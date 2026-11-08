@@ -283,6 +283,7 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
 
   const locateRaw = guard('locators (screen)', engine?.locate);
   const observeRaw = guard('observation', engine?.observe);
+  const readNodeRaw = guard('rendered node properties', engine?.read);
   const performRaw = guard('actions', engine?.perform);
   const actions: ReadonlySet<LocatorActionKind> = new Set(engine?.actions ?? []);
   const performAtRaw = guard('point actions', engine?.performAt);
@@ -433,6 +434,10 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
       const node = located.get(ref.id);
       if (node === undefined || node.ref.revision !== ref.revision) throw stale(ref);
       return node;
+    },
+    readNode(ref, readOptions, operation) {
+      rejectSupersededLocate(ref);
+      return readNodeRaw(ref, readOptions, operation);
     },
     async perform(ref, action, operation) {
       if (!actions.has(action.kind)) unsupported(`the "${action.kind}" action`);
