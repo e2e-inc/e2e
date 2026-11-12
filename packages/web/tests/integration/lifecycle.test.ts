@@ -216,6 +216,7 @@ describe('web engine lifecycle', () => {
       'actions',
       'artifacts',
       'browser',
+      'computedStyle',
       'keyboard',
       'location',
       'observation',

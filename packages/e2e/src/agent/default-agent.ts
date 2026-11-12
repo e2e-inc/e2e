@@ -247,6 +247,10 @@ export function projectTools(
               return context.observe(options);
             },
             attachScreenshot: (pixels, label) => context.attachScreenshot(pixels, label),
+            read: (target, options) => {
+              if (mutates) throw new AgentError('POLICY_DENIED', 'only read-only tools may read node properties');
+              return context.read(target, options);
+            },
           })),
         );
         // A text result is bounded like every other thing the model reads;

@@ -32,6 +32,9 @@ import {
   type LocatorAction,
   type LocatorExpression,
   type NodeRef,
+  type ComputedStyleProperty,
+  type ComputedStyleValues,
+  validateNodeReadOptions,
   type OperationContext,
   type PointerAction,
   type Secret,
@@ -793,6 +796,26 @@ export class PlaywrightSurface {
       await session.replace(undefined, currentOperation);
       await session.ensurePage();
     });
+  }
+
+  /** Reads computed styles from the element behind a node ref, without input or actionability waits. */
+  async readStyle(ref: NodeRef, properties: readonly ComputedStyleProperty[], operation: OperationContext): Promise<ComputedStyleValues> {
+    const checked = validateNodeReadOptions({ style: properties });
+    return this.guard(operation, 'read node properties', async (currentOperation) => {
+      const target = await this.requireSession().refs.lookup(ref);
+      currentOperation.signal.throwIfAborted();
+      const read = (element: Element, requested: readonly ComputedStyleProperty[]) => {
+        const view = element.ownerDocument.defaultView;
+        if (!element.isConnected || view === null) return null;
+        const computed = view.getComputedStyle(element);
+        return Object.fromEntries(requested.map((property) => [property, computed.getPropertyValue(property)]));
+      };
+      const style = target.kind === 'element'
+        ? await target.element.evaluate(read, checked.style)
+        : await target.locator.evaluate(read, checked.style, { timeout: currentOperation.timeoutMs });
+      if (style === null) throw new EngineError('NODE_STALE', 'node is detached; observe again before reading', { retryable: true });
+      return style;
+    }, navigationStaleOr);
   }
 
   // --- location tier ---
