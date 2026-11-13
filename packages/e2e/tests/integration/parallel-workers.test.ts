@@ -680,7 +680,7 @@ test('runs after the blocked tests', async ({ app }) => {
       assertValidReport(outcome.report);
       project.cleanup();
     },
-    120_000,
+    60_000,
   );
 
   it(
@@ -717,7 +717,7 @@ test('runs after the blocked retry', async () => {});
       assertValidReport(outcome.report);
       project.cleanup();
     },
-    120_000,
+    60_000,
   );
 
   it(
@@ -751,7 +751,7 @@ test('times out and tears down slowly', { timeout: 1000 }, async ({ app }) => {
       expect(attempt.durationMs).toBeGreaterThan(6_000);
       project.cleanup();
     },
-    120_000,
+    60_000,
   );
 
   it(
@@ -787,7 +787,7 @@ test('outside the group', async () => {});
       assertValidReport(outcome.report);
       project.cleanup();
     },
-    120_000,
+    60_000,
   );
 
   it(
