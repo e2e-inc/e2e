@@ -20,7 +20,7 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import picocolors from 'picocolors';
 import { z } from 'zod';
-import { classifyError, codedMessage, ConfigurationError, exitCodeForCategory } from '../internal/errors.ts';
+import { classifyError, codedMessage, ConfigurationError, exitCodeForCategory } from '@e2e-dev/core/lib/internal/errors';
 import { stepLine, stepPromptText } from '../report/list-steps.ts';
 import type { RunEventSink } from '../run/events.ts';
 import { run, type RunOptions, type RunOutcome } from '../run/runner.ts';

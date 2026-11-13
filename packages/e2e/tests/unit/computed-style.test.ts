@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateComputedStyleProperties, type ComputedStyleProperty } from '../../src/engine/computed-style.ts';
+import { validateComputedStyleProperties, type ComputedStyleProperty } from '@e2e-dev/core/lib/engine/computed-style';
 
 describe('computed style properties', () => {
   it.each([undefined, null, {}, 'color', [], ['content'], ['background-image'], ['--token'], ['COLOR'], ['color', 'content'], Array(1)])(

@@ -1,7 +1,7 @@
 /** Project-tool reads cross the built runner's engine protocol and secret boundary. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { defineTool, getToolContext } from '../../src/agent/tool.ts';
+import { defineTool, getToolContext } from '@e2e-dev/core/lib/agent/tool';
 import { installFakeLoopModel, loopCalls } from '../helpers/fake-loop-model.ts';
 import { startFixtureApp, type FixtureApp } from '../helpers/fixture-app.ts';
 import { resultByTitle, runProject } from '../helpers/run-project.ts';

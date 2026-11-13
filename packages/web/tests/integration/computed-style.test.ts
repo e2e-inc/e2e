@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { ComputedStyleProperty, EngineHandle, OperationContext, SemanticNode } from 'e2e/engine';
+import type { ComputedStyleProperty, EngineHandle, OperationContext, SemanticNode } from '@e2e-dev/core/engine';
 import { web, surfaceOf } from '../../src/index.ts';
 import { RefRegistry } from '../../src/refs.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
