@@ -108,11 +108,7 @@ export interface TargetExecutorOptions extends EngineSessionsOptions {
   readonly holdStep?: ((step: HeldStep, signal: AbortSignal) => Promise<void>) | undefined;
   /** Whether each hold reads the screen it starts on into `HeldStep.screen`. */
   readonly heldScreens?: boolean | undefined;
-  /**
-   * Awaited before each pair of a file unit, ahead of the interrupt check:
-   * a worker holds its next test here until the runner has answered the
-   * failures it reported (see `RunUnitMessage.failureLimit`).
-   */
+  /** Awaited before each pair starts, before the interrupt check. */
   readonly beforePair?: (() => Promise<void>) | undefined;
   readonly events?: ExecutionEvents;
   /** The virtual file of tests registered in memory, and the agents they run as; see `InMemoryAttempts`. */
