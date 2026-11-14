@@ -201,7 +201,7 @@ summaries, and your context; never raw HTML, cookies, headers, environment
 values, or a `Secret`'s value. When most of a screen changed, the whole
 screen goes out again with large subtrees that have not changed since the
 last screen folded to one line each, naming the node count and the revision
-they were last seen at; `observe` still returns the complete tree. Pixels arrive through `vision` on a judgment,
+that last listed them in full; `observe` still returns the complete tree. Pixels arrive through `vision` on a judgment,
 and in `act` through its screenshot and point tools, an opening screenshot
 when the screen lists no interactive node, and a screenshot when the browser
 engine's tree capture times out (a judgment gets that one only with `vision`
