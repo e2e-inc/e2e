@@ -18,6 +18,15 @@ import { REPORT_AT, reportAttempt, reportDocument, reportError, reportResult, re
 
 const FINISHED_AT = '2026-01-01T00:00:08.400Z';
 
+/** Freezes a report's nested inputs so rendering cannot change caller-owned data. */
+function freeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object') {
+    for (const child of Object.values(value)) freeze(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
 /** A document the page has something to say about: a version, a duration, one target. */
 function page(overrides: Partial<Report1Document['run']> = {}): Report1Document {
   const status = overrides.status ?? 'passed';
@@ -473,6 +482,45 @@ describe('renderMarkdownReport', () => {
       '| ⏭️ | **tests/a.e2e.ts** · 1 skipped |  | 0ms |',
       '| 🟢 | **tests/smoke.e2e.ts** · 1 passed |  | 850ms |',
     ]);
+  });
+
+  it('keeps frozen repeated results in their target and file groups, with ties ordered by file then target', () => {
+    const shared = named({ title: 'first', file: 'tests/a.e2e.ts', status: 'passed', attempts: [attempt({ durationMs: 100 })] });
+    const results = [
+      { ...shared, targetId: 'web' },
+      named({ title: 'last file', file: 'tests/z.e2e.ts', status: 'passed', attempts: [attempt({ durationMs: 100 })] }),
+      { ...shared, targetId: 'mobile' },
+      { ...shared, repeat: 1 },
+      named({ title: 'last in group', file: shared.file, status: 'passed', attempts: [attempt({ durationMs: 100 })] }),
+    ];
+    const document = freeze(page({ results, targets: [reportTarget(), reportTarget({ id: 'mobile', index: 1 })] }));
+    const before = JSON.stringify(document);
+    const body = renderMarkdownReport(document);
+    const rows = body.split('\n').filter((line) => line.startsWith('| 🟢 |'));
+    expect(rows).toEqual([
+      '| 🟢 | **tests/a.e2e.ts (mobile)** · 1 passed | 100ms |',
+      '| 🟢 | first | 100ms |',
+      '| 🟢 | **tests/a.e2e.ts (web)** · 3 passed | 300ms |',
+      '| 🟢 | first | 100ms |',
+      '| 🟢 | first (repeat #1) | 100ms |',
+      '| 🟢 | last in group | 100ms |',
+      '| 🟢 | **tests/z.e2e.ts (web)** · 1 passed | 100ms |',
+      '| 🟢 | last file | 100ms |',
+    ]);
+    expect(JSON.stringify(document)).toBe(before);
+    expect(document.run.results[0]).toBe(results[0]);
+    expect(renderMarkdownReport(freeze(page()))).not.toContain('<details>');
+  });
+
+  it('counts every result in a dense frozen group before capping its displayed rows', () => {
+    const results = Array.from({ length: 401 }, (_, index) => named({ title: `dense ${index}`, status: 'passed', attempts: [attempt({ durationMs: 1 })] }));
+    const document = freeze(page({ results }));
+    const body = renderMarkdownReport(document);
+    expect(body).toContain('**tests/example.e2e.ts** · 401 passed | 401ms |');
+    expect(body).toContain('| 🟢 | dense 399 | 1ms |');
+    expect(body).not.toContain('| 🟢 | dense 400 |');
+    expect(body).toContain('|  | and 1 more |  |\n</details>');
+    expect(document.run.results).toHaveLength(401);
   });
 
   it('caps the folded list, saying how many more there are', () => {
