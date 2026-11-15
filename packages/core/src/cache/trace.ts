@@ -18,7 +18,7 @@
 
 import type { KeyModifier } from '../engine/contract.ts';
 import { timestamp } from '../internal/ids.ts';
-import type { ScrollDirection, ProposedAction } from '../types.ts';
+import type { ScrollDirection } from '../types.ts';
 import { bound } from '../internal/text.ts';
 import type { RecordedModel } from './trace-fields.ts';
 
@@ -457,18 +457,6 @@ export interface ActionTrace {
    * entries.
    */
   readonly keyedBy?: TraceKeyContext;
-  /**
-   * The action an `@e2e-dev/core` agent's guard stopped the recorded step before.
-   * A replay that finishes the trace ends the step `stopped` before the same
-   * action, with no model call; absent on a step that finished.
-   */
-  readonly stop?: ProposedAction;
-  /**
-   * What decided `stop` when a rule did not: the guard's `check` function,
-   * whose logic no key can carry, so a replay asks it again before it ends
-   * the step there. Absent for a rule's stop, which the key vouches for.
-   */
-  readonly stopBy?: 'check';
 }
 
 /**
@@ -646,33 +634,14 @@ export function mapTraceText(trace: ActionTrace, map: TraceTextMap): ActionTrace
   if (trace.endAnchors !== undefined && endAnchors === undefined) return undefined;
   const goneAnchors = trace.goneAnchors === undefined ? undefined : mapDescriptors(trace.goneAnchors, map);
   if (trace.goneAnchors !== undefined && goneAnchors === undefined) return undefined;
-  const stop = trace.stop === undefined ? undefined : mapStopText(trace.stop, map);
-  if (trace.stop !== undefined && stop === undefined) return undefined;
   return {
     ...trace,
-    ...(stop === undefined ? {} : { stop }),
     actions,
     summary,
     ...(startPath === undefined ? {} : { startPath }),
     ...(endPath === undefined ? {} : { endPath }),
     ...(endAnchors === undefined ? {} : { endAnchors }),
     ...(goneAnchors === undefined ? {} : { goneAnchors }),
-  };
-}
-
-/** The stopped action's text through `map`, as its actions' is: the names, location, and destination a param may have spelled. */
-function mapStopText(stop: ProposedAction, map: TraceTextMap): ProposedAction | undefined {
-  const text = (value: string | undefined): string | undefined | null => (value === undefined ? undefined : map(value) ?? null);
-  const name = stop.node === undefined ? undefined : map(stop.node.name);
-  const testId = text(stop.node?.testId);
-  const url = text(stop.url);
-  const destination = text(stop.destination);
-  if ((stop.node !== undefined && name === undefined) || testId === null || url === null || destination === null) return undefined;
-  return {
-    ...stop,
-    ...(stop.node === undefined || name === undefined ? {} : { node: { ...stop.node, name, ...(testId === undefined ? {} : { testId }) } }),
-    ...(url === undefined ? {} : { url }),
-    ...(destination === undefined ? {} : { destination }),
   };
 }
 

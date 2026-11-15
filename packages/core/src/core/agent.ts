@@ -2,11 +2,9 @@
  * `createAgent` from `@e2e-dev/core/agent`: the agent over one session, configured
  * in code. `act`, `assert`, `waitFor`, and `extract` behave as they do in a
  * test. With `cache`, `act` replays recorded flows, each keyed by the
- * `cacheKey` the call names. With `guard`, the agent cannot take the actions
- * the program keeps for itself.
+ * `cacheKey` the call names.
  */
 
-import { compileGuard, guardIdentity } from '../agent/guard.ts';
 import { createAgentFixture } from '../agent/index.ts';
 import type { AgentContext, AgentSelection } from '../agent/invocation.ts';
 import { createAgentCacheContext, settleStagedTraces, type AgentCacheContext } from '../cache/context.ts';
@@ -19,15 +17,15 @@ import { rejectUnknownKeys } from '../internal/options.ts';
 import { lazily, lazyBuiltInAgent } from '../run/fixtures.ts';
 import { targetIdentity } from '../run/sessions.ts';
 import { WorkerModels } from '../run/worker-models.ts';
-import type { ActOptions, ActResult, Agent, AgentConfig, CacheStore, Guard } from '../types.ts';
+import type { ActOptions, ActResult, Agent, AgentConfig, CacheStore } from '../types.ts';
 import { sessionInternals } from './internals.ts';
 import type { Session } from './launch.ts';
 import path from 'node:path';
 
 export type {
-  ActionEvent, ActionHook, ActionName, ActOptions, ActOutcome, ActResult, Agent, AgentConfig, AgentErrorCode, AgentTool, AssertOptions,
-  BeforeActionEvent, BeforeActionHook, CacheReadResult, CacheStore, ExtractOptions, Guard, GuardDecision, GuardedActionName, GuardNode,
-  GuardRule, ModelInstance, ProposedAction, ProviderOptions, VisionMode, WaitForOptions,
+  ActionEvent, ActionHook, ActionName, ActOptions, ActResult, Agent, AgentConfig, AgentErrorCode, AgentTool, AssertOptions,
+  BeforeActionEvent, BeforeActionHook, CacheReadResult, CacheStore, ExtractOptions, ModelInstance, ProviderOptions, VisionMode,
+  WaitForOptions,
 } from '../types.ts';
 // What a custom executor is written against, as the `e2e` entry has it.
 export type {
@@ -56,8 +54,6 @@ export interface AgentCacheOptions {
 
 /** The agent's model, budgets, and context, as an `agents` entry of a config takes them, plus what only a program sets. */
 export type CreateAgentOptions = AgentConfig & {
-  /** What the agent may not do on its own; see `Guard`. */
-  readonly guard?: Guard;
   /** Replays recorded `act` flows; every `act` then names its recording with `cacheKey`. */
   readonly cache?: AgentCacheOptions;
 };
@@ -118,16 +114,14 @@ export function createAgent(session: Session, options: CreateAgentOptions): Unch
 export function createAgent(session: Session, options: CreateAgentOptions): CachingAgent | CoreAgent | UncheckedAgent {
   const internals = sessionInternals(session, 'createAgent');
   if (typeof options !== 'object' || options === null) throw new TestError('INVALID_ARGUMENT', 'createAgent options must be an object with a model');
-  const { guard, cache, ...entry } = options;
+  const { cache, ...entry } = options;
   const resolved = resolveAgentConfig(entry as AgentConfig, 'createAgent');
-  const compiledGuard = guard === undefined ? undefined : compileGuard(guard, 'createAgent guard');
   const { config, attempt, target } = internals;
   const cacheConfig = cache === undefined ? undefined : resolveAgentCache(cache, config.projectRoot);
   // A missing model fails the first call that needs one, as `MODEL_UNAVAILABLE`, never the construction.
   const models = new WorkerModels(() => undefined);
   const selection: AgentSelection = {
-    // The name keys recordings: one made under one guard never replays under another.
-    name: guard === undefined ? AGENT_NAME : `${AGENT_NAME}-guarded-${guardIdentity(guard).slice(0, 12)}`,
+    name: AGENT_NAME,
     config: resolved,
     executor: resolved.executor ?? lazyBuiltInAgent(resolved),
     customExecutor: resolved.executor !== undefined,
@@ -145,7 +139,6 @@ export function createAgent(session: Session, options: CreateAgentOptions): Cach
       return selection;
     },
     reportUnservedModel: models.unservedModel,
-    ...(compiledGuard === undefined ? {} : { guard: compiledGuard }),
   };
   const live = createAgentFixture(base);
 

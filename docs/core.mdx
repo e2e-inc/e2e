@@ -207,13 +207,11 @@ await session.app.open('/products/A-1001');
 const agent = createAgent(session, {
   model: gateway('anthropic/claude-sonnet-5-5'),
   cache: { dir: '.shop-bot/cache' },
-  guard: { stop: [{ role: 'button', name: /pay|place order/i }] },
 });
 
-const step = await agent.act('Add the item to the cart and apply the coupon with the largest discount', {
+await agent.act('Add the item to the cart and apply the coupon with the largest discount', {
   cacheKey: 'cart-best-coupon',
 });
-if (step.status !== 'stopped') throw new Error(`did not reach the payment button: ${step.summary}`);
 // A check after the step lets the cache keep its recording.
 await session.screen.getByRole('button', /pay now/i).waitFor();
 
@@ -232,7 +230,7 @@ if (order.total <= 39_000) {
 ```
 
 `createAgent` takes the options of an [`agents` entry](/reference/config#agents),
-such as `model`, `judge`, `maxSteps`, and `context`, plus `cache` and `guard`.
+such as `model`, `judge`, `maxSteps`, and `context`, plus `cache`.
 There is no default model: an agent without one fails its first call with
 `MODEL_UNAVAILABLE`. An `act` step has its own timeout, 120000 ms: set it per
 call with `timeout`.
@@ -263,48 +261,6 @@ how a replay checks the screen and hands off to the model.
 | `mode` | `read-write` | `read-only` replays and never writes. |
 | `strict` | `false` | A recording that no longer replays fails with `REPLAY_STALE`. |
 | `store` | - | A custom [`CacheStore`](/cache) in place of the files. |
-
-### Keep actions for your code
-
-`guard` names the actions the agent may not take on its own. In `act`, the
-guard checks every action, replayed ones too, before the action runs. It
-reads the screen again before each action, so it judges the screen that the
-action before it left.
-
-| Field | Effect |
-| --- | --- |
-| `stop` | The step ends before the action, with `status: 'stopped'` and the action in `stoppedAt`. Your code takes over. |
-| `deny` | The action fails with `POLICY_DENIED`. The model reads the refusal and plans around it. |
-| `check` | A function that gets each action the rules allowed and returns `'allow'`, `'deny'`, or `'stop'`. |
-| `unidentified` | An action whose target the guard cannot name: `'deny'` (the default when a rule or `check` is set) or `'allow'`. |
-
-A rule matches the node the action lands on and the screen's location. Set
-any of `role`, `name`, `text`, `testId`, `url`, `destination` (where a
-`navigate` goes), `key`, and `actions`; every field you set must match.
-`name` matches exactly unless it is a RegExp. A `key` or an `actions` name
-that does not exist fails `createAgent` with `INVALID_ARGUMENT`.
-
-An unidentified action is a point action (`tapAt`, `hoverAt`, `dragAt`) that
-lands on no control the screen lists, such as a canvas, or a mutating
-[project tool](/tools), which `actions` names as `tool:<name>`. The guard
-does not check `agent.assert`, which only reads and scrolls. A drag is
-checked on the node it starts from, not where it drops.
-
-A recording made under one set of rules never replays under another. A stop
-that `check` decided is asked again when its recording replays: when `check`
-no longer stops it, the agent continues from there.
-
-<Note>
-A rule on a button does not see Enter pressed in a field, which can submit
-the form. Add a rule such as `{ key: 'Enter', url: /checkout/ }`. It also
-matches Enter with a modifier, and typed text that holds a line break.
-</Note>
-
-<Warning>
-The guard reads the screen right before each action. A page that renames a
-control by itself in that instant is outside what it can see. For a payment,
-also check the result in your own code.
-</Warning>
 
 ## Next
 

@@ -28,7 +28,6 @@ import type {
 } from '../run/steps.ts';
 import type { JsonValue, VisionMode } from '../types.ts';
 import { AgentError } from './error.ts';
-import type { CompiledGuard } from './guard.ts';
 import { ModelUsage, reasoningField, tokenFields } from './usage.ts';
 import type { ExecutorAttempt, StepExecutor } from './executor.ts';
 import {
@@ -119,8 +118,6 @@ export interface AgentContext {
   readonly cache?: AgentCacheContext;
   /** `--debug` phase timings; absent when the caller collects none. */
   readonly debug?: DebugTrace;
-  /** What the agent may not do on its own (`@e2e-dev/core`'s `createAgent({ guard })`); absent in a test run. */
-  readonly guard?: CompiledGuard;
 }
 
 export interface InvocationOptions {

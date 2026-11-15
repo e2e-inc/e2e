@@ -50,9 +50,8 @@ suites that consume the built packages the way a user would.
   `core` attempt (nothing published to `globalThis`, no process secret
   registry, no trace, no session deadline), `SessionState` the
   `session-state-1` export, and `createAgent` (`@e2e-dev/core/agent`) the agent
-  with a per-`cacheKey` replay cache settled at session close and a `guard`
-  (`src/agent/guard.ts`) the action dispatcher checks before every action,
-  replayed ones included. It imports nothing of `e2e`:
+  with a per-`cacheKey` replay cache settled at session close. It imports
+  nothing of `e2e`:
   `tests/unit/package-imports.test.ts` in `packages/e2e` fails on a
   dependency `@e2e-dev/core`'s manifest does not declare. `e2e` reaches its
   modules as `@e2e-dev/core/lib/<path>` (`./lib/*` in its exports), which is

@@ -11,13 +11,11 @@ await session.app.open('/products/A-1001');
 const agent = createAgent(session, {
   model: gateway('anthropic/claude-sonnet-5-5'),
   cache: { dir: '.shop-bot/cache' },
-  guard: { stop: [{ role: 'button', name: /pay|place order/i }] },
 });
 
-const step = await agent.act('Add the item to the cart and apply the coupon with the largest discount', {
+await agent.act('Add the item to the cart and apply the coupon with the largest discount', {
   cacheKey: 'cart-best-coupon',
 });
-if (step.status !== 'stopped') throw new Error(`did not reach the payment button: ${step.summary}`);
 // A check after the step lets the cache keep its recording.
 await session.screen.getByRole('button', /pay now/i).waitFor();
 

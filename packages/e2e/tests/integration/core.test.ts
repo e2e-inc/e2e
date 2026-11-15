@@ -1,4 +1,4 @@
-/** `e2e/core` (`@e2e-dev/core`): hosts, sessions, saved state, secrets, timeouts, link bases, and the agent's cache and guard. */
+/** `e2e/core` (`@e2e-dev/core`): hosts, sessions, saved state, secrets, timeouts, link bases, and the agent's cache. */
 import { mkdirSync, mkdtempSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -18,7 +18,6 @@ function shop(): ScriptedNode[] {
     children: [
       { id: 'coupon', role: 'checkbox', name: 'Apply coupon SAVE10', states: { checked: false } },
       { id: 'pay', role: 'button', name: 'Pay now', on: () => { paid.states = { hidden: false }; } },
-      { id: 'delete', role: 'button', name: 'Delete account' },
     ],
   };
   return [
@@ -37,45 +36,18 @@ function idOf(text: string, role: string, name: string): string {
   return id;
 }
 
-/** A scripted brain: adds to cart, checks the coupon, and goes for the payment button; or deletes the account. */
-function scripted(): StepExecutor & { calls: number; refusals: string[] } {
+/** A scripted brain: adds to cart, checks the coupon, and pays. */
+function scripted(): StepExecutor & { calls: number } {
   const brain = {
     name: 'scripted',
     version: '1',
     calls: 0,
-    refusals: [] as string[],
     async runStep(context: StepExecutorContext) {
       brain.calls += 1;
       const tap = async (role: string, name: string): Promise<void> => {
         const { text } = await context.observe();
-        try {
-          await context.actions.tap({ id: idOf(text, role, name) });
-        } catch (cause) {
-          brain.refusals.push((cause as { code?: string }).code ?? 'unknown');
-        }
+        await context.actions.tap({ id: idOf(text, role, name) });
       };
-      if (context.step.kind === 'assert') {
-        const { text } = await context.observe();
-        await context.actions.scrollTo({ id: idOf(text, 'button', 'Pay now') });
-        return { status: 'failed' as const, summary: 'the total is wrong' };
-      }
-      if (context.step.instruction.startsWith('confirm')) {
-        try {
-          await context.actions.navigate('/checkout/confirm');
-        } catch (cause) {
-          brain.refusals.push((cause as { code?: string }).code ?? 'unknown');
-        }
-        try {
-          await context.budgets.runTool({ name: 'alert', mutates: true }, async () => 'accepted');
-        } catch (cause) {
-          brain.refusals.push((cause as { code?: string }).code ?? 'unknown');
-        }
-        return { status: 'passed' as const, summary: 'tried to confirm' };
-      }
-      if (context.step.instruction.startsWith('delete')) {
-        await tap('button', 'Delete account');
-        return { status: 'passed' as const, summary: 'tried to delete the account' };
-      }
       await tap('button', 'Add to cart');
       const { text } = await context.observe();
       await context.actions.check({ id: idOf(text, 'checkbox', 'Apply coupon SAVE10') }, true);
@@ -302,177 +274,23 @@ describe('e2e/core', { timeout: 60_000 }, () => {
   });
 
   describe('createAgent', () => {
-    it('stops before a guarded action, records the flow, and replays it to the same stop with no model', async () => {
+    it('records a flow under its cacheKey and replays it with no model', async () => {
       const brain = scripted();
       const cacheDir = path.join(dir, 'cache');
       const opened = await host(createFakeEngine({ scene: shop }).engine, { app: FAKE_APP });
       for (const round of [1, 2]) {
         const session = await opened.newSession();
         await session.app.open('/');
-        const agent = createAgent(session, {
-          executor: brain,
-          guard: { stop: [{ role: 'button', name: /Pay/ }] },
-          cache: { dir: cacheDir },
-        });
+        const agent = createAgent(session, { executor: brain, cache: { dir: cacheDir } });
         const result = await agent.act('checkout with the coupon', { cacheKey: 'checkout' });
-        expect(result.status).toBe('stopped');
-        expect(result.stoppedAt).toMatchObject({ kind: 'tap', node: { role: 'button', name: 'Pay now' } });
         expect(await session.screen.getByRole('checkbox').isChecked()).toBe(true);
-        expect(await session.screen.getByRole('status', { name: 'Paid', visible: true }).count()).toBe(0);
         // A check after the step confirms its recording.
-        await session.screen.getByRole('button', 'Pay now').waitFor();
+        await session.screen.getByRole('status', 'Paid').waitFor();
         expect(result.cache?.mode).toBe(round === 1 ? 'missed' : 'self-finalized');
         await session.close();
         expect(brain.calls).toBe(1);
       }
       expect(readdirSync(cacheDir, { recursive: true }).filter((file) => String(file).endsWith('.json'))).toHaveLength(1);
-    });
-
-    it('replays a stop before a navigate to the same action, its destination included', async () => {
-      // Adds to cart and applies the coupon, then heads for the confirmation page, which the guard keeps for the program.
-      const brain = {
-        name: 'navigator', version: '1', calls: 0,
-        async runStep(context: StepExecutorContext) {
-          brain.calls += 1;
-          const { text } = await context.observe();
-          await context.actions.tap({ id: idOf(text, 'button', 'Add to cart') });
-          await context.actions.check({ id: idOf((await context.observe()).text, 'checkbox', 'Apply coupon SAVE10') }, true);
-          await context.actions.navigate('/checkout/confirm');
-          return { status: 'passed' as const, summary: 'confirmed' };
-        },
-      };
-      const cacheDir = path.join(dir, 'cache');
-      const opened = await host(createFakeEngine({ scene: shop, navigation: true }).engine, { app: FAKE_APP });
-      const stops: unknown[] = [];
-      for (const round of [1, 2]) {
-        const session = await opened.newSession();
-        await session.app.open('/');
-        const agent = createAgent(session, { executor: brain, guard: { stop: [{ destination: /\/confirm/ }] }, cache: { dir: cacheDir } });
-        const result = await agent.act('confirm the order', { cacheKey: 'confirm' });
-        expect(result.status).toBe('stopped');
-        stops.push(result.stoppedAt);
-        await session.screen.getByRole('button', 'Pay now').waitFor();
-        expect(result.cache?.mode).toBe(round === 1 ? 'missed' : 'self-finalized');
-        await session.close();
-      }
-      expect(stops[0]).toMatchObject({ kind: 'navigate', destination: expect.stringContaining('/checkout/confirm') });
-      expect(stops[1]).toEqual(stops[0]);
-      expect(brain.calls).toBe(1);
-    });
-
-    it('judges each action of a batched turn on the screen the one before it left', async () => {
-      // One button: the first tap turns "Continue" into "Pay now", the second pays.
-      const scene = (): ScriptedNode[] => {
-        const paid: ScriptedNode = { id: 'paid', role: 'status', name: 'Paid', states: { hidden: true } };
-        const button: ScriptedNode = {
-          id: 'next', role: 'button', name: 'Continue',
-          on: () => {
-            if (button.name === 'Pay now') paid.states = { hidden: false };
-            button.name = 'Pay now';
-          },
-        };
-        return [button, paid];
-      };
-      const hasty = {
-        name: 'hasty', version: '1',
-        async runStep(context: StepExecutorContext) {
-          const id = idOf((await context.observe()).text, 'button', 'Continue');
-          await context.actions.tap({ id });
-          await context.actions.tap({ id });
-          return { status: 'passed' as const, summary: 'paid' };
-        },
-      };
-      const opened = await host(createFakeEngine({ scene }).engine, { app: FAKE_APP });
-      const session = await opened.newSession();
-      await session.app.open('/');
-      const result = await createAgent(session, { executor: hasty, guard: { stop: [{ role: 'button', name: /pay/i }] } }).act('continue to payment');
-      expect(result).toMatchObject({ status: 'stopped', stoppedAt: { kind: 'tap', node: { role: 'button', name: 'Pay now' } } });
-      expect(await session.screen.getByRole('status', { name: 'Paid', visible: true }).count()).toBe(0);
-      await session.close();
-    });
-
-    it('stops typed text that holds a line break under a rule on Enter, whatever modifier a press holds', async () => {
-      const scene = (): ScriptedNode[] => [{ id: 'note', role: 'textbox', name: 'Note', value: '', states: { focused: true } }];
-      const typist = (send: (context: StepExecutorContext, id: string) => Promise<void>) => ({
-        name: 'typist', version: '1',
-        async runStep(context: StepExecutorContext) {
-          const id = idOf((await context.observe()).text, 'textbox', 'Note');
-          await context.actions.tap({ id });
-          await send(context, id);
-          return { status: 'passed' as const, summary: 'typed' };
-        },
-      });
-      const opened = await host(createFakeEngine({ scene, keyboard: true }).engine, { app: FAKE_APP });
-      const session = await opened.newSession();
-      await session.app.open('/');
-      const guard = { stop: [{ key: 'Enter' }] };
-      const typed = await createAgent(session, { executor: typist((context) => context.actions.typeText('thanks\n')), guard }).act('leave a note');
-      expect(typed).toMatchObject({ status: 'stopped', stoppedAt: { kind: 'typeText', key: 'Enter' } });
-      const pressed = await createAgent(session, { executor: typist((context, id) => context.actions.press({ id }, 'Shift+Enter')), guard }).act('leave a note');
-      expect(pressed).toMatchObject({ status: 'stopped', stoppedAt: { kind: 'press', key: 'Shift+Enter' } });
-      const plain = await createAgent(session, { executor: typist((context) => context.actions.typeText('thanks')), guard }).act('leave a note');
-      expect(plain.status).toBe('done');
-      await session.close();
-    });
-
-    it('asks check again when a stop it decided replays, and hands the step to the agent when it no longer stops', async () => {
-      const brain = scripted();
-      const cacheDir = path.join(dir, 'cache');
-      const opened = await host(createFakeEngine({ scene: shop }).engine, { app: FAKE_APP });
-      let limit = 30_000;
-      const results = [];
-      for (const round of [1, 2, 3]) {
-        const session = await opened.newSession();
-        await session.app.open('/');
-        const agent = createAgent(session, {
-          executor: brain,
-          cache: { dir: cacheDir },
-          guard: { check: (action) => (action.node?.name === 'Pay now' && limit < 39_000 ? 'stop' : 'allow') },
-        });
-        const result = await agent.act('checkout with the coupon', { cacheKey: 'checkout' });
-        results.push({ status: result.status, mode: result.cache?.mode, calls: brain.calls });
-        await session.screen.getByRole('button', 'Pay now').waitFor();
-        await session.close();
-        if (round === 2) limit = 50_000;
-      }
-      expect(results).toEqual([
-        { status: 'stopped', mode: 'missed', calls: 1 },
-        { status: 'stopped', mode: 'self-finalized', calls: 1 },
-        { status: 'done', mode: 'agent-concluded', calls: 2 },
-      ]);
-    });
-
-    it('refuses a denied action as POLICY_DENIED, which the agent reads and works around', async () => {
-      const brain = scripted();
-      const opened = await host(createFakeEngine({ scene: shop }).engine, { app: FAKE_APP });
-      const session = await opened.newSession();
-      await session.app.open('/');
-      await session.screen.getByRole('button', 'Add to cart').tap();
-      const agent = createAgent(session, { executor: brain, guard: { deny: [{ name: 'Delete account' }] } });
-      const result = await agent.act('delete my account');
-      expect(result.status).toBe('done');
-      expect(brain.refusals).toEqual(['POLICY_DENIED']);
-      await session.close();
-    });
-
-    it('checks no assertion, which only reads, and guards a navigate by where it goes and a project tool as unidentified', async () => {
-      const brain = scripted();
-      const fake = createFakeEngine({ scene: shop, navigation: true });
-      const opened = await host(fake.engine, { app: FAKE_APP });
-      const session = await opened.newSession();
-      await session.app.open('/');
-      await session.screen.getByRole('button', 'Add to cart').tap();
-      const guard = { stop: [{}], deny: [] };
-      const stopsEverything = createAgent(session, { executor: brain, guard });
-      await expect(stopsEverything.assert('the total is 39,000')).rejects.toMatchObject({ code: 'ASSERTION_FAILED' });
-
-      const denies = createAgent(session, { executor: brain, guard: { deny: [{ destination: /\/confirm/ }] } });
-      expect((await denies.act('confirm the order')).status).toBe('done');
-      expect(brain.refusals).toEqual(['POLICY_DENIED', 'POLICY_DENIED']);
-      const allowsTools = createAgent(session, { executor: brain, guard: { deny: [{ destination: /\/confirm/ }], unidentified: 'allow' } });
-      await allowsTools.act('confirm the order');
-      expect(brain.refusals).toEqual(['POLICY_DENIED', 'POLICY_DENIED', 'POLICY_DENIED']);
-      await session.close();
     });
 
     it('keeps a confirmed recording when the host closes the session, and after a failure the program caught', async () => {
@@ -481,7 +299,7 @@ describe('e2e/core', { timeout: 60_000 }, () => {
       const opened = await host(createFakeEngine({ scene: shop }).engine, { app: FAKE_APP });
       const session = await opened.newSession();
       await session.app.open('/');
-      const agent = createAgent(session, { executor: brain, guard: { stop: [{ name: 'Pay now' }] }, cache: { dir: cacheDir } });
+      const agent = createAgent(session, { executor: brain, cache: { dir: cacheDir } });
       await agent.act('checkout with the coupon', { cacheKey: 'checkout' });
       await session.screen.getByRole('button', 'Pay now').waitFor();
       await expect(session.screen.getByRole('button', 'Missing').waitFor({ timeout: 100 })).rejects.toMatchObject({ code: 'LOCATOR_NOT_FOUND' });
@@ -506,7 +324,7 @@ describe('e2e/core', { timeout: 60_000 }, () => {
         await steps(agentOn(session), session);
         await session.close();
       };
-      const agentOn = (session: Session) => createAgent(session, { executor: flaky, guard: { stop: [{ name: 'Pay now' }] }, cache: { dir: cacheDir } });
+      const agentOn = (session: Session) => createAgent(session, { executor: flaky, cache: { dir: cacheDir } });
       const fails = (agent: ReturnType<typeof agentOn>) => expect(agent.act('find the sale', { cacheKey: 'sale' })).rejects.toMatchObject({ code: 'ACTION_FAILED' });
 
       // A recording made after a failure the program caught is confirmed by the check after it.
@@ -552,7 +370,6 @@ describe('e2e/core', { timeout: 60_000 }, () => {
       const held: Parameters<typeof createAgent>[1] = { executor: scripted(), cache: { dir: path.join(dir, 'cache') } };
       await expect(createAgent(session, held).act('checkout')).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
       expect(() => createAgent({} as never, {})).toThrow(expect.objectContaining({ code: 'INVALID_ARGUMENT' }));
-      expect(() => createAgent(session, { guard: { stop: [{ nme: 'Pay' } as never] } })).toThrow(expect.objectContaining({ code: 'INVALID_ARGUMENT' }));
       await session.close();
     });
   });

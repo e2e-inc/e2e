@@ -1093,13 +1093,8 @@ void (expectationBrand satisfies 'e2e.expectation.v1');
 void (locatorBrand satisfies 'e2e.locator');
 void (secretBrand satisfies 'e2e.secret');
 // @e2e-dev/core/agent: an agent with a cache names every act's recording.
-const cachingAgent = createCoreAgent(gadgetSession, { cache: { dir: '.e2e/cache' }, guard: { stop: [{ role: 'button', name: /Pay/ }] } });
-const stoppedResult = await cachingAgent.act('checkout', { cacheKey: 'checkout' });
-void (stoppedResult.status satisfies 'done' | 'stopped');
-// The status narrows the result: a stopped step names the action, a finished one has none.
-if (stoppedResult.status === 'stopped') void (stoppedResult.stoppedAt.kind satisfies string);
-// @ts-expect-error a finished step has no stopped action
-if (stoppedResult.status === 'done') void stoppedResult.stoppedAt.kind;
+const cachingAgent = createCoreAgent(gadgetSession, { cache: { dir: '.e2e/cache' } });
+void ((await cachingAgent.act('checkout', { cacheKey: 'checkout' })).summary satisfies string);
 await cachingAgent.act('look around', { cache: false });
 // @ts-expect-error an agent with a cache names the recording each act replays
 await cachingAgent.act('checkout');
@@ -1109,8 +1104,6 @@ const liveAgent = createCoreAgent(gadgetSession, {});
 await liveAgent.act('checkout');
 // @ts-expect-error an @e2e-dev/core agent takes no agent name: create another agent instead
 await liveAgent.act('checkout', { agent: 'other' });
-// @ts-expect-error a guard rule names roles from the closed vocabulary
-createCoreAgent(gadgetSession, { guard: { stop: [{ role: 'pay-button' }] } });
 // Options held in a variable hide the cache from the compiler: act takes either form, and the runtime refuses the wrong one.
 declare const heldAgentOptions: CreateAgentOptions;
 const uncheckedAgent = createCoreAgent(gadgetSession, heldAgentOptions);

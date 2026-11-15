@@ -8,8 +8,7 @@
  */
 
 import { isKeyModifier, KEY_MODIFIERS, type KeyModifier } from '../engine/contract.ts';
-import type { ScrollDirection, ProposedAction } from '../types.ts';
-import { isGuardedActionName } from '../agent/guard.ts';
+import type { ScrollDirection } from '../types.ts';
 import { VIEWPORT_LIMITS } from '../internal/geometry.ts';
 import { readBoundedText, readRecordedModel } from './trace-fields.ts';
 import {
@@ -143,9 +142,6 @@ function readActionTrace(document: unknown): ActionTrace | undefined {
   const actions = each(actionsRaw, readRecordedAction);
   if (actions === undefined) return undefined;
   const keyedBy = readKeyContext(raw['keyedBy']);
-  const stop = raw['stop'] === undefined ? undefined : readProposedAction(raw['stop']);
-  if (raw['stop'] !== undefined && stop === undefined) return undefined;
-  if (raw['stopBy'] !== undefined && (raw['stopBy'] !== 'check' || stop === undefined)) return undefined;
 
   return {
     actions,
@@ -163,38 +159,6 @@ function readActionTrace(document: unknown): ActionTrace | undefined {
     ...(endWaitMs === undefined ? {} : { endWaitMs }),
     ...(truncated === undefined ? {} : { truncated }),
     ...(keyedBy === undefined ? {} : { keyedBy }),
-    ...(stop === undefined ? {} : { stop, ...(raw['stopBy'] === 'check' ? { stopBy: 'check' as const } : {}) }),
-  };
-}
-
-/** The guarded action a stopped step recorded; anything malformed reads as undefined, and the trace with it. */
-function readProposedAction(value: unknown): ProposedAction | undefined {
-  if (typeof value !== 'object' || value === null) return undefined;
-  const raw = value as Record<string, unknown>;
-  const kind = readBoundedText(raw['kind'], MAX_TRACE_DESCRIPTOR_CHARS);
-  if (kind === undefined || !isGuardedActionName(kind)) return undefined;
-  const url = raw['url'] === undefined ? undefined : readInputText(raw['url']);
-  if (raw['url'] !== undefined && url === undefined) return undefined;
-  const destination = raw['destination'] === undefined ? undefined : readInputText(raw['destination']);
-  if (raw['destination'] !== undefined && destination === undefined) return undefined;
-  const key = readKey(raw['key'], MAX_TRACE_DESCRIPTOR_CHARS);
-  if (raw['key'] !== undefined && key === undefined) return undefined;
-  let node: ProposedAction['node'];
-  if (raw['node'] !== undefined) {
-    if (typeof raw['node'] !== 'object' || raw['node'] === null) return undefined;
-    const fields = raw['node'] as Record<string, unknown>;
-    const role = readBoundedText(fields['role'], MAX_TRACE_DESCRIPTOR_CHARS);
-    const name = typeof fields['name'] === 'string' ? readBoundedText(fields['name'], MAX_TRACE_DESCRIPTOR_CHARS) ?? (fields['name'] === '' ? '' : undefined) : undefined;
-    const testId = fields['testId'] === undefined ? undefined : readBoundedText(fields['testId'], MAX_TRACE_DESCRIPTOR_CHARS);
-    if (role === undefined || name === undefined || (fields['testId'] !== undefined && testId === undefined)) return undefined;
-    node = { role, name, ...(testId === undefined ? {} : { testId }) };
-  }
-  return {
-    kind,
-    ...(node === undefined ? {} : { node }),
-    ...(url === undefined ? {} : { url }),
-    ...(destination === undefined ? {} : { destination }),
-    ...(key === undefined ? {} : { key }),
   };
 }
 
@@ -478,12 +442,12 @@ function readInputPaths(value: unknown): readonly string[] | undefined {
   return each(value, readInputText);
 }
 
-/** Verbatim replay input: bounded but never trimmed — whitespace can be the value. */
 /** A recorded key: any non-empty key name up to `maxChars`, a space press's `' '` included, which the grammar takes as a single character. */
 function readKey(value: unknown, maxChars: number): string | undefined {
   return typeof value === 'string' && value !== '' && value.length <= maxChars ? value : undefined;
 }
 
+/** Verbatim replay input: bounded but never trimmed — whitespace can be the value. */
 function readInputText(value: unknown): string | undefined {
   if (typeof value !== 'string' || value === '' || value.length > MAX_TRACE_INPUT_CHARS) {
     return undefined;

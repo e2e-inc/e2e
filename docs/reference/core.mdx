@@ -237,14 +237,13 @@ const state = await SessionState.import(bytes, { key });
 #### `createAgent`
 
 Creates an agent over one session. `assert`, `waitFor`, and `extract` are
-the [agent fixture's](/reference/agent). `act` differs in two ways: with
-`cache` it takes a `cacheKey`, and with `guard` its result can be `stopped`.
+the [agent fixture's](/reference/agent). `act` differs in one way: with
+`cache` it takes a `cacheKey`.
 
 ```ts
 const agent = createAgent(session, {
   model: gateway('anthropic/claude-sonnet-5-5'),
   cache: { dir: '.shop-bot/cache' },
-  guard: { stop: [{ role: 'button', name: /pay/i }] },
 });
 const step = await agent.act('Add the item to the cart', { cacheKey: 'add-to-cart' });
 ```
@@ -253,7 +252,6 @@ const step = await agent.act('Add the item to the cart', { cacheKey: 'add-to-car
 | --- | --- | --- |
 | `model`, `judge`, `context`, and the rest | an [`agents` entry](/reference/config#agents) | - |
 | [`cache`](#cache) | `AgentCacheOptions` | no cache |
-| [`guard`](#guard) | `Guard` | no guard |
 
 <a id="cache" />
 
@@ -269,46 +267,6 @@ const step = await agent.act('Add the item to the cart', { cacheKey: 'add-to-car
 With `cache`, each `act` passes `{ cacheKey: '<name>' }`, or `{ cache: false }`
 to run live. [Replay recorded steps](/core#replay-recorded-steps) says when a
 recording is saved.
-
-<a id="guard" />
-
-##### `guard`
-
-| Field | Type | Default |
-| --- | --- | --- |
-| `stop` | `GuardRule[]` | - |
-| `deny` | `GuardRule[]` | - |
-| `check` | `(action) => 'allow' \| 'deny' \| 'stop'` | - |
-| `unidentified` | `'deny' \| 'allow'` | `'deny'` |
-
-A `GuardRule` sets any of these fields, and every field it sets must match:
-
-| Field | Matches |
-| --- | --- |
-| `role`, `name`, `text`, `testId` | The node the action lands on. Text matches exactly unless it is a RegExp. |
-| `url` | The screen's location before the action. |
-| `destination` | Where a `navigate` goes. |
-| `key` | The key of a `press` or `pressKey`, under any modifier unless the rule names modifiers. `Enter` also matches typed text that holds a line break. |
-| `actions` | The action's name, such as `tap`, `type`, `navigate`, or `tool:<name>`. |
-
-[Keep actions for your code](/core#keep-actions-for-your-code) explains each
-decision.
-
-#### `act` result
-
-```ts
-const step = await agent.act('Buy the item', { cacheKey: 'buy' });
-if (step.status === 'stopped') console.log(step.stoppedAt.kind, step.stoppedAt.node?.name);
-```
-
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `status` | `'done' \| 'stopped'` | `stopped` when the guard ended the step before an action. |
-| `stoppedAt` | `ProposedAction` | The action the guard stopped before: `kind`, `node`, `url`, `destination`, `key`. |
-| `summary` | `string` | The agent's one-line account of the step. |
-| `modelCalls` | `number` | 0 when a replay finished the step. |
-| `actions` | `number` | Actions the step took. |
-| `cache` | `StepCacheInfo` | How the [replay cache](/cache) took part. |
 
 ## Related
 

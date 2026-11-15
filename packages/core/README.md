@@ -22,8 +22,7 @@ const price = await session.screen.getByTestId('sale-price').textContent();
 
 The same code drives an iOS or Android app with `mobile()` from
 `@e2e-dev/mobile/engine`. See [the @e2e-dev/core guide](https://e2e.com/docs/core)
-for sessions, saved state, secrets, and the agent with its replay cache and
-guard.
+for sessions, saved state, secrets, and the agent with its replay cache.
 
 The entries are `@e2e-dev/core`, `@e2e-dev/core/agent`, and
 `@e2e-dev/core/engine`. Everything under `@e2e-dev/core/lib/*` is internal to

@@ -83,7 +83,6 @@ These calls fail with `POLICY_DENIED`.
 | `toHaveScreenshot()` when the engine can't prove every secure field is masked | The screenshot isn't kept. |
 | An agent, executor, or MCP `upload` of a file outside the project root, a hidden file, or a file under a hidden directory | Only project files, and the sample files e2e ships (`sample:photo.png` and the rest), can leave the computer through a form. |
 | An MCP `screenshot` `path` outside the project root, hidden, or under a hidden directory | A session writes only project files, and never over `.git` or `.e2e`. |
-| An action an `@e2e-dev/core` agent's `guard` denies, or, unless the guard sets `unidentified: 'allow'`, a point action on no listed control or a mutating project tool | The program, not the model, decides what the agent may do. The model reads the refusal and plans around it. |
 
 ### Navigation
 

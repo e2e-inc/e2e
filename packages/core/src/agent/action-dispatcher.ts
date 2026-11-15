@@ -17,7 +17,7 @@ import { requireKey } from '../internal/keys.ts';
 import { sleep } from '../internal/time.ts';
 import { clampToViewport, requireFinitePoint, requireViewportSize, viewportShare } from '../internal/geometry.ts';
 import { resolveNavigationUrl } from '../internal/urls.ts';
-import type { ActionEvent, ActionHook, ActionName, BeforeActionHook, ClickOptions, JsonValue, Momentum, ProposedAction, ScrollDirection, Secret } from '../types.ts';
+import type { ActionEvent, ActionHook, BeforeActionHook, ClickOptions, JsonValue, Momentum, ScrollDirection, Secret } from '../types.ts';
 import { PROJECT_TOOL_EVENT_PREFIX, READ_ONLY_GRAMMAR, type GrammarActionName } from './action-names.ts';
 import { actionEvent, containerKey, describeAction, type PlacedPoint, type Placement, type RecordableAction } from './actions.ts';
 import { describePosition } from '../cache/relocate.ts';
@@ -25,7 +25,6 @@ import { appNavigation } from '../cache/route.ts';
 import { isTapActionName, type NodeActionName, type PointActionName, type RecordedAction } from '../cache/trace.ts';
 import { derivedReason } from './derived.ts';
 import { ActionHookError, AgentError, toAgentError } from './error.ts';
-import { describeProposed, GuardStop, guardNode } from './guard.ts';
 import {
   RUNTIME_CODES,
   type ExecutorActions,
@@ -98,75 +97,6 @@ const NODE_ACTION_KINDS = {
   scrollTo: 'scrollIntoView',
 } as const satisfies Record<NodeActionName, LocatorActionKind & GrammarActionName>;
 
-/** Each grammar action by the name `onAction` reports it under, which a guard rule names. */
-const GUARD_KINDS: Readonly<Record<GrammarActionName, ActionName>> = {
-  back: 'back',
-  check: 'check',
-  closeTab: 'closeTab',
-  dismissKeyboard: 'dismissKeyboard',
-  doubleTap: 'doubleTap',
-  dragAt: 'dragAt',
-  dragTo: 'drag',
-  hover: 'hover',
-  hoverAt: 'hoverAt',
-  longPress: 'longPress',
-  navigate: 'navigate',
-  press: 'press',
-  pressKey: 'pressKey',
-  resize: 'resize',
-  scroll: 'scroll',
-  scrollIntoView: 'scrollTo',
-  scrollUntil: 'scrollUntil',
-  secondaryTap: 'secondaryTap',
-  selectOption: 'select',
-  setInputFiles: 'upload',
-  switchTab: 'switchTab',
-  tap: 'tap',
-  tapAt: 'tapAt',
-  type: 'type',
-  typeSecret: 'typeSecret',
-  typeText: 'typeText',
-  uncheck: 'check',
-};
-
-/** Actions whose node is resolved inside their body: the guard reads it there, the moment it is known. */
-const GUARDED_ON_NODE: ReadonlySet<GrammarActionName> = new Set([
-  'tap', 'doubleTap', 'longPress', 'secondaryTap', 'hover', 'scrollIntoView', 'type', 'typeSecret',
-  'press', 'selectOption', 'check', 'uncheck', 'dragTo', 'setInputFiles',
-]);
-
-/** Whether a guarded action is a grammar action rather than a project tool. */
-function isGrammarName(name: ActingAction['name']): name is GrammarActionName {
-  return !name.startsWith(PROJECT_TOOL_EVENT_PREFIX);
-}
-
-/** Typed text that holds a line break presses Enter, which a guard's `key` rule reads as that key. */
-function enterIn(value: string): { readonly key?: string } {
-  return /[\r\n]/.test(value) ? { key: 'Enter' } : {};
-}
-
-/** Keyboard input with no node of its own: a guard reads the focused node. */
-const KEYBOARD_ACTIONS: ReadonlySet<GrammarActionName> = new Set(['typeText', 'pressKey', 'dismissKeyboard']);
-
-/**
- * What a point action lands on, for the guard: the node under the point, and
- * whether it is a control the screen lists. A point on a canvas or a bare
- * container is unidentified: no rule can clear what it cannot name.
- */
-interface PointTarget {
-  readonly node: RedactedNode | undefined;
-  readonly identified: boolean;
-}
-
-/** The action the queue is running, and whether the guard has cleared it. */
-interface ActingAction {
-  readonly name: GrammarActionName | `${typeof PROJECT_TOOL_EVENT_PREFIX}${string}`;
-  readonly key?: string;
-  /** Where a `navigate` goes, resolved. */
-  readonly destination?: string;
-  checked: boolean;
-}
-
 /**
  * The `modifiers` of a tap-family action, validated: distinct key modifiers,
  * as the test API's `tap({ modifiers })` takes them. An empty list holds
@@ -209,9 +139,6 @@ export class ActionDispatcher {
    * rather than a guess.
    */
   readonly actions: ExecutorActions;
-
-  /** The action the queue is running; the queue runs one at a time. */
-  private acting: ActingAction | undefined;
 
   constructor(
     private readonly runtime: AgentContext,
@@ -265,7 +192,7 @@ export class ActionDispatcher {
     return this.runAction('typeText', async () => {
       await this.session.keyboard.type(value, { replace }, this.accounting.actionOperation());
       return { name: 'typeText', value, replace };
-    }, enterIn(value));
+    });
   }
 
   private pressKey(key: string): Promise<void> {
@@ -273,7 +200,7 @@ export class ActionDispatcher {
     return this.runAction('pressKey', async () => {
       await this.session.keyboard.press(key, this.accounting.actionOperation());
       return { name: 'pressKey', key };
-    }, { key });
+    });
   }
 
   private dismissKeyboard(): Promise<void> {
@@ -323,7 +250,6 @@ export class ActionDispatcher {
     requireFinitePoint(point, verb);
     const nodeVerb = POINT_VERBS[verb].node;
     return this.queue.run(async () => {
-      await this.readForGuard();
       const observation = this.feed.requireLatest();
       const clamped = clampToViewport(point, observation.viewport);
       const hit = hitTest(observation, clamped);
@@ -358,7 +284,7 @@ export class ActionDispatcher {
           viewport: { width: observation.viewport.width, height: observation.viewport.height },
           ...handle,
         };
-      }, { point: { node: hit.control ?? hit.under, identified: hit.control !== undefined } });
+      });
       return { point: clamped, ...(hit.control === undefined ? {} : { target: { id: hit.control.ref.id } }), summary };
     });
   }
@@ -376,7 +302,6 @@ export class ActionDispatcher {
     requireFinitePoint(from, 'dragAt');
     requireFinitePoint(to, 'dragAt');
     return this.queue.run(async () => {
-      await this.readForGuard();
       const observation = this.feed.requireLatest();
       const start = clampToViewport(from, observation.viewport);
       const end = clampToViewport(to, observation.viewport);
@@ -423,7 +348,7 @@ export class ActionDispatcher {
           to: { point: end, ...toHandle },
           viewport: { width: observation.viewport.width, height: observation.viewport.height },
         };
-      }, { point: { node: fromHit.control ?? fromHit.under, identified: fromHit.control !== undefined } });
+      });
       return {
         from: start,
         to: end,
@@ -441,20 +366,12 @@ export class ActionDispatcher {
       if (this.accounting.closed) throw new AgentError('CANCELLED', 'the step has ended');
       if (call.mutates) {
         this.assertAllowed('tool');
-        await this.readForGuard();
-        // A project tool names no node: under a guard with rules it is unidentified, denied unless the guard allows those.
-        await this.guard({ name: `${PROJECT_TOOL_EVENT_PREFIX}${call.name}`, checked: false }, undefined, false);
         this.accounting.reserveAction();
         await this.before();
         this.options.trace()?.recordGap(call.name);
       }
       const name = `${PROJECT_TOOL_EVENT_PREFIX}${call.name}`;
-      let value: T;
-      try {
-        value = await instrumentPhase(this.runtime, { api: this.accounting.api, kind: 'engine', phase: 'agent.action', name }, body);
-      } finally {
-        if (call.mutates) this.feed.noteActed(SETTLE_AFTER.tool.look);
-      }
+      const value = await instrumentPhase(this.runtime, { api: this.accounting.api, kind: 'engine', phase: 'agent.action', name }, body);
       if (call.mutates) {
         this.armAfter('tool');
         await this.notify('tool', (fields) => ({ ...fields, action: `${PROJECT_TOOL_EVENT_PREFIX}${call.name}`, summary: `ran ${call.name}` }));
@@ -577,7 +494,7 @@ export class ActionDispatcher {
     return this.commitTargeted('type', target, async (node) => {
       await this.session.perform(node.ref, { kind: 'fill', value, sensitive: false }, this.accounting.actionOperation());
       return { name: 'type', node, value };
-    }, enterIn(value));
+    });
   }
 
   private press(target: ExecutorTarget, key: string): Promise<void> {
@@ -587,7 +504,7 @@ export class ActionDispatcher {
     return this.commitTargeted('press', target, async (node) => {
       await this.session.perform(node.ref, { kind: 'press', key }, this.accounting.actionOperation());
       return { name: 'press', node, key };
-    }, { key });
+    });
   }
 
   private select(target: ExecutorTarget, value: string): Promise<void> {
@@ -769,7 +686,7 @@ export class ActionDispatcher {
     await this.runAction('navigate', async () => {
       await this.session.app.open(resolved, this.accounting.operation());
       return { name: 'navigate', url: recorded };
-    }, { destination: resolved });
+    });
   }
 
   /**
@@ -806,8 +723,8 @@ export class ActionDispatcher {
    * event's `detail` prose derives from it in a pure hook, and the dispatcher
    * writes it to the trace cache after the phase settles.
    */
-  private runAction(name: GrammarActionName, body: () => Promise<RecordableAction>, detail: { readonly key?: string; readonly destination?: string } = {}): Promise<void> {
-    return this.queue.run(() => this.runActionNow(name, body, detail));
+  private runAction(name: GrammarActionName, body: () => Promise<RecordableAction>): Promise<void> {
+    return this.queue.run(() => this.runActionNow(name, body));
   }
 
   /** Assertions may move the viewport but cannot interact with application state. */
@@ -817,23 +734,8 @@ export class ActionDispatcher {
     }
   }
 
-  private async runActionNow(
-    name: GrammarActionName,
-    body: () => Promise<RecordableAction>,
-    detail: { readonly key?: string; readonly destination?: string; readonly point?: PointTarget } = {},
-  ): Promise<void> {
+  private async runActionNow(name: GrammarActionName, body: () => Promise<RecordableAction>): Promise<void> {
     this.assertAllowed(name);
-    const acting: ActingAction = {
-      name,
-      ...(detail.key === undefined ? {} : { key: detail.key }),
-      ...(detail.destination === undefined ? {} : { destination: detail.destination }),
-      checked: false,
-    };
-    this.acting = acting;
-    await this.readForGuard();
-    // An action whose node its body resolves is guarded there, on that node; any other here, before it starts.
-    if (detail.point !== undefined) await this.guard(acting, detail.point.node, detail.point.identified);
-    else if (!GUARDED_ON_NODE.has(name)) await this.guard(acting, KEYBOARD_ACTIONS.has(name) ? this.focusedNode() : undefined, true);
     this.accounting.reserveAction();
     await this.before();
     const redaction = { redact: this.runtime.redact, redactCut: this.runtime.redactCut };
@@ -846,74 +748,12 @@ export class ActionDispatcher {
         (committed) => ({ detail: describeAction(committed, redaction).summary }),
       );
     } catch (cause) {
-      // A failed action may still have reached the app; one the guard or a policy refused never did.
-      if (toAgentError(cause).code !== 'POLICY_DENIED') this.feed.noteActed('held-still');
       this.accounting.checkpoint(cause);
       throw cause;
     }
     this.armAfter(action.name);
-    this.feed.noteActed(SETTLE_AFTER[action.name].look);
     this.recordTrace(action);
     await this.notify(action.name, (fields) => actionEvent(action, { ...fields, summary: describeAction(action, redaction).summary }));
-  }
-
-  /**
-   * Under a guard with rules, reads the screen the turn's earlier actions
-   * left, settled as the last one's policy asks, before the guard names what
-   * this action lands on. Without it a batched turn is judged on the screen
-   * from before those actions: a button they relabelled, a focus they moved,
-   * a page they left. Costs nothing when a settled look already followed the
-   * last action.
-   */
-  private async readForGuard(): Promise<void> {
-    if (this.runtime.guard?.guarding !== true || this.options.readOnly === true) return;
-    const settle = this.feed.unreadAction;
-    if (settle !== undefined) await this.feed.settleNow(settle);
-  }
-
-  /**
-   * Holds the action up to the agent's guard, once per action, before it
-   * reaches the engine: a model's action and a replayed one alike. `deny`
-   * refuses it as `POLICY_DENIED`, an action failure the model reads and
-   * plans around; `stop` hard-stops the step, which ends as `stopped`.
-   */
-  private async guard(acting: ActingAction, node: RedactedNode | undefined, identified: boolean): Promise<void> {
-    acting.checked = true;
-    const guard = this.runtime.guard;
-    // An assertion only reads and scrolls: there is nothing irreversible in it to keep, and no result to stop with.
-    if (guard === undefined || this.options.readOnly === true) return;
-    const location = this.feed.latest?.location;
-    const proposed: ProposedAction = {
-      kind: isGrammarName(acting.name) ? GUARD_KINDS[acting.name] : acting.name,
-      ...(node === undefined ? {} : { node: guardNode(node) }),
-      ...(location === undefined ? {} : { url: this.runtime.redact(location) }),
-      ...(acting.destination === undefined ? {} : { destination: this.runtime.redact(acting.destination) }),
-      ...(acting.key === undefined ? {} : { key: acting.key }),
-    };
-    let verdict: Awaited<ReturnType<typeof guard.decide>>;
-    try {
-      verdict = await guard.decide(proposed, identified, node === undefined ? {} : { node });
-    } catch (cause) {
-      // The program's own check failed: the step stops, as a failed onBeforeAction hook stops it.
-      throw this.accounting.fatalize(new ActionHookError('ACTION_FAILED', `the guard's check failed before ${describeProposed(proposed)}: ${toAgentError(cause).message}`, { cause }));
-    }
-    const { decision } = verdict;
-    if (decision === 'allow') return;
-    if (decision === 'stop') {
-      // Settled now, while the step can still read the screen: it is the end state a recording of the step keeps.
-      await this.feed.settleNow('held-still').catch(() => undefined);
-      throw this.accounting.fatalize(new GuardStop(proposed, this.feed.latest, verdict.byCheck));
-    }
-    const why = identified ? 'the guard denies it' : 'it lands on nothing the screen lists, and the guard denies what it cannot identify';
-    throw new AgentError('POLICY_DENIED', `${describeProposed(proposed)} is not allowed: ${why}`);
-  }
-
-  /** The node holding focus on the newest observation, which keyboard input lands on. */
-  private focusedNode(): RedactedNode | undefined {
-    const latest = this.feed.latest;
-    if (latest?.kind !== 'semantic') return undefined;
-    for (const node of latest.nodes.values()) if (node.states?.focused === true) return node;
-    return undefined;
   }
 
   /** Writes a committed action to the step's trace cache, when caching is on. */
@@ -1013,10 +853,9 @@ export class ActionDispatcher {
     name: GrammarActionName,
     target: ExecutorTarget,
     perform: (node: RedactedNode) => Promise<RecordableAction>,
-    detail: { readonly key?: string } = {},
   ): Promise<void> {
     // Resolved inside the body, so it reads the screen the earlier actions of the turn left.
-    return this.runAction(name, () => this.targeted(this.feed.resolve(target), perform), detail);
+    return this.runAction(name, () => this.targeted(this.feed.resolve(target), perform));
   }
 
   /**
@@ -1029,7 +868,6 @@ export class ActionDispatcher {
     perform: (node: RedactedNode, observation: SemanticAgentObservation) => Promise<RecordableAction>,
   ): Promise<RecordableAction> {
     let { node, observation } = resolved;
-    if (this.acting !== undefined && !this.acting.checked) await this.guard(this.acting, node, true);
     for (let relocations = 0; ; relocations += 1) {
       const placement = this.placementOf({ node, observation });
       try {
