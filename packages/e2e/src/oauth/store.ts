@@ -8,7 +8,7 @@
  * machine the user cannot sign in on; that store refuses to write.
  */
 
-import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { OAuthError } from './errors.ts';
@@ -64,10 +64,15 @@ export class FileCredentialStore implements CredentialStore {
   }
 
   async exclusive<T>(refresh: () => Promise<T>): Promise<T> {
-    const release = await this.lock(`${this.path}.refresh.lock`, REFRESH_LOCK_WAIT_MS);
+    const lockPath = `${this.path}.refresh.lock`;
+    const release = await this.lock(lockPath, REFRESH_LOCK_WAIT_MS);
+    // A slow token request must not look like a dead process's lock to the waiters.
+    const heartbeat = setInterval(() => touch(lockPath), LOCK_STALE_MS / 4);
+    heartbeat.unref();
     try {
       return await refresh();
     } finally {
+      clearInterval(heartbeat);
       release();
     }
   }
@@ -133,6 +138,15 @@ export class FileCredentialStore implements CredentialStore {
         await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
       }
     }
+  }
+}
+
+function touch(lockPath: string): void {
+  const now = new Date();
+  try {
+    utimesSync(lockPath, now, now);
+  } catch {
+    // Claimed as stale or released meanwhile; the next refresh takes a fresh lock.
   }
 }
 
