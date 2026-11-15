@@ -261,6 +261,7 @@ purpose. Use the workaround, or keep the test in Playwright.
 | `@axe-core/playwright` | axe-core through `browser.addInitScript({ path: 'node_modules/axe-core/axe.min.js' })`, then `axe.run()` in `browser.evaluate` |
 | `.resolves`, `.rejects`, `toThrow()`, `toStrictEqual()`, `toContainEqual()`, `toBeInstanceOf()`, `expect.closeTo()` | `await` first, or catch the error and assert on it; `toEqual`; `toContain`, which compares by deep equality; `toBeCloseTo` |
 | A `.not` locator matcher that passes on the first read | It passes after the condition holds for 1 s. The positive inverse passes on the first read: `toBeHidden()`, `toBeDisabled()`, `toBeChecked({ checked: false })` |
+| `expect.extend()` | An async helper that calls `expect` |
 
 </Accordion>
 <Accordion title="Navigation, network, and browser">
@@ -314,7 +315,6 @@ purpose. Use the workaround, or keep the test in Playwright.
 | `page.exposeFunction()`, `addStyleTag()`, `innerHTML()`, `page.viewportSize()` | `browser.evaluate` |
 | `routeFromHAR()`, `routeWebSocket()`, `page.setExtraHTTPHeaders()` | A `browser.route` for each endpoint or header; a `browser.addInitScript` that stubs `WebSocket` |
 | `emulateMedia({ media, forcedColors, contrast })` | - |
-| `expect.extend()` | An async helper that calls `expect` |
 | `npx playwright show-trace`, `trace.zip`, `context.tracing` | `trace.md` in the test's directory under `.e2e/results/`. A trace is a markdown page, with no zip and no viewer |
 
 ### Not planned
