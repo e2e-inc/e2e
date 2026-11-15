@@ -116,6 +116,20 @@ describe('createOAuthFetch', () => {
     expect(await store.get('test')).toMatchObject({ access: 'fresh-1', refresh: 'rt-1' });
   });
 
+  it('refreshes a token another process stored when that token is expiring too', async () => {
+    const api = await serve((_request, response) => json(response, 200, {}));
+    const store = new MemoryCredentialStore({ test: { access: 'stale', refresh: 'rt-0', expires: 1 } });
+    // Another process wrote a different token while this one waited for the lock, and that token lapses too.
+    store.exclusive = async (providerId, refresh) => {
+      await store.set(providerId, { access: 'other', refresh: 'rt-0', expires: Date.now() + 1_000 });
+      return refresh();
+    };
+    const testProvider = provider();
+    await createOAuthFetch(testProvider, { store, userAgent: 'p' })(api.url);
+    expect(testProvider.refreshes).toEqual(['rt-0']);
+    expect(api.requests.map((request) => request.headers['authorization'])).toEqual(['Bearer fresh-1']);
+  });
+
   it('shares one refresh between separate file stores over the same file', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'e2e-oauth-fetch-'));
     try {

@@ -1,7 +1,9 @@
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { existsSync, linkSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CREDENTIALS_ENV, EnvCredentialStore, FileCredentialStore, defaultCredentialStore, defaultCredentialsPath } from '../../../src/oauth/store.ts';
 
@@ -28,6 +30,17 @@ const heldBy = (pid: number) => `${hostname()} ${pid} other`;
 /** The pid of a process that has exited. */
 const exitedPid = () => spawnSync(process.execPath, ['-e', '']).pid;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/** Sets the file's times `seconds` from now. */
+const age = (file: string, seconds: number) => utimesSync(file, Date.now() / 1000 + seconds, Date.now() / 1000 + seconds);
+/** Whether `exclusive` on `providerId` enters within 150 ms; the attempt is left to finish once the lock is removed. */
+async function entersAtOnce(store: FileCredentialStore, providerId: string): Promise<{ entered: boolean; pending: Promise<unknown> }> {
+  const state = { entered: false };
+  const pending = store.exclusive(providerId, async () => {
+    state.entered = true;
+  });
+  await sleep(150);
+  return { entered: state.entered, pending };
+}
 
 describe('FileCredentialStore', () => {
   it('creates the file with owner-only permissions and round-trips entries', async () => {
@@ -127,25 +140,100 @@ describe('FileCredentialStore', () => {
     expect(await store.exclusive('x', async () => 'next')).toBe('next');
   });
 
-  it('waits for a live holder however old its lock is', async () => {
+  it.each([
+    ['this process', () => heldBy(process.pid)],
+    ['a process of another user', () => heldBy(1)],
+    ['another host', () => `elsewhere.example ${exitedPid()} other`],
+    ['no pid', () => `${hostname()} unknown other`],
+  ])('waits for a fresh lock held by %s', async (_holder, content) => {
     const file = tempFile();
     const store = new FileCredentialStore(file);
     await store.set('x', creds);
     const lock = `${file}.x.refresh.lock`;
-    // A holder suspended past the stale bound, or a laptop asleep mid-refresh, still holds the lock.
-    writeFileSync(lock, heldBy(process.pid));
-    const old = Date.now() / 1000 - 60;
-    utimesSync(lock, old, old);
-    let entered = false;
-    const pending = store.exclusive('x', async () => {
-      entered = true;
-    });
-    await sleep(150);
+    writeFileSync(lock, content());
+    const { entered, pending } = await entersAtOnce(store, 'x');
     expect(entered).toBe(false);
     rmSync(lock);
     await pending;
-    expect(entered).toBe(true);
   });
+
+  it('takes over a lock its holder stopped touching, even when the pid runs', async () => {
+    const file = tempFile();
+    const store = new FileCredentialStore(file);
+    await store.set('x', creds);
+    // A pid that now belongs to another program, or a holder suspended past the stale bound.
+    writeFileSync(`${file}.x.refresh.lock`, heldBy(process.pid));
+    age(`${file}.x.refresh.lock`, -60);
+    const { entered, pending } = await entersAtOnce(store, 'x');
+    expect(entered).toBe(true);
+    await pending;
+  });
+
+  it('keeps a held lock fresh, so waiters never take it as untouched', async () => {
+    const file = tempFile();
+    const store = new FileCredentialStore(file);
+    await store.set('x', creds);
+    const lock = `${file}.x.refresh.lock`;
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      await store.exclusive('x', async () => {
+        age(lock, -60);
+        vi.advanceTimersByTime(10_000);
+        expect(statSync(lock).mtimeMs).toBeGreaterThan(Date.now() - 5_000);
+      });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('never removes or touches a lock it no longer holds', async () => {
+    const file = tempFile();
+    const store = new FileCredentialStore(file);
+    await store.set('x', creds);
+    const lock = `${file}.x.refresh.lock`;
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      await store.exclusive('x', async () => {
+        // A waiter took the lock over and holds it now.
+        writeFileSync(lock, heldBy(process.pid));
+        age(lock, -60);
+        vi.advanceTimersByTime(10_000);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(readFileSync(lock, 'utf8')).toBe(heldBy(process.pid));
+    expect(statSync(lock).mtimeMs).toBeLessThan(Date.now() - 30_000);
+  });
+
+  it('links the lock into place with its holder already written', async () => {
+    const file = tempFile();
+    const store = new FileCredentialStore(file);
+    await store.set('x', creds);
+    const lock = `${file}.x.refresh.lock`;
+    vi.mocked(writeFileSync).mockClear();
+    vi.mocked(linkSync).mockClear();
+    await store.exclusive('x', async () => {});
+    expect(vi.mocked(writeFileSync).mock.calls.map(([target]) => target)).not.toContain(lock);
+    expect(linkSync).toHaveBeenCalledWith(expect.stringMatching(/\.tmp$/), lock);
+  });
+
+  it('lets one process at a time through an orphaned lock', async () => {
+    const file = tempFile();
+    const store = new FileCredentialStore(file);
+    await store.set('test', creds);
+    writeFileSync(`${file}.test.refresh.lock`, heldBy(exitedPid()));
+    const log = path.join(path.dirname(file), 'log');
+    writeFileSync(log, '');
+    const worker = ['--import', new URL('../../../src/config/register.ts', import.meta.url).href, fileURLToPath(new URL('./helpers/exclusive-worker.ts', import.meta.url))];
+    // One start time, after every process has booted, so they all find the orphaned lock at once.
+    const startAt = String(Date.now() + 2_000);
+    await Promise.all(Array.from({ length: 8 }, () => promisify(execFile)(process.execPath, [...worker, file, log, startAt])));
+    const lines = readFileSync(log, 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(16);
+    for (let i = 0; i < lines.length; i += 2) expect([lines[i]?.[0], lines[i + 1]]).toEqual(['+', `-${lines[i]?.slice(1)}`]);
+  }, 20_000);
 
   it('takes over at once a lock whose holder exited', async () => {
     const file = tempFile();
@@ -156,6 +244,42 @@ describe('FileCredentialStore', () => {
     expect(await store.exclusive('x', async () => 'entered')).toBe('entered');
     expect(Date.now() - started).toBeLessThan(1_000);
     expect(existsSync(`${file}.x.refresh.lock`)).toBe(false);
+  });
+
+  it('takes over the turn of a waiter that exited during it', async () => {
+    const file = tempFile();
+    const store = new FileCredentialStore(file);
+    await store.set('x', creds);
+    writeFileSync(`${file}.x.refresh.lock`, heldBy(exitedPid()));
+    writeFileSync(`${file}.x.refresh.lock.break`, heldBy(exitedPid()));
+    const { entered, pending } = await entersAtOnce(store, 'x');
+    expect(entered).toBe(true);
+    await pending;
+    expect(readdirSync(path.dirname(file)).filter((name) => name.includes('.lock'))).toEqual([]);
+  });
+
+  it('gives up with TIMEOUT after 30 s of another worker refreshing', async () => {
+    const file = tempFile();
+    const store = new FileCredentialStore(file);
+    await store.set('x', creds);
+    const lock = `${file}.x.refresh.lock`;
+    writeFileSync(lock, heldBy(process.pid));
+    // Touched in the future, so the lock stays fresh however far the fake clock moves.
+    age(lock, 3_600);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      let settled = false;
+      const pending = store.exclusive('x', async () => {}).finally(() => {
+        settled = true;
+      });
+      const rejected = expect(pending).rejects.toMatchObject({ code: 'TIMEOUT', message: expect.stringContaining('still refreshing the x login after 30 s') });
+      await vi.advanceTimersByTimeAsync(29_000);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('gives up on time while another waiter holds the takeover turn', async () => {

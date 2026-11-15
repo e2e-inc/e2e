@@ -4,9 +4,9 @@
  * header with the bearer token, and hands the request to the provider; on a
  * 401 it refreshes once and retries, or, with nothing to refresh, reports
  * that the user signs in again. One refresh serves every model instance,
- * every concurrent call, and every worker process over the same credentials,
- * because vendors that rotate refresh tokens reject the second concurrent
- * refresh.
+ * every concurrent call, and every worker process over the same credentials
+ * file, because vendors that rotate refresh tokens reject the second
+ * concurrent refresh.
  */
 
 import { withAbort } from '../internal/time.ts';

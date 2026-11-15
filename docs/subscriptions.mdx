@@ -229,6 +229,8 @@ Model-call cancellation also applies while waiting for a token refresh.
 
 Parallel workers share one token refresh for a login saved with
 `npx e2e login`, so a rotating refresh token is sent once per run.
+A worker waits up to 30 seconds for another worker's refresh, then its step
+fails and the message says to run again.
 
 ## CI
 

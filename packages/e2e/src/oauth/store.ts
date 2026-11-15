@@ -9,7 +9,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { chmodSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import path from 'node:path';
 import { OAuthError } from './errors.ts';
@@ -33,7 +33,7 @@ export function defaultCredentialStore(env: NodeJS.ProcessEnv = process.env): Cr
 }
 
 const LOCK_RETRY_MS = 25;
-/** How old a lock may get when it names no process this host can check. */
+/** How long a lock may go untouched before waiters take it over, whoever it names. */
 const LOCK_STALE_MS = 10_000;
 const LOCK_WAIT_MS = 5_000;
 /** A token request has no deadline of its own, so a waiter gives up on its own. */
@@ -68,10 +68,8 @@ export class FileCredentialStore implements CredentialStore {
   async exclusive<T>(providerId: string, refresh: () => Promise<T>): Promise<T> {
     const lockPath = `${this.path}.${providerId}.refresh.lock`;
     const release = await this.lock(lockPath, REFRESH_LOCK_WAIT_MS, () => {
-      return new OAuthError(
-        'TIMEOUT',
-        `another worker is still refreshing the ${providerId} login after ${REFRESH_LOCK_WAIT_MS / 1000} s; run again once it finishes, or remove ${lockPath} if no e2e run is active`,
-      );
+      const waited = `after ${REFRESH_LOCK_WAIT_MS / 1000} s`;
+      return new OAuthError('TIMEOUT', `another worker is still refreshing the ${providerId} login ${waited}; run again once it finishes`);
     });
     try {
       return await refresh();
@@ -98,7 +96,9 @@ export class FileCredentialStore implements CredentialStore {
     // Creation modes only apply to new paths; a directory or file that already existed keeps what it had unless told otherwise.
     chmodSync(dir, 0o700);
     const lockPath = `${this.path}.lock`;
-    const release = await this.lock(lockPath, LOCK_WAIT_MS, () => new Error(`${lockPath} is held by another process; remove it if that process is gone`));
+    const release = await this.lock(lockPath, LOCK_WAIT_MS, () => {
+      return new Error(`${lockPath} is held by another process; remove it if that process is gone`);
+    });
     try {
       const temp = `${this.path}.${process.pid}.${Date.now()}.tmp`;
       writeFileSync(temp, `${JSON.stringify(change(this.read()), null, 2)}\n`, { mode: 0o600 });
@@ -115,16 +115,23 @@ export class FileCredentialStore implements CredentialStore {
   }
 
   /**
-   * An advisory lock file created exclusively. It names its holder (`lockToken`),
-   * so a waiter takes it over only once the holder has exited, never while the
-   * holder is slow or suspended, and the holder releases only its own lock.
+   * An advisory lock file created exclusively. It names its holder
+   * (`lockToken`), and the holder touches it while it holds it, so waiters take
+   * it over at once when the holder has exited and otherwise only once it has
+   * gone untouched for the stale bound. The holder touches and releases only
+   * its own lock.
    */
   private async lock(lockPath: string, waitMs: number, busy: () => Error): Promise<() => void> {
     const token = lockToken();
     const deadline = Date.now() + waitMs;
     for (;;) {
       if (claim(lockPath, token)) {
+        const heartbeat = setInterval(() => {
+          if (readLock(lockPath) === token) touch(lockPath);
+        }, LOCK_STALE_MS / 4);
+        heartbeat.unref();
         return () => {
+          clearInterval(heartbeat);
           if (readLock(lockPath) === token) rmSync(lockPath, { force: true });
         };
       }
@@ -167,6 +174,15 @@ function lockToken(): string {
   return `${hostname()} ${process.pid} ${randomUUID()}`;
 }
 
+function touch(lockPath: string): void {
+  const now = new Date();
+  try {
+    utimesSync(lockPath, now, now);
+  } catch {
+    // Released meanwhile.
+  }
+}
+
 function readLock(lockPath: string): string | undefined {
   try {
     return readFileSync(lockPath, 'utf8');
@@ -176,16 +192,16 @@ function readLock(lockPath: string): string | undefined {
 }
 
 /**
- * True when the lock's holder has exited. A lock from another host, or an
- * empty one from an older e2e or a file system without hard links, names no
- * process this host can check, so it counts as abandoned once it is older
- * than the stale bound.
+ * True when the lock's holder on this host has exited, or the lock has gone
+ * untouched for the stale bound. The bound covers what the pid cannot tell:
+ * a lock from another host or an older e2e, a pid another program now has,
+ * and a holder suspended that long, which then loses its lock.
  */
 function abandoned(lockPath: string): boolean {
   const text = readLock(lockPath);
   if (text === undefined) return false;
   const [host, pid] = text.split(' ');
-  if (host === hostname() && pid !== undefined && /^\d+$/.test(pid)) return !running(Number(pid));
+  if (host === hostname() && pid !== undefined && /^\d+$/.test(pid) && !running(Number(pid))) return true;
   try {
     return Date.now() - statSync(lockPath).mtimeMs > LOCK_STALE_MS;
   } catch {
@@ -193,6 +209,7 @@ function abandoned(lockPath: string): boolean {
   }
 }
 
+/** True while `pid` exists, whoever owns it. */
 function running(pid: number): boolean {
   try {
     process.kill(pid, 0);
