@@ -220,7 +220,16 @@ jobs:
           GITHUB_TOKEN: ${{ inputs.agent-device-version == '' && github.token || '' }}
           E2E_MOBILE_BENCHMARK_IOS_APP: ${{ steps.app.outputs.app-path }}
           E2E_MOBILE_BENCHMARK_COMMENT: ios${{ matrix.suite == 'agentic' && ' agent' || '' }}
-          E2E_RUN: node node_modules/e2e/dist/cli/bin.js run --target ios-simulator ${{ matrix.suite == 'agentic' && '--config e2e.agent.config.ts --output .e2e/agent' || '' }}
+          E2E_RUN: node node_modules/e2e/dist/cli/bin.js run --target ios-simulator --exclude-tag peers ${{ matrix.suite == 'agentic' && '--config e2e.agent.config.ts --output .e2e/agent' || '' }}
+        run: $E2E_RUN || $E2E_RUN --last-failed
+      # The two-user test runs on its own: its peer takes the second
+      # simulator, so in the run above it would leave the whole suite one
+      # worker. It posts no comment; a failure fails the job.
+      - name: Run the two-user test
+        if: ${{ matrix.suite == 'deterministic' }}
+        env:
+          E2E_MOBILE_BENCHMARK_IOS_APP: ${{ steps.app.outputs.app-path }}
+          E2E_RUN: node node_modules/e2e/dist/cli/bin.js run --target ios-simulator --tag peers --output .e2e/peers
         run: $E2E_RUN || $E2E_RUN --last-failed
       # The artifact upload below fails whenever the repository's quota is
       # full, so the failure evidence goes into the log as well.
@@ -245,6 +254,7 @@ jobs:
           path: &report-paths |
             apps/mobile-benchmark/.e2e/report.json
             apps/mobile-benchmark/.e2e/agent/report.json
+            apps/mobile-benchmark/.e2e/peers/report.json
           if-no-files-found: warn
           retention-days: 7
       - name: Upload artifacts

@@ -1,8 +1,9 @@
 /** Test-target execution engine. */
 
+import { mkdirSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
-import type { EngineDisposeContext, EngineSnapshot, ResolveSecretOptions } from '../engine/index.ts';
+import type { EngineDisposeContext, EngineHandle, EngineSnapshot, ResolveSecretOptions } from '../engine/index.ts';
 import type { TargetSession, OperationContext, VideoSegment } from '../engine/surface.ts';
 import type { ResolvedConfig, ResolvedTarget } from '../config/resolve.ts';
 import {
@@ -28,19 +29,21 @@ import { DebugTrace } from '../internal/debug.ts';
 import { resultId, timestamp, uuidv7 } from '../internal/ids.ts';
 import { engineAppInfo } from '../config/app.ts';
 import { Deadline, NEVER_ABORTS, withAbort, withScopedBudget, withTimeout } from '../internal/time.ts';
-import { createAgentCacheContext, settleStagedTraces } from '../cache/context.ts';
+import { createAgentCacheContext, settleStagedTraces, type AgentCacheContext } from '../cache/context.ts';
+import type { CachePeerIdentity } from '../cache/identity.ts';
 import { storedRecordingsFor, type StoredRecordings } from '../cache/rekeyed.ts';
 import type { ModuleRegistration, RegisteredTest } from '../collect/registry.ts';
-import { pairRecordings, type TestTargetPair } from '../collect/select.ts';
+import { pairRecordings, peerTarget, type TestTargetPair } from '../collect/select.ts';
+import { reservedPeerSlot, type PeerSlots } from './peer-slots.ts';
 import { keeps, type AttemptRecordings, type VideoRecording } from '../internal/recording-modes.ts';
-import type { ArtifactStore, Secret } from '../types.ts';
+import type { ArtifactStore, PeerFixtures, Secret } from '../types.ts';
 import { attemptSegments, createAttemptArtifacts, resultSegment } from './artifacts.ts';
 import { AttemptBudget } from './budget.ts';
 import { createEngineSession } from '../engine/session.ts';
 import { createExtendedFixtures } from './extended-fixtures.ts';
 import { captureFailureEvidence } from './failure-evidence.ts';
-import { createFixtures, type ArtifactSink } from './fixtures.ts';
-import { WrittenScreenshots } from './screenshots.ts';
+import { createFixtures, type ArtifactSink, type AttemptEnvironment } from './fixtures.ts';
+import { WrittenScreenshots, type ScreenshotUser } from './screenshots.ts';
 import { publishAttempt } from '../expect/attempt.ts';
 import { PollScope, runInPollScope } from '../expect/poll-scope.ts';
 import { SoftFailures } from '../expect/soft.ts';
@@ -58,7 +61,7 @@ import { traceScreen } from './step-screens.ts';
 import { runWithRetries } from './retry.ts';
 import { runSerialUnit, type SerialAttemptStart, type SerialHost, type SharedSerialSession } from './serial.ts';
 import { interruptedInPhase, interruptedSkip, pairKey, pairResult, unstartedResult } from './units.ts';
-import { adoptSecrets, carriedSecrets, processSecrets, registerDerivedSecrets, redactForSession, resolveSecretValue, sessionLedger, staticSecretLedger } from './secrecy.ts';
+import { adoptSecrets, carriedSecrets, processSecrets, registerDerivedSecrets, redactForSession, resolveSecretValue, sessionLedger, shareSessionLedger, staticSecretLedger } from './secrecy.ts';
 import { isSecret } from '../secrets.ts';
 import { SessionStaging, SessionStore, targetIdentity, type SessionIdentity } from './sessions.ts';
 import { StepRecorder, type StepHoldRequest, type StepProgress } from './steps.ts';
@@ -120,6 +123,8 @@ export interface TargetExecutorOptions {
   readonly headed: boolean;
   /** This worker's slot among the target's workers; see `EngineInitInfo.workerSlot`. */
   readonly workerSlot: number;
+  /** The slots the run reserved for this worker's tests' peers, by peer target; see `WorkerBootstrap.peers`. */
+  readonly peerSlots?: Readonly<Record<string, PeerSlots>> | undefined;
   /** This worker's environment; see `EngineInitInfo.env`. */
   readonly env: Readonly<Record<string, string | undefined>>;
   /**
@@ -141,6 +146,43 @@ export interface TargetExecutorOptions {
   readonly events?: ExecutionEvents;
   /** The virtual file of tests registered in memory, and the agents they run as; see `InMemoryAttempts`. */
   readonly inMemory?: InMemoryAttempts | undefined;
+  /**
+   * Loads the config afresh in this process, for the engines a test's peers
+   * run on: every load evaluates the config and the project files it imports
+   * again, so its engines are its own. Undefined where the run loaded no
+   * config file (a config value, tests registered in memory), which the
+   * runner refuses peers in before any engine prepares.
+   */
+  readonly loadPeerConfig?: (() => Promise<ResolvedConfig>) | undefined;
+}
+
+/** One peer's app in an attempt: the executor whose engine runs it, its session, and its own artifact folder. */
+interface OpenPeer {
+  readonly name: string;
+  readonly executor: TargetExecutor;
+  readonly session: TargetSession;
+  readonly sink: ArtifactSink;
+}
+
+/** What a peer's fixtures are built from in the test's attempt; the peer's executor adds its own config, target, engine, and models. */
+export type PeerAttemptEnvironment = Omit<AttemptEnvironment, 'config' | 'target' | 'models' | 'debug' | 'test' | 'peers' | 'saveSession'> & {
+  readonly test: { readonly file: string; readonly titlePath: readonly string[]; readonly user: ScreenshotUser };
+};
+
+/**
+ * A peer's artifact folder, `peers/<name>/` inside the attempt's: what its
+ * engine writes there is registered on the attempt under that path, so two
+ * users never write the same file.
+ */
+function peerArtifactSink(sink: ArtifactSink, name: string): ArtifactSink {
+  const relative = path.posix.join('peers', name);
+  const dir = path.join(sink.dir, 'peers', name);
+  mkdirSync(dir, { recursive: true });
+  return {
+    dir,
+    register: (kind, relativePath, registration) => sink.register(kind, path.posix.join(relative, relativePath), { ...registration, user: name }),
+    link: (url, registration) => sink.link(url, { ...registration, user: name }),
+  };
 }
 
 /**
@@ -174,6 +216,8 @@ export interface ClosingRecord {
 export interface SessionPlan {
   readonly session: string | undefined;
   readonly recordings: AttemptRecordings;
+  /** The session whose secret ledger this one shares: the test's own, for a peer's. */
+  readonly ledgerOwner?: TargetSession | undefined;
 }
 
 /** What closing an attempt's session needs besides its verdict: the video it started. */
@@ -204,6 +248,10 @@ export class TargetExecutor implements SerialHost {
   readonly debug: DebugTrace;
 
   private readonly runErrors: RunError[] = [];
+  /** The executors of this worker's peer engines, by target and position among an attempt's peers on it. */
+  private readonly peerExecutors = new Map<string, Promise<TargetExecutor>>();
+  /** The engine objects this worker's peers run on: one object is one engine client, which drives one attempt at a time. */
+  private readonly peerEngines = new Set<EngineHandle>();
   /** Fails the attempt in flight from outside it, while one is; see `strayRejection`. */
   private strayFailure: ((cause: unknown) => void) | undefined;
   /** The last test whose attempt ended here: the likely source of a rejection that surfaces between attempts. */
@@ -373,6 +421,13 @@ export class TargetExecutor implements SerialHost {
    * connection, so the engine has nothing of it to release.
    */
   async dispose(options: Pick<EngineDisposeContext, 'reuseSignal'> = {}): Promise<void> {
+    for (const pending of this.peerExecutors.values()) {
+      const peer = await pending.catch(() => undefined);
+      if (peer === undefined) continue;
+      await peer.dispose(options);
+      this.runErrors.push(...peer.collectedRunErrors());
+    }
+    this.peerExecutors.clear();
     const disposeEngine = this.target.engine?.dispose?.bind(this.target.engine);
     if (disposeEngine === undefined) return;
     try {
@@ -386,6 +441,129 @@ export class TargetExecutor implements SerialHost {
     } catch (cause) {
       this.runErrors.push({ error: serializeError(classifyError(cause), { phase: 'cleanup' }) });
     }
+  }
+
+  /**
+   * The executor whose engine runs the `index`th peer on `targetName` in this
+   * worker's attempts: built from a fresh load of the config the first time
+   * and reused after, since a worker runs one attempt at a time. A load that
+   * failed fails every later attempt that needs it the same way, as an
+   * engine's failed boot does.
+   */
+  private peerExecutor(pair: TestTargetPair, targetName: string, index: number): Promise<TargetExecutor> {
+    const key = `${targetName}\u0000${String(index)}`;
+    const existing = this.peerExecutors.get(key);
+    if (existing !== undefined) return existing;
+    const pending = this.loadPeerExecutor(pair, targetName, index);
+    this.peerExecutors.set(key, pending);
+    // A load that failed is not kept: the next test's peer tries again, and its error names that test.
+    pending.catch(() => {
+      if (this.peerExecutors.get(key) === pending) this.peerExecutors.delete(key);
+    });
+    return pending;
+  }
+
+  private async loadPeerExecutor(pair: TestTargetPair, targetName: string, index: number): Promise<TargetExecutor> {
+    const named = `test "${pair.test.titlePath.join(' > ')}" in ${pair.test.file}`;
+    // The peer runs on a slot of its target the run set aside for it: its own device, on a phone.
+    const reserved = reservedPeerSlot(this.options.peerSlots, targetName, index, named);
+    // The runner refuses peers in a run with no config file, so a worker that runs one has the file to load.
+    const config = await this.options.loadPeerConfig!();
+    // The load matched the runner's config digest, so it declares every target selection checked.
+    const target = config.targets.find((candidate) => candidate.name === targetName)!;
+    // An engine made inside a package is one object every load of the config
+    // shares; it drives one attempt at a time, so it cannot serve two users,
+    // whichever targets they run on.
+    const engine = target.engine;
+    if (engine !== undefined && (engine === this.target.engine || this.peerEngines.has(engine))) {
+      throw new ConfigurationError(
+        'INVALID_CONFIG',
+        `${named} runs a peer on target "${targetName}", whose engine is the same instance as another user's in every load of the config, so it cannot run next to them; create the engine in the config file or a project file it imports, not inside a package`,
+      );
+    }
+    if (engine !== undefined) this.peerEngines.add(engine);
+    return new TargetExecutor({
+      config,
+      target,
+      runId: this.options.runId,
+      artifactsRoot: this.artifactsRoot,
+      rerunDir: this.rerunDir,
+      sessionStore: this.options.sessionStore,
+      headed: this.options.headed,
+      workerSlot: reserved.slot,
+      // What the peer target's `prepare` handed its workers, such as which device each slot drives.
+      env: { ...this.options.env, ...reserved.env },
+      isolated: this.options.isolated,
+      interruptSignal: this.interruptSignal,
+      debug: this.debug,
+      // A model failure the peer's agent meets stops the run, as one the test's own agent meets does.
+      events: {
+        onNotice: (message) => this.options.events?.onNotice?.(message),
+        onRunAbort: (error) => this.options.events?.onRunAbort?.(error),
+      },
+    });
+  }
+
+  /**
+   * Opens each peer's app for one attempt, in declaration order, each on an
+   * engine of its own, sharing the test's secret ledger. Every peer that
+   * opened lands in `opened` before the next opens, so the caller closes it
+   * whatever fails after.
+   */
+  private async launchPeers(
+    pair: TestTargetPair,
+    owner: TargetSession,
+    attempt: { readonly id: string; readonly sink: ArtifactSink; readonly recordings: AttemptRecordings; readonly signal: AbortSignal },
+    opened: OpenPeer[],
+    steps: StepRecorder,
+  ): Promise<void> {
+    const onTarget = new Map<string, number>();
+    for (const peer of pair.options.peers) {
+      const targetName = peerTarget(peer, pair);
+      const index = onTarget.get(targetName) ?? 0;
+      onTarget.set(targetName, index + 1);
+      const executor = await this.peerExecutor(pair, targetName, index);
+      const sink = peerArtifactSink(attempt.sink, peer.name);
+      const session = await executor.launchSession(
+        { session: peer.session, recordings: attempt.recordings, ledgerOwner: owner },
+        attempt.id,
+        sink.dir,
+        attempt.signal,
+      );
+      // What the peer's app logs, and the screens its steps saw, are the peer's.
+      session.appLog.route((event, at) => steps.recordAppEvent(event, at, peer.name));
+      session.screens.route((observation) =>
+        steps.recordScreen(() =>
+          traceScreen(observation, {
+            ledger: sessionLedger(session, this.config.allSecrets),
+            maxBytes: this.config.limits.maxObservationBytes,
+            appOrigin: executor.target.app.base?.origin,
+          }),
+        ),
+      );
+      opened.push({ name: peer.name, executor, session, sink });
+    }
+  }
+
+  /**
+   * One peer's fixtures in another executor's attempt: on that attempt's
+   * steps, budget, and secret ledger, over this executor's config, target,
+   * engine, and models, so the peer's agents and their tools see the peer's
+   * app and no other.
+   */
+  peerFixtures(environment: PeerAttemptEnvironment): PeerFixtures {
+    const { fixtures } = createFixtures({
+      ...environment,
+      config: this.config,
+      target: this.target,
+      models: this.models,
+      debug: this.debug,
+      saveSession: undefined,
+      test: { ...environment.test, writtenScreenshots: this.writtenScreenshots },
+    });
+    // The graph is a peer's whole: its engine's own fixtures are reached by name.
+    const peer: Omit<typeof fixtures, 'peers' | 'session'> = fixtures;
+    return peer;
   }
 
   /**
@@ -626,6 +804,7 @@ export class TargetExecutor implements SerialHost {
     }
     const { video } = plan.recordings;
     const session = createEngineSession({ engine, targetName: this.target.name, traced: plan.recordings.trace !== undefined });
+    if (plan.ledgerOwner !== undefined) shareSessionLedger(session, plan.ledgerOwner, this.config.allSecrets);
     const launch = <T>(label: string, run: (launchSignal: AbortSignal) => Promise<T>) =>
       this.lifecycle(label, this.config.launchTimeout, 'LAUNCH_TIMEOUT', signal, run);
     const launchOp = (launchSignal: AbortSignal) =>
@@ -724,6 +903,30 @@ export class TargetExecutor implements SerialHost {
       NEVER_ABORTS,
       (signal) => session.close(this.op(attemptId, this.config.cleanupTimeout, signal)),
     );
+  }
+
+  /** Closes one peer's app on its own executor. */
+  private async closePeer(open: OpenPeer, close: SessionClose, record: ClosingRecord, secondaryErrors: SerializedError[]): Promise<void> {
+    await open.executor.closeSession(open.session, close, record, open.sink, secondaryErrors);
+  }
+
+  /**
+   * A peer's replay cache in another executor's attempt: keyed on this
+   * executor's target, the peer's name, and the target and agent of the test
+   * that brought it, so no user replays another's recording, nor one peer
+   * its own from another pair of the test.
+   */
+  peerCache(testId: string, attemptIndex: number, user: CachePeerIdentity): AgentCacheContext | undefined {
+    return createAgentCacheContext({
+      cache: this.config.cache,
+      projectRoot: this.config.projectRoot,
+      projectId: this.config.projectId,
+      testId,
+      target: this.sessionIdentity,
+      attemptIndex,
+      recordings: this.storedRecordings,
+      user,
+    });
   }
 
   /**
@@ -864,6 +1067,8 @@ export class TargetExecutor implements SerialHost {
     const shared = context.kind === 'serial' ? context.shared : undefined;
     const onProgress = this.options.events?.onProgress;
     let openSession: TargetSession | null = null;
+    // Each peer's app, as it opens; closed before the test's own, on every path.
+    const openPeers: OpenPeer[] = [];
     // Secret values the session has seen never enter an error record or a
     // step label; the ledger is live, so a value resolved mid-attempt is
     // covered too. Before a session opens, the static values still are.
@@ -883,9 +1088,10 @@ export class TargetExecutor implements SerialHost {
     });
     // Agent prompts quote completed steps as prior context. Serial-group
     // members prepend the steps earlier members already contributed.
+    // A peer's steps are its own history: the test's user's prompt never quotes them.
     const priorSteps =
       shared === undefined
-        ? () => steps.completed()
+        ? () => steps.completed().filter((step) => step.user === undefined)
         : () => [...shared.priorSteps, ...steps.completed()];
     const secondaryErrors: SerializedError[] = [];
     const attemptAbort = new AbortController();
@@ -959,7 +1165,7 @@ export class TargetExecutor implements SerialHost {
     // Captured the moment the primary failure lands: steps that pass later —
     // afterEach cleanup, teardown — must not confirm traces the failure
     // implicated (a cleanup assertion says nothing about the failed flow).
-    let lastVerifiedAtFailure = -1;
+    let lastVerifiedAtFailure = new Map<string | undefined, number>();
     // Whether any failure, primary or later, says something about the app:
     // one where no model answered does not, but an afterEach assertion
     // failing after it still implicates the flows nothing confirmed.
@@ -975,7 +1181,7 @@ export class TargetExecutor implements SerialHost {
         );
         return;
       }
-      lastVerifiedAtFailure = steps.lastVerifiedStepIndex;
+      lastVerifiedAtFailure = new Map([undefined, ...openPeers.map((open) => open.name)].map((user) => [user, steps.lastVerifiedStepIndexOf(user)]));
       failure = classified;
       failurePhase = atPhase;
     };
@@ -999,8 +1205,25 @@ export class TargetExecutor implements SerialHost {
         interrupt: this.interruptSignal,
       }).catch(() => undefined);
       if (evidence !== undefined) record.failure = evidence;
+      // The failure may be on any user's app, so each peer's screen is kept
+      // too, in its own folder; the attempt's failure record stays the test's.
+      for (const open of openPeers) {
+        const peerEvidence = await captureFailureEvidence({
+          session: open.session,
+          error: failure,
+          ledger: sessionLedger(open.session, this.config.allSecrets),
+          config: this.config,
+          appOrigin: open.executor.target.app.base?.origin,
+          artifacts: open.sink,
+          operation: (signal, timeoutMs) => this.op(attemptId, timeoutMs, signal),
+          interrupt: this.interruptSignal,
+        }).catch(() => undefined);
+        if (peerEvidence !== undefined) record.peers = { ...record.peers, [open.name]: { target: open.executor.target.name, ...record.peers?.[open.name], failure: peerEvidence } };
+      }
     };
     const inMemory = this.options.inMemory?.file === pair.test.file ? this.options.inMemory : undefined;
+    /** Each peer's replay cache, by name, settled with the test's own at the end. */
+    const peerCaches = new Map<string, AgentCacheContext>();
     const cache =
       inMemory === undefined
         ? createAgentCacheContext({
@@ -1045,6 +1268,20 @@ export class TargetExecutor implements SerialHost {
           }),
         ),
       );
+      // Each peer opens its own app before the deadline starts, as the test's
+      // own app does, on an engine of its own.
+      await this.launchPeers(pair, session, { id: attemptId, sink: artifacts.sink, recordings, signal: attemptAbort.signal }, openPeers, steps);
+      // Every user's app is settled, each failure recorded: one user's failure never keeps another's from the verdict.
+      const settleUsers = async (onFailure: (cause: unknown) => void | Promise<void>): Promise<void> => {
+        const settles = [() => this.settleAttempt(session, attemptId), ...openPeers.map((open) => () => open.executor.settleAttempt(open.session, attemptId))];
+        for (const settle of settles) {
+          try {
+            await settle();
+          } catch (cause) {
+            await onFailure(cause);
+          }
+        }
+      };
 
       const testDeadline = new Deadline(pair.options.timeout);
       this.options.events?.onAttemptDeadline?.(pair, { index: attemptIndex, id: attemptId, startedAt });
@@ -1056,7 +1293,17 @@ export class TargetExecutor implements SerialHost {
           signal: attemptAbort.signal,
           ask: (step, signal) =>
             holdStep(
-              { target: this.target.name, testId: pair.test.id, agent: pair.agent, repeat: pair.repeat, title, api: step.api, label: step.label, ...(step.source === undefined ? {} : { source: step.source }) },
+              {
+                target: this.target.name,
+                testId: pair.test.id,
+                agent: pair.agent,
+                repeat: pair.repeat,
+                title,
+                api: step.api,
+                label: step.label,
+                ...(step.source === undefined ? {} : { source: step.source }),
+                ...(step.user === undefined ? {} : { user: step.user }),
+              },
               signal,
             ),
           // The runner's watchdog keeps the test deadline too; it gets what is left.
@@ -1083,6 +1330,32 @@ export class TargetExecutor implements SerialHost {
                 carriedSecrets(sessionLedger(session, this.config.allSecrets), this.config.allSecrets),
               );
             };
+      // A peer runs as its own agent, with its own context and executor memory.
+      const peerFixtures = Object.fromEntries(
+        openPeers.map((open) => {
+          const declared = pair.options.peers.find((peer) => peer.name === open.name)!;
+          const peerAgent = declared.agent ?? pair.agent;
+          // The peer's recordings are its own in this pair: keyed by the test's own target and agent too.
+          const owner = { name: open.name, ownerTargetId: this.sessionIdentity.targetId, ownerAgent: pair.agent };
+          const peerCache = open.executor.peerCache(pair.test.id, attemptIndex, owner);
+          if (peerCache !== undefined) peerCaches.set(open.name, peerCache);
+          const fixturesOfPeer = open.executor.peerFixtures({
+            session: open.session,
+            steps: steps.forUser(open.name, { agent: peerAgent, target: open.executor.target.name }),
+            budget,
+            runId: this.options.runId,
+            attemptId,
+            attempt: { ...attempt, memory: new Map<string, unknown>() },
+            artifacts: open.sink,
+            priorSteps: () => steps.completed().filter((step) => step.user === open.name),
+            agentContext: declared.agentContext,
+            agent: peerAgent,
+            test: { file: pair.test.file, titlePath: pair.test.titlePath, user: { name: open.name, ownerTarget: this.target.name } },
+            ...(peerCache === undefined ? {} : { cache: peerCache }),
+          });
+          return [open.name, fixturesOfPeer];
+        }),
+      );
       const { fixtures } = createFixtures({
         config: inMemory?.agents === undefined ? this.config : { ...this.config, agents: inMemory.agents },
         target: this.target,
@@ -1101,6 +1374,7 @@ export class TargetExecutor implements SerialHost {
         debug: this.debug,
         models: this.models,
         test: { file: pair.test.file, titlePath: pair.test.titlePath, writtenScreenshots: this.writtenScreenshots },
+        peers: peerFixtures,
       });
       // `expect.poll` and `expect.soft` take no fixture, so the attempt they
       // run on is published here and cleared when `attemptEnd` fires in `finally`.
@@ -1258,12 +1532,10 @@ export class TargetExecutor implements SerialHost {
       // the last step is collected here, so it is the verdict instead of the
       // next attempt's surprise. Evidence is taken now, before a teardown
       // navigates away from the page the callback saw.
-      try {
-        await this.settleAttempt(session, attemptId);
-      } catch (cause) {
+      await settleUsers(async (cause) => {
         recordFailure(cause, 'body');
         await captureEvidence();
-      }
+      });
 
       enter('afterEach');
       // Each teardown gets its own cleanup budget: a body that timed out or
@@ -1288,7 +1560,7 @@ export class TargetExecutor implements SerialHost {
           recordFailure(cause, 'afterEach');
         }
       }
-      await this.settleAttempt(session, attemptId).catch((cause: unknown) => recordFailure(cause, 'afterEach'));
+      await settleUsers((cause) => recordFailure(cause, 'afterEach'));
     } catch (cause) {
       recordFailure(cause, phase);
     } finally {
@@ -1318,6 +1590,16 @@ export class TargetExecutor implements SerialHost {
         serialize: (error) => serializeError(error, { phase: 'body', projectRoot: this.config.projectRoot, redact }),
         redact,
       });
+      // Peers close first, each with the verdict the test reached.
+      for (const open of openPeers) {
+        await this.closePeer(open, { attemptId, video }, record, secondaryErrors);
+        // Every peer that opened is told under its name, with the target it ran on.
+        const environment = open.session.environment.read(redact);
+        record.peers = {
+          ...record.peers,
+          [open.name]: { target: open.executor.target.name, ...record.peers?.[open.name], ...(environment === undefined ? {} : { environment }) },
+        };
+      }
       // A serial member's recording ends with the member, not the group.
       if (openSession !== null && shared !== undefined) {
         await this.stopRunningRecording(openSession, attemptId, record, artifacts.sink, secondaryErrors);
@@ -1354,7 +1636,23 @@ export class TargetExecutor implements SerialHost {
         record.status === 'interrupted'
           ? undefined
           : {
-              lastVerifiedStepIndex: failure === undefined ? steps.lastVerifiedStepIndex : lastVerifiedAtFailure,
+              lastVerifiedStepIndex: failure === undefined ? steps.lastVerifiedStepIndex : (lastVerifiedAtFailure.get(undefined) ?? -1),
+              implicatesUnconfirmed: failure === undefined || implicatesUnconfirmed,
+            },
+      );
+      for (const step of record.steps) {
+        const write = writes.get(step.index);
+        if (step.cache !== undefined && write !== undefined) step.cache.write = write;
+      }
+    }
+    // Each peer's recordings stand or fall on that peer's own checks.
+    for (const [user, peerCache] of peerCaches) {
+      const writes = await settleStagedTraces(
+        peerCache,
+        record.status === 'interrupted'
+          ? undefined
+          : {
+              lastVerifiedStepIndex: failure === undefined ? steps.lastVerifiedStepIndexOf(user) : (lastVerifiedAtFailure.get(user) ?? -1),
               implicatesUnconfirmed: failure === undefined || implicatesUnconfirmed,
             },
       );

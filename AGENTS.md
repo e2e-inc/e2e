@@ -151,7 +151,8 @@ suites that consume the built packages the way a user would.
   can affect each test, packing test files into calls under the model's
   size limit, 8 calls at a time, and leaves out the unlikely ones. It runs
   every test on an `e2e.config` or lockfile change, and asks nothing about a
-  test whose test file, setup file, or stored screenshots changed. It scores
+  test whose test file, a setup file of its or a peer's session, or stored
+  screenshots changed. It scores
   each test it keeps through `relevance` (1 for a touched test, the model's
   probability for a judged one, 0.5 for one it did not judge), and the
   runner starts each target's likeliest files first. A failed

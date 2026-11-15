@@ -235,6 +235,7 @@ instruction, the strings in `agent.act` params, `agentContext`, and an
 | Minimum length | A static value shorter than 6 characters is `INVALID_CONFIG`. A provider that returns one fails the fill. |
 | Assertions | Unaffected. Redaction rewrites only what the runner reports. |
 | Cache entries | Secret values and their cut parts never enter them. |
+| [Peers](/reference/test#peers) | The users of one test share one set of values: a secret any of them typed or restored is redacted from what every user's agent reads and from every record of the attempt. |
 
 ### Where redaction stops
 
@@ -293,7 +294,8 @@ Every other download is kept as served and labeled
 A saved session holds authentication state. It also carries, in the same
 ciphertext, the secret values the setup test resolved from a provider. The
 test that restores it redacts those values. The envelope holds, unencrypted
-but authenticated, the secret names.
+but authenticated, the secret names. A [peer's](/reference/test#peers) session
+is restored into the peer's app, bound to the peer's own target.
 
 | Property | Value |
 | --- | --- |

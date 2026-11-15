@@ -213,21 +213,26 @@ export function filterCandidates(selection: Selection): readonly TestFilterCandi
   for (const { test } of selection.pairs) {
     if (test.kind === 'setup') for (const session of test.sessions) producers.set(session, test.file);
   }
-  const tests = new Map<string, { readonly test: TestTargetPair['test']; readonly setupFile: string | undefined }>();
+  const tests = new Map<string, { readonly test: TestTargetPair['test']; readonly setupFile: string | undefined; readonly peerSetupFiles: readonly string[] }>();
   for (const { test, options, disposition } of selection.pairs) {
     if (test.kind !== 'test' || disposition !== 'run' || tests.has(test.id)) continue;
-    tests.set(test.id, { test, setupFile: options.session === undefined ? undefined : producers.get(options.session) });
+    const peerSetupFiles = [...new Set(options.peers.flatMap((peer) => {
+      const file = peer.session === undefined ? undefined : producers.get(peer.session);
+      return file === undefined ? [] : [file];
+    }))];
+    tests.set(test.id, { test, setupFile: options.session === undefined ? undefined : producers.get(options.session), peerSetupFiles });
   }
   return Object.freeze(
     [...tests.values()]
       .toSorted((a, b) => compareTests(a.test, b.test))
-      .map(({ test, setupFile }) =>
+      .map(({ test, setupFile, peerSetupFiles }) =>
         Object.freeze({
           id: test.id,
           file: test.file,
           titlePath: Object.freeze([...test.titlePath]),
           tags: Object.freeze([...test.tags]),
           ...(setupFile === undefined ? {} : { setupFile }),
+          ...(peerSetupFiles.length === 0 ? {} : { peerSetupFiles: Object.freeze(peerSetupFiles) }),
         }),
       ),
   );

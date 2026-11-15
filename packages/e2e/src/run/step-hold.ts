@@ -23,6 +23,8 @@ export interface HeldStep {
   /** Already redacted. */
   readonly label: string;
   readonly source?: SourceLocation;
+  /** The peer whose app the step runs on; absent for the test's own user. */
+  readonly user?: string;
 }
 
 /** A held step with its place among its test's held steps, from 1. */

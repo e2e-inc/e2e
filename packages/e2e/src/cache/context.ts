@@ -22,6 +22,7 @@ import {
   traceCacheKeyHash,
   traceCallSignature,
   type CacheAgentIdentity,
+  type CachePeerIdentity,
   type CacheTargetIdentity,
   type TraceCacheKind,
   type TraceCallSignature,
@@ -239,6 +240,8 @@ export function createAgentCacheContext(options: {
   readonly attemptIndex: number;
   /** The file store's listing under `cache.strict`, shared by the attempts of one worker and target (`storedRecordingsFor`). */
   readonly recordings?: StoredRecordings | undefined;
+  /** The peer whose steps this context keys, with the target and agent of the test that brought it; absent for the test's own user, whose keys stay as they were. */
+  readonly user?: CachePeerIdentity | undefined;
 }): AgentCacheContext | undefined {
   if (options.cache.mode === 'off') return undefined;
   const strict = options.cache.strict !== false;
@@ -283,6 +286,7 @@ export function createAgentCacheContext(options: {
         callIndex,
         agent,
         policyVersion: REPLAY_POLICY_VERSION,
+        user: options.user,
       });
       return {
         keyHash: traceCacheKeyHash(key),
@@ -294,6 +298,7 @@ export function createAgentCacheContext(options: {
           paramsDigest: signature.paramsDigest,
           callIndex,
           agent: agent.name,
+          ...(options.user === undefined ? {} : { user: options.user.name, ownerTargetId: options.user.ownerTargetId, ownerAgent: options.user.ownerAgent }),
         },
       };
     },

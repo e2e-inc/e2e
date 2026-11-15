@@ -41,6 +41,16 @@ const REASONING_SEPARATOR_WIDTH = 3;
 /** A narrower clip than this hides more than it says; the excerpt is dropped instead. */
 const MIN_REASONING_COLUMNS = 24;
 
+/** `guest · `: the peer a step ran as, before its api; nothing for the test's own user. */
+export function userPrefix(user: string | undefined): string {
+  return user === undefined ? '' : `${bounded(user)} · `;
+}
+
+/** `userPrefix` in cyan; nothing at all for the test's own user, so its lines carry no empty color codes. */
+function cyanUser(pc: Colors, user: string | undefined): string {
+  return user === undefined ? '' : pc.cyan(userPrefix(user));
+}
+
 /** One-line, quoted step label; `maxColumns` clips it further to fit a row. */
 export function quotedLabel(label: string, maxColumns = MAX_STEP_LABEL_COLUMNS): string {
   const max = Math.min(MAX_STEP_LABEL_COLUMNS, Math.max(MIN_STEP_LABEL_COLUMNS, maxColumns));
@@ -63,7 +73,7 @@ export function stepLine(pc: Colors, step: FinishedStep, options: StepLineOption
   const calls =
     step.modelCalls > 0 ? ` · ${step.modelCalls} model call${step.modelCalls === 1 ? '' : 's'}` : '';
   const outcome = step.status === 'passed' ? '' : ` ${step.status}`;
-  const head = `${glyph} ${options.context ?? ''}${pc.dim(step.api)} `;
+  const head = `${glyph} ${options.context ?? ''}${cyanUser(pc, step.user)}${pc.dim(step.api)} `;
   const tail = pc.dim(`${formatTime(step.durationMs)}${calls}${outcome}`);
   const room =
     options.maxWidth === undefined
@@ -98,7 +108,7 @@ function promptSource(step: HeldStep): string {
  */
 export function stepPromptRows(pc: Colors, prompt: StepPrompt, options: { readonly maxWidth: number }): string[] {
   const rows = prompt.steps.map(({ step, number }) => {
-    const head = `${pc.bold(pc.cyan(`▶ step ${number}`))}  ${pc.dim(step.api)} `;
+    const head = `${pc.bold(pc.cyan(`▶ step ${number}`))}  ${cyanUser(pc, step.user)}${pc.dim(step.api)} `;
     const source = promptSource(step);
     const tail = source === '' ? '' : `  ${pc.dim(source)}`;
     const room = options.maxWidth - visibleWidth(head) - visibleWidth(tail) - LABEL_CHROME;
@@ -118,7 +128,7 @@ export function stepPromptLine(prompt: StepPrompt): string {
   const numbers = prompt.steps.map(({ number }) => number).join(', ');
   const steps = prompt.steps.map(({ step }) => {
     const source = promptSource(step);
-    return `${step.api} ${quotedLabel(step.label)}${source === '' ? '' : ` (${source})`}`;
+    return `${userPrefix(step.user)}${step.api} ${quotedLabel(step.label)}${source === '' ? '' : ` (${source})`}`;
   });
   const keys = [`enter to ${enterDoes(prompt)}`, ...STEP_KEYS.map(([key, does]) => `${key} to ${does}`)].join(', ');
   const at = prompt.steps.length === 1 ? 'step' : 'steps';

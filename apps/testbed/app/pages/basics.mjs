@@ -2,8 +2,9 @@
  * The everyday pages: the landing page, a plans page of copy with inline
  * links and emphasis (unlisted in the nav), a todo list kept in localStorage, a
  * profile form, the cookie-session login and the dashboard behind it, a
- * three-step wizard, and a checkout with one planted bug. What queries,
- * fills, sessions, polling assertions, and judgments are dogfooded against.
+ * three-step wizard, a checkout with one planted bug, and a message board
+ * every visitor shares (two users in one test). What queries, fills,
+ * sessions, polling assertions, and judgments are dogfooded against.
  */
 
 const nav = [
@@ -14,7 +15,12 @@ const nav = [
   { path: '/dashboard', label: 'Dashboard' },
   { path: '/wizard', label: 'Wizard' },
   { path: '/checkout', label: 'Checkout' },
+  { path: '/messages', label: 'Messages' },
 ];
+
+function escapeHtml(text) {
+  return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+}
 
 const pages = {
   '/': () => ({
@@ -192,6 +198,21 @@ const pages = {
     body: `<h1>Dashboard</h1>
        <p role="status" aria-label="Greeting">Welcome back, ${request.user}!</p>
        <a href="/logout">Sign out</a>`,
+  }),
+
+  // The board as `request.user` sees it: who they are, every message the
+  // server keeps (`request.messages`), and a form to post one.
+  '/messages': (request) => ({
+    title: 'Messages',
+    body: `<h1>Messages</h1>
+       <p>Signed in as <output aria-label="Signed in as">${request.user}</output></p>
+       <ul aria-label="Messages">
+         ${(request.messages ?? []).map((message) => `<li>${escapeHtml(message.author)}: ${escapeHtml(message.text)}</li>`).join('\n         ')}
+       </ul>
+       <form method="post" action="/messages">
+         <label>Message <input name="text" /></label>
+         <button type="submit">Post</button>
+       </form>`,
   }),
 
   // Planted bug: the pay button keeps the total from page load, so after a

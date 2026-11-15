@@ -153,7 +153,7 @@ interface Answers {
 async function judge(given: readonly TestFilterCandidate[], context: TestFilterContext, options: DecisionFilterOptions): Promise<TestFilterResult> {
   const { changes, signal, log, redact } = context;
   const touched = touchedBy(context);
-  const tests = given.filter((test) => !touched(test.file) && !touched(test.setupFile));
+  const tests = given.filter((test) => !touched(test.file) && !setupFilesOf(test).some((file) => touched(file)));
   const relevance = unaskedRelevance(given, touched);
   const everything = runAllFile(context);
   if (everything !== undefined) return result({}, relevance, `${everything} changed, so the decision filter left nothing out`);
@@ -173,9 +173,13 @@ async function judge(given: readonly TestFilterCandidate[], context: TestFilterC
   const unjudged = verdict.missed.length === 0 ? undefined : `${modelId} did not judge ${testsIn(verdict.missed)}: ${unjudgedBecause(failures, tooLarge)}`;
   return answered(verdict.exclude, { ...relevance, ...verdict.relevance }, [unasked, unjudged], spend);
 }
-/** How likely each of `given` is to fail before the model says anything: `TOUCHED_RELEVANCE` for a test the change touches, `UNJUDGED_RELEVANCE` for the rest. */
+/** The setup files that save a test's session and its peers' sessions. */
+function setupFilesOf(test: TestFilterCandidate): readonly string[] {
+  return [...(test.setupFile === undefined ? [] : [test.setupFile]), ...(test.peerSetupFiles ?? [])];
+}
+/** How likely each of `given` is to fail before the model says anything: `TOUCHED_RELEVANCE` for a test the change touches, itself or a setup of its session or its peers', `UNJUDGED_RELEVANCE` for the rest. */
 function unaskedRelevance(given: readonly TestFilterCandidate[], touched: (file: string | undefined) => boolean): Record<string, number> {
-  return Object.fromEntries(given.map((test) => [test.id, touched(test.file) || touched(test.setupFile) ? TOUCHED_RELEVANCE : UNJUDGED_RELEVANCE]));
+  return Object.fromEntries(given.map((test) => [test.id, touched(test.file) || setupFilesOf(test).some((file) => touched(file)) ? TOUCHED_RELEVANCE : UNJUDGED_RELEVANCE]));
 }
 /**
  * `error` with `relevance` on it, which the run reads off a filter that
@@ -189,9 +193,9 @@ function withRelevance(error: unknown, relevance: Record<string, number>): unkno
 }
 /**
  * The tests to leave out, each with its reason; how likely each test is to
- * fail, the higher of the model's two answers, with a missing one counting as
- * `UNJUDGED_RELEVANCE`; and the tests the model did not answer for, itself
- * or its setup.
+ * fail, the highest of the model's answers for it and its setups, with a
+ * missing one counting as `UNJUDGED_RELEVANCE`; and the tests the model did
+ * not answer for, itself or one of its setups.
  */
 function verdicts(
   tests: readonly TestFilterCandidate[],
@@ -202,10 +206,12 @@ function verdicts(
   const missed: TestFilterCandidate[] = [];
   for (const test of tests) {
     const own = answers.tests.get(test.id);
-    const setup = test.setupFile === undefined ? 0 : answers.setups.get(test.setupFile);
+    const setupAnswers = setupFilesOf(test).map((file) => answers.setups.get(file));
+    const setupsAnswered = setupAnswers.filter((answer) => answer !== undefined);
+    const setup = setupsAnswered.length === setupAnswers.length ? Math.max(0, ...setupsAnswered) : undefined;
     if (own === undefined || setup === undefined) missed.push(test);
     else if (Math.max(own, setup) < MIN_PROBABILITY) exclude[test.id] = `${Math.round(Math.max(own, setup) * 100)}% likely affected`;
-    relevance[test.id] = Math.max(own ?? UNJUDGED_RELEVANCE, setup ?? UNJUDGED_RELEVANCE);
+    relevance[test.id] = Math.max(own ?? UNJUDGED_RELEVANCE, ...setupAnswers.map((answer) => answer ?? UNJUDGED_RELEVANCE));
   }
   return { exclude, relevance, missed };
 }
@@ -263,7 +269,7 @@ function touchedBy(context: TestFilterContext): (file: string | undefined) => bo
  */
 async function subjects(tests: readonly TestFilterCandidate[], context: TestFilterContext): Promise<Subject[]> {
   const { projectRoot, signal, redact } = context;
-  const setups = [...new Set(tests.flatMap((test) => (test.setupFile === undefined ? [] : [test.setupFile])))];
+  const setups = [...new Set(tests.flatMap(setupFilesOf))];
   const files = [...new Set([...tests.map((test) => test.file), ...setups])];
   const read = await Promise.all(files.map((file) => readFile(path.join(projectRoot, file), { encoding: 'utf8', signal })));
   const found = new Map<string, Subject>();

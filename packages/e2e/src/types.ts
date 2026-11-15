@@ -715,6 +715,22 @@ export interface TestFixtures {
   readonly screen: Screen;
   /** The target's platform label: `web`, `ios`, `android`, or an engine's own string. */
   readonly platform: string;
+  /** The test's peers by name (the `peers` option), each over an app of its own; empty when it declares none. */
+  readonly peers: Readonly<Record<string, PeerFixtures>>;
+}
+
+/** `Fixtures` with `peers` narrowed to the names a test declares; unchanged when it declares none. */
+type WithPeers<Fixtures, Peers> = [Peers] extends [never]
+  ? Fixtures
+  : Omit<Fixtures, 'peers'> & { readonly peers: { readonly [Name in keyof Peers]: PeerFixtures } };
+
+/**
+ * One peer's fixtures: what the test's own user has, over the peer's app, and
+ * the fixtures the peer target's engine contributes (`browser` on a web
+ * target, `device` on a phone).
+ */
+export interface PeerFixtures extends Omit<TestFixtures, 'peers'> {
+  readonly [fixture: string]: unknown;
 }
 
 export interface SetupFixtures extends TestFixtures {
@@ -725,6 +741,27 @@ export interface SetupFixtures extends TestFixtures {
 export interface SuiteFixtures {
   /** The target's platform label: `web`, `ios`, `android`, or an engine's own string. */
   readonly platform: string;
+}
+
+/**
+ * One more user in a test: an app of its own, opened next to the test's,
+ * on the test's target or another one. The test reaches it as
+ * `peers.<name>`.
+ */
+export interface PeerOptions {
+  /** The target the peer's app runs on; defaults to the test's own target. */
+  target?: string;
+  /**
+   * A session a setup test saved on the peer's target, restored into the
+   * peer's app before the body runs. The peer's target must save and
+   * restore state, as for `session`; a device target cannot, so a device
+   * peer signs in during the test.
+   */
+  session?: string;
+  /** The configured agent (`agents.<name>`) the peer's `agent` runs with; defaults to the agent the test runs as. */
+  agent?: string;
+  /** Extra context for the peer's agent steps. The test's own `agentContext` stays with the test's user. */
+  agentContext?: string;
 }
 
 export interface TestOptions {
@@ -750,6 +787,13 @@ export interface TestOptions {
   requires?: readonly Capability[];
   /** Session a setup test saved, restored before the body runs. */
   session?: string;
+  /**
+   * More users in the test, by name: each opens its own app before
+   * `beforeEach` runs, on the test's target or another one. Innermost wins,
+   * as a whole. Names are 1 through 128 ASCII letters, numbers, `_`, `-`,
+   * or `.`. Not allowed inside a serial group.
+   */
+  peers?: Readonly<Record<string, PeerOptions>>;
   /** Extra context for agent steps; layers are concatenated outermost first. */
   agentContext?: string;
   /**
@@ -781,7 +825,7 @@ export interface DescribeOptions extends Omit<TestOptions, 'only' | 'fail'> {
   serial?: boolean;
 }
 
-export interface SetupOptions extends Omit<TestOptions, 'session' | 'only' | 'skip' | 'fail' | 'agent'> {
+export interface SetupOptions extends Omit<TestOptions, 'session' | 'peers' | 'only' | 'skip' | 'fail' | 'agent'> {
   /** Session names this setup test MUST save. */
   sessions: readonly string[];
   /** A setup test runs once per target, so it pins at most one agent. */
@@ -815,8 +859,11 @@ export type FixtureFn<Fixtures, Value> = (
  * type error (and a `COLLECTION_ERROR` at runtime).
  */
 export type FixtureDefinitions<Base, Extra> = {
-  readonly [K in keyof Extra]: K extends keyof Base ? never : FixtureFn<Base, Extra[K]>;
+  // `peers` stays open to a suite's own fixture, as it was before e2e had peers.
+  readonly [K in keyof Extra]: K extends Exclude<keyof Base, 'peers'> ? never : FixtureFn<Base, Extra[K]>;
 };
+/** `Fixtures` and `Extra` together; a suite's own `peers` replaces the core one for its tests, which then declare no peers. */
+type Extended<Fixtures, Extra> = ('peers' extends keyof Extra ? Omit<Fixtures, 'peers'> : Fixtures) & Extra;
 /** A `describe` body. An async body is a type error. */
 export type SynchronousBody<Result> = Extract<Result, PromiseLike<unknown>> extends never
   ? () => Result
@@ -830,8 +877,17 @@ export interface TestCase {
 export interface TestAPI<Fixtures = TestFixtures> {
   /** Registers one test synchronously during module evaluation. */
   (title: string, fn: TestFn<Fixtures>): TestCase;
-  /** Registers one configured test synchronously during module evaluation. */
-  (title: string, options: TestOptions, fn: TestFn<Fixtures>): TestCase;
+  /**
+   * Registers one configured test synchronously during module evaluation.
+   * The names the test's own `peers` option declares type its `peers`
+   * fixture, so a peer it never declared is a type error; peers set on a
+   * `describe` are typed by any name.
+   */
+  <Peers extends Readonly<Record<string, PeerOptions>> = never>(
+    title: string,
+    options: TestOptions & { peers?: Peers },
+    fn: TestFn<WithPeers<Fixtures, Peers>>,
+  ): TestCase;
   /** Registers one skipped test. */
   skip(title: string, fn: TestFn<Fixtures>): TestCase;
   /**
@@ -870,7 +926,7 @@ export interface TestAPI<Fixtures = TestFixtures> {
    *
    *   export const test = base.extend<{ device: Device }>();
    */
-  extend<Extra>(): TestAPI<Fixtures & Extra>;
+  extend<Extra>(): TestAPI<Extended<Fixtures, Extra>>;
   /**
    * Returns a new `test` whose registrations carry these fixture
    * definitions on top of the ones it already had. Each attempt sets them up
@@ -885,7 +941,7 @@ export interface TestAPI<Fixtures = TestFixtures> {
    *     },
    *   });
    */
-  extend<Extra>(fixtures: FixtureDefinitions<Fixtures, Extra>): TestAPI<Fixtures & Extra>;
+  extend<Extra>(fixtures: FixtureDefinitions<Fixtures, Extra>): TestAPI<Extended<Fixtures, Extra>>;
   /** Declares a group synchronously. */
   describe<Result>(title: string, body: SynchronousBody<Result>): void;
   /** Declares a configured group synchronously. */
@@ -1654,6 +1710,8 @@ export interface TestFilterCandidate {
   readonly tags: readonly string[];
   /** Project-relative POSIX path of the setup test file that saves the test's session; absent when the test uses none. */
   readonly setupFile?: string;
+  /** Project-relative POSIX paths of the setup test files that save its peers' sessions, each once, in peer order; absent when no peer restores one. */
+  readonly peerSetupFiles?: readonly string[];
 }
 
 /** What a run's test filters judge: every file that differs from the base commit. */

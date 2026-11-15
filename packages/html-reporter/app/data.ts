@@ -29,6 +29,20 @@ export interface AttemptView {
   readonly failure: Attempt['failure'];
   readonly artifacts: readonly Artifact[];
   readonly environment: Attempt['environment'];
+  /** What each peer's app ran on and showed at the failure, by peer name: the peers whose app opened, so absent when none did. */
+  readonly peers?: Attempt['peers'];
+}
+
+/** One user's evidence at the failure: the test's own (`user` undefined), or a peer's. */
+export interface UserFailure {
+  readonly user: string | undefined;
+  readonly failure: NonNullable<Attempt['failure']>;
+}
+
+/** What each user's screen showed at the failure: the test's own first, then each peer's under its name; a user with none is left out. */
+export function failuresByUser(attempt: Pick<AttemptView, 'failure' | 'peers'>): UserFailure[] {
+  const users = [{ user: undefined, failure: attempt.failure }, ...Object.entries(attempt.peers ?? {}).map(([user, peer]) => ({ user, failure: peer.failure }))];
+  return users.flatMap(({ user, failure }) => (failure === undefined ? [] : [{ user, failure }]));
 }
 
 /** The page's whole model, built once from the payload. */
@@ -86,6 +100,7 @@ function attemptViews(result: Result, groups: ReadonlyMap<string, SerialGroup>):
       failure: attempt.failure,
       artifacts: attempt.artifacts,
       environment: attempt.environment,
+      ...(attempt.peers === undefined ? {} : { peers: attempt.peers }),
     }));
   }
   return (groups.get(result.serialGroupId)?.attempts ?? []).map((attempt) => {
@@ -197,14 +212,29 @@ export interface TimedVideo {
   readonly endsAt: number;
 }
 
-/** The attempt's playable videos in recording order, each ending where the next begins. */
-export function timedVideos(artifacts: readonly Artifact[], media: ReportMedia): TimedVideo[] {
+/**
+ * One user's playable videos of the attempt, the test's own user's when
+ * `user` is absent, in recording order, each ending where the next begins.
+ * Each user's app records its own, so each user's videos are a timeline of their own.
+ */
+export function timedVideos(artifacts: readonly Artifact[], media: ReportMedia, user?: string): TimedVideo[] {
   const videos = artifacts.flatMap((artifact) => {
-    const url = artifact.kind === 'video' ? artifactUrl(artifact, media) : undefined;
+    const url = artifact.kind === 'video' && artifact.user === user ? artifactUrl(artifact, media) : undefined;
     return url === undefined || artifact.startedAt === undefined ? [] : [{ artifact, url, startsAt: Date.parse(artifact.startedAt) }];
   });
   const sorted = videos.toSorted((a, b) => a.startsAt - b.startsAt);
   return sorted.map((video, index) => ({ ...video, endsAt: sorted[index + 1]?.startsAt ?? Infinity }));
+}
+
+/** The users whose app left a playable video: the test's own user first, then each peer in the order its first video was registered. */
+export function videoUsers(artifacts: readonly Artifact[], media: ReportMedia): (string | undefined)[] {
+  const users = new Set<string | undefined>();
+  for (const artifact of artifacts) {
+    if (artifact.kind === 'video' && artifact.startedAt !== undefined && artifactUrl(artifact, media) !== undefined) users.add(artifact.user);
+  }
+  // Sorting would put `undefined` last whatever the comparator says, so the test's own user is placed first by hand.
+  const peers = [...users].filter((user) => user !== undefined);
+  return users.has(undefined) ? [undefined, ...peers] : peers;
 }
 
 /**

@@ -294,7 +294,8 @@ jobs:
   passes on `pull_request` alone; never pass it on `pull_request_target`.
   Every test runs without it and on a `--last-failed` rerun. The decision
   filter also runs every test on a lockfile or `e2e.config` change, and the
-  tests whose test file, setup file, or stored screenshots changed. It scores
+  tests whose test file, a setup file of its or a peer's session, or stored
+  screenshots changed. It scores
   each test, and each target starts the likeliest files first. With one worker
   (the CI default) only the relevance bands order files and collection order
   breaks ties, since the timings history matters only above one worker. On GitLab, pass `--changed-since ${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}`

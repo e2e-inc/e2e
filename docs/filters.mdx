@@ -70,7 +70,7 @@ with `INVALID_CHANGED_SINCE`.
 The change is every file that differs from the merge base of the ref and
 `HEAD`, uncommitted and untracked files included. The model reads the diff
 of what the commits change, the test files, and the setup files that save
-their sessions, with secrets redacted, except a value a secret provider
+their sessions and their peers' sessions, with secrets redacted, except a value a secret provider
 returns. It gets a file only the working tree changes, uncommitted or
 untracked, by name alone, never its contents, so a file a CI step writes
 doesn't reach it.
@@ -122,7 +122,8 @@ filter reads only what the commits change.
 The decision filter also runs:
 
 - The tests in a test file that changed or whose stored screenshots
-  changed, and the tests that use the sessions of such a setup file.
+  changed, and the tests that use the sessions of such a setup file, their
+  own or a [peer's](/reference/test#peers).
 - Every test, when the config the run loaded changes, whatever its name,
   or when a file named `e2e.config.ts` (`.mts`, `.js`, `.mjs`),
   Gradle's `libs.versions.toml`, or a lockfile changes in the project's
@@ -152,8 +153,8 @@ the most with `--max-failures` and with one worker, the default in CI.
 
 | Test | Score |
 | --- | --- |
-| Its test file, setup file, or stored screenshots changed | 100% |
-| Every other test | The higher of its rating and its setup's, where a rating the model didn't give counts as 50% |
+| Its test file, a setup file of its own or a peer's session, or its stored screenshots changed | 100% |
+| Every other test | The highest of its rating and its setups' ratings, where a rating the model didn't give counts as 50% |
 
 - Files start in four bands: 75% and up, 50% up to 75%, 25% up to 50%, and
   under 25%. A file takes the band of its likeliest test.

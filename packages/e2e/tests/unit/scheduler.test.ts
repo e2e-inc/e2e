@@ -29,6 +29,7 @@ const defaultOptions: ResolvedTestOptions = {
   platforms: undefined,
   requires: [],
   session: undefined,
+  peers: [],
   agents: ['default'],
   agentContext: undefined,
   skipReason: undefined,
@@ -482,6 +483,90 @@ async function run(
   });
   return collected;
 }
+
+describe('an app exit on a target that only hosts peers', () => {
+  afterEach(() => vi.useRealTimers());
+
+  const failure: TargetFailure = {
+    targetNames: ['host'],
+    error: { category: 'infrastructure', code: 'APP_UNREACHABLE', message: 'target "host" command exited with code 1 after becoming ready', retryable: false },
+  };
+  const web = makeTarget('web', 0);
+  const host = makeTarget('host', 1);
+  const withPeer = (title: string) =>
+    makePair(makeTest(`tests/${title}.e2e.ts`, title), web, { options: { ...defaultOptions, peers: [{ name: 'ava', target: 'host', session: undefined, agent: undefined, agentContext: undefined }] } });
+  // The host runs no test of its own: a skipped pair gives it a plan, as a selected target has.
+  const hostSkipped = makePair(makeTest('tests/host.e2e.ts', 'host'), host, { disposition: 'skip', skip: { cause: 'platform-unavailable', reason: 'test declares platforms [web]' } });
+
+  it('reports the exit and skips a queued test that puts a peer there', async () => {
+    const pays = withPeer('pays');
+    const fleet = new FakeFleet();
+    const collected = await run(makeSelection([{ target: web, pairs: [pays] }, { target: host, pairs: [hostSkipped] }]), makeCollection([pays.test.file, hostSkipped.test.file], [pays, hostSkipped]), fleet, {
+      subscribeTargetFailures(receive) {
+        receive(failure);
+        return () => undefined;
+      },
+    });
+    expect(collected.runErrors).toEqual([{ error: failure.error }]);
+    expect(collected.results.find((result) => result.test.id === pays.test.id)).toMatchObject({ status: 'skipped', skip: { cause: 'infrastructure-unavailable', reason: failure.error.message } });
+    expect(fleet.unitsByWorker.flat()).toEqual([]);
+  });
+
+  it('reports the exit while a test that puts a peer there is running', async () => {
+    const pays = withPeer('pays');
+    const fleet = new FakeFleet({ overrun: { [pays.test.id]: 'slow-teardown' } });
+    vi.useFakeTimers();
+    const running = run(makeSelection([{ target: web, pairs: [pays] }, { target: host, pairs: [hostSkipped] }]), makeCollection([pays.test.file, hostSkipped.test.file], [pays, hostSkipped]), fleet, {
+      workers: 1,
+      subscribeTargetFailures(receive) {
+        setTimeout(() => receive(failure), 10);
+        return () => undefined;
+      },
+    });
+    await vi.runAllTimersAsync();
+    const collected = await running;
+    expect(collected.runErrors).toEqual([{ error: failure.error }]);
+    expect(fleet.unitsByWorker.flat().map((unit) => unit.unitId)).toEqual(['file::web::tests/pays.e2e.ts']);
+  });
+
+  it('ignores the exit once every test that put a peer there has reported', async () => {
+    const pays = withPeer('pays');
+    const after = makePair(makeTest('tests/pays.e2e.ts', 'after', { declarationIndex: 1 }), web);
+    const fleet = new FakeFleet({ overrun: { [after.test.id]: 'slow-teardown' } });
+    vi.useFakeTimers();
+    const running = run(makeSelection([{ target: web, pairs: [pays, after] }, { target: host, pairs: [hostSkipped] }]), makeCollection([pays.test.file, hostSkipped.test.file], [pays, after, hostSkipped]), fleet, {
+      workers: 1,
+      subscribeTargetFailures(receive) {
+        setTimeout(() => receive(failure), 10);
+        return () => undefined;
+      },
+    });
+    await vi.runAllTimersAsync();
+    const collected = await running;
+    expect(collected.results.find((result) => result.test.id === pays.test.id)?.status).toBe('passed');
+    expect(collected.runErrors).toEqual([]);
+  });
+
+  it('reports the exit while a starting worker holds a test that puts a peer there', async () => {
+    const pays = withPeer('pays');
+    const fleet = new FakeFleet({ neverReady: ['web'] });
+    const interrupt = new AbortController();
+    // The worker never becomes ready, so the run ends only when it is interrupted, after the exit.
+    const timer = setTimeout(() => interrupt.abort(), 40);
+    const collected = await run(makeSelection([{ target: web, pairs: [pays] }, { target: host, pairs: [hostSkipped] }]), makeCollection([pays.test.file, hostSkipped.test.file], [pays, hostSkipped]), fleet, {
+      workers: 1,
+      interruptSignal: interrupt.signal,
+      subscribeTargetFailures(receive) {
+        setTimeout(() => receive(failure), 10);
+        return () => undefined;
+      },
+    });
+    clearTimeout(timer);
+    expect(fleet.spawned.map((worker) => worker.targetName)).toEqual(['web']);
+    expect(fleet.unitsByWorker.flat()).toEqual([]);
+    expect(collected.runErrors).toEqual([{ error: failure.error }]);
+  });
+});
 
 describe('app command failures', () => {
   afterEach(() => vi.useRealTimers());
@@ -1823,5 +1908,98 @@ describe('scheduler fault handling', () => {
     expect(collected.results).toHaveLength(2);
     expect(collected.results.find((result) => result.test.id === 'skip-me')!.selected).toBe(true);
     expect(collected.results.find((result) => result.test.id === 'filter-me')!.selected).toBe(false);
+  });
+});
+
+describe('peers and setup gating', () => {
+  const peerOf = (session: string, target: string | undefined) => ({ name: 'ava', target, session, agent: undefined, agentContext: undefined });
+  const setupFor = (target: ResolvedTarget, session: string) =>
+    makePair(makeTest(`tests/${session}.setup.e2e.ts`, `save ${session}`, { kind: 'setup', sessions: [session], id: `setup::${session}` }), target);
+
+  it('starts a test only after the setup that saves its peer session on the peer target has finished, and no other', async () => {
+    const web = makeTarget('web', 0);
+    const admin = makeTarget('admin', 1);
+    const pays = makePair(makeTest('tests/pays.e2e.ts', 'pays'), web, { options: { ...defaultOptions, peers: [peerOf('ava', 'admin')] } });
+    const setup = setupFor(admin, 'ava');
+    const fleet = new FakeFleet();
+    const collected = await run(
+      makeSelection([{ target: web, pairs: [pays] }, { target: admin, pairs: [setup] }]),
+      makeCollection([pays.test.file, setup.test.file], [pays, setup]),
+      fleet,
+      { workers: 2 },
+    );
+    // The web worker is ready first and its own target has no setup, yet it waits for the admin one.
+    expect(collected.results.map((result) => result.test.id)).toEqual(['setup::ava', pays.test.id]);
+    expect(collected.results[1]!.status).toBe('passed');
+
+    // A peer that restores no session holds nothing back.
+    const chats = makePair(makeTest('tests/chats.e2e.ts', 'chats'), web, {
+      options: { ...defaultOptions, peers: [{ name: 'ava', target: 'admin', session: undefined, agent: undefined, agentContext: undefined }] },
+    });
+    const other = setupFor(admin, 'other');
+    const unheld = await run(
+      makeSelection([{ target: web, pairs: [chats] }, { target: admin, pairs: [other] }]),
+      makeCollection([chats.test.file, other.test.file], [chats, other]),
+      new FakeFleet(),
+      { workers: 2 },
+    );
+    expect(unheld.results.map((result) => result.test.id)).toEqual([chats.test.id, 'setup::other']);
+  });
+
+  it('skips a test whose peer session setup failed, on the peer target or its own', async () => {
+    const web = makeTarget('web', 0);
+    const admin = makeTarget('admin', 1);
+    const across = makePair(makeTest('tests/across.e2e.ts', 'across'), web, { options: { ...defaultOptions, peers: [peerOf('ava', 'admin')] } });
+    const local = makePair(makeTest('tests/local.e2e.ts', 'local'), web, { options: { ...defaultOptions, peers: [peerOf('bob', undefined)] } });
+    const avaSetup = setupFor(admin, 'ava');
+    const bobSetup = setupFor(web, 'bob');
+    const fleet = new FakeFleet({ status: { 'setup::ava': 'failed', 'setup::bob': 'failed' } });
+    const collected = await run(
+      makeSelection([{ target: web, pairs: [bobSetup, across, local] }, { target: admin, pairs: [avaSetup] }]),
+      makeCollection([across.test.file, local.test.file, avaSetup.test.file, bobSetup.test.file], [bobSetup, across, local, avaSetup]),
+      fleet,
+      { workers: 2 },
+    );
+    const byId = new Map(collected.results.map((result) => [result.test.id, result]));
+    expect(byId.get(across.test.id)).toMatchObject({ status: 'skipped', skip: { cause: 'setup-failed', relatedId: 'setup::ava' } });
+    expect(byId.get(local.test.id)).toMatchObject({ status: 'skipped', skip: { cause: 'setup-failed', relatedId: 'setup::bob' } });
+  });
+
+  it('skips a test whose peer target could not start a worker, instead of running it without the session', async () => {
+    const web = makeTarget('web', 0);
+    const admin = makeTarget('admin', 1);
+    const pays = makePair(makeTest('tests/pays.e2e.ts', 'pays'), web, { options: { ...defaultOptions, peers: [peerOf('ava', 'admin')] } });
+    const setup = setupFor(admin, 'ava');
+    const fleet = new FakeFleet({ failInit: ['admin'] });
+    const collected = await run(
+      makeSelection([{ target: web, pairs: [pays] }, { target: admin, pairs: [setup] }]),
+      makeCollection([pays.test.file, setup.test.file], [pays, setup]),
+      fleet,
+      { workers: 2 },
+    );
+    // The setup never ran: the target's own reason says why, not a setup failure.
+    expect(collected.results.find((result) => result.test.id === pays.test.id)).toMatchObject({
+      status: 'skipped',
+      skip: { cause: 'infrastructure-unavailable', reason: 'worker process failed to start' },
+    });
+  });
+
+  it('skips a test whose peer restores no session, when the peer target could not start a worker', async () => {
+    const web = makeTarget('web', 0);
+    const admin = makeTarget('admin', 1);
+    const pays = makePair(makeTest('tests/pays.e2e.ts', 'pays'), web, { options: { ...defaultOptions, peers: [{ name: 'ava', target: 'admin', session: undefined, agent: undefined, agentContext: undefined }] } });
+    const own = makePair(makeTest('tests/admin.e2e.ts', 'admin'), admin);
+    const fleet = new FakeFleet({ failInit: ['admin'] });
+    const collected = await run(
+      // The admin target comes first, so its workers fail before the web test is taken.
+      makeSelection([{ target: admin, pairs: [own] }, { target: web, pairs: [pays] }]),
+      makeCollection([own.test.file, pays.test.file], [own, pays]),
+      fleet,
+      { workers: 1 },
+    );
+    expect(collected.results.find((result) => result.test.id === pays.test.id)).toMatchObject({
+      status: 'skipped',
+      skip: { cause: 'infrastructure-unavailable', reason: 'worker process failed to start' },
+    });
   });
 });

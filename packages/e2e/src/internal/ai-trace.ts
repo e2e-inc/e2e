@@ -72,6 +72,19 @@ export interface AiTraceScope {
   readonly attempt: number;
   readonly api?: string;
   readonly label?: string;
+  /** The peer whose step made the call; absent for the test's own user. */
+  readonly user?: string;
+  /** The configured agent that peer runs as, beside `agent`, which stays the attempt's; set with `user`. */
+  readonly userAgent?: string;
+  /** The target that peer's app runs on, beside `target`, which stays the attempt's; set with `user`. */
+  readonly userTarget?: string;
+}
+
+/** The peer a step runs on, as its model calls are attributed: its name, the agent it runs as, and its app's target. */
+export interface AiTraceUser {
+  readonly name: string;
+  readonly agent: string;
+  readonly target: string;
 }
 
 const scopeStorage = new AsyncLocalStorage<AiTraceScope>();
@@ -85,10 +98,10 @@ export function withAiTraceScope<T>(scope: AiTraceScope, work: () => Promise<T>)
  * Narrows the current attempt scope to one public API step. Outside an
  * attempt scope there is nothing to narrow, and the work runs as is.
  */
-export function withAiTraceStep<T>(api: string, label: string, work: () => Promise<T>): Promise<T> {
+export function withAiTraceStep<T>(api: string, label: string, work: () => Promise<T>, user?: AiTraceUser): Promise<T> {
   const parent = scopeStorage.getStore();
   if (parent === undefined) return work();
-  return scopeStorage.run({ ...parent, api, label }, work);
+  return scopeStorage.run({ ...parent, api, label, ...(user === undefined ? {} : { user: user.name, userAgent: user.agent, userTarget: user.target }) }, work);
 }
 
 /** The scope of the calling async context, when inside an attempt. */
@@ -514,6 +527,9 @@ function redactScope(scope: AiTraceScope | undefined, redact: (text: string) => 
     agent: redact(scope.agent),
     ...(scope.api === undefined ? {} : { api: redact(scope.api) }),
     ...(scope.label === undefined ? {} : { label: redact(scope.label) }),
+    ...(scope.user === undefined ? {} : { user: redact(scope.user) }),
+    ...(scope.userAgent === undefined ? {} : { userAgent: redact(scope.userAgent) }),
+    ...(scope.userTarget === undefined ? {} : { userTarget: redact(scope.userTarget) }),
   };
 }
 
@@ -523,6 +539,8 @@ function runName(scope: AiTraceScope | undefined, functionId: string | undefined
   // A test run as several agents is several runs; the name tells them apart.
   if (scope.agent !== 'default') parts.push(`as ${scope.agent}`);
   if (scope.attempt > 0) parts.push(`attempt ${scope.attempt + 1}`);
+  // Each user's model calls are their own runs: the name says whose step it was, and the agent that peer runs as when it is not the test's.
+  if (scope.user !== undefined) parts.push(scope.userAgent === scope.agent ? `peer ${scope.user}` : `peer ${scope.user} as ${scope.userAgent}`);
   if (scope.api !== undefined) {
     const label =
       scope.label === undefined || scope.label === '' ? '' : ` ${JSON.stringify(truncate(scope.label))}`;

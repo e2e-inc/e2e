@@ -236,7 +236,7 @@ Both forms take the [Screenshot options](#screenshot-options).
 
 | Property | Value |
 | --- | --- |
-| Stored at | `<test file>-snapshots/<name>-<target>-<os>.png`; `.png` is added to a name without it |
+| Stored at | `<test file>-snapshots/<name>-<target>-<os>.png`; `.png` is added to a name without it. A [peer's](/reference/test#peers) is in `peers/<test's target>/<peer>/` there, named after the peer's target |
 | Unnamed | The test's title path, lowercase, and a count: `checkout-pays-by-card-1` |
 | Missing | Taken from two screenshots in a row that are the same within the tolerance, then `ASSERTION_FAILED`. Written beside the test; in CI without `--update-snapshots` only attached to the results, at `snapshots/<path in the project>` |
 | Written earlier in the run | Without `--update-snapshots`, and always for `.not`, no comparison passes against a screenshot the same run wrote (a retry, a repeat, another test naming it): `ASSERTION_FAILED` until the next run. With `--update-snapshots` a positive matcher compares and may write it again |

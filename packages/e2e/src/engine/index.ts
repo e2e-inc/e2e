@@ -392,12 +392,17 @@ export interface EngineSession {
 
 /**
  * What `prepare` learned that the run must honour. `workers` replaces the
- * engine's declared cap for this target and run: the surfaces the engine
- * actually provisioned, `1` to `info.slots`. Declared `workers` stays the
- * static answer for engines that know it up front.
+ * engine's declared cap for this target and run: how many of `info.slots`
+ * the engine serves at once, the surfaces it actually provisioned, `1` to
+ * `info.slots`. Declared `workers` stays the static answer for engines that
+ * know it up front.
  */
 export interface EnginePrepareResult {
-  /** Lowers the target's worker cap for this run, `1` to `info.slots`. */
+  /**
+   * How many slots the engine serves at once for this run, `1` to
+   * `info.slots`: its own workers' and the peers' (`info.peerSlots`) together,
+   * not its own workers alone. The run fits its worker counts to it.
+   */
   readonly workers?: number;
   /**
    * Variables every worker of this target is spawned with, on top of the
@@ -422,14 +427,26 @@ export interface EnginePrepareInfo {
   /** The app the target declares, as `init` receives it: what a device installs or warms up here. */
   readonly app: EngineAppInfo;
   /**
-   * The worker slots the run will start for this target, `0` to `slots - 1`:
-   * the run's worker cap, the engine's declared `workers`, and the work units
-   * selected for the target, whichever is smallest; `0` when nothing runs on
-   * it while another target has work. A run with nothing to run prepares no
+   * The slots the run may use on this target, `0` to `slots - 1`: one per
+   * worker it plans for the target (the run's worker cap, the engine's
+   * declared `workers`, and the work units selected for the target, whichever
+   * is smallest), and one per peer (`peerSlots`); `0` when nothing runs on it
+   * while another target has work. A run with nothing to run prepares no
    * target. Provision for exactly these slots (boot that many devices of a
-   * pool); `init` then finds them ready.
+   * pool); `init` then finds them ready. Treat the slots alike: which one a
+   * worker or a peer gets is settled after `prepare`, once the run fits its
+   * workers to what the engine serves.
    */
   readonly slots: number;
+  /**
+   * How many of `slots` the run sets aside for peers: a test's other users
+   * (its `peers` option), each on an engine instance of its own inside the
+   * worker that runs the test, on a slot no worker of this target holds. A
+   * count, not a range: see `slots`. Absent in a run that puts no peer on
+   * the target. An engine that cannot serve a peer refuses here, before it
+   * acquires anything.
+   */
+  readonly peerSlots?: number;
   /**
    * The run's environment: what every worker is started with. A host may hand
    * the run an environment other than the runner process's own, so anything
@@ -526,7 +543,14 @@ export interface EngineInitInfo {
    * This worker's 0-based slot among the target's workers: the lowest slot
    * free when the worker was spawned, so a replacement worker takes over the
    * slot of the one that exited. An engine with several devices hands each
-   * slot its own; `config.workers` bounds the slots a target can reach.
+   * slot its own. A target's own workers take the lowest slots, as many as
+   * the run starts for it; an instance that runs a peer of a worker's test
+   * gets a slot after them that no worker and no other peer holds. When the
+   * run starts fewer workers than `prepare` was told, the peers' slots start
+   * lower too. So a slot can reach past `config.workers`, up to
+   * `EnginePrepareInfo.slots - 1`. A peer's instance lives in the same worker
+   * process as the test's own: state an engine package keeps at module level
+   * is shared between them.
    */
   readonly workerSlot: number;
   /** Aborts on interrupt and when init exceeds the launch timeout; init must stop promptly. */
@@ -886,9 +910,10 @@ export interface Engine {
    * of a run's duration. A run with nothing to run (the test filters left
    * nothing, or `--pass-with-no-tests` on an empty selection) prepares no
    * target, and so calls no `finish`. Failure is infrastructure and ends the
-   * run before any test executes. The result may lower the target's worker
-   * cap for this run, for an engine that only learns its capacity here (a
-   * device pool discovered from the booted devices).
+   * run before any test executes. The result may say the engine serves fewer
+   * of the slots asked for at once, for an engine that only learns its
+   * capacity here (a device pool discovered from the booted devices); the run
+   * then starts fewer workers.
    */
   prepare?(info: EnginePrepareInfo): Promise<void | EnginePrepareResult>;
   /**

@@ -251,6 +251,13 @@ export class DevicePool {
    */
   async prepare(info: EnginePrepareInfo): Promise<EnginePrepareResult> {
     if (info.slots === 0) return {};
+    // Refused before anything is leased: a hosted device is billed from the start.
+    if (this.source instanceof LeasedDevices && (info.peerSlots ?? 0) > 0) {
+      throw new ConfigurationError(
+        'UNSUPPORTED_CAPABILITY',
+        `target "${info.targetName}" leases its devices from a device provider, and a test's peer on it would need a lease of its own, which this version does not take for a peer; run the peer on a simulator or emulator on this machine`,
+      );
+    }
     const bindings = await this.source.bind(info);
     await this.warm(bindings, info);
     this.bound.set(info.targetName, bindings);

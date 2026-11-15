@@ -26,7 +26,7 @@ export function agentStepTable(
   const mixedModels = models.size > 1;
 
   const rows = steps.map((step) => [
-    truncate(step.label === '' ? step.api : `${step.api} ${JSON.stringify(step.label)}`, 64),
+    truncate(`${step.user === undefined ? '' : `${step.user} · `}${step.label === '' ? step.api : `${step.api} ${JSON.stringify(step.label)}`}`, 64),
     ...(mixedModels ? [viaLabel(step) ?? '-'] : []),
     formatMs(step.durationMs),
     formatMs(eventMs(step, 'model')),

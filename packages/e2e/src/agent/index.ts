@@ -81,7 +81,8 @@ export function createAgentFixture(runtime: AgentContext): Agent {
    */
   const visionHint = (): string | undefined => {
     if (!runtime.engineCapabilities.has('artifacts')) return undefined;
-    const steps = runtime.steps.completed();
+    // The test's own user's recorder lists every user's steps; a peer's pixels prove nothing about this user's screen.
+    const steps = runtime.steps.completed().filter((step) => step.user === runtime.user);
     if (steps.some((step) => step.visionDegraded !== undefined)) return undefined;
     return steps.some((step) => step.visionInput === true) ? VISION_HINT : VISION_HINT_UNPROVEN;
   };

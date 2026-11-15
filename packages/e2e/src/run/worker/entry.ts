@@ -9,7 +9,7 @@ import { collectFromRegistration } from '../../collect/collect.ts';
 import { collectModule } from '../../collect/registry.ts';
 import type { TestTargetPair } from '../../collect/select.ts';
 import { importModule, loadConfigModule } from '../../config/load.ts';
-import { assignPorts, resolveConfig } from '../../config/resolve.ts';
+import { assignPorts, resolveConfig, type ResolvedConfig } from '../../config/resolve.ts';
 import { setSecretRegistry } from '../../secrets.ts';
 import { loadAiSdk } from '../../agent/ai-sdk.ts';
 import { AiTraceRecorder, registerAiTraceRecorder } from '../../internal/ai-trace.ts';
@@ -153,19 +153,28 @@ async function bootstrap(
   if (aiTrace !== undefined) await registerAiTraceRecorder(aiTrace, loadAiSdk);
   // What the config's top-level code prints is held until its secrets are
   // registered, so it is redacted like a test's output.
+  /**
+   * One load of the config as the runner resolved it: its ports, and a digest
+   * that must match. `graph` loads the project files it imports afresh too,
+   * which a peer's engine needs to be an instance of its own.
+   */
+  const loadResolved = async (options: { readonly graph: boolean }): Promise<ResolvedConfig> => {
+    const raw = await loadConfigModule(message.configPath, options.graph ? { graph: true } : {});
+    const resolved = assignPorts(
+      resolveConfig(raw, { projectRoot: message.projectRoot, configPath: message.configPath, env: process.env, cli: message.cli }),
+      message.ports,
+    );
+    if (resolved.configDigest !== message.configDigest) {
+      throw new ConfigurationError(
+        'CONFIG_NOT_DETERMINISTIC',
+        'worker resolved a different config digest than the runner; config must be deterministic',
+      );
+    }
+    return resolved;
+  };
   const { config, target } = await configLoad.during(
     async () => {
-      const raw = await loadConfigModule(message.configPath);
-      const resolved = assignPorts(
-        resolveConfig(raw, { projectRoot: message.projectRoot, configPath: message.configPath, env: process.env, cli: message.cli }),
-        message.ports,
-      );
-      if (resolved.configDigest !== message.configDigest) {
-        throw new ConfigurationError(
-          'CONFIG_NOT_DETERMINISTIC',
-          'worker resolved a different config digest than the runner; config must be deterministic',
-        );
-      }
+      const resolved = await loadResolved({ graph: false });
       const named = resolved.targets.find((candidate) => candidate.name === message.targetName);
       if (named === undefined) {
         throw new ConfigurationError('UNKNOWN_TARGET', `unknown target "${message.targetName}"`);
@@ -214,11 +223,13 @@ async function bootstrap(
     rerunDir: message.rerunDir,
     headed: message.headed,
     workerSlot: message.workerSlot,
+    peerSlots: message.peers,
     env: process.env,
     isolated: true,
     resolvePairs,
     debug,
     step: message.step,
+    loadPeerConfig: () => loadResolved({ graph: true }),
   };
 }
 

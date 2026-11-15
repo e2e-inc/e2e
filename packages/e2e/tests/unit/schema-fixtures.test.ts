@@ -109,6 +109,37 @@ describe.each(schemas)('%s schema', (name) => {
       }
     });
 
+    it("names the peer a step, a file, and a log line came from, and keeps each peer's facts apart", () => {
+      const report = readJson('fixtures', 'report-v1.valid.json') as {
+        run: { results: { attempts: (Record<string, unknown> & { steps: Record<string, unknown>[]; artifacts: Record<string, unknown>[] })[] }[] };
+      };
+      const attempt = report.run.results[0]!.attempts[0]!;
+      const step = attempt.steps.find((candidate) => candidate['user'] !== undefined)!;
+      const video = attempt.artifacts.find((artifact) => artifact['user'] !== undefined)!;
+      const line = (attempt['appLog'] as Record<string, unknown>[]).find((entry) => entry['user'] !== undefined)!;
+      const peers = attempt['peers'] as Record<string, Record<string, unknown>>;
+      expect(validate(report)).toBe(true);
+      const cases: [() => void, () => void][] = [
+        [() => (step['user'] = '..'), () => (step['user'] = 'guest')],
+        [() => (step['user'] = '.'), () => (step['user'] = 'guest.2')],
+        [() => (step['user'] = 'a guest'), () => (step['user'] = 'guest')],
+        [() => (video['user'] = ''), () => (video['user'] = 'guest')],
+        [() => (line['user'] = 'x'.repeat(129)), () => (line['user'] = 'x'.repeat(128))],
+        [() => (peers['..'] = {}), () => delete peers['..']],
+        [() => (peers['guest']!['region'] = 'eu'), () => delete peers['guest']!['region']],
+        [() => delete peers['guest']!['target'], () => (peers['guest']!['target'] = 'web')],
+        [() => (peers['guest']!['target'] = ''), () => (peers['guest']!['target'] = 'web')],
+        [() => (peers['guest']!['environment'] = { cores: 8 }), () => (peers['guest']!['environment'] = { cores: '8' })],
+        [() => (peers['guest']!['failure'] = { screen: 1 }), () => (peers['guest']!['failure'] = {})],
+      ];
+      for (const [breakIt, fixIt] of cases) {
+        breakIt();
+        expect(validate(report)).toBe(false);
+        fixIt();
+        expect(validate(report)).toBe(true);
+      }
+    });
+
     it('constrains result tags to distinct names --tag can spell back', () => {
       const report = readJson('fixtures', 'report-v1.valid.json') as { run: { results: { tags?: string[] }[] } };
       const result = report.run.results[0]!;

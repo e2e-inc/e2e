@@ -350,6 +350,74 @@ test('queued test', async ({ app }) => {
     }
   });
 
+  it("reports an exit of a target that only hosts peers, and skips the queued tests that put a peer there", async () => {
+    const portA = await freePort();
+    const portB = await freePort();
+    const target = (name: string, platform: string, port: number) => `{
+    name: '${name}', platform: '${platform}', engine: createFakeEngine().engine,
+    app: { url: 'http://127.0.0.1:${port}', command: {
+      executable: ${JSON.stringify(process.execPath)},
+      args: ['server.cjs', '${port}', '1', '${name}-'],
+      log: '.e2e/logs/${name}-app.log',
+      shutdownTimeout: 1000,
+    } },
+  }`;
+    const project = createProject({
+      'server.cjs': SERVER,
+      // Target b runs no test of its own: a test on a puts its peer there.
+      'e2e.config.ts': `import type { E2EConfig } from 'e2e';
+import { createFakeEngine } from '../../helpers/fake-engine.ts';
+export default {
+  workers: 1,
+  timeout: 10000,
+  cleanupTimeout: 2000,
+  targets: [${target('a', 'fake', portA)}, ${target('b', 'other', portB)}],
+} satisfies E2EConfig;
+`,
+      'tests/1-first.e2e.ts': `import { existsSync, writeFileSync } from 'node:fs';
+import { test } from 'e2e';
+${WAIT_FOR_FILE}
+test('first', { platforms: ['fake'], peers: { ava: { target: 'b' } } }, async () => {
+  writeFileSync('b-exit-now', 'requested');
+  await waitForFile('app-exit-observed');
+});`,
+      'tests/2-second.e2e.ts': `import { writeFileSync } from 'node:fs';
+import { test } from 'e2e';
+test('second', { platforms: ['fake'], peers: { ava: { target: 'b' } } }, async () => {
+  writeFileSync('second-ran', 'ran');
+});`,
+      'tests/3-own.e2e.ts': `import { writeFileSync } from 'node:fs';
+import { test } from 'e2e';
+test('own', { platforms: ['fake'] }, async () => {
+  writeFileSync('own-ran', 'ran');
+});`,
+    });
+    try {
+      const outcome = await runExistingWithConfigFile(project, {
+        runOptions: {
+          onEvent(event) {
+            if (event.type === 'run-error' && event.error.code === 'APP_UNREACHABLE') {
+              writeFileSync(path.join(project.dir, 'app-exit-observed'), 'observed');
+            }
+          },
+        },
+      });
+      expect.soft(outcome.report.run.errors).toEqual([
+        expect.objectContaining({ code: 'APP_UNREACHABLE', message: expect.stringContaining('target "b" command exited with code 1') }),
+      ]);
+      const status = (title: string) => outcome.results.find((result) => result.test.title === title && result.target.name === 'a');
+      expect.soft(status('first')?.status).toBe('passed');
+      expect.soft(status('second')?.status).toBe('skipped');
+      expect.soft(status('second')?.skip).toMatchObject({ cause: 'infrastructure-unavailable', reason: expect.stringContaining('target "b" command exited with code 1') });
+      expect.soft(existsSync(path.join(project.dir, 'second-ran'))).toBe(false);
+      expect.soft(status('own')?.status).toBe('passed');
+      expect.soft(outcome.exitCode).toBe(3);
+      assertValidReport(outcome.report);
+    } finally {
+      project.cleanup();
+    }
+  });
+
   it('stops every target sharing the exited command and starts that command only once', async () => {
     const port = await freePort();
     const project = createProject({

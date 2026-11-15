@@ -23,7 +23,7 @@ import type {
   StepMetrics,
   StepModelInfo,
   StepRecord,
-  StepRecorder,
+  StepSink,
   VisionDegradation,
 } from '../run/steps.ts';
 import type { JsonValue, VisionMode } from '../types.ts';
@@ -86,7 +86,7 @@ export interface AgentContext {
    * engine says whether it produces pixels only once `observe` asks.
    */
   readonly engineCapabilities: ReadonlySet<EngineCapability>;
-  readonly steps: StepRecorder;
+  readonly steps: StepSink;
   /**
    * The agent a call runs with: the one it names, else the test's pin, else
    * the run's. An unknown name is `INVALID_ARGUMENT`.
@@ -108,6 +108,8 @@ export interface AgentContext {
    * its location, not the acting agent's account.
    */
   readonly priorSteps: () => readonly StepRecord[];
+  /** The peer whose agent this is; undefined for the test's own user. `steps` may hold every user's steps; this agent reads its own. */
+  readonly user?: string | undefined;
   readonly secrets: SecretResolver;
   /** The attempt's live redactor (SecretLedger); sees values the moment they exist. */
   readonly redact: (text: string) => string;

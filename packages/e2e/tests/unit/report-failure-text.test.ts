@@ -167,6 +167,79 @@ describe('renderTracePage', () => {
     return renderTracePage(document, failing, outcome(failing, NO_GROUPS), { artifactsDir: '.e2e/artifacts', readArtifact });
   };
 
+  it("tells a peer's steps, log lines, environment, screen at failure, video, and files under the peer's name", () => {
+    const at = (seconds: number) => new Date(Date.UTC(2026, 9, 27, 10, 0, seconds)).toISOString();
+    const file = (id: string, kind: 'video' | 'screenshot' | 'log', path: string, user?: string) => ({
+      id,
+      kind,
+      mediaType: kind === 'video' ? 'video/webm' : kind === 'log' ? 'text/plain' : 'image/png',
+      path,
+      redaction: 'incomplete' as const,
+      startedAt: at(kind === 'video' && user !== undefined ? 3 : 0),
+      producer: { kind: 'attempt' as const },
+      ...(user === undefined ? {} : { user }),
+    });
+    const error = reportError();
+    const screens: Record<string, string> = { 't/peers/ava/screen-at-failure.txt': '#n1 heading "Invites"', 't/screen-at-failure.txt': '#n1 heading "Cart"' };
+    const body = page(
+      [
+        failed({
+          error,
+          steps: [
+            step({ index: 0, api: 'app.open', label: '/cart', startedAt: at(0) }),
+            step({ index: 1, api: 'app.open', label: '/invites', user: 'ava', startedAt: at(4) }),
+            step({ index: 2, api: 'app.reload', label: '/cart', startedAt: at(5) }),
+            step({ index: 3, api: 'locator.tap', label: 'Accept', user: 'ava', status: 'failed', error, startedAt: at(6) }),
+          ],
+          appLog: [
+            { source: 'console', level: 'warning', text: 'invite expires soon', at: at(5), step: 1, user: 'ava' },
+            { source: 'console', level: 'warning', text: 'cart is empty', at: at(1), step: 0 },
+          ],
+          environment: { browser: 'chromium 141' },
+          peers: {
+            ava: { target: 'web-b', environment: { browser: 'webkit 26' }, failure: { url: '/invites', screen: 'a:3' } },
+            bob: { target: 'web-b' },
+            carol: { target: 'web' },
+          },
+          failure: { url: '/cart', screen: 'a:2' },
+          artifacts: [
+            file('a:0', 'video', 't/video/video.webm'),
+            file('a:1', 'video', 't/peers/ava/video/video.webm', 'ava'),
+            file('a:2', 'log', 't/screen-at-failure.txt'),
+            file('a:3', 'log', 't/peers/ava/screen-at-failure.txt', 'ava'),
+          ],
+        }),
+      ],
+      (reportPath) => screens[reportPath],
+    );
+    const lines = body.split('\n');
+    expect(lines).toContain('Ran on: browser `chromium 141`');
+    expect(lines).toContain('ava ran on target `web-b`: browser `webkit 26`');
+    // A peer on another target says which even with nothing else to tell; one on the test's own says nothing.
+    expect(lines).toContain('bob ran on target `web-b`');
+    expect(lines.some((line) => line.startsWith('carol'))).toBe(false);
+    const steps = lines.filter((line) => /^\d\. /.test(line));
+    // Each step is placed on its own user's video: Ava's began at 0:03, and the test's own runs on under it.
+    expect(steps[0]).toMatch(/^1\. ✓ `app\.open` `\/cart` \(100ms, video 0:00\)/u);
+    expect(steps[1]).toMatch(/^2\. ✓ ava · `app\.open` `\/invites` \(100ms, video 0:01\)/u);
+    expect(steps[2]).toMatch(/^3\. ✓ `app\.reload` `\/cart` \(100ms, video 0:05\)/u);
+    expect(steps[3]).toMatch(/^4\. ✗ ava · `locator\.tap` `Accept` \(100ms, video 0:03\)/u);
+    expect(lines).toContain('- step 1 · ⚠ console warning: `cart is empty`');
+    expect(lines).toContain('- step 2 · ava · ⚠ console warning: `invite expires soon`');
+    const mine = lines.indexOf('## Screen at failure');
+    const hers = lines.indexOf('## Screen at failure: ava');
+    expect(mine).toBeGreaterThan(-1);
+    expect(hers).toBeGreaterThan(mine);
+    expect(lines.slice(mine, hers).join('\n')).toContain('#n1 heading "Cart"');
+    expect(lines.slice(hers).join('\n')).toContain('#n1 heading "Invites"');
+    const evidence = lines.slice(lines.indexOf('## Evidence'));
+    expect(evidence).toContain('- screen `.e2e/artifacts/t/screen-at-failure.txt`');
+    expect(evidence).toContain('- ava · screen `.e2e/artifacts/t/peers/ava/screen-at-failure.txt`');
+    expect(evidence).toContain('- video `.e2e/artifacts/t/video/video.webm`');
+    expect(evidence).toContain('- ava · video `.e2e/artifacts/t/peers/ava/video/video.webm`');
+    expect(screenLines(toldAttempt(reportResult({ status: 'failed', attempts: [failed({ peers: { ava: { target: 'web', failure: { url: '/invites' } } }, failure: { url: '/cart' } })] }), outcome(reportResult({ status: 'failed', attempts: [failed({ peers: { ava: { target: 'web', failure: { url: '/invites' } } }, failure: { url: '/cart' } })] }), NO_GROUPS)), 'ava')).toEqual(['Screen: `/invites`']);
+  });
+
   it('lists the screenshots a step attached under that step, and no other artifact', () => {
     const image = (id: string, file: string) => ({ id, kind: 'screenshot' as const, mediaType: 'image/png', path: `t/screenshots/${file}`, redaction: 'complete' as const, producer: { kind: 'step' as const, stepId: 's1' } });
     const log = { id: 'a:3', kind: 'log' as const, mediaType: 'text/plain', path: 't/console.txt', redaction: 'complete' as const, producer: { kind: 'step' as const, stepId: 's1' } };

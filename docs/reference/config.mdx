@@ -1776,6 +1776,8 @@ interface TestFilterCandidate {
   readonly tags: readonly string[];
   /** Project-relative path of the setup test file that saves the test's session; absent without one. */
   readonly setupFile?: string;
+  /** Project-relative paths of the setup test files that save its peers' sessions, each once; absent when no peer restores one. */
+  readonly peerSetupFiles?: readonly string[];
 }
 
 interface TestFilterContext {

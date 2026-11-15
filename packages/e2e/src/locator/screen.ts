@@ -34,7 +34,7 @@ import type {
   TextMatch,
   TextMatchOptions,
 } from '../types.ts';
-import type { StepRecorder } from '../run/steps.ts';
+import type { StepSink } from '../run/steps.ts';
 import { attributeOf, denySecureRead, isNodeVisible, locatorDetails, type LocatorEngine } from './engine.ts';
 import {
   describeExpression,
@@ -58,7 +58,7 @@ export interface SecretResolver {
 
 export interface ScreenContext {
   readonly engine: LocatorEngine;
-  readonly steps: StepRecorder;
+  readonly steps: StepSink;
   readonly secrets: SecretResolver;
   /** Base directory for resolving relative file paths, e.g. uploads. */
   readonly projectRoot?: string;

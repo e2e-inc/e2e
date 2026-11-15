@@ -260,6 +260,33 @@ describe('filterCandidates', () => {
       ['guest page', undefined],
     ]);
   });
+
+  it('names the files of the setup tests that save its peers sessions, each once, and none without', async () => {
+    const memberSetup = await collection(() => {
+      test.setup('sign in member', { sessions: ['member'] }, noop);
+    }, 'tests/member.setup.e2e.ts');
+    const peerSetups = await collection(() => {
+      test.setup('sign in ava', { sessions: ['ava', 'cat'] }, noop);
+      test.setup('sign in bob', { sessions: ['bob'] }, noop);
+    }, 'tests/peers.setup.e2e.ts');
+    const otherSetup = await collection(() => {
+      test.setup('sign in dan', { sessions: ['dan'] }, noop);
+    }, 'tests/dan.setup.e2e.ts');
+    const pages = await collection(() => {
+      test('pays', { session: 'member', peers: { ava: { session: 'ava' }, bob: { session: 'bob' }, cat: { session: 'cat' }, eve: {} } }, noop);
+      test('chats', { peers: { dan: { session: 'dan' }, eve: {} } }, noop);
+      test('alone', { peers: { eve: {} } }, noop);
+    }, 'tests/pages.e2e.ts');
+    const parts = [memberSetup, peerSetups, otherSetup, pages];
+    const col: Collection = { ...pages, files: parts.flatMap((part) => part.files), tests: parts.flatMap((part) => part.tests) };
+    const selection = select(col, config({ targets: [{ name: 'web', platform: 'web', engine: ENGINE }] }));
+    expect(filterCandidates(selection).map(({ titlePath, setupFile, peerSetupFiles }) => [titlePath.at(-1), setupFile, peerSetupFiles])).toEqual([
+      ['pays', 'tests/member.setup.e2e.ts', ['tests/peers.setup.e2e.ts']],
+      ['chats', undefined, ['tests/dan.setup.e2e.ts']],
+      ['alone', undefined, undefined],
+    ]);
+    expect(filterCandidates(selection).find((candidate) => candidate.titlePath.at(-1) === 'alone')).not.toHaveProperty('peerSetupFiles');
+  });
 });
 
 describe('applyTestFilters', () => {

@@ -11,7 +11,7 @@ import { asEngineError, isE2EError } from '../internal/errors.ts';
 import { timestamp } from '../internal/ids.ts';
 import { POLL_INTERVAL_MS, sleep, type Deadline } from '../internal/time.ts';
 import type { LocatorEngine } from '../locator/engine.ts';
-import type { StepActivity, StepEvent, StepRecorder } from '../run/steps.ts';
+import type { StepActivity, StepEvent, StepSink } from '../run/steps.ts';
 import { AgentError, toAgentError } from './error.ts';
 
 /**
@@ -30,7 +30,7 @@ export function boundedOperation(
 
 /** Records one policy decision as a child event of the current step. */
 export function recordPolicyEvent(
-  steps: StepRecorder,
+  steps: StepSink,
   name: string,
   decision: 'allowed' | 'denied',
   code?: string,
@@ -48,7 +48,7 @@ export function recordPolicyEvent(
 
 /** The step recorder and optional debug trace a phase reports into. */
 export interface PhaseHost {
-  readonly steps: StepRecorder;
+  readonly steps: StepSink;
   readonly debug?: DebugTrace | undefined;
 }
 

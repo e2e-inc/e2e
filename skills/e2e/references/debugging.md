@@ -80,7 +80,8 @@ jq '.run.results[] | select(.selected and .status != "passed") | .attempts[-1]
 
    `error.details` holds the facts, `error.source` the line, `failure` the
    `url`, `screen` and `screenshot` artifact ids, and `candidates`; a
-   failed agent step has `turns`; any agent step has
+   peer's step has `user`, and when it failed, the peer's screen is in
+   `peers.<name>.failure`, not `failure`; a failed agent step has `turns`; any agent step has
    `observationTruncated: true` when a semantic observation was incomplete;
    `selected` drops filtered-out tests
    (recorded as `skipped`).

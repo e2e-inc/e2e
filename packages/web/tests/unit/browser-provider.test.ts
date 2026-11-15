@@ -269,6 +269,23 @@ describe('worker scope', () => {
     expect(cloud.released).toHaveLength(2);
   });
 
+  it("refuses, before it leases anything, a run that puts a test's peer on the target", async () => {
+    for (const scope of ['worker', 'attempt'] as const) {
+      const cloud = provider();
+      const runner = new PlaywrightSurface({ browser: { ...cloud.impl, scope } });
+      await expect(runner.prepare({ ...prepareInfo(3), peerSlots: 1 })).rejects.toMatchObject({
+        code: 'UNSUPPORTED_CAPABILITY',
+        message:
+          'target "web" leases its browsers from toy-cloud, and a test\'s peer on it would need a lease of its own, which this version does not take for a peer; run the peer on a target that launches its browser on this machine',
+      });
+      expect(cloud.acquired).toEqual([]);
+    }
+    // A run with no peer there leases as it always has.
+    const cloud = provider();
+    await new PlaywrightSurface({ browser: cloud.impl }).prepare({ ...prepareInfo(1), peerSlots: 0 });
+    expect(cloud.acquired).toHaveLength(1);
+  });
+
   it('leases nothing for a target with no slots', async () => {
     const cloud = provider();
     const runner = new PlaywrightSurface({ browser: cloud.impl });

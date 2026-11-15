@@ -1,4 +1,4 @@
-import { formatDuration, testTitle, type Artifact, type AttemptView, type ReportError, type ReportModel, type Result, type Step } from './data.ts';
+import { failuresByUser, formatDuration, testTitle, type Artifact, type AttemptView, type ReportError, type ReportModel, type Result, type Step } from './data.ts';
 
 /** Agent turns quoted per failed step; the trace page has every one. */
 const MAX_TURNS = 3;
@@ -61,7 +61,8 @@ function errorLines(error: ReportError): string[] {
 function stepLines(step: Step, index: number, attempt: AttemptView): string[] {
   const label = step.label === '' ? '' : `: ${step.label.replaceAll('\n', ' ')}`;
   const notes = [formatDuration(step.durationMs), step.phase, step.cache === undefined ? undefined : `cache ${step.cache.mode}`].filter((note) => note !== undefined);
-  const head = `${index + 1}. ${step.status} ${step.api}${label} (${notes.join(', ')})`;
+  const user = step.user === undefined ? '' : `${step.user} · `;
+  const head = `${index + 1}. ${step.status} ${user}${step.api}${label} (${notes.join(', ')})`;
   if (step.status === 'passed') return [head];
   const actions = step.events.flatMap((event) => (event.kind === 'engine' && event.detail !== undefined ? [`${event.detail}${event.status === 'passed' ? '' : ` (${event.status})`}`] : []));
   const turns = (step.turns ?? []).slice(-MAX_TURNS).map((turn) => `turn ${turn.index}: ${turn.calls.join(', ')} -> ${turn.outcome}`);
@@ -80,26 +81,30 @@ function stepLines(step: Step, index: number, attempt: AttemptView): string[] {
   ];
 }
 
+/** What the runner saw on each user's screen at the failure: the test's own, then each peer's under its name. */
 function failureLines(attempt: AttemptView): string[] {
-  const { failure } = attempt;
-  if (failure === undefined) return [];
-  return [
-    ...(failure.url === undefined ? [] : [`- Screen: ${failure.url}`]),
-    ...(failure.candidates === undefined || failure.candidates.length === 0 ? [] : ['- Closest on screen:', ...failure.candidates.map((line) => `  - ${line}`)]),
-  ];
+  return failuresByUser(attempt).flatMap(({ user, failure }) => {
+    const whose = user === undefined ? '' : ` of ${user}`;
+    return [
+      ...(failure.url === undefined ? [] : [`- Screen${whose}: ${failure.url}`]),
+      ...(failure.candidates === undefined || failure.candidates.length === 0 ? [] : [`- Closest on screen${whose}:`, ...failure.candidates.map((line) => `  - ${line}`)]),
+    ];
+  });
 }
 
 /** The trace page, the failure evidence, the videos, and the files the test left; the step screenshots are in the trace. */
 function fileLines(model: ReportModel, result: Result, attempt: AttemptView): string[] {
   const trace = Object.hasOwn(model.traces, result.id) ? model.traces[result.id] : undefined;
   const describe = (artifact: Artifact): string | undefined => {
-    if (artifact.id === attempt.failure?.screen) return 'the screen tree at the failure';
-    if (artifact.id === attempt.failure?.screenshot) return 'a screenshot at the failure';
+    const failure = artifact.user === undefined ? attempt.failure : attempt.peers?.[artifact.user]?.failure;
+    if (artifact.id === failure?.screen) return 'the screen tree at the failure';
+    if (artifact.id === failure?.screenshot) return 'a screenshot at the failure';
     if (artifact.kind === 'video') return 'the recording';
     return artifact.kind === 'screenshot' ? undefined : artifact.kind;
   };
   const files = attempt.artifacts.flatMap((artifact) => {
-    const about = describe(artifact);
+    const described = describe(artifact);
+    const about = described === undefined || artifact.user === undefined ? described : `${described}, of ${artifact.user}`;
     return about === undefined || artifact.path === undefined ? [] : [`- ${model.resultsDir}/${artifact.path}: ${about}`];
   });
   return [...(trace === undefined ? [] : [`- ${trace}: the runner's trace of this test`]), ...files];

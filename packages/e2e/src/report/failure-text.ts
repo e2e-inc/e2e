@@ -12,9 +12,10 @@ import path from 'node:path';
 import { modelLabel } from '../config/agent.ts';
 import { isLoopbackHost } from '../internal/urls.ts';
 import type { AppLogSource } from '../engine/index.ts';
+import type { FailureEvidence } from '../run/records.ts';
 import type { AppLogRecord, StepCacheInfo, StepCacheRecord, StepEvent, StepTurn } from '../run/steps.ts';
 import type { Report1Document, ReportError, ReportResult, ReportSource, ReportStep } from './build.ts';
-import { cell, code, formatDuration, link, MAX_CELL_CHARS, MAX_ID_CHARS, MAX_LABEL_CHARS, MAX_PATH_CHARS, MAX_TITLE_CHARS, plural } from './markdown-text.ts';
+import { cell, code, formatDuration, link, MAX_CELL_CHARS, MAX_ID_CHARS, MAX_LABEL_CHARS, MAX_PATH_CHARS, MAX_TITLE_CHARS, plural, userLead } from './markdown-text.ts';
 import { repeatSuffix, STATUS_WORD } from './format.ts';
 import type { AttemptView, Outcome } from './outcome.ts';
 
@@ -112,18 +113,24 @@ export function toldAttempt(result: ReportResult, final: Outcome): AttemptView {
 /** A step that did not pass. */
 export type FailedStep = ReportStep & { readonly status: Exclude<ReportStep['status'], 'passed'> };
 
+/** What `failedStepOf` reads of a step: a report's, or a run record's, whose error keeps no source line. */
+type StepOutcome = Pick<ReportStep, 'status' | 'phase'> & { readonly error?: Pick<ReportError, 'code' | 'source'> | undefined };
+
 /**
  * The step whose error ended the attempt, with its position: the step in the
  * error's phase whose own error carries its code and line, else the last with
  * its code, since a caught failure comes earlier, else the step a timeout or
  * interrupt cut.
  */
-export function failedStepOf(attempt: { readonly steps: readonly ReportStep[]; readonly error?: ReportError | undefined }): { index: number; step: FailedStep } | undefined {
+export function failedStepOf<Step extends StepOutcome>(attempt: {
+  readonly steps: readonly Step[];
+  readonly error?: Pick<ReportError, 'code' | 'phase' | 'source'> | undefined;
+}): { index: number; step: Step & Pick<FailedStep, 'status'> } | undefined {
   const error = attempt.error;
   if (error === undefined) return undefined;
   const phase = error.phase;
   const candidates = attempt.steps.flatMap((step, index) =>
-    step.status !== 'passed' && (phase === undefined || (step.phase ?? 'body') === phase) ? [{ index, step: step as FailedStep }] : [],
+    step.status !== 'passed' && (phase === undefined || (step.phase ?? 'body') === phase) ? [{ index, step: step as Step & Pick<FailedStep, 'status'> }] : [],
   );
   const alike = candidates.filter(({ step }) => step.error?.code === error.code);
   const line = error.source;
@@ -204,9 +211,14 @@ export function lastTurnLines(step: ReportStep | undefined): string[] {
   return turns.slice(-MAX_SUMMARY_TURNS).map((turn) => turnLine(turn, 160));
 }
 
-/** `Screen: /path` and `Closest to the locator: ...`, for the run page. */
-export function screenLines(told: AttemptView): string[] {
-  const failure = told.failure;
+/** What the runner saw on one user's screen when the failure landed: the test's own user's, or a peer's by name. */
+function failureOf(told: AttemptView, user: string | undefined): FailureEvidence | undefined {
+  return user === undefined ? told.failure : told.peers?.[user]?.failure;
+}
+
+/** `Screen: /path` and `Closest to the locator: ...` on the screen of `user`, whose step failed, for the run page. */
+export function screenLines(told: AttemptView, user?: string): string[] {
+  const failure = failureOf(told, user);
   if (failure === undefined) return [];
   const lines: string[] = [];
   if (failure.url !== undefined) lines.push(`Screen: ${code(screenUrl(failure.url), MAX_PATH_CHARS)}`);
@@ -250,22 +262,25 @@ export function appErrorLines(told: AttemptView): string[] {
   return [...shown.map(({ label, text }) => `App ${label}: ${code(text, MAX_DETAIL_CHARS)}`), ...(more === undefined ? [] : [more])];
 }
 
-/** The failure screenshot artifact of the told attempt, if one was recorded. */
+/** The failure screenshot of the told attempt, from the screen of the user whose step failed, if one was recorded. */
 export function failureScreenshot(told: AttemptView): ReportArtifact | undefined {
-  const id = told.failure?.screenshot;
+  const id = failureOf(told, failedStepOf(told)?.step.user)?.screenshot;
   return id === undefined ? undefined : told.artifacts.find((artifact) => artifact.id === id);
 }
 
-/** Artifacts of the told attempt by id, the failure's own first, one per kind. */
+/** Artifacts of the told attempt by id, the failure's own first (each user's), one per kind and user. */
 export function evidenceOf(told: AttemptView): ReportArtifact[] {
   const byId = new Map(told.artifacts.map((artifact) => [artifact.id, artifact]));
-  const own = [told.failure?.screenshot, told.failure?.screen].flatMap((id) => (id === undefined ? [] : (byId.get(id) ?? [])));
+  const failures = [told.failure, ...Object.values(told.peers ?? {}).map((peer) => peer.failure)];
+  const own = failures.flatMap((failure) => [failure?.screenshot, failure?.screen]).flatMap((id) => (id === undefined ? [] : (byId.get(id) ?? [])));
   const seen = new Set(own.map((artifact) => artifact.id));
   const rest: ReportArtifact[] = [];
   const kinds = new Set<string>();
   for (const artifact of told.artifacts) {
-    if (seen.has(artifact.id) || kinds.has(artifact.kind) || artifact.kind === 'log') continue;
-    kinds.add(artifact.kind);
+    // Each user's app made its own video and screenshots: one of each per user.
+    const kind = `${artifact.user ?? ''}\u0000${artifact.kind}`;
+    if (seen.has(artifact.id) || kinds.has(kind) || artifact.kind === 'log') continue;
+    kinds.add(kind);
     rest.push(artifact);
   }
   return [...own, ...rest];
@@ -391,7 +406,7 @@ function appLogLines(steps: readonly ReportStep[], appLog: readonly AppLogRecord
   const numbers = new Map(steps.map((step, position) => [step.index, position + 1]));
   const items = appLog.map((entry) => {
     const number = entry.step === undefined ? undefined : numbers.get(entry.step);
-    return { at: entry.at, important: entry.level !== 'info', line: `${number === undefined ? 'before step 1' : `step ${number}`} · ${appLogLine(entry)}` };
+    return { at: entry.at, important: entry.level !== 'info', line: `${number === undefined ? 'before step 1' : `step ${number}`} · ${userLead(entry.user)}${appLogLine(entry)}` };
   });
   const { shown, left } = importantThenLatest(items, MAX_APP_LOG_LINES);
   return [...(left === 0 ? [] : [`${left} ${left === 1 ? 'line' : 'lines'} left out`]), ...shown.map((item) => item.line)];
@@ -479,12 +494,14 @@ function timedVideos(told: AttemptView): TimedVideo[] {
 
 /**
  * `, video 0:12`: where the step starts in the recording that was running
- * then, the last segment that began before it. An attempt cut into several
+ * on its user's app then, the last segment that began before it. Each user's
+ * app records its own video, so a step is timed only on its own user's. An attempt cut into several
  * segments (a restart opens a new page) names the segment too:
  * `, video-part2 0:03`. A step before the attempt's video began is at 0:00;
  * one outside every recording a step stopped gets nothing.
  */
-function videoOffset(step: ReportStep, videos: readonly TimedVideo[]): string {
+function videoOffset(step: ReportStep, all: readonly TimedVideo[]): string {
+  const videos = all.filter((video) => video.artifact.user === step.user);
   const at = Date.parse(step.startedAt);
   const timed =
     videos.findLast((candidate) => candidate.startsAt <= at && at < candidate.endsAt) ??
@@ -496,13 +513,42 @@ function videoOffset(step: ReportStep, videos: readonly TimedVideo[]): string {
   return `, ${name} ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
+/** One user's screen when the failure landed, as a section of the page: where it was, its screenshot, the locator's closest candidates, and the screen text. */
+function screenAtFailureLines(told: AttemptView, failure: FailureEvidence, heading: string, options: TracePageOptions): string[] {
+  const lines = [heading, ''];
+  const screen = failure.screen === undefined ? undefined : told.artifacts.find((artifact) => artifact.id === failure.screen);
+  const listing = screen?.path === undefined ? undefined : options.readArtifact?.(screen.path);
+  const where = [
+    ...(failure.url === undefined ? [] : [code(failure.url, MAX_PATH_CHARS)]),
+    ...(failure.viewport === undefined ? [] : [`viewport ${failure.viewport.width}x${failure.viewport.height}`]),
+    ...(failure.nodes === undefined ? [] : [plural(failure.nodes, 'node')]),
+  ];
+  if (where.length > 0) lines.push(`${where.join(' · ')}  `);
+  const shot = failure.screenshot === undefined ? undefined : told.artifacts.find((artifact) => artifact.id === failure.screenshot);
+  const shotHref = shot?.path === undefined ? undefined : pageHref(shot.path, options);
+  if (shotHref !== undefined) lines.push('', `!${link('screenshot at failure', shotHref)}`, '');
+  if (failure.candidates !== undefined && failure.candidates.length > 0) {
+    lines.push('Closest to what the locator asked for:  ');
+    for (const candidate of failure.candidates) lines.push(`- ${code(candidate, MAX_CELL_CHARS)}`);
+  }
+  if (listing !== undefined) {
+    const body = listing.length > MAX_SCREEN_CHARS ? `${listing.slice(0, MAX_SCREEN_CHARS)}\n…[cut at ${MAX_SCREEN_CHARS} characters; the file has the rest]` : listing;
+    if (lines.at(-1) !== '') lines.push('');
+    lines.push('The screen as the agent reads it, one node per line: `#id role "name" text="…" [states]`.', '', '```text', body.replaceAll('```', "'''").trimEnd(), '```');
+  } else if (screen !== undefined) {
+    lines.push(`${artifactPath(screen, options, 'screen')}  `);
+  }
+  lines.push('');
+  return lines;
+}
+
 // --- the page ---
 
 const STEP_GLYPH: Record<ReportStep['status'], string> = { passed: '✓', failed: '✗', blocked: '✗', 'timed-out': '✗', cancelled: '–' };
 
 /** `[screenshot](run#artifacts) \`todos-adds-a-todo-1a2b…/attempt-1/screenshots/001-failure.png\``: the kind (or `label`), linked to the run's artifacts when there is a URL, and the file's path so the reader finds it. */
 function artifactPath(artifact: ReportArtifact, options: TracePageOptions, label: string = artifact.kind): string {
-  const kind = cell(label, MAX_ID_CHARS);
+  const kind = `${userLead(artifact.user)}${cell(label, MAX_ID_CHARS)}`;
   // A video a hosted service keeps is its own link, wherever the run's files are.
   if (artifact.url !== undefined) return link(kind, artifact.url);
   const fromPage = artifact.path === undefined ? undefined : pageHref(artifact.path, options);
@@ -543,8 +589,15 @@ export function renderTracePage(report: Report1Document, result: ReportResult, f
     formatDuration(final.durationMs),
   ];
   lines.push(about.join(' · '), '');
-  const ranOn = Object.entries(told.environment ?? {});
-  if (ranOn.length > 0) lines.push(`Ran on: ${ranOn.map(([name, value]) => `${cell(name, MAX_ID_CHARS)} ${code(value, MAX_CELL_CHARS)}`).join(' · ')}`, '');
+  const ranOn = (environment: Readonly<Record<string, string>> | undefined): string =>
+    Object.entries(environment ?? {}).map(([name, value]) => `${cell(name, MAX_ID_CHARS)} ${code(value, MAX_CELL_CHARS)}`).join(' · ');
+  if (ranOn(told.environment) !== '') lines.push(`Ran on: ${ranOn(told.environment)}`, '');
+  for (const [user, peer] of Object.entries(told.peers ?? {})) {
+    // A peer on another target says which; one on the test's own needs no telling.
+    const elsewhere = peer.target === result.targetId ? '' : ` target ${code(peer.target, MAX_ID_CHARS)}`;
+    const facts = ranOn(peer.environment);
+    if (elsewhere !== '' || facts !== '') lines.push(`${cell(user, MAX_ID_CHARS)} ran on${elsewhere}${facts === '' ? '' : `: ${facts}`}`, '');
+  }
 
   // A test that failed as `test.fail` expected tells that failure, also below an earlier attempt's.
   const mark = result.attempts.at(-1)?.expectedFailure;
@@ -572,7 +625,7 @@ export function renderTracePage(report: Report1Document, result: ReportResult, f
       const offset = videoOffset(step, videos);
       const hook = step.phase === undefined ? '' : ` in ${step.phase}`;
       const label = stepLabel(step, MAX_CELL_CHARS);
-      lines.push(`${index + 1}. ${STEP_GLYPH[step.status]} ${code(step.api, MAX_ID_CHARS)}${label === '' ? '' : ` ${label}`} (${formatDuration(step.durationMs)}${calls}${offset}${hook})${failed}${own}`);
+      lines.push(`${index + 1}. ${STEP_GLYPH[step.status]} ${userLead(step.user)}${code(step.api, MAX_ID_CHARS)}${label === '' ? '' : ` ${label}`} (${formatDuration(step.durationMs)}${calls}${offset}${hook})${failed}${own}`);
       if (step.status !== 'passed' && step.explanation !== undefined && step.explanation.trim() !== '') {
         lines.push(`   > ${cell(step.explanation, MAX_DETAIL_CHARS)}`);
       }
@@ -605,31 +658,10 @@ export function renderTracePage(report: Report1Document, result: ReportResult, f
   }
 
   const failure = told.failure;
-  if (failure !== undefined) {
-    lines.push('## Screen at failure', '');
-    const screen = failure.screen === undefined ? undefined : told.artifacts.find((artifact) => artifact.id === failure.screen);
-    const listing = screen?.path === undefined ? undefined : options.readArtifact?.(screen.path);
-    const where = [
-      ...(failure.url === undefined ? [] : [code(failure.url, MAX_PATH_CHARS)]),
-      ...(failure.viewport === undefined ? [] : [`viewport ${failure.viewport.width}x${failure.viewport.height}`]),
-      ...(failure.nodes === undefined ? [] : [plural(failure.nodes, 'node')]),
-    ];
-    if (where.length > 0) lines.push(`${where.join(' · ')}  `);
-    const shot = failureScreenshot(told);
-    const shotHref = shot?.path === undefined ? undefined : pageHref(shot.path, options);
-    if (shotHref !== undefined) lines.push('', `!${link('screenshot at failure', shotHref)}`, '');
-    if (failure.candidates !== undefined && failure.candidates.length > 0) {
-      lines.push('Closest to what the locator asked for:  ');
-      for (const candidate of failure.candidates) lines.push(`- ${code(candidate, MAX_CELL_CHARS)}`);
-    }
-    if (listing !== undefined) {
-      const body = listing.length > MAX_SCREEN_CHARS ? `${listing.slice(0, MAX_SCREEN_CHARS)}\n…[cut at ${MAX_SCREEN_CHARS} characters; the file has the rest]` : listing;
-      if (lines.at(-1) !== '') lines.push('');
-      lines.push('The screen as the agent reads it, one node per line: `#id role "name" text="…" [states]`.', '', '```text', body.replaceAll('```', "'''").trimEnd(), '```');
-    } else if (screen !== undefined) {
-      lines.push(`${artifactPath(screen, options, 'screen')}  `);
-    }
-    lines.push('');
+  if (failure !== undefined) lines.push(...screenAtFailureLines(told, failure, '## Screen at failure', options));
+  // Each peer's screen when the failure landed, under its name.
+  for (const [user, peer] of Object.entries(told.peers ?? {})) {
+    if (peer.failure !== undefined) lines.push(...screenAtFailureLines(told, peer.failure, `## Screen at failure: ${cell(user, MAX_ID_CHARS)}`, options));
   }
 
   if (told.secondaryErrors.length > 0) {
@@ -644,7 +676,8 @@ export function renderTracePage(report: Report1Document, result: ReportResult, f
   const evidence = evidenceOf(told);
   if (evidence.length > 0) {
     lines.push('## Evidence', '');
-    for (const artifact of evidence) lines.push(`- ${artifactPath(artifact, options, artifact.id === failure?.screen ? 'screen' : artifact.kind)}`);
+    const screens = new Set([failure?.screen, ...Object.values(told.peers ?? {}).map((peer) => peer.failure?.screen)]);
+    for (const artifact of evidence) lines.push(`- ${artifactPath(artifact, options, screens.has(artifact.id) ? 'screen' : artifact.kind)}`);
     lines.push('');
   }
 

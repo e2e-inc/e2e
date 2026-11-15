@@ -363,6 +363,13 @@ export class LeasedBrowsers {
    */
   async prepare(info: EnginePrepareInfo): Promise<EnginePrepareResult> {
     if (info.slots === 0) return {};
+    // Refused before anything is leased: a lease is billed from the start.
+    if ((info.peerSlots ?? 0) > 0) {
+      throw new ConfigurationError(
+        'UNSUPPORTED_CAPABILITY',
+        `target "${info.targetName}" leases its browsers from ${this.provider.name}, and a test's peer on it would need a lease of its own, which this version does not take for a peer; run the peer on a target that launches its browser on this machine`,
+      );
+    }
     const variable = handoffVariable(info.targetName);
     const held: BrowserLease[] = [];
     this.held.set(info.targetName, held);

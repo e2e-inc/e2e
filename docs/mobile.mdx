@@ -470,6 +470,30 @@ If none are booted, it boots a shut-down one: on iOS an iPhone before an iPad
 before an Apple TV, on Android a phone or tablet before a TV, then the newest
 OS, then name order. Two workers never drive the same device.
 
+### Two users on two devices
+
+A test's [peers](/authentication#two-users-in-one-test) run beside its own
+user. A peer on a device target takes a device of its own from the pool, so
+a worker whose test has one peer there needs two devices:
+
+```ts
+test('both see the order', { platforms: ['ios'], peers: { courier: {} } }, async ({ screen, peers }) => {
+  await screen.getByRole('button', 'Place order').tap();
+  await expect(peers.courier.screen.getByText('New order')).toBeVisible();
+});
+```
+
+The run sets those devices aside for every worker on the target, for the
+whole run, so one test with a peer leaves the target fewer workers for every
+test. With too few devices, it starts fewer workers and says so. When one
+worker and its peers don't fit, it stops before any test. To keep the rest of
+a suite on every device, tag the tests with peers and run them on their own,
+as the mobile benchmark's CI does: `--exclude-tag peers` for the suite, then
+`--tag peers`.
+
+A device restores no saved login, so a device peer signs in during the test.
+A peer can't take a device from a [device provider](#hosted-devices).
+
 ## Agent tools
 
 The agent already has basic actions such as `tap`, `type`, and `scroll`.
@@ -495,7 +519,8 @@ export default {
 } satisfies E2EConfig;
 ```
 
-Calls go to the engine that runs the current attempt. `open_app`, `swipe`,
+Calls go to the engine that runs the current attempt. A peer's agent calls
+the tools on the peer's own device. `open_app`, `swipe`,
 and `alert` change device state, so the agent runs them live during a cache
 replay. The [mobile engine reference](/reference/mobile#agent-tools)
 describes each tool. To add your own beside them, see

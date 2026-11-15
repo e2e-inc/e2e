@@ -39,6 +39,14 @@ export interface ScreenshotContextOptions {
   readonly titlePath: readonly string[];
   readonly written: WrittenScreenshots;
   readonly artifacts: ArtifactSink;
+  /** The peer the screenshots are of; absent for the test's own user. */
+  readonly user?: ScreenshotUser | undefined;
+}
+
+/** A peer whose screenshots these are: its name, and the target of the test that brought it. */
+export interface ScreenshotUser {
+  readonly name: string;
+  readonly ownerTarget: string;
 }
 
 /**
@@ -71,11 +79,17 @@ export class WrittenScreenshots {
   }
 }
 
-/** The screenshot context of one attempt: beside the test file, one file per target and operating system. */
+/**
+ * The screenshot context of one attempt: beside the test file, one file per
+ * target and operating system. A peer's are in `peers/<test's target>/<name>`
+ * there, so two users' screenshots of one name never share a file, nor do one
+ * peer's in two pairs of the test on two targets.
+ */
 export function createScreenshotContext(options: ScreenshotContextOptions): ScreenshotContext {
+  const directory = path.join(options.projectRoot, `${options.file}-snapshots`);
   return {
     projectRoot: options.projectRoot,
-    directory: path.join(options.projectRoot, `${options.file}-snapshots`),
+    directory: options.user === undefined ? directory : path.join(directory, 'peers', options.user.ownerTarget, options.user.name),
     suffix: `-${options.targetName}-${process.platform}`,
     titlePath: options.titlePath,
     update: options.update,

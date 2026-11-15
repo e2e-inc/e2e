@@ -10,6 +10,23 @@ import { attemptKeep, attemptVideo, type AttemptRecordings, type RecordingKind, 
 import type { Capability, RecordingMode, TestOptions } from '../types.ts';
 import { excludingEntry, type Collection, type CollectedTest, type UncollectedFile } from './collect.ts';
 import { groupChain } from './registry.ts';
+import { isServedEngine } from '../engine/protocol/client.ts';
+
+/** One more user a test declares, as written: its target defaults per pair (`peerTarget`). */
+export interface ResolvedPeer {
+  readonly name: string;
+  /** The target the peer's app runs on; undefined runs it on the pair's own target. */
+  readonly target: string | undefined;
+  readonly session: string | undefined;
+  /** The configured agent the peer runs as; undefined runs it as the pair's agent. */
+  readonly agent: string | undefined;
+  readonly agentContext: string | undefined;
+}
+
+/** The name of the target a peer of `pair` runs on. */
+export function peerTarget(peer: ResolvedPeer, pair: Pick<TestTargetPair, 'target'>): string {
+  return peer.target ?? pair.target.name;
+}
 
 export interface ResolvedTestOptions {
   readonly timeout: number;
@@ -17,6 +34,8 @@ export interface ResolvedTestOptions {
   readonly platforms: readonly string[] | undefined;
   readonly requires: readonly Capability[];
   readonly session: string | undefined;
+  /** The test's peers in declaration order, the innermost layer's map as a whole; empty when it has none. */
+  readonly peers: readonly ResolvedPeer[];
   readonly agentContext: string | undefined;
   /**
    * The configured agents the test runs as, one pair (and one result) each,
@@ -166,6 +185,7 @@ export function resolveOptions(test: CollectedTest, config: ResolvedConfig): Res
   let platforms: readonly string[] | undefined;
   let requires: readonly Capability[] = [];
   let session: string | undefined;
+  let peers: TestOptions['peers'];
   let pin: readonly string[] | undefined;
   let skipReason: string | undefined;
   let trace: TestOptions['trace'];
@@ -180,6 +200,7 @@ export function resolveOptions(test: CollectedTest, config: ResolvedConfig): Res
     if (layer.platforms !== undefined) platforms = layer.platforms;
     if (layer.requires !== undefined) requires = layer.requires;
     if (layer.session !== undefined) session = layer.session;
+    if (layer.peers !== undefined) peers = layer.peers;
     if (layer.agent !== undefined) pin = typeof layer.agent === 'string' ? [layer.agent] : layer.agent;
     if (layer.agentContext !== undefined) agentContextParts.push(layer.agentContext);
     if (layer.skip !== undefined && layer.skip !== false) {
@@ -220,6 +241,7 @@ export function resolveOptions(test: CollectedTest, config: ResolvedConfig): Res
     platforms,
     requires,
     session,
+    peers: resolvePeers(test, peers, config),
     agents: effectiveAgents(test, pin, config.agentNames),
     agentContext: agentContextParts.length === 0 ? undefined : agentContextParts.join('\n'),
     skipReason: skipReason === undefined ? undefined : truncateUtf8(sanitizeText(staticSecretLedger(config.allSecrets).redact(skipReason)), 8192),
@@ -228,6 +250,32 @@ export function resolveOptions(test: CollectedTest, config: ResolvedConfig): Res
     trace,
     video,
   };
+}
+
+/**
+ * A test's peers with the facts the config settles checked here, before any
+ * process starts: the target and agent each names exist. Whether the target
+ * is selected and its login saved is decided per pair at selection.
+ */
+function resolvePeers(test: CollectedTest, peers: TestOptions['peers'], config: ResolvedConfig): readonly ResolvedPeer[] {
+  const targetNames = config.targets.map((target) => target.name);
+  const agentNames = [...config.agents.keys()];
+  const named = `test "${test.titlePath.join(' > ')}" in ${test.file}`;
+  return Object.freeze(
+    Object.entries(peers ?? {}).map(([name, peer]) => {
+      if (peer.target !== undefined && !targetNames.includes(peer.target)) {
+        throw new CollectionError(
+          `${named} runs peer "${name}" on target "${peer.target}", which the config does not declare; targets: ${targetNames.map((each) => `"${each}"`).join(', ')}${didYouMean(peer.target, targetNames)}`,
+        );
+      }
+      if (peer.agent !== undefined && !config.agents.has(peer.agent)) {
+        throw new CollectionError(
+          `${named} runs peer "${name}" as agent "${peer.agent}", which agents does not define; configured: ${agentNames.join(', ')}${didYouMean(peer.agent, agentNames)}`,
+        );
+      }
+      return Object.freeze({ name, target: peer.target, session: peer.session, agent: peer.agent, agentContext: peer.agentContext });
+    }),
+  );
 }
 
 /**
@@ -353,7 +401,12 @@ export function select(
   collection: Collection,
   config: ResolvedConfig,
   filters: SelectionFilters = {},
-  flags: { passWithNoTests?: boolean; noTestsHint?: string } = {},
+  flags: {
+    passWithNoTests?: boolean;
+    noTestsHint?: string;
+    /** The caller refuses every test with peers itself (an MCP session drives one app), so selection leaves their targets and sessions unchecked. */
+    peersRefused?: boolean;
+  } = {},
 ): Selection {
   const tagMode = filters.tagMode ?? 'any';
   const targets = selectTargets(config.targets, filters.targetIds);
@@ -401,7 +454,7 @@ export function select(
   // shard machines agree on the cut whatever a filter answers.
   const withExclusions =
     filters.excluded === undefined ? withShard : applySerialClosure(applyExclusions(withShard, filters.excluded));
-  const withSessions = applySessionSelection(withExclusions, sessionProducers, collection.uncollected);
+  const withSessions = applySessionSelection(withExclusions, sessionProducers, collection.uncollected, targets, flags.peersRefused === true);
 
   const runnableOrdinary = withSessions.filter(
     (pair) => pair.disposition === 'run' && pair.test.kind === 'test',
@@ -637,9 +690,16 @@ function withSetupConsumers(
   for (const target of targets) {
     for (const test of tests) {
       const options = optionsByTest.get(test.id)!;
-      const producer = options.session === undefined ? undefined : sessionProducers.get(options.session);
-      if (producer === undefined) continue;
-      const rerun = optionsByTest.get(producer.id)!.agents.some((agent) => lastFailed.has(resultId(producer.id, target.name, agent)));
+      // Its own login on this target, then each peer's on the peer's target.
+      const logins = [
+        { session: options.session, target: target.name },
+        ...options.peers.map((peer) => ({ session: peer.session, target: peer.target ?? target.name })),
+      ];
+      const rerun = logins.some(({ session, target: producedOn }) => {
+        const producer = session === undefined ? undefined : sessionProducers.get(session);
+        if (producer === undefined) return false;
+        return optionsByTest.get(producer.id)!.agents.some((agent) => lastFailed.has(resultId(producer.id, producedOn, agent)));
+      });
       if (rerun) for (const agent of options.agents) widened.add(resultId(test.id, target.name, agent));
     }
   }
@@ -850,12 +910,13 @@ function applySessionSelection(
   pairs: readonly TestTargetPair[],
   sessionProducers: ReadonlyMap<string, CollectedTest>,
   uncollected: readonly UncollectedFile[],
+  targets: readonly ResolvedTarget[],
+  peersRefused: boolean,
 ): TestTargetPair[] {
   /** Each needed setup, by target and producer, with the sessions a selected test consumes from it. */
   const neededSetups = new Map<string, Set<string>>();
-  for (const pair of pairs) {
-    if (pair.disposition !== 'run' || pair.options.session === undefined) continue;
-    const producer = sessionProducers.get(pair.options.session);
+  const need = (pair: TestTargetPair, session: string, targetName: string, peer: string | undefined): void => {
+    const producer = sessionProducers.get(session);
     if (producer === undefined) {
       // The setup may be in a file a narrowed run could not collect; its error is then the cause.
       const cause =
@@ -866,15 +927,57 @@ function applySessionSelection(
       const known =
         declared.length === 0
           ? '; no collected setup test declares a session'
-          : `; setup tests declare ${declared.map((name) => `"${name}"`).join(', ')}${didYouMean(pair.options.session, declared)}`;
+          : `; setup tests declare ${declared.map((name) => `"${name}"`).join(', ')}${didYouMean(session, declared)}`;
+      const consumer = peer === undefined ? '' : ` for peer "${peer}"`;
       throw new CollectionError(
-        `test "${pair.test.titlePath.join(' > ')}" in ${pair.test.file} consumes session "${pair.options.session}" but no setup test produces it${known}${cause}`,
+        `test "${pair.test.titlePath.join(' > ')}" in ${pair.test.file} consumes session "${session}"${consumer} but no setup test produces it${known}${cause}`,
       );
     }
-    const key = `${pair.target.name}::${producer.id}`;
+    const key = `${targetName}::${producer.id}`;
     const sessions = neededSetups.get(key) ?? new Set<string>();
-    sessions.add(pair.options.session);
+    sessions.add(session);
     neededSetups.set(key, sessions);
+  };
+  const selected = new Map(targets.map((target) => [target.name, target]));
+  for (const pair of pairs) {
+    if (pair.disposition !== 'run') continue;
+    if (pair.options.session !== undefined) need(pair, pair.options.session, pair.target.name, undefined);
+    // A caller that refuses tests with peers says why itself: a target or setup they need is not its concern.
+    if (peersRefused) continue;
+    // An engine may contribute its own fixture named `peers`, as it could before e2e had them; it would hide the test's.
+    const engine = pair.target.engine;
+    if (pair.options.peers.length > 0 && engine?.capabilities.has('peers') === true) {
+      throw new CollectionError(
+        `test "${pair.test.titlePath.join(' > ')}" in ${pair.test.file} declares peers, but target "${pair.target.name}" runs on engine ${engine.name}, which contributes a fixture named "peers"; the peers option needs that name`,
+      );
+    }
+    for (const peer of pair.options.peers) {
+      const targetName = peerTarget(peer, pair);
+      const named = `test "${pair.test.titlePath.join(' > ')}" in ${pair.test.file}`;
+      const target = selected.get(targetName);
+      // A peer's app runs on its target's engine, so the run must hold that
+      // target: a --target that leaves it out is an error, not a silent skip.
+      if (target === undefined) {
+        throw new CollectionError(
+          `${named} runs peer "${peer.name}" on target "${targetName}", which this run does not select; add --target ${targetName}`,
+        );
+      }
+      // A peer's engine comes from a second load of the config in the
+      // worker; a target served by an engine server gets one more connection
+      // to the same server, which this version does not open for a peer.
+      if (target.engine !== undefined && isServedEngine(target.engine)) {
+        throw new CollectionError(
+          `${named} runs peer "${peer.name}" on target "${targetName}", whose engine runs in an engine server (connectEngine); a peer runs on an engine in the worker's own process only, so give the peer a target whose engine the config creates`,
+        );
+      }
+      if (peer.session === undefined) continue;
+      if (target.engine !== undefined && !target.engine.capabilities.has('state')) {
+        throw new CollectionError(
+          `${named} restores session "${peer.session}" into peer "${peer.name}", but target "${targetName}" cannot save or restore a session: engine ${target.engine.name}, as configured, has no state capability; sign the peer in during the test instead`,
+        );
+      }
+      need(pair, peer.session, targetName, peer.name);
+    }
   }
   return pairs.map((pair) => {
     if (pair.test.kind !== 'setup') return pair;

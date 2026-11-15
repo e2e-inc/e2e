@@ -715,7 +715,7 @@ open_session {test: "tests/checkout.e2e.ts:12"}
 | --- | --- |
 | `NO_TESTS` | `test` selects no runnable test. The message names the cause, as for `e2e run`. |
 | `TEST_AMBIGUOUS` | `test` selects several tests. The message lists them as `file:line`. |
-| `SESSION_TEST_UNSUPPORTED` | The test is in a serial group, starts from a setup test's `session`, or runs as several agents. |
+| `SESSION_TEST_UNSUPPORTED` | The test is in a serial group, starts from a setup test's `session`, runs as several agents, or has [`peers`](/reference/test#peers). |
 | `COLLECTION_ERROR` | A test file fails to collect, as for `e2e run`. |
 
 ## Several sessions

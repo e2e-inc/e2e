@@ -114,6 +114,12 @@ describe('agentStepTable', () => {
     expect(stepModelLabel(acted)).toBe('typesafe-ai/jev');
   });
 
+  it("names the peer before a peer's step", () => {
+    const table = agentStepTable([result('invites', [step('s1', 'send the invite'), step('s2', 'accept the invite', { user: 'ava' })])], []);
+    const [, ...rows] = cells(table);
+    expect(rows.map((row) => row[0])).toEqual(['agent.act "send the invite"', 'ava · agent.act "accept the invite"']);
+  });
+
   it('shows `-` for a step whose model record lacks provenance and never prints undefined', () => {
     const table = agentStepTable(
       [result('pays', [

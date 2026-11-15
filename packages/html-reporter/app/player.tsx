@@ -35,6 +35,9 @@ export function VideoPlayer({
   onIndexChange,
   videoRef,
   steps,
+  users,
+  user,
+  onUserChange,
   playingStep,
   onPlayhead,
   shape,
@@ -44,7 +47,12 @@ export function VideoPlayer({
   index: number;
   onIndexChange: (index: number) => void;
   videoRef: RefObject<HTMLVideoElement | null>;
+  /** The steps of the user whose videos these are. */
   steps: readonly Step[];
+  /** Every user whose app recorded a video, the test's own user as `undefined`; a choice shows only with more than one. */
+  users: readonly (string | undefined)[];
+  user: string | undefined;
+  onUserChange: (user: string | undefined) => void;
   playingStep: Step | undefined;
   onPlayhead: (at: number) => void;
   /**
@@ -150,6 +158,22 @@ export function VideoPlayer({
             {formatClock(time)} / {formatClock(duration)}
           </span>
           <span className="flex-1" />
+          {users.length > 1 ? (
+            <div className="flex gap-e2e-1" role="group" aria-label="Whose screen">
+              {users.map((candidate) => (
+                <button
+                  key={candidate ?? ''}
+                  type="button"
+                  className="e2e-action"
+                  aria-pressed={candidate === user}
+                  title={candidate === undefined ? "The test's own app" : `The app of the peer ${candidate}`}
+                  onClick={() => onUserChange(candidate)}
+                >
+                  {candidate ?? 'main'}
+                </button>
+              ))}
+            </div>
+          ) : null}
           {videos.length > 1 ? (
             <div className="flex gap-e2e-1" role="group" aria-label="Recording part">
               {videos.map((candidate, partIndex) => (

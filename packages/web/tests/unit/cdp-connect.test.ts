@@ -71,6 +71,18 @@ describe('web({ connect })', () => {
 });
 
 describe('PlaywrightSurface CDP attach', () => {
+  it("refuses a run that puts a test's peer on an attached browser, and prepares any other run as before", async () => {
+    const attached = new PlaywrightSurface({ connect: { cdpEndpoint: () => 'ws://localhost:0' } });
+    const info = { runId: 'r', targetName: 'cdp', projectRoot: '/project', app: {}, slots: 2, env: {}, signal: new AbortController().signal, headed: false, log: () => undefined };
+    await expect(attached.prepare({ ...info, peerSlots: 1 })).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: 'target "cdp" attaches to a browser over CDP (web({ connect })), and a test\'s peer on it would not get a browser of its own; run the peer on a target that launches its browser on this machine',
+    });
+    await expect(attached.prepare(info)).resolves.toBeUndefined();
+    await expect(attached.prepare({ ...info, peerSlots: 0 })).resolves.toBeUndefined();
+  });
+
+
   it('fails init with ENGINE_FAILURE when the endpoint resolves empty or the resolver throws, without touching a browser', async () => {
     const empty = new PlaywrightSurface({ connect: { cdpEndpoint: () => '   ' } });
     await expect(empty.init(initInfo())).rejects.toMatchObject({

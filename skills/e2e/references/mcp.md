@@ -270,8 +270,8 @@ session runs the test and stops where it failed:
   the session's target. Several fail with `TEST_AMBIGUOUS`, which lists them
   as `file:line`; none fails with `NO_TESTS`.
 - `SESSION_TEST_UNSUPPORTED`: a test in a serial group, a test that starts
-  from a setup test's `session`, and a test that runs as several agents
-  can't run alone in a session. Fix those with `run_tests`.
+  from a setup test's `session`, a test that runs as several agents, and a
+  test with peers can't run alone in a session. Fix those with `run_tests`.
 
 ## Rules
 

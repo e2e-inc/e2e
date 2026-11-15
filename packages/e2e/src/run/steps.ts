@@ -215,6 +215,8 @@ export interface StepRecord {
   model?: StepModelInfo;
   /** The configured agent an agent step ran with, by name. */
   agent?: string;
+  /** The peer whose app the step ran on, by name (the `peers` option); absent for the test's own user. */
+  user?: string;
   /** The hook the step ran in; absent for a step of the test body. */
   phase?: StepPhase;
   /** How the last screen the step saw differs from the step before's; absent when it saw none. */
@@ -240,6 +242,8 @@ interface StepProgressIdentity {
   readonly attemptIndex: number;
   readonly stepId: string;
   readonly stepIndex: number;
+  /** The peer whose app the step runs on; absent for the test's own user. */
+  readonly user?: string;
 }
 
 /** One progress payload before the recorder attaches its identity. */
@@ -292,6 +296,38 @@ export interface StepRunOptions {
   readonly verifies?: boolean;
   /** The configured agent an agent step runs with, recorded on the step. */
   readonly agent?: string | undefined;
+  /** The peer whose app the step runs on; a step inside another runs on that one's. Set by `StepRecorder.forUser`. */
+  readonly user?: string | undefined;
+}
+
+/**
+ * What fixtures record steps through: the attempt's recorder itself for the
+ * test's own user, or `forUser`'s view of it for a peer, which marks every
+ * step it opens as the peer's.
+ */
+export type StepSink = Pick<
+  StepRecorder,
+  | 'run'
+  | 'recordEvent'
+  | 'activity'
+  | 'attachAgentDetails'
+  | 'attachArtifact'
+  | 'attachViewport'
+  | 'redactText'
+  | 'replaying'
+  | 'completed'
+  | 'currentStepId'
+  | 'currentStepIndex'
+>;
+
+/**
+ * The agent a peer runs as and its app's target, as `forUser` takes them.
+ * Declared here, not imported from the AI trace module, whose declarations
+ * import the optional `ai` package: this one is on the public types.
+ */
+interface PeerTraceIdentity {
+  readonly agent: string;
+  readonly target: string;
 }
 
 export interface StepRecorderOptions {
@@ -322,6 +358,8 @@ export interface StepHoldRequest {
   /** Already redacted. */
   readonly label: string;
   readonly source?: SourceLocation;
+  /** The peer whose app the step runs on; absent for the test's own user. */
+  readonly user?: string;
 }
 
 /** A step call waiting at its hold, kept so a body that returns without awaiting it still fails as `STEP_NOT_AWAITED`. */
@@ -366,6 +404,8 @@ export interface AppLogRecord {
   readonly level: AppLogEntry['level'];
   readonly text: string;
   readonly at: string;
+  /** The peer whose app logged it, by name; absent for the test's own user's app. */
+  readonly user?: string;
   readonly step?: number;
 }
 /** Characters of an event's detail the report admits. */
@@ -399,17 +439,19 @@ export class StepRecorder {
   /** The promises of abandoned steps, for the wait before teardown. */
   private readonly abandonedPromises: Promise<unknown>[] = [];
   /** The index every step before which a passed verification proves, or -1 when none has passed. */
-  private lastVerified = -1;
+  private readonly lastVerifiedBy = new Map<string | undefined, number>();
   /** What the app logged this attempt, within `APP_LOG_LIMITS`. */
   private readonly logged: AppLogRecord[] = [];
-  /** App log entries of each kind `APP_LOG_LIMITS` counts, kept so far. */
-  private readonly loggedCounts = { errorsAndWarnings: 0, info: 0 };
+  /** App log entries of each kind `APP_LOG_LIMITS` counts, kept so far, by user: each user's app has its own limit. */
+  private readonly loggedCounts = new Map<string | undefined, { errorsAndWarnings: number; info: number }>();
   /** The last screen each running step saw, read only when the step ends. */
   private readonly seenScreens = new Map<string, () => ScreenText | undefined>();
-  /** The last screen a finished step saw, the one the next step's is compared with. */
-  private lastScreen: { readonly step: number; readonly screen: ScreenText } | undefined;
-  /** Where the app went before the attempt's first step, told under it once it starts. */
-  private readonly earlyNavigations: { line: string; at: string }[] = [];
+  /** The last screen each user's finished step saw, the one that user's next step's is compared with; the test's own user is `undefined`. */
+  private readonly lastScreens = new Map<string | undefined, { readonly step: number; readonly screen: ScreenText }>();
+  /** Where each user's app went before that user's first step, told under it once it starts. */
+  private readonly earlyNavigations = new Map<string | undefined, { line: string; at: string }[]>();
+  /** Each peer's agent and target, by name, which its steps' model calls are attributed to. */
+  private readonly users = new Map<string, PeerTraceIdentity>();
   private readonly maxEventsPerStep: number;
   private readonly onProgress: ((progress: StepProgress) => void) | undefined;
   private readonly projectRoot: string | undefined;
@@ -447,7 +489,16 @@ export class StepRecorder {
 
   /** The index every step before which a passed verification proves, or -1 when none has passed. */
   get lastVerifiedStepIndex(): number {
-    return this.lastVerified;
+    return this.lastVerifiedStepIndexOf(undefined);
+  }
+
+  /**
+   * The same for one user's steps: a peer's passing check proves only what
+   * the peer's own steps before it left, never another user's, so each
+   * user's staged recordings are confirmed by that user's checks alone.
+   */
+  lastVerifiedStepIndexOf(user: string | undefined): number {
+    return this.lastVerifiedBy.get(user) ?? -1;
   }
 
   /** Runs one public API call as a recorded top-level step. */
@@ -481,7 +532,8 @@ export class StepRecorder {
     this.held.add(call);
     const promise = (async () => {
       try {
-        await hold({ api: call.api, label: call.label, ...(source === undefined ? {} : { source }) }, call.cancel.signal);
+        const user = call.options.user;
+        await hold({ api: call.api, label: call.label, ...(source === undefined ? {} : { source }), ...(user === undefined ? {} : { user }) }, call.cancel.signal);
         // Released in the same turn the body abandoned it: it must not run.
         call.cancel.signal.throwIfAborted();
       } catch (cause) {
@@ -511,14 +563,15 @@ export class StepRecorder {
     // A verification run inside another step (an `onAction` hook's) proves
     // only what the steps before that one left, never the step still running.
     const verifiesBefore = parent?.index ?? this.steps.length;
-    const record = this.open(kind, api, label, stack, options);
+    // Each user's steps name it: a peer's come through its own sink, so one the test's own code runs inside a peer's step stays the test's.
+    const record = this.open(kind, api, label, stack, options, options.user);
     const promise = this.execute(record, body, options, verifiesBefore);
     this.pending.set(record.id, promise);
     return promise;
   }
 
   /** Records a step as started now and tells reporters. */
-  private open(kind: StepKind, api: string, label: string, stack: string | undefined, options: StepRunOptions): StepRecord {
+  private open(kind: StepKind, api: string, label: string, stack: string | undefined, options: StepRunOptions, user: string | undefined): StepRecord {
     const index = this.steps.length;
     const startedAt = timestamp();
     const source = sourceLocation(stack, this.projectRoot);
@@ -534,12 +587,13 @@ export class StepRecorder {
       durationMs: 0,
       events: [],
       ...(options.agent === undefined ? {} : { agent: options.agent }),
+      ...(user === undefined ? {} : { user }),
       ...(this.phase === undefined ? {} : { phase: this.phase }),
       artifacts: [],
     };
     this.steps.push(record);
     this.running.add(record.id);
-    for (const { line, at } of this.earlyNavigations.splice(0)) this.fileNavigation(record, line, at);
+    for (const { line, at } of this.earlyNavigations.get(user)?.splice(0) ?? []) this.fileNavigation(record, line, at);
     if (stack !== undefined) this.stacks.set(record.id, stack);
     this.publish(record, { phase: 'start', kind, api, label });
     return record;
@@ -549,11 +603,12 @@ export class StepRecorder {
     const startedMs = Date.now();
     try {
       // Model calls made inside the body are attributed to this step.
-      const work = this.scope.run(record, () => withAiTraceStep(record.api, record.label, body));
+      const user = record.user === undefined ? undefined : { name: record.user, ...this.users.get(record.user)! };
+      const work = this.scope.run(record, () => withAiTraceStep(record.api, record.label, body, user));
       const result = await (this.signal === undefined ? work : withAbort(work, this.signal, () => new TestError('CANCELLED', `${record.api} cancelled`)));
       if (this.abandoned.has(record.id)) return result;
       record.durationMs = Date.now() - startedMs;
-      if (options.verifies === true) this.lastVerified = Math.max(this.lastVerified, verifiesBefore);
+      if (options.verifies === true) this.lastVerifiedBy.set(record.user, Math.max(this.lastVerifiedStepIndexOf(record.user), verifiesBefore));
       return result;
     } catch (cause) {
       if (this.abandoned.has(record.id)) {
@@ -600,7 +655,7 @@ export class StepRecorder {
     const held = [...this.held].map((call) => {
       this.held.delete(call);
       call.cancel.abort();
-      const record = this.open(call.kind, call.api, call.label, call.stack, call.options);
+      const record = this.open(call.kind, call.api, call.label, call.stack, call.options, call.options.user);
       this.pending.set(record.id, call.promise);
       return record;
     });
@@ -659,11 +714,11 @@ export class StepRecorder {
    * when none is running. The running step wins so a step that ran a nested
    * step (a fixture call that clicked a link, say) still owns what it produced.
    */
-  attachArtifact(artifactId: string): void {
-    // Cleanup outside a scope may attach to the last step. Work inherited
-    // from a closed scope must never attach to a newer step.
+  attachArtifact(artifactId: string, user?: string): void {
+    // Cleanup outside a scope may attach to the last step, of the user whose
+    // app made it. Work inherited from a closed scope must never attach to a newer step.
     const target = this.scope.getStore() === undefined
-      ? this.steps[this.steps.length - 1]
+      ? this.steps.findLast((step) => step.user === user)
       : this.current();
     if (target !== undefined) target.artifacts.push(artifactId);
   }
@@ -683,23 +738,29 @@ export class StepRecorder {
    * attempt's app log (`appLog`), within `APP_LOG_LIMITS`; where the app went
    * is an event of the step, and one before the first step waits for it.
    */
-  recordAppEvent(event: AppEvent, at: string = timestamp()): void {
-    const target = this.current() ?? this.steps.at(-1);
+  recordAppEvent(event: AppEvent, at: string = timestamp(), user?: string): void {
+    // Each user's app reports on its own: what it did lands with that user's steps.
+    const running = this.current();
+    const target = running !== undefined && running.user === user ? running : this.steps.findLast((step) => step.user === user);
     if (event.kind === 'navigation') {
       if (target === undefined) {
+        const waiting = this.earlyNavigations.get(user) ?? [];
         // A step takes no more events than this, so no more wait for one.
-        if (this.earlyNavigations.length < this.maxEventsPerStep) this.earlyNavigations.push({ line: event.line, at });
+        if (waiting.length < this.maxEventsPerStep) waiting.push({ line: event.line, at });
+        this.earlyNavigations.set(user, waiting);
       }
       else this.fileNavigation(target, event.line, at);
       return;
     }
     const { entry } = event;
     const counted = entry.level === 'info' ? 'info' : 'errorsAndWarnings';
-    if (this.loggedCounts[counted] >= APP_LOG_LIMITS[counted]) return;
-    this.loggedCounts[counted] += 1;
+    const counts = this.loggedCounts.get(user) ?? { errorsAndWarnings: 0, info: 0 };
+    if (counts[counted] >= APP_LOG_LIMITS[counted]) return;
+    counts[counted] += 1;
+    this.loggedCounts.set(user, counts);
     // Redacted before it is cut, so no cut leaves the head of a secret behind.
     const text = bound(this.redactText(entry.text.replace(/\s+/g, ' ').trim()), MAX_EVENT_DETAIL_CHARS);
-    this.logged.push({ source: entry.source, level: entry.level, text, at, ...(target === undefined ? {} : { step: target.index }) });
+    this.logged.push({ source: entry.source, level: entry.level, text, at, ...(target === undefined ? {} : { step: target.index }), ...(user === undefined ? {} : { user }) });
   }
 
   /** What the app logged this attempt, oldest first. */
@@ -730,8 +791,8 @@ export class StepRecorder {
       return;
     }
     if (screen === undefined) return;
-    record.screen = compareScreens(this.lastScreen, screen);
-    this.lastScreen = { step: record.index, screen };
+    record.screen = compareScreens(this.lastScreens.get(record.user), screen);
+    this.lastScreens.set(record.user, { step: record.index, screen });
   }
 
   private fileNavigation(target: StepRecord, line: string, at: string): void {
@@ -808,6 +869,36 @@ export class StepRecorder {
     return this.steps.filter((step) => !this.running.has(step.id));
   }
 
+  /**
+   * The recorder as one peer's fixtures see it: every step they open is the
+   * peer's, on the attempt's one timeline, and the steps it reads back as
+   * completed are the peer's alone. `as` is the agent the peer runs as and
+   * its app's target, which its steps' model calls are attributed to.
+   */
+  forUser(user: string, as: PeerTraceIdentity): StepSink {
+    this.users.set(user, as);
+    // The view's getters have the view as `this`; these read the recorder's running step.
+    const runningId = (): string | undefined => this.currentStepId;
+    const runningIndex = (): number | undefined => this.currentStepIndex;
+    return {
+      run: (kind, api, label, body, options = {}) => this.run(kind, api, label, body, { ...options, user }),
+      recordEvent: (event) => this.recordEvent(event),
+      activity: (activity) => this.activity(activity),
+      attachAgentDetails: (details) => this.attachAgentDetails(details),
+      attachArtifact: (artifactId) => this.attachArtifact(artifactId, user),
+      attachViewport: (viewport) => this.attachViewport(viewport),
+      redactText: (text) => this.redactText(text),
+      replaying: (active) => this.replaying(active),
+      completed: () => this.completed().filter((step) => step.user === user),
+      get currentStepId() {
+        return runningId();
+      },
+      get currentStepIndex() {
+        return runningIndex();
+      },
+    };
+  }
+
   private current(): StepRecord | undefined {
     const record = this.scope.getStore();
     return record !== undefined && this.running.has(record.id) && !this.abandoned.has(record.id) ? record : undefined;
@@ -822,6 +913,7 @@ export class StepRecorder {
         attemptIndex: this.attempt.index,
         stepId: record.id,
         stepIndex: record.index,
+        ...(record.user === undefined ? {} : { user: record.user }),
       },
     });
   }

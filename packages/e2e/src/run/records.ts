@@ -28,6 +28,8 @@ export interface ArtifactRecord {
    * is the step's offset into it.
    */
   startedAt?: string;
+  /** The peer whose app produced it, by name; absent for the test's own user. */
+  user?: string;
   /**
    * Mirrors report-1: how much of the file the runner masked. A screenshot is
    * `complete`; a video is `incomplete`, since a recording masks nothing
@@ -65,6 +67,14 @@ export interface FailureEvidence {
   candidates?: string[];
 }
 
+/** What an attempt kept of one peer beside its steps: the peer's engine's environment facts and its failure evidence. */
+export interface PeerAttemptFacts {
+  /** The target the peer's app ran on. */
+  target: string;
+  environment?: Record<string, string>;
+  failure?: FailureEvidence;
+}
+
 export interface AttemptRecord {
   id: string;
   index: number;
@@ -88,6 +98,8 @@ export interface AttemptRecord {
   secondaryErrors: SerializedError[];
   /** What the engine said the attempt ran on (`EngineAttemptContext.environment`), redacted. */
   environment?: Record<string, string>;
+  /** Each peer's own facts, by name: what its engine said it ran on, and the evidence its screen held when the attempt failed. */
+  peers?: Record<string, PeerAttemptFacts>;
   /** Which of the attempt's outcomes keep a trace (`keeps`), when it keeps one at all; the runner's, never in the report. */
   trace?: Keep | undefined;
   cleanup: 'complete' | 'failed' | 'forced';

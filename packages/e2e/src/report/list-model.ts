@@ -48,7 +48,10 @@ export interface CurrentStep {
 export type FinishedStep = Pick<
   Extract<StepProgress, { phase: 'end' }>,
   'api' | 'label' | 'status' | 'durationMs' | 'modelCalls'
->;
+> & {
+  /** The peer whose app the step ran on; absent for the test's own user. */
+  readonly user?: string;
+};
 
 /** A pair that has started and whose result is still to come. */
 export interface RunningTest {
@@ -62,7 +65,10 @@ export interface RunningTest {
    * executing, but its result only arrives with the whole group.
    */
   executing: boolean;
+  /** The test's own user's running step. */
   current: CurrentStep | undefined;
+  /** Each peer's running step, by peer name: a peer's steps run beside the test's own. */
+  readonly peerSteps: Map<string, CurrentStep>;
   /**
    * Finished agent steps across every attempt, oldest first. Shown under the
    * test in the live window while it runs, nested under its line in the file

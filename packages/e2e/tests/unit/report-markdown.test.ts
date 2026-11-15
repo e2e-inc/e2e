@@ -331,6 +331,30 @@ describe('renderMarkdownReport', () => {
     expect(worded).toContain(', after 15.1s\n\n> the Save button stayed\n\n- Expected:');
   });
 
+  it("names the peer whose step failed, tells the failure on that peer's screen, and names each user's evidence", () => {
+    const error = { code: 'ASSERTION_FAILED', message: 'heading "Welcome" never showed' };
+    const failedAttempt = attempt({
+      status: 'failed',
+      error,
+      artifacts: ['video', 'video'],
+      steps: [
+        step({ index: 0, kind: 'app', api: 'app.open', label: '/' }),
+        step({ index: 1, kind: 'agent', api: 'agent.act', label: 'Accept the invite', user: 'ava', status: 'failed', durationMs: 2_000, error: reportError({ message: error.message }) }),
+      ],
+    });
+    failedAttempt.artifacts = failedAttempt.artifacts.map((artifact, index) => (index === 1 ? { ...artifact, user: 'ava', path: 't/attempt-0/peers/ava/video-1.bin' } : artifact));
+    failedAttempt.failure = { url: '/cart', candidates: ['#n2 button "Pay"'] };
+    failedAttempt.peers = { ava: { target: 'web', failure: { url: '/invites', candidates: ['#n7 button "Accept"'] } } };
+    const body = renderMarkdownReport(page({ status: 'failed', results: [named({ title: 'invites', status: 'failed', attempts: [failedAttempt] })] }), { artifactsDir: '.e2e/artifacts' });
+    expect(body).toContain('**ASSERTION_FAILED** at step 2 of 2: ava · `agent.act` "Accept the invite", after 2.0s');
+    expect(body).toContain('- Screen: `/invites`\n- Closest to the locator: `#n7 button "Accept"`');
+    expect(body).not.toContain('`/cart`');
+    expect(body).toContain('Evidence: video `.e2e/artifacts/t/attempt-0/video-0.bin`, ava · video `.e2e/artifacts/t/attempt-0/peers/ava/video-1.bin`');
+    // With a link to the run's files, each user's video is its own link.
+    const linked = renderMarkdownReport(page({ status: 'failed', results: [named({ title: 'invites', status: 'failed', attempts: [failedAttempt] })] }), { artifactsUrl: 'https://ci.example/run/1#artifacts' });
+    expect(linked).toContain('Evidence: [video](https://ci.example/run/1#artifacts), [ava · video](https://ci.example/run/1#artifacts)');
+  });
+
   it('puts run-level errors before the failures and says no tests ran', () => {
     const body = renderMarkdownReport(
       page({

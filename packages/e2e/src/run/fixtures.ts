@@ -15,7 +15,7 @@ import type { DebugTrace } from '../internal/debug.ts';
 import { ConfigurationError, errorMessage, InfrastructureError, TestError } from '../internal/errors.ts';
 import { Deadline } from '../internal/time.ts';
 import { didYouMean } from '../internal/suggest.ts';
-import { createScreenshotContext, type ScreenshotContext, type WrittenScreenshots } from './screenshots.ts';
+import { createScreenshotContext, type ScreenshotContext, type ScreenshotUser, type WrittenScreenshots } from './screenshots.ts';
 import { sessionRecordings } from './recordings.ts';
 import { resolveSecretValue, sessionLedger } from './secrecy.ts';
 import { baseUrlOf, resolveNavigationUrl } from '../internal/urls.ts';
@@ -31,8 +31,8 @@ import {
 } from '../locator/screen.ts';
 import { engineAppInfo } from '../config/app.ts';
 import type { ResolvedAgentConfig, ResolvedConfig, ResolvedTarget } from '../config/resolve.ts';
-import type { Agent, App, CommandConfig, Expectable, RecordingOptions, SetupSession, TestFixtures } from '../types.ts';
-import type { StepRecord, StepRecorder } from './steps.ts';
+import type { Agent, App, CommandConfig, Expectable, PeerFixtures, RecordingOptions, SetupSession, TestFixtures } from '../types.ts';
+import type { StepRecord, StepSink } from './steps.ts';
 
 export interface ArtifactSink {
   /** Absolute attempt artifact directory, for runner-written artifacts. */
@@ -44,20 +44,22 @@ export interface ArtifactSink {
     options?: ArtifactRegistration,
   ): string;
   /** Registers a video a hosted service keeps, by URL, and returns its report artifact ID; nothing is read or stored. */
-  link(url: string, options: { readonly mediaType: string; readonly startedAt: string }): string;
+  link(url: string, options: { readonly mediaType: string; readonly startedAt: string; readonly user?: string }): string;
 }
 
 /** Facts about a produced artifact its file does not carry. */
 export interface ArtifactRegistration {
   /** When a time-based artifact (a video segment) began recording. */
   readonly startedAt?: string;
+  /** The peer whose app produced it, by name; absent for the test's own user. */
+  readonly user?: string;
 }
 
 export interface AttemptEnvironment {
   readonly config: ResolvedConfig;
   readonly target: ResolvedTarget;
   readonly session: TargetSession;
-  readonly steps: StepRecorder;
+  readonly steps: StepSink;
   /** The running phase's signal and deadline; read at call time, never captured. */
   readonly budget: AttemptBudget;
   readonly runId: string;
@@ -82,9 +84,17 @@ export interface AttemptEnvironment {
   /**
    * The test the attempt runs, which `toHaveScreenshot` keeps its screenshots
    * beside, and the screenshots the run wrote; absent for a session with no
-   * test (`e2e mcp`).
+   * test (`e2e mcp`). `user` names the peer a peer's graph is for, whose
+   * screenshots keep a folder of their own.
    */
-  readonly test?: { readonly file: string; readonly titlePath: readonly string[]; readonly writtenScreenshots: WrittenScreenshots };
+  readonly test?: {
+    readonly file: string;
+    readonly titlePath: readonly string[];
+    readonly writtenScreenshots: WrittenScreenshots;
+    readonly user?: ScreenshotUser;
+  };
+  /** The fixtures of each peer the test declares, by name, already over their own apps; absent for a peer's own graph. */
+  readonly peers?: Readonly<Record<string, PeerFixtures>>;
 }
 
 /** Builds the lazy fixture graph for one attempt. */
@@ -102,7 +112,7 @@ interface ScreenWiring {
   readonly runId: string;
   readonly attemptId: string;
   readonly config: ResolvedConfig;
-  readonly steps: StepRecorder;
+  readonly steps: StepSink;
   readonly secrets: SecretResolver;
   /** The session's secret ledger, which `screen.tree()` passes its text through. */
   readonly redaction: NodeRedaction;
@@ -174,6 +184,7 @@ export function createFixtures(environment: AttemptEnvironment): AttemptFixtures
             titlePath: environment.test.titlePath,
             written: environment.test.writtenScreenshots,
             artifacts: environment.artifacts,
+            user: environment.test.user,
           }),
         }),
   });
@@ -242,6 +253,7 @@ export function createFixtures(environment: AttemptEnvironment): AttemptFixtures
     app: environment.target.app,
     attempt: environment.attempt,
     priorSteps: environment.priorSteps,
+    ...(environment.test?.user === undefined ? {} : { user: environment.test.user.name }),
     secrets,
     redact: ledger.redact,
     redactCut: ledger.redactCut,
@@ -261,6 +273,7 @@ export function createFixtures(environment: AttemptEnvironment): AttemptFixtures
     app,
     screen,
     platform: environment.target.platform,
+    peers: peersFixture(environment.peers ?? {}),
     session: {
       save: async (name: string) => {
         const saveSession = environment.saveSession;
@@ -282,6 +295,27 @@ export function createFixtures(environment: AttemptEnvironment): AttemptFixtures
   );
 
   return { fixtures: gateUnknownFixtures(fixtures, environment), agentRuntime };
+}
+
+/**
+ * The test's peers by name. Reaching for a name the test does not declare
+ * fails at that touch, naming the ones it does, instead of a TypeError on
+ * `undefined` a line later.
+ */
+function peersFixture(declared: Readonly<Record<string, PeerFixtures>>): Readonly<Record<string, PeerFixtures>> {
+  const peers = Object.freeze({ ...declared });
+  return new Proxy(peers, {
+    get(target, property, receiver) {
+      if (typeof property !== 'string' || property in target || PROBED_KEYS.has(property)) {
+        return Reflect.get(target, property, receiver) as unknown;
+      }
+      const names = Object.keys(target);
+      throw new ConfigurationError(
+        'INVALID_CONFIG',
+        `the test declares no peer "${property}"; ${names.length === 0 ? 'it declares no peers, which the peers option adds' : `it declares ${names.map((name) => `"${name}"`).join(', ')}`}${didYouMean(property, names)}`,
+      );
+    },
+  });
 }
 
 /** Keys a test body may probe without meaning a fixture. */

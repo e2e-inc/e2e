@@ -269,6 +269,7 @@ process sees an edit.
 | `file`, `title`, `titlePath`, `kind`, `tags` | The collected test. `kind` is `test` or `setup`. `tags` is `[]` when the test declares none. |
 | `source` | The declaration, project-relative: `{ file, line, column }`. `undefined` when the test recorded none. |
 | `session` | The session the test consumes, from the test or its describe chain. `undefined` when it consumes none. |
+| `peers` | The test's [peers](/reference/test#peers), each `{ name, target, session, agent }`: `target` and `agent` are filled in from the pair when the peer sets none. Omitted when the test declares no peers. |
 | `sessions` | Session names a setup produces. `[]` on an ordinary test. |
 | `serialId` | Set when the test belongs to a serial group, otherwise `undefined`. |
 | `target`, `agent` | The target name and the configured agent this pair runs as. |

@@ -81,7 +81,7 @@ describe('registration', () => {
       'test options has unknown key "timout"; did you mean "timeout"?',
     );
     await expect(register(() => test('x', { retry: 2 } as never, noop))).rejects.toThrow(
-      'test options has unknown key "retry"; expected one of timeout, retries, tags, skip, fail, only, platforms, requires, session, agentContext, agent, trace, video',
+      'test options has unknown key "retry"; expected one of timeout, retries, tags, skip, fail, only, platforms, requires, session, peers, agentContext, agent, trace, video',
     );
     await expect(register(() => test.describe('group', { searial: true } as never, () => {}))).rejects.toThrow(
       'describe options has unknown key "searial"; did you mean "serial"?',
@@ -328,6 +328,109 @@ describe('serial groups', () => {
   });
 });
 
+describe('peers', () => {
+  const register = (declare: () => void) => collectModule(async () => declare());
+
+  it('registers a map of named peers on a test and a describe, as declared', async () => {
+    const registration = await register(() => {
+      test.describe('group', { peers: { ava: { session: 'ava' } } }, () => {
+        test('pays', { peers: { ava: { target: 'iphone', agent: 'ava', agentContext: 'You are Ava.' }, 'bob.2': {} } }, noop);
+      });
+      test('clears', { peers: {} }, noop);
+    });
+    expect(registration.tests.map((item) => item.options.peers)).toEqual([
+      { ava: { target: 'iphone', agent: 'ava', agentContext: 'You are Ava.' }, 'bob.2': {} },
+      {},
+    ]);
+    // A setup test saves sessions and declares no peers.
+    await expect(register(() => test.setup('login', { sessions: ['admin'], peers: {} } as never, noop))).rejects.toThrow(
+      /^setup options has unknown key "peers"/,
+    );
+  });
+
+  it('rejects peers that are not a map of names to objects', async () => {
+    await expect(register(() => test('x', { peers: ['ava'] } as never, noop))).rejects.toThrow(
+      'test options: peers must map peer names to their options, e.g. peers: { ava: { session: \'ava\' } }, got',
+    );
+    await expect(register(() => test('x', { peers: null } as never, noop))).rejects.toThrow(/peers must map peer names/);
+    await expect(register(() => test('x', { peers: { ava: 'ava' } } as never, noop))).rejects.toThrow(
+      /test options: peer "ava" must be an object of target, session, agent, and agentContext, got/,
+    );
+    await expect(register(() => test('x', { peers: { ava: null } } as never, noop))).rejects.toThrow(/peer "ava" must be an object/);
+  });
+
+  it('rejects a peer name a session name could not be', async () => {
+    for (const name of ['', 'two words', 'x'.repeat(129), 'a/b']) {
+      await expect(register(() => test('x', { peers: { [name]: {} } }, noop))).rejects.toThrow(
+        `test options: invalid peer name ${JSON.stringify(name)}: names are 1 through 128 ASCII letters`,
+      );
+    }
+    await expect(register(() => test('x', { peers: { ['x'.repeat(128)]: {} } }, noop))).resolves.toBeDefined();
+  });
+
+  it("rejects a peer name that could not be a folder of the peer's own: a dot, two dots, or another peer's name in other case", async () => {
+    for (const name of ['.', '..']) {
+      await expect(register(() => test('x', { peers: { [name]: {} } }, noop))).rejects.toThrow(
+        `test options: invalid peer name ${JSON.stringify(name)}: names are 1 through 128 ASCII letters, numbers, "_", "-", or ".", and not "." or ".."`,
+      );
+    }
+    await expect(register(() => test('x', { peers: { Ava: {}, ava: {} } }, noop))).rejects.toThrow(
+      'test options: peer names "Ava" and "ava" differ only in case; each peer\'s files go in a folder named after it, which a case-insensitive disk would share',
+    );
+    await expect(register(() => test('x', { peers: { '.ava': {}, 'ava.': {}, '...': {}, ava: {}, bob: {} } }, noop))).resolves.toBeDefined();
+  });
+
+  it('rejects an unknown peer key, naming the nearest, and fields that are not non-empty strings', async () => {
+    await expect(register(() => test('x', { peers: { ava: { sesion: 'ava' } } } as never, noop))).rejects.toThrow(
+      'test options: peer "ava" has unknown key "sesion"; did you mean "session"?',
+    );
+    for (const key of ['target', 'session', 'agent', 'agentContext']) {
+      await expect(register(() => test('x', { peers: { ava: { [key]: '' } } } as never, noop))).rejects.toThrow(
+        `test options: peer "ava": ${key} must be a non-empty string, got`,
+      );
+      await expect(register(() => test('x', { peers: { ava: { [key]: 7 } } } as never, noop))).rejects.toThrow(
+        `test options: peer "ava": ${key} must be a non-empty string, got`,
+      );
+    }
+    await expect(register(() => test('x', { peers: { ava: { session: 'two words' } } }, noop))).rejects.toThrow(
+      'test options: peer "ava": invalid session name "two words"',
+    );
+  });
+
+  it('checks peers on a describe the same way', async () => {
+    await expect(register(() => test.describe('group', { peers: { 'a b': {} } }, () => {}))).rejects.toThrow(
+      'describe options: invalid peer name "a b"',
+    );
+  });
+
+  it('is refused on, inside, and under a serial group, which runs on one shared app', async () => {
+    await expect(register(() => test.describe('group', { serial: true }, () => {
+      test('member', { peers: { ava: {} } }, noop);
+    }))).rejects.toThrow('test option "peers" cannot be overridden inside a serial group; it belongs to the unit');
+    await expect(register(() => test.describe('group', { serial: true, peers: { ava: {} } }, () => {}))).rejects.toThrow(
+      'describe option "peers" cannot be set on or inside a serial group; a serial group runs on one shared app',
+    );
+    await expect(register(() => test.describe('group', { serial: true }, () => {
+      test.describe('inner', { peers: { ava: {} } }, () => {});
+    }))).rejects.toThrow('describe option "peers" cannot be set on or inside a serial group');
+  });
+
+  it('refuses a serial group inside a group whose peers its tests would take, and allows one under a group that clears them', async () => {
+    await expect(register(() => test.describe('outer', { peers: { ava: {} } }, () => {
+      test.describe('group', { serial: true }, () => {
+        test('member', noop);
+      });
+    }))).rejects.toThrow('describe option "serial" cannot be set inside a group with peers ("outer"); a serial group runs on one shared app');
+    await expect(register(() => test.describe('outer', { peers: { ava: {} } }, () => {
+      test.describe('alone', { peers: {} }, () => {
+        test.describe('group', { serial: true }, () => {
+          test('member', noop);
+        });
+      });
+    }))).resolves.toBeDefined();
+  });
+});
+
 describe('test.extend', () => {
   const fixture = async (_fixtures: unknown, use: (value: string) => Promise<void>) => {
     await use('value');
@@ -385,6 +488,22 @@ describe('test.extend', () => {
     expect(() => extended.extend({ workspace: fixture } as never)).toThrow(
       /fixture "workspace" is already defined by an earlier test.extend\(\)/,
     );
+  });
+});
+
+describe("a suite's own fixture named peers", () => {
+  const register = (declare: () => void) => collectModule(async () => declare());
+  const own = test.extend<{ peers: string }>({ peers: async (_fixtures, use) => use('mine') });
+
+  it('keeps working for its tests that declare no peers, as before e2e had peers', async () => {
+    await expect(register(() => own('no peers', noop))).resolves.toBeDefined();
+    await expect(register(() => test.describe('group', { peers: { ava: {} } }, () => own('cleared', { peers: {} }, noop)))).resolves.toBeDefined();
+  });
+
+  it('refuses a test that declares peers through it, on the test or a describe around it', async () => {
+    const refusal = 'declares peers, but its test.extend() chain defines a fixture named "peers"; rename that fixture to give the test its peers';
+    await expect(register(() => own('with peers', { peers: { ava: {} } }, noop))).rejects.toThrow(`test "with peers" ${refusal}`);
+    await expect(register(() => test.describe('group', { peers: { ava: {} } }, () => own('inside', noop)))).rejects.toThrow(`test "inside" ${refusal}`);
   });
 });
 

@@ -20,6 +20,7 @@ import type {
   ArtifactRecord,
   AttemptRecord,
   FailureEvidence,
+  PeerAttemptFacts,
   ResultRecord,
   RunError,
   SerialAttemptRecord,
@@ -246,6 +247,8 @@ export interface ReportStep {
   model?: StepModelInfo | undefined;
   /** The configured agent an agent step ran with, by name. */
   agent?: string | undefined;
+  /** The peer whose app the step ran on, by name; absent for the test's own user. */
+  user?: string | undefined;
   /** The hook the step ran in; absent for a step of the test body. */
   phase?: StepRecord['phase'];
   /** How the last screen the step saw differs from the step before's; absent when it saw none. */
@@ -274,6 +277,8 @@ export interface ReportAttempt extends ReportAttemptBase {
   appLog?: readonly AppLogRecord[] | undefined;
   /** What the runner saw when the failure landed; absent on a pass or when nothing could be captured. */
   failure?: FailureEvidence | undefined;
+  /** What each peer's app ran on and showed at the failure, by peer name: the peers whose app opened, so absent when none did. */
+  peers?: Readonly<Record<string, PeerAttemptFacts>> | undefined;
   /** Why the body skipped itself; present when `status` is `skipped`, and on an attempt that failed after skipping. */
   skip?: SkipInfo | undefined;
   /**
@@ -551,6 +556,7 @@ function serializeAttempt(attempt: AttemptRecord): ReportAttempt {
   return {
     ...serializeAttemptBase(attempt),
     ...(attempt.failure === undefined ? {} : { failure: attempt.failure }),
+    ...(attempt.peers === undefined ? {} : { peers: attempt.peers }),
     ...(attempt.skip === undefined ? {} : { skip: attempt.skip }),
     ...(attempt.expectedFailure === undefined
       ? {}

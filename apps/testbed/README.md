@@ -11,7 +11,8 @@ here.
 - `app/server.mjs` — dependency-free playground app. The runner starts and
   stops it via the web engine's `command` option. The pages live under
   `app/pages/` by group, each module exporting its routes and its nav
-  entries: `basics` (home, todos, forms, login/session, dashboard, wizard),
+  entries: `basics` (home, todos, forms, login/session, dashboard, wizard,
+  a message board two users share),
   `interaction` (network, dialogs, board, pointer pad, iframes), `canvas`
   (four pixels-only surfaces), `downloads` (a file and a long page), and
   `controls` (control states, scrolling, the browser fixture's page, the
@@ -29,7 +30,8 @@ here.
   credentials and secrets, plus one file per surface added since: control
   states and the failure codes (`controls`), pointer coordinates and path
   swipes (`pointer`), viewport and node scrolling (`scroll`), the `browser`
-  fixture's own verbs (`browser`), and the per-action speed floor (`speed`).
+  fixture's own verbs (`browser`), the per-action speed floor (`speed`),
+  and two users in one test (`peers`).
   The files tagged `playwright` are Playwright's own `tests/page` specs (and
   `tests/library/download.spec.ts`) at v1.64.1, ported to the public API:
   each header names its source and the tests left out. `fail: 'reason'`

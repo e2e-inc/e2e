@@ -59,6 +59,19 @@ export interface TraceCacheKey {
   /** SHA-256 of the agent's redacted context (its `context` then the test's `agentContext`), or of the empty string. */
   readonly agentContextDigest: string;
   readonly policyVersion: string;
+  /** The peer the step ran as, by name; absent for the test's own user, whose keys stay as they were. */
+  readonly user?: string;
+  /** The target of the test that brought the peer, as `targetId` names one; set with `user`, so two pairs of one test key their peer's steps apart. */
+  readonly ownerTargetId?: string;
+  /** The configured agent the test that brought the peer runs as; set with `user`. */
+  readonly ownerAgent?: string;
+}
+
+/** The peer a step runs on, as the key sees it: its name, and the target and agent of the test that brought it. */
+export interface CachePeerIdentity {
+  readonly name: string;
+  readonly ownerTargetId: string;
+  readonly ownerAgent: string;
 }
 
 /** The agent a step runs with, as the key sees it. */
@@ -170,6 +183,7 @@ export function buildTraceCacheKey(parts: {
   readonly callIndex: number;
   readonly agent: CacheAgentIdentity;
   readonly policyVersion: string;
+  readonly user?: CachePeerIdentity | undefined;
 }): TraceCacheKey {
   return {
     specVersion: '0.1',
@@ -188,6 +202,7 @@ export function buildTraceCacheKey(parts: {
     agent: parts.agent.name,
     agentContextDigest: sha256Hex(parts.agent.context ?? ''),
     policyVersion: parts.policyVersion,
+    ...(parts.user === undefined ? {} : { user: parts.user.name, ownerTargetId: parts.user.ownerTargetId, ownerAgent: parts.user.ownerAgent }),
   };
 }
 

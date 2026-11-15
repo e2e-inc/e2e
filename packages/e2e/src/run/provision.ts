@@ -154,13 +154,13 @@ export class PreparedEngines {
   private readonly targets: ResolvedTarget[] = [];
 
   /**
-   * Runs one target's `prepare` hook for `slots` worker slots, streaming its
+   * Runs one target's `prepare` hook for `slots` slots, `peerSlots` of them for peers, streaming its
    * progress lines as notices. Resolves to nothing when the engine declares
    * no hook. Callers run targets in turn: two engines provisioning the same
    * toolchain would race, and the notices of one download read better than
    * two interleaved.
    */
-  async prepare(target: ResolvedTarget, slots: number, scope: PrepareScope): Promise<EnginePrepareResult | void> {
+  async prepare(target: ResolvedTarget, slots: number, scope: PrepareScope, peerSlots = 0): Promise<EnginePrepareResult | void> {
     const engine = target.engine;
     if (engine?.prepare === undefined) return;
     // Registered before the hook runs: a `prepare` that throws part-way still gets its `finish`.
@@ -173,6 +173,7 @@ export class PreparedEngines {
         headed: scope.headed,
         app: engineAppInfo(target.app),
         slots,
+        ...(peerSlots === 0 ? {} : { peerSlots }),
         env: scope.env,
         signal: scope.signal,
         log: (line) => scope.notice(target.name, line),

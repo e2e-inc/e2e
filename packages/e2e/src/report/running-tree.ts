@@ -8,7 +8,7 @@
 
 import { bounded, F_POINTER, formatTime, terminalColumns, terminalRows, type Colors } from './format.ts';
 import type { CurrentStep, FileGroup, PausedTest, RunningTest, SetupInFlight } from './list-model.ts';
-import { eventLine, quotedLabel, stepLine, stepPromptRows } from './list-steps.ts';
+import { eventLine, quotedLabel, stepLine, stepPromptRows, userPrefix } from './list-steps.ts';
 import { REPAINT_INTERVAL_MS, WIDTH_MARGIN } from './live-window.ts';
 
 const F_DOWN_RIGHT = '↳';
@@ -185,17 +185,24 @@ export class RunningTree {
   }
 
   /**
-   * The current step of a running pair and, for an agent step, its calls and
-   * the work in flight, at most `budget` rows. Older calls fold into one
-   * marker. No clock here: the test row above carries the one clock, so the
-   * eye has a single moving number per running test.
+   * The current steps of a running pair, the test's own user's first, then
+   * each peer's, and for an agent step its calls and the work in flight, at
+   * most `budget` rows. Older calls fold into one marker. No clock here: the
+   * test row above carries the one clock, so the eye has a single moving
+   * number per running test.
    */
   private stepRows(test: RunningTest, maxEvents: number, budget: number, now: number): string[] {
+    const own = test.current === undefined ? [] : this.currentRows(test.current, undefined, maxEvents, now);
+    // Each peer's running step under the test's own, so steps run side by side all show.
+    const peers = [...test.peerSteps].flatMap(([user, current]) => this.currentRows(current, user, maxEvents, now));
+    return [...own, ...peers].slice(0, budget);
+  }
+
+  /** One user's running step and, for an agent step, its calls and the work in flight. */
+  private currentRows(current: CurrentStep, user: string | undefined, maxEvents: number, now: number): string[] {
     const { pc } = this;
-    const { current } = test;
-    if (current === undefined) return [];
-    const rows = [pc.dim(`${F_DOWN_RIGHT} ${current.api} ${quotedLabel(current.label)}`)];
-    if (current.kind !== 'agent') return rows.slice(0, budget);
+    const rows = [pc.dim(`${F_DOWN_RIGHT} ${userPrefix(user)}${current.api} ${quotedLabel(current.label)}`)];
+    if (current.kind !== 'agent') return rows;
     const overflow = current.events.length - maxEvents;
     if (overflow > 0) rows.push(`  ${foldMarker(pc, overflow, 'call')}`);
     const maxWidth = terminalColumns() - WIDTH_MARGIN - DETAIL_INDENT.length - 2;
@@ -203,7 +210,7 @@ export class RunningTree {
       rows.push(`  ${eventLine(pc, event, { maxWidth })}`);
     }
     rows.push(`  ${waitingRow(pc, now, waitingWord(current))}`);
-    return rows.slice(0, budget);
+    return rows;
   }
 
 }

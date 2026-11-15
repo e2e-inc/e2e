@@ -13,6 +13,7 @@ import {
 import { collect, collectInMemory, collectSetups, type Collection } from '../collect/collect.ts';
 import type { ModuleRegistration } from '../collect/registry.ts';
 import {
+  peerTarget,
   repeatEach,
   select,
   selectTargets,
@@ -55,6 +56,7 @@ import { runUnits, type TargetFailure } from './scheduler.ts';
 import type { BeforeStep, HeldStep, StepPrompt } from './step-hold.ts';
 import { stepPromptLine } from '../report/list-steps.ts';
 import { buildWorkPlans, nonRunResult, orderWorkPlans, plannedSlots, type TargetWorkPlan, type TimeLimit } from './units.ts';
+import { fitWorkers, peerSlotsOf, peersBrought, slotsNeeded, type PeerSlots, type PeersBrought } from './peer-slots.ts';
 import { SessionStore } from './sessions.ts';
 import { outputLayout } from './output.ts';
 import type { RunnerOutput } from './process-output.ts';
@@ -322,6 +324,14 @@ export interface ListOptions
   targets?: readonly string[] | undefined;
 }
 
+/** One peer of a listed pair, with its defaults filled in from the pair. */
+export interface ListedPeer {
+  readonly name: string;
+  readonly target: string;
+  readonly session: string | undefined;
+  readonly agent: string;
+}
+
 /**
  * One test, target, and agent the selection produced, filtered pairs
  * included. `id` is the result id `report.json` stores for repeat 0.
@@ -340,6 +350,8 @@ export interface ListedPair {
   readonly source: { readonly file: string; readonly line: number; readonly column: number } | undefined;
   /** The session the test consumes, from the test or its describe chain. */
   readonly session: string | undefined;
+  /** The users the test adds, each with the target it runs on and the agent it runs as; omitted when it adds none. */
+  readonly peers?: readonly ListedPeer[];
   /** Session names a setup produces; `[]` on an ordinary test. */
   readonly sessions: readonly string[];
   /** Set when the test belongs to a serial group. */
@@ -964,6 +976,10 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     // The work units, built once: the same plans tell each engine's `prepare`
     // how many worker slots to provision and the scheduler what to dispatch.
     let plans = buildWorkPlans(selection, collection, config.projectRoot);
+    // A test's peers run in its worker on slots of their own on their targets,
+    // which each target's `prepare` provisions beside its own workers'.
+    const brought = peersBrought(selection);
+    let fitted: ReadonlyMap<string, number> = new Map();
     // A run with nothing to run (the filters left nothing, or
     // --pass-with-no-tests on an empty selection) still reports, but
     // prepares no engine and starts no app.
@@ -977,6 +993,20 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     const workerConfigPath = options.tests === undefined ? config.configPath : undefined;
     const inProcess = workerConfigPath === undefined;
     const runWorkers = inProcess ? 1 : config.workers;
+    // A peer's engine comes from a second load of the config file in the
+    // worker, so a run with no file to load refuses peers here, before any
+    // engine sets a slot aside, or boots a device, for one.
+    const peered = inProcess ? selection.pairs.find((pair) => pair.disposition === 'run' && pair.options.peers.length > 0) : undefined;
+    if (peered !== undefined) {
+      recordFailure(
+        new ConfigurationError(
+          'UNSUPPORTED_CAPABILITY',
+          `test "${peered.test.titlePath.join(' > ')}" in ${peered.test.file} declares peers, which need a run from a config file: a run given a config value, or of tests registered in memory, has no file to load a second engine from`,
+        ),
+        'collection',
+      );
+      return;
+    }
     // Starting long files early only pays when other workers take the rest, so only such a run reads the timings history.
     const previous = runWorkers > 1 ? await loadTimings(timingsPath(config), outputLayout(config.output).report) : undefined;
     plans = orderWorkPlans(plans, {
@@ -998,9 +1028,12 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     // of a worker's stderr fighting the live status block.
     if (hasWork) {
       try {
-        plans = await debug.time('engine.prepare', () =>
-          prepareEngines(plans, runWorkers, engines, { runId, projectRoot: config.projectRoot, env, signal: interrupted, headed: options.headed ?? false, notice }, emit),
+        const prepared = await debug.time('engine.prepare', () =>
+          prepareEngines(plans, runWorkers, brought, engines, { runId, projectRoot: config.projectRoot, env, signal: interrupted, headed: options.headed ?? false, notice }, emit),
         );
+        plans = prepared.plans;
+        fitted = prepared.workers;
+        for (const line of prepared.notices) notice('run', line);
       } catch (cause) {
         if (!interrupted.aborted) recordFailure(cause, 'launch');
         return;
@@ -1117,6 +1150,7 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
             aiTrace: aiTrace !== undefined,
             step: options.beforeStep !== undefined,
             envFor: workerEnvFor(plans, env),
+            peersFor: peerSlotsFor(plans, fitted, brought, env),
           });
 
     // The list reporter shows the prompt under its test; without it, the
@@ -1245,53 +1279,90 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
 async function prepareEngines(
   plans: readonly TargetWorkPlan[],
   runWorkers: number,
+  brought: PeersBrought,
   engines: PreparedEngines,
   scope: PrepareScope,
   emit: (fact: RunEventFact) => void,
-): Promise<TargetWorkPlan[]> {
-  const prepared: TargetWorkPlan[] = [];
+): Promise<{ plans: TargetWorkPlan[]; workers: ReadonlyMap<string, number>; notices: readonly string[] }> {
+  // Each target is asked for its own workers' slots and one per peer the
+  // other workers' tests put on it, as planned: an engine that serves fewer
+  // says so, and the worker counts are fitted to every answer below.
+  const planned = new Map(plans.map((plan) => [plan.target.name, plannedSlots(plan, runWorkers)]));
+  const results = new Map<string, void | EnginePrepareResult>();
   for (const plan of plans) {
     const { target } = plan;
     const engine = target.engine;
-    if (engine?.prepare === undefined || scope.signal.aborted) {
-      prepared.push(plan);
-      continue;
-    }
+    if (engine?.prepare === undefined || scope.signal.aborted) continue;
     const step: SetupStep = { kind: 'prepare', target: target.name, engine: engine.name };
     emit({ type: 'setup', step, state: 'started' });
     const startedMs = Date.now();
-    const slots = plannedSlots(plan, runWorkers);
-    const result = await engines.prepare(target, slots, scope);
-    prepared.push(withPreparedWorkers(plan, engine.name, slots, result));
+    const { slots, peerSlots } = slotsNeeded(target.name, planned, brought);
+    const result = await engines.prepare(target, slots, scope, peerSlots);
+    results.set(target.name, checkedPrepareResult(target.name, engine.name, slots, result));
     if (!scope.signal.aborted) {
       emit({ type: 'setup', step, state: 'finished', durationMs: Date.now() - startedMs });
     }
   }
-  return prepared;
+  const served = (plan: TargetWorkPlan): number | undefined => results.get(plan.target.name)?.workers ?? plan.target.engine?.workers;
+  const { workers, notices } = fitWorkers(
+    plans.map((plan) => ({ name: plan.target.name, workers: planned.get(plan.target.name) ?? 0, served: served(plan) })),
+    brought,
+  );
+  return {
+    plans: plans.map((plan) => {
+      const result = results.get(plan.target.name);
+      const own = planned.get(plan.target.name) ?? 0;
+      const fittedWorkers = workers.get(plan.target.name) ?? 0;
+      // A target that gave workers up to peers runs what the fit left it, and so does one that hosts peers: what its
+      // engine serves counts the peers' slots too, and a worker beyond the fit would start on a slot a peer holds.
+      // Any other keeps the cap its engine reported.
+      const hostsPeers = slotsNeeded(plan.target.name, workers, brought).peerSlots > 0;
+      const cap = fittedWorkers < Math.min(own, served(plan) ?? own) || hostsPeers ? fittedWorkers : result?.workers;
+      return {
+        ...plan,
+        ...(cap === undefined ? {} : { workers: cap }),
+        ...(result?.env === undefined ? {} : { env: result.env }),
+      };
+    }),
+    workers,
+    notices,
+  };
 }
 
 /**
- * Applies the worker cap `prepare` reported to the plan. The engine may only
- * narrow what the run planned: a cap outside `1..slots` is an engine defect.
+ * The result of `prepare`, checked: the engine may only narrow what the run
+ * asked for, so a count outside `1..slots` is an engine defect.
  */
-function withPreparedWorkers(
-  plan: TargetWorkPlan,
-  engineName: string,
-  slots: number,
-  result: void | EnginePrepareResult,
-): TargetWorkPlan {
+function checkedPrepareResult(targetName: string, engineName: string, slots: number, result: void | EnginePrepareResult): void | EnginePrepareResult {
   const workers = result?.workers;
   if (workers !== undefined && (!Number.isSafeInteger(workers) || workers < 1 || workers > Math.max(1, slots))) {
     throw new InfrastructureError(
       'ENGINE_FAILURE',
-      `engine ${engineName} reported ${String(workers)} workers from prepare for target "${plan.target.name}"; it was asked to provision ${slots}`,
+      `engine ${engineName} reported ${String(workers)} workers from prepare for target "${targetName}"; it was asked to provision ${slots}`,
     );
   }
-  return {
-    ...plan,
-    ...(workers === undefined ? {} : { workers }),
-    ...(result?.env === undefined ? {} : { env: result.env }),
-  };
+  return result;
+}
+
+/**
+ * The slots each worker's tests' peers take, with what each peer target's
+ * `prepare` handed its own workers: the peer's engine reads its device from
+ * the same variables, under the run's own, which win on a clash.
+ */
+function peerSlotsFor(
+  plans: readonly TargetWorkPlan[],
+  workers: ReadonlyMap<string, number>,
+  brought: PeersBrought,
+  env: NodeJS.ProcessEnv,
+): (targetName: string, workerSlot: number) => Record<string, PeerSlots> {
+  const order = plans.map((plan) => plan.target.name);
+  const additions = new Map(
+    plans.map((plan) => [plan.target.name, Object.fromEntries(Object.entries(plan.env ?? {}).filter(([name]) => env[name] === undefined))]),
+  );
+  return (targetName, workerSlot) =>
+    Object.fromEntries(
+      Object.entries(peerSlotsOf(targetName, workerSlot, order, workers, brought)).map(([peer, slots]) => [peer, { ...slots, env: additions.get(peer) ?? {} }]),
+    );
 }
 
 /**
@@ -1362,6 +1433,9 @@ function toListedPair(projectRoot: string, pair: TestTargetPair): ListedPair {
     tags: pair.test.tags,
     source: projectSource(projectRoot, pair.test.source, pair.test.file),
     session: pair.options.session,
+    ...(pair.options.peers.length === 0
+      ? {}
+      : { peers: pair.options.peers.map((peer) => ({ name: peer.name, target: peerTarget(peer, pair), session: peer.session, agent: peer.agent ?? pair.agent })) }),
     sessions: pair.test.sessions,
     serialId: pair.test.serialId,
     target: pair.target.name,

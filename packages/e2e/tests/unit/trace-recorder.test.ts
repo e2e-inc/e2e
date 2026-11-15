@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { describeTarget } from '../../src/agent/actions.ts';
 import { TraceRecorder } from '../../src/cache/recorder.ts';
-import { buildTraceEntry, MAX_TRACE_INPUT_CHARS } from '../../src/cache/trace.ts';
+import { buildTraceEntry, MAX_TRACE_INPUT_CHARS, type ActionTrace, type TraceProvenance } from '../../src/cache/trace.ts';
 import { readTraceEntry } from '../../src/cache/trace-read.ts';
 import { createRedactor, SecretLedger } from '../../src/internal/redact.ts';
 import { redacted } from '../helpers/redacted.ts';
@@ -25,6 +25,13 @@ const passwordField = redacted({
   states: { secure: true },
 });
 
+/** A finished trace whose provenance is written as given, past what the recorder itself would bound. */
+function makeRecorderTrace(recordedFor: TraceProvenance): ActionTrace {
+  const recorder = makeRecorder();
+  recorder.record({ name: 'tap', node: upgradeButton });
+  return { ...recorder.finalize(conclusion)!, recordedFor };
+}
+
 function makeRecorder(options: { maxActions?: number; secrets?: ReadonlyMap<string, string> } = {}) {
   const redact = createRedactor(options.secrets ?? new Map());
   return new TraceRecorder({
@@ -41,6 +48,21 @@ const conclusion = {
 };
 
 describe('TraceRecorder', () => {
+  it("records the peer a recording is for, with the test's own target and agent, and reads them back from the stored entry; the test's own user's names none", () => {
+    for (const recordedFor of [{ ...conclusion.recordedFor, user: 'ava', ownerTargetId: 'ios', ownerAgent: 'admin' }, conclusion.recordedFor]) {
+      const recorder = makeRecorder();
+      recorder.record({ name: 'tap', node: upgradeButton });
+      const trace = recorder.finalize({ ...conclusion, recordedFor });
+      expect(trace?.recordedFor).toEqual(recordedFor);
+      const stored = readTraceEntry(JSON.parse(JSON.stringify(buildTraceEntry(trace!))));
+      expect(stored?.payload.recordedFor).toEqual(recordedFor);
+    }
+    for (const oversized of [{ user: 'x'.repeat(301) }, { user: 'ava', ownerTargetId: 'x'.repeat(301), ownerAgent: 'admin' }, { user: 'ava', ownerTargetId: 'ios', ownerAgent: 'x'.repeat(301) }]) {
+      const unreadable = buildTraceEntry(makeRecorderTrace({ ...conclusion.recordedFor, ...oversized }));
+      expect(readTraceEntry(JSON.parse(JSON.stringify(unreadable))), JSON.stringify(Object.keys(oversized))).toBeUndefined();
+    }
+  });
+
   it.each(['provider', 'model'] as const)('omits an oversized recorded %s', (field) => {
     const recorder = makeRecorder();
     recorder.record({ name: 'tap', node: upgradeButton });

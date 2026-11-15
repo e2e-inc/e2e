@@ -2,18 +2,21 @@ import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   artifactUrl,
   formatClock,
+  failuresByUser,
   formatCost,
   formatDuration,
   formatTokens,
   testTitle,
   timedVideos,
   videoPosition,
+  videoUsers,
   type Artifact,
   type AttemptView,
   type ReportModel,
   type Result,
   type Step,
   type TimedVideo,
+  type UserFailure,
 } from './data.ts';
 import { CodeFrame, ErrorBlock, hasFrame } from './failure.tsx';
 import { failurePrompt } from './prompt.ts';
@@ -80,7 +83,14 @@ const WEB_SHAPE: VideoShape = { width: 1280, height: 720 };
 const PHONE_SHAPE: VideoShape = { width: 402, height: 874 };
 
 function AttemptPanel({ attempt, model, prompt, platform }: { attempt: AttemptView; model: ReportModel; prompt: () => string; platform: string }) {
-  const videos = useMemo(() => timedVideos(attempt.artifacts, model.media), [attempt, model.media]);
+  // Each user's app recorded its own videos; the player shows one user's at a time.
+  const users = useMemo(() => videoUsers(attempt.artifacts, model.media), [attempt, model.media]);
+  const videosOf = useMemo(
+    () => new Map(users.map((user) => [user, timedVideos(attempt.artifacts, model.media, user)])),
+    [users, attempt, model.media],
+  );
+  const [videoUser, setVideoUser] = useState<string | undefined>(users[0]);
+  const videos = videosOf.get(videoUser) ?? [];
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoIndex, setVideoIndex] = useState(0);
   const [playhead, setPlayhead] = useState<number | undefined>(undefined);
@@ -91,12 +101,14 @@ function AttemptPanel({ attempt, model, prompt, platform }: { attempt: AttemptVi
   );
   const portrait = isPortrait(shape);
 
-  // The step the video is showing: the last one that started at or before the playhead.
-  const playingStep = playhead === undefined ? undefined : attempt.steps.findLast((step) => Date.parse(step.startedAt) <= playhead);
+  // The step the video is showing: the last of its user's that started at or before the playhead.
+  const shownSteps = attempt.steps.filter((step) => step.user === videoUser);
+  const playingStep = playhead === undefined ? undefined : shownSteps.findLast((step) => Date.parse(step.startedAt) <= playhead);
 
   const seek = (step: Step) => {
-    const position = videoPosition(step, videos);
+    const position = videoPosition(step, videosOf.get(step.user) ?? []);
     if (position === undefined) return;
+    setVideoUser(step.user);
     setVideoIndex(position.video);
     // A new segment loads its source first; seek once its metadata is in.
     requestAnimationFrame(() => {
@@ -121,7 +133,8 @@ function AttemptPanel({ attempt, model, prompt, platform }: { attempt: AttemptVi
       : thrownAt;
 
   // The failure evidence has its own section; the gallery and the file list leave it out.
-  const evidence = new Set([attempt.failure?.screenshot, attempt.failure?.screen]);
+  const atFailure = failuresByUser(attempt);
+  const evidence = new Set(atFailure.flatMap(({ failure }) => [failure.screenshot, failure.screen]));
   // A page without media (`media: 'none'`), or a file the reporter could not embed, has no URL to show.
   const shown = attempt.artifacts.filter((artifact) => !evidence.has(artifact.id) && artifactUrl(artifact, model.media) !== undefined);
   const screenshots = shown.filter((artifact) => artifact.kind === 'screenshot');
@@ -140,7 +153,13 @@ function AttemptPanel({ attempt, model, prompt, platform }: { attempt: AttemptVi
             index={videoIndex}
             onIndexChange={setVideoIndex}
             videoRef={videoRef}
-            steps={attempt.steps}
+            steps={shownSteps}
+            users={users}
+            user={videoUser}
+            onUserChange={(user) => {
+              setVideoUser(user);
+              setVideoIndex(0);
+            }}
             playingStep={playingStep}
             onPlayhead={setPlayhead}
             shape={shape}
@@ -159,7 +178,7 @@ function AttemptPanel({ attempt, model, prompt, platform }: { attempt: AttemptVi
                   step={step}
                   attempt={attempt}
                   model={model}
-                  videos={videos}
+                  videos={videosOf.get(step.user) ?? []}
                   playing={step === playingStep}
                   onSeek={seek}
                 />
@@ -172,12 +191,14 @@ function AttemptPanel({ attempt, model, prompt, platform }: { attempt: AttemptVi
         <section aria-label="App log" className="flex flex-col gap-e2e-1">
           <h2 className="type-caption text-shade-500">app log</h2>
           <pre className="type-code-s e2e-panel max-h-96 overflow-auto p-e2e-2 text-shade-300">
-            {attempt.appLog.map((line) => `${line.level.padEnd(5)} ${line.text}`).join('\n')}
+            {attempt.appLog.map((line) => `${line.level.padEnd(5)} ${line.user === undefined ? '' : `${line.user} · `}${line.text}`).join('\n')}
           </pre>
         </section>
       )}
       <div className="grid gap-e2e-4 md:grid-cols-2">
-        <FailureEvidence attempt={attempt} model={model} />
+        {atFailure.map(({ user, failure }) => (
+          <FailureEvidence key={user ?? ''} user={user} failure={failure} artifacts={attempt.artifacts} model={model} />
+        ))}
         {screenshots.length === 0 ? null : (
           <section aria-label="Screenshots" className="flex flex-col gap-e2e-1">
             <h2 className="type-caption text-shade-500">screenshots</h2>
@@ -272,6 +293,11 @@ function StepRow({
             <Icon name={open ? 'disclosure-open' : 'disclosure-closed'} />
           </span>
           <StepStatusIcon status={step.status} />
+          {step.user === undefined ? null : (
+            <Tag hint={`Ran on the app of the peer ${step.user}.`} align="start">
+              {step.user}
+            </Tag>
+          )}
           <span className="type-code-s shrink-0 text-shade-400">{step.api}</span>
           <span className="type-body-s min-w-0 truncate">{step.label}</span>
         </button>
@@ -385,15 +411,15 @@ function Detail({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function FailureEvidence({ attempt, model }: { attempt: AttemptView; model: ReportModel }) {
-  const { failure } = attempt;
-  if (failure === undefined) return null;
-  const find = (id: string | undefined) => (id === undefined ? undefined : attempt.artifacts.find((artifact) => artifact.id === id));
+/** What one user's screen showed at the failure; a peer's names it. */
+function FailureEvidence({ user, failure, artifacts, model }: UserFailure & { artifacts: readonly Artifact[]; model: ReportModel }) {
+  const find = (id: string | undefined) => (id === undefined ? undefined : artifacts.find((artifact) => artifact.id === id));
   const screenshot = find(failure.screenshot);
   const screen = find(failure.screen);
+  const whose = user === undefined ? '' : ` · ${user}`;
   return (
-    <section aria-label="At failure" className="flex flex-col gap-e2e-1">
-      <h2 className="type-caption text-shade-500">at failure</h2>
+    <section aria-label={`At failure${whose}`} className="flex flex-col gap-e2e-1">
+      <h2 className="type-caption text-shade-500">at failure{whose}</h2>
       {failure.url === undefined ? null : <span className="type-code-s truncate text-shade-300">{failure.url}</span>}
       {screenshot === undefined ? null : <Screenshot artifact={screenshot} model={model} />}
       {screen === undefined ? null : <ArtifactLink artifact={screen} model={model} label={`screen at failure${failure.nodes === undefined ? '' : ` (${failure.nodes} nodes)`}`} />}

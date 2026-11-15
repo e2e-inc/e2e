@@ -131,6 +131,16 @@ export function sessionLedger(
 }
 
 /**
+ * Makes `session` redact with `owner`'s ledger from now on, so every user
+ * of one attempt redacts every value any of them has seen: a secret typed on
+ * one user's screen and shown on another's never reaches the second user's
+ * model input. Called before `session` resolves or restores anything.
+ */
+export function shareSessionLedger(session: TargetSession, owner: TargetSession, secrets: ResolvedConfig['allSecrets']): void {
+  ledgerBySession.set(session, sessionLedger(owner, secrets));
+}
+
+/**
  * Redacts `text` with every value `session` has seen, or with the static
  * values while no session is open yet, so text an attempt produces before
  * its session exists (a step label, a fixture error) is covered too.

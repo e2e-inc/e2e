@@ -83,6 +83,7 @@ describe('ChildProcessRunner', () => {
         aiTrace: false,
         step: false,
         envFor: () => ({ ...process.env, NODE_OPTIONS: `--import ${pathToFileURL(preload).href}` }),
+        peersFor: () => ({}),
       });
       let exit: string | undefined;
       const runner = spawn('web', 0, {

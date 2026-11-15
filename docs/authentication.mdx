@@ -287,6 +287,49 @@ Each name refers to an `agents` entry, a `credentials` entry, and a saved
 session. When the personas don't need separate sessions,
 [run one flow as several agents](/agents#one-flow-several-personas) instead.
 
+## Two users in one test
+
+Declare more users with [`peers`](/reference/test#peers). Each peer gets an
+app of its own, next to the test's, and the test drives both:
+
+```ts title="tests/payment.e2e.ts"
+import { test } from '@e2e-dev/web';
+import { expect } from 'e2e';
+
+test('Ava sees the payment', { session: 'member', peers: { ava: { session: 'ava' } } }, async ({ app, screen, peers }) => {
+  await app.open('/pay');
+  await screen.getByRole('button', 'Pay Ava $3').tap();
+
+  await peers.ava.app.open('/activity');
+  await expect(peers.ava.screen.getByText('$3.00 from Member')).toBeVisible();
+});
+```
+
+`peers.ava` has its own `app`, `screen`, `agent`, and `platform`, and its
+engine's fixtures, such as `browser` or `device`. Those are typed `unknown`,
+since the peer's target decides them: cast one to use it, as in
+`peers.ava.device as Device`. A peer opens before `beforeEach` and closes
+with the test, also when it fails.
+
+- **Its own target.** Set `target: 'iphone'` to put the peer on another
+  target. The run must select it. The test still runs once on each selected
+  target, so pin the test's own side with `platforms: ['web']`.
+- **Its own login.** A peer's `session` is saved by a setup test on the
+  peer's target. A phone restores no saved login, so a phone peer signs in
+  during the test.
+- **Its own device.** A phone peer takes a simulator or emulator of its own:
+  see [Two users on two devices](/mobile#two-users-on-two-devices).
+- **Its own records.** The report, the trace page, and the terminal name the
+  peer on each of its steps. Its files go in `peers/<name>/`, its replay
+  recordings are its own in each target and agent the test runs on, its
+  screenshot baselines in each target, and its agent sees only its own
+  earlier steps.
+- **One set of secrets.** A secret either user types is redacted from what
+  every user's agent reads, and from every record of the attempt.
+
+Where a peer can't run, such as a serial group or a hosted browser, and the
+error each case gives, is in the [`peers` reference](/reference/test#peers).
+
 ## Next
 
 <CardGroup cols={2}>
@@ -295,5 +338,8 @@ session. When the personas don't need separate sessions,
   </Card>
   <Card title="Config reference" icon="sliders" href="/reference/config#credentials">
     The `credentials` and `secrets` blocks.
+  </Card>
+  <Card title="Peer options" icon="users" href="/reference/test#peers">
+    Every option of a peer, and the errors.
   </Card>
 </CardGroup>

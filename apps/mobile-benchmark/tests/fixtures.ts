@@ -33,21 +33,30 @@ function installs(): Installs {
 
 /**
  * `build`: installs the platform's build on this worker's device before its
- * first test, and nothing when the run names none (the app is already on the
- * device). The engine installs nothing on its own, so this is where the
- * suite says it; the step shows in the first test's report.
+ * first test, and on the device of each peer a test declares, and nothing
+ * when the run names none (the app is already on the device). The engine
+ * installs nothing on its own, so this is where the suite says it; the step
+ * shows in the first test's report.
  */
 export const test = base.extend<{ build: undefined }>({
-  build: async ({ device, platform }, use) => {
-    const build = BUILDS[platform];
-    if (build !== undefined) {
-      const pending = installs();
-      let install = pending.get(platform);
+  build: async ({ device, platform, peers }, use) => {
+    const pending = installs();
+    const installOnce = async (key: string, on: Device, build: string): Promise<void> => {
+      let install = pending.get(key);
       if (install === undefined) {
-        install = device.installApp(build);
-        pending.set(platform, install);
+        install = on.installApp(build);
+        pending.set(key, install);
       }
       await install;
+    };
+    const build = BUILDS[platform];
+    if (build !== undefined) await installOnce(platform, device, build);
+    // A peer on a device of its own needs the build there too; a peer on a
+    // platform the run brings no build for (a browser) has no device to ask.
+    // In this suite a peer's name is one device for the worker's whole life.
+    for (const [name, peer] of Object.entries(peers)) {
+      const peerBuild = BUILDS[peer.platform];
+      if (peerBuild !== undefined) await installOnce(`${peer.platform} peer ${name}`, peer.device as Device, peerBuild);
     }
     await use(undefined);
   },

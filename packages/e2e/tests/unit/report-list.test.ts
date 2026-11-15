@@ -6,6 +6,8 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { resultId } from '../../src/internal/ids.ts';
 import { visibleWidth } from '../../src/report/format.ts';
 import { ListReporter } from '../../src/report/list.ts';
+import { stepLine, stepPromptLine, stepPromptRows } from '../../src/report/list-steps.ts';
+import picocolors from 'picocolors';
 import { userFrame } from '../../src/report/code-frame.ts';
 import type { CacheWrite } from '../../src/cache/context.ts';
 import type { RunEventFact, RunEventOf, RunEventResult } from '../../src/run/events.ts';
@@ -453,6 +455,46 @@ describe('ListReporter', () => {
       expect(lines).toContain(' ❯ at https://app.test/checkout');
       expect(lines).toContain(' ❯ on screen button "Pay later"');
       expect(lines).toContain(' ❯ screen .e2e/artifacts/chromium/a/attempt-0/screen.txt');
+    });
+
+    it("shows the screen of the peer whose step failed, named, and not the test user's", () => {
+      const { lines, output } = capture();
+      const reporter = plainReporter(output);
+      reporter.handle(runStarted());
+      reporter.handle(plan([{ file: 'tests/a.e2e.ts', tests: 1 }]));
+      const step = (user: string | undefined, status: string) =>
+        ({
+          id: `${user ?? 'own'}-step`,
+          index: 0,
+          kind: 'locator',
+          api: 'locator.tap',
+          label: 'Accept',
+          status,
+          startedAt: new Date(0).toISOString(),
+          durationMs: 10,
+          events: [],
+          artifacts: [],
+          ...(user === undefined ? {} : { user }),
+          ...(status === 'failed' ? { error: { category: 'test', code: 'ASSERTION_FAILED', message: 'no Accept button', retryable: false } } : {}),
+        }) as unknown as AttemptRecord['steps'][number];
+      const failed = failedAttempt('no Accept button');
+      failed.steps = [step(undefined, 'passed'), step('ava', 'failed')];
+      const screenText = (id: string, user: string | undefined, file: string) => ({
+        id, kind: 'log' as const, mediaType: 'text/plain', path: file, redaction: 'complete' as const, producer: { kind: 'attempt' as const }, ...(user === undefined ? {} : { user }),
+      });
+      failed.failure = { url: 'https://app.test/cart', candidates: ['button "Checkout"'], screen: 'attempt-1:artifact:0' };
+      failed.peers = { ava: { target: 'chromium', failure: { url: 'https://app.test/invites', candidates: ['button "Accept invite"'], screen: 'attempt-1:artifact:1' } } };
+      failed.artifacts = [
+        screenText('attempt-1:artifact:0', undefined, 'chromium/a/attempt-0/screen.txt'),
+        screenText('attempt-1:artifact:1', 'ava', 'chromium/a/attempt-0/peers/ava/screen.txt'),
+      ];
+      reporter.handle(finished(result({ status: 'failed', id: 'a', file: 'tests/a.e2e.ts', title: ['invites'], attempts: [failed] })));
+      reporter.handle(runFinished({ status: 'failed', exitCode: 1, reportPath: '/project/.e2e/report.json' }));
+      expect(lines).toContain(' ❯ at ava · https://app.test/invites');
+      expect(lines).toContain(' ❯ on screen button "Accept invite"');
+      expect(lines).toContain(' ❯ screen .e2e/artifacts/chromium/a/attempt-0/peers/ava/screen.txt');
+      expect(lines.join('\n')).not.toContain('https://app.test/cart');
+      expect(lines.join('\n')).not.toContain('Checkout');
     });
 
     it('quotes the first app errors under the tally, loopback origins dropped, and counts the rest', () => {
@@ -1284,6 +1326,59 @@ describe('ListReporter', () => {
       // The window above the result line is erased before the block prints.
       expect(chunks.some((chunk) => chunk.includes('\u001b[0J'))).toBe(true);
       expect(chunks.at(-1)).not.toContain('└──');
+    });
+
+    it("shows each user's running step under its test, and names the peer on its finished steps and at the --step prompt", () => {
+      const restore = withTerminalSize({ columns: 120, rows: 40 });
+      try {
+        const { chunks, output } = liveCapture();
+        const reporter = new ListReporter(output, { live: true, colors: false, stepping: true });
+        reporter.handle(runStarted());
+        reporter.handle(plan([{ file: 'tests/invite.e2e.ts', tests: 1 }]));
+        reporter.handle(testStarted('t1', 'invites a friend', 'chromium', 'tests/invite.e2e.ts'));
+        const step = (progress: object, user?: string) =>
+          reporter.handle({
+            type: 'step',
+            testId: 't1',
+            agent: 'default',
+            repeat: 0,
+            target: 'chromium',
+            progress: { ...progress, identity: { attemptId: 'a', attemptIndex: 0, stepId: user ?? 'own', stepIndex: 0, ...(user === undefined ? {} : { user }) } },
+          } as never);
+        const shown = () => {
+          const window = chunks.at(-1)!.replace(ANSI_PATTERN, '').split('\n').filter((line) => line.trim() !== '');
+          const row = window.findIndex((line) => line.includes('invites a friend'));
+          return window.slice(row + 1, window.findIndex((line) => line.includes('Test Files'))).map((line) => line.trim());
+        };
+        step({ phase: 'start', kind: 'agent', api: 'agent.act', label: 'pay' });
+        step({ phase: 'start', kind: 'agent', api: 'agent.act', label: 'accept' }, 'ava');
+        // What each user's step waits on shows under that step only.
+        step({ phase: 'activity', api: 'agent.act', activity: 'action' }, 'ava');
+        expect(shown().map((line) => line.replace(/^\S+ (Acting|Thinking)$/u, '$1'))).toEqual(['↳ agent.act "pay"', 'Thinking', '↳ ava · agent.act "accept"', 'Acting']);
+        step({ phase: 'replay', api: 'agent.act', active: true });
+        expect(shown().map((line) => line.replace(/^\S+ (Acting|Thinking|Replaying)$/u, '$1'))).toEqual(['↳ agent.act "pay"', 'Replaying', '↳ ava · agent.act "accept"', 'Acting']);
+        step({ phase: 'end', kind: 'agent', api: 'agent.act', label: 'pay', status: 'passed', durationMs: 40, modelCalls: 0 });
+        step({ phase: 'end', kind: 'agent', api: 'agent.act', label: 'accept', status: 'passed', durationMs: 50, modelCalls: 0 }, 'ava');
+        step({ phase: 'start', kind: 'locator', api: 'locator.click', label: 'Send invite' });
+        step({ phase: 'start', kind: 'locator', api: 'locator.click', label: 'Accept' }, 'ava');
+        expect(shown().slice(-2)).toEqual(['↳ locator.click "Send invite"', '↳ ava · locator.click "Accept"']);
+        step({ phase: 'end', kind: 'locator', api: 'locator.click', label: 'Accept', status: 'passed', durationMs: 85, modelCalls: 0 }, 'ava');
+        expect(shown().slice(-2)).toEqual(['✓ ava · locator.click "Accept" 85ms', '↳ locator.click "Send invite"']);
+        step({ phase: 'end', kind: 'locator', api: 'locator.click', label: 'Send invite', status: 'passed', durationMs: 90, modelCalls: 0 });
+        const held = { target: 'chromium', testId: 't1', agent: 'default', repeat: 0, title: 'invites a friend', api: 'locator.click', label: 'Join', user: 'ava' };
+        reporter.showStepPrompt({ steps: [{ step: held, number: 3 }], help: false });
+        expect(shown()).toEqual([
+          '✓ agent.act "pay" 40ms',
+          '✓ ava · agent.act "accept" 50ms',
+          '✓ ava · locator.click "Accept" 85ms',
+          '✓ locator.click "Send invite" 90ms',
+          '▶ step 3  ava · locator.click "Join"',
+          'press enter to run this step, press h to show help, press q to quit',
+        ]);
+        expect(stepPromptLine({ steps: [{ step: held, number: 3 }], help: false })).toContain(': ava · locator.click "Join" · press enter');
+      } finally {
+        restore();
+      }
     });
 
     it('shows the --step prompt under its paused test, after every step that ran, and takes it down', () => {
@@ -2278,5 +2373,20 @@ describe('screenshots row', () => {
       ...Array.from({ length: 9 }, (_, index) => `             .e2e/artifacts/s/${index + 1}.png`),
       '             and 2 more (the report lists every artifact)',
     ]);
+  });
+});
+
+describe('step lines in color', () => {
+  it("color a peer's name, and add no empty color codes for the test's own user", () => {
+    const pc = picocolors.createColors(true);
+    const step = { status: 'passed', api: 'locator.tap', label: 'Pay', durationMs: 5, modelCalls: 0 } as Parameters<typeof stepLine>[1];
+    const emptyCyan = '\u001b[36m\u001b[39m';
+    expect(stepLine(pc, step)).not.toContain(emptyCyan);
+    expect(stepLine(pc, { ...step, user: 'ava' })).toContain(pc.cyan('ava · '));
+    const held = { target: 'web', testId: 't1', agent: 'default', repeat: 0, title: 'pays', api: 'locator.tap', label: 'Pay' };
+    const [own] = stepPromptRows(pc, { steps: [{ step: held, number: 1 }], help: false }, { maxWidth: 120 });
+    expect(own).not.toContain(emptyCyan);
+    const [peer] = stepPromptRows(pc, { steps: [{ step: { ...held, user: 'ava' }, number: 1 }], help: false }, { maxWidth: 120 });
+    expect(peer).toContain(pc.cyan('ava · '));
   });
 });

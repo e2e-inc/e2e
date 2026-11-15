@@ -24,6 +24,7 @@ const OPTIONS: ResolvedTestOptions = {
   platforms: undefined,
   requires: [],
   session: undefined,
+  peers: [],
   agents: ['default'],
   agentContext: undefined,
   skipReason: undefined,

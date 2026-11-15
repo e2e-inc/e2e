@@ -9,6 +9,7 @@
 - Locators
 - expect
 - Sign-in sessions
+- Two users in one test
 - Start near the screen under test
 - The browser fixture (browser only)
 - Habits
@@ -149,12 +150,13 @@ or a blocked agent verdict still fails the test.
 | `platforms` | unset | Only targets with these platforms, e.g. `['ios']`. |
 | `requires` | `[]` | Engine capabilities, e.g. `['browser']`; missing ones skip the test at selection rather than failing it with `UNSUPPORTED_CAPABILITY`. |
 | `session` | unset | Restore state saved by a setup test. |
+| `peers` | unset | More users by name, each on an app of its own: `{ ava: { target?, session?, agent?, agentContext? } }`. See Two users in one test. |
 | `agentContext` | unset | Extra context for `agent.*` calls in this test or group. |
 | `agent` | the run's agent | A configured name (`agents.<name>`) or a list run once per agent; `--agent` narrows the list, a setup test takes one name. Innermost wins; `agent.act(..., { agent })` names another for one call. |
 | `trace`, `video` | the target's | `'off'`, `'on'`, `'retain-on-failure'`, `'on-first-retry'`, `'on-all-retries'`: whether the test keeps a trace page, which attempts record video. Innermost wins over `--trace` / `--video`, the target, and the config; video where the engine cannot record is `UNSUPPORTED_ARTIFACT` for the run. |
 | `serial` | `false` | Groups only. Members share app state, run in order on one worker, retry as a whole, and take the group's `trace` and `video`. |
 
-Serial members cannot set `retries`, `trace`, `video`, `session`,
+Serial members cannot set `retries`, `trace`, `video`, `session`, `peers`,
 `platforms`, `requires`, `skip`, `fail`, or `only`, nor can a nested `describe` set
 `trace` or `video`; nesting serial groups is a `COLLECTION_ERROR`.
 
@@ -174,7 +176,9 @@ configured model, else `MODEL_UNAVAILABLE` (topic `agent`). `platform`
 (`string`): always, hooks included; `web`, `ios`, `android`, or an engine's
 label. `browser` (`Browser`): browser targets, import `test` from `@e2e-dev/web`.
 `device` (`Device`): device targets, import `test` from `@e2e-dev/mobile`.
-`session` (`SetupSession`): only in `test.setup`.
+`session` (`SetupSession`): only in `test.setup`. `peers` (by name): each
+declared peer's own `app`, `screen`, `agent`, `platform`, and its engine's
+fixtures; empty without the option.
 
 ### app
 
@@ -463,6 +467,38 @@ credentials: {
   too: reports, step labels, the executor, and the model see
   `<secret:stripe-key>` (and so does the test id, for a value in a title),
   so the agent cannot type it. Pass the handle.
+
+## Two users in one test
+
+`peers` adds users to one test, each on an app of its own, opened before
+`beforeEach` and closed with the test:
+
+```ts
+test('Ava sees the payment', { session: 'member', peers: { ava: { session: 'ava' } } }, async ({ app, screen, peers }) => {
+  await app.open('/pay');
+  await screen.getByRole('button', 'Pay Ava $3').tap();
+  await peers.ava.app.open('/activity');
+  await expect(peers.ava.screen.getByText('$3.00 from Member')).toBeVisible();
+});
+```
+
+- `target` defaults to the test's own; the run must select a peer's target
+  (`--target`), and the test still runs once per selected target, so pin the
+  test's side with `platforms`.
+- A peer's `session` is saved by a setup test on the peer's target. A device
+  restores none: a device peer signs in during the test.
+- A device peer takes a device of its own; with too few, the run starts
+  fewer workers, and with none to spare for a peer it stops before any test.
+- Each peer's steps carry `user` in the report, its files go in
+  `peers/<name>/`, its replay recordings are its own in each target and
+  agent the test runs on, its screenshot baselines in each target, and its
+  agent sees only its own earlier steps. One secret ledger covers every user.
+- A peer's engine fixtures (`browser`, `device`) are typed `unknown`: cast
+  one to use it, as in `peers.ava.device as Device`.
+- Not in a serial group, a setup test, `open_session`, on an engine-server
+  target, a hosted browser or device provider, or a CDP attach. The peer's
+  engine must be created in the config or a file it imports, in a run from a
+  config file.
 
 ## Start near the screen under test
 

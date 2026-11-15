@@ -15,6 +15,8 @@ import type {
   EngineHandle,
   EngineInitInfo,
   EngineObserveOptions,
+  EnginePrepareInfo,
+  EnginePrepareResult,
   EngineState,
   LocatorAction,
   LocatorActionKind,
@@ -81,6 +83,10 @@ export interface RecordedSessionCall {
 export type RecordedCall = RecordedPerform | RecordedPointerAction | RecordedKey | RecordedSessionCall;
 
 export interface FakeEngineBehavior {
+  /** Declares `prepare`: what it returns is the engine's answer, a count of slots it serves and variables for its workers. */
+  prepare?(info: EnginePrepareInfo): EnginePrepareResult | void | Promise<EnginePrepareResult | void>;
+  /** Declares `workers`: the most the engine serves at once, known before `prepare`. */
+  workers?: number;
   /** Throw to fail worker boot. Called before any attempt. */
   onInit?(info: EngineInitInfo): void | Promise<void>;
   /** Throw or hang to fail attempt launches. */
@@ -248,6 +254,8 @@ export function createFakeEngine(behavior: FakeEngineBehavior = {}): FakeEngineH
     name: 'fake',
     version: '1.0.0',
     spiVersion: ENGINE_SPI_VERSION,
+    ...(behavior.workers === undefined ? {} : { workers: behavior.workers }),
+    ...(behavior.prepare === undefined ? {} : { prepare: async (info: EnginePrepareInfo) => behavior.prepare!(info) }),
     async init(info) {
       events.push('init');
       inits.push(info);

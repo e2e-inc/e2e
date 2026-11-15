@@ -83,7 +83,8 @@ export async function selectStandaloneTest(
   graph: string | undefined,
 ): Promise<StandaloneTest> {
   const collection = await collectAlone(() => collect(config, [positional], graph));
-  const { pairs } = select(collection, config, { targetIds: [target.name] }, { noTestsHint: 'name a test file the config finds, alone when it holds one test, or with :line on the line its test( call is on, not a line inside the test' });
+  // A session refuses a test with peers below, so selection leaves their targets to that refusal.
+  const { pairs } = select(collection, config, { targetIds: [target.name] }, { noTestsHint: 'name a test file the config finds, alone when it holds one test, or with :line on the line its test( call is on, not a line inside the test', peersRefused: true });
   // A serial group's other members run beside a selected one; only what the positional named counts.
   const runnable = pairs.filter((pair) => pair.disposition === 'run' && pair.test.kind === 'test' && pair.test.selected);
   const tests = [...new Map(runnable.map((pair) => [pair.test.id, pair.test])).values()];
@@ -103,6 +104,10 @@ export async function selectStandaloneTest(
   }
   if (pair.options.session !== undefined) {
     throw unsupported(`${named} starts from session "${pair.options.session}", which a setup test saves first; a session does not run setup tests yet, so run it with npx e2e run`);
+  }
+  if (pair.options.peers.length > 0) {
+    const peers = pair.options.peers.map((peer) => `"${peer.name}"`).join(', ');
+    throw unsupported(`${named} runs peers ${peers}, each on an app of its own; a session drives one app, so run it with npx e2e run`);
   }
   if (otherAgents.length > 0) {
     const agents = [pair, ...otherAgents].map((each) => `"${each.agent}"`).join(', ');

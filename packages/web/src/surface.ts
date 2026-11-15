@@ -367,7 +367,17 @@ export class PlaywrightSurface {
   async prepare(info: EnginePrepareInfo): Promise<EnginePrepareResult | void> {
     await this.configuredInitScripts.load(info.projectRoot);
     if (this.leases !== undefined) return this.leases.prepare(info);
-    if (this.connect !== undefined) return;
+    if (this.connect !== undefined) {
+      // An attached browser is one the target does not launch, and a
+      // reconnecting attach shares one context: a peer would not have a browser of its own.
+      if ((info.peerSlots ?? 0) > 0) {
+        throw new ConfigurationError(
+          'UNSUPPORTED_CAPABILITY',
+          `target "${info.targetName}" attaches to a browser over CDP (web({ connect })), and a test's peer on it would not get a browser of its own; run the peer on a target that launches its browser on this machine`,
+        );
+      }
+      return;
+    }
     await ensureBrowsersInstalled([this.browserName], { env: info.env, signal: info.signal, log: info.log, headed: info.headed });
   }
 

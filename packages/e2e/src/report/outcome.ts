@@ -7,7 +7,7 @@
  */
 
 import type { SkipInfo } from '../collect/select.ts';
-import type { FailureEvidence } from '../run/records.ts';
+import type { FailureEvidence, PeerAttemptFacts } from '../run/records.ts';
 import type { AppLogRecord } from '../run/steps.ts';
 import { isCutSerialRetry } from '../run/retry.ts';
 import type { ReportError, ReportResult, ReportSerialGroup, ReportStep } from './build.ts';
@@ -33,6 +33,8 @@ export interface AttemptView {
   readonly secondaryErrors: readonly ReportError[];
   /** What the engine said the attempt ran on; for a serial member, the group attempt's. */
   readonly environment?: Readonly<Record<string, string>> | undefined;
+  /** What each peer's app ran on and showed at the failure, by peer name: the peers whose app opened, so absent when none did. */
+  readonly peers?: Readonly<Record<string, PeerAttemptFacts>> | undefined;
   /** Why the body skipped itself; on a failed attempt, a skip the failure outranked. */
   readonly skip: SkipInfo | undefined;
 }
@@ -84,6 +86,7 @@ function attemptViews(result: ReportResult, groups: ReadonlyMap<string, ReportSe
       artifacts: attempt.artifacts,
       secondaryErrors: attempt.secondaryErrors,
       environment: attempt.environment,
+      ...(attempt.peers === undefined ? {} : { peers: attempt.peers }),
       skip: attempt.skip,
     }));
   }

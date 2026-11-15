@@ -11,5 +11,7 @@ import base from './e2e.config.ts';
  */
 export default {
   ...base,
+  // Lightpanda is a browser provider, where a peer cannot run: the peers test is left out.
+  tests: ['tests/**/*.e2e.ts', '!tests/peers.e2e.ts'],
   targets: base.targets.map((target) => ({ ...target, name: 'lightpanda', engine: web({ browser: lightpanda({ loadResources: ['iframe'] }) }) })),
 } satisfies E2EConfig;

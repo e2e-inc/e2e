@@ -174,9 +174,10 @@ result holds:
 | --- | --- |
 | `error` | The code, message, source line, and assertion details |
 | `failure` | The screen and screenshot artifacts, and any locator candidates |
-| `steps` | The calls that led to the failure. Each step's `events` hold what it did (`engine`), what it polled (`poll`), and where the app went (`navigation`). Agent steps add `cache` and recent model turns. `observationTruncated: true` means at least one semantic observation was incomplete. |
-| `appLog` | What the app logged. Each line's `step` is the `index` of its step, absent before the first step. |
-| `artifacts` | The captured files |
+| `steps` | The calls that led to the failure. Each step's `events` hold what it did (`engine`), what it polled (`poll`), and where the app went (`navigation`). Agent steps add `cache` and recent model turns. `observationTruncated: true` means at least one semantic observation was incomplete. A [peer's](/authentication#two-users-in-one-test) step has `user`, the peer's name. |
+| `appLog` | What the app logged. Each line's `step` is the `index` of its step, absent before the first step. A peer's line has `user`. |
+| `artifacts` | The captured files. A peer's files have `user` and sit under `peers/<name>/`. |
+| `peers` | Each peer's `target`, what it ran on (`environment`), and its own screen at the failure (`failure`). When a peer's step failed, its screen is here, not in `failure`. Holds the peers whose app opened, so it is absent when none did. |
 
 A serial group's tests have no `attempts` of their own. Their results are in
 `run.serialGroups`, one member for each test in each attempt. A retry the run

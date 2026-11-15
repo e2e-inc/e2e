@@ -158,6 +158,13 @@ function isEngineClient(engine: EngineHandle): engine is EngineClientHandle {
 
 /** The client each in-process engine is served through, so every config load gets the same one. */
 const loopbacks = new WeakMap<EngineHandle, EngineClientHandle>();
+/** The clients in `loopbacks`: every other client speaks to an engine server. */
+const loopbackClients = new WeakSet<EngineHandle>();
+
+/** Whether the harness reaches this engine in an engine server (`connectEngine`), not in this process. */
+export function isServedEngine(engine: EngineHandle): boolean {
+  return isEngineClient(engine) && !loopbackClients.has(engine);
+}
 
 /**
  * The engine as the harness drives it: over the protocol. A `connectEngine`
@@ -184,6 +191,7 @@ export function protocolEngine(engine: EngineHandle): EngineClientHandle {
     if (!isEngineClient(connected)) throw new Error('connectEngine returned a handle it did not make');
     client = connected;
     loopbacks.set(engine, client);
+    loopbackClients.add(client);
   }
   return client;
 }

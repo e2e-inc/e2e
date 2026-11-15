@@ -6,7 +6,7 @@ import { collectFromRegistration, type Collection } from '../../src/collect/coll
 import { collectModule, test } from '../../src/collect/registry.ts';
 import { pairRecording, pairRecordings, repeatEach, resolveOptions, select, type SelectionFilters } from '../../src/collect/select.ts';
 import { resolveConfig } from '../../src/config/resolve.ts';
-import { defineEngine } from '../../src/engine/index.ts';
+import { connectEngine, defineEngine, describeEngine, loopbackTransport } from '../../src/engine/index.ts';
 import { resultId } from '../../src/internal/ids.ts';
 import type { E2EConfig } from '../../src/types.ts';
 
@@ -965,5 +965,163 @@ describe('positional file selection', () => {
       ['tests/b.e2e.ts'],
     );
     expect(() => select(col, config())).toThrow(/none is runnable: 1 file not selected by a positional argument, 1 skipped with test.skip/);
+  });
+});
+
+describe('peers', () => {
+  /** A web target and an admin console, each on its own platform, so `platforms` can pin a test's own side. */
+  const twoTargets = (raw: Partial<E2EConfig> = {}) =>
+    config({ targets: [{ name: 'web', platform: 'web' }, { name: 'admin', platform: 'admin' }], ...raw });
+  const setupOn = (selection: ReturnType<typeof select>, target: string) =>
+    selection.pairs.find((pair) => pair.test.kind === 'setup' && pair.target.name === target)!;
+
+  it('resolves peers innermost-first as a whole, leaving each one target and agent to the pair', async () => {
+    const col = await collection(() => {
+      test.describe('outer', { peers: { ava: { session: 'ava' }, bob: {} } }, () => {
+        test('inherits', noop);
+        test('replaces', { peers: { cat: { target: 'admin', agent: 'buyer', agentContext: 'You are Cat.' } } }, noop);
+        test('clears', { peers: {} }, noop);
+      });
+      test('none', noop);
+    });
+    const cfg = twoTargets({ agents: { default: {}, buyer: {} } });
+    expect(col.tests.map((entry) => resolveOptions(entry, cfg).peers)).toEqual([
+      [
+        { name: 'ava', target: undefined, session: 'ava', agent: undefined, agentContext: undefined },
+        { name: 'bob', target: undefined, session: undefined, agent: undefined, agentContext: undefined },
+      ],
+      [{ name: 'cat', target: 'admin', session: undefined, agent: 'buyer', agentContext: 'You are Cat.' }],
+      [],
+      [],
+    ]);
+  });
+
+  it('rejects a peer target or agent the config does not declare, naming the nearest', async () => {
+    const col = await collection(() => {
+      test('pays', { peers: { ava: { target: 'admn' } } }, noop);
+      test('asks', { peers: { ava: { agent: 'buyr' } } }, noop);
+    });
+    const cfg = twoTargets({ agents: { default: {}, buyer: {} } });
+    expect(() => resolveOptions(col.tests[0]!, cfg)).toThrow(
+      'test "pays" in tests/a.e2e.ts runs peer "ava" on target "admn", which the config does not declare; targets: "web", "admin"; did you mean "admin"?',
+    );
+    expect(() => resolveOptions(col.tests[1]!, cfg)).toThrow(
+      'test "asks" in tests/a.e2e.ts runs peer "ava" as agent "buyr", which agents does not define; configured: default, buyer; did you mean "buyer"?',
+    );
+  });
+
+  it('runs a test with a peer once per selected target, and platforms pins the test own side', async () => {
+    const col = await collection(() => {
+      test('everywhere', { peers: { ava: { target: 'admin' } } }, noop);
+      test('from the web', { platforms: ['web'], peers: { ava: { target: 'admin' } } }, noop);
+    });
+    const runs = select(col, twoTargets()).pairs.filter((pair) => pair.disposition === 'run');
+    expect(runs.map((pair) => [pair.test.title, pair.target.name])).toEqual([
+      ['everywhere', 'web'],
+      ['from the web', 'web'],
+      ['everywhere', 'admin'],
+    ]);
+  });
+
+  it('refuses a run whose --target leaves out the target a selected peer runs on', async () => {
+    const col = await collection(() => {
+      test('from the web', { platforms: ['web'], peers: { ava: { target: 'admin' } } }, noop);
+    });
+    expect(() => select(col, twoTargets(), { targetIds: ['web'] })).toThrow(
+      'test "from the web" in tests/a.e2e.ts runs peer "ava" on target "admin", which this run does not select; add --target admin',
+    );
+    expect(running(select(col, twoTargets(), { targetIds: ['web', 'admin'] }))).toEqual(['from the web']);
+  });
+
+  it('refuses a peer on a target whose engine runs in an engine server, and takes one on an engine the config creates', async () => {
+    const local = defineEngine({ name: 'local', version: '1.0.0', spiVersion: 1, platform: 'admin' });
+    const served = connectEngine({ manifest: describeEngine(local), transport: loopbackTransport(local) });
+    const col = await collection(() => {
+      test('from the web', { platforms: ['web'], peers: { ava: { target: 'admin' } } }, noop);
+    });
+    const withEngine = (engine: typeof local) => config({ targets: [{ name: 'web', platform: 'web' }, { name: 'admin', engine, app: { url: 'http://localhost:3001' } }] });
+    expect(() => select(col, withEngine(served))).toThrow(
+      'test "from the web" in tests/a.e2e.ts runs peer "ava" on target "admin", whose engine runs in an engine server (connectEngine); a peer runs on an engine in the worker\'s own process only, so give the peer a target whose engine the config creates',
+    );
+    expect(running(select(col, withEngine(local)))).toEqual(['from the web']);
+  });
+
+  it('fails when no setup test produces a peer session, naming the peer', async () => {
+    const col = await collection(() => {
+      test('pays', { peers: { ava: { session: 'ava' } } }, noop);
+    });
+    expect(() => select(col, config())).toThrow(
+      /^test "pays" in tests\/a\.e2e\.ts consumes session "ava" for peer "ava" but no setup test produces it; no collected setup test declares a session$/,
+    );
+  });
+
+  it('runs the setup test that saves a peer session on the peer target, and only there', async () => {
+    const col = await collection(() => {
+      test.setup('sign in', { sessions: ['ava'] }, noop);
+      test('pays', { platforms: ['web'], peers: { ava: { target: 'admin', session: 'ava' } } }, noop);
+    });
+    const selection = select(col, twoTargets());
+    expect(setupOn(selection, 'admin').disposition).toBe('run');
+    expect(setupOn(selection, 'web').disposition).not.toBe('run');
+
+    // The same peer on the test own target needs the setup there instead.
+    const sameTarget = await collection(() => {
+      test.setup('sign in', { sessions: ['ava'] }, noop);
+      test('pays', { platforms: ['web'], peers: { ava: { session: 'ava' } } }, noop);
+    });
+    const local = select(sameTarget, twoTargets());
+    expect(setupOn(local, 'web').disposition).toBe('run');
+    expect(setupOn(local, 'admin').disposition).not.toBe('run');
+  });
+
+  it("keeps an engine's own fixture named peers for tests without peers, and refuses a test with peers on its target", async () => {
+    const own = defineEngine({ name: 'toy', version: '1.0.0', spiVersion: 1, fixtures: { peers: () => ({ mine: true }) } });
+    const cfg = config({ targets: [{ name: 'web', platform: 'web', engine: own }] });
+    const alone = await collection(() => test('alone', noop));
+    expect(select(alone, cfg).pairs.map((pair) => pair.disposition)).toEqual(['run']);
+    const pair = await collection(() => test('pays', { peers: { ava: {} } }, noop));
+    expect(() => select(pair, cfg)).toThrow(
+      'test "pays" in tests/a.e2e.ts declares peers, but target "web" runs on engine toy, which contributes a fixture named "peers"; the peers option needs that name',
+    );
+  });
+
+  it('refuses a peer session on a target whose engine cannot restore one, before any test runs', async () => {
+    const col = await collection(() => {
+      test.setup('sign in', { sessions: ['ava'] }, noop);
+      test('pays', { platforms: ['web'], peers: { ava: { target: 'admin', session: 'ava' } } }, noop);
+    });
+    const stateless = defineEngine({ name: 'toy', version: '1.0.0', spiVersion: 1 });
+    const cfg = config({ targets: [{ name: 'web', platform: 'web' }, { name: 'admin', platform: 'admin', engine: stateless }] });
+    expect(() => select(col, cfg)).toThrow(
+      'test "pays" in tests/a.e2e.ts restores session "ava" into peer "ava", but target "admin" cannot save or restore a session: engine toy, as configured, has no state capability; sign the peer in during the test instead',
+    );
+  });
+
+  it('brings a peer setup test into the shard that runs the test, and not into the others', async () => {
+    const col = await collection(() => {
+      test.setup('sign in', { sessions: ['ava'] }, noop);
+      test('a', { platforms: ['web'] }, noop);
+      test('b', { platforms: ['web'], peers: { ava: { target: 'admin', session: 'ava' } } }, noop);
+    });
+    const second = select(col, twoTargets(), { shard: { index: 2, total: 2 } });
+    expect(running(second)).toContain('b');
+    expect(setupOn(second, 'admin').disposition).toBe('run');
+    const first = select(col, twoTargets(), { shard: { index: 1, total: 2 } });
+    expect(running(first)).not.toContain('b');
+    expect(setupOn(first, 'admin').disposition).not.toBe('run');
+  });
+
+  it('reruns, under --last-failed, a test whose peer setup failed on the peer target last time', async () => {
+    const col = await collection(() => {
+      test.setup('sign in', { sessions: ['ava'] }, noop);
+      test('pays', { platforms: ['web'], peers: { ava: { target: 'admin', session: 'ava' } } }, noop);
+      test('other', { platforms: ['web'] }, noop);
+    });
+    const setup = col.tests.find((entry) => entry.kind === 'setup')!;
+    const onPeerTarget = select(col, twoTargets(), { lastFailed: new Set([resultId(setup.id, 'admin', 'default')]) });
+    expect(running(onPeerTarget)).toContain('pays');
+    expect(running(onPeerTarget)).not.toContain('other');
+    // A failure of the same setup on the test own target is not the peer one.
+    expect(() => select(col, twoTargets(), { lastFailed: new Set([resultId(setup.id, 'web', 'default')]) })).toThrow(/NO_TESTS|none is runnable|no test/i);
   });
 });

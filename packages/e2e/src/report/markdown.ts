@@ -41,7 +41,7 @@ import {
   stepLabel,
   toldAttempt,
 } from './failure-text.ts';
-import { cell, code, formatDuration, link, MAX_ID_CHARS, MAX_PATH_CHARS, MAX_TITLE_CHARS, plural } from './markdown-text.ts';
+import { cell, code, formatDuration, link, MAX_ID_CHARS, MAX_PATH_CHARS, MAX_TITLE_CHARS, plural, userLead } from './markdown-text.ts';
 import { outcome, type Outcome } from './outcome.ts';
 import { isExploreVerdict } from './traces.ts';
 import { posixRelative, writeTextReport } from './write.ts';
@@ -237,9 +237,14 @@ function spendLine(run: ReportRun, entries: readonly Entry[]): string | undefine
 /** `screenshot \`.e2e/results/<test>/attempt-1/screenshots/001-failure.png\``: each file as the reader finds it under `artifactsDir`, capped. */
 function evidencePaths(sorted: readonly ReportArtifact[], dir: string): string[] {
   const files = sorted.flatMap((artifact) => (artifact.path === undefined ? [] : [{ artifact, file: path.posix.join(dir, artifact.path) }]));
-  const shown = files.slice(0, MAX_EVIDENCE_PATHS).map(({ artifact, file }) => `${artifact.kind} ${code(file)}`);
+  const shown = files.slice(0, MAX_EVIDENCE_PATHS).map(({ artifact, file }) => `${artifactLabel(artifact)} ${code(file)}`);
   if (files.length > shown.length) shown.push(`and ${files.length - shown.length} more`);
   return shown;
+}
+
+/** `video`, or `guest · video` for a file a peer's app made. */
+function artifactLabel(artifact: ReportArtifact): string {
+  return `${userLead(artifact.user)}${artifact.kind}`;
 }
 
 /**
@@ -255,7 +260,7 @@ function evidence(artifacts: readonly ReportArtifact[], options: MarkdownReportO
   const local = artifacts.filter((artifact) => artifact.url === undefined);
   if (local.length === 0) return hosted.join(', ');
   const sorted = local.toSorted((a, b) => KIND_RANK[a.kind] - KIND_RANK[b.kind]);
-  const kinds = [...new Set(sorted.map((artifact) => artifact.kind))];
+  const kinds = [...new Set(sorted.map(artifactLabel))];
   const url = options.artifactsUrl;
   const shown = url !== undefined
     ? kinds.map((kind) => link(kind, url))
@@ -277,7 +282,7 @@ function stepClause(steps: readonly ReportStep[], at: { index: number; step: Fai
   const calls = modelCalls(at.step);
   const spent = calls === 0 ? '' : ` and ${plural(calls, 'model call')}`;
   const call = at.step.kind === 'agent' ? `${code(at.step.api, MAX_ID_CHARS)} ${stepLabel(at.step, MAX_PATH_CHARS)}` : code(`${at.step.api} ${at.step.label}`, MAX_PATH_CHARS);
-  return `at step ${at.index + 1} of ${steps.length}: ${call}, after ${formatDuration(at.step.durationMs)}${spent}`;
+  return `at step ${at.index + 1} of ${steps.length}: ${userLead(at.step.user)}${call}, after ${formatDuration(at.step.durationMs)}${spent}`;
 }
 
 /** `**CODE** (phase)`: how the error names itself. */
@@ -333,7 +338,8 @@ function failureBlock({ result, final }: Entry, manyTargets: boolean, options: M
   const name = error === undefined ? `**${cell(result.status, MAX_ID_CHARS)}**` : errorName(error);
   const lead = at === undefined ? name : `${name} ${stepClause(told.steps, at)}`;
   const alike = attemptsLine(result, final);
-  const facts = [...detailLines(error), ...(alike === undefined ? [] : [alike]), ...lastTurnLines(at?.step), ...screenLines(told), ...appErrorLines(told)];
+  // The screen the failure is told on is the one of the user whose step failed.
+  const facts = [...detailLines(error), ...(alike === undefined ? [] : [alike]), ...lastTurnLines(at?.step), ...screenLines(told, at?.step.user), ...appErrorLines(told)];
   const where = evidence(evidenceOf(told), options);
   const page = options.traces?.get(result.id);
   const about = [sourceText(failureSource(result, told), options.sourceUrl), ...(manyTargets ? [cell(result.targetId, MAX_ID_CHARS)] : [])];

@@ -284,6 +284,24 @@
                   "message": "semantic capture timed out",
                   "retryable": false
                 }
+              },
+              {
+                "id": "018f0f5c-7b2a-7abc-8abc-0123456789ab:2",
+                "index": 2,
+                "kind": "locator",
+                "api": "locator.click",
+                "label": "getByRole('button', { name: 'Accept' })",
+                "user": "guest",
+                "source": {
+                  "file": "tests/example.e2e.ts",
+                  "line": 9,
+                  "column": 3
+                },
+                "status": "passed",
+                "startedAt": "2026-07-24T12:00:01.000Z",
+                "durationMs": 300,
+                "events": [],
+                "artifacts": []
               }
             ],
             "artifacts": [
@@ -310,12 +328,38 @@
                 "producer": {
                   "kind": "attempt"
                 }
+              },
+              {
+                "id": "018f0f5c-7b2a-7abc-8abc-1123456789ab:artifact:2",
+                "kind": "video",
+                "mediaType": "video/webm",
+                "path": "web/tests_example.e2e.ts__opens_app/attempt-0/peers/guest/video/video.webm",
+                "size": 8,
+                "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+                "startedAt": "2026-07-24T12:00:00.000Z",
+                "redaction": "incomplete",
+                "user": "guest",
+                "producer": {
+                  "kind": "attempt"
+                }
               }
             ],
             "secondaryErrors": [],
             "cleanup": "complete",
             "environment": {
               "browser": "chromium 141.0.7390.37"
+            },
+            "peers": {
+              "guest": {
+                "target": "web",
+                "environment": {
+                  "browser": "chromium 141.0.7390.37"
+                },
+                "failure": {
+                  "url": "http://127.0.0.1:3000/invites",
+                  "screen": "018f0f5c-7b2a-7abc-8abc-1123456789ab:artifact:2"
+                }
+              }
             },
             "failure": {
               "url": "http://127.0.0.1:3000/todos",
@@ -349,6 +393,14 @@
                 "text": "POST /api/cart 500 Internal Server Error",
                 "at": "2026-07-24T12:00:03.100Z",
                 "step": 0
+              },
+              {
+                "source": "console",
+                "level": "warning",
+                "text": "invite link expires soon",
+                "at": "2026-07-24T12:00:01.200Z",
+                "step": 2,
+                "user": "guest"
               }
             ]
           }

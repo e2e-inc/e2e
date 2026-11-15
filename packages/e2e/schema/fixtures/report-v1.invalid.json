@@ -15,6 +15,7 @@
               {
                 "id": "no-file",
                 "kind": "screenshot",
+                "user": "..",
                 "mediaType": "image/png",
                 "redaction": "complete",
                 "producer": {

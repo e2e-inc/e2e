@@ -86,6 +86,11 @@ function href(url: string): string {
   return collapseText(url).replace(/[\s()<>]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`);
 }
 
+/** `guest · `: the peer a step, a log line, or a file belongs to, before it; nothing for the test's own user. */
+export function userLead(user: string | undefined): string {
+  return user === undefined ? '' : `${cell(user, MAX_ID_CHARS)} · `;
+}
+
 export function link(text: string, url: string): string {
   return `[${text}](${href(url)})`;
 }

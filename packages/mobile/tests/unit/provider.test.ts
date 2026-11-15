@@ -67,6 +67,20 @@ const finishInfo = (log: (line: string) => void = () => undefined) => ({
 });
 
 describe('device provider', () => {
+  it("refuses, before it leases anything, a run that puts a test's peer on the target", async () => {
+    const cloud = provider();
+    const h = harness({ device: cloud.impl });
+    await expect(h.prepare({ ...prepareInfo({}, 2), peerSlots: 1 })).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message:
+        'target "ios" leases its devices from a device provider, and a test\'s peer on it would need a lease of its own, which this version does not take for a peer; run the peer on a simulator or emulator on this machine',
+    });
+    expect(cloud.acquired).toEqual([]);
+    // A simulator pool on this machine serves a peer: each slot is a device of its own.
+    const local = harness({ device: ['iPhone 17 Pro peers-1', 'iPhone 17 Pro peers-2'] });
+    expect((await local.prepare({ ...prepareInfo({}, 2), peerSlots: 1 }))?.workers).toBe(2);
+  });
+
   it('rejects a provider without a name or the two methods', () => {
     expect(() => harness({ device: { name: '' } as unknown as DeviceProvider })).toThrow(/non-empty `name`/);
     expect(() => harness({ device: null as unknown as DeviceProvider })).toThrow(/non-empty `name`/);

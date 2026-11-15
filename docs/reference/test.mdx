@@ -348,6 +348,7 @@ blocked event loop hangs it.
 | [`platforms`](#platforms) | `readonly string[]` | - |
 | [`requires`](#requires) | `readonly Capability[]` | - |
 | [`session`](#session) | `string` | - |
+| [`peers`](#peers) | `Record<string, PeerOptions>` | - |
 | [`agentContext`](#agentcontext) | `string` | - |
 | [`agent`](#agent) | `string \| readonly string[]` | the run's agents |
 | [`trace`](#trace) | `RecordingMode` | the run's |
@@ -357,7 +358,7 @@ blocked event loop hangs it.
 
 `test` takes every option but `serial` and `sessions`. `describe` takes
 every option but `only`, `fail`, and `sessions`. `test.setup` requires
-`sessions` and takes no `session`, `only`, `skip`, or `fail`.
+`sessions` and takes no `session`, `peers`, `only`, `skip`, or `fail`.
 
 Resolution order: test, nearest group, outer groups, config, built-in
 default. Inside a [serial group](#serial), the group's `retries`, `trace`, and
@@ -464,6 +465,50 @@ test('sees the dashboard', { session: 'member' }, async ({ app }) => {});
 
 See [`test.setup`](#test-setup).
 
+#### `peers`
+
+More users in the test, by name. Each peer opens an app of its own before
+`beforeEach` runs, on the test's target or another one, and closes with the
+test. The test reaches it as `peers.<name>`.
+
+```ts
+test('Ava sees the payment', { session: 'member', peers: { ava: { session: 'ava' } } }, async ({ app, screen, peers }) => {
+  await app.open('/pay');
+  await screen.getByRole('button', 'Pay Ava $3').tap();
+  await peers.ava.app.open('/activity');
+  await expect(peers.ava.screen.getByText('$3.00 from Member')).toBeVisible();
+});
+```
+
+| Option | Type | Default |
+| --- | --- | --- |
+| `target` | `string` | the test's target |
+| `session` | `string` | - |
+| `agent` | `string` | the test's agent |
+| `agentContext` | `string` | - |
+
+- `target` must be a target the run selects. The test still runs on each
+  selected target as its own; pin the test's side with
+  [`platforms`](#platforms).
+- `session` is a session a setup test saved on the peer's target. The target
+  must save and restore state, so a phone peer signs in during the test.
+- `agentContext` reaches the peer's agent steps only. The test's own
+  `agentContext` stays with the test's user.
+- Names match `/^[A-Za-z0-9_.-]{1,128}$/`, are not `.` or `..`, and differ
+  in more than case, since each peer's files go in a folder named after it.
+- Innermost wins, as a whole.
+
+See [Two users in one test](/authentication#two-users-in-one-test) for what
+each peer gets.
+
+| Throws | When |
+| --- | --- |
+| `COLLECTION_ERROR` | A name or field that breaks the rules above, an unknown `target` or `agent`, a `target` the run does not select, a `session` no setup test saves, a `session` on a target that cannot restore one, `peers` on, inside, or around a serial group or on a setup test, a peer target whose engine runs in an engine server, or a target whose engine contributes its own `peers` fixture. |
+| `SESSION_TEST_UNSUPPORTED` | `e2e mcp`'s `open_session` names the test: a session drives one app. |
+| `UNSUPPORTED_CAPABILITY` | Before any test, the peer's target leases its browsers or devices from a provider, or attaches to a browser over CDP, or the run has no config file to load the peer's engine from: a config value or tests registered in memory. |
+| `INVALID_CONFIG` | At launch, the peer's engine is the same object as another user's in the worker, as an engine made inside a package is. In the body, `peers.<name>` names a peer the test does not declare. |
+| `ENGINE_FAILURE` | Before any test, a target cannot serve one worker and the peers its tests bring to it. |
+
 #### `agentContext`
 
 Extra context for agent steps. Layers are concatenated outermost first.
@@ -551,7 +596,7 @@ describe('checkout', { serial: true }, () => {
 
 | Throws | When |
 | --- | --- |
-| `COLLECTION_ERROR` | A member sets `retries`, `trace`, `video`, `session`, `platforms`, `requires`, `skip`, `only`, or a nested `serial`. |
+| `COLLECTION_ERROR` | A member sets `retries`, `trace`, `video`, `session`, `peers`, `platforms`, `requires`, `skip`, `only`, or a nested `serial`. |
 
 #### `sessions`
 
@@ -572,11 +617,17 @@ A static, non-empty array of unique names. Each name matches
 | [`app`](/reference/app) | `App` |
 | [`screen`](/reference/screen) | `Screen` |
 | `platform` | `string` |
+| [`peers`](#peers) | `Record<string, PeerFixtures>` |
 | [`session`](#test-setup) | `SetupSession` |
 
-`agent`, `app`, and `screen` reach test bodies, `beforeEach`, and
+`agent`, `app`, `screen`, and `peers` reach test bodies, `beforeEach`, and
 `afterEach`. `platform` reaches every hook too, and `session` only
 `test.setup` bodies. [`TestFixtures`](#testfixtures) describes each one.
+
+`peers.<name>` holds the peer's own `agent`, `app`, `screen`, and `platform`,
+and the fixtures its target's engine contributes (`browser`, `device`). A
+name the test does not declare throws `INVALID_CONFIG`, naming the peers it
+declares.
 
 Everything else is a fixture the target's engine contributes, or one of
 [your own](#your-own-fixtures). `@e2e-dev/web` contributes
@@ -643,6 +694,7 @@ Per attempt:
 | Mistake | Fails |
 | --- | --- |
 | A value that is not a plain object of functions, an empty name, a core name (`agent`, `app`, `screen`, `platform`, `session`), or a name an earlier `extend` in the chain defined | At import, `COLLECTION_ERROR` naming the fixture |
+| A fixture named `peers` in the chain of a test that declares [`peers`](#peers), on the test or a `describe` around it | At import, `COLLECTION_ERROR` naming the test. Without `peers` on the test, your fixture works as before |
 | A name the target's engine contributes (`browser` on a Playwright target) | The attempt, in `beforeEach`, `TEST_SETUP_FAILED` |
 | A definition that returns without calling `use` | The attempt, in `beforeEach`, `TEST_SETUP_FAILED` |
 | A definition that calls `use` twice | The attempt, at teardown, `TEST_SETUP_FAILED` |
@@ -666,8 +718,13 @@ hook finishes.
 export interface TestAPI<Fixtures = TestFixtures> {
   /** Registers one test synchronously during module evaluation. */
   (title: string, fn: TestFn<Fixtures>): TestCase;
-  /** Registers one configured test synchronously during module evaluation. */
-  (title: string, options: TestOptions, fn: TestFn<Fixtures>): TestCase;
+  /**
+   * Registers one configured test synchronously during module evaluation.
+   * The names the test's own `peers` option declares type its `peers`
+   * fixture, so a peer it never declared is a type error; peers set on a
+   * `describe` are typed by any name.
+   */
+  <Peers extends Readonly<Record<string, PeerOptions>> = never>(title: string, options: TestOptions & { peers?: Peers }, fn: TestFn<Fixtures>): TestCase;
   /** Registers one skipped test. */
   skip(title: string, fn: TestFn<Fixtures>): TestCase;
   /**
@@ -720,6 +777,9 @@ export interface TestAPI<Fixtures = TestFixtures> {
    *       await workspace.cleanup();
    *     },
    *   });
+   *
+   * A fixture named `peers` replaces the core one in its tests' types; those
+   * tests can't declare the `peers` option.
    */
   extend<Extra>(fixtures: FixtureDefinitions<Fixtures, Extra>): TestAPI<Fixtures & Extra>;
   /** Declares a group synchronously. */
@@ -774,6 +834,13 @@ export interface TestOptions {
   requires?: readonly Capability[];
   /** Session a setup test saved, restored before the body runs. */
   session?: string;
+  /**
+   * More users in the test, by name: each opens its own app before
+   * `beforeEach` runs, on the test's target or another one. Innermost wins,
+   * as a whole. Names are 1 through 128 ASCII letters, numbers, `_`, `-`,
+   * or `.`. Not allowed inside a serial group.
+   */
+  peers?: Readonly<Record<string, PeerOptions>>;
   /** Extra context for agent steps; layers are concatenated outermost first. */
   agentContext?: string;
   /**
@@ -805,7 +872,28 @@ export interface DescribeOptions extends Omit<TestOptions, 'only' | 'fail'> {
   serial?: boolean;
 }
 
-export interface SetupOptions extends Omit<TestOptions, 'session' | 'only' | 'skip' | 'fail' | 'agent'> {
+/**
+ * One more user in a test: an app of its own, opened next to the test's,
+ * on the test's target or another one. The test reaches it as
+ * `peers.<name>`.
+ */
+export interface PeerOptions {
+  /** The target the peer's app runs on; defaults to the test's own target. */
+  target?: string;
+  /**
+   * A session a setup test saved on the peer's target, restored into the
+   * peer's app before the body runs. The peer's target must save and
+   * restore state, as for `session`; a device target cannot, so a device
+   * peer signs in during the test.
+   */
+  session?: string;
+  /** The configured agent (`agents.<name>`) the peer's `agent` runs with; defaults to the agent the test runs as. */
+  agent?: string;
+  /** Extra context for the peer's agent steps. The test's own `agentContext` stays with the test's user. */
+  agentContext?: string;
+}
+
+export interface SetupOptions extends Omit<TestOptions, 'session' | 'peers' | 'only' | 'skip' | 'fail' | 'agent'> {
   /** Session names this setup test MUST save. */
   sessions: readonly string[];
   /** A setup test runs once per target, so it pins at most one agent. */
@@ -825,6 +913,17 @@ export interface TestFixtures {
   readonly screen: Screen;
   /** The target's platform label: `web`, `ios`, `android`, or an engine's own string. */
   readonly platform: string;
+  /** The test's peers by name (the `peers` option), each over an app of its own; empty when it declares none. */
+  readonly peers: Readonly<Record<string, PeerFixtures>>;
+}
+
+/**
+ * One peer's fixtures: what the test's own user has, over the peer's app, and
+ * the fixtures the peer target's engine contributes (`browser` on a web
+ * target, `device` on a phone).
+ */
+export interface PeerFixtures extends Omit<TestFixtures, 'peers'> {
+  readonly [fixture: string]: unknown;
 }
 
 export interface SetupFixtures extends TestFixtures {

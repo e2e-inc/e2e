@@ -20,7 +20,7 @@ import { cleanupErrorsOf, expectedFailureOf, failureBeforeSkip, type ArtifactRec
 import type { Reporter, ReporterSummary } from '../types.ts';
 import { projectSource } from './build.ts';
 import { codeFrame, userFrame } from './code-frame.ts';
-import { appErrorsOf, type AppErrors } from './failure-text.ts';
+import { appErrorsOf, failedStepOf, type AppErrors } from './failure-text.ts';
 import {
   addCacheTally,
   addModelTally,
@@ -63,7 +63,7 @@ import {
 import { leftOutTests } from './left-out.ts';
 import { ExploreView } from './list-explore.ts';
 import { isShownEvent, type ConfiguredModel, type FileGroup, type PausedTest, type ReplayNotice, type RunningTest, type TestLine } from './list-model.ts';
-import { replayLine, replayNotices, stepLine, stepPromptLine } from './list-steps.ts';
+import { replayLine, replayNotices, stepLine, stepPromptLine, userPrefix } from './list-steps.ts';
 import { LiveWindow } from './live-window.ts';
 import { repeatGroups, repeatLine, repeatSummary, type RepeatRun } from './repeats.ts';
 import { RunningTree } from './running-tree.ts';
@@ -127,6 +127,8 @@ interface ResultDetails {
   /** What the runner saw when the last failure landed, with the screen text's report path when it kept one. */
   readonly failure: FailureEvidence | undefined;
   readonly screenPath: string | undefined;
+  /** The peer whose step failed, whose screen `failure` is; undefined for the test's own user. */
+  readonly failureUser: string | undefined;
   /** What the app logged during the told attempt that went wrong; undefined for nothing. */
   readonly appLog: AppLogSummary | undefined;
   /** Cleanup-phase secondary errors of attempts whose cleanup failed; shown under a passed or flaky test. */
@@ -186,13 +188,22 @@ function attemptDetails(attempts: readonly AttemptRecord[], passed: boolean, con
   };
 }
 
-/** The failure evidence of one attempt, and the path of the screen text it points at. */
-function failureOf(
-  attempt: { readonly failure?: FailureEvidence | undefined; readonly artifacts: readonly ArtifactRecord[] } | undefined,
-): Pick<ResultDetails, 'failure' | 'screenPath'> {
-  const failure = attempt?.failure;
+/** What `failureOf` reads of an attempt: its evidence and files, and the steps that say whose failure it was. */
+interface FailedAttemptView {
+  readonly failure?: FailureEvidence | undefined;
+  readonly artifacts: readonly ArtifactRecord[];
+  readonly peers?: AttemptRecord['peers'];
+  readonly steps?: AttemptRecord['steps'];
+  readonly error?: AttemptRecord['error'];
+}
+
+/** The failure evidence of one attempt on the screen of the user whose step failed, and the path of the screen text it points at. */
+function failureOf(attempt: FailedAttemptView | undefined): Pick<ResultDetails, 'failure' | 'screenPath' | 'failureUser'> {
+  // Without its steps, a failure is the test's own user's: a serial member runs no peers.
+  const failureUser = attempt?.steps === undefined ? undefined : failedStepOf({ steps: attempt.steps, error: attempt.error })?.step.user;
+  const failure = failureUser === undefined ? attempt?.failure : attempt?.peers?.[failureUser]?.failure;
   const screen = failure?.screen === undefined ? undefined : attempt?.artifacts.find((artifact) => artifact.id === failure.screen);
-  return { failure, screenPath: screen?.path };
+  return { failure, screenPath: screen?.path, failureUser };
 }
 
 /** Where each video these attempts kept is, in order: a report-relative path, or the URL of one a hosted service keeps. */
@@ -276,6 +287,8 @@ interface Failure {
   readonly videos: readonly string[];
   readonly failure: FailureEvidence | undefined;
   readonly screenPath: string | undefined;
+  /** The peer whose step failed, whose screen `failure` is; undefined for the test's own user. */
+  readonly failureUser: string | undefined;
   readonly appLog: AppLogSummary | undefined;
   /** Why a failed test skipped itself: the skip did not outrank the failure. */
   readonly skipReason?: string | undefined;
@@ -698,6 +711,7 @@ export class ListReporter implements Reporter {
       startedMs: Date.now(),
       executing: true,
       current: undefined,
+      peerSteps: new Map(),
       steps: this.pairs.get(key)?.steps ?? [],
       ran: this.stepping ? (this.pairs.get(key)?.ran ?? []) : undefined,
     });
@@ -716,15 +730,19 @@ export class ListReporter implements Reporter {
     const running = this.pairs.get(pairKey(event.testId, event.agent, event.target, event.repeat));
     if (running === undefined) return;
     const { progress } = event;
+    // A peer's step runs beside the test's own: each user has its own current step.
+    const user = progress.identity?.user;
+    const current = user === undefined ? running.current : running.peerSteps.get(user);
     switch (progress.phase) {
       case 'start': {
         const { api, label, kind } = progress;
-        running.current = { api, label, kind, events: [], replaying: false, activity: undefined };
+        const started = { api, label, kind, events: [], replaying: false, activity: undefined };
+        if (user === undefined) running.current = started;
+        else running.peerSteps.set(user, started);
         this.window.redraw();
         break;
       }
       case 'event': {
-        const { current } = running;
         this.explore?.action(progress.event);
         if (current === undefined) break;
         // The event ends whatever was announced; until the next announcement
@@ -737,28 +755,27 @@ export class ListReporter implements Reporter {
         break;
       }
       case 'activity': {
-        const { current } = running;
         if (current === undefined) break;
         current.activity = progress.activity;
         this.window.redraw();
         break;
       }
       case 'replay': {
-        const { current } = running;
         if (current === undefined) break;
         current.replaying = progress.active;
         this.window.redraw();
         break;
       }
       case 'end': {
-        running.current = undefined;
-        running.ran?.push({ api: progress.api, label: progress.label, status: progress.status, durationMs: progress.durationMs, modelCalls: progress.modelCalls });
+        if (user === undefined) running.current = undefined;
+        else running.peerSteps.delete(user);
+        const { api, label, status, durationMs, modelCalls } = progress;
+        const step = { api, label, status, durationMs, modelCalls, ...(user === undefined ? {} : { user }) };
+        running.ran?.push(step);
         if (progress.kind !== 'agent') {
           this.window.redraw();
           break;
         }
-        const { api, label, status, durationMs, modelCalls } = progress;
-        const step = { api, label, status, durationMs, modelCalls };
         // An exploration's planner and charter steps show as the exploration's own rows.
         if (this.explore !== undefined) break;
         if (this.live) {
@@ -807,7 +824,7 @@ export class ListReporter implements Reporter {
     // Read before `detailsOf` releases the result's serial group.
     const skippedAfter = failureBeforeSkip(result, (id) => this.pendingSerial.get(id)?.group);
     const id = resultId(result.test.id, result.target.name, result.agent, result.repeat);
-    const { durationMs, usage, models, cache, error, videos, screenshots, failure, screenPath, appLog, skipReason, replays, cleanupErrors } =
+    const { durationMs, usage, models, cache, error, videos, screenshots, failure, screenPath, failureUser, appLog, skipReason, replays, cleanupErrors } =
       this.detailsOf(result);
     this.screenshots.push(...screenshots);
     addUsage(this.runUsage, usage);
@@ -823,7 +840,7 @@ export class ListReporter implements Reporter {
       // The exploration's verdict is its findings; any other error is a failure of its own, unless the run stopped it.
       this.explore.result(result.attempts.flatMap((attempt) => attempt.artifacts));
       if (error !== undefined && result.status !== 'interrupted' && !this.explore.isVerdict(error)) {
-        this.failures.push({ id, group, title, declaredLine, status: result.status, error, videos, failure, screenPath, appLog });
+        this.failures.push({ id, group, title, declaredLine, status: result.status, error, videos, failure, screenPath, failureUser, appLog });
       }
       this.window.redraw();
       return;
@@ -850,7 +867,7 @@ export class ListReporter implements Reporter {
       run: { repeat: result.repeat, status: result.status, code: error?.code ?? result.attempts.findLast((attempt) => attempt.status !== 'passed')?.error?.code },
     });
     if (statusBucket(result.status) === 'failed') {
-      this.failures.push({ id, group, title, declaredLine, status: result.status, error, videos, failure, screenPath, appLog, skipReason });
+      this.failures.push({ id, group, title, declaredLine, status: result.status, error, videos, failure, screenPath, failureUser, appLog, skipReason });
     }
     if (skippedAfter !== undefined) {
       this.skippedFailures.push({ id, group, title, declaredLine, status: result.status, error: skippedAfter.error, videos, ...failureOf(skippedAfter), appLog: undefined });
@@ -1171,7 +1188,7 @@ export class ListReporter implements Reporter {
     this.print('');
     this.print(this.errorBanner(`${heading} ${failures.length}`));
     this.print('');
-    failures.forEach(({ id, group, title, status, error, videos, failure, screenPath, appLog, skipReason }, index) => {
+    failures.forEach(({ id, group, title, status, error, videos, failure, screenPath, failureUser, appLog, skipReason }, index) => {
       this.print(
         `${pc.bold(pc.bgRed(status === 'skipped' ? ' SKIP ' : ' FAIL '))} ${this.badge(group.target)} ${bounded(group.file)}${this.separator}${title}`,
       );
@@ -1184,7 +1201,7 @@ export class ListReporter implements Reporter {
         this.printFailureLocation(error.stack);
       }
       if (skipReason !== undefined) this.print(pc.yellow(` ${pc.dim(F_POINTER)} ${pc.dim('skipped')} ${bounded(skipReason)}`));
-      this.printEvidence(failure, screenPath, pages[id], appLog);
+      this.printEvidence(failure, failureUser, screenPath, pages[id], appLog);
       this.printVideos(videos);
       const marker = `[${index + 1}/${failures.length}]`;
       const { before, after } = rule(marker, 'right');
@@ -1208,12 +1225,12 @@ export class ListReporter implements Reporter {
    * error, and where the trace page is (else the screen text). The message
    * says what was asked; these lines say what was there.
    */
-  private printEvidence(failure: FailureEvidence | undefined, screenPath: string | undefined, page: string | undefined, appLog: AppLogSummary | undefined): void {
+  private printEvidence(failure: FailureEvidence | undefined, user: string | undefined, screenPath: string | undefined, page: string | undefined, appLog: AppLogSummary | undefined): void {
     const { pc } = this;
     const row = (label: string, text: string): void => {
       this.print(pc.cyan(` ${pc.dim(F_POINTER)} ${pc.dim(label)} ${text}`));
     };
-    if (failure?.url !== undefined) row('at', bounded(failure.url));
+    if (failure?.url !== undefined) row('at', `${userPrefix(user)}${bounded(failure.url)}`);
     for (const candidate of failure?.candidates ?? []) row('on screen', bounded(candidate));
     if (appLog !== undefined) {
       row('app', `${appLog.tally} logged`);

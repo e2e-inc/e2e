@@ -1394,6 +1394,32 @@ describe('cache.strict and a step whose key changed under its recording', () => 
     }
   });
 
+  it("runs live a peer's step when the only recording is another user's of the same step", async () => {
+    const peerStep = { ...exampleStep, user: 'ava' };
+    const peerClaim = (context: AgentCacheContext): AgentCacheContext => ({ ...context, claimKey: () => ({ keyHash: OWN_KEY, context: exampleContext, step: peerStep }) });
+    // The test's own user's recording never stands in for Ava's step, nor Bob's for hers.
+    for (const recordedFor of [exampleStep, { ...exampleStep, user: 'bob' }]) {
+      const session = makeSession(peerClaim(await rekeyedContext(recordedPayload(recordedFor))), makeHost(['/']));
+      await expect(session.begin(), JSON.stringify(recordedFor)).resolves.toBeUndefined();
+    }
+    // Nor hers for the test's own step.
+    await expect(makeSession(await rekeyedContext(recordedPayload(peerStep)), makeHost(['/'])).begin()).resolves.toBeUndefined();
+    // Her own recording under another key is stale, as the test's own is.
+    const session = makeSession(peerClaim(await rekeyedContext(recordedPayload(peerStep))), makeHost(['/']));
+    await expect(session.begin()).rejects.toMatchObject({ code: 'REPLAY_STALE' });
+  });
+
+  it("runs live a peer's step when the only recording is the same peer's in another pair of the test, on another target or as another agent", async () => {
+    const peerStep = { ...exampleStep, user: 'ava', ownerTargetId: 'web', ownerAgent: 'admin' };
+    const peerClaim = (context: AgentCacheContext): AgentCacheContext => ({ ...context, claimKey: () => ({ keyHash: OWN_KEY, context: exampleContext, step: peerStep }) });
+    for (const recordedFor of [{ ...peerStep, ownerTargetId: 'ios' }, { ...peerStep, ownerAgent: 'member' }]) {
+      const session = makeSession(peerClaim(await rekeyedContext(recordedPayload(recordedFor))), makeHost(['/']));
+      await expect(session.begin(), JSON.stringify(recordedFor)).resolves.toBeUndefined();
+    }
+    // Her recording in this pair, under another key, is stale.
+    await expect(makeSession(peerClaim(await rekeyedContext(recordedPayload(peerStep))), makeHost(['/'])).begin()).rejects.toMatchObject({ code: 'REPLAY_STALE' });
+  });
+
   it('runs live when the only recording is truncated or records no step', async () => {
     const tapUpgrade = { name: 'tap', summary: 'tap button "Upgrade"', target: { role: 'button', name: 'Upgrade' } } as const;
     const truncated = recordedPayload(exampleStep, { actions: Array.from({ length: 50 }, () => tapUpgrade), truncated: true });

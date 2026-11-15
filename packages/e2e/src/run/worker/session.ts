@@ -13,6 +13,7 @@ import { DebugTrace } from '../../internal/debug.ts';
 import { uuidv7 } from '../../internal/ids.ts';
 import { abortError, cancelledError } from '../../internal/time.ts';
 import { TargetExecutor, type InMemoryAttempts } from '../execute.ts';
+import type { PeerSlots } from '../peer-slots.ts';
 import { encodeResult, type RunError } from '../records.ts';
 import type { SessionStore } from '../sessions.ts';
 import type { HeldStep } from '../step-hold.ts';
@@ -50,6 +51,8 @@ export interface TargetWorkerDeps {
   readonly headed: boolean;
   /** See `TargetExecutorOptions.workerSlot`. */
   readonly workerSlot: number;
+  /** See `TargetExecutorOptions.peerSlots`. */
+  readonly peerSlots?: Readonly<Record<string, PeerSlots>> | undefined;
   /** See `TargetExecutorOptions.env`. */
   readonly env: Readonly<Record<string, string | undefined>>;
   /** Whether the worker has a process of its own; see `TargetExecutorOptions.isolated`. */
@@ -60,6 +63,8 @@ export interface TargetWorkerDeps {
   readonly inMemory?: InMemoryAttempts | undefined;
   /** Whether steps wait for the runner's `step-release` (`e2e run --step`). */
   readonly step?: boolean | undefined;
+  /** See `TargetExecutorOptions.loadPeerConfig`; only a child-process worker, which loaded a config file, has it. */
+  readonly loadPeerConfig?: (() => Promise<ResolvedConfig>) | undefined;
 }
 
 /** Transport callbacks a target worker needs. */
@@ -117,12 +122,14 @@ export class TargetWorker {
         sessionStore: deps.sessionStore,
         headed: deps.headed,
         workerSlot: deps.workerSlot,
+        peerSlots: deps.peerSlots,
         env: deps.env,
         isolated: deps.isolated,
         interruptSignal: this.interruptController.signal,
         ...(deps.step === true ? { holdStep: (step: HeldStep, signal: AbortSignal) => this.holdStep(step, signal) } : {}),
         ...(deps.debug !== undefined ? { debug: deps.debug } : {}),
         inMemory: deps.inMemory,
+        loadPeerConfig: deps.loadPeerConfig,
         events: {
           onResult: (result) => {
             // Teardown after the result (an afterAll) belongs to no pair.

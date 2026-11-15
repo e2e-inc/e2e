@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FinishedRun } from '../../src/types.ts';
 import type { Report1Document, ReportSerialGroup } from '../../src/report/build.ts';
 import { junitReporter, renderJunitReport, type JunitReportOptions } from '../../src/report/junit.ts';
-import { REPORT_AT as AT, reportAttempt, reportDocument, reportError, reportResult } from '../helpers/report.ts';
+import { REPORT_AT as AT, reportAttempt, reportDocument, reportError, reportResult, reportStep } from '../helpers/report.ts';
 
 /** XML 1.0 `Char`, over code points: a lone surrogate is a code point of its own and falls outside every range. */
 // oxlint-disable-next-line no-control-regex -- the allowed range is the point
@@ -528,6 +528,16 @@ describe('renderJunitReport', () => {
     const artifacts = [shotArtifact('other', 'shots/first.png'), shotArtifact('shot-1', 'shots/target.png')];
     const xml = render(failedWithShot({ artifacts }), { artifactsDir: '.' });
     expect(xml).toContain('<system-out>[[ATTACHMENT|shots/target.png]]</system-out>');
+  });
+
+  it("attaches the screenshot of the peer whose step failed, not the test user's", () => {
+    const failed = reportStep({ status: 'failed', user: 'ava', error: reportError({ message: 'heading not visible' }) });
+    const document = failedWithShot({
+      steps: [reportStep({ index: 0 }), { ...failed, index: 1 }],
+      peers: { ava: { target: 'chromium', failure: { screenshot: 'shot-ava' } } },
+      artifacts: [shotArtifact('shot-1', 'checkout/001-failure.png'), { ...shotArtifact('shot-ava', 'checkout/peers/ava/001-failure.png'), user: 'ava' }],
+    });
+    expect(render(document, { artifactsDir: '.' })).toContain('<system-out>[[ATTACHMENT|checkout/peers/ava/001-failure.png]]</system-out>');
   });
 
   it('takes the screenshot of the told attempt when the last retry was interrupted', () => {

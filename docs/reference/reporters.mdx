@@ -479,7 +479,7 @@ product failure.
 Every step phase the runner emits includes `progress.identity`:
 
 ```ts
-{ attemptId: string; attemptIndex: number; stepId: string; stepIndex: number }
+{ attemptId: string; attemptIndex: number; stepId: string; stepIndex: number; user?: string }
 ```
 
 - The IDs match the final report. Both indexes start at zero.
@@ -489,6 +489,9 @@ Every step phase the runner emits includes `progress.identity`:
   member's step IDs stay distinct.
 - Use `stepId` to match start, activity, event, replay, and end phases,
   including nested steps.
+- `user` names the [peer](/reference/test#peers) whose app the step runs on.
+  It is absent for the test's own user. A peer's step can run while one of
+  the test's own does.
 - `identity` is optional in the type so a reporter can also accept older
   streams.
 

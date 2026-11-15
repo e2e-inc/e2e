@@ -24,6 +24,7 @@ import {
   type KeyModifier,
   type Locator,
   type ModelInstance,
+  type PeerOptions,
   type PointDragResult,
   type PointHit,
   type PointTapResult,
@@ -672,6 +673,38 @@ test.describe('as each persona', { agent: ['buyer', 'admin'] }, () => {});
 test('as each persona', { agent: ['buyer', 'admin'] }, async () => {});
 // @ts-expect-error a setup test runs once per target, so it pins at most one agent
 test.setup('sign in', { sessions: ['buyer'], agent: ['buyer', 'admin'] }, async () => {});
+// Peers: more users in one test, by name, each with its own target, saved session, agent, and context.
+const peer: PeerOptions = { target: 'iphone', session: 'ava', agent: 'ava', agentContext: 'You are Ava.' };
+test('pays a friend', { session: 'member', peers: { ava: peer, bob: {} } }, async () => {});
+test.describe('with a friend', { peers: { ava: { session: 'ava' } } }, () => {});
+// @ts-expect-error a peer takes only target, session, agent, and agentContext
+test('misspelled', { peers: { ava: { sesion: 'ava' } } }, async () => {});
+// @ts-expect-error a peer runs as one agent, not a list
+test('as each', { peers: { ava: { agent: ['ava', 'bob'] } } }, async () => {});
+// @ts-expect-error a setup test saves sessions and declares no peers
+test.setup('sign in', { sessions: ['ava'], peers: { ava: {} } }, async () => {});
+// Each peer has the test user's fixtures over its own app, and its engine's own.
+// A suite's own fixture named peers, as before e2e had peers, keeps its own type.
+const withOwnPeers = test.extend<{ peers: number }>({ peers: async (_fixtures, use) => use(7) });
+withOwnPeers('counts its own peers', async ({ peers }) => {
+  const count: number = peers;
+  // @ts-expect-error the suite's own peers is a number, not the core peers fixture
+  const core: Readonly<Record<string, unknown>> = peers;
+  void count;
+  void core;
+});
+test('sees the payment', { peers: { ava: {} } }, async ({ peers }) => {
+  const ava = peers.ava;
+  // @ts-expect-error the test declares no peer bob
+  void peers.bob;
+  await ava.app.open('/');
+  await ava.screen.getByText('$13.00').tap();
+  const platform: string = ava.platform;
+  const contributed: unknown = ava['browser'];
+  void [platform, contributed];
+  // @ts-expect-error a peer has no peers of its own
+  void ava.peers.bob;
+});
 declare const condition: boolean;
 // @ts-expect-error a conditionally async describe is still asynchronous
 test.describe('conditionally asynchronous', () => condition ? undefined : Promise.resolve());

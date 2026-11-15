@@ -12,6 +12,8 @@ import { playwrightRoutes } from './playwright/routes.mjs';
 
 const PORT = Number(process.env.PORT ?? 4271);
 const playwright = playwrightRoutes(PORT);
+/** The message board every visitor shares: one user posts, any other sees it (the peers test). */
+const messages = [];
 
 function parseCookies(request) {
   const header = request.headers.cookie ?? '';
@@ -62,6 +64,19 @@ const server = createServer(async (request, response) => {
     } else {
       html(render('/login', { failed: true }));
     }
+    return;
+  }
+  if (url.pathname === '/messages') {
+    const author = parseCookies(request).session === 'admin' ? 'admin' : 'guest';
+    if (request.method === 'POST') {
+      let body = '';
+      for await (const chunk of request) body += chunk;
+      const text = new URLSearchParams(body).get('text')?.trim();
+      if (text) messages.push({ author, text });
+      send(303, { location: '/messages' });
+      return;
+    }
+    html(render('/messages', { user: author, messages }));
     return;
   }
   if (url.pathname === '/logout') {

@@ -15,6 +15,7 @@ import type { DebugSnapshot } from '../../internal/debug.ts';
 import type { SerializedError } from '../../internal/errors.ts';
 import type { AttemptRecord, ResultRecord, RunError, SerialAttemptRecord, SerialGroupRecord, SerialMemberRecord, WireResultRecord } from '../records.ts';
 import type { SerialAttemptStart } from '../serial.ts';
+import type { PeerSlots } from '../peer-slots.ts';
 import type { HeldStep } from '../step-hold.ts';
 import type { StepProgress } from '../steps.ts';
 
@@ -61,6 +62,12 @@ export interface WorkerBootstrap {
   readonly targetName: string;
   /** This worker's slot among the target's workers; see `EngineInitInfo.workerSlot`. */
   readonly workerSlot: number;
+  /**
+   * The slots this worker's tests' peers take, by the peer's target: reserved
+   * for this worker alone when the targets were prepared, with what that
+   * target's `prepare` handed its own workers. Empty when its tests have no peers.
+   */
+  readonly peers: Readonly<Record<string, PeerSlots>>;
   readonly runId: string;
   readonly artifactsRoot: string;
   /** See `TargetExecutorOptions.rerunDir`. */

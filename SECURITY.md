@@ -57,7 +57,10 @@ included, is in the pixels the model gets. A text download (`.txt`,
 `.csv`, `.json`, `.html`) is rewritten before it is registered or stored, every secret value becoming
 `<secret:name>`; any other download is kept as served and marked
 `incomplete`. Sessions are per-run, target-bound, encrypted
-with a memory-only key, and deleted at cleanup.
+with a memory-only key, and deleted at cleanup. A test with peers has one
+set of secret values for all its users: a value any user typed or restored is
+redacted from every user's model input and from every record of the attempt,
+and a peer's session restores only on the peer's own target.
 
 ## Navigation and origins
 
