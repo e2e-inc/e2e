@@ -116,7 +116,7 @@ suites that consume the built packages the way a user would.
   device-cloud providers (`testmu`, `browserstack`) share: one daemon per
   slot, heartbeat, and a release that fails unless the session end is
   confirmed.
-- `packages/e2e/src/engine/protocol/` - the engine protocol: the engine
+- `packages/core/src/engine/protocol/` - the engine protocol: the engine
   contract as LSP-style JSON-RPC (`connectEngine` client, `serveEngine`
   server, spawn/socket/loopback transports), so an engine can run in
   another process, machine, or language. The harness holds only protocol
