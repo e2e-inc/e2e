@@ -43,8 +43,11 @@ const MIN_FOLD_NODES = 10;
 /** Every full screen is introduced by this phrase; the transcript elision looks for it. */
 export const FULL_SCREEN_PATTERN = /Current screen \(revision /;
 
-/** A fold line's dependency: `(12 nodes inside, unchanged since revision b1)`; the transcript elision looks for it. */
-export const FOLD_DEPENDENCY_PATTERN = /\(\d+ nodes inside, unchanged since revision ([^)]+)\)/g;
+/** A full screen's heading with its revision: `Current screen (revision b1, ...`; the transcript elision reads it. */
+export const SCREEN_REVISION_PATTERN = /Current screen \(revision ([^,)]+),/;
+
+/** A fold line's dependency: `(12 nodes inside, unchanged since revision b1)`; the transcript elision looks for it. No `/g`, so a later `.test()` or `.exec()` call is not stateful; a caller that needs every match builds its own global copy. */
+export const FOLD_DEPENDENCY_PATTERN = /\(\d+ nodes inside, unchanged since revision ([^)]+)\)/;
 
 /** The screen later updates are compared with: the last one sent, or the one `unlisted` named. */
 interface ShownScreen {
@@ -224,6 +227,15 @@ export class ScreenPresenter {
     const rendered = renderFull(observation);
     this.noteListed(rendered.listed, rendered.folded);
     return rendered.text;
+  }
+
+  /**
+   * Forgets every subtree the model last saw whole. The overflow retry cuts
+   * the screens those records name, so the next full render lists everything
+   * in full instead of folding against text the model no longer holds.
+   */
+  clearFoldRecords(): void {
+    this.fullyShown.clear();
   }
 
   /**
@@ -582,7 +594,7 @@ function foldUnchangedSubtrees(
     const inside = end - index - 1;
     const shown = fullyShown.get(entry.id);
     if (
-      index > 0 && entry.indent > 0 && inside >= MIN_FOLD_NODES &&
+      entry.indent > 0 && inside >= MIN_FOLD_NODES &&
       shown !== undefined && digests.get(entry.id) === shown.digest &&
       !subtreeHoldsFocus(entries, index, end)
     ) {
