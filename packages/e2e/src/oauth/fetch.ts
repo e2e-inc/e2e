@@ -82,7 +82,7 @@ export function createOAuthFetch<Credentials extends OAuthCredentials>(
     let pending = shared.refreshing.get(provider.id) as Promise<Credentials> | undefined;
     if (pending === undefined) {
       pending = store
-        .exclusive(async () => {
+        .exclusive(provider.id, async () => {
           // Another process may have refreshed already: prefer what the store holds now.
           const latest = await current();
           if (latest.access !== stale.access && !expiring(latest)) return latest;
@@ -91,7 +91,9 @@ export function createOAuthFetch<Credentials extends OAuthCredentials>(
             await persist(renewed);
             return renewed;
           } catch (cause) {
-            if (cause instanceof OAuthError && cause.code === 'LOGIN_REQUIRED') throw new OAuthError('LOGIN_REQUIRED', `${cause.message}; ${remedy}`, { cause });
+            if (cause instanceof OAuthError && cause.code === 'LOGIN_REQUIRED') {
+              throw new OAuthError('LOGIN_REQUIRED', `${cause.message}; ${remedy}`, { cause });
+            }
             throw cause;
           }
         })

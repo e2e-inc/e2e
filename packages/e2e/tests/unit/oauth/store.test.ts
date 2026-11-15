@@ -1,8 +1,14 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CREDENTIALS_ENV, EnvCredentialStore, FileCredentialStore, defaultCredentialStore, defaultCredentialsPath } from '../../../src/oauth/store.ts';
+
+vi.mock('node:fs', async (importOriginal) => {
+  const fs = await importOriginal<typeof import('node:fs')>();
+  return { ...fs, statSync: vi.fn(fs.statSync) };
+});
+const realStatSync = (await vi.importActual<typeof import('node:fs')>('node:fs')).statSync;
 
 const dirs: string[] = [];
 function tempFile(): string {
@@ -74,10 +80,73 @@ describe('FileCredentialStore', () => {
     await store.set('x', creds);
     writeFileSync(`${file}.lock`, '');
     const old = Date.now() / 1000 - 60;
-    const { utimesSync } = await import('node:fs');
     utimesSync(`${file}.lock`, old, old);
     await store.set('y', creds);
     expect((await store.list()).toSorted()).toEqual(['x', 'y']);
+  });
+
+  it('never takes over a lock another process created after the stale check', async () => {
+    const file = tempFile();
+    const store = new FileCredentialStore(file);
+    await store.set('x', creds);
+    const lock = `${file}.x.refresh.lock`;
+    writeFileSync(lock, '');
+    const old = Date.now() / 1000 - 60;
+    utimesSync(lock, old, old);
+    // Between this process's stale check and its takeover, another process takes the stale lock over and holds a fresh one.
+    vi.mocked(statSync).mockImplementationOnce(((target: string) => {
+      const stats = realStatSync(target);
+      rmSync(lock);
+      writeFileSync(lock, 'other');
+      return stats;
+    }) as typeof statSync);
+    let entered = false;
+    const pending = store.exclusive('x', async () => {
+      entered = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(entered).toBe(false);
+    rmSync(lock);
+    await pending;
+    expect(entered).toBe(true);
+  });
+
+  it('releases the refresh lock when the refresh throws', async () => {
+    const file = tempFile();
+    const store = new FileCredentialStore(file);
+    await store.set('x', creds);
+    await expect(store.exclusive('x', async () => Promise.reject(new Error('boom')))).rejects.toThrow('boom');
+    expect(existsSync(`${file}.x.refresh.lock`)).toBe(false);
+    expect(await store.exclusive('x', async () => 'next')).toBe('next');
+  });
+
+  it('keeps a held refresh lock fresh, so waiters never take it as stale', async () => {
+    const file = tempFile();
+    const store = new FileCredentialStore(file);
+    await store.set('x', creds);
+    const lock = `${file}.x.refresh.lock`;
+    const old = Date.now() / 1000 - 60;
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      await store.exclusive('x', async () => {
+        utimesSync(lock, old, old);
+        vi.advanceTimersByTime(10_000);
+        expect(statSync(lock).mtimeMs).toBeGreaterThan(Date.now() - 5_000);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('refreshes different providers at once', async () => {
+    const file = tempFile();
+    const store = new FileCredentialStore(file);
+    await store.set('a', creds);
+    let finishA = () => {};
+    const a = store.exclusive('a', () => new Promise<void>((resolve) => (finishA = resolve)));
+    expect(await store.exclusive('b', async () => 'b')).toBe('b');
+    finishA();
+    await a;
   });
 
   it('drops a damaged entry instead of losing every login', async () => {
