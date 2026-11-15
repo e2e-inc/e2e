@@ -1,5 +1,5 @@
 import { execFile, spawnSync } from 'node:child_process';
-import { existsSync, linkSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +9,7 @@ import { CREDENTIALS_ENV, EnvCredentialStore, FileCredentialStore, defaultCreden
 
 vi.mock('node:fs', async (importOriginal) => {
   const fs = await importOriginal<typeof import('node:fs')>();
-  return { ...fs, statSync: vi.fn(fs.statSync), writeFileSync: vi.fn(fs.writeFileSync), rmSync: vi.fn(fs.rmSync), linkSync: vi.fn(fs.linkSync) };
+  return { ...fs, statSync: vi.fn(fs.statSync), writeSync: vi.fn(fs.writeSync), rmSync: vi.fn(fs.rmSync) };
 });
 const realFs = await vi.importActual<typeof import('node:fs')>('node:fs');
 const realStatSync = realFs.statSync;
@@ -21,12 +21,15 @@ function tempFile(): string {
   return path.join(dir, 'nested', 'oauth.json');
 }
 afterEach(() => {
+  for (const mocked of [statSync, writeSync, rmSync]) vi.mocked(mocked).mockReset();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 const creds = { access: 'a', refresh: 'r', expires: 123, accountId: 'acct' };
+/** This host and pid namespace, as a lock names them. */
+const host = existsSync('/proc/self/ns/pid') ? `${hostname()}/${readlinkSync('/proc/self/ns/pid')}` : hostname();
 /** What a lock held by `pid` on this host holds. */
-const heldBy = (pid: number) => `${hostname()} ${pid} other`;
+const heldBy = (pid: number) => `${host} ${pid} other`;
 /** The pid of a process that has exited. */
 const exitedPid = () => spawnSync(process.execPath, ['-e', '']).pid;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -144,7 +147,8 @@ describe('FileCredentialStore', () => {
     ['this process', () => heldBy(process.pid)],
     ['a process of another user', () => heldBy(1)],
     ['another host', () => `elsewhere.example ${exitedPid()} other`],
-    ['no pid', () => `${hostname()} unknown other`],
+    ['another pid namespace on this host', () => `${hostname()}/pid:[1] ${exitedPid()} other`],
+    ['no pid', () => `${host} unknown other`],
   ])('waits for a fresh lock held by %s', async (_holder, content) => {
     const file = tempFile();
     const store = new FileCredentialStore(file);
@@ -205,18 +209,6 @@ describe('FileCredentialStore', () => {
     }
     expect(readFileSync(lock, 'utf8')).toBe(heldBy(process.pid));
     expect(statSync(lock).mtimeMs).toBeLessThan(Date.now() - 30_000);
-  });
-
-  it('links the lock into place with its holder already written', async () => {
-    const file = tempFile();
-    const store = new FileCredentialStore(file);
-    await store.set('x', creds);
-    const lock = `${file}.x.refresh.lock`;
-    vi.mocked(writeFileSync).mockClear();
-    vi.mocked(linkSync).mockClear();
-    await store.exclusive('x', async () => {});
-    expect(vi.mocked(writeFileSync).mock.calls.map(([target]) => target)).not.toContain(lock);
-    expect(linkSync).toHaveBeenCalledWith(expect.stringMatching(/\.tmp$/), lock);
   });
 
   it('lets one process at a time through an orphaned lock', async () => {
@@ -304,10 +296,10 @@ describe('FileCredentialStore', () => {
     const file = tempFile();
     const store = new FileCredentialStore(file);
     await store.set('x', creds);
-    vi.mocked(writeFileSync).mockImplementationOnce(((target: string, data: string) => {
-      realFs.writeFileSync(target, data.slice(0, 10));
+    vi.mocked(writeSync).mockImplementationOnce(((fd: number, data: string) => {
+      realFs.writeSync(fd, data.slice(0, 10));
       throw Object.assign(new Error('file too large'), { code: 'EFBIG' });
-    }) as typeof writeFileSync);
+    }) as unknown as typeof writeSync);
     await expect(store.exclusive('x', async () => 'entered')).rejects.toThrow('file too large');
     expect(readdirSync(path.dirname(file)).filter((name) => name.includes('.lock'))).toEqual([]);
     expect(await store.exclusive('x', async () => 'entered')).toBe('entered');
@@ -334,20 +326,8 @@ describe('FileCredentialStore', () => {
       await expect(store.set('y', creds)).rejects.toThrow(`${lock} is held by another process`);
       expect(takeovers).toBeLessThan(10);
     } finally {
-      vi.mocked(rmSync).mockImplementation(realFs.rmSync);
       vi.useRealTimers();
     }
-  });
-
-  it('creates the lock directly on a file system without hard links', async () => {
-    const file = tempFile();
-    const store = new FileCredentialStore(file);
-    await store.set('x', creds);
-    vi.mocked(linkSync).mockImplementationOnce(() => {
-      throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
-    });
-    expect(await store.exclusive('x', async () => readFileSync(`${file}.x.refresh.lock`, 'utf8'))).toMatch(new RegExp(`^${hostname()} ${process.pid} `));
-    expect(readdirSync(path.dirname(file)).filter((name) => name.includes('.lock'))).toEqual([]);
   });
 
   it('refreshes different providers at once', async () => {

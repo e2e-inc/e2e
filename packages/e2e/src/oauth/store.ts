@@ -9,7 +9,20 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { chmodSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  closeSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readlinkSync,
+  renameSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+  writeSync,
+} from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import path from 'node:path';
 import { OAuthError } from './errors.ts';
@@ -68,8 +81,8 @@ export class FileCredentialStore implements CredentialStore {
   async exclusive<T>(providerId: string, refresh: () => Promise<T>): Promise<T> {
     const lockPath = `${this.path}.${providerId}.refresh.lock`;
     const release = await this.lock(lockPath, REFRESH_LOCK_WAIT_MS, () => {
-      const waited = `after ${REFRESH_LOCK_WAIT_MS / 1000} s`;
-      return new OAuthError('TIMEOUT', `another worker is still refreshing the ${providerId} login ${waited}; run again once it finishes`);
+      const message = `another worker is still refreshing the ${providerId} login after ${REFRESH_LOCK_WAIT_MS / 1000} s`;
+      return new OAuthError('TIMEOUT', `${message}; run again once it finishes`);
     });
     try {
       return await refresh();
@@ -142,36 +155,41 @@ export class FileCredentialStore implements CredentialStore {
   }
 }
 
-/**
- * Creates `lockPath` holding `token`, false when it exists. The token is
- * written to a file of its own and linked into place, so the lock never
- * exists without its holder's name, even when the write fails or the holder
- * stops between creating and writing.
- */
+/** Creates `lockPath` holding `token`, false when it exists; a lock whose write failed is removed. */
 function claim(lockPath: string, token: string): boolean {
-  const temp = `${lockPath}.${randomUUID()}.tmp`;
+  let fd: number;
   try {
-    writeFileSync(temp, token, { flag: 'wx', mode: 0o600 });
-    try {
-      linkSync(temp, lockPath);
-    } catch (cause) {
-      const code = (cause as NodeJS.ErrnoException).code;
-      if (code !== 'EPERM' && code !== 'ENOTSUP' && code !== 'ENOSYS') throw cause;
-      // No hard links on this file system: create the lock directly, empty until the token is written.
-      writeFileSync(lockPath, token, { flag: 'wx', mode: 0o600 });
-    }
-    return true;
+    fd = openSync(lockPath, 'wx', 0o600);
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code === 'EEXIST') return false;
     throw cause;
+  }
+  try {
+    writeSync(fd, token);
+  } catch (cause) {
+    rmSync(lockPath, { force: true });
+    throw cause;
   } finally {
-    rmSync(temp, { force: true });
+    closeSync(fd);
+  }
+  return true;
+}
+
+/**
+ * This host and, where the system has them, its pid namespace, since a
+ * sandbox on the same host sees none of the pids outside it.
+ */
+function holderHost(): string {
+  try {
+    return `${hostname()}/${readlinkSync('/proc/self/ns/pid')}`;
+  } catch {
+    return hostname();
   }
 }
 
 /** This process on this host, and a random part no other holder shares. */
 function lockToken(): string {
-  return `${hostname()} ${process.pid} ${randomUUID()}`;
+  return `${holderHost()} ${process.pid} ${randomUUID()}`;
 }
 
 function touch(lockPath: string): void {
@@ -192,16 +210,17 @@ function readLock(lockPath: string): string | undefined {
 }
 
 /**
- * True when the lock's holder on this host has exited, or the lock has gone
- * untouched for the stale bound. The bound covers what the pid cannot tell:
- * a lock from another host or an older e2e, a pid another program now has,
- * and a holder suspended that long, which then loses its lock.
+ * True when the lock's holder on this host and pid namespace has exited, or
+ * the lock has gone untouched for the stale bound. The bound covers what the
+ * pid cannot tell: a lock from another host, sandbox, or older e2e, a pid
+ * another program now has, and a holder suspended that long, which then
+ * loses its lock.
  */
 function abandoned(lockPath: string): boolean {
   const text = readLock(lockPath);
   if (text === undefined) return false;
   const [host, pid] = text.split(' ');
-  if (host === hostname() && pid !== undefined && /^\d+$/.test(pid) && !running(Number(pid))) return true;
+  if (host === holderHost() && pid !== undefined && /^\d+$/.test(pid) && !running(Number(pid))) return true;
   try {
     return Date.now() - statSync(lockPath).mtimeMs > LOCK_STALE_MS;
   } catch {
