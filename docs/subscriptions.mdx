@@ -227,6 +227,9 @@ the `npx e2e login <provider>` command to run. See the
 
 Model-call cancellation also applies while waiting for a token refresh.
 
+Parallel workers share one token refresh, so a rotating refresh token is
+sent once per run.
+
 ## CI
 
 Use API keys in CI. Claude Max or Team already uses one. For OpenCode

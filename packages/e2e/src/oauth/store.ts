@@ -1,7 +1,9 @@
 /**
  * Credentials between runs: one JSON file keyed by provider id, mode 0600.
  * Writes hold an advisory lock and replace the file atomically, so two runs
- * refreshing at once neither tear the file nor lose each other's entries.
+ * writing at once neither tear the file nor lose each other's entries. A
+ * refresh holds a second lock from its read to its write, so worker
+ * processes send a rotating refresh token once between them.
  * `E2E_OAUTH_CREDENTIALS` holding the same JSON stands in for the file on a
  * machine the user cannot sign in on; that store refuses to write.
  */
@@ -32,6 +34,8 @@ export function defaultCredentialStore(env: NodeJS.ProcessEnv = process.env): Cr
 const LOCK_RETRY_MS = 25;
 const LOCK_STALE_MS = 10_000;
 const LOCK_WAIT_MS = 5_000;
+/** Longer than the stale bound, so a waiter outlasts a refresh lock its dead holder left. */
+const REFRESH_LOCK_WAIT_MS = 30_000;
 
 export class FileCredentialStore implements CredentialStore {
   readonly path: string;
@@ -59,6 +63,15 @@ export class FileCredentialStore implements CredentialStore {
     return Object.keys(this.read());
   }
 
+  async exclusive<T>(refresh: () => Promise<T>): Promise<T> {
+    const release = await this.lock(`${this.path}.refresh.lock`, REFRESH_LOCK_WAIT_MS);
+    try {
+      return await refresh();
+    } finally {
+      release();
+    }
+  }
+
   private read(): CredentialsFile {
     let text: string;
     try {
@@ -76,7 +89,7 @@ export class FileCredentialStore implements CredentialStore {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     // Creation modes only apply to new paths; a directory or file that already existed keeps what it had unless told otherwise.
     chmodSync(dir, 0o700);
-    const release = await this.lock();
+    const release = await this.lock(`${this.path}.lock`, LOCK_WAIT_MS);
     try {
       const temp = `${this.path}.${process.pid}.${Date.now()}.tmp`;
       writeFileSync(temp, `${JSON.stringify(change(this.read()), null, 2)}\n`, { mode: 0o600 });
@@ -98,9 +111,8 @@ export class FileCredentialStore implements CredentialStore {
    * only one waiter can win, so a lock a live process just created is never
    * removed from under it.
    */
-  private async lock(): Promise<() => void> {
-    const lockPath = `${this.path}.lock`;
-    const deadline = Date.now() + LOCK_WAIT_MS;
+  private async lock(lockPath: string, waitMs: number): Promise<() => void> {
+    const deadline = Date.now() + waitMs;
     for (;;) {
       try {
         closeSync(openSync(lockPath, 'wx', 0o600));
@@ -152,6 +164,10 @@ export class EnvCredentialStore implements CredentialStore {
   }
   async list(): Promise<string[]> {
     return Object.keys(this.entries);
+  }
+  /** Each process holds its own copy of the variable, so there is nothing to share a refresh with. */
+  async exclusive<T>(refresh: () => Promise<T>): Promise<T> {
+    return refresh();
   }
 }
 

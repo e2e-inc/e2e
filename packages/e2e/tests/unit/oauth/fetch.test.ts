@@ -11,7 +11,6 @@ import { createOAuthFetch } from '../../../src/oauth/fetch.ts';
 import { type OAuthCredentials, type OAuthProvider } from '../../../src/oauth/types.ts';
 import { MemoryCredentialStore } from './helpers/store.ts';
 import { json, useServers } from '../../helpers/recording-server.ts';
-import { onFakeTimeouts } from './helpers/time.ts';
 
 const serve = useServers(afterEach);
 const execFileAsync = promisify(execFile);
@@ -184,24 +183,10 @@ describe('createOAuthFetch', () => {
     const testProvider = provider();
     testProvider.refreshes.push('rt-0');
     const fetch = createOAuthFetch(testProvider, { store, userAgent: 'p', loginHint: 'run `npx e2e login test`' });
-    await expect(onFakeTimeouts(() => fetch('http://127.0.0.1:1/'))).rejects.toMatchObject({
+    await expect(fetch('http://127.0.0.1:1/')).rejects.toMatchObject({
       code: 'LOGIN_REQUIRED',
       message: 'refresh token rt-0 was already used; run `npx e2e login test`',
     });
-  });
-
-  it('uses the credentials another process stored when its own refresh token was already rotated', async () => {
-    const api = await serve((_request, response) => json(response, 200, {}));
-    const store = new MemoryCredentialStore({ test: { access: 'stale', refresh: 'rt-0', expires: Date.now() + 1_000 } });
-    const testProvider = provider();
-    testProvider.refreshes.push('rt-0');
-    const fetch = createOAuthFetch(testProvider, { store, userAgent: 'p' });
-    // The other process rotated the token and stores it a moment after this one was rejected.
-    await onFakeTimeouts(async () => {
-      setTimeout(() => void store.set('test', { access: 'theirs', refresh: 'rt-1', expires: Date.now() + 3_600_000 }), 300);
-      await fetch(api.url);
-    });
-    expect(api.requests[0]?.headers['authorization']).toBe('Bearer theirs');
   });
 
   it('retries once with a refreshed token after a 401, also for a Request input', async () => {

@@ -82,4 +82,9 @@ export interface CredentialStore {
   remove(providerId: string): Promise<void>;
   /** Every provider id with stored credentials. */
   list(): Promise<string[]>;
+  /**
+   * Runs `refresh` while no other process refreshes a login from this store,
+   * so a rotating refresh token is sent once however many workers need it.
+   */
+  exclusive<T>(refresh: () => Promise<T>): Promise<T>;
 }

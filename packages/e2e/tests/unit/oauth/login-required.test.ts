@@ -11,7 +11,6 @@ import { grok } from '../../../src/oauth/grok.ts';
 import { opencodeConsole } from '../../../src/oauth/opencode-console.ts';
 import { json, useServers } from '../../helpers/recording-server.ts';
 import { useVendor } from './helpers/vendor.ts';
-import { onFakeTimeouts } from './helpers/time.ts';
 
 const serve = useServers(afterEach);
 const vendor = useVendor(afterEach);
@@ -45,7 +44,7 @@ describe.each([
   it('fails with LOGIN_REQUIRED naming the login command when the token endpoint rejects the refresh', async () => {
     const issuer = await serve((request, response) => json(response, request.url === tokenPath ? 401 : 500, { error: 'invalid_grant' }));
     vendor(issuer, { [id]: expiring });
-    await expect(onFakeTimeouts(() => generateText({ model: model(), prompt: 'hi' }))).rejects.toMatchObject({ code: 'LOGIN_REQUIRED', message });
+    await expect(generateText({ model: model(), prompt: 'hi' })).rejects.toMatchObject({ code: 'LOGIN_REQUIRED', message });
     // One refresh, no API call with the stale token, no retry.
     expect(issuer.requests.map((request) => request.url)).toEqual([tokenPath]);
     const form = new URLSearchParams(issuer.requests[0]!.body);
