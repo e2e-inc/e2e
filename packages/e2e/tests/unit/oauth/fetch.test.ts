@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { EnvCredentialStore, FileCredentialStore } from '../../../src/oauth/store.ts';
 import { OAuthError } from '../../../src/oauth/errors.ts';
 import { createOAuthFetch } from '../../../src/oauth/fetch.ts';
@@ -11,6 +14,7 @@ import { json, useServers } from '../../helpers/recording-server.ts';
 import { onFakeTimeouts } from './helpers/time.ts';
 
 const serve = useServers(afterEach);
+const execFileAsync = promisify(execFile);
 
 type CountingProvider = OAuthProvider<OAuthCredentials, never> & { refreshes: string[] };
 
@@ -125,6 +129,40 @@ describe('createOAuthFetch', () => {
       await Promise.all([first(api.url), second(api.url)]);
       expect(testProvider.refreshes).toEqual(['rt-0']);
       expect(api.requests.map((request) => request.headers['authorization'])).toEqual(['Bearer fresh-1', 'Bearer fresh-1']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refreshes an expired login once for workers in separate processes', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'e2e-oauth-fetch-'));
+    try {
+      const file = path.join(dir, 'oauth.json');
+      await new FileCredentialStore(file).set('test', { access: 'at-0', refresh: 'rt-0', expires: 1 });
+      let live = { access: 'at-0', refresh: 'rt-0' };
+      let issued = 0;
+      const vendor = await serve(async (request, response) => {
+        if (request.url !== '/token') {
+          json(response, request.headers['authorization'] === `Bearer ${live.access}` ? 200 : 401, {});
+          return;
+        }
+        const presented = new URLSearchParams(request.body).get('refresh_token');
+        if (presented !== live.refresh) {
+          json(response, 400, { error: 'invalid_grant', error_description: 'refresh_token_reused' });
+          return;
+        }
+        issued += 1;
+        live = { access: `at-${issued}`, refresh: `rt-${issued}` };
+        // Long enough for every worker to reach the token endpoint while the first refresh is still out.
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        json(response, 200, { access_token: live.access, refresh_token: live.refresh, expires_in: 3600 });
+      });
+      const worker = ['--import', new URL('../../../src/config/register.ts', import.meta.url).href, fileURLToPath(new URL('./helpers/refresh-worker.ts', import.meta.url))];
+      const statuses = await Promise.all(
+        Array.from({ length: 4 }, async () => (await execFileAsync(process.execPath, [...worker, file, `${vendor.url}/token`, `${vendor.url}/api`])).stdout),
+      );
+      expect(statuses).toEqual(['200', '200', '200', '200']);
+      expect(vendor.requests.filter((request) => request.url === '/token')).toHaveLength(1);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
