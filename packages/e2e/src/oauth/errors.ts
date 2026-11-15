@@ -9,7 +9,10 @@ export type OAuthErrorCode =
   | 'FLOW_FAILED'
   /** The user or the caller cancelled the flow. */
   | 'CANCELLED'
-  /** The flow ran out of time waiting for the user, or a refresh waited too long for another process's refresh. */
+  /**
+   * The flow ran out of time waiting for the user, or a refresh ran out of time
+   * waiting for its token request or for another process's refresh.
+   */
   | 'TIMEOUT'
   /** The flow needs an option the caller did not give (a client id, a CLI). */
   | 'MISCONFIGURED';

@@ -27,6 +27,8 @@ const REFRESH_SKEW_MS = 120_000;
 /** After a rejected refresh token, how long to wait for another process to store the rotated one. */
 const ROTATION_WAIT_MS = 500;
 const ROTATION_ATTEMPTS = 4;
+/** Shorter than the store's 30 s wait for a refresh lock, so a hung token request frees the lock for the next worker. */
+const REFRESH_DEADLINE_MS = 20_000;
 
 /**
  * Per credentials source: the refresh in flight, and credentials renewed for
@@ -99,17 +101,25 @@ export function createOAuthFetch<Credentials extends OAuthCredentials>(
           // Another process may have refreshed already: prefer what the store holds now.
           const latest = await current();
           if (latest.access !== stale.access && !expiring(latest)) return latest;
+          const deadline = new AbortController();
+          const timer = setTimeout(() => deadline.abort(), REFRESH_DEADLINE_MS);
           try {
-            const renewed = await provider.refresh(latest);
+            const renewed = await provider.refresh(latest, deadline.signal);
             await persist(renewed);
             return renewed;
           } catch (cause) {
+            if (deadline.signal.aborted) {
+              const waited = `${REFRESH_DEADLINE_MS / 1000} s`;
+              throw new OAuthError('TIMEOUT', `the ${provider.name} token request did not answer within ${waited}`);
+            }
             if (cause instanceof OAuthError && cause.code === 'LOGIN_REQUIRED') {
               const rotated = await rotatedElsewhere(latest);
               if (rotated !== undefined) return rotated;
               throw new OAuthError('LOGIN_REQUIRED', `${cause.message}; ${remedy}`, { cause });
             }
             throw cause;
+          } finally {
+            clearTimeout(timer);
           }
         })
         .finally(() => shared.refreshing.delete(provider.id));

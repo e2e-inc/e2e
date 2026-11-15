@@ -193,6 +193,7 @@ function lockToken(): string {
   return `${holderHost()} ${process.pid} ${randomUUID()}`;
 }
 
+/** Marks the lock as held now. */
 function touch(lockPath: string): void {
   const now = new Date();
   try {
@@ -202,6 +203,7 @@ function touch(lockPath: string): void {
   }
 }
 
+/** The lock's holder token, undefined when there is no lock. */
 function readLock(lockPath: string): string | undefined {
   try {
     return readFileSync(lockPath, 'utf8');

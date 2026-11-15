@@ -44,8 +44,11 @@ export interface OAuthProvider<Credentials extends OAuthCredentials = OAuthCrede
   readonly id: string;
   readonly name: string;
   login(callbacks: OAuthLoginCallbacks, options?: LoginOptions): Promise<Credentials>;
-  /** Renews the credentials, or throws an OAuthError when the user has to sign in again. */
-  refresh(credentials: Credentials): Promise<Credentials>;
+  /**
+   * Renews the credentials, or throws an OAuthError when the user has to sign
+   * in again. `signal` aborts the token request once it has taken too long.
+   */
+  refresh(credentials: Credentials, signal?: AbortSignal): Promise<Credentials>;
   /**
    * Sends one API request. It arrives with the bearer token and the user
    * agent set and the SDK's own key header removed; the provider rewrites the

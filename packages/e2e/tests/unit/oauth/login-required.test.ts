@@ -52,4 +52,16 @@ describe.each([
     expect(form.get('grant_type')).toBe('refresh_token');
     expect(form.get('refresh_token')).toBe('rt-0');
   });
+
+  it('gives up with TIMEOUT on a token request that does not answer, so the next worker can refresh', async () => {
+    const issuer = await serve((request, response) => {
+      if (request.url !== tokenPath) json(response, 500, {});
+    });
+    vendor(issuer, { [id]: expiring });
+    await expect(onFakeTimeouts(() => generateText({ model: model(), prompt: 'hi', maxRetries: 0 }))).rejects.toMatchObject({
+      code: 'TIMEOUT',
+      message: expect.stringContaining('token request did not answer within 20 s'),
+    });
+    expect(issuer.requests.map((request) => request.url)).toEqual([tokenPath]);
+  });
 });

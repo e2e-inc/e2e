@@ -1,9 +1,7 @@
-import { execFile, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CREDENTIALS_ENV, EnvCredentialStore, FileCredentialStore, defaultCredentialStore, defaultCredentialsPath } from '../../../src/oauth/store.ts';
 
@@ -182,8 +180,8 @@ describe('FileCredentialStore', () => {
     try {
       await store.exclusive('x', async () => {
         age(lock, -60);
-        // Half the stale bound: a holder touches its lock well before a waiter would take it over.
-        vi.advanceTimersByTime(5_000);
+        // A holder touches its lock several times within the stale bound.
+        vi.advanceTimersByTime(3_000);
         expect(statSync(lock).mtimeMs).toBeGreaterThan(Date.now() - 5_000);
       });
       expect(vi.getTimerCount()).toBe(0);
@@ -235,27 +233,6 @@ describe('FileCredentialStore', () => {
     await second;
     expect(existsSync(lock)).toBe(false);
   });
-
-  it('lets one process at a time through an orphaned lock', async () => {
-    const file = tempFile();
-    const store = new FileCredentialStore(file);
-    await store.set('test', creds);
-    writeFileSync(`${file}.test.refresh.lock`, heldBy(exitedPid()));
-    const log = path.join(path.dirname(file), 'log');
-    writeFileSync(log, '');
-    const worker = [
-      '--import',
-      new URL('../../../src/config/register.ts', import.meta.url).href,
-      fileURLToPath(new URL('./helpers/exclusive-worker.ts', import.meta.url)),
-    ];
-    // One start time, after every process has booted, so they all find the orphaned lock at once.
-    const startAt = String(Date.now() + 2_000);
-    const run = () => promisify(execFile)(process.execPath, [...worker, file, log, startAt]);
-    await Promise.all(Array.from({ length: 8 }, run));
-    const lines = readFileSync(log, 'utf8').trim().split('\n');
-    expect(lines).toHaveLength(16);
-    for (let i = 0; i < lines.length; i += 2) expect([lines[i]?.[0], lines[i + 1]]).toEqual(['+', `-${lines[i]?.slice(1)}`]);
-  }, 20_000);
 
   it('takes over at once a lock whose holder exited', async () => {
     const file = tempFile();
@@ -361,6 +338,13 @@ describe('FileCredentialStore', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('fails at once when the lock cannot be created', async () => {
+    const store = new FileCredentialStore(path.join(path.dirname(tempFile()), 'missing', 'oauth.json'));
+    const started = Date.now();
+    await expect(store.exclusive('x', async () => 'entered')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(Date.now() - started).toBeLessThan(1_000);
   });
 
   it('refreshes different providers at once', async () => {

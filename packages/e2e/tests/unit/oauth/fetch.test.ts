@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -102,7 +102,7 @@ describe('createOAuthFetch', () => {
 
   it('fails with NOT_LOGGED_IN and the hint when nothing is stored', async () => {
     const fetch = createOAuthFetch(provider(), { store: new MemoryCredentialStore(), userAgent: 'p', loginHint: 'run e2e login test' });
-    await expect(onFakeTimeouts(() => fetch('http://127.0.0.1:1/'))).rejects.toMatchObject({ code: 'NOT_LOGGED_IN', message: expect.stringContaining('run e2e login test') });
+    await expect(fetch('http://127.0.0.1:1/')).rejects.toMatchObject({ code: 'NOT_LOGGED_IN', message: expect.stringContaining('run e2e login test') });
   });
 
   it('refreshes an expiring token once across model instances that share a store', async () => {
@@ -111,7 +111,18 @@ describe('createOAuthFetch', () => {
     const testProvider = provider();
     const first = createOAuthFetch(testProvider, { store, userAgent: 'p' });
     const second = createOAuthFetch(testProvider, { store, userAgent: 'p' });
-    await Promise.all([first(api.url), second(api.url), first(api.url)]);
+    const set = vi.spyOn(globalThis, 'setTimeout');
+    const clear = vi.spyOn(globalThis, 'clearTimeout');
+    try {
+      await Promise.all([first(api.url), second(api.url), first(api.url)]);
+      // The refresh's 20 s deadline is cleared once it answers, so it keeps no worker alive.
+      const deadlines = set.mock.results.filter((_result, index) => set.mock.calls[index]?.[1] === 20_000).map((result) => result.value);
+      expect(deadlines).toHaveLength(1);
+      expect(clear.mock.calls.map(([timer]) => timer)).toEqual(expect.arrayContaining(deadlines));
+    } finally {
+      set.mockRestore();
+      clear.mockRestore();
+    }
     expect(testProvider.refreshes).toEqual(['rt-0']);
     expect(api.requests.map((request) => request.headers['authorization'])).toEqual(['Bearer fresh-1', 'Bearer fresh-1', 'Bearer fresh-1']);
     expect(await store.get('test')).toMatchObject({ access: 'fresh-1', refresh: 'rt-1' });
@@ -201,7 +212,7 @@ describe('createOAuthFetch', () => {
     const testProvider = provider();
     testProvider.refreshes.push('rt-0');
     const fetch = createOAuthFetch(testProvider, { store, userAgent: 'p', loginHint: 'run `npx e2e login test`' });
-    await expect(fetch('http://127.0.0.1:1/')).rejects.toMatchObject({
+    await expect(onFakeTimeouts(() => fetch('http://127.0.0.1:1/'))).rejects.toMatchObject({
       code: 'LOGIN_REQUIRED',
       message: 'refresh token rt-0 was already used; run `npx e2e login test`',
     });
@@ -213,8 +224,7 @@ describe('createOAuthFetch', () => {
     const testProvider = provider();
     testProvider.refreshes.push('rt-0');
     const fetch = createOAuthFetch(testProvider, { store, userAgent: 'p' });
-    // An older e2e, which refreshes without the lock, rotated the token
-    // and stores it a moment after this one was rejected.
+    // The other process rotated the token and stores it a moment after this one was rejected.
     await onFakeTimeouts(async () => {
       setTimeout(() => void store.set('test', { access: 'theirs', refresh: 'rt-1', expires: Date.now() + 3_600_000 }), 300);
       await fetch(api.url);
