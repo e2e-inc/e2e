@@ -1,5 +1,6 @@
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CREDENTIALS_ENV, EnvCredentialStore, FileCredentialStore, defaultCredentialStore, defaultCredentialsPath } from '../../../src/oauth/store.ts';
@@ -21,6 +22,11 @@ afterEach(() => {
 });
 
 const creds = { access: 'a', refresh: 'r', expires: 123, accountId: 'acct' };
+/** What a lock held by `pid` on this host holds. */
+const heldBy = (pid: number) => `${hostname()} ${pid} other`;
+/** The pid of a process that has exited. */
+const exitedPid = () => spawnSync(process.execPath, ['-e', '']).pid;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('FileCredentialStore', () => {
   it('creates the file with owner-only permissions and round-trips entries', async () => {
@@ -85,7 +91,7 @@ describe('FileCredentialStore', () => {
     expect((await store.list()).toSorted()).toEqual(['x', 'y']);
   });
 
-  it('never takes over a lock another process created after the stale check', async () => {
+  it('never takes over a lock another process created after the check', async () => {
     const file = tempFile();
     const store = new FileCredentialStore(file);
     await store.set('x', creds);
@@ -97,7 +103,7 @@ describe('FileCredentialStore', () => {
     vi.mocked(statSync).mockImplementationOnce(((target: string) => {
       const stats = realStatSync(target);
       rmSync(lock);
-      writeFileSync(lock, 'other');
+      writeFileSync(lock, heldBy(process.pid));
       return stats;
     }) as typeof statSync);
     let entered = false;
@@ -120,19 +126,50 @@ describe('FileCredentialStore', () => {
     expect(await store.exclusive('x', async () => 'next')).toBe('next');
   });
 
-  it('keeps a held refresh lock fresh, so waiters never take it as stale', async () => {
+  it('waits for a live holder however old its lock is', async () => {
     const file = tempFile();
     const store = new FileCredentialStore(file);
     await store.set('x', creds);
     const lock = `${file}.x.refresh.lock`;
+    // A holder suspended past the stale bound, or a laptop asleep mid-refresh, still holds the lock.
+    writeFileSync(lock, heldBy(process.pid));
     const old = Date.now() / 1000 - 60;
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    utimesSync(lock, old, old);
+    let entered = false;
+    const pending = store.exclusive('x', async () => {
+      entered = true;
+    });
+    await sleep(150);
+    expect(entered).toBe(false);
+    rmSync(lock);
+    await pending;
+    expect(entered).toBe(true);
+  });
+
+  it('takes over at once a lock whose holder exited', async () => {
+    const file = tempFile();
+    const store = new FileCredentialStore(file);
+    await store.set('x', creds);
+    writeFileSync(`${file}.x.refresh.lock`, heldBy(exitedPid()));
+    const started = Date.now();
+    expect(await store.exclusive('x', async () => 'entered')).toBe('entered');
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(existsSync(`${file}.x.refresh.lock`)).toBe(false);
+  });
+
+  it('gives up on time while another waiter holds the takeover turn', async () => {
+    const file = tempFile();
+    const store = new FileCredentialStore(file);
+    await store.set('x', creds);
+    writeFileSync(`${file}.lock`, heldBy(exitedPid()));
+    const old = Date.now() / 1000 - 60;
+    utimesSync(`${file}.lock`, old, old);
+    writeFileSync(`${file}.lock.break`, heldBy(process.pid));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     try {
-      await store.exclusive('x', async () => {
-        utimesSync(lock, old, old);
-        vi.advanceTimersByTime(10_000);
-        expect(statSync(lock).mtimeMs).toBeGreaterThan(Date.now() - 5_000);
-      });
+      const pending = expect(store.set('y', creds)).rejects.toThrow(`${file}.lock is held by another process`);
+      await vi.advanceTimersByTimeAsync(6_000);
+      await pending;
     } finally {
       vi.useRealTimers();
     }
