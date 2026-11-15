@@ -232,6 +232,31 @@ describe('createOAuthFetch', () => {
     expect(api.requests[0]?.headers['authorization']).toBe('Bearer theirs');
   });
 
+  it('waits for another process to store a rotated token only after releasing the refresh lock', async () => {
+    const store = new MemoryCredentialStore({ test: { access: 'stale', refresh: 'rt-0', expires: 1 } });
+    let held = false;
+    let readsWhileHeld = 0;
+    store.exclusive = async (_providerId, refresh) => {
+      held = true;
+      try {
+        return await refresh();
+      } finally {
+        held = false;
+      }
+    };
+    const get = store.get.bind(store);
+    store.get = async (providerId) => {
+      if (held) readsWhileHeld += 1;
+      return get(providerId);
+    };
+    const testProvider = provider();
+    testProvider.refreshes.push('rt-0');
+    const fetch = createOAuthFetch(testProvider, { store, userAgent: 'p' });
+    await expect(onFakeTimeouts(() => fetch('http://127.0.0.1:1/'))).rejects.toMatchObject({ code: 'LOGIN_REQUIRED' });
+    // The re-read alone; the 2 s poll runs after release, so waiters on a revoked login do not wait it out in turn.
+    expect(readsWhileHeld).toBe(1);
+  });
+
   it('retries once with a refreshed token after a 401, also for a Request input', async () => {
     const api = await serve((request, response) => {
       if (request.headers['authorization'] === 'Bearer stale') json(response, 401, { error: 'expired' });

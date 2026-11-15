@@ -27,7 +27,7 @@ const REFRESH_SKEW_MS = 120_000;
 /** After a rejected refresh token, how long to wait for another process to store the rotated one. */
 const ROTATION_WAIT_MS = 500;
 const ROTATION_ATTEMPTS = 4;
-/** Shorter than the store's 30 s wait for a refresh lock, so a hung token request frees the lock for the next worker. */
+/** Under the 30 s a waiter gives the refresh lock, so a hung token request frees it for the next worker. */
 const REFRESH_DEADLINE_MS = 20_000;
 
 /**
@@ -93,36 +93,44 @@ export function createOAuthFetch<Credentials extends OAuthCredentials>(
     return undefined;
   }
 
+  /** One token request, aborted once it has taken longer than the deadline. */
+  async function requestRefresh(credentials: Credentials): Promise<Credentials> {
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), REFRESH_DEADLINE_MS);
+    try {
+      return await provider.refresh(credentials, deadline.signal);
+    } catch (cause) {
+      if (!deadline.signal.aborted) throw cause;
+      const waited = `${REFRESH_DEADLINE_MS / 1000} s`;
+      throw new OAuthError('TIMEOUT', `the ${provider.name} token request did not answer within ${waited}`);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   function refresh(stale: Credentials): Promise<Credentials> {
     let pending = shared.refreshing.get(provider.id) as Promise<Credentials> | undefined;
     if (pending === undefined) {
-      pending = store
-        .exclusive(provider.id, async () => {
-          // Another process may have refreshed already: prefer what the store holds now.
-          const latest = await current();
-          if (latest.access !== stale.access && !expiring(latest)) return latest;
-          const deadline = new AbortController();
-          const timer = setTimeout(() => deadline.abort(), REFRESH_DEADLINE_MS);
-          try {
-            const renewed = await provider.refresh(latest, deadline.signal);
+      pending = (async () => {
+        let sent: Credentials | undefined;
+        try {
+          return await store.exclusive(provider.id, async () => {
+            // Another process may have refreshed already: prefer what the store holds now.
+            const latest = await current();
+            if (latest.access !== stale.access && !expiring(latest)) return latest;
+            sent = latest;
+            const renewed = await requestRefresh(latest);
             await persist(renewed);
             return renewed;
-          } catch (cause) {
-            if (deadline.signal.aborted) {
-              const waited = `${REFRESH_DEADLINE_MS / 1000} s`;
-              throw new OAuthError('TIMEOUT', `the ${provider.name} token request did not answer within ${waited}`);
-            }
-            if (cause instanceof OAuthError && cause.code === 'LOGIN_REQUIRED') {
-              const rotated = await rotatedElsewhere(latest);
-              if (rotated !== undefined) return rotated;
-              throw new OAuthError('LOGIN_REQUIRED', `${cause.message}; ${remedy}`, { cause });
-            }
-            throw cause;
-          } finally {
-            clearTimeout(timer);
-          }
-        })
-        .finally(() => shared.refreshing.delete(provider.id));
+          });
+        } catch (cause) {
+          if (sent === undefined || !(cause instanceof OAuthError && cause.code === 'LOGIN_REQUIRED')) throw cause;
+          // After the lock, so waiters on a revoked login do not wait out each other's poll.
+          const rotated = await rotatedElsewhere(sent);
+          if (rotated !== undefined) return rotated;
+          throw new OAuthError('LOGIN_REQUIRED', `${cause.message}; ${remedy}`, { cause });
+        }
+      })().finally(() => shared.refreshing.delete(provider.id));
       shared.refreshing.set(provider.id, pending);
     }
     return pending;

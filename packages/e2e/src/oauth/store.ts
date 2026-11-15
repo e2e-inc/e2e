@@ -49,7 +49,7 @@ const LOCK_RETRY_MS = 25;
 /** How long a lock may go untouched before waiters take it over, whoever it names. */
 const LOCK_STALE_MS = 10_000;
 const LOCK_WAIT_MS = 5_000;
-/** A token request has no deadline of its own, so a waiter gives up on its own. */
+/** Longer than a refresh's 20 s token request, so a waiter outlasts a holder whose request hung. */
 const REFRESH_LOCK_WAIT_MS = 30_000;
 
 export class FileCredentialStore implements CredentialStore {
@@ -143,7 +143,6 @@ export class FileCredentialStore implements CredentialStore {
         const heartbeat = setInterval(() => {
           if (readLock(lockPath) === token) touch(lockPath);
         }, LOCK_STALE_MS / 4);
-        heartbeat.unref();
         return () => {
           clearInterval(heartbeat);
           if (readLock(lockPath) === token) rmSync(lockPath, { force: true });
@@ -220,9 +219,7 @@ function readLock(lockPath: string): string | undefined {
  * loses its lock.
  */
 function abandoned(lockPath: string): boolean {
-  const text = readLock(lockPath);
-  if (text === undefined) return false;
-  const [host, pid] = text.split(' ');
+  const [host, pid] = (readLock(lockPath) ?? '').split(' ');
   if (host === holderHost() && pid !== undefined && /^\d+$/.test(pid) && !running(Number(pid))) return true;
   try {
     return Date.now() - statSync(lockPath).mtimeMs > LOCK_STALE_MS;

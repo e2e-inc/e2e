@@ -1,13 +1,15 @@
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CREDENTIALS_ENV, EnvCredentialStore, FileCredentialStore, defaultCredentialStore, defaultCredentialsPath } from '../../../src/oauth/store.ts';
 
 vi.mock('node:fs', async (importOriginal) => {
   const fs = await importOriginal<typeof import('node:fs')>();
-  return { ...fs, statSync: vi.fn(fs.statSync), writeSync: vi.fn(fs.writeSync), rmSync: vi.fn(fs.rmSync) };
+  return { ...fs, statSync: vi.fn(fs.statSync), writeSync: vi.fn(fs.writeSync), rmSync: vi.fn(fs.rmSync), utimesSync: vi.fn(fs.utimesSync) };
 });
 const realFs = await vi.importActual<typeof import('node:fs')>('node:fs');
 const realStatSync = realFs.statSync;
@@ -19,7 +21,7 @@ function tempFile(): string {
   return path.join(dir, 'nested', 'oauth.json');
 }
 afterEach(() => {
-  for (const mocked of [statSync, writeSync, rmSync]) vi.mocked(mocked).mockReset();
+  for (const mocked of [statSync, writeSync, rmSync, utimesSync]) vi.mocked(mocked).mockReset();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -190,6 +192,23 @@ describe('FileCredentialStore', () => {
     }
   });
 
+  it('keeps its heartbeat going when the lock vanishes between the check and the touch', async () => {
+    const file = tempFile();
+    const store = new FileCredentialStore(file);
+    await store.set('x', creds);
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      await store.exclusive('x', async () => {
+        vi.mocked(utimesSync).mockImplementationOnce(() => {
+          throw Object.assign(new Error('no such file'), { code: 'ENOENT' });
+        });
+        expect(() => vi.advanceTimersByTime(3_000)).not.toThrow();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('never removes or touches a lock it no longer holds', async () => {
     const file = tempFile();
     const store = new FileCredentialStore(file);
@@ -244,6 +263,29 @@ describe('FileCredentialStore', () => {
     expect(Date.now() - started).toBeLessThan(1_000);
     expect(existsSync(`${file}.x.refresh.lock`)).toBe(false);
   });
+
+  it('lets one process at a time through an orphaned lock', async () => {
+    const file = tempFile();
+    const store = new FileCredentialStore(file);
+    await store.set('test', creds);
+    // An empty lock gone untouched past the stale bound, as a crashed older e2e leaves it.
+    writeFileSync(`${file}.test.refresh.lock`, '');
+    age(`${file}.test.refresh.lock`, -60);
+    const log = path.join(path.dirname(file), 'log');
+    writeFileSync(log, '');
+    const worker = [
+      '--import',
+      new URL('../../../src/config/register.ts', import.meta.url).href,
+      fileURLToPath(new URL('./helpers/exclusive-worker.ts', import.meta.url)),
+    ];
+    // One start time, after every process has booted, so they all find the orphaned lock at once.
+    const startAt = String(Date.now() + 2_000);
+    const run = () => promisify(execFile)(process.execPath, [...worker, file, log, startAt]);
+    await Promise.all(Array.from({ length: 8 }, run));
+    const lines = readFileSync(log, 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(16);
+    for (let i = 0; i < lines.length; i += 2) expect([lines[i]?.[0], lines[i + 1]]).toEqual(['+', `-${lines[i]?.slice(1)}`]);
+  }, 20_000);
 
   it('takes over the turn of a waiter that exited during it', async () => {
     const file = tempFile();
