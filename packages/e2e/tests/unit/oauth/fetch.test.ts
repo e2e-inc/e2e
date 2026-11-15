@@ -11,6 +11,7 @@ import { createOAuthFetch } from '../../../src/oauth/fetch.ts';
 import { type OAuthCredentials, type OAuthProvider } from '../../../src/oauth/types.ts';
 import { MemoryCredentialStore } from './helpers/store.ts';
 import { json, useServers } from '../../helpers/recording-server.ts';
+import { onFakeTimeouts } from './helpers/time.ts';
 
 const serve = useServers(afterEach);
 const execFileAsync = promisify(execFile);
@@ -101,7 +102,7 @@ describe('createOAuthFetch', () => {
 
   it('fails with NOT_LOGGED_IN and the hint when nothing is stored', async () => {
     const fetch = createOAuthFetch(provider(), { store: new MemoryCredentialStore(), userAgent: 'p', loginHint: 'run e2e login test' });
-    await expect(fetch('http://127.0.0.1:1/')).rejects.toMatchObject({ code: 'NOT_LOGGED_IN', message: expect.stringContaining('run e2e login test') });
+    await expect(onFakeTimeouts(() => fetch('http://127.0.0.1:1/'))).rejects.toMatchObject({ code: 'NOT_LOGGED_IN', message: expect.stringContaining('run e2e login test') });
   });
 
   it('refreshes an expiring token once across model instances that share a store', async () => {
@@ -121,12 +122,12 @@ describe('createOAuthFetch', () => {
     const store = new MemoryCredentialStore({ test: { access: 'stale', refresh: 'rt-0', expires: 1 } });
     // Another process wrote a different token while this one waited for the lock, and that token lapses too.
     store.exclusive = async (providerId, refresh) => {
-      await store.set(providerId, { access: 'other', refresh: 'rt-0', expires: Date.now() + 1_000 });
+      await store.set(providerId, { access: 'other', refresh: 'rt-1', expires: Date.now() + 1_000 });
       return refresh();
     };
     const testProvider = provider();
     await createOAuthFetch(testProvider, { store, userAgent: 'p' })(api.url);
-    expect(testProvider.refreshes).toEqual(['rt-0']);
+    expect(testProvider.refreshes).toEqual(['rt-1']);
     expect(api.requests.map((request) => request.headers['authorization'])).toEqual(['Bearer fresh-1']);
   });
 
@@ -170,10 +171,13 @@ describe('createOAuthFetch', () => {
         await new Promise((resolve) => setTimeout(resolve, 500));
         json(response, 200, { access_token: live.access, refresh_token: live.refresh, expires_in: 3600 });
       });
-      const worker = ['--import', new URL('../../../src/config/register.ts', import.meta.url).href, fileURLToPath(new URL('./helpers/refresh-worker.ts', import.meta.url))];
-      const statuses = await Promise.all(
-        Array.from({ length: 4 }, async () => (await execFileAsync(process.execPath, [...worker, file, `${vendor.url}/token`, `${vendor.url}/api`])).stdout),
-      );
+      const worker = [
+        '--import',
+        new URL('../../../src/config/register.ts', import.meta.url).href,
+        fileURLToPath(new URL('./helpers/refresh-worker.ts', import.meta.url)),
+      ];
+      const run = async () => (await execFileAsync(process.execPath, [...worker, file, `${vendor.url}/token`, `${vendor.url}/api`])).stdout;
+      const statuses = await Promise.all(Array.from({ length: 4 }, run));
       expect(statuses).toEqual(['200', '200', '200', '200']);
       expect(vendor.requests.filter((request) => request.url === '/token')).toHaveLength(1);
     } finally {
@@ -201,6 +205,21 @@ describe('createOAuthFetch', () => {
       code: 'LOGIN_REQUIRED',
       message: 'refresh token rt-0 was already used; run `npx e2e login test`',
     });
+  });
+
+  it('uses the credentials another process stored when its own refresh token was already rotated', async () => {
+    const api = await serve((_request, response) => json(response, 200, {}));
+    const store = new MemoryCredentialStore({ test: { access: 'stale', refresh: 'rt-0', expires: Date.now() + 1_000 } });
+    const testProvider = provider();
+    testProvider.refreshes.push('rt-0');
+    const fetch = createOAuthFetch(testProvider, { store, userAgent: 'p' });
+    // An older e2e, which refreshes without the lock, rotated the token
+    // and stores it a moment after this one was rejected.
+    await onFakeTimeouts(async () => {
+      setTimeout(() => void store.set('test', { access: 'theirs', refresh: 'rt-1', expires: Date.now() + 3_600_000 }), 300);
+      await fetch(api.url);
+    });
+    expect(api.requests[0]?.headers['authorization']).toBe('Bearer theirs');
   });
 
   it('retries once with a refreshed token after a 401, also for a Request input', async () => {

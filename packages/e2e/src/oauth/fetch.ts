@@ -24,6 +24,9 @@ export interface OAuthFetchOptions {
 
 /** Refresh this long before `expires`, so a call never starts on a token about to lapse. */
 const REFRESH_SKEW_MS = 120_000;
+/** After a rejected refresh token, how long to wait for another process to store the rotated one. */
+const ROTATION_WAIT_MS = 500;
+const ROTATION_ATTEMPTS = 4;
 
 /**
  * Per credentials source: the refresh in flight, and credentials renewed for
@@ -78,6 +81,16 @@ export function createOAuthFetch<Credentials extends OAuthCredentials>(
     }
   }
 
+  /** After a rejected refresh token: the credentials another process stored meanwhile, if any. */
+  async function rotatedElsewhere(rejected: Credentials): Promise<Credentials | undefined> {
+    for (let attempt = 0; attempt < ROTATION_ATTEMPTS; attempt += 1) {
+      const latest = await current();
+      if (latest.refresh !== rejected.refresh) return latest;
+      await new Promise((resolve) => setTimeout(resolve, ROTATION_WAIT_MS));
+    }
+    return undefined;
+  }
+
   function refresh(stale: Credentials): Promise<Credentials> {
     let pending = shared.refreshing.get(provider.id) as Promise<Credentials> | undefined;
     if (pending === undefined) {
@@ -92,6 +105,8 @@ export function createOAuthFetch<Credentials extends OAuthCredentials>(
             return renewed;
           } catch (cause) {
             if (cause instanceof OAuthError && cause.code === 'LOGIN_REQUIRED') {
+              const rotated = await rotatedElsewhere(latest);
+              if (rotated !== undefined) return rotated;
               throw new OAuthError('LOGIN_REQUIRED', `${cause.message}; ${remedy}`, { cause });
             }
             throw cause;

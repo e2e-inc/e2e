@@ -182,7 +182,8 @@ describe('FileCredentialStore', () => {
     try {
       await store.exclusive('x', async () => {
         age(lock, -60);
-        vi.advanceTimersByTime(10_000);
+        // Half the stale bound: a holder touches its lock well before a waiter would take it over.
+        vi.advanceTimersByTime(5_000);
         expect(statSync(lock).mtimeMs).toBeGreaterThan(Date.now() - 5_000);
       });
       expect(vi.getTimerCount()).toBe(0);
@@ -211,6 +212,30 @@ describe('FileCredentialStore', () => {
     expect(statSync(lock).mtimeMs).toBeLessThan(Date.now() - 30_000);
   });
 
+  it('leaves the lock of another attempt in this process that took over', async () => {
+    const file = tempFile();
+    const store = new FileCredentialStore(file);
+    await store.set('x', creds);
+    const lock = `${file}.x.refresh.lock`;
+    let second: Promise<unknown> = Promise.resolve();
+    let finishSecond = () => {};
+    await store.exclusive('x', async () => {
+      // Untouched past the stale bound, so a second attempt from this process takes it over.
+      age(lock, -60);
+      let entered = () => {};
+      const inside = new Promise<void>((resolve) => (entered = resolve));
+      second = store.exclusive('x', () => {
+        entered();
+        return new Promise<void>((resolve) => (finishSecond = resolve));
+      });
+      await inside;
+    });
+    expect(existsSync(lock)).toBe(true);
+    finishSecond();
+    await second;
+    expect(existsSync(lock)).toBe(false);
+  });
+
   it('lets one process at a time through an orphaned lock', async () => {
     const file = tempFile();
     const store = new FileCredentialStore(file);
@@ -218,10 +243,15 @@ describe('FileCredentialStore', () => {
     writeFileSync(`${file}.test.refresh.lock`, heldBy(exitedPid()));
     const log = path.join(path.dirname(file), 'log');
     writeFileSync(log, '');
-    const worker = ['--import', new URL('../../../src/config/register.ts', import.meta.url).href, fileURLToPath(new URL('./helpers/exclusive-worker.ts', import.meta.url))];
+    const worker = [
+      '--import',
+      new URL('../../../src/config/register.ts', import.meta.url).href,
+      fileURLToPath(new URL('./helpers/exclusive-worker.ts', import.meta.url)),
+    ];
     // One start time, after every process has booted, so they all find the orphaned lock at once.
     const startAt = String(Date.now() + 2_000);
-    await Promise.all(Array.from({ length: 8 }, () => promisify(execFile)(process.execPath, [...worker, file, log, startAt])));
+    const run = () => promisify(execFile)(process.execPath, [...worker, file, log, startAt]);
+    await Promise.all(Array.from({ length: 8 }, run));
     const lines = readFileSync(log, 'utf8').trim().split('\n');
     expect(lines).toHaveLength(16);
     for (let i = 0; i < lines.length; i += 2) expect([lines[i]?.[0], lines[i + 1]]).toEqual(['+', `-${lines[i]?.slice(1)}`]);
@@ -264,7 +294,10 @@ describe('FileCredentialStore', () => {
       const pending = store.exclusive('x', async () => {}).finally(() => {
         settled = true;
       });
-      const rejected = expect(pending).rejects.toMatchObject({ code: 'TIMEOUT', message: expect.stringContaining('still refreshing the x login after 30 s') });
+      const rejected = expect(pending).rejects.toMatchObject({
+        code: 'TIMEOUT',
+        message: expect.stringContaining('still refreshing the x login after 30 s'),
+      });
       await vi.advanceTimersByTimeAsync(29_000);
       expect(settled).toBe(false);
       await vi.advanceTimersByTimeAsync(2_000);

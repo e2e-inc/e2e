@@ -227,10 +227,11 @@ the `npx e2e login <provider>` command to run. See the
 
 Model-call cancellation also applies while waiting for a token refresh.
 
-Parallel workers share one token refresh for a login saved with
-`npx e2e login`, so a rotating refresh token is sent once per run.
-A worker waits up to 30 seconds for another worker's refresh, then its step
-fails and the message says to run again.
+Parallel workers share each token refresh for a login saved with
+`npx e2e login`, so a rotating refresh token is sent once.
+A worker waits up to 30 seconds for another worker's refresh.
+After that its step fails with `MODEL_PROVIDER_FAILED`, and the message
+says to run again.
 
 ## CI
 

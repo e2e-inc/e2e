@@ -81,7 +81,8 @@ export class FileCredentialStore implements CredentialStore {
   async exclusive<T>(providerId: string, refresh: () => Promise<T>): Promise<T> {
     const lockPath = `${this.path}.${providerId}.refresh.lock`;
     const release = await this.lock(lockPath, REFRESH_LOCK_WAIT_MS, () => {
-      const message = `another worker is still refreshing the ${providerId} login after ${REFRESH_LOCK_WAIT_MS / 1000} s`;
+      const waited = `${REFRESH_LOCK_WAIT_MS / 1000} s`;
+      const message = `another e2e process is still refreshing the ${providerId} login after ${waited}`;
       return new OAuthError('TIMEOUT', `${message}; run again once it finishes`);
     });
     try {
