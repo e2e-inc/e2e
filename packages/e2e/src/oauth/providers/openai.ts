@@ -73,13 +73,12 @@ export function createCodexProvider(options: CodexProviderOptions = {}): OAuthPr
           : await browserLogin(callbacks, { issuer, originator, callbackPort, timeoutMs });
       return toCredentials(tokens);
     },
-    async refresh(credentials, signal) {
+    async refresh(credentials) {
       const tokens = await requestTokens(
         'ChatGPT',
         `${issuer}/oauth/token`,
         { grant_type: 'refresh_token', refresh_token: credentials.refresh, client_id: CLIENT_ID },
         'LOGIN_REQUIRED',
-        signal,
       );
       return toCredentials(tokens, credentials);
     },

@@ -27,11 +27,6 @@ const REFRESH_SKEW_MS = 120_000;
 /** After a rejected refresh token, how long to wait for another process to store the rotated one. */
 const ROTATION_WAIT_MS = 500;
 const ROTATION_ATTEMPTS = 4;
-/**
- * Under the 30 s a waiter gives the refresh lock, so a hung token request
- * frees it for the next worker.
- */
-const REFRESH_DEADLINE_MS = 20_000;
 
 /**
  * Per credentials source: the refresh in flight, and credentials renewed for
@@ -96,21 +91,6 @@ export function createOAuthFetch<Credentials extends OAuthCredentials>(
     return undefined;
   }
 
-  /** One token request, aborted once it has taken longer than the deadline. */
-  async function requestRefresh(credentials: Credentials): Promise<Credentials> {
-    const deadline = new AbortController();
-    const timer = setTimeout(() => deadline.abort(), REFRESH_DEADLINE_MS);
-    try {
-      return await provider.refresh(credentials, deadline.signal);
-    } catch (cause) {
-      if (!deadline.signal.aborted) throw cause;
-      const waited = `${REFRESH_DEADLINE_MS / 1000} s`;
-      throw new OAuthError('TIMEOUT', `the ${provider.name} token request did not answer within ${waited}`);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
   function refresh(stale: Credentials): Promise<Credentials> {
     let pending = shared.refreshing.get(provider.id) as Promise<Credentials> | undefined;
     if (pending === undefined) {
@@ -122,7 +102,9 @@ export function createOAuthFetch<Credentials extends OAuthCredentials>(
             const latest = await current();
             if (latest.access !== stale.access && !expiring(latest)) return latest;
             sent = latest;
-            const renewed = await requestRefresh(latest);
+            // No deadline: the vendor may rotate the token before a late answer,
+            // and dropping that answer loses the login.
+            const renewed = await provider.refresh(latest);
             await persist(renewed);
             return renewed;
           });

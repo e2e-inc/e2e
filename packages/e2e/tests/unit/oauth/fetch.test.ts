@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -111,18 +111,7 @@ describe('createOAuthFetch', () => {
     const testProvider = provider();
     const first = createOAuthFetch(testProvider, { store, userAgent: 'p' });
     const second = createOAuthFetch(testProvider, { store, userAgent: 'p' });
-    const set = vi.spyOn(globalThis, 'setTimeout');
-    const clear = vi.spyOn(globalThis, 'clearTimeout');
-    try {
-      await Promise.all([first(api.url), second(api.url), first(api.url)]);
-      // The refresh's 20 s deadline is cleared once it answers, so it keeps no worker alive.
-      const deadlines = set.mock.results.filter((_result, index) => set.mock.calls[index]?.[1] === 20_000).map((result) => result.value);
-      expect(deadlines).toHaveLength(1);
-      expect(clear.mock.calls.map(([timer]) => timer)).toEqual(expect.arrayContaining(deadlines));
-    } finally {
-      set.mockRestore();
-      clear.mockRestore();
-    }
+    await Promise.all([first(api.url), second(api.url), first(api.url)]);
     expect(testProvider.refreshes).toEqual(['rt-0']);
     expect(api.requests.map((request) => request.headers['authorization'])).toEqual(['Bearer fresh-1', 'Bearer fresh-1', 'Bearer fresh-1']);
     expect(await store.get('test')).toMatchObject({ access: 'fresh-1', refresh: 'rt-1' });

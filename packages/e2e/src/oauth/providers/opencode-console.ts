@@ -61,14 +61,13 @@ export function createOpencodeConsoleProvider(options: OpencodeConsoleProviderOp
       });
       return toCredentials(tokens);
     },
-    async refresh(credentials, signal) {
+    async refresh(credentials) {
       if (credentials.refresh === '') throw new OAuthError('LOGIN_REQUIRED', 'OpenCode Console has no refresh token for this login');
       const tokens = await requestTokens(
         'OpenCode Console',
         tokenUrl,
         { grant_type: 'refresh_token', refresh_token: credentials.refresh, client_id: CLIENT_ID },
         'LOGIN_REQUIRED',
-        signal,
       );
       return toCredentials(tokens, credentials);
     },
