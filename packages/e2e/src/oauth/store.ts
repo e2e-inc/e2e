@@ -9,7 +9,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import path from 'node:path';
 import { OAuthError } from './errors.ts';
@@ -98,7 +98,7 @@ export class FileCredentialStore implements CredentialStore {
     // Creation modes only apply to new paths; a directory or file that already existed keeps what it had unless told otherwise.
     chmodSync(dir, 0o700);
     const lockPath = `${this.path}.lock`;
-    const release = await this.lock(lockPath, LOCK_WAIT_MS, (cause) => new Error(`${lockPath} is held by another process; remove it if that process is gone`, { cause }));
+    const release = await this.lock(lockPath, LOCK_WAIT_MS, () => new Error(`${lockPath} is held by another process; remove it if that process is gone`));
     try {
       const temp = `${this.path}.${process.pid}.${Date.now()}.tmp`;
       writeFileSync(temp, `${JSON.stringify(change(this.read()), null, 2)}\n`, { mode: 0o600 });
@@ -119,22 +119,46 @@ export class FileCredentialStore implements CredentialStore {
    * so a waiter takes it over only once the holder has exited, never while the
    * holder is slow or suspended, and the holder releases only its own lock.
    */
-  private async lock(lockPath: string, waitMs: number, busy: (cause: unknown) => Error): Promise<() => void> {
+  private async lock(lockPath: string, waitMs: number, busy: () => Error): Promise<() => void> {
     const token = lockToken();
     const deadline = Date.now() + waitMs;
     for (;;) {
-      try {
-        writeFileSync(lockPath, token, { flag: 'wx', mode: 0o600 });
+      if (claim(lockPath, token)) {
         return () => {
           if (readLock(lockPath) === token) rmSync(lockPath, { force: true });
         };
-      } catch (cause) {
-        if ((cause as NodeJS.ErrnoException).code !== 'EEXIST') throw cause;
-        if (abandoned(lockPath) && breakAbandoned(lockPath)) continue;
-        if (Date.now() > deadline) throw busy(cause);
-        await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
       }
+      if (Date.now() > deadline) throw busy();
+      if (abandoned(lockPath) && breakAbandoned(lockPath)) continue;
+      await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
     }
+  }
+}
+
+/**
+ * Creates `lockPath` holding `token`, false when it exists. The token is
+ * written to a file of its own and linked into place, so the lock never
+ * exists without its holder's name, even when the write fails or the holder
+ * stops between creating and writing.
+ */
+function claim(lockPath: string, token: string): boolean {
+  const temp = `${lockPath}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temp, token, { flag: 'wx', mode: 0o600 });
+    try {
+      linkSync(temp, lockPath);
+    } catch (cause) {
+      const code = (cause as NodeJS.ErrnoException).code;
+      if (code !== 'EPERM' && code !== 'ENOTSUP' && code !== 'ENOSYS') throw cause;
+      // No hard links on this file system: create the lock directly, empty until the token is written.
+      writeFileSync(lockPath, token, { flag: 'wx', mode: 0o600 });
+    }
+    return true;
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw cause;
+  } finally {
+    rmSync(temp, { force: true });
   }
 }
 
@@ -152,9 +176,10 @@ function readLock(lockPath: string): string | undefined {
 }
 
 /**
- * True when the lock's holder has exited. A lock from another host, from an
- * older e2e, or still being written names no process this host can check, so
- * it counts as abandoned once it is older than the stale bound.
+ * True when the lock's holder has exited. A lock from another host, or an
+ * empty one from an older e2e or a file system without hard links, names no
+ * process this host can check, so it counts as abandoned once it is older
+ * than the stale bound.
  */
 function abandoned(lockPath: string): boolean {
   const text = readLock(lockPath);
@@ -188,10 +213,7 @@ function running(pid: number): boolean {
  */
 function breakAbandoned(lockPath: string): boolean {
   const breaker = `${lockPath}.break`;
-  try {
-    writeFileSync(breaker, lockToken(), { flag: 'wx', mode: 0o600 });
-  } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code !== 'EEXIST') throw cause;
+  if (!claim(breaker, lockToken())) {
     if (abandoned(breaker)) rmSync(breaker, { force: true });
     return false;
   }

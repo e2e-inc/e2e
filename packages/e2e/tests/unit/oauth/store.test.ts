@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -7,9 +7,10 @@ import { CREDENTIALS_ENV, EnvCredentialStore, FileCredentialStore, defaultCreden
 
 vi.mock('node:fs', async (importOriginal) => {
   const fs = await importOriginal<typeof import('node:fs')>();
-  return { ...fs, statSync: vi.fn(fs.statSync) };
+  return { ...fs, statSync: vi.fn(fs.statSync), writeFileSync: vi.fn(fs.writeFileSync), rmSync: vi.fn(fs.rmSync), linkSync: vi.fn(fs.linkSync) };
 });
-const realStatSync = (await vi.importActual<typeof import('node:fs')>('node:fs')).statSync;
+const realFs = await vi.importActual<typeof import('node:fs')>('node:fs');
+const realStatSync = realFs.statSync;
 
 const dirs: string[] = [];
 function tempFile(): string {
@@ -173,6 +174,56 @@ describe('FileCredentialStore', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('leaves no lock behind when writing its holder fails', async () => {
+    const file = tempFile();
+    const store = new FileCredentialStore(file);
+    await store.set('x', creds);
+    vi.mocked(writeFileSync).mockImplementationOnce(((target: string, data: string) => {
+      realFs.writeFileSync(target, data.slice(0, 10));
+      throw Object.assign(new Error('file too large'), { code: 'EFBIG' });
+    }) as typeof writeFileSync);
+    await expect(store.exclusive('x', async () => 'entered')).rejects.toThrow('file too large');
+    expect(readdirSync(path.dirname(file)).filter((name) => name.includes('.lock'))).toEqual([]);
+    expect(await store.exclusive('x', async () => 'entered')).toBe('entered');
+  });
+
+  it('gives up on time while the locks of exiting holders keep replacing each other', async () => {
+    const file = tempFile();
+    const store = new FileCredentialStore(file);
+    await store.set('x', creds);
+    const lock = `${file}.lock`;
+    const exited = heldBy(exitedPid());
+    writeFileSync(lock, exited);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    // Each takeover is followed by another holder taking the lock and exiting, a second later.
+    let takeovers = 0;
+    vi.mocked(rmSync).mockImplementation(((target: string, options?: object) => {
+      realFs.rmSync(target, options);
+      if (target === lock && takeovers++ < 20) {
+        realFs.writeFileSync(lock, exited);
+        vi.setSystemTime(Date.now() + 1_000);
+      }
+    }) as typeof rmSync);
+    try {
+      await expect(store.set('y', creds)).rejects.toThrow(`${lock} is held by another process`);
+      expect(takeovers).toBeLessThan(10);
+    } finally {
+      vi.mocked(rmSync).mockImplementation(realFs.rmSync);
+      vi.useRealTimers();
+    }
+  });
+
+  it('creates the lock directly on a file system without hard links', async () => {
+    const file = tempFile();
+    const store = new FileCredentialStore(file);
+    await store.set('x', creds);
+    vi.mocked(linkSync).mockImplementationOnce(() => {
+      throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+    });
+    expect(await store.exclusive('x', async () => readFileSync(`${file}.x.refresh.lock`, 'utf8'))).toMatch(new RegExp(`^${hostname()} ${process.pid} `));
+    expect(readdirSync(path.dirname(file)).filter((name) => name.includes('.lock'))).toEqual([]);
   });
 
   it('refreshes different providers at once', async () => {
