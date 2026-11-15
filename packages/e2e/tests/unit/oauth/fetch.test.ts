@@ -257,6 +257,26 @@ describe('createOAuthFetch', () => {
     expect(readsWhileHeld).toBe(1);
   });
 
+  it('fails with LOGIN_REQUIRED when the token another process stored is rejected too', async () => {
+    const api = await serve((_request, response) => json(response, 200, {}));
+    const store = new MemoryCredentialStore({ test: { access: 'stale', refresh: 'rt-0', expires: 1 } });
+    store.exclusive = async (providerId, refresh) => {
+      await store.set(providerId, { access: 'other', refresh: 'rt-1', expires: Date.now() + 1_000 });
+      return refresh();
+    };
+    const testProvider = provider({
+      async refresh(credentials) {
+        testProvider.refreshes.push(credentials.refresh);
+        throw new OAuthError('LOGIN_REQUIRED', `refresh token ${credentials.refresh} was revoked`);
+      },
+    });
+    const fetch = createOAuthFetch(testProvider, { store, userAgent: 'p' });
+    await expect(onFakeTimeouts(() => fetch(api.url))).rejects.toMatchObject({ code: 'LOGIN_REQUIRED' });
+    // The poll waits for a token other than the one this refresh sent, not the one it read before the lock.
+    expect(testProvider.refreshes).toEqual(['rt-1']);
+    expect(api.requests).toEqual([]);
+  });
+
   it('retries once with a refreshed token after a 401, also for a Request input', async () => {
     const api = await serve((request, response) => {
       if (request.headers['authorization'] === 'Bearer stale') json(response, 401, { error: 'expired' });

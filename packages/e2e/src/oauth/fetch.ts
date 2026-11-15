@@ -27,7 +27,10 @@ const REFRESH_SKEW_MS = 120_000;
 /** After a rejected refresh token, how long to wait for another process to store the rotated one. */
 const ROTATION_WAIT_MS = 500;
 const ROTATION_ATTEMPTS = 4;
-/** Under the 30 s a waiter gives the refresh lock, so a hung token request frees it for the next worker. */
+/**
+ * Under the 30 s a waiter gives the refresh lock, so a hung token request
+ * frees it for the next worker.
+ */
 const REFRESH_DEADLINE_MS = 20_000;
 
 /**
@@ -124,11 +127,13 @@ export function createOAuthFetch<Credentials extends OAuthCredentials>(
             return renewed;
           });
         } catch (cause) {
-          if (sent === undefined || !(cause instanceof OAuthError && cause.code === 'LOGIN_REQUIRED')) throw cause;
-          // After the lock, so waiters on a revoked login do not wait out each other's poll.
-          const rotated = await rotatedElsewhere(sent);
-          if (rotated !== undefined) return rotated;
-          throw new OAuthError('LOGIN_REQUIRED', `${cause.message}; ${remedy}`, { cause });
+          if (sent !== undefined && cause instanceof OAuthError && cause.code === 'LOGIN_REQUIRED') {
+            // After the lock, so waiters on a revoked login do not wait out each other's poll.
+            const rotated = await rotatedElsewhere(sent);
+            if (rotated !== undefined) return rotated;
+            throw new OAuthError('LOGIN_REQUIRED', `${cause.message}; ${remedy}`, { cause });
+          }
+          throw cause;
         }
       })().finally(() => shared.refreshing.delete(provider.id));
       shared.refreshing.set(provider.id, pending);

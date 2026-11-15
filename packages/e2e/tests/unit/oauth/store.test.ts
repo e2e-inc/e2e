@@ -145,6 +145,7 @@ describe('FileCredentialStore', () => {
 
   it.each([
     ['this process', () => heldBy(process.pid)],
+    // Run as root, pid 1 can be signalled, so this checks a running process instead.
     ['a process of another user', () => heldBy(1)],
     ['another host', () => `elsewhere.example ${exitedPid()} other`],
     ['another pid namespace on this host', () => `${hostname()}/pid:[1] ${exitedPid()} other`],
