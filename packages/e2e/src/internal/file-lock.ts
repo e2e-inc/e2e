@@ -1,8 +1,9 @@
 /**
  * A lock file shared across processes, for work that runs one process at a
  * time. The file names its holder (`lockToken`), and the holder touches it
- * while it holds it, so waiters take it over at once when the holder has
- * exited and otherwise only once it has gone untouched for the stale bound.
+ * while it holds it, so waiters take it over at once when a holder on this
+ * host and pid namespace has exited, and otherwise only once it has gone
+ * untouched for the stale bound.
  * The holder touches and removes only a lock that names it.
  */
 

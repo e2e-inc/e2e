@@ -1,10 +1,10 @@
-import { execFile, spawnSync } from 'node:child_process';
+import { type ChildProcess, execFile, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { withFileLock } from '../../src/internal/file-lock.ts';
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -174,11 +174,19 @@ describe('withFileLock', () => {
     // Every process boots before the start, then half the holds end as a crash that leaves the lock behind.
     const args = [lock, log, String(exitedPid()), String(Date.now() + 2_000), stop];
     const workers: { failed?: unknown } = {};
-    const exited = Promise.all(Array.from({ length: 12 }, () => promisify(execFile)(process.execPath, [...worker, ...args]))).catch(
-      (cause: unknown) => {
-        workers.failed = cause;
-      },
-    );
+    // Killed when the test ends, even on a timeout, so a worker that hangs is not left running.
+    const children: ChildProcess[] = [];
+    onTestFinished(() => {
+      for (const child of children) child.kill('SIGKILL');
+    });
+    const spawn = () => {
+      const run = promisify(execFile)(process.execPath, [...worker, ...args]);
+      children.push(run.child);
+      return run;
+    };
+    const exited = Promise.all(Array.from({ length: 12 }, spawn)).catch((cause: unknown) => {
+      workers.failed = cause;
+    });
     const crashes = () => readFileSync(log, 'utf8').split('\n').filter((line) => line.startsWith('x')).length;
     try {
       // Each crash is one more race between waiters to take the lock over.
@@ -208,6 +216,22 @@ describe('withFileLock', () => {
     expect(entered).toBe(true);
     await pending;
     expect(readdirSync(path.dirname(lock))).toEqual([]);
+  });
+
+  it('leaves the turn of a live waiter whose file it could not stat', async () => {
+    const lock = tempLock();
+    writeFileSync(lock, heldBy(exitedPid()));
+    const breaker = `${lock}.break`;
+    writeFileSync(breaker, heldBy(process.pid));
+    // The turn's holder runs, so the check reads its age, and that read fails as if the file had just been removed.
+    vi.mocked(statSync).mockImplementationOnce(() => {
+      throw Object.assign(new Error('no such file'), { code: 'ENOENT' });
+    });
+    const { entered, pending } = await entersAtOnce(lock);
+    expect(entered).toBe(false);
+    expect(existsSync(breaker)).toBe(true);
+    rmSync(breaker);
+    await pending;
   });
 
   it('keeps a held lock fresh, so waiters never take it as untouched', async () => {

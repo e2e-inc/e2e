@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { execFile } from 'node:child_process';
+import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
+import { type ChildProcess, execFile } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -191,7 +191,16 @@ describe('createOAuthFetch', () => {
         fileURLToPath(new URL('./helpers/refresh-worker.ts', import.meta.url)),
       ];
       const args = [...worker, file, `${vendor.url}/token`, `${vendor.url}/api`];
-      const run = async () => (await execFileAsync(process.execPath, args)).stdout;
+      // Killed when the test ends, even on a timeout, so a worker that hangs is not left running.
+      const children: ChildProcess[] = [];
+      onTestFinished(() => {
+        for (const child of children) child.kill('SIGKILL');
+      });
+      const run = async () => {
+        const pending = execFileAsync(process.execPath, args);
+        children.push(pending.child);
+        return (await pending).stdout;
+      };
       const statuses = await Promise.all(Array.from({ length: 4 }, run));
       expect(statuses).toEqual(['200', '200', '200', '200']);
       expect(vendor.requests.filter((request) => request.url === '/token')).toHaveLength(1);
@@ -279,6 +288,28 @@ describe('createOAuthFetch', () => {
     // The poll waits for a token other than the one this refresh sent, not the one it read before the lock.
     expect(testProvider.refreshes).toEqual(['rt-1']);
     expect(api.requests).toEqual([]);
+  });
+
+  it('passes on any other refresh failure as it is, without waiting for another process', async () => {
+    const store = new MemoryCredentialStore({ test: { access: 'stale', refresh: 'rt-0', expires: 1 } });
+    let reads = 0;
+    const get = store.get.bind(store);
+    store.get = async (providerId) => {
+      reads += 1;
+      return get(providerId);
+    };
+    const testProvider = provider({
+      async refresh() {
+        throw new OAuthError('FLOW_FAILED', 'the token response is missing refresh_token');
+      },
+    });
+    const fetch = createOAuthFetch(testProvider, { store, userAgent: 'p', loginHint: 'run `npx e2e login test`' });
+    await expect(onFakeTimeouts(() => fetch('http://127.0.0.1:1/'))).rejects.toMatchObject({
+      code: 'FLOW_FAILED',
+      message: 'the token response is missing refresh_token',
+    });
+    // The read before the refresh and the re-read inside the lock; no poll for a rotated token.
+    expect(reads).toBe(2);
   });
 
   it('retries once with a refreshed token after a 401, also for a Request input', async () => {
