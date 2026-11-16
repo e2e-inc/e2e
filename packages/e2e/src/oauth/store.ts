@@ -62,6 +62,7 @@ export class FileCredentialStore implements CredentialStore {
     return Object.keys(this.read());
   }
 
+  /** Runs `refresh` holding this login's lock file, so worker processes refresh it one at a time. */
   async exclusive<T>(providerId: string, refresh: () => Promise<T>): Promise<T> {
     return withFileLock(`${this.path}.${providerId}.refresh.lock`, REFRESH_LOCK_WAIT_MS, () => {
       const waited = `${REFRESH_LOCK_WAIT_MS / 1000} s`;

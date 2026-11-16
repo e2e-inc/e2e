@@ -19,6 +19,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { hostname } from 'node:os';
+import { sleep } from './time.ts';
 
 const LOCK_RETRY_MS = 25;
 /** How long a lock may go untouched before waiters take it over, whoever it names. */
@@ -59,7 +60,7 @@ async function acquire(lockPath: string, waitMs: number, busy: () => Error): Pro
     }
     if (Date.now() > deadline) throw busy();
     if (abandoned(lockPath) && breakAbandoned(lockPath)) continue;
-    await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
+    await sleep(LOCK_RETRY_MS);
   }
 }
 
