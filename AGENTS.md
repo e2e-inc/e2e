@@ -750,6 +750,18 @@ trees, on both platforms, without a device.
   comparator with the same `major.minor.patch` carries a prerelease, so
   `0.3.0-beta.0` satisfies neither `>=0.1.0-0 <1` nor `*`. Never hand-edit a
   package `version` or `CHANGELOG.md`; `changesets/action` owns both.
+- When you release (merge the `chore: version packages` pull request) and it
+  publishes `e2e` or an `@e2e-dev/*` package an example depends on, update the
+  examples once npm has the new versions, in a separate pull request from the
+  release (#1838 is the pattern). Raise each `e2e` and `@e2e-dev/*` range in
+  `examples/*/package.json` and `examples/*/e2e/package.json` to the newest
+  version on npm (`npm view <pkg> version`); leave a package with no newer
+  version alone. Run each changed example's suite by hand and update the "Last
+  checked" line in its README for every example you ran. Where you have no
+  simulator, emulator, or toolchain for one, install it, typecheck it, run
+  `npx e2e list`, leave its "Last checked" line alone, and say so under
+  `## Verified`. The examples commit no lockfile and gate no pull request, so
+  nothing else catches one left on an old version.
 - Canaries are hand-run, never from CI: `pnpm run canary` with `GITHUB_TOKEN`
   set versions and builds every public package as a changesets snapshot, and
   `pnpm run canary:publish` publishes them to the `canary` dist-tag, then runs
