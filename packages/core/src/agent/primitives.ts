@@ -81,16 +81,10 @@ export const VERDICT_RULES = `Verdict rules:
 - "passed" means the application behaved as the step required. "failed" means it did not. "blocked" means credentials, the environment, or test setup prevented a product verdict — blocked says nothing about the product and requires an errorCode.`;
 
 /**
- * A plain AI SDK function tool with its input typed from the schema — what
- * `tool()` from `ai` does, without loading `ai` to do it. A tool that
- * declares fields is closed: a key it does not declare fails validation, and
- * the SDK hands the failure back to the model as the call's result instead of
- * stripping the field and running the call without it. A tool with no fields
- * still advertises that closed object — `additionalProperties: false` is
- * emitted for input JSON Schema only when the catchall is `never` — but a
- * plain object is read as `{}` first. Some models pad a no-input call and
- * resend the refusal until the step budget ends; dropping the keys lets the
- * call run. A non-object still fails.
+ * A plain AI SDK function tool with its input typed from the schema; a tool
+ * that declares fields rejects any key it does not declare. A tool with no
+ * fields reads a plain object as `{}` first, because some models pad a
+ * no-input call and resend the refusal until the step budget ends.
  */
 function schemaTool<Schema extends z.ZodObject, Output = string>(definition: {
   readonly description: string;

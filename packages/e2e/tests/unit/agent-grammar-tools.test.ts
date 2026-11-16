@@ -96,7 +96,7 @@ describe('the grammar tools have closed schemas', () => {
       const padded = schema.safeParse({ force: true, selector: '#x' });
       expect(padded.success, `${name} drops undeclared fields`).toBe(true);
       if (padded.success) expect(padded.data).toEqual({});
-      for (const value of ['nope', null]) {
+      for (const value of ['nope', null, []]) {
         const rejected = schema.safeParse(value);
         expect(rejected.success, `${name} rejects ${JSON.stringify(value)}`).toBe(false);
         if (!rejected.success) expect(rejected.error.issues.map((issue) => issue.code)).toEqual(['invalid_type']);
