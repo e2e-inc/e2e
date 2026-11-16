@@ -1119,6 +1119,33 @@
       }
     },
     {
+      "slug": "lightpanda",
+      "title": "Testing in Lightpanda with e2e",
+      "shortTitle": "Lightpanda",
+      "description": "A store page that loads its product and reviews with JavaScript, tested in a Lightpanda started on your machine, with no Chrome to install, or in Lightpanda Cloud.",
+      "icon": "lightpanda.svg",
+      "source": "partner",
+      "repository": "https://github.com/lightpanda-io/demo/tree/main/e2e",
+      "author": {
+        "name": "Lightpanda",
+        "github": "lightpanda-io",
+        "website": "https://lightpanda.io"
+      },
+      "license": "Apache-2.0",
+      "licenseUrl": "https://github.com/lightpanda-io/demo/blob/main/LICENSE",
+      "tags": {
+        "framework": [
+          "nodejs"
+        ],
+        "useCase": [
+          "cloud-browsers"
+        ],
+        "platform": [
+          "web"
+        ]
+      }
+    },
+    {
       "slug": "pipedash",
       "title": "Testing Pipedash's App Store screenshot editor with e2e",
       "shortTitle": "Pipedash",
