@@ -32,7 +32,7 @@ or `lightpanda` on `PATH`, `~/.lightpanda`, or `~/.local/bin`.
 such as the Docker image in CI, is a `web({ connect })` target instead.
 
 Lightpanda has no layout engine: locators, assertions, and agent steps on
-the accessibility tree work, while drags, dialogs, downloads, and
+the accessibility tree work, while drag and drop, dialogs, and
 scrolling do not. The full list lives at
 [e2e.com/docs/integrations/lightpanda](https://e2e.com/docs/integrations/lightpanda).
 
