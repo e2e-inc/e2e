@@ -11,6 +11,7 @@
  * | a stale-ref refusal by `details.reason` (action paths only)  | NODE_STALE (retryable)        |
  * | target_still_moving with `details.dispatched: no`            | NODE_STALE (retryable)        |
  * | a covered or keyboard-occluded target, `dispatched: no`      | NOT_ACTIONABLE, with the hint |
+ * | a target with no screen origin to aim at, `dispatched: no`   | NOT_ACTIONABLE, with the hint |
  * | the iOS runner busy, wedged, or past its watchdog           | ENGINE_FAILURE, naming the   |
  * | a snapshot the iOS runner acquired but could not present    |   runner and the recovery    |
  * | anything else, agent-device's own timeouts included         | ENGINE_FAILURE with the text |
@@ -101,6 +102,16 @@ const STALE_REF_REASONS: ReadonlySet<string> = new Set([
  * fine; the test has to move the cover or the target first.
  */
 const OCCLUDED_REASONS: ReadonlySet<string> = new Set(['target_covered', 'tap_keyboard_occludes_target']);
+
+/**
+ * The `details.reason` agent-device 0.21.37 refuses a ref action with when the
+ * capture the ref came from could not place its window on the screen. Nothing
+ * was sent, and the runner is healthy. agent-device's own hint names its CLI
+ * (`snapshot`, `screenshot`), so the failure carries the test's move instead:
+ * a point tap is not aimed from the capture, and agent-device takes it.
+ */
+const NO_SCREEN_ORIGIN_REASON = 'window-origin-unknown';
+const NO_SCREEN_ORIGIN_HINT = 'Nothing was sent. Tap the point instead with screen.tapAt().';
 
 /**
  * What the iOS automation runner reported about itself, by the code
@@ -295,9 +306,10 @@ export async function runCommand<T>(label: string, work: () => Promise<T>, signa
  * stale-ref reasons are sufficient on their own: Android dialog recovery can
  * mark a refused drag as `dispatched: unknown`. A `target_still_moving` refusal
  * additionally requires `dispatched: no`; missing or unknown dispatch is not retryable.
- * A target agent-device refused as covered (`OCCLUDED_REASONS`) with nothing
- * dispatched is `NOT_ACTIONABLE`: the test's own failure, with the hint that
- * names the cover, never an infrastructure one.
+ * A target agent-device refused as covered (`OCCLUDED_REASONS`) or as having
+ * no screen origin (`NO_SCREEN_ORIGIN_REASON`) with nothing dispatched is
+ * `NOT_ACTIONABLE`, with the move that gets past it: an action failure on a
+ * healthy device, never an infrastructure one.
  */
 export function staleOr(cause: unknown, operation: string, where?: string): Error {
   if (isClassified(cause)) return cause;
@@ -308,6 +320,9 @@ export function staleOr(cause: unknown, operation: string, where?: string): Erro
   }
   if (typeof reason === 'string' && OCCLUDED_REASONS.has(reason) && dispatched === 'no') {
     return new EngineError('NOT_ACTIONABLE', `${operation} failed: ${withHint(cause, message(cause))}`, { retryable: false, cause });
+  }
+  if (reason === NO_SCREEN_ORIGIN_REASON && dispatched === 'no') {
+    return new EngineError('NOT_ACTIONABLE', `${operation} failed: ${message(cause)} Hint: ${NO_SCREEN_ORIGIN_HINT}`, { retryable: false, cause });
   }
   return translateError(cause, operation, where);
 }
