@@ -90,6 +90,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Pack
         run: |
+          pnpm --filter @e2e-dev/core pack --out "$RUNNER_TEMP/packed/core.tgz"
           pnpm --filter e2e pack --out "$RUNNER_TEMP/packed/e2e.tgz"
           pnpm --filter @e2e-dev/web pack --out "$RUNNER_TEMP/packed/web.tgz"
           pnpm --filter @e2e-dev/mobile pack --out "$RUNNER_TEMP/packed/mobile.tgz"
@@ -239,6 +240,7 @@ jobs:
         if: ${{ matrix.toolchain == 'flutter' }}
         with:
           channel: stable
+          flutter-version: '3.50.0'
           cache: true
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         if: ${{ matrix.toolchain == 'dotnet' }}
@@ -438,6 +440,7 @@ jobs:
         if: ${{ matrix.toolchain == 'flutter' }}
         with:
           channel: stable
+          flutter-version: '3.50.0'
           cache: true
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         if: ${{ matrix.toolchain == 'dotnet' }}

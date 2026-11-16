@@ -20,7 +20,7 @@
  */
 
 import path from 'node:path';
-import { collapseText } from '../internal/text.ts';
+import { collapseText } from '@e2e-dev/core/lib/internal/text';
 import type { Report1Document, ReportChanges, ReportError, ReportExplore, ReportExploreFinding, ReportFilter, ReportResult, ReportStep, ReportTarget } from './build.ts';
 import { ENDED_TEXT, orderFindings, SEVERITY_WORDS, stepCountParts } from './explore-text.ts';
 import { filterDecision, formatCost, formatTokens, repeatSuffix, shortCommit, statusBucket, tally, type Counters } from './format.ts';
@@ -45,7 +45,7 @@ import { cell, code, formatDuration, link, MAX_ID_CHARS, MAX_PATH_CHARS, MAX_TIT
 import { outcome, type Outcome } from './outcome.ts';
 import { isExploreVerdict } from './traces.ts';
 import { posixRelative, writeTextReport } from './write.ts';
-import type { Reporter, ReporterSummary } from '../types.ts';
+import type { Reporter, ReporterSummary } from '../run-types.ts';
 
 type ReportRun = Report1Document['run'];
 type ReportArtifact = ReportResult['attempts'][number]['artifacts'][number];
@@ -415,7 +415,9 @@ function fileGroups(entries: readonly Entry[]): FileGroup[] {
   const groups = new Map<string, Map<string, Entry[]>>();
   for (const entry of entries) {
     const byFile = groups.get(entry.result.targetId) ?? new Map<string, Entry[]>();
-    byFile.set(entry.result.file, [...(byFile.get(entry.result.file) ?? []), entry]);
+    const grouped = byFile.get(entry.result.file);
+    if (grouped) grouped.push(entry);
+    else byFile.set(entry.result.file, [entry]);
     groups.set(entry.result.targetId, byFile);
   }
   const rows = [...groups].flatMap(([target, byFile]) => [...byFile].map(([file, grouped]) => ({ file, target, entries: grouped })));

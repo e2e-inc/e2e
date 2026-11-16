@@ -9,7 +9,7 @@
  * concurrent refresh.
  */
 
-import { withAbort } from '../internal/time.ts';
+import { withAbort } from '@e2e-dev/core/lib/internal/time';
 import { OAuthError, describeResponse } from './errors.ts';
 import type { CredentialStore, FetchFunction, OAuthCredentials, OAuthProvider } from './types.ts';
 

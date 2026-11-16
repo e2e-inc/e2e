@@ -37,6 +37,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./engine": {
+      "types": "./dist/engine-entry.d.ts",
+      "default": "./dist/engine-entry.js"
     }
   },
   "bin": {
@@ -58,9 +62,16 @@
     "playwright-core": "1.65.1"
   },
   "peerDependencies": {
-    "e2e": ">=0.23.1 <1"
+    "@e2e-dev/core": ">=0.23.2 <1",
+    "e2e": ">=0.23.2 <1"
+  },
+  "peerDependenciesMeta": {
+    "e2e": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "@e2e-dev/core": "workspace:*",
     "@napi-rs/image": "1.16.0",
     "@types/node": "26.6.6",
     "e2e": "workspace:*",

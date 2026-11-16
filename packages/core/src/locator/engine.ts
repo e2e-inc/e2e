@@ -1,0 +1,746 @@
+/** Runner-owned query polling, strictness, and action retry. */
+
+import {
+  type TargetSession,
+  type LocatorAction,
+  type LocatorExpression,
+  type NodeRef,
+  type OperationContext,
+  type PointerAction,
+  type SemanticNode,
+  type ViewportPoint,
+} from '../engine/surface.ts';
+import {
+  asEngineError,
+  ConfigurationError,
+  E2EError,
+  isE2EError,
+  TestError,
+  translateEngineError,
+  type ErrorDetails,
+} from '../internal/errors.ts';
+import { requireKey } from '../internal/keys.ts';
+import { describeExpression, expressionHints, filterSpine } from './expression.ts';
+import { abortError, cancelledError, Deadline, POLL_INTERVAL_MS, ReadWindow, sleep, stepTimeout } from '../internal/time.ts';
+import { timestamp } from '../internal/ids.ts';
+import { obj } from '../internal/objects.ts';
+import { targetLabel } from '../cache/trace.ts';
+import type { AttemptBudget } from '../run/budget.ts';
+import type { StepEvent } from '../run/steps.ts';
+
+/** Canonical visibility predicate over a semantic node snapshot. */
+export function isNodeVisible(node: SemanticNode | null): node is SemanticNode {
+  return node !== null && node.states?.hidden !== true;
+}
+
+/**
+ * The value of a node attribute, `null` when the node carries none by that
+ * name. Only own entries count: the map arrives as a plain object, so a
+ * lookup by name alone would answer `Object.prototype` members like
+ * `constructor` or `toString` for an attribute the element never had.
+ */
+export function attributeOf(node: SemanticNode, name: string): string | null {
+  const attributes = node.attributes;
+  if (attributes === undefined || !Object.hasOwn(attributes, name)) return null;
+  return attributes[name] ?? null;
+}
+
+/**
+ * Denies reading a value, text, or attribute when any node is a secure field:
+ * the engine withholds them there, so what reads as missing is redacted, not
+ * empty or absent.
+ */
+export function denySecureRead(nodes: readonly SemanticNode[], label: string): void {
+  if (nodes.some((node) => node.states?.secure === true)) {
+    throw new ConfigurationError('POLICY_DENIED', `reading values from a secure field is denied: ${label}`);
+  }
+}
+
+/**
+ * What a frame the engine reports missing means to a resolve: `wait` treats
+ * it like a node that is not there yet, `empty` answers zero matches.
+ */
+type MissingFrame = 'wait' | 'empty';
+
+/** The budget the whole diagnostic failure walk shares: best effort, never a wait.
+ * One deadline bounds every prefix resolve, so a multi-step chain cannot cost
+ * more than one short budget even on mobile, where `session.locate()` ignores
+ * the operation timeout and a snapshot that starts just before the deadline
+ * still runs to completion — the real bound is the budget plus one snapshot.
+ */
+const STEP_COUNT_BUDGET_MS = 500;
+
+interface LocatorEngineOptions {
+  readonly session: TargetSession;
+  /** The running phase's signal and deadline, read per operation. */
+  readonly budget: AttemptBudget;
+  readonly runId: string;
+  readonly attemptId: string;
+  readonly actionTimeout: number;
+  readonly assertionTimeout: number;
+  /**
+   * How long an app open, restart, or link open may take, once a program has
+   * set a default timeout; absent in a run, where the test's timeout bounds
+   * them.
+   */
+  readonly lifecycleTimeout?: number;
+  /** Records what an action did under the running step; omitted where no step records (`e2e mcp`). */
+  readonly recordEvent?: (event: StepEvent) => void;
+  /** Replaces secret values in text an event quotes from the screen, before it is clipped; identity when omitted. */
+  readonly redact?: (text: string) => string;
+}
+
+/**
+ * Builds an action once its node has resolved, on every resolve: a `dragTo`
+ * resolves its drop target alongside the source, a secret fill clears the
+ * node it is about to land on.
+ */
+type ActionBuilder = (deadline: Deadline, ref: NodeRef) => Promise<LocatorAction>;
+
+/** A resolve that found its one match, and how long it polled for it: 0 when the first round found it. */
+interface Resolved {
+  readonly ref: NodeRef;
+  readonly waitedMs: number;
+}
+
+/** Per-attempt locator execution engine. */
+export class LocatorEngine {
+  constructor(private options: LocatorEngineOptions) {}
+
+  /**
+   * Replaces the default timeouts of the operations that start from now on,
+   * for an `@e2e-dev/core` session's `setDefaultTimeout`. A running operation keeps
+   * the deadline it started with.
+   */
+  setDefaultTimeouts(timeouts: { readonly action: number; readonly assertion: number; readonly lifecycle: number }): void {
+    this.options = { ...this.options, actionTimeout: timeouts.action, assertionTimeout: timeouts.assertion, lifecycleTimeout: timeouts.lifecycle };
+  }
+
+  /** The default timeout of an app open, restart, or link open, when a program set one. */
+  get lifecycleTimeout(): number | undefined {
+    return this.options.lifecycleTimeout;
+  }
+
+  get session(): TargetSession {
+    return this.options.session;
+  }
+
+  /** The running phase's signal: the attempt's through the body, a hook's own in teardown. */
+  get signal(): AbortSignal {
+    return this.options.budget.signal;
+  }
+
+  get assertionTimeout(): number {
+    return this.options.assertionTimeout;
+  }
+
+  get actionTimeout(): number {
+    return this.options.actionTimeout;
+  }
+
+  /** Records an event under the running step; a no-op where no step records. */
+  recordEvent(event: StepEvent): void {
+    this.options.recordEvent?.(event);
+  }
+
+  /** Text an event quotes from the screen, its secrets replaced: run before any clip, so no cut leaves a secret's head behind. */
+  redact(text: string): string {
+    return this.options.redact?.(text) ?? text;
+  }
+
+  /** Builds an operation context on a plain budget, capped by the remaining test timeout: 0 is an expired one. */
+  operation(timeoutMs?: number): OperationContext {
+    return this.operationWithin(this.capped(timeoutMs));
+  }
+
+  /** The reads of one wait on `deadline`: the last may run past it, up to the running phase's deadline. */
+  reads(deadline: Deadline): ReadWindow {
+    return new ReadWindow(deadline, this.options.budget.deadline);
+  }
+
+  /**
+   * Deadline for one action-family operation on a call's own `timeout`,
+   * capped by the running phase's deadline. 0 sets no deadline of its own,
+   * so the phase's alone bounds it.
+   */
+  deadline(timeoutMs?: number): Deadline {
+    return this.capped(stepTimeout(timeoutMs, 'the step'));
+  }
+
+  /** A deadline `timeoutMs` (default the action timeout) from now, capped by the running phase's deadline. */
+  private capped(timeoutMs: number | undefined): Deadline {
+    return Deadline.min(new Deadline(timeoutMs ?? this.options.actionTimeout), this.options.budget.deadline);
+  }
+
+  /** An operation context bounded by a deadline a caller shares across steps, such as the swipes of one scroll. */
+  operationWithin(deadline: Deadline): OperationContext {
+    return this.readOperation(deadline.remaining());
+  }
+
+  /** An operation context on `timeoutMs`, never under 1 ms: the budget a `ReadWindow` hands one read. */
+  readOperation(timeoutMs: number): OperationContext {
+    // A phase that ended for a reason of its own (a closed session, a deadline) starts nothing more, and the reason is the error:
+    // an engine handed the aborted signal would answer with a bare cancellation.
+    if (this.signal.aborted && isE2EError(this.signal.reason)) throw this.signal.reason;
+    return {
+      signal: this.signal,
+      timeoutMs: Math.max(1, timeoutMs),
+      runId: this.options.runId,
+      attemptId: this.options.attemptId,
+      origin: 'test',
+    };
+  }
+
+  /**
+   * Refuses an action the session would refuse, before the locator is
+   * resolved: an undeclared kind, or modifiers on an engine that does not
+   * declare `tapModifiers`, is `UNSUPPORTED_CAPABILITY`, a `press` key
+   * outside the grammar is `INVALID_ARGUMENT`. Waiting for a node the engine
+   * could never act on would report it as missing instead.
+   */
+  private checkAction(action: LocatorAction): void {
+    if (!this.session.actions.has(action.kind)) {
+      throw new ConfigurationError(
+        'UNSUPPORTED_CAPABILITY',
+        `the "${action.kind}" action is not available on this target: its engine declares ${
+          this.session.actions.size === 0 ? 'no actions' : [...this.session.actions].join(', ')
+        }`,
+      );
+    }
+    if ('modifiers' in action && action.modifiers !== undefined && !this.session.tapModifiers) {
+      throw new ConfigurationError(
+        'UNSUPPORTED_CAPABILITY',
+        `modifiers on the "${action.kind}" action are not available on this target: its engine does not declare tapModifiers`,
+      );
+    }
+    if (action.kind === 'press') requireKey(action.key);
+  }
+
+  /** Refuses a pointer action the session would refuse: an undeclared kind is `UNSUPPORTED_CAPABILITY`. */
+  private checkPointerAction(action: PointerAction): void {
+    if (!this.session.pointerActions.has(action.kind)) {
+      throw new ConfigurationError(
+        'UNSUPPORTED_CAPABILITY',
+        `the "${action.kind}" action at a point is not available on this target: its engine declares ${
+          this.session.pointerActions.size === 0
+            ? 'no pointer actions'
+            : [...this.session.pointerActions].join(', ')
+        }`,
+      );
+    }
+  }
+
+  /**
+   * One immediate engine resolve, retrying retryable errors within the
+   * deadline. With `missingFrame: 'empty'` a retryable `FRAME_NOT_FOUND` is
+   * zero matches instead: nothing under a frame that is not in the document
+   * matches, and a read that promised not to wait must not wait for it.
+   */
+  private async resolveOnce(
+    expression: LocatorExpression,
+    reads: ReadWindow,
+    missingFrame: MissingFrame = 'wait',
+  ): Promise<readonly NodeRef[]> {
+    let retried: unknown;
+    for (;;) {
+      try {
+        return await reads.read((timeoutMs) => this.session.locate(expression, this.readOperation(timeoutMs)));
+      } catch (cause) {
+        // A retry the deadline cut off saw nothing new: the wait ends on the failure it was retrying.
+        if (retried !== undefined && reads.cutOff(cause)) throw translateLocatorError(retried, expression);
+        const engineError = asEngineError(cause);
+        if (engineError?.retryable === true) {
+          if (missingFrame === 'empty' && engineError.code === 'FRAME_NOT_FOUND') return [];
+          if (!reads.deadline.expired()) {
+            retried = cause;
+            await sleep(POLL_INTERVAL_MS, this.signal);
+            continue;
+          }
+        }
+        throw translateLocatorError(cause, expression);
+      }
+    }
+  }
+
+  /**
+   * Resolves exactly one match. Zero matches poll until the deadline;
+   * multiple matches fail immediately with LOCATOR_AMBIGUOUS.
+   */
+  async resolveExactlyOne(expression: LocatorExpression, deadline: Deadline): Promise<NodeRef> {
+    return (await this.resolveCounted(expression, this.reads(deadline))).ref;
+  }
+
+  /** `resolveExactlyOne`, timing how long it polled before the match appeared. */
+  private async resolveCounted(expression: LocatorExpression, reads: ReadWindow): Promise<Resolved> {
+    const { deadline } = reads;
+    const startedMs = Date.now();
+    // The wait as it happened: a deadline capped by the test's remaining
+    // budget waited less than the action timeout, and the report says so.
+    const notFound = async (cause?: unknown) => {
+      // The wait as it happened, read before the diagnostic pass runs: the
+      // prefix resolves below are not part of the locator's wait.
+      const waitedMs = Date.now() - startedMs;
+      const lines = await this.candidateCounts(expression);
+      return new TestError('LOCATOR_NOT_FOUND', `locator matched no nodes within ${describeExpression(expression)}${lines}`, {
+        details: locatorDetails(expression, waitedMs),
+        ...(cause === undefined ? {} : { cause }),
+      });
+    };
+    let sampled = false;
+    for (let rounds = 1; ; rounds += 1) {
+      let refs: readonly NodeRef[];
+      try {
+        refs = await this.resolveOnce(expression, reads);
+      } catch (cause) {
+        // A resolve the deadline cut off, after one that matched nothing, is the wait running out.
+if (sampled && reads.cutOff(cause)) throw await notFound(cause);
+        throw cause;
+      }
+      sampled = true;
+      const ref = await this.singleOf(refs, expression);
+      if (ref !== null) return { ref, waitedMs: rounds > 1 ? Date.now() - startedMs : 0 };
+      if (deadline.expired()) throw await notFound();
+      await sleep(POLL_INTERVAL_MS, this.signal);
+    }
+  }
+
+  /**
+   * The diagnostic on a filtered locator's failure: one immediate resolve per
+   * prefix of its chain, innermost first, and how many candidates each left,
+   * as the message's per-step lines. One deadline bounds the whole walk, so
+   * even on mobile, where `session.locate()` ignores the operation timeout,
+   * a chain whose walk cannot finish lists only the prefixes it read and says
+   * so, or lists nothing when a read failed outright. The counts are read
+   * after the failure, so a page that changed since can disagree with the
+   * failing attempt, and the message says so.
+   */
+  private async candidateCounts(expression: LocatorExpression): Promise<string> {
+    const spine = filterSpine(expression);
+    if (spine.length === 0) return '';
+    const deadline = Deadline.min(new Deadline(STEP_COUNT_BUDGET_MS), this.options.budget.deadline);
+    const lines: string[] = [];
+    try {
+      for (const prefix of spine) {
+        if (deadline.expired()) break;
+        const refs = await this.resolveNow(prefix, new ReadWindow(deadline));
+        lines.push(`${describeExpression(prefix)}: ${refs.length}`);
+      }
+    } catch {
+      if (this.signal.aborted) throw abortError(this.signal, () => cancelledError());
+      // A diagnostic read failure must not fail the failure: partial counts
+      // must not read as a completed walk, so return nothing.
+      return '';
+    }
+    if (lines.length === 0) return '';
+    const stopped = lines.length < spine.length ? `, walk stopped after ${lines.length} of ${spine.length} steps` : '';
+    return `; candidates left after each filter step${stopped}, counted after the failure:\n${lines.join('\n')}`;
+  }
+
+  /** Zero matches -> null; one -> the ref; many -> LOCATOR_AMBIGUOUS with the per-step counts. */
+  private async singleOf(refs: readonly NodeRef[], expression: LocatorExpression): Promise<NodeRef | null> {
+    if (refs.length <= 1) return refs[0] ?? null;
+    const lines = await this.candidateCounts(expression);
+    throw new TestError('LOCATOR_AMBIGUOUS', `locator matched ${refs.length} nodes, expected exactly one: ${describeExpression(expression)}${lines}`, {
+      details: { ...locatorDetails(expression), matches: refs.length },
+    });
+  }
+
+  /**
+   * Resolves every current match at once, without waiting for one. A frame
+   * the engine reports missing is zero matches, since nothing under it is in
+   * the document. A stale resolve is still retried within the deadline, as
+   * every resolve does: that repairs a race with a navigation, it does not
+   * wait for a match.
+   */
+  async resolveNow(
+    expression: LocatorExpression,
+    reads: ReadWindow = new ReadWindow(this.deadline(this.options.actionTimeout)),
+  ): Promise<readonly NodeRef[]> {
+    return this.resolveOnce(expression, reads, 'empty');
+  }
+
+  /**
+   * Reads one node snapshot. Zero matches poll until the action timeout, as
+   * an action's resolve does, so a read of a node the app is still
+   * rendering answers once it is there. A concurrent locator can supersede
+   * the ref between resolve and read; that is a repeatable race, so it
+   * re-resolves while the deadline remains instead of failing the test.
+   */
+  async read(expression: LocatorExpression): Promise<SemanticNode> {
+    const reads = this.reads(this.deadline(this.options.actionTimeout));
+    for (;;) {
+      const { ref } = await this.resolveCounted(expression, reads);
+      try {
+        return await reads.read((timeoutMs) => this.session.read(ref, this.readOperation(timeoutMs)));
+      } catch (cause) {
+        const engineError = asEngineError(cause);
+        if (engineError?.code === 'NODE_STALE' && engineError.retryable && !reads.deadline.expired()) {
+          continue;
+        }
+        throw translateLocatorError(cause, expression);
+      }
+    }
+  }
+
+  /**
+   * Reads every current match at once, in document order: a missing frame
+   * reads as no matches. A ref superseded between resolve and read
+   * re-resolves the whole set while the deadline remains, since one stale
+   * member says nothing about the others; a stale set at the deadline is
+   * `LOCATOR_NOT_FOUND`.
+   */
+  async readAllNow(
+    expression: LocatorExpression,
+    reads: ReadWindow = new ReadWindow(this.deadline(this.options.actionTimeout)),
+  ): Promise<readonly SemanticNode[]> {
+    for (;;) {
+      const refs = await this.resolveOnce(expression, reads, 'empty');
+      try {
+        const nodes: SemanticNode[] = [];
+        for (const ref of refs) nodes.push(await reads.read((timeoutMs) => this.session.read(ref, this.readOperation(timeoutMs))));
+        return nodes;
+      } catch (cause) {
+        if (asEngineError(cause)?.code === 'NODE_STALE' && !reads.deadline.expired()) {
+          await sleep(POLL_INTERVAL_MS, this.signal);
+          continue;
+        }
+        throw translateLocatorError(cause, expression);
+      }
+    }
+  }
+
+  /**
+   * Reads one node for polling surfaces; returns null while zero matches.
+   * A poll that waits for absence passes `missingFrame: 'empty'`: nothing
+   * under a frame that is not in the document is attached, so the sample is
+   * zero matches rather than a wait for the frame.
+   */
+  async tryRead(
+    expression: LocatorExpression,
+    reads: ReadWindow,
+    missingFrame: MissingFrame = 'wait',
+  ): Promise<{ node: SemanticNode | null; count: number }> {
+    return this.readOne(expression, reads, missingFrame);
+  }
+
+  /**
+   * Reads the one current match at once, for `isVisible` and `isHidden`:
+   * null for zero matches, a missing frame, or a node that went stale; two
+   * matches are `LOCATOR_AMBIGUOUS`.
+   */
+  async readNow(expression: LocatorExpression): Promise<SemanticNode | null> {
+    const { node } = await this.readOne(expression, new ReadWindow(this.deadline(this.options.actionTimeout)), 'empty');
+    return node;
+  }
+
+  private async readOne(
+    expression: LocatorExpression,
+    reads: ReadWindow,
+    missingFrame: MissingFrame,
+  ): Promise<{ node: SemanticNode | null; count: number }> {
+const ref = await this.singleOf(await this.resolveOnce(expression, reads, missingFrame), expression);
+    if (ref === null) return { node: null, count: 0 };
+    try {
+      const node = await reads.read((timeoutMs) => this.session.read(ref, this.readOperation(timeoutMs)));
+      return { node, count: 1 };
+    } catch (cause) {
+      if (asEngineError(cause)?.code === 'NODE_STALE') {
+        return { node: null, count: 0 };
+      }
+      throw translateLocatorError(cause, expression);
+    }
+  }
+
+  /**
+   * Performs exactly one action against exactly one match. Stale nodes are
+   * re-resolved while the deadline remains; a possibly committed action is
+   * never repeated. An action that itself names other nodes (dragTo) is built
+   * per attempt, so its refs are re-resolved together with the source.
+   */
+  async perform(
+    expression: LocatorExpression,
+    action: LocatorAction | ActionBuilder,
+    timeoutMs?: number,
+  ): Promise<void> {
+    await this.performUntil(expression, action, this.deadline(timeoutMs));
+  }
+
+  /**
+   * Fills a secret into exactly one match, and hands the value over only
+   * once `authorize` has cleared the node it lands on. The node is read and
+   * cleared on every resolve, so a match that went stale and resolved again
+   * is checked again before the value is handed over.
+   */
+  async fillSecret(
+    expression: LocatorExpression,
+    authorize: (node: SemanticNode) => Promise<string>,
+    timeoutMs?: number,
+  ): Promise<void> {
+    this.checkAction({ kind: 'fill', value: '', sensitive: true });
+    await this.performUntil(
+      expression,
+      async (deadline, ref) => {
+        let node: SemanticNode;
+        try {
+          node = await this.session.read(ref, this.operationWithin(deadline));
+        } catch (cause) {
+          throw translateLocatorError(cause, expression);
+        }
+        return { kind: 'fill', value: await authorize(node), sensitive: true };
+      },
+      this.deadline(timeoutMs),
+    );
+  }
+
+  /** Performs one pointer action at a viewport point, with no node behind it. */
+  async performAt(point: ViewportPoint, action: PointerAction, timeoutMs?: number): Promise<void> {
+    this.checkPointerAction(action);
+    await this.dispatchAt(point, action, this.deadline(timeoutMs));
+  }
+
+  /**
+   * Performs one pointer action at an offset from the origin of exactly one
+   * match (`SemanticNode.origin`, else its box's top-left corner): the node
+   * is scrolled into view when the engine can, then its box is read and the
+   * pointer dispatched at the point, with no node behind the gesture. The node has to be visible with a box within
+   * the deadline; one that never is fails as LOCATOR_NOT_FOUND, as `waitFor`
+   * does.
+   */
+  async performWithin(
+    expression: LocatorExpression,
+    offset: ViewportPoint,
+    action: PointerAction,
+    timeoutMs?: number,
+  ): Promise<void> {
+    this.checkPointerAction(action);
+    const deadline = this.deadline(timeoutMs);
+    const startedMs = Date.now();
+    if (this.session.actions.has('scrollIntoView')) {
+      await this.performUntil(expression, { kind: 'scrollIntoView' }, deadline);
+    }
+    const notVisible = (cause?: unknown) =>
+      new TestError('LOCATOR_NOT_FOUND', `locator did not become visible with a box to act within: ${describeExpression(expression)}`, {
+        details: locatorDetails(expression, Date.now() - startedMs),
+        ...(cause === undefined ? {} : { cause }),
+      });
+    const reads = this.reads(deadline);
+    let sampled = false;
+    for (;;) {
+      let node: SemanticNode | null;
+      try {
+        ({ node } = await this.tryRead(expression, reads));
+      } catch (cause) {
+        if (sampled && reads.cutOff(cause)) throw notVisible(cause);
+        throw cause;
+      }
+      sampled = true;
+      if (isNodeVisible(node) && node.rect !== undefined) {
+        const origin = node.origin ?? node.rect;
+        await this.dispatchAt({ x: origin.x + offset.x, y: origin.y + offset.y }, action, deadline);
+        return;
+      }
+      if (deadline.expired()) throw notVisible();
+      await sleep(POLL_INTERVAL_MS, this.signal);
+    }
+  }
+
+  /** One pointer dispatch within a deadline, its engine error translated to the public taxonomy. */
+  private async dispatchAt(point: ViewportPoint, action: PointerAction, deadline: Deadline): Promise<void> {
+    const startedAt = timestamp();
+    const startedMs = Date.now();
+    const record = (status: StepEvent['status'], code?: string): void =>
+      this.recordEvent({
+        kind: 'engine',
+        name: action.kind,
+        startedAt,
+        durationMs: Date.now() - startedMs,
+        status,
+        ...(code === undefined ? {} : { code }),
+        detail: `${action.kind} at (${Math.round(point.x)}, ${Math.round(point.y)})`,
+      });
+    if (deadline.expired()) {
+      const failure = lateAction(action.kind, `(${Math.round(point.x)}, ${Math.round(point.y)})`);
+      record('failed', failure.code);
+      throw failure;
+    }
+    try {
+      await this.session.performAt(point, action, this.operationWithin(deadline));
+    } catch (cause) {
+      const failure = translateLocatorError(cause);
+      record(this.signal.aborted ? 'cancelled' : 'failed', failure.code);
+      throw failure;
+    }
+    record('passed');
+  }
+
+  /**
+   * Focuses exactly one match, then types through the engine's keyboard so
+   * the app receives key events: `fill` sets the value without them.
+   * Composed from the `focus` action and the `keyboard` capability, so the
+   * engine contract does not grow. Each entry of `chunks` is one
+   * `keyboard.type` call, `delayMs` apart, and the whole sequence shares one
+   * action deadline: a pause is cut at the deadline and a keystroke is never
+   * sent past it, so a slow engine cannot stretch the action beyond its
+   * budget. The focus retries a stale node like any action; the typing never
+   * does, because a keystroke may already have landed.
+   */
+  async pressSequentially(
+    expression: LocatorExpression,
+    chunks: readonly string[],
+    delayMs: number,
+    timeoutMs?: number,
+  ): Promise<void> {
+    this.checkAction({ kind: 'focus' });
+    if (!this.session.verbs.has('typeText')) {
+      throw new ConfigurationError(
+        'UNSUPPORTED_CAPABILITY',
+        'pressSequentially is not available on this target: its engine declares no keyboard',
+      );
+    }
+    const deadline = this.deadline(timeoutMs);
+    await this.performUntil(expression, { kind: 'focus' }, deadline);
+    const timedOut = (typed: number): TestError =>
+      new TestError(
+        'ACTION_FAILED',
+        `operation timed out after typing ${typed} of ${chunks.length} characters: ${describeExpression(expression)}`,
+      );
+    for (const [index, chunk] of chunks.entries()) {
+      if (index > 0) {
+        // A pause the deadline cuts short ends the typing by itself. Reading
+        // the clock after the sleep would not: a timer may fire a hair early,
+        // and one more character would go out past the budget.
+        const remaining = deadline.remaining();
+        const cut = remaining < delayMs;
+        await sleep(cut ? remaining : delayMs, this.signal);
+        if (cut) throw timedOut(index);
+      }
+      if (deadline.expired()) throw timedOut(index);
+      try {
+        await this.session.keyboard.type(chunk, { replace: false }, this.operationWithin(deadline));
+      } catch (cause) {
+        throw translateLocatorError(cause, expression);
+      }
+    }
+  }
+
+  /** `perform` within a deadline a caller shares across steps, such as the swipes of one scroll. */
+  async performUntil(
+    expression: LocatorExpression,
+    action: LocatorAction | ActionBuilder,
+    deadline: Deadline,
+  ): Promise<void> {
+    if (typeof action !== 'function') this.checkAction(action);
+    const startedAt = timestamp();
+    const startedMs = Date.now();
+    let stale = 0;
+    const reads = this.reads(deadline);
+    for (;;) {
+      const { ref, waitedMs } = await this.resolveCounted(expression, reads);
+      // Read now, from the resolve's own cache: a dragTo's target resolve
+      // below supersedes this ref, and the node it named would be gone.
+      const node = this.options.recordEvent === undefined ? undefined : await this.session.read(ref, this.operationWithin(deadline)).catch(() => undefined);
+      const resolved = typeof action === 'function' ? await action(deadline, ref) : action;
+      const record = (status: StepEvent['status'], code?: string): void =>
+        this.recordAction({ node, kind: resolved.kind, startedAt, startedMs, waitedMs, stale, status, code });
+      if (deadline.expired()) {
+        const failure = lateAction(resolved.kind, describeExpression(expression));
+        record('failed', failure.code);
+        throw failure;
+      }
+      try {
+        await this.session.perform(ref, resolved, this.operationWithin(deadline));
+      } catch (cause) {
+        const engineError = asEngineError(cause);
+        if (
+          engineError?.code === 'NODE_STALE' &&
+          engineError.retryable &&
+          !deadline.expired()
+        ) {
+          stale += 1;
+          continue;
+        }
+        const failure = translateLocatorError(cause, expression);
+        record(this.signal.aborted ? 'cancelled' : 'failed', failure.code);
+        throw failure;
+      }
+      record('passed');
+      return;
+    }
+  }
+
+  /**
+   * Records one performed action as an `engine` event: the node it landed
+   * on as the resolve read it (no engine call), how long the node took to
+   * appear, and how many times it went stale under the action. A node the
+   * read could not answer leaves the event without a target.
+   */
+  private recordAction(action: {
+    readonly node: SemanticNode | undefined;
+    readonly kind: string;
+    readonly startedAt: string;
+    readonly startedMs: number;
+    readonly waitedMs: number;
+    readonly stale: number;
+    readonly status: StepEvent['status'];
+    readonly code: string | undefined;
+  }): void {
+    if (this.options.recordEvent === undefined) return;
+    const notes = [
+      ...(action.waitedMs > 0 ? [`appeared after ${action.waitedMs}ms`] : []),
+      ...(action.stale > 0 ? [`went stale ${action.stale}x`] : []),
+    ];
+    const target = action.node === undefined ? undefined : describeNode(action.node, (text) => this.redact(text));
+    const detail = [action.kind, target, notes.length === 0 ? undefined : `(${notes.join(', ')})`].filter((part) => part !== undefined).join(' ');
+    this.recordEvent({
+      kind: 'engine',
+      name: action.kind,
+      startedAt: action.startedAt,
+      durationMs: Date.now() - action.startedMs,
+      status: action.status,
+      ...(action.code === undefined ? {} : { code: action.code }),
+      detail,
+    });
+  }
+}
+
+/** A located node as a report line names it, `button "Add"`, each label redacted before it is bounded. */
+function describeNode(node: SemanticNode, redact: (text: string) => string): string {
+  const field = (value: string | undefined): string | undefined => {
+    const text = value === undefined ? '' : redact(value.replace(/\s+/g, ' ').trim());
+    return text === '' ? undefined : text;
+  };
+  return targetLabel(obj({
+    role: node.role,
+    name: field(node.name),
+    text: field(node.text),
+    placeholder: field(node.attributes?.['placeholder']),
+    testId: field(node.testId),
+  }));
+}
+
+/**
+ * The facts of a locator failure the report keeps beside the message: the
+ * locator as written, what it asked for, and how long it actually waited, in ms.
+ */
+export function locatorDetails(expression: LocatorExpression, waitedMs?: number): ErrorDetails {
+  return {
+    locator: describeExpression(expression),
+    ...expressionHints(expression),
+    ...(waitedMs === undefined ? {} : { waitedMs }),
+  };
+}
+
+/**
+ * The failure of an action whose deadline passed before it was sent. A read
+ * may finish past its deadline so its result is classed right; an action
+ * never starts past it.
+ */
+function lateAction(kind: string, target: string): TestError {
+  return new TestError('ACTION_FAILED', `operation timed out before the ${kind} was sent: ${target}`);
+}
+
+/** Translates an engine error into the runner-owned public taxonomy. */
+export function translateLocatorError(cause: unknown, expression?: LocatorExpression): E2EError {
+  const suffix = expression === undefined ? '' : `: ${describeExpression(expression)}`;
+  return translateEngineError(cause, suffix);
+}

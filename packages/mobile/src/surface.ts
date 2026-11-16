@@ -45,7 +45,7 @@ import {
   type ViewportSize,
   ConfigurationError,
   TestError,
-} from 'e2e/engine';
+} from '@e2e-dev/core/engine';
 import { isAppNotRunning, isSnapshotPresentationFailure, isUnreadableCapture, runCommand, staleOr } from './errors.ts';
 import { pointerInteraction, DEFAULT_LONG_PRESS_MS } from './actions.ts';
 import { resolveExpression } from './locate.ts';
@@ -938,7 +938,7 @@ export class AgentDeviceSurface {
    * no identity, and the package that took the link as its bundle id when
    * the OS told it; the next snapshot names the foreground app either way.
    */
-  async openLink(url: URL, app: string | undefined, signal: AbortSignal): Promise<void> {
+  async openLink(url: URL, app: string | undefined, signal: AbortSignal, input?: InputBudget): Promise<void> {
     const target = app ?? this.pinnedApp;
     if (target === undefined && this.options.platform === 'ios') {
       throw new TestError(
@@ -948,11 +948,14 @@ export class AgentDeviceSurface {
     }
     const result = await this.command(
       'device.openLink',
-      (client) =>
-        client.apps.open({
+      (client) => {
+        const open = () => client.apps.open({
           ...this.selection(),
           ...(target === undefined ? { app: url.href } : { app: target, url: url.href }),
-        }),
+        });
+        // An `app.open(path)` is an input like a tap: past its budget the link may have opened, so it is never repeated.
+        return input === undefined ? open() : input.send(open);
+      },
       signal,
     );
     this.launched(result.appBundleId ?? (target === undefined ? undefined : (result.appName ?? target)));

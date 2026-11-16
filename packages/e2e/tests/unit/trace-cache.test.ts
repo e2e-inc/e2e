@@ -1,7 +1,7 @@
 /** trace-1 entry format and the replay decision. */
 
 import { describe, expect, it } from 'vitest';
-import { decideTraceReplay } from '../../src/cache/decide.ts';
+import { decideTraceReplay } from '@e2e-dev/core/lib/cache/decide';
 import {
   buildTraceEntry,
   MAX_TRACE_ACTIONS,
@@ -10,8 +10,8 @@ import {
   type ActionTrace,
   type RecordedAction,
   type TraceEntry,
-} from '../../src/cache/trace.ts';
-import { readTraceEntry } from '../../src/cache/trace-read.ts';
+} from '@e2e-dev/core/lib/cache/trace';
+import { readTraceEntry } from '@e2e-dev/core/lib/cache/trace-read';
 
 const tap: RecordedAction = {
   name: 'tap',
@@ -84,6 +84,15 @@ describe('trace-1 entry', () => {
     const actions: RecordedAction[] = [
       { name: 'type', summary: 'clear textbox', target, value: '' },
       { name: 'typeText', summary: 'clear the focused field', value: '', replace: true },
+    ];
+    expect(entryOf(trace({ actions })).payload.actions).toEqual(actions);
+  });
+
+  it('round-trips a space press: a single character is a key, whitespace included', () => {
+    const target = { role: 'checkbox', name: 'Remember me' };
+    const actions: RecordedAction[] = [
+      { name: 'press', summary: 'press " "', target, key: ' ' },
+      { name: 'pressKey', summary: 'press " " in the focused field', key: ' ' },
     ];
     expect(entryOf(trace({ actions })).payload.actions).toEqual(actions);
   });
