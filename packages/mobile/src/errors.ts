@@ -95,24 +95,24 @@ const STALE_REF_REASONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The `details.reason` values agent-device refuses an action with when
- * something else is drawn where the touch would land: an overlay its
- * occlusion scan found over the target (`coveredBy` names it), or the soft
- * keyboard over the target's touch point. Nothing was sent, and the app is
- * fine; the test has to move the cover or the target first.
+ * The `details.reason` values agent-device refuses an action with, nothing
+ * sent, on a healthy device, each with the hint the failure carries:
+ * `undefined` keeps agent-device's own, and a string replaces it.
+ *
+ * - `target_covered`, `tap_keyboard_occludes_target`: an overlay its
+ *   occlusion scan found over the target (`coveredBy` names it), or the soft
+ *   keyboard over the target's touch point. The test has to move the cover
+ *   or the target first, and agent-device's hint says how.
+ * - `window-origin-unknown` (0.21.37): the capture the ref came from could not
+ *   place its window on the screen. agent-device's hint names its CLI
+ *   (`snapshot`, `screenshot`); a point tap is not aimed from the capture, and
+ *   agent-device takes it.
  */
-const OCCLUDED_REASONS: ReadonlySet<string> = new Set(['target_covered', 'tap_keyboard_occludes_target']);
-
-/**
- * The `details.reason` agent-device 0.21.37 refuses a ref action with when the
- * capture the ref came from could not place its window on the screen. Nothing
- * was sent, and the runner is healthy. agent-device's own hint names its CLI
- * (`snapshot`, `screenshot`), so the failure carries the test's move instead:
- * for a tap, a point tap is not aimed from the capture, and agent-device
- * takes it. Other actions have no point form, so the hint stays on the tap.
- */
-const NO_SCREEN_ORIGIN_REASON = 'window-origin-unknown';
-const NO_SCREEN_ORIGIN_HINT = 'Nothing was sent. For a tap, tap the point instead with screen.tapAt().';
+const NOT_ACTIONABLE_REASONS: ReadonlyMap<string, string | undefined> = new Map([
+  ['target_covered', undefined],
+  ['tap_keyboard_occludes_target', undefined],
+  ['window-origin-unknown', 'Nothing was sent. For a tap, tap the point instead with screen.tapAt().'],
+]);
 
 /**
  * What the iOS automation runner reported about itself, by the code
@@ -307,10 +307,9 @@ export async function runCommand<T>(label: string, work: () => Promise<T>, signa
  * stale-ref reasons are sufficient on their own: Android dialog recovery can
  * mark a refused drag as `dispatched: unknown`. A `target_still_moving` refusal
  * additionally requires `dispatched: no`; missing or unknown dispatch is not retryable.
- * A target agent-device refused as covered (`OCCLUDED_REASONS`) or as having
- * no screen origin (`NO_SCREEN_ORIGIN_REASON`) with nothing dispatched is
- * `NOT_ACTIONABLE`, with the move that gets past it: an action failure on a
- * healthy device, never an infrastructure one.
+ * A target agent-device refused for a reason in `NOT_ACTIONABLE_REASONS` with
+ * nothing dispatched is `NOT_ACTIONABLE`, with the move that gets past it: an
+ * action failure on a healthy device, never an infrastructure one.
  */
 export function staleOr(cause: unknown, operation: string, where?: string): Error {
   if (isClassified(cause)) return cause;
@@ -319,11 +318,10 @@ export function staleOr(cause: unknown, operation: string, where?: string): Erro
       (reason === 'target_still_moving' && dispatched === 'no')) {
     return new EngineError('NODE_STALE', `${operation}: ${message(cause)}`, { retryable: true, cause });
   }
-  if (typeof reason === 'string' && OCCLUDED_REASONS.has(reason) && dispatched === 'no') {
-    return new EngineError('NOT_ACTIONABLE', `${operation} failed: ${withHint(cause, message(cause))}`, { retryable: false, cause });
-  }
-  if (reason === NO_SCREEN_ORIGIN_REASON && dispatched === 'no') {
-    return new EngineError('NOT_ACTIONABLE', `${operation} failed: ${message(cause)} Hint: ${NO_SCREEN_ORIGIN_HINT}`, { retryable: false, cause });
+  if (typeof reason === 'string' && NOT_ACTIONABLE_REASONS.has(reason) && dispatched === 'no') {
+    const hint = NOT_ACTIONABLE_REASONS.get(reason);
+    const text = hint === undefined ? withHint(cause, message(cause)) : `${message(cause)} Hint: ${hint}`;
+    return new EngineError('NOT_ACTIONABLE', `${operation} failed: ${text}`, { retryable: false, cause });
   }
   return translateError(cause, operation, where);
 }

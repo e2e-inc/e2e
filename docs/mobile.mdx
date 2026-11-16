@@ -808,10 +808,6 @@ export function cloudDevices(options: { provider: string; device: string; osVers
   nodes, and a tap on one fails with `ACTION_FAILED`. Call
   `device.dismissKeyboard()` or scroll the node clear first. See
   [Visibility](/reference/mobile#visibility).
-- On iOS, an action on a node can fail with `ACTION_FAILED` and `has no
-  established screen-coordinate origin` on a heavy screen, such as right after
-  a large web view loads. Nothing was sent. For a tap, tap the point with
-  `screen.tapAt()` instead.
 - `doubleTap()` and `screen.doubleTapAt()` on iOS are two taps about 285 to
   335 ms apart. Give a double-tap detector a window of 350 ms or more.
 - On iOS, `device.foregroundApp()` still names the session's app after
