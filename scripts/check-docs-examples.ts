@@ -25,7 +25,7 @@ import { unmappedExamples } from './docs-examples.ts';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 /** Example file to the page that shows it verbatim. */
 const EXAMPLES: Record<string, string> = {
-  'docs/examples/vercel/e2e.config.ts': 'docs/ci/vercel.mdx',
+  'docs/examples/vercel/e2e.config.ts': 'docs/ci/vercel-previews.mdx',
   'docs/examples/browser-run/e2e.config.ts': 'docs/integrations/browser-run.mdx',
   'docs/examples/runner/run.ts': 'docs/reference/runner.mdx',
   'docs/examples/core/prices.ts': 'docs/core.mdx',
