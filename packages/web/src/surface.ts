@@ -919,9 +919,9 @@ export class PlaywrightSurface {
         const handle = await element.evaluateHandle(evaluate, input);
         return await handle.jsonValue();
       } catch (cause) {
-        // A page that broke a built-in breaks ownerFrame too, so the page stands in for the frame.
-        const scope = (await element.ownerFrame().catch(() => null)) ?? this.requirePage();
-        throw (await pageScriptFailure(scope, cause, 'evaluateOn', currentOperation.timeoutMs)) ?? cause;
+        const page = this.requirePage();
+        const failure = await pageScriptFailure(page, cause, 'evaluateOn', currentOperation.timeoutMs);
+        throw failure ?? cause;
       } finally {
         if (target.kind === 'locator') void element.dispose().catch(() => undefined);
       }

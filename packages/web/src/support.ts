@@ -1,7 +1,7 @@
 /** Shared error translation, filename, and swipe helpers for the Playwright engine. */
 
 import { setTimeout } from 'node:timers/promises';
-import type { ElementHandle, Frame, FrameLocator, Locator as PwLocator, Mouse, Page } from 'playwright-core';
+import type { ElementHandle, FrameLocator, Locator as PwLocator, Mouse, Page } from 'playwright-core';
 import { EngineError, withinCleanupBudget, type EngineCleanupContext, type Momentum, type ScrollDirection, type ViewportPoint, type ViewportSize } from '@e2e-dev/core/engine';
 import { ConfigurationError, InfrastructureError, TestError } from '@e2e-dev/core/engine';
 
@@ -381,7 +381,7 @@ export function isNavigationRace(cause: unknown): boolean {
  * cause.
  */
 export async function pageScriptFailure(
-  scope: Page | Frame | FrameLocator,
+  scope: Page | FrameLocator,
   cause: unknown,
   operation: string,
   timeoutMs: number,
