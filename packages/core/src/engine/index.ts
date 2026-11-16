@@ -245,6 +245,20 @@ export interface EngineFixtureContext {
   /** Mints a screen scope whose every query is wrapped by `scope` (a nested document, say). */
   screen(scope: (expression: LocatorExpression) => LocatorExpression): Screen;
   /**
+   * Resolves the one node `locator` matches, with its scope, strictness, and
+   * frame, waiting for it like a locator read (the action timeout, or
+   * `timeout`), then calls `use` with its ref and the budget that read has
+   * left. Zero matches by the deadline is `LOCATOR_NOT_FOUND`, two or more
+   * `LOCATOR_AMBIGUOUS` at once. A retryable `NODE_STALE` from `use`
+   * re-resolves while the deadline remains. A locator from another screen
+   * or attempt is `INVALID_LOCATOR`.
+   */
+  withNode<T>(
+    locator: Locator,
+    use: (ref: NodeRef, operation: OperationContext) => Promise<T>,
+    options?: { timeout?: number },
+  ): Promise<T>;
+  /**
    * Attaches an expectation surface to a fixture object so `expect(fixture)`
    * returns it. The harness records every matcher call as an assertion step
    * named `expect.<matcher>`; the factory only decides what the matchers mean.

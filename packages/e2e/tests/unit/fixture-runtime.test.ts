@@ -12,7 +12,8 @@ import { StepRecorder } from '@e2e-dev/core/lib/run/steps';
 import { WorkerModels } from '@e2e-dev/core/lib/run/worker-models';
 import type { StepExecutor } from '@e2e-dev/core/lib/agent/executor';
 import { defineTool, getToolContext } from '@e2e-dev/core/lib/agent/tool';
-import type { TargetApp } from '@e2e-dev/core/lib/types';
+import type { Locator, TargetApp } from '@e2e-dev/core/lib/types';
+import type { NodeRef, OperationContext } from '@e2e-dev/core/lib/engine/surface';
 import type { E2EConfig } from '../../src/run-types.ts';
 import { installFakeLoopModel } from '../helpers/fake-loop-model.ts';
 import { extracted, fakeCalls, installFakeModel, judgment, notFound } from '../helpers/fake-model.ts';
@@ -340,6 +341,68 @@ describe('explicit fixture operations', () => {
     expect(() => surfaces.widget).toThrow(
       expect.objectContaining({ code: 'INVALID_CONFIG', message: expect.stringContaining('declared as "gadget"') }),
     );
+  });
+});
+
+describe('context.withNode', () => {
+  type Use = (ref: NodeRef, operation: OperationContext) => Promise<string>;
+  type Probe = { run(locator: unknown, use: Use, timeout?: number): Promise<string> };
+
+  /** A fixture that hands `use` the node a locator matches; `matches` is what each locate answers. */
+  function probeRuntime(matches: () => readonly string[]) {
+    const engine = defineEngine({
+      name: 'fake', version: '1', spiVersion: 1,
+      observe: async () => snapshot([]),
+      locate: async () => matches().map((id) => ({ ref: { id, revision: '' }, role: 'navigation' })),
+      fixtures: {
+        probe: (context) => context.fixture('probe', {
+          run: (locator: Locator, use: Use, timeout?: number) =>
+            context.withNode(locator, use, timeout === undefined ? undefined : { timeout }),
+        }, { run: { kind: 'resource', timeout: false } }),
+      },
+    });
+    const { fixtures } = runtime(engine);
+    return { screen: fixtures.screen, probe: (fixtures as unknown as { probe: Probe }).probe };
+  }
+
+  it('hands use the ref of the one match, and resolves again when use reports it stale', async () => {
+    let generation = 1;
+    const { screen, probe } = probeRuntime(() => [`nav-${generation}`]);
+    const seen: string[] = [];
+    const value = await probe.run(screen.getByRole('navigation'), async (ref) => {
+      seen.push(ref.id);
+      if (ref.id === 'nav-1') {
+        generation = 2;
+        throw new EngineError('NODE_STALE', 'replaced', { retryable: true });
+      }
+      return ref.id;
+    });
+    expect(value).toBe('nav-2');
+    expect(seen).toEqual(['nav-1', 'nav-2']);
+  });
+
+  it('waits for a match that appears later', async () => {
+    const appearsAt = Date.now() + 150;
+    const { screen, probe } = probeRuntime(() => (Date.now() < appearsAt ? [] : ['late']));
+    await expect(probe.run(screen.getByRole('navigation'), async (ref) => ref.id, 2_000)).resolves.toBe('late');
+  });
+
+  it('fails no match by the timeout as LOCATOR_NOT_FOUND and two at once as LOCATOR_AMBIGUOUS, without calling use', async () => {
+    const use = vi.fn(async () => 'never');
+    const none = probeRuntime(() => []);
+    await expect(none.probe.run(none.screen.getByRole('navigation'), use, 100)).rejects.toMatchObject({ code: 'LOCATOR_NOT_FOUND' });
+    const two = probeRuntime(() => ['a', 'b']);
+    await expect(two.probe.run(two.screen.getByRole('navigation'), use, 5_000)).rejects.toMatchObject({ code: 'LOCATOR_AMBIGUOUS' });
+    expect(use).not.toHaveBeenCalled();
+  });
+
+  it('refuses a value that is not an e2e locator, and a locator from another attempt, with INVALID_LOCATOR', async () => {
+    const use = vi.fn(async () => 'never');
+    const { probe } = probeRuntime(() => ['nav']);
+    const other = probeRuntime(() => ['nav']);
+    await expect(probe.run({ selector: 'nav' }, use)).rejects.toMatchObject({ code: 'INVALID_LOCATOR' });
+    await expect(probe.run(other.screen.getByRole('navigation'), use)).rejects.toMatchObject({ code: 'INVALID_LOCATOR' });
+    expect(use).not.toHaveBeenCalled();
   });
 });
 

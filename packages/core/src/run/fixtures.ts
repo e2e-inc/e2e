@@ -26,6 +26,7 @@ import {
   createLocator,
   createScopedScreen,
   createScreen,
+  ownLocator,
   type ScreenContext,
   type SecretResolver,
 } from '../locator/screen.ts';
@@ -382,6 +383,8 @@ function fixtureContext(
     attachViewport: (viewport) => steps.attachViewport(viewport),
     locator: (expression) => createLocator(screenContext, expression),
     screen: (wrap) => createScopedScreen(screenContext, wrap),
+    withNode: (locator, use, options) =>
+      engine.withOne(ownLocator(locator, screenContext, 'this call').expression, use, engine.deadline(options?.timeout)),
     expectable<T extends object, E extends object>(target: T, factory: () => E): T & Expectable<E> {
       let surface: E | undefined;
       Object.defineProperty(target, expectationBrand, {
