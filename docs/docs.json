@@ -230,10 +230,6 @@
   },
   "redirects": [
     {
-      "source": "/ci/vercel",
-      "destination": "/ci/vercel-previews"
-    },
-    {
       "source": "/acp",
       "destination": "/subscriptions#use-your-coding-agent"
     },
