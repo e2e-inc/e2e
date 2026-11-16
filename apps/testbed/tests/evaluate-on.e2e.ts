@@ -71,6 +71,14 @@ test.describe('browser.evaluateOn', { requires: ['browser'] }, () => {
     expect(await browser.evaluateOn(screen.getByLabel('Name'), (el) => (el as HTMLInputElement).value)).toBe('Ada');
   });
 
+  test('refuses a result that is not JSON, naming evaluateOn', async ({ browser, screen }) => {
+    await browser.goto(page);
+    const main = screen.getByRole('navigation', { name: 'Main' });
+    const error = await failure(() => browser.evaluateOn(main, 'el => el'));
+    expect(error).toHaveProperty('code', 'INVALID_ARGUMENT');
+    expect(error).toHaveProperty('message', expect.stringMatching(/^evaluateOn result must be JSON-safe/));
+  });
+
   test('refuses an argument that is not JSON', async ({ browser }) => {
     await browser.goto(page);
     const error = await failure(() => browser.evaluateOn(browser.locator('#late'), (el) => el.id, new Map() as never));

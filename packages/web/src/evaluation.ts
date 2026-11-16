@@ -57,7 +57,10 @@ type EvaluationReport =
   | { ok: false; invalid: string }
   | { ok: false; detached: true };
 
-/** Thrown by a `pageValueEncoder` encoder for a value that is not JSON; the reason completes `evaluate result ...`. */
+/**
+ * Thrown by a `pageValueEncoder` encoder for a value that is not JSON; the
+ * reason completes `evaluate result ...` or `evaluateOn result ...`.
+ */
 interface InvalidPageValue {
   readonly invalid: string;
 }
@@ -205,13 +208,19 @@ export function readEvaluation(text: string): EvaluationResult {
   throw new TestError('EVALUATE_FAILED', report.message);
 }
 
-/** The JSON value of a finished evaluation; a result that is not JSON is `INVALID_ARGUMENT`. */
-export function evaluationValue(result: EvaluationResult): JsonValue | undefined {
-  if (!result.ok) throw new TestError('INVALID_ARGUMENT', `evaluate result ${result.invalid}`);
+/**
+ * The JSON value of a finished evaluation. A result that is not JSON is
+ * `INVALID_ARGUMENT`, its message opening with `api` (`evaluateOn result ...`).
+ */
+export function evaluationValue(
+  result: EvaluationResult,
+  api: 'evaluate' | 'evaluateOn',
+): JsonValue | undefined {
+  if (!result.ok) throw new TestError('INVALID_ARGUMENT', `${api} result ${result.invalid}`);
   return result.value;
 }
 
 /** `readEvaluation` for `browser.evaluate`: the value, or what made it fail. */
 export function decodeEvaluation(text: string): JsonValue | undefined {
-  return evaluationValue(readEvaluation(text));
+  return evaluationValue(readEvaluation(text), 'evaluate');
 }

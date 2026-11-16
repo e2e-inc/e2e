@@ -711,7 +711,8 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     ): Promise<T> {
       const source = typeof fn === 'string' ? fn : pageFunctionSource(fn);
       validateJsonValue(arg, 'evaluateOn argument');
-      return evaluationValue(await evaluateOn('browser.evaluateOn', target, source, arg)) as T;
+      const result = await evaluateOn('browser.evaluateOn', target, source, arg);
+      return evaluationValue(result, 'evaluateOn') as T;
     },
     async addInitScript(script: unknown, ...rest: unknown[]) {
       const source = await testInitScriptSource(script, rest.length === 0 ? undefined : { arg: rest[0] }, (file) => surface.projectPath(file));
