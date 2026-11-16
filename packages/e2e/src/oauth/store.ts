@@ -8,23 +8,10 @@
  * machine the user cannot sign in on; that store refuses to write.
  */
 
-import { randomUUID } from 'node:crypto';
-import {
-  chmodSync,
-  closeSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  readlinkSync,
-  renameSync,
-  rmSync,
-  statSync,
-  utimesSync,
-  writeFileSync,
-  writeSync,
-} from 'node:fs';
-import { homedir, hostname } from 'node:os';
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import path from 'node:path';
+import { withFileLock } from '../internal/file-lock.ts';
 import { OAuthError } from './errors.ts';
 import type { CredentialStore, OAuthCredentials } from './types.ts';
 
@@ -45,9 +32,6 @@ export function defaultCredentialStore(env: NodeJS.ProcessEnv = process.env): Cr
   return fromEnv !== undefined && fromEnv !== '' ? new EnvCredentialStore(fromEnv) : new FileCredentialStore(defaultCredentialsPath(env));
 }
 
-const LOCK_RETRY_MS = 25;
-/** How long a lock may go untouched before waiters take it over, whoever it names. */
-const LOCK_STALE_MS = 10_000;
 const LOCK_WAIT_MS = 5_000;
 /** A token request has no deadline of its own, so a waiter gives up on its own. */
 const REFRESH_LOCK_WAIT_MS = 30_000;
@@ -79,17 +63,11 @@ export class FileCredentialStore implements CredentialStore {
   }
 
   async exclusive<T>(providerId: string, refresh: () => Promise<T>): Promise<T> {
-    const lockPath = `${this.path}.${providerId}.refresh.lock`;
-    const release = await this.lock(lockPath, REFRESH_LOCK_WAIT_MS, () => {
+    return withFileLock(`${this.path}.${providerId}.refresh.lock`, REFRESH_LOCK_WAIT_MS, () => {
       const waited = `${REFRESH_LOCK_WAIT_MS / 1000} s`;
       const message = `another e2e process is still refreshing the ${providerId} login after ${waited}`;
       return new OAuthError('TIMEOUT', `${message}; run again once it finishes`);
-    });
-    try {
-      return await refresh();
-    } finally {
-      release();
-    }
+    }, refresh);
   }
 
   private read(): CredentialsFile {
@@ -110,10 +88,8 @@ export class FileCredentialStore implements CredentialStore {
     // Creation modes only apply to new paths; a directory or file that already existed keeps what it had unless told otherwise.
     chmodSync(dir, 0o700);
     const lockPath = `${this.path}.lock`;
-    const release = await this.lock(lockPath, LOCK_WAIT_MS, () => {
-      return new Error(`${lockPath} is held by another process; remove it if that process is gone`);
-    });
-    try {
+    const busy = () => new Error(`${lockPath} is held by another process; remove it if that process is gone`);
+    await withFileLock(lockPath, LOCK_WAIT_MS, busy, async () => {
       const temp = `${this.path}.${process.pid}.${Date.now()}.tmp`;
       writeFileSync(temp, `${JSON.stringify(change(this.read()), null, 2)}\n`, { mode: 0o600 });
       chmodSync(temp, 0o600);
@@ -123,141 +99,7 @@ export class FileCredentialStore implements CredentialStore {
         rmSync(temp, { force: true });
         throw cause;
       }
-    } finally {
-      release();
-    }
-  }
-
-  /**
-   * An advisory lock file created exclusively. It names its holder
-   * (`lockToken`), and the holder touches it while it holds it, so waiters take
-   * it over at once when the holder has exited and otherwise only once it has
-   * gone untouched for the stale bound. The holder touches and releases only
-   * its own lock.
-   */
-  private async lock(lockPath: string, waitMs: number, busy: () => Error): Promise<() => void> {
-    const token = lockToken();
-    const deadline = Date.now() + waitMs;
-    for (;;) {
-      if (claim(lockPath, token)) {
-        const heartbeat = setInterval(() => {
-          if (readLock(lockPath) === token) touch(lockPath);
-        }, LOCK_STALE_MS / 4);
-        return () => {
-          clearInterval(heartbeat);
-          if (readLock(lockPath) === token) rmSync(lockPath, { force: true });
-        };
-      }
-      if (Date.now() > deadline) throw busy();
-      if (abandoned(lockPath) && breakAbandoned(lockPath)) continue;
-      await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
-    }
-  }
-}
-
-/** Creates `lockPath` holding `token`, false when it exists; a lock whose write failed is removed. */
-function claim(lockPath: string, token: string): boolean {
-  let fd: number;
-  try {
-    fd = openSync(lockPath, 'wx', 0o600);
-  } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === 'EEXIST') return false;
-    throw cause;
-  }
-  try {
-    writeSync(fd, token);
-  } catch (cause) {
-    rmSync(lockPath, { force: true });
-    throw cause;
-  } finally {
-    closeSync(fd);
-  }
-  return true;
-}
-
-/**
- * This host and, where the system has them, its pid namespace, since a
- * sandbox on the same host sees none of the pids outside it.
- */
-function holderHost(): string {
-  try {
-    return `${hostname()}/${readlinkSync('/proc/self/ns/pid')}`;
-  } catch {
-    return hostname();
-  }
-}
-
-/** This process on this host, and a random part no other holder shares. */
-function lockToken(): string {
-  return `${holderHost()} ${process.pid} ${randomUUID()}`;
-}
-
-/** Marks the lock as held now. */
-function touch(lockPath: string): void {
-  const now = new Date();
-  try {
-    utimesSync(lockPath, now, now);
-  } catch {
-    // Released meanwhile.
-  }
-}
-
-/** The lock's holder token, undefined when there is no lock. */
-function readLock(lockPath: string): string | undefined {
-  try {
-    return readFileSync(lockPath, 'utf8');
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * True when the lock's holder on this host and pid namespace has exited, or
- * the lock has gone untouched for the stale bound. The bound covers what the
- * pid cannot tell: a lock from another host, sandbox, or older e2e, a pid
- * another program now has, and a holder suspended that long, which then
- * loses its lock.
- */
-function abandoned(lockPath: string): boolean {
-  const [host, pid] = (readLock(lockPath) ?? '').split(' ');
-  if (host === holderHost() && pid !== undefined && /^\d+$/.test(pid) && !running(Number(pid))) return true;
-  try {
-    return Date.now() - statSync(lockPath).mtimeMs > LOCK_STALE_MS;
-  } catch {
-    return false;
-  }
-}
-
-/** True while `pid` exists, whoever owns it. */
-function running(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (cause) {
-    // EPERM: the process exists but belongs to another user.
-    return (cause as NodeJS.ErrnoException).code === 'EPERM';
-  }
-}
-
-/**
- * Removes an abandoned lock, false when another waiter is removing it.
- * Waiters take turns through a second lock file and check the holder again
- * while they hold it, so a lock created after the first check is never
- * removed. A waiter that exits inside its turn, which lasts microseconds,
- * leaves that file for the next waiter to take over; two waiters doing so at
- * the same moment can still both remove.
- */
-function breakAbandoned(lockPath: string): boolean {
-  const breaker = `${lockPath}.break`;
-  if (!claim(breaker, lockToken())) {
-    if (abandoned(breaker)) rmSync(breaker, { force: true });
-    return false;
-  }
-  try {
-    if (abandoned(lockPath)) rmSync(lockPath, { force: true });
-    return true;
-  } finally {
-    rmSync(breaker, { force: true });
+    });
   }
 }
 
