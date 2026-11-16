@@ -1031,7 +1031,7 @@ function describeExpectedUrl(expected: string | RegExp, baseHref: string): strin
 interface BrowserSample {
   readonly matches: boolean | undefined;
   readonly observed: string;
-  /** The poll's deadline ended the read before it finished, so it saw nothing new. */
+  /** The poll's deadline ended the read before it saw anything. */
   readonly cutOff?: true;
 }
 
@@ -1057,8 +1057,11 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
       negated,
       evaluate: async () => {
         const sample = await read(deadline);
-        // A cut-off read saw nothing, so the failure reports the last read that finished.
-        if (sample.cutOff !== true || last === undefined) last = sample;
+        // A read the deadline cut off saw nothing new, so the poll counts the
+        // last finished read again: a negation that held still holds, and the
+        // failure reports what was last seen.
+        if (sample.cutOff === true && last !== undefined) return last.matches;
+        last = sample;
         return sample.matches;
       },
       onTimeout: (cause) =>

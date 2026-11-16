@@ -9,6 +9,14 @@ const slow = content(`<html><p id="slow">Slow</p><script>
   });
 </script></html>`);
 
+/** A page whose `#stalls` element answers `sample` with 0 twice, then only after a 600 ms busy wait. */
+const stalls = content(`<html><p id="stalls">Stalls</p><script>
+  let reads = 0;
+  Object.defineProperty(document.getElementById('stalls'), 'sample', {
+    get() { reads += 1; if (reads > 2) { const start = Date.now(); while (Date.now() - start < 600); } return 0; },
+  });
+</script></html>`);
+
 const page = content(`<html>
   <nav aria-label="Breadcrumbs" style="position: static">a / b</nav>
   <nav aria-label="Main" data-x="1" style="position: sticky; top: 0; --accent: red">Home</nav>
@@ -124,6 +132,11 @@ test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () 
     await browser.goto(slow);
     const error = await failure(() => expect(browser).toHaveJSProperty(browser.locator('#slow'), 'slow', 1, { timeout: 200 }));
     expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
+  });
+
+  test('keeps a negation that held when the timeout cuts off its last read', async ({ browser }) => {
+    await browser.goto(stalls);
+    await expect(browser).not.toHaveJSProperty(browser.locator('#stalls'), 'sample', 1, { timeout: 330 });
   });
 
   test('reports a route failure the poll ran into, instead of reading it as a value that is not JSON', async ({ browser }) => {
