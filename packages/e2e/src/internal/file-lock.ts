@@ -19,7 +19,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { hostname } from 'node:os';
-import { sleep } from './time.ts';
+import { sleep } from '@e2e-dev/core/lib/internal/time';
 
 const LOCK_RETRY_MS = 25;
 /** How long a lock may go untouched before waiters take it over, whoever it names. */
