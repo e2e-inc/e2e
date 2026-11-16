@@ -971,6 +971,35 @@
       }
     },
     {
+      "slug": "vercel",
+      "title": "Testing Vercel deployments with e2e",
+      "shortTitle": "Vercel",
+      "description": "A Next.js app tested against every Vercel preview and production deployment, with a Deployment Check that holds back a failing production deployment.",
+      "icon": "vercel.svg",
+      "invertIcon": true,
+      "source": "official",
+      "repository": "https://github.com/e2e-inc/e2e-vercel",
+      "author": {
+        "name": "e2e",
+        "github": "e2e-inc"
+      },
+      "license": "MIT",
+      "licenseUrl": "https://github.com/e2e-inc/e2e-vercel/blob/main/LICENSE",
+      "tags": {
+        "framework": [
+          "nextjs",
+          "react"
+        ],
+        "useCase": [
+          "preview-deployments",
+          "ci"
+        ],
+        "platform": [
+          "web"
+        ]
+      }
+    },
+    {
       "slug": "smolmachines",
       "title": "Testing in smol machines with e2e",
       "shortTitle": "smol machines",
