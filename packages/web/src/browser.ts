@@ -48,6 +48,7 @@ import { MEDIA_KEYS, mediaLabel, mediaProblem, type WebMedia } from './media.ts'
 import { lowercaseNames } from './protected-app.ts';
 import { parseContinue, parseFulfill, requireNoArguments } from './route-options.ts';
 import { routePatternMatches, routePatternsEqual } from './route-pattern.ts';
+import { jsonEqual } from './json-equal.ts';
 import type { PlaywrightSurface } from './surface.ts';
 
 /**
@@ -198,6 +199,19 @@ export interface BrowserExpectation {
   toHaveTitle(expected: TextMatch, options?: { timeout?: number }): Promise<void>;
   /** Waits for the target's `class` attribute to match: a string is the whole normalized class list, a RegExp is tested against it. */
   toHaveClass(target: Locator, expected: TextMatch, options?: { timeout?: number }): Promise<void>;
+  /**
+   * Waits for the target's computed `property` (kebab-case, a custom
+   * `--property` included) to match: a string is the whole value, a RegExp
+   * is tested against it.
+   */
+  toHaveCSS(target: Locator, property: string, expected: TextMatch, options?: { timeout?: number }): Promise<void>;
+  /**
+   * Waits for the JavaScript value at `path` on the target's element (a
+   * property name, or a dotted path such as `dataset.state`) to equal
+   * `expected` as JSON. A path that runs out before its end, or a value that
+   * is not JSON, never matches.
+   */
+  toHaveJSProperty(target: Locator, path: string, expected: JsonValue, options?: { timeout?: number }): Promise<void>;
 }
 
 /**
@@ -602,7 +616,15 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
   /** Page code run on the one node `target` matches, waiting for it up to `timeout` (the action timeout by default). */
   const evaluateOn = (target: Locator, source: string, arg: JsonValue | undefined, timeout?: number) =>
     context.withNode(target, (ref, operation) => surface.evaluateOn(ref, source, arg, operation), obj({ timeout }));
-  const expectation = createBrowserExpectation({ currentUrl, currentTitle, baseHref, deadlineFor, context });
+  const expectation = createBrowserExpectation({
+    currentUrl,
+    currentTitle,
+    // A matcher's wait for its node ends with the poll, never past it.
+    evaluateOn: (target, source, arg, deadline) => evaluateOn(target, source, arg, Math.max(1, deadline.remaining())),
+    baseHref,
+    deadlineFor,
+    context,
+  });
 
   const browser: Omit<Browser, keyof Expectable<BrowserExpectation>> = {
     goto(url, options) {
@@ -946,6 +968,8 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     toHaveURL: { kind: 'assertion', timeout: false, label: (expected) => String(expected) },
     toHaveTitle: { kind: 'assertion', timeout: false, label: (expected) => String(expected) },
     toHaveClass: { kind: 'assertion', timeout: false, label: (_target, expected) => String(expected) },
+    toHaveCSS: { kind: 'assertion', timeout: false, label: (_target, property, expected) => `${String(property)} ${String(expected)}` },
+    toHaveJSProperty: { kind: 'assertion', timeout: false, label: (_target, path, expected) => `${String(path)} ${JSON.stringify(expected)}` },
     get not() { return matchers; },
   };
   return context.fixture('browser', context.expectable(browser, () => context.fixture('expect', expectation, matchers)), {
@@ -982,6 +1006,8 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
 interface ExpectationDeps {
   currentUrl(deadline: Deadline): Promise<string>;
   currentTitle(deadline: Deadline): Promise<string>;
+  /** Page code run on the one node `target` matches, waiting for it no longer than `deadline`. */
+  evaluateOn(target: Locator, source: string, arg: JsonValue, deadline: Deadline): Promise<JsonValue | undefined>;
   baseHref(): string;
   deadlineFor(timeout: number | undefined, api: string): Deadline;
   readonly context: EngineFixtureContext;
@@ -1041,6 +1067,40 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
   };
   const validate = (api: string, options: object | undefined, keys: readonly string[] = ['timeout']): void =>
     rejectUnknownOptions(`expect.${negated ? 'not.' : ''}${api}`, options, keys);
+  /** The name a matcher's string argument is, refused unless it is a nonempty string. */
+  const requireName = (api: string, what: string, value: unknown): string => {
+    if (typeof value !== 'string' || value.length === 0) {
+      throw new TestError('INVALID_ARGUMENT', `expect.${negated ? 'not.' : ''}${api} ${what} must be a nonempty string`);
+    }
+    return value;
+  };
+  /**
+   * One sample of the value `source` reads off the one node `target`
+   * matches, observed as `subject` and its JSON. A node not there by the
+   * poll's deadline is `no node`, so one that never arrives fails the
+   * assertion; two or more matches fail at once. A value that is not JSON,
+   * or none, never matches.
+   */
+  const sampleOn = async (
+    target: Locator,
+    subject: string,
+    source: string,
+    arg: JsonValue,
+    deadline: Deadline,
+    matches: (value: JsonValue) => boolean,
+  ): Promise<BrowserSample> => {
+    let value: JsonValue | undefined;
+    try {
+      value = await deps.evaluateOn(target, source, arg, deadline);
+    } catch (error) {
+      if (isTestErrorCode(error, 'LOCATOR_NOT_FOUND')) return { matches: undefined, observed: 'no node' };
+      // How the evaluation boundary refuses a result that is not JSON.
+      if (isTestErrorCode(error, 'INVALID_ARGUMENT')) return { matches: false, observed: `${subject} is not JSON` };
+      throw error;
+    }
+    if (value === undefined) return { matches: false, observed: `${subject} is undefined` };
+    return { matches: matches(value), observed: `${subject} ${JSON.stringify(value)}` };
+  };
   return {
     get not() {
       return createBrowserExpectation(deps, !negated);
@@ -1104,8 +1164,49 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
         options?.timeout,
       );
     },
+    toHaveCSS(target, property, expected, options) {
+      validate('toHaveCSS', options);
+      const name = requireName('toHaveCSS', 'property', property);
+      const pattern = toTextPattern(expected, { exact: true });
+      return poll(
+        'toHaveCSS',
+        `css ${name} ${describePattern(pattern)}`,
+        (deadline) =>
+          sampleOn(target, `css ${name}`, COMPUTED_STYLE_SOURCE, name, deadline, (value) => typeof value === 'string' && matchesText(value, pattern)),
+        options?.timeout,
+      );
+    },
+    toHaveJSProperty(target, path, expected, options) {
+      validate('toHaveJSProperty', options);
+      const name = requireName('toHaveJSProperty', 'path', path);
+      if (expected === undefined) {
+        throw new TestError('INVALID_ARGUMENT', `expect.${negated ? 'not.' : ''}toHaveJSProperty expected value must be JSON, found undefined`);
+      }
+      validateJsonValue(expected, `expect.${negated ? 'not.' : ''}toHaveJSProperty expected value`);
+      return poll(
+        'toHaveJSProperty',
+        `property ${name} ${JSON.stringify(expected)}`,
+        (deadline) => sampleOn(target, `property ${name}`, PROPERTY_PATH_SOURCE, name, deadline, (value) => jsonEqual(value, expected)),
+        options?.timeout,
+      );
+    },
   };
 }
+
+/** Page code for `toHaveCSS`: one computed property of the element, as `getPropertyValue` reads it, so a custom `--property` works too. */
+const COMPUTED_STYLE_SOURCE = pageFunctionSource((element: Element, name: string) =>
+  element.ownerDocument.defaultView?.getComputedStyle(element).getPropertyValue(name) ?? '',
+);
+
+/** Page code for `toHaveJSProperty`: the value at a dotted path on the element, `undefined` once a step finds nothing to walk into. */
+const PROPERTY_PATH_SOURCE = pageFunctionSource((element: Element, path: string) => {
+  let value: unknown = element;
+  for (const name of path.split('.')) {
+    if (value === null || value === undefined) return undefined;
+    value = (value as Record<string, unknown>)[name];
+  }
+  return value;
+});
 
 /**
  * The class attribute of one match, `undefined` while nothing matches. A

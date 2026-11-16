@@ -52,3 +52,64 @@ test.describe('browser.evaluateOn', { requires: ['browser'] }, () => {
     expect(await browser.evaluateOn(browser.locator('#late'), (el) => el.textContent)).toBe('Late');
   });
 });
+
+test.describe('expect(browser).toHaveCSS', { requires: ['browser'] }, () => {
+  test('matches a computed value, a custom property, and its negation', async ({ browser, screen }) => {
+    await browser.goto(page);
+    const main = screen.getByRole('navigation', { name: 'Main' });
+    await expect(browser).toHaveCSS(main, 'position', 'sticky');
+    await expect(browser).toHaveCSS(main, '--accent', /red/);
+    await expect(browser).not.toHaveCSS(main, 'position', 'static');
+    await expect(browser).toHaveCSS(browser.frameLocator('iframe').locator('aside'), 'width', '240px');
+  });
+
+  test('waits for an element that appears later', async ({ browser }) => {
+    await browser.goto(page);
+    await expect(browser).toHaveCSS(browser.locator('#late'), 'display', 'block');
+  });
+
+  test('fails with the value it observed', async ({ browser, screen }) => {
+    await browser.goto(page);
+    const main = screen.getByRole('navigation', { name: 'Main' });
+    const error = await failure(() => expect(browser).toHaveCSS(main, 'position', 'fixed', { timeout: 300 }));
+    expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
+    expect(error).toHaveProperty('message', expect.stringContaining('observed: css position "sticky"'));
+  });
+
+  test('fails on an element that never appears, and on an ambiguous locator', async ({ browser }) => {
+    await browser.goto(page);
+    const missing = await failure(() => expect(browser).toHaveCSS(browser.locator('#missing'), 'position', 'static', { timeout: 300 }));
+    expect(missing).toHaveProperty('code', 'ASSERTION_FAILED');
+    expect(missing).toHaveProperty('message', expect.stringContaining('observed: no node'));
+    const ambiguous = await failure(() => expect(browser).toHaveCSS(browser.locator('nav'), 'position', 'static', { timeout: 300 }));
+    expect(ambiguous).toHaveProperty('code', 'LOCATOR_AMBIGUOUS');
+  });
+
+  test('refuses an empty property name', async ({ browser, screen }) => {
+    await browser.goto(page);
+    const error = await failure(() => expect(browser).toHaveCSS(screen.getByRole('navigation', { name: 'Main' }), '', 'sticky'));
+    expect(error).toHaveProperty('code', 'INVALID_ARGUMENT');
+  });
+});
+
+test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () => {
+  test('matches a dotted path and a number', async ({ browser, screen }) => {
+    await browser.goto(page);
+    const main = screen.getByRole('navigation', { name: 'Main' });
+    await expect(browser).toHaveJSProperty(main, 'dataset.x', '1');
+    await expect(browser).toHaveJSProperty(main, 'style.position', 'sticky');
+    await expect(browser).toHaveJSProperty(browser.frameLocator('iframe').locator('aside'), 'offsetWidth', 240);
+    await expect(browser).not.toHaveJSProperty(main, 'dataset.missing.deeper', '1');
+  });
+
+  test('fails with the value it observed, or that it is not JSON', async ({ browser, screen }) => {
+    await browser.goto(page);
+    const main = screen.getByRole('navigation', { name: 'Main' });
+    const wrong = await failure(() => expect(browser).toHaveJSProperty(main, 'dataset.x', 2, { timeout: 300 }));
+    expect(wrong).toHaveProperty('code', 'ASSERTION_FAILED');
+    expect(wrong).toHaveProperty('message', expect.stringContaining('observed: property dataset.x "1"'));
+    const opaque = await failure(() => expect(browser).toHaveJSProperty(main, 'style', 'sticky', { timeout: 300 }));
+    expect(opaque).toHaveProperty('code', 'ASSERTION_FAILED');
+    expect(opaque).toHaveProperty('message', expect.stringContaining('observed: property style is not JSON'));
+  });
+});
