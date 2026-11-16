@@ -401,6 +401,27 @@ describe('deltaMismatch', () => {
     expect(describeDelta(before, after, false)).toEqual({ appeared: [{ role: 'status', text: 'Task created' }], gone: [] });
   });
 
+  it('skips a date or time any locale prints as volatile, but keeps a bare month count', () => {
+    const day = new Date(Date.UTC(2026, 10, 15, 12, 30));
+    const numeric = { year: 'numeric', month: 'numeric', day: 'numeric', timeZone: 'UTC' } as const;
+    const long = { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' } as const;
+    const dates = [
+      ...['ja-JP', 'zh-CN', 'ko-KR', 'de-DE', 'en-US'].map((locale) => new Intl.DateTimeFormat(locale, numeric).format(day)),
+      ...['ja-JP', 'zh-CN', 'ko-KR'].map((locale) => new Intl.DateTimeFormat(locale, long).format(day)),
+      '11月15日',
+      '12時30分',
+      '12时30分',
+      '12시 30분',
+    ];
+    const before = nodes([heading]);
+    for (const date of dates) {
+      const after = nodes([heading, node('s', { role: 'status', text: 'Task created' }), node('d', { text: `作成日 ${date}` })]);
+      expect(describeDelta(before, after, false), date).toEqual({ appeared: [{ role: 'status', text: 'Task created' }], gone: [] });
+    }
+    const counts = nodes([heading, node('s', { role: 'status', text: 'Task created' }), node('m', { text: '3月' }), node('v', { text: 'v1.2.2026' })]);
+    expect(describeDelta(before, counts, false).appeared).toEqual([{ role: 'status', text: 'Task created' }, { text: '3月' }, { text: 'v1.2.2026' }]);
+  });
+
   it('forgives a churned test id when the other fields still identify the node', () => {
     const anchor = { role: 'link', name: 'PB-Twin-Alpha', testId: 'row-1a2b' };
     const rerendered = node('r2', { role: 'link', name: 'PB-Twin-Alpha', testId: 'row-9f8e' });
