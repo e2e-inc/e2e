@@ -57,7 +57,18 @@ import {
   beforeEach,
   describe,
 } from '../../src/index.ts';
-import type { Engine, EngineAttemptContext, EngineCleanupContext, EngineDisposeContext, EngineHandle, EngineObserveOptions, EngineSnapshot } from '../../src/engine/index.ts';
+import type {
+  Engine,
+  EngineAttemptContext,
+  EngineCleanupContext,
+  EngineDisposeContext,
+  EngineFixtureContext,
+  EngineHandle,
+  EngineObserveOptions,
+  EngineSnapshot,
+  NodeRef,
+  OperationContext,
+} from '../../src/engine/index.ts';
 import {
   BASE_RULES,
   createGrammarTools,
@@ -253,6 +264,18 @@ secrets.get('key') satisfies Secret;
 ({ name: 'gated', version: '1.0.0', spiVersion: 1, secrets: [secrets.get('key')] }) satisfies Engine;
 // @ts-expect-error an engine declares secrets.get() handles, never the values.
 ({ name: 'gated', version: '1.0.0', spiVersion: 1, secrets: ['sk_test'] }) satisfies Engine;
+declare const fixtureContext: EngineFixtureContext;
+declare const fixtureTarget: Locator;
+// withNode resolves to what `use` returns, and hands it the node's ref and the budget left.
+void (fixtureContext.withNode('custom.read', fixtureTarget, async (ref, operation) => {
+  ref satisfies NodeRef;
+  operation satisfies OperationContext;
+  return 1;
+}) satisfies Promise<number>);
+// @ts-expect-error the result follows `use`: a number is not a string.
+void (fixtureContext.withNode('custom.read', fixtureTarget, async () => 1) satisfies Promise<string>);
+// @ts-expect-error `api` is required: an INVALID_LOCATOR names the public call that took the locator.
+void fixtureContext.withNode(fixtureTarget, async () => 1);
 declare const attemptContext: EngineAttemptContext;
 attemptContext.resolveSecret(secrets.get('key')) satisfies Promise<string>;
 // The forms the app sees in place of the value join its redaction.
