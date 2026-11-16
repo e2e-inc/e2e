@@ -613,18 +613,10 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
   /** The page title, read within the action timeout or, for a matcher poll, within the poll's deadline. */
   const currentTitle = (deadline?: Deadline) =>
     surface.guard(context.operation(deadline?.remaining()), 'title', () => surface.requirePage().title());
-  /** Page code run on the one node `target` matches, waiting for it up to `timeout` (the action timeout by default). */
-  const evaluateOn = (target: Locator, source: string, arg: JsonValue | undefined, timeout?: number) =>
-    context.withNode(target, (ref, operation) => surface.evaluateOn(ref, source, arg, operation), obj({ timeout }));
-  const expectation = createBrowserExpectation({
-    currentUrl,
-    currentTitle,
-    // A matcher's wait for its node ends with the poll, never past it.
-    evaluateOn: (target, source, arg, deadline) => evaluateOn(target, source, arg, Math.max(1, deadline.remaining())),
-    baseHref,
-    deadlineFor,
-    context,
-  });
+  /** Page code run on the one node `target` matches, waiting for it up to the action timeout. */
+  const evaluateOn = (target: Locator, source: string, arg: JsonValue | undefined) =>
+    context.withNode(target, (ref, operation) => surface.evaluateOn(ref, source, arg, operation));
+  const expectation = createBrowserExpectation({ currentUrl, currentTitle, evaluateOn, baseHref, deadlineFor, context });
 
   const browser: Omit<Browser, keyof Expectable<BrowserExpectation>> = {
     goto(url, options) {
@@ -1006,8 +998,8 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
 interface ExpectationDeps {
   currentUrl(deadline: Deadline): Promise<string>;
   currentTitle(deadline: Deadline): Promise<string>;
-  /** Page code run on the one node `target` matches, waiting for it no longer than `deadline`. */
-  evaluateOn(target: Locator, source: string, arg: JsonValue, deadline: Deadline): Promise<JsonValue | undefined>;
+  /** Page code run on the one node `target` matches, waiting for it up to the action timeout. */
+  evaluateOn(target: Locator, source: string, arg: JsonValue): Promise<JsonValue | undefined>;
   baseHref(): string;
   deadlineFor(timeout: number | undefined, api: string): Deadline;
   readonly context: EngineFixtureContext;
@@ -1031,8 +1023,6 @@ function describeExpectedUrl(expected: string | RegExp, baseHref: string): strin
 interface BrowserSample {
   readonly matches: boolean | undefined;
   readonly observed: string;
-  /** The poll's deadline ended the read before it saw anything. */
-  readonly cutOff?: true;
 }
 
 /**
@@ -1056,13 +1046,8 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
       signal: deps.context.signal,
       negated,
       evaluate: async () => {
-        const sample = await read(deadline);
-        // A read the deadline cut off saw nothing new, so the poll counts the
-        // last finished read again: a negation that held still holds, and the
-        // failure reports what was last seen.
-        if (sample.cutOff === true && last !== undefined) return last.matches;
-        last = sample;
-        return sample.matches;
+        last = await read(deadline);
+        return last.matches;
       },
       onTimeout: (cause) =>
         new TestError(
@@ -1083,11 +1068,9 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
   };
   /**
    * One sample of the value `source` reads off the one node `target`
-   * matches, observed as `subject` and its JSON. Absence is sampled first,
-   * as `readClass` does, so a node that never arrives is `no node` and fails
-   * the assertion; two or more matches fail at once. A value that is not
-   * JSON, or none, never matches, and neither does a read the poll's
-   * deadline cut off.
+   * matches, observed as `subject` and its JSON, taken the way `toHaveClass`
+   * takes one: absence first, then the read, both inside the poll's
+   * deadline. A value that is not JSON, or none, never matches.
    */
   const sampleOn = async (
     target: Locator,
@@ -1097,24 +1080,24 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
     deadline: Deadline,
     matches: (value: JsonValue) => boolean,
   ): Promise<BrowserSample> => {
-    const noNode: BrowserSample = { matches: undefined, observed: 'no node' };
-    const cutOff = new EngineError('OPERATION_TIMEOUT', `${subject} read timed out`, { retryable: false });
-    let value: JsonValue | undefined;
+    /** The value on the one match, `undefined` while nothing matches, as `readClass` reads a class. */
+    const readOnce = async () =>
+      (await target.count()) === 0 ? undefined : { value: await deps.evaluateOn(target, source, arg) };
+    let read: { value: JsonValue | undefined } | undefined;
     try {
-      // A read window lets its last read run past the wait; the poll's deadline is the tighter bound.
-      const read = await withTimeout(
-        (async () => ((await target.count()) === 0 ? noNode : { value: await deps.evaluateOn(target, source, arg, deadline) }))(),
+      // A locator read takes the action timeout; the poll's deadline is the tighter bound.
+      read = await withTimeout(
+        readOnce(),
         deadline.remaining(),
-        () => cutOff,
+        () => new EngineError('OPERATION_TIMEOUT', `${subject} read timed out`, { retryable: false }),
       );
-      if (read === noNode) return noNode;
-      ({ value } = read as { value: JsonValue | undefined });
     } catch (error) {
-      if (error === cutOff) return { matches: undefined, observed: `${subject} not read before the timeout`, cutOff: true };
-      if (isTestErrorCode(error, 'LOCATOR_NOT_FOUND')) return noNode;
+      if (isTestErrorCode(error, 'LOCATOR_NOT_FOUND')) return { matches: undefined, observed: 'no node' };
       if (isNonJsonResult(error)) return { matches: false, observed: `${subject} is not JSON` };
       throw error;
     }
+    if (read === undefined) return { matches: undefined, observed: 'no node' };
+    const { value } = read;
     if (value === undefined) return { matches: false, observed: `${subject} is undefined` };
     return { matches: matches(value), observed: `${subject} ${JSON.stringify(value)}` };
   };

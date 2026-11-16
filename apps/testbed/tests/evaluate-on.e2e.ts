@@ -2,19 +2,16 @@ import { test } from '@e2e-dev/web';
 import { expect } from 'e2e';
 import { content, failure } from './helpers.ts';
 
-/** A page whose `#slow` element answers `slow` only after a 600 ms busy wait in the page. */
+/** A page whose `#slow` element answers `slow` with 1, but only after a 300 ms busy wait in the page. */
 const slow = content(`<html><p id="slow">Slow</p><script>
   Object.defineProperty(document.getElementById('slow'), 'slow', {
-    get() { const start = Date.now(); while (Date.now() - start < 600); return 1; },
+    get() { const start = Date.now(); while (Date.now() - start < 300); return 1; },
   });
 </script></html>`);
 
-/** A page whose `#stalls` element answers `sample` with 0 twice, then only after a 600 ms busy wait. */
-const stalls = content(`<html><p id="stalls">Stalls</p><script>
-  let reads = 0;
-  Object.defineProperty(document.getElementById('stalls'), 'sample', {
-    get() { reads += 1; if (reads > 2) { const start = Date.now(); while (Date.now() - start < 600); } return 0; },
-  });
+/** A page that answers for about 300 ms after it loads, then blocks its main thread for about 1.5 s. */
+const frozen = content(`<html><p id="frozen" style="color: blue">Frozen</p><script>
+  setTimeout(() => { const start = Date.now(); while (Date.now() - start < 1500); }, 300);
 </script></html>`);
 
 const page = content(`<html>
@@ -100,6 +97,14 @@ test.describe('expect(browser).toHaveCSS', { requires: ['browser'] }, () => {
     expect(ambiguous).toHaveProperty('code', 'LOCATOR_AMBIGUOUS');
   });
 
+  test('fails a negation when the page stops answering', async ({ browser }) => {
+    await browser.goto(frozen);
+    const error = await failure(() =>
+      expect(browser).not.toHaveCSS(browser.locator('#frozen'), 'color', 'red', { timeout: 1000 }),
+    );
+    expect(error).toHaveProperty('code', 'ACTION_FAILED');
+  });
+
   test('refuses an empty property name', async ({ browser, screen }) => {
     await browser.goto(page);
     const error = await failure(() => expect(browser).toHaveCSS(screen.getByRole('navigation', { name: 'Main' }), '', 'sticky'));
@@ -128,15 +133,18 @@ test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () 
     expect(opaque).toHaveProperty('message', expect.stringContaining('observed: property style is not JSON'));
   });
 
-  test('ends a slow sample at the assertion timeout', async ({ browser }) => {
+  test('fails a sample that outlasts the assertion timeout, even when it would match', async ({ browser }) => {
     await browser.goto(slow);
     const error = await failure(() => expect(browser).toHaveJSProperty(browser.locator('#slow'), 'slow', 1, { timeout: 200 }));
-    expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
+    expect(error).toHaveProperty('code', 'ACTION_FAILED');
   });
 
-  test('keeps a negation that held when the timeout cuts off its last read', async ({ browser }) => {
-    await browser.goto(stalls);
-    await expect(browser).not.toHaveJSProperty(browser.locator('#stalls'), 'sample', 1, { timeout: 330 });
+  test('fails a negation when the page stops answering', async ({ browser }) => {
+    await browser.goto(frozen);
+    const error = await failure(() =>
+      expect(browser).not.toHaveJSProperty(browser.locator('#frozen'), 'id', 'other', { timeout: 1000 }),
+    );
+    expect(error).toHaveProperty('code', 'ACTION_FAILED');
   });
 
   test('reports a route failure the poll ran into, instead of reading it as a value that is not JSON', async ({ browser }) => {
