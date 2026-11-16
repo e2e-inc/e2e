@@ -233,3 +233,23 @@ test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () 
     expect(error).toHaveProperty('code', 'INVALID_ARGUMENT');
   });
 });
+
+test.describe('expect(browser) locator matchers', { requires: ['browser'] }, () => {
+  test('refuse a target that is not a locator, naming the matcher', async ({ browser }) => {
+    await browser.goto(page);
+    const target = '#x' as never;
+    const calls = [
+      ['expect.toHaveClass', () => expect(browser).toHaveClass(target, 'x')],
+      ['expect.not.toHaveClass', () => expect(browser).not.toHaveClass(target, 'x')],
+      ['expect.toHaveCSS', () => expect(browser).toHaveCSS(target, 'position', 'x')],
+      ['expect.not.toHaveCSS', () => expect(browser).not.toHaveCSS(target, 'position', 'x')],
+      ['expect.toHaveJSProperty', () => expect(browser).toHaveJSProperty(target, 'id', 'x')],
+      ['expect.not.toHaveJSProperty', () => expect(browser).not.toHaveJSProperty(target, 'id', 'x')],
+    ] as const;
+    for (const [api, call] of calls) {
+      const error = await failure(call);
+      expect(error).toHaveProperty('code', 'INVALID_LOCATOR');
+      expect(error).toHaveProperty('message', `${api} requires an e2e locator`);
+    }
+  });
+});

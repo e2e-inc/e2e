@@ -318,6 +318,7 @@ await expect(browser).toHaveClass(browser.locator('.card'), 'card active');
 - It polls for the node too: a target that matches nothing yet is one more
   poll, not a failure, until the assertion timeout runs out.
 - An ambiguous target still fails at once with `LOCATOR_AMBIGUOUS`.
+- A target that is not an e2e locator is `INVALID_LOCATOR`.
 - It reads the `class` attribute, so `''` matches `class=""` and not an
   element with no `class` attribute at all. Playwright's `toHaveClass('')`
   accepts both.
@@ -340,7 +341,8 @@ await expect(browser).toHaveCSS(nav, '--accent', /red/);
   [`browser.evaluateOn`](/reference/web#evaluateon) does. A target that
   matches nothing yet is one more poll, not a failure, until the assertion
   timeout runs out. An ambiguous target fails at once with
-  `LOCATOR_AMBIGUOUS`.
+  `LOCATOR_AMBIGUOUS`. A target that is not an e2e locator, or one from
+  another screen or attempt, is `INVALID_LOCATOR`.
 - An empty or non-string `property` is `INVALID_ARGUMENT`.
 
 #### `toHaveJSProperty`

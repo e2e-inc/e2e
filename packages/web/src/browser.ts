@@ -1127,7 +1127,8 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
    * read waits for its match until the action timeout, so each sample counts
    * matches first: a node that never arrives stays an assertion failure.
    * Then `read` takes the sample, and both run inside the poll's deadline.
-   * Nothing matching, before or during the read, is one more poll.
+   * Nothing matching, before or during the read, is one more poll. A target
+   * that is not a locator is `INVALID_LOCATOR` before the first poll.
    */
   const sampleNode = (
     api: string,
@@ -1135,6 +1136,9 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
     subject: string,
     read: () => Promise<BrowserSample>,
   ): ((deadline: Deadline) => Promise<BrowserSample>) => {
+    if (typeof target !== 'object' || target === null || typeof target.count !== 'function') {
+      throw new TestError('INVALID_LOCATOR', `${qualified(api)} requires an e2e locator`);
+    }
     const once = async () => ((await target.count()) === 0 ? NO_NODE : read());
     return async (deadline) => {
       try {
