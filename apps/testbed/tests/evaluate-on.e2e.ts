@@ -118,6 +118,13 @@ test.describe('expect(browser).toHaveCSS', { requires: ['browser'] }, () => {
     expect(error).toHaveProperty('message', expect.stringContaining('observed: css position "sticky"'));
   });
 
+  test('matches a string as the whole value, not a part of it', async ({ browser, screen }) => {
+    await browser.goto(page);
+    const main = screen.getByRole('navigation', { name: 'Main' });
+    const error = await failure(() => expect(browser).toHaveCSS(main, 'position', 'stick', { timeout: 300 }));
+    expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
+  });
+
   test('fails on an element that never appears, and on an ambiguous locator', async ({ browser }) => {
     await browser.goto(page);
     const missing = await failure(() => expect(browser).toHaveCSS(browser.locator('#missing'), 'position', 'static', { timeout: 300 }));
