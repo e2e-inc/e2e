@@ -346,6 +346,13 @@ suites that consume the built packages the way a user would.
   package self-contained and leave the repository's development MCP
   configuration outside it. Example skills use `SKILL.example.md` so clients
   do not discover them as additional skills.
+  GitHub Copilot reads the generated `plugin.json` and `mcp.json` at the plugin
+  root (the Agent Plugins v1.0.0 format awesome-copilot's intake requires),
+  ahead of `.claude-plugin/`; `plugin.json` cannot name MCP servers, so
+  dropping `mcp.json` drops Copilot's server. The plugin's skill copies leave
+  out `metadata.openclaw`, since that spec takes string metadata values only
+  (ClawHub publishes from `skills/`), and a skill links no file outside its
+  own directory.
 
 ## Commands
 
