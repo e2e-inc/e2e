@@ -20,6 +20,7 @@ const page = content(`<html>
   <iframe srcdoc="<aside style='width: 240px'>Side</aside>"></iframe>
   <label>Name <input value="Ada"></label>
   <script>
+    document.querySelector('[aria-label="Main"]').config = { mode: 'dark', sizes: [1, 2] };
     setTimeout(() => {
       const late = document.createElement('p');
       late.id = 'late';
@@ -116,6 +117,14 @@ test.describe('expect(browser).toHaveCSS', { requires: ['browser'] }, () => {
     expect(ambiguous).toHaveProperty('code', 'LOCATOR_AMBIGUOUS');
   });
 
+  test('fails a negation on an element that never appears', async ({ browser }) => {
+    await browser.goto(page);
+    const missing = browser.locator('#missing');
+    const error = await failure(() => expect(browser).not.toHaveCSS(missing, 'position', 'static', { timeout: 300 }));
+    expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
+    expect(error).toHaveProperty('message', expect.stringContaining('observed: no node'));
+  });
+
   test('fails a negation when the page stops answering', async ({ browser }) => {
     await browser.goto(frozen);
     const error = await failure(() =>
@@ -139,6 +148,19 @@ test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () 
     await expect(browser).toHaveJSProperty(main, 'style.position', 'sticky');
     await expect(browser).toHaveJSProperty(browser.frameLocator('iframe').locator('aside'), 'offsetWidth', 240);
     await expect(browser).not.toHaveJSProperty(main, 'dataset.missing.deeper', '1');
+  });
+
+  test('compares an object and an array the page set as JSON', async ({ browser, screen }) => {
+    await browser.goto(page);
+    const main = screen.getByRole('navigation', { name: 'Main' });
+    await expect(browser).toHaveJSProperty(main, 'config', { sizes: [1, 2], mode: 'dark' });
+    await expect(browser).toHaveJSProperty(main, 'config.sizes', [1, 2]);
+    await expect(browser).not.toHaveJSProperty(main, 'config.sizes', [2, 1], { timeout: 300 });
+  });
+
+  test('never matches a value that is not JSON, so its negation passes', async ({ browser, screen }) => {
+    await browser.goto(page);
+    await expect(browser).not.toHaveJSProperty(screen.getByRole('navigation', { name: 'Main' }), 'style', 'x');
   });
 
   test('fails with the value it observed, or that it is not JSON', async ({ browser, screen }) => {
