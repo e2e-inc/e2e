@@ -42,7 +42,13 @@ import type { AttemptTab } from './attempt-session.ts';
 import type { DialogHandler } from './dialogs.ts';
 import { saveDownloadsTo, saveFromBrowser, saveLocally } from './downloads.ts';
 import { isTestErrorCode, message as causeMessage, pageScriptFailure, translatePwError } from './support.ts';
-import { compileEvaluation, decodeEvaluation, isNonJsonResult, pageFunctionSource } from './evaluation.ts';
+import {
+  compileEvaluation,
+  decodeEvaluation,
+  evaluationValue,
+  pageFunctionSource,
+  type EvaluationResult,
+} from './evaluation.ts';
 import { initScriptLabel, testInitScriptSource } from './init-scripts.ts';
 import { MEDIA_KEYS, mediaLabel, mediaProblem, type WebMedia } from './media.ts';
 import { lowercaseNames } from './protected-app.ts';
@@ -679,7 +685,7 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     ): Promise<T> {
       const source = typeof fn === 'string' ? fn : pageFunctionSource(fn);
       validateJsonValue(arg, 'evaluateOn argument');
-      return (await evaluateOn(target, source, arg)) as T;
+      return evaluationValue(await evaluateOn(target, source, arg)) as T;
     },
     async addInitScript(script: unknown, ...rest: unknown[]) {
       const source = await testInitScriptSource(script, rest.length === 0 ? undefined : { arg: rest[0] }, (file) => surface.projectPath(file));
@@ -999,7 +1005,7 @@ interface ExpectationDeps {
   currentUrl(deadline: Deadline): Promise<string>;
   currentTitle(deadline: Deadline): Promise<string>;
   /** Page code run on the one node `target` matches, waiting for it up to the action timeout. */
-  evaluateOn(target: Locator, source: string, arg: JsonValue): Promise<JsonValue | undefined>;
+  evaluateOn(target: Locator, source: string, arg: JsonValue): Promise<EvaluationResult>;
   baseHref(): string;
   deadlineFor(timeout: number | undefined, api: string): Deadline;
   readonly context: EngineFixtureContext;
@@ -1080,10 +1086,10 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
     deadline: Deadline,
     matches: (value: JsonValue) => boolean,
   ): Promise<BrowserSample> => {
-    /** The value on the one match, `undefined` while nothing matches, as `readClass` reads a class. */
+    /** The evaluation on the one match, `undefined` while nothing matches, as `readClass` reads a class. */
     const readOnce = async () =>
-      (await target.count()) === 0 ? undefined : { value: await deps.evaluateOn(target, source, arg) };
-    let read: { value: JsonValue | undefined } | undefined;
+      (await target.count()) === 0 ? undefined : deps.evaluateOn(target, source, arg);
+    let read: EvaluationResult | undefined;
     try {
       // A locator read takes the action timeout; the poll's deadline is the tighter bound.
       read = await withTimeout(
@@ -1093,10 +1099,10 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
       );
     } catch (error) {
       if (isTestErrorCode(error, 'LOCATOR_NOT_FOUND')) return { matches: undefined, observed: 'no node' };
-      if (isNonJsonResult(error)) return { matches: false, observed: `${subject} is not JSON` };
       throw error;
     }
     if (read === undefined) return { matches: undefined, observed: 'no node' };
+    if (!read.ok) return { matches: false, observed: `${subject} is not JSON` };
     const { value } = read;
     if (value === undefined) return { matches: false, observed: `${subject} is undefined` };
     return { matches: matches(value), observed: `${subject} ${JSON.stringify(value)}` };

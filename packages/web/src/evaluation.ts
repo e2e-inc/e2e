@@ -42,7 +42,15 @@ export function pageFunctionSource(fn: (...args: never[]) => unknown): string {
  */
 export type EvaluationCall = readonly [] | readonly ['arg'] | readonly ['element'] | readonly ['element', 'arg'];
 
-/** What the page-side boundary reports, as JSON text: the result, a thrown message, why the result is not JSON, or an element that left its document. */
+/** A finished evaluation: its JSON result, or why the result is not JSON. */
+export type EvaluationResult =
+  | { readonly ok: true; readonly value: JsonValue | undefined }
+  | { readonly ok: false; readonly invalid: string };
+
+/**
+ * What the page-side boundary reports, as JSON text: the result, a thrown
+ * message, why the result is not JSON, or an element that left its document.
+ */
 type EvaluationReport =
   | { ok: true; value?: JsonValue }
   | { ok: false; message: string }
@@ -119,12 +127,15 @@ export function pageValueEncoder(): (root: unknown) => string | undefined {
 }
 
 /**
- * Compiles the page-side error boundary without evaluating the caller's source in this process.
- * The source is one expression: a function it evaluates to is called with what `call` names,
- * any other value is the result. A call that starts with the element runs on the element
- * Playwright supplies, and reports a detached one instead of running the source. The boundary resolves to JSON text, a primitive the caller takes
- * back without Playwright serializing it in the page, so a page that deleted or replaced a
- * global the serializer needs still returns its result; `decodeEvaluation` reads it.
+ * Compiles the page-side error boundary without evaluating the caller's
+ * source in this process. The source is one expression: a function it
+ * evaluates to is called with what `call` names, any other value is the
+ * result. A call that starts with the element runs on the element
+ * Playwright supplies, and reports a detached one instead of running the
+ * source. The boundary resolves to JSON text, a primitive the caller takes
+ * back without Playwright serializing it in the page, so a page that deleted
+ * or replaced a global the serializer needs still returns its result;
+ * `readEvaluation` reads it.
  *
  * A function serialized with `toString()` carries whatever the loader compiled
  * it to. e2e before 0.17 loaded tests through tsx, whose esbuild `keepNames`
@@ -167,19 +178,13 @@ export function compileEvaluation(source: string, call: EvaluationCall): (...arg
   }
 }
 
-/** The refusals `decodeEvaluation` made of a result that is not JSON, told apart from any other `INVALID_ARGUMENT` by identity. */
-const nonJsonResults = new WeakSet<object>();
-
-/** Whether `cause`, or an error it wraps, is `decodeEvaluation`'s refusal of a result that is not JSON. */
-export function isNonJsonResult(cause: unknown): boolean {
-  for (let current = cause; typeof current === 'object' && current !== null; current = (current as { cause?: unknown }).cause) {
-    if (nonJsonResults.has(current)) return true;
-  }
-  return false;
-}
-
-/** The result of the boundary `compileEvaluation` compiled, from the JSON text it resolved to; throws what the page threw. */
-export function decodeEvaluation(text: string): JsonValue | undefined {
+/**
+ * The result of the boundary `compileEvaluation` compiled, from the JSON
+ * text it resolved to. Throws what the page threw as `EVALUATE_FAILED`, as
+ * it does an unreadable report, and an element that left its document as
+ * retryable `NODE_STALE`.
+ */
+export function readEvaluation(text: string): EvaluationResult {
   let report: EvaluationReport;
   try {
     // oxlint-disable-next-line e2e/no-unchecked-json -- the text is what compileEvaluation's own boundary wrote
@@ -187,12 +192,21 @@ export function decodeEvaluation(text: string): JsonValue | undefined {
   } catch (cause) {
     throw new TestError('EVALUATE_FAILED', 'page evaluation returned an unreadable result', { cause });
   }
-  if (report.ok) return report.value;
-  if ('detached' in report) throw new EngineError('NODE_STALE', 'node is detached; resolve it again before evaluating', { retryable: true });
-  if ('invalid' in report) {
-    const refusal = new TestError('INVALID_ARGUMENT', `evaluate result ${report.invalid}`);
-    nonJsonResults.add(refusal);
-    throw refusal;
+  if (report.ok) return { ok: true, value: report.value };
+  if ('detached' in report) {
+    throw new EngineError('NODE_STALE', 'node is detached; resolve it again before evaluating', { retryable: true });
   }
+  if ('invalid' in report) return { ok: false, invalid: report.invalid };
   throw new TestError('EVALUATE_FAILED', report.message);
+}
+
+/** The JSON value of a finished evaluation; a result that is not JSON is `INVALID_ARGUMENT`. */
+export function evaluationValue(result: EvaluationResult): JsonValue | undefined {
+  if (!result.ok) throw new TestError('INVALID_ARGUMENT', `evaluate result ${result.invalid}`);
+  return result.value;
+}
+
+/** `readEvaluation` for `browser.evaluate`: the value, or what made it fail. */
+export function decodeEvaluation(text: string): JsonValue | undefined {
+  return evaluationValue(readEvaluation(text));
 }

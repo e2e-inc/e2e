@@ -6,7 +6,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { compileEvaluation, decodeEvaluation, pageFunctionSource, pageValueEncoder } from '../../src/evaluation.ts';
+import { compileEvaluation, decodeEvaluation, pageFunctionSource, pageValueEncoder, readEvaluation } from '../../src/evaluation.ts';
 
 /** Runs the compiled boundary in this process and decodes its report like `browser.evaluate`. */
 async function run(source: string, hasArgument: boolean, arg?: unknown): Promise<unknown> {
@@ -60,15 +60,22 @@ describe('compileEvaluation', () => {
 
   it('calls a function on the element first, then the argument', async () => {
     const element = { isConnected: true, id: 'nav' };
-    expect(decodeEvaluation(await compileEvaluation('(el, suffix) => el.id + suffix', ['element', 'arg'])(element, '-main'))).toBe('nav-main');
+    const evaluate = compileEvaluation('(el, suffix) => el.id + suffix', ['element', 'arg']);
+    expect(decodeEvaluation(await evaluate(element, '-main'))).toBe('nav-main');
     expect(decodeEvaluation(await compileEvaluation('(...args) => args.length', ['element'])(element))).toBe(1);
+  });
+
+  it('reads a result that is not JSON as a value, which only the throwing form refuses', async () => {
+    const report = await compileEvaluation('(el) => el', ['element', 'arg'])({ isConnected: true, run: () => 1 });
+    expect(readEvaluation(report)).toEqual({ ok: false, invalid: expect.stringContaining('must be JSON-safe') });
+    expect(() => decodeEvaluation(report)).toThrow(expect.objectContaining({ code: 'INVALID_ARGUMENT' }));
   });
 
   it('reports a detached element as a retryable stale node without running the source', async () => {
     const ran = vi.fn();
     vi.stubGlobal('ran', ran);
     const report = await compileEvaluation('() => ran()', ['element'])({ isConnected: false });
-    expect(() => decodeEvaluation(report)).toThrow(expect.objectContaining({ code: 'NODE_STALE', retryable: true }));
+    expect(() => readEvaluation(report)).toThrow(expect.objectContaining({ code: 'NODE_STALE', retryable: true }));
     expect(ran).not.toHaveBeenCalled();
   });
 });

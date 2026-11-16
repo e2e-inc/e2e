@@ -69,7 +69,7 @@ import { SECURE_FIELD_SELECTOR, type RawNodeData } from './read-node.ts';
 import { readSelector, takeReadsFunction } from './read-selector.ts';
 import { credentialOrigins, httpCredentials, installConfiguredHeaders, lowercaseNames, configuredHeadersFor } from './protected-app.ts';
 import { RefRegistry } from './refs.ts';
-import { compileEvaluation, decodeEvaluation } from './evaluation.ts';
+import { compileEvaluation, readEvaluation, type EvaluationResult } from './evaluation.ts';
 import {
   cancelled,
   DEFAULT_VIEWPORT,
@@ -897,12 +897,18 @@ export class PlaywrightSurface {
 
   /**
    * Runs trusted page code on the element a ref names, the element first and
-   * `arg` second, and returns the JSON it resolves to. Nothing waits: a
+   * `arg` second, and returns the JSON it resolves to, or why that is not
+   * JSON. Nothing waits: a
    * located ref that no longer matches exactly one element, or an element
    * that left its document, is retryable `NODE_STALE`, so the caller
    * resolves again.
    */
-  async evaluateOn(ref: NodeRef, source: string, arg: JsonValue | undefined, operation: OperationContext): Promise<JsonValue | undefined> {
+  async evaluateOn(
+    ref: NodeRef,
+    source: string,
+    arg: JsonValue | undefined,
+    operation: OperationContext,
+  ): Promise<EvaluationResult> {
     const evaluate = compileEvaluation(source, arg === undefined ? ['element'] : ['element', 'arg']);
     const report = await this.guard(operation, 'evaluateOn', async (currentOperation) => {
       const target = await this.requireSession().refs.lookup(ref);
@@ -920,7 +926,7 @@ export class PlaywrightSurface {
         if (target.kind === 'locator') void element.dispose().catch(() => undefined);
       }
     }, navigationStaleOr);
-    return decodeEvaluation(report);
+    return readEvaluation(report);
   }
 
   // --- location tier ---
