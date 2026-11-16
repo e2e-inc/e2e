@@ -675,7 +675,7 @@ const width = await browser.evaluateOn(
 
 | Throws | When |
 | --- | --- |
-| `INVALID_LOCATOR` | The target is not an e2e locator, or belongs to another target or attempt. |
+| `INVALID_LOCATOR` | The target is not an e2e locator, or belongs to another target or attempt. The message names `browser.evaluateOn`. |
 | `LOCATOR_NOT_FOUND` | Nothing matches within `actionTimeout`. |
 | `LOCATOR_AMBIGUOUS` | Two or more elements match. |
 | `INVALID_ARGUMENT` | `arg` or the return value is not a [`JsonValue`](#jsonvalue). |
@@ -1324,8 +1324,14 @@ export interface Browser extends Expectable<BrowserExpectation> {
    * JSON. Meant for reads: the code can change the page, but a test should
    * act through the locator instead.
    */
-  evaluateOn<T extends JsonValue>(target: Locator, fn: string | ((element: Element) => T | Promise<T>)): Promise<T>;
-  /** Evaluates trusted test code on the one element `target` matches, with one required JSON-safe argument. */
+  evaluateOn<T extends JsonValue>(
+    target: Locator,
+    fn: string | ((element: Element) => T | Promise<T>),
+  ): Promise<T>;
+  /**
+   * Evaluates trusted test code on the one element `target` matches, with
+   * one required JSON-safe argument.
+   */
   evaluateOn<T extends JsonValue, Arg extends JsonValue>(
     target: Locator,
     fn: string | ((element: Element, arg: Arg) => T | Promise<T>),

@@ -941,14 +941,24 @@ export interface BrowserExpectation {
    * `--property` included) to match: a string is the whole value, a RegExp
    * is tested against it.
    */
-  toHaveCSS(target: Locator, property: string, expected: TextMatch, options?: { timeout?: number }): Promise<void>;
+  toHaveCSS(
+    target: Locator,
+    property: string,
+    expected: TextMatch,
+    options?: { timeout?: number },
+  ): Promise<void>;
   /**
    * Waits for the JavaScript value at `path` on the target's element (a
    * property name, or a dotted path such as `dataset.state`) to equal
    * `expected` as JSON. A path that runs out before its end, or a value that
    * is not JSON, never matches.
    */
-  toHaveJSProperty(target: Locator, path: string, expected: JsonValue, options?: { timeout?: number }): Promise<void>;
+  toHaveJSProperty(
+    target: Locator,
+    path: string,
+    expected: JsonValue,
+    options?: { timeout?: number },
+  ): Promise<void>;
 }
 ```
 
