@@ -898,10 +898,9 @@ export class PlaywrightSurface {
   /**
    * Runs trusted page code on the element a ref names, the element first and
    * `arg` second, and returns the JSON it resolves to, or why that is not
-   * JSON. Nothing waits: a
-   * located ref that no longer matches exactly one element, or an element
-   * that left its document, is retryable `NODE_STALE`, so the caller
-   * resolves again.
+   * JSON. Nothing waits: a located ref that no longer matches exactly one
+   * element, or an element that left its document, is retryable
+   * `NODE_STALE`, so the caller resolves again.
    */
   async evaluateOn(
     ref: NodeRef,
