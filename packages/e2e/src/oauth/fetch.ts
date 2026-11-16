@@ -95,28 +95,29 @@ export function createOAuthFetch<Credentials extends OAuthCredentials>(
     let pending = shared.refreshing.get(provider.id) as Promise<Credentials> | undefined;
     if (pending === undefined) {
       pending = (async () => {
-        let sent: Credentials | undefined;
-        try {
-          return await store.exclusive(provider.id, async () => {
-            // Another process may have refreshed already: prefer what the store holds now.
-            const latest = await current();
-            if (latest.access !== stale.access && !expiring(latest)) return latest;
-            sent = latest;
+        const outcome = await store.exclusive(provider.id, async () => {
+          // Another process may have refreshed already: prefer what the store holds now.
+          const latest = await current();
+          if (latest.access !== stale.access && !expiring(latest)) return { renewed: latest };
+          try {
             // No deadline: the vendor may rotate the token before a late answer,
             // and dropping that answer loses the login.
             const renewed = await provider.refresh(latest);
             await persist(renewed);
-            return renewed;
-          });
-        } catch (cause) {
-          if (sent !== undefined && cause instanceof OAuthError && cause.code === 'LOGIN_REQUIRED') {
-            // After the lock, so waiters on a revoked login do not wait out each other's poll.
-            const rotated = await rotatedElsewhere(sent);
-            if (rotated !== undefined) return rotated;
-            throw new OAuthError('LOGIN_REQUIRED', `${cause.message}; ${remedy}`, { cause });
+            return { renewed };
+          } catch (cause) {
+            if (cause instanceof OAuthError && cause.code === 'LOGIN_REQUIRED') {
+              return { rejected: cause, sent: latest };
+            }
+            throw cause;
           }
-          throw cause;
-        }
+        });
+        if ('renewed' in outcome) return outcome.renewed;
+        // After the lock, so waiters on a revoked login do not wait out each other's poll.
+        const rotated = await rotatedElsewhere(outcome.sent);
+        if (rotated !== undefined) return rotated;
+        const { rejected } = outcome;
+        throw new OAuthError('LOGIN_REQUIRED', `${rejected.message}; ${remedy}`, { cause: rejected });
       })().finally(() => shared.refreshing.delete(provider.id));
       shared.refreshing.set(provider.id, pending);
     }

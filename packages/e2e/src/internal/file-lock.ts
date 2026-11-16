@@ -7,15 +7,29 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { closeSync, openSync, readFileSync, readlinkSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  openSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { hostname } from 'node:os';
 
 const LOCK_RETRY_MS = 25;
 /** How long a lock may go untouched before waiters take it over, whoever it names. */
 const LOCK_STALE_MS = 10_000;
 
-/** Runs `work` holding the lock at `lockPath`, and throws `busy()` once another holder has kept it for `waitMs`. */
-export async function withFileLock<T>(lockPath: string, waitMs: number, busy: () => Error, work: () => Promise<T>): Promise<T> {
+/** Runs `work` holding the lock at `lockPath`; throws `busy()` once another holder has kept it `waitMs`. */
+export async function withFileLock<T>(
+  lockPath: string,
+  waitMs: number,
+  busy: () => Error,
+  work: () => Promise<T>,
+): Promise<T> {
   const release = await acquire(lockPath, waitMs, busy);
   try {
     return await work();

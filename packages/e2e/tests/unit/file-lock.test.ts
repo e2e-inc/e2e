@@ -158,6 +158,8 @@ describe('withFileLock', () => {
     expect(most).toBe(1);
   });
 
+  // Real processes, as a soak check. Their races land at random, so a missing takeover turn shows up on most runs but
+  // not all; the two-waiter cases above are the tests that fail every time.
   it('lets one process at a time through locks that holders keep crashing with', async () => {
     const lock = tempLock();
     const dir = path.dirname(lock);

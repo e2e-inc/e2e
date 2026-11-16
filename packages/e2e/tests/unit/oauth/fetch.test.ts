@@ -117,6 +117,20 @@ describe('createOAuthFetch', () => {
     expect(await store.get('test')).toMatchObject({ access: 'fresh-1', refresh: 'rt-1' });
   });
 
+  it('uses the token another process stored while this one waited for the lock, sending no refresh', async () => {
+    const api = await serve((_request, response) => json(response, 200, {}));
+    const store = new MemoryCredentialStore({ test: { access: 'stale', refresh: 'rt-0', expires: 1 } });
+    // Another process refreshed and wrote a fresh token while this one waited for the lock.
+    store.exclusive = async (providerId, refresh) => {
+      await store.set(providerId, { access: 'theirs', refresh: 'rt-1', expires: Date.now() + 3_600_000 });
+      return refresh();
+    };
+    const testProvider = provider();
+    await createOAuthFetch(testProvider, { store, userAgent: 'p' })(api.url);
+    expect(testProvider.refreshes).toEqual([]);
+    expect(api.requests.map((request) => request.headers['authorization'])).toEqual(['Bearer theirs']);
+  });
+
   it('refreshes a token another process stored when that token is expiring too', async () => {
     const api = await serve((_request, response) => json(response, 200, {}));
     const store = new MemoryCredentialStore({ test: { access: 'stale', refresh: 'rt-0', expires: 1 } });
@@ -176,7 +190,8 @@ describe('createOAuthFetch', () => {
         new URL('../../../src/config/register.ts', import.meta.url).href,
         fileURLToPath(new URL('./helpers/refresh-worker.ts', import.meta.url)),
       ];
-      const run = async () => (await execFileAsync(process.execPath, [...worker, file, `${vendor.url}/token`, `${vendor.url}/api`])).stdout;
+      const args = [...worker, file, `${vendor.url}/token`, `${vendor.url}/api`];
+      const run = async () => (await execFileAsync(process.execPath, args)).stdout;
       const statuses = await Promise.all(Array.from({ length: 4 }, run));
       expect(statuses).toEqual(['200', '200', '200', '200']);
       expect(vendor.requests.filter((request) => request.url === '/token')).toHaveLength(1);
