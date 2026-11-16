@@ -434,8 +434,8 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 
 - What reads or acts on a page acts on the active tab: `goto`, `reload`,
   `back`, `forward`, `url`, `title`, `waitForURL`, `locator`, `frameLocator`,
-  `evaluate`, `evaluateOn`, `waitForResponse`, `waitForDownload`, `keyboard`, `mouse`, the
-  `expect(browser)` matchers, and every `screen` query.
+  `evaluate`, `evaluateOn`, `waitForResponse`, `waitForDownload`, `keyboard`,
+  `mouse`, the `expect(browser)` matchers, and every `screen` query.
 - What belongs to the browser covers every tab: `cookies`, `setCookies`,
   `clearCookies`, `route`, `unroute`, `unrouteAll`, `onDialog`, and
   `addInitScript`.
@@ -452,8 +452,8 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 - Declare `requires: ['browser']` in a suite that also runs on other
   platforms.
 - `expect(browser)` returns the `BrowserExpectation` the engine attaches:
-  `toHaveURL`, `toHaveTitle`, `toHaveClass`, `toHaveCSS`, and `toHaveJSProperty`. See
-  [browser matchers](/reference/expect#browser-matchers).
+  `toHaveURL`, `toHaveTitle`, `toHaveClass`, `toHaveCSS`, and
+  `toHaveJSProperty`. See [browser matchers](/reference/expect#browser-matchers).
 
 | Member | Returns |
 | --- | --- |
@@ -496,10 +496,12 @@ The [config](/reference/config) sets each member's budget:
   `locator` and `frameLocator` touch no page and take none.
 
 A `{ timeout }` option overrides the budget on `goto`, `reload`, `back`,
-`forward`, `waitForResponse`, `waitForPopup`, `waitForDownload`, and `waitForDownloads`, capped
-by the test deadline (`cleanupTimeout` in `afterEach`); `0` waits until it. `url`, `title`, `evaluate`, `evaluateOn`, `addInitScript`, `route`,
-`unroute`, `unrouteAll`, `cookies`, `setCookies`, `clearCookies`, `setViewport`,
-`emulateMedia`, `onDialog`, `newTab`, the `BrowserTab` methods, `keyboard.*`, and `mouse.*` take no override.
+`forward`, `waitForResponse`, `waitForPopup`, `waitForDownload`, and
+`waitForDownloads`, capped by the test deadline (`cleanupTimeout` in
+`afterEach`); `0` waits until it. `url`, `title`, `evaluate`, `evaluateOn`,
+`addInitScript`, `route`, `unroute`, `unrouteAll`, `cookies`, `setCookies`,
+`clearCookies`, `setViewport`, `emulateMedia`, `onDialog`, `newTab`, the
+`BrowserTab` methods, `keyboard.*`, and `mouse.*` take no override.
 
 #### `goto`
 

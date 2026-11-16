@@ -383,8 +383,10 @@ function fixtureContext(
     attachViewport: (viewport) => steps.attachViewport(viewport),
     locator: (expression) => createLocator(screenContext, expression),
     screen: (wrap) => createScopedScreen(screenContext, wrap),
-    withNode: (api, locator, use, options) =>
-      engine.withOne(ownLocator(locator, screenContext, api).expression, use, engine.deadline(options?.timeout)),
+    withNode: (api, locator, use, options) => {
+      const { expression } = ownLocator(locator, screenContext, api);
+      return engine.withOne(expression, use, engine.deadline(options?.timeout));
+    },
     expectable<T extends object, E extends object>(target: T, factory: () => E): T & Expectable<E> {
       let surface: E | undefined;
       Object.defineProperty(target, expectationBrand, {

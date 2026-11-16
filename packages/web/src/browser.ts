@@ -635,12 +635,10 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
   /** The page title, read within the action timeout or, for a matcher poll, within the poll's deadline. */
   const currentTitle = (deadline?: Deadline) =>
     surface.guard(context.operation(deadline?.remaining()), 'title', () => surface.requirePage().title());
-  /**
-   * Page code run on the one node `target` matches, waiting for it up to the
-   * action timeout. `api` is the public call an `INVALID_LOCATOR` names.
-   */
+  /** `ExpectationDeps.evaluateOn`, shared with `browser.evaluateOn`. */
   const evaluateOn = (api: string, target: Locator, source: string, arg: JsonValue | undefined) =>
-    context.withNode(api, target, (ref, operation) => surface.evaluateOn(ref, source, arg, operation));
+    context.withNode(api, target, (ref, operation) =>
+      surface.evaluateOn(ref, source, arg, operation));
   const expectation = createBrowserExpectation({
     currentUrl,
     currentTitle,
@@ -1128,9 +1126,11 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
     deadline: Deadline,
     matches: (value: JsonValue) => boolean,
   ): Promise<BrowserSample> => {
-    /** The evaluation on the one match, `undefined` while nothing matches, as `readClass` reads a class. */
+    /** The evaluation on the one match, `undefined` while nothing matches, as `readClass` reads. */
     const readOnce = async () =>
-      (await target.count()) === 0 ? undefined : deps.evaluateOn(qualified(api), target, source, arg);
+      (await target.count()) === 0
+        ? undefined
+        : deps.evaluateOn(qualified(api), target, source, arg);
     let read: EvaluationResult | undefined;
     try {
       // A locator read takes the action timeout; the poll's deadline is the tighter bound.
@@ -1140,7 +1140,9 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
         () => new EngineError('OPERATION_TIMEOUT', `${subject} read timed out`, { retryable: false }),
       );
     } catch (error) {
-      if (isTestErrorCode(error, 'LOCATOR_NOT_FOUND')) return { matches: undefined, observed: 'no node' };
+      if (isTestErrorCode(error, 'LOCATOR_NOT_FOUND')) {
+        return { matches: undefined, observed: 'no node' };
+      }
       throw error;
     }
     if (read === undefined) return { matches: undefined, observed: 'no node' };
@@ -1237,8 +1239,8 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
         'toHaveJSProperty',
         `property ${name} ${JSON.stringify(expected)}`,
         (deadline) =>
-          sampleOn('toHaveJSProperty', target, `property ${name}`, PROPERTY_PATH_SOURCE, name, deadline,
-            (value) => jsonEqual(value, expected)),
+          sampleOn('toHaveJSProperty', target, `property ${name}`, PROPERTY_PATH_SOURCE, name,
+            deadline, (value) => jsonEqual(value, expected)),
         options?.timeout,
       );
     },

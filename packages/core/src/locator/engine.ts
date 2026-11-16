@@ -339,7 +339,8 @@ if (sampled && reads.cutOff(cause)) throw await notFound(cause);
    * re-resolves while the deadline remains instead of failing the test.
    */
   async read(expression: LocatorExpression): Promise<SemanticNode> {
-    return this.withOne(expression, (ref, operation) => this.session.read(ref, operation), this.deadline(this.options.actionTimeout));
+    const deadline = this.deadline(this.options.actionTimeout);
+    return this.withOne(expression, (ref, operation) => this.session.read(ref, operation), deadline);
   }
 
   /**
