@@ -1876,6 +1876,31 @@
           "web"
         ]
       }
+    },
+    {
+      "slug": "remote-mcp-http",
+      "title": "Serving e2e MCP over Streamable HTTP for trusted runs",
+      "shortTitle": "Remote MCP over HTTP",
+      "description": "Experimental bridge from MCP Streamable HTTP to the e2e mcp stdio server for trusted runs, with per-principal sessions, run_tests and Docker Compose. No TLS or OAuth.",
+      "source": "community",
+      "repository": "https://github.com/jxnxts/e2e-remote-mcp-example/tree/a8d437c3869ac17520c81cce8111d24f3067c8be/contrib/community/docker-remote-mcp",
+      "author": {
+        "name": "Jonatas Soares",
+        "github": "jxnxts"
+      },
+      "license": "Apache-2.0",
+      "licenseUrl": "https://github.com/jxnxts/e2e-remote-mcp-example/blob/a8d437c3869ac17520c81cce8111d24f3067c8be/contrib/community/docker-remote-mcp/LICENSE",
+      "tags": {
+        "framework": [
+          "nodejs"
+        ],
+        "useCase": [
+          "mcp"
+        ],
+        "platform": [
+          "web"
+        ]
+      }
     }
   ]
 }
