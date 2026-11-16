@@ -2277,7 +2277,7 @@ matches and calls `use` with its `NodeRef`. A fixture method that takes a
 element to run page code on.
 
 ```ts
-evaluateOn: (target: Locator, source: string, arg: JsonValue) =>
+evaluateOn: (target: Locator, source: string, arg?: JsonValue) =>
   context.withNode('browser.evaluateOn', target, (ref, operation) =>
     surface.evaluateOn(ref, source, arg, operation)),
 ```

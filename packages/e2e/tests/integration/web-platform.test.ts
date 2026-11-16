@@ -767,6 +767,10 @@ describe('web platform integration under a short action timeout', () => {
     expect(result.status).toBe('failed');
     const attempt = result.attempts[0]!;
     expect(attempt.error?.code, attempt.error?.message).toBe('LOCATOR_NOT_FOUND');
-    expect(attempt.steps.find((step) => step.status === 'failed')?.api).toBe('browser.evaluateOn');
+    const step = attempt.steps.find((candidate) => candidate.status === 'failed');
+    expect(step?.api).toBe('browser.evaluateOn');
+    // It waits out the 500 ms action timeout, not the 30 s default.
+    expect(step?.durationMs).toBeGreaterThanOrEqual(400);
+    expect(step?.durationMs).toBeLessThan(5000);
   });
 });

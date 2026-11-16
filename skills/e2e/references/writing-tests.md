@@ -370,7 +370,8 @@ a match, hidden or not; `toHaveClass` compares the whole normalized class
 list or tests a RegExp; `toHaveCSS` compares one computed property
 (kebab-case, `--custom` too) like a text; `toHaveJSProperty` compares the
 JSON at a dotted path (`dataset.state`, `offsetWidth`) by deep equality. A
-failed matcher is `ASSERTION_FAILED`, exit code 1.
+matcher whose value never matches is `ASSERTION_FAILED`, exit code 1. An
+ambiguous locator is `LOCATOR_AMBIGUOUS` at once.
 
 Playwright's `{ checked: false }`, `{ enabled: false }`, `{ visible: false }`,
 and `{ attached: false }` flip their matchers, and `{ ignoreCase: true }`
