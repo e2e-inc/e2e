@@ -153,6 +153,17 @@ const KEYBOARD_DRAG_RATIO = 0.03;
 const KEYBOARD_ALTERNATIVES = 'Tap the app\'s own Done or close control, or press Enter on the field when submitting is what you want.';
 
 /**
+ * Whether one line of agent-device's app list names `app`. A line reads
+ * `Name (id)`, the bundle id or package in the parentheses, or carries the
+ * id alone; either the id or the whole name matches.
+ */
+function listsApp(entry: string, app: string): boolean {
+  if (entry === app) return true;
+  const named = /^(.*) \(([^()]+)\)$/.exec(entry);
+  return named !== null && (named[2] === app || named[1] === app);
+}
+
+/**
  * The top edge of the soft keyboard: the band the capture's producer
  * measured, else the highest keyboard or key element, else the bottom of the
  * screen.
@@ -1034,6 +1045,45 @@ export class AgentDeviceSurface {
     // The engine's own build, installed: without `app`, this is what `app.open()` launches from here on.
     if (engineBuild) this.installedApp = installed.app;
     return installed;
+  }
+
+  /**
+   * Removes an app (default: the pinned one) from the session's device and
+   * resolves to whether it was installed; an app that is not there is no
+   * error. Removing the app the session observes (or an app while the
+   * session knows none) drops the nodes read from its screen, and removing
+   * the build `installApp` pinned without an `app.bundleId` unpins it, so
+   * `app.open()` asks for an install instead of launching an app that is gone.
+   */
+  async uninstallApp(app: string | undefined, signal: AbortSignal): Promise<boolean> {
+    const target = this.appArgument('uninstallApp', app);
+    const result = await this.command(`uninstall ${target}`, (client) => client.apps.uninstall({ ...this.selection(), app: target }), signal);
+    if (this.appIdentity === undefined || target === this.appIdentity) {
+      this.appIdentity = undefined;
+      this.screenReplaced();
+    }
+    if (target === this.installedApp) this.installedApp = undefined;
+    return result['wasInstalled'] === true;
+  }
+
+  /**
+   * Whether an app (default: the pinned one) is on the session's device,
+   * system apps included. `app` is a bundle id or package, or the exact
+   * name agent-device lists the app under.
+   */
+  async isAppInstalled(app: string | undefined, signal: AbortSignal): Promise<boolean> {
+    const target = this.appArgument('isAppInstalled', app);
+    const apps = await this.command('list apps', (client) => client.apps.list({ ...this.selection(), appsFilter: 'all' }), signal);
+    return apps.some((entry) => listsApp(entry, target));
+  }
+
+  /** The app a `device` method names, else the pinned one; neither is `INVALID_STATE`. */
+  private appArgument(method: string, app: string | undefined): string {
+    const target = app ?? this.pinnedApp;
+    if (target === undefined) {
+      throw invalidState(`${method} needs an app: pass a bundle id or package, or pin one with the target's app.bundleId or app.appPath`);
+    }
+    return target;
   }
 
   private async snapshot(signal: AbortSignal, interactiveOnly: boolean, budget: InputBudget): Promise<RawSnapshot> {

@@ -603,6 +603,25 @@ describe('lifecycle', () => {
     expect(h.surface.pinnedApp).toBe('com.example.app');
   });
 
+  it('unpins the build installApp pinned once uninstallApp removes it', async () => {
+    const signal = new AbortController().signal;
+    const h = harness({ appPath: './build/App.app' }, false);
+    h.fake.respond('apps.install', () => ({ app: './build/App.app', appPath: '/project/build/App.app', platform: 'ios', bundleId: 'com.example.app', identifiers: {} }));
+    h.fake.respond('apps.uninstall', () => ({ app: 'com.example.app', wasInstalled: true }));
+    await boot(h);
+    await h.engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal, resolveSecret: noSecrets, ...ignoreTrace });
+    await h.surface.installApp(undefined, {}, signal);
+    expect(h.surface.pinnedApp).toBe('com.example.app');
+    expect(await h.surface.uninstallApp(undefined, signal)).toBe(true);
+    expect(h.fake.lastArgs('apps.uninstall')).toEqual({ platform: 'ios', app: 'com.example.app' });
+    expect(h.surface.pinnedApp).toBeUndefined();
+    await expect(h.engine.session!.restart!(operation())).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('device.installApp()'),
+    });
+    expect(h.fake.methods()).not.toContain('apps.open');
+  });
+
   it('pins the package an Android install reports, and refuses the build path as an app id', async () => {
     const signal = new AbortController().signal;
     const h = harness({ appPath: './build/app.apk', platform: 'android' }, false);
@@ -2103,6 +2122,37 @@ describe('device fixture', () => {
     const free = harness({}, false);
     await openAttempt(free);
     await expect(fixture(free).installApp('/b/App.app', { reinstall: true })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    expect(free.fake.methods()).toEqual(['devices.boot']);
+  });
+
+  it('uninstalls and looks up apps by id or listed name, the pinned app by default', async () => {
+    const h = harness();
+    await openAttempt(h);
+    h.fake.respond('apps.uninstall', (args) => ({ app: (args as { app: string }).app, wasInstalled: (args as { app: string }).app !== 'dev.gone' }));
+    h.fake.respond('apps.list', () => ['Settings (com.apple.Preferences)', 'e2e Benchmark (dev.e2e.benchmark)', 'dev.bare.package']);
+    const device = fixture(h);
+    const before = h.fake.calls.length;
+    expect(await device.isAppInstalled('dev.e2e.benchmark')).toBe(true);
+    expect(await device.isAppInstalled('e2e Benchmark')).toBe(true);
+    expect(await device.isAppInstalled('dev.bare.package')).toBe(true);
+    expect(await device.isAppInstalled('dev.e2e')).toBe(false);
+    expect(await device.isAppInstalled()).toBe(true);
+    expect(await device.uninstallApp('dev.e2e.benchmark')).toBe(true);
+    expect(await device.uninstallApp('dev.gone')).toBe(false);
+    expect(await device.uninstallApp()).toBe(true);
+    expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
+      ...Array.from({ length: 5 }, () => ['apps.list', { platform: 'ios', appsFilter: 'all' }]),
+      ['apps.uninstall', { platform: 'ios', app: 'dev.e2e.benchmark' }],
+      ['apps.uninstall', { platform: 'ios', app: 'dev.gone' }],
+      ['apps.uninstall', { platform: 'ios', app: 'Settings' }],
+    ]);
+    expect(declared!.uninstallApp).toMatchObject({ kind: 'resource' });
+    expect((declared!.isAppInstalled as { label: (app?: string) => string }).label()).toBe('Settings');
+
+    const free = harness({}, false);
+    await openAttempt(free);
+    await expect(fixture(free).uninstallApp()).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    await expect(fixture(free).isAppInstalled()).rejects.toMatchObject({ code: 'INVALID_STATE' });
     expect(free.fake.methods()).toEqual(['devices.boot']);
   });
 
