@@ -334,9 +334,9 @@ await expect(browser).toHaveCSS(nav, 'position', 'sticky');
 await expect(browser).toHaveCSS(nav, '--accent', /red/);
 ```
 
-- It reads `getComputedStyle(element).getPropertyValue(property)`, as
-  Playwright does. Names are kebab-case (`background-color`), and a custom
-  property (`--accent`) works.
+- It runs `getComputedStyle(element).getPropertyValue(property)` as page
+  code, so a page that overrides those functions changes what it reads. Names are kebab-case (`background-color`), and a custom property
+  (`--accent`) works.
 - The target resolves with its scope and frame, as
   [`browser.evaluateOn`](/reference/web#evaluateon) does. A target that
   matches nothing yet is one more poll, not a failure, until the assertion
