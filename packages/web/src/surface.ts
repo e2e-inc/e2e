@@ -1489,5 +1489,7 @@ async function soleElement(locator: Locator): Promise<ElementHandle<Element>> {
   const [only] = handles;
   if (only !== undefined && handles.length === 1) return only;
   for (const handle of handles) void handle.dispose().catch(() => undefined);
-  throw new EngineError('NODE_STALE', `located node now matches ${handles.length} elements; resolve it again`, { retryable: true });
+  throw new EngineError('NODE_STALE', `located node now matches ${handles.length} elements; resolve it again`, {
+    retryable: true,
+  });
 }

@@ -10,7 +10,12 @@ export function jsonEqual(a: JsonValue, b: JsonValue): boolean {
   if (a === b) return true;
   if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
   if (isJsonArray(a) || isJsonArray(b)) {
-    return isJsonArray(a) && isJsonArray(b) && a.length === b.length && a.every((item, index) => jsonEqual(item, b[index]!));
+    return (
+      isJsonArray(a) &&
+      isJsonArray(b) &&
+      a.length === b.length &&
+      a.every((item, index) => jsonEqual(item, b[index]!))
+    );
   }
   const keys = Object.keys(a);
   return (

@@ -143,7 +143,10 @@ export function pageValueEncoder(): (root: unknown) => string | undefined {
  * helper; the page has no such helper, so the same one is declared next to
  * the inlined source for as long as this engine supports those runners.
  */
-export function compileEvaluation(source: string, call: EvaluationCall): (...args: unknown[]) => Promise<string> {
+export function compileEvaluation(
+  source: string,
+  call: EvaluationCall,
+): (...args: unknown[]) => Promise<string> {
   const onElement = call[0] === 'element';
   try {
     return new Function(...(onElement ? ['element', 'arg'] : ['arg']), `
@@ -194,7 +197,9 @@ export function readEvaluation(text: string): EvaluationResult {
   }
   if (report.ok) return { ok: true, value: report.value };
   if ('detached' in report) {
-    throw new EngineError('NODE_STALE', 'node is detached; resolve it again before evaluating', { retryable: true });
+    throw new EngineError('NODE_STALE', 'node is detached; resolve it again before evaluating', {
+      retryable: true,
+    });
   }
   if ('invalid' in report) return { ok: false, invalid: report.invalid };
   throw new TestError('EVALUATE_FAILED', report.message);
