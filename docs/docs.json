@@ -116,6 +116,7 @@
               "integrations/kernel",
               "integrations/browser-run",
               "integrations/lightpanda",
+              "integrations/moli",
               "integrations/eas",
               "integrations/smol",
               "integrations/limrun",
