@@ -129,7 +129,7 @@ describe('error translation', () => {
     const failure = staleOr(refused, 'perform tap');
     expect(failure).toMatchObject({ code: 'NOT_ACTIONABLE', retryable: false, cause: refused });
     // agent-device's hint names its CLI; the failure names the test's move instead.
-    expect(failure.message).toBe(`perform tap failed: ${text} Hint: Nothing was sent. Tap the point instead with screen.tapAt().`);
+    expect(failure.message).toBe(`perform tap failed: ${text} Hint: Nothing was sent. For a tap, tap the point instead with screen.tapAt().`);
     expect(
       staleOr(new AppError('COMMAND_FAILED', text, { reason: 'window-origin-unknown', hint, dispatched: 'unknown' }), 'perform tap'),
     ).toMatchObject({ code: 'ENGINE_FAILURE' });

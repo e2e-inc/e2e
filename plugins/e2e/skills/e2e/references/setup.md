@@ -425,7 +425,8 @@ export default {
   `ACTION_FAILED` naming the cover; dismiss it or scroll the target clear.
 - On iOS, an action on a node can fail `ACTION_FAILED` with `has no
   established screen-coordinate origin` on a heavy screen (a large web view
-  just loaded). Nothing was sent; tap the point with `screen.tapAt()`.
+  just loaded). Nothing was sent; for a tap, tap the point with
+  `screen.tapAt()`.
 - `screen`, `expect`, `app`, `agent` work unchanged; `test` from
   `@e2e-dev/mobile` types the `device` fixture (`installApp`, `openLink`,
   `setPermission`, `setNetwork`, `setAppearance`, `clearKeychain`, `fold`

@@ -108,10 +108,11 @@ const OCCLUDED_REASONS: ReadonlySet<string> = new Set(['target_covered', 'tap_ke
  * capture the ref came from could not place its window on the screen. Nothing
  * was sent, and the runner is healthy. agent-device's own hint names its CLI
  * (`snapshot`, `screenshot`), so the failure carries the test's move instead:
- * a point tap is not aimed from the capture, and agent-device takes it.
+ * for a tap, a point tap is not aimed from the capture, and agent-device
+ * takes it. Other actions have no point form, so the hint stays on the tap.
  */
 const NO_SCREEN_ORIGIN_REASON = 'window-origin-unknown';
-const NO_SCREEN_ORIGIN_HINT = 'Nothing was sent. Tap the point instead with screen.tapAt().';
+const NO_SCREEN_ORIGIN_HINT = 'Nothing was sent. For a tap, tap the point instead with screen.tapAt().';
 
 /**
  * What the iOS automation runner reported about itself, by the code
