@@ -281,6 +281,20 @@ export interface Browser extends Expectable<BrowserExpectation> {
     arg: Arg,
   ): Promise<T>;
   /**
+   * Evaluates trusted test code in the page on the one element `target`
+   * matches, with the locator's scope, strictness, and frame, waiting for it
+   * like a read. The element is passed inside the page only; the result is
+   * JSON. Meant for reads: the code can change the page, but a test should
+   * act through the locator instead.
+   */
+  evaluateOn<T extends JsonValue>(target: Locator, fn: string | ((element: Element) => T | Promise<T>)): Promise<T>;
+  /** Evaluates trusted test code on the one element `target` matches, with one required JSON-safe argument. */
+  evaluateOn<T extends JsonValue, Arg extends JsonValue>(
+    target: Locator,
+    fn: string | ((element: Element, arg: Arg) => T | Promise<T>),
+    arg: Arg,
+  ): Promise<T>;
+  /**
    * Adds a script every document runs before the page's own, from the next
    * navigation on: JavaScript source, a `{ path }` relative to the project
    * root, or a function.
@@ -585,6 +599,9 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
   /** The page title, read within the action timeout or, for a matcher poll, within the poll's deadline. */
   const currentTitle = (deadline?: Deadline) =>
     surface.guard(context.operation(deadline?.remaining()), 'title', () => surface.requirePage().title());
+  /** Page code run on the one node `target` matches, waiting for it up to `timeout` (the action timeout by default). */
+  const evaluateOn = (target: Locator, source: string, arg: JsonValue | undefined, timeout?: number) =>
+    context.withNode(target, (ref, operation) => surface.evaluateOn(ref, source, arg, operation), obj({ timeout }));
   const expectation = createBrowserExpectation({ currentUrl, currentTitle, baseHref, deadlineFor, context });
 
   const browser: Omit<Browser, keyof Expectable<BrowserExpectation>> = {
@@ -625,7 +642,7 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     ): Promise<T> {
       const source = typeof fn === 'string' ? fn : pageFunctionSource(fn);
       validateJsonValue(arg, 'evaluate argument');
-      const evaluate = compileEvaluation(source, arg !== undefined);
+      const evaluate = compileEvaluation(source, arg !== undefined ? ['arg'] : []);
       // JSON safety is checked above; Playwright's recursive argument type cannot expand JsonValue.
       const input: unknown = arg;
       // A handle, not a value: the boundary resolves to a string, which Playwright
@@ -640,6 +657,15 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
         }
       });
       return decodeEvaluation(report) as T;
+    },
+    async evaluateOn<T extends JsonValue>(
+      target: Locator,
+      fn: string | ((element: Element, arg?: never) => T | Promise<T>),
+      arg?: JsonValue,
+    ): Promise<T> {
+      const source = typeof fn === 'string' ? fn : pageFunctionSource(fn);
+      validateJsonValue(arg, 'evaluateOn argument');
+      return (await evaluateOn(target, source, arg)) as T;
     },
     async addInitScript(script: unknown, ...rest: unknown[]) {
       const source = await testInitScriptSource(script, rest.length === 0 ? undefined : { arg: rest[0] }, (file) => surface.projectPath(file));
@@ -931,6 +957,8 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     title: action,
     waitForURL: { ...navigationCall, verifies: true, label: patternLabel },
     evaluate: action,
+    // withNode bounds the wait for the node and the evaluation, so the step sets no deadline of its own.
+    evaluateOn: { ...action, timeout: false },
     addInitScript: { ...action, label: (script) => initScriptLabel(script) },
     route: { ...action, label: patternLabel },
     unroute: { ...action, label: patternLabel },

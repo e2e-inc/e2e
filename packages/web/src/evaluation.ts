@@ -1,6 +1,6 @@
 /** Separates exceptions thrown by trusted page code from failures of the evaluation transport. */
 import type { JsonValue } from 'e2e';
-import { TestError } from '@e2e-dev/core/engine';
+import { EngineError, TestError } from '@e2e-dev/core/engine';
 import { message } from './support.ts';
 
 /** The `__name` helper tsx's `keepNames` output calls, declared beside test code serialized into the page; it takes `defineProperty` before that code runs. */
@@ -35,11 +35,19 @@ export function pageFunctionSource(fn: (...args: never[]) => unknown): string {
   }
 }
 
-/** What the page-side boundary reports, as JSON text: the result, a thrown message, or why the result is not JSON. */
+/**
+ * What the boundary `compileEvaluation` compiles passes the function the
+ * source evaluates to, in order: nothing, the argument, the element
+ * Playwright supplies, or the element and the argument.
+ */
+export type EvaluationCall = readonly [] | readonly ['arg'] | readonly ['element'] | readonly ['element', 'arg'];
+
+/** What the page-side boundary reports, as JSON text: the result, a thrown message, why the result is not JSON, or an element that left its document. */
 type EvaluationReport =
   | { ok: true; value?: JsonValue }
   | { ok: false; message: string }
-  | { ok: false; invalid: string };
+  | { ok: false; invalid: string }
+  | { ok: false; detached: true };
 
 /** Thrown by a `pageValueEncoder` encoder for a value that is not JSON; the reason completes `evaluate result ...`. */
 interface InvalidPageValue {
@@ -112,8 +120,9 @@ export function pageValueEncoder(): (root: unknown) => string | undefined {
 
 /**
  * Compiles the page-side error boundary without evaluating the caller's source in this process.
- * The source is one expression: a function it evaluates to is called with the argument, any
- * other value is the result. The boundary resolves to JSON text, a primitive the caller takes
+ * The source is one expression: a function it evaluates to is called with what `call` names,
+ * any other value is the result. A call that starts with the element runs on the element
+ * Playwright supplies, and reports a detached one instead of running the source. The boundary resolves to JSON text, a primitive the caller takes
  * back without Playwright serializing it in the page, so a page that deleted or replaced a
  * global the serializer needs still returns its result; `decodeEvaluation` reads it.
  *
@@ -123,10 +132,12 @@ export function pageValueEncoder(): (root: unknown) => string | undefined {
  * helper; the page has no such helper, so the same one is declared next to
  * the inlined source for as long as this engine supports those runners.
  */
-export function compileEvaluation(source: string, hasArgument: boolean): (arg: unknown) => Promise<string> {
+export function compileEvaluation(source: string, call: EvaluationCall): (...args: unknown[]) => Promise<string> {
+  const onElement = call[0] === 'element';
   try {
-    return new Function('arg', `
-      ${KEEP_NAMES_HELPER}
+    return new Function(...(onElement ? ['element', 'arg'] : ['arg']), `
+      ${KEEP_NAMES_HELPER}${onElement ? `
+      if (!element.isConnected) return '{"ok":false,"detached":true}';` : ''}
       return (async (encode, run) => {
         const report = (ok, key, text) => \`{"ok":\${ok}\${text === undefined ? '' : \`,"\${key}":\${text}\`}}\`;
         let value;
@@ -149,8 +160,8 @@ export function compileEvaluation(source: string, hasArgument: boolean): (arg: u
           }
           return '{"ok":false,"message":"evaluate result cannot be read"}';
         }
-      })((${pageValueEncoder.toString()})(), async () => ((result) => typeof result === 'function' ? result(${hasArgument ? 'arg' : ''}) : result)((${source}\n)));
-    `) as (arg: unknown) => Promise<string>;
+      })((${pageValueEncoder.toString()})(), async () => ((result) => typeof result === 'function' ? result(${call.join(', ')}) : result)((${source}\n)));
+    `) as (...args: unknown[]) => Promise<string>;
   } catch (cause) {
     throw new TestError('EVALUATE_FAILED', message(cause), { cause });
   }
@@ -166,6 +177,7 @@ export function decodeEvaluation(text: string): JsonValue | undefined {
     throw new TestError('EVALUATE_FAILED', 'page evaluation returned an unreadable result', { cause });
   }
   if (report.ok) return report.value;
+  if ('detached' in report) throw new EngineError('NODE_STALE', 'node is detached; resolve it again before evaluating', { retryable: true });
   if ('invalid' in report) throw new TestError('INVALID_ARGUMENT', `evaluate result ${report.invalid}`);
   throw new TestError('EVALUATE_FAILED', report.message);
 }

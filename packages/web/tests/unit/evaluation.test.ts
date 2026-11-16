@@ -10,7 +10,7 @@ import { compileEvaluation, decodeEvaluation, pageFunctionSource, pageValueEncod
 
 /** Runs the compiled boundary in this process and decodes its report like `browser.evaluate`. */
 async function run(source: string, hasArgument: boolean, arg?: unknown): Promise<unknown> {
-  return decodeEvaluation(await compileEvaluation(source, hasArgument)(arg));
+  return decodeEvaluation(await compileEvaluation(source, hasArgument ? ['arg'] : [])(arg));
 }
 
 describe('compileEvaluation', () => {
@@ -56,6 +56,20 @@ describe('compileEvaluation', () => {
       code: 'INVALID_ARGUMENT',
       message: 'evaluate result must be JSON-safe, found undefined',
     });
+  });
+
+  it('calls a function on the element first, then the argument', async () => {
+    const element = { isConnected: true, id: 'nav' };
+    expect(decodeEvaluation(await compileEvaluation('(el, suffix) => el.id + suffix', ['element', 'arg'])(element, '-main'))).toBe('nav-main');
+    expect(decodeEvaluation(await compileEvaluation('(...args) => args.length', ['element'])(element))).toBe(1);
+  });
+
+  it('reports a detached element as a retryable stale node without running the source', async () => {
+    const ran = vi.fn();
+    vi.stubGlobal('ran', ran);
+    const report = await compileEvaluation('() => ran()', ['element'])({ isConnected: false });
+    expect(() => decodeEvaluation(report)).toThrow(expect.objectContaining({ code: 'NODE_STALE', retryable: true }));
+    expect(ran).not.toHaveBeenCalled();
   });
 });
 
