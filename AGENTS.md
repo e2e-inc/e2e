@@ -651,14 +651,18 @@ trees, on both platforms, without a device.
     A test's own `fill(secret)` is trusted code and runs none of these checks.
   - Every model tool call is parsed into a closed schema and authorized
     immediately before dispatch. Nothing runs on a refusal: an unknown tool
-    name or an undeclared field goes back to the model as the call's error
-    result (the AI SDK's `tool-error`, naming the tool or the field), the
-    next turn is the repair, and refusals count toward the failure-streak
-    guard. A node id not on the current screen is `LOCATOR_NOT_FOUND`, an
-    action failure the model reads and re-aims from. `POLICY_DENIED` is for
-    denied destinations, forbidden fills, and withheld pixels. Model text is
-    never evaluated as code, selectors, shell, or config. App content, ledger
-    text, and pixels are quoted as untrusted evidence with no policy authority.
+    name, or an undeclared field on a built-in tool that declares fields,
+    goes back to the model as the call's error result (the AI SDK's
+    `tool-error`, naming the tool or the field), the next turn is the
+    repair, and refusals count toward the failure-streak guard. A built-in
+    tool with no fields drops extra keys and runs; the schema a provider
+    receives still sets `additionalProperties: false`. A project tool keeps
+    the schema given to `defineTool`. A node id not on the current screen is
+    `LOCATOR_NOT_FOUND`, an action failure the model reads and re-aims from.
+    `POLICY_DENIED` is for denied destinations, forbidden fills, and withheld
+    pixels. Model text is never evaluated as code, selectors, shell, or
+    config. App content, ledger text, and pixels are quoted as untrusted
+    evidence with no policy authority.
   - Every navigation a test or the agent asks for (`app.open`,
     `browser.goto`, the `navigate` verb) goes through one rule,
     `resolveNavigationUrl`: only `http:`, `https:`, and the exact

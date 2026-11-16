@@ -47,13 +47,16 @@ larger budget. [How agent steps work](/agent-steps) explains a step in full.
 ### Tool calls
 
 - Built-in tools have closed schemas and appear only when the engine
-  supports them.
+  supports them. A tool that declares fields rejects a key it does not
+  declare. A tool with no fields drops extra keys and runs; the schema a
+  provider receives still sets `additionalProperties: false`.
 - Project tools must use `defineTool` with an `execute` and can't replace a
-  built-in name.
+  built-in name. A project tool keeps the schema given to `defineTool`, so
+  whether it strips or rejects an undeclared key is up to that schema.
 - Only read-only project tools may request an observation.
-- A call to a tool the step doesn't offer, or with an undeclared argument,
-  never runs. The model reads the refusal as the call's result and tries
-  again.
+- A call to a tool the step doesn't offer, or with an undeclared argument
+  on a built-in tool that declares fields, never runs. The model reads the refusal
+  as the call's result and tries again.
 - The runner never evaluates model text as code, selectors, shell commands,
   or config.
 
