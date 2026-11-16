@@ -42,7 +42,7 @@ import type { AttemptTab } from './attempt-session.ts';
 import type { DialogHandler } from './dialogs.ts';
 import { saveDownloadsTo, saveFromBrowser, saveLocally } from './downloads.ts';
 import { isTestErrorCode, message as causeMessage, pageScriptFailure, translatePwError } from './support.ts';
-import { compileEvaluation, decodeEvaluation, pageFunctionSource } from './evaluation.ts';
+import { compileEvaluation, decodeEvaluation, isNonJsonResult, pageFunctionSource } from './evaluation.ts';
 import { initScriptLabel, testInitScriptSource } from './init-scripts.ts';
 import { MEDIA_KEYS, mediaLabel, mediaProblem, type WebMedia } from './media.ts';
 import { lowercaseNames } from './protected-app.ts';
@@ -1031,6 +1031,8 @@ function describeExpectedUrl(expected: string | RegExp, baseHref: string): strin
 interface BrowserSample {
   readonly matches: boolean | undefined;
   readonly observed: string;
+  /** The poll's deadline ended the read before it finished, so it saw nothing new. */
+  readonly cutOff?: true;
 }
 
 /**
@@ -1054,8 +1056,10 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
       signal: deps.context.signal,
       negated,
       evaluate: async () => {
-        last = await read(deadline);
-        return last.matches;
+        const sample = await read(deadline);
+        // A cut-off read saw nothing, so the failure reports the last read that finished.
+        if (sample.cutOff !== true || last === undefined) last = sample;
+        return sample.matches;
       },
       onTimeout: (cause) =>
         new TestError(
@@ -1076,10 +1080,11 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
   };
   /**
    * One sample of the value `source` reads off the one node `target`
-   * matches, observed as `subject` and its JSON. A node not there by the
-   * poll's deadline is `no node`, so one that never arrives fails the
-   * assertion; two or more matches fail at once. A value that is not JSON,
-   * or none, never matches.
+   * matches, observed as `subject` and its JSON. Absence is sampled first,
+   * as `readClass` does, so a node that never arrives is `no node` and fails
+   * the assertion; two or more matches fail at once. A value that is not
+   * JSON, or none, never matches, and neither does a read the poll's
+   * deadline cut off.
    */
   const sampleOn = async (
     target: Locator,
@@ -1089,13 +1094,22 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
     deadline: Deadline,
     matches: (value: JsonValue) => boolean,
   ): Promise<BrowserSample> => {
+    const noNode: BrowserSample = { matches: undefined, observed: 'no node' };
+    const cutOff = new EngineError('OPERATION_TIMEOUT', `${subject} read timed out`, { retryable: false });
     let value: JsonValue | undefined;
     try {
-      value = await deps.evaluateOn(target, source, arg, deadline);
+      // A read window lets its last read run past the wait; the poll's deadline is the tighter bound.
+      const read = await withTimeout(
+        (async () => ((await target.count()) === 0 ? noNode : { value: await deps.evaluateOn(target, source, arg, deadline) }))(),
+        deadline.remaining(),
+        () => cutOff,
+      );
+      if (read === noNode) return noNode;
+      ({ value } = read as { value: JsonValue | undefined });
     } catch (error) {
-      if (isTestErrorCode(error, 'LOCATOR_NOT_FOUND')) return { matches: undefined, observed: 'no node' };
-      // How the evaluation boundary refuses a result that is not JSON.
-      if (isTestErrorCode(error, 'INVALID_ARGUMENT')) return { matches: false, observed: `${subject} is not JSON` };
+      if (error === cutOff) return { matches: undefined, observed: `${subject} not read before the timeout`, cutOff: true };
+      if (isTestErrorCode(error, 'LOCATOR_NOT_FOUND')) return noNode;
+      if (isNonJsonResult(error)) return { matches: false, observed: `${subject} is not JSON` };
       throw error;
     }
     if (value === undefined) return { matches: false, observed: `${subject} is undefined` };

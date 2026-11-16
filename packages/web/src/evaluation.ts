@@ -167,6 +167,17 @@ export function compileEvaluation(source: string, call: EvaluationCall): (...arg
   }
 }
 
+/** The refusals `decodeEvaluation` made of a result that is not JSON, told apart from any other `INVALID_ARGUMENT` by identity. */
+const nonJsonResults = new WeakSet<object>();
+
+/** Whether `cause`, or an error it wraps, is `decodeEvaluation`'s refusal of a result that is not JSON. */
+export function isNonJsonResult(cause: unknown): boolean {
+  for (let current = cause; typeof current === 'object' && current !== null; current = (current as { cause?: unknown }).cause) {
+    if (nonJsonResults.has(current)) return true;
+  }
+  return false;
+}
+
 /** The result of the boundary `compileEvaluation` compiled, from the JSON text it resolved to; throws what the page threw. */
 export function decodeEvaluation(text: string): JsonValue | undefined {
   let report: EvaluationReport;
@@ -178,6 +189,10 @@ export function decodeEvaluation(text: string): JsonValue | undefined {
   }
   if (report.ok) return report.value;
   if ('detached' in report) throw new EngineError('NODE_STALE', 'node is detached; resolve it again before evaluating', { retryable: true });
-  if ('invalid' in report) throw new TestError('INVALID_ARGUMENT', `evaluate result ${report.invalid}`);
+  if ('invalid' in report) {
+    const refusal = new TestError('INVALID_ARGUMENT', `evaluate result ${report.invalid}`);
+    nonJsonResults.add(refusal);
+    throw refusal;
+  }
   throw new TestError('EVALUATE_FAILED', report.message);
 }

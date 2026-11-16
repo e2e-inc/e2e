@@ -2,6 +2,13 @@ import { test } from '@e2e-dev/web';
 import { expect } from 'e2e';
 import { content, failure } from './helpers.ts';
 
+/** A page whose `#slow` element answers `slow` only after a 600 ms busy wait in the page. */
+const slow = content(`<html><p id="slow">Slow</p><script>
+  Object.defineProperty(document.getElementById('slow'), 'slow', {
+    get() { const start = Date.now(); while (Date.now() - start < 600); return 1; },
+  });
+</script></html>`);
+
 const page = content(`<html>
   <nav aria-label="Breadcrumbs" style="position: static">a / b</nav>
   <nav aria-label="Main" data-x="1" style="position: sticky; top: 0; --accent: red">Home</nav>
@@ -111,5 +118,19 @@ test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () 
     const opaque = await failure(() => expect(browser).toHaveJSProperty(main, 'style', 'sticky', { timeout: 300 }));
     expect(opaque).toHaveProperty('code', 'ASSERTION_FAILED');
     expect(opaque).toHaveProperty('message', expect.stringContaining('observed: property style is not JSON'));
+  });
+
+  test('ends a slow sample at the assertion timeout', async ({ browser }) => {
+    await browser.goto(slow);
+    const error = await failure(() => expect(browser).toHaveJSProperty(browser.locator('#slow'), 'slow', 1, { timeout: 200 }));
+    expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
+  });
+
+  test('reports a route failure the poll ran into, instead of reading it as a value that is not JSON', async ({ browser }) => {
+    await browser.route('**/latched', (route) => route.fulfill({ status: 0 }));
+    await browser.goto(page);
+    await browser.evaluate("() => { setTimeout(() => fetch('/latched').catch(() => undefined), 50); }");
+    const error = await failure(() => expect(browser).toHaveJSProperty(browser.locator('#late'), 'id', 'late'));
+    expect(error).toHaveProperty('code', 'INVALID_ARGUMENT');
   });
 });
