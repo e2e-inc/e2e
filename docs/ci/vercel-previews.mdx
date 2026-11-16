@@ -4,6 +4,7 @@ description: Test Vercel preview and production deployments with GitHub Actions,
 ---
 
 import { SetupPrompt } from '../snippets/setup-prompt-card.jsx';
+import { Video } from '../snippets/video.jsx';
 
 export const setupPrompt = `Run this project's e2e tests against Vercel deployments. Docs: \`https://e2e.com/docs/ci/vercel-previews.md\`
 
@@ -20,6 +21,12 @@ production release until the tests pass.
 
 See the [e2e-vercel example](https://github.com/e2e-inc/e2e-vercel) for a
 Next.js app with locator and agent tests.
+
+<Video>
+  <video src="/images/vercel-previews.mp4" aria-label="A pull request that crashes the greeting form fails its e2e check on the Vercel preview. The pull request comment shows the agent's failed steps and the app's uncaught error, and the recorded video shows the crash." muted loop playsInline controls />
+
+  e2e fails a broken pull request on its Vercel preview. The comment comes from the [GitHub reporter](#post-results-on-the-pull-request).
+</Video>
 
 <SetupPrompt>
 
