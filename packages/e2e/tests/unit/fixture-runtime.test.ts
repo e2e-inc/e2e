@@ -349,7 +349,7 @@ describe('context.withNode', () => {
   type Probe = { run(locator: unknown, use: Use, timeout?: number): Promise<string> };
 
   /** A fixture that hands `use` the node a locator matches; `matches` is what each locate answers. */
-  function probeRuntime(matches: () => readonly string[]) {
+  function probeRuntime(matches: () => readonly string[], overrides: Partial<E2EConfig> = {}) {
     const engine = defineEngine({
       name: 'fake', version: '1', spiVersion: 1,
       observe: async () => snapshot([]),
@@ -361,7 +361,7 @@ describe('context.withNode', () => {
         }, { run: { kind: 'resource', timeout: false } }),
       },
     });
-    const { fixtures } = runtime(engine);
+    const { fixtures } = runtime(engine, overrides);
     return { screen: fixtures.screen, probe: (fixtures as unknown as { probe: Probe }).probe };
   }
 
@@ -394,6 +394,49 @@ describe('context.withNode', () => {
     const two = probeRuntime(() => ['a', 'b']);
     await expect(two.probe.run(two.screen.getByRole('navigation'), use, 5_000)).rejects.toMatchObject({ code: 'LOCATOR_AMBIGUOUS' });
     expect(use).not.toHaveBeenCalled();
+  });
+
+  it('waits for a match up to the action timeout, or up to options.timeout when given', async () => {
+    const { screen, probe } = probeRuntime(() => [], { actionTimeout: 400 });
+    const use = async () => 'never';
+    let startedAt = Date.now();
+    await expect(probe.run(screen.getByRole('navigation'), use)).rejects.toMatchObject({ code: 'LOCATOR_NOT_FOUND' });
+    const byDefault = Date.now() - startedAt;
+    startedAt = Date.now();
+    await expect(probe.run(screen.getByRole('navigation'), use, 100)).rejects.toMatchObject({ code: 'LOCATOR_NOT_FOUND' });
+    const byOption = Date.now() - startedAt;
+    expect(byDefault).toBeGreaterThanOrEqual(400);
+    expect(byOption).toBeGreaterThanOrEqual(100);
+    expect(byOption).toBeLessThan(400);
+  });
+
+  it('stops resolving a ref that stays stale at the deadline', async () => {
+    const { screen, probe } = probeRuntime(() => ['nav']);
+    const startedAt = Date.now();
+    await expect(probe.run(screen.getByRole('navigation'), async () => {
+      throw new EngineError('NODE_STALE', 'replaced', { retryable: true });
+    }, 200)).rejects.toMatchObject({ code: 'LOCATOR_NOT_FOUND' });
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+  });
+
+  it('does not resolve again for a stale node that is not retryable', async () => {
+    const { screen, probe } = probeRuntime(() => ['nav']);
+    const use = vi.fn(async () => {
+      throw new EngineError('NODE_STALE', 'gone for good', { retryable: false });
+    });
+    await expect(probe.run(screen.getByRole('navigation'), use, 2_000)).rejects.toMatchObject({ code: 'LOCATOR_NOT_FOUND' });
+    expect(use).toHaveBeenCalledTimes(1);
+  });
+
+  it('translates an engine error from use into the public taxonomy, naming the locator', async () => {
+    const { screen, probe } = probeRuntime(() => ['nav']);
+    await expect(probe.run(screen.getByRole('navigation'), async () => {
+      throw new EngineError('NOT_ACTIONABLE', 'covered by a dialog', { retryable: false });
+    })).rejects.toMatchObject({
+      code: 'ACTION_FAILED',
+      category: 'test',
+      message: expect.stringContaining('covered by a dialog: getByRole("navigation")'),
+    });
   });
 
   it('refuses a value that is not an e2e locator, and a locator from another attempt, naming the caller', async () => {
