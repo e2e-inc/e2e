@@ -619,9 +619,9 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
   /** The page title, read within the action timeout or, for a matcher poll, within the poll's deadline. */
   const currentTitle = (deadline?: Deadline) =>
     surface.guard(context.operation(deadline?.remaining()), 'title', () => surface.requirePage().title());
-  /** Page code run on the one node `target` matches, waiting for it up to the action timeout. */
-  const evaluateOn = (target: Locator, source: string, arg: JsonValue | undefined) =>
-    context.withNode(target, (ref, operation) => surface.evaluateOn(ref, source, arg, operation));
+  /** Page code run on the one node `target` matches, waiting for it up to the action timeout; `api` names the caller. */
+  const evaluateOn = (api: string, target: Locator, source: string, arg: JsonValue | undefined) =>
+    context.withNode(api, target, (ref, operation) => surface.evaluateOn(ref, source, arg, operation));
   const expectation = createBrowserExpectation({ currentUrl, currentTitle, evaluateOn, baseHref, deadlineFor, context });
 
   const browser: Omit<Browser, keyof Expectable<BrowserExpectation>> = {
@@ -685,7 +685,7 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     ): Promise<T> {
       const source = typeof fn === 'string' ? fn : pageFunctionSource(fn);
       validateJsonValue(arg, 'evaluateOn argument');
-      return evaluationValue(await evaluateOn(target, source, arg)) as T;
+      return evaluationValue(await evaluateOn('browser.evaluateOn', target, source, arg)) as T;
     },
     async addInitScript(script: unknown, ...rest: unknown[]) {
       const source = await testInitScriptSource(script, rest.length === 0 ? undefined : { arg: rest[0] }, (file) => surface.projectPath(file));
@@ -1004,8 +1004,8 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
 interface ExpectationDeps {
   currentUrl(deadline: Deadline): Promise<string>;
   currentTitle(deadline: Deadline): Promise<string>;
-  /** Page code run on the one node `target` matches, waiting for it up to the action timeout. */
-  evaluateOn(target: Locator, source: string, arg: JsonValue): Promise<EvaluationResult>;
+  /** Page code run on the one node `target` matches, waiting for it up to the action timeout; `api` names the caller. */
+  evaluateOn(api: string, target: Locator, source: string, arg: JsonValue): Promise<EvaluationResult>;
   baseHref(): string;
   deadlineFor(timeout: number | undefined, api: string): Deadline;
   readonly context: EngineFixtureContext;
@@ -1065,10 +1065,12 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
   };
   const validate = (api: string, options: object | undefined, keys: readonly string[] = ['timeout']): void =>
     rejectUnknownOptions(`expect.${negated ? 'not.' : ''}${api}`, options, keys);
+  /** A matcher as its messages name it: `expect.toHaveCSS`, `expect.not.toHaveCSS`. */
+  const qualified = (api: string): string => `expect.${negated ? 'not.' : ''}${api}`;
   /** The name a matcher's string argument is, refused unless it is a nonempty string. */
   const requireName = (api: string, what: string, value: unknown): string => {
     if (typeof value !== 'string' || value.length === 0) {
-      throw new TestError('INVALID_ARGUMENT', `expect.${negated ? 'not.' : ''}${api} ${what} must be a nonempty string`);
+      throw new TestError('INVALID_ARGUMENT', `${qualified(api)} ${what} must be a nonempty string`);
     }
     return value;
   };
@@ -1079,6 +1081,7 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
    * deadline. A value that is not JSON, or none, never matches.
    */
   const sampleOn = async (
+    api: string,
     target: Locator,
     subject: string,
     source: string,
@@ -1088,7 +1091,7 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
   ): Promise<BrowserSample> => {
     /** The evaluation on the one match, `undefined` while nothing matches, as `readClass` reads a class. */
     const readOnce = async () =>
-      (await target.count()) === 0 ? undefined : deps.evaluateOn(target, source, arg);
+      (await target.count()) === 0 ? undefined : deps.evaluateOn(qualified(api), target, source, arg);
     let read: EvaluationResult | undefined;
     try {
       // A locator read takes the action timeout; the poll's deadline is the tighter bound.
@@ -1178,21 +1181,23 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
         'toHaveCSS',
         `css ${name} ${describePattern(pattern)}`,
         (deadline) =>
-          sampleOn(target, `css ${name}`, COMPUTED_STYLE_SOURCE, name, deadline, (value) => typeof value === 'string' && matchesText(value, pattern)),
+          sampleOn('toHaveCSS', target, `css ${name}`, COMPUTED_STYLE_SOURCE, name, deadline, (value) =>
+            typeof value === 'string' && matchesText(value, pattern)),
         options?.timeout,
       );
     },
     toHaveJSProperty(target, path, expected, options) {
       validate('toHaveJSProperty', options);
       const name = requireName('toHaveJSProperty', 'path', path);
-      if (expected === undefined) {
-        throw new TestError('INVALID_ARGUMENT', `expect.${negated ? 'not.' : ''}toHaveJSProperty expected value must be JSON, found undefined`);
-      }
-      validateJsonValue(expected, `expect.${negated ? 'not.' : ''}toHaveJSProperty expected value`);
+      const what = `${qualified('toHaveJSProperty')} expected value`;
+      if (expected === undefined) throw new TestError('INVALID_ARGUMENT', `${what} must be JSON, found undefined`);
+      validateJsonValue(expected, what);
       return poll(
         'toHaveJSProperty',
         `property ${name} ${JSON.stringify(expected)}`,
-        (deadline) => sampleOn(target, `property ${name}`, PROPERTY_PATH_SOURCE, name, deadline, (value) => jsonEqual(value, expected)),
+        (deadline) =>
+          sampleOn('toHaveJSProperty', target, `property ${name}`, PROPERTY_PATH_SOURCE, name, deadline, (value) =>
+            jsonEqual(value, expected)),
         options?.timeout,
       );
     },

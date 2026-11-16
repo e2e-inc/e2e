@@ -357,7 +357,7 @@ describe('context.withNode', () => {
       fixtures: {
         probe: (context) => context.fixture('probe', {
           run: (locator: Locator, use: Use, timeout?: number) =>
-            context.withNode(locator, use, timeout === undefined ? undefined : { timeout }),
+            context.withNode('probe.run', locator, use, timeout === undefined ? undefined : { timeout }),
         }, { run: { kind: 'resource', timeout: false } }),
       },
     });
@@ -396,12 +396,13 @@ describe('context.withNode', () => {
     expect(use).not.toHaveBeenCalled();
   });
 
-  it('refuses a value that is not an e2e locator, and a locator from another attempt, with INVALID_LOCATOR', async () => {
+  it('refuses a value that is not an e2e locator, and a locator from another attempt, naming the caller', async () => {
     const use = vi.fn(async () => 'never');
     const { probe } = probeRuntime(() => ['nav']);
     const other = probeRuntime(() => ['nav']);
-    await expect(probe.run({ selector: 'nav' }, use)).rejects.toMatchObject({ code: 'INVALID_LOCATOR' });
-    await expect(probe.run(other.screen.getByRole('navigation'), use)).rejects.toMatchObject({ code: 'INVALID_LOCATOR' });
+    const refusal = { code: 'INVALID_LOCATOR', message: expect.stringMatching(/^probe\.run requires/) };
+    await expect(probe.run({ selector: 'nav' }, use)).rejects.toMatchObject(refusal);
+    await expect(probe.run(other.screen.getByRole('navigation'), use)).rejects.toMatchObject(refusal);
     expect(use).not.toHaveBeenCalled();
   });
 });

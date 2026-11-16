@@ -63,6 +63,13 @@ test.describe('browser.evaluateOn', { requires: ['browser'] }, () => {
     await browser.goto(page);
     expect(await browser.evaluateOn(browser.locator('#late'), (el) => el.textContent)).toBe('Late');
   });
+
+  test('names itself when the target is not a locator', async ({ browser }) => {
+    await browser.goto(page);
+    const error = await failure(() => browser.evaluateOn('#x' as never, (el) => el.id));
+    expect(error).toHaveProperty('code', 'INVALID_LOCATOR');
+    expect(error).toHaveProperty('message', expect.stringContaining('browser.evaluateOn'));
+  });
 });
 
 test.describe('expect(browser).toHaveCSS', { requires: ['browser'] }, () => {
