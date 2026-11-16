@@ -1042,7 +1042,12 @@ interface ExpectationDeps {
    * Page code run on the one node `target` matches, waiting for it up to the
    * action timeout. `api` is the public call an `INVALID_LOCATOR` names.
    */
-  evaluateOn(api: string, target: Locator, source: string, arg: JsonValue): Promise<EvaluationResult>;
+  evaluateOn(
+    api: string,
+    target: Locator,
+    source: string,
+    arg: JsonValue,
+  ): Promise<EvaluationResult>;
   baseHref(): string;
   deadlineFor(timeout: number | undefined, api: string): Deadline;
   readonly context: EngineFixtureContext;
@@ -1107,7 +1112,10 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
   /** The name a matcher's string argument is, refused unless it is a nonempty string. */
   const requireName = (api: string, what: string, value: unknown): string => {
     if (typeof value !== 'string' || value.length === 0) {
-      throw new TestError('INVALID_ARGUMENT', `${qualified(api)} ${what} must be a nonempty string`);
+      throw new TestError(
+        'INVALID_ARGUMENT',
+        `${qualified(api)} ${what} must be a nonempty string`,
+      );
     }
     return value;
   };
@@ -1137,7 +1145,8 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
       read = await withTimeout(
         readOnce(),
         deadline.remaining(),
-        () => new EngineError('OPERATION_TIMEOUT', `${subject} read timed out`, { retryable: false }),
+        () =>
+          new EngineError('OPERATION_TIMEOUT', `${subject} read timed out`, { retryable: false }),
       );
     } catch (error) {
       if (isTestErrorCode(error, 'LOCATOR_NOT_FOUND')) {
