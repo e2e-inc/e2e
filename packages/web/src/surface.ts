@@ -909,7 +909,7 @@ export class PlaywrightSurface {
     arg: JsonValue | undefined,
     operation: OperationContext,
   ): Promise<EvaluationResult> {
-    const evaluate = compileEvaluation(source, arg === undefined ? ['element'] : ['element', 'arg']);
+    const evaluate = compileEvaluation(source, ['element', 'arg']);
     const report = await this.guard(operation, 'evaluateOn', async (currentOperation) => {
       const target = await this.requireSession().refs.lookup(ref);
       currentOperation.signal.throwIfAborted();

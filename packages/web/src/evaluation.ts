@@ -37,10 +37,10 @@ export function pageFunctionSource(fn: (...args: never[]) => unknown): string {
 
 /**
  * What the boundary `compileEvaluation` compiles passes the function the
- * source evaluates to, in order: nothing, the argument, the element
- * Playwright supplies, or the element and the argument.
+ * source evaluates to, in order: nothing, the argument, or the element
+ * Playwright supplies and the argument.
  */
-export type EvaluationCall = readonly [] | readonly ['arg'] | readonly ['element'] | readonly ['element', 'arg'];
+export type EvaluationCall = readonly [] | readonly ['arg'] | readonly ['element', 'arg'];
 
 /** A finished evaluation: its JSON result, or why the result is not JSON. */
 export type EvaluationResult =

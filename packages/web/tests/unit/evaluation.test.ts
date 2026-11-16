@@ -62,7 +62,6 @@ describe('compileEvaluation', () => {
     const element = { isConnected: true, id: 'nav' };
     const evaluate = compileEvaluation('(el, suffix) => el.id + suffix', ['element', 'arg']);
     expect(decodeEvaluation(await evaluate(element, '-main'))).toBe('nav-main');
-    expect(decodeEvaluation(await compileEvaluation('(...args) => args.length', ['element'])(element))).toBe(1);
   });
 
   it('reads a result that is not JSON as a value, which only the throwing form refuses', async () => {
@@ -74,7 +73,7 @@ describe('compileEvaluation', () => {
   it('reports a detached element as a retryable stale node without running the source', async () => {
     const ran = vi.fn();
     vi.stubGlobal('ran', ran);
-    const report = await compileEvaluation('() => ran()', ['element'])({ isConnected: false });
+    const report = await compileEvaluation('() => ran()', ['element', 'arg'])({ isConnected: false }, undefined);
     expect(() => readEvaluation(report)).toThrow(expect.objectContaining({ code: 'NODE_STALE', retryable: true }));
     expect(ran).not.toHaveBeenCalled();
   });
