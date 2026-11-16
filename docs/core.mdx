@@ -30,8 +30,9 @@ Install `@e2e-dev/mobile` instead of, or beside, `@e2e-dev/web` to drive a
 device. `@e2e-dev/core` needs no `e2e`, the test runner, which is built on it.
 
 <Note>
-Import an engine from its `/engine` entry, as the examples do. The package's
-main entry is for tests: it loads `e2e`.
+Import an engine from its `/engine` entry, as the examples do. The main entry
+also runs without `e2e`, but its `test` throws `RUNNER_NOT_INSTALLED`, and its
+types need `e2e` unless `skipLibCheck` is on.
 </Note>
 
 ## Drive a browser

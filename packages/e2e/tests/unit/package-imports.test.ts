@@ -48,9 +48,9 @@ const SCOPES: readonly Scope[] = [
       '@ai-sdk/xai': ['oauth/grok.ts'],
     },
   },
-  // An engine's main entry adds its fixture to `test`; its `/engine` entry runs on `@e2e-dev/core` alone.
-  { dir: 'web', optionalPeerHomes: { e2e: ['index.ts'] } },
-  { dir: 'mobile', optionalPeerHomes: { ai: [], e2e: ['index.ts'] } },
+  // An engine's main entry adds its fixture to `test`, which `runner-test.ts` requires from `e2e` only when it is installed.
+  { dir: 'web', optionalPeerHomes: { e2e: ['runner-test.ts'] } },
+  { dir: 'mobile', optionalPeerHomes: { ai: [], e2e: ['runner-test.ts'] } },
   { dir: 'github', optionalPeerHomes: {} },
   { dir: 'core', optionalPeerHomes: { ai: ['agent/ai-sdk.ts'] } },
 ];
@@ -168,11 +168,12 @@ function sourceModule(dir: string, file: string, specifier: string): string | un
 
 /**
  * Every package the static imports reach from `entry`, each with the chain of
- * files that leads to it, through `@e2e-dev/core` too, since `e2e` runs on it. A
- * dynamic import is not followed: that module loads when the code that asks
- * for it runs.
+ * files that leads to it, through `@e2e-dev/core` too, since `e2e` runs on it,
+ * and how many source modules the walk visited, `entry` included. A dynamic
+ * import is not followed: that module loads when the code that asks for it
+ * runs.
  */
-function startupPackages(dir: string, entry: string): Map<string, string[]> {
+function startupGraph(dir: string, entry: string): { readonly modules: number; readonly reached: Map<string, string[]> } {
   const start = path.join(dir, entry);
   const chains = new Map<string, string[]>([[start, [start]]]);
   const reached = new Map<string, string[]>();
@@ -193,7 +194,7 @@ function startupPackages(dir: string, entry: string): Map<string, string[]> {
       }
     }
   }
-  return reached;
+  return { modules: queue.length, reached };
 }
 
 /** What a process loads for an entry before it knows what it will do, and the packages that serve only some of what it does. */
@@ -216,13 +217,14 @@ const STARTUP: readonly { readonly dir: string; readonly entry: string; readonly
 
 describe.each(STARTUP)('importing packages/$dir/src/$entry', ({ dir, entry, lazy }) => {
   it(`loads none of ${lazy.join(', ')} until the code that needs it runs`, () => {
-    const reached = startupPackages(dir, entry);
+    const { reached } = startupGraph(dir, entry);
     const loaded = lazy.flatMap((name) => (reached.has(name) ? [reached.get(name)!.join(' > ')] : []));
     expect(loaded, 'import it with `await import()` in the function that uses it').toEqual([]);
   });
 
-  it('is scanned: its static imports reach some package at all', () => {
-    expect(startupPackages(dir, entry).size).toBeGreaterThan(0);
+  it('is scanned: its static imports reach some module or package at all', () => {
+    const { modules, reached } = startupGraph(dir, entry);
+    expect(modules + reached.size).toBeGreaterThan(1);
   });
 });
 

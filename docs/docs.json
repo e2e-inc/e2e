@@ -101,6 +101,7 @@
             "group": "Run in CI",
             "pages": [
               "ci/github-actions",
+              "ci/vercel-previews",
               "ci/gitlab",
               "ci/eas-workflows",
               "ci/bitrise",
