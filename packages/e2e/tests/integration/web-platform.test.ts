@@ -431,6 +431,16 @@ test('an option waitForURL does not take is refused', async ({ app, browser }) =
 });
 `;
 
+// Run under a short action timeout, the budget `browser.evaluateOn` waits for
+// its node within, so a node that never arrives fails fast.
+const EVALUATE_ON = `import { test } from '@e2e-dev/web';
+
+test('evaluateOn on a node that never arrives', async ({ app, browser }) => {
+  await app.open('/classes');
+  await browser.evaluateOn(browser.locator('#never-card'), (el) => el.id);
+});
+`;
+
 describe('web platform integration', () => {
   let app: FixtureApp;
   let outcome: RunOutcome;
@@ -731,5 +741,32 @@ describe('web platform integration', () => {
     const result = resultByTitle(outcome, title);
     expect(result.status).toBe('failed');
     expect(result.attempts[0]!.error).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining(message) });
+  });
+});
+
+describe('web platform integration under a short action timeout', () => {
+  let app: FixtureApp;
+  let outcome: RunOutcome;
+  let project: FixtureProject;
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+    ({ outcome, project } = await runProjectWithConfigFile(
+      { 'tests/evaluate-on.e2e.ts': EVALUATE_ON },
+      { appUrl: app.url, configSource: workerConfigSource(1, "\n  cache: 'off',\n  actionTimeout: 500,") },
+    ));
+  }, 120_000);
+
+  afterAll(async () => {
+    project?.cleanup();
+    await app?.close();
+  });
+
+  it('fails evaluateOn on a node that never arrives with LOCATOR_NOT_FOUND, not a step timeout', () => {
+    const result = resultByTitle(outcome, 'evaluateOn on a node that never arrives');
+    expect(result.status).toBe('failed');
+    const attempt = result.attempts[0]!;
+    expect(attempt.error?.code, attempt.error?.message).toBe('LOCATOR_NOT_FOUND');
+    expect(attempt.steps.find((step) => step.status === 'failed')?.api).toBe('browser.evaluateOn');
   });
 });

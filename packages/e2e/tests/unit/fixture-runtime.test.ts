@@ -410,6 +410,17 @@ describe('context.withNode', () => {
     expect(byOption).toBeLessThan(400);
   });
 
+  it('hands use a budget no larger than the timeout given', async () => {
+    const { screen, probe } = probeRuntime(() => ['nav']);
+    let budget: number | undefined;
+    await probe.run(screen.getByRole('navigation'), async (_ref, operation) => {
+      budget = operation.timeoutMs;
+      return 'read';
+    }, 300);
+    expect(budget).toBeGreaterThan(0);
+    expect(budget).toBeLessThanOrEqual(300);
+  });
+
   it('stops resolving a ref that stays stale at the deadline', async () => {
     const { screen, probe } = probeRuntime(() => ['nav']);
     const startedAt = Date.now();
