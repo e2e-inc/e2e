@@ -394,13 +394,17 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * contribute once. `accessible` is set for an accessible name, which reads
    * CSS generated content (`::before`, `::after`) and an embedded control's
    * value as accname does, and unset for label text, which Playwright's
-   * `getByLabel` reads without either.
+   * `getByLabel` reads without either. `fromContent` is set while reading
+   * the content of an element accname names from content, where a
+   * descendant adds its own content only when its role allows it
+   * (`addsContentToName`).
    */
   interface NameWalk {
     readonly inReference: boolean;
     readonly hiddenAllowed: boolean;
     readonly visited: Set<Element>;
     readonly accessible: boolean;
+    readonly fromContent: boolean;
   }
 
   /** Computed style of any element, SVG included, or undefined in a document with no view. */
@@ -408,11 +412,12 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     el.ownerDocument.defaultView?.getComputedStyle(el);
 
   /** A walk from the top, with the elements that may not contribute again already visited. */
-  const nameWalk = (visited: readonly Element[], accessible: boolean): NameWalk => ({
+  const nameWalk = (visited: readonly Element[], accessible: boolean, fromContent = false): NameWalk => ({
     inReference: false,
     hiddenAllowed: false,
     visited: new Set(visited),
     accessible,
+    fromContent,
   });
 
   /**
@@ -565,6 +570,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
           hiddenAllowed: isReferenceHidden(target),
           visited: walk.visited,
           accessible: walk.accessible,
+          fromContent: false,
         }),
       );
     }
@@ -657,10 +663,48 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     const alternative = altOf(el) ?? svgTitleOf(el);
     if (alternative !== null) return alternative;
     if (NAME_OPAQUE_TAGS.has(el.tagName)) return '';
+    if (walk.fromContent && !addsContentToName(el)) return excludedDescendantNameOf(el, walk);
     const content = childrenNameOf(el, walk);
     if (content !== '') return content;
     const title = el.getAttribute('title');
     return title === null ? '' : title.trim();
+  };
+
+  /**
+   * True when a descendant adds its own content to a name from content, as
+   * Playwright's `allowsNameFromContent` reads it: no role, a role named from
+   * content, or a text or structure role. So a tree item holding its child
+   * `group` is named by its own label, and a tab by its text without its
+   * `status` badge.
+   */
+  const addsContentToName = (el: Element): boolean => {
+    const tag = el.tagName.toLowerCase();
+    const role = explicitRole(el) === null && tag in PLAYWRIGHT_TAG_ROLES ? PLAYWRIGHT_TAG_ROLES[tag] ?? null : implicitRole(el);
+    return role === null || ACCNAME_CONTENT_ROLES.has(role) || CONTENT_DESCENDANT_ROLES.has(role);
+  };
+
+  /**
+   * Tags whose role Playwright reads differently from `implicitRole` in a way
+   * that decides whether they add their content: an `<address>` has none, so
+   * its text counts, and a `<blockquote>`, `<math>`, or `<search>` has one
+   * that is not named from content.
+   */
+  const PLAYWRIGHT_TAG_ROLES: Readonly<Record<string, string | null>> = {
+    address: null,
+    blockquote: 'blockquote',
+    math: 'math',
+    search: 'search',
+  };
+
+  /**
+   * What a descendant that adds no content of its own adds to a name from
+   * content instead: a fieldset its legend, a figure its figcaption, read
+   * whole, and anything else its title.
+   */
+  const excludedDescendantNameOf = (el: Element, walk: NameWalk): string => {
+    const caption = namingChildOf(el);
+    if (caption !== undefined) return contentNameOf(caption, styleOf(caption), { ...walk, fromContent: false });
+    return el.getAttribute('title')?.trim() ?? '';
   };
 
   /**
@@ -722,21 +766,19 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * controls' values too, as an accessible name does and label text does not.
    * `named` is the element the text names when that is not `el` (a control
    * read through its `<label>`), which never contributes to its own name.
+   * `fromContent` when accname names `el` from its content, so each
+   * descendant's role decides whether its content counts.
    */
-  const nameTextOf = (el: Element, accessible: boolean, named: Element = el): string => {
+  const nameTextOf = (el: Element, accessible: boolean, named: Element = el, fromContent = false): string => {
     if (isNameHidden(el, styleOf(el))) return '';
     if (NAME_OPAQUE_TAGS.has(el.tagName)) return '';
-    return childrenNameOf(el, nameWalk([el, named], accessible)).replace(/\s+/g, ' ').trim();
+    return childrenNameOf(el, nameWalk([el, named], accessible, fromContent)).replace(/\s+/g, ' ').trim();
   };
 
   const NAME_OPAQUE_TAGS: ReadonlySet<string> = new Set(['TEXTAREA', 'SELECT', 'INPUT', 'SCRIPT', 'STYLE']);
 
-  /**
-   * Roles named from their content (accname 2F, the list Playwright's role
-   * selector uses), plus `listitem`, `status`, and `alert`, which the tree
-   * has always named so a list row or a message reads as one line.
-   */
-  const NAME_FROM_CONTENT_ROLES: ReadonlySet<string> = new Set([
+  /** Roles accname names from their content (2F), the list Playwright's role selector uses. */
+  const ACCNAME_CONTENT_ROLES: ReadonlySet<string> = new Set([
     'button',
     'cell',
     'checkbox',
@@ -755,13 +797,34 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     'tab',
     'tooltip',
     'treeitem',
-    'listitem',
-    'status',
-    'alert',
+  ]);
+
+  /**
+   * Roles named from their content: accname's, plus `listitem`, `status`,
+   * and `alert`, which the tree has always named so a list row or a message
+   * reads as one line.
+   */
+  const NAME_FROM_CONTENT_ROLES: ReadonlySet<string> = new Set([...ACCNAME_CONTENT_ROLES, 'listitem', 'status', 'alert']);
+
+  /**
+   * Text and structure roles whose content a descendant adds to a name from
+   * content, besides `ACCNAME_CONTENT_ROLES` (Playwright's
+   * `allowsNameFromContent`).
+   */
+  const CONTENT_DESCENDANT_ROLES: ReadonlySet<string> = new Set([
+    'caption', 'code', 'contentinfo', 'definition', 'deletion', 'emphasis', 'insertion', 'list', 'listitem',
+    'mark', 'none', 'paragraph', 'presentation', 'region', 'row', 'rowgroup', 'section', 'strong',
+    'subscript', 'superscript', 'table', 'term', 'time',
   ]);
 
   /** HTML-AAM: the child element that names its parent when nothing ARIA does. */
   const NAMING_CHILD_TAGS: Readonly<Record<string, string>> = { fieldset: 'legend', figure: 'figcaption', table: 'caption' };
+
+  /** The `<legend>`, `<figcaption>`, or `<caption>` child that names a fieldset, figure, or table (`NAMING_CHILD_TAGS`). */
+  const namingChildOf = (el: Element): Element | undefined => {
+    const captionTag = NAMING_CHILD_TAGS[el.tagName.toLowerCase()];
+    return captionTag === undefined ? undefined : Array.from(el.children).find((child) => child.tagName.toLowerCase() === captionTag);
+  };
 
   /** The `<label>` elements associated with a labelable element (button, input, meter, output, progress, select, textarea). */
   const associatedLabels = (el: Element): readonly HTMLLabelElement[] => {
@@ -926,12 +989,9 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     }
     const alternative = altOf(el) ?? (isPresentational(el) ? null : svgTitleOf(el));
     if (alternative !== null) return alternative;
-    const captionTag = NAMING_CHILD_TAGS[el.tagName.toLowerCase()];
-    if (captionTag !== undefined) {
-      const caption = Array.from(el.children).find((child) => child.tagName.toLowerCase() === captionTag);
-      const text = caption === undefined ? '' : nameTextOf(caption, true);
-      if (text !== '') return text;
-    }
+    const caption = namingChildOf(el);
+    const captionText = caption === undefined ? '' : nameTextOf(caption, true);
+    if (captionText !== '') return captionText;
     if (el instanceof HTMLInputElement && (el.type === 'button' || el.type === 'submit' || el.type === 'reset')) {
       if (el.value.trim() !== '') return el.value.trim();
       // HTML-AAM: a submit or reset button with no value reads its default label.
@@ -940,7 +1000,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     }
     const role = implicitRole(el);
     if (role !== null && NAME_FROM_CONTENT_ROLES.has(role)) {
-      const text = nameTextOf(el, true);
+      const text = nameTextOf(el, true, el, ACCNAME_CONTENT_ROLES.has(role));
       if (text !== '') return text;
     }
     const title = el.getAttribute('title');

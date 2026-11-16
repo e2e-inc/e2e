@@ -232,6 +232,24 @@ export const FIXTURE_PAGES: readonly FixturePage[] = [
     `,
   },
   {
+    name: 'descendants in a name from content',
+    html: `
+      <ul role="tree" aria-label="Files">
+        <li role="treeitem" aria-expanded="true"><span>src</span>
+          <ul role="group">
+            <li role="treeitem" aria-expanded="true"><span>lib</span><ul role="group"><li role="treeitem">a.ts</li></ul></li>
+            <li role="treeitem">index.ts</li>
+          </ul>
+        </li>
+      </ul>
+      <div role="tablist"><button role="tab" aria-selected="true">Inbox <span role="status">3</span></button></div>
+      <button><span role="img">*</span> Party</button>
+      <h2>Title <span role="note">Note text</span></h2>
+      <a href="/quote" title="Quote"><blockquote>Quote text</blockquote></a>
+      <a href="/contact"><address>1 Main St</address></a>
+    `,
+  },
+  {
     name: 'generated content',
     html: `
       <style>
