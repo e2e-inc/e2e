@@ -357,12 +357,13 @@ await expect(browser).toHaveJSProperty(screen.getByRole('navigation'), 'dataset.
 ```
 
 - `path` is a property name or a dotted path, walked as Playwright walks
-  it. Each value before the last key must be an object that has the next
-  key, own or inherited. The last key is then read off the value reached,
-  so `value.length` on an input reads the length of its value.
+  it. Each value before the last key must be an object. The last key is
+  then read off the value reached, so `value.length` on an input reads the
+  length of its value.
 - A walk that reaches a missing key, or a string, a function, or `null`
   before the last key, reads as `undefined`, which never matches. So `.not`
-  passes on a missing property.
+  passes on a missing property. Playwright throws instead on a `null`
+  before the last key, or an `undefined` just before it.
 - A value that is not JSON, such as `style` or an element, never matches.
   The failure says `is not JSON`.
 - Objects and arrays compare structurally. Object keys may come in any

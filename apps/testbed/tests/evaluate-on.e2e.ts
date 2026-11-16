@@ -19,8 +19,10 @@ const page = content(`<html>
   <nav aria-label="Main" data-x="1" style="position: sticky; top: 0; --accent: red">Home</nav>
   <iframe srcdoc="<aside style='width: 240px'>Side</aside>"></iframe>
   <label>Name <input value="Ada"></label>
+  <p id="holder">Holder</p>
   <script>
     document.querySelector('[aria-label="Main"]').config = { mode: 'dark', sizes: [1, 2] };
+    document.getElementById('holder').holder = { inner: null };
     setTimeout(() => {
       const late = document.createElement('p');
       late.id = 'late';
@@ -223,6 +225,15 @@ test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () 
       expect(browser).not.toHaveJSProperty(browser.locator('#frozen'), 'id', 'other', { timeout: 1000 }),
     );
     expect(error).toHaveProperty('code', 'ACTION_FAILED');
+  });
+
+  test('reads a path through a null value as undefined, so its negation passes', async ({ browser }) => {
+    await browser.goto(page);
+    const holder = browser.locator('#holder');
+    await expect(browser).not.toHaveJSProperty(holder, 'holder.inner.x', 1);
+    const error = await failure(() => expect(browser).toHaveJSProperty(holder, 'holder.inner.x', 1, { timeout: 300 }));
+    expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
+    expect(error).toHaveProperty('message', expect.stringContaining('observed: property holder.inner.x is undefined'));
   });
 
   test('reports a route failure the poll ran into, instead of reading it as a value that is not JSON', async ({ browser }) => {
