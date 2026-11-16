@@ -971,7 +971,7 @@
       }
     },
     {
-      "slug": "vercel",
+      "slug": "vercel-previews",
       "title": "Testing Vercel Previews with e2e",
       "shortTitle": "Vercel Previews",
       "description": "A Next.js app tested against every Vercel preview and production deployment, with a Deployment Check that holds back a failing production deployment.",
