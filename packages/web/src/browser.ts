@@ -1255,15 +1255,20 @@ const COMPUTED_STYLE_SOURCE = pageFunctionSource((element: Element, name: string
 
 /**
  * Page code for `toHaveJSProperty`: the value at a dotted path on the
- * element, `undefined` once a step finds nothing to walk into.
+ * element, walked as Playwright walks it. Every step but the last must be a
+ * non-null object that has the next key, own or inherited, or the value is
+ * `undefined`; the last key is then read off whatever the walk reached.
  */
 const PROPERTY_PATH_SOURCE = pageFunctionSource((element: Element, path: string) => {
-  let value: unknown = element;
-  for (const name of path.split('.')) {
-    if (value === null || value === undefined) return undefined;
-    value = (value as Record<string, unknown>)[name];
+  const names = path.split('.');
+  const last = names.pop() ?? '';
+  let target: unknown = element;
+  for (const name of names) {
+    if (typeof target !== 'object' || target === null || !(name in target)) return undefined;
+    target = (target as Record<string, unknown>)[name];
   }
-  return value;
+  if (target === null || target === undefined) return undefined;
+  return (target as Record<string, unknown>)[last];
 });
 
 /**

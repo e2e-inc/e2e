@@ -171,6 +171,16 @@ test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () 
     await expect(browser).not.toHaveJSProperty(screen.getByRole('navigation', { name: 'Main' }), 'style', 'x');
   });
 
+  test('walks a path as Playwright does, reading the last key off a string but not stepping through one', async ({ browser, screen }) => {
+    await browser.goto(page);
+    const name = screen.getByLabel('Name');
+    await expect(browser).toHaveJSProperty(name, 'value.length', 3);
+    await expect(browser).not.toHaveJSProperty(name, 'value.0.length', 1);
+    const error = await failure(() => expect(browser).toHaveJSProperty(name, 'value.0.length', 1, { timeout: 300 }));
+    expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
+    expect(error).toHaveProperty('message', expect.stringContaining('observed: property value.0.length is undefined'));
+  });
+
   test('fails with the value it observed, or that it is not JSON', async ({ browser, screen }) => {
     await browser.goto(page);
     const main = screen.getByRole('navigation', { name: 'Main' });
