@@ -18,6 +18,7 @@ const page = content(`<html>
   <nav aria-label="Breadcrumbs" style="position: static">a / b</nav>
   <nav aria-label="Main" data-x="1" style="position: sticky; top: 0; --accent: red">Home</nav>
   <iframe srcdoc="<aside style='width: 240px'>Side</aside>"></iframe>
+  <label>Name <input value="Ada"></label>
   <script>
     setTimeout(() => {
       const late = document.createElement('p');
@@ -62,6 +63,17 @@ test.describe('browser.evaluateOn', { requires: ['browser'] }, () => {
   test('waits for an element that appears later', async ({ browser }) => {
     await browser.goto(page);
     expect(await browser.evaluateOn(browser.locator('#late'), (el) => el.textContent)).toBe('Late');
+  });
+
+  test('reads an element a label locator matches', async ({ browser, screen }) => {
+    await browser.goto(page);
+    expect(await browser.evaluateOn(screen.getByLabel('Name'), (el) => (el as HTMLInputElement).value)).toBe('Ada');
+  });
+
+  test('refuses an argument that is not JSON', async ({ browser }) => {
+    await browser.goto(page);
+    const error = await failure(() => browser.evaluateOn(browser.locator('#late'), (el) => el.id, new Map() as never));
+    expect(error).toHaveProperty('code', 'INVALID_ARGUMENT');
   });
 
   test('names itself when the target is not a locator', async ({ browser }) => {
@@ -138,6 +150,25 @@ test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () 
     const opaque = await failure(() => expect(browser).toHaveJSProperty(main, 'style', 'sticky', { timeout: 300 }));
     expect(opaque).toHaveProperty('code', 'ASSERTION_FAILED');
     expect(opaque).toHaveProperty('message', expect.stringContaining('observed: property style is not JSON'));
+  });
+
+  test('matches on an element a label locator matches', async ({ browser, screen }) => {
+    await browser.goto(page);
+    await expect(browser).toHaveJSProperty(screen.getByLabel('Name'), 'value', 'Ada');
+  });
+
+  test('refuses a path or an expected value it cannot compare', async ({ browser, screen }) => {
+    await browser.goto(page);
+    const main = screen.getByRole('navigation', { name: 'Main' });
+    for (const [path, expected] of [
+      ['', '1'],
+      [1, '1'],
+      ['dataset.x', undefined],
+      ['dataset.x', new Date()],
+    ] as const) {
+      const error = await failure(() => expect(browser).toHaveJSProperty(main, path as never, expected as never));
+      expect(error).toHaveProperty('code', 'INVALID_ARGUMENT');
+    }
   });
 
   test('fails a sample that outlasts the assertion timeout, even when it would match', async ({ browser }) => {
