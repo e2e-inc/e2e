@@ -1073,6 +1073,9 @@ interface BrowserSample {
   readonly observed: string;
 }
 
+/** The sample of a locator matcher while its target matches nothing. */
+const NO_NODE: BrowserSample = { matches: undefined, observed: 'no node' };
+
 /**
  * `expect(browser)` matchers: URL, title, and class polling against the
  * assertion budget. Every read is bounded by the poll's deadline, so a page
@@ -1120,46 +1123,54 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
     return value;
   };
   /**
-   * One sample of the value `source` reads off the one node `target`
-   * matches, observed as `subject` and its JSON, taken the way `toHaveClass`
-   * takes one: absence first, then the read, both inside the poll's
-   * deadline. A value that is not JSON, or none, never matches.
+   * The poll read of a matcher on the one node `target` matches. A locator
+   * read waits for its match until the action timeout, so each sample counts
+   * matches first: a node that never arrives stays an assertion failure.
+   * Then `read` takes the sample, and both run inside the poll's deadline.
+   * Nothing matching, before or during the read, is one more poll.
    */
-  const sampleOn = async (
+  const sampleNode = (
+    api: string,
+    target: Locator,
+    subject: string,
+    read: () => Promise<BrowserSample>,
+  ): ((deadline: Deadline) => Promise<BrowserSample>) => {
+    const once = async () => ((await target.count()) === 0 ? NO_NODE : read());
+    return async (deadline) => {
+      try {
+        // A locator read takes the action timeout; the poll's deadline is the tighter bound.
+        return await withTimeout(
+          once(),
+          deadline.remaining(),
+          () =>
+            new EngineError('OPERATION_TIMEOUT', `${subject} read timed out`, { retryable: false }),
+        );
+      } catch (error) {
+        if (isTestErrorCode(error, 'LOCATOR_NOT_FOUND')) return NO_NODE;
+        throw error;
+      }
+    };
+  };
+  /**
+   * A matcher sample of the page code `source` run on the one node `target`
+   * matches, observed as `subject` and its JSON. A value that is not JSON,
+   * or none, never matches.
+   */
+  const sampleJson = (
     api: string,
     target: Locator,
     subject: string,
     source: string,
     arg: JsonValue,
-    deadline: Deadline,
     matches: (value: JsonValue) => boolean,
-  ): Promise<BrowserSample> => {
-    /** The evaluation on the one match, `undefined` while nothing matches, as `readClass` reads. */
-    const readOnce = async () =>
-      (await target.count()) === 0
-        ? undefined
-        : deps.evaluateOn(qualified(api), target, source, arg);
-    let read: EvaluationResult | undefined;
-    try {
-      // A locator read takes the action timeout; the poll's deadline is the tighter bound.
-      read = await withTimeout(
-        readOnce(),
-        deadline.remaining(),
-        () =>
-          new EngineError('OPERATION_TIMEOUT', `${subject} read timed out`, { retryable: false }),
-      );
-    } catch (error) {
-      if (isTestErrorCode(error, 'LOCATOR_NOT_FOUND')) {
-        return { matches: undefined, observed: 'no node' };
-      }
-      throw error;
-    }
-    if (read === undefined) return { matches: undefined, observed: 'no node' };
-    if (!read.ok) return { matches: false, observed: `${subject} is not JSON` };
-    const { value } = read;
-    if (value === undefined) return { matches: false, observed: `${subject} is undefined` };
-    return { matches: matches(value), observed: `${subject} ${JSON.stringify(value)}` };
-  };
+  ): ((deadline: Deadline) => Promise<BrowserSample>) =>
+    sampleNode(api, target, subject, async () => {
+      const read = await deps.evaluateOn(qualified(api), target, source, arg);
+      if (!read.ok) return { matches: false, observed: `${subject} is not JSON` };
+      const { value } = read;
+      if (value === undefined) return { matches: false, observed: `${subject} is undefined` };
+      return { matches: matches(value), observed: `${subject} ${JSON.stringify(value)}` };
+    });
   return {
     get not() {
       return createBrowserExpectation(deps, !negated);
@@ -1200,26 +1211,14 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
       return poll(
         'toHaveClass',
         `class ${describePattern(pattern)}`,
-        async (deadline) => {
-          let value: string | null | undefined;
-          try {
-            // A locator read takes the action timeout; the poll's deadline is the tighter bound.
-            value = await withTimeout(
-              readClass(target),
-              deadline.remaining(),
-              () => new EngineError('OPERATION_TIMEOUT', 'class read timed out', { retryable: false }),
-            );
-          } catch (error) {
-            if (isTestErrorCode(error, 'LOCATOR_NOT_FOUND')) return { matches: undefined, observed: 'no node' };
-            throw error;
-          }
-          if (value === undefined) return { matches: undefined, observed: 'no node' };
+        sampleNode('toHaveClass', target, 'class', async () => {
+          const value = await target.getAttribute('class');
           if (value === null) return { matches: false, observed: 'no class attribute' };
           return {
             matches: matchesText(value.trim().split(/\s+/).join(' '), pattern),
             observed: `class ${JSON.stringify(value)}`,
           };
-        },
+        }),
         options?.timeout,
       );
     },
@@ -1230,9 +1229,8 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
       return poll(
         'toHaveCSS',
         `css ${name} ${describePattern(pattern)}`,
-        (deadline) =>
-          sampleOn('toHaveCSS', target, `css ${name}`, COMPUTED_STYLE_SOURCE, name, deadline,
-            (value) => matchesText(String(value), pattern)),
+        sampleJson('toHaveCSS', target, `css ${name}`, COMPUTED_STYLE_SOURCE, name,
+          (value) => matchesText(String(value), pattern)),
         options?.timeout,
       );
     },
@@ -1247,9 +1245,8 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
       return poll(
         'toHaveJSProperty',
         `property ${name} ${JSON.stringify(expected)}`,
-        (deadline) =>
-          sampleOn('toHaveJSProperty', target, `property ${name}`, PROPERTY_PATH_SOURCE, name,
-            deadline, (value) => jsonEqual(value, expected)),
+        sampleJson('toHaveJSProperty', target, `property ${name}`, PROPERTY_PATH_SOURCE, name,
+          (value) => jsonEqual(value, expected)),
         options?.timeout,
       );
     },
@@ -1281,16 +1278,6 @@ const PROPERTY_PATH_SOURCE = pageFunctionSource((element: Element, path: string)
   if (target === null || target === undefined) return undefined;
   return (target as Record<string, unknown>)[last];
 });
-
-/**
- * The class attribute of one match, `undefined` while nothing matches. A
- * read waits for its match until the action timeout, so the poll samples
- * absence first: a node that never arrives stays an assertion failure.
- */
-async function readClass(target: Locator): Promise<string | null | undefined> {
-  if ((await target.count()) === 0) return undefined;
-  return target.getAttribute('class');
-}
 
 function requireSelector(method: string, selector: unknown): string {
   if (typeof selector !== 'string' || selector.length === 0) {
