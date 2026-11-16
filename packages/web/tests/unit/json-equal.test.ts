@@ -31,4 +31,11 @@ describe('jsonEqual', () => {
     expect(jsonEqual(a, b)).toBe(false);
     expect(jsonEqual(b, a)).toBe(false);
   });
+
+  it('tells an own __proto__ key from another key, though the other object inherits __proto__', () => {
+    // oxlint-disable-next-line e2e/no-unchecked-json -- a literal, parsed the way a page result is
+    const parsed = JSON.parse('{"__proto__":{}}') as JsonValue;
+    expect(jsonEqual(parsed, { y: {} })).toBe(false);
+    expect(jsonEqual({ y: {} }, parsed)).toBe(false);
+  });
 });

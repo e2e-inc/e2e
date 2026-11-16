@@ -1182,7 +1182,7 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
         `css ${name} ${describePattern(pattern)}`,
         (deadline) =>
           sampleOn('toHaveCSS', target, `css ${name}`, COMPUTED_STYLE_SOURCE, name, deadline, (value) =>
-            typeof value === 'string' && matchesText(value, pattern)),
+            matchesText(String(value), pattern)),
         options?.timeout,
       );
     },
