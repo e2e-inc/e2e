@@ -625,4 +625,27 @@ test('negated', async ({ app, screen }) => {
     },
     30_000,
   );
+
+  it(
+    'opens a locator screenshot failure with the caller\'s message',
+    async () => {
+      const { fake } = screenEngine(() => screenPng(WHITE, BLUE));
+      const test = `import { test, expect } from 'e2e';
+
+test('labelled', async ({ app, screen }) => {
+  await app.open('/');
+  await expect(screen.getByRole('button', { name: 'Submit' }), 'the button restyled').not.toHaveScreenshot('button');
+});
+`;
+      const { outcome, project } = await runProject({ 'tests/labelled.e2e.ts': test }, { appUrl: FAKE_APP_URL, config: fakeConfig(fake) });
+      try {
+        const error = attemptOf(outcome, 'labelled').error;
+        expect(error?.code).toBe('ASSERTION_FAILED');
+        expect(error?.message.startsWith('the button restyled: expect.not.toHaveScreenshot failed\nno stored screenshot')).toBe(true);
+      } finally {
+        project.cleanup();
+      }
+    },
+    30_000,
+  );
 });

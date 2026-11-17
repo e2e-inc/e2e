@@ -28,7 +28,7 @@ test('checkout summary', async ({ screen }) => {
 
 | Call | Returns |
 | --- | --- |
-| [`expect(locator)`](#locator-matchers) | `AsyncExpectation` |
+| [`expect(locator, message?)`](#locator-matchers) | `AsyncExpectation` |
 | [`expect(screen)`](#screenshot-matchers) | `ScreenExpectation` |
 | [`expect(fixture)`](#browser-matchers) | The engine's matcher set |
 | [`expect(value, message?)`](#value-matchers) | `ValueExpectation<T>` |
@@ -54,6 +54,16 @@ holds or its timeout passes, under the rules in [Behavior](#behavior):
 [Strictness](#strictness), [Text matching](#text-matching), and
 [Secure fields](#secure-fields) among them. The options are in
 [`AsyncExpectation`](#asyncexpectation-and-textmatcheroptions).
+
+A second argument describes the check. It opens the failure message, before
+the matcher and the locator, on every matcher below, through `.not` and
+`expect.soft`. The step keeps its matcher and locator as its name.
+
+```ts
+await expect(screen.getByTestId('cart-empty'), 'the cart is empty').toBeVisible();
+// ASSERTION_FAILED: the cart is empty: expect.toBeVisible failed
+// locator: getByTestId("cart-empty")
+```
 
 | Matcher | Description |
 | --- | --- |
@@ -529,8 +539,8 @@ expect(created, 'the company exists through the API').toBeTruthy();
 // ASSERTION_FAILED: the company exists through the API: expected undefined to be truthy
 ```
 
-Only value expectations take a message; a locator or `browser` expectation
-already names its locator and matcher in the failure.
+A [locator expectation](#locator-matchers) takes a message the same way. A
+`screen` or `browser` expectation takes none; its failure names the matcher.
 
 #### Not included
 
@@ -787,7 +797,7 @@ type NotAny<T> = 0 extends 1 & T ? never : T;
 
 /** The `expect(actual)` call: a locator, `screen`, an engine fixture, or a value, told apart by the argument. */
 export interface ExpectCall {
-  <L extends Locator>(actual: NotAny<L>): AsyncExpectation;
+  <L extends Locator>(actual: NotAny<L>, message?: string): AsyncExpectation;
   <S extends Screen>(actual: NotAny<S>): ScreenExpectation;
   <E extends object>(actual: Expectable<E>): E;
   <T>(actual: T, message?: string): ValueExpectation<T>;
@@ -795,7 +805,7 @@ export interface ExpectCall {
 
 /** The `expect.soft(actual)` call: `expect(actual)` whose failures are kept instead of thrown. */
 export interface SoftExpectCall {
-  <L extends Locator>(actual: NotAny<L>): AsyncExpectation;
+  <L extends Locator>(actual: NotAny<L>, message?: string): AsyncExpectation;
   <S extends Screen>(actual: NotAny<S>): ScreenExpectation;
   <E extends object>(actual: Expectable<E>): E;
   <T>(actual: T, message?: string): SoftValueExpectation<T>;
