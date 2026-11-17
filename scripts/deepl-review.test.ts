@@ -261,6 +261,19 @@ describe('gateway', () => {
   });
 });
 
+describe('gateway answers', () => {
+  it('asks again after an answer that is not JSON', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      const content = calls === 1 ? 'Sure! Here you go:' : JSON.stringify({ translations: ['次へ'] });
+      return Response.json({ choices: [{ message: { content } }] });
+    }) as unknown as typeof fetch;
+    assert.deepEqual(await gateway('key', [], fetchImpl).translate(['Next'], 'EN', 'JA'), ['次へ']);
+    assert.equal(calls, 2);
+  });
+});
+
 describe('withFallback', () => {
   const exhausted: Translator = {
     name: 'DeepL',

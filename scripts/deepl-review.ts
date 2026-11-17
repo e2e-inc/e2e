@@ -452,8 +452,7 @@ export function gateway(
       }
       if (response.ok) {
         const body = (await response.json()) as { choices: { message: { content: string } }[] };
-        const parsed = JSON.parse(body.choices[0]?.message.content ?? '{}') as { translations?: unknown };
-        const translations = parsed.translations;
+        const translations = parseTranslations(body.choices[0]?.message.content);
         if (
           Array.isArray(translations) &&
           translations.length === texts.length &&
@@ -477,6 +476,16 @@ export function gateway(
       return out;
     },
   };
+}
+
+/** The model's `translations` list, or undefined for an answer that is not the JSON asked for. */
+function parseTranslations(content: string | undefined): unknown {
+  try {
+    const parsed: unknown = JSON.parse(content ?? '');
+    return typeof parsed === 'object' && parsed !== null && 'translations' in parsed ? parsed.translations : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
