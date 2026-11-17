@@ -167,14 +167,14 @@ function mentions(english: string, term: string): boolean {
   return new RegExp(`\\b${escaped}(?:s|es)?\\b`, 'i').test(english);
 }
 
-/** The glossary terms DeepL's reference uses for the English but our Japanese does not. */
+/** The glossary terms the reference translation uses for the English but our Japanese does not. */
 function glossaryMisses(pair: Pair, reference: string, glossary: GlossaryEntry[]): string[] {
   return glossary
     .filter((entry) => mentions(pair.en, entry.en) && reference.includes(entry.ja) && !pair.ja.includes(entry.ja))
     .map((entry) => `${entry.en} → ${entry.ja}`);
 }
 
-/** Reviews every pair with DeepL, translating all of them in each direction at once. */
+/** Reviews every pair, translating all of them in each direction at once. */
 export async function review(
   pairs: Pair[],
   translator: Translator,
