@@ -182,6 +182,71 @@ test('parallel neighbor', async ({ app }) => {
   );
 
   it(
+    'runs two serial groups each on one worker in order beside a parallel neighbor',
+    async () => {
+      const pidDir = mkdtempSync(path.join(tmpdir(), 'e2e-two-groups-'));
+      const groupFile = (group: string, other: string) => `import { existsSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { test } from 'e2e';
+
+test.describe('${group}', { serial: true }, () => {
+  let shared = 0;
+
+  test('${group} first', async ({ app }) => {
+    await app.open();
+    shared += 1;
+    writeFileSync(path.join(${JSON.stringify(pidDir)}, '${group}-first-' + process.pid), 'ok');
+    // Each group starts only while the other also runs: a scheduler that queues the groups one after the other deadlocks here instead of passing.
+    writeFileSync(path.join(${JSON.stringify(pidDir)}, 'started-${group}'), 'ok');
+    const otherStarted = path.join(${JSON.stringify(pidDir)}, 'started-${other}');
+    const deadline = Date.now() + 10_000;
+    while (!existsSync(otherStarted)) {
+      if (Date.now() > deadline) throw new Error('${group} waited 10s for ${other} to start; the two serial groups never ran at the same time');
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  });
+
+  test('${group} second shares state', async ({ app }) => {
+    if (shared !== 1) throw new Error('${group} module state was not preserved: ' + shared);
+    await app.open();
+    writeFileSync(path.join(${JSON.stringify(pidDir)}, '${group}-second-' + process.pid), 'ok');
+  });
+});
+`;
+      const neighborFile = `import { test } from 'e2e';
+
+test('parallel neighbor', async ({ app }) => {
+  await app.open();
+});
+`;
+      const { outcome, project } = await runProjectWithConfigFile(
+        { 'tests/alpha.e2e.ts': groupFile('alpha', 'beta'), 'tests/beta.e2e.ts': groupFile('beta', 'alpha'), 'tests/other.e2e.ts': neighborFile },
+        { configSource: workerFakeConfigSource(2) },
+      );
+      for (const title of ['alpha first', 'alpha second shares state', 'beta first', 'beta second shares state', 'parallel neighbor']) {
+        expect(resultByTitle(outcome, title).status, title).toBe('passed');
+      }
+      expect(outcome.exitCode).toBe(0);
+
+      assertValidReport(outcome.report);
+      const run = outcome.report['run'] as unknown as Record<string, unknown>;
+      const groups = run['serialGroups'] as Record<string, unknown>[];
+      expect(groups).toHaveLength(2);
+      expect(groups.map((group) => group['status'])).toEqual(['passed', 'passed']);
+
+      // Each group's two steps ran on one worker, in order: the module counter above only holds when they did, and the pid files say which. The started markers above are what proves the two groups overlapped in time.
+      const written = readdirSync(pidDir);
+      for (const group of ['alpha', 'beta']) {
+        const pids = new Set(written.filter((entry) => entry.startsWith(`${group}-`)).map((entry) => entry.slice(entry.lastIndexOf('-') + 1)));
+        expect(pids.size, `${group} ran on ${pids.size} workers`).toBe(1);
+      }
+      rmSync(pidDir, { recursive: true, force: true });
+      project.cleanup();
+    },
+    120_000,
+  );
+
+  it(
     'reports a worker crash as infrastructure failure and finishes the run',
     async () => {
       const crashFile = `import { test } from 'e2e';
@@ -796,6 +861,83 @@ test('would run last', async () => {});
       ]);
       expect(byDeclaration[1]!.skip?.reason).toBe('run stopped after 1 failure (--max-failures 1)');
       expect(outcome.report.run.summary).toMatchObject({ failed: 1, skipped: 2 });
+      assertValidReport(outcome.report);
+      project.cleanup();
+    },
+    120_000,
+  );
+
+  it(
+    'stops at --max-failures across workers: the worker whose failure reaches the limit starts no further test',
+    async () => {
+      // Each file fails first, then holds its worker in a long test. The file
+      // that fails later reaches the limit; its worker must wait for the
+      // runner's answer instead of starting its next test on a stale count.
+      // The 500 ms gap orders the two failures, so the tripping file is the
+      // one whose failure ended second.
+      const file = (name: string, failAfterMs: number) => `import { test } from 'e2e';
+
+test('${name} fails', async ({ app }) => {
+  await app.open();
+  await new Promise((resolve) => setTimeout(resolve, ${failAfterMs}));
+  throw new Error('${name}');
+});
+test('${name} next', async ({ app }) => {
+  await app.open();
+  await new Promise((resolve) => setTimeout(resolve, 2_000));
+});
+test('${name} last', async () => {});
+`;
+      const { outcome, project } = await runProjectWithConfigFile(
+        { 'tests/a.e2e.ts': file('a', 0), 'tests/b.e2e.ts': file('b', 500) },
+        { configSource: workerFakeConfigSource(2), runOptions: { maxFailures: 2 } },
+      );
+      expect(outcome.exitCode).toBe(1);
+      const failed = outcome.results.filter((result) => result.status === 'failed');
+      expect(failed.map((result) => result.test.title).toSorted()).toEqual(['a fails', 'b fails']);
+      const endOf = (result: (typeof failed)[number]): number => {
+        const last = result.attempts.at(-1)!;
+        return Date.parse(last.startedAt) + last.durationMs;
+      };
+      const tripping = failed.toSorted((a, b) => endOf(a) - endOf(b))[1]!.test.file;
+      const trippingRest = outcome.results.filter((result) => result.test.file === tripping && result.status !== 'failed');
+      expect(trippingRest.map((result) => [result.status, result.skip?.cause, result.attempts.length])).toEqual([
+        ['skipped', 'failure-limit', 0],
+        ['skipped', 'failure-limit', 0],
+      ]);
+      expect(outcome.results.filter((result) => result.status === 'interrupted').length).toBeLessThanOrEqual(1);
+      assertValidReport(outcome.report);
+      project.cleanup();
+    },
+    120_000,
+  );
+
+  it(
+    'below --max-failures, each worker gets the runner\'s answer to its failure and runs its next test',
+    async () => {
+      // Both workers fail once and wait for the runner's `continue`; a lost
+      // answer would hold them forever, so both `next` tests must run.
+      const file = (name: string) => `import { test } from 'e2e';
+
+test('${name} fails', async ({ app }) => {
+  await app.open();
+  throw new Error('${name}');
+});
+test('${name} next', async ({ app }) => {
+  await app.open();
+});
+`;
+      const { outcome, project } = await runProjectWithConfigFile(
+        { 'tests/a.e2e.ts': file('a'), 'tests/b.e2e.ts': file('b') },
+        { configSource: workerFakeConfigSource(2), runOptions: { maxFailures: 3 } },
+      );
+      expect(outcome.exitCode).toBe(1);
+      expect(outcome.results.map((result) => [result.test.title, result.status]).toSorted()).toEqual([
+        ['a fails', 'failed'],
+        ['a next', 'passed'],
+        ['b fails', 'failed'],
+        ['b next', 'passed'],
+      ]);
       assertValidReport(outcome.report);
       project.cleanup();
     },

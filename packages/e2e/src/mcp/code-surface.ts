@@ -10,7 +10,7 @@
  * members.
  */
 
-import type { App, AsyncExpectation, Locator, Screen } from '../types.ts';
+import type { App, AsyncExpectation, Locator, Screen } from '@e2e-dev/core/lib/types';
 
 /** Something a statement can call members on. */
 export type Receiver = 'screen' | 'locator' | 'app' | 'locator-expectation';
@@ -132,6 +132,7 @@ const LOCATOR_MATCHERS = members({
   toHaveAttribute: matcher(1, 3),
   toHaveCount: matcher(1, 2),
   toHaveAccessibleName: matcher(1, 2),
+  toHaveRole: matcher(1, 2),
 } satisfies Covers<AsyncExpectation>);
 
 /** Every receiver's members. */

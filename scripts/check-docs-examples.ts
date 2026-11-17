@@ -25,8 +25,11 @@ import { unmappedExamples } from './docs-examples.ts';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 /** Example file to the page that shows it verbatim. */
 const EXAMPLES: Record<string, string> = {
+  'docs/examples/vercel/e2e.config.ts': 'docs/ci/vercel-previews.mdx',
   'docs/examples/browser-run/e2e.config.ts': 'docs/integrations/browser-run.mdx',
   'docs/examples/runner/run.ts': 'docs/reference/runner.mdx',
+  'docs/examples/core/prices.ts': 'docs/core.mdx',
+  'docs/examples/core/checkout.ts': 'docs/core.mdx',
   'docs/examples/runner/explore.ts': 'docs/reference/runner.mdx',
   'docs/examples/limrun/e2e.config.ts': 'docs/integrations/limrun.mdx',
   'docs/examples/limrun/greeting.e2e.ts': 'docs/integrations/limrun.mdx',
@@ -47,6 +50,7 @@ const EXAMPLES: Record<string, string> = {
   'docs/examples/mobile/browserstack.e2e.ts': 'docs/integrations/browserstack.mdx',
   'docs/examples/mobile/e2b.config.ts': 'docs/integrations/e2b.mdx',
   'docs/examples/web/browser-provider.ts': 'docs/browser.mdx',
+  'docs/examples/web/moli.config.ts': 'docs/integrations/moli.mdx',
   'docs/examples/web/testmu-browsers.config.ts': 'docs/integrations/testmu.mdx',
   'docs/examples/web/e2b-browsers.config.ts': 'docs/integrations/e2b.mdx',
   'docs/examples/web/e2b-template.ts': 'docs/integrations/e2b.mdx',

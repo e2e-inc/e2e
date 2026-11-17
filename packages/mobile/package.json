@@ -41,6 +41,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./engine": {
+      "types": "./dist/engine-entry.d.ts",
+      "default": "./dist/engine-entry.js"
+    },
     "./tools": {
       "types": "./dist/tools.d.ts",
       "default": "./dist/tools.js"
@@ -64,21 +68,26 @@
   },
   "dependencies": {
     "@napi-rs/image": "1.16.0",
-    "agent-device": "0.21.37",
+    "agent-device": "0.21.38",
     "zod": "4.6.7"
   },
   "peerDependencies": {
+    "@e2e-dev/core": ">=0.23.2 <1",
     "ai": "^7.0.0",
-    "e2e": ">=0.22.1 <1"
+    "e2e": ">=0.23.2 <1"
   },
   "peerDependenciesMeta": {
     "ai": {
       "optional": true
+    },
+    "e2e": {
+      "optional": true
     }
   },
   "devDependencies": {
+    "@e2e-dev/core": "workspace:*",
     "@types/node": "26.6.6",
-    "ai": "7.0.170",
+    "ai": "7.0.173",
     "e2e": "workspace:*",
     "typescript": "7.0.2",
     "vitest": "5.1.0"

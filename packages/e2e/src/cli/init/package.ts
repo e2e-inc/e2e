@@ -3,8 +3,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { compareCodePoints } from '../../internal/globs.ts';
-import { isPlainObject } from '../../internal/options.ts';
+import { compareCodePoints } from '@e2e-dev/core/lib/internal/globs';
+import { isPlainObject } from '@e2e-dev/core/lib/internal/options';
 
 const dependencyBlock = z.record(z.string(), z.string()).optional();
 const packageSchema = z.looseObject({
@@ -39,7 +39,7 @@ export function describeManifestError(cause: unknown): string {
 }
 
 /** True when any dependency section lists `name`, so existing versions and workspace links are kept. */
-function declaresDependency(manifest: PackageManifest, name: string): boolean {
+export function declaresDependency(manifest: PackageManifest, name: string): boolean {
   return [manifest.dependencies, manifest.devDependencies, manifest.peerDependencies, manifest.optionalDependencies]
     .some((block) => block?.[name] !== undefined);
 }

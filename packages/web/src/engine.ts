@@ -2,7 +2,7 @@
  * The Playwright engine for e2e: a browser body built with the
  * public `defineEngine`, validated by the same rules and graded by the same
  * capabilities as any other engine. Core imports nothing from here; this
- * package imports the contract from `e2e/engine` and contributes the `browser`
+ * package imports the contract from `@e2e-dev/core/engine` and contributes the `browser`
  * fixture the way a device engine contributes `device`.
  */
 
@@ -17,8 +17,9 @@ import {
   type EngineAppCheckInfo,
   type EngineAppDeclaration,
   type EngineHandle,
-} from 'e2e/engine';
+} from '@e2e-dev/core/engine';
 import { createRequire } from 'node:module';
+import type { WebFixtures } from './fixtures.ts';
 import { asBrowserProvider } from './provider.ts';
 import { PlaywrightSurface, type WebOptions } from './surface.ts';
 import { createBrowserFixture } from './browser.ts';
@@ -54,7 +55,7 @@ export function surfaceOf(engine: EngineHandle): PlaywrightLiveSurface | undefin
   return { page: () => surface.requirePage(), context: () => surface.requireContext() };
 }
 
-export function web(options: WebOptions = {}): EngineHandle {
+export function web(options: WebOptions = {}): EngineHandle<WebFixtures> {
   if ('allowedOrigins' in options) {
     throw new ConfigurationError(
       'INVALID_CONFIG',
@@ -104,7 +105,7 @@ export function web(options: WebOptions = {}): EngineHandle {
     );
   }
   const surface = new PlaywrightSurface(options);
-  const handle = defineEngine({
+  const handle = defineEngine<WebFixtures>({
     name: 'web',
     version: ownVersion(),
     spiVersion: 1,
@@ -118,6 +119,7 @@ export function web(options: WebOptions = {}): EngineHandle {
     endAttempt: (context) => surface.endAttempt(context),
     dispose: (context) => surface.dispose(context),
     observe: (operation, observeOptions) => surface.observe(operation, observeOptions),
+    readStyle: (ref, properties, operation) => surface.readStyle(ref, properties, operation),
     locate: (expression, operation) => surface.locate(expression, operation),
     perform: (ref, action, operation) => surface.perform(ref, action, operation),
     // A browser honors every action kind of the contract; `actions.ts` dispatches each.
@@ -445,7 +447,7 @@ function validateApp(app: EngineAppDeclaration, { targetName }: EngineAppCheckIn
   if (app.url === undefined) {
     throw new ConfigurationError(
       'INVALID_CONFIG',
-      `target "${targetName}" needs app.url: a web() target opens the app at a URL, targets: [{ engine: web(), app: { url: 'http://localhost:3000' } }]`,
+      `target "${targetName}" needs app.url: web() opens the app at a URL, such as app: { url: 'http://localhost:3000' }`,
     );
   }
   if (app.permissions !== undefined) validatePermissions(targetName, browser, app.permissions);

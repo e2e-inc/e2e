@@ -12,7 +12,7 @@ import { startFixtureApp, type FixtureApp } from '../helpers/fixture-app.ts';
 import { installFakeLoopModel, loopCalls, nodeIdFor } from '../helpers/fake-loop-model.ts';
 import { resultByTitle, runProject, type FixtureProject } from '../helpers/run-project.ts';
 import type { RunOutcome } from '../helpers/run-project.ts';
-import type { StepExecutor, StepExecutorContext } from '../../src/agent/executor.ts';
+import type { StepExecutor, StepExecutorContext } from '@e2e-dev/core/lib/agent/executor';
 
 const SUITE = `import { test, expect } from 'e2e';
 
@@ -745,6 +745,8 @@ describe('agent.act with the default ToolLoopAgent executor', () => {
       'tap_at',
       'type',
       'type_at',
+      // Offered on a step without secrets too, so every step sends the same tools.
+      'type_secret',
       'upload',
     ]);
     expect(loopCalls[0]!.prompt).toContain('increment the counter once');

@@ -88,7 +88,7 @@ web({ browser: 'firefox' }); // default: 'chromium'
 - A `BrowserProvider` leases hosted browsers instead: one per worker slot for
   the run, or one per attempt ([`WebOptions`](#weboptions)). The engine
   drives each one as chromium over CDP, whether it is Chromium or another CDP
-  server such as [Lightpanda](/integrations/lightpanda).
+  server such as [Lightpanda](/integrations/lightpanda) or [Moli](/integrations/moli).
 - A provider with `scope: 'attempt'` rides a persistent context, with the
   limits under [Recovering a CDP transport](#recovering-a-cdp-transport).
 - [Hosted browsers](/browser#hosted-browsers) has the `BrowserProvider`
@@ -439,8 +439,8 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 - What belongs to the browser covers every tab: `cookies`, `setCookies`,
   `clearCookies`, `route`, `unroute`, `unrouteAll`, `onDialog`, and
   `addInitScript`.
-- `setViewport` sizes the active tab and every tab opened after it, and
-  `emulateMedia` sets its media the same way.
+- `setViewport` sizes the active tab and every tab opened after it.
+- [`emulateMedia`](#media-emulation) changes media on all open and future tabs.
 - A tab the app opens, from a `target="_blank"` link or `window.open`,
   opens in the background: the active tab stays where it was until
   `waitForPopup` or `activate` makes another one active. See [Tabs](#tabs).
@@ -542,8 +542,8 @@ const title = await browser.title();
 
 #### `waitForURL`
 
-Waits for the current URL to match, polling every 100 ms. It is the same poll
-as `expect(browser).toHaveURL`.
+Waits for the current URL to match. It reads the URL at 0, 20, and 50 ms, then
+every 100 ms from the start, the same poll as `expect(browser).toHaveURL`.
 
 ```ts
 await browser.waitForURL(/\/orders\/\d+$/, { timeout: 15_000 });

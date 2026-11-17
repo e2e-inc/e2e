@@ -5,13 +5,21 @@ The browser engine for [`e2e`](https://www.npmjs.com/package/e2e), built on
 
 `e2e` ships no engine of its own: every target names the engine that drives
 it, and this package is the one for browsers. It implements the public
-`e2e/engine` contract, so a device or desktop engine plugs into the same
-seam with no privilege either way.
+`@e2e-dev/core/engine` contract (`e2e/engine` to the runner), so a device or
+desktop engine plugs into the same seam with no privilege either way.
 
 ## Install
 
 ```bash
 npm install --save-dev e2e @e2e-dev/web
+```
+
+To drive a browser from a program without the test runner, install
+[`@e2e-dev/core`](https://www.npmjs.com/package/@e2e-dev/core) instead of `e2e`, and
+import `web` from `@e2e-dev/web/engine`:
+
+```bash
+npm install @e2e-dev/core @e2e-dev/web
 ```
 
 This package depends on `playwright-core` pinned to an exact version, so the
