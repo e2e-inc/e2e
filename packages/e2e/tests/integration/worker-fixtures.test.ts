@@ -1,23 +1,11 @@
 /** Worker-scoped fixtures and the suite hooks that receive them, on an engine that isolates each attempt and on one whose state outlives it. */
 
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createFakeEngine } from '../helpers/fake-engine.ts';
 import { engineConfig } from '../helpers/fixture-config.ts';
+import { hookLog, LOG_MODULE } from '../helpers/hook-log.ts';
 import { assertValidReport } from '../helpers/report-schema.ts';
 import { resultByTitle, runProject } from '../helpers/run-project.ts';
-
-/** A log file the fixture project appends to, read back as its lines. */
-function hookLog(name: string): { readonly path: string; lines(): string[] } {
-  const logPath = path.join('/tmp', `e2e-${name}-${Date.now()}.log`);
-  process.env['HOOK_LOG'] = logPath;
-  return { path: logPath, lines: () => readFileSync(logPath, 'utf8').trim().split('\n') };
-}
-
-const LOG_MODULE = `import { appendFileSync } from 'node:fs';
-export const log = (entry: string) => appendFileSync(process.env.HOOK_LOG!, entry + '\\n');
-`;
 
 describe('worker fixtures', () => {
   it(

@@ -1,23 +1,11 @@
 /** Fixtures set up on demand: what a test, its hooks, and their fixtures name, the `auto` ones, and the rules that fail at collection. */
 
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createFakeEngine, FAKE_APP } from '../helpers/fake-engine.ts';
 import { engineConfig } from '../helpers/fixture-config.ts';
+import { hookLog, LOG_MODULE } from '../helpers/hook-log.ts';
 import { assertValidReport } from '../helpers/report-schema.ts';
 import { resultByTitle, runProject } from '../helpers/run-project.ts';
-
-/** A log file the fixture project appends to, read back as its lines. */
-function hookLog(name: string): { lines(): string[] } {
-  const logPath = path.join('/tmp', `e2e-${name}-${Date.now()}.log`);
-  process.env['HOOK_LOG'] = logPath;
-  return { lines: () => readFileSync(logPath, 'utf8').trim().split('\n') };
-}
-
-const LOG_MODULE = `import { appendFileSync } from 'node:fs';
-export const log = (entry: string) => appendFileSync(process.env.HOOK_LOG!, entry + '\\n');
-`;
 
 /** A fixture that logs its setup and teardown and hands its own name over. */
 const LOGGED = `const logged = (name: string) => async ({}: object, use: (value: string) => Promise<void>) => {

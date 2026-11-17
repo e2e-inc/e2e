@@ -7,7 +7,7 @@
 
 import { CollectionError } from '@e2e-dev/core/lib/internal/errors';
 import type { Collection } from './collect.ts';
-import { declarationSite, FixtureUseError } from './fixture-names.ts';
+import { declarationSite, FixtureUseError } from './fixture-errors.ts';
 import { planAttempt, planSuiteHook } from './fixture-plan.ts';
 import { hooksFor, type ModuleRegistration, type RegisteredHook, type SuiteHook, type TestHook } from './registry.ts';
 import type { TestTargetPair } from './select.ts';

@@ -5,43 +5,15 @@
  * what they use this way, so the runner sets up those fixtures and no others.
  */
 
-import { CollectionError } from '@e2e-dev/core/lib/internal/errors';
-import { projectRelativePath, type SourceLocation } from '@e2e-dev/core/lib/internal/source';
+import type { SourceLocation } from '@e2e-dev/core/lib/internal/source';
+import { FixtureUseError } from './fixture-errors.ts';
 
 /** Any function that receives fixtures as its first argument. */
 export type FixtureUserFn = (...args: never[]) => unknown;
 
-/**
- * A fixture rule broken by code declared at a known line. `declaredAt` is
- * absolute; whoever knows the project root puts it in front of the message
- * (`declarationSite`).
- */
-export class FixtureUseError extends CollectionError {
-  constructor(
-    message: string,
-    readonly declaredAt: SourceLocation | undefined,
-  ) {
-    super(message);
-    this.name = 'FixtureUseError';
-  }
-}
-
-/**
- * Where the code a collection error is about was declared, as the message
- * names it: `tests/support.ts:12`, relative to the project root. `file` when
- * the error carries no line, or one outside the project. Read structurally: a
- * test file may load a second copy of this module.
- */
-export function declarationSite(cause: unknown, projectRoot: string, file: string): string {
-  const site = (cause as { declaredAt?: Partial<SourceLocation> } | null)?.declaredAt;
-  if (typeof site?.file !== 'string' || typeof site.line !== 'number') return file;
-  const relative = projectRelativePath(projectRoot, site.file);
-  return relative === undefined ? file : `${relative}:${site.line}`;
-}
-
 const QUOTES = new Set(['"', "'", '`']);
 const CLOSERS: Readonly<Record<string, string>> = { '(': ')', '[': ']', '{': '}' };
-const WORD = /[\p{ID_Continue}$#‌‍]/u;
+const WORD = /[\p{ID_Continue}$#\u200c\u200d]/u;
 
 /** The index of the first character at or after `at` that is neither whitespace nor inside a comment. */
 function skipTrivia(text: string, at: number): number {

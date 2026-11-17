@@ -1,7 +1,8 @@
 /** The fixtures a function names: read from the source of its first parameter. */
 
 import { describe, expect, it } from 'vitest';
-import { declarationSite, fixtureNames, type FixtureUserFn } from '../../src/collect/fixture-names.ts';
+import { declarationSite } from '../../src/collect/fixture-errors.ts';
+import { fixtureNames, type FixtureUserFn } from '../../src/collect/fixture-names.ts';
 
 /** A function built from source, so the test controls exactly what `toString()` prints. */
 function written(source: string): FixtureUserFn {

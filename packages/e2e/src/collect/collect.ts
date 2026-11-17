@@ -9,7 +9,7 @@ import { explainModuleError } from '../config/diagnose.ts';
 import { importModule } from '../config/load.ts';
 import type { ResolvedConfig } from '@e2e-dev/core/lib/config/resolve';
 import { staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
-import { declarationSite } from './fixture-names.ts';
+import { declarationSite } from './fixture-errors.ts';
 import {
   collectModule,
   groupTitles,

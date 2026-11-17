@@ -9,7 +9,7 @@
 import { builtInFixtures, DECLARED_BUILT_INS, type BuiltInFixtures, type BuiltInTarget } from '@e2e-dev/core/lib/run/fixtures';
 import type { FixtureScope } from '@e2e-dev/core/lib/types';
 import type { SourceLocation } from '@e2e-dev/core/lib/internal/source';
-import { FixtureUseError } from './fixture-names.ts';
+import { FixtureUseError } from './fixture-errors.ts';
 import type { FixtureDefinition, RegisteredHook, RegisteredTest, SuiteHook, TestHook } from './registry.ts';
 
 /** A registered test body or hook, as the planner reads it: the fixtures its function names, and where it is. */
