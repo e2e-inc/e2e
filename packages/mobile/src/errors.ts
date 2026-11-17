@@ -104,14 +104,19 @@ const STALE_REF_REASONS: ReadonlySet<string> = new Set([
  *   keyboard over the target's touch point. The test has to move the cover
  *   or the target first, and agent-device's hint says how.
  * - `window-origin-unknown` (0.21.37): the capture the ref came from could not
- *   place its window on the screen. agent-device's hint names its CLI
- *   (`snapshot`, `screenshot`); a point tap is not aimed from the capture, and
- *   agent-device takes it.
+ *   place its window on the screen, so its bounds may be offset from screen
+ *   coordinates by the window's position (a placed iPad window). agent-device's
+ *   hint names its CLI (`snapshot`, `screenshot`); a point tap is not aimed
+ *   from the capture, and agent-device takes it, but a point read from
+ *   `boundingBox()` carries the same offset.
  */
 const NOT_ACTIONABLE_REASONS: ReadonlyMap<string, string | undefined> = new Map([
   ['target_covered', undefined],
   ['tap_keyboard_occludes_target', undefined],
-  ['window-origin-unknown', 'Nothing was sent. For a tap, tap the point instead with screen.tapAt().'],
+  [
+    'window-origin-unknown',
+    "Nothing was sent. The app's window has no known position on the screen, so node bounds, boundingBox() included, may be offset from screen coordinates. For a tap, tap a screen point with screen.tapAt(), not one taken from those bounds.",
+  ],
 ]);
 
 /**
