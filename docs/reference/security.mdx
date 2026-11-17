@@ -48,8 +48,7 @@ larger budget. [How agent steps work](/agent-steps) explains a step in full.
 
 - Built-in tools have closed schemas and appear only when the engine
   supports them. A tool that declares fields rejects a key it does not
-  declare. A tool with no fields drops extra keys and runs; the schema a
-  provider receives still sets `additionalProperties: false`.
+  declare. A tool with no fields drops extra keys and runs.
 - Project tools must use `defineTool` with an `execute` and can't replace a
   built-in name. A project tool keeps the schema given to `defineTool`, so
   whether it strips or rejects an undeclared key is up to that schema.
