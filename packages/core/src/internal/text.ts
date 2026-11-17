@@ -17,7 +17,10 @@ export function bound(text: string, maxChars: number): string {
   return `${text.slice(0, end)}…`;
 }
 
-/** Whether `bound(text, maxChars)` could equal what `bound` makes of a different text: it cuts `text`, or `text` already ends like a cut. */
+/**
+ * Whether `bound(text, maxChars)` could equal what `bound` makes of a
+ * different text: it cuts `text`, or `text` already ends like a cut.
+ */
 export function boundIsAmbiguous(text: string, maxChars: number): boolean {
   return text.length > maxChars || (text.length >= maxChars - 1 && text.endsWith('…'));
 }

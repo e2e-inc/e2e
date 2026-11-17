@@ -87,8 +87,9 @@ export function storedRecordingsFor(cache: ResolvedCacheConfig): StoredRecording
 
 /**
  * The whole step as one map key, or undefined when the provenance does not
- * record all of it. A step with a cut test id, target id, or agent name keys
- * by its `identityDigest` too, so it never matches an entry that has none.
+ * record all of it. A step whose test id, target id, or agent name an entry
+ * could store cut keys by its `identityDigest` too, so it never matches an
+ * entry that has none.
  */
 function stepKey(step: TraceProvenance): string | undefined {
   const { testId, targetId, instructionDigest, paramsDigest, callIndex, agent, identityDigest } = step;

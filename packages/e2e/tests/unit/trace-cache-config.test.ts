@@ -373,22 +373,6 @@ describe('settleStagedTraces', () => {
     expect(readTraceEntry(JSON.parse(store.entries.get(KEY_A)!))?.payload.recordedFor).toEqual(recordedFor);
   });
 
-  it('takes the identity digest over the redacted names, so it never depends on a secret value', () => {
-    const long = `${STEP.testId}${'x'.repeat(400)}`;
-    const digestWith = (value: string) => {
-      const secrets = new SecretLedger();
-      secrets.register('password', value);
-      return recordedProvenance({ ...STEP, testId: `${long} as ${value}` }, secrets.redact).identityDigest;
-    };
-    expect(digestWith('hunter2')).toMatch(/^[a-f0-9]{64}$/u);
-    expect(digestWith('hunter2')).toBe(digestWith('swordfish'));
-  });
-
-  it('refuses an entry whose identity digest is not a SHA-256 hex digest', () => {
-    const entry = buildTraceEntry({ ...trace('recorded flow'), recordedFor: { ...STEP, identityDigest: 'not-a-digest' } });
-    expect(readTraceEntry(JSON.parse(JSON.stringify(entry)))).toBeUndefined();
-  });
-
   it('writes what was confirmed and leaves every unconfirmed entry as stored when the failure implicates nothing', async () => {
     const KEY_C = 'c'.repeat(64);
     const store = memoryStore();
@@ -428,5 +412,23 @@ describe('settleStagedTraces', () => {
     expect(first).toMatch(/^[a-f0-9]{64}$/);
     expect(repeat).not.toBe(first);
     expect(other).not.toBe(first);
+  });
+});
+
+describe('recorded provenance', () => {
+  it('takes the identity digest over the redacted names, so it never depends on a secret value', () => {
+    const long = `${STEP.testId}${'x'.repeat(400)}`;
+    const digestWith = (value: string) => {
+      const secrets = new SecretLedger();
+      secrets.register('password', value);
+      return recordedProvenance({ ...STEP, testId: `${long} as ${value}` }, secrets.redact).identityDigest;
+    };
+    expect(digestWith('hunter2')).toMatch(/^[a-f0-9]{64}$/u);
+    expect(digestWith('hunter2')).toBe(digestWith('swordfish'));
+  });
+
+  it('refuses an entry whose identity digest is not a SHA-256 hex digest', () => {
+    const entry = buildTraceEntry({ ...trace('recorded flow'), recordedFor: { ...STEP, identityDigest: 'not-a-digest' } });
+    expect(readTraceEntry(JSON.parse(JSON.stringify(entry)))).toBeUndefined();
   });
 });
