@@ -56,6 +56,7 @@ await expect(screen.getByTestId('cart-empty'), 'the cart is empty').toBeVisible(
 | [`toBeAttached`](#tobeattached) | 等待存在一个匹配项 |
 | [`toBeEnabled`](#tobeenabled-and-tobedisabled) | 等待启用状态 |
 | [`toBeDisabled`](#tobeenabled-and-tobedisabled) | 等待禁用状态 |
+| [`toBeEditable`](#tobeeditable) | 等待启用且非只读的控件 |
 | [`toBeChecked`](#tobechecked-tobeselected-and-tobeexpanded) | 等待勾选状态 |
 | [`toBeSelected`](#tobechecked-tobeselected-and-tobeexpanded) | 等待选中状态 |
 | [`toBeExpanded`](#tobechecked-tobeselected-and-tobeexpanded) | 等待展开状态 |
@@ -103,6 +104,19 @@ await expect(screen.getByRole('button', 'Pay')).toBeEnabled({ enabled: false });
 
 - `<fieldset disabled>` 内的控件被禁用，除非它位于该 fieldset 的第一个 `<legend>` 中。
 - 祖先上的 `aria-disabled="true"` 会禁用其下的控件，直到 `aria-disabled="false"` 截断该继承链。
+
+#### `toBeEditable`
+
+等待控件启用且非只读。
+
+```ts
+await expect(screen.getByLabel('Email')).toBeEditable();
+await expect(screen.getByLabel('Order id')).toBeEditable({ editable: false }); // read-only or disabled
+```
+
+- 带有 `readonly` 属性（任意值）或 `aria-readonly="true"` 的节点为只读。禁用的节点也不可编辑，禁用的判定与 [`toBeEnabled`](#tobeenabled-and-tobedisabled) 相同。
+- 它只读取角色可以为只读的节点，即接受 `aria-readonly` 的角色，例如 `textbox`、`searchbox`、`combobox`、`listbox`、`checkbox`、`switch`、`slider`、`spinbutton` 和 `gridcell`。其他节点（例如按钮）无论是否取反都会失败，失败信息会写出它的角色。
+- 设备引擎不报告 `readonly`，因此设备上的字段只要启用就可编辑。
 
 #### `toBeChecked`、`toBeSelected` 和 `toBeExpanded`
 
@@ -695,6 +709,8 @@ export interface AsyncExpectation {
   toBeEnabled(options?: { enabled?: boolean; timeout?: number }): Promise<void>;
   /** Waits for disabled state. */
   toBeDisabled(options?: { timeout?: number }): Promise<void>;
+  /** Waits for an enabled control that is not read-only; `editable: false` waits for a disabled or read-only one. */
+  toBeEditable(options?: { editable?: boolean; timeout?: number }): Promise<void>;
   /** Waits for checked state; `checked: false` waits for unchecked state. */
   toBeChecked(options?: { checked?: boolean; timeout?: number }): Promise<void>;
   /** Waits for selected state. */

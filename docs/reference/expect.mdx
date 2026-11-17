@@ -77,6 +77,7 @@ await expect(screen.getByTestId('cart-empty'), 'the cart is empty').toBeVisible(
 | [`toBeAttached`](#tobeattached) | Waits for one match to exist |
 | [`toBeEnabled`](#tobeenabled-and-tobedisabled) | Waits for enabled state |
 | [`toBeDisabled`](#tobeenabled-and-tobedisabled) | Waits for disabled state |
+| [`toBeEditable`](#tobeeditable) | Waits for an enabled control that is not read-only |
 | [`toBeChecked`](#tobechecked-tobeselected-and-tobeexpanded) | Waits for checked state |
 | [`toBeSelected`](#tobechecked-tobeselected-and-tobeexpanded) | Waits for selected state |
 | [`toBeExpanded`](#tobechecked-tobeselected-and-tobeexpanded) | Waits for expanded state |
@@ -135,6 +136,26 @@ Playwright's `toBeDisabled` gives:
   that fieldset's first `<legend>`.
 - `aria-disabled="true"` on an ancestor disables the widgets below it until
   an `aria-disabled="false"` cuts the chain.
+
+#### `toBeEditable`
+
+Waits for an enabled control that is not read-only.
+
+```ts
+await expect(screen.getByLabel('Email')).toBeEditable();
+await expect(screen.getByLabel('Order id')).toBeEditable({ editable: false }); // read-only or disabled
+```
+
+- A node is read-only when it carries the `readonly` attribute, with any
+  value, or `aria-readonly="true"`. A disabled node is not editable either,
+  as [`toBeEnabled`](#tobeenabled-and-tobedisabled) reads it.
+- It reads only a node whose role can be read-only: the roles that take
+  `aria-readonly`, such as `textbox`, `searchbox`, `combobox`, `listbox`,
+  `checkbox`, `switch`, `slider`, `spinbutton`, and `gridcell`. Any other
+  node, such as a button, fails it, negated too, and the failure message
+  says its role.
+- A device engine reports no `readonly`, so a field there is editable
+  whenever it is enabled.
 
 #### `toBeChecked`, `toBeSelected`, and `toBeExpanded`
 
@@ -942,6 +963,8 @@ export interface AsyncExpectation {
   toBeEnabled(options?: { enabled?: boolean; timeout?: number }): Promise<void>;
   /** Waits for disabled state. */
   toBeDisabled(options?: { timeout?: number }): Promise<void>;
+  /** Waits for an enabled control that is not read-only; `editable: false` waits for a disabled or read-only one. */
+  toBeEditable(options?: { editable?: boolean; timeout?: number }): Promise<void>;
   /** Waits for checked state; `checked: false` waits for unchecked state. */
   toBeChecked(options?: { checked?: boolean; timeout?: number }): Promise<void>;
   /** Waits for selected state. */

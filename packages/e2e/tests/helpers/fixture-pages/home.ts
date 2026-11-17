@@ -328,6 +328,22 @@ line2  </textarea>
   <div data-testid="plain">Plain</div>
 </body>
 </html>`),
+  // What toBeEditable reads: native readonly, aria-readonly, the disabled
+  // state a fieldset gives, an editing host, and a role that cannot be read-only.
+  '/editable-matcher': constant(`<!doctype html>
+<html>
+<head><title>Editable matcher</title></head>
+<body>
+  <input aria-label="Name" />
+  <textarea aria-label="Notes" readonly></textarea>
+  <div role="textbox" aria-label="Total" aria-readonly="true">42</div>
+  <select aria-label="Size"><option>S</option><option>M</option></select>
+  <fieldset disabled><input aria-label="Locked" /></fieldset>
+  <div contenteditable="true" data-testid="editor">Draft</div>
+  <input aria-label="Secret" type="password" readonly value="marker-3b9d" />
+  <button>Save</button>
+</body>
+</html>`),
   '/downloads': constant(
     '<!doctype html><html><head><title>Downloads</title></head><body><h1>Downloads</h1>' +
       '<a href="/report.csv" download>Download report</a></body></html>',

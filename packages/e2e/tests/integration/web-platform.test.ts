@@ -121,6 +121,28 @@ test('toHaveRole fails on a secure field without its value', async ({ app, scree
   await expect(screen.getByLabel('Secret')).toHaveRole('searchbox', { timeout: 300 });
 });
 
+test('toBeEditable reads readonly, aria-readonly, and the disabled state', async ({ app, screen }) => {
+  await app.open('/editable-matcher');
+  await expect(screen.getByLabel('Name')).toBeEditable();
+  await expect(screen.getByLabel('Size')).toBeEditable();
+  await expect(screen.getByTestId('editor')).toBeEditable();
+  await expect(screen.getByLabel('Notes')).not.toBeEditable();
+  await expect(screen.getByLabel('Total')).toBeEditable({ editable: false });
+  // A fieldset disables the control inside it, though the control has no attribute.
+  await expect(screen.getByLabel('Locked')).not.toBeEditable();
+  await expect(screen.getByLabel('Secret')).not.toBeEditable();
+});
+
+test('toBeEditable fails on a read-only field', async ({ app, screen }) => {
+  await app.open('/editable-matcher');
+  await expect(screen.getByLabel('Notes')).toBeEditable({ timeout: 500 });
+});
+
+test('toBeEditable fails on a button, negated too', async ({ app, screen }) => {
+  await app.open('/editable-matcher');
+  await expect(screen.getByRole('button', { name: 'Save' })).not.toBeEditable({ timeout: 300 });
+});
+
 test('secure fields refuse value reads', async ({ app, screen }) => {
   await app.open();
   await screen.getByLabel('Password').fill('hunter2');
@@ -501,6 +523,7 @@ describe('web platform integration', () => {
     'toHaveURL ignoreCase folds the comparison',
     'string and RegExp URL patterns match what they name',
     'toHaveRole compares the role the tree reads',
+    'toBeEditable reads readonly, aria-readonly, and the disabled state',
   ])('passes %s', (title) => {
     const result = resultByTitle(outcome, title);
     expect(result.status, JSON.stringify(result.attempts[0]?.error)).toBe('passed');
@@ -585,6 +608,22 @@ describe('web platform integration', () => {
     expect(result.attempts[0]!.error?.code).toBe('ASSERTION_FAILED');
     expect(result.attempts[0]!.error?.message).toContain('expected: role "searchbox"\nobserved: role "textbox"');
     expect(JSON.stringify(result)).not.toContain('marker-7c1f');
+  });
+
+  it('fails toBeEditable on a read-only textarea, naming why', () => {
+    const result = resultByTitle(outcome, 'toBeEditable fails on a read-only field');
+    expect(result.status).toBe('failed');
+    expect(result.attempts[0]!.error?.code).toBe('ASSERTION_FAILED');
+    expect(result.attempts[0]!.error?.message).toContain('expected: editable\nobserved: read-only');
+  });
+
+  it('fails a negated toBeEditable on a button, naming its role', () => {
+    const result = resultByTitle(outcome, 'toBeEditable fails on a button, negated too');
+    expect(result.status).toBe('failed');
+    expect(result.attempts[0]!.error?.code).toBe('ASSERTION_FAILED');
+    expect(result.attempts[0]!.error?.message).toContain(
+      'expected: not editable\nobserved: role "button" (not a control that can be read-only)',
+    );
   });
 
   it('denies secure value reads with POLICY_DENIED', () => {

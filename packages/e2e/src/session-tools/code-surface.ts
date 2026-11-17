@@ -123,6 +123,7 @@ const LOCATOR_MATCHERS = members({
   toBeAttached: matcher(0, 1),
   toBeEnabled: matcher(0, 1),
   toBeDisabled: matcher(0, 1),
+  toBeEditable: matcher(0, 1),
   toBeChecked: matcher(0, 1),
   toBeSelected: matcher(0, 1),
   toBeExpanded: matcher(0, 1),

@@ -13,7 +13,7 @@ import {
   type TextComparison,
   type TextPattern,
 } from '@e2e-dev/core/lib/internal/text';
-import { isValueControl } from '@e2e-dev/core/lib/internal/roles';
+import { canBeReadOnly, isReadOnly, isValueControl } from '@e2e-dev/core/lib/internal/roles';
 import { pollReads, type ReadWindow } from '@e2e-dev/core/lib/internal/time';
 import { SampleHistory } from '@e2e-dev/core/lib/expect/samples';
 import { attributeOf, denySecureRead, isNodeVisible } from '@e2e-dev/core/lib/locator/engine';
@@ -386,6 +386,28 @@ class AsyncExpectationImpl implements AsyncExpectation {
     return this.stateMatcher('toBeDisabled', options);
   }
 
+  toBeEditable(options?: { editable?: boolean; timeout?: number }): Promise<void> {
+    const holds = this.readOptions('toBeEditable', options, 'editable') ?? true;
+    return this.poll(
+      {
+        name: 'toBeEditable',
+        evaluableNode: canBeReadOnly,
+        predicate: (sample) => sample.node !== null && isNodeEditable(sample.node) === holds,
+        describeExpected: holds ? 'editable' : 'read-only or disabled',
+        observed: (sample) => {
+          if (sample.node === null) return 'no node';
+          const { node } = sample;
+          if (!canBeReadOnly(node)) {
+            return `${node.role === undefined ? 'no role' : `role ${JSON.stringify(node.role)}`} (not a control that can be read-only)`;
+          }
+          if (node.states?.disabled === true) return 'disabled';
+          return isReadOnly(node) ? 'read-only' : 'editable';
+        },
+      },
+      options?.timeout,
+    );
+  }
+
   toBeChecked(options?: { checked?: boolean; timeout?: number }): Promise<void> {
     return this.stateMatcher('toBeChecked', options);
   }
@@ -558,6 +580,11 @@ function describeText(pattern: TextPattern, ignoreCase: boolean | undefined): st
 /** The field as the failure message prints it: normalized when the comparison was, so the message shows what got compared. */
 function printField(def: TextMatcherDef, actual: string): string {
   return JSON.stringify(def.normalize ? normalizeText(actual) : actual);
+}
+
+/** An enabled node that is not read-only; the caller has checked that its role can be read-only. */
+function isNodeEditable(node: SemanticNode): boolean {
+  return node.states?.disabled !== true && !isReadOnly(node);
 }
 
 function observedState(sample: Sample): string {

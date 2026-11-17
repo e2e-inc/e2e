@@ -56,6 +56,7 @@ await expect(screen.getByTestId('cart-empty'), 'the cart is empty').toBeVisible(
 | [`toBeAttached`](#tobeattached) | 一致するノードが 1 つ存在するまで待機 |
 | [`toBeEnabled`](#tobeenabled-and-tobedisabled) | 有効になるまで待機 |
 | [`toBeDisabled`](#tobeenabled-and-tobedisabled) | 無効になるまで待機 |
+| [`toBeEditable`](#tobeeditable) | 有効で読み取り専用でないコントロールになるまで待機 |
 | [`toBeChecked`](#tobechecked-tobeselected-and-tobeexpanded) | チェックされるまで待機 |
 | [`toBeSelected`](#tobechecked-tobeselected-and-tobeexpanded) | 選択されるまで待機 |
 | [`toBeExpanded`](#tobechecked-tobeselected-and-tobeexpanded) | 展開されるまで待機 |
@@ -103,6 +104,19 @@ await expect(screen.getByRole('button', 'Pay')).toBeEnabled({ enabled: false });
 
 - `<fieldset disabled>` 内のコントロールは、その fieldset の最初の `<legend>` 内にない限り無効です。
 - 祖先の `aria-disabled="true"` は、その下のウィジェットを無効にします。途中に `aria-disabled="false"` があると、この継承を止めます。
+
+#### `toBeEditable`
+
+コントロールが有効で、読み取り専用でなくなるまで待ちます。
+
+```ts
+await expect(screen.getByLabel('Email')).toBeEditable();
+await expect(screen.getByLabel('Order id')).toBeEditable({ editable: false }); // read-only or disabled
+```
+
+- `readonly` 属性（値は問いません）または `aria-readonly="true"` があるノードは読み取り専用です。無効なノードも編集可能ではありません。無効の判定は [`toBeEnabled`](#tobeenabled-and-tobedisabled) と同じです。
+- 読み取り専用になりうるロールのノードだけを読みます。`aria-readonly` を取るロールで、`textbox`、`searchbox`、`combobox`、`listbox`、`checkbox`、`switch`、`slider`、`spinbutton`、`gridcell` などです。ボタンなどそれ以外のノードでは、否定しても失敗し、失敗メッセージにそのロールが表示されます。
+- デバイスエンジンは `readonly` を報告しないため、デバイス上のフィールドは有効であれば常に編集可能です。
 
 #### `toBeChecked`、`toBeSelected`、`toBeExpanded`
 
@@ -695,6 +709,8 @@ export interface AsyncExpectation {
   toBeEnabled(options?: { enabled?: boolean; timeout?: number }): Promise<void>;
   /** Waits for disabled state. */
   toBeDisabled(options?: { timeout?: number }): Promise<void>;
+  /** Waits for an enabled control that is not read-only; `editable: false` waits for a disabled or read-only one. */
+  toBeEditable(options?: { editable?: boolean; timeout?: number }): Promise<void>;
   /** Waits for checked state; `checked: false` waits for unchecked state. */
   toBeChecked(options?: { checked?: boolean; timeout?: number }): Promise<void>;
   /** Waits for selected state. */
