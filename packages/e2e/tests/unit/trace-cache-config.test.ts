@@ -10,6 +10,7 @@ import { recordedProvenance } from '@e2e-dev/core/lib/cache/recorder';
 import { FileCacheStore } from '@e2e-dev/core/lib/cache/store';
 import { buildTraceEntry } from '@e2e-dev/core/lib/cache/trace';
 import { readTraceEntry } from '@e2e-dev/core/lib/cache/trace-read';
+import { SecretLedger } from '@e2e-dev/core/lib/internal/redact';
 import { resolveConfig } from '../../src/config/resolve-run.ts';
 import type { ActionTrace, CacheStore } from '@e2e-dev/core/lib/types';
 import type { E2EConfig } from '../../src/run-types.ts';
@@ -370,6 +371,17 @@ describe('settleStagedTraces', () => {
     context.staged.push({ kind: 'keep', keyHash: KEY_A, stepIndex: 1, recordedFor });
     await settleStagedTraces(context, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true });
     expect(readTraceEntry(JSON.parse(store.entries.get(KEY_A)!))?.payload.recordedFor).toEqual(recordedFor);
+  });
+
+  it('takes the identity digest over the redacted names, so it never depends on a secret value', () => {
+    const long = `${STEP.testId}${'x'.repeat(400)}`;
+    const digestWith = (value: string) => {
+      const secrets = new SecretLedger();
+      secrets.register('password', value);
+      return recordedProvenance({ ...STEP, testId: `${long} as ${value}` }, secrets.redact).identityDigest;
+    };
+    expect(digestWith('hunter2')).toMatch(/^[a-f0-9]{64}$/u);
+    expect(digestWith('hunter2')).toBe(digestWith('swordfish'));
   });
 
   it('refuses an entry whose identity digest is not a SHA-256 hex digest', () => {

@@ -107,8 +107,8 @@ export interface TraceProvenance {
   readonly agent?: string;
   /**
    * SHA-256 of the whole redacted test id, target id, and agent name, only
-   * when one of them is longer than an entry keeps: two steps that differ
-   * past the cut store the same text but never the same digest.
+   * when one of them is longer than an entry keeps or ends like a cut: two
+   * steps whose stored text is the same never share the digest.
    */
   readonly identityDigest?: string;
 }

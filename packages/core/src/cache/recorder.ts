@@ -40,7 +40,7 @@ import {
 } from './trace.ts';
 import { readRecordedModel } from './trace-fields.ts';
 import { sha256Hex } from '../internal/ids.ts';
-import { bound } from '../internal/text.ts';
+import { bound, boundIsAmbiguous } from '../internal/text.ts';
 
 /** The summary a run-time value gap records; the prose a project-tool gap would carry for a tool of that name. */
 const DERIVED_GAP_SUMMARY = 'tool type (run-time value)';
@@ -346,7 +346,7 @@ export function recordedProvenance(provenance: TraceProvenance, redact: (text: s
   const testId = redact(provenance.testId);
   const targetId = redact(provenance.targetId);
   const agent = provenance.agent === undefined ? undefined : redact(provenance.agent);
-  const cut = [testId, targetId, agent ?? ''].some((text) => text.length > MAX_TRACE_DESCRIPTOR_CHARS);
+  const ambiguous = [testId, targetId, agent ?? ''].some((text) => boundIsAmbiguous(text, MAX_TRACE_DESCRIPTOR_CHARS));
   return {
     testId: bound(testId, MAX_TRACE_DESCRIPTOR_CHARS),
     targetId: bound(targetId, MAX_TRACE_DESCRIPTOR_CHARS),
@@ -354,6 +354,6 @@ export function recordedProvenance(provenance: TraceProvenance, redact: (text: s
     ...(provenance.paramsDigest === undefined ? {} : { paramsDigest: provenance.paramsDigest }),
     ...(provenance.callIndex === undefined ? {} : { callIndex: provenance.callIndex }),
     ...(agent === undefined ? {} : { agent: bound(agent, MAX_TRACE_DESCRIPTOR_CHARS) }),
-    ...(cut ? { identityDigest: sha256Hex(JSON.stringify([testId, targetId, agent ?? null])) } : {}),
+    ...(ambiguous ? { identityDigest: sha256Hex(JSON.stringify([testId, targetId, agent ?? null])) } : {}),
   };
 }

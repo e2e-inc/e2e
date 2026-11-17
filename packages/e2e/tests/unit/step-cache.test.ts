@@ -1395,7 +1395,7 @@ describe('cache.strict and a step whose key changed under its recording', () => 
     }
   });
 
-  describe.each(['testId', 'targetId', 'agent'] as const)('a %s longer than an entry keeps', (field) => {
+  describe.each(['testId', 'targetId', 'agent'] as const)('when the %s is longer than an entry keeps', (field) => {
     const long = 'checkout for a signed in customer with a saved card '.repeat(6);
     const stepWith = (value: string) => ({ ...exampleStep, [field]: value });
     const sessionFor = (context: AgentCacheContext, step: typeof exampleStep) =>
@@ -1420,6 +1420,22 @@ describe('cache.strict and a step whose key changed under its recording', () => 
       const step = stepWith(`${long} first`);
       const { identityDigest: _digest, ...legacy } = recordedProvenance(step, (text) => text);
       await expect(sessionFor(await rekeyedContext(recordedPayload(legacy)), step).begin()).resolves.toBeUndefined();
+    });
+
+    it('runs live when its whole name reads like the cut an entry with no identity digest stored for another step', async () => {
+      const { identityDigest: _digest, ...legacy } = recordedProvenance(stepWith(`${long} first`), (text) => text);
+      const step = stepWith(legacy[field]!);
+      await expect(sessionFor(await rekeyedContext(recordedPayload(legacy)), step).begin()).resolves.toBeUndefined();
+    });
+
+    it('fails with REPLAY_STALE when its whole name ends like a cut and its own recording sits under another key', async () => {
+      for (const length of [MAX_TRACE_DESCRIPTOR_CHARS - 1, MAX_TRACE_DESCRIPTOR_CHARS]) {
+        const step = stepWith(`${'x'.repeat(length - 1)}…`);
+        const stored = recordedProvenance(step, (text) => text);
+        expect(stored.identityDigest, String(length)).toMatch(/^[a-f0-9]{64}$/u);
+        const session = sessionFor(await rekeyedContext(recordedPayload(stored)), step);
+        await expect(session.begin(), String(length)).rejects.toMatchObject({ code: 'REPLAY_STALE' });
+      }
     });
 
     it(`fails with REPLAY_STALE at exactly ${MAX_TRACE_DESCRIPTOR_CHARS} characters, which an entry keeps whole`, async () => {
