@@ -474,11 +474,16 @@ export class ListReporter implements Reporter {
     this.window.redraw();
   }
 
+  /** Prints another reporter's completed line above the live window, without a user-output heading. */
+  printReporterLine(line: string, write: (line: string) => void): void {
+    this.print(line, write);
+  }
+
   /** Writes one permanent line without disturbing the live window. */
-  private print(line: string): void {
+  private print(line: string, write: (line: string) => void = (text) => this.output.write(text)): void {
     this.lastOutput = undefined;
     this.window.erase();
-    this.output.write(line);
+    write(line);
     this.window.logged(line);
     this.window.redraw();
   }

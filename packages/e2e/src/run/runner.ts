@@ -54,7 +54,7 @@ import { stepPromptLine } from '../report/list-steps.ts';
 import { buildWorkPlans, nonRunResult, orderWorkPlans, plannedSlots, type TargetWorkPlan, type TimeLimit } from './units.ts';
 import { SessionStore } from '@e2e-dev/core/lib/run/sessions';
 import { outputLayout } from '@e2e-dev/core/lib/run/output';
-import type { OutputView, RunnerOutput } from './process-output.ts';
+import { writeTerminal, type OutputStream, type OutputView, type RunnerOutput } from './process-output.ts';
 import { refuseBun } from './public-ownership.ts';
 import { processSecrets, registerStaticSecrets, staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
 import { nextRerunDir, pruneArtifacts } from '@e2e-dev/core/lib/run/artifacts';
@@ -526,9 +526,17 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
   const listView: OutputView | undefined = listReporter === undefined
     ? undefined
     : { show: (stream, text) => listReporter.processOutput(stream, text), end: () => listReporter.endProcessOutput() };
+  const terminalOutput = processOutput?.writeTerminal ?? writeTerminal;
+  let dotLine = '';
+  // Complete dot rows print above list's live window so its redraws cannot erase them.
+  const dotOutput = listReporter === undefined ? terminalOutput : (stream: OutputStream, text: string): void => {
+    const lines = (dotLine + text).split('\n');
+    dotLine = lines.pop() ?? '';
+    for (const line of lines) listReporter.printReporterLine(line, (row) => terminalOutput(stream, `${row}\n`));
+  };
   const dotReporter = options.quiet === true || !reporterIds.includes('dot')
     ? undefined
-    : new DotReporter(reporterIds.includes('json') ? 'stderr' : 'stdout', listView?.show ?? processOutput?.writeTerminal, listView?.end);
+    : new DotReporter(reporterIds.includes('json') ? 'stderr' : 'stdout', dotOutput, listView);
   // User output leaves the current row of dots and, with list, stays above the live window.
   processOutput?.showThrough(dotReporter ?? listView);
   const activeReporters: readonly Reporter[] = [
