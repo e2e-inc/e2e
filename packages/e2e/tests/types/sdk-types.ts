@@ -575,6 +575,17 @@ test.skipIf(true)('no body');
 test.runIf(true)('serial', { serial: true }, async () => {});
 // @ts-expect-error the registrar registers a test, it is not test.skip
 test.skipIf(true)(true, 'reason');
+// A condition of any non-Promise type passes, an unknown one included; a Promise must be awaited first.
+declare const anyCondition: unknown;
+declare const isFeatureOn: () => Promise<boolean>;
+void test.skipIf(anyCondition);
+void test.runIf(undefined as string | undefined);
+// @ts-expect-error a Promise condition is always truthy; await it first
+void test.skipIf(isFeatureOn());
+// @ts-expect-error a Promise condition is always truthy; await it first
+void test.runIf(Promise.resolve(true));
+// @ts-expect-error a union with a Promise could still be a Promise
+void test.runIf(isFeatureOn() as Promise<boolean> | boolean);
 // fail takes the same three shapes and returns nothing inside a body; describe and setup take no fail option.
 test.fail(true, 'known gap');
 test.fail('known gap');

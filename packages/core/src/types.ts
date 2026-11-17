@@ -820,6 +820,11 @@ export type SynchronousBody<Result> = Extract<Result, PromiseLike<unknown>> exte
   ? () => Result
   : never;
 
+/** A `test.skipIf` or `test.runIf` condition. A Promise is a type error. */
+export type SynchronousCondition<Condition> = Extract<Condition, PromiseLike<unknown>> extends never
+  ? Condition
+  : never;
+
 /** Opaque handle of a registered test. */
 export interface TestCase {
   readonly [testCaseBrand]: true;
@@ -859,12 +864,12 @@ export interface TestAPI<Fixtures = TestFixtures> extends TestRegistrar<Fixtures
    * rejects the call: set `skip` on the serial `describe` instead. A Promise
    * condition also fails the call: await it first.
    */
-  skipIf(condition: unknown): TestRegistrar<Fixtures>;
+  skipIf<Condition>(condition: SynchronousCondition<Condition>): TestRegistrar<Fixtures>;
   /**
    * Returns a function that registers one test, like `test(title, fn)`:
    * skipped when `condition` is falsy, `test.skipIf(!condition)`.
    */
-  runIf(condition: unknown): TestRegistrar<Fixtures>;
+  runIf<Condition>(condition: SynchronousCondition<Condition>): TestRegistrar<Fixtures>;
   /** Registers one test that is expected to fail. */
   fail(title: string, fn: TestFn<Fixtures>): TestCase;
   /**

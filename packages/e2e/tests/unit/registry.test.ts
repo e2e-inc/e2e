@@ -191,10 +191,10 @@ describe('registration', () => {
   });
 
   it('rejects a Promise condition, which would always read as truthy', async () => {
-    expect(() => test.skipIf(Promise.resolve(false))).toThrow(
+    expect(() => test.skipIf(Promise.resolve(false) as unknown)).toThrow(
       'test.skipIf() got a Promise as its condition; await it before the call',
     );
-    expect(() => test.runIf(Promise.resolve(true))).toThrow(
+    expect(() => test.runIf(Promise.resolve(true) as unknown)).toThrow(
       'test.runIf() got a Promise as its condition; await it before the call',
     );
     // oxlint-disable-next-line unicorn/no-thenable -- a thenable that is not a Promise is the case under test
