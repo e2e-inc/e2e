@@ -7,7 +7,8 @@
  * glossary term DeepL used gets a warning on its heading and a row in the job
  * summary, with both of DeepL's versions so a reviewer can judge it. The
  * check never fails on a flag: DeepL is a second opinion, not the source of
- * truth. It fails only when DeepL cannot be reached.
+ * truth. It fails only when DeepL cannot be reached; a used-up monthly
+ * quota skips the review with a warning.
  *
  * Sections pair by position, which holds because `check-docs-translations.ts`
  * keeps a translation's outline equal to its English page's; a page whose
@@ -35,7 +36,7 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { deepl, type Pair, parseGlossary, review, sections } from './deepl-review.ts';
+import { deepl, type Pair, parseGlossary, QuotaExceeded, review, sections } from './deepl-review.ts';
 import { pages } from './docs-pages.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -94,7 +95,16 @@ for (const page of pages(join(DOCS, LANGUAGE))) {
 const glossaryFile = join(DOCS, LANGUAGE, 'README.md');
 const glossary = existsSync(glossaryFile) ? parseGlossary(readFileSync(glossaryFile, 'utf8')) : [];
 const translator = deepl(key, glossary);
-const reviews = await review(pairs, translator, glossary);
+let reviews: Awaited<ReturnType<typeof review>>;
+try {
+  reviews = await review(pairs, translator, glossary);
+} catch (error) {
+  if (!(error instanceof QuotaExceeded)) throw error;
+  process.stdout.write(
+    `::warning::docs translations: ${pairs.length} changed sections not reviewed: ${error.message}. Re-run the job after the quota resets.\n`,
+  );
+  process.exit(0);
+}
 if (values.report) writeFileSync(values.report, `${JSON.stringify(reviews, null, 2)}\n`);
 const usage = await translator.usage();
 const usageLine = `DeepL usage this month: ${usage.count.toLocaleString('en')} of ${usage.limit.toLocaleString('en')} characters.`;

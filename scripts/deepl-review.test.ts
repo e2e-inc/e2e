@@ -2,7 +2,16 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import { chrf, deepl, glossaryTsv, parseGlossary, review, sections, type Translator } from './deepl-review.ts';
+import {
+  chrf,
+  deepl,
+  glossaryTsv,
+  parseGlossary,
+  QuotaExceeded,
+  review,
+  sections,
+  type Translator,
+} from './deepl-review.ts';
 import { REPO_ROOT } from './public-packages.ts';
 
 const README = `## Style
@@ -77,7 +86,7 @@ describe('review', () => {
   it('flags a translation that drifts in both directions', async () => {
     const [result] = await review(
       [{ id: 'previous', en: 'Previous', ja: '次へ' }],
-      fake({ Previous: '前へ', 次へ: 'Next' }),
+      fake({ Previous: '前のページ', 次へ: 'Next' }),
     );
     assert.deepEqual(result?.problems, ['differs from DeepL in both directions']);
   });
@@ -204,9 +213,14 @@ describe('deepl', () => {
   });
 
   it("fails with DeepL's message on an error it should not retry", async () => {
-    const fetchImpl = (async () => new Response('Quota exceeded', { status: 456 })) as unknown as typeof fetch;
+    const fetchImpl = (async () => new Response('Bad request', { status: 400 })) as unknown as typeof fetch;
     await assert.rejects(deepl('key', [], fetchImpl).translate(['a'], 'EN', 'JA'), {
-      message: /^DeepL \/v2\/translate answered 456: Quota exceeded/,
+      message: /^DeepL \/v2\/translate answered 400: Bad request/,
     });
+  });
+
+  it('tells a used-up quota apart', async () => {
+    const fetchImpl = (async () => new Response('Quota exceeded', { status: 456 })) as unknown as typeof fetch;
+    await assert.rejects(deepl('key', [], fetchImpl).translate(['a'], 'EN', 'JA'), QuotaExceeded);
   });
 });

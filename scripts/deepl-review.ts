@@ -17,8 +17,13 @@
  * (`apps/site/lib/i18n/deepl-review.ts`); keep the two in step.
  */
 
-/** Below this, on both scores, a pair is flagged. */
-const THRESHOLD = 0.45;
+/**
+ * Below this, on both scores, a pair is flagged. Set from the first run on the
+ * UI copy: the one real mistranslation ("previous" as 前へ, which DeepL reads
+ * as "Next") scored 0.11 at best, while rewordings such as ページ送り for
+ * "pagination" scored up to 0.44.
+ */
+const THRESHOLD = 0.25;
 
 export interface Pair {
   /** Where the pair lives, for the report. */
@@ -36,6 +41,9 @@ export interface Translator {
   /** Translates every text, in order, from one language to the other. */
   translate(texts: string[], from: 'EN' | 'JA', to: 'EN' | 'JA'): Promise<string[]>;
 }
+
+/** DeepL's answer when the month's characters are used up. */
+export class QuotaExceeded extends Error {}
 
 export interface Usage {
   /** Characters translated this billing period. */
@@ -310,6 +318,7 @@ export function deepl(
     for (let attempt = 0; ; attempt++) {
       const response = await fetchImpl(`${api}${path}`, { ...init, headers });
       if (response.ok) return (await response.json()) as T;
+      if (response.status === 456) throw new QuotaExceeded(`DeepL's character quota for the month is used up`);
       const retry = response.status === 429 || response.status >= 500;
       if (!retry || attempt === 4) {
         const trace = response.headers.get('x-trace-id') ?? 'none';
