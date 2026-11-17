@@ -2072,6 +2072,95 @@ describe('device fixture', () => {
     });
   });
 
+  describe('isKeyboardShown', () => {
+    const KEYBOARD_NODE = { ref: '@e20', index: 10, parentIndex: 0, depth: 1, type: 'XCUIElementTypeKeyboard', rect: { x: 0, y: 583, width: 390, height: 261 } };
+
+    it('answers from the keyboard agent-device measured, with one capture and nothing sent to the device', async () => {
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      const before = h.fake.calls.length;
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, keyboard: { kind: 'visible', frame: KEYBOARD_NODE.rect } }));
+      expect(await device.isKeyboardShown()).toBe(true);
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, KEYBOARD_NODE], keyboard: { kind: 'absent' } }));
+      // The measurement wins over a keyboard element the tree still lists.
+      expect(await device.isKeyboardShown()).toBe(false);
+      expect(h.fake.methods().slice(before)).toEqual(['capture.snapshot', 'capture.snapshot']);
+    });
+
+    it('falls back to a keyboard element in the tree when the capture measured nothing', async () => {
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, KEYBOARD_NODE] }));
+      expect(await device.isKeyboardShown()).toBe(true);
+      h.fake.respond('capture.snapshot', () => SETTINGS_SNAPSHOT);
+      expect(await device.isKeyboardShown()).toBe(false);
+    });
+
+    it('reads every keyboard fact agent-device reports the way the keyboard band does, whatever the tree still lists', async () => {
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      const frame = KEYBOARD_NODE.rect;
+      const cases: ReadonlyArray<readonly [unknown, readonly unknown[], boolean]> = [
+        [{ kind: 'derived', derivation: 'docked-tree', frame }, SETTINGS_NODES, true],
+        [{ kind: 'visibility-only', visible: true }, SETTINGS_NODES, true],
+        [{ kind: 'visibility-only', visible: false }, [...SETTINGS_NODES, KEYBOARD_NODE], false],
+        [{ kind: 'tree-rejected', derivation: 'docked-tree', visible: false }, [...SETTINGS_NODES, KEYBOARD_NODE], false],
+        [{ kind: 'tree-rejected', derivation: 'docked-tree', visible: true }, SETTINGS_NODES, true],
+        [{ kind: 'unmeasurable', reason: 'no probe' }, [...SETTINGS_NODES, KEYBOARD_NODE], true],
+        [{ kind: 'unmeasurable', reason: 'no probe' }, SETTINGS_NODES, false],
+      ];
+      for (const [keyboard, nodes, shown] of cases) {
+        h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes, keyboard }));
+        expect([keyboard, await device.isKeyboardShown()]).toEqual([keyboard, shown]);
+      }
+    });
+
+    it('fails rather than answer false from a tree that stays sparse', async () => {
+      autoAdvanceTimers();
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      h.fake.respond('capture.snapshot', () => ({ nodes: [{ ref: '@e1', type: 'application' }], snapshotQuality: { state: 'sparse' } }));
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
+      // A sparse capture that still carries the producer's reading answers from it.
+      h.fake.respond('capture.snapshot', () => ({ nodes: [{ ref: '@e1', type: 'application' }], snapshotQuality: { state: 'sparse' }, keyboard: { kind: 'absent' } }));
+      expect(await device.isKeyboardShown()).toBe(false);
+    });
+
+    it('trusts the keys a cut tree lists, and fails only when a cut tree lists none', async () => {
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, truncated: true, nodes: [...SETTINGS_NODES, KEYBOARD_NODE] }));
+      expect(await device.isKeyboardShown()).toBe(true);
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, truncated: true }));
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('incomplete') });
+    });
+
+    it('fails when agent-device rejected the keyboard elements it found and had no probe to say', async () => {
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, KEYBOARD_NODE], keyboard: { kind: 'tree-rejected', derivation: 'docked-tree' } }));
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('docked keyboard') });
+    });
+
+    it('captures a sparse tree again instead of reading it as no keyboard', async () => {
+      autoAdvanceTimers();
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      const sparse = { nodes: [{ ref: '@e1', type: 'application' }], snapshotQuality: { state: 'sparse' } };
+      let taken = 0;
+      h.fake.respond('capture.snapshot', () => (taken++ === 0 ? sparse : { ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, KEYBOARD_NODE] }));
+      expect(await device.isKeyboardShown()).toBe(true);
+      expect(taken).toBe(2);
+    });
+  });
+
   it('gives a screen swipe the remaining transition budget after an alert is dismissed', async () => {
     autoAdvanceTimers();
     const h = harness({ transition: 120 });

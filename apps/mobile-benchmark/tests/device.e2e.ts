@@ -46,7 +46,9 @@ test.describe('permission prompt', () => {
 test('sequential onboarding echoes the exact values', async ({ app, device, screen }) => {
   await openScenario({ app, device, screen }, 'Sequential Onboarding');
   await screen.getByTestId('email-input').fill('jane@example.com');
+  expect(await device.isKeyboardShown()).toBe(true);
   await device.dismissKeyboard();
+  expect(await device.isKeyboardShown()).toBe(false);
   await screen.getByTestId('continue-button').tap();
 
   await screen.getByTestId('first-name-input').fill('Jane');

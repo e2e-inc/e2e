@@ -208,6 +208,16 @@ export interface Device {
    * Enter on the field).
    */
   dismissKeyboard(): Promise<void>;
+  /**
+   * Whether the soft keyboard is on screen, from one capture: what
+   * agent-device reported for it (a measured or derived keyboard frame, or a
+   * visibility probe), else a visible keyboard element in the accessibility
+   * tree, the same keyboard observations hide covered nodes under. Fails
+   * with `ENGINE_FAILURE` when the capture cannot answer: no keyboard in a
+   * tree that is still incomplete, or keyboard elements agent-device could
+   * not place and had no probe for. Changes nothing on the device.
+   */
+  isKeyboardShown(): Promise<boolean>;
   /** Reads the clipboard. */
   clipboard(): Promise<string>;
   /** Writes the clipboard. */
@@ -356,6 +366,9 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     async dismissKeyboard() {
       await surface.dismissKeyboard(context.signal, surface.inputBudget('device.dismissKeyboard', { timeoutMs: context.timeouts.action, signal: context.signal }));
     },
+    async isKeyboardShown() {
+      return surface.keyboardShown(context.signal, surface.inputBudget('device.isKeyboardShown', { timeoutMs: context.timeouts.action, signal: context.signal }));
+    },
     async clipboard() {
       const result = await surface.command(
         'device.clipboard',
@@ -392,6 +405,7 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     back: action,
     alert: { ...action, label: (value) => value },
     dismissKeyboard: action,
+    isKeyboardShown: action,
     clipboard: action,
     setClipboard: { ...action, label: (text) => `${text.length} chars` },
   });
