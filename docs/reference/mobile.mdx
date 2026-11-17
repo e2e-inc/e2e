@@ -345,10 +345,10 @@ export default {
   arguments, so `AppleLanguages` or `AppleLocale` in an object on an Android
   target fails with `INVALID_CONFIG`; a list of strings is passed through as
   given.
-- `am start` splits a list extra on every comma and keeps a backslash before
-  one, so on Android a list in an object is not empty, and no item is empty,
-  holds a comma, or ends in a backslash. Each of those fails with
-  `INVALID_CONFIG`.
+- `am start` splits a list extra on each comma not preceded by a backslash
+  and keeps that backslash, so on Android a list in an object is not empty,
+  and no item is empty, holds a comma, or ends in a backslash. Each of those
+  fails with `INVALID_CONFIG`.
 
 | Value | iOS | Android |
 | --- | --- | --- |

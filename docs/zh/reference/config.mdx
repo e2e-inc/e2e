@@ -423,7 +423,7 @@ launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', e2e: true },
 
 ```ts
 type LaunchArgumentValue = string | number | boolean | readonly string[];
-type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue>>;
+type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue | undefined>>;
 ```
 
 选择构建模式的参数会改变应用本身：为每种模式设置独立的 `identity`。

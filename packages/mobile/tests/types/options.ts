@@ -37,7 +37,7 @@ const farm = {
 ({ id: 'lease-1', daemon: { baseUrl: 4700 } }) satisfies DeviceLease;
 
 ({ relaunch: true, launchArguments: ['-reset', 'YES'] }) satisfies OpenAppOptions;
-({ relaunch: true, launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', reset: true, retries: 3 } }) satisfies OpenAppOptions;
+({ relaunch: true, launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', reset: true, retries: 3, token: process.env['TOKEN'] } }) satisfies OpenAppOptions;
 // @ts-expect-error an object value is flat: no nested object
 ({ launchArguments: { locale: { language: 'fr' } } }) satisfies OpenAppOptions;
 // @ts-expect-error a list value holds strings only

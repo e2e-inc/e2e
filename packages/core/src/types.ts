@@ -1393,9 +1393,10 @@ export type LaunchArgumentValue = string | number | boolean | readonly string[];
 /**
  * A target's launch arguments: a list of strings, the arguments themselves
  * (`['-e2e', 'YES']`), or an object of argument name to value
- * (`{ AppleLanguages: ['fr'], AppleLocale: 'fr_FR' }`).
+ * (`{ AppleLanguages: ['fr'], AppleLocale: 'fr_FR' }`). An `undefined`
+ * value, read from the environment, is the entry left out.
  */
-export type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue>>;
+export type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue | undefined>>;
 
 /**
  * The app one target tests, declared on the target and nowhere else: engines
