@@ -386,7 +386,7 @@ export function deepl(
 }
 
 /** The model `gateway` translates with when DeepL's quota is used up. */
-export const FALLBACK_MODEL = 'openai/gpt-6-luna';
+const FALLBACK_MODEL = 'openai/gpt-6-luna';
 
 const LANGUAGE = { EN: 'English', JA: 'Japanese' } as const;
 
