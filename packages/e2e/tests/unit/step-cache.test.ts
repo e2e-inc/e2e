@@ -6,9 +6,10 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { settleStagedTraces, type AgentCacheContext, type ClaimedKey } from '@e2e-dev/core/lib/cache/context';
 import { instructionDigest, paramsDigest } from '@e2e-dev/core/lib/cache/identity';
+import { recordedProvenance } from '@e2e-dev/core/lib/cache/recorder';
 import { StoredRecordings } from '@e2e-dev/core/lib/cache/rekeyed';
 import { FileCacheStore, MAX_CACHE_WIRE_BYTES } from '@e2e-dev/core/lib/cache/store';
-import { buildTraceEntry, type ActionTrace, type DerivedReason, type TraceEntry } from '@e2e-dev/core/lib/cache/trace';
+import { buildTraceEntry, MAX_TRACE_DESCRIPTOR_CHARS, type ActionTrace, type DerivedReason, type TraceEntry } from '@e2e-dev/core/lib/cache/trace';
 import { failedStepOutcome, recordedVerdictOf, StepTraceSession, type StepCacheHost, type StepCacheOptions } from '@e2e-dev/core/lib/agent/step-cache';
 import { AgentError } from '@e2e-dev/core/lib/agent/error';
 import type { ExecutorActions } from '@e2e-dev/core/lib/agent/executor';
@@ -1392,6 +1393,41 @@ describe('cache.strict and a step whose key changed under its recording', () => 
       const session = makeSession(await rekeyedContext(recordedPayload(recordedFor)), makeHost(['/']));
       await expect(session.begin(), JSON.stringify(recordedFor)).resolves.toBeUndefined();
     }
+  });
+
+  describe.each(['testId', 'targetId', 'agent'] as const)('a %s longer than an entry keeps', (field) => {
+    const long = 'checkout for a signed in customer with a saved card '.repeat(6);
+    const stepWith = (value: string) => ({ ...exampleStep, [field]: value });
+    const sessionFor = (context: AgentCacheContext, step: typeof exampleStep) =>
+      makeSession({ ...context, claimKey: () => ({ keyHash: OWN_KEY, context: exampleContext, step }) }, makeHost(['/']));
+
+    it('runs live when only another step that starts the same way was recorded', async () => {
+      const context = await rekeyedContext(recordedPayload(recordedProvenance(stepWith(`${long} first`), (text) => text)));
+      const session = sessionFor(context, stepWith(`${long} second`));
+      await expect(session.begin()).resolves.toBeUndefined();
+      expect(session.cacheInfo).toMatchObject({ mode: 'missed', reason: 'no-entry' });
+    });
+
+    it('fails with REPLAY_STALE when its own recording sits under another key', async () => {
+      const step = stepWith(`${long} first`);
+      const stored = recordedProvenance(step, (text) => text);
+      expect(stored[field]).toHaveLength(MAX_TRACE_DESCRIPTOR_CHARS);
+      const session = sessionFor(await rekeyedContext(recordedPayload(stored)), step);
+      await expect(session.begin()).rejects.toMatchObject({ code: 'REPLAY_STALE' });
+    });
+
+    it('runs live against an entry that cut it before entries kept an identity digest', async () => {
+      const step = stepWith(`${long} first`);
+      const { identityDigest: _digest, ...legacy } = recordedProvenance(step, (text) => text);
+      await expect(sessionFor(await rekeyedContext(recordedPayload(legacy)), step).begin()).resolves.toBeUndefined();
+    });
+
+    it(`fails with REPLAY_STALE at exactly ${MAX_TRACE_DESCRIPTOR_CHARS} characters, which an entry keeps whole`, async () => {
+      const step = stepWith('x'.repeat(MAX_TRACE_DESCRIPTOR_CHARS));
+      const stored = recordedProvenance(step, (text) => text);
+      expect(stored).toEqual(step);
+      await expect(sessionFor(await rekeyedContext(recordedPayload(stored)), step).begin()).rejects.toMatchObject({ code: 'REPLAY_STALE' });
+    });
   });
 
   it('runs live when the only recording is truncated or records no step', async () => {

@@ -6,6 +6,7 @@ import { chmod, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { createAgentCacheContext, settleStagedTraces } from '@e2e-dev/core/lib/cache/context';
+import { recordedProvenance } from '@e2e-dev/core/lib/cache/recorder';
 import { FileCacheStore } from '@e2e-dev/core/lib/cache/store';
 import { buildTraceEntry } from '@e2e-dev/core/lib/cache/trace';
 import { readTraceEntry } from '@e2e-dev/core/lib/cache/trace-read';
@@ -356,6 +357,24 @@ describe('settleStagedTraces', () => {
     context.staged.push({ kind: 'keep', keyHash: KEY_A, stepIndex: 1, recordedFor: STEP });
     await settleStagedTraces(context, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true });
     expect(readTraceEntry(JSON.parse(store.entries.get(KEY_A)!))?.payload).toEqual({ ...recorded, recordedFor: STEP });
+  });
+
+  it('writes the identity digest into a confirmed kept entry that cut a long test id before entries kept one', async () => {
+    const store = memoryStore();
+    const long = { ...STEP, testId: `${STEP.testId}${'x'.repeat(400)}` };
+    const recordedFor = recordedProvenance(long, (text) => text);
+    const { identityDigest, ...legacy } = recordedFor;
+    expect(identityDigest).toMatch(/^[a-f0-9]{64}$/u);
+    store.entries.set(KEY_A, JSON.stringify(buildTraceEntry({ ...trace('replayed flow'), recordedFor: legacy })));
+    const context = contextWith(store);
+    context.staged.push({ kind: 'keep', keyHash: KEY_A, stepIndex: 1, recordedFor });
+    await settleStagedTraces(context, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true });
+    expect(readTraceEntry(JSON.parse(store.entries.get(KEY_A)!))?.payload.recordedFor).toEqual(recordedFor);
+  });
+
+  it('refuses an entry whose identity digest is not a SHA-256 hex digest', () => {
+    const entry = buildTraceEntry({ ...trace('recorded flow'), recordedFor: { ...STEP, identityDigest: 'not-a-digest' } });
+    expect(readTraceEntry(JSON.parse(JSON.stringify(entry)))).toBeUndefined();
   });
 
   it('writes what was confirmed and leaves every unconfirmed entry as stored when the failure implicates nothing', async () => {

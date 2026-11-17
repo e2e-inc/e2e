@@ -141,14 +141,16 @@ function flowOf(trace: ActionTrace): string {
 
 /**
  * Writes the step's full provenance into a kept entry recorded before the
- * occurrence fields were, leaving every other entry untouched. Its replay
- * proved which step it belongs to, and `cache.strict` matches only entries
- * that say so exactly (`rekeyed.ts`).
+ * occurrence fields or the identity digest were, leaving every other entry
+ * untouched. Its replay proved which step it belongs to, and `cache.strict`
+ * matches only entries that say so exactly (`rekeyed.ts`).
  */
 async function completeProvenance(store: CacheStore, keyHash: string, recordedFor: TraceProvenance): Promise<void> {
   const existing = await store.read(keyHash);
-  if (existing.status !== 'hit' || existing.entry.payload.recordedFor?.callIndex !== undefined) return;
-  await store.write(keyHash, { ...existing.entry.payload, recordedFor });
+  if (existing.status !== 'hit') return;
+  const stored = existing.entry.payload.recordedFor;
+  const complete = stored?.callIndex !== undefined && stored.identityDigest === recordedFor.identityDigest;
+  if (!complete) await store.write(keyHash, { ...existing.entry.payload, recordedFor });
 }
 
 /** How an attempt ended, as the settlement of its staged entries reads it. */

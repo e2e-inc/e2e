@@ -39,6 +39,7 @@ import {
   type TraceTargetDescriptor,
 } from './trace.ts';
 import { readRecordedModel } from './trace-fields.ts';
+import { sha256Hex } from '../internal/ids.ts';
 import { bound } from '../internal/text.ts';
 
 /** The summary a run-time value gap records; the prose a project-tool gap would carry for a tool of that name. */
@@ -342,12 +343,17 @@ function sameTarget(a: TraceTargetDescriptor | undefined, b: TraceTargetDescript
  * the store holds.
  */
 export function recordedProvenance(provenance: TraceProvenance, redact: (text: string) => string): TraceProvenance {
+  const testId = redact(provenance.testId);
+  const targetId = redact(provenance.targetId);
+  const agent = provenance.agent === undefined ? undefined : redact(provenance.agent);
+  const cut = [testId, targetId, agent ?? ''].some((text) => text.length > MAX_TRACE_DESCRIPTOR_CHARS);
   return {
-    testId: bound(redact(provenance.testId), MAX_TRACE_DESCRIPTOR_CHARS),
-    targetId: bound(redact(provenance.targetId), MAX_TRACE_DESCRIPTOR_CHARS),
+    testId: bound(testId, MAX_TRACE_DESCRIPTOR_CHARS),
+    targetId: bound(targetId, MAX_TRACE_DESCRIPTOR_CHARS),
     instructionDigest: provenance.instructionDigest,
     ...(provenance.paramsDigest === undefined ? {} : { paramsDigest: provenance.paramsDigest }),
     ...(provenance.callIndex === undefined ? {} : { callIndex: provenance.callIndex }),
-    ...(provenance.agent === undefined ? {} : { agent: bound(redact(provenance.agent), MAX_TRACE_DESCRIPTOR_CHARS) }),
+    ...(agent === undefined ? {} : { agent: bound(agent, MAX_TRACE_DESCRIPTOR_CHARS) }),
+    ...(cut ? { identityDigest: sha256Hex(JSON.stringify([testId, targetId, agent ?? null])) } : {}),
   };
 }
