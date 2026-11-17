@@ -31,7 +31,6 @@ import { SuiteAttempt, tearDownWorkerFixtures, type SuiteAttemptContext } from '
 import type {
   AttemptRecord,
   ResultRecord,
-  ResultStatus,
   RunError,
   SerialGroupRecord,
   SerialMemberRecord,
@@ -40,11 +39,11 @@ import { isFailedStatus, type SerialAttemptRecord } from '@e2e-dev/core/lib/run/
 import { traceScreen } from '@e2e-dev/core/lib/run/step-screens';
 import { runWithRetries } from './retry.ts';
 import { runSerialUnit, type SerialAttemptStart, type SerialHost, type SharedSerialSession } from './serial.ts';
-import { interruptedInPhase, interruptedSkip, pairKey, pairResult, unstartedResult } from './units.ts';
+import { interruptedInPhase, interruptedSkip, pairKey, unitResult, unstartedResult } from './units.ts';
 import { carriedSecrets, processSecrets, redactForSession, sessionLedger, staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
 import { SessionStaging } from '@e2e-dev/core/lib/run/sessions';
 import { StepRecorder, type StepHoldRequest, type StepProgress } from '@e2e-dev/core/lib/run/steps';
-import { AttemptHolds, type HeldStep } from './step-hold.ts';
+import { holdAttemptSteps, readHeldScreen, type AttemptHolds, type HeldStep } from './step-hold.ts';
 import { WorkerModels } from '@e2e-dev/core/lib/run/worker-models';
 import { classifyAttemptStatus, EngineSessions, type EngineSessionsOptions } from '@e2e-dev/core/lib/run/engine-sessions';
 import type { EngineDisposeContext } from '@e2e-dev/core/lib/engine/index';
@@ -212,27 +211,6 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
   }
 
   /**
-   * The screen a held step waits on, as the trace page lists one: its
-   * location, then a line per node, redacted with the session's ledger. Read
-   * while the test clock is stopped; a screen that cannot be read (no app
-   * open yet, an engine without a tree) is undefined and never fails the test.
-   */
-  private async readHeldScreen(session: TargetSession, attemptId: string, signal: AbortSignal): Promise<string | undefined> {
-    try {
-      const observation = await session.observe(this.op(attemptId, this.config.actionTimeout, signal));
-      const screen = traceScreen(observation, {
-        ledger: sessionLedger(session, this.config.allSecrets),
-        maxBytes: this.config.limits.maxObservationBytes,
-        appOrigin: this.target.app.base?.origin,
-      });
-      if (screen === undefined) return undefined;
-      return [...(screen.location === undefined ? [] : [screen.location]), ...screen.lines.map((line) => line.text)].join('\n');
-    } catch {
-      return undefined;
-    }
-  }
-
-  /**
    * Takes a rejection nobody in this process caught: a promise a test started
    * and never awaited. Node cannot say which test created it, so it is
    * charged to the attempt in flight: a running body is cut short the way a
@@ -374,44 +352,8 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       },
     );
 
-    this.emitUnitResult(pair, finalStatus, attempts, hookFailure);
+    this.emit(unitResult(pair, finalStatus, attempts, hookFailure));
     return realm;
-  }
-
-  /**
-   * The result of a test or setup unit. A beforeAll failure before any
-   * attempt ran skips the unit; on a retry the recorded attempts stand, since
-   * the hook failure is already a run error and a failing test must not be
-   * reported as skipped. A unit whose body skipped itself ends on its first
-   * skipped attempt (`runWithRetries`), so that attempt's reason is the
-   * result's.
-   */
-  private emitUnitResult(
-    pair: TestTargetPair,
-    finalStatus: ResultStatus,
-    attempts: AttemptRecord[],
-    hookFailure: SerializedError | undefined,
-  ): void {
-    if (hookFailure !== undefined && attempts.length === 0) {
-      this.emit(
-        pairResult(pair, {
-          status: 'skipped',
-          selected: true,
-          skip: { cause: 'hook-failed', reason: hookFailure.message },
-          attempts: [],
-        }),
-      );
-      return;
-    }
-    const last = attempts.at(-1);
-    this.emit(
-      pairResult(pair, {
-        status: finalStatus,
-        selected: true,
-        attempts,
-        ...(last?.status === 'skipped' ? { skip: last.skip } : {}),
-      }),
-    );
   }
 
   // --- setup tests ---
@@ -473,7 +415,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       },
     );
 
-    this.emitUnitResult(pair, finalStatus, attempts, hookFailure);
+    this.emit(unitResult(pair, finalStatus, attempts, hookFailure));
   }
 
 
@@ -718,34 +660,17 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       this.options.events?.onAttemptDeadline?.(pair, { index: attemptIndex, id: attemptId, startedAt });
       const budget = new AttemptBudget(attemptAbort.signal, testDeadline);
       if (holdStep !== undefined) {
-        const title = pair.test.titlePath.join(' › ');
-        // Steps held together (one `Promise.all`) wait on one screen, read once.
-        let heldScreen: Promise<string | undefined> | undefined;
-        holds = new AttemptHolds({
+        const screens = { ledger: sessionLedger(session, this.config.allSecrets), maxBytes: this.config.limits.maxObservationBytes, appOrigin: this.target.app.base?.origin };
+        holds = holdAttemptSteps({
           budget,
           signal: attemptAbort.signal,
-          ask: async (step, signal) => {
-            const screen = this.options.heldScreens === true ? await (heldScreen ??= this.readHeldScreen(session, attemptId, signal)) : undefined;
-            await holdStep(
-              {
-                target: this.target.name,
-                testId: pair.test.id,
-                agent: pair.agent,
-                repeat: pair.repeat,
-                title,
-                api: step.api,
-                label: step.label,
-                ...(step.source === undefined ? {} : { source: step.source }),
-                ...(screen === undefined ? {} : { screen }),
-              },
-              signal,
-            );
-          },
+          attempt: { target: this.target.name, testId: pair.test.id, agent: pair.agent, repeat: pair.repeat, title: pair.test.titlePath.join(' › ') },
+          holdStep,
+          ...(this.options.heldScreens === true
+            ? { readScreen: (signal: AbortSignal) => readHeldScreen(session, this.op(attemptId, this.config.actionTimeout, signal), screens) }
+            : {}),
           // The runner's watchdog keeps the test deadline too; it gets what is left.
-          onResume: (remainingMs) => {
-            heldScreen = undefined;
-            this.options.events?.onAttemptDeadline?.(pair, { index: attemptIndex, id: attemptId, startedAt, remainingMs });
-          },
+          onResume: (remainingMs) => this.options.events?.onAttemptDeadline?.(pair, { index: attemptIndex, id: attemptId, startedAt, remainingMs }),
         });
       }
       const saveSession =
