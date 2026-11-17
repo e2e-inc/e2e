@@ -40,6 +40,7 @@ import type { TargetProvenance } from '@e2e-dev/core/lib/run/provision';
 import { agentStepTable } from '../report/debug-steps.ts';
 import { writeTracePages, type TracePages } from '../report/traces.ts';
 import { STATELESS_REPORTERS } from '../report/builtin.ts';
+import { DotReporter } from '../report/dot.ts';
 import { failureLine } from '../report/format.ts';
 import { ListReporter } from '../report/list.ts';
 import { writeJsonReport } from '../report/write.ts';
@@ -53,7 +54,7 @@ import { stepPromptLine } from '../report/list-steps.ts';
 import { buildWorkPlans, nonRunResult, orderWorkPlans, plannedSlots, type TargetWorkPlan, type TimeLimit } from './units.ts';
 import { SessionStore } from '@e2e-dev/core/lib/run/sessions';
 import { outputLayout } from '@e2e-dev/core/lib/run/output';
-import type { RunnerOutput } from './process-output.ts';
+import type { OutputView, RunnerOutput } from './process-output.ts';
 import { refuseBun } from './public-ownership.ts';
 import { processSecrets, registerStaticSecrets, staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
 import { nextRerunDir, pruneArtifacts } from '@e2e-dev/core/lib/run/artifacts';
@@ -522,15 +523,18 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
   // Without the list reporter to print it under a heading, a test's output
   // goes to the terminal as written.
   const printsTestOutput = options.quiet !== true && listReporter === undefined;
-  // Until the run is over, what user code prints lands above the live window.
-  processOutput?.showThrough(
-    listReporter === undefined
-      ? undefined
-      : { show: (stream, text) => listReporter.processOutput(stream, text), end: () => listReporter.endProcessOutput() },
-  );
+  const listView: OutputView | undefined = listReporter === undefined
+    ? undefined
+    : { show: (stream, text) => listReporter.processOutput(stream, text), end: () => listReporter.endProcessOutput() };
+  const dotReporter = options.quiet === true || !reporterIds.includes('dot')
+    ? undefined
+    : new DotReporter(reporterIds.includes('json') ? 'stderr' : 'stdout', listView?.show ?? processOutput?.writeTerminal, listView?.end);
+  // User output leaves the current row of dots and, with list, stays above the live window.
+  processOutput?.showThrough(dotReporter ?? listView);
   const activeReporters: readonly Reporter[] = [
+    ...(dotReporter === undefined ? [] : [dotReporter]),
     ...(listReporter === undefined ? [] : [listReporter]),
-    ...reporterIds.filter((id) => id !== 'list').map((id) => STATELESS_REPORTERS[id]),
+    ...reporterIds.filter((id) => id !== 'list' && id !== 'dot').map((id) => STATELESS_REPORTERS[id]),
     ...(loaded.config?.customReporters ?? []),
   ];
   const emit = createRunEventEmitter([

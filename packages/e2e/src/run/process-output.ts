@@ -168,6 +168,10 @@ export class RunnerOutput {
   private stdoutTo: OutputStream = 'stdout';
   /** The terminal's stdout for the list reporter: its own lines and live window go straight there. */
   readonly listOutput: Required<ListReporterOutput>;
+  /** Writes a reporter's own output past the view handling user output. */
+  readonly writeTerminal = (stream: OutputStream, text: string): void => {
+    this.terminal[stream](text);
+  };
 
   constructor(
     private readonly terminal: Readonly<Record<OutputStream, TerminalWrite>>,

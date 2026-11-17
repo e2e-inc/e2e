@@ -336,6 +336,7 @@ unique(7);
 ({ targets, output: ['a', 'b'] }) satisfies E2EConfig;
 declare const reporter: Reporter;
 ({ targets, reporters: ['list', reporter] }) satisfies E2EConfig;
+({ targets, reporters: ['dot'] }) satisfies E2EConfig;
 ({ targets, reporters: [reporter] }) satisfies E2EConfig;
 ({
   name: 'upload',
