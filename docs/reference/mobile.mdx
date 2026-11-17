@@ -316,7 +316,7 @@ export default {
 
 | Throws | When |
 | --- | --- |
-| `INVALID_CONFIG` | At config load: no `app.bundleId` and no `app.appPath`; an `app.url` (not supported yet); a link in `bundleId` (a test opens one with `device.openLink`); an unknown permission name. |
+| `INVALID_CONFIG` | At config load: no `app.bundleId` and no `app.appPath`; an `app.url` (not supported yet); a link in `bundleId` (a test opens one with `device.openLink`); an unknown permission name; an Apple launch argument such as `AppleLocale` in an object on an Android target. |
 | `UNSUPPORTED_CAPABILITY` | `app.open()`, `app.restart()`, or `app.clearState()` on a target with no `app.bundleId` before its build is installed. |
 
 #### Launch arguments and permissions
@@ -344,6 +344,18 @@ export default {
 - iOS hands the arguments to the app process
   (`ProcessInfo.processInfo.arguments`). Android appends them to `am start`,
   so `['--ez', 'e2e', 'true']` is a boolean intent extra.
+- An object names each argument. On iOS an entry becomes `-name value`. On
+  Android it becomes `--es name value`. Android reads none of Apple's
+  arguments, so `AppleLanguages` or `AppleLocale` on an Android target fails
+  with `INVALID_CONFIG`.
+
+| Value | iOS | Android |
+| --- | --- | --- |
+| `'fr_FR'` | `-name fr_FR` | `--es name fr_FR` |
+| `true` | `-name YES` | `--es name true` |
+| `3` | `-name 3` | `--es name 3` |
+| `['fr', 'de']` | `-name (fr, de)` | `--esa name fr,de` |
+
 - Each permission is `grant`, `deny`, or `reset`. `deny` is a recorded
   refusal on iOS, where the app is told no without a prompt, and a revocation
   on Android, where the OS asks again when the app requests the permission.

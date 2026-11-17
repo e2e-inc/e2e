@@ -1492,7 +1492,7 @@ export interface EngineAppInfo {
   /** The build to install, as the target declared it; relative to `projectRoot`. */
   readonly appPath?: string;
   /** Arguments every fresh launch passes the app. */
-  readonly launchArguments?: readonly string[];
+  readonly launchArguments?: LaunchArguments;
   /** Permissions the app holds, by name; what each state means is the engine's (a device sets them before every fresh launch). */
   readonly permissions?: Readonly<Record<string, AppPermissionState>>;
 }

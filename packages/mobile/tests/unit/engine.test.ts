@@ -144,6 +144,25 @@ describe('manifest', () => {
     expect(() => validateApp!({ url: 'http://127.0.0.1:3000' }, info)).toThrowError(expect.objectContaining({ message: expect.not.stringContaining('10.0.2.2') }));
   });
 
+  it('refuses an iOS launch argument in an object on an Android target, and passes a list through', () => {
+    const info = { targetName: 'pixel' };
+    const android = harness({ platform: 'android' }).engine.validateApp!;
+    const ios = harness().engine.validateApp!;
+    const app = (launchArguments: unknown) => ({ bundleId: 'com.example.app', launchArguments }) as never;
+
+    expect(() => android(app({ AppleLocale: 'fr_FR' }), info)).toThrowError(
+      expect.objectContaining({
+        code: 'INVALID_CONFIG',
+        message: `target "pixel" app.launchArguments.AppleLocale is an iOS launch argument, and Android reads none of Apple's; set the device's language before the run, or language and locale on a hosted device provider`,
+      }),
+    );
+
+    expect(() => android(app({ AppleLanguages: ['fr'] }), info)).toThrowError(expect.objectContaining({ code: 'INVALID_CONFIG' }));
+    expect(() => android(app({ e2e: true, locale: 'fr_FR' }), info)).not.toThrow();
+    expect(() => android(app(['-AppleLocale', 'fr_FR']), info)).not.toThrow();
+    expect(() => ios(app({ AppleLocale: 'fr_FR', AppleLanguages: ['fr'] }), { targetName: 'ios' })).not.toThrow();
+  });
+
   it('rejects a permission name or state it does not know on the target, naming the nearest name', () => {
     const { validateApp } = harness().engine;
     const info = { targetName: 'ios' };
@@ -3437,6 +3456,37 @@ describe('device fixture', () => {
       permission('location', 'deny'),
       fresh,
     ]);
+  });
+
+  it('spells a launch-argument object for the platform on every fresh launch of the pinned app', async () => {
+    const launchArguments = { AppleLanguages: ['fr', 'en-GB'], AppleLocale: 'fr_FR', e2e: true, retries: 3 };
+    const ios = harness({ bundleId: 'com.example.app', launchArguments });
+    await openAttempt(ios);
+    await ios.engine.session!.restart!(operation());
+
+    expect(ios.fake.lastArgs('apps.open')).toEqual({
+      platform: 'ios',
+      app: 'com.example.app',
+      relaunch: true,
+      launchArgs: ['-AppleLanguages', '(fr, en-GB)', '-AppleLocale', 'fr_FR', '-e2e', 'YES', '-retries', '3'],
+    });
+
+    const android = harness({ platform: 'android', bundleId: ANDROID_APP_PACKAGE, launchArguments: { e2e: true, locale: 'fr_FR', retries: 3, tags: ['a', 'b'] } });
+
+    await openAttempt(android);
+    await android.engine.session!.restart!(operation());
+    expect(android.fake.lastArgs('apps.open')).toEqual({
+      platform: 'android',
+      app: ANDROID_APP_PACKAGE,
+      relaunch: true,
+      launchArgs: ['--es', 'e2e', 'true', '--es', 'locale', 'fr_FR', '--es', 'retries', '3', '--esa', 'tags', 'a,b'],
+    });
+
+    // An empty object sends nothing, like an empty list.
+    const empty = harness({ bundleId: 'com.example.app', launchArguments: {} });
+    await openAttempt(empty);
+    await empty.engine.session!.restart!(operation());
+    expect(empty.fake.lastArgs('apps.open')).toEqual({ platform: 'ios', app: 'com.example.app', relaunch: true });
   });
 
   it('launches any app with its own arguments and permissions, set on that app by name', async () => {

@@ -43,7 +43,7 @@ For a migration that spans several sessions, the [`migrate-to-e2e` skill](/codin
 | `devices.<name>.device.type` | `mobile({ device: 'iPhone 17' })` |
 | `configurations` | `targets`, one engine per platform |
 | Jest `maxWorkers` | `workers`, one per device |
-| `apps.<name>.launchArgs` | `app.launchArguments` on the target, a list of strings for each platform |
+| `apps.<name>.launchArgs` | `app.launchArguments` on the target, with the same keys, or a list of strings per platform |
 | `launchApp({ permissions })` | `app.permissions` on the target: `grant`, `deny`, `reset` for `YES`, `NO`, `unset`. More names are [planned](#planned) |
 
 ```ts title="e2e.config.ts"
@@ -167,10 +167,9 @@ on purpose.
 | `.toHaveValue(v)` outside a form control | `expect(device.locator('id=x value="v"')).toBeVisible()` |
 | `permissions` for `health`, `homekit`, `speech`, `faceid`, `userTracking`; values `always`, `inuse`, `limited` | Tap the prompt's button, or `device.alert('accept')` |
 | `device.sendUserNotification()`, `.pinch()` | `client.apps.push()`, `client.interactions.pinch()` on [`unstable_raw`](/reference/mobile#unstable_raw) |
-| `launchApp({ languageAndLocale })` | On iOS, `app.launchArguments: ['-AppleLanguages', '(fr)', '-AppleLocale', 'fr_FR']`, see [Run the app in another language](/mobile#run-the-app-in-another-language) |
+| `launchApp({ languageAndLocale })` | On iOS, `app.launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR' }`, see [Run the app in another language](/mobile#run-the-app-in-another-language) |
 | Jest `globalSetup`, `globalTeardown` | Start dependencies before the run |
 | `device.reverseTcpPort()` | Run `adb reverse` in a CI step |
-| `launchArgs` as one key-value map | `['-key', 'value']` on iOS, `['--es', 'key', 'value']` on Android |
 | `.getAttributes()` | `.textContent()`, `.inputValue()`, `.isEnabled()`, `.isVisible()`, `.isChecked()`, `.boundingBox()` |
 | `device.setStatusBar()` | `xcrun simctl status_bar`. `toHaveScreenshot` holds the status bar fixed |
 

@@ -7,10 +7,10 @@
 import type { EngineAppDeclaration, EngineAppInfo, EngineHandle } from '../engine/index.ts';
 import { ConfigurationError } from '../internal/errors.ts';
 import { obj } from '../internal/objects.ts';
-import { rejectUnknownKeys } from '../internal/options.ts';
+import { isPlainObject, rejectUnknownKeys } from '../internal/options.ts';
 import { didYouMean } from '../internal/suggest.ts';
 import { isImplicitTestHost, isRefusedLinkScheme, normalizeBaseUrl, portOf, requestsFreePort, siteOf, withPort, type NormalizedBaseUrl } from '../internal/urls.ts';
-import type { AppPermissionState, CommandConfig, TargetApp } from '../types.ts';
+import type { AppPermissionState, CommandConfig, LaunchArgumentValue, LaunchArguments, TargetApp } from '../types.ts';
 import { checkLog, digestCommand, isRecord, normalizeCommand } from './command.ts';
 import { httpUrl } from './validate.ts';
 
@@ -22,7 +22,7 @@ export interface TargetAppDeclaration {
   readonly appPath: string | undefined;
   readonly identity: string | undefined;
   readonly environment: 'test' | 'staging' | 'production' | undefined;
-  readonly launchArguments: readonly string[] | undefined;
+  readonly launchArguments: LaunchArguments | undefined;
   readonly permissions: Readonly<Record<string, AppPermissionState>> | undefined;
   readonly command: CommandConfig | undefined;
   readonly readyUrl: string | undefined;
@@ -68,7 +68,7 @@ export interface ResolvedApp {
   readonly appPath: string | undefined;
   /** The link base `app.open(path)` joins on a device target; see `TargetApp.linkBase`. */
   readonly linkBase: string | undefined;
-  readonly launchArguments: readonly string[] | undefined;
+  readonly launchArguments: LaunchArguments | undefined;
   readonly permissions: Readonly<Record<string, AppPermissionState>> | undefined;
   /** `app.command` with `{port}` expanded to the port the app is served on. */
   readonly command: CommandConfig | undefined;
@@ -133,13 +133,11 @@ export function checkTargetApp(targetName: string, engine: EngineHandle | undefi
       `target "${targetName}" declares app without an engine; only an engine can drive an app, so name one: engine: web() or mobile({ platform })`,
     );
   }
-  const { environment, launchArguments, permissions } = app;
+  const { environment, permissions } = app;
   if (environment !== undefined && !ENVIRONMENTS.has(environment)) {
     throw new ConfigurationError('INVALID_CONFIG', `${where}.environment must be one of test, staging, production, got ${JSON.stringify(environment)}`);
   }
-  if (launchArguments !== undefined && (!Array.isArray(launchArguments) || !launchArguments.every((argument) => typeof argument === 'string'))) {
-    throw new ConfigurationError('INVALID_CONFIG', `${where}.launchArguments must be an array of strings`);
-  }
+  const launchArguments = checkLaunchArguments(`${where}.launchArguments`, app.launchArguments);
   if (permissions !== undefined && !isRecord(permissions)) {
     throw new ConfigurationError('INVALID_CONFIG', `${where}.permissions must be an object of permission name to grant, deny, or reset`);
   }
@@ -165,7 +163,62 @@ export function checkTargetApp(targetName: string, engine: EngineHandle | undefi
   return checked;
 }
 
-/** Schemes a link base may not name: local content, an inline document, and the wrappers that carry one. */
+const LAUNCH_ARGUMENTS_SHAPE = 'an array of strings or an object of argument name to string, number, boolean, or array of strings';
+
+/**
+ * Launch arguments as declared: a list of strings, or a plain object of
+ * argument name (non-empty, no whitespace) to string, finite number, boolean,
+ * or list of strings. An `undefined` value, read from the environment, is
+ * the entry left out.
+ */
+function checkLaunchArguments(label: string, declared: unknown): LaunchArguments | undefined {
+  if (declared === undefined) return undefined;
+  if (Array.isArray(declared)) {
+    const index = declared.findIndex((argument) => typeof argument !== 'string');
+    if (index !== -1) {
+      throw new ConfigurationError('INVALID_CONFIG', `${label} must be ${LAUNCH_ARGUMENTS_SHAPE}; item ${index} is ${describe(declared[index])}`);
+    }
+    return declared as readonly string[];
+  }
+
+  if (!isPlainObject(declared)) {
+    throw new ConfigurationError('INVALID_CONFIG', `${label} must be ${LAUNCH_ARGUMENTS_SHAPE}, got ${describe(declared)}`);
+  }
+  const entries: [string, LaunchArgumentValue][] = [];
+  for (const [name, value] of Object.entries(declared)) {
+    if (value === undefined) continue;
+    if (name === '') {
+      throw new ConfigurationError('INVALID_CONFIG', `${label} has an empty argument name`);
+    }
+    if (/\s/.test(name)) {
+      throw new ConfigurationError('INVALID_CONFIG', `${label} argument name ${JSON.stringify(name)} must have no whitespace`);
+    }
+    if (!isLaunchArgumentValue(value)) {
+      throw new ConfigurationError('INVALID_CONFIG', `${label}.${name} must be a string, number, boolean, or array of strings, got ${describe(value)}`);
+    }
+    entries.push([name, value]);
+  }
+  return Object.fromEntries(entries);
+}
+
+function isLaunchArgumentValue(value: unknown): value is LaunchArgumentValue {
+  if (typeof value === 'string' || typeof value === 'boolean') {
+    return true;
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value);
+  }
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+/** A value's kind for an error message: `null`, `an array`, `a Map`, `an object`, `NaN`, `a number`. */
+function describe(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'an array';
+  if (typeof value === 'object') return isPlainObject(value) ? 'an object' : `a ${value.constructor.name}`;
+  if (typeof value === 'number' && !Number.isFinite(value)) return String(value);
+  return `a ${typeof value}`;
+}
 
 /**
  * A link base: an absolute URL, or a bare custom scheme (`shopapp://`), with

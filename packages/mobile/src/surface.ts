@@ -32,6 +32,7 @@ import {
   type EngineObserveOptions,
   type EngineSnapshot,
   type EngineAppInfo,
+  type LaunchArguments,
   type LocatorAction,
   type LocatorExpression,
   type NodeRef,
@@ -49,6 +50,7 @@ import {
 import { isAppNotRunning, isSnapshotPresentationFailure, isUnreadableCapture, ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING, runCommand, staleOr } from './errors.ts';
 import { pointerInteraction, DEFAULT_LONG_PRESS_MS } from './actions.ts';
 import { resolveExpression } from './locate.ts';
+import { launchArgumentList } from './launch-arguments.ts';
 import {
   isWithin,
   keyboardElementsTop,
@@ -904,7 +906,8 @@ export class AgentDeviceSurface {
   }
 
   /** One `open` of an app, remembered as the session's app and as the screen's replacement. */
-  private async open(app: string, relaunch: boolean, launchArguments: readonly string[] | undefined, signal: AbortSignal): Promise<void> {
+  private async open(app: string, relaunch: boolean, launchArguments: LaunchArguments | undefined, signal: AbortSignal): Promise<void> {
+    const launchArgs = launchArgumentList(this.options.platform, launchArguments);
     const result = await this.command(
       `open ${app}`,
       (client) =>
@@ -912,7 +915,7 @@ export class AgentDeviceSurface {
           app,
           ...this.selection(),
           ...(relaunch ? { relaunch: true } : {}),
-          ...(launchArguments === undefined || launchArguments.length === 0 ? {} : { launchArgs: [...launchArguments] }),
+          ...(launchArgs === undefined ? {} : { launchArgs: [...launchArgs] }),
         }),
       signal,
     );

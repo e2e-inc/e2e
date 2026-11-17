@@ -11,6 +11,7 @@ import { createAgentDeviceClient } from 'agent-device';
 import { ConfigurationError, defineEngine, obj, type EngineAppCheckInfo, type EngineAppDeclaration, type EngineHandle } from '@e2e-dev/core/engine';
 import { createDeviceFixture } from './device.ts';
 import type { ClientFactory, MobileOptions, MobilePlatform } from './options.ts';
+import { assertLaunchArgumentsFor } from './launch-arguments.ts';
 import { isLink, linkTarget } from './links.ts';
 import { DEVICE_ACTIONS, DEVICE_POINTER_ACTIONS } from './actions.ts';
 import { AgentDeviceSurface, assertPermissions } from './surface.ts';
@@ -139,6 +140,7 @@ function validateApp(app: EngineAppDeclaration, { targetName }: EngineAppCheckIn
       `${where} app.bundleId names an app by bundle id, package, or display name, not a link; a test opens a deep link or web link with device.openLink`,
     );
   }
+  assertLaunchArgumentsFor(platform, `${where} app.launchArguments`, app.launchArguments);
   if (app.permissions !== undefined) assertPermissions(`${where} app.permissions`, app.permissions, 'INVALID_CONFIG');
 }
 
