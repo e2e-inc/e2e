@@ -827,18 +827,25 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
           if (options.watch === true) {
             await watchToOutcome(telemetry, command, async (signals, record) => {
               const { watchSession } = await import('./watch.ts');
+              const { servePauses } = await import('./step-control.ts');
+              const stdin = process.stdin.isTTY === true ? process.stdin : undefined;
               return watchSession({
                 base: runOptions,
                 cwd: process.cwd(),
                 signals,
-                run: (iteration, cancel) =>
-                  run({
-                    ...iteration,
-                    interruptSignal: AbortSignal.any([signals.interruptSignal, cancel.interruptSignal]),
-                    forceSignal: AbortSignal.any([signals.forceSignal, cancel.forceSignal]),
-                    processOutput: output,
-                  }).then(record),
-                stdin: process.stdin.isTTY === true ? process.stdin : undefined,
+                run: (iteration, cancel, keys) =>
+                  servePauses(
+                    {
+                      ...iteration,
+                      interruptSignal: AbortSignal.any([signals.interruptSignal, cancel.interruptSignal]),
+                      forceSignal: AbortSignal.any([signals.forceSignal, cancel.forceSignal]),
+                      processOutput: output,
+                    },
+                    cancel.stop,
+                    stdin,
+                    keys,
+                  ).then(record),
+                stdin,
                 write: output.listOutput.raw,
                 writeError: (text) => void process.stderr.write(text),
                 pc: picocolors.createColors(process.stdout.isTTY === true),

@@ -447,7 +447,8 @@ export async function serveSteps(options: RunOptions, signals: SignalLadder, add
  * resume the test or stop the run, every time the call is reached.
  *
  * - In a terminal, `stdin` is read only while a pause is shown. Between
- *   pauses, the terminal is left as it was.
+ *   pauses, the terminal is left as it was. Under `--watch`, `keys` is
+ *   paused while a pause prompt is shown, so the keys reach the prompt.
  * - From the same directory, `e2e run --step next` and `rest` resume the
  *   shown test. `stop` stops the run, as `q` does. The command returns at
  *   the next pause or when the run ends.
@@ -466,6 +467,7 @@ export async function servePauses(
   options: RunOptions & { readonly processOutput: RunnerOutput },
   stop: () => void,
   stdin: NodeJS.ReadStream | undefined,
+  keys?: Pick<Keyboard<unknown>, 'pause' | 'resume'>,
 ): Promise<RunOutcome> {
   /** The first pause on the prompt currently shown. */
   let shown: HeldStep | undefined;
@@ -523,7 +525,7 @@ export async function servePauses(
     },
   });
 
-  /** Stops reading pause keys. */
+  /** Stops reading pause keys and returns keyboard control to `keys`. */
   const closeKeyboard = (): void => {
     if (keyboard === undefined) {
       return;
@@ -531,6 +533,7 @@ export async function servePauses(
 
     keyboard.close();
     keyboard = undefined;
+    keys?.resume();
   };
   /**
    * Shows a pause under its test in a terminal, reading keys while it's
@@ -543,6 +546,7 @@ export async function servePauses(
       if (prompt === undefined) {
         closeKeyboard();
       } else if (keyboard === undefined) {
+        keys?.pause();
         const opened = new Keyboard(stdin, stepKeyOf);
         opened.listen((key) => {
           if (key === 'suspend') {

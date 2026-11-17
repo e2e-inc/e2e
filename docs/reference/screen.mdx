@@ -611,7 +611,8 @@ await screen.pause();
   `open_session {test}` opens, in a program on `@e2e-dev/core` or
   `openHost`, or in `run()` from `e2e/runner`. With `CI` set, the test still
   fails with `PAUSE_UNAVAILABLE` in `run()`, as in `e2e run`.
-- A test isn't paused in `e2e run --watch`.
+- In `e2e run --watch`, only the current run is cancelled when `q` is pressed
+  at a pause or `e2e run --step stop` is run.
 - A locator doesn't have it.
 
 | Throws | When |

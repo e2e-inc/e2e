@@ -344,7 +344,6 @@ Next: e2e run --step next to resume the test, or e2e run --step stop to end the 
   - 没有终端时，测试会在暂停处以 `RUNNER_BUSY` 失败。请用 `e2e run --step stop` 结束另一个运行，或在终端中运行这个运行。
   - 在终端中，仍然可以使用按键。会输出一行，说明命令会发送到另一个运行。
 - 设置了 `CI` 时，测试会在暂停处以 `PAUSE_UNAVAILABLE` 失败。请在提交前删除该调用。
-- 在 `e2e run --watch` 中，测试不会暂停。
 
 ## 控制台输出
 

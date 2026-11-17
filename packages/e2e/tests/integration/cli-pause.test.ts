@@ -4,7 +4,8 @@
  * from the same directory. In CI, the test fails at the pause.
  *
  * Terminal cases run the built `servePauses` in this process with a stand-in
- * for stdin. Keys resume or stop the run.
+ * for stdin, both directly and through `watchSession`. Keys resume or stop
+ * the run.
  */
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -15,6 +16,7 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
+import picocolors from 'picocolors';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SecretLedger } from '@e2e-dev/core/lib/internal/redact';
 import { stepAddress } from '../../src/run/step-socket.ts';
@@ -22,8 +24,12 @@ import { fakeStdin } from '../helpers/fake-stdin.ts';
 import { createProject, workerFakeConfigSource, type FixtureProject } from '../helpers/run-project.ts';
 
 const builtStepControl = '../../dist/cli/step-control.js';
+const builtWatch = '../../dist/cli/watch.js';
+const builtSignals = '../../dist/cli/signals.js';
 const builtProcessOutput = '../../dist/run/process-output.js';
 const { servePauses } = (await import(builtStepControl)) as typeof import('../../src/cli/step-control.ts');
+const { watchSession } = (await import(builtWatch)) as typeof import('../../src/cli/watch.ts');
+const { SignalLadder } = (await import(builtSignals)) as typeof import('../../src/cli/signals.ts');
 const { RunnerOutput } = (await import(builtProcessOutput)) as typeof import('../../src/run/process-output.ts');
 
 const CLI = fileURLToPath(new URL('../../dist/cli/bin.js', import.meta.url));
@@ -572,6 +578,51 @@ describe('screen.pause() when the run ends', () => {
   }, 60_000);
 });
 
+describe('screen.pause() in --watch without a terminal', () => {
+  it('pauses the test on every run, cancels only that run on stop, and reruns once after a change saved during the pause', async () => {
+    const { dir } = project({ 'tests/pause.e2e.ts': pausing('pauses in watch', 1) });
+    const file = path.join(dir, 'tests', 'pause.e2e.ts');
+    const run = start(dir, ['run', '--watch']);
+    /** Waits for `text` after the `count`th RERUN banner in the run's output. */
+    const shows = async (count: number, text: string): Promise<void> => {
+      for (let tries = 0; tries < 600; tries += 1) {
+        const banners = run.stdout().split(' RERUN ');
+
+        if (banners.length > count && banners[count]!.includes(text)) {
+          return;
+        }
+
+        await sleep(50);
+      }
+
+      throw new Error(`rerun ${count} never printed ${text}. The run printed:\n${run.stdout()}${run.stderr()}`);
+    };
+    await shows(0, 'Next: e2e run --step next to resume the test, or e2e run --step stop to end the run.');
+    expect(e2e(dir, ['run', '--step', 'next']).stdout).toBe('The run has ended.\n');
+    await shows(0, 'Waiting for file changes');
+
+    // Save after the first run ends, when the test directory is watched.
+    writeFileSync(file, readFileSync(file, 'utf8'));
+    await shows(1, 'Paused in pauses in watch [fake]:\n  screen.pause() (tests/pause.e2e.ts:5)');
+    writeFileSync(file, readFileSync(file, 'utf8'));
+    expect(e2e(dir, ['run', '--step', 'next']).stdout).toBe('The run has ended.\n');
+    await shows(2, 'Paused in pauses in watch [fake]:\n  screen.pause() (tests/pause.e2e.ts:5)');
+    await shows(1, '1 passed (1)');
+
+    const stopped = e2e(dir, ['run', '--step', 'stop']);
+    expect(stopped.stdout).toBe('The run has ended.\n');
+    await shows(2, 'run cancelled');
+    // Wait for watch mode to be idle again. A rerun started by cancellation
+    // would appear first.
+    await shows(2, 'Waiting for file changes');
+    expect(run.stdout().split(' RERUN ').length - 1).toBe(2);
+    expect(e2e(dir, ['run', '--step', 'next']).stderr).toContain('no run in this directory can be controlled with e2e run --step');
+
+    runs.at(-1)!.kill('SIGINT');
+    expect(await run.exited).toBe(0);
+  }, 90_000);
+});
+
 describe('screen.pause() in a terminal', () => {
   it('resumes the test on Enter, and the test passes', async () => {
     const { dir } = project({ 'tests/pause.e2e.ts': PAUSE_SUITE });
@@ -734,6 +785,101 @@ export default {
     } finally {
       rmSync(lock, { force: true });
     }
+  }, 60_000);
+
+  it('in --watch, reads keys at the pause without cancelling the run, then gives them back to watch', async () => {
+    const { dir } = project({ 'tests/pause.e2e.ts': pausing('pauses in watch', 1) });
+    const stdin = fakeStdin();
+    const output = terminalOutput();
+    const signals = new SignalLadder();
+    const session = watchSession({
+      base: { cwd: dir, env: ENV },
+      cwd: dir,
+      signals,
+      run: (options, cancel, keys) =>
+        servePauses(
+          {
+            ...options,
+            interruptSignal: AbortSignal.any([signals.interruptSignal, cancel.interruptSignal]),
+            forceSignal: cancel.forceSignal,
+            processOutput: output.processOutput,
+          },
+          cancel.stop,
+          stdin,
+          keys,
+        ),
+      stdin,
+      write: output.processOutput.listOutput.raw,
+      writeError: output.processOutput.listOutput.raw,
+      pc: picocolors.createColors(false),
+      clear: false,
+      // Test the keys without file changes. On macOS, newly created project
+      // files can show up as changes when watch mode starts, which causes an
+      // extra rerun.
+      watch: () => ({ close: () => undefined, on: () => undefined }),
+    });
+    // On cleanup, the watch session and its run are ended with one signal, as
+    // with Ctrl-C.
+    inProcess.push({ stop: () => signals.escalate(), done: session });
+    await output.shows('paused in pauses in watch [fake]');
+    // The keys are read by watch mode first, then by the pause prompt.
+    expect(stdin.setRawMode.mock.calls.map(([raw]) => raw)).toEqual([true, false, true]);
+    await sleep(KEY_GUARD_MS);
+
+    // In watch mode, `r` is used to rerun the tests or cancel the current run.
+    // At a pause, it's ignored.
+    stdin.write('r');
+    stdin.write('\r');
+    await output.shows('Waiting for file changes');
+    expect(output.printed()).toContain('1 passed (1)');
+    expect(output.printed()).not.toContain('run cancelled');
+    expect(stdin.setRawMode.mock.calls.map(([raw]) => raw)).toEqual([true, false, true, false, true]);
+
+    stdin.write('q');
+    await expect(session).resolves.toBe(0);
+    expect(stdin.setRawMode).toHaveBeenLastCalledWith(false);
+  }, 60_000);
+
+  it('in --watch, cancels the run on q at the pause and stays in watch', async () => {
+    const { dir } = project({ 'tests/pause.e2e.ts': pausing('pauses in watch', 1) });
+    const stdin = fakeStdin();
+    const output = terminalOutput();
+    const signals = new SignalLadder();
+    const session = watchSession({
+      base: { cwd: dir, env: ENV },
+      cwd: dir,
+      signals,
+      run: (options, cancel, keys) =>
+        servePauses(
+          {
+            ...options,
+            interruptSignal: AbortSignal.any([signals.interruptSignal, cancel.interruptSignal]),
+            forceSignal: cancel.forceSignal,
+            processOutput: output.processOutput,
+          },
+          cancel.stop,
+          stdin,
+          keys,
+        ),
+      stdin,
+      write: output.processOutput.listOutput.raw,
+      writeError: output.processOutput.listOutput.raw,
+      pc: picocolors.createColors(false),
+      clear: false,
+      watch: () => ({ close: () => undefined, on: () => undefined }),
+    });
+    inProcess.push({ stop: () => signals.escalate(), done: session });
+    await output.shows('paused in pauses in watch [fake]');
+    await sleep(KEY_GUARD_MS);
+
+    stdin.write('q');
+    await output.shows('run cancelled');
+    await output.shows('Waiting for file changes');
+    expect(output.printed()).toContain('1 interrupted');
+    expect(await Promise.race([session, sleep(0, 'watching')])).toBe('watching');
+
+    stdin.write('q');
+    await expect(session).resolves.toBe(0);
   }, 60_000);
 });
 
