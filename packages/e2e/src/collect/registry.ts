@@ -236,6 +236,17 @@ class Collector {
   }
 }
 
+/**
+ * The truthiness of a `skipIf` or `runIf` condition. A Promise is always
+ * truthy, so an unawaited async check would decide nothing; it throws.
+ */
+function readCondition(api: string, condition: unknown): boolean {
+  if (isPromiseLike(condition)) {
+    throw new CollectionError(`${api} got a Promise as its condition; await it before the call`);
+  }
+  return Boolean(condition);
+}
+
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return (
     typeof value === 'object' &&
@@ -631,9 +642,9 @@ function validateFixtureDefinitions(
 function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
   /**
    * The `test()` call forms. `api` names the caller in errors. A `skip`
-   * condition comes from `skipIf` or `runIf`: when true, the test registers
-   * exactly like `test(title, { skip: true }, fn)`. Either way a serial group
-   * rejects it, so a file collects the same on every platform.
+   * condition comes from `skipIf` or `runIf`: when true, the test is
+   * skipped, keeping any reason its `skip` option gives. Either way a serial
+   * group rejects it, so a file collects the same on every platform.
    */
   const registrar = (api: string, skip?: boolean): TestRegistrar => (
     title: string,
@@ -643,7 +654,8 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
     const collector = requireCollector(api);
     if (skip !== undefined && collector.inSerialGroup) {
       throw new CollectionError(
-        `${api} cannot be used inside a serial group, which skips as one unit; set skip on the serial describe instead`,
+        `${api} cannot be used inside a serial group, which skips as one unit; ` +
+          'set skip on the serial describe instead',
       );
     }
     const { options: given, fn } = normalizeArgs(optionsOrFn, maybeFn);
@@ -673,10 +685,10 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
       return undefined;
     },
     skipIf(condition: unknown): TestRegistrar {
-      return registrar('test.skipIf()', Boolean(condition));
+      return registrar('test.skipIf()', readCondition('test.skipIf()', condition));
     },
     runIf(condition: unknown): TestRegistrar {
-      return registrar('test.runIf()', !condition);
+      return registrar('test.runIf()', !readCondition('test.runIf()', condition));
     },
     only(title: string, fn: TestFn): TestCase {
       return requireCollector('test.only()').registerTest('test', 'only', title, { only: true }, [], fn, chain);

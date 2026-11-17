@@ -128,7 +128,8 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 
 #### `test.skipIf`
 
-Returns a function that registers one test, like `test(title, fn)`, skipped when the condition is truthy.
+Returns a function that registers one test, like `test(title, fn)`, skipped
+when the condition is truthy.
 
 ```ts
 test.skipIf(process.platform === 'win32')('watches files', async ({ app }) => {});
@@ -136,21 +137,27 @@ test.skipIf(process.env.CI)('opens the system dialog', async ({ app }) => {});
 ```
 
 - The condition is read one time, at the call, while the file is collected.
-  Use a value known then, such as `process.platform` or an environment variable.
-  For a condition you learn at runtime, call [`test.skip(condition, reason)`](#test-skip) inside the body.
+  Use a value known then, such as `process.platform` or an environment
+  variable. For a condition you learn at runtime, call
+  [`test.skip(condition, reason)`](#test-skip) inside the body.
 - Any truthy value skips, as in Vitest.
-- A skipped test is the same as `test(title, { skip: true }, fn)`: its body never runs, and its options are kept.
-- A [`skip`](#skip) option skips the test whatever the condition, and its reason string is the reported reason.
+- A skipped test is the same as `test(title, { skip: true }, fn)`: its body
+  never runs, and its options are kept.
+- A [`skip`](#skip) option skips the test whatever the condition, and its
+  reason string is the reported reason.
 - A falsy condition registers the test as `test` would.
-- It takes the same two forms as [`test`](#test) and has the same fixtures, on an extended `test` too.
+- It takes the same two forms as [`test`](#test) and has the same fixtures,
+  on an extended `test` too.
 
 | Throws | When |
 | --- | --- |
 | `COLLECTION_ERROR` | Called inside a serial group, whatever the condition. Set [`skip`](#skip) on the serial `describe` instead. |
+| `COLLECTION_ERROR` | The condition is a Promise. Await it before the call. |
 
 #### `test.runIf`
 
-Returns a function that registers one test, like `test(title, fn)`, skipped when the condition is falsy.
+Returns a function that registers one test, like `test(title, fn)`, skipped
+when the condition is falsy.
 
 ```ts
 test.runIf(process.platform === 'linux')('reads inotify events', { tags: ['@fs'] }, async ({ app }) => {});

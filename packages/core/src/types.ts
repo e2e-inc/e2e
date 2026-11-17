@@ -856,7 +856,8 @@ export interface TestAPI<Fixtures = TestFixtures> extends TestRegistrar<Fixtures
    *   test.skipIf(process.platform === 'win32')('file watcher', async () => {});
    *
    * A `skip` option skips the test whatever the condition. A serial group
-   * rejects the call: set `skip` on the serial `describe` instead.
+   * rejects the call: set `skip` on the serial `describe` instead. So does a
+   * Promise condition: await it first.
    */
   skipIf(condition: unknown): TestRegistrar<Fixtures>;
   /**

@@ -190,6 +190,15 @@ describe('registration', () => {
     expect(() => test.runIf(true)('outside', noop)).toThrow(/^test\.runIf\(\) /);
   });
 
+  it('rejects a Promise condition, which would always read as truthy', async () => {
+    expect(() => test.skipIf(Promise.resolve(false))).toThrow(
+      'test.skipIf() got a Promise as its condition; await it before the call',
+    );
+    expect(() => test.runIf(Promise.resolve(true))).toThrow(
+      'test.runIf() got a Promise as its condition; await it before the call',
+    );
+  });
+
   it('keeps the options of a test.skipIf test, its skip reason included', async () => {
     const registration = await collectModule(async () => {
       test.skipIf(true)('tagged', { tags: ['@fs'], timeout: 5000 }, noop);
@@ -198,6 +207,10 @@ describe('registration', () => {
       test.skipIf(true)('skip false', { skip: false }, noop);
       test.skipIf(true)('focused', { only: true }, noop);
       test.skipIf(false)('not skipped', { tags: ['@fs'] }, noop);
+      test.skipIf(false)('option reason, falsy skipIf', { skip: 'tracked in #42' }, noop);
+      test.runIf(true)('option reason, truthy runIf', { skip: 'tracked in #42' }, noop);
+      test.skipIf(false)('option true, falsy skipIf', { skip: true }, noop);
+      test.runIf(true)('option true, truthy runIf', { skip: true }, noop);
     });
     expect(registration.tests.map((item) => [item.mode, item.options, item.tags])).toEqual([
       ['skip', { tags: ['@fs'], timeout: 5000, skip: true }, ['@fs']],
@@ -206,6 +219,10 @@ describe('registration', () => {
       ['skip', { skip: true }, []],
       ['only', { only: true, skip: true }, []],
       ['normal', { tags: ['@fs'] }, ['@fs']],
+      ['skip', { skip: 'tracked in #42' }, []],
+      ['skip', { skip: 'tracked in #42' }, []],
+      ['skip', { skip: true }, []],
+      ['skip', { skip: true }, []],
     ]);
     await expect(collectModule(async () => test.skipIf(true)('bad', { retry: 1 } as never, noop))).rejects.toThrow(
       /test options has unknown key "retry"/,
