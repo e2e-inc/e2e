@@ -361,8 +361,10 @@ typed; prefer it when the app already has a schema for the response.
 
 `toHaveText` compares the whole normalized text, `toContainText` a substring
 or RegExp, `toHaveValue` a form control's value as is, whitespace included
-(it fails on a node with none); on a password field all three are
-`POLICY_DENIED`, never a comparison against `''`. List forms:
+(it fails on a node with none). `toBeEmpty` passes on a form control whose
+value is `''` (read as is, so a space is not empty) and on any other node
+with no text; it takes only `timeout` and works with `.not`. On a password
+field all four are `POLICY_DENIED`, never a comparison against `''`. List forms:
 `toHaveText(['Alpha', /^Beta/])` needs exactly two matches with those texts
 in order; `toContainText(['Alpha', 'Beta'])` needs each entry in a distinct
 match, in order, extra matches allowed. `toHaveAttribute(name)` checks

@@ -353,9 +353,10 @@ purpose. Use the workaround, or keep the test in Playwright.
   screen.getByRole('button', 'save changes');          // no match, case differs
   screen.getByLabel('Email');                                    // no match
   ```
-- Text reads are rendered text. `textContent()`, `toHaveText`, and
-  `toContainText` read what `innerText` returns, so hidden text is left out
-  and `text-transform` applies. See [locator reads](/reference/screen#locator-reads).
+- Text reads are rendered text. `textContent()`, `toHaveText`,
+  `toContainText`, and `toBeEmpty` read what `innerText` returns, so hidden
+  text is left out (a node whose only text is hidden is empty) and
+  `text-transform` applies. See [locator reads](/reference/screen#locator-reads).
 - A locator is strict. An action, a read, or a positive matcher on several
   matches is `LOCATOR_AMBIGUOUS`, where Playwright's `page.click(selector)`
   and `isVisible()` take the first. Narrow with `filter` or `first()`.

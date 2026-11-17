@@ -34,6 +34,12 @@ describe('toBeEmpty', () => {
     });
   });
 
+  it('reads an option by its text, not its value', async () => {
+    await at({ role: 'option', text: 'Red' }).not.toBeEmpty();
+    await at({ role: 'option', text: 'Choose a colour', value: '' }).not.toBeEmpty();
+    await at({ role: 'option' }).toBeEmpty();
+  });
+
   it('fails the negation on an empty node', async () => {
     await vexpect(at({ role: 'textbox', value: '' }).not.toBeEmpty(soon)).rejects.toMatchObject({
       code: 'ASSERTION_FAILED',
