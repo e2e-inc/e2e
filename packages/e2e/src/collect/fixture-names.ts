@@ -149,32 +149,9 @@ function propertyName(property: string): string {
 
 const WHY = 'e2e sets up only the fixtures a function names there';
 
-function parse(fn: FixtureUserFn, what: string): { readonly names: readonly string[] } | { readonly problem: string } {
-  const parameter = firstParameter(Function.prototype.toString.call(fn));
-  if (parameter === undefined) return { names: [] };
-  if (!parameter.startsWith('{')) {
-    const shown = parameter.length > 40 ? `${parameter.slice(0, 40)}...` : parameter;
-    return {
-      problem: `${what} must destructure its first parameter, as in ({ app, screen }) => {}; it takes "${shown}". ${WHY}`,
-    };
-  }
-  const names: string[] = [];
-  for (const property of splitTopLevel(parameter.slice(1, skipGroup(parameter, 0) - 1))) {
-    if (property.startsWith('...')) {
-      return { problem: `${what} takes the rest property "${property}" in its first parameter; list the fixtures it uses by name. ${WHY}` };
-    }
-    if (property.startsWith('[')) {
-      return { problem: `${what} takes the computed property "${property}" in its first parameter; write the fixture's name. ${WHY}` };
-    }
-    names.push(propertyName(property));
-  }
-  return { names: [...new Set(names)] };
-}
-
-const parsed = new WeakMap<FixtureUserFn, readonly string[]>();
-
 /**
- * The fixtures `fn` names in its first parameter, parsed once per function. A
+ * The fixtures `fn` names in its first parameter. Registration calls it once
+ * per function and keeps the result beside the function (`names`). A
  * function with no parameter names none. One that takes the whole fixture
  * object (`(fixtures) => {}`), a rest property (`{ app, ...rest }`), or a
  * computed property fails with a `COLLECTION_ERROR` that opens with `what`
@@ -182,10 +159,18 @@ const parsed = new WeakMap<FixtureUserFn, readonly string[]>();
  * `source`, the line the function was registered at.
  */
 export function fixtureNames(fn: FixtureUserFn, what: string, source?: SourceLocation): readonly string[] {
-  const known = parsed.get(fn);
-  if (known !== undefined) return known;
-  const result = parse(fn, what);
-  if ('problem' in result) throw new FixtureUseError(result.problem, source);
-  parsed.set(fn, result.names);
-  return result.names;
+  const refuse = (problem: string): FixtureUseError => new FixtureUseError(`${what} ${problem}. ${WHY}`, source);
+  const parameter = firstParameter(Function.prototype.toString.call(fn));
+  if (parameter === undefined) return [];
+  if (!parameter.startsWith('{')) {
+    const shown = parameter.length > 40 ? `${parameter.slice(0, 40)}...` : parameter;
+    throw refuse(`must destructure its first parameter, as in ({ app, screen }) => {}; it takes "${shown}"`);
+  }
+  const names: string[] = [];
+  for (const property of splitTopLevel(parameter.slice(1, skipGroup(parameter, 0) - 1))) {
+    if (property.startsWith('...')) throw refuse(`takes the rest property "${property}" in its first parameter; list the fixtures it uses by name`);
+    if (property.startsWith('[')) throw refuse(`takes the computed property "${property}" in its first parameter; write the fixture's name`);
+    names.push(propertyName(property));
+  }
+  return [...new Set(names)];
 }

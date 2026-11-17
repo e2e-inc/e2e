@@ -443,7 +443,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       attemptFixtures === undefined
         ? []
         : [
-            ...executor.realms.hooksFor(realm, registered, 'afterEach').filter((hook) => attemptFixtures.ready(hook.fn)).map((hook) => ({ label: `${hook.kind} hook`, run: () => hook.fn(attemptFixtures.fixtures) })),
+            ...executor.realms.hooksFor(realm, registered, 'afterEach').filter((hook) => attemptFixtures.ready(hook)).map((hook) => ({ label: `${hook.kind} hook`, run: () => hook.fn(attemptFixtures.fixtures) })),
             ...attemptFixtures.teardowns().map((teardown) => ({ label: `fixture "${teardown.name}" teardown`, run: teardown.run })),
           ];
     return { started: { realm, teardowns }, outcome };

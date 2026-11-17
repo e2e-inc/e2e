@@ -10,7 +10,7 @@ import type { EngineIsolation } from '@e2e-dev/core/lib/engine/index';
 import { CORE_FIXTURES, unknownFixtureMessage } from '@e2e-dev/core/lib/run/fixtures';
 import type { FixtureScope } from '@e2e-dev/core/lib/types';
 import type { SourceLocation } from '@e2e-dev/core/lib/internal/source';
-import { fixtureNames, FixtureUseError, type FixtureUserFn } from './fixture-names.ts';
+import { FixtureUseError } from './fixture-names.ts';
 import type { FixtureDefinition, RegisteredHook, RegisteredTest, SuiteHook, TestHook } from './registry.ts';
 
 /** What the pool reads of a target: its name, its platform, and its engine's fixtures and isolation. */
@@ -51,23 +51,21 @@ export function builtInNames(target: FixtureTarget): readonly string[] {
   return [...Object.keys(CORE_FIXTURES), ...Object.keys(target.engine?.fixtures ?? {})];
 }
 
-/** One function that receives fixtures, and how an error names it. */
-interface FixtureUser {
-  /** The subject of an error about it: `test "signs in"`, `beforeEach hook`, `fixture "database"`. */
-  readonly what: string;
-  readonly fn: FixtureUserFn;
-  /** Where it was registered. */
+/** A registered test body or hook, as the planner reads it: the fixtures its function names, and where it is. */
+type FixtureUser = (Pick<RegisteredTest, 'kind' | 'titlePath'> | Pick<RegisteredHook, 'kind'>) & {
+  readonly names: readonly string[];
   readonly source?: SourceLocation | undefined;
+};
+
+/** How an error names a test body or a hook: `test "signs in"`, `setup test "auth"`, `beforeEach hook`. */
+export function describeUser(user: Pick<RegisteredTest, 'kind' | 'titlePath'> | Pick<RegisteredHook, 'kind'>): string {
+  if (!('titlePath' in user)) return `${user.kind} hook`;
+  return `${user.kind === 'setup' ? 'setup test' : 'test'} ${JSON.stringify(user.titlePath.join(' > '))}`;
 }
 
-/** A test body as a fixture user. */
-function testUser(test: Pick<RegisteredTest, 'kind' | 'titlePath' | 'fn' | 'source'>): FixtureUser {
-  return { what: `${test.kind === 'setup' ? 'setup test' : 'test'} ${JSON.stringify(test.titlePath.join(' > '))}`, fn: test.fn, source: test.source };
-}
-
-/** A hook as a fixture user. */
-function hookUser(hook: Pick<RegisteredHook, 'kind' | 'fn' | 'source'>): FixtureUser {
-  return { what: `${hook.kind} hook`, fn: hook.fn, source: hook.source };
+/** How an error names a `test.extend()` fixture of `scope`: `fixture "page"`, `worker fixture "database"`. */
+export function describeFixture(name: string, scope: FixtureScope | undefined): string {
+  return `${scope === 'worker' ? 'worker fixture' : 'fixture'} "${name}"`;
 }
 
 /** What to set up for one piece of test code, and whether it reaches the engine. */
@@ -160,19 +158,14 @@ class Planner {
     return this.pool.target === undefined ? '' : ` on target "${this.pool.target.name}"`;
   }
 
-  /** A `test.extend()` fixture function as a fixture user: its first parameter is what it depends on. */
-  private user(definition: FixtureDefinition): FixtureUser {
-    return { what: `${this.scopeOf(definition) === 'worker' ? 'worker fixture' : 'fixture'} "${definition.name}"`, fn: definition.fn, source: definition.source };
-  }
-
   /**
-   * Resolves `name`, which `user` reads. `scope` is how long `user` lives: a
-   * suite hook or a worker fixture (`worker`) cannot read a test fixture.
-   * `from` is the fixture reading it, which sees the fixtures of its own
-   * `test.extend()` call and of the ones before it, and every fixture that
-   * extends a built-in.
+   * Resolves `name`, which the code `what` describes reads; `source` is
+   * where that code is. `scope` is how long the code lives: a suite hook or a
+   * worker fixture (`worker`) cannot read a test fixture. `from` is the
+   * fixture reading it, which sees the fixtures of its own `test.extend()`
+   * call and of the ones before it, and every fixture that extends a built-in.
    */
-  read(name: string, user: FixtureUser, scope: FixtureScope | undefined, from?: FixtureDefinition): Dependency {
+  read(name: string, what: string, source: SourceLocation | undefined, scope: FixtureScope | undefined, from?: FixtureDefinition): Dependency {
     const { target, chain } = this.pool;
     const builtIn = target !== undefined && builtInNames(target).includes(name);
     const definition = this.declared(name, from);
@@ -181,8 +174,8 @@ class Planner {
     if (definition !== undefined) {
       if (target !== undefined && !builtIn && !chain.some((each) => each.name === name && visible(each))) {
         throw new FixtureUseError(
-          `${user.what} names "${name}", which a later test.extend() declares: a fixture sees the fixtures of its own extend() call and of the ones before it`,
-          user.source,
+          `${what} names "${name}", which a later test.extend() declares: a fixture sees the fixtures of its own extend() call and of the ones before it`,
+          source,
         );
       }
       fixtureScope = this.scopeOf(definition);
@@ -193,10 +186,10 @@ class Planner {
     else {
       const declared = chain.filter((each) => visible(each) && each !== from).map((each) => each.name);
       const available = [...new Set([...builtInNames(target), ...declared])].toSorted();
-      throw new FixtureUseError(`${user.what} names "${name}": ${unknownFixtureMessage(target, name, available)}`, user.source);
+      throw new FixtureUseError(`${what} names "${name}": ${unknownFixtureMessage(target, name, available)}`, source);
     }
     if (scope === 'worker' && fixtureScope === 'test') {
-      throw new FixtureUseError(`${user.what} names "${name}", a test fixture${this.onTarget()}: ${SCOPE_RULE}`, user.source);
+      throw new FixtureUseError(`${what} names "${name}", a test fixture${this.onTarget()}: ${SCOPE_RULE}`, source);
     }
     return definition === undefined ? { engineBacked: name !== 'platform' } : { definition };
   }
@@ -211,9 +204,9 @@ class Planner {
     }
     this.state.set(definition, 'visiting');
     const scope = this.scopeOf(definition);
-    const user = this.user(definition);
-    for (const name of fixtureNames(user.fn, user.what, user.source)) {
-      const dependency = this.read(name, user, scope, definition);
+    const what = describeFixture(definition.name, scope);
+    for (const name of definition.names) {
+      const dependency = this.read(name, what, definition.source, scope, definition);
       if (dependency.definition === undefined) {
         if (dependency.engineBacked) this.engineBacked.add(definition);
         continue;
@@ -261,8 +254,8 @@ function planFixtures(request: PlanRequest): FixturePlan {
   const named = new Set(chain.filter((definition) => definition.auto && (scope === 'test' || reach.scopeOf(definition) === 'worker')));
   let usesEngine = false;
   for (const user of users) {
-    for (const name of fixtureNames(user.fn, user.what, user.source)) {
-      const dependency = reach.read(name, user, scope);
+    for (const name of user.names) {
+      const dependency = reach.read(name, describeUser(user), user.source, scope);
       if (dependency.definition === undefined) usesEngine ||= dependency.engineBacked;
       else named.add(dependency.definition);
     }
@@ -279,7 +272,7 @@ function planFixtures(request: PlanRequest): FixturePlan {
   const bases = new Map<FixtureDefinition, FixtureDefinition>();
   for (const definition of ordered.order) {
     scopes.set(definition, reach.scopeOf(definition) ?? 'test');
-    const base = fixtureNames(definition.fn, 'fixture').includes(definition.name) ? reach.declared(definition.name, definition) : undefined;
+    const base = definition.names.includes(definition.name) ? reach.declared(definition.name, definition) : undefined;
     if (base !== undefined) bases.set(definition, base);
   }
   return { target, chain, scope, order: ordered.order, scopes, bases, usesEngine, engineBacked: reach.engineBacked };
@@ -291,11 +284,11 @@ function planFixtures(request: PlanRequest): FixturePlan {
  * own chain. A fixture only an `afterEach` names is set up before the first
  * `beforeEach`, never on the cleanup budget.
  */
-export function planAttempt(target: FixtureTarget, test: Pick<RegisteredTest, 'kind' | 'titlePath' | 'fn' | 'source' | 'fixtures'>, hooks: readonly TestHook[]): FixturePlan {
-  return planFixtures({ target, chain: test.fixtures, scope: 'test', users: [...hooks.map(hookUser), testUser(test)] });
+export function planAttempt(target: FixtureTarget, test: Pick<RegisteredTest, 'kind' | 'titlePath' | 'names' | 'source' | 'fixtures'>, hooks: readonly TestHook[]): FixturePlan {
+  return planFixtures({ target, chain: test.fixtures, scope: 'test', users: [...hooks, test] });
 }
 
 /** The plan of one `beforeAll` or `afterAll` hook, over the chain it was registered through. */
 export function planSuiteHook(target: FixtureTarget, hook: SuiteHook): FixturePlan {
-  return planFixtures({ target, chain: hook.fixtures, scope: 'worker', users: [hookUser(hook)] });
+  return planFixtures({ target, chain: hook.fixtures, scope: 'worker', users: [hook] });
 }

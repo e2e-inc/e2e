@@ -1142,7 +1142,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       // follow the hooks, last set up first, and fail the attempt like them.
       // A hook that names a fixture whose setup failed is skipped.
       const teardowns = [
-        ...afterEachHooks.filter((hook) => bound.ready(hook.fn)).map((hook) => ({ label: `${hook.kind} hook`, run: () => hook.fn(fixtures) })),
+        ...afterEachHooks.filter((hook) => bound.ready(hook)).map((hook) => ({ label: `${hook.kind} hook`, run: () => hook.fn(fixtures) })),
         ...bound.teardowns().map((teardown) => ({
           label: `fixture "${teardown.name}" teardown`,
           run: teardown.run,

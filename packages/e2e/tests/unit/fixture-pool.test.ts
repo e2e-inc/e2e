@@ -1,11 +1,10 @@
 /** One fixture pool: what a piece of code names is planned, a chain's test fixtures set up per attempt, its worker fixtures per worker, and what each scope sees. */
 
 import { describe, expect, it, vi } from 'vitest';
-import type { FixtureUserFn } from '../../src/collect/fixture-names.ts';
 import { checkDeclaredFixtures, planAttempt, planSuiteHook, type FixtureTarget } from '../../src/collect/fixture-plan.ts';
 import type { FixtureDefinition, SuiteHook, TestBody, TestHook } from '../../src/collect/registry.ts';
 import { attemptlessBuiltIns, bindFixtures, WorkerFixturePool } from '../../src/run/fixture-pool.ts';
-import type { FixtureFn, FixtureScope } from '@e2e-dev/core/lib/types';
+import type { FixtureScope } from '@e2e-dev/core/lib/types';
 
 /** A web-like target, whose attempts are isolated, or a device-like one, whose state outlives them. */
 function toyTarget(isolation: 'attempt' | 'worker' = 'attempt'): FixtureTarget {
@@ -14,15 +13,6 @@ function toyTarget(isolation: 'attempt' | 'worker' = 'attempt'): FixtureTarget {
 
 type Fixtures = Record<string, unknown>;
 type Use = (value: unknown) => Promise<void>;
-
-/**
- * `run` behind a function whose first parameter destructures `names`: what
- * the pool reads to know which fixtures it needs.
- */
-function naming<Fn extends FixtureUserFn>(names: readonly string[], run: (fixtures: Fixtures, use: Use) => unknown): Fn {
-  const pattern = `{ ${names.join(', ')} }`;
-  return new Function('run', `return (${pattern}, use) => run(${pattern}, use);`)(run) as Fn;
-}
 
 interface FixtureOptions {
   /** The scope it declares; `undefined`, spelled out, for a plain function, which declares none. */
@@ -40,7 +30,8 @@ function fixture(name: string, run: (fixtures: Fixtures, use: Use) => Promise<vo
     scope: 'scope' in options ? options.scope : 'test',
     auto: options.auto ?? false,
     layer: options.layer ?? 0,
-    fn: naming<FixtureFn<object, unknown>>(options.uses ?? [], run),
+    fn: (fixtures, use) => run(fixtures as Fixtures, use),
+    names: options.uses ?? [],
     source: { file: '/repo/tests/support.ts', line: 7, column: 1 },
   };
 }
@@ -60,11 +51,13 @@ function logged(log: string[], name: string, value: unknown, options: FixtureOpt
 
 /** A test whose body names `names`, registered through `chain`. */
 function testNaming(chain: readonly FixtureDefinition[], names: readonly string[]) {
-  return { kind: 'test' as const, titlePath: ['suite', 'case'], fn: naming<TestBody>(names, () => undefined), source: { file: '/repo/tests/a.e2e.ts', line: 3, column: 1 }, fixtures: chain };
+  const fn: TestBody = () => undefined;
+  return { kind: 'test' as const, titlePath: ['suite', 'case'], fn, names, source: { file: '/repo/tests/a.e2e.ts', line: 3, column: 1 }, fixtures: chain };
 }
 
 function hookNaming<Kind extends 'beforeEach' | 'afterEach' | 'beforeAll' | 'afterAll'>(kind: Kind, chain: readonly FixtureDefinition[], names: readonly string[]) {
-  return { kind, fn: naming<TestBody>(names, () => undefined), fixtures: chain, group: undefined, declarationIndex: 0, source: { file: '/repo/tests/a.e2e.ts', line: 9, column: 1 } };
+  const fn: TestBody = () => undefined;
+  return { kind, fn, names, fixtures: chain, group: undefined, declarationIndex: 0, source: { file: '/repo/tests/a.e2e.ts', line: 9, column: 1 } };
 }
 
 interface AttemptOptions {
@@ -287,7 +280,7 @@ describe('fixtures that extend a built-in', () => {
     const bound = attempt(chain, ['platform'], { builtIns: { app: 'original', platform: 'toy' } });
     await bound.setUp();
     expect(log).toEqual([]);
-    expect(bound.ready(hookNaming('afterEach', chain, ['app']).fn)).toBe(true);
+    expect(bound.ready(hookNaming('afterEach', chain, ['app']))).toBe(true);
   });
 
   it('chains overrides: each receives the one before it', async () => {
@@ -469,9 +462,9 @@ describe('test fixtures', () => {
     const { a, b } = bound.fixtures as Fixtures;
     expect([a, b]).toEqual(['A', 'B']);
     // An afterEach hook that names a fixture whose setup failed, or was never reached, is skipped.
-    expect(bound.ready(hookNaming('afterEach', chain, ['a', 'platform']).fn)).toBe(true);
-    expect(bound.ready(hookNaming('afterEach', chain, ['a', 'c']).fn)).toBe(false);
-    expect(bound.ready(hookNaming('afterEach', chain, ['d']).fn)).toBe(false);
+    expect(bound.ready(hookNaming('afterEach', chain, ['a', 'platform']))).toBe(true);
+    expect(bound.ready(hookNaming('afterEach', chain, ['a', 'c']))).toBe(false);
+    expect(bound.ready(hookNaming('afterEach', chain, ['d']))).toBe(false);
     expect(() => (bound.fixtures as Fixtures)['c']).toThrow(expect.objectContaining({ code: 'TEST_SETUP_FAILED', message: expect.stringContaining('fixture "c" was not set up: its setup failed') }));
   });
 });

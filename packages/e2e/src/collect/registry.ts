@@ -15,7 +15,7 @@ import { parseModifierCall, skipRunningTest } from '../internal/skip.ts';
 import { unknownKeyMessage } from '@e2e-dev/core/lib/internal/options';
 import type { SourceLocation } from '@e2e-dev/core/lib/internal/source';
 import { fixtureNames } from './fixture-names.ts';
-import { checkDeclaredFixtures } from './fixture-plan.ts';
+import { checkDeclaredFixtures, describeFixture, describeUser } from './fixture-plan.ts';
 import type {
   DescribeOptions,
   FixtureFn,
@@ -54,6 +54,8 @@ export type TestBody = TestHookFn<object>;
 export interface FixtureDefinition {
   readonly name: string;
   readonly fn: FixtureFn<object, unknown>;
+  /** The fixtures `fn` names in its first parameter: what it depends on. */
+  readonly names: readonly string[];
   /**
    * The scope it declares. A plain function declares none: it has the scope
    * of the fixture it extends, and is a test fixture when it extends none.
@@ -79,12 +81,10 @@ export interface RegisteredTest {
   readonly sessions: readonly string[];
   /** The tags the test declares: its describe chain's, outermost first, then its own, each once. */
   readonly tags: readonly string[];
-  /**
-   * The body, called with the fixture object its attempt binds; its `test`
-   * typed what that holds. The fixtures it names in its first parameter are
-   * the ones its attempt sets up (`fixtureNames`).
-   */
+  /** The body, called with the fixtures it names; its `test` typed what those are. */
   readonly fn: TestBody;
+  /** The fixtures `fn` names in its first parameter: the ones its attempt sets up for it. */
+  readonly names: readonly string[];
   /** The `test.extend()` chain the test was registered through, outermost definition first. */
   readonly fixtures: readonly FixtureDefinition[];
   readonly group: GroupNode | undefined;
@@ -96,6 +96,8 @@ interface HookBase {
   readonly group: GroupNode | undefined;
   readonly declarationIndex: number;
   readonly fn: TestBody;
+  /** The fixtures `fn` names in its first parameter. */
+  readonly names: readonly string[];
   /** The `test.extend()` chain the hook was registered through. */
   readonly fixtures: readonly FixtureDefinition[];
   /** Where the hook was registered. */
@@ -215,7 +217,6 @@ class Collector {
     validateTestOptions(options, this.currentGroup, kind);
     const titlePath = [...groupTitles(this.currentGroup), normalizedTitle];
     const source = captureSource(this.moduleFile);
-    fixtureNames(fn, `${kind === 'setup' ? 'setup test' : 'test'} ${JSON.stringify(titlePath.join(' > '))}`, source);
     const registered: RegisteredTest = {
       kind,
       title: normalizedTitle,
@@ -225,6 +226,7 @@ class Collector {
       sessions,
       tags: declaredTags(this.currentGroup, options),
       fn,
+      names: fixtureNames(fn, describeUser({ kind, titlePath }), source),
       fixtures,
       group: this.currentGroup,
       mode,
@@ -266,9 +268,9 @@ class Collector {
       throw new CollectionError(`${hook.kind} hook must be a function`);
     }
     const source = captureSource(this.moduleFile);
-    fixtureNames(hook.fn, `${hook.kind} hook`, source);
     this.hooks.push({
       ...hook,
+      names: fixtureNames(hook.fn, describeUser(hook), source),
       source,
       group: this.currentGroup,
       declarationIndex: this.declarationCounter,
@@ -655,7 +657,9 @@ function validateFixtureDefinitions(
   const source = captureSource(undefined);
   for (const [name, fn] of Object.entries(definitions)) {
     if (name === '') throw new CollectionError('test.extend(): a fixture name must not be empty');
-    added.push({ name, ...fixtureDefinition(name, fn), layer, source });
+    const definition = fixtureDefinition(name, fn);
+    const names = fixtureNames(definition.fn, describeFixture(name, definition.scope), source);
+    added.push({ name, ...definition, names, layer, source });
   }
   checkDeclaredFixtures([...chain, ...added], added);
   return added;

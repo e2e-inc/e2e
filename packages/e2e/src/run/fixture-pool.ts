@@ -9,7 +9,6 @@
  * (`planAttempt`, `planSuiteHook`).
  */
 
-import { fixtureNames, type FixtureUserFn } from '../collect/fixture-names.ts';
 import { builtInNames, builtInScope, type FixturePlan, type FixtureTarget } from '../collect/fixture-plan.ts';
 import type { FixtureDefinition } from '../collect/registry.ts';
 import { pollLineage, type PollLineage } from '@e2e-dev/core/lib/expect/poll-scope';
@@ -255,10 +254,10 @@ export interface BoundFixtures {
    */
   setUp(): Promise<void>;
   /**
-   * Whether every chain fixture `fn` names was set up. A hook that names one
-   * whose setup failed, or was never reached, has nothing to run with.
+   * Whether every chain fixture `hook` names was set up. A hook that names
+   * one whose setup failed, or was never reached, has nothing to run with.
    */
-  ready(fn: FixtureUserFn): boolean;
+  ready(hook: { readonly names: readonly string[] }): boolean;
   /**
    * The teardowns of the test fixtures whose setup completed, last set up
    * first. Taking them ends setup, as does `signal`: a test fixture still
@@ -313,7 +312,7 @@ export function bindFixtures(options: BindOptions): BoundFixtures {
    * built-in as `original` reads it, never the override user code sees.
    */
   const fixturesFor = (definition: FixtureDefinition, shared: object, original: () => unknown): object => {
-    if (!fixtureNames(definition.fn, 'fixture').includes(definition.name)) return shared;
+    if (!definition.names.includes(definition.name)) return shared;
     const base = plan.bases.get(definition);
     return Object.create(shared, { [definition.name]: { enumerable: true, get: base === undefined ? original : () => provided.get(base) } }) as object;
   };
@@ -362,7 +361,7 @@ export function bindFixtures(options: BindOptions): BoundFixtures {
         requireActive();
       }
     },
-    ready: (fn) => fixtureNames(fn, 'hook').every((name) => !declared.has(name) || Object.hasOwn(values, name)),
+    ready: ({ names }) => names.every((name) => !declared.has(name) || Object.hasOwn(values, name)),
     teardowns(): readonly FixtureTeardown[] {
       abandon();
       signal?.removeEventListener('abort', abandon);

@@ -92,6 +92,7 @@ function serialPairs(target: ResolvedTarget): TestTargetPair[] {
       kind: 'test',
       title,
       titlePath: [title],
+      names: [],
       declarationIndex,
       options: {},
       sessions: [],

@@ -96,12 +96,10 @@ describe('fixtureNames', () => {
     );
   });
 
-  it('parses a function once, and fails a refused one each time it is asked', () => {
-    const fn = written('({ app }) => app');
-    expect(names(fn)).toBe(names(fn));
+  it('opens the error with the subject it is given', () => {
     const refused = written('(fixtures) => fixtures');
     expect(() => fixtureNames(refused, 'beforeEach hook')).toThrow('beforeEach hook must destructure');
-    expect(() => fixtureNames(refused, 'afterEach hook')).toThrow('afterEach hook must destructure');
+    expect(() => fixtureNames(refused, 'worker fixture "database"')).toThrow('worker fixture "database" must destructure');
   });
 
   it('carries where the function was registered, which the collector puts before the message', () => {
