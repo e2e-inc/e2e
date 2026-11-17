@@ -393,6 +393,7 @@ test('offline banner', { platforms: ['android'] }, async ({ app, device, screen 
 | [`back`](#back) | `Promise<void>` |
 | [`alert`](#alert) | `Promise<void>` |
 | [`dismissKeyboard`](#dismisskeyboard) | `Promise<void>` |
+| [`isKeyboardShown`](#iskeyboardshown) | `Promise<boolean>` |
 | [`clipboard`](#clipboard) | `Promise<string>` |
 | [`setClipboard`](#setclipboard) | `Promise<void>` |
 
@@ -890,6 +891,30 @@ await device.dismissKeyboard();
 | 抛出错误 | 发生条件 |
 | --- | --- |
 | `UNSUPPORTED_CAPABILITY` | 键盘上方的每个点（屏幕有滚动视图时，在滚动视图内）都落在控件上，或两次拖动后键盘仍未消失。 |
+
+#### `isKeyboardShown`
+
+```ts
+/**
+ * Whether the soft keyboard is on screen, from one capture: what
+ * agent-device reported for it (a measured or derived keyboard frame, or a
+ * visibility probe), else a visible keyboard element in the accessibility
+ * tree, the same keyboard observations hide covered nodes under. Fails
+ * with `ENGINE_FAILURE` when the capture cannot answer: no keyboard in a
+ * tree that is still incomplete, or keyboard elements agent-device could
+ * not place and had no probe for. Changes nothing on the device.
+ */
+isKeyboardShown(): Promise<boolean>;
+```
+
+```ts
+await screen.getByTestId('email-input').fill('jane@example.com');
+if (await device.isKeyboardShown()) await device.dismissKeyboard();
+```
+
+| Throws | When |
+| --- | --- |
+| `ENGINE_FAILURE` | The capture cannot answer: agent-device reported no keyboard and the tree was sparse or cut (read it again once the screen has rendered), or the tree lists keyboard elements agent-device could not place as a docked keyboard, such as a floating or split one, with no visibility probe to ask. |
 
 #### `clipboard`
 
