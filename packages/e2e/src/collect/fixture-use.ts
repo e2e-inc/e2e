@@ -21,7 +21,8 @@ function isSuiteHook(hook: RegisteredHook): hook is SuiteHook {
  * scopes it enters, on the pair's target. The first rule one breaks is a
  * `COLLECTION_ERROR` that opens with where the code was declared: a name the
  * target has no fixture for, a test fixture named by a suite hook or a worker
- * fixture, a cycle, a chain fixture named like one the engine contributes.
+ * fixture, a cycle, a fixture whose declared scope is not the one of the
+ * fixture it extends.
  */
 export function assertFixtureUse(pairs: readonly TestTargetPair[], collection: Collection, projectRoot: string): void {
   const registrations = new Map<string, ModuleRegistration>(collection.files.map((file) => [file.file, file.registration]));
