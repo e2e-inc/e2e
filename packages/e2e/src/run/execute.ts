@@ -19,15 +19,16 @@ import { pairRecordings, type TestTargetPair } from '../collect/select.ts';
 import type { ArtifactStore } from '@e2e-dev/core/lib/types';
 import { attemptSegments, createAttemptArtifacts, resultSegment } from '@e2e-dev/core/lib/run/artifacts';
 import { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
-import { planAttempt, planSuiteHook } from '../collect/fixture-plan.ts';
-import { attemptBuiltIns, attemptlessBuiltIns, bindFixtures, WorkerFixturePool, type BuiltInReader } from './fixture-pool.ts';
+import { planAttempt } from '../collect/fixture-plan.ts';
+import { attemptBuiltIns, bindFixtures, WorkerFixturePool } from './fixture-pool.ts';
 import { captureFailureEvidence } from './failure-evidence.ts';
 import { createFixtures } from '@e2e-dev/core/lib/run/fixtures';
 import { WrittenScreenshots } from '@e2e-dev/core/lib/run/screenshots';
 import { publishAttempt } from '@e2e-dev/core/lib/expect/attempt';
 import { PollScope, runInPollScope } from '@e2e-dev/core/lib/expect/poll-scope';
 import { SoftFailures } from '@e2e-dev/core/lib/expect/soft';
-import { findRegistered, RealmManager, runHook, type FileRef, type Realm, type SuiteHookSession } from './realm.ts';
+import { findRegistered, RealmManager, runHook, type FileRef, type Realm } from './realm.ts';
+import { SuiteAttempt, tearDownWorkerFixtures, type SuiteAttemptContext } from './suite-attempt.ts';
 import type {
   AttemptRecord,
   ResultRecord,
@@ -48,7 +49,6 @@ import { AttemptHolds, type HeldStep } from './step-hold.ts';
 import { WorkerModels } from '@e2e-dev/core/lib/run/worker-models';
 import { classifyAttemptStatus, EngineSessions, type EngineSessionsOptions } from '@e2e-dev/core/lib/run/engine-sessions';
 import type { EngineDisposeContext } from '@e2e-dev/core/lib/engine/index';
-import { rmdir } from 'node:fs/promises';
 
 export interface ExecutionEvents {
   onResult?(result: ResultRecord): void;
@@ -130,9 +130,6 @@ export interface InMemoryAttempts {
 
 type AttemptPhase = 'launch' | 'beforeEach' | 'body' | 'afterEach';
 
-/** The results directory suite hooks' short attempts write in, left only when one wrote a file there. */
-const SUITE_HOOKS_DIR = 'suite-hooks';
-
 /** How one attempt acquires its session and session-staging hooks. */
 export type AttemptContext =
   | { readonly kind: 'ordinary' }
@@ -149,6 +146,8 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
   readonly realms: RealmManager;
   /** The worker-scoped `test.extend()` fixtures, torn down before the engine is disposed. */
   readonly workerFixtures: WorkerFixturePool;
+  /** What suite hooks and worker fixture teardowns run on; see `SuiteAttempt`. */
+  private readonly suiteAttempts: SuiteAttemptContext;
 
   /** Fails the attempt in flight from outside it, while one is; see `strayRejection`. */
   private strayFailure: ((cause: unknown) => void) | undefined;
@@ -169,9 +168,10 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       options.events?.onRunAbort?.({ error: serializeError(error) });
     });
     this.workerFixtures = new WorkerFixturePool(options.target);
+    this.suiteAttempts = { host: this, config: options.config, models: this.models, runErrors: this.runErrors };
     this.realms = new RealmManager({
       targetName: options.target.name,
-      openSuiteHooks: (shared) => this.openSuiteHooks(shared),
+      openSuiteHooks: (shared) => new SuiteAttempt(this.suiteAttempts, shared),
       timeout: options.config.timeout,
       cleanupTimeout: options.config.cleanupTimeout,
       runErrors: this.runErrors,
@@ -181,202 +181,10 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
     this.storedRecordings = storedRecordingsFor(options.config.cache);
   }
 
-  /**
-   * Tears the worker fixtures down, last set up first, each within its own
-   * cleanup budget, then disposes the engine. On an engine whose state
-   * outlives an attempt the teardowns run in a short attempt of their own,
-   * so a worker fixture that holds `device` can still drive it. A failed
-   * teardown is a run error.
-   */
+  /** Tears the worker fixtures down, then disposes the engine: a teardown may still drive it. */
   override async dispose(options: Pick<EngineDisposeContext, 'reuseSignal'> = {}): Promise<void> {
-    const teardowns = this.workerFixtures.close();
-    if (teardowns.length > 0) {
-      const attempt = this.openSuiteAttempt(undefined);
-      for (const teardown of teardowns) {
-        try {
-          await attempt.within(`fixture "${teardown.name}" teardown`, this.config.cleanupTimeout, teardown.usesEngine, () => teardown.run());
-        } catch (cause) {
-          this.runErrors.push({ error: serializeError(classifyError(cause), { phase: 'cleanup', projectRoot: this.config.projectRoot }) });
-        }
-      }
-      await attempt.close();
-    }
+    await tearDownWorkerFixtures(this.suiteAttempts);
     await super.dispose(options);
-  }
-
-  /** What `RealmManager` runs suite hooks on; see `openSuiteAttempt`. */
-  private openSuiteHooks(shared: TargetSession | undefined): SuiteHookSession {
-    const attempt = this.openSuiteAttempt(shared);
-    return {
-      run: async (hook, timeoutMs) => {
-        const plan = planSuiteHook(this.target, hook);
-        await attempt.within(`${hook.kind} hook`, timeoutMs, plan.usesEngine, async (builtIns) => {
-          const bound = bindFixtures({ plan, builtIns, pool: this.workerFixtures });
-          await bound.setUp();
-          await bound.call(hook);
-        });
-      },
-      close: () => attempt.close(),
-    };
-  }
-
-  /**
-   * What code that outlives a test runs on: a pass of suite hooks (the
-   * `beforeAll` hooks of the scopes a test enters, or the `afterAll` hooks of
-   * the scopes it leaves), or the worker fixtures' teardowns. On an engine that isolates
-   * each attempt it sees `platform` and nothing opens. On one whose state
-   * outlives an attempt it also sees the engine's fixtures, `app`, and
-   * `screen`, from `shared` (the attempt already open: a serial group's or a
-   * hosted test's, since an engine runs one attempt at a time) or from a
-   * short attempt of its own, opened at the first `within` whose code names
-   * one of them (`usesEngine`) and ended by `close`; code that names none
-   * opens nothing. When that attempt cannot open, or the run was interrupted, the
-   * code runs without it (see `acquire`). Its steps and artifacts are no
-   * test's: a hook that fails is a run error naming its scope.
-   */
-  private openSuiteAttempt(shared: TargetSession | undefined): {
-    within(label: string, timeoutMs: number, usesEngine: boolean, body: (builtIns: BuiltInReader) => Promise<void>): Promise<void>;
-    close(): Promise<void>;
-  } {
-    type HookAttempt = { readonly builtIns: BuiltInReader; readonly budget: AttemptBudget; readonly steps: StepRecorder; close(): Promise<void> };
-    const open = async (): Promise<HookAttempt> => {
-      const attemptId = uuidv7();
-      const attemptEnd = new AbortController();
-      let session: TargetSession | undefined = shared;
-      const artifacts = createAttemptArtifacts({
-        artifactsRoot: this.artifactsRoot,
-        segments: [SUITE_HOOKS_DIR, attemptId],
-        attemptId,
-        ledger: () => (session === undefined ? undefined : sessionLedger(session, this.config.allSecrets)),
-        identity: { runId: this.options.runId, testId: SUITE_HOOKS_DIR, attemptId },
-      });
-      const removeDir = async (): Promise<void> => {
-        await artifacts.settle();
-        // Nothing a report links lands here, so an empty directory goes.
-        await rmdir(artifacts.dir).catch(() => undefined);
-        await rmdir(path.dirname(artifacts.dir)).catch(() => undefined);
-      };
-      try {
-        session ??= await this.launchSession({ session: undefined, recordings: { trace: undefined, video: undefined } }, attemptId, artifacts.dir, this.interruptSignal);
-      } catch (cause) {
-        await removeDir();
-        throw cause;
-      }
-      const launched = session;
-      const redact = (text: string): string => redactForSession(launched, this.config.allSecrets, text);
-      const steps = new StepRecorder(attemptId, { maxEventsPerStep: this.config.limits.maxEventsPerStep, projectRoot: this.config.projectRoot, redact, retainSteps: 0 });
-      const budget = new AttemptBudget(this.interruptSignal, new Deadline(this.config.timeout));
-      const { fixtures } = createFixtures({
-        config: this.config,
-        target: this.target,
-        session: launched,
-        steps,
-        budget,
-        runId: this.options.runId,
-        attemptId,
-        attempt: { testId: SUITE_HOOKS_DIR, attemptId, titlePath: [], index: 0, signal: attemptEnd.signal, memory: new Map<string, unknown>() },
-        artifacts: artifacts.sink,
-        priorSteps: () => [],
-        agentContext: undefined,
-        saveSession: undefined,
-        debug: this.debug,
-        models: this.models,
-      });
-      return {
-        builtIns: attemptBuiltIns(fixtures),
-        budget,
-        steps,
-        close: async () => {
-          attemptEnd.abort();
-          if (shared === undefined) {
-            const errors: SerializedError[] = [];
-            await this.closeSession(launched, { attemptId, video: undefined }, { status: 'passed', cleanup: 'complete' }, artifacts.sink, errors);
-            for (const error of errors) this.runErrors.push({ error });
-          }
-          await removeDir();
-        },
-      };
-    };
-    const isolated = this.target.engine?.isolation !== 'worker';
-    /** The open attempt, or the launch failure, reported once as a run error, that left the hooks without one. */
-    let opened: Promise<HookAttempt | { readonly failure: E2EError }> | undefined;
-    /**
-     * The attempt the code runs in, if one can open. When none can, the code
-     * still runs, so an `afterAll` that needs no device and a worker fixture's
-     * teardown are not skipped; reading the engine's fixtures, `app`, or
-     * `screen` then fails with the reason. After an interrupt no attempt
-     * starts: a forced one disposes beside the unit's attempt, still open.
-     */
-    const acquire = async (label: string, usesEngine: boolean): Promise<{ readonly attempt?: HookAttempt; readonly builtIns: BuiltInReader }> => {
-      if (isolated) {
-        return {
-          builtIns: attemptlessBuiltIns(
-            this.target,
-            (name) => new ConfigurationError('UNSUPPORTED_CAPABILITY', `"${name}" is not available to the ${label}: engine ${this.target.engine?.name ?? 'none'} gives each attempt a fresh surface, so nothing of it outlives a test`),
-          ),
-        };
-      }
-      if (!usesEngine) {
-        return {
-          builtIns: attemptlessBuiltIns(
-            this.target,
-            (name) => new ConfigurationError('UNSUPPORTED_CAPABILITY', `"${name}" is not available to the ${label}: it names no engine fixture in its first parameter, so no attempt opened for it`),
-          ),
-        };
-      }
-      if (opened === undefined && this.interruptSignal.aborted) {
-        return {
-          builtIns: attemptlessBuiltIns(
-            this.target,
-            (name) => new E2EError('interrupted', 'INTERRUPTED', `"${name}" is not available to the ${label}: the run was interrupted, so no attempt opens for it`),
-          ),
-        };
-      }
-      opened ??= open().catch((cause: unknown) => {
-        const failure = classifyError(cause);
-        this.runErrors.push({ error: serializeError(failure, { phase: 'launch', projectRoot: this.config.projectRoot }) });
-        return { failure };
-      });
-      const attempt = await opened;
-      if ('failure' in attempt) {
-        const { failure } = attempt;
-        return {
-          builtIns: attemptlessBuiltIns(
-            this.target,
-            (name) => new E2EError(failure.category, failure.code, `"${name}" is not available to the ${label}: the attempt suite hooks run in could not open: ${failure.message}`),
-          ),
-        };
-      }
-      return { attempt, builtIns: attempt.builtIns };
-    };
-    return {
-      within: async (label, timeoutMs, usesEngine, body) => {
-        const { attempt, builtIns } = await acquire(label, usesEngine);
-        const hookAbort = attempt?.budget.enter(this.interruptSignal, timeoutMs);
-        const leave = this.workerFixtures.enter(builtIns);
-        let failure: { readonly cause: unknown } | undefined;
-        try {
-          await runHook(label, () => body(builtIns), timeoutMs, () => hookAbort?.abort());
-        } catch (cause) {
-          failure = { cause };
-        }
-        // A step the code started and did not await is failed at its call and
-        // cancelled, as after a test body: left alone it would fail once this
-        // attempt closed, as a stray rejection charged to whichever test ran then.
-        const notAwaited = attempt?.steps.abandonRunning();
-        if (notAwaited !== undefined) {
-          hookAbort?.abort();
-          await withTimeout(attempt!.steps.settleAbandoned(), this.config.cleanupTimeout, () => new Error('abandoned steps did not settle')).catch(() => undefined);
-        }
-        leave();
-        if (failure !== undefined) throw failure.cause;
-        if (notAwaited !== undefined) throw notAwaited;
-      },
-      close: async () => {
-        const attempt = await opened;
-        if (attempt !== undefined && !('failure' in attempt)) await attempt.close();
-      },
-    };
   }
 
   /** Emits one final result record (SerialHost). Records are not retained. */
