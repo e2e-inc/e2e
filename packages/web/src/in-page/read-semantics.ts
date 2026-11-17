@@ -129,9 +129,19 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     'tablist', 'tabpanel', 'term', 'textbox', 'time', 'timer', 'toolbar', 'tooltip',
     'tree', 'treegrid', 'treeitem',
   ];
+  const lowerAttr = (el: Element, name: string): string | null => {
+    const value = el.getAttribute(name);
+    return value === null ? null : value.toLowerCase();
+  };
+
+  const ariaBool = (el: Element, name: string): boolean | null => {
+    const value = lowerAttr(el, name);
+    return value === null ? null : value === 'true';
+  };
+
   /** ARIA uses the first recognized token, then native semantics if none is recognized. */
   const explicitRole = memoized((el: Element): string | null =>
-    (el.getAttribute('role') ?? '').split(/[ \t\n\f\r]+/).find((role) => ARIA_ROLES.indexOf(role) !== -1) ?? null);
+    (lowerAttr(el, 'role') ?? '').split(/[ \t\n\f\r]+/).find((role) => ARIA_ROLES.indexOf(role) !== -1) ?? null);
 
   /**
    * True when an element carries a name of its own (HTML-AAM: `aria-label`,
@@ -608,7 +618,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
         const listbox = role === 'combobox' ? ariaOwnedOf(el).find((owned) => implicitRole(owned) === 'listbox') : el;
         selected = listbox === undefined
           ? []
-          : ariaOwnedOf(listbox).filter((owned) => owned.getAttribute('aria-selected') === 'true' && implicitRole(owned) === 'option');
+          : ariaOwnedOf(listbox).filter((owned) => ariaBool(owned, 'aria-selected') === true && implicitRole(owned) === 'option');
       }
       if (selected.length === 0 && el instanceof HTMLInputElement) return el.value;
       return selected.map((option) => contentNameOf(option, styleOf(option), walk)).join(' ');
@@ -1538,7 +1548,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * disabled ancestor costs one walk, not one per node.
    */
   const ariaDisabledInChain = memoized((el: Element): boolean => {
-    const attribute = (el.getAttribute('aria-disabled') ?? '').toLowerCase();
+    const attribute = lowerAttr(el, 'aria-disabled');
     if (attribute === 'true') return true;
     if (attribute === 'false') return false;
     const parent = parentOrHostOf(el);
@@ -1555,7 +1565,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    */
   const isDisabled = (el: Element): boolean => {
     if (el.matches(':disabled')) return true;
-    if (el.getAttribute('aria-disabled') === 'true') return true;
+    if (ariaBool(el, 'aria-disabled') === true) return true;
     const role = implicitRole(el);
     return role !== null && ARIA_DISABLED_ROLES.indexOf(role) !== -1 && ariaDisabledInChain(el);
   };
@@ -1599,19 +1609,13 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     // stale aria-checked on a checkbox or aria-selected on an option says
     // nothing about what the browser will submit. ARIA fills in only where the
     // element has no native state.
-    if (checked === null) {
-      const ariaChecked = el.getAttribute('aria-checked');
-      if (ariaChecked !== null) checked = ariaChecked === 'true';
-    }
-    if (selectedState === null) {
-      const ariaSelected = el.getAttribute('aria-selected');
-      if (ariaSelected !== null) selectedState = ariaSelected.toLowerCase() === 'true';
-    }
+    if (checked === null) checked = ariaBool(el, 'aria-checked');
+    if (selectedState === null) selectedState = ariaBool(el, 'aria-selected');
 
     const disabled = isDisabled(el);
 
-    const ariaExpanded = el.getAttribute('aria-expanded');
-    const ariaPressed = el.getAttribute('aria-pressed');
+    const expanded = ariaBool(el, 'aria-expanded');
+    const pressed = ariaBool(el, 'aria-pressed');
     // Matched against the shared selector rather than re-derived from tag and
     // type, so this node's `secure` flag and the screenshot mask agree by
     // construction.
@@ -1688,8 +1692,8 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
         checked,
         disabled,
         selected: selectedState,
-        expanded: ariaExpanded === null ? null : ariaExpanded === 'true',
-        pressed: ariaPressed === null ? null : ariaPressed === 'true',
+        expanded,
+        pressed,
         focused: focusedElement === el,
         hidden: isHidden(el, style),
         secure,
