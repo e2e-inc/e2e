@@ -427,8 +427,9 @@ describe('recorded provenance', () => {
     expect(digestWith('hunter2')).toBe(digestWith('swordfish'));
   });
 
-  it('refuses an entry whose identity digest is not a SHA-256 hex digest', () => {
-    const entry = buildTraceEntry({ ...trace('recorded flow'), recordedFor: { ...STEP, identityDigest: 'not-a-digest' } });
-    expect(readTraceEntry(JSON.parse(JSON.stringify(entry)))).toBeUndefined();
+  it.each([['not-a-digest'], [['a'.repeat(64)]], [42]])('refuses an entry whose identity digest is %j', (identityDigest) => {
+    const entry = JSON.parse(JSON.stringify(buildTraceEntry({ ...trace('recorded flow'), recordedFor: STEP })));
+    entry.payload.recordedFor.identityDigest = identityDigest;
+    expect(readTraceEntry(entry)).toBeUndefined();
   });
 });
