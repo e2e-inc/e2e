@@ -30,6 +30,7 @@ import { protocolEngine } from '@e2e-dev/core/lib/engine/protocol/client';
 import { Connection } from '@e2e-dev/core/lib/engine/protocol/connection';
 import type { EngineTransport } from '@e2e-dev/core/lib/engine/protocol/transport';
 import { secretHandle } from '@e2e-dev/core/lib/secrets';
+import type { CrashMode } from '../fixtures/protocol-server.ts';
 
 const node = (id: string, name: string, role = 'button'): SemanticNode => ({ ref: { id, revision: '' }, role, name });
 
@@ -629,7 +630,7 @@ describe('engine protocol over a child process', () => {
   });
 
   /** A client of the toy server in `crashMode`, initialized. */
-  async function crashing(crashMode: string) {
+  async function crashing(crashMode: CrashMode) {
     const remote = connectEngine({
       manifest: { ...manifest, methods: [...manifest.methods], actions: [...manifest.actions] },
       transport: spawnTransport({ command: process.execPath, args: [server] }),
@@ -656,9 +657,18 @@ describe('engine protocol over a child process', () => {
 
   it('fails a request of a server that closed its stdout and keeps running', async () => {
     const remote = await crashing('stays-up');
+    const start = Date.now();
     await expect(remote.observe!(operation())).rejects.toThrow(/closed the connection[\s\S]*stdout closed, staying/);
+    // The 2 s cap, not the test timeout, ends the wait.
+    expect(Date.now() - start).toBeLessThan(4_000);
     await remote.dispose!(cleanup);
   }, 10_000);
+
+  it('names the signal that stopped a server mid-request, and its stderr', async () => {
+    const remote = await crashing('signal');
+    await expect(remote.observe!(operation())).rejects.toThrow(/killed by SIGKILL[\s\S]*crashing on purpose/);
+    await remote.dispose!(cleanup);
+  });
 });
 
 describe('engine protocol against a server written from the messages alone', () => {

@@ -8,6 +8,7 @@
  * - `late-child`: it exits, and a child that shares its stderr writes there
  *   300 ms later.
  * - `stays-up`: it closes its stdout, writes, and never exits.
+ * - `signal`: it writes and stops itself with SIGKILL.
  *
  * `hangDoctor` adds a `doctor` that logs the pid and never returns, in a
  * process that ignores SIGTERM.
@@ -18,7 +19,7 @@ import { closeSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { defineEngine, serveEngine } from '../../src/engine/index.ts';
 
-type CrashMode = 'stdout-first' | 'late-child' | 'stays-up';
+export type CrashMode = 'stdout-first' | 'late-child' | 'stays-up' | 'signal';
 
 interface ServerOptions {
   readonly crashOnObserve?: boolean;
@@ -26,7 +27,7 @@ interface ServerOptions {
   readonly hangDoctor?: boolean;
 }
 
-/** Ends the process the way `mode` says, from inside a request. */
+/** Fails the request the way `mode` says: the process exits, or, for `stays-up`, closes its stdout. */
 async function crash(mode: CrashMode | undefined): Promise<never> {
   if (mode === 'stdout-first' || mode === 'stays-up') {
     closeSync(1);
@@ -39,6 +40,10 @@ async function crash(mode: CrashMode | undefined): Promise<never> {
   if (mode === 'late-child') {
     const late = "setTimeout(() => process.stderr.write('toy server child: late line\\n'), 300)";
     spawn(process.execPath, ['-e', late], { stdio: ['ignore', 'ignore', 'inherit'] });
+  }
+  if (mode === 'signal') {
+    process.stderr.write('toy server: crashing on purpose\n', () => process.kill(process.pid, 'SIGKILL'));
+    return new Promise(() => {});
   }
   process.stderr.write('toy server: crashing on purpose\n');
   process.exit(7);
