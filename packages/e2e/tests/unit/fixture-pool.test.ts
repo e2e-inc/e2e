@@ -1,13 +1,14 @@
 /** One fixture pool: what a piece of code names is planned, a chain's test fixtures set up per attempt, its worker fixtures per worker, and what each scope sees. */
 
 import { describe, expect, it, vi } from 'vitest';
-import { checkDeclaredFixtures, planAttempt, planSuiteHook, type FixtureTarget } from '../../src/collect/fixture-plan.ts';
+import { checkDeclaredFixtures, planAttempt, planSuiteHook } from '../../src/collect/fixture-plan.ts';
 import type { FixtureDefinition, SuiteHook, TestBody, TestHook } from '../../src/collect/registry.ts';
 import { attemptlessBuiltIns, bindFixtures, WorkerFixturePool } from '../../src/run/fixture-pool.ts';
+import type { BuiltInTarget } from '@e2e-dev/core/lib/run/fixtures';
 import type { FixtureScope } from '@e2e-dev/core/lib/types';
 
 /** A web-like target, whose attempts are isolated, or a device-like one, whose state outlives them. */
-function toyTarget(isolation: 'attempt' | 'worker' = 'attempt'): FixtureTarget {
+function toyTarget(isolation: 'attempt' | 'worker' = 'attempt'): BuiltInTarget {
   return { name: 'toy', platform: 'toy', engine: { name: 'toy', isolation, fixtures: { gadget: () => ({}) } } };
 }
 
@@ -63,7 +64,7 @@ function hookNaming<Kind extends 'beforeEach' | 'afterEach' | 'beforeAll' | 'aft
 interface AttemptOptions {
   readonly pool?: WorkerFixturePool;
   readonly signal?: AbortSignal;
-  readonly target?: FixtureTarget;
+  readonly target?: BuiltInTarget;
   readonly builtIns?: object;
   readonly hooks?: readonly TestHook[];
 }
@@ -539,7 +540,7 @@ describe('worker fixtures', () => {
 });
 
 describe('suite hook fixtures', () => {
-  function bindHook(target: FixtureTarget, chain: readonly FixtureDefinition[], names: readonly string[], builtIns: object = attemptlessBuiltIns(target)) {
+  function bindHook(target: BuiltInTarget, chain: readonly FixtureDefinition[], names: readonly string[], builtIns: object = attemptlessBuiltIns(target)) {
     return bindFixtures({ plan: planSuiteHook(target, suiteHook(chain, names)), builtIns, pool: new WorkerFixturePool(target) });
   }
 

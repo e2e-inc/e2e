@@ -31,7 +31,7 @@ import {
 } from '../locator/screen.ts';
 import { engineAppInfo, joinLink, refusesLink } from '../config/app.ts';
 import type { ResolvedAgentConfig, ResolvedConfig, ResolvedTarget } from '../config/resolve.ts';
-import type { App, CommandConfig, Expectable, RecordingOptions, SetupSession, TestFixtures } from '../types.ts';
+import type { App, CommandConfig, Expectable, FixtureScope, RecordingOptions, SetupSession, TestFixtures } from '../types.ts';
 import type { StepRecord, StepRecorder } from './steps.ts';
 
 export interface ArtifactSink {
@@ -248,7 +248,9 @@ export function createFixtures(environment: AttemptEnvironment): AttemptFixtures
 
   const context: CoreFixtureContext = { environment, engine, screenContext, agentRuntime };
   const factories: Record<string, () => unknown> = {};
-  for (const [name, fixture] of Object.entries(CORE_FIXTURES)) factories[name] = () => fixture.create(context);
+  for (const [name, fixture] of Object.entries(CORE_FIXTURES)) {
+    factories[name] = 'ofTarget' in fixture ? () => fixture.ofTarget(environment.target) : () => fixture.create(context);
+  }
   Object.assign(factories, contributedFactories(environment, engine, screenContext));
   // Accessors: a fixture is built on first touch, whether or not the test body reaches it, and kept.
   const fixtures = {} as AttemptFixtures['fixtures'];
@@ -277,12 +279,30 @@ interface CoreFixtureContext {
 type CoreFixtureValues = AttemptFixtures['fixtures'];
 
 /**
+ * What the built-in fixtures of a target are read from: its name, its
+ * platform, and its engine's name, fixtures, and isolation.
+ */
+export type BuiltInTarget = Pick<ResolvedTarget, 'name' | 'platform'> & {
+  readonly engine?: Pick<NonNullable<ResolvedTarget['engine']>, 'name' | 'isolation' | 'fixtures'> | undefined;
+};
+
+/**
+ * One core fixture: its scope, and how it is built. Most are built from the
+ * attempt (`create`); one the target alone decides (`ofTarget`) needs no
+ * attempt, so code that outlives every attempt can read it.
+ */
+type CoreFixture<Value> = { readonly scope: CoreFixtureScope } & (
+  | { create(context: CoreFixtureContext): Value }
+  | { ofTarget(target: Pick<BuiltInTarget, 'platform'>): Value }
+);
+
+/**
  * The fixtures every attempt has, whatever its engine: each one's name, its
  * scope, and how it is built. `createFixtures` builds them through this
- * table, beside the engine's own (`Engine.fixtures`), and the runner's
- * fixture pool reads the names and scopes from it.
+ * table, beside the engine's own (`Engine.fixtures`); everything else reads
+ * it through `builtInFixtures`.
  */
-export const CORE_FIXTURES: { readonly [Name in keyof CoreFixtureValues]: { readonly scope: CoreFixtureScope; create(context: CoreFixtureContext): CoreFixtureValues[Name] } } = {
+export const CORE_FIXTURES: { readonly [Name in keyof CoreFixtureValues]: CoreFixture<CoreFixtureValues[Name]> } = {
   agent: {
     scope: 'test',
     create({ agentRuntime }) {
@@ -293,7 +313,7 @@ export const CORE_FIXTURES: { readonly [Name in keyof CoreFixtureValues]: { read
   },
   app: { scope: 'engine', create: ({ environment, engine }) => createApp(environment, engine) },
   screen: { scope: 'engine', create: ({ screenContext }) => createScreen(screenContext) },
-  platform: { scope: 'worker', create: ({ environment }) => environment.target.platform },
+  platform: { scope: 'worker', ofTarget: (target) => target.platform },
   session: {
     scope: 'test',
     create: ({ environment }) => ({
@@ -311,6 +331,82 @@ export const CORE_FIXTURES: { readonly [Name in keyof CoreFixtureValues]: { read
   },
 };
 
+/** The table by any name: `CORE_FIXTURES` typed for a lookup that may miss. */
+const CORE_FIXTURE: Readonly<Record<string, CoreFixture<unknown> | undefined>> = CORE_FIXTURES;
+
+/** The table's entry for `name`, when it is a core fixture. */
+function coreFixture(name: string): CoreFixture<unknown> | undefined {
+  return Object.hasOwn(CORE_FIXTURE, name) ? CORE_FIXTURE[name] : undefined;
+}
+
+/** Whether reading `name` takes an attempt: true of every fixture but a core one the target alone decides. */
+function needsAttempt(name: string): boolean {
+  const fixture = coreFixture(name);
+  return fixture === undefined || !('ofTarget' in fixture);
+}
+
+/**
+ * The built-in fixtures of a target: the core ones and the ones its engine
+ * contributes. The one place that knows their names, their scopes, and which
+ * of them need an attempt.
+ */
+export interface BuiltInFixtures {
+  /** The target the fixtures are of, for an error to name; undefined before one is known. */
+  readonly targetName: string | undefined;
+  /** Every built-in fixture name: the core ones, then the engine's. */
+  readonly names: readonly string[];
+  /**
+   * How long `name` lives: one test attempt or the worker. The engine's own
+   * fixtures, `app`, and `screen` live as long as the state behind them,
+   * which the engine declares (`isolation`), so before a target is known
+   * they are `unresolved`, as is any name an engine might contribute.
+   * Undefined when the target has no built-in fixture of that name.
+   */
+  scope(name: string): FixtureScope | 'unresolved' | undefined;
+  /** Whether reading `name` takes an attempt on the engine: every built-in but the ones the target alone decides. */
+  needsAttempt(name: string): boolean;
+  /** The value of a built-in that needs no attempt. */
+  attemptless(name: string): unknown;
+  /** Why the target has no fixture `name`, beside the fixtures `available` to the code that asked. */
+  missing(name: string, available: readonly string[]): string;
+}
+
+/** The built-in fixtures of `target`. */
+export function builtInFixtures(target: BuiltInTarget): BuiltInFixtures {
+  const contributed = Object.keys(target.engine?.fixtures ?? {});
+  const engineScope: FixtureScope = target.engine?.isolation === 'worker' ? 'worker' : 'test';
+  return {
+    targetName: target.name,
+    names: [...Object.keys(CORE_FIXTURES), ...contributed],
+    scope(name) {
+      const scope = coreFixture(name)?.scope ?? (contributed.includes(name) ? 'engine' : undefined);
+      return scope === 'engine' ? engineScope : scope;
+    },
+    needsAttempt,
+    attemptless(name) {
+      const fixture = coreFixture(name);
+      return fixture !== undefined && 'ofTarget' in fixture ? fixture.ofTarget(target) : undefined;
+    },
+    missing: (name, available) => unknownFixtureMessage(target, name, available),
+  };
+}
+
+/**
+ * The built-in fixtures as a `test.extend()` call can know them, before any
+ * target is: the core ones whose scope no engine changes. Every other name
+ * is `unresolved`, since an engine may contribute it, so none is missing.
+ */
+export const DECLARED_BUILT_INS: Omit<BuiltInFixtures, 'attemptless'> = {
+  targetName: undefined,
+  names: Object.keys(CORE_FIXTURES),
+  scope(name) {
+    const scope = coreFixture(name)?.scope ?? 'engine';
+    return scope === 'engine' ? 'unresolved' : scope;
+  },
+  needsAttempt,
+  missing: (name) => `no fixture is called "${name}"`,
+};
+
 /** Keys a test body may probe without meaning a fixture. */
 const PROBED_KEYS = new Set(['then', 'constructor', 'toJSON', 'toString', 'valueOf', 'inspect']);
 
@@ -322,18 +418,12 @@ const FOREIGN_FIXTURE_HINTS: Readonly<Record<string, string>> = {
   driver: 'there is no WebDriver session: drive the device through app, screen, and (on an agent-device target) device',
 };
 
-/** What an unknown-fixture message reads of a target: its name, and its engine's name and fixtures. */
-interface FixtureOwner {
-  readonly name: string;
-  readonly engine?: { readonly name: string; readonly fixtures?: Readonly<Record<string, unknown>> | undefined } | undefined;
-}
-
 /**
  * Why `target` has no fixture called `property`: the fixtures it does have
  * (`available`), what its engine contributes, and either the nearest name or,
  * for a fixture another runner hands out, the e2e way of doing the same thing.
  */
-export function unknownFixtureMessage(target: FixtureOwner, property: string, available: readonly string[]): string {
+function unknownFixtureMessage(target: BuiltInTarget, property: string, available: readonly string[]): string {
   const declared = Object.keys(target.engine?.fixtures ?? {});
   const contributed = `engine ${target.engine?.name ?? 'none'} contributes ${declared.length === 0 ? 'no fixtures' : declared.join(', ')}`;
   const foreign = FOREIGN_FIXTURE_HINTS[property];

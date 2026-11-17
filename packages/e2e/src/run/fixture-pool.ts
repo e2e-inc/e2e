@@ -9,11 +9,11 @@
  * (`planAttempt`, `planSuiteHook`).
  */
 
-import { builtInNames, builtInScope, type FixturePlan, type FixtureTarget } from '../collect/fixture-plan.ts';
+import type { FixturePlan } from '../collect/fixture-plan.ts';
 import type { FixtureDefinition } from '../collect/registry.ts';
+import { builtInFixtures, type BuiltInFixtures, type BuiltInTarget } from '@e2e-dev/core/lib/run/fixtures';
 import { pollLineage, type PollLineage } from '@e2e-dev/core/lib/expect/poll-scope';
 import { ConfigurationError } from '@e2e-dev/core/lib/internal/errors';
-import { didYouMean } from '@e2e-dev/core/lib/internal/suggest';
 
 /** Keys a test body may probe without meaning a fixture. */
 const PROBED_KEYS: ReadonlySet<string> = new Set(['then', 'constructor', 'toJSON', 'toString', 'valueOf', 'inspect']);
@@ -25,16 +25,14 @@ const PROBED_KEYS: ReadonlySet<string> = new Set(['then', 'constructor', 'toJSON
  * error it returns, which says why no attempt is behind the code (a suite
  * hook whose attempt could not open, or one that runs after an interrupt).
  */
-export function attemptlessBuiltIns(target: FixtureTarget, unavailable?: (name: string) => Error): object {
-  const values = { platform: target.platform };
+export function attemptlessBuiltIns(target: BuiltInTarget, unavailable?: (name: string) => Error): object {
+  const builtIns = builtInFixtures(target);
+  const values = Object.fromEntries(builtIns.names.filter((name) => !builtIns.needsAttempt(name)).map((name) => [name, builtIns.attemptless(name)]));
   return new Proxy(values, {
     get(own, property, receiver) {
       if (typeof property !== 'string' || property in own || PROBED_KEYS.has(property)) return Reflect.get(own, property, receiver) as unknown;
-      if (unavailable !== undefined && builtInNames(target).includes(property)) throw unavailable(property);
-      throw new ConfigurationError(
-        'UNSUPPORTED_CAPABILITY',
-        `target "${target.name}" has no "${property}" fixture; available: ${builtInNames(target).join(', ')}${didYouMean(property, builtInNames(target))}`,
-      );
+      if (unavailable !== undefined && builtIns.names.includes(property)) throw unavailable(property);
+      throw new ConfigurationError('UNSUPPORTED_CAPABILITY', builtIns.missing(property, builtIns.names));
     },
   });
 }
@@ -149,7 +147,11 @@ export class WorkerFixturePool {
   /** The built-in fixtures of the attempt or suite hook running now; see `enter`. */
   private current: object | undefined;
 
-  constructor(private readonly target: FixtureTarget) {}
+  private readonly builtInFixtures: BuiltInFixtures;
+
+  constructor(target: BuiltInTarget) {
+    this.builtInFixtures = builtInFixtures(target);
+  }
 
   /**
    * Makes `builtIns` the fixtures a worker fixture's built-ins forward to,
@@ -207,12 +209,10 @@ export class WorkerFixturePool {
    * at the time it is read.
    */
   builtIns(): Record<string, unknown> {
-    const values: Record<string, unknown> = { platform: this.target.platform };
-    for (const name of builtInNames(this.target)) {
-      if (name === 'platform' || builtInScope(this.target, name) !== 'worker') continue;
-      values[name] = this.forwarder(name);
-    }
-    return values;
+    const { names, scope, needsAttempt, attemptless } = this.builtInFixtures;
+    return Object.fromEntries(
+      names.filter((name) => scope(name) === 'worker').map((name) => [name, needsAttempt(name) ? this.forwarder(name) : attemptless(name)]),
+    );
   }
 
   /** An object that reads `name` off the running attempt's fixtures at each access. */
@@ -288,12 +288,13 @@ export interface BindOptions {
 export function bindFixtures(options: BindOptions): BoundFixtures {
   const { plan, builtIns, pool, signal } = options;
   const { target, scope } = plan;
+  const targetBuiltIns = builtInFixtures(target);
   const values: Record<string, unknown> = {};
   const fixtures = gate(values, plan, builtIns);
   // A built-in that a planned fixture extends is read through that fixture, once it is set up.
   const extended = new Set(plan.order.map((definition) => definition.name));
-  for (const name of builtInNames(target)) {
-    if (extended.has(name) || (scope === 'worker' && builtInScope(target, name) === 'test')) continue;
+  for (const name of targetBuiltIns.names) {
+    if (extended.has(name) || (scope === 'worker' && targetBuiltIns.scope(name) === 'test')) continue;
     Object.defineProperty(values, name, { enumerable: true, get: () => Reflect.get(builtIns, name) as unknown });
   }
   // What a worker fixture sees: the built-in worker fixtures and the worker
@@ -385,7 +386,7 @@ function gate(values: Record<string, unknown>, plan: FixturePlan, builtIns: obje
         return Reflect.get(own, property, receiver) as unknown;
       }
       const definition = declared.get(property);
-      const builtInScopeHere = builtInNames(target).includes(property) ? builtInScope(target, property) : undefined;
+      const builtInScopeHere = builtInFixtures(target).scope(property);
       const fixtureScope = definition === undefined ? builtInScopeHere : (plan.scopes.get(definition) ?? definition.scope ?? builtInScopeHere ?? 'test');
       if (scope === 'worker' && fixtureScope === 'test') {
         throw new ConfigurationError(
