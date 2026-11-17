@@ -1987,12 +1987,12 @@
       }
     },
     {
-      "slug": "mandu-public-service",
-      "title": "e2e with Mandu: synthetic public service",
-      "shortTitle": "Mandu",
-      "description": "A Portuguese synthetic service form with locators, agent.act and local contract fixtures for an explicit OpenAI-compatible endpoint.",
+      "slug": "openrouter-agent-form",
+      "title": "Testing a service request form with one agent step on OpenRouter",
+      "shortTitle": "OpenRouter agent step",
+      "description": "A synthetic Portuguese service form filled by locators, submitted by one agent.act step on an OpenRouter model you pick, and checked by locators. Offline tests cover provider errors and key redaction.",
       "source": "community",
-      "repository": "https://github.com/jxnxts/e2e-mandu-example/tree/6a0b18f4801862c1a52a13c22aa33b1f7a030ee1",
+      "repository": "https://github.com/jxnxts/e2e-openrouter-service-form/tree/e056308a99296787f0458c1247163172e0f8f6d3",
       "author": {
         "name": "Jonatas Soares",
         "github": "jxnxts"
@@ -2001,9 +2001,6 @@
       "tags": {
         "framework": [
           "nodejs"
-        ],
-        "useCase": [
-          "api-testing"
         ],
         "platform": [
           "web"
