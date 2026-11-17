@@ -1,12 +1,13 @@
-import type { E2EConfig, LaunchArguments } from 'e2e';
-import base, { ios } from './e2e.config.ts';
-
 /**
  * Hand-run check that `app.launchArguments` reaches the app as an object and as
  * a list (`tests-launch-arguments/launch-arguments.e2e.ts`). Each
  * deterministic target runs twice, once per form, with the arguments the
  * docs give as the example for its platform.
  */
+
+import type { E2EConfig, LaunchArguments } from 'e2e';
+import base, { ios } from './e2e.config.ts';
+
 interface Forms {
   readonly object: LaunchArguments;
   readonly list: LaunchArguments;

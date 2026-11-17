@@ -50,7 +50,7 @@ import {
 import { isAppNotRunning, isSnapshotPresentationFailure, isUnreadableCapture, ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING, runCommand, staleOr } from './errors.ts';
 import { pointerInteraction, DEFAULT_LONG_PRESS_MS } from './actions.ts';
 import { resolveExpression } from './locate.ts';
-import { launchArgumentList } from './launch-arguments.ts';
+import { launchArgumentList, launchArgumentsForOpen } from './launch-arguments.ts';
 import {
   isWithin,
   keyboardElementsTop,
@@ -900,7 +900,7 @@ export class AgentDeviceSurface {
     // app. A foreground-only open of a running app takes no arguments, and a
     // permission change there would terminate the app it means to keep.
     const configured = relaunch && app === this.pinnedApp;
-    const launchArguments = options.launchArguments ?? (configured ? this.app.launchArguments : undefined);
+    const launchArguments = launchArgumentsForOpen(this.options.platform, options.launchArguments) ?? (configured ? this.app.launchArguments : undefined);
     const permissions = options.permissions ?? (configured ? this.app.permissions : undefined);
     if (permissions !== undefined) await this.presetPermissions(app, permissions, signal);
     await this.open(app, relaunch, launchArguments, signal);

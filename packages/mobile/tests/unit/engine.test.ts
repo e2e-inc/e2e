@@ -2983,7 +2983,7 @@ describe('device fixture', () => {
     ]);
   });
 
-  it('spells a launch-argument object for the platform on every fresh launch of the pinned app', async () => {
+  it('spells a launch-argument object for the platform on every fresh launch of the pinned app, and sends nothing for an empty object', async () => {
     const launchArguments = { AppleLanguages: ['fr', 'en-GB'], AppleLocale: 'fr_FR', e2e: true, retries: 3 };
     const ios = harness({ bundleId: 'com.example.app', launchArguments });
     await openAttempt(ios);
@@ -3007,20 +3007,18 @@ describe('device fixture', () => {
       launchArgs: ['--ez', 'e2e', 'true', '--es', 'locale', 'fr_FR', '--ei', 'retries', '3', '--esa', 'tags', 'a,b'],
     });
 
-    // An empty object sends nothing, like an empty list.
     const empty = harness({ bundleId: 'com.example.app', launchArguments: {} });
     await openAttempt(empty);
     await empty.engine.session!.restart!(operation());
     expect(empty.fake.lastArgs('apps.open')).toEqual({ platform: 'ios', app: 'com.example.app', relaunch: true });
   });
 
-  it('launches any app with its own arguments and permissions, set on that app by name', async () => {
+  it('launches any app with its own arguments, a list or an object spelled for the platform, and permissions set on that app by name', async () => {
     const h = harness();
     await openAttempt(h);
     const device = fixture(h);
     const before = h.fake.calls.length;
     await device.openApp('com.other', { relaunch: true, launchArguments: ['--reset-onboarding'], permissions: { photos: 'reset' } });
-    // An object is spelled for the platform, as the target's is.
     await device.openApp('com.other', { relaunch: true, launchArguments: { AppleLocale: 'fr_FR', resetOnboarding: true } });
     // No arguments and an empty map send nothing.
     await device.openApp('com.other', { launchArguments: [], permissions: { photos: 'reset' } });
@@ -3033,6 +3031,29 @@ describe('device fixture', () => {
       ['apps.open', { platform: 'ios', app: 'com.other' }],
       ['apps.open', { platform: 'ios', app: 'com.other' }],
     ]);
+  });
+
+  it('refuses openApp launch arguments of the wrong shape, or ones Android cannot carry, before any device command', async () => {
+    const ios = harness();
+    await openAttempt(ios);
+    const device = fixture(ios);
+    const before = ios.fake.calls.length;
+    await expect(device.openApp('com.other', { relaunch: true, launchArguments: { env: null } } as never)).rejects.toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      message: 'device.openApp({ launchArguments }).env must be a string, number, boolean, or array of strings, got null',
+    });
+    expect(ios.fake.calls.length).toBe(before);
+
+    const android = harness({ platform: 'android', bundleId: ANDROID_APP_PACKAGE });
+    await openAttempt(android);
+    const pixel = fixture(android);
+    const sent = android.fake.calls.length;
+    await expect(pixel.openApp('com.other', { relaunch: true, launchArguments: { AppleLocale: 'fr_FR' } })).rejects.toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      message: expect.stringContaining('device.openApp({ launchArguments }).AppleLocale is an iOS launch argument'),
+    });
+    await expect(pixel.openApp('com.other', { relaunch: true, launchArguments: { tags: ['a,b'] } })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(android.fake.calls.length).toBe(sent);
   });
 
   it('refuses an openApp permission name it does not know before any device command', async () => {
