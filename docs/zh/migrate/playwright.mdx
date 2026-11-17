@@ -126,6 +126,7 @@ test('checkout', async ({ app, agent, screen }) => {
 | `expect(page).toHaveURL()`, `toHaveTitle()` | `expect(browser).toHaveURL()`、`toHaveTitle()` |
 | `expect(page).toHaveScreenshot()`, `expect(locator).toHaveScreenshot()` | `expect(screen).toHaveScreenshot()` 及定位器形式，参阅[视觉比较](/visual-testing) |
 | `expect(value)` 配合 `toBe()`、`toEqual()`、`toMatchObject()`、`toContain()`、`toHaveLength()`、`toHaveProperty()`、`toMatch()`，以及真值和数值匹配器 | 相同，参阅[值匹配器](/reference/expect#value-matchers) |
+| `expect(locator, 'message')`, `expect(page, 'message').toHaveScreenshot()`, `expect(value, 'message')` | 相同，页面使用 `expect(screen, 'message')`；消息出现在失败信息的开头，参阅[定位器匹配器](/reference/expect#locator-matchers) |
 | `expect.any()`, `anything()`, `objectContaining()`, `arrayContaining()`, `stringMatching()`, `stringContaining()`, `expect.poll()`, `expect.soft()` | 相同；`poll` 接受一个 `interval` |
 
 </Accordion>
@@ -242,7 +243,7 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 | `expect(fn).toPass()`, `expect.poll(fn, { intervals })` | `expect.poll(async () => { ...; return true }).toBe(true)` |
 | `toBeEmpty()`, `toBeEditable()`, `toBeInViewport()` | 表单控件上使用 `toHaveValue('')`，其他元素上使用 `toHaveText('')`；`toBeEnabled()` 和 `.not.toHaveAttribute('readonly')`；通过 `expect.poll` 检查 `boundingBox()` |
 | `locator.screenshot()`, `{ fullPage, clip }`, `snapshotPathTemplate`, `ignoreSnapshots` | 对视口或单个定位器使用 `toHaveScreenshot`；通过标签和 `--exclude-tag` 跳过视觉测试 |
-| `expect(locator, 'message')`, `expect.configure()` | 去掉消息，失败信息会注明定位器和匹配器；每次调用上设置 `{ timeout }` |
+| `expect.configure()` | 每次调用上设置 `{ timeout }` |
 | `@axe-core/playwright` | 通过 `browser.addInitScript({ path: 'node_modules/axe-core/axe.min.js' })` 加载 axe-core，然后在 `browser.evaluate` 中调用 `axe.run()` |
 | `.resolves`, `.rejects`, `toThrow()`, `toStrictEqual()`, `toContainEqual()`, `toBeInstanceOf()`, `expect.closeTo()` | 先 `await`，或捕获错误并对其断言；`toEqual`；按深度相等比较的 `toContain`；`toBeCloseTo` |
 | 首次读取即可通过的 `.not` 定位器匹配器 | 条件持续成立 1 s 后才会通过。对应的正向反义匹配器首次读取即可通过：`toBeHidden()`、`toBeDisabled()`、`toBeChecked({ checked: false })` |

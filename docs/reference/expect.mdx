@@ -588,8 +588,8 @@ expect(response).toHaveProperty('body.total', expect.any(Number));
 ### Soft assertions
 
 `expect.soft(actual, message?)` takes what `expect(actual, message?)` takes
-and returns the same matchers. A soft matcher that fails does not throw: the failure is kept on
-the running attempt and the body continues.
+and returns the same matchers. A soft matcher that fails does not throw: the
+failure is kept on the running attempt and the body continues.
 
 ```ts
 test('checkout summary', async ({ agent, screen }) => {
