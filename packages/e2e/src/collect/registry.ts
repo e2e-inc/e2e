@@ -738,9 +738,9 @@ function fixtureDefinition(name: string, entry: unknown): Pick<FixtureDefinition
 function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
   /**
    * Registers one `test()` call. `api` names the caller in errors. A `skip`
-   * condition comes from `skipIf`, `runIf`, or `fixme`: when true, the test is
-   * skipped, keeping any reason its `skip` option gives. Either way a serial
-   * group rejects it, so a file collects the same on every platform.
+   * condition comes from `skipIf`, `runIf`, `skip`, or `fixme`: when true, the
+   * test is skipped, keeping any reason its `skip` option gives. Either way a
+   * serial group rejects it, so a file collects the same on every platform.
    * `namedBy` is passed on to `registerTest`.
    */
   const registerOne = (
@@ -810,7 +810,7 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
     skip(first?: string | boolean, second?: TestBody | string): TestCase | undefined {
       const call = parseModifierCall(first, second);
       if (call.kind === 'register') {
-        return requireCollector('test.skip()').registerTest('test', 'skip', call.title, { skip: true }, [], call.fn as TestBody, chain);
+        return registrar('test.skip()', true)(call.title, call.fn as TestBody);
       }
       skipRunningTest('test.skip', call.condition, call.reason);
       return undefined;

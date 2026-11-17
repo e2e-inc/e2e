@@ -460,6 +460,18 @@ describe('registration', () => {
     expect(() => test.fixme('outside', noop)).toThrow(/^test\.fixme\(\) can only be called while a test module is being collected/);
   });
 
+  it('rejects test.skip(title, fn) in a serial group, naming test.skip()', async () => {
+    await expect(
+      collectModule(async () => {
+        test.describe('unit', { serial: true }, () => {
+          test.describe('nested', () => {
+            test.skip('member', noop);
+          });
+        });
+      }),
+    ).rejects.toThrow('test.skip() cannot be used inside a serial group, which skips as one unit; set skip on the serial describe instead');
+  });
+
   it('rejects the runtime test.fixme forms outside a test body, pointing at test.fixme(title, fn)', async () => {
     const message =
       'test.fixme(condition, reason) skips the running test and must be called inside a test body; to mark a test fixme at collection, register it with test.fixme(title, fn)';
