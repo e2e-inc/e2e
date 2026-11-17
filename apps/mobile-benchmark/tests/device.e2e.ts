@@ -48,7 +48,8 @@ test('sequential onboarding echoes the exact values', async ({ app, device, scre
   await screen.getByTestId('email-input').fill('jane@example.com');
   expect(await device.isKeyboardShown()).toBe(true);
   await device.dismissKeyboard();
-  expect(await device.isKeyboardShown()).toBe(false);
+  // The keyboard animates out, so poll until it is gone.
+  await expect.poll(() => device.isKeyboardShown()).toBe(false);
   await screen.getByTestId('continue-button').tap();
 
   await screen.getByTestId('first-name-input').fill('Jane');

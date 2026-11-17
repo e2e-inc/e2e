@@ -993,7 +993,9 @@ await device.dismissKeyboard();
  * tree, the same keyboard observations hide covered nodes under. Fails
  * with `ENGINE_FAILURE` when the capture cannot answer: no keyboard in a
  * tree that is still incomplete, or keyboard elements agent-device could
- * not place and had no probe for. Changes nothing on the device.
+ * not place and had no probe for. It reads the screen as it is now, so
+ * right after an action that closes the keyboard, poll it with
+ * `expect.poll`. Changes nothing on the device.
  */
 isKeyboardShown(): Promise<boolean>;
 ```
