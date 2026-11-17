@@ -972,15 +972,17 @@ export type WorkerFixtureDefinition<Worker, Value> = readonly [
  * test sees; a worker fixture sees worker fixtures only, since it outlives
  * every test fixture.
  *
- * A name the base already has is not a new fixture: it extends that fixture,
- * a built-in one included. Inside its function its own name is the fixture
- * it extends, and it keeps that fixture's type and scope:
+ * A name the base already has is not a new fixture, so declaring it in
+ * `Extra` or `ExtraWorker` is a type error. Defined beside them, it extends
+ * that fixture, a built-in one included (`FixtureOverrides`): inside its
+ * function its own name is the fixture it extends, and it keeps that
+ * fixture's type and scope:
  *
  *   base.extend({ app: async ({ app }, use) => { await app.open('/'); await use(app); } })
  */
 export type FixtureDefinitions<Base, Extra, Worker = {}, ExtraWorker = {}> = {
   readonly [K in keyof Extra]: K extends keyof Base
-    ? FixtureOverride<Base, Worker, K, Base & NoInfer<Extra> & NoInfer<ExtraWorker>, Worker & NoInfer<ExtraWorker>>
+    ? never
     : TestFixtureDefinition<Base & NoInfer<Extra> & NoInfer<ExtraWorker>, Extra[K]>;
 } & {
   // Not inferred: an `extend({ ... })` without type arguments infers its test
