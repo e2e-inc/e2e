@@ -3004,7 +3004,7 @@ describe('device fixture', () => {
       platform: 'android',
       app: ANDROID_APP_PACKAGE,
       relaunch: true,
-      launchArgs: ['--es', 'e2e', 'true', '--es', 'locale', 'fr_FR', '--es', 'retries', '3', '--esa', 'tags', 'a,b'],
+      launchArgs: ['--ez', 'e2e', 'true', '--es', 'locale', 'fr_FR', '--ei', 'retries', '3', '--esa', 'tags', 'a,b'],
     });
 
     // An empty object sends nothing, like an empty list.
@@ -3020,12 +3020,15 @@ describe('device fixture', () => {
     const device = fixture(h);
     const before = h.fake.calls.length;
     await device.openApp('com.other', { relaunch: true, launchArguments: ['--reset-onboarding'], permissions: { photos: 'reset' } });
+    // An object is spelled for the platform, as the target's is.
+    await device.openApp('com.other', { relaunch: true, launchArguments: { AppleLocale: 'fr_FR', resetOnboarding: true } });
     // No arguments and an empty map send nothing.
     await device.openApp('com.other', { launchArguments: [], permissions: { photos: 'reset' } });
     await device.openApp('com.other', { permissions: {} });
     expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
       ['settings.update', { setting: 'permission', permission: 'photos', state: 'reset', platform: 'ios', app: 'com.other' }],
       ['apps.open', { platform: 'ios', app: 'com.other', relaunch: true, launchArgs: ['--reset-onboarding'] }],
+      ['apps.open', { platform: 'ios', app: 'com.other', relaunch: true, launchArgs: ['-AppleLocale', 'fr_FR', '-resetOnboarding', 'YES'] }],
       ['settings.update', { setting: 'permission', permission: 'photos', state: 'reset', platform: 'ios', app: 'com.other' }],
       ['apps.open', { platform: 'ios', app: 'com.other' }],
       ['apps.open', { platform: 'ios', app: 'com.other' }],

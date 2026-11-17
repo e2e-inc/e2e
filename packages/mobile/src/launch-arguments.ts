@@ -1,7 +1,7 @@
 /**
  * The object form of `app.launchArguments`, spelled for the platform's launch
- * command: `-name value` process arguments on iOS, `am start` string extras
- * on Android. A list is handed over as it is.
+ * command: `-name value` process arguments on iOS, `am start` extras of the
+ * value's type on Android. A list is handed over as it is.
  */
 
 import { ConfigurationError, type LaunchArgumentValue, type LaunchArguments } from '@e2e-dev/core/engine';
@@ -53,8 +53,24 @@ function plistString(item: string): string {
   return PLIST_UNQUOTED.test(item) ? item : `"${item.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 }
 
-/** `--es name value`, or `--esa` for a list, whose items `am` splits on an unescaped comma. */
+/** Java's `int` range; `am start` parses `--ei` with `Integer.parseInt`. */
+const INT32_MIN = -(2 ** 31);
+const INT32_MAX = 2 ** 31 - 1;
+
+/**
+ * The extra of the value's type, so the app reads it with the matching
+ * `Intent` getter: `--ez` boolean, `--ei` int, `--el` long, `--ef` float,
+ * `--es` string, and `--esa` for a list, whose items `am` splits on an
+ * unescaped comma.
+ */
 function androidExtra(name: string, value: LaunchArgumentValue): string[] {
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return ['--es', name, String(value)];
+  if (typeof value === 'boolean') return ['--ez', name, String(value)];
+  if (typeof value === 'number') return [androidNumberFlag(value), name, String(value)];
+  if (typeof value === 'string') return ['--es', name, value];
   return ['--esa', name, value.map((item) => item.replaceAll(',', '\\,')).join(',')];
+}
+
+function androidNumberFlag(value: number): '--ei' | '--el' | '--ef' {
+  if (!Number.isInteger(value)) return '--ef';
+  return value >= INT32_MIN && value <= INT32_MAX ? '--ei' : '--el';
 }
