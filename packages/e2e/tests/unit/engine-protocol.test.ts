@@ -628,24 +628,34 @@ describe('engine protocol over a child process', () => {
     await remote.dispose!(cleanup);
   });
 
-  it('waits for the exit code and stderr of a server whose stdout closed before it exited', async () => {
+  /** A client of the toy server in `crashMode`, initialized. */
+  async function crashing(crashMode: string) {
     const remote = connectEngine({
       manifest: { ...manifest, methods: [...manifest.methods], actions: [...manifest.actions] },
       transport: spawnTransport({ command: process.execPath, args: [server] }),
-      initializationOptions: { crashOnObserve: true, closeStdoutFirst: true },
+      initializationOptions: { crashOnObserve: true, crashMode },
     });
     await remote.init!(initInfo());
+    return remote;
+  }
+
+  it('waits for the exit code and stderr of a server whose stdout closed before it exited', async () => {
+    const remote = await crashing('stdout-first');
+    const start = Date.now();
     await expect(remote.observe!(operation())).rejects.toThrow(/closed the connection[\s\S]*exited with code 7[\s\S]*crashing on purpose/);
+    // Well under the 2 s a transport waits at most: the exit ends the wait.
+    expect(Date.now() - start).toBeLessThan(1_500);
     await remote.dispose!(cleanup);
-  }, 1_500);
+  });
+
+  it('waits for stderr a child of the server writes after the server exited', async () => {
+    const remote = await crashing('late-child');
+    await expect(remote.observe!(operation())).rejects.toThrow(/exited with code 7[\s\S]*toy server child: late line/);
+    await remote.dispose!(cleanup);
+  });
 
   it('fails a request of a server that closed its stdout and keeps running', async () => {
-    const remote = connectEngine({
-      manifest: { ...manifest, methods: [...manifest.methods], actions: [...manifest.actions] },
-      transport: spawnTransport({ command: process.execPath, args: [server] }),
-      initializationOptions: { crashOnObserve: true, staysAfterStdout: true },
-    });
-    await remote.init!(initInfo());
+    const remote = await crashing('stays-up');
     await expect(remote.observe!(operation())).rejects.toThrow(/closed the connection[\s\S]*stdout closed, staying/);
     await remote.dispose!(cleanup);
   }, 10_000);

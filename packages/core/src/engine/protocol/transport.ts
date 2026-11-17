@@ -7,7 +7,6 @@
 import { spawn } from 'node:child_process';
 import { connect } from 'node:net';
 import { PassThrough } from 'node:stream';
-import { setTimeout as delay } from 'node:timers/promises';
 import type { EngineAppInfo, EngineHandle } from '../index.ts';
 import type { MessageStreams } from './connection.ts';
 import type { ConnectionRole } from './protocol.ts';
@@ -62,8 +61,8 @@ export interface SpawnTransportOptions {
 const STDERR_TAIL_BYTES = 4096;
 
 /**
- * How long the end of a server's stdout waits for the server to exit and
- * close its stderr, so a failure message can carry both.
+ * How long the end of a server's stdout waits for the server to exit and its
+ * stderr to close, so a failure message can carry both.
  */
 const EXIT_AFTER_STDOUT_MS = 2000;
 
@@ -96,8 +95,11 @@ export function spawnTransport(options: SpawnTransportOptions): EngineTransport 
       child.stdout.pipe(input, { end: false });
       child.stdout.once('error', (cause: Error) => input.destroy(cause));
       child.stdout.once('end', () => {
-        const cap = delay(EXIT_AFTER_STDOUT_MS, undefined, { ref: false });
-        void Promise.race([closed, cap]).then(() => input.end());
+        const cap = setTimeout(() => input.end(), EXIT_AFTER_STDOUT_MS);
+        void closed.then(() => {
+          clearTimeout(cap);
+          input.end();
+        });
       });
       await new Promise<void>((resolve, reject) => {
         child.once('spawn', resolve);
@@ -120,7 +122,6 @@ export function spawnTransport(options: SpawnTransportOptions): EngineTransport 
           clearTimeout(timer);
           child.stdout.destroy();
           child.stderr.destroy();
-          input.destroy();
         },
       };
     },
