@@ -357,6 +357,18 @@ describe('fixtures that extend a built-in', () => {
     expect(planAttempt(toyTarget(), testNaming(worker, []), []).order).toEqual([]);
   });
 
+  it('lets a worker fixture name an extended app, whose scope follows the engine', () => {
+    const chain = [
+      wrapping([], 'app', 'first'),
+      wrapping([], 'app', 'second', { scope: undefined, layer: 1 }),
+      logged([], 'seeded', 'S', { scope: 'worker', layer: 2, uses: ['app'] }),
+    ];
+    // Before a target is known an extended `app` is no more a test fixture than the built-in one.
+    expect(() => checkDeclaredFixtures(chain, chain)).not.toThrow();
+    expect(planAttempt(toyTarget('worker'), testNaming(chain, ['seeded']), []).order.map(({ name }) => name)).toEqual(['app', 'app', 'seeded']);
+    expect(() => planAttempt(toyTarget(), testNaming(chain, ['seeded']), [])).toThrow(planError('worker fixture "seeded" names "app", a test fixture on target "toy"'));
+  });
+
   it('fails on a target that lacks the built-in only when code there names it', () => {
     const chain = [wrapping([], 'device', 'override')];
     expect(planAttempt(toyTarget(), testNaming(chain, ['app']), []).order).toEqual([]);

@@ -596,6 +596,8 @@ describe('test.extend', () => {
       extended('extends', noop);
     });
     expect(registration.tests[0]!.fixtures.map(({ name, layer }) => [name, layer])).toEqual([['app', 0], ['platform', 0], ['app', 1]]);
+    // `app` follows the engine, extended or not: a worker fixture that names it waits for the target.
+    expect(() => extended.extend({ seeded: [needs('app'), { scope: 'worker' }] } as never)).not.toThrow();
     // A core fixture whose scope is the same on every engine keeps it.
     expect(() => test.extend({ agent: [needs('agent'), { scope: 'worker' }] } as never)).toThrow(
       /fixture "agent" is declared with scope 'worker', but it extends the built-in "agent", a test fixture: a fixture that extends another keeps its scope/,

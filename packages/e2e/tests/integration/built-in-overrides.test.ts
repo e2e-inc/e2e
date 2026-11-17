@@ -140,6 +140,49 @@ test.describe('device suite', () => {
   );
 
   it(
+    'lets a worker fixture name an extended app on an engine whose state outlives a test',
+    async () => {
+      const support = `import { test as base } from 'e2e';
+import { log } from './log.ts';
+
+export const test = base
+  .extend({
+    app: async ({ app }, use) => {
+      log('setup:app');
+      await use(app);
+    },
+  })
+  .extend<{}, { seeded: string }>({
+    seeded: [async ({ app }, use) => {
+      log('setup:seeded:' + typeof app.open);
+      await use('seeded');
+    }, { scope: 'worker' }],
+  });
+`;
+      const file = `import { test } from './support.ts';
+import { log } from './log.ts';
+
+test.beforeAll(({ seeded }) => log('beforeAll:' + seeded));
+test('one', ({ seeded }) => log('body:' + seeded));
+`;
+      const log = hookLog('override-worker-dependent');
+      const { outcome, project } = await runProject(
+        { 'tests/log.ts': LOG_MODULE, 'tests/support.ts': support, 'tests/device.e2e.ts': file },
+        { config: engineConfig(createFakeEngine({ fixtures: true, isolation: 'worker' }).engine) },
+      );
+      try {
+        assertValidReport(outcome.report);
+        expect(outcome.report.run.errors).toEqual([]);
+        expect(resultByTitle(outcome, 'one').status).toBe('passed');
+        expect(log.lines()).toEqual(['setup:app', 'setup:seeded:function', 'beforeAll:seeded', 'body:seeded']);
+      } finally {
+        project.cleanup();
+      }
+    },
+    120_000,
+  );
+
+  it(
     'fails nothing on a target that lacks the built-in until code there names it',
     async () => {
       const file = `import { test } from './support.ts';

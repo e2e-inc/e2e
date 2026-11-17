@@ -149,8 +149,9 @@ class Planner {
         definition.source,
       );
     }
-    // Before a target is known, a plain function named like no core fixture may still extend an engine's.
-    const scope = definition.scope ?? extended ?? (target === undefined && base === undefined && !builtIn ? undefined : 'test');
+    // Before a target is known, a plain function may extend a fixture whose
+    // scope follows the engine: `app`, `screen`, or one an engine contributes.
+    const scope = definition.scope ?? extended ?? (target === undefined ? undefined : 'test');
     this.scopes.set(definition, scope);
     return scope;
   }
