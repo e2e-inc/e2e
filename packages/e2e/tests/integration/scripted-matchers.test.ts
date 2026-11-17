@@ -37,6 +37,7 @@ test('every matcher passes on the scripted screen', async ({ app, screen }) => {
   await expect(screen.getByTestId('card')).toHaveAttribute('data-state', 'open');
   await expect(screen.getByTestId('card')).toHaveAttribute('class', /active/);
   await expect(screen.getByRole('list', { name: 'Todos' })).toHaveAccessibleName('Todos');
+  await expect(screen.getByRole('switch', { name: 'Dark mode' })).toHaveRole('switch');
   await expect(screen.getByTestId('todo')).toHaveCount(3);
   await expect(screen.getByTestId('todo')).toHaveText(['Write spec', /^Ship/, 'Release']);
   await expect(screen.getByTestId('todo')).toContainText(['spec', 'runner', 'Release']);
@@ -237,7 +238,7 @@ describe('scripted engine: expect(locator) matchers', () => {
     for (const matcher of [
       'toBeVisible', 'toBeHidden', 'toBeAttached', 'toBeEnabled', 'toBeDisabled', 'toBeChecked', 'toBeSelected',
       'toBeExpanded', 'toBeFocused', 'toBeEmpty', 'toHaveText', 'toContainText', 'toHaveValue', 'toHaveAttribute',
-      'toHaveAccessibleName', 'toHaveCount',
+      'toHaveAccessibleName', 'toHaveCount', 'toHaveRole',
     ]) {
       expect(apis, matcher).toContain(`expect.${matcher}`);
     }

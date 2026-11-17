@@ -17,9 +17,16 @@ import { isValueControl } from '@e2e-dev/core/lib/internal/roles';
 import { pollReads, type ReadWindow } from '@e2e-dev/core/lib/internal/time';
 import { SampleHistory } from '@e2e-dev/core/lib/expect/samples';
 import { attributeOf, denySecureRead, isNodeVisible } from '@e2e-dev/core/lib/locator/engine';
-import { describeExpression } from '@e2e-dev/core/lib/locator/expression';
+import { canonicalRole, describeExpression } from '@e2e-dev/core/lib/locator/expression';
 import type { LocatorInternals } from '@e2e-dev/core/lib/locator/screen';
-import type { AsyncExpectation, ScreenshotOptions, TextMatch, TextMatcherOptions } from '@e2e-dev/core/lib/types';
+import type {
+  AsyncExpectation,
+  Role,
+  RoleAlias,
+  ScreenshotOptions,
+  TextMatch,
+  TextMatcherOptions,
+} from '@e2e-dev/core/lib/types';
 import { expectScreenshot } from './screenshot.ts';
 
 interface Sample {
@@ -458,6 +465,27 @@ class AsyncExpectationImpl implements AsyncExpectation {
 
   toHaveAccessibleName(expected: TextMatch, options?: TextMatcherOptions): Promise<void> {
     return this.textMatcher('toHaveAccessibleName', expected, options);
+  }
+
+  toHaveRole(role: Role | RoleAlias, options?: { timeout?: number }): Promise<void> {
+    this.readOptions('toHaveRole', options);
+    const given: unknown = role;
+    if (typeof given !== 'string' || given === '') {
+      throw new TestError('INVALID_ARGUMENT', `${this.api('toHaveRole')} role must be a non-empty string`);
+    }
+    const expected = canonicalRole(role);
+    return this.poll(
+      {
+        name: 'toHaveRole',
+        predicate: (sample) => sample.node?.role === expected,
+        describeExpected: `role ${JSON.stringify(expected)}`,
+        observed: (sample) => {
+          if (sample.node === null) return 'no node';
+          return sample.node.role === undefined ? 'no role' : `role ${JSON.stringify(sample.node.role)}`;
+        },
+      },
+      options?.timeout,
+    );
   }
 
   toHaveScreenshot(nameOrOptions?: string | ScreenshotOptions, options?: ScreenshotOptions): Promise<void> {

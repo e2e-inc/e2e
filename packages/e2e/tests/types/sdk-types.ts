@@ -468,6 +468,14 @@ void asyncExpectation.toBeChecked({ indeterminate: true });
 void asyncExpectation.toHaveValue('a', { ignoreCase: true });
 // @ts-expect-error presence has no case to ignore
 void asyncExpectation.toHaveAttribute('data-kind', { ignoreCase: true });
+// toHaveRole takes a timeout and nothing else; a role comes from the vocabulary, ARIA's img included.
+void (asyncExpectation.not.toHaveRole('img', { timeout: 1000 }) satisfies Promise<void>);
+// @ts-expect-error a Playwright role the vocabulary does not carry stays out of toHaveRole too
+void asyncExpectation.toHaveRole('paragraph');
+// @ts-expect-error a role is compared as a string, never as a pattern
+void asyncExpectation.toHaveRole(/button/);
+// @ts-expect-error a role has no case to ignore
+void asyncExpectation.toHaveRole('button', { ignoreCase: true });
 
 void (screen.getByRole('row').filter({ hasNotText: 'Paid' }) satisfies Locator);
 void (screen.getByRole('row').filter({ hasText: 'Invoice', hasNotText: /Paid/i }) satisfies Locator);

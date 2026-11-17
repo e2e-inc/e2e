@@ -41,18 +41,18 @@ import {
   GITLAB_PIPELINE,
   posixRelative,
   readNodeMajor,
-  type CiChoice,
   type CiFile,
   type CiJobs,
   type CiService,
   type CiTarget,
 } from './init/ci.ts';
+import { MCP_LOCATIONS, type CiChoice } from './init/choices.ts';
 import { loadConfigModule } from '../config/load.ts';
 import { getEnginePreset, getEnginePresets, DEFAULT_ENGINE_IDS, type EngineId } from './init/engines.ts';
 import { copyExample, ExampleCopyCancelled, ExampleDownloadError, findExample, isEmptyDirectory, type ExampleCopy } from './init/examples.ts';
 import { DEFAULT_ENDPOINT, GATEWAYS, getGatewayPreset, validateEndpoint, type GatewayId } from './init/gateways.ts';
 import { isLoopbackHost } from '@e2e-dev/core/lib/internal/urls';
-import { findRegisteredMcpFiles, linkOnPath, MCP_LOCATIONS, planMcpRegistration } from './init/mcp-config.ts';
+import { findRegisteredMcpFiles, linkOnPath, planMcpRegistration } from './init/mcp-config.ts';
 import { addDependencies, addScripts, declaresDependency, describeManifestError, readPackage, serializePackage } from './init/package.ts';
 import { createScaffold, type ScaffoldModel } from './init/scaffold.ts';
 import { MISSING_SKILL_MESSAGE, readSkillFiles } from './skill.ts';
