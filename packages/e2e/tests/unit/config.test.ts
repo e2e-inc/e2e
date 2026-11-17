@@ -572,7 +572,7 @@ describe('resolveConfig', () => {
   });
 
   it('takes launch arguments as an object of name to string, number, boolean, or list of strings, and leaves out an undefined value', () => {
-    const launchArguments = { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', e2e: true, retries: 3, skipOnboarding: undefined } as never;
+    const launchArguments = { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', e2e: true, retries: 3, skipOnboarding: undefined };
     expect(resolveApp({ bundleId: 'dev.shop.app', launchArguments }).launchArguments).toEqual({
       AppleLanguages: ['fr'],
       AppleLocale: 'fr_FR',
@@ -597,13 +597,17 @@ describe('resolveConfig', () => {
 
     const value = (name: string) => `target "web" app.launchArguments.${name} must be a string, number, boolean, or array of strings, got`;
     expect(() => resolveApp({ launchArguments: { locale: { language: 'fr' } } } as never)).toThrow(`${value('locale')} an object`);
-    expect(() => resolveApp({ launchArguments: { languages: ['fr', 1] } } as never)).toThrow(`${value('languages')} an array`);
+    expect(() => resolveApp({ launchArguments: { languages: ['fr', 1] } } as never)).toThrow(
+      'target "web" app.launchArguments.languages must be a string, number, boolean, or array of strings; item 1 is a number',
+    );
     const sparse = ['fr'];
     sparse[2] = 'de';
-    expect(() => resolveApp({ launchArguments: { languages: sparse } })).toThrow(`${value('languages')} an array`);
+    expect(() => resolveApp({ launchArguments: { languages: sparse } })).toThrow(
+      'target "web" app.launchArguments.languages must be a string, number, boolean, or array of strings; item 1 is undefined',
+    );
     expect(() => resolveApp({ launchArguments: { retries: Number.NaN } })).toThrow(`${value('retries')} NaN`);
-    expect(() => resolveApp({ launchArguments: { retries: 2 ** 53 } })).toThrow(`${value('retries')} a number beyond 2^53`);
-    expect(() => resolveApp({ launchArguments: { ratio: -1e300 } })).toThrow(`${value('ratio')} a number beyond 2^53`);
+    expect(() => resolveApp({ launchArguments: { retries: 2 ** 53 } })).toThrow(`${value('retries')} a number beyond 2^53 - 1`);
+    expect(() => resolveApp({ launchArguments: { ratio: -1e300 } })).toThrow(`${value('ratio')} a number beyond 2^53 - 1`);
     expect(resolveApp({ bundleId: 'dev.shop.app', launchArguments: { retries: 2 ** 53 - 1, ratio: -1.5 } }).launchArguments).toEqual({ retries: 2 ** 53 - 1, ratio: -1.5 });
     expect(() => resolveApp({ launchArguments: { retries: null } } as never)).toThrow(`${value('retries')} null`);
     expect(() => resolveApp({ launchArguments: { when: new Date(0) } } as never)).toThrow(`${value('when')} a Date`);

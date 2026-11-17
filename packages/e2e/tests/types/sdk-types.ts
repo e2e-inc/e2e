@@ -246,9 +246,10 @@ customExecutorObservation.keyboardVisible satisfies boolean | undefined;
 ({ targets: [{ engine, app: { bundleId: 'dev.shop.app', permissions: { camera: 'allow' } } }] }) satisfies E2EConfig;
 // @ts-expect-error launch arguments are the strings the launch command takes
 ({ targets: [{ engine, app: { bundleId: 'dev.shop.app', launchArguments: [1] } }] }) satisfies E2EConfig;
-// An object value is a string, number, boolean, or list of strings.
+// An object value is a string, number, boolean, or list of strings, or undefined straight from the environment.
+declare const tokenFromEnv: string | undefined;
 ({
-  targets: [{ engine, app: { bundleId: 'dev.shop.app', launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', e2e: true, retries: 3 } } }],
+  targets: [{ engine, app: { bundleId: 'dev.shop.app', launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', e2e: true, retries: 3, token: tokenFromEnv } } }],
 }) satisfies E2EConfig;
 // @ts-expect-error an object value is flat: no nested object
 ({ targets: [{ engine, app: { bundleId: 'dev.shop.app', launchArguments: { locale: { language: 'fr' } } } }] }) satisfies E2EConfig;

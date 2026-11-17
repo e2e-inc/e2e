@@ -423,7 +423,7 @@ launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', e2e: true },
 
 ```ts
 type LaunchArgumentValue = string | number | boolean | readonly string[];
-type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue>>;
+type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue | undefined>>;
 ```
 
 ビルドモードを選ぶ引数は、アプリの内容を変えます。モードごとに独自の `identity` を指定してください。

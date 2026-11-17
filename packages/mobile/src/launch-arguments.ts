@@ -53,7 +53,7 @@ export function assertLaunchArgumentsFor(platform: MobilePlatform, label: string
     if (IOS_ONLY_ARGUMENTS.has(name)) {
       fail(code, `${label}.${name} is an iOS launch argument, and Android reads none of Apple's; set the device's language before the run, or language and locale on a hosted device provider`);
     }
-    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') continue;
+    if (value === undefined || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') continue;
     const problem = androidListProblem(value);
     if (problem !== undefined) fail(code, `${label}.${name} ${problem}: am start splits a list extra on commas`);
   }
@@ -74,7 +74,10 @@ export function launchArgumentList(platform: MobilePlatform, launchArguments: La
   if (launchArguments === undefined) return undefined;
   const list = Array.isArray(launchArguments)
     ? launchArguments
-    : Object.entries(launchArguments).flatMap(([name, value]) => (platform === 'android' ? androidExtra(name, value) : iosArgument(name, value)));
+    : Object.entries(launchArguments).flatMap(([name, value]) => {
+        if (value === undefined) return [];
+        return platform === 'android' ? androidExtra(name, value) : iosArgument(name, value);
+      });
   return list.length === 0 ? undefined : list;
 }
 

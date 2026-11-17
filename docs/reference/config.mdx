@@ -528,7 +528,7 @@ launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', e2e: true },
 
 ```ts
 type LaunchArgumentValue = string | number | boolean | readonly string[];
-type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue>>;
+type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue | undefined>>;
 ```
 
 - An object value is a string, a finite number below 2^53 in magnitude, a
@@ -543,7 +543,7 @@ type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumen
 
 | Throws | When |
 | --- | --- |
-| `INVALID_CONFIG` | A list item that is not a string. An object with an empty name, a name with whitespace or a control character, a value of another kind, a number beyond 2^53, or a NUL character anywhere. The engine adds its own rules: see [the mobile reference](/reference/mobile#launch-arguments-and-permissions). |
+| `INVALID_CONFIG` | A list item that is not a string. An object with an empty name, a name with whitespace or a control character, a value of another kind, a number beyond 2^53 - 1 in magnitude, or a NUL character anywhere. The engine adds its own rules: see [the mobile reference](/reference/mobile#launch-arguments-and-permissions). |
 
 #### `permissions`
 

@@ -41,7 +41,10 @@ export function checkLaunchArguments(label: string, declared: unknown, code: 'IN
     if (/[\s\p{Cc}]/u.test(name)) {
       fail(code, `${label} argument name ${JSON.stringify(name)} must have no whitespace or control characters`);
     }
-    if (!isLaunchArgumentValue(value)) {
+    if (Array.isArray(value)) {
+      const index = value.findIndex((item) => typeof item !== 'string');
+      if (index !== -1) fail(code, `${label}.${name} must be a string, number, boolean, or array of strings; item ${index} is ${describe(value[index])}`);
+    } else if (!isLaunchArgumentValue(value)) {
       fail(code, `${label}.${name} must be a string, number, boolean, or array of strings, got ${describe(value)}`);
     }
     if (holdsNul(value)) fail(code, `${label}.${name} holds a NUL character`);
@@ -62,9 +65,10 @@ function holdsNul(value: LaunchArgumentValue): boolean {
   return Array.isArray(value) && value.some((item) => item.includes('\u0000'));
 }
 
-/** A value's kind for an error message: `null`, `an array`, `a Map`, `an object`, `NaN`, `a number beyond 2^53`, `a number`. */
+/** A value's kind for an error message: `null`, `undefined`, `an array`, `a Map`, `an object`, `NaN`, `a number beyond 2^53 - 1`, `a number`. */
 function describe(value: unknown): string {
   if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
   if (Array.isArray(value)) return 'an array';
   if (typeof value === 'object') {
     const name: unknown = (value as { constructor?: { name?: unknown } }).constructor?.name;
@@ -72,7 +76,7 @@ function describe(value: unknown): string {
   }
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) return String(value);
-    if (Math.abs(value) > Number.MAX_SAFE_INTEGER) return 'a number beyond 2^53';
+    if (Math.abs(value) > Number.MAX_SAFE_INTEGER) return 'a number beyond 2^53 - 1';
   }
   return `a ${typeof value}`;
 }

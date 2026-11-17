@@ -1345,7 +1345,7 @@ export type AppPermissionState = 'grant' | 'deny' | 'reset';
 export type LaunchArgumentValue = string | number | boolean | readonly string[];
 
 /** A target's launch arguments: the strings the launch command takes, or an object of argument name to value. */
-export type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue>>;
+export type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue | undefined>>;
 ```
 
 #### `EngineAppInfo`
