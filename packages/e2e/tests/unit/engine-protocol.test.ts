@@ -627,6 +627,28 @@ describe('engine protocol over a child process', () => {
     await expect(remote.observe!(operation())).rejects.toThrow(/closed the connection[\s\S]*crashing on purpose/);
     await remote.dispose!(cleanup);
   });
+
+  it('waits for the exit code and stderr of a server whose stdout closed before it exited', async () => {
+    const remote = connectEngine({
+      manifest: { ...manifest, methods: [...manifest.methods], actions: [...manifest.actions] },
+      transport: spawnTransport({ command: process.execPath, args: [server] }),
+      initializationOptions: { crashOnObserve: true, closeStdoutFirst: true },
+    });
+    await remote.init!(initInfo());
+    await expect(remote.observe!(operation())).rejects.toThrow(/closed the connection[\s\S]*exited with code 7[\s\S]*crashing on purpose/);
+    await remote.dispose!(cleanup);
+  }, 1_500);
+
+  it('fails a request of a server that closed its stdout and keeps running', async () => {
+    const remote = connectEngine({
+      manifest: { ...manifest, methods: [...manifest.methods], actions: [...manifest.actions] },
+      transport: spawnTransport({ command: process.execPath, args: [server] }),
+      initializationOptions: { crashOnObserve: true, staysAfterStdout: true },
+    });
+    await remote.init!(initInfo());
+    await expect(remote.observe!(operation())).rejects.toThrow(/closed the connection[\s\S]*stdout closed, staying/);
+    await remote.dispose!(cleanup);
+  }, 10_000);
 });
 
 describe('engine protocol against a server written from the messages alone', () => {

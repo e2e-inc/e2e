@@ -7,6 +7,7 @@
 import { spawn } from 'node:child_process';
 import { connect } from 'node:net';
 import { PassThrough } from 'node:stream';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { EngineAppInfo, EngineHandle } from '../index.ts';
 import type { MessageStreams } from './connection.ts';
 import type { ConnectionRole } from './protocol.ts';
@@ -61,6 +62,12 @@ export interface SpawnTransportOptions {
 const STDERR_TAIL_BYTES = 4096;
 
 /**
+ * How long the end of a server's stdout waits for the server to exit and
+ * close its stderr, so a failure message can carry both.
+ */
+const EXIT_AFTER_STDOUT_MS = 2000;
+
+/**
  * Starts the server as a child process per connection and speaks over its
  * stdin and stdout, the way an editor starts a language server. Its stderr
  * is kept for the message of a failure.
@@ -82,12 +89,22 @@ export function spawnTransport(options: SpawnTransportOptions): EngineTransport 
       // `exit`, not `close`: a grandchild that inherited the pipes keeps
       // them open after the server is gone.
       const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+      const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+      // A server's stdout can end before its exit and the rest of its stderr
+      // arrive, and the connection reads both for its message when it closes.
+      const input = new PassThrough();
+      child.stdout.pipe(input, { end: false });
+      child.stdout.once('error', (cause: Error) => input.destroy(cause));
+      child.stdout.once('end', () => {
+        const cap = delay(EXIT_AFTER_STDOUT_MS, undefined, { ref: false });
+        void Promise.race([closed, cap]).then(() => input.end());
+      });
       await new Promise<void>((resolve, reject) => {
         child.once('spawn', resolve);
         child.once('error', reject);
       });
       return {
-        input: child.stdout,
+        input,
         output: child.stdin,
         diagnostics: () => {
           const tail = stderr.trim();
@@ -103,6 +120,7 @@ export function spawnTransport(options: SpawnTransportOptions): EngineTransport 
           clearTimeout(timer);
           child.stdout.destroy();
           child.stderr.destroy();
+          input.destroy();
         },
       };
     },
