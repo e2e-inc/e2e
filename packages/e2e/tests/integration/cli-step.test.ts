@@ -11,7 +11,7 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { stepAddress } from '../../src/cli/step-control.ts';
+import { stepAddress } from '../../src/run/step-socket.ts';
 import { createProject, workerFakeConfigSource, type FixtureProject } from '../helpers/run-project.ts';
 
 const CLI = fileURLToPath(new URL('../../dist/cli/bin.js', import.meta.url));

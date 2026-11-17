@@ -42,6 +42,7 @@ import type { LoginFlags } from '../oauth/cli.ts';
 import { Keyboard } from './keyboard.ts';
 import { SignalLadder } from './signals.ts';
 import { isStepAction, StepGate, stepKeyOf } from './step.ts';
+import { stepAddress } from '../run/step-socket.ts';
 import { skillTopics } from './skill.ts';
 import { UpdateCheck } from './update-check.ts';
 import { telemetry as telemetryCommand, TELEMETRY_ACTIONS, type TelemetryAction } from './telemetry.ts';
@@ -387,7 +388,7 @@ async function stepped(options: RunOptions, signals: SignalLadder): Promise<RunO
     else gate.press(key);
   });
   try {
-    return await run({ ...options, beforeStep: gate.beforeStep });
+    return await run({ ...options, hold: { ask: gate.beforeStep, steps: true } });
   } finally {
     keyboard.close();
   }
@@ -779,7 +780,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
             command.error(`error: --step ${stepAction} takes no files or other flags: it drives the run e2e run --step started`, { exitCode: 2 });
           }
           await driveStepped(command, async () => {
-            const { sendStep, stepAddress } = await import('./step-control.ts');
+            const { sendStep } = await import('./step-control.ts');
             return sendStep(stepAddress(process.cwd()), stepAction);
           });
           return;
@@ -816,7 +817,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
         const serveLog = options.step === true ? options.stepServe : undefined;
         if (options.step === true && serveLog === undefined && !hasTerminal()) {
           await driveStepped(command, async () => {
-            const { startStepped, stepAddress } = await import('./step-control.ts');
+            const { startStepped } = await import('./step-control.ts');
             return startStepped(stepAddress(process.cwd()), process.argv.slice(2));
           });
           return;
@@ -849,7 +850,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
           await runToOutcome(telemetry, command, async (signals) => {
             const base = { ...runOptions, interruptSignal: signals.interruptSignal, forceSignal: signals.forceSignal, processOutput: output };
             if (serveLog !== undefined) {
-              const { serveSteps, stepAddress } = await import('./step-control.ts');
+              const { serveSteps } = await import('./step-control.ts');
               return serveSteps(base, signals, { ...stepAddress(process.cwd()), log: serveLog });
             }
             return options.step === true ? stepped(base, signals) : run(base);

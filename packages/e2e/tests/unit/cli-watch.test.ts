@@ -1,7 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { PassThrough } from 'node:stream';
 import picocolors from 'picocolors';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { compileGlobList } from '@e2e-dev/core/lib/internal/globs';
@@ -24,6 +23,7 @@ import {
   type WatchFn,
   type WatchScope,
 } from '../../src/cli/watch.ts';
+import { fakeStdin } from '../helpers/fake-stdin.ts';
 
 const CANCEL = Symbol('cancel');
 const textMock = vi.hoisted(() => vi.fn());
@@ -37,12 +37,6 @@ function fakeWatch(listeners: Map<string, (event: string, filename: string | nul
     listeners.set(dir, listener);
     return { close: () => closed.push(dir), on: () => undefined };
   };
-}
-
-/** A stdin stand-in: keys arrive as writes, raw mode is recorded. */
-function fakeStdin(): NodeJS.ReadStream & { setRawMode: ReturnType<typeof vi.fn> } {
-  const setRawMode = vi.fn();
-  return Object.assign(new PassThrough(), { setRawMode }) as unknown as NodeJS.ReadStream & { setRawMode: typeof setRawMode };
 }
 
 describe('planRun', () => {

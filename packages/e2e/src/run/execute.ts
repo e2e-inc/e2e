@@ -44,7 +44,7 @@ import { interruptedInPhase, interruptedSkip, pairKey, unitResult, unstartedResu
 import { carriedSecrets, processSecrets, redactForSession, sessionLedger, staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
 import { SessionStaging } from '@e2e-dev/core/lib/run/sessions';
 import { isOwnStep, StepRecorder, type StepHoldRequest, type StepProgress } from '@e2e-dev/core/lib/run/steps';
-import { holdAttemptSteps, readHeldScreen, type AttemptHolds, type HeldStep } from './step-hold.ts';
+import { holdAttemptSteps, readHeldScreen, type AttemptHolds, type HeldStep, type StepHoldContext } from './step-hold.ts';
 import { WorkerModels } from '@e2e-dev/core/lib/run/worker-models';
 import { classifyAttemptStatus, EngineSessions, type EngineSessionsOptions } from '@e2e-dev/core/lib/run/engine-sessions';
 import type { EngineDisposeContext } from '@e2e-dev/core/lib/engine/index';
@@ -85,6 +85,20 @@ export interface ExecutionEvents {
   onRunAbort?(error: RunError): void;
 }
 
+/** Options for holding an attempt at steps. */
+type ExecutorHold = {
+  /**
+   * Asks the runner before each step when `steps` is set. The runner can
+   * call `readScreen` to read the screen during the wait.
+   */
+  readonly ask: (step: HeldStep, signal: AbortSignal, readScreen: StepHoldContext['readScreen']) => Promise<void>;
+  /**
+   * Set `steps` to wait at `ask` before each top-level step of a test's
+   * first attempt (`e2e run --step`). Setup tests and retries aren't held.
+   */
+  readonly steps: boolean;
+};
+
 export interface TargetExecutorOptions extends EngineSessionsOptions {
   readonly artifactsRoot: string;
   /**
@@ -101,14 +115,8 @@ export interface TargetExecutorOptions extends EngineSessionsOptions {
    * interrupt waits for it to reach a harness call or its timeout.
    */
   readonly isolated: boolean;
-  /**
-   * Holds each top-level step of a test's first attempt until the runner
-   * lets it run (`e2e run --step`); it resolves to run the step. Setup tests
-   * and retries never wait.
-   */
-  readonly holdStep?: ((step: HeldStep, signal: AbortSignal) => Promise<void>) | undefined;
-  /** Whether each hold reads the screen it starts on into `HeldStep.screen`. */
-  readonly heldScreens?: boolean | undefined;
+  /** Set `hold` to wait at held steps. Without it, steps aren't held. */
+  readonly hold?: ExecutorHold | undefined;
   /** Awaited before each pair starts, before the interrupt check. */
   readonly beforePair?: (() => Promise<void>) | undefined;
   readonly events?: ExecutionEvents;
@@ -473,9 +481,16 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
     const redact = (text: string): string => redactForSession(openSession ?? undefined, this.config.allSecrets, text);
     // Set once the test clock exists, before the first step that could wait.
     let holds: AttemptHolds | undefined;
-    const holdStep = context.kind === 'setup' || attemptIndex > 0 ? undefined : this.options.holdStep;
+    const hold = context.kind === 'setup' || attemptIndex > 0 ? undefined : this.options.hold;
     const steps = new StepRecorder(attemptId, {
-      ...(holdStep === undefined ? {} : { hold: (step: StepHoldRequest, signal: AbortSignal) => holds?.hold(step, signal) ?? Promise.resolve() }),
+      ...(hold === undefined
+        ? {}
+        : {
+            hold: {
+              ask: (request: StepHoldRequest, signal: AbortSignal) => holds?.hold(request, signal) ?? Promise.resolve(),
+              steps: hold.steps,
+            },
+          }),
       attempt: { id: shared?.attemptId ?? attemptId, index: attemptIndex },
       maxEventsPerStep: this.config.limits.maxEventsPerStep,
       projectRoot: this.config.projectRoot,
@@ -664,16 +679,14 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       const testDeadline = new Deadline(pair.options.timeout);
       this.options.events?.onAttemptDeadline?.(pair, { index: attemptIndex, id: attemptId, startedAt });
       const budget = new AttemptBudget(attemptAbort.signal, testDeadline);
-      if (holdStep !== undefined) {
+      if (hold !== undefined) {
         const screens = { ledger: sessionLedger(session, this.config.allSecrets), maxBytes: this.config.limits.maxObservationBytes, appOrigin: this.target.app.base?.origin };
         holds = holdAttemptSteps({
           budget,
           signal: attemptAbort.signal,
           attempt: { target: this.target.name, testId: pair.test.id, agent: pair.agent, repeat: pair.repeat, title: pair.test.titlePath.join(' › ') },
-          holdStep,
-          ...(this.options.heldScreens === true
-            ? { readScreen: (signal: AbortSignal) => readHeldScreen(session, this.op(attemptId, this.config.actionTimeout, signal), screens) }
-            : {}),
+          ask: hold.ask,
+          readScreen: (signal: AbortSignal) => readHeldScreen(session, this.op(attemptId, this.config.actionTimeout, signal), screens),
           // The runner's watchdog keeps the test deadline too; it gets what is left.
           onResume: (remainingMs) => this.options.events?.onAttemptDeadline?.(pair, { index: attemptIndex, id: attemptId, startedAt, remainingMs }),
         });

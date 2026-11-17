@@ -348,7 +348,8 @@ describe('e2e run argument parsing', () => {
       await invoke('run', '--step');
       const options = lastRunOptions();
       expect(options.workers).toBe(1);
-      expect(options.beforeStep).toBeTypeOf('function');
+      expect(options.hold?.ask).toBeTypeOf('function');
+      expect(options.hold?.steps).toBe(true);
     } finally {
       process.stdin.isTTY = tty.stdin;
       process.stdout.isTTY = tty.stdout;

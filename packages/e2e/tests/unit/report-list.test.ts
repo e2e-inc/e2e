@@ -9,6 +9,7 @@ import { ListReporter } from '../../src/report/list.ts';
 import { userFrame } from '../../src/report/code-frame.ts';
 import type { CacheWrite } from '@e2e-dev/core/lib/cache/context';
 import type { RunEventFact, RunEventOf, RunEventResult } from '../../src/run/events.ts';
+import type { HeldStep, NumberedStep } from '../../src/run/step-hold.ts';
 import type { ResultStatus, AttemptRecord, SerialGroupRecord, SerialMemberRecord } from '@e2e-dev/core/lib/run/records';
 
 // eslint-disable-next-line no-control-regex
@@ -1297,7 +1298,7 @@ describe('ListReporter', () => {
         const step = (progress: object) => reporter.handle({ type: 'step', testId: 't1', agent: 'default', repeat: 0, target: 'chromium', progress } as never);
         step({ phase: 'start', kind: 'locator', api: 'app.open', label: '/' });
         step({ phase: 'end', kind: 'locator', api: 'app.open', label: '/', status: 'passed', durationMs: 85, modelCalls: 0 });
-        const held = { target: 'chromium', testId: 't1', agent: 'default', repeat: 0, title: 'orders a drink', api: 'locator.click', label: 'getByRole("radio", name: "Latte")', source: { file: 'tests/coffee.e2e.ts', line: 7, column: 3 } };
+        const held: HeldStep = { kind: 'step', target: 'chromium', testId: 't1', agent: 'default', repeat: 0, title: 'orders a drink', api: 'locator.click', label: 'getByRole("radio", name: "Latte")', source: { file: 'tests/coffee.e2e.ts', line: 7, column: 3 } };
         const shown = () => {
           const window = chunks.at(-1)!.replace(ANSI_PATTERN, '').split('\n').filter((line) => line.trim() !== '');
           const row = window.findIndex((line) => line.includes('orders a drink'));
@@ -1341,7 +1342,7 @@ describe('ListReporter', () => {
         reporter.handle(runStarted());
         reporter.handle(plan([{ file: 'tests/coffee.e2e.ts', tests: 1 }]));
         reporter.handle(testStarted('t1', 'orders a drink', 'chromium', 'tests/coffee.e2e.ts'));
-        const held = (n: number) => ({ step: { target: 'chromium', testId: 't1', agent: 'default', repeat: 0, title: 'orders a drink', api: 'locator.click', label: `button ${n}` }, number: n });
+        const held = (n: number): NumberedStep => ({ step: { kind: 'step', target: 'chromium', testId: 't1', agent: 'default', repeat: 0, title: 'orders a drink', api: 'locator.click', label: `button ${n}` }, number: n });
         reporter.showStepPrompt({ steps: [held(2), held(3), held(4), held(5), held(6), held(7), held(8), held(9)], help: false });
         const window = chunks.at(-1)!.replace(ANSI_PATTERN, '');
         expect(window).toContain('press enter to run these 8 steps');
@@ -1355,7 +1356,7 @@ describe('ListReporter', () => {
     it('prints the --step prompt as one line without a live window', () => {
       const lines: string[] = [];
       const reporter = new ListReporter({ write: (line) => lines.push(line) }, { live: false, colors: false, stepping: true });
-      const held = { target: 'chromium', testId: 't1', agent: 'default', repeat: 0, title: 'orders a drink', api: 'app.open', label: '/cart' };
+      const held: HeldStep = { kind: 'step', target: 'chromium', testId: 't1', agent: 'default', repeat: 0, title: 'orders a drink', api: 'app.open', label: '/cart' };
       reporter.showStepPrompt({ steps: [{ step: held, number: 3 }], help: false });
       // `h` adds nothing to a plain line, so it prints nothing.
       reporter.showStepPrompt({ steps: [{ step: held, number: 3 }], help: true });
