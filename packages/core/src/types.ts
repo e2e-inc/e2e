@@ -1380,6 +1380,22 @@ export interface CommandConfig {
 export type AppPermissionState = 'grant' | 'deny' | 'reset';
 
 /**
+ * One value in the object form of `launchArguments`. On iOS
+ * `{ AppleLocale: 'fr_FR' }` is `-AppleLocale fr_FR`, `{ e2e: true }` is
+ * `-e2e YES`, and `{ AppleLanguages: ['fr', 'de'] }` is
+ * `-AppleLanguages (fr, de)`. On Android `{ e2e: true }` is `--es e2e true`
+ * and a list is `--esa tags a,b`.
+ */
+export type LaunchArgumentValue = string | number | boolean | readonly string[];
+
+/**
+ * A target's launch arguments: a list of strings, the arguments themselves
+ * (`['-e2e', 'YES']`), or an object of argument name to value
+ * (`{ AppleLanguages: ['fr'], AppleLocale: 'fr_FR' }`).
+ */
+export type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue>>;
+
+/**
  * The app one target tests, declared on the target and nowhere else: engines
  * only drive it. Every field also accepts `undefined`, so values read straight
  * from `process.env` need no conditional spread. A browser target names the
@@ -1441,7 +1457,7 @@ export interface TargetApp {
    * select a build mode change what the app is: give each mode its own
    * `identity` so their recordings stay apart.
    */
-  launchArguments?: readonly string[] | undefined;
+  launchArguments?: LaunchArguments | undefined;
   /**
    * Permissions the app holds, by name. A device app has each granted,
    * denied, or reset before every fresh launch. A browser target takes

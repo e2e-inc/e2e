@@ -359,7 +359,7 @@ targets: [
 | [`linkBase`](#linkbase) | `string` | - |
 | [`identity`](#identity) | `string` | derived from the app |
 | [`environment`](#environment) | `'test' \| 'staging' \| 'production'` | `'test'` or `'production'` |
-| [`launchArguments`](#launcharguments) | `string[]` | - |
+| [`launchArguments`](#launcharguments) | `string[] \| Record<string, LaunchArgumentValue>` | - |
 | [`permissions`](#permissions) | `Record<string, AppPermissionState>` | - |
 | [`command`](#command) | `CommandConfig` | - |
 | [`readyUrl`](#readyurl) | `string` | `url` |
@@ -480,14 +480,26 @@ environment: 'staging', // default: 'test' for a local host or no URL, else 'pro
 #### `launchArguments`
 
 Arguments every fresh launch passes the app: `app.open()`, `app.restart()`,
-and `app.clearState()`.
+and `app.clearState()`. Give a list of strings, the arguments themselves, or
+an object of argument name to value. On iOS an entry becomes `-name value`.
+On Android it becomes `--es name value`.
 
 ```ts
 launchArguments: ['-e2e', 'YES'],
+launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', e2e: true },
 ```
 
-Arguments that select a build mode change what the app is: give each mode its
-own `identity`.
+- An object value is a string, a number, a boolean, or a list of strings
+  (`LaunchArgumentValue`). A name has no whitespace.
+- The table under
+  [Launch arguments and permissions](/reference/mobile#launch-arguments-and-permissions)
+  shows each value type on each platform.
+- Arguments that select a build mode change what the app is. Give each mode
+  its own `identity`.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_CONFIG` | A list item that is not a string. An object with an empty name, a name with whitespace, or a value of another kind. |
 
 #### `permissions`
 

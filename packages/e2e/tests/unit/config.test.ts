@@ -507,7 +507,9 @@ describe('resolveConfig', () => {
     expect(() => resolveApp({ url: 5 } as never)).toThrow('target "web" app.url must be a non-empty string');
     expect(() => resolveApp({ bundleId: '' })).toThrow('app.bundleId must be a non-empty string');
     expect(() => resolveApp({ appPath: ' ' })).toThrow('app.appPath must be a non-empty string');
-    expect(() => resolveApp({ launchArguments: ['-a', 1] } as never)).toThrow('app.launchArguments must be an array of strings');
+    expect(() => resolveApp({ launchArguments: ['-a', 1] } as never)).toThrow(
+      'app.launchArguments must be an array of strings or an object of argument name to string, number, boolean, or array of strings; item 1 is a number',
+    );
     expect(() => resolveApp({ permissions: { camera: 'allow' } } as never)).toThrow(
       'app.permissions.camera must be grant, deny, or reset, got "allow"',
     );
@@ -522,6 +524,35 @@ describe('resolveConfig', () => {
       launchArguments: ['-e2e'],
       permissions: { camera: 'grant' },
     });
+  });
+
+  it('takes launch arguments as an object of name to string, number, boolean, or list of strings', () => {
+    // A value read from the environment may be undefined: that is the entry left out.
+    const launchArguments = { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', e2e: true, retries: 3, skipOnboarding: undefined } as never;
+    expect(resolveApp({ bundleId: 'dev.shop.app', launchArguments }).launchArguments).toEqual({
+      AppleLanguages: ['fr'],
+      AppleLocale: 'fr_FR',
+      e2e: true,
+      retries: 3,
+    });
+    expect(resolveApp({ bundleId: 'dev.shop.app', launchArguments: {} }).launchArguments).toEqual({});
+    expect(resolveApp({ bundleId: 'dev.shop.app', launchArguments: Object.assign(Object.create(null), { e2e: true }) }).launchArguments).toEqual({ e2e: true });
+
+    const shape = 'target "web" app.launchArguments must be an array of strings or an object of argument name to string, number, boolean, or array of strings';
+    expect(() => resolveApp({ launchArguments: 'fr_FR' } as never)).toThrow(`${shape}, got a string`);
+    expect(() => resolveApp({ launchArguments: null } as never)).toThrow(`${shape}, got null`);
+    expect(() => resolveApp({ launchArguments: new Map([['AppleLocale', 'fr_FR']]) } as never)).toThrow(`${shape}, got a Map`);
+    expect(() => resolveApp({ launchArguments: { '': 'x' } })).toThrow('target "web" app.launchArguments has an empty argument name');
+    expect(() => resolveApp({ launchArguments: { 'Apple Locale': 'fr_FR' } })).toThrow(
+      'target "web" app.launchArguments argument name "Apple Locale" must have no whitespace',
+    );
+
+    const value = (name: string) => `target "web" app.launchArguments.${name} must be a string, number, boolean, or array of strings, got`;
+    expect(() => resolveApp({ launchArguments: { locale: { language: 'fr' } } } as never)).toThrow(`${value('locale')} an object`);
+    expect(() => resolveApp({ launchArguments: { languages: ['fr', 1] } } as never)).toThrow(`${value('languages')} an array`);
+    expect(() => resolveApp({ launchArguments: { retries: Number.NaN } })).toThrow(`${value('retries')} NaN`);
+    expect(() => resolveApp({ launchArguments: { retries: null } } as never)).toThrow(`${value('retries')} null`);
+    expect(() => resolveApp({ launchArguments: { when: new Date(0) } } as never)).toThrow(`${value('when')} a Date`);
   });
 
   it("hands the declaration to the engine's validateApp, which names the target", () => {

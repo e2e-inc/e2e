@@ -48,7 +48,7 @@ For a migration that spans several sessions, the [`migrate-to-e2e` skill](/codin
 | `appium:deviceName`, `appium:udid` | `mobile({ device: 'iPhone 17' })`: a name, a simulator UDID, or an `emulator-5554` serial. A phone goes by its name |
 | `appium:app` | `app: { appPath }`. Install the build yourself, see [Point at your app](/mobile#point-at-your-app) |
 | `appium:bundleId`, `appium:appPackage` | `app: { bundleId }`, the app `app.open()` launches |
-| `appium:processArguments`, `appium:optionalIntentArguments` | `app.launchArguments`, a list of strings |
+| `appium:processArguments`, `appium:optionalIntentArguments` | `app.launchArguments`, a list of strings or an object of argument name to value |
 | `appium:permissions` | `app.permissions: { camera: 'grant' }`. Each [`DevicePermission`](/reference/mobile#device-fixture) name takes `grant`, `deny`, or `reset` |
 | `appium:noReset` | `true` is the default, so nothing clears the app's data. For `false`, call `app.clearState()` at the start of the test |
 | `appium:fullReset` | `device.installApp(path, { reinstall: true })` |
