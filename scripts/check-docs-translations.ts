@@ -31,7 +31,7 @@ import { pages } from './docs-pages.ts';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DOCS = join(ROOT, 'docs');
 /** The languages the docs are translated into, each a folder under `docs/`. */
-const LANGUAGES = ['ja'];
+const LANGUAGES = ['ja', 'zh'];
 // MDX components can contain fences indented beyond CommonMark's three spaces.
 const FENCE = /^ *(`{3,}|~{3,})/;
 const HEADING = /^ {0,3}(#{1,4})\s+\S/;

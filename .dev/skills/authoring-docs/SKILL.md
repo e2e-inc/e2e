@@ -442,21 +442,24 @@ Each group opens with one table, one row per entry. Keep it to the minimum:
 
 ## Translations
 
-`docs/ja/<path>.mdx` is the Japanese page for `docs/<path>.mdx`;
-[`docs/ja/README.md`](../../../docs/ja/README.md) has the rules, style, and
+`docs/<language>/<path>.mdx` translates `docs/<path>.mdx`: `docs/ja/` is
+Japanese, `docs/zh/` Simplified Chinese. Each language's README
+([`docs/ja/README.md`](../../../docs/ja/README.md),
+[`docs/zh/README.md`](../../../docs/zh/README.md)) has its rules, style, and
 glossary. The site gives a translated page the English page's heading, tab,
 and accordion ids by position, so a translation must keep the English
 outline, and `pnpm docs:check` (`scripts/check-docs-translations.ts`) fails
 when it does not.
 
-- Editing prose on an English page needs no Japanese change; the
+- Editing prose on an English page needs no translated change; the
   translation is stale until someone updates it, and the site still serves it.
 - Adding, removing, or reordering a heading, `<Tab>`, `<Accordion>`, or `id`
-  needs the same change in `docs/ja/`. An English placeholder heading is fine.
+  needs the same change in every language folder. An English placeholder
+  heading is fine.
 - A new English page needs nothing: the site shows it in English under
-  `/docs/ja/` until a translation exists.
-- A new tab or group in `docs.json` needs its label in
-  `docs/ja/navigation.json`.
+  `/docs/<language>/` until a translation exists.
+- A new tab or group in `docs.json` needs its label in every
+  `docs/<language>/navigation.json`.
 
 ## Before you commit
 
@@ -489,5 +492,5 @@ when it does not.
       ([Vendor logos](#vendor-logos)) and a card on its section's
       overview.
 - [ ] Links and anchors resolve. Moved pages have redirects.
-- [ ] A changed outline is mirrored in `docs/ja/` ([Translations](#translations)).
+- [ ] A changed outline is mirrored in `docs/ja/` and `docs/zh/` ([Translations](#translations)).
 - [ ] `pnpm docs:check` passes.
