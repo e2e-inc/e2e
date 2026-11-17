@@ -56,7 +56,7 @@ describe('assertLaunchArgumentsFor', () => {
   const label = 'target "pixel" app.launchArguments';
 
   it("refuses Apple's arguments in an object on Android, and nothing else", () => {
-    for (const name of ['AppleLanguages', 'AppleLocale', 'AppleTextDirection', 'NSDoubleLocalizedStrings']) {
+    for (const name of ['AppleLanguages', 'AppleLocale', 'AppleKeyboards', 'AppleFirstWeekday', 'AppleTextDirection', 'NSDoubleLocalizedStrings']) {
       expect(() => assertLaunchArgumentsFor('android', label, { [name]: 'x' })).toThrowError(
         expect.objectContaining({ code: 'INVALID_CONFIG', message: expect.stringContaining(`${label}.${name} is an iOS launch argument`) }),
       );

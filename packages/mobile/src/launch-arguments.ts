@@ -9,10 +9,15 @@ import type { MobilePlatform } from './options.ts';
 
 type Code = 'INVALID_CONFIG' | 'INVALID_ARGUMENT';
 
-/** Apple's user-defaults arguments. Android reads none of them. */
+/** The Apple user-defaults arguments a suite is likely to set; Android reads none of them. A name not listed here passes. */
 const IOS_ONLY_ARGUMENTS: ReadonlySet<string> = new Set([
   'AppleLanguages',
   'AppleLocale',
+  'AppleKeyboards',
+  'AppleMeasurementUnits',
+  'AppleMetricUnits',
+  'AppleTemperatureUnit',
+  'AppleFirstWeekday',
   'AppleTextDirection',
   'AppleICUForce24HourTime',
   'AppleICUForce12HourTime',
