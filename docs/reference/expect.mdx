@@ -72,6 +72,7 @@ holds or its timeout passes, under the rules in [Behavior](#behavior):
 | [`toHaveAttribute`](#tohaveattribute) | Waits for an attribute |
 | [`toHaveCount`](#tohavecount) | Waits for an exact match count |
 | [`toHaveAccessibleName`](#tohaveaccessiblename) | Waits for an accessible name |
+| [`toHaveRole`](#tohaverole) | Waits for a role |
 | [`toHaveScreenshot`](#screenshot-matchers) | Compares with a stored screenshot |
 
 #### `toBeVisible` and `toBeHidden`
@@ -209,6 +210,26 @@ Waits for an accessible name.
 ```ts
 await expect(screen.getByRole('button', { name: /close/i })).toHaveAccessibleName('Close');
 ```
+
+#### `toHaveRole`
+
+Waits for the one match to have the role, compared as a string.
+
+```ts
+await expect(screen.getByTestId('save')).toHaveRole('button');
+await expect(screen.getByTestId('wifi')).not.toHaveRole('checkbox');
+```
+
+- `role` takes the vocabulary [`getByRole`](/reference/screen#getbyrole)
+  takes. Its alias `img` reads as `image`. From JavaScript, any other string
+  is compared as written, and an empty one is `INVALID_ARGUMENT`.
+- It compares the role [`screen.tree()`](/reference/screen#screen-tree)
+  shows, so the role hierarchy does not count: a `switch` is not a
+  `checkbox`.
+- On the web, an editing host (`contenteditable`) reads as `textbox`
+  whatever its tag, though `getByRole` finds it by its tag's role.
+- A node the tree shows without a role, such as a `<div>` of text, fails it,
+  and the failure message reads `no role`.
 
 ### Screenshot matchers
 
@@ -683,6 +704,7 @@ Rules that apply across the matcher groups.
 | --- | --- |
 | Default timeout | [`config.assertionTimeout`](/reference/config#assertiontimeout) |
 | Override | `{ timeout }` in milliseconds, on every locator and `browser` matcher |
+| Reads | At 0, 20, and 50 ms, then every 100 ms from the start |
 | Unknown option | `INVALID_ARGUMENT`; see [Option validation](#option-validation) |
 | Failure code | `ASSERTION_FAILED`, exit code 1 |
 
@@ -736,7 +758,7 @@ withholds its value and text.
 | --- | --- |
 | `toHaveValue`, `toHaveText`, `toContainText` | `POLICY_DENIED`, like `inputValue()` and `textContent()`, negated or in list form too |
 | `toHaveAttribute` | `POLICY_DENIED`, like `getAttribute()`, for every attribute name and negated too |
-| `toHaveAccessibleName` and the state matchers | Answer as usual |
+| `toHaveAccessibleName`, `toHaveRole`, and the state matchers | Answer as usual |
 
 Reading the withheld value as `''` would pass a filled password field as
 cleared, and reading the withheld `value` attribute as absent would pass
@@ -837,6 +859,8 @@ export interface AsyncExpectation {
   toHaveCount(expected: number, options?: { timeout?: number }): Promise<void>;
   /** Waits for an accessible name. */
   toHaveAccessibleName(expected: TextMatch, options?: TextMatcherOptions): Promise<void>;
+  /** Waits for the role; `img` is read as `image`, as `getByRole` reads it. */
+  toHaveRole(role: Role | RoleAlias, options?: { timeout?: number }): Promise<void>;
   /** Waits for the one match to look like its stored screenshot; see [Screenshot matchers](#screenshot-matchers). */
   toHaveScreenshot(name: string, options?: ScreenshotOptions): Promise<void>;
   toHaveScreenshot(options?: ScreenshotOptions): Promise<void>;

@@ -3,7 +3,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/e2e"><img alt="npm version" src="https://img.shields.io/npm/v/e2e.svg?style=for-the-badge&labelColor=000000" /></a>
   <a href="./LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-green.svg?style=for-the-badge&labelColor=000000" /></a>
-  <a href="https://tester.army/discord"><img alt="Join the community on Discord" src="https://img.shields.io/badge/Join%20the%20community-5865F2.svg?style=for-the-badge&logo=discord&logoColor=white&labelColor=000000" /></a>
+  <a href="https://e2e.com/discord"><img alt="Join the community on Discord" src="https://img.shields.io/badge/Join%20the%20community-5865F2.svg?style=for-the-badge&logo=discord&logoColor=white&labelColor=000000" /></a>
 </p>
 
 <p align="center">
@@ -67,6 +67,7 @@ Flutter, and .NET MAUI, each a standalone project with a passing suite.
 | [`@e2e-dev/browser-run`](https://www.npmjs.com/package/@e2e-dev/browser-run) | Cloudflare Browser Run hosted Chromium for the web engine. |
 | [`@e2e-dev/kernel`](https://www.npmjs.com/package/@e2e-dev/kernel) | Kernel hosted browsers for the web engine. |
 | [`@e2e-dev/lightpanda`](https://www.npmjs.com/package/@e2e-dev/lightpanda) | Lightpanda, the open-source headless browser, started per run for the web engine. |
+| [`@e2e-dev/moli`](https://www.npmjs.com/package/@e2e-dev/moli) | Local Moli browsers with on-demand layout and screenshots, started per worker slot for the web engine. |
 | [`@e2e-dev/smol`](https://www.npmjs.com/package/@e2e-dev/smol) | smol machines browsers for the web engine: by default, each attempt branches a warm Chromium microVM. |
 | [`@e2e-dev/testmu`](https://www.npmjs.com/package/@e2e-dev/testmu) | TestMu AI (formerly LambdaTest) hosted Android emulators, iOS simulators, and real devices for the mobile engine, and hosted Chrome and Edge for the web engine. |
 | [`@e2e-dev/e2b`](https://www.npmjs.com/package/@e2e-dev/e2b) | E2B sandboxes: Android 16 for the mobile engine, and Chromium for the web engine. |
@@ -90,7 +91,7 @@ every page, so coding agents can read them offline in `node_modules/e2e/docs`.
 Join us in changing how software gets tested.
 [We are hiring.](https://e2e.com/careers?utm_source=e2e&utm_medium=github&utm_campaign=readme_hiring)
 
-Questions? Ask on [Discord](https://tester.army/discord). Issues are for bugs
+Questions? Ask on [Discord](https://e2e.com/discord). Issues are for bugs
 and feature requests.
 
 Want to hack on e2e? See [Contributing](./CONTRIBUTING.md). We prefer an issue

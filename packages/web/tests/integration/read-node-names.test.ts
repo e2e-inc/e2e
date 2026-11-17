@@ -2,7 +2,7 @@
 
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { SemanticNode } from 'e2e/engine';
+import type { SemanticNode } from '@e2e-dev/core/engine';
 import { CLOSED_SHADOW_ROOTS_INIT_SCRIPT } from '../../src/closed-shadow.ts';
 import { captureDocument } from '../../src/observation.ts';
 import { readSemanticsFunction } from '../../src/in-page/read-semantics.ts';
@@ -356,6 +356,46 @@ describe('names from content and precedence', () => {
     for (const [testId, name] of cases) {
       expect(byTestId.get(testId), testId).toMatchObject({ role: 'button', name });
       expect(await locatedTestId('button', name), name).toBe(testId);
+    }
+  });
+
+  it('reads a descendant\'s content only when its role is named from content or is text or structure', async () => {
+    await page.setContent(`
+      <ul role="tree" aria-label="Files">
+        <li role="treeitem" aria-expanded="true" data-testid="parent"><span>src</span>
+          <ul role="group">
+            <li role="treeitem" aria-expanded="true" data-testid="nested"><span>lib</span><ul role="group"><li role="treeitem">a.ts</li></ul></li>
+          </ul>
+        </li>
+      </ul>
+      <div role="tablist"><button role="tab" aria-selected="true" data-testid="badge">Inbox <span role="status">3</span></button></div>
+      <button data-testid="emoji"><span role="img">*</span> Party</button>
+      <a href="#" data-testid="figure"><figure><img src="${PIXEL}" alt="Cat"><figcaption>A cat</figcaption></figure></a>
+      <a href="#" title="Open story" data-testid="article"><article>Story</article></a>
+      <a href="#" title="Quote" data-testid="blockquote"><blockquote>Quote text</blockquote></a>
+      <a href="#" data-testid="address"><address>1 Main St</address></a>
+      <h2 data-testid="note">Title <span role="note" title="Aside">Note text</span></h2>
+      <a href="#" data-testid="structure"><p>Read <strong>more</strong></p><ul><li>about it</li></ul></a>
+      <button aria-labelledby="reference" data-testid="reference">x</button><span id="reference">Sent <span role="status">4</span></span>
+    `);
+    const { tree } = await capture();
+    const byTestId = new Map(flatten(tree).map((node) => [node.testId, node]));
+    const cases: readonly [testId: string, role: string, name: string][] = [
+      ['parent', 'treeitem', 'src'],
+      ['nested', 'treeitem', 'lib'],
+      ['badge', 'tab', 'Inbox'],
+      ['emoji', 'button', 'Party'],
+      ['figure', 'link', 'A cat'],
+      ['article', 'link', 'Open story'],
+      ['blockquote', 'link', 'Quote'],
+      ['address', 'link', '1 Main St'],
+      ['note', 'heading', 'Title Aside'],
+      ['structure', 'link', 'Read more about it'],
+      ['reference', 'button', 'Sent 4'],
+    ];
+    for (const [testId, role, name] of cases) {
+      expect(byTestId.get(testId), testId).toMatchObject({ role, name });
+      expect(await locatedTestId(role, name), name).toBe(testId);
     }
   });
 

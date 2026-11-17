@@ -45,7 +45,7 @@ import {
   type ViewportSize,
   ConfigurationError,
   TestError,
-} from 'e2e/engine';
+} from '@e2e-dev/core/engine';
 import { isAppNotRunning, isSnapshotPresentationFailure, isUnreadableCapture, runCommand, staleOr } from './errors.ts';
 import { pointerInteraction, DEFAULT_LONG_PRESS_MS } from './actions.ts';
 import { resolveExpression } from './locate.ts';
@@ -351,6 +351,9 @@ const MOBILE_OPTION_KEYS: readonly string[] = Object.keys({
   videoTouches: true,
 } satisfies Record<keyof MobileOptions, true>);
 
+/** Every `snapshot` value, kept equal to `MobileOptions['snapshot']` by the compiler. */
+const SNAPSHOT_MODES: readonly string[] = Object.keys({ full: true, interactive: true } satisfies Record<NonNullable<MobileOptions['snapshot']>, true>);
+
 /** Every state a permission takes, kept equal to `PermissionState` by the compiler. */
 const PERMISSION_STATES: readonly string[] = Object.keys({ grant: true, deny: true, reset: true } satisfies Record<PermissionState, true>);
 
@@ -425,6 +428,28 @@ function settleOptions(settle: MobileOptions['settle']): SettleOptions {
   return { settle: true, settleQuietMs: quietMs };
 }
 
+/**
+ * Resolves the `snapshot` option to whether captures keep interactive nodes
+ * only; `'Interactive'` used to capture the full tree as if unset.
+ */
+function interactiveSnapshots(snapshot: MobileOptions['snapshot']): boolean {
+  if (snapshot !== undefined && !SNAPSHOT_MODES.includes(snapshot)) {
+    throw new ConfigurationError('INVALID_CONFIG', `mobile: \`snapshot\` must be ${SNAPSHOT_MODES.map((mode) => `'${mode}'`).join(' or ')}, got ${JSON.stringify(snapshot)}`);
+  }
+  return snapshot === 'interactive';
+}
+
+/**
+ * Resolves the `videoTouches` option to whether recordings hide the touch
+ * overlay; `'false'` used to draw the touches as if unset.
+ */
+function hideTouches(videoTouches: MobileOptions['videoTouches']): boolean {
+  if (videoTouches !== undefined && typeof videoTouches !== 'boolean') {
+    throw new ConfigurationError('INVALID_CONFIG', `mobile: \`videoTouches\` must be true or false, got ${JSON.stringify(videoTouches)}`);
+  }
+  return videoTouches === false;
+}
+
 /** Calls one of the harness's trace hooks; a hook that throws, or one an older harness lacks, never fails the device's work. */
 function tellHarness(call: () => void): void {
   try {
@@ -489,6 +514,10 @@ export class AgentDeviceSurface {
   private latestScreen: ProjectedScreen | undefined;
   /** Budget a control that came with the last action gets to finish arriving; see DEFAULT_TRANSITION_MS. */
   private readonly transitionMs: number;
+  /** Whether snapshots keep interactive nodes only, from the `snapshot` option. */
+  private readonly interactiveSnapshots: boolean;
+  /** Whether recordings hide the touch overlay, from the `videoTouches` option. */
+  private readonly hideTouches: boolean;
   /**
    * The screen's logical size as last learned from a snapshot with geometry
    * or from the device itself, so a snapshot without geometry (an empty
@@ -507,6 +536,8 @@ export class AgentDeviceSurface {
     this.pool = new DevicePool(options, createClient);
     this.settleOptions = settleOptions(options.settle);
     this.transitionMs = transitionMs(options.transition);
+    this.interactiveSnapshots = interactiveSnapshots(options.snapshot);
+    this.hideTouches = hideTouches(options.videoTouches);
   }
 
   /** Whether the target pins an app for `app.open()`, `app.restart()`, and `app.clearState()` to launch. */
@@ -709,7 +740,7 @@ export class AgentDeviceSurface {
           path: absolute,
           quality: 'medium',
           recordingScope: 'device',
-          ...(this.options.videoTouches === false ? { hideTouches: true } : {}),
+          ...(this.hideTouches ? { hideTouches: true } : {}),
         }),
       operation.signal,
     );
@@ -907,7 +938,7 @@ export class AgentDeviceSurface {
    * no identity, and the package that took the link as its bundle id when
    * the OS told it; the next snapshot names the foreground app either way.
    */
-  async openLink(url: URL, app: string | undefined, signal: AbortSignal): Promise<void> {
+  async openLink(url: URL, app: string | undefined, signal: AbortSignal, input?: InputBudget): Promise<void> {
     const target = app ?? this.pinnedApp;
     if (target === undefined && this.options.platform === 'ios') {
       throw new TestError(
@@ -917,11 +948,14 @@ export class AgentDeviceSurface {
     }
     const result = await this.command(
       'device.openLink',
-      (client) =>
-        client.apps.open({
+      (client) => {
+        const open = () => client.apps.open({
           ...this.selection(),
           ...(target === undefined ? { app: url.href } : { app: target, url: url.href }),
-        }),
+        });
+        // An `app.open(path)` is an input like a tap: past its budget the link may have opened, so it is never repeated.
+        return input === undefined ? open() : input.send(open);
+      },
       signal,
     );
     this.launched(result.appBundleId ?? (target === undefined ? undefined : (result.appName ?? target)));
@@ -1148,7 +1182,7 @@ export class AgentDeviceSurface {
   }
 
   async observe(operation: OperationContext, options: EngineObserveOptions | undefined, budget: InputBudget): Promise<EngineSnapshot> {
-    const raw = await this.snapshotOrEmpty(operation, this.options.snapshot === 'interactive', budget);
+    const raw = await this.snapshotOrEmpty(operation, this.interactiveSnapshots, budget);
     const projected = this.project(raw);
     this.generation = new Map(projected.index.map((entry) => [entry.id, this.bind(entry, projected)]));
     const viewport = await this.viewportFor(projected, operation.signal, budget);

@@ -12,14 +12,14 @@ import {
   type NodeRef,
   type SemanticNode,
   type OperationContext,
-} from '../../src/engine/surface.ts';
-import { LocatorEngine, isNodeVisible, translateLocatorError } from '../../src/locator/engine.ts';
-import { E2EError } from '../../src/internal/errors.ts';
-import { Deadline, sleep, withTimeout } from '../../src/internal/time.ts';
-import { AttemptBudget } from '../../src/run/budget.ts';
-import { defineEngine, LOCATOR_ACTION_KINDS } from '../../src/engine/index.ts';
-import { createEngineSession } from '../../src/engine/session.ts';
-import { describeExpression, filterExpression, indexExpression, roleQuery, testIdQuery, textQuery } from '../../src/locator/expression.ts';
+} from '@e2e-dev/core/lib/engine/surface';
+import { LocatorEngine, isNodeVisible, translateLocatorError } from '@e2e-dev/core/lib/locator/engine';
+import { E2EError } from '@e2e-dev/core/lib/internal/errors';
+import { Deadline, sleep, withTimeout } from '@e2e-dev/core/lib/internal/time';
+import { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
+import { defineEngine, LOCATOR_ACTION_KINDS } from '@e2e-dev/core/lib/engine/index';
+import { createEngineSession } from '@e2e-dev/core/lib/engine/session';
+import { describeExpression, filterExpression, indexExpression, roleQuery, testIdQuery, textQuery } from '@e2e-dev/core/lib/locator/expression';
 import { snapshot } from '../helpers/snapshot.ts';
 import { useFakeTime } from '../helpers/fake-time.ts';
 
@@ -154,6 +154,12 @@ describe('LocatorEngine read retry contract', () => {
     expect(calls).toMatchObject({ resolve: 3, read: 1 });
   });
 
+  it('reads zero matches again at 20 and 50 ms, then every poll tick from the start', async () => {
+    const { engine, resolveTimeouts } = makeEngine({ resolve: [() => [], () => [], () => [], () => [], () => [REF]] });
+    await engine.resolveExactlyOne(EXPRESSION, engine.deadline());
+    expect(resolveTimeouts).toEqual([1_000, 980, 950, 900, 800]);
+  });
+
   it('gives zero matches the action timeout, then LOCATOR_NOT_FOUND', async () => {
     const { engine, calls } = makeEngine(
       { resolve: Array.from({ length: 50 }, () => () => []) },
@@ -256,7 +262,8 @@ describe('LocatorEngine resolve retry contract', () => {
   it('gives each retry of a resolve what is left of its budget, not the whole budget again', async () => {
     const { engine, resolveTimeouts } = makeEngine({ resolve: ['stale', 'stale', () => [REF]] }, { actionTimeout: 1_000 });
     await engine.resolveNow(EXPRESSION, engine.reads(engine.deadline()));
-    expect(resolveTimeouts).toEqual([1_000, 900, 800]);
+    // Retries read at 20 and 50 ms.
+    expect(resolveTimeouts).toEqual([1_000, 980, 950]);
   });
 
   it('ends a frame wait the deadline cut off on the missing frame, as LOCATOR_NOT_FOUND', async () => {

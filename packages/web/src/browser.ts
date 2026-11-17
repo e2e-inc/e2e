@@ -13,7 +13,7 @@
  */
 
 import type { Download, Route } from 'playwright-core';
-import type { ActionOptions, Expectable, JsonValue, Locator, Screen, TextMatch } from 'e2e';
+import type { ActionOptions, Expectable, JsonValue, Locator, Screen, TextMatch } from '@e2e-dev/core';
 import {
   ConfigurationError,
   Deadline,
@@ -36,7 +36,7 @@ import {
   type LocatorExpression,
   type OperationContext,
   type TextPattern,
-} from 'e2e/engine';
+} from '@e2e-dev/core/engine';
 import { classifyInputError } from './actions.ts';
 import type { AttemptTab } from './attempt-session.ts';
 import type { DialogHandler } from './dialogs.ts';

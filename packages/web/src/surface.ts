@@ -33,6 +33,9 @@ import {
   type LocatorAction,
   type LocatorExpression,
   type NodeRef,
+  type ComputedStyleProperty,
+  type ComputedStyleValues,
+  validateComputedStyleProperties,
   type OperationContext,
   type PointerAction,
   type Secret,
@@ -40,8 +43,8 @@ import {
   type VideoSegment,
   type ViewportPoint,
   type ViewportSize,
-} from 'e2e/engine';
-import { matchesText } from 'e2e/engine';
+} from '@e2e-dev/core/engine';
+import { matchesText } from '@e2e-dev/core/engine';
 import { classifyActionError, classifyInputError, dispatchLocatorAction, dispatchPointerAction } from './actions.ts';
 import { BrowserConnection, connectCdp, type BrowserName } from './browser-connection.ts';
 import { AttemptSession, type AttemptTab, type StorageState } from './attempt-session.ts';
@@ -59,6 +62,7 @@ import { SHOWN_SELECTOR } from './shown-selector.ts';
 import { withHiddenCaret } from './screenshot-caret.ts';
 import { connectionAbort, withOperationDeadline, type OperationBound } from './operation-budget.ts';
 import { CLOSED_SHADOW_ROOTS_INIT_SCRIPT, CLOSED_SHADOW_ROOTS_KEY } from './closed-shadow.ts';
+import { MODAL_ORDER_INIT_SCRIPT } from './modal-dialogs.ts';
 import { ConfiguredInitScripts, type WebInitScript } from './init-scripts.ts';
 import type { WebMedia } from './media.ts';
 import { SECURE_FIELD_SELECTOR, type RawNodeData } from './read-node.ts';
@@ -549,6 +553,7 @@ export class PlaywrightSurface {
       },
       configure: async (target) => {
         await target.addInitScript(CLOSED_SHADOW_ROOTS_INIT_SCRIPT);
+        await target.addInitScript(MODAL_ORDER_INIT_SCRIPT);
         for (const script of initScripts) await target.addInitScript(script);
         target.setDefaultTimeout(CONTEXT_DEFAULT_TIMEOUT_MS);
         target.on('dialog', (dialog) => { void dialogs.dispatch(dialog); });
@@ -868,6 +873,26 @@ export class PlaywrightSurface {
       await session.replace(undefined, currentOperation);
       await session.ensurePage();
     });
+  }
+
+  /** Reads computed styles from the element an observation ref names, without input or actionability waits. */
+  async readStyle(ref: NodeRef, properties: readonly ComputedStyleProperty[], operation: OperationContext): Promise<ComputedStyleValues> {
+    const requested = validateComputedStyleProperties(properties);
+    return this.guard(operation, 'read computed style', async (currentOperation) => {
+      const target = await this.requireSession().refs.lookup(ref);
+      if (target.kind !== 'element') {
+        throw new EngineError('NODE_STALE', `node reference ${ref.id} is not from an observation`, { retryable: false });
+      }
+      currentOperation.signal.throwIfAborted();
+      const style = await target.element.evaluate((element, names) => {
+        const view = element.ownerDocument.defaultView;
+        if (!element.isConnected || view === null) return null;
+        const computed = view.getComputedStyle(element);
+        return Object.fromEntries(names.map((name) => [name, computed.getPropertyValue(name)]));
+      }, requested);
+      if (style === null) throw new EngineError('NODE_STALE', 'node is detached; observe again before reading', { retryable: true });
+      return style;
+    }, navigationStaleOr);
   }
 
   // --- location tier ---

@@ -58,7 +58,7 @@ npx e2e telemetry [disable|enable] # anonymous usage telemetry: status or switch
 | `-u`, `--update-snapshots` | Write the stored screenshots `toHaveScreenshot` finds missing or different, and pass. |
 | `-w`, `--watch` | Run, then run again when a test file, a source file beside the tests, or the config is saved, or a key asks: `a` or enter all, `r` the current filters, `f` failed, `u` update snapshots, `p` and `t` filter by file and title, `q` quit; a key during a run cancels it. Refused in CI and with `--reporter json`. |
 | `--pass-with-no-tests` | Exit 0, not `NO_TESTS`, when nothing matches; a run with nothing to run starts no engine or app. |
-| `--step` | Run the first step, then hold each later one until a key at its prompt: Enter runs it, `n` the rest of the test, `a` the rest of the run, `h` lists the keys, `q` stops (exit 130). For a person at a terminal, not an agent: refused in CI, with `--watch`, `--workers` above 1, and the json reporter. |
+| `--step` | Run the first step, then hold each later one until a key at its prompt: Enter runs it, `n` the rest of the test, `a` the rest of the run, `h` lists the keys, `q` stops (exit 130). Without a terminal (an agent's shell) the run goes on in the background and each command returns at the next held step with the screen it waits on: then `e2e run --step next` runs that step, `rest` the rest, `stop` ends the run; run them from the same directory. A shell with a terminal gets the key prompt instead: redirect stdin from the null device (`< /dev/null`, or `< NUL` in Windows `cmd`). Refused in CI, with `--watch`, `--workers` above 1, and the json reporter. |
 | `--debug` | Phase timings and an agent step table on stderr; transcripts as artifacts. |
 | `--ai-trace` | Every model call except a test filter's, to `<output>/ai-trace.json`. |
 | `--timings <file>` | The timings history to update, over `<output>/timings.json`. With more than one worker, files with no recorded time start first, then the rest longest first. |
@@ -224,6 +224,15 @@ CI mode is on when `CI` is set (not `0` or `false`): `retries` 1,
 `ONLY_IN_CI`, the replay cache `read-only` unless the config sets a mode explicitly
 (`cache: 'read-write'` or `cache.mode`), `reuseExisting` ignored.
 
+`npx e2e init --yes --ci github-actions` writes a workflow like this one with
+a job per platform the config's targets run on (web, iOS, Android), for the
+project's package manager and model key; `--ci gitlab` writes the same jobs as
+`.gitlab-ci.yml` (or `.gitlab/e2e.gitlab-ci.yml` to include beside an existing
+one), its mobile jobs on self-managed runners. The mobile jobs build an Expo or
+bare React Native app; for any other app, replace the failing build step. It
+leaves existing pipeline files alone. Set `app.command` in the config so the
+runner starts the app.
+
 ```yaml
 # .github/workflows/e2e.yml
 # Omits the github() reporter: it needs pull-requests: write and
@@ -241,7 +250,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@9fd676a19091d4595eefd76e4bd31c97133911f1 # v4.2.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26 # Node >= 24.8, or >= 22.22.3 on 22
           cache: pnpm
@@ -257,7 +266,7 @@ jobs:
           E2E_USER_ADMIN_USERNAME: ${{ secrets.E2E_USER_ADMIN_USERNAME }}
           E2E_USER_ADMIN_PASSWORD: ${{ secrets.E2E_USER_ADMIN_PASSWORD }}
       - if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-report
           path: |
@@ -265,7 +274,7 @@ jobs:
             .e2e/junit.xml
           if-no-files-found: warn
       - if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-artifacts
           path: .e2e/results

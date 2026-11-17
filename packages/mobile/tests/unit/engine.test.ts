@@ -12,7 +12,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppError } from 'agent-device';
 import { decodePng, encodePng } from '../helpers/png.ts';
-import type { EngineFixtureContext, EngineSnapshot, FixtureOperations, LocatorExpression, OperationContext, SemanticNode } from 'e2e/engine';
+import type { EngineFixtureContext, EngineSnapshot, FixtureOperations, LocatorExpression, OperationContext, SemanticNode } from '@e2e-dev/core/engine';
 import type { Device } from '../../src/device.ts';
 import type { RawNode } from '../../src/nodes.ts';
 import { mobile } from '../../src/engine.ts';
@@ -92,7 +92,7 @@ describe('manifest', () => {
     expect([...pinned.capabilities].toSorted()).toEqual(['actions', 'artifacts', 'device', 'keyboard', 'location', 'observation', 'pointer']);
     expect(pinned.name).toBe('mobile');
     expect(pinned.version).not.toBe('unknown');
-    expect(Object.keys(pinned.session!).toSorted()).toEqual(['back', 'reset', 'restart']);
+    expect(Object.keys(pinned.session!).toSorted()).toEqual(['back', 'openLink', 'reset', 'restart']);
     // No `open`: a device app has no URL. No select verb either: the touch surface has no option lists to pick from.
     expect(pinned.session!.open).toBeUndefined();
     expect(pinned.actions).toEqual(['tap', 'doubleTap', 'longPress', 'fill', 'clear', 'press', 'check', 'uncheck', 'focus', 'hover', 'dragTo', 'swipe']);
@@ -109,7 +109,7 @@ describe('manifest', () => {
       expect.objectContaining({ code: 'INVALID_CONFIG', message: 'mobile() has unknown key "sesion"; did you mean "session"?' }),
     );
     // What `e2e mcp` passes when an agent names the package alone, or leaves the platform out.
-    for (const options of [undefined, {}, { platform: 'tvos' }]) {
+    for (const options of [undefined, {}, { platform: 'tvos' }, { platform: 'iOS' }, { platform: 'Android' }]) {
       expect(() => mobile(options as never)).toThrowError(expect.objectContaining({ code: 'INVALID_CONFIG', message: expect.stringContaining("mobile() needs platform: 'ios' or 'android'") }));
     }
     expect(() => mobile({ platform: 'ios', app: 'x' } as never)).toThrowError(
@@ -523,6 +523,23 @@ describe('lifecycle', () => {
     expect(() => harness({ device: ['iPhone 17', ' '] })).toThrow(/must not be blank/);
   });
 
+  it('refuses a snapshot or videoTouches value it would read as the default, and keeps the valid ones', () => {
+    for (const [snapshot, shown] of [['Interactive', '"Interactive"'], ['interactiv', '"interactiv"'], ['none', '"none"'], [true, 'true']] as const) {
+      expect(() => harness({ snapshot } as never)).toThrowError(
+        expect.objectContaining({ code: 'INVALID_CONFIG', message: `mobile: \`snapshot\` must be 'full' or 'interactive', got ${shown}` }),
+      );
+    }
+    for (const [videoTouches, shown] of [['false', '"false"'], [0, '0'], [1, '1'], [null, 'null']] as const) {
+      expect(() => harness({ videoTouches } as never)).toThrowError(
+        expect.objectContaining({ code: 'INVALID_CONFIG', message: `mobile: \`videoTouches\` must be true or false, got ${shown}` }),
+      );
+    }
+    for (const options of [{ snapshot: 'full' }, { snapshot: 'interactive' }, { snapshot: undefined }, { videoTouches: true }, { videoTouches: false }, { videoTouches: undefined }] as const) {
+      expect(() => harness(options)).not.toThrow();
+    }
+    expect(() => harness({ snapshot: 'Full' } as never)).toThrow('got "Full"');
+  });
+
   it('rejects an empty pool at config time', () => {
     expect(() => harness({ device: [] })).toThrow(/empty pool/);
   });
@@ -563,7 +580,7 @@ describe('lifecycle', () => {
       bundleId: 'com.example.app',
       identifiers: {},
     }));
-    expect(Object.keys(h.engine.session!).toSorted()).toEqual(['back', 'reset', 'restart']);
+    expect(Object.keys(h.engine.session!).toSorted()).toEqual(['back', 'openLink', 'reset', 'restart']);
     await boot(h);
     await h.engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
     expect(h.fake.methods()).toEqual(['devices.boot']);
@@ -932,6 +949,7 @@ describe('observation', () => {
     ['press', 'command.keyboard', (h, op) => h.engine.keyboard!.press('Enter', op)],
     ['keyboard dismiss', 'command.keyboard', (h, op) => h.engine.keyboard!.dismiss!(op)],
     ['back', 'command.back', (h, op) => h.engine.session!.back!(op)],
+    ['open link', 'apps.open', (h, op) => h.engine.session!.openLink!('e2e-benchmark://orders/42', op)],
   ];
 
   it.each(INPUTS)('ends %s, hung on %s, at its budget as possibly committed', async (_entry, method, call) => {
@@ -2232,6 +2250,18 @@ describe('device fixture', () => {
     expect((await h.engine.observe!(operation())).location).toBe('dev.e2e.benchmark / General');
   });
 
+  it('opens app.open(path) links on a target with app.linkBase in the pinned app, through session.openLink', async () => {
+    const h = harness();
+    await openAttempt(h);
+    h.fake.respond('apps.open', () => ({ session: 's', appName: 'Benchmark', appBundleId: 'dev.e2e.benchmark', identifiers: {} }));
+    const before = h.fake.calls.length;
+    await h.engine.session!.openLink!('e2e-benchmark://orders/42', operation());
+    expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
+      ['apps.open', { platform: 'ios', app: 'Settings', url: 'e2e-benchmark://orders/42' }],
+    ]);
+    await expect(h.engine.session!.openLink!('javascript:alert(1)', operation())).rejects.toMatchObject({ code: 'POLICY_DENIED' });
+  });
+
   it('lets Android route a link without an app, and needs one on iOS, where an unbound open leaves no session', async () => {
     const android = harness({ platform: 'android' }, false);
     await openAttempt(android);
@@ -2500,10 +2530,11 @@ describe('device fixture', () => {
 
   it('labels openApp and openLink steps without the link query and setClipboard by length, so a token never enters the report', () => {
     fixture(harness());
-    expect(declared?.openApp?.label?.('https://app.example.com/magic?token=s3cret#frag')).toBe('https://app.example.com/magic');
+    expect(declared?.openApp?.label?.('https://user:pw@app.example.com/magic?token=s3cret#frag')).toBe('<link>');
     expect(declared?.openApp?.label?.('com.apple.Preferences')).toBe('com.apple.Preferences');
     expect(declared?.openLink?.label?.('myapp://orders/42?ref=mail')).toBe('myapp://orders/42');
-    expect(declared?.openLink?.label?.('verify?token=s3cret')).toBe('verify');
+    expect(declared?.openLink?.label?.('https://user:pw@app.example.com/magic?token=s3cret#frag')).toBe('https://app.example.com/magic');
+    expect(declared?.openLink?.label?.('verify?token=s3cret')).toBe('<link>');
     // Clipboard text is often a code or token the test copied, never a configured secret the ledger would redact.
     expect(declared?.setClipboard?.label?.('482913')).toBe('6 chars');
   });

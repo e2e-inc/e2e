@@ -74,7 +74,8 @@
             "pages": [
               "web",
               "mobile",
-              "api-testing"
+              "api-testing",
+              "core"
             ]
           },
           {
@@ -100,6 +101,7 @@
             "group": "Run in CI",
             "pages": [
               "ci/github-actions",
+              "ci/vercel-previews",
               "ci/gitlab",
               "ci/eas-workflows",
               "ci/bitrise",
@@ -115,6 +117,7 @@
               "integrations/kernel",
               "integrations/browser-run",
               "integrations/lightpanda",
+              "integrations/moli",
               "integrations/eas",
               "integrations/smol",
               "integrations/limrun",
@@ -179,7 +182,8 @@
               "reference/expect",
               "reference/screen",
               "reference/app",
-              "reference/agent"
+              "reference/agent",
+              "reference/core"
             ]
           },
           {

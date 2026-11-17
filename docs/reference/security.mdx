@@ -47,13 +47,15 @@ larger budget. [How agent steps work](/agent-steps) explains a step in full.
 ### Tool calls
 
 - Built-in tools have closed schemas and appear only when the engine
-  supports them.
+  supports them. A tool that declares fields rejects a key it does not
+  declare. A tool with no fields drops extra keys and runs.
 - Project tools must use `defineTool` with an `execute` and can't replace a
-  built-in name.
+  built-in name. A project tool keeps the schema given to `defineTool`, so
+  whether it strips or rejects an undeclared key is up to that schema.
 - Only read-only project tools may request an observation.
-- A call to a tool the step doesn't offer, or with an undeclared argument,
-  never runs. The model reads the refusal as the call's result and tries
-  again.
+- A call to a tool the step doesn't offer, or with an undeclared argument
+  on a built-in tool that declares fields, never runs. The model reads the refusal
+  as the call's result and tries again.
 - The runner never evaluates model text as code, selectors, shell commands,
   or config.
 
@@ -89,6 +91,7 @@ These calls fail with `POLICY_DENIED`.
 | Entry point | Accepts | Refuses |
 | --- | --- | --- |
 | `app.open`, `browser.goto`, the agent's `navigate` verb | `http:`, `https:`, and the exact `about:blank` | Every other scheme |
+| `app.open(path)` on a device target with `app.linkBase` | The joined link, or an absolute link: an app's custom scheme, or `http:` and `https:` | `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, `filesystem:` |
 | `device.openLink` | Any absolute URL: an app's custom scheme, or `http:` and `https:` | `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, `filesystem:` |
 | `device.openApp`, the `open_app` tool | An app id | A link |
 | The browser `e2e login` opens | `http:` and `https:` | Every other scheme; the link is printed instead, for you to open yourself |
