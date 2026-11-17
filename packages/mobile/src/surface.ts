@@ -203,24 +203,44 @@ function keyboardShowing(raw: RawSnapshot): boolean {
 }
 
 /**
+ * The `unmeasurable` reasons agent-device gives after it read the whole tree,
+ * found no keyboard in it, and had no probe to ask: on a platform whose
+ * keyboard is in the app's tree (iOS), that is no keyboard. Every other
+ * reason means it could not see where the keyboard lives, such as an
+ * Android capture without the input method's window.
+ */
+const KEYBOARD_NOT_IN_TREE: ReadonlySet<string> = new Set(['keyboard-not-observed', 'keyboard-visibility-probe-unsupported']);
+
+/** Why a capture cannot say whether the keyboard is shown, as the error `device.isKeyboardShown()` fails with. */
+type KeyboardUnknown = { readonly code: 'ENGINE_FAILURE' | 'UNSUPPORTED_CAPABILITY'; readonly message: string };
+
+/**
  * Whether a capture shows the soft keyboard, the public answer of
  * `device.isKeyboardShown()`: a visibility the producer reported (a probe,
  * or a rejected docked frame that still says), else the band
  * {@link keyboardBand} reads, the one observations hide nodes under: a
  * measured or derived frame, none for `absent`, else visible keyboard
- * elements in the tree. `undetermined` for keyboard elements whose docked
- * frame agent-device rejected with no probe to say, as agent-device's own
- * occlusion check reads it; `incomplete` for no keyboard in a tree that is
- * still sparse or cut, whose missing keys would pass for no keyboard.
+ * elements in the tree. A rejected docked frame with no probe is shown:
+ * agent-device rejects one only for a tree that lists keyboard elements,
+ * such as a keyboard still sliding in or a floating one, so where it is is
+ * unsure, not whether. No keyboard in the tree answers `false` only when
+ * agent-device says the tree is where it looked; otherwise, and for a tree
+ * still sparse or cut, the capture cannot answer.
  */
-function keyboardShownIn(raw: RawSnapshot): boolean | 'undetermined' | 'incomplete' {
+function keyboardShownIn(raw: RawSnapshot): boolean | KeyboardUnknown {
   const fact = raw.keyboard;
   if (fact?.kind === 'visibility-only') return fact.visible;
-  if (fact?.kind === 'tree-rejected') return fact.visible ?? 'undetermined';
+  if (fact?.kind === 'tree-rejected') return fact.visible ?? true;
   if (fact?.kind === 'visible' || fact?.kind === 'derived') return true;
   if (fact?.kind === 'absent') return false;
   if (keyboardBand(raw.nodes ?? [], fact, raw.viewport) !== undefined) return true;
-  return isTruncated(raw) ? 'incomplete' : false;
+  const cannotTell = 'cannot tell whether the keyboard is shown:';
+  if (isTruncated(raw)) {
+    return { code: 'ENGINE_FAILURE', message: `${cannotTell} agent-device measured no keyboard, and the accessibility tree it returned was incomplete (sparse or cut), so missing keys cannot be read as no keyboard. Read it again once the screen has rendered.` };
+  }
+  if (fact?.kind === 'unmeasurable' && KEYBOARD_NOT_IN_TREE.has(fact.reason)) return false;
+  const reason = fact === undefined ? 'it reported no keyboard reading' : `its keyboard reading was unmeasurable (${fact.reason})`;
+  return { code: 'UNSUPPORTED_CAPABILITY', message: `${cannotTell} the tree lists no keyboard, but agent-device could not see where the keyboard is drawn: ${reason}` };
 }
 
 /**
@@ -1737,24 +1757,13 @@ export class AgentDeviceSurface {
   /**
    * Whether the soft keyboard is on screen, from one capture (a sparse tree
    * is captured again first): see {@link keyboardShownIn}. A capture that
-   * cannot answer fails with `ENGINE_FAILURE` instead of guessing.
+   * cannot answer fails, with the reason, instead of guessing.
    * Changes nothing on the device.
    */
   async keyboardShown(signal: AbortSignal, input: InputBudget): Promise<boolean> {
     const shown = keyboardShownIn(await this.snapshot(signal, false, input));
     if (typeof shown === 'boolean') return shown;
-    if (shown === 'undetermined') {
-      throw new EngineError(
-        'ENGINE_FAILURE',
-        'cannot tell whether the keyboard is shown: the tree lists keyboard elements, but agent-device could not place them as a docked keyboard (a floating or split keyboard, say) and had no visibility probe to ask',
-        { retryable: false },
-      );
-    }
-    throw new EngineError(
-      'ENGINE_FAILURE',
-      'cannot tell whether the keyboard is shown: agent-device measured no keyboard, and the accessibility tree it returned was incomplete (sparse or cut), so missing keys cannot be read as no keyboard. Read it again once the screen has rendered.',
-      { retryable: true },
-    );
+    throw new EngineError(shown.code, shown.message, { retryable: false });
   }
 
   /**

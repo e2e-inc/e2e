@@ -2088,14 +2088,15 @@ describe('device fixture', () => {
       expect(h.fake.methods().slice(before)).toEqual(['capture.snapshot', 'capture.snapshot']);
     });
 
-    it('falls back to a keyboard element in the tree when the capture measured nothing', async () => {
+    it('trusts a keyboard element in the tree when the capture measured nothing, and never reads its absence as no keyboard', async () => {
       const h = harness();
       await openAttempt(h);
       const device = fixture(h);
       h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, KEYBOARD_NODE] }));
       expect(await device.isKeyboardShown()).toBe(true);
+      // An older agent-device that reports no keyboard reading: no keys in the tree proves nothing.
       h.fake.respond('capture.snapshot', () => SETTINGS_SNAPSHOT);
-      expect(await device.isKeyboardShown()).toBe(false);
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY', retryable: false, message: expect.stringContaining('no keyboard reading') });
     });
 
     it('reads every keyboard fact agent-device reports the way the keyboard band does, whatever the tree still lists', async () => {
@@ -2109,8 +2110,11 @@ describe('device fixture', () => {
         [{ kind: 'visibility-only', visible: false }, [...SETTINGS_NODES, KEYBOARD_NODE], false],
         [{ kind: 'tree-rejected', derivation: 'docked-tree', visible: false }, [...SETTINGS_NODES, KEYBOARD_NODE], false],
         [{ kind: 'tree-rejected', derivation: 'docked-tree', visible: true }, SETTINGS_NODES, true],
-        [{ kind: 'unmeasurable', reason: 'no probe' }, [...SETTINGS_NODES, KEYBOARD_NODE], true],
-        [{ kind: 'unmeasurable', reason: 'no probe' }, SETTINGS_NODES, false],
+        // A keyboard still sliding in: agent-device lists its keys but rejects the frame.
+        [{ kind: 'tree-rejected', derivation: 'docked-tree' }, [...SETTINGS_NODES, KEYBOARD_NODE], true],
+        [{ kind: 'unmeasurable', reason: 'window-list-unavailable' }, [...SETTINGS_NODES, KEYBOARD_NODE], true],
+        [{ kind: 'unmeasurable', reason: 'keyboard-not-observed' }, SETTINGS_NODES, false],
+        [{ kind: 'unmeasurable', reason: 'keyboard-visibility-probe-unsupported' }, SETTINGS_NODES, false],
       ];
       for (const [keyboard, nodes, shown] of cases) {
         h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes, keyboard }));
@@ -2124,7 +2128,7 @@ describe('device fixture', () => {
       await openAttempt(h);
       const device = fixture(h);
       h.fake.respond('capture.snapshot', () => ({ nodes: [{ ref: '@e1', type: 'application' }], snapshotQuality: { state: 'sparse' } }));
-      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'ENGINE_FAILURE', retryable: false });
       // A sparse capture that still carries the producer's reading answers from it.
       h.fake.respond('capture.snapshot', () => ({ nodes: [{ ref: '@e1', type: 'application' }], snapshotQuality: { state: 'sparse' }, keyboard: { kind: 'absent' } }));
       expect(await device.isKeyboardShown()).toBe(false);
@@ -2137,15 +2141,17 @@ describe('device fixture', () => {
       h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, truncated: true, nodes: [...SETTINGS_NODES, KEYBOARD_NODE] }));
       expect(await device.isKeyboardShown()).toBe(true);
       h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, truncated: true }));
-      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('incomplete') });
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'ENGINE_FAILURE', retryable: false, message: expect.stringContaining('incomplete') });
     });
 
-    it('fails when agent-device rejected the keyboard elements it found and had no probe to say', async () => {
+    it('fails when agent-device could not see the window the keyboard is drawn in', async () => {
       const h = harness();
       await openAttempt(h);
       const device = fixture(h);
-      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, KEYBOARD_NODE], keyboard: { kind: 'tree-rejected', derivation: 'docked-tree' } }));
-      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('docked keyboard') });
+      for (const reason of ['window-root-unavailable', 'window-list-unavailable', 'keyboard-window-probe-failed']) {
+        h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, keyboard: { kind: 'unmeasurable', reason } }));
+        await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY', retryable: false, message: expect.stringContaining(reason) });
+      }
     });
 
     it('captures a sparse tree again instead of reading it as no keyboard', async () => {

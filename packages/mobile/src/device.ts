@@ -213,9 +213,9 @@ export interface Device {
    * agent-device reported for it (a measured or derived keyboard frame, or a
    * visibility probe), else a visible keyboard element in the accessibility
    * tree, the same keyboard observations hide covered nodes under. Fails
-   * with `ENGINE_FAILURE` when the capture cannot answer: no keyboard in a
-   * tree that is still incomplete, or keyboard elements agent-device could
-   * not place and had no probe for. It reads the screen as it is now, so
+   * when the capture cannot answer: `ENGINE_FAILURE` for a tree that is
+   * still incomplete, `UNSUPPORTED_CAPABILITY` when agent-device could not
+   * see where the keyboard is drawn. It reads the screen as it is now, so
    * right after an action that closes the keyboard, poll it with
    * `expect.poll`. Changes nothing on the device.
    */
