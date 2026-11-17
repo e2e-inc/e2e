@@ -194,6 +194,11 @@ test('a message opens an ambiguous locator failure', async ({ app, screen }) => 
   await app.open('/');
   await expect(screen.getByText('Duplicated'), 'the banner shows').toBeVisible({ timeout: 3000 });
 });
+
+test('a message opens an ambiguous locator screenshot failure', async ({ app, screen }) => {
+  await app.open('/');
+  await expect(screen.getByText('Duplicated'), 'the banner shows').toHaveScreenshot('duplicated', { timeout: 3000 });
+});
 `;
 
 /** Every failing matcher test in the fixture, with the fragments its error message must carry. */
@@ -235,6 +240,7 @@ const TITLES = [
   'a matcher honors its timeout',
   'an ambiguous locator fails an assertion at once',
   'a message opens an ambiguous locator failure',
+  'a message opens an ambiguous locator screenshot failure',
   ...SECURE_DENIALS,
 ];
 
@@ -282,7 +288,7 @@ describe('scripted engine: expect(locator) matchers', () => {
     }
   });
 
-  it('honors an explicit timeout and fails an ambiguous locator at once, after the caller\'s message', () => {
+  it('honors an explicit timeout and fails an ambiguous locator at once, after the caller\'s message, in toHaveScreenshot too', () => {
     const timed = failed(run.outcome, 'a matcher honors its timeout', 'ASSERTION_FAILED', 'observed: no node (match count 0)');
     const timedStep = step(timed, 'expect.toBeVisible');
     expect(timedStep.status).toBe('failed');
@@ -297,5 +303,8 @@ describe('scripted engine: expect(locator) matchers', () => {
     expect(labelled.error?.details).toEqual(ambiguous.error?.details);
     // The engine's error is the cause, so the stack still starts where the locator was resolved.
     expect(labelled.error?.stack?.split('\n')[1]).toBe(ambiguous.error?.stack?.split('\n')[1]);
+    const screenshot = failed(run.outcome, 'a message opens an ambiguous locator screenshot failure', 'LOCATOR_AMBIGUOUS');
+    expect(screenshot.error?.message.startsWith('the banner shows: locator matched 2 nodes, expected exactly one: getByText("Duplicated")')).toBe(true);
+    expect(step(screenshot, 'expect.toHaveScreenshot').durationMs).toBeLessThan(3_000);
   });
 });

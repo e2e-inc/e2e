@@ -59,8 +59,8 @@ A second argument describes the check, in `expect(locator, message)` and
 `expect.soft(locator, message)`. It opens each assertion failure of the
 matchers below, `.not` included, before the matcher and the locator, and the
 `LOCATOR_AMBIGUOUS` error of a locator that matches more than one node. An
-invalid option or a denied read fails without it. The step keeps its matcher
-and locator as its name. `expect(screen, message)` takes one the same way.
+invalid option or a denied read fails without it. `expect(screen, message)`
+takes one the same way.
 
 ```ts
 await expect(screen.getByTestId('cart-empty'), 'the cart is empty').toBeVisible();

@@ -18,7 +18,7 @@ import type { ScreenshotContext } from '@e2e-dev/core/lib/run/screenshots';
 import type { ScreenExpectation, ScreenshotOptions } from '@e2e-dev/core/lib/types';
 import { parseScreenshotCall, type ScreenshotCall } from './screenshot-call.ts';
 import { screenshotCapturer, type Capture } from './screenshot-capture.ts';
-import { withMessage } from './heading.ts';
+import { labelAmbiguous, withMessage } from './heading.ts';
 
 /** The stored screenshot one call compares against: its absolute path, and project-relative as a failure names it. */
 interface Stored {
@@ -87,7 +87,10 @@ export async function expectScreenshot(
   await context.steps.run('assertion', api, label, async () => {
     const deadline = context.engine.deadline(call.timeout ?? context.engine.assertionTimeout);
     const reads = context.engine.reads(deadline);
-    const capture = screenshotCapturer(context, { api, subject, masks: call.masks, maskColor: call.maskColor }, reads);
+    const captureOnce = screenshotCapturer(context, { api, subject, masks: call.masks, maskColor: call.maskColor }, reads);
+    const capture = (): Promise<Capture> => captureOnce().catch((error: unknown) => {
+      throw labelAmbiguous(error, message);
+    });
     const run: Run = { context, store, heading, call, stored, reads, capture };
     const expected = existsSync(file) ? readStored(api, stored) : undefined;
     if (expected !== undefined && (negated || !store.update) && store.written.has(file)) {
