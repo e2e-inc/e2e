@@ -630,6 +630,22 @@ void test.skipIf(isFeatureOn());
 void test.runIf(Promise.resolve(true));
 // @ts-expect-error a union with a Promise could still be a Promise
 void test.runIf(isFeatureOn() as Promise<boolean> | boolean);
+// fixme takes exactly skip's shapes: a registration returns a TestCase, a call inside a body returns nothing.
+test.fixme('not yet', async () => {}) satisfies ReturnType<typeof test>;
+void (test.fixme(true, 'flaky on webkit') satisfies void);
+void (test.fixme('flaky on webkit') satisfies void);
+void (test.fixme() satisfies void);
+test.extend<{ x: number }>().fixme('uses x', async ({ x }) => { x satisfies number; });
+// @ts-expect-error fixme takes no test options
+test.fixme('not yet', { tags: ['@fs'] }, async () => {});
+// @ts-expect-error the condition is a boolean; a truthy value must be converted first
+test.fixme(process.env['CI'], 'not on CI');
+// @ts-expect-error a reason is text, not a body
+test.fixme(true, async () => {});
+// @ts-expect-error a fixme registration is not a void call
+void (test.fixme('not yet', async () => {}) satisfies void);
+// @ts-expect-error a group cannot be fixme; mark each test
+test.describe.fixme('later', () => {});
 // each spreads an array row before the fixtures and passes any other row whole; for never spreads. Both register one test per row.
 test.each([{ user: 'Ada' }])('signs in as $user', async ({ user }, { app }) => { user satisfies string; void app; }) satisfies readonly ReturnType<typeof test>[];
 test.each([[1, 'one']])('%i is %s', async (n, word, { platform }) => { n satisfies number; word satisfies string; platform satisfies string; });

@@ -649,9 +649,15 @@ describe('select', () => {
       test.skip('skipped', noop);
     });
     expect(() => select(col, config())).toThrow(
-      '1 tests were collected but none is runnable: 1 skipped with test.skip; pass --pass-with-no-tests to allow this',
+      '1 tests were collected but none is runnable: 1 skipped explicitly; pass --pass-with-no-tests to allow this',
     );
     expect(() => select(col, config(), {}, { passWithNoTests: true })).not.toThrow();
+    const fixme = await collection(() => {
+      test.fixme('not yet', noop);
+    });
+    expect(() => select(fixme, config())).toThrow(
+      '1 tests were collected but none is runnable: 1 skipped explicitly; pass --pass-with-no-tests to allow this',
+    );
   });
 
   it('names the positionals that matched no file in the NO_TESTS message, with the nearest discovered file', async () => {
@@ -699,7 +705,7 @@ describe('select', () => {
       test.setup('login', { sessions: ['user'] }, noop);
     });
     expect(() => select(col, config())).toThrow(
-      '3 tests were collected but none is runnable: 1 declare platforms other than web, 1 skipped with test.skip, 1 setup tests, which run only for the sessions selected tests need; pass --pass-with-no-tests to allow this',
+      '3 tests were collected but none is runnable: 1 declare platforms other than web, 1 skipped explicitly, 1 setup tests, which run only for the sessions selected tests need; pass --pass-with-no-tests to allow this',
     );
     // The tag filter is applied first, so under --tag it is the one reason.
     const tagged = await collection(() => {
@@ -965,6 +971,6 @@ describe('positional file selection', () => {
       ],
       ['tests/b.e2e.ts'],
     );
-    expect(() => select(col, config())).toThrow(/none is runnable: 1 file not selected by a positional argument, 1 skipped with test.skip/);
+    expect(() => select(col, config())).toThrow(/none is runnable: 1 file not selected by a positional argument, 1 skipped explicitly/);
   });
 });

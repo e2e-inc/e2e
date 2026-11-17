@@ -501,7 +501,7 @@ function describeNoTests(
     }
     switch (pair.skip?.cause) {
       case 'explicit':
-        count('skipped with test.skip', pair.test);
+        count('skipped explicitly', pair.test);
         break;
       case 'platform-unavailable':
         count(`declare platforms other than ${pair.target.platform}`, pair.test);

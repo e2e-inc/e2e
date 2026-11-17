@@ -12,7 +12,7 @@ import { validateTitle } from '@e2e-dev/core/lib/internal/ids';
 import { realmSlot } from '@e2e-dev/core/lib/internal/realm-slot';
 import { markRunningTestExpectedToFail } from '@e2e-dev/core/lib/internal/expected-failure';
 import { setRunningTestTimeout } from '@e2e-dev/core/lib/internal/test-timeout';
-import { parseModifierCall, skipRunningTest } from '../internal/skip.ts';
+import { fixmeReason, parseModifierCall, skipRunningTest } from '../internal/skip.ts';
 import { formatEachTitle, readRows } from './each.ts';
 import { unknownKeyMessage } from '@e2e-dev/core/lib/internal/options';
 import type { SourceLocation } from '@e2e-dev/core/lib/internal/source';
@@ -738,7 +738,7 @@ function fixtureDefinition(name: string, entry: unknown): Pick<FixtureDefinition
 function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
   /**
    * Registers one `test()` call. `api` names the caller in errors. A `skip`
-   * condition comes from `skipIf` or `runIf`: when true, the test is
+   * condition comes from `skipIf`, `runIf`, or `fixme`: when true, the test is
    * skipped, keeping any reason its `skip` option gives. Either way a serial
    * group rejects it, so a file collects the same on every platform.
    * `namedBy` is passed on to `registerTest`.
@@ -812,7 +812,15 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
       if (call.kind === 'register') {
         return requireCollector('test.skip()').registerTest('test', 'skip', call.title, { skip: true }, [], call.fn as TestBody, chain);
       }
-      skipRunningTest(call.condition, call.reason);
+      skipRunningTest('test.skip', call.condition, call.reason);
+      return undefined;
+    },
+    fixme(first?: string | boolean, second?: TestBody | string): TestCase | undefined {
+      const call = parseModifierCall(first, second);
+      if (call.kind === 'register') {
+        return registrar('test.fixme()', true)(call.title, { skip: fixmeReason() }, call.fn as TestBody);
+      }
+      skipRunningTest('test.fixme', call.condition, fixmeReason(call.reason));
       return undefined;
     },
     fail(first?: string | boolean, second?: TestBody | string): TestCase | undefined {

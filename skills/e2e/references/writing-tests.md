@@ -131,6 +131,7 @@ test.each([{ user: 'Ada' }, { user: 'Grace' }])('signs in as $user', async ({ us
 test.for([['standard', '5.00']])('ships %s for %s', async ([speed, price], { app }) => {}); // test.each without the spread: (row, { app })
 test('conditional', async () => { test.skip(await onlyOneOrg(), 'nothing to switch to'); }); // throws: the body stops here, reported skipped; call it before the first step
 test('later', async () => { test.skip('waiting on the API'); }); // bare skip from the body
+test.fixme('not yet', async () => {}); // test.skip's three forms; reported skipped with reason "fixme", or "fixme: <reason>" from test.fixme(reason) or test.fixme(cond, reason) in a body
 test('big import', async () => { test.setTimeout(180_000); }); // body or beforeEach: the attempt's timeout, counted from its start; in beforeAll: that hook's own
 test.fail('known gap', async () => {}); // expected to fail: a test failure passes it, a pass fails it with UNEXPECTED_PASS
 test('gap on web', async ({ platform }) => { test.fail(platform === 'web', 'known gap'); }); // marks, does not throw; the body runs on
