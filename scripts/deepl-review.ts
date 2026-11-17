@@ -37,6 +37,13 @@ export interface Translator {
   translate(texts: string[], from: 'EN' | 'JA', to: 'EN' | 'JA'): Promise<string[]>;
 }
 
+export interface Usage {
+  /** Characters translated this billing period. */
+  count: number;
+  /** The plan's characters per billing period. */
+  limit: number;
+}
+
 export interface Review extends Pair {
   /** DeepL's Japanese for the English. */
   reference: string;
@@ -291,7 +298,11 @@ const BATCH_TEXTS = 50;
  * glossary is uploaded once per content and reused by name, so editing the
  * README's table uploads a new one and an unchanged one costs nothing.
  */
-export function deepl(key: string, glossary: GlossaryEntry[] = [], fetchImpl: typeof fetch = fetch): Translator {
+export function deepl(
+  key: string,
+  glossary: GlossaryEntry[] = [],
+  fetchImpl: typeof fetch = fetch,
+): Translator & { usage(): Promise<Usage> } {
   const api = key.endsWith(':fx') ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
   const headers = { Authorization: `DeepL-Auth-Key ${key}`, 'Content-Type': 'application/json' };
 
@@ -332,6 +343,10 @@ export function deepl(key: string, glossary: GlossaryEntry[] = [], fetchImpl: ty
   }
 
   return {
+    async usage() {
+      const usage = await call<{ character_count: number; character_limit: number }>('/v2/usage');
+      return { count: usage.character_count, limit: usage.character_limit };
+    },
     async translate(texts, from, to) {
       const glossary_id = await glossaryFor();
       const out: string[] = [];

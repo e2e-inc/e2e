@@ -198,6 +198,11 @@ describe('deepl', () => {
     assert.partialDeepStrictEqual(calls[4]?.body, { source_lang: 'JA', target_lang: 'EN-US' });
   });
 
+  it("reads the month's usage", async () => {
+    const fetchImpl = (async () => Response.json({ character_count: 1200, character_limit: 500000 })) as unknown as typeof fetch;
+    assert.deepEqual(await deepl('key:fx', [], fetchImpl).usage(), { count: 1200, limit: 500000 });
+  });
+
   it("fails with DeepL's message on an error it should not retry", async () => {
     const fetchImpl = (async () => new Response('Quota exceeded', { status: 456 })) as unknown as typeof fetch;
     await assert.rejects(deepl('key', [], fetchImpl).translate(['a'], 'EN', 'JA'), {

@@ -15,10 +15,13 @@
  *
  * The docs workflow's `translations` job runs it on pull requests that touch the docs.
  *
- * Usage: `node scripts/check-docs-translations-deepl.ts [--base <ref>]`.
+ * Usage: `node scripts/check-docs-translations-deepl.ts [--base <ref>] [--report <file>]`.
  * With `--base`, only the sections whose English or Japanese text differs
  * from `<ref>` are sent to DeepL, so an English edit that leaves its
- * translation stale is checked too.
+ * translation stale is checked too. Without it every section is sent: about
+ * a million characters for the whole docs, twice the Free plan's month.
+ * `--report` also writes every reviewed section, with DeepL's versions and
+ * the scores, to `<file>` as JSON.
  *
  * Environment:
  *   DEEPL_API_KEY        a DeepL API key; a Free key (ending in :fx) uses
@@ -28,7 +31,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -39,7 +42,7 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DOCS = join(ROOT, 'docs');
 const LANGUAGE = 'ja';
 
-const { values } = parseArgs({ options: { base: { type: 'string' } } });
+const { values } = parseArgs({ options: { base: { type: 'string' }, report: { type: 'string' } } });
 const key = process.env['DEEPL_API_KEY'];
 if (!key) {
   process.stdout.write('::notice::docs translations: DEEPL_API_KEY is not set, skipping the DeepL review\n');
@@ -90,7 +93,11 @@ for (const page of pages(join(DOCS, LANGUAGE))) {
 
 const glossaryFile = join(DOCS, LANGUAGE, 'README.md');
 const glossary = existsSync(glossaryFile) ? parseGlossary(readFileSync(glossaryFile, 'utf8')) : [];
-const reviews = await review(pairs, deepl(key, glossary), glossary);
+const translator = deepl(key, glossary);
+const reviews = await review(pairs, translator, glossary);
+if (values.report) writeFileSync(values.report, `${JSON.stringify(reviews, null, 2)}\n`);
+const usage = await translator.usage();
+const usageLine = `DeepL usage this month: ${usage.count.toLocaleString('en')} of ${usage.limit.toLocaleString('en')} characters.`;
 const flagged = reviews.filter((entry) => entry.problems.length > 0);
 
 const escape = (text: string) => text.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
@@ -127,6 +134,7 @@ const summary = [
   '',
   `${reviews.length} ${reviews.length === 1 ? 'section' : 'sections'} checked, ${flagged.length} flagged${skipped.length > 0 ? `, ${skipped.length} ${skipped.length === 1 ? 'page' : 'pages'} skipped` : ''}.`,
   'Scores are chrF from 0 to 1: ours against DeepL\'s Japanese, then the English against DeepL\'s English for ours. A flag is a prompt to look, not a verdict.',
+  usageLine,
   '',
   ...flagged.map(details),
   ...reviews.filter((entry) => entry.problems.length === 0).map(details),
@@ -135,6 +143,7 @@ const summary = [
 if (process.env['GITHUB_STEP_SUMMARY']) appendFileSync(process.env['GITHUB_STEP_SUMMARY'], summary);
 else process.stdout.write(summary);
 
+process.stdout.write(`${usageLine}\n`);
 process.stdout.write(
   `docs translations: ${reviews.length} ${reviews.length === 1 ? 'section' : 'sections'} checked against DeepL, ${flagged.length} flagged\n`,
 );
