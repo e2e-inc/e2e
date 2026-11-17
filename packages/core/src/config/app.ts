@@ -208,7 +208,7 @@ function isLaunchArgumentValue(value: unknown): value is LaunchArgumentValue {
   if (typeof value === 'number') {
     return Number.isFinite(value);
   }
-  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+  return Array.isArray(value) && value.findIndex((item) => typeof item !== 'string') === -1;
 }
 
 /** A value's kind for an error message: `null`, `an array`, `a Map`, `an object`, `NaN`, `a number`. */

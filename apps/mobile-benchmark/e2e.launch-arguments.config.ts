@@ -17,7 +17,7 @@ const IOS: Forms = {
   list: ['-AppleLanguages', '(fr)', '-AppleLocale', 'fr_FR'],
 };
 
-const ANDROID: Forms = { object: { e2e: true }, list: ['--es', 'e2e', 'true'] };
+const ANDROID: Forms = { object: { e2e: true }, list: ['--ez', 'e2e', 'true'] };
 
 export default {
   ...base,

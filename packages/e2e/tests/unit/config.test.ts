@@ -595,6 +595,9 @@ describe('resolveConfig', () => {
     const value = (name: string) => `target "web" app.launchArguments.${name} must be a string, number, boolean, or array of strings, got`;
     expect(() => resolveApp({ launchArguments: { locale: { language: 'fr' } } } as never)).toThrow(`${value('locale')} an object`);
     expect(() => resolveApp({ launchArguments: { languages: ['fr', 1] } } as never)).toThrow(`${value('languages')} an array`);
+    const sparse = ['fr'];
+    sparse[2] = 'de';
+    expect(() => resolveApp({ launchArguments: { languages: sparse } })).toThrow(`${value('languages')} an array`);
     expect(() => resolveApp({ launchArguments: { retries: Number.NaN } })).toThrow(`${value('retries')} NaN`);
     expect(() => resolveApp({ launchArguments: { retries: null } } as never)).toThrow(`${value('retries')} null`);
     expect(() => resolveApp({ launchArguments: { when: new Date(0) } } as never)).toThrow(`${value('when')} a Date`);

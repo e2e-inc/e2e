@@ -30,13 +30,15 @@ describe('launchArgumentList', () => {
     expect(launchArgumentList('ios', { empty: [] })).toEqual(['-empty', '()']);
   });
 
-  it('spells an object as am start string extras', () => {
-    expect(launchArgumentList('android', { e2e: true, dark: false, locale: 'fr_FR', retries: 3, ratio: 1.5 })).toEqual([
-      '--es', 'e2e', 'true',
-      '--es', 'dark', 'false',
+  it("spells an object as am start extras of each value's type", () => {
+    expect(launchArgumentList('android', { e2e: true, dark: false, locale: 'fr_FR', retries: 3, ratio: 1.5, epoch: 2 ** 31, negative: -1 })).toEqual([
+      '--ez', 'e2e', 'true',
+      '--ez', 'dark', 'false',
       '--es', 'locale', 'fr_FR',
-      '--es', 'retries', '3',
-      '--es', 'ratio', '1.5',
+      '--ei', 'retries', '3',
+      '--ef', 'ratio', '1.5',
+      '--el', 'epoch', '2147483648',
+      '--ei', 'negative', '-1',
     ]);
     expect(launchArgumentList('android', { tags: ['a', 'b,c', 'd'] })).toEqual(['--esa', 'tags', 'a,b\\,c,d']);
     expect(launchArgumentList('android', { tags: [] })).toEqual(['--esa', 'tags', '']);

@@ -514,10 +514,14 @@ environment: 'staging', // default: 'test' for a local host or no URL, else 'pro
 Arguments every fresh launch passes the app: `app.open()`, `app.restart()`,
 and `app.clearState()`. Give a list of strings, the arguments themselves, or
 an object of argument name to value. On iOS an entry becomes `-name value`.
-On Android it becomes `--es name value`.
+On Android it becomes an `am start` extra of the value's type: `--es` for a
+string, `--ez` for a boolean, `--ei` for a number, `--esa` for a list.
 
 ```ts
 launchArguments: ['-e2e', 'YES'],
+```
+
+```ts
 launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', e2e: true },
 ```
 
