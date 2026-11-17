@@ -27,6 +27,7 @@ export function createReporters(
     ],
     view: terminal === undefined ? undefined : {
       show: (source, text) => terminal.processOutput(source, text),
+      printLine: (line) => terminal.printLine(line),
       end: () => terminal.endProcessOutput(),
     },
   };

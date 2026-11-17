@@ -138,15 +138,16 @@ export interface ContinueMessage {
   readonly type: 'continue';
 }
 
-/** The held step `holdId` names may run. Handled at once, like `ping`; an id the worker no longer holds is ignored. */
+/** The held step or pause `holdId` names may continue; with `error`, the pause fails. Handled at once, like `ping`; an id the worker no longer holds is ignored. */
 export interface StepReleaseMessage {
   readonly type: 'step-release';
   readonly holdId: string;
+  readonly error?: SerializedError;
 }
 
 /**
- * A request to read the screen at the held step named by `holdId`. The
- * worker handles it right away, like `step-release`, then sends a
+ * A request to read the screen at the held step or pause named by `holdId`.
+ * The worker handles it right away, like `step-release`, then sends a
  * `screen-reply`.
  */
 export interface ScreenRequestMessage {
@@ -262,7 +263,7 @@ export interface PongMessage {
   readonly type: 'pong';
 }
 
-/** A step waits for `step-release` before it runs (`e2e run --step`). */
+/** A step waits for `step-release` before it runs (`e2e run --step`), or a paused test waits for it to resume. */
 export interface StepHoldMessage {
   readonly type: 'step-hold';
   readonly holdId: string;

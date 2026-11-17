@@ -101,6 +101,8 @@ export function writeTerminal(stream: OutputStream, text: string): void {
 export interface OutputView {
   /** Prints redacted text from `stream`. */
   show(stream: OutputStream, text: string): void;
+  /** Prints a runner line as `RunnerOutput.printLine` does. */
+  printLine(line: string): void;
   /** Prints what `show` left unfinished; nothing more follows. */
   end(): void;
 }
@@ -227,6 +229,19 @@ export class RunnerOutput {
   /** Prints what user code writes to stdout on stderr from now on: a reporter prints a document on stdout (`--reporter json`). */
   keepStdoutForReport(): void {
     this.stdoutTo = 'stderr';
+  }
+
+  /**
+   * Prints a runner line beside the list reporter's lines. While a view is
+   * showing the run, the line goes through it. Otherwise it goes to stdout,
+   * or to stderr if a reporter reserves stdout for its document.
+   */
+  printLine(line: string): void {
+    if (this.view === undefined) {
+      void this.terminal[this.stdoutTo](`${line}\n`);
+    } else {
+      this.view.printLine(line);
+    }
   }
 
   /** Prints a test's output, which its worker already redacted, to the terminal or the view. */

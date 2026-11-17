@@ -1,9 +1,10 @@
 /**
- * Holding steps for `e2e run --step`. A worker holds a top-level step before
- * it runs and asks the runner, which owns the terminal, whether it may; the
- * runner asks its `hold` hook. While any step of an attempt is held, the
- * attempt's test clock is stopped, so the time a person spends looking at the
- * app is never charged to the test.
+ * Holding steps for `e2e run --step` and tests at `screen.pause()`. A worker
+ * holds a top-level step before it runs, or a test at a pause, and asks the
+ * runner, which owns the terminal, whether it may; the runner asks its `hold`
+ * hook. While any step of an attempt is held, the attempt's test clock is
+ * stopped, so the time a person spends looking at the app is never charged
+ * to the test.
  */
 
 import { abortError, cancelledError } from '@e2e-dev/core/lib/internal/time';
@@ -13,7 +14,7 @@ import type { StepHoldRequest } from '@e2e-dev/core/lib/run/steps';
 import type { OperationContext, TargetSession } from '@e2e-dev/core/lib/engine/surface';
 import { traceScreen, type TraceScreenOptions } from '@e2e-dev/core/lib/run/step-screens';
 
-/** A step held before it runs, as the runner's `hold` hook sees it. */
+/** A step held before it runs, or a paused test, as the runner's `hold` hook sees it. */
 export interface HeldStep {
   /** Whether this wait is for a held step or a paused test. */
   readonly kind: StepHoldRequest['kind'];
@@ -29,7 +30,7 @@ export interface HeldStep {
   readonly source?: SourceLocation;
 }
 
-/** A held step with its place among its test's held steps, from 1. */
+/** A held step with its place among its test's held steps, from 1. Pauses use 0 because they aren't steps. */
 export interface NumberedStep {
   readonly step: HeldStep;
   readonly number: number;
@@ -41,6 +42,11 @@ export interface StepPrompt {
   readonly steps: readonly [NumberedStep, ...NumberedStep[]];
   /** List every key, not only the short line; `h` turns it on and off. */
   readonly help: boolean;
+  /**
+   * Whether the run holds steps (`e2e run --step`). `n`, `a`, and `rest`
+   * release them.
+   */
+  readonly holdSteps: boolean;
 }
 
 /** What the runner hands its `hold` hook beside the step. */
@@ -53,23 +59,24 @@ export interface StepHoldContext {
    */
   show(prompt: StepPrompt | undefined): void;
   /**
-   * Reads the screen at the held step. The result starts with the location
-   * when available, then lists one line per node. The lines are redacted
-   * and bounded like those on the trace page. Steps held together share
-   * one read.
+   * Reads the screen at the held step or pause. The result starts with the
+   * location when available, then lists one line per node. The lines are
+   * redacted and bounded like those on the trace page. Steps held together
+   * share one read.
    *
    * It returns `undefined` if the screen can't be read, or if it's called
    * after the wait has ended. A read that is still running when the wait
-   * ends can return the screen, so check that the step is still held
-   * before using the result.
+   * ends can return the screen, so check that the step or pause is still
+   * held before using the result.
    */
   readScreen(): Promise<string | undefined>;
 }
 
 /**
- * Decides when a held step runs: it resolves to run it. To stop instead,
- * interrupt the run; the interrupt aborts `context.signal`. A rejection
- * stops the run with that error.
+ * Decides when a held step runs or a paused test resumes: it resolves to run
+ * the step or resume the test. To stop instead, interrupt the run; the
+ * interrupt aborts `context.signal`. A rejection before a step stops the run
+ * with that error, and a rejection at a pause fails the test there.
  */
 export type BeforeStep = (step: HeldStep, context: StepHoldContext) => Promise<void>;
 

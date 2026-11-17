@@ -213,7 +213,284 @@ describe('reading the held screen', () => {
   }, 60_000);
 });
 
-describe('hold.ask and the run limits', () => {
+describe('pausing on the worker path', () => {
+  it('pauses a setup test and a retry with the clock stopped, without recording a step', async () => {
+    const held: HeldStep[] = [];
+    const { outcome, project } = await runProjectWithConfigFile(
+      {
+        'tests/paused.e2e.ts': `import { test } from 'e2e';
+
+test.setup('seeds a session', { sessions: ['seeded'] }, async ({ screen, session }) => {
+  await screen.pause();
+  await session.save('seeded');
+});
+
+const tries = globalThis as { retried?: number };
+test('pauses on each attempt', { session: 'seeded' }, async ({ app, screen }) => {
+  await app.open('/');
+  await screen.pause();
+  tries.retried = (tries.retried ?? 0) + 1;
+  if (tries.retried === 1) throw new Error('first attempt fails');
+});
+`,
+      },
+      {
+        configSource: workerFakeConfigSource(1, `\n  timeout: ${TIMEOUT_MS},\n  retries: 1,`),
+        runOptions: {
+          hold: {
+            ask: async (step) => {
+              held.push(step);
+              await sleep(HOLD_MS);
+            },
+            steps: false,
+          },
+        },
+      },
+    );
+    project.cleanup();
+    expect(resultByTitle(outcome, 'pauses on each attempt').status).toBe('flaky');
+    expect(held.map((step) => [step.kind, step.title, step.source?.line])).toEqual([
+      ['pause', 'seeds a session', 4],
+      ['pause', 'pauses on each attempt', 11],
+      ['pause', 'pauses on each attempt', 11],
+    ]);
+
+    const apis = outcome.report.run.results.flatMap((result) =>
+      result.attempts.flatMap((attempt) => attempt.steps.map((step) => step.api)),
+    );
+
+    expect(apis).not.toContain('screen.pause');
+  }, 60_000);
+
+  it('fails only the test whose unawaited code calls screen.pause() after the body returned', async () => {
+    const held: HeldStep[] = [];
+    const { outcome, project } = await runProjectWithConfigFile(
+      {
+        'tests/late.e2e.ts': `import { test } from 'e2e';
+
+test('pauses after it returned', async ({ screen }) => {
+  void (async () => {
+    for (let i = 0; i < 100; i++) await null;
+    await screen.pause();
+  })();
+});
+
+test('runs after it', async ({ app }) => { await app.open('/'); });
+`,
+      },
+      {
+        configSource: workerFakeConfigSource(1),
+        runOptions: {
+          hold: {
+            ask: async (step) => {
+              held.push(step);
+              await sleep(HOLD_MS);
+            },
+            steps: false,
+          },
+        },
+      },
+    );
+    project.cleanup();
+    expect(resultByTitle(outcome, 'pauses after it returned').attempts[0]?.error).toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      message: expect.stringContaining('was called after the test body ended'),
+      source: { file: 'tests/late.e2e.ts', line: 6 },
+    });
+    expect(resultByTitle(outcome, 'runs after it').status).toBe('passed');
+    expect(held).toEqual([]);
+  }, 60_000);
+
+  it('fails only the paused test, with the error the refusing hook gives', async () => {
+    const { outcome, project } = await runProjectWithConfigFile(
+      {
+        'tests/refused.e2e.ts': `import { test } from 'e2e';\ntest('meets a refusing hook', async ({ screen }) => {\n  await screen.pause();\n});\ntest('runs after it', async ({ app }) => { await app.open('/'); });\n`,
+      },
+      {
+        configSource: workerFakeConfigSource(1),
+        runOptions: { hold: { ask: () => Promise.reject(new Error('nobody can resume it')), steps: false } },
+      },
+    );
+    project.cleanup();
+    const attempt = resultByTitle(outcome, 'meets a refusing hook').attempts[0];
+    expect(attempt?.error).toMatchObject({ message: 'nobody can resume it', source: { file: 'tests/refused.e2e.ts', line: 3 } });
+    expect(resultByTitle(outcome, 'runs after it').status).toBe('passed');
+    expect(outcome.report.run.errors).toEqual([]);
+  }, 60_000);
+
+  it('pauses in fixture setup and beforeEach, and fails a pause in afterEach or a fixture teardown with INVALID_ARGUMENT', async () => {
+    const held: HeldStep[] = [];
+    const { outcome, project } = await runProjectWithConfigFile(
+      {
+        'tests/phases.e2e.ts': `import { test as base } from 'e2e';
+
+const test = base.extend<{ paused: number }>({
+  paused: async ({ screen }, use) => {
+    await screen.pause();
+    await use(1);
+  },
+});
+
+test.beforeEach(async ({ screen }) => { await screen.pause(); });
+
+test('pauses in setup', async ({ paused }) => { void paused; });
+
+test.describe('after each', () => {
+  test.afterEach(async ({ screen }) => { await screen.pause(); });
+  test('fails in afterEach', async ({ paused }) => { void paused; });
+});
+`,
+        'tests/teardown.e2e.ts': `import { test as base } from 'e2e';
+
+const test = base.extend<{ paused: number }>({
+  paused: async ({ screen }, use) => {
+    await use(1);
+    await screen.pause();
+  },
+});
+
+test('fails in a fixture teardown', async ({ paused }) => { void paused; });
+`,
+      },
+      {
+        configSource: workerFakeConfigSource(1, `\n  timeout: ${TIMEOUT_MS},`),
+        runOptions: {
+          hold: {
+            ask: async (step) => {
+              held.push(step);
+              await sleep(HOLD_MS);
+            },
+            steps: false,
+          },
+        },
+      },
+    );
+    project.cleanup();
+    expect(resultByTitle(outcome, 'pauses in setup').status).toBe('passed');
+
+    for (const [title, line] of [['fails in afterEach', 15], ['fails in a fixture teardown', 6]] as const) {
+      expect(resultByTitle(outcome, title).attempts[0]?.error).toMatchObject({
+        code: 'INVALID_ARGUMENT',
+        message: expect.stringContaining('was called after the test body ended (in an afterEach hook, a fixture teardown'),
+      });
+
+      expect(resultByTitle(outcome, title).attempts[0]?.error?.source?.line).toBe(line);
+    }
+    expect(held.map((step) => [step.title, step.source?.file, step.source?.line])).toEqual([
+      ['pauses in setup', 'tests/phases.e2e.ts', 5],
+      ['pauses in setup', 'tests/phases.e2e.ts', 10],
+      ['after each › fails in afterEach', 'tests/phases.e2e.ts', 5],
+      ['after each › fails in afterEach', 'tests/phases.e2e.ts', 10],
+    ]);
+  }, 60_000);
+
+  it('pauses each time the line runs, as on every pass of a loop', async () => {
+    const held: HeldStep[] = [];
+    const { outcome, project } = await runProjectWithConfigFile(
+      { 'tests/loop.e2e.ts': `import { test } from 'e2e';\ntest('pauses in a loop', async ({ screen }) => {\n  for (let pass = 0; pass < 3; pass++) {\n    await screen.pause();\n  }\n});\n` },
+      {
+        configSource: workerFakeConfigSource(1),
+        runOptions: { hold: { ask: async (step) => void held.push(step), steps: false } },
+      },
+    );
+    project.cleanup();
+    expect(resultByTitle(outcome, 'pauses in a loop').status).toBe('passed');
+    expect(held.map((step) => [step.kind, step.source?.line])).toEqual([
+      ['pause', 4],
+      ['pause', 4],
+      ['pause', 4],
+    ]);
+  }, 60_000);
+
+  it('refuses a pause inside an expect.poll read, on a locator, or on a frame, without asking the hook', async () => {
+    const held: HeldStep[] = [];
+    const { outcome, project } = await runProjectWithConfigFile(
+      {
+        'tests/refused.e2e.ts': `import { test, expect } from 'e2e';
+
+test('pauses in a poll read', async ({ screen }) => {
+  await expect.poll(async () => {
+    await screen.pause();
+    return 1;
+  }, { timeout: 300 }).toBe(1);
+});
+
+test('pauses on a locator', async ({ screen }) => {
+  const locator = screen.getByRole('button', { name: 'Submit' }) as unknown as { pause(): Promise<void> };
+  await locator.pause();
+});
+
+test('pauses on a frame', async ({ gadget }) => {
+  await gadget.frame().pause();
+});
+`,
+      },
+      {
+        configSource: workerFakeConfigSource(1).replace(
+          'createFakeEngine({ state: true })',
+          'createFakeEngine({ state: true, fixtures: true })',
+        ),
+        runOptions: { hold: { ask: async (step) => void held.push(step), steps: false } },
+      },
+    );
+    project.cleanup();
+    // The poll retries the failing read. Its error names the last refusal.
+    expect(resultByTitle(outcome, 'pauses in a poll read').attempts[0]?.error).toMatchObject({
+      code: 'ASSERTION_FAILED',
+      message: expect.stringContaining('last: screen.pause() was called inside another step (an onAction hook or a project tool) or an expect.poll read'),
+    });
+    expect(resultByTitle(outcome, 'pauses on a locator').attempts[0]?.error).toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      message: "you can't call pause() on a locator or a frame, since a pause stops the whole test; call screen.pause()",
+      source: { file: 'tests/refused.e2e.ts', line: 12 },
+    });
+    expect(resultByTitle(outcome, 'pauses on a frame').attempts[0]?.error).toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      message: "you can't call pause() on a locator or a frame, since a pause stops the whole test; call screen.pause()",
+      source: { file: 'tests/refused.e2e.ts', line: 16 },
+    });
+    expect(held).toEqual([]);
+  }, 60_000);
+
+  it("fails a pause where it isn't allowed with INVALID_ARGUMENT, not PAUSE_UNAVAILABLE, when CI is set", async () => {
+    const { outcome, project } = await runProjectWithConfigFile(
+      { 'tests/ci.e2e.ts': `import { test } from 'e2e';\ntest.afterEach(async ({ screen }) => { await screen.pause(); });\ntest('pauses in afterEach in CI', async () => {});\n` },
+      {
+        configSource: workerFakeConfigSource(1),
+        runOptions: {
+          env: { ...process.env, CI: '1' },
+          hold: { ask: () => Promise.resolve(), steps: false },
+        },
+      },
+    );
+    project.cleanup();
+
+    expect(resultByTitle(outcome, 'pauses in afterEach in CI').attempts[0]?.error).toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      source: { file: 'tests/ci.e2e.ts', line: 2 },
+    });
+  }, 60_000);
+
+  it('fails a pause with PAUSE_UNAVAILABLE in CI, without asking the hook', async () => {
+    const held: HeldStep[] = [];
+    const { outcome, project } = await runProjectWithConfigFile(
+      { 'tests/ci.e2e.ts': `import { test } from 'e2e';\ntest('pauses in CI', async ({ screen }) => {\n  await screen.pause();\n});\n` },
+      {
+        configSource: workerFakeConfigSource(1),
+        runOptions: {
+          env: { ...process.env, CI: '1' },
+          hold: { ask: async (step) => void held.push(step), steps: false },
+        },
+      },
+    );
+    project.cleanup();
+    const attempt = resultByTitle(outcome, 'pauses in CI').attempts[0];
+    expect(attempt?.error).toMatchObject({ code: 'PAUSE_UNAVAILABLE', source: { file: 'tests/ci.e2e.ts', line: 3 } });
+    expect(held).toEqual([]);
+  }, 60_000);
+});
+
+describe('holding steps and the run limits', () => {
   it('stops the time limit while a step is held', async () => {
     const { beforeStep } = holder(3_000);
     const { outcome, project } = await runProjectWithConfigFile(

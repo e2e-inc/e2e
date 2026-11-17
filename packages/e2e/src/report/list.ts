@@ -524,6 +524,14 @@ export class ListReporter implements Reporter {
     this.sourcedOutput(stream, this.pc.dim('runner'), undefined, text);
   }
 
+  /**
+   * Prints a runner line permanently above the live window. Pauses in runs
+   * without a terminal are printed here.
+   */
+  printLine(line: string): void {
+    this.print(line);
+  }
+
   /** Prints what `processOutput` left unfinished: the runner hands nothing more once the run's events are all dispatched. */
   endProcessOutput(): void {
     this.dots?.end();

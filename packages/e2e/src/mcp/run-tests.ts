@@ -144,7 +144,9 @@ class RunProcess {
 
   constructor(argv: readonly string[], options: TestRunsOptions, output: RunOutput) {
     const entry = cliEntry();
-    const env: NodeJS.ProcessEnv = { ...options.env, NO_COLOR: '1' };
+    // The CLI fails a pause in this run, since the agent waits on the call
+    // and can't resume the test.
+    const env: NodeJS.ProcessEnv = { ...options.env, NO_COLOR: '1', E2E_MCP_RUN_TESTS: '1' };
     delete env['FORCE_COLOR'];
     this.child = spawn(process.execPath, [...entry.execArgv, entry.path, ...argv], {
       cwd: options.cwd,

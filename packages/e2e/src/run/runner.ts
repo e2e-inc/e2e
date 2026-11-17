@@ -73,17 +73,20 @@ import type { AppProcesses } from '@e2e-dev/core/lib/run/managed-process';
 import { PreparedEngines, recordingNotices, startDeclaredProcesses, validateEngine, type EngineGrade, type PrepareScope } from '@e2e-dev/core/lib/run/provision';
 import { filterSelection, rankingNotice } from './test-filters.ts';
 
-/** Options for holding a run at steps. */
+/** Options for holding a run at steps and pauses. */
 type RunHold = {
   /**
-   * This function is called before every step when `steps` is set. The test
-   * waits until the promise it returns is settled.
+   * This function is called at every pause, and before every step when
+   * `steps` is set. The test waits until the promise it returns is settled.
    *
    * - If it resolves, the test continues.
-   * - If it rejects, the run stops with that error.
+   * - If it rejects at a pause, the test fails.
+   * - If it rejects before a step, the run stops with that error.
    *
-   * The test's timeout and the run's time limit don't count the time spent
-   * waiting.
+   * Pauses wait on every attempt, including setup tests. The test's timeout
+   * and the run's time limit don't count the time spent waiting.
+   *
+   * With `CI` set, the test fails with `PAUSE_UNAVAILABLE` and `ask` isn't called.
    */
   readonly ask: BeforeStep;
   /**
@@ -242,7 +245,10 @@ export interface RunOptions {
    * the CLI's Ctrl-C ladder (`cli/signals.ts`) feeds these two.
    */
   forceSignal?: AbortSignal | undefined;
-  /** Set `hold` to wait at held steps. Without it, steps aren't held. */
+  /**
+   * Set `hold` to wait at held steps and pauses. Without it, a pause returns
+   * right away.
+   */
   hold?: RunHold | undefined;
   /** A second sink on the run's event spine, beside the list reporter. */
   onEvent?: RunEventSink | undefined;

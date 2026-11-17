@@ -180,6 +180,7 @@ exit 1: a test failed or timed out
 - 输出超过 60,000 个字符时，会保留末尾部分，其中包含失败详情和摘要。一旦运行进入测试阶段，所有结果都会写入 `<output>/report.json`（默认目录为 `.e2e`）；参阅[输出](/reference/cli#output)。
 - 提供进度令牌时，stdout 的每个非空行都会作为进度通知，截断为 1,000 个字符。
 - 取消调用会像按 Ctrl-C 一样中断运行，每隔 15 秒再次中断一次，并在第三次中断后的 15 秒强制终止进程。下一个 `run_tests` 会等待它退出。
+- 到达 [`screen.pause()`](/reference/screen#screen-pause) 的测试会以 `PAUSE_UNAVAILABLE` 失败，因为等待该调用的智能体无法恢复它。
 - 服务器关闭时会拒绝新运行，并中断正在进行的运行。服务器意外终止时，运行也会以同样方式中断自身。
 
 | 抛出错误 | 何时发生 |
@@ -273,7 +274,7 @@ call {tool: "run_code", args: {code: "await screen.getByLabel('Email').fill('ada
 | 参数 | 字符串、数字、布尔值、`null`、正则表达式、不含 `${}` 的模板、数组、对象、定位器，或 `credentials.user(name).username` |
 | 机密值 | `credentials.user(name).password` 或 `secrets.get(name)`，仅可作为 `fill` 的值 |
 
-不包含：引擎提供的内置测试夹具（`browser`、`device`）、`expect(screen)`、`toHaveScreenshot`、`app.screenshot`、`screen.debug`、`all`、`setInputFiles` 和值匹配器（`toBe`、`toEqual`）。
+不包含：引擎提供的内置测试夹具（`browser`、`device`）、`expect(screen)`、`toHaveScreenshot`、`app.screenshot`、`screen.debug`、`screen.pause`、`all`、`setInputFiles` 和值匹配器（`toBe`、`toEqual`）。
 
 | 抛出错误 | 何时发生 |
 | --- | --- |

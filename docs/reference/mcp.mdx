@@ -221,6 +221,9 @@ exit 1: a test failed or timed out
 - Cancelling the call interrupts the run as Ctrl-C would, pressed again every
   15 seconds, and kills it 15 seconds after the third. The next `run_tests`
   waits for it to exit.
+- A test that reaches [`screen.pause()`](/reference/screen#screen-pause)
+  fails at the pause with `PAUSE_UNAVAILABLE`, since the agent waiting on the
+  call can't resume it.
 - When the server shuts down it refuses new runs and interrupts the one in
   flight. A run whose server dies interrupts itself the same way.
 
@@ -350,7 +353,7 @@ The code is parsed, never run as JavaScript. The grammar takes:
 
 Left out: the built-in fixtures an engine contributes (`browser`, `device`),
 `expect(screen)`, `toHaveScreenshot`, `app.screenshot`, `screen.debug`,
-`all`, `setInputFiles`, and the value matchers (`toBe`, `toEqual`).
+`screen.pause`, `all`, `setInputFiles`, and the value matchers (`toBe`, `toEqual`).
 
 | Throws | When |
 | --- | --- |

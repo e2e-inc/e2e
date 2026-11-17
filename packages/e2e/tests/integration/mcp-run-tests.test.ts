@@ -3,10 +3,11 @@
  * one file or one test, each the CLI's own run with its exit code and the
  * list reporter's text, progress per printed line, a secret a failure
  * carries redacted, a selection that matches nothing and a file that reads
- * as a flag as error results, one run at a time, a cancelled call
- * interrupting its run, a run beside an open session leaving that session
- * alive, and no run outliving the server: not on shutdown with a run
- * queued behind a cancelled one, and not when the server is killed.
+ * as a flag as error results, a test failing at `screen.pause()` instead
+ * of waiting, one run at a time, a cancelled call interrupting its run, a
+ * run beside an open session leaving that session alive, and no run
+ * outliving the server: not on shutdown with a run queued behind a
+ * cancelled one, and not when the server is killed.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -65,6 +66,14 @@ test('prints many long lines', async () => {
 
 // The slow tests sit outside the default config's tests, so the whole suite never waits on them.
 const slowConfig = (glob: string): string => CONFIG.replace('retries: 0,', `retries: 0,\n  tests: ['${glob}'],`);
+
+const PAUSED = `import { test } from 'e2e';
+
+test('pauses', async ({ app, screen }) => {
+  await app.open('/');
+  await screen.pause();
+});
+`;
 
 const SLOW = `import { test } from 'e2e';
 
@@ -154,6 +163,8 @@ describe('e2e mcp run_tests', { timeout: 120_000 }, () => {
       'tests/failing.e2e.ts': FAILING,
       'loud/loud.e2e.ts': LOUD,
       'loud.config.ts': slowConfig('loud/**/*.e2e.ts'),
+      'paused/paused.e2e.ts': PAUSED,
+      'paused.config.ts': slowConfig('paused/**/*.e2e.ts'),
       'slow/slow.e2e.ts': SLOW,
       'slow.config.ts': slowConfig('slow/**/*.e2e.ts'),
       'slow-shutdown.config.ts': slowConfig('slow/**/*.e2e.ts'),
@@ -224,6 +235,13 @@ describe('e2e mcp run_tests', { timeout: 120_000 }, () => {
     expect(run.isError).toBe(true);
     expect(run.text).toContain('exit 2: CLI, config, or agent policy error');
     expect(run.text).toContain('NO_TESTS');
+  });
+
+  it('fails a test at screen.pause() with PAUSE_UNAVAILABLE instead of waiting', async () => {
+    const run = await runTests({ config: 'paused.config.ts' });
+    expect(run.text).toContain('exit 1: a test failed or timed out');
+    expect(run.text).toContain('PAUSE_UNAVAILABLE');
+    expect(run.text).toContain('paused/paused.e2e.ts:5');
   });
 
   it('refuses a file that reads as a flag, an empty target list, and raw flags', async () => {

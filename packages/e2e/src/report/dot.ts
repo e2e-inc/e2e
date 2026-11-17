@@ -5,7 +5,7 @@ import type { ResultStatus } from '@e2e-dev/core/lib/run/records';
 import type { Colors } from './format.ts';
 import { writeTerminal, type OutputStream, type OutputView } from '../run/process-output.ts';
 
-export class DotProgress implements OutputView {
+export class DotProgress implements Pick<OutputView, 'show' | 'end'> {
   private readonly marks: Record<ResultStatus, string>;
   private columns = 0;
   private readonly unfinished = new Set<OutputStream>();
