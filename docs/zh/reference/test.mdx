@@ -1,11 +1,11 @@
 ---
 title: test
-description: 测试、前置测试、分组、钩子、选项和测试夹具。
+description: 测试、准备测试、分组、钩子、选项和测试夹具。
 "og:image": "https://e2e.com/docs/images/og/reference/test.png?v=d1ad3b01c3"
 "twitter:image": "https://e2e.com/docs/images/og/reference/test.png?v=d1ad3b01c3"
 ---
 
-`test` 声明测试、前置测试、分组和钩子。声明在导入测试文件时同步执行。使用 `test.extend` 添加测试夹具，使用 `test.skip` 在注册时或测试主体执行期间跳过测试。
+`test` 声明测试、准备测试、分组和钩子。声明在导入测试文件时同步执行。使用 `test.extend` 添加测试夹具，使用 `test.skip` 在注册时或测试主体执行期间跳过测试。
 
 ```ts title="tests/checkout.e2e.ts"
 import { beforeEach, describe, expect, test } from 'e2e';
@@ -106,7 +106,7 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 
 | 抛出 | 条件 |
 | --- | --- |
-| `INVALID_ARGUMENT` | 在前置测试中调用。前置测试不能跳过，因为其他测试依赖它的会话。 |
+| `INVALID_ARGUMENT` | 在准备测试中调用。准备测试不能跳过，因为其他测试依赖它的会话。 |
 | `COLLECTION_ERROR` | 在测试主体之外使用条件形式。 |
 
 #### `test.skipIf`
@@ -160,7 +160,7 @@ test('exports a PDF', { fail: 'PDF export is broken' }, async ({ app }) => {}); 
 
 | 抛出 | 条件 |
 | --- | --- |
-| `INVALID_ARGUMENT` | 在前置测试、串行分组成员、`afterEach` 钩子或测试夹具清理中使用真条件。 |
+| `INVALID_ARGUMENT` | 在准备测试、串行分组成员、`afterEach` 钩子或测试夹具清理中使用真条件。 |
 | `COLLECTION_ERROR` | 在测试主体之外使用条件形式，或在串行分组中使用 `fail` 选项。 |
 
 #### `test.only`
@@ -177,7 +177,7 @@ test.only('pays', async ({ app }) => {
 
 #### `test.setup`
 
-注册一个前置测试，声明它保存的会话，并且必须将每个会话恰好保存一次。
+注册一个准备测试，声明它保存的会话，并且必须将每个会话恰好保存一次。
 
 ```ts
 import { credentials } from 'e2e';
@@ -194,7 +194,7 @@ test.setup('authenticate', { sessions: ['member'] }, async ({ app, screen, sessi
 - `test.setup` 必须位于顶层，不能放在 `describe` 内。
 - [`sessions`](#sessions) 选项声明名称。
 - 测试通过 [`session`](#session) 选项使用已保存的会话。
-- 前置测试主体会获得一个额外测试夹具 `session`：
+- 准备测试主体会获得一个额外测试夹具 `session`：
 
 ```ts
 export interface SetupSession {
@@ -291,7 +291,7 @@ beforeAll(async ({ platform }) => {
 });
 ```
 
-每次重试、每个串行分组和每个前置测试都会重新导入模块，因此 `beforeAll` 在其中都会再次运行。它唯一的测试夹具是 `platform`。
+每次重试、每个串行分组和每个准备测试都会重新导入模块，因此 `beforeAll` 在其中都会再次运行。它唯一的测试夹具是 `platform`。
 
 | 抛出 | 条件 |
 | --- | --- |
@@ -431,7 +431,7 @@ test('onboarding asks for the camera', { requires: ['native-app'] }, async ({ ap
 
 #### `session`
 
-前置测试保存的会话，在主体运行前恢复。
+准备测试保存的会话，在主体运行前恢复。
 
 ```ts
 test('sees the dashboard', { session: 'member' }, async ({ app }) => {});
@@ -458,7 +458,7 @@ test('checks out', { agent: ['fast', 'smart'] }, async ({ agent }) => {}); // on
 - 列表会让测试针对每个命名智能体各运行一次，各自产生一个结果。
 - 最内层设置优先。调用自身的 `agent` 选项优先级更高。
 - `--agent` 将列表缩小到两者共同指定的名称，绝不会覆盖该标志未指定的绑定。
-- 前置测试针对每个测试目标运行一次，因此最多绑定一个智能体。
+- 准备测试针对每个测试目标运行一次，因此最多绑定一个智能体。
 
 | 抛出 | 条件 |
 | --- | --- |
@@ -516,7 +516,7 @@ describe('checkout', { serial: true }, () => {
 
 #### `sessions`
 
-仅用于 `test.setup`。前置测试必须保存的会话名称。
+仅用于 `test.setup`。准备测试必须保存的会话名称。
 
 ```ts
 test.setup('authenticate', { sessions: ['member', 'admin'] }, async ({ session }) => {});

@@ -421,9 +421,9 @@ expect(totals.lineTotal).toBeCloseTo(60); // digits default: 2
 
 `toBeCloseTo(60)` 接受 59.996，拒绝 59.99。无穷值只有与同一个无穷值比较时才会通过。
 
-#### 匹配模式
+#### 匹配 schema
 
-`toMatchSchema` 根据 [Standard Schema](https://standardschema.dev) 校验值：可以是 Zod、Valibot 或 ArkType 模式，也可以是任何实现该规范的库。传入应用已经用于解析 API 的模式，当 API 偏离该模式时，测试就会失败。它返回带类型的模式输出，因此测试其余部分可以直接读取属性，无需类型转换。
+`toMatchSchema` 根据 [Standard Schema](https://standardschema.dev) 校验值：可以是 Zod、Valibot 或 ArkType schema，也可以是任何实现该规范的库。传入应用已经用于解析 API 的 schema，当 API 偏离该 schema 时，测试就会失败。它返回带类型的 schema 输出，因此测试其余部分可以直接读取属性，无需类型转换。
 
 ```ts
 import { z } from 'zod';
@@ -435,8 +435,8 @@ expect(users.map((user) => user.name)).toContain('Ada');
 ```
 
 - 失败时会按路径列出每个问题（`1.email: Invalid email address`）。
-- 输出来自模式，因此默认值和转换都会生效。
-- 匹配器会在任何代码有机会等待它之前返回，因此异步校验的模式（异步 refinement）会导致 `INVALID_ARGUMENT`。
+- 输出来自 schema，因此默认值和转换都会生效。
+- 匹配器会在任何代码有机会等待它之前返回，因此异步校验的 schema（异步 refinement）会导致 `INVALID_ARGUMENT`。
 - 取反时，值不匹配则通过，不返回任何内容。
 
 #### 失败消息
@@ -510,7 +510,7 @@ ASSERTION_FAILED: 2 soft assertions failed
 - 软值匹配器与硬值匹配器一样，不算步骤；其失败出现在尝试的错误记录中。
 - 如果测试体自行抛出异常或超时，该错误仍是尝试的判定结果，软断言失败则记录在旁边的 `secondaryErrors` 下。
 - 测试体在软断言失败后通过 `test.skip(...)` 跳过自身，仍会失败：软断言失败成为尝试的错误，跳过原因保留在尝试的 `skip` 中。
-- 软 `toMatchSchema` 在值匹配时返回模式输出，在保留失败后返回 `undefined`，其类型也反映这一点。
+- 软 `toMatchSchema` 在值匹配时返回 schema 输出，在保留失败后返回 `undefined`，其类型也反映这一点。
 
 <Note>
 测试体之外没有可供延后处理失败的对象，因此 `expect.soft` 会像 `expect` 一样立即抛出异常：独立脚本中如此，`afterEach` 钩子中也如此，因为该钩子在软断言失败处理完毕后运行。没有 `expect.soft.poll`；`expect.poll` 使用自己的超时来判定失败。
@@ -544,7 +544,7 @@ await expect.poll(() => readStatus(), { message: 'the batch never finished' }).n
 所有值匹配器都可用，返回 Promise。
 
 - 每次采样都会调用 `read` 并运行匹配器。匹配器失败或 `read` 抛出异常都算一次失败采样；挂起的 `read` 会在截止时间被放弃。
-- `toMatchSchema` 会解析为通过校验的那次读取所对应的模式输出。
+- `toMatchSchema` 会解析为通过校验的那次读取所对应的 schema 输出。
 - 尝试被取消时，循环以 `CANCELLED` 停止。到达尝试截止时间时，以 `ASSERTION_FAILED` 停止，并指出截止时间。进行中的 `read` 会被放弃，而不会被停止：它启动的工作可以继续。
 - `expect.poll` 不会记录为报告步骤；超时只会表现为测试失败。
 

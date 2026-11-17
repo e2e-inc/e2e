@@ -173,8 +173,8 @@ targets: [{ name: 'phone', engine: hyperdrive({ device: 'iPhone 16' }), app: { b
 
 - 只有 `NODE_STALE` 和 `FRAME_NOT_FOUND` 可以重试。
 - 当操作可能已经生效时，使用 `ACTION_MAY_HAVE_COMMITTED`，避免运行器重复执行。
-- `INVALID_STATE` 会转换为 `APP_NOT_OPEN`，`UNSUPPORTED_CAPABILITY` 则属于配置错误。
-- 未知错误会转换为基础设施故障。
+- `INVALID_STATE` 会转换为 `APP_NOT_OPEN`，`UNSUPPORTED_CAPABILITY` 则属于 configuration 类别的错误。
+- 未知错误会转换为 infrastructure 类别的错误。
 
 ## 引擎提供的测试夹具
 

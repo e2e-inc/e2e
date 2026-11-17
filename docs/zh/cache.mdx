@@ -144,7 +144,7 @@ await expect(screen.getByRole('heading', { name })).toBeVisible();
 | --- | --- | --- |
 | `no-entry` | 没有录制记录匹配此步骤及其参数。 | 下次通过验证后会录制，除非该步骤的 `step.cache.write` 为 `no-change`。 |
 | `retry` | 重试不会回放，使用 `--strict-cache` 或 `cache.strict` 时除外。 | 无需操作。 |
-| `invalid-entry` | 文件无法读取、超过 1 MiB，或来自其他架构版本。 | `npx e2e cache clear`。 |
+| `invalid-entry` | 文件无法读取、超过 1 MiB，或来自其他 schema 版本。 | `npx e2e cache clear`。 |
 | `truncated` | 录制达到了限制，参阅[下文](#limits-and-gaps)。 | 拆分步骤，或将机密值作为 `Secret` 传入。 |
 | `wrong-context` | 应用所在路由与录制步骤时不同。参阅[回放的工作原理](#how-a-replay-works)。 | 在步骤之前打开相同的屏幕。 |
 | `target-not-found` | 已录制的控件在 15 秒内未出现，或者它没有名称，也没有具名容器来将它与相同控件区分开。 | UI 已变化：下次通过的运行会重新录制。对于无名称的控件，请为其添加标签，或将其放入具名行或组中。 |

@@ -23,7 +23,7 @@ test('GET /api/users returns the seeded users', async ({ app }) => {
 });
 ```
 
-`toMatchSchema` 接受任何 [Standard Schema](/reference/expect#matching-a-schema)，例如 Zod、Valibot 或 ArkType，并返回带有类型的值。使用应用解析 API 时所用的模式，API 不再符合该模式时，测试就会失败。
+`toMatchSchema` 接受任何 [Standard Schema](/reference/expect#matching-a-schema)，例如 Zod、Valibot 或 ArkType，并返回带有类型的值。使用应用解析 API 时所用的 schema，API 不再符合该 schema 时，测试就会失败。
 
 ## API 的运行位置
 

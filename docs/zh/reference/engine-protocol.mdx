@@ -232,7 +232,7 @@ export interface EngineManifest {
 | `{ type: 'engine', code, retryable }` | [`EngineError`](/reference/engine#engineerror)。只有 `NODE_STALE` 和 `FRAME_NOT_FOUND` 可以重试。 |
 | `{ type: 'e2e', category, code, retryable, details? }` | 运行器错误，例如 `TestError` 或 `ConfigurationError`。 |
 
-其他错误码只携带消息。测试执行框架将其视为基础设施故障，与本地引擎抛出的普通 `Error` 一样处理。每个错误的 `data` 还可以携带 `stack`、`errno`（例如 `ECONNREFUSED` 这样的 Node 错误码）和 `cause`（同样结构的错误对象），让报告显示引擎失败的位置。
+其他错误码只携带消息。测试执行框架将其视为 infrastructure 类别的错误，与本地引擎抛出的普通 `Error` 一样处理。每个错误的 `data` 还可以携带 `stack`、`errno`（例如 `ECONNREFUSED` 这样的 Node 错误码）和 `cause`（同样结构的错误对象），让报告显示引擎失败的位置。
 
 ## 类型
 

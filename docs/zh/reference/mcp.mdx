@@ -113,7 +113,7 @@ tools {tool: "locate"}
 
 | 输入 | 类型 | 必填 | 作用 |
 | --- | --- | --- | --- |
-| `tool` | string | 否 | 目录中的工具。返回其完整描述和参数架构。 |
+| `tool` | string | 否 | 目录中的工具。返回其完整描述和参数 schema。 |
 | `session` | string | 打开多个会话时 | 会话 ID。 |
 
 #### `call`
@@ -130,7 +130,7 @@ call {tool: "tap", args: {target: "n42"}, session: "<id>"}
 | `args` | object | 否 | 工具参数。 |
 | `session` | string | 打开多个会话时 | 会话 ID。 |
 
-- 首先按工具的封闭架构验证参数。类型错误，或向声明了参数的工具传入未声明的参数，会返回 `INVALID_ARGUMENT`，且不执行任何操作。`back` 和 `dismiss_keyboard` 不接受参数；它们会丢弃收到的所有参数并执行。
+- 首先按工具的封闭 schema 验证参数。类型错误，或向声明了参数的工具传入未声明的参数，会返回 `INVALID_ARGUMENT`，且不执行任何操作。`back` 和 `dismiss_keyboard` 不接受参数；它们会丢弃收到的所有参数并执行。
 - 失败的操作会返回错误结果，其中仍包含重新观察到的屏幕。结果以工具、操作目标和代码开头：`navigate file:///etc/passwd failed: POLICY_DENIED: forbidden URL scheme: file:`。
 - 项目工具遵循其 AI SDK `toModelOutput` 渲染器，包括 `execute` 返回字符串的情况。渲染后的 `error-text` 和 `error-json` 输出是 MCP 错误结果（`isError: true`）。编码智能体可以区分失败和成功的工具调用。
 

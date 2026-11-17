@@ -538,7 +538,7 @@ async prepare(info) {
 | --- | --- |
 | 运行器错误类，例如引擎无法支持某个选项时抛出的 `ConfigurationError` | 保留相同代码。 |
 | 代码为 `CANCELLED` 的 `EngineError` | 取消。 |
-| 任何其他 `EngineError` 或普通 `Error` | 基础设施错误 `ENGINE_FAILURE`。 |
+| 任何其他 `EngineError` 或普通 `Error` | infrastructure 类别的错误 `ENGINE_FAILURE`。 |
 
 ```ts
 /**
@@ -691,7 +691,7 @@ async init(info) {
 },
 ```
 
-`init` 不会收到应用 URL；URL 只通过 `session.open` 传入。失败会被视为基础设施错误。
+`init` 不会收到应用 URL；URL 只通过 `session.open` 传入。失败会被视为 infrastructure 类别的错误。
 
 ```ts
 /** Run identity and harness-resolved facts handed to `init`, once per worker before the first step. */
@@ -1413,10 +1413,10 @@ export interface EngineSession {
 | `FRAME_NOT_FOUND` | 重新解析，然后为 `LOCATOR_NOT_FOUND` | 是 |
 | `FRAME_AMBIGUOUS` | `LOCATOR_AMBIGUOUS` | 否 |
 | `NOT_ACTIONABLE`、`ACTION_MAY_HAVE_COMMITTED`、`OPERATION_TIMEOUT` | `ACTION_FAILED` | 否 |
-| `CANCELLED` | 基础设施错误 `CANCELLED` | 否 |
-| `UNSUPPORTED_CAPABILITY` | 配置错误 `UNSUPPORTED_CAPABILITY` | 否 |
+| `CANCELLED` | infrastructure 类别的错误 `CANCELLED` | 否 |
+| `UNSUPPORTED_CAPABILITY` | configuration 类别的错误 `UNSUPPORTED_CAPABILITY` | 否 |
 | `INVALID_STATE` | `APP_NOT_OPEN` | 否 |
-| `ENGINE_FAILURE`、任何非 `EngineError` 错误 | 基础设施错误 `ENGINE_FAILURE` | 否 |
+| `ENGINE_FAILURE`、任何非 `EngineError` 错误 | infrastructure 类别的错误 `ENGINE_FAILURE` | 否 |
 
 #### `EngineError`
 

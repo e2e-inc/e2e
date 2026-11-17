@@ -71,7 +71,7 @@ const agent = { model: openai('gpt-6-luna') };
   </Tab>
   <Tab title="本地或自托管">
 
-安装 `@ai-sdk/openai-compatible`。设置端点 URL 和该端点提供的模型 ID。如果服务器需要密钥，则添加 `apiKey`。如果服务器支持 JSON Schema 响应格式（例如 Ollama），请设置 `supportsStructuredOutputs: true`。否则，AI SDK 会丢弃模式并发出 `responseFormat` 警告，智能体步骤可能需要更多模型调用：
+安装 `@ai-sdk/openai-compatible`。设置端点 URL 和该端点提供的模型 ID。如果服务器需要密钥，则添加 `apiKey`。如果服务器支持 JSON Schema 响应格式（例如 Ollama），请设置 `supportsStructuredOutputs: true`。否则，AI SDK 会丢弃 schema 并发出 `responseFormat` 警告，智能体步骤可能需要更多模型调用：
 
 ```ts title="Model setup"
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';

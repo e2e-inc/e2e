@@ -130,7 +130,7 @@ What the app logged, oldest first, with the step it happened in.
 
 ## 供脚本使用：report.json
 
-每次进入测试执行阶段的运行还会将 `report.json` 写入[输出目录](/reference/config#output)，默认为 `.e2e`。它以带版本的模式保存此次运行的每项结果。`--reporter json` 将它输出到 stdout：
+每次进入测试执行阶段的运行还会将 `report.json` 写入[输出目录](/reference/config#output)，默认为 `.e2e`。它以带版本的 schema 保存此次运行的每项结果。`--reporter json` 将它输出到 stdout：
 
 ```bash
 jq '.run | {status, exitCode, errors}' .e2e/report.json

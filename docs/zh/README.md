@@ -61,6 +61,9 @@ translates it; deleting the translated page falls back to English.
 | English | Chinese |
 | --- | --- |
 | test, test suite | 测试，测试套件 |
+| setup test (`test.setup`) | 准备测试 |
+| blocked (verdict / status) | 受阻 |
+| schema | schema (keep in English) |
 | agent, agentic | 智能体，智能体驱动的 |
 | deterministic | 确定性 |
 | engine | 引擎 |

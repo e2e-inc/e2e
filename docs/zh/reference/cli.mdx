@@ -476,7 +476,7 @@ e2e run [files...]
 - **行号。** 如果行号指向串行组中的一个成员，会运行整个组。同一文件的多个行号会合并选择；不带行号的文件参数会选择整个文件。如果指定行没有测试声明，`NO_TESTS` 会指出该位置参数和文件中声明测试的行。如果位置参数原样对应磁盘上存在的路径，即使以 `:12` 结尾，也会作为路径处理。
 - **Glob。** 花括号、字符类和扩展 glob 会报 `INVALID_GLOB` 并给出提示，不会被当作无法匹配的模式。不会进行展开，因此请为每个备选项分别指定 glob。`./`、`..`、末尾的 `/` 和项目内的绝对路径与其他位置路径参数一样解析。已有文件或目录始终按路径选择，无论名称包含什么字符。
 - 位置参数进一步缩小配置 glob 以及标签、平台和能力过滤器的结果范围，绝不会绕过它们。名称和 glob 在所有操作系统上都区分大小写。项目根目录之外的路径会报 `COLLECTION_ERROR`。
-- 运行器会导入所有发现的测试文件，即使你只选择少数文件，以便所选测试能在其他文件中找到会话配置。其他普通测试仍不会被选中。所选文件中发生收集错误，或未使用位置参数的运行中任意文件发生收集错误，都会导致运行失败。位置参数排除的文件如果无法导入或注册测试，会被跳过并显示通知。因此，其他位置未完成的文件不会阻止 `npx e2e run tests/login.e2e.ts`。如果所选测试的会话随后找不到配置测试，错误信息会指出该文件可能是配置所在的位置。
+- 运行器会导入所有发现的测试文件，即使你只选择少数文件，以便所选测试能在其他文件中找到保存其会话的准备测试。其他普通测试仍不会被选中。所选文件中发生收集错误，或未使用位置参数的运行中任意文件发生收集错误，都会导致运行失败。位置参数排除的文件如果无法导入或注册测试，会被跳过并显示通知。因此，其他位置未完成的文件不会阻止 `npx e2e run tests/login.e2e.ts`。如果所选测试的会话随后找不到准备测试，错误信息会指出准备测试可能位于该文件中。
 - 以 `-` 开头且不对应任何文件的位置参数属于用法错误，退出码为 2。`pnpm test:e2e -- --headed` 会产生此错误：`--` 被传到 e2e，否则它会将 `--headed` 当作文件。提示信息会给出直接调用形式 `pnpm exec e2e run --headed`。对于 npm，则为 `npm exec -- e2e run --headed`；npm 需要在可执行文件前使用分隔符来传递其标志。
 - 没有可运行的测试时，`NO_TESTS` 会指出原因：没有文件匹配 glob（并列出 `tests/login.test.ts` 等相似文件）、位置参数没有匹配项（并给出最接近的路径）、匹配文件未注册测试，或所有测试都被过滤掉。
 
@@ -497,7 +497,7 @@ e2e run [files...]
 | `--grep-invert <pattern>` | 排除标题匹配任意正则表达式的测试；可重复传入，匹配文本和形式与 `--grep` 相同。同时使用两者时，保留 `--grep` 匹配的测试，再减去 `--grep-invert` 匹配的测试。 |
 | `--changed-since <ref>` | 对相对于 ref 的更改运行配置的[测试过滤器](/filters)：包括与 ref 和 `HEAD` 的合并基点相比有差异的所有文件，以及未提交和未跟踪的文件。每个测试目标优先启动过滤器评分认为最相关的测试文件。未使用此选项时，不运行过滤器。未配置过滤器时，会警告将运行全部测试。 |
 | `--last-failed` | 仅选择上次运行未通过的测试；具体范围见这些表格后的列表。 |
-| `--shard <index/total>` | 运行所选测试的一个连续分片，例如 `2/3`，在所有其他标志应用后切分。分片间最多相差一个测试。串行组算作一个，绝不拆分。每个分片只带上自身测试所需的配置测试。跳过的测试不参与切分：由运行它前面最近测试的分片报告；如果前面没有测试，则由第一个分片报告，因此只报告一次。每个分片运行同一命令，使用不同索引。顺序与报告顺序一致，因此测试套件在每台机器上的分片方式相同。没有测试的分片会报 `NO_TESTS`，除非使用 `--pass-with-no-tests`。参阅[分片](/ci#sharding)。 |
+| `--shard <index/total>` | 运行所选测试的一个连续分片，例如 `2/3`，在所有其他标志应用后切分。分片间最多相差一个测试。串行组算作一个，绝不拆分。每个分片只带上自身测试所需的准备测试。跳过的测试不参与切分：由运行它前面最近测试的分片报告；如果前面没有测试，则由第一个分片报告，因此只报告一次。每个分片运行同一命令，使用不同索引。顺序与报告顺序一致，因此测试套件在每台机器上的分片方式相同。没有测试的分片会报 `NO_TESTS`，除非使用 `--pass-with-no-tests`。参阅[分片](/ci#sharding)。 |
 | `--pass-with-no-tests` | 未选中任何测试时，以退出码 0 退出，而非报 `NO_TESTS`。没有测试可运行时，不会准备引擎，也不会启动应用或服务命令。 |
 
 **执行**
@@ -512,7 +512,7 @@ e2e run [files...]
 | `--assertion-timeout <ms>` | 替代本次运行的 [`assertionTimeout`](/reference/config#assertiontimeout)；范围为 1–2147483647 的整数，其他值属于用法错误，退出码为 2。默认：配置值，否则为 `5000`。匹配器自身的 `timeout` 仍优先。 |
 | `--max-failures <n>` | 当失败或超时的测试达到此数量（至少为 1）时停止运行。不再分配新测试，其他工作进程中正在运行的测试以 `interrupted` 结束。尚未启动的测试，包括触发限制的测试所在文件中的其余测试，都会被跳过，原因为 `failure-limit`，说明为 `run stopped after 3 failures (--max-failures 3)`。以失败自身的退出码 1 退出，而不是 130。 |
 | `--max-duration <ms>` | 覆盖单次运行的 [`maxDuration`](/reference/config#maxduration)；范围为 1–2147483647 的整数。默认：配置值。以退出码 1 退出，而不是 130。 |
-| `--repeat-each <n>` | 将每个所选测试运行指定次数，至少为 1。默认：`1`。每次运行都有独立结果，`repeat` 从 0 到 `n - 1`，并有独立的 `id`。list 报告器将后续运行标为 `(repeat #1)`、`(repeat #2)`，并将产物放入 `repeat-<n>` 目录。配置测试只运行一次。启用回放缓存时，首次运行会录制，后续运行会回放；添加 `--no-cache` 可在每次运行时调用模型。`list` 摘要会添加 `Repeats` 行（`1 of 2 tests passed all 5 runs`），并为未能每次都通过的测试各列一行，指出失败的运行。`markdown` 页面显示相同统计。 |
+| `--repeat-each <n>` | 将每个所选测试运行指定次数，至少为 1。默认：`1`。每次运行都有独立结果，`repeat` 从 0 到 `n - 1`，并有独立的 `id`。list 报告器将后续运行标为 `(repeat #1)`、`(repeat #2)`，并将产物放入 `repeat-<n>` 目录。准备测试只运行一次。启用回放缓存时，首次运行会录制，后续运行会回放；添加 `--no-cache` 可在每次运行时调用模型。`list` 摘要会添加 `Repeats` 行（`1 of 2 tests passed all 5 runs`），并为未能每次都通过的测试各列一行，指出失败的运行。`markdown` 页面显示相同统计。 |
 | `--no-cache` | 为本次运行关闭回放缓存，无论 `config.cache` 如何设置。 |
 | `--strict-cache` | 为本次运行启用 `cache.strict`。已有录制但无法再回放的步骤会报 `REPLAY_STALE`，而不是交给智能体。重试也会回放，且本次运行绝不会写入缓存。参阅[录制失效时失败](/cache#fail-on-a-stale-recording)。 |
 | `-u`、`--update-snapshots` | 写入 [`toHaveScreenshot`](/reference/expect#screenshot-matchers) 发现缺失或不同的每张已存储截图，并让匹配器通过。不使用此标志时，缺失的截图会被写入，但检查失败；在 CI 中只会附加到结果中。 |
@@ -539,8 +539,8 @@ e2e run [files...]
 `--last-failed` 选择上次运行未通过的测试。它从本次运行将覆盖的 `report.json` 读取，即 `<output>/report.json`（使用 `--output`，否则使用配置的 [`output`](/reference/config#output)）：
 
 - 失败、超时或被中断的测试。
-- 因配置测试、串行前序测试、钩子或工作进程失败而被跳过的测试，或因 `--max-failures` 或 `--max-duration` 提前停止运行而被跳过的测试。
-- 失败的 `beforeAll` 或 `afterAll` 在该测试目标上、其 describe 或文件中选中的每个测试；对于配置测试，则包括使用其会话的测试。如果重新运行再次执行该钩子且仍然失败，会再次报告。若重新运行执行其作用域内的任意测试且钩子未失败，则该失败被视为已解决。
+- 因准备测试、串行前序测试、钩子或工作进程失败而被跳过的测试，或因 `--max-failures` 或 `--max-duration` 提前停止运行而被跳过的测试。
+- 失败的 `beforeAll` 或 `afterAll` 在该测试目标上、其 describe 或文件中选中的每个测试；对于准备测试，则包括使用其会话的测试。如果重新运行再次执行该钩子且仍然失败，会再次报告。若重新运行执行其作用域内的任意测试且钩子未失败，则该失败被视为已解决。
 - 因其他过滤器（`--grep`、`--tag`、`--target`、`--agent`、位置参数）被排除在重新运行之外的测试，仍待处理。重新运行的报告会在 `run.carried` 下保留其上次结果，以及作用域涵盖它的钩子失败信息。下次 `--last-failed` 会再次选择它，[`@e2e-dev/github`](/github) 页面会一直保持红色，直到它通过（上次运行被中断的测试显示 ⏹️）。重新运行自身的退出码和摘要只统计实际运行的内容。
 - 重新运行会保留上一份报告引用的产物，并将新产物写入每个测试的 `rerun-<n>/` 下，避免任何尝试覆盖先前尝试的文件。
 - 测试按测试目标和智能体分别标识。
@@ -587,7 +587,7 @@ $ npx e2e run --debug
 | --- | --- |
 | `list` | 终端进度、带代码上下文的失败信息，以及运行摘要。在 TTY 中，实时进度显示当前智能体步骤、模型轮次、工具调用和推理摘录；stdout 不是终端时（管道、重定向、大多数 CI），每个测试结束后才输出。输出结尾列出每个失败测试的文件和行号、错误首行，以及已写入的追踪记录页面。不可信字段限制为 8 KiB，并移除控制字符。 |
 | `json` | 将报告文档输出到 stdout，且不在 stdout 输出其他内容，因此 `e2e run --reporter json \| jq` 可正常工作。文档与 `<output>/report.json` 相同，由包中的 `schema/report-v1.schema.json` 描述。结构只会随 `schemaVersion` 字段变化（目前为 `report-1`）。 |
-| `junit` | 报告旁的 `junit.xml`。每个文件一个 `<testsuite>`，每个测试与测试目标的组合一个 `<testcase>`，命名为 `title > path [target]`。测试类错误为 `<failure>`，其他错误为 `<error>`，跳过为带原因的 `<skipped>`。被中断的测试没有得出判定，因此为消息以 `interrupted:` 开头的 `<skipped>`。被[测试过滤器](/filters)排除的测试为消息以 `left out by filter <name>:` 开头的 `<skipped>`；其他未被本次运行选中的测试不会列出。运行级错误组成一个 `run` 套件。 |
+| `junit` | 报告旁的 `junit.xml`。每个文件一个 `<testsuite>`，每个测试与测试目标的组合一个 `<testcase>`，命名为 `title > path [target]`。test 类别的错误为 `<failure>`，其他错误为 `<error>`，跳过为带原因的 `<skipped>`。被中断的测试没有得出判定，因此为消息以 `interrupted:` 开头的 `<skipped>`。被[测试过滤器](/filters)排除的测试为消息以 `left out by filter <name>:` 开头的 `<skipped>`；其他未被本次运行选中的测试不会列出。运行级错误组成一个 `run` 套件。 |
 | `markdown` | 报告旁的 `summary.md`：数量、费用、错误和失败详情，每项都会指出保留的追踪记录页面。探索运行会显示发现的问题。[`@e2e-dev/github`](/github) 使用该摘要生成拉取请求（PR）评论。 |
 
 每次执行到测试阶段的运行都会在[输出目录](/reference/config#output)（默认为 `.e2e`）下写入：
@@ -706,7 +706,7 @@ bunx e2e explore 'Hunt for broken forms and dead links' --agent thorough --video
 | `--config <path>` | 显式配置路径，错误与 `run` 相同。默认：自动发现。未找到配置且 stdin 和 stdout 均为终端时，会先在工作目录中运行 [`e2e init`](#e2e-init) 向导。当不再需要手动操作时，探索会接着开始：依赖项已安装、模型密钥已设置或已完成登录，并且有网页端测试目标（会指出探索的 URL）。否则，init 会列出剩余步骤，然后显示原样输入的 `e2e explore` 命令。没有终端且未找到配置时，报 `CONFIG_NOT_FOUND`。 |
 | `--target <id>` | 要探索的一个测试目标。默认：配置中的第一个测试目标；有多个测试目标且未指定此标志时，探索第一个，并在 stderr 说明。未知名称会报 `UNKNOWN_TARGET`。 |
 | `--agent <name>` | 探索时使用的已配置智能体。默认：`default`。复用其模型、`system`、工具和上下文。内置智能体会替代自行编写的 `StepExecutor`，并显示通知。条目没有模型时，包括自定义执行器的条目，会在任何操作开始前报 `MODEL_UNAVAILABLE`。未知名称会报 `INVALID_CONFIG`。 |
-| `--session <name>` | 以已登录状态开始。配置的测试文件中声明此会话的配置测试会先运行。探索会像带有 `{ session }` 的测试一样恢复它保存的状态。不运行其他测试。名称未被任何配置测试声明时，会在任何应用进程启动前报 `COLLECTION_ERROR`，并列出已声明的名称。参阅[以已登录状态开始](/explore#start-signed-in)。 |
+| `--session <name>` | 以已登录状态开始。先运行配置中指定的测试文件里声明此会话的准备测试。探索会像带有 `{ session }` 的测试一样恢复它保存的状态。不运行其他测试。名称未被任何准备测试声明时，会在任何应用进程启动前报 `COLLECTION_ERROR`，并列出已声明的名称。参阅[以已登录状态开始](/explore#start-signed-in)。 |
 | `--changed-since <ref>` | 探索相对于 ref 与 HEAD 的合并基点的更改。规划器读取提交消息和已提交的差异。不指定目标时，目标为 `Explore what this change affects and find bugs in it`，规划器可以跳过用户不可见的更改；运行以 `skipped` 结束并通过。空 ref、以 `-` 开头的 ref，或 git 无法据其计算更改的 ref，会报 `INVALID_CHANGED_SINCE`。报告将更改记录为 `run.explore.change`。参阅[探索拉取请求（PR）的更改](/explore#explore-a-pull-requests-change)，以及[安全](/reference/security#mcp-and-explore)中模型读取内容的说明。 |
 | `--max-steps <n>` | 最多探索步骤数，范围为 1–100 的整数。默认：`8`。超出范围时以退出码 2 退出。 |
 | `--timeout <ms>` | 运行的实际经过时间，范围为 180000–7200000 的整数。默认：`600000`。最后一分钟留给最终评估。超出范围时以退出码 2 退出。 |
@@ -724,8 +724,8 @@ bunx e2e explore 'Hunt for broken forms and dead links' --agent thorough --video
 
 - 运行包含一个结果，位于虚拟文件 `explore` 下，以目标作为标题。
 - 探索首先打开应用：使用测试目标的 `app.url`，或在设备上全新启动[固定的应用](/mobile#point-at-your-app)。它不会安装构建，因此本地设备测试目标需要 `app.bundleId`。
-- 使用 `--session` 时，报告还包含配置测试的结果。项目中的其他测试会被列为跳过，原因为 `filtered`，就像 `run` 列出未被位置参数指定的文件中的测试一样。
-- 探索时关闭回放缓存，重试次数为零，无论配置如何设置。`--session` 的配置测试则像 `run` 中一样运行，使用配置中的智能体、缓存和重试。
+- 使用 `--session` 时，报告还包含准备测试的结果。项目中的其他测试会被列为跳过，原因为 `filtered`，就像 `run` 列出未被位置参数指定的文件中的测试一样。
+- 探索时关闭回放缓存，重试次数为零，无论配置如何设置。`--session` 的准备测试则像 `run` 中一样运行，使用配置中的智能体、缓存和重试。
 - `<output>/report.json` 会增加 `run.explore`：包含目标、预算、运行结束原因（`finished`、`skipped`、`step-limit`、`time`、`stuck` 或 `aborted`）、评估、使用 `--changed-since` 时的更改（`base` 和 `files`）、步骤和发现的问题。
 - 产物目录的名称由目标开头的词语和目标、测试目标、智能体的摘要组成，例如 `<output>/results/explore-check-the-cart-totals-1a2b3c4d5e6f7a8b/`。在相同测试目标和智能体上重新运行相同目标时，会写入同一目录。
 
@@ -792,7 +792,7 @@ bunx e2e list --changed-since origin/main
 
 | 报告器 | 写入内容 |
 | --- | --- |
-| `list` | 按选择顺序为每个组合输出一行：`file › title [target]`，describe 路径用 ` › ` 连接（`tests/billing.e2e.ts › checkout › pays [web]`），然后将每个声明的标签显示为 `#tag`（`tests/billing.e2e.ts › checkout › pays [web] #smoke #billing`）。跳过的测试保留该行，并追加 `(skipped: <reason>)`；被测试过滤器排除的测试以 `(left out by <filter>: <reason>)` 结尾。配置测试与其他测试一样列出。 |
+| `list` | 按选择顺序为每个组合输出一行：`file › title [target]`，describe 路径用 ` › ` 连接（`tests/billing.e2e.ts › checkout › pays [web]`），然后将每个声明的标签显示为 `#tag`（`tests/billing.e2e.ts › checkout › pays [web] #smoke #billing`）。跳过的测试保留该行，并追加 `(skipped: <reason>)`；被测试过滤器排除的测试以 `(left out by <filter>: <reason>)` 结尾。准备测试与其他测试一样列出。 |
 | `json` | 将 `{ "pairs": [...] }` 输出到 stdout。每个组合包含 `id`、`file`、`title`、`titlePath`、`kind`（`test` 或 `setup`）、`tags`（测试声明的标签，没有时为 `[]`）、声明位置已知时的 `source`、测试使用会话时的 `session`、`sessions`、测试属于串行组时的 `serialId`、`target`、`agent`、`disposition`（`run`、`skip`，或被测试过滤器排除时的 `filtered`）、跳过或排除时的 `reason`，以及被测试过滤器排除时的过滤器名称 `filter`。 |
 
 被选择标志移除的组合不会列出。[`e2e/runner` 的 `list`](/reference/runner) 在进程内执行相同的选择，并且还会返回被移除的组合。
@@ -1069,7 +1069,7 @@ E2E_TELEMETRY_DEBUG=1 bunx e2e run
 | 退出码 | 含义 |
 | ---: | --- |
 | 0 | 所有所选测试都通过、为不稳定测试，或被显式跳过 |
-| 1 | 测试或配置测试最终失败，或测试超时 |
+| 1 | 测试或准备测试最终失败，或测试超时 |
 | 2 | CLI、配置、收集、依赖项、凭据、模型配置或策略错误 |
 | 3 | 引擎、应用进程、模型提供方、产物或清理基础设施故障；`e2e feedback` 无法送达；`e2e upgrade` 无法访问包注册表 |
 | 4 | 运行器内部不变量被破坏，或未处理的运行器错误 |

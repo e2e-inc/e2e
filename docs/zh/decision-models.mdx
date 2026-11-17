@@ -98,7 +98,7 @@ const executor = decisionExecutor({
 
 每一轮都会提供引擎在最新屏幕元素上支持的操作：`tap`、`type`、`typeSecret`、`submit`、`select`、`check`、`upload`、`hover`、`secondary_tap`（右键单击）、`double_tap`、`long_press`、`drag`、`scroll_to`、`scroll_up`、`scroll_down` 和 `back`。悬停、右键单击、拖动和滚动到指定位置也可以作用于带标签的非控件节点，例如悬停时打开菜单的卡片；拖动也可以将元素放到这些节点上。`tap` 还可以作用于文本字段，以打开日期选择器或建议列表。当移动端引擎等支持关闭屏幕键盘的引擎显示键盘时，即使语义树中没有键盘，执行器也会提供 `dismiss_keyboard`。
 
-每个作用于元素的操作都会询问操作对象，即使只有一个元素符合条件。每个操作对象问题都有一个 `none` 选项，因此，没有合适操作对象时，提供方会回答 `none`，而不是拒绝回答。`none` 会阻塞该步骤。
+每个作用于元素的操作都会询问操作对象，即使只有一个元素符合条件。每个操作对象问题都有一个 `none` 选项，因此，没有合适操作对象时，提供方会回答 `none`，而不是拒绝回答。`none` 会使该步骤受阻。
 
 ## 如何输入文本
 
@@ -183,7 +183,7 @@ const executor = decisionExecutor({
 - 不支持多选 `listbox`，也不支持 `scrollUntil`。`type_at` 不会先清空绘制的字段，因此适合空字段。
 - 描述绘制控件的文本模型看不到像素。它无法遵循仅以绘制文本呈现的指令，例如向导中绘制的“点击圆圈”。
 - 每次决策调用和文本调用都计入 `maxModelCalls`。
-- 连续三次操作失败或未产生变化时，步骤会以 `AUTOMATION_UNSUPPORTED` 阻塞。
+- 连续三次操作失败或未产生变化时，步骤会以 `AUTOMATION_UNSUPPORTED` 受阻。
 - 如果提供方拒绝回答某个问题，步骤会以 `MODEL_OUTPUT_INVALID` 失败。
 - 每个问题最多有 255 个选项，这是 TypeSafe 的限制。在更大的屏幕上，视口中的节点优先，其余节点计为省略，因此模型可以滚动。
 

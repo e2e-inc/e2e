@@ -32,7 +32,7 @@ test('invite a teammate', async ({ agent }) => {
 
 ### agent.act
 
-规划并执行一个受限的多操作流程。判定通过时，Promise 以 `ActResult` 完成。失败或阻塞时抛出 [`AgentError`](#agenterror)，其 `code` 和 `blocked` 标志说明原因。
+规划并执行一个受限的多操作流程。判定通过时，Promise 以 `ActResult` 完成。失败或受阻时抛出 [`AgentError`](#agenterror)，其 `code` 和 `blocked` 标志说明原因。
 
 ```ts
 await agent.act('invite {email} as an editor', { params: { email: 'ada@example.test' } });
@@ -85,9 +85,9 @@ await agent.act('open settings and turn on dark mode', {
 });
 ```
 
-除非执行器指定更具体的错误码（如 `LOCATOR_NOT_FOUND` 或 `AUTHENTICATION_FAILED`），否则失败判定为 `ACTION_FAILED`。阻塞判定表示该步骤无法对产品作出判定。它携带以下错误码之一：
+除非执行器指定更具体的错误码（如 `LOCATOR_NOT_FOUND` 或 `AUTHENTICATION_FAILED`），否则失败判定为 `ACTION_FAILED`。受阻判定表示该步骤无法对产品作出判定。它携带以下错误码之一：
 
-| 阻塞原因 | 错误码 |
+| 受阻原因 | 错误码 |
 | --- | --- |
 | 凭据 | `AUTH_CREDENTIAL_UNAVAILABLE`、`AUTH_CREDENTIAL_INVALID`、`SECRET_UNAVAILABLE` |
 | 环境 | `ENVIRONMENT_UNAVAILABLE`、`APP_UNREACHABLE`、`APP_ALREADY_RUNNING` |
