@@ -36,8 +36,18 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
+      # A change to the check itself reviews every section; any other change
+      # only the sections it touches.
+      - name: Pick the sections to check
+        id: scope
+        run: |
+          if git diff --quiet "origin/$BASE_REF...HEAD" -- scripts/deepl-review.ts scripts/check-docs-translations-deepl.ts .github/workflows/docs-translations.yml; then
+            echo "args=--base origin/$BASE_REF" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          BASE_REF: ${{ github.base_ref }}
       # A fork's pull request has no DEEPL_API_KEY; the check then skips.
       - name: Check the Japanese docs against DeepL
-        run: node scripts/check-docs-translations-deepl.ts --base origin/${{ github.base_ref }}
+        run: node scripts/check-docs-translations-deepl.ts ${{ steps.scope.outputs.args }}
         env:
           DEEPL_API_KEY: ${{ secrets.DEEPL_API_KEY }}
