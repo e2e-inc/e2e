@@ -238,7 +238,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
     within(label: string, timeoutMs: number, usesEngine: boolean, body: (builtIns: object) => Promise<void>): Promise<void>;
     close(): Promise<void>;
   } {
-    type HookAttempt = { readonly builtIns: object; readonly budget: AttemptBudget; close(): Promise<void> };
+    type HookAttempt = { readonly builtIns: object; readonly budget: AttemptBudget; readonly steps: StepRecorder; close(): Promise<void> };
     const open = async (): Promise<HookAttempt> => {
       const attemptId = uuidv7();
       const attemptEnd = new AbortController();
@@ -285,6 +285,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       return {
         builtIns: fixtures,
         budget,
+        steps,
         close: async () => {
           attemptEnd.abort();
           if (shared === undefined) {
@@ -346,11 +347,23 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         const { attempt, builtIns } = await acquire(label, usesEngine);
         const hookAbort = attempt?.budget.enter(this.interruptSignal, timeoutMs);
         const leave = this.workerFixtures.enter(builtIns);
+        let failure: { readonly cause: unknown } | undefined;
         try {
           await runHook(label, () => body(builtIns), timeoutMs, () => hookAbort?.abort());
-        } finally {
-          leave();
+        } catch (cause) {
+          failure = { cause };
         }
+        // A step the code started and did not await is failed at its call and
+        // cancelled, as after a test body: left alone it would fail once this
+        // attempt closed, as a stray rejection charged to whichever test ran then.
+        const notAwaited = attempt?.steps.abandonRunning();
+        if (notAwaited !== undefined) {
+          hookAbort?.abort();
+          await withTimeout(attempt!.steps.settleAbandoned(), this.config.cleanupTimeout, () => new Error('abandoned steps did not settle')).catch(() => undefined);
+        }
+        leave();
+        if (failure !== undefined) throw failure.cause;
+        if (notAwaited !== undefined) throw notAwaited;
       },
       close: async () => {
         const attempt = await opened;

@@ -575,9 +575,11 @@ export class StepRecorder {
       artifacts: [],
     };
     this.steps.push(record);
-    // Only a finished step is dropped, and only from the front, so a long-running one keeps its record.
-    while (this.retainSteps !== undefined && this.steps.length > this.retainSteps && !this.running.has(this.steps[0]!.id)) this.steps.shift();
     this.running.add(record.id);
+    // Only a finished step is dropped, and only from the front, so a running
+    // one keeps its record, the one opened here included: with nothing
+    // retained it is still there for `abandonRunning` to fail.
+    while (this.retainSteps !== undefined && this.steps.length > this.retainSteps && !this.running.has(this.steps[0]!.id)) this.steps.shift();
     for (const { line, at } of this.earlyNavigations.splice(0)) this.fileNavigation(record, line, at);
     if (stack !== undefined) this.stacks.set(record.id, stack);
     this.publish(record, { phase: 'start', kind, api, label });

@@ -172,6 +172,49 @@ test.describe('serial', { serial: true }, () => {
     120_000,
   );
 
+  it(
+    'fails a suite hook that left an engine step running, as that hook, and charges no test with it',
+    async () => {
+      const file = `import { test as base } from 'e2e';
+import { log } from './log.ts';
+
+const test = base.extend<{}, { gadget: { hang(options: { timeout: number }): Promise<void> } }>();
+
+test.describe('left running', () => {
+  test.beforeAll(({ gadget }) => {
+    // Not awaited: it fails 150 ms later, long after the hook returned.
+    void gadget.hang({ timeout: 150 });
+  });
+  test('skipped by its hook', () => log('unreachable'));
+});
+
+test('after the hook', async () => {
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  log('body:after');
+});
+`;
+      const log = hookLog('suite-hook-step-not-awaited');
+      const fake = createFakeEngine({ fixtures: true, isolation: 'worker' });
+      const { outcome, project } = await runProject(
+        { 'tests/log.ts': LOG_MODULE, 'tests/device.e2e.ts': file },
+        { config: engineConfig(fake.engine, { retries: 0 }) },
+      );
+      try {
+        assertValidReport(outcome.report);
+        expect(outcome.report.run.errors.map(({ code, phase, message }) => ({ code, phase, message }))).toEqual([
+          { code: 'HOOK_FAILED', phase: 'beforeAll', message: expect.stringMatching(/^beforeAll failed: .* returned before gadget\.hang .* finished/) },
+        ]);
+        expect(resultByTitle(outcome, 'skipped by its hook').skip?.cause).toBe('hook-failed');
+        // The step's own failure, arriving once the hook's attempt has closed, is no later test's.
+        expect(resultByTitle(outcome, 'after the hook').status).toBe('passed');
+        expect(log.lines()).toEqual(['body:after']);
+      } finally {
+        project.cleanup();
+      }
+    },
+    120_000,
+  );
+
   // The support module for the two cases below: a worker fixture whose
   // teardown tries the engine's fixture and logs what happened.
   const keeperSupport = `import { test as base } from 'e2e';
