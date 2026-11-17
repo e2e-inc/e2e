@@ -43,7 +43,7 @@ For a migration that spans several sessions, the [`migrate-to-e2e` skill](/codin
 | `devices.<name>.device.type` | `mobile({ device: 'iPhone 17' })` |
 | `configurations` | `targets`, one engine per platform |
 | Jest `maxWorkers` | `workers`, one per device |
-| `apps.<name>.launchArgs` | `app.launchArguments` on the target, with the same keys, or a list of strings per platform. Android gets each key as a typed top-level intent extra, not Detox's `launchArgs` bundle; a nested value has no equivalent |
+| `apps.<name>.launchArgs` | `app.launchArguments` on the target, with the same keys, or a list of strings per platform. On Android the app reads each key as a typed intent extra, where Detox hands them over as instrumentation arguments, so that read changes; a nested value has no equivalent |
 | `launchApp({ permissions })` | `app.permissions` on the target: `grant`, `deny`, `reset` for `YES`, `NO`, `unset`. More names are [planned](#planned) |
 
 ```ts title="e2e.config.ts"

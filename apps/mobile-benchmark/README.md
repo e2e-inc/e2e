@@ -29,10 +29,6 @@ from the directory it runs in.
 - `modules/apple-pay-lab`: the local Expo module (PassKit, iOS only) behind
   the two Apple Pay scenarios.
 - `e2e.config.ts` + `tests/`: the deterministic suite, locators only.
-- `e2e.launch-arguments.config.ts` + `tests-launch-arguments/`: a hand-run
-  check that `app.launchArguments` reaches the app as an object and as a list,
-  read from the simulator's process and the emulator's launch intent. Local
-  devices only.
 - `e2e.agent.config.ts` + `tests-agent/`: the agentic suite, derived from the
   deterministic config. One `agent.act` per scenario (Control Inventory
   excepted) with the catalog description as its goal and a deterministic
@@ -97,7 +93,6 @@ pnpm --filter @e2e-dev/mobile-benchmark ios              # build + install on th
 pnpm --filter @e2e-dev/mobile-benchmark android          # same for the running emulator
 pnpm --filter @e2e-dev/mobile-benchmark test             # tests/ on both targets
 AI_GATEWAY_API_KEY=... pnpm --filter @e2e-dev/mobile-benchmark test:agent
-pnpm --filter @e2e-dev/mobile-benchmark verify:launch-arguments   # launch arguments, both forms
 ```
 
 The configs pin the app by bundle id (`dev.e2e.benchmark`) and expect it
