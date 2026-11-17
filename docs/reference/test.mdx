@@ -142,10 +142,11 @@ test.skipIf(process.env.CI)('opens the system dialog', async ({ app }) => {});
   [`test.skip(condition, reason)`](#test-skip) inside the body.
 - Any truthy value skips, as in Vitest.
 - A skipped test is the same as `test(title, { skip: true }, fn)`: its body
-  never runs, and its options are kept.
+  never runs, and its other options are kept.
 - A [`skip`](#skip) option skips the test whatever the condition, and its
   reason string is the reported reason.
-- A falsy condition registers the test as `test` would.
+- Outside a serial group, a falsy condition registers the test as `test`
+  would.
 - It takes the same two forms as [`test`](#test) and has the same fixtures,
   on an extended `test` too.
 
