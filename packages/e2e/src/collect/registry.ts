@@ -318,6 +318,27 @@ function declaredTags(group: GroupNode | undefined, options: TestOptions): strin
   return [...new Set(layers.flatMap((layer) => layer.tags ?? []))];
 }
 
+/**
+ * A suite scope: a describe group, or `undefined` for the file scope. Scopes
+ * are the registration's own group nodes, so two sibling groups that happen
+ * to share a title stay two scopes with their own hooks.
+ */
+export type Scope = GroupNode | undefined;
+
+/** The suite scopes `test` is in, outermost first: the file scope, then each describe group around it. */
+export function scopeChain(test: Pick<RegisteredTest, 'group'>): Scope[] {
+  return [undefined, ...groupChain(test.group)];
+}
+
+/**
+ * The hooks that apply to `test`, of every kind: those of each scope it is
+ * in, outermost scope first, each scope's in declaration order, wherever in
+ * the file a scope's hooks were declared relative to the test.
+ */
+export function hooksFor(registration: Pick<ModuleRegistration, 'hooks'>, test: Pick<RegisteredTest, 'group'>): RegisteredHook[] {
+  return scopeChain(test).flatMap((scope) => registration.hooks.filter((hook) => hook.group === scope));
+}
+
 /** Finds the outermost serial group enclosing a node, if any. */
 export function outermostSerialGroup(group: GroupNode | undefined): GroupNode | undefined {
   return groupChain(group).find((node) => node.serial);

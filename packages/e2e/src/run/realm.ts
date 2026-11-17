@@ -15,25 +15,19 @@ import { withTimeout } from '@e2e-dev/core/lib/internal/time';
 import type { CollectedFile, CollectedTest } from '../collect/collect.ts';
 import {
   collectModule,
-  groupChain,
   groupTitles,
-  type GroupNode,
+  hooksFor,
+  scopeChain,
   type ModuleRegistration,
   type RegisteredHook,
   type RegisteredTest,
+  type Scope,
   type SuiteHook,
   type TestHook,
 } from '../collect/registry.ts';
 import type { TestTargetPair } from '../collect/select.ts';
 import type { TargetSession } from '@e2e-dev/core/lib/engine/surface';
 import type { RunError } from '@e2e-dev/core/lib/run/records';
-
-/**
- * A suite scope of one realm: a describe group, or `undefined` for the file
- * scope. Scopes are the registration's own group nodes, so two sibling groups
- * that happen to share a title stay two scopes with their own hooks.
- */
-type Scope = GroupNode | undefined;
 
 /** The test module a realm imports: the project-relative path its results carry, and where it is on disk. */
 export type FileRef = Pick<CollectedFile, 'file' | 'absolutePath'>;
@@ -154,9 +148,7 @@ export class RealmManager {
    * each scope's hooks in reverse declaration order.
    */
   hooksFor(realm: Realm, test: RegisteredTest, kind: TestHook['kind']): TestHook[] {
-    const ordered = scopeChainFor(test).flatMap((scope) =>
-      this.scopeHooks<TestHook>(realm, scope, kind),
-    );
+    const ordered = hooksFor(realm.registration, test).filter((hook): hook is TestHook => hook.kind === kind);
     return kind === 'beforeEach' ? ordered : ordered.toReversed();
   }
 
@@ -167,7 +159,7 @@ export class RealmManager {
    */
   async enterScopes(realm: Realm, test: RegisteredTest, shared?: TargetSession): Promise<SerializedError | undefined> {
     return this.withSuiteHooks(shared, async (hooks) => {
-      for (const scope of scopeChainFor(test)) {
+      for (const scope of scopeChain(test)) {
         const entered = realm.entered.get(scope);
         if (entered !== undefined) {
           if (entered.failed !== undefined) return entered.failed;
@@ -209,7 +201,7 @@ export class RealmManager {
     for (const pair of remaining) {
       // A pair the realm cannot find never runs here, so it holds nothing open.
       const registered = findRegistered(realm, pair.test);
-      if (registered !== undefined) for (const scope of scopeChainFor(registered)) needed.add(scope);
+      if (registered !== undefined) for (const scope of scopeChain(registered)) needed.add(scope);
     }
     return this.withSuiteHooks(shared, async (hooks) => {
       let failure: SerializedError | undefined;
@@ -278,8 +270,4 @@ export class RealmManager {
 /** The scope's report identity: its title path, or `file` for the file scope. */
 function scopeId(scope: Scope): string {
   return scope === undefined ? 'file' : groupTitles(scope).join(' \u203a ');
-}
-
-function scopeChainFor(test: RegisteredTest): Scope[] {
-  return [undefined, ...groupChain(test.group)];
 }

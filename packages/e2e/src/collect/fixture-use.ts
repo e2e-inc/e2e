@@ -9,7 +9,7 @@ import { CollectionError } from '@e2e-dev/core/lib/internal/errors';
 import type { Collection } from './collect.ts';
 import { declarationSite, FixtureUseError } from './fixture-names.ts';
 import { planAttempt, planSuiteHook } from './fixture-plan.ts';
-import { groupChain, type GroupNode, type RegisteredHook, type SuiteHook, type TestHook } from './registry.ts';
+import { hooksFor, type ModuleRegistration, type RegisteredHook, type SuiteHook, type TestHook } from './registry.ts';
 import type { TestTargetPair } from './select.ts';
 
 function isSuiteHook(hook: RegisteredHook): hook is SuiteHook {
@@ -24,7 +24,7 @@ function isSuiteHook(hook: RegisteredHook): hook is SuiteHook {
  * fixture, a cycle, a chain fixture named like one the engine contributes.
  */
 export function assertFixtureUse(pairs: readonly TestTargetPair[], collection: Collection, projectRoot: string): void {
-  const hooksByFile = new Map(collection.files.map((file) => [file.file, file.registration.hooks]));
+  const registrations = new Map<string, ModuleRegistration>(collection.files.map((file) => [file.file, file.registration]));
   // A test runs once per agent and repeat, and a suite hook serves every test of its scope.
   const planned = new Set<string>();
   const plannedHooks = new Map<string, Set<SuiteHook>>();
@@ -33,8 +33,8 @@ export function assertFixtureUse(pairs: readonly TestTargetPair[], collection: C
     const key = `${target.name}::${test.id}`;
     if (planned.has(key)) continue;
     planned.add(key);
-    const scopes = new Set<GroupNode | undefined>([undefined, ...groupChain(test.group)]);
-    const hooks = (hooksByFile.get(test.file) ?? []).filter((hook) => scopes.has(hook.group));
+    const registration = registrations.get(test.file);
+    const hooks = registration === undefined ? [] : hooksFor(registration, test);
     const seen = plannedHooks.get(target.name) ?? new Set<SuiteHook>();
     plannedHooks.set(target.name, seen);
     try {
