@@ -197,6 +197,11 @@ describe('registration', () => {
     expect(() => test.runIf(Promise.resolve(true))).toThrow(
       'test.runIf() got a Promise as its condition; await it before the call',
     );
+    // oxlint-disable-next-line unicorn/no-thenable -- a thenable that is not a Promise is the case under test
+    const thenable = { then: (resolve: (value: boolean) => void) => resolve(false) };
+    expect(() => test.skipIf(thenable)).toThrow(
+      'test.skipIf() got a Promise as its condition; await it before the call',
+    );
   });
 
   it('keeps the options of a test.skipIf test, its skip reason included', async () => {
