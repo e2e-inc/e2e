@@ -19,8 +19,7 @@ import { pairRecordings, type TestTargetPair } from '../collect/select.ts';
 import type { ArtifactStore } from '@e2e-dev/core/lib/types';
 import { attemptSegments, createAttemptArtifacts, resultSegment } from '@e2e-dev/core/lib/run/artifacts';
 import { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
-import { planAttempt } from '../collect/fixture-plan.ts';
-import { attemptBuiltIns, bindFixtures, WorkerFixturePool } from './fixture-pool.ts';
+import { planAttemptFixtures, WorkerFixturePool } from './fixture-pool.ts';
 import { captureFailureEvidence } from './failure-evidence.ts';
 import { createFixtures } from '@e2e-dev/core/lib/run/fixtures';
 import { WrittenScreenshots } from '@e2e-dev/core/lib/run/screenshots';
@@ -691,12 +690,13 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
     };
 
     try {
-      const beforeEachHooks = this.realms.hooksFor(realm, registered, 'beforeEach');
-      const afterEachHooks = this.realms.hooksFor(realm, registered, 'afterEach');
       // Before the session launches: a fixture rule the test breaks fails the
       // attempt with nothing set up. What the body and these hooks name
       // decides which fixtures of the test's own chain the attempt sets up.
-      const plan = planAttempt(this.target, registered, [...beforeEachHooks, ...afterEachHooks]);
+      const fixturePlan = planAttemptFixtures(this.target, registered, {
+        beforeEach: this.realms.hooksFor(realm, registered, 'beforeEach'),
+        afterEach: this.realms.hooksFor(realm, registered, 'afterEach'),
+      });
       const session =
         shared?.session ??
         (await this.launchSession({ session: pair.options.session, recordings }, attemptId, artifacts.dir, attemptAbort.signal));
@@ -809,14 +809,9 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         attemptEnd.signal,
       );
 
-      const bound = bindFixtures({
-        plan,
-        builtIns: attemptBuiltIns(builtIns),
-        pool: this.workerFixtures,
-        signal: attemptAbort.signal,
-      });
+      const fixtures = fixturePlan.open({ builtIns, pool: this.workerFixtures, signal: attemptAbort.signal });
       // Worker fixtures read their built-ins off this attempt until it ends.
-      leaveWorkerFixtures = this.workerFixtures.enter(attemptBuiltIns(builtIns));
+      leaveWorkerFixtures = fixtures.enter();
 
       /**
        * Steps and polls the body left running when it settled were not
@@ -844,15 +839,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       };
       const mainWork = async (): Promise<void> => {
         try {
-          enter('beforeEach');
-          await bound.setUp();
-          attemptAbort.signal.throwIfAborted();
-          for (const hook of beforeEachHooks) {
-            await bound.call(hook);
-            attemptAbort.signal.throwIfAborted();
-          }
-          enter('body');
-          await bound.call(registered);
+          await fixtures.run(enter, attemptAbort.signal);
         } catch (cause) {
           // The body's own failure stays the verdict; the step it abandoned
           // and the soft failures it kept are noted beside it. A skip leaves
@@ -953,15 +940,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       // that overruns has its own operations cancelled, not the next hook's.
       // Only a run interrupt still cuts cleanup short. Fixture teardowns
       // follow the hooks, last set up first, and fail the attempt like them.
-      // A hook that names a fixture whose setup failed is skipped.
-      const teardowns = [
-        ...afterEachHooks.filter((hook) => bound.ready(hook)).map((hook) => ({ label: `${hook.kind} hook`, run: () => bound.call(hook) })),
-        ...bound.teardowns().map((teardown) => ({
-          label: `fixture "${teardown.name}" teardown`,
-          run: teardown.run,
-        })),
-      ];
-      for (const teardown of teardowns) {
+      for (const teardown of fixtures.cleanup()) {
         const hookAbort = budget.enter(this.interruptSignal, this.config.cleanupTimeout);
         try {
           await runHook(teardown.label, teardown.run, this.config.cleanupTimeout, () =>

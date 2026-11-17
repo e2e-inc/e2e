@@ -29,8 +29,7 @@ import { withAbort, withTimeout } from '@e2e-dev/core/lib/internal/time';
 import type { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
 import type { TargetExecutor } from './execute.ts';
 import { classifyAttemptStatus } from '@e2e-dev/core/lib/run/engine-sessions';
-import { planAttempt } from '../collect/fixture-plan.ts';
-import { attemptBuiltIns, bindFixtures, type BoundFixtures } from './fixture-pool.ts';
+import { planAttemptFixtures, type AttemptCleanup, type TestAttemptFixtures } from './fixture-pool.ts';
 import { captureFailureEvidence } from './failure-evidence.ts';
 import type { ArtifactSink, AttemptFixtures } from '@e2e-dev/core/lib/run/fixtures';
 import { findRegistered, runHook, type Realm } from './realm.ts';
@@ -174,10 +173,15 @@ export interface StandaloneTestRun {
 /** The phases a standalone run moves through before its teardown. */
 type RunPhase = 'beforeAll' | 'beforeEach' | 'body';
 
-/** What a run leaves for its teardown: the realm whose scopes it entered, and the `afterEach` hooks then the fixture teardowns, in order. */
+/**
+ * What a run leaves for its teardown: the realm whose scopes it entered, and
+ * its fixtures with what they leave to clean up, when it got as far as
+ * binding them.
+ */
 interface Started {
   readonly realm: Realm;
-  readonly teardowns: readonly { readonly label: string; readonly run: () => Promise<void> | void }[];
+  readonly fixtures?: TestAttemptFixtures | undefined;
+  readonly teardowns: readonly AttemptCleanup[];
 }
 
 /** Where a rejection nobody handled goes while test code takes its turn. */
@@ -270,12 +274,18 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
 
     // The suite hooks run on this attempt: an engine runs one at a time.
     const hookFailure = await executor.realms.enterScopes(realm, registered, env.session);
-    let bound: BoundFixtures | undefined;
+    let fixtures: TestAttemptFixtures | undefined;
     if (hookFailure !== undefined) {
       fail(new E2EError('test', hookFailure.code, hookFailure.message), 'beforeAll');
     } else {
       // The test's own timeout bounds its hooks and body.
       const bodyAbort = budget.enter(env.signal, pair.options.timeout);
+      // Planned and bound before the attempt is published: a fixture rule broken here leaves nothing to undo.
+      const attemptFixtures = planAttemptFixtures(env.target, registered, {
+        beforeEach: executor.realms.hooksFor(realm, registered, 'beforeEach'),
+        afterEach: executor.realms.hooksFor(realm, registered, 'afterEach'),
+      }).open({ builtIns: env.fixtures, pool: executor.workerFixtures, signal: budget.signal });
+      fixtures = attemptFixtures;
       const soft = new SoftFailures();
       const polls = new PollScope('the test body');
       const publication = new AbortController();
@@ -293,16 +303,9 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
         publication.signal,
       );
       // Worker fixtures read their built-ins off this attempt while its code runs.
-      const leaveWorkerFixtures = executor.workerFixtures.enter(attemptBuiltIns(env.fixtures));
+      const leaveWorkerFixtures = attemptFixtures.enter();
       // Whatever happens below, the slot is free for the next test once the body is done.
       try {
-        const attemptFixtures = bindFixtures({
-          plan: planAttempt(env.target, registered, [...executor.realms.hooksFor(realm, registered, 'beforeEach'), ...executor.realms.hooksFor(realm, registered, 'afterEach')]),
-          builtIns: attemptBuiltIns(env.fixtures),
-          pool: executor.workerFixtures,
-          signal: budget.signal,
-        });
-        bound = attemptFixtures;
         /** Set once the body's race settled: a body cut short that runs on is no longer the test's to report. */
         let bodyOver = false;
         const enter = (next: RunPhase): void => {
@@ -322,15 +325,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
         };
         const mainWork = async (): Promise<void> => {
           try {
-            enter('beforeEach');
-            await attemptFixtures.setUp();
-            budget.signal.throwIfAborted();
-            for (const hook of executor.realms.hooksFor(realm, registered, 'beforeEach')) {
-              await attemptFixtures.call(hook);
-              budget.signal.throwIfAborted();
-            }
-            enter('body');
-            await attemptFixtures.call(registered);
+            await attemptFixtures.run(enter, budget.signal);
           } catch (cause) {
             const notAwaited = await abandonNotAwaited();
             if (isRuntimeSkip(cause)) throw cause;
@@ -437,15 +432,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       durationMs: Date.now() - startedMs,
       steps: steps.all().slice(0, stepsRan),
     };
-    const attemptFixtures = bound;
-    const teardowns =
-      attemptFixtures === undefined
-        ? []
-        : [
-            ...executor.realms.hooksFor(realm, registered, 'afterEach').filter((hook) => attemptFixtures.ready(hook)).map((hook) => ({ label: `${hook.kind} hook`, run: () => attemptFixtures.call(hook) })),
-            ...attemptFixtures.teardowns().map((teardown) => ({ label: `fixture "${teardown.name}" teardown`, run: teardown.run })),
-          ];
-    return { started: { realm, teardowns }, outcome };
+    return { started: { realm, fixtures, teardowns: fixtures?.cleanup() ?? [] }, outcome };
   };
 
   const run = (): Promise<StandaloneTestOutcome> => {
@@ -479,7 +466,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
         // As after a run's body: a soft matcher in a teardown hook finds the collection closed.
         soft.close();
         const publication = new AbortController();
-        const leaveWorkerFixtures = executor.workerFixtures.enter(attemptBuiltIns(env.fixtures));
+        const leaveWorkerFixtures = started.fixtures?.enter();
         try {
           publishAttempt({ attemptId, owner: 'host', testKind: 'test', assertionTimeout: config.assertionTimeout, budget, soft, polls: new PollScope('the test teardown') }, publication.signal);
           steps.phase = 'afterEach';
@@ -495,7 +482,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
           await executor.settleAttempt(env.session, attemptId).catch((cause: unknown) => errors.push(serialize(cause, 'afterEach')));
           await executor.realms.leave(started.realm, env.session).catch((cause: unknown) => errors.push(serialize(cause, 'afterAll')));
         } finally {
-          leaveWorkerFixtures();
+          leaveWorkerFixtures?.();
           steps.phase = undefined;
           publication.abort();
           strayInTurn = undefined;

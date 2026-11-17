@@ -11,8 +11,8 @@
  * fixtures it names.
  */
 
-import type { FixtureInputs, FixturePlan, FixtureUser, PlannedFixture } from '../collect/fixture-plan.ts';
-import type { FixtureDefinition, TestBody } from '../collect/registry.ts';
+import { planAttempt, type FixtureInputs, type FixturePlan, type FixtureUser, type PlannedFixture } from '../collect/fixture-plan.ts';
+import type { FixtureDefinition, RegisteredTest, TestBody, TestHook } from '../collect/registry.ts';
 import { builtInFixtures, type BuiltInFixtures, type BuiltInTarget } from '@e2e-dev/core/lib/run/fixtures';
 import { pollLineage, type PollLineage } from '@e2e-dev/core/lib/expect/poll-scope';
 import { ConfigurationError } from '@e2e-dev/core/lib/internal/errors';
@@ -346,6 +346,74 @@ export function bindFixtures(options: BindOptions): BoundFixtures {
       abandon();
       signal?.removeEventListener('abort', abandon);
       return active.toReversed();
+    },
+  };
+}
+
+/** The `beforeEach` and `afterEach` hooks that apply to one test, each list in the order it runs. */
+export interface AttemptHooks {
+  readonly beforeEach: readonly TestHook[];
+  readonly afterEach: readonly TestHook[];
+}
+
+/** One step of an attempt's cleanup: a label for its timeout, and what to run within its own cleanup budget. */
+export interface AttemptCleanup {
+  readonly label: string;
+  run(): void | Promise<void>;
+}
+
+/** The fixtures of one test attempt, bound to its built-ins. */
+export interface TestAttemptFixtures {
+  /** Makes this attempt the one worker fixtures read their built-ins off, until the returned function is called. */
+  enter(): () => void;
+  /**
+   * Sets the fixtures up, runs the `beforeEach` hooks, then the body. `phase`
+   * is told which is about to run; `signal` stops the sequence between two
+   * of them.
+   */
+  run(phase: (next: 'beforeEach' | 'body') => void, signal: AbortSignal): Promise<void>;
+  /**
+   * What the attempt leaves to clean up: the `afterEach` hooks, then the test
+   * fixtures' teardowns, last set up first. A hook that names a fixture
+   * whose setup failed is left out. Taking the list ends fixture setup.
+   */
+  cleanup(): readonly AttemptCleanup[];
+}
+
+/**
+ * Plans the fixtures of one attempt of `test` on `target`, resolved as one
+ * unit over its body and `hooks`, before any session exists: a fixture rule
+ * one of them breaks throws here. `open` binds the plan to the attempt once
+ * its built-in fixtures exist.
+ */
+export function planAttemptFixtures(
+  target: BuiltInTarget,
+  test: RegisteredTest,
+  hooks: AttemptHooks,
+): { open(options: { readonly builtIns: object; readonly pool: WorkerFixturePool; readonly signal: AbortSignal }): TestAttemptFixtures } {
+  const plan = planAttempt(target, test, [...hooks.beforeEach, ...hooks.afterEach]);
+  return {
+    open({ builtIns, pool, signal }) {
+      const read = attemptBuiltIns(builtIns);
+      const bound = bindFixtures({ plan, builtIns: read, pool, signal });
+      return {
+        enter: () => pool.enter(read),
+        async run(phase, stop) {
+          phase('beforeEach');
+          await bound.setUp();
+          stop.throwIfAborted();
+          for (const hook of hooks.beforeEach) {
+            await bound.call(hook);
+            stop.throwIfAborted();
+          }
+          phase('body');
+          await bound.call(test);
+        },
+        cleanup: () => [
+          ...hooks.afterEach.filter((hook) => bound.ready(hook)).map((hook) => ({ label: `${hook.kind} hook`, run: () => bound.call(hook) })),
+          ...bound.teardowns().map((teardown) => ({ label: `fixture "${teardown.name}" teardown`, run: teardown.run })),
+        ],
+      };
     },
   };
 }
