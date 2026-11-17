@@ -515,7 +515,8 @@ Arguments every fresh launch passes the app: `app.open()`, `app.restart()`,
 and `app.clearState()`. Give a list of strings, the arguments themselves, or
 an object of argument name to value. On iOS an entry becomes `-name value`.
 On Android it becomes an `am start` extra of the value's type: `--es` for a
-string, `--ez` for a boolean, `--ei` for a number, `--esa` for a list.
+string, `--ez` for a boolean, `--ei` for a whole number (`--el` beyond Java's
+`int`), `--ef` for a fraction, `--esa` for a list.
 
 ```ts
 launchArguments: ['-e2e', 'YES'],
@@ -525,8 +526,15 @@ launchArguments: ['-e2e', 'YES'],
 launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', e2e: true },
 ```
 
-- An object value is a string, a number, a boolean, or a list of strings
-  (`LaunchArgumentValue`). A name has no whitespace.
+```ts
+type LaunchArgumentValue = string | number | boolean | readonly string[];
+type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue>>;
+```
+
+- An object value is a string, a finite number below 2^53 in magnitude, a
+  boolean, or a list of strings. A name has no whitespace or control
+  characters, and nothing holds a NUL character. A value read from the
+  environment may be `undefined`: that entry is left out.
 - The table under
   [Launch arguments and permissions](/reference/mobile#launch-arguments-and-permissions)
   shows each value type on each platform.
@@ -535,7 +543,7 @@ launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', e2e: true },
 
 | Throws | When |
 | --- | --- |
-| `INVALID_CONFIG` | A list item that is not a string. An object with an empty name, a name with whitespace, or a value of another kind. |
+| `INVALID_CONFIG` | A list item that is not a string. An object with an empty name, a name with whitespace or a control character, a value of another kind, a number beyond 2^53, or a NUL character anywhere. The engine adds its own rules: see [the mobile reference](/reference/mobile#launch-arguments-and-permissions). |
 
 #### `permissions`
 

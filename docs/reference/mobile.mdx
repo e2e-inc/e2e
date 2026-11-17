@@ -316,7 +316,7 @@ export default {
 
 | Throws | When |
 | --- | --- |
-| `INVALID_CONFIG` | At config load: no `app.bundleId` and no `app.appPath`; an `app.url` (not supported yet); a link in `bundleId` (a test opens one with `device.openLink`); an unknown permission name; an Apple launch argument such as `AppleLocale` in an object on an Android target. |
+| `INVALID_CONFIG` | At config load: no `app.bundleId` and no `app.appPath`; an `app.url` (not supported yet); a link in `bundleId` (a test opens one with `device.openLink`); an unknown permission name; an Apple launch argument such as `AppleLocale`, or a list item `am start` cannot carry, in an object on an Android target. |
 | `UNSUPPORTED_CAPABILITY` | `app.open()`, `app.restart()`, or `app.clearState()` on a target with no `app.bundleId` before its build is installed. |
 
 #### Launch arguments and permissions
@@ -344,15 +344,23 @@ export default {
 - iOS hands the arguments to the app process
   (`ProcessInfo.processInfo.arguments`). Android appends them to `am start`,
   so `['--ez', 'e2e', 'true']` is a boolean intent extra.
-- An object names each argument. On iOS an entry becomes `-name value`. On
-  Android it becomes an `am start` extra of the value's type, so the app
-  reads it with the matching `Intent` getter. Android reads none of Apple's
+- An object names each argument. On iOS an entry becomes `-name value` as
+  `NSUserDefaults` reads it: a string the parser would take for a plist, such
+  as `(draft)` or `a b`, is quoted. On Android it becomes an `am start` extra
+  of the value's type, so the app reads it with the matching `Intent` getter;
+  a whole number such as `1.0` is an `int`. Android reads none of Apple's
   arguments, so `AppleLanguages` or `AppleLocale` in an object on an Android
-  target fails with `INVALID_CONFIG`; a list is passed through as given.
+  target fails with `INVALID_CONFIG`; a list of strings is passed through as
+  given.
+- `am start` splits a list extra on every comma and keeps a backslash before
+  one, so on Android a list in an object is not empty, and no item is empty,
+  holds a comma, or ends in a backslash. Each of those fails with
+  `INVALID_CONFIG`.
 
 | Value | iOS | Android |
 | --- | --- | --- |
 | `'fr_FR'` | `-name fr_FR` | `--es name fr_FR` |
+| `'(draft)'` | `-name "(draft)"` | `--es name (draft)` |
 | `true` | `-name YES` | `--ez name true` |
 | `3` | `-name 3` | `--ei name 3`, `--el` outside Java's `int` |
 | `1.5` | `-name 1.5` | `--ef name 1.5` |
@@ -846,7 +854,7 @@ await device.openApp('com.example.app', { relaunch: true, launchArguments: { App
 | Throws | When |
 | --- | --- |
 | `POLICY_DENIED` | A `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, or `filesystem:` link. |
-| `INVALID_ARGUMENT` | Any other link, with a message pointing at `openLink`; or an invalid permission name or state (see [Launch arguments and permissions](#launch-arguments-and-permissions)). |
+| `INVALID_ARGUMENT` | Any other link, with a message pointing at `openLink`; an invalid permission name or state; or `launchArguments` outside the declared shape, or one Android cannot carry (see [Launch arguments and permissions](#launch-arguments-and-permissions)). |
 
 #### `openLink`
 

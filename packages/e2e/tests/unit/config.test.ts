@@ -571,8 +571,7 @@ describe('resolveConfig', () => {
     });
   });
 
-  it('takes launch arguments as an object of name to string, number, boolean, or list of strings', () => {
-    // A value read from the environment may be undefined: that is the entry left out.
+  it('takes launch arguments as an object of name to string, number, boolean, or list of strings, and leaves out an undefined value', () => {
     const launchArguments = { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', e2e: true, retries: 3, skipOnboarding: undefined } as never;
     expect(resolveApp({ bundleId: 'dev.shop.app', launchArguments }).launchArguments).toEqual({
       AppleLanguages: ['fr'],
@@ -589,8 +588,12 @@ describe('resolveConfig', () => {
     expect(() => resolveApp({ launchArguments: new Map([['AppleLocale', 'fr_FR']]) } as never)).toThrow(`${shape}, got a Map`);
     expect(() => resolveApp({ launchArguments: { '': 'x' } })).toThrow('target "web" app.launchArguments has an empty argument name');
     expect(() => resolveApp({ launchArguments: { 'Apple Locale': 'fr_FR' } })).toThrow(
-      'target "web" app.launchArguments argument name "Apple Locale" must have no whitespace',
+      'target "web" app.launchArguments argument name "Apple Locale" must have no whitespace or control characters',
     );
+    expect(() => resolveApp({ launchArguments: { 'a\u0000b': 'x' } })).toThrow('argument name "a\\u0000b" must have no whitespace or control characters');
+    expect(() => resolveApp({ launchArguments: { env: 'a\u0000' } })).toThrow('target "web" app.launchArguments.env holds a NUL character');
+    expect(() => resolveApp({ launchArguments: { tags: ['a', 'b\u0000'] } })).toThrow('target "web" app.launchArguments.tags holds a NUL character');
+    expect(() => resolveApp({ launchArguments: ['-a', 'b\u0000'] })).toThrow('target "web" app.launchArguments item 1 holds a NUL character');
 
     const value = (name: string) => `target "web" app.launchArguments.${name} must be a string, number, boolean, or array of strings, got`;
     expect(() => resolveApp({ launchArguments: { locale: { language: 'fr' } } } as never)).toThrow(`${value('locale')} an object`);
@@ -599,6 +602,9 @@ describe('resolveConfig', () => {
     sparse[2] = 'de';
     expect(() => resolveApp({ launchArguments: { languages: sparse } })).toThrow(`${value('languages')} an array`);
     expect(() => resolveApp({ launchArguments: { retries: Number.NaN } })).toThrow(`${value('retries')} NaN`);
+    expect(() => resolveApp({ launchArguments: { retries: 2 ** 53 } })).toThrow(`${value('retries')} a number beyond 2^53`);
+    expect(() => resolveApp({ launchArguments: { ratio: -1e300 } })).toThrow(`${value('ratio')} a number beyond 2^53`);
+    expect(resolveApp({ bundleId: 'dev.shop.app', launchArguments: { retries: 2 ** 53 - 1, ratio: -1.5 } }).launchArguments).toEqual({ retries: 2 ** 53 - 1, ratio: -1.5 });
     expect(() => resolveApp({ launchArguments: { retries: null } } as never)).toThrow(`${value('retries')} null`);
     expect(() => resolveApp({ launchArguments: { when: new Date(0) } } as never)).toThrow(`${value('when')} a Date`);
   });

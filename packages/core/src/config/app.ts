@@ -7,10 +7,11 @@
 import type { EngineAppDeclaration, EngineAppInfo, EngineHandle } from '../engine/index.ts';
 import { ConfigurationError } from '../internal/errors.ts';
 import { obj } from '../internal/objects.ts';
-import { isPlainObject, rejectUnknownKeys } from '../internal/options.ts';
+import { checkLaunchArguments } from '../internal/launch-arguments.ts';
+import { rejectUnknownKeys } from '../internal/options.ts';
 import { didYouMean } from '../internal/suggest.ts';
 import { isImplicitTestHost, isRefusedLinkScheme, normalizeBaseUrl, portOf, requestsFreePort, siteOf, withPort, type NormalizedBaseUrl } from '../internal/urls.ts';
-import type { AppPermissionState, CommandConfig, LaunchArgumentValue, LaunchArguments, TargetApp } from '../types.ts';
+import type { AppPermissionState, CommandConfig, LaunchArguments, TargetApp } from '../types.ts';
 import { checkLog, digestCommand, isRecord, normalizeCommand } from './command.ts';
 import { httpUrl } from './validate.ts';
 
@@ -161,63 +162,6 @@ export function checkTargetApp(targetName: string, engine: EngineHandle | undefi
   const { url, bundleId, appPath } = checked;
   engine?.validateApp?.(obj({ url, bundleId, appPath, launchArguments, permissions }) satisfies EngineAppDeclaration, { targetName });
   return checked;
-}
-
-const LAUNCH_ARGUMENTS_SHAPE = 'an array of strings or an object of argument name to string, number, boolean, or array of strings';
-
-/**
- * Launch arguments as declared: a list of strings, or a plain object of
- * argument name (non-empty, no whitespace) to string, finite number, boolean,
- * or list of strings. An `undefined` value, read from the environment, is
- * the entry left out.
- */
-function checkLaunchArguments(label: string, declared: unknown): LaunchArguments | undefined {
-  if (declared === undefined) return undefined;
-  if (Array.isArray(declared)) {
-    const index = declared.findIndex((argument) => typeof argument !== 'string');
-    if (index !== -1) {
-      throw new ConfigurationError('INVALID_CONFIG', `${label} must be ${LAUNCH_ARGUMENTS_SHAPE}; item ${index} is ${describe(declared[index])}`);
-    }
-    return declared as readonly string[];
-  }
-
-  if (!isPlainObject(declared)) {
-    throw new ConfigurationError('INVALID_CONFIG', `${label} must be ${LAUNCH_ARGUMENTS_SHAPE}, got ${describe(declared)}`);
-  }
-  const entries: [string, LaunchArgumentValue][] = [];
-  for (const [name, value] of Object.entries(declared)) {
-    if (value === undefined) continue;
-    if (name === '') {
-      throw new ConfigurationError('INVALID_CONFIG', `${label} has an empty argument name`);
-    }
-    if (/\s/.test(name)) {
-      throw new ConfigurationError('INVALID_CONFIG', `${label} argument name ${JSON.stringify(name)} must have no whitespace`);
-    }
-    if (!isLaunchArgumentValue(value)) {
-      throw new ConfigurationError('INVALID_CONFIG', `${label}.${name} must be a string, number, boolean, or array of strings, got ${describe(value)}`);
-    }
-    entries.push([name, value]);
-  }
-  return Object.fromEntries(entries);
-}
-
-function isLaunchArgumentValue(value: unknown): value is LaunchArgumentValue {
-  if (typeof value === 'string' || typeof value === 'boolean') {
-    return true;
-  }
-  if (typeof value === 'number') {
-    return Number.isFinite(value);
-  }
-  return Array.isArray(value) && value.findIndex((item) => typeof item !== 'string') === -1;
-}
-
-/** A value's kind for an error message: `null`, `an array`, `a Map`, `an object`, `NaN`, `a number`. */
-function describe(value: unknown): string {
-  if (value === null) return 'null';
-  if (Array.isArray(value)) return 'an array';
-  if (typeof value === 'object') return isPlainObject(value) ? 'an object' : `a ${value.constructor.name}`;
-  if (typeof value === 'number' && !Number.isFinite(value)) return String(value);
-  return `a ${typeof value}`;
 }
 
 /**

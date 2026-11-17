@@ -37,6 +37,7 @@ export type { EngineFinishInfo, EnginePrepareInfo, EnginePrepareResult } from '.
 // config options get.
 export { ConfigurationError, InfrastructureError, TestError } from '../internal/errors.ts';
 export { rejectUnknownKeys, rejectUnknownOptions } from '../internal/options.ts';
+export { checkLaunchArguments } from '../internal/launch-arguments.ts';
 export { validateJsonValue, type JsonValueRules } from '../internal/json-value.ts';
 export { describePattern, matchesText, toTextPattern } from '../internal/text.ts';
 export { resolveExpression, type ResolveExpressionOptions } from './resolve.ts';

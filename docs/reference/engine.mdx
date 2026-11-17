@@ -1453,6 +1453,12 @@ export interface EngineAppCheckInfo {
 
 /** A permission's state when the app launches: held, refused, or not asked for yet, so the OS asks again. */
 export type AppPermissionState = 'grant' | 'deny' | 'reset';
+
+/** One value in the object form of `launchArguments`; the engine spells it for its platform. */
+export type LaunchArgumentValue = string | number | boolean | readonly string[];
+
+/** A target's launch arguments: the strings the launch command takes, or an object of argument name to value. */
+export type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue>>;
 ```
 
 #### `EngineAppInfo`
@@ -1698,6 +1704,7 @@ reproduces these semantics; import them instead of carrying a copy.
 | [`pollCondition`, `Deadline`](#pollcondition) | `Promise<void>`, `Deadline` |
 | [`validateJsonValue`](#validatejsonvalue) | `void` |
 | [`rejectUnknownKeys`](#rejectunknownkeys) | `void` |
+| [`checkLaunchArguments`](#checklauncharguments) | `LaunchArguments \| undefined` |
 | [`rejectUnknownOptions`](#rejectunknownoptions) | `void` |
 | [`obj`](#obj) | `WithoutUndefined<T>` |
 | [`raceAbort`, `withTimeout`, `withinCleanupBudget`](#timing-helpers) | `Promise<T>`, `Promise<T>`, `Promise<void>` |
@@ -1873,6 +1880,31 @@ rejectUnknownKeys('web()', options, ['browser', 'viewport']);
   the known keys otherwise.
 - Pass `'INVALID_ARGUMENT'` as `code` for an object a test passes to a
   fixture method.
+
+#### `checkLaunchArguments`
+
+The shape check the runner runs on a target's `app.launchArguments`, for a
+launch a test asks for by hand, such as `device.openApp(app, { launchArguments })`.
+Returns the arguments with every `undefined` value left out, or throws.
+
+```ts
+export function checkLaunchArguments(
+  label: string,
+  declared: unknown,
+  code?: 'INVALID_CONFIG' | 'INVALID_ARGUMENT', // default: 'INVALID_CONFIG'
+): LaunchArguments | undefined;
+```
+
+```ts
+const launchArguments = checkLaunchArguments('device.openApp({ launchArguments })', options.launchArguments, 'INVALID_ARGUMENT');
+// device.openApp({ launchArguments }).env must be a string, number, boolean, or array of strings, got null
+```
+
+- A list holds strings. An object maps a name with no whitespace or control
+  characters to a string, a finite number below 2^53 in magnitude, a
+  boolean, or a list of strings. Nothing holds a NUL character.
+- The engine adds its platform's rules after this check, with the same
+  `code`.
 
 #### `rejectUnknownOptions`
 
