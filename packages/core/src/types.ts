@@ -892,7 +892,7 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   /**
    * Inside a running test: skips it as fixme when `condition` is true (or
    * always, with no condition), as `test.skip` does. The reported reason is
-   * `fixme`, or `fixme: <reason>` when `reason` is given. A setup test cannot
+   * `fixme`, or `fixme: <reason>` when `reason` is not blank. A setup test cannot
    * skip. Outside a test body this form is `COLLECTION_ERROR`; use
    * `test.fixme(title, fn)` to mark a test fixme at collection.
    */
