@@ -117,7 +117,7 @@ function splitTopLevel(text: string): string[] {
 /**
  * The first parameter of a function, as written: `{ app, screen }`. Undefined
  * for a function that takes none, and for source with no parameter list to
- * read (a bound or native function prints `[native code]`).
+ * read.
  */
 function firstParameter(source: string): string | undefined {
   let index = skipTrivia(source, 0);
@@ -148,6 +148,8 @@ function propertyName(property: string): string {
 }
 
 const WHY = 'e2e sets up only the fixtures a function names there';
+/** What `Function.prototype.toString` prints for a function with no source of its own. */
+const NATIVE = /\{\s*\[native code\]\s*\}\s*$/;
 
 /**
  * The fixtures `fn` names in its first parameter. Registration calls it once
@@ -160,7 +162,10 @@ const WHY = 'e2e sets up only the fixtures a function names there';
  */
 export function fixtureNames(fn: FixtureUserFn, what: string, source?: SourceLocation): readonly string[] {
   const refuse = (problem: string): FixtureUseError => new FixtureUseError(`${what} ${problem}. ${WHY}`, source);
-  const parameter = firstParameter(Function.prototype.toString.call(fn));
+  const text = Function.prototype.toString.call(fn);
+  // A bound or built-in function prints no parameters, so it would be handed no fixtures at all.
+  if (NATIVE.test(text)) throw refuse('is a bound or native function, whose parameters cannot be read; pass the function itself, or wrap it: ({ app }) => bound({ app })');
+  const parameter = firstParameter(text);
   if (parameter === undefined) return [];
   if (!parameter.startsWith('{')) {
     const shown = parameter.length > 40 ? `${parameter.slice(0, 40)}...` : parameter;

@@ -58,9 +58,17 @@ describe('fixtureNames', () => {
     expect(names(typed as FixtureUserFn)).toEqual(['app', 'screen']);
   });
 
-  it('names no fixture for a function whose source is not its own', () => {
+  it('refuses a function whose source is not its own, since it would be handed nothing', () => {
     const bound = Function.prototype.bind.call(({ app }: { app: unknown }) => app, undefined) as FixtureUserFn;
-    expect(names(bound)).toEqual([]);
+    expect(() => names(bound)).toThrow(
+      expect.objectContaining({
+        code: 'COLLECTION_ERROR',
+        message: 'test "x" is a bound or native function, whose parameters cannot be read; pass the function itself, or wrap it: ({ app }) => bound({ app }). e2e sets up only the fixtures a function names there',
+      }),
+    );
+    expect(() => names(Math.max as FixtureUserFn)).toThrow('is a bound or native function');
+    // The words in a body or a default value are not the marker.
+    expect(names(written(`({ app = '{ [native code] }' }) => { return '{ [native code] }'; }`))).toEqual(['app']);
   });
 
   it.each([

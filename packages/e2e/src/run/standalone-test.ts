@@ -30,7 +30,7 @@ import type { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
 import type { TargetExecutor } from './execute.ts';
 import { classifyAttemptStatus } from '@e2e-dev/core/lib/run/engine-sessions';
 import { planAttempt } from '../collect/fixture-plan.ts';
-import { bindFixtures, type BoundFixtures } from './fixture-pool.ts';
+import { attemptBuiltIns, bindFixtures, type BoundFixtures } from './fixture-pool.ts';
 import { captureFailureEvidence } from './failure-evidence.ts';
 import type { ArtifactSink, AttemptFixtures } from '@e2e-dev/core/lib/run/fixtures';
 import { findRegistered, runHook, type Realm } from './realm.ts';
@@ -293,17 +293,16 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
         publication.signal,
       );
       // Worker fixtures read their built-ins off this attempt while its code runs.
-      const leaveWorkerFixtures = executor.workerFixtures.enter(env.fixtures);
+      const leaveWorkerFixtures = executor.workerFixtures.enter(attemptBuiltIns(env.fixtures));
       // Whatever happens below, the slot is free for the next test once the body is done.
       try {
         const attemptFixtures = bindFixtures({
           plan: planAttempt(env.target, registered, [...executor.realms.hooksFor(realm, registered, 'beforeEach'), ...executor.realms.hooksFor(realm, registered, 'afterEach')]),
-          builtIns: env.fixtures,
+          builtIns: attemptBuiltIns(env.fixtures),
           pool: executor.workerFixtures,
           signal: budget.signal,
         });
         bound = attemptFixtures;
-        const { fixtures } = attemptFixtures;
         /** Set once the body's race settled: a body cut short that runs on is no longer the test's to report. */
         let bodyOver = false;
         const enter = (next: RunPhase): void => {
@@ -327,11 +326,11 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
             await attemptFixtures.setUp();
             budget.signal.throwIfAborted();
             for (const hook of executor.realms.hooksFor(realm, registered, 'beforeEach')) {
-              await hook.fn(fixtures);
+              await attemptFixtures.call(hook);
               budget.signal.throwIfAborted();
             }
             enter('body');
-            await registered.fn(fixtures);
+            await attemptFixtures.call(registered);
           } catch (cause) {
             const notAwaited = await abandonNotAwaited();
             if (isRuntimeSkip(cause)) throw cause;
@@ -443,7 +442,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       attemptFixtures === undefined
         ? []
         : [
-            ...executor.realms.hooksFor(realm, registered, 'afterEach').filter((hook) => attemptFixtures.ready(hook)).map((hook) => ({ label: `${hook.kind} hook`, run: () => hook.fn(attemptFixtures.fixtures) })),
+            ...executor.realms.hooksFor(realm, registered, 'afterEach').filter((hook) => attemptFixtures.ready(hook)).map((hook) => ({ label: `${hook.kind} hook`, run: () => attemptFixtures.call(hook) })),
             ...attemptFixtures.teardowns().map((teardown) => ({ label: `fixture "${teardown.name}" teardown`, run: teardown.run })),
           ];
     return { started: { realm, teardowns }, outcome };
@@ -480,7 +479,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
         // As after a run's body: a soft matcher in a teardown hook finds the collection closed.
         soft.close();
         const publication = new AbortController();
-        const leaveWorkerFixtures = executor.workerFixtures.enter(env.fixtures);
+        const leaveWorkerFixtures = executor.workerFixtures.enter(attemptBuiltIns(env.fixtures));
         try {
           publishAttempt({ attemptId, owner: 'host', testKind: 'test', assertionTimeout: config.assertionTimeout, budget, soft, polls: new PollScope('the test teardown') }, publication.signal);
           steps.phase = 'afterEach';

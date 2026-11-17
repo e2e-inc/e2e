@@ -5,36 +5,37 @@
  * code sees the fixtures that live at least as long as it does: a test and
  * its per-test hooks see test and worker fixtures, a suite hook and a worker
  * fixture see worker fixtures only. A chain fixture is set up on demand: for
- * code that names it, for a fixture that names it, or because it is `auto`
- * (`planAttempt`, `planSuiteHook`).
+ * code that names it, for a fixture that names it, or because it is `auto`.
+ * The plan (`planAttempt`, `planSuiteHook`) decides all of that before
+ * anything runs; the pool sets up what it lists and hands each function the
+ * fixtures it names.
  */
 
-import type { FixturePlan } from '../collect/fixture-plan.ts';
-import type { FixtureDefinition } from '../collect/registry.ts';
+import type { FixtureInputs, FixturePlan, FixtureUser, PlannedFixture } from '../collect/fixture-plan.ts';
+import type { FixtureDefinition, TestBody } from '../collect/registry.ts';
 import { builtInFixtures, type BuiltInFixtures, type BuiltInTarget } from '@e2e-dev/core/lib/run/fixtures';
 import { pollLineage, type PollLineage } from '@e2e-dev/core/lib/expect/poll-scope';
 import { ConfigurationError } from '@e2e-dev/core/lib/internal/errors';
 
-/** Keys a test body may probe without meaning a fixture. */
-const PROBED_KEYS: ReadonlySet<string> = new Set(['then', 'constructor', 'toJSON', 'toString', 'valueOf', 'inspect']);
+/** Reads one built-in fixture by name, off whatever attempt runs the code. */
+export type BuiltInReader = (name: string) => unknown;
+
+/** The built-in fixtures of an attempt, read lazily off the object `createFixtures` built for it. */
+export function attemptBuiltIns(fixtures: object): BuiltInReader {
+  return (name) => Reflect.get(fixtures, name) as unknown;
+}
 
 /**
- * The built-in fixtures of code with no attempt behind it: `platform` alone.
- * Any other name fails the way the attempt's fixture object fails it, unless
- * `unavailable` is given: then a built-in the target does have fails with the
- * error it returns, which says why no attempt is behind the code (a suite
- * hook whose attempt could not open, or one that runs after an interrupt).
+ * The built-in fixtures of code with no attempt behind it: the ones the
+ * target alone decides (`platform`). Any other fails with the error
+ * `unavailable` returns, which says why no attempt is behind the code.
  */
-export function attemptlessBuiltIns(target: BuiltInTarget, unavailable?: (name: string) => Error): object {
+export function attemptlessBuiltIns(target: BuiltInTarget, unavailable: (name: string) => Error): BuiltInReader {
   const builtIns = builtInFixtures(target);
-  const values = Object.fromEntries(builtIns.names.filter((name) => !builtIns.needsAttempt(name)).map((name) => [name, builtIns.attemptless(name)]));
-  return new Proxy(values, {
-    get(own, property, receiver) {
-      if (typeof property !== 'string' || property in own || PROBED_KEYS.has(property)) return Reflect.get(own, property, receiver) as unknown;
-      if (unavailable !== undefined && builtIns.names.includes(property)) throw unavailable(property);
-      throw new ConfigurationError('UNSUPPORTED_CAPABILITY', builtIns.missing(property, builtIns.names));
-    },
-  });
+  return (name) => {
+    if (builtIns.needsAttempt(name)) throw unavailable(name);
+    return builtIns.attemptless(name);
+  };
 }
 
 /** One set-up fixture's teardown: the rest of its function after `use`. */
@@ -145,7 +146,7 @@ export class WorkerFixturePool {
   private readonly active: WorkerFixtureTeardown[] = [];
   private closed = false;
   /** The built-in fixtures of the attempt or suite hook running now; see `enter`. */
-  private current: object | undefined;
+  private current: BuiltInReader | undefined;
 
   private readonly builtInFixtures: BuiltInFixtures;
 
@@ -160,7 +161,7 @@ export class WorkerFixturePool {
    * for `device`, `app`, and `screen`, never one attempt's object: the steps
    * it takes land in the record of whatever runs at the time.
    */
-  enter(builtIns: object): () => void {
+  enter(builtIns: BuiltInReader): () => void {
     const previous = this.current;
     this.current = builtIns;
     return () => {
@@ -204,28 +205,24 @@ export class WorkerFixturePool {
   }
 
   /**
-   * The built-in worker fixtures as a worker fixture sees them: `platform`
-   * as is, every other one forwarding to the attempt or suite hook running
-   * at the time it is read.
+   * Built-in `name` as a worker fixture receives it: its value when the
+   * target alone decides it, else an object that forwards to the attempt or
+   * suite hook running at the time it is used.
    */
-  builtIns(): Record<string, unknown> {
-    const { names, scope, needsAttempt, attemptless } = this.builtInFixtures;
-    return Object.fromEntries(
-      names.filter((name) => scope(name) === 'worker').map((name) => [name, needsAttempt(name) ? this.forwarder(name) : attemptless(name)]),
-    );
+  builtIn(name: string): unknown {
+    return this.builtInFixtures.needsAttempt(name) ? this.forwarder(name) : this.builtInFixtures.attemptless(name);
   }
 
   /** An object that reads `name` off the running attempt's fixtures at each access. */
   private forwarder(name: string): object {
     const resolve = (): object => {
-      const current = this.current;
-      if (current === undefined) {
+      if (this.current === undefined) {
         throw new ConfigurationError(
           'UNSUPPORTED_CAPABILITY',
           `a worker fixture used "${name}" when no test or suite hook was running`,
         );
       }
-      return Reflect.get(current, name) as object;
+      return this.current(name) as object;
     };
     return new Proxy(
       {},
@@ -241,23 +238,28 @@ export class WorkerFixturePool {
   }
 }
 
-/** What one piece of user code receives, and the fixtures set up for it. */
+/** A registered test body or hook: what the pool calls with the fixtures it names. */
+type BoundUser = FixtureUser & { readonly fn: TestBody };
+
+/** The fixtures set up for one piece of user code, and the way to run that code with them. */
 export interface BoundFixtures {
-  /** The object the hooks and the body receive. */
-  readonly fixtures: object;
   /**
    * Sets up the fixtures the plan lists, in its order: a worker fixture is
    * taken from the pool (set up there on first use), a test fixture set up
-   * for this attempt. Each value is defined on `fixtures` before the next
-   * fixture, the hooks, or the body can read it. Rejects with the first
-   * failure; the test fixtures set up before it still get torn down.
+   * for this attempt. Rejects with the first failure; the test fixtures set
+   * up before it still get torn down.
    */
   setUp(): Promise<void>;
   /**
-   * Whether every chain fixture `hook` names was set up. A hook that names
+   * Runs the test body or hook `user` with the fixtures it names, and no
+   * others. A built-in one is acquired as the function destructures it.
+   */
+  call(user: BoundUser): void | Promise<void>;
+  /**
+   * Whether every chain fixture `user` names was set up. A hook that names
    * one whose setup failed, or was never reached, has nothing to run with.
    */
-  ready(hook: { readonly names: readonly string[] }): boolean;
+  ready(user: FixtureUser): boolean;
   /**
    * The teardowns of the test fixtures whose setup completed, last set up
    * first. Taking them ends setup, as does `signal`: a test fixture still
@@ -269,10 +271,10 @@ export interface BoundFixtures {
 }
 
 export interface BindOptions {
-  /** What to set up, for which code, on which target: `planAttempt` or `planSuiteHook`. */
+  /** What to set up, and what each function receives: `planAttempt` or `planSuiteHook`. */
   readonly plan: FixturePlan;
-  /** The attempt's built-in fixtures, which the result reads lazily; see `attemptlessBuiltIns`. */
-  readonly builtIns: object;
+  /** The built-in fixtures of the attempt the code runs in; see `attemptlessBuiltIns`. */
+  readonly builtIns: BuiltInReader;
   readonly pool: WorkerFixturePool;
   /** The attempt's abort signal: setup stops once it fires. */
   readonly signal?: AbortSignal | undefined;
@@ -280,42 +282,29 @@ export interface BindOptions {
 
 /**
  * Binds one plan to the code about to run with it: a test attempt, or a
- * suite hook. The result reads the built-ins the scope admits lazily, and
- * holds the planned fixtures as they are set up. A fixture the scope does
- * not admit, one whose setup failed, or one nothing named fails at the first
- * read with what went wrong instead of looking unknown.
+ * suite hook. Every function, a fixture's included, receives a plain object
+ * holding the fixtures it names: the value a chain fixture handed over, or a
+ * built-in read off the attempt when the function destructures it.
  */
 export function bindFixtures(options: BindOptions): BoundFixtures {
   const { plan, builtIns, pool, signal } = options;
-  const { target, scope } = plan;
-  const targetBuiltIns = builtInFixtures(target);
-  const values: Record<string, unknown> = {};
-  const fixtures = gate(values, plan, builtIns);
-  // A built-in that a planned fixture extends is read through that fixture, once it is set up.
-  const extended = new Set(plan.order.map((definition) => definition.name));
-  for (const name of targetBuiltIns.names) {
-    if (extended.has(name) || (scope === 'worker' && targetBuiltIns.scope(name) === 'test')) continue;
-    Object.defineProperty(values, name, { enumerable: true, get: () => Reflect.get(builtIns, name) as unknown });
-  }
-  // What a worker fixture sees: the built-in worker fixtures and the worker
-  // fixtures it names, set up before it.
-  const workerBuiltIns = pool.builtIns();
-  const workerValues: Record<string, unknown> = {};
-  for (const [name, value] of Object.entries(workerBuiltIns)) if (!extended.has(name)) workerValues[name] = value;
-  const workerFixtures = gate(workerValues, { ...plan, scope: 'worker' }, attemptlessBuiltIns(target));
-  /** The value each fixture handed over, by definition: a fixture that extends another reads that one's here. */
+  /** The value each fixture handed over. */
   const provided = new Map<FixtureDefinition, unknown>();
-  /** Whether user code reads `definition` under its name: the last fixture of that name in the chain. */
-  const isLast = (definition: FixtureDefinition): boolean => plan.chain.findLast((each) => each.name === definition.name) === definition;
-  /**
-   * What `definition`'s function receives. One that names itself extends a
-   * fixture: its own name is the earlier fixture of that name, or the
-   * built-in as `original` reads it, never the override user code sees.
-   */
-  const fixturesFor = (definition: FixtureDefinition, shared: object, original: () => unknown): object => {
-    if (!definition.names.includes(definition.name)) return shared;
-    const base = plan.bases.get(definition);
-    return Object.create(shared, { [definition.name]: { enumerable: true, get: base === undefined ? original : () => provided.get(base) } }) as object;
+  const receive = (inputs: FixtureInputs, builtIn: BuiltInReader): object => {
+    const fixtures = {};
+    for (const [name, definition] of inputs) {
+      Object.defineProperty(
+        fixtures,
+        name,
+        definition === undefined ? { enumerable: true, get: () => builtIn(name) } : { enumerable: true, value: provided.get(definition) },
+      );
+    }
+    return fixtures;
+  };
+  const inputsOf = (user: FixtureUser): FixtureInputs => {
+    const inputs = plan.inputs.get(user);
+    if (inputs === undefined) throw new Error('the fixture plan does not cover this test body or hook');
+    return inputs;
   };
 
   const active: FixtureTeardown[] = [];
@@ -328,81 +317,35 @@ export function bindFixtures(options: BindOptions): BoundFixtures {
   const requireActive = (): void => {
     if (abandoned) throw new ConfigurationError('TEST_SETUP_FAILED', 'fixture setup ended after the attempt was abandoned');
   };
-  const define = (name: string, value: unknown): void => {
-    Object.defineProperty(values, name, { value, enumerable: true });
-  };
 
-  const setUpOne = async (definition: FixtureDefinition): Promise<void> => {
-    const { name } = definition;
-    if (plan.scopes.get(definition) === 'worker') {
-      const received = fixturesFor(definition, workerFixtures, () => workerBuiltIns[name]);
-      const value = await pool.acquire(definition, received, plan.engineBacked.has(definition));
-      provided.set(definition, value);
-      if (!isLast(definition)) return;
-      Object.defineProperty(workerValues, name, { value, enumerable: true });
-      define(name, value);
+  const setUpOne = async ({ definition, scope, usesEngine, inputs }: PlannedFixture): Promise<void> => {
+    if (scope === 'worker') {
+      // A worker fixture outlives this attempt, so a built-in reaches it through the pool, never as this attempt's object.
+      provided.set(definition, await pool.acquire(definition, receive(inputs, (name) => pool.builtIn(name)), usesEngine));
       return;
     }
-    await startFixture(definition, fixturesFor(definition, fixtures, () => Reflect.get(builtIns, name) as unknown), (value, teardown) => {
+    await startFixture(definition, receive(inputs, builtIns), (value, teardown) => {
       if (abandoned) return false;
       provided.set(definition, value);
-      if (isLast(definition)) define(name, value);
       active.push(teardown);
       return true;
     });
   };
 
-  const declared = new Set(plan.chain.map((definition) => definition.name));
   return {
-    fixtures,
     async setUp(): Promise<void> {
       requireActive();
-      for (const definition of plan.order) {
-        await setUpOne(definition);
+      for (const planned of plan.order) {
+        await setUpOne(planned);
         requireActive();
       }
     },
-    ready: ({ names }) => names.every((name) => !declared.has(name) || Object.hasOwn(values, name)),
+    call: (user) => user.fn(receive(inputsOf(user), builtIns)),
+    ready: (user) => [...inputsOf(user).values()].every((definition) => definition === undefined || provided.has(definition)),
     teardowns(): readonly FixtureTeardown[] {
       abandon();
       signal?.removeEventListener('abort', abandon);
       return active.toReversed();
     },
   };
-}
-
-/**
- * Wraps `values` so a read of a fixture they lack says why: a test fixture
- * read where only worker fixtures live, a chain fixture whose setup failed,
- * or one nothing named. Any other name goes to the built-ins, whose own gate
- * names the fixtures the target has.
- */
-function gate(values: Record<string, unknown>, plan: FixturePlan, builtIns: object): object {
-  const { target, chain, scope } = plan;
-  const declared = new Map(chain.map((definition) => [definition.name, definition]));
-  return new Proxy(values, {
-    get(own, property, receiver) {
-      if (typeof property !== 'string' || property in own || PROBED_KEYS.has(property)) {
-        return Reflect.get(own, property, receiver) as unknown;
-      }
-      const definition = declared.get(property);
-      const builtInScopeHere = builtInFixtures(target).scope(property);
-      const fixtureScope = definition === undefined ? builtInScopeHere : (plan.scopes.get(definition) ?? definition.scope ?? builtInScopeHere ?? 'test');
-      if (scope === 'worker' && fixtureScope === 'test') {
-        throw new ConfigurationError(
-          'UNSUPPORTED_CAPABILITY',
-          `"${property}" is a test fixture on target "${target.name}": beforeAll, afterAll, and worker fixtures see worker fixtures only, since a test fixture is set up for one test. Use it in beforeEach, or save the state it builds with test.setup()`,
-        );
-      }
-      if (definition !== undefined) {
-        throw new ConfigurationError(
-          'TEST_SETUP_FAILED',
-          plan.order.includes(definition)
-            ? `fixture "${property}" was not set up: its setup failed, or the setup of a fixture before it did`
-            : `fixture "${property}" was not set up: nothing running here names it. A fixture is set up for the code that names it in its first parameter, or for every test when it is declared with auto: true`,
-        );
-      }
-      return Reflect.get(builtIns, property) as unknown;
-    },
-  });
 }

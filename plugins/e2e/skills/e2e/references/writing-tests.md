@@ -180,7 +180,7 @@ reading `device`, `app`, or `screen` throws the reason.
 Fixtures are set up on demand. A test body, a hook, and a fixture function
 name what they use by destructuring their first parameter
 (`async ({ app, screen }) => {}`); `async (fixtures) => {}`, `async (_, use)`,
-and a rest property are `COLLECTION_ERROR`, and a fixture that needs nothing
+a rest property, and a bound function (`fn.bind()`) are `COLLECTION_ERROR`, and a fixture that needs nothing
 takes `({}, use)`. A test sets up the `test.extend` fixtures its body and its
 `beforeEach` and `afterEach` hooks name, and the ones those fixtures name
 (same `extend` call or an earlier one, any order; a cycle is

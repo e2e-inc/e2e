@@ -9,7 +9,7 @@ To migrate:
 
 - A fixture that exists for its side effect (it seeds data, installs a build, starts a watcher) and that no test names needs `auto: true`: `[fn, { auto: true }]` runs for every test, `[fn, { scope: 'worker', auto: true }]` once per worker.
 - A fixture that relies on another one running first names it: `task: async ({ project, agent }, use) => {}`.
-- A test body, a hook, and a fixture function destructure their first parameter. `async (fixtures) => {}`, `async (_, use) => {}`, and a rest property (`{ app, ...rest }`) are now a `COLLECTION_ERROR`; a fixture that needs nothing writes `async ({}, use) => {}`.
+- A test body, a hook, and a fixture function destructure their first parameter. `async (fixtures) => {}`, `async (_, use) => {}`, a rest property (`{ app, ...rest }`), and a bound function (`fn.bind()`) are now a `COLLECTION_ERROR`; a fixture that needs nothing writes `async ({}, use) => {}`.
 
 A fixture can now name the fixtures declared beside it in the same `test.extend()` call, in any order; a cycle is a `COLLECTION_ERROR` naming it.
 

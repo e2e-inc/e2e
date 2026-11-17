@@ -684,7 +684,7 @@ reads the names from the function's source.
 | Throws | When |
 | --- | --- |
 | `COLLECTION_ERROR` | A test that runs on a target, or one of its hooks, names a fixture the target does not have. No test runs. Declare `requires: ['browser']`, `platforms`, or `test.skipIf` to skip such tests on that target instead. |
-| `COLLECTION_ERROR` | A test body, a hook, or a fixture function takes the whole object (`async (fixtures) => {}`), a rest property (`{ app, ...rest }`), or a computed property. |
+| `COLLECTION_ERROR` | A test body, a hook, or a fixture function takes the whole object (`async (fixtures) => {}`), a rest property (`{ app, ...rest }`), or a computed property, or is a bound function (`fn.bind()`), whose parameters cannot be read. |
 
 <Note>
 Built-in fixtures are lazy. Destructuring in the parameter list acquires
@@ -739,7 +739,8 @@ Per attempt:
    each calls `use`. Setup counts against the test `timeout`. A failure is
    reported in phase `beforeEach`, before any `beforeEach` hook has run.
 3. `beforeEach` hooks, the body, then `afterEach` hooks run with the same
-   fixture object. The fixture set is the test's own chain: a hook that names
+   fixtures. Each receives the ones it names. The fixture set is the test's
+   own chain: a hook that names
    `workspace` around a test registered through `base` fails with
    `COLLECTION_ERROR`.
 4. Teardowns run in reverse order after the last `afterEach`, whether or not
@@ -754,7 +755,7 @@ checked against that target's fixtures.
 | Mistake | Fails |
 | --- | --- |
 | A value that is not a plain object of functions or `[fn, { scope, auto }]` pairs, a scope other than `'test'` or `'worker'`, an `auto` that is not a boolean, an option other than `scope` and `auto`, or an empty name | At import, `COLLECTION_ERROR` naming the fixture |
-| A function that does not destructure its first parameter, or takes a rest or computed property there | At import, `COLLECTION_ERROR` naming the fixture |
+| A function that does not destructure its first parameter, takes a rest or computed property there, or is a bound function | At import, `COLLECTION_ERROR` naming the fixture |
 | Fixtures that name each other in a cycle | At import, `COLLECTION_ERROR` naming the cycle |
 | A name the target has no fixture for, in a test that runs there, its hooks, or a fixture they need | At collection, `COLLECTION_ERROR` |
 | A `scope` that differs from the scope of the [fixture it extends](#extending-a-fixture) | At import when that scope is the same on every engine, else at collection, `COLLECTION_ERROR` naming both |

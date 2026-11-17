@@ -572,7 +572,7 @@ test.setup('authenticate', { sessions: ['member', 'admin'] }, async ({ session }
 | 抛出 | 条件 |
 | --- | --- |
 | `COLLECTION_ERROR` | 在某个测试目标上运行的测试或它的钩子列出了该测试目标没有的测试夹具。此时不会运行任何测试。声明 `requires: ['browser']`、`platforms` 或 `test.skipIf` 可改为在该测试目标上跳过此类测试。 |
-| `COLLECTION_ERROR` | 测试主体、钩子或测试夹具函数接收整个对象（`async (fixtures) => {}`）、剩余属性（`{ app, ...rest }`）或计算属性。 |
+| `COLLECTION_ERROR` | 测试主体、钩子或测试夹具函数接收整个对象（`async (fixtures) => {}`）、剩余属性（`{ app, ...rest }`）或计算属性，或者是无法读取参数的绑定函数（`fn.bind()`）。 |
 
 <Note>
 内置测试夹具按需获取。在参数列表中解构会在主体第一条语句之前获取它们。[你自己的测试夹具](#your-own-fixtures)会在第一个 `beforeEach` 之前准备。
@@ -609,7 +609,7 @@ test('renames the workspace', async ({ workspace, screen }) => {
 
 1. 在运行任何代码之前，先确定要准备哪些测试夹具：主体和所有适用的 `beforeEach`、`afterEach` 钩子列出的测试夹具，这些测试夹具列出的测试夹具，以及 `auto` 测试夹具。没有被列出的测试夹具不会运行。
 2. 它们按声明顺序执行，每个都排在它列出的测试夹具之后，直到各自调用 `use`。准备时间计入测试的 `timeout`。失败会报告在 `beforeEach` 阶段，此时尚未运行任何 `beforeEach` 钩子。
-3. `beforeEach` 钩子、主体，然后是 `afterEach` 钩子，使用同一个测试夹具对象运行。测试夹具集合取决于测试自身的链：对于通过 `base` 注册的测试，其外层钩子若列出 `workspace`，会以 `COLLECTION_ERROR` 失败。
+3. `beforeEach` 钩子、主体，然后是 `afterEach` 钩子，使用同一组测试夹具运行，各自得到它列出的那些。测试夹具集合取决于测试自身的链：对于通过 `base` 注册的测试，其外层钩子若列出 `workspace`，会以 `COLLECTION_ERROR` 失败。
 4. 无论主体是否通过，清理都会在最后一个 `afterEach` 之后按反向顺序运行，各自拥有独立的 `cleanupTimeout` 预算。清理错误会在 `afterEach` 阶段使原本通过的尝试失败；如果主体已失败，则加入 `secondaryErrors`。
 
 在收集阶段失败的错误用法是一条运行错误，其中带有代码所在的文件和行号，并且不会运行任何测试。不在某个测试目标上运行的测试，不会按该测试目标的测试夹具检查。
@@ -617,7 +617,7 @@ test('renames the workspace', async ({ workspace, screen }) => {
 | 错误用法 | 失败位置和错误 |
 | --- | --- |
 | 值不是由函数或 `[fn, { scope, auto }]` 组成的普通对象、作用域不是 `'test'` 或 `'worker'`、`auto` 不是布尔值、使用 `scope` 和 `auto` 之外的选项，或名称为空 | 导入时抛出 `COLLECTION_ERROR`，指出测试夹具名称 |
-| 函数没有解构第一个参数，或在其中使用剩余属性或计算属性 | 导入时抛出 `COLLECTION_ERROR`，指出测试夹具名称 |
+| 函数没有解构第一个参数、在其中使用剩余属性或计算属性，或是绑定函数 | 导入时抛出 `COLLECTION_ERROR`，指出测试夹具名称 |
 | 测试夹具互相列出，形成循环 | 导入时抛出 `COLLECTION_ERROR`，指出该循环 |
 | 在某个测试目标上运行的测试、它的钩子或它们需要的测试夹具，列出了该测试目标没有的名称 | 收集阶段，`COLLECTION_ERROR` |
 | `scope` 与[被扩展的测试夹具](#extending-a-fixture)的作用域不同 | 如果该作用域在所有引擎上都相同，则在导入时，否则在收集阶段，抛出指出两者的 `COLLECTION_ERROR` |
