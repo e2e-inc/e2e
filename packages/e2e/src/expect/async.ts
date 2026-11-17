@@ -390,6 +390,24 @@ class AsyncExpectationImpl implements AsyncExpectation {
     return this.stateMatcher('toBeFocused', options);
   }
 
+  toBeEmpty(options?: { timeout?: number }): Promise<void> {
+    this.readOptions('toBeEmpty', options);
+    return this.poll(
+      {
+        name: 'toBeEmpty',
+        readsWithheld: true,
+        predicate: (sample) => sample.node !== null && readContent(sample.node).content === '',
+        describeExpected: 'empty',
+        observed: (sample) => {
+          if (sample.node === null) return 'no node';
+          const { field, content } = readContent(sample.node);
+          return `${field} ${JSON.stringify(content)}`;
+        },
+      },
+      options?.timeout,
+    );
+  }
+
   toHaveText(expected: TextMatch | readonly TextMatch[], options?: TextMatcherOptions): Promise<void> {
     return this.textMatcher('toHaveText', expected, options);
   }
@@ -507,6 +525,16 @@ function readField(def: TextMatcherDef, node: SemanticNode): string | undefined 
   if (raw !== undefined) return raw;
   if (def.field !== 'value') return '';
   return isValueControl(node) ? '' : undefined;
+}
+
+/**
+ * What `toBeEmpty` reads, as Playwright's does: a form control's raw value,
+ * empty when the platform reports none, and any other node's normalized text,
+ * so whitespace alone is empty there.
+ */
+function readContent(node: SemanticNode): { field: 'value' | 'text'; content: string } {
+  if (isValueControl(node)) return { field: 'value', content: node.value ?? '' };
+  return { field: 'text', content: normalizeText(node.text ?? '') };
 }
 
 /** A pattern as a failure message prints it, marking a string compared ignoring case. */
