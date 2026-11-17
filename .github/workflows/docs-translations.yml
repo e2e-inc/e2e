@@ -43,6 +43,8 @@ jobs:
         run: node scripts/check-docs-translations-deepl.ts --base origin/${{ github.base_ref }} --report deepl-report.json
         env:
           DEEPL_API_KEY: ${{ secrets.DEEPL_API_KEY }}
+          # The fallback once DeepL's monthly quota is used up.
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
       # Every reviewed section with DeepL's versions and the scores; GitHub
       # shows only the first 10 warnings of a step.
       - if: ${{ !cancelled() }}

@@ -5,12 +5,14 @@ import { describe, it } from 'node:test';
 import {
   chrf,
   deepl,
+  gateway,
   glossaryTsv,
   parseGlossary,
   QuotaExceeded,
   review,
   sections,
   type Translator,
+  withFallback,
 } from './deepl-review.ts';
 import { REPO_ROOT } from './public-packages.ts';
 
@@ -27,7 +29,7 @@ const README = `## Style
 
 /** DeepL with canned answers, keyed by the text it is given. */
 function fake(answers: Record<string, string>): Translator {
-  return { translate: async (texts) => texts.map((text) => answers[text] ?? '') };
+  return { name: 'fake', translate: async (texts) => texts.map((text) => answers[text] ?? '') };
 }
 
 describe('chrf', () => {
@@ -88,7 +90,7 @@ describe('review', () => {
       [{ id: 'previous', en: 'Previous', ja: '次へ' }],
       fake({ Previous: '前のページ', 次へ: 'Next' }),
     );
-    assert.deepEqual(result?.problems, ['differs from DeepL in both directions']);
+    assert.deepEqual(result?.problems, ['far from the reference in both directions']);
   });
 
   it('passes a paraphrase that back-translates to the English', async () => {
@@ -222,5 +224,59 @@ describe('deepl', () => {
   it('tells a used-up quota apart', async () => {
     const fetchImpl = (async () => new Response('Quota exceeded', { status: 456 })) as unknown as typeof fetch;
     await assert.rejects(deepl('key', [], fetchImpl).translate(['a'], 'EN', 'JA'), QuotaExceeded);
+  });
+});
+
+describe('gateway', () => {
+  it('asks the model for one translation per text, with the glossary', async () => {
+    const bodies: { model: string; messages: { content: string }[] }[] = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { model: string; messages: { content: string }[] };
+      bodies.push(body);
+      const { texts } = JSON.parse(body.messages[1]!.content) as { texts: string[] };
+      return Response.json({
+        choices: [{ message: { content: JSON.stringify({ translations: texts.map((t) => `${t}!`) }) } }],
+      });
+    }) as typeof fetch;
+    const translator = gateway('key', parseGlossary(README), fetchImpl);
+    const texts = Array.from({ length: 25 }, (_, i) => `t${i}`);
+
+    assert.deepEqual(await translator.translate(texts, 'EN', 'JA'), texts.map((t) => `${t}!`));
+    assert.equal(translator.name, 'openai/gpt-6-luna');
+    assert.equal(bodies.length, 2);
+    assert.equal(bodies[0]?.model, 'openai/gpt-6-luna');
+    assert.match(bodies[0]?.messages[0]?.content ?? '', /hosted browser = ホスト型ブラウザ/);
+  });
+
+  it('sends a long section in a request of its own', async () => {
+    let requests = 0;
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      requests++;
+      const body = JSON.parse(String(init?.body)) as { messages: { content: string }[] };
+      const { texts } = JSON.parse(body.messages[1]!.content) as { texts: string[] };
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ translations: texts }) } }] });
+    }) as typeof fetch;
+    await gateway('key', [], fetchImpl).translate(['a'.repeat(7_000), 'b'.repeat(7_000)], 'EN', 'JA');
+    assert.equal(requests, 2);
+  });
+});
+
+describe('withFallback', () => {
+  const exhausted: Translator = {
+    name: 'DeepL',
+    translate: async () => {
+      throw new QuotaExceeded('used up');
+    },
+  };
+
+  it("hands the texts to the fallback once DeepL's quota is used up", async () => {
+    const translator = withFallback(exhausted, fake({ Next: '次へ' }));
+    assert.equal(translator.name, 'DeepL');
+    assert.deepEqual(await translator.translate(['Next'], 'EN', 'JA'), ['次へ']);
+    assert.equal(translator.name, 'fake');
+  });
+
+  it('rethrows the quota error without a fallback', async () => {
+    await assert.rejects(withFallback(exhausted, undefined).translate(['a'], 'EN', 'JA'), QuotaExceeded);
   });
 });

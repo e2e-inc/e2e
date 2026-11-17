@@ -13,6 +13,10 @@
  * reference uses our terms, and a term DeepL's reference uses that ours does
  * not is flagged as well.
  *
+ * When DeepL's monthly quota is used up, `withFallback` hands the
+ * translations to a model on the Vercel AI Gateway (`gateway`), given the
+ * same glossary in its prompt, and the review goes on unchanged.
+ *
  * e2e-inc/e2e-site checks its UI copy the same way
  * (`apps/site/lib/i18n/deepl-review.ts`); keep the two in step.
  */
@@ -38,6 +42,8 @@ export interface GlossaryEntry {
 }
 
 export interface Translator {
+  /** Who translates, for the report: "DeepL" or a model id. */
+  readonly name: string;
   /** Translates every text, in order, from one language to the other. */
   translate(texts: string[], from: 'EN' | 'JA', to: 'EN' | 'JA'): Promise<string[]>;
 }
@@ -53,9 +59,9 @@ export interface Usage {
 }
 
 export interface Review extends Pair {
-  /** DeepL's Japanese for the English. */
+  /** The translator's Japanese for the English. */
   reference: string;
-  /** DeepL's English for our Japanese. */
+  /** The translator's English for our Japanese. */
   back: string;
   /** chrF between our Japanese and DeepL's, 0 to 1. */
   referenceScore: number;
@@ -197,7 +203,7 @@ export async function review(
     if (/[a-z]{3}/i.test(pair.en) && !JAPANESE.test(pair.ja)) {
       problems.push('left in English');
     } else if (referenceScore < threshold && backScore < threshold) {
-      problems.push('differs from DeepL in both directions');
+      problems.push('far from the reference in both directions');
     }
     const misses = glossaryMisses(pair, reference, glossary);
     if (misses.length > 0) problems.push(`glossary: ${misses.join(', ')}`);
@@ -352,6 +358,7 @@ export function deepl(
   }
 
   return {
+    name: 'DeepL',
     async usage() {
       const usage = await call<{ character_count: number; character_limit: number }>('/v2/usage');
       return { count: usage.character_count, limit: usage.character_limit };
@@ -378,11 +385,127 @@ export function deepl(
   };
 }
 
-function* batches(texts: string[]): Generator<string[]> {
+/** The model `gateway` translates with when DeepL's quota is used up. */
+export const FALLBACK_MODEL = 'openai/gpt-6-luna';
+
+const LANGUAGE = { EN: 'English', JA: 'Japanese' } as const;
+
+// Smaller than DeepL's batches: a model keeps a short list in order more
+// reliably, and a docs section can run to thousands of characters.
+const GATEWAY_BATCH_TEXTS = 20;
+const GATEWAY_BATCH_CHARS = 8_000;
+
+/**
+ * A translator on the Vercel AI Gateway, for when DeepL's quota is used up.
+ * The model gets the glossary and the docs' style (polite です・ます form,
+ * product names kept in English) and answers a JSON list of translations, one
+ * per text, in order.
+ */
+export function gateway(
+  key: string,
+  glossary: GlossaryEntry[] = [],
+  fetchImpl: typeof fetch = fetch,
+  model = FALLBACK_MODEL,
+): Translator {
+  const terms = glossary.map((entry) => `${entry.en} = ${entry.ja}`).join('\n');
+
+  async function translateBatch(texts: string[], from: 'EN' | 'JA', to: 'EN' | 'JA'): Promise<string[]> {
+    const system = [
+      `Translate each ${LANGUAGE[from]} text of a developer tool's documentation into ${LANGUAGE[to]}.`,
+      'Translate each text on its own, faithfully: no additions, no omissions, no explanations.',
+      to === 'JA'
+        ? 'Use the polite です・ます form and keep product, package, and API names in English.'
+        : 'Keep product, package, and API names as they are.',
+      terms ? `Use these terms (English = Japanese):\n${terms}` : '',
+      'Answer JSON: {"translations": [...]}, one string per input text, in the same order.',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    for (let attempt = 0; ; attempt++) {
+      const response = await fetchImpl('https://ai-gateway.vercel.sh/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: JSON.stringify({ texts }) },
+          ],
+          response_format: {
+            type: 'json_schema',
+            json_schema: {
+              name: 'translations',
+              strict: true,
+              schema: {
+                type: 'object',
+                properties: { translations: { type: 'array', items: { type: 'string' } } },
+                required: ['translations'],
+                additionalProperties: false,
+              },
+            },
+          },
+        }),
+      });
+      const retry = response.status === 429 || response.status >= 500;
+      if (!response.ok && (!retry || attempt === 4)) {
+        throw new Error(`AI Gateway ${model} answered ${response.status}: ${await response.text()}`);
+      }
+      if (response.ok) {
+        const body = (await response.json()) as { choices: { message: { content: string } }[] };
+        const parsed = JSON.parse(body.choices[0]?.message.content ?? '{}') as { translations?: unknown };
+        const translations = parsed.translations;
+        if (
+          Array.isArray(translations) &&
+          translations.length === texts.length &&
+          translations.every((text) => typeof text === 'string')
+        ) {
+          return translations as string[];
+        }
+        if (attempt === 4) throw new Error(`AI Gateway ${model} did not answer one translation per text`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2 ** attempt * 1000));
+    }
+  }
+
+  return {
+    name: model,
+    async translate(texts, from, to) {
+      const out: string[] = [];
+      for (const batch of batches(texts, GATEWAY_BATCH_TEXTS, GATEWAY_BATCH_CHARS)) {
+        out.push(...(await translateBatch(batch, from, to)));
+      }
+      return out;
+    },
+  };
+}
+
+/**
+ * DeepL until its monthly quota is used up, then `fallback` for the rest of
+ * the run. `name` says who translated last, for the report.
+ */
+export function withFallback(primary: Translator, fallback: Translator | undefined): Translator {
+  let current = primary;
+  return {
+    get name() {
+      return current.name;
+    },
+    async translate(texts, from, to) {
+      try {
+        return await current.translate(texts, from, to);
+      } catch (error) {
+        if (!(error instanceof QuotaExceeded) || !fallback) throw error;
+        current = fallback;
+        return fallback.translate(texts, from, to);
+      }
+    },
+  };
+}
+
+function* batches(texts: string[], maxTexts = BATCH_TEXTS, maxChars = BATCH_CHARS): Generator<string[]> {
   let batch: string[] = [];
   let size = 0;
   for (const text of texts) {
-    if (batch.length > 0 && (batch.length === BATCH_TEXTS || size + text.length > BATCH_CHARS)) {
+    if (batch.length > 0 && (batch.length === maxTexts || size + text.length > maxChars)) {
       yield batch;
       batch = [];
       size = 0;

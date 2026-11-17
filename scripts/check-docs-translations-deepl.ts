@@ -7,8 +7,9 @@
  * glossary term DeepL used gets a warning on its heading and a row in the job
  * summary, with both of DeepL's versions so a reviewer can judge it. The
  * check never fails on a flag: DeepL is a second opinion, not the source of
- * truth. It fails only when DeepL cannot be reached; a used-up monthly
- * quota skips the review with a warning.
+ * truth. It fails only when DeepL cannot be reached. When DeepL's monthly
+ * quota is used up, the review goes on with openai/gpt-6-luna on the Vercel
+ * AI Gateway, or skips with a warning without AI_GATEWAY_API_KEY.
  *
  * Sections pair by position, which holds because `check-docs-translations.ts`
  * keeps a translation's outline equal to its English page's; a page whose
@@ -28,6 +29,7 @@
  *   DEEPL_API_KEY        a DeepL API key; a Free key (ending in :fx) uses
  *                        api-free.deepl.com. Without one the check skips, as on
  *                        a fork's pull request.
+ *   AI_GATEWAY_API_KEY   the Vercel AI Gateway key for the fallback
  *   GITHUB_STEP_SUMMARY  where the report goes in CI
  */
 
@@ -36,7 +38,16 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { deepl, type Pair, parseGlossary, QuotaExceeded, review, sections } from './deepl-review.ts';
+import {
+  deepl,
+  gateway,
+  type Pair,
+  parseGlossary,
+  QuotaExceeded,
+  review,
+  sections,
+  withFallback,
+} from './deepl-review.ts';
 import { pages } from './docs-pages.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -94,20 +105,26 @@ for (const page of pages(join(DOCS, LANGUAGE))) {
 
 const glossaryFile = join(DOCS, LANGUAGE, 'README.md');
 const glossary = existsSync(glossaryFile) ? parseGlossary(readFileSync(glossaryFile, 'utf8')) : [];
-const translator = deepl(key, glossary);
+const deeplTranslator = deepl(key, glossary);
+const gatewayKey = process.env['AI_GATEWAY_API_KEY'];
+const translator = withFallback(deeplTranslator, gatewayKey ? gateway(gatewayKey, glossary) : undefined);
 let reviews: Awaited<ReturnType<typeof review>>;
 try {
   reviews = await review(pairs, translator, glossary);
 } catch (error) {
   if (!(error instanceof QuotaExceeded)) throw error;
   process.stdout.write(
-    `::warning::docs translations: ${pairs.length} changed sections not reviewed: ${error.message}. Re-run the job after the quota resets.\n`,
+    `::warning::docs translations: ${pairs.length} changed sections not reviewed: ${error.message}, and AI_GATEWAY_API_KEY is not set for the fallback. Re-run the job after the quota resets.\n`,
   );
   process.exit(0);
 }
 if (values.report) writeFileSync(values.report, `${JSON.stringify(reviews, null, 2)}\n`);
-const usage = await translator.usage();
-const usageLine = `DeepL usage this month: ${usage.count.toLocaleString('en')} of ${usage.limit.toLocaleString('en')} characters.`;
+const by = translator.name;
+const usage = await deeplTranslator.usage();
+const usageLine =
+  `DeepL usage this month: ${usage.count.toLocaleString('en')} of ${usage.limit.toLocaleString('en')} characters.` +
+  (by === 'DeepL' ? '' : ` The quota ran out, so ${by} translated instead.`);
+if (by !== 'DeepL') process.stdout.write(`::notice::docs translations: DeepL's quota is used up, ${by} translated instead\n`);
 const flagged = reviews.filter((entry) => entry.problems.length > 0);
 
 const escape = (text: string) => text.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
@@ -119,8 +136,8 @@ reviews.forEach((entry, i) => {
   if (entry.problems.length === 0) return;
   const { file, line } = pairs[i]!;
   process.stdout.write(
-    `::warning file=${file},line=${line},title=${property(`DeepL: ${entry.problems.join('; ')}`)}::` +
-      `${escape(`DeepL's English for this section: ${entry.back}`)}\n`,
+    `::warning file=${file},line=${line},title=${property(`${by}: ${entry.problems.join('; ')}`)}::` +
+      `${escape(`${by}'s English for this section: ${entry.back}`)}\n`,
   );
 });
 
@@ -133,17 +150,17 @@ const details = (entry: (typeof reviews)[number]) =>
     '| | |',
     '| --- | --- |',
     `| English | ${cell(entry.en)} |`,
-    `| DeepL's English for ours | ${cell(entry.back)} |`,
+    `| ${by}'s English for ours | ${cell(entry.back)} |`,
     `| Ours | ${cell(entry.ja)} |`,
-    `| DeepL's Japanese | ${cell(entry.reference)} |`,
+    `| ${by}'s Japanese | ${cell(entry.reference)} |`,
     '',
     '</details>',
   ].join('\n');
 const summary = [
-  '## Japanese docs checked against DeepL',
+  `## Japanese docs checked against ${by}`,
   '',
   `${reviews.length} ${reviews.length === 1 ? 'section' : 'sections'} checked, ${flagged.length} flagged${skipped.length > 0 ? `, ${skipped.length} ${skipped.length === 1 ? 'page' : 'pages'} skipped` : ''}.`,
-  'Scores are chrF from 0 to 1: ours against DeepL\'s Japanese, then the English against DeepL\'s English for ours. A flag is a prompt to look, not a verdict.',
+  `Scores are chrF from 0 to 1: ours against ${by}'s Japanese, then the English against ${by}'s English for ours. A flag is a prompt to look, not a verdict.`,
   usageLine,
   '',
   ...flagged.map(details),
@@ -155,5 +172,5 @@ else process.stdout.write(summary);
 
 process.stdout.write(`${usageLine}\n`);
 process.stdout.write(
-  `docs translations: ${reviews.length} ${reviews.length === 1 ? 'section' : 'sections'} checked against DeepL, ${flagged.length} flagged\n`,
+  `docs translations: ${reviews.length} ${reviews.length === 1 ? 'section' : 'sections'} checked against ${by}, ${flagged.length} flagged\n`,
 );
