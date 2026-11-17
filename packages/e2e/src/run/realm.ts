@@ -176,7 +176,7 @@ export class RealmManager {
         let failed: SerializedError | undefined;
         for (const hook of this.scopeHooks<SuiteHook>(realm, scope, 'beforeAll')) {
           try {
-            await hooks().run(hook, this.options.timeout);
+            await hooks.run(hook, this.options.timeout);
           } catch (cause) {
             failed = this.hookFailed(realm, scope, 'beforeAll', cause);
             break;
@@ -218,7 +218,7 @@ export class RealmManager {
         realm.entered.delete(scope);
         for (const hook of this.scopeHooks<SuiteHook>(realm, scope, 'afterAll').toReversed()) {
           try {
-            await hooks().run(hook, this.options.cleanupTimeout);
+            await hooks.run(hook, this.options.cleanupTimeout);
           } catch (cause) {
             const failed = this.hookFailed(realm, scope, 'afterAll', cause);
             failure ??= failed;
@@ -234,13 +234,13 @@ export class RealmManager {
     await this.leaveFinished(realm, [], shared);
   }
 
-  /** Runs `work` with a pass of suite hooks opened on first use and closed after it. */
-  private async withSuiteHooks<T>(shared: TargetSession | undefined, work: (hooks: () => SuiteHookSession) => Promise<T>): Promise<T> {
-    let opened: SuiteHookSession | undefined;
+  /** Runs `work` with a pass of suite hooks, closed after it. Opening one costs nothing until a hook needs the engine. */
+  private async withSuiteHooks<T>(shared: TargetSession | undefined, work: (hooks: SuiteHookSession) => Promise<T>): Promise<T> {
+    const hooks = this.options.openSuiteHooks(shared);
     try {
-      return await work(() => (opened ??= this.options.openSuiteHooks(shared)));
+      return await work(hooks);
     } finally {
-      await opened?.close();
+      await hooks.close();
     }
   }
 
