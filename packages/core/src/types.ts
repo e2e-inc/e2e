@@ -820,16 +820,25 @@ export type SynchronousBody<Result> = Extract<Result, PromiseLike<unknown>> exte
   ? () => Result
   : never;
 
+/** A `test.skipIf` or `test.runIf` condition. A Promise is a type error. */
+export type SynchronousCondition<Condition> = Extract<Condition, PromiseLike<unknown>> extends never
+  ? Condition
+  : never;
+
 /** Opaque handle of a registered test. */
 export interface TestCase {
   readonly [testCaseBrand]: true;
 }
 
-export interface TestAPI<Fixtures = TestFixtures> {
+/** The two call forms of `test`, shared with what `test.skipIf` and `test.runIf` return. */
+export interface TestRegistrar<Fixtures = TestFixtures> {
   /** Registers one test synchronously during module evaluation. */
   (title: string, fn: TestFn<Fixtures>): TestCase;
   /** Registers one configured test synchronously during module evaluation. */
   (title: string, options: TestOptions, fn: TestFn<Fixtures>): TestCase;
+}
+
+export interface TestAPI<Fixtures = TestFixtures> extends TestRegistrar<Fixtures> {
   /** Registers one skipped test. */
   skip(title: string, fn: TestFn<Fixtures>): TestCase;
   /**
@@ -843,6 +852,24 @@ export interface TestAPI<Fixtures = TestFixtures> {
    */
   skip(condition: boolean, reason?: string): void;
   skip(reason?: string): void;
+  /**
+   * Returns a function that registers one test, like `test(title, fn)`:
+   * skipped when `condition` is truthy, as if it had the `skip` option. The
+   * condition is read once, at this call, so it can only depend on what is
+   * known while the file is collected (`process.platform`, `process.env.CI`):
+   *
+   *   test.skipIf(process.platform === 'win32')('file watcher', async () => {});
+   *
+   * A `skip` option skips the test whatever the condition. A serial group
+   * rejects the call: set `skip` on the serial `describe` instead. A Promise
+   * condition also fails the call: await it first.
+   */
+  skipIf<Condition>(condition: SynchronousCondition<Condition>): TestRegistrar<Fixtures>;
+  /**
+   * Returns a function that registers one test, like `test(title, fn)`:
+   * skipped when `condition` is falsy, `test.skipIf(!condition)`.
+   */
+  runIf<Condition>(condition: SynchronousCondition<Condition>): TestRegistrar<Fixtures>;
   /** Registers one test that is expected to fail. */
   fail(title: string, fn: TestFn<Fixtures>): TestCase;
   /**

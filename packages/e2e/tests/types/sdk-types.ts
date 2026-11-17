@@ -46,6 +46,7 @@ import {
   type TestFilter,
   type TestFilterCandidate,
   type TestFilterContext,
+  type TestRegistrar,
   type Unique,
   type CacheStore,
   type ExecutorObservation,
@@ -572,6 +573,35 @@ expect.soft.any(Number);
 test.skip(true, 'not today');
 test.skip('not today');
 test.skip('later', async () => {});
+// skipIf and runIf take any condition and return test's two registration forms, typed with the test's fixtures.
+test.skipIf(process.platform === 'win32')('file watcher', async () => {}) satisfies ReturnType<typeof test>;
+test.runIf(process.env['CI'])('inotify', { tags: ['@fs'], skip: 'reason' }, async () => {}) satisfies ReturnType<typeof test>;
+void (test.skipIf(1) satisfies TestRegistrar);
+test.extend<{ x: number }>().skipIf(true)('uses x', async ({ x }) => { x satisfies number; });
+test.extend<{ x: number }>().runIf(true)('uses x', async ({ x }) => { x satisfies number; });
+// @ts-expect-error the registrar registers a test and has no modifiers
+test.skipIf(true).skip('x', async () => {});
+// @ts-expect-error the registrar registers a test and has no modifiers
+test.runIf(true).only('x', async () => {});
+// @ts-expect-error x is a number, not a string
+test.extend<{ x: number }>().runIf(true)('uses x', async ({ x }) => { x satisfies string; });
+// @ts-expect-error the registrar needs a body
+test.skipIf(true)('no body');
+// @ts-expect-error the registrar takes test options, not describe options
+test.runIf(true)('serial', { serial: true }, async () => {});
+// @ts-expect-error the registrar registers a test, it is not test.skip
+test.skipIf(true)(true, 'reason');
+// A condition of any non-Promise type passes, an unknown one included; a Promise must be awaited first.
+declare const anyCondition: unknown;
+declare const isFeatureOn: () => Promise<boolean>;
+void test.skipIf(anyCondition);
+void test.runIf(undefined as string | undefined);
+// @ts-expect-error a Promise condition is always truthy; await it first
+void test.skipIf(isFeatureOn());
+// @ts-expect-error a Promise condition is always truthy; await it first
+void test.runIf(Promise.resolve(true));
+// @ts-expect-error a union with a Promise could still be a Promise
+void test.runIf(isFeatureOn() as Promise<boolean> | boolean);
 // fail takes the same three shapes and returns nothing inside a body; describe and setup take no fail option.
 test.fail(true, 'known gap');
 test.fail('known gap');
