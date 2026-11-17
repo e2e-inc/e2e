@@ -3,4 +3,4 @@
 '@e2e-dev/core': patch
 ---
 
-`expect(locator, message)` and `expect.soft(locator, message)` take an optional message, as value expectations already do. It opens the failure of every locator matcher, `.not` and `toHaveScreenshot` included: `the cart is empty: expect.toBeVisible failed`.
+`expect(locator, message)`, `expect(screen, message)`, and their `expect.soft` forms take an optional message, as value expectations already do. It opens every assertion failure, `.not` and `toHaveScreenshot` included, and a locator's `LOCATOR_AMBIGUOUS` error: `the cart is empty: expect.toBeVisible failed`.

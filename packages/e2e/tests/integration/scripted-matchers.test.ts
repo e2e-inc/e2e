@@ -189,6 +189,11 @@ test('an ambiguous locator fails an assertion at once', async ({ app, screen }) 
   await app.open('/');
   await expect(screen.getByText('Duplicated')).toBeVisible({ timeout: 3000 });
 });
+
+test('a message opens an ambiguous locator failure', async ({ app, screen }) => {
+  await app.open('/');
+  await expect(screen.getByText('Duplicated'), 'the banner shows').toBeVisible({ timeout: 3000 });
+});
 `;
 
 /** Every failing matcher test in the fixture, with the fragments its error message must carry. */
@@ -229,6 +234,7 @@ const TITLES = [
   ...FAILURES.map(([title]) => title),
   'a matcher honors its timeout',
   'an ambiguous locator fails an assertion at once',
+  'a message opens an ambiguous locator failure',
   ...SECURE_DENIALS,
 ];
 
@@ -276,7 +282,7 @@ describe('scripted engine: expect(locator) matchers', () => {
     }
   });
 
-  it('honors an explicit timeout and fails an ambiguous locator at once', () => {
+  it('honors an explicit timeout and fails an ambiguous locator at once, after the caller\'s message', () => {
     const timed = failed(run.outcome, 'a matcher honors its timeout', 'ASSERTION_FAILED', 'observed: no node (match count 0)');
     const timedStep = step(timed, 'expect.toBeVisible');
     expect(timedStep.status).toBe('failed');
@@ -285,5 +291,11 @@ describe('scripted engine: expect(locator) matchers', () => {
     // At once: well inside the 3000 ms the test allowed the matcher.
     expect(step(ambiguous, 'expect.toBeVisible').durationMs).toBeLessThan(3_000);
     expect(ambiguous.error?.details).toMatchObject({ matches: 2, locator: 'getByText("Duplicated")' });
+    expect(ambiguous.error?.message.startsWith('locator matched 2 nodes')).toBe(true);
+    const labelled = failed(run.outcome, 'a message opens an ambiguous locator failure', 'LOCATOR_AMBIGUOUS');
+    expect(labelled.error?.message.startsWith('the banner shows: locator matched 2 nodes, expected exactly one: getByText("Duplicated")')).toBe(true);
+    expect(labelled.error?.details).toEqual(ambiguous.error?.details);
+    // The engine's error is the cause, so the stack still starts where the locator was resolved.
+    expect(labelled.error?.stack?.split('\n')[1]).toBe(ambiguous.error?.stack?.split('\n')[1]);
   });
 });

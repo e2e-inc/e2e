@@ -20,7 +20,7 @@ import { createValueExpectation } from './values.ts';
 const expectationSlot = realmSlot<object>(expectationBrand);
 
 function dispatch(actual: Locator, message?: string): AsyncExpectation;
-function dispatch(actual: Screen): ScreenExpectation;
+function dispatch(actual: Screen, message?: string): ScreenExpectation;
 function dispatch<E extends object>(actual: Expectable<E>): E;
 function dispatch<T>(actual: T, message?: string): ValueExpectation<T>;
 function dispatch(actual: unknown, message?: string): AsyncExpectation | ScreenExpectation | object | ValueExpectation<unknown> {
@@ -29,12 +29,12 @@ function dispatch(actual: unknown, message?: string): AsyncExpectation | ScreenE
   const attached = expectationSlot.get(actual);
   if (attached !== undefined) return attached;
   const screen = screenInternals(actual);
-  if (screen !== undefined) return createScreenExpectation(screen.context, screen.scoped);
+  if (screen !== undefined) return createScreenExpectation(screen.context, screen.scoped, message);
   return createValueExpectation(actual, message);
 }
 
 function soft(actual: Locator, message?: string): AsyncExpectation;
-function soft(actual: Screen): ScreenExpectation;
+function soft(actual: Screen, message?: string): ScreenExpectation;
 function soft<E extends object>(actual: Expectable<E>): E;
 function soft<T>(actual: T, message?: string): SoftValueExpectation<T>;
 function soft(actual: unknown, message?: string): AsyncExpectation | ScreenExpectation | object | SoftValueExpectation<unknown> {

@@ -18,6 +18,7 @@ import type { ScreenshotContext } from '@e2e-dev/core/lib/run/screenshots';
 import type { ScreenExpectation, ScreenshotOptions } from '@e2e-dev/core/lib/types';
 import { parseScreenshotCall, type ScreenshotCall } from './screenshot-call.ts';
 import { screenshotCapturer, type Capture } from './screenshot-capture.ts';
+import { withMessage } from './heading.ts';
 
 /** The stored screenshot one call compares against: its absolute path, and project-relative as a failure names it. */
 interface Stored {
@@ -37,11 +38,16 @@ interface Run {
   readonly capture: () => Promise<Capture>;
 }
 
-/** The `expect(screen)` surface; a scoped screen (a frame) refuses, since its box is not known. */
-export function createScreenExpectation(context: ScreenContext, scoped: boolean, negated = false): ScreenExpectation {
+/** The `expect(screen, message?)` surface; a scoped screen (a frame) refuses, since its box is not known. */
+export function createScreenExpectation(
+  context: ScreenContext,
+  scoped: boolean,
+  message: string | undefined,
+  negated = false,
+): ScreenExpectation {
   return {
     get not() {
-      return createScreenExpectation(context, scoped, !negated);
+      return createScreenExpectation(context, scoped, message, !negated);
     },
     toHaveScreenshot: (nameOrOptions?: string | ScreenshotOptions, options?: ScreenshotOptions) => {
       if (scoped) {
@@ -50,17 +56,9 @@ export function createScreenExpectation(context: ScreenContext, scoped: boolean,
           'toHaveScreenshot compares the whole screen or one locator; call it on screen, or on a locator inside the frame',
         ));
       }
-      return expectScreenshot(context, undefined, negated, undefined, nameOrOptions, options);
+      return expectScreenshot(context, undefined, negated, message, nameOrOptions, options);
     },
   };
-}
-
-/**
- * The first line of an assertion failure: `expect.toBeVisible failed`, after
- * the caller's `message` and a colon when there is one, as a value matcher's.
- */
-export function failureHeading(api: string, message: string | undefined): string {
-  return message === undefined ? `${api} failed` : `${message}: ${api} failed`;
 }
 
 /**
@@ -77,7 +75,7 @@ export async function expectScreenshot(
   maybeOptions: ScreenshotOptions | undefined,
 ): Promise<void> {
   const api = `expect.${negated ? 'not.' : ''}toHaveScreenshot`;
-  const heading = failureHeading(api, message);
+  const heading = withMessage(message, `${api} failed`);
   const store = context.screenshots;
   if (store === undefined) {
     throw new TestError('UNSUPPORTED_CAPABILITY', `${api} keeps screenshots beside a test file, so it runs only inside a test`);

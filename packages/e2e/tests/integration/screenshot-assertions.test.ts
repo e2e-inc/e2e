@@ -627,6 +627,44 @@ test('negated', async ({ app, screen }) => {
   );
 
   it(
+    'opens a locator and a screen screenshot failure with the caller\'s message, when none is stored and on a mismatch',
+    async () => {
+      let shown = screenPng(WHITE, BLUE);
+      const { fake } = screenEngine(() => shown);
+      const test = `import { test, expect } from 'e2e';
+
+test('button', async ({ app, screen }) => {
+  await app.open('/');
+  await expect(screen.getByRole('button', { name: 'Submit' }), 'the button kept its style').toHaveScreenshot('button', { timeout: 1000 });
+});
+
+test('page', async ({ app, screen }) => {
+  await app.open('/');
+  await expect(screen, 'the page kept its look').toHaveScreenshot('page', { timeout: 1000 });
+});
+`;
+      const options = { appUrl: FAKE_APP_URL, config: fakeConfig(fake) };
+      const { outcome, project } = await runProject({ 'tests/labelled.e2e.ts': test }, options);
+      try {
+        for (const [title, message] of [['button', 'the button kept its style'], ['page', 'the page kept its look']] as const) {
+          expect(attemptOf(outcome, title).error?.message.startsWith(`${message}: expect.toHaveScreenshot failed\nno stored screenshot at `), title).toBe(true);
+        }
+        shown = screenPng(WHITE, RED);
+        const changed = await runExisting(project, options);
+        for (const [title, message] of [['button', 'the button kept its style'], ['page', 'the page kept its look']] as const) {
+          const error = attemptOf(changed, title).error;
+          expect(error?.code, title).toBe('ASSERTION_FAILED');
+          expect(error?.message.startsWith(`${message}: expect.toHaveScreenshot failed\n`), title).toBe(true);
+          expect(error?.message, title).toContain('pixels');
+        }
+      } finally {
+        project.cleanup();
+      }
+    },
+    60_000,
+  );
+
+  it(
     'opens a locator screenshot failure with the caller\'s message',
     async () => {
       const { fake } = screenEngine(() => screenPng(WHITE, BLUE));

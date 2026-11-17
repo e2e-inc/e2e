@@ -1,7 +1,7 @@
 /** Runner-owned polling locator assertions. */
 
 import type { SemanticNode } from '@e2e-dev/core/lib/engine/surface';
-import { TestError } from '@e2e-dev/core/lib/internal/errors';
+import { isE2EError, TestError } from '@e2e-dev/core/lib/internal/errors';
 import { rejectUnknownOptions } from '@e2e-dev/core/lib/internal/options';
 import {
   isTextMatch,
@@ -27,7 +27,8 @@ import type {
   TextMatch,
   TextMatcherOptions,
 } from '@e2e-dev/core/lib/types';
-import { expectScreenshot, failureHeading } from './screenshot.ts';
+import { withMessage } from './heading.ts';
+import { expectScreenshot } from './screenshot.ts';
 
 interface Sample {
   readonly count: number;
@@ -188,7 +189,9 @@ class AsyncExpectationImpl implements AsyncExpectation {
           signal: engine.signal,
           negated: this.negated,
           evaluate: async (reads) => {
-            const sample = await this.sample(spec, reads);
+            const sample = await this.sample(spec, reads).catch((error: unknown) => {
+              throw labelAmbiguous(error, this.message);
+            });
             lastSample = sample;
             if (spec.readsWithheld === true) {
               denySecureRead(sample.node === null ? sample.nodes : [sample.node], this.label);
@@ -203,7 +206,7 @@ class AsyncExpectationImpl implements AsyncExpectation {
             return new TestError(
               'ASSERTION_FAILED',
               [
-                failureHeading(api, this.message),
+                withMessage(this.message, `${api} failed`),
                 `locator: ${this.label}`,
                 `expected: ${expected}`,
                 `observed: ${observed} (match count ${lastSample.count})`,
@@ -496,6 +499,20 @@ class AsyncExpectationImpl implements AsyncExpectation {
       options?.timeout,
     );
   }
+}
+
+/**
+ * An ambiguous locator's error opened with the caller's message, as an
+ * assertion failure is: it is the commonest way a check fails at once. The
+ * code and details stay; the original is the cause, so the report keeps its
+ * stack. Any other error is returned as it is.
+ */
+function labelAmbiguous(error: unknown, message: string | undefined): unknown {
+  if (message === undefined || !isE2EError(error) || error.code !== 'LOCATOR_AMBIGUOUS') return error;
+  return new TestError('LOCATOR_AMBIGUOUS', withMessage(message, error.message), {
+    ...(error.details === undefined ? {} : { details: error.details }),
+    cause: error,
+  });
 }
 
 /** A list of text matches, as opposed to one string or RegExp. */

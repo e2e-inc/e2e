@@ -137,7 +137,7 @@ run only in a browser, so a test that uses it declares
 | `expect(page).toHaveURL()`, `toHaveTitle()` | `expect(browser).toHaveURL()`, `toHaveTitle()` |
 | `expect(page).toHaveScreenshot()`, `expect(locator).toHaveScreenshot()` | `expect(screen).toHaveScreenshot()` and the locator form, see [Visual comparison](/visual-testing) |
 | `expect(value)` with `toBe()`, `toEqual()`, `toMatchObject()`, `toContain()`, `toHaveLength()`, `toHaveProperty()`, `toMatch()`, and the truthiness and number matchers | the same, see [value matchers](/reference/expect#value-matchers) |
-| `expect(locator, 'message')`, `expect(value, 'message')` | the same; the message opens the failure, see [locator matchers](/reference/expect#locator-matchers) |
+| `expect(locator, 'message')`, `expect(page, 'message').toHaveScreenshot()`, `expect(value, 'message')` | the same, `expect(screen, 'message')` for the page; the message opens the failure, see [locator matchers](/reference/expect#locator-matchers) |
 | `expect.any()`, `anything()`, `objectContaining()`, `arrayContaining()`, `stringMatching()`, `stringContaining()`, `expect.poll()`, `expect.soft()` | the same; `poll` takes one `interval` |
 
 </Accordion>

@@ -319,8 +319,8 @@ a frame throws `INVALID_ARGUMENT`.
 `expect(locator)` polls up to `config.assertionTimeout` (5 s) or
 `{ timeout }`; `.not` inverts and passes once the negation has held 1 s
 continuously, or for the whole `timeout` when that is shorter, so it never
-returns sooner. `expect(locator, message?)` and `expect.soft(locator,
-message?)` open each assertion failure with the message.
+returns sooner. `expect(locator, message?)`, `expect(screen, message?)`, and
+their `expect.soft` forms open each assertion failure with the message.
 `expect(value, message?)` is synchronous.
 `expect.poll(read, { timeout?, interval?, message? })` re-reads until a value
 matcher passes (`assertionTimeout` and 100 ms by default, stopping with the
