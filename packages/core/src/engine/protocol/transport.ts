@@ -77,9 +77,7 @@ function untilClosed(stdout: Readable, closed: Promise<void>): Readable {
   return Readable.from(
     (async function* () {
       yield* stdout;
-      const cap = new AbortController();
-      await Promise.race([closed, delay(EXIT_AFTER_STDOUT_MS, undefined, { signal: cap.signal }).catch(() => {})]);
-      cap.abort();
+      await Promise.race([closed, delay(EXIT_AFTER_STDOUT_MS, undefined, { ref: false })]);
     })(),
     { objectMode: false },
   );

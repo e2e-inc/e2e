@@ -660,7 +660,8 @@ describe('engine protocol over a child process', () => {
     const start = Date.now();
     await expect(remote.observe!(operation())).rejects.toThrow(/closed the connection[\s\S]*stdout closed, staying/);
     // The 2 s cap, not the test timeout, ends the wait.
-    expect(Date.now() - start).toBeLessThan(4_000);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(1_900);
+    expect(Date.now() - start).toBeLessThan(3_000);
     await remote.dispose!(cleanup);
   }, 10_000);
 
