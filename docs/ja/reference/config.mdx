@@ -311,7 +311,7 @@ targets: [
 | [`linkBase`](#linkbase) | `string` | - |
 | [`identity`](#identity) | `string` | アプリから導出 |
 | [`environment`](#environment) | `'test' \| 'staging' \| 'production'` | `'test'` または `'production'` |
-| [`launchArguments`](#launcharguments) | `string[]` | - |
+| [`launchArguments`](#launcharguments) | `string[] \| Record<string, LaunchArgumentValue>` | - |
 | [`permissions`](#permissions) | `Record<string, AppPermissionState>` | - |
 | [`command`](#command) | `CommandConfig` | - |
 | [`readyUrl`](#readyurl) | `string` | `url` |

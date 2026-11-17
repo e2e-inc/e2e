@@ -1885,7 +1885,8 @@ rejectUnknownKeys('web()', options, ['browser', 'viewport']);
 
 The shape check the runner runs on a target's `app.launchArguments`, for a
 launch a test asks for by hand, such as `device.openApp(app, { launchArguments })`.
-Returns the arguments with every `undefined` value left out, or throws.
+Returns the arguments with every `undefined` object property left out, or
+throws; an `undefined` list item is refused like any other non-string.
 
 ```ts
 export function checkLaunchArguments(
@@ -1900,8 +1901,8 @@ const launchArguments = checkLaunchArguments('device.openApp({ launchArguments }
 // device.openApp({ launchArguments }).env must be a string, number, boolean, or array of strings, got null
 ```
 
-- A list holds strings. An object maps a name with no whitespace or control
-  characters to a string, a finite number below 2^53 in magnitude, a
+- A list holds strings. An object maps a non-empty name with no whitespace or
+  control characters to a string, a finite number below 2^53 in magnitude, a
   boolean, or a list of strings. Nothing holds a NUL character.
 - The engine adds its platform's rules after this check, with the same
   `code`.
