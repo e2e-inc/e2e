@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { AgentError, type JsonValue, type StepExecutor, type StepExecutorContext, type StepVerdict } from 'e2e';
-import { BASE_RULES, redactSecrets, VERDICT_RULES } from 'e2e/agent';
+import { BASE_RULES, redactSecrets, registerProviderKeys, VERDICT_RULES } from 'e2e/agent';
 import { ConfigurationError } from 'e2e/engine';
-import { claudeCodeLaunch, codexLaunch } from './presets.ts';
+import { claudeCodeLaunch, codexLaunch, registerSavedCodexLogin } from './presets.ts';
 import type { Usage } from '@agentclientprotocol/sdk/unstable';
 import { startSession, type AcpSession, type AgentLaunch, type TurnReport } from './session.ts';
 import { activeStep, missingTools, openingScreen, stepTools, verdictOf, type ActiveStep, type StepSlot } from './tools.ts';
@@ -60,10 +60,18 @@ export function claudeCode(options: AcpAgentOptions = {}): StepExecutor {
 
 /** Codex through its adapter (`@agentclientprotocol/codex-acp`), signed in with your `codex` login, or with `OPENAI_API_KEY` when Codex has none. */
 export function codex(options: AcpAgentOptions = {}): StepExecutor {
-  return executor(options.name ?? 'codex', options, codexLaunch(options));
+  return executor(options.name ?? 'codex', options, codexLaunch(options), () => registerSavedCodexLogin(options.env));
 }
 
-function executor(name: string, options: AcpAgentOptions, launch: () => Promise<AgentLaunch>): StepExecutor {
+/**
+ * `registerLogin` has the run redact the login the agent keeps on disk. It
+ * runs before each step, since the agent renews a login between turns, and
+ * again once the turn is over, before anything the agent said in it is
+ * returned.
+ */
+function executor(name: string, options: AcpAgentOptions, launch: () => Promise<AgentLaunch>, registerLogin: () => void = () => undefined): StepExecutor {
+  // A key only the agent's own `env` holds, known before the first step's text is built.
+  registerProviderKeys(options.env ?? {});
   // Where an attempt's session lives in `attempt.memory`: one key per executor, so two ACP agents never share a session.
   const memoryKey = `@e2e-dev/acp.session.${randomUUID()}`;
   return {
@@ -71,6 +79,7 @@ function executor(name: string, options: AcpAgentOptions, launch: () => Promise<
     version: '1',
     cache: 'inherit',
     async runStep(ctx) {
+      registerLogin();
       const { held, session } = await ready(ctx, launch, memoryKey);
       ctx.signal.throwIfAborted();
       const active = activeStep(ctx);
@@ -94,6 +103,7 @@ function executor(name: string, options: AcpAgentOptions, launch: () => Promise<
       } finally {
         if (held.slot.active === active) held.slot.active = undefined;
         ctx.signal.removeEventListener('abort', cancel);
+        registerLogin();
       }
       ctx.attachTranscript(transcript(text, active, report));
       if (!ctx.signal.aborted) recordTurn(ctx, session, report);

@@ -29,6 +29,11 @@ export function setErrorRedactor(redact: ((text: string) => string) | undefined)
   else redactorSlot.set(globalThis, redact);
 }
 
+/** Installs `redact` as that redactor unless one is installed already. */
+export function ensureErrorRedactor(redact: (text: string) => string): void {
+  if (redactorSlot.get(globalThis) === undefined) redactorSlot.set(globalThis, redact);
+}
+
 /** Response body bytes `providerFailureMessage` quotes. */
 const MAX_PROVIDER_BODY_BYTES = 1024;
 

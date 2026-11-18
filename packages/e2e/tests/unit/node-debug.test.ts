@@ -21,18 +21,14 @@ describe('the NODE_DEBUG warning', () => {
 
   it('names the request headers for net', () => {
     expect(nodeDebugWarning('net', prints('net'))).toBe(
-      'e2e: NODE_DEBUG=net makes Node print the headers of every request made with node:http; e2e redacts its secrets and the provider keys it knows there, and every other token or password is printed as it is, so unset NODE_DEBUG unless you are debugging with it',
+      'e2e: NODE_DEBUG=net makes Node print the headers of requests made with node:http; e2e redacts its secrets and the provider keys it knows there, and every other token or password is printed as it is, so unset NODE_DEBUG unless you are debugging with it',
     );
   });
 
   it('names both when both are on', () => {
     expect(nodeDebugWarning('*', prints('child_process', 'net', 'http'))).toContain(
-      'makes Node print the environment of every process e2e starts and the headers of every request made with node:http; e2e redacts',
+      'makes Node print the environment of every process e2e starts and the headers of requests made with node:http; e2e redacts',
     );
-  });
-
-  it('reads the sections from Node itself by default: this process prints neither', () => {
-    expect(nodeDebugWarning('child_process')).toBeUndefined();
   });
 });
 

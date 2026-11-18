@@ -152,4 +152,18 @@ describe('a key only the environment handed to a run or a host holds', () => {
     await expect(openHost({ cwd: project.dir, env: { ANTHROPIC_API_KEY: key } })).rejects.toThrow();
     expect(processSecrets.redact(key)).toBe('<secret:ANTHROPIC_API_KEY>');
   });
+
+  it('is redacted by the process that launches a core host, before the engine prepares', async () => {
+    const key = `sk-launch-env-${randomBytes(12).toString('hex')}`;
+    const { launch } = await import('@e2e-dev/core');
+    const { createFakeEngine, FAKE_APP } = await import('../helpers/fake-engine.ts');
+    expect(processSecrets.redact(key)).toBe(key);
+    const host = await launch(createFakeEngine().engine, { app: FAKE_APP, env: { XAI_API_KEY: key }, handleSignals: false });
+    try {
+      expect(processSecrets.redact(key)).toBe('<secret:XAI_API_KEY>');
+    } finally {
+      await host.close();
+    }
+  });
 });
+

@@ -43,6 +43,9 @@ const AUTH_REQUIRED = -32000;
 /** Variables e2e reads secret and credential values from: the agent never needs them. Any case, since Windows reads names that way. */
 const SECRET_VARIABLE = /^E2E_(?:SECRET|USER)_/i;
 
+/** How much of the agent's stderr is kept for the error of an agent that exits. */
+const STDERR_KEPT = 65_536;
+
 /** How to start one agent and what its session gets. */
 export interface AgentLaunch {
   readonly command: string;
@@ -128,8 +131,8 @@ export async function startSession(
   });
   let stderr = '';
   child.stderr.on('data', (data: Buffer) => {
-    // Redacted before the cut: half a key is no longer a match.
-    stderr = redactSecrets(stderr + data.toString()).slice(-2000);
+    // Kept raw, and far longer than what is shown of it: a key in pieces across two writes is whole again here.
+    stderr = (stderr + data.toString()).slice(-STDERR_KEPT);
   });
   // A dead agent must not take the test worker down with a pipe error.
   child.stdin.on('error', () => undefined);
@@ -412,6 +415,8 @@ function defined<T extends object>(value: T): Partial<T> {
   return Object.fromEntries(Object.entries(value).filter(([, field]) => field !== undefined && field !== null)) as Partial<T>;
 }
 
+/** The end of the last line the agent wrote, redacted before it is cut: half a key is no longer a match. */
 function lastLine(text: string): string {
-  return text.trim().split('\n').at(-1) ?? '';
+  const written = text.trim();
+  return redactSecrets(written.slice(written.lastIndexOf('\n') + 1)).slice(-2000);
 }

@@ -101,7 +101,7 @@ function compile(values: readonly (readonly [string, string])[], wholeOnly: Read
     let marker = '';
     leadingForms.forEach((forms, index) => {
       for (const value of forms) {
-        const length = leadingPartAtEnd(tailKey.key, value, Math.min(FRAGMENT_LENGTH, Math.ceil(value.length / 2)));
+        const length = leadingPartAtEnd(tailKey.key, value, cutMinimum(value, wholeOnly.has(entries[index]!)));
         if (length > cut) {
           cut = length;
           marker = markers[index] ?? '';
@@ -433,6 +433,18 @@ function spellings(ch: string): string[] {
 function unicodeEscape(ch: string): string {
   const units = Array.from({ length: ch.length }, (_, index) => ch.charCodeAt(index));
   return units.map((unit) => `\\u${unit.toString(16).padStart(4, '0')}`).join('');
+}
+
+/**
+ * The fewest leading characters of `value` that count as it cut short. A
+ * secret of the run: `FRAGMENT_LENGTH`, or half of a shorter one. A provider
+ * key: half of it, and at least twice `FRAGMENT_LENGTH`, since every key of a
+ * provider starts alike (`sk-proj-`, a token's header) and text that merely
+ * ends with that start is no key.
+ */
+function cutMinimum(value: string, wholeOnly: boolean): number {
+  const half = Math.ceil(value.length / 2);
+  return wholeOnly ? Math.max(FRAGMENT_LENGTH * 2, half) : Math.min(FRAGMENT_LENGTH, half);
 }
 
 /** The length of the longest leading part of `value`, short of the whole and at least `minimum` long, that `text` ends with; 0 when it ends with none. */

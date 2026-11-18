@@ -13,7 +13,7 @@ import { debuglog } from 'node:util';
 
 const SECTION_PRINTS: Readonly<Record<string, string>> = {
   child_process: 'the environment of every process e2e starts',
-  net: 'the headers of every request made with node:http',
+  net: 'the headers of requests made with node:http',
 };
 
 /** Whether Node, as it started, prints `section`: its own reading of `NODE_DEBUG`, wildcards and case included. A runtime that keeps no such switch prints nothing. */

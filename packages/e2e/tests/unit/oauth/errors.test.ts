@@ -51,4 +51,10 @@ describe('describeResponse and a token the vendor quotes back', () => {
     expect(described).toBe(`400: ${body.replace(token, '<secret:vendor.access-token>').slice(0, 200)}`);
     expect(described).not.toContain('oauth-acce');
   });
+
+  it('redacts the token in the failure a JSON body names', async () => {
+    registerProviderKey('vendor.access-token', token);
+    expect(await describeResponse(reply(JSON.stringify({ error: { message: `invalid token ${token}` } })))).toBe('400: invalid token <secret:vendor.access-token>');
+    expect(await describeResponse(reply(JSON.stringify({ error: 'invalid_grant', error_description: `revoked ${token}` })))).toBe('400: revoked <secret:vendor.access-token>');
+  });
 });

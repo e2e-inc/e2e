@@ -37,6 +37,8 @@ export interface LoopCall {
   readonly toolCallOptions: readonly unknown[];
   /** Reasoning parts in the assistant messages of the request: what a provider replays as thinking. */
   readonly reasoningParts: number;
+  /** What the assistant messages of the request say, prose and reasoning, oldest first: the model's own words as they are sent back to it. */
+  readonly assistantText: readonly string[];
 }
 
 export interface LoopToolCall {
@@ -119,6 +121,13 @@ export function installFakeLoopModel(respond: LoopResponder): ModelInstance {
             ? message.content.filter((part) => part.type === 'reasoning').length
             : 0),
         0,
+      ),
+      assistantText: options.prompt.flatMap((message) =>
+        message.role !== 'assistant'
+          ? []
+          : typeof message.content === 'string'
+            ? [message.content]
+            : message.content.flatMap((part) => ((part.type === 'text' || part.type === 'reasoning') && part.text !== undefined ? [part.text] : [])),
       ),
     };
     loopCalls.push(call);

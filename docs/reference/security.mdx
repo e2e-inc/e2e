@@ -255,7 +255,7 @@ can't put it in a report. Each shows as `<secret:NAME>`.
 
 | Rule | Detail |
 | --- | --- |
-| Whole keys only | A key matches as a whole, in the forms above, or cut short at a length limit. A part of one in the middle of other text isn't a match: keys of one provider share a prefix. |
+| Whole keys only | A key matches as a whole, in the forms above. Cut short at a length limit, it matches when at least half of it is there, and no fewer than 16 characters. Any other part of one isn't a match: keys of one provider start alike. |
 | Minimum length | A value shorter than 20 characters is left alone, so a placeholder for a local model server, such as `ollama`, doesn't rewrite ordinary words. Name a shorter real key under [`secrets`](/reference/config#secrets). |
 | Downloads | Never rewritten for a provider key: the app doesn't hold one. |
 | Sessions | A provider key is never saved into a [session](#sessions). |
@@ -266,6 +266,11 @@ These keys are not redacted:
 - a key passed in code, such as `createOpenAI({ apiKey })`, unless you
   register it or name it under [`secrets`](/reference/config#secrets),
 - a key in another variable, such as a custom provider's,
+- a key spelled into a test or `describe` title, a skip reason, or an
+  `e2e explore` goal. The runner and its workers build test ids from
+  those, and need not know the same keys. Name it under `secrets`,
+- `command.log`, as for every secret: the runner keeps your app's output
+  as written, and your app inherits the environment,
 - a login a coding agent keeps in the OS keyring,
 - a JSON service key or a key file, such as `AICORE_SERVICE_KEY` and
   `GOOGLE_APPLICATION_CREDENTIALS`,

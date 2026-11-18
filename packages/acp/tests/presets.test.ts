@@ -372,7 +372,44 @@ describe('the environment an agent starts with', () => {
   });
 });
 
+describe('a key only the agent is given', () => {
+  it("is redacted from the moment the executor is built, before a step's text exists", () => {
+    const key = 'sk-test-agent-env-only-5a9c2e7f1b';
+    vi.stubEnv('OPENAI_API_KEY', undefined);
+    expect(redactSecrets(key)).toBe(key);
+    acp({ command: process.execPath, args: [AGENT], env: { OPENAI_API_KEY: key } });
+    expect(redactSecrets(key)).toBe('<secret:OPENAI_API_KEY>');
+  });
+
+  it('builds an executor with no env of its own', () => {
+    expect(acp({ command: process.execPath, args: [AGENT] }).name).toBe('acp');
+  });
+
+  it('names a Codex executor codex, or as the config names it, and looks for its saved login with no env of its own', async () => {
+    const directory = project(['@agentclientprotocol/codex-acp']);
+    expect(inProject(directory, () => codex({ name: 'reviewer' })).name).toBe('reviewer');
+    const executor = inProject(directory, () => codex());
+    expect(executor.name).toBe('codex');
+    // The stand-in adapter ships no Codex to list MCP servers with, so the step fails there, past the saved login.
+    expect(await stepFailure(executor)).toContain('The ACP agent did not start: Cannot find module');
+  });
+});
+
 describe('a key the agent repeats where its text is cut', () => {
+  it('redacts a key longer than what is kept of a line, written to stderr in two pieces', async () => {
+    const key = `eyJ-test-long-token-${'k7'.repeat(1500)}`;
+    vi.stubEnv('VERCEL_OIDC_TOKEN', key);
+    const half = Math.floor(key.length / 2);
+    const crash = [
+      "require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', 'inherit', 'ignore'], detached: true }).unref();",
+      `process.stderr.write(${JSON.stringify(`an earlier line\nfatal: ${key.slice(0, half)}`)}, () => setTimeout(() => process.stderr.write(${JSON.stringify(`${key.slice(half)} rejected\n`)}, () => process.exit(3)), 50));`,
+    ].join('\n');
+    const failure = await stepFailure(acp({ command: process.execPath, args: ['-e', crash] }));
+    expect(failure).toContain('the agent exited (code 3): fatal: <secret:VERCEL_OIDC_TOKEN> rejected');
+    expect(failure).not.toContain('earlier line');
+    expect(failure).not.toContain('k7k7k7k7');
+  });
+
   it('redacts a key in the reply of a turn with no verdict before cutting the reply short', async () => {
     const key = 'sk-test-reply-4be19c07a6d2f358';
     vi.stubEnv('OPENAI_API_KEY', key);
@@ -474,6 +511,50 @@ describe('the login Codex saved', () => {
   it.each([['no saved login', undefined], ['a login that is not JSON', '{not json'], ['a login with no tokens', '{"auth_mode":"chatgpt","tokens":null}']])('starts the session with %s', async (_label, auth) => {
     const { executor, log } = codexWith(auth, (home) => ({ CODEX_HOME: home }));
     await runStep(executor, log);
+  });
+
+  it('starts the session, and reads nothing, when auth.json is no file', async () => {
+    const { executor, log } = codexWith(undefined, (home) => ({ CODEX_HOME: home }));
+    mkdirSync(join(dirname(log), 'home', '.codex', 'auth.json'));
+    await runStep(executor, log);
+  });
+
+  it('reads a login of exactly the largest size it takes, and nothing larger', async () => {
+    const fits = 'sk-saved-largest-login-4d0a7e2c9b';
+    const over = 'sk-saved-too-large-login-8b3f6a1d5e';
+    const sized = (key: string, bytes: number) => {
+      const start = `{"OPENAI_API_KEY":"${key}","pad":"`;
+      return `${start}${'p'.repeat(bytes - start.length - 2)}"}`;
+    };
+    const first = codexWith(sized(fits, 1_048_576), (home) => ({ CODEX_HOME: home }));
+    await runStep(first.executor, first.log);
+    const second = codexWith(sized(over, 1_048_577), (home) => ({ CODEX_HOME: home }));
+    await runStep(second.executor, second.log);
+    expect(redactSecrets(`${fits} ${over}`)).toBe(`<secret:codex.api-key> ${over}`);
+  });
+
+  it('is read again before each step and once the turn is over, since Codex renews it', async () => {
+    const before = 'sk-saved-before-step-two-7e1b4c9a2f';
+    const during = 'sk-saved-during-the-turn-0d5a8f3c6b';
+    const directory = project(['@agentclientprotocol/codex-acp']);
+    const home = join(directory, '.codex');
+    mkdirSync(home);
+    const codexBin = join(directory, 'codex');
+    writeFileSync(codexBin, "#!/bin/sh\necho '[]'\n");
+    chmodSync(codexBin, 0o755);
+    const executor = inProject(directory, () => codex({ env: { CODEX_PATH: codexBin, CODEX_HOME: home, ACP_SCRIPT: JSON.stringify([[pass], [pass]]) } }));
+    const context = stepContext();
+    await executor.runStep(context);
+    writeFileSync(join(home, 'auth.json'), login({ OPENAI_API_KEY: before }));
+    // The screen is read after the step has started and before its turn ends: a login saved then is one the turn renewed.
+    const observe = context.observe;
+    (context as { observe: typeof observe }).observe = async (...args) => {
+      expect(redactSecrets(before)).toBe('<secret:codex.api-key>');
+      writeFileSync(join(home, 'auth.json'), login({ OPENAI_API_KEY: during }));
+      return observe(...args);
+    };
+    await executor.runStep(context);
+    expect(redactSecrets(during)).toBe('<secret:codex.api-key>');
   });
 });
 

@@ -9,6 +9,7 @@ import {
   registerStaticSecrets,
   releaseSessionLedger,
   sessionLedger,
+  staticOutputLedger,
   staticSecretLedger,
 } from '../../src/run/secrecy.ts';
 
@@ -82,11 +83,33 @@ describe('provider credentials in the environment', () => {
     expect(ledger.redact(JSON.stringify({ message: key.toUpperCase() }))).toBe('{"message":"<secret:ANTHROPIC_API_KEY>"}');
   });
 
-  it('redacts a key cut short at a length limit', () => {
+  it('redacts a key cut short at a length limit once half of it is there', () => {
     const key = fakeKey();
+    expect(key).toHaveLength(32);
     vi.stubEnv('OPENAI_API_KEY', key);
     const ledger = sessionLedger(newSession(), NO_SECRETS);
-    expect(ledger.redactCut(`credential ${key.slice(0, 14)}`)).toBe('credential <secret:OPENAI_API_KEY>');
+    expect(ledger.redactCut(`credential ${key.slice(0, 16)}`)).toBe('credential <secret:OPENAI_API_KEY>');
+    expect(ledger.redactCut(`credential ${key.slice(0, 15)}`)).toBe(`credential ${key.slice(0, 15)}`);
+  });
+
+  it('asks for at least 16 characters of a short key cut at a limit, more than its half', () => {
+    const key = 'q7z9w3k1m5p8r2t6v0xy';
+    vi.stubEnv('OPENAI_API_KEY', key);
+    const ledger = sessionLedger(newSession(), NO_SECRETS);
+    expect(ledger.redactCut(`credential ${key.slice(0, 16)}`)).toBe('credential <secret:OPENAI_API_KEY>');
+    expect(ledger.redactCut(`credential ${key.slice(0, 15)}`)).toBe(`credential ${key.slice(0, 15)}`);
+  });
+
+  it('leaves text that ends with only the start every key of a provider shares', () => {
+    vi.stubEnv('OPENAI_API_KEY', 'sk-proj-aaaa1111bbbb2222cccc3333dddd4444');
+    const ledger = sessionLedger(newSession(), NO_SECRETS);
+    expect(ledger.redactCut('Paste a key that starts with sk-proj-')).toBe('Paste a key that starts with sk-proj-');
+  });
+
+  it('still takes 8 characters of a secret of the run cut at a limit', () => {
+    const ledger = sessionLedger(newSession(), NO_SECRETS);
+    ledger.register('token', 'run-secret-value-2204');
+    expect(ledger.redactCut('typed run-secr')).toBe('typed <secret:token>');
   });
 
   it.each(['ollama', 'lm-studio', 'sk-no-key-required', 'q7z9w3k1m5p8r2t6v0x'])('leaves the placeholder %s a local model server takes alone, so ordinary text is not rewritten', (placeholder) => {
@@ -168,12 +191,26 @@ describe('provider credentials leave the rest of secrecy as it was', () => {
 });
 
 describe('provider keys and the rest of redaction', () => {
-  it('redacts a key from text redacted before any session, such as a test title', () => {
+  it('redacts a key from text this process alone writes before any session, such as a test filter note', () => {
     const key = fakeKey();
     vi.stubEnv('OPENAI_API_KEY', key);
+    const ledger = staticOutputLedger(new Map());
+    expect(ledger.redact(`note ${key}`)).toBe('note <secret:OPENAI_API_KEY>');
+    expect(ledger.redactFragments(`diff ${key}`)).toBe('diff <secret:OPENAI_API_KEY>');
+  });
+
+  it('builds that ledger once per config, with the config\'s own secrets in it', () => {
+    const secrets = new Map([['password', { name: 'password', purpose: 'password', value: 'config-secret-value-7719' }]]) as never;
+    expect(staticOutputLedger(secrets)).toBe(staticOutputLedger(secrets));
+    expect(staticOutputLedger(secrets).redact('config-secret-value-7719')).toBe('<secret:password>');
+  });
+
+  it('leaves a key in what a test id is made of, which the runner and a worker must redact alike whatever keys each knows', () => {
+    const key = fakeKey();
+    vi.stubEnv('OPENAI_API_KEY', key);
+    registerProviderKey('agent.worker-only', `${key}-worker`);
     const ledger = staticSecretLedger(new Map());
-    expect(ledger.redact(`title ${key}`)).toBe('title <secret:OPENAI_API_KEY>');
-    expect(ledger.entries()).toEqual([]);
+    expect(ledger.redact(`title ${key} ${key}-worker`)).toBe(`title ${key} ${key}-worker`);
   });
 
   it('leaves a key in a download as the app served it, even when the download is rewritten for a secret of the run', () => {
@@ -295,7 +332,7 @@ describe('the ledger and what is beside it', () => {
   });
 
   it('sees a key registered after the static ledger last redacted', () => {
-    const ledger = staticSecretLedger(new Map());
+    const ledger = staticOutputLedger(new Map());
     const key = fakeKey();
     expect(ledger.redact(key)).toBe(key);
     registerProviderKey('agent.later-key', key);
@@ -319,5 +356,15 @@ describe('a process that has loaded no config yet', () => {
     expect(fresh.processSecrets.redact(key)).toBe('<secret:OPENROUTER_API_KEY>');
     const serialized = errors.serializeError(new errors.ConfigurationError('INVALID_CONFIG', `config threw: ${key}`));
     expect(serialized.message).toBe('config threw: <secret:OPENROUTER_API_KEY>');
+  });
+
+  it('leaves the error redactor another copy of the package installed, which knows values this copy does not', async () => {
+    const errors = await import('../../src/internal/errors.ts');
+    errors.setErrorRedactor((text) => text.replaceAll('first-copy-value', '<secret:first>'));
+    vi.resetModules();
+    await import('../../src/run/secrecy.ts');
+    const serialized = errors.serializeError(new errors.ConfigurationError('INVALID_CONFIG', 'quoted first-copy-value'));
+    expect(serialized.message).toBe('quoted <secret:first>');
+    errors.setErrorRedactor(undefined);
   });
 });

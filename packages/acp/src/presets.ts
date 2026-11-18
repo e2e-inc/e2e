@@ -6,7 +6,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
 import { dirname, join, parse } from 'node:path';
@@ -69,7 +69,6 @@ export function codexLaunch(options: AcpAgentOptions): () => Promise<AgentLaunch
     const config = JSON.stringify(codexConfig(await servers));
     // Read at each session, so a request or key set after the first one counts, and pinned for it.
     const auth = codexAuth(options.env);
-    registerSavedLogin(options.env);
     return {
       command: process.execPath,
       args: [bin],
@@ -151,6 +150,9 @@ function codexAuth(env: Readonly<Record<string, string>> | undefined): CodexAuth
   return { env: { ...pinned, DEFAULT_AUTH_REQUEST: JSON.stringify({ methodId: 'api-key' }) }, signIn, loginRefused };
 }
 
+/** More than any `auth.json` holds: a login with its tokens is a few kilobytes. */
+const MAX_SAVED_LOGIN_BYTES = 1_048_576;
+
 /** What Codex keeps of a login in `auth.json`, as far as it is a credential. */
 const CodexSavedLogin = z.object({
   OPENAI_API_KEY: z.string().nullish().catch(undefined),
@@ -169,15 +171,19 @@ const CodexSavedLogin = z.object({
  * from an earlier `codex login --with-api-key`, which need not be the
  * environment's, or the tokens of a ChatGPT login. Codex signs in with it
  * ahead of any key, and a provider that quotes it back would otherwise put
- * it in the report. Read before each session, since Codex renews tokens. A
- * login in the OS keyring cannot be read, and is not redacted.
+ * it in the report. A login in the OS keyring cannot be read, and is not
+ * redacted; nor is a file that is no login: not a regular file, or larger
+ * than any login.
  */
-function registerSavedLogin(env: Readonly<Record<string, string>> | undefined): void {
+export function registerSavedCodexLogin(env: Readonly<Record<string, string>> | undefined): void {
   // An empty CODEX_HOME is none, as Codex reads it.
   const home = (env?.['CODEX_HOME'] ?? process.env['CODEX_HOME']) || join(homedir(), '.codex');
   let saved: z.infer<typeof CodexSavedLogin>;
   try {
-    saved = CodexSavedLogin.parse(JSON.parse(readFileSync(join(home, 'auth.json')).toString()));
+    const file = join(home, 'auth.json');
+    const stats = statSync(file);
+    if (!stats.isFile() || stats.size > MAX_SAVED_LOGIN_BYTES) return;
+    saved = CodexSavedLogin.parse(JSON.parse(readFileSync(file).toString()));
   } catch {
     // No saved login, or one this version cannot read.
     return;

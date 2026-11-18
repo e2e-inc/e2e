@@ -11,7 +11,8 @@
  * - model-call accounting and a step transcript for `--debug`.
  */
 
-import { redactToolResult } from './redaction.ts';
+import { executorRedactors, redactToolResult } from './redaction.ts';
+import { processSecrets } from '../run/secrecy.ts';
 import type { StepTurn } from '../run/steps.ts';
 import type { AssistantModelMessage, ModelMessage, StepResult, ToolCallPart, ToolSet } from 'ai';
 import { asSdkLanguageModel, loadAiSdk, type AiSdk, type SdkLanguageModel } from './ai-sdk.ts';
@@ -284,7 +285,7 @@ class LoopRun {
       middleware: {
         transformParams: async ({ params }) => ({
           ...params,
-          prompt: params.prompt.map(message => message.role !== 'tool' ? message : {
+          prompt: params.prompt.map(message => message.role === 'assistant' ? redactAssistantText(message, executorRedactors.get(context)) : message.role !== 'tool' ? message : {
             ...message,
             content: message.content.map(part => {
               if (part.type !== 'tool-result') return part;
@@ -906,8 +907,29 @@ function textChars(messages: readonly ModelMessage[]): number {
   return total;
 }
 
+/**
+ * An assistant message with what the model wrote redacted, before it is sent
+ * back as history: a model that repeats a secret or a provider key it was
+ * shown, in an error or on a screen, must not be handed it again as text.
+ * Its tool calls stay as it made them.
+ */
+function redactAssistantText<Message extends { content: unknown }>(message: Message, redact: ((text: string) => string) | undefined): Message {
+  if (redact === undefined) return message;
+  if (typeof message.content === 'string') return { ...message, content: redact(message.content) };
+  if (!Array.isArray(message.content)) return message;
+  return {
+    ...message,
+    content: message.content.map((part: unknown) => {
+      const record = part as { type?: unknown; text?: unknown };
+      return (record.type === 'text' || record.type === 'reasoning') && typeof record.text === 'string' ? { ...record, text: redact(record.text) } : part;
+    }),
+  };
+}
+
 function truncate(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max)}…[truncated]`;
+  // Redacted before the cut: half a value is no longer a match. What the step reports is redacted again, whole.
+  const safe = processSecrets.redact(text);
+  return safe.length <= max ? safe : `${safe.slice(0, max)}…[truncated]`;
 }
 
 /** A tool result for the transcript: a screenshot-carrying result reads as its text plus the image size, never the bytes. */

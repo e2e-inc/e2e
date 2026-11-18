@@ -54,7 +54,7 @@ import { SessionStore } from '@e2e-dev/core/lib/run/sessions';
 import { outputLayout } from '@e2e-dev/core/lib/run/output';
 import { uncaptured, writeTerminal, type RunnerOutput } from './process-output.ts';
 import { refuseBun } from './public-ownership.ts';
-import { processSecrets, registerProviderKeys, registerStaticSecrets, staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
+import { processSecrets, registerProviderKeys, registerStaticSecrets, staticOutputLedger } from '@e2e-dev/core/lib/run/secrecy';
 import { warnOfNodeDebug } from './node-debug.ts';
 import { nextRerunDir, pruneArtifacts } from '@e2e-dev/core/lib/run/artifacts';
 import { carryForward, fileDurationKey, lastFailedIds, readLastRun, reportArtifactPaths, type RerunCollection } from './last-run.ts';
@@ -1560,7 +1560,7 @@ class ReporterAbandoned extends Error {}
 /** `FinishedRun.redact`: the config's fixed secret values; a config that never loaded declared none. */
 function redactStaticSecrets(secrets: ResolvedRunConfig['allSecrets'] | undefined): (text: string) => string {
   if (secrets === undefined) return (text) => String(text);
-  const { redactFragments } = staticSecretLedger(secrets);
+  const { redactFragments } = staticOutputLedger(secrets);
   return (text) => redactFragments(String(text));
 }
 

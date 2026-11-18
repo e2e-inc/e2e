@@ -4,7 +4,7 @@ import type { ResolvedConfig } from '../config/resolve.ts';
 import { MIN_SECRET_LENGTH, secretLength } from '../config/secrets.ts';
 import type { TargetSession } from '../engine/surface.ts';
 import { sharedSecretsBrand } from '../internal/brands.ts';
-import { ConfigurationError, setErrorRedactor } from '../internal/errors.ts';
+import { ConfigurationError, ensureErrorRedactor, setErrorRedactor } from '../internal/errors.ts';
 import { realmSlot } from '../internal/realm-slot.ts';
 import { SecretLedger, type SecretList, type SecretsBeside } from '../internal/redact.ts';
 import { unavailableCode } from '../secrets.ts';
@@ -248,8 +248,9 @@ const besideStatic: SecretsBeside = {
 export const processSecrets = new SecretLedger([], beside);
 
 // Before any config is read: a config that fails to load, or an engine that fails to start, is reported through this redactor too.
+// Only where none is installed: another copy of this module in the process may hold values this one does not.
 registerProviderKeys(process.env);
-setErrorRedactor(processSecrets.redact);
+ensureErrorRedactor(processSecrets.redact);
 
 function staticEntries(secrets: ResolvedConfig['allSecrets']): SecretList {
   return [...secrets].flatMap(([name, { value }]) => (typeof value === 'string' ? [[name, value] as const] : []));
@@ -269,8 +270,27 @@ const staticLedgers = new WeakMap<ResolvedConfig['allSecrets'], SecretLedger>();
 export function staticSecretLedger(secrets: ResolvedConfig['allSecrets']): Pick<SecretLedger, 'redact' | 'entries' | 'redactFragments'> {
   let ledger = staticLedgers.get(secrets);
   if (ledger === undefined) {
-    ledger = new SecretLedger(staticEntries(secrets), besideStatic);
+    ledger = new SecretLedger(staticEntries(secrets));
     staticLedgers.set(secrets, ledger);
+  }
+  return ledger;
+}
+
+/** The output ledger of each secrets map, built once. */
+const staticOutputLedgers = new WeakMap<ResolvedConfig['allSecrets'], SecretLedger>();
+
+/**
+ * `staticSecretLedger` with the provider keys this process knows beside
+ * it, for text only this process writes: a test filter's note, what a
+ * reporter redacts, a change brief. Never for a title or anything else a
+ * test's id is made of: the runner and a worker need not know the same
+ * keys, and a name they redact differently is a test neither finds.
+ */
+export function staticOutputLedger(secrets: ResolvedConfig['allSecrets']): Pick<SecretLedger, 'redact' | 'redactFragments'> {
+  let ledger = staticOutputLedgers.get(secrets);
+  if (ledger === undefined) {
+    ledger = new SecretLedger(staticEntries(secrets), besideStatic);
+    staticOutputLedgers.set(secrets, ledger);
   }
   // A key exported since the process started, by a config file or a setup step.
   registerProviderKeys(process.env);
@@ -280,6 +300,8 @@ export function staticSecretLedger(secrets: ResolvedConfig['allSecrets']): Pick<
 /** Makes `processSecrets` `serializeError`'s default redactor and seeds it with the static values of `secrets`, which it returns. */
 function seedProcess(secrets: ResolvedConfig['allSecrets']): SecretList {
   setErrorRedactor(processSecrets.redact);
+  // A key exported since the process started, by a config file or a setup step.
+  registerProviderKeys(process.env);
   const entries = staticSecretLedger(secrets).entries();
   for (const [name, value] of entries) processSecrets.register(name, value);
   return entries;

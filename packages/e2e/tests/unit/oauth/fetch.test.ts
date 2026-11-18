@@ -374,4 +374,32 @@ describe('createOAuthFetch', () => {
     await createOAuthFetch(provider(), { store: rotating, userAgent: 'p' })(api.url).catch(() => undefined);
     expect(processSecrets.redact(refresh)).toBe('<secret:test.refresh-token>');
   });
+
+  it('has the run redact an expired login before it is sent to be renewed, and the renewed one before it is sent on', async () => {
+    const stale = { access: 'oauth-stale-access-6e0c2a8f4b1d7935', refresh: 'oauth-stale-refresh-9a4d1f7c3e0b5826', expires: 1 };
+    const renewed = { access: 'oauth-renewed-access-2f8b5d1a7c3e9046', refresh: 'oauth-renewed-refresh-5c1e9a3f7b0d2468', expires: Date.now() + 3_600_000 };
+    const atRefresh: string[] = [];
+    const atRequest: string[] = [];
+    const api = await serve((request, response) => {
+      atRequest.push(processSecrets.redact(request.headers['authorization'] ?? ''));
+      json(response, 200, { ok: true });
+    });
+    const store = new MemoryCredentialStore({ test: stale });
+    const fetch = createOAuthFetch(
+      provider({
+        async refresh(credentials) {
+          // What the run would make of an answer from the token endpoint that quotes the grant back.
+          atRefresh.push(processSecrets.redact(`${credentials.access} ${credentials.refresh}`));
+          return renewed;
+        },
+      }),
+      { store, userAgent: 'p' },
+    );
+    expect(processSecrets.redact(stale.refresh)).toBe(stale.refresh);
+    await fetch(api.url);
+    expect(atRefresh).toEqual(['<secret:test.access-token> <secret:test.refresh-token>']);
+    expect(atRequest).toEqual(['Bearer <secret:test.access-token>']);
+    expect(processSecrets.redact(renewed.refresh)).toBe('<secret:test.refresh-token>');
+  });
 });
+

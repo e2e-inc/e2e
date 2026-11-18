@@ -47,7 +47,7 @@ export async function describeResponse(response: Response): Promise<string> {
   try {
     const { error, error_description, message } = ErrorBodySchema.parse(JSON.parse(text));
     const detail = error_description ?? (typeof error === 'object' ? error.message : undefined) ?? message ?? (typeof error === 'string' ? error : undefined);
-    return detail === undefined ? `${response.status}: ${excerpt(text)}` : `${response.status}: ${detail}`;
+    return detail === undefined ? `${response.status}: ${excerpt(text)}` : `${response.status}: ${processSecrets.redact(detail)}`;
   } catch {
     return `${response.status}: ${excerpt(text)}`;
   }
