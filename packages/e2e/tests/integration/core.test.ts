@@ -125,7 +125,7 @@ describe('e2e/core', { timeout: 60_000 }, () => {
     await host(fakes[2]!.engine);
     const names = fakes.map((fake) => fake.inits[0]?.targetName);
     expect(new Set(names).size).toBe(3);
-    for (const name of names) expect(name).toMatch(/^fake-host-[0-9a-f]{8}$/);
+    for (const name of names) expect(name).toMatch(/^fake-host-[0-9a-f]{24}$/);
     // Hosts in two worker threads share the process and load their own copy of the module.
     const script = path.join(dir, 'thread-host.mjs');
     writeFileSync(script, [
@@ -143,7 +143,7 @@ describe('e2e/core', { timeout: 60_000 }, () => {
       thread.once('message', resolve);
       thread.once('error', reject);
     })));
-    expect(threadNames[0]).toMatch(/^fake-host-[0-9a-f]{8}$/);
+    expect(threadNames[0]).toMatch(/^fake-host-[0-9a-f]{24}$/);
     expect(threadNames[1]).not.toBe(threadNames[0]);
   });
 
@@ -152,6 +152,15 @@ describe('e2e/core', { timeout: 60_000 }, () => {
     const opened = await host(defineEngine({ name: long, version: '1', spiVersion: ENGINE_SPI_VERSION, async startAttempt() {}, async endAttempt() {} }));
     expect(opened.platform).toBe(long);
     await (await opened.newSession()).close();
+    // A platform that is a secret's value: the host's name keeps none of it, so no notice carries a part the redactor cannot match.
+    const secret = 's3cr3t'.repeat(7);
+    const notices: string[] = [];
+    await host(defineEngine({ name: 'labelled', platform: secret, version: '1', spiVersion: ENGINE_SPI_VERSION, async init(info) { info.log('ready'); }, async startAttempt() {}, async endAttempt() {} }), {
+      secrets: { LABEL: secret },
+      onNotice: (message) => notices.push(message),
+    });
+    expect(notices.some((message) => message.includes('ready'))).toBe(true);
+    expect(notices.filter((message) => message.includes(secret.slice(0, 20)))).toEqual([]);
     await expect(host(createFakeEngine().engine, { app: { url: 'http://127.0.0.1:1', linkBase: 'not a url' } }))
       .rejects.toMatchObject({ message: expect.stringContaining('target "fake"') });
   });

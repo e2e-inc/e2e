@@ -127,19 +127,22 @@ const RETAINED_STEPS = 500;
 /** The core fixtures that belong to a test. A session has no test, so it exposes every other built-in fixture. */
 const TEST_FIXTURES = new Set(Object.entries(CORE_FIXTURES).flatMap(([name, fixture]) => (fixture.scope === 'test' ? [name] : [])));
 
-/** The characters of the platform a host's target name keeps, so the name fits in a file name with an attempt id beside it. */
+/** The longest platform a host's target name starts with, so the name fits in a file name with an attempt id beside it. */
 const HOST_NAME_PLATFORM_MAX = 40;
 
 /**
- * The name a host's target goes by once its config resolved: the start of
- * its platform and a random token. An engine may name what a target holds
- * after it, such as the mobile engine's device session, and the platform
- * alone would give every host the name another host, or a test's own target,
- * already holds. The token is drawn per host, so hosts in other processes,
- * worker threads, or copies of this package get names of their own.
+ * The name a host's target goes by once its config resolved: its platform
+ * and a random token. An engine may name what a target holds after it, such
+ * as the mobile engine's device session, and the platform alone would give
+ * every host the name another host, or a test's own target, already holds.
+ * The token is drawn per host, so hosts in other processes, worker threads,
+ * or copies of this package get names of their own. A longer platform is
+ * left out whole rather than cut: a cut could keep part of a secret the
+ * redactor only knows in full.
  */
 function hostTargetName(platform: string): string {
-  return `${Array.from(platform).slice(0, HOST_NAME_PLATFORM_MAX).join('')}-host-${randomBytes(4).toString('hex')}`;
+  const token = randomBytes(12).toString('hex');
+  return platform.length > HOST_NAME_PLATFORM_MAX ? `host-${token}` : `${platform}-host-${token}`;
 }
 
 /**

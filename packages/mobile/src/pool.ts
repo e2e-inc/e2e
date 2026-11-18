@@ -267,6 +267,8 @@ export class DevicePool {
   async finish(info: EngineFinishInfo): Promise<void> {
     const clients = this.warmed.get(info.targetName) ?? [];
     this.warmed.delete(info.targetName);
+    // A released lease's daemon must not serve a later init, and an engine reused across hosts must not pile up their bindings.
+    this.bound.delete(info.targetName);
     const closing = withinCleanupBudget(
       Promise.allSettled(clients.map((client) => client.sessions.close())),
       info,
