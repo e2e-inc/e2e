@@ -125,7 +125,7 @@ test.fixme(); // inside a body, always
 ```
 
 - 它接受与 [`test.skip`](#test-skip) 相同的三种形式，并适用其主体形式的规则。
-- 测试报告为 `skipped`，原因为 `fixme`；在测试主体中调用并给出非空白原因时，原因为 `fixme: <reason>`。列表报告器将其显示为 `[fixme: crashes on Android]`。
+- 测试报告为 `skipped`，`report.json` 中的 `skip.cause` 为 `fixme`，而 `test.skip` 为 `explicit`。原因为 `fixme`；在测试主体中调用并给出非空白原因时，原因为 `fixme: <reason>`。列表报告器将其显示为 `[fixme: crashes on Android]`。
 - 注册形式不接受测试选项。
 - 注册时返回 `TestCase`；在测试主体中返回 `void`。
 
@@ -817,14 +817,15 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    */
   skip(condition: boolean, reason?: string): void;
   skip(reason?: string): void;
-  /** Registers one skipped test marked fixme, reported with the skip reason `fixme`. */
+  /** Registers one skipped test marked fixme, reported with the skip cause and reason `fixme`. */
   fixme(title: string, fn: TestFn<Fixtures>): TestCase;
   /**
    * Inside a running test: skips it as fixme when `condition` is true (or
-   * always, with no condition), as `test.skip` does. The reported reason is
-   * `fixme`, or `fixme: <reason>` when `reason` is not blank. A setup test cannot
-   * skip. Outside a test body this form is `COLLECTION_ERROR`; use
-   * `test.fixme(title, fn)` to mark a test fixme at collection.
+   * always, with no condition), as `test.skip` does. The skip cause is
+   * `fixme`, and the reason `fixme`, or `fixme: <reason>` when `reason` is not
+   * blank. A setup test cannot skip. Outside a test body this form is
+   * `COLLECTION_ERROR`; use `test.fixme(title, fn)` to mark a test fixme at
+   * collection.
    */
   fixme(condition: boolean, reason?: string): void;
   fixme(reason?: string): void;

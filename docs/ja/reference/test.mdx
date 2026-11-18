@@ -125,7 +125,7 @@ test.fixme(); // inside a body, always
 ```
 
 - [`test.skip`](#test-skip) と同じ 3 つの形式を受け付け、本体内の形式のルールが適用されます。
-- テストは理由 `fixme` とともに `skipped` と報告します。テスト本体内の呼び出しで空白でない理由を渡した場合は `fixme: <reason>` です。リスト形式のレポーターは `[fixme: crashes on Android]` と表示します。
+- テストは `skipped` と報告します。`report.json` の `skip.cause` は、`test.skip` の `explicit` ではなく `fixme` です。理由は `fixme` です。テスト本体内の呼び出しで空白でない理由を渡した場合は `fixme: <reason>` です。リスト形式のレポーターは `[fixme: crashes on Android]` と表示します。
 - 登録時の形式はテストオプションを受け付けません。
 - 登録時の戻り値は `TestCase`、テスト本体内では `void` です。
 
@@ -817,14 +817,15 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    */
   skip(condition: boolean, reason?: string): void;
   skip(reason?: string): void;
-  /** Registers one skipped test marked fixme, reported with the skip reason `fixme`. */
+  /** Registers one skipped test marked fixme, reported with the skip cause and reason `fixme`. */
   fixme(title: string, fn: TestFn<Fixtures>): TestCase;
   /**
    * Inside a running test: skips it as fixme when `condition` is true (or
-   * always, with no condition), as `test.skip` does. The reported reason is
-   * `fixme`, or `fixme: <reason>` when `reason` is not blank. A setup test cannot
-   * skip. Outside a test body this form is `COLLECTION_ERROR`; use
-   * `test.fixme(title, fn)` to mark a test fixme at collection.
+   * always, with no condition), as `test.skip` does. The skip cause is
+   * `fixme`, and the reason `fixme`, or `fixme: <reason>` when `reason` is not
+   * blank. A setup test cannot skip. Outside a test body this form is
+   * `COLLECTION_ERROR`; use `test.fixme(title, fn)` to mark a test fixme at
+   * collection.
    */
   fixme(condition: boolean, reason?: string): void;
   fixme(reason?: string): void;

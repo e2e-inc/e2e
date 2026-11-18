@@ -374,6 +374,9 @@ describe('foldLastRun', () => {
     const folded = foldLastRun(run(['self-skipped', 'failed', 'skipped']), run(['failed', 'skipped', 'skipped']));
     // One ran in both runs and skipped itself in the rerun, two ran in the rerun, three never started.
     expect(folded.run.summary).toMatchObject({ selected: 3, executed: 2, failed: 1, skipped: 2 });
+    // Two ran only in the rerun, where it skipped itself.
+    const selfSkippedOnly = foldLastRun(run(['failed', 'self-skipped', 'skipped']), run(['failed', 'skipped', 'skipped']));
+    expect(selfSkippedOnly.run.summary).toMatchObject({ selected: 3, executed: 2, failed: 1, skipped: 2 });
   });
 
   it('leaves the rerun alone when the run before is another project\'s', () => {
