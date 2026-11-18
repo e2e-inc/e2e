@@ -74,6 +74,10 @@ jobs:
         run: |
           pnpm exec tsc -p .dev/skills/babysit/scripts
           node --test .dev/skills/babysit/scripts/pr-status.test.ts
+          pnpm exec tsc -p .dev/skills/translation-review/scripts
+          pnpm exec tsc -p .dev/skills/translation-viewer/viewer
+          pnpm exec tsc -p .dev/skills/terms-find/scripts
+          node --test .dev/skills/translation-review/scripts/lib.test.ts .dev/skills/translation-viewer/viewer/server.test.ts
       - name: Install browsers
         uses: ./.github/actions/chromium
       # On a pull request, Jev leaves out the tests the change can't affect;

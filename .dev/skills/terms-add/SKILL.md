@@ -19,12 +19,12 @@ engine or person, uses it.
 2. Find the locale code: the language's folder under `docs/` with a
    `navigation.json` or `Terms.md` (`es`, `ja`, `zh`, `pt-BR`, ...). A locale folder
    that has no `Terms.md` yet (`ja`, `zh`) gets one first:
-   `node .dev/skills/translation-review/scripts/terms.mjs init <locale> "<Language>"`.
+   `node .dev/skills/translation-review/scripts/terms.ts init <locale> "<Language>"`.
    A language with no folder yet has no locale: tell the user.
 3. Run the edit script from the repo root; never hand-edit the table:
 
    ```sh
-   node .dev/skills/translation-review/scripts/terms.mjs add <locale> "<English term>" "<translation>"
+   node .dev/skills/translation-review/scripts/terms.ts add <locale> "<English term>" "<translation>"
    ```
 
    - Several accepted forms go in one argument, ` / ` between them, the
@@ -38,12 +38,12 @@ engine or person, uses it.
 4. See what the new rule touches:
 
    ```sh
-   node .dev/skills/translation-review/scripts/review.mjs <locale>
+   node .dev/skills/translation-review/scripts/review.ts <locale>
    ```
 
    List the `term` warnings for this term (the pages that now disagree).
    Offer to fix them, one page at a time; do not rewrite pages unasked.
-5. `node .dev/skills/translation-review/scripts/terms.mjs list <locale>`
+5. `node .dev/skills/translation-review/scripts/terms.ts list <locale>`
    shows the whole table when the user asks what is recorded.
 
 ## Notes

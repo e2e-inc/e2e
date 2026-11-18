@@ -19,9 +19,9 @@ section, or a term translated three ways. This skill does, for any folder under
 From the repo root (Node 22+, no install):
 
 ```sh
-node .dev/skills/translation-review/scripts/review.mjs <locale>            # every page
-node .dev/skills/translation-review/scripts/review.mjs <locale> --page ci.mdx
-node .dev/skills/translation-review/scripts/review.mjs <locale> --json     # for tooling
+node .dev/skills/translation-review/scripts/review.ts <locale>            # every page
+node .dev/skills/translation-review/scripts/review.ts <locale> --page ci.mdx
+node .dev/skills/translation-review/scripts/review.ts <locale> --json     # for tooling
 ```
 
 It pairs each English section with its translation by position and reports,
@@ -64,11 +64,18 @@ itself. A form matches as the start of a word, ignoring case, and a space and
 a hyphen stand for each other ("sign in" also finds "sign-in"). Give the
 feminine and plural forms of an adjective too: `bloqueado` does not match
 `bloqueada`. A locale without `Terms.md` is checked for content only; create
-one with `node .dev/skills/translation-review/scripts/terms.mjs init <locale>
+one with `node .dev/skills/translation-review/scripts/terms.ts init <locale>
 "<Language>"`. Add or change rows through the `terms-add` skill.
+
+`ja` and `zh` keep their glossary as a table in their README, which the DeepL
+check (`scripts/deepl-review.ts`) reads. These skills read `Terms.md` only, so
+term checks are off for those locales until their table moves to a `Terms.md`
+and `parseGlossary` reads that; `init` refuses to start a second glossary
+beside a README table.
 
 ## Limits
 
+- For Chinese, Japanese, and Korean the length checks are skipped (a character is not a word, and the ratio to English is not calibrated); the other checks run.
 - It compares counts and words, not meaning. A fluent translation that says
   something else passes; read the pages, or use `translation-viewer`'s model
   read, for that.

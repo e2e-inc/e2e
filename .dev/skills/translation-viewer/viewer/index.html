@@ -101,55 +101,6 @@ async function api(path, init) {
   return res.json();
 }
 
-/** Splits an MDX page into sections at h1-h4 headings outside code fences. */
-function sections(source) {
-  const out = [];
-  let cur = { heading: 'Frontmatter and intro', lines: [] };
-  let fence = null;
-  for (const line of source.replaceAll('\r\n', '\n').split('\n')) {
-    const mark = /^ *(`{3,}|~{3,})/.exec(line)?.[1];
-    if (fence) {
-      if (mark && mark[0] === fence[0] && mark.length >= fence.length) fence = null;
-    } else if (mark) {
-      fence = mark;
-    } else if (/^ {0,3}#{1,4}\s+\S/.test(line)) {
-      out.push(cur);
-      cur = { heading: line.trim(), lines: [] };
-    }
-    cur.lines.push(line);
-  }
-  out.push(cur);
-  return out;
-}
-
-/**
- * The prose of a section: code blocks become `[code block]`, and imports,
- * exports, and MDX tags (which may span lines) are dropped, keeping the text
- * of a tag's title, subtitle, description, and label. Inline code and link
- * text stay, since a sentence reads wrong without them.
- */
-function prose(lines) {
-  const out = [];
-  let fence = null;
-  for (const line of lines) {
-    const mark = /^ *(`{3,}|~{3,})/.exec(line)?.[1];
-    if (fence) {
-      if (mark && mark[0] === fence[0] && mark.length >= fence.length) fence = null;
-    } else if (mark) {
-      fence = mark;
-      out.push('[code block]');
-    } else if (!/^\s*(import|export)\s/.test(line)) {
-      out.push(line);
-    }
-  }
-  const attributes = /\b(?:title|subtitle|description|label)="([^"]*)"/g;
-  return out
-    .join('\n')
-    .replace(/<\/?[A-Za-z][^<>]*>/g, (tag) => ` ${[...tag.matchAll(attributes)].map((match) => match[1]).join('\n')} `)
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
 /**
  * Pairs the paragraphs of both sides into chunks under CHUNK characters. When
  * the paragraph counts differ, both sides are cut at the same fractions of
@@ -178,30 +129,16 @@ function chunks(en, tr) {
   return out;
 }
 
-/** The README's glossary rows whose English term appears in the English text. */
-function glossaryFor(readme, english) {
-  const lower = english.toLowerCase();
-  return readme
-    .split('\n')
-    .filter((line) => line.startsWith('|') && !/^\|\s*(-|Inglés|English)/.test(line))
-    .filter((line) => {
-      const term = line.split('|')[1] ?? '';
-      return term.split(',').some((t) => t.replace(/\(.*?\)/g, '').trim() && lower.includes(t.replace(/\(.*?\)/g, '').trim().toLowerCase()));
-    })
-    .join('\n');
+/** The term rows of a section as `English | translation | note` lines. */
+function termLines(terms) {
+  return terms.map((term) => `${term.en} | ${term.forms.join(' / ')}${term.note ? ` | ${term.note}` : ''}`).join('
+');
 }
 
-/** The glossary terms of one section, as `English -> translation` lines, for a prompt. */
-function termsFor(doc, index) {
-  const english = prose(sections(doc.english)[index]?.lines ?? []);
-  return glossaryFor(doc.glossary, english)
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => {
-      const [, term, forms, note] = line.split('|').map((cell) => cell.trim());
-      return `- ${term} -> ${forms}${note ? ` (${note})` : ''}`;
-    })
-    .join('\n');
+/** The terms of a section as prompt bullets for the coding session. */
+function termBullets(terms) {
+  return terms.map((term) => `- ${term.en} -> ${term.forms.join(' / ')}${term.note ? ` (${term.note})` : ''}`).join('
+');
 }
 
 function systemPrompt(locale, glossary) {
@@ -212,7 +149,7 @@ function systemPrompt(locale, glossary) {
     '- warning: unnatural or literal phrasing, a register that differs from the English or from the rest of the passage, grammar or spelling mistakes.',
     '- nit: small style points.',
     'Never flag code, "[code block]", URLs, or text that is the same in both languages on purpose. If the translation is fine, answer verdict "ok" with no issues.',
-    'quote must be copied exactly from the translation. Write problem and suggestion in English, suggestion in the translation language.',
+    'quote must be copied exactly from the translation. Write the problem in English; write the suggestion in the language of the translation.',
     glossary ? `Glossary (English | translation):\n${glossary}` : '',
   ].filter(Boolean).join('\n');
 }
@@ -282,7 +219,7 @@ function fixPrompt(path, heading, issues, terms, files) {
     ...(terms ? [`Terms this section must use exactly (from the glossary; the first form is preferred):`, terms, ''] : []),
     'The findings come from a small on-device model: read the English page docs/' + path + ' first and skip any finding that is wrong.',
     `${files.length > 0 ? `Follow ${files.join(' and ')}. ` : ''}Edit only docs/${locale}/${path}; keep the outline, code, inline code, and links exactly as in English.`,
-    `Then run: node .dev/skills/translation-review/scripts/review.mjs ${locale} --page ${path}  and  pnpm docs:check. Tell me what you changed and what you skipped.`,
+    `Then run: node .dev/skills/translation-review/scripts/review.ts ${locale} --page ${path}  and  pnpm docs:check. Tell me what you changed and what you skipped.`,
   ].join('\n');
 }
 
@@ -330,25 +267,23 @@ async function show(path) {
   for (const node of document.querySelectorAll('#tree .file')) node.classList.toggle('active', node.dataset.path === path);
   const doc = await loadDoc(path);
   if (state.current !== path) return;
-  const en = sections(doc.english);
-  const tr = sections(doc.translated);
   const view = $('view');
   view.replaceChildren();
-  if (en.length !== tr.length) view.append(el('div', 'notice', `Outlines differ (${en.length} English sections, ${tr.length} translated), so the sections below are paired by position and may not match. Run the translation-review skill; AI review skips this page.`));
+  if (!doc.outlinesMatch) view.append(el('div', 'notice', `Outlines differ (${doc.englishSections} English sections, ${doc.translatedSections} translated), so the sections below are paired by position and may not match. Run the translation-review skill; AI review skips this page.`));
   const head = el('div', 'cols');
   head.append(el('div', '', 'English'), el('div', '', state.locale));
   view.append(head);
   const saved = state.findings.get(path) ?? [];
-  for (let i = 0; i < Math.max(en.length, tr.length); i++) {
+  for (const [i, part] of doc.sections.entries()) {
     const row = el('div', 'row');
     row.id = `s${i}`;
     const left = el('div', 'cell');
-    left.append(el('pre', '', en[i]?.lines.join('\n') ?? ''));
+    left.append(el('pre', '', part.english));
     const right = el('div', 'cell');
-    right.append(el('pre', '', tr[i]?.lines.join('\n') ?? ''));
+    right.append(el('pre', '', part.translated));
     const box = el('div', 'findings');
     right.append(box);
-    renderFindings(box, saved[i], { path, heading: tr[i]?.heading ?? en[i]?.heading ?? '', terms: termsFor(doc, i), files: doc.guideFiles });
+    renderFindings(box, saved[i], { path, heading: part.heading, terms: termBullets(part.terms), files: doc.guideFiles });
     row.append(left, right);
     view.append(row);
   }
@@ -358,13 +293,12 @@ async function show(path) {
 
 /** Reviews one section; the model sees paired chunks of its prose. */
 async function reviewSection(doc, i) {
-  const en = sections(doc.english)[i];
-  const tr = sections(doc.translated)[i];
-  const enText = prose(en?.lines ?? []);
-  const trText = prose(tr?.lines ?? []);
+  const part = doc.sections[i];
+  const enText = part.englishText;
+  const trText = part.translatedText;
   if (!enText.replace(/\[code block\]/g, '').trim() && !trText.replace(/\[code block\]/g, '').trim()) return { issues: [] };
   const issues = [];
-  const glossary = glossaryFor(doc.glossary, enText);
+  const glossary = termLines(part.terms);
   for (const chunk of chunks(enText, trText)) {
     if (!chunk.en.trim() || !chunk.tr.trim()) continue;
     const session = await LanguageModel.create({
@@ -386,8 +320,8 @@ async function reviewSection(doc, i) {
 
 async function reviewFile(path) {
   const doc = await loadDoc(path);
-  const count = Math.max(sections(doc.english).length, sections(doc.translated).length);
-  if (sections(doc.english).length !== sections(doc.translated).length) {
+  const count = doc.sections.length;
+  if (!doc.outlinesMatch) {
     markBadge(path, 'outline');
     return;
   }
@@ -400,7 +334,7 @@ async function reviewFile(path) {
     } catch (error) {
       results[i] = { error: String(error) };
     }
-    if (state.current === path) renderFindings(document.querySelector(`#s${i} .findings`), results[i], { path, heading: sections(doc.translated)[i]?.heading ?? '', terms: termsFor(doc, i), files: doc.guideFiles });
+    if (state.current === path) renderFindings(document.querySelector(`#s${i} .findings`), results[i], { path, heading: doc.sections[i].heading, terms: termBullets(doc.sections[i].terms), files: doc.guideFiles });
     $('ai').textContent = `Reviewing ${path}: section ${i + 1} of ${count}`;
   }
   const total = results.reduce((n, r) => n + (r?.issues?.length ?? 0), 0);
@@ -412,7 +346,7 @@ async function reviewFile(path) {
   await api('/api/findings', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ locale: state.locale, path, findings: results.flatMap((r, i) => (r?.issues ?? []).map((issue) => ({ section: sections(doc.translated)[i]?.heading, ...issue }))) }),
+    body: JSON.stringify({ locale: state.locale, path, findings: results.flatMap((r, i) => (r?.issues ?? []).map((issue) => ({ section: doc.sections[i]?.heading, ...issue }))) }),
   });
 }
 

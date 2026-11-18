@@ -7,45 +7,59 @@
  * Sources, in order: Microsoft Learn, then MDN Web Docs when Learn has too
  * little evidence (`--source learn|mdn|both` forces one).
  *
- * Usage: node find.mjs <locale> "<english term>" [--source both] [--pages 8] [--samples 4] [--json]
+ * Usage: node find.ts <locale> "<english term>" [--source both] [--pages 8] [--samples 4] [--json]
  *
  * Only the search term leaves the machine. Needs network access.
  */
 
+import { termPattern } from '../../translation-review/scripts/lib.ts';
+
+interface SearchJson {
+  results?: { url: string }[];
+  documents?: { mdn_url: string }[];
+}
+
+interface Source {
+  name: string;
+  locales: Record<string, string>;
+  searchUrl(term: string, top: number): string;
+  urlsOf(json: SearchJson): string[];
+  translate(url: string, locale: string): string;
+}
+
 /** Our locale codes (docs/<locale>/) to each source's. MDN translates only some languages. */
-const SOURCES = {
+const SOURCES: Record<'learn' | 'mdn', Source> = {
   learn: {
     name: 'Microsoft Learn',
-    origin: 'https://learn.microsoft.com',
     locales: {
       es: 'es-es', ja: 'ja-jp', zh: 'zh-cn', fr: 'fr-fr', de: 'de-de', 'pt-BR': 'pt-br', ko: 'ko-kr', pl: 'pl-pl',
       cz: 'cs-cz', cs: 'cs-cz', tr: 'tr-tr', hi: 'hi-in', uk: 'uk-ua', it: 'it-it', nl: 'nl-nl', ru: 'ru-ru', sv: 'sv-se',
     },
     searchUrl: (term, top) => `https://learn.microsoft.com/api/search?search=${encodeURIComponent(term)}&locale=en-us&%24top=${top}`,
-    urlsOf: (json) => json.results.map((result) => result.url).filter((url) => url.includes('/en-us/')),
+    urlsOf: (json) => (json.results ?? []).map((result) => result.url).filter((url) => url.includes('/en-us/')),
     translate: (url, locale) => url.replace('/en-us/', `/${locale}/`),
   },
   mdn: {
     name: 'MDN Web Docs',
-    origin: 'https://developer.mozilla.org',
     locales: { es: 'es', ja: 'ja', zh: 'zh-CN', fr: 'fr', ko: 'ko', 'pt-BR': 'pt-BR', ru: 'ru' },
     searchUrl: (term, top) => `https://developer.mozilla.org/api/v1/search?q=${encodeURIComponent(term)}&locale=en-US&size=${top}`,
-    urlsOf: (json) => json.documents.map((doc) => `https://developer.mozilla.org${doc.mdn_url}`),
+    urlsOf: (json) => (json.documents ?? []).map((doc) => `https://developer.mozilla.org${doc.mdn_url}`),
     translate: (url, locale) => url.replace('/en-US/', `/${locale}/`),
   },
 };
 
 const args = process.argv.slice(2);
-const flag = (name, fallback) => (args.includes(`--${name}`) ? args[args.indexOf(`--${name}`) + 1] : fallback);
+const flag = (name: string, fallback: string): string => (args.includes(`--${name}`) ? (args[args.indexOf(`--${name}`) + 1] ?? fallback) : fallback);
 const VALUE_FLAGS = new Set(['--pages', '--samples', '--source']);
 const positional = args.filter((arg, i) => !arg.startsWith('--') && !VALUE_FLAGS.has(args[i - 1] ?? ''));
 const [locale, term] = positional;
 if (!locale || !term) {
-  console.error(`usage: node find.mjs <locale> "<english term>" [--source both|learn|mdn] [--pages 8] [--samples 4] [--json]\nlocales: ${Object.keys(SOURCES.learn.locales).join(', ')} (MDN: ${Object.keys(SOURCES.mdn.locales).join(', ')})`);
+  console.error(`usage: node find.ts <locale> "<english term>" [--source both|learn|mdn] [--pages 8] [--samples 4] [--json]\nlocales: ${Object.keys(SOURCES.learn.locales).join(', ')} (MDN: ${Object.keys(SOURCES.mdn.locales).join(', ')})`);
   process.exit(2);
 }
+
 /** A flag that must be a positive whole number. */
-function positiveInt(name, fallback) {
+function positiveInt(name: string, fallback: string): number {
   const value = Number(flag(name, fallback));
   if (!Number.isInteger(value) || value < 1) {
     console.error(`--${name} must be a positive whole number`);
@@ -64,7 +78,7 @@ const ENOUGH = 8;
 let rateLimited = false;
 
 /** Fetches a page: its text and final URL, or undefined on a failure. */
-async function get(url) {
+async function get(url: string): Promise<{ text: string; url: string } | undefined> {
   try {
     const res = await fetch(url, { headers: { 'user-agent': 'terms-find' }, signal: AbortSignal.timeout(20_000) });
     if (res.status === 429) rateLimited = true;
@@ -74,55 +88,76 @@ async function get(url) {
   }
 }
 
-const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
 
 /** The reading blocks of a page: headings, paragraphs, list items, and table cells of its main content. */
-function blocks(html) {
+function blocks(html: string): string[] {
   const main = /<main\b[\s\S]*<\/main>/.exec(html)?.[0] ?? html;
   const body = main.replace(/<(script|style|nav|aside)\b[\s\S]*?<\/\1>/g, '');
   return [...body.matchAll(/<(h[1-6]|p|li|td|th|dt|dd)\b[^>]*>([\s\S]*?)<\/\1>/g)]
     .map((match) =>
-      match[2]
+      (match[2] ?? '')
         .replace(/<[^>]+>/g, ' ')
-        .replace(/&(#\d+|#x[\da-f]+|\w+);/gi, (all, code) => (code[0] === '#' ? String.fromCodePoint(code[1].toLowerCase() === 'x' ? Number.parseInt(code.slice(2), 16) : Number(code.slice(1))) : (ENTITIES[code] ?? all)))
+        .replace(/&(#\d+|#x[\da-f]+|\w+);/gi, (all: string, code: string) => (code.startsWith('#') ? String.fromCodePoint(code[1]?.toLowerCase() === 'x' ? Number.parseInt(code.slice(2), 16) : Number(code.slice(1))) : (ENTITIES[code] ?? all)))
         .replace(/\s+/g, ' ')
         .trim(),
     )
     .filter(Boolean);
 }
 
+/** Chinese, Japanese, and Korean have no spaces: split those with the runtime's word segmenter. */
+const SEGMENTED = new Set(['ja', 'zh', 'ko']);
+
 /** Lowercase words of a block. */
-const wordsOf = (text) => text.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}'-]*/gu) ?? [];
+function wordsOf(text: string): string[] {
+  const lower = text.toLowerCase();
+  if (SEGMENTED.has(locale ?? '')) {
+    return [...new Intl.Segmenter(locale, { granularity: 'word' }).segment(lower)].filter((part) => part.isWordLike).map((part) => part.segment);
+  }
+  return lower.match(/[\p{L}\p{N}][\p{L}\p{N}'-]*/gu) ?? [];
+}
 
 /** The word 1-3 grams of a block, as a set. */
-function grams(text) {
+function grams(text: string): Set<string> {
   const w = wordsOf(text);
-  const out = new Set();
+  const out = new Set<string>();
   for (let n = 1; n <= 3; n++) for (let i = 0; i + n <= w.length; i++) out.add(w.slice(i, i + n).join(' '));
   return out;
 }
 
-/** The term as pattern text: syntax characters escaped, a space or hyphen standing for each other ("end-to-end", "sign in"). */
-const escaped = term
-  .split(/[\s-]+/)
-  .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`))
-  .join(String.raw`[\s-]+`);
-const termPattern = new RegExp(String.raw`(?<![\p{L}\p{N}])${escaped}(?:s|es)?(?![\p{L}\p{N}])`, 'iu');
+const pattern = termPattern(term);
+
+interface Sample {
+  url: string;
+  english: string;
+  translated: string;
+}
+
+interface Collected {
+  source: string;
+  error?: string;
+  learnLocale?: string;
+  pages?: string[];
+  termBlocks?: number;
+  candidates?: { gram: string; blocks: number; lift: number }[];
+  samples?: Sample[];
+  skipped?: string[];
+}
 
 /** Runs one source: its pages, the ranked candidates, and the sample pairs. */
-async function collect(key) {
+async function collect(key: 'learn' | 'mdn'): Promise<Collected> {
   rateLimited = false;
   const source = SOURCES[key];
-  const target = source.locales[locale];
+  const target = source.locales[locale ?? ''];
   if (!target) return { source: source.name, error: `${source.name} has no ${locale} translation` };
-  const search = await get(source.searchUrl(term, pageLimit * 2));
+  const search = await get(source.searchUrl(term ?? '', pageLimit * 2));
   if (!search) return { source: source.name, error: rateLimited ? `${source.name} answered 429 (rate limited): wait a few minutes, and search fewer terms in a row` : `${source.name} search did not answer; check the network` };
-  const urls = [...new Set(source.urlsOf(JSON.parse(search.text)))].slice(0, pageLimit * 3);
-  const inTerm = new Map();
-  const outside = new Map();
-  const samples = [];
-  const used = [];
-  const skipped = [];
+  const urls = [...new Set(source.urlsOf(JSON.parse(search.text) as SearchJson))].slice(0, pageLimit * 3);
+  const inTerm = new Map<string, number>();
+  const outside = new Map<string, number>();
+  const samples: Sample[] = [];
+  const used: string[] = [];
+  const skipped: string[] = [];
   let termBlocks = 0;
   let otherBlocks = 0;
   for (const url of urls) {
@@ -147,14 +182,15 @@ async function collect(key) {
     }
     used.push(url);
     enBlocks.forEach((block, i) => {
-      const hit = termPattern.test(block);
-      for (const gram of grams(trBlocks[i])) {
+      const hit = pattern.test(block);
+      const translated = trBlocks[i] ?? '';
+      for (const gram of grams(translated)) {
         const map = hit ? inTerm : outside;
         map.set(gram, (map.get(gram) ?? 0) + 1);
       }
       if (hit) {
         termBlocks++;
-        samples.push({ url: other, english: block, translated: trBlocks[i] });
+        samples.push({ url: other, english: block, translated });
       } else {
         otherBlocks++;
       }
@@ -176,12 +212,12 @@ async function collect(key) {
   };
 }
 
-const order = sourceOption === 'both' ? ['learn', 'mdn'] : [sourceOption];
-if (!order.every((key) => key in SOURCES)) {
+const order: ('learn' | 'mdn')[] = sourceOption === 'both' ? ['learn', 'mdn'] : sourceOption === 'learn' || sourceOption === 'mdn' ? [sourceOption] : [];
+if (order.length === 0) {
   console.error('--source is learn, mdn, or both');
   process.exit(2);
 }
-const results = [];
+const results: Collected[] = [];
 for (const key of order) {
   const result = await collect(key);
   results.push(result);
@@ -196,15 +232,15 @@ if (asJson) {
       console.log(`${result.source}: ${result.error}\n`);
       continue;
     }
-    console.log(`${result.source}: "${term}" in ${result.learnLocale}: ${result.termBlocks} blocks with the term, from ${result.pages.length} pages (${result.skipped.length} skipped)`);
+    console.log(`${result.source}: "${term}" in ${result.learnLocale}: ${result.termBlocks} blocks with the term, from ${result.pages?.length ?? 0} pages (${result.skipped?.length ?? 0} skipped)`);
     if (result.termBlocks === 0) {
       console.log('  No page used the term; try another spelling or --pages 15.');
     } else {
       console.log('\nCandidates (blocks of the translation, lift against blocks without the term):');
-      for (const c of result.candidates) console.log(`  ${c.gram.padEnd(32)} ${String(c.blocks).padStart(3)} blocks  lift ${c.lift}`);
+      for (const c of result.candidates ?? []) console.log(`  ${c.gram.padEnd(32)} ${String(c.blocks).padStart(3)} blocks  lift ${c.lift}`);
       console.log('\nSamples:');
-      for (const s of result.samples) console.log(`  EN: ${s.english.slice(0, 220)}\n  ${locale.toUpperCase()}: ${s.translated.slice(0, 220)}\n  ${s.url}\n`);
+      for (const s of result.samples ?? []) console.log(`  EN: ${s.english.slice(0, 220)}\n  ${(locale ?? '').toUpperCase()}: ${s.translated.slice(0, 220)}\n  ${s.url}\n`);
     }
-    if (result.skipped.length > 0) console.log(`Skipped:\n${result.skipped.slice(0, 6).map((line) => `  ${line}`).join('\n')}\n`);
+    if ((result.skipped?.length ?? 0) > 0) console.log(`Skipped:\n${(result.skipped ?? []).slice(0, 6).map((line) => `  ${line}`).join('\n')}\n`);
   }
 }

@@ -18,7 +18,7 @@ this reviews the prose: meaning, glossary terms, register, grammar.
    locale folder that has translated pages:
 
    ```sh
-   node .dev/skills/translation-viewer/viewer/server.mjs --locale <locale>
+   node .dev/skills/translation-viewer/viewer/server.ts --locale <locale>
    ```
 
    It serves `http://127.0.0.1:4777/` and prints where findings are saved
@@ -55,7 +55,7 @@ this reviews the prose: meaning, glossary terms, register, grammar.
 - The model sees, per section, the prose (code blocks become `[code block]`;
   imports and MDX tags are dropped, keeping title, subtitle, description,
   and label text; inline code and link text stay), the glossary rows of
-  `docs/<locale>/Terms.md` (the README when there is none) for the terms that
+  `docs/<locale>/Terms.md` (no terms when there is none) for the terms that
   occur, and a closed JSON schema for its answer. Long sections go in
   chunks of paired paragraphs; when a section's paragraph counts differ, both
   sides are cut at the same fractions, so all of it is read but the pairs are

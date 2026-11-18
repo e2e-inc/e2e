@@ -15,8 +15,8 @@ what Microsoft calls the term so the user can decide the `Terms.md` row.
 
 1. Take the English term and the locale (`es`, `ja`, `zh`, `fr`, `pt-BR`, ...).
    If either is missing, ask once.
-2. **Look it up in the browser** (the Chrome tools; load them with ToolSearch
-   if deferred; see `claude-in-chrome`). Go straight to the report, no sign-in:
+2. **Look it up in the browser** with whatever browser automation the agent has
+   (for Claude Code, the Chrome tools, loaded with ToolSearch if deferred). Go straight to the report, no sign-in:
 
    ```
    https://msit.powerbi.com/view?r=eyJrIjoiODJmYjU4Y2YtM2M0ZC00YzYxLWE1YTktNzFjYmYxNTAxNjQ0IiwidCI6IjcyZjk4OGJmLTg2ZjEtNDFhZi05MWFiLTJkN2NkMDExZGI0NyIsImMiOjV9
@@ -54,9 +54,9 @@ what Microsoft calls the term so the user can decide the `Terms.md` row.
    the words that appear in the translation (Node 22+, network, no install):
 
    ```sh
-   node .dev/skills/terms-find/scripts/find.mjs <locale> "<English term>"
-   node .dev/skills/terms-find/scripts/find.mjs es "pipeline" --pages 12 --samples 6
-   node .dev/skills/terms-find/scripts/find.mjs es "assertion" --source mdn --json
+   node .dev/skills/terms-find/scripts/find.ts <locale> "<English term>"
+   node .dev/skills/terms-find/scripts/find.ts es "pipeline" --pages 12 --samples 6
+   node .dev/skills/terms-find/scripts/find.ts es "assertion" --source mdn --json
    ```
 
    It asks Learn first, then MDN (locales es, ja, zh, fr, ko, pt-BR, ru)
@@ -67,7 +67,7 @@ what Microsoft calls the term so the user can decide the `Terms.md` row.
 5. **Report to the user:** the English term, what Microsoft calls it in the
    locale (with gender and the other forms the docs would use), which source
    and product sense it came from, and how it compares with the row in
-   `docs/<locale>/Terms.md` (`node .dev/skills/translation-review/scripts/terms.mjs list <locale>`;
+   `docs/<locale>/Terms.md` (`node .dev/skills/translation-review/scripts/terms.ts list <locale>`;
    a locale with no `Terms.md` has no glossary yet, so say that instead).
 6. Add or change the row only when the user says so, through `terms-add`.
    Microsoft is a reference: the project's glossary decides. A term the
@@ -75,6 +75,8 @@ what Microsoft calls the term so the user can decide the `Terms.md` row.
    Microsoft's `prueba`), stays as the user set it.
 
 ## Limits
+
+- For ja, zh, and ko the script splits words with the runtime's segmenter, so a candidate is a segmenter word, not always a whole term: read the samples before trusting a rank.
 
 - Microsoft's vocabulary is Windows, Office, Azure, and .NET: terms specific
   to e2e or to test frameworks may have no entry, or a different sense.
