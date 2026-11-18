@@ -5,6 +5,7 @@
  * one at a time. Parallel work is more hosts.
  */
 
+import { randomBytes } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,7 +18,7 @@ import { MAX_TIMER_MS } from '../internal/time.ts';
 import { builtInFixtures, CORE_FIXTURES } from '../run/fixtures.ts';
 import { redactOpening } from '../run/redact-opening.ts';
 import { processSecrets, sessionLedger, shareStaticSecrets } from '../run/secrecy.ts';
-import { targetIdentity } from '../run/sessions.ts';
+import { targetIdentity, type SessionIdentity } from '../run/sessions.ts';
 import { openCoreHost, type StandaloneHost } from '../run/standalone.ts';
 import type { StandaloneAttempt } from '../run/standalone-attempt.ts';
 import { secretHandle } from '../secrets.ts';
@@ -126,19 +127,19 @@ const RETAINED_STEPS = 500;
 /** The core fixtures that belong to a test. A session has no test, so it exposes every other built-in fixture. */
 const TEST_FIXTURES = new Set(Object.entries(CORE_FIXTURES).flatMap(([name, fixture]) => (fixture.scope === 'test' ? [name] : [])));
 
-/** Hosts this process launched, which numbers each host's target name. */
-let hostsLaunched = 0;
+/** The characters of the platform a host's target name keeps, so the name fits in a file name with an attempt id beside it. */
+const HOST_NAME_PLATFORM_MAX = 40;
 
 /**
- * The name a host's target goes by: its platform, this process, and the
- * host's number in it. Unique among the hosts open on the machine at once,
- * since an engine names what it holds after it (a device's agent-device
- * session), so two hosts never share one device. The replay cache keys on
- * the platform instead, so a recording replays on any host.
+ * The name a host's target goes by once its config resolved: the start of
+ * its platform and a random token. An engine may name what a target holds
+ * after it, such as the mobile engine's device session, and the platform
+ * alone would give every host the name another host, or a test's own target,
+ * already holds. The token is drawn per host, so hosts in other processes,
+ * worker threads, or copies of this package get names of their own.
  */
 function hostTargetName(platform: string): string {
-  hostsLaunched += 1;
-  return `${platform}-launch-${process.pid}-${hostsLaunched}`;
+  return `${Array.from(platform).slice(0, HOST_NAME_PLATFORM_MAX).join('')}-host-${randomBytes(4).toString('hex')}`;
 }
 
 /**
@@ -170,7 +171,7 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
     const mark = handlesSignals ? engineListeners() : () => undefined;
     try { return await redactOpening(open); } finally { mark(); }
   };
-  let opened: { readonly config: ResolvedConfig; readonly target: ResolvedTarget; readonly host: StandaloneHost };
+  let opened: { readonly config: ResolvedConfig; readonly target: ResolvedTarget; readonly cacheTarget: SessionIdentity; readonly host: StandaloneHost };
   /** Stops sharing the host's secrets with the sessions beside it; set once they are shared. */
   let withdrawSecrets = (): void => undefined;
   try {
@@ -179,12 +180,7 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
       const resolved = resolveProjectConfig(
         {
           // An engine that declares no platform labels its host with its name.
-          targets: [{
-            name: hostTargetName(engine.platform ?? engine.name),
-            engine,
-            ...(engine.platform === undefined ? { platform: engine.name } : {}),
-            ...(options.app === undefined ? {} : { app: options.app }),
-          }],
+          targets: [{ engine, ...(engine.platform === undefined ? { platform: engine.name } : {}), ...(options.app === undefined ? {} : { app: options.app }) }],
           trace: 'off',
           video: 'off',
           cache: 'off',
@@ -193,17 +189,21 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
         },
         { projectRoot, env },
       );
+      const resolvedTarget = resolved.targets[0]!;
+      // The replay cache keys on the name the config resolved, so a recording replays on any host.
+      const cacheTarget = targetIdentity(resolvedTarget);
+      // Renamed past resolution, so a config error names the target as the program wrote it.
+      const target: ResolvedTarget = { ...resolvedTarget, name: hostTargetName(resolvedTarget.name) };
       // Set past resolution, which keeps a run's output inside its project: a host's lives where the program says.
-      const config: ResolvedConfig = { ...resolved, output };
+      const config: ResolvedConfig = { ...resolved, output, targets: [target] };
       withdrawSecrets = shareStaticSecrets(config.allSecrets);
-      const target = config.targets[0]!;
       const notice = options.onNotice;
       const host = await openCoreHost({
         config, target, env, headed: options.headed ?? false,
         signal: anySignal(options.signal, seat?.signal),
         ...(notice === undefined ? {} : { notice: (_target: string, message: string) => notice(message) }),
       });
-      return { config, target, host };
+      return { config, target, cacheTarget, host };
     });
   } catch (cause) {
     withdrawSecrets();
@@ -211,7 +211,7 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
     if (seat?.signal.aborted === true) owner?.gaveUp(cause);
     throw cause;
   }
-  const { config, target, host } = opened;
+  const { config, target, cacheTarget, host } = opened;
   const identity: StateIdentity = {
     engine: target.engine?.name ?? 'none',
     platform: target.platform,
@@ -276,7 +276,7 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
       ...(state === undefined ? {} : { state }),
     });
     failures.watch(attempt.steps);
-    const session = coreSession<Fixtures>(attempt, config, identity, target, failures, guest, timeout, () => {
+    const session = coreSession<Fixtures>(attempt, config, identity, target, cacheTarget, failures, guest, timeout, () => {
       if (closeOpen === session.close) closeOpen = undefined;
     });
     closeOpen = session.close;
@@ -315,6 +315,7 @@ function coreSession<Fixtures extends object>(
   config: ResolvedConfig,
   identity: StateIdentity,
   target: ResolvedTarget,
+  cacheTarget: SessionIdentity,
   failures: FailureWatch,
   guest: SessionGuest,
   timeout: number | undefined,
@@ -367,7 +368,7 @@ function coreSession<Fixtures extends object>(
   const typed = Object.freeze(session);
   registerSession(typed, {
     attempt, config, closers,
-    cacheTarget: targetIdentity({ ...target, name: target.platform }),
+    cacheTarget,
     // A cancelled session implicates nothing, so its recordings are neither written nor evicted.
     settlement: () => attempt.budget.signal.aborted ? undefined : failures.settlement(attempt.steps),
   });

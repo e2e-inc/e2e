@@ -1,10 +1,12 @@
 /** `e2e/core` (`@e2e-dev/core`): hosts, sessions, saved state, secrets, timeouts, link bases, and the agent's cache. */
-import { mkdirSync, mkdtempSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { Worker } from 'node:worker_threads';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { StepExecutor, StepExecutorContext } from '@e2e-dev/core/lib/agent/executor';
 import { createAgent } from '@e2e-dev/core/agent';
 import { launch, SessionState, type Host, type Session } from '@e2e-dev/core';
+import { defineEngine, ENGINE_SPI_VERSION } from '@e2e-dev/core/engine';
 import { publishAttempt } from '@e2e-dev/core/lib/expect/attempt';
 import { SoftFailures } from '@e2e-dev/core/lib/expect/soft';
 import { Deadline } from '@e2e-dev/core/lib/internal/time';
@@ -123,7 +125,35 @@ describe('e2e/core', { timeout: 60_000 }, () => {
     await host(fakes[2]!.engine);
     const names = fakes.map((fake) => fake.inits[0]?.targetName);
     expect(new Set(names).size).toBe(3);
-    for (const name of names) expect(name).toMatch(new RegExp(`^fake-launch-${process.pid}-\\d+$`));
+    for (const name of names) expect(name).toMatch(/^fake-host-[0-9a-f]{8}$/);
+    // Hosts in two worker threads share the process and load their own copy of the module.
+    const script = path.join(dir, 'thread-host.mjs');
+    writeFileSync(script, [
+      `import { parentPort } from 'node:worker_threads';`,
+      `import { launch } from ${JSON.stringify(import.meta.resolve('@e2e-dev/core'))};`,
+      `import { defineEngine, ENGINE_SPI_VERSION } from ${JSON.stringify(import.meta.resolve('@e2e-dev/core/engine'))};`,
+      `let name;`,
+      `const engine = defineEngine({ name: 'fake', version: '1', spiVersion: ENGINE_SPI_VERSION, init(info) { name = info.targetName; }, startAttempt() {}, endAttempt() {}, dispose() {} });`,
+      `const opened = await launch(engine, { cwd: ${JSON.stringify(dir)}, env: {}, handleSignals: false });`,
+      `await opened.close();`,
+      `parentPort.postMessage(name);`,
+    ].join('\n'));
+    const threadNames = await Promise.all([0, 1].map(() => new Promise((resolve, reject) => {
+      const thread = new Worker(script);
+      thread.once('message', resolve);
+      thread.once('error', reject);
+    })));
+    expect(threadNames[0]).toMatch(/^fake-host-[0-9a-f]{8}$/);
+    expect(threadNames[1]).not.toBe(threadNames[0]);
+  });
+
+  it('opens a session on an engine whose long name labels its host, and reports config errors under the name the program gave', async () => {
+    const long = 'p'.repeat(210);
+    const opened = await host(defineEngine({ name: long, version: '1', spiVersion: ENGINE_SPI_VERSION, async startAttempt() {}, async endAttempt() {} }));
+    expect(opened.platform).toBe(long);
+    await (await opened.newSession()).close();
+    await expect(host(createFakeEngine().engine, { app: { url: 'http://127.0.0.1:1', linkBase: 'not a url' } }))
+      .rejects.toMatchObject({ message: expect.stringContaining('target "fake"') });
   });
 
   it('refuses what is not an engine, an app key it does not take, and a relative artifactsDir resolves from cwd', async () => {
@@ -413,6 +443,8 @@ describe('e2e/core', { timeout: 60_000 }, () => {
         await opened.close();
       }
       expect(brain.calls).toBe(1);
+      const entry = readdirSync(cacheDir, { recursive: true }).find((file) => String(file).endsWith('.json'));
+      expect(readFileSync(path.join(cacheDir, String(entry)), 'utf8')).toMatch(/"targetId":\s*"fake"/);
     });
 
     it('keeps a confirmed recording when the host closes the session, and after a failure the program caught', async () => {

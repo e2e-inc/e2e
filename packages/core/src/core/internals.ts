@@ -19,7 +19,7 @@ import type { StepProgress, StepRecord, StepRecorder } from '../run/steps.ts';
 export interface SessionInternals {
   readonly attempt: StandaloneAttempt;
   readonly config: ResolvedConfig;
-  /** The target an agent's replay cache keys its recordings to: the host's, named by its platform rather than the host's own target name. */
+  /** The target an agent's replay cache keys its recordings to: the host's, under the name its config resolved rather than the host's own. */
   readonly cacheTarget: SessionIdentity;
   /** Run in order when the session closes, before its attempt ends: an agent settles its replay cache here. */
   readonly closers: (() => Promise<void>)[];

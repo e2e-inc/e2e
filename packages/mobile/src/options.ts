@@ -82,7 +82,8 @@ export interface MobileOptions {
    * device under `<session>-<n>`, `e2e-<target name>-<n>` by default. One run
    * per session at a time: concurrent runs on the same session interleave
    * taps. A `launch()` host's target is named
-   * `<platform>-launch-<pid>-<n>`, so each host has a session of its own.
+   * `<platform>-host-<token>`, so without this option each host has a session
+   * of its own.
    */
   readonly session?: string | undefined;
   /**
