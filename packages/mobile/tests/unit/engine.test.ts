@@ -622,6 +622,28 @@ describe('lifecycle', () => {
     expect(h.fake.methods()).not.toContain('apps.open');
   });
 
+  it('unpins by the id agent-device removed when uninstallApp is given a display name', async () => {
+    const signal = new AbortController().signal;
+    const h = harness({ appPath: './build/App.app' }, false);
+    h.fake.respond('apps.install', () => ({ app: './build/App.app', appPath: '/project/build/App.app', platform: 'ios', bundleId: 'com.example.app', identifiers: {} }));
+    h.fake.respond('apps.uninstall', () => ({ app: 'Example', appId: 'com.example.app', wasInstalled: true }));
+    await boot(h);
+    await h.engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal, resolveSecret: noSecrets, ...ignoreTrace });
+    await h.surface.installApp(undefined, {}, signal);
+    expect(await h.surface.uninstallApp('Example', signal)).toBe(true);
+    expect(h.surface.pinnedApp).toBeUndefined();
+  });
+
+  it('drops a handle located before uninstallApp', async () => {
+    const h = harness();
+    await openAttempt(h);
+    h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, appBundleId: 'com.example.app' }));
+    h.fake.respond('apps.uninstall', () => ({ app: 'Example', appId: 'com.example.app', wasInstalled: true }));
+    const about = await observed(h, 'About');
+    await h.surface.uninstallApp('Example', new AbortController().signal);
+    await expect(h.engine.perform!(about.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NODE_STALE' });
+  });
+
   it('pins the package an Android install reports, and refuses the build path as an app id', async () => {
     const signal = new AbortController().signal;
     const h = harness({ appPath: './build/app.apk', platform: 'android' }, false);

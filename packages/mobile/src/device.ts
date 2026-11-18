@@ -138,14 +138,14 @@ export interface Device {
   /**
    * Removes an app, by bundle id or package, from the device; without one,
    * the pinned app. Resolves to whether it was installed, so removing an app
-   * that is not there passes. Without `app.bundleId` on the target,
+   * id that is not there passes. Without `app.bundleId` on the target,
    * removing the build `installApp` pinned unpins it: `app.open()` then
    * needs another install.
    */
   uninstallApp(app?: string): Promise<boolean>;
   /**
    * Whether an app, by bundle id or package, is on the device, system apps
-   * included; without one, the pinned app.
+   * included (Android: launchable apps only); without one, the pinned app.
    */
   isAppInstalled(app?: string): Promise<boolean>;
   /**

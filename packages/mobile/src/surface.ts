@@ -1049,20 +1049,24 @@ export class AgentDeviceSurface {
 
   /**
    * Removes an app (default: the pinned one) from the session's device and
-   * resolves to whether it was installed; an app that is not there is no
-   * error. Removing the app the session observes (or an app while the
-   * session knows none) drops the nodes read from its screen, and removing
+   * resolves to whether it was installed; an app named by id that is not
+   * there is no error (a missing display name is `APP_NOT_INSTALLED`).
+   * Removing the app the session observes (or an app while the session
+   * knows none) drops the nodes read from its screen, and removing
    * the build `installApp` pinned without an `app.bundleId` unpins it, so
    * `app.open()` asks for an install instead of launching an app that is gone.
    */
   async uninstallApp(app: string | undefined, signal: AbortSignal): Promise<boolean> {
     const target = this.appArgument('uninstallApp', app);
     const result = await this.command(`uninstall ${target}`, (client) => client.apps.uninstall({ ...this.selection(), app: target }), signal);
-    if (this.appIdentity === undefined || target === this.appIdentity) {
+    // agent-device resolves display names too: compare the id it removed, not only the string the caller passed.
+    const removed = typeof result['appId'] === 'string' ? result['appId'] : target;
+    if (this.appIdentity === undefined || target === this.appIdentity || removed === this.appIdentity) {
       this.appIdentity = undefined;
+      this.launching = false;
       this.screenReplaced();
     }
-    if (target === this.installedApp) this.installedApp = undefined;
+    if (target === this.installedApp || removed === this.installedApp) this.installedApp = undefined;
     return result['wasInstalled'] === true;
   }
 
@@ -1081,7 +1085,7 @@ export class AgentDeviceSurface {
   private appArgument(method: string, app: string | undefined): string {
     const target = app ?? this.pinnedApp;
     if (target === undefined) {
-      throw invalidState(`${method} needs an app: pass a bundle id or package, or pin one with the target's app.bundleId or app.appPath`);
+      throw invalidState(`${method} needs an app: pass a bundle id or package, pin one with the target's app.bundleId, or ${UNINSTALLED_BUILD}`);
     }
     return target;
   }

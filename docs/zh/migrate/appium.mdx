@@ -298,7 +298,7 @@ bunx e2e run --target ios --reporter list,junit
 | Appium | 当前可用方案 |
 | --- | --- |
 | `driver.getLogs('logcat')`, `'syslog'`, `'crashlog'` | 在钩子中运行 `adb logcat` 或 `xcrun simctl spawn <udid> log stream` |
-| `driver.queryAppState(id)` | `device.isAppInstalled(id)`；前台应用用 `device.foregroundApp()` |
+| `driver.queryAppState(id)` | 部分对应：`device.isAppInstalled(id)` 判断是否安装，`device.foregroundApp()` 获取前台应用。后台运行状态没有对应方法 |
 | `driver.lock()`、`unlock()`、电源和音量按钮 | 通过 [`unstable_raw`](/reference/mobile#unstable_raw) 调用 `client.command.hardwareButton` |
 | `driver.openNotifications()`, `mobile: pushNotification` | 从顶部边缘执行 `screen.swipe({ from, to })`；在 Node 中运行 `xcrun simctl push` |
 | `driver.pushFile()`, `pullFile()`, `pullFolder()` | 在 Node 中运行 `adb push`、`adb pull` 或 `xcrun simctl addmedia`；仅限本地设备 |

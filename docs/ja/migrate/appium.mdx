@@ -310,7 +310,7 @@ bunx e2e run --target ios --reporter list,junit
 | Appium | 現在使える方法 |
 | --- | --- |
 | `driver.getLogs('logcat')`, `'syslog'`, `'crashlog'` | フックから `adb logcat` または `xcrun simctl spawn <udid> log stream` を実行 |
-| `driver.queryAppState(id)` | `device.isAppInstalled(id)`。前面のアプリは `device.foregroundApp()` |
+| `driver.queryAppState(id)` | 一部のみ対応: インストールの有無は `device.isAppInstalled(id)`、前面のアプリは `device.foregroundApp()`。バックグラウンドの実行状態に相当するものはありません |
 | `driver.lock()`、`unlock()`、電源・音量ボタン | [`unstable_raw`](/reference/mobile#unstable_raw) 経由の `client.command.hardwareButton` |
 | `driver.openNotifications()`, `mobile: pushNotification` | 上端からの `screen.swipe({ from, to })`。Node からの `xcrun simctl push` |
 | `driver.pushFile()`, `pullFile()`, `pullFolder()` | Node から `adb push`、`adb pull`、`xcrun simctl addmedia`。ローカルデバイスのみ |
