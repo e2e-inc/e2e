@@ -1,7 +1,7 @@
 # Czech docs
 
 The Czech translation of the e2e docs. The site serves each page here at
-`/docs/cz/<path>`; a page without a translation shows the English page with a
+`/docs/cs/<path>`; a page without a translation shows the English page with a
 notice. English stays the source of truth.
 
 This translation is best effort. English changes don't wait for it, so a page
@@ -10,7 +10,7 @@ it. `pnpm docs:check` lists every page and label that is behind as a warning.
 
 ## Layout
 
-- `docs/cz/<path>.mdx` translates `docs/<path>.mdx`: same path, same file name.
+- `docs/cs/<path>.mdx` translates `docs/<path>.mdx`: same path, same file name.
 - `navigation.json` holds the Czech labels for every tab and group in
   `docs/docs.json` (`tabs`, `groups`), keyed by the English label. The navigation order and
   pages come from `docs/docs.json`; there is no second navigation to keep in
