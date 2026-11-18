@@ -323,8 +323,8 @@ await expect(browser).toHaveJSProperty(sidebar, 'offsetWidth', 240);
 await expect(browser).toHaveJSProperty(screen.getByRole('navigation'), 'dataset.state', 'open');
 ```
 
-- `path` はプロパティ名、またはドット区切りのパスで、Playwright と同じ方法でたどります。最後のキーより前の値はすべてオブジェクトである必要があります。そのうえで、たどり着いた値から最後のキーを読みます。たとえば input の `value.length` は値の長さを読みます。
-- 存在しないキーに達した場合や、最後のキーより前で文字列、関数、`null` に達した場合は `undefined` として読み、一致しません。そのため、存在しないプロパティでは `.not` が成功します。Playwright は、最後のキーより前の `null`、または最後のキーの直前の `undefined` で例外をスローします。
+- `path` はプロパティ名、またはドット区切りのパスで、Playwright と同じ方法でたどります。最後のキー以外のキーは、`null` でないオブジェクトから読みます。最後のキーは、たどり着いた値が何であってもその値から読みます。たとえば input の `value.length` は値の長さを読みます。
+- 存在しないプロパティは `undefined` として読み、一致しません。そのため `.not` が成功します。最後のキーより前のキーを文字列、関数、`null` から読むことになるパスも同じです。Playwright は、最後のキーより前の `null`、または最後のキーの直前の `undefined` で例外をスローします。
 - `style` や要素など、JSON でない値は一致しません。失敗メッセージには `is not JSON` と表示されます。
 - オブジェクトと配列は構造で比較します。オブジェクトのキーの順序は問いません。
 - 対象の解決と待機は [`toHaveCSS`](#tohavecss) と同じです。

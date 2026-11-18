@@ -1267,7 +1267,7 @@ const COMPUTED_STYLE_SOURCE = pageFunctionSource((element: Element, name: string
 
 /**
  * Page code for `toHaveJSProperty`: the value at a dotted path on the
- * element. Every step but the last must reach a non-null object, or the
+ * element. Every key but the last is read off a non-null object, or the
  * value is `undefined`; the last key is then read off whatever the walk
  * reached, so `value.length` reads a string's length. Playwright throws
  * instead on a `null` before the last key, or an `undefined` just before it.

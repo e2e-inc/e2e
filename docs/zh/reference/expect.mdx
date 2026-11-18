@@ -323,8 +323,8 @@ await expect(browser).toHaveJSProperty(sidebar, 'offsetWidth', 240);
 await expect(browser).toHaveJSProperty(screen.getByRole('navigation'), 'dataset.state', 'open');
 ```
 
-- `path` 是属性名或以点分隔的路径，按 Playwright 的方式遍历。最后一个键之前的每个值都必须是对象。然后从到达的值上读取最后一个键，因此 input 上的 `value.length` 读取其值的长度。
-- 遍历遇到不存在的键，或在最后一个键之前遇到字符串、函数或 `null` 时，读取结果为 `undefined`，永远不会匹配。因此对不存在的属性，`.not` 会通过。Playwright 则会在最后一个键之前遇到 `null`，或在最后一个键的前一项遇到 `undefined` 时抛出错误。
+- `path` 是属性名或以点分隔的路径，按 Playwright 的方式遍历。除最后一个键外，每个键都从非 `null` 的对象上读取。最后一个键从遍历到达的任意值上读取，因此 input 上的 `value.length` 读取其值的长度。
+- 不存在的属性读取为 `undefined`，永远不会匹配，因此 `.not` 会通过。需要从字符串、函数或 `null` 上读取最后一个键之前的键时，结果也一样。Playwright 则会在最后一个键之前遇到 `null`，或在最后一个键的前一项遇到 `undefined` 时抛出错误。
 - 不是 JSON 的值，例如 `style` 或元素，永远不会匹配。失败信息显示 `is not JSON`。
 - 对象和数组按结构比较。对象的键顺序不限。
 - 目标的解析和等待与 [`toHaveCSS`](#tohavecss) 相同。
