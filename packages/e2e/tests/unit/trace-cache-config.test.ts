@@ -394,6 +394,34 @@ describe('settleStagedTraces', () => {
     expect(writes.get(1)).toBe('kept');
   });
 
+  it('replaces the identity digest of a confirmed kept entry whose names redact differently now', async () => {
+    const store = memoryStore();
+    const step = { ...STEP, testId: `${STEP.testId}${'x'.repeat(400)} as hunter2` };
+    store.entries.set(KEY_A, JSON.stringify(buildTraceEntry({ ...trace('replayed flow'), recordedFor: recordedProvenance(step, (text) => text) })));
+    const secrets = new SecretLedger();
+    secrets.register('password', 'hunter2');
+    const recordedFor = recordedProvenance(step, secrets.redact);
+    const context = contextWith(store);
+    context.staged.push({ kind: 'keep', keyHash: KEY_A, stepIndex: 1, recordedFor });
+    await settleStagedTraces(context, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true });
+    expect(readTraceEntry(JSON.parse(store.entries.get(KEY_A)!))?.payload.recordedFor).toEqual(recordedFor);
+  });
+
+  it('drops the identity digest of a confirmed kept entry whose names no longer need one', async () => {
+    const store = memoryStore();
+    const step = { ...STEP, testId: `${'x'.repeat(290)}hunter2` };
+    const secrets = new SecretLedger();
+    secrets.register('password', 'hunter2');
+    const recorded = recordedProvenance(step, secrets.redact);
+    expect(recorded.identityDigest).toMatch(/^[a-f0-9]{64}$/u);
+    store.entries.set(KEY_A, JSON.stringify(buildTraceEntry({ ...trace('replayed flow'), recordedFor: recorded })));
+    const recordedFor = recordedProvenance(step, (text) => text);
+    const context = contextWith(store);
+    context.staged.push({ kind: 'keep', keyHash: KEY_A, stepIndex: 1, recordedFor });
+    await settleStagedTraces(context, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true });
+    expect(readTraceEntry(JSON.parse(store.entries.get(KEY_A)!))?.payload.recordedFor?.identityDigest).toBeUndefined();
+  });
+
   it('writes what was confirmed and leaves every unconfirmed entry as stored when the failure implicates nothing', async () => {
     const KEY_C = 'c'.repeat(64);
     const store = memoryStore();
