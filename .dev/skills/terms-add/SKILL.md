@@ -17,9 +17,10 @@ engine or person, uses it.
 1. Read the rule as `<English term>` -> `<translation>` in `<language>`. If
    any of the three is missing or the language is ambiguous, ask once.
 2. Find the locale code: the language's folder under `docs/` with a
-   `navigation.json` or `Terms.md` (`es`, `ja`, `zh`, `pt-BR`, ...). A language with no
-   folder yet has no `Terms.md`: tell the user, and offer to create one
-   from `docs/es/Terms.md`'s header.
+   `navigation.json` or `Terms.md` (`es`, `ja`, `zh`, `pt-BR`, ...). A locale folder
+   that has no `Terms.md` yet (`ja`, `zh`) gets one first:
+   `node .dev/skills/translation-review/scripts/terms.mjs init <locale> "<Language>"`.
+   A language with no folder yet has no locale: tell the user.
 3. Run the edit script from the repo root; never hand-edit the table:
 
    ```sh
@@ -49,7 +50,10 @@ engine or person, uses it.
 
 - English is the key: one row per English term, case-insensitive. A
   second translation of the same term is an accepted form in that row, not
-  a new row.
+  a new row. `add` replaces the row's forms with the ones given, so to
+  keep `agente / agentes` and add a third form, pass all three.
+- A form matches as the start of a word, so give the feminine and plural
+  forms of an adjective too. A space and a hyphen match each other.
 - MCP, CI, SDK, CLI, API, and UI are kept in English by each locale's
   README, not by a row.
 - Only the translation column and notes are the user's to set. Do not

@@ -7,9 +7,12 @@ metadata:
 
 # Translation review
 
-`pnpm docs:check` proves the outline, code blocks, and link anchors match the
-English page. It cannot see a dropped list item, a paragraph skipped inside a
-section, or a term translated three ways. This skill does.
+The docs checks (`pnpm docs:check`) warn when a translated page's outline,
+code blocks, or labels drift from the English page, but only for the locales
+`scripts/check-docs-translations.ts` and `scripts/check-docs-anchors.ts`
+register. They cannot see a dropped list item, a paragraph skipped inside a
+section, or a term translated three ways. This skill does, for any folder under
+`docs/` with a `navigation.json` or a `Terms.md`.
 
 ## Run it
 
@@ -28,10 +31,10 @@ per page and section:
 | --- | --- |
 | A page of the minimum set (issue #1890) is not translated | error |
 | Section count differs from English | error |
-| A link target, list item, table row, code block, or component is missing | error |
-| Prose is under 70% of the English word count (content cut) | error |
-| Prose is mostly the English words (left untranslated), or English prose has no translation | error |
-| An inline-code span of English is missing, or prose is over 190% (content added) | warning |
+| A link target (Markdown or a component's `href`), list item, table row, code block, or component is missing | error |
+| Prose is under 70% of the English word count (content cut), in a section of 25 or more English words | error |
+| Prose is mostly the English words (left untranslated), in a section of 25 or more English words; or English prose has no translation | error |
+| An inline-code span of English is missing, or prose is over 190% (content added), in a section of 25 or more English words | warning |
 | A term from `Terms.md` is in the English section and none of its forms are in the translation | warning |
 
 Errors mean content is missing: exit code 1. Warnings are leads.
@@ -57,10 +60,12 @@ Errors mean content is missing: exit code 1. Warnings are leads.
 person translates. One row per term in the table `| English | <Language> |
 Notes |`: the second column may list accepted forms separated by ` / ` (the
 plural, verb forms; the first is preferred), and a term kept in English repeats
-itself. A form matches as the start of a word, ignoring case. A locale
-without `Terms.md` is checked for content only; create one by copying
-`docs/es/Terms.md`'s header, with the new language's name as the second
-column. Add or change rows through the `terms-add` skill.
+itself. A form matches as the start of a word, ignoring case, and a space and
+a hyphen stand for each other ("sign in" also finds "sign-in"). Give the
+feminine and plural forms of an adjective too: `bloqueado` does not match
+`bloqueada`. A locale without `Terms.md` is checked for content only; create
+one with `node .dev/skills/translation-review/scripts/terms.mjs init <locale>
+"<Language>"`. Add or change rows through the `terms-add` skill.
 
 ## Limits
 
@@ -70,4 +75,10 @@ column. Add or change rows through the `terms-add` skill.
 - Paragraph order inside a section is not checked, only what the section
   holds.
 - Frontmatter other than `title`, `description`, and `sidebarTitle` is not
-  read; `pnpm docs:check` covers keys and code.
+  read. The docs checks only require a translated page to have a `title`, so a
+  wrong or missing key such as `og:image` is yours to check against the English
+  page.
+- Word counts treat each Japanese, Chinese, or Korean character as a word, so
+  the 70% and 190% thresholds are rough for those languages; read a finding
+  before trusting it.
+- `--page` reviews only that page and skips the minimum-set check.

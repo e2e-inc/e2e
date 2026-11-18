@@ -64,7 +64,8 @@ what Microsoft calls the term so the user can decide the `Terms.md` row.
 5. **Report to the user:** the English term, what Microsoft calls it in the
    locale (with gender and the other forms the docs would use), which source
    and product sense it came from, and how it compares with the row in
-   `docs/<locale>/Terms.md` (`node .dev/skills/translation-review/scripts/terms.mjs list <locale>`).
+   `docs/<locale>/Terms.md` (`node .dev/skills/translation-review/scripts/terms.mjs list <locale>`;
+   a locale with no `Terms.md` has no glossary yet, so say that instead).
 6. Add or change the row only when the user says so, through `terms-add`.
    Microsoft is a reference: the project's glossary decides. A term the
    project keeps in English (`fixture`), or a loanword it prefers (`test` for
@@ -79,5 +80,7 @@ what Microsoft calls the term so the user can decide the `Terms.md` row.
 - The Power BI report is a visual: its layout and the dropdown can change.
   Screenshot before clicking, and do not trust fixed coordinates.
 - The fallback script pairs page blocks by position, so a page whose two
-  versions differ in block count is skipped; MDN translations lag the
+  versions differ in block count is skipped, and a page with the same count can
+  still pair unrelated blocks (a banner on one side): read the samples before
+  trusting a candidate; MDN translations lag the
   English, so MDN pairs few pages.

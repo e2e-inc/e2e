@@ -5,8 +5,9 @@
  *
  * Usage: node server.mjs [--locale es] [--port 4777] [--out <dir>]
  *
- * Findings the page posts are written to `<out>/<locale>/<page>.json`, so the
- * agent that started the server can read and apply them.
+ * Findings the page posts are written to `<out>/<locale>/<page>.json` (a
+ * `/` in the page path becomes `__`), so the agent that started the server
+ * can read and apply them.
  */
 
 import { createServer } from 'node:http';
@@ -27,8 +28,9 @@ function option(name, fallback) {
 }
 
 const PORT = Number(option('port', '4777'));
-const DEFAULT_LOCALE = option('locale', 'es');
+const REQUESTED_LOCALE = option('locale', 'es');
 const OUT = resolve(option('out', join(tmpdir(), 'translation-viewer')));
+const ORIGIN = `127.0.0.1:${PORT}`;
 
 /** Every `.mdx` page under a folder, as paths relative to it with `/` separators. */
 function pagesUnder(root, base = '') {
@@ -47,6 +49,14 @@ function locales() {
     .map((entry) => entry.name)
     .filter((name) => readdirSync(join(DOCS, name)).some((file) => file === 'navigation.json' || file === 'Terms.md'));
 }
+
+const DETECTED = locales();
+if (DETECTED.length === 0) {
+  console.error('No locale folder under docs/ has a navigation.json or a Terms.md.');
+  process.exit(1);
+}
+if (!DETECTED.includes(REQUESTED_LOCALE)) console.warn(`--locale ${REQUESTED_LOCALE} is not a locale folder (${DETECTED.join(', ')}); using ${DETECTED[0]}`);
+const DEFAULT_LOCALE = DETECTED.includes(REQUESTED_LOCALE) ? REQUESTED_LOCALE : DETECTED[0];
 
 /** A docs file under `base`, or undefined when the path escapes it or is no page. */
 function safePage(base, path) {
@@ -78,32 +88,39 @@ function readBody(req) {
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
+  // Only this page may talk to the server: a rebinding or cross-site request names another host or origin.
+  if (req.headers.host !== ORIGIN || (req.headers.origin !== undefined && req.headers.origin !== `http://${ORIGIN}`)) return json(res, 403, { error: 'forbidden' });
+  const known = locales();
   try {
     if (url.pathname === '/') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(readFileSync(join(HERE, 'index.html')));
     } else if (url.pathname === '/api/locales') {
-      json(res, 200, { locales: locales(), default: DEFAULT_LOCALE, out: OUT });
+      json(res, 200, { locales: known, default: DEFAULT_LOCALE, out: OUT });
     } else if (url.pathname === '/api/tree') {
       const locale = url.searchParams.get('locale') ?? DEFAULT_LOCALE;
-      if (!locales().includes(locale)) return json(res, 404, { error: 'unknown locale' });
-      const english = new Set(pagesUnder(DOCS).filter((page) => !page.includes('/') || !locales().includes(page.split('/')[0])));
+      if (!known.includes(locale)) return json(res, 404, { error: 'unknown locale' });
+      const english = new Set(pagesUnder(DOCS).filter((page) => !page.includes('/') || !known.includes(page.split('/')[0])));
       const pages = pagesUnder(join(DOCS, locale)).filter((page) => english.has(page)).toSorted();
       json(res, 200, { pages });
     } else if (url.pathname === '/api/file') {
       const locale = url.searchParams.get('locale') ?? DEFAULT_LOCALE;
       const path = url.searchParams.get('path') ?? '';
-      const translated = locales().includes(locale) ? safePage(join(DOCS, locale), path) : undefined;
+      const translated = known.includes(locale) ? safePage(join(DOCS, locale), path) : undefined;
       const source = safePage(DOCS, path);
       if (!translated || !source) return json(res, 400, { error: 'bad path' });
+      const glossaryFile = ['Terms.md', 'README.md'].find((name) => existsSync(join(DOCS, locale, name)));
+      const guideFiles = ['README.md', 'Terms.md'].filter((name) => existsSync(join(DOCS, locale, name))).map((name) => `docs/${locale}/${name}`);
       json(res, 200, {
         english: readFileSync(source, 'utf8'),
         translated: readFileSync(translated, 'utf8'),
-        glossary: readFileSync(join(DOCS, locale, existsSync(join(DOCS, locale, 'Terms.md')) ? 'Terms.md' : 'README.md'), 'utf8'),
+        glossary: glossaryFile ? readFileSync(join(DOCS, locale, glossaryFile), 'utf8') : '',
+        guideFiles,
       });
     } else if (url.pathname === '/api/findings' && req.method === 'POST') {
+      if (!String(req.headers['content-type']).startsWith('application/json')) return json(res, 415, { error: 'application/json only' });
       const { locale, path, findings } = JSON.parse(await readBody(req));
-      if (!locales().includes(locale) || !safePage(join(DOCS, locale), path)) return json(res, 400, { error: 'bad path' });
+      if (!known.includes(locale) || !safePage(join(DOCS, locale), path)) return json(res, 400, { error: 'bad path' });
       const dir = join(OUT, locale);
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, `${path.replaceAll('/', '__')}.json`), JSON.stringify({ path, findings }, null, 2));

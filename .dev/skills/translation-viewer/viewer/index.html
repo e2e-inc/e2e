@@ -27,7 +27,7 @@
   main { display: grid; grid-template-columns: 280px 1fr; min-height: 0; }
   #tree { overflow: auto; border-right: 1px solid var(--line); padding: 8px 0; background: var(--panel); }
   #tree details > summary { padding: 3px 12px; cursor: pointer; color: var(--muted); }
-  #tree .file { display: flex; justify-content: space-between; gap: 8px; padding: 3px 12px 3px 28px; cursor: pointer; }
+  #tree .file { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 3px 12px 3px 28px; cursor: pointer; border: 0; background: none; color: inherit; font: inherit; text-align: left; }
   #tree .file:hover { background: var(--line); }
   #tree .file.active { background: var(--accent); color: #fff; }
   #tree .badge { font-size: 12px; }
@@ -122,7 +122,12 @@ function sections(source) {
   return out;
 }
 
-/** The prose of a section: code blocks and JSX-only lines replaced so the model reads text. */
+/**
+ * The prose of a section: code blocks become `[code block]`, and imports,
+ * exports, and MDX tags (which may span lines) are dropped, keeping the text
+ * of a tag's title, subtitle, description, and label. Inline code and link
+ * text stay, since a sentence reads wrong without them.
+ */
 function prose(lines) {
   const out = [];
   let fence = null;
@@ -133,18 +138,33 @@ function prose(lines) {
     } else if (mark) {
       fence = mark;
       out.push('[code block]');
-    } else {
+    } else if (!/^\s*(import|export)\s/.test(line)) {
       out.push(line);
     }
   }
-  return out.join('\n').trim();
+  const attributes = /\b(?:title|subtitle|description|label)="([^"]*)"/g;
+  return out
+    .join('\n')
+    .replace(/<\/?[A-Za-z][^<>]*>/g, (tag) => ` ${[...tag.matchAll(attributes)].map((match) => match[1]).join('\n')} `)
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
-/** Pairs the paragraphs of both sides into chunks under CHUNK characters; one chunk, truncated, when the counts differ. */
+/**
+ * Pairs the paragraphs of both sides into chunks under CHUNK characters. When
+ * the paragraph counts differ, both sides are cut at the same fractions of
+ * their paragraphs, so all of the section is read but the pairs are approximate.
+ */
 function chunks(en, tr) {
   const a = en.split(/\n\s*\n/);
   const b = tr.split(/\n\s*\n/);
-  if (a.length !== b.length) return [{ en: en.slice(0, CHUNK), tr: tr.slice(0, CHUNK * 1.3), cut: en.length > CHUNK }];
+  if (a.length !== b.length) {
+    const count = Math.max(1, Math.ceil(Math.max(en.length, tr.length) / CHUNK));
+    return Array.from({ length: count }, (_, k) => ({
+      en: a.slice(Math.floor((k * a.length) / count), Math.floor(((k + 1) * a.length) / count)).join('\n\n'),
+      tr: b.slice(Math.floor((k * b.length) / count), Math.floor(((k + 1) * b.length) / count)).join('\n\n'),
+    }));
+  }
   const out = [];
   let cur = { en: '', tr: '' };
   a.forEach((paragraph, i) => {
@@ -189,7 +209,7 @@ function systemPrompt(locale, glossary) {
     `You review a ${locale} translation of English technical documentation for the testing tool "e2e".`,
     'You get an English passage and its translation. Report only real problems:',
     '- error: meaning changed, content missing or added, a wrong term from the glossary, a product or package name translated.',
-    '- warning: unnatural or literal phrasing, inconsistent register (the reader is addressed informally), grammar or spelling mistakes.',
+    '- warning: unnatural or literal phrasing, a register that differs from the English or from the rest of the passage, grammar or spelling mistakes.',
     '- nit: small style points.',
     'Never flag code, "[code block]", URLs, or text that is the same in both languages on purpose. If the translation is fine, answer verdict "ok" with no issues.',
     'quote must be copied exactly from the translation. Write problem and suggestion in English, suggestion in the translation language.',
@@ -210,9 +230,11 @@ async function enable() {
   }
   $('ai').textContent = availability === 'available' ? 'Starting Chrome AI...' : 'Downloading the model...';
   try {
-    state.model = { options, probe: await LanguageModel.create({ ...options, monitor(m) {
+    const probe = await LanguageModel.create({ ...options, monitor(m) {
       m.addEventListener('downloadprogress', (e) => { $('ai').textContent = `Downloading the model: ${Math.round(e.loaded * 100)}%`; });
-    } }) };
+    } });
+    probe.destroy();
+    state.model = { options };
   } catch (error) {
     $('ai').textContent = `Could not start Chrome AI: ${error}`;
     return;
@@ -227,14 +249,16 @@ function syncButtons() {
   $('reviewFile').disabled = !ready || !state.current || state.running;
   $('reviewAll').disabled = !ready || state.running;
   $('stop').disabled = !state.running;
+  $('locale').disabled = state.running;
   $('copy').disabled = state.findings.size === 0;
 }
 
 async function loadDoc(path) {
-  if (!state.docs.has(path)) {
-    state.docs.set(path, await api(`/api/file?locale=${state.locale}&path=${encodeURIComponent(path)}`));
+  const key = `${state.locale}/${path}`;
+  if (!state.docs.has(key)) {
+    state.docs.set(key, await api(`/api/file?locale=${encodeURIComponent(state.locale)}&path=${encodeURIComponent(path)}`));
   }
-  return state.docs.get(path);
+  return state.docs.get(key);
 }
 
 function el(tag, className, text) {
@@ -245,7 +269,7 @@ function el(tag, className, text) {
 }
 
 /** A prompt to paste into the coding session so it fixes the findings of one section. */
-function fixPrompt(path, heading, issues, terms) {
+function fixPrompt(path, heading, issues, terms, files) {
   const locale = state.locale;
   const list = issues
     .map((issue, i) => `${i + 1}. [${issue.severity}] ${issue.quote ? `"${issue.quote}" - ` : ''}${issue.problem}${issue.suggestion ? ` Suggested: ${issue.suggestion}` : ''}`)
@@ -255,9 +279,9 @@ function fixPrompt(path, heading, issues, terms) {
     '',
     list,
     '',
-    ...(terms ? [`Terms this section must use exactly (from docs/${locale}/Terms.md; the first form is preferred):`, terms, ''] : []),
+    ...(terms ? [`Terms this section must use exactly (from the glossary; the first form is preferred):`, terms, ''] : []),
     'The findings come from a small on-device model: read the English page docs/' + path + ' first and skip any finding that is wrong.',
-    `Follow docs/${locale}/README.md and docs/${locale}/Terms.md. Edit only docs/${locale}/${path}; keep the outline, code, inline code, and links exactly as in English.`,
+    `${files.length > 0 ? `Follow ${files.join(' and ')}. ` : ''}Edit only docs/${locale}/${path}; keep the outline, code, inline code, and links exactly as in English.`,
     `Then run: node .dev/skills/translation-review/scripts/review.mjs ${locale} --page ${path}  and  pnpm docs:check. Tell me what you changed and what you skipped.`,
   ].join('\n');
 }
@@ -295,21 +319,22 @@ function renderFindings(box, result, context) {
     }
     item.append(el('div', '', issue.problem));
     if (issue.suggestion) item.append(el('div', 'ok', `Suggestion: ${issue.suggestion}`));
-    item.append(promptButton('Get prompt', fixPrompt(context.path, context.heading, [issue], context.terms)));
+    item.append(promptButton('Get prompt', fixPrompt(context.path, context.heading, [issue], context.terms, context.files)));
     box.append(item);
   }
-  if (result.issues.length > 1) box.append(promptButton(`Get prompt for all ${result.issues.length}`, fixPrompt(context.path, context.heading, result.issues, context.terms)));
+  if (result.issues.length > 1) box.append(promptButton(`Get prompt for all ${result.issues.length}`, fixPrompt(context.path, context.heading, result.issues, context.terms, context.files)));
 }
 
 async function show(path) {
   state.current = path;
   for (const node of document.querySelectorAll('#tree .file')) node.classList.toggle('active', node.dataset.path === path);
   const doc = await loadDoc(path);
+  if (state.current !== path) return;
   const en = sections(doc.english);
   const tr = sections(doc.translated);
   const view = $('view');
   view.replaceChildren();
-  if (en.length !== tr.length) view.append(el('div', 'notice', `Outlines differ (${en.length} English sections, ${tr.length} translated). Run pnpm docs:check.`));
+  if (en.length !== tr.length) view.append(el('div', 'notice', `Outlines differ (${en.length} English sections, ${tr.length} translated), so the sections below are paired by position and may not match. Run the translation-review skill; AI review skips this page.`));
   const head = el('div', 'cols');
   head.append(el('div', '', 'English'), el('div', '', state.locale));
   view.append(head);
@@ -323,7 +348,7 @@ async function show(path) {
     right.append(el('pre', '', tr[i]?.lines.join('\n') ?? ''));
     const box = el('div', 'findings');
     right.append(box);
-    renderFindings(box, saved[i], { path, heading: tr[i]?.heading ?? en[i]?.heading ?? '', terms: termsFor(doc, i) });
+    renderFindings(box, saved[i], { path, heading: tr[i]?.heading ?? en[i]?.heading ?? '', terms: termsFor(doc, i), files: doc.guideFiles });
     row.append(left, right);
     view.append(row);
   }
@@ -353,7 +378,7 @@ async function reviewSection(doc, i) {
       session.destroy();
     }
   }
-  const squash = (text) => text.replace(/s+/g, ' ').toLowerCase();
+  const squash = (text) => text.replace(/\s+/g, ' ').toLowerCase();
   // A quote that is not on the page is invented: the small model does this often.
   return { issues: issues.filter((issue) => !issue.quote || squash(trText).includes(squash(issue.quote))) };
 }
@@ -361,6 +386,10 @@ async function reviewSection(doc, i) {
 async function reviewFile(path) {
   const doc = await loadDoc(path);
   const count = Math.max(sections(doc.english).length, sections(doc.translated).length);
+  if (sections(doc.english).length !== sections(doc.translated).length) {
+    markBadge(path, 'outline');
+    return;
+  }
   const results = [];
   state.findings.set(path, results);
   markBadge(path, '...');
@@ -370,10 +399,14 @@ async function reviewFile(path) {
     } catch (error) {
       results[i] = { error: String(error) };
     }
-    if (state.current === path) renderFindings(document.querySelector(`#s${i} .findings`), results[i], { path, heading: sections(doc.translated)[i]?.heading ?? '', terms: termsFor(doc, i) });
+    if (state.current === path) renderFindings(document.querySelector(`#s${i} .findings`), results[i], { path, heading: sections(doc.translated)[i]?.heading ?? '', terms: termsFor(doc, i), files: doc.guideFiles });
     $('ai').textContent = `Reviewing ${path}: section ${i + 1} of ${count}`;
   }
   const total = results.reduce((n, r) => n + (r?.issues?.length ?? 0), 0);
+  if (state.stop) {
+    markBadge(path, total === 0 ? 'stopped' : `${total}+`);
+    return;
+  }
   markBadge(path, total === 0 ? 'ok' : String(total));
   await api('/api/findings', {
     method: 'POST',
@@ -391,13 +424,18 @@ async function run(paths) {
   state.running = true;
   state.stop = false;
   syncButtons();
-  for (const path of paths) {
-    if (state.stop) break;
-    await reviewFile(path);
+  try {
+    for (const path of paths) {
+      if (state.stop) break;
+      await reviewFile(path);
+    }
+    $('ai').textContent = state.stop ? 'Stopped. Findings of an interrupted page were not saved.' : 'Review done. Findings were saved for the agent.';
+  } catch (error) {
+    $('ai').textContent = `Review failed: ${error}`;
+  } finally {
+    state.running = false;
+    syncButtons();
   }
-  state.running = false;
-  $('ai').textContent = state.stop ? 'Stopped' : 'Review done. Findings were saved for the agent.';
-  syncButtons();
 }
 
 function buildTree() {
@@ -418,7 +456,8 @@ function buildTree() {
       tree.append(parent);
     }
     for (const path of paths) {
-      const row = el('div', 'file');
+      const row = el('button', 'file');
+      row.type = 'button';
       row.dataset.path = path;
       row.append(el('span', '', path.split('/').pop()), el('span', 'badge'));
       row.addEventListener('click', () => show(path));

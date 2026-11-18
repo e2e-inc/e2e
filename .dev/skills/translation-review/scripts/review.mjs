@@ -1,7 +1,8 @@
 /**
  * Checks a docs translation for missing content and for terms that drifted
- * from `docs/<locale>/Terms.md`. `pnpm docs:check` proves the outline, code,
- * and link anchors match; this compares what is inside each section.
+ * from `docs/<locale>/Terms.md`. It works for any locale folder, including
+ * those the docs checks do not register; it compares what is inside each
+ * section, and with `--page` it reviews only that page.
  *
  * Usage: node review.mjs <locale> [--page ci.mdx] [--json]
  *
@@ -42,7 +43,7 @@ function inventory(lines) {
   const prose = withoutCode(lines);
   const text = prose.join('\n').replace(/export const \w+ = `[\s\S]*?`;/, '');
   return {
-    links: tally([...text.matchAll(/!?\[[^\]]*\]\(([^)\s]+)/g)].map((m) => m[1])),
+    links: tally([...text.matchAll(/!?\[[^\]]*\]\(([^)\s]+)/g), ...text.matchAll(/\bhref="([^"]+)"/g)].map((m) => m[1])),
     codeSpans: tally([...text.replaceAll(String.raw`\``, "'").matchAll(/`([^`]+)`/g)].map((m) => m[1])),
     tags: tally([...text.matchAll(/<\/?([A-Z][A-Za-z]*)\b/g)].map((m) => m[1])),
     listItems: prose.filter((line) => /^\s*([-*]|\d+\.)\s+\S/.test(line)).length,
@@ -51,15 +52,23 @@ function inventory(lines) {
   };
 }
 
+/** A term as pattern text: syntax characters escaped, and a space or hyphen standing for each other ("sign in" matches "sign-in"). */
+function escapeTerm(term) {
+  return term
+    .split(/[\s-]+/)
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`))
+    .join(String.raw`[\s-]+`);
+}
+
 /** The term as a pattern that also takes a regular plural. */
 function termPattern(term) {
-  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+  const escaped = escapeTerm(term);
   return new RegExp(String.raw`(?<![\p{L}\p{N}])${escaped}(?:s|es)?(?![\p{L}\p{N}])`, 'iu');
 }
 
 /** Whether the text holds a form, as a word start so plurals and verb endings match. */
 function hasForm(text, form) {
-  const escaped = form.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+  const escaped = escapeTerm(form);
   return new RegExp(String.raw`(?<![\p{L}\p{N}])${escaped}`, 'iu').test(text);
 }
 
@@ -73,8 +82,10 @@ function report(page, section, severity, kind, message) {
   findings.push({ page, section, severity, kind, message });
 }
 
-for (const page of MINIMUM.filter((name) => !translatedPages.has(name))) {
-  report(page, '', 'error', 'missing-page', 'in the minimum set but not translated');
+if (!pageOption) {
+  for (const page of MINIMUM.filter((name) => !translatedPages.has(name))) {
+    report(page, '', 'error', 'missing-page', 'in the minimum set but not translated');
+  }
 }
 
 for (const page of pageOption ? [pageOption] : [...translatedPages].toSorted()) {

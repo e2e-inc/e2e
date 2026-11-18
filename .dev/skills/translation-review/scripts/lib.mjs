@@ -72,7 +72,9 @@ export function withoutCode(lines) {
   return out;
 }
 
-const TEXT_ATTRIBUTES = /\b(?:title|subtitle|description|label|aria-label)="([^"]*)"/g;
+const CJK = String.raw`\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}`;
+const CJK_OR_WORD = new RegExp(String.raw`[${CJK}]|(?:(?![${CJK}])[\p{L}\p{N}])+`, 'gu');
+const TEXT_ATTRIBUTES =/\b(?:title|subtitle|description|label|aria-label)="([^"]*)"/g;
 
 /**
  * The text a reader reads in a section: frontmatter title and description,
@@ -81,6 +83,7 @@ const TEXT_ATTRIBUTES = /\b(?:title|subtitle|description|label|aria-label)="([^"
  */
 export function proseOf(lines) {
   const text = [];
+  const body = [];
   let inFrontmatter = false;
   for (const [index, line] of withoutCode(lines).entries()) {
     if (index === 0 && line === '---') {
@@ -96,9 +99,12 @@ export function proseOf(lines) {
       continue;
     }
     if (/^\s*(import|export)\s/.test(line)) continue;
-    for (const match of line.matchAll(TEXT_ATTRIBUTES)) text.push(match[1]);
+    body.push(line);
+  }
+  // A tag may span lines: replace each with the text of its attributes, once.
+  const tagless = body.join('\n').replace(/<\/?[A-Za-z][^<>]*>/g, (tag) => ` ${[...tag.matchAll(TEXT_ATTRIBUTES)].map((match) => match[1]).join('\n')} `);
+  for (const line of tagless.split('\n')) {
     const stripped = line
-      .replace(/<[^>]*>/g, ' ')
       .replace(/`[^`]*`/g, ' ')
       .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
       .replace(/https?:\/\/\S+/g, ' ')
@@ -110,9 +116,9 @@ export function proseOf(lines) {
   return text.join('\n');
 }
 
-/** Words of a text, lowercased. */
+/** Words of a text, lowercased; a CJK character counts as one word, since those scripts have no spaces. */
 export function words(text) {
-  return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  return text.toLowerCase().match(CJK_OR_WORD) ?? [];
 }
 
 /** Parses the terms table in `docs/<locale>/Terms.md`: `{ en, forms, note }` per row. */
@@ -121,7 +127,7 @@ export function parseTerms(markdown) {
     .split('\n')
     .filter((line) => line.trim().startsWith('|'))
     .map((line) => line.trim().replace(/^\||\|$/g, '').split(/(?<!\\)\|/).map((cell) => cell.trim().replaceAll('\\|', '|')))
-    .filter((cells) => cells.length >= 2 && cells[0] !== '' && !/^-+$/.test(cells[0]) && cells[0].toLowerCase() !== 'english')
+    .filter((cells) => cells.length >= 2 && cells[0] !== '' && !/^:?-+:?$/.test(cells[0]) && cells[0].toLowerCase() !== 'english')
     .map(([en, translation, note = '']) => ({ en, forms: translation.split(' / ').map((form) => form.trim()).filter(Boolean), note }));
 }
 

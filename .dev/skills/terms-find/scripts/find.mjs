@@ -44,8 +44,17 @@ if (!locale || !term) {
   console.error(`usage: node find.mjs <locale> "<english term>" [--source both|learn|mdn] [--pages 8] [--samples 4] [--json]\nlocales: ${Object.keys(SOURCES.learn.locales).join(', ')} (MDN: ${Object.keys(SOURCES.mdn.locales).join(', ')})`);
   process.exit(2);
 }
-const pageLimit = Number(flag('pages', '8'));
-const sampleLimit = Number(flag('samples', '4'));
+/** A flag that must be a positive whole number. */
+function positiveInt(name, fallback) {
+  const value = Number(flag(name, fallback));
+  if (!Number.isInteger(value) || value < 1) {
+    console.error(`--${name} must be a positive whole number`);
+    process.exit(2);
+  }
+  return value;
+}
+const pageLimit = positiveInt('pages', '8');
+const sampleLimit = positiveInt('samples', '4');
 const sourceOption = flag('source', 'both');
 const asJson = args.includes('--json');
 /** Learn gives too little evidence below this many blocks with the term. */
@@ -93,7 +102,11 @@ function grams(text) {
   return out;
 }
 
-const escaped = term.replace(/[^\p{L}\p{N}\s]/gu, String.raw`\$&`);
+/** The term as pattern text: syntax characters escaped, a space or hyphen standing for each other ("end-to-end", "sign in"). */
+const escaped = term
+  .split(/[\s-]+/)
+  .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`))
+  .join(String.raw`[\s-]+`);
 const termPattern = new RegExp(String.raw`(?<![\p{L}\p{N}])${escaped}(?:s|es)?(?![\p{L}\p{N}])`, 'iu');
 
 /** Runs one source: its pages, the ranked candidates, and the sample pairs. */
@@ -115,6 +128,9 @@ async function collect(key) {
     if (used.length >= pageLimit) break;
     const other = source.translate(url, target);
     const [en, tr] = await Promise.all([get(url), get(other)]);
+    if (rateLimited) {
+      return { source: source.name, error: `${source.name} answered 429 (rate limited) after ${used.length} pages: wait a few minutes, and search fewer terms in a row. Nothing below is complete evidence.` };
+    }
     if (!en || !tr) {
       skipped.push(`${url} (no ${target} page)`);
       continue;
