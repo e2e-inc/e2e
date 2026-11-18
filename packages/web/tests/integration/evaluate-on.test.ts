@@ -49,10 +49,10 @@ describe('PlaywrightSurface.evaluateOn', () => {
   it('reports a ref whose strict locator now matches two elements as retryable NODE_STALE', async () => {
     await page.setContent('<p>one</p>');
     const ref = await locateOne(paragraph);
-    await expect(surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation))
+    await expect(surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, false))
       .resolves.toEqual({ ok: true, value: 'one' });
     await page.evaluate(() => document.body.append(Object.assign(document.createElement('p'), { textContent: 'two' })));
-    await expect(surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation))
+    await expect(surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, false))
       .rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
   });
 
@@ -63,7 +63,7 @@ describe('PlaywrightSurface.evaluateOn', () => {
     await page.setContent('<label>Name <input value="Ada"></label>');
     const ref = await locateOne(expression);
     await page.evaluate('window.Map = 1');
-    await expect(surface.evaluateOn(ref, '(el) => el.value', undefined, operation))
+    await expect(surface.evaluateOn(ref, '(el) => el.value', undefined, operation, false))
       .rejects.toMatchObject({ code: 'EVALUATE_FAILED', category: 'test' });
   });
 });

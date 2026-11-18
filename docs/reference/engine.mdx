@@ -1627,7 +1627,7 @@ reproduces these semantics; import them instead of carrying a copy.
 
 | Export | Returns |
 | --- | --- |
-| [`matchesText`, `toTextPattern`, `describePattern`](#text-patterns) | `boolean`, `TextPattern`, `string` |
+| [`matchesText`, `compareText`, `toTextPattern`, `describePattern`](#text-patterns) | `boolean`, `boolean`, `TextPattern`, `string` |
 | [`resolveExpression`](#resolveexpression) | `SemanticNode[]` |
 | [`urlMatches`](#urlmatches) | `boolean` |
 | [`siteOf`, `sameSite`](#site-helpers) | `string`, `boolean` |
@@ -1643,11 +1643,17 @@ reproduces these semantics; import them instead of carrying a copy.
 
 #### Text patterns
 
-`TextPattern` matching for `locate` and text matchers.
+`TextPattern` matching for `locate` and text matchers. `matchesText` is
+`compareText` with `{ mode: 'equals', normalize: true }`, which collapses
+whitespace on both sides. Pass `normalize: false` to compare a value the
+platform reports verbatim, such as a computed style; `mode: 'contains'`
+accepts the expected string anywhere, and `ignoreCase` folds a string
+pattern's case.
 
 ```ts
 export function toTextPattern(match: TextMatch, options?: { exact?: boolean }): TextPattern;
 export function matchesText(actual: string, pattern: TextPattern): boolean;
+export function compareText(actual: string, pattern: TextPattern, comparison: TextComparison): boolean;
 export function describePattern(pattern: TextPattern): string;
 ```
 

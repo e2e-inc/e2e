@@ -9,6 +9,33 @@ const slow = content(`<html><p id="slow">Slow</p><script>
   });
 </script></html>`);
 
+/**
+ * A page whose `#r` answers `state` with a promise that never settles, and
+ * reloads 200 ms later; after the reload it answers `done`. A read of
+ * `state` is still running when the page navigates.
+ */
+const reloading = content(`<html><p id="r">Reloading</p><script>
+  const r = document.getElementById('r');
+  if (sessionStorage.getItem('reloaded') === null) {
+    r.state = new Promise(() => undefined);
+    setTimeout(() => { sessionStorage.setItem('reloaded', 'yes'); location.reload(); }, 200);
+  } else {
+    r.state = 'done';
+  }
+</script></html>`);
+
+/** A page that replaces `#flip` with a new element on every task, so a matched element soon leaves its document. */
+const flipping = content(`<html><p id="flip">Flip</p><script>
+  const flip = () => {
+    const next = document.createElement('p');
+    next.id = 'flip';
+    next.textContent = 'Flip';
+    document.getElementById('flip').replaceWith(next);
+    setTimeout(flip, 0);
+  };
+  flip();
+</script></html>`);
+
 /** A page that answers for about 300 ms after it loads, then blocks its main thread for about 1.5 s. */
 const frozen = content(`<html><p id="frozen" style="color: blue">Frozen</p><script>
   setTimeout(() => { const start = Date.now(); while (Date.now() - start < 1500); }, 300);
@@ -87,14 +114,23 @@ test.describe('browser.evaluateOn', { requires: ['browser'] }, () => {
     expect(error).toHaveProperty('code', 'INVALID_ARGUMENT');
   });
 
-  test('reads again when the page reloads during a read', async ({ browser }) => {
+  test('fails, and never runs the function again, when the page navigates while it runs', async ({ browser }) => {
     await browser.goto(page);
-    await browser.evaluate('() => { setTimeout(() => location.reload(), 100); }');
-    const read = await browser.evaluateOn(
-      browser.locator('#holder'),
-      (el) => new Promise<string>((resolve) => setTimeout(() => resolve(el.id), 300)),
-    );
-    expect(read).toBe('holder');
+    const error = await failure(() => browser.evaluateOn(browser.locator('#holder'), () => {
+      sessionStorage.setItem('runs', String(Number(sessionStorage.getItem('runs') ?? '0') + 1));
+      location.reload();
+      return new Promise<never>(() => undefined);
+    }));
+    expect(error).toHaveProperty('code', 'ENGINE_FAILURE');
+    expect(error).toHaveProperty('message', expect.stringContaining('navigation'));
+    await expect(browser).toHaveJSProperty(browser.locator('#holder'), 'ownerDocument.defaultView.sessionStorage.runs', '1');
+  });
+
+  test('runs on an element still in its document, when the page keeps replacing it', async ({ browser }) => {
+    await browser.goto(flipping);
+    for (let run = 0; run < 20; run += 1) {
+      expect(await browser.evaluateOn(browser.locator('#flip'), (el) => el.isConnected)).toBe(true);
+    }
   });
 
   test('names itself when the target is not a locator', async ({ browser }) => {
@@ -106,13 +142,18 @@ test.describe('browser.evaluateOn', { requires: ['browser'] }, () => {
 });
 
 test.describe('expect(browser).toHaveCSS', { requires: ['browser'] }, () => {
-  test('collapses whitespace in the value, and tests a RegExp against the collapsed value', async ({ browser, screen }) => {
+  test('compares the raw value, whitespace included, as Playwright does', async ({ browser, screen }) => {
     await browser.goto(page);
     const main = screen.getByRole('navigation', { name: 'Main' });
     expect(await browser.evaluateOn(main, (el) => getComputedStyle(el).getPropertyValue('--grid'))).toBe('a    b');
-    await expect(browser).toHaveCSS(main, '--grid', 'a b');
-    await expect(browser).toHaveCSS(main, '--grid', /^a b$/);
-    await expect(browser).not.toHaveCSS(main, '--grid', /a {4}b/, { timeout: 300 });
+    await expect(browser).toHaveCSS(main, '--grid', 'a    b');
+    await expect(browser).toHaveCSS(main, '--grid', /^a {4}b$/);
+    await expect(browser).not.toHaveCSS(main, '--grid', 'a b', { timeout: 300 });
+  });
+
+  test('reads again when the page navigates during its read', async ({ browser }) => {
+    await browser.goto(reloading);
+    await expect(browser).toHaveJSProperty(browser.locator('#r'), 'state', 'done');
   });
 
   test('matches a computed value, a custom property, and its negation', async ({ browser, screen }) => {
@@ -322,16 +363,21 @@ test.describe('expect(browser) locator matchers', { requires: ['browser'] }, () 
     }
   });
 
-  test('refuse a look-alike with count() once it reports a match', async ({ browser }) => {
+  test('refuse a look-alike at once, whatever its count() answers', async ({ browser }) => {
     await browser.goto(page);
-    const target = { count: async () => 1 } as never;
-    for (const [api, call] of [
-      ['expect.toHaveCSS', () => expect(browser).toHaveCSS(target, 'position', 'x')],
-      ['expect.toHaveJSProperty', () => expect(browser).toHaveJSProperty(target, 'id', 'x')],
-    ] as const) {
-      const error = await failure(call);
-      expect(error).toHaveProperty('code', 'INVALID_LOCATOR');
-      expect(error).toHaveProperty('message', `${api} requires an e2e locator`);
+    for (const count of [0, 1]) {
+      const target = { count: async () => count, getAttribute: async () => 'x' } as never;
+      for (const [api, call] of [
+        ['expect.toHaveClass', () => expect(browser).toHaveClass(target, 'x')],
+        ['expect.toHaveCSS', () => expect(browser).toHaveCSS(target, 'position', 'x')],
+        ['expect.toHaveJSProperty', () => expect(browser).toHaveJSProperty(target, 'id', 'x')],
+      ] as const) {
+        const started = Date.now();
+        const error = await failure(call);
+        expect(error).toHaveProperty('code', 'INVALID_LOCATOR');
+        expect(error).toHaveProperty('message', `${api} requires an e2e locator`);
+        expect(Date.now() - started).toBeLessThan(1000);
+      }
     }
   });
 });
@@ -362,16 +408,20 @@ test.describe('a locator from an earlier attempt', { serial: true, requires: ['b
     }
   });
 
-  test('polls like any target while it matches nothing, so a matcher fails observing no node', async ({ browser }) => {
+  test('is refused at once, even while it matches nothing', async ({ browser }) => {
     await browser.goto(page);
     const target = missing!;
-    for (const call of [
-      () => expect(browser).toHaveCSS(target, 'position', 'sticky', { timeout: 300 }),
-      () => expect(browser).toHaveJSProperty(target, 'id', 'never', { timeout: 300 }),
-    ]) {
+    const calls = [
+      ['expect.toHaveClass', () => expect(browser).toHaveClass(target, 'x')],
+      ['expect.toHaveCSS', () => expect(browser).toHaveCSS(target, 'position', 'sticky')],
+      ['expect.not.toHaveJSProperty', () => expect(browser).not.toHaveJSProperty(target, 'id', 'never')],
+    ] as const;
+    for (const [api, call] of calls) {
+      const started = Date.now();
       const error = await failure(call);
-      expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
-      expect(error).toHaveProperty('message', expect.stringContaining('observed: no node'));
+      expect(error).toHaveProperty('code', 'INVALID_LOCATOR');
+      expect(error).toHaveProperty('message', expect.stringContaining(`${api} requires a locator made by this screen`));
+      expect(Date.now() - started).toBeLessThan(1000);
     }
   });
 });

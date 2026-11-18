@@ -1510,7 +1510,7 @@ export class InfrastructureError extends E2EError {
 
 | 导出 | 返回值 |
 | --- | --- |
-| [`matchesText`、`toTextPattern`、`describePattern`](#text-patterns) | `boolean`、`TextPattern`、`string` |
+| [`matchesText`、`compareText`、`toTextPattern`、`describePattern`](#text-patterns) | `boolean`、`boolean`、`TextPattern`、`string` |
 | [`resolveExpression`](#resolveexpression) | `SemanticNode[]` |
 | [`urlMatches`](#urlmatches) | `boolean` |
 | [`siteOf`、`sameSite`](#site-helpers) | `string`、`boolean` |
@@ -1526,11 +1526,12 @@ export class InfrastructureError extends E2EError {
 
 #### 文本模式
 
-供 `locate` 和文本匹配器使用的 `TextPattern` 匹配。
+供 `locate` 和文本匹配器使用的 `TextPattern` 匹配。`matchesText` 即指定 `{ mode: 'equals', normalize: true }` 的 `compareText`，会先合并两侧的空白再比较。若要比较平台原样报告的值（例如计算样式），请传入 `normalize: false`。`mode: 'contains'` 接受期望字符串出现在任意位置，`ignoreCase` 则对字符串模式忽略大小写。
 
 ```ts
 export function toTextPattern(match: TextMatch, options?: { exact?: boolean }): TextPattern;
 export function matchesText(actual: string, pattern: TextPattern): boolean;
+export function compareText(actual: string, pattern: TextPattern, comparison: TextComparison): boolean;
 export function describePattern(pattern: TextPattern): string;
 ```
 

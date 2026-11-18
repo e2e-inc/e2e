@@ -671,6 +671,9 @@ const width = await browser.evaluateOn(
   a string, and the result are those of [`evaluate`](#evaluate).
 - It is meant for reads. The code can change the page, but act through the
   locator instead, so the step records the action.
+- The code runs once. A navigation while it runs fails the call with
+  `ENGINE_FAILURE`, as in Playwright, and the code is never run again on
+  the new page.
 - To wait for a value, use
   [`toHaveCSS`](/reference/expect#tohavecss) or
   [`toHaveJSProperty`](/reference/expect#tohavejsproperty).
@@ -683,7 +686,7 @@ const width = await browser.evaluateOn(
 | `INVALID_ARGUMENT` | `arg` or the return value is not a [`JsonValue`](#jsonvalue). |
 | `EVALUATE_FAILED` | The evaluated code threw, or the top-level page replaced a JavaScript built-in that the engine needs. The error carries the message. |
 | `ACTION_FAILED` | The code did not finish within `actionTimeout`. |
-| `ENGINE_FAILURE` | The page closed or the context was lost. |
+| `ENGINE_FAILURE` | The page closed or the context was lost, or the page navigated while the code ran. |
 
 #### `route`
 

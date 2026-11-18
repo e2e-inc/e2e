@@ -1510,7 +1510,7 @@ export class InfrastructureError extends E2EError {
 
 | エクスポート | 戻り値 |
 | --- | --- |
-| [`matchesText`, `toTextPattern`, `describePattern`](#text-patterns) | `boolean`, `TextPattern`, `string` |
+| [`matchesText`, `compareText`, `toTextPattern`, `describePattern`](#text-patterns) | `boolean`, `boolean`, `TextPattern`, `string` |
 | [`resolveExpression`](#resolveexpression) | `SemanticNode[]` |
 | [`urlMatches`](#urlmatches) | `boolean` |
 | [`siteOf`, `sameSite`](#site-helpers) | `string`, `boolean` |
@@ -1526,11 +1526,12 @@ export class InfrastructureError extends E2EError {
 
 #### テキストパターン
 
-`locate` とテキストマッチャー用の `TextPattern` 照合です。
+`locate` とテキストマッチャー用の `TextPattern` 照合です。`matchesText` は `{ mode: 'equals', normalize: true }` を指定した `compareText` で、両側の空白をまとめてから比較します。計算済みスタイルのように、プラットフォームが報告したままの値を比較するには `normalize: false` を渡します。`mode: 'contains'` は期待する文字列がどこにあっても一致とし、`ignoreCase` は文字列パターンの大文字と小文字を区別しません。
 
 ```ts
 export function toTextPattern(match: TextMatch, options?: { exact?: boolean }): TextPattern;
 export function matchesText(actual: string, pattern: TextPattern): boolean;
+export function compareText(actual: string, pattern: TextPattern, comparison: TextComparison): boolean;
 export function describePattern(pattern: TextPattern): string;
 ```
 

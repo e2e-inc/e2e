@@ -128,7 +128,8 @@ describe('operations on a hung page', () => {
   /**
    * `expect(browser)` over the attempt, through a fixture context with the
    * harness's budgets: an operation with no explicit timeout gets the action
-   * timeout.
+   * timeout, and `withNode` locates the page's Next button the way core's
+   * does, waiting out the action timeout.
    */
   function browserExpectation(): BrowserExpectation {
     let expectation: (() => unknown) | undefined;
@@ -139,6 +140,10 @@ describe('operations on a hung page', () => {
       operation: (timeoutMs?: number) => ({ ...operation(), timeoutMs: Math.max(1, timeoutMs ?? ACTION_TIMEOUT_MS) }),
       app: { resolveUrl: (url: string) => new URL(url, origin).href },
       fixture: (_name: string, target: object) => target,
+      withNode: async (_api: string, _locator: Locator, use: (ref: NodeRef, operation: OperationContext) => Promise<unknown>) => {
+        const [node] = await engine.locate!(button('Next'), { ...operation(), timeoutMs: ACTION_TIMEOUT_MS });
+        return use(node!.ref as NodeRef, operation());
+      },
       expectable: (target: object, factory: () => unknown) => {
         expectation = factory;
         return target;
@@ -154,16 +159,10 @@ describe('operations on a hung page', () => {
     const expectation = browserExpectation();
     const title = await bounded(() => expectation.toHaveTitle('Other', { timeout: BUDGET_MS }));
     expect(title.error).toMatchObject({ code: 'OPERATION_TIMEOUT' });
-    // A locator read waits out the action timeout, as the harness's does.
-    const card = {
-      count: async () => 1,
-      getAttribute: async () => {
-        await engine.locate!(button('Next'), { ...operation(), timeoutMs: ACTION_TIMEOUT_MS });
-        return 'card';
-      },
-    } as unknown as Locator;
+    // The locate waits out the action timeout; the assertion ends at its own.
+    const card = {} as Locator;
     const negated = await bounded(() => expectation.not.toHaveClass(card, 'card', { timeout: BUDGET_MS }));
-    expect(negated.error).toMatchObject({ code: 'OPERATION_TIMEOUT' });
+    expect(negated.error).toMatchObject({ code: 'ASSERTION_FAILED', message: expect.stringContaining('observed: no node') });
   });
 
   it('times out a navigation to a server that never answers', async () => {

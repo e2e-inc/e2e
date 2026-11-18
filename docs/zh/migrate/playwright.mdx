@@ -124,6 +124,7 @@ test('checkout', async ({ app, agent, screen }) => {
 | `toBeVisible()`, `toBeHidden()`, `toBeEnabled()`, `toBeDisabled()`, `toBeChecked()`, `toBeFocused()`, `toBeAttached()`, `toHaveText()`, `toContainText()`, `toHaveValue()`, `toHaveAttribute()`, `toHaveCount()`, `toHaveAccessibleName()`, `toHaveRole()` | 相同，支持 `{ visible }`、`{ enabled }`、`{ checked }`、`{ attached }` 和 `{ ignoreCase }` |
 | `toHaveId(id)`, `toContainClass(name)` | `toHaveAttribute('id', id)`、`toHaveAttribute('class', RegExp)` |
 | `expect(page).toHaveURL()`, `toHaveTitle()` | `expect(browser).toHaveURL()`、`toHaveTitle()` |
+| `expect(locator).toHaveCSS(name, value)`, `toHaveJSProperty(name, value)` | `expect(browser).toHaveCSS(locator, name, value)`、`expect(browser).toHaveJSProperty(locator, name, value)`；没有 `pseudo` 选项，`undefined` 也不能作为期望值 |
 | `expect(page).toHaveScreenshot()`, `expect(locator).toHaveScreenshot()` | `expect(screen).toHaveScreenshot()` 及定位器形式，参阅[视觉比较](/visual-testing) |
 | `expect(value)` 配合 `toBe()`、`toEqual()`、`toMatchObject()`、`toContain()`、`toHaveLength()`、`toHaveProperty()`、`toMatch()`，以及真值和数值匹配器 | 相同，参阅[值匹配器](/reference/expect#value-matchers) |
 | `expect(locator, 'message')`, `expect(page, 'message').toHaveScreenshot()`, `expect(value, 'message')` | 相同，页面使用 `expect(screen, 'message')`；消息出现在失败信息的开头，参阅[定位器匹配器](/reference/expect#locator-matchers) |
@@ -152,6 +153,7 @@ test('checkout', async ({ app, agent, screen }) => {
 | `page.waitForEvent('popup')` | `browser.waitForPopup(() => trigger)`，会激活新标签页，参阅[标签页](/reference/web#tabs) |
 | `context.pages()`, `context.newPage()`, `page.bringToFront()` | `browser.tabs()`、`browser.newTab()`、`tab.activate()`；没有 `context.on('page')` 事件 |
 | `page.evaluate(fn, arg)` | `browser.evaluate(fn, arg)`，输入和输出均为 JSON |
+| `locator.evaluate(fn, arg)` | `browser.evaluateOn(locator, fn, arg)`，输入和输出均为 JSON；不接受 `{ timeout }`，最长等待到 `actionTimeout` |
 | `page.addInitScript()`, `page.emulateMedia({ colorScheme, reducedMotion })` | `browser.addInitScript()` 或 `web({ initScripts })`；`browser.emulateMedia()` |
 | `context.addCookies()`, `cookies()`, `clearCookies()` | `browser.setCookies()`、`browser.cookies()`、`browser.clearCookies()` |
 
@@ -232,7 +234,7 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 | Playwright | 目前可用的方式 |
 | --- | --- |
 | `locator.locator(selector)`, `locator.and()`, `filter({ visible })` | 一个 `browser.locator` 选择器，例如 `'.card >> .close'`，或作用域内的 `screen` 查询 |
-| `locator.evaluate()`, `expect(locator).toHaveClass()`, `toHaveCSS()`, `dispatchEvent()` | `browser.evaluate(fn, selector)`；`expect(browser).toHaveClass(locator, cls)` |
+| `expect(locator).toHaveClass()`, `dispatchEvent()` | `expect(browser).toHaveClass(locator, cls)`；`browser.evaluate(fn, selector)` |
 | `setInputFiles({ buffer })`, `selectOption([...])`, `click({ clickCount })`, `hover({ position })` | 临时文件路径；多选使用 `browser.evaluate`；`browser.mouse` 配合 `boundingBox()` |
 
 </Accordion>

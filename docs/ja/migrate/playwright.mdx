@@ -124,6 +124,7 @@ test('checkout', async ({ app, agent, screen }) => {
 | `toBeVisible()`, `toBeHidden()`, `toBeEnabled()`, `toBeDisabled()`, `toBeChecked()`, `toBeFocused()`, `toBeAttached()`, `toHaveText()`, `toContainText()`, `toHaveValue()`, `toHaveAttribute()`, `toHaveCount()`, `toHaveAccessibleName()`, `toHaveRole()` | 同じ。`{ visible }`、`{ enabled }`、`{ checked }`、`{ attached }`、`{ ignoreCase }` も対応 |
 | `toHaveId(id)`, `toContainClass(name)` | `toHaveAttribute('id', id)`、`toHaveAttribute('class', RegExp)` |
 | `expect(page).toHaveURL()`, `toHaveTitle()` | `expect(browser).toHaveURL()`、`toHaveTitle()` |
+| `expect(locator).toHaveCSS(name, value)`, `toHaveJSProperty(name, value)` | `expect(browser).toHaveCSS(locator, name, value)`、`expect(browser).toHaveJSProperty(locator, name, value)`。`pseudo` オプションはなく、`undefined` は期待値に使えません |
 | `expect(page).toHaveScreenshot()`, `expect(locator).toHaveScreenshot()` | `expect(screen).toHaveScreenshot()` とロケーター形式。[視覚的な比較](/visual-testing)を参照 |
 | `expect(value)` の `toBe()`、`toEqual()`、`toMatchObject()`、`toContain()`、`toHaveLength()`、`toHaveProperty()`、`toMatch()`、真偽性と数値のマッチャー | 同じ。[値のマッチャー](/reference/expect#value-matchers)を参照 |
 | `expect(locator, 'message')`, `expect(page, 'message').toHaveScreenshot()`, `expect(value, 'message')` | 同じ。ページには `expect(screen, 'message')`。メッセージは失敗の先頭に付きます。[ロケーターのマッチャー](/reference/expect#locator-matchers)を参照 |
@@ -152,6 +153,7 @@ test('checkout', async ({ app, agent, screen }) => {
 | `page.waitForEvent('popup')` | 新しいタブをアクティブにする `browser.waitForPopup(() => trigger)`。[タブ](/reference/web#tabs)を参照 |
 | `context.pages()`, `context.newPage()`, `page.bringToFront()` | `browser.tabs()`、`browser.newTab()`、`tab.activate()`。`context.on('page')` イベントはなし |
 | `page.evaluate(fn, arg)` | `browser.evaluate(fn, arg)`。入出力は JSON |
+| `locator.evaluate(fn, arg)` | `browser.evaluateOn(locator, fn, arg)`。入出力は JSON。`{ timeout }` は取らず、`actionTimeout` まで待ちます |
 | `page.addInitScript()`, `page.emulateMedia({ colorScheme, reducedMotion })` | `browser.addInitScript()` または `web({ initScripts })`。`browser.emulateMedia()` |
 | `context.addCookies()`, `cookies()`, `clearCookies()` | `browser.setCookies()`、`browser.cookies()`、`browser.clearCookies()` |
 
@@ -232,7 +234,7 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 | Playwright | 現在使える方法 |
 | --- | --- |
 | `locator.locator(selector)`, `locator.and()`, `filter({ visible })` | `'.card >> .close'` のような単一の `browser.locator` セレクター、またはスコープ内の `screen` クエリ |
-| `locator.evaluate()`, `expect(locator).toHaveClass()`, `toHaveCSS()`, `dispatchEvent()` | `browser.evaluate(fn, selector)`。`expect(browser).toHaveClass(locator, cls)` |
+| `expect(locator).toHaveClass()`, `dispatchEvent()` | `expect(browser).toHaveClass(locator, cls)`。`browser.evaluate(fn, selector)` |
 | `setInputFiles({ buffer })`, `selectOption([...])`, `click({ clickCount })`, `hover({ position })` | 一時ファイルのパス。複数選択には `browser.evaluate`。`boundingBox()` と `browser.mouse` |
 
 </Accordion>

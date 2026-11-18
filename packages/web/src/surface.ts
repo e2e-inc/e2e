@@ -902,13 +902,17 @@ export class PlaywrightSurface {
    * `arg` second, and returns the JSON it resolves to, or why that is not
    * JSON. Nothing waits: a located ref that no longer matches exactly one
    * element, or an element that left its document, is retryable
-   * `NODE_STALE`, so the caller resolves again.
+   * `NODE_STALE`, so the caller resolves again. Those are found before
+   * `source` runs. A navigation while it may be running is retryable only
+   * when `repeatable` says running it again is safe, as for a read the
+   * engine owns; test code fails instead, as `browser.evaluate` does.
    */
   async evaluateOn(
     ref: NodeRef,
     source: string,
     arg: JsonValue | undefined,
     operation: OperationContext,
+    repeatable: boolean,
   ): Promise<EvaluationResult> {
     const evaluate = compileEvaluation(source, ['element', 'arg']);
     const report = await this.guard(operation, 'evaluateOn', async (currentOperation) => {
@@ -923,7 +927,9 @@ export class PlaywrightSurface {
       } catch (cause) {
         const page = this.requirePage();
         const failure = await pageScriptFailure(page, cause, 'evaluateOn', currentOperation.timeoutMs);
-        throw failure ?? cause;
+        if (failure !== undefined) throw failure;
+        if (!repeatable && isNavigationRace(cause)) throw translatePwError(cause, 'evaluateOn');
+        throw cause;
       } finally {
         if (target.kind === 'locator') void element.dispose().catch(() => undefined);
       }

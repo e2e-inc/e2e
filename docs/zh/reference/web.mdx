@@ -536,6 +536,7 @@ const width = await browser.evaluateOn(
 - 定位器像定位器读取一样解析：保留其作用域、框架，并等待恰好一个匹配，最长到 `actionTimeout`。如果页面在代码运行前替换了节点，会重新解析。
 - 函数以元素和 `arg` 依次作为参数调用。元素只存在于页面中，测试永远不会持有它。函数、字符串和结果的规则与 [`evaluate`](#evaluate) 相同。
 - 它用于读取。代码可以修改页面，但请通过定位器操作，以便步骤记录该操作。
+- 代码只运行一次。代码运行期间发生导航时，调用会像 Playwright 一样以 `ENGINE_FAILURE` 失败，且绝不会在新页面上再次运行代码。
 - 要等待某个值，请使用 [`toHaveCSS`](/reference/expect#tohavecss) 或 [`toHaveJSProperty`](/reference/expect#tohavejsproperty)。
 
 | 抛出错误 | 触发条件 |
@@ -546,7 +547,7 @@ const width = await browser.evaluateOn(
 | `INVALID_ARGUMENT` | `arg` 或返回值不是 [`JsonValue`](#jsonvalue)。 |
 | `EVALUATE_FAILED` | 被执行的代码抛出错误，或顶层页面替换了引擎所需的 JavaScript 内置对象。错误携带具体消息。 |
 | `ACTION_FAILED` | 代码未在 `actionTimeout` 内完成。 |
-| `ENGINE_FAILURE` | 页面关闭或上下文丢失。 |
+| `ENGINE_FAILURE` | 页面关闭或上下文丢失，或代码运行期间页面发生了导航。 |
 
 #### `route`
 

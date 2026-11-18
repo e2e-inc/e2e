@@ -372,7 +372,7 @@ match, in order, extra matches allowed. `toHaveAttribute(name)` checks
 presence, `toHaveAttribute(name, value)` the value; `toBeAttached` waits for
 a match, hidden or not; `toHaveClass` compares the whole normalized class
 list or tests a RegExp; `toHaveCSS` compares one computed property
-(kebab-case, `--custom` too) like a text; `toHaveJSProperty` compares the
+(kebab-case, `--custom` too) as its raw string; `toHaveJSProperty` compares the
 JSON at a dotted path (`dataset.state`, `offsetWidth`) by deep equality. A
 matcher whose value never matches is `ASSERTION_FAILED`, exit code 1. An
 ambiguous locator is `LOCATOR_AMBIGUOUS` at once.

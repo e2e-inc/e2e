@@ -219,8 +219,3 @@ export function evaluationValue(
   if (!result.ok) throw new TestError('INVALID_ARGUMENT', `${api} result ${result.invalid}`);
   return result.value;
 }
-
-/** `readEvaluation` for `browser.evaluate`: the value, or what made it fail. */
-export function decodeEvaluation(text: string): JsonValue | undefined {
-  return evaluationValue(readEvaluation(text), 'evaluate');
-}
