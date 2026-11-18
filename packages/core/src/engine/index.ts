@@ -251,16 +251,19 @@ export interface EngineFixtureContext {
    * `timeout`), then calls `use` with its ref and the budget that read has
    * left. Zero matches by the deadline is `LOCATOR_NOT_FOUND`, two or more
    * `LOCATOR_AMBIGUOUS` at once. A retryable `NODE_STALE` from `use`
-   * re-resolves while the deadline remains. A value that is not an e2e
-   * locator, or a locator from another screen or attempt, is
-   * `INVALID_LOCATOR`, and its message names `api`, the public call that
-   * took the locator.
+   * re-resolves while the deadline remains and runs `use` again, so report
+   * it only before work that must not repeat. `wait: false` resolves without
+   * waiting for a match: zero matches are `LOCATOR_NOT_FOUND` at once, for a
+   * caller that polls itself. A value that is not an e2e locator, or a
+   * locator from another screen or attempt, is `INVALID_LOCATOR` before any
+   * resolve, and its message names `api`, the public call that took the
+   * locator.
    */
   withNode<T>(
     api: string,
     locator: Locator,
     use: (ref: NodeRef, operation: OperationContext) => Promise<T>,
-    options?: { timeout?: number },
+    options?: { timeout?: number; wait?: boolean },
   ): Promise<T>;
   /**
    * Attaches an expectation surface to a fixture object so `expect(fixture)`

@@ -111,43 +111,35 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
     return value;
   };
   /**
-   * The poll read of a matcher on the one node `target` matches, through
-   * `context.withNode` with the poll's remaining budget, inside that budget:
-   * it waits for the match, refuses a target that is not this attempt's
-   * locator before any read, and fails an ambiguous one at once. Until a
-   * sample has read the node, a budget that ends while the sample still
-   * waits for its match is `no node`, so a node that never arrives stays an
-   * assertion failure. Any other sample the budget cuts off rejects, and
-   * the poll judges it, reporting the last read.
+   * The poll read of a matcher on the one node `target` matches: one
+   * `context.withNode` that does not wait for a match, inside the poll's
+   * deadline. It refuses a target that is not this attempt's locator before
+   * any read, and fails an ambiguous one at once. Zero matches is `no node`,
+   * one more poll, so a node that never arrives stays an assertion failure;
+   * a read the deadline cuts off is the poll's to judge.
    */
   const sampleNode = (
     api: string,
     subject: string,
     target: Locator,
     read: (ref: NodeRef, operation: OperationContext) => Promise<BrowserSample>,
-  ): ((deadline: Deadline) => Promise<BrowserSample>) => {
-    let readOnce = false;
-    return async (deadline) => {
-      let reading = false;
-      const timedOut = new EngineError('OPERATION_TIMEOUT', `${subject} read timed out`, { retryable: false });
-      const sample = deps.context.withNode(qualified(api), target, async (ref, operation) => {
-        reading = true;
-        try {
-          return await read(ref, operation);
-        } finally {
-          reading = false;
-        }
-      }, { timeout: Math.max(1, deadline.remaining()) });
+  ): ((deadline: Deadline) => Promise<BrowserSample>) =>
+    async (deadline) => {
+      const sample = deps.context.withNode(qualified(api), target, read, {
+        timeout: Math.max(1, deadline.remaining()),
+        wait: false,
+      });
       try {
-        const result = await withTimeout(sample, deadline.remaining(), () => timedOut);
-        readOnce = true;
-        return result;
+        return await withTimeout(
+          sample,
+          deadline.remaining(),
+          () => new EngineError('OPERATION_TIMEOUT', `${subject} read timed out`, { retryable: false }),
+        );
       } catch (error) {
-        if (error === timedOut ? !reading && !readOnce : isTestErrorCode(error, 'LOCATOR_NOT_FOUND')) return NO_NODE;
+        if (isTestErrorCode(error, 'LOCATOR_NOT_FOUND')) return NO_NODE;
         throw error;
       }
     };
-  };
   /**
    * A matcher sample of the page code `source` run on the one node `target`
    * matches, observed as `subject` and its JSON. A value that is not JSON,

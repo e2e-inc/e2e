@@ -346,7 +346,7 @@ describe('explicit fixture operations', () => {
 
 describe('context.withNode', () => {
   type Use = (ref: NodeRef, operation: OperationContext) => Promise<string>;
-  type Probe = { run(locator: unknown, use: Use, timeout?: number): Promise<string> };
+  type Probe = { run(locator: unknown, use: Use, timeout?: number, wait?: boolean): Promise<string> };
 
   /** A fixture that hands `use` the node a locator matches; `matches` is what each locate answers. */
   function probeRuntime(matches: () => readonly string[], overrides: Partial<E2EConfig> = {}) {
@@ -356,10 +356,13 @@ describe('context.withNode', () => {
       locate: async () => matches().map((id) => ({ ref: { id, revision: '' }, role: 'navigation' })),
       fixtures: {
         probe: (context) => context.fixture('probe', {
-          run: (locator: Locator, use: Use, timeout?: number) => {
+          run: (locator: Locator, use: Use, timeout?: number, wait?: boolean) => {
             // withNode returns a promise and never throws synchronously, so a refusal is a rejection.
             try {
-              return context.withNode('probe.run', locator, use, timeout === undefined ? undefined : { timeout });
+              return context.withNode('probe.run', locator, use, {
+                ...(timeout === undefined ? {} : { timeout }),
+                ...(wait === undefined ? {} : { wait }),
+              });
             } catch {
               return Promise.resolve('withNode threw synchronously');
             }
@@ -454,6 +457,22 @@ describe('context.withNode', () => {
       category: 'test',
       message: expect.stringContaining('covered by a dialog: getByRole("navigation")'),
     });
+  });
+
+  it('fails zero matches at once without waiting when told not to wait, and still runs use on one', async () => {
+    let locates = 0;
+    let current: readonly string[] = [];
+    const { screen, probe } = probeRuntime(() => {
+      locates += 1;
+      return current;
+    });
+    const started = Date.now();
+    await expect(probe.run(screen.getByRole('navigation'), async () => 'never', 5_000, false))
+      .rejects.toMatchObject({ code: 'LOCATOR_NOT_FOUND' });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(locates).toBe(1);
+    current = ['nav'];
+    await expect(probe.run(screen.getByRole('navigation'), async (ref) => ref.id, 5_000, false)).resolves.toBe('nav');
   });
 
   it('refuses a value that is not an e2e locator, and a locator from another attempt, naming the caller', async () => {

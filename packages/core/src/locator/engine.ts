@@ -377,15 +377,25 @@ if (sampled && reads.cutOff(cause)) throw await notFound(cause);
    * `read` reads it: zero matches poll, two or more are `LOCATOR_AMBIGUOUS`
    * at once, and a retryable `NODE_STALE` from `use` re-resolves while the
    * deadline remains. `use` gets the budget one read of that wait has left.
+   * With `wait` false, zero matches (a missing frame included) are
+   * `LOCATOR_NOT_FOUND` at once, for a caller that polls itself.
    */
   async withOne<T>(
     expression: LocatorExpression,
     use: (ref: NodeRef, operation: OperationContext) => Promise<T>,
     deadline: Deadline,
+    wait = true,
   ): Promise<T> {
     const reads = this.reads(deadline);
     for (;;) {
-      const { ref } = await this.resolveCounted(expression, reads);
+      const ref = wait
+        ? (await this.resolveCounted(expression, reads)).ref
+        : await this.singleOf(await this.resolveOnce(expression, reads, 'empty'), expression);
+      if (ref === null) {
+        throw new TestError('LOCATOR_NOT_FOUND', `locator matched no nodes: ${describeExpression(expression)}`, {
+          details: locatorDetails(expression, 0),
+        });
+      }
       try {
         return await reads.read((timeoutMs) => use(ref, this.readOperation(timeoutMs)));
       } catch (cause) {

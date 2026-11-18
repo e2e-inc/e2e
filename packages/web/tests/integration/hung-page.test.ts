@@ -129,7 +129,7 @@ describe('operations on a hung page', () => {
    * `expect(browser)` over the attempt, through a fixture context with the
    * harness's budgets: an operation with no explicit timeout gets the action
    * timeout, and `withNode` locates the page's Next button the way core's
-   * does, waiting out the action timeout.
+   * does, within the action timeout.
    */
   function browserExpectation(): BrowserExpectation {
     let expectation: (() => unknown) | undefined;
@@ -162,7 +162,7 @@ describe('operations on a hung page', () => {
     // The locate waits out the action timeout; the assertion ends at its own.
     const card = {} as Locator;
     const negated = await bounded(() => expectation.not.toHaveClass(card, 'card', { timeout: BUDGET_MS }));
-    expect(negated.error).toMatchObject({ code: 'ASSERTION_FAILED', message: expect.stringContaining('observed: no node') });
+    expect(negated.error).toMatchObject({ code: 'OPERATION_TIMEOUT' });
   });
 
   it('times out a navigation to a server that never answers', async () => {

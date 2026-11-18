@@ -270,6 +270,10 @@ void (fixtureContext.withNode('custom.read', fixtureTarget, async (ref, operatio
 }) satisfies Promise<number>);
 // @ts-expect-error the result follows `use`: a number is not a string.
 void (fixtureContext.withNode('custom.read', fixtureTarget, async () => 1) satisfies Promise<string>);
+// `wait: false` resolves without waiting for a match; it takes a boolean only.
+void fixtureContext.withNode('custom.read', fixtureTarget, async () => 1, { timeout: 100, wait: false });
+// @ts-expect-error `wait` is a boolean.
+void fixtureContext.withNode('custom.read', fixtureTarget, async () => 1, { wait: 'no' });
 // @ts-expect-error `api` is required: an INVALID_LOCATOR names the public call that took the locator.
 void fixtureContext.withNode(fixtureTarget, async () => 1);
 declare const attemptContext: EngineAttemptContext;

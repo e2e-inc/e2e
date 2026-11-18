@@ -27,6 +27,7 @@ function foreignTestError(code: string): Error {
 const NAVIGATION_RACES = [
   'Execution context was destroyed, most likely because of a navigation.',
   'locator.evaluate: Frame was detached',
+  'locator.elementHandles: Protocol error (DOM.describeNode): Cannot find context with specified id',
 ];
 
 describe('translatePwError', () => {

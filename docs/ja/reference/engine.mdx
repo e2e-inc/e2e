@@ -2075,16 +2075,19 @@ export interface EngineFixtureContext {
    * `timeout`), then calls `use` with its ref and the budget that read has
    * left. Zero matches by the deadline is `LOCATOR_NOT_FOUND`, two or more
    * `LOCATOR_AMBIGUOUS` at once. A retryable `NODE_STALE` from `use`
-   * re-resolves while the deadline remains. A value that is not an e2e
-   * locator, or a locator from another screen or attempt, is
-   * `INVALID_LOCATOR`, and its message names `api`, the public call that
-   * took the locator (`browser.evaluateOn`, say).
+   * re-resolves while the deadline remains and runs `use` again, so report
+   * it only before work that must not repeat. `wait: false` resolves without
+   * waiting for a match: zero matches are `LOCATOR_NOT_FOUND` at once, for a
+   * caller that polls itself. A value that is not an e2e locator, or a
+   * locator from another screen or attempt, is `INVALID_LOCATOR` before any
+   * resolve, and its message names `api`, the public call that took the
+   * locator.
    */
   withNode<T>(
     api: string,
     locator: Locator,
     use: (ref: NodeRef, operation: OperationContext) => Promise<T>,
-    options?: { timeout?: number },
+    options?: { timeout?: number; wait?: boolean },
   ): Promise<T>;
   /**
    * Attaches an expectation surface to a fixture object so `expect(fixture)`
@@ -2143,7 +2146,9 @@ evaluateOn: (target: Locator, source: string, arg?: JsonValue) =>
 - `api` はロケーターを受け取った公開 API の呼び出しです。`INVALID_LOCATOR` のメッセージはこれを示します。
 - ロケーターはスコープ、厳密さ、フレームを保ちます。`withNode` はロケーターの読み取りと同じように、`actionTimeout` または `options.timeout` まで一致を待ちます。
 - `use` は読み取り自身の `OperationContext` を受け取ります。エンジンの呼び出しはこれで制限してください。
-- ref がもうそのノードを指さないとき、`use` はリトライ可能な `NODE_STALE` をスローします。期限が残っていれば、`withNode` はもう一度解決します。
+- ref がもうそのノードを指さないとき、`use` はリトライ可能な `NODE_STALE` をスローします。期限が残っていれば、`withNode` はもう一度解決し、`use` をもう一度呼び出します。そのため、2 回実行してはいけない処理の前にだけスローしてください。
+- `options.wait: false` は一致を待たずに 1 回だけ解決します。一致がなければ直ちに `LOCATOR_NOT_FOUND` になります。自分でポーリングするマッチャーはこれを使い、ロケーターの読み取りではなく自分のポーリングでノードを待ちます。
+- `options.timeout: 0` は待機に独自の期限を付けません。それでもテストの持ち時間が上限になります。
 - `use` からのそれ以外のエラーは、ロケーターの読み取りでのエンジンのエラーと同じように変換します。
 - メソッドは `timeout: false` で宣言してください。ステップの期限がノードの待機と競合しなくなります。
 

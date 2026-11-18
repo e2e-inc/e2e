@@ -24,16 +24,45 @@ const reloading = content(`<html><p id="r">Reloading</p><script>
   }
 </script></html>`);
 
-/** A page that replaces `#flip` with a new element on every task, so a matched element soon leaves its document. */
+/**
+ * A page whose `burst()` replaces `#flip` with a new element on every task
+ * for 300 ms, so an element matched during it soon leaves its document, and
+ * then leaves the last one in place.
+ */
 const flipping = content(`<html><p id="flip">Flip</p><script>
-  const flip = () => {
-    const next = document.createElement('p');
-    next.id = 'flip';
-    next.textContent = 'Flip';
-    document.getElementById('flip').replaceWith(next);
-    setTimeout(flip, 0);
+  window.burst = () => {
+    const until = Date.now() + 300;
+    const flip = () => {
+      const next = document.createElement('p');
+      next.id = 'flip';
+      next.textContent = 'Flip';
+      document.getElementById('flip').replaceWith(next);
+      if (Date.now() < until) setTimeout(flip, 0);
+    };
+    flip();
   };
-  flip();
+</script></html>`);
+
+/** A page whose `#gone` (class `a`, blue) is removed 300 ms after load. */
+const vanishing = content(`<html><p id="gone" class="a" style="color: blue">Gone</p><script>
+  setTimeout(() => document.getElementById('gone').remove(), 300);
+</script></html>`);
+
+/** A page whose `#late` appears 600 ms after load as class `pending` and becomes `error` 300 ms later. */
+const lateThenError = content(`<html><body><script>
+  setTimeout(() => {
+    const late = document.createElement('p');
+    late.id = 'late';
+    late.className = 'pending';
+    late.textContent = 'Late';
+    document.body.append(late);
+    setTimeout(() => { late.className = 'error'; }, 300);
+  }, 600);
+</script></body></html>`);
+
+/** A page whose `#stuck` exists, and whose main thread blocks for 3 s from 100 ms after load. */
+const stuckEarly = content(`<html><p id="stuck" class="a">Stuck</p><script>
+  setTimeout(() => { const start = Date.now(); while (Date.now() - start < 3000); }, 100);
 </script></html>`);
 
 /** A page that answers for about 300 ms after it loads, then blocks its main thread for about 1.5 s. */
@@ -47,6 +76,7 @@ const page = content(`<html>
   <iframe srcdoc="<aside style='width: 240px'>Side</aside>"></iframe>
   <label>Name <input value="Ada"></label>
   <p id="holder">Holder</p>
+  <p id="spaced" class="  a   b ">Spaced</p>
   <script>
     document.querySelector('[aria-label="Main"]').config = { mode: 'dark', sizes: [1, 2] };
     document.getElementById('holder').holder = { inner: null };
@@ -126,9 +156,10 @@ test.describe('browser.evaluateOn', { requires: ['browser'] }, () => {
     await expect(browser).toHaveJSProperty(browser.locator('#holder'), 'ownerDocument.defaultView.sessionStorage.runs', '1');
   });
 
-  test('runs on an element still in its document, when the page keeps replacing it', async ({ browser }) => {
+  test('runs on an element still in its document, when the page replaces it after the match', async ({ browser }) => {
     await browser.goto(flipping);
-    for (let run = 0; run < 20; run += 1) {
+    for (let run = 0; run < 10; run += 1) {
+      await browser.evaluate('() => window.burst()');
       expect(await browser.evaluateOn(browser.locator('#flip'), (el) => el.isConnected)).toBe(true);
     }
   });
@@ -345,6 +376,43 @@ test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () 
 });
 
 test.describe('expect(browser) locator matchers', { requires: ['browser'] }, () => {
+  test('fail observing no node when the node leaves after a read', async ({ browser }) => {
+    await browser.goto(vanishing);
+    const gone = browser.locator('#gone');
+    for (const call of [
+      () => expect(browser).toHaveClass(gone, 'b', { timeout: 1000 }),
+      () => expect(browser).toHaveCSS(gone, 'color', 'rgb(255, 0, 0)', { timeout: 1000 }),
+    ]) {
+      const error = await failure(call);
+      expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
+      expect(error).toHaveProperty('message', expect.stringContaining('observed: no node'));
+    }
+  });
+
+  test('fail a negation that holds only until the node arrives and matches', async ({ browser }) => {
+    for (const call of [
+      () => expect(browser).not.toHaveClass(browser.locator('#late'), 'error', { timeout: 2500 }),
+      () => expect(browser).not.toHaveJSProperty(browser.locator('#late'), 'className', 'error', { timeout: 2500 }),
+    ]) {
+      await browser.goto(lateThenError);
+      const error = await failure(call);
+      expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
+    }
+  });
+
+  test('time out a sample on a page that stops answering before the first read', async ({ browser }) => {
+    await browser.goto(stuckEarly);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const error = await failure(() => expect(browser).toHaveClass(browser.locator('#stuck'), 'b', { timeout: 1000 }));
+    expect(error).toHaveProperty('code', 'ACTION_FAILED');
+  });
+
+  test('compare the class list with its whitespace collapsed, and fail no class attribute', async ({ browser }) => {
+    await browser.goto(page);
+    await expect(browser).toHaveClass(browser.locator('#spaced'), 'a b');
+    await expect(browser).not.toHaveClass(browser.locator('#holder'), '');
+  });
+
   test('refuse a target that is not a locator, naming the matcher', async ({ browser }) => {
     await browser.goto(page);
     const target = '#x' as never;
