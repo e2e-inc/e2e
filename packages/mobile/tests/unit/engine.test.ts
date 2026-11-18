@@ -1854,7 +1854,7 @@ describe('device fixture', () => {
       const device = fixture(h);
       h.fake.respond('command.keyboard', NO_DISMISS_KEY);
       // With a hardware keyboard, XCTest lists the strip alone. A pad of controls covers the centre down to it,
-      // so the only point clear of controls and below the strip's top is above the pad.
+      // so the only point clear of controls and above the strip is above the pad.
       const nodes = [
         ...FORM_NODES,
         { ref: '@e5', index: 4, parentIndex: 1, depth: 2, type: 'other', label: 'Pad', rect: { x: 0, y: 200, width: 390, height: 250 } },
