@@ -152,8 +152,9 @@ call {tool: "tap", args: {target: "n42"}, session: "<id>"}
 | `session` | string | while several are open | The session id. |
 
 - Arguments are validated against the tool's closed schema first. A wrong
-  type or an argument the tool does not declare is `INVALID_ARGUMENT`, and
-  nothing runs.
+  type, or an argument a tool that declares arguments does not declare, is
+  `INVALID_ARGUMENT`, and nothing runs. `back` and `dismiss_keyboard` take no
+  arguments; they drop any they are given and run.
 - An action that fails is an error result that still carries the screen it
   re-observed. It leads with the tool, its target, and the code:
   `navigate file:///etc/passwd failed: POLICY_DENIED: forbidden URL scheme: file:`.
@@ -347,7 +348,7 @@ The code is parsed, never run as JavaScript. The grammar takes:
 | Argument | A string, number, boolean, `null`, regular expression, template without `${}`, array, object, locator, or `credentials.user(name).username` |
 | Secret | `credentials.user(name).password` or `secrets.get(name)`, as `fill`'s value only |
 
-Left out: fixtures an engine contributes (`browser`, `device`),
+Left out: the built-in fixtures an engine contributes (`browser`, `device`),
 `expect(screen)`, `toHaveScreenshot`, `app.screenshot`, `screen.debug`,
 `all`, `setInputFiles`, and the value matchers (`toBe`, `toEqual`).
 
@@ -403,7 +404,7 @@ Test line: await screen.getByRole("button", "Sign in").tap();
 
 No line: `type` or `press` with no target, `press` with `times` over 1,
 `scroll`, `scroll_to` a text, `dismiss_keyboard`, `resize_viewport` (set the
-size with the engine fixture, `browser.setViewport` on web), `switch_tab`
+size with the engine's built-in fixture, `browser.setViewport` on web), `switch_tab`
 and `close_tab` (`browser.tabs()[tab - 1].activate()` and `.close()` on
 web), and a `type` the
 node took through the keyboard. The [point tools](#point-tools) print nothing.
@@ -522,6 +523,9 @@ Start a new session after registering it:
 command = "npx"
 args = ["e2e", "mcp"]
 ```
+
+OpenCode reads the server from `mcp` in the project's `opencode.json`. See
+the OpenCode tab in [MCP server](/mcp-server#set-it-up).
 
 The server is also listed in the
 [MCP Registry](https://registry.modelcontextprotocol.io) as
