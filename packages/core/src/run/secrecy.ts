@@ -6,7 +6,7 @@ import type { TargetSession } from '../engine/surface.ts';
 import { sharedSecretsBrand } from '../internal/brands.ts';
 import { ConfigurationError, ensureErrorRedactor, setErrorRedactor } from '../internal/errors.ts';
 import { realmSlot } from '../internal/realm-slot.ts';
-import { SecretLedger, type SecretList, type SecretsBeside } from '../internal/redact.ts';
+import { createRedactor, SecretLedger, type SecretList, type SecretsBeside } from '../internal/redact.ts';
 import { unavailableCode } from '../secrets.ts';
 import type { Secret } from '../types.ts';
 
@@ -192,6 +192,8 @@ const PROVIDER_KEY_NAME = /^[A-Za-z0-9_.-]+$/;
 interface ProviderKeys {
   /** By name and value. Only ever added to, so its size says when it changed. */
   readonly values: Map<string, readonly [string, string]>;
+  /** The names and values no pattern could be built for, which are not redacted. */
+  readonly refused: Set<string>;
 }
 
 const providerKeySlot = realmSlot<ProviderKeys>('e2e.providerKeys.v1');
@@ -199,7 +201,7 @@ const providerKeySlot = realmSlot<ProviderKeys>('e2e.providerKeys.v1');
 function providerKeys(): ProviderKeys {
   let state = providerKeySlot.get(globalThis);
   if (state === undefined) {
-    state = { values: new Map() };
+    state = { values: new Map(), refused: new Set() };
     providerKeySlot.set(globalThis, state);
   }
   return state;
@@ -210,7 +212,8 @@ function providerKeys(): ProviderKeys {
  * now on: a key a model provider or an agent signs in with, which is not a
  * secret of the app. Trimmed, as a provider reads it. A value shorter than
  * `MIN_PROVIDER_KEY_LENGTH` or longer than `MAX_PROVIDER_KEY_LENGTH` is left
- * alone, and so is one that is no string, as an unset variable is. `name`
+ * alone, as is one no pattern can be built for, and one that is no string,
+ * as an unset variable is. `name`
  * is what the marker shows: letters, digits, `_`, `.`, and `-`.
  */
 export function registerProviderKey(name: string, value: string | null | undefined): void {
@@ -226,7 +229,18 @@ function registerKey(name: string, value: string | null | undefined): void {
   const key = value.trim();
   const length = secretLength(key);
   if (length < MIN_PROVIDER_KEY_LENGTH || length > MAX_PROVIDER_KEY_LENGTH) return;
-  providerKeys().values.set(`${name}\0${key}`, [name, key]);
+  const state = providerKeys();
+  const id = `${name}\0${key}`;
+  // Known already; building a pattern again for every look at the environment would cost each of them.
+  if (state.values.has(id) || state.refused.has(id)) return;
+  try {
+    // Alone first: a value no pattern can hold (what counts depends on its characters, not only its length) would stop every ledger in the process.
+    createRedactor([[name, key]]);
+  } catch {
+    state.refused.add(id);
+    return;
+  }
+  state.values.set(id, [name, key]);
 }
 
 /** Registers the provider keys `env` holds, under their variable names. */
@@ -265,7 +279,7 @@ export const processSecrets = new SecretLedger([], beside);
  * (`process.loadEnvFile()`) and then fails has set them since anything
  * here last looked.
  */
-function redactError(text: string): string {
+export function redactError(text: string): string {
   registerProviderKeys(process.env);
   return processSecrets.redact(text);
 }

@@ -518,17 +518,22 @@ describe('the login Codex saved', () => {
     writeFileSync(join(runnerHome, '.codex', 'auth.json'), login({ OPENAI_API_KEY: runners }));
     vi.stubEnv('CODEX_HOME', undefined);
     vi.stubEnv('HOME', runnerHome);
-    vi.stubEnv('USERPROFILE', runnerHome);
     await runStep(executor, log);
     expect(redactSecrets(`${agents} ${runners}`)).toBe(`<secret:codex.api-key> ${runners}`);
   });
 
-  it('is read from the USERPROFILE of the agent where it has no HOME', async () => {
-    const key = 'sk-saved-userprofile-5a1d9c3e7b0f';
-    const { executor, log } = codexWith(login({ OPENAI_API_KEY: key }), (home) => ({ USERPROFILE: dirname(home), HOME: '' }));
-    vi.stubEnv('CODEX_HOME', undefined);
-    vi.stubEnv('HOME', '/nonexistent/runner-home');
-    await runStep(executor, log);
+  it('is read again when the agent fails to start, since signing in is when Codex writes one', async () => {
+    const key = 'sk-saved-at-startup-6f0c3a9e2d7b';
+    const directory = project(['@agentclientprotocol/codex-acp']);
+    const home = join(directory, '.codex');
+    mkdirSync(home);
+    const codexBin = join(directory, 'codex');
+    // Stands in for a Codex that saves a login while the session starts, after the step's first look.
+    writeFileSync(codexBin, `#!/bin/sh\nprintf '%s' '${login({ OPENAI_API_KEY: key })}' > "$CODEX_HOME/auth.json"\necho '[]'\n`);
+    chmodSync(codexBin, 0o755);
+    const executor = inProject(directory, () => codex({ env: { CODEX_PATH: codexBin, CODEX_HOME: home, ACP_AUTH_REQUIRED: '1' } }));
+    expect(redactSecrets(key)).toBe(key);
+    expect(await stepFailure(executor)).toContain('the agent is not signed in');
     expect(redactSecrets(key)).toBe('<secret:codex.api-key>');
   });
 

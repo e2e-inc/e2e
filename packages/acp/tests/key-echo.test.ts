@@ -171,12 +171,18 @@ describe('credentials an agent repeats, through the built CLI', () => {
   });
 
   it('prints no piece of a credential to the terminal', () => {
+    // The agent's text is there, with a marker where the credentials were: redacted, not dropped.
+    expect(output).toContain('summary <secret:OPENAI_API_KEY> <secret:codex.api-key>');
     expect(leaked(output)).toEqual([]);
   });
 
   it('writes no piece of a credential to the report, the summary, or a trace page', () => {
     const names = written.map(([path]) => relative(directory, path));
     expect(names).toEqual(expect.arrayContaining(['.e2e/report.json', '.e2e/summary.md']));
+    // A trace page per test, each holding the markers.
+    const traces = written.filter(([path]) => path.endsWith('trace.md'));
+    expect(traces).toHaveLength(5);
+    for (const [, content] of traces) expect(content).toContain('<secret:OPENAI_API_KEY>');
     const leaks = written.flatMap(([path, content]) => leaked(content).map((name) => `${relative(directory, path)}: ${name}`));
     expect(leaks).toEqual([]);
   });

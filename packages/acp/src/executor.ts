@@ -65,9 +65,9 @@ export function codex(options: AcpAgentOptions = {}): StepExecutor {
 
 /**
  * `registerLogin` has the run redact the login the agent keeps on disk. It
- * runs before each step, since the agent renews a login between turns, and
- * again once the turn is over, before anything the agent said in it is
- * returned.
+ * runs for each step once the agent is up, since the agent renews a login
+ * between turns, and again once the turn is over, before anything the
+ * agent said in it is returned.
  */
 function executor(name: string, options: AcpAgentOptions, launch: () => Promise<AgentLaunch>, registerLogin: () => void = () => undefined): StepExecutor {
   // A key only the agent's own `env` holds, known before the first step's text is built.
@@ -79,8 +79,8 @@ function executor(name: string, options: AcpAgentOptions, launch: () => Promise<
     version: '1',
     cache: 'inherit',
     async runStep(ctx) {
-      registerLogin();
-      const { held, session } = await ready(ctx, launch, memoryKey);
+      // Once the agent has started, or failed to: signing in is when it writes a login. Before any of the step's text is built.
+      const { held, session } = await ready(ctx, launch, memoryKey).finally(registerLogin);
       ctx.signal.throwIfAborted();
       const active = activeStep(ctx);
       const text = await untilAborted(stepMessage(active, held.tools, held.introduced ? undefined : [RULES, options.system, ctx.agentContext]), ctx.signal);

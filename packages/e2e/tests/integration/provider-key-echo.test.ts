@@ -153,6 +153,21 @@ describe('a key only the environment handed to a run or a host holds', () => {
     expect(processSecrets.redact(key)).toBe('<secret:ANTHROPIC_API_KEY>');
   });
 
+  it('is redacted in the error of a host whose config loads the key itself and then fails', async () => {
+    const key = `sk-host-config-${randomBytes(12).toString('hex')}`;
+    const project = createProject({ 'e2e.config.ts': `process.env.DEEPSEEK_API_KEY = ${JSON.stringify(key)};\nthrow new Error('config failed with ' + process.env.DEEPSEEK_API_KEY);\n` });
+    projects.push(project);
+    const built = '../../dist/run/open-session.js';
+    const { openHost } = (await import(built)) as typeof import('../../src/run/open-session.ts');
+    try {
+      const error = await openHost({ cwd: project.dir }).then(() => undefined, (rejection: unknown) => rejection);
+      expect(String((error as Error).message)).toContain('config failed with <secret:DEEPSEEK_API_KEY>');
+      expect(String((error as Error).stack)).not.toContain(key);
+    } finally {
+      delete process.env['DEEPSEEK_API_KEY'];
+    }
+  });
+
   it('is redacted by the process that launches a core host, before the engine prepares', async () => {
     const key = `sk-launch-env-${randomBytes(12).toString('hex')}`;
     const { launch } = await import('@e2e-dev/core');

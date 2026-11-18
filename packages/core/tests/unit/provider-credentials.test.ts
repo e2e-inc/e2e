@@ -439,3 +439,37 @@ describe('an error reported before any session', () => {
     expect(serialized.message).toBe('config threw: <secret:GROQ_API_KEY>');
   });
 });
+
+describe('values at the edge of what a pattern can hold', () => {
+  const FIXED = 'the secret values are too long to redact: shorten the longest secret, or take it out of the run';
+
+  it('either redacts a secret or refuses with the fixed message, at every length around the limit', async () => {
+    const { SecretLedger } = await import('../../src/internal/redact.ts');
+    const outcomes = new Set<string>();
+    // Punctuation is what a pattern holds least of: the limit for it is about 1,300 to 1,500 characters, by engine version.
+    for (let length = 1200; length <= 1700; length += 1) {
+      const value = '-'.repeat(length);
+      let outcome: string;
+      try {
+        const ledger = new SecretLedger([['dashes', value]]);
+        // Text outside Latin-1 too: the engine builds the pattern again for it.
+        outcome = `${ledger.redact(`a ${value} b`)}|${ledger.redact(`ż ${value} ✓`)}`;
+      } catch (error) {
+        outcome = (error as Error).message;
+      }
+      outcomes.add(outcome === 'a <secret:dashes> b|ż <secret:dashes> ✓' ? 'redacted' : outcome);
+    }
+    expect([...outcomes].toSorted()).toEqual([FIXED, 'redacted'].toSorted());
+  });
+
+  it('leaves a provider key no pattern can be built for alone, and the run goes on', () => {
+    const unbuildable = '-'.repeat(3000);
+    const key = fakeKey();
+    vi.stubEnv('VERCEL_OIDC_TOKEN', unbuildable);
+    vi.stubEnv('OPENAI_API_KEY', key);
+    const ledger = sessionLedger(newSession(), NO_SECRETS);
+    expect(ledger.redact(`${key} plain`)).toBe('<secret:OPENAI_API_KEY> plain');
+    // Asked again, as every later look at the environment does.
+    expect(sessionLedger(newSession(), NO_SECRETS).redact(`${key} plain`)).toBe('<secret:OPENAI_API_KEY> plain');
+  });
+});

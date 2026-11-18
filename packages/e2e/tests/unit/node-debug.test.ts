@@ -4,8 +4,11 @@ import { nodeDebugWarning } from '../../src/run/node-debug.ts';
 const prints = (...on: string[]) => (section: string): boolean => on.includes(section);
 
 describe('the NODE_DEBUG warning', () => {
-  it('says nothing without the variable, whatever Node prints', () => {
-    expect(nodeDebugWarning(undefined, prints('child_process', 'net'))).toBeUndefined();
+  it('warns by what Node prints, not by the variable: one cleared since startup changes nothing', () => {
+    expect(nodeDebugWarning(undefined, prints('child_process'))).toBe(
+      'e2e: NODE_DEBUG, as this process started with it, makes Node print the environment of every process e2e starts; in output e2e writes, its secrets and the provider keys it knows are redacted there, and every other token or password is printed as it is, so start without NODE_DEBUG unless you are debugging with it',
+    );
+    expect(nodeDebugWarning(undefined, prints())).toBeUndefined();
   });
 
   it('says nothing when no section that prints credentials is on', () => {
@@ -15,19 +18,19 @@ describe('the NODE_DEBUG warning', () => {
 
   it('names the variable as set and the environment for child_process', () => {
     expect(nodeDebugWarning('CHILD*', prints('child_process'))).toBe(
-      'e2e: NODE_DEBUG=CHILD* makes Node print the environment of every process e2e starts; e2e redacts its secrets and the provider keys it knows there, and every other token or password is printed as it is, so unset NODE_DEBUG unless you are debugging with it',
+      'e2e: NODE_DEBUG=CHILD* makes Node print the environment of every process e2e starts; in output e2e writes, its secrets and the provider keys it knows are redacted there, and every other token or password is printed as it is, so start without NODE_DEBUG unless you are debugging with it',
     );
   });
 
   it('names the request headers for net', () => {
     expect(nodeDebugWarning('net', prints('net'))).toBe(
-      'e2e: NODE_DEBUG=net makes Node print the headers of requests made with node:http; e2e redacts its secrets and the provider keys it knows there, and every other token or password is printed as it is, so unset NODE_DEBUG unless you are debugging with it',
+      'e2e: NODE_DEBUG=net makes Node print the headers of requests made with node:http; in output e2e writes, its secrets and the provider keys it knows are redacted there, and every other token or password is printed as it is, so start without NODE_DEBUG unless you are debugging with it',
     );
   });
 
   it('names both when both are on', () => {
     expect(nodeDebugWarning('*', prints('child_process', 'net', 'http'))).toContain(
-      'makes Node print the environment of every process e2e starts and the headers of requests made with node:http; e2e redacts',
+      'makes Node print the environment of every process e2e starts and the headers of requests made with node:http; in output e2e writes,',
     );
   });
 });

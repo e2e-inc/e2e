@@ -2,11 +2,13 @@
  * `NODE_DEBUG` sections that print credentials: `child_process` prints the
  * environment of every process this one starts, and `net` the options of
  * each `http.request`, its `Authorization` header included. Node decides
- * which sections are on once, at startup, so a run cannot turn one off. What
- * Node prints passes the run's output redaction, which knows the run's
- * secrets and provider keys and nothing else of an environment or a header.
- * The run says so and goes on: the variable is the developer's own debugging
- * switch.
+ * which sections are on once, at startup, so a run cannot turn one off, and
+ * clearing the variable afterwards changes nothing. Where the run owns the
+ * output (`e2e run`, its workers), what Node prints passes the run's
+ * redaction, which knows the run's secrets and provider keys and nothing
+ * else of an environment or a header; a program that opens a host itself
+ * keeps its own stderr. The run says so and goes on: the variable is the
+ * developer's own debugging switch.
  */
 
 import { debuglog } from 'node:util';
@@ -22,15 +24,16 @@ function nodePrints(section: string): boolean {
 }
 
 /**
- * The warning for a process started with `value` as `NODE_DEBUG`, or
- * `undefined` when no section that prints credentials is on. One line, so a
- * log reader finds it among Node's own.
+ * The warning for a process whose Node prints a section that holds
+ * credentials, or `undefined` when none is on. `value` is `NODE_DEBUG` as it
+ * is now, which names the cause but does not decide: Node read it at
+ * startup. One line, so a log reader finds it among Node's own.
  */
 export function nodeDebugWarning(value: string | undefined, prints: (section: string) => boolean = nodePrints): string | undefined {
-  if (value === undefined) return undefined;
   const on = Object.keys(SECTION_PRINTS).filter(prints);
   if (on.length === 0) return undefined;
-  return `e2e: NODE_DEBUG=${value} makes Node print ${on.map((section) => SECTION_PRINTS[section]).join(' and ')}; e2e redacts its secrets and the provider keys it knows there, and every other token or password is printed as it is, so unset NODE_DEBUG unless you are debugging with it`;
+  const cause = value === undefined ? 'NODE_DEBUG, as this process started with it,' : `NODE_DEBUG=${value}`;
+  return `e2e: ${cause} makes Node print ${on.map((section) => SECTION_PRINTS[section]).join(' and ')}; in output e2e writes, its secrets and the provider keys it knows are redacted there, and every other token or password is printed as it is, so start without NODE_DEBUG unless you are debugging with it`;
 }
 
 let warned = false;

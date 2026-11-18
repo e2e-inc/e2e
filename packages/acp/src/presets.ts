@@ -6,7 +6,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { closeSync, constants, existsSync, fstatSync, openSync, readFileSync, readSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
 import { dirname, join, parse } from 'node:path';
@@ -178,13 +178,11 @@ const CodexSavedLogin = z.object({
 export function registerSavedCodexLogin(env: Readonly<Record<string, string>> | undefined): void {
   // Where the agent will look, from the environment it starts with: its CODEX_HOME, an empty one being none, else `.codex` in its home.
   const given = (name: string) => env?.[name] ?? process.env[name];
-  const home = given('CODEX_HOME') || join(given('HOME') || given('USERPROFILE') || homedir(), '.codex');
+  const home = given('CODEX_HOME') || join(given('HOME') || homedir(), '.codex');
   let saved: z.infer<typeof CodexSavedLogin>;
   try {
-    const file = join(home, 'auth.json');
-    const stats = statSync(file);
-    if (!stats.isFile() || stats.size > MAX_SAVED_LOGIN_BYTES) return;
-    saved = CodexSavedLogin.parse(JSON.parse(readFileSync(file).toString()));
+    // No file, or one that is no login, parses as nothing and is refused here like any other shape.
+    saved = CodexSavedLogin.parse(JSON.parse(readBounded(join(home, 'auth.json')) ?? 'null'));
   } catch {
     // No saved login, or one this version cannot read.
     return;
@@ -196,6 +194,25 @@ export function registerSavedCodexLogin(env: Readonly<Record<string, string>> | 
     ['codex.refresh-token', saved.tokens?.refresh_token],
   ] as const) {
     registerProviderKey(name, value);
+  }
+}
+
+/**
+ * The text of a regular file of at most `MAX_SAVED_LOGIN_BYTES`, checked and
+ * read through one open file, so what is read is what was checked. Opened
+ * without waiting: a pipe in the file's place has no writer to wait for.
+ * `undefined` for a file that is neither; throws where there is none.
+ */
+function readBounded(file: string): string | undefined {
+  const descriptor = openSync(file, constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    const stats = fstatSync(descriptor);
+    const { size } = stats;
+    if (!stats.isFile() || size > MAX_SAVED_LOGIN_BYTES) return undefined;
+    const bytes = Buffer.alloc(size);
+    return bytes.subarray(0, readSync(descriptor, bytes, 0, size, 0)).toString();
+  } finally {
+    closeSync(descriptor);
   }
 }
 
