@@ -12,6 +12,7 @@
  * says which URLs a test may open.
  */
 
+import { isDeepStrictEqual } from 'node:util';
 import type { Download, Route } from 'playwright-core';
 import type { ActionOptions, Expectable, JsonValue, Locator, Screen, TextMatch } from '@e2e-dev/core';
 import {
@@ -54,7 +55,6 @@ import { MEDIA_KEYS, mediaLabel, mediaProblem, type WebMedia } from './media.ts'
 import { lowercaseNames } from './protected-app.ts';
 import { parseContinue, parseFulfill, requireNoArguments } from './route-options.ts';
 import { routePatternMatches, routePatternsEqual } from './route-pattern.ts';
-import { jsonEqual } from './json-equal.ts';
 import type { PlaywrightSurface } from './surface.ts';
 
 /**
@@ -999,7 +999,7 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     toHaveJSProperty: {
       kind: 'assertion',
       timeout: false,
-      label: (_target, path, expected) => `${String(path)} ${JSON.stringify(expected)}`,
+      label: (_target, path, expected) => `${String(path)} ${expectedLabel(expected)}`,
     },
     get not() { return matchers; },
   };
@@ -1077,7 +1077,7 @@ interface BrowserSample {
 const NO_NODE: BrowserSample = { matches: undefined, observed: 'no node' };
 
 /**
- * `expect(browser)` matchers: URL, title, and class polling against the
+ * `expect(browser)` matchers: URL, title, class, CSS, and DOM property polling against the
  * assertion budget. Every read is bounded by the poll's deadline, so a page
  * that stops answering ends the assertion at its own timeout, and the
  * failure reports the last read instead of reading a hung page again.
@@ -1246,11 +1246,13 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
         throw new TestError('INVALID_ARGUMENT', `${what} must be JSON, found undefined`);
       }
       validateJsonValue(expected, what);
+      // The page's value crosses a JSON boundary, so the expected value does too: `-0` reads as `0`.
+      const wanted: unknown = JSON.parse(JSON.stringify(expected));
       return poll(
         'toHaveJSProperty',
         `property ${name} ${JSON.stringify(expected)}`,
-        sampleJson('toHaveJSProperty', target, `property ${name}`, PROPERTY_PATH_SOURCE, name,
-          (value) => jsonEqual(value, expected)),
+        sampleJson('toHaveJSProperty', target, `property ${name}`, PROPERTY_PATH_SOURCE, name.split('.'),
+          (value) => isDeepStrictEqual(value, wanted)),
         options?.timeout,
       );
     },
@@ -1266,23 +1268,36 @@ const COMPUTED_STYLE_SOURCE = pageFunctionSource((element: Element, name: string
 );
 
 /**
- * Page code for `toHaveJSProperty`: the value at a dotted path on the
- * element. Every key but the last is read off a non-null object, or the
- * value is `undefined`; the last key is then read off whatever the walk
- * reached, so `value.length` reads a string's length. Playwright throws
- * instead on a `null` before the last key, or an `undefined` just before it.
+ * Page code for `toHaveJSProperty`: the value at a path on the element,
+ * given as its keys, split in Node so a page that replaces
+ * `String.prototype.split` cannot change the walk. Every key but the last is
+ * read off a non-null object, or the value is `undefined`; the last key is
+ * then read off whatever the walk reached, so `value.length` reads a
+ * string's length. Playwright throws instead on a `null` before the last
+ * key, or an `undefined` just before it.
  */
-const PROPERTY_PATH_SOURCE = pageFunctionSource((element: Element, path: string) => {
-  const names = path.split('.');
-  const last = names.pop() ?? '';
+const PROPERTY_PATH_SOURCE = pageFunctionSource((element: Element, names: string[]) => {
   let target: unknown = element;
-  for (const name of names) {
+  for (let index = 0; index < names.length - 1; index += 1) {
     if (typeof target !== 'object' || target === null) return undefined;
-    target = (target as Record<string, unknown>)[name];
+    target = (target as Record<string, unknown>)[names[index]!];
   }
   if (target === null || target === undefined) return undefined;
-  return (target as Record<string, unknown>)[last];
+  return (target as Record<string, unknown>)[names[names.length - 1]!];
 });
+
+/**
+ * The step label for a `toHaveJSProperty` expected value. It is built before
+ * the matcher validates the value, so a value `JSON.stringify` refuses (a
+ * BigInt, a cycle) still gets a label and then fails as `INVALID_ARGUMENT`.
+ */
+function expectedLabel(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return 'a value that is not JSON';
+  }
+}
 
 function requireSelector(method: string, selector: unknown): string {
   if (typeof selector !== 'string' || selector.length === 0) {

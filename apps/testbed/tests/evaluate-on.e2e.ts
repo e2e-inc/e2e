@@ -1,5 +1,5 @@
 import { test } from '@e2e-dev/web';
-import { expect } from 'e2e';
+import { expect, type Locator } from 'e2e';
 import { content, failure } from './helpers.ts';
 
 /** A page whose `#slow` element answers `slow` with 1, but only after a 300 ms busy wait in the page. */
@@ -85,6 +85,16 @@ test.describe('browser.evaluateOn', { requires: ['browser'] }, () => {
     await browser.goto(page);
     const error = await failure(() => browser.evaluateOn(browser.locator('#late'), (el) => el.id, new Map() as never));
     expect(error).toHaveProperty('code', 'INVALID_ARGUMENT');
+  });
+
+  test('reads again when the page reloads during a read', async ({ browser }) => {
+    await browser.goto(page);
+    await browser.evaluate('() => { setTimeout(() => location.reload(), 100); }');
+    const read = await browser.evaluateOn(
+      browser.locator('#holder'),
+      (el) => new Promise<string>((resolve) => setTimeout(() => resolve(el.id), 300)),
+    );
+    expect(read).toBe('holder');
   });
 
   test('names itself when the target is not a locator', async ({ browser }) => {
@@ -185,6 +195,8 @@ test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () 
     const name = screen.getByLabel('Name');
     await expect(browser).toHaveJSProperty(name, 'value.length', 3);
     await expect(browser).not.toHaveJSProperty(name, 'value.0.length', 1);
+    await expect(browser).toHaveJSProperty(name, 'focus.length', 0);
+    await expect(browser).not.toHaveJSProperty(name, 'focus.name.length', 5);
     const error = await failure(() => expect(browser).toHaveJSProperty(name, 'value.0.length', 1, { timeout: 300 }));
     expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
     expect(error).toHaveProperty('message', expect.stringContaining('observed: property value.0.length is undefined'));
@@ -220,6 +232,25 @@ test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () 
     }
   });
 
+  test('refuses an expected value JSON.stringify cannot write, as a rejection', async ({ browser, screen }) => {
+    await browser.goto(page);
+    const main = screen.getByRole('navigation', { name: 'Main' });
+    const cyclic: Record<string, unknown> = {};
+    cyclic['self'] = cyclic;
+    for (const expected of [1n, cyclic]) {
+      let thrown: unknown;
+      let pending: unknown;
+      try {
+        pending = expect(browser).toHaveJSProperty(main, 'dataset.x', expected as never);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeUndefined();
+      const error = await failure(() => pending);
+      expect(error).toHaveProperty('code', 'INVALID_ARGUMENT');
+    }
+  });
+
   test('fails a sample that outlasts the assertion timeout, even when it would match', async ({ browser }) => {
     await browser.goto(slow);
     const error = await failure(() => expect(browser).toHaveJSProperty(browser.locator('#slow'), 'slow', 1, { timeout: 200 }));
@@ -232,6 +263,17 @@ test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () 
       expect(browser).not.toHaveJSProperty(browser.locator('#frozen'), 'id', 'other', { timeout: 1000 }),
     );
     expect(error).toHaveProperty('code', 'ACTION_FAILED');
+  });
+
+  test('compares the expected value as JSON, so -0 matches the 0 the page sends', async ({ browser }) => {
+    await browser.goto(page);
+    await expect(browser).toHaveJSProperty(browser.locator('#holder'), 'scrollTop', -0);
+  });
+
+  test('walks the path the test gave, even when the page replaces String.prototype.split', async ({ browser }) => {
+    await browser.goto(page);
+    await browser.evaluate("() => { String.prototype.split = function () { return ['id']; }; }");
+    await expect(browser).toHaveJSProperty(browser.locator('[data-x]'), 'dataset.x', '1');
   });
 
   test('reads a path through a null value as undefined, so its negation passes', async ({ browser }) => {
@@ -268,6 +310,31 @@ test.describe('expect(browser) locator matchers', { requires: ['browser'] }, () 
       const error = await failure(call);
       expect(error).toHaveProperty('code', 'INVALID_LOCATOR');
       expect(error).toHaveProperty('message', `${api} requires an e2e locator`);
+    }
+  });
+});
+
+test.describe('a locator from an earlier attempt', { serial: true, requires: ['browser'] }, () => {
+  let earlier: Locator | undefined;
+
+  test('keeps a locator for the next test', async ({ browser, screen }) => {
+    await browser.goto(page);
+    earlier = screen.getByRole('navigation', { name: 'Main' });
+    await expect(browser).toHaveCSS(earlier, 'position', 'sticky');
+  });
+
+  test('is refused, naming the call', async ({ browser }) => {
+    await browser.goto(page);
+    const target = earlier!;
+    const calls = [
+      ['browser.evaluateOn', () => browser.evaluateOn(target, (el) => el.id)],
+      ['expect.toHaveCSS', () => expect(browser).toHaveCSS(target, 'position', 'sticky')],
+      ['expect.toHaveJSProperty', () => expect(browser).toHaveJSProperty(target, 'dataset.x', '1')],
+    ] as const;
+    for (const [api, call] of calls) {
+      const error = await failure(call);
+      expect(error).toHaveProperty('code', 'INVALID_LOCATOR');
+      expect(error).toHaveProperty('message', expect.stringContaining(`${api} requires a locator made by this screen`));
     }
   });
 });
