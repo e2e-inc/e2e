@@ -146,6 +146,11 @@ test('toBeEmpty is not empty on a contenteditable textbox with text', async ({ a
   await expect(screen.getByTestId('textbox')).not.toBeEmpty({ timeout: 300 });
 });
 
+test('toBeEmpty is not empty on a non-editable ARIA textbox with text', async ({ app, screen }) => {
+  await app.open('/empty-matcher');
+  await expect(screen.getByTestId('aria-textbox')).not.toBeEmpty({ timeout: 300 });
+});
+
 test('toBeEmpty is not empty on a native select with options', async ({ app, screen }) => {
   await app.open('/empty-matcher');
   await expect(screen.getByTestId('select')).not.toBeEmpty({ timeout: 300 });
@@ -554,17 +559,20 @@ describe('web platform integration', () => {
 
   // Playwright decides emptiness by tag (input and textarea by value, anything
   // else by trimmed text). The semantic tree has no tag, so these read empty
-  // here until emptiness is read engine-side; see the review on #1869. Drop
-  // `fails` once they match.
-  it.fails.each([
+  // here until emptiness is read engine-side; see the review on #1869. Each
+  // asserts today's assertion failure, so a renamed case or a broken fixture
+  // still fails; move a case to the passes list once it matches.
+  it.each([
     'toBeEmpty is not empty on an ARIA combobox with text',
     'toBeEmpty is not empty on an ARIA listbox with options',
+    'toBeEmpty is not empty on a non-editable ARIA textbox with text',
     'toBeEmpty is not empty on a native select with options',
     'toBeEmpty is not empty on a submit input with a value',
     'toBeEmpty is not empty on a checkbox input',
-  ])('matches Playwright: %s', (title) => {
+  ])('differs from Playwright: %s', (title) => {
     const result = resultByTitle(outcome, title);
-    expect(result.status, JSON.stringify(result.attempts[0]?.error)).toBe('passed');
+    expect(result.status, JSON.stringify(result.attempts[0]?.error)).toBe('failed');
+    expect(result.attempts[0]?.error?.code).toBe('ASSERTION_FAILED');
   });
 
   it('decides absence under an absent frame without waiting out the deadline', () => {

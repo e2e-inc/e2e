@@ -343,6 +343,7 @@ line2  </textarea>
   <button data-testid="combobox" role="combobox" aria-expanded="false">Select a fruit</button>
   <ul data-testid="listbox" role="listbox"><li role="option">Apple</li></ul>
   <div data-testid="textbox" role="textbox" contenteditable="true">hello</div>
+  <div data-testid="aria-textbox" role="textbox">hello</div>
   <select data-testid="select" aria-label="Colour"><option value="">Choose a colour</option><option value="red">Red</option></select>
   <input data-testid="submit" type="submit" value="Go" />
   <input data-testid="checkbox" type="checkbox" aria-label="Agree" />

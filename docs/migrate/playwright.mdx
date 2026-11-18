@@ -364,9 +364,11 @@ purpose. Use the workaround, or keep the test in Playwright.
   `text-transform` applies. See [locator reads](/reference/screen#locator-reads).
 - `toBeEmpty` decides by role, not by tag. Playwright reads the value of an
   `input` or `textarea` and the text of anything else; here a node with a
-  value role reads its value, and other nodes read their own text. So an ARIA
-  combobox or listbox, a native `select`, a submit button input, and a
-  checkbox all read as empty here, though Playwright finds them not empty.
+  value role reads its value (except an `option`, which reads its text), and
+  other nodes read their own text. So an ARIA combobox or listbox, an ARIA
+  `textbox` that is not `contenteditable`, a native `select`, a submit
+  button input, and a checkbox all read as empty here, though Playwright finds
+  them not empty.
 - `toHaveRole` takes the `getByRole` vocabulary, so `paragraph`, `generic`,
   and the other roles it leaves out are type errors, and `img` reads as
   `image`. It compares the role the tree reads, where a `contenteditable`

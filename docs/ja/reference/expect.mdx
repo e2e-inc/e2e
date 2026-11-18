@@ -60,6 +60,7 @@ await expect(screen.getByTestId('cart-empty'), 'the cart is empty').toBeVisible(
 | [`toBeSelected`](#tobechecked-tobeselected-and-tobeexpanded) | 選択されるまで待機 |
 | [`toBeExpanded`](#tobechecked-tobeselected-and-tobeexpanded) | 展開されるまで待機 |
 | [`toBeFocused`](#tobefocused) | フォーカスされるまで待機 |
+| [`toBeEmpty`](#tobeempty) | 値が空、またはテキストがなくなるまで待機 |
 | [`toHaveText`](#tohavetext-and-tocontaintext) | 正規化後のテキストが完全一致するまで待機 |
 | [`toContainText`](#tohavetext-and-tocontaintext) | 正規化後のテキストが含まれるまで待機 |
 | [`toHaveValue`](#tohavevalue) | フォームコントロールが指定の値になるまで待機 |
@@ -121,6 +122,15 @@ await expect(screen.getByRole('tab', 'Billing')).toBeSelected();
 
 ```ts
 await expect(screen.getByLabel('Email')).toBeFocused();
+```
+
+#### `toBeEmpty`
+
+一致した 1 つの要素が空になるまで待ちます。フォームコントロールなら値が空、それ以外のノードならテキストがない状態です。値はそのまま読むため、スペースだけが入ったフィールドは空ではありません。テキストは正規化するため、空白だけなら空です。オプション（`option`）はテキストで判定します。モバイルではノードのテキストはそのノード自身のラベルなので、子要素がテキストを持つコンテナは空と判定されることがあります。
+
+```ts
+await expect(screen.getByLabel('Search')).toBeEmpty();
+await expect(screen.getByTestId('cart')).not.toBeEmpty();
 ```
 
 #### `toHaveText` と `toContainText`
@@ -623,7 +633,7 @@ last: expected "running" not to be "running"
 
 | マッチャー | 機密フィールドでの動作 |
 | --- | --- |
-| `toHaveValue`, `toHaveText`, `toContainText` | `inputValue()` や `textContent()` と同じく `POLICY_DENIED`。否定やリスト形式も同様 |
+| `toHaveValue`, `toHaveText`, `toContainText`, `toBeEmpty` | `inputValue()` や `textContent()` と同じく `POLICY_DENIED`。否定やリスト形式も同様 |
 | `toHaveAttribute` | `getAttribute()` と同じく `POLICY_DENIED`。すべての属性名と否定も対象 |
 | `toHaveAccessibleName`、`toHaveRole`、状態のマッチャー | 通常どおりに判定 |
 
@@ -703,6 +713,8 @@ export interface AsyncExpectation {
   toBeExpanded(options?: { timeout?: number }): Promise<void>;
   /** Waits for focused state. */
   toBeFocused(options?: { timeout?: number }): Promise<void>;
+  /** Waits for an empty form control value, or no text on any other node. */
+  toBeEmpty(options?: { timeout?: number }): Promise<void>;
   /** Waits for exact normalized text; a list waits for exactly that many matches, each with its entry's text, in order. */
   toHaveText(expected: TextMatch, options?: TextMatcherOptions): Promise<void>;
   toHaveText(expected: readonly TextMatch[], options?: TextMatcherOptions): Promise<void>;
