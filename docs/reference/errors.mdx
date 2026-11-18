@@ -168,7 +168,7 @@ These appear in terminal output and in the report as plain string codes.
 | `UNEXPECTED_PASS` | A test marked [`test.fail`](/reference/test#test-fail) passed. Retried like any test failure. Remove the mark once the cause is fixed | test | 1 |
 | `RUN_TIMEOUT` | The run spent its [`maxDuration`](/reference/config#maxduration) or `--max-duration`. The running tests end as `interrupted`, and the rest are skipped with cause `time-limit` | test | 1 |
 | `LAUNCH_TIMEOUT` | Engine init or attempt start exceeded `config.launchTimeout` | infrastructure | 3 |
-| `CLEANUP_TIMEOUT` | Engine attempt end exceeded `config.cleanupTimeout`, or a route or dialog handler the engine ran for the test was still running when the attempt settled | infrastructure | 3 |
+| `CLEANUP_TIMEOUT` | Engine attempt end exceeded `config.cleanupTimeout`, a route or dialog handler the engine ran for the test was still running when the attempt settled, or a host or session the test opened with `launch()` did not close in that time | infrastructure | 3 |
 | `BROWSER_INSTALL_FAILED` | Browser provisioning failed | infrastructure | 3 |
 | `WORKER_INIT_FAILED` | A worker process never became ready | infrastructure | 3 |
 | `WORKER_EXIT` | A worker exited unexpectedly while running a file. The test in flight fails with `WORKER_CRASH`, and the file's other tests are skipped. Attempts that finished before the exit stay in the report, including a retry's earlier attempts and a serial group's finished members. The crash is recorded as the attempt after them, or on the last attempt when it came after it (an `afterAll`). When an unhandled rejection ends the worker (see `UNHANDLED_REJECTION`), the rejection is the run error, not this one | infrastructure | 3 |

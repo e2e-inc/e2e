@@ -388,13 +388,14 @@ type StepProgress = (
 运行器发送的每个步骤阶段都包含 `progress.identity`：
 
 ```ts
-{ attemptId: string; attemptIndex: number; stepId: string; stepIndex: number }
+{ attemptId: string; attemptIndex: number; stepId: string; stepIndex: number; actor?: string }
 ```
 
 - ID 与最终报告一致。两个索引都从零开始。
 - 重试有新的尝试 ID 和更大的尝试索引；其步骤索引重新从零开始。
 - 串行分组的成员共享分组的尝试 ID 和索引。每个成员的步骤 ID 仍各不相同。
 - 使用 `stepId` 匹配 start、activity、event、replay 和 end 阶段，包括嵌套步骤。
+- 当步骤运行的会话不是测试自身的会话时，`actor` 给出该会话的名称：即测试用 [`launch()`](/core#open-a-host-inside-a-test) 打开的会话。
 - 类型中的 `identity` 是可选的，因此报告器也能接受旧版事件流。
 
 ## `--reporter` 对报告器对象的影响

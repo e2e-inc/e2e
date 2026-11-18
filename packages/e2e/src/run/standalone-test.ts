@@ -398,6 +398,8 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       evidence = await captureFailureEvidence({
         session: env.session,
         error: failure,
+        // A hosted attempt takes in no session beside its own.
+        ownStep: true,
         ledger: sessionLedger(env.session, config.allSecrets),
         config,
         appOrigin: env.target.app.base?.origin,

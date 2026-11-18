@@ -18,7 +18,7 @@ import { attemptSegments, createAttemptArtifacts, resultSegment } from '@e2e-dev
 import type { AttemptContext } from './execute.ts';
 import type { ClosingRecord, SessionClose, SessionPlan } from '@e2e-dev/core/lib/run/engine-sessions';
 import type { ArtifactSink } from '@e2e-dev/core/lib/run/fixtures';
-import type { StepRecord } from '@e2e-dev/core/lib/run/steps';
+import { isOwnStep, type StepRecord } from '@e2e-dev/core/lib/run/steps';
 import { findRegistered, type FileRef, type Realm, RealmManager } from './realm.ts';
 import type { AttemptRecord, ResultRecord, ResultStatus, SerialAttemptRecord, SerialGroupRecord, SerialMemberRecord, FailedStatus } from '@e2e-dev/core/lib/run/records';
 import { isFailedStatus } from '@e2e-dev/core/lib/run/records';
@@ -471,7 +471,8 @@ async function runSerialAttempt(
       kind: 'serial',
       shared,
     });
-    shared.priorSteps.push(...memberAttempt.steps);
+    // What a later member's agent reads as the steps before its own is the shared session's alone.
+    shared.priorSteps.push(...memberAttempt.steps.filter(isOwnStep));
     finishMember({
       id: memberId,
       index: memberIndex,

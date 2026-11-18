@@ -736,7 +736,7 @@ export class ListReporter implements Reporter {
     switch (progress.phase) {
       case 'start': {
         const { api, label, kind } = progress;
-        running.current = { api, label, kind, events: [], replaying: false, activity: undefined };
+        running.current = { api, label, kind, actor: progress.identity?.actor, events: [], replaying: false, activity: undefined };
         this.window.redraw();
         break;
       }
@@ -769,13 +769,13 @@ export class ListReporter implements Reporter {
       }
       case 'end': {
         running.current = undefined;
-        running.ran?.push({ api: progress.api, label: progress.label, status: progress.status, durationMs: progress.durationMs, modelCalls: progress.modelCalls });
+        const { api, label, status, durationMs, modelCalls } = progress;
+        const step = { api, label, status, durationMs, modelCalls, actor: progress.identity?.actor };
+        running.ran?.push(step);
         if (progress.kind !== 'agent') {
           this.window.redraw();
           break;
         }
-        const { api, label, status, durationMs, modelCalls } = progress;
-        const step = { api, label, status, durationMs, modelCalls };
         // An exploration's planner and charter steps show as the exploration's own rows.
         if (this.explore !== undefined) break;
         if (this.live) {

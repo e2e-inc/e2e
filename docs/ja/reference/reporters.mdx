@@ -388,13 +388,14 @@ type StepProgress = (
 ランナーが発行するすべてのステップフェーズには、`progress.identity` を含めます。
 
 ```ts
-{ attemptId: string; attemptIndex: number; stepId: string; stepIndex: number }
+{ attemptId: string; attemptIndex: number; stepId: string; stepIndex: number; actor?: string }
 ```
 
 - ID は最終レポートと一致します。2 つのインデックスはどちらも 0 始まりです。
 - リトライには新しい試行 ID と、より大きい試行インデックスを割り当てます。ステップのインデックスは再び 0 から始まります。
 - 直列グループのメンバーは、グループの試行 ID とインデックスを共有します。各メンバーのステップ ID は区別されます。
 - ネストしたステップも含め、start、activity、event、replay、end フェーズを対応づけるには `stepId` を使います。
+- `actor` は、ステップを実行したセッションがテスト自身のものでない場合に、その名前を示します。テストが [`launch()`](/core#open-a-host-inside-a-test) で開いたセッションです。
 - 古いイベントストリームもレポーターが受け取れるように、型上の `identity` は省略可能です。
 
 ## `--reporter` とレポーターオブジェクトの関係

@@ -222,26 +222,54 @@ export interface TimedVideo {
   readonly endsAt: number;
 }
 
-/** The attempt's playable videos in recording order, each ending where the next begins. */
+/**
+ * The attempt's playable videos in recording order, each ending where the
+ * next of its session begins: a session the test opened beside its own
+ * records at the same time as the test's, so its video ends no other's.
+ */
 export function timedVideos(artifacts: readonly Artifact[], media: ReportMedia): TimedVideo[] {
   const videos = artifacts.flatMap((artifact) => {
     const url = artifact.kind === 'video' ? artifactUrl(artifact, media) : undefined;
     return url === undefined || artifact.startedAt === undefined ? [] : [{ artifact, url, startsAt: Date.parse(artifact.startedAt) }];
   });
   const sorted = videos.toSorted((a, b) => a.startsAt - b.startsAt);
-  return sorted.map((video, index) => ({ ...video, endsAt: sorted[index + 1]?.startsAt ?? Infinity }));
+  return sorted.map((video, index) => ({
+    ...video,
+    endsAt: sorted.slice(index + 1).find((next) => next.artifact.actor === video.artifact.actor)?.startsAt ?? Infinity,
+  }));
+}
+
+/**
+ * What a recording is called among an attempt's: the session's name for one
+ * of a session the test opened beside its own, else `test` beside such
+ * recordings, and its part number when the test's own video came in parts.
+ */
+export function videoName(video: TimedVideo, videos: readonly TimedVideo[]): string {
+  const { actor } = video.artifact;
+  const own = videos.filter((candidate) => candidate.artifact.actor === actor);
+  const part = own.length > 1 ? ` part ${own.indexOf(video) + 1}` : '';
+  if (actor !== undefined) return `${actor}${part}`;
+  return own.length === videos.length ? part.trim() : `test${part}`;
 }
 
 /**
  * Where a step starts in the recording that was running then: the segment
- * and the second into it. A step before the first segment began is at its
- * start, the way the trace page reads it.
+ * and the second into it. A step before its session's first segment began
+ * is at that segment's start, the way the trace page reads it.
  */
 export function videoPosition(step: Step, videos: readonly TimedVideo[]): { readonly video: number; readonly seconds: number } | undefined {
   const at = Date.parse(step.startedAt);
-  const index = videos.findLastIndex((video) => video.startsAt <= at && at < video.endsAt);
+  // A step is in the recording of the session it ran on, never in one of a session beside it.
+  const ofSession = (video: TimedVideo): boolean => video.artifact.actor === step.actor;
+  const index = videos.findLastIndex((video) => ofSession(video) && video.startsAt <= at && at < video.endsAt);
   if (index !== -1) return { video: index, seconds: (at - (videos[index]?.startsAt ?? at)) / 1000 };
-  return videos.length > 0 && at < (videos[0]?.startsAt ?? 0) ? { video: 0, seconds: 0 } : undefined;
+  const first = videos.findIndex(ofSession);
+  return first !== -1 && at < (videos[first]?.startsAt ?? 0) ? { video: first, seconds: 0 } : undefined;
+}
+
+/** A step's api as the page names it: under the session it ran on when that is not the test's own. */
+export function stepCall(step: Step): string {
+  return step.actor === undefined ? step.api : `${step.actor} › ${step.api}`;
 }
 
 export function formatDuration(ms: number): string {
