@@ -211,7 +211,9 @@ on purpose.
   unless you name it, so a ported flow meets system prompts Maestro never
   showed. Set [`app.permissions: 'all'`](/mobile#launch-arguments-and-permissions),
   or name each one with `grant`, `deny`, and `reset` for Maestro's `allow`,
-  `deny`, and `unset`.
+  `deny`, and `unset`. On an iOS simulator `'all'` leaves out notifications,
+  which the simulator refuses to set: accept that prompt with
+  `device.alert('accept')`.
 - Calls through [`device.unstable_raw`](/reference/mobile#unstable_raw)
   aren't steps. The report, the trace, the agent cache, and redaction skip them.
 - A device has no `test.setup` or `{ session }`, see
