@@ -37,9 +37,8 @@ import type { JsonValue } from '../types.ts';
  * stands. A kept entry carries no payload, so the replay's expansion of it
  * (every `unique()` slot filled with this run's value) can never be written;
  * confirmed, the file keeps its bytes and `createdAt`, and a committed cache
- * directory stays clean, unless its provenance predates the step's
- * occurrence fields (`recordedFor`, as stored), which the replay proved and
- * are then written in. Unconfirmed, both kinds are evicted alike.
+ * directory stays clean, but for the provenance the replay proved, which
+ * `completeProvenance` writes in. Unconfirmed, both kinds are evicted alike.
  */
 export type StagedTrace = {
   readonly keyHash: string;
@@ -140,15 +139,19 @@ function flowOf(trace: ActionTrace): string {
 }
 
 /**
- * Writes the step's full provenance into a kept entry recorded before the
- * occurrence fields were, leaving every other entry untouched. Its replay
- * proved which step it belongs to, and `cache.strict` matches only entries
- * that say so exactly (`rekeyed.ts`).
+ * Writes the step's full provenance into a kept entry whose stored provenance
+ * lacks the occurrence fields, or whose identity digest is not the step's:
+ * missing while the step has one, different, or present while the step has
+ * none. Every other entry is left untouched. Its replay proved which step it
+ * belongs to, and `cache.strict` matches only entries that say so exactly
+ * (`rekeyed.ts`).
  */
 async function completeProvenance(store: CacheStore, keyHash: string, recordedFor: TraceProvenance): Promise<void> {
   const existing = await store.read(keyHash);
-  if (existing.status !== 'hit' || existing.entry.payload.recordedFor?.callIndex !== undefined) return;
-  await store.write(keyHash, { ...existing.entry.payload, recordedFor });
+  if (existing.status !== 'hit') return;
+  const stored = existing.entry.payload.recordedFor;
+  const complete = stored?.callIndex !== undefined && stored.identityDigest === recordedFor.identityDigest;
+  if (!complete) await store.write(keyHash, { ...existing.entry.payload, recordedFor });
 }
 
 /** How an attempt ended, as the settlement of its staged entries reads it. */
@@ -162,6 +165,23 @@ export interface AttemptSettlement {
    * exactly as they are, neither written nor evicted.
    */
   readonly implicatesUnconfirmed: boolean;
+  /**
+   * Failures the attempt went on after, which only a program without a test
+   * around it does: each settles the entries it found unconfirmed as that
+   * failure does, whatever passed later. Entries staged after it are judged
+   * by the checks that follow them.
+   */
+  readonly survived?: readonly SurvivedFailure[];
+}
+
+/** One failed step an attempt went on after, and the staged entries it found unconfirmed. */
+export interface SurvivedFailure {
+  /** The first step index no verification had confirmed when the step failed. */
+  readonly from: number;
+  /** The failed step's index, the last the failure covers. */
+  readonly through: number;
+  /** Whether the failure implicates those entries; see `AttemptSettlement.implicatesUnconfirmed`. */
+  readonly implicates: boolean;
 }
 
 /**
@@ -183,7 +203,8 @@ export interface AttemptSettlement {
  * no settlement: interruption implicates nothing, so it writes nothing and
  * evicts nothing. An entry a step replayed whole is staged too,
  * so the same rule evicts it when nothing confirmed it; when something did,
- * it is left exactly as it was found, but for provenance it lacked.
+ * it is left exactly as it was found, but for what `completeProvenance`
+ * writes in.
  */
 export async function settleStagedTraces(context: AgentCacheContext, settlement: AttemptSettlement | undefined): Promise<ReadonlyMap<number, CacheWrite>> {
   const outcomes = new Map<number, CacheWrite>();
@@ -194,12 +215,13 @@ export async function settleStagedTraces(context: AgentCacheContext, settlement:
       continue;
     }
     if (settlement === undefined || context.mode !== 'read-write') continue;
-    const confirmed = entry.stepIndex < settlement.lastVerifiedStepIndex;
+    const failure = settlement.survived?.find((survived) => entry.stepIndex >= survived.from && entry.stepIndex <= survived.through);
+    const confirmed = failure === undefined && entry.stepIndex < settlement.lastVerifiedStepIndex;
     try {
       if (!confirmed) {
         // A kept entry existed for certain, so deleting it is an eviction; a
         // new recording's delete only clears what an earlier run may have left.
-        const deletes = settlement.implicatesUnconfirmed && context.store.delete !== undefined;
+        const deletes = (failure?.implicates ?? settlement.implicatesUnconfirmed) && context.store.delete !== undefined;
         const deleted = deletes && await context.store.delete!(entry.keyHash).then(() => true, () => false);
         outcomes.set(entry.stepIndex, entry.kind === 'keep' && deleted ? 'evicted' : 'unconfirmed');
         continue;

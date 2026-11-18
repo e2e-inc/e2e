@@ -550,6 +550,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
           'e2e init my-app --example with-expo',
           'e2e init --yes',
           'e2e init --yes --gateway openrouter --skills .agents/skills --mcp none --install',
+          'e2e init --yes --ci github-actions',
         ]),
         '',
         docsLine('/reference/cli'),
@@ -1081,6 +1082,28 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
     });
 
   registerCacheCommand(program);
+
+  program
+    .command('report')
+    .summary('open the HTML report in a browser')
+    .description(
+      'Open the HTML report written by @e2e-dev/html-reporter in the default browser (default: <output>/report.html, or .e2e/report.html). Pass [path] to open another HTML file or directory (such as a custom htmlReporter({ outputFile }) path), or --output to override the configured output directory. Exits 2 when the file is missing or cannot be resolved.',
+    )
+    .argument('[path]', 'HTML report file or directory containing report.html')
+    .option('--config <path>', 'config file (default: the nearest e2e.config.ts, .mts, .js, or .mjs)')
+    .option('--output <dir>', 'results directory containing report.html (default: output in the config, else .e2e)')
+    .addHelpText(
+      'after',
+      ['', examples(['e2e report', 'e2e report .e2e/report.html', 'e2e report --output out']), '', docsLine('/reference/cli#e2e-report')].join('\n'),
+    )
+    .action(async (reportPath: string | undefined, options: { config?: string; output?: string }) => {
+      const { report } = await import('./report.ts');
+      process.exitCode = await report({
+        ...(reportPath === undefined ? {} : { path: reportPath }),
+        ...(options.config === undefined ? {} : { config: options.config }),
+        ...(options.output === undefined ? {} : { output: options.output }),
+      });
+    });
 
   program
     .command('upgrade')

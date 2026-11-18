@@ -26,6 +26,7 @@
     "packages/web/tests/types/evaluate-on.ts",
     "packages/mobile/tests/types/options.ts",
     "packages/browser-run/tests/types/options.ts",
+    "packages/moli/tests/types/options.ts",
     "packages/decision/tests/types/options.ts",
     "packages/acp/tests/fixtures/scripted-agent.ts",
     "packages/acp/tests/live/*.ts",
@@ -46,8 +47,7 @@
     "@openrouter/ai-sdk-provider",
     "@expo/fingerprint",
     "@expo/repack-app",
-    "@oxc-project/runtime",
-    "@agent-device/testmu"
+    "@oxc-project/runtime"
   ],
   "ignoreBinaries": ["eas"],
   "ignoreExports": [

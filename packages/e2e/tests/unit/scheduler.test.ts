@@ -46,6 +46,7 @@ const EMPTY_APP: ResolvedTarget['app'] = {
   identity: undefined,
   bundleId: undefined,
   appPath: undefined,
+  linkBase: undefined,
   launchArguments: undefined,
   permissions: undefined,
   command: undefined,
@@ -55,6 +56,7 @@ const EMPTY_DECLARED: ResolvedTarget['declaredApp'] = {
   url: undefined,
   bundleId: undefined,
   appPath: undefined,
+  linkBase: undefined,
   identity: undefined,
   environment: undefined,
   launchArguments: undefined,
@@ -760,6 +762,23 @@ describe('failure limit', () => {
     expect(collected.results.map((result) => result.status)).toEqual(['timed-out', 'failed', 'passed']);
     expect(collected.failureLimits).toEqual([]);
     expect(fleet.interruptSkips).toEqual([]);
+  });
+
+  it('answers each counted failure with continue below the limit, and with nothing at the limit or without one', async () => {
+    const target = makeTarget('web', 0);
+    const pairs = ['a', 'b', 'c'].map((name) => makePair(makeTest(`tests/${name}.e2e.ts`, name), target));
+    const status = { [pairs[0]!.test.id]: 'timed-out' as const, [pairs[1]!.test.id]: 'failed' as const };
+    const controlsWith = async (maxFailures: number | undefined): Promise<MainToWorker['type'][]> => {
+      const fleet = new FakeFleet({ status });
+      await run(makeSelection([{ target, pairs }]), makeCollection(pairs.map((pair) => pair.test.file), pairs), fleet, {
+        workers: 1,
+        ...(maxFailures === undefined ? {} : { maxFailures }),
+      });
+      return fleet.controlMessages.filter((type) => type === 'continue' || type === 'interrupt');
+    };
+    expect(await controlsWith(3)).toEqual(['continue', 'continue']);
+    expect(await controlsWith(2)).toEqual(['continue', 'interrupt']);
+    expect(await controlsWith(undefined)).toEqual([]);
   });
 });
 

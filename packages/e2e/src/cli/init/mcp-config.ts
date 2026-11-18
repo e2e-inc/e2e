@@ -11,21 +11,8 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { PackageManager } from '../../internal/package-manager.ts';
 import { realpathOfExisting } from '@e2e-dev/core/lib/internal/paths';
+import { MCP_LOCATIONS } from './choices.ts';
 import { readCodexConfig, updateCodexConfig } from './codex-config.ts';
-
-interface McpLocation {
-  /** Project-relative config file with `/` separators. */
-  readonly file: string;
-  /** The agents that read it, shown as the prompt hint. */
-  readonly hint: string;
-}
-
-/** Where project-scoped MCP servers are declared. */
-export const MCP_LOCATIONS = [
-  { file: '.mcp.json', hint: 'Claude Code' },
-  { file: '.cursor/mcp.json', hint: 'Cursor' },
-  { file: '.codex/config.toml', hint: 'Codex' },
-] as const satisfies readonly McpLocation[];
 
 const MCP_SERVER_NAME = 'e2e';
 
@@ -79,7 +66,7 @@ function readDocument(absolute: string): McpConfigDocument | undefined {
  * every existing component is a plain entry. A component past the link is not
  * inspected: it lives wherever the link points.
  */
-function linkOnPath(cwd: string, target: string): McpLink | undefined {
+export function linkOnPath(cwd: string, target: string): McpLink | undefined {
   let current = cwd;
   for (const segment of path.relative(cwd, target).split(path.sep)) {
     current = path.join(current, segment);

@@ -100,7 +100,7 @@ This project is a pnpm monorepo. `packages/` holds what publishes to npm,
 - `skills/e2e/`: the agent skill shipped with the package and installed by `e2e init`
 - `skills/create-verification-skill/`: the generator of a project-local `verify-<app>` skill, installed with `npx skills add e2e-inc/e2e --skill create-verification-skill`
 - `skills/migrate-to-e2e/`: ports an existing Playwright, Cypress, Selenium, Appium, Detox, Maestro, or TesterArmy suite one slice at a time, installed with `npx skills add e2e-inc/e2e --skill migrate-to-e2e`
-- `plugins/e2e/`: the Claude Code, Codex, and Cursor plugin of the three skills, installed from this repository as a marketplace with `claude plugin marketplace add e2e-inc/e2e` or `codex plugin marketplace add e2e-inc/e2e`, or copied into `~/.cursor/plugins/local/` for Cursor
+- `plugins/e2e/`: the Claude Code, Codex, Cursor, and Devin plugin of the three skills, installed from this repository as a marketplace with `claude plugin marketplace add e2e-inc/e2e` or `codex plugin marketplace add e2e-inc/e2e`, or copied into `~/.cursor/plugins/local/` for Cursor, or added in Devin from this repository with the subdirectory `plugins/e2e`
 - `.dev/skills/`: the skills coding agents use to work on this repo, symlinked from `.claude/skills/` so `npx skills add e2e-inc/e2e` offers only `skills/*`
 
 On Windows, enable Developer Mode and clone with
@@ -289,9 +289,10 @@ committed.
 The following are the public contract. A change that breaks any of them is a
 breaking change and follows the rules below:
 
-- Public types exported from `e2e`, `e2e/engine`, and `@e2e-dev/core/engine`,
-  as emitted in `dist/index.d.ts` and `dist/engine/index.d.ts` of `e2e`,
-  and `dist/engine/index.d.ts` of `@e2e-dev/core`. Removing an
+- Public types exported from `e2e`, `e2e/engine`, `@e2e-dev/core`,
+  `@e2e-dev/core/agent`, and `@e2e-dev/core/engine`, as emitted in `dist/index.d.ts`
+  and `dist/engine/index.d.ts` of `e2e`, and `dist/core/*.d.ts` and
+  `dist/engine/index.d.ts` of `@e2e-dev/core`. Removing an
   export, narrowing an accepted input, widening a returned type, or changing a
   fixture's runtime behavior all count.
 - Config keys in `e2e.config.ts`, their types, and their defaults.
@@ -335,8 +336,8 @@ together in one release, with a changeset for each, so an engine and a runner
 from the same release always match. `e2e` and `@e2e-dev/core` are a changesets
 `fixed` group: they always share a version, and `e2e` depends on that exact
 `@e2e-dev/core`. Engines declare a peer range on `@e2e-dev/core` that points one way
-only (engine to core, `>=x <1`), plus one on `e2e` for the main entry that
-adds the engine's fixture to `test`, and each integration (`@e2e-dev/kernel`, `@e2e-dev/lightpanda`, `@e2e-dev/eas`, `@e2e-dev/smol`, `@e2e-dev/testmu`, `@e2e-dev/browserstack`, `@e2e-dev/e2b`) does
+only (engine to core, `>=x <1`), plus an optional one on `e2e` for the main
+entry that adds the engine's fixture to `test`, and each integration (`@e2e-dev/kernel`, `@e2e-dev/notte`, `@e2e-dev/lightpanda`, `@e2e-dev/eas`, `@e2e-dev/smol`, `@e2e-dev/testmu`, `@e2e-dev/browserstack`, `@e2e-dev/e2b`, `@e2e-dev/revyl`) does
 the same on the engines it plugs into; do not make it mutual or narrow it.
 
 ### Driver nightly compatibility

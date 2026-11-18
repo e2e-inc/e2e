@@ -17,6 +17,7 @@ import { KEY_MODIFIERS, type KeyModifier } from '../engine/contract.ts';
 import type { ViewportPoint } from '../engine/surface.ts';
 import { codedMessage, hasCause, TestError } from '../internal/errors.ts';
 import { VIEWPORT_LIMITS } from '../internal/geometry.ts';
+import { isPlainObject } from '../internal/options.ts';
 import type { AgentErrorCode } from '../types.ts';
 import { READ_ONLY_GRAMMAR } from './action-names.ts';
 import { isRuntimeHardStop, BLOCKABLE_CODES, type StepExecutorContext, type StepVerdict } from './executor.ts';
@@ -80,11 +81,10 @@ export const VERDICT_RULES = `Verdict rules:
 - "passed" means the application behaved as the step required. "failed" means it did not. "blocked" means credentials, the environment, or test setup prevented a product verdict — blocked says nothing about the product and requires an errorCode.`;
 
 /**
- * A plain AI SDK function tool with its input typed from the schema — what
- * `tool()` from `ai` does, without loading `ai` to do it. The schema is
- * closed here, once for every tool: a field it does not declare fails
- * validation, and the SDK hands the failure back to the model as the call's
- * result instead of stripping the field and running the call without it.
+ * A plain AI SDK function tool with its input typed from the schema; a tool
+ * that declares fields rejects any key it does not declare. A tool with no
+ * fields reads a plain object as `{}` first, because some models pad a
+ * no-input call and resend the refusal until the step budget ends.
  */
 function schemaTool<Schema extends z.ZodObject, Output = string>(definition: {
   readonly description: string;
@@ -93,7 +93,11 @@ function schemaTool<Schema extends z.ZodObject, Output = string>(definition: {
   /** Maps a structured result onto model content; a string result needs none. */
   readonly toModelOutput?: (options: { readonly output: Output }) => ModelOutput;
 }): Tool {
-  return { ...definition, inputSchema: definition.inputSchema.strict() } as Tool;
+  const strict = definition.inputSchema.strict();
+  const inputSchema = Object.keys(definition.inputSchema.shape).length === 0
+    ? z.preprocess((value) => (isPlainObject(value) ? {} : value), strict)
+    : strict;
+  return { ...definition, inputSchema } as Tool;
 }
 
 /** The model-facing shape of a tool result: text, or text with a screenshot attached. */
@@ -238,6 +242,15 @@ interface GrammarToolSetup extends GrammarToolOptions {
    * mcp` sets it, the testing agent does not.
    */
   readonly saveScreenshot?: ((file: string) => Promise<string>) | undefined;
+  /**
+   * Offers `type_secret` on every step the surface can fill a secret on, with
+   * a description that names no secret, so every act step of a target sends
+   * the same tools and a provider's prompt cache serves them. The caller lists
+   * the step's secrets in its own message; a call on a step that declares none
+   * fails like any undeclared name. Without it the tool is offered only to a
+   * step that declares secrets, and its description names them.
+   */
+  readonly secretsListedByCaller?: boolean | undefined;
 }
 
 /**
@@ -648,14 +661,19 @@ export function grammarTools(
             ),
         });
   Object.assign(tools, createPointTools(context, { screen, inOrder, perform }));
-  // Offered only when the step declared secrets and the surface can fill: an
-  // empty vocabulary is better than a tool the model can only be rejected on.
-  if (verbs.has('typeSecret') && context.step.secrets.length > 0) {
+  // Offered only when the surface can fill, and otherwise only when the step
+  // declared secrets: an empty vocabulary is better than a tool the model can
+  // only be rejected on. A caller that lists the secrets itself takes the
+  // refusal for a tool set that stays the same across steps.
+  const secrets = context.step.secrets;
+  const listedByCaller = options.secretsListedByCaller === true;
+  if (verbs.has('typeSecret') && (listedByCaller || secrets.length > 0)) {
     tools['type_secret'] = screenTool({
       description:
-        'Fill one declared secret into an input by its name; the plaintext never passes through you. A password fills only a password field; a generic-secret fills any editable input. Available: ' +
-        context.step.secrets.map((secret) => `"${secret.name}" (${secret.purpose})`).join(', ') +
-        '.',
+        'Fill one declared secret into an input by its name; the plaintext never passes through you. A password fills only a password field; a generic-secret fills any editable input. ' +
+        (listedByCaller
+          ? 'The step message lists the secrets it declares.'
+          : `Available: ${secrets.map((secret) => `"${secret.name}" (${secret.purpose})`).join(', ')}.`),
       inputSchema: z.object({ target, name: z.string().min(1) }),
       execute: ({ target: id, name }) =>
         acting(

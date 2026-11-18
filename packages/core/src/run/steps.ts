@@ -294,6 +294,23 @@ export interface StepRunOptions {
   readonly agent?: string | undefined;
 }
 
+/** How many causes down a thrown error is redacted; a chain is rarely three deep. */
+const MAX_REDACTED_CAUSES = 8;
+
+/** Replaces secret values in the message and stack of a thrown error and of the causes under it, keeping each error's identity. */
+function redactErrorInPlace(thrown: unknown, redact: (text: string) => string): void {
+  let error: unknown = thrown;
+  for (let depth = 0; error instanceof Error && depth < MAX_REDACTED_CAUSES; depth += 1) {
+    try {
+      error.message = redact(error.message);
+      if (error.stack !== undefined) error.stack = redact(error.stack);
+    } catch {
+      // A frozen error keeps its text; nothing more can be done to it here.
+    }
+    error = error.cause;
+  }
+}
+
 export interface StepRecorderOptions {
   /** The report-owning attempt; serial members share their group's attempt identity. */
   readonly attempt?: { readonly id: string; readonly index: number };
@@ -307,6 +324,19 @@ export interface StepRecorderOptions {
   readonly redact?: (text: string) => string;
   /** Cuts every running step when it aborts: the step fails with the signal's error and its body is abandoned. */
   readonly signal?: AbortSignal;
+  /**
+   * Throws a failed step's error classified and redacted, as its record
+   * keeps it: a program with no report around it reads the thrown error
+   * itself, so it must carry a `code`, and an engine's message quotes the
+   * screen. Off in a run, whose report classifies and redacts.
+   */
+  readonly redactThrown?: boolean;
+  /**
+   * How many finished steps the recorder keeps, oldest dropped first. A run
+   * keeps them all for its report; a program's session has no report and
+   * may take millions of steps. Step indexes go on counting.
+   */
+  readonly retainSteps?: number;
   /**
    * Holds a top-level step of a phase that `holdable` allows until it may
    * run (`e2e run --step`). It resolves when the step may run and rejects
@@ -378,6 +408,11 @@ function quoted(label: string): string {
   return `"${label.length > MAX_QUOTED_LABEL_CHARS ? `${label.slice(0, MAX_QUOTED_LABEL_CHARS - 3)}...` : label}"`;
 }
 
+/** A step as an error message names it: its api, and its quoted label when it has one. */
+function callName(step: { readonly api: string; readonly label: string }): string {
+  return step.label === '' ? step.api : `${step.api} ${quoted(step.label)}`;
+}
+
 export class StepRecorder {
   private readonly attempt: { readonly id: string; readonly index: number };
   private readonly steps: StepRecord[] = [];
@@ -398,6 +433,8 @@ export class StepRecorder {
   private readonly abandoned = new Set<string>();
   /** The promises of abandoned steps, for the wait before teardown. */
   private readonly abandonedPromises: Promise<unknown>[] = [];
+  /** What each step named by `nameRunning` fails with, in place of the abort reason it was named for. */
+  private readonly named = new Map<string, { readonly reason: Error; readonly error: Error }>();
   /** The index every step before which a passed verification proves, or -1 when none has passed. */
   private lastVerified = -1;
   /** What the app logged this attempt, within `APP_LOG_LIMITS`. */
@@ -415,6 +452,10 @@ export class StepRecorder {
   private readonly projectRoot: string | undefined;
   private readonly redact: ((text: string) => string) | undefined;
   private readonly signal: AbortSignal | undefined;
+  private readonly redactThrown: boolean;
+  private readonly retainSteps: number | undefined;
+  /** Steps opened so far, the next step's index: `steps` may have dropped its oldest. */
+  private opened = 0;
   private readonly hold: StepRecorderOptions['hold'];
 
   constructor(
@@ -427,6 +468,8 @@ export class StepRecorder {
     this.projectRoot = options.projectRoot;
     this.redact = options.redact;
     this.signal = options.signal;
+    this.redactThrown = options.redactThrown === true;
+    this.retainSteps = options.retainSteps;
     this.hold = options.hold;
   }
 
@@ -510,7 +553,7 @@ export class StepRecorder {
   ): Promise<T> {
     // A verification run inside another step (an `onAction` hook's) proves
     // only what the steps before that one left, never the step still running.
-    const verifiesBefore = parent?.index ?? this.steps.length;
+    const verifiesBefore = parent?.index ?? this.opened;
     const record = this.open(kind, api, label, stack, options);
     const promise = this.execute(record, body, options, verifiesBefore);
     this.pending.set(record.id, promise);
@@ -519,7 +562,8 @@ export class StepRecorder {
 
   /** Records a step as started now and tells reporters. */
   private open(kind: StepKind, api: string, label: string, stack: string | undefined, options: StepRunOptions): StepRecord {
-    const index = this.steps.length;
+    const index = this.opened;
+    this.opened += 1;
     const startedAt = timestamp();
     const source = sourceLocation(stack, this.projectRoot);
     const record: StepRecord = {
@@ -538,6 +582,8 @@ export class StepRecorder {
       artifacts: [],
     };
     this.steps.push(record);
+    // Only a finished step is dropped, and only from the front, so a long-running one keeps its record.
+    while (this.retainSteps !== undefined && this.steps.length > this.retainSteps && !this.running.has(this.steps[0]!.id)) this.steps.shift();
     this.running.add(record.id);
     for (const { line, at } of this.earlyNavigations.splice(0)) this.fileNavigation(record, line, at);
     if (stack !== undefined) this.stacks.set(record.id, stack);
@@ -555,7 +601,10 @@ export class StepRecorder {
       record.durationMs = Date.now() - startedMs;
       if (options.verifies === true) this.lastVerified = Math.max(this.lastVerified, verifiesBefore);
       return result;
-    } catch (cause) {
+    } catch (thrown) {
+      // A step that failed on its own, or that another abort reached first, keeps that failure.
+      const name = this.named.get(record.id);
+      const cause = name !== undefined && thrown === name.reason ? name.error : thrown;
       if (this.abandoned.has(record.id)) {
         markAbandonedRejection(cause);
         throw cause;
@@ -571,11 +620,14 @@ export class StepRecorder {
             ? 'blocked'
             : 'failed';
       record.error = serializeError(error, { projectRoot: this.projectRoot, redact: this.redact });
-      throw cause;
+      if (!this.redactThrown) throw cause;
+      if (this.redact !== undefined) redactErrorInPlace(error, this.redact);
+      throw error;
     } finally {
       this.running.delete(record.id);
       this.pending.delete(record.id);
       this.stacks.delete(record.id);
+      this.named.delete(record.id);
       // An abandoned step reported its end when the body returned; what it did since is not the test's.
       if (this.abandoned.delete(record.id)) {
         this.seenScreens.delete(record.id);
@@ -610,7 +662,7 @@ export class StepRecorder {
       const more = first === undefined && running.length > 1 ? ` and ${running.length - 1} more` : '';
       const error = new TestError(
         'STEP_NOT_AWAITED',
-        withHint(`the test body returned before ${step.api} ${quoted(step.label)}${more} finished`, 'put `await` in front of every step call'),
+        withHint(`the test body returned before ${callName(step)}${more} finished`, 'put `await` in front of every step call'),
       );
       relocateStack(error, this.stacks.get(step.id));
       first ??= error;
@@ -633,6 +685,23 @@ export class StepRecorder {
       this.stacks.delete(record.id);
     }
     return first;
+  }
+
+  /**
+   * Names every step still running in the error it fails with once the
+   * recorder's signal aborts with `reason`: what `error` builds for the call,
+   * at the line that made it. Call it right before that abort. Unlike
+   * `abandonRunning`, nothing is recorded as not awaited and no rejection is
+   * observed: a program closes a session to cancel what runs on it, and the
+   * calls it cut are its own to handle.
+   */
+  nameRunning(reason: Error, error: (call: string) => Error): void {
+    for (const step of this.steps) {
+      if (!this.running.has(step.id)) continue;
+      const named = error(callName(step));
+      relocateStack(named, this.stacks.get(step.id));
+      this.named.set(step.id, { reason, error: named });
+    }
   }
 
   /** Resolves once every abandoned step has settled, however it did; the caller bounds the wait. */

@@ -16,7 +16,7 @@ function eventually<T>(check: () => T): Promise<T> {
   return vi.waitFor(check, { timeout: 15_000 });
 }
 afterEach(() => {
-  for (const cleanup of cleanups.splice(0)) cleanup();
+  for (const cleanup of cleanups.splice(0).toReversed()) cleanup();
 });
 
 /** A scripted agent: one list of moves per prompt turn, and the log it writes. */
@@ -418,6 +418,8 @@ describe('acp', () => {
     await eventually(() => expect(log().filter((entry) => 'prompt' in entry)).toHaveLength(1));
     first.abortStep(new AgentError('STEP_TIMEOUT', 'the first step timed out'));
     await expect(run).rejects.toMatchObject({ code: 'STEP_TIMEOUT' });
+    // The agent logs the cancel after the step already ended: wait for it, or that write races the teardown.
+    await eventually(() => expect(log()).toContainEqual({ cancelled: true }));
 
     const second = context({ attempt: { attempt: first.ctx.attempt as never, end: first.end } });
     const next = executor.runStep(second.ctx);

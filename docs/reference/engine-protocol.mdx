@@ -146,6 +146,10 @@ export function spawnTransport(options: {
 
 Closing a connection ends stdin, sends `SIGTERM`, and sends `SIGKILL` when
 the cleanup budget runs out.
+When the server's stdout ends, the connection closes once the server has
+exited and its stderr has closed, or 2 seconds later.
+The error names what the transport has seen by then: the exit code or
+signal, and the last stderr lines.
 
 ### `socketTransport`
 
@@ -231,6 +235,7 @@ params are the member's arguments by name, with every `OperationContext` as
 | `artifacts/startVideo` | `{ operation }` | `null` |
 | `artifacts/stopVideo` | `{ operation }` | `VideoSegment[]` |
 | `session/open` | `{ url, operation }` | `null` |
+| `session/openLink` | `{ url, operation }` | `null` |
 | `session/back`, `session/restart`, `session/reset` | `{ operation }` | `null` |
 | `session/resize` | `{ size: { width, height }, operation }` | `null` |
 | `session/switchTab` | `{ index, operation }` | `null` |

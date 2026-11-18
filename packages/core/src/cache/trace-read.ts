@@ -211,7 +211,7 @@ function readRecordedAction(document: unknown): RecordedAction | undefined {
     }
     case 'press': {
       const target = readDescriptor(raw['target']);
-      const key = readBoundedText(raw['key'], 64);
+      const key = readKey(raw['key'], 64);
       if (target === undefined || key === undefined) return undefined;
       return { name: 'press', summary, target, key };
     }
@@ -313,7 +313,7 @@ function readRecordedAction(document: unknown): RecordedAction | undefined {
       return { name: 'typeText', summary, value, replace: raw['replace'] };
     }
     case 'pressKey': {
-      const key = readBoundedText(raw['key'], 64);
+      const key = readKey(raw['key'], 64);
       return key === undefined ? undefined : { name: 'pressKey', summary, key };
     }
     case 'dismissKeyboard':
@@ -408,6 +408,11 @@ function readPosition(document: unknown): TracePosition | undefined {
   return { index: index as number, of: of as number };
 }
 
+/** Whether a provenance field that may be absent is absent or a SHA-256 hex digest. */
+function isOptionalDigest(value: unknown): value is string | undefined {
+  return value === undefined || (typeof value === 'string' && SHA256_HEX.test(value));
+}
+
 function readProvenance(document: unknown): TraceProvenance | undefined {
   if (typeof document !== 'object' || document === null || Array.isArray(document)) {
     return undefined;
@@ -419,13 +424,15 @@ function readProvenance(document: unknown): TraceProvenance | undefined {
   if (testId === undefined || targetId === undefined) return undefined;
   if (typeof instructionDigest !== 'string' || !SHA256_HEX.test(instructionDigest)) return undefined;
   const paramsDigest = raw['paramsDigest'];
-  if (paramsDigest !== undefined && (typeof paramsDigest !== 'string' || !SHA256_HEX.test(paramsDigest))) return undefined;
+  if (!isOptionalDigest(paramsDigest)) return undefined;
   const callIndex = raw['callIndex'];
   if (callIndex !== undefined && (typeof callIndex !== 'number' || !Number.isSafeInteger(callIndex) || callIndex < 0)) {
     return undefined;
   }
   const agent = raw['agent'] === undefined ? undefined : readBoundedText(raw['agent'], MAX_TRACE_DESCRIPTOR_CHARS);
   if (raw['agent'] !== undefined && agent === undefined) return undefined;
+  const identityDigest = raw['identityDigest'];
+  if (!isOptionalDigest(identityDigest)) return undefined;
   return {
     testId,
     targetId,
@@ -433,6 +440,7 @@ function readProvenance(document: unknown): TraceProvenance | undefined {
     ...(paramsDigest === undefined ? {} : { paramsDigest }),
     ...(callIndex === undefined ? {} : { callIndex }),
     ...(agent === undefined ? {} : { agent }),
+    ...(identityDigest === undefined ? {} : { identityDigest }),
   };
 }
 
@@ -440,6 +448,11 @@ function readProvenance(document: unknown): TraceProvenance | undefined {
 function readInputPaths(value: unknown): readonly string[] | undefined {
   if (!Array.isArray(value) || value.length === 0 || value.length > MAX_TRACE_UPLOAD_PATHS) return undefined;
   return each(value, readInputText);
+}
+
+/** A recorded key: any non-empty key name up to `maxChars`, a space press's `' '` included, which the grammar takes as a single character. */
+function readKey(value: unknown, maxChars: number): string | undefined {
+  return typeof value === 'string' && value !== '' && value.length <= maxChars ? value : undefined;
 }
 
 /** Verbatim replay input: bounded but never trimmed — whitespace can be the value. */
