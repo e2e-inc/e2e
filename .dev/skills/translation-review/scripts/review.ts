@@ -20,6 +20,12 @@ import type { Finding } from './lib.ts';
 const MINIMUM = ['index', 'quickstart', 'core-concepts', 'agentic-vs-deterministic', 'coding-agents', 'mcp-server', 'ci', 'web', 'mobile'].map((name) => `${name}.mdx`);
 
 const args = process.argv.slice(2);
+const unknown = args.filter((arg) => arg.startsWith('--') && !['--page', '--minimum', '--json'].includes(arg));
+if (unknown.length > 0) {
+  console.error(`unknown option ${unknown.join(', ')}
+usage: node review.ts <locale> [--page <page>.mdx] [--minimum] [--json]`);
+  process.exit(2);
+}
 const locale = args.find((arg, i) => !arg.startsWith('--') && args[i - 1] !== '--page');
 const pageAt = args.indexOf('--page');
 const pageOption = pageAt === -1 ? undefined : args[pageAt + 1];

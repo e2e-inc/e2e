@@ -16,7 +16,7 @@ section, or a term translated three ways. This skill does, for any folder under
 
 ## Run it
 
-From the repo root (Node 22+, no install):
+From the repo root (Node 22.18+ or 24+, which run `.ts` files directly; no install):
 
 ```sh
 node .dev/skills/translation-review/scripts/review.ts <locale>            # every page
@@ -29,7 +29,7 @@ per page and section:
 
 | Check | Severity |
 | --- | --- |
-| A page of the minimum set (issue #1890) is not translated | error |
+| With `--minimum`: a page of the minimum set (issue #1890) is not translated | error |
 | Section count differs from English | error |
 | A link target (Markdown or a component's `href`), list item, table row, code block, or component is missing | error |
 | Prose is under 70% of the English word count (content cut), in a section of 25 or more English words | error |
@@ -67,8 +67,8 @@ feminine and plural forms of an adjective too: `bloqueado` does not match
 one with `node .dev/skills/translation-review/scripts/terms.ts init <locale>
 "<Language>"`. Add or change rows through the `terms-add` skill.
 
-`ja` and `zh` keep their glossary as a table in their README, which the DeepL
-check (`scripts/deepl-review.ts`) reads. These skills read `Terms.md` only, so
+`ja` keeps its glossary as a table in its README, which the DeepL check
+(`scripts/deepl-review.ts`) reads, and `zh` has no `Terms.md` either. These skills read `Terms.md` only, so
 term checks are off for those locales until their table moves to a `Terms.md`
 and `parseGlossary` reads that; `init` refuses to start a second glossary
 beside a README table.
@@ -85,7 +85,4 @@ beside a README table.
   read. The docs checks only require a translated page to have a `title`, so a
   wrong or missing key such as `og:image` is yours to check against the English
   page.
-- Word counts treat each Japanese, Chinese, or Korean character as a word, so
-  the 70% and 190% thresholds are rough for those languages; read a finding
-  before trusting it.
 - `--page` reviews only that page and skips the minimum-set check.

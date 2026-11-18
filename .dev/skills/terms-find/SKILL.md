@@ -51,7 +51,7 @@ what Microsoft calls the term so the user can decide the `Terms.md` row.
      Microsoft's: report the one for the locale's main region first.
 4. **Fallback when the report has no entry:** the script, which aligns the
    same page on Microsoft Learn and MDN Web Docs in two languages and ranks
-   the words that appear in the translation (Node 22+, network, no install):
+   the words that appear in the translation (Node 22.18+ or 24+, which run `.ts` files directly; network, no install):
 
    ```sh
    node .dev/skills/terms-find/scripts/find.ts <locale> "<English term>"

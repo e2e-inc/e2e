@@ -14,7 +14,7 @@ this reviews the prose: meaning, glossary terms, register, grammar.
 
 ## Run it
 
-1. Start the viewer from the repo root (any Node 22+; no install). Use a
+1. Start the viewer from the repo root (Node 22.18+ or 24+, which run `.ts` files directly; no install). Use a
    locale folder that has translated pages:
 
    ```sh

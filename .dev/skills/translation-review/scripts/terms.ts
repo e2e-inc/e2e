@@ -21,6 +21,8 @@ import { DOCS, locales, parseTerms, read, termsPath, upsertTerm } from './lib.ts
 const USAGE = `usage: node terms.ts list <locale> | init <locale> "<Language>" | add <locale> "<english>" "<translation>" [--note "<why>"]\nlocales: ${locales().join(', ')}`;
 const argv = process.argv.slice(2);
 let note: string | undefined;
+const joined = argv.findIndex((arg) => arg.startsWith('--note='));
+if (joined !== -1) argv.splice(joined, 1, '--note', (argv[joined] ?? '').slice('--note='.length));
 const noteAt = argv.indexOf('--note');
 if (noteAt !== -1) {
   note = argv[noteAt + 1];
@@ -29,6 +31,12 @@ if (noteAt !== -1) {
     process.exit(2);
   }
   argv.splice(noteAt, 2);
+}
+const unknownOption = argv.find((arg) => arg.startsWith('--'));
+if (unknownOption) {
+  console.error(`unknown option ${unknownOption}
+${USAGE}`);
+  process.exit(2);
 }
 const [command, locale, rawEnglish, rawTranslation] = argv;
 const english = rawEnglish?.trim();

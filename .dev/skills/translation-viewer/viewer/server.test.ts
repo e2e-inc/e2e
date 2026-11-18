@@ -5,6 +5,7 @@ import { once } from 'node:events';
 import { dirname, join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { DOCS, locales, pagesUnder } from '../../translation-review/scripts/lib.ts';
 
 const PORT = 4790 + (process.pid % 100);
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -40,14 +41,17 @@ test('refuses a request that names another origin', async () => {
 test('refuses a page path that leaves the docs folder', async () => {
   const { body } = await call('/api/locales');
   const locale = String((body['locales'] as string[])[0]);
-  const { status } = await call(`/api/file?locale=${locale}&path=${encodeURIComponent('../README.md')}`);
+  const { status } = await call(`/api/file?locale=${locale}&path=${encodeURIComponent('../index.mdx')}`);
   assert.equal(status, 400);
 });
 
 test('answers 404, not 500, for a page the locale has not translated', async () => {
-  const { body } = await call('/api/locales');
-  const locale = String((body['locales'] as string[])[0]);
-  const { status } = await call(`/api/file?locale=${locale}&path=${encodeURIComponent('no-such-page.mdx')}`);
+  const locale = String(((await call('/api/locales')).body['locales'] as string[])[0]);
+  const known = new Set(locales());
+  const translated = new Set(pagesUnder(`${DOCS}/${locale}`));
+  const page = pagesUnder(DOCS).find((candidate) => !known.has(candidate.split('/')[0] ?? '') && !translated.has(candidate));
+  assert.ok(page, 'an English page the first locale has not translated');
+  const { status } = await call(`/api/file?locale=${locale}&path=${encodeURIComponent(page)}`);
   assert.equal(status, 404);
 });
 

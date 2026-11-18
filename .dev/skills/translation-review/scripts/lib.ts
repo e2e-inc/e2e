@@ -252,7 +252,7 @@ export function inventory(lines: string[]): Inventory {
     tags: tally([...text.matchAll(/<\/?([A-Z][A-Za-z]*)\b/g)].map((match) => match[1] ?? '')),
     listItems: prose.filter((line) => /^\s*([-*]|\d+\.)\s+\S/.test(line)).length,
     tableRows: prose.filter((line) => /^\s*\|/.test(line)).length,
-    codeBlocks: lines.filter((line) => FENCE.test(line)).length,
+    codeBlocks: Math.ceil(lines.filter((line) => FENCE.test(line)).length / 2),
   };
 }
 

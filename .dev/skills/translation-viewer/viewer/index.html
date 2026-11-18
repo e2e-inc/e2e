@@ -131,14 +131,12 @@ function chunks(en, tr) {
 
 /** The term rows of a section as `English | translation | note` lines. */
 function termLines(terms) {
-  return terms.map((term) => `${term.en} | ${term.forms.join(' / ')}${term.note ? ` | ${term.note}` : ''}`).join('
-');
+  return terms.map((term) => `${term.en} | ${term.forms.join(' / ')}${term.note ? ` | ${term.note}` : ''}`).join('\n');
 }
 
 /** The terms of a section as prompt bullets for the coding session. */
 function termBullets(terms) {
-  return terms.map((term) => `- ${term.en} -> ${term.forms.join(' / ')}${term.note ? ` (${term.note})` : ''}`).join('
-');
+  return terms.map((term) => `- ${term.en} -> ${term.forms.join(' / ')}${term.note ? ` (${term.note})` : ''}`).join('\n');
 }
 
 function systemPrompt(locale, glossary) {

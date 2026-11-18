@@ -65,7 +65,7 @@ test('inventory counts markdown links, component hrefs, list items, table rows, 
   const counts = inventory(['- [a](/one)', '- b', '<Card href="/two" />', '| x | y |', '```ts', 'code', '```']);
   assert.equal(counts.links.get('/one'), 1);
   assert.equal(counts.links.get('/two'), 1);
-  assert.equal([counts.listItems, counts.tableRows, counts.codeBlocks].join(','), '2,1,2');
+  assert.equal([counts.listItems, counts.tableRows, counts.codeBlocks].join(','), '2,1,1');
 });
 
 const english = { heading: '## A', lines: ['## A', 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour twentyfive twentysix'] };
