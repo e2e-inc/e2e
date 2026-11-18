@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { StepExecutor, StepExecutorContext } from 'e2e';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { redactSecrets } from 'e2e/agent';
 import { acp, claudeCode, codex } from '../src/index.ts';
 import { codexLaunch } from '../src/presets.ts';
@@ -12,6 +12,10 @@ import { codexLaunch } from '../src/presets.ts';
 const AGENT = fileURLToPath(new URL('./fixtures/scripted-agent.ts', import.meta.url));
 const pass = { call: 'complete_step', args: { status: 'passed', summary: 'done' } };
 const cleanups: (() => void)[] = [];
+// No test reads the developer's own Codex login: a test that wants one names its own home.
+beforeEach(() => {
+  vi.stubEnv('CODEX_HOME', join(tmpdir(), 'e2e-acp-no-codex-home'));
+});
 afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup();
   vi.unstubAllEnvs();
@@ -450,10 +454,10 @@ describe('the login Codex saved', () => {
     expect(redactSecrets(key)).toBe('<secret:codex.api-key>');
   });
 
-  it('is read from ~/.codex when no CODEX_HOME is set', async () => {
-    const key = 'sk-saved-default-home-1a7c3e9b5d';
+  it.each([['no CODEX_HOME is set', undefined], ['CODEX_HOME is empty', '']])('is read from ~/.codex when %s', async (_label, value) => {
+    const key = `sk-saved-default-home-${value === undefined ? '1a7c3e9b5d' : '8f2b6d0c4e'}`;
     const { executor, log } = codexWith(login({ OPENAI_API_KEY: key }), () => ({}));
-    vi.stubEnv('CODEX_HOME', undefined);
+    vi.stubEnv('CODEX_HOME', value);
     vi.stubEnv('HOME', join(dirname(log), 'home'));
     vi.stubEnv('USERPROFILE', join(dirname(log), 'home'));
     await runStep(executor, log);

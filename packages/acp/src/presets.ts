@@ -173,7 +173,8 @@ const CodexSavedLogin = z.object({
  * login in the OS keyring cannot be read, and is not redacted.
  */
 function registerSavedLogin(env: Readonly<Record<string, string>> | undefined): void {
-  const home = env?.['CODEX_HOME'] ?? process.env['CODEX_HOME'] ?? join(homedir(), '.codex');
+  // An empty CODEX_HOME is none, as Codex reads it.
+  const home = (env?.['CODEX_HOME'] ?? process.env['CODEX_HOME']) || join(homedir(), '.codex');
   let saved: z.infer<typeof CodexSavedLogin>;
   try {
     saved = CodexSavedLogin.parse(JSON.parse(readFileSync(join(home, 'auth.json')).toString()));
