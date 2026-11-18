@@ -117,6 +117,15 @@ describe('e2e/core', { timeout: 60_000 }, () => {
     await expect(host(fake.engine)).rejects.toMatchObject({ code: 'WORKER_PROTOCOL' });
   });
 
+  it('gives each host its own target name, so an engine that names a device session after it never hands one device to two hosts', async () => {
+    const fakes = [createFakeEngine(), createFakeEngine(), createFakeEngine()];
+    await Promise.all(fakes.slice(0, 2).map((fake) => host(fake.engine)));
+    await host(fakes[2]!.engine);
+    const names = fakes.map((fake) => fake.inits[0]?.targetName);
+    expect(new Set(names).size).toBe(3);
+    for (const name of names) expect(name).toMatch(new RegExp(`^fake-launch-${process.pid}-\\d+$`));
+  });
+
   it('refuses what is not an engine, an app key it does not take, and a relative artifactsDir resolves from cwd', async () => {
     const web = () => createFakeEngine().engine;
     await expect(launch(web as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('got a function') });
@@ -388,6 +397,22 @@ describe('e2e/core', { timeout: 60_000 }, () => {
         expect(brain.calls).toBe(1);
       }
       expect(readdirSync(cacheDir, { recursive: true }).filter((file) => String(file).endsWith('.json'))).toHaveLength(1);
+    });
+
+    it('replays a recording another host made, since a host\'s own target name is not part of the key', async () => {
+      const brain = scripted();
+      const cacheDir = path.join(dir, 'cache');
+      for (const round of [1, 2]) {
+        const opened = await host(createFakeEngine({ scene: shop }).engine, { app: FAKE_APP });
+        const session = await opened.newSession();
+        await session.app.open('/');
+        const agent = createAgent(session, { executor: brain, cache: { dir: cacheDir } });
+        const result = await agent.act('checkout with the coupon', { cacheKey: 'checkout' });
+        await session.screen.getByRole('status', 'Paid').waitFor();
+        expect(result.cache?.mode).toBe(round === 1 ? 'missed' : 'self-finalized');
+        await opened.close();
+      }
+      expect(brain.calls).toBe(1);
     });
 
     it('keeps a confirmed recording when the host closes the session, and after a failure the program caught', async () => {

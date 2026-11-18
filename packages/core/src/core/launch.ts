@@ -126,6 +126,21 @@ const RETAINED_STEPS = 500;
 /** The core fixtures that belong to a test. A session has no test, so it exposes every other built-in fixture. */
 const TEST_FIXTURES = new Set(Object.entries(CORE_FIXTURES).flatMap(([name, fixture]) => (fixture.scope === 'test' ? [name] : [])));
 
+/** Hosts this process launched, which numbers each host's target name. */
+let hostsLaunched = 0;
+
+/**
+ * The name a host's target goes by: its platform, this process, and the
+ * host's number in it. Unique among the hosts open on the machine at once,
+ * since an engine names what it holds after it (a device's agent-device
+ * session), so two hosts never share one device. The replay cache keys on
+ * the platform instead, so a recording replays on any host.
+ */
+function hostTargetName(platform: string): string {
+  hostsLaunched += 1;
+  return `${platform}-launch-${process.pid}-${hostsLaunched}`;
+}
+
 /**
  * Launches `engine`: prepares it (a first-run browser download, a device
  * lease), initializes one worker, and returns the host that opens sessions
@@ -164,7 +179,12 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
       const resolved = resolveProjectConfig(
         {
           // An engine that declares no platform labels its host with its name.
-          targets: [{ engine, ...(engine.platform === undefined ? { platform: engine.name } : {}), ...(options.app === undefined ? {} : { app: options.app }) }],
+          targets: [{
+            name: hostTargetName(engine.platform ?? engine.name),
+            engine,
+            ...(engine.platform === undefined ? { platform: engine.name } : {}),
+            ...(options.app === undefined ? {} : { app: options.app }),
+          }],
           trace: 'off',
           video: 'off',
           cache: 'off',
@@ -346,7 +366,8 @@ function coreSession<Fixtures extends object>(
   Object.defineProperties(session, Object.getOwnPropertyDescriptors(controls));
   const typed = Object.freeze(session);
   registerSession(typed, {
-    attempt, config, target, closers,
+    attempt, config, closers,
+    cacheTarget: targetIdentity({ ...target, name: target.platform }),
     // A cancelled session implicates nothing, so its recordings are neither written nor evicted.
     settlement: () => attempt.budget.signal.aborted ? undefined : failures.settlement(attempt.steps),
   });
