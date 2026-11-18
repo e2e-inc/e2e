@@ -490,15 +490,14 @@ describe('recorded provenance', () => {
   it('measures the redacted names, so a name a secret makes longer than an entry keeps gets a digest', () => {
     const secrets = new SecretLedger();
     secrets.register('password', 'hunter2');
+    // Under 300 characters as written, over 300 once `hunter2` is redacted.
     const variant = (title: string) => recordedProvenance({ ...STEP, testId: `${'x'.repeat(280)} hunter2 ${title}` }, secrets.redact);
     const [first, second] = [variant('first'), variant('second')];
-    expect(`${'x'.repeat(280)} hunter2 second`.length).toBeLessThanOrEqual(300);
     expect(first.testId).toBe(second.testId);
     expect(first.identityDigest).toMatch(/^[a-f0-9]{64}$/u);
     expect(second.identityDigest).toMatch(/^[a-f0-9]{64}$/u);
     expect(first.identityDigest).not.toBe(second.identityDigest);
   });
-
 });
 
 describe('reading recorded provenance', () => {
