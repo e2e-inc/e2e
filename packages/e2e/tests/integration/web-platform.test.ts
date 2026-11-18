@@ -398,6 +398,17 @@ test('a relative toHaveURL prints the expected URL resolved', async ({ app, brow
   await app.open('/classes');
   await expect(browser).toHaveURL('/about', { timeout: 300 });
 });
+
+test('CSS and property assertions name what they wait for', async ({ app, browser }) => {
+  await app.open('/classes');
+  await expect(browser).toHaveCSS(browser.locator('body'), 'display', 'block');
+  await expect(browser).toHaveJSProperty(browser.locator('body'), 'tagName', 'BODY');
+});
+
+test('a NaN property value is refused under its own label', async ({ app, browser }) => {
+  await app.open('/classes');
+  await expect(browser).toHaveJSProperty(browser.locator('body'), 'tagName', Number.NaN);
+});
 `;
 
 // A predicate, which Playwright accepts and a migrated test may still pass, is
@@ -720,6 +731,18 @@ describe('web platform integration', () => {
     expect(result.attempts[0]!.error?.code).toBe('LOCATOR_NOT_FOUND');
     expect(result.attempts[0]!.error?.message).toContain('Never card');
     expect(result.attempts[0]!.durationMs).toBeGreaterThanOrEqual(5_000);
+  });
+
+  it('labels a CSS and a property assertion with what they wait for', () => {
+    const result = resultByTitle(outcome, 'CSS and property assertions name what they wait for');
+    expect(result.status, JSON.stringify(result.attempts[0]?.error)).toBe('passed');
+    const { steps } = result.attempts[0]!;
+    expect(steps.find((step) => step.api === 'expect.toHaveCSS')?.label).toBe('display block');
+    expect(steps.find((step) => step.api === 'expect.toHaveJSProperty')?.label).toBe('tagName "BODY"');
+    const refused = resultByTitle(outcome, 'a NaN property value is refused under its own label');
+    expect(refused.attempts[0]!.error?.code).toBe('INVALID_ARGUMENT');
+    const step = refused.attempts[0]!.steps.find((candidate) => candidate.api === 'expect.toHaveJSProperty');
+    expect(step?.label).toBe('tagName NaN');
   });
 
   it('fails a class assertion on an ambiguous locator with LOCATOR_AMBIGUOUS before the deadline', () => {

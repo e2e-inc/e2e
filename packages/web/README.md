@@ -118,7 +118,8 @@ engine: web({
 
 The engine contributes `browser`: navigation, routes, cookies, dialogs, frames,
 downloads, keyboard and mouse, plus `expect(browser).toHaveURL()`,
-`toHaveTitle()`, `toHaveClass()`, `toHaveCSS()`, and `toHaveJSProperty()`. Import `test` from this package to have it
+`toHaveTitle()`, `toHaveClass()`, `toHaveCSS()`, and
+`toHaveJSProperty()`. Import `test` from this package to have it
 typed; it is the same runtime `test` as `e2e`'s.
 
 ```ts

@@ -253,7 +253,7 @@ export interface EngineFixtureContext {
    * re-resolves while the deadline remains. A value that is not an e2e
    * locator, or a locator from another screen or attempt, is
    * `INVALID_LOCATOR`, and its message names `api`, the public call that
-   * took the locator (`browser.evaluateOn`, say).
+   * took the locator.
    */
   withNode<T>(
     api: string,

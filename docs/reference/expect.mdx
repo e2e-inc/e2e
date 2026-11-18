@@ -369,14 +369,17 @@ await expect(browser).toHaveCSS(nav, '--accent', /red/);
 ```
 
 - It runs `getComputedStyle(element).getPropertyValue(property)` as page
-  code, so a page that overrides those functions changes what it reads. Names are kebab-case (`background-color`), and a custom property
+  code, so a page that overrides those functions changes what it reads.
+  Names are kebab-case (`background-color`), and a custom property
   (`--accent`) works.
 - The target resolves with its scope and frame, as
   [`browser.evaluateOn`](/reference/web#evaluateon) does. A target that
   matches nothing yet is one more poll, not a failure, until the assertion
   timeout runs out. An ambiguous target fails at once with
-  `LOCATOR_AMBIGUOUS`. A target that is not an e2e locator, or one from
-  another screen or attempt, is `INVALID_LOCATOR`.
+  `LOCATOR_AMBIGUOUS`. A target that is not an e2e locator is
+  `INVALID_LOCATOR`. So is a locator from another screen or attempt, once it
+  matches a node. While it matches nothing, it polls like any other target
+  and fails observing `no node` at the timeout.
 - An empty or non-string `property` is `INVALID_ARGUMENT`.
 
 #### `toHaveJSProperty`

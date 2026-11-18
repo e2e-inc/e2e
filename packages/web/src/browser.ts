@@ -1289,9 +1289,11 @@ const PROPERTY_PATH_SOURCE = pageFunctionSource((element: Element, names: string
 /**
  * The step label for a `toHaveJSProperty` expected value. It is built before
  * the matcher validates the value, so a value `JSON.stringify` refuses (a
- * BigInt, a cycle) still gets a label and then fails as `INVALID_ARGUMENT`.
+ * BigInt, a cycle) or writes as `null` (`NaN`) still gets its own label and
+ * then fails as `INVALID_ARGUMENT`.
  */
 function expectedLabel(value: unknown): string {
+  if (typeof value === 'number' && !Number.isFinite(value)) return String(value);
   try {
     return JSON.stringify(value) ?? String(value);
   } catch {

@@ -316,10 +316,12 @@ test.describe('expect(browser) locator matchers', { requires: ['browser'] }, () 
 
 test.describe('a locator from an earlier attempt', { serial: true, requires: ['browser'] }, () => {
   let earlier: Locator | undefined;
+  let missing: Locator | undefined;
 
   test('keeps a locator for the next test', async ({ browser, screen }) => {
     await browser.goto(page);
     earlier = screen.getByRole('navigation', { name: 'Main' });
+    missing = browser.locator('#never');
     await expect(browser).toHaveCSS(earlier, 'position', 'sticky');
   });
 
@@ -335,6 +337,19 @@ test.describe('a locator from an earlier attempt', { serial: true, requires: ['b
       const error = await failure(call);
       expect(error).toHaveProperty('code', 'INVALID_LOCATOR');
       expect(error).toHaveProperty('message', expect.stringContaining(`${api} requires a locator made by this screen`));
+    }
+  });
+
+  test('polls like any target while it matches nothing, so a matcher fails observing no node', async ({ browser }) => {
+    await browser.goto(page);
+    const target = missing!;
+    for (const call of [
+      () => expect(browser).toHaveCSS(target, 'position', 'sticky', { timeout: 300 }),
+      () => expect(browser).toHaveJSProperty(target, 'id', 'never', { timeout: 300 }),
+    ]) {
+      const error = await failure(call);
+      expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
+      expect(error).toHaveProperty('message', expect.stringContaining('observed: no node'));
     }
   });
 });

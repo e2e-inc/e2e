@@ -310,7 +310,7 @@ await expect(browser).toHaveCSS(nav, '--accent', /red/);
 ```
 
 - `getComputedStyle(element).getPropertyValue(property)` をページのコードとして実行します。そのため、これらの関数を上書きしたページでは読み取る値が変わります。名前はケバブケース（`background-color`）で、カスタムプロパティ（`--accent`）も使えます。
-- 対象は [`browser.evaluateOn`](/reference/web#evaluateon) と同じく、スコープとフレームで解決します。対象にまだ一致するノードがなければ、失敗せずにアサーションのタイムアウトまでポーリングを続けます。対象が曖昧な場合は、直ちに `LOCATOR_AMBIGUOUS` で失敗します。e2e のロケーターでない対象や、別の screen や試行のロケーターは `INVALID_LOCATOR` になります。
+- 対象は [`browser.evaluateOn`](/reference/web#evaluateon) と同じく、スコープとフレームで解決します。対象にまだ一致するノードがなければ、失敗せずにアサーションのタイムアウトまでポーリングを続けます。対象が曖昧な場合は、直ちに `LOCATOR_AMBIGUOUS` で失敗します。e2e のロケーターでない対象は `INVALID_LOCATOR` になります。別の screen や試行のロケーターも、ノードに一致した時点で `INVALID_LOCATOR` になります。一致するノードがない間は他の対象と同じくポーリングを続け、タイムアウトで `no node` を観測して失敗します。
 - 空の、または文字列でない `property` は `INVALID_ARGUMENT` になります。
 
 #### `toHaveJSProperty`
