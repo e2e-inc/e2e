@@ -1847,6 +1847,25 @@ describe('device fixture', () => {
       });
     });
 
+    it('starts the drag above the suggestion strip when the strip is all the tree lists of the keyboard', async () => {
+      const h = harness();
+      await openAttempt(h);
+      await observed(h, 'Back');
+      const device = fixture(h);
+      h.fake.respond('command.keyboard', NO_DISMISS_KEY);
+      // With a hardware keyboard, XCTest lists the strip alone. A pad of controls covers the centre down to it,
+      // so the only point clear of controls and below the strip's top is above the pad.
+      const nodes = [
+        ...FORM_NODES,
+        { ref: '@e5', index: 4, parentIndex: 1, depth: 2, type: 'other', label: 'Pad', rect: { x: 0, y: 200, width: 390, height: 250 } },
+        { ref: '@e6', index: 5, parentIndex: 0, depth: 1, type: 'other', identifier: 'SystemInputAssistantView', rect: { x: 0, y: 460, width: 390, height: 44 } },
+      ];
+      captures(h, [{ ...SETTINGS_SNAPSHOT, viewport: { width: 390, height: 844 }, nodes }, KEYBOARD_GONE]);
+      await device.dismissKeyboard();
+      const { from } = h.fake.lastArgs('interactions.swipe') as { from: { y: number } };
+      expect(from.y).toBeLessThan(200);
+    });
+
     it('drags at the centre of a screen rotated since the last observation', async () => {
       const h = harness();
       await openAttempt(h);

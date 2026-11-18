@@ -916,7 +916,8 @@ isKeyboardShown(): Promise<boolean>;
 
 ```ts
 await screen.getByTestId('email-input').fill('jane@example.com');
-if (await device.isKeyboardShown()) await device.dismissKeyboard();
+await device.dismissKeyboard();
+await expect.poll(() => device.isKeyboardShown()).toBe(false);
 ```
 
 | エラー | 発生条件 |

@@ -121,7 +121,7 @@ const CHECKABLE_ROLES = new Set(['switch', 'checkbox']);
 const CHECKED_VALUES = new Set(['1', 'on', 'true', 'checked', 'selected']);
 const UNCHECKED_VALUES = new Set(['0', 'off', 'false', 'unchecked']);
 /** Platform element types that are the soft keyboard or one of its keys, as agent-device names them. */
-export const KEYBOARD_KINDS: ReadonlySet<string> = new Set(['keyboard', 'key']);
+const KEYBOARD_KINDS: ReadonlySet<string> = new Set(['keyboard', 'key']);
 
 /**
  * Whether a raw node is the soft keyboard: the keyboard element or one of
@@ -143,12 +143,25 @@ function isKeyboardElement(node: RawNode): boolean {
  * it.
  */
 export function keyboardOnScreen(nodes: readonly RawNode[], viewport: ViewportSize | undefined): boolean {
+  return keyboardElementsTop(nodes, viewport) !== undefined;
+}
+
+/**
+ * The top edge of the highest keyboard element {@link keyboardOnScreen}
+ * counts, the suggestion strip included, so a drag that starts above it
+ * starts above everything that answered "the keyboard is up"; undefined when
+ * there is none.
+ */
+export function keyboardElementsTop(nodes: readonly RawNode[], viewport: ViewportSize | undefined): number | undefined {
   const screen = viewport ?? viewportOf(nodes);
-  return nodes.some((node) => {
+  let top: number | undefined;
+  for (const node of nodes) {
     const rect = node.rect;
-    if (rect === undefined || rect.width <= 0 || rect.height <= 0 || node.visibleToUser === false || !isKeyboardElement(node)) return false;
-    return screen === undefined || (rect.x < screen.width && rect.x + rect.width > 0 && rect.y < screen.height && rect.y + rect.height > 0);
-  });
+    if (rect === undefined || rect.width <= 0 || rect.height <= 0 || node.visibleToUser === false || !isKeyboardElement(node)) continue;
+    if (screen !== undefined && !(rect.x < screen.width && rect.x + rect.width > 0 && rect.y < screen.height && rect.y + rect.height > 0)) continue;
+    top = top === undefined ? rect.y : Math.min(top, rect.y);
+  }
+  return top;
 }
 
 /**
@@ -330,7 +343,7 @@ function isAndroidClass(type: string | undefined): boolean {
 }
 
 /** One element-type spelling for `NavigationBar`, `XCUIElementTypeNavigationBar`, `navigation-bar`, and `android.widget.NavigationBar` alike. */
-export function normalizeKind(type: string): string {
+function normalizeKind(type: string): string {
   const simple = type.slice(type.lastIndexOf('.') + 1).replace(/^XCUIElementType(?=[A-Z])/, '');
   return simple
     .replaceAll(/([a-z0-9])([A-Z])/g, '$1-$2')

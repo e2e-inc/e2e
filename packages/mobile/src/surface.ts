@@ -51,10 +51,9 @@ import { pointerInteraction, DEFAULT_LONG_PRESS_MS } from './actions.ts';
 import { resolveExpression } from './locate.ts';
 import {
   isWithin,
-  KEYBOARD_KINDS,
+  keyboardElementsTop,
   keyboardBand,
   mayTakeText,
-  normalizeKind,
   projectSnapshot,
   ROOT_ID,
   screenRoot,
@@ -165,13 +164,13 @@ function listsApp(entry: string, app: string): boolean {
 
 /**
  * The top edge of the soft keyboard: the band the capture's producer
- * measured, else the highest keyboard or key element, else the bottom of the
- * screen.
+ * measured, else the highest keyboard element drawn on screen (a key, the
+ * keyboard, or the suggestion strip above it, the elements
+ * {@link keyboardShownIn} answers from), else the bottom of the screen.
  */
 function keyboardTop(raw: RawSnapshot, viewport: ViewportSize): number {
   if (raw.keyboard?.kind === 'visible' || raw.keyboard?.kind === 'derived') return raw.keyboard.frame.y;
-  const keys = (raw.nodes ?? []).filter((node) => node.rect !== undefined && KEYBOARD_KINDS.has(normalizeKind(node.type ?? '')));
-  return Math.min(viewport.height, ...keys.map((node) => node.rect!.y));
+  return Math.min(viewport.height, keyboardElementsTop(raw.nodes ?? [], raw.viewport ?? viewport) ?? viewport.height);
 }
 
 /**
