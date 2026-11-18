@@ -45,13 +45,8 @@ test.describe('permission prompt', () => {
 // press fails it.
 test('sequential onboarding echoes the exact values', async ({ app, device, screen }) => {
   await openScenario({ app, device, screen }, 'Sequential Onboarding');
-  // A fill on Android sets the text without the input method, so the tap is
-  // what opens the keyboard there. It slides in and out, so both reads poll.
-  await screen.getByTestId('email-input').tap();
   await screen.getByTestId('email-input').fill('jane@example.com');
-  await expect.poll(() => device.isKeyboardShown()).toBe(true);
   await device.dismissKeyboard();
-  await expect.poll(() => device.isKeyboardShown()).toBe(false);
   await screen.getByTestId('continue-button').tap();
 
   await screen.getByTestId('first-name-input').fill('Jane');
@@ -68,6 +63,17 @@ test('sequential onboarding echoes the exact values', async ({ app, device, scre
   await expect(screen.getByTestId('echo-email')).toHaveText('jane@example.com');
   await expect(screen.getByTestId('echo-name')).toHaveText('Jane Merchant');
   await expect(screen.getByTestId('echo-phone')).toHaveText('0612435678');
+});
+
+// The Android emulator in CI draws no soft keyboard, even for a tapped field,
+// so the keyboard reads run where one comes up. The email field autofocuses,
+// and the keyboard slides in and out, so both reads poll.
+test('isKeyboardShown follows the keyboard up and through a dismissal', { platforms: ['ios'] }, async ({ app, device, screen }) => {
+  await openScenario({ app, device, screen }, 'Sequential Onboarding');
+  await screen.getByTestId('email-input').fill('jane@example.com');
+  await expect.poll(() => device.isKeyboardShown()).toBe(true);
+  await device.dismissKeyboard();
+  await expect.poll(() => device.isKeyboardShown()).toBe(false);
 });
 
 test('onboarding rejects a malformed email before advancing', async ({ app, device, screen }) => {
