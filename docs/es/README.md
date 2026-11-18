@@ -4,6 +4,11 @@ La traducción al español de la documentación de e2e. El sitio sirve cada pág
 esta carpeta en `/docs/es/<ruta>`; una página sin traducción muestra la página en
 inglés con un aviso. El inglés sigue siendo la fuente de verdad.
 
+Esta traducción es de mejor esfuerzo. Los cambios en inglés no esperan a la
+traducción, así que una página puede ir por detrás de su página en inglés hasta
+que alguien que lea español la actualice. `pnpm docs:check` avisa de cada página
+y etiqueta que está desactualizada.
+
 ## Estructura
 
 - `docs/es/<ruta>.mdx` traduce `docs/<ruta>.mdx`: misma ruta, mismo nombre de archivo.
@@ -35,10 +40,12 @@ inglés con un aviso. El inglés sigue siendo la fuente de verdad.
    `../snippets/x.jsx`, y en una página anidada `../snippets/x.jsx` pasa a ser
    `../../snippets/x.jsx`).
 
-Cuando un cambio en inglés añade o elimina un encabezado, una pestaña o un
-acordeón, haz el mismo cambio aquí. Un encabezado en inglés como marcador es
-válido hasta que alguien lo traduzca; si se elimina la página traducida, se
-muestra la inglesa.
+Cuando actualices una página, alinea su estructura, su código y sus etiquetas
+con la página en inglés, incluidos los cambios que el inglés haya hecho desde
+entonces. Un encabezado en inglés como marcador es válido hasta que alguien lo
+traduzca; si se elimina la página traducida, se muestra la inglesa. Cuando una
+página en inglés se mueve o se elimina, su traducción se mueve o se elimina con
+ella en el mismo cambio.
 
 ## Estilo
 
