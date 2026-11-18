@@ -408,6 +408,11 @@ function readPosition(document: unknown): TracePosition | undefined {
   return { index: index as number, of: of as number };
 }
 
+/** Whether a provenance field that may be absent is absent or a SHA-256 hex digest. */
+function isOptionalDigest(value: unknown): value is string | undefined {
+  return value === undefined || (typeof value === 'string' && SHA256_HEX.test(value));
+}
+
 function readProvenance(document: unknown): TraceProvenance | undefined {
   if (typeof document !== 'object' || document === null || Array.isArray(document)) {
     return undefined;
@@ -419,7 +424,7 @@ function readProvenance(document: unknown): TraceProvenance | undefined {
   if (testId === undefined || targetId === undefined) return undefined;
   if (typeof instructionDigest !== 'string' || !SHA256_HEX.test(instructionDigest)) return undefined;
   const paramsDigest = raw['paramsDigest'];
-  if (paramsDigest !== undefined && (typeof paramsDigest !== 'string' || !SHA256_HEX.test(paramsDigest))) return undefined;
+  if (!isOptionalDigest(paramsDigest)) return undefined;
   const callIndex = raw['callIndex'];
   if (callIndex !== undefined && (typeof callIndex !== 'number' || !Number.isSafeInteger(callIndex) || callIndex < 0)) {
     return undefined;
@@ -427,7 +432,7 @@ function readProvenance(document: unknown): TraceProvenance | undefined {
   const agent = raw['agent'] === undefined ? undefined : readBoundedText(raw['agent'], MAX_TRACE_DESCRIPTOR_CHARS);
   if (raw['agent'] !== undefined && agent === undefined) return undefined;
   const identityDigest = raw['identityDigest'];
-  if (identityDigest !== undefined && (typeof identityDigest !== 'string' || !SHA256_HEX.test(identityDigest))) return undefined;
+  if (!isOptionalDigest(identityDigest)) return undefined;
   return {
     testId,
     targetId,

@@ -448,6 +448,18 @@ describe('recorded provenance', () => {
     expect(digestWith('hunter2')).toBe(digestWith('swordfish'));
   });
 
+  it('measures the redacted names, so a name a secret makes longer than an entry keeps gets a digest', () => {
+    const secrets = new SecretLedger();
+    secrets.register('password', 'hunter2');
+    const variant = (title: string) => recordedProvenance({ ...STEP, testId: `${'x'.repeat(280)} hunter2 ${title}` }, secrets.redact);
+    const [first, second] = [variant('first'), variant('second')];
+    expect(`${'x'.repeat(280)} hunter2 second`.length).toBeLessThanOrEqual(300);
+    expect(first.testId).toBe(second.testId);
+    expect(first.identityDigest).toMatch(/^[a-f0-9]{64}$/u);
+    expect(second.identityDigest).toMatch(/^[a-f0-9]{64}$/u);
+    expect(first.identityDigest).not.toBe(second.identityDigest);
+  });
+
   it.each([['not-a-digest'], [['a'.repeat(64)]], [42]])('refuses an entry whose identity digest is %j', (identityDigest) => {
     const entry = JSON.parse(JSON.stringify(buildTraceEntry({ ...trace('recorded flow'), recordedFor: STEP })));
     entry.payload.recordedFor.identityDigest = identityDigest;
