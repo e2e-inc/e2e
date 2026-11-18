@@ -340,10 +340,11 @@ export default {
   refusal on iOS, where the app is told no without a prompt, and a revocation
   on Android, where the OS asks again when the app requests the permission.
 - `permissions: 'all'` grants every permission the platform can set: on
-  Android each one the app's manifest declares, in one call; on an iOS
-  simulator each `DevicePermission` but `notifications`, one at a time,
-  since the simulator refuses to set notifications. It replaces the map;
-  name permissions instead to deny or reset one.
+  Android each one the app's manifest declares; on an iOS simulator each
+  `DevicePermission` but `notifications`, skipping any the simulator's
+  runtime does not support. Accept the notifications prompt with
+  `device.alert('accept')`. It replaces the map; name permissions instead
+  to deny or reset one.
 - The permissions are set on the app by name before it starts, with no open
   first, since iOS terminates a running app whose permission changed and
   Android one whose permission was revoked.
@@ -1246,8 +1247,13 @@ Each `MobileOptions` member is declared, with its JSDoc, in its
 /** A permission's state: held, refused, or not asked for yet, so the OS asks again. */
 export type PermissionState = 'grant' | 'deny' | 'reset';
 
-/** Permissions an app holds when it launches, by name. */
-export type LaunchPermissions = Readonly<Partial<Record<DevicePermission, PermissionState>>>;
+/**
+ * Permissions an app holds when it launches, by name, or `'all'` to grant
+ * every one the platform can: each permission the app declares on Android,
+ * and every name but `notifications` on an iOS simulator, which refuses to
+ * set notifications.
+ */
+export type LaunchPermissions = Readonly<Partial<Record<DevicePermission, PermissionState>>> | 'all';
 ```
 
 ### Device fixture

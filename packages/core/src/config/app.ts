@@ -140,12 +140,14 @@ export function checkTargetApp(targetName: string, engine: EngineHandle | undefi
   if (launchArguments !== undefined && (!Array.isArray(launchArguments) || !launchArguments.every((argument) => typeof argument === 'string'))) {
     throw new ConfigurationError('INVALID_CONFIG', `${where}.launchArguments must be an array of strings`);
   }
-  if (permissions !== undefined && permissions !== 'all' && !isRecord(permissions)) {
-    throw new ConfigurationError('INVALID_CONFIG', `${where}.permissions must be 'all' or an object of permission name to grant, deny, or reset`);
-  }
-  for (const [permission, state] of Object.entries(permissions === 'all' ? {} : permissions ?? {})) {
-    if (!PERMISSION_STATES.has(state)) {
-      throw new ConfigurationError('INVALID_CONFIG', `${where}.permissions.${permission} must be grant, deny, or reset, got ${JSON.stringify(state)}`);
+  if (permissions !== undefined && permissions !== 'all') {
+    if (!isRecord(permissions)) {
+      throw new ConfigurationError('INVALID_CONFIG', `${where}.permissions must be 'all' or an object of permission name to grant, deny, or reset`);
+    }
+    for (const [permission, state] of Object.entries(permissions)) {
+      if (!PERMISSION_STATES.has(state)) {
+        throw new ConfigurationError('INVALID_CONFIG', `${where}.permissions.${permission} must be grant, deny, or reset, got ${JSON.stringify(state)}`);
+      }
     }
   }
   const checked: TargetAppDeclaration = {

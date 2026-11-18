@@ -372,10 +372,22 @@ const MOBILE_OPTION_KEYS: readonly string[] = Object.keys({
 const SNAPSHOT_MODES: readonly string[] = Object.keys({ full: true, interactive: true } satisfies Record<NonNullable<MobileOptions['snapshot']>, true>);
 
 /**
- * What `permissions: 'all'` grants on iOS, one by one: every permission but
- * `notifications`, which the simulator refuses to set.
+ * What `permissions: 'all'` grants on iOS, one by one: each `simctl privacy`
+ * service a `DevicePermission` names, but `notifications`, which the
+ * simulator refuses to set.
  */
-const IOS_GRANT_ALL: readonly DevicePermission[] = DEVICE_PERMISSIONS.filter((permission) => permission !== 'notifications');
+const IOS_GRANT_ALL = [
+  'camera',
+  'microphone',
+  'photos',
+  'contacts',
+  'calendar',
+  'location',
+  'reminders',
+  'motion',
+  'siri',
+  'media-library',
+] as const satisfies readonly DevicePermission[];
 
 /** Every state a permission takes, kept equal to `PermissionState` by the compiler. */
 const PERMISSION_STATES: readonly string[] = Object.keys({ grant: true, deny: true, reset: true } satisfies Record<PermissionState, true>);
@@ -925,7 +937,9 @@ export class AgentDeviceSurface {
    * set: on Android one agent-device `all`, which grants each permission the
    * app declares; on iOS each name but `notifications` in turn, since the
    * simulator ignores the `all` service `simctl privacy grant all` records
-   * and refuses a notifications change.
+   * and refuses a notifications change. A service the runtime refuses
+   * (`UNSUPPORTED_CAPABILITY`; the services vary by Xcode runtime) is
+   * skipped, and only a runtime that refuses every one fails the launch.
    */
   private async presetPermissions(app: string, permissions: LaunchPermissions, signal: AbortSignal): Promise<void> {
     if (permissions === 'all') {
@@ -933,7 +947,18 @@ export class AgentDeviceSurface {
         await this.permission('all', 'grant', app, signal);
         return;
       }
-      for (const permission of IOS_GRANT_ALL) await this.permission(permission, 'grant', app, signal);
+      let refused: EngineError | undefined;
+      let granted = false;
+      for (const permission of IOS_GRANT_ALL) {
+        try {
+          await this.permission(permission, 'grant', app, signal);
+          granted = true;
+        } catch (cause) {
+          if (!(cause instanceof EngineError && cause.code === 'UNSUPPORTED_CAPABILITY')) throw cause;
+          refused = cause;
+        }
+      }
+      if (!granted && refused !== undefined) throw refused;
       return;
     }
     const entries = Object.entries(permissions).filter(
