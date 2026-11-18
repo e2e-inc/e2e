@@ -203,6 +203,10 @@
       {
         "id": "custom-executors",
         "label": "Custom executors"
+      },
+      {
+        "id": "web3",
+        "label": "Web3"
       }
     ],
     "platform": [
@@ -2028,6 +2032,32 @@
       "tags": {
         "framework": [
           "nodejs"
+        ],
+        "platform": [
+          "web"
+        ]
+      }
+    },
+    {
+      "slug": "web3-wallet-base-fork",
+      "title": "Testing a web3 swap on a Base mainnet fork with e2e",
+      "shortTitle": "Web3 swap on a Base fork",
+      "description": "A wagmi swap app on Uniswap V3, on a Base mainnet fork. The community e2e-wallet package answers the wallet in the test, with no extension; tests check balances on-chain.",
+      "source": "community",
+      "repository": "https://github.com/forever8896/e2e-web3-example/tree/a122ccf0a924f1660ebf68e8e8214e40a53df1fe",
+      "author": {
+        "name": "Kilian Valdman",
+        "github": "forever8896"
+      },
+      "license": "Apache-2.0",
+      "licenseUrl": "https://github.com/forever8896/e2e-web3-example/blob/a122ccf0a924f1660ebf68e8e8214e40a53df1fe/LICENSE",
+      "tags": {
+        "framework": [
+          "vite",
+          "react"
+        ],
+        "useCase": [
+          "web3"
         ],
         "platform": [
           "web"
