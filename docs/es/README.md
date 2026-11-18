@@ -24,14 +24,16 @@ inglés con un aviso. El inglés sigue siendo la fuente de verdad.
    y todos los `id="..."`. El sitio asigna a un encabezado traducido el id del
    encabezado en inglés según su posición, así que los enlaces y el selector de
    idioma llevan a la misma sección. `pnpm docs:check`
-   (`scripts/check-docs-translations.ts`) falla si el esquema difiere.
+   (`scripts/check-docs-translations.ts`) avisa, sin fallar, si el esquema difiere.
 3. No toques el código: los bloques de código, el código en línea, los títulos
    de los bloques, las URL y los destinos de enlace con sus `#anclas` quedan
-   exactamente como en la página en inglés. `pnpm docs:check` falla si un bloque
-   de código difiere. Los enlaces siguen siendo relativos a la raíz de la
+   exactamente como en la página en inglés. `pnpm docs:check` avisa, sin
+   fallar, si un bloque de código difiere. Los enlaces siguen siendo relativos a la raíz de la
    documentación (`/quickstart#install`); el sitio los dirige a las páginas en español.
-4. Las importaciones de snippets están una carpeta más abajo:
-   `./snippets/x.jsx` pasa a ser `../snippets/x.jsx`.
+4. Las importaciones de snippets están una carpeta más abajo: añade un `../` al
+   principio de la ruta de la importación (`./snippets/x.jsx` pasa a ser
+   `../snippets/x.jsx`, y en una página anidada `../snippets/x.jsx` pasa a ser
+   `../../snippets/x.jsx`).
 
 Cuando un cambio en inglés añade o elimina un encabezado, una pestaña o un
 acordeón, haz el mismo cambio aquí. Un encabezado en inglés como marcador es
