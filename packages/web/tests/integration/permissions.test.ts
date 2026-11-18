@@ -1,7 +1,7 @@
 /**
  * A web target's `app.permissions` in a real browser: headless Chromium
- * refuses the clipboard to a page unless the target grants it, and a grant
- * holds on every context the attempt opens. Driven through the engine hooks,
+ * refuses the clipboard to a page unless the target grants it, by name or
+ * with `'all'`, and a grant holds on every context the attempt opens. Driven through the engine hooks,
  * as the attempt executor drives them.
  */
 
@@ -37,7 +37,7 @@ describe('app permissions', () => {
   });
 
   /** Boots one engine into a running attempt for a target granting `permissions`. */
-  async function boot(permissions?: Readonly<Record<string, AppPermissionState>>): Promise<EngineHandle> {
+  async function boot(permissions?: Readonly<Record<string, AppPermissionState>> | 'all'): Promise<EngineHandle> {
     const engine = web();
     await engine.init!({
       runId: 'run-permissions', targetName: 'web', projectRoot: process.cwd(),
@@ -74,6 +74,15 @@ describe('app permissions', () => {
       expect(await copy(engine, 'second')).toBe('second');
       await engine.session!.reset!(operation());
       expect(await copy(engine, 'third')).toBe('third');
+    } finally {
+      await shutdown(engine);
+    }
+  });
+
+  it('grants every permission the browser grants for \'all\', the clipboard among them', async () => {
+    const engine = await boot('all');
+    try {
+      expect(await copy(engine, 'everything')).toBe('everything');
     } finally {
       await shutdown(engine);
     }

@@ -47,6 +47,7 @@ import {
 import { matchesText } from '@e2e-dev/core/engine';
 import { classifyActionError, classifyInputError, dispatchLocatorAction, dispatchPointerAction } from './actions.ts';
 import { BrowserConnection, connectCdp, defaultChromiumSandbox, type BrowserName } from './browser-connection.ts';
+import { grantedPermissions } from './permissions.ts';
 import { AttemptSession, type AttemptTab, type StorageState } from './attempt-session.ts';
 import type { CdpEndpointResolver } from './cdp-recovery.ts';
 import { LeasedBrowsers, type BrowserProvider, type LeaseDownloads } from './provider.ts';
@@ -541,7 +542,7 @@ export class PlaywrightSurface {
     const routes: StoredRoute[] = [];
     const initScripts = this.configuredInitScripts.forAttempt();
     // `validateApp` admitted only grants.
-    const granted = Object.keys(this.app.permissions ?? {});
+    const granted = grantedPermissions(this.browserName, this.app.permissions);
     this.latch = new ErrorLatch();
     const dialogs = new DialogRouter(this.latch);
     this.routes = routes;
@@ -576,7 +577,7 @@ export class PlaywrightSurface {
           testPage: () => this.openPage(),
         });
         await installConfiguredHeaders(target, this.credentialScope, this.headers);
-        if (granted.length > 0) await target.grantPermissions(granted);
+        if (granted.length > 0) await target.grantPermissions([...granted]);
         for (const stored of routes) await target.route(stored.predicate, stored.handler);
       },
       ...(persistent === undefined ? {} : { persistent }),

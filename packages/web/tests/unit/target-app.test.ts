@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { web } from '../../src/index.ts';
+import { grantedPermissions } from '../../src/permissions.ts';
 
 describe('web() and the target app', () => {
   it('needs app.url on the target, and refuses the fields of an installed device app', () => {
@@ -35,5 +36,15 @@ describe('web() and the target app', () => {
         refused(`target "web" app.permissions.camera is ${state}, but a web() target only grants; leave the permission out instead`),
       );
     }
+  });
+
+  it('takes \'all\' on every browser, granting each permission that browser grants', () => {
+    for (const browser of ['chromium', 'firefox', 'webkit'] as const) {
+      expect(() => web({ browser }).validateApp!({ url: 'http://localhost:3000', permissions: 'all' }, { targetName: 'web' })).not.toThrow();
+    }
+    expect(grantedPermissions('firefox', 'all')).toEqual(['geolocation', 'local-network-access', 'notifications', 'persistent-storage', 'push', 'screen-wake-lock']);
+    expect(grantedPermissions('chromium', 'all')).toContain('clipboard-read');
+    expect(grantedPermissions('webkit', { camera: 'grant' })).toEqual(['camera']);
+    expect(grantedPermissions('webkit', undefined)).toEqual([]);
   });
 });

@@ -23,7 +23,7 @@ export interface TargetAppDeclaration {
   readonly identity: string | undefined;
   readonly environment: 'test' | 'staging' | 'production' | undefined;
   readonly launchArguments: readonly string[] | undefined;
-  readonly permissions: Readonly<Record<string, AppPermissionState>> | undefined;
+  readonly permissions: Readonly<Record<string, AppPermissionState>> | 'all' | undefined;
   readonly command: CommandConfig | undefined;
   readonly readyUrl: string | undefined;
 }
@@ -69,7 +69,7 @@ export interface ResolvedApp {
   /** The link base `app.open(path)` joins on a device target; see `TargetApp.linkBase`. */
   readonly linkBase: string | undefined;
   readonly launchArguments: readonly string[] | undefined;
-  readonly permissions: Readonly<Record<string, AppPermissionState>> | undefined;
+  readonly permissions: Readonly<Record<string, AppPermissionState>> | 'all' | undefined;
   /** `app.command` with `{port}` expanded to the port the app is served on. */
   readonly command: CommandConfig | undefined;
   /** Readiness probe for `command`; defined whenever `command` is. */
@@ -140,10 +140,10 @@ export function checkTargetApp(targetName: string, engine: EngineHandle | undefi
   if (launchArguments !== undefined && (!Array.isArray(launchArguments) || !launchArguments.every((argument) => typeof argument === 'string'))) {
     throw new ConfigurationError('INVALID_CONFIG', `${where}.launchArguments must be an array of strings`);
   }
-  if (permissions !== undefined && !isRecord(permissions)) {
-    throw new ConfigurationError('INVALID_CONFIG', `${where}.permissions must be an object of permission name to grant, deny, or reset`);
+  if (permissions !== undefined && permissions !== 'all' && !isRecord(permissions)) {
+    throw new ConfigurationError('INVALID_CONFIG', `${where}.permissions must be 'all' or an object of permission name to grant, deny, or reset`);
   }
-  for (const [permission, state] of Object.entries(permissions ?? {})) {
+  for (const [permission, state] of Object.entries(permissions === 'all' ? {} : permissions ?? {})) {
     if (!PERMISSION_STATES.has(state)) {
       throw new ConfigurationError('INVALID_CONFIG', `${where}.permissions.${permission} must be grant, deny, or reset, got ${JSON.stringify(state)}`);
     }

@@ -40,8 +40,12 @@ export type DevicePermission = (typeof DEVICE_PERMISSIONS)[number];
 /** A permission's state: held, refused, or not asked for yet, so the OS asks again. */
 export type PermissionState = 'grant' | 'deny' | 'reset';
 
-/** Permissions an app holds when it launches, by name. */
-export type LaunchPermissions = Readonly<Partial<Record<DevicePermission, PermissionState>>>;
+/**
+ * Permissions an app holds when it launches, by name, or `'all'` to grant
+ * every one the platform can: each permission the app declares on Android,
+ * and on an iOS simulator each service `simctl privacy grant all` covers.
+ */
+export type LaunchPermissions = Readonly<Partial<Record<DevicePermission, PermissionState>>> | 'all';
 
 /**
  * Options of the device engine: which devices it drives and how. The app
