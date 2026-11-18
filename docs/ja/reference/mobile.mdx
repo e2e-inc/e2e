@@ -897,7 +897,8 @@ await device.dismissKeyboard();
 
 ```ts
 /**
- * Whether the soft keyboard is on screen, from one capture: what
+ * Whether the soft keyboard is on screen, from a capture (taken again,
+ * within the action timeout, while the keyboard is still moving): what
  * agent-device reported for it (a visibility probe, a measured or derived
  * keyboard frame, or proof that there is none), else a keyboard element
  * drawn on screen in the accessibility tree, the same keyboard
@@ -921,7 +922,7 @@ if (await device.isKeyboardShown()) await device.dismissKeyboard();
 | エラー | 発生条件 |
 | --- | --- |
 | `ENGINE_FAILURE` | agent-device が何も計測できず、返したツリーが疎か途中で切れている場合。または、キーボードの要素は見つけたもののその位置を棄却し、画面上に描画された要素が 1 つもない場合（キーボードがスライドして出入りしている間など）。もう一度読み取ってください。`expect.poll` は自動で読み直します。 |
-| `UNSUPPORTED_CAPABILITY` | ツリーにキーボードがなく、agent-device もキーボードがないことを証明していない場合。たとえば、入力メソッドのウィンドウを含まない Android のキャプチャー、キーボードのプローブを持たない WebDriver プロバイダー、キーボードの読み取り結果がまったくない場合です。メッセージに理由が示されます。 |
+| `UNSUPPORTED_CAPABILITY` | ツリーに画面上に描画されたキーボードがなく、agent-device もキーボードがないことを証明していない場合。たとえば、入力メソッドのウィンドウを含まない Android のキャプチャー、キーボードのプローブを持たない WebDriver プロバイダー、キーボードの読み取り結果がまったくない場合です。メッセージに理由が示されます。 |
 
 #### `clipboard`
 

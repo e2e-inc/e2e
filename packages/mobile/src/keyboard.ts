@@ -128,7 +128,9 @@ const CANNOT_TELL = 'cannot tell whether the keyboard is shown:';
 
 /**
  * Whether a capture shows the soft keyboard: the one rule behind
- * `device.isKeyboardShown()` and every engine check that the keyboard is up.
+ * `device.isKeyboardShown()`, the dismissing drag, and the keyboard state
+ * an action's target is bound with. An observation's `keyboardVisible`
+ * reports only what agent-device measured, not this answer.
  * A visibility agent-device reported answers (a probe, or a rejected docked
  * frame that still says), then a measured or derived frame (`true`) or a
  * proven `absent` (`false`). A rejected docked frame that does not say
@@ -164,6 +166,6 @@ export function keyboardShownIn(capture: KeyboardCapture, truncated: boolean): b
   const reading = fact === undefined ? 'it reported no keyboard reading' : `its keyboard reading was unmeasurable (${fact.reason})`;
   return {
     code: 'UNSUPPORTED_CAPABILITY',
-    message: `${CANNOT_TELL} the tree lists no keyboard, and agent-device did not prove the keyboard absent: ${reading}`,
+    message: `${CANNOT_TELL} the tree shows no keyboard drawn on screen, and agent-device did not prove the keyboard absent: ${reading}`,
   };
 }

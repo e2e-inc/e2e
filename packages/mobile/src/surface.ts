@@ -1720,8 +1720,9 @@ export class AgentDeviceSurface {
   }
 
   /**
-   * Whether the soft keyboard is on screen, from one capture (a sparse tree
-   * is captured again first): see {@link keyboardShownIn}. A capture that
+   * Whether the soft keyboard is on screen, from a capture taken again while
+   * the tree is sparse or the keyboard is still moving (see
+   * {@link keyboardReading}): see {@link keyboardShownIn}. A capture that
    * cannot answer fails, with the reason, instead of guessing.
    * Changes nothing on the device.
    */

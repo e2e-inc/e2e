@@ -209,7 +209,8 @@ export interface Device {
    */
   dismissKeyboard(): Promise<void>;
   /**
-   * Whether the soft keyboard is on screen, from one capture: what
+   * Whether the soft keyboard is on screen, from a capture (taken again,
+   * within the action timeout, while the keyboard is still moving): what
    * agent-device reported for it (a visibility probe, a measured or derived
    * keyboard frame, or proof that there is none), else a keyboard element
    * drawn on screen in the accessibility tree, the same keyboard

@@ -896,7 +896,8 @@ await device.dismissKeyboard();
 
 ```ts
 /**
- * Whether the soft keyboard is on screen, from one capture: what
+ * Whether the soft keyboard is on screen, from a capture (taken again,
+ * within the action timeout, while the keyboard is still moving): what
  * agent-device reported for it (a visibility probe, a measured or derived
  * keyboard frame, or proof that there is none), else a keyboard element
  * drawn on screen in the accessibility tree, the same keyboard
@@ -920,7 +921,7 @@ if (await device.isKeyboardShown()) await device.dismissKeyboard();
 | 抛出错误 | 发生条件 |
 | --- | --- |
 | `ENGINE_FAILURE` | agent-device 什么也没测到，且返回的树稀疏或被截断；或者它找到了键盘元素，但否定了这些元素的位置，屏幕上也没有绘制出任何一个（例如键盘正在滑入或滑出时）。请再读取一次，`expect.poll` 会自动重读。 |
-| `UNSUPPORTED_CAPABILITY` | 树中没有键盘，且 agent-device 没有证明键盘不存在。例如不含输入法窗口的 Android 捕获、没有键盘探测的 WebDriver 提供方，或完全没有键盘读数。错误消息会写明原因。 |
+| `UNSUPPORTED_CAPABILITY` | 树中没有绘制在屏幕上的键盘，且 agent-device 没有证明键盘不存在。例如不含输入法窗口的 Android 捕获、没有键盘探测的 WebDriver 提供方，或完全没有键盘读数。错误消息会写明原因。 |
 
 #### `clipboard`
 
