@@ -49,6 +49,14 @@ iOS と Android の実機、シミュレーター、エミュレーター、デ�
 
 [npm](https://www.npmjs.com/package/@testomatio/reporter) · [リポジトリと使用例](https://github.com/testomatio/reporter/tree/2.x/example/e2e)
 
+### `e2e-wallet`
+
+Injects an EIP-1193 wallet, announced through EIP-6963, into web tests with `injectWallet(browser, { rpcUrl })`. The test answers every connect, signature, and transaction in Node, on Anvil or a mainnet fork, so a dApp needs no browser extension. Tests can reject the next request and switch accounts.
+
+Maintainer: [Kilian Valdman](https://github.com/forever8896). Version `0.1.0`, published November 18, 2026, declares `@e2e-dev/web >=0.16.0 <1`.
+
+[npm](https://www.npmjs.com/package/e2e-wallet) · [Repository and setup](https://github.com/forever8896/e2e-wallet)
+
 ## 関連する連携を探す
 
 e2e チームは、[ホスト型ブラウザとデバイスの連携](/integrations)、[GitHub レポーター](/github)、[組み込みレポーター](/reference/reporters)を保守しています。
