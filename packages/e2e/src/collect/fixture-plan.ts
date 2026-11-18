@@ -74,6 +74,7 @@ class Planner {
   readonly inputs = new Map<FixtureDefinition, FixtureInputs>();
   private readonly state = new Map<FixtureDefinition, 'visiting' | 'done'>();
   private readonly scopes = new Map<FixtureDefinition, PlannedScope>();
+  private readonly autos = new Map<FixtureDefinition, boolean>();
 
   constructor(
     private readonly chain: readonly FixtureDefinition[],
@@ -112,6 +113,30 @@ class Planner {
     const scope = definition.scope ?? extended ?? 'test';
     this.scopes.set(definition, scope);
     return scope;
+  }
+
+  /**
+   * Whether `definition` is set up without being named: what it declares,
+   * else what the fixture it extends is (a built-in never is), else not. A
+   * declared `auto` that differs from the extended fixture's is an error
+   * naming both.
+   */
+  autoOf(definition: FixtureDefinition): boolean {
+    const known = this.autos.get(definition);
+    if (known !== undefined) return known;
+    const { name } = definition;
+    const base = this.declared(name, definition);
+    const extended = base === undefined ? (this.builtIns.names.includes(name) ? false : undefined) : this.autoOf(base);
+    if (definition.auto !== undefined && extended !== undefined && extended !== definition.auto) {
+      const what = base === undefined ? `the built-in "${name}"` : `the fixture "${name}" of an earlier test.extend()`;
+      throw new FixtureUseError(
+        `fixture "${name}" is declared with auto: ${definition.auto}, but it extends ${what}, ${extended ? 'an auto fixture' : 'not an auto fixture'}${this.onTarget()}: a fixture that extends another keeps its auto`,
+        definition.source,
+      );
+    }
+    const auto = definition.auto ?? extended ?? false;
+    this.autos.set(definition, auto);
+    return auto;
   }
 
   private onTarget(): string {
@@ -155,6 +180,7 @@ class Planner {
       throw new FixtureUseError(`fixtures depend on each other in a cycle: ${cycle}. A fixture cannot name one that needs it`, definition.source);
     }
     this.state.set(definition, 'visiting');
+    this.autoOf(definition);
     const scope = this.scopeOf(definition);
     const what = describeFixture(definition.name, scope === 'unresolved' ? definition.scope : scope);
     const inputs = new Map<string, FixtureDefinition | undefined>();
@@ -172,8 +198,8 @@ class Planner {
  * Checks the fixtures one `test.extend()` call added (`added`, the end of
  * `chain`) as far as they can be before a target is known: each function
  * destructures its first parameter, no two fixtures need each other, a
- * fixture that extends another keeps its scope, and a worker fixture names
- * no fixture known to be a test fixture.
+ * fixture that extends another keeps its scope and its `auto`, and a worker
+ * fixture names no fixture known to be a test fixture.
  */
 export function checkDeclaredFixtures(chain: readonly FixtureDefinition[], added: readonly FixtureDefinition[]): void {
   const planner = new Planner(chain, DECLARED_BUILT_INS);
@@ -195,13 +221,16 @@ interface PlanRequest {
  * test fixture, `auto` or not). Throws a `FixtureUseError`, before anything
  * is set up, for a name the target has no fixture for, a test fixture named
  * by a suite hook or a worker fixture, a cycle, and a fixture whose declared
- * scope is not the one of the fixture it extends.
+ * scope or `auto` is not the one of the fixture it extends.
  */
 function planFixtures(request: PlanRequest): FixturePlan {
   const { target, chain, scope, users } = request;
   const builtIns = builtInFixtures(target);
   const planner = new Planner(chain, builtIns);
-  const roots = new Set(chain.filter((definition) => definition.auto && (scope === 'test' || planner.scopeOf(definition) === 'worker')));
+  // An auto fixture is a root where its name stands for it: one that an
+  // override extends is reached through the override, or not at all.
+  const stands = (definition: FixtureDefinition): boolean => planner.declared(definition.name) === definition;
+  const roots = new Set(chain.filter((definition) => stands(definition) && planner.autoOf(definition) && (scope === 'test' || planner.scopeOf(definition) === 'worker')));
   const inputs = new Map<FixtureUser, FixtureInputs>();
   for (const user of users) {
     const what = describeUser(user);

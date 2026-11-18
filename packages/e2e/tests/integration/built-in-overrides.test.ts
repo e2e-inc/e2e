@@ -171,6 +171,66 @@ test('one', ({ seeded }) => log('body:' + seeded));
   );
 
   it(
+    'keeps an extended fixture auto, and refuses an override that says otherwise',
+    async () => {
+      const support = (options: string) => `import { test as base } from 'e2e';
+import { log } from './log.ts';
+
+export const test = base
+  .extend<{ seed: string }>({
+    seed: [async ({}, use) => {
+      log('setup:seed');
+      await use('seeded');
+    }, { auto: true }],
+  })
+  .extend({
+    seed: ${options},
+  });
+`;
+      const override = `async ({ seed }, use) => {
+      log('setup:override:' + seed);
+      await use(seed + '!');
+    }`;
+      const file = `import { test } from './support.ts';
+import { log } from './log.ts';
+
+test('names nothing', () => log('body'));
+test('names it', ({ seed }) => log('body:' + seed));
+`;
+      const log = hookLog('override-auto');
+      const inherited = await runProject(
+        { 'tests/log.ts': LOG_MODULE, 'tests/support.ts': support(override), 'tests/a.e2e.ts': file },
+        { config: engineConfig(createFakeEngine().engine) },
+      );
+      try {
+        assertValidReport(inherited.outcome.report);
+        expect(inherited.outcome.report.run.errors).toEqual([]);
+        // Each runs once per test: the override because it is auto like the fixture it extends, the base through it.
+        expect(log.lines()).toEqual(['setup:seed', 'setup:override:seeded', 'body', 'setup:seed', 'setup:override:seeded', 'body:seeded!']);
+      } finally {
+        inherited.project.cleanup();
+      }
+      const refused = await runProject(
+        { 'tests/log.ts': LOG_MODULE, 'tests/support.ts': support(`[${override}, { auto: false }]`), 'tests/a.e2e.ts': file },
+        { config: engineConfig(createFakeEngine().engine) },
+      );
+      try {
+        expect(refused.outcome.report.run.errors.map(({ code, message }) => ({ code, message }))).toEqual([
+          {
+            code: 'COLLECTION_ERROR',
+            message: expect.stringMatching(
+              /^tests\/support\.ts:\d+: fixture "seed" is declared with auto: false, but it extends the fixture "seed" of an earlier test\.extend\(\), an auto fixture: a fixture that extends another keeps its auto$/,
+            ),
+          },
+        ]);
+      } finally {
+        refused.project.cleanup();
+      }
+    },
+    120_000,
+  );
+
+  it(
     'fails nothing on a target that lacks the built-in until code there names it',
     async () => {
       const file = `import { test } from './support.ts';

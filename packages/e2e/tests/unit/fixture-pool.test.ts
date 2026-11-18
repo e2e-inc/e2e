@@ -18,7 +18,8 @@ type Use = (value: unknown) => Promise<void>;
 interface FixtureOptions {
   /** The scope it declares; `undefined`, spelled out, for a plain function, which declares none. */
   readonly scope?: FixtureScope | undefined;
-  readonly auto?: boolean;
+  /** Whether it declares `auto`; `undefined`, spelled out, for one that does not say. */
+  readonly auto?: boolean | undefined;
   /** The `test.extend()` call that declares it, from 0. */
   readonly layer?: number;
   /** The fixtures its function names. */
@@ -29,7 +30,7 @@ function fixture(name: string, run: (fixtures: Fixtures, use: Use) => Promise<vo
   return {
     name,
     scope: 'scope' in options ? options.scope : 'test',
-    auto: options.auto ?? false,
+    auto: 'auto' in options ? options.auto : false,
     layer: options.layer ?? 0,
     fn: (fixtures, use) => run(fixtures as Fixtures, use),
     names: options.uses ?? [],
@@ -406,6 +407,44 @@ describe('fixtures that extend a built-in', () => {
     expect(() => checkDeclaredFixtures(chain, chain)).not.toThrow();
     expect(plannedNames(planAttempt(toyTarget('worker'), testNaming(chain, ['seeded']), []))).toEqual(['app', 'app', 'seeded']);
     expect(() => planAttempt(toyTarget(), testNaming(chain, ['seeded']), [])).toThrow(planError('worker fixture "seeded" names "app", a test fixture on target "toy"'));
+  });
+
+  it('sets an auto fixture and its override up once each: the override because it inherits auto, the base through it', async () => {
+    const log: string[] = [];
+    const chain = [logged(log, 'seed', 'base', { scope: undefined, auto: true }), wrapping(log, 'seed', 'override', { scope: undefined, auto: undefined, layer: 1 })];
+    const bound = attempt(chain, []);
+    await bound.setUp();
+    expect(log).toEqual(['setup:seed', 'setup:override']);
+    for (const teardown of bound.teardowns()) await teardown.run();
+    expect(log).toEqual(['setup:seed', 'setup:override', 'teardown:override', 'teardown:seed']);
+  });
+
+  it('does not set up an auto fixture that an override replaces without naming it', async () => {
+    const log: string[] = [];
+    const chain = [logged(log, 'seed', 'base', { scope: undefined, auto: true }), logged(log, 'seed', 'replacement', { scope: undefined, auto: undefined, layer: 1 })];
+    const bound = attempt(chain, []);
+    await bound.setUp();
+    // One setup, the replacement's: `logged` logs the fixture's name, which both share.
+    expect(log).toEqual(['setup:seed']);
+    expect(planAttempt(toyTarget(), testNaming(chain, []), []).order.map((planned) => planned.definition)).toEqual([chain[1]]);
+  });
+
+  it('refuses a declared auto that is not the auto of the fixture it extends, naming both', () => {
+    const base = logged([], 'seed', 'base', { scope: undefined, auto: true });
+    const quiet = [base, wrapping([], 'seed', 'override', { scope: undefined, auto: false, layer: 1 })];
+    expect(() => checkDeclaredFixtures(quiet, [quiet[1]!])).toThrow(
+      planError('fixture "seed" is declared with auto: false, but it extends the fixture "seed" of an earlier test.extend(), an auto fixture: a fixture that extends another keeps its auto'),
+    );
+    // A built-in fixture is set up on demand, so its override is too.
+    const eager = [wrapping([], 'app', 'override', { scope: undefined, auto: true })];
+    expect(() => checkDeclaredFixtures(eager, eager)).toThrow(planError('fixture "app" is declared with auto: true, but it extends the built-in "app", not an auto fixture: a fixture that extends another keeps its auto'));
+    const gadget = [wrapping([], 'gadget', 'override', { scope: undefined, auto: true })];
+    // An engine's fixture is known as one only on a target.
+    expect(() => checkDeclaredFixtures(gadget, gadget)).not.toThrow();
+    expect(() => planAttempt(toyTarget(), testNaming(gadget, []), [])).toThrow(planError('fixture "gadget" is declared with auto: true, but it extends the built-in "gadget", not an auto fixture on target "toy"'));
+    // Saying the same auto again is fine.
+    const same = [base, wrapping([], 'seed', 'override', { scope: undefined, auto: true, layer: 1 })];
+    expect(() => checkDeclaredFixtures(same, [same[1]!])).not.toThrow();
   });
 
   it('fails on a target that lacks the built-in only when code there names it', () => {

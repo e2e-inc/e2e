@@ -758,7 +758,7 @@ checked against that target's fixtures.
 | A function that does not destructure its first parameter, takes a rest or computed property there, or is a bound function | At import, `COLLECTION_ERROR` naming the fixture |
 | Fixtures that name each other in a cycle | At import, `COLLECTION_ERROR` naming the cycle |
 | A name the target has no fixture for, in a test that runs there, its hooks, or a fixture they need | At collection, `COLLECTION_ERROR` |
-| A `scope` that differs from the scope of the [fixture it extends](#extending-a-fixture) | At import when that scope is the same on every engine, else at collection, `COLLECTION_ERROR` naming both |
+| A `scope` or an `auto` that differs from that of the [fixture it extends](#extending-a-fixture) | At import when it is the same on every engine, else at collection, `COLLECTION_ERROR` naming both |
 | A fixture that names one a later `extend` declares | At collection, `COLLECTION_ERROR` |
 | A definition that returns without calling `use` | The attempt, in `beforeEach`, `TEST_SETUP_FAILED` |
 | A definition that calls `use` twice | The attempt, at teardown, `TEST_SETUP_FAILED` |
@@ -832,7 +832,9 @@ export const test = base.extend({
   replaces the fixture.
 - Tests, hooks, and other fixtures that name the fixture get the value passed
   to `use`. What the runner does with a built-in fixture does not change.
-- It is set up on demand, for code that names the fixture.
+- It is set up when the fixture it extends would be: on demand, for code that
+  names the fixture, or for every test when it extends an `auto` fixture. An
+  `auto` in the options must be the `auto` of the fixture it extends.
 - It keeps the scope of the fixture it extends on the target, as the
   [built-in fixtures](#fixtures) table gives it. `device` is a worker fixture,
   so its override runs one time per worker and `beforeAll` gets it. A `scope`

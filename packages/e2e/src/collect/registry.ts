@@ -61,8 +61,12 @@ export interface FixtureDefinition {
    * of the fixture it extends, and is a test fixture when it extends none.
    */
   readonly scope: FixtureScope | undefined;
-  /** Set up for every test (or once per worker) whether or not anything names it. */
-  readonly auto: boolean;
+  /**
+   * Whether it declares itself set up for every test (or once per worker)
+   * whether or not anything names it. One that does not say has the `auto`
+   * of the fixture it extends, and is set up on demand when it extends none.
+   */
+  readonly auto: boolean | undefined;
   /**
    * Which `test.extend()` call of its chain defined it, counted from 0. A
    * fixture sees the fixtures of its own call and of the ones before it.
@@ -689,7 +693,7 @@ function validateFixtureDefinitions(
 /** The function, scope, and `auto` of one `test.extend()` entry: `fn`, or `[fn, { scope, auto }]`. */
 function fixtureDefinition(name: string, entry: unknown): Pick<FixtureDefinition, 'fn' | 'scope' | 'auto'> {
   const shape = `test.extend(): fixture "${name}" must be a function ({ ...fixtures }, use) => Promise<void>, or [fn, { scope: 'test' | 'worker', auto: boolean }]`;
-  if (typeof entry === 'function') return { fn: entry as FixtureFn<object, unknown>, scope: undefined, auto: false };
+  if (typeof entry === 'function') return { fn: entry as FixtureFn<object, unknown>, scope: undefined, auto: undefined };
   if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'function') throw new CollectionError(shape);
   const options: unknown = entry[1];
   if (typeof options !== 'object' || options === null || Array.isArray(options)) throw new CollectionError(shape);
@@ -702,7 +706,7 @@ function fixtureDefinition(name: string, entry: unknown): Pick<FixtureDefinition
   if (auto !== undefined && typeof auto !== 'boolean') {
     throw new CollectionError(`test.extend(): fixture "${name}" auto must be true or false, got ${describeValue(auto)}`);
   }
-  return { fn: entry[0] as FixtureFn<object, unknown>, scope: scope as FixtureScope | undefined, auto: auto ?? false };
+  return { fn: entry[0] as FixtureFn<object, unknown>, scope: scope as FixtureScope | undefined, auto };
 }
 
 /**

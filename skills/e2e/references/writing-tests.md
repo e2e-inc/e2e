@@ -194,8 +194,8 @@ skipped. A fixture named like one the `test` already has, built-in ones
 included, extends it (`app: async ({ app }, use) => { await app.open('/x');
 await use(app); }`, no type argument): inside it the name is the previous
 value, everyone else gets what it passes to `use`, and it keeps that
-fixture's type and scope (`device` on mobile: once per worker, `beforeAll`
-gets it; a different `scope` is `COLLECTION_ERROR`). A worker
+fixture's type, scope, and `auto` (`device` on mobile: once per worker,
+`beforeAll` gets it; a different `scope` or `auto` is `COLLECTION_ERROR`). A worker
 fixture (`[fn, { scope: 'worker' }]`, second type argument of `extend`) is
 set up once per worker and target by the first test or suite hook that names
 it, torn down when the worker ends, and sees worker fixtures only. Declare it in a module the test files import: a test

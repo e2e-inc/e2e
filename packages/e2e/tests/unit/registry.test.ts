@@ -524,7 +524,8 @@ describe('test.extend', () => {
       extended('auto', noop);
     });
     expect(registration.tests[0]!.fixtures.map(({ name, scope, auto, layer }) => ({ name, scope, auto, layer }))).toEqual([
-      { name: 'plain', scope: undefined, auto: false, layer: 0 },
+      // A plain function declares neither: it has the scope and the auto of the fixture it extends, if any.
+      { name: 'plain', scope: undefined, auto: undefined, layer: 0 },
       { name: 'watch', scope: undefined, auto: true, layer: 0 },
       { name: 'install', scope: 'worker', auto: true, layer: 0 },
       { name: 'later', scope: undefined, auto: false, layer: 1 },
