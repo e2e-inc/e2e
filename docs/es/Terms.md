@@ -20,7 +20,7 @@ de esta tabla, la traducción usa una de sus formas.
 | artifact | artefacto |  |
 | assertion | aserción / aserciones |  |
 | authentication | autenticación |  |
-| blocked | bloqueado |  |
+| blocked | bloqueado / bloqueada / bloqueados / bloqueadas |  |
 | bug bash | bug bash |  |
 | checkpoint | punto de control / puntos de control |  |
 | coding agent | agente de programación / agentes de programación |  |

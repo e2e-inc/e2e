@@ -63,8 +63,9 @@ para iOS o un `.apk` para Android:
 
 Un destino de dispositivo necesita `bundleId`, `appPath` o ambos. El motor no
 instala nada por sí solo. Llama a `device.installApp()` una vez por
-dispositivo, por ejemplo en un fixture que toman todos los tests. Sin ruta,
-instala `app.appPath`. Sin `bundleId`, `app.open()` lanza la app que instaló la
+dispositivo, en un [fixture de worker](/fixtures#share-a-fixture-across-a-worker)
+con [`auto: true`](/fixtures#run-a-fixture-for-every-test). Sin ruta, instala
+`app.appPath`. Sin `bundleId`, `app.open()` lanza la app que instaló la
 compilación.
 
 Para ejecutar la suite en CI, consulta [Trabajos móviles](/ci#mobile-jobs).
