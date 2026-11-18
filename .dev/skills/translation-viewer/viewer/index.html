@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Translation viewer</title>
+<style>
+  :root {
+    --bg: #fff; --panel: #f6f7f9; --text: #1a1d21; --muted: #667085; --line: #dfe3e8;
+    --accent: #2457d6; --err: #c0302b; --warn: #a15c00; --nit: #5b6472; --ok: #1d7a46; --mark: #fff3bf;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14161a; --panel: #1b1e24; --text: #e6e8eb; --muted: #98a2b3; --line: #2c313a;
+      --accent: #7aa2ff; --err: #ff7b72; --warn: #e3b341; --nit: #98a2b3; --ok: #56d364; --mark: #4a3f10;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, sans-serif; display: grid; grid-template-rows: auto 1fr; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 15px; margin: 0 8px 0 0; }
+  button, select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  #ai { color: var(--muted); font-size: 13px; }
+  main { display: grid; grid-template-columns: 280px 1fr; min-height: 0; }
+  #tree { overflow: auto; border-right: 1px solid var(--line); padding: 8px 0; background: var(--panel); }
+  #tree details > summary { padding: 3px 12px; cursor: pointer; color: var(--muted); }
+  #tree .file { display: flex; justify-content: space-between; gap: 8px; padding: 3px 12px 3px 28px; cursor: pointer; }
+  #tree .file:hover { background: var(--line); }
+  #tree .file.active { background: var(--accent); color: #fff; }
+  #tree .badge { font-size: 12px; }
+  #view { overflow: auto; min-width: 0; }
+  #empty { padding: 32px; color: var(--muted); }
+  .cols, .row { display: grid; grid-template-columns: 1fr 1fr; }
+  .cols { position: sticky; top: 0; z-index: 1; background: var(--panel); border-bottom: 1px solid var(--line); font-weight: 600; }
+  .cols div { padding: 6px 16px; }
+  .row { border-bottom: 1px solid var(--line); }
+  .cell { padding: 8px 16px; min-width: 0; }
+  .cell + .cell { border-left: 1px solid var(--line); }
+  pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.5 ui-monospace, Consolas, monospace; }
+  .findings { margin-top: 8px; display: grid; gap: 6px; }
+  .finding { border-left: 3px solid var(--nit); padding: 4px 8px; background: var(--panel); border-radius: 0 6px 6px 0; }
+  .finding.error { border-color: var(--err); }
+  .finding.warning { border-color: var(--warn); }
+  .finding .sev { font-weight: 600; text-transform: uppercase; font-size: 11px; }
+  .finding q { background: var(--mark); }
+  .ok { color: var(--ok); font-size: 12px; }
+  button.prompt { margin-top: 4px; padding: 2px 8px; font-size: 12px; }
+  .pending { color: var(--muted); font-size: 12px; }
+  .notice { padding: 8px 16px; background: var(--mark); }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; grid-template-rows: 200px 1fr; } .cols, .row { grid-template-columns: 1fr; } .cell + .cell { border-left: 0; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Translation viewer</h1>
+  <select id="locale" aria-label="Locale"></select>
+  <button id="enable" class="primary">Enable Chrome AI</button>
+  <button id="reviewFile" disabled>Review this file</button>
+  <button id="reviewAll" disabled>Review all files</button>
+  <button id="stop" disabled>Stop</button>
+  <button id="copy" disabled>Copy findings</button>
+  <span id="ai" role="status">Chrome AI not started</span>
+</header>
+<main>
+  <nav id="tree" aria-label="Pages"></nav>
+  <div id="view"><div id="empty">Pick a page on the left.</div></div>
+</main>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const state = { locale: '', pages: [], current: '', model: undefined, running: false, stop: false, findings: new Map(), docs: new Map() };
+
+const SCHEMA = {
+  type: 'object',
+  properties: {
+    verdict: { enum: ['ok', 'issues'] },
+    issues: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          severity: { enum: ['error', 'warning', 'nit'] },
+          quote: { type: 'string' },
+          problem: { type: 'string' },
+          suggestion: { type: 'string' },
+        },
+        required: ['severity', 'quote', 'problem'],
+      },
+    },
+  },
+  required: ['verdict', 'issues'],
+};
+const CHUNK = 1800;
+
+async function api(path, init) {
+  const res = await fetch(path, init);
+  if (!res.ok) throw new Error(`${path}: ${res.status}`);
+  return res.json();
+}
+
+/** Splits an MDX page into sections at h1-h4 headings outside code fences. */
+function sections(source) {
+  const out = [];
+  let cur = { heading: 'Frontmatter and intro', lines: [] };
+  let fence = null;
+  for (const line of source.replaceAll('\r\n', '\n').split('\n')) {
+    const mark = /^ *(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence) {
+      if (mark && mark[0] === fence[0] && mark.length >= fence.length) fence = null;
+    } else if (mark) {
+      fence = mark;
+    } else if (/^ {0,3}#{1,4}\s+\S/.test(line)) {
+      out.push(cur);
+      cur = { heading: line.trim(), lines: [] };
+    }
+    cur.lines.push(line);
+  }
+  out.push(cur);
+  return out;
+}
+
+/** The prose of a section: code blocks and JSX-only lines replaced so the model reads text. */
+function prose(lines) {
+  const out = [];
+  let fence = null;
+  for (const line of lines) {
+    const mark = /^ *(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence) {
+      if (mark && mark[0] === fence[0] && mark.length >= fence.length) fence = null;
+    } else if (mark) {
+      fence = mark;
+      out.push('[code block]');
+    } else {
+      out.push(line);
+    }
+  }
+  return out.join('\n').trim();
+}
+
+/** Pairs the paragraphs of both sides into chunks under CHUNK characters; one chunk, truncated, when the counts differ. */
+function chunks(en, tr) {
+  const a = en.split(/\n\s*\n/);
+  const b = tr.split(/\n\s*\n/);
+  if (a.length !== b.length) return [{ en: en.slice(0, CHUNK), tr: tr.slice(0, CHUNK * 1.3), cut: en.length > CHUNK }];
+  const out = [];
+  let cur = { en: '', tr: '' };
+  a.forEach((paragraph, i) => {
+    if (cur.en && cur.en.length + paragraph.length > CHUNK) {
+      out.push(cur);
+      cur = { en: '', tr: '' };
+    }
+    cur = { en: `${cur.en}${cur.en ? '\n\n' : ''}${paragraph}`, tr: `${cur.tr}${cur.tr ? '\n\n' : ''}${b[i]}` };
+  });
+  out.push(cur);
+  return out;
+}
+
+/** The README's glossary rows whose English term appears in the English text. */
+function glossaryFor(readme, english) {
+  const lower = english.toLowerCase();
+  return readme
+    .split('\n')
+    .filter((line) => line.startsWith('|') && !/^\|\s*(-|Inglés|English)/.test(line))
+    .filter((line) => {
+      const term = line.split('|')[1] ?? '';
+      return term.split(',').some((t) => t.replace(/\(.*?\)/g, '').trim() && lower.includes(t.replace(/\(.*?\)/g, '').trim().toLowerCase()));
+    })
+    .join('\n');
+}
+
+/** The glossary terms of one section, as `English -> translation` lines, for a prompt. */
+function termsFor(doc, index) {
+  const english = prose(sections(doc.english)[index]?.lines ?? []);
+  return glossaryFor(doc.glossary, english)
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const [, term, forms, note] = line.split('|').map((cell) => cell.trim());
+      return `- ${term} -> ${forms}${note ? ` (${note})` : ''}`;
+    })
+    .join('\n');
+}
+
+function systemPrompt(locale, glossary) {
+  return [
+    `You review a ${locale} translation of English technical documentation for the testing tool "e2e".`,
+    'You get an English passage and its translation. Report only real problems:',
+    '- error: meaning changed, content missing or added, a wrong term from the glossary, a product or package name translated.',
+    '- warning: unnatural or literal phrasing, inconsistent register (the reader is addressed informally), grammar or spelling mistakes.',
+    '- nit: small style points.',
+    'Never flag code, "[code block]", URLs, or text that is the same in both languages on purpose. If the translation is fine, answer verdict "ok" with no issues.',
+    'quote must be copied exactly from the translation. Write problem and suggestion in English, suggestion in the translation language.',
+    glossary ? `Glossary (English | translation):\n${glossary}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+async function enable() {
+  if (!('LanguageModel' in self)) {
+    $('ai').textContent = 'No LanguageModel API: use Chrome 138+ on desktop, and see the skill for flags.';
+    return;
+  }
+  const options = { expectedInputs: [{ type: 'text', languages: ['en'] }], expectedOutputs: [{ type: 'text', languages: ['en'] }] };
+  const availability = await LanguageModel.availability(options).catch(() => 'unavailable');
+  if (availability === 'unavailable') {
+    $('ai').textContent = 'Chrome AI unavailable on this device (model, GPU, or disk requirements).';
+    return;
+  }
+  $('ai').textContent = availability === 'available' ? 'Starting Chrome AI...' : 'Downloading the model...';
+  try {
+    state.model = { options, probe: await LanguageModel.create({ ...options, monitor(m) {
+      m.addEventListener('downloadprogress', (e) => { $('ai').textContent = `Downloading the model: ${Math.round(e.loaded * 100)}%`; });
+    } }) };
+  } catch (error) {
+    $('ai').textContent = `Could not start Chrome AI: ${error}`;
+    return;
+  }
+  $('ai').textContent = 'Chrome AI ready (Gemini Nano, on this device)';
+  $('enable').disabled = true;
+  syncButtons();
+}
+
+function syncButtons() {
+  const ready = Boolean(state.model);
+  $('reviewFile').disabled = !ready || !state.current || state.running;
+  $('reviewAll').disabled = !ready || state.running;
+  $('stop').disabled = !state.running;
+  $('copy').disabled = state.findings.size === 0;
+}
+
+async function loadDoc(path) {
+  if (!state.docs.has(path)) {
+    state.docs.set(path, await api(`/api/file?locale=${state.locale}&path=${encodeURIComponent(path)}`));
+  }
+  return state.docs.get(path);
+}
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+/** A prompt to paste into the coding session so it fixes the findings of one section. */
+function fixPrompt(path, heading, issues, terms) {
+  const locale = state.locale;
+  const list = issues
+    .map((issue, i) => `${i + 1}. [${issue.severity}] ${issue.quote ? `"${issue.quote}" - ` : ''}${issue.problem}${issue.suggestion ? ` Suggested: ${issue.suggestion}` : ''}`)
+    .join('\n');
+  return [
+    `Fix ${issues.length === 1 ? 'this translation finding' : 'these translation findings'} in docs/${locale}/${path}, section "${heading}".`,
+    '',
+    list,
+    '',
+    ...(terms ? [`Terms this section must use exactly (from docs/${locale}/Terms.md; the first form is preferred):`, terms, ''] : []),
+    'The findings come from a small on-device model: read the English page docs/' + path + ' first and skip any finding that is wrong.',
+    `Follow docs/${locale}/README.md and docs/${locale}/Terms.md. Edit only docs/${locale}/${path}; keep the outline, code, inline code, and links exactly as in English.`,
+    `Then run: node .dev/skills/translation-review/scripts/review.mjs ${locale} --page ${path}  and  pnpm docs:check. Tell me what you changed and what you skipped.`,
+  ].join('\n');
+}
+
+/** Copies text and shows it on the button for a moment. */
+async function copyPrompt(button, text) {
+  const label = button.textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    button.textContent = 'Copied';
+  } catch {
+    button.textContent = 'Copy failed';
+  }
+  setTimeout(() => { button.textContent = label; }, 1500);
+}
+
+function promptButton(label, text) {
+  const button = el('button', 'prompt', label);
+  button.addEventListener('click', () => copyPrompt(button, text));
+  return button;
+}
+
+function renderFindings(box, result, context) {
+  box.replaceChildren();
+  if (!result) return;
+  if (result.error) return box.append(el('div', 'pending', `Review failed: ${result.error}`));
+  if (result.issues.length === 0) return box.append(el('div', 'ok', 'No issues found'));
+  for (const issue of result.issues) {
+    const item = el('div', `finding ${issue.severity}`);
+    item.append(el('span', 'sev', issue.severity), document.createTextNode(' '));
+    if (issue.quote) {
+      const quote = document.createElement('q');
+      quote.textContent = issue.quote;
+      item.append(quote, document.createTextNode(' '));
+    }
+    item.append(el('div', '', issue.problem));
+    if (issue.suggestion) item.append(el('div', 'ok', `Suggestion: ${issue.suggestion}`));
+    item.append(promptButton('Get prompt', fixPrompt(context.path, context.heading, [issue], context.terms)));
+    box.append(item);
+  }
+  if (result.issues.length > 1) box.append(promptButton(`Get prompt for all ${result.issues.length}`, fixPrompt(context.path, context.heading, result.issues, context.terms)));
+}
+
+async function show(path) {
+  state.current = path;
+  for (const node of document.querySelectorAll('#tree .file')) node.classList.toggle('active', node.dataset.path === path);
+  const doc = await loadDoc(path);
+  const en = sections(doc.english);
+  const tr = sections(doc.translated);
+  const view = $('view');
+  view.replaceChildren();
+  if (en.length !== tr.length) view.append(el('div', 'notice', `Outlines differ (${en.length} English sections, ${tr.length} translated). Run pnpm docs:check.`));
+  const head = el('div', 'cols');
+  head.append(el('div', '', 'English'), el('div', '', state.locale));
+  view.append(head);
+  const saved = state.findings.get(path) ?? [];
+  for (let i = 0; i < Math.max(en.length, tr.length); i++) {
+    const row = el('div', 'row');
+    row.id = `s${i}`;
+    const left = el('div', 'cell');
+    left.append(el('pre', '', en[i]?.lines.join('\n') ?? ''));
+    const right = el('div', 'cell');
+    right.append(el('pre', '', tr[i]?.lines.join('\n') ?? ''));
+    const box = el('div', 'findings');
+    right.append(box);
+    renderFindings(box, saved[i], { path, heading: tr[i]?.heading ?? en[i]?.heading ?? '', terms: termsFor(doc, i) });
+    row.append(left, right);
+    view.append(row);
+  }
+  view.scrollTop = 0;
+  syncButtons();
+}
+
+/** Reviews one section; the model sees paired chunks of its prose. */
+async function reviewSection(doc, i) {
+  const en = sections(doc.english)[i];
+  const tr = sections(doc.translated)[i];
+  const enText = prose(en?.lines ?? []);
+  const trText = prose(tr?.lines ?? []);
+  if (!enText.replace(/\[code block\]/g, '').trim() && !trText.replace(/\[code block\]/g, '').trim()) return { issues: [] };
+  const issues = [];
+  const glossary = glossaryFor(doc.glossary, enText);
+  for (const chunk of chunks(enText, trText)) {
+    const session = await LanguageModel.create({
+      ...state.model.options,
+      initialPrompts: [{ role: 'system', content: systemPrompt(state.locale, glossary) }],
+    });
+    try {
+      const answer = await session.prompt(`English:\n${chunk.en}\n\nTranslation:\n${chunk.tr}`, { responseConstraint: SCHEMA });
+      const parsed = JSON.parse(answer);
+      if (parsed.verdict === 'issues') issues.push(...parsed.issues);
+    } finally {
+      session.destroy();
+    }
+  }
+  const squash = (text) => text.replace(/s+/g, ' ').toLowerCase();
+  // A quote that is not on the page is invented: the small model does this often.
+  return { issues: issues.filter((issue) => !issue.quote || squash(trText).includes(squash(issue.quote))) };
+}
+
+async function reviewFile(path) {
+  const doc = await loadDoc(path);
+  const count = Math.max(sections(doc.english).length, sections(doc.translated).length);
+  const results = [];
+  state.findings.set(path, results);
+  markBadge(path, '...');
+  for (let i = 0; i < count && !state.stop; i++) {
+    try {
+      results[i] = await reviewSection(doc, i);
+    } catch (error) {
+      results[i] = { error: String(error) };
+    }
+    if (state.current === path) renderFindings(document.querySelector(`#s${i} .findings`), results[i], { path, heading: sections(doc.translated)[i]?.heading ?? '', terms: termsFor(doc, i) });
+    $('ai').textContent = `Reviewing ${path}: section ${i + 1} of ${count}`;
+  }
+  const total = results.reduce((n, r) => n + (r?.issues?.length ?? 0), 0);
+  markBadge(path, total === 0 ? 'ok' : String(total));
+  await api('/api/findings', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ locale: state.locale, path, findings: results.flatMap((r, i) => (r?.issues ?? []).map((issue) => ({ section: sections(doc.translated)[i]?.heading, ...issue }))) }),
+  });
+}
+
+function markBadge(path, text) {
+  const node = document.querySelector(`#tree .file[data-path="${CSS.escape(path)}"] .badge`);
+  if (node) node.textContent = text;
+}
+
+async function run(paths) {
+  state.running = true;
+  state.stop = false;
+  syncButtons();
+  for (const path of paths) {
+    if (state.stop) break;
+    await reviewFile(path);
+  }
+  state.running = false;
+  $('ai').textContent = state.stop ? 'Stopped' : 'Review done. Findings were saved for the agent.';
+  syncButtons();
+}
+
+function buildTree() {
+  const tree = $('tree');
+  tree.replaceChildren();
+  const folders = new Map();
+  for (const path of state.pages) {
+    const parts = path.split('/');
+    const folder = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+    if (!folders.has(folder)) folders.set(folder, []);
+    folders.get(folder).push(path);
+  }
+  for (const [folder, paths] of [...folders].sort(([a], [b]) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)))) {
+    const parent = folder === '' ? tree : el('details');
+    if (folder !== '') {
+      parent.open = true;
+      parent.append(el('summary', '', folder));
+      tree.append(parent);
+    }
+    for (const path of paths) {
+      const row = el('div', 'file');
+      row.dataset.path = path;
+      row.append(el('span', '', path.split('/').pop()), el('span', 'badge'));
+      row.addEventListener('click', () => show(path));
+      parent.append(row);
+    }
+  }
+}
+
+async function loadLocale(locale) {
+  state.locale = locale;
+  state.docs.clear();
+  state.findings.clear();
+  state.current = '';
+  state.pages = (await api(`/api/tree?locale=${locale}`)).pages;
+  buildTree();
+  $('view').replaceChildren(el('div', '', ''));
+  $('view').firstChild.id = 'empty';
+  $('view').firstChild.textContent = `${state.pages.length} translated pages. Pick one on the left.`;
+  syncButtons();
+}
+
+$('enable').addEventListener('click', enable);
+$('reviewFile').addEventListener('click', () => run([state.current]));
+$('reviewAll').addEventListener('click', () => run(state.pages));
+$('stop').addEventListener('click', () => { state.stop = true; });
+$('locale').addEventListener('change', (e) => loadLocale(e.target.value));
+$('copy').addEventListener('click', async () => {
+  const lines = [];
+  for (const [path, results] of state.findings) {
+    for (const r of results) for (const i of r?.issues ?? []) lines.push(`- ${path} [${i.severity}] "${i.quote}": ${i.problem}${i.suggestion ? ` -> ${i.suggestion}` : ''}`);
+  }
+  await navigator.clipboard.writeText(lines.join('\n'));
+  $('ai').textContent = `Copied ${lines.length} findings`;
+});
+
+(async () => {
+  const info = await api('/api/locales');
+  for (const locale of info.locales) $('locale').append(new Option(locale, locale));
+  $('locale').value = info.default;
+  await loadLocale(info.default);
+})();
+</script>
+</body>
+</html>
