@@ -57,11 +57,14 @@ export interface WorkerFixtureTeardown extends FixtureTeardown {
  * asked gave up), and the function then runs on detached with `use`
  * resolved at once. Resolves once the value was handed over; rejects with
  * the function's failure, or when it returned without calling `use`.
+ * `outlivesTest` says the fixture is a worker's: set up inside the first
+ * test that names it, it is no part of that test.
  */
 function startFixture(
   definition: FixtureDefinition,
   fixtures: object,
   accept: (value: unknown, teardown: FixtureTeardown) => boolean,
+  outlivesTest = false,
 ): Promise<void> {
   const { name } = definition;
   let ready!: () => void;
@@ -77,7 +80,7 @@ function startFixture(
   let used = false;
   let misuse: ConfigurationError | undefined;
   // The function's polls are its user's until `use` returns, then its teardown's.
-  const polls: PollLineage = pollLineage();
+  const polls: PollLineage = pollLineage({ outlivesTest });
   const use = (value: unknown): Promise<void> => {
     if (used) {
       misuse = new ConfigurationError(
@@ -185,7 +188,7 @@ export class WorkerFixturePool {
       value = provided;
       this.active.push({ ...teardown, usesEngine });
       return true;
-    }).then(() => value);
+    }, true).then(() => value);
     this.instances.set(definition, instance);
     instance.catch(() => {
       if (this.instances.get(definition) === instance) this.instances.delete(definition);
