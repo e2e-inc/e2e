@@ -62,8 +62,9 @@ nebo `.apk` pro Android:
 ```
 
 Cíl pro zařízení potřebuje `bundleId`, `appPath`, nebo obojí. Engine sám nic
-neinstaluje. Zavolej `device.installApp()` jednou pro každé zařízení,
-například ve fixture, kterou používá každý test. Bez cesty nainstaluje
+neinstaluje. Zavolej `device.installApp()` jednou pro každé zařízení, ve
+[fixture workeru](/fixtures#share-a-fixture-across-a-worker) s
+[`auto: true`](/fixtures#run-a-fixture-for-every-test). Bez cesty nainstaluje
 `app.appPath`. Bez `bundleId` spustí `app.open()` aplikaci, kterou
 sestavení nainstalovalo.
 
