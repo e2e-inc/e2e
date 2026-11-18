@@ -61,6 +61,12 @@ test('termsIn matches an English term at word boundaries, with a plural, and acr
   assert.deepEqual(termsIn('Agents run the latest build and sign-in.', terms).map((term) => term.en), ['agent', 'sign in']);
 });
 
+test('termsIn does not match a term inside a hyphenated name', () => {
+  const terms = [{ en: 'agent', forms: ['agente'], note: '' }];
+  assert.deepEqual(termsIn('Install agent-device and my-agent first.', terms), []);
+  assert.equal(termsIn('Run the agent.', terms).length, 1);
+});
+
 test('inventory counts markdown links, component hrefs, list items, table rows, and code blocks', () => {
   const counts = inventory(['- [a](/one)', '- b', '<Card href="/two" />', '| x | y |', '```ts', 'code', '```']);
   assert.equal(counts.links.get('/one'), 1);

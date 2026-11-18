@@ -54,18 +54,32 @@ export function read(path: string): string {
   return readFileSync(path, 'utf8').replaceAll('\r\n', '\n');
 }
 
+/**
+ * Tags each line as `text`, the `open` fence of a code block, or `code` (its
+ * body and closing fence): the one place fence tracking lives.
+ */
+function classify(lines: string[]): { line: string; kind: 'text' | 'open' | 'code' }[] {
+  let fence: string | undefined;
+  return lines.map((line) => {
+    const mark = FENCE.exec(line)?.[1];
+    if (fence) {
+      if (mark && mark[0] === fence[0] && mark.length >= fence.length) fence = undefined;
+      return { line, kind: 'code' };
+    }
+    if (mark) {
+      fence = mark;
+      return { line, kind: 'open' };
+    }
+    return { line, kind: 'text' };
+  });
+}
+
 /** Splits a page into sections at h1-h4 headings outside code fences. */
 export function sections(source: string): Section[] {
   const out: Section[] = [];
   let cur: Section = { heading: 'Frontmatter and intro', lines: [] };
-  let fence: string | undefined;
-  for (const line of source.replaceAll('\r\n', '\n').split('\n')) {
-    const mark = FENCE.exec(line)?.[1];
-    if (fence) {
-      if (mark && mark[0] === fence[0] && mark.length >= fence.length) fence = undefined;
-    } else if (mark) {
-      fence = mark;
-    } else if (HEADING.test(line)) {
+  for (const { line, kind } of classify(source.replaceAll('\r\n', '\n').split('\n'))) {
+    if (kind === 'text' && HEADING.test(line)) {
       out.push(cur);
       cur = { heading: line.trim(), lines: [] };
     }
@@ -77,19 +91,7 @@ export function sections(source: string): Section[] {
 
 /** The section's lines without fenced code blocks (fence lines included). */
 export function withoutCode(lines: string[]): string[] {
-  const out: string[] = [];
-  let fence: string | undefined;
-  for (const line of lines) {
-    const mark = FENCE.exec(line)?.[1];
-    if (fence) {
-      if (mark && mark[0] === fence[0] && mark.length >= fence.length) fence = undefined;
-    } else if (mark) {
-      fence = mark;
-    } else {
-      out.push(line);
-    }
-  }
-  return out;
+  return classify(lines).filter(({ kind }) => kind === 'text').map(({ line }) => line);
 }
 
 const TEXT_ATTRIBUTES = /\b(?:title|subtitle|description|label|aria-label)="([^"]*)"/g;
@@ -146,17 +148,9 @@ export function proseOf(lines: string[]): string {
  */
 export function modelText(lines: string[]): string {
   const out: string[] = [];
-  let fence: string | undefined;
-  for (const line of lines) {
-    const mark = FENCE.exec(line)?.[1];
-    if (fence) {
-      if (mark && mark[0] === fence[0] && mark.length >= fence.length) fence = undefined;
-    } else if (mark) {
-      fence = mark;
-      out.push('[code block]');
-    } else if (!/^\s*(import|export)\s/.test(line)) {
-      out.push(line);
-    }
+  for (const { line, kind } of classify(lines)) {
+    if (kind === 'open') out.push('[code block]');
+    else if (kind === 'text' && !/^\s*(import|export)\s/.test(line)) out.push(line);
   }
   return out.join('\n').replace(TAG, tagText).replace(/\n{3,}/g, '\n\n').trim();
 }
@@ -202,7 +196,7 @@ function escapeTerm(term: string): string {
 
 /** The English term as a pattern that also takes a regular plural. */
 export function termPattern(term: string): RegExp {
-  return new RegExp(String.raw`(?<![\p{L}\p{N}])${escapeTerm(term)}(?:s|es)?(?![\p{L}\p{N}])`, 'iu');
+  return new RegExp(String.raw`(?<![\p{L}\p{N}-])${escapeTerm(term)}(?:s|es)?(?![\p{L}\p{N}-])`, 'iu');
 }
 
 /**
