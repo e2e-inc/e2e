@@ -44,7 +44,7 @@ export type PermissionState = 'grant' | 'deny' | 'reset';
  * Permissions an app holds when it launches, by name, or `'all'` to grant
  * every one the platform can: each permission the app declares on Android,
  * and every name but `notifications` on an iOS simulator, which refuses to
- * set notifications.
+ * set notifications, skipping any its runtime does not support.
  */
 export type LaunchPermissions = Readonly<Partial<Record<DevicePermission, PermissionState>>> | 'all';
 
