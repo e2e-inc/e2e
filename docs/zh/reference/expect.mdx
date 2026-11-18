@@ -301,7 +301,7 @@ await expect(browser).toHaveClass(browser.locator('.card'), 'card active');
 
 #### `toHaveCSS`
 
-等待目标元素的一个计算样式属性匹配：字符串对应整个值，`RegExp` 则对该值进行测试。比较前，两侧连续的空白都会合并为一个空格，并去掉首尾空白，与其他文本匹配器相同。Playwright 则按原始值比较。
+等待目标元素的一个计算样式属性匹配。与其他文本匹配器读取文本的方式相同，读取值时会把连续的空白合并为一个空格，并去掉首尾空白。字符串也按同样方式规范化，并且必须与整个值相等。`RegExp` 的源保持不变，对规范化后的值进行测试。Playwright 则按原始值比较。
 
 ```ts
 const nav = screen.getByRole('navigation', { name: 'Main' });

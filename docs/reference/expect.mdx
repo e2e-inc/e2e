@@ -360,10 +360,11 @@ await expect(browser).toHaveClass(browser.locator('.card'), 'card active');
 
 #### `toHaveCSS`
 
-Waits for one computed style property of the target to match: a string is
-the whole value, a `RegExp` is tested against it. Both sides have runs of
-whitespace collapsed to one space and their ends trimmed first, as the other
-text matchers do. Playwright compares the raw value.
+Waits for one computed style property of the target to match. The value is
+read with runs of whitespace collapsed to one space and its ends trimmed, as
+the other text matchers read text. A string is normalized the same way and
+must equal the whole value. A `RegExp` is tested against the normalized
+value, with its source unchanged. Playwright compares the raw value.
 
 ```ts
 const nav = screen.getByRole('navigation', { name: 'Main' });

@@ -16,7 +16,7 @@ const frozen = content(`<html><p id="frozen" style="color: blue">Frozen</p><scri
 
 const page = content(`<html>
   <nav aria-label="Breadcrumbs" style="position: static">a / b</nav>
-  <nav aria-label="Main" data-x="1" style="position: sticky; top: 0; --accent: red">Home</nav>
+  <nav aria-label="Main" data-x="1" style="position: sticky; top: 0; --accent: red; --grid: a    b">Home</nav>
   <iframe srcdoc="<aside style='width: 240px'>Side</aside>"></iframe>
   <label>Name <input value="Ada"></label>
   <p id="holder">Holder</p>
@@ -106,6 +106,15 @@ test.describe('browser.evaluateOn', { requires: ['browser'] }, () => {
 });
 
 test.describe('expect(browser).toHaveCSS', { requires: ['browser'] }, () => {
+  test('collapses whitespace in the value, and tests a RegExp against the collapsed value', async ({ browser, screen }) => {
+    await browser.goto(page);
+    const main = screen.getByRole('navigation', { name: 'Main' });
+    expect(await browser.evaluateOn(main, (el) => getComputedStyle(el).getPropertyValue('--grid'))).toBe('a    b');
+    await expect(browser).toHaveCSS(main, '--grid', 'a b');
+    await expect(browser).toHaveCSS(main, '--grid', /^a b$/);
+    await expect(browser).not.toHaveCSS(main, '--grid', /a {4}b/, { timeout: 300 });
+  });
+
   test('matches a computed value, a custom property, and its negation', async ({ browser, screen }) => {
     await browser.goto(page);
     const main = screen.getByRole('navigation', { name: 'Main' });
