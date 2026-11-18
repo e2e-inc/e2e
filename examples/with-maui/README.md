@@ -60,6 +60,11 @@ model calls. Results are in `e2e/.e2e/report.json`.
   Deployment), and `app.clearState()` deletes them with the app data. The
   app then exits at start. For tests that clear app data, build with
   `-p:EmbedAssembliesIntoApk=true`.
+- On a CI Mac, the first read after a Debug build launches on iOS took 4 to
+  5 seconds in the nightly runs, and sometimes over the default 5 second
+  `expect` deadline. The first assertion in
+  [deterministic.e2e.ts](e2e/tests/deterministic.e2e.ts) waits up to 10
+  seconds.
 
 See [e2e/e2e.config.ts](e2e/e2e.config.ts) and [e2e/tests/](e2e/tests/) for the setup.
 For device setup and CI, see the [Mobile guide](https://e2e.com/docs/mobile).
