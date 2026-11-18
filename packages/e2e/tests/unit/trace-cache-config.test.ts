@@ -476,6 +476,17 @@ describe('recorded provenance', () => {
     expect(digestWith('hunter2')).toBe(digestWith('swordfish'));
   });
 
+  it.each(['targetId', 'agent'] as const)('stores the %s redacted and takes the digest over it redacted', (field) => {
+    const recorded = (value: string) => {
+      const secrets = new SecretLedger();
+      secrets.register('password', value);
+      return recordedProvenance({ ...STEP, testId: `${STEP.testId}${'x'.repeat(400)}`, [field]: `staging-${value}` }, secrets.redact);
+    };
+    expect(recorded('hunter2')[field]).not.toContain('hunter2');
+    expect(recorded('hunter2').identityDigest).toMatch(/^[a-f0-9]{64}$/u);
+    expect(recorded('hunter2').identityDigest).toBe(recorded('swordfish').identityDigest);
+  });
+
   it('measures the redacted names, so a name a secret makes longer than an entry keeps gets a digest', () => {
     const secrets = new SecretLedger();
     secrets.register('password', 'hunter2');

@@ -37,10 +37,8 @@ import type { JsonValue } from '../types.ts';
  * stands. A kept entry carries no payload, so the replay's expansion of it
  * (every `unique()` slot filled with this run's value) can never be written;
  * confirmed, the file keeps its bytes and `createdAt`, and a committed cache
- * directory stays clean, unless its stored provenance (`recordedFor`) differs
- * from the step's in the occurrence fields or the identity digest, which the
- * replay proved and are then written in. Unconfirmed, both kinds are evicted
- * alike.
+ * directory stays clean, but for the provenance the replay proved, which
+ * `completeProvenance` writes in. Unconfirmed, both kinds are evicted alike.
  */
 export type StagedTrace = {
   readonly keyHash: string;
@@ -203,8 +201,8 @@ export interface SurvivedFailure {
  * no settlement: interruption implicates nothing, so it writes nothing and
  * evicts nothing. An entry a step replayed whole is staged too,
  * so the same rule evicts it when nothing confirmed it; when something did,
- * it is left exactly as it was found, but for provenance that differs from
- * the step's (`completeProvenance`).
+ * it is left exactly as it was found, but for what `completeProvenance`
+ * writes in.
  */
 export async function settleStagedTraces(context: AgentCacheContext, settlement: AttemptSettlement | undefined): Promise<ReadonlyMap<number, CacheWrite>> {
   const outcomes = new Map<number, CacheWrite>();
