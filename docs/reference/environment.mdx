@@ -25,7 +25,13 @@ Configure a model in `e2e.config.ts`. Its provider reads the API key:
 `AI_GATEWAY_API_KEY`, `gateway()` uses a
 [Vercel OIDC token](/models#vercel-oidc-instead-of-a-key). A missing
 credential fails on the first model call. Subscription models use a stored
-login instead.
+login instead. The `codex()` coding agent preset from `@e2e-dev/acp` also
+reads the first nonblank of `CODEX_API_KEY` and `OPENAI_API_KEY` to sign
+Codex in when it has no login of its own and `DEFAULT_AUTH_REQUEST` is
+unset, empty, or only spaces. Codex then saves the key as its login with its default
+credential store. While `APP_SERVER_LOGS` is set, `codex()` passes no sign-in
+request at all. See
+[Use your coding agent](/subscriptions#use-your-coding-agent).
 See [Models](/models) and [Subscriptions](/subscriptions).
 
 | Variable | Example | Reading | Effect |

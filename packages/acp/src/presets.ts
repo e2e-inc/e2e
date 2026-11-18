@@ -58,26 +58,97 @@ export function claudeCodeLaunch(options: AcpAgentOptions): () => Promise<AgentL
 export function codexLaunch(options: AcpAgentOptions): () => Promise<AgentLaunch> {
   const pkg = adapterPackage('@agentclientprotocol/codex-acp');
   const bin = binOf(pkg, 'codex-acp');
-  let launch: Promise<AgentLaunch> | undefined;
-  return () => {
-    launch ??= codexServers(pkg, options.env).then(
-      (servers): AgentLaunch => ({
-        command: process.execPath,
-        args: [bin],
-        env: { ...options.env, CODEX_CONFIG: JSON.stringify(codexConfig(servers)) },
-        model: options.model,
-        mode: 'read-only',
-        signIn: 'run `codex login`',
-      }),
-    );
-    launch.catch(() => {
-      launch = undefined;
+  let servers: Promise<string[]> | undefined;
+  return async () => {
+    servers ??= codexServers(pkg, options.env);
+    servers.catch(() => {
+      servers = undefined;
     });
-    return launch;
+    const config = JSON.stringify(codexConfig(await servers));
+    // Read at each session, so a request or key set after the first one counts, and pinned for it.
+    const auth = codexAuth(options.env);
+    return {
+      command: process.execPath,
+      args: [bin],
+      env: { ...options.env, ...auth.env, CODEX_CONFIG: config },
+      model: options.model,
+      mode: 'read-only',
+      signIn: auth.signIn,
+      loginRefused: auth.loginRefused,
+    };
   };
 }
 
-/** The Codex features that give the agent a tool of its own. */
+/**
+ * How one Codex session signs in: the variables it starts with, the hint
+ * for a session it refuses, and the hint for a turn refused because the
+ * saved login no longer works, which Codex keeps until logout.
+ */
+interface CodexAuth {
+  readonly env: Record<string, string>;
+  readonly signIn: string;
+  readonly loginRefused: string;
+}
+
+/**
+ * Signs Codex in with an OpenAI API key when one is set, in `env` or the
+ * runner's environment, and no `DEFAULT_AUTH_REQUEST` is. The adapter
+ * takes the first nonblank of `CODEX_API_KEY` and `OPENAI_API_KEY`, but
+ * logs in with it only when the client asks; `DEFAULT_AUTH_REQUEST` asks
+ * whenever Codex has no login of its own. Codex then stores the key as
+ * its login, as `codex login --with-api-key` does. The request names the
+ * method only.
+ *
+ * The adapter's log, which `APP_SERVER_LOGS` turns on, records the
+ * request at startup and the login call it makes, key included, in plain
+ * text. So with that log on the adapter gets no request at all, the
+ * user's own included: a saved login still works, and a session Codex
+ * refuses says why. A variable in `env` replaces the runner's, blank
+ * included, so a config can keep a key from Codex; a blank request or key
+ * then counts as none, and none reaches the adapter empty, since the
+ * adapter parses a request of spaces and exits. Every variable the decision read is pinned,
+ * an unset one as empty, which the adapter reads the same way, so the
+ * agent starts on what was decided even if the environment changes
+ * before it spawns.
+ */
+function codexAuth(env: Readonly<Record<string, string>> | undefined): CodexAuth {
+  const value = (name: string) => (env !== undefined && Object.hasOwn(env, name) ? env[name] : process.env[name]) ?? '';
+  const nonblank = (name: string) => (value(name).trim() === '' ? '' : value(name));
+  const pinned = {
+    CODEX_API_KEY: nonblank('CODEX_API_KEY'),
+    OPENAI_API_KEY: nonblank('OPENAI_API_KEY'),
+    DEFAULT_AUTH_REQUEST: nonblank('DEFAULT_AUTH_REQUEST'),
+    APP_SERVER_LOGS: value('APP_SERVER_LOGS'),
+  };
+  const signIn = 'run `codex login`, or set OPENAI_API_KEY';
+  // What a fresh sign-in would use: the user's request, else CODEX_API_KEY before OPENAI_API_KEY; with the adapter log on, neither.
+  const fresh =
+    pinned['APP_SERVER_LOGS'] !== ''
+      ? '`codex login`, or unset APP_SERVER_LOGS and set a working OPENAI_API_KEY'
+      : pinned['DEFAULT_AUTH_REQUEST'] !== ''
+        ? '`codex login`, or fix DEFAULT_AUTH_REQUEST'
+        : `\`codex login\` or set a working ${pinned['CODEX_API_KEY'] === '' ? 'OPENAI_API_KEY' : 'CODEX_API_KEY'}`;
+  const loginRefused = `the model provider refused Codex's credentials. If Codex signed in with a saved login or key, run \`codex logout\` first, then ${fresh}. If they come from a custom model provider's key, fix that key`;
+  const withoutRequest = { ...pinned, DEFAULT_AUTH_REQUEST: '' };
+  const request = pinned['DEFAULT_AUTH_REQUEST'] !== '';
+  const key = pinned['CODEX_API_KEY'] !== '' || pinned['OPENAI_API_KEY'] !== '';
+  // The adapter logs whenever the variable is not empty, spaces included.
+  if (pinned['APP_SERVER_LOGS'] !== '' && (request || key)) {
+    return {
+      env: withoutRequest,
+      loginRefused,
+      signIn: 'APP_SERVER_LOGS is set, and the Codex adapter would write sign-in credentials to its log in plain text, so e2e passes it no sign-in request: unset APP_SERVER_LOGS, or run `codex login`',
+    };
+  }
+  if (request) return { env: pinned, signIn: 'the DEFAULT_AUTH_REQUEST you set did not sign Codex in: fix or unset it, or run `codex login`', loginRefused };
+  if (!key) {
+    const logged = pinned['APP_SERVER_LOGS'] !== '';
+    return { env: withoutRequest, signIn: logged ? 'run `codex login`, or unset APP_SERVER_LOGS and set OPENAI_API_KEY' : signIn, loginRefused };
+  }
+  return { env: { ...pinned, DEFAULT_AUTH_REQUEST: JSON.stringify({ methodId: 'api-key' }) }, signIn, loginRefused };
+}
+
+/** The Codex features that give the agent a tool of its own, and shell snapshots, which copy the shell's environment, keys included, to disk. */
 const CODEX_FEATURES_OFF = [
   'apps',
   'browser_use',
@@ -88,6 +159,8 @@ const CODEX_FEATURES_OFF = [
   'multi_agent',
   'multi_agent_v2',
   'plugins',
+  'shell_snapshot',
+  'shell_snapshot_v2',
   'shell_tool',
   'skill_search',
   'tool_suggest',

@@ -1,16 +1,19 @@
+import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { StepExecutor, StepExecutorContext } from 'e2e';
-import { afterEach, describe, expect, it } from 'vitest';
-import { claudeCode, codex } from '../src/index.ts';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { acp, claudeCode, codex } from '../src/index.ts';
+import { codexLaunch } from '../src/presets.ts';
 
 const AGENT = fileURLToPath(new URL('./fixtures/scripted-agent.ts', import.meta.url));
 const pass = { call: 'complete_step', args: { status: 'passed', summary: 'done' } };
 const cleanups: (() => void)[] = [];
 afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup();
+  vi.unstubAllEnvs();
 });
 
 /** A project with the scripted agent installed under an adapter's package name. */
@@ -40,6 +43,20 @@ function inProject<T>(directory: string, build: () => T): T {
 
 /** Runs one passing step and returns what the agent logged. */
 async function runStep(executor: StepExecutor, log: string): Promise<Record<string, unknown>[]> {
+  await expect(executor.runStep(stepContext())).resolves.toMatchObject({ status: 'passed' });
+  return readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+/** The messages of the error one step fails with, causes included, one per line. */
+async function stepFailure(executor: StepExecutor): Promise<string> {
+  const error = await executor.runStep(stepContext()).then(() => undefined, (rejection: unknown) => rejection);
+  const messages: string[] = [];
+  for (let cause = error; cause instanceof Error; cause = cause.cause) messages.push(cause.message);
+  return messages.join('\n');
+}
+
+/** The context of one act step on a fake web target. */
+function stepContext(): StepExecutorContext {
   const attempt = new AbortController();
   cleanups.push(() => attempt.abort());
   const ctx = {
@@ -56,8 +73,7 @@ async function runStep(executor: StepExecutor, log: string): Promise<Record<stri
     attachScreenshot: async () => 'screenshot',
     budgets: { maxActions: 5, maxModelCalls: 5, remainingMs: () => 60_000, actionsUsed: () => 0, recordModelCall: () => undefined, runTool: <T>(_: unknown, body: () => Promise<T>) => body() },
   } as unknown as StepExecutorContext;
-  await expect(executor.runStep(ctx)).resolves.toMatchObject({ status: 'passed' });
-  return readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+  return ctx;
 }
 
 describe('agent presets', () => {
@@ -104,7 +120,219 @@ describe('agent presets', () => {
       mcp_servers: Record<string, { enabled: boolean }>;
     };
     expect(config.web_search).toBe('disabled');
-    expect(config.features).toMatchObject({ shell_tool: false, multi_agent: false, plugins: false, apps: false, browser_use: false });
+    const off = ['apps', 'browser_use', 'browser_use_external', 'computer_use', 'goals', 'image_generation', 'multi_agent', 'multi_agent_v2', 'plugins', 'shell_snapshot', 'shell_snapshot_v2', 'shell_tool', 'skill_search', 'tool_suggest', 'unified_exec', 'view_image'];
+    expect(config.features).toEqual(Object.fromEntries(off.map((feature) => [feature, false])));
     expect(config.mcp_servers).toEqual({ playwright: { enabled: false }, executor: { enabled: false } });
+  });
+
+  /** A Codex executor on the scripted agent, with a stand-in `codex` that lists no MCP servers, and the log it writes. */
+  function codexProject(env: Record<string, string> = {}): { executor: StepExecutor; log: string } {
+    const directory = project(['@agentclientprotocol/codex-acp']);
+    const log = join(directory, 'agent.jsonl');
+    const codexBin = join(directory, 'codex');
+    writeFileSync(codexBin, `#!/bin/sh\necho '[]'\n`);
+    chmodSync(codexBin, 0o755);
+    const executor = inProject(directory, () => codex({ env: { CODEX_PATH: codexBin, ACP_SCRIPT: JSON.stringify([[pass], [pass]]), ACP_LOG: log, ...env } }));
+    return { executor, log };
+  }
+
+  /** What the fixture logs of the `DEFAULT_AUTH_REQUEST` each Codex session started with, in order. */
+  function authRequests(entries: readonly Record<string, unknown>[]): unknown[] {
+    return entries.filter((entry) => 'defaultAuthRequest' in entry).map((entry) => entry['defaultAuthRequest']);
+  }
+
+  /** How the fixture logs `request`: its method and a SHA-256 of the exact text, so a test can compare without the fixture logging it. */
+  function logged(request: string): { methodId: unknown; sha256: string } {
+    return { methodId: (JSON.parse(request) as { methodId?: unknown }).methodId, sha256: createHash('sha256').update(request).digest('hex') };
+  }
+
+  /** The `DEFAULT_AUTH_REQUEST` one Codex step started with, as the fixture logs it, given the variables in `env`. */
+  async function codexAuthRequest(env: Record<string, string>): Promise<unknown> {
+    const { executor, log } = codexProject(env);
+    return authRequests(await runStep(executor, log)).at(-1);
+  }
+
+  /** No key, auth request, or adapter log from the developer's shell. */
+  function cleanAuthEnv(): void {
+    for (const name of ['CODEX_API_KEY', 'OPENAI_API_KEY', 'DEFAULT_AUTH_REQUEST', 'APP_SERVER_LOGS']) vi.stubEnv(name, undefined);
+  }
+
+  /** The request the preset sends: the method alone, never the key. */
+  const API_KEY_LOGIN = logged('{"methodId":"api-key"}');
+
+  it('signs Codex in with an API key from its env or the process environment, sending the method alone', async () => {
+    cleanAuthEnv();
+    expect(await codexAuthRequest({ CODEX_API_KEY: 'sk-test-codex' })).toEqual(API_KEY_LOGIN);
+    expect(await codexAuthRequest({ OPENAI_API_KEY: 'sk-test-openai' })).toEqual(API_KEY_LOGIN);
+    vi.stubEnv('OPENAI_API_KEY', 'sk-test-process');
+    expect(await codexAuthRequest({})).toEqual(API_KEY_LOGIN);
+  });
+
+  it('leaves Codex to its own login without a key, and reads a blank auth request as none', async () => {
+    cleanAuthEnv();
+    expect(await codexAuthRequest({})).toBeNull();
+    vi.stubEnv('OPENAI_API_KEY', ' ');
+    expect(await codexAuthRequest({ CODEX_API_KEY: '' })).toBeNull();
+    // The adapter cannot parse a request of spaces and exits, so it gets none.
+    vi.stubEnv('DEFAULT_AUTH_REQUEST', '   ');
+    expect(await codexAuthRequest({})).toBeNull();
+    expect(await codexAuthRequest({ DEFAULT_AUTH_REQUEST: ' ' })).toBeNull();
+    vi.stubEnv('OPENAI_API_KEY', 'sk-test-process');
+    expect(await codexAuthRequest({})).toEqual(API_KEY_LOGIN);
+    expect(await codexAuthRequest({ DEFAULT_AUTH_REQUEST: '' })).toEqual(API_KEY_LOGIN);
+  });
+
+  it('passes an auth request from the config, else the environment, unchanged over a key', async () => {
+    cleanAuthEnv();
+    const fromConfig = '{"methodId":"api-key","_meta":{"api-key":{"apiKey":"sk-test-config-meta"}}}';
+    const fromProcess = '{"methodId":"chat-gpt","_meta":{"source":"process"}}';
+    vi.stubEnv('OPENAI_API_KEY', 'sk-test-process');
+    vi.stubEnv('DEFAULT_AUTH_REQUEST', fromProcess);
+    expect(await codexAuthRequest({ CODEX_API_KEY: 'sk-test-codex', DEFAULT_AUTH_REQUEST: fromConfig })).toEqual(logged(fromConfig));
+    expect(await codexAuthRequest({ CODEX_API_KEY: 'sk-test-codex' })).toEqual(logged(fromProcess));
+    // The config's own values replace the environment's, blank ones too, so a config can keep a key or request from Codex.
+    expect(await codexAuthRequest({ DEFAULT_AUTH_REQUEST: '' })).toEqual(API_KEY_LOGIN);
+    expect(await codexAuthRequest({ DEFAULT_AUTH_REQUEST: '  ', OPENAI_API_KEY: '' })).toBeNull();
+    vi.stubEnv('DEFAULT_AUTH_REQUEST', undefined);
+    expect(await codexAuthRequest({ OPENAI_API_KEY: ' ' })).toBeNull();
+  });
+
+  it('reads the auth request again for each session of one executor', async () => {
+    cleanAuthEnv();
+    vi.stubEnv('OPENAI_API_KEY', 'sk-test-process');
+    const { executor, log } = codexProject();
+    await runStep(executor, log);
+    const gateway = '{"methodId":"gateway"}';
+    vi.stubEnv('DEFAULT_AUTH_REQUEST', gateway);
+    expect(authRequests(await runStep(executor, log))).toEqual([API_KEY_LOGIN, logged(gateway)]);
+  });
+
+  it('passes Codex no sign-in request, its own or an explicit one, while the adapter log, which would record it, is on', async () => {
+    cleanAuthEnv();
+    vi.stubEnv('OPENAI_API_KEY', 'sk-test-process');
+    vi.stubEnv('APP_SERVER_LOGS', '/tmp/codex-logs');
+    expect(await codexAuthRequest({})).toBeNull();
+    expect(await codexAuthRequest({ CODEX_API_KEY: 'sk-test-codex', APP_SERVER_LOGS: ' ' })).toBeNull();
+    expect(await codexAuthRequest({ DEFAULT_AUTH_REQUEST: '{"methodId":"api-key","_meta":{"api-key":{"apiKey":"sk-test-meta"}}}' })).toBeNull();
+    vi.stubEnv('OPENAI_API_KEY', undefined);
+    expect(await codexAuthRequest({ DEFAULT_AUTH_REQUEST: '{"methodId":"gateway"}' })).toBeNull();
+    vi.stubEnv('OPENAI_API_KEY', 'sk-test-process');
+    const { executor } = codexProject({ ACP_AUTH_REQUIRED: '1' });
+    expect(await stepFailure(executor)).toContain('APP_SERVER_LOGS is set, and the Codex adapter would write sign-in credentials to its log in plain text');
+    // The adapter keeps an empty one off, so the key signs in.
+    expect(await codexAuthRequest({ APP_SERVER_LOGS: '' })).toEqual(API_KEY_LOGIN);
+  });
+
+  it('starts Codex with every sign-in variable pinned, unset ones empty', async () => {
+    cleanAuthEnv();
+    const authEnv = async (env: Record<string, string>) => {
+      const { executor, log } = codexProject(env);
+      return (await runStep(executor, log)).find((entry) => 'authEnv' in entry)?.['authEnv'];
+    };
+    expect(await authEnv({})).toEqual({ CODEX_API_KEY: 'empty', OPENAI_API_KEY: 'empty', DEFAULT_AUTH_REQUEST: 'empty', APP_SERVER_LOGS: 'empty' });
+    expect(await authEnv({ CODEX_API_KEY: 'sk-test-codex' })).toEqual({ CODEX_API_KEY: 'set', OPENAI_API_KEY: 'empty', DEFAULT_AUTH_REQUEST: 'set', APP_SERVER_LOGS: 'empty' });
+    expect(await authEnv({ OPENAI_API_KEY: 'sk-test-openai', APP_SERVER_LOGS: '/tmp/codex-logs' })).toEqual({ CODEX_API_KEY: 'empty', OPENAI_API_KEY: 'set', DEFAULT_AUTH_REQUEST: 'empty', APP_SERVER_LOGS: 'set' });
+    expect(await authEnv({ DEFAULT_AUTH_REQUEST: '{"methodId":"chat-gpt"}' })).toEqual({ CODEX_API_KEY: 'empty', OPENAI_API_KEY: 'empty', DEFAULT_AUTH_REQUEST: 'set', APP_SERVER_LOGS: 'empty' });
+  });
+
+  it('keeps what one Codex launch decided when the environment changes before the agent starts', async () => {
+    cleanAuthEnv();
+    const { log } = codexProject();
+    const directory = dirname(log);
+    const request = '{"methodId":"chat-gpt"}';
+    vi.stubEnv('DEFAULT_AUTH_REQUEST', request);
+    const launch = await inProject(directory, () => codexLaunch({ env: { CODEX_PATH: join(directory, 'codex') } }))();
+    vi.stubEnv('DEFAULT_AUTH_REQUEST', '{"methodId":"gateway"}');
+    vi.stubEnv('APP_SERVER_LOGS', '/tmp/codex-logs');
+    vi.stubEnv('OPENAI_API_KEY', 'sk-test-late');
+    expect(launch.env).toMatchObject({ DEFAULT_AUTH_REQUEST: request, APP_SERVER_LOGS: '', OPENAI_API_KEY: '', CODEX_API_KEY: '' });
+  });
+
+  it('signs Codex in from the environment when the preset gets no env at all', async () => {
+    cleanAuthEnv();
+    const { log } = codexProject();
+    const directory = dirname(log);
+    vi.stubEnv('CODEX_PATH', join(directory, 'codex'));
+    vi.stubEnv('OPENAI_API_KEY', 'sk-test-process');
+    vi.stubEnv('APP_SERVER_LOGS', '');
+    const launch = await inProject(directory, () => codexLaunch({}))();
+    expect(launch.env).toMatchObject({ DEFAULT_AUTH_REQUEST: '{"methodId":"api-key"}', APP_SERVER_LOGS: '' });
+    vi.stubEnv('APP_SERVER_LOGS', '/tmp/codex-logs');
+    expect((await inProject(directory, () => codexLaunch({}))()).env).toMatchObject({ DEFAULT_AUTH_REQUEST: '', APP_SERVER_LOGS: '/tmp/codex-logs' });
+  });
+
+  it('tells a Codex user whose saved login is refused at a prompt to log out, naming the key a new sign-in would use', async () => {
+    cleanAuthEnv();
+    const { executor } = codexProject({ ACP_PROMPT_AUTH_REQUIRED: '1' });
+    const refused = await stepFailure(executor);
+    expect(refused).toContain(
+      "the agent's credentials were refused: the model provider refused Codex's credentials. If Codex signed in with a saved login or key, run `codex logout` first, then `codex login` or set a working OPENAI_API_KEY. If they come from a custom model provider's key, fix that key",
+    );
+    // The hint names what a fresh sign-in would use: CODEX_API_KEY first, the user's request, or nothing while the adapter log is on.
+    expect(await stepFailure(codexProject({ ACP_PROMPT_AUTH_REQUIRED: '1', CODEX_API_KEY: 'sk-test-codex' }).executor)).toContain(
+      'first, then `codex login` or set a working CODEX_API_KEY.',
+    );
+    expect(await stepFailure(codexProject({ ACP_PROMPT_AUTH_REQUIRED: '1', DEFAULT_AUTH_REQUEST: '{"methodId":"chat-gpt"}' }).executor)).toContain(
+      'first, then `codex login`, or fix DEFAULT_AUTH_REQUEST.',
+    );
+    expect(await stepFailure(codexProject({ ACP_PROMPT_AUTH_REQUIRED: '1', APP_SERVER_LOGS: '/tmp/codex-logs' }).executor)).toContain(
+      'first, then `codex login`, or unset APP_SERVER_LOGS and set a working OPENAI_API_KEY.',
+    );
+    expect(refused).toContain('Authentication required');
+    // Any other failed turn keeps its own error.
+    const directory = project(['@agentclientprotocol/codex-acp']);
+    const codexBin = join(directory, 'codex');
+    writeFileSync(codexBin, `#!/bin/sh\necho '[]'\n`);
+    chmodSync(codexBin, 0o755);
+    const failing = inProject(directory, () => codex({ env: { CODEX_PATH: codexBin, ACP_SCRIPT: JSON.stringify([[{ fail: 'quota exceeded' }]]) } }));
+    const other = await stepFailure(failing);
+    expect(other).toContain('quota exceeded');
+    expect(other).not.toContain('credentials were refused');
+  });
+
+  it('says the agent is not signed in, with its hint when it has one, and keeps the refusal as the cause', async () => {
+    const claude = project(['@agentclientprotocol/claude-agent-acp']);
+    const refused = await stepFailure(inProject(claude, () => claudeCode({ env: { ACP_AUTH_REQUIRED: '1' } })));
+    expect(refused).toContain('the agent is not signed in: run `claude` and log in, or set ANTHROPIC_API_KEY\nAuthentication required');
+    const generic = await stepFailure(acp({ command: process.execPath, args: [AGENT], env: { ACP_AUTH_REQUIRED: '1' } }));
+    expect(generic).toContain('the agent is not signed in\nAuthentication required');
+  });
+
+  it('keeps the plain refusal for an agent with no saved-login hint', async () => {
+    const directory = project(['@agentclientprotocol/claude-agent-acp']);
+    const executor = inProject(directory, () => claudeCode({ env: { ACP_SCRIPT: JSON.stringify([[pass]]), ACP_PROMPT_AUTH_REQUIRED: '1' } }));
+    const refused = await stepFailure(executor);
+    expect(refused).toContain('Authentication required');
+    expect(refused).not.toContain('credentials were refused');
+  });
+
+  it('lists the Codex MCP servers once for every session of one executor', async () => {
+    const { executor, log } = codexProject();
+    const codexBin = join(dirname(log), 'codex');
+    writeFileSync(codexBin, `#!/bin/sh\necho x >> "$0.calls"\necho '[]'\n`);
+    await runStep(executor, log);
+    await runStep(executor, log);
+    expect(readFileSync(`${codexBin}.calls`, 'utf8').trim().split('\n')).toHaveLength(1);
+  });
+
+  it('lists the Codex MCP servers again after a failed listing', async () => {
+    const { executor, log } = codexProject();
+    const codexBin = join(dirname(log), 'codex');
+    // Fails the first listing only, as a Codex that cannot start yet would.
+    writeFileSync(codexBin, `#!/bin/sh\n[ -f "$0.ran" ] && echo '[]' && exit 0\ntouch "$0.ran"\nexit 1\n`);
+    expect(await stepFailure(executor)).toContain('could not list your Codex MCP servers');
+    expect(authRequests(await runStep(executor, log))).toHaveLength(1);
+  });
+
+  it('tells a Codex user who is not signed in to log in or set OPENAI_API_KEY', async () => {
+    cleanAuthEnv();
+    const { executor } = codexProject({ ACP_AUTH_REQUIRED: '1' });
+    expect(await stepFailure(executor)).toContain('the agent is not signed in: run `codex login`, or set OPENAI_API_KEY');
+    const withRequest = await stepFailure(codexProject({ ACP_AUTH_REQUIRED: '1', OPENAI_API_KEY: 'sk-test-codex', DEFAULT_AUTH_REQUEST: '{}' }).executor);
+    expect(withRequest).toContain('the DEFAULT_AUTH_REQUEST you set did not sign Codex in');
+    // With the log on, a key would not be used, so the hint says to turn the log off first.
+    vi.stubEnv('APP_SERVER_LOGS', '/tmp/codex-logs');
+    const withLogOn = await stepFailure(codexProject({ ACP_AUTH_REQUIRED: '1' }).executor);
+    expect(withLogOn).toContain('the agent is not signed in: run `codex login`, or unset APP_SERVER_LOGS and set OPENAI_API_KEY');
   });
 });

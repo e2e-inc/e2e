@@ -52,6 +52,8 @@ export interface AgentLaunch {
   readonly sessionMeta?: Readonly<Record<string, unknown>> | undefined;
   /** How the user signs the agent in, for a session it refuses until they do. */
   readonly signIn?: string | undefined;
+  /** What to do when a turn is refused although the session opened: credentials the provider no longer accepts. */
+  readonly loginRefused?: string | undefined;
 }
 
 /** What one prompt turn reported. */
@@ -227,6 +229,9 @@ export async function startSession(
       const costBefore = turn.cost;
       const started = Date.now();
       const response = await Promise.race([agent.request(methods.agent.session.prompt, { sessionId, prompt: [{ type: 'text', text }] }), toolServerFailed, exited]).catch((error: unknown) => {
+        if (isAuthRequired(error) && launch.loginRefused !== undefined) {
+          throw new Error(`the agent's credentials were refused: ${launch.loginRefused}`, { cause: error });
+        }
         throw withDetails(error);
       });
       const costUsd = turn.cost === undefined ? undefined : turn.cost - (costBefore ?? 0);

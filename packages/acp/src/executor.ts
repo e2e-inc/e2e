@@ -58,7 +58,7 @@ export function claudeCode(options: AcpAgentOptions = {}): StepExecutor {
   return executor(options.name ?? 'claude-code', options, claudeCodeLaunch(options));
 }
 
-/** Codex through its adapter (`@agentclientprotocol/codex-acp`), signed in with your `codex` login. */
+/** Codex through its adapter (`@agentclientprotocol/codex-acp`), signed in with your `codex` login, or with `OPENAI_API_KEY` when Codex has none. */
 export function codex(options: AcpAgentOptions = {}): StepExecutor {
   return executor(options.name ?? 'codex', options, codexLaunch(options));
 }
