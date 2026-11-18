@@ -1,17 +1,15 @@
 # Términos
 
 Cómo se traduce cada término técnico al español, igual en todas las páginas y
-con cualquier motor de traducción. El comprobador de la skill `translation-review`
-(`node .dev/skills/translation-review/scripts/review.mjs es`) avisa cuando una
-sección de inglés usa un término de esta tabla y la traducción no usa ninguna
-de sus formas.
+con cualquier motor de traducción. Cuando una sección de inglés usa un término
+de esta tabla, la traducción usa una de sus formas.
 
 - Una fila por término. La segunda columna admite varias formas separadas por
   ` / `: el plural, y las conjugaciones de un verbo. La primera es la preferida.
 - Una forma coincide como inicio de palabra, sin distinguir mayúsculas.
 - Si el término se mantiene en inglés, la segunda columna lo repite.
-- Para añadir o cambiar una fila: la skill `terms-add`, o
-  `node .dev/skills/translation-review/scripts/terms.mjs add es "<inglés>" "<español>"`.
+- Para añadir o cambiar una fila, edita la tabla y mantenla ordenada por la primera
+  columna.
 - MCP, CI, SDK, CLI, API y UI se mantienen en inglés y no están en la tabla.
 
 | English | Español | Notas |
