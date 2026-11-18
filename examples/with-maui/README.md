@@ -71,6 +71,6 @@ For device setup and CI, see the [Mobile guide](https://e2e.com/docs/mobile).
 
 The bundled fonts use the [SIL Open Font License](Resources/Fonts/OFL.txt).
 
-Last checked on 2026-11-04 with e2e 0.22.0, @e2e-dev/mobile 0.12.5, .NET
+Last checked on 2026-11-18 with e2e 0.23.1, @e2e-dev/mobile 0.12.7, .NET
 SDK 10.0.403, and MAUI 10.0.110 on an Android 16 emulator and an iOS 26.5
 simulator. The three locator tests and the two agent tests passed on each.
