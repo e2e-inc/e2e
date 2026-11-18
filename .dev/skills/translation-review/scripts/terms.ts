@@ -65,6 +65,10 @@ if (command === 'init') {
   process.exit(0);
 }
 if (!existsSync(termsPath(locale))) {
+  if (command === 'list') {
+    console.log(`docs/${locale}/Terms.md does not exist: no terms yet`);
+    process.exit(0);
+  }
   console.error(`docs/${locale}/Terms.md does not exist${command === 'add' ? '; for a locale with no glossary yet, create it with: node terms.ts init <locale> "<Language>"' : ''}`);
   process.exit(2);
 }
