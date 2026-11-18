@@ -1422,7 +1422,7 @@ describe('cache.strict and a step whose key changed under its recording', () => 
       await expect(sessionFor(await rekeyedContext(recordedPayload(legacy)), step).begin()).resolves.toBeUndefined();
     });
 
-    it('runs live when its whole name reads like the cut an entry with no identity digest stored for another step', async () => {
+    it('runs live when its whole name equals the cut name of another step, stored without an identity digest', async () => {
       const { identityDigest: _digest, ...legacy } = recordedProvenance(stepWith(`${long} first`), (text) => text);
       const step = stepWith(legacy[field]!);
       await expect(sessionFor(await rekeyedContext(recordedPayload(legacy)), step).begin()).resolves.toBeUndefined();

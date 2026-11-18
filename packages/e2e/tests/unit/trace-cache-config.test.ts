@@ -488,9 +488,18 @@ describe('recorded provenance', () => {
     expect(first.identityDigest).not.toBe(second.identityDigest);
   });
 
-  it.each([['not-a-digest'], [['a'.repeat(64)]], [42]])('refuses an entry whose identity digest is %j', (identityDigest) => {
+});
+
+describe('reading recorded provenance', () => {
+  it.each([
+    ['paramsDigest', 'not-a-digest'],
+    ['paramsDigest', 42],
+    ['identityDigest', 'not-a-digest'],
+    ['identityDigest', ['a'.repeat(64)]],
+    ['identityDigest', 42],
+  ])('refuses an entry whose %s is %j', (field, digest) => {
     const entry = JSON.parse(JSON.stringify(buildTraceEntry({ ...trace('recorded flow'), recordedFor: STEP })));
-    entry.payload.recordedFor.identityDigest = identityDigest;
+    entry.payload.recordedFor[field] = digest;
     expect(readTraceEntry(entry)).toBeUndefined();
   });
 });

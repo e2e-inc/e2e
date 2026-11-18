@@ -37,8 +37,8 @@ import type { JsonValue } from '../types.ts';
  * stands. A kept entry carries no payload, so the replay's expansion of it
  * (every `unique()` slot filled with this run's value) can never be written;
  * confirmed, the file keeps its bytes and `createdAt`, and a committed cache
- * directory stays clean, unless its provenance predates the step's
- * occurrence fields or identity digest (`recordedFor`, as stored), which the
+ * directory stays clean, unless its stored provenance (`recordedFor`) differs
+ * from the step's in the occurrence fields or the identity digest, which the
  * replay proved and are then written in. Unconfirmed, both kinds are evicted
  * alike.
  */
@@ -141,10 +141,10 @@ function flowOf(trace: ActionTrace): string {
 }
 
 /**
- * Writes the step's full provenance into a kept entry recorded before the
- * occurrence fields or the identity digest were, leaving every other entry
- * untouched. Its replay proved which step it belongs to, and `cache.strict`
- * matches only entries that say so exactly (`rekeyed.ts`).
+ * Writes the step's full provenance into a kept entry whose stored provenance
+ * lacks the occurrence fields or holds another identity digest, leaving every
+ * other entry untouched. Its replay proved which step it belongs to, and
+ * `cache.strict` matches only entries that say so exactly (`rekeyed.ts`).
  */
 async function completeProvenance(store: CacheStore, keyHash: string, recordedFor: TraceProvenance): Promise<void> {
   const existing = await store.read(keyHash);
@@ -203,7 +203,8 @@ export interface SurvivedFailure {
  * no settlement: interruption implicates nothing, so it writes nothing and
  * evicts nothing. An entry a step replayed whole is staged too,
  * so the same rule evicts it when nothing confirmed it; when something did,
- * it is left exactly as it was found, but for provenance it lacked.
+ * it is left exactly as it was found, but for provenance that differs from
+ * the step's (`completeProvenance`).
  */
 export async function settleStagedTraces(context: AgentCacheContext, settlement: AttemptSettlement | undefined): Promise<ReadonlyMap<number, CacheWrite>> {
   const outcomes = new Map<number, CacheWrite>();
