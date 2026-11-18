@@ -190,7 +190,7 @@ test('after the hook', async () => {
       try {
         assertValidReport(outcome.report);
         expect(outcome.report.run.errors.map(({ code, phase, message }) => ({ code, phase, message }))).toEqual([
-          { code: 'HOOK_FAILED', phase: 'beforeAll', message: expect.stringMatching(/^beforeAll failed: .* returned before gadget\.hang .* finished/) },
+          { code: 'HOOK_FAILED', phase: 'beforeAll', message: expect.stringMatching(/^beforeAll failed: .* returned before gadget\.hang finished/) },
         ]);
         expect(resultByTitle(outcome, 'skipped by its hook').skip?.cause).toBe('hook-failed');
         // The step's own failure, arriving once the hook's attempt has closed, is no later test's.
