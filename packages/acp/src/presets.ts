@@ -7,12 +7,14 @@
 
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
 import { dirname, join, parse } from 'node:path';
 import { promisify } from 'node:util';
+import { registerProviderKey } from 'e2e/agent';
 import { ConfigurationError } from 'e2e/engine';
 import { z } from 'zod';
-import { withoutSecrets, type AgentLaunch } from './session.ts';
+import { agentEnvironment, type AgentLaunch } from './session.ts';
 import type { AcpAgentOptions } from './types.ts';
 
 const execFileAsync = promisify(execFile);
@@ -67,6 +69,7 @@ export function codexLaunch(options: AcpAgentOptions): () => Promise<AgentLaunch
     const config = JSON.stringify(codexConfig(await servers));
     // Read at each session, so a request or key set after the first one counts, and pinned for it.
     const auth = codexAuth(options.env);
+    registerSavedLogin(options.env);
     return {
       command: process.execPath,
       args: [bin],
@@ -148,6 +151,46 @@ function codexAuth(env: Readonly<Record<string, string>> | undefined): CodexAuth
   return { env: { ...pinned, DEFAULT_AUTH_REQUEST: JSON.stringify({ methodId: 'api-key' }) }, signIn, loginRefused };
 }
 
+/** What Codex keeps of a login in `auth.json`, as far as it is a credential. */
+const CodexSavedLogin = z.object({
+  OPENAI_API_KEY: z.string().nullish().catch(undefined),
+  tokens: z
+    .object({
+      id_token: z.string().nullish().catch(undefined),
+      access_token: z.string().nullish().catch(undefined),
+      refresh_token: z.string().nullish().catch(undefined),
+    })
+    .nullish()
+    .catch(undefined),
+});
+
+/**
+ * Has the run redact the login Codex saved in `CODEX_HOME/auth.json`: a key
+ * from an earlier `codex login --with-api-key`, which need not be the
+ * environment's, or the tokens of a ChatGPT login. Codex signs in with it
+ * ahead of any key, and a provider that quotes it back would otherwise put
+ * it in the report. Read before each session, since Codex renews tokens. A
+ * login in the OS keyring cannot be read, and is not redacted.
+ */
+function registerSavedLogin(env: Readonly<Record<string, string>> | undefined): void {
+  const home = env?.['CODEX_HOME'] ?? process.env['CODEX_HOME'] ?? join(homedir(), '.codex');
+  let saved: z.infer<typeof CodexSavedLogin>;
+  try {
+    saved = CodexSavedLogin.parse(JSON.parse(readFileSync(join(home, 'auth.json')).toString()));
+  } catch {
+    // No saved login, or one this version cannot read.
+    return;
+  }
+  for (const [name, value] of [
+    ['codex.api-key', saved.OPENAI_API_KEY],
+    ['codex.id-token', saved.tokens?.id_token],
+    ['codex.access-token', saved.tokens?.access_token],
+    ['codex.refresh-token', saved.tokens?.refresh_token],
+  ] as const) {
+    if (typeof value === 'string') registerProviderKey(name, value);
+  }
+}
+
 /** The Codex features that give the agent a tool of its own, and shell snapshots, which copy the shell's environment, keys included, to disk. */
 const CODEX_FEATURES_OFF = [
   'apps',
@@ -185,7 +228,7 @@ async function codexServers(adapter: string, env: Readonly<Record<string, string
       : [codexPath, []];
   try {
     const { stdout } = await execFileAsync(command, [...args, 'mcp', 'list', '--json'], {
-      env: withoutSecrets({ ...process.env, ...env }),
+      env: agentEnvironment({ ...process.env, ...env }),
       timeout: 30_000,
     });
     return CodexServerList.parse(JSON.parse(stdout)).map((server) => server.name);

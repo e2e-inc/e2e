@@ -54,7 +54,8 @@ import { SessionStore } from '@e2e-dev/core/lib/run/sessions';
 import { outputLayout } from '@e2e-dev/core/lib/run/output';
 import { uncaptured, writeTerminal, type RunnerOutput } from './process-output.ts';
 import { refuseBun } from './public-ownership.ts';
-import { processSecrets, registerStaticSecrets, staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
+import { processSecrets, registerProviderKeys, registerStaticSecrets, staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
+import { warnOfNodeDebug } from './node-debug.ts';
 import { nextRerunDir, pruneArtifacts } from '@e2e-dev/core/lib/run/artifacts';
 import { carryForward, fileDurationKey, lastFailedIds, readLastRun, reportArtifactPaths, type RerunCollection } from './last-run.ts';
 import { loadTimings, writeTimings } from './timings.ts';
@@ -453,6 +454,9 @@ const FORCE_KILL_MARGIN_MS = 1_000;
 export async function run(options: RunOptions = {}): Promise<RunOutcome> {
   const cwd = options.cwd ?? process.cwd();
   const env = options.env ?? process.env;
+  // The workers start with this environment, so a key only it holds is redacted here too, before the config loads.
+  registerProviderKeys(env);
+  warnOfNodeDebug();
   const runId = uuidv7();
   /** The fresh module graph this run's config and test files load in, when `freshGraph` asks for one. */
   const graph = options.freshGraph === true ? `run-${runId}` : undefined;

@@ -280,7 +280,7 @@ async function redactDownload(absolute: string, ledger: SecretLedger): Promise<A
   try {
     const bytes = await readFile(absolute);
     const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
-    const redacted = ledger.redactFragments(text);
+    const redacted = ledger.redactAppFragments(text);
     if (redacted !== text) await writeFileAtomic(absolute, redacted);
     return 'complete';
   } catch {

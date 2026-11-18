@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { processSecrets } from '@e2e-dev/core/lib/run/secrecy';
 import { EnvCredentialStore, FileCredentialStore } from '../../../src/oauth/store.ts';
 import { OAuthError } from '../../../src/oauth/errors.ts';
 import { createOAuthFetch } from '../../../src/oauth/fetch.ts';
@@ -351,5 +352,26 @@ describe('createOAuthFetch', () => {
       { store, userAgent: 'p' },
     );
     expect(await (await fetch(`${api.url}/original`)).json()).toEqual({ wrapped: { path: '/rewritten', marker: 'tok' } });
+  });
+
+  it('has the run redact the access and refresh tokens before it sends one, so an answer that quotes it back is redacted', async () => {
+    const access = 'oauth-access-token-91be07c4a2d653f8';
+    const refresh = 'oauth-refresh-token-3d8e61f0b7a942c5';
+    const seen: string[] = [];
+    const api = await serve((request, response) => {
+      // What the run would make of the token, at the moment the vendor receives it.
+      seen.push(processSecrets.redact(request.headers['authorization'] ?? ''));
+      json(response, 401, { error: { message: `invalid token ${access}` } });
+    });
+    expect(processSecrets.redact(`${access} ${refresh}`)).toBe(`${access} ${refresh}`);
+    const store = new MemoryCredentialStore({ test: { access, refresh: '', expires: 0 } });
+    const fetch = createOAuthFetch(provider(), { store, userAgent: 'p' });
+    const error = await fetch(api.url).then(() => undefined, (rejection: unknown) => rejection);
+    expect(seen).toEqual(['Bearer <secret:test.access-token>']);
+    expect(error).toMatchObject({ code: 'LOGIN_REQUIRED' });
+    expect(processSecrets.redact((error as Error).message)).toContain('invalid token <secret:test.access-token>');
+    const rotating = new MemoryCredentialStore({ test: { access, refresh, expires: 0 } });
+    await createOAuthFetch(provider(), { store: rotating, userAgent: 'p' })(api.url).catch(() => undefined);
+    expect(processSecrets.redact(refresh)).toBe('<secret:test.refresh-token>');
   });
 });

@@ -62,7 +62,7 @@ const MARKER_NAME = /^[A-Za-z0-9_.-]*$/;
  * per-character case forms leave out: a sigma lower-cased at the end of a
  * word, a titlecase digraph.
  */
-function compile(values: readonly (readonly [string, string])[]): Compiled {
+function compile(values: readonly (readonly [string, string])[], wholeOnly: ReadonlySet<readonly [string, string]> = new Set()): Compiled {
   const entries = values.filter(([, value]) => value.length > 0).toSorted((a, b) => b[1].length - a[1].length);
   if (entries.length === 0) {
     return {
@@ -120,7 +120,8 @@ function compile(values: readonly (readonly [string, string])[]): Compiled {
     }
     return `${redact(text.slice(0, text.length - tail.length + start))}${marker}`;
   };
-  const fragments = fragmentOwners(valueKeys);
+  // A provider key shares its prefix with every key of its kind (`sk-proj-`), so only the whole of one is a match.
+  const fragments = fragmentOwners(valueKeys, (index) => wholeOnly.has(entries[index]!));
   const redactPlainFragments = (text: string): string =>
     redact(text)
       .split(known)
@@ -447,11 +448,13 @@ function leadingPartAtEnd(text: string, value: string, minimum: number): number 
  * index of the first value holding it; values come longest first, so a run
  * two values share names the longer one. The values come as `readingKey`
  * reads them, so a run in any case or with its whitespace collapsed finds
- * its owner.
+ * its owner. A value `wholeOnly` names owns no run: only the whole of it is
+ * a match.
  */
-function fragmentOwners(values: readonly string[]): Map<string, number> {
+function fragmentOwners(values: readonly string[], wholeOnly: (index: number) => boolean): Map<string, number> {
   const owners = new Map<string, number>();
   values.forEach((value, index) => {
+    if (wholeOnly(index)) return;
     for (let start = 0; start + FRAGMENT_LENGTH <= value.length; start += 1) {
       const run = value.slice(start, start + FRAGMENT_LENGTH);
       if (!owners.has(run)) owners.set(run, index);
@@ -563,10 +566,20 @@ export type SecretList = readonly (readonly [string, string])[];
 
 /** Values a ledger redacts without holding them; see `SecretLedger`. */
 export interface SecretsBeside {
-  /** Moves whenever `values` would return a different set. */
+  /** Moves whenever `values` or `providerKeys` would return a different set. */
   readonly revision: number;
   values(): SecretList;
+  /**
+   * The keys the run's model providers and agents sign in with. Redacted
+   * like any value from text the run writes, but they are not the app's
+   * secrets: the app never receives one, so they do not decide whether a
+   * download is rewritten, and a fragment of one is not a match.
+   */
+  providerKeys(): SecretList;
 }
+
+/** For a ledger that stands alone. */
+const NOTHING_BESIDE: SecretsBeside = { revision: 0, values: () => [], providerKeys: () => [] };
 
 /**
  * The attempt's registered secret values and their redactor, in one owner.
@@ -585,6 +598,8 @@ export class SecretLedger {
    */
   private readonly values: [string, string][] = [];
   private compiled: Compiled | undefined;
+  /** `compiled` over the app's secrets alone, built when a download asks. */
+  private compiledApp: Compiled | undefined;
   /** The revision `beside` had when `compiled` was built. */
   private besideRevision = -1;
 
@@ -597,7 +612,7 @@ export class SecretLedger {
    */
   constructor(
     initial: Iterable<readonly [string, string]> = [],
-    private readonly beside?: SecretsBeside,
+    private readonly beside: SecretsBeside = NOTHING_BESIDE,
   ) {
     for (const [name, value] of initial) this.register(name, value);
   }
@@ -607,13 +622,21 @@ export class SecretLedger {
     if (this.values.some(([n, v]) => n === name && v === value)) return false;
     this.values.push([name, value]);
     this.compiled = undefined;
+    this.compiledApp = undefined;
     return true;
   }
 
-  /** Whether the ledger redacts anything at all, its own values or the ones beside it. */
-  get redactsAnything(): boolean {
-    return this.compile().pattern !== undefined;
+  /** Whether the ledger redacts a secret of the app, its own or one beside it; a provider key is not one. */
+  get redactsAppSecrets(): boolean {
+    return this.compileApp().pattern !== undefined;
   }
+
+  /**
+   * `redactFragments` over the app's secrets alone, for a file the app
+   * served: the app holds no provider key, and a file is kept as served
+   * unless it can hold a secret the app was given.
+   */
+  readonly redactAppFragments = (text: string): string => this.compileApp().redactFragments(text);
 
   /** Bound so it can be handed out as a plain function. */
   readonly redact = (text: string): string => this.compile().redact(text);
@@ -690,15 +713,33 @@ export class SecretLedger {
   }
 
   private compile(): Compiled {
-    const revision = this.beside?.revision ?? 0;
-    if (this.compiled === undefined || revision !== this.besideRevision) {
-      this.besideRevision = revision;
-      // A value the ledger holds is usually shared beside it too; one alternative each is enough.
-      const all = new Map<string, readonly [string, string]>();
-      for (const entry of [...this.values, ...(this.beside?.values() ?? [])]) all.set(`${entry[0]}\0${entry[1]}`, entry);
-      this.compiled = compile([...all.values()]);
-    }
+    this.sync();
+    // A provider key that is also a secret of the run comes after it here, so the run's name and its fragments win.
+    const keys = this.beside.providerKeys();
+    this.compiled ??= compile([...this.appValues(), ...keys], new Set(keys));
     return this.compiled;
+  }
+
+  private compileApp(): Compiled {
+    this.sync();
+    this.compiledApp ??= compile(this.appValues());
+    return this.compiledApp;
+  }
+
+  /** Drops what was compiled once `beside` has moved. */
+  private sync(): void {
+    const { revision } = this.beside;
+    if (revision === this.besideRevision) return;
+    this.besideRevision = revision;
+    this.compiled = undefined;
+    this.compiledApp = undefined;
+  }
+
+  /** The ledger's values and the ones shared beside it. A value it holds is usually shared too; one alternative each is enough. */
+  private appValues(): SecretList {
+    const all = new Map<string, readonly [string, string]>();
+    for (const entry of [...this.values, ...this.beside.values()]) all.set(`${entry[0]}\0${entry[1]}`, entry);
+    return [...all.values()];
   }
 }
 

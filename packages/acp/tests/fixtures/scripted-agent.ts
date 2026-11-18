@@ -8,7 +8,7 @@
  * lines, with the tool list the session saw, the names of the `E2E_`
  * variables it started with, the fields of `CODEX_CONFIG` the tests read,
  * a hash of `DEFAULT_AUTH_REQUEST`, and whether each Codex sign-in variable
- * is unset, empty, or set: never a credential. `ACP_USAGE` is the usage
+ * is unset, empty, or set, and whether `NODE_DEBUG` is: never a credential. `ACP_USAGE` is the usage
  * each turn reports. With `ACP_HANG_INIT` set, the agent never answers
  * `initialize`; with `ACP_AUTH_REQUIRED=1` it refuses `session/new` as
  * not signed in, and with `ACP_PROMPT_AUTH_REQUIRED=1` every prompt.
@@ -89,8 +89,13 @@ function authEnv(): Record<string, 'unset' | 'empty' | 'set'> {
   return Object.fromEntries(names.map((name) => [name, process.env[name] === undefined ? 'unset' : process.env[name] === '' ? 'empty' : 'set']));
 }
 
+/** Whether the agent started with `NODE_DEBUG`, which makes Node print each child's environment: never its value. */
+function nodeDebug(): 'unset' | 'set' {
+  return process.env['NODE_DEBUG'] === undefined ? 'unset' : 'set';
+}
+
 /** The MCP server names the stand-in `codex` lists, and the Codex features the preset switches: other names are hashed, never logged. */
-const KNOWN_SERVERS = new Set(['playwright', 'executor']);
+const KNOWN_SERVERS = new Set(['playwright', 'executor', 'other', 'debug']);
 const KNOWN_FEATURES = new Set([
   'apps', 'browser_use', 'browser_use_external', 'computer_use', 'goals', 'image_generation', 'multi_agent', 'multi_agent_v2',
   'plugins', 'shell_snapshot', 'shell_snapshot_v2', 'shell_tool', 'skill_search', 'tool_suggest', 'unified_exec', 'view_image',
@@ -129,7 +134,7 @@ function codexConfig(config: string | undefined): string | null {
 }
 
 log({ pid: process.pid });
-log({ env: Object.keys(process.env).filter((name) => name.toUpperCase().startsWith('E2E_')).toSorted(), codexConfig: codexConfig(process.env['CODEX_CONFIG']), defaultAuthRequest: authRequest(process.env['DEFAULT_AUTH_REQUEST']), authEnv: authEnv() });
+log({ env: Object.keys(process.env).filter((name) => name.toUpperCase().startsWith('E2E_')).toSorted(), codexConfig: codexConfig(process.env['CODEX_CONFIG']), defaultAuthRequest: authRequest(process.env['DEFAULT_AUTH_REQUEST']), authEnv: authEnv(), nodeDebug: nodeDebug() });
 
 /**
  * `ACP_EXIT_DELAY_MS` holds the agent in place after SIGTERM, so a test can

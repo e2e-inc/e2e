@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { AgentError, type JsonValue, type StepExecutor, type StepExecutorContext, type StepVerdict } from 'e2e';
-import { BASE_RULES, VERDICT_RULES } from 'e2e/agent';
+import { BASE_RULES, redactSecrets, VERDICT_RULES } from 'e2e/agent';
 import { ConfigurationError } from 'e2e/engine';
 import { claudeCodeLaunch, codexLaunch } from './presets.ts';
 import type { Usage } from '@agentclientprotocol/sdk/unstable';
@@ -289,11 +289,13 @@ function ownToolUsed(title: string): StepVerdict {
 }
 
 function noConclusion(report: TurnReport): StepVerdict {
-  const said = report.text.trim().split('\n').at(-1)?.slice(0, 300);
+  const text = report.text.trim();
+  // The last line, redacted before the cut: half a key is no longer a match.
+  const said = redactSecrets(text.slice(text.lastIndexOf('\n') + 1)).slice(0, 300);
   return {
     status: 'failed',
     errorCode: 'STEP_NO_CONCLUSION',
-    summary: `The agent ended its turn (${report.stopReason}) without complete_step${said === undefined || said === '' ? '' : `: ${said}`}`,
+    summary: `The agent ended its turn (${report.stopReason}) without complete_step${said === '' ? '' : `: ${said}`}`,
   };
 }
 

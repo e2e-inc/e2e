@@ -28,7 +28,7 @@ export function pixelsProvenMasked(redaction: { readonly secureNodeCount: number
  * report and observation, not only after a fill.
  */
 export function redactsDownloads(ledger: SecretLedger): boolean {
-  return ledger.redactsAnything;
+  return ledger.redactsAppSecrets;
 }
 
 /**
@@ -106,11 +106,137 @@ function share(entries: SecretList): Sharing {
   };
 }
 
+/**
+ * The variables a model provider or a coding agent reads its key from: the
+ * AI SDK providers `e2e init` writes, the gateways, and the agents
+ * `@e2e-dev/acp` starts. A closed list, not a pattern over names: a value
+ * redacted from every report must be one the run is known to sign in with.
+ */
+const PROVIDER_KEY_VARIABLES = [
+  'AIHUBMIX_API_KEY',
+  'AIMLAPI_API_KEY',
+  'AI_GATEWAY_API_KEY',
+  'ALIBABA_API_KEY',
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_AWS_API_KEY',
+  'AWS_BEARER_TOKEN_BEDROCK',
+  'AZURE_API_KEY',
+  'BASETEN_API_KEY',
+  'CENCORI_API_KEY',
+  'CEREBRAS_API_KEY',
+  'CHEAPER_INFERENCE_API_KEY',
+  'CLARIFAI_PAT',
+  'CODEX_API_KEY',
+  'COHERE_API_KEY',
+  'CRUSOE_API_KEY',
+  'DEEPINFRA_API_KEY',
+  'DEEPSEEK_API_KEY',
+  'FIREWORKS_API_KEY',
+  'FRIENDLI_TOKEN',
+  'GMI_CLOUD_APIKEY',
+  'GOOGLE_GENERATIVE_AI_API_KEY',
+  'GROQ_API_KEY',
+  'HELICONE_API_KEY',
+  'HUGGINGFACE_API_KEY',
+  'INFERENCE_KEY',
+  'INTERFAZE_API_KEY',
+  'LLM_API_KEY',
+  'MINIMAX_API_KEY',
+  'MISTRAL_API_KEY',
+  'MODELRUSH_API_KEY',
+  'MOONSHOT_API_KEY',
+  'NEARAI_API_KEY',
+  'NEON_AI_GATEWAY_TOKEN',
+  'NIM_API_KEY',
+  'OLLM_API_KEY',
+  'OPENAI_API_KEY',
+  'OPENCODE_API_KEY',
+  'OPENROUTER_API_KEY',
+  'RUNPOD_API_KEY',
+  'SAMBANOVA_API_KEY',
+  'TELNYX_API_KEY',
+  'TOGETHER_API_KEY',
+  'VERCEL_OIDC_TOKEN',
+  'XAI_API_KEY',
+  'ZAI_API_KEY',
+  'ZHIPU_API_KEY',
+];
+
+/**
+ * The fewest characters a provider key may have to be redacted. A key comes
+ * from the environment, not from a `secrets` entry someone wrote for the
+ * run, and a local model server takes any placeholder (`ollama`,
+ * `lm-studio`, `sk-no-key-required`): redacting one would rewrite ordinary
+ * words in titles, instructions, and the screen, and so the replay cache
+ * keys made from them. Every listed provider's keys are longer.
+ */
+const MIN_PROVIDER_KEY_LENGTH = 20;
+
+/** What a name may spell inside its `<secret:name>` marker. */
+const PROVIDER_KEY_NAME = /^[A-Za-z0-9_.-]+$/;
+
+/**
+ * The provider keys this process knows, for as long as it lives: a key is
+ * never withdrawn, since a report written after the last session ended can
+ * still quote it. On `globalThis` like the shared secrets, for the same
+ * reason.
+ */
+interface ProviderKeys {
+  /** By name and value. Only ever added to, so its size says when it changed. */
+  readonly values: Map<string, readonly [string, string]>;
+}
+
+const providerKeySlot = realmSlot<ProviderKeys>('e2e.providerKeys.v1');
+
+function providerKeys(): ProviderKeys {
+  let state = providerKeySlot.get(globalThis);
+  if (state === undefined) {
+    state = { values: new Map() };
+    providerKeySlot.set(globalThis, state);
+  }
+  return state;
+}
+
+/**
+ * Makes every ledger in the process redact `value` as `<secret:name>` from
+ * now on: a key a model provider or an agent signs in with, which is not a
+ * secret of the app. Trimmed, as a provider reads it. A value shorter than
+ * `MIN_PROVIDER_KEY_LENGTH` is left alone. `name` is what the marker shows:
+ * letters, digits, `_`, `.`, and `-`.
+ */
+export function registerProviderKey(name: string, value: string): void {
+  if (!PROVIDER_KEY_NAME.test(name)) {
+    throw new TypeError(`registerProviderKey: the name ${JSON.stringify(name)} must be letters, digits, "_", ".", or "-"`);
+  }
+  const key = value.trim();
+  if (secretLength(key) < MIN_PROVIDER_KEY_LENGTH) return;
+  providerKeys().values.set(`${name}\0${key}`, [name, key]);
+}
+
+/** Registers the provider keys `env` holds, under their variable names. */
+export function registerProviderKeys(env: Readonly<Record<string, string | undefined>>): void {
+  for (const name of PROVIDER_KEY_VARIABLES) {
+    const value = env[name];
+    if (typeof value === 'string') registerProviderKey(name, value);
+  }
+}
+
 const beside: SecretsBeside = {
   get revision() {
-    return shared().revision;
+    return shared().revision + providerKeys().values.size;
   },
   values: () => [...shared().values.values()].map((held) => held.entry),
+  providerKeys: () => [...providerKeys().values.values()],
+};
+
+/** The provider keys alone, for a ledger that shares no session's values. */
+const besideStatic: SecretsBeside = {
+  get revision() {
+    return providerKeys().values.size;
+  },
+  values: () => [],
+  providerKeys: beside.providerKeys,
 };
 
 /**
@@ -120,6 +246,10 @@ const beside: SecretsBeside = {
  * provider-backed values join as they resolve.
  */
 export const processSecrets = new SecretLedger([], beside);
+
+// Before any config is read: a config that fails to load, or an engine that fails to start, is reported through this redactor too.
+registerProviderKeys(process.env);
+setErrorRedactor(processSecrets.redact);
 
 function staticEntries(secrets: ResolvedConfig['allSecrets']): SecretList {
   return [...secrets].flatMap(([name, { value }]) => (typeof value === 'string' ? [[name, value] as const] : []));
@@ -139,9 +269,11 @@ const staticLedgers = new WeakMap<ResolvedConfig['allSecrets'], SecretLedger>();
 export function staticSecretLedger(secrets: ResolvedConfig['allSecrets']): Pick<SecretLedger, 'redact' | 'entries' | 'redactFragments'> {
   let ledger = staticLedgers.get(secrets);
   if (ledger === undefined) {
-    ledger = new SecretLedger(staticEntries(secrets));
+    ledger = new SecretLedger(staticEntries(secrets), besideStatic);
     staticLedgers.set(secrets, ledger);
   }
+  // A key exported since the process started, by a config file or a setup step.
+  registerProviderKeys(process.env);
   return ledger;
 }
 

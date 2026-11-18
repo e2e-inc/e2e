@@ -27,6 +27,7 @@ import type {
   ToolCallUpdate,
   Usage,
 } from '@agentclientprotocol/sdk/unstable';
+import { redactSecrets, registerProviderKeys } from 'e2e/agent';
 import { ConfigurationError } from 'e2e/engine';
 import { MCP_SERVER_NAME, serveTools, type ServedTool, type ToolServer } from './mcp.ts';
 
@@ -118,13 +119,17 @@ export async function startSession(
   serving.catch(() => undefined);
   const toolServerFailed = serving.then(started => started.failed);
   toolServerFailed.catch(() => undefined);
+  const env = agentEnvironment({ ...process.env, ...launch.env });
+  // A key the agent gets from its own `env` and not the runner's is one the run has not seen yet.
+  registerProviderKeys(env);
   const child = spawn(launch.command, [...launch.args], {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: withoutSecrets({ ...process.env, ...launch.env }),
+    env,
   });
   let stderr = '';
   child.stderr.on('data', (data: Buffer) => {
-    stderr = (stderr + data.toString()).slice(-2000);
+    // Redacted before the cut: half a key is no longer a match.
+    stderr = redactSecrets(stderr + data.toString()).slice(-2000);
   });
   // A dead agent must not take the test worker down with a pipe error.
   child.stdin.on('error', () => undefined);
@@ -261,9 +266,14 @@ export async function startSession(
   };
 }
 
-/** The agent's environment without the variables e2e reads secrets from, wherever they came from. */
-export function withoutSecrets(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(env).filter(([name]) => !SECRET_VARIABLE.test(name)));
+/**
+ * What a process an executor starts gets of `env`: not the variables e2e
+ * reads secrets from, wherever they came from, and not `NODE_DEBUG`, which
+ * makes a Node agent print the environment of each process it starts in
+ * turn, keys included, to its log or to the run's output.
+ */
+export function agentEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !SECRET_VARIABLE.test(name) && name.toUpperCase() !== 'NODE_DEBUG'));
 }
 
 /** `error` with what the agent said about it beyond its message appended, if anything. */

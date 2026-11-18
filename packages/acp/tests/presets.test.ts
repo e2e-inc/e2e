@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { StepExecutor, StepExecutorContext } from 'e2e';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { redactSecrets } from 'e2e/agent';
 import { acp, claudeCode, codex } from '../src/index.ts';
 import { codexLaunch } from '../src/presets.ts';
 
@@ -334,5 +335,157 @@ describe('agent presets', () => {
     vi.stubEnv('APP_SERVER_LOGS', '/tmp/codex-logs');
     const withLogOn = await stepFailure(codexProject({ ACP_AUTH_REQUIRED: '1' }).executor);
     expect(withLogOn).toContain('the agent is not signed in: run `codex login`, or unset APP_SERVER_LOGS and set OPENAI_API_KEY');
+  });
+});
+
+describe('the environment an agent starts with', () => {
+  /** What the agent of one step logged at startup, `env` its config's variables. */
+  async function startup(env: Record<string, string> = {}): Promise<Record<string, unknown>> {
+    const log = join(mkdtempSync(join(tmpdir(), 'e2e-acp-env-')), 'agent.jsonl');
+    cleanups.push(() => rmSync(dirname(log), { recursive: true, force: true }));
+    const executor = acp({ command: process.execPath, args: [AGENT], env: { ACP_SCRIPT: JSON.stringify([[pass]]), ACP_LOG: log, ...env } });
+    const entries = await runStep(executor, log);
+    const first = entries.find((entry) => 'nodeDebug' in entry);
+    expect(first).toBeDefined();
+    return first!;
+  }
+
+  it('starts the agent without NODE_DEBUG, which would make Node print every environment the agent hands its children', async () => {
+    vi.stubEnv('NODE_DEBUG', 'child_process');
+    expect((await startup())['nodeDebug']).toBe('unset');
+  });
+
+  it('drops NODE_DEBUG from the config too, and keeps the other variables', async () => {
+    vi.stubEnv('NODE_DEBUG', undefined);
+    const entry = await startup({ NODE_DEBUG: 'net,child_process', E2E_PROBE_KEPT: 'kept' });
+    expect(entry['nodeDebug']).toBe('unset');
+    expect(entry['env']).toContain('E2E_PROBE_KEPT');
+  });
+
+  it('starts the agent as before without NODE_DEBUG anywhere', async () => {
+    vi.stubEnv('NODE_DEBUG', undefined);
+    expect((await startup())['nodeDebug']).toBe('unset');
+  });
+});
+
+describe('a key the agent repeats where its text is cut', () => {
+  it('redacts a key in the reply of a turn with no verdict before cutting the reply short', async () => {
+    const key = 'sk-test-reply-4be19c07a6d2f358';
+    vi.stubEnv('OPENAI_API_KEY', key);
+    // The key starts 10 characters before the cut at 300, so cutting first would keep its head.
+    const reply = `first line\n${'x'.repeat(290)}${key} and more\n  `;
+    const executor = acp({ command: process.execPath, args: [AGENT], env: { ACP_SCRIPT: JSON.stringify([[{ say: reply }]]) } });
+    const verdict = await executor.runStep(stepContext());
+    expect(verdict).toMatchObject({ status: 'failed', errorCode: 'STEP_NO_CONCLUSION' });
+    expect(verdict.summary).toBe(`The agent ended its turn (end_turn) without complete_step: ${'x'.repeat(290)}<secret:OP`);
+    expect(verdict.summary).not.toContain('sk-test-re');
+  });
+
+  it('redacts a key in what the agent wrote to stderr before keeping the end of it, when the agent exits', async () => {
+    const key = 'sk-test-stderr-7c3a05e9d1b64f82';
+    vi.stubEnv('OPENAI_API_KEY', key);
+    // A child of the agent keeps its output open, so the exit is what the step hears of, not a closed connection.
+    // The key starts 10 characters before the last 2000 of the line, so keeping the end first would keep its tail.
+    const line = `fatal: ${key.slice(0, 10)}`.length;
+    const crash = [
+      "require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', 'inherit', 'ignore'], detached: true }).unref();",
+      `process.stderr.write(${JSON.stringify(`fatal: ${key}${'y'.repeat(2000 - (key.length - 10))}\n`)}, () => process.exit(3));`,
+    ].join('\n');
+    expect(line).toBe(17);
+    const failure = await stepFailure(acp({ command: process.execPath, args: ['-e', crash] }));
+    expect(failure).toContain('the agent exited (code 3): ');
+    expect(failure).toContain(`OPENAI_API_KEY>${'y'.repeat(50)}`);
+    expect(failure).not.toContain(key.slice(10));
+    // Only the end of a long line is kept.
+    expect(failure).not.toContain('fatal:');
+  });
+
+  it('says only that the turn ended when the agent said nothing', async () => {
+    const executor = acp({ command: process.execPath, args: [AGENT], env: { ACP_SCRIPT: JSON.stringify([[]]) } });
+    expect((await executor.runStep(stepContext())).summary).toBe('The agent ended its turn (end_turn) without complete_step');
+  });
+});
+
+describe('the login Codex saved', () => {
+  const saved = {
+    key: 'sk-saved-0f3a9c5e7b1d2468',
+    id: 'id-token-5c1e8a3f7d9b0246',
+    access: 'access-token-9d2b6f4a8c0e1357',
+    refresh: 'refresh-token-3e7a1c9f5b8d0246',
+  };
+
+  /** A Codex home holding `auth`, and a Codex executor on the scripted agent whose config names `env`. */
+  function codexWith(auth: string | undefined, env: (home: string) => Record<string, string>): { executor: StepExecutor; log: string } {
+    const directory = project(['@agentclientprotocol/codex-acp']);
+    const home = join(directory, 'home', '.codex');
+    mkdirSync(home, { recursive: true });
+    if (auth !== undefined) writeFileSync(join(home, 'auth.json'), auth);
+    const codexBin = join(directory, 'codex');
+    writeFileSync(codexBin, "#!/bin/sh\necho '[]'\n");
+    chmodSync(codexBin, 0o755);
+    const log = join(directory, 'agent.jsonl');
+    const executor = inProject(directory, () => codex({ env: { CODEX_PATH: codexBin, ACP_SCRIPT: JSON.stringify([[pass]]), ACP_LOG: log, ...env(home) } }));
+    return { executor, log };
+  }
+
+  const login = (fields: Record<string, unknown>) => JSON.stringify({ auth_mode: 'apikey', ...fields });
+
+  it('is redacted once a session starts: the key and each token, from the CODEX_HOME of the config', async () => {
+    vi.stubEnv('CODEX_HOME', '/nonexistent/codex-home');
+    const all = `${saved.key} ${saved.id} ${saved.access} ${saved.refresh}`;
+    expect(redactSecrets(all)).toBe(all);
+    const { executor, log } = codexWith(
+      login({ OPENAI_API_KEY: saved.key, tokens: { id_token: saved.id, access_token: saved.access, refresh_token: saved.refresh, account_id: 'acct' } }),
+      (home) => ({ CODEX_HOME: home }),
+    );
+    await runStep(executor, log);
+    expect(redactSecrets(all)).toBe('<secret:codex.api-key> <secret:codex.id-token> <secret:codex.access-token> <secret:codex.refresh-token>');
+  });
+
+  it('is read from the CODEX_HOME of the environment when the config names none', async () => {
+    const key = 'sk-saved-env-home-6b2d8f0a4c1e';
+    const { executor, log } = codexWith(login({ OPENAI_API_KEY: key }), () => ({}));
+    vi.stubEnv('CODEX_HOME', join(dirname(log), 'home', '.codex'));
+    await runStep(executor, log);
+    expect(redactSecrets(key)).toBe('<secret:codex.api-key>');
+  });
+
+  it('is read from ~/.codex when no CODEX_HOME is set', async () => {
+    const key = 'sk-saved-default-home-1a7c3e9b5d';
+    const { executor, log } = codexWith(login({ OPENAI_API_KEY: key }), () => ({}));
+    vi.stubEnv('CODEX_HOME', undefined);
+    vi.stubEnv('HOME', join(dirname(log), 'home'));
+    vi.stubEnv('USERPROFILE', join(dirname(log), 'home'));
+    await runStep(executor, log);
+    expect(redactSecrets(key)).toBe('<secret:codex.api-key>');
+  });
+
+  it('takes the fields it can read of a login in another shape, and starts the session', async () => {
+    const access = 'access-token-partial-4f8b2d6a0c';
+    const { executor, log } = codexWith(login({ OPENAI_API_KEY: null, tokens: { id_token: { raw: 'object-id-token-7e1c5a9d3b' }, access_token: access } }), (home) => ({ CODEX_HOME: home }));
+    await runStep(executor, log);
+    expect(redactSecrets(`${access} object-id-token-7e1c5a9d3b`)).toBe('<secret:codex.access-token> object-id-token-7e1c5a9d3b');
+  });
+
+  it.each([['no saved login', undefined], ['a login that is not JSON', '{not json'], ['a login with no tokens', '{"auth_mode":"chatgpt","tokens":null}']])('starts the session with %s', async (_label, auth) => {
+    const { executor, log } = codexWith(auth, (home) => ({ CODEX_HOME: home }));
+    await runStep(executor, log);
+  });
+});
+
+describe('the environment `codex mcp list` runs in', () => {
+  it("gets the config's variables and the runner's, without NODE_DEBUG", async () => {
+    const directory = project(['@agentclientprotocol/codex-acp']);
+    const log = join(directory, 'agent.jsonl');
+    const codexBin = join(directory, 'codex');
+    // Lists a server per variable it was given, so the session's config shows what it ran with.
+    writeFileSync(codexBin, '#!/bin/sh\nprintf \'[{"name":"playwright"}\'\n[ -n "$E2E_PROBE_CONFIG" ] && printf \',{"name":"executor"}\'\n[ -n "$E2E_PROBE_RUNNER" ] && printf \',{"name":"other"}\'\n[ -n "$NODE_DEBUG" ] && printf \',{"name":"debug"}\'\necho "]"\n');
+    chmodSync(codexBin, 0o755);
+    vi.stubEnv('E2E_PROBE_RUNNER', '1');
+    vi.stubEnv('NODE_DEBUG', 'child_process');
+    const executor = inProject(directory, () => codex({ env: { CODEX_PATH: codexBin, E2E_PROBE_CONFIG: '1', ACP_SCRIPT: JSON.stringify([[pass]]), ACP_LOG: log } }));
+    const entries = await runStep(executor, log);
+    const config = JSON.parse(entries.find((entry) => 'codexConfig' in entry)?.['codexConfig'] as string) as { mcp_servers: Record<string, unknown> };
+    expect(Object.keys(config.mcp_servers).toSorted()).toEqual(['executor', 'other', 'playwright']);
   });
 });

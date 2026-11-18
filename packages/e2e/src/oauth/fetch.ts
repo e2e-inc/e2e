@@ -9,6 +9,7 @@
  * concurrent refresh.
  */
 
+import { registerProviderKey } from '@e2e-dev/core/lib/run/secrecy';
 import { withAbort } from '@e2e-dev/core/lib/internal/time';
 import { OAuthError, describeResponse } from './errors.ts';
 import type { CredentialStore, FetchFunction, OAuthCredentials, OAuthProvider } from './types.ts';
@@ -131,6 +132,9 @@ export function createOAuthFetch<Credentials extends OAuthCredentials>(
       const body = base.method === 'GET' || base.method === 'HEAD' ? undefined : await base.arrayBuffer();
       const attempt = (credentials: Credentials) => {
         base.signal.throwIfAborted();
+        // Before the token is sent: an answer that quotes it back is redacted like a provider key.
+        registerProviderKey(`${provider.id}.access-token`, credentials.access);
+        registerProviderKey(`${provider.id}.refresh-token`, credentials.refresh);
         const headers = new Headers(base.headers);
         headers.delete('x-api-key');
         headers.set('authorization', `Bearer ${credentials.access}`);
