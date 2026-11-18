@@ -301,8 +301,12 @@ suites that consume the built packages the way a user would.
   by `scripts/check-docs-package-managers.ts`).
   `docs/ja/` and `docs/zh/` hold the Japanese and Simplified Chinese
   translations, one page per English page at the same path, with the tab
-  and group labels in `docs/<language>/navigation.json`; a translation keeps its English page's outline
-  (`scripts/check-docs-translations.ts`, `authoring-docs` "Translations").
+  and group labels in `docs/<language>/navigation.json`. Translations are best
+  effort: keep the English pages current in every change, and leave the
+  translations to lag behind, since no contributor is expected to update a
+  language they don't speak. `scripts/check-docs-translations.ts` warns on a
+  stale outline, code block, or label and fails only on a translation whose
+  English page is gone (`authoring-docs` "Translations").
   The `e2e` build copies the
   pages to `packages/e2e/docs/` (gitignored,
   `packages/e2e/scripts/prepare-build.ts`) so the published package ships
