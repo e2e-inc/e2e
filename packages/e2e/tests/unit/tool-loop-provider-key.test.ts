@@ -54,12 +54,15 @@ describe('a provider key the model repeats', () => {
   it('is redacted in the model\'s own words before they are sent back to it', async () => {
     const key = 'sk-loop-history-7a2e9c4f1b6d8035';
     registerProviderKey('loop.history-key', key);
-    const model = installFakeLoopModel(({ turn }) => (turn === 1 ? { toolCalls: [{ toolName: 'peek', input: {} }], reasoning: `the error quoted ${key}` } : [conclude]));
+    const model = installFakeLoopModel(({ turn }) =>
+      turn === 1 ? { toolCalls: [{ toolName: 'peek', input: {} }], text: `the error quoted ${key}`, reasoning: `thinking of ${key}` } : [conclude],
+    );
     const { fixtures } = runtime({ agents: { default: { tools: { peek }, model } } });
 
     await fixtures.agent.act('look around');
 
-    expect(loopCalls[1]?.assistantText).toEqual(['the error quoted <secret:loop.history-key>']);
+    // Its reasoning goes back as it wrote it: a provider signs reasoning, and refuses it changed.
+    expect(loopCalls[1]?.assistantText).toEqual([`thinking of ${key}`, 'the error quoted <secret:loop.history-key>']);
     // What the tool answered is still there, as it was.
     expect(loopCalls[1]?.lastToolResult).toBe('looked');
   });

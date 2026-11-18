@@ -164,7 +164,10 @@ describe('credentials an agent repeats, through the built CLI', () => {
       ['reply', 'failed'],
       ['error', 'failed'],
     ]);
-    for (const path of ['summary', 'verdict', 'title', 'reply', 'error']) expect(output).toContain(`${path} `);
+    // Each path's text is in the report with a marker where each credential was: redacted, not dropped.
+    const markers = '<secret:OPENAI_API_KEY> <secret:codex.api-key> <secret:codex.access-token> <secret:codex.refresh-token>';
+    const reported = readFileSync(join(directory, '.e2e/report.json'), 'utf8');
+    for (const path of ['summary', 'verdict', 'title', 'reply', 'error']) expect(reported).toContain(`${path} ${markers}`);
   });
 
   it('prints no piece of a credential to the terminal', () => {

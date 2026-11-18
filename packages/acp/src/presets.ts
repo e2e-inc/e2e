@@ -176,8 +176,9 @@ const CodexSavedLogin = z.object({
  * than any login.
  */
 export function registerSavedCodexLogin(env: Readonly<Record<string, string>> | undefined): void {
-  // An empty CODEX_HOME is none, as Codex reads it.
-  const home = (env?.['CODEX_HOME'] ?? process.env['CODEX_HOME']) || join(homedir(), '.codex');
+  // Where the agent will look, from the environment it starts with: its CODEX_HOME, an empty one being none, else `.codex` in its home.
+  const given = (name: string) => env?.[name] ?? process.env[name];
+  const home = given('CODEX_HOME') || join(given('HOME') || given('USERPROFILE') || homedir(), '.codex');
   let saved: z.infer<typeof CodexSavedLogin>;
   try {
     const file = join(home, 'auth.json');
@@ -194,7 +195,7 @@ export function registerSavedCodexLogin(env: Readonly<Record<string, string>> | 
     ['codex.access-token', saved.tokens?.access_token],
     ['codex.refresh-token', saved.tokens?.refresh_token],
   ] as const) {
-    if (typeof value === 'string') registerProviderKey(name, value);
+    registerProviderKey(name, value);
   }
 }
 

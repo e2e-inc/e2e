@@ -356,6 +356,9 @@ describe('a process that has loaded no config yet', () => {
     expect(fresh.processSecrets.redact(key)).toBe('<secret:OPENROUTER_API_KEY>');
     const serialized = errors.serializeError(new errors.ConfigurationError('INVALID_CONFIG', `config threw: ${key}`));
     expect(serialized.message).toBe('config threw: <secret:OPENROUTER_API_KEY>');
+    const later = fakeKey();
+    vi.stubEnv('MISTRAL_API_KEY', later);
+    expect(errors.serializeError(new errors.ConfigurationError('INVALID_CONFIG', `then: ${later}`)).message).toBe('then: <secret:MISTRAL_API_KEY>');
   });
 
   it('leaves the error redactor another copy of the package installed, which knows values this copy does not', async () => {
@@ -366,5 +369,73 @@ describe('a process that has loaded no config yet', () => {
     const serialized = errors.serializeError(new errors.ConfigurationError('INVALID_CONFIG', 'quoted first-copy-value'));
     expect(serialized.message).toBe('quoted <secret:first>');
     errors.setErrorRedactor(undefined);
+  });
+});
+
+describe('a value too long to be a key', () => {
+  /** A token in the shape of a JWT, `length` characters long. */
+  const tokenOf = (length: number) => `eyJhbGciOiJSUzI1NiJ9.${randomBytes(length).toString('base64url')}`.slice(0, length);
+
+  it('redacts a token of exactly the most characters it takes', () => {
+    const token = tokenOf(8192);
+    registerProviderKey('agent.longest-token', token);
+    expect(redactSecrets(`quoted ${token}.`)).toBe('quoted <secret:agent.longest-token>.');
+  });
+
+  it('leaves a longer value alone, and goes on redacting the others', () => {
+    const tooLong = tokenOf(8193);
+    const key = fakeKey();
+    registerProviderKey('agent.too-long', tooLong);
+    registerProviderKey('agent.beside-too-long', key);
+    expect(redactSecrets(tooLong)).toBe(tooLong);
+    expect(redactSecrets(key)).toBe('<secret:agent.beside-too-long>');
+  });
+
+  it('leaves a value far past what a pattern can hold alone, where registering it would stop the run', () => {
+    vi.stubEnv('VERCEL_OIDC_TOKEN', tokenOf(40_000));
+    const ledger = sessionLedger(newSession(), NO_SECRETS);
+    expect(ledger.redact('plain text')).toBe('plain text');
+  });
+
+  it('ignores a value that is no string, as an unset variable is in a config', () => {
+    registerProviderKey('agent.unset', undefined);
+    expect(redactSecrets('undefined stays as written')).toBe('undefined stays as written');
+  });
+
+  it('never quotes a secret in the error for values no pattern can hold', async () => {
+    const { SecretLedger } = await import('../../src/internal/redact.ts');
+    const huge = randomBytes(40_000).toString('hex');
+    const ledger = new SecretLedger([
+      ['huge', huge],
+      ['token', 'beside-huge-secret-5521'],
+    ]);
+    let thrown: unknown;
+    try {
+      ledger.redact('text');
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toEqual(new Error('the secret values are too long to redact: shorten the longest secret, or take it out of the run'));
+    expect(String((thrown as Error).stack)).not.toContain(huge.slice(0, 16));
+    expect(String((thrown as Error).stack)).not.toContain('beside-huge');
+  });
+});
+
+describe('an error reported before any session', () => {
+  it('goes through this process\'s secrets once a run registers them, whatever redactor was installed before', async () => {
+    const errors = await import('../../src/internal/errors.ts');
+    errors.setErrorRedactor((text) => text);
+    registerStaticSecrets(new Map([['password', { name: 'password', purpose: 'password', value: 'run-secret-value-6642' }]]) as never);
+    expect(errors.serializeError(new errors.ConfigurationError('INVALID_CONFIG', 'typed run-secret-value-6642')).message).toBe('typed <secret:password>');
+  });
+
+  it('is redacted for a key the config set itself before it failed', async () => {
+    const errors = await import('../../src/internal/errors.ts');
+    registerStaticSecrets(NO_SECRETS);
+    const key = fakeKey();
+    // What `process.loadEnvFile()` in a config does, after every earlier look at the environment.
+    vi.stubEnv('GROQ_API_KEY', key);
+    const serialized = errors.serializeError(new errors.ConfigurationError('INVALID_CONFIG', `config threw: ${key}`));
+    expect(serialized.message).toBe('config threw: <secret:GROQ_API_KEY>');
   });
 });

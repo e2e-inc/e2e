@@ -173,6 +173,13 @@ const PROVIDER_KEY_VARIABLES = [
  */
 const MIN_PROVIDER_KEY_LENGTH = 20;
 
+/**
+ * The most characters a provider key may have to be redacted. A longer value
+ * is no key or token a provider issues, and one long enough is more than a
+ * pattern can hold: the run would stop on a value it picked up by itself.
+ */
+const MAX_PROVIDER_KEY_LENGTH = 8192;
+
 /** What a name may spell inside its `<secret:name>` marker. */
 const PROVIDER_KEY_NAME = /^[A-Za-z0-9_.-]+$/;
 
@@ -202,24 +209,29 @@ function providerKeys(): ProviderKeys {
  * Makes every ledger in the process redact `value` as `<secret:name>` from
  * now on: a key a model provider or an agent signs in with, which is not a
  * secret of the app. Trimmed, as a provider reads it. A value shorter than
- * `MIN_PROVIDER_KEY_LENGTH` is left alone. `name` is what the marker shows:
- * letters, digits, `_`, `.`, and `-`.
+ * `MIN_PROVIDER_KEY_LENGTH` or longer than `MAX_PROVIDER_KEY_LENGTH` is left
+ * alone, and so is one that is no string, as an unset variable is. `name`
+ * is what the marker shows: letters, digits, `_`, `.`, and `-`.
  */
-export function registerProviderKey(name: string, value: string): void {
+export function registerProviderKey(name: string, value: string | null | undefined): void {
   if (!PROVIDER_KEY_NAME.test(name)) {
     throw new TypeError(`registerProviderKey: the name ${JSON.stringify(name)} must be letters, digits, "_", ".", or "-"`);
   }
+  registerKey(name, value);
+}
+
+/** `registerProviderKey` for a name this module wrote itself. */
+function registerKey(name: string, value: string | null | undefined): void {
+  if (typeof value !== 'string') return;
   const key = value.trim();
-  if (secretLength(key) < MIN_PROVIDER_KEY_LENGTH) return;
+  const length = secretLength(key);
+  if (length < MIN_PROVIDER_KEY_LENGTH || length > MAX_PROVIDER_KEY_LENGTH) return;
   providerKeys().values.set(`${name}\0${key}`, [name, key]);
 }
 
 /** Registers the provider keys `env` holds, under their variable names. */
 export function registerProviderKeys(env: Readonly<Record<string, string | undefined>>): void {
-  for (const name of PROVIDER_KEY_VARIABLES) {
-    const value = env[name];
-    if (typeof value === 'string') registerProviderKey(name, value);
-  }
+  for (const name of PROVIDER_KEY_VARIABLES) registerKey(name, env[name]);
 }
 
 const beside: SecretsBeside = {
@@ -247,10 +259,21 @@ const besideStatic: SecretsBeside = {
  */
 export const processSecrets = new SecretLedger([], beside);
 
+/**
+ * `processSecrets.redact` for an error with no session to redact it. Reads
+ * the environment first: a config that loads its keys itself
+ * (`process.loadEnvFile()`) and then fails has set them since anything
+ * here last looked.
+ */
+function redactError(text: string): string {
+  registerProviderKeys(process.env);
+  return processSecrets.redact(text);
+}
+
 // Before any config is read: a config that fails to load, or an engine that fails to start, is reported through this redactor too.
 // Only where none is installed: another copy of this module in the process may hold values this one does not.
 registerProviderKeys(process.env);
-ensureErrorRedactor(processSecrets.redact);
+ensureErrorRedactor(redactError);
 
 function staticEntries(secrets: ResolvedConfig['allSecrets']): SecretList {
   return [...secrets].flatMap(([name, { value }]) => (typeof value === 'string' ? [[name, value] as const] : []));
@@ -299,7 +322,7 @@ export function staticOutputLedger(secrets: ResolvedConfig['allSecrets']): Pick<
 
 /** Makes `processSecrets` `serializeError`'s default redactor and seeds it with the static values of `secrets`, which it returns. */
 function seedProcess(secrets: ResolvedConfig['allSecrets']): SecretList {
-  setErrorRedactor(processSecrets.redact);
+  setErrorRedactor(redactError);
   // A key exported since the process started, by a config file or a setup step.
   registerProviderKeys(process.env);
   const entries = staticSecretLedger(secrets).entries();

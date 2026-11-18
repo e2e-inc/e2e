@@ -911,7 +911,8 @@ function textChars(messages: readonly ModelMessage[]): number {
  * An assistant message with what the model wrote redacted, before it is sent
  * back as history: a model that repeats a secret or a provider key it was
  * shown, in an error or on a screen, must not be handed it again as text.
- * Its tool calls stay as it made them.
+ * Its tool calls stay as it made them, and so does its reasoning, which a
+ * provider signs and refuses once a character of it has changed.
  */
 function redactAssistantText<Message extends { content: unknown }>(message: Message, redact: ((text: string) => string) | undefined): Message {
   if (redact === undefined) return message;
@@ -921,7 +922,7 @@ function redactAssistantText<Message extends { content: unknown }>(message: Mess
     ...message,
     content: message.content.map((part: unknown) => {
       const record = part as { type?: unknown; text?: unknown };
-      return (record.type === 'text' || record.type === 'reasoning') && typeof record.text === 'string' ? { ...record, text: redact(record.text) } : part;
+      return record.type === 'text' && typeof record.text === 'string' ? { ...record, text: redact(record.text) } : part;
     }),
   };
 }

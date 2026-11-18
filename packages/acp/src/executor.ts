@@ -299,9 +299,9 @@ function ownToolUsed(title: string): StepVerdict {
 }
 
 function noConclusion(report: TurnReport): StepVerdict {
-  const text = report.text.trim();
-  // The last line, redacted before the cut: half a key is no longer a match.
-  const said = redactSecrets(text.slice(text.lastIndexOf('\n') + 1)).slice(0, 300);
+  // Redacted whole, before the last line is taken and cut: a value can span lines, and half a key is no longer a match.
+  const text = redactSecrets(report.text.trim());
+  const said = text.slice(text.lastIndexOf('\n') + 1).slice(0, 300);
   return {
     status: 'failed',
     errorCode: 'STEP_NO_CONCLUSION',

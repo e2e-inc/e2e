@@ -675,10 +675,21 @@ trees, on both platforms, without a device.
     fields only, before and after a secret fill: a value the app shows
     elsewhere is in the image, a documented limit (`docs/security.mdx`), not
     a gap to close with taint or text-matching heuristics. Text downloads are
-    rewritten whenever the session's ledger holds a value
+    rewritten whenever the session's ledger holds a secret of the app
     (`redactsDownloads` in `run/secrecy.ts`), since a plain string reaches
     the app unseen. What an executor keeps in `attempt.memory` is its own;
     the harness never reports it.
+  - Provider keys are a class of their own in the ledger
+    (`registerProviderKey` in `run/secrecy.ts`): the closed list of model
+    provider variables there, subscription tokens, a coding agent's saved
+    login, and what an executor registers through `e2e/agent`. Every ledger
+    redacts them from what the run writes and from model input, whole
+    values only. They never turn on download rewriting, never enter a
+    ledger's own entries (so no saved session carries one), and never
+    redact what a test id is made of, since the runner and a worker need
+    not know the same keys. A new provider adds its variable to the list;
+    a name pattern is not a substitute. Redact before any cut: half a
+    value is no longer a match.
   - An agent's secret fill is authorized by the runner, not the model.
     `typeSecret` (`action-dispatcher.ts`) takes only a handle the step's
     params declare, the target resolves on the newest observation

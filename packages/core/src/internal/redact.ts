@@ -78,7 +78,7 @@ function compile(values: readonly (readonly [string, string])[], wholeOnly: Read
   const markers = entries.map(([name]) => `${MARKER_OPEN}${name}>`);
   const known = markerPattern(entries.map(([name]) => name));
   const patterns = entries.map(([, value]) => valuePattern(value));
-  const pattern = new RegExp(patterns.map(({ source }) => `(${source})`).join('|'), 'gi');
+  const pattern = valuesPattern(patterns.map(({ source }) => `(${source})`).join('|'));
   const rewrite = (text: string): string =>
     text.replace(pattern, (_occurrence: string, ...rest: unknown[]) => {
       const matched = rest.slice(0, markers.length).findIndex((group) => group !== undefined);
@@ -137,6 +137,24 @@ function compile(values: readonly (readonly [string, string])[], wholeOnly: Read
     maxMarkerLength: Math.max(...markers.map((marker) => marker.length)),
     spansLines: entries.some(([, value]) => value.includes('\n') || /\s/.test(value.trim())),
   };
+}
+
+/**
+ * The pattern over every value. A value long enough makes the engine refuse
+ * the pattern, and its error quotes the pattern, values and all: that error
+ * never leaves here.
+ */
+function valuesPattern(source: string): RegExp {
+  try {
+    const pattern = new RegExp(source, 'gi');
+    // The engine compiles a pattern when it first runs it, once for Latin-1 text and once for the rest, and refuses one too large only then.
+    pattern.test('');
+    pattern.test('\u0100');
+    pattern.lastIndex = 0;
+    return pattern;
+  } catch {
+    throw new Error('the secret values are too long to redact: shorten the longest secret, or take it out of the run');
+  }
 }
 
 /** Matches the marker of any known name, captured so `split` keeps the markers. */

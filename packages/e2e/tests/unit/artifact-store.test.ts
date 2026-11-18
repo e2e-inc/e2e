@@ -251,6 +251,28 @@ describe('download redaction', () => {
     expect(readFileSync(path.join(artifacts.dir, 'downloads', 'headers.txt'), 'utf8')).toBe('authorization: <secret:api-key>\n');
   });
 
+  it('leaves a provider key in a download as the app served it, rewritten for the secret or not', async () => {
+    const key = 'sk-proj-artifact-4c9e1a7f2b6d8035';
+    const beside = { revision: 1, values: () => [], providerKeys: () => [['OPENAI_API_KEY', key] as const] };
+    const withSecret = new SecretLedger([['api-key', SECRET]], beside);
+    expect(withSecret.redact(key)).toBe('<secret:OPENAI_API_KEY>');
+    const rewritten = createAttemptArtifacts({ artifactsRoot: root(), segments: ['web', 'test-1', 'attempt-0'], attemptId: 'att-1', ledger: () => withSecret });
+    mkdirSync(path.join(rewritten.dir, 'downloads'));
+    writeFileSync(path.join(rewritten.dir, 'downloads', 'export.txt'), `secret ${SECRET}\nkey ${key}\n`);
+    rewritten.sink.register('download', 'downloads/export.txt');
+    await rewritten.settle();
+    expect(rewritten.records[0]).toMatchObject({ redaction: 'complete' });
+    expect(readFileSync(path.join(rewritten.dir, 'downloads', 'export.txt'), 'utf8')).toBe(`secret <secret:api-key>\nkey ${key}\n`);
+
+    const keyOnly = createAttemptArtifacts({ artifactsRoot: root(), segments: ['web', 'test-2', 'attempt-0'], attemptId: 'att-2', ledger: () => new SecretLedger([], beside) });
+    mkdirSync(path.join(keyOnly.dir, 'downloads'));
+    writeFileSync(path.join(keyOnly.dir, 'downloads', 'export.txt'), `key ${key}\n`);
+    keyOnly.sink.register('download', 'downloads/export.txt');
+    await keyOnly.settle();
+    expect(keyOnly.records[0]).toMatchObject({ redaction: 'incomplete' });
+    expect(readFileSync(path.join(keyOnly.dir, 'downloads', 'export.txt'), 'utf8')).toBe(`key ${key}\n`);
+  });
+
   it('labels a rewritten download complete, and stores the rewritten bytes', async () => {
     const store = capturing();
     const artifacts = downloads(true, store);

@@ -508,6 +508,11 @@ before writing the AI trace.
 - Any `StepExecutor` (`{ name, version?, cache?, runStep(ctx) }`) goes under
   `executor`; the runner still owns observations, actions, budgets, and the
   report, and `system` or `tools` beside `executor` is `INVALID_CONFIG`.
+- The run redacts the model provider keys in its environment from reports,
+  traces, and output. For a key it cannot see (one passed in code, one an
+  agent reads from its own login file), call
+  `registerProviderKey(name, value)` from `e2e/agent`; an executor that cuts
+  text itself calls `redactSecrets(text)` first.
 
 Reference: https://e2e.com/docs/agents
 

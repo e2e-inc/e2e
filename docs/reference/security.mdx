@@ -250,13 +250,14 @@ can't put it in a report. Each shows as `<secret:NAME>`.
 | --- | --- |
 | The key variable of each [model provider](/models), such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AI_GATEWAY_API_KEY`, and `OPENROUTER_API_KEY`, plus `ANTHROPIC_AUTH_TOKEN`, `CODEX_API_KEY`, `LLM_API_KEY`, `OPENCODE_API_KEY`, and `VERCEL_OIDC_TOKEN`, in the environment of the run or of an `acp()` agent | The variable |
 | A [subscription login](/subscriptions) the run sends | `<provider>.access-token`, `<provider>.refresh-token` |
-| The login `codex()` finds in `CODEX_HOME/auth.json` | `codex.api-key`, `codex.id-token`, `codex.access-token`, `codex.refresh-token` |
+| The login `codex()` finds in `auth.json` under the agent's `CODEX_HOME`, or `.codex` in its home | `codex.api-key`, `codex.id-token`, `codex.access-token`, `codex.refresh-token` |
 | A key you register with [`registerProviderKey`](/executors#provider-keys) | The name you give |
 
 | Rule | Detail |
 | --- | --- |
 | Whole keys only | A key matches as a whole, in the forms above. Cut short at a length limit, it matches when at least half of it is there, and no fewer than 16 characters. Any other part of one isn't a match: keys of one provider start alike. |
-| Minimum length | A value shorter than 20 characters is left alone, so a placeholder for a local model server, such as `ollama`, doesn't rewrite ordinary words. Name a shorter real key under [`secrets`](/reference/config#secrets). |
+| Length | A value shorter than 20 characters is left alone, so a placeholder for a local model server, such as `ollama`, doesn't rewrite ordinary words. Name a shorter real key under [`secrets`](/reference/config#secrets). A value longer than 8,192 characters is left alone too: it is no key or token a provider issues. |
+| Output | A worker holds back the end of an unfinished line that could still become a key, as it does for a secret. A prompt printed without a newline shows with the next output, and is lost if the test then blocks the process until it is stopped. |
 | Downloads | Never rewritten for a provider key: the app doesn't hold one. |
 | Sessions | A provider key is never saved into a [session](#sessions). |
 | A key that is also a secret | Stays your secret: its name, and the [download](#downloads) rule. |
@@ -271,7 +272,10 @@ These keys are not redacted:
   those, and need not know the same keys. Name it under `secrets`,
 - `command.log`, as for every secret: the runner keeps your app's output
   as written, and your app inherits the environment,
-- a login a coding agent keeps in the OS keyring,
+- a login a coding agent keeps in the OS keyring, and Claude Code's own
+  login file,
+- the model's reasoning when it is sent back to the model: a provider
+  signs it and refuses a changed one. Its prose is redacted,
 - a JSON service key or a key file, such as `AICORE_SERVICE_KEY` and
   `GOOGLE_APPLICATION_CREDENTIALS`,
 - in what Node prints when `NODE_DEBUG` names `child_process` or `net`,

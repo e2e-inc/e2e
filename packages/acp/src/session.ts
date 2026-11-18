@@ -415,8 +415,8 @@ function defined<T extends object>(value: T): Partial<T> {
   return Object.fromEntries(Object.entries(value).filter(([, field]) => field !== undefined && field !== null)) as Partial<T>;
 }
 
-/** The end of the last line the agent wrote, redacted before it is cut: half a key is no longer a match. */
+/** The end of the last line the agent wrote. Redacted whole, before the line is taken and cut: a value can span lines, and half a key is no longer a match. */
 function lastLine(text: string): string {
-  const written = text.trim();
-  return redactSecrets(written.slice(written.lastIndexOf('\n') + 1)).slice(-2000);
+  const written = redactSecrets(text.trim());
+  return written.slice(written.lastIndexOf('\n') + 1).slice(-2000);
 }

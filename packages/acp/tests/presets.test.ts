@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { StepExecutor, StepExecutorContext } from 'e2e';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { redactSecrets } from 'e2e/agent';
+import { redactSecrets, registerProviderKey } from 'e2e/agent';
 import { acp, claudeCode, codex } from '../src/index.ts';
 import { codexLaunch } from '../src/presets.ts';
 
@@ -441,6 +441,14 @@ describe('a key the agent repeats where its text is cut', () => {
     expect(failure).not.toContain('fatal:');
   });
 
+  it('redacts a secret that spans lines before taking the last line of the reply', async () => {
+    const key = `sk-test-two-line-key\nsecond-line-of-the-key-9d3f`;
+    registerProviderKey('agent.two-line-key', key);
+    const executor = acp({ command: process.execPath, args: [AGENT], env: { ACP_SCRIPT: JSON.stringify([[{ say: `the provider quoted ${key}` }]]) } });
+    const verdict = await executor.runStep(stepContext());
+    expect(verdict.summary).toBe('The agent ended its turn (end_turn) without complete_step: the provider quoted <secret:agent.two-line-key>');
+  });
+
   it('says only that the turn ended when the agent said nothing', async () => {
     const executor = acp({ command: process.execPath, args: [AGENT], env: { ACP_SCRIPT: JSON.stringify([[]]) } });
     expect((await executor.runStep(stepContext())).summary).toBe('The agent ended its turn (end_turn) without complete_step');
@@ -499,6 +507,37 @@ describe('the login Codex saved', () => {
     vi.stubEnv('USERPROFILE', join(dirname(log), 'home'));
     await runStep(executor, log);
     expect(redactSecrets(key)).toBe('<secret:codex.api-key>');
+  });
+
+  it("is read from the home the config gives the agent, not the runner's", async () => {
+    const agents = 'sk-saved-agent-home-2c8e4a6f0b1d';
+    const runners = 'sk-saved-runner-home-7f3b9d5a1c0e';
+    const { executor, log } = codexWith(login({ OPENAI_API_KEY: agents }), (home) => ({ HOME: dirname(home) }));
+    const runnerHome = join(dirname(log), 'runner');
+    mkdirSync(join(runnerHome, '.codex'), { recursive: true });
+    writeFileSync(join(runnerHome, '.codex', 'auth.json'), login({ OPENAI_API_KEY: runners }));
+    vi.stubEnv('CODEX_HOME', undefined);
+    vi.stubEnv('HOME', runnerHome);
+    vi.stubEnv('USERPROFILE', runnerHome);
+    await runStep(executor, log);
+    expect(redactSecrets(`${agents} ${runners}`)).toBe(`<secret:codex.api-key> ${runners}`);
+  });
+
+  it('is read from the USERPROFILE of the agent where it has no HOME', async () => {
+    const key = 'sk-saved-userprofile-5a1d9c3e7b0f';
+    const { executor, log } = codexWith(login({ OPENAI_API_KEY: key }), (home) => ({ USERPROFILE: dirname(home), HOME: '' }));
+    vi.stubEnv('CODEX_HOME', undefined);
+    vi.stubEnv('HOME', '/nonexistent/runner-home');
+    await runStep(executor, log);
+    expect(redactSecrets(key)).toBe('<secret:codex.api-key>');
+  });
+
+  it('starts the session with a token in the login far longer than any token, and redacts the rest of it', async () => {
+    const access = 'access-token-beside-huge-3b7e1d9a5c';
+    const huge = `eyJ${'hugetoken'.repeat(2300)}`;
+    const { executor, log } = codexWith(login({ tokens: { id_token: huge, access_token: access } }), (home) => ({ CODEX_HOME: home }));
+    await runStep(executor, log);
+    expect(redactSecrets(`${access} ${huge.slice(0, 40)}`)).toBe(`<secret:codex.access-token> ${huge.slice(0, 40)}`);
   });
 
   it('takes the fields it can read of a login in another shape, and starts the session', async () => {
