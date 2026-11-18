@@ -9,10 +9,11 @@ import type { RecordedModel, DerivedReason } from '../cache/trace.ts';
 import { bound } from '../internal/text.ts';
 import { markAbandonedRejection, relocateStack } from '../internal/abandoned.ts';
 import { withAiTraceStep } from '../internal/ai-trace.ts';
-import { classifyError, serializeError, TestError, withHint, type SerializedError } from '../internal/errors.ts';
+import { classifyError, redactErrorDetails, serializeError, TestError, withHint, type SerializedError } from '../internal/errors.ts';
 import { timestamp } from '../internal/ids.ts';
 import { withAbort } from '../internal/time.ts';
 import { sourceLocation, type SourceLocation } from '../internal/source.ts';
+import type { GuestRecord } from './guest-steps.ts';
 import type { AppLogEntry, AppLogSource } from '../engine/index.ts';
 import { APP_LOG_LIMITS } from '../engine/session.ts';
 import type { AppEvent } from '../engine/surface.ts';
@@ -194,6 +195,13 @@ export interface StepRecord {
   kind: StepKind;
   api: string;
   label: string;
+  /**
+   * The session the step ran on, when it is not the test's own: one the test
+   * drives beside it through `launch()`, named in the order they joined it
+   * (`launch-1`), which is when the test opened one, or first used one
+   * opened outside it. Absent for a step of the test's own session.
+   */
+  actor?: string;
   /** The test line the step was called from; absent when no project line was on the stack. */
   source?: SourceLocation;
   status: 'passed' | 'failed' | 'blocked' | 'timed-out' | 'cancelled';
@@ -223,6 +231,11 @@ export interface StepRecord {
   artifacts: string[];
 }
 
+/** Whether a step ran on the test's own session, not on one the test drives beside it. */
+export function isOwnStep(step: Pick<StepRecord, 'actor'>): boolean {
+  return step.actor === undefined;
+}
+
 /** The hooks a step can run in outside the test body. */
 export type StepPhase = 'beforeEach' | 'afterEach';
 
@@ -240,10 +253,12 @@ interface StepProgressIdentity {
   readonly attemptIndex: number;
   readonly stepId: string;
   readonly stepIndex: number;
+  /** The session the step ran on when it is not the test's own; see `StepRecord.actor`. */
+  readonly actor?: string;
 }
 
 /** One progress payload before the recorder attaches its identity. */
-type StepProgressFact =
+export type StepProgressFact =
   | { readonly phase: 'start'; readonly kind: StepKind; readonly api: string; readonly label: string }
   | {
       readonly phase: 'end';
@@ -297,13 +312,14 @@ export interface StepRunOptions {
 /** How many causes down a thrown error is redacted; a chain is rarely three deep. */
 const MAX_REDACTED_CAUSES = 8;
 
-/** Replaces secret values in the message and stack of a thrown error and of the causes under it, keeping each error's identity. */
+/** Replaces secret values in the message, stack, and details of a thrown error and of the causes under it, keeping each error's identity. */
 function redactErrorInPlace(thrown: unknown, redact: (text: string) => string): void {
   let error: unknown = thrown;
   for (let depth = 0; error instanceof Error && depth < MAX_REDACTED_CAUSES; depth += 1) {
     try {
       error.message = redact(error.message);
       if (error.stack !== undefined) error.stack = redact(error.stack);
+      redactErrorDetails(error, redact);
     } catch {
       // A frozen error keeps its text; nothing more can be done to it here.
     }
@@ -318,6 +334,8 @@ export interface StepRecorderOptions {
   readonly maxEventsPerStep?: number;
   /** Live progress sink; omitted in contexts with no reporter to feed. */
   readonly onProgress?: (progress: StepProgress) => void;
+  /** Takes each progress with the record it is of, for the recorder of a session whose steps a test's recorder mirrors (`run/guest-steps.ts`). */
+  readonly mirror?: (progress: StepProgress, record: StepRecord) => void;
   /** The project root; with it, every step and step error names the test line it came from. */
   readonly projectRoot?: string;
   /** Replaces secret values in a step's label, and in its error's message and details, before the record keeps them. */
@@ -456,8 +474,10 @@ export class StepRecorder {
   /** Where the app went before the attempt's first step, told under it once it starts. */
   private readonly earlyNavigations: { line: string; at: string }[] = [];
   private readonly maxEventsPerStep: number;
-  private readonly onProgress: ((progress: StepProgress) => void) | undefined;
-  private readonly projectRoot: string | undefined;
+  private readonly onProgress: StepRecorderOptions['onProgress'];
+  private readonly mirror: StepRecorderOptions['mirror'];
+  /** The root step sources are read against. */
+  readonly projectRoot: string | undefined;
   private readonly redact: ((text: string) => string) | undefined;
   private readonly signal: AbortSignal | undefined;
   private readonly redactThrown: boolean;
@@ -473,6 +493,7 @@ export class StepRecorder {
     this.attempt = options.attempt ?? { id: attemptId, index: 0 };
     this.maxEventsPerStep = options.maxEventsPerStep ?? 1_000;
     this.onProgress = options.onProgress;
+    this.mirror = options.mirror;
     this.projectRoot = options.projectRoot;
     this.redact = options.redact;
     this.signal = options.signal;
@@ -484,6 +505,11 @@ export class StepRecorder {
   /** Replaces secret values in text the way every record is redacted; identity without a redactor. */
   redactText(text: string): string {
     return this.redact?.(text) ?? text;
+  }
+
+  /** Whether a step is still executing. */
+  get busy(): boolean {
+    return this.running.size > 0;
   }
 
   /** The step currently executing, when inside StepRecorder.run. */
@@ -568,28 +594,33 @@ export class StepRecorder {
     return promise;
   }
 
-  /** Records a step as started now and tells reporters. */
-  private open(kind: StepKind, api: string, label: string, stack: string | undefined, options: StepRunOptions): StepRecord {
+  /** Mints a step's record at the next index, started now in the running phase. */
+  private file(step: Pick<StepRecord, 'kind' | 'api' | 'label'> & { readonly [Key in 'source' | 'agent' | 'actor']?: StepRecord[Key] | undefined }): StepRecord {
     const index = this.opened;
     this.opened += 1;
-    const startedAt = timestamp();
-    const source = sourceLocation(stack, this.projectRoot);
     const record: StepRecord = {
       id: `${this.attemptId}:${index}`,
       index,
-      kind,
-      api,
-      label,
-      ...(source === undefined ? {} : { source }),
+      kind: step.kind,
+      api: step.api,
+      label: step.label,
+      ...(step.actor === undefined ? {} : { actor: step.actor }),
+      ...(step.source === undefined ? {} : { source: step.source }),
       status: 'passed',
-      startedAt,
+      startedAt: timestamp(),
       durationMs: 0,
       events: [],
-      ...(options.agent === undefined ? {} : { agent: options.agent }),
+      ...(step.agent === undefined ? {} : { agent: step.agent }),
       ...(this.phase === undefined ? {} : { phase: this.phase }),
       artifacts: [],
     };
     this.steps.push(record);
+    return record;
+  }
+
+  /** Records a step as started now and tells reporters. */
+  private open(kind: StepKind, api: string, label: string, stack: string | undefined, options: StepRunOptions): StepRecord {
+    const record = this.file({ kind, api, label, source: sourceLocation(stack, this.projectRoot), agent: options.agent });
     this.running.add(record.id);
     // Only a finished step is dropped, and only from the front, so a running
     // one keeps its record, the one opened here included: with nothing
@@ -745,9 +776,7 @@ export class StepRecorder {
   attachArtifact(artifactId: string): void {
     // Cleanup outside a scope may attach to the last step. Work inherited
     // from a closed scope must never attach to a newer step.
-    const target = this.scope.getStore() === undefined
-      ? this.steps[this.steps.length - 1]
-      : this.current();
+    const target = this.scope.getStore() === undefined ? this.lastOwn() : this.current();
     if (target !== undefined) target.artifacts.push(artifactId);
   }
 
@@ -767,7 +796,7 @@ export class StepRecorder {
    * is an event of the step, and one before the first step waits for it.
    */
   recordAppEvent(event: AppEvent, at: string = timestamp()): void {
-    const target = this.current() ?? this.steps.at(-1);
+    const target = this.current() ?? this.lastOwn();
     if (event.kind === 'navigation') {
       if (target === undefined) {
         // A step takes no more events than this, so no more wait for one.
@@ -886,9 +915,36 @@ export class StepRecorder {
     return this.steps;
   }
 
-  /** Steps whose execution has finished, e.g. as prior-step prompt context. */
+  /** Steps of the test's own session whose execution has finished, e.g. as prior-step prompt context. */
   completed(): readonly StepRecord[] {
-    return this.steps.filter((step) => !this.running.has(step.id));
+    return this.steps.filter((step) => isOwnStep(step) && !this.running.has(step.id));
+  }
+
+  /**
+   * Files a step another session runs (`run/guest-steps.ts`) and tells
+   * reporters it started. The step takes the next index, so the report tells
+   * both sessions' steps in the order they began. It is the other session's
+   * in every other way: never the running step here, so it is not held and
+   * it verifies nothing.
+   */
+  guest(step: Pick<StepRecord, 'kind' | 'api' | 'label' | 'actor'> & { readonly source: SourceLocation | undefined }): GuestRecord {
+    const record = this.file({ ...step, label: this.redactText(step.label) });
+    this.publish(record, { phase: 'start', kind: record.kind, api: record.api, label: record.label });
+    return {
+      tell: (progress) => {
+        if (progress.phase === 'event') this.push(record, progress.event);
+        else this.publish(record, progress);
+      },
+      end: (result) => {
+        Object.assign(record, result);
+        this.publishEnd(record);
+      },
+    };
+  }
+
+  /** The last step of the test's own session, the one an event with no running step belongs to. */
+  private lastOwn(): StepRecord | undefined {
+    return this.steps.findLast(isOwnStep);
   }
 
   private current(): StepRecord | undefined {
@@ -897,15 +953,19 @@ export class StepRecorder {
   }
 
   /** Publishes a phase with the owning record's identity, including nested and finishing steps. */
-  private publish(record: StepRecord, progress: StepProgressFact): void {
-    this.onProgress?.({
-      ...progress,
+  private publish(record: StepRecord, fact: StepProgressFact): void {
+    if (this.onProgress === undefined && this.mirror === undefined) return;
+    const progress: StepProgress = {
+      ...fact,
       identity: {
         attemptId: this.attempt.id,
         attemptIndex: this.attempt.index,
         stepId: record.id,
         stepIndex: record.index,
+        ...(record.actor === undefined ? {} : { actor: record.actor }),
       },
-    });
+    };
+    this.onProgress?.(progress);
+    this.mirror?.(progress, record);
   }
 }

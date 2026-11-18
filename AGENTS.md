@@ -47,10 +47,15 @@ suites that consume the built packages the way a user would.
   host, or MCP keeps alive, with a `WorkerPolicy` per kind), and
   `run/standalone-attempt.ts` (one attempt: reservation, launch, fixtures,
   deadline, close). `src/core/` is its own surface: `launch` opens a
-  `core` attempt (nothing published to `globalThis`, no process secret
-  registry, no trace, no session deadline), `SessionState` the
-  `session-state-1` export, and `createAgent` (`@e2e-dev/core/agent`) the agent
-  with a per-`cacheKey` replay cache settled at session close. It imports
+  `core` attempt (no attempt published to `globalThis`, no trace, no session
+  deadline), `SessionState` the `session-state-1` export, and `createAgent`
+  (`@e2e-dev/core/agent`) the agent with a per-`cacheKey` replay cache settled
+  at session close. A host shares its static secrets with every session in
+  the process while it is open (`run/secrecy.ts`), and inside a test the
+  running attempt takes charge of the host and its sessions, records their
+  steps, and keeps their video (`run/guest-steps.ts`), both through
+  `globalThis`, so they hold between two installed copies of the package. It
+  imports
   nothing of `e2e`:
   `tests/unit/package-imports.test.ts` in `packages/e2e` fails on a
   dependency `@e2e-dev/core`'s manifest does not declare. `e2e` reaches its

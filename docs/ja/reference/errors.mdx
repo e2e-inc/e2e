@@ -155,7 +155,7 @@ export class AgentError extends Error {
 | `UNEXPECTED_PASS` | [`test.fail`](/reference/test#test-fail) を指定したテストが成功した場合。他のテスト失敗と同様にリトライします。原因を修正したら指定を外してください | test | 1 |
 | `RUN_TIMEOUT` | 実行が [`maxDuration`](/reference/config#maxduration) または `--max-duration` を使い切った場合。実行中のテストは `interrupted` で終了し、残りは理由 `time-limit` でスキップします | test | 1 |
 | `LAUNCH_TIMEOUT` | エンジンの初期化または試行の開始が `config.launchTimeout` を超えた場合 | infrastructure | 3 |
-| `CLEANUP_TIMEOUT` | エンジンの試行終了処理が `config.cleanupTimeout` を超えた場合、または試行の完了時に、エンジンがテストのために実行したルートやダイアログのハンドラーがまだ実行中だった場合 | infrastructure | 3 |
+| `CLEANUP_TIMEOUT` | エンジンの試行終了処理が `config.cleanupTimeout` を超えた場合、試行の完了時に、エンジンがテストのために実行したルートやダイアログのハンドラーがまだ実行中だった場合、またはテストが `launch()` で開いたホストやセッションがその時間内に閉じなかった場合 | infrastructure | 3 |
 | `BROWSER_INSTALL_FAILED` | ブラウザの準備に失敗した場合 | infrastructure | 3 |
 | `WORKER_INIT_FAILED` | ワーカープロセスが準備完了にならなかった場合 | infrastructure | 3 |
 | `WORKER_EXIT` | ファイルの実行中にワーカーが予期せず終了した場合。実行中のテストは `WORKER_CRASH` で失敗し、そのファイルのほかのテストはスキップします。終了前に完了した試行はレポートに残します。リトライ前の試行や、直列グループの完了済みメンバーも含みます。クラッシュはそれらの後の試行として記録し、最後の試行後に発生した場合（`afterAll`）は最後の試行に記録します。未処理の reject によってワーカーが終了した場合（`UNHANDLED_REJECTION` を参照）、実行エラーはこのコードではなく、その reject です | infrastructure | 3 |

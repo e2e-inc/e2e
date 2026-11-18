@@ -155,7 +155,7 @@ export class AgentError extends Error {
 | `UNEXPECTED_PASS` | 标记为 [`test.fail`](/reference/test#test-fail) 的测试通过了。像其他测试失败一样重试。原因修复后，请移除该标记 | test | 1 |
 | `RUN_TIMEOUT` | 运行耗尽了 [`maxDuration`](/reference/config#maxduration) 或 `--max-duration`。正在运行的测试以 `interrupted` 结束，其余测试以原因 `time-limit` 跳过 | test | 1 |
 | `LAUNCH_TIMEOUT` | 引擎初始化或尝试启动超过 `config.launchTimeout` | infrastructure | 3 |
-| `CLEANUP_TIMEOUT` | 引擎结束尝试超过 `config.cleanupTimeout`，或尝试结束时，引擎为测试运行的路由或对话框处理函数仍在运行 | infrastructure | 3 |
+| `CLEANUP_TIMEOUT` | 引擎结束尝试超过 `config.cleanupTimeout`，尝试结束时引擎为测试运行的路由或对话框处理函数仍在运行，或测试用 `launch()` 打开的宿主或会话未在该时间内关闭 | infrastructure | 3 |
 | `BROWSER_INSTALL_FAILED` | 浏览器准备失败 | infrastructure | 3 |
 | `WORKER_INIT_FAILED` | 工作进程始终未就绪 | infrastructure | 3 |
 | `WORKER_EXIT` | 工作进程运行文件时意外退出。正在执行的测试因 `WORKER_CRASH` 失败，该文件中的其他测试被跳过。退出前已完成的尝试保留在报告中，包括重试之前的尝试和串行组中已完成的成员。崩溃记录为它们之后的一次尝试；如果发生在最后一次尝试之后（`afterAll` 中），则记录在最后一次尝试上。如果未处理的拒绝导致工作进程结束（参阅 `UNHANDLED_REJECTION`），运行错误是该拒绝，而非此错误 | infrastructure | 3 |

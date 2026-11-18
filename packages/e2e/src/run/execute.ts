@@ -38,11 +38,12 @@ import type {
 import { isFailedStatus, type SerialAttemptRecord } from '@e2e-dev/core/lib/run/records';
 import { traceScreen } from '@e2e-dev/core/lib/run/step-screens';
 import { runWithRetries } from './retry.ts';
+import { AttemptGuestSessions } from './guests.ts';
 import { runSerialUnit, type SerialAttemptStart, type SerialHost, type SharedSerialSession } from './serial.ts';
 import { interruptedInPhase, interruptedSkip, pairKey, unitResult, unstartedResult } from './units.ts';
 import { carriedSecrets, processSecrets, redactForSession, sessionLedger, staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
 import { SessionStaging } from '@e2e-dev/core/lib/run/sessions';
-import { StepRecorder, type StepHoldRequest, type StepProgress } from '@e2e-dev/core/lib/run/steps';
+import { isOwnStep, StepRecorder, type StepHoldRequest, type StepProgress } from '@e2e-dev/core/lib/run/steps';
 import { holdAttemptSteps, readHeldScreen, type AttemptHolds, type HeldStep } from './step-hold.ts';
 import { WorkerModels } from '@e2e-dev/core/lib/run/worker-models';
 import { classifyAttemptStatus, EngineSessions, type EngineSessionsOptions } from '@e2e-dev/core/lib/run/engine-sessions';
@@ -529,6 +530,9 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       identity: { runId: this.options.runId, testId: pair.test.id, attemptId: shared?.attemptId ?? attemptId },
     });
 
+    /** The sessions the test opens beside its own with `launch()`. */
+    const guests = new AttemptGuestSessions(steps, artifacts.sink, { keep: video?.keep, videoPrefix: shared === undefined ? '' : `${attemptId}-`, cleanupTimeout: this.config.cleanupTimeout });
+
     const record: AttemptRecord = {
       id: attemptId,
       index: attemptIndex,
@@ -593,6 +597,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       const evidence = await captureFailureEvidence({
         session: openSession,
         error: failure,
+        ownStep: isOwnStep(steps.all().findLast((step) => step.status !== 'passed') ?? {}),
         ledger: sessionLedger(openSession, this.config.allSecrets),
         config: this.config,
         appOrigin: this.target.app.base?.origin,
@@ -717,6 +722,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       publishAttempt(
         {
           attemptId,
+          guests: guests.offer,
           owner: 'suite',
           testKind: pair.test.kind,
           assertionTimeout: this.config.assertionTimeout,
@@ -751,6 +757,8 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       const abandonNotAwaited = async (): Promise<TestError[]> => {
         if (attemptEnd.signal.aborted) return [];
         const pollsNotAwaited = bodyPolls.close();
+        // Both fail their steps now; the sessions' close is waited for below, after the test's own steps are cut.
+        const guestsAbandoned = guests.abandonRunning();
         const stepsNotAwaited = steps.abandonRunning();
         if (stepsNotAwaited !== undefined) {
           attemptAbort.abort();
@@ -760,7 +768,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
             () => new Error('abandoned steps did not settle'),
           ).catch(() => undefined);
         }
-        return [stepsNotAwaited, pollsNotAwaited].filter((error) => error !== undefined);
+        return [stepsNotAwaited, ...(await guestsAbandoned), pollsNotAwaited].filter((error) => error !== undefined);
       };
       const mainWork = async (): Promise<void> => {
         try {
@@ -835,6 +843,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         }
       }
       cutBody = undefined;
+      await guests.quiesce();
       // A promise the body rejected and never awaited reaches the process
       // once the microtasks drain, which is after the body settled but before
       // the next turn of the event loop; waiting that turn out lands it on
@@ -920,6 +929,10 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         const environment = openSession.environment.read(redact);
         if (environment !== undefined) record.environment = environment;
       }
+      for (const cause of await guests.settle(record.status)) {
+        record.cleanup = 'failed';
+        secondaryErrors.push(serializeError(cause, { phase: 'cleanup', projectRoot: this.config.projectRoot, redact }));
+      }
       // What a shared session's app logs from here waits for the next member.
       openSession?.appLog.route(undefined);
       openSession?.screens.route(undefined);
@@ -927,6 +940,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
 
     // Size and digest land asynchronously; the record is read right after.
     await artifacts.settle();
+    guests.release();
     record.durationMs = Date.now() - startedMs;
     record.steps = [...steps.all()];
     const appLog = steps.appLog();
