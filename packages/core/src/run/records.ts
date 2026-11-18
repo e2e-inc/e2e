@@ -38,6 +38,7 @@ export type SkipInfo =
   | (SkipDetail & {
       readonly cause:
         | 'explicit'
+        | 'fixme'
         | 'platform-unavailable'
         | 'capability-unavailable'
         | 'setup-failed'
@@ -231,7 +232,15 @@ export function isFailedStatus(status: AttemptStatus | ResultStatus): status is 
  * itself started its body.
  */
 export function memberRan(member: { readonly status: string; readonly skip?: { readonly cause: string } | undefined }): boolean {
-  return member.status !== 'skipped' || member.skip?.cause === 'explicit';
+  return member.status !== 'skipped' || skippedItself(member.skip?.cause);
+}
+
+/**
+ * Whether a skip cause is one a test gives itself, with `test.skip`, the
+ * `skip` option, or `test.fixme`, as opposed to one the runner gives it.
+ */
+function skippedItself(cause: string | undefined): boolean {
+  return cause === 'explicit' || cause === 'fixme';
 }
 
 /** Whether an attempt keeps its trace, by the rule its video follows too (`keeps`): a `test.fail` verdict, not what the body did. */
@@ -307,7 +316,7 @@ export function failureBeforeSkip(
   result: Pick<ResultRecord, 'status' | 'skip' | 'attempts' | 'serialGroupId' | 'test'>,
   groupOf: (id: string) => SerialGroupRecord | undefined,
 ): FailureBeforeSkip | undefined {
-  if (result.status !== 'skipped' || result.skip?.cause !== 'explicit') return undefined;
+  if (result.status !== 'skipped' || !skippedItself(result.skip?.cause)) return undefined;
   const runs =
     result.serialGroupId === undefined
       ? result.attempts

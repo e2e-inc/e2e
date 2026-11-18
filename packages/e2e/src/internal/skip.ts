@@ -16,10 +16,18 @@ const runtimeSkipBrand: unique symbol = Symbol.for('e2e.runtimeSkip.v1');
 export class RuntimeSkip {
   readonly [runtimeSkipBrand] = true as const;
   readonly reason: string;
+  /** `fixme` from `test.fixme`, else `explicit`. A copy of this package from before the field carries none. */
+  readonly cause: 'explicit' | 'fixme';
 
-  constructor(reason: string | undefined) {
+  constructor(reason: string | undefined, cause: 'explicit' | 'fixme' = 'explicit') {
     this.reason = reason === undefined || reason.trim() === '' ? 'skipped' : reason;
+    this.cause = cause;
   }
+}
+
+/** The skip cause a runtime skip reports: its own, or `explicit` for one that names none. */
+export function runtimeSkipCause(skip: RuntimeSkip): 'explicit' | 'fixme' {
+  return skip.cause === 'fixme' ? 'fixme' : 'explicit';
 }
 
 export function isRuntimeSkip(value: unknown): value is RuntimeSkip {
@@ -90,5 +98,5 @@ export function skipRunningTest(
   if (attempt.testKind === 'setup') {
     throw new TestError('INVALID_ARGUMENT', `${api}() cannot skip a setup test: the sessions it declares are owed to their consumers`);
   }
-  throw new RuntimeSkip(reason);
+  throw new RuntimeSkip(reason, api === 'test.fixme' ? 'fixme' : 'explicit');
 }

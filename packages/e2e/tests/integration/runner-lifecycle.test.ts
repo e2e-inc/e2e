@@ -285,16 +285,16 @@ test('consumer', { session: 'admin' }, async () => {});
       const { outcome, project } = await runProject({ 'tests/fixme.e2e.ts': file }, {});
       const registered = resultByTitle(outcome, 'registered');
       expect(registered.status).toBe('skipped');
-      expect(registered.skip).toEqual({ cause: 'explicit', reason: 'fixme' });
+      expect(registered.skip).toEqual({ cause: 'fixme', reason: 'fixme' });
       expect(registered.attempts).toEqual([]);
       const conditional = resultByTitle(outcome, 'conditional');
       expect(conditional.status).toBe('skipped');
-      expect(conditional.skip).toEqual({ cause: 'explicit', reason: 'fixme: flaky on webkit' });
+      expect(conditional.skip).toEqual({ cause: 'fixme', reason: 'fixme: flaky on webkit' });
       expect(conditional.attempts[0]?.steps.map((step) => step.api)).toEqual(['app.open']);
       expect(resultByTitle(outcome, 'condition false runs on').status).toBe('passed');
-      expect(resultByTitle(outcome, 'bare').skip).toEqual({ cause: 'explicit', reason: 'fixme' });
-      expect(resultByTitle(outcome, 'blank reason').skip).toEqual({ cause: 'explicit', reason: 'fixme' });
-      expect(resultByTitle(outcome, 'member').skip).toEqual({ cause: 'explicit', reason: 'fixme: hook says not yet' });
+      expect(resultByTitle(outcome, 'bare').skip).toEqual({ cause: 'fixme', reason: 'fixme' });
+      expect(resultByTitle(outcome, 'blank reason').skip).toEqual({ cause: 'fixme', reason: 'fixme' });
+      expect(resultByTitle(outcome, 'member').skip).toEqual({ cause: 'fixme', reason: 'fixme: hook says not yet' });
       const setup = resultByTitle(outcome, 'sign in');
       expect(setup.status).toBe('failed');
       expect(setup.attempts[0]?.error).toMatchObject({
@@ -358,6 +358,31 @@ test('plain', async () => {});
       expect(calls).toEqual([...new Set(calls)].toSorted((a, b) => a - b));
       expect(resultByTitle(outcome, 'fails on left').skip).toEqual({ cause: 'explicit', reason: 'not this one' });
       expect(outcome.exitCode).toBe(1);
+      project.cleanup();
+    },
+    120_000,
+  );
+
+  it(
+    'counts a serial member that marks itself fixme as executed, with the cause fixme',
+    async () => {
+      const file = `import { test } from 'e2e';
+
+test.describe('wizard', { serial: true }, () => {
+  test('step 1 is not ready', async () => {
+    test.fixme('crashes on step 1');
+  });
+  test('step 2 runs', async () => {});
+});
+`;
+      const { outcome, project } = await runProject({ 'tests/fixme-serial.e2e.ts': file }, {});
+      const step1 = resultByTitle(outcome, 'step 1 is not ready');
+      expect(step1.status).toBe('skipped');
+      expect(step1.skip).toEqual({ cause: 'fixme', reason: 'fixme: crashes on step 1' });
+      expect(resultByTitle(outcome, 'step 2 runs').status).toBe('passed');
+      expect(outcome.report.run.summary).toMatchObject({ selected: 2, executed: 2, passed: 1, skipped: 1 });
+      assertValidReport(outcome.report);
+      expect(outcome.exitCode).toBe(0);
       project.cleanup();
     },
     120_000,

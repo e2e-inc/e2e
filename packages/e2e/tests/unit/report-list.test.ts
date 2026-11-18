@@ -426,7 +426,7 @@ describe('ListReporter', () => {
   });
 
   describe('failed tests section', () => {
-    it('lists a retry that skipped with the failed attempt’s error and evidence', () => {
+    it.each(['explicit', 'fixme'] as const)('lists a retry that skipped (cause %s) with the failed attempt’s error and evidence', (cause) => {
       const { lines, output } = capture();
       const reporter = plainReporter(output);
       reporter.handle(runStarted());
@@ -446,7 +446,7 @@ describe('ListReporter', () => {
       const skipped = attempt({ id: 'attempt-2', index: 1, status: 'skipped' });
       reporter.handle(finished({
         ...result({ status: 'skipped', id: 'a', file: 'tests/a.e2e.ts', title: ['first'], attempts: [failed, skipped] }),
-        skip: { cause: 'explicit', reason: 'feature disabled' },
+        skip: { cause, reason: 'feature disabled' },
       } as RunEventResult));
       reporter.handle(runFinished({ status: 'passed', exitCode: 0, reportPath: '/project/.e2e/report.json' }));
       expect(lines.join('\n')).toContain(' Skipped After Failure 1 ');

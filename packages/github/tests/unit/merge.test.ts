@@ -349,7 +349,7 @@ describe('foldLastRun', () => {
     expect(page).not.toContain('left out by filters');
   });
 
-  it('counts a serial member executed when its body ran in any group attempt, one that skipped itself included', () => {
+  it.each(['explicit', 'fixme'] as const)('counts a serial member executed when its body ran in any group attempt, one that skipped itself (cause %s) included', (cause) => {
     const titles = ['one', 'two', 'three'];
     const memberIds = titles.map((title) => `tests/example.e2e.ts::wizard::${title}`);
     const blocked = { cause: 'serial-predecessor-failed' as const, reason: 'member 0 failed in this group attempt' };
@@ -361,7 +361,7 @@ describe('foldLastRun', () => {
         index,
         testId: memberIds[index]!,
         status: status === 'failed' ? ('failed' as const) : ('skipped' as const),
-        ...(status === 'failed' ? {} : { error: undefined, skip: status === 'self-skipped' ? { cause: 'explicit' as const, reason: 'not here' } : blocked }),
+        ...(status === 'failed' ? {} : { error: undefined, skip: status === 'self-skipped' ? { cause, reason: 'not here' } : blocked }),
       }));
       return report({
         status: 'failed',

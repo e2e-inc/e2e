@@ -271,6 +271,26 @@ describe('select', () => {
     expect(skipped.skip?.cause).toBe('explicit');
   });
 
+  it('gives a test.fixme registration the cause fixme, and a skip option reading fixme the cause explicit', async () => {
+    const col = await collection(() => {
+      test('runs', noop);
+      test.fixme('registered', noop);
+      test('by option', { skip: 'fixme' }, noop);
+      test.describe('skipped group', { skip: 'tracked in #42' }, () => {
+        test.fixme('inside a skipped group', noop);
+        test('plain member', noop);
+      });
+    });
+    const skips = select(col, config()).pairs.map((pair) => [pair.test.title, pair.disposition, pair.skip]);
+    expect(skips).toEqual([
+      ['runs', 'run', undefined],
+      ['registered', 'skip', { cause: 'fixme', reason: 'fixme' }],
+      ['by option', 'skip', { cause: 'explicit', reason: 'fixme' }],
+      ['inside a skipped group', 'skip', { cause: 'fixme', reason: 'fixme' }],
+      ['plain member', 'skip', { cause: 'explicit', reason: 'tracked in #42' }],
+    ]);
+  });
+
   it('focuses .only tests and filters the rest', async () => {
     const col = await collection(() => {
       test('normal', noop);
@@ -656,7 +676,7 @@ describe('select', () => {
       test.fixme('not yet', noop);
     });
     expect(() => select(fixme, config())).toThrow(
-      '1 tests were collected but none is runnable: 1 skipped explicitly; pass --pass-with-no-tests to allow this',
+      '1 tests were collected but none is runnable: 1 marked fixme; pass --pass-with-no-tests to allow this',
     );
   });
 

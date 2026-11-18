@@ -59,7 +59,7 @@ function foldGroup(current: ReportSerialGroup, before: ReportSerialGroup | undef
  * peer range keeps this package from importing.
  */
 function memberRan(member: ReportSerialGroup['attempts'][number]['members'][number]): boolean {
-  return member.status !== 'skipped' || member.skip?.cause === 'explicit';
+  return member.status !== 'skipped' || member.skip?.cause === 'explicit' || member.skip?.cause === 'fixme';
 }
 
 /**

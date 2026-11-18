@@ -39,7 +39,8 @@ export interface GroupNode {
   readonly serial: boolean;
 }
 
-export type TestMode = 'normal' | 'skip' | 'only';
+/** How a test was registered; `fixme` is a skip from `test.fixme(title, fn)`, reported with its own cause. */
+export type TestMode = 'normal' | 'skip' | 'fixme' | 'only';
 
 /**
  * A registered test or hook body. `TestAPI` types what each receives; at run
@@ -738,14 +739,15 @@ function fixtureDefinition(name: string, entry: unknown): Pick<FixtureDefinition
 function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
   /**
    * Registers one `test()` call. `api` names the caller in errors. A `skip`
-   * condition comes from `skipIf`, `runIf`, `skip`, or `fixme`: when true, the
-   * test is skipped, keeping any reason its `skip` option gives. Either way a
-   * serial group rejects it, so a file collects the same on every platform.
-   * `namedBy` is passed on to `registerTest`.
+   * condition comes from `skipIf`, `runIf`, or `skip`: when true, the test is
+   * skipped, keeping any reason its `skip` option gives. `fixme` skips it as
+   * fixme, with the reason `fixme`. Either way a serial group rejects it, so
+   * a file collects the same on every platform. `namedBy` is passed on to
+   * `registerTest`.
    */
   const registerOne = (
     api: string,
-    skip: boolean | undefined,
+    skip: boolean | 'fixme' | undefined,
     title: string,
     given: TestOptions,
     fn: TestBody,
@@ -758,14 +760,20 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
           'set skip on the serial describe instead',
       );
     }
-    const options = skip === true
-      ? { ...given, skip: typeof given.skip === 'string' ? given.skip : true }
-      : given;
-    const mode: TestMode = options.only === true ? 'only' : options.skip !== undefined && options.skip !== false ? 'skip' : 'normal';
+    const options = skip === 'fixme'
+      ? { ...given, skip: fixmeReason() }
+      : skip === true
+        ? { ...given, skip: typeof given.skip === 'string' ? given.skip : true }
+        : given;
+    const mode: TestMode = options.only === true
+      ? 'only'
+      : skip === 'fixme'
+        ? 'fixme'
+        : options.skip !== undefined && options.skip !== false ? 'skip' : 'normal';
     return collector.registerTest('test', mode, title, options, [], fn, chain, namedBy);
   };
   /** The `test()` call forms. */
-  const registrar = (api: string, skip?: boolean): TestRegistrar<object> => (
+  const registrar = (api: string, skip?: boolean | 'fixme'): TestRegistrar<object> => (
     title: string,
     optionsOrFn: TestOptions | TestBody,
     maybeFn?: TestBody,
@@ -818,7 +826,7 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
     fixme(first?: string | boolean, second?: TestBody | string): TestCase | undefined {
       const call = parseModifierCall(first, second);
       if (call.kind === 'register') {
-        return registrar('test.fixme()', true)(call.title, { skip: fixmeReason() }, call.fn as TestBody);
+        return registrar('test.fixme()', 'fixme')(call.title, call.fn as TestBody);
       }
       skipRunningTest('test.fixme', call.condition, fixmeReason(call.reason));
       return undefined;

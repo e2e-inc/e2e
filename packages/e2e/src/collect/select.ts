@@ -503,6 +503,9 @@ function describeNoTests(
       case 'explicit':
         count('skipped explicitly', pair.test);
         break;
+      case 'fixme':
+        count('marked fixme', pair.test);
+        break;
       case 'platform-unavailable':
         count(`declare platforms other than ${pair.target.platform}`, pair.test);
         break;
@@ -713,7 +716,7 @@ function classifyPair(
     return {
       ...base,
       disposition: 'skip',
-      skip: { cause: 'explicit', reason: options.skipReason },
+      skip: { cause: test.mode === 'fixme' ? 'fixme' : 'explicit', reason: options.skipReason },
     };
   }
 

@@ -437,7 +437,7 @@ describe('registration', () => {
     expect(registration.tests.map((item) => item.mode)).toEqual(['normal']);
   });
 
-  it('registers test.fixme(title, fn) skipped with the reason fixme, and rejects it in a serial group', async () => {
+  it('registers test.fixme(title, fn) as fixme with the reason fixme, and rejects it in a serial group', async () => {
     const registration = await collectModule(async () => {
       test.fixme('not yet', noop);
       test.describe('plain group', () => {
@@ -445,8 +445,8 @@ describe('registration', () => {
       });
     });
     expect(registration.tests.map((item) => [item.title, item.mode, item.options])).toEqual([
-      ['not yet', 'skip', { skip: 'fixme' }],
-      ['grouped', 'skip', { skip: 'fixme' }],
+      ['not yet', 'fixme', { skip: 'fixme' }],
+      ['grouped', 'fixme', { skip: 'fixme' }],
     ]);
     await expect(
       collectModule(async () => {
@@ -809,7 +809,7 @@ describe('test.extend', () => {
     expect(registration.tests.map((item) => [item.mode, item.fixtures.map((definition) => definition.name)])).toEqual([
       ['skip', ['one']],
       ['normal', ['one']],
-      ['skip', ['one']],
+      ['fixme', ['one']],
     ]);
   });
 
