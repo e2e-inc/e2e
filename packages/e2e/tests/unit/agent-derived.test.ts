@@ -111,6 +111,18 @@ describe('derivedReason', () => {
     expect(derivedReason('4', 'enter the code', { code: '482913' }, otp)).toBe('minted-token');
   });
 
+  it('never replays a chunk of a longer number in a one-time-code field', () => {
+    const otp = { inputPurpose: 'one-time-code' } as const;
+    // A code split three and three: each half sits inside a longer param or
+    // word, which spells neither the code nor the half.
+    expect(derivedReason('482', 'enter the code', { phone: '4825551234' }, otp)).toBe('minted-token');
+    expect(derivedReason('482', 'enter the code', { code: '482913' }, otp)).toBe('minted-token');
+    expect(derivedReason('482', 'enter the code 482913', undefined, otp)).toBe('minted-token');
+    // A half the step spells out on its own still replays.
+    expect(derivedReason('482', 'enter 482 then 913', undefined, otp)).toBeUndefined();
+    expect(derivedReason('482', 'enter the code', { first: '482' }, otp)).toBeUndefined();
+  });
+
   it('never treats an empty value as derived', () => {
     expect(derivedReason('', 'anything', undefined)).toBeUndefined();
     expect(derivedReason('   ', 'anything', undefined)).toBeUndefined();

@@ -77,8 +77,9 @@ export function derivedReason(
   if (evidence.inputPurpose === 'one-time-code') {
     // One box per digit puts a single character in each fill, and "the
     // 6-digit code" spells no code: only a longer value the step spells out
-    // replays, so a lone digit never replays as last run's.
-    return [...needle].length > 1 && isLiteral(needle, instruction, params) ? undefined : 'minted-token';
+    // whole replays, so neither a lone digit nor a chunk of some other
+    // number ever replays as last run's code.
+    return [...needle].length > 1 && spellsOutWhole(needle, instruction, params) ? undefined : 'minted-token';
   }
   if (isLiteral(needle, instruction, params)) return undefined;
   if (evidence.pixels === true) return 'pixels';
@@ -96,6 +97,15 @@ export function derivedReason(
 /** Whether the instruction or a param spells the value out: the step's literal input, which replays verbatim. */
 function isLiteral(needle: string, instruction: string, params: Readonly<Record<string, JsonValue>> | undefined): boolean {
   return normalize(instruction).includes(needle) || paramStrings(params).some((text) => normalize(text).includes(needle));
+}
+
+/**
+ * Whether the instruction carries the value as a word of its own, or a param
+ * is that value: the stricter reading of a literal a one-time-code field
+ * gets, where a chunk of a longer number is no spelling of the code.
+ */
+function spellsOutWhole(needle: string, instruction: string, params: Readonly<Record<string, JsonValue>> | undefined): boolean {
+  return hasWord(normalize(instruction), needle) || paramStrings(params).some((text) => normalize(text) === needle);
 }
 
 /**

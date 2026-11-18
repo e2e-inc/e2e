@@ -179,7 +179,7 @@ bunx e2e run --no-cache
 - 输入了超过 4,096 个字符的值或 URL，或其中包含已注册的机密值，
 - 操作了没有可用描述的控件。
 
-`gap` 表示缓存无法重复的操作：会修改状态的[项目工具](/tools)，或智能体从屏幕读取、查看截图后输入、或根据日期推算的值。`step.cache.derived` 标明具体规则：`whole-node`（控件的完整名称或文本）、`minted-token`（应用以独立词项显示的代码或 ID，或输入到标记为 `autocomplete="one-time-code"` 的字段中的值）、`date` 或 `pixels`。来自指令或 `params` 的值，以及智能体自行编写的值，可以回放。
+`gap` 表示缓存无法重复的操作：会修改状态的[项目工具](/tools)，或智能体从屏幕读取、查看截图后输入、或根据日期推算的值。`step.cache.derived` 标明具体规则：`whole-node`（控件的完整名称或文本）、`minted-token`（应用以独立词项显示的代码或 ID，或输入到标记为 `autocomplete="one-time-code"` 的字段中的值）、`date` 或 `pixels`。来自指令或 `params` 的值，以及智能体自行编写的值，可以回放。但在 one-time-code 字段中，只有指令或 `params` 写出完整代码时才会回放。
 
 ## 录制记录包含什么
 

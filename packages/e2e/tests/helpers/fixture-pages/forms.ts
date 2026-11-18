@@ -80,14 +80,6 @@ ${widget ? `    setTimeout(() => {
 }
 
 /**
- * Controls a recording can only re-find by their place: two fields named by
- * placeholder alone, two textboxes with no name at all in one named group,
- * and three buttons sharing one label outside any row or list item. The
- * `b` variant (`?variant=b`, or `FixtureApp.setVariant`) prepends a
- * banner and swaps the two placeholder fields, so every node's id and
- * rectangle move while the counts and the unnamed order stay.
- */
-/**
  * Six one-digit boxes the app marks as a one-time code, and the code it
  * issued for this load. The status reads the verdict once every box holds a
  * digit, so a replay that typed another load's code shows as it would to a
@@ -117,6 +109,14 @@ function renderOneTimeCode(code: string): string {
 </html>`;
 }
 
+/**
+ * Controls a recording can only re-find by their place: two fields named by
+ * placeholder alone, two textboxes with no name at all in one named group,
+ * and three buttons sharing one label outside any row or list item. The
+ * `b` variant (`?variant=b`, or `FixtureApp.setVariant`) prepends a
+ * banner and swaps the two placeholder fields, so every node's id and
+ * rectangle move while the counts and the unnamed order stay.
+ */
 function renderTwinsForm(variant: string | null): string {
   const moved = variant === 'b';
   const nickname = '    <input placeholder="Nickname" />';
