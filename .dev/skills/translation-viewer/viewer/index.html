@@ -366,6 +366,7 @@ async function reviewSection(doc, i) {
   const issues = [];
   const glossary = glossaryFor(doc.glossary, enText);
   for (const chunk of chunks(enText, trText)) {
+    if (!chunk.en.trim() || !chunk.tr.trim()) continue;
     const session = await LanguageModel.create({
       ...state.model.options,
       initialPrompts: [{ role: 'system', content: systemPrompt(state.locale, glossary) }],

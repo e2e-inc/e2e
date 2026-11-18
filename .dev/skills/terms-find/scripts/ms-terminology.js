@@ -37,7 +37,7 @@ window.msFind = async (term) => {
     await wait(110);
     for (const cell of source.querySelectorAll('[role=gridcell],[role=rowheader]')) {
       const text = clean(cell.innerText);
-      if (text === term) target = cell;
+      if (text === term && !target) target = cell;
       else if (!looseTarget && text.toLowerCase() === term.toLowerCase()) looseTarget = cell;
     }
   }

@@ -27,7 +27,9 @@ if (noteAt !== -1) {
   }
   argv.splice(noteAt, 2);
 }
-const [command, locale, english, translation] = argv;
+const [command, locale, rawEnglish, rawTranslation] = argv;
+const english = rawEnglish?.trim();
+const translation = rawTranslation?.trim();
 
 if (!locale || !locales().includes(locale) || !['list', 'add', 'init'].includes(command ?? '') || (command === 'add' && (!english || !translation)) || (command === 'init' && !english)) {
   console.error(USAGE);

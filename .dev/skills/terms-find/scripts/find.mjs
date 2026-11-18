@@ -111,6 +111,7 @@ const termPattern = new RegExp(String.raw`(?<![\p{L}\p{N}])${escaped}(?:s|es)?(?
 
 /** Runs one source: its pages, the ranked candidates, and the sample pairs. */
 async function collect(key) {
+  rateLimited = false;
   const source = SOURCES[key];
   const target = source.locales[locale];
   if (!target) return { source: source.name, error: `${source.name} has no ${locale} translation` };

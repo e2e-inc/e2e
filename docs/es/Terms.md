@@ -8,6 +8,9 @@ de esta tabla, la traducción usa una de sus formas.
   ` / `: el plural, y las conjugaciones de un verbo. La primera es la preferida.
 - Una forma coincide como inicio de palabra, sin distinguir mayúsculas.
 - Si el término se mantiene en inglés, la segunda columna lo repite.
+- Cuando dos términos se solapan (`test` y `test suite`), cada uno es su propia fila y se
+  comprueba por separado: usa en cada frase la forma del término más largo que encaje
+  (`suite de test`), que ya contiene la forma del más corto.
 - Para añadir o cambiar una fila, edita la tabla y mantenla ordenada por la primera
   columna.
 - MCP, CI, SDK, CLI, API y UI se mantienen en inglés y no están en la tabla.

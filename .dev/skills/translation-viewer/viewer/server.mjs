@@ -90,8 +90,8 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
   // Only this page may talk to the server: a rebinding or cross-site request names another host or origin.
   if (req.headers.host !== ORIGIN || (req.headers.origin !== undefined && req.headers.origin !== `http://${ORIGIN}`)) return json(res, 403, { error: 'forbidden' });
-  const known = locales();
   try {
+    const known = locales();
     if (url.pathname === '/') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(readFileSync(join(HERE, 'index.html')));

@@ -39,7 +39,10 @@ what Microsoft calls the term so the user can decide the `Terms.md` row.
    - The search matches any source term that *contains* the text, and the
      tables load about 20 rows at a time; `msFind` handles that. `exact: false`
      means Microsoft has no entry for the bare term: say so, and read the
-     compounds with `msTerms()` instead.
+     compounds with `msTerms()` instead. `exactCase: false` means only a
+     differently cased entry exists, and `settled: false` means the
+     translation table did not visibly change after the click: do not report
+     `translations` from a result that is not settled.
    - The two tables are sorted separately, so `msTerms()` lists do not pair
      row by row. `msFind` selects the entry, which filters the translations.
    - The first table's Concept column says which sense it is (Visual Studio,
