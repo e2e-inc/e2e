@@ -296,12 +296,12 @@ await expect(browser).toHaveClass(browser.locator('.card'), 'card active');
 
 - 它也会轮询节点：目标暂时没有匹配项时，会继续轮询，而不是立即失败，直到断言超时。
 - 存在歧义的目标仍会立即因 `LOCATOR_AMBIGUOUS` 失败。
-- 不是 e2e 定位器的目标会导致 `INVALID_LOCATOR`。
+- 没有 `count()` 方法的目标（例如选择器字符串）会导致 `INVALID_LOCATOR`。
 - 它读取 `class` 属性，因此 `''` 匹配 `class=""`，但不匹配完全没有 `class` 属性的元素。Playwright 的 `toHaveClass('')` 接受这两种情况。
 
 #### `toHaveCSS`
 
-等待目标元素的一个计算样式属性匹配：字符串对应整个值，`RegExp` 则对该值进行测试。
+等待目标元素的一个计算样式属性匹配：字符串对应整个值，`RegExp` 则对该值进行测试。比较前，两侧连续的空白都会合并为一个空格，并去掉首尾空白，与其他文本匹配器相同。Playwright 则按原始值比较。
 
 ```ts
 const nav = screen.getByRole('navigation', { name: 'Main' });
@@ -310,7 +310,7 @@ await expect(browser).toHaveCSS(nav, '--accent', /red/);
 ```
 
 - 它以页面代码的形式运行 `getComputedStyle(element).getPropertyValue(property)`，因此覆盖了这些函数的页面会改变读取结果。名称使用短横线形式（`background-color`），自定义属性（`--accent`）也可以使用。
-- 目标按其作用域和框架解析，与 [`browser.evaluateOn`](/reference/web#evaluateon) 相同。目标暂时没有匹配项时，会继续轮询，而不是失败，直到断言超时。存在歧义的目标会立即因 `LOCATOR_AMBIGUOUS` 失败。不是 e2e 定位器的目标会导致 `INVALID_LOCATOR`。来自另一个屏幕或尝试的定位器在匹配到节点时也会导致 `INVALID_LOCATOR`。在没有匹配项期间，它会像其他目标一样继续轮询，并在超时时以观测到 `no node` 失败。
+- 目标按其作用域和框架解析，与 [`browser.evaluateOn`](/reference/web#evaluateon) 相同。目标暂时没有匹配项时，会继续轮询，而不是失败，直到断言超时。存在歧义的目标会立即因 `LOCATOR_AMBIGUOUS` 失败。没有 `count()` 方法的目标（例如选择器字符串）会立即导致 `INVALID_LOCATOR`。其他不是 e2e 定位器的值，或来自另一个屏幕或尝试的定位器，在匹配到节点时也会导致 `INVALID_LOCATOR`。在没有匹配项期间，它会像其他目标一样继续轮询，并在超时时以观测到 `no node` 失败。
 - 空的或非字符串的 `property` 会导致 `INVALID_ARGUMENT`。
 
 #### `toHaveJSProperty`

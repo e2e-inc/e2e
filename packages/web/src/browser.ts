@@ -1108,10 +1108,10 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
         ),
     });
   };
-  const validate = (api: string, options: object | undefined, keys: readonly string[] = ['timeout']): void =>
-    rejectUnknownOptions(`expect.${negated ? 'not.' : ''}${api}`, options, keys);
   /** A matcher as its messages name it: `expect.toHaveCSS`, `expect.not.toHaveCSS`. */
   const qualified = (api: string): string => `expect.${negated ? 'not.' : ''}${api}`;
+  const validate = (api: string, options: object | undefined, keys: readonly string[] = ['timeout']): void =>
+    rejectUnknownOptions(qualified(api), options, keys);
   /** The name a matcher's string argument is, refused unless it is a nonempty string. */
   const requireName = (api: string, what: string, value: unknown): string => {
     if (typeof value !== 'string' || value.length === 0) {
@@ -1128,7 +1128,8 @@ function createBrowserExpectation(deps: ExpectationDeps, negated = false): Brows
    * matches first: a node that never arrives stays an assertion failure.
    * Then `read` takes the sample, and both run inside the poll's deadline.
    * Nothing matching, before or during the read, is one more poll. A target
-   * that is not a locator is `INVALID_LOCATOR` before the first poll.
+   * with no `count()` is `INVALID_LOCATOR` before the first poll; `read`
+   * checks that the target is this attempt's locator once it matches.
    */
   const sampleNode = (
     api: string,

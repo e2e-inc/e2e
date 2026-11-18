@@ -312,6 +312,19 @@ test.describe('expect(browser) locator matchers', { requires: ['browser'] }, () 
       expect(error).toHaveProperty('message', `${api} requires an e2e locator`);
     }
   });
+
+  test('refuse a look-alike with count() once it reports a match', async ({ browser }) => {
+    await browser.goto(page);
+    const target = { count: async () => 1 } as never;
+    for (const [api, call] of [
+      ['expect.toHaveCSS', () => expect(browser).toHaveCSS(target, 'position', 'x')],
+      ['expect.toHaveJSProperty', () => expect(browser).toHaveJSProperty(target, 'id', 'x')],
+    ] as const) {
+      const error = await failure(call);
+      expect(error).toHaveProperty('code', 'INVALID_LOCATOR');
+      expect(error).toHaveProperty('message', `${api} requires an e2e locator`);
+    }
+  });
 });
 
 test.describe('a locator from an earlier attempt', { serial: true, requires: ['browser'] }, () => {

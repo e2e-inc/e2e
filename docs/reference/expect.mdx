@@ -352,7 +352,8 @@ await expect(browser).toHaveClass(browser.locator('.card'), 'card active');
 - It polls for the node too: a target that matches nothing yet is one more
   poll, not a failure, until the assertion timeout runs out.
 - An ambiguous target still fails at once with `LOCATOR_AMBIGUOUS`.
-- A target that is not an e2e locator is `INVALID_LOCATOR`.
+- A target with no `count()` method, such as a selector string, is
+  `INVALID_LOCATOR`.
 - It reads the `class` attribute, so `''` matches `class=""` and not an
   element with no `class` attribute at all. Playwright's `toHaveClass('')`
   accepts both.
@@ -360,7 +361,9 @@ await expect(browser).toHaveClass(browser.locator('.card'), 'card active');
 #### `toHaveCSS`
 
 Waits for one computed style property of the target to match: a string is
-the whole value, a `RegExp` is tested against it.
+the whole value, a `RegExp` is tested against it. Both sides have runs of
+whitespace collapsed to one space and their ends trimmed first, as the other
+text matchers do. Playwright compares the raw value.
 
 ```ts
 const nav = screen.getByRole('navigation', { name: 'Main' });
@@ -376,8 +379,9 @@ await expect(browser).toHaveCSS(nav, '--accent', /red/);
   [`browser.evaluateOn`](/reference/web#evaluateon) does. A target that
   matches nothing yet is one more poll, not a failure, until the assertion
   timeout runs out. An ambiguous target fails at once with
-  `LOCATOR_AMBIGUOUS`. A target that is not an e2e locator is
-  `INVALID_LOCATOR`. So is a locator from another screen or attempt, once it
+  `LOCATOR_AMBIGUOUS`. A target with no `count()` method, such as a
+  selector string, is `INVALID_LOCATOR` at once. So is any other value that
+  is not an e2e locator, or a locator from another screen or attempt, once it
   matches a node. While it matches nothing, it polls like any other target
   and fails observing `no node` at the timeout.
 - An empty or non-string `property` is `INVALID_ARGUMENT`.

@@ -296,12 +296,12 @@ await expect(browser).toHaveClass(browser.locator('.card'), 'card active');
 
 - ノード自体もポーリングします。対象にまだ一致するノードがなければ、即座に失敗せず、アサーションのタイムアウトまでポーリングを続けます。
 - 対象が曖昧な場合は、直ちに `LOCATOR_AMBIGUOUS` で失敗します。
-- 対象が e2e のロケーターでない場合は `INVALID_LOCATOR` になります。
+- セレクター文字列など、`count()` メソッドを持たない対象は `INVALID_LOCATOR` になります。
 - `class` 属性を読み取るため、`''` は `class=""` に一致しますが、`class` 属性自体がない要素には一致しません。Playwright の `toHaveClass('')` はどちらも受け付けます。
 
 #### `toHaveCSS`
 
-対象の計算済みスタイルのプロパティ 1 つが一致するまで待ちます。文字列なら値全体と比較し、`RegExp` なら値に適用します。
+対象の計算済みスタイルのプロパティ 1 つが一致するまで待ちます。文字列なら値全体と比較し、`RegExp` なら値に適用します。比較の前に、両側の連続する空白を 1 つのスペースにまとめ、前後の空白を取り除きます。ほかのテキストのマッチャーと同じです。Playwright は元の値のまま比較します。
 
 ```ts
 const nav = screen.getByRole('navigation', { name: 'Main' });
@@ -310,7 +310,7 @@ await expect(browser).toHaveCSS(nav, '--accent', /red/);
 ```
 
 - `getComputedStyle(element).getPropertyValue(property)` をページのコードとして実行します。そのため、これらの関数を上書きしたページでは読み取る値が変わります。名前はケバブケース（`background-color`）で、カスタムプロパティ（`--accent`）も使えます。
-- 対象は [`browser.evaluateOn`](/reference/web#evaluateon) と同じく、スコープとフレームで解決します。対象にまだ一致するノードがなければ、失敗せずにアサーションのタイムアウトまでポーリングを続けます。対象が曖昧な場合は、直ちに `LOCATOR_AMBIGUOUS` で失敗します。e2e のロケーターでない対象は `INVALID_LOCATOR` になります。別の screen や試行のロケーターも、ノードに一致した時点で `INVALID_LOCATOR` になります。一致するノードがない間は他の対象と同じくポーリングを続け、タイムアウトで `no node` を観測して失敗します。
+- 対象は [`browser.evaluateOn`](/reference/web#evaluateon) と同じく、スコープとフレームで解決します。対象にまだ一致するノードがなければ、失敗せずにアサーションのタイムアウトまでポーリングを続けます。対象が曖昧な場合は、直ちに `LOCATOR_AMBIGUOUS` で失敗します。セレクター文字列など、`count()` メソッドを持たない対象は直ちに `INVALID_LOCATOR` になります。それ以外の e2e のロケーターでない値や、別の screen や試行のロケーターも、ノードに一致した時点で `INVALID_LOCATOR` になります。一致するノードがない間は他の対象と同じくポーリングを続け、タイムアウトで `no node` を観測して失敗します。
 - 空の、または文字列でない `property` は `INVALID_ARGUMENT` になります。
 
 #### `toHaveJSProperty`

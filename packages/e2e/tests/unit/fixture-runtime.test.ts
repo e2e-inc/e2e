@@ -356,8 +356,14 @@ describe('context.withNode', () => {
       locate: async () => matches().map((id) => ({ ref: { id, revision: '' }, role: 'navigation' })),
       fixtures: {
         probe: (context) => context.fixture('probe', {
-          run: (locator: Locator, use: Use, timeout?: number) =>
-            context.withNode('probe.run', locator, use, timeout === undefined ? undefined : { timeout }),
+          run: (locator: Locator, use: Use, timeout?: number) => {
+            // withNode returns a promise and never throws synchronously, so a refusal is a rejection.
+            try {
+              return context.withNode('probe.run', locator, use, timeout === undefined ? undefined : { timeout });
+            } catch {
+              return Promise.resolve('withNode threw synchronously');
+            }
+          },
         }, { run: { kind: 'resource', timeout: false } }),
       },
     });
