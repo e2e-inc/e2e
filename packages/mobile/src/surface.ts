@@ -371,6 +371,12 @@ const MOBILE_OPTION_KEYS: readonly string[] = Object.keys({
 /** Every `snapshot` value, kept equal to `MobileOptions['snapshot']` by the compiler. */
 const SNAPSHOT_MODES: readonly string[] = Object.keys({ full: true, interactive: true } satisfies Record<NonNullable<MobileOptions['snapshot']>, true>);
 
+/**
+ * What `permissions: 'all'` grants on iOS, one by one: every permission but
+ * `notifications`, which the simulator refuses to set.
+ */
+const IOS_GRANT_ALL: readonly DevicePermission[] = DEVICE_PERMISSIONS.filter((permission) => permission !== 'notifications');
+
 /** Every state a permission takes, kept equal to `PermissionState` by the compiler. */
 const PERMISSION_STATES: readonly string[] = Object.keys({ grant: true, deny: true, reset: true } satisfies Record<PermissionState, true>);
 
@@ -915,12 +921,19 @@ export class AgentDeviceSurface {
    * Puts an app's permissions in place before it launches, never after: iOS
    * terminates a running app whose permission changed, and Android one whose
    * permission was revoked, so a change after the launch would leave the
-   * test on no screen. `'all'` is one grant of every permission the
-   * platform can set, which agent-device resolves for the app.
+   * test on no screen. `'all'` grants every permission the platform can
+   * set: on Android one agent-device `all`, which grants each permission the
+   * app declares; on iOS each name but `notifications` in turn, since the
+   * simulator ignores the `all` service `simctl privacy grant all` records
+   * and refuses a notifications change.
    */
   private async presetPermissions(app: string, permissions: LaunchPermissions, signal: AbortSignal): Promise<void> {
     if (permissions === 'all') {
-      await this.permission('all', 'grant', app, signal);
+      if (this.options.platform === 'android') {
+        await this.permission('all', 'grant', app, signal);
+        return;
+      }
+      for (const permission of IOS_GRANT_ALL) await this.permission(permission, 'grant', app, signal);
       return;
     }
     const entries = Object.entries(permissions).filter(

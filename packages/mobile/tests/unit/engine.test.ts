@@ -2509,7 +2509,7 @@ describe('device fixture', () => {
     ]);
   });
 
-  it('grants every permission with one \'all\' grant before each fresh launch, on iOS and Android, and for one openApp', async () => {
+  it('grants every permission before each fresh launch with \'all\': one agent-device all on Android, each name but notifications on iOS, and for one openApp', async () => {
     for (const platform of ['ios', 'android'] as const) {
       const h = harness({ platform, bundleId: 'com.example.app', permissions: 'all' });
       h.fake.respond('apps.open', () => ({ session: 's', appName: 'Example', appBundleId: 'com.example.app', identifiers: {} }));
@@ -2520,15 +2520,18 @@ describe('device fixture', () => {
       await h.engine.session!.restart!(operation());
       await h.engine.session!.reset!(operation());
       await device.openApp('com.other', { relaunch: true, permissions: 'all' });
-      const all = (app: string): [string, unknown] => ['settings.update', { setting: 'permission', permission: 'all', state: 'grant', platform, app }];
+      // Android grants the app's declared permissions in one call; iOS ignores that call's `all` service, so each name but notifications goes in turn.
+      const IOS = ['camera', 'microphone', 'photos', 'contacts', 'calendar', 'location', 'reminders', 'motion', 'siri', 'media-library'];
+      const grant = (permission: string, app: string): [string, unknown] => ['settings.update', { setting: 'permission', permission, state: 'grant', platform, app }];
+      const all = (app: string): [string, unknown][] => (platform === 'android' ? [grant('all', app)] : IOS.map((name) => grant(name, app)));
       const fresh: [string, unknown] = ['apps.open', { platform, app: 'com.example.app', relaunch: true }];
       expect(h.fake.calls.slice(before).map((call) => [call.method, call.args]), platform).toEqual([
-        all('com.example.app'),
+        ...all('com.example.app'),
         fresh,
         ['settings.update', { platform, setting: 'clear-app-state', state: 'clear', app: 'com.example.app' }],
-        all('com.example.app'),
+        ...all('com.example.app'),
         fresh,
-        all('com.other'),
+        ...all('com.other'),
         ['apps.open', { platform, app: 'com.other', relaunch: true }],
       ]);
     }

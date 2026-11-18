@@ -339,10 +339,11 @@ export default {
 - Each permission is `grant`, `deny`, or `reset`. `deny` is a recorded
   refusal on iOS, where the app is told no without a prompt, and a revocation
   on Android, where the OS asks again when the app requests the permission.
-- `permissions: 'all'` is one grant of every permission the platform can
-  set: on Android each one the app's manifest declares, on an iOS simulator
-  `simctl privacy grant all`, which on current runtimes leaves notifications
-  out. It replaces the map; name permissions instead to deny or reset one.
+- `permissions: 'all'` grants every permission the platform can set: on
+  Android each one the app's manifest declares, in one call; on an iOS
+  simulator each `DevicePermission` but `notifications`, one at a time,
+  since the simulator refuses to set notifications. It replaces the map;
+  name permissions instead to deny or reset one.
 - The permissions are set on the app by name before it starts, with no open
   first, since iOS terminates a running app whose permission changed and
   Android one whose permission was revoked.
