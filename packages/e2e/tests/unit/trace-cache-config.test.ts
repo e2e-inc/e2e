@@ -373,6 +373,27 @@ describe('settleStagedTraces', () => {
     expect(readTraceEntry(JSON.parse(store.entries.get(KEY_A)!))?.payload.recordedFor).toEqual(recordedFor);
   });
 
+  it('leaves a confirmed kept entry that already keeps the step\'s identity digest exactly as stored', async () => {
+    const store = memoryStore();
+    const recordedFor = recordedProvenance({ ...STEP, testId: `${STEP.testId}${'x'.repeat(400)}` }, (text) => text);
+    expect(recordedFor.identityDigest).toMatch(/^[a-f0-9]{64}$/u);
+    const stored = JSON.stringify(buildTraceEntry({ ...trace('replayed flow'), recordedFor }));
+    store.entries.set(KEY_A, stored);
+    const written: string[] = [];
+    const context = contextWith({
+      ...store,
+      write: async (keyHash, payload) => {
+        written.push(keyHash);
+        return store.write(keyHash, payload);
+      },
+    });
+    context.staged.push({ kind: 'keep', keyHash: KEY_A, stepIndex: 1, recordedFor });
+    const writes = await settleStagedTraces(context, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true });
+    expect(written).toEqual([]);
+    expect(store.entries.get(KEY_A)).toBe(stored);
+    expect(writes.get(1)).toBe('kept');
+  });
+
   it('writes what was confirmed and leaves every unconfirmed entry as stored when the failure implicates nothing', async () => {
     const KEY_C = 'c'.repeat(64);
     const store = memoryStore();

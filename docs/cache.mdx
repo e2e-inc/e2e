@@ -393,7 +393,7 @@ CI=1 bunx e2e run --strict-cache
 | `invalid-entry`, `wrong-context`, `target-not-found`, `target-ambiguous`, `viewport-changed`, `action-failed`, `action-uncertain`, `end-mismatch`: the app or the entry changed | A step never recorded (a new or edited instruction or params) |
 | `no-entry`, when the cache directory holds a recording of the same step under another key | A `gap` or a `truncated` recording |
 | | A step whose store read fails |
-| | A step whose test id, target name, or agent name is over 300 characters, when its recording under another key was made by an earlier `e2e` version |
+| | A step in a test with a very long title, or with a target or agent name over 300 characters (or of 299 or 300 characters ending in `…`), when its recording under another key was made by an earlier `e2e` version |
 
 A recording under another key comes from an `e2e` upgrade that changed the
 keys, or a change to the project id, the app's identity, or the agent's

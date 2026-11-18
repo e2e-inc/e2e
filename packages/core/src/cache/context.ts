@@ -38,8 +38,9 @@ import type { JsonValue } from '../types.ts';
  * (every `unique()` slot filled with this run's value) can never be written;
  * confirmed, the file keeps its bytes and `createdAt`, and a committed cache
  * directory stays clean, unless its provenance predates the step's
- * occurrence fields (`recordedFor`, as stored), which the replay proved and
- * are then written in. Unconfirmed, both kinds are evicted alike.
+ * occurrence fields or identity digest (`recordedFor`, as stored), which the
+ * replay proved and are then written in. Unconfirmed, both kinds are evicted
+ * alike.
  */
 export type StagedTrace = {
   readonly keyHash: string;
