@@ -140,9 +140,11 @@ function flowOf(trace: ActionTrace): string {
 
 /**
  * Writes the step's full provenance into a kept entry whose stored provenance
- * lacks the occurrence fields or holds another identity digest, leaving every
- * other entry untouched. Its replay proved which step it belongs to, and
- * `cache.strict` matches only entries that say so exactly (`rekeyed.ts`).
+ * lacks the occurrence fields, or whose identity digest is not the step's:
+ * missing while the step has one, different, or present while the step has
+ * none. Every other entry is left untouched. Its replay proved which step it
+ * belongs to, and `cache.strict` matches only entries that say so exactly
+ * (`rekeyed.ts`).
  */
 async function completeProvenance(store: CacheStore, keyHash: string, recordedFor: TraceProvenance): Promise<void> {
   const existing = await store.read(keyHash);
