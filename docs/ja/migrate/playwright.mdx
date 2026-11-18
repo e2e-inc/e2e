@@ -46,7 +46,7 @@ e2e は同じプロジェクト内で Playwright と並行して動かせるた�
 | `retries`, `workers`, `timeout` | 同名。[デフォルト値は一部異なります](#defaults-that-differ)。`workers` は整数 |
 | `expect.timeout`, `use.actionTimeout`, `globalTimeout` | `assertionTimeout`、`actionTimeout`、`maxDuration`。`maxDuration` の計測はアプリの起動時ではなくテスト開始時から |
 | `maxFailures`, `use.headless: false` | CLI の `--max-failures <n>` と `--headed` |
-| `reporter`, `outputDir` | `reporters: ['list', 'junit', htmlReporter()]`。`htmlReporter` は `@e2e-dev/html-reporter` から。`json` と `markdown` も利用可能。出力先は `output`、デフォルトは `.e2e` |
+| `reporter`, `outputDir` | `reporters: ['list', 'junit', htmlReporter()]`。`htmlReporter` は `@e2e-dev/html-reporter` から。`dot`、`json`、`markdown` も利用可能。出力先は `output`、デフォルトは `.e2e` |
 | `use.viewport`, `locale`, `timezoneId`, `colorScheme`, `reducedMotion`, `userAgent`, `testIdAttribute` | `web({ ... })` 内の同名キー |
 | `use.browserName`, `httpCredentials`, `extraHTTPHeaders` | `web({ browser, basicAuth, headers })`。`basicAuth` と `headers` はアプリのオリジンだけに適用。[`credentialOrigins`](/reference/web#credentialorigins) で追加可能 |
 | `chromium.connectOverCDP(url)` | `web({ connect: { cdpEndpoint: () => url } })`。chromium のみ |
@@ -126,6 +126,7 @@ test('checkout', async ({ app, agent, screen }) => {
 | `expect(page).toHaveURL()`, `toHaveTitle()` | `expect(browser).toHaveURL()`、`toHaveTitle()` |
 | `expect(page).toHaveScreenshot()`, `expect(locator).toHaveScreenshot()` | `expect(screen).toHaveScreenshot()` とロケーター形式。[視覚的な比較](/visual-testing)を参照 |
 | `expect(value)` の `toBe()`、`toEqual()`、`toMatchObject()`、`toContain()`、`toHaveLength()`、`toHaveProperty()`、`toMatch()`、真偽性と数値のマッチャー | 同じ。[値のマッチャー](/reference/expect#value-matchers)を参照 |
+| `expect(locator, 'message')`, `expect(page, 'message').toHaveScreenshot()`, `expect(value, 'message')` | 同じ。ページには `expect(screen, 'message')`。メッセージは失敗の先頭に付きます。[ロケーターのマッチャー](/reference/expect#locator-matchers)を参照 |
 | `expect.any()`, `anything()`, `objectContaining()`, `arrayContaining()`, `stringMatching()`, `stringContaining()`, `expect.poll()`, `expect.soft()` | 同じ。`poll` は単一の `interval` を指定 |
 
 </Accordion>
@@ -162,10 +163,13 @@ test('checkout', async ({ app, agent, screen }) => {
 | `import { test, expect } from '@playwright/test'` | `import { test } from '@e2e-dev/web'` と `import { expect } from 'e2e'` |
 | テストの `{ page }` | `{ screen, app, browser }` |
 | `test()`, `test.describe()`, `test.only`, `test.fail()`, `test.skip(title, fn)`, `test.skip(condition, reason)` | 同じ。条件付きの `skip` はテスト本体または `beforeEach` 内で利用可能 |
-| `beforeEach`, `afterEach`, `beforeAll`, `afterAll` | 同じ。ただしタイトルなし。`beforeAll` と `afterAll` のフィクスチャは `platform` のみ |
+| `beforeEach`, `afterEach`, `beforeAll`, `afterAll` | 同じ。ただしタイトルなし。`beforeAll` と `afterAll` が受け取るのはワーカーフィクスチャで、`browser`、`app`、`screen` は受け取らない |
 | `test.describe.skip`, `test.describe.serial`, `describe.configure({ mode: 'serial', retries, timeout })` | `test.describe(title, { skip, serial, retries, timeout }, fn)` |
 | `{ tag: '@smoke' }` | テストまたはグループの `{ tags: ['smoke'] }` |
-| `test.extend({ fixture })` | 同じ形式。別のフィクスチャに依存するものは、次の `extend` を連結 |
+| `test.extend({ fixture })` | 同じ形式で、必要に応じてセットアップ。テスト、フック、フィクスチャは、最初の引数で指定したフィクスチャを受け取る |
+| `[fn, { scope: 'worker' }]` のフィクスチャ | 同じ。`extend` の 2 番目の型引数で型を指定 |
+| `[fn, { auto: true }]` のフィクスチャ | 同じ。どちらのスコープでも利用可能 |
+| フィクスチャのオーバーライド、`page: async ({ page }, use) => {}` | `app`、`screen`、`browser`、独自のフィクスチャで同じ。[フィクスチャの拡張](/reference/test#extending-a-fixture)を参照 |
 
 </Accordion>
 <Accordion title="CLI">
@@ -217,7 +221,7 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 });
 ```
 
-`browser` を使うフィクスチャは、その `test` から登録するすべてのテストを Web 専用にします。[移植性を保つ](/page-object-model#keep-it-portable)を参照してください。各試行は新しいコンテキストで始まるため、フックから `newPage()` と `page.close()` を削除します。
+`browser` を指定するフィクスチャは、それを使うすべてのテストを Web 専用にします。[移植性を保つ](/page-object-model#keep-it-portable)を参照してください。各試行は新しいコンテキストで始まるため、フックから `newPage()` と `page.close()` を削除します。
 
 ## e2e にまだない機能
 
@@ -242,7 +246,7 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 | `expect(fn).toPass()`, `expect.poll(fn, { intervals })` | `expect.poll(async () => { ...; return true }).toBe(true)` |
 | `toBeEmpty()`, `toBeEditable()`, `toBeInViewport()` | フォームには `toHaveValue('')`、ほかの要素には `toHaveText('')`。`toBeEnabled()` と `.not.toHaveAttribute('readonly')`。`boundingBox()` を `expect.poll` で確認 |
 | `locator.screenshot()`, `{ fullPage, clip }`, `snapshotPathTemplate`, `ignoreSnapshots` | `toHaveScreenshot` でビューポートまたは 1 つのロケーターを比較。ビジュアルテストのスキップにはタグと `--exclude-tag` |
-| `expect(locator, 'message')`, `expect.configure()` | メッセージは省略。失敗にはロケーターとマッチャーの名前が表示されます。各呼び出しに `{ timeout }` |
+| `expect.configure()` | 各呼び出しに `{ timeout }` |
 | `@axe-core/playwright` | `browser.addInitScript({ path: 'node_modules/axe-core/axe.min.js' })` で axe-core を読み、`browser.evaluate` 内で `axe.run()` |
 | `.resolves`, `.rejects`, `toThrow()`, `toStrictEqual()`, `toContainEqual()`, `toBeInstanceOf()`, `expect.closeTo()` | 先に `await`、またはエラーを捕捉して検証。`toEqual`、深い等価性で比較する `toContain`、`toBeCloseTo` |
 | 最初の読み取りで成功する `.not` のロケーターマッチャー | 条件が 1 秒続いてから成功。逆の状態を肯定形で確認すれば最初の読み取りで成功: `toBeHidden()`、`toBeDisabled()`、`toBeChecked({ checked: false })` |
@@ -271,10 +275,10 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 | `test.step()`, `testInfo.attach()` | 各呼び出しがすでにレポート上の名前付きステップ。`app.screenshot(label)` で画像を添付 |
 | `test.info()`、フックやフィクスチャの `testInfo`、`annotations` | 独自のフィクスチャやモジュールの状態。タイトルやタグに issue ID |
 | `fullyParallel`, `describe.configure({ mode: 'parallel' })` | ファイルを分割。ファイル間は並列、同じファイルのテストは順番に実行 |
-| 遅延取得、ワーカースコープ、`{ auto: true }` のフィクスチャ、`mergeTests()` | フィクスチャ群ごとに 1 つの `test`。ファイル単位の準備には `beforeAll` |
+| `mergeTests()` | `extend` 呼び出しを 1 本のチェーンにまとめる |
 | `globalSetup`、`globalTeardown`、`webServer` の配列 | 実行の前後を囲むスクリプト、または全プロセスを起動する 1 つの `app.command` |
 | `projects[].testMatch`, `testDir`, `testIgnore`, `grep` | テストの `platforms` やタグ、またはターゲットごとに別の実行 |
-| `--ui`, `npx playwright show-report`, `--reporter html` | `--watch --headed`。`htmlReporter()` が作る `.e2e/report.html` を開く |
+| `--ui`, `npx playwright show-report`, `--reporter html` | `--watch --headed`。`npx e2e report`（`htmlReporter()` が書き出す `<output>/report.html` を開く） |
 | `test.setTimeout()`、`test.slow()`、`test.fixme()`、`test.describe.only()`、describe に対する `test.fail()` | テストやグループに `{ timeout }` または `{ skip: 'reason' }`。各テストに `test.only` と `test.fail()` |
 | `failOnFlakyTests`, `use.navigationTimeout`, `--timeout`, `--quiet` | `report.json` の `run.summary.flaky`。`browser.goto(url, { timeout })`。設定の `timeout` |
 | `blob` レポーターと `merge-reports` | シャードごとに 1 つのレポート |
@@ -282,7 +286,7 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 | ファイルや describe 内の `test.use({ ... })` | ランナーのオプションはグループ、エンジンのオプションはターゲット、実行時の変更は `browser.setViewport` |
 | `projects[].dependencies`, `teardown` | サインインはトップレベルの `test.setup`。実行の前後を囲むスクリプト |
 | `page.pause()` | `--step --headed` で、キー入力まで各ステップを停止 |
-| `line`、`dot`、`github` レポーター | `list`。`github()` はプルリクエストにコメントを投稿 |
+| `line`、`github` レポーター | `list`。`github()` はプルリクエストにコメントを投稿 |
 
 </Accordion>
 </AccordionGroup>

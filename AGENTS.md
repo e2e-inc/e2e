@@ -47,10 +47,15 @@ suites that consume the built packages the way a user would.
   host, or MCP keeps alive, with a `WorkerPolicy` per kind), and
   `run/standalone-attempt.ts` (one attempt: reservation, launch, fixtures,
   deadline, close). `src/core/` is its own surface: `launch` opens a
-  `core` attempt (nothing published to `globalThis`, no process secret
-  registry, no trace, no session deadline), `SessionState` the
-  `session-state-1` export, and `createAgent` (`@e2e-dev/core/agent`) the agent
-  with a per-`cacheKey` replay cache settled at session close. It imports
+  `core` attempt (no attempt published to `globalThis`, no trace, no session
+  deadline), `SessionState` the `session-state-1` export, and `createAgent`
+  (`@e2e-dev/core/agent`) the agent with a per-`cacheKey` replay cache settled
+  at session close. A host shares its static secrets with every session in
+  the process while it is open (`run/secrecy.ts`), and inside a test the
+  running attempt takes charge of the host and its sessions, records their
+  steps, and keeps their video (`run/guest-steps.ts`), both through
+  `globalThis`, so they hold between two installed copies of the package. It
+  imports
   nothing of `e2e`:
   `tests/unit/package-imports.test.ts` in `packages/e2e` fails on a
   dependency `@e2e-dev/core`'s manifest does not declare. `e2e` reaches its
@@ -122,9 +127,10 @@ suites that consume the built packages the way a user would.
   attempt's raw driver session, like `device.unstable_raw`. The client is typed as
   `DeviceSessionClient`, exported from the main entry.
   The `@e2e-dev/mobile/lease` subpath holds the agent-device lease plumbing
-  device-cloud providers (`testmu`, `browserstack`) share: one daemon per
-  slot, heartbeat, and a release that fails unless the session end is
-  confirmed.
+  device-cloud providers (`testmu`, `browserstack`, `revyl`) share: one
+  daemon per slot, heartbeat, a release that fails unless the session end is
+  confirmed, and `agentDevicePlugin()`, which checks a provider plugin's
+  version and registers it in the daemon's home.
 - `packages/core/src/engine/protocol/` - the engine protocol: the engine
   contract as LSP-style JSON-RPC (`connectEngine` client, `serveEngine`
   server, spawn/socket/loopback transports), so an engine can run in
@@ -145,6 +151,9 @@ suites that consume the built packages the way a user would.
   Its docs page under `docs/integrations/` ships with the vendor's logo on
   its overview card (`authoring-docs`, "Vendor logos");
   `scripts/check-docs-logos.ts` fails `pnpm docs:check` without it.
+- `packages/notte` - the published `@e2e-dev/notte` package: Notte cloud
+  browsers for the web engine, `attempt` scope only, with a marker-file
+  ledger for `sweep` since sessions carry no tags. Maintained by Notte.
 - `packages/lightpanda` - the published `@e2e-dev/lightpanda` package: a
   `BrowserProvider` that starts a local `lightpanda serve` per worker slot
   and stops it with the run; no vendor SDK, the binary is the dependency.
@@ -212,6 +221,11 @@ suites that consume the built packages the way a user would.
   devices for the mobile engine (`DeviceProvider`), through agent-device's
   `@agent-device/testmu` plugin, and hosted Chrome and Edge for the web
   engine (`BrowserProvider`) from `@e2e-dev/testmu/web`.
+- `packages/revyl` - the published `@e2e-dev/revyl` package: Revyl hosted
+  iOS simulators and Android emulators for the mobile engine
+  (`DeviceProvider`), through agent-device's `@agent-device/revyl` plugin.
+  Revyl installs the build from an `https` `app` URL when it starts each
+  device.
 - `packages/browserstack` — the published `@e2e-dev/browserstack` package:
   BrowserStack App Automate real Android and iOS devices for the mobile
   engine (`DeviceProvider`), through agent-device's built-in `browserstack`
@@ -292,8 +306,12 @@ suites that consume the built packages the way a user would.
   by `scripts/check-docs-package-managers.ts`).
   `docs/ja/` and `docs/zh/` hold the Japanese and Simplified Chinese
   translations, one page per English page at the same path, with the tab
-  and group labels in `docs/<language>/navigation.json`; a translation keeps its English page's outline
-  (`scripts/check-docs-translations.ts`, `authoring-docs` "Translations").
+  and group labels in `docs/<language>/navigation.json`. Translations are best
+  effort: keep the English pages current in every change, and leave the
+  translations to lag behind, since no contributor is expected to update a
+  language they don't speak. `scripts/check-docs-translations.ts` warns on a
+  stale outline, code block, or label and fails only on a translation whose
+  English page is gone (`authoring-docs` "Translations").
   The `e2e` build copies the
   pages to `packages/e2e/docs/` (gitignored,
   `packages/e2e/scripts/prepare-build.ts`) so the published package ships
@@ -334,12 +352,12 @@ suites that consume the built packages the way a user would.
   `unslop`, tracked by `skills-lock.json`) stay where they are: the CLI
   skips them as installed project skills.
 - `plugins/e2e/` — one package of skills and the e2e MCP server
-  (`.mcp.json`, `npx -y e2e@<version> mcp`) for Codex, Claude Code, and Cursor; Grok
+  (`.mcp.json`, `npx -y e2e@<version> mcp`) for Codex, Claude Code, Cursor, and Devin; Grok
   Build reads the Claude files. The root
   `.agents/plugins/marketplace.json`, `.claude-plugin/marketplace.json`, and
   `.cursor-plugin/marketplace.json` all point here. Edit skill Markdown in
   `skills/`, then run `pnpm plugins:sync`; `pnpm plugins:check` checks the
-  generated copies, license, the Claude and Cursor manifests (generated from
+  generated copies, license, the Claude, Cursor, and Devin manifests (generated from
   Codex's), every manifest's `version`, and the version `.mcp.json` pins, which is the
   runner's (`version-packages` syncs it, so plugin
   installs update once per release; it does the same for
@@ -357,6 +375,11 @@ suites that consume the built packages the way a user would.
   out `metadata.openclaw`, since that spec takes string metadata values only
   (ClawHub publishes from `skills/`), and a skill links no file outside its
   own directory.
+  Devin reads the generated `.devin-plugin/plugin.json` (card fields and the
+  server inline); its loader also reads the root `plugin.json` and MCP files,
+  which declare the same `e2e` server. Its marketplace (CognitionAI/devin-marketplace) lists `plugins/e2e`
+  pinned to one commit of this repository, so a plugin change reaches Devin
+  users only after a pull request there bumps that `sha`.
 
 ## Commands
 
