@@ -247,9 +247,10 @@ export interface BoundFixtures {
    * Sets up the fixtures the plan lists, in its order: a worker fixture is
    * taken from the pool (set up there on first use), a test fixture set up
    * for this attempt. Rejects with the first failure; the test fixtures set
-   * up before it still get torn down.
+   * up before it still get torn down. `starting` hears each fixture's name
+   * right before its setup runs.
    */
-  setUp(): Promise<void>;
+  setUp(starting?: (fixture: string) => void): Promise<void>;
   /**
    * Runs the test body or hook `user` with the fixtures it names, and no
    * others. A built-in one is acquired as the function destructures it.
@@ -333,9 +334,10 @@ export function bindFixtures(options: BindOptions): BoundFixtures {
   };
 
   return {
-    async setUp(): Promise<void> {
+    async setUp(starting): Promise<void> {
       requireActive();
       for (const planned of plan.order) {
+        starting?.(planned.definition.name);
         await setUpOne(planned);
         requireActive();
       }
@@ -356,6 +358,11 @@ export interface AttemptHooks {
   readonly afterEach: readonly TestHook[];
 }
 
+/** A fixture's setup as `StepRecorder.owner` names it. */
+export function fixtureSetup(fixture: string): string {
+  return `the fixture "${fixture}" setup`;
+}
+
 /** One step of an attempt's cleanup: a label for its timeout, and what to run within its own cleanup budget. */
 export interface AttemptCleanup {
   readonly label: string;
@@ -367,11 +374,12 @@ export interface TestAttemptFixtures {
   /** Makes this attempt the one worker fixtures read their built-ins off, until the returned function is called. */
   enter(): () => void;
   /**
-   * Sets the fixtures up, runs the `beforeEach` hooks, then the body. `phase`
-   * is told which is about to run; `signal` stops the sequence between two
-   * of them.
+   * Sets the fixtures up, runs the `beforeEach` hooks, then the body.
+   * `running` is told the phase about to run and the code that runs in it,
+   * as `StepRecorder.owner` names it; `signal` stops the sequence between
+   * two of them.
    */
-  run(phase: (next: 'beforeEach' | 'body') => void, signal: AbortSignal): Promise<void>;
+  run(running: (phase: 'beforeEach' | 'body', owner: string) => void, signal: AbortSignal): Promise<void>;
   /**
    * What the attempt leaves to clean up: the `afterEach` hooks, then the test
    * fixtures' teardowns, last set up first. A hook that names a fixture
@@ -398,15 +406,16 @@ export function planAttemptFixtures(
       const bound = bindFixtures({ plan, builtIns: read, pool, signal });
       return {
         enter: () => pool.enter(read),
-        async run(phase, stop) {
-          phase('beforeEach');
-          await bound.setUp();
+        async run(running, stop) {
+          running('beforeEach', 'the beforeEach hook');
+          await bound.setUp((fixture) => running('beforeEach', fixtureSetup(fixture)));
           stop.throwIfAborted();
           for (const hook of hooks.beforeEach) {
+            running('beforeEach', 'the beforeEach hook');
             await bound.call(hook);
             stop.throwIfAborted();
           }
-          phase('body');
+          running('body', 'the test body');
           await bound.call(test);
         },
         cleanup: () => [

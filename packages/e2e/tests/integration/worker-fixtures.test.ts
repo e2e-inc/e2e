@@ -190,12 +190,70 @@ test('after the hook', async () => {
       try {
         assertValidReport(outcome.report);
         expect(outcome.report.run.errors.map(({ code, phase, message }) => ({ code, phase, message }))).toEqual([
-          { code: 'HOOK_FAILED', phase: 'beforeAll', message: expect.stringMatching(/^beforeAll failed: .* returned before gadget\.hang finished/) },
+          { code: 'HOOK_FAILED', phase: 'beforeAll', message: 'beforeAll failed: the beforeAll hook returned before gadget.hang finished; put `await` in front of every step call' },
         ]);
         expect(resultByTitle(outcome, 'skipped by its hook').skip?.cause).toBe('hook-failed');
         // The step's own failure, arriving once the hook's attempt has closed, is no later test's.
         expect(resultByTitle(outcome, 'after the hook').status).toBe('passed');
         expect(log.lines()).toEqual(['body:after']);
+      } finally {
+        project.cleanup();
+      }
+    },
+    120_000,
+  );
+
+  it(
+    'names the hook or the fixture that left an engine step running, not the test body',
+    async () => {
+      const file = `import { test as base } from 'e2e';
+
+type Gadget = { hang(options: { timeout: number }): Promise<void> };
+const test = base.extend<{}, { gadget: Gadget }>().extend<{ armed: string }, { warmed: string }>({
+  armed: async ({ gadget }, use) => {
+    void gadget.hang({ timeout: 150 });
+    await use('armed');
+  },
+  warmed: [async ({ gadget }, use) => {
+    void gadget.hang({ timeout: 150 });
+    await use('warmed');
+  }, { scope: 'worker' }],
+});
+
+test.describe('in beforeEach', () => {
+  test.beforeEach(({ gadget }) => {
+    void gadget.hang({ timeout: 150 });
+  });
+  test('hook', () => {});
+});
+
+test('test fixture', ({ armed }) => void armed);
+
+test('worker fixture', ({ warmed }) => void warmed);
+
+test.describe('in afterAll', () => {
+  test.afterAll(({ gadget }) => {
+    void gadget.hang({ timeout: 150 });
+  });
+  test('passes', () => {});
+});
+`;
+      const fake = createFakeEngine({ fixtures: true, isolation: 'worker' });
+      const { outcome, project } = await runProject({ 'tests/device.e2e.ts': file }, { config: engineConfig(fake.engine, { retries: 0, workers: 1 }) });
+      const notAwaited = (owner: string): string => `${owner} returned before gadget.hang finished; put \`await\` in front of every step call`;
+      try {
+        assertValidReport(outcome.report);
+        const failure = (title: string): unknown => {
+          const error = resultByTitle(outcome, title).attempts[0]?.error;
+          return { code: error?.code, message: error?.message };
+        };
+        expect(failure('hook')).toEqual({ code: 'STEP_NOT_AWAITED', message: notAwaited('the beforeEach hook') });
+        expect(failure('test fixture')).toEqual({ code: 'STEP_NOT_AWAITED', message: notAwaited('the fixture "armed" setup') });
+        expect(failure('worker fixture')).toEqual({ code: 'STEP_NOT_AWAITED', message: notAwaited('the fixture "warmed" setup') });
+        expect(resultByTitle(outcome, 'passes').status).toBe('passed');
+        expect(outcome.report.run.errors.map(({ code, phase, message }) => ({ code, phase, message }))).toEqual([
+          { code: 'HOOK_FAILED', phase: 'afterAll', message: `afterAll failed: ${notAwaited('the afterAll hook')}` },
+        ]);
       } finally {
         project.cleanup();
       }

@@ -29,7 +29,7 @@ import { StepRecorder } from '@e2e-dev/core/lib/run/steps';
 import type { WorkerModels } from '@e2e-dev/core/lib/run/worker-models';
 import { planSuiteHook } from '../collect/fixture-plan.ts';
 import type { SuiteHook } from '../collect/registry.ts';
-import { attemptBuiltIns, attemptlessBuiltIns, bindFixtures, type BuiltInReader, type WorkerFixturePool } from './fixture-pool.ts';
+import { attemptBuiltIns, attemptlessBuiltIns, bindFixtures, fixtureSetup, type BuiltInReader, type WorkerFixturePool } from './fixture-pool.ts';
 import { runHook, type SuiteHookSession } from './realm.ts';
 
 /** The results directory suite hooks' short attempts write in, left only when one wrote a file there. */
@@ -106,9 +106,11 @@ export class SuiteAttempt implements SuiteHookSession {
   async run(hook: SuiteHook, timeoutMs: number): Promise<void> {
     const { host } = this.context;
     const plan = planSuiteHook(host.target, hook);
-    await this.within(`${hook.kind} hook`, timeoutMs, plan.usesEngine, async (builtIns) => {
+    const label = `${hook.kind} hook`;
+    await this.within(label, timeoutMs, plan.usesEngine, async (builtIns, owns) => {
       const bound = bindFixtures({ plan, builtIns, pool: host.workerFixtures });
-      await bound.setUp();
+      await bound.setUp((fixture) => owns(fixtureSetup(fixture)));
+      owns(`the ${label}`);
       await bound.call(hook);
     });
   }
@@ -117,18 +119,24 @@ export class SuiteAttempt implements SuiteHookSession {
    * Runs `body` within `timeoutMs`, on an attempt when it `usesEngine` and
    * one can open. When none can, the code still runs, so an `afterAll` that
    * needs no device and a worker fixture's teardown are not skipped; reading
-   * a built-in that needs an attempt then fails with the reason.
+   * a built-in that needs an attempt then fails with the reason. The steps
+   * `body` starts are `label`'s unless it says otherwise through `owns`
+   * (`StepRecorder.owner`).
    */
-  async within(label: string, timeoutMs: number, usesEngine: boolean, body: (builtIns: BuiltInReader) => Promise<void>): Promise<void> {
+  async within(label: string, timeoutMs: number, usesEngine: boolean, body: (builtIns: BuiltInReader, owns: (owner: string) => void) => Promise<void>): Promise<void> {
     const { host, config } = this.context;
     const acquired = await this.acquire(usesEngine);
     const attempt = isOpen(acquired) ? acquired : undefined;
     const builtIns = isOpen(acquired) ? acquired.builtIns : attemptlessBuiltIns(host.target, unavailable(acquired, label, host.target.engine?.name ?? 'none'));
     const hookAbort = attempt?.budget.enter(host.interruptSignal, timeoutMs);
     const leave = host.workerFixtures.enter(builtIns);
+    const owns = (owner: string): void => {
+      if (attempt !== undefined) attempt.steps.owner = owner;
+    };
+    owns(`the ${label}`);
     let failure: { readonly cause: unknown } | undefined;
     try {
-      await runHook(label, () => body(builtIns), timeoutMs, () => hookAbort?.abort());
+      await runHook(label, () => body(builtIns, owns), timeoutMs, () => hookAbort?.abort());
     } catch (cause) {
       failure = { cause };
     }

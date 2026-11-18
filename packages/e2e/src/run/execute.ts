@@ -764,7 +764,10 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       };
       const mainWork = async (): Promise<void> => {
         try {
-          await fixtures.run(enter, attemptAbort.signal);
+          await fixtures.run((next, owner) => {
+            enter(next);
+            steps.owner = owner;
+          }, attemptAbort.signal);
         } catch (cause) {
           // The body's own failure stays the verdict; the step it abandoned
           // and the soft failures it kept are noted beside it. A skip leaves

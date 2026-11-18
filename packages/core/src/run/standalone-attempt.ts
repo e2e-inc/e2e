@@ -202,6 +202,7 @@ export async function launchAttempt<Sessions extends EngineSessions, Extra>(
     ...(options.redactThrown === true ? { redactThrown: true } : {}),
     ...(options.retainSteps === undefined ? {} : { retainSteps: options.retainSteps }),
   });
+  steps.owner = 'the hosted session';
   const artifacts = createAttemptArtifacts({
     artifactsRoot: worker.resultsDir, segments: identity.segments, attemptId, currentStepId: () => steps.currentStepId,
     ...(config.artifactStore === undefined ? {} : { store: config.artifactStore }),

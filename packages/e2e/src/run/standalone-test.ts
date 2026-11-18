@@ -304,13 +304,16 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       );
       // Worker fixtures read their built-ins off this attempt while its code runs.
       const leaveWorkerFixtures = attemptFixtures.enter();
+      // The session's recorder is the test's while it runs, and the session's again after.
+      const sessionOwner = steps.owner;
       // Whatever happens below, the slot is free for the next test once the body is done.
       try {
         /** Set once the body's race settled: a body cut short that runs on is no longer the test's to report. */
         let bodyOver = false;
-        const enter = (next: RunPhase): void => {
+        const enter = (next: RunPhase, owner: string): void => {
           phase = next;
           steps.phase = next === 'beforeEach' ? 'beforeEach' : undefined;
+          steps.owner = owner;
         };
         /** Steps and polls the body left running, failed at their call and cancelled; see `executeAttempt`. */
         const abandonNotAwaited = async (): Promise<E2EError[]> => {
@@ -379,6 +382,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
         }
       } finally {
         steps.phase = undefined;
+        steps.owner = sessionOwner;
         publication.abort();
         leaveWorkerFixtures();
       }
