@@ -234,7 +234,7 @@ test('fails once', async ({ app }) => {
     expect(report.run.results).toHaveLength(titles.length);
   });
 
-  it('prints one dot reporter mark per selected result, including a single mark for a retry', () => {
+  it('prints dot verdicts, failure diagnostics, and counts with one mark per selected result', () => {
     const { exitCode, stdout } = cli(
       {
         'e2e.config.ts': fakeConfig('{}', "reporters: ['dot'],"),
@@ -256,8 +256,13 @@ test('left out', () => {});
       ['run', '--grep', 'selected'],
     );
     expect(exitCode).toBe(1);
-    expect(stdout).toMatch(/^[.~F-]{4}\n$/u);
-    expect([...stdout.trim()].toSorted()).toEqual(['-', '.', 'F', '~']);
+    const marks = stdout.split('\n').filter((line) => /^[.~FTI-]+$/u.test(line)).join('');
+    expect([...marks].toSorted()).toEqual(['-', '.', 'F', '~']);
+    expect(stdout).toContain('Failed Tests');
+    expect(stdout).toContain('selected failure');
+    expect(stdout).toContain('fails');
+    expect(stdout).toMatch(/tests\/dot\.e2e\.ts:\d+/u);
+    expect(stdout).toMatch(/Tests\s+1 failed.*1 passed.*1 flaky.*1 skipped/u);
   });
 
   it('keeps dot progress and test logs on stderr when the CLI also requests JSON', () => {

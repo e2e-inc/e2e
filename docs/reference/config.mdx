@@ -247,7 +247,7 @@ reporters: ['list', 'junit'], // default: ['list']
 | Value | Does |
 | --- | --- |
 | `'list'` | Terminal progress, failures, and a run summary. |
-| `'dot'` | Prints one character per selected test result. |
+| `'dot'` | Compact terminal progress, failures, and a run summary. Excludes `list`: the two together are `INVALID_CONFIG`. |
 | `'junit'` | Writes `<output>/junit.xml`. |
 | `'markdown'` | Writes `<output>/summary.md`. |
 | `'json'` | Prints the report. Excludes `list`: the two together are `INVALID_CONFIG`. |
