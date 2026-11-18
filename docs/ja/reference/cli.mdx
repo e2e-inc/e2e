@@ -65,6 +65,7 @@ $ npx e2e --version
 | [`e2e list`](#e2e-list) | 実行で選択されるテストを表示します |
 | [`e2e doctor`](#e2e-doctor) | 実行を開始できるか確認します |
 | [`e2e cache`](#e2e-cache) | リプレイキャッシュを調べるか消去します |
+| [`e2e report`](#e2e-report) | HTML レポートをブラウザーで開きます |
 | [`e2e upgrade`](#e2e-upgrade) | e2e と関連パッケージを更新します |
 | [`e2e feedback`](#e2e-feedback) | e2e チームにフィードバックを送ります |
 | [`e2e telemetry`](#e2e-telemetry) | 利用状況テレメトリーの表示・切り替えを行います |
@@ -1063,6 +1064,38 @@ E2E_TELEMETRY_DEBUG=1 bunx e2e run
 - `E2E_TELEMETRY_DISABLED=1` と `DO_NOT_TRACK=1` は、ファイルを変更せずにテレメトリーを無効にします。
 - `E2E_TELEMETRY_DEBUG=1` は、すべてのイベントを stderr に表示し、何も送りません。
 - マシン上の最初のコマンドで、`e2e init` と `e2e telemetry` を除き、通知を 1 回表示します。CI では何も表示せず、ファイルも書きません。
+
+#### `e2e report`
+
+[`htmlReporter()`](/reference/reporters#htmlreporter) が書き出した HTML レポートを既定のブラウザーで開きます（デフォルトは `<output>/report.html`）。読み取れるレポートファイルが見つからない場合、または `[path]` と `--output` の両方が渡された場合は終了コード `2` で終了します。
+
+<CodeGroup>
+```bash npm
+npx e2e report
+npx e2e report out/custom.html
+npx e2e report --output out
+```
+
+```bash pnpm
+pnpm exec e2e report
+pnpm exec e2e report out/custom.html
+pnpm exec e2e report --output out
+```
+
+```bash bun
+bunx e2e report
+bunx e2e report out/custom.html
+bunx e2e report --output out
+```
+</CodeGroup>
+
+| 引数またはフラグ | 説明 |
+| --- | --- |
+| `[path]` | HTML ファイルまたは `report.html` を含むディレクトリ（デフォルト: `<output>/report.html`、`--output` とは併用不可） |
+| `--config <path>` | 設定ファイル（デフォルト: 最も近い `e2e.config.ts`、`.mts`、`.js`、`.mjs`） |
+| `--output <dir>` | `report.html` がある結果ディレクトリ（デフォルト: 設定の `output`、なければ `.e2e`） |
+
+- [`htmlReporter({ outputFile })`](/reference/reporters#htmlreporter) で別の場所に書き出した場合は、そのパスを `[path]` として渡してください。`e2e report` は `<output>/report.html` のみを探します。
 
 ## 終了コード
 

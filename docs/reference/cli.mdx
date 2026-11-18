@@ -80,6 +80,7 @@ $ npx e2e --version
 | [`e2e list`](#e2e-list) | Prints the tests a run selects |
 | [`e2e doctor`](#e2e-doctor) | Checks that a run can start |
 | [`e2e cache`](#e2e-cache) | Inspects or clears the replay cache |
+| [`e2e report`](#e2e-report) | Opens the HTML report in a browser |
 | [`e2e upgrade`](#e2e-upgrade) | Upgrades e2e and its packages |
 | [`e2e feedback`](#e2e-feedback) | Sends feedback to the e2e team |
 | [`e2e telemetry`](#e2e-telemetry) | Shows or switches usage telemetry |
@@ -1403,6 +1404,40 @@ E2E_TELEMETRY_DEBUG=1 bunx e2e run
 - The first command on a machine, other than `e2e init` and
   `e2e telemetry`, prints a notice one time. In CI nothing is printed and no
   file is written.
+
+#### `e2e report`
+
+Opens the HTML report written by [`htmlReporter()`](/reference/reporters#htmlreporter)
+in the default browser (`<output>/report.html` by default). Exits `2` when no
+readable report file is found or both `[path]` and `--output` are passed.
+
+<CodeGroup>
+```bash npm
+npx e2e report
+npx e2e report out/custom.html
+npx e2e report --output out
+```
+
+```bash pnpm
+pnpm exec e2e report
+pnpm exec e2e report out/custom.html
+pnpm exec e2e report --output out
+```
+
+```bash bun
+bunx e2e report
+bunx e2e report out/custom.html
+bunx e2e report --output out
+```
+</CodeGroup>
+
+| Argument or flag | Meaning |
+| --- | --- |
+| `[path]` | HTML file or directory holding `report.html` (default: `<output>/report.html`; mutually exclusive with `--output`) |
+| `--config <path>` | Config file (default: the nearest `e2e.config.ts`, `.mts`, `.js`, or `.mjs`) |
+| `--output <dir>` | Results directory containing `report.html` (default: `output` in the config, else `.e2e`) |
+
+- If [`htmlReporter({ outputFile })`](/reference/reporters#htmlreporter) writes the page elsewhere, pass that path as `[path]`: `e2e report` checks `<output>/report.html` only.
 
 ## Exit codes
 

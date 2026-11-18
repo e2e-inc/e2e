@@ -65,6 +65,7 @@ $ npx e2e --version
 | [`e2e list`](#e2e-list) | 输出运行所选的测试 |
 | [`e2e doctor`](#e2e-doctor) | 检查是否可以开始运行 |
 | [`e2e cache`](#e2e-cache) | 检查或清除回放缓存 |
+| [`e2e report`](#e2e-report) | 在浏览器中打开 HTML 报告 |
 | [`e2e upgrade`](#e2e-upgrade) | 升级 e2e 及其包 |
 | [`e2e feedback`](#e2e-feedback) | 向 e2e 团队发送反馈 |
 | [`e2e telemetry`](#e2e-telemetry) | 显示或切换使用遥测 |
@@ -1063,6 +1064,38 @@ E2E_TELEMETRY_DEBUG=1 bunx e2e run
 - `E2E_TELEMETRY_DISABLED=1` 和 `DO_NOT_TRACK=1` 会关闭遥测，不修改文件。
 - `E2E_TELEMETRY_DEBUG=1` 将每个事件输出到 stderr，不发送任何内容。
 - 一台机器上执行的第一个命令，除 `e2e init` 和 `e2e telemetry` 外，会显示一次通知。在 CI 中，不输出通知，也不写入文件。
+
+#### `e2e report`
+
+在默认浏览器中打开 [`htmlReporter()`](/reference/reporters#htmlreporter) 生成的 HTML 报告（默认为 `<output>/report.html`）。找不到或无法读取报告文件，或同时传入 `[path]` 和 `--output` 时，以退出码 `2` 退出。
+
+<CodeGroup>
+```bash npm
+npx e2e report
+npx e2e report out/custom.html
+npx e2e report --output out
+```
+
+```bash pnpm
+pnpm exec e2e report
+pnpm exec e2e report out/custom.html
+pnpm exec e2e report --output out
+```
+
+```bash bun
+bunx e2e report
+bunx e2e report out/custom.html
+bunx e2e report --output out
+```
+</CodeGroup>
+
+| 参数或标志 | 含义 |
+| --- | --- |
+| `[path]` | HTML 文件或包含 `report.html` 的目录（默认：`<output>/report.html`，不可与 `--output` 同时使用） |
+| `--config <path>` | 配置文件（默认：最近的 `e2e.config.ts`、`.mts`、`.js` 或 `.mjs`） |
+| `--output <dir>` | 包含 `report.html` 的结果目录（默认：配置中的 `output`，否则为 `.e2e`） |
+
+- 如果 [`htmlReporter({ outputFile })`](/reference/reporters#htmlreporter) 将页面写入了其他位置，请将该路径作为 `[path]` 传入；`e2e report` 只检查 `<output>/report.html`。
 
 ## 退出码
 

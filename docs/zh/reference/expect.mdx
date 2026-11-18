@@ -22,12 +22,12 @@ test('checkout summary', async ({ screen }) => {
 
 | 调用 | 返回值 |
 | --- | --- |
-| [`expect(locator)`](#locator-matchers) | `AsyncExpectation` |
-| [`expect(screen)`](#screenshot-matchers) | `ScreenExpectation` |
+| [`expect(locator, message?)`](#locator-matchers) | `AsyncExpectation` |
+| [`expect(screen, message?)`](#screenshot-matchers) | `ScreenExpectation` |
 | [`expect(fixture)`](#browser-matchers) | 引擎的匹配器集合 |
 | [`expect(value, message?)`](#value-matchers) | `ValueExpectation<T>` |
 | [`expect.poll(read, options?)`](#polling-a-value) | `PollExpectation<T>` |
-| [`expect.soft(actual)`](#soft-assertions) | 相同的匹配器，但会保留失败 |
+| [`expect.soft(actual, message?)`](#soft-assertions) | 相同的匹配器，但会保留失败 |
 | [`expect.any(Class)` 等](#asymmetric-matchers) | `AsymmetricMatcher` |
 
 `expect` 根据参数本身的类型进行区分：
@@ -40,6 +40,14 @@ test('checkout summary', async ({ screen }) => {
 ### 定位器匹配器
 
 `expect(locator)` 返回 `AsyncExpectation`。每个匹配器都会轮询，直到条件成立或超时，并遵循[行为](#behavior)中的规则，包括[严格性](#strictness)、[文本匹配](#text-matching)和[安全字段](#secure-fields)。选项见 [`AsyncExpectation`](#asyncexpectation-and-textmatcheroptions)。
+
+`expect(locator, message)` 和 `expect.soft(locator, message)` 的第二个参数用于描述检查。它出现在下列匹配器每次断言失败的开头（包括 `.not`），位于匹配器和定位器之前；定位器匹配到多个节点时的 `LOCATOR_AMBIGUOUS` 错误也以它开头。选项无效或读取被拒绝时，失败信息不带该消息。`expect(screen, message)` 以同样的方式接受消息。
+
+```ts
+await expect(screen.getByTestId('cart-empty'), 'the cart is empty').toBeVisible();
+// ASSERTION_FAILED: the cart is empty: expect.toBeVisible failed
+// locator: getByTestId("cart-empty")
+```
 
 | 匹配器 | 说明 |
 | --- | --- |
@@ -448,7 +456,7 @@ expect(created, 'the company exists through the API').toBeTruthy();
 // ASSERTION_FAILED: the company exists through the API: expected undefined to be truthy
 ```
 
-只有值断言接受消息；定位器或 `browser` 断言的失败信息已经包含定位器和匹配器名称。
+[定位器](#locator-matchers)或 `screen` 断言以同样的方式接受消息。`browser` 断言不接受消息，其失败信息会注明匹配器。
 
 #### 未包含的功能
 
@@ -484,7 +492,7 @@ expect(response).toHaveProperty('body.total', expect.any(Number));
 
 ### 软断言
 
-`expect.soft(actual)` 接受与 `expect(actual)` 相同的参数，并返回相同的匹配器。软匹配器失败时不会抛出异常：失败保留在当前尝试中，测试体继续执行。
+`expect.soft(actual, message?)` 接受与 `expect(actual, message?)` 相同的参数，并返回相同的匹配器。软匹配器失败时不会抛出异常：失败保留在当前尝试中，测试体继续执行。
 
 ```ts
 test('checkout summary', async ({ agent, screen }) => {
@@ -638,16 +646,16 @@ type NotAny<T> = 0 extends 1 & T ? never : T;
 
 /** The `expect(actual)` call: a locator, `screen`, an engine fixture, or a value, told apart by the argument. */
 export interface ExpectCall {
-  <L extends Locator>(actual: NotAny<L>): AsyncExpectation;
-  <S extends Screen>(actual: NotAny<S>): ScreenExpectation;
+  <L extends Locator>(actual: NotAny<L>, message?: string): AsyncExpectation;
+  <S extends Screen>(actual: NotAny<S>, message?: string): ScreenExpectation;
   <E extends object>(actual: Expectable<E>): E;
   <T>(actual: T, message?: string): ValueExpectation<T>;
 }
 
 /** The `expect.soft(actual)` call: `expect(actual)` whose failures are kept instead of thrown. */
 export interface SoftExpectCall {
-  <L extends Locator>(actual: NotAny<L>): AsyncExpectation;
-  <S extends Screen>(actual: NotAny<S>): ScreenExpectation;
+  <L extends Locator>(actual: NotAny<L>, message?: string): AsyncExpectation;
+  <S extends Screen>(actual: NotAny<S>, message?: string): ScreenExpectation;
   <E extends object>(actual: Expectable<E>): E;
   <T>(actual: T, message?: string): SoftValueExpectation<T>;
 }

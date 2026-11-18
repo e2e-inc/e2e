@@ -557,6 +557,14 @@ expect.stringContaining(/a/);
 // expect.soft has the expect call's three shapes and no poll of its own.
 expect.soft(1, 'why this holds').toBe(1);
 void (expect.soft(screen.getByRole('button')).toBeVisible() satisfies Promise<void>);
+// A message names a locator check too, on every locator matcher and through .not and soft.
+void (expect(screen.getByRole('button'), 'the cart is empty').toBeVisible() satisfies Promise<void>);
+void (expect(screen.getByRole('button'), 'the cart is empty').not.toHaveText('Checkout') satisfies Promise<void>);
+void (expect.soft(screen.getByRole('button'), 'the cart is empty').toBeHidden() satisfies Promise<void>);
+void (expect(screen, 'the page settled').toHaveScreenshot() satisfies Promise<void>);
+void (expect.soft(screen, 'the page settled').not.toHaveScreenshot('before') satisfies Promise<void>);
+// @ts-expect-error a locator check's message is text
+void expect(screen.getByRole('button'), 1);
 // @ts-expect-error soft is the call, not the whole entry
 expect.soft.poll(() => 1);
 // @ts-expect-error soft has no statics either
