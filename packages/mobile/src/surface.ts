@@ -1051,9 +1051,8 @@ export class AgentDeviceSurface {
    * Removes an app (default: the pinned one) from the session's device and
    * resolves to whether it was installed; an app named by id that is not
    * there is no error (a missing display name is `APP_NOT_INSTALLED`).
-   * Removing the app the session observes (or an app while the session
-   * knows none) drops the nodes read from its screen, and removing
-   * the build `installApp` pinned without an `app.bundleId` unpins it, so
+   * Removing an app drops the nodes read from the session's screen, and
+   * removing the build `installApp` pinned without an `app.bundleId` unpins it, so
    * `app.open()` asks for an install instead of launching an app that is gone.
    */
   async uninstallApp(app: string | undefined, signal: AbortSignal): Promise<boolean> {
@@ -1061,11 +1060,10 @@ export class AgentDeviceSurface {
     const result = await this.command(`uninstall ${target}`, (client) => client.apps.uninstall({ ...this.selection(), app: target }), signal);
     // agent-device resolves display names too: compare the id it removed, not only the string the caller passed.
     const removed = typeof result['appId'] === 'string' ? result['appId'] : target;
-    if (this.appIdentity === undefined || target === this.appIdentity || removed === this.appIdentity) {
-      this.appIdentity = undefined;
-      this.launching = false;
-      this.screenReplaced();
-    }
+    if (this.appIdentity === undefined || target === this.appIdentity || removed === this.appIdentity) this.appIdentity = undefined;
+    // The identity may be a display name no id comparison matches, so the screen always goes: a cheap re-snapshot.
+    this.launching = false;
+    this.screenReplaced();
     if (target === this.installedApp || removed === this.installedApp) this.installedApp = undefined;
     return result['wasInstalled'] === true;
   }

@@ -644,6 +644,16 @@ describe('lifecycle', () => {
     await expect(h.engine.perform!(about.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NODE_STALE' });
   });
 
+  it('drops a handle when the session knows the app by display name and uninstallApp gets its id', async () => {
+    const h = harness();
+    await openAttempt(h);
+    h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, appName: 'Example' }));
+    h.fake.respond('apps.uninstall', () => ({ app: 'com.example.app', appId: 'com.example.app', wasInstalled: true }));
+    const about = await observed(h, 'About');
+    await h.surface.uninstallApp('com.example.app', new AbortController().signal);
+    await expect(h.engine.perform!(about.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NODE_STALE' });
+  });
+
   it('pins the package an Android install reports, and refuses the build path as an app id', async () => {
     const signal = new AbortController().signal;
     const h = harness({ appPath: './build/app.apk', platform: 'android' }, false);

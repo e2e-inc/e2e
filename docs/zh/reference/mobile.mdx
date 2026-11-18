@@ -678,7 +678,7 @@ uninstallApp(app?: string): Promise<boolean>;
 
 ```ts
 expect(await device.uninstallApp()).toBe(true);
-expect(await device.isAppInstalled()).toBe(false);
+expect(await device.isAppInstalled('com.example.app')).toBe(false);
 await device.installApp(); // a fresh install, for a first-launch flow
 ```
 
