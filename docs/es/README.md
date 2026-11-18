@@ -6,8 +6,9 @@ inglés con un aviso. El inglés sigue siendo la fuente de verdad.
 
 Esta traducción es de mejor esfuerzo. Los cambios en inglés no esperan a la
 traducción, así que una página puede ir por detrás de su página en inglés hasta
-que alguien que lea español la actualice. `pnpm docs:check` avisa de cada página
-y etiqueta que está desactualizada.
+que alguien que lea español la actualice. `pnpm docs:check` avisa de las páginas
+y etiquetas cuya estructura o código difieren del inglés; no detecta un cambio
+que solo afecte al texto.
 
 ## Estructura
 
