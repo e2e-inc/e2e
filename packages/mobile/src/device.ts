@@ -210,14 +210,17 @@ export interface Device {
   dismissKeyboard(): Promise<void>;
   /**
    * Whether the soft keyboard is on screen, from one capture: what
-   * agent-device reported for it (a measured or derived keyboard frame, or a
-   * visibility probe), else a visible keyboard element in the accessibility
-   * tree, the same keyboard observations hide covered nodes under. Fails
-   * when the capture cannot answer: `ENGINE_FAILURE` for a tree that is
-   * still incomplete, `UNSUPPORTED_CAPABILITY` when agent-device could not
-   * see where the keyboard is drawn. It reads the screen as it is now, so
-   * right after an action that closes the keyboard, poll it with
-   * `expect.poll`. Changes nothing on the device.
+   * agent-device reported for it (a visibility probe, a measured or derived
+   * keyboard frame, or proof that there is none), else a keyboard element
+   * drawn on screen in the accessibility tree, the same keyboard
+   * observations hide covered nodes under. Only agent-device's proof
+   * answers `false`. Fails when the capture cannot answer: `ENGINE_FAILURE`
+   * while the keyboard is moving or the tree is still incomplete,
+   * `UNSUPPORTED_CAPABILITY` when agent-device did not prove the keyboard
+   * absent and the tree lists none. It reads the screen as it is now, so
+   * right after an action that opens or closes the keyboard, poll it with
+   * `expect.poll`, which reads it again through an `ENGINE_FAILURE`.
+   * Changes nothing on the device.
    */
   isKeyboardShown(): Promise<boolean>;
   /** Reads the clipboard. */

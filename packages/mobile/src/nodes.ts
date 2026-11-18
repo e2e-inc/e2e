@@ -134,6 +134,24 @@ function isKeyboardElement(node: RawNode): boolean {
 }
 
 /**
+ * Whether the tree lists a keyboard element that is drawn on screen: a
+ * keyboard, a key, or the suggestion strip with a nonzero frame that
+ * overlaps the viewport. A keyboard left in the tree off screen after it was
+ * dismissed is not one. With no viewport and no window to measure, the
+ * screen is read from the tree's own extent, which holds every element it
+ * lists, so a listed keyboard element counts, as {@link keyboardBand} counts
+ * it.
+ */
+export function keyboardOnScreen(nodes: readonly RawNode[], viewport: ViewportSize | undefined): boolean {
+  const screen = viewport ?? viewportOf(nodes);
+  return nodes.some((node) => {
+    const rect = node.rect;
+    if (rect === undefined || rect.width <= 0 || rect.height <= 0 || node.visibleToUser === false || !isKeyboardElement(node)) return false;
+    return screen === undefined || (rect.x < screen.width && rect.x + rect.width > 0 && rect.y < screen.height && rect.y + rect.height > 0);
+  });
+}
+
+/**
  * The band the soft keyboard covers: the frame the capture's producer
  * measured or derived, else the keyboard elements in the tree (the keys and
  * the suggestion strip above them), from the highest one's top edge to the

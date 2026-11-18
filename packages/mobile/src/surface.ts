@@ -62,7 +62,7 @@ import {
   type ProjectedNode,
   type ProjectedSnapshot,
 } from './nodes.ts';
-import { keyboardDragStart } from './keyboard.ts';
+import { keyboardDragStart, keyboardShownIn, type KeyboardUnknown } from './keyboard.ts';
 import { DEVICE_PERMISSIONS, type AgentDeviceClient, type ClientFactory, type DevicePermission, type LaunchPermissions, type MobileOptions, type PermissionState } from './options.ts';
 import { maskPng } from './png.ts';
 import { mobileDoctor } from './doctor.ts';
@@ -192,55 +192,12 @@ function measuredKeyboard(raw: RawSnapshot): boolean | undefined {
 }
 
 /**
- * Whether a capture shows the soft keyboard: the band its producer measured
- * when it measured one, else a keyboard or key element in the tree, the probe
- * Maestro's `hideKeyboard` uses. A capture that says nothing either way
- * counts as no keyboard: a drag on a guess costs more than a keyboard a later
- * tap refuses against by name.
+ * Whether a capture shows the soft keyboard, by {@link keyboardShownIn}: a
+ * capture that cannot answer counts as no keyboard here, since a drag on a
+ * guess costs more than a keyboard a later tap refuses against by name.
  */
 function keyboardShowing(raw: RawSnapshot): boolean {
-  return measuredKeyboard(raw) ?? (raw.nodes ?? []).some((node) => KEYBOARD_KINDS.has(normalizeKind(node.type ?? '')));
-}
-
-/**
- * The `unmeasurable` reasons agent-device gives after it read the whole tree,
- * found no keyboard in it, and had no probe to ask: on a platform whose
- * keyboard is in the app's tree (iOS), that is no keyboard. Every other
- * reason means it could not see where the keyboard lives, such as an
- * Android capture without the input method's window.
- */
-const KEYBOARD_NOT_IN_TREE: ReadonlySet<string> = new Set(['keyboard-not-observed', 'keyboard-visibility-probe-unsupported']);
-
-/** Why a capture cannot say whether the keyboard is shown, as the error `device.isKeyboardShown()` fails with. */
-type KeyboardUnknown = { readonly code: 'ENGINE_FAILURE' | 'UNSUPPORTED_CAPABILITY'; readonly message: string };
-
-/**
- * Whether a capture shows the soft keyboard, the public answer of
- * `device.isKeyboardShown()`: a visibility the producer reported (a probe,
- * or a rejected docked frame that still says), else the band
- * {@link keyboardBand} reads, the one observations hide nodes under: a
- * measured or derived frame, none for `absent`, else visible keyboard
- * elements in the tree. A rejected docked frame with no probe is shown:
- * agent-device rejects one only for a tree that lists keyboard elements,
- * such as a keyboard still sliding in or a floating one, so where it is is
- * unsure, not whether. No keyboard in the tree answers `false` only when
- * agent-device says the tree is where it looked; otherwise, and for a tree
- * still sparse or cut, the capture cannot answer.
- */
-function keyboardShownIn(raw: RawSnapshot): boolean | KeyboardUnknown {
-  const fact = raw.keyboard;
-  if (fact?.kind === 'visibility-only') return fact.visible;
-  if (fact?.kind === 'tree-rejected') return fact.visible ?? true;
-  if (fact?.kind === 'visible' || fact?.kind === 'derived') return true;
-  if (fact?.kind === 'absent') return false;
-  if (keyboardBand(raw.nodes ?? [], fact, raw.viewport) !== undefined) return true;
-  const cannotTell = 'cannot tell whether the keyboard is shown:';
-  if (isTruncated(raw)) {
-    return { code: 'ENGINE_FAILURE', message: `${cannotTell} agent-device measured no keyboard, and the accessibility tree it returned was incomplete (sparse or cut), so missing keys cannot be read as no keyboard. Read it again once the screen has rendered.` };
-  }
-  if (fact?.kind === 'unmeasurable' && KEYBOARD_NOT_IN_TREE.has(fact.reason)) return false;
-  const reason = fact === undefined ? 'it reported no keyboard reading' : `its keyboard reading was unmeasurable (${fact.reason})`;
-  return { code: 'UNSUPPORTED_CAPABILITY', message: `${cannotTell} the tree lists no keyboard, but agent-device could not see where the keyboard is drawn: ${reason}` };
+  return keyboardShownIn(raw, isTruncated(raw)) === true;
 }
 
 /**
@@ -362,6 +319,14 @@ interface LeaseRecorder {
  * returning the sparse tree costs the model a confused turn.
  */
 const SPARSE_RETRY_BACKOFF_MS = [0, 1_200, 3_000] as const;
+
+/**
+ * Waits between captures while the keyboard reads as moving
+ * ({@link KeyboardUnknown.settling}): an iPhone keyboard slides in or out in
+ * about a third of a second, longer on a loaded simulator, and a reading
+ * taken mid-slide can say neither way.
+ */
+const KEYBOARD_SETTLE_BACKOFF_MS = [0, 250, 500, 1_000] as const;
 
 /** Number of parent hops from `entry` up to `ancestor`. */
 function depthBelow(entry: ProjectedNode, ancestor: ProjectedNode): number {
@@ -1761,9 +1726,28 @@ export class AgentDeviceSurface {
    * Changes nothing on the device.
    */
   async keyboardShown(signal: AbortSignal, input: InputBudget): Promise<boolean> {
-    const shown = keyboardShownIn(await this.snapshot(signal, false, input));
+    const { shown } = await this.keyboardReading(signal, input);
     if (typeof shown === 'boolean') return shown;
     throw new EngineError(shown.code, shown.message, { retryable: false });
+  }
+
+  /**
+   * A capture and what {@link keyboardShownIn} reads in it, captured again
+   * while the keyboard reads as moving, as long as the budget allows. The
+   * last reading is answered, settled or not.
+   */
+  private async keyboardReading(signal: AbortSignal, input: InputBudget): Promise<{ readonly raw: RawSnapshot; readonly shown: boolean | KeyboardUnknown }> {
+    let reading: { readonly raw: RawSnapshot; readonly shown: boolean | KeyboardUnknown } | undefined;
+    for (const backoffMs of KEYBOARD_SETTLE_BACKOFF_MS) {
+      if (reading !== undefined) {
+        if (input.remainingMs() <= backoffMs) return reading;
+        await sleep(backoffMs, signal);
+      }
+      const raw = await this.snapshot(signal, false, input);
+      reading = { raw, shown: keyboardShownIn(raw, isTruncated(raw)) };
+      if (typeof reading.shown === 'boolean' || reading.shown.settling !== true) return reading;
+    }
+    return reading!;
   }
 
   /**
@@ -1808,9 +1792,11 @@ export class AgentDeviceSurface {
    * keyboard.
    */
   private async dismissKeyboardByGesture(signal: AbortSignal, input: InputBudget): Promise<void> {
-    let raw = await this.dismissKeyboardTip(await this.snapshot(signal, false, input), signal, input);
-    if (!keyboardShowing(raw)) return;
+    let reading = await this.keyboardReading(signal, input);
+    if (await this.dismissKeyboardTip(reading.raw, signal, input)) reading = await this.keyboardReading(signal, input);
+    if (reading.shown !== true) return;
     for (const axis of ['horizontal', 'vertical'] as const) {
+      const { raw } = reading;
       const projected = projectSnapshot(raw.nodes ?? [], { mintId: () => 'keyboard', viewport: raw.viewport });
       const viewport = await this.viewportFor(projected, signal, input);
       const from = keyboardDragStart(projected, viewport, keyboardTop(raw, viewport));
@@ -1825,8 +1811,8 @@ export class AgentDeviceSurface {
         ? { x: from.x - viewport.width * KEYBOARD_DRAG_RATIO, y: from.y }
         : { x: from.x, y: from.y - viewport.height * KEYBOARD_DRAG_RATIO };
       await this.command('keyboard.dismiss', (client) => input.send(() => client.interactions.swipe({ from, to })), signal);
-      raw = await this.snapshot(signal, false, input);
-      if (!keyboardShowing(raw)) return;
+      reading = await this.keyboardReading(signal, input);
+      if (reading.shown !== true) return;
     }
     throw new EngineError(
       'UNSUPPORTED_CAPABILITY',
@@ -1838,18 +1824,17 @@ export class AgentDeviceSurface {
   /**
    * The simulator shows a "Speed up your typing" tip over the keyboard the
    * first time it appears; its Continue button is the only way past it, and
-   * Maestro's `hideKeyboard` presses it too. Answers the capture after the
-   * press, or the one given when no tip is showing.
+   * Maestro's `hideKeyboard` presses it too. Answers whether it pressed.
    */
-  private async dismissKeyboardTip(raw: RawSnapshot, signal: AbortSignal, input: InputBudget): Promise<RawSnapshot> {
+  private async dismissKeyboardTip(raw: RawSnapshot, signal: AbortSignal, input: InputBudget): Promise<boolean> {
     const nodes = raw.nodes ?? [];
     const tip = nodes.find((node) => (node.label ?? node.value ?? '').startsWith('Speed up your typing'));
-    if (tip?.rect === undefined) return raw;
+    if (tip?.rect === undefined) return false;
     const tipTop = tip.rect.y;
     const button = nodes.find((node) => node.label === 'Continue' && node.rect !== undefined && node.rect.y > tipTop);
-    if (button?.rect === undefined) return raw;
+    if (button?.rect === undefined) return false;
     await this.command('keyboard.dismiss', (client) => input.press(client, centreOf(button.rect!)), signal);
-    return await this.snapshot(signal, false, input);
+    return true;
   }
 
   async back(operation: OperationContext, input: InputBudget): Promise<void> {

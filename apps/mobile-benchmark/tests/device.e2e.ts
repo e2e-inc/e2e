@@ -45,10 +45,12 @@ test.describe('permission prompt', () => {
 // press fails it.
 test('sequential onboarding echoes the exact values', async ({ app, device, screen }) => {
   await openScenario({ app, device, screen }, 'Sequential Onboarding');
+  // A fill on Android sets the text without the input method, so the tap is
+  // what opens the keyboard there. It slides in and out, so both reads poll.
+  await screen.getByTestId('email-input').tap();
   await screen.getByTestId('email-input').fill('jane@example.com');
-  expect(await device.isKeyboardShown()).toBe(true);
+  await expect.poll(() => device.isKeyboardShown()).toBe(true);
   await device.dismissKeyboard();
-  // The keyboard animates out, so poll until it is gone.
   await expect.poll(() => device.isKeyboardShown()).toBe(false);
   await screen.getByTestId('continue-button').tap();
 
