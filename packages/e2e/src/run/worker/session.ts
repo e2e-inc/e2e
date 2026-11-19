@@ -15,7 +15,7 @@ import { abortError, cancelledError } from '@e2e-dev/core/lib/internal/time';
 import { TargetExecutor, type InMemoryAttempts } from '../execute.ts';
 import { encodeResult, type RunError } from '@e2e-dev/core/lib/run/records';
 import type { SessionStore } from '@e2e-dev/core/lib/run/sessions';
-import type { HeldStep, StepHolding } from '../step-hold.ts';
+import type { HeldStep, StepHoldContext } from '../step-hold.ts';
 import { countsTowardFailureLimit, disappearedResult } from '../units.ts';
 import type { MainToWorker, RunUnitMessage, WirePair, WorkerToMain } from './protocol.ts';
 
@@ -58,8 +58,8 @@ export interface TargetWorkerDeps {
   readonly debug?: DebugTrace;
   /** See `TargetExecutorOptions.inMemory`; only an in-process worker has tests registered in memory. */
   readonly inMemory?: InMemoryAttempts | undefined;
-  /** How steps wait for the runner's `step-release` (`e2e run --step`); undefined when they never do. */
-  readonly step?: StepHolding | undefined;
+  /** Whether steps wait for the runner's `step-release` (`e2e run --step`). */
+  readonly holdSteps: boolean;
 }
 
 /** Transport callbacks a target worker needs. */
@@ -99,8 +99,8 @@ export class TargetWorker {
   private queue: Promise<void> = Promise.resolve();
   /** Disposal happens once, whichever of shutdown or terminate asks first. */
   private shutdownOnce: Promise<void> | undefined;
-  /** Each step waiting for `step-release`, by hold id: what lets it run. */
-  private readonly holds = new Map<string, () => void>();
+  /** Each step waiting for `step-release`, by hold id: what lets it run, and what reads its screen. */
+  private readonly holds = new Map<string, { readonly release: () => void; readonly readScreen: StepHoldContext['readScreen'] }>();
 
   constructor(
     private readonly host: TargetWorkerHost,
@@ -124,9 +124,15 @@ export class TargetWorker {
         env: deps.env,
         isolated: deps.isolated,
         interruptSignal: this.interruptController.signal,
-        ...(deps.step === undefined
-          ? {}
-          : { holdStep: (step: HeldStep, signal: AbortSignal) => this.holdStep(step, signal), heldScreens: deps.step === 'screen' }),
+        ...(deps.holdSteps
+          ? {
+              hold: {
+                ask: (step: HeldStep, signal: AbortSignal, readScreen: StepHoldContext['readScreen']) =>
+                  this.holdStep(step, signal, readScreen),
+                steps: true,
+              },
+            }
+          : {}),
         ...(deps.debug !== undefined ? { debug: deps.debug } : {}),
         inMemory: deps.inMemory,
         beforePair: () => this.failuresAnswered(),
@@ -221,13 +227,25 @@ export class TargetWorker {
         return;
       case 'step-release':
         // Now too: the unit it releases is the one running.
-        this.holds.get(message.holdId)?.();
+        this.holds.get(message.holdId)?.release();
         return;
       case 'continue':
         // Now too: the running unit is what waits for it.
         this.unanswered -= 1;
         if (this.unanswered === 0) this.answered?.();
         return;
+      case 'screen-request': {
+        // Handle this right away because the waiting unit is still running.
+        // If its wait has ended, there is no screen to read.
+        const { requestId } = message;
+        const hold = this.holds.get(message.holdId);
+        const screen = hold === undefined ? Promise.resolve(undefined) : hold.readScreen();
+
+        void screen.then((read) => {
+          this.host.emit({ type: 'screen-reply', requestId, ...(read === undefined ? {} : { screen: read }) });
+        });
+        return;
+      }
       default:
         message satisfies never;
     }
@@ -236,9 +254,10 @@ export class TargetWorker {
   /**
    * Holds one step until the runner releases it. A hold that ends first
    * (the step was abandoned, its attempt ended) tells the runner, so its
-   * prompt goes away, and rejects with the signal's reason.
+   * prompt goes away, and rejects with the signal's reason. The runner can
+   * request the screen through `readScreen` while the step is held.
    */
-  private holdStep(step: HeldStep, signal: AbortSignal): Promise<void> {
+  private holdStep(step: HeldStep, signal: AbortSignal, readScreen: StepHoldContext['readScreen']): Promise<void> {
     const holdId = uuidv7();
     return new Promise<void>((resolve, reject) => {
       const settle = (): void => {
@@ -250,9 +269,12 @@ export class TargetWorker {
         this.host.emit({ type: 'step-cancel', holdId });
         reject(abortError(signal, cancelledError));
       };
-      this.holds.set(holdId, () => {
-        settle();
-        resolve();
+      this.holds.set(holdId, {
+        release: () => {
+          settle();
+          resolve();
+        },
+        readScreen,
       });
       signal.addEventListener('abort', cancel, { once: true });
       this.host.emit({ type: 'step-hold', holdId, step });

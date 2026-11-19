@@ -304,8 +304,8 @@ suites that consume the built packages the way a user would.
   block that runs `npx` or `npm install`/`ci` sits in a `<CodeGroup>` of
   `npm`, `pnpm`, and `bun` blocks, which the site syncs site-wide, enforced
   by `scripts/check-docs-package-managers.ts`).
-  `docs/ja/` and `docs/zh/` hold the Japanese and Simplified Chinese
-  translations, one page per English page at the same path, with the tab
+  `docs/ja/`, `docs/zh/`, `docs/cs/`, and `docs/es/` hold the Japanese,
+  Simplified Chinese, Czech, and Spanish translations, one page per English page at the same path, with the tab
   and group labels in `docs/<language>/navigation.json`. Translations are best
   effort: keep the English pages current in every change, and leave the
   translations to lag behind, since no contributor is expected to update a

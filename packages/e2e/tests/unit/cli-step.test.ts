@@ -6,7 +6,7 @@ import type { HeldStep, StepHoldContext, StepPrompt } from '../../src/run/step-h
 const KEY_GUARD_MS = 150;
 
 function step(label: string, testId = 'checkout', target = 'web'): HeldStep {
-  return { target, testId, agent: 'default', repeat: 0, title: testId, api: 'app.open', label };
+  return { kind: 'step', target, testId, agent: 'default', repeat: 0, title: testId, api: 'app.open', label };
 }
 
 /** A gate on a clock the test moves, recording what it showed and whether it asked to stop. */
@@ -20,7 +20,7 @@ function gate() {
     },
     { now: () => now },
   );
-  const context = (signal = new AbortController().signal): StepHoldContext => ({ signal, show: (prompt) => shown.push(prompt) });
+  const context = (signal = new AbortController().signal): StepHoldContext => ({ signal, show: (prompt) => shown.push(prompt), readScreen: () => Promise.resolve(undefined) });
   /** Holds `held` and reports, after the microtasks drain, whether it was let through. */
   const hold = (held: HeldStep, signal?: AbortSignal) => {
     let released = false;

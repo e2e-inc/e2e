@@ -1,19 +1,10 @@
+import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
-import { SignalLadder } from '../../src/cli/signals.ts';
+import { SignalLadder, type SignalHost } from '../../src/cli/signals.ts';
 
-/** Runs `body` with `process.send` and `process.connected` as `channel` describes, then restores both. */
-function withProcessChannel<T>(channel: { readonly send: (() => boolean) | undefined; readonly connected: boolean }, body: () => T): T {
-  const saved = (['send', 'connected'] as const).map((key) => [key, Object.getOwnPropertyDescriptor(process, key)] as const);
-  Object.defineProperty(process, 'send', { value: channel.send, configurable: true, writable: true });
-  Object.defineProperty(process, 'connected', { value: channel.connected, configurable: true, writable: true });
-  try {
-    return body();
-  } finally {
-    for (const [key, descriptor] of saved) {
-      if (descriptor === undefined) Reflect.deleteProperty(process, key);
-      else Object.defineProperty(process, key, descriptor);
-    }
-  }
+// The real `process` of a forks worker belongs to vitest, which exits the worker on `disconnect`.
+function fakeHost(channel: { readonly send: (() => boolean) | undefined; readonly connected: boolean }): EventEmitter & SignalHost {
+  return Object.assign(new EventEmitter(), channel);
 }
 
 describe('SignalLadder', () => {
@@ -56,9 +47,10 @@ describe('SignalLadder', () => {
     vi.useFakeTimers();
     const exits: number[] = [];
     const ladder = new SignalLadder();
-    const release = ladder.arm((code) => exits.push(code), 1_000);
+    const host = fakeHost({ send: () => true, connected: true });
+    const release = ladder.arm((code) => exits.push(code), 1_000, host);
     try {
-      process.emit('disconnect');
+      host.emit('disconnect');
       expect(ladder.interruptSignal.aborted).toBe(true);
       expect(ladder.forceSignal.aborted).toBe(false);
       vi.advanceTimersByTime(1_000);
@@ -79,7 +71,7 @@ describe('SignalLadder', () => {
     ['stays put without an IPC channel, whatever connected says', { send: undefined, connected: false }, false],
   ])('%s', (_case, channel, climbs) => {
     const ladder = new SignalLadder();
-    const release = withProcessChannel(channel, () => ladder.arm(() => undefined, 1_000));
+    const release = ladder.arm(() => undefined, 1_000, fakeHost(channel));
     try {
       expect(ladder.interruptSignal.aborted).toBe(climbs);
     } finally {

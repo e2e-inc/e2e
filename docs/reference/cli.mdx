@@ -346,7 +346,7 @@ npx e2e login openai --device     # sign in with a device code
 npx e2e login github-copilot --from-gh  # use your GitHub CLI login
 npx e2e login github-copilot --client-id <id> [--enterprise-url <host>]
 npx e2e login opencode-console    # OpenCode Console, device code
-npx e2e login spacexai            # SuperGrok, device code
+npx e2e login spacexsi            # SuperGrok, device code
 npx e2e login                     # choose a provider
 ```
 
@@ -356,7 +356,7 @@ pnpm exec e2e login openai --device     # sign in with a device code
 pnpm exec e2e login github-copilot --from-gh  # use your GitHub CLI login
 pnpm exec e2e login github-copilot --client-id <id> [--enterprise-url <host>]
 pnpm exec e2e login opencode-console    # OpenCode Console, device code
-pnpm exec e2e login spacexai            # SuperGrok, device code
+pnpm exec e2e login spacexsi            # SuperGrok, device code
 pnpm exec e2e login                     # choose a provider
 ```
 
@@ -366,14 +366,14 @@ bunx e2e login openai --device     # sign in with a device code
 bunx e2e login github-copilot --from-gh  # use your GitHub CLI login
 bunx e2e login github-copilot --client-id <id> [--enterprise-url <host>]
 bunx e2e login opencode-console    # OpenCode Console, device code
-bunx e2e login spacexai            # SuperGrok, device code
+bunx e2e login spacexsi            # SuperGrok, device code
 bunx e2e login                     # choose a provider
 ```
 </CodeGroup>
 
 | Option | Description |
 | --- | --- |
-| `[provider]` | The subscription: `openai`, `github-copilot`, `opencode-console`, or `spacexai`. Default: a picker. |
+| `[provider]` | The subscription: `openai`, `github-copilot`, `opencode-console`, or `spacexsi`. `spacexai` and `grok` are aliases of `spacexsi`, here and in `logout` and `models`. Default: a picker. |
 | `--device` | ChatGPT: shows a code to enter on another device instead of opening a browser. |
 | `--from-gh` | GitHub Copilot: reuses the signed-in GitHub CLI's token. |
 | `--client-id <id>` | GitHub Copilot: the client id of your GitHub OAuth App, with the device flow enabled. |
@@ -408,7 +408,7 @@ bunx e2e logout openai    # forget one
 
 | Option | Description |
 | --- | --- |
-| `[provider]` | The login to forget: `openai`, `github-copilot`, `opencode-console`, or `spacexai`. Default: a picker over the stored logins. |
+| `[provider]` | The login to forget: `openai`, `github-copilot`, `opencode-console`, or `spacexsi`. Default: a picker over the stored logins. |
 
 #### `e2e models`
 
@@ -434,7 +434,7 @@ bunx e2e models openai    # one provider
 
 | Option | Description |
 | --- | --- |
-| `[provider]` | `openai`, `github-copilot`, `opencode-console`, or `spacexai`. Default: every stored login, plus OpenCode Console when only `OPENCODE_API_KEY` is set. |
+| `[provider]` | `openai`, `github-copilot`, `opencode-console`, or `spacexsi`. Default: every stored login, plus OpenCode Console when only `OPENCODE_API_KEY` is set. |
 
 Each line holds:
 

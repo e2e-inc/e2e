@@ -11,7 +11,7 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { stepAddress } from '../../src/cli/step-control.ts';
+import { stepAddress } from '../../src/run/step-socket.ts';
 import { createProject, workerFakeConfigSource, type FixtureProject } from '../helpers/run-project.ts';
 
 const CLI = fileURLToPath(new URL('../../dist/cli/bin.js', import.meta.url));
@@ -71,6 +71,7 @@ afterEach(() => {
   for (const created of projects.splice(0)) {
     e2e(created.dir, ['run', '--step', 'stop']);
     created.cleanup();
+    expect(fs.existsSync(stepAddress(created.dir).socket), `the socket file of ${created.dir}`).toBe(false);
   }
 });
 
@@ -142,6 +143,64 @@ describe('e2e run --step without a terminal', () => {
     expect(stopped.stdout).toContain('1 interrupted');
     expect(e2e(dir, ['run', '--step', 'next']).exitCode).toBe(2);
   });
+
+  it('removes the socket file when a third interrupt forces the run to exit', async () => {
+    const { dir } = project(
+      `import { test } from 'e2e';
+
+test.afterEach(async () => {
+  await new Promise((resolve) => setTimeout(resolve, 60_000));
+});
+
+test('holds before a slow teardown', async ({ app }) => {
+  await app.open('/one');
+  await app.open('/two');
+});
+`,
+      workerFakeConfigSource(1, '\n  cleanupTimeout: 30_000,'),
+    );
+
+    // The background run a starting command spawns, started here so this test can interrupt it.
+    const log = path.join(dir, 'step.log');
+    const output = fs.openSync(log, 'w');
+
+    const run = spawn(process.execPath, [CLI, 'run', '--step', '--step-serve', log], {
+      cwd: dir,
+      env: { ...process.env, CI: '', NO_COLOR: '1' },
+      stdio: ['ignore', output, output],
+    });
+
+    fs.closeSync(output);
+
+    const exited = new Promise<number | null>((resolve) => run.once('exit', resolve));
+
+    for (let tries = 0; tries < 600; tries += 1) {
+      if (fs.readFileSync(log, 'utf8').includes('✓ app.open "/one"')) {
+        break;
+      }
+
+      await sleep(50);
+    }
+
+    expect(fs.existsSync(stepAddress(dir).socket)).toBe(true);
+
+    // One at a time: signals sent together reach the run as one.
+    run.kill('SIGINT');
+
+    for (let tries = 0; tries < 600; tries += 1) {
+      if (fs.readFileSync(log, 'utf8').includes('interrupt again to force')) {
+        break;
+      }
+
+      await sleep(50);
+    }
+
+    run.kill('SIGINT');
+    await sleep(1_000);
+    run.kill('SIGINT');
+    expect(await exited).toBe(130);
+    expect(fs.existsSync(stepAddress(dir).socket)).toBe(false);
+  }, 60_000);
 
   it('prints the step a killed command missed, without running it, and says the action was not applied', async () => {
     const { dir } = project(`import { test } from 'e2e';

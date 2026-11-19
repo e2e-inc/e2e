@@ -239,7 +239,7 @@ npx e2e login openai --device     # sign in with a device code
 npx e2e login github-copilot --from-gh  # use your GitHub CLI login
 npx e2e login github-copilot --client-id <id> [--enterprise-url <host>]
 npx e2e login opencode-console    # OpenCode Console, device code
-npx e2e login spacexai            # SuperGrok, device code
+npx e2e login spacexsi            # SuperGrok, device code
 npx e2e login                     # choose a provider
 ```
 
@@ -249,7 +249,7 @@ pnpm exec e2e login openai --device     # sign in with a device code
 pnpm exec e2e login github-copilot --from-gh  # use your GitHub CLI login
 pnpm exec e2e login github-copilot --client-id <id> [--enterprise-url <host>]
 pnpm exec e2e login opencode-console    # OpenCode Console, device code
-pnpm exec e2e login spacexai            # SuperGrok, device code
+pnpm exec e2e login spacexsi            # SuperGrok, device code
 pnpm exec e2e login                     # choose a provider
 ```
 
@@ -259,14 +259,14 @@ bunx e2e login openai --device     # sign in with a device code
 bunx e2e login github-copilot --from-gh  # use your GitHub CLI login
 bunx e2e login github-copilot --client-id <id> [--enterprise-url <host>]
 bunx e2e login opencode-console    # OpenCode Console, device code
-bunx e2e login spacexai            # SuperGrok, device code
+bunx e2e login spacexsi            # SuperGrok, device code
 bunx e2e login                     # choose a provider
 ```
 </CodeGroup>
 
 | オプション | 説明 |
 | --- | --- |
-| `[provider]` | サブスクリプションです。`openai`、`github-copilot`、`opencode-console`、`spacexai` を指定できます。デフォルトでは選択画面を表示します。 |
+| `[provider]` | サブスクリプションです。`openai`、`github-copilot`、`opencode-console`、`spacexsi` を指定できます。`spacexai` と `grok` は `spacexsi` のエイリアスで、`logout` と `models` でも使えます。デフォルトでは選択画面を表示します。 |
 | `--device` | ChatGPT 用です。ブラウザを開かず、別のデバイスで入力するコードを表示します。 |
 | `--from-gh` | GitHub Copilot 用です。サインイン済みの GitHub CLI のトークンを再利用します。 |
 | `--client-id <id>` | GitHub Copilot 用です。デバイスフローを有効にした GitHub OAuth App のクライアント ID です。 |
@@ -301,7 +301,7 @@ bunx e2e logout openai    # forget one
 
 | オプション | 説明 |
 | --- | --- |
-| `[provider]` | ログイン情報を削除する対象です。`openai`、`github-copilot`、`opencode-console`、`spacexai` を指定できます。デフォルトでは保存済みのログインから選ぶ画面を表示します。 |
+| `[provider]` | ログイン情報を削除する対象です。`openai`、`github-copilot`、`opencode-console`、`spacexsi` を指定できます。デフォルトでは保存済みのログインから選ぶ画面を表示します。 |
 
 #### `e2e models`
 
@@ -326,7 +326,7 @@ bunx e2e models openai    # one provider
 
 | オプション | 説明 |
 | --- | --- |
-| `[provider]` | `openai`、`github-copilot`、`opencode-console`、`spacexai` を指定できます。デフォルトでは保存済みの全ログインを使い、`OPENCODE_API_KEY` だけがある場合も OpenCode Console を含めます。 |
+| `[provider]` | `openai`、`github-copilot`、`opencode-console`、`spacexsi` を指定できます。デフォルトでは保存済みの全ログインを使い、`OPENCODE_API_KEY` だけがある場合も OpenCode Console を含めます。 |
 
 各行には次の情報があります。
 

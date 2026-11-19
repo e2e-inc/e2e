@@ -129,9 +129,10 @@ export function stepPromptLine(prompt: StepPrompt): string {
 /**
  * A held step's prompt as plain lines for a reader with no terminal
  * (`e2e run --step` driven by later commands): the test, the steps waiting
- * with their call sites, the screen they wait on, and the commands that go on.
+ * with their call sites, the screen they wait on, and the commands that go
+ * on. `screen` is undefined if it couldn't be read or the wait ended.
  */
-export function stepPromptText(prompt: StepPrompt): string {
+export function stepPromptText(prompt: StepPrompt, screen: string | undefined): string {
   const [first] = prompt.steps;
   const numbers = prompt.steps.map(({ number }) => number).join(', ');
   const lines = [`Paused before ${prompt.steps.length === 1 ? 'step' : 'steps'} ${numbers} of ${bounded(first.step.title)} [${bounded(first.step.target)}]:`];
@@ -139,7 +140,6 @@ export function stepPromptText(prompt: StepPrompt): string {
     const source = promptSource(step);
     lines.push(`  ${step.api} ${quotedLabel(step.label)}${source === '' ? '' : ` (${source})`}`);
   }
-  const { screen } = first.step;
   if (screen === undefined) lines.push('Screen: could not be read.');
   else lines.push('Screen:', ...screen.split('\n').map((line) => `  ${bounded(line)}`));
   lines.push(`Next: e2e run --step next runs ${prompt.steps.length === 1 ? 'it' : 'them'}, e2e run --step rest runs the rest, e2e run --step stop ends the run.`);

@@ -1146,6 +1146,33 @@
       }
     },
     {
+      "slug": "moli",
+      "title": "Testing sign-in with e2e in a local Moli browser",
+      "shortTitle": "Moli",
+      "description": "Test a sign-in form locally with Moli. Capture the signed-in dashboard and verify that signing out blocks access. No API keys required.",
+      "icon": "moli.png",
+      "source": "partner",
+      "repository": "https://github.com/lexmount/moli/tree/main/examples/e2e-sign-in",
+      "author": {
+        "name": "Lexmount",
+        "github": "lexmount",
+        "website": "https://browser.lexmount.com"
+      },
+      "license": "Apache-2.0",
+      "licenseUrl": "https://github.com/lexmount/moli/blob/main/examples/e2e-sign-in/LICENSE",
+      "tags": {
+        "framework": [
+          "nodejs"
+        ],
+        "useCase": [
+          "authentication"
+        ],
+        "platform": [
+          "web"
+        ]
+      }
+    },
+    {
       "slug": "pipedash",
       "title": "Testing Pipedash's App Store screenshot editor with e2e",
       "shortTitle": "Pipedash",

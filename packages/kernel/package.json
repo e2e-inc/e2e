@@ -58,11 +58,11 @@
   },
   "devDependencies": {
     "@e2e-dev/web": "workspace:*",
-    "@onkernel/sdk": "0.148.0",
+    "@onkernel/sdk": "0.149.0",
     "@types/node": "26.6.6",
     "e2e": "workspace:*",
     "typescript": "7.0.2",
-    "vitest": "5.1.0"
+    "vitest": "5.1.1"
   },
   "engines": {
     "node": "^22.22.3 || >=24.8.0"

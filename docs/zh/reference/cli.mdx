@@ -239,7 +239,7 @@ npx e2e login openai --device     # sign in with a device code
 npx e2e login github-copilot --from-gh  # use your GitHub CLI login
 npx e2e login github-copilot --client-id <id> [--enterprise-url <host>]
 npx e2e login opencode-console    # OpenCode Console, device code
-npx e2e login spacexai            # SuperGrok, device code
+npx e2e login spacexsi            # SuperGrok, device code
 npx e2e login                     # choose a provider
 ```
 
@@ -249,7 +249,7 @@ pnpm exec e2e login openai --device     # sign in with a device code
 pnpm exec e2e login github-copilot --from-gh  # use your GitHub CLI login
 pnpm exec e2e login github-copilot --client-id <id> [--enterprise-url <host>]
 pnpm exec e2e login opencode-console    # OpenCode Console, device code
-pnpm exec e2e login spacexai            # SuperGrok, device code
+pnpm exec e2e login spacexsi            # SuperGrok, device code
 pnpm exec e2e login                     # choose a provider
 ```
 
@@ -259,14 +259,14 @@ bunx e2e login openai --device     # sign in with a device code
 bunx e2e login github-copilot --from-gh  # use your GitHub CLI login
 bunx e2e login github-copilot --client-id <id> [--enterprise-url <host>]
 bunx e2e login opencode-console    # OpenCode Console, device code
-bunx e2e login spacexai            # SuperGrok, device code
+bunx e2e login spacexsi            # SuperGrok, device code
 bunx e2e login                     # choose a provider
 ```
 </CodeGroup>
 
 | 选项 | 说明 |
 | --- | --- |
-| `[provider]` | 订阅：`openai`、`github-copilot`、`opencode-console` 或 `spacexai`。默认：显示选择器。 |
+| `[provider]` | 订阅：`openai`、`github-copilot`、`opencode-console` 或 `spacexsi`。`spacexai` 和 `grok` 是 `spacexsi` 的别名，在 `logout` 和 `models` 中同样可用。默认：显示选择器。 |
 | `--device` | ChatGPT：显示一个供你在其他设备上输入的代码，而不是打开浏览器。 |
 | `--from-gh` | GitHub Copilot：复用已登录的 GitHub CLI 令牌。 |
 | `--client-id <id>` | GitHub Copilot：已启用设备流程的 GitHub OAuth App 客户端 ID。 |
@@ -301,7 +301,7 @@ bunx e2e logout openai    # forget one
 
 | 选项 | 说明 |
 | --- | --- |
-| `[provider]` | 要清除的登录信息：`openai`、`github-copilot`、`opencode-console` 或 `spacexai`。默认：从已保存的登录信息中选择。 |
+| `[provider]` | 要清除的登录信息：`openai`、`github-copilot`、`opencode-console` 或 `spacexsi`。默认：从已保存的登录信息中选择。 |
 
 #### `e2e models`
 
@@ -326,7 +326,7 @@ bunx e2e models openai    # one provider
 
 | 选项 | 说明 |
 | --- | --- |
-| `[provider]` | `openai`、`github-copilot`、`opencode-console` 或 `spacexai`。默认：所有已保存的登录信息，以及仅设置了 `OPENCODE_API_KEY` 时的 OpenCode Console。 |
+| `[provider]` | `openai`、`github-copilot`、`opencode-console` 或 `spacexsi`。默认：所有已保存的登录信息，以及仅设置了 `OPENCODE_API_KEY` 时的 OpenCode Console。 |
 
 每行包含：
 
