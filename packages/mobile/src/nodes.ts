@@ -394,6 +394,31 @@ function nonEmpty(value: string | undefined): string | undefined {
 }
 
 /**
+ * What `getAttribute` reads on a device node, under the names an Appium
+ * suite asks for: `label` (the node's text, as the tree shows it),
+ * `resource-id` (the Android resource id or the iOS accessibility
+ * identifier, the test id), `class` (the Android class or the iOS element
+ * type, also the tag name), `content-desc` (Android only), and `placeholder`.
+ * Undefined when the node carries none of them.
+ */
+function nodeAttributes(
+  source: RawNode,
+  android: boolean,
+  projected: { readonly label: string | undefined; readonly identifier: string | undefined; readonly placeholder: string | undefined },
+): Record<string, string> | undefined {
+  const contentDescription = android ? nonEmpty(source.contentDescription) : undefined;
+  const entries: [string, string | undefined][] = [
+    ['label', projected.label],
+    ['resource-id', projected.identifier],
+    ['class', nonEmpty(source.type)],
+    ['content-desc', contentDescription],
+    ['placeholder', projected.placeholder],
+  ];
+  const present = entries.filter((entry): entry is [string, string] => entry[1] !== undefined);
+  return present.length === 0 ? undefined : Object.fromEntries(present);
+}
+
+/**
  * A node the platform reports as editable takes typed text whatever its
  * class, so a custom input view, or a class the maps do not know, is a
  * `textbox` rather than its verbatim kind; a role that already takes text
@@ -562,6 +587,7 @@ export function projectSnapshot(
     const label = folded === undefined ? nonEmpty(source.label) : folded.label;
     const name = nonEmpty(source.contentDescription) ?? label;
     const placeholder = folded?.placeholder ?? nonEmpty(source.placeholder);
+    const attributes = nodeAttributes(source, android, { label, identifier, placeholder });
     const projected: { node: SemanticNode | undefined } = { node: undefined };
     const entry: ProjectedNode = {
       id,
@@ -606,7 +632,7 @@ export function projectSnapshot(
         : { value }),
       ...(secure ? { inputPurpose: 'password' as const } : {}),
       ...(Object.keys(states).length === 0 ? {} : { states }),
-      ...(placeholder === undefined ? {} : { attributes: { placeholder } }),
+      ...(attributes === undefined ? {} : { attributes }),
       // The accessibility identifier (iOS) or resource id (Android) is the node's test id.
       ...(identifier === undefined ? {} : { testId: identifier }),
       ...(source.rect === undefined ? {} : { rect: { ...source.rect } }),

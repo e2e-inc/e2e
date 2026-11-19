@@ -172,6 +172,7 @@ declares `requires: ['device']` on those tests.
 | `driver.keys('Enter')`, `pressKeyCode(66)` | `.press('Enter')` on the field |
 | `.getText()`, `.getValue()`, `.getAttribute('value')` | `.textContent()`, `.inputValue()` |
 | `.isDisplayed()`, `.isEnabled()`, `.getAttribute('checked')` | `.isVisible()`, `.isEnabled()`, `.isChecked()` |
+| `.getAttribute('label')`, `'resource-id'`, `'class'`, `'content-desc'`, `.getTagName()` | `.getAttribute('label')`, `'resource-id'`, `'class'`, `'content-desc'` (Android only). `label` is the iOS accessibility label or the Android text, `resource-id` the test id on both platforms, and `class` the Android class or the iOS element type without its prefix (`TextField`), which also stands in for the tag name |
 | `.isExisting()` | `(await locator.count()) > 0` |
 | `.getLocation()`, `.getSize()` | `.boundingBox()` |
 | `.waitForDisplayed({ timeout })` | `await expect(locator).toBeVisible({ timeout })`, or `locator.waitFor()` |
@@ -305,7 +306,7 @@ is not a step, so it skips the report and secret redaction.
 
 | Appium | Use today |
 | --- | --- |
-| `.getAttribute()` for a label, id, or class, `.isSelected()`, `.getTagName()` | `toHaveAccessibleName` for a label, `toBeSelected` for the selected state. No read for an id, class, or tag name |
+| `.isSelected()` | `toBeSelected` for the selected state |
 | `pressKeyCode(code)`, `driver.keys('Backspace')`, `isKeyboardShown()` | `.press()` takes `Enter`, `Space`, or one character. Use `.clear()` and `.fill()` |
 | `driver.getWindowRect()`, `getWindowSize()`, `mobile: deviceInfo` | Swipe by direction, or read `.boundingBox()` of a full-screen element |
 | `UiScrollable` `scrollToEnd()`, `scrollToBeginning()` | Loop `locator.swipe({ direction: 'down' })` until `allTextContents()` stops changing; `'up'` for the beginning |

@@ -1035,6 +1035,11 @@ getAttribute(name: string): Promise<string | null>;
 const href = await screen.getByRole('link', 'Docs').getAttribute('href');
 ```
 
+On a device, a node carries `label` (the iOS accessibility label, the Android
+text), `resource-id` (its test id), `class` (the Android class, or the iOS
+element type such as `TextField`), `content-desc` on Android, and
+`placeholder` when the platform reports one.
+
 #### `isVisible`
 
 ```ts
