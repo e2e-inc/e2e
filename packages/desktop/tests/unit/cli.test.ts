@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { AgentDesktopCli, AgentDesktopFailure, translate } from '../../src/cli.ts';
-import { FAKE_BINARY, failure, fakeScenario } from '../helpers/fake.ts';
+import { FAKE_BINARY, cleanupFakes, failure, fakeScenario } from '../helpers/fake.ts';
+
+afterEach(cleanupFakes);
 
 const call = { input: true, signal: new AbortController().signal, timeoutMs: 10_000, label: 'set-value' } as const;
 

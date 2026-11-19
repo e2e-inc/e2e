@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -16,9 +16,18 @@ export interface FakeCall {
 /** Answers by command (`snapshot`, `snapshot:menu`, `select`): each call takes the next, the last repeats. */
 export type Scenario = Record<string, readonly unknown[]>;
 
+/** The directories scenarios were written to, removed by `cleanupFakes`. */
+const directories: string[] = [];
+
+/** Removes every scenario directory written so far; call it after each test, once its fake processes have stopped. */
+export function cleanupFakes(): void {
+  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+}
+
 /** A scenario on disk and the environment that points the fake at it. */
 export function fakeScenario(scenario: Scenario): { env: Record<string, string>; calls: () => FakeCall[]; spawned: () => number[] } {
   const directory = mkdtempSync(path.join(tmpdir(), 'e2e-fake-agent-desktop-'));
+  directories.push(directory);
   const file = path.join(directory, 'scenario.json');
   const log = path.join(directory, 'calls.jsonl');
   writeFileSync(file, JSON.stringify(scenario));

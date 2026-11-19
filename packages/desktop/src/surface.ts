@@ -376,6 +376,7 @@ export class DesktopSurface {
     }
     if (typeof launched.pid !== 'number') throw new EngineError('ENGINE_FAILURE', `agent-desktop launched ${target} but reported no process id, so the engine cannot tell its copy from another`, { retryable: false });
     // A launcher can hand the request to a copy already running (a Linux desktop file does), which agent-desktop then reports: it is not this launch's, and is never driven or quit.
+    // Only a readable environment without the token proves that; an unreadable one (a macOS system app) leaves agent-desktop's report, of a fresh instance it started, standing.
     if ((await carriesToken(launched.pid, token, this.platform, operation.signal)) === false) {
       throw new EngineError('ENGINE_FAILURE', `launching ${target} handed over to a copy already running (process ${launched.pid}), which the engine does not drive or quit; quit that copy and run again`, { retryable: false, cause: HANDED_OVER });
     }
@@ -487,6 +488,7 @@ export class DesktopSurface {
     if (this.pid === undefined && pending !== undefined) {
       // A launch whose outcome was unknown: look for the process it started, which may still be registering, under this quit's own budget.
       const until = Date.now() + Math.min(timeoutMs, PENDING_SETTLE_MS);
+      // The pending launch stays until it is claimed or a whole wait found none: a lookup that failed leaves it for the next quit.
       while (Date.now() < until && !signal.aborted) {
         const found = await this.claim(pending.target, pending.token, { signal, timeoutMs: Math.max(until - Date.now(), 0) }).catch((cause: unknown) => {
           if (cause instanceof EngineError && cause.code === 'OPERATION_TIMEOUT') return false;
@@ -495,6 +497,7 @@ export class DesktopSurface {
         if (found) break;
         await sleep(Math.min(LAUNCH_POLL_MS, Math.max(until - Date.now(), 0)), signal);
       }
+      if (signal.aborted) throw new EngineError('CANCELLED', `looking for the process a launch of ${pending.target} started was cancelled`, { retryable: false });
       this.pending = undefined;
       if (this.pid === undefined) {
         throw new EngineError('ENGINE_FAILURE', `a launch of ${pending.target} failed, and no process it started was found; if the app is running, quit it by hand`, { retryable: false });
@@ -565,11 +568,13 @@ export class DesktopSurface {
   /**
    * One snapshot of a window of the app the engine launched, projected: the
    * window `windowId` names, else the focused one, the visible ones, and the
-   * rest, in that order, the first one accessibility can read. Undefined while
+   * rest, in that order, the first one accessibility can read. `full` reads
+   * every node even with `snapshot: 'interactive'`, which leaves out a secure
+   * node with no action of its own. Undefined while
    * the app is not running or has no window to read; a copy of the app the
    * engine did not launch is never read.
    */
-  private async capture(operation: OperationContext, windowId?: string): Promise<ProjectedScreen | undefined> {
+  private async capture(operation: OperationContext, windowId?: string, full = false): Promise<ProjectedScreen | undefined> {
     const windows = await this.ownWindows(operation);
     const candidates =
       windowId === undefined
@@ -577,7 +582,7 @@ export class DesktopSurface {
         : windows.filter((window) => window.id === windowId);
     for (const window of candidates) {
       const args = ['snapshot', '--window-id', window.id, '--include-bounds', '--max-depth', String(MAX_DEPTH), '--timeout-ms', String(this.toolBudget(operation))];
-      if (this.options.interactiveOnly) args.push('-i');
+      if (this.options.interactiveOnly && !full) args.push('-i');
       try {
         return this.projectWindow(await this.run<RawSnapshot>(args, { label: 'snapshot', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs, raw: true }));
       } catch (cause) {
@@ -601,7 +606,7 @@ export class DesktopSurface {
       throw translate(cause, 'list windows', false);
     }
     const { instance } = this;
-    return listed.filter((window) => window.pid === pid && (instance === undefined || window.process_instance === undefined || window.process_instance === instance));
+    return listed.filter((window) => window.pid === pid && (instance === undefined || window.process_instance === instance));
   }
 
   /** The window of the launched process a command reads or acts in: the focused one, else the first visible one. */
@@ -746,11 +751,16 @@ export class DesktopSurface {
         await this.fill(binding, action.value, operation);
         break;
       case 'press': {
+        // A key agent-desktop cannot press is refused before focus moves.
+        const combo = toCombo(action.key, this.platform);
+        const window = binding.windowId;
+        if (window === undefined) throw notActionable(`node ${binding.id} was read in no window to press a key into`);
         await this.refCommand('focus', binding, operation);
-        // Focusing can hand focus on (a dialog it opens): the key goes only when the control still holds it, into its own window.
-        const now = await this.capture(operation, binding.windowId);
-        if (now?.bindings.get(binding.id)?.states?.focused !== true) throw notActionable(`node ${binding.id} did not keep keyboard focus, so the key would land on another control`);
-        await this.run(['press', toCombo(action.key, this.platform), '--window-id', binding.windowId ?? '', ...(this.options.headed ? ['--headed'] : [])], { label: `press ${action.key}`, input: true, signal: operation.signal, timeoutMs: operation.timeoutMs });
+        // Focusing can hand focus on (a dialog it opens): the key goes only when the control still holds it, found again by role and place, since a look-alike has a new id in every read.
+        const now = await this.capture(operation, window);
+        const held = [...(now?.bindings.values() ?? [])].some((candidate) => candidate.states?.focused === true && candidate.role === binding.role && (binding.rect === undefined ? candidate.id === binding.id : sameRect(candidate.rect, binding.rect)));
+        if (!held) throw notActionable(`node ${binding.id} did not keep keyboard focus, so the key would land on another control`);
+        await this.run(['press', combo, '--window-id', window, ...(this.options.headed ? ['--headed'] : [])], { label: `press ${action.key}`, input: true, signal: operation.signal, timeoutMs: operation.timeoutMs });
         break;
       }
       case 'selectOption':
@@ -859,6 +869,8 @@ export class DesktopSurface {
   private async clickMenuItem(label: string, operation: OperationContext): Promise<void> {
     const menu = await this.scoped<RawSnapshot>((scope) => ['snapshot', ...scope, '--surface', 'menu', '-i', '--timeout-ms', String(this.toolBudget(operation))], operation, { label: 'snapshot menu', input: false });
     const items = projectSnapshot(menu, () => this.idFor(undefined));
+    // A menu read in part proves no option missing.
+    if (items.truncated) throw new EngineError('ENGINE_FAILURE', `the open menu could not be read whole, so whether it has "${label}" is unknown`, { retryable: false });
     const item = [...items.bindings.values()].find((candidate) => candidate.ref !== undefined && candidate.name === label);
     if (item === undefined) {
       // A menu left open is a changed app: a failure to close it is reported, not the missing option.
@@ -943,8 +955,11 @@ export class DesktopSurface {
    * a field that moved in between withholds the image rather than ship it
    * unproven.
    */
-  private async pixelsFor(screen: ProjectedScreen, operation: OperationContext): Promise<{ pixels: ObservationPixels; masked: number }> {
-    if (screen.windowId === undefined) throw notActionable('the observed surface has no window to capture');
+  private async pixelsFor(observed: ProjectedScreen, operation: OperationContext): Promise<{ pixels: ObservationPixels; masked: number }> {
+    if (observed.windowId === undefined) throw notActionable('the observed surface has no window to capture');
+    // The secure fields come from a whole read of the window, never an interactive one, which can leave a secure node out.
+    const screen = this.options.interactiveOnly ? await this.capture(operation, observed.windowId, true) : observed;
+    if (screen?.windowId === undefined) throw new EngineError('ENGINE_FAILURE', 'the window could not be read whole to find its secure fields; screenshot withheld', { retryable: false });
     const secure = screen.secureRects;
     if (secure === undefined) throw new EngineError('ENGINE_FAILURE', 'a secure field on screen has no bounds to mask; screenshot withheld', { retryable: false });
     // A snapshot cut short can leave out a secure field, which would then go unmasked.
@@ -954,7 +969,7 @@ export class DesktopSurface {
       const file = path.join(directory, 'window.png');
       const shot = await this.run<{ scale_factor?: number }>(['screenshot', '--window-id', screen.windowId, file], { label: 'screenshot', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
       // The snapshot and the capture are two commands: read the window again, and withhold the image if a secure field moved, came, or went between them.
-      const after = await this.capture(operation);
+      const after = await this.capture(operation, screen.windowId, true);
       if (after === undefined || after.windowId !== screen.windowId || after.truncated || !sameRects(after.secureRects, secure) || after.viewport.width !== screen.viewport.width || after.viewport.height !== screen.viewport.height) {
         throw new EngineError('ENGINE_FAILURE', 'the window changed while it was captured, so its secure fields cannot be placed; screenshot withheld', { retryable: false });
       }
@@ -1000,18 +1015,22 @@ export class DesktopSurface {
 
 /**
  * Whether a process carries a launch token in its environment: `ps -E` on
- * macOS, `/proc/<pid>/environ` on Linux. Undefined where it cannot be read
- * (Windows), which the caller treats as no evidence.
+ * macOS, `/proc/<pid>/environ` on Linux. Undefined where the environment
+ * cannot be read (Windows, a macOS system app, a lookup that failed): no
+ * evidence either way.
  */
 async function carriesToken(pid: number, token: string, platform: DesktopPlatform, signal: AbortSignal): Promise<boolean | undefined> {
   const marker = `${LAUNCH_TOKEN}=${token}`;
   if (platform === 'macos') {
     const { stdout } = await execFileAsync('ps', ['-E', '-p', String(pid), '-o', 'command='], { signal }).catch(() => ({ stdout: '' }));
-    return stdout.split(/\s+/).includes(marker);
+    const words = stdout.split(/\s+/);
+    if (words.includes(marker)) return true;
+    // macOS hides the environment of a system app (SIP), and `ps -E` then prints the command alone: that is no evidence either way.
+    return words.some((word) => /^(HOME|PATH|USER)=/.test(word)) ? false : undefined;
   }
   if (platform === 'linux') {
-    const environ = await readFile(`/proc/${pid}/environ`, 'utf8').catch(() => '');
-    return environ.split('\0').includes(marker);
+    const environ = await readFile(`/proc/${pid}/environ`, 'utf8').catch(() => undefined);
+    return environ === undefined ? undefined : environ.split('\0').includes(marker);
   }
   return undefined;
 }
@@ -1032,6 +1051,11 @@ async function afterChange(label: string, run: () => Promise<unknown>): Promise<
 
 /** Thrown when an open menu has no item with the label a select names; nothing was chosen, and the menu was closed. */
 class NoSuchOption extends Error {}
+
+/** Whether two rects are the same; two missing rects are not. */
+function sameRect(a: Rect | undefined, b: Rect | undefined): boolean {
+  return a !== undefined && b !== undefined && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
 
 /** Whether two lists of secure-field rects are the same, in order. */
 function sameRects(a: readonly Rect[] | undefined, b: readonly Rect[]): boolean {

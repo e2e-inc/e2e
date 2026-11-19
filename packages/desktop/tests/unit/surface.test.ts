@@ -5,15 +5,20 @@ import path from 'node:path';
 import type { OperationContext } from '@e2e-dev/core/engine';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveOptions } from '../../src/options.ts';
+import { hostPlatform } from '../../src/options.ts';
 import { DesktopSurface } from '../../src/surface.ts';
-import { FAKE_BINARY, failure, fakeScenario, snapshotAnswer, type Scenario } from '../helpers/fake.ts';
+import { FAKE_BINARY, cleanupFakes, failure, fakeScenario, snapshotAnswer, type Scenario } from '../helpers/fake.ts';
 
 const signal = new AbortController().signal;
+
+/** The OS these tests run on: the launch token is read the way this OS reads a process's environment. */
+const HOST = hostPlatform() ?? 'linux';
 const children: ChildProcess[] = [];
 const fakes: { spawned: () => number[] }[] = [];
 
 afterEach(() => {
   for (const child of children.splice(0)) child.kill('SIGKILL');
+  cleanupFakes();
   for (const fake of fakes.splice(0)) {
     for (const pid of fake.spawned()) {
       try {
@@ -88,7 +93,7 @@ async function initialized(scenario: Scenario | ((pid: number) => Scenario), { s
       return pid;
     },
   };
-  const surface = new DesktopSurface(resolveOptions({ binary: FAKE_BINARY, settle: false, ...options }), 'macos');
+  const surface = new DesktopSurface(resolveOptions({ binary: FAKE_BINARY, settle: false, ...options }), HOST);
   await surface.init({
     runId: 'run',
     targetName: 'macos',
@@ -251,7 +256,7 @@ describe('DesktopSurface', () => {
   it('presses keys as agent-desktop combos into the window of the launched process', async () => {
     const { surface, fake } = await launched({});
     await surface.pressKey('ControlOrMeta+a', operation());
-    expect(fake.calls().at(-1)?.args).toEqual(['press', 'cmd+a', '--window-id', 'w-mine']);
+    expect(fake.calls().at(-1)?.args).toEqual(['press', HOST === 'macos' ? 'cmd+a' : 'ctrl+a', '--window-id', 'w-mine']);
   });
 
   it('sends no key to whatever has focus when the control it was meant for refuses focus', async () => {
@@ -579,6 +584,65 @@ describe('DesktopSurface', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it('presses a key into one of two look-alike fields, found again by its place', async () => {
+    const field = (ref: string, y: number, focused: boolean) => ({ role: 'textfield', name: 'Item', ref_id: ref, bounds: { x: 10, y, width: 100, height: 20 }, ...(focused ? { states: ['focused'] } : {}) });
+    const screen = (id: string, focusSecond: boolean) => ({ ok: true, data: { snapshot_id: id, window: { id: 'w-mine' }, tree: { role: 'window', name: 'List', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [field(`@${id}:e1`, 10, false), field(`@${id}:e2`, 40, focusSecond)] } } });
+    const { surface, fake } = await launched({ snapshot: [screen('s1', false), screen('s1', false), screen('s2', true)] }, { observe: false });
+    const observed = await surface.observe(operation(), undefined);
+    await surface.perform(observed.root.children![1]!.ref, { kind: 'press', key: 'a' }, operation());
+    expect(fake.calls().at(-1)?.args).toEqual(['press', 'a', '--window-id', 'w-mine']);
+  });
+
+  it('refuses a key agent-desktop cannot press before it moves focus', async () => {
+    const { surface, fake, byTestId } = await launched({});
+    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Insert' }, operation())).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+    expect(fake.calls().some((call) => call.key === 'focus')).toBe(false);
+  });
+
+  it('keeps a launch whose process it could not look for, so the next quit looks again', async () => {
+    const { surface, fake } = await initialized({
+      launch: [{ spawn: true, ...(failure('TIMEOUT', 'delivered_unverified') as object) }],
+      'list-apps': [failure('INTERNAL', 'not_delivered'), { spawnedApps: { name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form' } }],
+    });
+    await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
+    await expect(surface.endAttempt({ signal, timeoutMs: 5_000 })).rejects.toThrow(/list apps/);
+    await surface.dispose({ signal, timeoutMs: 5_000 });
+    expect(await gone(fake.spawned()[0]!)).toBe(true);
+  });
+
+  it('never reads a window row that names the launched pid but no process instance', async () => {
+    const { surface, fake } = await launched((pid) => ({ 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }, { ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }, { ok: true, data: [{ id: 'w-anon', pid, is_focused: true }] }] }));
+    await expect(surface.pressKey('Enter', operation())).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    expect(fake.calls().some((call) => call.args.includes('w-anon'))).toBe(false);
+  });
+
+  it('accepts the process agent-desktop launched when its environment cannot be read, as for a system app', async () => {
+    const hidden = 2_147_483_000;
+    const { surface } = await initialized({
+      launch: [{ ok: true, data: { app: 'SpikeForm', pid: hidden, process_instance: 'instance-1' } }],
+      'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid: hidden, process_instance: 'instance-1', is_focused: true }] }],
+      'list-apps': [{ ok: true, data: { apps: [] } }],
+    });
+    await expect(surface.restart(operation())).resolves.toBeUndefined();
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+  });
+
+  it('reads the whole window for a screenshot even with interactive snapshots', async () => {
+    const { surface, fake } = await launched({ snapshot: [renamed('macos/sign-in-form', 'w-8321', 'w-mine')] }, { options: { snapshot: 'interactive' } });
+    await startAttempt(surface);
+    await surface.screenshot('shot', operation()).catch(() => undefined);
+    const reads = fake.calls().filter((call) => call.key === 'snapshot');
+    expect(reads.at(-1)?.args).not.toContain('-i');
+    expect(reads.some((call) => call.args.includes('-i'))).toBe(true);
+  });
+
+  it('never calls an option missing from a menu read only in part', async () => {
+    const partial = { ok: true, data: { ...(snapshotAnswer('macos/electron-menu') as { data: object }).data, complete: false } };
+    const { surface, fake, byTestId } = await launched({ select: [failure('TIMEOUT', 'not_delivered')], expand: [failure('ACTION_NOT_SUPPORTED', 'not_delivered')], 'snapshot:menu': [partial] });
+    await expect(surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Enterprise' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
+    expect(fake.calls().some((call) => call.key === 'press')).toBe(false);
   });
 
   it('quits the process it launched at the end of the attempt, and only that one', async () => {
