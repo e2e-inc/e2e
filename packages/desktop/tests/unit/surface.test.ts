@@ -10,20 +10,47 @@ import { FAKE_BINARY, failure, fakeScenario, snapshotAnswer, type Scenario } fro
 
 const signal = new AbortController().signal;
 const children: ChildProcess[] = [];
+const fakes: { spawned: () => number[] }[] = [];
 
 afterEach(() => {
   for (const child of children.splice(0)) child.kill('SIGKILL');
+  for (const fake of fakes.splice(0)) {
+    for (const pid of fake.spawned()) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        // Already quit by the test.
+      }
+    }
+  }
 });
+
+/** In a scripted answer, the pid of the process the fake's `launch` started for the app. */
+const SPAWNED = '$spawned' as unknown as number;
+
+/** Whether a process is gone within `ms`. */
+async function gone(pid: number, ms = 3_000): Promise<boolean> {
+  const until = Date.now() + ms;
+  for (;;) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return true;
+    }
+    if (Date.now() >= until) return false;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
 
 function operation(origin: 'test' | 'agent' = 'test'): OperationContext {
   return { signal, timeoutMs: 10_000, runId: 'run', attemptId: 'attempt', origin };
 }
 
-/** A real process standing in for the launched app, so the engine has a pid to own and quit. */
-function fakeApp(): { pid: number; exited: Promise<NodeJS.Signals | null> } {
+/** A real process standing in for a copy of the app the engine did not launch: the developer's own. */
+function otherCopy(): number {
   const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)']);
   children.push(child);
-  return { pid: child.pid!, exited: new Promise((resolve) => child.once('exit', (_code, exitSignal) => resolve(exitSignal))) };
+  return child.pid!;
 }
 
 /** A snapshot fixture's answer with its refs and window renamed, as a later snapshot of the same window reports it. */
@@ -38,17 +65,29 @@ interface Launch {
   readonly options?: Parameters<typeof resolveOptions>[0];
 }
 
-/** A surface on the scripted agent-desktop, initialized but with nothing launched; a real child process stands in for the app. */
+/**
+ * A surface on the scripted agent-desktop, initialized but with nothing
+ * launched. The fake's `launch` starts a real process with the launch's
+ * environment (its token) and reports it, as agent-desktop does; `app.pid`
+ * is that process once launched.
+ */
 async function initialized(scenario: Scenario | ((pid: number) => Scenario), { snapshot = 'macos/appkit-form', options = {} }: Launch = {}) {
-  const app = fakeApp();
   const fake = fakeScenario({
     status: [{ ok: true, data: { version: '1.3.1', permissions: { accessibility: { state: 'granted' } } } }],
-    launch: [{ ok: true, data: { app: 'SpikeForm', pid: app.pid, process_instance: 'instance-1' } }],
-    'list-windows': [{ ok: true, data: [{ id: 'w-mine', title: 'Spike Form', pid: app.pid, is_focused: true }, { id: 'w-theirs', title: 'Spike Form', pid: 1, is_focused: false }] }],
-    'list-apps': [{ ok: true, data: { apps: [{ pid: app.pid, process_instance: 'instance-1' }] } }],
+    launch: [{ spawn: true, ok: true, data: { app: 'SpikeForm', pid: SPAWNED, process_instance: 'instance-1' } }],
+    'list-windows': [{ ok: true, data: [{ id: 'w-mine', title: 'Spike Form', pid: SPAWNED, process_instance: 'instance-1', is_focused: true }, { id: 'w-theirs', title: 'Spike Form', pid: 1, is_focused: false }] }],
+    'list-apps': [{ ok: true, data: { apps: [{ pid: SPAWNED, process_instance: 'instance-1' }] } }],
     snapshot: [snapshotAnswer(snapshot)],
-    ...(typeof scenario === 'function' ? scenario(app.pid) : scenario),
+    ...(typeof scenario === 'function' ? scenario(SPAWNED) : scenario),
   });
+  fakes.push(fake);
+  const app = {
+    get pid(): number {
+      const pid = fake.spawned().at(-1);
+      if (pid === undefined) throw new Error('nothing was launched');
+      return pid;
+    },
+  };
   const surface = new DesktopSurface(resolveOptions({ binary: FAKE_BINARY, settle: false, ...options }), 'macos');
   await surface.init({
     runId: 'run',
@@ -284,8 +323,7 @@ describe('DesktopSurface', () => {
     const { surface, app } = await launched({ 'list-apps': [{ ok: true, data: { apps: [] } }] });
     await surface.endAttempt({ signal, timeoutMs: 5_000 });
     await surface.dispose({ signal, timeoutMs: 5_000 });
-    const raced = await Promise.race([app.exited, new Promise((resolve) => setTimeout(() => resolve('running'), 300))]);
-    expect(raced).toBe('running');
+    expect(await gone(app.pid, 300)).toBe(false);
   });
 
   it('keeps the process as its own when a quit fails, so dispose quits it', async () => {
@@ -293,10 +331,10 @@ describe('DesktopSurface', () => {
     await expect(surface.endAttempt({ signal, timeoutMs: 5_000 })).rejects.toThrow(/find SpikeForm/);
     await surface.dispose({ signal, timeoutMs: 5_000 });
     expect(fake.calls().filter((call) => call.key === 'list-apps')).toHaveLength(2);
-    await expect(app.exited).resolves.toBe('SIGKILL');
+    expect(await gone(app.pid)).toBe(true);
   });
 
-  it.skipIf(process.platform !== 'darwin')('takes as its own the process a failed launch started, by its launch token, and quits it', async () => {
+  it.skipIf(process.platform === 'win32')('takes as its own the process a failed launch started, by its launch token, and quits it', async () => {
     const { surface, fake } = await initialized({
       launch: [{ spawn: true, ...(failure('TIMEOUT', 'delivered_unverified') as object) }],
       'list-apps': [{ spawnedApps: { name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form' } }],
@@ -360,24 +398,26 @@ describe('DesktopSurface', () => {
   });
 
   it('takes nothing as its own after a launch agent-desktop refused', async () => {
-    const { surface, app } = await initialized((pid) => ({
+    const theirs = otherCopy();
+    const { surface } = await initialized({
       launch: [failure('APP_NOT_FOUND', 'not_delivered')],
-      'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [{ name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form', pid, process_instance: 'mine' }] } }],
-    }));
+      'list-apps': [{ ok: true, data: { apps: [{ name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form', pid: theirs, process_instance: 'theirs' }] } }],
+    });
     await expect(surface.restart(operation())).rejects.toThrow(/no installed app/);
     await surface.endAttempt({ signal, timeoutMs: 5_000 });
     await surface.dispose({ signal, timeoutMs: 5_000 });
-    expect(await Promise.race([app.exited, new Promise((resolve) => setTimeout(() => resolve('running'), 300))])).toBe('running');
+    expect(await gone(theirs, 300)).toBe(false);
   });
 
   it('never takes a running copy without its launch token, and says the launch left nothing it could find', async () => {
-    const { surface, app } = await initialized((pid) => ({
+    const theirs = otherCopy();
+    const { surface } = await initialized({
       launch: [failure('TIMEOUT', 'delivered_unverified')],
-      'list-apps': [{ ok: true, data: { apps: [{ name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form', pid, process_instance: 'theirs' }] } }],
-    }));
+      'list-apps': [{ ok: true, data: { apps: [{ name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form', pid: theirs, process_instance: 'theirs' }] } }],
+    });
     await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
     await expect(surface.endAttempt({ signal, timeoutMs: 1_000 })).rejects.toThrow(/no process it started was found/);
-    expect(await Promise.race([app.exited, new Promise((resolve) => setTimeout(() => resolve('running'), 300))])).toBe('running');
+    expect(await gone(theirs, 300)).toBe(false);
   });
 
   it('taps a point in the window it was taken from, even after another window took focus', async () => {
@@ -454,10 +494,97 @@ describe('DesktopSurface', () => {
     expect(Date.now() - started).toBeLessThan(4_500);
   });
 
+  it('presses a key into a control only while it holds focus, and into its own window', async () => {
+    const { surface, fake, byTestId } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')] });
+    await surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, operation());
+    expect(fake.calls().at(-1)?.args).toEqual(['press', 'return', '--window-id', 'w-mine']);
+    await expect(surface.perform(byTestId('sign-in'), { kind: 'press', key: 'Enter' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+    expect(fake.calls().filter((call) => call.key === 'press')).toHaveLength(1);
+  });
+
+  it('sends no key when focusing the control fails', async () => {
+    const { surface, fake, byTestId } = await launched({ focus: [failure('ACTION_NOT_SUPPORTED', 'not_delivered')] });
+    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'a' }, operation())).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+    expect(fake.calls().some((call) => call.key === 'press')).toBe(false);
+  });
+
+  it('reports a menu it could not close after finding no such option as possibly changed', async () => {
+    const { surface, byTestId } = await launched({
+      select: [failure('TIMEOUT', 'not_delivered')],
+      expand: [failure('ACTION_NOT_SUPPORTED', 'not_delivered')],
+      'snapshot:menu': [snapshotAnswer('macos/electron-menu')],
+      press: [failure('ACTION_FAILED', 'unknown')],
+    });
+    await expect(surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Enterprise' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
+  });
+
+  it('never types a missing option into an editable list as free text', async () => {
+    const editable = { ok: true, data: { snapshot_id: 's5', window: { id: 'w-mine' }, tree: { role: 'window', name: 'Form', children: [{ role: 'combobox', name: 'Plan', ref_id: '@s5:e1', available_actions: ['Click', 'SetValue', 'SetFocus'] }] } } };
+    const { surface, fake } = await launched({ snapshot: [editable], select: [failure('ELEMENT_NOT_FOUND', 'not_delivered')], 'snapshot:menu': [snapshotAnswer('macos/electron-menu')] }, { observe: false });
+    const observed = await surface.observe(operation(), undefined);
+    await expect(surface.perform(observed.root.children![0]!.ref, { kind: 'selectOption', value: 'Enterprise' }, operation())).rejects.toThrow(/no option "Enterprise"/);
+    expect(fake.calls().some((call) => call.key === 'set-value')).toBe(false);
+  });
+
+  it('reads the next window when the focused-first one is a panel accessibility cannot read', async () => {
+    const hidden = { ok: false, error: { code: 'ACTION_NOT_SUPPORTED', message: 'not exposed', details: { kind: 'window_without_accessibility_element' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
+    const { surface, fake } = await launched(
+      (pid) => ({
+        'list-windows': [{ ok: true, data: [{ id: 'w-panel', pid, process_instance: 'instance-1', visible: true }, { id: 'w-doc', pid, process_instance: 'instance-1', visible: true }] }],
+        snapshot: [hidden, snapshotAnswer('macos/appkit-form')],
+      }),
+      { observe: false },
+    );
+    const observed = await surface.observe(operation(), undefined);
+    expect(observed.root.children?.length).toBeGreaterThan(0);
+    expect(fake.calls().filter((call) => call.key === 'snapshot').map((call) => call.args[2])).toEqual(expect.arrayContaining(['w-panel', 'w-doc']));
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a launch that agent-desktop says handed over to a copy already running', async () => {
+    const theirs = otherCopy();
+    const { surface } = await initialized({ launch: [{ ok: true, data: { app: 'SpikeForm', pid: theirs, process_instance: 'theirs' } }] });
+    await expect(surface.restart(operation())).rejects.toThrow(/handed over to a copy already running/);
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect(await gone(theirs, 300)).toBe(false);
+  });
+
+  it('types keystrokes into the focused field, which only physical input sends', async () => {
+    const { surface, fake } = await launched({}, { options: { headed: true } });
+    await surface.typeText('ada', { replace: false }, operation());
+    expect(fake.calls().find((call) => call.key === 'type')?.args).toContain('--headed');
+  });
+
+  it('fails doctor on an appPath that is no app bundle', async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'e2e-desktop-empty-'));
+    mkdirSync(path.join(directory, 'Empty.app'));
+    try {
+      const fake = fakeScenario({ status: [{ ok: true, data: { version: '1.3.1', permissions: { accessibility: { state: 'granted' }, screen_recording: { state: 'granted' } } } }] });
+      const surface = new DesktopSurface(resolveOptions({ binary: FAKE_BINARY }), 'macos');
+      const checks = await surface.doctor({ targetName: 'mac', projectRoot: directory, app: { appPath: 'Empty.app' }, env: fake.env, headed: false, signal, log: () => undefined });
+      expect(checks.find((check) => check.id === 'app-path')).toMatchObject({ status: 'fail', message: expect.stringMatching(/no Contents\/Info.plist/) });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform !== 'darwin')('opens no app bundle once the operation budget is spent', async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'e2e-desktop-bundle-'));
+    mkdirSync(path.join(directory, 'Built.app', 'Contents'), { recursive: true });
+    writeFileSync(path.join(directory, 'Built.app', 'Contents', 'Info.plist'), '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>dev.e2e.built</string></dict></plist>');
+    try {
+      const fake = fakeScenario({ status: [{ ok: true, data: { version: '1.3.1', permissions: { accessibility: { state: 'granted' } } } }] });
+      const surface = new DesktopSurface(resolveOptions({ binary: FAKE_BINARY }), 'macos');
+      await surface.init({ runId: 'r', targetName: 'mac', projectRoot: directory, app: { appPath: 'Built.app' }, env: fake.env, headed: false, workerSlot: 0, signal, log: () => undefined });
+      await expect(surface.restart({ ...operation(), timeoutMs: 0 })).rejects.toMatchObject({ code: 'OPERATION_TIMEOUT' });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('quits the process it launched at the end of the attempt, and only that one', async () => {
     const { surface, app, fake } = await launched({});
     await surface.endAttempt({ signal, timeoutMs: 5_000 });
-    await expect(app.exited).resolves.toBe('SIGKILL');
+    expect(await gone(app.pid)).toBe(true);
     expect(fake.calls().some((call) => call.key === 'close-app')).toBe(false);
   });
 });

@@ -12,6 +12,8 @@ describe('desktop()', () => {
     expect(headed.actions).toEqual(expect.arrayContaining(['doubleTap', 'hover']));
     expect(headed.pointerActions).toEqual(expect.arrayContaining(['tap']));
     expect(plain.workers).toBe(1);
+    expect(plain.keyboard).toBeUndefined();
+    expect(headed.keyboard).toBeDefined();
   });
 
   it('refuses options it does not take', () => {

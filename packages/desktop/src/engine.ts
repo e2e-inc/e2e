@@ -52,10 +52,15 @@ export function desktop(options: DesktopOptions = {}): EngineHandle<DesktopFixtu
     ...(headed
       ? { performAt: (point, action, operation) => surface.performAt(point, action, operation), pointerActions: HEADED_POINTER_ACTIONS }
       : {}),
-    keyboard: {
-      type: (text, keyboardOptions, operation) => surface.typeText(text, keyboardOptions, operation),
-      press: (key, operation) => surface.pressKey(key, operation),
-    },
+    // Typing into whatever has focus must send keystrokes, which agent-desktop does with physical input only.
+    ...(headed
+      ? {
+          keyboard: {
+            type: (text, keyboardOptions, operation) => surface.typeText(text, keyboardOptions, operation),
+            press: (key, operation) => surface.pressKey(key, operation),
+          },
+        }
+      : {}),
     validateApp: (app, info) => validateApp(app, info, platform),
     // No `open`: a desktop app has no URL, so the runner serves `app.open()`
     // with `restart`, a fresh launch of the target's app.

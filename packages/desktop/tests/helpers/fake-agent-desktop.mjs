@@ -36,5 +36,8 @@ if (answer.spawnedApps !== undefined) {
 }
 if (answer.sleepMs !== undefined) await new Promise((resolve) => setTimeout(resolve, answer.sleepMs));
 if (answer.noEnvelope === true) process.exit(1);
-process.stdout.write(`${JSON.stringify({ version: '2.6', command: args[0], ...answer.envelope ?? answer })}\n`);
+// `"$spawned"` in an answer stands for the pid of the newest process `spawn` started.
+const spawned = existsSync(`${log}.spawned`) ? readFileSync(`${log}.spawned`, 'utf8').split('\n').findLast(Boolean) : undefined;
+const text = JSON.stringify({ version: '2.6', command: args[0], ...answer.envelope ?? answer }).replaceAll('"$spawned"', spawned ?? 'null');
+process.stdout.write(`${text}\n`);
 process.exitCode = answer.ok === false ? 1 : 0;

@@ -60,6 +60,9 @@ const LAUNCH_POLL_MS = 100;
 /** The environment variable that carries a launch's token into the process it starts. */
 const LAUNCH_TOKEN = 'E2E_DESKTOP_LAUNCH';
 
+/** The cause of a launch agent-desktop handed to a copy already running: it started nothing of the engine's. */
+const HANDED_OVER = new Error('the launch handed over to a copy already running');
+
 /** How long a quit looks for the process of a launch whose outcome was unknown. */
 const PENDING_SETTLE_MS = 3_000;
 
@@ -186,7 +189,6 @@ export class DesktopSurface {
    */
   private pending: { readonly target: string; readonly token: string } | undefined;
   private attempt: Attempt | undefined;
-  private latest: ProjectedScreen | undefined;
   /** The window of the newest screen handed to the harness, by observe or locate: the one a point is measured in. */
   private pointWindow: string | undefined;
   /** The newest binding of every node id an observation or a locate handed out, newest last. */
@@ -316,7 +318,15 @@ export class DesktopSurface {
     }
     if (info.app.appPath !== undefined) {
       const bundle = path.resolve(info.projectRoot, info.app.appPath);
-      checks.push(existsSync(bundle) ? { id: 'app-path', status: 'pass', message: bundle } : { id: 'app-path', status: 'fail', message: `app.appPath ${bundle} does not exist; build the app or fix the path` });
+      // What init needs of the bundle: its Info.plist, which names the bundle id the launched process is found by.
+      const plist = path.join(bundle, 'Contents', 'Info.plist');
+      checks.push(
+        !existsSync(bundle)
+          ? { id: 'app-path', status: 'fail', message: `app.appPath ${bundle} does not exist; build the app or fix the path` }
+          : !existsSync(plist)
+            ? { id: 'app-path', status: 'fail', message: `app.appPath ${bundle} is not an app bundle: it has no Contents/Info.plist` }
+            : { id: 'app-path', status: 'pass', message: bundle },
+      );
     }
     return checks;
   }
@@ -342,7 +352,8 @@ export class DesktopSurface {
       else await this.openBundle(this.bundle, target, token, operation);
     } catch (cause) {
       // A launch agent-desktop refused sent nothing: no process of it can be running.
-      const refused = cause instanceof EngineError && cause.cause instanceof AgentDesktopFailure && cause.cause.notDelivered;
+      // A launch handed to a copy already running started nothing either.
+      const refused = cause instanceof EngineError && ((cause.cause instanceof AgentDesktopFailure && cause.cause.notDelivered) || cause.cause === HANDED_OVER);
       if (this.pid === undefined && !refused) this.pending = { target, token };
       throw cause;
     }
@@ -364,6 +375,10 @@ export class DesktopSurface {
       throw translate(cause, `launch ${target}`, true);
     }
     if (typeof launched.pid !== 'number') throw new EngineError('ENGINE_FAILURE', `agent-desktop launched ${target} but reported no process id, so the engine cannot tell its copy from another`, { retryable: false });
+    // A launcher can hand the request to a copy already running (a Linux desktop file does), which agent-desktop then reports: it is not this launch's, and is never driven or quit.
+    if ((await carriesToken(launched.pid, token, this.platform, operation.signal)) === false) {
+      throw new EngineError('ENGINE_FAILURE', `launching ${target} handed over to a copy already running (process ${launched.pid}), which the engine does not drive or quit; quit that copy and run again`, { retryable: false, cause: HANDED_OVER });
+    }
     this.appName = launched.app ?? target;
     this.pid = launched.pid;
     this.instance = typeof launched.process_instance === 'string' ? launched.process_instance : undefined;
@@ -377,6 +392,7 @@ export class DesktopSurface {
    * token in its environment.
    */
   private async openBundle(bundle: string, target: string, token: string, operation: OperationContext): Promise<void> {
+    if (operation.timeoutMs <= 0) throw new EngineError('OPERATION_TIMEOUT', `opening ${bundle}: the operation's budget ran out before it was sent`, { retryable: false });
     const args = ['-n', '--env', `${LAUNCH_TOKEN}=${token}`, bundle];
     if ((this.app.launchArguments ?? []).length > 0) args.push('--args', ...(this.app.launchArguments ?? []));
     try {
@@ -396,16 +412,13 @@ export class DesktopSurface {
    * Takes as the engine's own the running copy of the app that carries this
    * launch's token in its environment. False when there is none (yet); a copy
    * without the token, the developer's own or another worker's, is never
-   * taken. The token is read with `ps -E`, which macOS has; elsewhere nothing
-   * is taken.
+   * taken, and neither is one whose environment cannot be read.
    */
   private async claim(target: string, token: string, operation: Pick<OperationContext, 'signal' | 'timeoutMs'>): Promise<boolean> {
-    if (this.platform !== 'macos') return false;
     const { apps } = await this.run<{ apps?: readonly RawApp[] }>(['list-apps'], { label: 'list apps', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
     for (const app of apps ?? []) {
       if (typeof app.pid !== 'number' || (app.bundle_id !== target && app.name !== target)) continue;
-      const { stdout } = await execFileAsync('ps', ['-E', '-p', String(app.pid), '-o', 'command='], { signal: operation.signal }).catch(() => ({ stdout: '' }));
-      if (!stdout.split(/\s+/).includes(`${LAUNCH_TOKEN}=${token}`)) continue;
+      if ((await carriesToken(app.pid, token, this.platform, operation.signal)) !== true) continue;
       this.appName = app.name ?? target;
       this.pid = app.pid;
       this.instance = app.process_instance;
@@ -512,7 +525,6 @@ export class DesktopSurface {
 
   /** Every binding of the screen before: after a launch or a quit, none names a control that still exists. */
   private forget(): void {
-    this.latest = undefined;
     this.pointWindow = undefined;
     this.bindings.clear();
     this.ids.clear();
@@ -551,22 +563,30 @@ export class DesktopSurface {
   // --- reading the screen ---
 
   /**
-   * One snapshot of a window of the app the engine launched, projected:
-   * the focused one, else the first visible one. Undefined while the app is
-   * not running or has no window to read; a copy of the app the engine did
-   * not launch is never read.
+   * One snapshot of a window of the app the engine launched, projected: the
+   * window `windowId` names, else the focused one, the visible ones, and the
+   * rest, in that order, the first one accessibility can read. Undefined while
+   * the app is not running or has no window to read; a copy of the app the
+   * engine did not launch is never read.
    */
-  private async capture(operation: OperationContext): Promise<ProjectedScreen | undefined> {
-    const window = await this.ownWindow(operation);
-    if (window === undefined) return undefined;
-    const args = ['snapshot', '--window-id', window.id, '--include-bounds', '--max-depth', String(MAX_DEPTH), '--timeout-ms', String(this.toolBudget(operation))];
-    if (this.options.interactiveOnly) args.push('-i');
-    try {
-      return this.projectWindow(await this.run<RawSnapshot>(args, { label: 'snapshot', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs, raw: true }));
-    } catch (cause) {
-      if (cause instanceof AgentDesktopFailure && (NO_WINDOW_CODES.has(cause.code) || cause.details.kind === 'window_without_accessibility_element')) return undefined;
-      throw translate(cause, 'snapshot', false);
+  private async capture(operation: OperationContext, windowId?: string): Promise<ProjectedScreen | undefined> {
+    const windows = await this.ownWindows(operation);
+    const candidates =
+      windowId === undefined
+        ? [...windows.filter((window) => window.is_focused === true), ...windows.filter((window) => window.is_focused !== true && window.visible !== false), ...windows.filter((window) => window.is_focused !== true && window.visible === false)]
+        : windows.filter((window) => window.id === windowId);
+    for (const window of candidates) {
+      const args = ['snapshot', '--window-id', window.id, '--include-bounds', '--max-depth', String(MAX_DEPTH), '--timeout-ms', String(this.toolBudget(operation))];
+      if (this.options.interactiveOnly) args.push('-i');
+      try {
+        return this.projectWindow(await this.run<RawSnapshot>(args, { label: 'snapshot', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs, raw: true }));
+      } catch (cause) {
+        // A panel accessibility cannot read, or a window that just closed: try the next one.
+        if (cause instanceof AgentDesktopFailure && (NO_WINDOW_CODES.has(cause.code) || cause.details.kind === 'window_without_accessibility_element')) continue;
+        throw translate(cause, 'snapshot', false);
+      }
     }
+    return undefined;
   }
 
   /** The windows of the process the engine launched; none before `app.open()` or after the app quit. */
@@ -605,10 +625,8 @@ export class DesktopSurface {
     const operation = withDeadline(context);
     const screen = await this.capture(operation);
     if (screen === undefined) {
-      this.latest = undefined;
       return { root: { ref: { id: ROOT_ID, revision: '' }, role: 'window' }, viewport: { width: 0, height: 0 } };
     }
-    this.latest = screen;
     this.pointWindow = screen.windowId;
     this.remember(screen.bindings.values());
     const pixels = options?.pixels === true ? await this.pixelsFor(screen, operation).catch((cause: unknown) => {
@@ -689,10 +707,7 @@ export class DesktopSurface {
       if (action.kind !== 'swipe') throw notActionable(`the window takes swipe only, not ${action.kind}; act on a node`);
       // The root is the window as it is now: read it again, since a locate or a restart may have moved on from the last observation.
       const screen = await this.capture(operation);
-      if (screen !== undefined) {
-        this.latest = screen;
-        this.remember(screen.bindings.values());
-      }
+      if (screen !== undefined) this.remember(screen.bindings.values());
       const target = screen?.scrollTarget;
       if (target === undefined) throw notActionable('the window has nothing that scrolls');
       await this.scroll(this.binding({ id: target, revision: '' }), action.direction, action.momentum, operation);
@@ -730,13 +745,14 @@ export class DesktopSurface {
       case 'fill':
         await this.fill(binding, action.value, operation);
         break;
-      case 'press':
-        await this.refCommand('focus', binding, operation).catch((cause: unknown) => {
-          // A control that takes no focus of its own gets the key only when it holds focus already; else the key would land on another control.
-          if (!(cause instanceof EngineError && cause.code === 'UNSUPPORTED_CAPABILITY' && binding.states?.focused === true)) throw cause;
-        });
-        await this.pressKey(action.key, operation);
+      case 'press': {
+        await this.refCommand('focus', binding, operation);
+        // Focusing can hand focus on (a dialog it opens): the key goes only when the control still holds it, into its own window.
+        const now = await this.capture(operation, binding.windowId);
+        if (now?.bindings.get(binding.id)?.states?.focused !== true) throw notActionable(`node ${binding.id} did not keep keyboard focus, so the key would land on another control`);
+        await this.run(['press', toCombo(action.key, this.platform), '--window-id', binding.windowId ?? '', ...(this.options.headed ? ['--headed'] : [])], { label: `press ${action.key}`, input: true, signal: operation.signal, timeoutMs: operation.timeoutMs });
         break;
+      }
       case 'selectOption':
         await this.select(binding, optionLabel(action.value), operation);
         break;
@@ -806,6 +822,8 @@ export class DesktopSurface {
   private async select(binding: NodeBinding, label: string, operation: OperationContext): Promise<void> {
     const attempts: string[] = [];
     const option = ['--', label];
+    // `select` found no such option: setting the value would type the label in as free text, so only ways that open the list are tried.
+    let missing = false;
     const rung = async (name: string, steps: readonly (readonly [command: string, run: () => Promise<unknown>])[]): Promise<boolean> => {
       let sent = false;
       let command = '';
@@ -825,13 +843,14 @@ export class DesktopSurface {
         // `select` answers ELEMENT_NOT_FOUND for an option it cannot find, which the next way may reach; from any other command it means the list itself is gone.
         const gone = cause instanceof AgentDesktopFailure && (STALE_REF_CODES.has(cause.code) || (cause.code === 'ELEMENT_NOT_FOUND' && command !== 'select'));
         if (!(cause instanceof AgentDesktopFailure && cause.notDelivered) || gone) throw translate(cause, what, true);
+        if (command === 'select' && cause.code === 'ELEMENT_NOT_FOUND') missing = true;
         attempts.push(`${name}: ${cause.message}`);
         return false;
       }
     };
     if (await rung('select', [['select', () => this.tryRef('select', binding, operation, option)]])) return;
     if (binding.actions.includes('Expand') && (await rung('expand, then select', [['expand', () => this.tryRef('expand', binding, operation)], ['select', () => this.tryRef('select', binding, operation, option)]]))) return;
-    if (binding.actions.includes('SetValue') && (await rung('set-value', [['set-value', () => this.tryRef('set-value', binding, operation, [], label)]]))) return;
+    if (!missing && binding.actions.includes('SetValue') && (await rung('set-value', [['set-value', () => this.tryRef('set-value', binding, operation, [], label)]]))) return;
     if (await rung('menu', [['click', () => this.tryRef('click', binding, operation)], ['menu item', () => this.clickMenuItem(label, operation)]])) return;
     throw notActionable(`could not select "${label}": ${attempts.join('; ')}`);
   }
@@ -842,7 +861,8 @@ export class DesktopSurface {
     const items = projectSnapshot(menu, () => this.idFor(undefined));
     const item = [...items.bindings.values()].find((candidate) => candidate.ref !== undefined && candidate.name === label);
     if (item === undefined) {
-      await this.scoped((scope) => ['press', 'escape', ...scope], operation, { label: 'close menu', input: true }).catch(() => undefined);
+      // A menu left open is a changed app: a failure to close it is reported, not the missing option.
+      await this.scoped((scope) => ['press', 'escape', ...scope], operation, { label: 'close menu', input: true });
       throw new NoSuchOption();
     }
     await this.tryRef('click', item, operation);
@@ -879,21 +899,15 @@ export class DesktopSurface {
     await this.settle(operation);
   }
 
-  /** The keyboard capability's `type`: text inserted into the focused field, which a fresh snapshot names. */
+  /** The keyboard capability's `type` (declared with `headed` only): keystrokes into the focused field, which a fresh snapshot names. */
   async typeText(text: string, options: { readonly replace: boolean }, context: OperationContext): Promise<void> {
     const operation = withDeadline(context);
     const screen = await this.capture(operation);
     const focused = screen === undefined ? undefined : [...screen.bindings.values()].find((binding) => binding.ref !== undefined && binding.states?.focused === true);
     if (focused === undefined) throw notActionable('no field has keyboard focus; tap or focus the field first');
     if (options.replace) await this.refCommand('clear', focused, operation);
-    const type = async (): Promise<void> => {
-      try {
-        await this.tryRef('type', focused, operation, [], text);
-      } catch (cause) {
-        if (!(this.options.headed && cause instanceof AgentDesktopFailure && cause.notDelivered)) throw cause;
-        await this.tryRef('type', focused, operation, [], text, true);
-      }
-    };
+    // Keystrokes, which only physical input sends: without it agent-desktop sets the text, and the app's key handlers never run.
+    const type = (): Promise<unknown> => this.tryRef('type', focused, operation, [], text, true);
     if (options.replace) await afterChange('type', type);
     else await type().catch((cause: unknown) => Promise.reject(translate(cause, 'type', true)));
     await this.settle(operation);
@@ -982,6 +996,24 @@ export class DesktopSurface {
       throw translate(cause, call.label, call.input);
     }
   }
+}
+
+/**
+ * Whether a process carries a launch token in its environment: `ps -E` on
+ * macOS, `/proc/<pid>/environ` on Linux. Undefined where it cannot be read
+ * (Windows), which the caller treats as no evidence.
+ */
+async function carriesToken(pid: number, token: string, platform: DesktopPlatform, signal: AbortSignal): Promise<boolean | undefined> {
+  const marker = `${LAUNCH_TOKEN}=${token}`;
+  if (platform === 'macos') {
+    const { stdout } = await execFileAsync('ps', ['-E', '-p', String(pid), '-o', 'command='], { signal }).catch(() => ({ stdout: '' }));
+    return stdout.split(/\s+/).includes(marker);
+  }
+  if (platform === 'linux') {
+    const environ = await readFile(`/proc/${pid}/environ`, 'utf8').catch(() => '');
+    return environ.split('\0').includes(marker);
+  }
+  return undefined;
 }
 
 /**
