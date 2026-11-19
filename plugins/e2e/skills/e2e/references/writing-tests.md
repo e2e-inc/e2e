@@ -604,7 +604,8 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
 - `addInitScript(source | { path } | fn)`, `addInitScript(fn, arg)`: runs
   before the page's own scripts; call it before `app.open`. `arg` is JSON.
 - `route(pattern, handler)`, `unroute(pattern)`: intercept requests, newest
-  route first; `route.request` has `url`, `method`, `headers`, `postData`.
+  route first; `pattern` is a URL pattern or `{ method, url }` for one method.
+  `route.request` has `url`, `method`, `headers`, `postData`.
   `route.fetch()` reads upstream without deciding the route and returns
   `{ url, status, headers, body(), text(), json() }`; redirects are not followed.
   Hand binary bodies on with `body()`, never `text()`.
@@ -649,8 +650,11 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
 
 A `route`, `unroute`, or `waitForResponse` pattern is a glob string or
 `RegExp` matched against the full URL (`*` stays within one path segment,
-`**` crosses `/`, `?` is one character); a predicate function is
-`INVALID_ARGUMENT`.
+`**` crosses `/`, `?` is one character), or `{ method, url }` to match one
+HTTP method too, case-insensitively. A method matches exactly that method:
+`GET` does not answer `HEAD`. `unroute` removes routes
+registered with the same pattern, method included, rather than URL-matching
+them. A predicate function is `INVALID_ARGUMENT`.
 
 ## Habits
 

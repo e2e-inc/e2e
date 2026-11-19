@@ -145,7 +145,7 @@ test('checkout', async ({ app, agent, screen }) => {
 
 | Playwright | e2e |
 | --- | --- |
-| `page.route(pattern, handler)`, `unroute()`, `unrouteAll()` | `browser` の同名メソッド。パターンは URL 全体に対する `RegExp` または glob |
+| `page.route(pattern, handler)`, `unroute()`, `unrouteAll()` | `browser` の同名メソッド。パターンは URL 全体に対する `RegExp`、glob、または 1 つの HTTP メソッドを指定する `{ method, url }` |
 | `route.fulfill()`, `continue()`, `fallback()`, `abort()`, `fetch()` | 同じ。各オプションは [`route`](/reference/web#route) を参照 |
 | `page.waitForResponse(pattern)` | `browser.waitForResponse(pattern)`。`'/api/orders'` ではなく `'**/api/orders'` |
 | `page.on('dialog')`, `page.waitForEvent('download')` | `browser.onDialog('accept')` またはハンドラー。`browser.waitForDownload(() => trigger)` |
@@ -260,7 +260,7 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 | --- | --- |
 | `devices['iPhone 15']`, `isMobile`, `hasTouch`, `deviceScaleFactor` | `web({ viewport, userAgent })`。実際のタッチにはモバイルターゲット |
 | `waitForURL(glob)`, `waitForFunction()` | `RegExp`。`browser.evaluate` を `expect.poll` で確認 |
-| `waitForResponse(predicate)`, `waitForRequest()`, `page.on('request')`, `response.ok()` | `browser.waitForResponse(pattern)` の後、テスト内でレスポンスを検証。`ok()` の代わりに `status`。リクエストは `browser.route` ハンドラーで `route.request` を記録し、`route.fallback()` を呼ぶ |
+| `waitForResponse(predicate)`, `waitForRequest()`, `page.on('request')`, `response.ok()` | `browser.waitForResponse(pattern)`、またはリクエストのメソッドで絞り込む `{ method, url }` を使い、テスト内でレスポンスを検証。`ok()` の代わりに `status`。リクエストは `browser.route` ハンドラーで `route.request` を記録し、`route.fallback()` を呼ぶ |
 | `route.fulfill({ response })`, `route.abort(code)`, `route.fetch(options)`, `request.postDataJSON()` | `route.fetch()` の `status`、`headers`、`body`。`JSON.parse(route.request.postData)` |
 | `page.addLocatorHandler()` | `beforeEach` でオーバーレイを閉じる、または `browser.setCookies` で同意の Cookie を設定 |
 | `page.on('console')`, `page.on('pageerror')`, `page.clock` | `window` の配列に記録する、または `Date` を置き換える `browser.addInitScript` |

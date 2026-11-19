@@ -156,7 +156,7 @@ run only in a browser, so a test that uses it declares
 
 | Playwright | e2e |
 | --- | --- |
-| `page.route(pattern, handler)`, `unroute()`, `unrouteAll()` | the same on `browser`; a pattern is a `RegExp` or a glob on the full URL |
+| `page.route(pattern, handler)`, `unroute()`, `unrouteAll()` | the same on `browser`; a pattern is a `RegExp`, a glob on the full URL, or `{ method, url }` for one HTTP method |
 | `route.fulfill()`, `continue()`, `fallback()`, `abort()`, `fetch()` | the same, see [`route`](/reference/web#route) for the options each takes |
 | `page.waitForResponse(pattern)` | `browser.waitForResponse(pattern)`; `'**/api/orders'`, not `'/api/orders'` |
 | `page.on('dialog')`, `page.waitForEvent('download')` | `browser.onDialog('accept')` or a handler; `browser.waitForDownload(() => trigger)` |
@@ -275,7 +275,7 @@ purpose. Use the workaround, or keep the test in Playwright.
 | --- | --- |
 | `devices['iPhone 15']`, `isMobile`, `hasTouch`, `deviceScaleFactor` | `web({ viewport, userAgent })`; a mobile target for real touch |
 | `waitForURL(glob)`, `waitForFunction()` | A `RegExp`; `expect.poll` over `browser.evaluate` |
-| `waitForResponse(predicate)`, `waitForRequest()`, `page.on('request')`, `response.ok()` | `browser.waitForResponse(pattern)`, then check the response in the test, `status` for `ok()`. For requests, a `browser.route` handler that records `route.request`, then calls `route.fallback()` |
+| `waitForResponse(predicate)`, `waitForRequest()`, `page.on('request')`, `response.ok()` | `browser.waitForResponse(pattern)`, or `{ method, url }` to filter on the request's method, then check the response in the test, `status` for `ok()`. For requests, a `browser.route` handler that records `route.request`, then calls `route.fallback()` |
 | `route.fulfill({ response })`, `route.abort(code)`, `route.fetch(options)`, `request.postDataJSON()` | `status`, `headers`, and `body` from `route.fetch()`; `JSON.parse(route.request.postData)` |
 | `page.addLocatorHandler()` | Dismiss the overlay in `beforeEach`, or set its consent cookie with `browser.setCookies` |
 | `page.on('console')`, `page.on('pageerror')`, `page.clock` | A `browser.addInitScript` that records to a `window` array, or that stubs `Date` |

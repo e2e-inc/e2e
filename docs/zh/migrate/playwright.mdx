@@ -145,7 +145,7 @@ test('checkout', async ({ app, agent, screen }) => {
 
 | Playwright | e2e |
 | --- | --- |
-| `page.route(pattern, handler)`, `unroute()`, `unrouteAll()` | `browser` 上的同名方法；模式是匹配完整 URL 的 `RegExp` 或 glob |
+| `page.route(pattern, handler)`, `unroute()`, `unrouteAll()` | `browser` 上的同名方法；模式是匹配完整 URL 的 `RegExp`、glob，或用 `{ method, url }` 指定一个 HTTP 方法 |
 | `route.fulfill()`, `continue()`, `fallback()`, `abort()`, `fetch()` | 相同，各方法接受的选项见 [`route`](/reference/web#route) |
 | `page.waitForResponse(pattern)` | `browser.waitForResponse(pattern)`；使用 `'**/api/orders'`，而非 `'/api/orders'` |
 | `page.on('dialog')`, `page.waitForEvent('download')` | `browser.onDialog('accept')` 或处理函数；`browser.waitForDownload(() => trigger)` |
@@ -260,7 +260,7 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 | --- | --- |
 | `devices['iPhone 15']`, `isMobile`, `hasTouch`, `deviceScaleFactor` | `web({ viewport, userAgent })`；真实触摸使用移动端测试目标 |
 | `waitForURL(glob)`, `waitForFunction()` | `RegExp`；通过 `expect.poll` 检查 `browser.evaluate` |
-| `waitForResponse(predicate)`, `waitForRequest()`, `page.on('request')`, `response.ok()` | `browser.waitForResponse(pattern)`，然后在测试中检查响应，以 `status` 代替 `ok()`。对于请求，使用 `browser.route` 处理函数记录 `route.request`，然后调用 `route.fallback()` |
+| `waitForResponse(predicate)`, `waitForRequest()`, `page.on('request')`, `response.ok()` | `browser.waitForResponse(pattern)`，或用 `{ method, url }` 按请求方法过滤，然后在测试中检查响应，以 `status` 代替 `ok()`。对于请求，使用 `browser.route` 处理函数记录 `route.request`，然后调用 `route.fallback()` |
 | `route.fulfill({ response })`, `route.abort(code)`, `route.fetch(options)`, `request.postDataJSON()` | `route.fetch()` 返回的 `status`、`headers` 和 `body`；`JSON.parse(route.request.postData)` |
 | `page.addLocatorHandler()` | 在 `beforeEach` 中关闭覆盖层，或通过 `browser.setCookies` 设置其同意 Cookie |
 | `page.on('console')`, `page.on('pageerror')`, `page.clock` | 用 `browser.addInitScript` 记录到 `window` 数组，或替换 `Date` 实现 |
