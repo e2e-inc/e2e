@@ -1028,10 +1028,11 @@ describe('coordinate input', () => {
   });
 
   it('screen.swipe({ from, to }) dispatches a pointer swipe along the path; a direction still needs the swipe action', async () => {
-    const { engine, performedAt } = pointer();
+    const { engine, performedAt, observes } = pointer();
     const { fixtures, steps } = runtime(engine);
     await fixtures.screen.swipe({ from: { x: 10, y: 20 }, to: { x: 10, y: 300 } });
     expect(performedAt).toEqual(['swipeTo @ 10,20 -> 10,300']);
+    expect(observes).toEqual([]);
     expect(steps.all().at(-1)).toMatchObject({ kind: 'screen', api: 'screen.swipe', label: '(10, 20) → (10, 300)', status: 'passed' });
     await fixtures.screen.swipe({ from: { x: 10, y: 20 }, to: { x: 10, y: 300 }, duration: 400 });
     expect(performedAt.at(-1)).toEqual('swipeTo @ 10,20 -> 10,300 for 400ms');
