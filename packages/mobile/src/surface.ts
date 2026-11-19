@@ -33,6 +33,7 @@ import {
   type EngineSnapshot,
   type EngineAppInfo,
   type LaunchArguments,
+  type ResolvedLaunchArguments,
   type LocatorAction,
   type LocatorExpression,
   type NodeRef,
@@ -907,7 +908,7 @@ export class AgentDeviceSurface {
   }
 
   /** One `open` of an app, remembered as the session's app and as the screen's replacement. */
-  private async open(app: string, relaunch: boolean, launchArguments: LaunchArguments | undefined, signal: AbortSignal): Promise<void> {
+  private async open(app: string, relaunch: boolean, launchArguments: ResolvedLaunchArguments | undefined, signal: AbortSignal): Promise<void> {
     const launchArgs = launchArgumentList(this.options.platform, launchArguments);
     const result = await this.command(
       `open ${app}`,

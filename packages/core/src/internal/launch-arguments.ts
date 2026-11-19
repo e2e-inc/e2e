@@ -6,7 +6,7 @@
 
 import { ConfigurationError, TestError } from './errors.ts';
 import { isPlainObject } from './options.ts';
-import type { LaunchArgumentValue, LaunchArguments } from '../types.ts';
+import type { LaunchArgumentValue, ResolvedLaunchArguments } from '../types.ts';
 
 const LAUNCH_ARGUMENTS_SHAPE = 'an array of strings or an object of argument name to string, number, boolean, or array of strings';
 
@@ -19,7 +19,7 @@ const LAUNCH_ARGUMENTS_SHAPE = 'an array of strings or an object of argument nam
  * config fails with `INVALID_CONFIG`, a test's own launch with
  * `INVALID_ARGUMENT`.
  */
-export function checkLaunchArguments(label: string, declared: unknown, code: 'INVALID_CONFIG' | 'INVALID_ARGUMENT' = 'INVALID_CONFIG'): LaunchArguments | undefined {
+export function checkLaunchArguments(label: string, declared: unknown, code: 'INVALID_CONFIG' | 'INVALID_ARGUMENT' = 'INVALID_CONFIG'): ResolvedLaunchArguments | undefined {
   if (declared === undefined) return undefined;
   if (Array.isArray(declared)) {
     const index = declared.findIndex((argument) => typeof argument !== 'string');

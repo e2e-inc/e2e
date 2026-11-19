@@ -11,7 +11,7 @@ import { checkLaunchArguments } from '../internal/launch-arguments.ts';
 import { rejectUnknownKeys } from '../internal/options.ts';
 import { didYouMean } from '../internal/suggest.ts';
 import { isImplicitTestHost, isRefusedLinkScheme, normalizeBaseUrl, portOf, requestsFreePort, siteOf, withPort, type NormalizedBaseUrl } from '../internal/urls.ts';
-import type { AppPermissionState, CommandConfig, LaunchArguments, TargetApp } from '../types.ts';
+import type { AppPermissionState, CommandConfig, ResolvedLaunchArguments, TargetApp } from '../types.ts';
 import { checkLog, digestCommand, isRecord, normalizeCommand } from './command.ts';
 import { httpUrl } from './validate.ts';
 
@@ -23,7 +23,7 @@ export interface TargetAppDeclaration {
   readonly appPath: string | undefined;
   readonly identity: string | undefined;
   readonly environment: 'test' | 'staging' | 'production' | undefined;
-  readonly launchArguments: LaunchArguments | undefined;
+  readonly launchArguments: ResolvedLaunchArguments | undefined;
   readonly permissions: Readonly<Record<string, AppPermissionState>> | undefined;
   readonly command: CommandConfig | undefined;
   readonly readyUrl: string | undefined;
@@ -69,7 +69,7 @@ export interface ResolvedApp {
   readonly appPath: string | undefined;
   /** The link base `app.open(path)` joins on a device target; see `TargetApp.linkBase`. */
   readonly linkBase: string | undefined;
-  readonly launchArguments: LaunchArguments | undefined;
+  readonly launchArguments: ResolvedLaunchArguments | undefined;
   readonly permissions: Readonly<Record<string, AppPermissionState>> | undefined;
   /** `app.command` with `{port}` expanded to the port the app is served on. */
   readonly command: CommandConfig | undefined;
