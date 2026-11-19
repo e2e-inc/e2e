@@ -47,6 +47,7 @@ import {
   type TestFilterCandidate,
   type TestFilterContext,
   type TestRegistrar,
+  type EachRegistrar,
   type Unique,
   type CacheStore,
   type ExecutorObservation,
@@ -604,6 +605,36 @@ void test.skipIf(isFeatureOn());
 void test.runIf(Promise.resolve(true));
 // @ts-expect-error a union with a Promise could still be a Promise
 void test.runIf(isFeatureOn() as Promise<boolean> | boolean);
+// each spreads an array row before the fixtures and passes any other row whole; for never spreads. Both register one test per row.
+test.each([{ user: 'Ada' }])('signs in as $user', async ({ user }, { app }) => { user satisfies string; void app; }) satisfies readonly ReturnType<typeof test>[];
+test.each([[1, 'one']])('%i is %s', async (n, word, { platform }) => { n satisfies number; word satisfies string; platform satisfies string; });
+test.each(['a', 'b'])('letter %s', { tags: ['@each'] }, async (letter, { app }) => { letter satisfies string; void app; });
+test.for([[1, 'one']])('%i is %s', async ([n, word], { app }) => { n satisfies number; word satisfies string; void app; });
+test.extend<{ x: number }>().each([1])('x %s', async (row, { x }) => { row satisfies number; x satisfies number; });
+test.extend<{ x: number }>().for([{ id: 'a' }])('x $id', async ({ id }, { x }) => { id satisfies string; x satisfies number; });
+void (test.each([1]) satisfies EachRegistrar<[number, TestFixtures]>);
+test.each([[1, 'one']] as const)('%i is %s', async (n, word, { app }) => { n satisfies 1; word satisfies 'one'; void app; });
+declare const pairs: ReadonlyArray<readonly [number, string]>;
+test.each(pairs)('%i is %s', async (n, word, { app }) => { n satisfies number; word satisfies string; void app; });
+test.for(pairs)('%i is %s', async ([n, word], { app }) => { n satisfies number; word satisfies string; void app; });
+// A table that mixes array and non-array rows is never spread, as at run time.
+declare const mixed: ReadonlyArray<readonly [number, string] | { user: string }>;
+test.each(mixed)('row %#', async (row, { app }) => { row satisfies readonly [number, string] | { user: string }; void app; });
+// An unknown row may be spread or not at run time, so test.for, which never spreads, is the way to take the fixtures.
+declare const loose: unknown[];
+test.for(loose)('row %#', async (row, { app }) => { row satisfies unknown; void app; });
+// @ts-expect-error an unknown row may be spread, so the second argument is not known to be the fixtures
+test.each(loose)('row %#', async (_row, { app }) => { void app; });
+// @ts-expect-error rows are an array
+test.each('ab');
+// @ts-expect-error the registrar registers tests and has no modifiers
+test.each([1]).skip('x %s', async () => {});
+// @ts-expect-error the registrar needs a body
+test.for([1])('no body');
+// @ts-expect-error an array row is spread, so the second argument is its second item, not the fixtures
+test.each([[1, 'one']])('%i', async (_n, { app }) => { void app; });
+// @ts-expect-error test.for passes the row whole, not spread
+test.for([[1, 'one']])('%i', async (n: number) => { void n; });
 // fail takes the same three shapes and returns nothing inside a body; describe and setup take no fail option.
 test.fail(true, 'known gap');
 test.fail('known gap');

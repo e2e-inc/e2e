@@ -148,6 +148,7 @@ const reporter = htmlReporter({ media: 'embed' });
 ```
 
 - 它在报告旁写入 `report.html`，并嵌入报告文档。页面可直接从磁盘打开，无需服务器，也可以运行 `npx e2e report`（[CLI 参考](/reference/cli#e2e-report)）打开。
+- 未写入报告的运行也不会写入页面，因此与 `junit.xml` 一样，上一次运行的页面会保留。参见[输出](/reference/cli#output)。
 - `media` 决定如何处理截图、视频和下载文件：
 
   | `media` | 页面行为 | 分享方式 |
@@ -254,7 +255,7 @@ interface FinishedRun {
   readonly status: RunStatus;              // report.run.status
   readonly exitCode: RunExitCode;
   readonly projectRoot: string;            // what the terminal shows paths relative to
-  readonly reportPath: string | undefined; // absent when the write failed
+  readonly reportPath: string | undefined; // absent when the run stopped before its tests or the write failed
   readonly artifactsRoot: string;          // what the report's artifact paths are relative to
   readonly aiTracePath: string | undefined;
   readonly traces: ReadonlyMap<string, string>;      // result id -> its trace page, from the project root
