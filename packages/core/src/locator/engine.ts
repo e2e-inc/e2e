@@ -37,6 +37,9 @@ type ScreenPointerAction = WithScreenTarget<PointerAction>;
 /** Each action in the union, with `target` typed as a `ScreenPoint`. */
 type WithScreenTarget<A> = { readonly [K in keyof A]: K extends 'target' ? ScreenPoint : A[K] };
 
+/** A tuple of `ScreenPoint`s, each resolved to CSS pixels. */
+type InPixels<P extends readonly ScreenPoint[]> = { readonly [K in keyof P]: ViewportPoint };
+
 /** Canonical visibility predicate over a semantic node snapshot. */
 export function isNodeVisible(node: SemanticNode | null): node is SemanticNode {
   return node !== null && node.states?.hidden !== true;
@@ -508,19 +511,19 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
     const deadline = this.deadline(timeoutMs);
 
     if (!('target' in action)) {
-      const at = isPixelPoint(point) ? point : resolveScreenPoint(point, await this.viewport(deadline));
+      const [at] = await this.inPixels([point], deadline);
       await this.dispatchAt(at, action, deadline);
       return;
     }
-    const [from, to] = await this.pathInPixels(point, action.target, deadline);
+    const [from, to] = await this.inPixels([point, action.target], deadline);
     await this.dispatchAt(from, { ...action, target: to }, deadline);
   }
 
-  /** Both ends of a path in CSS pixels, with one viewport read if either is a percentage. */
-  private async pathInPixels(from: ScreenPoint, to: ScreenPoint, deadline: Deadline): Promise<readonly [ViewportPoint, ViewportPoint]> {
-    if (isPixelPoint(from) && isPixelPoint(to)) return [from, to];
+  /** The points in CSS pixels, with one viewport read if any of them is a percentage. */
+  private async inPixels<const P extends readonly ScreenPoint[]>(points: P, deadline: Deadline): Promise<InPixels<P>> {
+    if (points.every(isPixelPoint)) return points as InPixels<P>;
     const viewport = await this.viewport(deadline);
-    return [resolveScreenPoint(from, viewport), resolveScreenPoint(to, viewport)];
+    return points.map((point) => resolveScreenPoint(point, viewport)) as InPixels<P>;
   }
 
   /** The viewport size, read from one screen observation. */
