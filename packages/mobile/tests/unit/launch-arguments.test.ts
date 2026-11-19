@@ -37,6 +37,16 @@ describe('launchArgumentList', () => {
     expect(launchArgumentList('ios', { empty: [] })).toEqual(['-empty', '()']);
   });
 
+  it('quotes a value that starts with a dash, which NSUserDefaults would read as the next name', () => {
+    expect(launchArgumentList('ios', { offset: -1, ratio: -0.5, mode: '-x', range: 'a-b' })).toEqual([
+      '-offset', '"-1"',
+      '-ratio', '"-0.5"',
+      '-mode', '"-x"',
+      '-range', 'a-b',
+    ]);
+    expect(launchArgumentList('ios', { flags: ['-x', 'y'] })).toEqual(['-flags', '("-x", y)']);
+  });
+
   it("spells an object as am start extras of each value's type", () => {
     expect(launchArgumentList('android', { e2e: true, dark: false, locale: 'fr_FR', retries: 3, ratio: 1.5, epoch: 2 ** 31, negative: -1, spaced: 'a b' })).toEqual([
       '--ez', 'e2e', 'true',
