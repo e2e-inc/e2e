@@ -44,7 +44,7 @@ export function checkLaunchArguments(label: string, declared: unknown, code: 'IN
     if (Array.isArray(value)) {
       const index = value.findIndex((item) => typeof item !== 'string');
       if (index !== -1) fail(code, `${label}.${name} must be a string, number, boolean, or array of strings; item ${index} is ${describe(value[index])}`);
-    } else if (!isLaunchArgumentValue(value)) {
+    } else if (!isLaunchArgumentScalar(value)) {
       fail(code, `${label}.${name} must be a string, number, boolean, or array of strings, got ${describe(value)}`);
     }
     if (holdsNul(value)) fail(code, `${label}.${name} holds a NUL character`);
@@ -53,11 +53,10 @@ export function checkLaunchArguments(label: string, declared: unknown, code: 'IN
   return Object.fromEntries(entries);
 }
 
-/** A string, a boolean, a finite number below 2^53 in magnitude, or a list of strings with no hole. */
-function isLaunchArgumentValue(value: unknown): value is LaunchArgumentValue {
+/** A string, a boolean, or a finite number below 2^53 in magnitude. */
+function isLaunchArgumentScalar(value: unknown): value is string | number | boolean {
   if (typeof value === 'string' || typeof value === 'boolean') return true;
-  if (typeof value === 'number') return Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER;
-  return Array.isArray(value) && value.findIndex((item) => typeof item !== 'string') === -1;
+  return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER;
 }
 
 function holdsNul(value: LaunchArgumentValue): boolean {

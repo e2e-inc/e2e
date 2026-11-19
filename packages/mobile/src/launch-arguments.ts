@@ -61,12 +61,12 @@ export function assertLaunchArgumentsFor(platform: MobilePlatform, label: string
 
 function androidListProblem(items: readonly string[]): string | undefined {
   if (items.length === 0) return 'is an empty list, which Android reads as one empty item';
-  const index = items.findIndex((item) => item === '' || item.includes(',') || item.endsWith('\\'));
-  if (index === -1) return undefined;
-  const item = items[index] ?? '';
-  if (item === '') return `item ${index} is empty`;
-  if (item.includes(',')) return `item ${index} holds a comma`;
-  return `item ${index} ends in a backslash`;
+  for (const [index, item] of items.entries()) {
+    if (item === '') return `item ${index} is empty`;
+    if (item.includes(',')) return `item ${index} holds a comma`;
+    if (item.endsWith('\\')) return `item ${index} ends in a backslash`;
+  }
+  return undefined;
 }
 
 /** The arguments a launch passes the platform's launch command; undefined when there are none. */
