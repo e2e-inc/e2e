@@ -76,9 +76,10 @@ describe('parseModifierCall', () => {
     expect(parse(Promise.resolve(false), 'async check')).toEqual(runtime(true, 'async check'));
   });
 
-  it('keeps test.skipIf refusing a Promise as a collection error, even inside a test body', () => {
+  it('keeps test.skipIf and test.runIf refusing a Promise as a collection error, even inside a test body', () => {
     inBody(() => {
       expect(() => test.skipIf(Promise.resolve(false) as unknown as boolean)).toThrow(CollectionError);
+      expect(() => test.runIf(Promise.resolve(true) as unknown as boolean)).toThrow(CollectionError);
     });
   });
 });
