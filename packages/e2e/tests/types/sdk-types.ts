@@ -173,6 +173,11 @@ void (screen.tree() satisfies Promise<string>);
 void (screen.debug({ timeout: 1000 }) satisfies Promise<void>);
 // @ts-expect-error tree reads the whole screen; a locator does not scope it
 void screen.getByRole('list').tree();
+void (screen.pause() satisfies Promise<void>);
+// @ts-expect-error pause stops the whole test, so a locator doesn't scope it
+void screen.getByRole('list').pause();
+// @ts-expect-error pause doesn't take options
+void screen.pause({ timeout: 1000 });
 
 declare const cleanupContext: EngineCleanupContext;
 declare const disposeContext: EngineDisposeContext;

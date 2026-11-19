@@ -1304,23 +1304,23 @@ describe('ListReporter', () => {
           const row = window.findIndex((line) => line.includes('orders a drink'));
           return window.slice(row, window.findIndex((line) => line.includes('Test Files')));
         };
-        reporter.showStepPrompt({ steps: [{ step: held, number: 2 }], help: false });
+        reporter.showStepPrompt({ steps: [{ step: held, number: 2 }], help: false, holdSteps: true });
         expect(shown()).toEqual([
           '   └── orders a drink paused',
           '       ✓ app.open "/" 85ms',
           '       ▶ step 2  locator.click "getByRole("radio", name: "Latte")"  tests/coffee.e2e.ts:7',
           '         press enter to run this step, press h to show help, press q to quit',
         ]);
-        reporter.showStepPrompt({ steps: [{ step: held, number: 2 }], help: true });
+        reporter.showStepPrompt({ steps: [{ step: held, number: 2 }], help: true, holdSteps: true });
         expect(shown().slice(3)).toEqual([
           '         press enter to run this step',
-          '         press n to run to the next test',
-          '         press a to run all without stopping',
+          '         press n to run this test without holding steps',
+          '         press a to run all without holding steps',
           '         press q to quit',
           '         press h to hide help',
         ]);
         const pay = { ...held, api: 'locator.click', label: 'getByRole("button", name: "Pay")', source: { file: 'tests/coffee.e2e.ts', line: 8, column: 3 } };
-        reporter.showStepPrompt({ steps: [{ step: held, number: 2 }, { step: pay, number: 3 }], help: false });
+        reporter.showStepPrompt({ steps: [{ step: held, number: 2 }, { step: pay, number: 3 }], help: false, holdSteps: true });
         expect(shown().slice(2)).toEqual([
           '       ▶ step 2  locator.click "getByRole("radio", name: "Latte")"  tests/coffee.e2e.ts:7',
           '       ▶ step 3  locator.click "getByRole("button", name: "Pay")"  tests/coffee.e2e.ts:8',
@@ -1343,7 +1343,8 @@ describe('ListReporter', () => {
         reporter.handle(plan([{ file: 'tests/coffee.e2e.ts', tests: 1 }]));
         reporter.handle(testStarted('t1', 'orders a drink', 'chromium', 'tests/coffee.e2e.ts'));
         const held = (n: number): NumberedStep => ({ step: { kind: 'step', target: 'chromium', testId: 't1', agent: 'default', repeat: 0, title: 'orders a drink', api: 'locator.click', label: `button ${n}` }, number: n });
-        reporter.showStepPrompt({ steps: [held(2), held(3), held(4), held(5), held(6), held(7), held(8), held(9)], help: false });
+        reporter.showStepPrompt({ steps: [held(2), held(3), held(4), held(5), held(6), held(7), held(8), held(9)], help: false, holdSteps: true });
+
         const window = chunks.at(-1)!.replace(ANSI_PATTERN, '');
         expect(window).toContain('press enter to run these 8 steps');
         expect(window).toContain('▶ step 2');
@@ -1357,14 +1358,75 @@ describe('ListReporter', () => {
       const lines: string[] = [];
       const reporter = new ListReporter({ write: (line) => lines.push(line) }, { live: false, colors: false, stepping: true });
       const held: HeldStep = { kind: 'step', target: 'chromium', testId: 't1', agent: 'default', repeat: 0, title: 'orders a drink', api: 'app.open', label: '/cart' };
-      reporter.showStepPrompt({ steps: [{ step: held, number: 3 }], help: false });
+      reporter.showStepPrompt({ steps: [{ step: held, number: 3 }], help: false, holdSteps: true });
       // `h` adds nothing to a plain line, so it prints nothing.
-      reporter.showStepPrompt({ steps: [{ step: held, number: 3 }], help: true });
-      reporter.showStepPrompt({ steps: [{ step: held, number: 3 }, { step: { ...held, api: 'locator.click', label: 'Pay' }, number: 4 }], help: true });
+      reporter.showStepPrompt({ steps: [{ step: held, number: 3 }], help: true, holdSteps: true });
+      reporter.showStepPrompt({ steps: [{ step: held, number: 3 }, { step: { ...held, api: 'locator.click', label: 'Pay' }, number: 4 }], help: true, holdSteps: true });
       reporter.showStepPrompt(undefined);
       expect(lines).toEqual([
-        'paused at step 3 of orders a drink [chromium]: app.open "/cart" · press enter to run this step, n to run to the next test, a to run all without stopping, q to quit',
-        'paused at steps 3, 4 of orders a drink [chromium]: app.open "/cart"; locator.click "Pay" · press enter to run these 2 steps, n to run to the next test, a to run all without stopping, q to quit',
+        'paused at step 3 of orders a drink [chromium]: app.open "/cart" · press enter to run this step, n to run this test without holding steps, a to run all without holding steps, q to quit',
+        'paused at steps 3, 4 of orders a drink [chromium]: app.open "/cart"; locator.click "Pay" · press enter to run these 2 steps, n to run this test without holding steps, a to run all without holding steps, q to quit',
+      ]);
+    });
+
+    it('shows a pause under its test in a run without --step, with enter to resume', () => {
+      const restore = withTerminalSize({ columns: 120, rows: 40 });
+      try {
+        const { chunks, output } = liveCapture();
+        const reporter = new ListReporter(output, { live: true, colors: false });
+        reporter.handle(runStarted());
+        reporter.handle(plan([{ file: 'tests/coffee.e2e.ts', tests: 1 }]));
+        reporter.handle(testStarted('t1', 'orders a drink', 'chromium', 'tests/coffee.e2e.ts'));
+        const held: HeldStep = {
+          kind: 'pause',
+          target: 'chromium',
+          testId: 't1',
+          agent: 'default',
+          repeat: 0,
+          title: 'orders a drink',
+          api: 'screen.pause',
+          label: '',
+          source: { file: 'tests/coffee.e2e.ts', line: 9, column: 3 },
+        };
+
+        reporter.showStepPrompt({ steps: [{ step: held, number: 0 }], help: false, holdSteps: false });
+        const window = chunks.at(-1)!.replace(ANSI_PATTERN, '').split('\n').filter((line) => line.trim() !== '');
+        const row = window.findIndex((line) => line.includes('orders a drink'));
+        expect(window.slice(row, row + 3)).toEqual([
+          '   └── orders a drink paused',
+          '       ▶ paused  screen.pause()  tests/coffee.e2e.ts:9',
+          '         press enter to resume, press h to show help, press q to quit',
+        ]);
+        reporter.showStepPrompt({ steps: [{ step: held, number: 0 }], help: true, holdSteps: false });
+        const help = chunks.at(-1)!.replace(ANSI_PATTERN, '').split('\n').filter((line) => line.trim() !== '');
+        expect(help.slice(row + 2, row + 5)).toEqual([
+          '         press enter to resume',
+          '         press q to quit',
+          '         press h to hide help',
+        ]);
+      } finally {
+        restore();
+      }
+    });
+
+    it('prints a pause as one line without a live window', () => {
+      const lines: string[] = [];
+      const reporter = new ListReporter({ write: (line) => lines.push(line) }, { live: false, colors: false });
+      const held: HeldStep = {
+        kind: 'pause',
+        target: 'chromium',
+        testId: 't1',
+        agent: 'default',
+        repeat: 0,
+        title: 'orders a drink',
+        api: 'screen.pause',
+        label: '',
+        source: { file: 'tests/coffee.e2e.ts', line: 9, column: 3 },
+      };
+
+      reporter.showStepPrompt({ steps: [{ step: held, number: 0 }], help: false, holdSteps: false });
+      expect(lines).toEqual([
+        'paused in orders a drink [chromium]: screen.pause() (tests/coffee.e2e.ts:9) · press enter to resume, q to quit',
       ]);
     });
 
@@ -1476,6 +1538,24 @@ describe('ListReporter', () => {
       expect(eraseIndex).toBeGreaterThan(-1);
       expect(eraseIndex).toBeLessThan(noticeIndex);
       expect(chunks.at(-1)).toContain('Tests');
+    });
+
+    it('prints a line of the runner permanently above the live window, so a repaint keeps it', () => {
+      const { chunks, lines, output } = liveCapture();
+      const reporter = plainReporter(output, true);
+      reporter.handle(runStarted());
+      reporter.handle(testStarted('t1', 'signs in', 'chromium'));
+      const pause = 'Paused in signs in [chromium]:\nNext: e2e run --step next to resume the test, or e2e run --step stop to end the run.';
+      reporter.printLine(pause);
+      expect(lines).toContain(pause);
+      const printed = chunks.indexOf(`${pause}\n`);
+      // The window is erased before the line prints, then repainted below it.
+      // eslint-disable-next-line no-control-regex
+      expect(chunks[printed - 1]).toMatch(/\u001b\[\d+A\u001b\[0J$/);
+      const block = chunks[printed + 1]!;
+      reporter.handle(testStarted('t2', 'signs out', 'chromium'));
+      // The repaint clears the block below the line, leaving the line in place.
+      expect(chunks.at(-1)).toContain(`\u001b[${block.split('\n').length - 1}A\u001b[0J`);
     });
 
     it('never writes control sequences when live rendering is off', () => {
@@ -1667,6 +1747,38 @@ describe('ListReporter', () => {
         const rowsErased = chunks.map((chunk) => Number(/\u001b\[(\d+)A/.exec(chunk)?.[1] ?? 0));
         expect(Math.max(...rowsErased)).toBeLessThanOrEqual(7);
         expect(chunks.at(-1)).toContain('more running');
+      } finally {
+        restore();
+      }
+    });
+
+    it('keeps a paused test and its prompt in the window while many other tests run', () => {
+      const restore = withTerminalSize({ rows: 24, columns: 120 });
+      try {
+        const { chunks, output } = liveCapture();
+        const reporter = new ListReporter(output, { live: true, colors: false });
+        reporter.handle(runStarted());
+        reporter.handle(plan([{ file: 'tests/a.e2e.ts', tests: 8 }]));
+        for (const id of ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']) {
+          reporter.handle(testStarted(id, `test ${id}`, 'chromium', 'tests/a.e2e.ts'));
+        }
+        const held: HeldStep = {
+          kind: 'pause',
+          target: 'chromium',
+          testId: 'h',
+          agent: 'default',
+          repeat: 0,
+          title: 'test h',
+          api: 'screen.pause',
+          label: '',
+          source: { file: 'tests/a.e2e.ts', line: 9, column: 3 },
+        };
+
+        reporter.showStepPrompt({ steps: [{ step: held, number: 0 }], help: false, holdSteps: false });
+        const window = chunks.at(-1)!.replace(ANSI_PATTERN, '');
+        expect(window).toContain('test h paused');
+        expect(window).toContain('▶ paused  screen.pause()  tests/a.e2e.ts:9');
+        expect(window).toContain('press enter to resume');
       } finally {
         restore();
       }

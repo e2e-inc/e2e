@@ -1,5 +1,6 @@
 import { generateText } from 'ai';
 import { afterEach, describe, expect, it } from 'vitest';
+import { USER_AGENT } from '@e2e-dev/core/lib/internal/client-identity';
 import { createOAuthFetch } from '../../../src/oauth/fetch.ts';
 import { createXaiProvider } from '../../../src/oauth/providers/xai.ts';
 import { MemoryCredentialStore } from './helpers/store.ts';
@@ -35,6 +36,7 @@ describe('SpaceXSI login', () => {
     const credentials = await onFakeTimeouts(() => provider.login({ onAuth: (info) => (shown = info), onPrompt: async () => '' }));
     expect(shown).toMatchObject({ url: 'https://accounts.x.ai/oauth2/device?user_code=ABCD-EFGH', userCode: 'ABCD-EFGH' });
     expect(credentials).toEqual({ access: fakeJwt({ exp }), refresh: 'rt-1', expires: exp * 1000 });
+    expect(issuer.requests.map((request) => request.headers['user-agent'])).toEqual([USER_AGENT, USER_AGENT, USER_AGENT, USER_AGENT]);
   });
 
   it('refreshes with rotation and keeps the old refresh token when none is returned', async () => {
@@ -50,6 +52,7 @@ describe('SpaceXSI login', () => {
     expect(second).toMatchObject({ access: 'a2', refresh: 'rt-2' });
     rotate = false;
     expect(await provider.refresh(second)).toMatchObject({ access: 'a3', refresh: 'rt-2' });
+    expect(issuer.requests.map((request) => request.headers['user-agent'])).toEqual([USER_AGENT, USER_AGENT]);
   });
 
   it.each(['spacexsi', 'spacexai'])('serves generateText with the bearer token against the SpaceXSI API, the login stored under %s', async (stored) => {

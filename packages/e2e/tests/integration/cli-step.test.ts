@@ -98,7 +98,7 @@ describe('e2e run --step without a terminal', () => {
 
     const gone = e2e(dir, ['run', '--step', 'next']);
     expect(gone.exitCode).toBe(2);
-    expect(gone.stderr).toContain('no stepped run is going in this directory');
+    expect(gone.stderr).toContain('no run in this directory can be controlled with e2e run --step');
   });
 
   it('prints why a run that cannot start ended', () => {
@@ -119,7 +119,7 @@ describe('e2e run --step without a terminal', () => {
     try {
       const started = e2e(dir, ['run', '--step']);
       expect(started.exitCode).toBe(2);
-      expect(started.stdout).toContain(`RUNNER_BUSY: ${lock} was left by a stepped run killed while it started`);
+      expect(started.stdout).toContain(`RUNNER_BUSY: ${lock} was left by a run killed while it took control of this directory`);
       expect(fs.existsSync(lock)).toBe(true);
     } finally {
       fs.rmSync(lock, { force: true });
@@ -132,7 +132,7 @@ describe('e2e run --step without a terminal', () => {
 
     const second = e2e(dir, ['run', '--step']);
     expect(second.exitCode).toBe(2);
-    expect(second.stderr).toContain('RUNNER_BUSY: a stepped run is already going in this directory: drive it with e2e run --step next, rest, or stop');
+    expect(second.stderr).toContain('RUNNER_BUSY: another run in this directory is already controlled with e2e run --step: continue it with e2e run --step next or rest, or end it with e2e run --step stop');
 
     const withFiles = e2e(dir, ['run', '--step', 'next', 'tests/pages.e2e.ts']);
     expect(withFiles.exitCode).toBe(2);

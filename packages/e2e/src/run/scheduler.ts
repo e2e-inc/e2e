@@ -100,12 +100,13 @@ export interface RunUnitsOptions {
   readonly spawn: SpawnUnitRunner;
   readonly events: SchedulerEvents;
   /**
-   * Answers a worker's held step (`e2e run --step`): it resolves to let the
-   * step run. `signal` aborts when the hold ends without an answer: the
-   * worker cancelled it, its attempt ended, it exited, or the run was
-   * interrupted. A rejection otherwise stops the run with its error. While
-   * any step is held, the time limit does not run. `readScreen` asks the
-   * worker for the screen at that wait.
+   * Answers a worker's held step (`e2e run --step`) or pause: it resolves to
+   * let the step run or the test resume. `signal` aborts when the hold ends
+   * without an answer: the worker cancelled it, its attempt ended, it exited,
+   * or the run was interrupted. A rejection otherwise stops the run with its
+   * error, or fails the test at a pause. While any step is held, the time
+   * limit does not run. `readScreen` asks the worker for the screen at that
+   * wait.
    */
   readonly beforeStep?: ((step: HeldStep, signal: AbortSignal, readScreen: StepHoldContext['readScreen']) => Promise<void>) | undefined;
   /** App failures buffered during startup, then delivered while target work remains. */
@@ -544,9 +545,10 @@ class Scheduler {
   }
 
   /**
-   * Asks `beforeStep` about a worker's held step, and releases it when the
-   * answer is yes. Nothing asks once the run is interrupted: the worker's
-   * interrupt cancels the hold, and a prompt then would be one nobody answers.
+   * Asks `beforeStep` about a worker's held step or pause, and releases it
+   * when the answer is yes. Nothing asks once the run is interrupted: the
+   * worker's interrupt cancels the hold, and a prompt then would be one
+   * nobody answers. A rejection at a pause fails the test there.
    */
   private hold(worker: SchedulerWorker, holdId: string, step: HeldStep): void {
     if (this.interrupting) return;
@@ -577,7 +579,10 @@ class Scheduler {
       },
       (cause: unknown) => {
         const answered = this.endHold(holdId);
-        if (answered && !signal.aborted) this.options.events.onRunAbort({ error: serializeError(classifyError(cause)) });
+        if (!answered || signal.aborted) return;
+        const error = serializeError(classifyError(cause));
+        if (step.kind === 'step') this.options.events.onRunAbort({ error });
+        else if (worker.runner.alive) worker.runner.send({ type: 'step-release', holdId, error });
       },
     );
   }

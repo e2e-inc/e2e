@@ -17,7 +17,6 @@ pantalla, actúa sobre ella y comprueba su trabajo.
 | Cambiar la UI | Termina cuando compila | Abre la página y comprueba el resultado |
 | Reproducir un error | Adivina a partir del código | Sigue los pasos en la aplicación |
 | Arreglar un test que falla | Vuelve a recorrer el flujo con clics | Ejecuta el test y se detiene en el fallo |
-| Ejecutar la suite | Necesita una shell para `e2e run` | La ejecuta con `run_tests` |
 | Mostrar un cambio en un PR | Lo describe | Graba un vídeo |
 
 El servidor no necesita un modelo. Un test que ejecuta solo lo necesita
@@ -99,7 +98,7 @@ motor cuando abre una sesión:
 open_session {engine: "@e2e-dev/web", app: {url: "http://localhost:3000"}}
 ```
 
-`run_tests` sigue necesitando una configuración. Para las opciones del motor,
+`e2e run` sigue necesitando una configuración. Para las opciones del motor,
 los proveedores de dispositivos y la instalación de un motor, consulta
 [Sin configuración](/reference/mcp#without-a-config).
 
@@ -185,8 +184,7 @@ cuáles son los límites.
 
 Una sesión no escribe resultados de tests, y solo un test que ejecuta con
 `open_session {test}` usa la caché de reproducción. El agente ejecuta suites
-con [`run_tests`](/reference/mcp#run_tests), la misma ejecución que `e2e run`,
-y, cuando una ejecución puede ir junto a la sesión, mantiene la sesión abierta
+con `e2e run` y, cuando una ejecución puede ir junto a la sesión, mantiene la sesión abierta
 entre ejecuciones. Tras una ejecución fallida, va a la pantalla del fallo en
 esa sesión en lugar de abrir una nueva.
 

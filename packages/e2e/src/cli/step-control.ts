@@ -8,7 +8,9 @@
  *
  * The background run listens on a Unix socket (a named pipe on Windows) in a
  * directory only this user can open, keyed by the working directory, so one
- * directory has one stepped run at a time.
+ * directory has one stepped run at a time. A run without `--step` starts
+ * listening on the same socket at its first `screen.pause()`. The commands
+ * can then resume the test.
  */
 
 import { spawn } from 'node:child_process';
@@ -17,15 +19,17 @@ import net from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import picocolors from 'picocolors';
 import { z } from 'zod';
-import { classifyError, codedMessage, ConfigurationError, exitCodeForCategory } from '@e2e-dev/core/lib/internal/errors';
+import { classifyError, codedMessage, ConfigurationError, errorMessage, exitCodeForCategory } from '@e2e-dev/core/lib/internal/errors';
 import { bounded } from '../report/format.ts';
 import { stepLine, stepPromptText } from '../report/list-steps.ts';
 import type { RunEventSink } from '../run/events.ts';
 import { run, type RunOptions, type RunOutcome } from '../run/runner.ts';
-import type { BeforeStep, StepHoldContext, StepPrompt } from '../run/step-hold.ts';
-import { parseLine, type StepAddress } from '../run/step-socket.ts';
+import type { RunnerOutput } from '../run/process-output.ts';
+import type { BeforeStep, HeldStep, StepHoldContext, StepPrompt } from '../run/step-hold.ts';
+import { parseLine, stepAddress, type StepAddress } from '../run/step-socket.ts';
+import { Keyboard } from './keyboard.ts';
 import type { SignalLadder } from './signals.ts';
-import { STEP_ACTIONS, StepGate, type StepAction } from './step.ts';
+import { STEP_ACTIONS, StepGate, stepKeyOf, type StepAction, type StepKey } from './step.ts';
 
 /**
  * What a command sends, and what the background run answers: the text the
@@ -54,8 +58,12 @@ const CONNECT_POLL_MS = 100;
 const FLUSH_MS = 5_000;
 /** The last line of the answer to a command the run ended on, so a reader knows no command is left to send. */
 const ENDED = 'The stepped run has ended.\n';
+/** The last line of a command's answer when a run without `--step` ends. */
+const RUN_ENDED = 'The run has ended.\n';
 /** Why a second start is refused; a word that is not an action reads as a file and lands here too. */
-const ALREADY_GOING = 'a stepped run is already going in this directory: drive it with e2e run --step next, rest, or stop';
+const ALREADY_GOING = 'another run in this directory is already controlled with e2e run --step: continue it with e2e run --step next or rest, or end it with e2e run --step stop';
+/** The error for a pause without a terminal when another run owns the socket. */
+const ALREADY_GOING_AT_PAUSE = 'another run in this directory is already controlled with e2e run --step; end it with e2e run --step stop, or run this test in a terminal';
 
 /**
  * Sends one request and reads the answer. `absent` when nothing listens;
@@ -156,15 +164,15 @@ export async function startStepped(address: StepAddress, args: readonly string[]
 /** A later command: sends `action` to the stepped run for this directory and prints its answer. */
 export async function sendStep(address: StepAddress, action: StepAction): Promise<number> {
   const answer = await ask(address.socket, { action });
-  if (answer === 'absent') throw new Error('no stepped run is going in this directory: start one with e2e run <files> --step');
-  if (answer === 'closed') throw new Error('the stepped run was killed before it answered');
+  if (answer === 'absent') throw new Error('no run in this directory can be controlled with e2e run --step: start one with e2e run <files> --step, or wait until a test is paused at screen.pause()');
+  if (answer === 'closed') throw new Error('the run was killed before it answered; start it again');
   process.stdout.write(answer.text);
   return answer.exitCode;
 }
 
 /**
  * Listens on `address.socket`; a socket file a dead run left is removed, a
- * live run's is refused. The run holds `address.lock`, created exclusively,
+ * live run's is refused with `busyMessage`. The run holds `address.lock`, created exclusively,
  * while it claims, so two runs starting at once over a dead run's file cannot
  * both remove it and listen: the one without the lock is refused. A lock a
  * run killed mid-claim left is refused too, with its path to remove. Named pipes
@@ -173,16 +181,24 @@ export async function sendStep(address: StepAddress, action: StepAction): Promis
  * first), the socket file is removed on exit. Otherwise `server.close()`
  * removes it.
  */
-async function claim(server: net.Server, address: StepAddress): Promise<void> {
+async function claim(server: net.Server, address: StepAddress, busyMessage: string): Promise<void> {
   const busy = (cause: unknown): ConfigurationError =>
-    new ConfigurationError('RUNNER_BUSY', ALREADY_GOING, { cause });
+    new ConfigurationError('RUNNER_BUSY', busyMessage, { cause });
   const listen = (): Promise<void> =>
     new Promise((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(address.socket, () => {
-        server.off('error', reject);
+      const onError = (cause: Error): void => {
+        server.off('listening', onListening);
+        reject(cause);
+      };
+
+      const onListening = (): void => {
+        server.off('error', onError);
         resolve();
-      });
+      };
+
+      server.once('error', onError);
+      server.once('listening', onListening);
+      server.listen(address.socket);
     });
   let held: number;
   try {
@@ -192,7 +208,7 @@ async function claim(server: net.Server, address: StepAddress): Promise<void> {
     // Never removed here: two runs that both found it stale could both take it.
     const made = fs.statSync(address.lock, { throwIfNoEntry: false })?.mtimeMs ?? Date.now();
     if (Date.now() - made < STALE_LOCK_MS) throw busy(cause);
-    throw new ConfigurationError('RUNNER_BUSY', `${address.lock} was left by a stepped run killed while it started; remove it and run again`, { cause });
+    throw new ConfigurationError('RUNNER_BUSY', `${address.lock} was left by a run killed while it took control of this directory; remove it and run again`, { cause });
   }
   try {
     await listen();
@@ -350,7 +366,7 @@ export async function serveSteps(options: RunOptions, signals: SignalLadder, add
     // The starting command waits for the first held step and presses nothing.
     else if (starting) return '';
     else if (unseen !== undefined) return `e2e run --step ${action} was not applied: the step below was held while no command waited, so it shows first.\n`;
-    else if (!held) return `e2e run --step ${action} was not applied: it came while a step ran, so it waited for the next pause or the end; send it again to apply it.\n`;
+    else if (!held) return `e2e run --step ${action} was not applied: it came while a step ran, so it waited for the next held step or the end; send it again to apply it.\n`;
     else gate.press(action === 'next' ? 'continue' : 'rest', { guard: false });
     return '';
   };
@@ -372,7 +388,7 @@ export async function serveSteps(options: RunOptions, signals: SignalLadder, add
   };
 
   const server = commandServer({ step: handle });
-  await claim(server, address);
+  await claim(server, address, ALREADY_GOING);
 
   const beforeStep: BeforeStep = (step, context) =>
     gate.beforeStep(step, {
@@ -424,4 +440,200 @@ export async function serveSteps(options: RunOptions, signals: SignalLadder, add
     if (answered) fs.rmSync(address.log, { force: true });
     await Promise.race([Promise.all(sent), sleep(FLUSH_MS, undefined, { ref: false })]);
   }
+}
+
+/**
+ * Runs tests without `--step`. Each `screen.pause()` waits for a person to
+ * resume the test or stop the run, every time the call is reached.
+ *
+ * - In a terminal, `stdin` is read only while a pause is shown. Between
+ *   pauses, the terminal is left as it was. Under `--watch`, `keys` is
+ *   paused while a pause prompt is shown, so the keys reach the prompt.
+ * - From the same directory, `e2e run --step next` and `rest` resume the
+ *   shown test. `stop` stops the run, as `q` does. The command returns at
+ *   the next pause or when the run ends.
+ * - The run claims the directory's socket (`stepAddress`) at its first
+ *   pause, so a run that never pauses leaves it free. It closes the socket
+ *   when the run ends.
+ * - Without a terminal, a pause fails with `RUNNER_BUSY` if another run has
+ *   the socket. In a terminal, the keys still work. A printed line explains
+ *   that commands reach the other run. Other claim errors are printed.
+ * - Pauses from several workers are shown one at a time, oldest first. The
+ *   other workers continue.
+ * - Without a terminal, each pause is printed in the run's output. The run
+ *   stops after 30 minutes at a pause with no command.
+ */
+export async function servePauses(
+  options: RunOptions & { readonly processOutput: RunnerOutput },
+  stop: () => void,
+  stdin: NodeJS.ReadStream | undefined,
+  keys?: Pick<Keyboard<unknown>, 'pause' | 'resume'>,
+): Promise<RunOutcome> {
+  /** The first pause on the prompt currently shown. */
+  let shown: HeldStep | undefined;
+  /** Waiting commands and the note that precedes each answer. */
+  const waiting = new Map<net.Socket, string>();
+  /** Answers being sent. The run waits for their connections to close. */
+  const sent: Promise<unknown>[] = [];
+  let idle: NodeJS.Timeout | undefined;
+  let claimed: Promise<void> | undefined;
+  /** The run's final answer, returned right away to later commands. */
+  let ended: StepReply | undefined;
+  /** Reads keys while a pause prompt is shown in a terminal. */
+  let keyboard: Keyboard<StepKey> | undefined;
+
+  const gate = new StepGate(stop, { holdSteps: false });
+  // Print beside the list reporter's lines. Keep stdout free for reporters that use it.
+  const print = (line: string): void => options.processOutput.printLine(line);
+  /**
+   * Stops the run if nobody acts on a pause, as with a held step. A terminal
+   * pause has no idle limit.
+   */
+  const restartIdle = (): void => {
+    clearTimeout(idle);
+
+    if (stdin === undefined && shown !== undefined) {
+      idle = setTimeout(stop, IDLE_STOP_MS);
+    }
+  };
+  const server = commandServer({
+    step: (client, { action, log }) => {
+      // Reject a start command here. It waits for the run it started to fail.
+      if (log !== undefined) {
+        client.destroy();
+        return;
+      }
+      if (ended !== undefined) {
+        client.end(`${JSON.stringify(ended)}\n`);
+        return;
+      }
+      client.on('close', () => waiting.delete(client));
+      if (action === 'stop') {
+        waiting.set(client, '');
+        stop();
+      } else if (shown === undefined) {
+        waiting.set(
+          client,
+          `e2e run --step ${action} was not applied: it came before the next pause, so it waited for that pause or the end; send it again to apply it.\n`,
+        );
+      } else {
+        // Register the command first so it receives the next pause, even if
+        // release shows it right away.
+        waiting.set(client, '');
+        gate.press(action === 'next' ? 'continue' : 'rest', { guard: false });
+      }
+    },
+  });
+
+  /** Stops reading pause keys and returns keyboard control to `keys`. */
+  const closeKeyboard = (): void => {
+    if (keyboard === undefined) {
+      return;
+    }
+
+    keyboard.close();
+    keyboard = undefined;
+    keys?.resume();
+  };
+  /**
+   * Shows a pause under its test in a terminal, reading keys while it's
+   * shown. Without a terminal, it prints the pause in the run's output.
+   * Each new pause answers waiting commands. After the run starts stopping,
+   * new pauses aren't printed and commands receive the run's final answer.
+   */
+  const show = (prompt: StepPrompt | undefined, context: StepHoldContext): void => {
+    if (stdin !== undefined) {
+      if (prompt === undefined) {
+        closeKeyboard();
+      } else if (keyboard === undefined) {
+        keys?.pause();
+        const opened = new Keyboard(stdin, stepKeyOf);
+        opened.listen((key) => {
+          if (key === 'suspend') {
+            opened.suspend();
+          } else if (key !== 'test' && key !== 'rest') {
+            // `n` and `a` act on held steps, but this run doesn't hold any.
+            gate.press(key);
+          }
+        });
+        keyboard = opened;
+      }
+      context.show(prompt);
+    }
+
+    const first = prompt?.steps[0].step;
+
+    if (first === shown) {
+      return;
+    }
+
+    shown = first;
+    restartIdle();
+
+    if (prompt === undefined || options.interruptSignal?.aborted === true) {
+      return;
+    }
+
+    // In a terminal, read the screen only when a command is waiting.
+    if (stdin !== undefined && waiting.size === 0) {
+      return;
+    }
+
+    void context.readScreen().then((screen) => {
+      // Discard the screen if the pause ended or the run started stopping
+      // while it was being read. Waiting commands get the next pause or end.
+      if (shown !== first || options.interruptSignal?.aborted === true) {
+        return;
+      }
+
+      const text = stepPromptText(prompt, screen);
+
+      if (stdin === undefined) {
+        print(text.trimEnd());
+      }
+
+      answerWaiting(waiting, { text, exitCode: 0 }, sent);
+    });
+  };
+  const onPause: BeforeStep = async (step, context) => {
+    // In a terminal, keys resume the test even if another run owns the socket.
+    claimed ??= Promise.resolve()
+      .then(() => claim(server, stepAddress(options.cwd ?? process.cwd()), ALREADY_GOING_AT_PAUSE))
+      .catch((cause: unknown) => {
+        if (stdin === undefined) {
+          claimed = undefined;
+          throw cause;
+        }
+        if (errorMessage(cause) === ALREADY_GOING_AT_PAUSE) {
+          print('Another run in this directory is controlled with e2e run --step commands, so use the keys for this run.');
+          return;
+        }
+
+        print(codedMessage(cause));
+        print('Only the keys work for this run.');
+      });
+    await claimed;
+    return gate.beforeStep(step, { ...context, show: (prompt) => show(prompt, context) });
+  };
+  /** Closes the socket and sends the final answer to waiting commands. */
+  const end = async (reply: StepReply): Promise<void> => {
+    clearTimeout(idle);
+    closeKeyboard();
+    // Wait for a pending claim so it can't start listening after the server closes.
+    await Promise.allSettled([claimed]);
+    server.close();
+    ended = reply;
+    answerWaiting(waiting, reply, sent);
+    await Promise.race([Promise.all(sent), sleep(FLUSH_MS, undefined, { ref: false })]);
+  };
+
+  let outcome: RunOutcome;
+  try {
+    outcome = await run({ ...options, hold: { ask: onPause, steps: false } });
+  } catch (cause) {
+    await end({ text: `error: ${codedMessage(cause)}\n${RUN_ENDED}`, exitCode: exitCodeForCategory(classifyError(cause).category) });
+    throw cause;
+  }
+  await end({ text: RUN_ENDED, exitCode: outcome.exitCode });
+  return outcome;
 }

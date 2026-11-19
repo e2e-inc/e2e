@@ -17,7 +17,6 @@ pracuje s ní a kontroluje svou práci.
 | Změnit UI | Hotovo, jakmile se to zkompiluje | Otevře stránku a zkontroluje výsledek |
 | Reprodukovat chybu | Hádá z kódu | Projde kroky v aplikaci |
 | Opravit selhávající test | Znovu proklikává celé flow | Spustí test a zastaví se na selhání |
-| Spustit sadu testů | Potřebuje shell pro `e2e run` | Spustí ji přes `run_tests` |
 | Ukázat změnu v PR | Popíše ji | Nahraje video |
 
 Server žádný model nepotřebuje. Test, který spouští, ho potřebuje jen pro
@@ -97,7 +96,7 @@ určí engine:
 open_session {engine: "@e2e-dev/web", app: {url: "http://localhost:3000"}}
 ```
 
-`run_tests` konfiguraci stále potřebuje. Možnosti enginu, poskytovatele
+`e2e run` konfiguraci stále potřebuje. Možnosti enginu, poskytovatele
 zařízení a instalaci enginu najdeš v části
 [Bez konfigurace](/reference/mcp#without-a-config).
 
@@ -179,7 +178,7 @@ Co se spouští a jaká platí omezení, popisuje
 
 Relace nezapisuje žádné výsledky testů a replay cache používá jen test,
 který spustí přes `open_session {test}`. Sady testů agent spouští přes
-[`run_tests`](/reference/mcp#run_tests), stejný běh jako `e2e run`, a pokud
+`e2e run`, a pokud
 může běh probíhat vedle relace, nechá relaci mezi běhy otevřenou. Po neúspěšném běhu přejde na obrazovku se selháním
 v této relaci, místo aby otevíral novou.
 
