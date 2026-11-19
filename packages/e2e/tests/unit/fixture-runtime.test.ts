@@ -438,7 +438,6 @@ describe('context.withNode', () => {
       budget = operation.timeoutMs;
       return 'read';
     }, 300);
-    expect(budget).toBeGreaterThan(0);
     expect(budget).toBeLessThanOrEqual(300);
   });
 

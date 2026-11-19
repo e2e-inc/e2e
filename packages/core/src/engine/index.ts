@@ -49,7 +49,7 @@ export type {
   ProviderRecordingStopContext,
   ProviderRecordingTarget,
 } from './recording.ts';
-export { Deadline, pollCondition, stepTimeout, withTimeout, withinCleanupBudget, type PollConditionOptions, type ReadWindow } from '../internal/time.ts';
+export { Deadline, pollCondition, stepTimeout, withTimeout, withinCleanupBudget, type PollConditionOptions, type PollReads } from '../internal/time.ts';
 export { isRefusedLinkScheme, sameSite, siteOf, urlMatches } from '../internal/urls.ts';
 export { obj, type WithoutUndefined } from '../internal/objects.ts';
 import type { AppPermissionState, Expectable, Locator, Screen, Secret } from '../types.ts';

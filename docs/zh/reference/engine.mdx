@@ -1533,7 +1533,7 @@ export class InfrastructureError extends E2EError {
 
 #### 文本模式
 
-供 `locate` 和文本匹配器使用的 `TextPattern` 匹配。`matchesText` 即指定 `{ mode: 'equals', normalize: true }` 的 `compareText`，会先合并两侧的空白再比较。若要比较平台原样报告的值（例如计算样式），请传入 `normalize: false`。`mode: 'contains'` 接受期望字符串出现在任意位置，`ignoreCase` 则对字符串模式忽略大小写。
+供 `locate` 和文本匹配器使用的 `TextPattern` 匹配。`matchesText` 即指定 `{ mode: 'equals', normalize: true }` 的 `compareText`，会先合并文本和字符串模式中的空白再比较，`RegExp` 则针对合并后的文本进行匹配。若要比较平台原样报告的值（例如计算样式），请传入 `normalize: false`。`mode: 'contains'` 接受期望字符串出现在任意位置，`ignoreCase` 则对字符串模式忽略大小写。
 
 ```ts
 export function toTextPattern(match: TextMatch, options?: { exact?: boolean }): TextPattern;
@@ -1641,7 +1641,7 @@ await pollCondition({
 });
 ```
 
-- 通过 `reads.read`（基于 `deadline` 的 `ReadWindow`）运行 `evaluate` 发起的每次读取。它为读取提供时限（`context.operation(timeoutMs)`），因为使用操作超时时间的读取可能超过断言自身的超时时间。它还会记录读取耗时，因此被截止时间中断的读取会与此前最慢的读取比较来判定。
+- 通过 `reads.read`（基于 `deadline` 的 `PollReads`）运行 `evaluate` 发起的每次读取。它为读取提供时限（`context.operation(timeoutMs)`），因为使用操作超时时间的读取可能超过断言自身的超时时间。它还会记录读取耗时，因此被截止时间中断的读取会与此前最慢的读取比较来判定。
 - 它在 0、20 和 50 ms 时读取，然后在从开始时刻起每隔 100 ms 的时间点读取。每次读取至少在上次读取结束 10 ms 后开始，最多间隔 100 ms。操作和 `waitFor` 也以同样的方式等待节点。
 - `evaluate` 产生的 `OPERATION_TIMEOUT` 会按[截止时间附近的超时](#timeouts-at-a-deadline)中的规则结束轮询。`onTimeout(cause)` 用它构造失败错误。
 
@@ -2213,7 +2213,7 @@ return context.fixture('printer', printer, { print: { kind: 'resource' } });
 
 ### 导出的名称
 
-`EngineCleanupContext`、`EngineDisposeContext`、`OperationContext`、`TextPattern`、`SemanticQuery`、`LocatorExpression`、`NodeRef`、`SemanticNode`、`ViewportPoint`、`ViewportSize`、`ObservationPixels`、`LocatorAction`、`LocatorActionKind`、`PointerAction`、`PointerActionKind`、`ScrollDirection`、`Momentum`、`SelectOption`、`Key`、`KeyModifier`、`KeyName`、`ParsedKey`、`ENGINE_SPI_VERSION`、`LOCATOR_ACTION_KINDS`、`POINTER_ACTION_KINDS`、`KEY_MODIFIERS`、`KEY_NAMES`、`parseKey`、`ENGINE_ERROR_CODES`、`RETRYABLE_ENGINE_ERROR_CODES`、`Secret`、`isSecret`、`TextMatch`、`JsonValue`、`JsonValueRules`、`ResolveExpressionOptions`、`PollConditionOptions`、`ReadWindow`、`WithoutUndefined`、`FixtureOperation`、`EngineIsolation`、`OBSERVED_NAME_LIMIT` 和 `OBSERVED_TEXT_LIMIT` 均从 `e2e/engine` 导出。[引擎协议](/reference/engine-protocol)的 `connectEngine`、`serveEngine`、`describeEngine`、`spawnTransport`、`socketTransport`、`loopbackTransport`、`ENGINE_METHODS`、`ENGINE_PROTOCOL_VERSION` 及其类型也从这里导出。
+`EngineCleanupContext`、`EngineDisposeContext`、`OperationContext`、`TextPattern`、`SemanticQuery`、`LocatorExpression`、`NodeRef`、`SemanticNode`、`ViewportPoint`、`ViewportSize`、`ObservationPixels`、`LocatorAction`、`LocatorActionKind`、`PointerAction`、`PointerActionKind`、`ScrollDirection`、`Momentum`、`SelectOption`、`Key`、`KeyModifier`、`KeyName`、`ParsedKey`、`ENGINE_SPI_VERSION`、`LOCATOR_ACTION_KINDS`、`POINTER_ACTION_KINDS`、`KEY_MODIFIERS`、`KEY_NAMES`、`parseKey`、`ENGINE_ERROR_CODES`、`RETRYABLE_ENGINE_ERROR_CODES`、`Secret`、`isSecret`、`TextMatch`、`JsonValue`、`JsonValueRules`、`ResolveExpressionOptions`、`PollConditionOptions`、`PollReads`、`WithoutUndefined`、`FixtureOperation`、`EngineIsolation`、`OBSERVED_NAME_LIMIT` 和 `OBSERVED_TEXT_LIMIT` 均从 `e2e/engine` 导出。[引擎协议](/reference/engine-protocol)的 `connectEngine`、`serveEngine`、`describeEngine`、`spawnTransport`、`socketTransport`、`loopbackTransport`、`ENGINE_METHODS`、`ENGINE_PROTOCOL_VERSION` 及其类型也从这里导出。
 
 ### `SemanticNode`
 

@@ -180,6 +180,12 @@ export function isOperationTimeout(cause: unknown): boolean {
 /** How long a negated assertion must hold before it passes. */
 export const NEGATION_GRACE_MS = 1000;
 
+/** The reads of one `pollCondition`, as its `evaluate` gets them. */
+export interface PollReads {
+  /** Runs one read on the budget the poll has left for it, `timeoutMs`, and times it. */
+  read<T>(call: (timeoutMs: number) => Promise<T>): Promise<T>;
+}
+
 export interface PollConditionOptions {
   readonly deadline: Deadline;
   readonly signal: AbortSignal;
@@ -191,14 +197,16 @@ export interface PollConditionOptions {
    * undefined when the condition cannot be evaluated yet: the positive poll
    * keeps waiting and the negation grace window resets.
    */
-  evaluate(reads: ReadWindow): Promise<boolean | undefined>;
+  evaluate(reads: PollReads): Promise<boolean | undefined>;
   /** Builds the poll's failure; `cause` is the read the deadline cut off, when one did. */
   onTimeout(cause?: unknown): Error | Promise<Error>;
 }
 
 /** `pollCondition` options whose reads run in a `ReadWindow` the caller made, with a cap of its own. */
-export interface PollReadsOptions extends PollConditionOptions {
+export interface PollReadsOptions extends Omit<PollConditionOptions, 'evaluate'> {
   readonly reads: ReadWindow;
+  /** Evaluates the positive condition once, every read run through `reads`. */
+  evaluate(reads: ReadWindow): Promise<boolean | undefined>;
 }
 
 /**

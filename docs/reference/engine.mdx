@@ -1652,7 +1652,8 @@ reproduces these semantics; import them instead of carrying a copy.
 
 `TextPattern` matching for `locate` and text matchers. `matchesText` is
 `compareText` with `{ mode: 'equals', normalize: true }`, which collapses
-whitespace on both sides. Pass `normalize: false` to compare a value the
+whitespace in the text and in a string pattern, and tests a `RegExp` against
+the collapsed text. Pass `normalize: false` to compare a value the
 platform reports verbatim, such as a computed style; `mode: 'contains'`
 accepts the expected string anywhere, and `ignoreCase` folds a string
 pattern's case.
@@ -1770,8 +1771,8 @@ await pollCondition({
 });
 ```
 
-- Run each read `evaluate` makes through `reads.read`, a `ReadWindow` over
-  `deadline`. It hands the read its budget (`context.operation(timeoutMs)`),
+- Run each read `evaluate` makes through `reads.read` (a `PollReads` over
+  `deadline`). It hands the read its budget (`context.operation(timeoutMs)`),
   since a read on the action timeout can outlast the assertion's own. It
   also times the read, so a read the deadline cuts off is judged against the
   slowest one before it.
@@ -2428,7 +2429,7 @@ return context.fixture('printer', printer, { print: { kind: 'resource' } });
 `LOCATOR_ACTION_KINDS`, `POINTER_ACTION_KINDS`, `KEY_MODIFIERS`,
 `KEY_NAMES`, `parseKey`, `ENGINE_ERROR_CODES`, `RETRYABLE_ENGINE_ERROR_CODES`,
 `Secret`, `isSecret`, `TextMatch`, `JsonValue`, `JsonValueRules`,
-`ResolveExpressionOptions`, `PollConditionOptions`, `ReadWindow`, `WithoutUndefined`,
+`ResolveExpressionOptions`, `PollConditionOptions`, `PollReads`, `WithoutUndefined`,
 `FixtureOperation`, `EngineIsolation`, `OBSERVED_NAME_LIMIT`, and `OBSERVED_TEXT_LIMIT` are
 exported from `e2e/engine`. So are the [engine protocol](/reference/engine-protocol)'s
 `connectEngine`, `serveEngine`, `describeEngine`, `spawnTransport`,

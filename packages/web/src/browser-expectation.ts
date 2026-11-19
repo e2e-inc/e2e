@@ -22,7 +22,7 @@ import {
   type EngineFixtureContext,
   type NodeRef,
   type OperationContext,
-  type ReadWindow,
+  type PollReads,
   type SemanticNode,
 } from '@e2e-dev/core/engine';
 import type { BrowserExpectation } from './browser.ts';
@@ -76,15 +76,17 @@ const NO_NODE: BrowserSample = { matches: undefined, observed: 'no node' };
 /**
  * `expect(browser)` matchers: URL, title, class, CSS, and DOM property
  * polling against the assertion budget. Every read runs through the poll's
- * `ReadWindow`, bounded by its deadline and timed, so a page that stops
+ * `reads.read`, bounded by its deadline and timed, so a page that stops
  * answering ends the assertion at its own timeout, and a read the deadline
  * cuts off fails the assertion with the last read it saw.
  */
 export function createBrowserExpectation(deps: ExpectationDeps, negated = false): BrowserExpectation {
+  /** A matcher as its messages name it: `expect.toHaveCSS`, `expect.not.toHaveCSS`. */
+  const qualified = (api: string): string => `expect.${negated ? 'not.' : ''}${api}`;
   const poll = async (
     api: string,
     label: string,
-    read: (reads: ReadWindow) => Promise<BrowserSample>,
+    read: (reads: PollReads) => Promise<BrowserSample>,
     timeout: number | undefined,
   ): Promise<void> => {
     const deadline = deps.deadlineFor(timeout, api);
@@ -101,13 +103,11 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
       onTimeout: (cause) =>
         new TestError(
           'ASSERTION_FAILED',
-          `expect.${negated ? 'not.' : ''}${api} failed\nexpected: ${negated ? 'not ' : ''}${label}\nobserved: ${last?.observed ?? 'nothing'}`,
+          `${qualified(api)} failed\nexpected: ${negated ? 'not ' : ''}${label}\nobserved: ${last?.observed ?? 'nothing'}`,
           cause === undefined ? undefined : { cause },
         ),
     });
   };
-  /** A matcher as its messages name it: `expect.toHaveCSS`, `expect.not.toHaveCSS`. */
-  const qualified = (api: string): string => `expect.${negated ? 'not.' : ''}${api}`;
   const validate = (api: string, options: object | undefined, keys: readonly string[] = ['timeout']): void =>
     rejectUnknownOptions(qualified(api), options, keys);
   /** The name a matcher's string argument is, refused unless it is a nonempty string. */
@@ -123,7 +123,7 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
   /**
    * The poll read of a matcher on the one node `target` matches: one
    * `context.withNode` that does not wait for a match, run through the poll's
-   * read window. It refuses a target that is not this attempt's locator before
+   * `reads.read`. It refuses a target that is not this attempt's locator before
    * any read, and a secure field or an ambiguous match at once. Zero matches
    * is `no node`, one more poll, so a node that never arrives stays an
    * assertion failure; a read the deadline cuts off is the poll's to judge.
@@ -133,7 +133,7 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
     subject: string,
     target: Locator,
     read: (ref: NodeRef, operation: OperationContext, node: SemanticNode) => Promise<BrowserSample>,
-  ): ((reads: ReadWindow) => Promise<BrowserSample>) =>
+  ): ((reads: PollReads) => Promise<BrowserSample>) =>
     async (reads) => {
       try {
         return await reads.read((timeoutMs) =>
@@ -161,7 +161,7 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
     source: string,
     arg: JsonValue,
     matches: (value: JsonValue) => boolean,
-  ): ((reads: ReadWindow) => Promise<BrowserSample>) =>
+  ): ((reads: PollReads) => Promise<BrowserSample>) =>
     sampleNode(api, subject, target, async (ref, operation) => {
       const read = await deps.readNode(ref, source, arg, operation);
       if (!read.ok) return { matches: false, observed: `${subject} is not JSON` };
@@ -177,7 +177,7 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
       validate('toHaveURL', options, ['ignoreCase', 'timeout']);
       const ignoreCase = options?.ignoreCase;
       if (ignoreCase !== undefined && typeof ignoreCase !== 'boolean') {
-        throw new TestError('INVALID_ARGUMENT', `expect.${negated ? 'not.' : ''}toHaveURL option ignoreCase must be a boolean`);
+        throw new TestError('INVALID_ARGUMENT', `${qualified('toHaveURL')} option ignoreCase must be a boolean`);
       }
       const target = deps.baseHref();
       return poll(

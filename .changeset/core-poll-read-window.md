@@ -2,4 +2,4 @@
 "@e2e-dev/core": patch
 ---
 
-Hand `pollCondition`'s `evaluate` the poll's `ReadWindow`, so an engine matcher that runs its reads through it fails a slow read cut off at the deadline as an assertion, not a timeout.
+An engine matcher built on `pollCondition` can fail a slow read the deadline cuts off as an assertion, not a timeout, by running its reads through the `reads.read` that `evaluate` now receives.

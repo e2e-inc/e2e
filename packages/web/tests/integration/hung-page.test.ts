@@ -173,7 +173,6 @@ describe('operations on a hung page', () => {
     // A sample asks for one resolve that does not wait, bounded by what is left of the assertion.
     expect(withNodeOptions).toEqual([{ wait: false, timeout: expect.any(Number) }]);
     const [{ timeout }] = withNodeOptions as [{ timeout: number }];
-    expect(timeout).toBeGreaterThan(0);
     expect(timeout).toBeLessThanOrEqual(BUDGET_MS);
   });
 

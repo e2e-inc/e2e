@@ -72,7 +72,7 @@ import {
   VERDICT_RULES,
   type ScreenOutput,
 } from '../../src/agent/public.ts';
-import { connectEngine, socketTransport, type EngineManifest } from '../../src/engine/index.ts';
+import { connectEngine, Deadline, pollCondition, socketTransport, type EngineManifest } from '../../src/engine/index.ts';
 import type { Report, TestFixtures, WorkerFixtures } from '../../src/index.ts';
 import type { ToolSet } from 'ai';
 import type { LanguageModelV2, LanguageModelV3, LanguageModelV4 } from '@ai-sdk/provider';
@@ -284,6 +284,22 @@ void fixtureContext.withNode('custom.read', fixtureTarget, async () => 1, { time
 void fixtureContext.withNode('custom.read', fixtureTarget, async () => 1, { wait: 'no' });
 // @ts-expect-error `api` is required: an INVALID_LOCATOR names the public call that took the locator.
 void fixtureContext.withNode(fixtureTarget, async () => 1);
+// pollCondition hands evaluate the poll's reads: run each read through reads.read, nothing more.
+void pollCondition({
+  deadline: new Deadline(100),
+  signal: new AbortController().signal,
+  negated: false,
+  evaluate: async (reads) => (await reads.read(async (timeoutMs) => timeoutMs)) > 0,
+  onTimeout: () => new Error('never'),
+});
+void pollCondition({
+  deadline: new Deadline(100),
+  signal: new AbortController().signal,
+  negated: false,
+  // @ts-expect-error the window's judgment of a cut-off read is not engine API.
+  evaluate: async (reads) => reads.cutOff(new Error('timeout')),
+  onTimeout: () => new Error('never'),
+});
 declare const attemptContext: EngineAttemptContext;
 attemptContext.resolveSecret(secrets.get('key')) satisfies Promise<string>;
 // The forms the app sees in place of the value join its redaction.
