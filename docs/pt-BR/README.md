@@ -6,8 +6,10 @@ notice. English stays the source of truth.
 
 This translation is best effort. English changes don't wait for it, so a page
 here can lag behind its English page until someone who reads Portuguese updates
-it. `pnpm docs:check` warns about every page and label whose outline or code
-differs from English; it does not detect a change to the prose alone.
+it. `pnpm docs:check` warns about every page whose outline or code differs
+from English, and about every tab or group label missing from `navigation.json`
+or no longer in `docs/docs.json`; it does not detect a change to the prose or
+to a label's text.
 
 ## Layout
 

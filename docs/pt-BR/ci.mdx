@@ -232,8 +232,8 @@ Veja [Comece pelos mais prováveis](/filters#start-the-likeliest-first).
 
 ## Faça cache do histórico de tempos
 
-Com mais de um worker, o `e2e run` começa pelos arquivos mais longos, depois
-de qualquer arquivo sem tempo registrado, na ordem dada por
+Com mais de um worker, o `e2e run` começa pelos arquivos sem tempo registrado
+e depois roda os demais, dos mais longos para os mais curtos, na ordem dada por
 `<output>/timings.json` (`.e2e/timings.json` por padrão): alguns KB que uma
 execução atualiza quando rodou pelo menos um arquivo inteiro. Um checkout
 novo na CI não tem esse arquivo, então restaure-o do cache da sua CI antes da
