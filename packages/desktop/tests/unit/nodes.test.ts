@@ -166,6 +166,17 @@ describe('projectSnapshot', () => {
     expect(screen.secureRects).toEqual([{ x: 10, y: 10, width: 50, height: 20 }]);
   });
 
+  it('withholds masking for a secure field whose box has no area', () => {
+    const screen = projectSnapshot({ snapshot_id: 's', tree: { role: 'window', name: 'W', bounds: { x: 0, y: 0, width: 100, height: 100 }, children: [{ role: 'textfield', states: ['secure'], ref_id: '@s:e1', bounds: { x: 10, y: 10, width: 0, height: 0 } }] } }, minter());
+    expect(screen.secureRects).toBeUndefined();
+  });
+
+  it('gives a control its title as its text, and an input none', () => {
+    const { root } = project('macos/sign-in-form');
+    expect(byTestId(root, 'sign-in')).toMatchObject({ name: 'Sign in', text: 'Sign in' });
+    expect(byTestId(root, 'username')?.text).toBeUndefined();
+  });
+
   it('withholds masking when a secure field has no bounds, and measures rects from the window', () => {
     expect(project('macos/appkit-form').secureRects).toBeUndefined();
     const raw = load('macos/appkit-form');

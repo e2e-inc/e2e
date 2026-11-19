@@ -60,6 +60,8 @@ export interface NodeBinding {
   readonly actions: readonly string[];
   /** The window the snapshot read the node in. */
   readonly windowId?: string;
+  /** The node's box in the window, which finds it again where its id cannot (a look-alike's). */
+  readonly rect?: Rect;
 }
 
 /** A snapshot as the engine keeps it: the tree the harness sees, and a binding for every node in it. */
@@ -152,6 +154,9 @@ const ROLE_MAP: Readonly<Record<string, string>> = {
 /** Roles whose checked state is a fact whenever it is not stated: an unchecked box reports no `checked`. */
 const CHECKABLE_ROLES = new Set(['checkbox', 'switch', 'radiobutton']);
 
+/** Roles whose name labels what they hold, so it is never their text. */
+const INPUT_ROLES = new Set(['textfield', 'combobox', 'slider', 'incrementor', 'datefield', 'timefield', 'colorwell']);
+
 /** Roles agent-desktop reads text into `value`, which the contract calls `text`. */
 const TEXT_ROLES = new Set(['statictext', 'heading']);
 
@@ -228,12 +233,14 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
     }
     const isText = TEXT_ROLES.has(node.role);
     const name = label(node.name ?? (isText ? node.value : undefined));
-    const text = isText ? label(node.value ?? node.name) : undefined;
+    // A control shows its name (a button's title) as its text, as on a device; an input's name is a label, not what it holds.
+    const text = isText ? label(node.value ?? node.name) : INPUT_ROLES.has(node.role) ? undefined : name;
     // A checkbox's value is its state ("0", "1"), already in `checked`; a secure field's is never reported.
     const value = secure || isText || CHECKABLE_ROLES.has(node.role) ? undefined : node.value;
     const rect = node.bounds === undefined ? undefined : { x: node.bounds.x - window.x, y: node.bounds.y - window.y, width: node.bounds.width, height: node.bounds.height };
     if (secure) {
-      if (rect === undefined) unmaskable = true;
+      // A box with no area masks nothing, so it proves nothing about a field that may still show.
+      if (rect === undefined || rect.width <= 0 || rect.height <= 0) unmaskable = true;
       else secureRects.push(rect);
     }
     const attributes: Record<string, string> = {};
@@ -253,6 +260,7 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
       states,
       actions: node.available_actions ?? [],
       ...(raw.window === undefined ? {} : { windowId: raw.window.id }),
+      ...(rect === undefined ? {} : { rect }),
     });
     const kept: RawNode[] = [];
     const collect = (child: RawNode): void => {
