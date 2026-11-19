@@ -310,7 +310,8 @@ export interface Browser extends Expectable<BrowserExpectation> {
    * like a read. The element is passed inside the page only; the result is
    * JSON. Meant for reads: the code can change the page, but a test should
    * act through the locator instead. The code runs once: a navigation while
-   * it runs fails the call with `ENGINE_FAILURE`.
+   * it runs fails the call with `ENGINE_FAILURE`. A secure field is
+   * `POLICY_DENIED`, as the locator getters deny it.
    */
   evaluateOn<T extends JsonValue>(
     target: Locator,

@@ -22,6 +22,7 @@ import {
   type EngineFixtureContext,
   type NodeRef,
   type OperationContext,
+  type SemanticNode,
 } from '@e2e-dev/core/engine';
 import type { BrowserExpectation } from './browser.ts';
 import { pageFunctionSource, type EvaluationResult } from './evaluation.ts';
@@ -71,9 +72,10 @@ const NO_NODE: BrowserSample = { matches: undefined, observed: 'no node' };
 
 /**
  * `expect(browser)` matchers: URL, title, class, CSS, and DOM property
- * polling against the assertion budget. Every read is bounded by the poll's deadline, so a page
- * that stops answering ends the assertion at its own timeout, and the
- * failure reports the last read instead of reading a hung page again.
+ * polling against the assertion budget. Every read is bounded by the poll's
+ * deadline, so a page that stops answering ends the assertion at its own
+ * timeout, and the failure reports the last read instead of reading a hung
+ * page again.
  */
 export function createBrowserExpectation(deps: ExpectationDeps, negated = false): BrowserExpectation {
   const poll = async (
@@ -119,15 +121,15 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
    * The poll read of a matcher on the one node `target` matches: one
    * `context.withNode` that does not wait for a match, inside the poll's
    * deadline. It refuses a target that is not this attempt's locator before
-   * any read, and fails an ambiguous one at once. Zero matches is `no node`,
-   * one more poll, so a node that never arrives stays an assertion failure;
-   * a read the deadline cuts off is the poll's to judge.
+   * any read, and a secure field or an ambiguous match at once. Zero matches
+   * is `no node`, one more poll, so a node that never arrives stays an
+   * assertion failure; a read the deadline cuts off is the poll's to judge.
    */
   const sampleNode = (
     api: string,
     subject: string,
     target: Locator,
-    read: (ref: NodeRef, operation: OperationContext) => Promise<BrowserSample>,
+    read: (ref: NodeRef, operation: OperationContext, node: SemanticNode) => Promise<BrowserSample>,
   ): ((deadline: Deadline) => Promise<BrowserSample>) =>
     async (deadline) => {
       const sample = deps.context.withNode(qualified(api), target, read, {
@@ -206,10 +208,9 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
       return poll(
         'toHaveClass',
         `class ${describePattern(pattern)}`,
-        sampleNode('toHaveClass', 'class', target, async (ref, operation) => {
-          const read = await deps.readNode(ref, CLASS_ATTRIBUTE_SOURCE, null, operation);
-          const value = read.ok ? read.value : undefined;
-          if (typeof value !== 'string') return { matches: false, observed: 'no class attribute' };
+        sampleNode('toHaveClass', 'class', target, async (_ref, _operation, node) => {
+          const value = node.attributes?.['class'];
+          if (value === undefined) return { matches: false, observed: 'no class attribute' };
           return {
             matches: matchesText(value.trim().split(/\s+/).join(' '), pattern),
             observed: `class ${JSON.stringify(value)}`,
@@ -257,11 +258,6 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
     },
   };
 }
-
-/** Page code for `toHaveClass`: the element's `class` attribute, `null` when it has none. */
-const CLASS_ATTRIBUTE_SOURCE = pageFunctionSource((element: Element) =>
-  element.getAttribute('class'),
-);
 
 /**
  * Page code for `toHaveCSS`: one computed property of the element, as

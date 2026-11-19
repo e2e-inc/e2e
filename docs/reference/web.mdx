@@ -683,6 +683,7 @@ const width = await browser.evaluateOn(
 | `INVALID_LOCATOR` | The target is not an e2e locator, or belongs to another target or attempt. The message names `browser.evaluateOn`. |
 | `LOCATOR_NOT_FOUND` | Nothing matches within `actionTimeout`. |
 | `LOCATOR_AMBIGUOUS` | Two or more elements match. |
+| `POLICY_DENIED` | The element is a secure field, such as a password input. The code never runs. |
 | `INVALID_ARGUMENT` | `arg` or the return value is not a [`JsonValue`](#jsonvalue). |
 | `EVALUATE_FAILED` | The evaluated code threw, or the top-level page replaced a JavaScript built-in that the engine needs. The error carries the message. |
 | `ACTION_FAILED` | The code did not finish within `actionTimeout`. |
@@ -1329,7 +1330,8 @@ export interface Browser extends Expectable<BrowserExpectation> {
    * like a read. The element is passed inside the page only; the result is
    * JSON. Meant for reads: the code can change the page, but a test should
    * act through the locator instead. The code runs once: a navigation while
-   * it runs fails the call with `ENGINE_FAILURE`.
+   * it runs fails the call with `ENGINE_FAILURE`. A secure field is
+   * `POLICY_DENIED`, as the locator getters deny it.
    */
   evaluateOn<T extends JsonValue>(
     target: Locator,

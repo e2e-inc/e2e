@@ -21,7 +21,8 @@ import { resolveSecretValue, sessionLedger } from './secrecy.ts';
 import { baseUrlOf, resolveNavigationUrl } from '../internal/urls.ts';
 import { FixtureRecorder } from './fixture-recording.ts';
 import type { AttemptBudget } from './budget.ts';
-import { LocatorEngine } from '../locator/engine.ts';
+import { denySecureRead, LocatorEngine } from '../locator/engine.ts';
+import { describeExpression } from '../locator/expression.ts';
 import {
   createLocator,
   createScopedScreen,
@@ -514,7 +515,16 @@ function fixtureContext(
     withNode: async (api, locator, use, options) => {
       const { expression } = ownLocator(locator, screenContext, api);
       const deadline = engine.deadline(options?.timeout);
-      return engine.withOne(expression, use, deadline, options?.wait !== false);
+      return engine.withOne(
+        expression,
+        async (ref, operation) => {
+          const node = await engine.session.read(ref, operation);
+          denySecureRead([node], describeExpression(expression));
+          return use(ref, operation, node);
+        },
+        deadline,
+        options?.wait !== false,
+      );
     },
     expectable<T extends object, E extends object>(target: T, factory: () => E): T & Expectable<E> {
       let surface: E | undefined;

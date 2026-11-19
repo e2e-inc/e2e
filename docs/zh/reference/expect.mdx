@@ -297,6 +297,7 @@ await expect(browser).toHaveClass(browser.locator('.card'), 'card active');
 - 它也会轮询节点：目标暂时没有匹配项时，会继续轮询，而不是立即失败，直到断言超时。
 - 存在歧义的目标仍会立即因 `LOCATOR_AMBIGUOUS` 失败。
 - 不是 e2e 定位器的目标，或来自另一个屏幕或尝试的定位器，会立即导致 `INVALID_LOCATOR`。
+- 安全字段与 `getAttribute()` 一样触发 `POLICY_DENIED`。
 - 它读取 `class` 属性，因此 `''` 匹配 `class=""`，但不匹配完全没有 `class` 属性的元素。Playwright 的 `toHaveClass('')` 接受这两种情况。
 
 #### `toHaveCSS`
@@ -311,6 +312,7 @@ await expect(browser).toHaveCSS(nav, '--accent', /red/);
 
 - 它以页面代码的形式运行 `getComputedStyle(element).getPropertyValue(property)`，因此覆盖了这些函数的页面会改变读取结果。名称使用短横线形式（`background-color`），自定义属性（`--accent`）也可以使用。
 - 目标按其作用域和框架解析，与 [`browser.evaluateOn`](/reference/web#evaluateon) 相同。目标暂时没有匹配项时，会继续轮询，而不是失败，直到断言超时。存在歧义的目标会立即因 `LOCATOR_AMBIGUOUS` 失败。不是 e2e 定位器的目标，或来自另一个屏幕或尝试的定位器，会立即导致 `INVALID_LOCATOR`。
+- 安全字段与 [`browser.evaluateOn`](/reference/web#evaluateon) 一样触发 `POLICY_DENIED`，样式也不例外。
 - 读取期间发生导航时，会在新页面上重新解析目标。
 - 空的或非字符串的 `property` 会导致 `INVALID_ARGUMENT`。
 
@@ -660,6 +662,7 @@ last: expected "running" not to be "running"
 | --- | --- |
 | `toHaveValue`、`toHaveText`、`toContainText` | 与 `inputValue()` 和 `textContent()` 一样触发 `POLICY_DENIED`，取反或列表形式也如此 |
 | `toHaveAttribute` | 与 `getAttribute()` 一样触发 `POLICY_DENIED`，所有属性名以及取反形式都如此 |
+| `expect(browser)` 的 `toHaveClass`、`toHaveCSS` 和 `toHaveJSProperty` | 触发 `POLICY_DENIED`，取反形式也如此 |
 | `toHaveAccessibleName`、`toHaveRole` 和状态匹配器 | 正常返回结果 |
 
 如果将未提供的值读取为 `''`，就会把已填入的密码字段当作已清空而通过；如果将未提供的 `value` 属性读取为不存在，就会让具有该属性的密码字段通过 `not.toHaveAttribute('value')`。请断言填入操作的结果，而不是字段本身。

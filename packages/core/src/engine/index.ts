@@ -248,8 +248,10 @@ export interface EngineFixtureContext {
   /**
    * Resolves the one node `locator` matches, with its scope, strictness, and
    * frame, waiting for it like a locator read (the action timeout, or
-   * `timeout`), then calls `use` with its ref and the budget that read has
-   * left. Zero matches by the deadline is `LOCATOR_NOT_FOUND`, two or more
+   * `timeout`), then calls `use` with its ref, the budget that read has left,
+   * and the node as that resolve read it. It is a read: a secure field is
+   * `POLICY_DENIED` before `use` runs, as the locator getters deny it.
+   * Zero matches by the deadline is `LOCATOR_NOT_FOUND`, two or more
    * `LOCATOR_AMBIGUOUS` at once. A retryable `NODE_STALE` from `use`
    * re-resolves while the deadline remains and runs `use` again, so report
    * it only before work that must not repeat. `wait: false` resolves without
@@ -262,7 +264,7 @@ export interface EngineFixtureContext {
   withNode<T>(
     api: string,
     locator: Locator,
-    use: (ref: NodeRef, operation: OperationContext) => Promise<T>,
+    use: (ref: NodeRef, operation: OperationContext, node: SemanticNode) => Promise<T>,
     options?: { timeout?: number; wait?: boolean },
   ): Promise<T>;
   /**

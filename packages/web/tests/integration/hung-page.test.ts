@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { Locator } from 'e2e';
-import type { EngineFixtureContext, EngineHandle, LocatorExpression, NodeRef, OperationContext } from '@e2e-dev/core/engine';
+import type { EngineFixtureContext, EngineHandle, LocatorExpression, NodeRef, OperationContext, SemanticNode } from '@e2e-dev/core/engine';
 import { web, type BrowserExpectation } from '../../src/index.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
@@ -143,12 +143,12 @@ describe('operations on a hung page', () => {
       withNode: async (
         _api: string,
         _locator: Locator,
-        use: (ref: NodeRef, operation: OperationContext) => Promise<unknown>,
+        use: (ref: NodeRef, operation: OperationContext, node: SemanticNode) => Promise<unknown>,
         options?: unknown,
       ) => {
         withNodeOptions.push(options);
         const [node] = await engine.locate!(button('Next'), { ...operation(), timeoutMs: ACTION_TIMEOUT_MS });
-        return use(node!.ref as NodeRef, operation());
+        return use(node!.ref as NodeRef, operation(), node as SemanticNode);
       },
       expectable: (target: object, factory: () => unknown) => {
         expectation = factory;

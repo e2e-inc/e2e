@@ -2023,7 +2023,7 @@ test('prints a receipt', { requires: ['printer'] }, async ({ printer }) => {
 | --- | --- |
 | `INVALID_CONFIG` | 测试首次使用工厂时，工厂返回普通接口，而非通过 `context.fixture` 声明的接口。 |
 | `APP_URL_REQUIRED` | 在未声明 URL 的测试目标上调用 `app.resolveUrl`。 |
-| `POLICY_DENIED` | `app.resolveUrl` 使用 `http:` 和 `https:` 以外的协议（`about:blank` 除外）。 |
+| `POLICY_DENIED` | `app.resolveUrl` 使用 `http:` 和 `https:` 以外的协议（`about:blank` 除外），或对安全字段调用 `withNode`。 |
 | `INVALID_LOCATOR` | 传给 `withNode` 的值不是 e2e 定位器，或是来自另一个屏幕或尝试的定位器。消息会指明 `api`。 |
 
 ```ts
@@ -2079,8 +2079,10 @@ export interface EngineFixtureContext {
   /**
    * Resolves the one node `locator` matches, with its scope, strictness, and
    * frame, waiting for it like a locator read (the action timeout, or
-   * `timeout`), then calls `use` with its ref and the budget that read has
-   * left. Zero matches by the deadline is `LOCATOR_NOT_FOUND`, two or more
+   * `timeout`), then calls `use` with its ref, the budget that read has left,
+   * and the node as that resolve read it. It is a read: a secure field is
+   * `POLICY_DENIED` before `use` runs, as the locator getters deny it.
+   * Zero matches by the deadline is `LOCATOR_NOT_FOUND`, two or more
    * `LOCATOR_AMBIGUOUS` at once. A retryable `NODE_STALE` from `use`
    * re-resolves while the deadline remains and runs `use` again, so report
    * it only before work that must not repeat. `wait: false` resolves without
@@ -2093,7 +2095,7 @@ export interface EngineFixtureContext {
   withNode<T>(
     api: string,
     locator: Locator,
-    use: (ref: NodeRef, operation: OperationContext) => Promise<T>,
+    use: (ref: NodeRef, operation: OperationContext, node: SemanticNode) => Promise<T>,
     options?: { timeout?: number; wait?: boolean },
   ): Promise<T>;
   /**
@@ -2174,18 +2176,20 @@ export type FixtureOperations<T extends object> = {
 
 #### 在定位到的节点上运行代码
 
-`withNode(api, locator, use, options?)` 解析测试定位器匹配的单个节点，并以其 `NodeRef` 调用 `use`。接受 `Locator` 的测试夹具方法用它获取引擎自己对该节点的句柄，例如要在其上运行页面代码的元素。
+`withNode(api, locator, use, options?)` 解析测试定位器匹配的单个节点，并以其 `NodeRef` 和解析时读取的节点调用 `use`。接受 `Locator` 的测试夹具方法用它获取引擎自己对该节点的句柄，例如要在其上运行页面代码的元素。
 
 ```ts
-evaluateOn: (target: Locator, source: string, arg?: JsonValue) =>
+evaluateOn: (target: Locator, source: string) =>
   context.withNode('browser.evaluateOn', target, (ref, operation) =>
-    // Test code: a navigation while it runs fails instead of a retryable NODE_STALE.
-    surface.evaluateOn(ref, source, arg, operation, false)),
+    // `driver` stands for the engine's own client, which knows the element behind a ref.
+    driver.evaluateOn(ref.id, source, { timeoutMs: operation.timeoutMs })),
 ```
 
 - `api` 是接受该定位器的公开调用。`INVALID_LOCATOR` 的消息会指明它。
 - 定位器保留其作用域、严格性和框架。`withNode` 像定位器读取一样等待匹配，最长到 `actionTimeout` 或 `options.timeout`。
 - `use` 获得该读取自己的 `OperationContext`。请用它约束引擎调用。
+- `use` 还会获得解析时读取的 `SemanticNode`（角色、名称、状态和属性），因此读取这些内容无需再次调用引擎。
+- `withNode` 是读取操作：与定位器的读取方法一样，对安全字段会在运行 `use` 之前以 `POLICY_DENIED` 失败。
 - 当 ref 不再指向该节点时，`use` 抛出可重试的 `NODE_STALE`。只要截止时间未到，`withNode` 就会重新解析并再次调用 `use`，因此只应在不能运行两次的工作之前抛出它。
 - `options.wait: false` 只解析一次，不等待匹配：没有匹配项时立即为 `LOCATOR_NOT_FOUND`。自行轮询的匹配器使用它，由自己的轮询而不是定位器读取来等待节点。
 - `options.timeout: 0` 不给等待设置自己的截止时间，但测试的总时限仍会约束它。

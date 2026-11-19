@@ -544,6 +544,7 @@ const width = await browser.evaluateOn(
 | `INVALID_LOCATOR` | 対象が e2e のロケーターではない場合、または別のターゲットや試行のものである場合。メッセージは `browser.evaluateOn` を示します。 |
 | `LOCATOR_NOT_FOUND` | `actionTimeout` 内に何も一致しない場合。 |
 | `LOCATOR_AMBIGUOUS` | 2 つ以上の要素が一致した場合。 |
+| `POLICY_DENIED` | 要素がパスワード入力などのセキュアなフィールドの場合。コードは実行しません。 |
 | `INVALID_ARGUMENT` | `arg` または戻り値が [`JsonValue`](#jsonvalue) ではない場合。 |
 | `EVALUATE_FAILED` | 評価したコードが例外をスローした場合、またはトップレベルのページがエンジンに必要な JavaScript 組み込みを置き換えた場合。エラーにメッセージを含めます。 |
 | `ACTION_FAILED` | コードが `actionTimeout` 内に終わらなかった場合。 |
@@ -1104,7 +1105,8 @@ export interface Browser extends Expectable<BrowserExpectation> {
    * like a read. The element is passed inside the page only; the result is
    * JSON. Meant for reads: the code can change the page, but a test should
    * act through the locator instead. The code runs once: a navigation while
-   * it runs fails the call with `ENGINE_FAILURE`.
+   * it runs fails the call with `ENGINE_FAILURE`. A secure field is
+   * `POLICY_DENIED`, as the locator getters deny it.
    */
   evaluateOn<T extends JsonValue>(
     target: Locator,

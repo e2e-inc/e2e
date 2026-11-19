@@ -72,6 +72,16 @@ const frozen = content(`<html><p id="frozen" style="color: blue">Frozen</p><scri
   setTimeout(() => { const start = Date.now(); while (Date.now() - start < 1500); }, 300);
 </script></html>`);
 
+/** A page whose password field holds a value the app put there, not a configured secret. */
+const secureField = content(`<html>
+  <label>Password <input type="password" class="field" style="color: blue" value="app-generated-0xBEEF"></label>
+</html>`);
+
+/** A page whose `#real` has class `real`, and which makes every `getAttribute` call answer `fake`. */
+const lyingAttributes = content(`<html><p id="real" class="real">Real</p><script>
+  Element.prototype.getAttribute = () => 'fake';
+</script></html>`);
+
 const page = content(`<html>
   <nav aria-label="Breadcrumbs" style="position: static">a / b</nav>
   <nav aria-label="Main" data-x="1" style="position: sticky; top: 0; --accent: red; --grid: a    b">Home</nav>
@@ -407,6 +417,42 @@ test.describe('expect(browser) locator matchers', { requires: ['browser'] }, () 
     await new Promise((resolve) => setTimeout(resolve, 300));
     const error = await failure(() => expect(browser).toHaveClass(browser.locator('#stuck'), 'b', { timeout: 1000 }));
     expect(error).toHaveProperty('code', 'ACTION_FAILED');
+  });
+
+  test('refuse a secure field as POLICY_DENIED, as the locator getters do, and never read its value', async ({ browser, screen }) => {
+    await browser.goto(secureField);
+    const field = screen.getByLabel('Password');
+    for (const call of [
+      () => browser.evaluateOn(field, (element) => (element as HTMLInputElement).value),
+      () => expect(browser).toHaveClass(field, 'x'),
+      () => expect(browser).not.toHaveClass(field, 'x'),
+      () => expect(browser).toHaveCSS(field, 'color', 'x'),
+      () => expect(browser).not.toHaveCSS(field, 'color', 'x'),
+      () => expect(browser).toHaveJSProperty(field, 'value', 'x'),
+      () => expect(browser).not.toHaveJSProperty(field, 'value', 'x'),
+    ]) {
+      const error = await failure(call);
+      expect(error).toHaveProperty('code', 'POLICY_DENIED');
+      expect(String((error as Error).message)).not.toContain('0xBEEF');
+    }
+  });
+
+  test('read the class the element has, even when the page replaces getAttribute', async ({ browser }) => {
+    await browser.goto(lyingAttributes);
+    await expect(browser).toHaveClass(browser.locator('#real'), 'real');
+  });
+
+  test('observe no node in a frame that is not there, at once each sample', async ({ browser }) => {
+    await browser.goto(page);
+    const missing = browser.frameLocator('#nope').locator('p');
+    for (const call of [
+      () => expect(browser).toHaveCSS(missing, 'color', 'red', { timeout: 800 }),
+      () => expect(browser).not.toHaveCSS(missing, 'color', 'red', { timeout: 800 }),
+    ]) {
+      const error = await failure(call);
+      expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
+      expect(error).toHaveProperty('message', expect.stringContaining('observed: no node'));
+    }
   });
 
   test('compare the class list with its whitespace collapsed, and fail no class attribute', async ({ browser }) => {

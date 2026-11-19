@@ -14,6 +14,7 @@ import type { StepExecutor } from '@e2e-dev/core/lib/agent/executor';
 import { defineTool, getToolContext } from '@e2e-dev/core/lib/agent/tool';
 import type { Locator, TargetApp } from '@e2e-dev/core/lib/types';
 import type { NodeRef, OperationContext } from '@e2e-dev/core/lib/engine/surface';
+import type { SemanticNode } from '@e2e-dev/core/lib/engine/contract';
 import type { E2EConfig } from '../../src/run-types.ts';
 import { installFakeLoopModel } from '../helpers/fake-loop-model.ts';
 import { extracted, fakeCalls, installFakeModel, judgment, notFound } from '../helpers/fake-model.ts';
@@ -345,15 +346,26 @@ describe('explicit fixture operations', () => {
 });
 
 describe('context.withNode', () => {
-  type Use = (ref: NodeRef, operation: OperationContext) => Promise<string>;
+  type Use = (ref: NodeRef, operation: OperationContext, node: SemanticNode) => Promise<string>;
   type Probe = { run(locator: unknown, use: Use, timeout?: number, wait?: boolean): Promise<string> };
 
-  /** A fixture that hands `use` the node a locator matches; `matches` is what each locate answers. */
-  function probeRuntime(matches: () => readonly string[], overrides: Partial<E2EConfig> = {}) {
+  /**
+   * A fixture that hands `use` the node a locator matches; `matches` is what
+   * each locate answers, and a match named in `secure` is a secure field.
+   */
+  function probeRuntime(
+    matches: () => readonly string[],
+    overrides: Partial<E2EConfig> = {},
+    secure: readonly string[] = [],
+  ) {
     const engine = defineEngine({
       name: 'fake', version: '1', spiVersion: 1,
       observe: async () => snapshot([]),
-      locate: async () => matches().map((id) => ({ ref: { id, revision: '' }, role: 'navigation' })),
+      locate: async () => matches().map((id) => ({
+        ref: { id, revision: '' },
+        role: 'navigation',
+        ...(secure.includes(id) ? { states: { secure: true } } : {}),
+      })),
       fixtures: {
         probe: (context) => context.fixture('probe', {
           run: (locator: Locator, use: Use, timeout?: number, wait?: boolean) => {
@@ -473,6 +485,35 @@ describe('context.withNode', () => {
     expect(locates).toBe(1);
     current = ['nav'];
     await expect(probe.run(screen.getByRole('navigation'), async (ref) => ref.id, 5_000, false)).resolves.toBe('nav');
+  });
+
+  it('hands use the node the resolve read', async () => {
+    const { screen, probe } = probeRuntime(() => ['nav']);
+    await expect(probe.run(screen.getByRole('navigation'), async (ref, _operation, node) =>
+      `${node.ref.id}=${ref.id} ${node.role}`)).resolves.toBe('nav=nav navigation');
+  });
+
+  it('refuses a secure field as POLICY_DENIED before use runs, naming the locator', async () => {
+    const use = vi.fn(async () => 'never');
+    const { screen, probe } = probeRuntime(() => ['password'], {}, ['password']);
+    await expect(probe.run(screen.getByRole('navigation'), use, 2_000)).rejects.toMatchObject({
+      code: 'POLICY_DENIED',
+      message: expect.stringContaining('secure field is denied: getByRole("navigation")'),
+    });
+    expect(use).not.toHaveBeenCalled();
+  });
+
+  it('answers a missing frame as zero matches at once when told not to wait', async () => {
+    let locates = 0;
+    const { screen, probe } = probeRuntime(() => {
+      locates += 1;
+      throw new EngineError('FRAME_NOT_FOUND', 'no frame matches #nope', { retryable: true });
+    });
+    const started = Date.now();
+    await expect(probe.run(screen.getByRole('navigation'), async () => 'never', 5_000, false))
+      .rejects.toMatchObject({ code: 'LOCATOR_NOT_FOUND' });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(locates).toBe(1);
   });
 
   it('refuses a value that is not an e2e locator, and a locator from another attempt, naming the caller', async () => {

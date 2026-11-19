@@ -297,6 +297,7 @@ await expect(browser).toHaveClass(browser.locator('.card'), 'card active');
 - ノード自体もポーリングします。対象にまだ一致するノードがなければ、即座に失敗せず、アサーションのタイムアウトまでポーリングを続けます。
 - 対象が曖昧な場合は、直ちに `LOCATOR_AMBIGUOUS` で失敗します。
 - e2e のロケーターでない対象や、別の screen や試行のロケーターは、直ちに `INVALID_LOCATOR` になります。
+- セキュアなフィールドは、`getAttribute()` と同じく `POLICY_DENIED` になります。
 - `class` 属性を読み取るため、`''` は `class=""` に一致しますが、`class` 属性自体がない要素には一致しません。Playwright の `toHaveClass('')` はどちらも受け付けます。
 
 #### `toHaveCSS`
@@ -311,6 +312,7 @@ await expect(browser).toHaveCSS(nav, '--accent', /red/);
 
 - `getComputedStyle(element).getPropertyValue(property)` をページのコードとして実行します。そのため、これらの関数を上書きしたページでは読み取る値が変わります。名前はケバブケース（`background-color`）で、カスタムプロパティ（`--accent`）も使えます。
 - 対象は [`browser.evaluateOn`](/reference/web#evaluateon) と同じく、スコープとフレームで解決します。対象にまだ一致するノードがなければ、失敗せずにアサーションのタイムアウトまでポーリングを続けます。対象が曖昧な場合は、直ちに `LOCATOR_AMBIGUOUS` で失敗します。e2e のロケーターでない対象や、別の screen や試行のロケーターは、直ちに `INVALID_LOCATOR` になります。
+- セキュアなフィールドは、[`browser.evaluateOn`](/reference/web#evaluateon) と同じく、スタイルであっても `POLICY_DENIED` になります。
 - 読み取り中にナビゲーションが起きた場合は、新しいページで対象をもう一度解決します。
 - 空の、または文字列でない `property` は `INVALID_ARGUMENT` になります。
 
@@ -660,6 +662,7 @@ last: expected "running" not to be "running"
 | --- | --- |
 | `toHaveValue`, `toHaveText`, `toContainText` | `inputValue()` や `textContent()` と同じく `POLICY_DENIED`。否定やリスト形式も同様 |
 | `toHaveAttribute` | `getAttribute()` と同じく `POLICY_DENIED`。すべての属性名と否定も対象 |
+| `expect(browser)` の `toHaveClass`、`toHaveCSS`、`toHaveJSProperty` | `POLICY_DENIED`。否定も同様 |
 | `toHaveAccessibleName`、`toHaveRole`、状態のマッチャー | 通常どおりに判定 |
 
 伏せられた値を `''` と読むと、入力済みのパスワード欄を空だと判定してしまいます。また、伏せられた `value` 属性を不存在と読むと、実際には属性のあるパスワード欄で `not.toHaveAttribute('value')` が成功してしまいます。フィールドそのものではなく、入力した結果を検証してください。

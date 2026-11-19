@@ -59,7 +59,7 @@ import {
   beforeEach,
   describe,
 } from '../../src/index.ts';
-import type { Engine, EngineAttemptContext, EngineCleanupContext, EngineDisposeContext, EngineFixtureContext, EngineHandle, EngineObserveOptions, EngineSnapshot, NodeRef, OperationContext } from '../../src/engine/index.ts';
+import type { Engine, EngineAttemptContext, EngineCleanupContext, EngineDisposeContext, EngineFixtureContext, EngineHandle, EngineObserveOptions, EngineSnapshot, NodeRef, OperationContext, SemanticNode } from '../../src/engine/index.ts';
 import {
   BASE_RULES,
   createGrammarTools,
@@ -263,10 +263,11 @@ secrets.get('key') satisfies Secret;
 ({ name: 'gated', version: '1.0.0', spiVersion: 1, secrets: ['sk_test'] }) satisfies Engine;
 declare const fixtureContext: EngineFixtureContext;
 declare const fixtureTarget: Locator;
-// withNode resolves to what `use` returns, and hands it the node's ref and the budget left.
-void (fixtureContext.withNode('custom.read', fixtureTarget, async (ref, operation) => {
+// withNode resolves to what `use` returns, and hands it the node's ref, the budget left, and the node.
+void (fixtureContext.withNode('custom.read', fixtureTarget, async (ref, operation, node) => {
   ref satisfies NodeRef;
   operation satisfies OperationContext;
+  node satisfies SemanticNode;
   return 1;
 }) satisfies Promise<number>);
 // @ts-expect-error the result follows `use`: a number is not a string.
