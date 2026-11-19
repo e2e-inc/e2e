@@ -153,10 +153,12 @@ translation moves or goes with it in the same change.
 | call (noun) | कॉल | f |
 | lease | लीज़ | f |
 | request | अनुरोध | m |
+| reference (docs) | रेफ़रेंस | m |
 | action | एक्शन | m |
 | permission | इजाज़त | f |
 | untrusted (code, pull request) | जिस पर आप भरोसा नहीं करते | |
-| state | स्टेट | m |
+| state (of the app, in prose) | स्थिति | f |
+| state (stored or device state) | स्टेट | m |
 | accessibility | ऐक्सेसिबिलिटी | f |
 | account | खाता | m |
 | job (CI) | जॉब | m |

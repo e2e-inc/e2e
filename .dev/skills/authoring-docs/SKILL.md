@@ -443,8 +443,9 @@ Each group opens with one table, one row per entry. Keep it to the minimum:
 ## Translations
 
 `docs/<language>/<path>.mdx` translates `docs/<path>.mdx`: `docs/ja/` is
-Japanese, `docs/zh/` Simplified Chinese, `docs/cs/` Czech, `docs/es/` Spanish, `docs/hi/` Hindi. Each language's
-README ([`docs/ja/README.md`](../../../docs/ja/README.md),
+Japanese, `docs/zh/` Simplified Chinese, `docs/cs/` Czech, `docs/es/`
+Spanish, `docs/hi/` Hindi. Each language's README
+([`docs/ja/README.md`](../../../docs/ja/README.md),
 [`docs/zh/README.md`](../../../docs/zh/README.md),
 [`docs/cs/README.md`](../../../docs/cs/README.md),
 [`docs/es/README.md`](../../../docs/es/README.md),
