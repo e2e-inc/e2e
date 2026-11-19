@@ -12,7 +12,7 @@ import picocolors from 'picocolors';
 import { detectPackageManager, execCommand, runScriptCommand } from '../internal/package-manager.ts';
 import { packageVersion } from '@e2e-dev/core/lib/internal/package-version';
 import { MAX_TIMER_MS } from '@e2e-dev/core/lib/internal/time';
-import { classifyError, codedMessage, exitCodeForCategory, TestError, withHint } from '@e2e-dev/core/lib/internal/errors';
+import { classifyError, codedMessage, exitCodeForCategory } from '@e2e-dev/core/lib/internal/errors';
 import type { Shard, TagMode } from '../collect/select.ts';
 import { listSelection, run, type ListedPair, type RunOptions, type RunOutcome } from '../run/runner.ts';
 import { claimRunnerOutput } from './run-output.ts';
@@ -855,26 +855,6 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
             }
             if (options.step === true) {
               return stepped(base, signals);
-            }
-
-            // The MCP `run_tests` tool started this run, and the agent
-            // waiting on that call can't resume a pause.
-            if (process.env['E2E_MCP_RUN_TESTS'] === '1') {
-              return run({
-                ...base,
-                hold: {
-                  ask: async () => {
-                    throw new TestError(
-                      'PAUSE_UNAVAILABLE',
-                      withHint(
-                        "a test can't be paused in a run that the MCP run_tests tool started, since the agent waiting on the call can't resume it",
-                        'remove the screen.pause() call, or run the test with e2e run in a terminal',
-                      ),
-                    );
-                  },
-                  steps: false,
-                },
-              });
             }
 
             const { servePauses } = await import('./step-control.ts');

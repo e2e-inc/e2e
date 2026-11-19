@@ -503,7 +503,7 @@ await screen.pause();
 
 | 抛出的错误 | 触发条件 |
 | --- | --- |
-| `PAUSE_UNAVAILABLE` | 设置了 `CI`，或运行由 MCP [`run_tests`](/reference/mcp#run_tests) 工具启动。请在提交前删除该调用，或在终端中使用 `e2e run` 运行测试。在不允许暂停的位置调用时，会改为以下表中对应的错误失败。 |
+| `PAUSE_UNAVAILABLE` | 设置了 `CI`。请在提交前删除该调用，或在终端中使用 `e2e run` 运行测试。在不允许暂停的位置调用时，会改为以下表中对应的错误失败。 |
 | `INVALID_ARGUMENT` | 在定位器或框架上、在 [`afterEach`](/reference/test#aftereach) 钩子中、在测试夹具清理中，或在测试体返回后运行的未 await 代码中调用。请在 `screen` 上，于测试夹具准备阶段、`beforeEach` 钩子或测试体中的步骤之间调用。 |
 | `ACTION_FAILED` | 在智能体步骤内调用，例如在 [`onAction`](/reference/agent#agent-act) 钩子或[自定义执行器](/executors)中。步骤会以暂停的消息失败，测试不会暂停。在内置智能体的[项目工具](/tools)中，拒绝会作为失败的工具结果返回给模型，步骤继续执行。请改为在步骤之间调用。 |
 | `ASSERTION_FAILED` | 在 [`expect.poll`](/reference/expect#polling-a-value) 读取内调用。读取会重试，直到轮询超时。请在读取之外调用。 |

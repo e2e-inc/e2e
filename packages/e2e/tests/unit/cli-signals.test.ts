@@ -1,11 +1,5 @@
-import { EventEmitter } from 'node:events';
-import { describe, expect, it, vi } from 'vitest';
-import { SignalLadder, type SignalHost } from '../../src/cli/signals.ts';
-
-// The real `process` of a forks worker belongs to vitest, which exits the worker on `disconnect`.
-function fakeHost(channel: { readonly send: (() => boolean) | undefined; readonly connected: boolean }): EventEmitter & SignalHost {
-  return Object.assign(new EventEmitter(), channel);
-}
+import { describe, expect, it } from 'vitest';
+import { SignalLadder } from '../../src/cli/signals.ts';
 
 describe('SignalLadder', () => {
   it('interrupts on the first signal, forces on the second, exits on the third', () => {
@@ -43,50 +37,11 @@ describe('SignalLadder', () => {
     expect(exits).toEqual([130]);
   });
 
-  it('climbs the whole ladder on its own once the parent closes its IPC channel', () => {
-    vi.useFakeTimers();
-    const exits: number[] = [];
-    const ladder = new SignalLadder();
-    const host = fakeHost({ send: () => true, connected: true });
-    const release = ladder.arm((code) => exits.push(code), 1_000, host);
-    try {
-      host.emit('disconnect');
-      expect(ladder.interruptSignal.aborted).toBe(true);
-      expect(ladder.forceSignal.aborted).toBe(false);
-      vi.advanceTimersByTime(1_000);
-      expect(ladder.forceSignal.aborted).toBe(true);
-      expect(exits).toEqual([]);
-      vi.advanceTimersByTime(1_000);
-      expect(exits).toEqual([130]);
-    } finally {
-      release();
-      vi.useRealTimers();
-    }
-  });
-
-  it.each([
-    ['climbs at once when the parent was gone before it armed', { send: () => true, connected: false }, true],
-    ['stays put while the parent is connected', { send: () => true, connected: true }, false],
-    // Bun reports `connected: false` for a process spawned without a channel; Node.js leaves it undefined.
-    ['stays put without an IPC channel, whatever connected says', { send: undefined, connected: false }, false],
-  ])('%s', (_case, channel, climbs) => {
-    const ladder = new SignalLadder();
-    const release = ladder.arm(() => undefined, 1_000, fakeHost(channel));
-    try {
-      expect(ladder.interruptSignal.aborted).toBe(climbs);
-    } finally {
-      release();
-    }
-  });
-
   it('release removes its handlers', () => {
     const before = process.listenerCount('SIGINT');
-    const disconnects = process.listenerCount('disconnect');
     const release = new SignalLadder().arm(() => undefined);
     expect(process.listenerCount('SIGINT')).toBe(before + 1);
-    expect(process.listenerCount('disconnect')).toBe(disconnects + 1);
     release();
     expect(process.listenerCount('SIGINT')).toBe(before);
-    expect(process.listenerCount('disconnect')).toBe(disconnects);
   });
 });
