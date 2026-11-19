@@ -636,6 +636,7 @@ void (test.fixme(true, 'flaky on webkit') satisfies void);
 void (test.fixme('flaky on webkit') satisfies void);
 void (test.fixme() satisfies void);
 test.extend<{ x: number }>().fixme('uses x', async ({ x }) => { x satisfies number; });
+test.extend<{}, { db: number }>().fixme('uses a worker fixture', async ({ db }) => { db satisfies number; });
 // @ts-expect-error fixme takes no test options
 test.fixme('not yet', { tags: ['@fs'] }, async () => {});
 // @ts-expect-error the condition is a boolean; a truthy value must be converted first

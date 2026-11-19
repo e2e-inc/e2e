@@ -888,7 +888,7 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   skip(condition: boolean, reason?: string): void;
   skip(reason?: string): void;
   /** Registers one skipped test marked fixme, reported with the skip cause and reason `fixme`. */
-  fixme(title: string, fn: TestFn<Fixtures>): TestCase;
+  fixme(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
    * Inside a running test: skips it as fixme when `condition` is true (or
    * always, with no condition), as `test.skip` does. The skip cause is

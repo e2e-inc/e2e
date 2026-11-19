@@ -32,7 +32,10 @@ export interface TestIdentity {
  * The skip causes a test gives itself: `explicit` from `test.skip` or the
  * `skip` option, `fixme` from `test.fixme`. Every other cause is the runner's.
  */
-export type SelfSkipCause = 'explicit' | 'fixme';
+const SELF_SKIP_CAUSES = ['explicit', 'fixme'] as const;
+
+/** One of `SELF_SKIP_CAUSES`. */
+export type SelfSkipCause = (typeof SELF_SKIP_CAUSES)[number];
 
 /** Why a pair did not run; only a `filtered` one can name the test filter that left it out. */
 export type SkipInfo =
@@ -242,7 +245,7 @@ export function memberRan(member: { readonly status: string; readonly skip?: { r
 
 /** Whether a skip cause is a `SelfSkipCause`, one a test gives itself rather than one the runner gives it. */
 function skippedItself(cause: string | undefined): cause is SelfSkipCause {
-  return cause === 'explicit' || cause === 'fixme';
+  return (SELF_SKIP_CAUSES as readonly (string | undefined)[]).includes(cause);
 }
 
 /** Whether an attempt keeps its trace, by the rule its video follows too (`keeps`): a `test.fail` verdict, not what the body did. */
