@@ -682,7 +682,8 @@ expect(await device.isAppInstalled('com.example.app')).toBe(false);
 await device.installApp(); // a fresh install, for a first-launch flow
 ```
 
-- 删除当前显示的应用后，设备会回到主屏幕，之前解析的定位器不再指向任何元素。要继续测试，请重新打开应用。
+- 删除当前显示的应用后，设备会回到主屏幕，之前解析的定位器不再指向任何元素。要继续测试，请先用 `device.installApp()` 重新安装，再用 `device.openApp(app)` 打开。
+- 设备会留给该 worker 的后续测试使用，删除的状态也会保留。请在测试结束前（在 `finally` 块中）重新安装应用，否则该 worker 后续的所有测试都会在 `app.open()` 处失败。
 
 | 抛出错误 | 发生条件 |
 | --- | --- |

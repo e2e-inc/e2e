@@ -766,6 +766,9 @@ await device.installApp(); // a fresh install, for a first-launch flow
 - Removing the app on screen leaves the device on its home screen, and
   locators resolved before point at nothing. Install it again with
   `device.installApp()`, then `device.openApp(app)`, to keep testing it.
+- The device stays with the worker for its later tests, and so does the
+  removal. Reinstall the app before the test ends, in a `finally` block, or
+  every later test on that worker fails at `app.open()`.
 
 | Throws | When |
 | --- | --- |
