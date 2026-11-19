@@ -1,4 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type { OperationContext } from '@e2e-dev/core/engine';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveOptions } from '../../src/options.ts';
@@ -241,7 +244,12 @@ describe('DesktopSurface', () => {
 
   it('fails the open when the window never becomes readable, as on a locked screen', async () => {
     const hidden = { ok: false, error: { code: 'ACTION_NOT_SUPPORTED', message: 'not exposed', details: { kind: 'window_without_accessibility_element' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
-    await expect(launched({ snapshot: [hidden] }, { openTimeoutMs: 1_500 })).rejects.toThrow(/cannot be read through accessibility/);
+    await expect(launched({ snapshot: [hidden] }, { openTimeoutMs: 15_000 })).rejects.toThrow(/cannot be read through accessibility/);
+  }, 30_000);
+
+  it('reports an open that ran out of its own budget as a timeout, not a locked screen', async () => {
+    const hidden = { ok: false, error: { code: 'ACTION_NOT_SUPPORTED', message: 'not exposed', details: { kind: 'window_without_accessibility_element' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
+    await expect(launched({ snapshot: [hidden] }, { openTimeoutMs: 1_500 })).rejects.toMatchObject({ code: 'OPERATION_TIMEOUT' });
   });
 
   it('reports a read that fails for another reason as it is, not as a locked screen', async () => {
@@ -348,6 +356,74 @@ describe('DesktopSurface', () => {
     const observed = await surface.observe(operation(), undefined);
     await surface.perform(observed.root.children![0]!.ref, { kind: 'tap' }, operation());
     expect(fake.calls().at(-1)?.args.slice(0, 2)).toEqual(['click', '@s1:e0']);
+  });
+
+  it('takes nothing as its own after a launch agent-desktop refused', async () => {
+    const { surface, app } = await initialized((pid) => ({
+      launch: [failure('APP_NOT_FOUND', 'not_delivered')],
+      'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [{ name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form', pid, process_instance: 'mine' }] } }],
+    }));
+    await expect(surface.restart(operation())).rejects.toThrow(/no installed app/);
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    await surface.dispose({ signal, timeoutMs: 5_000 });
+    expect(await Promise.race([app.exited, new Promise((resolve) => setTimeout(() => resolve('running'), 300))])).toBe('running');
+  });
+
+  it('takes nothing as its own when the list before the launch was partial', async () => {
+    const { surface, app } = await initialized((pid) => ({
+      launch: [failure('TIMEOUT', 'delivered_unverified')],
+      'list-apps': [{ ok: true, data: { apps: [], complete: false } }, { ok: true, data: { apps: [{ name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form', pid, process_instance: 'theirs' }] } }],
+    }));
+    await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect(await Promise.race([app.exited, new Promise((resolve) => setTimeout(() => resolve('running'), 300))])).toBe('running');
+  });
+
+  it('taps a point in the window it was taken from, even after another window took focus', async () => {
+    const windows = (pid: number, first: number) => [
+      { id: 'w-mine', pid, process_instance: 'instance-1', is_focused: first === 0, bounds: { x: 100, y: 100, width: 400, height: 300 } },
+      { id: 'w-other', pid, process_instance: 'instance-1', is_focused: first === 1, bounds: { x: 700, y: 200, width: 400, height: 300 } },
+    ];
+    const { surface, fake } = await launched((pid) => ({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], 'list-windows': [{ ok: true, data: windows(pid, 0) }, { ok: true, data: windows(pid, 0) }, { ok: true, data: windows(pid, 1) }] }), { options: { headed: true } });
+    await surface.performAt({ x: 10, y: 20 }, { kind: 'tap' }, operation());
+    const calls = fake.calls().map((call) => call.args);
+    expect(calls.at(-2)).toEqual(['focus-window', '--window-id', 'w-mine', '--headed']);
+    expect(calls.at(-1)).toEqual(['mouse-click', '--xy=110,120', '--headed']);
+  });
+
+  it('refuses a point outside the window, which would land on another app', async () => {
+    const { surface, fake } = await launched((pid) => ({ 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true, bounds: { x: 100, y: 100, width: 100, height: 100 } }] }] }), { observe: false, options: { headed: true } });
+    await expect(surface.performAt({ x: 115, y: 20 }, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+    expect(fake.calls().some((call) => call.key === 'mouse-click')).toBe(false);
+  });
+
+  it('goes on when select finds no such option, and reports a list that is gone as stale', async () => {
+    const { surface, fake, byTestId } = await launched({ select: [failure('ELEMENT_NOT_FOUND', 'not_delivered')], expand: [failure('ELEMENT_NOT_FOUND', 'not_delivered')] });
+    await expect(surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Team' }, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
+    expect(actions(fake.calls())).toEqual(['snapshot', 'snapshot', 'select', 'expand']);
+  });
+
+  it('scrolls the window as it is now on a root swipe, not the container of an older observation', async () => {
+    const screen = (id: string) => ({ ok: true, data: { snapshot_id: id, window: { id: 'w-mine' }, tree: { role: 'window', name: 'List', bounds: { x: 0, y: 0, width: 100, height: 100 }, children: [{ role: 'scrollarea', name: id, ref_id: `@${id}:e1` }] } } });
+    const { surface, fake } = await launched({ snapshot: [screen('s1'), screen('s1'), screen('s2')] });
+    await surface.perform({ id: 'root', revision: '' }, { kind: 'swipe', direction: 'down' }, operation());
+    expect(fake.calls().at(-1)?.args.slice(0, 2)).toEqual(['scroll', '@s2:e1']);
+  });
+
+  it.skipIf(process.platform !== 'darwin')('launches the appPath build even with a bundleId set, and refuses a bundleId that is not its own', async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'e2e-desktop-bundle-'));
+    const bundle = path.join(directory, 'Built.app');
+    mkdirSync(path.join(bundle, 'Contents'), { recursive: true });
+    writeFileSync(path.join(bundle, 'Contents', 'Info.plist'), '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>dev.e2e.built</string></dict></plist>');
+    try {
+      const fake = fakeScenario({ status: [{ ok: true, data: { version: '1.3.1', permissions: { accessibility: { state: 'granted' } } } }] });
+      const init = (bundleId: string) =>
+        new DesktopSurface(resolveOptions({ binary: FAKE_BINARY }), 'macos').init({ runId: 'r', targetName: 'mac', projectRoot: directory, app: { appPath: 'Built.app', bundleId }, env: fake.env, headed: false, workerSlot: 0, signal, log: () => undefined });
+      await expect(init('dev.e2e.built')).resolves.toBeUndefined();
+      await expect(init('com.example.other')).rejects.toThrow(/is not the CFBundleIdentifier "dev.e2e.built"/);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('quits the process it launched at the end of the attempt, and only that one', async () => {
