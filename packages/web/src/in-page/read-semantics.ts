@@ -1650,6 +1650,28 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     return role !== null && ARIA_DISABLED_ROLES.indexOf(role) !== -1 && ariaDisabledInChain(el);
   };
 
+  /** The roles that take `aria-readonly`, as Playwright's `getReadonly` lists them. */
+  const ARIA_READONLY_ROLES = [
+    'checkbox', 'combobox', 'grid', 'gridcell', 'listbox', 'radiogroup', 'slider', 'spinbutton', 'textbox',
+    'columnheader', 'rowheader', 'searchbox', 'switch', 'treegrid',
+  ];
+
+  /**
+   * Whether the element is read-only, as Playwright's `getReadonly` reads it:
+   * an input, textarea, or select by its own `readonly` attribute alone; an
+   * `aria-readonly` role by that attribute, case folded; an editing host
+   * (or any element inside one) never. Null for anything else, which has no
+   * read-only state: Playwright's `toBeEditable` throws on it.
+   */
+  const readOnlyOf = (el: Element, tag: string, role: string | null): boolean | null => {
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return el.hasAttribute('readonly');
+    if (role !== null && ARIA_READONLY_ROLES.indexOf(role) !== -1) {
+      return (el.getAttribute('aria-readonly') ?? '').toLowerCase() === 'true';
+    }
+    if (el instanceof HTMLElement && el.isContentEditable) return false;
+    return null;
+  };
+
   const describe = (el: Element, style = styleOf(el)): RawNodeData => {
     const tag = el.tagName.toLowerCase();
     const autocomplete = (el.getAttribute('autocomplete') ?? '').toLowerCase();
@@ -1783,6 +1805,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
         focused: focusedElement === el,
         hidden: isHidden(el, style),
         secure,
+        readonly: readOnlyOf(el, tag, role),
       },
       level,
       attributes,

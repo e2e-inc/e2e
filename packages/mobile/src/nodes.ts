@@ -438,6 +438,18 @@ function editableRole(role: string | undefined, editable: boolean | undefined): 
   return role !== undefined && TEXT_INPUT_ROLES.has(role) ? role : 'textbox';
 }
 
+/**
+ * A text field's read-only state, where the platform says whether it takes
+ * text (Android's `TextView.isTextEditable()`): a field that does not is
+ * read-only. agent-device leaves the flag out where it does not know, and so
+ * does the node, rather than calling an unknown field editable. A combobox
+ * is left out: a picker takes no typed text yet is not read-only.
+ */
+function readOnlyState(role: string | undefined, editable: boolean | undefined): { readonly?: boolean } {
+  if (editable === undefined || (role !== 'textbox' && role !== 'searchbox')) return {};
+  return { readonly: !editable };
+}
+
 function checkedOf(role: string | undefined, value: string | undefined): boolean | undefined {
   if (role === undefined || !CHECKABLE_ROLES.has(role) || value === undefined) return undefined;
   const lowered = value.trim().toLowerCase();
@@ -616,6 +628,7 @@ export function projectSnapshot(
       ...(secure ? { secure: true } : {}),
       ...(checked === undefined ? {} : { checked }),
       ...(spelled?.states.expanded === undefined ? {} : { expanded: spelled.states.expanded }),
+      ...readOnlyState(role, source.editable),
     };
     const node: SemanticNode = {
       ref: { id, revision: '' },

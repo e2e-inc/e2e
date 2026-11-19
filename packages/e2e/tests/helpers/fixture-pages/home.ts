@@ -329,7 +329,9 @@ line2  </textarea>
 </body>
 </html>`),
   // What toBeEditable reads: native readonly, aria-readonly, the disabled
-  // state a fieldset gives, an editing host, and a role that cannot be read-only.
+  // state a fieldset gives, an editing host and what is inside it, and a role
+  // that cannot be read-only. A native tag reads readonly alone, an ARIA role
+  // aria-readonly alone, as Playwright's getReadonly does.
   '/editable-matcher': constant(`<!doctype html>
 <html>
 <head><title>Editable matcher</title></head>
@@ -339,8 +341,12 @@ line2  </textarea>
   <div role="textbox" aria-label="Total" aria-readonly="true">42</div>
   <select aria-label="Size"><option>S</option><option>M</option></select>
   <fieldset disabled><input aria-label="Locked" /></fieldset>
-  <div contenteditable="true" data-testid="editor">Draft</div>
+  <div contenteditable="true" data-testid="editor">Draft<p data-testid="editor-line">Line</p></div>
   <input aria-label="Secret" type="password" readonly value="marker-3b9d" />
+  <input aria-label="Aria on input" aria-readonly="true" />
+  <div role="textbox" aria-label="Upper case" aria-readonly="TRUE">7</div>
+  <input type="radio" aria-label="Pick" readonly />
+  <div role="textbox" aria-label="Attribute on div" readonly>8</div>
   <button>Save</button>
 </body>
 </html>`),

@@ -13,7 +13,7 @@ import {
   type TextComparison,
   type TextPattern,
 } from '@e2e-dev/core/lib/internal/text';
-import { canBeReadOnly, isReadOnly, isValueControl } from '@e2e-dev/core/lib/internal/roles';
+import { isValueControl } from '@e2e-dev/core/lib/internal/roles';
 import { pollReads, type ReadWindow } from '@e2e-dev/core/lib/internal/time';
 import { SampleHistory } from '@e2e-dev/core/lib/expect/samples';
 import { attributeOf, denySecureRead, isNodeVisible } from '@e2e-dev/core/lib/locator/engine';
@@ -391,17 +391,14 @@ class AsyncExpectationImpl implements AsyncExpectation {
     return this.poll(
       {
         name: 'toBeEditable',
-        evaluableNode: canBeReadOnly,
-        predicate: (sample) => sample.node !== null && isNodeEditable(sample.node) === holds,
+        evaluableNode: (node) => editState(node) !== undefined,
+        predicate: (sample) => sample.node !== null && (editState(sample.node) === 'editable') === holds,
         describeExpected: holds ? 'editable' : 'read-only or disabled',
         observed: (sample) => {
           if (sample.node === null) return 'no node';
           const { node } = sample;
-          if (!canBeReadOnly(node)) {
-            return `${node.role === undefined ? 'no role' : `role ${JSON.stringify(node.role)}`} (not a control that can be read-only)`;
-          }
-          if (node.states?.disabled === true) return 'disabled';
-          return isReadOnly(node) ? 'read-only' : 'editable';
+          const role = node.role === undefined ? 'no role' : `role ${JSON.stringify(node.role)}`;
+          return editState(node) ?? `${role}, no read-only state`;
         },
       },
       options?.timeout,
@@ -582,9 +579,16 @@ function printField(def: TextMatcherDef, actual: string): string {
   return JSON.stringify(def.normalize ? normalizeText(actual) : actual);
 }
 
-/** An enabled node that is not read-only; the caller has checked that its role can be read-only. */
-function isNodeEditable(node: SemanticNode): boolean {
-  return node.states?.disabled !== true && !isReadOnly(node);
+/**
+ * What `toBeEditable` reads: undefined for a node the engine reports no
+ * read-only state for, which the matcher cannot judge; else disabled first,
+ * as Playwright reads it, then read-only.
+ */
+function editState(node: SemanticNode): 'disabled' | 'read-only' | 'editable' | undefined {
+  const readonly = node.states?.readonly;
+  if (readonly === undefined) return undefined;
+  if (node.states?.disabled === true) return 'disabled';
+  return readonly ? 'read-only' : 'editable';
 }
 
 function observedState(sample: Sample): string {

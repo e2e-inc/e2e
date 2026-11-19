@@ -114,9 +114,10 @@ await expect(screen.getByLabel('Email')).toBeEditable();
 await expect(screen.getByLabel('Order id')).toBeEditable({ editable: false }); // read-only or disabled
 ```
 
-- `readonly` 属性（値は問いません）または `aria-readonly="true"` があるノードは読み取り専用です。無効なノードも編集可能ではありません。無効の判定は [`toBeEnabled`](#tobeenabled-and-tobedisabled) と同じです。
-- 読み取り専用になりうるロールのノードだけを読みます。`aria-readonly` を取るロールで、`textbox`、`searchbox`、`combobox`、`listbox`、`checkbox`、`switch`、`slider`、`spinbutton`、`gridcell` などです。ボタンなどそれ以外のノードでは、否定しても失敗し、失敗メッセージにそのロールが表示されます。
-- デバイスエンジンは `readonly` を報告しないため、デバイス上のフィールドは有効であれば常に編集可能です。
+- 読み取り専用かどうかはエンジンが報告する状態で、Web では Playwright の `toBeEditable` と同じ方法で決まります。`input`、`textarea`、`select` は自身の `readonly` 属性だけを読みます（値は問いません）。`aria-readonly` を取るロール（`textbox`、`searchbox`、`combobox`、`listbox`、`checkbox`、`switch`、`slider`、`spinbutton`、`gridcell` など）の要素は `aria-readonly="true"` を読みます（大文字小文字は問いません）。編集ホストとその中の要素は読み取り専用になりません。
+- 無効なノードも編集可能ではありません。無効の判定は [`toBeEnabled`](#tobeenabled-and-tobedisabled) と同じです。
+- ボタンなどそれ以外のノードには読み取り専用の状態がありません。否定してもマッチャーは失敗し、失敗メッセージにそのことが表示されます。
+- デバイスでは、agent-device がテキストを受け付けるかどうかを報告する場合（Android など）だけ、テキストフィールドに読み取り専用の状態があります。報告がないフィールドでは、推測で成功させずにマッチャーが失敗します。
 
 #### `toBeChecked`、`toBeSelected`、`toBeExpanded`
 
@@ -709,7 +710,7 @@ export interface AsyncExpectation {
   toBeEnabled(options?: { enabled?: boolean; timeout?: number }): Promise<void>;
   /** Waits for disabled state. */
   toBeDisabled(options?: { timeout?: number }): Promise<void>;
-  /** Waits for an enabled control that is not read-only; `editable: false` waits for a disabled or read-only one. A node of a role that cannot be read-only, a button included, fails either way. */
+  /** Waits for an enabled control that is not read-only; `editable: false` waits for a disabled or read-only one. A node with no read-only state, a button included, fails either way. */
   toBeEditable(options?: { editable?: boolean; timeout?: number }): Promise<void>;
   /** Waits for checked state; `checked: false` waits for unchecked state. */
   toBeChecked(options?: { checked?: boolean; timeout?: number }): Promise<void>;

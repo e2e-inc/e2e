@@ -131,6 +131,13 @@ test('toBeEditable reads readonly, aria-readonly, and the disabled state', async
   // A fieldset disables the control inside it, though the control has no attribute.
   await expect(screen.getByLabel('Locked')).not.toBeEditable();
   await expect(screen.getByLabel('Secret')).not.toBeEditable();
+  // Playwright parity: a native tag ignores aria-readonly, an ARIA role ignores
+  // readonly and folds case, an element inside an editing host is editable.
+  await expect(screen.getByLabel('Aria on input')).toBeEditable();
+  await expect(screen.getByLabel('Upper case')).not.toBeEditable();
+  await expect(screen.getByTestId('editor-line')).toBeEditable();
+  await expect(screen.getByLabel('Pick')).not.toBeEditable();
+  await expect(screen.getByLabel('Attribute on div')).toBeEditable();
 });
 
 test('toBeEditable fails on a read-only field', async ({ app, screen }) => {
@@ -622,7 +629,7 @@ describe('web platform integration', () => {
     expect(result.status).toBe('failed');
     expect(result.attempts[0]!.error?.code).toBe('ASSERTION_FAILED');
     expect(result.attempts[0]!.error?.message).toContain(
-      'expected: not editable\nobserved: role "button" (not a control that can be read-only)',
+      'expected: not editable\nobserved: role "button", no read-only state',
     );
   });
 

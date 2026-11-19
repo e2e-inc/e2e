@@ -23,30 +23,8 @@ const CHECKED_ROLES: ReadonlySet<string> = new Set([
   'treeitem',
 ]);
 
-/**
- * Roles that can be read-only, the ARIA roles that take `aria-readonly`, as
- * Playwright lists them. A text field, a select, and a checkbox read as one
- * of them, so their native `readonly` is read too.
- */
-const READONLY_ROLES: ReadonlySet<string> = new Set([
-  'checkbox',
-  'columnheader',
-  'combobox',
-  'grid',
-  'gridcell',
-  'listbox',
-  'radiogroup',
-  'rowheader',
-  'searchbox',
-  'slider',
-  'spinbutton',
-  'switch',
-  'textbox',
-  'treegrid',
-]);
-
-/** True for a node of an editable role. */
-export function isEditable(node: Pick<SemanticNode, 'role'>): boolean {
+/** True for a node of a role that takes typed text. */
+export function takesText(node: Pick<SemanticNode, 'role'>): boolean {
   return EDITABLE_ROLES.has(node.role ?? '');
 }
 
@@ -66,20 +44,4 @@ export function isValueControl(node: Pick<SemanticNode, 'role'>): boolean {
  */
 export function isCheckable(node: Pick<SemanticNode, 'role' | 'states'>): boolean {
   return node.states?.checked !== undefined || CHECKED_ROLES.has(node.role ?? '');
-}
-
-/** True for a node whose role can be read-only, the nodes `toBeEditable` reads. */
-export function canBeReadOnly(node: Pick<SemanticNode, 'role'>): boolean {
-  return READONLY_ROLES.has(node.role ?? '');
-}
-
-/**
- * True for a node marked read-only: the native `readonly` attribute, present
- * with any value, or `aria-readonly="true"`. A platform without attributes
- * never marks one.
- */
-export function isReadOnly(node: Pick<SemanticNode, 'attributes'>): boolean {
-  const attributes = node.attributes;
-  if (attributes === undefined) return false;
-  return Object.hasOwn(attributes, 'readonly') || attributes['aria-readonly'] === 'true';
 }

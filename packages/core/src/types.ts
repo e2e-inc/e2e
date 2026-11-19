@@ -1087,9 +1087,10 @@ export interface AsyncExpectation {
   toBeDisabled(options?: { timeout?: number }): Promise<void>;
   /**
    * Waits for an enabled control that is not read-only; `editable: false`
-   * waits for a disabled or read-only one. Only a node of a role that can be
-   * read-only (a textbox, combobox, checkbox, slider, and the rest of ARIA's
-   * `aria-readonly` roles) is read; any other node fails either way.
+   * waits for a disabled or read-only one. Only a node the engine reports a
+   * read-only state for is read (on the web, an input, textarea, select,
+   * editing host, or a role that takes `aria-readonly`); any other node fails
+   * either way.
    */
   toBeEditable(options?: { editable?: boolean; timeout?: number }): Promise<void>;
   /** Waits for checked state; `checked: false` waits for unchecked state. */

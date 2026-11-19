@@ -146,16 +146,20 @@ await expect(screen.getByLabel('Email')).toBeEditable();
 await expect(screen.getByLabel('Order id')).toBeEditable({ editable: false }); // read-only or disabled
 ```
 
-- A node is read-only when it carries the `readonly` attribute, with any
-  value, or `aria-readonly="true"`. A disabled node is not editable either,
-  as [`toBeEnabled`](#tobeenabled-and-tobedisabled) reads it.
-- It reads only a node whose role can be read-only: the roles that take
-  `aria-readonly`, such as `textbox`, `searchbox`, `combobox`, `listbox`,
-  `checkbox`, `switch`, `slider`, `spinbutton`, and `gridcell`. Any other
-  node, such as a button, fails it, negated too, and the failure message
-  says its role.
-- A device engine reports no `readonly`, so a field there is editable
-  whenever it is enabled.
+- Read-only is the state the engine reports, decided on the web as
+  Playwright's `toBeEditable` decides it. An `input`, `textarea`, or
+  `select` reads its `readonly` attribute alone, with any value. An element
+  of a role that takes `aria-readonly` (`textbox`, `searchbox`, `combobox`,
+  `listbox`, `checkbox`, `switch`, `slider`, `spinbutton`, `gridcell`, and
+  the rest) reads `aria-readonly="true"`, in any case. An editing host, and
+  any element inside one, is never read-only.
+- A disabled node is not editable either, as
+  [`toBeEnabled`](#tobeenabled-and-tobedisabled) reads it.
+- Any other node, such as a button, has no read-only state. It fails the
+  matcher, negated too, and the failure message says so.
+- On a device, a text field has a read-only state only where agent-device
+  reports whether it takes text, as Android does. A field without it fails
+  the matcher rather than pass as a guess.
 
 #### `toBeChecked`, `toBeSelected`, and `toBeExpanded`
 
@@ -963,7 +967,7 @@ export interface AsyncExpectation {
   toBeEnabled(options?: { enabled?: boolean; timeout?: number }): Promise<void>;
   /** Waits for disabled state. */
   toBeDisabled(options?: { timeout?: number }): Promise<void>;
-  /** Waits for an enabled control that is not read-only; `editable: false` waits for a disabled or read-only one. A node of a role that cannot be read-only, a button included, fails either way. */
+  /** Waits for an enabled control that is not read-only; `editable: false` waits for a disabled or read-only one. A node with no read-only state, a button included, fails either way. */
   toBeEditable(options?: { editable?: boolean; timeout?: number }): Promise<void>;
   /** Waits for checked state; `checked: false` waits for unchecked state. */
   toBeChecked(options?: { checked?: boolean; timeout?: number }): Promise<void>;

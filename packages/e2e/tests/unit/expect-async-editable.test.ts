@@ -15,20 +15,20 @@ function node(testId: string, fields: Omit<SemanticNode, 'ref' | 'testId'>): Sem
 }
 
 const NODES: readonly SemanticNode[] = [
-  node('field', { role: 'textbox', name: 'Name', attributes: { type: 'text' } }),
-  // A device engine reports no attributes at all.
-  node('device-field', { role: 'textbox', name: 'Name' }),
-  node('native-readonly', { role: 'textbox', name: 'Id', attributes: { readonly: '' } }),
-  node('aria-readonly', { role: 'textbox', name: 'Total', attributes: { 'aria-readonly': 'true' } }),
-  node('aria-writable', { role: 'searchbox', name: 'Search', attributes: { 'aria-readonly': 'false' } }),
-  node('disabled', { role: 'combobox', name: 'Country', states: { disabled: true } }),
-  node('checkbox', { role: 'checkbox', name: 'Agree' }),
-  node('grid-cell', { role: 'gridcell', name: 'Qty', attributes: { 'aria-readonly': 'true' } }),
-  node('secret', { role: 'textbox', name: 'Password', states: { secure: true } }),
-  node('button', { role: 'button', name: 'Save' }),
+  node('field', { role: 'textbox', name: 'Name', states: { readonly: false } }),
+  node('read-only', { role: 'textbox', name: 'Id', states: { readonly: true } }),
+  // A readonly attribute is the engine's to read: the matcher reads the state alone.
+  node('attribute-only', { role: 'textbox', name: 'Total', attributes: { readonly: '', 'aria-readonly': 'true' } }),
+  node('disabled', { role: 'combobox', name: 'Country', states: { disabled: true, readonly: false } }),
+  node('disabled-read-only', { role: 'textbox', name: 'Code', states: { disabled: true, readonly: true } }),
+  node('checkbox', { role: 'checkbox', name: 'Agree', states: { readonly: false } }),
+  node('grid-cell', { role: 'gridcell', name: 'Qty', states: { readonly: true } }),
+  node('secret', { role: 'textbox', name: 'Password', states: { secure: true, readonly: false } }),
+  // A disabled button: still no read-only state, so not judged.
+  node('button', { role: 'button', name: 'Save', states: { disabled: true } }),
   node('unroled', { text: 'Plain' }),
-  node('twin', { role: 'textbox', name: 'One' }),
-  node('twin', { role: 'textbox', name: 'Two' }),
+  node('twin', { role: 'textbox', name: 'One', states: { readonly: false } }),
+  node('twin', { role: 'textbox', name: 'Two', states: { readonly: false } }),
 ];
 
 const screen = createScreenFixture(NODES);
@@ -42,32 +42,38 @@ const computed = (options: Record<string, unknown>): { timeout?: number } => ({ 
 describe('toBeEditable', () => {
   it('passes on an enabled control that is not read-only', async () => {
     await at('field').toBeEditable();
-    await at('device-field').toBeEditable();
-    await at('aria-writable').toBeEditable();
     await at('checkbox').toBeEditable();
     await at('field').not.toBeEditable({ editable: false });
   });
 
-  it('reads the native readonly attribute, whatever its value', async () => {
-    await at('native-readonly').not.toBeEditable(soon);
-    await vexpect(at('native-readonly').toBeEditable(soon)).rejects.toMatchObject({
+  it('reads the engine read-only state', async () => {
+    await at('read-only').not.toBeEditable(soon);
+    await at('grid-cell').toBeEditable({ editable: false });
+    await vexpect(at('read-only').toBeEditable(soon)).rejects.toMatchObject({
       ...failsAssertion,
       message: [
         'expect.toBeEditable failed',
-        'locator: getByTestId("native-readonly")',
+        'locator: getByTestId("read-only")',
         'expected: editable',
         'observed: read-only (match count 1)',
       ].join('\n'),
     });
   });
 
-  it('reads aria-readonly="true" on any role that takes it', async () => {
-    await at('aria-readonly').not.toBeEditable(soon);
-    await at('grid-cell').toBeEditable({ editable: false });
+  it('never reads attributes itself', async () => {
+    for (const run of [at('attribute-only').toBeEditable(soon), at('attribute-only').not.toBeEditable(soon)]) {
+      await vexpect(run).rejects.toMatchObject({
+        ...failsAssertion,
+        message: vexpect.stringContaining('observed: role "textbox", no read-only state'),
+      });
+    }
   });
 
-  it('counts a disabled control as not editable', async () => {
+  it('counts a disabled control as not editable, and says disabled first', async () => {
     await at('disabled').toBeEditable({ editable: false });
+    await vexpect(at('disabled-read-only').toBeEditable(soon)).rejects.toMatchObject({
+      message: vexpect.stringContaining('observed: disabled (match count 1)'),
+    });
     await vexpect(at('disabled').toBeEditable(soon)).rejects.toMatchObject({
       ...failsAssertion,
       message: vexpect.stringContaining('observed: disabled (match count 1)'),
@@ -85,16 +91,17 @@ describe('toBeEditable', () => {
     });
   });
 
-  it('fails either way on a node whose role cannot be read-only', async () => {
+  it('fails either way on a node with no read-only state', async () => {
     for (const testId of ['button', 'unroled']) {
       await vexpect(at(testId).toBeEditable(soon)).rejects.toMatchObject(failsAssertion);
       await vexpect(at(testId).not.toBeEditable(soon)).rejects.toMatchObject(failsAssertion);
+      await vexpect(at(testId).toBeEditable({ editable: false, timeout: 100 })).rejects.toMatchObject(failsAssertion);
     }
     await vexpect(at('button').not.toBeEditable(soon)).rejects.toMatchObject({
-      message: vexpect.stringContaining('observed: role "button" (not a control that can be read-only)'),
+      message: vexpect.stringContaining('observed: role "button", no read-only state'),
     });
     await vexpect(at('unroled').toBeEditable(soon)).rejects.toMatchObject({
-      message: vexpect.stringContaining('observed: no role (not a control that can be read-only)'),
+      message: vexpect.stringContaining('observed: no role, no read-only state'),
     });
   });
 

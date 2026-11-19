@@ -173,11 +173,16 @@ export interface SemanticNode {
   /**
    * Boolean states the platform reports. `pressed` is a toggle button's
    * pressed state; `secure` marks a field whose value is never observed.
+   * `readonly` is present only on a node that can be read-only, as
+   * Playwright's `getReadonly` decides on the web (an input, textarea, or
+   * select by its `readonly` attribute, an `aria-readonly` role by that
+   * attribute, an editing host never), and only where the platform knows:
+   * absent means the node has no read-only state to read, not `false`.
    */
   readonly states?: Readonly<
     Partial<
       Record<
-        'checked' | 'disabled' | 'selected' | 'expanded' | 'pressed' | 'focused' | 'hidden' | 'secure',
+        'checked' | 'disabled' | 'selected' | 'expanded' | 'pressed' | 'focused' | 'hidden' | 'secure' | 'readonly',
         boolean
       >
     >

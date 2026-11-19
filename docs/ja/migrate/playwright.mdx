@@ -344,7 +344,6 @@ export const test = base.extend<{ accountPage: AccountPage }>({
   ```
 - 読み取るのは描画済みテキストです。`textContent()`、`toHaveText`、`toContainText` は `innerText` と同じ内容を読み、非表示のテキストは除外し、`text-transform` を適用します。[ロケーターの読み取り](/reference/screen#locator-reads)を参照してください。
 - `toHaveRole` は `getByRole` と同じロール名を使います。`paragraph`、`generic` など、そこにないロールは型エラーになり、`img` は `image` と読みます。比較するのはツリー上のロールで、`contenteditable` エディターは `textbox` です。
-- `toBeEditable` はタグではなくロールを読みます。`aria-readonly` を取るロールなら `readonly` と `aria-readonly="true"` の両方を読むため、`<div role="textbox" readonly>` も読み取り専用です。ネイティブのラジオやボタンの input のロールは `aria-readonly` を取らないので、Playwright はその `readonly` を読みますが、このマッチャーは失敗します。
 - ロケーターは厳密です。複数一致した場合、アクション、読み取り、肯定形のマッチャーは `LOCATOR_AMBIGUOUS` になります。Playwright の `page.click(selector)` や `isVisible()` は最初の一致を使います。`filter` や `first()` で絞り込んでください。
 - `.not.toBeChecked()` はボタンや見出しでも成功します。コントロールの種類が変わったら失敗するように、ロールで対象を探してください。
 - セッションは 1 回の実行内だけ有効です。`test.setup` が名前付きで状態を保存し、`{ session }` が復元します。ファイルは暗号化し、クリーンアップ時に削除するため、再利用する `.auth/user.json` はありません。

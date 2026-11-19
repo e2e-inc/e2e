@@ -369,11 +369,6 @@ purpose. Use the workaround, or keep the test in Playwright.
   and the other roles it leaves out are type errors, and `img` reads as
   `image`. It compares the role the tree reads, where a `contenteditable`
   editor is a `textbox`.
-- `toBeEditable` reads the role, not the tag. It reads `readonly` and
-  `aria-readonly="true"` on any role that takes `aria-readonly`, so a
-  `<div role="textbox" readonly>` is read-only too. A native radio or a
-  button input has a role that does not take it, so the matcher fails on
-  them, where Playwright reads their `readonly`.
 - A locator is strict. An action, a read, or a positive matcher on several
   matches is `LOCATOR_AMBIGUOUS`, where Playwright's `page.click(selector)`
   and `isVisible()` take the first. Narrow with `filter` or `first()`.
