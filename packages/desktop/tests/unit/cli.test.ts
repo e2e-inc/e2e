@@ -36,6 +36,12 @@ describe('AgentDesktopCli', () => {
     await expect(cli.run({ ...call, input: false, args: ['snapshot'] })).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
   });
 
+  it('gives a read exactly its budget, with no floor', async () => {
+    const fake = fakeScenario({ snapshot: [{ ok: true, data: {}, sleepMs: 400 }] });
+    const cli = new AgentDesktopCli(FAKE_BINARY, fake.env);
+    await expect(cli.run({ ...call, input: false, args: ['snapshot'], timeoutMs: 100 })).rejects.toMatchObject({ code: 'OPERATION_TIMEOUT' });
+  });
+
   it('cancels with the signal', async () => {
     const fake = fakeScenario({ click: [{ ok: true, data: {}, sleepMs: 5_000 }] });
     const cli = new AgentDesktopCli(FAKE_BINARY, fake.env);

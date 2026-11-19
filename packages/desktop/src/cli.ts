@@ -79,8 +79,8 @@ export class AgentDesktopFailure extends Error {
   }
 }
 
-/** The least time a command gets once started, however little budget was left: a click that lands is then not reported as cut off. */
-const MIN_COMMAND_MS = 500;
+/** The least time an input gets once started, however little budget was left: a click that lands is then not reported as cut off. A read gets exactly its budget. */
+const MIN_INPUT_MS = 500;
 
 /** Runs agent-desktop commands for one worker: its executable, its private state directory. */
 export class AgentDesktopCli {
@@ -132,7 +132,7 @@ export class AgentDesktopCli {
         cutOff ??= reason;
         child.kill('SIGKILL');
       };
-      const timer = setTimeout(() => stop('timeout'), Math.max(call.timeoutMs, MIN_COMMAND_MS));
+      const timer = setTimeout(() => stop('timeout'), call.input ? Math.max(call.timeoutMs, MIN_INPUT_MS) : call.timeoutMs);
       const onAbort = (): void => stop('aborted');
       call.signal.addEventListener('abort', onAbort, { once: true });
       child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
