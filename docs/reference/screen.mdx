@@ -404,6 +404,7 @@ await screen.tapAt({ x: '50%', y: '50%' });
 - Each coordinate is CSS pixels, the space `boundingBox()` reports in, or a
   percentage of the viewport from `'0%'` through `'100%'`, rounded to the
   nearest pixel (`'100%'` is the last one). They may mix: `{ x: '50%', y: 120 }`.
+- A percentage reads the screen once for its size.
 - Nothing is resolved or waited for; the page decides what the tap lands on.
 - Uses `config.actionTimeout`.
 - Prefer a locator when the tree lists the control, since a point moves with
@@ -413,7 +414,7 @@ await screen.tapAt({ x: '50%', y: '50%' });
 | Throws | When |
 | --- | --- |
 | `INVALID_ARGUMENT` | A negative or non-finite coordinate, or a string that is not a percentage from `'0%'` through `'100%'`. |
-| `UNSUPPORTED_CAPABILITY` | The engine does not list `tap` in its pointer actions, or a percentage on an engine that cannot observe the screen. |
+| `UNSUPPORTED_CAPABILITY` | The engine does not list `tap` in its pointer actions. |
 
 <Note>
 `tapAt` is not scoped: on a locator it still taps a viewport point.
