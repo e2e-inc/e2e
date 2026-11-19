@@ -58,6 +58,8 @@ export interface NodeBinding {
   readonly states: SemanticNode['states'];
   /** The actions agent-desktop says the element takes (`Click`, `SetValue`, `Expand`, ...). */
   readonly actions: readonly string[];
+  /** The window the snapshot read the node in. */
+  readonly windowId?: string;
 }
 
 /** A snapshot as the engine keeps it: the tree the harness sees, and a binding for every node in it. */
@@ -169,7 +171,8 @@ function label(value: string | undefined): string | undefined {
 
 /** A node agent-desktop reports but nothing reads: a wrapper with no name, value, id, ref, or text of its own. */
 function transparent(raw: RawNode): boolean {
-  if (raw.ref_id !== undefined || raw.native_id !== undefined) return false;
+  // A secure node is never dropped: its bounds are what a screenshot masks.
+  if (raw.ref_id !== undefined || raw.native_id !== undefined || raw.states?.includes('secure') === true) return false;
   if (label(raw.name) !== undefined || label(raw.value) !== undefined) return false;
   return raw.role === 'group' || raw.role === 'unknown' || raw.role === 'layoutitem' || raw.role === 'matte' || raw.role === 'splitter';
 }
@@ -186,8 +189,9 @@ function transparent(raw: RawNode): boolean {
 function identityOf(node: RawNode, named = false): string {
   const name = node.name ?? (TEXT_ROLES.has(node.role) ? node.value : undefined) ?? '';
   const id = node.native_id?.value;
-  if (id === undefined) return `${node.role}::${name}`;
-  return named ? `${node.role}:${id}:${name}` : `${node.role}:${id}:`;
+  // A tagged tuple, so no id or name, whatever characters it holds, can spell another kind's key.
+  if (id === undefined) return JSON.stringify(['name', node.role, name]);
+  return JSON.stringify(named ? ['id+name', node.role, id, name] : ['id', node.role, id]);
 }
 
 /**
@@ -248,6 +252,7 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
       ...(name === undefined ? {} : { name }),
       states,
       actions: node.available_actions ?? [],
+      ...(raw.window === undefined ? {} : { windowId: raw.window.id }),
     });
     const kept: RawNode[] = [];
     const collect = (child: RawNode): void => {

@@ -141,6 +141,31 @@ describe('projectSnapshot', () => {
     expect(projectSnapshot(status('Not signed in'), mint).root.children?.[0]?.ref.id).toBe(projectSnapshot(status('Signed in'), mint).root.children?.[0]?.ref.id);
   });
 
+  it('never lets a developer id and a name spell another control\'s identity', () => {
+    const raw: RawSnapshot = {
+      snapshot_id: 's',
+      tree: {
+        role: 'window',
+        name: 'W',
+        children: [
+          { role: 'button', name: 'Edit:', native_id: { kind: 'ax_identifier', value: 'shared' }, ref_id: '@s:e1' },
+          { role: 'button', name: 'Copy', native_id: { kind: 'ax_identifier', value: 'shared' }, ref_id: '@s:e2' },
+          { role: 'button', name: 'Archived', native_id: { kind: 'ax_identifier', value: 'shared:Edit' }, ref_id: '@s:e3' },
+        ],
+      },
+    };
+    const ids = projectSnapshot(raw, minter()).root.children!.map((node) => node.ref.id);
+    expect(new Set(ids).size).toBe(3);
+  });
+
+  it('keeps a secure field a wrapper would hide, so its bounds are masked', () => {
+    const screen = projectSnapshot(
+      { snapshot_id: 's', tree: { role: 'window', name: 'W', bounds: { x: 0, y: 0, width: 100, height: 100 }, children: [{ role: 'group', states: ['secure'], bounds: { x: 10, y: 10, width: 50, height: 20 } }] } },
+      minter(),
+    );
+    expect(screen.secureRects).toEqual([{ x: 10, y: 10, width: 50, height: 20 }]);
+  });
+
   it('withholds masking when a secure field has no bounds, and measures rects from the window', () => {
     expect(project('macos/appkit-form').secureRects).toBeUndefined();
     const raw = load('macos/appkit-form');
