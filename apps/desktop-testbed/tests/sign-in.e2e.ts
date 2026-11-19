@@ -42,25 +42,30 @@ test.describe('sign-in form', () => {
   test('takes a screenshot of the window with the password field painted over', async ({ app, screen }) => {
     await screen.getByRole('textbox', 'Password').fill(credentials.user('ada').password);
     const file = await app.screenshot('filled');
-    // The window is 420 points wide and the password field 262, so the mask is a solid black bar about as wide as the field at the capture's scale; an unmasked window has none.
+    // The window is 420 points wide and the password field 262 by 26: its mask is a solid black block that size at the capture's scale; an unmasked window has none.
     const png = new Uint8Array(readFileSync(file));
     const scale = new Transformer(png).metadataSync().width / 420;
-    expect(longestBlackRun(png)).toBeGreaterThanOrEqual(Math.floor(262 * scale));
+    expect(tallestBlackBlock(png, Math.floor(262 * scale))).toBeGreaterThanOrEqual(Math.floor(26 * scale));
   });
 });
 
-/** The longest run of opaque black pixels in any row of a PNG: the width of a mask, where one was painted. */
-function longestBlackRun(png: Uint8Array): number {
+/** The most consecutive rows of a PNG that each hold a run of at least `width` opaque black pixels: the height of a mask that wide. */
+function tallestBlackBlock(png: Uint8Array, width: number): number {
   const transformer = new Transformer(png);
-  const { width } = transformer.metadataSync();
+  const { width: columns } = transformer.metadataSync();
   const pixels = transformer.rawPixelsSync();
-  let longest = 0;
-  let run = 0;
-  for (let at = 0; at < pixels.length; at += 4) {
-    if (at % (width * 4) === 0) run = 0;
-    const black = pixels[at] === 0 && pixels[at + 1] === 0 && pixels[at + 2] === 0 && pixels[at + 3] === 255;
-    run = black ? run + 1 : 0;
-    longest = Math.max(longest, run);
+  let tallest = 0;
+  let height = 0;
+  for (let row = 0; row * columns * 4 < pixels.length; row += 1) {
+    let run = 0;
+    let longest = 0;
+    for (let column = 0; column < columns; column += 1) {
+      const at = (row * columns + column) * 4;
+      run = pixels[at] === 0 && pixels[at + 1] === 0 && pixels[at + 2] === 0 && pixels[at + 3] === 255 ? run + 1 : 0;
+      longest = Math.max(longest, run);
+    }
+    height = longest >= width ? height + 1 : 0;
+    tallest = Math.max(tallest, height);
   }
-  return longest;
+  return tallest;
 }
