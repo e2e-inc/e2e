@@ -548,7 +548,7 @@ await screen.pause();
 #### `tap`
 
 ```ts
-/** Taps exactly one matching actionable node; with `position`, taps that point of its box once it is in view, with no other actionability check. */
+/** Taps exactly one matching actionable node, `count` times in a row; with `position`, taps that point of its box once it is in view, with no other actionability check. */
 tap(options?: TapOptions): Promise<void>;
 /** Alias of tap. */
 click(options?: TapOptions): Promise<void>;
@@ -558,6 +558,7 @@ click(options?: TapOptions): Promise<void>;
 await screen.getByRole('button', 'Save').tap({ timeout: 10_000 });
 await screen.getByRole('image', 'Seat map').tap({ position: { x: 120, y: 48 } });
 await row.click({ modifiers: ['Shift'] });
+await screen.getByText('Shipping address').tap({ count: 3 });
 ```
 
 选项为 [`TapOptions`](#types)：
@@ -1267,6 +1268,12 @@ export interface TapOptions extends ClickOptions {
    * a box, which needs the engine's `tap` pointer action.
    */
   position?: Point;
+  /**
+   * How many taps in a row, a positive integer, default 1. `2` is the same as
+   * `doubleTap()`; 3 or more needs an engine that declares the `multiTap`
+   * action, `UNSUPPORTED_CAPABILITY` otherwise. Not combined with `position`.
+   */
+  count?: number;
 }
 
 /** One option of a select: its label (a bare string too), its `value` attribute, or its zero-based index. */

@@ -488,6 +488,12 @@ export interface TapOptions extends ClickOptions {
    * a box, which needs the engine's `tap` pointer action.
    */
   position?: Point;
+  /**
+   * How many taps in a row, a positive integer, default 1. `2` is the same as
+   * `doubleTap()`; 3 or more needs an engine that declares the `multiTap`
+   * action, `UNSUPPORTED_CAPABILITY` otherwise. Not combined with `position`.
+   */
+  count?: number;
 }
 
 /** `longPress` options: the hold time in milliseconds, 100 through 10000, default the engine's own. */
@@ -576,7 +582,7 @@ export interface Screen {
 }
 
 export interface Locator extends Omit<Screen, 'tree' | 'debug' | 'pause'> {
-  /** Taps exactly one matching actionable node; with `position`, taps that point of its box once it is in view, with no other actionability check. */
+  /** Taps exactly one matching actionable node, `count` times in a row; with `position`, taps that point of its box once it is in view, with no other actionability check. */
   tap(options?: TapOptions): Promise<void>;
   /** Alias of tap. */
   click(options?: TapOptions): Promise<void>;
