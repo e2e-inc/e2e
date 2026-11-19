@@ -1,0 +1,145 @@
+/**
+ * Where the agent-desktop executable comes from: the `binary` option, or the
+ * pinned release the engine downloads once per machine and checks against
+ * its SHA-256 digest. The npm package `agent-desktop` is not a dependency:
+ * its `postinstall` script would run in every install of this package.
+ */
+
+import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { constants, existsSync } from 'node:fs';
+import { access, chmod, mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
+import { ConfigurationError, InfrastructureError } from '@e2e-dev/core/engine';
+
+/** The agent-desktop release this engine is written and tested against. */
+export const AGENT_DESKTOP_VERSION = '1.3.1';
+
+/** SHA-256 of each release archive, by Rust target triple, from the release's `checksums.txt`. */
+const ARCHIVE_DIGESTS: Readonly<Record<string, string>> = {
+  'aarch64-apple-darwin': '9b7b7cfc74892eab46c2c85d6cb7dc4863bf8dab0a222cfcfb8ae4604c69c86c',
+  'x86_64-apple-darwin': '469da10cfb68928c58caff88b92b30526e0ca895ac06bc86b7f533b1d9b309b3',
+  'aarch64-pc-windows-msvc': '805f1f61890f9983fceaf38cda94a37a049c379435d65607db5cedd22c8ef97b',
+  'x86_64-pc-windows-msvc': '6ee4b1e078f4e78792e79f16e32e4a78b9919464aa3c55629b7e27ed53a08c13',
+  'aarch64-unknown-linux-gnu': '438990a703fbeb19775596c341c3701435e80adbfa1b2f64b82ff17567d5573b',
+  'x86_64-unknown-linux-gnu': 'ca77b6b75034eeb12e537dd8c0a4f2a3424119253f38b7e6bd79ba0d2fef1264',
+};
+
+const execFileAsync = promisify(execFile);
+
+/** The release target for this machine; undefined on an OS or architecture agent-desktop ships no build for. */
+function releaseTarget(): string | undefined {
+  const arch = process.arch === 'arm64' ? 'aarch64' : process.arch === 'x64' ? 'x86_64' : undefined;
+  if (arch === undefined) return undefined;
+  switch (process.platform) {
+    case 'darwin':
+      return `${arch}-apple-darwin`;
+    case 'win32':
+      return `${arch}-pc-windows-msvc`;
+    case 'linux':
+      return `${arch}-unknown-linux-gnu`;
+    default:
+      return undefined;
+  }
+}
+
+/** The executable's file name on this OS. */
+function executableName(): string {
+  return process.platform === 'win32' ? 'agent-desktop.exe' : 'agent-desktop';
+}
+
+/**
+ * The per-user cache the pinned release unpacks into:
+ * `$E2E_CACHE_DIR/agent-desktop/<version>-<target>` when set, else the OS's
+ * cache directory. Read from the run's environment, never `process.env`, so
+ * `prepare` and the workers agree.
+ */
+function cacheDirectory(env: Readonly<Record<string, string | undefined>>, target: string): string {
+  const base =
+    env.E2E_CACHE_DIR ??
+    (process.platform === 'darwin'
+      ? path.join(homedir(), 'Library', 'Caches', 'e2e')
+      : process.platform === 'win32'
+        ? path.join(env.LOCALAPPDATA ?? path.join(homedir(), 'AppData', 'Local'), 'e2e', 'cache')
+        : path.join(env.XDG_CACHE_HOME ?? path.join(homedir(), '.cache'), 'e2e'));
+  return path.join(base, 'agent-desktop', `${AGENT_DESKTOP_VERSION}-${target}`);
+}
+
+/** Where the executable is, or would be once `prepare` downloads it; undefined when nothing can be run here. */
+export function pinnedExecutable(env: Readonly<Record<string, string | undefined>>): string | undefined {
+  const target = releaseTarget();
+  return target === undefined ? undefined : path.join(cacheDirectory(env, target), executableName());
+}
+
+/**
+ * The executable a worker runs: the `binary` option resolved against the
+ * project, else the pinned release. Throws when neither exists, which means
+ * `prepare` did not run (a programmatic host that skips it) or failed.
+ */
+export async function resolveExecutable(binary: string | undefined, projectRoot: string, env: Readonly<Record<string, string | undefined>>): Promise<string> {
+  if (binary !== undefined) {
+    const resolved = path.resolve(projectRoot, binary);
+    try {
+      await access(resolved, constants.X_OK);
+    } catch {
+      throw new ConfigurationError('INVALID_CONFIG', `desktop({ binary }) names ${resolved}, which is not an executable file`);
+    }
+    return resolved;
+  }
+  const pinned = pinnedExecutable(env);
+  if (pinned === undefined) {
+    throw new ConfigurationError('INVALID_CONFIG', `agent-desktop has no release for ${process.platform} on ${process.arch}; pass desktop({ binary }) to use a build of your own`);
+  }
+  if (!existsSync(pinned)) {
+    throw new InfrastructureError('AGENT_DESKTOP_INSTALL_FAILED', `agent-desktop ${AGENT_DESKTOP_VERSION} is not installed at ${pinned}; the engine's prepare step downloads it before the first test`);
+  }
+  return pinned;
+}
+
+/**
+ * Downloads and unpacks the pinned release unless it is already in the
+ * cache. The archive is checked against its pinned SHA-256 before anything
+ * is unpacked, then unpacked by the OS's `tar` into a fresh directory that
+ * replaces the cache entry in one rename, so a download cut short never
+ * leaves a half-written executable behind.
+ */
+export async function installPinned(env: Readonly<Record<string, string | undefined>>, signal: AbortSignal, log: (line: string) => void): Promise<string> {
+  const target = releaseTarget();
+  const digest = target === undefined ? undefined : ARCHIVE_DIGESTS[target];
+  if (target === undefined || digest === undefined) {
+    throw new ConfigurationError('INVALID_CONFIG', `agent-desktop has no release for ${process.platform} on ${process.arch}; pass desktop({ binary }) to use a build of your own`);
+  }
+  const directory = cacheDirectory(env, target);
+  const executable = path.join(directory, executableName());
+  if (existsSync(executable)) return executable;
+  const archive = `agent-desktop-v${AGENT_DESKTOP_VERSION}-${target}.tar.gz`;
+  const url = `https://github.com/vercel-labs/agent-desktop/releases/download/v${AGENT_DESKTOP_VERSION}/${archive}`;
+  log(`downloading agent-desktop ${AGENT_DESKTOP_VERSION} (${target})`);
+  const response = await fetch(url, { signal });
+  if (!response.ok) throw new InfrastructureError('AGENT_DESKTOP_INSTALL_FAILED', `downloading ${url} failed: HTTP ${response.status}`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const actual = createHash('sha256').update(bytes).digest('hex');
+  if (actual !== digest) {
+    throw new InfrastructureError('AGENT_DESKTOP_INSTALL_FAILED', `${archive} has SHA-256 ${actual}, expected ${digest}; refusing to unpack it`);
+  }
+  await mkdir(path.dirname(directory), { recursive: true });
+  const staging = await mkdtemp(`${directory}.partial-`);
+  try {
+    const file = path.join(staging, archive);
+    await writeFile(file, bytes);
+    await execFileAsync('tar', ['-xzf', file, '-C', staging], { signal });
+    await rm(file);
+    if (process.platform !== 'win32') await chmod(path.join(staging, executableName()), 0o755);
+    try {
+      await rename(staging, directory);
+    } catch (cause) {
+      // Another run unpacked the same release first; its copy is as good as ours.
+      if (!existsSync(executable)) throw cause;
+    }
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
+  return executable;
+}

@@ -1,0 +1,806 @@
+/**
+ * One worker's desktop session: the app the target declares, driven through
+ * agent-desktop's accessibility commands. Every action goes through the
+ * accessibility API and leaves the user's pointer and focus alone, unless the
+ * target opts into physical input with `headed`.
+ */
+
+import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
+import {
+  EngineError,
+  resolveExpression,
+  withinCleanupBudget,
+  type EngineAppInfo,
+  type EngineAttemptContext,
+  type EngineCleanupContext,
+  type EngineDoctorCheck,
+  type EngineDoctorInfo,
+  type EngineInitInfo,
+  type EngineObserveOptions,
+  type EnginePrepareInfo,
+  type EnginePrepareResult,
+  type EngineSnapshot,
+  type LocatorAction,
+  type LocatorExpression,
+  type NodeRef,
+  type ObservationPixels,
+  type OperationContext,
+  type PointerAction,
+  type SelectOption,
+  type SemanticNode,
+  type ViewportPoint,
+} from '@e2e-dev/core/engine';
+import { AGENT_DESKTOP_VERSION, installPinned, pinnedExecutable, resolveExecutable } from './binary.ts';
+import { AgentDesktopCli, AgentDesktopFailure, translate } from './cli.ts';
+import { toCombo } from './keys.ts';
+import { ROOT_ID, projectSnapshot, type NodeBinding, type ProjectedScreen, type RawSnapshot, type Rect } from './nodes.ts';
+import type { DesktopPlatform, ResolvedDesktopOptions } from './options.ts';
+import { encodePng, windowImage } from './png.ts';
+
+const execFileAsync = promisify(execFile);
+
+/** How deep a snapshot reads. Chromium's anonymous wrappers cost agent-desktop no depth, so this is real nesting. */
+const MAX_DEPTH = 24;
+
+/** The least budget agent-desktop gets for its own wait, however little the operation has left. */
+const MIN_TOOL_MS = 200;
+
+/** How much of an operation's budget is kept back so agent-desktop answers before the process is killed. */
+const ANSWER_MARGIN_MS = 400;
+
+/** How often a launch checks whether the app's window can be read yet. */
+const LAUNCH_POLL_MS = 100;
+
+/** How many node bindings stay usable; the oldest go first. */
+const MAX_BINDINGS = 4096;
+
+/** Codes a snapshot fails with while the app has no window to read: not launched yet, or still opening. */
+const NO_WINDOW_CODES = new Set(['APP_NOT_FOUND', 'WINDOW_NOT_FOUND']);
+
+/** macOS's LaunchServices registration tool: an app bundle that was just built must be registered before it can be launched by id. */
+const LSREGISTER = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister';
+
+/** The app-wide `window` list entry agent-desktop prints. */
+interface RawWindow {
+  readonly id: string;
+  readonly title?: string;
+  readonly is_focused?: boolean;
+  readonly visible?: boolean;
+  readonly app_name?: string;
+  readonly pid?: number;
+}
+
+/** One window of the app under test, as `desktop.windows()` lists it. */
+export interface DesktopWindow {
+  /** agent-desktop's window id, valid while the window stays open. */
+  readonly id: string;
+  readonly title: string;
+  readonly focused: boolean;
+}
+
+/** One attempt's bookkeeping. */
+interface Attempt {
+  readonly artifactsDir: string;
+  screenshots: number;
+  readonly screen?: (snapshot: EngineSnapshot) => void;
+}
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (ms <= 0 || signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done(): void {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', done);
+      resolve();
+    }
+    signal.addEventListener('abort', done, { once: true });
+  });
+}
+
+function notActionable(text: string): EngineError {
+  return new EngineError('NOT_ACTIONABLE', text, { retryable: false });
+}
+
+function unsupported(text: string): EngineError {
+  return new EngineError('UNSUPPORTED_CAPABILITY', text, { retryable: false });
+}
+
+function invalidState(text: string): EngineError {
+  return new EngineError('INVALID_STATE', text, { retryable: false });
+}
+
+/**
+ * The operation with one deadline: `timeoutMs` reads what is left of the
+ * budget the call started with, so every command an action sends (a select
+ * that tries several ways, a type that clears first) shares one budget
+ * instead of each getting the whole of it.
+ */
+function withDeadline(operation: OperationContext): OperationContext {
+  const deadline = Date.now() + operation.timeoutMs;
+  return {
+    ...operation,
+    get timeoutMs() {
+      return Math.max(0, deadline - Date.now());
+    },
+  };
+}
+
+/** Constrains a caller-supplied artifact label to a safe filename. */
+function sanitizeFilename(name: string): string {
+  return name.replaceAll(/[^A-Za-z0-9._-]/g, '_').slice(0, 64) || 'artifact';
+}
+
+/** The label a select names: a bare string, or `{ label }`; a `value` is a desktop option's label too, since a native list has no other value. */
+function optionLabel(option: SelectOption): string {
+  if (typeof option === 'string') return option;
+  if (option.label !== undefined) return option.label;
+  if (option.value !== undefined) return option.value;
+  throw unsupported('a desktop list selects an option by its label; select by { index } is not supported');
+}
+
+export class DesktopSurface {
+  private cli: AgentDesktopCli | undefined;
+  private home: string | undefined;
+  private app: EngineAppInfo = {};
+  private projectRoot = process.cwd();
+  /** What `launch` is given: the target's `bundleId`, or the bundle id read from its `appPath`. */
+  private launchTarget: string | undefined;
+  /** The process name agent-desktop reported at launch; every command scopes to it. */
+  private appName: string | undefined;
+  /** The process the engine launched, which it alone quits; another instance of the same app is never touched. */
+  private pid: number | undefined;
+  /** agent-desktop's identity of that process, which a later process given the same id does not share. */
+  private instance: string | undefined;
+  private attempt: Attempt | undefined;
+  private latest: ProjectedScreen | undefined;
+  /** The newest binding of every node id an observation or a locate handed out, newest last. */
+  private readonly bindings = new Map<string, NodeBinding>();
+  /** The id handed out for each node identity since the app launched; see `projectSnapshot`. */
+  private readonly ids = new Map<string, string>();
+  private sequence = 0;
+  private toolVersion = AGENT_DESKTOP_VERSION;
+
+  constructor(
+    readonly options: ResolvedDesktopOptions,
+    readonly platform: DesktopPlatform,
+  ) {}
+
+  // --- lifecycle ---
+
+  /** Downloads the pinned agent-desktop once per machine, unless the target names its own. */
+  async prepare(info: EnginePrepareInfo): Promise<EnginePrepareResult> {
+    if (this.options.binary === undefined) await installPinned(info.env, info.signal, info.log);
+    // One worker per target: two would share one screen and one app.
+    return { workers: 1 };
+  }
+
+  async init(info: EngineInitInfo): Promise<void> {
+    this.projectRoot = info.projectRoot;
+    this.app = info.app;
+    const executable = await resolveExecutable(this.options.binary, info.projectRoot, info.env);
+    // A private state directory per worker: agent-desktop keeps its refs there, and on Windows refuses one others can read.
+    this.home = await mkdtemp(path.join(tmpdir(), 'e2e-agent-desktop-'));
+    if (this.platform === 'windows') await restrictToUser(this.home, info.env);
+    this.cli = new AgentDesktopCli(executable, { ...info.env, AGENT_DESKTOP_HOME: this.home });
+    const status = await this.run<{ version?: string; permissions?: Record<string, { state?: string }> }>(['status'], { label: 'agent-desktop status', input: false, signal: info.signal, timeoutMs: 15_000 });
+    if (typeof status.version === 'string') this.toolVersion = status.version;
+    const accessibility = status.permissions?.accessibility?.state;
+    if (this.platform === 'macos' && accessibility !== undefined && accessibility !== 'granted') {
+      throw new EngineError(
+        'ENGINE_FAILURE',
+        'agent-desktop has no Accessibility permission. In System Settings > Privacy & Security > Accessibility, allow the app that starts e2e (your terminal, IDE, or CI agent), then run again',
+        { retryable: false },
+      );
+    }
+    this.launchTarget = await this.resolveLaunchTarget(info.signal);
+    info.log(`agent-desktop ${this.toolVersion} on ${this.platform}`);
+  }
+
+  /**
+   * The name or id `launch` takes. An `appPath` on macOS is an `.app`
+   * bundle: its `CFBundleIdentifier`, registered with LaunchServices first so
+   * a bundle that was just built can be launched by id.
+   */
+  private async resolveLaunchTarget(signal: AbortSignal): Promise<string | undefined> {
+    if (this.app.bundleId !== undefined) return this.app.bundleId;
+    if (this.app.appPath === undefined) return undefined;
+    const bundle = path.resolve(this.projectRoot, this.app.appPath);
+    const plist = path.join(bundle, 'Contents', 'Info.plist');
+    if (!existsSync(plist)) throw new EngineError('ENGINE_FAILURE', `app.appPath ${bundle} is not an app bundle: it has no Contents/Info.plist. Build the app first`, { retryable: false });
+    const { stdout } = await execFileAsync('plutil', ['-extract', 'CFBundleIdentifier', 'raw', '-o', '-', plist], { signal });
+    const bundleId = stdout.trim();
+    if (bundleId === '') throw new EngineError('ENGINE_FAILURE', `${plist} declares no CFBundleIdentifier`, { retryable: false });
+    await execFileAsync(LSREGISTER, ['-f', bundle], { signal });
+    return bundleId;
+  }
+
+  async startAttempt(context: EngineAttemptContext): Promise<void> {
+    if (this.attempt !== undefined) throw invalidState('an attempt is already running on this desktop engine');
+    this.attempt = { artifactsDir: context.artifactsDir, screenshots: 0, ...(context.screen === undefined ? {} : { screen: context.screen }) };
+    this.forget();
+    context.environment({ platform: this.platform, 'agent-desktop': this.toolVersion });
+  }
+
+  /** Quits the app the attempt launched, so the next test starts from a closed app as the first one did. */
+  async endAttempt(context: EngineCleanupContext): Promise<void> {
+    this.attempt = undefined;
+    this.forget();
+    if (this.pid !== undefined) await withinCleanupBudget(this.quit(context.signal, context.timeoutMs), context);
+  }
+
+  async dispose(context: EngineCleanupContext): Promise<void> {
+    if (this.pid !== undefined) await withinCleanupBudget(this.quit(context.signal, context.timeoutMs), context);
+    if (this.home !== undefined) await rm(this.home, { recursive: true, force: true }).catch(() => undefined);
+    this.home = undefined;
+    this.cli = undefined;
+    this.attempt = undefined;
+    this.forget();
+  }
+
+  async doctor(info: EngineDoctorInfo): Promise<readonly EngineDoctorCheck[]> {
+    const checks: EngineDoctorCheck[] = [];
+    const executable = this.options.binary === undefined ? pinnedExecutable(info.env) : path.resolve(info.projectRoot, this.options.binary);
+    if (executable === undefined) return [{ id: 'agent-desktop', status: 'fail', message: `agent-desktop has no release for ${process.platform} on ${process.arch}` }];
+    if (!existsSync(executable)) {
+      checks.push(
+        this.options.binary === undefined
+          ? { id: 'agent-desktop', status: 'warn', message: `agent-desktop ${AGENT_DESKTOP_VERSION} is downloaded on the first run, to ${executable}` }
+          : { id: 'agent-desktop', status: 'fail', message: `desktop({ binary }) names ${executable}, which does not exist` },
+      );
+    } else {
+      const cli = new AgentDesktopCli(executable, info.env);
+      try {
+        const status = await cli.run<{ version?: string; permissions?: Record<string, { state?: string }> }>({ args: ['status'], input: false, signal: info.signal, timeoutMs: 15_000, label: 'agent-desktop status' });
+        checks.push({ id: 'agent-desktop', status: 'pass', message: `agent-desktop ${status.version ?? 'unknown version'} at ${executable}` });
+        if (this.platform === 'macos') {
+          const accessibility = status.permissions?.accessibility?.state;
+          const screen = status.permissions?.screen_recording?.state;
+          checks.push(
+            accessibility === 'granted'
+              ? { id: 'accessibility', status: 'pass', message: 'Accessibility permission granted' }
+              : { id: 'accessibility', status: 'fail', message: 'Allow the app that starts e2e in System Settings > Privacy & Security > Accessibility' },
+            screen === 'granted'
+              ? { id: 'screen-recording', status: 'pass', message: 'Screen Recording permission granted' }
+              : { id: 'screen-recording', status: 'warn', message: 'Screenshots need Screen Recording: allow the app that starts e2e in System Settings > Privacy & Security > Screen Recording' },
+          );
+        }
+      } catch (cause) {
+        checks.push({ id: 'agent-desktop', status: 'fail', message: `agent-desktop at ${executable} did not answer: ${(cause as Error).message}` });
+      }
+    }
+    if (info.app.appPath !== undefined) {
+      const bundle = path.resolve(info.projectRoot, info.app.appPath);
+      checks.push(existsSync(bundle) ? { id: 'app-path', status: 'pass', message: bundle } : { id: 'app-path', status: 'fail', message: `app.appPath ${bundle} does not exist; build the app or fix the path` });
+    }
+    return checks;
+  }
+
+  // --- the app ---
+
+  /** `app.open()`: the app quit if it runs, then launched fresh with the target's launch arguments. */
+  async restart(context: OperationContext): Promise<void> {
+    const operation = withDeadline(context);
+    const target = this.launchTarget;
+    if (target === undefined) throw unsupported("launching the app needs the target's app.bundleId or app.appPath");
+    if (this.pid !== undefined) await this.quit(operation.signal, operation.timeoutMs);
+    const args = ['launch', target, '--activate', '--no-attach', '--timeout', String(Math.max(operation.timeoutMs - ANSWER_MARGIN_MS, 1_000))];
+    for (const argument of this.app.launchArguments ?? []) args.push(`--arg=${argument}`);
+    const launched = await this.run<{ app?: string; pid?: number; process_instance?: string }>(args, { label: `launch ${target}`, input: true, signal: operation.signal, timeoutMs: operation.timeoutMs });
+    this.appName = launched.app ?? target;
+    this.pid = typeof launched.pid === 'number' ? launched.pid : undefined;
+    this.instance = typeof launched.process_instance === 'string' ? launched.process_instance : undefined;
+    this.forget();
+    await this.windowReadable(operation);
+  }
+
+  /**
+   * Waits until the launched app's window can be read: a window exists the
+   * moment `launch --activate` returns, but its accessibility element can
+   * arrive a moment later, and an observation then would show the agent an
+   * empty screen. A window that stays unreadable for the whole budget fails
+   * the open: every later step would only time out on an empty screen.
+   */
+  private async windowReadable(operation: OperationContext): Promise<void> {
+    while (operation.timeoutMs > 0 && !operation.signal.aborted) {
+      const screen = await this.capture(operation).catch(() => undefined);
+      if (screen !== undefined) return;
+      await sleep(Math.min(LAUNCH_POLL_MS, operation.timeoutMs), operation.signal);
+    }
+    if (operation.signal.aborted) return;
+    throw new EngineError(
+      'ENGINE_FAILURE',
+      `${this.appName ?? 'the app'} launched, but its window cannot be read through accessibility. On macOS the screen may be locked, or the window may be off screen`,
+      { retryable: false },
+    );
+  }
+
+  /** The app's open windows, for the `desktop` fixture. */
+  async windows(signal: AbortSignal, timeoutMs: number): Promise<readonly DesktopWindow[]> {
+    const listed = await this.run<readonly RawWindow[]>(['list-windows', '--app', this.requireApp()], { label: 'list windows', input: false, signal, timeoutMs });
+    const windows = this.pid === undefined ? listed : listed.filter((window) => window.pid === this.pid);
+    return windows.map((window) => ({ id: window.id, title: window.title ?? '', focused: window.is_focused === true }));
+  }
+
+  /** `desktop.closeApp()`: the app quit, as at the end of every test. */
+  async closeApp(signal: AbortSignal, timeoutMs: number): Promise<void> {
+    await this.quit(signal, timeoutMs);
+  }
+
+  /**
+   * Quits the app the engine launched, forcefully: a test needs it gone, not
+   * asked to save. It is ended by its process id, so another instance of the
+   * same app (the developer's own copy) is left alone, and waited for, so the
+   * next launch cannot find it still running. The process is looked up
+   * first: one that exited on its own, or whose id the OS gave to another
+   * process since, is not running any more, and nothing is killed.
+   */
+  private async quit(signal: AbortSignal, timeoutMs: number): Promise<void> {
+    const { pid, instance, appName } = this;
+    this.pid = undefined;
+    this.instance = undefined;
+    this.forget();
+    if (pid === undefined || appName === undefined) return;
+    const deadline = Date.now() + timeoutMs;
+    const { apps } = await this.run<{ apps?: readonly { pid?: number; process_instance?: string }[] }>(['list-apps', '--app', appName], { label: `find ${appName}`, input: false, signal, timeoutMs });
+    const running = apps?.some((app) => app.pid === pid && (instance === undefined || app.process_instance === instance)) === true;
+    if (!running) return;
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      return;
+    }
+    while (alive(pid)) {
+      if (signal.aborted || Date.now() >= deadline) throw new EngineError('ENGINE_FAILURE', `the app (process ${pid}) did not exit`, { retryable: false });
+      await sleep(LAUNCH_POLL_MS, signal);
+    }
+  }
+
+  /** Every binding of the screen before: after a launch or a quit, none names a control that still exists. */
+  private forget(): void {
+    this.latest = undefined;
+    this.bindings.clear();
+    this.ids.clear();
+  }
+
+  /** The node id for an identity: the one it had before, else a new one, never handed out before since the app launched. */
+  private idFor(identity: string | undefined): string {
+    let id = identity === undefined ? undefined : this.ids.get(identity);
+    if (id === undefined) {
+      id = `n${(this.sequence += 1)}`;
+      if (identity !== undefined) this.ids.set(identity, id);
+    }
+    return id;
+  }
+
+  /** The app's name for `--app`; a test that never opened the app has none. */
+  private requireApp(): string {
+    const name = this.appName ?? this.app.bundleId;
+    if (name === undefined) throw invalidState('the app is not running; open it with app.open()');
+    return name;
+  }
+
+  // --- reading the screen ---
+
+  /**
+   * One snapshot of the app's window, projected. With several windows open,
+   * agent-desktop asks which: the focused one, else the first, is read.
+   * Undefined while the app has no window to read.
+   */
+  private async capture(operation: OperationContext): Promise<ProjectedScreen | undefined> {
+    const app = this.requireApp();
+    const args = ['snapshot', '--app', app, '--include-bounds', '--max-depth', String(MAX_DEPTH), '--timeout-ms', String(this.toolBudget(operation))];
+    if (this.options.interactiveOnly) args.push('-i');
+    let raw: RawSnapshot;
+    try {
+      raw = await this.run<RawSnapshot>(args, { label: 'snapshot', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs, raw: true });
+    } catch (cause) {
+      if (cause instanceof AgentDesktopFailure && cause.code === 'AMBIGUOUS_TARGET') {
+        const window = await this.pickWindow(app, operation);
+        if (window === undefined) return undefined;
+        args.splice(1, 2, '--window-id', window);
+        raw = await this.run<RawSnapshot>(args, { label: 'snapshot', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
+      } else if (cause instanceof AgentDesktopFailure && (NO_WINDOW_CODES.has(cause.code) || cause.details.kind === 'window_without_accessibility_element')) {
+        return undefined;
+      } else {
+        throw translate(cause, 'snapshot', false);
+      }
+    }
+    return projectSnapshot(raw, (identity) => this.idFor(identity));
+  }
+
+  /**
+   * The window to read when the name matches several: of the windows of the
+   * process the engine launched (another instance may share its name), the
+   * focused one, else the first visible one.
+   */
+  private async pickWindow(app: string, operation: OperationContext): Promise<string | undefined> {
+    const listed = await this.run<readonly RawWindow[]>(['list-windows', '--app', app], { label: 'list windows', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
+    const windows = this.pid === undefined ? listed : listed.filter((window) => window.pid === this.pid);
+    return (windows.find((window) => window.is_focused === true) ?? windows.find((window) => window.visible !== false) ?? windows[0])?.id;
+  }
+
+  /**
+   * How a command that names the app scopes to it: `--app`, or, when another
+   * instance shares the name, the window the newest observation read, which
+   * belongs to the engine's own process.
+   */
+  private async scoped<T>(build: (scope: readonly string[]) => readonly string[], call: { label: string; input: boolean; signal: AbortSignal; timeoutMs: number; stdin?: string }): Promise<T> {
+    try {
+      return await this.run<T>(build(['--app', this.requireApp()]), { ...call, raw: true });
+    } catch (cause) {
+      const window = this.latest?.windowId;
+      if (cause instanceof AgentDesktopFailure && cause.code === 'AMBIGUOUS_TARGET' && cause.notDelivered && window !== undefined) {
+        return await this.run<T>(build(['--window-id', window]), call);
+      }
+      throw translate(cause, call.label, call.input);
+    }
+  }
+
+  async observe(context: OperationContext, options: EngineObserveOptions | undefined): Promise<EngineSnapshot> {
+    const operation = withDeadline(context);
+    const screen = await this.capture(operation);
+    if (screen === undefined) {
+      this.latest = undefined;
+      return { root: { ref: { id: ROOT_ID, revision: '' }, role: 'window' }, viewport: { width: 0, height: 0 } };
+    }
+    this.latest = screen;
+    this.remember(screen.bindings.values());
+    const pixels = options?.pixels === true ? await this.pixelsFor(screen, operation).catch((cause: unknown) => {
+      if (cause instanceof EngineError && cause.code === 'OPERATION_TIMEOUT') throw cause;
+      return undefined;
+    }) : undefined;
+    return {
+      ...this.snapshotOf(screen),
+      ...(pixels === undefined ? {} : { pixels: pixels.pixels, maskedRegionCount: pixels.masked }),
+    };
+  }
+
+  private snapshotOf(screen: ProjectedScreen): EngineSnapshot {
+    const app = this.appName;
+    const location = app === undefined ? screen.title : screen.title === undefined ? app : `${app} › ${screen.title}`;
+    return {
+      root: screen.root,
+      viewport: screen.viewport,
+      ...(screen.truncated ? { truncated: true } : {}),
+      ...(location === undefined ? {} : { location }),
+    };
+  }
+
+  async locate(expression: LocatorExpression, context: OperationContext): Promise<readonly SemanticNode[]> {
+    const operation = withDeadline(context);
+    const screen = await this.capture(operation);
+    if (screen === undefined) return [];
+    const sink = this.attempt?.screen;
+    if (sink !== undefined) {
+      try {
+        sink(this.snapshotOf(screen));
+      } catch {
+        // The trace is evidence; a sink that throws never fails the step.
+      }
+    }
+    const matches = resolveExpression(expression, [screen.root]);
+    this.remember(matches.flatMap((match) => screen.bindings.get(match.ref.id) ?? []));
+    return matches;
+  }
+
+  // --- acting ---
+
+  private binding(ref: NodeRef): NodeBinding {
+    const binding = this.bindings.get(ref.id);
+    if (binding === undefined) throw new EngineError('NODE_STALE', `node ${ref.id} is not on the screen`, { retryable: true });
+    return binding;
+  }
+
+  /**
+   * Keeps the newest binding of each node: an id names the same control in
+   * every snapshot, and the newest snapshot's agent-desktop ref is the one to
+   * act on. A control that has since gone keeps its last ref, which
+   * agent-desktop refuses as stale.
+   */
+  private remember(bindings: Iterable<NodeBinding>): void {
+    for (const binding of bindings) {
+      this.bindings.delete(binding.id);
+      this.bindings.set(binding.id, binding);
+    }
+    for (const oldest of this.bindings.keys()) {
+      if (this.bindings.size <= MAX_BINDINGS) break;
+      this.bindings.delete(oldest);
+    }
+  }
+
+  private refOf(binding: NodeBinding, action: string): string {
+    if (binding.ref === undefined) throw notActionable(`node ${binding.id} (${binding.role ?? 'unknown'}) is not a control agent-desktop can ${action}`);
+    return binding.ref;
+  }
+
+  async perform(ref: NodeRef, action: LocatorAction, context: OperationContext): Promise<void> {
+    const operation = withDeadline(context);
+    if (ref.id === ROOT_ID) {
+      if (action.kind !== 'swipe') throw notActionable(`the window takes swipe only, not ${action.kind}; act on a node`);
+      const target = this.latest?.scrollTarget;
+      if (target === undefined) throw notActionable('the window has nothing that scrolls');
+      await this.scroll(this.binding({ id: target, revision: '' }), action.direction, action.momentum, operation);
+      return this.settle(operation);
+    }
+    const binding = this.binding(ref);
+    switch (action.kind) {
+      case 'tap':
+        await this.refCommand('click', binding, operation);
+        break;
+      case 'doubleTap':
+        await this.refCommand('double-click', binding, operation);
+        break;
+      case 'secondaryTap':
+        await this.refCommand('right-click', binding, operation);
+        break;
+      case 'focus':
+        await this.refCommand('focus', binding, operation);
+        break;
+      case 'clear':
+        await this.refCommand('clear', binding, operation);
+        break;
+      case 'check':
+      case 'uncheck':
+        if (binding.states?.checked === (action.kind === 'check')) return;
+        await this.refCommand(action.kind, binding, operation);
+        break;
+      case 'scrollIntoView':
+        await this.refCommand('scroll-to', binding, operation);
+        break;
+      case 'hover':
+        await this.refCommand('hover', binding, operation, [], undefined, true);
+        break;
+      case 'fill':
+        await this.fill(binding, action.value, operation);
+        break;
+      case 'press':
+        await this.refCommand('focus', binding, operation).catch((cause: unknown) => {
+          // A control that takes no focus of its own (a button on macOS) gets the key where focus already is.
+          if (!(cause instanceof EngineError && cause.code === 'UNSUPPORTED_CAPABILITY')) throw cause;
+        });
+        await this.pressKey(action.key, operation);
+        break;
+      case 'selectOption':
+        await this.select(binding, optionLabel(action.value), operation);
+        break;
+      case 'swipe':
+        await this.scroll(binding, action.direction, action.momentum, operation);
+        break;
+      case 'longPress':
+      case 'setInputFiles':
+      case 'dragTo':
+        // Not declared in `actions` (engine.ts), so the harness never sends them; kept exhaustive.
+        throw unsupported(`the desktop engine cannot perform ${action.kind}`);
+    }
+    await this.settle(operation);
+  }
+
+  /** The agent reads the screen right after acting, so its actions let the UI settle first; a test's own steps verify with `expect`. */
+  private async settle(operation: OperationContext): Promise<void> {
+    if (operation.origin === 'agent') await sleep(Math.min(this.options.settleMs, operation.timeoutMs), operation.signal);
+  }
+
+  /** One command on a node's ref, failures translated. */
+  private async refCommand(command: string, binding: NodeBinding, operation: OperationContext, extra: readonly string[] = [], stdin?: string, headed = false): Promise<void> {
+    try {
+      await this.tryRef(command, binding, operation, extra, stdin, headed);
+    } catch (cause) {
+      throw translate(cause, command, true);
+    }
+  }
+
+  /** One command on a node's ref, a failure left as agent-desktop reported it so a caller can try another way when nothing was sent. */
+  private async tryRef(command: string, binding: NodeBinding, operation: OperationContext, extra: readonly string[] = [], stdin?: string, headed = false): Promise<unknown> {
+    const args = [command, this.refOf(binding, command), ...extra, '--timeout-ms', String(this.toolBudget(operation))];
+    if (stdin !== undefined) args.push('--stdin');
+    if (headed) args.push('--headed');
+    return await this.run(args, { label: command, input: true, signal: operation.signal, timeoutMs: operation.timeoutMs, raw: true, ...(stdin === undefined ? {} : { stdin }) });
+  }
+
+  /**
+   * Sets a field's value through the accessibility API, the text on stdin.
+   * With physical input allowed, a field the API cannot set (an Electron
+   * text field on Linux) is cleared and typed into instead.
+   */
+  private async fill(binding: NodeBinding, value: string, operation: OperationContext): Promise<void> {
+    try {
+      await this.tryRef('set-value', binding, operation, [], value);
+    } catch (cause) {
+      const refused = cause instanceof AgentDesktopFailure && cause.notDelivered && (cause.code === 'ACTION_NOT_SUPPORTED' || cause.code === 'POLICY_DENIED');
+      if (!refused || !this.options.headed) throw translate(cause, 'fill', true);
+      await this.refCommand('clear', binding, operation);
+      await this.refCommand('type', binding, operation, [], value, true);
+    }
+  }
+
+  /**
+   * Chooses an option of a list or dropdown. agent-desktop's `select` works
+   * for most toolkits, but not all: each later rung runs only when the one
+   * before sent nothing. Expand first (Electron on Windows lists no options
+   * until the list is open); set the value (a WinForms combobox takes no
+   * `select`); open the menu and click the item (Electron on macOS).
+   */
+  private async select(binding: NodeBinding, label: string, operation: OperationContext): Promise<void> {
+    const refused = (cause: unknown): boolean => cause instanceof AgentDesktopFailure && cause.notDelivered;
+    const attempts: string[] = [];
+    const rung = async (name: string, run: () => Promise<unknown>): Promise<boolean> => {
+      try {
+        await run();
+        return true;
+      } catch (cause) {
+        if (!refused(cause)) throw translate(cause, `select "${label}" (${name})`, true);
+        attempts.push(`${name}: ${(cause as Error).message}`);
+        return false;
+      }
+    };
+    if (await rung('select', () => this.tryRef('select', binding, operation, [label]))) return;
+    if (binding.actions.includes('Expand') && (await rung('expand, then select', async () => {
+      await this.tryRef('expand', binding, operation);
+      await this.tryRef('select', binding, operation, [label]);
+    }))) return;
+    if (binding.actions.includes('SetValue') && (await rung('set-value', () => this.tryRef('set-value', binding, operation, [], label)))) return;
+    if (await rung('menu', () => this.selectFromMenu(binding, label, operation))) return;
+    throw notActionable(`could not select "${label}": ${attempts.join('; ')}`);
+  }
+
+  /** Opens the list with a click and clicks the item named `label` in the menu it shows. */
+  private async selectFromMenu(binding: NodeBinding, label: string, operation: OperationContext): Promise<void> {
+    await this.tryRef('click', binding, operation);
+    const menu = await this.scoped<RawSnapshot>(
+      (scope) => ['snapshot', ...scope, '--surface', 'menu', '-i', '--timeout-ms', String(this.toolBudget(operation))],
+      { label: 'snapshot menu', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs },
+    );
+    const items = projectSnapshot(menu, (identity) => this.idFor(identity === undefined ? undefined : `menu/${identity}`));
+    const item = [...items.bindings.values()].find((candidate) => candidate.ref !== undefined && candidate.name === label);
+    if (item === undefined) {
+      await this.scoped((scope) => ['press', 'escape', ...scope], { label: 'close menu', input: true, signal: operation.signal, timeoutMs: operation.timeoutMs }).catch(() => undefined);
+      // The click opened a menu, so the state changed; but nothing was chosen.
+      throw new EngineError('NOT_ACTIONABLE', `the list has no option "${label}"`, { retryable: false });
+    }
+    await this.tryRef('click', item, operation);
+  }
+
+  private async scroll(binding: NodeBinding, direction: string, momentum: string | undefined, operation: OperationContext): Promise<void> {
+    const amount = momentum === 'fast' ? 10 : momentum === 'slow' ? 2 : 5;
+    await this.refCommand('scroll', binding, operation, ['--direction', direction, '--amount', String(amount)]);
+  }
+
+  /** Physical pointer input at a point in the window: only with `headed`, and only then declared. */
+  async performAt(point: ViewportPoint, action: PointerAction, context: OperationContext): Promise<void> {
+    const operation = withDeadline(context);
+    const window = this.latest?.window;
+    if (window === undefined) throw notActionable('there is no observed window to place the point in; observe first');
+    const xy = `--xy=${Math.round(window.x + point.x)},${Math.round(window.y + point.y)}`;
+    const args =
+      action.kind === 'hover'
+        ? ['hover', xy, '--headed']
+        : ['mouse-click', xy, '--headed', ...(action.kind === 'doubleTap' ? ['--count', '2'] : []), ...(action.kind === 'secondaryTap' ? ['--button', 'right'] : [])];
+    if (action.kind !== 'hover' && action.kind !== 'tap' && action.kind !== 'doubleTap' && action.kind !== 'secondaryTap') {
+      throw unsupported(`the desktop engine cannot perform ${action.kind} at a point`);
+    }
+    await this.run(args, { label: action.kind, input: true, signal: operation.signal, timeoutMs: operation.timeoutMs });
+    await this.settle(operation);
+  }
+
+  /** The keyboard capability's `type`: text inserted into the focused field, which a fresh snapshot names. */
+  async typeText(text: string, options: { readonly replace: boolean }, context: OperationContext): Promise<void> {
+    const operation = withDeadline(context);
+    const screen = await this.capture(operation);
+    const focused = screen === undefined ? undefined : [...screen.bindings.values()].find((binding) => binding.ref !== undefined && binding.states?.focused === true);
+    if (focused === undefined) throw notActionable('no field has keyboard focus; tap or focus the field first');
+    if (options.replace) await this.refCommand('clear', focused, operation);
+    try {
+      await this.tryRef('type', focused, operation, [], text);
+    } catch (cause) {
+      if (!(this.options.headed && cause instanceof AgentDesktopFailure && cause.notDelivered)) throw translate(cause, 'type', true);
+      await this.refCommand('type', focused, operation, [], text, true);
+    }
+    await this.settle(operation);
+  }
+
+  /** One key to whatever holds focus in the app; agent-desktop sends it to the process without focusing its window. */
+  async pressKey(key: string, context: OperationContext): Promise<void> {
+    const operation = withDeadline(context);
+    const combo = toCombo(key, this.platform);
+    await this.scoped((scope) => ['press', combo, ...scope, ...(this.options.headed ? ['--headed'] : [])], { label: `press ${key}`, input: true, signal: operation.signal, timeoutMs: operation.timeoutMs });
+  }
+
+  // --- pixels ---
+
+  async screenshot(label: string | undefined, context: OperationContext): Promise<string> {
+    const operation = withDeadline(context);
+    const attempt = this.attempt;
+    if (attempt === undefined) throw invalidState('screenshot outside an attempt');
+    const screen = await this.capture(operation);
+    if (screen === undefined) throw invalidState('the app has no window to capture; open it with app.open()');
+    const { pixels } = await this.pixelsFor(screen, operation);
+    attempt.screenshots += 1;
+    const relative = path.join('screenshots', `${String(attempt.screenshots).padStart(3, '0')}-${sanitizeFilename(label ?? 'screenshot')}.png`);
+    await mkdir(path.join(attempt.artifactsDir, 'screenshots'), { recursive: true });
+    await writeFile(path.join(attempt.artifactsDir, relative), pixels.data);
+    return relative;
+  }
+
+  /**
+   * The window's pixels with every secure field painted over. The fields
+   * come from the snapshot taken just before; a secure field without bounds
+   * cannot be covered, so the image is withheld rather than shipped
+   * unproven.
+   */
+  private async pixelsFor(screen: ProjectedScreen, operation: OperationContext): Promise<{ pixels: ObservationPixels; masked: number }> {
+    if (screen.windowId === undefined) throw notActionable('the observed surface has no window to capture');
+    const secure = screen.secureRects;
+    if (secure === undefined) throw new EngineError('ENGINE_FAILURE', 'a secure field on screen has no bounds to mask; screenshot withheld', { retryable: false });
+    // A snapshot cut short can leave out a secure field, which would then go unmasked.
+    if (screen.truncated) throw new EngineError('ENGINE_FAILURE', 'the snapshot did not read the whole window, so a secure field may be missing from it; screenshot withheld', { retryable: false });
+    const directory = await mkdtemp(path.join(this.home ?? tmpdir(), 'shot-'));
+    try {
+      const file = path.join(directory, 'window.png');
+      const shot = await this.run<{ scale_factor?: number }>(['screenshot', '--window-id', screen.windowId, file], { label: 'screenshot', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
+      const scale = typeof shot.scale_factor === 'number' && shot.scale_factor > 0 ? shot.scale_factor : 1;
+      const raw = new Uint8Array(await readFile(file));
+      const expected = { width: Math.round(screen.viewport.width * scale), height: Math.round(screen.viewport.height * scale) };
+      const rects: Rect[] = secure.map((rect) => ({ x: rect.x * scale, y: rect.y * scale, width: rect.width * scale, height: rect.height * scale }));
+      const image = windowImage(raw, expected, rects);
+      if (image === undefined) {
+        throw new EngineError('ENGINE_FAILURE', `the window capture does not match the window's ${expected.width}x${expected.height} pixels, so its secure fields cannot be placed; screenshot withheld`, { retryable: false });
+      }
+      return { pixels: { data: encodePng(image), mediaType: 'image/png', width: image.width, height: image.height, scale }, masked: rects.length };
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+
+  // --- plumbing ---
+
+  /** agent-desktop's own wait inside one command: the operation's budget less a margin, so it answers before it is killed. */
+  private toolBudget(operation: OperationContext): number {
+    return Math.max(operation.timeoutMs - ANSWER_MARGIN_MS, MIN_TOOL_MS);
+  }
+
+  /**
+   * Runs one command. A failure is translated onto the engine contract
+   * unless `raw` asks for agent-desktop's own, which a caller reads to try
+   * another way.
+   */
+  private async run<T>(args: readonly string[], call: { label: string; input: boolean; signal: AbortSignal; timeoutMs: number; stdin?: string; raw?: boolean }): Promise<T> {
+    const cli = this.cli;
+    if (cli === undefined) throw invalidState('the desktop engine is not initialized');
+    // Nothing is sent once the operation's budget is spent: a later rung of a fallback never starts past the deadline.
+    if (call.timeoutMs <= 0) throw new EngineError('OPERATION_TIMEOUT', `${call.label}: the operation's budget ran out before it was sent`, { retryable: false });
+    try {
+      return await cli.run<T>({ args, input: call.input, signal: call.signal, timeoutMs: call.timeoutMs, label: call.label, ...(call.stdin === undefined ? {} : { stdin: call.stdin }) });
+    } catch (cause) {
+      if (call.raw === true && cause instanceof AgentDesktopFailure) throw cause;
+      throw translate(cause, call.label, call.input);
+    }
+  }
+}
+
+/** Whether a process still runs: it answers signal 0, or exists but belongs to another user. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (cause) {
+    return (cause as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/**
+ * Takes a directory's inherited permissions away and gives it to the current
+ * user alone: agent-desktop on Windows refuses a state directory whose ACL
+ * grants another principal anything.
+ */
+async function restrictToUser(directory: string, env: Readonly<Record<string, string | undefined>>): Promise<void> {
+  const user = env.USERNAME;
+  if (user === undefined) return;
+  const domain = env.USERDOMAIN;
+  await execFileAsync('icacls', [directory, '/inheritance:r', '/grant:r', `${domain === undefined ? '' : `${domain}\\`}${user}:(OI)(CI)F`]);
+}

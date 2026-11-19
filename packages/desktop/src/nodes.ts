@@ -1,0 +1,289 @@
+/**
+ * agent-desktop's snapshot tree projected onto the contract's semantic
+ * nodes. agent-desktop already speaks one closed role and state vocabulary
+ * on every OS; this maps it onto the ARIA names `screen.getByRole` and the
+ * agent use on every other engine, so `getByRole('textbox')` means the same
+ * field in a browser, on a phone, and in a desktop app.
+ */
+
+import { OBSERVED_NAME_LIMIT, OBSERVED_TEXT_LIMIT, type SemanticNode, type ViewportSize } from '@e2e-dev/core/engine';
+
+/** A rectangle in screen points, as agent-desktop reports bounds. */
+export interface Rect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** One node of an agent-desktop snapshot (`snapshot --include-bounds`). */
+export interface RawNode {
+  readonly ref_id?: string;
+  readonly role: string;
+  readonly name?: string;
+  readonly value?: string;
+  readonly description?: string;
+  readonly hint?: string;
+  readonly native_id?: { readonly kind: string; readonly value: string };
+  readonly states?: readonly string[];
+  readonly available_actions?: readonly string[];
+  readonly bounds?: Rect;
+  readonly subtree_truncated?: boolean;
+  readonly children?: readonly RawNode[];
+}
+
+/** The `data` of an agent-desktop `snapshot`. */
+export interface RawSnapshot {
+  readonly app?: string;
+  readonly snapshot_id: string;
+  readonly complete?: boolean;
+  readonly truncated?: boolean;
+  readonly tree: RawNode;
+  readonly window?: { readonly id: string; readonly title?: string };
+}
+
+/** The observation root's id: one window, the same id across observations, as the contract requires. */
+export const ROOT_ID = 'root';
+
+/** What an action needs to know about a node, kept beside the node the harness sees. */
+export interface NodeBinding {
+  readonly id: string;
+  /** agent-desktop's snapshot-qualified ref (`@s8f3k2p9:e3`); absent for a node it gives none, such as static text. */
+  readonly ref?: string;
+  readonly role?: string;
+  readonly name?: string;
+  readonly states: SemanticNode['states'];
+  /** The actions agent-desktop says the element takes (`Click`, `SetValue`, `Expand`, ...). */
+  readonly actions: readonly string[];
+}
+
+/** A snapshot as the engine keeps it: the tree the harness sees, and a binding for every node in it. */
+export interface ProjectedScreen {
+  readonly root: SemanticNode;
+  readonly bindings: ReadonlyMap<string, NodeBinding>;
+  /** The window, in screen points: the viewport every node's rect is measured from. */
+  readonly window: Rect;
+  readonly viewport: ViewportSize;
+  /** Rects of the secure fields, in the viewport's points, for masking. Undefined when a secure field has no bounds to mask. */
+  readonly secureRects: readonly Rect[] | undefined;
+  readonly truncated: boolean;
+  readonly windowId?: string;
+  readonly title?: string;
+  /** The first scrollable node, which the observation root's swipe scrolls. */
+  readonly scrollTarget?: string;
+}
+
+/**
+ * ARIA's name for each agent-desktop role that has one. A role missing here
+ * keeps agent-desktop's own token: it is still one closed vocabulary, just
+ * not one a browser shares.
+ */
+const ROLE_MAP: Readonly<Record<string, string>> = {
+  alert: 'alert',
+  alertdialog: 'alertdialog',
+  application: 'application',
+  article: 'article',
+  banner: 'banner',
+  button: 'button',
+  cell: 'cell',
+  checkbox: 'checkbox',
+  column: 'columnheader',
+  combobox: 'combobox',
+  complementary: 'complementary',
+  contentinfo: 'contentinfo',
+  definition: 'definition',
+  dialog: 'dialog',
+  disclosure: 'button',
+  document: 'document',
+  form: 'form',
+  grid: 'grid',
+  group: 'group',
+  heading: 'heading',
+  image: 'img',
+  incrementor: 'spinbutton',
+  link: 'link',
+  list: 'list',
+  listbox: 'listbox',
+  log: 'log',
+  main: 'main',
+  marquee: 'marquee',
+  math: 'math',
+  menu: 'menu',
+  menubutton: 'button',
+  menuitem: 'menuitem',
+  navigation: 'navigation',
+  note: 'note',
+  option: 'option',
+  outline: 'tree',
+  paragraph: 'paragraph',
+  popover: 'dialog',
+  progressbar: 'progressbar',
+  radiobutton: 'radio',
+  radiogroup: 'radiogroup',
+  region: 'region',
+  row: 'row',
+  scrollbar: 'scrollbar',
+  search: 'search',
+  separator: 'separator',
+  sheet: 'dialog',
+  slider: 'slider',
+  statictext: 'text',
+  status: 'status',
+  switch: 'switch',
+  tab: 'tab',
+  tablist: 'tablist',
+  tabpanel: 'tabpanel',
+  table: 'table',
+  term: 'term',
+  textfield: 'textbox',
+  timer: 'timer',
+  toolbar: 'toolbar',
+  tooltip: 'tooltip',
+  treeitem: 'treeitem',
+  webarea: 'document',
+  window: 'window',
+};
+
+/** Roles whose checked state is a fact whenever it is not stated: an unchecked box reports no `checked`. */
+const CHECKABLE_ROLES = new Set(['checkbox', 'switch', 'radiobutton']);
+
+/** Roles agent-desktop reads text into `value`, which the contract calls `text`. */
+const TEXT_ROLES = new Set(['statictext', 'heading']);
+
+/** Roles a swipe on the observation root scrolls, in preference order. */
+const SCROLLABLE_ROLES = new Set(['scrollarea', 'list', 'listbox', 'table', 'outline', 'grid', 'webarea']);
+
+const STATE_NAMES = ['focused', 'disabled', 'secure', 'expanded', 'selected', 'hidden', 'pressed'] as const;
+
+/** A string cut at a limit, keeping its start; whitespace-only strings are no value. */
+function bounded(value: string | undefined, limit: number): string | undefined {
+  if (value === undefined || value.trim() === '') return undefined;
+  return value.length > limit ? value.slice(0, limit) : value;
+}
+
+/** A node agent-desktop reports but nothing reads: a wrapper with no name, value, id, ref, or text of its own. */
+function transparent(raw: RawNode): boolean {
+  if (raw.ref_id !== undefined || raw.native_id !== undefined) return false;
+  if (bounded(raw.name, 1) !== undefined || bounded(raw.value, 1) !== undefined) return false;
+  return raw.role === 'group' || raw.role === 'unknown' || raw.role === 'layoutitem' || raw.role === 'matte' || raw.role === 'splitter';
+}
+
+/**
+ * What makes a node the same node in the next snapshot, among its parent's
+ * children: its role and its developer id, else its role and name. A field's
+ * value is not part of it, so a field keeps its id while it is typed into.
+ */
+function identityOf(node: RawNode): string {
+  return `${node.role}:${node.native_id?.value ?? node.name ?? node.value ?? ''}`;
+}
+
+/**
+ * Projects one snapshot. `idFor` turns a node's identity (its parent's id,
+ * and its own role and developer id or name) into the id the harness sees:
+ * the caller hands out the same id for the same identity across
+ * observations, so a control keeps its id for as long as it exists, as the
+ * contract asks. A node with a look-alike sibling has no identity
+ * (`undefined`) and gets a new id, which no later snapshot gives out again.
+ * The window is always `root`.
+ * Wrappers nothing reads (Chromium's chains of anonymous groups) are dropped
+ * and their children lifted, so the model reads the controls, not the
+ * scaffolding.
+ */
+export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | undefined) => string): ProjectedScreen {
+  const window = raw.tree.bounds ?? { x: 0, y: 0, width: 0, height: 0 };
+  const bindings = new Map<string, NodeBinding>();
+  const secureRects: Rect[] = [];
+  let unmaskable = false;
+  let scrollTarget: string | undefined;
+
+  const project = (node: RawNode, id: string): SemanticNode => {
+    const rawStates = new Set(node.states ?? []);
+    const role = ROLE_MAP[node.role] ?? (node.role === 'unknown' ? undefined : node.role);
+    const secure = rawStates.has('secure');
+    const states: Record<string, boolean> = {};
+    for (const state of STATE_NAMES) if (rawStates.has(state)) states[state] = true;
+    if (rawStates.has('offscreen')) states.hidden = true;
+    if (CHECKABLE_ROLES.has(node.role)) states.checked = rawStates.has('checked') || node.value === '1';
+    else if (rawStates.has('checked')) states.checked = true;
+    if (node.role === 'combobox' || node.role === 'disclosure' || node.role === 'menubutton') {
+      if (node.available_actions?.includes('Expand') === true || node.available_actions?.includes('Collapse') === true) states.expanded = rawStates.has('expanded');
+    }
+    const isText = TEXT_ROLES.has(node.role);
+    const name = bounded(node.name ?? (isText ? node.value : undefined), OBSERVED_NAME_LIMIT);
+    const text = isText ? bounded(node.value ?? node.name, OBSERVED_TEXT_LIMIT) : undefined;
+    // A checkbox's value is its state ("0", "1"), already in `checked`; a secure field's is never reported.
+    const value = secure || isText || CHECKABLE_ROLES.has(node.role) ? undefined : bounded(node.value, OBSERVED_TEXT_LIMIT);
+    const rect = node.bounds === undefined ? undefined : { x: node.bounds.x - window.x, y: node.bounds.y - window.y, width: node.bounds.width, height: node.bounds.height };
+    if (secure) {
+      if (rect === undefined) unmaskable = true;
+      else secureRects.push(rect);
+    }
+    const attributes: Record<string, string> = {};
+    const placeholder = bounded(node.hint, OBSERVED_TEXT_LIMIT);
+    if (placeholder !== undefined) attributes.placeholder = placeholder;
+    const description = bounded(node.description, OBSERVED_TEXT_LIMIT);
+    if (description !== undefined) attributes.description = description;
+    if (node.native_id !== undefined) attributes['native-id-kind'] = node.native_id.kind;
+    if (scrollTarget === undefined && node.ref_id !== undefined && SCROLLABLE_ROLES.has(node.role)) scrollTarget = id;
+    bindings.set(id, {
+      id,
+      ...(node.ref_id === undefined ? {} : { ref: node.ref_id }),
+      ...(role === undefined ? {} : { role }),
+      ...(name === undefined ? {} : { name }),
+      states,
+      actions: node.available_actions ?? [],
+    });
+    const kept: RawNode[] = [];
+    const collect = (child: RawNode): void => {
+      if (transparent(child)) for (const grandchild of child.children ?? []) collect(grandchild);
+      else kept.push(child);
+    };
+    for (const child of node.children ?? []) collect(child);
+    const counts = new Map<string, number>();
+    for (const child of kept) counts.set(identityOf(child), (counts.get(identityOf(child)) ?? 0) + 1);
+    // A look-alike sibling has no identity: if the first of two "Delete" buttons
+    // goes, the second must not take over its id, so each look-alike gets a new id every snapshot.
+    const children = kept.map((child) => {
+      const identity = identityOf(child);
+      return project(child, idFor(counts.get(identity) === 1 ? `${id}/${identity}` : undefined));
+    });
+    return {
+      ref: { id, revision: '' },
+      ...(role === undefined ? {} : { role }),
+      ...(name === undefined ? {} : { name }),
+      ...(text === undefined ? {} : { text }),
+      ...(value === undefined ? {} : { value }),
+      ...(node.native_id === undefined || node.native_id.value === '' ? {} : { testId: node.native_id.value }),
+      ...(secure ? { inputPurpose: 'password' as const } : {}),
+      ...(Object.keys(states).length === 0 ? {} : { states }),
+      ...(node.role === 'heading' ? headingLevel(node) : {}),
+      ...(Object.keys(attributes).length === 0 ? {} : { attributes }),
+      ...(rect === undefined ? {} : { rect }),
+      ...(children.length === 0 ? {} : { children }),
+    };
+  };
+
+  const root = project(raw.tree, ROOT_ID);
+  return {
+    root,
+    bindings,
+    window,
+    viewport: { width: window.width, height: window.height },
+    secureRects: unmaskable ? undefined : secureRects,
+    truncated: raw.complete === false || raw.truncated === true || hasTruncatedSubtree(raw.tree),
+    ...(raw.window === undefined ? {} : { windowId: raw.window.id }),
+    ...(raw.window?.title === undefined || raw.window.title === '' ? {} : { title: raw.window.title }),
+    ...(scrollTarget === undefined ? {} : { scrollTarget }),
+  };
+}
+
+/** A heading's level, when agent-desktop names it in the node's description (`heading level 2`). */
+function headingLevel(node: RawNode): { level?: number } {
+  const match = /\blevel (\d)\b/i.exec(node.description ?? '');
+  return match === null ? {} : { level: Number(match[1]) };
+}
+
+function hasTruncatedSubtree(node: RawNode): boolean {
+  if (node.subtree_truncated === true) return true;
+  return (node.children ?? []).some(hasTruncatedSubtree);
+}

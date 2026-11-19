@@ -192,8 +192,8 @@ test('needs two organizations', async ({ app }) => {
 - 複数のテストにまたがるフローでは、グループに `{ serial: true }` を設定します。
   テストは 1 つのワーカーで順番に実行され、まとめてリトライされます。
 - セットアップとクリーンアップには `test.extend` を使います。[フィクスチャの作成](/fixtures) を参照してください。
-- `browser` または `device` フィクスチャに型を付けるには、
-  `@e2e-dev/web` または `@e2e-dev/mobile` から `test` をインポートします。
+- `browser`、`device`、`desktop` フィクスチャに型を付けるには、
+  `@e2e-dev/web`、`@e2e-dev/mobile`、`@e2e-dev/desktop` から `test` をインポートします。
 
 すべてのオプションは [test リファレンス](/reference/test) にあります。
 
