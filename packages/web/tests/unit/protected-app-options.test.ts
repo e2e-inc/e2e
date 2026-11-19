@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { secrets } from 'e2e';
 import { web, type WebOptions } from '../../src/index.ts';
-import { credentialOrigins, httpCredentials } from '../../src/protected-app.ts';
+import { credentialOrigins, httpCredentials, ProtectedApp } from '../../src/protected-app.ts';
 
 describe('web({ headers })', () => {
   it('rejects a header name outside the token grammar as INVALID_CONFIG', () => {
@@ -26,7 +26,7 @@ describe('web({ headers })', () => {
   });
 
   it('rejects headers that are not a plain object, null included', () => {
-    for (const headers of [['x-a'], null, 'x-a: v', 3]) {
+    for (const headers of [['x-a'], null, 'x-a: v', 3, new Headers({ 'x-a': 'v' })]) {
       expect(() => web({ headers: headers as unknown as Record<string, string> })).toThrowError(
         /must be an object/,
       );
@@ -80,7 +80,7 @@ describe('web({ basicAuth })', () => {
   });
 
   it('rejects credentials that are not a plain object, null included', () => {
-    for (const basicAuth of [null, ['ada', 'x'], 'ada:x']) {
+    for (const basicAuth of [null, ['ada', 'x'], 'ada:x', new URL('http://ada:x@localhost')]) {
       expect(() =>
         web({ basicAuth: basicAuth as unknown as { username: string; password: string } }),
       ).toThrowError(/must be an object/);
@@ -143,10 +143,10 @@ describe('web({ locale, timezoneId })', () => {
 });
 
 describe('web({ colorScheme, reducedMotion })', () => {
-  it('accepts every value the browser emulates, on a persistent context too', () => {
+  it('accepts every value the browser emulates, on an attached browser too', () => {
     for (const colorScheme of ['light', 'dark', 'no-preference'] as const) expect(() => web({ colorScheme })).not.toThrow();
     for (const reducedMotion of ['reduce', 'no-preference'] as const) expect(() => web({ reducedMotion })).not.toThrow();
-    const connect = { cdpEndpoint: () => 'ws://127.0.0.1:9222', reconnectEndpoint: () => 'ws://127.0.0.1:9222' };
+    const connect = { cdpEndpoint: () => 'ws://127.0.0.1:9222' };
     expect(() => web({ connect, colorScheme: 'dark', reducedMotion: 'reduce' })).not.toThrow();
   });
 
@@ -229,8 +229,8 @@ describe('web() option keys', () => {
 
   it('rejects an unknown key inside connect and basicAuth', () => {
     const cdpEndpoint = () => 'ws://127.0.0.1:9222';
-    expect(() => web({ connect: { cdpEndpoint, reconectEndpoint: cdpEndpoint } } as unknown as Parameters<typeof web>[0])).toThrow(
-      refused('web({ connect }) has unknown key "reconectEndpoint"; did you mean "reconnectEndpoint"?'),
+    expect(() => web({ connect: { cdpEndpoint, cdpEndpont: cdpEndpoint } } as unknown as Parameters<typeof web>[0])).toThrow(
+      refused('web({ connect }) has unknown key "cdpEndpont"; did you mean "cdpEndpoint"?'),
     );
     expect(() => web({ basicAuth: { username: 'u', password: 'p', usernme: 'u' } } as unknown as Parameters<typeof web>[0])).toThrow(
       refused('web({ basicAuth }) has unknown key "usernme"; did you mean "username"?'),
@@ -244,40 +244,38 @@ describe('web() option keys', () => {
 
 describe('basic-auth credentials', () => {
   const app = 'http://127.0.0.1:3000';
-  const notASecret = async (): Promise<string> => {
-    throw new Error('not a secret');
-  };
-
-  it('scopes one entry to each origin: the app\'s, then the extras, normalized', async () => {
-    const origins = credentialOrigins(app, ['https://API.example.com:443/', 'http://127.0.0.1:3000']);
-    const credentials = await httpCredentials({ username: 'ada', password: 'plain-value' }, origins, 'chromium', notASecret);
-    expect(credentials).toEqual([
-      { username: 'ada', password: 'plain-value', origin: app },
-      { username: 'ada', password: 'plain-value', origin: 'https://api.example.com' },
-    ]);
+    it('normalizes the origins: the app\'s, then the extras', () => {
+    expect([...credentialOrigins(app, ['https://API.example.com:443/', 'http://127.0.0.1:3000'])]).toEqual([app, 'https://api.example.com']);
   });
 
-  it('goes unscoped on WebKit when an origin is on a default port or an IPv6 host, which WebKit cannot match', async () => {
-    const plain = { username: 'ada', password: 'plain-value' };
-    for (const extra of ['https://api.example.com', 'http://[::1]:3000']) {
-      expect(await httpCredentials(plain, credentialOrigins(app, [extra]), 'webkit', notASecret)).toEqual([plain]);
+  it('answers a challenge, and sends the headers, only at one of the origins, by exact scheme, host, and port', () => {
+    const credentials = { username: 'ada', password: 'pa55word!' };
+    const access = new ProtectedApp(credentialOrigins(app, ['https://api.example.com']), { 'X-Preview': 'token' }, credentials);
+    for (const url of ['http://127.0.0.1:3000/login', 'https://api.example.com:443/v1']) {
+      expect(access.credentialsFor(url)).toBe(credentials);
+      expect(access.headersFor(url)).toEqual({ 'x-preview': 'token' });
     }
-    expect(await httpCredentials(plain, credentialOrigins(app, ['http://localhost:4000']), 'webkit', notASecret)).toEqual([
-      { ...plain, origin: app },
-      { ...plain, origin: 'http://localhost:4000' },
-    ]);
-    expect(await httpCredentials(plain, credentialOrigins('https://example.com', undefined), 'firefox', notASecret)).toEqual([
-      { ...plain, origin: 'https://example.com' },
-    ]);
+    for (const url of ['http://127.0.0.1:3001/', 'https://www.api.example.com/', 'http://api.example.com/', 'not a url']) {
+      expect(access.credentialsFor(url)).toBeUndefined();
+      expect(access.headersFor(url)).toBeUndefined();
+    }
+  });
+
+  it('holds requests only for configured headers, and challenges only for configured credentials', () => {
+    const origins = credentialOrigins(app, undefined);
+    const neither = new ProtectedApp(origins, undefined, undefined);
+    expect([neither.sendsHeaders, neither.answersChallenges, neither.headersFor(app), neither.credentialsFor(app)]).toEqual([false, false, undefined, undefined]);
+    const both = new ProtectedApp(origins, {}, { username: 'ada', password: 'x' });
+    expect([both.sendsHeaders, both.answersChallenges]).toEqual([true, true]);
   });
 
   it('registers the Authorization credential a secret password becomes, padded and not, for redaction', async () => {
     const asked: { name: string; derived: readonly string[] }[] = [];
-    const credentials = await httpCredentials({ username: 'ada', password: secrets.get('stagingPassword') }, credentialOrigins(app, undefined), 'chromium', async (secret, options) => {
+    const credentials = await httpCredentials({ username: 'ada', password: secrets.get('stagingPassword') }, async (secret, options) => {
       asked.push({ name: secret.name, derived: (await options?.derived?.('pa55word!')) ?? [] });
       return 'pa55word!';
     });
-    expect(credentials).toEqual([{ username: 'ada', password: 'pa55word!', origin: app }]);
+    expect(credentials).toEqual({ username: 'ada', password: 'pa55word!' });
     const encoded = Buffer.from('ada:pa55word!').toString('base64');
     expect(encoded.endsWith('=')).toBe(true);
     expect(asked).toEqual([{ name: 'stagingPassword', derived: [encoded, encoded.replace(/=+$/, '')] }]);

@@ -1,7 +1,7 @@
 /** Route decision validation that a browser round trip cannot observe. */
 
 import { describe, expect, it } from 'vitest';
-import { parseContinue, parseFulfill } from '../../src/route-options.ts';
+import { parseContinue, parseFulfill } from '../../src/fixture/routes.ts';
 
 const resolveUrl = (url: string): string => new URL(url, 'http://127.0.0.1/').href;
 
@@ -12,5 +12,11 @@ describe('route decision headers', () => {
     const fulfilled = parseFulfill({ headers }, (file) => file).headers;
     expect(Object.hasOwn(continued, '__proto__') && continued['__proto__']).toBe('kept');
     expect(Object.hasOwn(fulfilled, '__proto__') && fulfilled['__proto__']).toBe('kept');
+  });
+
+  it('leaves a content-type header a header, and takes contentType only when given', () => {
+    const headers = { 'Content-Type': 'text/plain' };
+    expect(parseFulfill({ headers, json: 1 }, (file) => file)).toEqual({ status: 200, headers, json: 1 });
+    expect(parseFulfill({ headers, contentType: 'text/csv' }, (file) => file)).toEqual({ status: 200, headers, contentType: 'text/csv' });
   });
 });

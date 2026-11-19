@@ -10,25 +10,17 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { EngineCleanupContext, EngineHandle, LocatorExpression, OperationContext, TextPattern } from '@e2e-dev/core/engine';
-import { web } from '../../src/index.ts';
+import type { LocatorExpression, TextPattern } from '@e2e-dev/core/engine';
 import { startFixtureApp, type FixtureApp } from '../helpers/fixture-app.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
-
-function cleanup(): EngineCleanupContext {
-  return { signal: new AbortController().signal, timeoutMs: 30_000 };
-}
-
-function operation(attemptId: string): OperationContext {
-  return { signal: new AbortController().signal, timeoutMs: 30_000, runId: 'run-rows', attemptId, origin: 'test' };
-}
+import { boot, byRole, cleanup, operation, testWeb } from '../helpers/web-session.ts';
 
 function byLabel(value: string, exact: boolean, visible?: boolean): LocatorExpression {
   const pattern: TextPattern = { kind: 'string', value, exact };
   return { kind: 'query', query: { kind: 'label', value: pattern, ...(visible === undefined ? {} : { visible }) } };
 }
 
-const rows: LocatorExpression = { kind: 'query', query: { kind: 'role', value: { kind: 'string', value: 'listitem', exact: true } } };
+const rows = byRole('listitem');
 
 function rowsWith(has: LocatorExpression): LocatorExpression {
   return { kind: 'filter', source: rows, has };
@@ -42,24 +34,10 @@ function removeButtonOf(scope: LocatorExpression): LocatorExpression {
   };
 }
 
-async function boot(engine: EngineHandle, app: FixtureApp): Promise<void> {
-  await engine.init!({
-    runId: 'run-rows',
-    targetName: 'web',
-    projectRoot: process.cwd(),
-    app: { site: new URL(app.url).hostname },
-    env: {},
-    headed: false,
-    workerSlot: 0,
-    log: () => undefined,
-    signal: new AbortController().signal,
-  });
-}
-
 describe('an exact label query composed as a has filter', () => {
   let app: FixtureApp;
   let artifactsDir: string;
-  const engine = web();
+  const engine = testWeb();
   const op = operation('rows-1');
   const locate = (expression: LocatorExpression) => engine.locate!(expression, op);
   const testIds = (expression: LocatorExpression) => locate(expression).then((nodes) => nodes.map((node) => node.testId));

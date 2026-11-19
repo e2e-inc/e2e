@@ -77,17 +77,17 @@ jobs:
       - uses: ./.github/actions/workspace-install
         with:
           agent-device-version: ${{ inputs.agent-device-version }}
-      - name: Install browsers
-        uses: ./.github/actions/chromium
       - name: Build
         run: pnpm run build
+      - name: Install browsers
+        uses: ./.github/actions/browsers
       - name: Run test
         env:
           # The reporter posts the comment with the job's token.
           GITHUB_TOKEN: ${{ inputs.agent-device-version == '' && github.token || '' }}
         run: pnpm --filter @e2e-dev/web-benchmark run test
-      # The engine's tree against Chrome's accessibility tree and Playwright's
-      # getByRole on every scenario, against the disagreements committed in
+      # The engine's tree against Chrome's accessibility tree and the engine's
+      # own locate on every scenario, against the disagreements committed in
       # packages/web/tests/crosscheck/expected.txt. `test` built the app.
       - name: Cross-check the tree
         env:
@@ -95,7 +95,7 @@ jobs:
         run: |
           pnpm --filter @e2e-dev/web-benchmark run start > /tmp/benchmark-app.log 2>&1 &
           for _ in $(seq 1 60); do curl -sf "$CROSSCHECK_BENCHMARK_URL" > /dev/null && break; sleep 1; done
-          pnpm --filter @e2e-dev/web exec vitest run --project integration tests/integration/crosscheck.test.ts
+          pnpm --filter @e2e-dev/web exec vitest run --project integration tests/integration/chromium/crosscheck.test.ts
       # The comment is the result; the artifact is evidence for it. A storage
       # quota that refuses the upload must not turn a green suite red.
       - name: Upload report
@@ -144,10 +144,10 @@ jobs:
       - uses: ./.github/actions/workspace-install
         with:
           agent-device-version: ${{ inputs.agent-device-version }}
-      - name: Install browsers
-        uses: ./.github/actions/chromium
       - name: Build
         run: pnpm run build
+      - name: Install browsers
+        uses: ./.github/actions/browsers
       - name: Run test:agent
         env:
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}

@@ -3,13 +3,11 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { Page } from 'playwright-core';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ProviderRecording } from '@e2e-dev/core/engine';
-import { ProviderVideo } from '../../src/provider-video.ts';
+import { ProviderVideo } from '../../src/driver/provider-video.ts';
 import type { LeaseRecording } from '../../src/provider.ts';
-
-const PAGE = {} as Page;
+import { gate } from '../helpers/gate.ts';
 
 describe('ProviderVideo', () => {
   const dirs: string[] = [];
@@ -39,27 +37,40 @@ describe('ProviderVideo', () => {
 
   it('stops a start that landed after its budget ran out, and keeps the recording started after it', async () => {
     const stopped: string[] = [];
-    let land!: (started: LeaseRecording) => void;
+    const { held: landing, release: land } = gate<LeaseRecording>();
     const starts = [
-      () => new Promise<LeaseRecording>((resolve) => { land = resolve; }),
+      () => landing,
       async () => recording('second', stopped),
     ];
-    const video = new ProviderVideo(async () => starts.shift()!(), artifactsDir());
+    const video = new ProviderVideo(async () => starts.shift()!(), artifactsDir(), new AbortController().signal);
     const timedOut = new AbortController();
-    const first = video.arm(PAGE, timedOut.signal);
+    const first = video.start(timedOut.signal);
     timedOut.abort();
-    await video.arm(PAGE, new AbortController().signal);
+    await video.start(new AbortController().signal);
     land(recording('first', stopped));
     await expect(first).rejects.toMatchObject({ code: 'CANCELLED' });
     expect(stopped).toEqual(['first']);
     expect((await video.stop(new AbortController().signal)).map((segment) => ('path' in segment ? segment.path : segment.url))).toEqual(['video/second.mp4']);
   });
 
-  it('keeps the handle of a recording whose stop failed on abandon, so a later stop still ends it', async () => {
+  it('stops a recording that started once the attempt had ended, and never keeps it', async () => {
     const stopped: string[] = [];
-    const video = new ProviderVideo(async () => recording('clip', stopped, 1), artifactsDir());
-    await video.arm(PAGE, new AbortController().signal);
-    await video.abandon(new AbortController().signal);
+    const { held: landing, release: land } = gate<LeaseRecording>();
+    const ended = new AbortController();
+    const video = new ProviderVideo(() => landing, artifactsDir(), ended.signal);
+    const starting = video.start(new AbortController().signal);
+    ended.abort();
+    land(recording('late', stopped));
+    await expect(starting).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(stopped).toEqual(['late']);
+    expect(await video.stop(new AbortController().signal)).toEqual([]);
+  });
+
+  it('keeps the handle of a recording whose stop failed at the attempt’s close, so a later stop still ends it', async () => {
+    const stopped: string[] = [];
+    const video = new ProviderVideo(async () => recording('clip', stopped, 1), artifactsDir(), new AbortController().signal);
+    await video.start(new AbortController().signal);
+    await video.close(1_000);
     expect(stopped).toEqual(['clip']);
     expect(await video.stop(new AbortController().signal)).toHaveLength(1);
     expect(stopped).toEqual(['clip', 'clip']);

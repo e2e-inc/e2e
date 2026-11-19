@@ -87,9 +87,8 @@ bun add -d e2e @e2e-dev/web @e2e-dev/e2b e2b
 ```
 </CodeGroup>
 
-Build the browser template once, from the Playwright image. Use the image
-tag of the Playwright version your `@e2e-dev/web` uses, and give the
-template 4 GB of memory, as below:
+Build the browser template once, from the Playwright image, which carries
+Chromium. Give the template 4 GB of memory, as below:
 
 ```ts title="build-template.ts"
 import { Template, defaultBuildLogger } from 'e2b';

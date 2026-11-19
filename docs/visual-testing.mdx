@@ -130,9 +130,18 @@ await expect(screen).toHaveScreenshot('dashboard.png', {
 | `maskColor` | `#ff00ff` | Color of the mask boxes |
 | `timeout` | `assertionTimeout` | Assertion budget in milliseconds |
 
-On the web, e2e stops animations and hides the text caret. On iOS and
-Android, it holds the status bar fixed, so the clock and battery match on
-every run.
+On the web, e2e hides the text caret and stops CSS animations, transitions,
+and `element.animate()`: one that ends is captured at its end, and one that
+loops forever as if it had not started. An animation that ends stays at its
+end after the screenshot and fires its end events, so a page that reacts to
+them changes: a toast that removes itself on `animationend` is gone. The
+pixels a model reads are taken the same way. `app.screenshot()` pauses
+animations where they are and resumes them, so it leaves the page as it
+was. A canvas, a video, an animated image,
+or a script that redraws the page keeps moving, so mask it. A looping
+`element.animate()` the page cancels while a screenshot is taken plays again
+after it. On iOS and Android, e2e holds the status bar fixed, so the clock
+and battery match on every run.
 
 e2e masks secure fields in every screenshot, after a secret fill too. The
 matcher fails with `POLICY_DENIED` when the engine can't prove every secure

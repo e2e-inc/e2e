@@ -60,8 +60,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+          path: ~/.cache/e2e/browsers
+          key: e2e-browsers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install browsers
         run: pnpm exec e2e-web install chromium --with-deps
@@ -95,8 +95,8 @@ jobs:
 ```
 
 `npx e2e` は、ロックファイルに従ってインストールされたバージョンを実行します。
-[インストールコマンド](/reference/web#installing-browsers) は、エンジンが固定する Playwright のバージョンに対応した
-ブラウザとシステムライブラリをダウンロードします。
+[インストールコマンド](/reference/web#installing-browsers) は、エンジンが固定するブラウザビルドを
+システムライブラリとともにダウンロードします。
 キャッシュのステップにより、ロックファイルが変わるまではダウンロードを省略できます。
 リトライで成功したテストでも、失敗した試行の記録はアップロードに含まれます。
 

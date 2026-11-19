@@ -1517,7 +1517,7 @@ export class InfrastructureError extends E2EError {
 
 | エクスポート | 戻り値 |
 | --- | --- |
-| [`matchesText`, `toTextPattern`, `describePattern`](#text-patterns) | `boolean`, `TextPattern`, `string` |
+| [`matchesText`, `toTextPattern`, `describePattern`, `createTextMatching`](#text-patterns) | `boolean`, `TextPattern`, `string`, `TextMatching` |
 | [`resolveExpression`](#resolveexpression) | `SemanticNode[]` |
 | [`urlMatches`](#urlmatches) | `boolean` |
 | [`siteOf`, `sameSite`](#site-helpers) | `string`, `boolean` |
@@ -1539,12 +1539,19 @@ export class InfrastructureError extends E2EError {
 export function toTextPattern(match: TextMatch, options?: { exact?: boolean }): TextPattern;
 export function matchesText(actual: string, pattern: TextPattern): boolean;
 export function describePattern(pattern: TextPattern): string;
+export function createTextMatching(): TextMatching;
 ```
 
 ```ts
 const pattern = toTextPattern(/total/i);
 matchesText('Order total', pattern); // true
 describePattern(pattern); // '/total/i'
+```
+
+`createTextMatching()` は、`matchesText` が適用するルールを `matchesText`、`compareText`、`normalizeText`、`testPattern` として返します。外部の値をクロージャーで参照しません。ページ内でテキストを照合するエンジンは、そのソースをページに送ります。
+
+```ts
+const source = `(${createTextMatching.toString()})()`;
 ```
 
 | 発生するエラー | 条件 |
@@ -1573,6 +1580,7 @@ async locate(expression) {
 - コンテナーが子孫のテキストを繰り返す場合、`text` と `label` は最も内側の一致を返します。
 - ツリーが情報のすべてを表すエンジン（デバイス）はこれを呼び、ブラウザエンジンは同じ動作を再現します。
 - `selector` 式には `selector` オプションが必要です。
+- `createResolver(platform)` は、プラットフォーム自身のノードに対して同じルールを実行します。その `ResolverPlatform` は、一致の順に並んだ `nodes`、各ノードの `parent`、そしてプラットフォームの `matches`、`hasText`、`selector`、`fail`（ブラウザのテキストや非表示のルールなど）を提供します。外部の値をクロージャーで参照しないため、ブラウザエンジンはそのソースをページに送ります。
 - `frame` 式は `FRAME_NOT_FOUND` になります。
 - `union` 式は、どちらかの分岐に一致するノードを、重複なしでドキュメント順に返します。
 
@@ -1584,7 +1592,7 @@ async locate(expression) {
 export function urlMatches(
   current: string,
   expected: string | RegExp,
-  baseHref: string,
+  baseHref: string | undefined,
   ignoreCase?: boolean,
 ): boolean;
 ```
@@ -2020,7 +2028,7 @@ test('prints a receipt', { requires: ['printer'] }, async ({ printer }) => {
 | 発生するエラー | 条件 |
 | --- | --- |
 | `INVALID_CONFIG` | ファクトリーが `context.fixture` で宣言したものではなく、通常の操作オブジェクトを返す。テストが初めて参照した時点で発生します。 |
-| `APP_URL_REQUIRED` | URL を宣言していないターゲットでの `app.resolveUrl`。 |
+| `APP_URL_REQUIRED` | URL を宣言していないターゲットで、相対 URL を渡した `app.resolveUrl`。 |
 | `POLICY_DENIED` | `app.resolveUrl` に `http:` と `https:` 以外のスキームを指定（`about:blank` を除く）。 |
 
 ```ts
@@ -2165,7 +2173,7 @@ return context.fixture('printer', printer, { print: { kind: 'resource' } });
 
 ### エクスポートされる名前
 
-`EngineCleanupContext`、`EngineDisposeContext`、`OperationContext`、`TextPattern`、`SemanticQuery`、`LocatorExpression`、`NodeRef`、`SemanticNode`、`ViewportPoint`、`ViewportSize`、`ObservationPixels`、`LocatorAction`、`LocatorActionKind`、`PointerAction`、`PointerActionKind`、`ScrollDirection`、`Momentum`、`SelectOption`、`Key`、`KeyModifier`、`KeyName`、`ParsedKey`、`ENGINE_SPI_VERSION`、`LOCATOR_ACTION_KINDS`、`POINTER_ACTION_KINDS`、`KEY_MODIFIERS`、`KEY_NAMES`、`parseKey`、`ENGINE_ERROR_CODES`、`RETRYABLE_ENGINE_ERROR_CODES`、`Secret`、`isSecret`、`TextMatch`、`JsonValue`、`JsonValueRules`、`ResolveExpressionOptions`、`PollConditionOptions`、`WithoutUndefined`、`FixtureOperation`、`EngineIsolation`、`OBSERVED_NAME_LIMIT`、`OBSERVED_TEXT_LIMIT` は `e2e/engine` からエクスポートされます。[エンジンプロトコル](/reference/engine-protocol)の `connectEngine`、`serveEngine`、`describeEngine`、`spawnTransport`、`socketTransport`、`loopbackTransport`、`ENGINE_METHODS`、`ENGINE_PROTOCOL_VERSION` と、それぞれの型も含まれます。
+`EngineCleanupContext`、`EngineDisposeContext`、`OperationContext`、`TextPattern`、`SemanticQuery`、`LocatorExpression`、`NodeRef`、`SemanticNode`、`ViewportPoint`、`ViewportSize`、`ObservationPixels`、`LocatorAction`、`LocatorActionKind`、`PointerAction`、`PointerActionKind`、`ScrollDirection`、`Momentum`、`SelectOption`、`Key`、`KeyModifier`、`KeyName`、`ParsedKey`、`ENGINE_SPI_VERSION`、`LOCATOR_ACTION_KINDS`、`POINTER_ACTION_KINDS`、`KEY_MODIFIERS`、`KEY_NAMES`、`parseKey`、`ENGINE_ERROR_CODES`、`RETRYABLE_ENGINE_ERROR_CODES`、`Secret`、`isSecret`、`TextMatch`、`JsonValue`、`JsonValueRules`、`ResolveExpressionOptions`、`ResolverPlatform`、`TextMatching`、`PollConditionOptions`、`WithoutUndefined`、`FixtureOperation`、`EngineIsolation`、`OBSERVED_NAME_LIMIT`、`OBSERVED_TEXT_LIMIT` は `e2e/engine` からエクスポートされます。[エンジンプロトコル](/reference/engine-protocol)の `connectEngine`、`serveEngine`、`describeEngine`、`spawnTransport`、`socketTransport`、`loopbackTransport`、`ENGINE_METHODS`、`ENGINE_PROTOCOL_VERSION` と、それぞれの型も含まれます。
 
 ### `SemanticNode`
 

@@ -117,8 +117,8 @@ jobs:
       - run: npm ci
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          path: ~/.cache/e2e/browsers
+          key: e2e-browsers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
       - run: npx e2e-web install chromium --with-deps
 
       - name: Run e2e against the deployment

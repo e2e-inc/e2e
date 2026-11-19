@@ -233,9 +233,9 @@ label. `browser` (`Browser`): browser targets, import `test` from `@e2e-dev/web`
   returns its videos (`path` or hosted `url`). Fails while the test's
   `video` records: set `{ video: 'off' }` on the test.
 
-`clearState()` is `UNSUPPORTED_CAPABILITY` with `connect.reconnectEndpoint`
-or an attempt-scoped browser provider; on a device with no pinned `app`, both
-methods are.
+`clearState()` is `UNSUPPORTED_CAPABILITY` with an attempt-scoped browser
+provider; on a device with no pinned `app`, `restart()` and `clearState()`
+both are.
 
 ## Locators
 
@@ -248,7 +248,7 @@ assertion. Every query also exists on a locator, scoped to its subtree.
 | `getByLabel(text, { exact?, visible? })` | Form controls by label. |
 | `getByPlaceholder(text, { exact?, visible? })` | Inputs by placeholder. |
 | `getByText(text, { exact?, visible? })` | Visible text. |
-| `getByDisplayValue(value, { exact?, visible? })` | Inputs by current value; on the web it cannot scope child queries or be a `filter({ has })` or `filter({ hasNot })` target. |
+| `getByDisplayValue(value, { exact?, visible? })` | Inputs by current value. |
 | `getByTestId(id, { visible? })` | `data-testid` on the web (or `web({ testIdAttribute })`), accessibility identifier or resource id on a device (React Native `testID`, SwiftUI `.accessibilityIdentifier`, Compose `testTag` with `testTagsAsResourceId` on Android, Flutter `Semantics(identifier:)`, .NET MAUI `AutomationId`, NativeScript `testID`); a string matches the whole id, a RegExp tests it; on Android the `<package>:id/` prefix may be left off. Last resort. |
 
 Roles: `button`, `link`, `textbox`, `searchbox`, `combobox`, `listbox`,
@@ -261,9 +261,8 @@ Roles: `button`, `link`, `textbox`, `searchbox`, `combobox`, `listbox`,
 `alertdialog`, `main`, `navigation`, `banner`, `contentinfo`, `complementary`,
 `region`. The union is closed (anything else is a type error); `img` aliases
 `image`; a role the platform lacks (`tooltip` on a phone) matches nothing.
-On the web a `contenteditable` host is a `textbox` for the agent and takes
-`fill`; from a test use `getByLabel`, `getByTestId`, or `role="textbox"` on
-the host.
+On the web a `contenteditable` host is a `textbox`: `getByRole('textbox')`
+finds it and it takes `fill`.
 
 Text matching is exact after whitespace normalization (whole string,
 case-sensitive) for a `getByRole` name, `getByLabel`, `getByPlaceholder`, and
@@ -287,8 +286,7 @@ substring; a `RegExp` matches as written.
   key (`visible`) or an empty `filter({})` is `INVALID_LOCATOR`. `a.or(b)`
   matches either, still strict: add `first()` when both may match. Both
   locators must come from the same screen and attempt. Web branches need
-  identical literal frame-selector chains; display-value branches cannot be
-  composed.
+  identical literal frame-selector chains.
 - `visible: true` drops nodes the page hides (a closed drawer) before the
   exactly-one rule. Visibility is what renders, as `toBeVisible()` reads it:
   an `aria-hidden` spinner that paints is visible, so `toBeHidden()` waits
@@ -619,7 +617,7 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
   option with `INVALID_ARGUMENT`.
 - `unrouteAll()` removes every route; configured headers stay.
 - `waitForResponse(pattern, { timeout? })`: resolves once the headers
-  arrive, with `{ url, status, headers, body(), json(), text() }`; the body
+  arrive (on Firefox once the body starts), with `{ url, status, headers, body(), json(), text() }`; the body
   readers wait for the body (up to the action timeout) and reject with
   `ACTION_FAILED` when it could not be read. Start the wait before the
   request, including the first `browser.goto` or `app.open`.
@@ -630,12 +628,14 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
 - `emulateMedia({ colorScheme?, reducedMotion? })`: what the page's `@media`
   rules and `matchMedia` read, for the rest of the test. Call it before
   `app.open` to load the page with it; a feature left out keeps its value.
+  On Firefox, `reducedMotion` here is `UNSUPPORTED_CAPABILITY`: set
+  `web({ reducedMotion })`.
 - `onDialog('accept' | 'dismiss' | handler)`: awaited; resolves to an async
   unsubscribe. Register it before the tap that opens the dialog. A handler
   gets `{ type, message, accept(text?), dismiss() }`, where `type` is
   `alert`, `confirm`, `prompt`, or `beforeunload`, `accept` taking the prompt
   text; no handler, or one that neither accepts nor dismisses, fails the
-  next step with `INVALID_STATE`. A throwing handler's unanswered dialog is
+  next step with `APP_NOT_OPEN`. A throwing handler's unanswered dialog is
   dismissed too, and its error fails the next step.
 - `waitForDownload(() => trigger, { timeout? })`: returns
   `{ path, absolutePath, suggestedFilename }`; `absolutePath` names the saved

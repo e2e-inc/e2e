@@ -41,7 +41,7 @@ test('a member upgrades to Pro', async ({ app, agent, screen }) => {
 ## 仕組み
 
 - **ターゲット。** 各テストは、Chromium や iPhone シミュレーターなどのターゲットごとに 1 回実行されます。
-  [Web エンジン](/web) は Playwright を通じてブラウザを操作します。
+  [Web エンジン](/web) は WebDriver BiDi 経由で Chromium と Firefox を操作します。
   [モバイルエンジン](/mobile) は agent-device を通じて iOS シミュレーターと Android
   エミュレーターを操作します。[独自のエンジンを作成](/writing-an-engine) することもできます。
 - **エージェントステップ。** `agent.act` はゴールを達成します。`agent.assert`、

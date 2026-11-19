@@ -150,7 +150,10 @@ export class LocatorEngine {
 
   /** Builds an operation context on a plain budget, capped by the remaining test timeout: 0 is an expired one. */
   operation(timeoutMs?: number): OperationContext {
-    return this.operationWithin(this.capped(timeoutMs));
+    const own = timeoutMs ?? this.options.actionTimeout;
+    // The call's own timeout, exactly, unless the running phase ends first: one read back off a deadline set
+    // a moment ago can come out a millisecond short, and the budget is the number an error names.
+    return this.options.budget.deadline.remaining() < own ? this.operationWithin(this.options.budget.deadline) : this.readOperation(own);
   }
 
   /** The reads of one wait on `deadline`: the last may run past it, up to the running phase's deadline. */

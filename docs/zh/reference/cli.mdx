@@ -127,7 +127,7 @@ bunx e2e init --yes --gateway openrouter --skills .agents/skills --mcp .mcp.json
 
 对于新项目，向导会询问：
 
-- **引擎。** 选择一个、两个或都不选。**Web**（Playwright，默认）会添加 `@e2e-dev/web`。**Mobile (iOS/Android)** 会添加 `@e2e-dev/mobile`，在 macOS 上默认使用 iOS，其他系统使用 Android，并打开“设置”应用。都不选则不添加引擎，适用于 HTTP 测试或自定义引擎。
+- **引擎。** 选择一个、两个或都不选。**Web**（Chromium 和 Firefox）是默认选项，会添加 `@e2e-dev/web`。**Mobile (iOS/Android)** 会添加 `@e2e-dev/mobile`，在 macOS 上默认使用 iOS，其他系统使用 Android，并打开“设置”应用。都不选则不添加引擎，适用于 HTTP 测试或自定义引擎。
 - **智能体步骤使用的模型提供方或订阅：** Vercel AI Gateway、OpenRouter、兼容 OpenAI 的端点、ChatGPT、GitHub Copilot、OpenCode Console 或 SuperGrok。None 适用于只使用定位器的测试。向导会添加所需的包和模型配置。订阅用户随后通过 [`e2e login`](#e2e-login) 登录。参阅[模型](/models)和[订阅](/subscriptions)。
 - **智能体技能的安装位置**（参阅 [e2e guide](#e2e-guide)）。`.agents/skills/` 供 Codex、Cursor、Copilot、Gemini CLI、OpenCode 和 Zed 使用；`.claude/skills/` 供 Claude Code 使用。两者默认均选中。
 - **[MCP 服务器](/reference/mcp)的注册位置。** Claude Code 使用 `.mcp.json`，Cursor 使用 `.cursor/mcp.json`，Codex 使用 `.codex/config.toml`。默认全部选中。Codex 会在受信任的项目中加载配置；安装依赖项后，请启动新会话。
@@ -140,7 +140,7 @@ bunx e2e init --yes --gateway openrouter --skills .agents/skills --mcp .mcp.json
 | 创建的文件 | 内容 |
 | --- | --- |
 | `package.json` | 不存在时创建为私有 ESM 包；已存在时只添加缺少的依赖项和脚本。同系列包（`@e2e-dev/web`、`@e2e-dev/mobile`）使用随 CLI 发布版本的脱字符版本范围；CLI 为预发布版本时，使用该精确版本。如果不存在，则添加运行 `e2e run` 的 `test:e2e` 脚本 |
-| `e2e.config.ts` | 每个所选引擎一个测试目标，应用位于其 `app` 中。Playwright 将 `APP_URL`（默认 `http://localhost:3000`）读入 `app.url`，并在注释中展示 `app.command`。移动端在 iOS 上设置 `app: { bundleId: 'Settings' }`，在 Android 上使用 `com.android.settings`，并设置 `workers: 1`。选择网关时，`agents.default` 为 `{ model, system }` |
+| `e2e.config.ts` | 每个所选引擎一个测试目标，应用位于其 `app` 中。网页端将 `APP_URL`（默认 `http://localhost:3000`）读入 `app.url`，并在注释中展示 `app.command`。移动端在 iOS 上设置 `app: { bundleId: 'Settings' }`，在 Android 上使用 `com.android.settings`，并设置 `workers: 1`。选择网关时，`agents.default` 为 `{ model, system }` |
 | `tests/example.e2e.ts` | 一个在任意页面上都能通过的应用打开测试，以及一段注释掉的智能体测试。设备配置则使用“设置”应用检查。选择两个引擎时，改为生成 `tests/web.e2e.ts` 和 `tests/mobile.e2e.ts`，每个测试分别带有 `requires: ['browser']` 或 `requires: ['device']`，以便另一测试目标跳过它 |
 | `.gitignore` | 追加 `node_modules/`、`.e2e/results/`、`.e2e/cache/`、`.e2e/sessions/`、`.e2e/report.json`、`.e2e/ai-trace.json`、`.e2e/timings.json`、`.e2e/junit.xml`、`.e2e/summary.md`、`.e2e/logs/` 和 `.e2e/videos/`。是否提交缓存由你选择；参阅[提交回放缓存](/cache#commit-the-replay-cache) |
 | `.agents/skills/e2e/`、`.claude/skills/e2e/` | `SKILL.md`，以及每个 `e2e guide` 主题对应的 `references/<topic>.md`。同时选择两个位置时，Claude Code 目录为指向副本的相对符号链接（`../../.agents/skills/e2e`），与 `npx skills add` 生成的布局一致 |
@@ -407,7 +407,7 @@ npx e2e run tests/signup.e2e.ts --tag smoke
 npx e2e run tests/signup.e2e.ts:12
 npx e2e run tests/agent
 npx e2e run 'tests/**/*.smoke.e2e.ts'
-npx e2e run --target web,webkit --tag smoke,billing --tag-mode all
+npx e2e run --target web,firefox --tag smoke,billing --tag-mode all
 npx e2e run --tag smoke --exclude-tag slow
 npx e2e run --grep checkout --grep-invert '/refund/i'
 npx e2e run --last-failed
@@ -425,7 +425,7 @@ pnpm exec e2e run tests/signup.e2e.ts --tag smoke
 pnpm exec e2e run tests/signup.e2e.ts:12
 pnpm exec e2e run tests/agent
 pnpm exec e2e run 'tests/**/*.smoke.e2e.ts'
-pnpm exec e2e run --target web,webkit --tag smoke,billing --tag-mode all
+pnpm exec e2e run --target web,firefox --tag smoke,billing --tag-mode all
 pnpm exec e2e run --tag smoke --exclude-tag slow
 pnpm exec e2e run --grep checkout --grep-invert '/refund/i'
 pnpm exec e2e run --last-failed
@@ -443,7 +443,7 @@ bunx e2e run tests/signup.e2e.ts --tag smoke
 bunx e2e run tests/signup.e2e.ts:12
 bunx e2e run tests/agent
 bunx e2e run 'tests/**/*.smoke.e2e.ts'
-bunx e2e run --target web,webkit --tag smoke,billing --tag-mode all
+bunx e2e run --target web,firefox --tag smoke,billing --tag-mode all
 bunx e2e run --tag smoke --exclude-tag slow
 bunx e2e run --grep checkout --grep-invert '/refund/i'
 bunx e2e run --last-failed

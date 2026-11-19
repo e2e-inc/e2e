@@ -1,44 +1,28 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Page } from 'playwright-core';
-import type { EngineFixtureContext } from '@e2e-dev/core/engine';
-import { PlaywrightSurface } from '../../src/surface.ts';
-import { createBrowserFixture, type Browser } from '../../src/browser.ts';
-import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type { Browser } from '../../src/index.ts';
+import { gate } from '../helpers/gate.ts';
+import { startWebSession, type WebSession } from '../helpers/web-session.ts';
 
 describe('browser.evaluate error boundaries', () => {
-  const surface = new PlaywrightSurface({});
-  const artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-evaluate-'));
-  const signal = new AbortController().signal;
-  let page: Page;
+  let session: WebSession;
   let browser: Browser;
 
   beforeAll(async () => {
-    await surface.init({ runId: 'evaluate', targetName: 'web', projectRoot: process.cwd(),
-      app: {}, env: {}, headed: false, workerSlot: 0, signal, log: () => undefined });
+    session = await startWebSession({ startAttempt: false });
   });
 
   beforeEach(async () => {
-    await surface.startAttempt({ attemptId: 'evaluate', artifactsDir, signal, resolveSecret: noSecrets, ...ignoreTrace });
-    page = await surface.ensurePage();
-    browser = createBrowserFixture(surface, {
-      operation: () => ({ signal, timeoutMs: 1_000, runId: 'evaluate', attemptId: 'evaluate', origin: 'test' }),
-      expectable: (target: object) => target,
-      // The recorder is the harness's concern; these tests exercise evaluate's error boundaries only.
-      fixture: (_name: string, target: object) => target,
-    } as unknown as EngineFixtureContext);
+    await session.startAttempt();
+    browser = session.browser;
+    await session.setContent('<title>Evaluate</title>');
   });
 
   afterEach(async () => {
-    vi.restoreAllMocks();
-    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    await session.endAttempt();
   });
 
   afterAll(async () => {
-    await surface.dispose({ signal, timeoutMs: 5_000 });
-    rmSync(artifactsDir, { recursive: true, force: true });
+    await session.close();
   });
 
   it.each([
@@ -52,31 +36,37 @@ describe('browser.evaluate error boundaries', () => {
     await expect(browser.evaluate(source)).rejects.toMatchObject({ code: 'EVALUATE_FAILED', message });
   });
 
-  it.each([
-    'page.evaluate: Target page, context or browser has been closed',
-    'page.evaluate: Execution context was destroyed, most likely because of a navigation.',
-  ])('keeps a Playwright rejection as infrastructure: %s', async (message) => {
-    vi.spyOn(page, 'evaluateHandle').mockRejectedValueOnce(new Error(message));
-    await expect(browser.evaluate('() => 1')).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
-  });
-
-  it('keeps a Playwright timeout as OPERATION_TIMEOUT', async () => {
-    const error = new Error('page.evaluate: Timeout 1000ms exceeded.');
-    error.name = 'TimeoutError';
-    vi.spyOn(page, 'evaluateHandle').mockRejectedValueOnce(error);
-    await expect(browser.evaluate('() => 1')).rejects.toMatchObject({ code: 'OPERATION_TIMEOUT' });
-  });
-
-  it.each(['page', 'context'] as const)('keeps a real %s closure during evaluation as infrastructure', async (target) => {
-    let ready!: () => void;
-    const started = new Promise<void>((resolve) => { ready = resolve; });
-    await page.exposeFunction('__e2eReady', ready);
-    const pending = browser.evaluate('async () => { await globalThis.__e2eReady(); await new Promise(() => {}); }');
+  it.each(['restart', 'reset'] as const)('keeps a tab closed by %s during evaluation as infrastructure', async (replace) => {
+    const { held: evaluating, release: dispatched } = gate();
+    session.serve('/evaluating', (_request, response) => {
+      dispatched();
+      response.end();
+    });
+    await session.setContent('<title>Pending</title>');
+    const pending = browser.evaluate('() => { void fetch("/evaluating"); return new Promise(() => {}); }');
     const rejected = pending.catch((cause: unknown) => cause);
-    await started;
-    if (target === 'page') await page.close();
-    else await page.context().close();
+    await evaluating;
+    await session.engine.session![replace]!(session.op());
     expect(await rejected).toMatchObject({ code: 'ENGINE_FAILURE' });
+  });
+
+  it('runs code once whose page navigated away under it, and fails it as an engine fault', async () => {
+    let ran = 0;
+    session.serve('/ran', (_request, response) => {
+      ran += 1;
+      response.end();
+    });
+    const next = session.serve('/next', '<title>Next</title>');
+    const failure = await browser.evaluate(async (url: string) => {
+      const call = new XMLHttpRequest();
+      call.open('GET', '/ran', false);
+      call.send();
+      location.href = url;
+      await new Promise(() => undefined);
+      return null;
+    }, next).then(() => undefined, (cause: unknown) => cause);
+    expect(failure).toMatchObject({ code: 'ENGINE_FAILURE' });
+    expect(ran).toBe(1);
   });
 
   it('preserves JSON results, explicit arguments, and zero-argument invocation', async () => {
@@ -89,7 +79,7 @@ describe('browser.evaluate error boundaries', () => {
   });
 
   it('evaluates a string as an expression and calls a function it evaluates to', async () => {
-    await page.setContent('<title>Cart</title>');
+    await session.setContent('<title>Cart</title>');
     await expect(browser.evaluate('document.title')).resolves.toBe('Cart');
     await expect(browser.evaluate('(() => document.title)()')).resolves.toBe('Cart');
     await expect(browser.evaluate('fetch("data:text/plain,ok").then((response) => response.text())')).resolves.toBe('ok');
@@ -108,7 +98,7 @@ describe('browser.evaluate error boundaries', () => {
   });
 
   it('returns JSON only', async () => {
-    await page.setContent('<div></div>');
+    await session.setContent('<div></div>');
     await expect(browser.evaluate('() => document.querySelector("div").getBoundingClientRect()'))
       .rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: 'evaluate result must be JSON-safe' });
     await expect(browser.evaluate('() => document.body')).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
@@ -126,12 +116,26 @@ describe('browser.evaluate error boundaries', () => {
     )).resolves.toEqual({ items: [1, 'two'], ok: true });
   });
 
-  it('fails a later evaluate and a locate as EVALUATE_FAILED once the page replaced Map', async () => {
-    await page.setContent('<div>cart</div><script>window.Map = 1;</script>');
-    await expect(browser.evaluate('() => 1')).rejects.toMatchObject({ code: 'EVALUATE_FAILED' });
-    const operation = { signal, timeoutMs: 5_000, runId: 'evaluate', attemptId: 'evaluate', origin: 'test' as const };
-    await expect(surface.locate({ kind: 'selector', selector: 'div' }, operation))
-      .rejects.toMatchObject({ code: 'EVALUATE_FAILED', category: 'test' });
+  it('keeps evaluating once the page replaced Map', async () => {
+    await session.setContent('<div>cart</div><script>window.Map = 1;</script>');
+    await expect(browser.evaluate('() => 1')).resolves.toBe(1);
+  });
+
+  it('keeps locating once the page replaced Map', async () => {
+    await session.setContent('<div>cart</div><script>window.Map = 1;</script>');
+    await expect(session.locate({ kind: 'selector', selector: 'div' })).resolves.toHaveLength(1);
+  });
+
+  it('fails a locate as EVALUATE_FAILED once the page broke a Map method', async () => {
+    await session.setContent('<div>cart</div><script>Map.prototype.set = 1;</script>');
+    // A selector of several compounds too, whose matching remembers what it matched in a Map: the page's fault, not the selector's.
+    for (const selector of ['div', 'body div']) {
+      await expect(session.locate({ kind: 'selector', selector })).rejects.toMatchObject({
+        code: 'EVALUATE_FAILED',
+        category: 'test',
+        message: expect.stringContaining('the page deleted or replaced a JavaScript built-in'),
+      });
+    }
   });
 
   it('runs keepNames output after the code deleted Object', async () => {
@@ -139,8 +143,30 @@ describe('browser.evaluate error boundaries', () => {
   });
 
   it('keeps returning results on a page that deleted Array and JSON and hid __proto__', async () => {
-    await page.setContent('<script>delete window.Array; delete window.JSON; delete Object.prototype.__proto__;</script>');
+    await session.setContent('<script>delete window.Array; delete window.JSON; delete Object.prototype.__proto__;</script>');
     await expect(browser.evaluate((n: number) => ({ items: [n, 'two'] }), 1)).resolves.toEqual({ items: [1, 'two'] });
     await expect(browser.evaluate('() => [1, 2]')).resolves.toEqual([1, 2]);
+  });
+});
+
+// A session of its own: its budget is every operation's, and a state reset takes longer than 1 s on a busy machine.
+describe('browser.evaluate on a 1 s action budget', () => {
+  let session: WebSession;
+
+  beforeAll(async () => {
+    session = await startWebSession({ timeoutMs: 1_000 });
+  });
+
+  afterAll(async () => {
+    await session.close();
+  });
+
+  it('keeps a call that outlives its budget as a timeout', async () => {
+    await session.setContent('<title>Evaluate</title>');
+    await expect(session.browser.evaluate('() => new Promise(() => {})')).rejects.toMatchObject({
+      code: 'ACTION_FAILED',
+      message: expect.stringMatching(/^operation timed out/),
+      cause: expect.objectContaining({ code: 'OPERATION_TIMEOUT' }),
+    });
   });
 });

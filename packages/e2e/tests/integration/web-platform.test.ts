@@ -57,7 +57,7 @@ test('deterministic queries and reads', async ({ app, screen, browser }) => {
 test('class assertions report the observed class on failure', async ({ app, browser }) => {
   await app.open();
   try {
-    await expect(browser).toHaveClass(browser.locator('#class-card'), 'card inactive', { timeout: 300 });
+    await expect(browser).toHaveClass(browser.locator('#class-card'), 'card inactive', { timeout: 2_000 });
     throw new Error('toHaveClass unexpectedly passed');
   } catch (error) {
     if (!(error instanceof Error) || !error.message.includes('class "card active"')) throw error;
@@ -107,8 +107,10 @@ test('toHaveRole compares the role the tree reads', async ({ app, screen }) => {
   await expect(screen.getByText('Wi-Fi')).toHaveRole('switch');
   await expect(screen.getByText('Wi-Fi')).not.toHaveRole('checkbox', { timeout: 200 });
   await expect(screen.getByTestId('plain')).not.toHaveRole('button', { timeout: 200 });
-  // An editing host reads as a textbox in the tree, though getByRole finds it by its tag's role.
-  await expect(screen.getByRole('heading', { name: 'Untitled' })).toHaveRole('textbox');
+  // An editing host is a textbox to the tree and to getByRole, whatever its tag.
+  await expect(screen.getByTestId('doc')).toHaveRole('textbox');
+  await expect(screen.getByRole('textbox').filter({ hasText: 'Untitled' })).toHaveRole('textbox');
+  await expect(screen.getByRole('heading', { name: 'Untitled' })).toHaveCount(0);
 });
 
 test('toHaveRole fails on another role', async ({ app, screen }) => {

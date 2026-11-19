@@ -92,6 +92,8 @@ screen.getByRole('heading', /welcome/i, { level: 1 });
 
 设备引擎映射平台已有的类型：标签栏或分段控件为 `tablist`，进度指示器为 `progressbar`，步进器为 `spinbutton`。其他类型按原样保留，因此没有原生控件对应的角色（例如 `tooltip` 或 `figure`）在手机上不会匹配任何内容。
 
+<a id="editing-hosts" />
+
 ##### 编辑宿主
 
 `contenteditable` 编辑宿主，即 TipTap、ProseMirror、Lexical 或 Slate 编辑器渲染到的根节点，为 `textbox`。
@@ -102,7 +104,7 @@ screen.getByRole('heading', /welcome/i, { level: 1 });
 - 标签不影响角色：`<article contenteditable>` 是编辑器，而非文章。变为可编辑的原生控件或绘制表面保留自身角色。
 - 来自块的 `data-placeholder`（TipTap、ProseMirror）的名称会在编辑器有内容后消失，与绘制的提示文字一样。此后宿主为没有名称的 `textbox`。来自宿主自身 `aria-label`、`aria-labelledby`、`aria-placeholder` 或 `data-placeholder`（Quill）的名称则会保留。
 
-`getByRole` 通过 Playwright 的角色选择器解析，后者没有这条规则。因此，只有宿主带有 `role="textbox"` 时，`getByRole` 才能找到编辑器；`getByLabel` 和 `getByTestId` 无论哪种情况都能找到。测试应依靠标签或测试 ID 定位，而不是占位符。
+无论宿主是否带有 `role="textbox"`，`getByRole('textbox')` 都能找到编辑器，`getByLabel` 和 `getByTestId` 也是如此。测试应依靠标签或测试 ID 定位，而不是占位符。
 
 #### `getByLabel`
 
@@ -154,10 +156,6 @@ getByDisplayValue(value: TextMatch, options?: TextMatchOptions): Locator;
 await screen.getByDisplayValue('ada@example.test').clear();
 ```
 
-<Note>
-在网页端引擎中，`getByDisplayValue` 定位器不能作为子查询或 `has` 过滤器的作用域；两者都会以 `UNSUPPORTED_CAPABILITY` 失败。Playwright 没有针对控件当前值的选择器，因此引擎会在查询后过滤候选项。
-</Note>
-
 #### `getByTestId`
 
 匹配节点的 `testId`。
@@ -197,7 +195,7 @@ await screen.getByTestId('memory-list', { visible: true }).getByRole('listitem')
 - 在网页端，隐藏的 `<iframe>` 内所有内容都是隐藏的，包括跨源框架。
 - 它适用于作用域、`filter`、`first`、`last` 和 `nth`：`getByText('Save', { visible: true }).first()` 是第一个可见匹配项。
 
-优先使用它，而不是将测试绑定到 CSS 的 `browser.locator('p:visible')`。
+`browser.locator` 不支持 `:visible`，`:visible` 并不是 CSS。
 
 ### 细化
 
@@ -241,12 +239,12 @@ await row.getByRole('button', 'Void').tap();
 or(other: Locator): Locator;
 ```
 
-`a.or(b)` 按文档顺序匹配任一分支，每个节点只匹配一次。它仍采用严格匹配：两个分支匹配不同节点时，操作会抛出 `LOCATOR_AMBIGUOUS`。如果任一个都可以，请添加 `first()`。两个定位器必须来自同一个 screen 和同一次尝试。在网页端，两者的框架选择器链字面值必须完全相同；显示值查询分支不能组合。
+`a.or(b)` 按文档顺序匹配任一分支，每个节点只匹配一次。它仍采用严格匹配：两个分支匹配不同节点时，操作会抛出 `LOCATOR_AMBIGUOUS`。如果任一个都可以，请添加 `first()`。两个定位器必须来自同一个 screen 和同一次尝试。在网页端，两者的框架选择器链字面值必须完全相同。
 
 | 抛出的错误 | 触发条件 |
 | --- | --- |
 | `INVALID_LOCATOR` | `other` 不是运行器定位器，或属于另一个 screen 或另一次尝试。 |
-| `UNSUPPORTED_CAPABILITY` | 网页端分支的框架选择器链不同，或某个分支是显示值查询。 |
+| `UNSUPPORTED_CAPABILITY` | 网页端分支的框架选择器链不同。 |
 
 #### `first`
 

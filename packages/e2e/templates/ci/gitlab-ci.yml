@@ -10,13 +10,13 @@ e2e-web:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   variables:
     # GitLab caches only paths inside the project.
-    PLAYWRIGHT_BROWSERS_PATH: $CI_PROJECT_DIR/.cache/ms-playwright
+    E2E_BROWSERS_PATH: $CI_PROJECT_DIR/.cache/e2e/browsers
   cache:
     key:
       files:
         - package-lock.json
     paths:
-      - .cache/ms-playwright/
+      - .cache/e2e/browsers/
       - .npm/
   script:
     - npm ci --cache .npm --prefer-offline

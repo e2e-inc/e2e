@@ -439,12 +439,12 @@ test.describe('wizard', { serial: true, retries: 1 }, () => {
     60_000,
   );
 
-  it(
-    'names APP_UNREACHABLE, with the URL, when the network refused the navigation',
-    async () => {
+  it.each(['ERR_CONNECTION_REFUSED', 'NS_ERROR_CONNECTION_REFUSED'])(
+    'names APP_UNREACHABLE, with the URL, when the network refused the navigation (%s)',
+    async (refusal) => {
       const refused = createFakeEngine({
         onNavigate(url) {
-          throw engineFailure('ENGINE_FAILURE', `navigation failed: page.goto: net::ERR_CONNECTION_REFUSED at ${url}`);
+          throw engineFailure('ENGINE_FAILURE', `navigation to ${url} failed: ${refusal}`);
         },
       });
       const { outcome, project } = await runProject(
@@ -457,7 +457,7 @@ test.describe('wizard', { serial: true, retries: 1 }, () => {
         category: 'infrastructure',
         code: 'APP_UNREACHABLE',
         message: expect.stringMatching(
-          /^nothing answered at http:\/\/\S+ \(ERR_CONNECTION_REFUSED\); start the app there, point the target's app.url at where it runs, or give the target an app.command so the runner starts it$/,
+          new RegExp(`^nothing answered at http://\\S+ \\(${refusal}\\); start the app there, point the target's app.url at where it runs, or give the target an app.command so the runner starts it$`),
         ),
       });
       expect(outcome.exitCode).toBe(3);

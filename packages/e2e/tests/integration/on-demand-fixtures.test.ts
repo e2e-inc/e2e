@@ -385,7 +385,7 @@ export const test = base.extend<{ gadget: unknown; workspace: string }, { databa
     [
       "another runner's fixture",
       `${IMPORT}test.afterEach(async ({ page }: { page: unknown }) => void page);\ntest('ported', () => {});\n`,
-      'afterEach hook names "page": target "fake" has no "page" fixture; available: agent, app, database, gadget, platform, screen, session, workspace (engine fake contributes gadget); there is no Playwright page: open the app with app.open() and find elements through screen; browser-only APIs are on the browser fixture of a Playwright target',
+      'afterEach hook names "page": target "fake" has no "page" fixture; available: agent, app, database, gadget, platform, screen, session, workspace (engine fake contributes gadget); there is no Playwright page: open the app with app.open() and find elements through screen; browser-only APIs are on the browser fixture of a web target',
     ],
     [
       'a suite hook that names a test fixture',

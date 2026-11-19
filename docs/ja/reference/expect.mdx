@@ -196,7 +196,7 @@ await expect(screen.getByTestId('wifi')).not.toHaveRole('checkbox');
 
 - `role` は [`getByRole`](/reference/screen#getbyrole) と同じロール名を受け付けます。別名 `img` は `image` として扱います。JavaScript から渡したそれ以外の文字列はそのまま比較し、空文字列なら `INVALID_ARGUMENT` になります。
 - [`screen.tree()`](/reference/screen#screen-tree) が示すロールを比較するため、ロールの継承関係は考慮しません。`switch` は `checkbox` とは一致しません。
-- Web では、編集ホスト（`contenteditable`）はタグにかかわらず `textbox` として読み取ります。ただし `getByRole` はタグのロールで検索します。
+- Web では、[編集ホスト](/reference/screen#editing-hosts)（`contenteditable`）はタグにかかわらず `textbox` として読み取り、`getByRole('textbox')` で見つかります。
 - テキストを持つ `<div>` など、ツリーにロールがないノードでは失敗し、メッセージは `no role` になります。
 
 ### スクリーンショットのマッチャー

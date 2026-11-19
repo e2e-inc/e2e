@@ -192,8 +192,11 @@ export const FLOWS: readonly Flow[] = [
   {
     title: 'reserves offer B',
     // The replay run renders the `b` variant, the offers reversed, under the recorded URL.
+    // The step waits for the widget the page adds 150 ms in, which moves every row: an engine
+    // quick enough to act at that moment taps as the rows move, or records a screen that is changing.
     open: () => '/repeats',
-    body: `  await agent.act('reserve offer B');
+    body: `  await expect(screen.getByText('Chat with us')).toBeVisible();
+  await agent.act('reserve offer B');
   await expect(screen.getByRole('status', { name: 'Picked' })).toHaveText('B');`,
     script: {
       'reserve offer B': {

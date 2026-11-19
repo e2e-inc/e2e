@@ -22,8 +22,9 @@
   Imports follow TypeScript: `./x.js` or `./x` loads `x.ts`, and the nearest
   `tsconfig.json` `paths` and `baseUrl` apply. Decorators need
   `experimentalDecorators`; CommonJS TypeScript goes in `.cts`.
-- Browser tests: `@e2e-dev/web`, pinning `playwright-core` exactly; do not
-  add `playwright` for it. Missing browsers download on first boot; in CI run
+- Browser tests: `@e2e-dev/web`, Chromium and Firefox over WebDriver BiDi,
+  no Playwright; do not add `playwright` for it. Missing browsers download
+  on first boot into `E2E_BROWSERS_PATH`, else the user cache; in CI run
   `npx @e2e-dev/web install chromium --with-deps` (pnpm: `pnpm exec e2e-web
   install chromium --with-deps`). Mobile tests: `@e2e-dev/mobile`, pinning
   `agent-device` exactly; each pin moves with its engine release.
@@ -42,7 +43,7 @@ e2e init`; `npx e2e init my-app` scaffolds into a new directory.
 
 The wizard picks the engines (web, mobile, or both) and a model provider (None for tests without AI)
 and offers to install this skill, register the MCP server for your coding
-agent, and install dependencies. `--yes` picks the web engine (Playwright) and Vercel AI
+agent, and install dependencies. `--yes` picks the web engine and Vercel AI
 Gateway, installs the skill in `.agents/skills/` (`.claude/skills/e2e`
 symlinks to it), registers MCP in `.mcp.json`, `.cursor/mcp.json`, and `.codex/config.toml`, skips
 installing dependencies. A flag per question overrides one default:
@@ -215,27 +216,24 @@ start a script that brings them up and serves the app.
 
 | Option | Meaning |
 | --- | --- |
-| `browser` | `'chromium'` (default), `'firefox'`, `'webkit'`, or a `BrowserProvider` leasing hosted browsers over CDP ([`browserRun()`](https://e2e.com/docs/integrations/browser-run) from `@e2e-dev/browser-run`, `kernel()` from `@e2e-dev/kernel`, `notte()` from `@e2e-dev/notte`, `smol()` from `@e2e-dev/smol`, `lightpanda()` from `@e2e-dev/lightpanda`, `moli()` from `@e2e-dev/moli`, `testmuBrowsers()` from `@e2e-dev/testmu/web`, `e2bBrowsers()` from `@e2e-dev/e2b/web`, or your own), which implies chromium and excludes `connect`. Scope `'worker'` (default): one browser per worker slot from `prepare` to `finish`; `'attempt'`: one per attempt, with `reconnectEndpoint`'s limits (`lightpanda()`, `moli()`, and `testmuBrowsers()` are worker scope only; `notte()` is attempt scope only). |
+| `browser` | `'chromium'` (default), `'firefox'` (no WebKit), or a `BrowserProvider` leasing hosted browsers over CDP ([`browserRun()`](https://e2e.com/docs/integrations/browser-run) from `@e2e-dev/browser-run`, `kernel()` from `@e2e-dev/kernel`, `notte()` from `@e2e-dev/notte`, `smol()` from `@e2e-dev/smol`, `testmuBrowsers()` from `@e2e-dev/testmu/web`, `e2bBrowsers()` from `@e2e-dev/e2b/web`, or your own), which implies chromium and excludes `connect`. Scope `'worker'` (default): one browser per worker slot from `prepare` to `finish`; `'attempt'`: a fresh browser per attempt (`smol()`'s default, `notte()`'s only scope), run in that browser's own context, so `app.clearState()` is `UNSUPPORTED_CAPABILITY` and a test with a saved session is a `COLLECTION_ERROR` before any test runs. Downloads work when the provider has `downloads` (`kernel()`, `notte()`, `smol()`, `e2bBrowsers()`), else `UNSUPPORTED_CAPABILITY`; `setInputFiles` on a provider's browser sends the files' bytes (50 MB in all; a directory is `UNSUPPORTED_CAPABILITY`). |
 | `viewport` | `{ width, height }`, default 1280x720; `null` follows the browser window (hosted live view, headed run). On a headed hosted browser (Kernel) use `null` and size the service's screen; a fixed size gives a smaller, unmaximized window. |
-| `connect` | `{ cdpEndpoint }` attaches to a remote Chromium over CDP; `cdpEndpoint` is required, and both it and `reconnectEndpoint` are resolvers `(signal) => url` or `(signal) => ({ endpoint, headers })` for authenticated CDP connections, not strings, else `INVALID_CONFIG` at load. With `reconnectEndpoint` it rides one persistent default context, needs a fresh browser from `cdpEndpoint` every attempt, and reconnects only to the original browser and page. |
-| `headers` | Sent to the app's origin only (scheme, host, and port of `app.url`; Vercel's `x-vercel-protection-bypass`, ngrok's `ngrok-skip-browser-warning`), `agent.act` included; `credentialOrigins: ['https://api.example.com']` adds exact origins for `headers` and `basicAuth`. A request keeps them through its redirects, to any origin. Disables the browser HTTP cache and service workers. |
-| `basicAuth` | `{ username, password }` for a `401` challenge from the app's origin, or one `credentialOrigins` lists (a redirect to `www` or `https:` is another origin; WebKit answers any origin when one is on a default port or an IPv6 host); `password` may be `secrets.get('name')`, resolved per attempt and redacted like any secret, the base64 `Authorization` credential too. |
+| `connect` | `{ cdpEndpoint }` attaches to a remote Chromium over CDP; `cdpEndpoint` is a resolver `(signal) => url`, or `(signal) => ({ endpoint, headers })` for an authenticated CDP connection, not a string, else `INVALID_CONFIG` at load. A dropped connection fails the attempt and is reacquired at the next one. |
+| `headers` | Sent to the app's origin only (scheme, host, and port of `app.url`; Vercel's `x-vercel-protection-bypass`, ngrok's `ngrok-skip-browser-warning`), `agent.act` included; `credentialOrigins: ['https://api.example.com']` adds exact origins for `headers` and `basicAuth`. A request keeps them through its redirects, to any origin. Blocks service workers. |
+| `basicAuth` | `{ username, password }` for a `401` challenge from the app's origin, or one `credentialOrigins` lists (a redirect to `www` or `https:` is another origin); `password` may be `secrets.get('name')`, resolved per attempt and redacted like any secret, the base64 `Authorization` credential too. |
 | `userAgent` | The `User-Agent` every attempt sends and `navigator.userAgent` reports. |
 | `locale`, `timezoneId` | The language (`'de-DE'`: `navigator.language`, `Intl`, `Accept-Language`) and IANA time zone (`'Europe/Berlin'`) every attempt runs in. |
 | `colorScheme`, `reducedMotion` | The `prefers-color-scheme` (`'light'`, `'dark'`, `'no-preference'`) and `prefers-reduced-motion` (`'reduce'`, `'no-preference'`) every page reports to its `@media` rules and `matchMedia`, from first paint. |
 | `initScripts` | Scripts every document runs before the page's own: source, `{ path }`, or a function with no closures. |
 | `testIdAttribute` | What `getByTestId` reads; default `data-testid`. |
-| `screencast` | `{ size?, quality? }` for the engine's own video: frame size (default the viewport's), JPEG quality 0 to 100. |
+| `screencast` | `{ size?, quality? }` for the engine's own video: frame size (default the viewport's), JPEG quality 0 to 100 (Chromium only, default 90). |
 
 - `basicAuth` via `secrets.get()` masks text, not screenshots or model pixels
   showing the password. An undeclared name is `INVALID_CONFIG` at load, as is
   the handle (a reference, not the value) in `app.command.env`, a template
   literal, or `context`; read those from `process.env`.
-- `reconnectEndpoint` or an attempt-scoped provider rides one persistent
-  context without `headers`, `basicAuth`, `userAgent`, `locale`, `timezoneId`, `app.clearState()`, or
-  session state. Recovery never repeats a dispatched operation; exhausting
-  the budget is `OPERATION_TIMEOUT`. Without `reconnectEndpoint` a dropped
-  connection is reacquired at the next attempt.
+- `browser.locator` takes CSS and XPath, alone or in `>>` chains (no
+  `text=` or `nth=`). Limits: [web reference](https://e2e.com/docs/reference/web#limits).
 
 Two browsers, one app declaration:
 
@@ -244,7 +242,7 @@ const app = { url: 'http://127.0.0.1:3000' };
 export default {
   targets: [
     { name: 'chromium', engine: web(), app },
-    { name: 'mobile-webkit', engine: web({ browser: 'webkit', viewport: { width: 390, height: 844 } }), app },
+    { name: 'mobile-firefox', engine: web({ browser: 'firefox', viewport: { width: 390, height: 844 } }), app },
   ],
 } satisfies E2EConfig;
 ```

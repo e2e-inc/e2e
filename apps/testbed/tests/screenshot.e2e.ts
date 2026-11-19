@@ -41,7 +41,7 @@
  * - mask option should work with elementhandle: element handles.
  * - mask option should hide elements based on attr: e2e has no `style` option.
  * - mask option should remove elements based on attr: e2e has no `style` option.
- * - page screenshot animations (all 13 tests): e2e has no `animations` option.
+ * - page screenshot animations (all 13 tests): e2e has no `animations` option; `app.screenshot()` always holds animations where they are.
  * - should throw if screenshot size is too large: e2e has no `fullPage` option.
  * - page screenshot should capture css transform: golden only, of a 3D transform with no stable pixel to check.
  * The `fullPage` option of should work while navigating and should work with Array deleted is dropped: they take the viewport.

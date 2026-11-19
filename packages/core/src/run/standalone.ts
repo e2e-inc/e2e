@@ -10,6 +10,7 @@ import { DebugTrace } from '../internal/debug.ts';
 import { classifyError, InfrastructureError, serializeError, type SerializedError } from '../internal/errors.ts';
 import { realmSlot } from '../internal/realm-slot.ts';
 import { uuidv7 } from '../internal/ids.ts';
+import { abortError } from '../internal/time.ts';
 import { holdSecretRegistry } from '../secrets.ts';
 import { EngineSessions, type EngineSessionsOptions } from './engine-sessions.ts';
 import type { AppProcesses } from './managed-process.ts';
@@ -124,6 +125,8 @@ export async function openWorker<Sessions extends EngineSessions, Extra>(
   const failure = (cause: unknown): void => {
     errors.push(serializeError(classifyError(cause), { phase: 'cleanup', projectRoot: config.projectRoot, redact: processSecrets.redact }));
   };
+  /** What an opening its signal ended fails with: the classified error the signal aborted with (a caller's deadline), else `CANCELLED`. */
+  const givenUp = (): Error => abortError(signal, () => new InfrastructureError('CANCELLED', `opening a host on target "${target.name}" was cancelled`));
   let processes: AppProcesses | undefined;
   let executor: Sessions | undefined;
   let tearingDown: Promise<void> | undefined;
@@ -153,7 +156,7 @@ export async function openWorker<Sessions extends EngineSessions, Extra>(
     });
     const hooks = { ci: config.ci, env: options.env, notice: (message: string) => notice('app', message) };
     processes = await startDeclaredProcesses([target], config.projectRoot, hooks, signal, debug, options.processes);
-    if (signal.aborted) throw new InfrastructureError('CANCELLED', `opening a host on target "${target.name}" was cancelled`);
+    if (signal.aborted) throw givenUp();
     executor = policy.sessions({
       config, target, runId, artifactsRoot: layout.results, sessionStore,
       headed: options.headed, workerSlot: 0, env: { ...prepared?.env, ...options.env },
@@ -161,7 +164,7 @@ export async function openWorker<Sessions extends EngineSessions, Extra>(
       events: { onNotice: (message) => notice(target.name, message) },
     });
     await executor.initEngineOnce();
-    if (signal.aborted) throw new InfrastructureError('CANCELLED', `opening a host on target "${target.name}" was cancelled`);
+    if (signal.aborted) throw givenUp();
   } catch (cause) {
     hostEnd.abort();
     await teardown();

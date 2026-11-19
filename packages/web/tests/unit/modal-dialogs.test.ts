@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { MODAL_ORDER_INIT_SCRIPT } from '../../src/modal-dialogs.ts';
+import { MODAL_ORDER_INIT_SCRIPT } from '../../src/in-page/modal-dialogs.ts';
 
 /** The record's key as the in-page reader spells it (`read-semantics.ts`), so the two literals must agree. */
 const KEY = Symbol.for('e2e.modalDialogOrder');

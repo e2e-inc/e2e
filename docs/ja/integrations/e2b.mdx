@@ -85,8 +85,8 @@ bun add -d e2e @e2e-dev/web @e2e-dev/e2b e2b
 ```
 </CodeGroup>
 
-Playwright イメージからブラウザテンプレートを一度ビルドします。
-`@e2e-dev/web` が使う Playwright バージョンのイメージタグを使い、次の例のようにテンプレートに 4 GB のメモリを割り当ててください。
+Chromium を含む Playwright イメージからブラウザテンプレートを一度ビルドします。
+次の例のようにテンプレートに 4 GB のメモリを割り当ててください。
 
 ```ts title="build-template.ts"
 import { Template, defaultBuildLogger } from 'e2b';

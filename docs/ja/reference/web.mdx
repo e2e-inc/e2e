@@ -5,7 +5,7 @@ description: ブラウザエンジン、そのオプション、エンジンが�
 "twitter:image": "https://e2e.com/docs/images/og/reference/web.png?v=66fee465a4"
 ---
 
-`@e2e-dev/web` はブラウザエンジンです。Playwright を通して Chromium、Firefox、WebKit を操作します。Web ターゲットには `web()` でエンジンを指定します。ブラウザ専用の操作には、このエンジンが提供する組み込みフィクスチャ `browser` を使います。
+`@e2e-dev/web` はブラウザエンジンです。WebDriver BiDi 経由で Chromium と Firefox を操作します。Web ターゲットには `web()` でエンジンを指定します。ブラウザ専用の操作には、このエンジンが提供する組み込みフィクスチャ `browser` を使います。
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
@@ -64,7 +64,6 @@ web({ viewport: { width: 390, height: 844 }, locale: 'de-DE' });
 | エラー | 発生条件 |
 | --- | --- |
 | `INVALID_CONFIG` | `web()` が受け付けないオプション（`url` などアプリのキーも含む）、または `connect` や `basicAuth` 内に未知のキーがある場合。タイプミスと思われる場合は最も近い既知のキー（`viewprt` なら `viewport`）、それ以外はすべてのキーを示します。 |
-| `INVALID_CONFIG` | [永続コンテキスト](#recovering-a-cdp-transport)（`connect.reconnectEndpoint`、または `scope: 'attempt'` のプロバイダー）で `headers`、`basicAuth`、`userAgent`、`locale`、`timezoneId` を指定した場合。 |
 
 #### `browser`
 
@@ -74,13 +73,14 @@ web({ viewport: { width: 390, height: 844 }, locale: 'de-DE' });
 web({ browser: 'firefox' }); // default: 'chromium'
 ```
 
-- `'chromium'`、`'firefox'`、`'webkit'` を指定できます。
-- `BrowserProvider` を渡すと、代わりにホスト型ブラウザをリースします。実行中のワーカースロットごと、または試行ごとに 1 つです（[`WebOptions`](#weboptions)）。Chromium 自体でも、[Lightpanda](/integrations/lightpanda) や [Moli](/integrations/moli) のような別の CDP サーバーでも、エンジンは chromium として CDP 経由で操作します。
-- `scope: 'attempt'` のプロバイダーは永続コンテキストを使います。[CDP 接続の復旧](#recovering-a-cdp-transport)に記載した制限が適用されます。
+- `'chromium'` または `'firefox'` を指定できます。使用するビルドは[ブラウザのインストール](#installing-browsers)にあります。
+- `BrowserProvider` を渡すと、代わりにホスト型ブラウザをリースします。実行中のワーカースロットごとに 1 つ、`scope: 'attempt'` では試行ごとに 1 つです。エンジンは、それぞれを chromium として CDP 経由で操作します。
+- `scope: 'attempt'` では、各試行はリースしたブラウザ自身のコンテキストで動きます。`app.clearState()` は `UNSUPPORTED_CAPABILITY` をスローし、保存済みセッションを使うテストは収集時に `COLLECTION_ERROR` で失敗します。
 - [ホスト型ブラウザ](/browser#hosted-browsers)に `BrowserProvider` の契約と実装例があります。
 
 | エラー | 発生条件 |
 | --- | --- |
+| `INVALID_CONFIG` | `'webkit'` を含め、ほかのブラウザ名を指定した場合。 |
 | `INVALID_CONFIG` | `browser: provider` と `connect` を併用した場合。 |
 
 #### `viewport`
@@ -101,7 +101,8 @@ web({ viewport: { width: 390, height: 844 } }); // default: { width: 1280, heigh
 web({ screencast: { size: { width: 800, height: 450 }, quality: 60 } });
 ```
 
-- `size` は整数のピクセル数で、各辺は 1 以上です。`quality` は整数です。
+- `size` は整数のピクセル数で、各辺は 1 以上です。Firefox ではフレームがビューポートの縦横比を保つため、`size` の内側に収まる大きさになります。
+- `quality` は整数で、未設定の場合は `90` です。Chromium だけに適用され、Firefox は無視します。
 - どの試行を録画するかは、設定の [`video`](/reference/config#video) モードで決まります。
 
 ```ts
@@ -109,7 +110,7 @@ web({ screencast: { size: { width: 800, height: 450 }, quality: 60 } });
 export interface WebScreencastOptions {
   /** Frame size in pixels; default the viewport's, or the window's under `viewport: null`. A smaller size makes a smaller file. */
   readonly size?: ViewportSize;
-  /** JPEG quality of each captured frame, 0 through 100; Playwright's default when unset. */
+  /** JPEG quality of each captured frame, 0 through 100; 90 when unset. Chromium only: Firefox ignores it. */
   readonly quality?: number;
 }
 ```
@@ -120,71 +121,31 @@ export interface WebScreencastOptions {
 
 #### `connect`
 
-ローカルで起動せず、CDP 経由でリモートブラウザに接続します。
+ローカルで起動せず、CDP 経由でリモートの Chromium に接続します。
 
 ```ts
 web({ connect: { cdpEndpoint: async () => 'ws://127.0.0.1:9222' } });
 ```
 
-`reconnectEndpoint` を指定すると永続コンテキストを使います。[CDP 接続の復旧](#recovering-a-cdp-transport)を参照してください。
+- `cdpEndpoint(signal)` は、ワーカーが初めてブラウザを必要とした時点で解決されます。接続が切れた後に試行が始まるときにも、もう一度解決されます。
+- 各試行は、リモートブラウザ上に新しいブラウザコンテキストを取得します。コンテキストを作成できないホストでは、試行が `UNSUPPORTED_CAPABILITY` で失敗します。
+- `context: 'existing'` は、コンテキストとタブを作成せず、ブラウザがすでに表示しているページを操作します。Electron アプリなど、どちらも作成できないホスト向けです。`app.open()` はそのページを遷移させ、試行はそのページの Cookie とストレージを共有し、ターゲットは 1 つのワーカーで動きます。試行が終わると、そのページが開いたタブを閉じ、試行がブラウザに設定した内容を元に戻します。
+- 接続が切れると試行は失敗し、次の試行が `cdpEndpoint` を通して再び接続します。
 
-どちらのリゾルバーも、CDP ハンドシェイクを認証するために `CdpTarget` として `{ endpoint, headers }` を返せます。このヘッダーは、アプリに送る `web({ headers })` とは別です。
+`cdpEndpoint` は、CDP ハンドシェイクを認証するために `CdpTarget` として `{ endpoint, headers }` を返せます。このヘッダーは、アプリに送る `web({ headers })` とは別です。
 
 ```ts
-interface WebConnectOptions {
-  cdpEndpoint(signal: AbortSignal): string | CdpTarget | Promise<string | CdpTarget>;
-  reconnectEndpoint?(signal: AbortSignal): string | CdpTarget | Promise<string | CdpTarget>;
+export interface WebConnectOptions {
+  readonly cdpEndpoint: (signal: AbortSignal) => string | CdpTarget | Promise<string | CdpTarget>;
+  readonly context?: 'new' | 'existing';
 }
 ```
 
 | エラー | 発生条件 |
 | --- | --- |
-| `INVALID_CONFIG` | 設定の読み込み時に、`connect` に `cdpEndpoint` がない、または文字列で指定されている場合。`connect` と `browser` プロバイダーの併用も該当します。 |
+| `INVALID_CONFIG` | 設定の読み込み時に、`connect` に `cdpEndpoint` がない、または文字列で指定されている場合。`connect` と `browser` プロバイダーの併用、chromium 以外の `browser`、`'new'` と `'existing'` 以外の `context` も該当します。 |
 
-<a id="recovering-a-cdp-transport" />
-
-##### CDP 接続の復旧
-
-`connect.reconnectEndpoint(signal)` を指定すると、CDP 接続が切れた後に同じリモートブラウザへ再接続します。分離されたコンテキストを使う場合は省略してください。
-
-リモートブラウザには次の要件があります。
-
-- リトライを含め、各試行には `cdpEndpoint` から新しい専用のブラウザを取得する必要があります。1 つのブラウザを長期間共有してスイートを実行することはできません。
-- リモートブラウザに存在してよいのは、デフォルトのコンテキストだけです。
-- 試行終了時に、ホストがブラウザを削除する必要があります。エンジンのクリーンアップは接続を切り離すだけで、ホストのブラウザを終了しません。
-- 試行の最初のページは、ブラウザ自身の最初のタブを `about:blank` に遷移させたものです。その隣に 2 つ目のタブは作りません。`app.restart` などで後から開くページは、新しいタブになります。
-
-復旧は次のように行います。
-
-- 切断後の次の操作で、その操作のタイムアウトと中断シグナルの範囲内で `reconnectEndpoint` を 1 回呼びます。リゾルバーは既存のブラウザのエンドポイントを返す必要があります。
-- エンジンは永続的なデフォルトコンテキストの ID と、アクティブなタブのターゲット ID を確認します。デフォルトコンテキストの ID を公開しないブラウザは拒否します。アクティブなタブがない、またはコンテキストが異なる場合は、試行が失敗します。同じ URL でも代わりのタブを選ぶことはありません。ほかのタブもターゲット ID で探し、なくなったものは除外します。
-- エンジンは各 CDP 接続を利用可能にする前に、機密フィールドのマスク処理を設定します。Playwright のバージョンに互換性がない場合、画像を公開せず接続を失敗させます。
-- 元のページのフレームには、閉じたシャドウ DOM を追跡するフックが残っている必要があります。既存の閉じたルートは、アプリを再読み込みしないと追跡を復旧できません。マスク用のクエリは、追跡されていないドキュメントを拒否します。
-- エンドポイントの解決、CDP 接続、準備、操作の送信は、1 つのタイムアウトを共有します。同時に待っている別の呼び出しをキャンセルしても、復旧を始めた操作はキャンセルしません。復旧を開始した操作がキャンセルされると、共有する復旧処理も失敗します。
-
-| エラー | 発生条件 |
-| --- | --- |
-| `ENGINE_FAILURE` | 切断中に、閉じたシャドウ DOM のフックなしでドキュメントが読み込まれた場合。 |
-| `OPERATION_TIMEOUT` | エンドポイントの解決、接続、準備、操作の送信で、共通のタイムアウトを使い切った場合。 |
-| `CANCELLED` | 呼び出し元または試行がキャンセルされた場合。 |
-
-復旧後の状態は次のとおりです。
-
-- ページの未保存の状態、ストレージ、エージェントの台帳は維持します。ダイアログとルートのハンドラーを再登録します。
-- 動画の記録を再開します。切断中に失われた部分は復元しません。
-- 送信済みの操作は再実行しません。
-- 古いノード参照は消去します。観測結果に基づく `tapAt` と `doubleTapAt`、観測のルートを対象とするスワイプ、フォーカス先へのエンジンのキーボード入力は、新しい観測を取得するまで再開できません。
-- 復旧前に開始した観測やロケーターの読み取りは、接続の変更後に参照を公開できません。各試行が自身の接続と録画を所有するため、遅れて完了したクリーンアップが後の試行を変えることはありません。
-- 決定論的な `browser.mouse` と `browser.keyboard` は、エージェントの観測なしで引き続き使えます。入力はテストコードが管理するため、操作前に `browser.evaluate` で現在の位置やフォーカスを確認できます。
-- `surfaceOf(engine)` を使うコードは、復旧後にアクセサーを読み直す必要があります。保持していた Playwright オブジェクトは、切断済みの接続に属しています。
-
-`scope: 'attempt'` の `browser` プロバイダーも、同じ永続コンテキストと制限を使います。リースの `cdpEndpoint` が試行のブラウザを用意し、`reconnectEndpoint`（なければ再び `cdpEndpoint`）がそこへ再接続します。プロバイダーの契約上、リースは新しいものなので、エンジンはコンテキストを過去の試行と比較しません。ホスト型サービスは同じスナップショットからブラウザを復元することがあり、新しいブラウザでも同じコンテキスト ID になるためです。
-
-ファイルをまたいで 1 回のサインインを再利用するには、分離コンテキストを使い（`reconnectEndpoint` なし、プロバイダーの `scope: 'attempt'` なし）、[セットアップテストで 1 回サインイン](/authentication#reuse-authenticated-sessions)してください。認証状態は共有ブラウザではなく、保存済みセッションで引き継ぎます。
-
-<Note>
-永続コンテキストは `headers`、`basicAuth`、`userAgent`、`locale`、`timezoneId`（[オプション](#options)を参照）、`app.clearState`、セッション状態の保存と復元に対応しません。`app.clearState` は `UNSUPPORTED_CAPABILITY` で失敗します。`app.restart` は引き続き使えます。
-</Note>
+ファイルをまたいで 1 回のサインインを再利用するには、[セットアップテストで 1 回サインイン](/authentication#reuse-authenticated-sessions)してください。認証状態は共有ブラウザではなく、保存済みセッションで引き継ぎます。
 
 #### `headers`
 
@@ -203,7 +164,7 @@ web({ headers: { 'x-preview-token': process.env.PREVIEW_TOKEN ?? '' } });
 | `INVALID_CONFIG` | `user-agent` と [`userAgent`](#useragent)、または `accept-language` と [`locale`](#locale) を併用した場合。 |
 
 <Note>
-`headers` はリクエストのルーティングを有効にするため、ブラウザの HTTP キャッシュが無効になり、Service Worker がブロックされます。
+`headers` は Service Worker をブロックします。
 </Note>
 
 #### `basicAuth`
@@ -231,10 +192,6 @@ export interface WebBasicAuth {
 | エラー | 発生条件 |
 | --- | --- |
 | `INVALID_CONFIG` | ユーザー名に `:` があるか、未知のキーがある場合。 |
-
-<Note>
-WebKit は、スキームのデフォルトポート（`https://staging.example.com`）や IPv6 ホストを持つオリジンに、認証情報の送信先を限定できません。アプリのオリジンまたは `credentialOrigins` のいずれかが該当すると、Playwright のデフォルトと同じく、どのオリジンからの `401` にも応答します。
-</Note>
 
 <Warning>
 シークレットの保護対象はテキストだけです。ページがパスワードを画面に表示した場合、スクリーンショットやモデルに送る画像ではマスクされません（[セキュリティルール](/reference/security#secrets-in-engine-options)）。
@@ -291,7 +248,7 @@ web({ timezoneId: 'Europe/Berlin' }); // default: the machine's
 
 #### メディアのエミュレーション
 
-`web({ colorScheme, reducedMotion })` は、Playwright の同名のコンテキストオプションと同じく、各試行のすべてのページが報告するメディア特性を設定します。`browser.emulateMedia(media)` は、1 回の試行について変更します。
+`web({ colorScheme, reducedMotion })` は、各試行のすべてのページが報告するメディア特性を設定します。`browser.emulateMedia(media)` は、1 回の試行について変更します。
 
 ```ts
 web({ colorScheme: 'dark', reducedMotion: 'reduce' }); // default: the browser's own
@@ -299,11 +256,10 @@ await browser.emulateMedia({ colorScheme: 'light' });
 ```
 
 - ページの `@media` ルールと `matchMedia` は、最初の描画からこの値を読みます。
-- 永続コンテキストでも指定できます。エンジンが、開く各ページに設定します。
 - `emulateMedia` は、開いているすべてのタブと今後開くタブに、試行の残りの期間適用します。`app.restart()` と `app.clearState()` をまたいでも維持します。
 - 最初のページ遷移前にも使えるため、次の `app.open` はその値で読み込みます。
 - 省略した特性は現在の値を維持します。
-- アプリ自身が開くタブには、永続コンテキストでも、タブが現れた時点でテストによる変更を適用します。そのため、読み込み時のスクリプトは設定ファイルの値を読むことがあります。
+- アプリ自身が開くタブには、タブが現れた時点でテストによる変更を適用します。そのため、読み込み時のスクリプトは設定ファイルの値を読むことがあります。
 
 ```ts
 /** User preferences a page reads through `@media` rules and `matchMedia`. */
@@ -319,6 +275,7 @@ export interface WebMedia {
 | --- | --- |
 | `INVALID_CONFIG` | `web()` で `WebMedia` にない特性や値を指定した場合。 |
 | `INVALID_ARGUMENT` | `emulateMedia` で `WebMedia` にない特性や値を指定した場合。 |
+| `UNSUPPORTED_CAPABILITY` | Firefox で、`emulateMedia` に `reducedMotion` を指定した場合。代わりに `web({ reducedMotion })` を設定してください。 |
 
 #### 初期化スクリプト
 
@@ -338,13 +295,43 @@ await app.open('/raffle');
 export type WebInitScript = string | { readonly path: string } | (() => unknown);
 ```
 
+#### 制限
+
+| 制限 | 理由 |
+| --- | --- |
+| WebKit には対応しません | WebKit には WebDriver BiDi のエンドポイントがありません。 |
+| `connect` とブラウザプロバイダーは Chromium 専用です | どちらも CDP 経由で接続します。 |
+| `connect.reconnectEndpoint` は削除されました | 切れた接続を、試行の途中で復旧することはありません。次の試行が再び接続します。 |
+| `connect.context: 'existing'` では、`app.clearState()` が `UNSUPPORTED_CAPABILITY` をスローし、保存済みセッションは拒否され、ターゲットは 1 つのワーカーで動きます | テストは、ブラウザが表示している 1 つのページを、ブラウザ自身のコンテキストで操作します。 |
+| ブラウザが表示しているタブが 2 つある場合、または複数のタブがあってどれも表示されていない場合、`attachBrowser` と `connect.context: 'existing'` は `UNSUPPORTED_CAPABILITY` をスローします | ブラウザが報告する情報からは、どのタブを操作すべきか分かりません。Electron は `show: false` のウィンドウも表示中として報告します。 |
+| `attachBrowser` と `connect.context: 'existing'` では、開いたまま残したページに、初期化スクリプトなどのスクリプトがそこで行った変更が、ページが遷移するまで残ります | ページはホストのもので、再読み込みは行われません。 |
+| `scope: 'attempt'` のプロバイダーでは、`app.clearState()` が `UNSUPPORTED_CAPABILITY` をスローし、保存済みセッションは `COLLECTION_ERROR` になります | 試行は新しいブラウザ自身のコンテキストで動きます。どちらも、そのコンテキストを置き換えてしまう操作です。 |
+| セレクターは CSS と XPath で、単独でも `>>` で連結しても使えますが、`text=` や `nth=` のセレクターエンジンはありません | セレクターはページ自身が実行します。 |
+| Chromium では、`noopener` のタブ（`target="_blank"` のリンク）を開くアクションが、新しいタブのサーバーが応答するまで待ちます | chromium-bidi は、新しいタブの作成が終わるまですべてのメッセージを保留し、タブの作成は最初のレスポンスを待ちます（[crbug 372842894](https://crbug.com/372842894)）。 |
+| Firefox では、`browser.emulateMedia({ reducedMotion })` が `UNSUPPORTED_CAPABILITY` をスローします | Firefox が実行時に変更するのは `prefers-color-scheme` だけです。代わりに `web({ reducedMotion })` を設定してください。 |
+| Firefox では、HTML5 のドラッグを開始するドラッグ（`draggable` 要素）が `UNSUPPORTED_CAPABILITY` をスローします | [Firefox bug 1515879](https://bugzilla.mozilla.org/show_bug.cgi?id=1515879): Firefox はどこにもドロップしません。ポインターによるドラッグは動作します。 |
+| Firefox では、`route.continue({ url })` が `UNSUPPORTED_CAPABILITY` をスローします | [Firefox bug 2014825](https://bugzilla.mozilla.org/show_bug.cgi?id=2014825): ページは、書き換えた URL の読み込みに失敗します。`route.fulfill` を使ってください。 |
+| Firefox では、`route.fulfill` がリダイレクトで応答したリクエストに対する `waitForResponse` は、解決しません | Firefox は、そのレスポンスを報告しません。リダイレクト先の URL を待ってください。 |
+| Firefox では、`waitForResponse` は、ヘッダーが届いた時点ではなく、レスポンスの本文が始まった時点で解決します | Firefox がレスポンスを報告するのは、その時点になってからです。 |
+| Firefox では、`MediaPlayPause` など、WebDriver が値を定義していないキーが `UNSUPPORTED_CAPABILITY` をスローします | Chromium は、これらのキーを CDP 経由で押します。 |
+| Firefox では、ウィンドウを広げても収まらないビューポートが `UNSUPPORTED_CAPABILITY` をスローします | Firefox は、ウィンドウの内側でしかポインター入力を受け付けません。ヘッドレスのウィンドウは縦横それぞれ 16384 ピクセルまで、headed のウィンドウはディスプレイの大きさまで広がります。 |
+| Chromium では、`/favicon.ico` へのリクエストが、対応するルートを通らずにネットワークへ送られます | chromium-bidi は、このリクエストのイベントを報告しません。 |
+| Chromium では、フォーム内にディスク上のファイルを含む本文、またはストリーミングされる本文を持つリクエストのルートは、`route.request.postData` を受け取らず、`route.fetch()` は `ACTION_FAILED` をスローします | Chromium は、その部分のバイト列を報告しません。`route.continue()` は、その場合も送信します。 |
+| Firefox では、本文が 20 MB を超える、またはバイナリデータで 15 MB を超えるリクエストのルートは、`route.request.postData` を受け取らず、`route.fetch()` は `ACTION_FAILED` をスローします | Firefox がリクエスト本文を保持するのは、保存時の形式で 20 MB までで、バイナリデータは base64 として保存します。`route.continue()` は、その場合も本文全体を送信します。 |
+| Firefox では、[アプリのログ](/debugging#traces)が、ログに出力されたイベントを `object` と表示し、クラスのインスタンスをクラス名なしで表示します | Firefox は、イベントについては何も報告せず、インスタンスについてはフィールドだけを報告します。 |
+| Firefox では、動画がページの最後の再描画の 1 つ前で終わることがあり、開始から約 2 フレーム以内に停止した動画にはフレームが含まれません | Firefox は独自のクロックでページを録画し、取得した内容を何も報告しません。 |
+| Firefox では、初期化スクリプトが見るのは、同一オリジンのフレームの最初の空のドキュメント（`about:blank`）であり、フレームがその後に読み込むページではありません | Firefox は、そのドキュメントの `window` をページでも使い続け、スクリプトを再実行しません。スクリプトが `window` に設定した内容は残ります。 |
+| Firefox では、`browser.evaluate` が複数回実行されることがあります。`browser.newTab()` で開いたタブが最初のページを読み込むときにまだ実行中のもの、または別サイトへのページ遷移がコミットされる間に開始したものが該当します | Firefox は、コマンドの送信先だった空のドキュメント（新しいタブの最初のドキュメント、新しいサイトのプロセスが最初に持つドキュメント）がページに置き換わると、コマンドを再送します。`waitForURL` などで、先にページを待ってください。 |
+| ブラウザプロバイダーでは、`setInputFiles` はファイルのバイト列を合計 50 MB までページに送り、ディレクトリには `UNSUPPORTED_CAPABILITY` をスローします。ダウンロードは、プロバイダーが提供しない場合に同じエラーをスローします | ブラウザのファイルシステムは、別のマシンのものです。 |
+| 保存済みセッションは、JSON でも `Date` でもない IndexedDB の値に対して `UNSUPPORTED_CAPABILITY` をスローします | `Blob` やクラスインスタンスは復元できません。 |
+
 ### browser フィクスチャ
 
 `browser` はブラウザ全体を表し、1 つのアクティブなタブを表示します。
 
 - ページを読む操作やアクションは、アクティブなタブに対して行います。`goto`、`reload`、`back`、`forward`、`url`、`title`、`waitForURL`、`locator`、`frameLocator`、`evaluate`、`waitForResponse`、`waitForDownload`、`keyboard`、`mouse`、`expect(browser)` のマッチャー、すべての `screen` クエリが対象です。
 - ブラウザ全体に属する操作は、すべてのタブに適用します。`cookies`、`setCookies`、`clearCookies`、`route`、`unroute`、`unrouteAll`、`onDialog`、`addInitScript` が対象です。
-- `setViewport` は、アクティブなタブとそれ以降に開くタブのサイズを設定します。
+- `setViewport` は、アクティブなタブと、それ以降にアクティブになるタブのサイズを設定します。
 - [`emulateMedia`](#media-emulation) は、すべての既存タブと今後のタブのメディア特性を変更します。
 - `target="_blank"` のリンクや `window.open` からアプリが開くタブは、バックグラウンドで開きます。`waitForPopup` または `activate` で別のタブをアクティブにするまで、現在のタブは変わりません。[タブ](#tabs)を参照してください。
 - `locator` と `frameLocator` を除くすべての `browser` 呼び出しは、`browser.<method>` ステップとして記録します。この 2 つはページに触れずにロケーターを作り、それを使うアクションやアサーションがステップになります。
@@ -405,11 +392,13 @@ await browser.goto('/dashboard', { waitUntil: 'networkidle' }); // default: 'loa
 | --- | --- |
 | `POLICY_DENIED` | URL のスキームが `http:` または `https:` 以外の場合。`about:blank` は許可されます。 |
 | `APP_URL_REQUIRED` | `app.url` のないターゲットで相対 URL を指定した場合。 |
-| `ACTION_FAILED` | ページ遷移が失敗した場合。 |
+| `INVALID_ARGUMENT` | `waitUntil` が 3 つのいずれでもない場合。 |
+| `ACTION_FAILED` | ページが時間内に読み込まれなかったか、[ルート](#route)がリクエストを中断した場合。 |
+| `ENGINE_FAILURE` | ブラウザが URL を読み込めなかった場合。接続の拒否、不明なホスト、内容のないレスポンスが該当します。 |
 
 #### `reload`、`back`、`forward`
 
-`reload` は現在のドキュメントを再読み込みします。`back` と `forward` はブラウザ履歴を 1 つ戻る、または進む操作です。いずれもドキュメントの読み込みを待ちます。戻る・進むキャッシュからの復元では、読み込み済みのドキュメントを再利用することがあります。アプリの内容を待つには、ロケーターとアサーションを使ってください。
+`reload` は現在のドキュメントを再読み込みします。`back` と `forward` はブラウザ履歴を 1 つ戻る、または進む操作で、移動先の履歴がなければ何もしません。いずれもドキュメントの読み込みを待ちます。Chromium と Firefox はどちらも戻る・進むキャッシュを無効にして起動するため、`back` と `forward` はページをもう一度読み込みます。`connect` またはブラウザプロバイダーを通して接続したブラウザは、読み込み済みのドキュメントをこのキャッシュから復元することがあります。アプリの内容を待つには、ロケーターとアサーションを使ってください。
 
 ```ts
 await browser.reload();
@@ -418,7 +407,8 @@ await browser.back({ timeout: 10_000 });
 
 | エラー | 発生条件 |
 | --- | --- |
-| `ACTION_FAILED` | ページ遷移が失敗した場合。 |
+| `ACTION_FAILED` | ページが時間内に読み込まれなかった場合。 |
+| `ENGINE_FAILURE` | ブラウザがページを読み込めなかった場合。 |
 
 #### `url`、`title`
 
@@ -447,23 +437,25 @@ await browser.waitForURL(/\/orders\/\d+$/, { timeout: 15_000 });
 
 #### `locator`
 
-Playwright のセレクターから、Web 専用のロケーターを作ります。
+CSS または XPath のセレクターから、Web 専用のロケーターを作ります。
 
 ```ts
-const conditions = browser.locator(
-  '[data-testid="row"] >> nth=2 >> [data-testid="conditions"] > div',
-);
+const conditions = browser.locator('[data-testid="row"]').nth(2).getByTestId('conditions');
 ```
 
-- セレクターはデフォルトで CSS です。`xpath=` または先頭の `//` で XPath になり、`>>` で連結できます。そのため、例では CSS の検索範囲を 1 行に限定しています。
+- セレクターはデフォルトで CSS です。`xpath=`、先頭の `/`、先頭の `..` のいずれかで XPath になり、`css=` で CSS を強制します。
+- CSS は、開いたシャドウルートの中にも届きます。
+- `>>` は CSS と XPath の部分を連結し、各部分は直前の部分が一致した要素の内側で照合します。`text=` や `nth=` のセレクターエンジンはありません。代わりに、例のように `nth` と screen クエリを連結してください。
+- 部分の中の `:scope` は、直前の部分が一致した要素です。Playwright とは異なり、その兄弟要素には届かないため、`:scope + p` は何にも一致しません。
+- `:scope` は `:is()` と `:not()` の外に書いてください。これらの内側に書くと、部分の末尾を除き、その複合セレクターは `:scope` の要素だけに一致します。`p:not(:scope) > button` は何にも一致しません。
 - 別の要素を内包する要素には、`filter({ has })` を使います。
 
 | エラー | 発生条件 |
 | --- | --- |
-| `INVALID_LOCATOR` | 空のセレクター、または最後の部分より前の `*` キャプチャ（`*css=article >> text=Hello`）。 |
+| `INVALID_LOCATOR` | 空のセレクター、または有効な CSS でも XPath でもないセレクター。 |
 
 <Note>
-すべての `screen` クエリは、スコープとその下にページが作った閉じたシャドウルートを検索します。ロール、名前、テキスト、ラベル、属性の照合には Playwright のルールを使い、各ノードは 1 回だけ取得します。観測ツリーに載る閉じたルート内のコントロールも解決でき、アクションと読み取りを行えます。`locator`、`frameLocator`、`filter({ hasText })` は Playwright と同じ範囲だけを検索し、閉じたルートには入りません。詳細は[ブラウザガイド](/browser#shadow-dom)を参照してください。
+すべての `screen` クエリは、スコープとその下にページが作った閉じたシャドウルートを検索します。ロール、名前、テキスト、ラベル、属性の照合には Playwright のルールを使い、各ノードは 1 回だけ取得します。観測ツリーに載る閉じたルート内のコントロールも解決でき、アクションと読み取りを行えます。`locator`、`frameLocator`、`filter({ hasText })` は、閉じたルートには入りません。詳細は[ブラウザガイド](/browser#shadow-dom)を参照してください。
 </Note>
 
 #### `frameLocator`
@@ -514,8 +506,8 @@ const title = await browser.evaluate<string>('document.title');
 | エラー | 発生条件 |
 | --- | --- |
 | `INVALID_ARGUMENT` | `arg` または戻り値が [`JsonValue`](#jsonvalue) ではない場合。`DOMRect` や要素などのクラスインスタンスは該当しません。`rect.toJSON()` または必要なフィールドを返してください。 |
-| `EVALUATE_FAILED` | 評価したコードが例外をスローした場合、またはページがエンジンに必要な `Map` などの JavaScript 組み込みを置き換えた場合。エラーにメッセージを含めます。 |
-| `ACTION_FAILED` | Playwright のタイムアウト。 |
+| `EVALUATE_FAILED` | 評価したコードが例外をスローした場合。エラーにメッセージを含めます。 |
+| `ACTION_FAILED` | 評価が時間内に完了しなかった場合。 |
 | `ENGINE_FAILURE` | ページが閉じたか、コンテキストが失われた場合。 |
 
 #### `route`
@@ -532,6 +524,8 @@ await browser.route('**/api/quote', async (route) => {
 
 - パターンは文字列または `RegExp` で、どちらも URL 全体と照合します。文字列の `*` はパスの 1 セグメント内、`**` は `/` をまたいで一致し、`?` は任意の 1 文字、`\` は次の文字をエスケープします。`unroute` と `waitForResponse` も同じパターンを使います。
 - ルートは `app.restart()`、`app.clearState()`、セッションの復元をまたいでも残ります。
+- ルートを設定している間は、ブラウザの HTTP キャッシュを迂回します。そのため、以前のページが読み込んだリソースもルートを通ります。Firefox では、現在のドキュメントがすでに読み込んだ画像やスタイルシートは、リクエストなしで再利用されます。ページを開く前にルートを追加してください。
+- `route.request.postData` は、本文のバイト列を UTF-8 としてデコードしたものです。テキストでない本文は、U+FFFD を含む文字列になります。`route.fetch()` は、元のバイト列をそのまま送ります。
 - 新しく登録したルートから順に実行します。
 - ハンドラーは `fulfill`、`continue`、`fallback`、`abort` のいずれかで、必ず 1 回だけ処理を決定します。それぞれの説明は下の `WebRoute` にあります。
 - `continue` の URL は `goto` と同じルールで検証します。`continue` で `undefined` にしたヘッダーは、リダイレクト時も削除します。
@@ -627,7 +621,7 @@ const response = await browser.waitForResponse('**/api/orders');
 expect(response.status).toBe(201);
 ```
 
-- 期限が制限するのは、一致するレスポンスを待つ時間です。ヘッダーが届いた時点で解決します。
+- 期限が制限するのは、一致するレスポンスを待つ時間です。ヘッダーが届いた時点で解決します。Firefox では、本文が始まった時点です。
 - `body()`、`text()`、`json()` は、それぞれ独自の時間上限で本文を待ちます。`config.actionTimeout` を使い、テストの期限を上限とします。
 - `url`、`status`、`headers` は常に読めます。
 - 本文が実際に空なら、`body()` は空の `Buffer`、`text()` は `''` を返し、`json()` は拒否します。
@@ -635,7 +629,7 @@ expect(response.status).toBe(201);
 | エラー | 発生条件 |
 | --- | --- |
 | `INVALID_ARGUMENT` | パターンに述語関数を渡した場合。 |
-| `ACTION_FAILED` | 期限内に一致するレスポンスがなかった場合。`body()`、`text()`、`json()` では、期限時点でも本文の受信が続いている場合や、ブラウザが本文を読めなかった場合も、空文字列の代わりにこのエラーになります。後者には、宣言された `Content-Length` に達する前の接続リセット、ページが中断したリクエスト、ブラウザが本文を保持しないリダイレクトが含まれます。 |
+| `ACTION_FAILED` | 期限内に一致するレスポンスがなかった場合。`body()`、`text()`、`json()` では、期限時点でも本文の受信が続いている場合や、ブラウザが本文を読めなかった場合も、空文字列の代わりにこのエラーになります。後者には、宣言された `Content-Length` に達する前の接続リセット、ページが中断したリクエスト、20 MB を超える本文、ブラウザが本文を保持しないリダイレクトが含まれます。 |
 
 ```ts
 export interface WebResponse {
@@ -672,10 +666,13 @@ await browser.setCookies([{ url: 'http://localhost:3000', name: 'tz', value: 'UT
 
 - 相対 `url` は、`goto` と同じくベース URL を基準に解決します。
 - `domain` 形式では、スキームはベース URL に従い、先頭の `.` は除去します。
+- 完全な `url` と `domain` には `app.url` が要らないため、どちらも [`attachBrowser`](#attachbrowser) で使えます。
 
 | エラー | 発生条件 |
 | --- | --- |
 | `POLICY_DENIED` | 対象をパースできないか、禁止スキームの場合。何も設定しません。 |
+| `APP_URL_REQUIRED` | `app.url` のないターゲットで相対 `url` を指定した場合。何も設定しません。 |
+| `INVALID_ARGUMENT` | Cookie に `url` も `domain` もない場合。何も設定しません。 |
 
 ```ts
 export interface CookieFields {
@@ -784,8 +781,8 @@ await screen.getByRole('textbox', 'Verification code').fill(code);
 - `tabs()` は開いた順にタブを返し、試行中は同じタブに同じ `BrowserTab` を返します。最初のページを読み込んだ時点で一覧に加わるため、1 つの操作で 2 タブが開くと、ページの読み込み順に並びます。ページを持たないタブは一覧に載りません。ダウンロード、`mailto:` アドレス、内容のないレスポンスへ向かう `target="_blank"` リンクなどが該当します。
 - `tab.activate()` は、ほかのタブを閉じずにそのタブをアクティブにします。`tab.close()` はタブを閉じ、アクティブだった場合は次のタブがアクティブになるまで待ちます。
 - `newTab()` は、同じ Cookie とストレージを持つ同一ブラウザコンテキストに空のタブを開き、アクティブにします。`goto` で遷移してください。
-- Chromium では、読み込み前に開き元が閉じたタブも一覧に載ります。テストが `surfaceOf(engine)` で開いたページは載りません。
-- スクリーンキャストはアクティブなタブを記録し、切り替わるごとに動画セグメントを分けます。自分自身を閉じるタブは、録画を保存する前にページが閉じるため、セグメントを残しません。プロバイダー自身の録画は、すべてのタブを対象にします。
+- 読み込み前に開き元が閉じたタブも一覧に載ります。
+- スクリーンキャストはアクティブなタブを記録し、切り替わるごとに動画セグメントを分けます。自分自身を閉じるタブは、録画を保存する前にページが閉じると、セグメントを失います。プロバイダー自身の録画は、すべてのタブを対象にします。
 
 ```ts
 /** One tab of the browser the attempt drives. */
@@ -817,12 +814,12 @@ const file = await browser.waitForDownload(() =>
 ```
 
 - ファイルを `download` アーティファクトとして登録し、相対 `path`、ランナー側の `absolutePath`、`suggestedFilename` を返します。
-- ホスト型ブラウザの場合も、ファイル API で内容を調べるには `absolutePath` を使います。
-- ホスト型ブラウザでは、プロバイダーの [`downloads`](/browser#downloads-on-the-provider) を通してファイルを取得します。
+- ファイル API で内容を調べるには `absolutePath` を使います。
 - 待機時間には、トリガー自体の実行時間も含みます。
 
 | エラー | 発生条件 |
 | --- | --- |
+| `UNSUPPORTED_CAPABILITY` | ブラウザが、[`downloads`](/browser#downloads-on-the-provider) のないブラウザプロバイダーのものである場合。 |
 | `ACTION_FAILED` | 時間内にダウンロードが完了しなかった場合。トリガーは時間内に解決したもののダウンロードを開始しなかった場合は、`no download started within <n>ms; the trigger resolved after <m>ms` になります。 |
 
 タイムアウト時にトリガーがまだ動いていれば、ステップのタイムアウトになります。トリガーが例外をスローした場合は、そのエラーで失敗します。
@@ -840,7 +837,7 @@ await browser.keyboard.press('Escape');
 await browser.keyboard.type('hello');
 ```
 
-- `type(text)` が入力するのは通常のテキストだけで、`Secret` は使えません。
+- `type(text)` が入力するのは通常のテキストだけで、`Secret` は使えません。絵文字、アクセント付きの文字、タブなど、キーで入力できない文字は、フォーカスのあるフィールドに挿入します。カスタムウィジェットなど、フォーカスのある要素がキーを受け付けてもテキストを受け付けない場合、呼び出しは失敗します。ボタンやリンクにフォーカスがある場合、または何にもフォーカスがない場合、その文字は入力しません。そこでキーを押しても何も入力されないのと同じです。`keyboard.down` で Shift を押したままでも、テキストは書かれたとおりに入力されます。
 - 対象がある場合は、`locator.press` と `locator.fill` を優先してください。
 - 各メソッドの説明は [`Browser`](#browser-interface) にあります。
 
@@ -855,13 +852,57 @@ await browser.mouse.move(320, 240);
 await browser.mouse.up();
 ```
 
-`wheel` を含む各メソッドの説明は [`Browser`](#browser-interface) にあります。
+ビューポート外の座標は `INVALID_ARGUMENT` をスローします。`wheel` を含む各メソッドの説明は [`Browser`](#browser-interface) にあります。
+
+### 関数
+
+| 関数 | 戻り値 |
+| --- | --- |
+| [`attachBrowser`](#attachbrowser) | `Promise<AttachedBrowser>` |
+
+#### `attachBrowser`
+
+`attachBrowser(cdpEndpoint: string, options?: AttachBrowserOptions)` は、テストの外で、すでに動いている Chromium に接続します。テストが受け取るものと同じ `browser` と `screen` を返します。
+
+```ts title="scripts/sign-in.ts"
+import { attachBrowser } from '@e2e-dev/web';
+
+await using attached = await attachBrowser('http://127.0.0.1:9222');
+const { browser, screen } = attached;
+await browser.goto('http://localhost:3000/login');
+await screen.getByLabel('Email').fill('qa@example.com');
+await screen.getByRole('button', 'Sign in').tap();
+```
+
+- `cdpEndpoint` は、DevTools の HTTP エンドポイント、またはその `ws://` URL です。Chromium 専用です。
+- macOS では、Chrome を `--use-mock-keychain` 付きで起動してください。付けないと、Chrome for Testing がキーチェーンのプロンプトを待ち、ページを読み込まないことがあります。
+- ブラウザがデフォルトのコンテキストで表示しているタブを操作します。タブが 1 つだけならそのタブ、複数あれば表示中のタブです。開いているタブがなければ、1 つ開きます。
+- 相対 URL には基準がありません。`browser.goto` には完全な URL を渡してください。
+- `close()` は接続を切り離します。ブラウザは、タブ、Cookie、ストレージを保ったまま動き続けます。閉じるのは、接続時に開いたタブと、接続中にページが開いたタブだけです。接続がブラウザに設定した内容（ビューポート、メディア、権限）は元に戻します。`close()` は冪等で、`await using` でも実行され、失敗があれば、それらをまとめた `AggregateError` をスローします。
+- `timeout` は、接続とすべての操作を合わせた時間を制限します。使い切ると、それぞれが `TEST_TIMEOUT` で失敗します。
+- `app` はないため、タブの再起動、状態のクリア、セッションの保存を行うものはありません。
+
+| オプション | 型 | デフォルト |
+| --- | --- | --- |
+| `testIdAttribute` | `string` | `'data-testid'` |
+| `timeout` | `number` | `120000` |
+| `signal` | `AbortSignal` | - |
+
+- `timeout` は、すべての操作を合わせた時間上限をミリ秒で指定します。接続の時点から数えます。1 から 2147483647 までの整数で指定します。それ以外の値は `INVALID_ARGUMENT` をスローします。
+- `signal` は、接続とすべての操作をキャンセルします。その場合も `close()` は接続を切り離します。
+
+```ts
+interface AttachedBrowser extends AsyncDisposable {
+  readonly browser: Browser;
+  readonly screen: Screen;
+  /** Detaches. The browser keeps running, with its tabs, cookies, and storage. */
+  close(): Promise<void>;
+}
+```
 
 ## ブラウザのインストール
 
-パッケージは `playwright-core` を完全一致のバージョンに固定しているため、エンジンは常に検証済みの Playwright で動きます。アプリ自身が Playwright に依存する場合は、別のコピーを保持します。バージョンが一致するときだけ、ブラウザのキャッシュを共有します。
-
-ブラウザがなければ、実行時間の計測開始前に、1 回の実行につき 1 回ダウンロードします。CI やコンテナイメージで独立した手順としてインストールするには、パッケージのコマンドを使ってください。エンジンが固定している Playwright に対応したブラウザをインストールします。
+エンジンは固定したビルドで動きます。`chromium` には Chrome for Testing 157.0.8103.38（ヘッドレス実行にはヘッドレスシェル、headed 実行には完全版の Chrome）、`firefox` には Firefox 159.0.1 を使います。ブラウザがなければ、実行時間の計測開始前に、1 回の実行につき 1 回ダウンロードします。CI やコンテナイメージで独立した手順としてインストールするには、パッケージのコマンドを使ってください。
 
 <CodeGroup>
 ```bash npm
@@ -877,43 +918,15 @@ bunx @e2e-dev/web install chromium --with-deps
 ```
 </CodeGroup>
 
-- `chromium`、`firefox`、`webkit` を指定できます。省略すると `chromium` をインストールします。
-- `--with-deps` は、Linux でブラウザが必要とするシステムライブラリもインストールします。
-- コマンドはインストーラーの終了コードで終了します。
-
-## セマンティック情報の取得失敗からの復旧
-
-セマンティック情報の読み取りがタイムアウトすると、エージェントの観測は、新しいビューポートのスクリーンショットを使って続行できる場合があります。
-
-- Playwright は、開いたシャドウルートと閉じたシャドウルートを含む、到達可能なすべてのフレームで機密フィールドのマスクを再確認します。すべての確認が成功する必要があります。
-- 観測はセマンティック情報が利用不能であることを示し、それ以前のノード参照を消去します。
-- 復旧には、操作の残り時間とランナーの許可が必要です。`act` は許可します。判定では `vision: true` または `'only'` が必要です。
-- マスク処理の失敗、キャンセル、回復不能なエンジンエラーでは、観測を停止します。
-
-フォールバックが許可されている場合、読み取り処理は残りの観測時間の 4 分の 1（最大 2 秒）をスクリーンショット用に確保します。期限には、ページの走査、メタデータと要素の読み戻し、入れ子のフレームがすべて含まれます。
-
-セマンティックメタデータは、シリアライズの負荷を減らすため、1 つの JSON 文字列として Playwright 接続を通過します。走査した要素はドキュメントごとのページ内配列に保持し、アクションが初めてノードを使うときに、その配列からハンドルを作ります。参照は走査時に読んだ要素を指し続け、後から同じ位置にある別の要素を指すことはありません。ページが `JSON.stringify` を置き換えたり、オブジェクトや配列のプロトタイプに `toJSON` を加えたりしている場合は、構造化したデータとして転送します。クリーンアップは、応答の止まったプロトコル通信を待ちません。待機を打ち切られた読み取り処理が、ノード ID を再利用したり、新しい観測に古い参照を上書きしたりすることはできません。
-
-## surfaceOf
-
-ページを自ら操作する[カスタムエグゼキューター](/executors#driving-the-page-yourself)向けに、`web()` ハンドルが持つ稼働中の Playwright オブジェクトへのアクセスを返します。
-
-```ts
-import { web, surfaceOf } from '@e2e-dev/web';
-
-const engine = web();
-const live = surfaceOf(engine);   // PlaywrightLiveSurface | undefined
-live!.page();                     // the Page of the current attempt
-live!.context();                  // its BrowserContext
-```
-
-- 別のパッケージのハンドルには `undefined` を返します。
-- Playwright の直接呼び出しは、ステップとして記録しません。
-- [CDP の復旧](#recovering-a-cdp-transport)後は、アクセサーを読み直してください。
-
-| エラー | 発生条件 |
-| --- | --- |
-| `INVALID_STATE` | アクティブな試行の外でアクセサーを呼び出した場合。 |
+- `chromium`、`firefox`、`ffmpeg` のいずれか、または複数を指定できます。省略すると `chromium` をインストールします。
+- `--headed` は、ヘッドレスシェルの代わりに、headed 実行が起動する完全版の Chrome をインストールします。両方を使うには、両方のコマンドを実行してください。
+- `--with-deps` は、Debian と Ubuntu でブラウザが必要とするシステムライブラリも、`apt-get` でインストールします。root で実行していない場合は `sudo` を通します。
+- ブラウザの保存先は `E2E_BROWSERS_PATH`、なければユーザーキャッシュです。macOS では `~/Library/Caches/e2e/browsers`、Linux では `$XDG_CACHE_HOME/e2e/browsers` または `~/.cache/e2e/browsers`、Windows では `%LOCALAPPDATA%\e2e\browsers` です。マシン上のすべてのプロジェクトが共有し、同時に実行したインストールは互いの完了を待ちます。
+- ダウンロード元は `storage.googleapis.com`（Chrome for Testing）、`archive.mozilla.org`（Firefox）、`github.com`（ffmpeg）です。`E2E_BROWSERS_DOWNLOAD_HOST` には、`https://mirror.example.com` のように、同じパスで配信するミラーを指定します。暗号化なしの `http` は `localhost` でだけ使えます。ミラーを使うかどうかにかかわらず、すべてのアーカイブは固定された SHA-256 と一致する必要があります。
+- ダウンロードは、`NO_PROXY` のホストを除き、`HTTPS_PROXY` または `HTTP_PROXY` を経由します。Node 22 と Node 24 の初期リリースでは、`NODE_USE_ENV_PROXY=1` も設定してください。
+- Linux では、Firefox を `tar` と `xz` で展開します。`--with-deps` は `xz-utils` をインストールします。
+- `chromium` の動画には、`libvpx-vp9` を持つ ffmpeg が必要です。エンジンは `E2E_FFMPEG_PATH`、なければブラウザキャッシュ内の固定ビルド、それもなければ `PATH` 上の `ffmpeg` を使います。いずれもない場合は、最初の録画時に固定ビルドをブラウザキャッシュへダウンロードします。事前にインストールするには `install ffmpeg` を使います。
+- インストールが失敗すると、コマンドは 0 以外で終了します。Ctrl-C または SIGTERM はダウンロードを中止し、途中までのファイルを削除して、130 または 143 で終了します。
 
 ## 型
 
@@ -922,12 +935,13 @@ live!.context();                  // its BrowserContext
 `WebBasicAuth`、`WebInitScript`、`BrowserName`、`BrowserProvider`、
 `BrowserProviderScope`、`BrowserRequest`、`BrowserLease`、
 `BrowserReleaseContext`、`BrowserProviderDownloads`、
-`BrowserDownloadContext`、`PlaywrightLiveSurface`、`Browser`、`FrameScreen`、
+`BrowserDownloadContext`、`Browser`、`FrameScreen`、
 `BrowserExpectation`、`WebRoute`、`RouteFulfillResponse`、
 `RouteContinueOverrides`、`WebResponse`、`Cookie`、`CookieFields`、
-`CookieFilter`、`Dialog`、`DialogHandler`。
+`CookieFilter`、`Dialog`、`DialogHandler`、`AttachBrowserOptions`、
+`AttachedBrowser`。
 
-実行時のエクスポートは `web`、[`surfaceOf`](#surfaceof)、および `browser` フィクスチャの型を持つ `test`、`describe`、`beforeEach`、`afterEach`、`beforeAll`、`afterAll` です。
+実行時のエクスポートは `web`、`attachBrowser`、および `browser` フィクスチャの型を持つ `test`、`describe`、`beforeEach`、`afterEach`、`beforeAll`、`afterAll` です。
 
 ### `WebOptions`
 
@@ -939,10 +953,11 @@ live!.context();                  // its BrowserContext
  */
 export interface WebOptions {
   /**
-   * Browser to launch, `chromium` by default. A `BrowserProvider` leases
-   * hosted browsers instead: one per worker slot at `prepare`, or one per
-   * attempt, each attached to over CDP and released when its scope ends. A
-   * provider implies chromium and excludes `connect`.
+   * Browser to launch, `chromium` (default) or `firefox`, driven over
+   * WebDriver BiDi. A `BrowserProvider` leases hosted browsers instead, each
+   * attached to over CDP: one per worker slot, released when the run ends,
+   * or one per attempt with `scope: 'attempt'`. A provider implies chromium
+   * and excludes `connect`.
    */
   readonly browser?: BrowserName | BrowserProvider;
   /**
@@ -970,8 +985,7 @@ export interface WebOptions {
    * Useful for preview-protection tokens. A request that starts at another
    * origin goes without them; a redirect keeps them, to any origin.
    * Names are case-insensitive and replace existing headers of the same name.
-   * This enables request routing, disables the browser's HTTP cache, and
-   * blocks service workers.
+   * Setting them blocks service workers.
    */
   readonly headers?: Readonly<Record<string, string>>;
   /**
@@ -994,22 +1008,20 @@ export interface WebOptions {
    * The `User-Agent` every attempt's context sends and `navigator.userAgent`
    * reports, for an app that switches into a test mode on a marker in the
    * agent string. Defaults to the browser's own. A `user-agent` entry in
-   * `headers` beside it is `INVALID_CONFIG`, and so is a persistent context
-   * (`connect.reconnectEndpoint`, or a provider with `scope: 'attempt'`).
+   * `headers` beside it is `INVALID_CONFIG`.
    */
   readonly userAgent?: string;
   /**
    * The locale every attempt's context runs in, a BCP 47 tag such as
    * `de-DE`: what `navigator.language`, `Intl` formatting, and the
    * `Accept-Language` header report. Defaults to the browser's own. An
-   * `accept-language` entry in `headers` beside it is `INVALID_CONFIG`, and
-   * so is a persistent context.
+   * `accept-language` entry in `headers` beside it is `INVALID_CONFIG`.
    */
   readonly locale?: string;
   /**
    * The IANA time zone every attempt's context runs in, such as
    * `Europe/Berlin`: what `Date` and `Intl` resolve local time against.
-   * Defaults to the machine's. A persistent context is `INVALID_CONFIG`.
+   * Defaults to the machine's.
    */
   readonly timezoneId?: string;
   /** The `prefers-color-scheme` every page reports. See [Media emulation](#media-emulation). */
@@ -1130,11 +1142,7 @@ export interface Browser extends Expectable<BrowserExpectation> {
     /** Types plain text. */
     type(text: string): Promise<void>;
   };
-  /**
-   * Direct pointer input from test code, independent of agent observations.
-   * After CDP recovery, test code can read current geometry with `evaluate`
-   * before starting a pointer sequence.
-   */
+  /** Direct pointer input from test code, independent of agent observations. */
   readonly mouse: {
     /** Moves the pointer. */
     move(x: number, y: number): Promise<void>;

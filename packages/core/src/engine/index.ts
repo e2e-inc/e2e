@@ -36,8 +36,8 @@ export type { ComputedStyleProperty, ComputedStyleValues } from './computed-styl
 export { ConfigurationError, InfrastructureError, TestError } from '../internal/errors.ts';
 export { rejectUnknownKeys, rejectUnknownOptions } from '../internal/options.ts';
 export { validateJsonValue, type JsonValueRules } from '../internal/json-value.ts';
-export { describePattern, matchesText, toTextPattern } from '../internal/text.ts';
-export { resolveExpression, type ResolveExpressionOptions } from './resolve.ts';
+export { createTextMatching, describePattern, matchesText, toTextPattern, type TextMatching } from '../internal/text.ts';
+export { createResolver, resolveExpression, type ResolveExpressionOptions, type ResolverPlatform } from './resolve.ts';
 export type { TextMatch } from '../types.ts';
 export { raceAbort } from './timing.ts';
 export { isProviderRecording, stopProviderRecording } from './recording.ts';
@@ -212,7 +212,7 @@ export interface EngineFixtureContext {
   readonly app: EngineAppInfo & {
     /**
      * Resolves a navigation target against the base URL. Throws
-     * `APP_URL_REQUIRED` when the target declares no URL and `POLICY_DENIED`
+     * `APP_URL_REQUIRED` for a relative URL when the target declares no URL and `POLICY_DENIED`
      * for any scheme but `http:` and `https:` (`about:blank` aside), so a
      * fixture never re-implements the rule the harness owns.
      */

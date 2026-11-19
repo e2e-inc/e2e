@@ -414,9 +414,9 @@ const PROBED_KEYS = new Set(['then', 'constructor', 'toJSON', 'toString', 'value
 
 /** Fixtures other runners hand out, each pointed at the e2e way of doing the same thing. */
 const FOREIGN_FIXTURE_HINTS: Readonly<Record<string, string>> = {
-  page: 'there is no Playwright page: open the app with app.open() and find elements through screen; browser-only APIs are on the browser fixture of a Playwright target',
-  context: 'the browser context is owned by the engine: cookies, routes, and storage are on the browser fixture of a Playwright target',
-  request: 'there is no request fixture: call fetch() directly, or reach the browser through the browser fixture of a Playwright target',
+  page: 'there is no Playwright page: open the app with app.open() and find elements through screen; browser-only APIs are on the browser fixture of a web target',
+  context: 'the browser context is owned by the engine: cookies, routes, and storage are on the browser fixture of a web target',
+  request: 'there is no request fixture: call fetch() directly, or reach the browser through the browser fixture of a web target',
   driver: 'there is no WebDriver session: drive the device through app, screen, and (on an agent-device target) device',
 };
 
@@ -485,10 +485,7 @@ function fixtureContext(
     fixture: (name, surface, operations) => recorder.fixture(name, surface, operations),
     app: {
       ...engineAppInfo(app),
-      resolveUrl: (url) => {
-        requireAppUrl(environment.target);
-        return resolveNavigationUrl(url, app.base).url;
-      },
+      resolveUrl: (url) => resolveNavigationUrl(url, app.base).url,
     },
     // Getters: an `@e2e-dev/core` session's `setDefaultTimeout` moves them under a live fixture.
     timeouts: {
@@ -576,7 +573,7 @@ function requireAppUrl(target: ResolvedTarget): asserts target is ResolvedTarget
  * (a certificate, a 500, a crash mid-load) stays an engine failure.
  */
 const NOTHING_LISTENING =
-  /ERR_CONNECTION_REFUSED|ECONNREFUSED|ERR_NAME_NOT_RESOLVED|ENOTFOUND|ERR_ADDRESS_UNREACHABLE|EHOSTUNREACH|ERR_CONNECTION_TIMED_OUT|ETIMEDOUT/;
+  /ERR_CONNECTION_REFUSED|NS_ERROR_CONNECTION_REFUSED|ECONNREFUSED|ERR_NAME_NOT_RESOLVED|NS_ERROR_UNKNOWN_HOST|ENOTFOUND|ERR_ADDRESS_UNREACHABLE|EHOSTUNREACH|ERR_CONNECTION_TIMED_OUT|ETIMEDOUT/;
 
 /**
  * Adds a recovery hint to navigation connection errors using the target's

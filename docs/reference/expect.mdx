@@ -240,8 +240,9 @@ await expect(screen.getByTestId('wifi')).not.toHaveRole('checkbox');
 - It compares the role [`screen.tree()`](/reference/screen#screen-tree)
   shows, so the role hierarchy does not count: a `switch` is not a
   `checkbox`.
-- On the web, an editing host (`contenteditable`) reads as `textbox`
-  whatever its tag, though `getByRole` finds it by its tag's role.
+- On the web, an [editing host](/reference/screen#editing-hosts)
+  (`contenteditable`) reads as `textbox` whatever its tag, and
+  `getByRole('textbox')` finds it.
 - A node the tree shows without a role, such as a `<div>` of text, fails it,
   and the failure message reads `no role`.
 

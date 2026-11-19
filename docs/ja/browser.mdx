@@ -5,7 +5,7 @@ description: API のモック、ダイアログへの対応、ファイルのダ
 "twitter:image": "https://e2e.com/docs/images/og/browser.png?v=9e41078fc1"
 ---
 
-`@e2e-dev/web` の `browser` フィクスチャでは、リクエストのモック、ダイアログへの対応、ファイルのダウンロード、ページ内でのコード実行ができます。エンジンは [Playwright](https://github.com/microsoft/playwright) を通して Chromium、Firefox、WebKit を動かします。画面遷移、操作、確認には `screen`、`app`、`expect` を使います。
+`@e2e-dev/web` の `browser` フィクスチャでは、リクエストのモック、ダイアログへの対応、ファイルのダウンロード、ページ内でのコード実行ができます。エンジンは WebDriver BiDi 経由で Chromium と Firefox を操作します。画面遷移、操作、確認には `screen`、`app`、`expect` を使います。
 
 `browser` を使うには、`@e2e-dev/web` から `test` をインポートします。
 
@@ -74,7 +74,7 @@ const csv = await readFile(file.absolutePath, 'utf8');
 expect(csv).toContain('Invoice');
 ```
 
-e2e はファイルを `download` アーティファクトとして保存します。読み取りには `file.absolutePath` を使います。ホスト型ブラウザでも同じように使えます。`file.path` は、プロジェクトではなく、その試行のアーティファクトディレクトリからの相対パスです。
+e2e はファイルを `download` アーティファクトとして保存します。読み取りには `file.absolutePath` を使います。`file.path` は、プロジェクトではなく、その試行のアーティファクトディレクトリからの相対パスです。
 
 ## iframe 内を操作する
 
@@ -136,11 +136,11 @@ web({ colorScheme: 'dark', reducedMotion: 'reduce' })
 1 つのテストだけで使う場合は `browser.emulateMedia` を呼び出します。指定した値でページを読み込むには、ページを開く前に呼び出してください。
 
 ```ts
-await browser.emulateMedia({ reducedMotion: 'reduce' });
+await browser.emulateMedia({ colorScheme: 'dark' });
 await app.open('/');
 ```
 
-値はテストの終了まで保持され、`app.restart()` や `app.clearState()` を呼び出しても変わりません。[メディアのエミュレーション](/reference/web#media-emulation)を参照してください。
+値はテストの終了まで保持され、`app.restart()` や `app.clearState()` を呼び出しても変わりません。Firefox では、`emulateMedia` で変更できるのは `colorScheme` だけです。`reducedMotion` は `web()` で設定してください。[メディアのエミュレーション](/reference/web#media-emulation)を参照してください。
 
 ## Cookie
 
@@ -155,26 +155,26 @@ Cookie の URL が解析できない場合、`about:blank` の場合、`http:` �
 ブラウザはエンジンのオプションで、デフォルトは `chromium` です。同じアプリを 2 種類のブラウザでテストする場合は、[ターゲットごとにサイズを指定する](/web#one-size-per-target)例と同様に、2 つのターゲットを定義します。
 
 ```ts title="Target fragment"
-{ name: 'webkit', engine: web({ browser: 'webkit' }), app },
+{ name: 'firefox', engine: web({ browser: 'firefox' }), app },
 ```
 
 CI では、[インストールコマンド](/reference/web#installing-browsers)で追加のブラウザをインストールします。
 
 <CodeGroup>
 ```bash npm
-npx @e2e-dev/web install webkit --with-deps
+npx @e2e-dev/web install firefox --with-deps
 ```
 
 ```bash pnpm
-pnpm exec e2e-web install webkit --with-deps
+pnpm exec e2e-web install firefox --with-deps
 ```
 
 ```bash bun
-bunx @e2e-dev/web install webkit --with-deps
+bunx @e2e-dev/web install firefox --with-deps
 ```
 </CodeGroup>
 
-`connect` を使うと、ブラウザを起動する代わりに、CDP 経由でリモートの Chromium に接続します。起動済みの [Lightpanda](/integrations/lightpanda) や [Moli](/integrations/moli) など、CDP に対応する他のブラウザにも接続できます。サイズの設定については[ビューポート](/web#viewports)を参照してください。
+WebKit には対応していません。`connect` を使うと、ブラウザを起動する代わりに、CDP 経由でリモートの Chromium に接続します。サイズの設定については[ビューポート](/web#viewports)を参照してください。
 
 ## ホスト型ブラウザ
 
@@ -183,16 +183,18 @@ bunx @e2e-dev/web install webkit --with-deps
 | サービス | プロバイダー |
 | --- | --- |
 | [Kernel](/integrations/kernel) | `@e2e-dev/kernel` の `kernel()` |
+| [Notte](/integrations/notte) | `@e2e-dev/notte` の `notte()` |
 | 自分のコンピューターで動く [smol machines](/integrations/smol) の microVM | `@e2e-dev/smol` の `smol()` |
-| 自分のマシンで動くオープンソースのヘッドレスブラウザ [Lightpanda](/integrations/lightpanda) | `@e2e-dev/lightpanda` の `lightpanda()` |
-| 必要に応じてレイアウト計算とスクリーンショット撮影を行うローカルブラウザ [Moli](/integrations/moli) | `@e2e-dev/moli` の `moli()` |
+| 自分のマシンで動くオープンソースのヘッドレスブラウザ [Lightpanda](/integrations/lightpanda)。エンジンはまだ、このブラウザでページを開けません | `@e2e-dev/lightpanda` の `lightpanda()` |
+| ローカルブラウザ [Moli](/integrations/moli)。エンジンはまだ、このブラウザの要素を操作できません | `@e2e-dev/moli` の `moli()` |
 | [TestMu AI](/integrations/testmu#run-web-targets-in-browsers) | `@e2e-dev/testmu/web` の `testmuBrowsers()` |
 | [E2B](/integrations/e2b#run-web-targets-in-browsers) のサンドボックス | `@e2e-dev/e2b/web` の `e2bBrowsers()` |
+| [Cloudflare Browser Run](/integrations/browser-run) | `@e2e-dev/browser-run` の `browserRun()` |
 | その他のサービス | プロジェクト内に数十行で実装する独自プロバイダー |
 
 サービスのライブビューにウィンドウが表示される場合は、`viewport: null` を追加して、[ページをウィンドウ全体に広げます](/web#fill-the-window)。
 
-プロバイダーで使うブラウザは、エンジンが CDP 経由で Chromium として操作できるものです。Chromium 自体のほか、Lightpanda、Moli が該当します。`connect` との併用はできません。実行するテストがないターゲットはブラウザを借りません。
+プロバイダーで使うブラウザは、エンジンが CDP 経由で Chromium として操作できるものです。`connect` との併用はできません。実行するテストがないターゲットはブラウザを借りません。
 
 ### プロバイダーを実装する
 
@@ -228,14 +230,12 @@ export interface BrowserLease {
   readonly id: string;
   /** `ws://`, `wss://`, or `http://` DevTools endpoint to attach to over CDP. */
   readonly cdpEndpoint: string;
-  /** Endpoint to reattach to the same browser after a transport drop; per-attempt leases only. */
-  readonly reconnectEndpoint?: string;
 }
 ```
 
 `acquire` には、実行 ID、ターゲット、ワーカースロットとスロット数、試行単位のリースでは試行 ID、実行の環境変数、AbortSignal、レポーターに届く `log` が渡されます。トークンは `process.env` ではなく `request.env` から読み取ってください。
 
-リースは JSON データです。`release` には `acquire` が返したオブジェクトがそのまま渡るため、プロバイダー独自のフィールドを保持できます。ワーカーに渡るのは `id`、`cdpEndpoint`、`reconnectEndpoint` だけです。録画など、ワーカーが使う情報は `lease.id` をキーにして管理してください。
+リースは JSON データです。`release` には `acquire` が返したオブジェクトがそのまま渡るため、プロバイダー独自のフィールドを保持できます。ワーカーに渡るのは `id` と `cdpEndpoint` だけです。録画など、ワーカーが使う情報は `lease.id` をキーにして管理してください。
 
 認証が必要な CDP 接続では `cdpHeaders(lease, request)` を実装し、ワーカー内の `request.env` から認証情報を読み取ります。ヘッダーはリースの JSON には含まれず、ページのリクエストヘッダーにもなりません。
 
@@ -320,7 +320,7 @@ export default {
 
 ### リースのスコープを選ぶ
 
-デフォルトの `scope: 'worker'` は、ワーカースロットごとに 1 つのブラウザを実行全体で保持します。`scope: 'attempt'` は、リトライを含む各試行に、それ以前のテストが使っていない新しいブラウザを割り当てます。その分、試行ごとにセッションを起動するコストがかかります。ホスト型セッションは稼働中に費用がかかるため、`workers` はスイートが使い切れる数にしてください。
+デフォルトの `scope: 'worker'` は、ワーカースロットごとに 1 つのブラウザを実行全体で保持します。`scope: 'attempt'` は、リトライを含む各試行に、それ以前のテストが使っていない新しいブラウザを割り当てます。その分、試行ごとにセッションを起動するコストがかかります。ワーカースコープでは、ローカル実行と同様に、各試行は新しいブラウザコンテキストで実行されます。試行スコープでは、新しいブラウザ自身のコンテキストで実行されるため、ログイン状態など、プロバイダーがそこに用意したものがテストに引き継がれます。試行スコープでは、`app.clearState()` は `UNSUPPORTED_CAPABILITY` をスローし、[セッション](/authentication)を使うテストは収集時に `COLLECTION_ERROR` で失敗します。`headers`、`basicAuth`、`userAgent`、`locale`、`timezoneId` はどちらのスコープでも使えます。ホスト型セッションは稼働中に費用がかかるため、`workers` はスイートが使い切れる数にしてください。
 
 ワーカーがクラッシュ、`process.exit`、強制終了などで停止すると、取得したリースを解放できません。`sweep` を実装すると、ランナーが実行終了時にターゲットごとに 1 回、残ったリースを解放できます。サービスのタグ、または実行とターゲットごとに分けた共有のローカルリース記録からリースを探し、レポーター用に ID を返します。sweep の失敗は 1 行表示されますが、実行を失敗にはしません。`sweep` がなければ、そのブラウザはサービス側で終了されるまで動き続けます。
 
@@ -331,21 +331,11 @@ export default {
 - リースを取得した側が、ちょうど 1 回だけ解放します。
 </Accordion>
 
-<Accordion title="試行スコープ: 制限事項">
-試行はブラウザの永続的なデフォルトコンテキストの最初のタブで実行されるため、リモートブラウザにはそのコンテキストだけが存在する必要があります。[`connect.reconnectEndpoint`](/reference/web#recovering-a-cdp-transport) の制限が適用されます。
-
-- `headers`、`basicAuth`、`userAgent`、`locale`、`timezoneId` は使えません。いずれも `INVALID_CONFIG` になります。
-- `app.clearState()` は使えません。スコープを示す `UNSUPPORTED_CAPABILITY` になります。
-- セッション状態の取得と復元はできません。そのターゲットで[セッション](/authentication)を使うテストがある場合、セットアップテストがログインする前に `COLLECTION_ERROR` で失敗します。
-
-トランスポートが切断された後は、次の操作でリースの `reconnectEndpoint`、なければ `cdpEndpoint` を使って再接続し、同じブラウザであることを確認します。
-</Accordion>
-
 ### プロバイダーでダウンロードに対応する
 
-`downloads` を実装すると、`browser.waitForDownload` をローカルと同じように使えます。ホスト型ブラウザは、ランナーから開けない自身のディスクにファイルを保存します。`downloads` があると、ファイルを `dir` 配下に保存し、エンジンが完成したファイルのパスを `read` に渡します。`read` はワーカー内でサービスのファイル API からバイト列を取得します。この処理には呼び出しのタイムアウトが適用されます。[Kernel](/integrations/kernel#downloads) はこの方法でダウンロードに対応しています。
+`downloads` を実装すると、`browser.waitForDownload` をローカルと同じように使えます。ホスト型ブラウザは、ランナーから開けない自身のディスクにファイルを保存します。`downloads` があると、ダウンロードしたファイルを `dir` に保存し、エンジンが完成した各ファイルのパスを `read` に渡します。`read` はサービスのファイル API からバイト列を取得します。[Kernel](/integrations/kernel#downloads)、[smol machines](/integrations/smol)、[E2B](/integrations/e2b) はこの方法でダウンロードに対応しています。ダウンロードをパスではなく名前で保存するサービスは、サイトが提案した名前である `context.suggestedFilename` でファイルを探します。[Notte](/integrations/notte#downloads) がこの方式です。
 
-`downloads` がない場合、別のマシン上のブラウザでダウンロードすると、プロバイダー名を示す `ENGINE_FAILURE` になります。ランナーと同じマシンでブラウザを動かすプロバイダーでは、追加の実装は不要です。
+`downloads` がない場合、別のマシン上のブラウザでダウンロードすると、プロバイダー名を示す `UNSUPPORTED_CAPABILITY` をスローします。ランナーと同じマシンでブラウザを動かすプロバイダーでは、追加の実装は不要です。プロバイダーのブラウザで `setInputFiles` を使うと、ファイルのバイト列がページに送られます。上限は合計 50 MB です。ディレクトリを指定すると `UNSUPPORTED_CAPABILITY` をスローします。
 
 ### プロバイダーで録画に対応する
 
@@ -396,8 +386,7 @@ async record(lease, context): Promise<ProviderRecording> {
 
 - `<button><i class="fa fa-sign-in"> Login</i></button>` は `button "Login"` となり、`getByRole('button', 'Login')` で見つかります。
 - 2 つの単語の間にあるグリフは、空白として扱われます。
-- アイコンだけのコントロールに `title` があれば、それが名前として表示されます。ただし、ブラウザ自身は引き続きグリフを名前にするため、そのタイトルを指定した `getByRole` では見つかりません。`aria-label` を追加するか、`browser.locator('[title="Sign out"]')` を使ってください。
-- 名前に `RegExp` を指定すると、グリフを含むブラウザ側の名前に照合されます。そのため、`/Login/` のように先頭・末尾のアンカーを付けずに使ってください。
+- アイコンだけのコントロールに `title` があれば、それが名前として表示され、`getByRole` はその名前で見つけます。
 
 ## inert なコンテンツ
 

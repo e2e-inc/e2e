@@ -40,6 +40,9 @@ export default defineConfig({
           include: ['tests/integration/**/*.test.ts'],
           // @e2e-dev/core's too, so the runner and a test reach one copy of its module state.
           // Unit tests load it through Vite's runner instead, where `vi.mock` reaches its modules.
+          // Vitest keeps that choice per file across both projects: a unit test that imports
+          // `@e2e-dev/core` leaves `launch` in the runner here and `createAgent` outside it,
+          // each with its own session registry. A test of the package's entries belongs here.
           server: { deps: { external: [/[\\/]packages[\\/](?:core|e2e|web|mobile|github|kernel|eas)[\\/]dist[\\/]/] } },
           testTimeout: 30_000,
           hookTimeout: 30_000,

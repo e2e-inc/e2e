@@ -138,6 +138,8 @@ control is a `tablist`, a progress indicator a `progressbar`, a stepper a
 `spinbutton`. It keeps any other type verbatim, so a role with no native
 widget, such as `tooltip` or `figure`, matches nothing on a phone.
 
+<a id="editing-hosts" />
+
 ##### Editing hosts
 
 A `contenteditable` editing host, the root a TipTap, ProseMirror, Lexical, or
@@ -161,10 +163,9 @@ Slate editor renders into, is a `textbox`.
   an unnamed `textbox`. A name from the host's own `aria-label`,
   `aria-labelledby`, `aria-placeholder`, or `data-placeholder` (Quill) stays.
 
-`getByRole` resolves through Playwright's role selector, which has no such
-rule. So `getByRole` finds an editor only when the host carries
-`role="textbox"`; `getByLabel` and `getByTestId` reach it either way. Anchor
-a test on a label or a test id, not on the placeholder.
+`getByRole('textbox')` finds the editor, with or without `role="textbox"` on
+the host, and so do `getByLabel` and `getByTestId`. Anchor a test on a label
+or a test id, not on the placeholder.
 
 #### `getByLabel`
 
@@ -220,13 +221,6 @@ getByDisplayValue(value: TextMatch, options?: TextMatchOptions): Locator;
 await screen.getByDisplayValue('ada@example.test').clear();
 ```
 
-<Note>
-In the web engine a `getByDisplayValue` locator cannot be the scope of a
-child query or a `has` filter; both fail with `UNSUPPORTED_CAPABILITY`.
-Playwright has no selector for a control's current value, so the engine
-filters candidates after the fact.
-</Note>
-
 #### `getByTestId`
 
 Matches the node's `testId`.
@@ -278,7 +272,7 @@ and `waitFor()`: what renders, as Playwright reads it.
 - It works with scopes, `filter`, `first`, `last`, and `nth`:
   `getByText('Save', { visible: true }).first()` is the first visible match.
 
-Prefer it over `browser.locator('p:visible')`, which ties the test to CSS.
+`browser.locator` has no `:visible`, which is not CSS.
 
 ### Refinement
 
@@ -330,12 +324,12 @@ or(other: Locator): Locator;
 when both match different nodes, an action throws `LOCATOR_AMBIGUOUS`.
 Add `first()` if either will do. Both locators must come from the same
 screen and attempt. On web, both need identical literal frame-selector
-chains; display-value branches cannot be composed.
+chains.
 
 | Throws | When |
 | --- | --- |
 | `INVALID_LOCATOR` | `other` is not a runner locator, or belongs to another screen or attempt. |
-| `UNSUPPORTED_CAPABILITY` | Web branches have different frame-selector chains, or a branch is a display-value query. |
+| `UNSUPPORTED_CAPABILITY` | Web branches have different frame-selector chains. |
 
 #### `first`
 

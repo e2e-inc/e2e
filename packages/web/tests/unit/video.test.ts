@@ -1,199 +1,304 @@
 /**
- * The recorder's segment bookkeeping over a scripted page: one segment per
- * page, a failed stop that still left a file kept, a lost segment reported at
- * stop, and every hook a no-op until armed. The real screencast is covered by
- * the lifecycle integration test.
+ * The driver's recording as the session drives it, over a scripted Firefox
+ * peer, whose screencast is plain BiDi: nothing recorded and no tab sized
+ * until a recording is asked for, a start on the tab shown then, one
+ * segment per tab shown after it, a start its step gave up on stopped
+ * again, a failed finish that still left a file kept, and a lost segment
+ * reported once. And its policy on Chromium without a real browser: a
+ * segment that cannot start never fails the tab that opened, `stop` reports
+ * it once, and a recorder whose own start failed stays disarmed. The real
+ * screencasts are covered by the lifecycle integration test on each browser.
  */
 
+import path from 'node:path';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import path from 'node:path';
-import type { Page } from 'playwright-core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EngineError } from '@e2e-dev/core/engine';
-import { VideoRecorder } from '../../src/video.ts';
+import { BidiVideo, type RecordedTab, type VideoOptions } from '../../src/driver/video.ts';
+import { BROWSER_TRAITS } from '../../src/browsers.ts';
+import { FakeBidi, type Reply } from '../helpers/bidi-fake.ts';
+import { gate } from '../helpers/gate.ts';
 
 const VIEWPORT = { width: 320, height: 200 };
 
-/**
- * A page whose screencast writes its file on start unless told not to, sends
- * its first frame at once (or after `firstFrameMs`, or never with `null`)
- * and records frame/stop order, and can fail to stop.
- */
-function fakePage(options: { writes?: boolean; stopError?: Error; startError?: Error; viewport?: { width: number; height: number }; firstFrameMs?: number | null } = {}) {
-  const started: string[] = [];
-  const sizes: { width: number; height: number }[] = [];
-  const startOptions: Record<string, unknown>[] = [];
-  const stopped = { count: 0, at: [] as number[] };
-  const events: ('frame' | 'stop')[] = [];
-  const page = {
-    viewportSize: () => options.viewport ?? VIEWPORT,
-    screencast: {
-      start: async (start: { path: string; size: { width: number; height: number }; onFrame?: () => void }) => {
-        const { path: file, size, onFrame: _onFrame, ...rest } = start;
-        if (options.startError !== undefined) throw options.startError;
-        started.push(file);
-        sizes.push(size);
-        startOptions.push({ path: file, size, ...rest });
-        if (options.writes !== false) writeFileSync(file, 'webm');
-        const firstFrameMs = options.firstFrameMs === undefined ? 0 : options.firstFrameMs;
-        if (firstFrameMs !== null) {
-          setTimeout(() => {
-            events.push('frame');
-            start.onFrame?.();
-          }, firstFrameMs);
-        }
-      },
-      stop: async () => {
-        events.push('stop');
-        stopped.at.push(Date.now());
-        stopped.count += 1;
-        if (options.stopError !== undefined) throw options.stopError;
-      },
+/** A tab the test shows to a recorder, counting how often its viewport is read. */
+function recordedTab() {
+  const state = { shown: undefined as string | undefined, viewport: VIEWPORT, sized: 0 };
+  const tab: RecordedTab = {
+    shown: () => state.shown,
+    viewport: async () => {
+      state.sized += 1;
+      return state.viewport;
     },
-  } as unknown as Page;
-  return { page, started, sizes, startOptions, stopped, events };
+  };
+  return { state, tab };
 }
 
-describe('VideoRecorder', () => {
-  let dir: string;
-  const recorder = () => {
-    dir = mkdtempSync(path.join(tmpdir(), 'e2e-video-unit-'));
-    return new VideoRecorder(dir);
-  };
+/** Starts `video` with nothing giving up on it. */
+function start(video: BidiVideo): Promise<void> {
+  return video.start(new AbortController().signal);
+}
+
+/** How the scripted browser answers one screencast. */
+interface ScreencastScript {
+  /** Fails the start with this error. */
+  readonly startError?: string;
+  /** Answers the stop with this error after writing nothing, or after writing the attempt's file itself when `wroteTarget`. */
+  readonly stopError?: string;
+  readonly wroteTarget?: boolean;
+}
+
+describe('BidiVideo', () => {
+  let artifactsDir: string;
+  let browserDir: string;
+  let bidi: FakeBidi;
+  /** Scripts keyed by the context a screencast records; a context with none records cleanly. */
+  let scripts: Map<string, ScreencastScript>;
+  /** The tab the recorders of a test are shown. */
+  let shown: ReturnType<typeof recordedTab>;
+
+  beforeEach(() => {
+    artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-video-unit-'));
+    browserDir = mkdtempSync(path.join(tmpdir(), 'e2e-video-browser-'));
+    scripts = new Map();
+    shown = recordedTab();
+    bidi = new FakeBidi()
+      .on('browsingContext.startScreencast', (params) => {
+        const context = params['context'] as string;
+        const script = scripts.get(context) ?? {};
+        if (script.startError !== undefined) return { error: 'unknown error', message: script.startError };
+        return { result: { screencast: `cast-${context}` } };
+      })
+      .on('browsingContext.stopScreencast', (params): Reply => {
+        const context = (params['screencast'] as string).replace(/^cast-/, '');
+        const script = scripts.get(context) ?? {};
+        if (script.stopError !== undefined) {
+          if (script.wroteTarget === true) writeFileSync(path.join(artifactsDir, 'video', targetName(context)), 'webm');
+          return { result: { error: script.stopError } };
+        }
+        const file = path.join(browserDir, `${context}.webm`);
+        writeFileSync(file, 'webm');
+        return { result: { path: file } };
+      });
+  });
+
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(artifactsDir, { recursive: true, force: true });
+    rmSync(browserDir, { recursive: true, force: true });
   });
 
-  it('waits for a segment\'s first frame before ending it, within a bound, so a recording stopped right after a paint is not blank', async () => {
-    const video = recorder();
-    const late = fakePage({ firstFrameMs: 150 });
-    await video.arm(late.page);
-    await video.stop();
-    expect(late.events).toEqual(['frame', 'stop']);
+  /** The segment file name the test expects `context` to be recorded as, by the order the tests open contexts in. */
+  function targetName(context: string): string {
+    const index = Number(context.replace(/^tab-/, ''));
+    return index === 1 ? 'video.webm' : `video-part${String(index)}.webm`;
+  }
 
-    const silent = fakePage({ firstFrameMs: null });
-    await video.arm(silent.page);
-    const started = Date.now();
-    await video.stop();
-    // A page that never repaints ends after the bound, not never.
-    expect(silent.stopped.at[0]! - started).toBeGreaterThanOrEqual(990);
-    expect(silent.stopped.at[0]! - started).toBeLessThan(3_000);
+  const video = (options: VideoOptions = {}) => new BidiVideo(bidi.connection, BROWSER_TRAITS.firefox, artifactsDir, options, {}, shown.tab);
+  /** Starts `recorder` while `context` is the tab shown. */
+  const startOn = (recorder: BidiVideo, context: string): Promise<void> => {
+    shown.state.shown = context;
+    return start(recorder);
+  };
+  const started = () => bidi.commands('browsingContext.startScreencast').map((command) => command.params);
+  const stops = () => bidi.commands('browsingContext.stopScreencast').length;
+  const paths = (segments: readonly { path: string }[]) => segments.map((segment) => segment.path);
+
+  it('records nothing and sizes no tab until a recording is asked for', async () => {
+    const recorder = video();
+    shown.state.shown = 'tab-1';
+    await recorder.contextOpened('tab-1');
+    await recorder.contextClosing();
+    await recorder.contextClosed();
+    expect(await recorder.stop()).toEqual([]);
+    await recorder.close();
+    expect(shown.state.sized).toBe(0);
+    expect(bidi.sent).toEqual([]);
   });
 
-  it('records one segment per page, in order, each with its start instant', async () => {
-    const video = recorder();
-    const first = fakePage();
-    const second = fakePage({ viewport: { width: 390, height: 600 } });
-    await video.arm(first.page);
-    expect(video.isArmed).toBe(true);
-    expect(first.started).toEqual([path.join(dir, 'video', 'video.webm')]);
-    // A restart ends the segment before its page closes, then opens another page: the next segment.
-    await video.pageClosing();
-    expect(first.stopped.count).toBe(1);
-    expect(video.isArmed).toBe(true);
-    await video.pageOpened(second.page);
-    expect(second.started).toEqual([path.join(dir, 'video', 'video-part2.webm')]);
-    expect([...first.sizes, ...second.sizes]).toEqual([VIEWPORT, { width: 390, height: 600 }]);
-    const segments = await video.stop();
-    expect(segments.map((segment) => segment.path)).toEqual(['video/video.webm', 'video/video-part2.webm']);
-    for (const segment of segments) expect(Number.isNaN(Date.parse(segment.startedAt))).toBe(false);
-    expect(video.isArmed).toBe(false);
-    expect([first.stopped.count, second.stopped.count]).toEqual([1, 1]);
-  });
-
-  it('starts again after a stop on the same page, and the second stop hands over only the new segment', async () => {
-    const video = recorder();
-    const page = fakePage();
-    await video.arm(page.page);
-    expect((await video.stop()).map((segment) => segment.path)).toEqual(['video/video.webm']);
-    // Disarmed between recordings: a page opened now starts nothing.
-    await video.pageOpened(fakePage().page);
-    await video.arm(page.page);
-    expect((await video.stop()).map((segment) => segment.path)).toEqual(['video/video-part2.webm']);
-    expect(page.started).toEqual([path.join(dir, 'video', 'video.webm'), path.join(dir, 'video', 'video-part2.webm')]);
-    expect(page.stopped.count).toBe(2);
-  });
-
-  it('records at the viewport size by default, and at the configured size and quality when given', async () => {
-    const plain = fakePage();
-    await recorder().arm(plain.page);
-    expect(plain.startOptions[0]).toMatchObject({ size: VIEWPORT });
-    expect(plain.startOptions[0]).not.toHaveProperty('quality');
-    const tuned = fakePage();
-    const dirTuned = mkdtempSync(path.join(tmpdir(), 'e2e-video-unit-'));
-    try {
-      await new VideoRecorder(dirTuned, { size: { width: 640, height: 400 }, quality: 70 }).arm(tuned.page);
-      expect(tuned.startOptions[0]).toMatchObject({ size: { width: 640, height: 400 }, quality: 70 });
-    } finally {
-      rmSync(dirTuned, { recursive: true, force: true });
+  it('starts on the tab shown, then records one segment per tab shown after it, in order, each at its viewport and with its start instant', async () => {
+    const recorder = video();
+    await startOn(recorder, 'tab-1');
+    // A restart ends the segment before its tab closes, then opens another tab: the next segment.
+    await recorder.contextClosing();
+    expect(stops()).toBe(1);
+    shown.state.viewport = { width: 390, height: 600 };
+    await recorder.contextOpened('tab-2');
+    expect(started()).toEqual([
+      { context: 'tab-1', mimeType: 'video/webm', video: { ...VIEWPORT, frameRate: 25 } },
+      { context: 'tab-2', mimeType: 'video/webm', video: { width: 390, height: 600, frameRate: 25 } },
+    ]);
+    const segments = await recorder.stop();
+    expect(paths(segments)).toEqual(['video/video.webm', 'video/video-part2.webm']);
+    for (const segment of segments) {
+      expect(Number.isNaN(Date.parse(segment.startedAt))).toBe(false);
+      expect(existsSync(path.join(artifactsDir, segment.path))).toBe(true);
     }
+    expect(stops()).toBe(2);
+    expect(existsSync(path.join(browserDir, 'tab-1.webm'))).toBe(false);
   });
 
-  it('keeps a segment whose stop failed but whose file exists', async () => {
-    const video = recorder();
-    const flaky = fakePage({ stopError: new Error('screencast.stop: protocol error') });
-    await video.arm(flaky.page);
-    expect((await video.stop()).map((segment) => segment.path)).toEqual(['video/video.webm']);
+  it('only arms while no tab is shown, without sizing one, and the first tab shown starts the first segment', async () => {
+    const recorder = video();
+    await start(recorder);
+    expect(shown.state.sized).toBe(0);
+    expect(started()).toEqual([]);
+    await recorder.contextOpened('tab-1');
+    expect(started().map((params) => params['context'])).toEqual(['tab-1']);
+    await recorder.close();
   });
 
-  it('reports a segment whose stop failed and left no file, once', async () => {
-    const video = recorder();
-    const broken = fakePage({ writes: false, stopError: new Error('screencast stop failed') });
-    await video.arm(broken.page);
-    let caught: unknown;
-    try {
-      await video.stop();
-    } catch (error) {
-      caught = error;
-    }
+  it('stops a start that finished after its step gave up, and records no tab shown after it', async () => {
+    const recorder = video();
+    shown.state.shown = 'tab-1';
+    const gaveUp = new AbortController();
+    gaveUp.abort();
+    await expect(recorder.start(gaveUp.signal)).rejects.toThrow();
+    expect(stops()).toBe(1);
+    await recorder.contextOpened('tab-2');
+    expect(started().map((params) => params['context'])).toEqual(['tab-1']);
+  });
+
+  it('records at the configured size without reading the viewport', async () => {
+    const recorder = video({ size: { width: 640, height: 400 } });
+    await startOn(recorder, 'tab-1');
+    expect(started()[0]).toMatchObject({ video: { width: 640, height: 400 } });
+    expect(shown.state.sized).toBe(0);
+    await recorder.stop();
+  });
+
+  it('starts again after a stop on the same tab, and the second stop hands over only the new segment', async () => {
+    const recorder = video();
+    await startOn(recorder, 'tab-1');
+    expect(paths(await recorder.stop())).toEqual(['video/video.webm']);
+    // Disarmed between recordings: a tab opened now starts nothing and is not sized.
+    await recorder.contextOpened('tab-9');
+    expect(started()).toHaveLength(1);
+    expect(shown.state.sized).toBe(1);
+    await startOn(recorder, 'tab-2');
+    expect(paths(await recorder.stop())).toEqual(['video/video-part2.webm']);
+  });
+
+  it('reports a tab whose viewport cannot be read as a lost segment, never to the step that showed it', async () => {
+    const recorder = new BidiVideo(bidi.connection, BROWSER_TRAITS.firefox, artifactsDir, {}, {}, {
+      shown: () => undefined,
+      viewport: async () => {
+        throw new Error('the window has no size');
+      },
+    });
+    await start(recorder);
+    await expect(recorder.contextOpened('tab-1')).resolves.toBeUndefined();
+    expect(started()).toEqual([]);
+    await expect(recorder.stop()).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('the window has no size') });
+    await expect(recorder.stop()).resolves.toEqual([]);
+  });
+
+  it('keeps a segment whose finish failed but whose file exists', async () => {
+    scripts.set('tab-1', { stopError: 'encoder stalled', wroteTarget: true });
+    const recorder = video();
+    await startOn(recorder, 'tab-1');
+    expect(paths(await recorder.stop())).toEqual(['video/video.webm']);
+  });
+
+  it('reports a segment whose finish failed and left no file, once', async () => {
+    scripts.set('tab-1', { stopError: 'screencast stop failed' });
+    const recorder = video();
+    await startOn(recorder, 'tab-1');
+    const caught = await recorder.stop().then(() => undefined, (error: unknown) => error);
     expect(caught).toBeInstanceOf(EngineError);
-    expect(String((caught as Error).message)).toContain('video/video.webm');
-    expect(String((caught as Error).message)).toContain('screencast stop failed');
-    expect(video.isArmed).toBe(false);
+    expect(caught).toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('video/video.webm') });
+    expect((caught as Error).message).toContain('screencast stop failed');
     // Reported, then forgotten: the next stop has nothing to say.
-    expect(await video.stop()).toEqual([]);
-    expect(existsSync(path.join(dir, 'video', 'video.webm'))).toBe(false);
+    expect(await recorder.stop()).toEqual([]);
+    expect(existsSync(path.join(artifactsDir, 'video', 'video.webm'))).toBe(false);
   });
 
   it('hands the segments that finalized to the stop after one that reported a lost segment', async () => {
-    const video = recorder();
-    const kept = fakePage();
-    const broken = fakePage({ writes: false, stopError: new Error('screencast stop failed') });
-    await video.arm(kept.page);
-    await video.pageClosing();
-    await video.pageOpened(broken.page);
-    await expect(video.stop()).rejects.toThrow('video/video-part2.webm');
+    scripts.set('tab-2', { stopError: 'screencast stop failed' });
+    const recorder = video();
+    await startOn(recorder, 'tab-1');
+    await recorder.contextOpened('tab-2');
+    await expect(recorder.stop()).rejects.toThrow('video/video-part2.webm');
     // A host that retries the stop gets what did finalize, so nothing on disk goes unreported.
-    expect((await video.stop()).map((segment) => segment.path)).toEqual(['video/video.webm']);
+    expect(paths(await recorder.stop())).toEqual(['video/video.webm']);
   });
 
-  it('starts no segment for a page opened after the attempt abandoned its recording', async () => {
-    const video = recorder();
-    const first = fakePage();
-    const late = fakePage();
-    await video.arm(first.page);
-    await video.abandon();
-    expect(video.isArmed).toBe(false);
-    await video.pageOpened(late.page);
-    expect(late.started).toEqual([]);
+  it('stays disarmed when the first segment cannot start, so a later tab does not record', async () => {
+    scripts.set('tab-1', { startError: 'screencast unavailable' });
+    const recorder = video();
+    await expect(startOn(recorder, 'tab-1')).rejects.toThrow('screencast unavailable');
+    await recorder.contextOpened('tab-2');
+    expect(started()).toHaveLength(1);
+    expect(await recorder.stop()).toEqual([]);
+    expect(stops()).toBe(0);
   });
 
-  it('stays disarmed when the first segment cannot start', async () => {
-    const video = recorder();
-    const dead = fakePage({ startError: new Error('screencast unavailable') });
-    await expect(video.arm(dead.page)).rejects.toThrow('screencast unavailable');
-    expect(video.isArmed).toBe(false);
-    expect(await video.stop()).toEqual([]);
-    expect(dead.stopped.count).toBe(0);
+  it('ends at once a segment whose start outlived the stop', async () => {
+    const { held, release } = gate();
+    bidi.on('browsingContext.startScreencast', async () => {
+      await held;
+      return { result: { screencast: 'cast-tab-1' } };
+    });
+    const recorder = video();
+    const arming = startOn(recorder, 'tab-1');
+    const stopping = recorder.stop();
+    release();
+    await arming;
+    // The start finished after the stop began, so its segment ended at once and the stop hands it over.
+    expect(paths(await stopping)).toEqual(['video/video.webm']);
+    expect(stops()).toBe(1);
+    await recorder.contextOpened('tab-2');
+    expect(started()).toHaveLength(1);
   });
 
-  it('runs every hook straight through until armed', async () => {
-    const video = recorder();
-    const idle = fakePage();
-    await video.pageOpened(idle.page);
-    expect(idle.started).toEqual([]);
-    await video.pageClosing();
-    expect(await video.stop()).toEqual([]);
+});
+
+describe('a segment that cannot start', () => {
+  let artifactsDir: string;
+
+  beforeEach(() => {
+    artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-video-test-'));
+  });
+
+  afterEach(() => {
+    rmSync(artifactsDir, { recursive: true, force: true });
+  });
+
+  /** A Chromium recorder of `tab` on `fake` whose CDP session never opens, with an ffmpeg that is never reached. */
+  function unstartable(fake: FakeBidi, tab: RecordedTab): BidiVideo {
+    fake.on('goog:cdp.getSession', { error: 'unknown error', message: 'no CDP session for this tab' });
+    return new BidiVideo(fake.connection, BROWSER_TRAITS.chromium, artifactsDir, {}, { E2E_FFMPEG_PATH: process.execPath }, tab);
+  }
+
+  it('lets a tab open when its segment cannot start, and reports the lost segment from stop once', async () => {
+    const video = unstartable(new FakeBidi(), recordedTab().tab);
+    await start(video);
+    await expect(video.contextOpened('tab')).resolves.toBeUndefined();
+    await expect(video.stop()).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('no CDP session for this tab') });
+    await expect(video.stop()).resolves.toEqual([]);
+  });
+
+  it('stays disarmed after its own start failed, so later tabs start no segment', async () => {
+    const fake = new FakeBidi();
+    const shown = recordedTab();
+    shown.state.shown = 'tab';
+    const video = unstartable(fake, shown.tab);
+    await expect(start(video)).rejects.toThrow('no CDP session for this tab');
+    const tried = fake.commands('goog:cdp.getSession').length;
+    await video.contextOpened('tab-2');
+    expect(fake.commands('goog:cdp.getSession')).toHaveLength(tried);
+    await expect(video.stop()).resolves.toEqual([]);
+  });
+
+  it('records and arms nothing when a stop lands while its start still looks for ffmpeg', async () => {
+    const fake = new FakeBidi();
+    const shown = recordedTab();
+    shown.state.shown = 'tab';
+    const video = unstartable(fake, shown.tab);
+    const starting = start(video);
+    await expect(video.stop()).resolves.toEqual([]);
+    await expect(starting).resolves.toBeUndefined();
+    await video.contextOpened('tab-2');
+    expect(fake.commands('goog:cdp.getSession')).toHaveLength(0);
   });
 });

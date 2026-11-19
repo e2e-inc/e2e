@@ -40,7 +40,7 @@ e2e 用 TypeScript 测试替换 Selenium 测试套件。定位器按角色和标
 | --- | --- |
 | 每个 `driver.get` 中的 URL | 测试目标上的 `app: { url }`，之后使用相对路径 |
 | 在脚本中启动应用 | `app: { url, command }`，参阅[启动应用](/web#starting-your-app) |
-| 每个浏览器一个驱动 | 每种 `web({ browser })` 构建对应一个测试目标，使用 `chromium`、`firefox` 或 `webkit`，而非 Chrome、Edge 或 Safari |
+| 每个浏览器一个驱动 | 每种 `web({ browser })` 构建对应一个测试目标，使用 `chromium` 或 `firefox`，而非 Chrome、Edge 或 Safari |
 | Selenium Grid | 通过 `workers` 并行运行，通过[浏览器提供方](/browser#hosted-browsers)使用托管 Chromium |
 | 来自 `System.getenv` 的密码 | 配置中的 `credentials` 或 `secrets`，参阅[身份验证](/authentication) |
 
@@ -114,7 +114,7 @@ test('signs in', async ({ app, screen, browser }) => {
 
 | Selenium | 当前替代方式 |
 | --- | --- |
-| `new RemoteWebDriver(gridUrl)`、远程节点上的 Firefox 或 Safari | 使用 `web({ connect })` 连接 CDP 端点。在本地运行 `firefox` 和 `webkit` 测试目标 |
+| `new RemoteWebDriver(gridUrl)`、远程节点上的 Firefox 或 Safari | 使用 `web({ connect })` 连接 CDP 端点。在本地运行 `firefox` 测试目标。将 Safari 测试留在 Selenium 中 |
 | 一个测试中使用两个驱动、WebdriverIO 的 `multiremote` | 通过应用的 API 操作第二个用户 |
 | `getPageSource()`、`getLocalStorage()`、`getSessionStorage()` | `browser.evaluate`，例如 `() => localStorage.getItem('k')` |
 | Java、Python、C# 或 Ruby 绑定 | 测试使用 TypeScript 或 JavaScript |
@@ -126,7 +126,7 @@ test('signs in', async ({ app, screen, browser }) => {
 | Cucumber 功能文件 | 将每个场景改写为测试。一个步骤通常适合对应一个 `agent.act` 目标 |
 | `Thread.sleep`、`Actions.pause`、`wait.until(elementToBeClickable(...))` | 对所等待的状态使用定位器断言。每个操作都会等待其节点 |
 | 对话框打开后调用 `switchTo().alert()`、`alertIsPresent()` | 在打开对话框的操作前调用 `browser.onDialog(handler)` |
-| 真正的 Safari、IE 模式 | `webkit` 是最接近 Safari 的构建。将 IE 模式测试留在 Selenium 中 |
+| 真正的 Safari、IE 模式 | 将这些测试留在 Selenium 中 |
 | `executeCdpCommand`、`DevTools.send`、接收驱动的 SDK | 将这些测试留在 Selenium 中。原始驱动调用不会被记录或脱敏 |
 | Allure 报告 | 将 `junit` 报告器的 XML 交给 Allure，或使用 `htmlReporter()` |
 

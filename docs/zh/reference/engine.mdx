@@ -1517,7 +1517,7 @@ export class InfrastructureError extends E2EError {
 
 | 导出 | 返回值 |
 | --- | --- |
-| [`matchesText`、`toTextPattern`、`describePattern`](#text-patterns) | `boolean`、`TextPattern`、`string` |
+| [`matchesText`、`toTextPattern`、`describePattern`、`createTextMatching`](#text-patterns) | `boolean`、`TextPattern`、`string`、`TextMatching` |
 | [`resolveExpression`](#resolveexpression) | `SemanticNode[]` |
 | [`urlMatches`](#urlmatches) | `boolean` |
 | [`siteOf`、`sameSite`](#site-helpers) | `string`、`boolean` |
@@ -1539,12 +1539,19 @@ export class InfrastructureError extends E2EError {
 export function toTextPattern(match: TextMatch, options?: { exact?: boolean }): TextPattern;
 export function matchesText(actual: string, pattern: TextPattern): boolean;
 export function describePattern(pattern: TextPattern): string;
+export function createTextMatching(): TextMatching;
 ```
 
 ```ts
 const pattern = toTextPattern(/total/i);
 matchesText('Order total', pattern); // true
 describePattern(pattern); // '/total/i'
+```
+
+`createTextMatching()` 以 `matchesText`、`compareText`、`normalizeText` 和 `testPattern` 的形式返回 `matchesText` 所应用的规则。它不捕获任何外部变量。在页面中匹配文本的引擎会把它的源码发送到页面：
+
+```ts
+const source = `(${createTextMatching.toString()})()`;
 ```
 
 | 抛出的错误 | 条件 |
@@ -1573,6 +1580,7 @@ async locate(expression) {
 - 当容器重复包含后代节点的文本时，`text` 和 `label` 返回最内层的匹配。
 - 语义树包含全部信息的引擎（设备）会调用它；浏览器引擎则复现其行为。
 - `selector` 表达式需要 `selector` 选项。
+- `createResolver(platform)` 对平台自身的节点运行同样的规则。它的 `ResolverPlatform` 提供按匹配顺序排列的 `nodes`、每个节点的 `parent`，以及平台的 `matches`、`hasText`、`selector` 和 `fail`，例如浏览器的文本规则和隐藏规则。它不捕获任何外部变量，因此浏览器引擎会把它的源码发送到页面。
 - `frame` 表达式会产生 `FRAME_NOT_FOUND`。
 - `union` 表达式按文档顺序匹配任一分支，不返回重复节点。
 
@@ -1584,7 +1592,7 @@ async locate(expression) {
 export function urlMatches(
   current: string,
   expected: string | RegExp,
-  baseHref: string,
+  baseHref: string | undefined,
   ignoreCase?: boolean,
 ): boolean;
 ```
@@ -2020,7 +2028,7 @@ test('prints a receipt', { requires: ['printer'] }, async ({ printer }) => {
 | 抛出的错误 | 条件 |
 | --- | --- |
 | `INVALID_CONFIG` | 测试首次使用工厂时，工厂返回普通接口，而非通过 `context.fixture` 声明的接口。 |
-| `APP_URL_REQUIRED` | 在未声明 URL 的测试目标上调用 `app.resolveUrl`。 |
+| `APP_URL_REQUIRED` | 在未声明 URL 的测试目标上以相对 URL 调用 `app.resolveUrl`。 |
 | `POLICY_DENIED` | `app.resolveUrl` 使用 `http:` 和 `https:` 以外的协议（`about:blank` 除外）。 |
 
 ```ts
@@ -2165,7 +2173,7 @@ return context.fixture('printer', printer, { print: { kind: 'resource' } });
 
 ### 导出的名称
 
-`EngineCleanupContext`、`EngineDisposeContext`、`OperationContext`、`TextPattern`、`SemanticQuery`、`LocatorExpression`、`NodeRef`、`SemanticNode`、`ViewportPoint`、`ViewportSize`、`ObservationPixels`、`LocatorAction`、`LocatorActionKind`、`PointerAction`、`PointerActionKind`、`ScrollDirection`、`Momentum`、`SelectOption`、`Key`、`KeyModifier`、`KeyName`、`ParsedKey`、`ENGINE_SPI_VERSION`、`LOCATOR_ACTION_KINDS`、`POINTER_ACTION_KINDS`、`KEY_MODIFIERS`、`KEY_NAMES`、`parseKey`、`ENGINE_ERROR_CODES`、`RETRYABLE_ENGINE_ERROR_CODES`、`Secret`、`isSecret`、`TextMatch`、`JsonValue`、`JsonValueRules`、`ResolveExpressionOptions`、`PollConditionOptions`、`WithoutUndefined`、`FixtureOperation`、`EngineIsolation`、`OBSERVED_NAME_LIMIT` 和 `OBSERVED_TEXT_LIMIT` 均从 `e2e/engine` 导出。[引擎协议](/reference/engine-protocol)的 `connectEngine`、`serveEngine`、`describeEngine`、`spawnTransport`、`socketTransport`、`loopbackTransport`、`ENGINE_METHODS`、`ENGINE_PROTOCOL_VERSION` 及其类型也从这里导出。
+`EngineCleanupContext`、`EngineDisposeContext`、`OperationContext`、`TextPattern`、`SemanticQuery`、`LocatorExpression`、`NodeRef`、`SemanticNode`、`ViewportPoint`、`ViewportSize`、`ObservationPixels`、`LocatorAction`、`LocatorActionKind`、`PointerAction`、`PointerActionKind`、`ScrollDirection`、`Momentum`、`SelectOption`、`Key`、`KeyModifier`、`KeyName`、`ParsedKey`、`ENGINE_SPI_VERSION`、`LOCATOR_ACTION_KINDS`、`POINTER_ACTION_KINDS`、`KEY_MODIFIERS`、`KEY_NAMES`、`parseKey`、`ENGINE_ERROR_CODES`、`RETRYABLE_ENGINE_ERROR_CODES`、`Secret`、`isSecret`、`TextMatch`、`JsonValue`、`JsonValueRules`、`ResolveExpressionOptions`、`ResolverPlatform`、`TextMatching`、`PollConditionOptions`、`WithoutUndefined`、`FixtureOperation`、`EngineIsolation`、`OBSERVED_NAME_LIMIT` 和 `OBSERVED_TEXT_LIMIT` 均从 `e2e/engine` 导出。[引擎协议](/reference/engine-protocol)的 `connectEngine`、`serveEngine`、`describeEngine`、`spawnTransport`、`socketTransport`、`loopbackTransport`、`ENGINE_METHODS`、`ENGINE_PROTOCOL_VERSION` 及其类型也从这里导出。
 
 ### `SemanticNode`
 

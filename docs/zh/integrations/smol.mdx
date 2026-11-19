@@ -1,17 +1,17 @@
 ---
 title: smol machines 浏览器
 sidebarTitle: smol machines
-description: 使用 @e2e-dev/smol 的 smol() 浏览器提供方，让每次网页端测试尝试都在你计算机上预热的 Chromium 微型虚拟机的独立分支中运行。
+description: 使用 @e2e-dev/smol 的 smol() 浏览器提供方，在你计算机上预热的 Chromium 微型虚拟机中运行网页端测试。
 "og:image": "https://e2e.com/docs/images/og/integrations/smol.png?v=93b61e0399"
 "twitter:image": "https://e2e.com/docs/images/og/integrations/smol.png?v=93b61e0399"
 ---
 
-`@e2e-dev/smol` 中的 `smol()` 是一个[浏览器提供方](/browser#hosted-browsers)，在你计算机上的 [smol machines](https://smolmachines.com) 微型虚拟机中运行 Chromium。每个工作进程槽位启动一台浏览器虚拟机。默认情况下，每次测试尝试都在它的写时复制分支中运行，约一秒即可就绪，因此每次重试都从相同的浏览器状态开始。只有当应用[在虚拟机中运行](#run-the-app-in-the-machine)时，应用数据才会重置。你计算机上或外部服务中的状态仍然共享。
+`@e2e-dev/smol` 中的 `smol()` 是一个[浏览器提供方](/browser#hosted-browsers)，在你计算机上的 [smol machines](https://smolmachines.com) 微型虚拟机中运行 Chromium。每个工作进程槽位启动一台浏览器虚拟机，每次测试尝试会获得它的一个分支或其中的一个新浏览器上下文，具体取决于[作用域](#choose-a-scope)。你计算机上或外部服务中的状态仍然共享。
 
 ## 配置提供方
 
 <Note>
-smol machines 可在 Apple Silicon 的 macOS 上运行，也可在支持 KVM（`/dev/kvm`）的 Linux 上运行。无需账号或 API 密钥。首次启动会拉取 Playwright Ubuntu 镜像，因此耗时较长。
+smol machines 可在 Apple Silicon 的 macOS 上运行，也可在支持 KVM（`/dev/kvm`）的 Linux 上运行。无需账号或 API 密钥。首次启动会拉取自带 Chromium 的 Playwright Ubuntu 镜像，因此耗时较长。
 </Note>
 
 安装提供方和 smol machines SDK：
@@ -62,44 +62,21 @@ export default {
 
 `prepare` 会在任何尝试创建分支前，操作每个预热浏览器一次。该槽位上的每次尝试都从它留下的 Cookie、存储和页面开始。它替代了 `'attempt'` 作用域无法使用的[会话](/authentication)。
 
-`prepare` 接收浏览器的 DevTools 端点。请在尝试运行所在的默认上下文中操作。在 `prepare` 完成前断开连接，并保持浏览器运行。
+`prepare` 接收浏览器的 DevTools 端点，以及指向其已打开标签页的 `browser` 和 `screen`，与测试获得的相同。向 `browser.goto` 传入完整的 URL。`prepare` 完成后，smol 会将它们分离；浏览器继续运行，并保留其 Cookie、存储和页面。其他 CDP 客户端必须在 `prepare` 完成前断开连接，并保持浏览器运行。一次 `prepare` 中的 `browser` 和 `screen` 调用总共最多可耗时 120 秒；可通过 `prepareTimeout` 调高该值。
 
-<Accordion title="使用 Playwright 登录">
-安装 `@e2e-dev/web` 固定使用的 `playwright-core` 版本，目前为 1.65.1，升级时也要保持版本一致。pnpm 不允许你的配置导入依赖项的依赖项。
-
-<CodeGroup>
-```bash npm
-npm install --save-dev playwright-core@1.65.1
-```
-
-```bash pnpm
-pnpm add -D playwright-core@1.65.1
-```
-
-```bash bun
-bun add -d playwright-core@1.65.1
-```
-</CodeGroup>
-
+<Accordion title="在 prepare 中登录">
 ```ts title="Provider options"
-import { chromium } from 'playwright-core';
-
 smol({
   hostPorts: [3000],
-  prepare: async (cdpEndpoint) => {
-    const browser = await chromium.connectOverCDP(cdpEndpoint);
-    const page = browser.contexts()[0]!.pages()[0]!;
-    await page.goto('http://localhost:3000/login');
-    await page.getByLabel('Email').fill('qa@example.com');
-    await page.getByLabel('Password').fill(process.env.QA_PASSWORD!);
-    await page.getByRole('button', { name: 'Sign in' }).click();
-    await page.waitForURL('**/dashboard');
-    await browser.close();
+  prepare: async (_cdpEndpoint, { browser, screen }) => {
+    await browser.goto('http://localhost:3000/login');
+    await screen.getByLabel('Email').fill('qa@example.com');
+    await screen.getByLabel('Password').fill(process.env.QA_PASSWORD!);
+    await screen.getByRole('button', 'Sign in').tap();
+    await browser.waitForURL('http://localhost:3000/dashboard');
   },
 })
 ```
-
-对于通过 `connectOverCDP` 连接的浏览器，`browser.close()` 只会断开连接。
 </Accordion>
 
 ## 在虚拟机中运行应用
@@ -130,9 +107,9 @@ smol({
 
 ## 选择作用域
 
-默认值 `scope: 'attempt'` 让每次尝试都获得槽位预热浏览器的独立分支，并受到[每次尝试租约](/browser#hosted-browsers)的限制。
+默认值 `scope: 'attempt'` 让每次尝试都获得槽位预热虚拟机的独立分支，因此一个测试对虚拟机的更改（例如应用的本地数据库）不会影响另一个测试。尝试在分支出的浏览器自身的上下文中运行，并带有 `prepare` 留下的内容。在该作用域中，`app.clearState()` 会抛出 `UNSUPPORTED_CAPABILITY`，使用[会话](/authentication)的测试会在收集阶段以 `COLLECTION_ERROR` 失败。`headers`、`locale` 等选项可用。
 
-`scope: 'worker'` 在本次运行中为每个工作进程槽位保留一台虚拟机。每次尝试都会在其中获得一个新的浏览器上下文，与本地运行相同，因此会话以及 `headers`、`locale` 等选项都可用。此时不会创建任何分支，设置 `prepare` 会导致 `INVALID_CONFIG`。
+`scope: 'worker'` 在本次运行中为每个工作进程槽位保留一台虚拟机。每次尝试都会在其中获得一个新的浏览器上下文，与本地运行相同，因此会话和 `app.clearState()` 都可用。此时不会创建任何分支，设置 `prepare` 会导致 `INVALID_CONFIG`。
 
 ## 选项
 
@@ -140,6 +117,7 @@ smol({
 | ----------- | ----------- | ------- |
 | `scope` | `'attempt'` | 参阅[选择作用域](#choose-a-scope)。 |
 | `prepare` | 无 | 参阅[让每个测试从已登录状态开始](#start-every-test-signed-in)。 |
+| `prepareTimeout` | `120000` | 一次 `prepare` 中的 `browser` 和 `screen` 调用总共可耗时的毫秒数。 |
 | `hostPorts` | `[]` | 参阅[配置提供方](#set-up-the-provider)。不能使用 80 或 9229。 |
 | `app` | 无 | 参阅[在虚拟机中运行应用](#run-the-app-in-the-machine)。 |
 | `setup` | 无 | 在每台虚拟机启动 Chromium 之前以 root 身份运行的 Shell 脚本，例如通过 `apt-get update && apt-get install -y fonts-noto-cjk` 安装更多字体。 |
@@ -148,7 +126,7 @@ smol({
 
 ## 与本地浏览器的差异
 
-浏览器的前进/后退缓存已关闭，因此后退会重新加载页面。`browser.waitForDownload` 的行为与本地一致。
+`setInputFiles` 会将文件的字节数据发送到页面，总计最多 50 MB；传入目录会抛出 `UNSUPPORTED_CAPABILITY`。`browser.waitForDownload` 的行为与本地一致：提供方从虚拟机的磁盘读取每个文件。
 
 ## 清理残留虚拟机
 
@@ -161,6 +139,6 @@ smol({
     哪些内容在你的计算机上运行，以及哪些内容仍可能泄露。
   </Card>
   <Card title="托管浏览器" icon="globe" href="/browser#hosted-browsers">
-    浏览器提供方如何租用浏览器，以及 `'attempt'` 作用域的限制。
+    浏览器提供方如何租用浏览器。
   </Card>
 </CardGroup>

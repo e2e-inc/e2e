@@ -57,8 +57,9 @@ export default {
 即使连接仍然保持，超时也会计算没有 CDP 命令的时间。如果测试可能暂停超过 10 分钟，请增大 `keepAlive`。
 
 工作进程作用域会为每次尝试创建隔离的上下文。
-尝试作用域使用全新浏览器的默认上下文，并支持在传输连接中断后重新连接该浏览器。
-适用[按尝试分配的提供方限制](/browser#hosted-browsers)。
+尝试作用域让每次尝试在全新浏览器自身的上下文中运行。
+适用[按尝试分配的提供方限制](/browser#pick-a-lease-scope)。
+在两种作用域中，连接中断都会导致本次尝试失败，下一次尝试会获得一个新浏览器。
 
 会话在清理阶段删除。如果运行器在清理前退出，无活动超时会终止浏览器。
 
@@ -66,7 +67,7 @@ export default {
 
 Chromium、导航、定位器、网络路由、Cookie、截图和网页端引擎的屏幕录制视频均使用 CDP。CDP 授权请求头用于对浏览器连接进行身份验证，不会成为页面请求头。
 
-在 Browser Run 上调用 `browser.back()` 或 `browser.forward()` 后，历史记录导航可能在等待页面的 `load` 事件时超时。
+Browser Run 使用自己的标志启动 Chromium，因此 `browser.back()` 和 `browser.forward()` 可能会从前进/后退缓存中恢复页面。恢复的页面会保留其状态，并且不发送任何请求。
 
 不支持远程文件下载。Browser Run 没有提供可供提供方读取的浏览器文件系统 API。Cloudflare 原生会话录制不会附加到报告中。
 启用[视频](/reference/config#video)后，网页端引擎会为每次尝试录制 WebM 屏幕视频。

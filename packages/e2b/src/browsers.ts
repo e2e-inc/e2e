@@ -71,8 +71,9 @@ const CHROMIUM_PATH = /^\/ms-playwright\/[\w./-]+$/;
 /** Starts Chromium at `chrome` headless, with DevTools on loopback. */
 function startChromium(chrome: string): string {
   if (!CHROMIUM_PATH.test(chrome)) throw new Error(`unexpected Chromium path ${JSON.stringify(chrome)} in the sandbox template`);
-  // A history restore from Chromium's back/forward cache emits no load event
-  // over CDP, so Playwright goBack({ waitUntil: 'load' }) otherwise hangs.
+  // The back/forward cache is off, as in the browser the engine launches:
+  // going back loads the page again, and its request reaches the routes. A
+  // page restored from the cache keeps its state and sends no request.
   return `exec ${chrome} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --no-first-run --no-default-browser-check --disable-features=BackForwardCache --remote-debugging-port=${CHROMIUM_CDP_PORT} --user-data-dir=/tmp/e2e-chromium about:blank > ${CHROMIUM_LOG} 2>&1`;
 }
 

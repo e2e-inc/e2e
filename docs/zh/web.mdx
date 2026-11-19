@@ -119,10 +119,10 @@ app: {
 浏览器只向从 `app.url` 的源发起的请求添加 `headers`，源由协议、主机和端口组成。请求会在重定向到任何源时保留这些请求头。要为其他源添加请求头，例如受相同访问控制保护的 API 主机，请将其列入 `credentialOrigins`。参阅[请求凭据](/reference/security#request-credentials)。对于 ngrok，使用 `'ngrok-skip-browser-warning': '1'`。`app.identity` 可在预览 URL 变化时保持缓存身份稳定。
 
 <Note>
-设置 `headers` 会关闭浏览器的 HTTP 缓存并阻止 Service Worker。
+设置 `headers` 会阻止 Service Worker。
 </Note>
 
-使用 `basicAuth` 进行 HTTP 基本身份验证。浏览器会响应来自 `app.url` 的源及 `credentialOrigins` 中各源的 `401` 质询。如果这些源之一使用默认端口，例如不带端口的 `https://` URL，或使用 IPv6 主机，WebKit 会响应任何源。在 `secrets` 中声明密码，并传入 `secrets.get(name)`：
+使用 `basicAuth` 进行 HTTP 基本身份验证。浏览器会响应来自 `app.url` 的源及 `credentialOrigins` 中各源的 `401` 质询。在 `secrets` 中声明密码，并传入 `secrets.get(name)`：
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
@@ -162,7 +162,7 @@ export default {
   targets: [
     { name: 'desktop', engine: web(), app },
     { name: 'tablet', engine: web({ viewport: { width: 820, height: 1180 } }), app },
-    { name: 'phone', engine: web({ browser: 'webkit', viewport: { width: 390, height: 844 } }), app },
+    { name: 'phone', engine: web({ browser: 'firefox', viewport: { width: 390, height: 844 } }), app },
   ],
 } satisfies E2EConfig;
 ```
@@ -181,7 +181,7 @@ export default {
 { name: 'window', engine: web({ viewport: null }), app }
 ```
 
-本地有头模式启动时会打开一个小窗口。托管浏览器使用你向服务请求的窗口尺寸。`browser.setViewport` 仍然有效。
+本地有头模式启动时会打开浏览器的默认窗口。托管浏览器使用你向服务请求的窗口尺寸。`browser.setViewport` 仍然有效。
 
 ### 在测试中调整尺寸
 

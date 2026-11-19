@@ -35,14 +35,14 @@ e2e:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   variables:
     APP_URL: http://127.0.0.1:3000
-    PLAYWRIGHT_BROWSERS_PATH: $CI_PROJECT_DIR/.cache/ms-playwright
+    E2E_BROWSERS_PATH: $CI_PROJECT_DIR/.cache/e2e/browsers
   cache:
     key:
       files:
         - package-lock.json
     paths:
       - .npm/
-      - .cache/ms-playwright/
+      - .cache/e2e/browsers/
   script:
     - npm ci --cache .npm --prefer-offline
     - npx @e2e-dev/web install chromium --with-deps
@@ -60,7 +60,7 @@ e2e:
 
 规则设置在作业上，而非 `workflow:` 块中，因此同一个作业既可以在独立流水线中运行，也可以[与你的其他作业一起运行](#add-it-to-an-existing-pipeline)。
 
-GitLab 只缓存项目内的路径，因此 `PLAYWRIGHT_BROWSERS_PATH` 将[浏览器](/reference/web#installing-browsers)放到项目内。缓存会保留它们，直到锁文件发生变化。
+GitLab 只缓存项目内的路径，因此 `E2E_BROWSERS_PATH` 将[浏览器](/reference/web#installing-browsers)放到项目内。缓存会保留它们，直到锁文件发生变化。
 
 让应用的命令监听 `127.0.0.1`，即 `APP_URL` 指定的主机。在容器中，监听 `localhost` 的开发服务器（例如 Vite）可能只绑定到 `::1`。这样 e2e 就无法访问它，运行会因 `APP_UNREACHABLE` 失败。
 

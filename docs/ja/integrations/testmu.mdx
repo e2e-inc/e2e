@@ -226,8 +226,8 @@ testmuBrowsers({
   それ以降もキュー待ちやプロビジョニング中のセッションは `LAUNCH_TIMEOUT` で失敗します。
   `launchTimeout` が 60 秒を超えている場合は `ENGINE_FAILURE` になります。
 - **ブラウザ接続の切断。** ブラウザセッションは再開できないため、接続が切れると試行が失敗します。
-- **ブラウザのダウンロード。** TestMu AI のブラウザは自身のマシンにダウンロードを保存するため、
-  `browser.waitForDownload` は `ENGINE_FAILURE` で失敗します。代わりにダウンロードリンクやリクエストを検証してください。
+- **ブラウザのダウンロード。** TestMu AI のブラウザは別のマシンで動作し、プロバイダーはダウンロードを提供しないため、
+  `browser.waitForDownload` は `UNSUPPORTED_CAPABILITY` で失敗します。代わりにダウンロードリンクやリクエストを検証してください。
 
 ## 次のステップ
 

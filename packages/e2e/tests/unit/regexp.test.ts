@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { testPattern } from '@e2e-dev/core/lib/internal/regexp';
+import { testPattern } from '@e2e-dev/core/lib/internal/text';
 
 describe('testPattern', () => {
   it('never leaks lastIndex state between calls with global or sticky flags', () => {

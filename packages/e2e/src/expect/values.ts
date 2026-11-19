@@ -3,9 +3,8 @@
 import { types } from 'node:util';
 import { equals, isAsymmetric, iterableEquality, subsetEquality } from '@vitest/expect';
 import { TestError } from '@e2e-dev/core/lib/internal/errors';
-import { testPattern } from '@e2e-dev/core/lib/internal/regexp';
 import { describeIssue, requireStandardSchema } from '@e2e-dev/core/lib/internal/standard-schema';
-import { toTextPattern } from '@e2e-dev/core/lib/internal/text';
+import { testPattern, toTextPattern } from '@e2e-dev/core/lib/internal/text';
 import type { AsymmetricMatcher, NegatedValueExpectation, PropertyPath, StandardSchemaV1, ValueExpectation } from '@e2e-dev/core/lib/types';
 import { withMessage } from './heading.ts';
 

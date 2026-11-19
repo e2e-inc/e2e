@@ -1,0 +1,42 @@
+{
+  "chrome-headless-shell": {
+    "buildId": "157.0.8103.38",
+    "sha256": {
+      "darwin-arm64": "e6a6b13551aa12f951d0891d79282606b13742837c8fa0505e1272bae116ce82",
+      "darwin-x64": "79821745d0a72d2ba752d981284ed0a9e6fa320dad133596941a17dba6186de3",
+      "linux-x64": "deafffa74660b34853a4119c361fd427ac8c9fcb62db51ddb8a797cd83a4ba2d",
+      "linux-arm64": "b9b910a57b2a15eb3e55000a2339f93a973934a413ebfc6e585a50ec6c42fd6c",
+      "win32-x64": "1ff4540855478ba0848e03f1ef8d455f77d058b38285df91bc34273788a73446"
+    }
+  },
+  "chrome": {
+    "buildId": "157.0.8103.38",
+    "sha256": {
+      "darwin-arm64": "3406b38b52b7d341d74450eb7b369be038c9fec9894c8b8a9e9e9f97333caf2f",
+      "darwin-x64": "c6fcc2869b0d5a421e880d7bcdabe96e4261c4100e125fc4e4daf6346474efa6",
+      "linux-x64": "8cdeb344e9b2cefe59f4aea8d1d93d5d93054c03cde217665c16fc1f62e72a66",
+      "linux-arm64": "5517510e61657ff43ee9ab804ecd1a499b3d5bd3caf72f097516bd6565ba5a17",
+      "win32-x64": "ae0deef27d449e1d7529df7705d609bab102de48464da13567ed3dd2ee1a0586"
+    }
+  },
+  "firefox": {
+    "buildId": "stable_159.0.1",
+    "sha256": {
+      "darwin-arm64": "0c214da4439c1eb4cea28a3c141ff112d511aa32c67f9d12e91116569c8d8dda",
+      "darwin-x64": "0c214da4439c1eb4cea28a3c141ff112d511aa32c67f9d12e91116569c8d8dda",
+      "linux-x64": "469ce17120018e1c95411d254cf3c5f8db2dd1768a7acde5a2a089b00072ac65",
+      "linux-arm64": "847651efd44351972a281afa54845708faffb358692f551af391dd77736bbd6b",
+      "win32-x64": "729af643b8e0a3809d6153a57a448cb96a01e6fa5e2e7ff782152ede6202eadd"
+    }
+  },
+  "ffmpeg": {
+    "buildId": "b6.1.1",
+    "sha256": {
+      "darwin-arm64": "8923876afa8db5585022d7860ec7e589af192f441c56793971276d450ed3bbfa",
+      "darwin-x64": "929b375c1182d956c51f7ac25e0b2b0411fb01f6f407aa15c9758efeb4242106",
+      "linux-x64": "bfe8a8fc511530457b528c48d77b5737527b504a3797a9bc4866aeca69c2dffa",
+      "linux-arm64": "754a678672298bc68156adff58aa7385a592c2b30b1d0ae8750c45c915c4bac0",
+      "win32-x64": "8883a3dffbd0a16cf4ef95206ea05283f78908dbfb118f73c83f4951dcc06d77"
+    }
+  }
+}

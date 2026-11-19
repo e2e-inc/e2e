@@ -5,47 +5,24 @@
  * wrappers are not listed a second time.
  */
 
-import { chromium, type Browser, type Page } from 'playwright-core';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import type { SemanticNode } from '@e2e-dev/core/engine';
-import { CLOSED_SHADOW_ROOTS_INIT_SCRIPT } from '../../src/closed-shadow.ts';
-import { captureDocument } from '../../src/observation.ts';
+import { flatten, startWebSession, type WebSession } from '../helpers/web-session.ts';
 
-let browser: Browser;
-let page: Page;
+let page: WebSession;
 
 beforeAll(async () => {
-  browser = await chromium.launch();
-  page = await browser.newPage();
-  await page.addInitScript(CLOSED_SHADOW_ROOTS_INIT_SCRIPT);
-  await page.goto('about:blank');
+  page = await startWebSession();
 });
 
 afterAll(async () => {
-  await browser.close();
+  await page.close();
 });
 
 /** Every node of one observation of `html`, in document order. */
 async function observe(html: string): Promise<SemanticNode[]> {
   await page.setContent(html);
-  let nextId = 1;
-  const { tree } = await captureDocument(
-    {
-      testIdAttribute: 'data-testid',
-      site: undefined,
-      reserveIds: (count) => { const first = nextId; nextId += count; return first; },
-      commit: () => undefined,
-    },
-    page,
-    { framePath: [], budget: 100, deadline: Date.now() + 10_000, signal: new AbortController().signal },
-  );
-  const out: SemanticNode[] = [];
-  const visit = (node: SemanticNode): void => {
-    out.push(node);
-    for (const child of node.children ?? []) visit(child);
-  };
-  for (const child of tree.children ?? []) visit(child);
-  return out;
+  return flatten((await page.observe()).root).slice(1);
 }
 
 /** The nodes as `role "name" text`, the parts a model reads. */
@@ -146,7 +123,7 @@ it('reads no slotted text a hidden slot hides, and lists a slotted child that sh
     </script>
   `);
   expect(lines(nodes)).toEqual(['Status end', 'shown']);
-  expect(await page.locator('p').innerText()).toBe('Status shown end');
+  expect(await page.browser.evaluate(() => document.querySelector('p')!.innerText)).toBe('Status shown end');
 });
 
 it('keeps listing the inline text of a line too long for the text bound, so nothing past the cut is lost', async () => {

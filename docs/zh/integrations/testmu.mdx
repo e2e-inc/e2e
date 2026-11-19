@@ -186,7 +186,7 @@ testmuBrowsers({
 - **设备设置和日志。** 不支持设备设置（权限、位置、网络、外观）、系统提示框、通过 agent-device 录制和读取设备日志，以及端口反向转发。在 TestMu AI 控制台中读取日志，并使用 TestMu AI Tunnel 访问你所在网络上的服务器。
 - **浏览器连接限时 60 秒。** 网页端引擎最多等待 60 秒，让浏览器会话接受 CDP 连接。更短的 `launchTimeout` 会提前结束等待，但更长的值不会延长等待。超过该时间仍在排队或准备中的会话会以 `LAUNCH_TIMEOUT` 失败；当 `launchTimeout` 超过 60 秒时，则以 `ENGINE_FAILURE` 失败。
 - **浏览器连接中断。** 浏览器会话无法恢复，因此连接中断会导致尝试失败。
-- **浏览器下载。** TestMu AI 的浏览器将下载文件保存在其自己的机器上，因此 `browser.waitForDownload` 会以 `ENGINE_FAILURE` 失败。请改为对下载链接或请求进行断言。
+- **浏览器下载。** TestMu AI 的浏览器运行在其他机器上，提供方也不提供下载，因此 `browser.waitForDownload` 会以 `UNSUPPORTED_CAPABILITY` 失败。请改为对下载链接或请求进行断言。
 
 ## 下一步
 

@@ -17,7 +17,9 @@ const pages = {
   // operating system: what toHaveScreenshot is dogfooded against with one stored
   // file per system. The noise block takes a new color on every load and is
   // only ever compared masked; the far block sits below the fold; the framed
-  // block is measured through the iframe.
+  // block is measured through the iframe; the pulse block shows its own
+  // blue only while its animation is stopped, and no frame of the animation
+  // comes within the matcher's color tolerance of it.
   '/swatches': () => ({
     title: 'Swatches',
     body: `<h1>Swatches</h1>
@@ -27,6 +29,8 @@ const pages = {
          <div data-testid="noise" style="width:40px;height:40px"></div>
        </div>
        <iframe id="swatch-frame" src="/swatches/frame" title="swatch frame" style="width:120px;height:80px;border:0"></iframe>
+       <style>@keyframes swatch-pulse { from { background-color: #ff0000; } to { background-color: #ffff00; } }</style>
+       <div data-testid="pulse" style="width:40px;height:40px;background:#0000ff;animation:swatch-pulse 400ms linear infinite alternate"></div>
        <div data-testid="far" style="margin-top:1600px;width:64px;height:24px;background:#16a34a"></div>
        <script>
          document.querySelector('[data-testid="noise"]').style.background =

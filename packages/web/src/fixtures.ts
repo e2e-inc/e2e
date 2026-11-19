@@ -1,7 +1,7 @@
 /** The fixtures a `web()` target contributes, as types only. */
 
 import type { App } from '@e2e-dev/core';
-import type { Browser } from './browser.ts';
+import type { Browser } from './fixture/types.ts';
 
 /** `app` on a web target. A `web()` target always declares `app.url`, so `baseUrl` is always set. */
 export interface WebApp extends App {

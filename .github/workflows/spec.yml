@@ -51,6 +51,8 @@ jobs:
         run: pnpm check:dead-code
       - name: Typecheck packages
         run: pnpm typecheck
+      - name: Published types compile in a consumer's project
+        run: pnpm check:consumer-types
       - name: Error code reference
         run: pnpm docs:check-errors
       - name: Peer ranges on the runner
@@ -75,7 +77,7 @@ jobs:
           pnpm exec tsc -p .dev/skills/babysit/scripts
           node --test .dev/skills/babysit/scripts/pr-status.test.ts
       - name: Install browsers
-        uses: ./.github/actions/chromium
+        uses: ./.github/actions/browsers
       # On a pull request, Jev leaves out the tests the change can't affect;
       # a push to main passes no --changed-since and runs every test.
       # Without the key (a fork's pull request), every test runs.
@@ -95,7 +97,8 @@ jobs:
 
   test:
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 15
+    # Every package's tests in a row: about 16 minutes with the web engine's on both browsers.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -114,9 +117,11 @@ jobs:
       - uses: ./.github/actions/workspace-install
         with:
           agent-device-version: ${{ inputs.agent-device-version }}
+      # @e2e-dev/web's integration suite, locator parity included, runs on Firefox too.
       - name: Install browsers
-        uses: ./.github/actions/chromium
+        uses: ./.github/actions/browsers
         with:
+          browsers: chromium firefox
           only-shell: false
       - name: Unit and integration tests
         run: pnpm test
@@ -176,11 +181,73 @@ jobs:
           AGENT_DEVICE_VERSION: ${{ inputs.agent-device-version }}
         run: node scripts/install-smoke.ts ${{ matrix.pnpm }}
 
+  # The testbed's own tests on Firefox. The tests ported from Playwright
+  # (tag playwright) assert Chromium's errors and run on Chromium in `check`.
+  firefox:
+    name: testbed (firefox)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@9fd676a19091d4595eefd76e4bd31c97133911f1 # v4.2.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: pnpm
+      - uses: ./.github/actions/workspace-install
+        with:
+          agent-device-version: ${{ inputs.agent-device-version }}
+      - name: Build
+        run: pnpm run build
+      - name: Install Firefox
+        uses: ./.github/actions/browsers
+        with:
+          browsers: firefox
+      - name: Testbed on Firefox
+        working-directory: apps/testbed
+        run: node node_modules/e2e/dist/cli/bin.js run --config e2e.firefox.config.ts --exclude-tag playwright
+      - name: Upload report
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: testbed-firefox
+          path: |
+            apps/testbed/.e2e/report.json
+            apps/testbed/.e2e/results
+          if-no-files-found: warn
+          retention-days: 7
+
+  # The web engine on Windows: its own installer, the watchdog that ends the
+  # browser's process tree, and a launch and attempt on each browser.
+  windows:
+    name: web (windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@9fd676a19091d4595eefd76e4bd31c97133911f1 # v4.2.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @e2e-dev/core run build && pnpm --filter e2e run build && pnpm --filter @e2e-dev/web run build
+      - name: Install Chromium and Firefox
+        run: node packages/web/dist/bin.js install chromium firefox
+      # A Firefox launch takes 8 to 17 s on the Windows runner, so a test or a
+      # hook that launches twice needs more than the suite's 30 s.
+      - name: Launch, attempt, and close on each browser
+        working-directory: packages/web
+        env:
+          E2E_WEB_TEST_TIMEOUT_MS: 90000
+        run: npx vitest run tests/integration/lifecycle.test.ts tests/integration/keyboard.test.ts tests/integration/tabs.test.ts
+
   # The one check the ruleset requires from this workflow. A skipped job
   # passes (the change cannot reach it); a failed or cancelled one fails it.
   gate:
     name: spec gate
-    needs: [check, test, bun, install]
+    needs: [check, test, bun, install, firefox, windows]
     if: ${{ always() }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5

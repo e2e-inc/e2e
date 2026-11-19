@@ -161,36 +161,6 @@ export default {
 
 キャッシュは、ステップが `ctx.actions` を通して行った操作を記録します。状態を変更するツール呼び出しは記録に空白を残し、再生時にエグゼキューターがその部分を埋めます。エントリーのキーは、エグゼキューターではなく、設定されたエージェントとそのコンテキストです。エージェントのエグゼキューターを変えても、エントリーは保持されます。
 
-## ページを直接操作する
-
-Web エンジンでは、`@e2e-dev/web` の `surfaceOf(handle)` から現在の試行の `Page` と `BrowserContext` を取得できます。アクティブな試行の外では、どちらのアクセサーも `INVALID_STATE` を投げます。`page()` はページが開かれていない場合にも投げます。
-
-```ts
-import type { E2EConfig, StepExecutor } from 'e2e';
-import { web, surfaceOf } from '@e2e-dev/web';
-
-const engine = web();
-const own: StepExecutor = {
-  name: 'own-tools',
-  version: '1',
-  cache: 'off',
-  async runStep(ctx) {
-    const page = surfaceOf(engine)!.page();   // the page app.open() navigated
-    await ctx.budgets.runTool({ name: 'click', mutates: true }, () =>
-      page.getByRole('button', { name: 'Save' }).click(),
-    );
-    return { status: 'passed', summary: 'saved' };
-  },
-};
-
-export default {
-  targets: [{ engine, app: { url: 'http://localhost:3000' } }],
-  agents: { default: { executor: own } },
-} satisfies E2EConfig;
-```
-
-Playwright の直接呼び出しは、操作の認可とリプレイキャッシュを通らず、アーティファクトも残しません。ステップの期限と判定の記録は引き続き適用されます。
-
 ## 次のステップ
 
 <CardGroup cols={2}>

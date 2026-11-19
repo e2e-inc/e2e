@@ -4,11 +4,11 @@
  * that keeps a link out of `device.openApp`.
  *
  * The runner's own rule (`resolveNavigationUrl`, reached by a fixture as
- * `context.app.resolveUrl`) first demands an app URL, which a device engine
- * never declares, and admits http(s) alone, where a device link is any app's
- * custom scheme. So the check here is a list of refused schemes: the ones
- * that read local content or inline a document, and the browser wrappers
- * (`view-source:file:...`, `blob:`, `filesystem:`) that carry one inside.
+ * `context.app.resolveUrl`) admits http(s) alone, where a device link is
+ * any app's custom scheme. So the check here is a list of refused schemes:
+ * the ones that read local content or inline a document, and the browser
+ * wrappers (`view-source:file:...`, `blob:`, `filesystem:`) that carry one
+ * inside.
  */
 
 import { ConfigurationError, isRefusedLinkScheme, TestError } from '@e2e-dev/core/engine';

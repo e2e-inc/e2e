@@ -40,7 +40,7 @@ e2e は Selenium のスイートを TypeScript のテストに置き換えます
 | --- | --- |
 | 各 `driver.get` の URL | ターゲットの `app: { url }` に設定し、以後は相対パス |
 | スクリプトでアプリを起動 | `app: { url, command }`。[アプリの起動](/web#starting-your-app)を参照 |
-| ブラウザごとのドライバー | `web({ browser })` のビルドごとにターゲットを作成。Chrome、Edge、Safari ではなく `chromium`、`firefox`、`webkit` |
+| ブラウザごとのドライバー | `web({ browser })` のビルドごとにターゲットを作成。Chrome、Edge、Safari ではなく `chromium` または `firefox` |
 | Selenium Grid | 並列実行には `workers`、ホスト型 Chromium には[ブラウザプロバイダー](/browser#hosted-browsers) |
 | `System.getenv` からのパスワード | 設定の `credentials` または `secrets`。[認証](/authentication)を参照 |
 
@@ -114,7 +114,7 @@ test('signs in', async ({ app, screen, browser }) => {
 
 | Selenium | 現在使える方法 |
 | --- | --- |
-| `new RemoteWebDriver(gridUrl)`、リモートノード上の Firefox または Safari | `web({ connect })` で CDP エンドポイントに接続。`firefox` と `webkit` のターゲットはローカルで実行 |
+| `new RemoteWebDriver(gridUrl)`、リモートノード上の Firefox または Safari | `web({ connect })` で CDP エンドポイントに接続。`firefox` のターゲットはローカルで実行。Safari のテストは Selenium に残す |
 | 1 テストに 2 つのドライバー、WebdriverIO の `multiremote` | 2 人目のユーザーをアプリの API で操作 |
 | `getPageSource()`, `getLocalStorage()`, `getSessionStorage()` | `browser.evaluate`。例: `() => localStorage.getItem('k')` |
 | Java、Python、C#、Ruby のバインディング | テストは TypeScript または JavaScript |
@@ -126,7 +126,7 @@ test('signs in', async ({ app, screen, browser }) => {
 | Cucumber の feature ファイル | 各シナリオをテストに書き換え。1 ステップを 1 つの `agent.act` の目標にできることが多い |
 | `Thread.sleep`, `Actions.pause`, `wait.until(elementToBeClickable(...))` | 待ちたい状態へのロケーターアサーション。各アクションは自身のノードを待つ |
 | ダイアログが開いた後の `switchTo().alert()`、`alertIsPresent()` | ダイアログを開く操作の前に `browser.onDialog(handler)` |
-| 実際の Safari、IE モード | Safari に最も近いビルドは `webkit`。IE モードのテストは Selenium に残す |
+| 実際の Safari、IE モード | Selenium に残す |
 | `executeCdpCommand`、`DevTools.send`、ドライバーを受け取る SDK | Selenium に残す。生のドライバー呼び出しは記録も伏せ字化もされない |
 | Allure レポート | `junit` レポーターの XML を Allure に渡すか、`htmlReporter()` を使用 |
 

@@ -1,65 +1,50 @@
 /**
- * `setInputFiles` against a real page, through both kinds of target the
- * engine acts on: a file input and a label for one take the files without a
+ * `setInputFiles` against a real page, for both callers the engine acts for,
+ * a test's step and the agent: a file input and a label for one take the files without a
  * click, a button that opens a hidden input's chooser is clicked and the
- * chooser takes them, an empty list clears either, and a button that opens
- * nothing fails.
+ * chooser takes them, an empty list clears either, two files for an input
+ * that takes one are refused as never sent, and a button that opens nothing
+ * fails.
  */
 
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { chromium, type Browser, type Page } from 'playwright-core';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { classifyActionError, dispatchLocatorAction } from '../../src/actions.ts';
-import type { ActionTarget } from '../../src/support.ts';
+import { KINDS, targetOf, type Target } from '../helpers/action-target.ts';
+import { startWebSession, type WebSession } from '../helpers/web-session.ts';
 
-let browser: Browser;
-let page: Page;
+let session: WebSession;
 let file: string;
 
 beforeAll(async () => {
-  browser = await chromium.launch();
+  session = await startWebSession({ startAttempt: false });
   file = path.join(mkdtempSync(path.join(tmpdir(), 'e2e-upload-')), 'avatar.png');
   writeFileSync(file, 'png');
 });
 
 afterAll(async () => {
-  await browser.close();
+  await session.close();
+  rmSync(path.dirname(file), { recursive: true, force: true });
 });
 
 beforeEach(async () => {
-  await page?.close();
-  page = await browser.newPage();
+  await session.startAttempt();
 });
 
-const KINDS = ['locator', 'element'] as const;
-
-/** The control as the engine would hold it: a locator, or an element handle pinned by an observation. */
-async function targetOf(kind: (typeof KINDS)[number], selector: string): Promise<ActionTarget> {
-  const locator = page.locator(selector);
-  if (kind === 'locator') return { kind, locator };
-  const element = await locator.elementHandle();
-  if (element === null) throw new Error(`no element for ${selector}`);
-  return { kind, element };
-}
-
-/** Uploads `paths`, the fixture file by default, and returns the contract error it failed with, classified as the engine reports it. */
-async function upload(target: ActionTarget, paths: readonly string[] = [file]): Promise<Error | undefined> {
-  const action = { kind: 'setInputFiles', paths } as const;
+/** Uploads `paths`, the fixture file by default, and returns the contract error it failed with, as the engine reports it. */
+async function upload(target: Target, paths: readonly string[] = [file]): Promise<Error | undefined> {
   try {
-    await dispatchLocatorAction(target, action, { timeoutMs: 2000, signal: new AbortController().signal }, () => {
-      throw new Error('no second target');
-    });
+    await session.engine.perform!(target.ref, { kind: 'setInputFiles', paths }, { ...session.op(2_000), origin: target.origin });
     return undefined;
   } catch (cause) {
-    return classifyActionError(cause, action);
+    return cause as Error;
   }
 }
 
 /** The page's record of the file the input holds and the clicks it saw. */
 function state(): Promise<{ files: string; clicks: number }> {
-  return page.evaluate(() => ({
+  return session.browser.evaluate(() => ({
     files: Array.from(document.querySelector<HTMLInputElement>('#avatar')!.files ?? [], (picked) => picked.name).join(', '),
     clicks: (window as unknown as { clicks: number }).clicks,
   }));
@@ -67,48 +52,56 @@ function state(): Promise<{ files: string; clicks: number }> {
 
 const COUNT_CLICKS = '<script>window.clicks = 0; document.addEventListener("click", () => window.clicks++, true)</script>';
 
-describe.each(KINDS)('through the %s target', (kind) => {
+describe.each(KINDS)('for the %s', (kind) => {
   it('sets a file input directly', async () => {
-    await page.setContent(`<input id="avatar" type="file">${COUNT_CLICKS}`);
-    expect(await upload(await targetOf(kind, '#avatar'))).toBeUndefined();
+    await session.setContent(`<input id="avatar" type="file">${COUNT_CLICKS}`);
+    expect(await upload(await targetOf(session, kind, '#avatar'))).toBeUndefined();
     expect(await state()).toEqual({ files: 'avatar.png', clicks: 0 });
   });
 
   it('sets the input a label names without clicking the label', async () => {
-    await page.setContent(`<label id="pick" for="avatar">Choose avatar</label><input id="avatar" type="file" hidden>${COUNT_CLICKS}`);
-    expect(await upload(await targetOf(kind, '#pick'))).toBeUndefined();
+    await session.setContent(`<label id="pick" for="avatar">Choose avatar</label><input id="avatar" type="file" hidden>${COUNT_CLICKS}`);
+    expect(await upload(await targetOf(session, kind, '#pick'))).toBeUndefined();
     expect(await state()).toEqual({ files: 'avatar.png', clicks: 0 });
   });
 
   it('clicks a button over a hidden input and sets the files through its chooser', async () => {
-    await page.setContent(`
+    await session.setContent(`
       <button id="pick" type="button" onclick="document.getElementById('avatar').click()">Choose avatar</button>
       <input id="avatar" type="file" hidden>${COUNT_CLICKS}`);
-    expect(await upload(await targetOf(kind, '#pick'))).toBeUndefined();
+    expect(await upload(await targetOf(session, kind, '#pick'))).toBeUndefined();
     expect((await state()).files).toBe('avatar.png');
   });
 
-  it.each([
+  it.for([
     ['a file input', '<input id="avatar" type="file">', '#avatar'],
     ['a button over a hidden input', `<button id="pick" type="button" onclick="document.getElementById('avatar').click()">Choose avatar</button><input id="avatar" type="file" hidden>`, '#pick'],
-  ])('clears %s with an empty list and fires input and change', async (_name, html, selector) => {
-    await page.setContent(`${html}${COUNT_CLICKS}`);
-    expect(await upload(await targetOf(kind, selector))).toBeUndefined();
-    await page.evaluate(() => {
+  ] as const)('clears %s with an empty list and fires input and change', async ([_name, html, selector]) => {
+    await session.setContent(`${html}${COUNT_CLICKS}`);
+    expect(await upload(await targetOf(session, kind, selector))).toBeUndefined();
+    await session.browser.evaluate(() => {
       const events: string[] = [];
       (window as unknown as { events: string[] }).events = events;
       const input = document.querySelector('#avatar')!;
       input.addEventListener('input', () => events.push('input'));
       input.addEventListener('change', () => events.push('change'));
+      return null;
     });
-    expect(await upload(await targetOf(kind, selector), [])).toBeUndefined();
+    expect(await upload(await targetOf(session, kind, selector), [])).toBeUndefined();
     expect((await state()).files).toBe('');
-    expect(await page.evaluate(() => (window as unknown as { events: string[] }).events)).toEqual(['input', 'change']);
+    expect(await session.browser.evaluate(() => (window as unknown as { events: string[] }).events)).toEqual(['input', 'change']);
+  });
+
+  it('refuses two files for an input that takes one before anything is sent, and changes nothing', async () => {
+    await session.setContent(`<input id="avatar" type="file">${COUNT_CLICKS}`);
+    const error = await upload(await targetOf(session, kind, '#avatar'), [file, file]);
+    expect(error).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'Non-multiple file input can only accept single file' });
+    expect((await state()).files).toBe('');
   });
 
   it('fails when the button opens no file chooser', async () => {
-    await page.setContent(`<button id="pick" type="button">Choose avatar</button><input id="avatar" type="file" hidden>${COUNT_CLICKS}`);
-    const error = await upload(await targetOf(kind, '#pick'));
+    await session.setContent(`<button id="pick" type="button">Choose avatar</button><input id="avatar" type="file" hidden>${COUNT_CLICKS}`);
+    const error = await upload(await targetOf(session, kind, '#pick'));
     expect(error).toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringContaining('opened no file chooser') });
     expect((await state()).files).toBe('');
   });

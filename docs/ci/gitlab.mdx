@@ -43,14 +43,14 @@ e2e:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   variables:
     APP_URL: http://127.0.0.1:3000
-    PLAYWRIGHT_BROWSERS_PATH: $CI_PROJECT_DIR/.cache/ms-playwright
+    E2E_BROWSERS_PATH: $CI_PROJECT_DIR/.cache/e2e/browsers
   cache:
     key:
       files:
         - package-lock.json
     paths:
       - .npm/
-      - .cache/ms-playwright/
+      - .cache/e2e/browsers/
   script:
     - npm ci --cache .npm --prefer-offline
     - npx @e2e-dev/web install chromium --with-deps
@@ -69,7 +69,7 @@ e2e:
 The rules are on the job, not in a `workflow:` block, so the same job works
 in a pipeline of its own or [beside your other jobs](#add-it-to-an-existing-pipeline).
 
-GitLab caches only paths inside the project, so `PLAYWRIGHT_BROWSERS_PATH`
+GitLab caches only paths inside the project, so `E2E_BROWSERS_PATH`
 moves the [browsers](/reference/web#installing-browsers) there. The cache
 keeps them until the lockfile changes.
 

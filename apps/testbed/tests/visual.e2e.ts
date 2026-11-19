@@ -20,6 +20,10 @@ test.describe('screenshots', { requires: ['browser'] }, () => {
     await expect(browser.frameLocator('#swatch-frame').getByTestId('framed')).toHaveScreenshot('framed.png');
   });
 
+  test('compares a block an animation keeps recoloring with the animation stopped', async ({ screen }) => {
+    await expect(screen.getByTestId('pulse')).toHaveScreenshot('pulse.png');
+  });
+
   test('tells one block from another\'s stored screenshot', async ({ screen }) => {
     await expect(screen.getByTestId('far')).not.toHaveScreenshot('palette.png');
   });

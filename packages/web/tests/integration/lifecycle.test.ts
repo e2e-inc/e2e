@@ -1,5 +1,5 @@
 /**
- * The playwright engine's lifecycle through the public contract: one shared
+ * The web engine's lifecycle through the public contract: one shared
  * browser per engine, one context per attempt, and honest idempotent
  * teardown. No runner involved - the hooks are driven directly, the way the
  * attempt executor drives them.
@@ -8,21 +8,21 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { BrowserContext, Page } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type {
   VideoFile,
   VideoSegment,
-  EngineCleanupContext,
   EngineHandle,
   LocatorExpression,
-  OperationContext,
   SemanticNode,
 } from '@e2e-dev/core/engine';
-import { web, surfaceOf } from '../../src/index.ts';
+import type { Browser } from '../../src/index.ts';
 import { startFixtureApp, type FixtureApp } from '../helpers/fixture-app.ts';
 import { decodePng } from '../helpers/png.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
+import { browserFixture, byRole, cleanup, flatten, initInfo, operation, startPageServer, testWeb as web, type PageServer } from '../helpers/web-session.ts';
+import { BidiConnection } from '../../src/driver/connection.ts';
+import { gate } from '../helpers/gate.ts';
 
 /** The segments as files: a local recording never links, so a link here is a failure. */
 function videoFiles(segments: readonly VideoSegment[]): VideoFile[] {
@@ -32,39 +32,43 @@ function videoFiles(segments: readonly VideoSegment[]): VideoFile[] {
   });
 }
 
-function cleanup(signal = new AbortController().signal): EngineCleanupContext {
-  return { signal, timeoutMs: 30_000 };
-}
-
-function operation(attemptId: string, signal = new AbortController().signal): OperationContext {
-  return { signal, timeoutMs: 30_000, runId: 'run-pool', attemptId, origin: 'test' };
-}
-
 function attempt(attemptId: string, artifactsDir: string) {
   return { attemptId, artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace };
 }
 
-function byRole(role: string): LocatorExpression {
-  return { kind: 'query', query: { kind: 'role', value: { kind: 'string', value: role, exact: true } } };
+/** The pages a test writes inline, served beside the fixture app. */
+let pages: PageServer;
+let contentCount = 0;
+
+/** The open attempt's page, reached through the engine's `browser` fixture. */
+function pageOf(engine: EngineHandle) {
+  const browser: Browser = browserFixture(engine, { baseUrl: pages.origin });
+  return {
+    browser,
+    /** Serves `html` at a fresh path and navigates there. */
+    async setContent(html: string): Promise<void> {
+      contentCount += 1;
+      await browser.goto(pages.serve(`/content-${String(contentCount)}`, html));
+    },
+    evaluate: <T,>(fn: () => T): Promise<T> => browser.evaluate(fn as never) as Promise<T>,
+    url: () => browser.url(),
+    /** Resolves once `fn` returns true in the page. */
+    async waitForFunction(fn: () => boolean): Promise<void> {
+      await expect.poll(() => browser.evaluate(fn as never), { timeout: 5_000 }).toBe(true);
+    },
+  };
 }
 
-/** Depth-first walk of one observation tree. */
-function* walk(node: SemanticNode): Generator<SemanticNode> {
-  yield node;
-  for (const child of node.children ?? []) yield* walk(child);
-}
-
-/** Runs one attempt on a booted engine and always tears it down. */
 /**
  * Decodes a recording inside the page and reads its last frame: the frame's
  * size, how much of it is the grey a screencast pads a smaller frame with,
  * and how much of it is content.
  */
 async function lastFrame(
-  page: Page,
+  page: ReturnType<typeof pageOf>,
   webm: Buffer,
 ): Promise<{ width: number; height: number; padded: number; inked: number }> {
-  return page.evaluate(async (bytes) => {
+  return page.browser.evaluate(async (bytes: number[]) => {
     const video = document.createElement('video');
     video.muted = true;
     video.src = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'video/webm' }));
@@ -94,60 +98,25 @@ async function lastFrame(
     }
     const total = data.length / 4;
     return { width: canvas.width, height: canvas.height, padded: padded / total, inked: inked / total };
-  }, [...webm]);
+  }, [...webm]) as Promise<{ width: number; height: number; padded: number; inked: number }>;
+}
+
+/** The page's viewport in CSS pixels. */
+function viewportOf(page: ReturnType<typeof pageOf>): Promise<{ width: number; height: number }> {
+  return page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
 }
 
 /**
- * Watches the frames the engine's screencast delivers, so a test can hold a
- * video segment open until it received a painted one: Playwright writes a
- * white frame for a segment stopped before its first frame arrived.
+ * Lets the page paint into the recording before a segment closes: its
+ * second animation frame from now, then half a second. Firefox's recorder
+ * takes the page's repaints on its own clock and reports nothing of what it
+ * has taken, so a recording stopped at the animation frame can end one
+ * repaint short: the last frame of a segment then held no ink in 7 of 41
+ * runs. Chromium's segment ends on a screenshot of the page as it stands.
  */
-function watchPaint() {
-  const painted = new WeakSet<Page>();
-  const restores: (() => void)[] = [];
-  const watchPage = (page: Page): void => {
-    const start = page.screencast.start.bind(page.screencast);
-    const spy = vi.spyOn(page.screencast, 'start').mockImplementation((options) => start({
-      ...options,
-      onFrame: async (frame) => {
-        const hasPaint = await page.evaluate(async (bytes) => {
-          const bitmap = await createImageBitmap(new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' }));
-          const canvas = document.createElement('canvas');
-          canvas.width = bitmap.width;
-          canvas.height = bitmap.height;
-          const context = canvas.getContext('2d')!;
-          context.drawImage(bitmap, 0, 0);
-          bitmap.close();
-          const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
-          for (let index = 0; index < data.length; index += 4) {
-            if (data[index]! < 200 || data[index + 1]! < 200 || data[index + 2]! < 200) return true;
-          }
-          return false;
-        }, [...frame.data]).catch(() => false);
-        if (hasPaint) painted.add(page);
-        await options?.onFrame?.(frame);
-      },
-    }));
-    restores.push(() => spy.mockRestore());
-  };
-  return {
-    /** Observes the context's pages, including those it opens later, before their recording starts. */
-    watchContext(context: BrowserContext): void {
-      context.on('page', watchPage);
-      for (const page of context.pages()) watchPage(page);
-    },
-    /** Waits for a painted frame delivered after this call, so a page that painted for an earlier segment cannot pass for this one. */
-    async settle(page: Page): Promise<void> {
-      painted.delete(page);
-      // A static page may not repaint after navigation overtakes its first screencast frame.
-      await page.screenshot();
-      await expect.poll(() => painted.has(page), { timeout: 5_000, message: 'the recorder received a painted frame' }).toBe(true);
-    },
-    /** Removes every observer, so none reaches the next test. */
-    restore(): void {
-      while (restores.length > 0) restores.pop()!();
-    },
-  };
+async function repainted(page: ReturnType<typeof pageOf>): Promise<void> {
+  await page.browser.evaluate('() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(null))))');
+  await new Promise((resolve) => setTimeout(resolve, 500));
 }
 
 async function withAttempt(
@@ -168,17 +137,7 @@ async function withAttempt(
 }
 
 async function boot(engine: EngineHandle, app: FixtureApp): Promise<void> {
-  await engine.init!({
-    runId: 'run-pool',
-    targetName: 'web',
-    projectRoot: process.cwd(),
-    app: { site: new URL(app.url).hostname },
-    env: {},
-    headed: false,
-    workerSlot: 0,
-    log: () => undefined,
-    signal: new AbortController().signal,
-  });
+  await engine.init!(initInfo({ app: { site: new URL(app.url).hostname } }));
 }
 
 async function openAttempt(
@@ -190,7 +149,7 @@ async function openAttempt(
   await engine.startAttempt!({ attemptId, artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
   await engine.session!.open!(`${app.url}/`, operation(attemptId));
   const nodes = await engine.locate!(
-    { kind: 'query', query: { kind: 'role', value: { kind: 'string', value: 'heading', exact: true } } },
+    byRole('heading'),
     operation(attemptId),
   );
   return nodes[0]?.name ?? '';
@@ -202,11 +161,13 @@ describe('web engine lifecycle', () => {
 
   beforeAll(async () => {
     app = await startFixtureApp();
+    pages = await startPageServer();
     artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-pool-'));
   });
 
   afterAll(async () => {
     await app.close();
+    await pages.close();
     rmSync(artifactsDir, { recursive: true, force: true });
   });
 
@@ -227,16 +188,19 @@ describe('web engine lifecycle', () => {
   });
 
   it('serves consecutive attempts from one browser and survives an attempt close', async () => {
+    const sent = vi.spyOn(BidiConnection.prototype, 'send');
     const engine = web();
     try {
       await boot(engine, app);
       expect(await openAttempt(engine, app, artifactsDir, 'a1')).toBe('Home');
       expect((await engine.observe!(operation('a1'))).location).toBe(`${app.url}/`);
       await engine.endAttempt!(cleanup());
-      // The next attempt reuses the pooled browser process, not a new launch.
       expect(await openAttempt(engine, app, artifactsDir, 'a2')).toBe('Home');
       await engine.endAttempt!(cleanup());
+      // Every launch opens a session of its own, so one session is one browser for both attempts.
+      expect(sent.mock.calls.filter(([method]) => method === 'session.new')).toHaveLength(1);
     } finally {
+      sent.mockRestore();
       await engine.dispose!(cleanup());
     }
   });
@@ -318,7 +282,7 @@ describe('web engine lifecycle', () => {
         await engine.session!.open!(`${app.url}/pointer`, op());
 
         const snapshot = await engine.observe!(op());
-        const nodes = [...walk(snapshot.root)];
+        const nodes = flatten(snapshot.root);
         const heading = nodes.find((node) => node.role === 'heading');
         expect(heading).toMatchObject({ name: 'Pointer', level: 2 });
         expect(nodes.find((node) => node.name === 'Mute')?.states).toMatchObject({ pressed: false });
@@ -380,7 +344,7 @@ describe('web engine lifecycle', () => {
         await engine.session!.open!(`${app.url}/`, operation('attributes1'));
 
         const snapshot = await engine.observe!(operation('attributes1'));
-        const treeNodes = [...walk(snapshot.root)];
+        const treeNodes = flatten(snapshot.root);
         expect(treeNodes.some((node) => node.attributes?.class === 'card active')).toBe(false);
         expect(treeNodes.some((node) => node.attributes?.readonly !== undefined)).toBe(false);
         expect(treeNodes.some((node) => node.attributes?.['data-extra'] !== undefined)).toBe(false);
@@ -426,7 +390,7 @@ describe('web engine lifecycle', () => {
         );
         expect(names(firstOfLast)).toEqual(['Third']);
 
-        // filter({ hasText }) composes as a per-element Playwright filter ahead of
+        // filter({ hasText }) composes as a per-element filter ahead of
         // the value predicate. Inputs have no text content; the textarea's is its
         // initial content, exactly as for any other query.
         const withText = await engine.locate!(
@@ -482,20 +446,23 @@ describe('web engine lifecycle', () => {
         };
         expect(names(await engine.locate!(edited, operation('dv1')))).toEqual(['Third']);
 
-        // What still needs the value predicate inside Playwright's chain stays
-        // unsupported, and says which compositions those are.
+        // A display-value query composes like any other: as a scope, a form
+        // control has no descendants; as a has filter, it finds the body that holds it.
         const child: LocatorExpression = {
           kind: 'query',
           query: { kind: 'role', value: { kind: 'string', value: 'textbox', exact: true } },
           scope: shared,
         };
-        await expect(engine.locate!(child, operation('dv1'))).rejects.toMatchObject({
-          code: 'UNSUPPORTED_CAPABILITY',
-          message: 'displayValue queries cannot scope child queries or serve as a has or hasNot filter in this engine',
-        });
-        await expect(
-          engine.locate!({ kind: 'filter', source: byRole('main'), has: shared }, operation('dv1')),
-        ).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+        expect(await engine.locate!(child, operation('dv1'))).toEqual([]);
+        const labels: LocatorExpression = { kind: 'selector', selector: 'label' };
+        const holding = await engine.locate!({ kind: 'filter', source: labels, has: shared }, operation('dv1'));
+        const lacking = await engine.locate!({ kind: 'filter', source: labels, hasNot: shared }, operation('dv1'));
+        expect(holding.map((node) => node.text)).toEqual([expect.stringMatching(/^First/), expect.stringMatching(/^Second/)]);
+        expect(lacking.map((node) => node.text)).toEqual([expect.stringMatching(/^Third/), expect.stringMatching(/^Other/)]);
+        // The heading holds no control, so the same filter leaves it out.
+        expect(await engine.locate!({ kind: 'filter', source: byRole('heading'), has: shared }, operation('dv1'))).toEqual([]);
+        // And as either branch of an or: the controls of both values, in document order.
+        expect(names(await engine.locate!({ kind: 'union', left: edited, right: shared }, operation('dv1')))).toEqual(['First', 'Second', 'Third']);
       });
     });
 
@@ -686,21 +653,21 @@ describe('web engine lifecycle', () => {
       await inAttempt('o1', async () => {
         await engine.session!.open!(`${app.url}/form`, operation('o1'));
         const first = await engine.observe!(operation('o1'));
-        const textbox = [...walk(first.root)].find((node) => node.role === 'textbox');
+        const textbox = flatten(first.root).find((node) => node.role === 'textbox');
         expect(textbox).toBeDefined();
         await engine.perform!(textbox!.ref, { kind: 'fill', value: 'fresh', sensitive: false }, operation('o1'));
 
         // The id is stamped on the element: a second look names the same
         // textbox by the same id, and the earlier ref still acts on it.
         const second = await engine.observe!(operation('o1'));
-        const again = [...walk(second.root)].find((node) => node.role === 'textbox');
+        const again = flatten(second.root).find((node) => node.role === 'textbox');
         expect(again!.ref.id).toBe(textbox!.ref.id);
         await engine.perform!(textbox!.ref, { kind: 'fill', value: 'late', sensitive: false }, operation('o1'));
 
         // A new document has none of the old elements: the id is gone with it.
         await engine.session!.open!(`${app.url}/`, operation('o1'));
         const third = await engine.observe!(operation('o1'));
-        expect([...walk(third.root)].some((node) => node.ref.id === textbox!.ref.id)).toBe(false);
+        expect(flatten(third.root).some((node) => node.ref.id === textbox!.ref.id)).toBe(false);
         await expect(
           engine.perform!(textbox!.ref, { kind: 'fill', value: 'gone', sensitive: false }, operation('o1')),
         ).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
@@ -710,10 +677,10 @@ describe('web engine lifecycle', () => {
     it('reports a located ref stale once a second element matches it, and acts on neither', async () => {
       await inAttempt('amb1', async () => {
         await engine.session!.open!(`${app.url}/`, operation('amb1'));
-        const page = surfaceOf(engine)!.page();
+        const page = pageOf(engine);
         await page.setContent('<script>window.taps = 0</script><button onclick="taps++">Go</button>');
         const [go] = await engine.locate!(byRole('button'), operation('amb1'));
-        await page.evaluate(() => document.body.insertAdjacentHTML('beforeend', '<button onclick="taps++">Go</button>'));
+        await page.evaluate(() => { document.body.insertAdjacentHTML('beforeend', '<button onclick="taps++">Go</button>'); return null; });
 
         await expect(engine.perform!(go!.ref, { kind: 'tap' }, operation('amb1'))).rejects.toMatchObject({
           code: 'NODE_STALE',
@@ -726,7 +693,7 @@ describe('web engine lifecycle', () => {
     it('reports a drag whose drop target turns ambiguous after the press as possibly committed', async () => {
       await inAttempt('amb2', async () => {
         await engine.session!.open!(`${app.url}/`, operation('amb2'));
-        const page = surfaceOf(engine)!.page();
+        const page = pageOf(engine);
         await page.setContent(`
           <script>window.downs = 0</script>
           <button onmousedown="downs++; document.body.insertAdjacentHTML('beforeend', '<div role=region>Drop</div>')">Card</button>
@@ -748,7 +715,7 @@ describe('web engine lifecycle', () => {
         expect(first.root.ref.id).toBe('root');
         expect(first.root.name).toBe('Fixture Form');
         // The element ids under the root are stamped in the page; the root's is the engine's.
-        expect([...walk(first.root)].slice(1).every((node) => /^n\d+$/.test(node.ref.id))).toBe(true);
+        expect(flatten(first.root).slice(1).every((node) => /^n\d+$/.test(node.ref.id))).toBe(true);
 
         // A new document stamps new numbers; the root keeps its id.
         await engine.session!.open!(`${app.url}/`, operation('r1'));
@@ -758,7 +725,7 @@ describe('web engine lifecycle', () => {
         expect(second.location).toBe(`${app.url}/`);
 
         // The viewport swipe arrives as a swipe on the root, addressed from an earlier observation.
-        const page = surfaceOf(engine)!.page();
+        const page = pageOf(engine);
         await page.setContent('<div style="height: 5000px">tall</div>');
         await engine.perform!(first.root.ref, { kind: 'swipe', direction: 'down' }, operation('r1'));
         await page.waitForFunction(() => window.scrollY > 0);
@@ -771,7 +738,7 @@ describe('web engine lifecycle', () => {
     it('refuses to swipe a node with no box even when its child is under aim', async () => {
       await inAttempt('dc2', async () => {
         await engine.session!.open!(`${app.url}/`, operation('dc2'));
-        const page = surfaceOf(engine)!.page();
+        const page = pageOf(engine);
         await page.setContent(`
           <body style="margin: 0"><ul aria-label="Feed" style="display: contents"><li style="display: block; height: 400px">Item</li></ul></body>`);
         const [feed] = await engine.locate!(byRole('list'), operation('dc2'));
@@ -785,7 +752,7 @@ describe('web engine lifecycle', () => {
       await inAttempt('dc1', async () => {
         await engine.session!.open!(`${app.url}/contents`, operation('dc1'));
         const snapshot = await engine.observe!(operation('dc1'));
-        const fields = [...walk(snapshot.root)].filter((node) => node.role === 'textbox').map((node) => node.name);
+        const fields = flatten(snapshot.root).filter((node) => node.role === 'textbox').map((node) => node.name);
         expect(fields).toEqual(['Email', 'First name']);
       });
     });
@@ -796,7 +763,7 @@ describe('web engine lifecycle', () => {
         await inAttempt('cm1', async () => {
           await engine.session!.open!(`${app.url}/closed-login`, operation('cm1'));
           const snapshot = await engine.observe!(operation('cm1'));
-          const nodes = [...walk(snapshot.root)];
+          const nodes = flatten(snapshot.root);
           const user = nodes.find((node) => node.role === 'textbox' && node.name === 'User');
           const password = nodes.find((node) => node.states?.secure === true);
           expect(user?.rect).toBeDefined();
@@ -824,11 +791,11 @@ describe('web engine lifecycle', () => {
       try {
         await inAttempt('fm1', async () => {
           await engine.session!.open!(`${app.url}/`, operation('fm1'));
-          const page = surfaceOf(engine)!.page();
+          const page = pageOf(engine);
           await page.setContent(
             `<body style="margin:0"><iframe srcdoc='${frame}' style="position:absolute;left:0;top:0;width:400px;height:200px;border:0"></iframe></body>`,
           );
-          await page.frameLocator('iframe').locator('input[type=password]').waitFor();
+          await page.waitForFunction(() => document.querySelector('iframe')?.contentDocument?.querySelector('input[type=password]') != null);
 
           const relative = await engine.artifacts!.screenshot('framed', operation('fm1'));
           const shot = decodePng(new Uint8Array(readFileSync(path.join(shotDir, relative))));
@@ -887,14 +854,15 @@ describe('web engine lifecycle', () => {
     }
   });
 
-  it('stops waiting on cleanup once its budget is aborted, and recovers on the next attempt', async () => {
+  it('stops waiting on cleanup once its budget is aborted, reports it, and recovers on the next attempt', async () => {
     const engine = web();
     try {
       await boot(engine, app);
       expect(await openAttempt(engine, app, artifactsDir, 'g1')).toBe('Home');
       const exhausted = new AbortController();
       exhausted.abort();
-      await expect(engine.endAttempt!({ signal: exhausted.signal, timeoutMs: 0 })).resolves.toBeUndefined();
+      // The close could not finish, so the browser is retired and the cut-short cleanup reported.
+      await expect(engine.endAttempt!({ signal: exhausted.signal, timeoutMs: 0 })).rejects.toMatchObject({ code: 'CANCELLED' });
       expect(await openAttempt(engine, app, artifactsDir, 'g2')).toBe('Home');
     } finally {
       await engine.endAttempt!(cleanup());
@@ -902,15 +870,15 @@ describe('web engine lifecycle', () => {
     }
   });
 
-  it('cancels an in-flight operation when its signal aborts instead of waiting out Playwright', async () => {
+  it('cancels an in-flight operation when its signal aborts instead of waiting out the driver', async () => {
     const engine = web();
     await withAttempt(engine, app, artifactsDir, 'h1', async () => {
       const controller = new AbortController();
-      const started = Date.now();
-      const pending = engine.session!.open!(`${app.url}/slow`, operation('h1', controller.signal));
-      setTimeout(() => controller.abort(), 100);
+      // The signal aborts once the page is asked for. The page is never answered and the budget outlasts the test,
+      // so nothing but the abort ends the navigation: one that waited out the driver would never settle here.
+      const unanswered = pages.serve('/unanswered', () => controller.abort());
+      const pending = engine.session!.open!(unanswered, operation('h1', { signal: controller.signal, timeoutMs: 600_000 }));
       await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' });
-      expect(Date.now() - started).toBeLessThan(3_000);
     });
   });
 
@@ -924,7 +892,7 @@ describe('web engine lifecycle', () => {
       await engine.session!.open!(`${app.url}/state?set=abc`, operation('s1'));
       expect(await token()).toBe('abc');
       const state = await engine.state!.capture(operation('s1'));
-      expect(state.format).toBe('playwright-storage-state');
+      expect(state.format).toBe('bidi-storage-state');
 
       await engine.session!.reset!(operation('s1'));
       await engine.session!.open!(`${app.url}/state`, operation('s1'));
@@ -934,16 +902,41 @@ describe('web engine lifecycle', () => {
       await engine.session!.open!(`${app.url}/state`, operation('s1'));
       expect(await token()).toBe('abc');
 
-      // A restart keeps the persisted state and shows nothing until the harness reopens the app.
+      // A restart keeps the persisted state.
       await engine.session!.restart!(operation('s1'));
-      expect(surfaceOf(engine)!.page().url()).toBe('about:blank');
-      expect((await engine.observe!(operation('s1'))).location).toBe('about:blank');
       await engine.session!.open!(`${app.url}/state`, operation('s1'));
       expect(await token()).toBe('abc');
 
       await expect(
-        engine.state!.restore({ format: 'playwright-storage-state', version: 1, data: '/etc/passwd' }, operation('s1')),
+        engine.state!.restore({ format: 'bidi-storage-state', version: 1, data: '/etc/passwd' }, operation('s1')),
       ).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    });
+  });
+
+  it('shows a blank page after a restart until the harness reopens the app', async () => {
+    const engine = web();
+    await withAttempt(engine, app, artifactsDir, 's2', async () => {
+      await engine.session!.open!(`${app.url}/state`, operation('s2'));
+      await engine.session!.restart!(operation('s2'));
+      expect(await pageOf(engine).url()).toBe('about:blank');
+      expect((await engine.observe!(operation('s2'))).location).toBe('about:blank');
+    });
+  });
+
+  it('reaches networkidle after a restart closed a tab whose frame had a request in flight', async () => {
+    const engine = web();
+    await withAttempt(engine, app, artifactsDir, 's3', async () => {
+      const page = pageOf(engine);
+      const { browser } = page;
+      const { held: inFlight, release: asked } = gate();
+      const stuck = pages.serve('/stuck', () => asked());
+      const frame = pages.serve('/stuck-frame', `<script>addEventListener('message', () => void fetch(${JSON.stringify(stuck)}))</script>`);
+      await browser.goto(pages.serve('/stuck-outer', `<iframe src="${frame}"></iframe>`), { waitUntil: 'networkidle' });
+      await page.evaluate(() => document.querySelector('iframe')!.contentWindow!.postMessage('go', '*'));
+      await inFlight;
+      await engine.session!.restart!(operation('s3'));
+      await browser.goto(pages.serve('/after-stuck', '<h1>After</h1>'), { waitUntil: 'networkidle', timeout: 10_000 });
+      expect(await browser.url()).toBe(`${pages.origin}/after-stuck`);
     });
   });
 
@@ -951,9 +944,8 @@ describe('web engine lifecycle', () => {
     const engine = web({ viewport: null });
     await withAttempt(engine, app, artifactsDir, 'w1', async () => {
       await engine.session!.open!(`${app.url}/form`, operation('w1'));
-      const page = surfaceOf(engine)!.page();
-      expect(page.viewportSize()).toBeNull();
-      const measured = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+      const page = pageOf(engine);
+      const measured = await viewportOf(page);
       expect(measured.width).toBeGreaterThan(0);
       const snapshot = await engine.observe!(operation('w1'), { pixels: true });
       expect(snapshot.viewport).toEqual(measured);
@@ -974,10 +966,10 @@ describe('web engine lifecycle', () => {
     });
     await withAttempt(engine, app, artifactsDir, 'tid1', async () => {
       await engine.session!.open!(`${app.url}/`, operation('tid1'));
-      await surfaceOf(engine)!.page().setContent(
+      await pageOf(engine).setContent(
         '<button data-qa="go">Go</button><button data-testid="stop">Stop</button>',
       );
-      const observed = [...walk((await engine.observe!(operation('tid1'))).root)];
+      const observed = flatten((await engine.observe!(operation('tid1'))).root);
       const go = observed.find((node) => node.name === 'Go');
       const stop = observed.find((node) => node.name === 'Stop');
       expect(go?.testId).toBe('go');
@@ -994,50 +986,35 @@ describe('web engine lifecycle', () => {
   it('records a video per page at the viewport size: a restart and a state reset each continue in a new segment', async () => {
     const engine = web();
     const videoDir = mkdtempSync(path.join(tmpdir(), 'e2e-video-'));
-    const nodesOf = (snapshot: { root: SemanticNode }) => [...walk(snapshot.root)];
-    const paint = watchPaint();
-    const restores: (() => void)[] = [];
+    const nodesOf = (snapshot: { root: SemanticNode }) => flatten(snapshot.root);
     try {
       await withAttempt(engine, app, videoDir, 'v1', async () => {
         await engine.session!.open!(`${app.url}/form`, operation('v1'));
-        const context = surfaceOf(engine)!.context();
-        paint.watchContext(context);
-        const browser = context.browser()!;
-        const newContext = browser.newContext.bind(browser);
-        const contextSpy = vi.spyOn(browser, 'newContext').mockImplementation(async (options) => {
-          const next = await newContext(options);
-          paint.watchContext(next);
-          return next;
-        });
-        restores.push(() => contextSpy.mockRestore());
         await engine.artifacts!.startVideo!(operation('v1'));
-        const page = surfaceOf(engine)!.page();
-        const viewport = page.viewportSize()!;
+        const page = pageOf(engine);
+        const viewport = await viewportOf(page);
         // Observations, actions, and captures run as they would without a recording.
         const observed = nodesOf(await engine.observe!(operation('v1'), { pixels: true }));
         const textbox = observed.find((node) => node.role === 'textbox' && node.name === 'First');
         await engine.perform!(textbox!.ref, { kind: 'fill', value: 'recorded', sensitive: false }, operation('v1'));
         await engine.artifacts!.screenshot('shot', operation('v1'));
-        await paint.settle(surfaceOf(engine)!.page());
+        await repainted(page);
         // A restart closes the page and opens another, blank until the harness
         // reopens the app: the recording continues in a second segment.
         await engine.session!.restart!(operation('v1'));
-        expect(surfaceOf(engine)!.page()).not.toBe(page);
-        expect(surfaceOf(engine)!.page().url()).toBe('about:blank');
         await engine.session!.open!(`${app.url}/form`, operation('v1'));
-        await paint.settle(surfaceOf(engine)!.page());
+        await repainted(page);
         // A state reset recreates the context; the recording continues in a third.
         await engine.session!.reset!(operation('v1'));
-        expect(surfaceOf(engine)!.page().url()).toBe('about:blank');
         await engine.session!.open!(`${app.url}/`, operation('v1'));
-        await paint.settle(surfaceOf(engine)!.page());
+        await repainted(page);
         const segments = videoFiles(await engine.artifacts!.stopVideo!(operation('v1')));
         expect(segments.map((segment) => segment.path)).toEqual([
           'video/video.webm',
           'video/video-part2.webm',
           'video/video-part3.webm',
         ]);
-        const viewer = surfaceOf(engine)!.page();
+        const viewer = page;
         for (const segment of segments) {
           const absolute = path.join(videoDir, segment.path);
           expect(existsSync(absolute), segment.path).toBe(true);
@@ -1055,8 +1032,6 @@ describe('web engine lifecycle', () => {
         }
       });
     } finally {
-      for (const restore of restores) restore();
-      paint.restore();
       rmSync(videoDir, { recursive: true, force: true });
     }
   });
@@ -1064,19 +1039,17 @@ describe('web engine lifecycle', () => {
   it('records a video started mid-attempt at the viewport size, each time it starts', async () => {
     const engine = web();
     const videoDir = mkdtempSync(path.join(tmpdir(), 'e2e-video-'));
-    const paint = watchPaint();
     try {
       await withAttempt(engine, app, videoDir, 'v3', async () => {
         // A host that records on demand, after the page is open.
         await engine.session!.open!(`${app.url}/`, operation('v3'));
-        paint.watchContext(surfaceOf(engine)!.context());
-        const viewer = surfaceOf(engine)!.page();
-        const viewport = viewer.viewportSize()!;
+        const viewer = pageOf(engine);
+        const viewport = await viewportOf(viewer);
         const segments: VideoFile[] = [];
         for (const url of [`${app.url}/form`, `${app.url}/`]) {
           await engine.artifacts!.startVideo!(operation('v3'));
           await engine.session!.open!(url, operation('v3'));
-          await paint.settle(viewer);
+          await repainted(viewer);
           segments.push(...videoFiles(await engine.artifacts!.stopVideo!(operation('v3'))));
         }
         expect(segments.map((segment) => segment.path)).toEqual(['video/video.webm', 'video/video-part2.webm']);
@@ -1088,7 +1061,6 @@ describe('web engine lifecycle', () => {
         }
       });
     } finally {
-      paint.restore();
       rmSync(videoDir, { recursive: true, force: true });
     }
   });
@@ -1099,29 +1071,40 @@ describe('web engine lifecycle', () => {
     try {
       await withAttempt(engine, app, videoDir, 'v4', async () => {
         await engine.session!.open!(`${app.url}/`, operation('v4'));
-        const page = surfaceOf(engine)!.page();
-        const spy = vi.spyOn(page.screencast, 'start').mockRejectedValueOnce(new Error('screencast unavailable'));
+        const sendExtension = BidiConnection.prototype.sendExtension;
+        const spy = vi.spyOn(BidiConnection.prototype, 'sendExtension').mockImplementation(function (this: BidiConnection, method, params) {
+          if (method === 'goog:cdp.sendCommand' && (params as { method?: string }).method === 'Page.startScreencast') {
+            return Promise.reject(new Error('screencast unavailable'));
+          }
+          return sendExtension.call(this, method, params);
+        });
+        // Firefox records natively, so its screencast starts over plain BiDi.
+        const send = BidiConnection.prototype.send;
+        const nativeSpy = vi.spyOn(BidiConnection.prototype, 'send').mockImplementation(function (this: BidiConnection, method, params) {
+          if (method === 'browsingContext.startScreencast') return Promise.reject(new Error('screencast unavailable'));
+          return send.call(this, method, params);
+        });
         try {
           await expect(engine.artifacts!.startVideo!(operation('v4'))).rejects.toThrow('screencast unavailable');
         } finally {
           spy.mockRestore();
+          nativeSpy.mockRestore();
         }
         await engine.session!.open!(`${app.url}/form`, operation('v4'));
-        expect(surfaceOf(engine)!.page().url()).toBe(`${app.url}/form`);
+        expect(await pageOf(engine).url()).toBe(`${app.url}/form`);
       });
     } finally {
       rmSync(videoDir, { recursive: true, force: true });
     }
   });
 
-  it('opens the attempt page when the video starts', async () => {
+  it('opens no page when the video starts, and records the page the app opens', async () => {
     const engine = web();
     const videoDir = mkdtempSync(path.join(tmpdir(), 'e2e-video-'));
     try {
       await withAttempt(engine, app, videoDir, 'v2', async () => {
         await engine.artifacts!.startVideo!(operation('v2'));
-        // The page exists before any navigation: the recording owns its screencast.
-        expect(surfaceOf(engine)!.page().url()).toBe('about:blank');
+        await expect(pageOf(engine).url()).rejects.toMatchObject({ code: 'INVALID_STATE' });
         await engine.session!.open!(`${app.url}/`, operation('v2'));
         const segments = videoFiles(await engine.artifacts!.stopVideo!(operation('v2')));
         expect(segments.map((segment) => segment.path)).toEqual(['video/video.webm']);

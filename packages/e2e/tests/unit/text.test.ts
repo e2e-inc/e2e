@@ -1,6 +1,6 @@
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
-import { bound, boundIsAmbiguous, compareText, matchesText, normalizeRegexpFlags, normalizeText, toTextPattern } from '@e2e-dev/core/lib/internal/text';
+import { bound, boundIsAmbiguous, compareText, createTextMatching, matchesText, normalizeRegexpFlags, normalizeText, testPattern, toTextPattern } from '@e2e-dev/core/lib/internal/text';
 
 describe('normalizeText', () => {
   it('trims and collapses unicode whitespace runs to one ASCII space', () => {
@@ -44,6 +44,29 @@ describe('compareText', () => {
     expect(compareText(value, { kind: 'string', value, exact: true }, raw)).toBe(true);
     expect(compareText(value, { kind: 'regexp', source: '^line1\\n\\nline2 {2}$', flags: '' }, raw)).toBe(true);
     expect(compareText(value, { kind: 'string', value: 'line1 line2', exact: true }, { ...raw, normalize: true })).toBe(true);
+  });
+});
+
+describe('createTextMatching', () => {
+  it('runs serialized, closing over nothing of its module', () => {
+    // oxlint-disable-next-line no-new-func -- the page revives the rules from their source the same way
+    const revived = (new Function(`return (${createTextMatching.toString()})`)() as typeof createTextMatching)();
+    const global = { kind: 'regexp', source: 'b', flags: 'g' } as const;
+    expect(revived.testPattern('^a', 'y', 'ab')).toBe(true);
+    expect(revived.normalizeText('  a \t\n b\u00a0c ')).toBe('a b c');
+    expect(revived.matchesText('  Sign\n in ', { kind: 'string', value: 'Sign in', exact: true })).toBe(true);
+    expect(revived.matchesText('Sign In Now', { kind: 'string', value: 'sign in', exact: false })).toBe(true);
+    expect(revived.matchesText('abc', global)).toBe(true);
+    expect(revived.matchesText('abc', global)).toBe(true);
+    expect(revived.compareText('Hello World', { kind: 'string', value: 'hello', exact: true }, { mode: 'contains', normalize: true, ignoreCase: true })).toBe(true);
+  });
+
+  it('gives every instance a pattern cache of its own, bounded', () => {
+    const { testPattern: test } = createTextMatching();
+    for (let index = 0; index < 600; index += 1) expect(test(`^${String(index)}$`, '', String(index))).toBe(true);
+    expect(test('^0$', '', '0')).toBe(true);
+    expect(() => test('(', '', 'x')).toThrow(SyntaxError);
+    expect(() => testPattern('(', '', 'x')).toThrow(SyntaxError);
   });
 });
 

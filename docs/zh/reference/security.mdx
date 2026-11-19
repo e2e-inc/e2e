@@ -104,7 +104,6 @@ description: 运行器对模型输入、工具调用、机密值、脱敏、会�
 - 同一主机的其他端口、子域名，以及 `vercel.app` 等共享域下的同级主机，都属于其他源。除下文说明的情况外，从那里发起的请求不携带 `headers`，来自那里的 `401` 也不会得到响应。
 - `headers` 取决于请求最初发起的源。向允许的源发起的请求会在所有重定向中保留它们，无论重定向到哪个源。从其他源发起的请求不携带它们，即使重定向到允许的源也是如此。
 - `basicAuth` 响应发出 `401` 的源。重定向到其他源，例如从 `http:` 到 `https:`，或从根域名到 `www`，不会得到响应，除非你列出了最终落点的源。
-- 在 WebKit 中，如果允许的源使用其协议的默认端口（`https://staging.example.com`）或 IPv6 主机，`basicAuth` 会响应任何源的 `401`。WebKit 无法将凭据限定到此类源。
 - 额外源必须是没有路径、查询字符串或片段的 `http:` 或 `https:` 源，例如 `https://api.example.com`。其他形式、主机中的 `*` 和端口 `0` 都会在加载配置时触发 `INVALID_CONFIG`。
 
 ### 站点检查
@@ -285,7 +284,7 @@ export default {
 | 你的模型提供方 | 调用模型的智能体步骤。确定性测试和完全回放的步骤不会调用模型。 |
 | 订阅提供方的登录和模型列表端点 | `e2e login` 和 `e2e models`（[订阅](/subscriptions)）。 |
 | 应用的 `readyUrl` | 对运行器启动的应用进行就绪探测。 |
-| Playwright 浏览器下载 | 浏览器缺失时下载一次。 |
+| `storage.googleapis.com`（Chrome for Testing）、`archive.mozilla.org`（Firefox）和 GitHub Releases（ffmpeg） | 浏览器或 ffmpeg 缺失时下载一次。 |
 | `web({ connect })` 中的 DevTools 端点 | 每次运行该测试目标时。 |
 | GitHub API | 仅来自 `@e2e-dev/github` 报告器。 |
 | 你传入的 `model` 的提供方 | 仅来自 [`decisionFilter()`](/filters)：提交更改的差异（只有工作区发生变化的文件仅发送名称）、测试文件，以及保存其会话的准备文件，按[文本下载](#downloads)的方式脱敏，但机密值提供方返回的值除外。 |
@@ -297,7 +296,7 @@ export default {
 | `hub-cloud.browserstack.com` 和 `api-cloud.browserstack.com`（或 `BROWSERSTACK_API_ENDPOINT`） | 仅来自 [`browserstack()`](/integrations/browserstack)。使用 `BROWSERSTACK_USERNAME` 和 `BROWSERSTACK_ACCESS_KEY` 登录。每个会话中，agent-device 会在 App Automate API 中查找设备、上传本地 `app`，并在 BrowserStack 的 Appium 中心运行会话。对于 `https` `app`，提供方让 API 每次运行获取一次构建产物，并只在某次尝试录制视频时向 API 请求会话视频。 |
 | `api.e2b.app` 及其沙盒（或 `E2B_DOMAIN`、`E2B_API_URL`、`E2B_SANDBOX_URL`） | 仅来自 [`e2b()`](/integrations/e2b#run-android-targets) 和 [`e2bBrowsers()`](/integrations/e2b#run-web-targets-in-browsers)。使用 `E2B_API_KEY` 登录。引擎通过 `127.0.0.1` 上的隧道访问各沙盒的 agent-device 或 Chromium（[沙盒如何保持私有](/integrations/e2b#how-the-sandboxes-stay-private)），`e2b()` 也通过该隧道发送 `.apk`。每个 Android 沙盒在缺少 Node 时从 `nodejs.org` 下载 Node，并从 npm 安装 agent-device。 |
 | Expo API 和模拟器的 agent-device 守护进程 | 仅来自 [`expoSimulators()`](/integrations/eas) 或其已弃用的别名 `easSimulators()`。使用 `EXPO_TOKEN` 登录，否则使用 `~/.expo/state.json` 中的 eas-cli 登录信息。在 CI 运行器上，设置 `EXPO_TOKEN`，或不要在运行器的主目录中保留该登录信息。 |
-| `mcr.microsoft.com` | 仅来自 [`smol()`](/integrations/smol)，用于拉取 Playwright 镜像。随后机器拥有不受限制的网络访问权限，并可通过 `host.smolvm.internal` 访问你计算机回环地址上的每个端口，而不只是 `hostPorts`（[配置提供方](/integrations/smol#set-up-the-provider)）。 |
+| `mcr.microsoft.com` | 仅来自 [`smol()`](/integrations/smol)，用于拉取机器运行的 Playwright Ubuntu 镜像。随后机器拥有不受限制的网络访问权限，并可通过 `host.smolvm.internal` 访问你计算机回环地址上的每个端口，而不只是 `hostPorts`（[配置提供方](/integrations/smol#set-up-the-provider)）。 |
 | 包注册表 | `e2e init` 安装依赖项时。 |
 | 被测应用 | 每次运行，以及应用自身加载的任何内容。 |
 

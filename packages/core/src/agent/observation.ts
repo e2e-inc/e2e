@@ -331,12 +331,14 @@ function judgeLocation(location: string, appOrigin: string | undefined): JudgedL
 
 /**
  * What a judgment is shown, as a wait compares it: the screen's shape, and
- * the location unless the tree is withheld, since `vision: 'only'` is not
- * shown it (`buildPrompt`). A clock in a device's screen title is no change,
- * as in `observationShape`; an http(s) URL is compared as it is, since a time
- * in its path or query names another page.
+ * the location. Under `vision: 'only'` the judgment is shown the pixels alone
+ * (`buildPrompt`), so only they are compared when there are any: a read that
+ * fell back to pixels with no tree is the same screen. A clock in a device's screen title
+ * is no change, as in `observationShape`; an http(s) URL is compared as it
+ * is, since a time in its path or query names another page.
  */
 export function judgmentShape(observation: AgentObservation, options: { readonly treeWithheld: boolean }): string | undefined {
+  if (options.treeWithheld && observation.pixels !== undefined) return `<pixels ${pixelDigest(observation.pixels.data)}>`;
   const shape = observationShape(observation);
   const location = observation.judgedLocation;
   if (options.treeWithheld || location === undefined) return shape;

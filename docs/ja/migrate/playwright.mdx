@@ -21,7 +21,7 @@ export const migrationPrompt = `このプロジェクトの Playwright テスト
 10. \`npx e2e run <file>\` で新しいファイルを実行し、成功するまで修正してください。削除してよいと私が確認するまで、Playwright の spec は残してください。
 11. 移したテスト、Playwright に残したテスト、それぞれの理由をまとめてください。`;
 
-e2e は同じプロジェクト内で Playwright と並行して動かせるため、テストを 1 ファイルずつ移行できます。`@e2e-dev/web` は固定バージョンの `playwright-core` を同梱し、既存の `@playwright/test` のバージョンは変えません。e2e は `e2e.config.ts` を読み、デフォルトでは `tests/**/*.e2e.ts` を探すため、両者のファイルパターンを分けてください。
+e2e は同じプロジェクト内で Playwright と並行して動かせるため、テストを 1 ファイルずつ移行できます。`@e2e-dev/web` は Playwright を使わないため、既存の `@playwright/test` のバージョンは変わりません。e2e は `e2e.config.ts` を読み、デフォルトでは `tests/**/*.e2e.ts` を探すため、両者のファイルパターンを分けてください。
 
 <SetupPrompt>
 
@@ -42,6 +42,7 @@ e2e は同じプロジェクト内で Playwright と並行して動かせるた�
 | `use.baseURL`, `webServer` | ターゲットの `app: { url, command }`。[アプリの起動](/web#starting-your-app)を参照 |
 | `webServer.reuseExistingServer` | `app.command: { reuseExisting: true }`。CI では無視 |
 | `projects` | `targets`。それぞれ独立したエンジンインスタンス |
+| `webkit` プロジェクト、`devices['Desktop Safari']` | Playwright に残す。e2e が実行するのは `chromium` と `firefox` |
 | `testDir`, `testMatch`, `testIgnore` | プロジェクトルートからの glob を指定する `tests`。先頭の `!` で除外 |
 | `retries`, `workers`, `timeout` | 同名。[デフォルト値は一部異なります](#defaults-that-differ)。`workers` は整数 |
 | `expect.timeout`, `use.actionTimeout`, `globalTimeout` | `assertionTimeout`、`actionTimeout`、`maxDuration`。`maxDuration` の計測はアプリの起動時ではなくテスト開始時から |
@@ -282,7 +283,7 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 | `test.setTimeout()`、`test.slow()`、`test.fixme()`、`test.describe.only()`、describe に対する `test.fail()` | テストやグループに `{ timeout }` または `{ skip: 'reason' }`。各テストに `test.only` と `test.fail()` |
 | `failOnFlakyTests`, `use.navigationTimeout`, `--timeout`, `--quiet` | `report.json` の `run.summary.flaky`。`browser.goto(url, { timeout })`。設定の `timeout` |
 | `blob` レポーターと `merge-reports` | シャードごとに 1 つのレポート |
-| Playwright の Docker イメージ | `@e2e-dev/web` が固定する `playwright-core` バージョンのイメージ、または `npx @e2e-dev/web install chromium --with-deps` |
+| Playwright の Docker イメージ | Debian または Ubuntu の Node.js イメージと、`npx @e2e-dev/web install chromium --with-deps` |
 | ファイルや describe 内の `test.use({ ... })` | ランナーのオプションはグループ、エンジンのオプションはターゲット、実行時の変更は `browser.setViewport` |
 | `projects[].dependencies`, `teardown` | サインインはトップレベルの `test.setup`。実行の前後を囲むスクリプト |
 | `page.pause()` | `--step --headed` で、キー入力まで各ステップを停止 |
@@ -318,9 +319,9 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 | `page.$()`、`$eval()`、`elementHandle()`、JSON 以外の `evaluate` 値、`locator.page()` | ロケーターと、JSON を入出力する `browser.evaluate`。レポートに記録し、シークレットを伏せ字化。ページオブジェクトには `browser` を渡す |
 | ハンドラーなしで黙って閉じられるダイアログ | `browser.onDialog('dismiss')`。未処理のダイアログは次のステップを失敗させる |
 | `page.goto('data:...')`, `'file://...'` | アプリの URL に `route.fulfill({ body, contentType: 'text/html' })`。開けるのは `http` と `https` のみ |
-| `getByRole(role, { includeHidden })` | `browser.locator('role=button[include-hidden=true]')`。ロールクエリはアクセシビリティツリーに従う |
+| `getByRole(role, { includeHidden })` | 非表示の要素にも一致する CSS の `browser.locator('button, [role="button"]')`。ロールクエリはアクセシビリティツリーに従う |
 | タグの `--grep @smoke`、位置引数の正規表現、`file:line:column` | `--tag smoke`。glob または単独の名前。`file:line` |
-| `getByTitle()` | `browser.locator('[title="Close"]')`。title は DOM 属性なので `screen` のクエリはなし |
+| `getByTitle()` | title がコントロールの唯一の名前なら `getByRole('button', 'Close')`、それ以外は `browser.locator('[title="Close"]')`。title のクエリはなし |
 | `page.waitForLoadState()` | 次のページの表示内容へのアサーション。ページ遷移は `load` を待ち、各アクションとアサーションは自身のノードを待つ |
 | `npx playwright codegen`、Inspector | [`npx e2e mcp`](/mcp-server) でコーディングエージェントがアプリを操作しながらテストを作成。`screen.debug()` でツリーを表示 |
 | `{ force: true }`, `{ trial: true }` | `tap({ position })` は操作可能性の検証を省略。試行的な確認には `toBeVisible()` と `toBeEnabled()` |
@@ -341,10 +342,11 @@ export const test = base.extend<{ accountPage: AccountPage }>({
   ```
 - 読み取るのは描画済みテキストです。`textContent()`、`toHaveText`、`toContainText` は `innerText` と同じ内容を読み、非表示のテキストは除外し、`text-transform` を適用します。[ロケーターの読み取り](/reference/screen#locator-reads)を参照してください。
 - `toHaveRole` は `getByRole` と同じロール名を使います。`paragraph`、`generic` など、そこにないロールは型エラーになり、`img` は `image` と読みます。比較するのはツリー上のロールで、`contenteditable` エディターは `textbox` です。
+- `getByRole` はツリー上のロールを読みます。`contenteditable` エディターはタグにかかわらず `textbox` なので、`getByRole('heading')` では `<h1 contenteditable>` は見つかりません。`getByRole('textbox')` または `getByTestId` を使ってください。
 - ロケーターは厳密です。複数一致した場合、アクション、読み取り、肯定形のマッチャーは `LOCATOR_AMBIGUOUS` になります。Playwright の `page.click(selector)` や `isVisible()` は最初の一致を使います。`filter` や `first()` で絞り込んでください。
 - `.not.toBeChecked()` はボタンや見出しでも成功します。コントロールの種類が変わったら失敗するように、ロールで対象を探してください。
 - セッションは 1 回の実行内だけ有効です。`test.setup` が名前付きで状態を保存し、`{ session }` が復元します。ファイルは暗号化し、クリーンアップ時に削除するため、再利用する `.auth/user.json` はありません。
-- テストには生の `Page` を渡しません。その上の操作は記録、伏せ字化、マスクの対象にならないためです。`surfaceOf(engine)` はテストコード向けではなく、[カスタムエグゼキューター](/executors#driving-the-page-yourself)向けです。
+- テストには生の `Page` を渡しません。エンジンは Playwright ではなく WebDriver BiDi でブラウザを操作します。また、生のページ上の操作は記録、伏せ字化、マスクの対象になりません。
 
 ## デフォルト値の違い
 

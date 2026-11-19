@@ -50,7 +50,8 @@ here.
   `integrations/lightpanda` lists the result.
 - `e2e.moli.config.ts`: the full local suite on `@e2e-dev/moli`, which
   starts and stops Moli for the run, with one worker. Reports and artifacts
-  land in `.e2e-moli/`.
+  land in `.e2e-moli/`. Run by hand; the docs page `integrations/moli` lists
+  what fails.
 - `e2e.scroll.config.ts` + `tests-scroll/` — `scroll_to` by text over the
   windowed `/scroll` page, driven by a scripted executor, so it needs no model.
   Its own config, since it makes the default agent the scripted executor; it

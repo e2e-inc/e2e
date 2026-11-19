@@ -112,4 +112,15 @@ describe('judgmentShape', () => {
   it('sees no location change when the tree is withheld, since the judgment is not shown it', () => {
     expect(shapeAt('https://app.test/a', true)).toBe(shapeAt('https://app.test/b', true));
   });
+
+  it('compares only the pixels when the tree is withheld, so a read that fell back to pixels alone is the same screen', () => {
+    const root = { id: 'root', revision: 'r1' };
+    const pixels = { data: new Uint8Array([1, 2, 3]), mediaType: 'image/png' as const, width: 800, height: 600, scale: 1 };
+    const base = { root, truncated: false, revision: 'r1', capturedAt: '2026-01-01T00:00:00.000Z', viewport: { width: 800, height: 600 }, redaction: { secureNodeCount: 0, maskedRegionCount: 0 }, location: 'https://app.test/a', pixels };
+    const options = { redact: REDACT, redactCut: REDACT, maxBytes: 4_096, appOrigin: 'https://app.test', pixelsAllowed: true };
+    const semantic = prepareObservation({ ...base, kind: 'semantic', tree: { ref: root, role: 'document', name: 'Moves' } }, options);
+    const fallback = prepareObservation({ ...base, kind: 'pixels', location: 'https://app.test/b' }, options);
+    expect(judgmentShape(fallback, { treeWithheld: true })).toBe(judgmentShape(semantic, { treeWithheld: true }));
+    expect(judgmentShape(fallback, { treeWithheld: false })).not.toBe(judgmentShape(semantic, { treeWithheld: false }));
+  });
 });

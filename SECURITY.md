@@ -82,8 +82,7 @@ Child frames off the site of the target's `url`, its registrable domain, are
 dropped from observations. The browser engine's `headers` and `basicAuth`
 are scoped tighter, to the exact origin of `url` plus the origins
 `credentialOrigins` lists. `headers` stay on a request's redirects to any
-origin, and WebKit answers a basic-auth challenge from any origin when an
-allowed origin is on a default port or an IPv6 host.
+origin.
 
 ## Telemetry and outbound traffic
 
@@ -150,7 +149,8 @@ full list, integrations and reporters included, is under
   only; deterministic suites make no model calls, and cached steps replay
   without one)
 - `readyUrl` probes against the app the runner starts
-- Playwright browser downloads, once, when Chromium is missing
+- browser downloads (Chrome for Testing, Firefox) and ffmpeg, once, when
+  missing
 - the app under test, and whatever that app itself loads
 
 `e2e run --ai-trace` writes every model call to a local file. Nothing uploads

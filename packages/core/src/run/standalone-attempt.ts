@@ -18,10 +18,11 @@ import { attemptVideo, type VideoRecording } from '../internal/recording-modes.t
 import type { TestFixtures } from '../types.ts';
 import { createAttemptArtifacts, type AttemptArtifacts } from './artifacts.ts';
 import { AttemptBudget } from './budget.ts';
-import { classifyAttemptStatus, type ClosingRecord, type EngineSessions, type RestoredState } from './engine-sessions.ts';
+import { classifyAttemptStatus, type ClosingRecord, type EngineSessions } from './engine-sessions.ts';
 import { createFixtures, type AttemptEnvironment } from './fixtures.ts';
 import type { AttemptRecord, SessionVideo } from './records.ts';
 import { redactForSession, sessionLedger } from './secrecy.ts';
+import type { SavedSession } from './sessions.ts';
 import { StepRecorder, type StepProgress, type StepRecord } from './steps.ts';
 import { WorkerModels } from './worker-models.ts';
 
@@ -51,7 +52,7 @@ export interface StandaloneSessionOptions {
   /** The test title of a hosted attempt; its policy decides whether the attempt reads it. */
   readonly name?: string;
   /** A state an earlier session captured, restored at launch. */
-  readonly state?: RestoredState | undefined;
+  readonly state?: SavedSession | undefined;
   /** The video this session records, in place of what the target's mode says. */
   readonly video?: VideoRecording | undefined;
 }

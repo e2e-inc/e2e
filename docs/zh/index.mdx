@@ -33,7 +33,7 @@ test('a member upgrades to Pro', async ({ app, agent, screen }) => {
 
 ## 工作原理
 
-- **测试目标。** 每个测试都会在每个测试目标上运行一次，例如 Chromium 或 iPhone 模拟器。[网页端引擎](/web)通过 Playwright 操作浏览器。[移动端引擎](/mobile)通过 agent-device 操作 iOS 模拟器和 Android 模拟器。你也可以[编写自己的引擎](/writing-an-engine)。
+- **测试目标。** 每个测试都会在每个测试目标上运行一次，例如 Chromium 或 iPhone 模拟器。[网页端引擎](/web)通过 WebDriver BiDi 操作 Chromium 和 Firefox。[移动端引擎](/mobile)通过 agent-device 操作 iOS 模拟器和 Android 模拟器。你也可以[编写自己的引擎](/writing-an-engine)。
 - **智能体步骤。** `agent.act` 完成目标。`agent.assert`、`agent.waitFor` 和 `agent.extract` 判定屏幕内容。你可以使用自己的[订阅](/subscriptions)、[API 密钥或本地模型](/models)。不包含智能体步骤的测试无需模型。
 - **报告。** 运行器会对模型输入中的[已注册机密值进行脱敏](/security)，并将步骤、失败信息和产物记录在[报告](/debugging)中，供你或编码智能体查看。
 

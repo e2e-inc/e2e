@@ -1,11 +1,16 @@
 ---
 title: Moli
 sidebarTitle: Moli
-description: "@e2e-dev/moli でローカルの Moli ブラウザを自動起動・終了し、Web ターゲットを実行します。"
+description: "@e2e-dev/moli の moli() ブラウザプロバイダーは、ローカルの Moli ブラウザを起動します。Web エンジンはそのブラウザでページを読み取れますが、まだ要素を操作できません。"
 ---
 
 [Moli](https://github.com/lexmount/moli) は、Chrome DevTools Protocol に対応したオープンソースのブラウザです。
 `@e2e-dev/moli` の `moli()` は、ワーカースロットごとに 1 つのローカルブラウザを起動し、テスト実行の終了時に停止します。
+
+<Note>
+Web エンジンは、Moli でページを開いて読み取れます。要素への操作は失敗し、スクリーンショットも失敗します。
+[使えない機能](#what-does-not-work) を参照してください。
+</Note>
 
 ## Moli のターゲットを起動する
 
@@ -70,10 +75,19 @@ web({ connect: { cdpEndpoint: () => process.env.MOLI_CDP_URL?.trim() || 'http://
 ```
 </Accordion>
 
-## ブラウザの互換性を確認する
+## 使えない機能
 
-利用する Moli のビルドでスイートを実行してください。
-CDP の互換性に関する制限は [Moli の issue](https://github.com/lexmount/moli/issues) で確認できます。
+ページを開く操作、クエリ、アサーション、Cookie、初期化スクリプトは動作します。
+Moli 1.1.25 では、プロバイダーを使う場合も `connect` を使う場合も、以下が失敗します。
+
+| 機能 | 動作 | 理由 |
+| ------- | ------------ | --- |
+| 要素への操作：`tap`、`fill`、`check`、`hover`、`swipe`、`setInputFiles` | [`actionTimeout`](/reference/config#actiontimeout) に達すると、操作は `ACTION_FAILED` または `LOCATOR_NOT_FOUND` で失敗します。 | Moli は、エンジンが読み取る形式では要素を識別しません。 |
+| スクリーンショット | 取得時に `ENGINE_FAILURE` をスローします。 | Moli には `document.getAnimations` がありません。 |
+| フレーム内のクエリ | クエリは `LOCATOR_NOT_FOUND` で失敗します。 | エンジンがフレーム内にドキュメントを見つけられません。 |
+
+修正には Moli 側の変更が必要です。[Moli の issue](https://github.com/lexmount/moli/issues) を確認し、
+ページを操作するテストは Chromium ターゲットで実行してください。
 
 ## 次のステップ
 

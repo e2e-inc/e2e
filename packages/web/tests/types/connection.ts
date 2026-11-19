@@ -1,26 +1,19 @@
-/** Compile-time assertions for endpoint provisioning, transport recovery, and the browser provider seam. */
+/** Compile-time assertions for endpoint provisioning and the browser provider seam. */
 import { secrets } from 'e2e';
-import type { BrowserLease, BrowserProvider, CdpTarget, WebConnectOptions, WebInitScript, WebOptions } from '../../src/index.ts';
+import type { BrowserLease, BrowserProvider, WebConnectOptions, WebInitScript, WebOptions } from '../../src/index.ts';
 
-({ cdpEndpoint: () => 'ws://localhost:9222', reconnectEndpoint: async (signal) => {
+({ cdpEndpoint: async (signal) => {
   signal.throwIfAborted();
   return 'ws://localhost:9222';
 } }) satisfies WebConnectOptions;
 
-// @ts-expect-error recovery cannot omit the fresh-attempt provisioner.
-({ reconnectEndpoint: () => 'ws://localhost:9222' }) satisfies WebConnectOptions;
-// @ts-expect-error a recovery resolver must return an endpoint, never a page or a success flag.
-({ cdpEndpoint: () => 'ws://localhost:9222', reconnectEndpoint: async () => true }) satisfies WebConnectOptions;
+// @ts-expect-error reconnectEndpoint is removed: the next attempt attaches through cdpEndpoint again.
+({ cdpEndpoint: () => 'ws://localhost:9222', reconnectEndpoint: () => 'ws://localhost:9222' }) satisfies WebConnectOptions;
+// @ts-expect-error a resolver must return an endpoint, never a page or a success flag.
+({ cdpEndpoint: async () => true }) satisfies WebConnectOptions;
 
 ({ name: 'hosted', scope: 'attempt', acquire: async () => ({ id: 's', cdpEndpoint: 'ws://localhost:9222' }), release: async () => undefined }) satisfies BrowserProvider;
-({ id: 's', cdpEndpoint: 'ws://localhost:9222', reconnectEndpoint: undefined }) satisfies BrowserLease;
-
-({ name: 'hosted', acquire: async () => ({ id: 's', cdpEndpoint: 'ws://localhost:9222' }), release: async () => undefined, cdpHeaders: async (_lease, context) => ({ Authorization: context.env.TOKEN ?? '' }) }) satisfies BrowserProvider;
-// @ts-expect-error CDP headers do not travel in lease JSON.
-({ id: 's', cdpEndpoint: 'ws://localhost:9222', cdpHeaders: {} }) satisfies BrowserLease;
-// @ts-expect-error CDP handshake headers carry string values.
-({ name: 'hosted', acquire: async () => ({ id: 's', cdpEndpoint: 'ws://localhost:9222' }), release: async () => undefined, cdpHeaders: async () => ({ Authorization: 42 }) }) satisfies BrowserProvider;
-
+({ id: 's', cdpEndpoint: 'ws://localhost:9222' }) satisfies BrowserLease;
 ({ browser: { name: 'hosted', acquire: async () => ({ id: 's', cdpEndpoint: 'ws://localhost:9222' }), release: async () => undefined } }) satisfies WebOptions;
 
 // @ts-expect-error a lease names its endpoint; a browser object or a page is not one.
@@ -64,7 +57,7 @@ import type { BrowserLease, BrowserProvider, CdpTarget, WebConnectOptions, WebIn
 ({ userAgent: 3 }) satisfies WebOptions;
 // The locale and time zone every context runs in.
 ({ locale: 'de-DE', timezoneId: 'Europe/Berlin' }) satisfies WebOptions;
-// @ts-expect-error a locale is one tag; Playwright takes no fallback list.
+// @ts-expect-error a locale is one tag, not a fallback list.
 ({ locale: ['de-DE', 'en-US'] }) satisfies WebOptions;
 // Init scripts: source, a file, or a function that takes no argument.
 ({ initScripts: ['window.x = 1', { path: 'shim.js' }, () => undefined] }) satisfies WebOptions;
@@ -77,10 +70,3 @@ import type { BrowserLease, BrowserProvider, CdpTarget, WebConnectOptions, WebIn
 ({ screencast: { size: { width: 1280, height: 720 }, quality: 80 } }) satisfies WebOptions;
 // @ts-expect-error web({ video }) was renamed web({ screencast }).
 ({ video: { quality: 80 } }) satisfies WebOptions;
-
-({ endpoint: 'wss://browser.example', headers: { Authorization: 'token' } }) satisfies CdpTarget;
-({ cdpEndpoint: () => ({ endpoint: 'wss://browser.example', headers: { Authorization: 'token' } }), reconnectEndpoint: async () => ({ endpoint: 'wss://browser.example' }) }) satisfies WebConnectOptions;
-// @ts-expect-error CDP headers must contain strings.
-({ endpoint: 'wss://browser.example', headers: { Authorization: 42 } }) satisfies CdpTarget;
-// @ts-expect-error a CDP target must name its endpoint.
-({ cdpEndpoint: () => ({ headers: {} }) }) satisfies WebConnectOptions;

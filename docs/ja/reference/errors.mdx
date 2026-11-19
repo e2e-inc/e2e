@@ -135,7 +135,7 @@ export class AgentError extends Error {
 | `TEST_AMBIGUOUS` | `e2e mcp` の `open_session` の `test` が、セッションのターゲット上で複数のテストを選んだ場合。`file:line` 形式で一覧を示します | configuration | 2 |
 | `SESSION_TEST_UNSUPPORTED` | `e2e mcp` の `open_session` の `test` が、セッション単独では実行できないテストを選んだ場合。直列グループのメンバー、セットアップテストの `session` から開始するテスト、または複数のエージェントとして実行するテストです。`e2e run` で実行してください | configuration | 2 |
 | `UNSUPPORTED_ARTIFACT` | ターゲット、またはそのターゲットで実行するテストに設定した [`video` モード](/reference/config#recording)が、いずれかの試行で録画するのに、そのエンジンが録画できない場合。メッセージにターゲットを示し、テストのモードならテストも示します。設定のルートまたは `--video` からのモードでは発生しません。録画できるターゲットに適用し、それ以外を通知します | configuration | 2 |
-| `UNSUPPORTED_CAPABILITY` | ターゲットのエンジンが宣言していないフィクスチャ、操作、または機能レベルを使った場合。テストもフックも実行していないときにワーカーフィクスチャが組み込みフィクスチャを使った場合（ターゲットにないフィクスチャは `COLLECTION_ERROR`）、`locate` なしの `screen`、`state` なしの状態復元、`artifacts` なしのスクリーンショット、永続ブラウザコンテキストでの `app.clearState()`（モードをメッセージに示します）、`vision: true` を宣言しないエグゼキューターでの `agent.assert` の `vision`、またはテストの動画を録画中の `app.startRecording()` です | configuration | 2 |
+| `UNSUPPORTED_CAPABILITY` | ターゲットのエンジンが宣言していないフィクスチャ、操作、または機能レベルを使った場合。テストもフックも実行していないときにワーカーフィクスチャが組み込みフィクスチャを使った場合（ターゲットにないフィクスチャは `COLLECTION_ERROR`）、`locate` なしの `screen`、`state` なしの状態復元、`artifacts` なしのスクリーンショット、`scope: 'attempt'` のブラウザプロバイダーでの `app.clearState()`、`vision: true` を宣言しないエグゼキューターでの `agent.assert` の `vision`、またはテストの動画を録画中の `app.startRecording()` です | configuration | 2 |
 | `NO_TESTS` | 実行可能な通常テストとターゲットの組が 0 件の場合。メッセージに原因を示します。`tests` の glob に一致するファイルがない（似たファイルを列挙）、位置引数に一致するものがない（指定ファイルを除外する `!` エントリを提示）、ファイルがテストを登録していない、またはフィルターがすべてを除外した場合です。`--pass-with-no-tests` で抑制できます。[テストフィルター](/filters)によって実行対象がなくなった場合は、代わりに成功します（終了コード 0）。`e2e mcp` の `open_session` の `test` が実行可能なテストを選べなかった場合も該当します。 | configuration | 2 |
 | `RUNNER_BUSY` | テストスイートが別のスイート、オープン処理中または開いているホスト、実行中の試行と重なった場合。スイート中にホストを開いた場合。別の `e2e mcp` の `run_tests` が実行中に開始した場合。`e2e run --step` が、ステップ実行中のディレクトリ、または起動中に強制終了した実行のロックが残るディレクトリで、ターミナルなしに開始した場合（削除するファイルをメッセージに示します）。スイートを await し、既存のホストを閉じてから再試行してください。ステップ実行は `e2e run --step stop` で終了するか、メッセージにあるロックファイルを削除してください。 | configuration | 2 |
 | `RUNNER_NOT_INSTALLED` | `e2e` がインストールされていない場所（`@e2e-dev/core` だけを使うプログラムなど）で、`@e2e-dev/web` または `@e2e-dev/mobile` の `test`、`describe`、フックを呼んだ場合。同じエントリのエンジンファクトリーは引き続き使えます。テストを書くには `e2e` をインストールしてください | configuration | 2 |
@@ -156,7 +156,7 @@ export class AgentError extends Error {
 | `RUN_TIMEOUT` | 実行が [`maxDuration`](/reference/config#maxduration) または `--max-duration` を使い切った場合。実行中のテストは `interrupted` で終了し、残りは理由 `time-limit` でスキップします | test | 1 |
 | `LAUNCH_TIMEOUT` | エンジンの初期化または試行の開始が `config.launchTimeout` を超えた場合 | infrastructure | 3 |
 | `CLEANUP_TIMEOUT` | エンジンの試行終了処理が `config.cleanupTimeout` を超えた場合、試行の完了時に、エンジンがテストのために実行したルートやダイアログのハンドラーがまだ実行中だった場合、またはテストが `launch()` で開いたホストやセッションがその時間内に閉じなかった場合 | infrastructure | 3 |
-| `BROWSER_INSTALL_FAILED` | ブラウザの準備に失敗した場合 | infrastructure | 3 |
+| `BROWSER_INSTALL_FAILED` | ブラウザまたは ffmpeg の準備に失敗した場合。ダウンロードエラー、固定した SHA-256 と一致しないアーカイブ、または `https` でない `E2E_BROWSERS_DOWNLOAD_HOST`（`http` は `localhost` のみ）です | infrastructure | 3 |
 | `WORKER_INIT_FAILED` | ワーカープロセスが準備完了にならなかった場合 | infrastructure | 3 |
 | `WORKER_EXIT` | ファイルの実行中にワーカーが予期せず終了した場合。実行中のテストは `WORKER_CRASH` で失敗し、そのファイルのほかのテストはスキップします。終了前に完了した試行はレポートに残します。リトライ前の試行や、直列グループの完了済みメンバーも含みます。クラッシュはそれらの後の試行として記録し、最後の試行後に発生した場合（`afterAll`）は最後の試行に記録します。未処理の reject によってワーカーが終了した場合（`UNHANDLED_REJECTION` を参照）、実行エラーはこのコードではなく、その reject です | infrastructure | 3 |
 | `WORKER_CRASH` | 特定のテストの実行中にワーカーが終了した場合 | infrastructure | 3 |
@@ -168,7 +168,7 @@ export class AgentError extends Error {
 | `WORKER_PROTOCOL` | ワーカーが誤った処理単位を報告した場合、試行が実行中の試行と重なった場合、`openHost` が別のホストの所有するエンジンインスタンスを取得しようとした場合、または `host.openSession` が閉じたホストを再利用したり、オープン処理中、使用中、クローズ処理中のセッションと重なろうとした場合。`@e2e-dev/core` では、別のホストが所有するエンジンインスタンスでの `launch`、閉じたホストやセッションが開いているホストでの `host.newSession` が該当します | infrastructure | 3 |
 | `SESSION_KEY_INVALID` | ワーカーが 32 バイトでないセッション鍵を受け取った場合。パッケージングまたは IPC の不具合です。 | infrastructure | 3 |
 | `REPORT_WRITE_FAILED` | `report.json` または `ai-trace.json` を書き込めなかった場合。実行エラーとして記録しますが、メモリ上の結果は完全なままです。`junit.xml` を書き込めなかった場合は、代わりに `junit` レポーターの stderr に 1 行出力します | infrastructure | 3 |
-| `EVALUATE_FAILED` | `browser.evaluate` がページ内で例外を投げた場合、またはエンジンのページ内コードが必要とする JavaScript の組み込み機能（`Map` など）をページが削除または置き換え、以降の評価とロケーターが失敗する場合（`@e2e-dev/web`） | test | 1 |
+| `EVALUATE_FAILED` | `browser.evaluate` がページ内で例外を投げた場合、またはエンジンのページ内コードが呼び出す組み込みメソッド（`Map.prototype.set` など）をページが壊し、ロケーターが失敗する場合（`@e2e-dev/web`） | test | 1 |
 | `INTERRUPTED` | ユーザーまたは CI のシグナルが実行を中止した場合。`--max-failures` または時間制限で中断したテストもこのコードで終了し、制限をメッセージに示します。その場合の実行の終了コードは 130 ではなく 1 です | interrupted | 130 |
 
 #### テストコードのエラー

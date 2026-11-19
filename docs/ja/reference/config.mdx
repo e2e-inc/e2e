@@ -436,9 +436,8 @@ permissions: { camera: 'grant' },
 | --- | --- |
 | `chromium` | `accelerometer`, `ambient-light-sensor`, `background-sync`, `camera`, `clipboard-read`, `clipboard-write`, `geolocation`, `gyroscope`, `local-fonts`, `local-network-access`, `magnetometer`, `microphone`, `midi`, `midi-sysex`, `notifications`, `payment-handler`, `screen-wake-lock`, `storage-access` |
 | `firefox` | `geolocation`, `local-network-access`, `notifications`, `persistent-storage`, `push`, `screen-wake-lock` |
-| `webkit` | `camera`, `clipboard-read`, `geolocation`, `microphone`, `notifications`, `screen-wake-lock` |
 
-ブラウザプロバイダーや `connect` では `chromium` の名前を使います。Lightpanda も含め、エンジンが CDP 経由で操作するためです。
+ブラウザプロバイダーや `connect` では `chromium` の名前を使います。エンジンが CDP 経由で操作するためです。
 
 #### `command`
 
@@ -720,7 +719,7 @@ video: 'retain-on-failure', // default: 'off'
 
 | 録画方式 | 試行の成果物ディレクトリ内のファイル |
 | --- | --- |
-| ブラウザエンジン、Playwright スクリーンキャスト | `video/video.webm`。試行で表示したページごとに 1 セグメントで、2 つ目以降は `video/video-part<n>.webm` です。[`web({ screencast })`](/reference/web#options) でフレームのサイズと画質を設定します |
+| ブラウザエンジンのスクリーンキャスト | `video/video.webm`。試行で表示したページごとに 1 セグメントで、2 つ目以降は `video/video-part<n>.webm` です。[`web({ screencast })`](/reference/web#options) でフレームのサイズと画質を設定します |
 | モバイルエンジン、agent-device | `video/video.mp4` |
 | プロバイダー自身の録画（[`BrowserProvider.record`](/browser#recording-on-the-provider)、[`DeviceProvider.record`](/mobile#hosted-devices)） | プロバイダーが書いたファイルを `video/<file>` として保存します。Kernel は `video/replay.mp4` です。またはサービス側が保持する録画へのリンクで、`path` の代わりに `url` を記録します。ランナーはダウンロードしません |
 

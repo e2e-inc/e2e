@@ -137,13 +137,11 @@ ngrok では `'ngrok-skip-browser-warning': '1'` を使います。
 `app.identity` は、プレビュー URL が変わってもキャッシュ上の識別情報を保ちます。
 
 <Note>
-`headers` を設定すると、ブラウザの HTTP キャッシュが無効になり、Service Worker がブロックされます。
+`headers` を設定すると、Service Worker がブロックされます。
 </Note>
 
 HTTP Basic 認証には `basicAuth` を使います。
 ブラウザは、`app.url` のオリジンと `credentialOrigins` の各オリジンからの `401` チャレンジに応答します。
-WebKit では、そのいずれかがポートを省略した `https://` URL などのデフォルトポートを使うか、
-IPv6 ホストを持つ場合、任意のオリジンに応答します。
 パスワードを `secrets` に宣言し、`secrets.get(name)` で渡してください。
 
 ```ts title="e2e.config.ts"
@@ -189,7 +187,7 @@ export default {
   targets: [
     { name: 'desktop', engine: web(), app },
     { name: 'tablet', engine: web({ viewport: { width: 820, height: 1180 } }), app },
-    { name: 'phone', engine: web({ browser: 'webkit', viewport: { width: 390, height: 844 } }), app },
+    { name: 'phone', engine: web({ browser: 'firefox', viewport: { width: 390, height: 844 } }), app },
   ],
 } satisfies E2EConfig;
 ```
@@ -213,7 +211,7 @@ headed 実行や、ライブビューの隅に 1280 × 720 のページが表示
 { name: 'window', engine: web({ viewport: null }), app }
 ```
 
-ローカルの headed 起動では、小さなウィンドウが開きます。
+ローカルの headed 起動では、ブラウザのデフォルトのウィンドウが開きます。
 ホスト型ブラウザでは、サービスに要求したウィンドウサイズを使います。
 `browser.setViewport` も引き続き使えます。
 

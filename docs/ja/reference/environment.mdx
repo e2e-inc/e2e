@@ -146,8 +146,10 @@ CI モードを有効にします。
 
 | 変数 | 例 | 判定 | 効果 |
 | --- | --- | --- | --- |
-| `PLAYWRIGHT_BROWSERS_PATH` | `PLAYWRIGHT_BROWSERS_PATH=~/.cache/ms-playwright` | value | Playwright のブラウザキャッシュです。エンジンの `prepare` フックがこの設定に従います |
-| `PLAYWRIGHT_SKIP_BROWSER_GC` | `PLAYWRIGHT_SKIP_BROWSER_GC=0` | value | エンジンがブラウザをインストールするときのデフォルトは `1` で、キャッシュ内のほかのブラウザを残します。`0` ならインストール時にそれらを削除できます |
+| `E2E_BROWSERS_PATH` | `E2E_BROWSERS_PATH=/opt/e2e-browsers` | value | `@e2e-dev/web` がブラウザをインストールし、起動する場所です。未設定の場合はユーザーキャッシュを使います。[ブラウザのインストール](/reference/web#installing-browsers)を参照してください |
+| `E2E_BROWSERS_DOWNLOAD_HOST` | `E2E_BROWSERS_DOWNLOAD_HOST=https://mirror.example.com` | value | `@e2e-dev/web` がブラウザと ffmpeg をダウンロードするミラーです。`storage.googleapis.com`、`archive.mozilla.org`、`github.com` のパスを配信します。`https` を指定します。`http` は `localhost` に限ります。ミラーを使っても、各アーカイブは固定した SHA-256 と一致する必要があります。未設定の場合はこれらのホストを使います。[ブラウザのインストール](/reference/web#installing-browsers)を参照してください |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | `HTTPS_PROXY=http://proxy.example.com:3128` | value | `@e2e-dev/web` がブラウザと ffmpeg のダウンロードに使うプロキシと、直接接続するホストです。Node 22 と Node 24 の初期リリースでは、`NODE_USE_ENV_PROXY=1` を設定した場合だけ有効です |
+| `E2E_FFMPEG_PATH` | `E2E_FFMPEG_PATH=/usr/bin/ffmpeg` | value | Chromium の動画をエンコードする、`libvpx-vp9` を含む ffmpeg です。未設定の場合、固定したビルドがブラウザキャッシュにあればそれを使い、なければ `PATH` の `ffmpeg` を使います。どちらもなければ、最初の録画で固定したビルドをダウンロードします |
 | `KERNEL_API_KEY` | `KERNEL_API_KEY=<key>` | value | `@e2e-dev/kernel` の `kernel()` がブラウザを作成する API キーです。未設定の場合、ブラウザのリースに失敗します。[Kernel](/integrations/kernel) を参照してください |
 | `LIGHTPANDA_PATH` | `LIGHTPANDA_PATH=/opt/lightpanda` | value | `@e2e-dev/lightpanda` の `lightpanda()` が CDP サーバーを起動するバイナリです。未設定の場合は `PATH`、`~/.lightpanda`、`~/.local/bin` の `lightpanda` を使います。[Lightpanda](/integrations/lightpanda) を参照してください |
 | `MOLI_PATH` | `MOLI_PATH=/opt/moli` | value | `binary` が未設定のときに `@e2e-dev/moli` の `moli()` が起動する実行ファイルです。`MOLI_PATH` がなければ `PATH`、次に `~/.local/bin/moli` を検索します。[Moli](/integrations/moli) を参照してください |

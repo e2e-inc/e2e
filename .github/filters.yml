@@ -29,7 +29,7 @@ web:
   - 'packages/github/**'
   - 'apps/web-benchmark/**'
   - '.github/workflows/benchmark.yml'
-  - '.github/actions/chromium/**'
+  - '.github/actions/browsers/**'
 
 mobile:
   - *runner

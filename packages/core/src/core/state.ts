@@ -10,8 +10,8 @@ import type { EngineState } from '../engine/index.ts';
 import { ConfigurationError, TestError } from '../internal/errors.ts';
 import { rejectUnknownOptions } from '../internal/options.ts';
 import { canonicalJson, timestamp } from '../internal/ids.ts';
-import type { RestoredState } from '../run/engine-sessions.ts';
 import type { SavedSecrets } from '../run/secrecy.ts';
+import type { SavedSession } from '../run/sessions.ts';
 
 /** What a state is bound to: it restores only on a host of the same engine, platform, and app. */
 export interface StateIdentity {
@@ -56,7 +56,7 @@ export interface SessionStateKeyOptions {
   readonly key: Uint8Array;
 }
 
-const held = new WeakMap<SessionState, { readonly identity: StateIdentity; readonly saved: RestoredState }>();
+const held = new WeakMap<SessionState, { readonly identity: StateIdentity; readonly saved: SavedSession }>();
 
 /**
  * A captured session state. Pass it to `host.newSession({ state })` to start
@@ -68,7 +68,7 @@ export class SessionState {
   /** The platform it was captured on. */
   readonly platform: string;
 
-  private constructor(identity: StateIdentity, saved: RestoredState) {
+  private constructor(identity: StateIdentity, saved: SavedSession) {
     this.engine = identity.engine;
     this.platform = identity.platform;
     held.set(this, { identity, saved });
@@ -160,7 +160,7 @@ export class SessionState {
  * another engine, platform, or app is `SESSION_MISMATCH`, an expired state
  * `SESSION_EXPIRED`.
  */
-export function restoredStateFor(state: unknown, host: StateIdentity): RestoredState {
+export function restoredStateFor(state: unknown, host: StateIdentity): SavedSession {
   const entry = state instanceof SessionState ? held.get(state) : undefined;
   if (entry === undefined) throw new TestError('INVALID_ARGUMENT', 'newSession state must be a SessionState from saveState() or SessionState.import()');
   const { identity, saved } = entry;

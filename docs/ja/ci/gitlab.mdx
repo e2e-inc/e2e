@@ -40,14 +40,14 @@ e2e:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   variables:
     APP_URL: http://127.0.0.1:3000
-    PLAYWRIGHT_BROWSERS_PATH: $CI_PROJECT_DIR/.cache/ms-playwright
+    E2E_BROWSERS_PATH: $CI_PROJECT_DIR/.cache/e2e/browsers
   cache:
     key:
       files:
         - package-lock.json
     paths:
       - .npm/
-      - .cache/ms-playwright/
+      - .cache/e2e/browsers/
   script:
     - npm ci --cache .npm --prefer-offline
     - npx @e2e-dev/web install chromium --with-deps
@@ -66,7 +66,7 @@ e2e:
 ルールは `workflow:` ブロックではなくジョブに設定しているため、単独のパイプラインでも
 [他のジョブと一緒でも](#add-it-to-an-existing-pipeline) 使えます。
 
-GitLab がキャッシュできるのはプロジェクト内のパスだけなので、`PLAYWRIGHT_BROWSERS_PATH` で
+GitLab がキャッシュできるのはプロジェクト内のパスだけなので、`E2E_BROWSERS_PATH` で
 [ブラウザ](/reference/web#installing-browsers) の保存先を移します。
 ロックファイルが変わるまでキャッシュを使います。
 

@@ -85,6 +85,14 @@ const MAX_SCROLL_UNTIL_TEXT_CHARS = 200;
  * unchanged look is that as often as it is the end or the wrong list.
  */
 const SCROLL_UNTIL_STILL_PAGES = 3;
+/**
+ * How long the screen must also have stayed unchanged before the list counts
+ * as ended, the rest waited out without paging once the still pages are in:
+ * a list that loads its next page on a timer holds still while it waits, and
+ * an engine that pages fast would otherwise read that pause as the end where
+ * a slower one would not.
+ */
+const SCROLL_UNTIL_STILL_MS = HELD_STILL_MS;
 const SCROLL_UNTIL_WRONG_LIST_PAGES = 2;
 
 /** The engine action each node verb performs; also the name its engine event carries. */
@@ -581,6 +589,7 @@ export class ActionDispatcher {
       let paged: Pick<Extract<RecordableAction, { name: 'scrollUntil' }>, 'node' | 'spans'> = {};
       let previous: PageReading | undefined;
       let still = 0;
+      let changedAt = Date.now();
       let within = list;
       for (let screens = 0; ; screens += 1) {
         // Only the list being paged is read while it is on screen; once it is
@@ -601,7 +610,25 @@ export class ActionDispatcher {
         if (screens >= MAX_SCROLL_UNTIL_SCREENS) throw notFound(`within ${String(MAX_SCROLL_UNTIL_SCREENS)} screens ${direction}`);
         const reading = observation.kind === 'semantic' ? readPage(observation) : undefined;
         still = reading !== undefined && previous !== undefined && !pageMoved(previous, reading) ? still + 1 : 0;
-        if (still >= SCROLL_UNTIL_STILL_PAGES) throw notFound(`before the screen stopped moving ${direction}, after ${String(screens)} screens`);
+        if (still === 0) changedAt = Date.now();
+        if (still >= SCROLL_UNTIL_STILL_PAGES) {
+          // A list that loads its next page on a timer holds still while it
+          // waits: the rest of the stillness window is waited out with no
+          // more paging, and a screen that moved meanwhile goes on paging.
+          const rest = SCROLL_UNTIL_STILL_MS - (Date.now() - changedAt);
+          if (rest > 0) {
+            await sleep(rest, this.accounting.signal);
+            const later = await this.feed.look('held-still');
+            const again = later.kind === 'semantic' ? readPage(later) : undefined;
+            if (reading !== undefined && again !== undefined && pageMoved(reading, again)) {
+              observation = later;
+              previous = undefined;
+              still = 0;
+              continue;
+            }
+          }
+          throw notFound(`before the screen stopped moving ${direction}, after ${String(screens)} screens`);
+        }
         if (still >= SCROLL_UNTIL_WRONG_LIST_PAGES && within !== undefined) {
           within = undefined;
           still = 0;

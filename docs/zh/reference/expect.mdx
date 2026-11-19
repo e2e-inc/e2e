@@ -196,7 +196,7 @@ await expect(screen.getByTestId('wifi')).not.toHaveRole('checkbox');
 
 - `role` 接受与 [`getByRole`](/reference/screen#getbyrole) 相同的角色名称。别名 `img` 读取为 `image`。从 JavaScript 传入的其他字符串会按原样比较，空字符串则导致 `INVALID_ARGUMENT`。
 - 它比较 [`screen.tree()`](/reference/screen#screen-tree) 显示的角色，因此不考虑角色层级：`switch` 不是 `checkbox`。
-- 在网页端，编辑宿主（`contenteditable`）无论标签是什么，都会读取为 `textbox`，但 `getByRole` 会按其标签对应的角色查找它。
+- 在网页端，[编辑宿主](/reference/screen#editing-hosts)（`contenteditable`）无论标签是什么，都会读取为 `textbox`，`getByRole('textbox')` 可以找到它。
 - 语义树中没有角色的节点，例如包含文本的 `<div>`，会导致匹配失败，失败消息为 `no role`。
 
 ### 截图匹配器

@@ -161,36 +161,6 @@ export default {
 
 缓存记录步骤通过 `ctx.actions` 执行的操作。会修改状态的工具调用会留下一个空缺，由执行器在回放时补齐。条目的键由配置的智能体及其上下文决定，而非执行器，因此更换智能体的执行器会保留其条目。
 
-## 自行驱动页面
-
-在网页端引擎上，`@e2e-dev/web` 中的 `surfaceOf(handle)` 可提供当前尝试的 `Page` 和 `BrowserContext`。在没有活跃尝试时，两个访问器都会抛出 `INVALID_STATE`；未打开页面时，`page()` 也会抛出该错误。
-
-```ts
-import type { E2EConfig, StepExecutor } from 'e2e';
-import { web, surfaceOf } from '@e2e-dev/web';
-
-const engine = web();
-const own: StepExecutor = {
-  name: 'own-tools',
-  version: '1',
-  cache: 'off',
-  async runStep(ctx) {
-    const page = surfaceOf(engine)!.page();   // the page app.open() navigated
-    await ctx.budgets.runTool({ name: 'click', mutates: true }, () =>
-      page.getByRole('button', { name: 'Save' }).click(),
-    );
-    return { status: 'passed', summary: 'saved' };
-  },
-};
-
-export default {
-  targets: [{ engine, app: { url: 'http://localhost:3000' } }],
-  agents: { default: { executor: own } },
-} satisfies E2EConfig;
-```
-
-直接调用 Playwright 会跳过操作授权和回放缓存，也不会留下产物。步骤截止时间和判定记录仍然生效。
-
 ## 下一步
 
 <CardGroup cols={2}>

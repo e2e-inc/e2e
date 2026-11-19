@@ -1,10 +1,14 @@
 ---
 title: Moli
 sidebarTitle: Moli
-description: 通过 @e2e-dev/moli 在本地 Moli 浏览器中运行网页端测试目标，并自动启动和清理浏览器。
+description: "@e2e-dev/moli 的 moli() 浏览器提供方会启动本地 Moli 浏览器。网页端引擎可以读取其中的页面，但目前还无法对元素执行操作。"
 ---
 
 [Moli](https://github.com/lexmount/moli) 是支持 Chrome DevTools Protocol 的开源浏览器。`@e2e-dev/moli` 中的 `moli()` 会为每个工作进程槽位启动一个本地浏览器，并在运行结束时停止它。
+
+<Note>
+网页端引擎可以在 Moli 中打开并读取页面。对元素的操作会失败，截图也会失败。参阅[不支持的功能](#what-does-not-work)。
+</Note>
 
 ## 启动 Moli 测试目标
 
@@ -67,9 +71,17 @@ web({ connect: { cdpEndpoint: () => process.env.MOLI_CDP_URL?.trim() || 'http://
 ```
 </Accordion>
 
-## 检查浏览器兼容性
+## 不支持的功能
 
-使用你部署的 Moli 构建版本运行测试套件。查看[上游问题](https://github.com/lexmount/moli/issues)，了解 CDP 兼容性方面的缺口。
+打开页面、查询、断言、Cookie 和初始化脚本都可用。在 Moli 1.1.25 上，无论使用提供方还是 `connect`，以下功能都会失败：
+
+| 功能 | 实际行为 | 原因 |
+| ------- | ------------ | --- |
+| 对元素的操作：`tap`、`fill`、`check`、`hover`、`swipe`、`setInputFiles` | 操作会在其 [`actionTimeout`](/reference/config#actiontimeout) 结束时失败，错误为 `ACTION_FAILED` 或 `LOCATOR_NOT_FOUND`。 | Moli 不会以引擎能读取的方式标识元素。 |
+| 截图 | 截图时抛出 `ENGINE_FAILURE`。 | Moli 没有 `document.getAnimations`。 |
+| 框架内的查询 | 查询以 `LOCATOR_NOT_FOUND` 失败。 | 引擎在该框架中找不到文档。 |
+
+修复需要 Moli 自身做出改动。请查看其[上游问题](https://github.com/lexmount/moli/issues)，并在 Chromium 测试目标上运行需要操作页面的测试。
 
 ## 下一步
 

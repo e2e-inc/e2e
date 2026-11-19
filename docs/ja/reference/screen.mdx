@@ -92,6 +92,8 @@ Web エンジンは、HTML-AAM と同じように HTML からロールを導き�
 
 デバイスエンジンは、プラットフォームが持つ型を対応付けます。タブバーやセグメントコントロールは `tablist`、進捗インジケーターは `progressbar`、ステッパーは `spinbutton` です。それ以外の型はそのまま保持します。そのため、`tooltip` や `figure` のようにネイティブウィジェットがないロールは、スマートフォンでは一致する対象がありません。
 
+<a id="editing-hosts" />
+
 ##### 編集ホスト
 
 TipTap、ProseMirror、Lexical、Slate などのエディターが描画するルートである `contenteditable` の編集ホストは、`textbox` です。
@@ -102,7 +104,7 @@ TipTap、ProseMirror、Lexical、Slate などのエディターが描画する�
 - タグは問いません。`<article contenteditable>` は記事ではなくエディターです。編集可能にしたネイティブコントロールや描画領域は、元のロールを維持します。
 - ブロックの `data-placeholder`（TipTap、ProseMirror）から得る名前は、内容が入ると表示上のヒントとともに消えます。それ以降、ホストは名前のない `textbox` になります。ホスト自身の `aria-label`、`aria-labelledby`、`aria-placeholder`、`data-placeholder`（Quill）から得る名前は残ります。
 
-`getByRole` は Playwright のロールセレクターで解決するため、このルールは適用されません。そのため、`getByRole` がエディターを見つけるのは、ホストに `role="textbox"` がある場合だけです。`getByLabel` と `getByTestId` は、どちらの場合も使えます。テストの対象はプレースホルダーではなく、ラベルかテスト ID で指定してください。
+`getByRole('textbox')` は、ホストに `role="textbox"` があってもなくてもエディターを見つけます。`getByLabel` と `getByTestId` も同様です。テストの対象はプレースホルダーではなく、ラベルかテスト ID で指定してください。
 
 #### `getByLabel`
 
@@ -154,10 +156,6 @@ getByDisplayValue(value: TextMatch, options?: TextMatchOptions): Locator;
 await screen.getByDisplayValue('ada@example.test').clear();
 ```
 
-<Note>
-Web エンジンでは、`getByDisplayValue` のロケーターを子クエリや `has` フィルターのスコープにはできません。どちらも `UNSUPPORTED_CAPABILITY` で失敗します。Playwright にコントロールの現在値を指定するセレクターがないため、エンジンは候補を取得してから絞り込んでいます。
-</Note>
-
 #### `getByTestId`
 
 ノードの `testId` で検索します。
@@ -197,7 +195,7 @@ await screen.getByTestId('memory-list', { visible: true }).getByRole('listitem')
 - Web では、非表示の `<iframe>` 内はすべて非表示です。クロスオリジンのフレームも含みます。
 - スコープ、`filter`、`first`、`last`、`nth` と組み合わせられます。`getByText('Save', { visible: true }).first()` は、可視の一致ノードのうち最初のものです。
 
-CSS に依存する `browser.locator('p:visible')` より、この指定を優先してください。
+`browser.locator` に `:visible` はありません。これは CSS ではないためです。
 
 ### 絞り込み
 
@@ -241,12 +239,12 @@ await row.getByRole('button', 'Void').tap();
 or(other: Locator): Locator;
 ```
 
-`a.or(b)` はどちらかの分岐に一致するノードを、重複なくドキュメント順に返します。厳密性は維持されるため、両方が別々のノードに一致すると、アクションは `LOCATOR_AMBIGUOUS` をスローします。どちらでもよければ `first()` を追加してください。両方のロケーターは同じ screen と試行に属する必要があります。Web では、リテラルのフレームセレクターチェーンが完全に同じでなければなりません。表示値のクエリを含む分岐は合成できません。
+`a.or(b)` はどちらかの分岐に一致するノードを、重複なくドキュメント順に返します。厳密性は維持されるため、両方が別々のノードに一致すると、アクションは `LOCATOR_AMBIGUOUS` をスローします。どちらでもよければ `first()` を追加してください。両方のロケーターは同じ screen と試行に属する必要があります。Web では、リテラルのフレームセレクターチェーンが完全に同じでなければなりません。
 
 | エラー | 発生条件 |
 | --- | --- |
 | `INVALID_LOCATOR` | `other` がランナーのロケーターではないか、別の screen または試行に属する場合。 |
-| `UNSUPPORTED_CAPABILITY` | Web の分岐のフレームセレクターチェーンが異なるか、表示値のクエリを含む場合。 |
+| `UNSUPPORTED_CAPABILITY` | Web の分岐のフレームセレクターチェーンが異なる場合。 |
 
 #### `first`
 

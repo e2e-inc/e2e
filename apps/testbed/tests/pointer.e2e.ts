@@ -1,6 +1,6 @@
 import { test } from '@e2e-dev/web';
 import { expect } from 'e2e';
-import { boxOf, centerOf, failure } from './helpers.ts';
+import { boxOf, browserName, centerOf, failure } from './helpers.ts';
 
 test('screen.tapAt taps a viewport point with no node behind it', async ({ app, screen }) => {
   await app.open('/pointer');
@@ -39,11 +39,16 @@ test('screen.swipe({ from, to }) moves the pointer along the path', async ({ app
   await expect(screen.getByLabel('Pad state')).toHaveText('swiped from 10,20 to 250,20');
 });
 
-test('a path swipe drags and drops on the board', async ({ app, screen }) => {
+test('a path swipe drags and drops on the board', { requires: ['browser'] }, async ({ app, screen, browser }) => {
   await app.open('/board');
 
   const card = centerOf(await boxOf(screen.getByText('Design review', { exact: true })));
   const done = centerOf(await boxOf(screen.getByLabel('Done column')));
+  if (await browserName(browser) === 'firefox') {
+    // Firefox's remote agent drops no HTML5 drag (https://bugzilla.mozilla.org/show_bug.cgi?id=1515879).
+    expect(await failure(() => screen.swipe({ from: card, to: done }))).toHaveProperty('code', 'UNSUPPORTED_CAPABILITY');
+    return;
+  }
   await screen.swipe({ from: card, to: done });
 
   await expect(screen.getByLabel('Board state')).toHaveText('Design review is done');

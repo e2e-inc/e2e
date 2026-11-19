@@ -3,6 +3,7 @@
 [Moli](https://github.com/lexmount/moli) browsers for
 [`e2e`](https://www.npmjs.com/package/e2e). Each worker slot gets a local
 `moli serve` process on an available port, stopped when the run ends.
+The web engine reads a page in Moli but cannot act on an element yet.
 
 ## Install
 

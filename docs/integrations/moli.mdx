@@ -1,12 +1,17 @@
 ---
 title: Moli
 sidebarTitle: Moli
-description: Run web targets in local Moli browsers with automatic startup and cleanup through @e2e-dev/moli.
+description: The moli() browser provider from @e2e-dev/moli starts local Moli browsers. The web engine reads a page in them but cannot act on an element yet.
 ---
 
 [Moli](https://github.com/lexmount/moli) is an open-source browser that speaks
 the Chrome DevTools Protocol. `moli()` from `@e2e-dev/moli` starts one local
 browser per worker slot and stops it with the run.
+
+<Note>
+The web engine opens and reads a page in Moli. An action on an element
+fails, and so does a screenshot. See [What does not work](#what-does-not-work).
+</Note>
 
 ## Start a Moli target
 
@@ -72,10 +77,20 @@ web({ connect: { cdpEndpoint: () => process.env.MOLI_CDP_URL?.trim() || 'http://
 ```
 </Accordion>
 
-## Check browser compatibility
+## What does not work
 
-Run your suite against the Moli build you deploy. Check
-[upstream issues](https://github.com/lexmount/moli/issues) for CDP compatibility gaps.
+Opening a page, queries, assertions, cookies, and init scripts work. These
+fail on Moli 1.1.25, with the provider and with `connect`:
+
+| Feature | What happens | Why |
+| ------- | ------------ | --- |
+| An action on an element: `tap`, `fill`, `check`, `hover`, `swipe`, `setInputFiles` | The action fails when its [`actionTimeout`](/reference/config#actiontimeout) ends, with `ACTION_FAILED` or `LOCATOR_NOT_FOUND`. | Moli does not name an element the way the engine reads it. |
+| Screenshots | The capture throws `ENGINE_FAILURE`. | Moli has no `document.getAnimations`. |
+| A query inside a frame | The query fails with `LOCATOR_NOT_FOUND`. | The engine finds no document in the frame. |
+
+A fix needs changes in Moli. Check its
+[upstream issues](https://github.com/lexmount/moli/issues), and run tests
+that act on a page on a Chromium target.
 
 ## Next
 

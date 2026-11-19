@@ -104,7 +104,6 @@ description: モデル入力、ツール呼び出し、シークレット、秘�
 - 同じホストの別ポート、サブドメイン、`vercel.app` などの共有ドメイン下にある別のホストは、別オリジンです。以降に挙げる例外を除き、そこから始まるリクエストには `headers` を付けず、そこからの `401` にも応答しません。
 - `headers` は、リクエストが開始したオリジンに従います。許可されたオリジンへのリクエストは、どのオリジンへ何回リダイレクトされてもヘッダーを維持します。別の場所で始まったリクエストには、許可されたオリジンにリダイレクトされても付けません。
 - `basicAuth` は `401` を送ったオリジンに応答します。`http:` から `https:`、ルートドメインから `www` など、別オリジンへのリダイレクトには、遷移先を列挙していなければ応答しません。
-- WebKit では、許可されたオリジンがそのスキームのデフォルトポートを使う場合（`https://staging.example.com`）、または IPv6 ホストを持つ場合、`basicAuth` はあらゆるオリジンからの `401` に応答します。WebKit はそのようなオリジンに認証情報を限定できません。
 - 追加する値は、`https://api.example.com` のような、パス、クエリ、フラグメントのない `http:` または `https:` のオリジンです。それ以外の値、ホスト内の `*`、ポート `0` は、設定の読み込み時に `INVALID_CONFIG` になります。
 
 ### サイトの判定
@@ -285,7 +284,7 @@ export default {
 | 使用するモデルのプロバイダー | モデルを呼び出すエージェントステップ。決定論的なテストや完全にリプレイされたステップは、モデルを呼びません。 |
 | サブスクリプションプロバイダーのサインインとモデル一覧のエンドポイント | `e2e login` と `e2e models`（[サブスクリプション](/subscriptions)）。 |
 | アプリの `readyUrl` | ランナーが起動するアプリの準備完了チェック。 |
-| Playwright のブラウザダウンロード先 | ブラウザがない場合に 1 回。 |
+| `storage.googleapis.com`（Chrome for Testing）、`archive.mozilla.org`（Firefox）、GitHub のリリース（ffmpeg） | ブラウザまたは ffmpeg がない場合に 1 回。 |
 | `web({ connect })` の DevTools エンドポイント | そのターゲットの実行ごと。 |
 | GitHub API | `@e2e-dev/github` レポーターからだけ。 |
 | 指定した `model` のプロバイダー | [`decisionFilter()`](/filters) からだけ。コミットによる変更の差分（作業ツリーだけで変更したファイルは名前のみ）、テストファイル、そのセッションを保存するセットアップファイルを送ります。シークレットプロバイダーが返す値を除き、[テキストのダウンロード](#downloads)と同じ秘匿処理を適用します。 |
@@ -297,7 +296,7 @@ export default {
 | `hub-cloud.browserstack.com` と `api-cloud.browserstack.com`（または `BROWSERSTACK_API_ENDPOINT`） | [`browserstack()`](/integrations/browserstack) からだけ。`BROWSERSTACK_USERNAME` と `BROWSERSTACK_ACCESS_KEY` でサインインします。セッションごとに agent-device が App Automate API でデバイスを検索し、ローカルの `app` をアップロードして、BrowserStack の Appium ハブ上でセッションを実行します。`https` の `app` では、プロバイダーが実行ごとに 1 回 API にビルドを取得させます。セッションの動画を API に要求するのは、試行で録画する場合だけです。 |
 | `api.e2b.app` とそのサンドボックス（または `E2B_DOMAIN`、`E2B_API_URL`、`E2B_SANDBOX_URL`） | [`e2b()`](/integrations/e2b#run-android-targets) と [`e2bBrowsers()`](/integrations/e2b#run-web-targets-in-browsers) からだけ。`E2B_API_KEY` でサインインします。エンジンは `127.0.0.1` 上のトンネル経由で各サンドボックスの agent-device または Chromium に接続し（[サンドボックスを非公開に保つ仕組み](/integrations/e2b#how-the-sandboxes-stay-private)）、`e2b()` はそのトンネルから `.apk` を送ります。Android の各サンドボックスは、Node がなければ `nodejs.org` からダウンロードし、npm から agent-device をインストールします。 |
 | Expo API とシミュレーターの agent-device デーモン | [`expoSimulators()`](/integrations/eas)、または非推奨の別名 `easSimulators()` からだけ。`EXPO_TOKEN`、なければ `~/.expo/state.json` の eas-cli のログイン情報でサインインします。CI ランナーでは `EXPO_TOKEN` を設定するか、ランナーのホームにそのログイン情報を置かないでください。 |
-| `mcr.microsoft.com` | Playwright イメージを取得する [`smol()`](/integrations/smol) からだけ。起動後のマシンにはネットワークアクセスの制限がなく、`host.smolvm.internal` 経由でコンピューターのループバックの全ポートに接続できます。`hostPorts` だけに限定されません（[プロバイダーの設定](/integrations/smol#set-up-the-provider)）。 |
+| `mcr.microsoft.com` | マシンが実行する Playwright の Ubuntu イメージを取得する [`smol()`](/integrations/smol) からだけ。起動後のマシンにはネットワークアクセスの制限がなく、`host.smolvm.internal` 経由でコンピューターのループバックの全ポートに接続できます。`hostPorts` だけに限定されません（[プロバイダーの設定](/integrations/smol#set-up-the-provider)）。 |
 | パッケージレジストリ | `e2e init` が依存関係をインストールするとき。 |
 | テスト対象のアプリ | すべての実行時。加えて、アプリ自体が読み込むものにも接続します。 |
 

@@ -3,7 +3,7 @@
  * complete EngineError -> runner taxonomy mapping.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   EngineError,
   type EngineErrorCode,
@@ -402,6 +402,20 @@ describe('LocatorEngine step deadline', () => {
   it('keeps an operation budget of 0 an expired one, for a caller passing what is left of its deadline', () => {
     const { engine } = makeEngine({}, { actionTimeout: 100 });
     expect(engine.operation(0).timeoutMs).toBe(1);
+  });
+
+  it('gives an operation its own timeout exactly, however the clock moves, and the phase what is left once it ends sooner', () => {
+    const budget = new AttemptBudget(new AbortController().signal, new Deadline(1_000));
+    const { engine } = makeEngine({}, { actionTimeout: 100, budget });
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => (now += 1));
+    try {
+      expect(engine.operation(500).timeoutMs).toBe(500);
+      expect(engine.operation().timeoutMs).toBe(100);
+      expect(engine.operation(5_000).timeoutMs).toBeLessThan(1_000);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('refuses a negative, NaN, or infinite timeout before resolving', async () => {

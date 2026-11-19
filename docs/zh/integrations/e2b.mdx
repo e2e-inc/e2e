@@ -75,7 +75,7 @@ bun add -d e2e @e2e-dev/web @e2e-dev/e2b e2b
 ```
 </CodeGroup>
 
-从 Playwright 镜像构建一次浏览器模板。使用与你的 `@e2e-dev/web` 所用 Playwright 版本对应的镜像标签，并为模板分配 4 GB 内存，如下所示：
+从自带 Chromium 的 Playwright 镜像构建一次浏览器模板。为模板分配 4 GB 内存，如下所示：
 
 ```ts title="build-template.ts"
 import { Template, defaultBuildLogger } from 'e2b';

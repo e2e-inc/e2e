@@ -61,6 +61,13 @@ describe('renderGithubWorkflow', () => {
     expect(githubJob(renderGithubWorkflow(base)).step('Run e2e')['run']).toBe('npx e2e run --reporter list,junit');
   });
 
+  it("caches the web engine's browsers where its installer puts them on the runner", () => {
+    expect(githubJob(renderGithubWorkflow(base)).uses('actions/cache')?.['with']).toEqual({
+      path: '~/.cache/e2e/browsers',
+      key: "e2e-browsers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}",
+    });
+  });
+
   it('writes only the phone jobs for a mobile-only config, each naming its targets', () => {
     const workflow = renderGithubWorkflow({ ...base, jobs: { ios: { targets: ['iphone', 'ipad'], build: { kind: 'expo' } }, android: expoJobs.android! } });
     expect(Object.keys((parse(workflow) as { jobs: object }).jobs)).toEqual(['ios', 'android']);
@@ -197,6 +204,12 @@ describe('renderGitlabPipeline', () => {
     expect(gitlabJob(pipeline)['script']).toContain('npx e2e run --reporter list,junit');
   });
 
+  it("moves the web engine's browsers into the project, the only place GitLab caches", () => {
+    const job = gitlabJob(renderGitlabPipeline(base));
+    expect(job['variables']).toEqual({ E2E_BROWSERS_PATH: '$CI_PROJECT_DIR/.cache/e2e/browsers' });
+    expect(job['cache']).toEqual({ key: { files: ['package-lock.json'] }, paths: ['.cache/e2e/browsers/', '.npm/'] });
+  });
+
   it('runs the phone jobs on self-managed runners: install, build, a device of their own, then the targets', () => {
     const pipeline = renderGitlabPipeline({ ...base, jobs: { ios: { targets: ['iphone'], build: { kind: 'react-native', workspace: 'MyApp', bundler: false } }, android: { targets: ['android'], build: { kind: 'custom' } } } });
     expect(Object.keys(parse(pipeline) as object)).toEqual(['.e2e-mobile', 'e2e-ios', 'e2e-android']);
@@ -230,7 +243,7 @@ describe('renderGitlabPipeline', () => {
       'pnpm exec e2e-web install chromium --with-deps',
       'pnpm exec e2e run --target web --reporter list,junit',
     ]);
-    expect(job['cache']).toEqual({ key: { files: ['pnpm-lock.yaml'] }, paths: ['.cache/ms-playwright/', '.pnpm-store/'] });
+    expect(job['cache']).toEqual({ key: { files: ['pnpm-lock.yaml'] }, paths: ['.cache/e2e/browsers/', '.pnpm-store/'] });
     expect(job['artifacts']).toMatchObject({
       paths: ['apps/web/.e2e/report.json', 'apps/web/.e2e/junit.xml', 'apps/web/.e2e/results/'],
       reports: { junit: 'apps/web/.e2e/junit.xml' },
@@ -249,7 +262,7 @@ describe('renderGitlabPipeline', () => {
     expect(job['variables']).toMatchObject({ COREPACK_ENABLE_DOWNLOAD_PROMPT: '0' });
     // Node 25 and later ship no corepack.
     expect((job['script'] as string[]).slice(0, 3)).toEqual(['cd "$CI_PROJECT_DIR/site"', 'command -v corepack || npm install --global corepack', 'corepack enable']);
-    expect(job['cache']).toEqual({ key: { files: ['site/pnpm-lock.yaml'] }, paths: ['.cache/ms-playwright/', 'site/.pnpm-store/'] });
+    expect(job['cache']).toEqual({ key: { files: ['site/pnpm-lock.yaml'] }, paths: ['.cache/e2e/browsers/', 'site/.pnpm-store/'] });
   });
 
   it.each([
@@ -259,14 +272,14 @@ describe('renderGitlabPipeline', () => {
   ])('installs Yarn dependencies with $install', ({ yarnBerry, install, store }) => {
     const job = gitlabJob(renderGitlabPipeline({ ...base, manager: 'yarn', yarnBerry }));
     expect((job['script'] as string[]).slice(0, install.length)).toEqual(install);
-    expect((job['cache'] as Node)['paths']).toEqual(['.cache/ms-playwright/', ...store]);
+    expect((job['cache'] as Node)['paths']).toEqual(['.cache/e2e/browsers/', ...store]);
   });
 
   it('installs Bun into the node image and runs the web job beside a phone job', () => {
     const job = gitlabJob(renderGitlabPipeline({ ...base, manager: 'bun', jobs: { web: ['web'], ios: expoJobs.ios! } }));
     expect((job['script'] as string[]).slice(0, 2)).toEqual(['npm install --global bun', 'bun install --frozen-lockfile']);
     expect((job['script'] as string[]).at(-1)).toBe('bunx e2e run --target web --reporter list,junit');
-    expect((job['cache'] as Node)['paths']).toEqual(['.cache/ms-playwright/']);
+    expect((job['cache'] as Node)['paths']).toEqual(['.cache/e2e/browsers/']);
   });
 
   it('renames every job, and what the phone jobs extend, beside a pipeline that has one of the names', () => {

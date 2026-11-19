@@ -66,7 +66,7 @@ interface SessionEnvelope {
   };
 }
 
-/** What one saved session holds once decrypted. */
+/** What a saved session holds: the engine's state, and the secret values the session that captured it had learned. */
 export interface SavedSession {
   readonly state: EngineState;
   readonly secrets: SavedSecrets;

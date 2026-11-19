@@ -16,7 +16,7 @@
 
 import { test } from '@e2e-dev/web';
 import { expect } from 'e2e';
-import { content, CROSS } from './helpers.ts';
+import { browserName, content, CROSS, failure } from './helpers.ts';
 
 /** Records the last keydown in `window.lastEvent`, Playwright's `captureLastKeydown`. */
 const captureLastKeydown = `() => {
@@ -354,6 +354,11 @@ test.describe('page keyboard', { requires: ['browser'], tags: ['playwright'] }, 
   test('should press audio and media control keys', async ({ browser }) => {
     await browser.goto(content('<input autofocus>'));
     await browser.locator('input').focus();
+    if (await browserName(browser) === 'firefox') {
+      // WebDriver defines no key values for the media keys (https://w3c.github.io/webdriver/#keyboard-actions), and Firefox takes key input over WebDriver BiDi only.
+      expect(await failure(() => browser.keyboard.press('MediaPlayPause'))).toHaveProperty('code', 'UNSUPPORTED_CAPABILITY');
+      return;
+    }
     await browser.evaluate(captureLastKeydown);
     const mediaKeys = [
       { key: 'AudioVolumeMute', code: 'AudioVolumeMute' },
@@ -443,7 +448,9 @@ test.describe('page keyboard', { requires: ['browser'], tags: ['playwright'] }, 
     await browser.locator('textarea').pressSequentially('some text');
     await browser.keyboard.press('Shift+Control+Alt+KeyB');
     await browser.keyboard.press('Backspace');
-    expect(await browser.evaluate("() => document.querySelector('textarea').value")).toBe('some ');
+    // Firefox on macOS runs no editing key binding for synthesized key events (microsoft/playwright#5721).
+    const firefox = await browserName(browser) === 'firefox';
+    expect(await browser.evaluate("() => document.querySelector('textarea').value")).toBe(firefox ? 'some tex' : 'some ');
   });
 
   test('should press the meta key', async ({ browser }) => {

@@ -8,13 +8,13 @@
  * a Chrome on a machine down the hall are each one small provider in user code.
  */
 
+import type { CdpTarget } from './options.ts';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {
   ConfigurationError,
   EngineError,
   isProviderRecording,
-  obj,
   raceAbort,
   type EngineAttemptContext,
   type EngineCleanupContext,
@@ -25,16 +25,13 @@ import {
   type ProviderRecordContext,
   type ProviderRecording,
 } from '@e2e-dev/core/engine';
-import type { CdpTarget } from './browser-connection.ts';
-import { connectionAbort } from './operation-budget.ts';
-import { invalidState, message } from './support.ts';
+import { abortError, invalidState, message } from './errors.ts';
 
 /**
  * How long a lease lives. `worker` (the default) is one browser per worker
  * slot, acquired in `prepare` and released in `finish`; `attempt` is a fresh
  * browser per attempt, acquired in `startAttempt` and released in
- * `endAttempt`, reconnected through the lease's `reconnectEndpoint` after a
- * transport drop.
+ * `endAttempt`, whose attempt runs in the browser's default user context.
  */
 export type BrowserProviderScope = 'worker' | 'attempt';
 
@@ -52,7 +49,12 @@ export interface BrowserRequest {
   readonly attemptId?: string | undefined;
   /** The run's environment: where a provider reads its token from, never `process.env`. */
   readonly env: Readonly<Record<string, string | undefined>>;
-  /** Aborts on interrupt, and when the init or attempt that needs the browser is cancelled or exceeds its budget. */
+  /**
+   * Aborts when the browser is no longer wanted. In `prepare`, on interrupt.
+   * For a per-attempt lease, when the attempt is cancelled or exceeds its
+   * budget. For a worker's replacement, when the worker is disposed or the
+   * replacement takes more than 60 seconds.
+   */
   readonly signal: AbortSignal;
   /** Reports one line of progress to the run's reporter (a session URL to watch), from the runner and from a worker alike. */
   readonly log: (line: string) => void;
@@ -73,11 +75,6 @@ export interface BrowserLease {
   readonly id: string;
   /** `ws://`, `wss://`, or `http://` DevTools endpoint to attach to over CDP. */
   readonly cdpEndpoint: string;
-  /**
-   * Endpoint to reattach to the same browser after a transport drop, when it
-   * differs from `cdpEndpoint`; only meaningful for a per-attempt lease.
-   */
-  readonly reconnectEndpoint?: string | undefined;
 }
 
 /** Handed to `release`, once per lease. */
@@ -153,8 +150,6 @@ export interface BrowserProvider {
   readonly scope?: BrowserProviderScope | undefined;
   acquire(request: BrowserRequest): Promise<BrowserLease>;
   release(lease: BrowserLease, context: BrowserReleaseContext): Promise<void>;
-  /** Resolves CDP handshake headers in the worker from its own environment; never serialized with the lease. */
-  cdpHeaders?(lease: BrowserLease, context: BrowserRequest): Readonly<Record<string, string>> | Promise<Readonly<Record<string, string>>>;
   /**
    * Records the leased browser for an attempt that records video, in place
    * of the engine's screencast of the page: the service's own recording of
@@ -164,11 +159,13 @@ export interface BrowserProvider {
    * screencast.
    */
   record?(lease: BrowserLease, context: ProviderRecordContext): Promise<ProviderRecording>;
+  /** Resolves CDP handshake headers in the worker from its own environment; never serialized with the lease. */
+  cdpHeaders?(lease: BrowserLease, context: BrowserRequest): Readonly<Record<string, string>> | Promise<Readonly<Record<string, string>>>;
   /**
-   * Serves `browser.waitForDownload` for a browser that runs on another machine.
-   * Without it a download on such a browser fails, since the file lands on
-   * the browser's disk; a provider whose browsers run on the runner's own
-   * machine leaves it out.
+   * Serves `browser.waitForDownload` for a browser on another machine.
+   * Without it a download is read from where the browser saved it, which
+   * works when the browser runs on the runner's machine; on another one the
+   * wait throws `UNSUPPORTED_CAPABILITY`, since the file is on that disk.
    */
   readonly downloads?: BrowserProviderDownloads | undefined;
   /**
@@ -177,8 +174,8 @@ export interface BrowserProvider {
    * in the runner, after every worker exited and the leases `prepare` made
    * were released: whatever it finds is a lease a worker acquired (a
    * per-attempt browser, a replacement) and never gave back, because the
-   * worker died before it could. Find them by service tags or a shared
-   * journal scoped to the run id and target.
+   * worker died before it could. Find them by what `acquire` tagged them
+   * with at the service: the run id and the target.
    */
   sweep?(context: BrowserReleaseContext): Promise<readonly string[]>;
 }
@@ -228,8 +225,8 @@ function isNonEmptyString(value: unknown): value is string {
 /** A lease as a provider returned it or as JSON parsed it back, checked field by field: the engine trusts nothing it did not write. */
 function isBrowserLease(value: unknown): value is BrowserLease {
   if (typeof value !== 'object' || value === null) return false;
-  const { id, cdpEndpoint, reconnectEndpoint } = value as Record<keyof BrowserLease, unknown>;
-  return isNonEmptyString(id) && isNonEmptyString(cdpEndpoint) && (reconnectEndpoint === undefined || isNonEmptyString(reconnectEndpoint));
+  const { id, cdpEndpoint } = value as Record<keyof BrowserLease, unknown>;
+  return isNonEmptyString(id) && isNonEmptyString(cdpEndpoint);
 }
 
 /**
@@ -263,7 +260,7 @@ function handoffVariable(targetName: string): string {
 function encodeHandoff(handoff: Handoff): string {
   const encoded = JSON.stringify({
     slots: handoff.slots,
-    leases: handoff.leases.map((lease) => obj({ id: lease.id, cdpEndpoint: lease.cdpEndpoint, reconnectEndpoint: lease.reconnectEndpoint })),
+    leases: handoff.leases.map((lease) => ({ id: lease.id, cdpEndpoint: lease.cdpEndpoint })),
   });
   const bytes = Buffer.byteLength(encoded);
   if (bytes > MAX_HANDOFF_ENV_BYTES) {
@@ -506,7 +503,7 @@ export class LeasedBrowsers {
     const lease = await this.acquire({ runId: run.runId, targetName: run.targetName, slot: run.slot, slots: run.slots, env: run.env, signal, log: run.log });
     if (signal.aborted || this.tenure !== tenure) {
       await this.provider.release(lease, this.releaseContext(run, signal)).catch(discard);
-      throw new EngineError('CANCELLED', `browser lease from "${this.provider.name}" arrived after the worker gave up; released`, { retryable: false });
+      throw abortError(signal, `browser lease from "${this.provider.name}"`);
     }
     this.current = { lease, owned: true };
     this.attached = true;
@@ -514,11 +511,11 @@ export class LeasedBrowsers {
     return this.cdpTarget(lease, signal);
   }
 
-  /** Resolves connection credentials inside the worker, separately from the lease handoff. */
-  async cdpTarget(lease: BrowserLease, signal: AbortSignal, endpoint = lease.cdpEndpoint): Promise<CdpTarget> {
+  /** The CDP endpoint of `lease` with the handshake headers the provider resolves in this worker, which never travel with the lease. */
+  async cdpTarget(lease: BrowserLease, signal: AbortSignal): Promise<CdpTarget> {
     const run = this.requireRun();
-    const headers = await this.provider.cdpHeaders?.(lease, { ...run, signal });
-    return { endpoint, ...(headers === undefined ? {} : { headers }) };
+    const headers = await this.provider.cdpHeaders?.(lease, { runId: run.runId, targetName: run.targetName, slot: run.slot, slots: run.slots, env: run.env, signal, log: run.log });
+    return { endpoint: lease.cdpEndpoint, ...(headers === undefined ? {} : { headers }) };
   }
 
   /**
@@ -543,7 +540,7 @@ export class LeasedBrowsers {
     });
     if (context.signal.aborted || this.opened !== opened) {
       await this.provider.release(lease, this.releaseContext(run, context.signal)).catch(discard);
-      throw new EngineError('CANCELLED', `browser lease from "${this.provider.name}" arrived after the attempt ended; released`, { retryable: false });
+      throw abortError(context.signal, `browser lease from "${this.provider.name}"`);
     }
     this.attempt = lease;
     return lease;
@@ -589,7 +586,7 @@ export class LeasedBrowsers {
       try {
         recording = await record(lease, { runId: run.runId, targetName: run.targetName, attemptId, env: run.env, signal });
       } catch (cause) {
-        if (signal.aborted) throw connectionAbort(signal, `recording from "${provider.name}"`);
+        if (signal.aborted) throw abortError(signal, `recording from "${provider.name}"`);
         throw new EngineError('ENGINE_FAILURE', `${label} could not start recording browser ${lease.id}: ${message(cause)}`, { retryable: false, cause });
       }
       if (!isProviderRecording(recording)) {
@@ -620,7 +617,7 @@ export class LeasedBrowsers {
         try {
           return await served.read(lease, file, { runId: run.runId, targetName: run.targetName, env: run.env, signal, suggestedFilename });
         } catch (cause) {
-          if (signal.aborted) throw connectionAbort(signal, `download from "${provider.name}"`);
+          if (signal.aborted) throw abortError(signal, `download from "${provider.name}"`);
           throw new EngineError('ENGINE_FAILURE', `${label} could not read download ${file} from browser ${lease.id}: ${message(cause)}`, { retryable: false, cause });
         }
       },
@@ -641,9 +638,7 @@ export class LeasedBrowsers {
     try {
       lease = await provider.acquire(request);
     } catch (cause) {
-      if (request.signal.aborted) {
-        throw new EngineError('CANCELLED', `browser lease from "${provider.name}" cancelled`, { retryable: false, cause });
-      }
+      if (request.signal.aborted) throw abortError(request.signal, `browser lease from "${provider.name}"`);
       throw new EngineError('ENGINE_FAILURE', `browser provider "${provider.name}" could not lease a browser: ${message(cause)}`, { retryable: false, cause });
     }
     if (!isBrowserLease(lease)) {
