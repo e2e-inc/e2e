@@ -78,7 +78,7 @@ process.exitCode = result.exitCode;
 | `exitCode` | CLI と同じ終了コードです。`0`、`1`、`2`、`3`、`4`、`130` のいずれかです。 |
 | `status` | `passed`、`failed`、`blocked`、`error`、`interrupted` のいずれかです。 |
 | `report` | 完全なレポートです。結果は `report.run.results`、`report.run.errors`、`report.run.summary` で確認できます。 |
-| `reportPath` | `report.json` の絶対パスです。書き込めなかった場合は `undefined` です。 |
+| `reportPath` | `report.json` の絶対パスです。書き込めなかった場合や、テストの前に実行が止まった場合は `undefined` です。 |
 | `aiTracePath` | AI トレースのパスです。書き込まなかった場合は `undefined` です。 |
 
 テスト失敗、設定の失敗、中断の場合も resolve し、状態とエラーをレポートに含めます。
@@ -428,7 +428,7 @@ if (failures.length > 0) throw new AggregateError(failures, 'e2e session close f
 `expect.soft` はセッションの生存期間全体で失敗を収集します。ホスト側のランナーのテストを失敗にするには、`close()` の結果を確認してください。
 
 - `expect.poll` は、自身のタイムアウトのほうが長くても、セッションの残り時間を使います。
-- 追加フィクスチャの操作もこの予算に従います。自身のタイムアウトを無効にする操作も含みます。
+- エンジンが提供する組み込みフィクスチャの操作もこの予算に従います。自身のタイムアウトを無効にする操作も含みます。
 - 期限に達すると、それを監視していたポーリングや操作は、自身の中断を報告します。それ以外の実行中の処理はすべて `TEST_TIMEOUT` で失敗します。エンジンやモデルが応答しなかった操作も含みます。
 - どちらの場合も、セッションの結果はタイムアウトになり、`close()` はそのタイムアウトを返します。以後の操作は `TEST_TIMEOUT` で失敗するため、セッションを閉じてください。
 

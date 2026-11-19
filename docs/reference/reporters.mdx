@@ -27,6 +27,7 @@ export default {
 | Reporter | Description |
 | --- | --- |
 | [`list`](#list) | Terminal progress and run summary |
+| [`dot`](#dot) | Compact progress and run summary |
 | [`json`](#json) | Report document to stdout |
 | [`junit`](#junit) | Writes `<output>/junit.xml` |
 | [`markdown`](#markdown) | Writes `<output>/summary.md` |
@@ -36,9 +37,10 @@ export default {
 | Throws | When |
 | --- | --- |
 | `INVALID_CONFIG` | `reporters` is not an array. |
-| `INVALID_CONFIG` | An id other than `list`, `json`, `junit`, or `markdown`. |
+| `INVALID_CONFIG` | An id other than `list`, `dot`, `json`, `junit`, or `markdown`. |
 | `INVALID_CONFIG` | An entry that is neither an id nor an object with a `name` and at least one handler. |
 | `INVALID_CONFIG` | `json` together with `list`. |
+| `INVALID_CONFIG` | `dot` together with `list`. |
 
 #### `list`
 
@@ -56,6 +58,28 @@ reporters: ['list'], // default
 - The output ends with a `Failed` row per failed test: its file and line,
   its error's first line, and its trace page when one was written, so `e2e run | tail` still
   names what broke.
+
+#### `dot`
+
+Prints one character when each selected test finishes.
+
+```ts
+reporters: ['dot'],
+```
+
+| Passed | Flaky | Failed | Timed out | Interrupted | Skipped |
+| --- | --- | --- | --- | --- | --- |
+| `.` | `~` | `F` | `T` | `I` | `-` |
+
+Rows wrap after 80 marks. Colors follow the terminal settings; `NO_COLOR`
+disables them. The run header, failure details and locations, summary, and
+step prompts use the same format as `list`.
+
+Reporter output goes to stdout by default. With `--reporter dot,json`, all
+human-readable output goes to stderr so stdout holds the JSON report.
+
+Unlike Playwright, e2e uses ASCII marks and prints only the final result
+after retries, with no mark for each retried attempt.
 
 #### `json`
 
@@ -155,6 +179,8 @@ const reporter = htmlReporter({ media: 'embed' });
 - It writes `report.html` beside the report, with the report document
   embedded. The page opens from disk with no server, or with
   [`npx e2e report`](/reference/cli#e2e-report).
+- A run that writes no report writes no page either, so the previous run's
+  page stays, as `junit.xml` does. See [Output](/reference/cli#output).
 - `media` decides what happens to screenshots, videos, and downloads:
 
   | `media` | The page | To share it |
@@ -173,6 +199,9 @@ const reporter = htmlReporter({ media: 'embed' });
   `e2e explore`, the exploration without its findings.
 - The tests list as a tree: each file, its describe blocks, then their tests,
   failures first. Selecting a file's path folds its tests away.
+- A run that selected more than one target gets target tabs above the status
+  tabs. Picking one shows only its tests and their counts; the URL carries
+  the choice, so a filtered view keeps working as a link.
 - Each step shows where it starts in the attempt's video; selecting the time
   plays the video from there, and the step the video is on stays
   highlighted. The video's timeline marks each step's start, and its speed
@@ -291,7 +320,7 @@ interface FinishedRun {
   readonly status: RunStatus;              // report.run.status
   readonly exitCode: RunExitCode;
   readonly projectRoot: string;            // what the terminal shows paths relative to
-  readonly reportPath: string | undefined; // absent when the write failed
+  readonly reportPath: string | undefined; // absent when the run stopped before its tests or the write failed
   readonly artifactsRoot: string;          // what the report's artifact paths are relative to
   readonly aiTracePath: string | undefined;
   readonly traces: ReadonlyMap<string, string>;      // result id -> its trace page, from the project root
@@ -319,7 +348,7 @@ a reporter it abandoned, cutting off what it still does; under
 
 ##### Summary rows
 
-The rows a reporter resolves with print under the `list` summary, in the
+The rows a reporter resolves with print under the `list` or `dot` summary, in the
 same layout as its own rows. The `json` reporter does not carry them.
 
 ```
@@ -481,7 +510,7 @@ product failure.
 Every step phase the runner emits includes `progress.identity`:
 
 ```ts
-{ attemptId: string; attemptIndex: number; stepId: string; stepIndex: number }
+{ attemptId: string; attemptIndex: number; stepId: string; stepIndex: number; actor?: string }
 ```
 
 - The IDs match the final report. Both indexes start at zero.
@@ -491,6 +520,8 @@ Every step phase the runner emits includes `progress.identity`:
   member's step IDs stay distinct.
 - Use `stepId` to match start, activity, event, replay, and end phases,
   including nested steps.
+- `actor` names the session a step ran on when it is not the test's own: one
+  the test opened with [`launch()`](/core#open-a-host-inside-a-test).
 - `identity` is optional in the type so a reporter can also accept older
   streams.
 

@@ -25,6 +25,7 @@ export default {
 | レポーター | 説明 |
 | --- | --- |
 | [`list`](#list) | ターミナルの進捗と実行サマリー |
+| [`dot`](#dot) | 簡潔な進捗と実行サマリー |
 | [`json`](#json) | レポートを stdout に出力 |
 | [`junit`](#junit) | `<output>/junit.xml` に書き込み |
 | [`markdown`](#markdown) | `<output>/summary.md` に書き込み |
@@ -34,9 +35,10 @@ export default {
 | 投げるエラー | 発生条件 |
 | --- | --- |
 | `INVALID_CONFIG` | `reporters` が配列でない場合。 |
-| `INVALID_CONFIG` | `list`、`json`、`junit`、`markdown` 以外の ID を指定した場合。 |
+| `INVALID_CONFIG` | `list`、`dot`、`json`、`junit`、`markdown` 以外の ID を指定した場合。 |
 | `INVALID_CONFIG` | エントリが ID でも、`name` と 1 つ以上のハンドラーを持つオブジェクトでもない場合。 |
 | `INVALID_CONFIG` | `json` と `list` を併用した場合。 |
+| `INVALID_CONFIG` | `dot` と `list` を併用した場合。 |
 
 #### `list`
 
@@ -50,6 +52,24 @@ reporters: ['list'], // default
 - TTY では実行中のテストをリアルタイムに表示します。stdout がターミナルでない場合（パイプ、リダイレクト、多くの CI）は、各テストの完了時に表示します。
 - レポーターが返す[サマリー行](#onrunfinished)を、自身のサマリーの下に表示します。
 - 出力の最後には、失敗したテストごとに `Failed` 行を表示します。ファイルと行、エラーの最初の行、作成済みならトレースページを示すため、`e2e run | tail` でも何が失敗したかを確認できます。
+
+#### `dot`
+
+選択した各テストの完了時に 1 文字を出力します。
+
+```ts
+reporters: ['dot'],
+```
+
+| 成功 | 不安定 | 失敗 | タイムアウト | 中断 | スキップ |
+| --- | --- | --- | --- | --- | --- |
+| `.` | `~` | `F` | `T` | `I` | `-` |
+
+80 文字ごとに改行します。色はターミナルの設定に従い、`NO_COLOR` で無効にできます。実行ヘッダー、失敗の詳細と場所、サマリー、ステップのプロンプトは `list` と同じ形式です。
+
+レポーターの出力先はデフォルトで stdout です。`--reporter dot,json` では、ターミナル向けの出力をすべて stderr に送り、stdout には JSON レポートだけを出力します。
+
+Playwright と異なり、e2e は ASCII の記号を使い、リトライ後の最終結果だけを出力します。リトライした各試行の記号は出力しません。
 
 #### `json`
 
@@ -128,6 +148,7 @@ const reporter = htmlReporter({ media: 'embed' });
 ```
 
 - レポートと同じディレクトリに `report.html` を書き込み、レポートドキュメントを埋め込みます。サーバーなしでディスクから開けるほか、`npx e2e report`（[CLI リファレンス](/reference/cli#e2e-report)）でも開けます。
+- レポートを書き込まない実行はページも書き込まないので、`junit.xml` と同じく前回の実行のページが残ります。[出力](/reference/cli#output)を参照してください。
 - `media` は、スクリーンショット、動画、ダウンロードの扱いを決めます。
 
   | `media` | ページの内容 | 共有方法 |
@@ -234,7 +255,7 @@ interface FinishedRun {
   readonly status: RunStatus;              // report.run.status
   readonly exitCode: RunExitCode;
   readonly projectRoot: string;            // what the terminal shows paths relative to
-  readonly reportPath: string | undefined; // absent when the write failed
+  readonly reportPath: string | undefined; // absent when the run stopped before its tests or the write failed
   readonly artifactsRoot: string;          // what the report's artifact paths are relative to
   readonly aiTracePath: string | undefined;
   readonly traces: ReadonlyMap<string, string>;      // result id -> its trace page, from the project root
@@ -257,7 +278,7 @@ type ReporterSummary = readonly { label: string; text: string }[];
 
 ##### サマリー行
 
-レポーターが resolve 時に返す行は、`list` のサマリーの下に同じレイアウトで表示します。`json` レポーターには含めません。
+レポーターが resolve 時に返す行は、`list` または `dot` のサマリーの下に同じレイアウトで表示します。`json` レポーターには含めません。
 
 ```
    Test Files  2 passed (2)
@@ -368,13 +389,14 @@ type StepProgress = (
 ランナーが発行するすべてのステップフェーズには、`progress.identity` を含めます。
 
 ```ts
-{ attemptId: string; attemptIndex: number; stepId: string; stepIndex: number }
+{ attemptId: string; attemptIndex: number; stepId: string; stepIndex: number; actor?: string }
 ```
 
 - ID は最終レポートと一致します。2 つのインデックスはどちらも 0 始まりです。
 - リトライには新しい試行 ID と、より大きい試行インデックスを割り当てます。ステップのインデックスは再び 0 から始まります。
 - 直列グループのメンバーは、グループの試行 ID とインデックスを共有します。各メンバーのステップ ID は区別されます。
 - ネストしたステップも含め、start、activity、event、replay、end フェーズを対応づけるには `stepId` を使います。
+- `actor` は、ステップを実行したセッションがテスト自身のものでない場合に、その名前を示します。テストが [`launch()`](/core#open-a-host-inside-a-test) で開いたセッションです。
 - 古いイベントストリームもレポーターが受け取れるように、型上の `identity` は省略可能です。
 
 ## `--reporter` とレポーターオブジェクトの関係
