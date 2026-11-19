@@ -1577,6 +1577,8 @@ export class AgentDeviceSurface {
           return input.press(client, { ...this.actionTarget(target), ...settle });
         case 'doubleTap':
           return input.press(client, { ...this.actionTarget(target), count: 2, ...settle });
+        case 'multiTap':
+          return input.press(client, { ...this.actionTarget(target), count: action.count, ...settle });
         case 'longPress':
           return input.send(
             () => client.interactions.longPress({ ...this.actionTarget(target), ...settle, durationMs: action.durationMs ?? DEFAULT_LONG_PRESS_MS }),
