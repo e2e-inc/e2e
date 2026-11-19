@@ -128,7 +128,7 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | Called in a setup test. A setup test cannot skip because other tests depend on its sessions. |
+| `INVALID_ARGUMENT` | Called in a setup test with a true condition, or none. A setup test cannot skip because other tests depend on its sessions. |
 | `COLLECTION_ERROR` | The conditional form, outside a test body. |
 | `COLLECTION_ERROR` | The registration form, inside a serial group. Set [`skip`](#skip) on the serial `describe` instead. |
 

@@ -364,6 +364,28 @@ test('plain', async () => {});
   );
 
   it(
+    'keeps the fixme cause beside a failure that outranks the skip',
+    async () => {
+      const file = `import { test } from 'e2e';
+
+test.afterEach(() => {
+  throw new Error('teardown broke');
+});
+test('member', async () => {
+  test.fixme('not ready');
+});
+`;
+      const { outcome, project } = await runProject({ 'tests/fixme-failed.e2e.ts': file }, {});
+      const member = resultByTitle(outcome, 'member');
+      expect(member.status).toBe('failed');
+      expect(member.attempts[0]).toMatchObject({ status: 'failed', skip: { cause: 'fixme', reason: 'fixme: not ready' } });
+      assertValidReport(outcome.report);
+      project.cleanup();
+    },
+    120_000,
+  );
+
+  it(
     'counts a serial member that marks itself fixme as executed, with the cause fixme',
     async () => {
       const file = `import { test } from 'e2e';

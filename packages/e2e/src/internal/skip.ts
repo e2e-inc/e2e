@@ -10,23 +10,26 @@
 
 import { currentAttempt } from '@e2e-dev/core/lib/expect/attempt';
 import { CollectionError, TestError } from '@e2e-dev/core/lib/internal/errors';
+import type { SelfSkipCause } from '@e2e-dev/core/lib/run/records';
 
 const runtimeSkipBrand: unique symbol = Symbol.for('e2e.runtimeSkip.v1');
 
 export class RuntimeSkip {
   readonly [runtimeSkipBrand] = true as const;
   readonly reason: string;
-  /** `fixme` from `test.fixme`, else `explicit`. A copy of this package from before the field carries none. */
-  readonly cause: 'explicit' | 'fixme';
+  readonly cause: SelfSkipCause;
 
-  constructor(reason: string | undefined, cause: 'explicit' | 'fixme' = 'explicit') {
+  constructor(reason: string | undefined, cause: SelfSkipCause) {
     this.reason = reason === undefined || reason.trim() === '' ? 'skipped' : reason;
     this.cause = cause;
   }
 }
 
-/** The skip cause a runtime skip reports: its own, or `explicit` for one that names none. */
-export function runtimeSkipCause(skip: RuntimeSkip): 'explicit' | 'fixme' {
+/**
+ * The skip cause a runtime skip reports: its own, or `explicit` for one with
+ * none, which a copy of this package from before `test.fixme` throws.
+ */
+export function runtimeSkipCause(skip: { readonly cause?: unknown }): SelfSkipCause {
   return skip.cause === 'fixme' ? 'fixme' : 'explicit';
 }
 
@@ -60,13 +63,13 @@ export function parseModifierCall(first: unknown, second: unknown): ModifierCall
 }
 
 /**
- * The test APIs that skip the running test, each with the collection form an
- * outside-body call is pointed at.
+ * The test APIs that skip the running test: the cause each reports, and the
+ * collection form an outside-body call is pointed at.
  */
 const RUNTIME_SKIP_APIS = {
-  'test.skip': 'to skip at collection, pass { skip: true } or a reason string as the test option',
-  'test.fixme': 'to mark a test fixme at collection, register it with test.fixme(title, fn)',
-} as const;
+  'test.skip': { cause: 'explicit', hint: 'to skip at collection, pass { skip: true } or a reason string as the test option' },
+  'test.fixme': { cause: 'fixme', hint: 'to mark a test fixme at collection, register it with test.fixme(title, fn)' },
+} as const satisfies Record<string, { readonly cause: SelfSkipCause; readonly hint: string }>;
 
 /**
  * The skip reason of a `test.fixme` test: `fixme`, or `fixme: <reason>` when
@@ -91,12 +94,12 @@ export function skipRunningTest(
   const attempt = currentAttempt();
   if (attempt === undefined) {
     throw new CollectionError(
-      `${api}(condition, reason) skips the running test and must be called inside a test body; ${RUNTIME_SKIP_APIS[api]}`,
+      `${api}(condition, reason) skips the running test and must be called inside a test body; ${RUNTIME_SKIP_APIS[api].hint}`,
     );
   }
   if (!condition) return;
   if (attempt.testKind === 'setup') {
     throw new TestError('INVALID_ARGUMENT', `${api}() cannot skip a setup test: the sessions it declares are owed to their consumers`);
   }
-  throw new RuntimeSkip(reason, api === 'test.fixme' ? 'fixme' : 'explicit');
+  throw new RuntimeSkip(reason, RUNTIME_SKIP_APIS[api].cause);
 }

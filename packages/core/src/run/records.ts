@@ -28,6 +28,12 @@ export interface TestIdentity {
   readonly serialId: string | undefined;
 }
 
+/**
+ * The skip causes a test gives itself: `explicit` from `test.skip` or the
+ * `skip` option, `fixme` from `test.fixme`. Every other cause is the runner's.
+ */
+export type SelfSkipCause = 'explicit' | 'fixme';
+
 /** Why a pair did not run; only a `filtered` one can name the test filter that left it out. */
 export type SkipInfo =
   | (SkipDetail & {
@@ -37,8 +43,7 @@ export type SkipInfo =
     })
   | (SkipDetail & {
       readonly cause:
-        | 'explicit'
-        | 'fixme'
+        | SelfSkipCause
         | 'platform-unavailable'
         | 'capability-unavailable'
         | 'setup-failed'
@@ -235,11 +240,8 @@ export function memberRan(member: { readonly status: string; readonly skip?: { r
   return member.status !== 'skipped' || skippedItself(member.skip?.cause);
 }
 
-/**
- * Whether a skip cause is one a test gives itself, with `test.skip`, the
- * `skip` option, or `test.fixme`, as opposed to one the runner gives it.
- */
-function skippedItself(cause: string | undefined): boolean {
+/** Whether a skip cause is a `SelfSkipCause`, one a test gives itself rather than one the runner gives it. */
+function skippedItself(cause: string | undefined): cause is SelfSkipCause {
   return cause === 'explicit' || cause === 'fixme';
 }
 

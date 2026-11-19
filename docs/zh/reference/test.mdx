@@ -110,7 +110,7 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 
 | 抛出 | 条件 |
 | --- | --- |
-| `INVALID_ARGUMENT` | 在准备测试中调用。准备测试不能跳过，因为其他测试依赖它的会话。 |
+| `INVALID_ARGUMENT` | 在准备测试中调用，且条件为真或未给出条件。准备测试不能跳过，因为其他测试依赖它的会话。 |
 | `COLLECTION_ERROR` | 在测试主体之外使用条件形式。 |
 | `COLLECTION_ERROR` | 在串行分组内使用注册形式。请改为在串行 `describe` 上设置 [`skip`](#skip)。 |
 
