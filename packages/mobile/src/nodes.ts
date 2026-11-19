@@ -154,14 +154,19 @@ export function keyboardOnScreen(nodes: readonly RawNode[], viewport: ViewportSi
  */
 export function keyboardElementsTop(nodes: readonly RawNode[], viewport: ViewportSize | undefined): number | undefined {
   const screen = viewport ?? viewportOf(nodes);
-  let top: number | undefined;
-  for (const node of nodes) {
-    const rect = node.rect;
-    if (rect === undefined || rect.width <= 0 || rect.height <= 0 || node.visibleToUser === false || !isKeyboardElement(node)) continue;
-    if (screen !== undefined && !(rect.x < screen.width && rect.x + rect.width > 0 && rect.y < screen.height && rect.y + rect.height > 0)) continue;
-    top = top === undefined ? rect.y : Math.min(top, rect.y);
-  }
-  return top;
+  const onScreen = drawnKeyboardRects(nodes).filter(
+    (rect) => screen === undefined || (rect.x < screen.width && rect.x + rect.width > 0 && rect.y < screen.height && rect.y + rect.height > 0),
+  );
+  return onScreen.length === 0 ? undefined : Math.min(...onScreen.map((rect) => rect.y));
+}
+
+/** The frames of the keyboard elements the tree draws: a nonzero frame, not hidden from the user. */
+function drawnKeyboardRects(nodes: readonly RawNode[]): Rect[] {
+  return nodes.flatMap((node) =>
+    node.rect !== undefined && node.rect.width > 0 && node.rect.height > 0 && node.visibleToUser !== false && isKeyboardElement(node)
+      ? [node.rect]
+      : [],
+  );
 }
 
 /**
@@ -180,11 +185,7 @@ export function keyboardBand(
 ): Rect | undefined {
   if (fact?.kind === 'visible' || fact?.kind === 'derived') return fact.frame;
   if (fact?.kind === 'absent' || fact?.kind === 'tree-rejected' || (fact?.kind === 'visibility-only' && !fact.visible)) return undefined;
-  const boards = nodes.flatMap((node) =>
-    node.rect !== undefined && node.rect.width > 0 && node.rect.height > 0 && node.visibleToUser !== false && isKeyboardElement(node)
-      ? [node.rect]
-      : [],
-  );
+  const boards = drawnKeyboardRects(nodes);
   if (boards.length === 0) return undefined;
   const left = Math.min(...boards.map((rect) => rect.x));
   const right = Math.max(...boards.map((rect) => rect.x + rect.width));
