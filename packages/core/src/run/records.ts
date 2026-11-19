@@ -311,11 +311,12 @@ export function cleanupErrorsOf(
 }
 
 /**
- * The failure a test's `test.skip(...)` followed: the last attempt that
- * failed before a skipped retry, or an error the skipped attempt kept beside
- * its skip. A soft failure before the skip fails its own attempt. Engine
- * cleanup diagnostics after the skip are not one. A serial member's attempts
- * live on its group, which `groupOf` looks up only for such a member.
+ * The failure a test's `test.skip(...)` or `test.fixme(...)` followed: the
+ * last attempt that failed before a skipped retry, or an error the skipped
+ * attempt kept beside its skip. A soft failure before the skip fails its own
+ * attempt. Engine cleanup diagnostics after the skip are not one. A serial
+ * member's attempts live on its group, which `groupOf` looks up only for such
+ * a member.
  */
 export function failureBeforeSkip(
   result: Pick<ResultRecord, 'status' | 'skip' | 'attempts' | 'serialGroupId' | 'test'>,

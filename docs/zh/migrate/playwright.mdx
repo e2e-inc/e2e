@@ -162,7 +162,7 @@ test('checkout', async ({ app, agent, screen }) => {
 | --- | --- |
 | `import { test, expect } from '@playwright/test'` | `import { test } from '@e2e-dev/web'` 和 `import { expect } from 'e2e'` |
 | 测试中的 `{ page }` | `{ screen, app, browser }` |
-| `test()`, `test.describe()`, `test.only`, `test.fail()`, `test.skip(title, fn)`, `test.skip(condition, reason)`, `test.fixme(title, fn)`, `test.fixme(condition, reason)` | 相同；条件式 `skip` 和 `fixme` 可用于测试体或 `beforeEach` 中；serial 组不接受 `skip(title, fn)` 或 `fixme(title, fn)`，请在组上设置 `skip` |
+| `test()`, `test.describe()`, `test.only`, `test.fail()`, `test.skip(title, fn)`, `test.skip(condition, reason)`, `test.fixme(title, fn)`, `test.fixme(condition, reason)` | 相同，但 serial 组改为在组上设置 `skip`；条件式可用于测试体或 `beforeEach` 中 |
 | `test.setTimeout()` | 在测试体、`beforeEach` 或 `beforeAll`（该钩子自身的超时）中相同；`afterEach` 和 `afterAll` 不能调用。在 `describe` 回调中，请改为向 `test.describe` 传入 `{ timeout }`。没有表示不限时的 `0`：请传入一个较大的值 |
 | `beforeEach`, `afterEach`, `beforeAll`, `afterAll` | 相同，但不带标题；`beforeAll` 和 `afterAll` 得到工作进程测试夹具，而不是 `browser`、`app` 或 `screen` |
 | `test.describe.skip`, `test.describe.serial`, `describe.configure({ mode: 'serial', retries, timeout })` | `test.describe(title, { skip, serial, retries, timeout }, fn)` |
