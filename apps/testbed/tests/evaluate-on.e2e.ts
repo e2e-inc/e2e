@@ -10,6 +10,17 @@ const slow = content(`<html><p id="slow">Slow</p><script>
 </script></html>`);
 
 /**
+ * A page whose `#slower` answers `slow` with 1 after an 800 ms busy wait, so
+ * a 1500 ms assertion reads it once in full and is cut off in its second
+ * read with well over one poll tick left.
+ */
+const slower = content(`<html><p id="slower">Slower</p><script>
+  Object.defineProperty(document.getElementById('slower'), 'slow', {
+    get() { const start = Date.now(); while (Date.now() - start < 800); return 1; },
+  });
+</script></html>`);
+
+/**
  * A page whose `#r` reloads the page the first time something reads its
  * `state`, and answers that read with a promise that never settles, so the
  * read is still running when the page navigates. After the reload it
@@ -50,7 +61,11 @@ const vanishing = content(`<html><p id="gone" class="a" style="color: blue">Gone
   setTimeout(() => document.getElementById('gone').remove(), 300);
 </script></html>`);
 
-/** A page whose `#late` appears 600 ms after load as class `pending` and becomes `error` 300 ms later. */
+/**
+ * A page whose `#late` appears 600 ms after load as class `pending` and
+ * becomes `error` 700 ms later: past the negation grace from load, inside it
+ * from the node's arrival.
+ */
 const lateThenError = content(`<html><body><script>
   setTimeout(() => {
     const late = document.createElement('p');
@@ -58,7 +73,7 @@ const lateThenError = content(`<html><body><script>
     late.className = 'pending';
     late.textContent = 'Late';
     document.body.append(late);
-    setTimeout(() => { late.className = 'error'; }, 300);
+    setTimeout(() => { late.className = 'error'; }, 700);
   }, 600);
 </script></body></html>`);
 
@@ -453,6 +468,14 @@ test.describe('expect(browser) locator matchers', { requires: ['browser'] }, () 
       expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
       expect(error).toHaveProperty('message', expect.stringContaining('observed: no node'));
     }
+  });
+
+  test('fail a value that never matches as an assertion, even when each read is slow', async ({ browser }) => {
+    await browser.goto(slower);
+    const error = await failure(() =>
+      expect(browser).toHaveJSProperty(browser.locator('#slower'), 'slow', 2, { timeout: 1500 }));
+    expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
+    expect(error).toHaveProperty('message', expect.stringContaining('observed: property slow 1'));
   });
 
   test('compare the class list with its whitespace collapsed, and fail no class attribute', async ({ browser }) => {

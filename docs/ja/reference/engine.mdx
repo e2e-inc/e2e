@@ -1635,12 +1635,13 @@ await pollCondition({
   deadline,
   signal: context.signal,
   negated: false,
-  evaluate: async () => (await read(context.operation(deadline.remaining()))) === 'Paid',
+  evaluate: async (reads) =>
+    (await reads.read((timeoutMs) => read(context.operation(timeoutMs)))) === 'Paid',
   onTimeout: (cause) => new TestError('ASSERTION_FAILED', 'status never became Paid', { cause }),
 });
 ```
 
-- `evaluate` が行う各読み取りは `deadline` で制限します（`context.operation(deadline.remaining())`）。操作タイムアウトを使うと、アサーション自身の期限を超える可能性があります。
+- `evaluate` が行う各読み取りは、`deadline` に対する `ReadWindow` である `reads.read` を通して実行します。これは読み取りに持ち時間を渡し（`context.operation(timeoutMs)`）、操作タイムアウトを使ってアサーション自身の期限を超えることを防ぎます。また読み取りの時間を測るため、期限で打ち切られた読み取りは、それまでで最も遅い読み取りと比べて判定されます。
 - 開始から 0、20、50 ms で読み取り、その後は 100 ms の倍数で読み取ります。各読み取りは、直前の完了から最短 10 ms、最長 100 ms 後に開始します。操作と `waitFor` も同じ方法でノードを待ちます。
 - `evaluate` の `OPERATION_TIMEOUT` は、[期限間際のタイムアウト](#timeouts-at-a-deadline)のルールでポーリングを終了します。`onTimeout(cause)` がそれを使って失敗を作成します。
 
@@ -2212,7 +2213,7 @@ return context.fixture('printer', printer, { print: { kind: 'resource' } });
 
 ### エクスポートされる名前
 
-`EngineCleanupContext`、`EngineDisposeContext`、`OperationContext`、`TextPattern`、`SemanticQuery`、`LocatorExpression`、`NodeRef`、`SemanticNode`、`ViewportPoint`、`ViewportSize`、`ObservationPixels`、`LocatorAction`、`LocatorActionKind`、`PointerAction`、`PointerActionKind`、`ScrollDirection`、`Momentum`、`SelectOption`、`Key`、`KeyModifier`、`KeyName`、`ParsedKey`、`ENGINE_SPI_VERSION`、`LOCATOR_ACTION_KINDS`、`POINTER_ACTION_KINDS`、`KEY_MODIFIERS`、`KEY_NAMES`、`parseKey`、`ENGINE_ERROR_CODES`、`RETRYABLE_ENGINE_ERROR_CODES`、`Secret`、`isSecret`、`TextMatch`、`JsonValue`、`JsonValueRules`、`ResolveExpressionOptions`、`PollConditionOptions`、`WithoutUndefined`、`FixtureOperation`、`EngineIsolation`、`OBSERVED_NAME_LIMIT`、`OBSERVED_TEXT_LIMIT` は `e2e/engine` からエクスポートされます。[エンジンプロトコル](/reference/engine-protocol)の `connectEngine`、`serveEngine`、`describeEngine`、`spawnTransport`、`socketTransport`、`loopbackTransport`、`ENGINE_METHODS`、`ENGINE_PROTOCOL_VERSION` と、それぞれの型も含まれます。
+`EngineCleanupContext`、`EngineDisposeContext`、`OperationContext`、`TextPattern`、`SemanticQuery`、`LocatorExpression`、`NodeRef`、`SemanticNode`、`ViewportPoint`、`ViewportSize`、`ObservationPixels`、`LocatorAction`、`LocatorActionKind`、`PointerAction`、`PointerActionKind`、`ScrollDirection`、`Momentum`、`SelectOption`、`Key`、`KeyModifier`、`KeyName`、`ParsedKey`、`ENGINE_SPI_VERSION`、`LOCATOR_ACTION_KINDS`、`POINTER_ACTION_KINDS`、`KEY_MODIFIERS`、`KEY_NAMES`、`parseKey`、`ENGINE_ERROR_CODES`、`RETRYABLE_ENGINE_ERROR_CODES`、`Secret`、`isSecret`、`TextMatch`、`JsonValue`、`JsonValueRules`、`ResolveExpressionOptions`、`PollConditionOptions`、`ReadWindow`、`WithoutUndefined`、`FixtureOperation`、`EngineIsolation`、`OBSERVED_NAME_LIMIT`、`OBSERVED_TEXT_LIMIT` は `e2e/engine` からエクスポートされます。[エンジンプロトコル](/reference/engine-protocol)の `connectEngine`、`serveEngine`、`describeEngine`、`spawnTransport`、`socketTransport`、`loopbackTransport`、`ENGINE_METHODS`、`ENGINE_PROTOCOL_VERSION` と、それぞれの型も含まれます。
 
 ### `SemanticNode`
 

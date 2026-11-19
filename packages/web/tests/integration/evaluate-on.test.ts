@@ -56,6 +56,14 @@ describe('PlaywrightSurface.evaluateOn', () => {
       .rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
   });
 
+  it('reports a ref whose strict locator now matches nothing as retryable NODE_STALE', async () => {
+    await page.setContent('<p>one</p>');
+    const ref = await locateOne(paragraph);
+    await page.evaluate(() => document.querySelector('p')!.remove());
+    await expect(surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, false))
+      .rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringContaining('matches 0 elements') });
+  });
+
   it.each([
     ['a label', nameField],
     ['a selector', { kind: 'selector', selector: 'input' } as const],

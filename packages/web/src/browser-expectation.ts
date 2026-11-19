@@ -22,6 +22,7 @@ import {
   type EngineFixtureContext,
   type NodeRef,
   type OperationContext,
+  type ReadWindow,
   type SemanticNode,
 } from '@e2e-dev/core/engine';
 import type { BrowserExpectation } from './browser.ts';
@@ -30,8 +31,10 @@ import { isTestErrorCode } from './support.ts';
 
 /** What the matchers read the page through. */
 export interface ExpectationDeps {
-  currentUrl(deadline: Deadline): Promise<string>;
-  currentTitle(deadline: Deadline): Promise<string>;
+  /** The page URL, read within `timeoutMs`. */
+  currentUrl(timeoutMs: number): Promise<string>;
+  /** The page title, read within `timeoutMs`. */
+  currentTitle(timeoutMs: number): Promise<string>;
   /**
    * Runs the engine's own read-only page code on the node `ref` names. A
    * navigation while it runs re-resolves the node and runs it again.
@@ -72,16 +75,16 @@ const NO_NODE: BrowserSample = { matches: undefined, observed: 'no node' };
 
 /**
  * `expect(browser)` matchers: URL, title, class, CSS, and DOM property
- * polling against the assertion budget. Every read is bounded by the poll's
- * deadline, so a page that stops answering ends the assertion at its own
- * timeout, and the failure reports the last read instead of reading a hung
- * page again.
+ * polling against the assertion budget. Every read runs through the poll's
+ * `ReadWindow`, bounded by its deadline and timed, so a page that stops
+ * answering ends the assertion at its own timeout, and a read the deadline
+ * cuts off fails the assertion with the last read it saw.
  */
 export function createBrowserExpectation(deps: ExpectationDeps, negated = false): BrowserExpectation {
   const poll = async (
     api: string,
     label: string,
-    read: (deadline: Deadline) => Promise<BrowserSample>,
+    read: (reads: ReadWindow) => Promise<BrowserSample>,
     timeout: number | undefined,
   ): Promise<void> => {
     const deadline = deps.deadlineFor(timeout, api);
@@ -91,8 +94,8 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
       deadline,
       signal: deps.context.signal,
       negated,
-      evaluate: async () => {
-        last = await read(deadline);
+      evaluate: async (reads) => {
+        last = await read(reads);
         return last.matches;
       },
       onTimeout: (cause) =>
@@ -119,8 +122,8 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
   };
   /**
    * The poll read of a matcher on the one node `target` matches: one
-   * `context.withNode` that does not wait for a match, inside the poll's
-   * deadline. It refuses a target that is not this attempt's locator before
+   * `context.withNode` that does not wait for a match, run through the poll's
+   * read window. It refuses a target that is not this attempt's locator before
    * any read, and a secure field or an ambiguous match at once. Zero matches
    * is `no node`, one more poll, so a node that never arrives stays an
    * assertion failure; a read the deadline cuts off is the poll's to judge.
@@ -130,18 +133,16 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
     subject: string,
     target: Locator,
     read: (ref: NodeRef, operation: OperationContext, node: SemanticNode) => Promise<BrowserSample>,
-  ): ((deadline: Deadline) => Promise<BrowserSample>) =>
-    async (deadline) => {
-      const sample = deps.context.withNode(qualified(api), target, read, {
-        timeout: Math.max(1, deadline.remaining()),
-        wait: false,
-      });
+  ): ((reads: ReadWindow) => Promise<BrowserSample>) =>
+    async (reads) => {
       try {
-        return await withTimeout(
-          sample,
-          deadline.remaining(),
-          () =>
-            new EngineError('OPERATION_TIMEOUT', `${subject} read timed out`, { retryable: false }),
+        return await reads.read((timeoutMs) =>
+          withTimeout(
+            deps.context.withNode(qualified(api), target, read, { timeout: timeoutMs, wait: false }),
+            timeoutMs,
+            () =>
+              new EngineError('OPERATION_TIMEOUT', `${subject} read timed out`, { retryable: false }),
+          ),
         );
       } catch (error) {
         if (isTestErrorCode(error, 'LOCATOR_NOT_FOUND')) return NO_NODE;
@@ -160,7 +161,7 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
     source: string,
     arg: JsonValue,
     matches: (value: JsonValue) => boolean,
-  ): ((deadline: Deadline) => Promise<BrowserSample>) =>
+  ): ((reads: ReadWindow) => Promise<BrowserSample>) =>
     sampleNode(api, subject, target, async (ref, operation) => {
       const read = await deps.readNode(ref, source, arg, operation);
       if (!read.ok) return { matches: false, observed: `${subject} is not JSON` };
@@ -182,8 +183,8 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
       return poll(
         'toHaveURL',
         `URL ${describeExpectedUrl(expected, target)}${ignoreCase === true ? ' (ignoring case)' : ''}`,
-        async (deadline) => {
-          const url = await deps.currentUrl(deadline);
+        async (reads) => {
+          const url = await reads.read((timeoutMs) => deps.currentUrl(timeoutMs));
           return { matches: urlMatches(url, expected, target, ignoreCase), observed: `URL ${url}` };
         },
         options?.timeout,
@@ -195,8 +196,8 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
       return poll(
         'toHaveTitle',
         `title ${describePattern(pattern)}`,
-        async (deadline) => {
-          const title = await deps.currentTitle(deadline);
+        async (reads) => {
+          const title = await reads.read((timeoutMs) => deps.currentTitle(timeoutMs));
           return { matches: matchesText(title, pattern), observed: `title ${JSON.stringify(title)}` };
         },
         options?.timeout,
@@ -212,7 +213,7 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
           const value = node.attributes?.['class'];
           if (value === undefined) return { matches: false, observed: 'no class attribute' };
           return {
-            matches: matchesText(value.trim().split(/\s+/).join(' '), pattern),
+            matches: matchesText(value, pattern),
             observed: `class ${JSON.stringify(value)}`,
           };
         }),

@@ -1764,14 +1764,17 @@ await pollCondition({
   deadline,
   signal: context.signal,
   negated: false,
-  evaluate: async () => (await read(context.operation(deadline.remaining()))) === 'Paid',
+  evaluate: async (reads) =>
+    (await reads.read((timeoutMs) => read(context.operation(timeoutMs)))) === 'Paid',
   onTimeout: (cause) => new TestError('ASSERTION_FAILED', 'status never became Paid', { cause }),
 });
 ```
 
-- Bound each read `evaluate` makes by `deadline`
-  (`context.operation(deadline.remaining())`). A read on the action timeout
-  can outlast the assertion's own.
+- Run each read `evaluate` makes through `reads.read`, a `ReadWindow` over
+  `deadline`. It hands the read its budget (`context.operation(timeoutMs)`),
+  since a read on the action timeout can outlast the assertion's own. It
+  also times the read, so a read the deadline cuts off is judged against the
+  slowest one before it.
 - It reads at 0, 20, and 50 ms, then at every multiple of 100 ms from its
   start. Each read starts at least 10 ms and at most 100 ms after the one
   before ends. Actions and `waitFor` wait for their node the same way.
@@ -2425,7 +2428,7 @@ return context.fixture('printer', printer, { print: { kind: 'resource' } });
 `LOCATOR_ACTION_KINDS`, `POINTER_ACTION_KINDS`, `KEY_MODIFIERS`,
 `KEY_NAMES`, `parseKey`, `ENGINE_ERROR_CODES`, `RETRYABLE_ENGINE_ERROR_CODES`,
 `Secret`, `isSecret`, `TextMatch`, `JsonValue`, `JsonValueRules`,
-`ResolveExpressionOptions`, `PollConditionOptions`, `WithoutUndefined`,
+`ResolveExpressionOptions`, `PollConditionOptions`, `ReadWindow`, `WithoutUndefined`,
 `FixtureOperation`, `EngineIsolation`, `OBSERVED_NAME_LIMIT`, and `OBSERVED_TEXT_LIMIT` are
 exported from `e2e/engine`. So are the [engine protocol](/reference/engine-protocol)'s
 `connectEngine`, `serveEngine`, `describeEngine`, `spawnTransport`,

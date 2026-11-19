@@ -625,12 +625,12 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
   const deadlineFor = (timeout: number | undefined, api: string): Deadline =>
     new Deadline(context.operation(stepTimeout(timeout, api) ?? context.timeouts.assertion).timeoutMs);
 
-  /** The page URL, read within the action timeout or, for a matcher poll, within the poll's deadline. */
-  const currentUrl = (deadline?: Deadline) =>
-    surface.guard(context.operation(deadline?.remaining()), 'url', async () => surface.requirePage().url());
-  /** The page title, read within the action timeout or, for a matcher poll, within the poll's deadline. */
-  const currentTitle = (deadline?: Deadline) =>
-    surface.guard(context.operation(deadline?.remaining()), 'title', () => surface.requirePage().title());
+  /** The page URL, read within `timeoutMs`, else within the action timeout. */
+  const currentUrl = (timeoutMs?: number) =>
+    surface.guard(context.operation(timeoutMs), 'url', async () => surface.requirePage().url());
+  /** The page title, read within `timeoutMs`, else within the action timeout. */
+  const currentTitle = (timeoutMs?: number) =>
+    surface.guard(context.operation(timeoutMs), 'title', () => surface.requirePage().title());
   const expectation = createBrowserExpectation({
     currentUrl,
     currentTitle,

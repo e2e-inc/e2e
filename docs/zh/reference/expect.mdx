@@ -667,6 +667,8 @@ last: expected "running" not to be "running"
 
 如果将未提供的值读取为 `''`，就会把已填入的密码字段当作已清空而通过；如果将未提供的 `value` 属性读取为不存在，就会让具有该属性的密码字段通过 `not.toHaveAttribute('value')`。请断言填入操作的结果，而不是字段本身。
 
+`expect(browser)` 的匹配器检查的是其定位器匹配的元素。通向另一个元素的 `toHaveJSProperty` 路径（例如 `<label>` 上的 `control.value`）会读取那个元素的值。
+
 ### 选项校验
 
 - 匹配器会在读取屏幕前，以 `INVALID_ARGUMENT` 拒绝它不接受的选项键，以及非布尔值的标志。

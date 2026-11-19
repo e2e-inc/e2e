@@ -185,21 +185,20 @@ export interface PollConditionOptions {
   readonly signal: AbortSignal;
   readonly negated: boolean;
   /**
-   * Evaluates the positive condition once, every read bounded by
-   * `deadline`: a read on a longer budget outlasts the poll. Returns
+   * Evaluates the positive condition once, every read run through
+   * `reads.read`, which bounds it by `deadline` and times it, so a read the
+   * deadline cuts off is judged against the slowest one before it. Returns
    * undefined when the condition cannot be evaluated yet: the positive poll
    * keeps waiting and the negation grace window resets.
    */
-  evaluate(): Promise<boolean | undefined>;
+  evaluate(reads: ReadWindow): Promise<boolean | undefined>;
   /** Builds the poll's failure; `cause` is the read the deadline cut off, when one did. */
   onTimeout(cause?: unknown): Error | Promise<Error>;
 }
 
-/** `pollCondition` options whose reads run in a `ReadWindow` over the deadline. */
-export interface PollReadsOptions extends Omit<PollConditionOptions, 'evaluate'> {
+/** `pollCondition` options whose reads run in a `ReadWindow` the caller made, with a cap of its own. */
+export interface PollReadsOptions extends PollConditionOptions {
   readonly reads: ReadWindow;
-  /** Evaluates the positive condition once, every read run through `reads`. */
-  evaluate(reads: ReadWindow): Promise<boolean | undefined>;
 }
 
 /**

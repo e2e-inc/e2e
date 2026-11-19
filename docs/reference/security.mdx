@@ -74,7 +74,7 @@ These calls fail with `POLICY_DENIED`.
 | Navigation to any scheme but `http:` and `https:`, other than `about:blank` | `file:`, `data:`, `javascript:`, and wrappers such as `view-source:file:` would load local or inline content. |
 | A malformed URL | Nothing is repaired. |
 | A `Secret` reaching a JSON sink | Handles carry no value, and no value may be serialized. |
-| Reading a value, text, or attribute from a secure field, with a getter or a `toHaveValue`, `toHaveText`, `toContainText`, or `toHaveAttribute` matcher, and any read of one with `browser.evaluateOn` or an `expect(browser)` locator matcher | Assert the outcome, not the secret. A withheld value is redacted, not empty or absent. |
+| Reading a value, text, or attribute from a secure field, with a getter or a `toHaveValue`, `toHaveText`, `toContainText`, or `toHaveAttribute` matcher, or with `browser.evaluateOn` or an `expect(browser)` locator matcher whose locator matches one | Assert the outcome, not the secret. A withheld value is redacted, not empty or absent. |
 | `type_secret` with an undeclared name | Only secrets in the step's params can be filled. |
 | `type_secret`, or a `fill` in MCP `run_code`, into a disabled or non-editable node | Sinks are `textbox`, `searchbox`, and `combobox`. |
 | A password into a field that isn't a password field | Purpose must match. A generic secret fills any editable input. |
