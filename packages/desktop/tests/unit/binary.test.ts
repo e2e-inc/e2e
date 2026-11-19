@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installPinned, pinnedExecutable } from '../../src/binary.ts';
 
@@ -10,6 +11,13 @@ describe('the pinned agent-desktop', () => {
     const env = { HOME: '/home/ada', USERPROFILE: '/home/ada', XDG_CACHE_HOME: '/home/ada/.cache', LOCALAPPDATA: '/home/ada/local' };
     expect(pinnedExecutable({ ...env, E2E_CACHE_DIR: '.e2e/cache' })).toBe(pinnedExecutable(env));
     expect(pinnedExecutable(env)).toMatch(/^\/home\/ada\/.*[\\/]e2e[\\/]/);
+  });
+
+  it('refuses an archive whose SHA-256 is not the pinned one, and caches nothing', async () => {
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(new Uint8Array([1, 2, 3]))));
+    const env = { HOME: '/nonexistent', USERPROFILE: '/nonexistent', XDG_CACHE_HOME: '/nonexistent/cache', LOCALAPPDATA: '/nonexistent/local' };
+    await expect(installPinned(env, new AbortController().signal, () => undefined)).rejects.toMatchObject({ code: 'AGENT_DESKTOP_INSTALL_FAILED', message: expect.stringMatching(/refusing to unpack/) });
+    expect(existsSync(pinnedExecutable(env)!)).toBe(false);
   });
 
   it('reports a failed download as AGENT_DESKTOP_INSTALL_FAILED', async () => {
