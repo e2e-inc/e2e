@@ -145,7 +145,7 @@ export class SuiteAttempt implements SuiteHookSession {
     const hookAbort = attempt?.budget.enter(host.interruptSignal, timeoutMs);
     // On the attempt's budget, so the device calls the code makes stop at the deadline `test.setTimeout` moved.
     const timeout = attempt === undefined ? AttemptTimeout.alone(timeoutMs) : new AttemptTimeout(attempt.budget, timeoutMs);
-    const hook: RunningSuiteHook = { name: running.name, ...(running.settable ? { setTimeout: (ms: number) => timeout.set(ms) } : {}) };
+    const hook: RunningSuiteHook = { name: running.name, ...(running.settable ? { setTimeout: (update) => timeout.set(update(timeout.timeoutMs)) } : {}) };
     const leave = host.workerFixtures.enter(builtIns);
     const owns = (owner: string): void => {
       if (attempt !== undefined) attempt.steps.owner = owner;

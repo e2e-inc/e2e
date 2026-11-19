@@ -1,10 +1,16 @@
-/** Changing the running test's timeout from inside it: `test.setTimeout(timeout)`. */
+/** Changing the running test's timeout from inside it: `test.setTimeout(timeout)` and `test.slow()`. */
 
-import { currentAttempt } from '../expect/attempt.ts';
+import { currentAttempt, type PublishedAttempt } from '../expect/attempt.ts';
 import { suiteHookBrand } from './brands.ts';
 import { CollectionError, TestError } from './errors.ts';
 import { realmSlot } from './realm-slot.ts';
 import { MAX_TIMER_MS } from './time.ts';
+
+/** The calls that change a running test's or hook's timeout, as their errors name them. */
+export type TimeoutApi = 'test.setTimeout()' | 'test.slow()';
+
+/** The next timeout from the one in force, in milliseconds. */
+export type TimeoutUpdate = (currentMs: number) => number;
 
 /**
  * Code outside any test running now: a `beforeAll` or `afterAll` hook, or a
@@ -13,8 +19,8 @@ import { MAX_TIMER_MS } from './time.ts';
 export interface RunningSuiteHook {
   /** What runs, as a refusal names it: `an afterAll hook`. */
   readonly name: string;
-  /** Moves the hook's timeout; false once the hook's timeout race settled. */
-  readonly setTimeout?: (timeoutMs: number) => boolean;
+  /** Moves the hook's timeout to what `update` makes of it; false once the hook's timeout race settled. */
+  readonly setTimeout?: (update: TimeoutUpdate, api: TimeoutApi) => boolean;
 }
 
 /** On `globalThis`, as the published attempt is: test modules share nothing else with the runner. */
@@ -30,49 +36,85 @@ export async function inSuiteHook<T>(hook: RunningSuiteHook, run: () => Promise<
   }
 }
 
+/** The code running now whose timeout can change: a suite hook, else the published attempt. */
+type RunningCode = { readonly hook: RunningSuiteHook; readonly attempt?: undefined } | { readonly hook?: undefined; readonly attempt: PublishedAttempt };
+
+/** The running suite hook or attempt; outside both the call is a collection error saying what to use instead. */
+function runningCode(outside: string): RunningCode {
+  const hook = suiteHookSlot.get(globalThis);
+  if (hook !== undefined) return { hook };
+  const attempt = currentAttempt();
+  if (attempt === undefined) throw new CollectionError(outside);
+  return { attempt };
+}
+
+/**
+ * Moves the running code's timeout to what `update` makes of the one in
+ * force. Where the attempt or hook publishes no way to change it (teardown
+ * on `cleanupTimeout`, or a hosted session that runs no e2e test), it is a
+ * test error.
+ */
+function changeTimeout(code: RunningCode, update: TimeoutUpdate, api: TimeoutApi): void {
+  const set = code.hook === undefined ? code.attempt.setTimeout : code.hook.setTimeout;
+  if (set !== undefined) {
+    if (!set(update, api)) {
+      throw new TestError(
+        'INVALID_ARGUMENT',
+        `${api} cannot change the timeout from code left running after its test or hook ended: await the work the test or hook starts`,
+      );
+    }
+  } else if (code.hook !== undefined) throw lateTimeoutError(code.hook.name, api);
+  else {
+    throw new TestError(
+      'INVALID_ARGUMENT',
+      `${api} changes an e2e test's timeout, and a hosted session runs none: your test runner owns the test timeout, and host.openSession({ timeout }) sets the session deadline`,
+    );
+  }
+}
+
 /**
  * Gives the running test a timeout of `timeout` ms, counted from the start of
  * its attempt, the way a `{ timeout }` option is; in a `beforeAll` hook,
  * gives that hook a timeout counted from its start. Outside a test or hook
- * the call is a collection error pointing at the option. Where the attempt
- * or hook publishes no way to change it (teardown on `cleanupTimeout`, or a
- * hosted session that runs no e2e test), it is a test error.
+ * the call is a collection error pointing at the option.
  */
 export function setRunningTestTimeout(timeout: unknown): void {
-  const hook = suiteHookSlot.get(globalThis);
-  const attempt = hook === undefined ? currentAttempt() : undefined;
-  if (hook === undefined && attempt === undefined) {
-    throw new CollectionError(
-      'test.setTimeout(timeout) must be called inside a test body or a beforeEach or beforeAll hook; to set a test\'s timeout ahead of time, pass { timeout } as the test or describe option',
-    );
-  }
+  const code = runningCode(
+    'test.setTimeout(timeout) must be called inside a test body or a beforeEach or beforeAll hook; to set a test\'s timeout ahead of time, pass { timeout } as the test or describe option',
+  );
   if (typeof timeout !== 'number' || !Number.isSafeInteger(timeout) || timeout <= 0) {
     throw new TestError('INVALID_ARGUMENT', `test.setTimeout() timeout must be a positive safe integer of milliseconds, got ${String(timeout)}`);
   }
   if (timeout > MAX_TIMER_MS) {
     throw new TestError('INVALID_ARGUMENT', `test.setTimeout() timeout must be at most ${MAX_TIMER_MS} milliseconds, got ${timeout}`);
   }
-  const set = hook === undefined ? attempt?.setTimeout : hook.setTimeout;
-  if (set !== undefined) {
-    if (!set(timeout)) {
-      throw new TestError(
-        'INVALID_ARGUMENT',
-        'test.setTimeout() cannot change the timeout from code left running after its test or hook ended: await the work the test or hook starts',
-      );
-    }
-  } else if (hook !== undefined) throw lateTimeoutError(hook.name);
-  else {
-    throw new TestError(
-      'INVALID_ARGUMENT',
-      'test.setTimeout() changes an e2e test\'s timeout, and a hosted session runs none: your test runner owns the test timeout, and host.openSession({ timeout }) sets the session deadline',
-    );
-  }
+  changeTimeout(code, () => timeout, 'test.setTimeout()');
+}
+
+/** How much `test.slow()` multiplies the timeout in force by, as Playwright's does. */
+export const SLOW_FACTOR = 3;
+
+/**
+ * Triples the running test's timeout when `condition` holds, as
+ * `test.slow()` does in Playwright: the timeout in force, so after
+ * `test.setTimeout(10_000)` it is 30 s, and each call triples it again. In a
+ * `beforeAll` hook it triples that hook's timeout. The result is capped at
+ * the longest timer Node keeps. Outside a test or hook the call is a
+ * collection error, checked before the condition so a misplaced
+ * `test.slow(false)` is caught too.
+ */
+export function slowRunningTest(condition: boolean): void {
+  const code = runningCode(
+    'test.slow() triples the running test\'s timeout and must be called inside a test body or a beforeEach or beforeAll hook; to give a test more time ahead of time, pass { timeout } as the test or describe option',
+  );
+  if (!condition) return;
+  changeTimeout(code, (currentMs) => Math.min(currentMs * SLOW_FACTOR, MAX_TIMER_MS), 'test.slow()');
 }
 
 /** The error for a timeout change from teardown, which runs on `cleanupTimeout`. */
-export function lateTimeoutError(from = 'an afterEach hook or a fixture teardown'): TestError {
+export function lateTimeoutError(from = 'an afterEach hook or a fixture teardown', api: TimeoutApi = 'test.setTimeout()'): TestError {
   return new TestError(
     'INVALID_ARGUMENT',
-    `test.setTimeout() cannot change the timeout from ${from}: teardown runs on cleanupTimeout, not the test timeout`,
+    `${api} cannot change the timeout from ${from}: teardown runs on cleanupTimeout, not the test timeout`,
   );
 }

@@ -301,9 +301,9 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
           soft,
           polls,
           expectFailure: (reason) => (expectedFailure ??= reason),
-          setTimeout: (timeoutMs) => {
-            if (phase !== 'beforeEach' && phase !== 'body') throw lateTimeoutError();
-            return timeout.set(timeoutMs);
+          setTimeout: (update, api) => {
+            if (phase !== 'beforeEach' && phase !== 'body') throw lateTimeoutError(undefined, api);
+            return timeout.set(update(timeout.timeoutMs));
           },
         },
         publication.signal,
@@ -480,7 +480,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
         const publication = new AbortController();
         const leaveWorkerFixtures = started.fixtures?.enter();
         try {
-          publishAttempt({ attemptId, owner: 'host', testKind: 'test', assertionTimeout: config.assertionTimeout, budget, soft, polls: new PollScope('the test teardown'), setTimeout: () => { throw lateTimeoutError(); } }, publication.signal);
+          publishAttempt({ attemptId, owner: 'host', testKind: 'test', assertionTimeout: config.assertionTimeout, budget, soft, polls: new PollScope('the test teardown'), setTimeout: (_update, api) => { throw lateTimeoutError(undefined, api); } }, publication.signal);
           steps.phase = 'afterEach';
           // Each teardown gets its own cleanup budget, as in a run's attempt.
           for (const hook of started.teardowns) {

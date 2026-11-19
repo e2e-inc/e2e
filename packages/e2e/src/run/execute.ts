@@ -812,9 +812,9 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
                 },
               }
             : {}),
-          setTimeout: (timeoutMs: number) => {
-            if (phase !== 'beforeEach' && phase !== 'body') throw lateTimeoutError();
-            return timeout.set(timeoutMs);
+          setTimeout: (update, api) => {
+            if (phase !== 'beforeEach' && phase !== 'body') throw lateTimeoutError(undefined, api);
+            return timeout.set(update(timeout.timeoutMs));
           },
         },
         attemptEnd.signal,
