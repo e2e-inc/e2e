@@ -633,7 +633,8 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
   const expectation = createBrowserExpectation({
     currentUrl,
     currentTitle,
-    readNode: (ref, source, arg, operation) => surface.evaluateOn(ref, source, arg, operation, true),
+    readNode: (ref, source, arg, operation) =>
+      surface.evaluateOn(ref, source, arg, operation, true),
     baseHref,
     deadlineFor,
     context,

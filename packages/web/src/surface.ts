@@ -918,15 +918,20 @@ export class PlaywrightSurface {
     const report = await this.guard(operation, 'evaluateOn', async (currentOperation) => {
       const target = await this.requireSession().refs.lookup(ref);
       currentOperation.signal.throwIfAborted();
-      const element = target.kind === 'element' ? target.element : await soleElement(target.locator);
+      const element = target.kind === 'element'
+        ? target.element
+        : await soleElement(target.locator);
       try {
-        // JSON safety is the caller's; Playwright's recursive argument type cannot expand JsonValue.
+        // JSON safety is the caller's; Playwright's recursive argument type
+        // cannot expand JsonValue.
         const input: unknown = arg;
         const handle = await element.evaluateHandle(evaluate, input);
         return await handle.jsonValue();
       } catch (cause) {
         const page = this.requirePage();
-        const failure = await pageScriptFailure(page, cause, 'evaluateOn', currentOperation.timeoutMs);
+        const failure = await pageScriptFailure(
+          page, cause, 'evaluateOn', currentOperation.timeoutMs,
+        );
         if (failure !== undefined) throw failure;
         if (!repeatable && isNavigationRace(cause)) throw translatePwError(cause, 'evaluateOn');
         throw cause;

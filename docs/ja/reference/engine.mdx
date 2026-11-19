@@ -2140,7 +2140,8 @@ export type FixtureOperations<T extends object> = {
 ```ts
 evaluateOn: (target: Locator, source: string, arg?: JsonValue) =>
   context.withNode('browser.evaluateOn', target, (ref, operation) =>
-    surface.evaluateOn(ref, source, arg, operation)),
+    // Test code: a navigation while it runs fails instead of a retryable NODE_STALE.
+    surface.evaluateOn(ref, source, arg, operation, false)),
 ```
 
 - `api` はロケーターを受け取った公開 API の呼び出しです。`INVALID_LOCATOR` のメッセージはこれを示します。

@@ -2325,7 +2325,8 @@ element to run page code on.
 ```ts
 evaluateOn: (target: Locator, source: string, arg?: JsonValue) =>
   context.withNode('browser.evaluateOn', target, (ref, operation) =>
-    surface.evaluateOn(ref, source, arg, operation)),
+    // Test code: a navigation while it runs fails instead of a retryable NODE_STALE.
+    surface.evaluateOn(ref, source, arg, operation, false)),
 ```
 
 - `api` is the public call that took the locator. An `INVALID_LOCATOR`

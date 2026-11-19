@@ -10,18 +10,20 @@ const slow = content(`<html><p id="slow">Slow</p><script>
 </script></html>`);
 
 /**
- * A page whose `#r` answers `state` with a promise that never settles, and
- * reloads 200 ms later; after the reload it answers `done`. A read of
- * `state` is still running when the page navigates.
+ * A page whose `#r` reloads the page the first time something reads its
+ * `state`, and answers that read with a promise that never settles, so the
+ * read is still running when the page navigates. After the reload it
+ * answers `done`.
  */
 const reloading = content(`<html><p id="r">Reloading</p><script>
-  const r = document.getElementById('r');
-  if (sessionStorage.getItem('reloaded') === null) {
-    r.state = new Promise(() => undefined);
-    setTimeout(() => { sessionStorage.setItem('reloaded', 'yes'); location.reload(); }, 200);
-  } else {
-    r.state = 'done';
-  }
+  Object.defineProperty(document.getElementById('r'), 'state', {
+    get() {
+      if (sessionStorage.getItem('reloaded') !== null) return 'done';
+      sessionStorage.setItem('reloaded', 'yes');
+      location.reload();
+      return new Promise(() => undefined);
+    },
+  });
 </script></html>`);
 
 /**
@@ -182,11 +184,6 @@ test.describe('expect(browser).toHaveCSS', { requires: ['browser'] }, () => {
     await expect(browser).not.toHaveCSS(main, '--grid', 'a b', { timeout: 300 });
   });
 
-  test('reads again when the page navigates during its read', async ({ browser }) => {
-    await browser.goto(reloading);
-    await expect(browser).toHaveJSProperty(browser.locator('#r'), 'state', 'done');
-  });
-
   test('matches a computed value, a custom property, and its negation', async ({ browser, screen }) => {
     await browser.goto(page);
     const main = screen.getByRole('navigation', { name: 'Main' });
@@ -249,6 +246,11 @@ test.describe('expect(browser).toHaveCSS', { requires: ['browser'] }, () => {
 });
 
 test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () => {
+  test('reads again when the page navigates during its read', async ({ browser }) => {
+    await browser.goto(reloading);
+    await expect(browser).toHaveJSProperty(browser.locator('#r'), 'state', 'done');
+  });
+
   test('matches a dotted path and a number', async ({ browser, screen }) => {
     await browser.goto(page);
     const main = screen.getByRole('navigation', { name: 'Main' });

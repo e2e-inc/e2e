@@ -35,7 +35,12 @@ export interface ExpectationDeps {
    * Runs the engine's own read-only page code on the node `ref` names. A
    * navigation while it runs re-resolves the node and runs it again.
    */
-  readNode(ref: NodeRef, source: string, arg: JsonValue, operation: OperationContext): Promise<EvaluationResult>;
+  readNode(
+    ref: NodeRef,
+    source: string,
+    arg: JsonValue,
+    operation: OperationContext,
+  ): Promise<EvaluationResult>;
   baseHref(): string;
   deadlineFor(timeout: number | undefined, api: string): Deadline;
   readonly context: EngineFixtureContext;
@@ -133,7 +138,8 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
         return await withTimeout(
           sample,
           deadline.remaining(),
-          () => new EngineError('OPERATION_TIMEOUT', `${subject} read timed out`, { retryable: false }),
+          () =>
+            new EngineError('OPERATION_TIMEOUT', `${subject} read timed out`, { retryable: false }),
         );
       } catch (error) {
         if (isTestErrorCode(error, 'LOCATOR_NOT_FOUND')) return NO_NODE;
@@ -232,13 +238,20 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
         throw new TestError('INVALID_ARGUMENT', `${what} must be JSON, found undefined`);
       }
       validateJsonValue(expected, what);
-      // The page's value crosses a JSON boundary, so the expected value does too: `-0` reads as `0`.
+      // The page's value crosses a JSON boundary, so the expected value does
+      // too: `-0` reads as `0`.
       const wanted: unknown = JSON.parse(JSON.stringify(expected));
       return poll(
         'toHaveJSProperty',
         `property ${name} ${JSON.stringify(expected)}`,
-        sampleJson('toHaveJSProperty', `property ${name}`, target, PROPERTY_PATH_SOURCE, name.split('.'),
-          (value) => isDeepStrictEqual(value, wanted)),
+        sampleJson(
+          'toHaveJSProperty',
+          `property ${name}`,
+          target,
+          PROPERTY_PATH_SOURCE,
+          name.split('.'),
+          (value) => isDeepStrictEqual(value, wanted),
+        ),
         options?.timeout,
       );
     },
@@ -246,7 +259,9 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
 }
 
 /** Page code for `toHaveClass`: the element's `class` attribute, `null` when it has none. */
-const CLASS_ATTRIBUTE_SOURCE = pageFunctionSource((element: Element) => element.getAttribute('class'));
+const CLASS_ATTRIBUTE_SOURCE = pageFunctionSource((element: Element) =>
+  element.getAttribute('class'),
+);
 
 /**
  * Page code for `toHaveCSS`: one computed property of the element, as

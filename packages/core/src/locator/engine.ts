@@ -369,7 +369,11 @@ if (sampled && reads.cutOff(cause)) throw await notFound(cause);
    */
   async read(expression: LocatorExpression): Promise<SemanticNode> {
     const deadline = this.deadline(this.options.actionTimeout);
-    return this.withOne(expression, (ref, operation) => this.session.read(ref, operation), deadline);
+    return this.withOne(
+      expression,
+      (ref, operation) => this.session.read(ref, operation),
+      deadline,
+    );
   }
 
   /**
@@ -392,7 +396,8 @@ if (sampled && reads.cutOff(cause)) throw await notFound(cause);
         ? (await this.resolveCounted(expression, reads)).ref
         : await this.singleOf(await this.resolveOnce(expression, reads, 'empty'), expression);
       if (ref === null) {
-        throw new TestError('LOCATOR_NOT_FOUND', `locator matched no nodes: ${describeExpression(expression)}`, {
+        const described = describeExpression(expression);
+        throw new TestError('LOCATOR_NOT_FOUND', `locator matched no nodes: ${described}`, {
           details: locatorDetails(expression, 0),
         });
       }

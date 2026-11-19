@@ -131,7 +131,7 @@ describe('operations on a hung page', () => {
    * timeout, and `withNode` locates the page's Next button the way core's
    * does, within the action timeout.
    */
-  function browserExpectation(): BrowserExpectation {
+  function browserExpectation(withNodeOptions: unknown[] = []): BrowserExpectation {
     let expectation: (() => unknown) | undefined;
     const context = {
       targetName: 'web',
@@ -140,7 +140,13 @@ describe('operations on a hung page', () => {
       operation: (timeoutMs?: number) => ({ ...operation(), timeoutMs: Math.max(1, timeoutMs ?? ACTION_TIMEOUT_MS) }),
       app: { resolveUrl: (url: string) => new URL(url, origin).href },
       fixture: (_name: string, target: object) => target,
-      withNode: async (_api: string, _locator: Locator, use: (ref: NodeRef, operation: OperationContext) => Promise<unknown>) => {
+      withNode: async (
+        _api: string,
+        _locator: Locator,
+        use: (ref: NodeRef, operation: OperationContext) => Promise<unknown>,
+        options?: unknown,
+      ) => {
+        withNodeOptions.push(options);
         const [node] = await engine.locate!(button('Next'), { ...operation(), timeoutMs: ACTION_TIMEOUT_MS });
         return use(node!.ref as NodeRef, operation());
       },
@@ -156,13 +162,19 @@ describe('operations on a hung page', () => {
   it('ends a browser assertion on a stuck page at its own timeout, not the action timeout', async () => {
     await start();
     await freeze();
-    const expectation = browserExpectation();
+    const withNodeOptions: unknown[] = [];
+    const expectation = browserExpectation(withNodeOptions);
     const title = await bounded(() => expectation.toHaveTitle('Other', { timeout: BUDGET_MS }));
     expect(title.error).toMatchObject({ code: 'OPERATION_TIMEOUT' });
     // The locate waits out the action timeout; the assertion ends at its own.
     const card = {} as Locator;
     const negated = await bounded(() => expectation.not.toHaveClass(card, 'card', { timeout: BUDGET_MS }));
     expect(negated.error).toMatchObject({ code: 'OPERATION_TIMEOUT' });
+    // A sample asks for one resolve that does not wait, bounded by what is left of the assertion.
+    expect(withNodeOptions).toEqual([{ wait: false, timeout: expect.any(Number) }]);
+    const [{ timeout }] = withNodeOptions as [{ timeout: number }];
+    expect(timeout).toBeGreaterThan(0);
+    expect(timeout).toBeLessThanOrEqual(BUDGET_MS);
   });
 
   it('times out a navigation to a server that never answers', async () => {
