@@ -46,7 +46,7 @@ import {
   ConfigurationError,
   TestError,
 } from '@e2e-dev/core/engine';
-import { isAppNotRunning, isSnapshotPresentationFailure, isUnreadableCapture, runCommand, staleOr } from './errors.ts';
+import { isAppNotRunning, isSnapshotPresentationFailure, isUnreadableCapture, ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING, runCommand, staleOr } from './errors.ts';
 import { pointerInteraction, DEFAULT_LONG_PRESS_MS } from './actions.ts';
 import { resolveExpression } from './locate.ts';
 import {
@@ -137,9 +137,9 @@ export interface OpenAppOptions {
  * The snapshot fields this engine reads off agent-device's response. `keyboard`
  * is the band the capture's producer measured: `visible` with its frame,
  * `absent`, or that it could not look. `refsGeneration` is the capture its
- * refs were issued from.
+ * refs were issued from. `warnings` is read for `ORIGIN_WARNING` only.
  */
-type RawSnapshot = Partial<Pick<CaptureSnapshotResult, 'nodes' | 'viewport' | 'truncated' | 'appName' | 'appBundleId' | 'snapshotQuality' | 'keyboard' | 'refsGeneration'>>;
+type RawSnapshot = Partial<Pick<CaptureSnapshotResult, 'nodes' | 'viewport' | 'truncated' | 'appName' | 'appBundleId' | 'snapshotQuality' | 'keyboard' | 'refsGeneration' | 'warnings'>>;
 
 /**
  * How far the dismissing drag travels, as a share of the viewport: short
@@ -163,8 +163,12 @@ function keyboardTop(raw: RawSnapshot, viewport: ViewportSize): number {
   return Math.min(viewport.height, ...keys.map((node) => node.rect!.y));
 }
 
-/** One projection and the keyboard state captured with it, kept together across an action. */
-type ProjectedScreen = ProjectedSnapshot & { readonly keyboardVisible: boolean };
+/**
+ * One projection and the keyboard state captured with it, kept together
+ * across an action. `originUnknown` is set when the capture could not place
+ * its window on the screen, so its rects may be window-local.
+ */
+type ProjectedScreen = ProjectedSnapshot & { readonly keyboardVisible: boolean; readonly originUnknown: boolean };
 
 /**
  * Whether the capture's producer measured the soft keyboard on screen:
@@ -206,6 +210,8 @@ interface NodeBinding {
   /** The capture `ref` and `controlRef` came from, pinned on every action so agent-device refuses them once a newer capture supersedes it. */
   readonly refsGeneration: number | undefined;
   readonly keyboardVisible: boolean;
+  /** Whether the capture `node.rect` came from could not place its window on the screen. */
+  readonly originUnknown: boolean;
   /** Whether `fill` and `clear` may type into the node, judged with the children `node` leaves out. */
   readonly takesText: boolean;
 }
@@ -1131,6 +1137,7 @@ export class AgentDeviceSurface {
         keyboard: keyboardBand(raw.nodes ?? [], raw.keyboard, raw.viewport),
       }),
       keyboardVisible: keyboardShowing(raw),
+      originUnknown: raw.warnings?.includes(ORIGIN_WARNING) === true,
     };
     this.latestScreen = projected;
     const read = projected.viewport;
@@ -1281,6 +1288,7 @@ export class AgentDeviceSurface {
       node,
       controlRef: control.ref,
       keyboardVisible: snapshot.keyboardVisible,
+      originUnknown: snapshot.originUnknown,
       takesText: mayTakeText(entry.node),
       refsGeneration: snapshot.refsGeneration,
     };
@@ -1530,6 +1538,11 @@ export class AgentDeviceSurface {
         case 'swipe': {
           const rect = target.node.rect;
           if (rect === undefined) throw notActionable(`node ${target.id} has no bounds to swipe within`);
+          if (target.originUnknown) {
+            throw notActionable(
+              `${label} failed: the ${ORIGIN_UNKNOWN_BOUNDS} Nothing was sent. Swipe the screen with screen.swipe({ direction }), or between screen points with screen.swipe({ from, to }) not taken from those bounds.`,
+            );
+          }
           const stabilization = gestureStabilization(operation);
           const sent = await input.send(() => client.interactions.swipe({ ...swipeWithin(rect, action.direction, action.momentum), ...stabilization }));
           this.noteGesture(operation);
