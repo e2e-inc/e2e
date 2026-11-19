@@ -60,8 +60,8 @@ test('signs in', async ({ app, screen }) => {
   onto the ARIA names other engines use (`textbox`, `checkbox`, `combobox`,
   `button`); the developer id (`AXIdentifier`, `AutomationId`, a DOM `id` in
   Electron) is the node's test id, so `getByTestId` finds it.
-- Actions go through the accessibility API and leave your pointer and focus
-  alone. `desktop({ headed: true })` allows physical input: `doubleTap`,
+- `app.open()` brings the app forward. Actions after it go through the
+  accessibility API and leave your pointer and focus alone. `desktop({ headed: true })` allows physical input: `doubleTap`,
   `hover`, point-addressed taps, and typing into fields the API cannot set.
 - A fill sends the text to agent-desktop on stdin, never in its arguments.
   A secure field reports no value, and screenshots paint over its bounds; when

@@ -117,7 +117,7 @@ quits the app (`desktop.closeApp()`).
 
 | Area | On a desktop target |
 | --- | --- |
-| Input | Actions use the accessibility API. Your pointer and focus stay where they are |
+| Input | `app.open()` brings the app forward. Actions after it use the accessibility API, so your pointer and focus stay where they are |
 | Pointer | `doubleTap`, `hover`, and point taps need `desktop({ headed: true })`, which moves the real pointer |
 | Select | `selectOption` takes an option's label, not an index |
 | Workers | One per target, because its workers would share one screen. Two desktop targets can still run at the same time: with `headed: true`, set `workers: 1` in the config |

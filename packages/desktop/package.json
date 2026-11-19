@@ -1,7 +1,7 @@
 {
   "name": "@e2e-dev/desktop",
   "version": "0.0.0",
-  "description": "Desktop engine (macOS, Windows, Linux, Electron) for e2e agentic end-to-end testing, built on agent-desktop",
+  "description": "Desktop engine for e2e agentic end-to-end testing, built on agent-desktop: native and Electron apps, a prototype tested on macOS",
   "keywords": [
     "e2e",
     "end-to-end",
