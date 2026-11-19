@@ -35,8 +35,8 @@ interface Launch {
   readonly options?: Parameters<typeof resolveOptions>[0];
 }
 
-/** A surface on the scripted agent-desktop, with the form launched (a real child process as the app) and observed once. */
-async function launched(scenario: Scenario | ((pid: number) => Scenario), { snapshot = 'macos/appkit-form', openTimeoutMs = 10_000, observe = true, options = {} }: Launch = {}) {
+/** A surface on the scripted agent-desktop, initialized but with nothing launched; a real child process stands in for the app. */
+async function initialized(scenario: Scenario | ((pid: number) => Scenario), { snapshot = 'macos/appkit-form', options = {} }: Launch = {}) {
   const app = fakeApp();
   const fake = fakeScenario({
     status: [{ ok: true, data: { version: '1.3.1', permissions: { accessibility: { state: 'granted' } } } }],
@@ -58,6 +58,13 @@ async function launched(scenario: Scenario | ((pid: number) => Scenario), { snap
     signal,
     log: () => undefined,
   });
+  return { surface, fake, app };
+}
+
+/** A surface on the scripted agent-desktop, with the form launched (a real child process as the app) and observed once. */
+async function launched(scenario: Scenario | ((pid: number) => Scenario), launch: Launch = {}) {
+  const { openTimeoutMs = 10_000, observe = true } = launch;
+  const { surface, fake, app } = await initialized(scenario, launch);
   await surface.restart({ ...operation(), timeoutMs: openTimeoutMs });
   const nodes = observe ? await surface.observe(operation(), undefined).then((observed) => [observed.root, ...(observed.root.children ?? [])]) : [];
   const byTestId = (testId: string) => {
@@ -275,11 +282,72 @@ describe('DesktopSurface', () => {
   });
 
   it('keeps the process as its own when a quit fails, so dispose quits it', async () => {
-    const { surface, app, fake } = await launched((pid) => ({ 'list-apps': [failure('INTERNAL', 'not_delivered'), { ok: true, data: { apps: [{ pid, process_instance: 'instance-1' }] } }] }), { observe: false });
+    const { surface, app, fake } = await launched((pid) => ({ 'list-apps': [{ ok: true, data: { apps: [] } }, failure('INTERNAL', 'not_delivered'), { ok: true, data: { apps: [{ pid, process_instance: 'instance-1' }] } }] }), { observe: false });
     await expect(surface.endAttempt({ signal, timeoutMs: 5_000 })).rejects.toThrow(/find SpikeForm/);
     await surface.dispose({ signal, timeoutMs: 5_000 });
-    expect(fake.calls().filter((call) => call.key === 'list-apps')).toHaveLength(2);
+    expect(fake.calls().filter((call) => call.key === 'list-apps')).toHaveLength(3);
     await expect(app.exited).resolves.toBe('SIGKILL');
+  });
+
+  it('takes as its own a process a failed launch started, so the end of the attempt quits it', async () => {
+    const { surface, app } = await initialized((pid) => ({
+      launch: [failure('TIMEOUT', 'delivered_unverified')],
+      'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [{ name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form', pid, process_instance: 'instance-1' }] } }],
+    }));
+    await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    await expect(app.exited).resolves.toBe('SIGKILL');
+  });
+
+  it('says which app is missing when the bundle id names none', async () => {
+    const { surface } = await initialized({ launch: [failure('APP_NOT_FOUND', 'not_delivered')] });
+    await expect(surface.restart(operation())).rejects.toThrow(/no installed app has the name or bundle id "dev.e2e.spike.form"/);
+  });
+
+  it('reads a window of its own process only, not one a later process with the same id owns', async () => {
+    const { surface, fake } = await launched((pid) => ({ 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }, { ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }, { ok: true, data: [{ id: 'w-replacement', pid, process_instance: 'instance-2', is_focused: true }] }] }));
+    await expect(surface.pressKey('Enter', operation())).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    expect(fake.calls().some((call) => call.args.includes('w-replacement'))).toBe(false);
+  });
+
+  it('keeps the process when the app list is incomplete, so dispose looks again', async () => {
+    const { surface, fake } = await launched((pid) => ({ 'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [], complete: false } }, { ok: true, data: { apps: [{ pid, process_instance: 'instance-1' }] } }] }), { observe: false });
+    await expect(surface.endAttempt({ signal, timeoutMs: 5_000 })).rejects.toThrow(/listed the apps only in part/);
+    await surface.dispose({ signal, timeoutMs: 5_000 });
+    expect(fake.calls().filter((call) => call.key === 'list-apps')).toHaveLength(3);
+  });
+
+  it('reports a type after a clear that changed the field as possibly committed', async () => {
+    const { surface } = await launched({ type: [failure('STALE_REF', 'not_delivered')] });
+    await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });
+  });
+
+  it('unchecks a mixed checkbox, whose state is neither checked nor unchecked', async () => {
+    const mixed = JSON.parse(JSON.stringify(snapshotAnswer('macos/appkit-form')).replace('"value":"0"', '"value":"2","states":["indeterminate"]')) as unknown;
+    const { surface, fake, byTestId } = await launched({ snapshot: [mixed] });
+    await surface.perform(byTestId('remember'), { kind: 'uncheck' }, operation());
+    expect(fake.calls().some((call) => call.key === 'uncheck')).toBe(true);
+  });
+
+  it('taps a point in the window where it is now, with no observation first', async () => {
+    const { surface, fake } = await launched((pid) => ({ 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true, bounds: { x: 300, y: 200, width: 400, height: 300 } }] }] }), { observe: false, options: { headed: true } });
+    await surface.performAt({ x: 20, y: 30 }, { kind: 'tap' }, operation());
+    expect(fake.calls().at(-1)?.args).toEqual(['mouse-click', '--xy=320,230', '--headed']);
+  });
+
+  it('gives each read of the launch wait what is left of that wait, not of the whole open', async () => {
+    const { fake } = await launched({}, { openTimeoutMs: 60_000, observe: false });
+    const read = fake.calls().find((call) => call.key === 'snapshot');
+    expect(Number(read?.args[read.args.indexOf('--timeout-ms') + 1])).toBeLessThanOrEqual(10_000);
+  });
+
+  it('keeps every node of a screen larger than the binding cap', async () => {
+    const buttons = Array.from({ length: 5_000 }, (_, index) => ({ role: 'button', name: `b${index}`, ref_id: `@s1:e${index}` }));
+    const big = { ok: true, data: { snapshot_id: 's1', window: { id: 'w-mine' }, tree: { role: 'window', name: 'Big', children: buttons } } };
+    const { surface, fake } = await launched({ snapshot: [big] }, { observe: false });
+    const observed = await surface.observe(operation(), undefined);
+    await surface.perform(observed.root.children![0]!.ref, { kind: 'tap' }, operation());
+    expect(fake.calls().at(-1)?.args.slice(0, 2)).toEqual(['click', '@s1:e0']);
   });
 
   it('quits the process it launched at the end of the attempt, and only that one', async () => {

@@ -1,8 +1,9 @@
 /**
  * One worker's desktop session: the app the target declares, driven through
- * agent-desktop's accessibility commands. Every action goes through the
- * accessibility API and leaves the user's pointer and focus alone, unless the
- * target opts into physical input with `headed`.
+ * agent-desktop's accessibility commands. `app.open()` brings the app
+ * forward; every action after it goes through the accessibility API and
+ * leaves the user's pointer and focus alone, unless the target opts into
+ * physical input with `headed`.
  */
 
 import { execFile } from 'node:child_process';
@@ -56,7 +57,7 @@ const ANSWER_MARGIN_MS = 400;
 const LAUNCH_POLL_MS = 100;
 
 /** How long a launch waits for the app's window to become readable before it reports why it did not. */
-const LAUNCH_READY_MS = 30_000;
+const LAUNCH_READY_MS = 10_000;
 
 /** Refusals that mean the ref is gone, not that the action is unsupported: the harness locates the node again. */
 const STALE_REF_CODES = new Set(['STALE_REF', 'SNAPSHOT_NOT_FOUND']);
@@ -67,9 +68,6 @@ const MAX_BINDINGS = 4096;
 /** Codes a snapshot fails with while the app has no window to read: not launched yet, or still opening. */
 const NO_WINDOW_CODES = new Set(['APP_NOT_FOUND', 'WINDOW_NOT_FOUND']);
 
-/** macOS's LaunchServices registration tool: an app bundle that was just built must be registered before it can be launched by id. */
-const LSREGISTER = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister';
-
 /** The app-wide `window` list entry agent-desktop prints. */
 interface RawWindow {
   readonly id: string;
@@ -78,6 +76,16 @@ interface RawWindow {
   readonly visible?: boolean;
   readonly app_name?: string;
   readonly pid?: number;
+  readonly process_instance?: string;
+  readonly bounds?: Rect;
+}
+
+/** One running app as `list-apps` prints it. */
+interface RawApp {
+  readonly name?: string;
+  readonly bundle_id?: string;
+  readonly pid?: number;
+  readonly process_instance?: string;
 }
 
 /** One window of the app under test, as `desktop.windows()` lists it. */
@@ -154,8 +162,10 @@ export class DesktopSurface {
   private home: string | undefined;
   private app: EngineAppInfo = {};
   private projectRoot = process.cwd();
-  /** What `launch` is given: the target's `bundleId`, or the bundle id read from its `appPath`. */
+  /** The app's bundle id or name: the target's `bundleId`, or the bundle id read from its `appPath`. */
   private launchTarget: string | undefined;
+  /** The `.app` bundle an `appPath` names, resolved; the launched process must run from it. */
+  private bundle: string | undefined;
   /** The process name agent-desktop reported at launch, which window lookups filter by before they keep the launched process's own. */
   private appName: string | undefined;
   /** The process the engine launched, which it alone quits; another instance of the same app is never touched. */
@@ -208,9 +218,9 @@ export class DesktopSurface {
   }
 
   /**
-   * The name or id `launch` takes. An `appPath` on macOS is an `.app`
-   * bundle: its `CFBundleIdentifier`, registered with LaunchServices first so
-   * a bundle that was just built can be launched by id.
+   * The app's bundle id or name. An `appPath` on macOS is an `.app` bundle:
+   * its `CFBundleIdentifier`, which `list-apps` reports for the process that
+   * bundle starts.
    */
   private async resolveLaunchTarget(signal: AbortSignal): Promise<string | undefined> {
     if (this.app.bundleId !== undefined) return this.app.bundleId;
@@ -221,7 +231,7 @@ export class DesktopSurface {
     const { stdout } = await execFileAsync('plutil', ['-extract', 'CFBundleIdentifier', 'raw', '-o', '-', plist], { signal });
     const bundleId = stdout.trim();
     if (bundleId === '') throw new EngineError('ENGINE_FAILURE', `${plist} declares no CFBundleIdentifier`, { retryable: false });
-    await execFileAsync(LSREGISTER, ['-f', bundle], { signal });
+    this.bundle = await realpath(bundle);
     return bundleId;
   }
 
@@ -299,51 +309,105 @@ export class DesktopSurface {
    * `app.open()`: the copy of the app the engine launched is quit, and the
    * app launched fresh with the target's launch arguments. A copy the engine
    * did not launch (the developer's own) is left alone, and never read or
-   * driven.
+   * driven. A launch that failed after the app started still leaves the
+   * engine owning the new process, so the end of the attempt quits it.
    */
   async restart(context: OperationContext): Promise<void> {
     const operation = withDeadline(context);
     const target = this.launchTarget;
     if (target === undefined) throw unsupported("launching the app needs the target's app.bundleId or app.appPath");
     await this.quit(operation.signal, operation.timeoutMs);
-    const args = ['launch', target, '--activate', '--no-attach', '--timeout', String(Math.max(operation.timeoutMs - ANSWER_MARGIN_MS, 1_000))];
+    const before = new Set((await this.runningCopies(target, operation)).map((app) => app.pid));
+    try {
+      if (this.bundle === undefined) await this.launchById(target, operation);
+      else await this.openBundle(this.bundle, target, before, operation);
+    } catch (cause) {
+      if (this.pid === undefined) await this.claim(target, before, operation).catch(() => false);
+      throw cause;
+    }
+    this.forget();
+    await this.windowReadable(operation);
+  }
+
+  /** Launches an installed app by bundle id or name through agent-desktop, which reports the process it started. */
+  private async launchById(target: string, operation: OperationContext): Promise<void> {
+    const args = ['launch', target, '--activate', '--no-attach', '--timeout', String(this.toolBudget(operation))];
     for (const argument of this.app.launchArguments ?? []) args.push(`--arg=${argument}`);
-    const launched = await this.run<{ app?: string; pid?: number; process_instance?: string }>(args, { label: `launch ${target}`, input: true, signal: operation.signal, timeoutMs: operation.timeoutMs });
+    let launched: { app?: string; pid?: number; process_instance?: string };
+    try {
+      launched = await this.run(args, { label: `launch ${target}`, input: true, signal: operation.signal, timeoutMs: operation.timeoutMs, raw: true });
+    } catch (cause) {
+      if (cause instanceof AgentDesktopFailure && cause.code === 'APP_NOT_FOUND' && cause.notDelivered) {
+        throw new EngineError('ENGINE_FAILURE', `no installed app has the name or bundle id "${target}"; check the target's app.bundleId`, { retryable: false, cause });
+      }
+      throw translate(cause, `launch ${target}`, true);
+    }
     if (typeof launched.pid !== 'number') throw new EngineError('ENGINE_FAILURE', `agent-desktop launched ${target} but reported no process id, so the engine cannot tell its copy from another`, { retryable: false });
     this.appName = launched.app ?? target;
     this.pid = launched.pid;
     this.instance = typeof launched.process_instance === 'string' ? launched.process_instance : undefined;
-    this.forget();
-    await this.launchedBundle(operation);
-    await this.windowReadable(operation);
   }
 
   /**
-   * Checks that the process launched for an `appPath` runs from that
-   * bundle. The engine launches by bundle id, and LaunchServices picks the
-   * copy: another build or an installed app with the same id would be tested
-   * in place of the one the target names.
+   * Starts a new process of the `.app` bundle an `appPath` names, by its
+   * path: launching by bundle id would let LaunchServices pick another copy
+   * with the same id (an installed release, another checkout's build). The
+   * process is then found among the app's running copies: the new one whose
+   * executable is inside the bundle.
    */
-  private async launchedBundle(operation: OperationContext): Promise<void> {
-    if (this.app.appPath === undefined || this.platform !== 'macos' || this.pid === undefined) return;
-    const bundle = await realpath(path.resolve(this.projectRoot, this.app.appPath));
-    const { stdout } = await execFileAsync('ps', ['-p', String(this.pid), '-o', 'comm='], { signal: operation.signal });
-    const executable = await realpath(stdout.trim()).catch(() => stdout.trim());
-    if (executable.startsWith(`${bundle}${path.sep}`)) return;
-    await this.quit(operation.signal, operation.timeoutMs);
-    throw new EngineError(
-      'ENGINE_FAILURE',
-      `LaunchServices launched ${executable} for the bundle id of app.appPath ${bundle}: another copy of the app has the same CFBundleIdentifier. Remove it, or give the build its own bundle id`,
-      { retryable: false },
-    );
+  private async openBundle(bundle: string, target: string, before: ReadonlySet<number | undefined>, operation: OperationContext): Promise<void> {
+    const args = ['-n', bundle];
+    if ((this.app.launchArguments ?? []).length > 0) args.push('--args', ...(this.app.launchArguments ?? []));
+    try {
+      await execFileAsync('open', args, { signal: operation.signal, timeout: operation.timeoutMs });
+    } catch (cause) {
+      throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `opening ${bundle} failed: ${(cause as Error).message}`, { retryable: false, cause });
+    }
+    while (!(await this.claim(target, before, operation))) {
+      if (operation.timeoutMs <= LAUNCH_POLL_MS || operation.signal.aborted) {
+        throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `${bundle} was opened, but no new process of it appeared`, { retryable: false });
+      }
+      await sleep(LAUNCH_POLL_MS, operation.signal);
+    }
+  }
+
+  /** The running copies of the app: every process whose bundle id or name is the target's. */
+  private async runningCopies(target: string, operation: Pick<OperationContext, 'signal' | 'timeoutMs'>): Promise<readonly RawApp[]> {
+    const { apps } = await this.run<{ apps?: readonly RawApp[] }>(['list-apps'], { label: 'list apps', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
+    return (apps ?? []).filter((app) => typeof app.pid === 'number' && (app.bundle_id === target || app.name === target));
   }
 
   /**
-   * Waits until the launched app's window can be read: a window exists the
-   * moment `launch --activate` returns, but its accessibility element can
-   * arrive a moment later, and an observation then would show the agent an
-   * empty screen. A window that stays unreadable fails the open: every later
-   * step would only time out on an empty screen. Any other failure of a
+   * Takes as the engine's own the one copy of the app that started since
+   * `before` (and, for an `appPath`, runs from that bundle). False when there
+   * is none yet; more than one new copy names no single process, so none is
+   * taken.
+   */
+  private async claim(target: string, before: ReadonlySet<number | undefined>, operation: OperationContext): Promise<boolean> {
+    const started = (await this.runningCopies(target, operation)).filter((app) => !before.has(app.pid));
+    const own: RawApp[] = [];
+    for (const app of started) if (this.bundle === undefined || (await this.runsFrom(app.pid!, this.bundle, operation))) own.push(app);
+    const [app] = own;
+    if (own.length !== 1 || app?.pid === undefined) return false;
+    this.appName = app.name ?? target;
+    this.pid = app.pid;
+    this.instance = app.process_instance;
+    return true;
+  }
+
+  /** Whether a process's executable is inside a bundle. */
+  private async runsFrom(pid: number, bundle: string, operation: OperationContext): Promise<boolean> {
+    const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'comm='], { signal: operation.signal }).catch(() => ({ stdout: '' }));
+    const executable = await realpath(stdout.trim()).catch(() => stdout.trim());
+    return executable.startsWith(`${bundle}${path.sep}`);
+  }
+
+  /**
+   * Waits until the launched app's window can be read: a window exists soon
+   * after the launch, but its accessibility element can arrive a moment
+   * later, and an observation then would show the agent an empty screen. A
+   * window that stays unreadable for `LAUNCH_READY_MS` fails the open: every
+   * later step would only time out on an empty screen. Any other failure of a
    * read is reported as it is.
    */
   private async windowReadable(operation: OperationContext): Promise<void> {
@@ -352,7 +416,8 @@ export class DesktopSurface {
       if (operation.signal.aborted) throw new EngineError('CANCELLED', `opening ${this.appName ?? 'the app'} was cancelled`, { retryable: false });
       let screen: ProjectedScreen | undefined;
       try {
-        screen = await this.capture(operation);
+        // Each read gets what is left of the readiness wait, not of the whole operation.
+        screen = await this.capture({ ...operation, timeoutMs: Math.max(deadline - Date.now(), 0) });
       } catch (cause) {
         // The last read ran out of budget: the window never became readable in time.
         if (cause instanceof EngineError && cause.code === 'OPERATION_TIMEOUT') break;
@@ -394,8 +459,10 @@ export class DesktopSurface {
     this.forget();
     if (pid === undefined || appName === undefined) return;
     const deadline = Date.now() + timeoutMs;
-    const { apps } = await this.run<{ apps?: readonly { pid?: number; process_instance?: string }[] }>(['list-apps', '--app', appName], { label: `find ${appName}`, input: false, signal, timeoutMs });
+    const { apps, complete } = await this.run<{ apps?: readonly RawApp[]; complete?: boolean }>(['list-apps', '--app', appName], { label: `find ${appName}`, input: false, signal, timeoutMs });
     const running = apps?.some((app) => app.pid === pid && (instance === undefined || app.process_instance === instance)) === true;
+    // An inventory that skipped some processes cannot say the app is gone; it stays the engine's, to quit again.
+    if (!running && complete === false) throw new EngineError('ENGINE_FAILURE', `could not tell whether the app (process ${pid}) is still running: agent-desktop listed the apps only in part`, { retryable: false });
     if (running) {
       try {
         process.kill(pid, 'SIGKILL');
@@ -478,7 +545,8 @@ export class DesktopSurface {
       if (cause instanceof AgentDesktopFailure && NO_WINDOW_CODES.has(cause.code)) return [];
       throw translate(cause, 'list windows', false);
     }
-    return listed.filter((window) => window.pid === pid);
+    const { instance } = this;
+    return listed.filter((window) => window.pid === pid && (instance === undefined || window.process_instance === undefined || window.process_instance === instance));
   }
 
   /** The window of the launched process a command reads or acts in: the focused one, else the first visible one. */
@@ -560,13 +628,16 @@ export class DesktopSurface {
    * agent-desktop refuses as stale.
    */
   private remember(bindings: Iterable<NodeBinding>): void {
+    const fresh = new Set<string>();
     for (const binding of bindings) {
       this.bindings.delete(binding.id);
       this.bindings.set(binding.id, binding);
+      fresh.add(binding.id);
     }
+    // The oldest go first, but never one just read: a screen larger than the cap keeps every node.
     for (const oldest of this.bindings.keys()) {
       if (this.bindings.size <= MAX_BINDINGS) break;
-      this.bindings.delete(oldest);
+      if (!fresh.has(oldest)) this.bindings.delete(oldest);
     }
   }
 
@@ -680,7 +751,7 @@ export class DesktopSurface {
       const refused = cause instanceof AgentDesktopFailure && cause.notDelivered && (cause.code === 'ACTION_NOT_SUPPORTED' || cause.code === 'POLICY_DENIED');
       if (!refused || !this.options.headed) throw translate(cause, 'fill', true);
       await this.refCommand('clear', binding, operation);
-      await this.refCommand('type', binding, operation, [], value, true);
+      await afterChange('fill', () => this.tryRef('type', binding, operation, [], value, true));
     }
   }
 
@@ -744,8 +815,9 @@ export class DesktopSurface {
   /** Physical pointer input at a point in the window: only with `headed`, and only then declared. */
   async performAt(point: ViewportPoint, action: PointerAction, context: OperationContext): Promise<void> {
     const operation = withDeadline(context);
-    const window = this.latest?.window;
-    if (window === undefined) throw notActionable('there is no observed window to place the point in; observe first');
+    // The window's current place on screen: the point is in its coordinates, and it may have moved since the last observation.
+    const window = (await this.ownWindow(operation))?.bounds;
+    if (window === undefined) throw notActionable('the app has no window on screen to place the point in');
     const xy = `--xy=${Math.round(window.x + point.x)},${Math.round(window.y + point.y)}`;
     const args =
       action.kind === 'hover'
@@ -765,12 +837,16 @@ export class DesktopSurface {
     const focused = screen === undefined ? undefined : [...screen.bindings.values()].find((binding) => binding.ref !== undefined && binding.states?.focused === true);
     if (focused === undefined) throw notActionable('no field has keyboard focus; tap or focus the field first');
     if (options.replace) await this.refCommand('clear', focused, operation);
-    try {
-      await this.tryRef('type', focused, operation, [], text);
-    } catch (cause) {
-      if (!(this.options.headed && cause instanceof AgentDesktopFailure && cause.notDelivered)) throw translate(cause, 'type', true);
-      await this.refCommand('type', focused, operation, [], text, true);
-    }
+    const type = async (): Promise<void> => {
+      try {
+        await this.tryRef('type', focused, operation, [], text);
+      } catch (cause) {
+        if (!(this.options.headed && cause instanceof AgentDesktopFailure && cause.notDelivered)) throw cause;
+        await this.tryRef('type', focused, operation, [], text, true);
+      }
+    };
+    if (options.replace) await afterChange('type', type);
+    else await type().catch((cause: unknown) => Promise.reject(translate(cause, 'type', true)));
     await this.settle(operation);
   }
 
@@ -856,6 +932,20 @@ export class DesktopSurface {
       if (call.raw === true && cause instanceof AgentDesktopFailure) throw cause;
       throw translate(cause, call.label, call.input);
     }
+  }
+}
+
+/**
+ * Runs the input that follows one that already changed the app (a clear
+ * before a type): its failure, whatever agent-desktop says it sent, is
+ * `ACTION_MAY_HAVE_COMMITTED`, so the step is never repeated as if nothing
+ * happened.
+ */
+async function afterChange(label: string, run: () => Promise<unknown>): Promise<void> {
+  try {
+    await run();
+  } catch (cause) {
+    throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `${label}: ${(cause as Error).message} (an earlier command of this step changed the app)`, { retryable: false, cause });
   }
 }
 
