@@ -6,7 +6,7 @@
  * field in a browser, on a phone, and in a desktop app.
  */
 
-import { OBSERVED_NAME_LIMIT, OBSERVED_TEXT_LIMIT, type SemanticNode, type ViewportSize } from '@e2e-dev/core/engine';
+import type { SemanticNode, ViewportSize } from '@e2e-dev/core/engine';
 
 /** A rectangle in screen points, as agent-desktop reports bounds. */
 export interface Rect {
@@ -99,7 +99,7 @@ const ROLE_MAP: Readonly<Record<string, string>> = {
   grid: 'grid',
   group: 'group',
   heading: 'heading',
-  image: 'img',
+  image: 'image',
   incrementor: 'spinbutton',
   link: 'link',
   list: 'list',
@@ -155,26 +155,30 @@ const SCROLLABLE_ROLES = new Set(['scrollarea', 'list', 'listbox', 'table', 'out
 
 const STATE_NAMES = ['focused', 'disabled', 'secure', 'expanded', 'selected', 'hidden', 'pressed'] as const;
 
-/** A string cut at a limit, keeping its start; whitespace-only strings are no value. */
-function bounded(value: string | undefined, limit: number): string | undefined {
-  if (value === undefined || value.trim() === '') return undefined;
-  return value.length > limit ? value.slice(0, limit) : value;
+/**
+ * A label: a whitespace-only one is no label. Nothing is cut here: `locate`
+ * answers single-node reads, which carry the whole value, and the harness
+ * cuts what it shows the agent.
+ */
+function label(value: string | undefined): string | undefined {
+  return value === undefined || value.trim() === '' ? undefined : value;
 }
 
 /** A node agent-desktop reports but nothing reads: a wrapper with no name, value, id, ref, or text of its own. */
 function transparent(raw: RawNode): boolean {
   if (raw.ref_id !== undefined || raw.native_id !== undefined) return false;
-  if (bounded(raw.name, 1) !== undefined || bounded(raw.value, 1) !== undefined) return false;
+  if (label(raw.name) !== undefined || label(raw.value) !== undefined) return false;
   return raw.role === 'group' || raw.role === 'unknown' || raw.role === 'layoutitem' || raw.role === 'matte' || raw.role === 'splitter';
 }
 
 /**
  * What makes a node the same node in the next snapshot, among its parent's
- * children: its role and its developer id, else its role and name. A field's
- * value is not part of it, so a field keeps its id while it is typed into.
+ * children: its role and its developer id, else its role and name (or, for
+ * static text, its text). A field's value is not part of it, so a field keeps
+ * its id while it is typed into.
  */
 function identityOf(node: RawNode): string {
-  return `${node.role}:${node.native_id?.value ?? node.name ?? node.value ?? ''}`;
+  return `${node.role}:${node.native_id?.value ?? node.name ?? (TEXT_ROLES.has(node.role) ? node.value : undefined) ?? ''}`;
 }
 
 /**
@@ -209,19 +213,19 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
       if (node.available_actions?.includes('Expand') === true || node.available_actions?.includes('Collapse') === true) states.expanded = rawStates.has('expanded');
     }
     const isText = TEXT_ROLES.has(node.role);
-    const name = bounded(node.name ?? (isText ? node.value : undefined), OBSERVED_NAME_LIMIT);
-    const text = isText ? bounded(node.value ?? node.name, OBSERVED_TEXT_LIMIT) : undefined;
+    const name = label(node.name ?? (isText ? node.value : undefined));
+    const text = isText ? label(node.value ?? node.name) : undefined;
     // A checkbox's value is its state ("0", "1"), already in `checked`; a secure field's is never reported.
-    const value = secure || isText || CHECKABLE_ROLES.has(node.role) ? undefined : bounded(node.value, OBSERVED_TEXT_LIMIT);
+    const value = secure || isText || CHECKABLE_ROLES.has(node.role) ? undefined : node.value;
     const rect = node.bounds === undefined ? undefined : { x: node.bounds.x - window.x, y: node.bounds.y - window.y, width: node.bounds.width, height: node.bounds.height };
     if (secure) {
       if (rect === undefined) unmaskable = true;
       else secureRects.push(rect);
     }
     const attributes: Record<string, string> = {};
-    const placeholder = bounded(node.hint, OBSERVED_TEXT_LIMIT);
+    const placeholder = label(node.hint);
     if (placeholder !== undefined) attributes.placeholder = placeholder;
-    const description = bounded(node.description, OBSERVED_TEXT_LIMIT);
+    const description = label(node.description);
     if (description !== undefined) attributes.description = description;
     if (node.native_id !== undefined) attributes['native-id-kind'] = node.native_id.kind;
     if (scrollTarget === undefined && node.ref_id !== undefined && SCROLLABLE_ROLES.has(node.role)) scrollTarget = id;

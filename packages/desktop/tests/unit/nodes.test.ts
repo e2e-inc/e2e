@@ -100,6 +100,23 @@ describe('projectSnapshot', () => {
     expect(ids(after, 'Done')).toEqual(ids(before, 'Done'));
   });
 
+  it('keeps an unnamed field its id while it is typed into', () => {
+    const mint = minter();
+    const field = (value: string): RawSnapshot => ({ snapshot_id: 's', tree: { role: 'window', name: 'Form', children: [{ role: 'textfield', ref_id: '@s:e1', value }] } });
+    const ids = ['', 'a', 'ab'].map((value) => projectSnapshot(field(value), mint).root.children?.[0]?.ref.id);
+    expect(new Set(ids).size).toBe(1);
+  });
+
+  it('reports a value whole, and an image by the contract role', () => {
+    const long = 'x'.repeat(600);
+    const { root } = projectSnapshot(
+      { snapshot_id: 's', tree: { role: 'window', name: 'Form', children: [{ role: 'textfield', name: 'Notes', ref_id: '@s:e1', value: long }, { role: 'image', name: 'Logo' }] } },
+      minter(),
+    );
+    expect(root.children?.[0]?.value).toBe(long);
+    expect(root.children?.[1]?.role).toBe('image');
+  });
+
   it('withholds masking when a secure field has no bounds, and measures rects from the window', () => {
     expect(project('macos/appkit-form').secureRects).toBeUndefined();
     const raw = load('macos/appkit-form');
