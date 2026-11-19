@@ -326,6 +326,8 @@ suites that consume the built packages the way a user would.
   opens with a table that routes each job to one reference, and every
   reference over 100 lines opens with a `## Contents` list of its sections
   (`tests/unit/skill.test.ts`).
+  Every consumer skill under `skills/` is named in the root `skills.sh.json`
+  group, which puts it at the top of the skills.sh page.
 - `skills/create-verification-skill/`: a generator skill for consumers;
   it writes a project-local `verify-<app>` skill and feature map on top of
   e2e, with the bug bash wired to the map. Installed with `npx skills add
@@ -350,7 +352,9 @@ suites that consume the built packages the way a user would.
   `.dev/skills/` with both. On Windows the symlinks need Developer Mode and
   `core.symlinks=true` (CONTRIBUTING.md). The vendored third-party skills in `.claude/skills/` (`unbox-ai`,
   `unslop`, tracked by `skills-lock.json`) stay where they are: the CLI
-  skips them as installed project skills.
+  skips them as installed project skills. Each also carries
+  `metadata.internal: true`, which keeps skills.sh from listing it on the
+  e2e-inc/e2e page; `npx skills update` drops that line, so add it back.
 - `plugins/e2e/` — one package of skills and the e2e MCP server
   (`.mcp.json`, `npx -y e2e@<version> mcp`) for Codex, Claude Code, Cursor, and Devin; Grok
   Build reads the Claude files. The root
