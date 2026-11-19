@@ -1865,7 +1865,7 @@ describe('device fixture', () => {
         captures(h, [{ ...SETTINGS_SNAPSHOT, viewport: { width: 390, height: 844 }, nodes: [...FORM_NODES, pad, ...keyboard] }, KEYBOARD_GONE]);
         await device.dismissKeyboard();
         const { from } = h.fake.lastArgs('interactions.swipe') as { from: { y: number } };
-        expect([keyboard.length, from.y < 200]).toEqual([keyboard.length, true]);
+        expect(from.y, `${keyboard.length} keyboard elements`).toBeLessThan(200);
       }
     });
 
@@ -1889,6 +1889,27 @@ describe('device fixture', () => {
         from: { x: 422, y: 195 },
         to: { x: expect.closeTo(396.68, 2), y: 195 },
       });
+    });
+
+    it('refuses to drag a keyboard that is up but has no bounds, rather than guess where it is', async () => {
+      const h = harness();
+      await openAttempt(h);
+      await observed(h, 'Back');
+      const device = fixture(h);
+      h.fake.respond('command.keyboard', NO_DISMISS_KEY);
+      // A probe that says visible, with no frame and no keyboard element in the tree: the bottom of the
+      // screen is no bound, and the centre of this landscape screen may be on the keyboard.
+      const landscape = [
+        { ref: '@e1', index: 0, depth: 0, type: 'application', label: 'Order', rect: { x: 0, y: 0, width: 844, height: 390 } },
+        { ref: '@e2', index: 1, parentIndex: 0, depth: 1, type: 'scroll-view', rect: { x: 0, y: 60, width: 844, height: 330 } },
+        { ref: '@e3', index: 2, parentIndex: 1, depth: 2, type: 'text-field', label: 'Notes', rect: { x: 20, y: 80, width: 804, height: 44 } },
+      ];
+      captures(h, [{ ...SETTINGS_SNAPSHOT, viewport: { width: 844, height: 390 }, nodes: landscape, keyboard: { kind: 'visibility-only', visible: true } }]);
+      await expect(device.dismissKeyboard()).rejects.toMatchObject({
+        code: 'UNSUPPORTED_CAPABILITY',
+        message: expect.stringContaining('without a frame or any keyboard element on screen'),
+      });
+      expect(h.fake.calls.filter((call) => call.method === 'interactions.swipe')).toHaveLength(0);
     });
 
     it('tries a vertical drag when the horizontal one left the keyboard up', async () => {

@@ -202,10 +202,11 @@ export interface Device {
    * screen has one, to avoid pressing a button or toggling a checkbox. A
    * control the tree leaves out, such as pressable text, can still be hit. The
    * simulator's "Speed up your typing" tip goes through its Continue button
-   * first. A screen with no clear point above the keyboard, or a keyboard that
-   * outlives both drags, fails with `UNSUPPORTED_CAPABILITY`; the message
-   * names the alternatives (the app's own Done or close control, or pressing
-   * Enter on the field).
+   * first. A screen with no clear point above the keyboard, a keyboard reported
+   * up with no frame and no keyboard element on screen (so no point is known
+   * to be above it), or a keyboard that outlives both drags, fails with
+   * `UNSUPPORTED_CAPABILITY`; the message names the alternatives (the app's
+   * own Done or close control, or pressing Enter on the field).
    */
   dismissKeyboard(): Promise<void>;
   /**

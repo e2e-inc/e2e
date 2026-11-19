@@ -166,11 +166,14 @@ function listsApp(entry: string, app: string): boolean {
  * The top edge of the soft keyboard: the band the capture's producer
  * measured, else the highest keyboard element drawn on screen (a key, the
  * keyboard, or the suggestion strip above it, the elements
- * {@link keyboardShownIn} answers from), else the bottom of the screen.
+ * {@link keyboardShownIn} answers from). Undefined when the capture says the
+ * keyboard is up but bounds it nowhere, as a visibility probe alone does:
+ * the keyboard could reach anywhere, so no point is known to be above it.
  */
-function keyboardTop(raw: RawSnapshot, viewport: ViewportSize): number {
-  if (raw.keyboard?.kind === 'visible' || raw.keyboard?.kind === 'derived') return raw.keyboard.frame.y;
-  return Math.min(viewport.height, keyboardElementsTop(raw.nodes ?? [], raw.viewport ?? viewport) ?? viewport.height);
+function keyboardTop(raw: RawSnapshot, viewport: ViewportSize): number | undefined {
+  if (raw.keyboard?.kind === 'visible' || raw.keyboard?.kind === 'derived') return Math.min(viewport.height, raw.keyboard.frame.y);
+  const top = keyboardElementsTop(raw.nodes ?? [], raw.viewport ?? viewport);
+  return top === undefined ? undefined : Math.min(viewport.height, top);
 }
 
 /**
@@ -1799,7 +1802,15 @@ export class AgentDeviceSurface {
       const { raw } = reading;
       const projected = projectSnapshot(raw.nodes ?? [], { mintId: () => 'keyboard', viewport: raw.viewport });
       const viewport = await this.viewportFor(projected, signal, input);
-      const from = keyboardDragStart(projected, viewport, keyboardTop(raw, viewport));
+      const top = keyboardTop(raw, viewport);
+      if (top === undefined) {
+        throw new EngineError(
+          'UNSUPPORTED_CAPABILITY',
+          `keyboard dismissal failed: agent-device reports the keyboard up without a frame or any keyboard element on screen, so a drag could start on the keyboard. ${KEYBOARD_ALTERNATIVES}`,
+          { retryable: false },
+        );
+      }
+      const from = keyboardDragStart(projected, viewport, top);
       if (from === undefined) {
         throw new EngineError(
           'UNSUPPORTED_CAPABILITY',

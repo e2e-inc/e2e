@@ -876,10 +876,11 @@ await device.alert('accept');
  * screen has one, to avoid pressing a button or toggling a checkbox. A
  * control the tree leaves out, such as pressable text, can still be hit. The
  * simulator's "Speed up your typing" tip goes through its Continue button
- * first. A screen with no clear point above the keyboard, or a keyboard that
- * outlives both drags, fails with `UNSUPPORTED_CAPABILITY`; the message
- * names the alternatives (the app's own Done or close control, or pressing
- * Enter on the field).
+ * first. A screen with no clear point above the keyboard, a keyboard reported
+ * up with no frame and no keyboard element on screen (so no point is known
+ * to be above it), or a keyboard that outlives both drags, fails with
+ * `UNSUPPORTED_CAPABILITY`; the message names the alternatives (the app's
+ * own Done or close control, or pressing Enter on the field).
  */
 dismissKeyboard(): Promise<void>;
 ```
@@ -890,7 +891,7 @@ await device.dismissKeyboard();
 
 | 抛出错误 | 发生条件 |
 | --- | --- |
-| `UNSUPPORTED_CAPABILITY` | 键盘上方的每个点（屏幕有滚动视图时，在滚动视图内）都落在控件上，或两次拖动后键盘仍未消失。 |
+| `UNSUPPORTED_CAPABILITY` | 键盘上方的每个点（屏幕有滚动视图时，在滚动视图内）都落在控件上，agent-device 报告键盘已弹出但没有键盘框架、屏幕上也没有键盘元素，或两次拖动后键盘仍未消失。 |
 
 #### `isKeyboardShown`
 
