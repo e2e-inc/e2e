@@ -131,8 +131,9 @@ function seedReceiptPhoto(): void {
 function readMarker(marker: string): string | undefined {
   try {
     return readFileSync(marker, 'utf8');
-  } catch {
-    return undefined;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
   }
 }
 

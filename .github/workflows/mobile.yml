@@ -206,6 +206,13 @@ jobs:
           # took about 130 s on this runner.
           xcrun simctl boot "$UDID"
           xcrun simctl boot "$SECOND"
+          # The agentic recordings name things by the region they were made
+          # in (a Mac set to Poland: `Photo, October 15, 10:27`, 24-hour). The
+          # runner's default region writes `10:27 AM`, which never matches.
+          for id in "$UDID" "$SECOND"; do
+            xcrun simctl spawn "$id" defaults write -g AppleLocale "en_US@rg=plzzzz"
+            xcrun simctl spawn "$id" defaults write -g AppleICUForce24HourTime -bool YES
+          done
           xcrun simctl bootstatus "$UDID"
           xcrun simctl bootstatus "$SECOND"
           echo "E2E_MOBILE_BENCHMARK_IOS_DEVICE=$UDID,$SECOND" >> "$GITHUB_ENV"
