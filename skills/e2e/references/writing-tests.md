@@ -325,8 +325,9 @@ Coordinates are CSS pixels, for what the tree does not list: `tap({ position:
 `screen.doubleTapAt({ x, y })` double-taps a viewport point,
 `screen.swipe({ from, to, duration? })` swipes along a path,
 `screen.swipe({ direction, momentum? })` swipes the viewport. Viewport
-points also take percentages: `{ x: '50%', y: '50%' }`. Prefer a locator; a
-point moves with the layout.
+points also take percentages from `'0%'` through `'100%'`, rounded to the
+nearest pixel: `{ x: '50%', y: '50%' }`. Prefer a locator; a point moves with
+the layout.
 
 ### Reads
 
