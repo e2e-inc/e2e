@@ -59,8 +59,9 @@ translation moves or goes with it in the same change.
   them in the terminal.
 - End a Hindi sentence with the पूर्ण विराम `।`, including the bold lead-in
   of a list item (**टेस्ट पर कम समय।**). Use Latin `,`, `?`, `!`, `:`, and
-  `"` quotes. A sentence that ends in inline code, a URL, or a Latin name
-  still ends with `।`.
+  `"` quotes. The one exception is a keyboard key, written “की” in curly quotes
+  as Apple's Hindi guides do, so it never reads as the possessive की. A
+  sentence that ends in inline code, a URL, or a Latin name still ends with `।`.
 - Use Western digits (1, 2, 3), not Devanagari digits, so numbers match the
   code and the terminal.
 - Write the nukta in loanwords: फ़ाइल, ब्राउज़र, फ़ीचर, कॉन्फ़िग. Write `ऑ` for
@@ -91,12 +92,13 @@ translation moves or goes with it in the same change.
 | target | टारगेट | m |
 | goal, atomic goal | लक्ष्य, एटॉमिक लक्ष्य | m |
 | replay cache | रीप्ले कैश | m |
+| strict cache mode | स्ट्रिक्ट कैश मोड | m |
 | replay | रीप्ले (noun), रीप्ले करना (verb) | m |
 | executor | एक्ज़ीक्यूटर | m |
 | provider | प्रोवाइडर | m |
 | hosted browser | होस्टेड ब्राउज़र | m |
 | device | डिवाइस | m |
-| app | ऐप | m |
+| app, apps | ऐप, ऐप्स | m |
 | worker | वर्कर | m |
 | retry | रीट्राई | m |
 | report, reporter | रिपोर्ट, रिपोर्टर | f, m |
@@ -119,7 +121,7 @@ translation moves or goes with it in the same change.
 | flaky, flaky test | फ़्लेकी, फ़्लेकी टेस्ट | m |
 | harness | हार्नेस | m |
 | simulator, emulator | सिम्युलेटर, एम्युलेटर | m |
-| real device | असली डिवाइस | m |
+| real device, physical device | असली डिवाइस | m |
 | trace | ट्रेस | m |
 | artifact | आर्टिफ़ैक्ट | m |
 | matcher | मैचर | m |
@@ -151,11 +153,18 @@ translation moves or goes with it in the same change.
 | call (noun) | कॉल | f |
 | lease | लीज़ | f |
 | request | अनुरोध | m |
+| action | एक्शन | m |
+| permission | इजाज़त | f |
+| untrusted (code, pull request) | जिस पर आप भरोसा नहीं करते | |
+| state | स्टेट | m |
+| accessibility | ऐक्सेसिबिलिटी | f |
+| account | खाता | m |
 | job (CI) | जॉब | m |
 | observation | ऑब्ज़र्वेशन | m |
 | viewport | व्यूपोर्ट | m |
 | origin | ऑरिजिन | m |
-| key press | की प्रेस | m |
+| key press | “की” प्रेस | m |
+| keyboard key | “की” | f |
 | Next (closing section heading) | आगे | |
 | install | इंस्टॉल करना | |
 | continuous integration | कंटीन्यूअस इंटीग्रेशन (CI) | m |
