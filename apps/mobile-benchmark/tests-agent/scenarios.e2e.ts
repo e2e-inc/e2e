@@ -7,9 +7,9 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { crc32 } from 'node:zlib';
 import type { Device } from '@e2e-dev/mobile';
 import type { Agent, AgentParam, App, Screen } from 'e2e';
@@ -99,8 +99,9 @@ function datedReceipt(time: string): Buffer {
  * The photo the picker scenario expects in the library, added once to every
  * booted simulator. A marker in the simulator's own data directory keeps a
  * rerun from adding a copy, which would leave the picker with twins the
- * trace cache cannot tell apart, and goes with the library when the
- * simulator is erased. The marker holds the capture time, so a new year
+ * trace cache cannot tell apart. It sits in `Media`, which survives a
+ * reboot (iOS clears `tmp` on every boot) and goes with the library when
+ * the simulator is erased. The marker holds the capture time, so a new year
  * adds a photo under this year's name. Re-record on an erased simulator: one
  * seeded before the photo had a capture time still holds an undated copy.
  */
@@ -111,7 +112,7 @@ function seedReceiptPhoto(): void {
   const pending = Object.values(devices.devices)
     .flat()
     .filter((device) => device.state === 'Booted')
-    .map((device) => ({ device, marker: resolve(device.dataPath, 'tmp', 'e2e-mobile-benchmark-receipt') }))
+    .map((device) => ({ device, marker: resolve(device.dataPath, 'Media', 'e2e-mobile-benchmark-receipt') }))
     .filter(({ marker }) => readMarker(marker) !== time);
   if (pending.length === 0) return;
   const dir = mkdtempSync(join(tmpdir(), 'e2e-receipt-'));
@@ -120,6 +121,7 @@ function seedReceiptPhoto(): void {
     writeFileSync(photo, datedReceipt(time));
     for (const { device, marker } of pending) {
       execFileSync('xcrun', ['simctl', 'addmedia', device.udid, photo]);
+      mkdirSync(dirname(marker), { recursive: true });
       writeFileSync(marker, time);
     }
   } finally {
