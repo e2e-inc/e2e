@@ -660,7 +660,7 @@ export interface DeviceLease {
 ```
 
 **`acquire`** रनर प्रोसेस में हर वर्कर स्लॉट के लिए एक साथ चलता है।
-रिक्वेस्ट में `platform`, `runId`, `targetName`, `slot`, `slots`, `app`
+अनुरोध में `platform`, `runId`, `targetName`, `slot`, `slots`, `app`
 (टारगेट का `app.bundleId`), रिज़ॉल्व किया गया `appPath`, `agentDeviceVersion`
 (उस सर्विस के लिए जो चुने हुए वर्शन का daemon शुरू करती है), `projectRoot`,
 `env`, एक इंटरप्ट `signal`, और रिपोर्टर तक पहुँचने वाला `log` होता है।
@@ -668,7 +668,7 @@ export interface DeviceLease {
 - टोकन `process.env` से नहीं, `request.env` से पढ़ें। प्रोजेक्ट फ़ाइलें
   `process.cwd()` के नीचे नहीं, `request.projectRoot` के नीचे पढ़ें।
 - जिस टारगेट के पास चलाने को कुछ नहीं है, वह कुछ भी लीज़ नहीं करता।
-- `installedApp` सिर्फ़ तब सेट करें जब रिक्वेस्ट में `appPath` हो। वरना रन
+- `installedApp` सिर्फ़ तब सेट करें जब अनुरोध में `appPath` हो। वरना रन
   फ़ेल होता है।
 
 **`release`** आख़िरी वर्कर के बाहर निकलने के बाद, `cleanupTimeout` के भीतर,
@@ -699,7 +699,7 @@ agent-device की स्क्रीन रिकॉर्डिंग की 
 </Accordion>
 
 <Accordion title="उदाहरण: सेशन API के लिए प्रोवाइडर">
-आम तौर पर सेशन API को तीन रिक्वेस्ट चाहिए: सेशन बनाना, daemon तक पहुँच मिलने तक
+आम तौर पर सेशन API को तीन अनुरोध चाहिए: सेशन बनाना, daemon तक पहुँच मिलने तक
 उसे पोल करना, और उसे रोकना।
 
 ```ts title="device-provider.ts" expandable
@@ -760,8 +760,8 @@ export function hostedDevices(options: { serviceUrl: string; image: string }): D
 नहीं चाहिए। `@e2e-dev/mobile/lease` का `agentDeviceLeases()` हर वर्कर स्लॉट के
 लिए `env` के क्रेडेंशियल के साथ एक agent-device daemon शुरू करता है, `selectors`
 के साथ एक लीज़ allocate करता है, और जब तक रन उसे थामे रहता है तब तक उसे ज़िंदा
-रखता है। रिलीज़ पर यह तब तक फ़ेल होता है जब तक agent-device पुष्टि न करे कि
-सेशन ख़त्म हो गया। [TestMu AI](/integrations/testmu) के लिए `@e2e-dev/testmu`
+रखता है। अगर agent-device पुष्टि नहीं करता कि सेशन ख़त्म हो गया है, तो रिलीज़
+फ़ेल होती है। [TestMu AI](/integrations/testmu) के लिए `@e2e-dev/testmu`
 का `testmu()`, [BrowserStack](/integrations/browserstack) के लिए
 `@e2e-dev/browserstack` का `browserstack()`, और [Revyl](/integrations/revyl) के
 लिए `@e2e-dev/revyl` का `revyl()` इसी तरह काम करते हैं।

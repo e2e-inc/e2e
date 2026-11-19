@@ -6,7 +6,9 @@ notice. English stays the source of truth.
 
 This translation is best effort. English changes don't wait for it, so a page
 here can lag behind its English page until someone who reads Hindi updates
-it. `pnpm docs:check` lists every page and label that is behind as a warning.
+it. `pnpm docs:check` warns when a page's outline or code blocks differ from
+the English page, or when a navigation label is missing. It does not catch
+changed English prose.
 
 ## Layout
 
@@ -149,7 +151,7 @@ translation moves or goes with it in the same change.
 | call (noun) | कॉल | f |
 | lease | लीज़ | f |
 | request | अनुरोध | m |
-| job (CI) | जॉब | f |
+| job (CI) | जॉब | m |
 | observation | ऑब्ज़र्वेशन | m |
 | viewport | व्यूपोर्ट | m |
 | origin | ऑरिजिन | m |
