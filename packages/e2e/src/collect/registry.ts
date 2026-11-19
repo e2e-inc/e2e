@@ -308,6 +308,11 @@ export function groupTitles(group: GroupNode | undefined): string[] {
   return groupChain(group).map((node) => node.title);
 }
 
+/** `skipIf` and `runIf` read their condition while the file is collected, so a refused one is a collection error. */
+function collectionError(message: string): CollectionError {
+  return new CollectionError(message);
+}
+
 /** The tags along the describe chain and the test's own, outermost first, each once. */
 function declaredTags(group: GroupNode | undefined, options: TestOptions): string[] {
   const layers = [...groupChain(group).map((node) => node.options), options];
@@ -805,10 +810,10 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
       return undefined;
     },
     skipIf(condition: unknown): TestRegistrar<object> {
-      return registrar('test.skipIf()', readCondition('test.skipIf()', condition));
+      return registrar('test.skipIf()', readCondition('test.skipIf()', condition, collectionError));
     },
     runIf(condition: unknown): TestRegistrar<object> {
-      return registrar('test.runIf()', !readCondition('test.runIf()', condition));
+      return registrar('test.runIf()', !readCondition('test.runIf()', condition, collectionError));
     },
     each(rows: unknown): EachRegistrar<unknown[]> {
       return eachRegistrar('test.each()', readRows('test.each()', rows), true);

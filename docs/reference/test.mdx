@@ -133,7 +133,8 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | Called in a setup test, which cannot skip because other tests depend on its sessions, or given a Promise condition. |
+| `INVALID_ARGUMENT` | Called in a setup test. A setup test cannot skip because other tests depend on its sessions. |
+| `INVALID_ARGUMENT` | A Promise condition, inside a test body. |
 | `COLLECTION_ERROR` | The conditional form, outside a test body. |
 
 #### `test.skipIf`
@@ -280,7 +281,7 @@ test('exports a PDF', { fail: 'PDF export is broken' }, async ({ app }) => {}); 
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | A Promise condition, or a truthy condition in a setup test, a serial group member, an `afterEach` hook, or a fixture teardown. |
+| `INVALID_ARGUMENT` | A Promise condition inside a test body, or a truthy condition in a setup test, a serial group member, an `afterEach` hook, or a fixture teardown. |
 | `COLLECTION_ERROR` | The conditional form, outside a test body, or the `fail` option inside a serial group. |
 
 #### `test.only`

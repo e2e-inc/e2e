@@ -40,12 +40,9 @@ export type ModifierCall =
 /**
  * `skip(title, fn)` registers a skipped test; `skip(condition, reason?)` and
  * `skip(reason?)` skip the running one, and `fail` takes the same shapes.
- * `args` are the call's own arguments, since `skip(undefined, reason)` and
- * `skip(reason?)` differ only in their count. A lone string or `undefined` is
- * the `reason?` form, so it always skips; a string alone is never a title,
- * since a registration always carries its body. Any other call reads its
- * first argument as the condition by truthiness and its second as the
- * reason, as Playwright does, so `skip(undefined, reason)` does not skip.
+ * `args` are the call's own arguments: `skip(undefined, reason)` and
+ * `skip(reason?)` differ only in their count. A condition is read by
+ * truthiness and the reason is the second argument, as in Playwright.
  */
 export function parseModifierCall(api: string, args: readonly unknown[]): ModifierCall {
   const [first, second] = args;
@@ -56,20 +53,20 @@ export function parseModifierCall(api: string, args: readonly unknown[]): Modifi
     return { kind: 'runtime', condition: true, reason: first };
   }
   const reason = typeof second === 'string' ? second : undefined;
-  return { kind: 'runtime', condition: readCondition(api, first), reason };
+  // Outside a body the call itself is the mistake, and the skip or fail it reaches says so.
+  const condition = currentAttempt() === undefined
+    ? Boolean(first)
+    : readCondition(api, first, (message) => new TestError('INVALID_ARGUMENT', message));
+  return { kind: 'runtime', condition, reason };
 }
 
 /**
- * The truthiness of a `skip`, `fail`, `skipIf`, or `runIf` condition. A
- * Promise is always truthy, so an unawaited async check would decide nothing:
- * it throws, as a test error inside a test body and a collection error
- * outside one.
+ * The truthiness of a test modifier's condition. A Promise is always truthy,
+ * so an unawaited async check would decide nothing: it throws the error
+ * `refuse` builds from the message.
  */
-export function readCondition(api: string, condition: unknown): boolean {
-  if (isPromiseLike(condition)) {
-    const message = `${api} got a Promise as its condition; await it before the call`;
-    throw currentAttempt() === undefined ? new CollectionError(message) : new TestError('INVALID_ARGUMENT', message);
-  }
+export function readCondition(api: string, condition: unknown, refuse: (message: string) => Error): boolean {
+  if (isPromiseLike(condition)) throw refuse(`${api} got a Promise as its condition; await it before the call`);
   return Boolean(condition);
 }
 
