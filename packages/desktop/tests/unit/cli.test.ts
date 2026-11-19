@@ -67,6 +67,8 @@ describe('translate', () => {
     expect(translate(failed('ACTION_NOT_SUPPORTED', 'not_delivered'), 'click', true)).toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
     expect(translate(failed('APP_NOT_FOUND', 'not_delivered'), 'snapshot', false)).toMatchObject({ code: 'INVALID_STATE' });
     expect(translate(failed('AMBIGUOUS_TARGET', 'not_delivered'), 'click', true)).toMatchObject({ code: 'NOT_ACTIONABLE' });
+    expect(translate(failed('TIMEOUT', 'not_delivered'), 'snapshot', false)).toMatchObject({ code: 'OPERATION_TIMEOUT' });
+    expect(translate(failed('TIMEOUT', 'not_delivered'), 'click', true)).toMatchObject({ code: 'NOT_ACTIONABLE' });
   });
 
   it('never lets an input that may have landed look retryable', () => {

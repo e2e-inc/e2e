@@ -8,6 +8,7 @@
  * | `ACTION_NOT_SUPPORTED`, `PLATFORM_NOT_SUPPORTED`, `POLICY_DENIED` | UNSUPPORTED_CAPABILITY |
  * | `APP_NOT_FOUND`, `WINDOW_NOT_FOUND`                           | INVALID_STATE             |
  * | `AMBIGUOUS_TARGET`, `ACTION_FAILED`, `TIMEOUT`, sent nothing  | NOT_ACTIONABLE            |
+ * | `TIMEOUT` of a read                                           | OPERATION_TIMEOUT         |
  * | any failure of an input that may have been delivered          | ACTION_MAY_HAVE_COMMITTED |
  * | an input still running when the operation's budget ran out    | ACTION_MAY_HAVE_COMMITTED |
  * | an input whose process exited without printing a result       | ACTION_MAY_HAVE_COMMITTED |
@@ -191,6 +192,8 @@ export function translate(cause: unknown, label: string, input: boolean): Error 
   if (STALE_CODES.has(cause.code)) return new EngineError('NODE_STALE', text, { retryable: true, cause });
   if (UNSUPPORTED_CODES.has(cause.code)) return new EngineError('UNSUPPORTED_CAPABILITY', text, { retryable: false, cause });
   if (GONE_CODES.has(cause.code)) return new EngineError('INVALID_STATE', `${text}; open the app with app.open()`, { retryable: false, cause });
+  // A read that ran out of time is a timeout; only an input that could not be delivered in time is not actionable.
+  if (cause.code === 'TIMEOUT' && !input) return new EngineError('OPERATION_TIMEOUT', text, { retryable: false, cause });
   if (REFUSED_CODES.has(cause.code)) return new EngineError('NOT_ACTIONABLE', text, { retryable: false, cause });
   if (cause.code === 'PERM_DENIED') {
     return new EngineError('ENGINE_FAILURE', `${text}. Grant Accessibility (and Screen Recording, for screenshots) to the app that starts e2e, such as your terminal, then run again`, { retryable: false, cause });
