@@ -568,7 +568,7 @@ function readField(def: TextMatcherDef, node: SemanticNode): string | undefined 
 }
 
 /**
- * What `toBeEmpty` reads, as Playwright's does: a form control's raw value,
+ * What `toBeEmpty` reads: a form control's raw value,
  * empty when the platform reports none, and any other node's normalized text,
  * so whitespace alone is empty there. An option carries a value but is not a
  * control the user fills in, so it reads by its text: one with a label and no
