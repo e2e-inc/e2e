@@ -55,10 +55,12 @@ describe('device node attributes', () => {
     });
   });
 
-  it('leaves out an attribute the platform did not report', () => {
+  it('drops the XCUIElementType prefix and leaves out what the platform did not report', () => {
     const raw = [{ index: 0, type: 'Other' }];
     const projected = projectSnapshot(raw, { mintId: () => 'n1', viewport: { width: 400, height: 800 } });
     expect(projected.roots[0]?.attributes).toEqual({ class: 'Other' });
+    const prefixed = projectSnapshot([{ index: 0, type: 'XCUIElementTypeTextField' }], { mintId: () => 'n1', viewport: { width: 400, height: 800 } });
+    expect(prefixed.roots[0]?.attributes).toEqual({ class: 'TextField' });
     expect(projectSnapshot([{ index: 0 }], { mintId: () => 'n1', viewport: { width: 400, height: 800 } }).roots[0]?.attributes).toBeUndefined();
   });
 });

@@ -398,8 +398,9 @@ function nonEmpty(value: string | undefined): string | undefined {
  * suite asks for: `label` (the node's text, as the tree shows it),
  * `resource-id` (the Android resource id or the iOS accessibility
  * identifier, the test id), `class` (the Android class or the iOS element
- * type, also the tag name), `content-desc` (Android only), and `placeholder`.
- * Undefined when the node carries none of them.
+ * type without its `XCUIElementType` prefix, also the tag name),
+ * `content-desc` (Android only), and `placeholder`. Undefined when the node
+ * carries none of them.
  */
 function nodeAttributes(
   source: RawNode,
@@ -410,7 +411,7 @@ function nodeAttributes(
   const entries: [string, string | undefined][] = [
     ['label', projected.label],
     ['resource-id', projected.identifier],
-    ['class', nonEmpty(source.type)],
+    ['class', nonEmpty(source.type?.replace(/^XCUIElementType(?=[A-Z])/, ''))],
     ['content-desc', contentDescription],
     ['placeholder', projected.placeholder],
   ];
