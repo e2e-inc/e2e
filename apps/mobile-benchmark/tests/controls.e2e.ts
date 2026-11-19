@@ -63,12 +63,11 @@ test.describe('control inventory', () => {
   test('getAttribute reads the label, resource id, and class an Appium suite asks for', async ({ platform, screen }) => {
     const field = screen.getByTestId('name-input');
     expect(await field.getAttribute('resource-id')).toBe('name-input');
+    await expect(field).toHaveAttribute('label', 'Name field');
     if (platform === 'ios') {
-      await expect(field).toHaveAttribute('label', 'Name field');
       await expect(field).toHaveAttribute('class', 'TextField');
       expect(await field.getAttribute('content-desc')).toBeNull();
     } else {
-      await expect(field).toHaveAttribute('label', 'Ada Lovelace');
       await expect(field).toHaveAttribute('class', 'android.widget.EditText');
       await expect(field).toHaveAttribute('content-desc', 'Name field');
     }

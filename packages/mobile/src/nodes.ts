@@ -311,9 +311,14 @@ function isAndroidClass(type: string | undefined): boolean {
   return type !== undefined && type.includes('.');
 }
 
+/** An element type without the `XCUIElementType` prefix a WebDriver-backed iOS snapshot may carry. */
+function elementType(type: string): string {
+  return type.replace(/^XCUIElementType(?=[A-Z])/, '');
+}
+
 /** One element-type spelling for `NavigationBar`, `XCUIElementTypeNavigationBar`, `navigation-bar`, and `android.widget.NavigationBar` alike. */
 export function normalizeKind(type: string): string {
-  const simple = type.slice(type.lastIndexOf('.') + 1).replace(/^XCUIElementType(?=[A-Z])/, '');
+  const simple = elementType(type.slice(type.lastIndexOf('.') + 1));
   return simple
     .replaceAll(/([a-z0-9])([A-Z])/g, '$1-$2')
     .replaceAll(/[\s_]+/g, '-')
@@ -395,7 +400,8 @@ function nonEmpty(value: string | undefined): string | undefined {
 
 /**
  * What `getAttribute` reads on a device node, under the names an Appium
- * suite asks for: `label` (the node's text, as the tree shows it),
+ * suite asks for: `label` (the accessibility label: the iOS label, the Android
+ * content description, as Detox defines it),
  * `resource-id` (the Android resource id or the iOS accessibility
  * identifier, the test id), `class` (the Android class or the iOS element
  * type without its `XCUIElementType` prefix, also the tag name),
@@ -409,9 +415,9 @@ function nodeAttributes(
 ): Record<string, string> | undefined {
   const contentDescription = android ? nonEmpty(source.contentDescription) : undefined;
   const entries: [string, string | undefined][] = [
-    ['label', projected.label],
+    ['label', android ? contentDescription : projected.label],
     ['resource-id', projected.identifier],
-    ['class', nonEmpty(source.type?.replace(/^XCUIElementType(?=[A-Z])/, ''))],
+    ['class', nonEmpty(source.type === undefined ? undefined : elementType(source.type))],
     ['content-desc', contentDescription],
     ['placeholder', projected.placeholder],
   ];

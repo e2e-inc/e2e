@@ -39,16 +39,16 @@ describe('device node attributes', () => {
     });
   });
 
-  it('reads the text as label and the content description on Android', () => {
+  it('reads the content description as label and content-desc on Android', () => {
     expect(attributesOf('android', 'control-inventory', 'name-input')).toEqual({
-      label: 'Ada Lovelace',
+      label: 'Name field',
       'resource-id': 'name-input',
       class: 'android.widget.EditText',
       'content-desc': 'Name field',
       placeholder: 'Type your name',
     });
     expect(attributesOf('android', 'control-inventory', 'inventory-header')).toEqual({
-      label: 'Plain controls, every state exposed',
+      label: 'Inventory heading',
       'resource-id': 'inventory-header',
       class: 'android.view.View',
       'content-desc': 'Inventory heading',
@@ -62,5 +62,13 @@ describe('device node attributes', () => {
     const prefixed = projectSnapshot([{ index: 0, type: 'XCUIElementTypeTextField' }], { mintId: () => 'n1', viewport: { width: 400, height: 800 } });
     expect(prefixed.roots[0]?.attributes).toEqual({ class: 'TextField' });
     expect(projectSnapshot([{ index: 0 }], { mintId: () => 'n1', viewport: { width: 400, height: 800 } }).roots[0]?.attributes).toBeUndefined();
+  });
+
+  it('reads content-desc only on Android', () => {
+    const view = { mintId: () => 'n1', viewport: { width: 400, height: 800 } };
+    const android = projectSnapshot([{ index: 0, type: 'android.view.View', contentDescription: 'Close' }], view);
+    expect(android.roots[0]?.attributes).toEqual({ label: 'Close', class: 'android.view.View', 'content-desc': 'Close' });
+    const ios = projectSnapshot([{ index: 0, type: 'Button', label: 'Done', contentDescription: 'Close' }], view);
+    expect(ios.roots[0]?.attributes).toEqual({ label: 'Done', class: 'Button' });
   });
 });
