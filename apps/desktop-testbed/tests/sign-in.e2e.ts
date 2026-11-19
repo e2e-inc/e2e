@@ -42,8 +42,10 @@ test.describe('sign-in form', () => {
   test('takes a screenshot of the window with the password field painted over', async ({ app, screen }) => {
     await screen.getByRole('textbox', 'Password').fill(credentials.user('ada').password);
     const file = await app.screenshot('filled');
-    // The password field is 262 points wide, so its mask is a solid black bar of over 400 pixels at 2x; an unmasked window has none.
-    expect(longestBlackRun(new Uint8Array(readFileSync(file)))).toBeGreaterThan(400);
+    // The window is 420 points wide and the password field 262, so the mask is a solid black bar about as wide as the field at the capture's scale; an unmasked window has none.
+    const png = new Uint8Array(readFileSync(file));
+    const scale = new Transformer(png).metadataSync().width / 420;
+    expect(longestBlackRun(png)).toBeGreaterThanOrEqual(Math.floor(262 * scale));
   });
 });
 
@@ -62,4 +64,3 @@ function longestBlackRun(png: Uint8Array): number {
   }
   return longest;
 }
-
