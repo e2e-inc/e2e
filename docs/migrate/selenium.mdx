@@ -94,6 +94,7 @@ test('signs in', async ({ app, screen, browser }) => {
 | `switchTo().frame()`, `switchTo().alert().accept()` | `browser.frameLocator('#frame')`, `browser.onDialog('accept')` before the action |
 | `switchTo().window(handle)`, `getWindowHandles()`, `switchTo().newWindow()` | `tab.activate()`, `browser.tabs()`, `browser.newTab()`; `browser.waitForPopup(() => trigger)` for a tab the app opens, see [Tabs](/reference/web#tabs) |
 | `executeScript(script, args)` | `browser.evaluate(fn, arg)`, JSON in and out only |
+| `executeScript(script, element)`, `getDomProperty`, `getCssValue` | `browser.evaluateOn(locator, fn, arg)`; `expect(browser).toHaveJSProperty(locator, path, value)` and `toHaveCSS(locator, property, value)` to wait for a value |
 | Page objects | A fixture from `test.extend`, or a goal for `agent.act`, see [Page objects](/page-object-model) |
 
 ## What e2e doesn't have yet
@@ -105,7 +106,6 @@ e2e leaves it out on purpose.
 
 | Selenium | Use today |
 | --- | --- |
-| `executeScript(script, element)`, `getDomProperty`, `getCssValue` | A locator action such as `.tap()` or `.scrollIntoView()`, or `browser.evaluate` with a CSS selector |
 | `element.findElement(By.cssSelector)`, WebdriverIO `$('a').$('b')` | One `browser.locator('a >> b')` selector, or chained `getBy*` queries |
 | `ChromeOptions.addArguments`, `setBinary`, `Proxy`, `acceptInsecureCerts` | Start Chrome or Edge with the flags, then attach with `web({ connect })` |
 | `@BeforeSuite`, `@AfterSuite`, pytest session-scoped fixtures, WebdriverIO `onPrepare` | Once for the run: the script `app.command` starts, or a wrapper around `e2e run`. Once for a file: `beforeAll` and `afterAll`. Sign-in: a top-level `test.setup` that saves a session |

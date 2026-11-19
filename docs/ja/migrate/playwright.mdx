@@ -238,7 +238,7 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 | Playwright | 現在使える方法 |
 | --- | --- |
 | `locator.locator(selector)`, `locator.and()`, `filter({ visible })` | `'.card >> .close'` のような単一の `browser.locator` セレクター、またはスコープ内の `screen` クエリ |
-| `expect(locator).toHaveClass()`, `dispatchEvent()` | `expect(browser).toHaveClass(locator, cls)`。`browser.evaluate(fn, selector)` |
+| `expect(locator).toHaveClass()`, `dispatchEvent()` | `expect(browser).toHaveClass(locator, cls)`。`browser.evaluateOn(locator, (el, type) => el.dispatchEvent(new Event(type)), 'change')` |
 | `setInputFiles({ buffer })`, `selectOption([...])`, `click({ clickCount })`, `hover({ position })` | 一時ファイルのパス。複数選択には `browser.evaluate`。`boundingBox()` と `browser.mouse` |
 
 </Accordion>

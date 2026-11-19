@@ -92,6 +92,7 @@ test('signs in', async ({ app, screen, browser }) => {
 | `switchTo().frame()`、`switchTo().alert().accept()` | `browser.frameLocator('#frame')`、在操作前调用 `browser.onDialog('accept')` |
 | `switchTo().window(handle)`、`getWindowHandles()`、`switchTo().newWindow()` | `tab.activate()`、`browser.tabs()`、`browser.newTab()`；对于应用打开的标签页使用 `browser.waitForPopup(() => trigger)`，参阅[标签页](/reference/web#tabs) |
 | `executeScript(script, args)` | `browser.evaluate(fn, arg)`，输入和输出仅限 JSON |
+| `executeScript(script, element)`、`getDomProperty`、`getCssValue` | `browser.evaluateOn(locator, fn, arg)`；要等待某个值，使用 `expect(browser).toHaveJSProperty(locator, path, value)` 和 `toHaveCSS(locator, property, value)` |
 | 页面对象 | 通过 `test.extend` 定义的测试夹具，或 `agent.act` 的目标，参阅[页面对象](/page-object-model) |
 
 ## e2e 尚未提供的功能
@@ -102,7 +103,6 @@ test('signs in', async ({ app, screen, browser }) => {
 
 | Selenium | 当前替代方式 |
 | --- | --- |
-| `executeScript(script, element)`、`getDomProperty`、`getCssValue` | `.tap()` 或 `.scrollIntoView()` 等定位器操作，或配合 CSS 选择器使用 `browser.evaluate` |
 | `element.findElement(By.cssSelector)`、WebdriverIO 的 `$('a').$('b')` | 一个 `browser.locator('a >> b')` 选择器，或链式 `getBy*` 查询 |
 | `ChromeOptions.addArguments`、`setBinary`、`Proxy`、`acceptInsecureCerts` | 使用这些标志启动 Chrome 或 Edge，再通过 `web({ connect })` 连接 |
 | `@BeforeSuite`、`@AfterSuite`、pytest 会话作用域测试夹具、WebdriverIO 的 `onPrepare` | 每次运行执行一次：`app.command` 启动的脚本，或包装 `e2e run` 的脚本。每个文件执行一次：`beforeAll` 和 `afterAll`。登录：保存会话的顶层 `test.setup` |

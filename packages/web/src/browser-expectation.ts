@@ -64,7 +64,10 @@ function describeExpectedUrl(expected: string | RegExp, baseHref: string): strin
   }
 }
 
-/** One read of a browser matcher poll: whether the condition holds (undefined: not evaluable yet), and what was seen. */
+/**
+ * One read of a browser matcher poll: whether the condition holds
+ * (undefined: not evaluable yet), and what was seen.
+ */
 interface BrowserSample {
   readonly matches: boolean | undefined;
   readonly observed: string;
@@ -100,12 +103,14 @@ export function createBrowserExpectation(deps: ExpectationDeps, negated = false)
         last = await read(reads);
         return last.matches;
       },
-      onTimeout: (cause) =>
-        new TestError(
+      onTimeout: (cause) => {
+        const expected = `${negated ? 'not ' : ''}${label}`;
+        return new TestError(
           'ASSERTION_FAILED',
-          `${qualified(api)} failed\nexpected: ${negated ? 'not ' : ''}${label}\nobserved: ${last?.observed ?? 'nothing'}`,
+          `${qualified(api)} failed\nexpected: ${expected}\nobserved: ${last?.observed ?? 'nothing'}`,
           cause === undefined ? undefined : { cause },
-        ),
+        );
+      },
     });
   };
   const validate = (api: string, options: object | undefined, keys: readonly string[] = ['timeout']): void =>

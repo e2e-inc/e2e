@@ -253,7 +253,7 @@ purpose. Use the workaround, or keep the test in Playwright.
 | Playwright | Use today |
 | --- | --- |
 | `locator.locator(selector)`, `locator.and()`, `filter({ visible })` | One `browser.locator` selector, such as `'.card >> .close'`, or a `screen` query inside the scope |
-| `expect(locator).toHaveClass()`, `dispatchEvent()` | `expect(browser).toHaveClass(locator, cls)`; `browser.evaluate(fn, selector)` |
+| `expect(locator).toHaveClass()`, `dispatchEvent()` | `expect(browser).toHaveClass(locator, cls)`; `browser.evaluateOn(locator, (el, type) => el.dispatchEvent(new Event(type)), 'change')` |
 | `setInputFiles({ buffer })`, `selectOption([...])`, `click({ clickCount })`, `hover({ position })` | A temp file path; `browser.evaluate` for a multi-select; `browser.mouse` with `boundingBox()` |
 
 </Accordion>

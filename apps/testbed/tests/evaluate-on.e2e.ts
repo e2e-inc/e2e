@@ -240,10 +240,12 @@ test.describe('expect(browser).toHaveCSS', { requires: ['browser'] }, () => {
 
   test('fails on an element that never appears, and on an ambiguous locator', async ({ browser }) => {
     await browser.goto(page);
-    const missing = await failure(() => expect(browser).toHaveCSS(browser.locator('#missing'), 'position', 'static', { timeout: 300 }));
+    const missing = await failure(() =>
+      expect(browser).toHaveCSS(browser.locator('#missing'), 'position', 'static', { timeout: 300 }));
     expect(missing).toHaveProperty('code', 'ASSERTION_FAILED');
     expect(missing).toHaveProperty('message', expect.stringContaining('observed: no node'));
-    const ambiguous = await failure(() => expect(browser).toHaveCSS(browser.locator('nav'), 'position', 'static', { timeout: 300 }));
+    const ambiguous = await failure(() =>
+      expect(browser).toHaveCSS(browser.locator('nav'), 'position', 'static', { timeout: 300 }));
     expect(ambiguous).toHaveProperty('code', 'LOCATOR_AMBIGUOUS');
   });
 
