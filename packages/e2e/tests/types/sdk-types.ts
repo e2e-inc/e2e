@@ -648,6 +648,19 @@ void screen.tapAt({ x: 1 });
 void screen.swipe({ from: point });
 // @ts-expect-error a swipe is a direction or a path, never both.
 void screen.swipe({ direction: 'up', to: point });
+// Viewport points also take percentages of the viewport, mixed with pixels; a Point is a ScreenPoint.
+void screen.tapAt({ x: '50%', y: '50%' });
+void screen.doubleTapAt({ x: '12.5%', y: 40 }, { timeout: 1_000 });
+void screen.swipe({ from: { x: '50%', y: '90%' }, to: { x: '50%', y: '10%' }, duration: 300 });
+void screen.getByRole('list').tapAt({ x: '50%', y: 0 });
+const screenPoint: import('../../src/index.ts').ScreenPoint = point;
+void screen.tapAt(screenPoint);
+// @ts-expect-error a percentage carries its % sign.
+void screen.tapAt({ x: '50', y: 1 });
+// @ts-expect-error a position is relative to the node, so it stays in pixels.
+void screen.getByRole('image').tap({ position: { x: '50%', y: 0 } });
+// @ts-expect-error the executor's point verbs aim at screenshot pixels, never percentages.
+void executorContext.actions.tapAt({ x: '50%', y: 0 });
 // @ts-expect-error a locator swipe is directional; the path form is screen.swipe.
 void screen.getByRole('image').swipe({ from: point, to: point });
 // @ts-expect-error a directional swipe takes no duration.
