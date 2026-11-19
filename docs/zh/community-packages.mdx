@@ -49,6 +49,14 @@ description: 查找扩展 e2e 的第三方包，并提交集成。
 
 [npm](https://www.npmjs.com/package/@testomatio/reporter) · [仓库和示例](https://github.com/testomatio/reporter/tree/2.x/example/e2e)
 
+### `@waitcher/cli`
+
+Deploys `*.e2e.ts` tests from your repository as scheduled monitors on Waitcher, a hosted synthetic monitoring service, and alerts when a run fails. Each run keeps its `.e2e/` summary and traces as evidence. `waitcher runtime install` pins the project to the e2e versions the service runs. Browser tests use `@e2e-dev/web` with Chromium; API tests use `e2e` and `fetch`. Waitcher is a commercial service with a free plan.
+
+Maintainer: [Sławomir Radzymiński](https://github.com/slawekradzyminski). Version `0.2.27`, published November 18, 2026, runs tests on `e2e 0.21.1` and `@e2e-dev/web 0.15.1`.
+
+[npm](https://www.npmjs.com/package/@waitcher/cli) · [Documentation and example](https://waitcher.dev/docs/repository-workflow)
+
 ## 查找相关集成
 
 e2e 团队维护[托管浏览器和设备集成](/integrations)、[GitHub 报告器](/github)和[内置报告器](/reference/reporters)。

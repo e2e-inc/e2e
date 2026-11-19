@@ -49,6 +49,14 @@ iOS と Android の実機、シミュレーター、エミュレーター、デ�
 
 [npm](https://www.npmjs.com/package/@testomatio/reporter) · [リポジトリと使用例](https://github.com/testomatio/reporter/tree/2.x/example/e2e)
 
+### `@waitcher/cli`
+
+Deploys `*.e2e.ts` tests from your repository as scheduled monitors on Waitcher, a hosted synthetic monitoring service, and alerts when a run fails. Each run keeps its `.e2e/` summary and traces as evidence. `waitcher runtime install` pins the project to the e2e versions the service runs. Browser tests use `@e2e-dev/web` with Chromium; API tests use `e2e` and `fetch`. Waitcher is a commercial service with a free plan.
+
+Maintainer: [Sławomir Radzymiński](https://github.com/slawekradzyminski). Version `0.2.27`, published November 18, 2026, runs tests on `e2e 0.21.1` and `@e2e-dev/web 0.15.1`.
+
+[npm](https://www.npmjs.com/package/@waitcher/cli) · [Documentation and example](https://waitcher.dev/docs/repository-workflow)
+
 ## 関連する連携を探す
 
 e2e チームは、[ホスト型ブラウザとデバイスの連携](/integrations)、[GitHub レポーター](/github)、[組み込みレポーター](/reference/reporters)を保守しています。
