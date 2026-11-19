@@ -114,7 +114,7 @@ await expect(screen.getByLabel('Email')).toBeEditable();
 await expect(screen.getByLabel('Order id')).toBeEditable({ editable: false }); // read-only or disabled
 ```
 
-- 読み取り専用かどうかはエンジンが報告する状態で、Web では Playwright の `toBeEditable` と同じ方法で決まります。`input`、`textarea`、`select` は自身の `readonly` 属性だけを読みます（値は問いません）。`aria-readonly` を取るロール（`textbox`、`searchbox`、`combobox`、`listbox`、`checkbox`、`switch`、`slider`、`spinbutton`、`gridcell` など）の要素は `aria-readonly="true"` を読みます（大文字小文字は問いません）。編集ホストとその中の要素は読み取り専用になりません。
+- 読み取り専用かどうかはエンジンが報告する状態で、Web では Playwright の `toBeEditable` と同じ方法で決まります。`input`、`textarea`、`select` は自身の `readonly` 属性だけを読みます（値は問いません）。`aria-readonly` を取るロール（`textbox`、`searchbox`、`combobox`、`listbox`、`checkbox`、`switch`、`slider`、`spinbutton`、`gridcell` など）の要素は、編集ホストであっても `aria-readonly="true"` を読みます（大文字小文字は問いません）。それ以外の編集ホストとその中の要素は読み取り専用になりません。
 - 無効なノードも編集可能ではありません。無効の判定は [`toBeEnabled`](#tobeenabled-and-tobedisabled) と同じです。
 - ボタンなどそれ以外のノードには読み取り専用の状態がありません。否定してもマッチャーは失敗し、失敗メッセージにそのことが表示されます。
 - デバイスでは、agent-device がテキストを受け付けるかどうかを報告する場合（Android など）だけ、テキストフィールドに読み取り専用の状態があります。報告がないフィールドでは、推測で成功させずにマッチャーが失敗します。

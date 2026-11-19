@@ -347,6 +347,7 @@ line2  </textarea>
   <div role="textbox" aria-label="Upper case" aria-readonly="TRUE">7</div>
   <input type="radio" aria-label="Pick" readonly />
   <div role="textbox" aria-label="Attribute on div" readonly>8</div>
+  <div contenteditable="true" role="textbox" aria-label="Locked editor" aria-readonly="true">Fixed</div>
   <button>Save</button>
 </body>
 </html>`),

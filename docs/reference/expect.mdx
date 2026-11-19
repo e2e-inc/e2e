@@ -151,8 +151,9 @@ await expect(screen.getByLabel('Order id')).toBeEditable({ editable: false }); /
   `select` reads its `readonly` attribute alone, with any value. An element
   of a role that takes `aria-readonly` (`textbox`, `searchbox`, `combobox`,
   `listbox`, `checkbox`, `switch`, `slider`, `spinbutton`, `gridcell`, and
-  the rest) reads `aria-readonly="true"`, in any case. An editing host, and
-  any element inside one, is never read-only.
+  the rest) reads `aria-readonly="true"`, in any case, even when it is an
+  editing host. Any other editing host, and any element inside one, is never
+  read-only.
 - A disabled node is not editable either, as
   [`toBeEnabled`](#tobeenabled-and-tobedisabled) reads it.
 - Any other node, such as a button, has no read-only state. It fails the

@@ -138,6 +138,8 @@ test('toBeEditable reads readonly, aria-readonly, and the disabled state', async
   await expect(screen.getByTestId('editor-line')).toBeEditable();
   await expect(screen.getByLabel('Pick')).not.toBeEditable();
   await expect(screen.getByLabel('Attribute on div')).toBeEditable();
+  // An editing host with an aria-readonly role reads that attribute first.
+  await expect(screen.getByLabel('Locked editor')).not.toBeEditable();
 });
 
 test('toBeEditable fails on a read-only field', async ({ app, screen }) => {
