@@ -53,15 +53,16 @@ test('signs in', async ({ app, screen }) => {
 
 ## How it works
 
-- `app.open()` quits the app if it runs and launches it fresh. Every test ends
-  with the app quit.
+- `app.open()` launches the app fresh, after quitting the copy the engine
+  launched before. A copy you opened yourself is never read, driven, or quit.
+  Every test ends with the app quit.
 - An observation is one agent-desktop snapshot of the app's window. Roles map
   onto the ARIA names other engines use (`textbox`, `checkbox`, `combobox`,
   `button`); the developer id (`AXIdentifier`, `AutomationId`, a DOM `id` in
   Electron) is the node's test id, so `getByTestId` finds it.
 - Actions go through the accessibility API and leave your pointer and focus
-  alone. `desktop({ headed: true })` allows physical input: `hover`,
-  point-addressed taps, and typing into fields the API cannot set.
+  alone. `desktop({ headed: true })` allows physical input: `doubleTap`,
+  `hover`, point-addressed taps, and typing into fields the API cannot set.
 - A fill sends the text to agent-desktop on stdin, never in its arguments.
   A secure field reports no value, and screenshots paint over its bounds; when
   a secure field has no bounds, the screenshot is withheld.

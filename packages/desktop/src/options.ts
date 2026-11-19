@@ -32,13 +32,13 @@ export interface DesktopOptions {
    * Allows physical input: the real pointer and keyboard, which take focus
    * and move the cursor. Off by default: every action goes through the
    * accessibility API and leaves the user's pointer and focus alone. On, the
-   * engine also offers `hover` and point-addressed taps, and falls back to
+   * engine also offers `doubleTap`, `hover`, and point-addressed taps, and falls back to
    * typing a field the accessibility API cannot set (Electron text fields on
    * Linux).
    */
   readonly headed?: boolean | undefined;
   /**
-   * How long the UI must hold still after an action the agent took before it
+   * How long the engine waits after an action the agent took before the agent
    * observes again, in milliseconds; `false` skips the wait. A test's own
    * steps never wait: `expect` polls their outcome. Default 150.
    */

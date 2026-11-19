@@ -85,8 +85,10 @@ export default {
 
 ## Write a test
 
-Import `test` from `@e2e-dev/desktop`. `app.open()` quits the app if it
-runs, then launches it again. Every test ends with the app quit.
+Import `test` from `@e2e-dev/desktop`. `app.open()` launches the app. When
+the engine launched it before, it quits that copy first. A copy you opened
+yourself is left alone, and the engine never reads or drives it. Every test
+ends with the app quit.
 
 ```ts title="tests/sign-in.e2e.ts"
 import { test } from '@e2e-dev/desktop';
@@ -116,7 +118,7 @@ quits the app (`desktop.closeApp()`).
 | Area | On a desktop target |
 | --- | --- |
 | Input | Actions use the accessibility API. Your pointer and focus stay where they are |
-| Pointer | `hover` and point taps need `desktop({ headed: true })`, which moves the real pointer |
+| Pointer | `doubleTap`, `hover`, and point taps need `desktop({ headed: true })`, which moves the real pointer |
 | Select | `selectOption` takes an option's label, not an index |
 | Workers | One per target, because its workers would share one screen. Two desktop targets can still run at the same time: with `headed: true`, set `workers: 1` in the config |
 | State | `app.clearState()` is not supported |
@@ -134,7 +136,8 @@ A screenshot that cannot cover a password field is not saved.
 | `settle` | `number \| false` | `150` |
 
 `snapshot: 'interactive'` reads only controls, without static text. `settle`
-is how long the UI must stay still after an agent action, in milliseconds.
+is how long the engine waits after an agent action before the agent reads
+the screen, in milliseconds.
 
 ## Next
 

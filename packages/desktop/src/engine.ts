@@ -14,10 +14,10 @@ import { hostPlatform, resolveOptions, type DesktopOptions, type DesktopPlatform
 import { DesktopSurface } from './surface.ts';
 
 /** What `perform` honors through the accessibility API alone. */
-const ACTIONS: readonly LocatorActionKind[] = ['tap', 'doubleTap', 'secondaryTap', 'fill', 'clear', 'press', 'check', 'uncheck', 'focus', 'scrollIntoView', 'selectOption', 'swipe'];
+const ACTIONS: readonly LocatorActionKind[] = ['tap', 'secondaryTap', 'fill', 'clear', 'press', 'check', 'uncheck', 'focus', 'scrollIntoView', 'selectOption', 'swipe'];
 
-/** What physical input adds: the pointer over a control, and taps at a point. */
-const HEADED_ACTIONS: readonly LocatorActionKind[] = [...ACTIONS, 'hover'];
+/** What physical input adds: a double click and the pointer over a control (agent-desktop does both with the real pointer only), and taps at a point. */
+const HEADED_ACTIONS: readonly LocatorActionKind[] = [...ACTIONS, 'doubleTap', 'hover'];
 const HEADED_POINTER_ACTIONS: readonly PointerActionKind[] = ['tap', 'doubleTap', 'secondaryTap', 'hover'];
 
 /**
