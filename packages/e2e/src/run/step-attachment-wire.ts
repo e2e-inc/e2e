@@ -1,7 +1,6 @@
 /** Line-delimited JSON sent on a dedicated attachment connection to the step socket. */
 
 import { z } from 'zod';
-import type { McpToolResult } from '../mcp/tools.ts';
 
 export const ATTACH_PROTOCOL = 1;
 
@@ -66,6 +65,10 @@ export const AttachReply = z.discriminatedUnion('type', [
 /** Replies and end notices on an attachment socket. */
 export type AttachReply = z.infer<typeof AttachReply>;
 
+type AttachmentResult = Omit<Extract<AttachReply, { type: 'result' }>['result'], 'isError'> & {
+  readonly isError?: boolean;
+};
+
 /** The summary, catalog, and first screen for a new attachment. */
 export type HeldTestOpening = Extract<AttachReply, { type: 'opening' }>['opening'];
 
@@ -80,7 +83,7 @@ export type HeldTestAttachment = {
   detail(name: string): Promise<string>;
 
   /** Calls one tool and returns a redacted MCP result. */
-  call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<McpToolResult>;
+  call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<AttachmentResult>;
 
   /** Ends the attachment and leaves the test held. */
   detach(): Promise<void>;

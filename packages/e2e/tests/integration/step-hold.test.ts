@@ -6,11 +6,8 @@
 
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { defineTool } from '@e2e-dev/core/lib/agent/public';
 import type { EngineAttemptContext } from '@e2e-dev/core/lib/engine/index';
-import { SecretLedger } from '@e2e-dev/core/lib/internal/redact';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { z } from 'zod';
 import { StepGate } from '../../src/cli/step.ts';
 import { stepPromptText } from '../../src/report/list-steps.ts';
 import type { HeldTestAttachment } from '../../src/run/step-attachment-wire.ts';
@@ -22,12 +19,10 @@ import {
   createProject,
   resultByTitle,
   runExisting,
-  runExistingWithConfigFile,
   runProject,
   runProjectWithConfigFile,
   workerFakeConfigSource,
   type FixtureProject,
-  type RunOptions,
   type RunOutcome,
 } from '../helpers/run-project.ts';
 
@@ -625,86 +620,6 @@ test('opens a page after the pause', async ({ app, screen }) => {
   }
 });
 
-it('keeps attached project tool output out of the run and report', async () => {
-  const builtOutput = '../../dist/run/process-output.js';
-  const { withProcessOutput }: typeof import('../../src/run/process-output.ts') = await import(builtOutput);
-  const line = 'printed during an attached call';
-  const project = createProject({
-    'tests/paused.e2e.ts': `import { test } from 'e2e';
-test('prints and pauses', async ({ screen }) => {
-  process.stdout.write('printed by the test\\n');
-  await screen.pause();
-});
-`,
-    'e2e.config.ts': `import { defineTool } from 'e2e/agent';
-import { z } from 'zod';
-import { createFakeEngine, FAKE_APP } from '../../helpers/fake-engine.ts';
-
-export default {
-  targets: [{ name: 'fake', platform: 'fake', engine: createFakeEngine({}).engine, app: FAKE_APP }],
-  agents: { default: { tools: {
-    print_line: defineTool({
-      inputSchema: z.object({}),
-      execute: async () => {
-        process.stdout.write(${JSON.stringify(line + '\n')});
-        return 'printed';
-      },
-    }, { mutates: false }),
-  } } },
-};
-`,
-  });
-  const printTool = defineTool({
-    inputSchema: z.object({}),
-    execute: async () => {
-      process.stdout.write(`${line}\n`);
-      return 'printed';
-    },
-  }, { mutates: false });
-  let output = '';
-  const stdout = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-    output += String(chunk);
-    return true;
-  });
-
-  try {
-    for (const worker of ['in-process', 'child process']) {
-      output = '';
-      const outcome = await withProcessOutput(new SecretLedger(), (processOutput) => {
-        const runOptions: Partial<RunOptions> = {
-          quiet: false,
-          processOutput,
-          hold: {
-            steps: false,
-            ask: async (step, { attach }) => {
-              const attached = await attach(step.attachId);
-              const reply = await attached.call('print_line', {});
-              expect(reply).toEqual({ content: [{ type: 'text', text: 'printed' }] });
-            },
-          },
-        };
-
-        if (worker === 'child process') {
-          return runExistingWithConfigFile(project, { runOptions });
-        }
-
-        return runExisting(project, {
-          config: { agents: { default: { tools: { print_line: printTool } } } },
-          runOptions,
-        });
-      });
-
-      expect(outcome.exitCode, worker).toBe(0);
-      expect(output, worker).toContain('printed by the test');
-      expect(output, worker).not.toContain(line);
-      expect(readFileSync(path.join(project.dir, '.e2e/report.json'), 'utf8'), worker).not.toContain(line);
-    }
-  } finally {
-    stdout.mockRestore();
-    project.cleanup();
-  }
-});
-
 describe('holding steps and the run limits', () => {
   it('stops the time limit while a step is held', async () => {
     const { beforeStep } = holder(3_000);
@@ -807,12 +722,49 @@ describe('hold.ask ending a hold', () => {
   }, 60_000);
 
   it('refuses the json reporter, whose stdout the prompt would break', async () => {
-    const { outcome, project } = await runProjectWithConfigFile(
-      { 'tests/any.e2e.ts': `import { test } from 'e2e';\ntest('never runs', async () => {});\n` },
-      { configSource: workerFakeConfigSource(1, `\n  reporters: ['json'],`), runOptions: { hold: { ask: () => Promise.resolve(), steps: true } } },
-    );
-    project.cleanup();
-    expect(outcome.exitCode).toBe(2);
-    expect(outcome.report.run.errors[0]).toMatchObject({ code: 'INVALID_CONFIG', message: expect.stringContaining('--step') });
+    // Not quiet: a quiet run runs no reporter that claims stdout, so nothing would break.
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      const { outcome, project } = await runProjectWithConfigFile(
+        { 'tests/any.e2e.ts': `import { test } from 'e2e';\ntest('never runs', async () => {});\n` },
+        { configSource: workerFakeConfigSource(1, `\n  reporters: ['json'],`), runOptions: { hold: { ask: () => Promise.resolve(), steps: true }, quiet: false } },
+      );
+      project.cleanup();
+      expect(outcome.exitCode).toBe(2);
+      expect(outcome.report.run.errors[0]).toMatchObject({ code: 'INVALID_CONFIG', message: expect.stringContaining('--step cannot run with the reporter "json"') });
+    } finally {
+      stdout.mockRestore();
+    }
+  }, 60_000);
+  it('prints the prompt itself while the step waits once the reporter showing it rejects', async () => {
+    const stderr: string[] = [];
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => (stderr.push(String(chunk)), true));
+    const reporter = `{ name: 'broken-prompt', printsTo: 'stdout', async onStepPrompt() { throw new Error('PROMPT_BOOM'); } }`;
+    let shownWhileHeld = false;
+    try {
+      const { outcome, project } = await runProjectWithConfigFile(
+        { 'tests/held.e2e.ts': `import { test } from 'e2e';\ntest('waits', async ({ app }) => { await app.open('/held'); });\n` },
+        {
+          configSource: workerFakeConfigSource(1, `\n  reporters: [${reporter}],`),
+          runOptions: {
+            hold: {
+              steps: true,
+              ask: async (step, { show }) => {
+                show({ steps: [{ step, number: 1 }], help: false, holdSteps: true });
+                await sleep(200);
+                shownWhileHeld = stderr.some((text) => text.startsWith('paused (p1) at step 1 of waits'));
+                show(undefined);
+              },
+            },
+          },
+        },
+      );
+      project.cleanup();
+      expect(outcome.exitCode).toBe(0);
+    } finally {
+      write.mockRestore();
+    }
+    expect(stderr.filter((text) => text.includes('threw in onStepPrompt: PROMPT_BOOM'))).toHaveLength(1);
+    expect(shownWhileHeld).toBe(true);
   }, 60_000);
 });

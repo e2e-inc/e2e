@@ -9,9 +9,14 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
-import { createProject, type FixtureProject } from '../helpers/run-project.ts';
+import { defineTool } from '@e2e-dev/core/lib/agent/public';
+import { SecretLedger } from '@e2e-dev/core/lib/internal/redact';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
+import { createProject, runExisting, runExistingWithConfigFile, type FixtureProject, type RunOptions } from '../helpers/run-project.ts';
 
 const CLI = fileURLToPath(new URL('../../dist/cli/bin.js', import.meta.url));
 
@@ -103,6 +108,60 @@ describe('e2e run redacts what user code prints outside a test', () => {
     }
   });
 
+  it('hands output to every reporter that takes it, beside list, with where it came from', () => {
+    const mirrored = CONFIG.replace("import { defineEngine }", "import { appendFileSync } from 'node:fs';\nimport { defineEngine }").replace(
+      "reporters: ['list', {",
+      `reporters: ['list', {
+    name: 'mirror',
+    onOutput(output) {
+      appendFileSync('mirror.jsonl', JSON.stringify(output) + '\\n');
+    },
+  }, {`,
+    );
+    const cli = runCli({ 'e2e.config.ts': mirrored, 'tests/print.e2e.ts': TEST });
+    expect(cli.status, cli.stdout + cli.stderr).toBe(0);
+    const project = projects.at(-1)!;
+    const mirror = readFileSync(path.join(project.dir, 'mirror.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(mirror).toContainEqual({ stream: 'stdout', text: 'test file top level: <secret:apiToken>\n' });
+    expect(mirror).toContainEqual(expect.objectContaining({ stream: 'stdout', text: 'test body: <secret:apiToken>\n', target: 'headless', pair: expect.objectContaining({ repeat: 0 }) }));
+    expect(JSON.stringify(mirror)).not.toContain(TOKEN);
+    // list still shows both.
+    expect(cli.stdout.split('\n')).toEqual(expect.arrayContaining(['test file top level: <secret:apiToken>', 'test body: <secret:apiToken>']));
+  });
+
+  it('still prints output itself when the reporter printing to stdout does not show it, whoever else records it', () => {
+    const mirrored = CONFIG.replace("import { defineEngine }", "import { appendFileSync } from 'node:fs';\nimport { defineEngine }").replace(
+      "reporters: ['list', {",
+      `reporters: ['list', {
+    name: 'mirror',
+    onOutput(output) {
+      appendFileSync('mirror.jsonl', JSON.stringify(output) + '\\n');
+      setTimeout(() => process.stderr.write('echo\\n'), 0);
+    },
+  }, {`,
+    );
+    const cli = runCli({ 'e2e.config.ts': mirrored, 'tests/print.e2e.ts': TEST }, ['--reporter', 'json']);
+    expect(cli.status, cli.stdout + cli.stderr).toBe(0);
+    expect(JSON.parse(cli.stdout)).toMatchObject({ schemaVersion: 'report-1' });
+    expect(cli.stderr.split('\n')).toEqual(expect.arrayContaining(['test file top level: <secret:apiToken>', 'reporter onEvent: <secret:apiToken>', 'test body: <secret:apiToken>']));
+    // Each test write reaches the mirror once, naming its test.
+    const project = projects.at(-1)!;
+    const mirror = readFileSync(path.join(project.dir, 'mirror.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(mirror.filter((output) => output.text === 'test body: <secret:apiToken>\n')).toEqual([expect.objectContaining({ target: 'headless' })]);
+    // What it prints later, from a timer it started there, never comes back to it.
+    expect(mirror.map((output) => output.text)).not.toContain('echo\n');
+    expect(cli.stderr).toContain('echo\n');
+  });
+
+  it('prints output itself once the reporter showing it throws', () => {
+    const broken = CONFIG.replace("reporters: ['list', {", `reporters: [{ name: 'broken-view', printsTo: 'stdout', onOutput() { throw new Error('VIEW_BOOM'); } }, {`);
+    const cli = runCli({ 'e2e.config.ts': broken, 'tests/print.e2e.ts': TEST }, []);
+    expect(cli.status, cli.stdout + cli.stderr).toBe(0);
+    expect(cli.stderr.split('\n')).toContain('e2e: reporter "broken-view" threw in onOutput: VIEW_BOOM; ignoring it for the rest of the run');
+    expect(cli.stdout.split('\n')).toEqual(expect.arrayContaining(['test file top level: <secret:apiToken>', 'test body: <secret:apiToken>']));
+    expect(`${cli.stdout}\n${cli.stderr}`).not.toContain(TOKEN);
+  });
+
   it('prints a test body on its own stream without the list reporter', () => {
     const cli = runCli({ 'e2e.config.ts': CONFIG, 'tests/print.e2e.ts': TEST }, ['--reporter', 'junit']);
     expect(cli.status, cli.stdout + cli.stderr).toBe(0);
@@ -166,4 +225,84 @@ test('prints encoded', () => {
     expect(output).toContain('withheld');
     expect(output).not.toContain(TOKEN);
   });
+});
+
+it('keeps attached project tool output out of the run and report', async () => {
+  const builtOutput = '../../dist/run/process-output.js';
+  const { withProcessOutput }: typeof import('../../src/run/process-output.ts') = await import(builtOutput);
+  const line = 'printed during an attached call';
+  const project = createProject({
+    'tests/paused.e2e.ts': `import { test } from 'e2e';
+test('prints and pauses', async ({ screen }) => {
+  process.stdout.write('printed by the test\\n');
+  await screen.pause();
+});
+`,
+    'e2e.config.ts': `import { defineTool } from 'e2e/agent';
+import { z } from 'zod';
+import { createFakeEngine, FAKE_APP } from '../../helpers/fake-engine.ts';
+
+export default {
+  targets: [{ name: 'fake', platform: 'fake', engine: createFakeEngine({}).engine, app: FAKE_APP }],
+  agents: { default: { tools: {
+    print_line: defineTool({
+      inputSchema: z.object({}),
+      execute: async () => {
+        process.stdout.write(${JSON.stringify(line + '\n')});
+        return 'printed';
+      },
+    }, { mutates: false }),
+  } } },
+};
+`,
+  });
+  const printTool = defineTool({
+    inputSchema: z.object({}),
+    execute: async () => {
+      process.stdout.write(`${line}\n`);
+      return 'printed';
+    },
+  }, { mutates: false });
+  let output = '';
+  const stdout = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+    output += String(chunk);
+    return true;
+  });
+
+  try {
+    for (const worker of ['in-process', 'child process']) {
+      output = '';
+      const outcome = await withProcessOutput(new SecretLedger(), (processOutput) => {
+        const runOptions: Partial<RunOptions> = {
+          quiet: false,
+          processOutput,
+          hold: {
+            steps: false,
+            ask: async (step, { attach }) => {
+              const attached = await attach(step.attachId);
+              const reply = await attached.call('print_line', {});
+              expect(reply).toEqual({ content: [{ type: 'text', text: 'printed' }] });
+            },
+          },
+        };
+
+        if (worker === 'child process') {
+          return runExistingWithConfigFile(project, { runOptions });
+        }
+
+        return runExisting(project, {
+          config: { agents: { default: { tools: { print_line: printTool } } } },
+          runOptions,
+        });
+      });
+
+      expect(outcome.exitCode, worker).toBe(0);
+      expect(output, worker).toContain('printed by the test');
+      expect(output, worker).not.toContain(line);
+      expect(readFileSync(path.join(project.dir, '.e2e/report.json'), 'utf8'), worker).not.toContain(line);
+    }
+  } finally {
+    stdout.mockRestore();
+    project.cleanup();
+  }
 });
