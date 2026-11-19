@@ -649,7 +649,7 @@ describe('lifecycle', () => {
   it('drops a handle when the session knows the app by display name and uninstallApp gets its id', async () => {
     const h = harness();
     await openAttempt(h);
-    h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, appName: 'Example' }));
+    h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, appBundleId: undefined, appName: 'Example' }));
     h.fake.respond('apps.uninstall', () => ({ app: 'com.example.app', appId: 'com.example.app', wasInstalled: true }));
     const about = await observed(h, 'About');
     await h.surface.uninstallApp('com.example.app', new AbortController().signal);
@@ -1322,6 +1322,17 @@ describe('a screen agent-device cannot read yet', () => {
     h.fake.respond('capture.snapshot', () => SETTINGS_SNAPSHOT);
     await expect(h.engine.locate!(ABOUT, operation())).resolves.toHaveLength(1);
     h.fake.respond('capture.snapshot', notRunning);
+    await expect(h.engine.locate!(ABOUT, operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
+  });
+
+  it('fails a locate on an app not running after uninstallApp right after a launch', async () => {
+    const h = harness();
+    await openAttempt(h);
+    h.fake.respond('apps.uninstall', () => ({ app: 'com.example.app', appId: 'com.example.app', wasInstalled: true }));
+    await h.surface.uninstallApp('com.example.app', new AbortController().signal);
+    h.fake.respond('capture.snapshot', () => {
+      throw new AppError('COMMAND_FAILED', "app 'com.example.app' is not running", { runnerErrorCode: 'APP_NOT_RUNNING' });
+    });
     await expect(h.engine.locate!(ABOUT, operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
   });
 

@@ -1066,8 +1066,8 @@ export class AgentDeviceSurface {
     const result = await this.command(`uninstall ${target}`, (client) => client.apps.uninstall({ ...this.selection(), app: target }), signal);
     // agent-device resolves display names too: compare the id it removed, not only the string the caller passed.
     const removed = typeof result['appId'] === 'string' ? result['appId'] : target;
-    if (this.appIdentity === undefined || target === this.appIdentity || removed === this.appIdentity) this.appIdentity = undefined;
-    // The identity may be a display name no id comparison matches, so the screen always goes: a cheap re-snapshot.
+    // The identity may be a display name no id comparison matches, so it always goes: the next snapshot fills it again.
+    this.appIdentity = undefined;
     this.launching = false;
     this.screenReplaced();
     if (target === this.installedApp || removed === this.installedApp) this.installedApp = undefined;
