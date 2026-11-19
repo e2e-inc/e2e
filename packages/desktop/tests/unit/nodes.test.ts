@@ -50,17 +50,17 @@ describe('projectSnapshot', () => {
     expect(password.value).toBeUndefined();
   });
 
-  it("drops Chromium's anonymous wrappers and keeps the controls", () => {
-    const { root } = project('macos/electron-form');
+  it('drops anonymous wrappers and keeps the controls', () => {
+    const { root } = project('macos/sign-in-form');
     const nodes = all(root);
     expect(nodes.filter((node) => node.role === 'group' && node.name === undefined)).toEqual([]);
-    expect(byTestId(root, 'username')).toMatchObject({ role: 'textbox', value: 'alice' });
-    expect(byTestId(root, 'remember')).toMatchObject({ role: 'checkbox', states: { checked: true } });
+    expect(nodes.find((node) => node.role === 'button' && node.name === 'Full Screen')?.children).toBeUndefined();
+    expect(byTestId(root, 'username')).toMatchObject({ role: 'textbox', name: 'Username' });
     expect(byTestId(root, 'password')).toMatchObject({ inputPurpose: 'password', states: { secure: true } });
   });
 
   it('answers role and test-id queries through the shared resolver', () => {
-    const { root } = project('macos/electron-form');
+    const { root } = project('macos/sign-in-form');
     const [field] = resolveExpression(
       { kind: 'query', query: { kind: 'role', value: { kind: 'string', value: 'textbox', exact: true }, name: { kind: 'string', value: 'Username', exact: true } } },
       [root],
@@ -130,8 +130,11 @@ describe('projectSnapshot', () => {
   it('keeps ids for siblings that share a developer id but not a name', () => {
     const mint = minter();
     const ids = (screen: ReturnType<typeof projectSnapshot>) => all(screen.root).filter((node) => node.role === 'menuitem').map((node) => node.ref.id);
-    const first = ids(projectSnapshot(load('macos/electron-menu'), mint));
-    const second = ids(projectSnapshot(load('macos/electron-menu'), mint));
+    const item = (name: string, index: number) => ({ role: 'menuitem', name, native_id: { kind: 'ax_identifier', value: 'menuItemSelected:' }, ref_id: `@m:e${index}`, available_actions: ['Click'] });
+    const menu: RawSnapshot = { snapshot_id: 'm', tree: { role: 'menu', children: [item('Free', 1), item('Pro', 2), item('Team', 3)] } };
+    const first = ids(projectSnapshot(menu, mint));
+    const second = ids(projectSnapshot(menu, mint));
+    expect(new Set(first).size).toBe(3);
     expect(second).toEqual(first);
   });
 

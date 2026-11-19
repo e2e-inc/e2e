@@ -132,8 +132,8 @@ suites that consume the built packages the way a user would.
   confirmed, and `agentDevicePlugin()`, which checks a provider plugin's
   version and registers it in the daemon's home.
 - `packages/desktop` - the published `@e2e-dev/desktop` package: the
-  desktop engine on agent-desktop (native and Electron apps through the OS
-  accessibility tree), built with the same public `defineEngine`,
+  desktop engine on agent-desktop (native apps through the OS accessibility
+  tree), built with the same public `defineEngine`,
   contributing the `desktop` fixture. It imports from `@e2e-dev/core/engine`
   only, and a target names it as `engine: desktop()`. agent-desktop is not an
   npm dependency (its `postinstall` would fail `check:install-scripts`): the

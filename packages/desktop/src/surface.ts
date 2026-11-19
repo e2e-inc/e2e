@@ -45,7 +45,7 @@ import { encodePng, windowImage } from './png.ts';
 
 const execFileAsync = promisify(execFile);
 
-/** How deep a snapshot reads. Chromium's anonymous wrappers cost agent-desktop no depth, so this is real nesting. */
+/** How deep a snapshot reads. */
 const MAX_DEPTH = 24;
 
 /** The least budget agent-desktop gets for its own wait, however little the operation has left. */
@@ -748,7 +748,7 @@ export class DesktopSurface {
         await this.refCommand('hover', binding, operation, [], undefined, true);
         break;
       case 'fill':
-        await this.fill(binding, action.value, operation);
+        await this.refCommand('set-value', binding, operation, [], action.value);
         break;
       case 'press': {
         // A key agent-desktop cannot press is refused before focus moves.
@@ -803,81 +803,24 @@ export class DesktopSurface {
   }
 
   /**
-   * Sets a field's value through the accessibility API, the text on stdin.
-   * With physical input allowed, a field the API cannot set (an Electron
-   * text field on Linux) is cleared and typed into instead.
-   */
-  private async fill(binding: NodeBinding, value: string, operation: OperationContext): Promise<void> {
-    try {
-      await this.tryRef('set-value', binding, operation, [], value);
-    } catch (cause) {
-      const refused = cause instanceof AgentDesktopFailure && cause.notDelivered && (cause.code === 'ACTION_NOT_SUPPORTED' || cause.code === 'POLICY_DENIED');
-      if (!refused || !this.options.headed) throw translate(cause, 'fill', true);
-      await this.refCommand('clear', binding, operation);
-      await afterChange('fill', () => this.tryRef('type', binding, operation, [], value, true));
-    }
-  }
-
-  /**
-   * Chooses an option of a list or dropdown. agent-desktop's `select` works
-   * for most toolkits, but not all, so a ladder of ways is tried: `select`;
-   * expand, then `select` (Electron on Windows lists no options until the
-   * list is open); set the value (a WinForms combobox takes no `select`);
-   * open the menu and click the item (Electron on macOS). The next way is
-   * tried only when agent-desktop says the first command of this one sent
-   * nothing. Once a command reached the app, a later failure is
-   * `ACTION_MAY_HAVE_COMMITTED`, and a stale ref is `NODE_STALE`, so the
-   * harness locates the list again.
+   * Chooses an option of a list or dropdown with agent-desktop's `select`.
+   * A list that takes no `select` (a WinForms combobox) has its value set
+   * instead, only when `select` sent nothing and did not report the option
+   * missing: setting the value would type a missing option in as free text.
+   * A stale ref is `NODE_STALE`, so the harness locates the list again.
    */
   private async select(binding: NodeBinding, label: string, operation: OperationContext): Promise<void> {
-    const attempts: string[] = [];
-    const option = ['--', label];
-    // `select` found no such option: setting the value would type the label in as free text, so only ways that open the list are tried.
-    let missing = false;
-    const rung = async (name: string, steps: readonly (readonly [command: string, run: () => Promise<unknown>])[]): Promise<boolean> => {
-      let sent = false;
-      let command = '';
-      try {
-        for (const [step, run] of steps) {
-          command = step;
-          await run();
-          sent = true;
-        }
-        return true;
-      } catch (cause) {
-        const what = `select "${label}" (${name})`;
-        if (cause instanceof NoSuchOption) throw notActionable(`the list has no option "${label}"`);
-        if (sent) {
-          throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `${what}: ${(cause as Error).message} (an earlier command of this way reached the app)`, { retryable: false, cause });
-        }
-        // `select` answers ELEMENT_NOT_FOUND for an option it cannot find, which the next way may reach; from any other command it means the list itself is gone.
-        const gone = cause instanceof AgentDesktopFailure && (STALE_REF_CODES.has(cause.code) || (cause.code === 'ELEMENT_NOT_FOUND' && command !== 'select'));
-        if (!(cause instanceof AgentDesktopFailure && cause.notDelivered) || gone) throw translate(cause, what, true);
-        if (command === 'select' && cause.code === 'ELEMENT_NOT_FOUND') missing = true;
-        attempts.push(`${name}: ${cause.message}`);
-        return false;
-      }
-    };
-    if (await rung('select', [['select', () => this.tryRef('select', binding, operation, option)]])) return;
-    if (binding.actions.includes('Expand') && (await rung('expand, then select', [['expand', () => this.tryRef('expand', binding, operation)], ['select', () => this.tryRef('select', binding, operation, option)]]))) return;
-    if (!missing && binding.actions.includes('SetValue') && (await rung('set-value', [['set-value', () => this.tryRef('set-value', binding, operation, [], label)]]))) return;
-    if (await rung('menu', [['click', () => this.tryRef('click', binding, operation)], ['menu item', () => this.clickMenuItem(label, operation)]])) return;
-    throw notActionable(`could not select "${label}": ${attempts.join('; ')}`);
-  }
-
-  /** Clicks the item named `label` in the open menu; with no such item, closes the menu and throws `NoSuchOption`. */
-  private async clickMenuItem(label: string, operation: OperationContext): Promise<void> {
-    const menu = await this.scoped<RawSnapshot>((scope) => ['snapshot', ...scope, '--surface', 'menu', '-i', '--timeout-ms', String(this.toolBudget(operation))], operation, { label: 'snapshot menu', input: false });
-    const items = projectSnapshot(menu, () => this.idFor(undefined));
-    // A menu read in part proves no option missing.
-    if (items.truncated) throw new EngineError('ENGINE_FAILURE', `the open menu could not be read whole, so whether it has "${label}" is unknown`, { retryable: false });
-    const item = [...items.bindings.values()].find((candidate) => candidate.ref !== undefined && candidate.name === label);
-    if (item === undefined) {
-      // A menu left open is a changed app: a failure to close it is reported, not the missing option.
-      await this.scoped((scope) => ['press', 'escape', ...scope], operation, { label: 'close menu', input: true });
-      throw new NoSuchOption();
+    const what = `select "${label}"`;
+    try {
+      await this.tryRef('select', binding, operation, ['--', label]);
+      return;
+    } catch (cause) {
+      // `select` answers ELEMENT_NOT_FOUND for an option it cannot find; a list that is gone is a stale ref.
+      if (cause instanceof AgentDesktopFailure && cause.notDelivered && cause.code === 'ELEMENT_NOT_FOUND') throw notActionable(`the list has no option "${label}"`);
+      const settable = cause instanceof AgentDesktopFailure && cause.notDelivered && !STALE_REF_CODES.has(cause.code) && binding.actions.includes('SetValue');
+      if (!settable) throw translate(cause, what, true);
     }
-    await this.tryRef('click', item, operation);
+    await this.refCommand('set-value', binding, operation, [], label);
   }
 
   private async scroll(binding: NodeBinding, direction: string, momentum: string | undefined, operation: OperationContext): Promise<void> {
@@ -1048,9 +991,6 @@ async function afterChange(label: string, run: () => Promise<unknown>): Promise<
     throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `${label}: ${(cause as Error).message} (an earlier command of this step changed the app)`, { retryable: false, cause });
   }
 }
-
-/** Thrown when an open menu has no item with the label a select names; nothing was chosen, and the menu was closed. */
-class NoSuchOption extends Error {}
 
 /** Whether two rects are the same; two missing rects are not. */
 function sameRect(a: Rect | undefined, b: Rect | undefined): boolean {

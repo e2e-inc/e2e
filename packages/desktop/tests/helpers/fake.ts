@@ -13,7 +13,7 @@ export interface FakeCall {
   readonly home?: string;
 }
 
-/** Answers by command (`snapshot`, `snapshot:menu`, `select`): each call takes the next, the last repeats. */
+/** Answers by command (`snapshot`, `select`): each call takes the next, the last repeats. */
 export type Scenario = Record<string, readonly unknown[]>;
 
 /** The directories scenarios were written to, removed by `cleanupFakes`. */

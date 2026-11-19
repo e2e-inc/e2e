@@ -190,17 +190,20 @@ describe('DesktopSurface', () => {
     expect(actions(fake.calls()).slice(-2)).toEqual(['check', 'uncheck']);
   });
 
-  it('climbs the select ladder while each way sends nothing, and ends on the menu item', async () => {
-    const { surface, fake, byTestId } = await launched({
-      select: [failure('TIMEOUT', 'not_delivered')],
-      expand: [failure('ACTION_NOT_SUPPORTED', 'not_delivered')],
-      'snapshot:menu': [snapshotAnswer('macos/electron-menu')],
-    });
-    await surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Team' }, operation());
-    expect(actions(fake.calls())).toEqual(['snapshot', 'snapshot', 'select', 'expand', 'click', 'snapshot:menu', 'click']);
+  it('sets the value of a list that takes no select, the label on stdin', async () => {
+    const editable = { ok: true, data: { snapshot_id: 's5', window: { id: 'w-mine' }, tree: { role: 'window', name: 'Form', children: [{ role: 'combobox', name: 'Plan', ref_id: '@s5:e1', available_actions: ['Click', 'SetValue', 'SetFocus'] }] } } };
+    const { surface, fake } = await launched({ snapshot: [editable], select: [failure('ACTION_NOT_SUPPORTED', 'not_delivered')] }, { observe: false });
+    const observed = await surface.observe(operation(), undefined);
+    await surface.perform(observed.root.children![0]!.ref, { kind: 'selectOption', value: 'Team' }, operation());
+    expect(actions(fake.calls())).toEqual(['snapshot', 'snapshot', 'select', 'set-value']);
     expect(fake.calls().find((call) => call.key === 'select')?.args.slice(-2)).toEqual(['--', 'Team']);
-    expect(fake.calls().find((call) => call.key === 'snapshot:menu')?.args).toEqual(expect.arrayContaining(['--window-id', 'w-mine']));
-    expect(fake.calls().at(-1)?.args[1]).toBe('@s3bfjcqphd2uik:e3');
+    expect(fake.calls().at(-1)?.stdin).toBe('Team');
+  });
+
+  it('reports a list that takes neither select nor a value as unsupported', async () => {
+    const { surface, fake, byTestId } = await launched({ select: [failure('ACTION_NOT_SUPPORTED', 'not_delivered')] });
+    await expect(surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Team' }, operation())).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+    expect(actions(fake.calls())).toEqual(['snapshot', 'snapshot', 'select']);
   });
 
   it('passes a label that starts with a dash after --, so it is never read as a flag', async () => {
@@ -209,22 +212,16 @@ describe('DesktopSurface', () => {
     expect(fake.calls().find((call) => call.key === 'select')?.args.slice(-2)).toEqual(['--', '- None -']);
   });
 
-  it('stops the ladder at a way that may have landed', async () => {
+  it('sets no value after a select that may have landed', async () => {
     const { surface, fake, byTestId } = await launched({ select: [failure('ACTION_FAILED', 'delivered_unverified')] });
     await expect(surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Team' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
-    expect(fake.calls().some((call) => call.key === 'expand')).toBe(false);
+    expect(fake.calls().some((call) => call.key === 'set-value')).toBe(false);
   });
 
-  it('stops the ladder once an expand reached the app, even when the select after it sent nothing', async () => {
-    const { surface, fake, byTestId } = await launched({ select: [failure('TIMEOUT', 'not_delivered')] });
-    await expect(surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Team' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
-    expect(actions(fake.calls())).toEqual(['snapshot', 'snapshot', 'select', 'expand', 'select']);
-  });
-
-  it('reports a stale ref in the select ladder as stale, so the list is located again', async () => {
+  it('reports a stale ref in a select as stale, so the list is located again', async () => {
     const { surface, fake, byTestId } = await launched({ select: [failure('STALE_REF', 'not_delivered')] });
     await expect(surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Team' }, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
-    expect(fake.calls().some((call) => call.key === 'expand' || call.key === 'click')).toBe(false);
+    expect(fake.calls().some((call) => call.key === 'set-value')).toBe(false);
   });
 
   it('keeps a control id across observations of a window and acts on its newest ref', async () => {
@@ -466,10 +463,10 @@ describe('DesktopSurface', () => {
     expect(fake.calls().some((call) => call.key === 'mouse-click')).toBe(false);
   });
 
-  it('goes on when select finds no such option, and reports a list that is gone as stale', async () => {
-    const { surface, fake, byTestId } = await launched({ select: [failure('ELEMENT_NOT_FOUND', 'not_delivered')], expand: [failure('ELEMENT_NOT_FOUND', 'not_delivered')] });
-    await expect(surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Team' }, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
-    expect(actions(fake.calls())).toEqual(['snapshot', 'snapshot', 'select', 'expand']);
+  it('reports an option select cannot find as missing', async () => {
+    const { surface, fake, byTestId } = await launched({ select: [failure('ELEMENT_NOT_FOUND', 'not_delivered')] });
+    await expect(surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Team' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/no option "Team"/) });
+    expect(actions(fake.calls())).toEqual(['snapshot', 'snapshot', 'select']);
   });
 
   it('scrolls the window as it is now on a root swipe, not the container of an older observation', async () => {
@@ -523,19 +520,9 @@ describe('DesktopSurface', () => {
     expect(fake.calls().some((call) => call.key === 'press')).toBe(false);
   });
 
-  it('reports a menu it could not close after finding no such option as possibly changed', async () => {
-    const { surface, byTestId } = await launched({
-      select: [failure('TIMEOUT', 'not_delivered')],
-      expand: [failure('ACTION_NOT_SUPPORTED', 'not_delivered')],
-      'snapshot:menu': [snapshotAnswer('macos/electron-menu')],
-      press: [failure('ACTION_FAILED', 'unknown')],
-    });
-    await expect(surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Enterprise' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
-  });
-
   it('never types a missing option into an editable list as free text', async () => {
     const editable = { ok: true, data: { snapshot_id: 's5', window: { id: 'w-mine' }, tree: { role: 'window', name: 'Form', children: [{ role: 'combobox', name: 'Plan', ref_id: '@s5:e1', available_actions: ['Click', 'SetValue', 'SetFocus'] }] } } };
-    const { surface, fake } = await launched({ snapshot: [editable], select: [failure('ELEMENT_NOT_FOUND', 'not_delivered')], 'snapshot:menu': [snapshotAnswer('macos/electron-menu')] }, { observe: false });
+    const { surface, fake } = await launched({ snapshot: [editable], select: [failure('ELEMENT_NOT_FOUND', 'not_delivered')] }, { observe: false });
     const observed = await surface.observe(operation(), undefined);
     await expect(surface.perform(observed.root.children![0]!.ref, { kind: 'selectOption', value: 'Enterprise' }, operation())).rejects.toThrow(/no option "Enterprise"/);
     expect(fake.calls().some((call) => call.key === 'set-value')).toBe(false);
@@ -646,13 +633,6 @@ describe('DesktopSurface', () => {
     const reads = fake.calls().filter((call) => call.key === 'snapshot');
     expect(reads.at(-1)?.args).not.toContain('-i');
     expect(reads.some((call) => call.args.includes('-i'))).toBe(true);
-  });
-
-  it('never calls an option missing from a menu read only in part', async () => {
-    const partial = { ok: true, data: { ...(snapshotAnswer('macos/electron-menu') as { data: object }).data, complete: false } };
-    const { surface, fake, byTestId } = await launched({ select: [failure('TIMEOUT', 'not_delivered')], expand: [failure('ACTION_NOT_SUPPORTED', 'not_delivered')], 'snapshot:menu': [partial] });
-    await expect(surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Enterprise' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
-    expect(fake.calls().some((call) => call.key === 'press')).toBe(false);
   });
 
   it('quits the process it launched at the end of the attempt, and only that one', async () => {

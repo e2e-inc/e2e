@@ -1,9 +1,9 @@
 # @e2e-dev/desktop
 
 The desktop engine for [`e2e`](https://www.npmjs.com/package/e2e), built on
-[agent-desktop](https://github.com/vercel-labs/agent-desktop): native and
-Electron apps, read and driven through the OS accessibility tree (AX on
-macOS, UI Automation on Windows, AT-SPI on Linux), through the same
+[agent-desktop](https://github.com/vercel-labs/agent-desktop): native apps,
+read and driven through the OS accessibility tree (AX on macOS, UI
+Automation on Windows, AT-SPI on Linux), through the same
 `@e2e-dev/core/engine` contract the browser and mobile engines implement. A
 test written against `screen`, `expect`, `app`, and `agent` runs on a desktop
 target unchanged.
@@ -58,12 +58,11 @@ test('signs in', async ({ app, screen }) => {
   Every test ends with the app quit.
 - An observation is one agent-desktop snapshot of the app's window. Roles map
   onto the ARIA names other engines use (`textbox`, `checkbox`, `combobox`,
-  `button`); the developer id (`AXIdentifier`, `AutomationId`, a DOM `id` in
-  Electron) is the node's test id, so `getByTestId` finds it.
+  `button`); the developer id (`AXIdentifier`, `AutomationId`) is the node's test
+  id, so `getByTestId` finds it.
 - `app.open()` brings the app forward. Actions after it go through the
   accessibility API and leave your pointer and focus alone. `desktop({ headed: true })` allows physical input: `doubleTap`,
-  `hover`, point-addressed taps, typing into whatever has focus, and typing
-  into fields the API cannot set.
+  `hover`, point-addressed taps, and typing into whatever has focus.
 - A fill sends the text to agent-desktop on stdin, never in its arguments.
   A secure field reports no value, and screenshots paint over its bounds; when
   a secure field has no bounds, the screenshot is withheld.

@@ -207,7 +207,7 @@ function identityOf(node: RawNode, named = false): string {
  * contract asks. A node with a look-alike sibling has no identity
  * (`undefined`) and gets a new id, which no later snapshot gives out again.
  * The window is always `root`.
- * Wrappers nothing reads (Chromium's chains of anonymous groups) are dropped
+ * Wrappers nothing reads (anonymous groups) are dropped
  * and their children lifted, so the model reads the controls, not the
  * scaffolding.
  */

@@ -1,10 +1,10 @@
 ---
 title: Desktop
-description: Test a native or Electron desktop app on macOS through its accessibility tree.
+description: Test a native desktop app on macOS through its accessibility tree.
 ---
 
-`@e2e-dev/desktop` runs tests on desktop apps: native apps and Electron
-apps. It reads and drives the app through the OS accessibility tree with
+`@e2e-dev/desktop` runs tests on native desktop apps. It reads and drives
+the app through the OS accessibility tree with
 [agent-desktop](https://github.com/vercel-labs/agent-desktop). Tests use the
 same `agent`, `screen`, and `expect` APIs as browser tests.
 
@@ -108,8 +108,7 @@ test('signs in', async ({ app, screen }) => {
 
 Roles use the names the web uses: `textbox`, `checkbox`, `combobox`,
 `button`. Static text has the role `text`, so find it with `getByText`.
-`getByTestId` finds the developer id: `AXIdentifier` on macOS, and a DOM
-`id` in an Electron app.
+`getByTestId` finds the developer id, which is `AXIdentifier` on macOS.
 
 The `desktop` fixture lists the app's windows (`desktop.windows()`) and
 quits the app (`desktop.closeApp()`).

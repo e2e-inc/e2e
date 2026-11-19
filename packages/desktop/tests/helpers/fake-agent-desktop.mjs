@@ -6,8 +6,7 @@ import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
-const surface = args.includes('--surface') ? `:${args[args.indexOf('--surface') + 1]}` : '';
-const key = `${args[0]}${surface}`;
+const key = args[0];
 const scenario = JSON.parse(readFileSync(process.env.FAKE_AD_SCENARIO, 'utf8'));
 const log = process.env.FAKE_AD_LOG;
 const previous = existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [];
