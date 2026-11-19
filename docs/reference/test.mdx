@@ -111,8 +111,9 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 
 - When the condition is truthy, the call throws, as Playwright's does.
   Nothing after the call runs.
-- A falsy condition with a reason, such as
-  `test.skip(undefined, 'only on CI')`, does nothing, as in Playwright.
+- A falsy condition with a reason does nothing, as in Playwright. The type
+  takes a `boolean`, but a JavaScript test or an `any` value can pass
+  `undefined` or `0`, and those do nothing too.
 - With one argument, a string or `undefined` is the reason, not a
   condition, so the call always skips. Playwright does not skip on
   `test.skip(undefined)` or `test.skip('')`.
