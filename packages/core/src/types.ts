@@ -868,7 +868,7 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   skip(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
    * Inside a running test: skips it when `condition` is truthy (or always,
-   * with no argument) by throwing, so nothing after the call runs. The
+   * with no condition) by throwing, so nothing after the call runs. The
    * attempt is reported `skipped` with `reason`; steps that already ran stay
    * in the report without deciding the status, and teardown still runs. A
    * setup test cannot skip: its sessions are owed.
@@ -923,7 +923,7 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   fail(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
    * Inside a running test: marks it expected to fail when `condition` is
-   * truthy (or always, with no argument). The body keeps running. A test
+   * truthy (or always, with no condition). The body keeps running. A test
    * failure then passes the test, keeping the error and `reason` in the
    * report; a pass fails it with `UNEXPECTED_PASS`. Infrastructure failures
    * and interrupts are not covered. A setup test or a serial group member

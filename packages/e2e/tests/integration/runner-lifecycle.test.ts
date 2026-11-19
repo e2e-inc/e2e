@@ -132,7 +132,8 @@ test('consumer', { session: 'admin' }, async () => {});
       expect(resultByTitle(outcome, 'condition false runs on').status).toBe('passed');
       // The condition is read by truthiness, as in Playwright: an unset env var is undefined.
       expect(resultByTitle(outcome, 'unset condition runs on').status).toBe('passed');
-      expect(resultByTitle(outcome, 'string condition skips with the second argument as the reason').skip).toEqual({ cause: 'explicit', reason: 'the real reason' });
+      const stringCondition = resultByTitle(outcome, 'string condition skips with the second argument as the reason');
+      expect(stringCondition.skip).toEqual({ cause: 'explicit', reason: 'the real reason' });
       expect(resultByTitle(outcome, 'bare skip').skip).toEqual({ cause: 'explicit', reason: 'skipped' });
       const setup = resultByTitle(outcome, 'sign in');
       expect(setup.status).toBe('failed');

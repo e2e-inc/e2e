@@ -7,6 +7,8 @@ describe('parseModifierCall', () => {
   it('registers a test for a title and a body', () => {
     const fn = () => {};
     expect(parseModifierCall(['later', fn])).toEqual({ kind: 'register', title: 'later', fn });
+    expect(parseModifierCall([true, fn])).toEqual(runtime(true));
+    expect(parseModifierCall(['later', 42])).toEqual(runtime(true));
   });
 
   it('skips always in the reason form: no argument, or a lone string or undefined', () => {
@@ -18,7 +20,9 @@ describe('parseModifierCall', () => {
   it('reads the first argument as a condition by truthiness, as Playwright does', () => {
     for (const falsy of [undefined, null, false, 0, '', Number.NaN]) {
       expect(parseModifierCall([falsy, 'flaky on CI'])).toEqual(runtime(false, 'flaky on CI'));
-      if (falsy !== undefined && typeof falsy !== 'string') expect(parseModifierCall([falsy])).toEqual(runtime(false));
+    }
+    for (const falsy of [null, false, 0, Number.NaN]) {
+      expect(parseModifierCall([falsy])).toEqual(runtime(false));
     }
     for (const truthy of [true, 1, 'true', {}]) {
       expect(parseModifierCall([truthy, 'flaky on CI'])).toEqual(runtime(true, 'flaky on CI'));

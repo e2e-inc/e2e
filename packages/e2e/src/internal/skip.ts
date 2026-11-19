@@ -49,8 +49,11 @@ export type ModifierCall =
 export function parseModifierCall(args: readonly unknown[]): ModifierCall {
   const [first, second] = args;
   if (typeof first === 'string' && typeof second === 'function') return { kind: 'register', title: first, fn: second };
-  if (args.length <= 1 && (first === undefined || typeof first === 'string')) return { kind: 'runtime', condition: true, reason: first };
-  return { kind: 'runtime', condition: Boolean(first), reason: typeof second === 'string' ? second : undefined };
+  if (args.length <= 1 && (first === undefined || typeof first === 'string')) {
+    return { kind: 'runtime', condition: true, reason: first };
+  }
+  const reason = typeof second === 'string' ? second : undefined;
+  return { kind: 'runtime', condition: Boolean(first), reason };
 }
 
 /**
