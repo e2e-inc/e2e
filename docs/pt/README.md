@@ -1,7 +1,7 @@
 # Brazilian Portuguese docs
 
 The Brazilian Portuguese translation of the e2e docs. The site serves each page here at
-`/docs/pt-BR/<path>`; a page without a translation shows the English page with a
+`/docs/pt/<path>`; a page without a translation shows the English page with a
 notice. English stays the source of truth.
 
 This translation is best effort. English changes don't wait for it, so a page
@@ -13,7 +13,7 @@ to a label's text.
 
 ## Layout
 
-- `docs/pt-BR/<path>.mdx` translates `docs/<path>.mdx`: same path, same file name.
+- `docs/pt/<path>.mdx` translates `docs/<path>.mdx`: same path, same file name.
 - `navigation.json` holds the Brazilian Portuguese labels for every tab and group in
   `docs/docs.json` (`tabs`, `groups`), keyed by the English label. The navigation order and
   pages come from `docs/docs.json`; there is no second navigation to keep in
