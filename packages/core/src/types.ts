@@ -453,12 +453,21 @@ export interface ActionOptions {
 }
 
 /**
- * A point in CSS pixels. For `screen.tapAt`, `screen.doubleTapAt`, and `screen.swipe` the origin is
- * the viewport's top-left corner, the space `boundingBox()` reports in; for
- * `tap({ position })` it is the node's own top-left corner, inside its
- * border on a document platform.
+ * A point in CSS pixels. For `tap({ position })` the origin is the node's own
+ * top-left corner, inside its border on a document platform. A `Point` is
+ * also a `ScreenPoint`, whose origin is the viewport's top-left corner, the
+ * space `boundingBox()` reports in.
  */
 export type Point = ViewportPoint;
+
+/** CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`), `'0%'` through `'100%'`. */
+export type ScreenCoordinate = number | `${number}%`;
+
+/** A viewport point in pixels, percentages, or both: `{ x: '50%', y: 120 }`. */
+export interface ScreenPoint {
+  readonly x: ScreenCoordinate;
+  readonly y: ScreenCoordinate;
+}
 
 /** `tap`, `click`, `doubleTap`, `dblclick`, and `secondaryTap` options: the action timeout and the keys held for the click. */
 export interface ClickOptions extends ActionOptions {
@@ -509,9 +518,9 @@ export interface SwipeOptions {
 /** A swipe along a path between two viewport points: a touch swipe on a device, a pointer drag on a document platform. */
 export interface SwipePathOptions {
   /** Where the finger goes down. */
-  from: Point;
+  from: ScreenPoint;
   /** Where it lifts. */
-  to: Point;
+  to: ScreenPoint;
   /** Gesture duration in milliseconds; omitted = the engine's default. */
   duration?: number;
   direction?: never;
@@ -533,10 +542,10 @@ export interface Screen {
   getByDisplayValue(value: TextMatch, options?: TextMatchOptions): Locator;
   /** Creates a lazy test-id query: a string matches the whole id, case-sensitive; a RegExp tests it. An engine may also match an id without its platform's namespacing. */
   getByTestId(id: TextMatch, options?: { visible?: boolean }): Locator;
-  /** Taps a viewport point, with no node behind it. */
-  tapAt(point: Point, options?: ActionOptions): Promise<void>;
-  /** Double-taps a viewport point, with no node behind it. */
-  doubleTapAt(point: Point, options?: ActionOptions): Promise<void>;
+  /** Taps a viewport point, in pixels or percentages, with no node behind it. */
+  tapAt(point: ScreenPoint, options?: ActionOptions): Promise<void>;
+  /** Double-taps a viewport point, in pixels or percentages, with no node behind it. */
+  doubleTapAt(point: ScreenPoint, options?: ActionOptions): Promise<void>;
   /** Performs a viewport-level swipe: in a direction, or along a path from one point to another. */
   swipe(options: SwipeOptions | SwipePathOptions): Promise<void>;
   /**
