@@ -654,6 +654,8 @@ describe('lifecycle', () => {
     const about = await observed(h, 'About');
     await h.surface.uninstallApp('com.example.app', new AbortController().signal);
     await expect(h.engine.perform!(about.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NODE_STALE' });
+    await h.surface.closeApp(operation().signal);
+    expect(h.fake.lastArgs('apps.close')).not.toMatchObject({ app: 'Example' });
   });
 
   it('pins the package an Android install reports, and refuses the build path as an app id', async () => {
