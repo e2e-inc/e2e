@@ -57,7 +57,10 @@ describe('DesktopSurface', () => {
     const { surface, fake, byTestId } = await launched({});
     await surface.perform(byTestId('password'), { kind: 'fill', value: 'hunter2', sensitive: true }, operation());
     const fill = fake.calls().find((call) => call.key === 'set-value');
-    expect(fill?.args).toEqual(['set-value', '@s1y1hxmo5pexrl:e2', '--timeout-ms', '9600', '--stdin']);
+    expect(fill?.args).toEqual(['set-value', '@s1y1hxmo5pexrl:e2', '--timeout-ms', expect.any(String), '--stdin']);
+    // agent-desktop's own wait is what is left of the operation's budget, less the margin it answers within.
+    expect(Number(fill?.args[3])).toBeGreaterThan(9_000);
+    expect(Number(fill?.args[3])).toBeLessThanOrEqual(9_600);
     expect(fill?.stdin).toBe('hunter2');
     expect(fake.calls().some((call) => call.args.join(' ').includes('hunter2'))).toBe(false);
   });
