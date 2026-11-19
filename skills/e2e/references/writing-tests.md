@@ -435,8 +435,8 @@ presence, `toHaveAttribute(name, value)` the value; `toBeAttached` waits for
 a match, hidden or not; `toHaveClass` compares the whole normalized class
 list or tests a RegExp. A failed matcher is `ASSERTION_FAILED`, exit code 1.
 
-Playwright's `{ checked: false }`, `{ enabled: false }`, `{ visible: false }`,
-and `{ attached: false }` flip their matchers, and `{ ignoreCase: true }`
+Playwright's `{ checked: false }`, `{ enabled: false }`, `{ editable: false }`,
+`{ visible: false }`, and `{ attached: false }` flip their matchers, and `{ ignoreCase: true }`
 works on `toHaveText`, `toContainText`, `toHaveAccessibleName`,
 `toHaveAttribute(name, value)`, and `expect(browser).toHaveURL`. Any other option, `indeterminate` or
 `useInnerText` included, is `INVALID_ARGUMENT`, in JavaScript too.

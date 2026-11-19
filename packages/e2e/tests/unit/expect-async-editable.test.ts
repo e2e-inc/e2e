@@ -103,6 +103,10 @@ describe('toBeEditable', () => {
   });
 
   it('keeps polling while nothing matches, negated or not', async () => {
+    await vexpect(at('nowhere').toBeEditable(soon)).rejects.toMatchObject({
+      ...failsAssertion,
+      message: vexpect.stringContaining('observed: no node'),
+    });
     await vexpect(at('nowhere').not.toBeEditable(soon)).rejects.toMatchObject({
       ...failsAssertion,
       message: vexpect.stringContaining('observed: no node'),
