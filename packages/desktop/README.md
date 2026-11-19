@@ -62,7 +62,8 @@ test('signs in', async ({ app, screen }) => {
   Electron) is the node's test id, so `getByTestId` finds it.
 - `app.open()` brings the app forward. Actions after it go through the
   accessibility API and leave your pointer and focus alone. `desktop({ headed: true })` allows physical input: `doubleTap`,
-  `hover`, point-addressed taps, and typing into fields the API cannot set.
+  `hover`, point-addressed taps, typing into whatever has focus, and typing
+  into fields the API cannot set.
 - A fill sends the text to agent-desktop on stdin, never in its arguments.
   A secure field reports no value, and screenshots paint over its bounds; when
   a secure field has no bounds, the screenshot is withheld.
