@@ -35,6 +35,17 @@ describe('windowImage', () => {
     expect(image).toMatchObject({ width: 16, height: 10 });
   });
 
+  it('withholds a capture with a border, rather than mask it in the wrong place', () => {
+    const bordered = capture(12, 10, { x: 0, y: 0, width: 12, height: 10 });
+    expect(windowImage(bordered, { width: 10, height: 10 }, [{ x: 7, y: 2, width: 3, height: 3 }])).toBeUndefined();
+  });
+
+  it('covers a field off by a pixel of rounding', () => {
+    const image = windowImage(capture(16, 10, { x: 0, y: 0, width: 16, height: 10 }), { width: 16, height: 10 }, [{ x: 4, y: 4, width: 2, height: 2 }]);
+    expect(pixel(image!, 3, 3)).toEqual([0, 0, 0, 255]);
+    expect(pixel(image!, 6, 6)).toEqual([0, 0, 0, 255]);
+  });
+
   it('withholds a capture whose window is not the size expected', () => {
     expect(windowImage(capture(30, 24, { x: 6, y: 3, width: 16, height: 10 }), { width: 40, height: 10 }, [])).toBeUndefined();
   });

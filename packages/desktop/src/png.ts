@@ -23,18 +23,22 @@ export interface Rgba {
   readonly data: Uint8Array;
 }
 
-/** How far, in image pixels, the window found in a capture may differ from the size its bounds give. */
-const SIZE_TOLERANCE = 4;
+/** How far, in image pixels, the window in a capture may differ from the size its bounds give: points times scale, rounded. */
+const SIZE_TOLERANCE = 1;
+
+/** How far each mask reaches past its field, in image pixels, so a field off by the tolerance is still covered. */
+const MASK_MARGIN = 2;
 
 /**
  * The window's own pixels out of a window capture, every rectangle (in the
  * window's image pixels) painted opaque black. macOS draws the window's
  * shadow into the capture, unevenly on each side, so the window is found as
  * the box of fully opaque pixels, which the shadow never is, and cropped to.
- * A capture with no shadow is the window already. Undefined when neither
- * matches `expected`, the window's size in image pixels: the rectangles
- * would then land somewhere else, and an image whose masking cannot be
- * proven must not leave the engine.
+ * A capture within a pixel of `expected` (the window's size in image
+ * pixels) is the window already; any other is cropped to its opaque box,
+ * which must then be within a pixel of it. Undefined otherwise: the
+ * rectangles would land somewhere else, and an image whose masking cannot
+ * be proven must not leave the engine.
  */
 export function windowImage(bytes: Uint8Array, expected: { width: number; height: number }, rects: readonly Rect[]): Rgba | undefined {
   const image = decodeRgba(bytes);
@@ -47,10 +51,10 @@ export function windowImage(bytes: Uint8Array, expected: { width: number; height
     window = crop(image, box);
   }
   for (const rect of rects) {
-    const x0 = Math.max(0, Math.floor(rect.x));
-    const y0 = Math.max(0, Math.floor(rect.y));
-    const x1 = Math.min(window.width, Math.ceil(rect.x + rect.width));
-    const y1 = Math.min(window.height, Math.ceil(rect.y + rect.height));
+    const x0 = Math.max(0, Math.floor(rect.x) - MASK_MARGIN);
+    const y0 = Math.max(0, Math.floor(rect.y) - MASK_MARGIN);
+    const x1 = Math.min(window.width, Math.ceil(rect.x + rect.width) + MASK_MARGIN);
+    const y1 = Math.min(window.height, Math.ceil(rect.y + rect.height) + MASK_MARGIN);
     for (let y = y0; y < y1; y += 1) {
       for (let x = x0; x < x1; x += 1) {
         const at = (y * window.width + x) * 4;
