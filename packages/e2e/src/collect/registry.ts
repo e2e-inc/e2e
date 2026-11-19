@@ -11,7 +11,8 @@ import { MAX_TIMER_MS } from '@e2e-dev/core/lib/internal/time';
 import { validateTitle } from '@e2e-dev/core/lib/internal/ids';
 import { realmSlot } from '@e2e-dev/core/lib/internal/realm-slot';
 import { markRunningTestExpectedToFail } from '@e2e-dev/core/lib/internal/expected-failure';
-import { parseModifierCall, skipRunningTest } from '../internal/skip.ts';
+import { isPromiseLike } from '../internal/promise-like.ts';
+import { parseModifierCall, readCondition, skipRunningTest } from '../internal/skip.ts';
 import { formatEachTitle, readRows } from './each.ts';
 import { unknownKeyMessage } from '@e2e-dev/core/lib/internal/options';
 import type { SourceLocation } from '@e2e-dev/core/lib/internal/source';
@@ -291,25 +292,6 @@ class Collector {
     });
     this.declarationCounter += 1;
   }
-}
-
-/**
- * The truthiness of a `skipIf` or `runIf` condition. A Promise is always
- * truthy, so an unawaited async check would decide nothing; it throws.
- */
-function readCondition(api: string, condition: unknown): boolean {
-  if (isPromiseLike(condition)) {
-    throw new CollectionError(`${api} got a Promise as its condition; await it before the call`);
-  }
-  return Boolean(condition);
-}
-
-function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as { then?: unknown }).then === 'function'
-  );
 }
 
 /** Canonical group-tree walk: the enclosing groups of a node, outermost first. */
@@ -807,7 +789,7 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
 
   const api: TestAPI = Object.assign(testFunction, {
     skip(...args: [first?: string | boolean, second?: TestBody | string]): TestCase | undefined {
-      const call = parseModifierCall(args);
+      const call = parseModifierCall('test.skip()', args);
       if (call.kind === 'register') {
         return requireCollector('test.skip()').registerTest('test', 'skip', call.title, { skip: true }, [], call.fn as TestBody, chain);
       }
@@ -815,7 +797,7 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
       return undefined;
     },
     fail(...args: [first?: string | boolean, second?: TestBody | string]): TestCase | undefined {
-      const call = parseModifierCall(args);
+      const call = parseModifierCall('test.fail()', args);
       if (call.kind === 'register') {
         return requireCollector('test.fail()').registerTest('test', 'normal', call.title, { fail: true }, [], call.fn as TestBody, chain);
       }

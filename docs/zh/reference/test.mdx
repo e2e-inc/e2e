@@ -758,11 +758,12 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   /** Registers one skipped test. */
   skip(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
-   * Inside a running test: skips it when `condition` is true (or always,
+   * Inside a running test: skips it when `condition` is truthy (or always,
    * with no condition) by throwing, so nothing after the call runs. The
    * attempt is reported `skipped` with `reason`; steps that already ran stay
    * in the report without deciding the status, and teardown still runs. A
-   * setup test cannot skip: its sessions are owed.
+   * setup test cannot skip: its sessions are owed. A Promise condition
+   * fails the test with `INVALID_ARGUMENT`: await it first.
    * Outside a test body this form is `COLLECTION_ERROR`; use the `skip`
    * option to skip at collection.
    */
@@ -814,11 +815,12 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   fail(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
    * Inside a running test: marks it expected to fail when `condition` is
-   * true (or always, with no condition). The body keeps running. A test
+   * truthy (or always, with no condition). The body keeps running. A test
    * failure then passes the test, keeping the error and `reason` in the
    * report; a pass fails it with `UNEXPECTED_PASS`. Infrastructure failures
    * and interrupts are not covered. A setup test or a serial group member
-   * cannot be marked. Outside a test body this form is `COLLECTION_ERROR`;
+   * cannot be marked, and a Promise condition fails the test with
+   * `INVALID_ARGUMENT`. Outside a test body this form is `COLLECTION_ERROR`;
    * use `test.fail(title, fn)` or the `fail` option to mark at collection.
    */
   fail(condition: boolean, reason?: string): void;

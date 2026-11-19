@@ -10,6 +10,7 @@
 
 import { currentAttempt } from '@e2e-dev/core/lib/expect/attempt';
 import { CollectionError, TestError } from '@e2e-dev/core/lib/internal/errors';
+import { isPromiseLike } from './promise-like.ts';
 
 const runtimeSkipBrand: unique symbol = Symbol.for('e2e.runtimeSkip.v1');
 
@@ -46,14 +47,30 @@ export type ModifierCall =
  * first argument as the condition by truthiness and its second as the
  * reason, as Playwright does, so `skip(undefined, reason)` does not skip.
  */
-export function parseModifierCall(args: readonly unknown[]): ModifierCall {
+export function parseModifierCall(api: string, args: readonly unknown[]): ModifierCall {
   const [first, second] = args;
-  if (typeof first === 'string' && typeof second === 'function') return { kind: 'register', title: first, fn: second };
+  if (typeof first === 'string' && typeof second === 'function') {
+    return { kind: 'register', title: first, fn: second };
+  }
   if (args.length <= 1 && (first === undefined || typeof first === 'string')) {
     return { kind: 'runtime', condition: true, reason: first };
   }
   const reason = typeof second === 'string' ? second : undefined;
-  return { kind: 'runtime', condition: Boolean(first), reason };
+  return { kind: 'runtime', condition: readCondition(api, first), reason };
+}
+
+/**
+ * The truthiness of a `skip`, `fail`, `skipIf`, or `runIf` condition. A
+ * Promise is always truthy, so an unawaited async check would decide nothing:
+ * it throws, as a test error inside a test body and a collection error
+ * outside one.
+ */
+export function readCondition(api: string, condition: unknown): boolean {
+  if (isPromiseLike(condition)) {
+    const message = `${api} got a Promise as its condition; await it before the call`;
+    throw currentAttempt() === undefined ? new CollectionError(message) : new TestError('INVALID_ARGUMENT', message);
+  }
+  return Boolean(condition);
 }
 
 /**

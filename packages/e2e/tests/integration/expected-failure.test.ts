@@ -31,6 +31,10 @@ test('unset condition runs as normal', async () => {
   test.fail(process.env.E2E_NEVER_SET as unknown as boolean, 'only on CI');
 });
 
+test('promise condition', async () => {
+  test.fail(Promise.resolve(false) as unknown as boolean, 'async check');
+});
+
 test('option passes', { fail: 'gap is fixed' }, async () => {});
 
 test('marked then skipped', { fail: 'gap' }, async () => {
@@ -75,6 +79,9 @@ test('times out', { fail: 'too slow', timeout: 500 }, async () => {
       const unset = byTitle('unset condition runs as normal');
       expect(unset.status).toBe('passed');
       expect(unset.expectedFailure).toBeUndefined();
+      const promise = byTitle('promise condition');
+      expect(promise.status).toBe('failed');
+      expect(promise.attempts[0]?.error).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('test.fail() got a Promise') });
 
       const unexpected = byTitle('option passes');
       expect(unexpected.status).toBe('failed');
@@ -95,7 +102,7 @@ test('times out', { fail: 'too slow', timeout: 500 }, async () => {
       expect(engine.attempts[0]?.error).toMatchObject({ category: 'infrastructure', code: 'ENGINE_FAILURE' });
       expect(engine.attempts[0]?.expectedFailure).toEqual({ reason: 'engine gap' });
 
-      expect(outcome.report.run.summary).toMatchObject({ passed: 6, failed: 3, skipped: 1 });
+      expect(outcome.report.run.summary).toMatchObject({ passed: 6, failed: 4, skipped: 1 });
       expect(outcome.exitCode).toBe(3);
 
       const junit = renderJunitReport(outcome.report);

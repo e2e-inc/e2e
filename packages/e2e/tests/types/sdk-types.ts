@@ -575,6 +575,10 @@ expect.soft.any(Number);
 test.skip(true, 'not today');
 test.skip('not today');
 test.skip('later', async () => {});
+// @ts-expect-error a Promise condition is always truthy; await it first
+test.skip(Promise.resolve(true), 'not today');
+// @ts-expect-error a Promise condition is always truthy; await it first
+test.fail(Promise.resolve(true), 'known gap');
 // skipIf and runIf take any condition and return test's two registration forms, typed with the test's fixtures.
 test.skipIf(process.platform === 'win32')('file watcher', async () => {}) satisfies ReturnType<typeof test>;
 test.runIf(process.env['CI'])('inotify', { tags: ['@fs'], skip: 'reason' }, async () => {}) satisfies ReturnType<typeof test>;

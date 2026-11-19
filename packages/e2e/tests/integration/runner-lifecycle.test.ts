@@ -111,6 +111,10 @@ test('string condition skips with the second argument as the reason', async () =
   test.skip('1' as unknown as boolean, 'the real reason');
 });
 
+test('promise condition', async () => {
+  test.skip(Promise.resolve(false) as unknown as boolean, 'async check');
+});
+
 test('bare skip', async () => {
   test.skip();
 });
@@ -134,6 +138,10 @@ test('consumer', { session: 'admin' }, async () => {});
       expect(resultByTitle(outcome, 'unset condition runs on').status).toBe('passed');
       const stringCondition = resultByTitle(outcome, 'string condition skips with the second argument as the reason');
       expect(stringCondition.skip).toEqual({ cause: 'explicit', reason: 'the real reason' });
+      // A Promise is always truthy, so a forgotten await fails the test instead of skipping it.
+      const promise = resultByTitle(outcome, 'promise condition');
+      expect(promise.status).toBe('failed');
+      expect(promise.attempts[0]?.error).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('test.skip() got a Promise') });
       expect(resultByTitle(outcome, 'bare skip').skip).toEqual({ cause: 'explicit', reason: 'skipped' });
       const setup = resultByTitle(outcome, 'sign in');
       expect(setup.status).toBe('failed');
