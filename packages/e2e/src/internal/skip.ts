@@ -38,17 +38,19 @@ export type ModifierCall =
 
 /**
  * `skip(title, fn)` registers a skipped test; `skip(condition, reason?)` and
- * `skip(reason?)` skip the running one, and `fail` takes the same shapes. A
- * string alone is a reason, never a title: a registration always carries its
- * body.
+ * `skip(reason?)` skip the running one, and `fail` takes the same shapes.
+ * `args` are the call's own arguments, since `skip(undefined, reason)` and
+ * `skip(reason?)` differ only in their count. A lone string or `undefined` is
+ * the `reason?` form, so it always skips; a string alone is never a title,
+ * since a registration always carries its body. Any other call reads its
+ * first argument as the condition by truthiness and its second as the
+ * reason, as Playwright does, so `skip(undefined, reason)` does not skip.
  */
-export function parseModifierCall(first: unknown, second: unknown): ModifierCall {
+export function parseModifierCall(args: readonly unknown[]): ModifierCall {
+  const [first, second] = args;
   if (typeof first === 'string' && typeof second === 'function') return { kind: 'register', title: first, fn: second };
-  return {
-    kind: 'runtime',
-    condition: typeof first === 'boolean' ? first : true,
-    reason: typeof first === 'string' ? first : typeof second === 'string' ? second : undefined,
-  };
+  if (args.length <= 1 && (first === undefined || typeof first === 'string')) return { kind: 'runtime', condition: true, reason: first };
+  return { kind: 'runtime', condition: Boolean(first), reason: typeof second === 'string' ? second : undefined };
 }
 
 /**

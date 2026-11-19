@@ -806,16 +806,16 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
   };
 
   const api: TestAPI = Object.assign(testFunction, {
-    skip(first?: string | boolean, second?: TestBody | string): TestCase | undefined {
-      const call = parseModifierCall(first, second);
+    skip(...args: [first?: string | boolean, second?: TestBody | string]): TestCase | undefined {
+      const call = parseModifierCall(args);
       if (call.kind === 'register') {
         return requireCollector('test.skip()').registerTest('test', 'skip', call.title, { skip: true }, [], call.fn as TestBody, chain);
       }
       skipRunningTest(call.condition, call.reason);
       return undefined;
     },
-    fail(first?: string | boolean, second?: TestBody | string): TestCase | undefined {
-      const call = parseModifierCall(first, second);
+    fail(...args: [first?: string | boolean, second?: TestBody | string]): TestCase | undefined {
+      const call = parseModifierCall(args);
       if (call.kind === 'register') {
         return requireCollector('test.fail()').registerTest('test', 'normal', call.title, { fail: true }, [], call.fn as TestBody, chain);
       }

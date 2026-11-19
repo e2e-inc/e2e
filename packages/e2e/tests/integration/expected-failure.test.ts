@@ -27,6 +27,10 @@ test('condition false runs as normal', async () => {
   test.fail(false, 'never');
 });
 
+test('unset condition runs as normal', async () => {
+  test.fail(process.env.E2E_NEVER_SET as unknown as boolean, 'only on CI');
+});
+
 test('option passes', { fail: 'gap is fixed' }, async () => {});
 
 test('marked then skipped', { fail: 'gap' }, async () => {
@@ -67,6 +71,10 @@ test('times out', { fail: 'too slow', timeout: 500 }, async () => {
       expect(normal.status).toBe('passed');
       expect(normal.expectedFailure).toBeUndefined();
       expect(normal.attempts[0]?.expectedFailure).toBeUndefined();
+      // A falsy condition does not mark the test, as in Playwright: an unset env var is undefined.
+      const unset = byTitle('unset condition runs as normal');
+      expect(unset.status).toBe('passed');
+      expect(unset.expectedFailure).toBeUndefined();
 
       const unexpected = byTitle('option passes');
       expect(unexpected.status).toBe('failed');
@@ -87,7 +95,7 @@ test('times out', { fail: 'too slow', timeout: 500 }, async () => {
       expect(engine.attempts[0]?.error).toMatchObject({ category: 'infrastructure', code: 'ENGINE_FAILURE' });
       expect(engine.attempts[0]?.expectedFailure).toEqual({ reason: 'engine gap' });
 
-      expect(outcome.report.run.summary).toMatchObject({ passed: 5, failed: 3, skipped: 1 });
+      expect(outcome.report.run.summary).toMatchObject({ passed: 6, failed: 3, skipped: 1 });
       expect(outcome.exitCode).toBe(3);
 
       const junit = renderJunitReport(outcome.report);

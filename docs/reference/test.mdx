@@ -109,8 +109,12 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 });
 ```
 
-- When the condition is true, the call throws, as Playwright's does. Nothing
-  after the call runs.
+- When the condition is truthy, the call throws, as Playwright's does.
+  Nothing after the call runs.
+- A falsy condition, such as `undefined` or `0`, does nothing, as in
+  Playwright.
+- With one argument, a string or `undefined` is the reason, not a condition,
+  so the call always skips.
 - With no failure before it, the test is reported `skipped` with `reason`,
   with no retry.
 - Steps before it stay in the report as they ran.
@@ -259,6 +263,8 @@ test('exports a PDF', { fail: 'PDF export is broken' }, async ({ app }) => {}); 
 
 - The body keeps running after the call. A `beforeEach` hook can mark the
   test too.
+- A falsy condition, such as `undefined` or `0`, does nothing, as in
+  `test.skip`.
 - A failed assertion, action, thrown error, or timeout makes the test
   `passed`. The report keeps the reason and the error.
 - A pass makes the test `failed` with `UNEXPECTED_PASS`. Remove the mark
@@ -270,7 +276,7 @@ test('exports a PDF', { fail: 'PDF export is broken' }, async ({ app }) => {}); 
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | A true condition in a setup test, a serial group member, an `afterEach` hook, or a fixture teardown. |
+| `INVALID_ARGUMENT` | A truthy condition in a setup test, a serial group member, an `afterEach` hook, or a fixture teardown. |
 | `COLLECTION_ERROR` | The conditional form, outside a test body, or the `fail` option inside a serial group. |
 
 #### `test.only`
@@ -952,8 +958,8 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   /** Registers one skipped test. */
   skip(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
-   * Inside a running test: skips it when `condition` is true (or always,
-   * with no condition) by throwing, so nothing after the call runs. The
+   * Inside a running test: skips it when `condition` is truthy (or always,
+   * with no argument) by throwing, so nothing after the call runs. The
    * attempt is reported `skipped` with `reason`; steps that already ran stay
    * in the report without deciding the status, and teardown still runs. A
    * setup test cannot skip: its sessions are owed.
@@ -1008,7 +1014,7 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   fail(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
    * Inside a running test: marks it expected to fail when `condition` is
-   * true (or always, with no condition). The body keeps running. A test
+   * truthy (or always, with no argument). The body keeps running. A test
    * failure then passes the test, keeping the error and `reason` in the
    * report; a pass fails it with `UNEXPECTED_PASS`. Infrastructure failures
    * and interrupts are not covered. A setup test or a serial group member

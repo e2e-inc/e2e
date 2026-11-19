@@ -194,7 +194,7 @@ test('needs two organizations', async ({ app }) => {
   open the screen by its path. On a device, open a
   [deep link](/mobile#the-device-fixture).
 - `test.skip(condition, reason)` stops the test as `skipped` when the
-  condition is true.
+  condition is truthy.
 - For a flow across many tests, set `{ serial: true }` on the group. The
   tests run in sequence on one worker and retry together.
 - For setup and cleanup, use `test.extend`. See
