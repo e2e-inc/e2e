@@ -17,13 +17,20 @@ export interface FakeCall {
 export type Scenario = Record<string, readonly unknown[]>;
 
 /** A scenario on disk and the environment that points the fake at it. */
-export function fakeScenario(scenario: Scenario): { env: Record<string, string>; calls: () => FakeCall[] } {
+export function fakeScenario(scenario: Scenario): { env: Record<string, string>; calls: () => FakeCall[]; spawned: () => number[] } {
   const directory = mkdtempSync(path.join(tmpdir(), 'e2e-fake-agent-desktop-'));
   const file = path.join(directory, 'scenario.json');
   const log = path.join(directory, 'calls.jsonl');
   writeFileSync(file, JSON.stringify(scenario));
   return {
     env: { ...(process.env as Record<string, string>), FAKE_AD_SCENARIO: file, FAKE_AD_LOG: log },
+    spawned: () => {
+      try {
+        return readFileSync(`${log}.spawned`, 'utf8').split('\n').filter(Boolean).map(Number);
+      } catch {
+        return [];
+      }
+    },
     calls: () => {
       try {
         return readFileSync(log, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as FakeCall);

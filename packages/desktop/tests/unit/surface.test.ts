@@ -129,12 +129,11 @@ describe('DesktopSurface', () => {
     expect(fake.calls().some((call) => call.args.join(' ').includes('hunter2'))).toBe(false);
   });
 
-  it('skips a check on a box already in the wanted state', async () => {
+  it('leaves whether a box needs checking to agent-desktop, which reads its live state', async () => {
     const { surface, fake, byTestId } = await launched({});
-    await surface.perform(byTestId('remember'), { kind: 'uncheck' }, operation());
-    expect(fake.calls().some((call) => call.key === 'uncheck')).toBe(false);
     await surface.perform(byTestId('remember'), { kind: 'check' }, operation());
-    expect(fake.calls().filter((call) => call.key === 'check')).toHaveLength(1);
+    await surface.perform(byTestId('remember'), { kind: 'uncheck' }, operation());
+    expect(actions(fake.calls()).slice(-2)).toEqual(['check', 'uncheck']);
   });
 
   it('climbs the select ladder while each way sends nothing, and ends on the menu item', async () => {
@@ -290,21 +289,23 @@ describe('DesktopSurface', () => {
   });
 
   it('keeps the process as its own when a quit fails, so dispose quits it', async () => {
-    const { surface, app, fake } = await launched((pid) => ({ 'list-apps': [{ ok: true, data: { apps: [] } }, failure('INTERNAL', 'not_delivered'), { ok: true, data: { apps: [{ pid, process_instance: 'instance-1' }] } }] }), { observe: false });
+    const { surface, app, fake } = await launched((pid) => ({ 'list-apps': [failure('INTERNAL', 'not_delivered'), { ok: true, data: { apps: [{ pid, process_instance: 'instance-1' }] } }] }), { observe: false });
     await expect(surface.endAttempt({ signal, timeoutMs: 5_000 })).rejects.toThrow(/find SpikeForm/);
     await surface.dispose({ signal, timeoutMs: 5_000 });
-    expect(fake.calls().filter((call) => call.key === 'list-apps')).toHaveLength(3);
+    expect(fake.calls().filter((call) => call.key === 'list-apps')).toHaveLength(2);
     await expect(app.exited).resolves.toBe('SIGKILL');
   });
 
-  it('takes as its own a process a failed launch started, so the end of the attempt quits it', async () => {
-    const { surface, app } = await initialized((pid) => ({
-      launch: [failure('TIMEOUT', 'delivered_unverified')],
-      'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [{ name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form', pid, process_instance: 'instance-1' }] } }],
-    }));
+  it.skipIf(process.platform !== 'darwin')('takes as its own the process a failed launch started, by its launch token, and quits it', async () => {
+    const { surface, fake } = await initialized({
+      launch: [{ spawn: true, ...(failure('TIMEOUT', 'delivered_unverified') as object) }],
+      'list-apps': [{ spawnedApps: { name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form' } }],
+    });
     await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
+    const [started] = fake.spawned();
     await surface.endAttempt({ signal, timeoutMs: 5_000 });
-    await expect(app.exited).resolves.toBe('SIGKILL');
+    expect(started).toBeDefined();
+    expect(() => process.kill(started!, 0)).toThrow();
   });
 
   it('says which app is missing when the bundle id names none', async () => {
@@ -319,10 +320,10 @@ describe('DesktopSurface', () => {
   });
 
   it('keeps the process when the app list is incomplete, so dispose looks again', async () => {
-    const { surface, fake } = await launched((pid) => ({ 'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [], complete: false } }, { ok: true, data: { apps: [{ pid, process_instance: 'instance-1' }] } }] }), { observe: false });
+    const { surface, fake } = await launched((pid) => ({ 'list-apps': [{ ok: true, data: { apps: [], complete: false } }, { ok: true, data: { apps: [{ pid, process_instance: 'instance-1' }] } }] }), { observe: false });
     await expect(surface.endAttempt({ signal, timeoutMs: 5_000 })).rejects.toThrow(/listed the apps only in part/);
     await surface.dispose({ signal, timeoutMs: 5_000 });
-    expect(fake.calls().filter((call) => call.key === 'list-apps')).toHaveLength(3);
+    expect(fake.calls().filter((call) => call.key === 'list-apps')).toHaveLength(2);
   });
 
   it('reports a type after a clear that changed the field as possibly committed', async () => {
@@ -369,13 +370,13 @@ describe('DesktopSurface', () => {
     expect(await Promise.race([app.exited, new Promise((resolve) => setTimeout(() => resolve('running'), 300))])).toBe('running');
   });
 
-  it('takes nothing as its own when the list before the launch was partial', async () => {
+  it('never takes a running copy without its launch token, and says the launch left nothing it could find', async () => {
     const { surface, app } = await initialized((pid) => ({
       launch: [failure('TIMEOUT', 'delivered_unverified')],
-      'list-apps': [{ ok: true, data: { apps: [], complete: false } }, { ok: true, data: { apps: [{ name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form', pid, process_instance: 'theirs' }] } }],
+      'list-apps': [{ ok: true, data: { apps: [{ name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form', pid, process_instance: 'theirs' }] } }],
     }));
     await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
-    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    await expect(surface.endAttempt({ signal, timeoutMs: 1_000 })).rejects.toThrow(/no process it started was found/);
     expect(await Promise.race([app.exited, new Promise((resolve) => setTimeout(() => resolve('running'), 300))])).toBe('running');
   });
 
@@ -389,6 +390,19 @@ describe('DesktopSurface', () => {
     const calls = fake.calls().map((call) => call.args);
     expect(calls.at(-2)).toEqual(['focus-window', '--window-id', 'w-mine', '--headed']);
     expect(calls.at(-1)).toEqual(['mouse-click', '--xy=110,120', '--headed']);
+  });
+
+  it('measures a point in the window a locate read, after a dialog window took over', async () => {
+    const windows = (pid: number) => [
+      { id: 'w-8032', pid, process_instance: 'instance-1', is_focused: false, bounds: { x: 100, y: 100, width: 400, height: 300 } },
+      { id: 'w-dialog', pid, process_instance: 'instance-1', is_focused: true, bounds: { x: 500, y: 100, width: 300, height: 200 } },
+    ];
+    const { surface, fake } = await launched((pid) => ({ snapshot: [snapshotAnswer('macos/appkit-form'), snapshotAnswer('macos/appkit-form'), renamed('macos/appkit-form', 'w-8032', 'w-dialog')], 'list-windows': [{ ok: true, data: windows(pid) }] }), { options: { headed: true } });
+    await surface.locate({ kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'sign-in', exact: true } } }, operation());
+    await surface.performAt({ x: 11.5, y: 16.25 }, { kind: 'tap' }, operation());
+    const calls = fake.calls().map((call) => call.args);
+    expect(calls.at(-2)).toEqual(['focus-window', '--window-id', 'w-dialog', '--headed']);
+    expect(calls.at(-1)).toEqual(['mouse-click', '--xy=511.5,116.25', '--headed']);
   });
 
   it('refuses a point outside the window, which would land on another app', async () => {
@@ -424,6 +438,20 @@ describe('DesktopSurface', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it('keeps the ids of one window while another window is read', async () => {
+    const { surface, byTestId } = await launched({ snapshot: [snapshotAnswer('macos/appkit-form'), snapshotAnswer('macos/appkit-form'), renamed('macos/appkit-form', 'w-8032', 'w-other'), snapshotAnswer('macos/appkit-form')] });
+    const signIn = byTestId('sign-in');
+    await surface.observe(operation(), undefined);
+    const back = await surface.observe(operation(), undefined);
+    expect(back.root.children?.find((node) => node.testId === 'sign-in')?.ref.id).toBe(signIn.id);
+  });
+
+  it('keeps the launch wait within its time when each read of it is slow', async () => {
+    const started = Date.now();
+    await expect(launched({ 'list-windows': [{ ok: true, data: [], sleepMs: 2_000 }] }, { openTimeoutMs: 3_000, observe: false })).rejects.toMatchObject({ code: 'OPERATION_TIMEOUT' });
+    expect(Date.now() - started).toBeLessThan(4_500);
   });
 
   it('quits the process it launched at the end of the attempt, and only that one', async () => {
