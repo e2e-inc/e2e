@@ -48,9 +48,13 @@ export function htmlReporter(options: HtmlReporterOptions = {}): Reporter {
 /**
  * Fills the page template with one finished run, writes it, and resolves with
  * the row naming where it went. Once `signal` aborts (the runner gave up on
- * its reporters), it stops reading files and writes nothing.
+ * its reporters), it stops reading files and writes nothing. A run that wrote
+ * no report (it stopped before its tests, or the write failed) writes no
+ * page either, so the previous run's page stays beside the previous run's
+ * report, as `junit.xml` and `summary.md` do.
  */
-export async function writeReport(run: FinishedRun, options: HtmlReporterOptions, template: string, signal?: AbortSignal): Promise<ReporterSummary> {
+export async function writeReport(run: FinishedRun, options: HtmlReporterOptions, template: string, signal?: AbortSignal): Promise<ReporterSummary | undefined> {
+  if (run.reportPath === undefined) return undefined;
   const outputFile =
     options.outputFile === undefined
       ? path.join(path.dirname(run.artifactsRoot), 'report.html')

@@ -27,7 +27,7 @@ export interface FinishedRun {
   readonly exitCode: RunExitCode;
   /** Absolute project root, what the terminal shows paths relative to. */
   readonly projectRoot: string;
-  /** Where `report.json` was written; undefined when the write failed or config never loaded. */
+  /** Where `report.json` was written; undefined when the run stopped before its tests, the write failed, or config never loaded. */
   readonly reportPath: string | undefined;
   /** Absolute directory the report's artifact paths are relative to: `<output>/results`, a directory per test. */
   readonly artifactsRoot: string;

@@ -179,6 +179,8 @@ const reporter = htmlReporter({ media: 'embed' });
 - It writes `report.html` beside the report, with the report document
   embedded. The page opens from disk with no server, or with
   [`npx e2e report`](/reference/cli#e2e-report).
+- A run that writes no report writes no page either, so the previous run's
+  page stays, as `junit.xml` does. See [Output](/reference/cli#output).
 - `media` decides what happens to screenshots, videos, and downloads:
 
   | `media` | The page | To share it |
@@ -318,7 +320,7 @@ interface FinishedRun {
   readonly status: RunStatus;              // report.run.status
   readonly exitCode: RunExitCode;
   readonly projectRoot: string;            // what the terminal shows paths relative to
-  readonly reportPath: string | undefined; // absent when the write failed
+  readonly reportPath: string | undefined; // absent when the run stopped before its tests or the write failed
   readonly artifactsRoot: string;          // what the report's artifact paths are relative to
   readonly aiTracePath: string | undefined;
   readonly traces: ReadonlyMap<string, string>;      // result id -> its trace page, from the project root

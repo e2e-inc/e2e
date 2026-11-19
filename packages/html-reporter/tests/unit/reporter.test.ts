@@ -71,6 +71,18 @@ describe('writeReport', () => {
     expect(rows).toEqual([{ label: 'HTML report', text: expect.stringMatching(/report\.html$/u) }]);
   });
 
+  it('keeps the previous page when the run wrote no report', async () => {
+    root = await mkdtemp(path.join(tmpdir(), 'e2e-html-'));
+    const previous = path.join(root, '.e2e', 'report.html');
+    await mkdir(path.dirname(previous), { recursive: true });
+    await writeFile(previous, 'the previous run');
+    // A run that stopped before its tests (NO_TESTS, a config error, an app that never started) has no reportPath.
+    const rows = await writeReport({ ...finishedRun(root), reportPath: undefined }, {}, TEMPLATE);
+
+    expect(await readFile(previous, 'utf8')).toBe('the previous run');
+    expect(rows).toBeUndefined();
+  });
+
   it('keeps the test file lines around each source location, redacted, and no file outside the project', async () => {
     root = await mkdtemp(path.join(tmpdir(), 'e2e-html-'));
     const project = path.join(root, 'project');
@@ -135,7 +147,7 @@ describe('writeReport', () => {
         'a/page.html': `data:application/octet-stream;base64,${Buffer.from('<script>alert(1)</script>').toString('base64')}`,
       },
     });
-    expect(rows[0]?.text).toMatch(/report\.html \(one file, \d+ KB\)$/u);
+    expect(rows?.[0]?.text).toMatch(/report\.html \(one file, \d+ KB\)$/u);
   });
 
   it('leaves media out for text only', async () => {
@@ -143,6 +155,6 @@ describe('writeReport', () => {
     const rows = await writeReport(finishedRun(root), { media: 'none' }, TEMPLATE);
 
     expect(parsePayload(await readFile(path.join(root, '.e2e', 'report.html'), 'utf8')).media).toEqual({ mode: 'none' });
-    expect(rows[0]?.text).toMatch(/\(text only\)$/u);
+    expect(rows?.[0]?.text).toMatch(/\(text only\)$/u);
   });
 });
