@@ -117,8 +117,8 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 - With one argument, a string or `undefined` is the reason, not a
   condition, so the call always skips. Playwright does not skip on
   `test.skip(undefined)` or `test.skip('')`.
-- A Promise condition fails the test with `INVALID_ARGUMENT`. Await it
-  first.
+- A Promise or a function as the condition fails the test with
+  `INVALID_ARGUMENT`. Await the Promise, or call the function, first.
 - With no failure before it, the test is reported `skipped` with `reason`,
   with no retry.
 - Steps before it stay in the report as they ran.
@@ -135,7 +135,7 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 | Throws | When |
 | --- | --- |
 | `INVALID_ARGUMENT` | Called in a setup test. A setup test cannot skip because other tests depend on its sessions. |
-| `INVALID_ARGUMENT` | A Promise condition inside a test body. |
+| `INVALID_ARGUMENT` | A Promise or function condition inside a test body. |
 | `COLLECTION_ERROR` | The conditional form, outside a test body. |
 
 #### `test.skipIf`
@@ -269,8 +269,8 @@ test('exports a PDF', { fail: 'PDF export is broken' }, async ({ app }) => {}); 
 - The body keeps running after the call. A `beforeEach` hook can mark the
   test too.
 - The condition reads as in `test.skip`: a falsy one does nothing, a lone
-  string or `undefined` is the reason and always marks, and a Promise fails
-  the test.
+  string or `undefined` is the reason and always marks, and a Promise or a
+  function fails the test.
 - A failed assertion, action, thrown error, or timeout makes the test
   `passed`. The report keeps the reason and the error.
 - A pass makes the test `failed` with `UNEXPECTED_PASS`. Remove the mark
@@ -282,7 +282,7 @@ test('exports a PDF', { fail: 'PDF export is broken' }, async ({ app }) => {}); 
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | A Promise condition inside a test body. |
+| `INVALID_ARGUMENT` | A Promise or function condition inside a test body. |
 | `INVALID_ARGUMENT` | A truthy condition in a setup test, a serial group member, an `afterEach` hook, or a fixture teardown. |
 | `COLLECTION_ERROR` | The conditional form, outside a test body, or the `fail` option inside a serial group. |
 
@@ -969,8 +969,8 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    * with no condition) by throwing, so nothing after the call runs. The
    * attempt is reported `skipped` with `reason`; steps that already ran stay
    * in the report without deciding the status, and teardown still runs. A
-   * setup test cannot skip: its sessions are owed. A Promise condition
-   * fails the test with `INVALID_ARGUMENT`: await it first.
+   * setup test cannot skip: its sessions are owed. A Promise or function
+   * condition fails the test with `INVALID_ARGUMENT`: await or call it first.
    * Outside a test body this form is `COLLECTION_ERROR`; use the `skip`
    * option to skip at collection.
    */
@@ -1026,8 +1026,8 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    * failure then passes the test, keeping the error and `reason` in the
    * report; a pass fails it with `UNEXPECTED_PASS`. Infrastructure failures
    * and interrupts are not covered. A setup test or a serial group member
-   * cannot be marked, and a Promise condition fails the test with
-   * `INVALID_ARGUMENT`. Outside a test body this form is `COLLECTION_ERROR`;
+   * cannot be marked, and a Promise or function condition fails the test
+   * with `INVALID_ARGUMENT`. Outside a test body this form is `COLLECTION_ERROR`;
    * use `test.fail(title, fn)` or the `fail` option to mark at collection.
    */
   fail(condition: boolean, reason?: string): void;

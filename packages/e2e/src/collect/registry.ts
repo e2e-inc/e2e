@@ -805,10 +805,12 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
       return undefined;
     },
     skipIf(condition: unknown): TestRegistrar<object> {
-      return registrar('test.skipIf()', readCondition('test.skipIf()', condition, (message) => new CollectionError(message)));
+      const refuse = (message: string): CollectionError => new CollectionError(message);
+      return registrar('test.skipIf()', readCondition('test.skipIf()', condition, refuse));
     },
     runIf(condition: unknown): TestRegistrar<object> {
-      return registrar('test.runIf()', !readCondition('test.runIf()', condition, (message) => new CollectionError(message)));
+      const refuse = (message: string): CollectionError => new CollectionError(message);
+      return registrar('test.runIf()', !readCondition('test.runIf()', condition, refuse));
     },
     each(rows: unknown): EachRegistrar<unknown[]> {
       return eachRegistrar('test.each()', readRows('test.each()', rows), true);

@@ -68,8 +68,18 @@ describe('parseModifierCall', () => {
   it('refuses a Promise condition, which is always truthy, inside a test body', () => {
     inBody(() => {
       expect(() => parse(Promise.resolve(false), 'async check')).toThrow(TestError);
-      expect(() => parse(Promise.resolve(false))).toThrow('test.skip() got a Promise as its condition; await it before the call');
+      expect(() => parse(Promise.resolve(false))).toThrow(
+        'test.skip() got a Promise as its condition; await it before the call',
+      );
     });
+  });
+
+  it('refuses a function condition, which is always truthy, inside a test body', () => {
+    inBody(() => {
+      expect(() => parse(() => false, 'not called')).toThrow(TestError);
+      expect(() => parse(() => false)).toThrow('test.skip() got a function as its condition; call it and pass the result');
+    });
+    expect(parse(() => false, 'not called')).toEqual(runtime(true, 'not called'));
   });
 
   it('leaves a Promise condition outside a test body to the skip, which refuses the call itself', () => {

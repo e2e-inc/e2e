@@ -1,4 +1,4 @@
-/** Whether `value` has a callable `then`: a Promise, or any object or function that is a thenable. */
+/** Whether `value` has a callable `then`: a Promise, or any thenable object or function. */
 export function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return (
     (typeof value === 'object' || typeof value === 'function') &&

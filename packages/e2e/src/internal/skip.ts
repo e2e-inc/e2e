@@ -54,10 +54,13 @@ export function parseModifierCall(api: string, args: readonly unknown[]): Modifi
   }
   const reason = typeof second === 'string' ? second : undefined;
   // Outside a body the call itself is the mistake, and the skip or fail it reaches says so.
-  const condition = currentAttempt() === undefined
-    ? Boolean(first)
-    : readCondition(api, first, (message) => new TestError('INVALID_ARGUMENT', message));
-  return { kind: 'runtime', condition, reason };
+  if (currentAttempt() === undefined) return { kind: 'runtime', condition: Boolean(first), reason };
+  const refuse = (message: string): TestError => new TestError('INVALID_ARGUMENT', message);
+  // A function is always truthy, like a Promise. Playwright takes one only on a describe block.
+  if (typeof first === 'function') {
+    throw refuse(`${api} got a function as its condition; call it and pass the result`);
+  }
+  return { kind: 'runtime', condition: readCondition(api, first, refuse), reason };
 }
 
 /**
@@ -65,8 +68,14 @@ export function parseModifierCall(api: string, args: readonly unknown[]): Modifi
  * so an unawaited async check would decide nothing: it throws the error
  * `refuse` builds from the message.
  */
-export function readCondition(api: string, condition: unknown, refuse: (message: string) => Error): boolean {
-  if (isPromiseLike(condition)) throw refuse(`${api} got a Promise as its condition; await it before the call`);
+export function readCondition(
+  api: string,
+  condition: unknown,
+  refuse: (message: string) => Error,
+): boolean {
+  if (isPromiseLike(condition)) {
+    throw refuse(`${api} got a Promise as its condition; await it before the call`);
+  }
   return Boolean(condition);
 }
 
