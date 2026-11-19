@@ -10,6 +10,14 @@ import { killManagedProcessGroups } from '@e2e-dev/core/lib/run/managed-process'
 /** How long a CLI whose parent died waits on each rung of the ladder before the next. */
 const PARENT_GONE_ESCALATE_MS = 15_000;
 
+/** The slice of `process` the ladder listens on. */
+export interface SignalHost {
+  on(event: 'SIGINT' | 'SIGTERM' | 'disconnect', listener: () => void): unknown;
+  removeListener(event: 'SIGINT' | 'SIGTERM' | 'disconnect', listener: () => void): unknown;
+  readonly send?: unknown;
+  readonly connected: boolean;
+}
+
 /**
  * The escalation ladder behind SIGINT and SIGTERM. The next rung is the first
  * one not yet reached, so the state is the signals themselves: the first
@@ -52,7 +60,11 @@ export class SignalLadder {
    * its parent dying: nobody is left to read the run or press Ctrl-C again,
    * so it climbs the whole ladder on its own, one rung per `parentGoneMs`.
    */
-  arm(exit: (code: number) => void = (code) => process.exit(code), parentGoneMs = PARENT_GONE_ESCALATE_MS): () => void {
+  arm(
+    exit: (code: number) => void = (code) => process.exit(code),
+    parentGoneMs = PARENT_GONE_ESCALATE_MS,
+    host: SignalHost = process,
+  ): () => void {
     const escalate = (): void => this.escalate(exit);
     let climbing: NodeJS.Timeout | undefined;
     const parentGone = (): void => {
@@ -60,15 +72,15 @@ export class SignalLadder {
       climbing = setInterval(escalate, parentGoneMs);
       climbing.unref();
     };
-    process.on('SIGINT', escalate);
-    process.on('SIGTERM', escalate);
-    process.on('disconnect', parentGone);
+    host.on('SIGINT', escalate);
+    host.on('SIGTERM', escalate);
+    host.on('disconnect', parentGone);
     // `process.send` marks a process spawned with a channel: Bun reports `connected: false` without one.
-    if (process.send !== undefined && !process.connected) parentGone();
+    if (host.send !== undefined && !host.connected) parentGone();
     return () => {
-      process.removeListener('SIGINT', escalate);
-      process.removeListener('SIGTERM', escalate);
-      process.removeListener('disconnect', parentGone);
+      host.removeListener('SIGINT', escalate);
+      host.removeListener('SIGTERM', escalate);
+      host.removeListener('disconnect', parentGone);
       clearInterval(climbing);
     };
   }
