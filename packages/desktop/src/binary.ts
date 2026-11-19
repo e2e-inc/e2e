@@ -51,19 +51,19 @@ function executableName(): string {
 }
 
 /**
- * The per-user cache the pinned release unpacks into:
- * `$E2E_CACHE_DIR/agent-desktop/<version>-<target>` when set, else the OS's
- * cache directory. Read from the run's environment, never `process.env`, so
- * `prepare` and the workers agree.
+ * The per-user cache the pinned release unpacks into, under the OS's cache
+ * directory: `~/Library/Caches/e2e` on macOS, `%LOCALAPPDATA%\\e2e\\cache` on
+ * Windows, `$XDG_CACHE_HOME/e2e` (or `~/.cache/e2e`) on Linux. Read from the
+ * run's environment, never `process.env`, so `prepare` and the workers agree.
  */
 function cacheDirectory(env: Readonly<Record<string, string | undefined>>, target: string): string {
+  const home = (process.platform === 'win32' ? env.USERPROFILE : env.HOME) ?? homedir();
   const base =
-    env.E2E_CACHE_DIR ??
-    (process.platform === 'darwin'
-      ? path.join(homedir(), 'Library', 'Caches', 'e2e')
+    process.platform === 'darwin'
+      ? path.join(home, 'Library', 'Caches', 'e2e')
       : process.platform === 'win32'
-        ? path.join(env.LOCALAPPDATA ?? path.join(homedir(), 'AppData', 'Local'), 'e2e', 'cache')
-        : path.join(env.XDG_CACHE_HOME ?? path.join(homedir(), '.cache'), 'e2e'));
+        ? path.join(env.LOCALAPPDATA ?? path.join(home, 'AppData', 'Local'), 'e2e', 'cache')
+        : path.join(env.XDG_CACHE_HOME ?? path.join(home, '.cache'), 'e2e');
   return path.join(base, 'agent-desktop', `${AGENT_DESKTOP_VERSION}-${target}`);
 }
 
@@ -100,10 +100,7 @@ export async function resolveExecutable(binary: string | undefined, projectRoot:
 
 /**
  * Downloads and unpacks the pinned release unless it is already in the
- * cache. The archive is checked against its pinned SHA-256 before anything
- * is unpacked, then unpacked by the OS's `tar` into a fresh directory that
- * replaces the cache entry in one rename, so a download cut short never
- * leaves a half-written executable behind.
+ * cache. Any failure but a cancellation is `AGENT_DESKTOP_INSTALL_FAILED`.
  */
 export async function installPinned(env: Readonly<Record<string, string | undefined>>, signal: AbortSignal, log: (line: string) => void): Promise<string> {
   const target = releaseTarget();
@@ -117,6 +114,22 @@ export async function installPinned(env: Readonly<Record<string, string | undefi
   const archive = `agent-desktop-v${AGENT_DESKTOP_VERSION}-${target}.tar.gz`;
   const url = `https://github.com/vercel-labs/agent-desktop/releases/download/v${AGENT_DESKTOP_VERSION}/${archive}`;
   log(`downloading agent-desktop ${AGENT_DESKTOP_VERSION} (${target})`);
+  try {
+    await download(url, archive, digest, directory, executable, signal);
+  } catch (cause) {
+    if (cause instanceof InfrastructureError || signal.aborted) throw cause;
+    throw new InfrastructureError('AGENT_DESKTOP_INSTALL_FAILED', `installing agent-desktop from ${url} failed: ${(cause as Error).message}`, { cause });
+  }
+  return executable;
+}
+
+/**
+ * Fetches the archive, checks its digest before anything is unpacked, and
+ * unpacks it by the OS's `tar` into a fresh directory that replaces the cache
+ * entry in one rename, so a download cut short never leaves a half-written
+ * executable behind.
+ */
+async function download(url: string, archive: string, digest: string, directory: string, executable: string, signal: AbortSignal): Promise<void> {
   const response = await fetch(url, { signal });
   if (!response.ok) throw new InfrastructureError('AGENT_DESKTOP_INSTALL_FAILED', `downloading ${url} failed: HTTP ${response.status}`);
   const bytes = new Uint8Array(await response.arrayBuffer());
@@ -141,5 +154,4 @@ export async function installPinned(env: Readonly<Record<string, string | undefi
   } finally {
     await rm(staging, { recursive: true, force: true });
   }
-  return executable;
 }
