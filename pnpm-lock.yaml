@@ -170,6 +170,9 @@ importers:
         specifier: workspace:*
         version: link:../../packages/e2e
     devDependencies:
+      '@napi-rs/image':
+        specifier: 1.16.0
+        version: 1.16.0
       '@types/node':
         specifier: 26.6.6
         version: 26.6.6

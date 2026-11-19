@@ -1,5 +1,6 @@
 import { test } from '@e2e-dev/desktop';
 import { readFileSync } from 'node:fs';
+import { Transformer } from '@napi-rs/image';
 import { credentials, expect } from 'e2e';
 
 test.describe('sign-in form', () => {
@@ -41,7 +42,24 @@ test.describe('sign-in form', () => {
   test('takes a screenshot of the window with the password field painted over', async ({ app, screen }) => {
     await screen.getByRole('textbox', 'Password').fill(credentials.user('ada').password);
     const file = await app.screenshot('filled');
-    const png = readFileSync(file);
-    expect(png.subarray(1, 4).toString('latin1')).toBe('PNG');
+    // The password field is 262 points wide, so its mask is a solid black bar of over 400 pixels at 2x; an unmasked window has none.
+    expect(longestBlackRun(new Uint8Array(readFileSync(file)))).toBeGreaterThan(400);
   });
 });
+
+/** The longest run of opaque black pixels in any row of a PNG: the width of a mask, where one was painted. */
+function longestBlackRun(png: Uint8Array): number {
+  const transformer = new Transformer(png);
+  const { width } = transformer.metadataSync();
+  const pixels = transformer.rawPixelsSync();
+  let longest = 0;
+  let run = 0;
+  for (let at = 0; at < pixels.length; at += 4) {
+    if (at % (width * 4) === 0) run = 0;
+    const black = pixels[at] === 0 && pixels[at + 1] === 0 && pixels[at + 2] === 0 && pixels[at + 3] === 255;
+    run = black ? run + 1 : 0;
+    longest = Math.max(longest, run);
+  }
+  return longest;
+}
+
