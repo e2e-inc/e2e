@@ -14,7 +14,7 @@ import type { SelfSkipCause } from '@e2e-dev/core/lib/run/records';
 
 const runtimeSkipBrand: unique symbol = Symbol.for('e2e.runtimeSkip.v1');
 
-export class RuntimeSkip {
+class RuntimeSkip {
   readonly [runtimeSkipBrand] = true as const;
   readonly reason: string;
   readonly cause: SelfSkipCause;
@@ -29,11 +29,21 @@ export class RuntimeSkip {
  * The skip cause a runtime skip reports: its own, or `explicit` for one with
  * none, which a copy of this package from before `test.fixme` throws.
  */
-export function runtimeSkipCause(skip: { readonly cause?: unknown }): SelfSkipCause {
+export function runtimeSkipCause(skip: CaughtRuntimeSkip): SelfSkipCause {
   return skip.cause === 'fixme' ? 'fixme' : 'explicit';
 }
 
-export function isRuntimeSkip(value: unknown): value is RuntimeSkip {
+/**
+ * A caught runtime skip, which may come from another copy of this package.
+ * Its `cause` is not typed, so a reader goes through `runtimeSkipCause`.
+ */
+export interface CaughtRuntimeSkip {
+  readonly reason: string;
+  readonly cause?: unknown;
+}
+
+/** Whether `value` is a runtime skip thrown by any copy of this package. */
+export function isRuntimeSkip(value: unknown): value is CaughtRuntimeSkip {
   return (
     typeof value === 'object' &&
     value !== null &&

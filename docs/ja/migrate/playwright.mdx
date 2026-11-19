@@ -162,7 +162,7 @@ test('checkout', async ({ app, agent, screen }) => {
 | --- | --- |
 | `import { test, expect } from '@playwright/test'` | `import { test } from '@e2e-dev/web'` と `import { expect } from 'e2e'` |
 | テストの `{ page }` | `{ screen, app, browser }` |
-| `test()`, `test.describe()`, `test.only`, `test.fail()`, `test.skip(title, fn)`, `test.skip(condition, reason)`, `test.fixme(title, fn)`, `test.fixme(condition, reason)` | 同じ。条件付きの `skip` と `fixme` はテスト本体または `beforeEach` 内で利用可能 |
+| `test()`, `test.describe()`, `test.only`, `test.fail()`, `test.skip(title, fn)`, `test.skip(condition, reason)`, `test.fixme(title, fn)`, `test.fixme(condition, reason)` | 同じ。条件付きの `skip` と `fixme` はテスト本体または `beforeEach` 内で利用可能。serial グループでは `skip(title, fn)` や `fixme(title, fn)` ではなく、グループに `skip` を指定 |
 | `test.setTimeout()` | テスト本体、`beforeEach`、`beforeAll`（そのフック自身のタイムアウト）では同じ。`afterEach` と `afterAll` からは呼び出せません。`describe` のコールバック内では、代わりに `test.describe` に `{ timeout }` を渡します。タイムアウトなしを意味する `0` はないため、大きな値を渡します |
 | `beforeEach`, `afterEach`, `beforeAll`, `afterAll` | 同じ。ただしタイトルなし。`beforeAll` と `afterAll` が受け取るのはワーカーフィクスチャで、`browser`、`app`、`screen` は受け取らない |
 | `test.describe.skip`, `test.describe.serial`, `describe.configure({ mode: 'serial', retries, timeout })` | `test.describe(title, { skip, serial, retries, timeout }, fn)` |

@@ -2,4 +2,4 @@
 '@e2e-dev/github': patch
 ---
 
-Count a serial test that marks itself `test.fixme` as run when merging a rerun's report.
+After a rerun, the pull request comment counts a serial test that calls `test.fixme()` in its body as run.

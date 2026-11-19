@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { TargetSession } from '@e2e-dev/core/lib/engine/surface';
 import { isCiMode, type ResolvedConfig } from '@e2e-dev/core/lib/config/resolve';
 import { classifyError, ConfigurationError, E2EError, serializeError, sanitizeRecordedText, truncateUtf8, TestError, TestTimeoutError, withHint, type SerializedError } from '@e2e-dev/core/lib/internal/errors';
-import { isRuntimeSkip, runtimeSkipCause, type RuntimeSkip } from '../internal/skip.ts';
+import { isRuntimeSkip, runtimeSkipCause, type CaughtRuntimeSkip } from '../internal/skip.ts';
 import { lateExpectedFailureError } from '@e2e-dev/core/lib/internal/expected-failure';
 import { lateTimeoutError } from '@e2e-dev/core/lib/internal/test-timeout';
 import { settleExpectedFailure } from './expected-failure.ts';
@@ -580,8 +580,8 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
 
     let failure: E2EError | undefined;
     let failurePhase: AttemptPhase | undefined;
-    /** Set when the body (or a beforeEach) skipped the test with `test.skip(...)`. */
-    let skipped: RuntimeSkip | undefined;
+    /** Set when the body (or a beforeEach) skipped the test with `test.skip(...)` or `test.fixme(...)`. */
+    let skipped: CaughtRuntimeSkip | undefined;
     /** Why the attempt is expected to fail: the `fail` option, else the first `test.fail(...)` that marked it. */
     let expectedFailure = pair.options.expectedFailure;
     let phase: AttemptPhase = 'launch';

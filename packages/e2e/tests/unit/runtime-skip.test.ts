@@ -9,8 +9,8 @@ describe('runtimeSkipCause', () => {
   });
 
   it('keeps fixme, and reads any other value as explicit', () => {
-    expect(runtimeSkipCause({ cause: 'fixme' })).toBe('fixme');
-    expect(runtimeSkipCause({ cause: 'explicit' })).toBe('explicit');
-    expect(runtimeSkipCause({ cause: 'skipped' })).toBe('explicit');
+    expect(runtimeSkipCause({ reason: 'r', cause: 'fixme' })).toBe('fixme');
+    expect(runtimeSkipCause({ reason: 'r', cause: 'explicit' })).toBe('explicit');
+    expect(runtimeSkipCause({ reason: 'r', cause: 'skipped' })).toBe('explicit');
   });
 });

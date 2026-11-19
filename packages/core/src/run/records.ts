@@ -140,7 +140,7 @@ export interface AttemptRecord {
   error?: SerializedError;
   failure?: FailureEvidence;
   /**
-   * Why the body skipped itself (`test.skip(condition, reason)`). Always set
+   * Why the body skipped itself (`test.skip` or `test.fixme`). Always set
    * when `status` is `skipped`; also on a failed attempt whose body skipped
    * after a soft failure, or whose teardown failed after the skip.
    */
@@ -169,9 +169,9 @@ export interface SerialMemberRecord {
   /** What the runner saw when this member's failure landed; see `FailureEvidence`. */
   failure?: FailureEvidence;
   /**
-   * Why the member was skipped: its own `test.skip`, or the runner (a failed
-   * predecessor or hook, an interrupt). Also on a failed member that skipped
-   * itself first; see `AttemptRecord.skip`.
+   * Why the member was skipped: its own `test.skip` or `test.fixme`, or the
+   * runner (a failed predecessor or hook, an interrupt). Also on a failed
+   * member that skipped itself first; see `AttemptRecord.skip`.
    */
   skip?: SkipInfo;
   secondaryErrors: SerializedError[];

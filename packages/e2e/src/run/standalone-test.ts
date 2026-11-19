@@ -24,7 +24,7 @@ import {
 } from '@e2e-dev/core/lib/internal/errors';
 import type { ExpectedFailureInfo } from '@e2e-dev/core/lib/internal/expected-failure';
 import { lateTimeoutError } from '@e2e-dev/core/lib/internal/test-timeout';
-import { isRuntimeSkip, type RuntimeSkip } from '../internal/skip.ts';
+import { isRuntimeSkip, type CaughtRuntimeSkip } from '../internal/skip.ts';
 import { settleExpectedFailure } from './expected-failure.ts';
 import { withAbort, withTimeout } from '@e2e-dev/core/lib/internal/time';
 import { AttemptTimeout, type AttemptBudget } from '@e2e-dev/core/lib/run/budget';
@@ -247,7 +247,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
     const secondaryErrors: SerializedError[] = [];
     let failure: E2EError | undefined;
     let failurePhase: RunPhase = 'beforeAll';
-    let skipped: RuntimeSkip | undefined;
+    let skipped: CaughtRuntimeSkip | undefined;
     let expectedFailure = pair.options.expectedFailure;
     let timedOut = false;
     // As in a run's attempt: confirmation stops at what was verified when the
