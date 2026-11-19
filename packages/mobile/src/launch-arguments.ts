@@ -4,7 +4,7 @@
  * value's type on Android. A list is handed over as it is.
  */
 
-import { ConfigurationError, TestError, checkLaunchArguments, type LaunchArgumentValue, type LaunchArguments } from '@e2e-dev/core/engine';
+import { ConfigurationError, TestError, checkLaunchArguments, type LaunchArgumentValue, type ResolvedLaunchArguments } from '@e2e-dev/core/engine';
 import type { MobilePlatform } from './options.ts';
 
 type Code = 'INVALID_CONFIG' | 'INVALID_ARGUMENT';
@@ -33,7 +33,7 @@ const PLIST_UNQUOTED = /^[A-Za-z0-9_$/:.][A-Za-z0-9_$/:.-]*$/;
  * The launch arguments a test hands `device.openApp`, checked like the
  * target's: the declared shape, then the platform's rules.
  */
-export function launchArgumentsForOpen(platform: MobilePlatform, declared: unknown): LaunchArguments | undefined {
+export function launchArgumentsForOpen(platform: MobilePlatform, declared: unknown): ResolvedLaunchArguments | undefined {
   const label = 'device.openApp({ launchArguments })';
   const launchArguments = checkLaunchArguments(label, declared, 'INVALID_ARGUMENT');
   assertLaunchArgumentsFor(platform, label, launchArguments, 'INVALID_ARGUMENT');
@@ -47,13 +47,13 @@ export function launchArgumentsForOpen(platform: MobilePlatform, declared: unkno
  * holds no comma and ends in no backslash; an empty value arrives as one
  * empty item, so neither the list nor an item is empty.
  */
-export function assertLaunchArgumentsFor(platform: MobilePlatform, label: string, launchArguments: LaunchArguments | undefined, code: Code = 'INVALID_CONFIG'): void {
+export function assertLaunchArgumentsFor(platform: MobilePlatform, label: string, launchArguments: ResolvedLaunchArguments | undefined, code: Code = 'INVALID_CONFIG'): void {
   if (platform !== 'android' || launchArguments === undefined || Array.isArray(launchArguments)) return;
   for (const [name, value] of Object.entries(launchArguments)) {
     if (IOS_ONLY_ARGUMENTS.has(name)) {
       fail(code, `${label}.${name} is an iOS launch argument, and Android reads none of Apple's; set the device's language before the run, or language and locale on a hosted device provider`);
     }
-    if (value === undefined || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') continue;
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') continue;
     const problem = androidListProblem(value);
     if (problem !== undefined) fail(code, `${label}.${name} ${problem}: am start splits a list extra on commas`);
   }
@@ -70,14 +70,11 @@ function androidListProblem(items: readonly string[]): string | undefined {
 }
 
 /** The arguments a launch passes the platform's launch command; undefined when there are none. */
-export function launchArgumentList(platform: MobilePlatform, launchArguments: LaunchArguments | undefined): readonly string[] | undefined {
+export function launchArgumentList(platform: MobilePlatform, launchArguments: ResolvedLaunchArguments | undefined): readonly string[] | undefined {
   if (launchArguments === undefined) return undefined;
   const list = Array.isArray(launchArguments)
     ? launchArguments
-    : Object.entries(launchArguments).flatMap(([name, value]) => {
-        if (value === undefined) return [];
-        return platform === 'android' ? androidExtra(name, value) : iosArgument(name, value);
-      });
+    : Object.entries(launchArguments).flatMap(([name, value]) => (platform === 'android' ? androidExtra(name, value) : iosArgument(name, value)));
   return list.length === 0 ? undefined : list;
 }
 
