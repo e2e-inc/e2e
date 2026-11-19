@@ -24,11 +24,14 @@ export interface RawNode {
   readonly value?: string;
   readonly description?: string;
   readonly hint?: string;
+  readonly placeholder?: string;
   readonly native_id?: { readonly kind: string; readonly value: string };
   readonly states?: readonly string[];
   readonly available_actions?: readonly string[];
   readonly bounds?: Rect;
   readonly subtree_truncated?: boolean;
+  /** How many children the element has, when agent-desktop stopped at the depth limit and listed none of them. */
+  readonly children_count?: number;
   readonly children?: readonly RawNode[];
 }
 
@@ -174,11 +177,17 @@ function transparent(raw: RawNode): boolean {
 /**
  * What makes a node the same node in the next snapshot, among its parent's
  * children: its role and its developer id, else its role and name (or, for
- * static text, its text). A field's value is not part of it, so a field keeps
- * its id while it is typed into.
+ * static text, its text). A field's value is not part of it, so a field
+ * keeps its id while it is typed into, and a status with a developer id
+ * keeps its id while its text changes. `named` adds the name to the
+ * developer id, for siblings a toolkit gives one id (AppKit menu items share
+ * `menuItemSelected:`).
  */
-function identityOf(node: RawNode): string {
-  return `${node.role}:${node.native_id?.value ?? node.name ?? (TEXT_ROLES.has(node.role) ? node.value : undefined) ?? ''}`;
+function identityOf(node: RawNode, named = false): string {
+  const name = node.name ?? (TEXT_ROLES.has(node.role) ? node.value : undefined) ?? '';
+  const id = node.native_id?.value;
+  if (id === undefined) return `${node.role}::${name}`;
+  return named ? `${node.role}:${id}:${name}` : `${node.role}:${id}:`;
 }
 
 /**
@@ -207,7 +216,8 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
     const states: Record<string, boolean> = {};
     for (const state of STATE_NAMES) if (rawStates.has(state)) states[state] = true;
     if (rawStates.has('offscreen')) states.hidden = true;
-    if (CHECKABLE_ROLES.has(node.role)) states.checked = rawStates.has('checked') || node.value === '1';
+    // A mixed checkbox is neither checked nor unchecked: no state, so check() and uncheck() always reach the control.
+    if (CHECKABLE_ROLES.has(node.role) && !rawStates.has('indeterminate')) states.checked = rawStates.has('checked') || node.value === '1';
     else if (rawStates.has('checked')) states.checked = true;
     if (node.role === 'combobox' || node.role === 'disclosure' || node.role === 'menubutton') {
       if (node.available_actions?.includes('Expand') === true || node.available_actions?.includes('Collapse') === true) states.expanded = rawStates.has('expanded');
@@ -223,8 +233,10 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
       else secureRects.push(rect);
     }
     const attributes: Record<string, string> = {};
-    const placeholder = label(node.hint);
+    const placeholder = label(node.placeholder);
     if (placeholder !== undefined) attributes.placeholder = placeholder;
+    const hint = label(node.hint);
+    if (hint !== undefined) attributes.hint = hint;
     const description = label(node.description);
     if (description !== undefined) attributes.description = description;
     if (node.native_id !== undefined) attributes['native-id-kind'] = node.native_id.kind;
@@ -243,13 +255,20 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
       else kept.push(child);
     };
     for (const child of node.children ?? []) collect(child);
-    const counts = new Map<string, number>();
-    for (const child of kept) counts.set(identityOf(child), (counts.get(identityOf(child)) ?? 0) + 1);
-    // A look-alike sibling has no identity: if the first of two "Delete" buttons
-    // goes, the second must not take over its id, so each look-alike gets a new id every snapshot.
+    const tally = (named: boolean): Map<string, number> => {
+      const counts = new Map<string, number>();
+      for (const child of kept) counts.set(identityOf(child, named), (counts.get(identityOf(child, named)) ?? 0) + 1);
+      return counts;
+    };
+    const plain = tally(false);
+    const named = tally(true);
+    // Siblings sharing a developer id tell themselves apart by name. A
+    // look-alike that still matches has no identity: if the first of two
+    // "Delete" buttons goes, the second must not take over its id, so each
+    // look-alike gets a new id every snapshot.
     const children = kept.map((child) => {
-      const identity = identityOf(child);
-      return project(child, idFor(counts.get(identity) === 1 ? `${id}/${identity}` : undefined));
+      const identity = plain.get(identityOf(child)) === 1 ? identityOf(child) : named.get(identityOf(child, true)) === 1 ? identityOf(child, true) : undefined;
+      return project(child, idFor(identity === undefined ? undefined : `${id}/${identity}`));
     });
     return {
       ref: { id, revision: '' },
@@ -289,5 +308,7 @@ function headingLevel(node: RawNode): { level?: number } {
 
 function hasTruncatedSubtree(node: RawNode): boolean {
   if (node.subtree_truncated === true) return true;
+  // At the depth limit agent-desktop counts the children it did not list.
+  if (node.children_count !== undefined && node.children_count > (node.children?.length ?? 0)) return true;
   return (node.children ?? []).some(hasTruncatedSubtree);
 }

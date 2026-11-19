@@ -117,6 +117,30 @@ describe('projectSnapshot', () => {
     expect(root.children?.[1]?.role).toBe('image');
   });
 
+  it('counts a node with children it did not list as a cut-short tree', () => {
+    const screen = projectSnapshot({ snapshot_id: 's', complete: true, tree: { role: 'window', name: 'W', children: [{ role: 'group', name: 'Deep', children_count: 3 }] } }, minter());
+    expect(screen.truncated).toBe(true);
+  });
+
+  it('reads a placeholder from its own field, not from a hint', () => {
+    const { root } = projectSnapshot({ snapshot_id: 's', tree: { role: 'window', name: 'W', children: [{ role: 'textfield', name: 'Email', placeholder: 'Email address', hint: 'column 1 of 2', ref_id: '@s:e1' }] } }, minter());
+    expect(root.children?.[0]?.attributes).toMatchObject({ placeholder: 'Email address', hint: 'column 1 of 2' });
+  });
+
+  it('keeps ids for siblings that share a developer id but not a name', () => {
+    const mint = minter();
+    const ids = (screen: ReturnType<typeof projectSnapshot>) => all(screen.root).filter((node) => node.role === 'menuitem').map((node) => node.ref.id);
+    const first = ids(projectSnapshot(load('macos/electron-menu'), mint));
+    const second = ids(projectSnapshot(load('macos/electron-menu'), mint));
+    expect(second).toEqual(first);
+  });
+
+  it('keeps a status its id while its text changes', () => {
+    const mint = minter();
+    const status = (text: string): RawSnapshot => ({ snapshot_id: 's', tree: { role: 'window', name: 'W', children: [{ role: 'statictext', value: text, native_id: { kind: 'ax_identifier', value: 'status' } }] } });
+    expect(projectSnapshot(status('Not signed in'), mint).root.children?.[0]?.ref.id).toBe(projectSnapshot(status('Signed in'), mint).root.children?.[0]?.ref.id);
+  });
+
   it('withholds masking when a secure field has no bounds, and measures rects from the window', () => {
     expect(project('macos/appkit-form').secureRects).toBeUndefined();
     const raw = load('macos/appkit-form');
