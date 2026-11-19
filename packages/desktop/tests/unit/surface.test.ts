@@ -15,8 +15,11 @@ const signal = new AbortController().signal;
 const HOST = hostPlatform() ?? 'linux';
 const children: ChildProcess[] = [];
 const fakes: { spawned: () => number[] }[] = [];
+const surfaces: DesktopSurface[] = [];
 
-afterEach(() => {
+afterEach(async () => {
+  // Disposing removes each surface's private agent-desktop state directory.
+  for (const surface of surfaces.splice(0)) await surface.dispose({ signal, timeoutMs: 2_000 }).catch(() => undefined);
   for (const child of children.splice(0)) child.kill('SIGKILL');
   cleanupFakes();
   for (const fake of fakes.splice(0)) {
@@ -29,6 +32,12 @@ afterEach(() => {
     }
   }
 });
+
+/** A surface disposed after the test, so its state directory is removed. */
+function tracked(surface: DesktopSurface): DesktopSurface {
+  surfaces.push(surface);
+  return surface;
+}
 
 /** In a scripted answer, the pid of the process the fake's `launch` started for the app. */
 const SPAWNED = '$spawned' as unknown as number;
@@ -94,6 +103,7 @@ async function initialized(scenario: Scenario | ((pid: number) => Scenario), { s
     },
   };
   const surface = new DesktopSurface(resolveOptions({ binary: FAKE_BINARY, settle: false, ...options }), HOST);
+  surfaces.push(surface);
   await surface.init({
     runId: 'run',
     targetName: 'macos',
@@ -477,7 +487,7 @@ describe('DesktopSurface', () => {
     try {
       const fake = fakeScenario({ status: [{ ok: true, data: { version: '1.3.1', permissions: { accessibility: { state: 'granted' } } } }] });
       const init = (bundleId: string) =>
-        new DesktopSurface(resolveOptions({ binary: FAKE_BINARY }), 'macos').init({ runId: 'r', targetName: 'mac', projectRoot: directory, app: { appPath: 'Built.app', bundleId }, env: fake.env, headed: false, workerSlot: 0, signal, log: () => undefined });
+        tracked(new DesktopSurface(resolveOptions({ binary: FAKE_BINARY }), 'macos')).init({ runId: 'r', targetName: 'mac', projectRoot: directory, app: { appPath: 'Built.app', bundleId }, env: fake.env, headed: false, workerSlot: 0, signal, log: () => undefined });
       await expect(init('dev.e2e.built')).resolves.toBeUndefined();
       await expect(init('com.example.other')).rejects.toThrow(/is not the CFBundleIdentifier "dev.e2e.built"/);
     } finally {
@@ -564,7 +574,7 @@ describe('DesktopSurface', () => {
     mkdirSync(path.join(directory, 'Empty.app'));
     try {
       const fake = fakeScenario({ status: [{ ok: true, data: { version: '1.3.1', permissions: { accessibility: { state: 'granted' }, screen_recording: { state: 'granted' } } } }] });
-      const surface = new DesktopSurface(resolveOptions({ binary: FAKE_BINARY }), 'macos');
+      const surface = tracked(new DesktopSurface(resolveOptions({ binary: FAKE_BINARY }), 'macos'));
       const checks = await surface.doctor({ targetName: 'mac', projectRoot: directory, app: { appPath: 'Empty.app' }, env: fake.env, headed: false, signal, log: () => undefined });
       expect(checks.find((check) => check.id === 'app-path')).toMatchObject({ status: 'fail', message: expect.stringMatching(/no Contents\/Info.plist/) });
     } finally {
@@ -578,7 +588,7 @@ describe('DesktopSurface', () => {
     writeFileSync(path.join(directory, 'Built.app', 'Contents', 'Info.plist'), '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>dev.e2e.built</string></dict></plist>');
     try {
       const fake = fakeScenario({ status: [{ ok: true, data: { version: '1.3.1', permissions: { accessibility: { state: 'granted' } } } }] });
-      const surface = new DesktopSurface(resolveOptions({ binary: FAKE_BINARY }), 'macos');
+      const surface = tracked(new DesktopSurface(resolveOptions({ binary: FAKE_BINARY }), 'macos'));
       await surface.init({ runId: 'r', targetName: 'mac', projectRoot: directory, app: { appPath: 'Built.app' }, env: fake.env, headed: false, workerSlot: 0, signal, log: () => undefined });
       await expect(surface.restart({ ...operation(), timeoutMs: 0 })).rejects.toMatchObject({ code: 'OPERATION_TIMEOUT' });
     } finally {
