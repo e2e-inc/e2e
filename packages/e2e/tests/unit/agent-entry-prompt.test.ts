@@ -54,6 +54,17 @@ describe('the built-in agent from its agents entry', () => {
     expect(system).toContain('Project context:\nPlans are called tiers.');
   });
 
+  it('tells the act loop to check a commit before it presses the control again', async () => {
+    const model = installFakeLoopModel(() => conclude);
+    const fixtures = runtime({ agents: { default: { model } } });
+    await fixtures.agent.act('save the product');
+    const system = loopCalls[0]!.system;
+    expect(system).toContain('Never press it again before you check whether the first press committed.');
+    expect(system).toContain('When the check shows neither, do not press it again: conclude from the screen you have.');
+    expect(system).toContain('Do not leave the screen (navigate, go back, open another page) to confirm a commit unless the step asks for that.');
+    expect(system).not.toContain('means the decisive action did not land: act again');
+  });
+
   it('joins the context with the test-level agentContext', async () => {
     const model = installFakeLoopModel(() => conclude);
     const fixtures = runtime(
