@@ -771,7 +771,24 @@ trees, on both platforms, without a device.
   newer sibling's export or contract field;
   `scripts/check-peer-ranges.ts` (`pnpm check`) fails on any other shape for
   every peer one package under `packages/` has on another (vendor SDK peers
-  such as `@onkernel/sdk` are not checked). Narrow or exact, every runner minor (exact: every patch too)
+  such as `@onkernel/sdk` are not checked). The floor must name a version the
+  sibling released, or the sibling's version in the same release, and a raise
+  past a runner minor the previous range accepted needs a `**Breaking:**`
+  minor changeset (`scripts/check-changeset-bumps.ts`); a new `e2e/engine`
+  or `@e2e-dev/core/engine` import counts as a raise, so the check also fails
+  any named import from `e2e`, an `e2e/*` entry, `@e2e-dev/core`, or an
+  `@e2e-dev/core/*` entry the floor version does not export, read off the
+  `<sibling>@<version>` tag, or off the working tree when the floor names the
+  version the sibling's pending changesets will release, or the version
+  `changeset version` just wrote into the sibling's manifest, since that tag
+  does not exist yet, or off the export fixture in `scripts/fixtures` when the
+  version was published with no tag at all (a namespace import is reported
+  as an unverifiable note instead, since its names cannot be enumerated,
+  unless the floor version does not export that subpath at all, in which
+  case it fails). Rule (c) covers
+  both siblings: an engine's imports from `@e2e-dev/core/engine` are checked
+  against its declared core peer floor the same way. Narrow or exact, every runner
+  minor (exact: every patch too)
   falls out of range, and changesets 3 then patch-bumps each engine and
   rewrites its pin, never a major (`determineDependents` in
   `@changesets/assemble-release-plan` patches an out-of-range peer dependent).
