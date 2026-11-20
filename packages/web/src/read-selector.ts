@@ -53,19 +53,10 @@ export function readSelector(options: Omit<ReadSelectorBody, 'token'>): { readon
 export const READ_SELECTOR_ENGINE_SOURCE = `() => {
   const read = (${readSemanticsFunction.toString()});
   const key = Symbol.for(${JSON.stringify(READS_KEY)});
-  // Reads of one synchronous selector operation share what the page cannot change between them (\`SharedReads\`); a microtask ends the operation.
-  let shared = null;
-  const sharedReads = () => {
-    if (shared === null) {
-      shared = { closedSlots: new Map() };
-      queueMicrotask(() => { shared = null; });
-    }
-    return shared;
-  };
   const queryAll = (root, selector) => {
     if (root.nodeType !== 1) return [];
     const body = JSON.parse(selector);
-    const options = { testIdAttribute: body.testIdAttribute, secureFieldSelector: body.secureFieldSelector, mode: { kind: 'node' }, shared: sharedReads() };
+    const options = { testIdAttribute: body.testIdAttribute, secureFieldSelector: body.secureFieldSelector, mode: { kind: 'node' } };
     if (!Object.prototype.hasOwnProperty.call(root, key)) {
       Object.defineProperty(root, key, { value: new Map(), enumerable: false, configurable: false, writable: false });
     }

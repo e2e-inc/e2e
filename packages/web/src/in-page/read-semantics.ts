@@ -21,26 +21,9 @@ import type { RawNodeData, RawObservedNode, SemanticMode, SemanticResult } from 
  * modes also project nodes differently; those differences are data (see
  * `projection` below), not scattered branches.
  */
-/**
- * Where each light child of a tracked closed root's host is slotted: by slot
- * name for a root that assigns by name, by element for one that assigns by
- * hand (`closedSlotsOf` inside the reader).
- */
-export type ClosedSlots = Map<ShadowRoot, { readonly byName: Map<string, Element>; readonly byElement: Map<Element, Element> }>;
-
-/**
- * What consecutive reads of one synchronous selector operation share. A
- * selector engine reads each candidate in its own call, and the page cannot
- * change between them, so the closed roots' slots are read once per
- * operation instead of once per match.
- */
-export interface SharedReads {
-  readonly closedSlots: ClosedSlots;
-}
-
 export const readSemanticsFunction = <Mode extends SemanticMode>(
   element: Element,
-  options: { testIdAttribute: string; secureFieldSelector: string; mode: Mode; shared?: SharedReads },
+  options: { testIdAttribute: string; secureFieldSelector: string; mode: Mode },
 ): SemanticResult<Mode> => {
   const SKIP_TAGS = [
     'script',
@@ -428,16 +411,10 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   const styleOf = (el: Element): CSSStyleDeclaration | undefined =>
     el.ownerDocument.defaultView?.getComputedStyle(el);
 
-  /**
-   * The `display` values on which `content-visibility: hidden` skips nothing,
-   * since the box cannot contain its contents: no box of its own
-   * (`contents`), a non-atomic inline box, and table rows, row groups and
-   * ruby text, each checked against `checkVisibility()` in Chromium. A table
-   * cell and an inline block do skip theirs.
-   */
+  /** `display` values on which `content-visibility: hidden` skips nothing (checked against `checkVisibility()` in Chromium). */
   const BOXES_THAT_SKIP_NOTHING = new Set(['contents', 'inline', 'table-row', 'table-row-group', 'table-header-group', 'table-footer-group', 'ruby-text']);
 
-  /** Whether an element with this computed style renders nothing under it: `content-visibility: hidden` on a box that can contain its contents. */
+  /** Whether an element with this style renders nothing under it. */
   const skipsContents = (style: CSSStyleDeclaration | undefined): boolean =>
     style?.getPropertyValue('content-visibility') === 'hidden' && !BOXES_THAT_SKIP_NOTHING.has(style.display);
 
@@ -1133,11 +1110,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     return rect.width > 0 && rect.height > 0;
   };
 
-  /**
-   * A `<details>` element's summary: its first child that is an HTML
-   * `<summary>`, as the browser picks it. Memoized, so the children of a wide
-   * `<details>` share one look.
-   */
+  /** A `<details>` element's summary: its first HTML `<summary>` child. */
   const firstSummaryOf = memoized((details: Element): Element | null => {
     for (let child = details.firstElementChild; child !== null; child = child.nextElementSibling) {
       if (child.localName === 'summary' && isHtml(child)) return child;
@@ -1146,11 +1119,9 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   });
 
   /**
-   * Whether a `<details>` element skips rendering its body: what its
-   * `::details-content` computes for `content-visibility`, which the browser
-   * sets to `hidden` while the element is closed and a page's CSS can set back
-   * to `visible` to show a closed body. A browser without that pseudo element
-   * computes nothing for it, and then the `open` attribute decides.
+   * Whether a `<details>` element hides its body: its `::details-content`
+   * computes `content-visibility: hidden`, so page CSS can show a closed body.
+   * Without that pseudo element, the `open` attribute decides.
    */
   const foldsBody = memoized((details: Element): boolean => {
     const skip = details.ownerDocument.defaultView?.getComputedStyle(details, '::details-content').getPropertyValue('content-visibility') ?? '';
@@ -1158,15 +1129,10 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   });
 
   /**
-   * True for content a closed `<details>` folds away (`foldsBody`): anything
-   * under it in the flat tree that is not in its first HTML `<summary>` child, so what is
-   * slotted into a `<details>` of a shadow root folds with it, and so does
-   * the shadow tree of a host under one. Every closed `<details>` on the way
-   * up is asked, so a summary's own controls stay visible while the closed
-   * body's do not, nested `<details>` and their summaries included.
-   * Memoized, so siblings under one ancestor share the walk up. A
-   * `<details>` is known by its name, not `instanceof`: one adopted from
-   * another frame keeps that frame's prototype.
+   * True for content a closed `<details>` folds away: anything under it in the
+   * flat tree, slotted and shadow content included, outside its summary.
+   * Every `<details>` on the way up is asked. Known by name, not `instanceof`,
+   * so one adopted from another frame still counts.
    */
   const isInClosedDetails = memoized((el: Element): boolean => {
     const parent = flatParentOf(el);
@@ -1177,10 +1143,8 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
 
   /**
    * True when an ancestor in the flat tree skips its contents
-   * (`skipsContents`): it keeps its own box and skips rendering
-   * everything under it, slotted and shadow content included, as
-   * `checkVisibility()` reads it. Memoized, so siblings under one ancestor
-   * share the walk up.
+   * (`skipsContents`), slotted and shadow content included, as
+   * `checkVisibility()` reads it.
    */
   const isSkippedContent = memoized((el: Element): boolean => {
     const parent = flatParentOf(el);
@@ -1309,49 +1273,27 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     return found;
   };
 
-  /** Whether `node` is an HTML element: `slot` and `summary` also match SVG or MathML elements of those names, which slot and summarize nothing. */
+  /** Whether `node` is an HTML element; an SVG `slot` or a foreign `summary` does nothing. */
   const isHtml = (node: Element): boolean => node.namespaceURI === 'http://www.w3.org/1999/xhtml';
 
-  /**
-   * Where each light child of a tracked closed root's host is slotted, read
-   * once per root in a read: a named root maps each slot name to its first
-   * HTML slot in tree order, as named assignment picks it, and a root that
-   * assigns by hand (`slotAssignment: 'manual'`) maps each assigned element
-   * to its slot. One read of the slots per root, however many children the
-   * host has.
-   */
-  const closedSlots: ClosedSlots = options.shared?.closedSlots ?? new Map();
-  const closedSlotsOf = (shadow: ShadowRoot): { readonly byName: Map<string, Element>; readonly byElement: Map<Element, Element> } => {
-    let slots = closedSlots.get(shadow);
-    if (slots === undefined) {
-      slots = { byName: new Map(), byElement: new Map() };
-      const manual = shadow.slotAssignment === 'manual';
-      for (const slot of Array.from(shadow.querySelectorAll('slot'))) {
-        if (!isHtml(slot)) continue;
-        if (manual) {
-          for (const assigned of (slot as HTMLSlotElement).assignedElements()) if (!slots.byElement.has(assigned)) slots.byElement.set(assigned, slot);
-        } else {
-          const name = slot.getAttribute('name') ?? '';
-          if (!slots.byName.has(name)) slots.byName.set(name, slot);
-        }
-      }
-      closedSlots.set(shadow, slots);
-    }
-    return slots;
-  };
+  /** Each element a tracked closed root's HTML slots hold, mapped to its slot; read once per root in a read. */
+  const closedSlots = new Map<ShadowRoot, Map<Element, Element>>();
 
-  /**
-   * The slot an element is assigned to: `assignedSlot`, which a closed root
-   * hides from the outside, else the tracked closed root's slot for it
-   * (`closedSlotsOf`), by the element's `slot` name or by hand.
-   */
+  /** The slot an element is assigned to: `assignedSlot`, which a closed root hides from the outside, else the tracked closed root's slot for it. */
   const slotOf = (el: Element): Element | null => {
     if (el.assignedSlot !== null) return el.assignedSlot;
     const host = el.parentElement;
     const shadow = host === null ? undefined : closedShadowRoots?.get(host);
     if (shadow === undefined) return null;
-    const slots = closedSlotsOf(shadow);
-    return shadow.slotAssignment === 'manual' ? (slots.byElement.get(el) ?? null) : (slots.byName.get(el.getAttribute('slot') ?? '') ?? null);
+    let slots = closedSlots.get(shadow);
+    if (slots === undefined) {
+      slots = new Map();
+      for (const slot of Array.from(shadow.querySelectorAll('slot'))) {
+        if (isHtml(slot)) for (const assigned of (slot as HTMLSlotElement).assignedElements()) slots.set(assigned, slot);
+      }
+      closedSlots.set(shadow, slots);
+    }
+    return slots.get(el) ?? null;
   };
 
   /** An element's parent in the flat tree: its slot, the tree parent, or the host at a shadow root. */

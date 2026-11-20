@@ -13,10 +13,7 @@ import type { SemanticNode } from '@e2e-dev/core/engine';
 import { CLOSED_SHADOW_ROOTS_INIT_SCRIPT } from '../../src/closed-shadow.ts';
 import { captureDocument } from '../../src/observation.ts';
 import { readSemanticsFunction } from '../../src/in-page/read-semantics.ts';
-import { EXACT_LABEL_SELECTOR_ENGINE_SOURCE } from '../../src/label-selector.ts';
-import { READ_SELECTOR_ENGINE_SOURCE } from '../../src/read-selector.ts';
 import { SECURE_FIELD_SELECTOR } from '../../src/read-node.ts';
-import { SHOWN_SELECTOR_ENGINE_SOURCE } from '../../src/shown-selector.ts';
 
 let browser: Browser;
 let context: BrowserContext;
@@ -210,7 +207,7 @@ describe('visibility across shadow boundaries, in the flat tree', () => {
     await other.close();
   });
 
-  it('lists the slots of a closed root once per read, however many children its host slots', async () => {
+  it('reads the slots of a closed root once per read, however many children its host slots', async () => {
     const other = await context.newPage();
     const rows = Array.from({ length: 1000 }, (_, index) => `<span slot="s${index}">Row</span>`).join('') + '<span>Row</span>'.repeat(1000);
     const slots = Array.from({ length: 1000 }, (_, index) => `<slot name="s${index}"></slot>`).join('') + '<slot></slot>';
@@ -244,24 +241,8 @@ describe('visibility across shadow boundaries, in the flat tree', () => {
       other,
       { framePath: [], budget: 200, deadline: Date.now() + 10_000, signal: new AbortController().signal },
     );
-    const expectAtMostOneList = ({ scans, lists }: { scans: number; lists: number }): void => {
-      expect({ scans, listsAtMostOnce: lists <= 1 }).toEqual({ scans: 0, listsAtMostOnce: true });
-    };
-    const counts = (): Promise<{ scans: number; lists: number }> =>
-      other.evaluate(() => {
-        const { counts: current } = globalThis as unknown as { counts: { scans: number; lists: number } };
-        const taken = { ...current };
-        current.scans = 0;
-        current.lists = 0;
-        return taken;
-      });
-    expectAtMostOneList(await counts());
-    // A locator reads each match in its own reader call.
-    const spans = other.locator('many-host > span');
-    for (let index = 0; index < 5; index += 1) {
-      await spans.nth(index).evaluate(readSemanticsFunction<typeof READ_OPTIONS.mode>, READ_OPTIONS);
-      expectAtMostOneList(await counts());
-    }
+    // One listing of the root's 1,001 slots and one read of each, not one per slotted child.
+    expect(await other.evaluate(() => (globalThis as unknown as { counts: { scans: number; lists: number } }).counts)).toEqual({ scans: 1001, lists: 1 });
     await other.close();
   });
 
@@ -296,70 +277,6 @@ describe('visibility across shadow boundaries, in the flat tree', () => {
     );
     // One walk of the children, plus whatever else of the read steps through them; never one walk per child.
     expect(await other.evaluate(() => (globalThis as unknown as { counter: { reads: number } }).counter.reads)).toBeLessThanOrEqual(3 * 2000);
-    await other.close();
-  });
-
-  it.each([
-    ['shown', SHOWN_SELECTOR_ENGINE_SOURCE, '', 'each'],
-    ['read', READ_SELECTOR_ENGINE_SOURCE, JSON.stringify({ testIdAttribute: 'data-testid', secureFieldSelector: SECURE_FIELD_SELECTOR, token: 't' }), 'each'],
-    ['label', EXACT_LABEL_SELECTOR_ENGINE_SOURCE, JSON.stringify({ value: 'Row', testIdAttribute: 'data-testid', secureFieldSelector: SECURE_FIELD_SELECTOR }), 'once'],
-  ])('reads the slots of a closed root once per %s selector operation, however many matches it reads', async (_engine, source, selector, calls) => {
-    const other = await context.newPage();
-    await other.setContent(`<many-host>${'<button>Row</button>'.repeat(1000)}</many-host><script>
-      customElements.define('many-host', class extends HTMLElement {
-        constructor() {
-          super();
-          const root = this.attachShadow({ mode: 'closed', slotAssignment: 'manual' });
-          root.innerHTML = '<div><slot></slot></div>';
-          root.querySelector('slot').assign(...this.children);
-        }
-      });
-    </script>`);
-    const work = await other.evaluate(({ source: engineSource, selector: body, calls: callStyle }) => {
-      const counts = { assigned: 0, lists: 0 };
-      const scan = HTMLSlotElement.prototype.assignedElements;
-      HTMLSlotElement.prototype.assignedElements = function (this: HTMLSlotElement, options?: AssignedNodesOptions) {
-        const found = scan.call(this, options);
-        counts.assigned += found.length;
-        return found;
-      };
-      const list = ShadowRoot.prototype.querySelectorAll;
-      ShadowRoot.prototype.querySelectorAll = function (this: ShadowRoot, selectors: string) {
-        if (selectors === 'slot') counts.lists += 1;
-        return list.call(this, selectors);
-      } as typeof list;
-      // eslint-disable-next-line no-new-func
-      const engine = (new Function(`return (${engineSource})()`) as () => { queryAll: (root: Element, selector: string) => Element[] })();
-      // One selector operation: Playwright calls the engine once per candidate, synchronously.
-      // The label engine reads every labelable candidate under one root in a single call.
-      const matched = callStyle === 'once'
-        ? engine.queryAll(document.documentElement, body)
-        : Array.from(document.querySelectorAll('many-host > button')).flatMap((button) => engine.queryAll(button, body));
-      return { read: matched.length > 0 || callStyle === 'once', ...counts };
-    }, { source, selector, calls });
-    expect(work).toEqual({ read: true, assigned: 1000, lists: 1 });
-    await other.close();
-  });
-
-  it('reads slots again in the next selector operation, after the page moved an element to another slot', async () => {
-    const other = await context.newPage();
-    await other.setContent(`<moving-host><button id="moving">Moving</button></moving-host><script>
-      customElements.define('moving-host', class extends HTMLElement {
-        constructor() {
-          super();
-          const root = this.attachShadow({ mode: 'closed', slotAssignment: 'manual' });
-          root.innerHTML = '<details><summary><slot id="label"></slot></summary><slot id="body"></slot></details>';
-          root.getElementById('body').assign(this.querySelector('#moving'));
-          window.moveToSummary = () => root.getElementById('label').assign(this.querySelector('#moving'));
-        }
-      });
-      window.shown = (${SHOWN_SELECTOR_ENGINE_SOURCE})();
-    </script>`);
-    const shownNow = (): Promise<boolean> =>
-      other.evaluate(() => (globalThis as unknown as { shown: { queryAll: (root: Element, selector: string) => Element[] } }).shown.queryAll(document.querySelector('#moving')!, '').length === 1);
-    expect(await shownNow()).toBe(false);
-    await other.evaluate(() => (globalThis as unknown as { moveToSummary: () => void }).moveToSummary());
-    expect(await shownNow()).toBe(true);
     await other.close();
   });
 

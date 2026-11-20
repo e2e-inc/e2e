@@ -53,19 +53,10 @@ export function exactLabelSelector(body: ExactLabelSelectorBody): string {
 export const EXACT_LABEL_SELECTOR_ENGINE_SOURCE = `() => {${CLOSED_SHADOW_HELPERS_SOURCE}
   const read = (${readSemanticsFunction.toString()});
   const normalize = (text) => text.replace(/\\s+/gu, ' ').trim();
-  // Reads of one synchronous selector operation share what the page cannot change between them (\`SharedReads\`); a microtask ends the operation.
-  let shared = null;
-  const sharedReads = () => {
-    if (shared === null) {
-      shared = { closedSlots: new Map() };
-      queueMicrotask(() => { shared = null; });
-    }
-    return shared;
-  };
   const queryAll = (root, selector) => {
     const body = JSON.parse(selector);
     const expected = normalize(body.value);
-    const options = { testIdAttribute: body.testIdAttribute, secureFieldSelector: body.secureFieldSelector, mode: { kind: 'node' }, shared: sharedReads() };
+    const options = { testIdAttribute: body.testIdAttribute, secureFieldSelector: body.secureFieldSelector, mode: { kind: 'node' } };
     const candidates = matchesIn(root, ${JSON.stringify(LABELABLE_SELECTOR)}, []);
     for (const closed of closedRootsUnder(root, [])) matchesIn(closed, ${JSON.stringify(LABELABLE_SELECTOR)}, candidates);
     return candidates.filter((el) => (read(el, options).labels ?? []).some((label) => normalize(label) === expected));
