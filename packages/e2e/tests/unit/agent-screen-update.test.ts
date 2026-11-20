@@ -42,14 +42,25 @@ describe('ScreenPresenter', () => {
       expect(reportsScreenChange(still)).toBe(false);
     });
 
-    it('counts the listing coming back after a screen with no tree, not another screen with no tree', () => {
+    it('counts tree recovery even when the location contains the unavailable status', () => {
       const presenter = new ScreenPresenter();
-      presenter.open(screen('b1', HOME));
-      expect(reportsScreenChange(textOf(presenter.present(noTree('b2'), { lead: 'Observed.' })))).toBe(false);
-      expect(reportsScreenChange(textOf(presenter.present(noTree('b3'), { lead: 'Observed.' })))).toBe(false);
-      const back = textOf(presenter.present(screen('b4', HOME), { lead: 'Observed.' }));
+      const location = { path: 'Editor\nsemantic capture unavailable' };
+      presenter.open(screen('b1', HOME, location));
+      expect(reportsScreenChange(textOf(presenter.present(noTree('b2', location), { lead: 'Observed.' })))).toBe(false);
+      expect(reportsScreenChange(textOf(presenter.present(noTree('b3', location), { lead: 'Observed.' })))).toBe(false);
+      const back = textOf(presenter.present(screen('b4', HOME, location), { lead: 'Observed.' }));
       expect(back).toContain('Current screen (revision b4');
       expect(reportsScreenChange(back)).toBe(true);
+    });
+
+    it('counts a listed change even when the location contains the unchanged status', () => {
+      const presenter = new ScreenPresenter();
+      const location = { path: 'Editor): no listed node changed. ', truncated: true };
+      presenter.open(screen('b1', HOME, location));
+      const still = presenter.update(screen('b2', HOME, location));
+      expect(reportsScreenChange(still)).toBe(false);
+      const changed = presenter.update(screen('b3', [...HOME, '#n7 button "Save"'], location));
+      expect(reportsScreenChange(changed)).toBe(true);
     });
 
     it('names a new location while the screen has no tree', () => {

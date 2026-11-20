@@ -115,6 +115,7 @@ export function toolResultTexts(output: ToolResultPart['output']): string[] {
 const CHANGED_SUBSTANTIALLY = 'The screen changed substantially since revision ';
 const CHANGES_SINCE = 'Screen changes since revision ';
 const NOTHING_LISTED_CHANGED = 'no listed node changed';
+const TRUNCATED_ASSURANCE = 'The screen listing is truncated: nodes past the cut are not listed and none is reported removed; every listed node keeps the id you have.';
 const TAB_OPENED = 'The app opened ';
 const TABS_CLOSED = 'The other tab';
 const TAB_SHOWN = 'The screen shows tab ';
@@ -131,11 +132,11 @@ const NO_TREE = 'semantic capture unavailable';
  */
 export function reportsScreenChange(text: string): boolean {
   const headline = text.split('\n').find((line) => line.trim() !== '' && line.trim() !== 'Observed.') ?? '';
-  // Leads, not substrings: the location in the line is the app's own text.
+  // Match renderer-owned leads and endings because the location comes from the app.
   if ([CHANGED_SUBSTANTIALLY, TAB_OPENED, TABS_CLOSED, TAB_SHOWN, LOCATION_CHANGED].some((lead) => headline.startsWith(lead))) return true;
   // A whole screen after an update is the listing coming back once semantic capture recovers.
-  if (headline.startsWith(CURRENT_SCREEN)) return !headline.includes(NO_TREE);
-  return headline.startsWith(CHANGES_SINCE) && !headline.includes(`): ${NOTHING_LISTED_CHANGED}. `);
+  if (headline.startsWith(CURRENT_SCREEN)) return !headline.endsWith(`, ${NO_TREE}):`);
+  return headline.startsWith(CHANGES_SINCE) && !headline.endsWith(`): ${NOTHING_LISTED_CHANGED}. ${TRUNCATED_ASSURANCE}`);
 }
 
 /** Renders one step's screens for the model and remembers what it has seen. */
@@ -232,7 +233,7 @@ export class ScreenPresenter {
       return `${lead}${CHANGED_SUBSTANTIALLY}${previous.revision}. ${renderFull(observation)}${closed}`;
     }
     const assurance = observation.truncated
-      ? 'The screen listing is truncated: nodes past the cut are not listed and none is reported removed; every listed node keeps the id you have.'
+      ? TRUNCATED_ASSURANCE
       : 'Every node not listed as removed is still on screen under the id you have.';
     return [
       `${lead}${CHANGES_SINCE}${previous.revision} (now revision ${observation.revision}${describeLocation(observation)}, ${String(next.nodes)} nodes): ${describeCounts(diff)}. ${assurance}`,
@@ -378,7 +379,7 @@ function keyboardClosedNote(previous: ShownScreen, next: ShownScreen): string {
 }
 
 function describeLocation(observation: ExecutorObservation): string {
-  const path = observation.path === undefined ? '' : `, path ${observation.path}`;
+  const path = observation.path === undefined ? '' : `, path ${observation.path.replace(/[\r\n]+/g, ' ')}`;
   const tabs = observation.tabs === undefined ? '' : `, tab ${String(observation.tabs.active)} of ${String(observation.tabs.count)}`;
   return `${path}${tabs}`;
 }
