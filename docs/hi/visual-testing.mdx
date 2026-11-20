@@ -12,9 +12,9 @@ import { Video } from '../snippets/video.jsx';
 टेस्ट ब्राउज़र, iOS सिम्युलेटर और Android एम्युलेटर को जाँचता है।
 
 <Video>
-  <video src="/images/visual-testing.mp4" aria-label="टर्मिनल में एक फ़ेल हुआ toHaveScreenshot असर्शन, फिर अपेक्षित, असली और डिफ़ इमेज अगल-बगल।" muted loop playsInline controls />
+  <video src="/images/visual-testing.mp4" aria-label="टर्मिनल में फ़ेल हुआ toHaveScreenshot असर्शन, फिर अगल-बगल अपेक्षित इमेज, रन में ली गई इमेज और डिफ़ इमेज।" muted loop playsInline controls />
 
-  एक फ़ेल हुई तुलना, फिर उसकी अपेक्षित, असली और डिफ़ इमेज।
+  फ़ेल हुई तुलना, फिर उसकी अपेक्षित इमेज, रन में ली गई इमेज और डिफ़ इमेज।
 </Video>
 
 ```ts title="tests/checkout.e2e.ts"
@@ -124,7 +124,7 @@ await expect(screen).toHaveScreenshot('dashboard.png', {
 | `threshold` | `0.2` | एक पिक्सल का रंग कितना बदलकर भी वैसा ही गिना जाए, 0 से 1 |
 | `maxDiffPixels` | `0` | कितने पिक्सल अलग हो सकते हैं |
 | `maxDiffPixelRatio` | `0` | पिक्सल का कितना हिस्सा अलग हो सकता है, 0 से 1 |
-| `mask` | कोई नहीं | वे लोकेटर जिन पर तुलना से पहले रंग भर दिया जाता है, उस कंटेंट के लिए जो एक रन से दूसरे रन में बदलता है |
+| `mask` | कोई नहीं | बदलते कंटेंट के लोकेटर। तुलना से पहले इन लोकेटर से मिले हिस्सों को रंग से ढक दिया जाता है। |
 | `maskColor` | `#ff00ff` | मास्क बॉक्स का रंग |
 | `timeout` | `assertionTimeout` | असर्शन का बजट, मिलीसेकंड में |
 
