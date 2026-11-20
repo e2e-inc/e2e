@@ -966,12 +966,14 @@ export class PlaywrightSurface {
 
   /**
    * Measures how much of a located or observed element is inside the
-   * viewport with an `IntersectionObserver`, as Playwright's
-   * `toBeInViewport` does, so scrolling and overflow ancestors and frames
-   * clip it. An element with no box, or an empty one, is outside.
+   * viewport with the page's `IntersectionObserver`, the check Playwright's
+   * `toBeInViewport` makes, so scrolling and overflow ancestors and frames
+   * clip it. An element with no box, or an empty one, is outside. It runs
+   * in the page's own world, as `readStyle` does, so an app that replaces
+   * `IntersectionObserver` changes what it reads.
    */
   viewportIntersection(ref: NodeRef, operation: OperationContext): Promise<ViewportIntersection> {
-    return this.guard(operation, 'measure viewport intersection', async (currentOperation) => {
+    return this.guard(operation, 'measure viewport intersection', (currentOperation) => this.readingTab(async () => {
       const target = await this.requireSession().refs.lookup(ref);
       let element: ElementHandle;
       if (target.kind === 'element') {
@@ -985,8 +987,8 @@ export class PlaywrightSurface {
         }
         element = handles[0]!;
       }
-      currentOperation.signal.throwIfAborted();
       try {
+        currentOperation.signal.throwIfAborted();
         const measured = await element.evaluate(measureViewportIntersection);
         if (measured === 'detached') throw new EngineError('NODE_STALE', 'node is detached; locate it again', { retryable: true });
         if (measured === 'unsupported') {
@@ -998,7 +1000,7 @@ export class PlaywrightSurface {
       } finally {
         if (target.kind === 'locator') void element.dispose().catch(() => undefined);
       }
-    }, navigationStaleOr);
+    }), navigationStaleOr);
   }
 
   // --- location tier ---
