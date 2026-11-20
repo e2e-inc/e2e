@@ -213,15 +213,18 @@ export interface Device {
    * Whether the soft keyboard is on screen, from a capture (taken again,
    * within the action timeout, while the keyboard is still moving): what
    * agent-device reported for it (a visibility probe, a measured or derived
-   * keyboard frame, or proof that there is none), else a keyboard element
-   * drawn on screen in the accessibility tree, the same keyboard
-   * observations hide covered nodes under. Only agent-device's proof
+   * keyboard frame, or proof that there is none), else the keyboard or a key
+   * drawn on screen in the accessibility tree (the suggestion strip alone,
+   * as with a hardware keyboard, is not one). Only agent-device's proof
    * answers `false`. Fails when the capture cannot answer: `ENGINE_FAILURE`
    * while the keyboard is moving or the tree is still incomplete,
    * `UNSUPPORTED_CAPABILITY` when agent-device did not prove the keyboard
    * absent and the tree lists none. It reads the screen as it is now, so
    * right after an action that opens or closes the keyboard, poll it with
-   * `expect.poll`, which reads it again through an `ENGINE_FAILURE`.
+   * `expect.poll`. A poll reads again after any error: an `ENGINE_FAILURE`
+   * clears once the keyboard settles, while an `UNSUPPORTED_CAPABILITY`
+   * that lasts (a provider that cannot read the keyboard at all) makes the
+   * poll wait out its whole timeout before it fails.
    * Changes nothing on the device.
    */
   isKeyboardShown(): Promise<boolean>;

@@ -900,15 +900,18 @@ await device.dismissKeyboard();
  * Whether the soft keyboard is on screen, from a capture (taken again,
  * within the action timeout, while the keyboard is still moving): what
  * agent-device reported for it (a visibility probe, a measured or derived
- * keyboard frame, or proof that there is none), else a keyboard element
- * drawn on screen in the accessibility tree, the same keyboard
- * observations hide covered nodes under. Only agent-device's proof
+ * keyboard frame, or proof that there is none), else the keyboard or a key
+ * drawn on screen in the accessibility tree (the suggestion strip alone,
+ * as with a hardware keyboard, is not one). Only agent-device's proof
  * answers `false`. Fails when the capture cannot answer: `ENGINE_FAILURE`
  * while the keyboard is moving or the tree is still incomplete,
  * `UNSUPPORTED_CAPABILITY` when agent-device did not prove the keyboard
  * absent and the tree lists none. It reads the screen as it is now, so
  * right after an action that opens or closes the keyboard, poll it with
- * `expect.poll`, which reads it again through an `ENGINE_FAILURE`.
+ * `expect.poll`. A poll reads again after any error: an `ENGINE_FAILURE`
+ * clears once the keyboard settles, while an `UNSUPPORTED_CAPABILITY`
+ * that lasts (a provider that cannot read the keyboard at all) makes the
+ * poll wait out its whole timeout before it fails.
  * Changes nothing on the device.
  */
 isKeyboardShown(): Promise<boolean>;
@@ -923,7 +926,7 @@ await expect.poll(() => device.isKeyboardShown()).toBe(false);
 | 抛出错误 | 发生条件 |
 | --- | --- |
 | `ENGINE_FAILURE` | agent-device 什么也没测到，且返回的树稀疏或被截断；或者它找到了键盘元素，但否定了这些元素的位置，屏幕上也没有绘制出任何一个（例如键盘正在滑入或滑出时）。请再读取一次，`expect.poll` 会自动重读。 |
-| `UNSUPPORTED_CAPABILITY` | 树中没有绘制在屏幕上的键盘，且 agent-device 没有证明键盘不存在。例如不含输入法窗口的 Android 捕获、没有键盘探测的 WebDriver 提供方，或完全没有键盘读数。错误消息会写明原因。 |
+| `UNSUPPORTED_CAPABILITY` | 树中没有绘制在屏幕上的键盘或按键（仅有建议栏不算键盘），且 agent-device 没有证明键盘不存在。例如不含输入法窗口的 Android 捕获、没有键盘探测的 WebDriver 提供方，或完全没有键盘读数。错误消息会写明原因。若这种情况持续，`expect.poll` 会等到超时后才失败。 |
 
 #### `clipboard`
 
