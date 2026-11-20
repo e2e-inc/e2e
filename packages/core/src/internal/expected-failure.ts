@@ -49,17 +49,17 @@ export function markRunningTestExpectedToFail(condition: boolean, reason: string
   attempt.expectFailure(expectedFailureReason(reason));
 }
 
-/** Why a test cannot be marked from its teardown. */
-const LATE = 'a test from an afterEach hook or a fixture teardown: its verdict is already reached';
+/** Why a mark or skip made from an afterEach hook or a fixture teardown comes too late; `test.skip()`'s refusal shares it. */
+export const LATE_VERDICT = 'a test from an afterEach hook or a fixture teardown: its verdict is already reached';
 
 /** Why the running attempt cannot be marked. */
 function unmarkable(attempt: { readonly owner: 'suite' | 'host'; readonly testKind: 'test' | 'setup' }): string {
   if (attempt.testKind === 'setup') return 'a setup test: the sessions it declares are owed to their consumers';
-  if (attempt.owner === 'host') return LATE;
+  if (attempt.owner === 'host') return LATE_VERDICT;
   return 'a serial group member: the group passes or fails as one unit';
 }
 
 /** The error for a mark made once the verdict is reached, from an afterEach hook or a fixture teardown. */
 export function lateExpectedFailureError(): TestError {
-  return new TestError('INVALID_ARGUMENT', `test.fail() cannot mark ${LATE}`);
+  return new TestError('INVALID_ARGUMENT', `test.fail() cannot mark ${LATE_VERDICT}`);
 }

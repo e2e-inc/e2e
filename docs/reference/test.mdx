@@ -128,6 +128,7 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 | Throws | When |
 | --- | --- |
 | `INVALID_ARGUMENT` | Called in a setup test. A setup test cannot skip because other tests depend on its sessions. |
+| `INVALID_ARGUMENT` | A true condition in an `afterEach` hook or a fixture teardown after a test that did not skip, where its verdict is already reached. Playwright instead marks a passed test skipped and ignores the call after a failure. After a skipped test, the call does nothing. |
 | `COLLECTION_ERROR` | The conditional form, outside a test body. |
 
 #### `test.skipIf`

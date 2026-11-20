@@ -24,7 +24,7 @@ import {
 } from '@e2e-dev/core/lib/internal/errors';
 import type { ExpectedFailureInfo } from '@e2e-dev/core/lib/internal/expected-failure';
 import { lateTimeoutError } from '@e2e-dev/core/lib/internal/test-timeout';
-import { isRuntimeSkip, type RuntimeSkip } from '../internal/skip.ts';
+import { isRuntimeSkip, lateSkipError, type RuntimeSkip } from '../internal/skip.ts';
 import { settleExpectedFailure } from './expected-failure.ts';
 import { withAbort, withTimeout } from '@e2e-dev/core/lib/internal/time';
 import { AttemptTimeout, type AttemptBudget } from '@e2e-dev/core/lib/run/budget';
@@ -183,6 +183,8 @@ interface Started {
   readonly realm: Realm;
   readonly fixtures?: TestAttemptFixtures | undefined;
   readonly teardowns: readonly AttemptCleanup[];
+  /** Whether the test's final verdict is a skip, which a later skip in its teardown agrees with. */
+  readonly skipped: boolean;
 }
 
 /** Where a rejection nobody handled goes while test code takes its turn. */
@@ -444,7 +446,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       durationMs: Date.now() - startedMs,
       steps: steps.all().slice(0, stepsRan),
     };
-    return { started: { realm, fixtures, teardowns: fixtures?.cleanup() ?? [] }, outcome };
+    return { started: { realm, fixtures, teardowns: fixtures?.cleanup() ?? [], skipped: outcome.status === 'skipped' }, outcome };
   };
 
   const run = (): Promise<StandaloneTestOutcome> => {
@@ -488,7 +490,9 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
             try {
               await runHook(hook.label, hook.run, config.cleanupTimeout, () => hookAbort.abort());
             } catch (cause) {
-              errors.push(serialize(cause, 'afterEach'));
+              // As in a run's attempt: a skip after a skipped test agrees with it.
+              if (!isRuntimeSkip(cause)) errors.push(serialize(cause, 'afterEach'));
+              else if (!started.skipped) errors.push(serialize(lateSkipError(), 'afterEach'));
             }
           }
           await executor.settleAttempt(env.session, attemptId).catch((cause: unknown) => errors.push(serialize(cause, 'afterEach')));

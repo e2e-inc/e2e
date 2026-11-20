@@ -110,6 +110,7 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 | 抛出 | 条件 |
 | --- | --- |
 | `INVALID_ARGUMENT` | 在准备测试中调用。准备测试不能跳过，因为其他测试依赖它的会话。 |
+| `INVALID_ARGUMENT` | 在未跳过的测试之后，于 `afterEach` 钩子或测试夹具清理中使用真条件，此时测试结果已经确定。Playwright 则会把通过的测试标记为跳过，并在失败后忽略该调用。在已跳过的测试之后，该调用不做任何事。 |
 | `COLLECTION_ERROR` | 在测试主体之外使用条件形式。 |
 
 #### `test.skipIf`

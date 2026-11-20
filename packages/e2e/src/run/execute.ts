@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { TargetSession } from '@e2e-dev/core/lib/engine/surface';
 import { isCiMode, type ResolvedConfig } from '@e2e-dev/core/lib/config/resolve';
 import { classifyError, ConfigurationError, E2EError, serializeError, sanitizeRecordedText, truncateUtf8, TestError, TestTimeoutError, withHint, type SerializedError } from '@e2e-dev/core/lib/internal/errors';
-import { isRuntimeSkip, type RuntimeSkip } from '../internal/skip.ts';
+import { isRuntimeSkip, lateSkipError, type RuntimeSkip } from '../internal/skip.ts';
 import { lateExpectedFailureError } from '@e2e-dev/core/lib/internal/expected-failure';
 import { lateTimeoutError } from '@e2e-dev/core/lib/internal/test-timeout';
 import { settleExpectedFailure } from './expected-failure.ts';
@@ -920,7 +920,10 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
             hookAbort.abort(),
           );
         } catch (cause) {
-          recordFailure(cause, 'afterEach');
+          // A skip agrees with a verdict that is already a skip; after any other verdict, a failure
+          // that outranks the body's skip included, it comes too late.
+          if (!isRuntimeSkip(cause)) recordFailure(cause, 'afterEach');
+          else if (skipped === undefined || failure !== undefined) recordFailure(lateSkipError(), 'afterEach');
         }
       }
       await this.settleAttempt(session, attemptId).catch((cause: unknown) => recordFailure(cause, 'afterEach'));
