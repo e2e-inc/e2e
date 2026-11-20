@@ -186,11 +186,11 @@ nothing to tap by id opens with a screenshot attached. A device has no
 secure fields only (topic writing-tests). A result says when an action
 closed an on-screen keyboard; on a touch screen that tap was often spent
 closing it, so act again. A control that commits something (save, submit,
-delete) is pressed once for each commit the step asks for: before a
-second press the agent checks the screen, and presses again only when the
+delete) is pressed once for each commit the step asks for. When the tap
+only closed the keyboard, the agent presses again at once. Otherwise it
+checks the screen before a second press, and presses again only when the
 screen shows the first press did not commit (a validation error that
-blocked the save and that the agent then corrected), or when the tap only
-closed the keyboard.
+blocked the save and that the agent then corrected).
 
 ## assert, waitFor, extract: one question
 
