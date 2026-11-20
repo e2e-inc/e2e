@@ -5,6 +5,7 @@ import path from 'node:path';
 import { ConfigurationError, InfrastructureError, isE2EError } from '@e2e-dev/core/lib/internal/errors';
 import { onBun } from '../internal/runtime.ts';
 import { withConfigSecretReferences } from '@e2e-dev/core/lib/secrets';
+import { redactError } from '@e2e-dev/core/lib/run/secrecy';
 import type { E2EConfig } from '../run-types.ts';
 import { explainModuleError } from './diagnose.ts';
 import { freshModuleURL, registerLoader } from './esm-hooks.ts';
@@ -154,9 +155,10 @@ export async function loadConfigModule(configPath: string, options: ConfigLoadOp
     if (isE2EError(cause) && cause.category === 'infrastructure') {
       throw new InfrastructureError(cause.code, cause.message, { cause });
     }
+    // Redacted here, for every command that prints it: the config may have just loaded a key into the environment.
     throw new ConfigurationError(
       'CONFIG_LOAD_FAILED',
-      `failed to load config ${configPath}: ${explainModuleError(cause, configPath)}`,
+      redactError(`failed to load config ${configPath}: ${explainModuleError(cause, configPath)}`),
       { cause },
     );
   }

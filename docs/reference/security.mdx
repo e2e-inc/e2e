@@ -258,8 +258,8 @@ can't put it in a report. Each shows as `<secret:NAME>`.
 | Whole keys only | A key matches as a whole, in the forms above. Cut short at a length limit, it matches when at least half of it is there, and no fewer than 16 characters. Any other part of one isn't a match: keys of one provider start alike. |
 | Length | A value shorter than 20 characters is left alone, so a placeholder for a local model server, such as `ollama`, doesn't rewrite ordinary words. Name a shorter real key under [`secrets`](/reference/config#secrets). A value longer than 8,192 characters is left alone too, as is a shorter one the redactor can't build a pattern for, such as thousands of punctuation characters: neither is a key or token a provider issues. |
 | Output | The run holds back the end of an unfinished line that could still become a key, as it does for a secret. A prompt printed without a newline shows with the next output, and is lost if the test then blocks the process until it is stopped. |
-| Downloads | Never rewritten for a provider key: the app doesn't hold one. |
-| Sessions | A provider key is never saved into a [session](#sessions). |
+| Downloads | Never rewritten for a provider key. An app you give one through `inheritEnv` or `command.env` can serve it in a download, which is kept as served; name that key under [`secrets`](/reference/config#secrets) to have downloads rewritten. |
+| Sessions | A provider key is never added to a [session](#sessions)'s saved secrets. What the app keeps in its own state, such as browser storage, is saved as the app wrote it, encrypted. |
 | A key that is also a secret | Stays your secret: its name, and the [download](#downloads) rule. |
 
 These keys are not redacted:
@@ -271,7 +271,7 @@ These keys are not redacted:
   `e2e explore` goal. The runner and its workers build test ids from
   those, and need not know the same keys. Name it under `secrets`,
 - `command.log`, as for every secret: the runner keeps your app's output
-  as written, and your app inherits the environment,
+  as written, and your app gets what `inheritEnv` and `command.env` give it,
 - a login a coding agent keeps in the OS keyring, and Claude Code's own
   login file,
 - the model's reasoning and the arguments of its own tool calls when
