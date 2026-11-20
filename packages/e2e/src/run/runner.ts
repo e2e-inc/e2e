@@ -877,8 +877,9 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     ci: isCiMode(env),
     targets: ('targets' in selected ? selected.targets : config.targets).map((target) => target.name),
     ...(config.agentNames.length === 1 && config.agentNames[0] === 'default' ? {} : { agents: config.agentNames }),
-    ...(runAgent?.model === undefined ? {} : { model: modelLabel(runAgent.model) }),
-    ...(runJudge === undefined ? {} : { judge: modelLabel(runJudge) }),
+    // Redacted for every subscriber: a key given as a model id would otherwise head the terminal output.
+    ...(runAgent?.model === undefined ? {} : { model: processSecrets.redact(modelLabel(runAgent.model)) }),
+    ...(runJudge === undefined ? {} : { judge: processSecrets.redact(modelLabel(runJudge)) }),
     ...(options.hold?.steps === true ? { stepping: true } : {}),
   });
 

@@ -44,7 +44,7 @@ async function echoingProvider(status: number): Promise<{ server: Server; url: s
   return { server, url: `http://127.0.0.1:${address.port}/v1`, seen };
 }
 
-function config(providerUrl: string): string {
+function config(providerUrl: string, modelId = "'gpt-echo'"): string {
   return `import type { E2EConfig } from 'e2e';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createFakeEngine, FAKE_APP } from '../../helpers/fake-engine.ts';
@@ -54,7 +54,7 @@ export default {
   targets: [{ name: 'fake', platform: 'fake', engine: createFakeEngine({ state: true }).engine, app: FAKE_APP }],
   workers: 1,
   cache: 'off',
-  agents: { default: { model: createOpenAI({ baseURL: ${JSON.stringify(providerUrl)} })('gpt-echo') } },
+  agents: { default: { model: createOpenAI({ baseURL: ${JSON.stringify(providerUrl)} })(${modelId}) } },
 } satisfies E2EConfig;
 `;
 }
@@ -201,6 +201,50 @@ describe.each(Object.entries(FAILING_CONFIGS))('a config that loads a key from .
     expect(check?.message).toContain('<secret:GROQ_API_KEY>');
     expect(piecesOf(key, random, stdout + stderr)).toEqual([]);
   }, 90_000);
+});
+
+describe('a key given as the model id, through e2e run --ai-trace', () => {
+  const random = randomBytes(16).toString('hex');
+  const key = `sk-model-run-${random}`;
+  let provider: Awaited<ReturnType<typeof echoingProvider>>;
+  let project: FixtureProject;
+  let output = '';
+  let files: [string, string][] = [];
+
+  beforeAll(async () => {
+    provider = await echoingProvider(400);
+    project = createProject({ 'e2e.config.ts': config(provider.url, 'process.env.OPENAI_API_KEY!'), 'tests/echo.e2e.ts': SUITE });
+    const env: NodeJS.ProcessEnv = { ...process.env, CI: '', NO_COLOR: '1', E2E_TELEMETRY_DISABLED: '1', OPENAI_API_KEY: key };
+    for (const name of ['CODEX_API_KEY', 'ANTHROPIC_API_KEY', 'AI_GATEWAY_API_KEY', 'OPENROUTER_API_KEY', 'NODE_DEBUG']) delete env[name];
+    try {
+      const result = await execFileAsync(process.execPath, [CLI, 'run', '--reporter', 'list,markdown', '--ai-trace'], { cwd: project.dir, env, timeout: 90_000 });
+      output = result.stdout + result.stderr;
+    } catch (error) {
+      const failed = error as { stdout?: string; stderr?: string };
+      output = (failed.stdout ?? '') + (failed.stderr ?? '');
+    }
+    files = contentsUnder(path.join(project.dir, '.e2e'));
+  }, 120_000);
+
+  afterAll(() => {
+    provider?.server.close();
+    project?.cleanup();
+  });
+
+  it('called the provider, so the trace has a model call to record', () => {
+    expect(provider.seen.length).toBeGreaterThan(0);
+  });
+
+  it('heads the terminal output with the marker as the model', () => {
+    expect(output).toMatch(/model [^\n]*<secret:OPENAI_API_KEY>/);
+    expect(piecesOf(key, random, output)).toEqual([]);
+  });
+
+  it('writes the marker as the model id in ai-trace.json and the report, and no piece of the key anywhere', () => {
+    const trace = files.find(([name]) => name.endsWith('ai-trace.json'))?.[1] ?? '';
+    expect(trace).toContain('"model_id": "<secret:OPENAI_API_KEY>"');
+    for (const [name, content] of files) expect(piecesOf(key, random, content), name).toEqual([]);
+  });
 });
 
 describe('a key a program hands e2e itself', () => {
