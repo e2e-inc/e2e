@@ -160,8 +160,8 @@ describe.each(Object.entries(FAILING_CONFIGS))('a config that loads a key from .
     }
   }
 
-  it.each([['run'], ['list'], ['doctor'], ['cache', 'stats']])('e2e %s names the key by its marker and prints no piece of it', async (...command) => {
-    const { code, stdout, stderr } = await cli(...command);
+  it.each(['run', 'list', 'doctor', 'cache stats'])('e2e %s names the key by its marker and prints no piece of it', async (command) => {
+    const { code, stdout, stderr } = await cli(...command.split(' '));
     expect(code).toBe(2);
     expect(stdout + stderr).toContain('<secret:GROQ_API_KEY>');
     expect(piecesOf(key, random, stdout + stderr)).toEqual([]);
