@@ -59,8 +59,9 @@ add your own operations, with declared budgets and platforms.
 The agent's rules tell the model to press a control that commits
 something, such as Save or Submit, one time for each commit the step asks
 for. Before it repeats a commit, the model must find on the current screen
-that the first press didn't commit: an error, for example. When it can't
-tell, it doesn't press again.
+that the first press didn't commit: an error, for example. A tap that only
+closed the on-screen keyboard counts as not committed. When the model
+can't tell, it doesn't press again.
 
 The loop detects repeated calls and cycles. After three failed actions in a
 row, it tells the model to change its approach. After five, it asks for a
