@@ -325,10 +325,14 @@ export class DesktopSurface {
   }
 
   async dispose(context: EngineCleanupContext): Promise<void> {
+    let quit = false;
     try {
       await this.quit(context.signal, context.timeoutMs);
+      quit = true;
     } finally {
-      if (this.home !== undefined) await rm(this.home, { recursive: true, force: true }).catch(() => undefined);
+      // An app that would not quit stays named in the state directory, whose sweep at the next run's init quits it by its token.
+      const leftRunning = !quit && this.pid !== undefined;
+      if (this.home !== undefined && !leftRunning) await rm(this.home, { recursive: true, force: true }).catch(() => undefined);
       this.home = undefined;
       this.cli = undefined;
       this.attempt = undefined;

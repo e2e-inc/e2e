@@ -403,6 +403,17 @@ describe('DesktopSurface', () => {
     expect(fake.calls().filter((call) => call.key === 'list-apps')).toHaveLength(3);
   });
 
+  it('keeps the state directory, and the app it names, when dispose could not quit the app', async () => {
+    const { surface, fake, app } = await launched({ 'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [], complete: false } }] }, { observe: false });
+    const home = fake.calls()[0]!.home!;
+    try {
+      await expect(surface.dispose({ signal, timeoutMs: 5_000 })).rejects.toThrow(/listed the apps only in part/);
+      expect(JSON.parse(readFileSync(path.join(home, 'app.json'), 'utf8'))).toMatchObject({ pid: app.pid });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it('reports a type after a clear that changed the field as possibly committed', async () => {
     const { surface } = await launched({ type: [failure('STALE_REF', 'not_delivered')] });
     await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });
