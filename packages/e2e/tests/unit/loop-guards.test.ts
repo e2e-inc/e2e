@@ -126,8 +126,10 @@ describe('loop guards', () => {
       expect(verdict(repeat(10, mixed)).kind).toBe('stop');
     });
 
-    it('still ends a wait whose screen changes on every look, at twenty looks', () => {
-      expect(verdict(repeat(19, (index) => turn('observe', ticked(index)))).kind).toBe('clear');
+    it('warns a wait whose screen changes on every look at twelve looks and ends it at twenty', () => {
+      expect(verdict(repeat(11, (index) => turn('observe', ticked(index)))).kind).toBe('clear');
+      expect(verdict(repeat(12, (index) => turn('observe', ticked(index))))).toMatchObject({ kind: 'warn', waiting: true });
+      expect(verdict(repeat(19, (index) => turn('observe', ticked(index)))).kind).toBe('warn');
       const stopped = verdict(repeat(20, (index) => turn('observe', ticked(index))));
       expect(stopped).toMatchObject({ kind: 'stop' });
       expect((stopped as { reason: string }).reason).toContain('20 times in a row while it kept changing');
@@ -139,11 +141,16 @@ describe('loop guards', () => {
       expect(verdict(repeat(3, cycle)).kind).toBe('stop');
     });
 
-    it('gives the waiting notice the same reason on every turn, so it is given once', () => {
-      const six = verdict(repeat(6, (index) => turn('observe', unchanged(index))));
-      const eight = verdict(repeat(8, (index) => turn('observe', unchanged(index))));
+    it('keys the waiting notice by the wait, so a wait is warned once and a later wait in the step again', () => {
+      const first = repeat(6, (index) => turn('observe', unchanged(index)));
+      const six = verdict(first);
+      const eight = verdict([...first, ...repeat(2, (index) => turn('observe', unchanged(index + 6)))]);
       expect(six).toMatchObject({ kind: 'warn', waiting: true });
       expect((six as { reason: string }).reason).toBe((eight as { reason: string }).reason);
+      expect((six as { key?: string }).key).toBe((eight as { key?: string }).key);
+      const second = verdict([...first, ...turn('tap', 'Tapped #n2.', { target: 'n2' }), ...repeat(6, (index) => turn('observe', unchanged(index + 20)))]);
+      expect(second).toMatchObject({ kind: 'warn', waiting: true });
+      expect((second as { key?: string }).key).not.toBe((six as { key?: string }).key);
     });
   });
 

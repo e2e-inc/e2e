@@ -29,6 +29,8 @@ export type LoopGuardVerdict =
       readonly reason: string;
       /** True when the calls are looks of the waiting tools (the built-in observe and screenshot): a wait, not yet a circle. */
       readonly waiting?: boolean;
+      /** Names the wait a warning belongs to, so each wait in a step is warned once; the reason stays the same. */
+      readonly key?: string;
     };
 
 /** Longest cycle period the detector considers. */
@@ -51,7 +53,8 @@ export interface LoopGuardThresholds {
    */
   readonly observeRepeatWarn: number;
   readonly observeRepeatStop: number;
-  /** Calls in a row to waiting tools however many showed a change: a screen that ticks forever still ends the wait. */
+  /** Calls in a row to waiting tools however many showed a change: a screen that ticks forever still ends the wait, with a warning first. */
+  readonly waitingWarn: number;
   readonly waitingStop: number;
   readonly cycleWarn: number;
   readonly cycleStop: number;
@@ -66,6 +69,7 @@ export const DEFAULT_LOOP_GUARD_THRESHOLDS: LoopGuardThresholds = {
   repeatStop: 5,
   observeRepeatWarn: 6,
   observeRepeatStop: 10,
+  waitingWarn: 12,
   waitingStop: 20,
   cycleWarn: 2,
   cycleStop: 3,
@@ -145,8 +149,9 @@ function waitsThatSawChange(messages: readonly ModelMessage[], waiting: Readonly
   return moved;
 }
 
-/** The waiting notice's reason: the same on every turn, so the notice is given once per wait. */
+/** The waiting notices' reasons: the same on every turn of a wait, so each wait is warned once. */
 const WAITING_REASON = 'the screen was looked at several times in a row with no change';
+const TICKING_REASON = 'the screen was looked at many times in a row while it kept changing';
 
 /**
  * Checks the trailing calls for exact repetition (period 1) and short exact
@@ -169,7 +174,13 @@ export function checkLoopGuards(
   if (wait.unchanged >= thresholds.observeRepeatStop) {
     return { kind: 'stop', reason: `the screen was looked at ${String(wait.unchanged)} times in a row with no change` };
   }
-  if (wait.unchanged >= thresholds.observeRepeatWarn) warning = { kind: 'warn', reason: WAITING_REASON, waiting: true };
+  // Keyed by where the wait or its unchanged run began: a later wait in the step is warned again.
+  const started = calls.length - wait.looks;
+  if (wait.unchanged >= thresholds.observeRepeatWarn) {
+    warning = { kind: 'warn', reason: WAITING_REASON, waiting: true, key: `wait@${String(calls.length - wait.unchanged)}` };
+  } else if (wait.looks >= thresholds.waitingWarn) {
+    warning = { kind: 'warn', reason: TICKING_REASON, waiting: true, key: `ticking@${String(started)}` };
+  }
   for (let period = 1; period <= MAX_CYCLE_PERIOD; period += 1) {
     // A window of waiting calls alone is the wait above, not a circle.
     if (period <= wait.looks) continue;

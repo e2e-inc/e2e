@@ -352,6 +352,33 @@ describe('the loop guard waits longer on the built-in observe only', () => {
     expect(warned?.lastPrompt).not.toContain('going in circles');
   });
 
+  it('warns each wait in a step, not only the first', async () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    let looks = 0;
+    const observe = async () => {
+      looks += 1;
+      // The opening look and six observes show the first save in progress; then it is done, and the second save never ends.
+      const text = looks <= 7 ? '#n1 button "Saving" [disabled]' : looks === 8 ? '#n1 button "Saved"\n#n2 button "Send"' : '#n2 button "Sending" [disabled]';
+      return { revision: String(looks), text, truncated: false, viewport: { width: 800, height: 600 } };
+    };
+    let sent = false;
+    const model = installFakeLoopModel((call) => {
+      if (call.toolNames.length === 1) return [{ toolName: 'complete_step', input: { status: 'failed', summary: 'forced' } }];
+      if (!sent && call.lastToolResult.includes('"Send"')) {
+        sent = true;
+        return [{ toolName: 'tap', input: { target: 'n2' } }];
+      }
+      return [{ toolName: 'observe', input: {} }];
+    });
+    await createBuiltInAgent().runStep({ ...context, model, observe });
+    const notice = 'the screen was looked at several times in a row with no change';
+    // A notice joins the history as a new user message, so count the turns that added one.
+    const warned = loopCalls.filter((call, index) => index > 0 && call.userMessages > loopCalls[index - 1]!.userMessages && call.lastPrompt.includes(notice));
+    // One warning per wait: the second wait, after the tap, is warned again.
+    expect(sent).toBe(true);
+    expect(warned).toHaveLength(2);
+  });
+
   it('lets the act loop go on to the step\'s next action when the tenth observe shows the save finished', async () => {
     const { context } = fakeExecutorContext({ secrets: [] });
     let looks = 0;

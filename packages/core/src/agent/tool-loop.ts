@@ -658,8 +658,8 @@ class LoopRun {
       const guard = checkLoopGuards(extractGuardCalls(prepared, 'complete_step', waiting), DEFAULT_LOOP_GUARD_THRESHOLDS, waiting);
       if (guard.kind === 'stop') {
         this.guardStop = guard.reason;
-      } else if (guard.kind === 'warn' && guard.reason !== this.noticedGuardReason) {
-        this.noticedGuardReason = guard.reason;
+      } else if (guard.kind === 'warn' && (guard.key ?? guard.reason) !== this.noticedGuardReason) {
+        this.noticedGuardReason = guard.key ?? guard.reason;
         this.note(`loop guard warned before turn ${String(stepNumber + 1)}: ${guard.reason}`);
         // Repeated looks at a save or load still in progress are a wait the
         // rules ask for, so the notice bounds the wait instead of calling it a circle.
