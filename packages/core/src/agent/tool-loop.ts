@@ -659,9 +659,11 @@ class LoopRun {
       // Read per turn: a handler replaced after the tools were built (in
       // buildPrompt, say) may write, and loses the waiting room.
       const waiting = waitingToolNames(tools);
-      // Each look is read while it is the newest, before compaction can elide
-      // its lead line, and the answer is kept for the turns after.
-      const guard = checkLoopGuards(extractGuardCalls(messages, 'complete_step', waiting, this.looks), DEFAULT_LOOP_GUARD_THRESHOLDS, waiting);
+      // The calls are the ones the model reads, after an executor's own
+      // prepareMessages; each look's result is read while it is the newest,
+      // before compaction can elide its lead line, and kept for the turns after.
+      const calls = extractGuardCalls(prepared, 'complete_step', waiting, this.looks, messages);
+      const guard = checkLoopGuards(calls, DEFAULT_LOOP_GUARD_THRESHOLDS, waiting);
       const fresh =
         guard.kind === 'warn' &&
         (guard.key === undefined ? guard.reason !== this.noticedGuardReason : !this.noticedWaits.has(guard.key));

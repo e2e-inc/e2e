@@ -120,8 +120,10 @@ export function extractGuardCalls(
   concludeToolName: string,
   waiting: ReadonlySet<string> = new Set(),
   seen: Map<string, boolean> = new Map(),
+  resultMessages: readonly ModelMessage[] = messages,
 ): GuardToolCall[] {
-  const moved = waiting.size === 0 ? new Set<string>() : waitsThatSawChange(messages, waiting, seen);
+  // The calls come from the history the model reads; the looks' results may come from an earlier, uncut one.
+  const moved = waiting.size === 0 ? new Set<string>() : waitsThatSawChange(resultMessages, waiting, seen);
   const calls: GuardToolCall[] = [];
   for (const message of messages) {
     if (message.role !== 'assistant' || !Array.isArray(message.content)) continue;

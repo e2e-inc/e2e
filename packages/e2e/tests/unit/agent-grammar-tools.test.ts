@@ -6,7 +6,7 @@
  * keys and runs on `{}`.
  */
 
-import type { ToolSet } from 'ai';
+import type { ModelMessage, ToolSet } from 'ai';
 import { z } from 'zod';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { aiSdk, loadAiSdk } from '@e2e-dev/core/lib/agent/ai-sdk';
@@ -462,6 +462,32 @@ describe('the loop guard waits longer on the built-in observe only', () => {
     await expect(executor.runStep({ ...context, model })).resolves.toMatchObject({ status: 'failed' });
     expect(observed()).toBe(5);
     expect(writes).toHaveLength(5);
+  });
+
+  it('counts only the calls an executor keeps in the history it sends, not the ones its prepareMessages summarized away', async () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    let rows = 5;
+    // The executor carries the five rows read in earlier steps into its prompt, then summarizes them away before the model reads it.
+    const carried = Array.from({ length: 5 }, (_, index): ModelMessage[] => [
+      { role: 'assistant', content: [{ type: 'tool-call', toolCallId: `old${String(index)}`, toolName: 'read_row', input: {} }] },
+      { role: 'tool', content: [{ type: 'tool-result', toolCallId: `old${String(index)}`, toolName: 'read_row', output: { type: 'text', value: `row ${String(index + 1)}` } }] },
+    ]).flat();
+    const executor = createToolLoopExecutor({
+      name: 'custom',
+      system: 'Read the next row.',
+      buildPrompt: () => [{ role: 'user', content: 'Rows so far:' }, ...carried, { role: 'user', content: 'Read the next row.' }],
+      tools: () => ({
+        read_row: { description: 'Reads the next row.', inputSchema: aiSdk().zodSchema(z.object({})), execute: async () => `row ${String((rows += 1))}` },
+      }) as ToolSet,
+      prepareMessages: (messages) => messages.filter((message) => message.role === 'user' || !carried.includes(message)),
+    });
+    const model = installFakeLoopModel((call) => {
+      if (call.toolNames.length === 1 || rows >= 6) return [{ toolName: 'complete_step', input: { status: 'passed', summary: `read ${String(rows)} rows` } }];
+      return [{ toolName: 'read_row', input: {} }];
+    });
+    await expect(executor.runStep({ ...context, model })).resolves.toMatchObject({ status: 'passed' });
+    // The step read its row: the summarized calls did not force a verdict before its first turn.
+    expect(rows).toBe(6);
   });
 
   it('keeps the ordinary limit when the caller replaces the built-in handler after the tools are built', async () => {
