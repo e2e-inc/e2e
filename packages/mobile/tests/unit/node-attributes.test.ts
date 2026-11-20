@@ -55,6 +55,16 @@ describe('device node attributes', () => {
     });
   });
 
+  it('reads a description-only node and a plain text view on Android', () => {
+    const view = { mintId: () => 'n1', viewport: { width: 400, height: 800 } };
+    const icon = projectSnapshot([{ index: 0, type: 'android.widget.ImageButton', label: 'Close', text: '' }], view);
+    expect(icon.roots[0]?.attributes).toEqual({ label: 'Close', class: 'android.widget.ImageButton', 'content-desc': 'Close' });
+    const text = projectSnapshot([{ index: 0, type: 'android.widget.TextView', label: 'Log in', text: 'Log in' }], view);
+    expect(text.roots[0]?.attributes).toEqual({ label: 'Log in', class: 'android.widget.TextView' });
+    const hint = projectSnapshot([{ index: 0, type: 'android.widget.EditText', label: 'Type your name', text: '', hintShowing: true }], view);
+    expect(hint.roots[0]?.attributes?.label).toBeUndefined();
+  });
+
   it('drops the XCUIElementType prefix and leaves out what the platform did not report', () => {
     const raw = [{ index: 0, type: 'Other' }];
     const projected = projectSnapshot(raw, { mintId: () => 'n1', viewport: { width: 400, height: 800 } });

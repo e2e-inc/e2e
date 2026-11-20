@@ -401,7 +401,7 @@ function nonEmpty(value: string | undefined): string | undefined {
 /**
  * What `getAttribute` reads on a device node, under the names an Appium
  * suite asks for: `label` (the accessibility label: the iOS label, the Android
- * content description, as Detox defines it),
+ * content description or, when it has none, its text, as Detox defines it),
  * `resource-id` (the Android resource id or the iOS accessibility
  * identifier, the test id), `class` (the Android class or the iOS element
  * type without its `XCUIElementType` prefix, also the tag name),
@@ -413,9 +413,12 @@ function nodeAttributes(
   android: boolean,
   projected: { readonly label: string | undefined; readonly identifier: string | undefined; readonly placeholder: string | undefined },
 ): Record<string, string> | undefined {
-  const contentDescription = android ? nonEmpty(source.contentDescription) : undefined;
+  const description = nonEmpty(source.contentDescription);
+  const descriptionOnly = source.text === '' ? nonEmpty(source.label) : undefined;
+  const contentDescription = android ? (description ?? descriptionOnly) : undefined;
+  const ownText = source.hintShowing === true ? undefined : nonEmpty(source.label);
   const entries: [string, string | undefined][] = [
-    ['label', android ? contentDescription : projected.label],
+    ['label', android ? (description ?? ownText) : projected.label],
     ['resource-id', projected.identifier],
     ['class', nonEmpty(source.type === undefined ? undefined : elementType(source.type))],
     ['content-desc', contentDescription],
