@@ -50,6 +50,7 @@ import { HeldTestTools } from './worker/held-test-tools.ts';
 import { WorkerModels } from '@e2e-dev/core/lib/run/worker-models';
 import { classifyAttemptStatus, EngineSessions, type EngineSessionsOptions } from '@e2e-dev/core/lib/run/engine-sessions';
 import type { EngineDisposeContext } from '@e2e-dev/core/lib/engine/index';
+import { numberedAppLogLines } from '../report/failure-text.ts';
 
 export interface ExecutionEvents {
   onResult?(result: ResultRecord): void;
@@ -782,7 +783,10 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
           ask: (step, signal, readScreen) => hold.ask(
             step,
             signal,
-            { readScreen, readLogs: () => Promise.resolve(steps.appLog().slice()) },
+            {
+              readScreen,
+              readLogs: () => Promise.resolve(numberedAppLogLines(steps.all(), steps.appLog()).map(({ line }) => line)),
+            },
             tools,
           ),
           readScreen: (signal: AbortSignal) => readHeldScreen(session, this.op(attemptId, this.config.actionTimeout, signal), screens),

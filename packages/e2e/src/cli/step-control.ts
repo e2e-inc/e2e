@@ -817,12 +817,9 @@ export async function servePauses(
       return;
     }
 
-    try {
-      keyboard.close();
-    } finally {
-      keyboard = undefined;
-      keys?.resume();
-    }
+    keyboard.close();
+    keyboard = undefined;
+    keys?.resume();
   };
 
   /** Opens the keyboard listener so Ctrl-C is handled between held steps too. */

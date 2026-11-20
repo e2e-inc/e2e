@@ -18,7 +18,7 @@ import type { SerialAttemptStart } from '../serial.ts';
 import type { McpToolResult } from '../../session-tools/tools.ts';
 import type { HeldTestOpening } from '../step-attachment-wire.ts';
 import type { StepHold } from '../step-hold.ts';
-import type { AppLogRecord, StepProgress } from '@e2e-dev/core/lib/run/steps';
+import type { StepProgress } from '@e2e-dev/core/lib/run/steps';
 
 /** One runnable pair on the wire; the worker resolves the test function. */
 export interface WirePair {
@@ -323,7 +323,7 @@ export interface ScreenReplyMessage {
 type LogsReplyMessage = {
   readonly type: 'logs-reply';
   readonly requestId: string;
-  readonly logs?: readonly AppLogRecord[];
+  readonly logs?: readonly string[];
 };
 
 /**

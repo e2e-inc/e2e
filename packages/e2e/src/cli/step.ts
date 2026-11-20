@@ -109,8 +109,8 @@ export class StepGate {
   private help = false;
   /** The test `n` let through, until its steps stop coming. */
   private released: string | undefined;
-  /** The test whose steps reached the gate last, and how many of them did. */
-  private current: { readonly key: string; count: number } | undefined;
+  /** The test whose steps reached the gate last. */
+  private current: string | undefined;
   /** The displayed hold's callback, also used to clear its prompt. */
   private show: StepHoldContext['show'] | undefined;
 
@@ -136,7 +136,12 @@ export class StepGate {
     // A hold that ended before it arrived has nobody to answer.
     if (context.signal.aborted) return Promise.resolve();
     const key = testKey(step);
-    const number = step.kind === 'pause' ? 0 : this.count(key);
+
+    if (step.kind === 'step' && this.current !== key) {
+      this.current = key;
+      if (this.released !== key) this.released = undefined;
+    }
+
     // The first step runs at once, so the app is open before the first prompt.
     // A pause already has the app open.
     if (step.kind === 'pause') {
@@ -149,7 +154,7 @@ export class StepGate {
     return new Promise<void>((resolve) => {
       const waiting: Waiting = {
         step,
-        number,
+        number: context.number,
         context,
         resolve,
         onAbort: () => {
@@ -208,16 +213,6 @@ export class StepGate {
   private onPrompt(step: HeldStep): boolean {
     const shown = this.queue[0];
     return shown !== undefined && samePrompt(shown.step, step);
-  }
-
-  /** Numbers the steps of one test as they reach the gate; a new test starts at 1 and ends what `n` let through. */
-  private count(key: string): number {
-    if (this.current?.key !== key) {
-      this.current = { key, count: 0 };
-      if (this.released !== key) this.released = undefined;
-    }
-    this.current.count += 1;
-    return this.current.count;
   }
 
   /** Lets every waiting step `which` picks run, then shows the next prompt. */

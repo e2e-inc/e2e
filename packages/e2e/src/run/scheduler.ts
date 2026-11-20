@@ -623,9 +623,10 @@ class Scheduler {
     };
 
     // Called inside the chain, so a hook that throws stops the run like one that rejects.
-    const held = { ...step, attachId };
+    const { number, ...details } = step;
+    const held = { ...details, attachId };
     Promise.resolve()
-      .then(() => beforeStep(held, { signal, ...reads, attach: this.attachments.attach }))
+      .then(() => beforeStep(held, { number, signal, ...reads, attach: this.attachments.attach }))
       .then(
         () => {
           // An answer that came after the hold ended (an interrupt, say) lets nothing run.

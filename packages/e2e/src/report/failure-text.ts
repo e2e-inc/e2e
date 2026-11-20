@@ -356,11 +356,6 @@ function appLogLine(entry: AppLogRecord): string {
   return entry.level === 'info' ? `${glyph} ${source}: ${text}` : `${glyph} ${source} ${entry.level}: ${text}`;
 }
 
-/** Formats one app log line with its step number. */
-export function numberedAppLogLine(entry: AppLogRecord, number: number | undefined): string {
-  return `${number === undefined ? 'before step 1' : `step ${number}`} · ${appLogLine(entry)}`;
-}
-
 /**
  * The lines under one step on the page, oldest first: the cache's decision
  * for an agent step, then each action it took (the node it landed on), each
@@ -393,13 +388,20 @@ const MAX_APP_LOG_LINES = 50;
  * counts what was left out.
  */
 function appLogLines(steps: readonly ReportStep[], appLog: readonly AppLogRecord[]): string[] {
-  const numbers = new Map(steps.map((step, position) => [step.index, position + 1]));
-  const items = appLog.map((entry) => {
-    const number = entry.step === undefined ? undefined : numbers.get(entry.step);
-    return { at: entry.at, important: entry.level !== 'info', line: numberedAppLogLine(entry, number) };
-  });
+  const items = numberedAppLogLines(steps, appLog);
   const { shown, left } = importantThenLatest(items, MAX_APP_LOG_LINES);
   return [...(left === 0 ? [] : [`${left} ${left === 1 ? 'line' : 'lines'} left out`]), ...shown.map((item) => item.line)];
+}
+
+/** Formats app log lines with the position of their step in the attempt's step list. */
+export function numberedAppLogLines(steps: readonly Pick<ReportStep, 'index'>[], appLog: readonly AppLogRecord[]): PageItem[] {
+  const numbers = new Map(steps.map((step, position) => [step.index, position + 1]));
+
+  return appLog.map((entry) => {
+    const number = entry.step === undefined ? undefined : numbers.get(entry.step);
+    const prefix = number === undefined ? 'before step 1' : `step ${number}`;
+    return { at: entry.at, important: entry.level !== 'info', line: `${prefix} · ${appLogLine(entry)}` };
+  });
 }
 
 function cacheLine(cache: StepCacheRecord, cacheDir: string | undefined): string {

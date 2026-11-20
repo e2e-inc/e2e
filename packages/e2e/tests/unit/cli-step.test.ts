@@ -1,35 +1,41 @@
 import { describe, expect, it } from 'vitest';
 import { StepGate, stepKeyOf } from '../../src/cli/step.ts';
-import type { HeldStep, StepHoldContext, StepPrompt } from '../../src/run/step-hold.ts';
+import type { NumberedStep, StepHoldContext, StepPrompt } from '../../src/run/step-hold.ts';
 
 /** How long a prompt ignores keys after it appears. */
 const KEY_GUARD_MS = 150;
 
-function step(label: string, testId = 'checkout', target = 'web'): HeldStep {
+function step(number: number, label: string, testId = 'checkout', target = 'web'): NumberedStep {
   return {
-    kind: 'step',
-    attachId: 'k3f9',
-    target,
-    testId,
-    agent: 'default',
-    repeat: 0,
-    title: testId,
-    api: 'app.open',
-    label,
+    number,
+    step: {
+      kind: 'step',
+      attachId: 'k3f9',
+      target,
+      testId,
+      agent: 'default',
+      repeat: 0,
+      title: testId,
+      api: 'app.open',
+      label,
+    },
   };
 }
 
-function pause(testId = 'checkout', target = 'web'): HeldStep {
+function pause(testId = 'checkout', target = 'web'): NumberedStep {
   return {
-    kind: 'pause',
-    attachId: 'k3f9',
-    target,
-    testId,
-    agent: 'default',
-    repeat: 0,
-    title: testId,
-    api: 'screen.pause',
-    label: '',
+    number: 0,
+    step: {
+      kind: 'pause',
+      attachId: 'k3f9',
+      target,
+      testId,
+      agent: 'default',
+      repeat: 0,
+      title: testId,
+      api: 'screen.pause',
+      label: '',
+    },
   };
 }
 
@@ -44,7 +50,8 @@ function gate(holdSteps = true) {
     },
     { now: () => now, holdSteps },
   );
-  const context = (signal = new AbortController().signal): StepHoldContext => ({
+  const context = (number: number, signal = new AbortController().signal): StepHoldContext => ({
+    number,
     signal,
     show: (prompt) => shown.push(prompt),
     readScreen: () => Promise.resolve(undefined),
@@ -52,9 +59,9 @@ function gate(holdSteps = true) {
     attach: () => Promise.reject(new Error('no held tests')),
   });
   /** Holds `held` and reports, after the microtasks drain, whether it was let through. */
-  const hold = (held: HeldStep, signal?: AbortSignal) => {
+  const hold = ({ step: heldStep, number }: NumberedStep, signal?: AbortSignal) => {
     let released = false;
-    void subject.beforeStep(held, context(signal)).then(() => {
+    void subject.beforeStep(heldStep, context(number, signal)).then(() => {
       released = true;
     });
     return { released: async () => { await Promise.resolve(); await Promise.resolve(); return released; } };
@@ -91,9 +98,9 @@ describe('stepKeyOf', () => {
 describe('StepGate', () => {
   it('runs the first step of the run at once and holds the next until c, then takes the prompt down', async () => {
     const { gate: subject, hold, showing, shown, later } = gate();
-    expect(await hold(step('/')).released()).toBe(true);
+    expect(await hold(step(1, '/')).released()).toBe(true);
     expect(shown).toEqual([]);
-    const second = hold(step('/cart'));
+    const second = hold(step(2, '/cart'));
     expect(await second.released()).toBe(false);
     expect(showing()).toBe('2 /cart');
     later();
@@ -104,8 +111,8 @@ describe('StepGate', () => {
 
   it('ignores a key pressed before the prompt has been up for the guard', async () => {
     const { gate: subject, hold, later } = gate();
-    await hold(step('/')).released();
-    const held = hold(step('/cart'));
+    await hold(step(1, '/')).released();
+    const held = hold(step(2, '/cart'));
     later(KEY_GUARD_MS - 1);
     subject.press('continue');
     expect(await held.released()).toBe(false);
@@ -118,8 +125,8 @@ describe('StepGate', () => {
     const { gate: subject, hold, stops, later } = gate();
     subject.press('stop');
     expect(stops()).toBe(0);
-    await hold(step('/')).released();
-    hold(step('/cart'));
+    await hold(step(1, '/')).released();
+    hold(step(2, '/cart'));
     subject.press('stop');
     expect(stops()).toBe(0);
     later();
@@ -129,10 +136,10 @@ describe('StepGate', () => {
 
   it('shows steps held together in one prompt and runs them on one key, so a wait never outlives its action', async () => {
     const { gate: subject, hold, showing, later } = gate();
-    await hold(step('/')).released();
-    const waits = hold(step('/api/orders'));
+    await hold(step(1, '/')).released();
+    const waits = hold(step(2, '/api/orders'));
     expect(showing()).toBe('2 /api/orders');
-    const acts = hold(step('Place order'));
+    const acts = hold(step(3, 'Place order'));
     expect(showing()).toBe('2 /api/orders + 3 Place order');
     later();
     subject.press('continue');
@@ -142,14 +149,14 @@ describe('StepGate', () => {
 
   it('lists every key on h until h again, and keeps it for the next prompt', async () => {
     const { gate: subject, hold, shown, later } = gate();
-    await hold(step('/')).released();
-    const held = hold(step('/cart'));
+    await hold(step(1, '/')).released();
+    const held = hold(step(2, '/cart'));
     later();
     subject.press('help');
     expect(await held.released()).toBe(false);
     expect(shown.at(-1)).toMatchObject({ steps: [{ number: 2 }], help: true });
     subject.press('continue');
-    hold(step('/pay'));
+    hold(step(3, '/pay'));
     expect(shown.at(-1)).toMatchObject({ steps: [{ number: 3 }], help: true });
     later();
     subject.press('help');
@@ -158,39 +165,39 @@ describe('StepGate', () => {
 
   it('lets the rest of one test through on n, and holds again at the next test or target', async () => {
     const { gate: subject, hold, later } = gate();
-    await hold(step('/')).released();
-    hold(step('/cart'));
+    await hold(step(1, '/')).released();
+    hold(step(2, '/cart'));
     later();
     subject.press('test');
-    expect(await hold(step('/pay')).released()).toBe(true);
-    expect(await hold(step('/', 'checkout', 'mobile')).released()).toBe(false);
+    expect(await hold(step(3, '/pay')).released()).toBe(true);
+    expect(await hold(step(1, '/', 'checkout', 'mobile')).released()).toBe(false);
   });
 
   it('lets every step through after a', async () => {
     const { gate: subject, hold, later } = gate();
-    await hold(step('/')).released();
-    const held = hold(step('/cart'));
+    await hold(step(1, '/')).released();
+    const held = hold(step(2, '/cart'));
     later();
     subject.press('rest');
     expect(await held.released()).toBe(true);
-    expect(await hold(step('/', 'profile')).released()).toBe(true);
+    expect(await hold(step(1, '/', 'profile')).released()).toBe(true);
   });
 
   it('never prompts for a hold that ended before it arrived', async () => {
     const { hold, shown } = gate();
-    await hold(step('/')).released();
+    await hold(step(1, '/')).released();
     const ended = new AbortController();
     ended.abort();
-    expect(await hold(step('/late'), ended.signal).released()).toBe(true);
+    expect(await hold(step(2, '/late'), ended.signal).released()).toBe(true);
     expect(shown).toEqual([]);
   });
 
   it('drops a prompt whose hold ended and shows the next one', async () => {
     const { hold, showing } = gate();
-    await hold(step('/')).released();
+    await hold(step(1, '/')).released();
     const ended = new AbortController();
-    hold(step('/gone'), ended.signal);
-    hold(step('/next'));
+    hold(step(2, '/gone'), ended.signal);
+    hold(step(3, '/next'));
     ended.abort();
     expect(showing()).toBe('3 /next');
   });
@@ -212,13 +219,13 @@ describe('StepGate', () => {
     later();
     subject.press('continue');
     expect(await paused.released()).toBe(true);
-    const first = hold(step('/one'));
+    const first = hold(step(1, '/one'));
     expect(await first.released()).toBe(false);
     expect(showing()).toBe('1 /one');
     later();
     subject.press('continue');
     expect(await first.released()).toBe(true);
-    hold(step('/two'));
+    hold(step(2, '/two'));
     expect(showing()).toBe('2 /two');
   });
 
@@ -239,13 +246,13 @@ describe('StepGate', () => {
 
   it('shows a pause on a separate prompt, without a step number, and keeps numbering the steps', async () => {
     const { gate: subject, hold, showing, later } = gate();
-    await hold(step('/')).released();
+    await hold(step(1, '/')).released();
     const paused = hold(pause());
     expect(showing()).toBe('0 ');
     later();
     subject.press('continue');
     expect(await paused.released()).toBe(true);
-    hold(step('/cart'));
+    hold(step(2, '/cart'));
     expect(showing()).toBe('2 /cart');
   });
 
@@ -277,44 +284,44 @@ describe('StepGate', () => {
 
   it('stops holding steps after a at a step, but still waits at a later pause', async () => {
     const { gate: subject, hold, later } = gate();
-    await hold(step('/')).released();
-    hold(step('/cart'));
+    await hold(step(1, '/')).released();
+    hold(step(2, '/cart'));
     later();
     subject.press('rest');
-    expect(await hold(step('/pay')).released()).toBe(true);
+    expect(await hold(step(3, '/pay')).released()).toBe(true);
     const paused = hold(pause());
     expect(await paused.released()).toBe(false);
     later();
     subject.press('continue');
     expect(await paused.released()).toBe(true);
-    expect(await hold(step('/done')).released()).toBe(true);
+    expect(await hold(step(4, '/done')).released()).toBe(true);
   });
 
   it('stops holding the steps of the test after n at a step, but still waits at a later pause of that test', async () => {
     const { gate: subject, hold, later } = gate();
-    await hold(step('/')).released();
-    hold(step('/cart'));
+    await hold(step(1, '/')).released();
+    hold(step(2, '/cart'));
     later();
     subject.press('test');
-    expect(await hold(step('/pay')).released()).toBe(true);
+    expect(await hold(step(3, '/pay')).released()).toBe(true);
     expect(await hold(pause()).released()).toBe(false);
   });
 
   it('resumes the paused test on n or a in a stepped run, stops holding steps as at a step, and waits at the next pause', async () => {
     const { gate: subject, hold, shown, later } = gate();
-    await hold(step('/')).released();
+    await hold(step(1, '/')).released();
     const paused = hold(pause());
     expect(shown.at(-1)).toMatchObject({ holdSteps: true });
     later();
     subject.press('test');
     expect(await paused.released()).toBe(true);
-    expect(await hold(step('/cart')).released()).toBe(true);
+    expect(await hold(step(2, '/cart')).released()).toBe(true);
     const next = hold(pause());
     expect(await next.released()).toBe(false);
     later();
     subject.press('rest');
     expect(await next.released()).toBe(true);
-    expect(await hold(step('/', 'profile')).released()).toBe(true);
+    expect(await hold(step(1, '/', 'profile')).released()).toBe(true);
     expect(await hold(pause('profile')).released()).toBe(false);
   });
 });

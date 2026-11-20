@@ -1,5 +1,6 @@
 ---
 "e2e": patch
+"@e2e-dev/core": patch
 "@e2e-dev/github": patch
 "@e2e-dev/html-reporter": patch
 ---

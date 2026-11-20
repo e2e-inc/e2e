@@ -116,11 +116,8 @@ export function openAlternateScreen(stream: OutputStream): AlternateScreen {
     writeSync(process[stream].fd, leave);
   };
   const close = (): void => {
-    try {
-      write(leave);
-    } finally {
-      state.held = undefined;
-    }
+    write(leave);
+    state.held = undefined;
     process.off('exit', restore);
 
     for (const { stream: destination, text } of held) {
@@ -130,13 +127,7 @@ export function openAlternateScreen(stream: OutputStream): AlternateScreen {
 
   state.held = held;
   process.once('exit', restore);
-
-  try {
-    write('\u001b[?1049h\u001b[?25l');
-  } catch (cause) {
-    close();
-    throw cause;
-  }
+  write('\u001b[?1049h\u001b[?25l');
 
   return { write, close };
 }

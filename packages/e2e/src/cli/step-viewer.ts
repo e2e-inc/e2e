@@ -4,7 +4,6 @@
  */
 
 import { sanitizeText } from '@e2e-dev/core/lib/internal/errors';
-import { numberedAppLogLine } from '../report/failure-text.ts';
 import { fitColumns, terminalColumns, terminalRows, visibleWidth } from '../report/format.ts';
 import { LiveWindow } from '../report/live-window.ts';
 import { openAlternateScreen, uncaptured, type OutputStream, type RunnerOutput } from '../run/process-output.ts';
@@ -74,11 +73,8 @@ export class StepKeyboard {
 
   /** Restores the main screen and turns off raw mode. */
   close(): void {
-    try {
-      this.closeViewer();
-    } finally {
-      this.keyboard.close();
-    }
+    this.closeViewer();
+    this.keyboard.close();
   }
 }
 
@@ -89,7 +85,7 @@ class StepViewer {
   private readonly screenTitle: string;
   private readonly logTitle: string;
   private view: StepView = 'screen';
-  private lines: string[] = [];
+  private lines: readonly string[] = [];
   private offset = 0;
   private request: symbol | undefined;
 
@@ -104,13 +100,7 @@ class StepViewer {
     this.screenTitle = `Screen ${step.kind === 'pause' ? 'at screen.pause()' : `before step ${number}`} · ${test}`;
     this.logTitle = `App log · ${test}`;
     this.resume = uncaptured(() => LiveWindow.suspend());
-
-    try {
-      this.terminal = openAlternateScreen(stream);
-    } catch (cause) {
-      uncaptured(this.resume);
-      throw cause;
-    }
+    this.terminal = openAlternateScreen(stream);
 
     process[stream].on('resize', this.draw);
     held.context.signal.addEventListener('abort', this.close, { once: true });
@@ -124,36 +114,25 @@ class StepViewer {
     this.lines = [view === 'screen' ? 'Reading the screen…' : 'Reading the app log…'];
     this.offset = 0;
 
-    try {
-      this.draw();
-      const { context } = this.held;
-      let lines: string[];
+    this.draw();
+    const { context } = this.held;
+    let lines: readonly string[];
 
-      if (view === 'screen') {
-        const screen = await context.readScreen();
-        lines = screen === undefined ? ['The screen could not be read.'] : sanitizeText(screen).replaceAll('\t', '  ').split('\n');
-      } else {
-        const logs = await context.readLogs();
-        lines = logs?.map((entry) => numberedAppLogLine(entry, entry.step === undefined ? undefined : entry.step + 1)) ?? [];
-
-        if (lines.length === 0) {
-          lines.push('The app has not logged anything.');
-        }
-      }
-
-      if (this.request !== request) {
-        return;
-      }
-
-      this.lines = lines;
-      this.offset = view === 'logs' ? lines.length : 0;
-      this.draw();
-    } catch (cause) {
-      if (this.request !== undefined) {
-        this.close();
-      }
-      throw cause;
+    if (view === 'screen') {
+      const screen = await context.readScreen();
+      lines = screen === undefined ? ['The screen could not be read.'] : sanitizeText(screen).replaceAll('\t', '  ').split('\n');
+    } else {
+      const logs = await context.readLogs();
+      lines = logs === undefined || logs.length === 0 ? ['The app has not logged anything.'] : logs;
     }
+
+    if (this.request !== request) {
+      return;
+    }
+
+    this.lines = lines;
+    this.offset = view === 'logs' ? lines.length : 0;
+    this.draw();
   }
 
   /** Handles keys in the viewer. These keys aren't sent to the test. */
@@ -211,11 +190,8 @@ class StepViewer {
     this.held.context.signal.removeEventListener('abort', this.close);
     this.onClose();
 
-    try {
-      this.terminal.close();
-    } finally {
-      uncaptured(this.resume);
-    }
+    this.terminal.close();
+    uncaptured(this.resume);
   };
 
   private get title(): string {
@@ -229,28 +205,23 @@ class StepViewer {
 
   /** Paints one row per line. One column stays free to prevent wrapping. */
   private readonly draw = (): void => {
-    try {
-      const columns = Math.max(1, terminalColumns() - 1);
-      const page = this.pageRows;
-      this.offset = Math.max(0, Math.min(this.offset, this.lines.length - page));
-      const visible = this.lines.slice(this.offset, this.offset + page);
-      const range = `${this.offset + 1}-${this.offset + visible.length} of ${this.lines.length}`;
-      const title = fitColumns(this.title, Math.max(1, columns - range.length - 2));
-      const heading = columns > range.length + 2 && visible.length > 0 ? `${title}${' '.repeat(columns - visibleWidth(title) - range.length)}${range}` : this.title;
-      const other = this.view === 'screen' ? 'l to show the app log' : 's to show the screen';
-      const help = `  press ↑ ↓ to scroll, press ${other}, press p to print, press q to go back`;
-      const gap = terminalRows() >= 5 ? [''] : [];
-      const rows = [heading, ...gap, ...visible.map((line) => `  ${line}`)];
+    const columns = Math.max(1, terminalColumns() - 1);
+    const page = this.pageRows;
+    this.offset = Math.max(0, Math.min(this.offset, this.lines.length - page));
+    const visible = this.lines.slice(this.offset, this.offset + page);
+    const range = `${this.offset + 1}-${this.offset + visible.length} of ${this.lines.length}`;
+    const title = fitColumns(this.title, Math.max(1, columns - range.length - 2));
+    const heading = columns > range.length + 2 && visible.length > 0 ? `${title}${' '.repeat(columns - visibleWidth(title) - range.length)}${range}` : this.title;
+    const other = this.view === 'screen' ? 'l to show the app log' : 's to show the screen';
+    const help = `  press ↑ ↓ to scroll, press ${other}, press p to print, press q to go back`;
+    const gap = terminalRows() >= 5 ? [''] : [];
+    const rows = [heading, ...gap, ...visible.map((line) => `  ${line}`)];
 
-      while (rows.length < terminalRows() - 1) {
-        rows.push('');
-      }
-
-      rows.push(help);
-      this.terminal.write(`\u001b[H\u001b[2J${rows.slice(0, terminalRows()).map((line) => fitColumns(line, columns)).join('\r\n')}`);
-    } catch (cause) {
-      this.close();
-      throw cause;
+    while (rows.length < terminalRows() - 1) {
+      rows.push('');
     }
+
+    rows.push(help);
+    this.terminal.write(`\u001b[H\u001b[2J${rows.slice(0, terminalRows()).map((line) => fitColumns(line, columns)).join('\r\n')}`);
   };
 }

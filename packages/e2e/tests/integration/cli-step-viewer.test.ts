@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, globSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -296,6 +296,62 @@ test('checks out', async ({ app, screen }) => {
 });
 
 describe('the terminal screen and app log viewer', () => {
+  it('uses the prompt and trace step number on an app log line after a nested step', async (context) => {
+    const config = `import { createFakeEngine, FAKE_APP } from '../../helpers/fake-engine.ts';
+
+let log;
+const { engine } = createFakeEngine({
+  pointerActions: ['tap'],
+  onStartAttempt(context) { log = context.appLog; },
+  onNavigate(url) { log({ source: 'console', level: 'info', text: new URL(url).pathname }); },
+});
+const executor = {
+  name: 'tap',
+  async runStep(context) {
+    await context.actions.tapAt({ x: 10, y: 10 });
+    return { status: 'passed', summary: 'Tapped Submit' };
+  },
+};
+export default { targets: [{ name: 'fake', platform: 'fake', engine, app: FAKE_APP }], agents: { default: { executor } } };
+`;
+    const suite = `import { test } from 'e2e';
+
+test('checks out', async ({ app, agent, screen }) => {
+  await app.open('/');
+  await agent.act('submit', { onAction: () => app.open('/cart') });
+  await app.open('/receipt');
+  await screen.pause();
+});
+`;
+    const run = await heldRun(context, { config, suite, args: ['--step', '--trace', 'on'] });
+    const prompt = new RegExp(`Paused \\(${PAUSE_ID_PATTERN.source}\\) at step ([3-9])\\b`);
+    const receipt = run.press('\r');
+    await run.shows(prompt, receipt);
+    await sleep(KEY_GUARD_MS);
+    const number = prompt.exec(run.printed(receipt))?.[1];
+    assert(number !== undefined, 'the prompt numbers the receipt step');
+
+    await run.shows(PAUSE_PROMPT, run.press('\r'));
+    await sleep(KEY_GUARD_MS);
+    const logs = await run.frame('1-3 of 3', run.press('l'));
+    const cartLog = 'step 3 · ℹ console: `/cart`';
+    const receiptLog = 'ℹ console: `/receipt`';
+    expect(logs).toContain(cartLog);
+    expect(logs).toContain(`step ${number} · ${receiptLog}`);
+
+    await run.shows(PAUSE_PROMPT, run.press('q'));
+    await sleep(KEY_GUARD_MS);
+    run.press('\r');
+    await run.finishes(0);
+
+    const results = path.join(run.dir, '.e2e', 'results');
+    const [traceFile] = globSync('*/trace.md', { cwd: results });
+    assert(traceFile !== undefined, 'the run wrote a trace page');
+    const trace = readFileSync(path.join(results, traceFile), 'utf8');
+    expect(trace).toContain(`- ${cartLog}`);
+    expect(trace).toContain(`- step ${number} · ${receiptLog}`);
+  });
+
   it('shows the newest app log lines first. You can switch between the log and screen', async (context) => {
     const run = await heldRun(context);
     const opened = run.press('l');
