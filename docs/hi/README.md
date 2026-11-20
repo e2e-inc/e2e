@@ -117,6 +117,7 @@ translation moves or goes with it in the same change.
 | finding (explore, bug bash) | फ़ाइंडिंग (plural also फ़ाइंडिंग) | f |
 | exploration; `explore` in prose | एक्सप्लोरेशन; explore (keep in English) | m |
 | defect | खामी | f |
+| secret fill | सीक्रेट भरना (fill as a noun: फ़िल, m) | |
 | visual testing | विज़ुअल टेस्टिंग | f |
 | self-healing | सेल्फ़-हीलिंग | f |
 | pull request | पुल रिक्वेस्ट (PR) | m |
