@@ -8,6 +8,8 @@ import {
   type GuardToolCall,
   type GuardToolResult,
   isFailedResult,
+  markWaitingTool,
+  waitingToolNames,
 } from '@e2e-dev/core/lib/agent/loop-guards';
 
 const call = (toolName: string, input = '{}'): GuardToolCall => ({ toolName, input });
@@ -47,6 +49,15 @@ describe('loop guards', () => {
     // A tool named observe that the caller did not mark keeps the ordinary thresholds.
     expect(checkLoopGuards(observes(3)).kind).toBe('warn');
     expect(checkLoopGuards(observes(5)).kind).toBe('stop');
+  });
+
+  it('recognizes a waiting handler marked by another installed copy, and nothing else', () => {
+    const own = markWaitingTool({ execute: async () => 'observed' });
+    // Another copy of the package marks through the same registry symbol, not through this module's state.
+    const foreignHandler = async () => 'observed';
+    Object.defineProperty(foreignHandler, Symbol.for('e2e.agent.waiting-handler.v1'), { value: true });
+    const names = waitingToolNames({ own, foreign: { execute: foreignHandler }, write: { execute: async () => 'wrote' }, bare: {} });
+    expect([...names].toSorted()).toEqual(['foreign', 'own']);
   });
 
   it('identical inputs are required: alternating targets are not a repeat', () => {

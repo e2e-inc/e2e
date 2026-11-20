@@ -10,6 +10,7 @@
  */
 
 import type { ModelMessage } from 'ai';
+import { realmSlot } from '../internal/realm-slot.ts';
 import { GRAMMAR_TOOL_NAMES } from './action-names.ts';
 import { toolResultTexts } from './screen-update.ts';
 
@@ -71,8 +72,12 @@ interface GuardedTool {
   readonly execute?: unknown;
 }
 
-/** The handlers of tools that only wait on the screen; see `observeRepeatWarn`. */
-const waitingHandlers = new WeakSet<object>();
+/**
+ * Set on the handler of a tool that only waits on the screen; see
+ * `observeRepeatWarn`. A registry symbol, not module state: a custom executor
+ * can get the built-in tools from another installed copy of this package.
+ */
+const waitingHandler = realmSlot<true>('e2e.agent.waiting-handler.v1');
 
 /**
  * Marks a tool as one that only reads the screen again, so identical calls
@@ -82,7 +87,7 @@ const waitingHandlers = new WeakSet<object>();
  * and keeps the ordinary thresholds.
  */
 export function markWaitingTool<T extends GuardedTool>(tool: T): T {
-  if (typeof tool.execute === 'function') waitingHandlers.add(tool.execute);
+  if (typeof tool.execute === 'function') waitingHandler.set(tool.execute, true);
   return tool;
 }
 
@@ -90,7 +95,7 @@ export function markWaitingTool<T extends GuardedTool>(tool: T): T {
 export function waitingToolNames(tools: Readonly<Record<string, GuardedTool>>): ReadonlySet<string> {
   return new Set(
     Object.entries(tools)
-      .filter(([, tool]) => typeof tool.execute === 'function' && waitingHandlers.has(tool.execute))
+      .filter(([, tool]) => typeof tool.execute === 'function' && waitingHandler.get(tool.execute) === true)
       .map(([name]) => name),
   );
 }
