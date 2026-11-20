@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import { classifyError, ConfigurationError, E2EError } from '@e2e-dev/core/lib/internal/errors';
+import { classifyError, ConfigurationError, E2EError, errorMessage } from '@e2e-dev/core/lib/internal/errors';
 import { uuidv7 } from '@e2e-dev/core/lib/internal/ids';
 import { abortError, cancelledError } from '@e2e-dev/core/lib/internal/time';
 import { errorResult } from '../session-tools/tools.ts';
@@ -13,7 +13,7 @@ type HeldAttemptState = {
   readonly attemptId: string;
   readonly attachId: string;
   labels: StepHoldMessage['attachmentLabels'];
-  attachment: AbortController | undefined;
+  attachment: ((reason: string) => Promise<string | undefined>) | undefined;
 };
 
 type PendingAttachmentReply = {
@@ -66,8 +66,7 @@ export class StepAttachmentRelay {
 
     if (hold !== undefined) {
       this.holds.delete(holdId);
-      hold.attempt.attachment?.abort(new ConfigurationError('NO_SESSION', reason));
-      hold.attempt.attachment = undefined;
+      void hold.attempt.attachment?.(reason).catch(() => undefined);
     }
   }
 
@@ -96,7 +95,7 @@ export class StepAttachmentRelay {
     }
   }
 
-  /** Picks four characters without reusing an active attempt's ID. */
+  /** Picks an ID that no active attempt uses. */
   private newId(): string {
     const used = new Set([...this.attempts.values()].map((attempt) => attempt.attachId));
     let id: string;
@@ -109,7 +108,7 @@ export class StepAttachmentRelay {
   }
 
   /** Opens an attachment to the worker running the test named by the pause ID. */
-  readonly attach = async (attachId: string, openingSignal?: AbortSignal): Promise<HeldTestAttachment> => {
+  readonly attach = async (attachId: string, openingSignal?: AbortSignal, sessionId?: string): Promise<HeldTestAttachment> => {
     const held = [...this.holds].find(([, { attempt }]) => attempt.attachId === attachId);
 
     if (held === undefined || this.interrupting()) {
@@ -131,31 +130,44 @@ export class StepAttachmentRelay {
 
     const controller = new AbortController();
     const { signal } = controller;
+    const ended = new AbortController();
     const attachmentId = uuidv7();
-    attempt.attachment = controller;
+    let closing: Promise<string | undefined> | undefined;
 
-    /** Releases the test's attachment after the worker acknowledges the detach. */
-    const detach = async (): Promise<void> => {
-      if (signal.aborted) {
-        return;
+    /** Cancels calls now and ends the attachment once the worker saves its recording. */
+    const end = (reason: string): Promise<string | undefined> => {
+      if (closing === undefined) {
+        controller.abort(new ConfigurationError('NO_SESSION', reason));
+        closing = this.requestAttachment(worker, uuidv7(), { kind: 'detach', attachmentId }).then(
+          ({ recording }) => {
+            ended.abort(new ConfigurationError('NO_SESSION', recording === undefined ? reason : `${reason}\n${recording}`));
+            return recording;
+          },
+          (cause: unknown) => {
+            ended.abort(new ConfigurationError('NO_SESSION', `${reason}\n${errorMessage(cause)}`));
+            throw cause;
+          },
+        ).finally(() => {
+          if (attempt.attachment === end) {
+            attempt.attachment = undefined;
+          }
+        });
       }
 
-      controller.abort(new ConfigurationError('NO_SESSION', 'the attachment was detached'));
-
-      try {
-        await this.requestAttachment(worker, uuidv7(), { kind: 'detach', attachmentId });
-      } finally {
-        if (attempt.attachment === controller) {
-          attempt.attachment = undefined;
-        }
-      }
+      return closing;
     };
+    attempt.attachment = end;
 
     try {
       const opening = await this.requestAttachment(
         worker,
         attachmentId,
-        { kind: 'attach', holdId, attachId },
+        {
+          kind: 'attach',
+          holdId,
+          attachId,
+          sessionId: sessionId ?? attachmentId,
+        },
         openingSignal === undefined ? signal : AbortSignal.any([signal, openingSignal]),
       );
 
@@ -169,7 +181,7 @@ export class StepAttachmentRelay {
 
       return {
         opening: opening.opening,
-        signal,
+        signal: ended.signal,
         detail: async (name) => {
           const detail = await this.requestAttachment(worker, uuidv7(), { kind: 'detail', attachmentId, name }, signal);
 
@@ -195,12 +207,12 @@ export class StepAttachmentRelay {
             };
           }
         },
-        detach,
+        detach: () => end('the attachment was detached'),
       };
     } catch (cause) {
       if (openingSignal?.aborted === true && !signal.aborted) {
-        await detach();
-      } else if (attempt.attachment === controller) {
+        await end('the attachment was detached');
+      } else if (closing === undefined && attempt.attachment === end) {
         attempt.attachment = undefined;
       }
 

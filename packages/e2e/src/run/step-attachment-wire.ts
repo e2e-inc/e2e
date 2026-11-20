@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 
-export const ATTACH_PROTOCOL = 1;
+export const ATTACH_PROTOCOL = 2;
 
 export const AttachHello = z.object({
   type: z.literal('hello'),
@@ -13,7 +13,11 @@ export const AttachHello = z.object({
 const requestId = z.string().min(1);
 
 export const AttachRequest = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('attach'), id: z.string().min(1) }),
+  z.object({
+    type: z.literal('attach'),
+    id: z.string().min(1),
+    sessionId: z.uuidv7(),
+  }),
   z.object({ type: z.literal('detail'), requestId, name: z.string() }),
   z.object({
     type: z.literal('call'),
@@ -63,7 +67,10 @@ export const AttachReply = z.discriminatedUnion('type', [
     code: z.string(),
     message: z.string(),
   }),
-  z.object({ type: z.literal('detached') }),
+  z.object({
+    type: z.literal('detached'),
+    recording: z.string().optional(),
+  }),
   z.object({ type: z.literal('ended'), reason: z.string() }),
 ]);
 
@@ -92,8 +99,8 @@ export type HeldTestAttachment = {
   /** Calls one tool and returns a redacted MCP result. */
   call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<AttachmentResult>;
 
-  /** Ends the attachment and leaves the test held. */
-  detach(): Promise<void>;
+  /** Ends the attachment and reports where its recording was saved. */
+  detach(): Promise<string | undefined>;
 };
 
 export const NO_HELD_TEST = 'No test in this directory is held. Add screen.pause() to a test and run it, or start e2e run <files> --step.';

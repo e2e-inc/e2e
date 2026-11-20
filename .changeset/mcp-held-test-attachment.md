@@ -4,8 +4,9 @@
 ---
 
 Attach to a test held at `screen.pause()` or `e2e run --step` with
-`open_session {attach: "k3f9"}` in `e2e mcp`. Use the four-character ID
-from the pause header. Run test statements, fill configured secrets, or
-save screenshots on the held app with the target's normal session tools.
-Start the run with `--video` to record activity while attached.
-`close_session` detaches and leaves the test held.
+`open_session {attach: "k3f9"}` in `e2e mcp`. Use the ID from the pause
+header. The attached session has the same tools as a normal session on
+that target. If the run already records the attempt, `start_recording`
+returns an error with the run's video directory. `close_session` detaches
+and leaves the test held. Detaching or resuming saves an attached recording
+still running and reports its path.

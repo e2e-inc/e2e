@@ -36,7 +36,7 @@ import { appLines } from './app-lines.ts';
 import { SESSION_BOUNDS } from '../session-tools/bounds.ts';
 import type { EngineSession, LoadedConfig } from './config.ts';
 import type { FactoryRef } from './default-engine.ts';
-import { describeRecording, SessionRecorder } from '../session-tools/recording.ts';
+import { SessionRecorder } from '../session-tools/recording.ts';
 import { SessionRegistry } from './sessions.ts';
 import { describeTestOutcome } from './test-outcome.ts';
 import { SessionUsage, type McpSessionSummary, type SessionEndedBy } from './usage.ts';
@@ -83,7 +83,7 @@ type AttachedSession = {
 type Session = LiveSession | AttachedSession;
 
 export interface OpenSessionOptions {
-  /** Set to the four-character ID in a pause header to attach to that test. */
+  /** Set to the ID in a pause header to attach to that test. */
   readonly attach?: string | undefined;
   /** The target to open; otherwise the server's `--target`, else the config's only target. */
   readonly target?: string | undefined;
@@ -111,7 +111,7 @@ const ENGINE_DEFAULTS = 'engine defaults, with no config file';
 
 export interface SessionHostOptions {
   /** Supply a connector to enable attachments from the MCP server's working directory. */
-  readonly connectAttachment?: (id: string, signal: AbortSignal) => Promise<HeldTestAttachment>;
+  readonly connectAttachment?: (id: string, sessionId: string, signal: AbortSignal) => Promise<HeldTestAttachment>;
   /** The absolute path of the config a session loads, without evaluating it; `configPath` overrides the server's default. */
   readonly locateConfig: (configPath: string | undefined) => string;
   /**
@@ -208,9 +208,10 @@ export class SessionHost {
   /** Detaches from the test or closes the standalone attempt. Returns a summary. */
   private async teardown(live: Session, reason: string, endedBy: SessionEndedBy): Promise<string> {
     if (live.kind === 'attached') {
-      await live.attachment.detach().finally(() => this.options.onSessionEnd?.(live.usage.closed(endedBy)));
+      const recording = await live.attachment.detach().finally(() => this.options.onSessionEnd?.(live.usage.closed(endedBy)));
+      const summary = `Session ${live.id} closed (${reason}).`;
 
-      return processSecrets.redact(`Session ${live.id} closed (${reason}).`);
+      return processSecrets.redact(recording === undefined ? summary : `${summary}\n${recording}`);
     }
 
     if (live.idleTimer !== undefined) clearTimeout(live.idleTimer);
@@ -218,7 +219,7 @@ export class SessionHost {
       await live.step.end({ status: 'passed', summary: `session closed: ${reason}` });
       const outcome = await live.step.done;
       // The recorder runs this after a start or stop still in flight, even one the step's deadline abandoned.
-      return { outcome, saved: await this.saveRecording(live) };
+      return { outcome, saved: await live.recorder?.saveOnClose() };
     }).finally(() => this.options.onSessionEnd?.(live.usage.closed(endedBy)));
     const lines = [`Session ${live.id} closed (${reason}); ${live.actions} tool calls ran.`];
     if (value.saved !== undefined) lines.push(value.saved);
@@ -331,7 +332,7 @@ export class SessionHost {
       throw new ConfigurationError('NO_SESSION', NO_HELD_TEST);
     }
 
-    const attachment = await connect(attach, opening);
+    const attachment = await connect(attach, id, opening);
 
     if (opening.aborted || attachment.signal.aborted) {
       await attachment.detach();
@@ -558,21 +559,6 @@ export class SessionHost {
   }
 
   /**
-   * Stops a recording still running when the session closes, and says where
-   * it went or why it was lost. Always queued, never checked first: a start
-   * still in flight is not running yet, and would record past the close.
-   */
-  private async saveRecording(live: LiveSession): Promise<string | undefined> {
-    if (live.recorder === undefined) return undefined;
-    try {
-      const recording = await live.recorder.stop();
-      return recording === undefined ? undefined : describeRecording(recording);
-    } catch (cause) {
-      return `The running recording could not be saved: ${errorMessage(cause)}`;
-    }
-  }
-
-  /**
    * Opens the app URL when `open` asks and the engine can navigate, then
    * observes; a device's pinned app launched before the step opened. Either
    * opening is the test's `app.open()`, the session's first test line.
@@ -660,7 +646,7 @@ export class SessionHost {
         'Pass the session ID to later calls. Use call {tool: "observe"} to see the current screen.',
       ].join(' '),
       inputSchema: z.object({
-        attach: z.string().min(1).optional().describe('Pass only attach with the four-character ID from a pause header, such as k3f9'),
+        attach: z.string().min(1).optional().describe('Pass only attach with the ID from the pause header'),
         target: z.string().min(1).optional().describe('Target name from the config; required when the config declares several'),
         config: z.string().min(1).optional().describe("Path to an e2e config file, absolute or relative to the server's working directory; default: the nearest e2e.config.ts, .mts, .js, or .mjs"),
         headed: z

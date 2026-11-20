@@ -17,7 +17,7 @@ import { traceScreen, type TraceScreenOptions } from '@e2e-dev/core/lib/run/step
 
 /** A step held before it runs, or a paused test, as the runner's `hold` hook sees it. */
 export interface HeldStep extends StepHold {
-  /** The random four-character ID shown at every hold of this attempt. */
+  /** The ID shown at every hold of this attempt. */
   readonly attachId: string;
 }
 
@@ -61,7 +61,7 @@ export interface StepHoldContext {
   /** Aborts once the answer no longer matters: the step was abandoned, its attempt ended, or the run was interrupted. */
   readonly signal: AbortSignal;
   /** Attaches to a held test by its pause ID. */
-  attach(id: string, signal?: AbortSignal): Promise<HeldTestAttachment>;
+  attach(id: string, signal?: AbortSignal, sessionId?: string): Promise<HeldTestAttachment>;
   /**
    * Shows the step waiting for a key, or no prompt: under its test in the
    * list reporter's live window, else on stderr.

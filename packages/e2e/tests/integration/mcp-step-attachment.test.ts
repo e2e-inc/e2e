@@ -128,13 +128,17 @@ async function mcp(dir: string) {
     command: process.execPath,
     args: [CLI, 'mcp'],
     cwd: dir,
-    stderr: 'ignore',
+    stderr: 'pipe',
     env: { ...temp, E2E_TELEMETRY_DISABLED: '1', E2E_UPDATE_CHECK_DISABLED: '1' },
   });
   const client = new Client({ name: 'step-attachment-test', version: '1.0.0' });
+  const log: string[] = [];
+  transport.stderr?.on('data', (chunk: Buffer) => {
+    log.push(chunk.toString());
+  });
   clients.push(client);
   await client.connect(transport);
-  return { client, transport };
+  return { client, transport, log };
 }
 
 /** Invokes a tool and collects its text, including any error reason. */
@@ -435,7 +439,7 @@ ${CONFIG.replace('  video: true,', `  video: true,
     expect(pages[0]?.[1]).not.toContain('/attached-only');
   });
 
-  it('offers the normal session tools for the same target while preserving the test video', async () => {
+  it('lists exactly the normal session tools and keeps the run video when the agent does not record', async () => {
     const dir = project('await screen.pause();');
     const { client } = await mcp(dir);
     const normal = await openSession(client);
@@ -446,9 +450,7 @@ ${CONFIG.replace('  video: true,', `  video: true,
     const held = await pause(dir, '--video', 'on');
     const attached = await openSession(client, { attach: held.id });
     const attachedTools = await toolNames(client, attached.session);
-    // The engine contract exposes one recorder per session, already used by the run's video.
-    const recordingTools = new Set(['start_recording', 'stop_recording']);
-    expect(attachedTools.toSorted()).toEqual(normalTools.filter((name) => !recordingTools.has(name)).toSorted());
+    expect(attachedTools.toSorted()).toEqual(normalTools.toSorted());
     expect((await invoke(client, 'call', { tool: 'checkout_status' })).text).toBe('ready');
 
     expect(e2e(dir, 'run', '--step', 'next').status).toBe(0);
@@ -456,6 +458,90 @@ ${CONFIG.replace('  video: true,', `  video: true,
     expect(contentsUnder(path.join(dir, '.e2e/results')).map(([file]) => file)).toEqual(
       expect.arrayContaining([expect.stringMatching(/fake\.webm$/)]),
     );
+    expect(existsSync(path.join(dir, '.e2e/videos', attached.session))).toBe(false);
+  });
+
+  it('saves attached recordings under their session IDs and returns the paths', async () => {
+    const dir = project('await screen.pause();');
+    const held = await pause(dir, '--video', 'on-first-retry');
+    const { client } = await mcp(dir);
+    const normal = await openSession(client);
+    const first = await openSession(client, { attach: held.id });
+    const sessions = [normal.session, first.session];
+
+    for (const session of sessions) {
+      const started = await invoke(client, 'call', { session, tool: 'start_recording', args: { name: 'demo' } });
+      expect(started.isError, started.text).toBe(false);
+      expect(started.text).toContain('Recording 1 "demo" started.');
+
+      const stopped = await invoke(client, 'call', { session, tool: 'stop_recording' });
+      expect(stopped.isError, stopped.text).toBe(false);
+      const file = path.join(dir, '.e2e/videos', session, '1-demo.webm');
+      expect(stopped.text).toContain(`- ${file}`);
+      expect(readFileSync(file).subarray(0, 4).toString('hex')).toBe('1a45dfa3');
+
+      expect((await invoke(client, 'close_session', { session })).isError).toBe(false);
+    }
+
+    const second = await openSession(client, { attach: held.id });
+    expect(new Set([...sessions, second.session]).size).toBe(3);
+    const started = await invoke(client, 'call', { session: second.session, tool: 'start_recording', args: { name: 'demo' } });
+    expect(started.isError, started.text).toBe(false);
+
+    const closed = await invoke(client, 'close_session', { session: second.session });
+    const file = path.join(dir, '.e2e/videos', second.session, '1-demo.webm');
+    expect(closed.isError, closed.text).toBe(false);
+    expect(closed.text).toContain(`- ${file}`);
+    expect(readFileSync(file).subarray(0, 4).toString('hex')).toBe('1a45dfa3');
+  });
+
+  it('refuses to start a recording and reports where the run saves its video', async () => {
+    const dir = project('await screen.pause();');
+    const held = await pause(dir, '--video', 'on');
+    const { client } = await mcp(dir);
+    const { session } = await openSession(client, { attach: held.id });
+
+    const refused = await invoke(client, 'call', { session, tool: 'start_recording' });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain('The run already records this test.');
+
+    const stopped = await invoke(client, 'call', { session, tool: 'stop_recording' });
+    expect(stopped.isError, stopped.text).toBe(false);
+    expect(stopped.text).toContain('Nothing is recording');
+    expect(e2e(dir, 'run', '--step', 'next').status).toBe(0);
+    expect(await held.exited).toBe(0);
+
+    const videos = contentsUnder(path.join(dir, '.e2e/results')).filter(([file]) => file.endsWith('.webm'));
+    expect(videos).toHaveLength(1);
+    expect(refused.text).toContain(path.dirname(videos[0]?.[0] ?? ''));
+    expect(existsSync(path.join(dir, '.e2e/videos', session))).toBe(false);
+  });
+
+  it('saves an attached recording before the test resumes and logs the path', async () => {
+    const dir = project(`await screen.pause();
+    const { readdirSync } = await import('node:fs');
+    const saved = readdirSync(new URL('../.e2e/videos/', import.meta.url), { recursive: true });
+    if (!saved.some((name) => name.endsWith('1-paused.webm'))) {
+      throw new Error('The recording was missing when the test resumed.');
+    }
+    ${STEP}`);
+    const held = await pause(dir);
+    const server = await mcp(dir);
+    const { client } = server;
+    const { session } = await openSession(client, { attach: held.id });
+
+    const started = await invoke(client, 'call', { session, tool: 'start_recording', args: { name: 'paused' } });
+    expect(started.isError, started.text).toBe(false);
+    expect(e2e(dir, 'run', '--step', 'next').status).toBe(0);
+    expect(await held.exited).toBe(0);
+
+    const file = path.join(dir, '.e2e/videos', session, '1-paused.webm');
+    expect(readFileSync(file).subarray(0, 4).toString('hex')).toBe('1a45dfa3');
+    await vi.waitFor(() => {
+      const log = server.log.join('');
+      expect(log).toContain(`session ${session} ended: the test resumed`);
+      expect(log).toContain(file);
+    });
   });
 
   it('runs test statements under the call timeout and leaves them out of the report', async () => {

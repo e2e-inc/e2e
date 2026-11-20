@@ -73,7 +73,7 @@ export async function serveMcp(options: ServeOptions): Promise<number> {
 
   const output = options.output;
   const host = new SessionHost({
-    connectAttachment: (id, signal) => connectHeldTest(options.cwd, options.version, id, signal),
+    connectAttachment: (id, sessionId, signal) => connectHeldTest(options.cwd, options.version, id, sessionId, signal),
     locateConfig: (configPath) => locateProjectConfig({ cwd: options.cwd, configPath: configPath ?? options.configPath }),
     loadConfig: (configPath, graph) => loadProjectConfig(configPath, options.env, graph),
     loadEngineConfig: (session) => loadEngineConfig({ cwd: options.cwd, configPath: options.configPath, env: options.env, enginesDir: userEnginesDir() }, session),

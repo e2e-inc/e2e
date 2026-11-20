@@ -311,28 +311,29 @@ export class TargetWorker {
         return;
       }
 
-      const settle = (reason: Error): void => {
+      const settle = (reason: Error): Promise<string | undefined> | undefined => {
         this.holds.delete(holdId);
         signal.removeEventListener('abort', cancel);
-        tools.end(reason);
+        return tools.end(reason);
       };
 
       const cancel = (): void => {
         const reason = this.interruptController.signal.aborted ? 'the run was interrupted' : 'the test hold ended';
-        settle(abortError(signal, () => new ConfigurationError('NO_SESSION', reason)));
+        const saving = settle(abortError(signal, () => new ConfigurationError('NO_SESSION', reason)));
         this.host.emit({ type: 'step-cancel', holdId });
-        reject(abortError(signal, cancelledError));
+        void Promise.resolve(saving).then(() => reject(abortError(signal, cancelledError)), reject);
       };
 
       this.holds.set(holdId, {
         release: (error) => {
-          settle(new ConfigurationError('NO_SESSION', error === undefined ? 'the test resumed' : 'the test hold failed'));
-
-          if (error === undefined) {
-            resolve();
-          } else {
-            reject(new E2EError(error.category, error.code, error.message));
-          }
+          const saving = settle(new ConfigurationError('NO_SESSION', error === undefined ? 'the test resumed' : 'the test hold failed'));
+          void Promise.resolve(saving).then(() => {
+            if (error === undefined) {
+              resolve();
+            } else {
+              reject(new E2EError(error.category, error.code, error.message));
+            }
+          }, reject);
         },
         readScreen,
         tools,

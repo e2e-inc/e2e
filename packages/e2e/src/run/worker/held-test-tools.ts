@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { GRAMMAR_TOOL_NAMES } from '@e2e-dev/core/lib/agent/action-names';
 import { validateParams } from '@e2e-dev/core/lib/agent/act-validation';
 import { loadAiSdkIfInstalled } from '@e2e-dev/core/lib/agent/ai-sdk';
@@ -13,8 +14,11 @@ import { abortError, cancelledError, Deadline, withAbort } from '@e2e-dev/core/l
 import { LocatorEngine } from '@e2e-dev/core/lib/locator/engine';
 import { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
 import { createApp } from '@e2e-dev/core/lib/run/fixtures';
+import { outputLayout } from '@e2e-dev/core/lib/run/output';
+import { sessionRecordings } from '@e2e-dev/core/lib/run/recordings';
 import { StepRecorder } from '@e2e-dev/core/lib/run/steps';
 import type { SessionCatalog } from '../../session-tools/catalog.ts';
+import type { SessionRecorder } from '../../session-tools/recording.ts';
 import { actionResult, catalogLine, describeToolDetail, errorResult, invokeTool, redactResult, unavailableSessionTool } from '../../session-tools/tools.ts';
 import { sessionFills, sessionSecretLines, sessionSecretParams } from '../../session-tools/secrets.ts';
 import { heldTestToolCallScope } from './held-test-tool-scope.ts';
@@ -27,18 +31,21 @@ type Attachment = {
   readonly controller: AbortController;
   readonly queue: OperationQueue;
   readonly requests: Map<string, AbortController>;
+  recorder: SessionRecorder | undefined;
   running: boolean;
 };
 
 /** Tool calls on the engine session of a held test attempt. */
 export class HeldTestTools {
   private attachment: Attachment | undefined;
+  private saving: Promise<string | undefined> | undefined;
 
   constructor(
     private readonly runtime: AgentContext,
     private readonly runId: string,
     private readonly target: ResolvedTarget,
     private readonly headed: boolean,
+    private readonly runRecordsVideo: boolean,
   ) {}
 
   /** The ID of the attempt running in this worker. */
@@ -72,11 +79,13 @@ export class HeldTestTools {
     try {
       switch (request.kind) {
         case 'attach':
-          return await this.attach(requestId, request.attachId);
+          return await this.attach(requestId, request.attachId, request.sessionId);
 
         case 'detach':
           if (this.attachment?.id === request.attachmentId) {
-            this.end(new ConfigurationError('NO_SESSION', 'the attachment was detached'));
+            const recording = await this.end(new ConfigurationError('NO_SESSION', 'the attachment was detached'));
+
+            return recording === undefined ? { kind: 'detach' } : { kind: 'detach', recording };
           }
 
           return { kind: 'detach' };
@@ -122,7 +131,7 @@ export class HeldTestTools {
   }
 
   /** Opens an attachment with a catalog and the screen at the hold. */
-  private async attach(requestId: string, attachId: string): Promise<Extract<StepAttachmentResponse, { kind: 'attach' }>> {
+  private async attach(requestId: string, attachId: string, sessionId: string): Promise<Extract<StepAttachmentResponse, { kind: 'attach' }>> {
     if (this.attachment !== undefined) {
       throw new ConfigurationError('INVALID_ARGUMENT', 'this test already has an attachment');
     }
@@ -139,14 +148,16 @@ export class HeldTestTools {
       controller,
       queue: new OperationQueue(),
       requests: new Map(),
+      recorder: undefined,
       running: false,
     };
 
     this.attachment = attachment;
+    this.saving = undefined;
 
     try {
       const { catalog, observation } = await this.run(requestId, attachment, async (callSignal) => {
-        const openedCatalog = await this.createCatalog(callSignal, signal, screen);
+        const openedCatalog = await this.createCatalog(callSignal, attachment, sessionId, screen);
         attachment.catalog = openedCatalog;
 
         try {
@@ -185,7 +196,7 @@ export class HeldTestTools {
       };
     } catch (cause) {
       if (this.attachment === attachment) {
-        this.end(classifyError(cause));
+        await this.end(classifyError(cause));
       }
 
       throw cause;
@@ -209,15 +220,21 @@ export class HeldTestTools {
   }
 
   /** Ends the attachment before a test step can drive the app again. */
-  end(reason: Error): void {
+  end(reason: Error): Promise<string | undefined> | undefined {
     const attachment = this.attachment;
 
     if (attachment === undefined) {
-      return;
+      return this.saving;
     }
 
     this.attachment = undefined;
     attachment.controller.abort(reason);
+    const { redact } = this.runtime;
+    this.saving = attachment.recorder?.saveOnClose().then((recording) =>
+      recording === undefined ? undefined : redact(recording),
+    );
+
+    return this.saving;
   }
 
   /** Resolves a catalog entry, excluding inherited object members. */
@@ -259,9 +276,15 @@ export class HeldTestTools {
   }
 
   /** Builds the reusable grammar and observation context without opening a recorded step. */
-  private async createCatalog(callSignal: AbortSignal, signal: AbortSignal, screen: ScreenPresenter): Promise<SessionCatalog> {
-    const [{ createSessionCatalog }] = await Promise.all([
+  private async createCatalog(
+    callSignal: AbortSignal,
+    attachment: Attachment,
+    sessionId: string,
+    screen: ScreenPresenter,
+  ): Promise<SessionCatalog> {
+    const [{ createSessionCatalog }, { SessionRecorder }] = await Promise.all([
       import('../../session-tools/catalog.ts'),
+      import('../../session-tools/recording.ts'),
       loadAiSdkIfInstalled(),
     ]);
 
@@ -269,7 +292,8 @@ export class HeldTestTools {
       throw abortError(callSignal, cancelledError);
     }
 
-    const { config, redact, redactCut } = this.runtime;
+    const { artifacts, config, redact, redactCut } = this.runtime;
+    const { signal } = attachment;
     const budget = {
       get signal() {
         return heldTestToolCallScope.getStore()?.signal ?? signal;
@@ -278,6 +302,41 @@ export class HeldTestTools {
     };
 
     const session = this.runtime.engine.session;
+    const { startVideo, stopVideo } = session.artifacts;
+
+    if (startVideo !== undefined && stopVideo !== undefined) {
+      attachment.recorder = new SessionRecorder({
+        beforeStart: () => {
+          if (budget.signal.aborted) {
+            throw abortError(budget.signal, cancelledError);
+          }
+
+          if (this.runRecordsVideo) {
+            throw new ConfigurationError(
+              'UNSUPPORTED_CAPABILITY',
+              `The run already records this test. Run video is written to ${path.join(artifacts.dir, 'video')}.`,
+            );
+          }
+
+          if (sessionRecordings(session, this.target.name).spanRunning) {
+            throw new ConfigurationError('UNSUPPORTED_CAPABILITY', 'The test already has a recording started by app.startRecording().');
+          }
+        },
+        startVideo,
+        stopVideo,
+        attemptDir: artifacts.dir,
+        outDir: outputLayout(config.output).videos(sessionId),
+        operation: (timeoutMs) => ({
+          signal: AbortSignal.timeout(timeoutMs),
+          timeoutMs,
+          runId: this.runId,
+          attemptId: this.attemptId,
+          origin: 'test',
+        }),
+        timeoutMs: config.cleanupTimeout,
+      });
+    }
+
     const engine = this.locator(budget);
     const { debug: _debug, ...runtime } = {
       ...this.runtime,
@@ -347,7 +406,7 @@ export class HeldTestTools {
       redaction: { redact, redactCut },
       projectRoot: config.projectRoot,
       attemptDir: runtime.artifacts.dir,
-      recorder: undefined,
+      recorder: attachment.recorder,
       fills: sessionFills(config),
       onActionFailed: (cause) => {
         const call = heldTestToolCallScope.getStore();
@@ -362,7 +421,6 @@ export class HeldTestTools {
           const statementBudget = new AttemptBudget(requestSignal ?? signal, new Deadline(Number.POSITIVE_INFINITY));
           const steps = new StepRecorder(this.attemptId, { redact });
           const locator = this.locator(statementBudget);
-          const { artifacts } = runtime;
 
           return {
             agentRuntime: { ...runtime, engine: locator, steps },

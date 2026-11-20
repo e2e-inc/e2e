@@ -333,7 +333,7 @@ function attachmentConnection(client: net.Socket, options: AttachmentSocketOptio
             throw new ConfigurationError('NO_SESSION', NO_HELD_TEST);
           }
 
-          const opened = await attach(request.id, connection.signal);
+          const opened = await attach(request.id, connection.signal, request.sessionId);
 
           if (connection.signal.aborted || client.writableEnded) {
             await opened.detach();
@@ -356,8 +356,8 @@ function attachmentConnection(client: net.Socket, options: AttachmentSocketOptio
           const attached = requireAttachment();
           detachRequested = true;
 
-          await attached.detach();
-          closeWithReply({ type: 'detached' });
+          const recording = await attached.detach();
+          closeWithReply({ type: 'detached', recording });
           return;
         }
 

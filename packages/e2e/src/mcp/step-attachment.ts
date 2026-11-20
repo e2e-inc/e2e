@@ -1,7 +1,7 @@
 import net from 'node:net';
-import { ConfigurationError, E2EError, InfrastructureError } from '@e2e-dev/core/lib/internal/errors';
+import { ConfigurationError, E2EError } from '@e2e-dev/core/lib/internal/errors';
 import { uuidv7 } from '@e2e-dev/core/lib/internal/ids';
-import { abortError, cancelledError, withTimeout } from '@e2e-dev/core/lib/internal/time';
+import { abortError, cancelledError } from '@e2e-dev/core/lib/internal/time';
 import {
   ATTACH_PROTOCOL,
   AttachReply,
@@ -12,8 +12,6 @@ import {
 } from '../run/step-attachment-wire.ts';
 import { parseLine, readSocketLines, stepAddress } from '../run/step-socket.ts';
 
-const DETACH_TIMEOUT_MS = 5_000;
-
 type RequestReply = Extract<AttachReply, { type: 'detail' | 'result' }>;
 
 type PendingReply<Value> = {
@@ -22,12 +20,12 @@ type PendingReply<Value> = {
 };
 
 /** Connects to a held test in the MCP server's directory. */
-export async function connectHeldTest(cwd: string, version: string, id: string, signal: AbortSignal): Promise<HeldTestAttachment> {
+export async function connectHeldTest(cwd: string, version: string, id: string, sessionId: string, signal: AbortSignal): Promise<HeldTestAttachment> {
   if (signal.aborted) {
     throw abortError(signal, cancelledError);
   }
 
-  const client = new AttachmentClient(stepAddress(cwd).socket, version, id);
+  const client = new AttachmentClient(stepAddress(cwd).socket, version, { type: 'attach', id, sessionId });
 
   /** Closes the connection if the client cancels the open request. */
   const cancel = (): void => client.end(abortError(signal, cancelledError));
@@ -60,15 +58,15 @@ class AttachmentClient {
   private opening: PendingReply<HeldTestOpening> | undefined;
   private readonly pending = new Map<string, PendingReply<RequestReply>>();
   private phase: 'hello' | 'opening' | 'open' = 'hello';
-  private detachPromise: Promise<void> | undefined;
-  private detachReply: (() => void) | undefined;
+  private detachPromise: Promise<string | undefined> | undefined;
+  private detachReply: ((recording?: string) => void) | undefined;
 
   readonly opened = new Promise<HeldTestOpening>((resolve, reject) => {
     this.opening = { resolve, reject };
   });
   readonly signal = this.attachmentEnd.signal;
 
-  constructor(socket: string, version: string, private readonly id: string) {
+  constructor(socket: string, version: string, private readonly attach: Extract<AttachRequest, { type: 'attach' }>) {
     this.socket = net.connect(socket, () => {
       this.socket.write(`${JSON.stringify({ type: 'hello', protocol: ATTACH_PROTOCOL, version })}\n`);
     });
@@ -132,19 +130,16 @@ class AttachmentClient {
   }
 
   /** Waits for detach to finish so an immediate reattach can claim the attempt. */
-  detach(): Promise<void> {
+  detach(): Promise<string | undefined> {
     if (this.detachPromise === undefined) {
       if (this.signal.aborted) {
-        return Promise.resolve();
+        return Promise.resolve(undefined);
       }
 
-      const reply = new Promise<void>((resolve) => {
+      this.detachPromise = new Promise<string | undefined>((resolve) => {
         this.detachReply = resolve;
         this.socket.write(`${JSON.stringify({ type: 'detach' } satisfies AttachRequest)}\n`);
       });
-      this.detachPromise = withTimeout(reply, DETACH_TIMEOUT_MS, () =>
-        new InfrastructureError('OPERATION_TIMEOUT', 'timed out waiting for a detach acknowledgement'),
-      ).finally(() => this.end(new ConfigurationError('NO_SESSION', 'the attachment was detached')));
     }
 
     return this.detachPromise;
@@ -166,11 +161,13 @@ class AttachmentClient {
 
     if (this.phase === 'hello' && reply?.type === 'hello') {
       this.phase = 'opening';
-      this.socket.write(`${JSON.stringify({ type: 'attach', id: this.id } satisfies AttachRequest)}\n`);
+      this.socket.write(`${JSON.stringify(this.attach)}\n`);
       return;
     }
 
     if (reply?.type === 'ended') {
+      this.detachReply?.(reply.reason);
+      this.detachReply = undefined;
       this.end(new ConfigurationError('NO_SESSION', reply.reason));
     } else if (this.phase === 'opening' && reply?.type === 'opening') {
       this.phase = 'open';
@@ -179,6 +176,8 @@ class AttachmentClient {
     } else if (this.phase === 'open' && (reply?.type === 'detail' || reply?.type === 'result')) {
       this.pending.get(reply.requestId)?.resolve(reply);
     } else if (this.detachReply !== undefined && reply?.type === 'detached') {
+      this.detachReply(reply.recording);
+      this.detachReply = undefined;
       this.end(new ConfigurationError('NO_SESSION', 'the attachment was detached'));
     } else {
       this.end(new ConfigurationError('NO_SESSION', 'invalid attachment reply from the step socket'));

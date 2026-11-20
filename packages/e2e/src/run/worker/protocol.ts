@@ -163,7 +163,12 @@ export interface ScreenRequestMessage {
  * Later requests use the ID of the attach request.
  */
 export type StepAttachmentRequest =
-  | { readonly kind: 'attach'; readonly holdId: string; readonly attachId: string }
+  | {
+      readonly kind: 'attach';
+      readonly holdId: string;
+      readonly attachId: string;
+      readonly sessionId: string;
+    }
   | { readonly kind: 'detail'; readonly attachmentId: string; readonly name: string }
   | {
       readonly kind: 'call';
@@ -322,7 +327,7 @@ export type StepAttachmentResponse =
   | { readonly kind: 'attach'; readonly opening: HeldTestOpening }
   | { readonly kind: 'detail'; readonly text: string }
   | { readonly kind: 'call'; readonly result: McpToolResult; readonly errorCode: string | undefined }
-  | { readonly kind: 'detach' }
+  | { readonly kind: 'detach'; readonly recording?: string }
   | { readonly kind: 'error'; readonly error: Pick<SerializedError, 'category' | 'code' | 'message'> };
 
 type StepAttachmentReplyMessage = {

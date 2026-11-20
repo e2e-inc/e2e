@@ -240,14 +240,22 @@ Resources: `e2e://guide` and `e2e://guide/<topic>` hold this skill.
 
 ## Attaching to a held test
 
-Pass only `attach` to `open_session`, using the four-character ID from
-the pause header. For `Paused (k3f9)`, call `open_session {attach: "k3f9"}`.
-Run MCP from the test run's directory with the same e2e version. Use the
-target's normal tools to inspect and drive the app. To record the app
-while attached, start the run with `--video`.
+Pass only `attach` to `open_session`, using the ID from the pause header.
+Run MCP from the test run's directory with the same e2e version.
+
+```txt
+open_session {attach: "k3f9"}
+```
+
+An attached session has the same tools as a normal session on that target.
+Use `start_recording` and `stop_recording` to save a video under
+`<output>/videos/<session>/`. If the run already records the attempt,
+`start_recording` returns an error with the run's video directory.
 
 Use `close_session` to detach and leave the test held. Press Enter or run
 `npx e2e run --step next` to resume the test and end the attachment.
+Both save any attached recording still running. The closing reply or the
+server log shows the saved path.
 
 ## Fixing a failing test
 

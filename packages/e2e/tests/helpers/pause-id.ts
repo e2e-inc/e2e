@@ -1,4 +1,4 @@
-/** The four characters printed as a held attempt's ID. */
+/** Reads the held attempt's ID from the pause header. */
 export const PAUSE_ID_PATTERN = /[a-hjkmnp-z2-9]{4}/;
 
 /** Reads the held attempt's ID from its pause header. */

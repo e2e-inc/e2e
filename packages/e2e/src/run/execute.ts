@@ -753,7 +753,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         test: { file: pair.test.file, titlePath: pair.test.titlePath, writtenScreenshots: this.writtenScreenshots },
       });
       if (hold !== undefined) {
-        const tools = new HeldTestTools(agentRuntime, this.options.runId, this.target, this.options.headed);
+        const tools = new HeldTestTools(agentRuntime, this.options.runId, this.target, this.options.headed, video !== undefined);
         heldTools = tools;
         const screens = {
           ledger: sessionLedger(session, this.config.allSecrets),
