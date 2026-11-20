@@ -61,7 +61,7 @@ description: モデル入力、ツール呼び出し、シークレット、秘�
 
 | 拒否する操作 | 理由 |
 | --- | --- |
-| `about:blank` を除き、`http:` と `https:` 以外のスキームへのナビゲーション | `file:`、`data:`、`javascript:`、`view-source:file:` などのラッパーは、ローカルまたはインラインの内容を読み込むためです。 |
+| `about:blank` を除き、`http:` と `https:` 以外のスキームへのナビゲーション | `file:`、`data:`、`javascript:` と、`view-source:file:` などのラッパーは、ローカルまたはインラインの内容を読み込むためです。 |
 | 不正な形式の URL | 自動修正は行いません。 |
 | JSON を受け取る箇所への `Secret` の受け渡し | ハンドルは値を保持せず、値をシリアライズすることも許可されません。 |
 | getter、または `toHaveValue`、`toHaveText`、`toContainText`、`toHaveAttribute` マッチャーによる、セキュアフィールドからの値、テキスト、属性の読み取り | シークレット自体ではなく、操作の結果をアサートしてください。非公開の値は秘匿された値であり、空でも欠落でもありません。 |
