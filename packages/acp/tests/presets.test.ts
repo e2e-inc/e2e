@@ -381,6 +381,21 @@ describe('a key only the agent is given', () => {
     expect(redactSecrets(key)).toBe('<secret:OPENAI_API_KEY>');
   });
 
+  it('reaches the agent as its marker in the system text and the step', async () => {
+    const key = 'sk-test-agent-system-8c3f1a6d2e9b';
+    vi.stubEnv('OPENAI_API_KEY', undefined);
+    const log = join(mkdtempSync(join(tmpdir(), 'e2e-acp-system-')), 'agent.jsonl');
+    cleanups.push(() => rmSync(dirname(log), { recursive: true, force: true }));
+    const executor = acp({ command: process.execPath, args: [AGENT], system: `Sign in with ${key} when asked.`, env: { OPENAI_API_KEY: key, ACP_SCRIPT: JSON.stringify([[pass]]), ACP_LOG: log } });
+    const ctx = stepContext();
+    (ctx.step as { instruction: string }).instruction = `type ${key} into the key field`;
+    await expect(executor.runStep(ctx)).resolves.toMatchObject({ status: 'passed' });
+    const prompt = String(readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>).find((entry) => 'prompt' in entry)?.['prompt']);
+    expect(prompt).toContain('Sign in with <secret:OPENAI_API_KEY> when asked.');
+    expect(prompt).toContain('type <secret:OPENAI_API_KEY> into the key field');
+    expect(prompt).not.toContain(key.slice(-12));
+  });
+
   it('builds an executor with no env of its own', () => {
     expect(acp({ command: process.execPath, args: [AGENT] }).name).toBe('acp');
   });
@@ -489,6 +504,28 @@ describe('the login Codex saved', () => {
     );
     await runStep(executor, log);
     expect(redactSecrets(all)).toBe('<secret:codex.api-key> <secret:codex.id-token> <secret:codex.access-token> <secret:codex.refresh-token>');
+  });
+
+  it('is known before the first step, so that step reaches the agent with the marker', async () => {
+    const key = 'sk-saved-first-step-2d7b9e4a1c6f';
+    const { executor, log } = codexWith(login({ OPENAI_API_KEY: key }), (home) => ({ CODEX_HOME: home }));
+    expect(redactSecrets(key)).toBe('<secret:codex.api-key>');
+    const ctx = stepContext();
+    (ctx.step as { instruction: string }).instruction = `paste ${key} into the form`;
+    await expect(executor.runStep(ctx)).resolves.toMatchObject({ status: 'passed' });
+    const prompt = String(readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>).find((entry) => 'prompt' in entry)?.['prompt']);
+    expect(prompt).toContain('paste <secret:codex.api-key> into the form');
+    expect(prompt).not.toContain(key.slice(-12));
+  });
+
+  it('is redacted from the first start that fails quoting it, before the line is cut', async () => {
+    // The last 2,000 characters of the line start inside the token: its last 30 characters are kept unless it was redacted first.
+    const token = `access-token-${'4f9e2a7c'.repeat(6)}`;
+    const { executor } = codexWith(login({ tokens: { access_token: token } }), (home) => ({ CODEX_HOME: home, ACP_STARTUP_STDERR: `fatal: ${token} rejected${'y'.repeat(1961)}\n` }));
+    const failure = await stepFailure(executor);
+    expect(failure).toContain('the agent exited (code 3)');
+    expect(failure).not.toContain(token.slice(-16));
+    expect(failure).not.toContain('4f9e2a7c4f9e2a7c');
   });
 
   it('is read from the CODEX_HOME of the environment when the config names none', async () => {

@@ -14,6 +14,7 @@
  * not signed in, and with `ACP_PROMPT_AUTH_REQUIRED=1` every prompt.
  */
 
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import { Readable, Writable } from 'node:stream';
@@ -134,6 +135,14 @@ function codexConfig(config: string | undefined): string | null {
 }
 
 log({ pid: process.pid });
+
+// With `ACP_STARTUP_STDERR` set, the agent writes it to stderr and exits 3 before it answers anything: a start that fails quoting a value.
+// A short-lived child holds stdout open, so the client sees the exit, with its stderr, before the connection closes.
+if (process.env['ACP_STARTUP_STDERR'] !== undefined) {
+  spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', 'inherit', 'ignore'], detached: true }).unref();
+  await new Promise((resolve) => process.stderr.write(process.env['ACP_STARTUP_STDERR']!, resolve));
+  process.exit(3);
+}
 log({ env: Object.keys(process.env).filter((name) => name.toUpperCase().startsWith('E2E_')).toSorted(), codexConfig: codexConfig(process.env['CODEX_CONFIG']), defaultAuthRequest: authRequest(process.env['DEFAULT_AUTH_REQUEST']), authEnv: authEnv(), nodeDebug: nodeDebug() });
 
 /**

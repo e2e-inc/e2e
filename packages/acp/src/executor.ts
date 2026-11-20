@@ -65,13 +65,16 @@ export function codex(options: AcpAgentOptions = {}): StepExecutor {
 
 /**
  * `registerLogin` has the run redact the login the agent keeps on disk. It
- * runs for each step once the agent is up, since the agent renews a login
+ * runs once when the executor is built, for a login saved before the run,
+ * then for each step once the agent is up, since the agent renews a login
  * between turns, and again once the turn is over, before anything the
  * agent said in it is returned.
  */
 function executor(name: string, options: AcpAgentOptions, launch: () => Promise<AgentLaunch>, registerLogin: () => void = () => undefined): StepExecutor {
   // A key only the agent's own `env` holds, known before the first step's text is built.
   registerProviderKeys(options.env ?? {});
+  // A login the agent saved before this run, known before its first start: that start's stderr or the first step's text may quote it.
+  registerLogin();
   // Where an attempt's session lives in `attempt.memory`: one key per executor, so two ACP agents never share a session.
   const memoryKey = `@e2e-dev/acp.session.${randomUUID()}`;
   return {
@@ -83,7 +86,8 @@ function executor(name: string, options: AcpAgentOptions, launch: () => Promise<
       const { held, session } = await ready(ctx, launch, memoryKey).finally(registerLogin);
       ctx.signal.throwIfAborted();
       const active = activeStep(ctx);
-      const text = await untilAborted(stepMessage(active, held.tools, held.introduced ? undefined : [RULES, options.system, ctx.agentContext]), ctx.signal);
+      // Redacted whole, once the agent's login is known: `system` and the step's text may quote a key core did not know when it built the step.
+      const text = redactSecrets(await untilAborted(stepMessage(active, held.tools, held.introduced ? undefined : [RULES, options.system, ctx.agentContext]), ctx.signal));
       // A step that ended while its screen was read sends no prompt, which no cancel would reach.
       ctx.signal.throwIfAborted();
       held.introduced = true;
