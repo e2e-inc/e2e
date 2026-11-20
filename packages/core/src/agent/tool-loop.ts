@@ -670,7 +670,7 @@ class LoopRun {
           prepared,
           guard.waiting === true
             ? `[SYSTEM NOTICE] ${guard.reason}. Observe again only while the screen still shows the work in progress; ` +
-                'otherwise call complete_step with your best verdict.'
+                'once it is done, do what the step still asks for, then call complete_step with your verdict.'
             : `[SYSTEM NOTICE] You appear to be going in circles: ${guard.reason}. ` +
                 'Change approach, or call complete_step with your best verdict.',
         );

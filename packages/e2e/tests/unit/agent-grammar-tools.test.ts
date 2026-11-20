@@ -348,6 +348,7 @@ describe('the loop guard waits longer on the built-in observe only', () => {
     expect(observed()).toBe(10);
     const warned = loopCalls.find((call) => call.lastPrompt.includes('issued 6 times in a row'));
     expect(warned?.lastPrompt).toContain('Observe again only while the screen still shows the work in progress');
+    expect(warned?.lastPrompt).toContain('once it is done, do what the step still asks for, then call complete_step');
     expect(warned?.lastPrompt).not.toContain('going in circles');
   });
 
