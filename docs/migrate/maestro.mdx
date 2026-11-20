@@ -168,7 +168,7 @@ on purpose.
 
 | Maestro | Use today |
 | --- | --- |
-| The grant-all default, names such as `bluetooth` and `storage` | `app.permissions: 'all'`, which on Android grants every runtime permission the app declares, or accept the prompt with `device.alert('accept')`. An Android app that declares no permissions fails to launch with `'all'` |
+| The grant-all default, names such as `bluetooth` and `storage` | `app.permissions: 'all'`, which on Android grants every runtime permission the app declares (an Android app that declares none fails to launch with `'all'`), or accept the prompt with `device.alert('accept')` |
 | `point: "50%,50%"`, percent `start` and `end` on `swipe` | Compute pixels from a full-screen node's `boundingBox()` |
 | `inputText` and `pressKey: Enter` with no field, `eraseText: N`, `pressKey: backspace`, `tab` | `fill` or `press` on the field's locator; `fill` a shortened `inputValue()` to erase; tap the next field for Tab |
 | `addMedia` | On an iOS simulator, `xcrun simctl addmedia` before `app.open()`; Android is unchecked. See "Photos for a picker test" under [The device fixture](/mobile#the-device-fixture) |
