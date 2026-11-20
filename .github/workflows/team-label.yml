@@ -1,6 +1,6 @@
 name: team-label
 
-# Labels a PR `team` when its author is listed in .github/team.txt, one GitHub
+# Labels a PR `e2e team` when its author is listed in .github/team.txt, one GitHub
 # login per line. The list is explicit because the workflow token cannot see
 # private org memberships, so `author_association` reports those members as
 # contributors.
@@ -27,5 +27,5 @@ jobs:
         run: |
           team=$(gh api "repos/$GITHUB_REPOSITORY/contents/.github/team.txt" -H 'accept: application/vnd.github.raw')
           if grep -qixF -- "$AUTHOR" <<< "$team"; then
-            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/labels" -f 'labels[]=team' --silent
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/labels" -f 'labels[]=e2e team' --silent
           fi
