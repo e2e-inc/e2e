@@ -299,6 +299,8 @@ interface ReporterOutput {
 
 ターミナルに表示する [`--step`](/debugging#step-through-a-test) のプロンプト、または消すための `undefined` を受け取ります。バックグラウンドの `--step` は、代わりにソケット経由で各プロンプトに応答し、レポーターを呼び出しません。
 
+待機中の各ステップには `attachId` があります。[MCP でアタッチする](/reference/mcp#attaching-to-a-held-test)には、この ID を使います。ID は、その試行の中で何度一時停止しても変わりません。
+
 ```ts
 onStepPrompt(prompt) {
   overlay.show(prompt === undefined ? '' : `Step ${prompt.steps[0].number}: ${prompt.steps[0].step.label}`);

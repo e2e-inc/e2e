@@ -173,8 +173,9 @@ CLI は、実際のペイロードを `[telemetry] {...}` として標準エラ�
 | --- | --- |
 | `client`, `client_version` | MCP クライアントが名乗る名前とバージョン（`claude-code`、`cursor-vscode` など）。クライアントが自己紹介する前は `null` |
 | `outcome`, `error_code` | 開始できたセッションは `closed`。開始失敗は `open-failed` と失敗のランナーコード（`APP_UNREACHABLE`、`ENGINE_FAILURE` など） |
-| `ended_by` | `close_session` は `agent`、アイドル終了は `idle`、セッションの時間制限は `step`、サーバー終了は `server`。開始失敗は `null` |
+| `ended_by` | `close_session` は `agent`、アイドル終了は `idle`、セッションが時間制限に達したときと一時停止中のテストが再開したときは `step`、サーバー終了は `server`。開始失敗は `null` |
 | `platform`, `engine`, `headed` | 通常の実行と同様に、ターゲットのプラットフォーム、エンジンとバージョン、UI を表示したか |
+| `attached` | セッションが一時停止中のテストにアタッチしたか |
 | `duration_ms`, `sessions_open` | セッションの存続時間と、開始時に開いていた他のセッション数 |
 | `calls_total`, `calls_failed`, `calls` | ツール呼び出し数、失敗数、セッション固有のツール名別の回数: `{"observe": 4, "tap": 9, "locate": 2, "screenshot": 1}` |
 | `error_codes` | 各ランナーコードによる呼び出し失敗数: `{"LOCATOR_NOT_FOUND": 2}`。最大 20 コード |
