@@ -1518,7 +1518,7 @@ function deviceTarget(targets: readonly ResolvedTarget[], name: string): NonNull
   if (takers.length === 0) {
     throw new ConfigurationError(
       'UNSUPPORTED_CAPABILITY',
-      `--device names the device a target runs on, and no selected target's engine selects one (${quoted(targets)}); use it with a mobile() target`,
+      `--device names the device a target runs on, and no selected target's engine selects one (${quoted(targets)}); use it with a mobile() target on local devices, not a device provider's`,
     );
   }
   throw new ConfigurationError('TARGET_REQUIRED', `--device names one device, and ${quoted(takers)} each select one; pick a target with --target`);

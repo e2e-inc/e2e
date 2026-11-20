@@ -214,6 +214,14 @@ export class DevicePool {
     return this.source.size;
   }
 
+  /**
+   * Whether `e2e run --device` can name the device: a local pool can bind
+   * any device by name or id, and a provider's leases have none to name.
+   */
+  get selectsDevice(): boolean {
+    return !(this.source instanceof LeasedDevices);
+  }
+
   /** The agent-device session a worker slot drives its device under: the `session` option or `e2e-<target>`, then `-<slot>`. */
   session(targetName: string, slot: number): string {
     return `${this.options.session ?? `e2e-${targetName}`}-${slot}`;
@@ -251,26 +259,11 @@ export class DevicePool {
    */
   async prepare(info: EnginePrepareInfo): Promise<EnginePrepareResult> {
     if (info.slots === 0) return {};
-    const source = info.device === undefined ? this.source : this.named(info.device, info.targetName);
+    const source = info.device === undefined ? this.source : new ConfiguredDevices([namedDevice(info.device)]);
     const bindings = await source.bind(info);
     await this.warm(bindings, info);
     this.bound.set(info.targetName, bindings);
     return { workers: bindings.length, env: { [bindingsVariable(info.targetName)]: encodeBindings(bindings) } };
-  }
-
-  /**
-   * The one device `e2e run --device` names, in place of the configured
-   * source. A provider leases hosted devices, so there is no local one to
-   * swap in.
-   */
-  private named(device: string, targetName: string): DeviceSource {
-    if (this.source instanceof LeasedDevices) {
-      throw new ConfigurationError(
-        'UNSUPPORTED_CAPABILITY',
-        `target "${targetName}" leases its devices from a device provider, so --device cannot name a local one; run without --device, or pick a target with a local device`,
-      );
-    }
-    return new ConfiguredDevices([namedDevice(device)]);
   }
 
   /**

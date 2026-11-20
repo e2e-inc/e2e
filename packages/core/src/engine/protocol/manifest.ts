@@ -49,6 +49,10 @@ export function checkManifest(manifest: EngineManifest): EngineManifest {
     if (seen.has(method)) throw invalid(`manifest.methods lists "${method}" twice`);
     seen.add(method);
   }
+  // The client serves `prepare` for `lifecycle/finish` alone, so the hook defineEngine requires is there either way.
+  if (manifest.selectsDevice === true && !seen.has('lifecycle/prepare')) {
+    throw invalid('manifest.selectsDevice needs lifecycle/prepare: prepare binds the device --device names');
+  }
   return manifest;
 }
 

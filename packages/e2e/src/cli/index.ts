@@ -55,13 +55,14 @@ function parsePositiveInt(value: string): number {
   return parsed;
 }
 
-/** Shape check only; the config resolver applies each flag's bounds. */
-/** A device name or id for `--device`; a blank one would name no device. */
+/** A device name or id for `--device`, trimmed; a blank one would name no device. */
 function parseDevice(value: string): string {
-  if (value.trim() === '') throw new InvalidArgumentError('must name a simulator, emulator, or phone');
-  return value;
+  const device = value.trim();
+  if (device === '') throw new InvalidArgumentError('must name a simulator, emulator, or phone');
+  return device;
 }
 
+/** Shape check only; the config resolver applies each flag's bounds. */
 function parseNonNegativeInt(value: string): number {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 0) {

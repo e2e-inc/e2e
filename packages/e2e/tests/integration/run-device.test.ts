@@ -89,7 +89,7 @@ describe('e2e run --device', () => {
       expect(runErrors(outcome)).toEqual([
         {
           code: 'UNSUPPORTED_CAPABILITY',
-          message: '--device names the device a target runs on, and no selected target\'s engine selects one ("web"); use it with a mobile() target',
+          message: '--device names the device a target runs on, and no selected target\'s engine selects one ("web"); use it with a mobile() target on local devices, not a device provider\'s',
         },
       ]);
       expect(web.prepares).toEqual([]);
