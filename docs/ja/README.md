@@ -65,10 +65,14 @@ translation moves or goes with it in the same change.
 | fixture | フィクスチャ |
 | locator | ロケーター |
 | step | ステップ |
+| goal | ゴール |
+| entry | エントリー |
 | assertion | アサーション |
 | target | ターゲット |
 | replay cache | リプレイキャッシュ |
-| executor | エグゼキューター |
+| executor, custom executor | エグゼキューター, カスタムエグゼキューター |
+| tool, custom tool, project tool | ツール, カスタムツール, プロジェクトツール |
+| custom store | カスタムストア |
 | provider | プロバイダー |
 | hosted browser | ホスト型ブラウザ |
 | device | デバイス |
@@ -88,3 +92,8 @@ translation moves or goes with it in the same change.
 | config, configuration | 設定 |
 | screenshot | スクリーンショット |
 | semantic tree | セマンティックツリー |
+| redact, redaction | マスキング |
+| secure field | 機密フィールド |
+| location (current URL or screen) | 現在の画面位置 |
+| budget | 予算 |
+| planned, not planned | 実装予定, 実装予定なし |

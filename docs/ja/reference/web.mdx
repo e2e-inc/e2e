@@ -216,7 +216,7 @@ import { secrets } from 'e2e';
 web({ basicAuth: { username: 'staging', password: secrets.get('staging-password') } });
 ```
 
-`secrets.get(name)` のパスワードは各試行の開始時に解決し、設定済みのほかのシークレットと同じように伏せ字にします。それを Base64 化した `Authorization` ヘッダーの認証情報も同様です。
+`secrets.get(name)` のパスワードは各試行の開始時に解決し、設定済みのほかのシークレットと同じようにマスキングします。それを Base64 化した `Authorization` ヘッダーの認証情報も同様です。
 
 ```ts
 /** HTTP basic authentication the browser answers a `401` challenge from the app's origin with. */

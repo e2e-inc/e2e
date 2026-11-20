@@ -28,7 +28,7 @@ test('invite a teammate', async ({ agent }) => {
 | [`agent.waitFor`](#agent-waitfor) | `Promise<void>` |
 | [`agent.extract`](#agent-extract) | `Promise<InferOutput<Schema>>` |
 
-シグネチャは[型](#types)にあります。[実行上限](#budgets)では各メソッドのデフォルトタイムアウト、モデル呼び出し回数、アクション数と、それらを引き下げる際のルールを説明します。すべてのメソッドで `agent` を指定できます。設定済みエージェントの名前（`agents.<name>`）を渡すと、その呼び出しだけテストのエージェントに代わって実行します。
+シグネチャは[型](#types)にあります。[予算](#budgets)では各メソッドのデフォルトタイムアウト、モデル呼び出し回数、アクション数と、それらを引き下げる際のルールを説明します。すべてのメソッドで `agent` を指定できます。設定済みエージェントの名前（`agents.<name>`）を渡すと、その呼び出しだけテストのエージェントに代わって実行します。
 
 ### agent.act
 
@@ -119,7 +119,7 @@ await agent.assert('the dashboard shows a trial badge');
 await agent.assert('the table lists {name}', { params: { name } });
 ```
 
-- ジャッジに渡すのは、アサーション、その `params`、位置情報を含む現在の観測結果、エージェントの `context` です。過去のステップや `act` の要約は渡しません。回答は `holds`、`fails`、`inconclusive` のいずれかです。
+- ジャッジに渡すのは、アサーション、その `params`、現在の画面位置を含む現在の観測結果、エージェントの `context` です。過去のステップや `act` の要約は渡しません。回答は `holds`、`fails`、`inconclusive` のいずれかです。
 - 確認対象が複数箇所に現れる場合、たとえば合計金額が注文概要と支払いボタンに表示される場合は、すべて一致する必要があります。1 箇所でも矛盾すれば失敗します。特定の箇所だけを判定するには、場所を明示します（`the order summary total is $42.00`）。
 - `a todo is marked done` のように、いずれかの項目について述べる条件は、1 つでも該当すれば成立します。
 
@@ -149,7 +149,7 @@ await agent.assert('the table lists {name}', { params: { name } });
 - エンジンがスクリーンショットに対応していないと宣言している場合や、以前のステップの画像要求が縮退した場合、ヒントはありません。その状態では `vision: true` にしても証拠が増えないためです。
 
 <Note>
-カスタム `StepExecutor` はアサーションを自ら判定します。`assert` に含まれるのはエグゼキューターの説明だけで、画像入力のヒントは付きません。判定後の証跡はランナーが取得するため、`screenshot` の指定は適用されます。エグゼキューターが `vision: true` を宣言していれば `step.vision` として `vision` を受け取り、それ以外では `vision` の指定は `UNSUPPORTED_CAPABILITY` になります。回数と時間の上限は[実行上限](#budgets)を参照してください。
+カスタム `StepExecutor` はアサーションを自ら判定します。`assert` に含まれるのはエグゼキューターの説明だけで、画像入力のヒントは付きません。判定後の証跡はランナーが取得するため、`screenshot` の指定は適用されます。エグゼキューターが `vision: true` を宣言していれば `step.vision` として `vision` を受け取り、それ以外では `vision` の指定は `UNSUPPORTED_CAPABILITY` になります。回数と時間の上限は[予算](#budgets)を参照してください。
 </Note>
 
 #### ビューポートの探索
@@ -164,7 +164,7 @@ await agent.assert('Settings lists HOS Settings, Account, Language and Theme', {
 });
 ```
 
-探索では `observe`、`scroll`、`scroll_to` と、`mutates: false` を宣言したプロジェクトのツールを利用できます。組み込みエグゼキューターでは、`vision` が `true` または `'only'` なら `screenshot` も利用できます。デフォルトはツリーのみです。ほかのアクションは拒否されます。探索後の表示位置は、そのまま残ります。
+探索では `observe`、`scroll`、`scroll_to` と、`mutates: false` を宣言したプロジェクトツールを利用できます。組み込みエグゼキューターでは、`vision` が `true` または `'only'` なら `screenshot` も利用できます。デフォルトはツリーのみです。ほかのアクションは拒否されます。探索後の表示位置は、そのまま残ります。
 
 デフォルトはスクロール操作が 10 回、モデル呼び出しが 6 回で、それぞれ選択したエージェントの設定上限までに制限されます。設定上限の範囲内であれば、10 回・6 回というデフォルトを超えて指定できます。期限のデフォルトは `judgmentTimeout` です。`explore: true` なしで `maxSteps` または `maxModelCalls` を指定すると `INVALID_ARGUMENT` をスローします。組み込みエグゼキューターは、`judge` が設定されていても `agents.<name>.model` を使います。
 
@@ -181,7 +181,7 @@ await agent.waitFor('the upload progress reports completion', { interval: 500 })
 ```
 
 - 直ちに観測と判定を行い、最初に条件が成立した時点で成功します。
-- 不成立または判断不能の判定後は、モデルを呼ばずに 500 ms ごとに観測します（`interval` がそれより短ければ `interval` ごと）。最後に判定した画面または位置情報が変わった場合にだけ、再び判定します。`vision` 使用時は画像の変化も対象です。`vision: 'only'` では位置情報をモデルに見せないため、位置だけの変化は対象になりません。
+- 不成立または判断不能の判定後は、モデルを呼ばずに 500 ms ごとに観測します（`interval` がそれより短ければ `interval` ごと）。最後に判定した画面または現在の画面位置が変わった場合にだけ、再び判定します。`vision` 使用時は画像の変化も対象です。`vision: 'only'` では現在の画面位置をモデルに見せないため、画面位置だけの変化は対象になりません。
 - 変化する直前の `interval` の間に画面が変わっていなかった場合、または待機開始から一度も変わっていなかった場合、変化を見つけると直ちに判定します。進捗カウンターや時計などで画面が変わり続ける場合は、前回の判定から `interval` ごとに最大 1 回判定します。
 - 判定は [`agent.assert`](#agent-assert) と同じルールに従います。値が複数箇所に表示される場合は、すべてが一致して初めて成立します。
 
@@ -233,7 +233,7 @@ const summary = await agent.extract('the workspace name and plan', {
 | `ASSERTION_INCONCLUSIVE` | 画面にデータが表示されていない場合。 |
 | `MODEL_OUTPUT_INVALID` | 修正のための再呼び出し後も検証に失敗する場合。 |
 
-## 実行上限
+## 予算
 
 モデル呼び出し回数には、修正のための再呼び出しを含め、すべてのモデルリクエストを数えます。アクション数は、実行が確定したエンジンのアクションを数えます。すべてのタイムアウトは、テストの残り時間が上限になります。
 
@@ -340,7 +340,7 @@ await agent.assert('no overlay covers the checkout form', { vision: 'only' }); /
 | --- | --- |
 | `false`（デフォルト） | セマンティックツリー |
 | `true` | セマンティックツリーとマスク済みスクリーンショット |
-| `'only'` | マスク済みスクリーンショットのみ。ツリーや位置情報は含みません |
+| `'only'` | マスク済みスクリーンショットのみ。ツリーや現在の画面位置は含みません |
 
 オーバーレイがフォームを覆っているか、グラフの見た目が正しいかなど、視覚的な確認には `'only'` を使います。スクリーンショットに写るのは現在の表示範囲なので、先に対象の内容までスクロールしてください。
 

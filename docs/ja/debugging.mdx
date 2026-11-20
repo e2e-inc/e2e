@@ -124,7 +124,7 @@ remaining"`）は、アプリの更新とタイミングが競合しています
 
 | アーティファクト | 保存されるタイミング |
 | --- | --- |
-| スクリーンショット | エンジンが対応していれば、失敗した試行で撮影します。組み込みの `agent.assert` は、`screenshot: false` でなければ判定の成否にかかわらず撮影します。`app.screenshot('label')` でも撮影できます。マスキングされるのはセキュアなフィールドだけです。[シークレット入力後のスクリーンショット](/reference/security#screenshots-after-a-secret-fill)を参照してください。 |
+| スクリーンショット | エンジンが対応していれば、失敗した試行で撮影します。組み込みの `agent.assert` は、`screenshot: false` でなければ判定の成否にかかわらず撮影します。`app.screenshot('label')` でも撮影できます。マスキングされるのは機密フィールドだけです。[シークレット入力後のスクリーンショット](/reference/security#screenshots-after-a-secret-fill)を参照してください。 |
 | ダウンロード | `browser.waitForDownload` で保存したファイルを `download` として、アプリが提供した内容で保存します。ランナーがシークレットをマスキングする条件は[ダウンロード](/reference/security#downloads)を参照してください。 |
 | 動画 | [録画を有効にした場合](#watch-it-happen)。動画は何もマスキングしません。[マスキングの限界](/reference/security#where-redaction-stops)を参照してください。 |
 | エージェントのトランスクリプト | [`--debug`](#agent-steps) を指定した場合。 |
@@ -424,7 +424,7 @@ bunx unbox-ai summary .e2e/ai-trace.json --run 0
 | `ASSERTION_FAILED` | 期待値が違う、状態の確定に 5 秒以上かかる、または `agent.assert` が偽と判定した | スクリーンショットと比較。マッチャーに `{ timeout }` を指定。質問を書き直す |
 | `ASSERTION_INCONCLUSIVE` | `agent.assert` や `agent.extract` が、別ページ、読み込み中、画像だけの情報など、画面に現れていない内容を尋ねた | 正しい画面を開くか待つ。答えが画像内にある場合は `vision: true` を追加（メッセージにも表示） |
 | `ACTION_FAILED` | 要素が覆われている、無効、削除済み、または操作がタイムアウトした | 先に `expect` で適切な条件を待つ。オーバーレイを閉じる |
-| `STEP_BUDGET_EXHAUSTED`、`STEP_TIMEOUT` | エージェントの操作数、モデル呼び出し数、時間が尽きた | 目標を 1 ステップに絞る。予算ならエージェントの `maxSteps` または `maxModelCalls`、`act` の時間なら設定の `timeout`、`assert`、`waitFor`、`extract` ならエージェントの `judgmentTimeout` を増やす |
+| `STEP_BUDGET_EXHAUSTED`、`STEP_TIMEOUT` | エージェントの操作数、モデル呼び出し数、時間が尽きた | ゴールを 1 ステップに絞る。予算ならエージェントの `maxSteps` または `maxModelCalls`、`act` の時間なら設定の `timeout`、`assert`、`waitFor`、`extract` ならエージェントの `judgmentTimeout` を増やす |
 | `MODEL_UNAVAILABLE` | 設定にモデルが作られていない、または GitHub Copilot がアカウントにモデルを提供していない | [モデル](/models)を参照。Copilot では[モデルを選ぶ](/subscriptions#pick-a-model)を参照 |
 | `MODEL_PROVIDER_FAILED` | キーが不正、レート制限、残高不足、またはひとつのリクエストの全試行が 120 秒応答なし | プロバイダーが読むキーと利用枠を確認。遅いローカルモデルでは画面を小さくする（`agents.<name>.maxObservationBytes`）か、高速なモデルを使う |
 | `MODEL_REFUSED` | モデルがプロンプトを拒否した（終了理由 `content-filter`）。終了コード 1 | 指示を言い換えるか、別のモデルに切り替える |

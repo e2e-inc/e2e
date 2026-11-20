@@ -5,7 +5,7 @@ description: テスト API、データの準備、デバイス操作のツール
 "twitter:image": "https://e2e.com/docs/images/og/tools.png?v=8747047102"
 ---
 
-プロジェクトツールは、目標の実行中にエージェントが呼び出せる AI SDK ツールです。テスト API へのリクエストや、データを準備する処理などに使います。
+プロジェクトツールは、ゴールの実行中にエージェントが呼び出せる AI SDK ツールです。テスト API へのリクエストや、データを準備する処理などに使います。
 
 ## ツールを追加する
 
@@ -125,18 +125,18 @@ return result.style;
 
 ## デバイス用ツールセット
 
-`@e2e-dev/mobile` には、`open_app`、`swipe`、`alert` をまとめた `mobileTools` が用意されています。スプレッド構文で展開すると、独自のツールと一緒に使えます。
+`@e2e-dev/mobile` には、`open_app`、`swipe`、`alert` をまとめた `mobileTools` が用意されています。スプレッド構文で展開すると、カスタムツールと一緒に使えます。
 
 ```ts
 tools: { ...mobileTools(iphone, pixel), seedCart },
 ```
 
-設定方法は[エージェントツール](/mobile#agent-tools)を参照してください。独自のツールで生のドライバーセッションが必要な場合は、[`unstable_deviceSession`](/reference/mobile#unstable_devicesession) から実行中のデバイスのクライアントを取得できます。
+設定方法は[エージェントツール](/mobile#agent-tools)を参照してください。カスタムツールで生のドライバーセッションが必要な場合は、[`unstable_deviceSession`](/reference/mobile#unstable_devicesession) から実行中のデバイスのクライアントを取得できます。
 
 ## 次のステップ
 
 <CardGroup cols={2}>
-  <Card title="独自のエグゼキューター" icon="gears" href="/executors">
+  <Card title="カスタムエグゼキューター" icon="gears" href="/executors">
     プロンプトや判断のループを置き換えます。
   </Card>
   <Card title="エージェントステップの仕組み" icon="stairs" href="/agent-steps">

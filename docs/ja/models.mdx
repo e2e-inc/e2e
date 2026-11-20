@@ -9,7 +9,7 @@ import { ModelProvider } from '../snippets/model-provider.jsx';
 
 エージェントステップは、`e2e.config.ts` に設定したモデルを使います。デフォルトのモデルはありません。[AI SDK](https://ai-sdk.dev/providers/ai-sdk-providers) のプロバイダーを通して、ゲートウェイ、直接の API キー、ローカルサーバー、[サブスクリプション](/subscriptions)のいずれかを使います。初めてのセットアップでは、`e2e init` が設定ファイルを作成します。[クイックスタート](/quickstart#use-a-subscription-or-api-key)を参照してください。
 
-エージェントステップのないテストにモデルは不要です。組み込みエージェントには、ツール呼び出しと画像に対応したモデルが必要です。Clef や Jev などの[デシジョンモデル](/decision-models)は、独自のエグゼキューターを通して使います。
+エージェントステップのないテストにモデルは不要です。組み込みエージェントには、ツール呼び出しと画像に対応したモデルが必要です。Clef や Jev などの[デシジョンモデル](/decision-models)は、カスタムエグゼキューターを通して使います。
 
 ## ゲートウェイまたはプロバイダーを選ぶ
 
@@ -232,7 +232,7 @@ const agent = {
 | 最初のモデル呼び出しで認証に失敗する | `MODEL_PROVIDER_FAILED` | プロバイダーの API キーを確認します。サブスクリプションなら `npx e2e login` を実行します。Vercel OIDC のメッセージには `AI_GATEWAY_API_KEY` しか表示されません。`vercel login` と `.vercel/project.json` を確認してください。 |
 | `ai` パッケージがない | `MODEL_UNAVAILABLE` | `ai` をインストールします。[ゲートウェイまたはプロバイダーを選ぶ](#pick-a-gateway-or-a-provider)を参照してください。 |
 | ステップの 2 ターン目が `Item with id 'rs_…' not found` で失敗する | `MODEL_PROVIDER_FAILED` | `providerOptions` の `store` をデフォルトどおり無効にするか、ゲートウェイ経由ではなく OpenAI を直接呼び出します。 |
-| 独自のエグゼキューター自身の `model` または `judge` が agents エントリーと異なる | `INVALID_CONFIG` | [独自のエグゼキューター](/executors#keep-the-loop-change-the-vocabulary)を参照してください。 |
+| カスタムエグゼキューター自身の `model` または `judge` が agents エントリーと異なる | `INVALID_CONFIG` | [カスタムエグゼキューター](/executors#keep-the-loop-change-the-vocabulary)を参照してください。 |
 
 ## 次のステップ
 

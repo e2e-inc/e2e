@@ -153,7 +153,7 @@ targets: [{ name: 'phone', engine: hyperdrive({ device: 'iPhone 16' }), app: { b
 
 ## シークレットを扱う
 
-シークレットの入力は、`sensitive: true` を持つ `fill` 操作としてエンジンに届きます。専用の機能フラグはありません。エージェントの `type_secret` では、ランナーが認証情報、観測結果、フィールドを確認済みです。テストの `fill(secret)` はこれらの[確認](/reference/security#secret-fills)を省略します。入力を安全に処理するか、`UNSUPPORTED_CAPABILITY` を投げてください。その後のスクリーンショットも、[セキュアなフィールドをマスキングして](/reference/security#screenshots-after-a-secret-fill)モデルに渡されます。
+シークレットの入力は、`sensitive: true` を持つ `fill` 操作としてエンジンに届きます。専用の機能フラグはありません。エージェントの `type_secret` では、ランナーが認証情報、観測結果、フィールドを確認済みです。テストの `fill(secret)` はこれらの[確認](/reference/security#secret-fills)を省略します。入力を安全に処理するか、`UNSUPPORTED_CAPABILITY` を投げてください。その後のスクリーンショットも、[機密フィールドをマスキングして](/reference/security#screenshots-after-a-secret-fill)モデルに渡されます。
 
 エンジンがアプリに送るパスワードなど、エンジンオプションでもシークレットを受け取れます。
 

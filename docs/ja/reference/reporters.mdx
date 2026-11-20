@@ -41,7 +41,7 @@ export default {
 | `INVALID_CONFIG` | `reporters` が配列でない場合。 |
 | `INVALID_CONFIG` | `list`、`dot`、`json`、`junit`、`markdown` 以外の ID を指定した場合。 |
 | `INVALID_CONFIG` | `junit()` の代わりに `junit` と書くなど、ファクトリーを呼び出していない場合。 |
-| `INVALID_CONFIG` | エントリが ID でも、`name` と 1 つ以上のフックを持つオブジェクトでもない場合。 |
+| `INVALID_CONFIG` | エントリーが ID でも、`name` と 1 つ以上のフックを持つオブジェクトでもない場合。 |
 | `INVALID_CONFIG` | `list` と `dot` のように、2 つのレポーターが同じストリームに[出力する](#printsto)場合。 |
 
 #### `list`
@@ -383,7 +383,7 @@ type ReporterSummary = readonly { label: string; text: string }[];
 ##### 成果物
 
 - レポート内の成果物パスは、`artifactsRoot` 相対の POSIX パスです。
-- `path`、`size`、`sha256` は省略可能です。ファイルが生成されなかった成果物や、秘匿処理によって非公開になった成果物は、これらを付けずに記録します。読み取る前に `path` を確認してください。
+- `path`、`size`、`sha256` は省略可能です。ファイルが生成されなかった成果物や、マスキングによって非公開になった成果物は、これらを付けずに記録します。読み取る前に `path` を確認してください。
 - ホスト型サービスが保存する動画は、`path` の代わりに `http(s)` の `url` を持ちます。
 
 ##### `--last-failed` での再実行
@@ -454,7 +454,7 @@ type RunEventFact =
 - ステップの開始前に失敗した試行は、ステップ進捗を発行せず、最終結果に現れます。
 
 <Note>
-シークレットはイベントを作成する前に秘匿します。エラーメッセージとスキップ理由から取り除くのは、ANSI エスケープと、タブ、改行、`\r\n` の `\r` 以外の制御文字だけです。そのため、信頼できない内容として扱ってください。
+シークレットはイベントを作成する前にマスキングします。エラーメッセージとスキップ理由から取り除くのは、ANSI エスケープと、タブ、改行、`\r\n` の `\r` 以外の制御文字だけです。そのため、信頼できない内容として扱ってください。
 </Note>
 
 ### ステップ進捗
@@ -486,7 +486,7 @@ type StepProgress = (
 ) & { identity?: StepProgressIdentity };
 ```
 
-`end` フェーズの `error` と `explanation` は秘匿済みです。`blocked` や `cancelled` を含め、`status` をそのまま扱ってください。成功以外のすべてのステップを、プロダクトの不具合と見なさないでください。
+`end` フェーズの `error` と `explanation` はマスキング済みです。`blocked` や `cancelled` を含め、`status` をそのまま扱ってください。成功以外のすべてのステップを、プロダクトの不具合と見なさないでください。
 
 ランナーが発行するすべてのステップフェーズには、`progress.identity` を含めます。
 
@@ -531,7 +531,7 @@ bunx e2e run --reporter list,junit
 
 ## 型
 
-`Reporter`、`FinishedRun`、`ReportFile`、`ReporterOutput`、`ReporterSummary`、`StepPrompt`、`Report`、`RunEvent`、`RunEventOf` はメインエントリポイントからエクスポートします。`renderMarkdownReport(report, options)` も同様です。`e2e/reporters` は `list`、`dot`、`json`、`junit`、`markdown` を、`ListReporterOptions`、`DotReporterOptions`、`JunitReporterOptions`、`MarkdownReporterOptions` とともにエクスポートします。
+`Reporter`、`FinishedRun`、`ReportFile`、`ReporterOutput`、`ReporterSummary`、`StepPrompt`、`Report`、`RunEvent`、`RunEventOf` はメインエントリーポイントからエクスポートします。`renderMarkdownReport(report, options)` も同様です。`e2e/reporters` は `list`、`dot`、`json`、`junit`、`markdown` を、`ListReporterOptions`、`DotReporterOptions`、`JunitReporterOptions`、`MarkdownReporterOptions` とともにエクスポートします。
 
 ## 関連情報
 
