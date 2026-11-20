@@ -66,8 +66,8 @@ describe('ScreenPresenter', () => {
       presenter.open(screen('b1', HOME, { path: '/edit' }));
       const without = textOf(presenter.present(screen('b2', HOME), { lead: 'Observed.' }));
       const back = textOf(presenter.present(screen('b3', HOME, { path: '/edit' }), { lead: 'Observed.' }));
-      const noTree = textOf(presenter.present(screen('b4', ['[semantic capture unavailable]'], { treeUnavailable: true, truncated: true }), { lead: 'Observed.' }));
-      for (const text of [without, back, noTree]) {
+      const treeless = textOf(presenter.present(noTree('b4'), { lead: 'Observed.' }));
+      for (const text of [without, back, treeless]) {
         expect(text).not.toContain('The location changed');
         expect(reportsScreenChange(text)).toBe(false);
       }
