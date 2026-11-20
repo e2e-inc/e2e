@@ -85,6 +85,12 @@ const MENU_CLOSE_MS = 1_000;
 /** The cause of an input that was never sent, because the operation's budget ran out first. */
 const NOT_SENT = new Error('the operation ran out of budget before anything was sent');
 
+/** The cause of a read that found the app's windows but could read none of them. */
+const UNREADABLE = new Error('no window of the app could be read');
+
+/** The cause of a read of an app that quit since it launched. */
+const QUIT = new Error('the app quit');
+
 /** The prefix of every worker's private agent-desktop state directory, which a later run sweeps once its worker is gone. */
 const STATE_PREFIX = 'e2e-agent-desktop-';
 
@@ -568,7 +574,8 @@ export class DesktopSurface {
       } catch (cause) {
         // The last read ran out of budget: the window never became readable in time.
         if (cause instanceof EngineError && cause.code === 'OPERATION_TIMEOUT') break;
-        throw cause;
+        // A window not readable yet, or an app that quit, is what this wait looks at below.
+        if (!(cause instanceof EngineError && (cause.cause === UNREADABLE || cause.cause === QUIT))) throw cause;
       }
       if (screen !== undefined) return;
       // An app that quit (or crashed) on its own never shows a window, and bringing its bundle forward would start a copy the engine does not own.
@@ -750,14 +757,20 @@ export class DesktopSurface {
    * read that only places secure fields: it reads every node even with
    * `snapshot: 'interactive'`, which leaves out a secure node with no action
    * of its own, and hands out no ids, so the ids of the screen the harness
-   * holds stay as they are. Undefined while the app is not running or has no
-   * window to read; a copy of the app the engine did not launch is never
-   * read.
+   * holds stay as they are. Undefined before `app.open()` and while the app
+   * has no window; a copy of the app the engine did not launch is never
+   * read. None of these is an empty screen, which would let a negative
+   * assertion pass: an app that quit is `INVALID_STATE`, as is a chosen
+   * window that closed, and windows none of which could be read are a
+   * retryable `NODE_STALE`, so a locator reads again until its deadline.
    */
   private async capture(operation: OperationContext, windowId = this.chosenWindow, forMask = false): Promise<ProjectedScreen | undefined> {
     const windows = await this.ownWindows(operation);
-    // A chosen window that closed is not an empty screen: that would let a negative assertion pass.
-    if (windowId !== undefined && windowId === this.chosenWindow && !windows.some((window) => window.id === windowId)) throw this.chosenClosed();
+    const chosen = windowId !== undefined && windowId === this.chosenWindow;
+    if (chosen && !windows.some((window) => window.id === windowId)) throw this.chosenClosed();
+    if (windows.length === 0 && this.pid !== undefined && !alive(this.pid)) {
+      throw new EngineError('INVALID_STATE', `${this.appName ?? 'the app'} quit (process ${this.pid}); open it again with app.open()`, { retryable: false, cause: QUIT });
+    }
     const candidates =
       windowId === undefined
         ? [...windows.filter((window) => window.is_focused === true), ...windows.filter((window) => window.is_focused !== true && window.visible !== false), ...windows.filter((window) => window.is_focused !== true && window.visible === false)]
@@ -772,11 +785,20 @@ export class DesktopSurface {
         return projectSnapshot(raw, () => `mask${(scratch += 1)}`);
       } catch (cause) {
         // A panel accessibility cannot read, or a window that just closed: try the next one.
-        if (cause instanceof AgentDesktopFailure && (NO_WINDOW_CODES.has(cause.code) || cause.details.kind === 'window_without_accessibility_element')) continue;
+        if (cause instanceof AgentDesktopFailure && NO_WINDOW_CODES.has(cause.code)) {
+          if (chosen) throw this.chosenClosed();
+          continue;
+        }
+        if (cause instanceof AgentDesktopFailure && cause.details.kind === 'window_without_accessibility_element') continue;
         throw translate(cause, 'snapshot', false);
       }
     }
-    return undefined;
+    if (candidates.length === 0) return undefined;
+    throw new EngineError(
+      'NODE_STALE',
+      `no window of ${this.appName ?? 'the app'} could be read through accessibility (on macOS the screen may be locked), or each closed while it was read`,
+      { retryable: true, cause: UNREADABLE },
+    );
   }
 
   /** The windows of the process the engine launched; none before `app.open()` or after the app quit. */

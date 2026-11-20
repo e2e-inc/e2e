@@ -307,8 +307,14 @@ describe('DesktopSurface', () => {
     expect(fake.calls().at(-1)?.args.slice(0, 2)).toEqual(['scroll', '@s9:e1']);
   });
 
-  it('reads an app with no window as an empty screen, so a locator keeps polling', async () => {
+  it('reads again when the window closed while it was read, so a locator keeps polling', async () => {
     const { surface } = await launched({ snapshot: [snapshotAnswer('macos/appkit-form'), snapshotAnswer('macos/appkit-form'), failure('WINDOW_NOT_FOUND', 'not_delivered')] });
+    const username = { kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'username', exact: true } } } as const;
+    await expect(surface.locate(username, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
+  });
+
+  it('reads an app with no window as an empty screen', async () => {
+    const { surface } = await launched((pid) => ({ 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }, { ok: true, data: [] }] }), { observe: false });
     const matches = await surface.locate({ kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'username', exact: true } } }, operation());
     expect(matches).toEqual([]);
   });
@@ -826,6 +832,32 @@ describe('DesktopSurface', () => {
       launched({ launch: [{ spawn: true, exits: true, ok: true, data: { app: 'SpikeForm', pid: SPAWNED, process_instance: 'instance-1' } }], 'list-windows': [{ ok: true, data: [] }] }, { observe: false }),
     ).rejects.toThrow(/quit right after it launched/);
     expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it('refuses to read a chosen window that closed between the list and the read', async () => {
+    const { surface } = await launched((pid) => ({
+      'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }, { id: 'w-panel', pid, process_instance: 'instance-1' }] }],
+      snapshot: [snapshotAnswer('macos/appkit-form'), snapshotAnswer('macos/appkit-form'), failure('WINDOW_NOT_FOUND', 'not_delivered')],
+    }));
+    await surface.useWindow('w-panel', signal, 5_000);
+    const missing = { kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'nowhere', exact: true } } } as const;
+    await expect(surface.locate(missing, operation())).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/useWindow\(\) chose/) });
+  });
+
+  it('reads no empty screen from an app whose windows accessibility cannot read, and lets a locator read again', async () => {
+    const unreadable = { ok: false, error: { code: 'ACTION_NOT_SUPPORTED', message: 'no accessibility element', details: { kind: 'window_without_accessibility_element' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
+    const { surface } = await launched({ snapshot: [snapshotAnswer('macos/appkit-form'), unreadable] }, { observe: false });
+    const missing = { kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'nowhere', exact: true } } } as const;
+    await expect(surface.locate(missing, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringMatching(/could be read/) });
+    await expect(surface.observe(operation(), undefined)).rejects.toMatchObject({ code: 'NODE_STALE' });
+  });
+
+  it('reads no empty screen from an app that quit', async () => {
+    const { surface, app } = await launched((pid) => ({ 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }, { ok: true, data: [] }] }), { observe: false });
+    process.kill(app.pid, 'SIGKILL');
+    expect(await gone(app.pid)).toBe(true);
+    const missing = { kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'nowhere', exact: true } } } as const;
+    await expect(surface.locate(missing, operation())).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/quit/) });
   });
 
   it('refuses to read a chosen window once it closed, rather than show an empty screen', async () => {
