@@ -1100,13 +1100,14 @@ export class DesktopSurface {
    * `headed`, agent-desktop brings the window forward first.
    */
   private async sendKey(combo: string, window: string, label: string, operation: OperationContext): Promise<void> {
-    const call = { label, input: true, signal: operation.signal, timeoutMs: operation.timeoutMs };
+    // Built for each command: the budget is what is left of the operation when that command starts.
+    const call = () => ({ label, input: true, signal: operation.signal, timeoutMs: operation.timeoutMs });
     if (this.options.headed) {
-      await this.run(['press', combo, '--window-id', window, '--headed'], call);
+      await this.run(['press', combo, '--window-id', window, '--headed'], call());
       return;
     }
     try {
-      await this.run(['press', combo, '--window-id', window], { ...call, raw: true });
+      await this.run(['press', combo, '--window-id', window], { ...call(), raw: true });
       return;
     } catch (cause) {
       if (!(cause instanceof AgentDesktopFailure && cause.notDelivered && cause.details.cause === 'exact_window_focus_unconfirmed')) throw translate(cause, label, true);
@@ -1119,7 +1120,7 @@ export class DesktopSurface {
     const copies = (apps ?? []).filter((app) => typeof app.pid === 'number');
     if (copies.length !== 1 || copies[0]!.pid !== pid || (this.instance !== undefined && copies[0]!.process_instance !== this.instance)) throw another();
     try {
-      await this.run(['press', combo, '--app', appName], { ...call, raw: true });
+      await this.run(['press', combo, '--app', appName], { ...call(), raw: true });
     } catch (cause) {
       if (cause instanceof AgentDesktopFailure && cause.notDelivered && cause.code === 'AMBIGUOUS_TARGET') throw another();
       throw translate(cause, label, true);

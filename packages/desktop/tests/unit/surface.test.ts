@@ -859,6 +859,17 @@ describe('DesktopSurface', () => {
     ]);
   });
 
+  it('gives a key sent by name only what is left of the budget after looking for other copies', async () => {
+    const unconfirmed = { ok: false, error: { code: 'STALE_REF', message: 'focus unconfirmed', details: { cause: 'exact_window_focus_unconfirmed' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
+    const { surface } = await launched((pid) => ({
+      press: [unconfirmed, { sleepMs: 1_500, ok: true, data: {} }],
+      'list-apps': [{ ok: true, data: { apps: [] } }, { sleepMs: 1_200, ok: true, data: { apps: [{ name: 'SpikeForm', pid, process_instance: 'instance-1' }] } }],
+    }));
+    const started = Date.now();
+    await expect(surface.pressKey('Enter', { ...operation(), timeoutMs: 2_000 })).rejects.toMatchObject({ code: expect.stringMatching(/OPERATION_TIMEOUT|ACTION_MAY_HAVE_COMMITTED/) });
+    expect(Date.now() - started).toBeLessThan(2_600);
+  });
+
   it('sends no key by name while another copy of the app shares it', async () => {
     const unconfirmed = { ok: false, error: { code: 'STALE_REF', message: 'focus unconfirmed', details: { cause: 'exact_window_focus_unconfirmed' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
     const theirs = otherCopy();
