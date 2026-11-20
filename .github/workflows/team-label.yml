@@ -1,9 +1,9 @@
 name: team-label
 
 # Labels a PR `e2e team` when its author is listed in .github/team.txt, one GitHub
-# login per line. The list is explicit because the workflow token cannot see
-# private org memberships, so `author_association` reports those members as
-# contributors.
+# login per line. The list is explicit because `author_association` reports a
+# member with private org membership as a collaborator, the same as an outside
+# collaborator.
 # pull_request_target so the token can edit labels; the list is read from the
 # default branch and the job never checks out or runs PR code.
 on:
