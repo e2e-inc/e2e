@@ -1137,8 +1137,14 @@ export class DesktopSurface {
     }
     // Physical input lands on whatever is frontmost at the point: bring the window forward first.
     await this.run(['focus-window', '--window-id', target.id, '--headed'], { label: 'focus window', input: true, signal: operation.signal, timeoutMs: operation.timeoutMs });
+    // Coming forward can move the window (onto another space, out from under the menu bar): the click is measured from where it is now.
+    const focused = (await this.ownWindows(operation)).find((candidate) => candidate.id === target.id)?.bounds;
+    if (focused === undefined) throw notActionable('the window the point was taken from closed as it was brought forward; observe again');
+    if (point.x >= focused.width || point.y >= focused.height) {
+      throw notActionable(`(${point.x}, ${point.y}) is outside the ${focused.width}x${focused.height} window; a click there would land on another app`);
+    }
     // Unrounded: agent-desktop takes fractional points, and rounding could carry a point past the window's edge.
-    const xy = `--xy=${window.x + point.x},${window.y + point.y}`;
+    const xy = `--xy=${focused.x + point.x},${focused.y + point.y}`;
     const args =
       action.kind === 'hover'
         ? ['hover', xy, '--headed']

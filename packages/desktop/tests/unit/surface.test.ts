@@ -514,7 +514,7 @@ describe('DesktopSurface', () => {
     const { surface, fake } = await launched((pid) => ({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], 'list-windows': [{ ok: true, data: windows(pid, 0) }, { ok: true, data: windows(pid, 0) }, { ok: true, data: windows(pid, 1) }] }), { options: { headed: true } });
     await surface.performAt({ x: 10, y: 20 }, { kind: 'tap' }, operation());
     const calls = fake.calls().map((call) => call.args);
-    expect(calls.at(-2)).toEqual(['focus-window', '--window-id', 'w-mine', '--headed']);
+    expect(calls.findLast((call) => call[0] === 'focus-window')).toEqual(['focus-window', '--window-id', 'w-mine', '--headed']);
     expect(calls.at(-1)).toEqual(['mouse-click', '--xy=110,120', '--headed']);
   });
 
@@ -527,7 +527,7 @@ describe('DesktopSurface', () => {
     await surface.locate({ kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'sign-in', exact: true } } }, operation());
     await surface.performAt({ x: 11.5, y: 16.25 }, { kind: 'tap' }, operation());
     const calls = fake.calls().map((call) => call.args);
-    expect(calls.at(-2)).toEqual(['focus-window', '--window-id', 'w-dialog', '--headed']);
+    expect(calls.findLast((call) => call[0] === 'focus-window')).toEqual(['focus-window', '--window-id', 'w-dialog', '--headed']);
     expect(calls.at(-1)).toEqual(['mouse-click', '--xy=511.5,116.25', '--headed']);
   });
 
@@ -541,8 +541,15 @@ describe('DesktopSurface', () => {
     await surface.useWindow('w-panel', signal, 5_000);
     await surface.performAt({ x: 10, y: 20 }, { kind: 'tap' }, operation());
     const calls = fake.calls().map((call) => call.args);
-    expect(calls.at(-2)).toEqual(['focus-window', '--window-id', 'w-panel', '--headed']);
+    expect(calls.findLast((call) => call[0] === 'focus-window')).toEqual(['focus-window', '--window-id', 'w-panel', '--headed']);
     expect(calls.at(-1)).toEqual(['mouse-click', '--xy=610,120', '--headed']);
+  });
+
+  it('measures a point from where the window is once it was brought forward', async () => {
+    const at = (pid: number, x: number) => ({ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true, bounds: { x, y: 200, width: 400, height: 300 } }] });
+    const { surface, fake } = await launched((pid) => ({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], 'list-windows': [at(pid, 100), at(pid, 100), at(pid, 100), at(pid, 500)] }), { options: { headed: true } });
+    await surface.performAt({ x: 10, y: 20 }, { kind: 'tap' }, operation());
+    expect(fake.calls().map((call) => call.args).at(-1)).toEqual(['mouse-click', '--xy=510,220', '--headed']);
   });
 
   it('refuses a point outside the window, which would land on another app', async () => {
