@@ -66,13 +66,13 @@ export function bootRequest(selection: DeviceSelection): DeviceSelection & Pick<
   return named === undefined ? { ...selection, pick: 'newest' } : selection;
 }
 
-/** The agent-device session slot `slot` of a target drives: the `session` option or `e2e-<target>`, then `-<slot>`. */
 /** What names a slot's session: the target, and the `launch()` host holding it, if one does. */
 export interface SessionOwner {
   readonly targetName: string;
   readonly hostId?: string | undefined;
 }
 
+/** The agent-device session slot `slot` of a target drives; see `DevicePool.session`. */
 type SessionNamer = (owner: SessionOwner, slot: number) => string;
 
 /** Whether the `device` option names a pool of devices rather than one device or a provider. */

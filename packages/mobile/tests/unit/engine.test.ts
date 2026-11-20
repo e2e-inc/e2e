@@ -455,15 +455,18 @@ describe('lifecycle', () => {
     expect(held.fake.methods()).not.toContain('devices.boot');
   });
 
-  it('names a launch() host\'s session after its host id, so it leaves the device a worker of the same target holds', async () => {
+  it('names a launch() host\'s session after its host id, so it leaves the device a worker of the same target holds and keeps the one it holds itself', async () => {
     const h = harness({ device: undefined });
     h.fake.respond('devices.list', () => [
       { platform: 'ios', id: 'A', name: 'A', booted: true, claimedBy: { session: 'e2e-ios-0', workspace: '/project' } },
-      { platform: 'ios', id: 'B', name: 'B', booted: true },
+      { platform: 'ios', id: 'B', name: 'B', booted: true, claimedBy: { session: 'e2e-ios-abc123-0', workspace: '/project' } },
     ]);
     const info = { runId: 'run-1', targetName: 'ios', hostId: 'abc123', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: () => undefined };
-    expect(await h.prepare(info)).toMatchObject({ workers: 1 });
+    const prepared = await h.prepare(info);
+    expect(prepared).toMatchObject({ workers: 1 });
     expect(h.fake.calls.filter((call) => call.method === 'devices.boot').map((call) => call.args)).toEqual([{ platform: 'ios', udid: 'B' }]);
+    // The worker's init resumes the session prepare warmed, not the target's plain one.
+    await h.engine.init!({ runId: 'run-1', targetName: 'ios', hostId: 'abc123', projectRoot: PROJECT_ROOT, app: h.app, env: prepared?.env ?? {}, headed: false, workerSlot: 0, log: () => undefined, signal: new AbortController().signal });
     expect(new Set(h.sessions)).toEqual(new Set(['e2e-ios-abc123-0']));
 
     // The `session` option names the session whole, as it documents.
