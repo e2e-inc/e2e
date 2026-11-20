@@ -71,7 +71,8 @@ translation moves or goes with it in the same change.
 | target | ターゲット |
 | replay cache | リプレイキャッシュ |
 | executor, custom executor | エグゼキューター, カスタムエグゼキューター |
-| tool, custom tool, project tool | ツール, カスタムツール, プロジェクトツール |
+| tool, project tool | ツール, プロジェクトツール |
+| custom tool (an executor's own) | カスタムツール |
 | custom store | カスタムストア |
 | provider | プロバイダー |
 | hosted browser | ホスト型ブラウザ |

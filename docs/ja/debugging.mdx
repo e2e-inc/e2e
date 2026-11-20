@@ -126,7 +126,7 @@ remaining"`）は、アプリの更新とタイミングが競合しています
 | --- | --- |
 | スクリーンショット | エンジンが対応していれば、失敗した試行で撮影します。組み込みの `agent.assert` は、`screenshot: false` でなければ判定の成否にかかわらず撮影します。`app.screenshot('label')` でも撮影できます。マスキングされるのは機密フィールドだけです。[シークレット入力後のスクリーンショット](/reference/security#screenshots-after-a-secret-fill)を参照してください。 |
 | ダウンロード | `browser.waitForDownload` で保存したファイルを `download` として、アプリが提供した内容で保存します。ランナーがシークレットをマスキングする条件は[ダウンロード](/reference/security#downloads)を参照してください。 |
-| 動画 | [録画を有効にした場合](#watch-it-happen)。動画は何もマスキングしません。[マスキングの限界](/reference/security#where-redaction-stops)を参照してください。 |
+| 動画 | [録画を有効にした場合](#watch-it-happen)。動画は何もマスキングしません。[マスキングの対象外](/reference/security#where-redaction-stops)を参照してください。 |
 | エージェントのトランスクリプト | [`--debug`](#agent-steps) を指定した場合。 |
 
 ## スクリプトから読む report.json

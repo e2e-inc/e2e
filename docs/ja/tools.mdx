@@ -125,13 +125,13 @@ return result.style;
 
 ## デバイス用ツールセット
 
-`@e2e-dev/mobile` には、`open_app`、`swipe`、`alert` をまとめた `mobileTools` が用意されています。スプレッド構文で展開すると、カスタムツールと一緒に使えます。
+`@e2e-dev/mobile` には、`open_app`、`swipe`、`alert` をまとめた `mobileTools` が用意されています。スプレッド構文で展開すると、独自のツールと一緒に使えます。
 
 ```ts
 tools: { ...mobileTools(iphone, pixel), seedCart },
 ```
 
-設定方法は[エージェントツール](/mobile#agent-tools)を参照してください。カスタムツールで生のドライバーセッションが必要な場合は、[`unstable_deviceSession`](/reference/mobile#unstable_devicesession) から実行中のデバイスのクライアントを取得できます。
+設定方法は[エージェントツール](/mobile#agent-tools)を参照してください。独自のツールで生のドライバーセッションが必要な場合は、[`unstable_deviceSession`](/reference/mobile#unstable_devicesession) から実行中のデバイスのクライアントを取得できます。
 
 ## 次のステップ
 

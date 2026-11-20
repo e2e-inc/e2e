@@ -7,7 +7,7 @@ description: 既存のアプリビルドと testID を、screen、expect、エ�
 
 import { SetupPrompt } from '../../snippets/setup-prompt-card.jsx';
 
-export const migrationPrompt = `このプロジェクトの Detox テストを、テストファイル ごとに e2e へ移行してください。ドキュメント: \`https://e2e.com/docs/migrate/detox.md\` と \`https://e2e.com/docs/mobile.md\`
+export const migrationPrompt = `このプロジェクトの Detox テストを、テストファイルごとに e2e へ移行してください。ドキュメント: \`https://e2e.com/docs/migrate/detox.md\` と \`https://e2e.com/docs/mobile.md\`
 
 1. 上記の移行ガイドを読んでください。\`.detoxrc.js\` と Detox API の e2e への対応関係、および e2e にまだない機能が載っています。モバイルガイドではデバイスとアプリのビルドを説明しています。
 2. プロジェクトに e2e の設定（\`e2e.config.ts\`、\`.mts\`、\`.js\`、\`.mjs\`）がなければ、\`npx e2e init --yes --engine mobile\`（または pnpm、bun の同等コマンド）を実行してください。このマシンのプラットフォーム用のターゲットを 1 つ持つモバイル設定と、設定アプリに対するサンプルテストを作りますが、この時点では何もインストールしません。\`tests/example.e2e.ts\` を対象アプリ用に書き換えるか、削除してください。
@@ -44,7 +44,7 @@ e2e は、通常のデバッグビルドやリリースビルドを使い、シ�
 | `configurations` | `targets`。プラットフォームごとに 1 エンジン |
 | Jest の `maxWorkers` | `workers`。デバイスごとに 1 ワーカー |
 | `apps.<name>.launchArgs` | ターゲットの `app.launchArguments`。プラットフォームごとの文字列リスト |
-| `launchApp({ permissions })` | ターゲットの `app.permissions`。`YES`、`NO`、`unset` に対して `grant`、`deny`、`reset`。対応する権限名は[追加予定](#planned) |
+| `launchApp({ permissions })` | ターゲットの `app.permissions`。`YES`、`NO`、`unset` に対して `grant`、`deny`、`reset`。ほかの権限名も[実装予定](#planned) |
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
