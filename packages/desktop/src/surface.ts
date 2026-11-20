@@ -895,6 +895,10 @@ export class DesktopSurface {
   private binding(ref: NodeRef): NodeBinding {
     const binding = this.bindings.get(ref.id);
     if (binding === undefined) throw new EngineError('NODE_STALE', `node ${ref.id} is not on the screen`, { retryable: true });
+    // A node read before desktop.useWindow() chose another window is not on the screen in use: the harness locates it again there.
+    if (this.chosenWindow !== undefined && binding.windowId !== this.chosenWindow) {
+      throw new EngineError('NODE_STALE', `node ${ref.id} is in another window than the one desktop.useWindow() chose`, { retryable: true });
+    }
     return binding;
   }
 

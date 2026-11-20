@@ -899,6 +899,16 @@ describe('DesktopSurface', () => {
     expect(Date.now() - started).toBeLessThan(2_000);
   });
 
+  it('acts on no node read in another window than the one a test chose', async () => {
+    const { surface, fake, byTestId } = await launched((pid) => ({
+      snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')],
+      'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }, { id: 'w-panel', pid, process_instance: 'instance-1' }] }],
+    }));
+    await surface.useWindow('w-panel', signal, 5_000);
+    await expect(surface.perform(byTestId('sign-in'), { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
+    expect(fake.calls().some((call) => call.key === 'click')).toBe(false);
+  });
+
   it('refuses to read a chosen window that closed between the list and the read', async () => {
     const { surface } = await launched((pid) => ({
       'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }, { id: 'w-panel', pid, process_instance: 'instance-1' }] }],
