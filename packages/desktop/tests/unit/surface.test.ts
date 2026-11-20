@@ -927,6 +927,15 @@ describe('DesktopSurface', () => {
     await expect(surface.observe(operation(), undefined)).rejects.toMatchObject({ code: 'NODE_STALE' });
   });
 
+  it('reads no empty screen from an app that quit while another process took over its id', async () => {
+    const { surface } = await launched((pid) => ({
+      'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }, { ok: true, data: [{ id: 'w-new', pid, process_instance: 'instance-2', is_focused: true }] }],
+      'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [{ name: 'SpikeForm', pid, process_instance: 'instance-2' }] } }],
+    }), { observe: false });
+    const missing = { kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'nowhere', exact: true } } } as const;
+    await expect(surface.locate(missing, operation())).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/quit/) });
+  });
+
   it('reads no empty screen from an app that quit', async () => {
     const { surface, app } = await launched((pid) => ({ 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }, { ok: true, data: [] }] }), { observe: false });
     process.kill(app.pid, 'SIGKILL');

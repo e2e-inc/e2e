@@ -780,9 +780,7 @@ export class DesktopSurface {
     const windows = await this.ownWindows(operation);
     const chosen = windowId !== undefined && windowId === this.chosenWindow;
     if (chosen && !windows.some((window) => window.id === windowId)) throw this.chosenClosed();
-    if (windows.length === 0 && this.pid !== undefined && !alive(this.pid)) {
-      throw new EngineError('INVALID_STATE', `${this.appName ?? 'the app'} quit (process ${this.pid}); open it again with app.open()`, { retryable: false, cause: QUIT });
-    }
+    if (windows.length === 0 && this.pid !== undefined) await this.requireRunning(operation);
     const candidates =
       windowId === undefined
         ? [...windows.filter((window) => window.is_focused === true), ...windows.filter((window) => window.is_focused !== true && window.visible !== false), ...windows.filter((window) => window.is_focused !== true && window.visible === false)]
@@ -811,6 +809,24 @@ export class DesktopSurface {
       `no window of ${this.appName ?? 'the app'} could be read through accessibility (on macOS the screen may be locked), or each closed while it was read`,
       { retryable: true, cause: UNREADABLE },
     );
+  }
+
+  /**
+   * Throws unless the process the engine launched still runs: its id alone
+   * does not show that, since another process can take the id over once the
+   * app quits, so the app list must show the same process instance. A list
+   * that left copies out shows nothing, and the read is tried again.
+   */
+  private async requireRunning(operation: Pick<OperationContext, 'signal' | 'timeoutMs'>): Promise<void> {
+    const { pid, instance, appName } = this;
+    if (pid === undefined) return;
+    const quit = (): EngineError => new EngineError('INVALID_STATE', `${appName ?? 'the app'} quit (process ${pid}); open it again with app.open()`, { retryable: false, cause: QUIT });
+    if (!alive(pid)) throw quit();
+    if (instance === undefined || appName === undefined) return;
+    const { apps, complete } = await this.run<{ apps?: readonly RawApp[]; complete?: boolean }>(['list-apps', '--app', appName], { label: `find ${appName}`, input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
+    if (apps?.some((app) => app.pid === pid && app.process_instance === instance) === true) return;
+    if (complete === false) throw new EngineError('NODE_STALE', `could not tell whether ${appName} still runs: agent-desktop listed the apps only in part`, { retryable: true, cause: UNREADABLE });
+    throw quit();
   }
 
   /** The windows of the process the engine launched; none before `app.open()` or after the app quit. */
