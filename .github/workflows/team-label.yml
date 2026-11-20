@@ -1,0 +1,35 @@
+name: team-label
+
+# Labels a PR `team` when an e2e team member opened it. The list is explicit
+# because the workflow token cannot see private org memberships, so
+# `author_association` reports those members as contributors.
+# pull_request_target so the token can edit labels; the job never checks out
+# or runs PR code.
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  label:
+    if: >-
+      contains(fromJSON('[
+        "bszafranow",
+        "kacperkapusciak",
+        "kdy1",
+        "KrzysztofMoch",
+        "okwasniewski",
+        "satya164",
+        "szymonrybczak",
+        "werkaTA"
+      ]'), github.event.pull_request.user.login)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    steps:
+      - name: Add the label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/labels" -f 'labels[]=team' --silent
