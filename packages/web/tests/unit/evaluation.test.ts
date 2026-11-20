@@ -87,13 +87,14 @@ describe('compileEvaluation', () => {
   it.each([
     ['a password field', () => true],
     ['an element whose matches throws', () => { throw new Error('replaced'); }],
+    ['an element whose matches answers no boolean', () => undefined],
   ])('refuses %s as POLICY_DENIED without running the source', async (_, matches) => {
     const ran = vi.fn();
     vi.stubGlobal('ran', ran);
     const selectors: unknown[] = [];
     const element = { isConnected: true, matches: (selector: unknown) => { selectors.push(selector); return matches(); } };
     const report = await compileEvaluation('() => ran()', ['element', 'arg'])(element, undefined);
-    expect(() => readEvaluation(report)).toThrow(expect.objectContaining({ code: 'POLICY_DENIED' }));
+    expect(() => readEvaluation(report)).toThrow(expect.objectContaining({ code: 'POLICY_DENIED', category: 'configuration' }));
     expect(ran).not.toHaveBeenCalled();
     expect(selectors).toEqual([SECURE_FIELD_SELECTOR]);
   });
