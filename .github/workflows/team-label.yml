@@ -1,30 +1,21 @@
 name: team-label
 
-# Labels a PR `team` when an e2e team member opened it. The list is explicit
-# because the workflow token cannot see private org memberships, so
-# `author_association` reports those members as contributors.
-# pull_request_target so the token can edit labels; the job never checks out
-# or runs PR code.
+# Labels a PR `team` when its author is listed in .github/team.txt, one GitHub
+# login per line. The list is explicit because the workflow token cannot see
+# private org memberships, so `author_association` reports those members as
+# contributors.
+# pull_request_target so the token can edit labels; the list is read from the
+# default branch and the job never checks out or runs PR code.
 on:
   pull_request_target:
     types: [opened, reopened]
 
 permissions:
+  contents: read
   pull-requests: write
 
 jobs:
   label:
-    if: >-
-      contains(fromJSON('[
-        "bszafranow",
-        "kacperkapusciak",
-        "kdy1",
-        "KrzysztofMoch",
-        "okwasniewski",
-        "satya164",
-        "szymonrybczak",
-        "werkaTA"
-      ]'), github.event.pull_request.user.login)
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
@@ -32,4 +23,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-        run: gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/labels" -f 'labels[]=team' --silent
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          team=$(gh api "repos/$GITHUB_REPOSITORY/contents/.github/team.txt" -H 'accept: application/vnd.github.raw')
+          if grep -qixF -- "$AUTHOR" <<< "$team"; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/labels" -f 'labels[]=team' --silent
+          fi
