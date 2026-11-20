@@ -3,13 +3,15 @@ import { desktop } from '../../src/engine.ts';
 import { resolveOptions } from '../../src/options.ts';
 
 describe('desktop()', () => {
-  it('offers the pointer-only actions with headed alone', () => {
+  it('offers the pointer-only actions, and keys, with headed alone', () => {
     const plain = desktop();
     const headed = desktop({ headed: true });
     expect(plain.actions).not.toContain('doubleTap');
     expect(plain.actions).not.toContain('hover');
+    // agent-desktop sends a key only to the active window, which an app in the background never has.
+    expect(plain.actions).not.toContain('press');
     expect(plain.pointerActions).toBeUndefined();
-    expect(headed.actions).toEqual(expect.arrayContaining(['doubleTap', 'hover']));
+    expect(headed.actions).toEqual(expect.arrayContaining(['doubleTap', 'hover', 'press']));
     expect(headed.pointerActions).toEqual(expect.arrayContaining(['tap']));
     expect(plain.workers).toBe(1);
     expect(plain.keyboard).toBeUndefined();

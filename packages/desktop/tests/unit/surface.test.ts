@@ -1032,40 +1032,18 @@ describe('DesktopSurface', () => {
     }
   });
 
-  it('sends a key to an app in the background by its name, once it saw its copy is the only one', async () => {
+  it('sends a key to an app in the background only to its own window, never by its name', async () => {
     const unconfirmed = { ok: false, error: { code: 'STALE_REF', message: 'focus unconfirmed', details: { cause: 'exact_window_focus_unconfirmed' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
-    const { surface, fake, byTestId } = await launched((pid) => ({
+    const { surface, fake, byTestId } = await launched({
       snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')],
-      press: [unconfirmed, { ok: true, data: {} }],
-      'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [{ name: 'SpikeForm', pid, process_instance: 'instance-1' }] } }],
-    }));
-    await surface.perform(byTestId('username'), { kind: 'press', key: 'Tab' }, operation());
+      press: [unconfirmed],
+    });
+    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Tab' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/headed: true/) });
+    await expect(surface.pressKey('Enter', operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
     expect(fake.calls().filter((call) => call.key === 'press').map((call) => call.args)).toEqual([
       ['press', 'tab', '--window-id', 'w-mine'],
-      ['press', 'tab', '--app', 'SpikeForm'],
+      ['press', 'return', '--window-id', 'w-mine'],
     ]);
-  });
-
-  it('gives a key sent by name only what is left of the budget after looking for other copies', async () => {
-    const unconfirmed = { ok: false, error: { code: 'STALE_REF', message: 'focus unconfirmed', details: { cause: 'exact_window_focus_unconfirmed' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
-    const { surface } = await launched((pid) => ({
-      press: [unconfirmed, { sleepMs: 1_500, ok: true, data: {} }],
-      'list-apps': [{ ok: true, data: { apps: [] } }, { sleepMs: 1_200, ok: true, data: { apps: [{ name: 'SpikeForm', pid, process_instance: 'instance-1' }] } }],
-    }));
-    const started = Date.now();
-    await expect(surface.pressKey('Enter', { ...operation(), timeoutMs: 2_000 })).rejects.toMatchObject({ code: expect.stringMatching(/OPERATION_TIMEOUT|ACTION_MAY_HAVE_COMMITTED/) });
-    expect(Date.now() - started).toBeLessThan(2_600);
-  });
-
-  it('sends no key by name while another copy of the app shares it', async () => {
-    const unconfirmed = { ok: false, error: { code: 'STALE_REF', message: 'focus unconfirmed', details: { cause: 'exact_window_focus_unconfirmed' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
-    const theirs = otherCopy();
-    const { surface, fake } = await launched((pid) => ({
-      press: [unconfirmed],
-      'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [{ name: 'SpikeForm', pid: theirs, process_instance: 'theirs' }, { name: 'SpikeForm', pid, process_instance: 'instance-1' }] } }],
-    }));
-    await expect(surface.pressKey('Enter', operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/another copy/) });
-    expect(fake.calls().filter((call) => call.key === 'press')).toHaveLength(1);
   });
 
   it('closes the menu a select of a missing option left open, and names the option it may lack', async () => {

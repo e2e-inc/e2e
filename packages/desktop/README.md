@@ -64,8 +64,8 @@ test('signs in', async ({ app, screen }) => {
   `getByTestId` finds it.
 - Actions go through the accessibility API and leave your pointer, focus, and
   typing alone. `desktop({ headed: true })` brings the app forward and allows
-  physical input: `doubleTap`, `hover`, point-addressed taps, and typing into
-  whatever has focus.
+  physical input: `doubleTap`, `hover`, `press`, point-addressed taps, and
+  typing into whatever has focus.
 - A fill sends the text to agent-desktop on stdin, never in its arguments.
   A secure field reports no value, and screenshots paint over its bounds; when
   a secure field has no bounds, the screenshot is withheld.

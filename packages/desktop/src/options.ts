@@ -34,8 +34,8 @@ export interface DesktopOptions {
    * accessibility API and leaves the user's pointer and focus alone, and
    * the app stays in the background. On, `app.open()` brings the app
    * forward, which some apps need before they show a window, and the
-   * engine also offers `doubleTap`, `hover`, point-addressed taps, and
-   * keystrokes into whatever has focus (the keyboard capability).
+   * engine also offers `doubleTap`, `hover`, `press`, point-addressed taps,
+   * and keystrokes into whatever has focus (the keyboard capability).
    */
   readonly headed?: boolean | undefined;
   /**

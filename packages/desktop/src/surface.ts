@@ -1192,37 +1192,25 @@ export class DesktopSurface {
   }
 
   /**
-   * Sends one key combo to the launched process. agent-desktop sends a key
-   * to a named window only while that window is active, which an app in the
-   * background never is; there the key goes to the process by its app name,
-   * which agent-desktop refuses when two copies share it, and which the
-   * engine sends only once it has seen that its copy is the only one. With
-   * `headed`, agent-desktop brings the window forward first.
+   * Sends one key combo to the launched process's window. agent-desktop
+   * sends a key to a named window only while that window is active, which
+   * an app in the background never is, and refuses it before sending. A key
+   * is never sent by the app's name instead: the name does not pin the
+   * process, so the key could reach another copy. With `headed`,
+   * agent-desktop brings the window forward first.
    */
   private async sendKey(combo: string, window: string, label: string, operation: OperationContext): Promise<void> {
-    // Built for each command: the budget is what is left of the operation when that command starts.
-    const call = () => ({ label, input: true, signal: operation.signal, timeoutMs: operation.timeoutMs });
+    const call = { label, input: true, signal: operation.signal, timeoutMs: operation.timeoutMs };
     if (this.options.headed) {
-      await this.run(['press', combo, '--window-id', window, '--headed'], call());
+      await this.run(['press', combo, '--window-id', window, '--headed'], call);
       return;
     }
     try {
-      await this.run(['press', combo, '--window-id', window], { ...call(), raw: true });
-      return;
+      await this.run(['press', combo, '--window-id', window], { ...call, raw: true });
     } catch (cause) {
-      if (!(cause instanceof AgentDesktopFailure && cause.notDelivered && cause.details.cause === 'exact_window_focus_unconfirmed')) throw translate(cause, label, true);
-    }
-    const { appName, pid } = this;
-    if (appName === undefined || pid === undefined) throw invalidState('the app is not running; open it with app.open()');
-    const another = (): EngineError =>
-      notActionable(`another copy of ${appName} is running, and a key to an app in the background is sent by its name, which could reach that copy; quit it, or set desktop({ headed: true })`);
-    const { apps } = await this.run<{ apps?: readonly RawApp[] }>(['list-apps', '--app', appName], { label: `find ${appName}`, input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
-    const copies = (apps ?? []).filter((app) => typeof app.pid === 'number');
-    if (copies.length !== 1 || copies[0]!.pid !== pid || (this.instance !== undefined && copies[0]!.process_instance !== this.instance)) throw another();
-    try {
-      await this.run(['press', combo, '--app', appName], { ...call(), raw: true });
-    } catch (cause) {
-      if (cause instanceof AgentDesktopFailure && cause.notDelivered && cause.code === 'AMBIGUOUS_TARGET') throw another();
+      if (cause instanceof AgentDesktopFailure && cause.notDelivered && cause.details.cause === 'exact_window_focus_unconfirmed') {
+        throw notActionable(`${label}: agent-desktop sends a key only to the active window, and the app runs in the background, so nothing was sent; set desktop({ headed: true }) to press keys`);
+      }
       throw translate(cause, label, true);
     }
   }
