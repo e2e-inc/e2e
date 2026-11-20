@@ -145,8 +145,12 @@ export class ScreenPresenter {
   private screenshotDigest: string | undefined;
   /** True once the engine said it captures no screenshots at all. */
   private pixelsDenied = false;
-  /** The tabs as of the last screen sent, kept even when that screen had no tree. */
-  private tabsSeen: ExecutorObservation['tabs'];
+  /**
+   * The tabs and location of the last screen sent, kept even when that screen
+   * had no tree; undefined until the first screen, so a presenter that was
+   * never opened reports no change on its first result.
+   */
+  private seen: { readonly tabs: ExecutorObservation['tabs']; readonly path: string | undefined } | undefined;
 
   /** True once a screenshot went to the model in this step. */
   get showingPixels(): boolean {
@@ -158,10 +162,18 @@ export class ScreenPresenter {
     return this.screenshot;
   }
 
+  /** What the tabs and location say changed since the last screen sent, for a screen with no tree to compare. */
+  private movedSinceSeen(observation: ExecutorObservation): string {
+    if (this.seen === undefined) return '';
+    const tabs = tabNote(this.seen.tabs, observation.tabs);
+    const moved = tabs?.moved !== true && this.seen.path !== observation.path;
+    return `${tabs === undefined ? '' : `${tabs.note} `}${moved ? `${LOCATION_CHANGED}${observation.path ?? 'none'}. ` : ''}`;
+  }
+
   /** The step's first screen, whole. */
   initial(observation: ExecutorObservation): string {
     this.shown = observation.treeUnavailable === true ? undefined : indexScreen(observation);
-    this.tabsSeen = observation.tabs;
+    this.seen = { tabs: observation.tabs, path: observation.path };
     return renderFull(observation);
   }
 
@@ -177,19 +189,19 @@ export class ScreenPresenter {
   private render(observation: ExecutorObservation, options: ScreenUpdateOptions, pixels: PixelEvidence): string {
     let lead = options.lead === undefined ? '' : `${options.lead}\n\n`;
     if (observation.treeUnavailable === true) {
-      // No tree to compare, but the tabs still say what happened.
-      const tabs = tabNote(this.shown?.tabs ?? this.tabsSeen, observation.tabs);
-      return `${lead}${tabs === undefined ? '' : `${tabs.note} `}${this.initial(observation)}`;
+      // No tree to compare, but the tabs and the location still say what happened.
+      return `${lead}${this.movedSinceSeen(observation)}${this.initial(observation)}`;
     }
     const previous = this.shown;
     const next = indexScreen(observation);
-    this.shown = next;
     if (previous === undefined) {
-      const tabs = tabNote(this.tabsSeen, next.tabs);
-      this.tabsSeen = next.tabs;
-      return `${lead}${tabs === undefined ? '' : `${tabs.note} `}${renderFull(observation)}`;
+      const notes = this.movedSinceSeen(observation);
+      this.shown = next;
+      this.seen = { tabs: next.tabs, path: next.path };
+      return `${lead}${notes}${renderFull(observation)}`;
     }
-    this.tabsSeen = next.tabs;
+    this.shown = next;
+    this.seen = { tabs: next.tabs, path: next.path };
     const closed = options.keyboardNote === false || options.lead === undefined ? '' : keyboardClosedNote(previous, next);
     const tabs = tabNote(previous.tabs, next.tabs);
     // Another tab is another document: its ids say nothing about the tab the model held.

@@ -52,6 +52,25 @@ describe('ScreenPresenter', () => {
       expect(reportsScreenChange(back)).toBe(true);
     });
 
+    it('names a new location while the screen has no tree', () => {
+      const presenter = new ScreenPresenter();
+      presenter.open(screen('b1', HOME, { path: '/product/edit' }));
+      expect(reportsScreenChange(textOf(presenter.present(noTree('b2', { path: '/product/edit' }), { lead: 'Observed.' })))).toBe(false);
+      const moved = textOf(presenter.present(noTree('b3', { path: '/product/42' }), { lead: 'Observed.' }));
+      expect(moved).toContain('The location changed to /product/42. ');
+      expect(reportsScreenChange(moved)).toBe(true);
+    });
+
+    it('reports no tab or location change on the first result of a presenter that was never opened', () => {
+      for (const active of [1, 2]) {
+        const output = textOf(new ScreenPresenter().present(screen('b1', HOME, { tabs: { count: 2, active }, path: '/p' }), { lead: 'Tapped #n3.' }));
+        expect(output).not.toContain('The app opened');
+        expect(output).not.toContain('The screen shows tab');
+        expect(output).not.toContain('The location changed');
+        expect(output).toContain(`tab ${String(active)} of 2`);
+      }
+    });
+
     it('says a tab opened even while the screen has no tree', () => {
       const presenter = new ScreenPresenter();
       presenter.open(screen('b1', HOME));
