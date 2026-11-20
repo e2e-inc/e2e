@@ -228,7 +228,7 @@ test.describe('expect(browser).toHaveCSS', { requires: ['browser'] }, () => {
     expect(await browser.evaluateOn(main, (el) => getComputedStyle(el).getPropertyValue('--grid'))).toBe('a    b');
     await expect(browser).toHaveCSS(main, '--grid', 'a    b');
     await expect(browser).toHaveCSS(main, '--grid', /^a {4}b$/);
-    await expect(browser).not.toHaveCSS(main, '--grid', 'a b', { timeout: 300 });
+    await expect(browser).not.toHaveCSS(main, '--grid', 'a b', { timeout: 1000 });
   });
 
   test('matches a computed value, a custom property, and its negation', async ({ browser, screen }) => {
@@ -248,7 +248,7 @@ test.describe('expect(browser).toHaveCSS', { requires: ['browser'] }, () => {
   test('fails with the value it observed', async ({ browser, screen }) => {
     await browser.goto(page);
     const main = screen.getByRole('navigation', { name: 'Main' });
-    const error = await failure(() => expect(browser).toHaveCSS(main, 'position', 'fixed', { timeout: 300 }));
+    const error = await failure(() => expect(browser).toHaveCSS(main, 'position', 'fixed', { timeout: 1000 }));
     expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
     expect(error).toHaveProperty('message', expect.stringContaining('observed: css position "sticky"'));
   });
@@ -256,25 +256,25 @@ test.describe('expect(browser).toHaveCSS', { requires: ['browser'] }, () => {
   test('matches a string as the whole value, not a part of it', async ({ browser, screen }) => {
     await browser.goto(page);
     const main = screen.getByRole('navigation', { name: 'Main' });
-    const error = await failure(() => expect(browser).toHaveCSS(main, 'position', 'stick', { timeout: 300 }));
+    const error = await failure(() => expect(browser).toHaveCSS(main, 'position', 'stick', { timeout: 1000 }));
     expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
   });
 
   test('fails on an element that never appears, and on an ambiguous locator', async ({ browser }) => {
     await browser.goto(page);
     const missing = await failure(() =>
-      expect(browser).toHaveCSS(browser.locator('#missing'), 'position', 'static', { timeout: 300 }));
+      expect(browser).toHaveCSS(browser.locator('#missing'), 'position', 'static', { timeout: 1000 }));
     expect(missing).toHaveProperty('code', 'ASSERTION_FAILED');
     expect(missing).toHaveProperty('message', expect.stringContaining('observed: no node'));
     const ambiguous = await failure(() =>
-      expect(browser).toHaveCSS(browser.locator('nav'), 'position', 'static', { timeout: 300 }));
+      expect(browser).toHaveCSS(browser.locator('nav'), 'position', 'static', { timeout: 1000 }));
     expect(ambiguous).toHaveProperty('code', 'LOCATOR_AMBIGUOUS');
   });
 
   test('fails a negation on an element that never appears', async ({ browser }) => {
     await browser.goto(page);
     const missing = browser.locator('#missing');
-    const error = await failure(() => expect(browser).not.toHaveCSS(missing, 'position', 'static', { timeout: 300 }));
+    const error = await failure(() => expect(browser).not.toHaveCSS(missing, 'position', 'static', { timeout: 1000 }));
     expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
     expect(error).toHaveProperty('message', expect.stringContaining('observed: no node'));
   });
@@ -314,7 +314,7 @@ test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () 
     const main = screen.getByRole('navigation', { name: 'Main' });
     await expect(browser).toHaveJSProperty(main, 'config', { sizes: [1, 2], mode: 'dark' });
     await expect(browser).toHaveJSProperty(main, 'config.sizes', [1, 2]);
-    await expect(browser).not.toHaveJSProperty(main, 'config.sizes', [2, 1], { timeout: 300 });
+    await expect(browser).not.toHaveJSProperty(main, 'config.sizes', [2, 1], { timeout: 1000 });
   });
 
   test('never matches a value that is not JSON, so its negation passes', async ({ browser, screen }) => {
@@ -329,7 +329,7 @@ test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () 
     await expect(browser).not.toHaveJSProperty(name, 'value.0.length', 1);
     await expect(browser).toHaveJSProperty(name, 'focus.length', 0);
     await expect(browser).not.toHaveJSProperty(name, 'focus.name.length', 5);
-    const error = await failure(() => expect(browser).toHaveJSProperty(name, 'value.0.length', 1, { timeout: 300 }));
+    const error = await failure(() => expect(browser).toHaveJSProperty(name, 'value.0.length', 1, { timeout: 1000 }));
     expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
     expect(error).toHaveProperty('message', expect.stringContaining('observed: property value.0.length is undefined'));
   });
@@ -337,10 +337,10 @@ test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () 
   test('fails with the value it observed, or that it is not JSON', async ({ browser, screen }) => {
     await browser.goto(page);
     const main = screen.getByRole('navigation', { name: 'Main' });
-    const wrong = await failure(() => expect(browser).toHaveJSProperty(main, 'dataset.x', 2, { timeout: 300 }));
+    const wrong = await failure(() => expect(browser).toHaveJSProperty(main, 'dataset.x', 2, { timeout: 1000 }));
     expect(wrong).toHaveProperty('code', 'ASSERTION_FAILED');
     expect(wrong).toHaveProperty('message', expect.stringContaining('observed: property dataset.x "1"'));
-    const opaque = await failure(() => expect(browser).toHaveJSProperty(main, 'style', 'sticky', { timeout: 300 }));
+    const opaque = await failure(() => expect(browser).toHaveJSProperty(main, 'style', 'sticky', { timeout: 1000 }));
     expect(opaque).toHaveProperty('code', 'ASSERTION_FAILED');
     expect(opaque).toHaveProperty('message', expect.stringContaining('observed: property style is not JSON'));
   });
@@ -412,7 +412,7 @@ test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () 
     await browser.goto(page);
     const holder = browser.locator('#holder');
     await expect(browser).not.toHaveJSProperty(holder, 'holder.inner.x', 1);
-    const error = await failure(() => expect(browser).toHaveJSProperty(holder, 'holder.inner.x', 1, { timeout: 300 }));
+    const error = await failure(() => expect(browser).toHaveJSProperty(holder, 'holder.inner.x', 1, { timeout: 1000 }));
     expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
     expect(error).toHaveProperty('message', expect.stringContaining('observed: property holder.inner.x is undefined'));
   });
