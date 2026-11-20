@@ -21,6 +21,12 @@ export interface CdpTarget {
   readonly headers?: Readonly<Record<string, string>> | undefined;
 }
 
+/** What a feature adds to the launch of a browser: command-line arguments on Chromium, preferences on Firefox. */
+export interface BrowserLaunchOptions {
+  readonly args?: string[];
+  readonly firefoxUserPrefs?: Record<string, string | number | boolean>;
+}
+
 /** Whether `name` is a browser the engine launches. */
 export function isBrowserName(name: string): name is BrowserName {
   return (BROWSER_NAMES as readonly string[]).includes(name);
@@ -53,19 +59,21 @@ export class BrowserConnection {
    * When `connect` is given the connection attaches to a remote browser through it
    * instead of launching a local one; `connect` is re-invoked on a relaunch,
    * so a caller that resolves a fresh per-run endpoint reconnects cleanly
-   * after a dropped session.
+   * after a dropped session. `launch` applies to a browser the connection
+   * launches; a browser it attaches to was started elsewhere and takes none.
    */
   async acquire(
     name: BrowserName,
     headed: boolean,
     timeoutMs: number,
     connect?: () => Promise<Browser>,
+    launch: BrowserLaunchOptions = {},
   ): Promise<Browser> {
     const cached = this.pending;
     if (cached !== undefined) {
       const browser = await cached.catch(() => null);
       if (browser !== null && browser.isConnected()) return browser;
-      if (this.pending !== cached) return this.acquire(name, headed, timeoutMs, connect);
+      if (this.pending !== cached) return this.acquire(name, headed, timeoutMs, connect, launch);
       this.pending = undefined;
     }
     // Set before anything awaits: the first call loads Playwright, and a `dispose`
@@ -74,7 +82,7 @@ export class BrowserConnection {
     const launching = registerSelectorEngines().then(() =>
       connect !== undefined
         ? connect()
-        : browserType(name).then((type) => type.launch({ headless: !headed, timeout: timeoutMs, ...RUNNER_OWNS_SIGNALS })),
+        : browserType(name).then((type) => type.launch({ headless: !headed, timeout: timeoutMs, ...launch, ...RUNNER_OWNS_SIGNALS })),
     );
     this.pending = launching;
     try {
