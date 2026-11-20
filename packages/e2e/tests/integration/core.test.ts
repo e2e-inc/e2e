@@ -173,6 +173,19 @@ describe('e2e/core', { timeout: 60_000 }, () => {
       .rejects.toMatchObject({ message: expect.stringContaining('target "fake"') });
   });
 
+  it('names a host\'s artifact folders after its token, so a platform that is a secret\'s value never reaches a path', async () => {
+    const secret = 'private-label';
+    const artifactsDir = path.join(dir, 'kept');
+    const opened = await host(defineEngine({ name: 'labelled', platform: secret, version: '1', spiVersion: ENGINE_SPI_VERSION, async startAttempt() {}, async endAttempt() {} }), {
+      secrets: { LABEL: secret }, artifactsDir,
+    });
+    await (await opened.newSession()).close();
+    await opened.close();
+    const entries = readdirSync(artifactsDir, { recursive: true }).map(String);
+    expect(entries.some((entry) => /(^|[\\/])core[\\/]host-[0-9a-f]{24}-[^\\/]+$/.test(entry))).toBe(true);
+    expect(entries.filter((entry) => entry.includes(secret))).toEqual([]);
+  });
+
   it('refuses what is not an engine, an app key it does not take, and a relative artifactsDir resolves from cwd', async () => {
     const web = () => createFakeEngine().engine;
     await expect(launch(web as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('got a function') });

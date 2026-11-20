@@ -127,7 +127,7 @@ const RETAINED_STEPS = 500;
 /** The core fixtures that belong to a test. A session has no test, so it exposes every other built-in fixture. */
 const TEST_FIXTURES = new Set(Object.entries(CORE_FIXTURES).flatMap(([name, fixture]) => (fixture.scope === 'test' ? [name] : [])));
 
-/** The longest platform a host's target name starts with, so the name fits in a file name with an attempt id beside it. */
+/** The longest platform a host's target name starts with, so the names an engine builds from it (a device session, a provider's tag) stay short. */
 const HOST_NAME_PLATFORM_MAX = 40;
 
 /**
@@ -135,13 +135,12 @@ const HOST_NAME_PLATFORM_MAX = 40;
  * and a random token. An engine may name what a target holds after it, such
  * as the mobile engine's device session, and the platform alone would give
  * every host the name another host, or a test's own target, already holds.
- * The token is drawn per host, so hosts in other processes, worker threads,
+ * `token` is drawn per host, so hosts in other processes, worker threads,
  * or copies of this package get names of their own. A longer platform is
  * left out whole rather than cut: a cut could keep part of a secret the
  * redactor only knows in full.
  */
-function hostTargetName(platform: string): string {
-  const token = randomBytes(12).toString('hex');
+function hostTargetName(platform: string, token: string): string {
   return platform.length > HOST_NAME_PLATFORM_MAX ? `host-${token}` : `${platform}-host-${token}`;
 }
 
@@ -196,13 +195,16 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
       // The replay cache keys on the name the config resolved, so a recording replays on any host.
       const cacheTarget = targetIdentity(resolvedTarget);
       // Renamed past resolution, so a config error names the target as the program wrote it.
-      const target: ResolvedTarget = { ...resolvedTarget, name: hostTargetName(resolvedTarget.name) };
+      const token = randomBytes(12).toString('hex');
+      const target: ResolvedTarget = { ...resolvedTarget, name: hostTargetName(resolvedTarget.name, token) };
       // Set past resolution, which keeps a run's output inside its project: a host's lives where the program says.
       const config: ResolvedConfig = { ...resolved, output, targets: [target] };
       withdrawSecrets = shareStaticSecrets(config.allSecrets);
       const notice = options.onNotice;
       const host = await openCoreHost({
         config, target, env, headed: options.headed ?? false,
+        // The artifact folders carry the token alone: the platform can be a secret's value, and a path is never redacted.
+        folder: `host-${token}`,
         signal: anySignal(options.signal, seat?.signal),
         ...(notice === undefined ? {} : { notice: (_target: string, message: string) => notice(message) }),
       });

@@ -87,14 +87,16 @@ function claimEngine(engine: object | undefined): () => void {
 /**
  * An `@e2e-dev/core` host: a worker whose sessions publish no attempt to
  * `globalThis` and hold no process-wide secret registry, so any number of
- * hosts coexist in one process. It owns its engine instance.
+ * hosts coexist in one process. It owns its engine instance. Its artifact
+ * folders are named after `folder`, never the target, whose name holds the
+ * platform an engine reports, and a platform can be a secret's value.
  */
-export function openCoreHost(options: StandaloneHostOptions): Promise<StandaloneHost> {
+export function openCoreHost(options: StandaloneHostOptions & { readonly folder: string }): Promise<StandaloneHost> {
   return openWorker(options, {
     claimsEngine: true,
     holdsRegistry: false,
     sessions: (sessionOptions) => new EngineSessions(sessionOptions),
-    identity: ({ target }, attemptId) => ({ testId: `core:${attemptId}`, segments: ['core', `${target.name}-${attemptId}`] }),
+    identity: (_worker, attemptId) => ({ testId: `core:${attemptId}`, segments: ['core', `${options.folder}-${attemptId}`] }),
   });
 }
 
