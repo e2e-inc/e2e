@@ -66,8 +66,8 @@ describe('the built-in agent from its agents entry', () => {
     expect(system).toContain('while the check still shows the commit in progress, observe again instead of pressing.');
     expect(system).toContain('When the check shows neither and nothing in progress, do not press it again: conclude from the screen you have.');
     expect(system).toContain('Do not leave the screen (navigate, go back, open another page) to confirm a commit unless the step asks for that.');
-    expect(system).toContain('or once to check whether a save or submit committed (see below).');
-    expect(system).toContain('or once when a save or submit showed no confirmation.');
+    expect(system).toContain('or once to check whether a press that commits something went through (see below).');
+    expect(system).toContain('or once when a press that commits something (a save, a submit, a delete) showed no confirmation.');
     expect(system).not.toContain('means the decisive action did not land: act again');
   });
 
