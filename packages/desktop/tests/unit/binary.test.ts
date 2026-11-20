@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -6,8 +6,23 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installPinned, pinnedExecutable } from '../../src/binary.ts';
 
+/** Runs before every rename the install makes, so a test can hold one at a chosen point while another run goes ahead. */
+const hooks = vi.hoisted(() => ({ beforeRename: (_from: string, _to: string): Promise<void> => Promise.resolve() }));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    rename: async (from: string, to: string) => {
+      await hooks.beforeRename(from, to);
+      return actual.rename(from, to);
+    },
+  };
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  hooks.beforeRename = () => Promise.resolve();
 });
 
 /** A release archive of its own, with its digest as the pinned one for every target. */
@@ -101,7 +116,7 @@ describe('the pinned agent-desktop', () => {
     }
   });
 
-  it.skipIf(process.platform === 'win32')('repairs a damaged entry once when two runs repair it at the same time, and leaves no lock', async () => {
+  it.skipIf(process.platform === 'win32')('repairs a damaged entry when three runs repair it at the same time, and leaves nothing beside it', async () => {
     const home = mkdtempSync(path.join(tmpdir(), 'e2e-desktop-cache-'));
     try {
       const { bytes, digest, digests } = release(home);
@@ -119,7 +134,7 @@ describe('the pinned agent-desktop', () => {
     }
   });
 
-  it.skipIf(process.platform === 'win32')('takes over the lock a killed run left on the cache entry', async () => {
+  it.skipIf(process.platform === 'win32')('keeps the copy another run put in place while this one was replacing a damaged entry', async () => {
     const home = mkdtempSync(path.join(tmpdir(), 'e2e-desktop-cache-'));
     try {
       const { bytes, digest, digests } = release(home);
@@ -128,14 +143,49 @@ describe('the pinned agent-desktop', () => {
       const entry = path.dirname(pinnedExecutable(env)!);
       mkdirSync(entry, { recursive: true });
       writeFileSync(path.join(entry, '.verified'), digest);
-      const dead = spawnSync(process.execPath, ['-e', '']).pid;
-      mkdirSync(`${entry}.lock`);
-      writeFileSync(path.join(`${entry}.lock`, 'owner'), String(dead));
-      const started = Date.now();
-      const executable = await installPinned(env, new AbortController().signal, () => undefined, digests);
-      expect(Date.now() - started).toBeLessThan(5_000);
-      expect(execFileSync(executable, { encoding: 'utf8' }).trim()).toBe('1.3.1');
-      expect(existsSync(`${entry}.lock`)).toBe(false);
+      const install = () => installPinned(env, new AbortController().signal, () => undefined, digests);
+      // The first run has moved the damaged entry aside; before it puts its own copy in, a second run installs whole.
+      let second: Promise<string> | undefined;
+      hooks.beforeRename = async (from, to) => {
+        if (second !== undefined || to !== entry || existsSync(entry) || !from.includes('.partial-')) return;
+        second = install();
+        await second;
+      };
+      const first = await install();
+      expect(second).toBeDefined();
+      expect(await second).toBe(first);
+      expect(execFileSync(first, { encoding: 'utf8' }).trim()).toBe('1.3.1');
+      expect(readdirSync(path.dirname(entry))).toEqual([path.basename(entry)]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('puts back a whole copy it moved aside, which another run put in place after it found the entry damaged', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'e2e-desktop-cache-'));
+    try {
+      const { bytes, digest, digests } = release(home);
+      vi.stubGlobal('fetch', () => Promise.resolve(new Response(new Uint8Array(bytes))));
+      const env = { HOME: home, USERPROFILE: home, XDG_CACHE_HOME: path.join(home, 'cache'), LOCALAPPDATA: path.join(home, 'local') };
+      const entry = path.dirname(pinnedExecutable(env)!);
+      mkdirSync(entry, { recursive: true });
+      writeFileSync(path.join(entry, '.verified'), digest);
+      const install = () => installPinned(env, new AbortController().signal, () => undefined, digests);
+      // The first run found the entry damaged; before it moves it aside, a second run replaces it whole.
+      let second: Promise<string> | undefined;
+      const moved: string[] = [];
+      hooks.beforeRename = async (from, to) => {
+        if (from === entry) moved.push(to);
+        if (second !== undefined || from !== entry) return;
+        second = install();
+        await second;
+      };
+      const first = await install();
+      expect(await second).toBe(first);
+      // Both runs moved an entry aside: the damaged one, then the second run's whole copy, which went back.
+      expect(moved).toHaveLength(2);
+      expect(execFileSync(first, { encoding: 'utf8' }).trim()).toBe('1.3.1');
+      expect(readdirSync(path.dirname(entry))).toEqual([path.basename(entry)]);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
