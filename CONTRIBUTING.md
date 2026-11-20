@@ -330,11 +330,11 @@ prompts and tool descriptions.
 
 ### Engine contract
 
-`@e2e-dev/core/engine` (re-exported as `e2e/engine`) is what `@e2e-dev/web` and
-`@e2e-dev/mobile` build against, and what a third-party engine builds against
-too. A change to that contract bumps `@e2e-dev/core`, `e2e`, and both engines
-together in one release, with a changeset for each, so an engine and a runner
-from the same release always match. `e2e` and `@e2e-dev/core` are a changesets
+`@e2e-dev/core/engine` (re-exported as `e2e/engine`) is what `@e2e-dev/web`,
+`@e2e-dev/mobile`, and `@e2e-dev/desktop` build against, and what a third-party
+engine builds against too. A change to that contract bumps `@e2e-dev/core`,
+`e2e`, and every engine together in one release, with a changeset for each,
+so an engine and a runner from the same release always match. `e2e` and `@e2e-dev/core` are a changesets
 `fixed` group: they always share a version, and `e2e` depends on that exact
 `@e2e-dev/core`. Engines declare a peer range on `@e2e-dev/core` that points one way
 only (engine to core, `>=x <1`), plus an optional one on `e2e` for the main

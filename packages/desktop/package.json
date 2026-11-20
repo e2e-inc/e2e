@@ -9,8 +9,6 @@
     "ai-testing",
     "desktop-testing",
     "macos",
-    "windows",
-    "linux",
     "accessibility",
     "agent-desktop"
   ],
