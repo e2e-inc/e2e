@@ -4,7 +4,5 @@
 "@e2e-dev/html-reporter": patch
 ---
 
-Prompt keys are now below the live summary during `--step` and `screen.pause()`.
-The screen is available with `s` and the app log with `l`.
-Time spent at a held step or pause is excluded from the terminal's `Duration` row and the report's `run.durationMs`.
-The run timestamps still use wall time.
+`--step` and `screen.pause()` keys now appear below the live summary, with `s` for the screen and `l` for the app log.
+The terminal's `Duration` row and the report's new `run.durationMs` field show the run duration without paused time.
