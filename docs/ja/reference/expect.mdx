@@ -118,7 +118,7 @@ await expect(screen.getByLabel('Order id')).toBeEditable({ editable: false }); /
 - 無効なノードも編集可能ではありません。無効の判定は [`toBeEnabled`](#tobeenabled-and-tobedisabled) と同じです。
 - ボタンなどそれ以外のノードには読み取り専用の状態がありません。否定してもマッチャーは失敗し、失敗メッセージにそのことが表示されます。
 - デバイスでは、プラットフォームがテキストを受け付けるかどうかを報告する場合（Android など）だけ、テキストフィールドに読み取り専用の状態があります。iOS は報告しないので、iOS のフィールドでは推測で成功させずにマッチャーが失敗します。
-- この状態は、`e2e` 0.24.1 を必要とする `@e2e-dev/web` と `@e2e-dev/mobile` のリリースから報告されます。古いエンジンではすべてのノードが `no read-only state` で失敗するので、`e2e` と一緒にエンジンも更新してください。
+- この状態は、`e2e` 0.25.0 を必要とする `@e2e-dev/web` と `@e2e-dev/mobile` のリリースから報告されます。古いエンジンではすべてのノードが `no read-only state` で失敗するので、`e2e` と一緒にエンジンも更新してください。
 
 #### `toBeChecked`、`toBeSelected`、`toBeExpanded`
 

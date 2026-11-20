@@ -118,7 +118,7 @@ await expect(screen.getByLabel('Order id')).toBeEditable({ editable: false }); /
 - 禁用的节点也不可编辑，禁用的判定与 [`toBeEnabled`](#tobeenabled-and-tobedisabled) 相同。
 - 其他节点（例如按钮）没有只读状态。无论是否取反，匹配器都会失败，失败信息会说明这一点。
 - 在设备上，只有当平台报告文本字段是否接受输入时（例如 Android），该字段才有只读状态。iOS 不报告，因此 iOS 字段会让匹配器失败，而不是靠猜测通过。
-- 引擎从需要 `e2e` 0.24.1 的 `@e2e-dev/web` 和 `@e2e-dev/mobile` 版本开始报告此状态。使用旧引擎时，每个节点都会以 `no read-only state` 失败：请随 `e2e` 一起更新引擎。
+- 引擎从需要 `e2e` 0.25.0 的 `@e2e-dev/web` 和 `@e2e-dev/mobile` 版本开始报告此状态。使用旧引擎时，每个节点都会以 `no read-only state` 失败：请随 `e2e` 一起更新引擎。
 
 #### `toBeChecked`、`toBeSelected` 和 `toBeExpanded`
 

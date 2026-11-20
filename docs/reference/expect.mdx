@@ -164,7 +164,7 @@ await expect(screen.getByLabel('Order id')).toBeEditable({ editable: false }); /
   reports whether it takes text, as Android does. iOS does not, so an iOS
   field fails the matcher rather than pass as a guess.
 - The engines report this state from the `@e2e-dev/web` and
-  `@e2e-dev/mobile` releases that need `e2e` 0.24.1. With an older engine,
+  `@e2e-dev/mobile` releases that need `e2e` 0.25.0. With an older engine,
   every node fails with `no read-only state`: update the engine with `e2e`.
 
 #### `toBeChecked`, `toBeSelected`, and `toBeExpanded`
