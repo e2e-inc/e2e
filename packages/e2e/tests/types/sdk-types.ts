@@ -69,6 +69,7 @@ import {
   defineTool,
   getToolContext,
   isRuntimeHardStop,
+  redactProviderKeys,
   redactSecrets,
   registerProviderKey,
   registerProviderKeys,
@@ -994,10 +995,13 @@ registerProviderKey('agent.key', 'value') satisfies void;
 registerProviderKeys({ OPENAI_API_KEY: 'value', UNSET: undefined }) satisfies void;
 registerProviderKeys(process.env) satisfies void;
 redactSecrets('text') satisfies string;
+redactProviderKeys('text') satisfies string;
 // @ts-expect-error a key is registered under a name: the marker shows it
 registerProviderKey('value');
 // @ts-expect-error only text is redacted: an object's strings are the caller's to walk
 redactSecrets({ text: 'text' });
+// @ts-expect-error only text is redacted
+redactProviderKeys({ text: 'text' });
 // A grammar tool's result is a rendered screen: text, or text with its screenshot.
 declare const rendered: ScreenOutput;
 if (typeof rendered !== 'string') rendered.pixels.mediaType satisfies string;

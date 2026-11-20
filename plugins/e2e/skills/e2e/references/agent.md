@@ -512,7 +512,8 @@ before writing the AI trace.
   traces, and output. For a key it cannot see (one passed in code, one an
   agent reads from its own login file), call
   `registerProviderKey(name, value)` from `e2e/agent`; an executor that cuts
-  text itself calls `redactSecrets(text)` first.
+  text itself calls `redactSecrets(text)` first, and one that sends its agent
+  text of its own calls `redactProviderKeys(text)`.
 
 Reference: https://e2e.com/docs/agents
 

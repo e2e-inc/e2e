@@ -7,7 +7,7 @@
  * a caller's own prompt and vocabulary.
  */
 
-import { redactToolResult } from './redaction.ts';
+import { executorRedactors, redactToolResult } from './redaction.ts';
 import type { ModelMessage, Tool, ToolExecutionOptions, ToolSet } from 'ai';
 
 import { BUILT_IN_AGENT } from './agent-brand.ts';
@@ -88,7 +88,7 @@ export function createBuiltInAgent(options: BuiltInAgentOptions = {}): StepExecu
 function createActLoop(options: BuiltInAgentOptions): StepExecutor {
   return createToolLoopExecutor({
     ...BUILT_IN_AGENT,
-    system: rules(BASE_RULES, options.system),
+    system: (context) => rules(BASE_RULES, configSystem(context, options.system)),
     prepareMessages: (messages) => compactScreenshotHistory(compactScreenHistory(messages)),
     tools: (context, helpers) => loopTools(context, helpers, options.tools),
     buildPrompt: async (context) => {
@@ -119,7 +119,7 @@ function createActLoop(options: BuiltInAgentOptions): StepExecutor {
 function createAssertionLoop(options: BuiltInAgentOptions): StepExecutor {
   const loop = createToolLoopExecutor({
     ...BUILT_IN_AGENT,
-    system: rules(ASSERT_RULES, options.system),
+    system: (context) => rules(ASSERT_RULES, configSystem(context, options.system)),
     inconclusiveOnOverflow: true,
     tools: (context, helpers) => loopTools(context, helpers, options.tools),
     buildPrompt: async (context) =>
@@ -144,6 +144,18 @@ function withVision(context: StepExecutorContext): StepExecutorContext {
   };
   // Object.create keeps the context's lazy `model` getter unread until the loop needs it.
   return Object.create(context, { observe: { value: observe } }) as StepExecutorContext;
+}
+
+/**
+ * The agents entry's `system`, redacted with this step's own redactor: a
+ * config may write a key or a secret into it. Not the process ledger, which
+ * also holds values earlier tests learned, such as a one-time code that
+ * happens to match an order number here.
+ */
+function configSystem(context: StepExecutorContext, system: string | undefined): string | undefined {
+  if (system === undefined) return undefined;
+  const redact = executorRedactors.get(context);
+  return redact === undefined ? system : redact(system);
 }
 
 /** A loop's rules, then the agents entry's `system` when it has one. */

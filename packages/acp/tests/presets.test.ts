@@ -393,6 +393,23 @@ describe('a key only the agent is given', () => {
     expect(prompt).not.toContain(key.slice(-12));
   });
 
+  it('reaches the agent as its marker when it became known only after the executor was built', async () => {
+    const key = 'sk-test-agent-late-3f8b1d6a9e2c';
+    vi.stubEnv('OPENAI_API_KEY', undefined);
+    const log = join(mkdtempSync(join(tmpdir(), 'e2e-acp-late-')), 'agent.jsonl');
+    cleanups.push(() => rmSync(dirname(log), { recursive: true, force: true }));
+    const executor = acp({ command: process.execPath, args: [AGENT], system: `Sign in with ${key} when asked.`, env: { ACP_SCRIPT: JSON.stringify([[pass]]), ACP_LOG: log } });
+    // Set after the executor was built and core built the step: the agent's start registers it.
+    vi.stubEnv('OPENAI_API_KEY', key);
+    const ctx = stepContext();
+    (ctx.step as { instruction: string }).instruction = `type ${key} into the key field`;
+    await expect(executor.runStep(ctx)).resolves.toMatchObject({ status: 'passed' });
+    const prompt = String(readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>).find((entry) => 'prompt' in entry)?.['prompt']);
+    expect(prompt).toContain('Sign in with <secret:OPENAI_API_KEY> when asked.');
+    expect(prompt).toContain('type <secret:OPENAI_API_KEY> into the key field');
+    expect(prompt).not.toContain(key.slice(-12));
+  });
+
   it('builds an executor with no env of its own', () => {
     expect(acp({ command: process.execPath, args: [AGENT] }).name).toBe('acp');
   });

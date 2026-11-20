@@ -5,9 +5,9 @@
  * before the run sees it.
  */
 
-import { processSecrets, registerProviderKey, registerProviderKeys } from '../run/secrecy.ts';
+import { processSecrets, redactProviderKeys, registerProviderKey, registerProviderKeys } from '../run/secrecy.ts';
 
-export { registerProviderKey, registerProviderKeys };
+export { redactProviderKeys, registerProviderKey, registerProviderKeys };
 
 /**
  * `text` with every secret and provider key the process knows replaced by

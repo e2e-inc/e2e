@@ -224,8 +224,8 @@ The runner replaces every registered secret value with `<secret:name>` in:
 It also redacts a value passed as a plain string instead of a
 `secrets.get()` handle: test and `describe` titles, step labels (an
 `app.open` URL, a locator's text), a `fill`, an `agent.act` or `agent.assert`
-instruction, the strings in `agent.act` params, `agentContext`, and an
-`e2e explore` goal.
+instruction, the strings in `agent.act` params, `agentContext`, the built-in
+agent's `system`, and an `e2e explore` goal.
 
 | Rule | Detail |
 | --- | --- |

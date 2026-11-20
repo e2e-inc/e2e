@@ -12,7 +12,7 @@ import { createEngineSession } from '@e2e-dev/core/lib/engine/session';
 import { Deadline } from '@e2e-dev/core/lib/internal/time';
 import { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
 import { createFixtures } from '@e2e-dev/core/lib/run/fixtures';
-import { registerProviderKey } from '@e2e-dev/core/lib/run/secrecy';
+import { processSecrets, registerProviderKey } from '@e2e-dev/core/lib/run/secrecy';
 import { StepRecorder } from '@e2e-dev/core/lib/run/steps';
 import { WorkerModels } from '@e2e-dev/core/lib/run/worker-models';
 import { resolveConfig } from '../../src/config/resolve-run.ts';
@@ -77,6 +77,28 @@ describe('a provider key the model repeats', () => {
 
     expect(loopCalls[0]?.system).toContain('Sign in with <secret:loop.system-key> when the form asks.');
     expect(loopCalls[0]?.system).not.toContain(key.slice(-12));
+  });
+
+  it('leaves a value an earlier test learned in the system text as it is', async () => {
+    processSecrets.register('earlier.pin', 'order-5d2f8e1a7c');
+    const model = installFakeLoopModel(() => [conclude]);
+    const { fixtures } = runtime({ agents: { default: { model, system: 'Select order-5d2f8e1a7c in the list.' } } });
+
+    await fixtures.agent.act('look around');
+
+    expect(loopCalls[0]?.system).toContain('Select order-5d2f8e1a7c in the list.');
+  });
+
+  it('reaches the model as its marker in an instruction', async () => {
+    const key = 'sk-loop-instruction-8a3c6e1f4b9d2057';
+    registerProviderKey('loop.instruction-key', key);
+    const model = installFakeLoopModel(() => [conclude]);
+    const { fixtures } = runtime({ agents: { default: { model } } });
+
+    await fixtures.agent.act(`type ${key} into the key field`);
+
+    expect(loopCalls[0]?.prompt).toContain('type <secret:loop.instruction-key> into the key field');
+    expect(loopCalls[0]?.prompt).not.toContain(key.slice(-12));
   });
 
   it('is redacted from the model the step records, when the key was given as its id', async () => {

@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TargetSession } from '../../src/engine/surface.ts';
-import { redactSecrets, registerProviderKey, registerProviderKeys } from '../../src/agent/public.ts';
+import { redactProviderKeys, redactSecrets, registerProviderKey, registerProviderKeys } from '../../src/agent/public.ts';
 import {
   carriedSecrets,
   processSecrets,
@@ -248,6 +248,14 @@ describe('what an executor registers and redacts', () => {
     registerProviderKey('agent.saved-key', ` ${key}\n`);
     expect(redactSecrets(`quoted ${key}`)).toBe('quoted <secret:agent.saved-key>');
     expect(sessionLedger(newSession(), NO_SECRETS).redact(key)).toBe('<secret:agent.saved-key>');
+  });
+
+  it('redacts only provider keys with redactProviderKeys, not a value a session learned', () => {
+    const key = fakeKey();
+    registerProviderKey('agent.prompt-key', key);
+    processSecrets.register('earlier.pin', 'order-7c3e9a41b2');
+    expect(redactProviderKeys(`use ${key} for order-7c3e9a41b2`)).toBe('use <secret:agent.prompt-key> for order-7c3e9a41b2');
+    expect(redactSecrets('order-7c3e9a41b2')).toBe('<secret:earlier.pin>');
   });
 
   it('leaves a registered value shorter than 20 characters alone, and takes one of exactly 20', () => {

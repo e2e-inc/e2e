@@ -313,6 +313,18 @@ export function staticSecretLedger(secrets: ResolvedConfig['allSecrets']): Pick<
   return ledger;
 }
 
+/** The provider keys alone, with no secret of any session or config. */
+const providerKeyLedger = new SecretLedger([], besideStatic);
+
+/**
+ * `text` with every provider key the process knows replaced by its marker,
+ * and nothing else: no value a test or a session learned, which a text built
+ * outside any one test, such as a coding agent's prompt, may hold by chance.
+ */
+export function redactProviderKeys(text: string): string {
+  return providerKeyLedger.redact(text);
+}
+
 /** The output ledger of each secrets map, built once. */
 const staticOutputLedgers = new WeakMap<ResolvedConfig['allSecrets'], SecretLedger>();
 
