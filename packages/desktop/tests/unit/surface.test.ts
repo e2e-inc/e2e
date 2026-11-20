@@ -662,6 +662,16 @@ describe('DesktopSurface', () => {
     expect(fake.calls().some((call) => call.key === 'press')).toBe(false);
   });
 
+  it('reports a read that went stale after the press focused the control as possibly committed, so it is not retried and focused again', async () => {
+    const hidden = { ok: false, error: { code: 'ACTION_NOT_SUPPORTED', message: 'not exposed', details: { kind: 'window_without_accessibility_element' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
+    // The launch's read and the observation, then the read after the focus.
+    const form = renamed('macos/appkit-form', 'w-8032', 'w-mine');
+    const { surface, fake, byTestId } = await launched({ snapshot: [form, form, hidden] });
+    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Tab' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });
+    expect(fake.calls().filter((call) => call.key === 'focus')).toHaveLength(1);
+    expect(fake.calls().some((call) => call.key === 'press')).toBe(false);
+  });
+
   it('never types a missing option into an editable list as free text', async () => {
     const editable = { ok: true, data: { snapshot_id: 's5', window: { id: 'w-mine' }, tree: { role: 'window', name: 'Form', children: [{ role: 'combobox', name: 'Plan', ref_id: '@s5:e1', available_actions: ['Click', 'SetValue', 'SetFocus'] }] } } };
     const { surface, fake } = await launched({ snapshot: [editable], select: [failure('ELEMENT_NOT_FOUND', 'not_delivered')] }, { observe: false });

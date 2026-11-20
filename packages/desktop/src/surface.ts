@@ -1027,20 +1027,28 @@ export class DesktopSurface {
         const window = binding.windowId;
         if (window === undefined) throw notActionable(`node ${binding.id} was read in no window to press a key into`);
         await this.refCommand('focus', binding, operation);
-        // The key goes to the process, which hands it to its key window: with more than one window, the control's must be the one shown focused.
-        const windows = (await this.ownWindows(operation)).filter((candidate) => candidate.visible !== false);
-        const home = windows.find((candidate) => candidate.id === window);
-        if (home === undefined) throw notActionable(`the window node ${binding.id} was read in is gone`);
-        if (windows.length > 1 && home.is_focused !== true) {
-          throw notActionable(`node ${binding.id} is in a window that cannot be shown to be the app's key window, so the key could land in another window`);
+        try {
+          // The key goes to the process, which hands it to its key window: with more than one window, the control's must be the one shown focused.
+          const windows = (await this.ownWindows(operation)).filter((candidate) => candidate.visible !== false);
+          const home = windows.find((candidate) => candidate.id === window);
+          if (home === undefined) throw notActionable(`the window node ${binding.id} was read in is gone`);
+          if (windows.length > 1 && home.is_focused !== true) {
+            throw notActionable(`node ${binding.id} is in a window that cannot be shown to be the app's key window, so the key could land in another window`);
+          }
+          // Focusing can hand focus on (a dialog it opens): the key goes only when the control still holds it. A control with an identity keeps its id; a look-alike has a new id in every read, so it is found by role and place.
+          const now = await this.capture(operation, window);
+          const held = [...(now?.bindings.values() ?? [])].some(
+            (candidate) => candidate.states?.focused === true && (binding.stable ? candidate.id === binding.id : candidate.role === binding.role && sameRect(candidate.rect, binding.rect)),
+          );
+          if (!held) throw notActionable(`node ${binding.id} did not keep keyboard focus, so the key would land on another control`);
+          await this.sendKey(combo, window, `press ${action.key}`, operation);
+        } catch (cause) {
+          // The focus already moved: a retry of the whole press would focus the control a second time, which an app's focus handler sees.
+          if (cause instanceof EngineError && cause.retryable) {
+            throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `press ${action.key}: ${cause.message} (the control was already focused)`, { retryable: false, cause });
+          }
+          throw cause;
         }
-        // Focusing can hand focus on (a dialog it opens): the key goes only when the control still holds it. A control with an identity keeps its id; a look-alike has a new id in every read, so it is found by role and place.
-        const now = await this.capture(operation, window);
-        const held = [...(now?.bindings.values() ?? [])].some(
-          (candidate) => candidate.states?.focused === true && (binding.stable ? candidate.id === binding.id : candidate.role === binding.role && sameRect(candidate.rect, binding.rect)),
-        );
-        if (!held) throw notActionable(`node ${binding.id} did not keep keyboard focus, so the key would land on another control`);
-        await this.sendKey(combo, window, `press ${action.key}`, operation);
         break;
       }
       case 'selectOption':
