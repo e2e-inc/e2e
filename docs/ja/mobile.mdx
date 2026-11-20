@@ -691,8 +691,14 @@ export function hostedDevices(options: { serviceUrl: string; image: string }): D
 agent-device が直接対応するデバイスクラウドでは、独自のセッション API は不要です。
 `@e2e-dev/mobile/lease` の `agentDeviceLeases()` は、`env` の認証情報でワーカースロットごとにデーモンを起動し、
 `selectors` でリースを割り当て、実行中は維持します。解放時は、agent-device がセッション終了を確認しなければ失敗します。
-[TestMu AI](/integrations/testmu) 用の `@e2e-dev/testmu` の `testmu()` と、
-[BrowserStack](/integrations/browserstack) 用の `@e2e-dev/browserstack` の `browserstack()` がこの方式です。
+[TestMu AI](/integrations/testmu) 用の `@e2e-dev/testmu` の `testmu()`、
+[BrowserStack](/integrations/browserstack) 用の `@e2e-dev/browserstack` の `browserstack()`、
+[Revyl](/integrations/revyl) 用の `@e2e-dev/revyl` の `revyl()` がこの方式です。
+
+クラウドが agent-device のプロバイダープラグインを必要とする場合は、そのプラグインに依存し、
+`agentDevicePlugin(import.meta.resolve('@agent-device/<plugin>'))` を渡します。
+`acquire` でその `assertVersion(request.agentDeviceVersion)` を呼び出し、リースと一緒にその `prepareHome` を渡してください。
+`prepareHome` は、デーモンのホームにプラグインを登録します。
 
 ```ts title="device-cloud-provider.ts" expandable
 import type { DeviceProvider } from '@e2e-dev/mobile';

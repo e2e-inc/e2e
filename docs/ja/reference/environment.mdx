@@ -162,7 +162,7 @@ CI モードを有効にします。
 | `LT_USERNAME`, `LT_ACCESS_KEY` | `LT_USERNAME=acme` | value | `@e2e-dev/testmu` の `testmu()` がデバイスをリースする TestMu AI のユーザー名とアクセスキーです。どちらかが未設定の場合、デバイスのリースに失敗します。`@e2e-dev/testmu/web` の `testmuBrowsers()` はこれらを各ブラウザセッションの CDP URL にのみ含め、どちらかが未設定ならブラウザのリースに失敗します。[TestMu AI](/integrations/testmu) を参照してください |
 | `TESTMU_API_ENDPOINT` | `TESTMU_API_ENDPOINT=<url>` | value | `testmu()` がセッションの録画を取得する TestMu AI セッション API のベース URL です。デフォルトは `https://mobile-api.lambdatest.com/mobile-automation/api/v1` です。http(s) URL でない値や、ユーザー名またはパスワードを含む値の場合、取得は `INVALID_CONFIG` で失敗します。agent-device の TestMu AI プラグインもこの変数を読み取ります |
 | `REVYL_API_KEY` | `REVYL_API_KEY=<key>` | value | `@e2e-dev/revyl` の `revyl()` がデバイスをリースする API キーです。未設定の場合、デバイスのリースに失敗します。[Revyl](/integrations/revyl) を参照してください |
-| `REVYL_API_URL` | `REVYL_API_URL=<url>` | value | `revyl()` がデバイスをリースする Revyl のバックエンドです。デフォルトは `https://backend.revyl.ai` です。agent-device の Revyl プラグインもこの変数を読み取ります |
+| `REVYL_API_URL` | `REVYL_API_URL=<url>` | value | `revyl()` がデバイスをリースする Revyl のバックエンドです。デフォルトは `https://backend.revyl.ai` です。agent-device の Revyl プラグインがこの変数を読み取ります |
 | `E2B_API_KEY` | `E2B_API_KEY=<key>` | value | `@e2e-dev/e2b` の `e2b()` と `@e2e-dev/e2b/web` の `e2bBrowsers()` がサンドボックスを作成する API キーです。未設定の場合、リースは `INVALID_CONFIG` で失敗します。[E2B](/integrations/e2b) を参照してください |
 | `E2B_DOMAIN` | `E2B_DOMAIN=e2b.example.com` | value | プロバイダーがサンドボックスを作成する E2B ドメインです。デフォルトは `e2b.app` です。専用の E2B クラスターを使う場合に設定します |
 | `E2B_API_URL` | `E2B_API_URL=<url>` | value | プロバイダーが呼び出す E2B API の URL です。デフォルトは `https://api.<E2B_DOMAIN>` です |
