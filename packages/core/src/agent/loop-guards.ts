@@ -34,6 +34,13 @@ const MAX_CYCLE_PERIOD = 4;
 export interface LoopGuardThresholds {
   readonly repeatWarn: number;
   readonly repeatStop: number;
+  /**
+   * Identical `observe` calls in a row: reading the screen again while a save
+   * or a load is still in progress is waiting, not a loop, so it gets more
+   * room than an action. The step budget and deadline still bound it.
+   */
+  readonly observeRepeatWarn: number;
+  readonly observeRepeatStop: number;
   readonly cycleWarn: number;
   readonly cycleStop: number;
   /** Consecutive failed tool results that warn, then force the conclusion. */
@@ -45,6 +52,8 @@ export interface LoopGuardThresholds {
 export const DEFAULT_LOOP_GUARD_THRESHOLDS: LoopGuardThresholds = {
   repeatWarn: 3,
   repeatStop: 5,
+  observeRepeatWarn: 6,
+  observeRepeatStop: 10,
   cycleWarn: 2,
   cycleStop: 3,
   failureWarn: 3,
@@ -84,9 +93,11 @@ export function checkLoopGuards(
   for (let period = 1; period <= MAX_CYCLE_PERIOD; period += 1) {
     const repeats = trailingRepeats(calls, period);
     const [warnAt, stopAt] =
-      period === 1
-        ? [thresholds.repeatWarn, thresholds.repeatStop]
-        : [thresholds.cycleWarn, thresholds.cycleStop];
+      period > 1
+        ? [thresholds.cycleWarn, thresholds.cycleStop]
+        : calls[calls.length - 1]?.toolName === 'observe'
+          ? [thresholds.observeRepeatWarn, thresholds.observeRepeatStop]
+          : [thresholds.repeatWarn, thresholds.repeatStop];
     if (repeats >= stopAt) {
       return { kind: 'stop', reason: describe(calls, period, repeats) };
     }
