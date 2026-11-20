@@ -63,6 +63,12 @@ that the first press didn't commit: an error, for example. A tap that only
 closed the on-screen keyboard counts as not committed. When the model
 can't tell, it doesn't press again.
 
+The model checks a save on the screen the step is on and doesn't navigate
+away to confirm it. When an app saves without a confirmation on that
+screen, the step can end `failed`. Name the check in the step instead,
+for example "save the product, then confirm it appears in the product
+list".
+
 The loop detects repeated calls and cycles. After three failed actions in a
 row, it tells the model to change its approach. After five, it asks for a
 verdict. It also asks for a verdict when the budget or the deadline is
