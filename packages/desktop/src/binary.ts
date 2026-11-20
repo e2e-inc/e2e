@@ -8,7 +8,7 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -180,19 +180,69 @@ async function download(url: string, archive: string, digest: string, directory:
     await writeFile(path.join(staging, STAMP), digest);
     // Into place when there is no entry. A rename onto an existing entry fails, so one another run put there meanwhile is never moved aside.
     if (await rename(staging, directory).then(() => true, () => false)) return;
-    // Another run unpacked the same release meanwhile; its copy is as good as ours.
-    if (await usable(directory, digest)) return;
-    // A damaged entry is moved aside, not deleted first, so the executable is missing only between two renames.
-    const aside = `${directory}.stale-${process.pid}-${Date.now()}`;
-    await rename(directory, aside).catch(() => undefined);
-    try {
-      await rename(staging, directory);
-    } catch (cause) {
-      if (!(await usable(directory, digest))) throw cause;
-    } finally {
-      await rm(aside, { recursive: true, force: true });
-    }
+    // Replacing an entry takes the lock, so two runs that both found it damaged never move aside the copy the other just put in place.
+    await withLock(`${directory}.lock`, signal, async () => {
+      // Checked again under the lock: another run may have replaced the damaged entry meanwhile, and its copy is as good as ours.
+      if (await usable(directory, digest)) return;
+      // A damaged entry is moved aside, not deleted first, so the executable is missing only between two renames.
+      const aside = `${directory}.stale-${process.pid}-${Date.now()}`;
+      await rename(directory, aside).catch(() => undefined);
+      try {
+        await rename(staging, directory);
+      } finally {
+        await rm(aside, { recursive: true, force: true });
+      }
+    });
   } finally {
     await rm(staging, { recursive: true, force: true });
+  }
+}
+
+/** How long a cache entry's lock is waited for before the install fails. */
+const LOCK_WAIT_MS = 60_000;
+
+/** How old a lock with no owner written into it yet must be to count as left behind. */
+const LOCK_ORPHAN_MS = 10_000;
+
+/**
+ * Runs `run` holding a lock directory that every run on the machine
+ * respects. A lock whose owner process is gone, or that never got an owner
+ * and is older than `LOCK_ORPHAN_MS`, was left by a run that was killed, and
+ * is taken over.
+ */
+async function withLock(lock: string, signal: AbortSignal, run: () => Promise<void>): Promise<void> {
+  const until = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    signal.throwIfAborted();
+    try {
+      await mkdir(lock);
+      break;
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== 'EEXIST') throw cause;
+    }
+    const owner = Number((await readFile(path.join(lock, 'owner'), 'utf8').catch(() => '')).trim());
+    const left = Number.isInteger(owner) && owner > 0 ? !running(owner) : await stat(lock).then((info) => Date.now() - info.mtimeMs > LOCK_ORPHAN_MS, () => false);
+    if (left) {
+      await rm(lock, { recursive: true, force: true });
+      continue;
+    }
+    if (Date.now() >= until) throw new InfrastructureError('AGENT_DESKTOP_INSTALL_FAILED', `another run held ${lock} for ${LOCK_WAIT_MS / 1000} s; if no run is installing agent-desktop, delete it`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  try {
+    await writeFile(path.join(lock, 'owner'), String(process.pid));
+    await run();
+  } finally {
+    await rm(lock, { recursive: true, force: true });
+  }
+}
+
+/** Whether a process still runs: it answers signal 0, or exists but belongs to another user. */
+function running(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (cause) {
+    return (cause as NodeJS.ErrnoException).code === 'EPERM';
   }
 }

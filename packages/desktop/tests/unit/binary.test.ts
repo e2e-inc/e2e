@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,6 +9,18 @@ import { installPinned, pinnedExecutable } from '../../src/binary.ts';
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+/** A release archive of its own, with its digest as the pinned one for every target. */
+function release(home: string): { bytes: Buffer; digest: string; digests: Record<string, string> } {
+  const files = path.join(home, 'release');
+  mkdirSync(files);
+  for (const name of ['agent-desktop', 'agent-desktop-macos-helper']) writeFileSync(path.join(files, name), '#!/bin/sh\necho 1.3.1\n', { mode: 0o755 });
+  const archive = path.join(home, 'release.tar.gz');
+  execFileSync('tar', ['-czf', archive, '-C', files, '.']);
+  const bytes = readFileSync(archive);
+  const digest = createHash('sha256').update(bytes).digest('hex');
+  return { bytes, digest, digests: Object.fromEntries(['aarch64-apple-darwin', 'x86_64-apple-darwin', 'aarch64-unknown-linux-gnu', 'x86_64-unknown-linux-gnu'].map((target) => [target, digest])) };
+}
 
 describe('the pinned agent-desktop', () => {
   it('lives in the OS cache, never in the replay cache E2E_CACHE_DIR names', () => {
@@ -47,14 +59,7 @@ describe('the pinned agent-desktop', () => {
   it.skipIf(process.platform === 'win32')('unpacks a checked archive into the cache once, however many runs install it at the same time', async () => {
     const home = mkdtempSync(path.join(tmpdir(), 'e2e-desktop-cache-'));
     try {
-      const release = path.join(home, 'release');
-      mkdirSync(release);
-      for (const name of ['agent-desktop', 'agent-desktop-macos-helper']) writeFileSync(path.join(release, name), '#!/bin/sh\necho 1.3.1\n', { mode: 0o755 });
-      const archive = path.join(home, 'release.tar.gz');
-      execFileSync('tar', ['-czf', archive, '-C', release, '.']);
-      const bytes = readFileSync(archive);
-      const digest = createHash('sha256').update(bytes).digest('hex');
-      const digests = Object.fromEntries(['aarch64-apple-darwin', 'x86_64-apple-darwin', 'aarch64-unknown-linux-gnu', 'x86_64-unknown-linux-gnu'].map((target) => [target, digest]));
+      const { bytes, digest, digests } = release(home);
       let fetched = 0;
       vi.stubGlobal('fetch', () => {
         fetched += 1;
@@ -81,14 +86,7 @@ describe('the pinned agent-desktop', () => {
   it.skipIf(process.platform === 'win32')('replaces a damaged cache entry with a checked unpack', async () => {
     const home = mkdtempSync(path.join(tmpdir(), 'e2e-desktop-cache-'));
     try {
-      const release = path.join(home, 'release');
-      mkdirSync(release);
-      for (const name of ['agent-desktop', 'agent-desktop-macos-helper']) writeFileSync(path.join(release, name), '#!/bin/sh\necho 1.3.1\n', { mode: 0o755 });
-      const archive = path.join(home, 'release.tar.gz');
-      execFileSync('tar', ['-czf', archive, '-C', release, '.']);
-      const bytes = readFileSync(archive);
-      const digest = createHash('sha256').update(bytes).digest('hex');
-      const digests = Object.fromEntries(['aarch64-apple-darwin', 'x86_64-apple-darwin', 'aarch64-unknown-linux-gnu', 'x86_64-unknown-linux-gnu'].map((target) => [target, digest]));
+      const { bytes, digest, digests } = release(home);
       vi.stubGlobal('fetch', () => Promise.resolve(new Response(new Uint8Array(bytes))));
       const env = { HOME: home, USERPROFILE: home, XDG_CACHE_HOME: path.join(home, 'cache'), LOCALAPPDATA: path.join(home, 'local') };
       // Stamped, but its executable lost: what a cleaner that deleted one file leaves.
@@ -98,6 +96,46 @@ describe('the pinned agent-desktop', () => {
       const executable = await installPinned(env, new AbortController().signal, () => undefined, digests);
       expect(execFileSync(executable, { encoding: 'utf8' }).trim()).toBe('1.3.1');
       expect(readdirSync(path.dirname(entry))).toEqual([path.basename(entry)]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('repairs a damaged entry once when two runs repair it at the same time, and leaves no lock', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'e2e-desktop-cache-'));
+    try {
+      const { bytes, digest, digests } = release(home);
+      vi.stubGlobal('fetch', () => Promise.resolve(new Response(new Uint8Array(bytes))));
+      const env = { HOME: home, USERPROFILE: home, XDG_CACHE_HOME: path.join(home, 'cache'), LOCALAPPDATA: path.join(home, 'local') };
+      const entry = path.dirname(pinnedExecutable(env)!);
+      mkdirSync(entry, { recursive: true });
+      writeFileSync(path.join(entry, '.verified'), digest);
+      const install = () => installPinned(env, new AbortController().signal, () => undefined, digests);
+      const [first] = await Promise.all([install(), install(), install()]);
+      expect(execFileSync(first, { encoding: 'utf8' }).trim()).toBe('1.3.1');
+      expect(readdirSync(path.dirname(entry))).toEqual([path.basename(entry)]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('takes over the lock a killed run left on the cache entry', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'e2e-desktop-cache-'));
+    try {
+      const { bytes, digest, digests } = release(home);
+      vi.stubGlobal('fetch', () => Promise.resolve(new Response(new Uint8Array(bytes))));
+      const env = { HOME: home, USERPROFILE: home, XDG_CACHE_HOME: path.join(home, 'cache'), LOCALAPPDATA: path.join(home, 'local') };
+      const entry = path.dirname(pinnedExecutable(env)!);
+      mkdirSync(entry, { recursive: true });
+      writeFileSync(path.join(entry, '.verified'), digest);
+      const dead = spawnSync(process.execPath, ['-e', '']).pid;
+      mkdirSync(`${entry}.lock`);
+      writeFileSync(path.join(`${entry}.lock`, 'owner'), String(dead));
+      const started = Date.now();
+      const executable = await installPinned(env, new AbortController().signal, () => undefined, digests);
+      expect(Date.now() - started).toBeLessThan(5_000);
+      expect(execFileSync(executable, { encoding: 'utf8' }).trim()).toBe('1.3.1');
+      expect(existsSync(`${entry}.lock`)).toBe(false);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
