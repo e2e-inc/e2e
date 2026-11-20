@@ -114,6 +114,7 @@ translation moves or goes with it in the same change.
 | coding agent | कोडिंग एजेंट | m |
 | skill | स्किल | f |
 | bug bash | Bug Bash (keep in English) | m |
+| checkout (git working tree) | चेकआउट (git वर्किंग कॉपी) | m |
 | finding (explore, bug bash) | फ़ाइंडिंग (plural also फ़ाइंडिंग) | f |
 | exploration; `explore` in prose | एक्सप्लोरेशन; explore (keep in English) | m |
 | defect | दोष | m |
