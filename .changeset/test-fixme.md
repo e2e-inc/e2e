@@ -3,4 +3,11 @@
 '@e2e-dev/core': minor
 ---
 
-**Breaking:** `test.fixme` skips a test at registration or from inside its body and adds a new `skip.cause` value, `fixme`, to `report-1` reports. Update validators to the new `report-v1.schema.json` and handle `fixme` in any exhaustive skip-cause checks.
+**Breaking:** `report-1` reports can now contain the `skip.cause` value `fixme`.
+Update pinned copies of `schema/report-v1.schema.json` from this release and
+handle `fixme` in exhaustive skip-cause checks. The report's `schemaVersion`
+stays `report-1`.
+
+The new `test.fixme` API skips tests at registration or from inside their
+bodies. The report gives the reason as `fixme`, or `fixme: <reason>` when you
+give a non-blank reason.
