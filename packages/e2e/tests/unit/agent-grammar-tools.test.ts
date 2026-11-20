@@ -346,7 +346,9 @@ describe('the loop guard waits longer on the built-in observe only', () => {
     const { model, observed } = observeUntilForced();
     await expect(createBuiltInAgent().runStep({ ...context, model, observe })).resolves.toMatchObject({ status: 'failed' });
     expect(observed()).toBe(10);
-    expect(loopCalls.some((call) => call.lastPrompt.includes('issued 6 times in a row'))).toBe(true);
+    const warned = loopCalls.find((call) => call.lastPrompt.includes('issued 6 times in a row'));
+    expect(warned?.lastPrompt).toContain('Observe again only while the screen still shows the work in progress');
+    expect(warned?.lastPrompt).not.toContain('going in circles');
   });
 
   it('keeps the ordinary limit for a caller\'s own tool named observe, which may write', async () => {

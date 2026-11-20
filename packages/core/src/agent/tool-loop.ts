@@ -664,10 +664,15 @@ class LoopRun {
       } else if (guard.kind === 'warn' && guard.reason !== this.noticedGuardReason) {
         this.noticedGuardReason = guard.reason;
         this.note(`loop guard warned before turn ${String(stepNumber + 1)}: ${guard.reason}`);
+        // Repeated looks at a save or load still in progress are a wait the
+        // rules ask for, so the notice bounds the wait instead of calling it a circle.
         prepared = appendNotice(
           prepared,
-          `[SYSTEM NOTICE] You appear to be going in circles: ${guard.reason}. ` +
-            'Change approach, or call complete_step with your best verdict.',
+          guard.waiting === true
+            ? `[SYSTEM NOTICE] ${guard.reason}. Observe again only while the screen still shows the work in progress; ` +
+                'otherwise call complete_step with your best verdict.'
+            : `[SYSTEM NOTICE] You appear to be going in circles: ${guard.reason}. ` +
+                'Change approach, or call complete_step with your best verdict.',
         );
       }
     }

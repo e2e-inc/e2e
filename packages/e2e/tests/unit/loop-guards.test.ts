@@ -41,6 +41,8 @@ describe('loop guards', () => {
     const check = (count: number) => checkLoopGuards(observes(count), DEFAULT_LOOP_GUARD_THRESHOLDS, waiting).kind;
     expect(check(5)).toBe('clear');
     expect(check(6)).toBe('warn');
+    expect(checkLoopGuards(observes(6), DEFAULT_LOOP_GUARD_THRESHOLDS, waiting)).toMatchObject({ waiting: true });
+    expect(checkLoopGuards(observes(3))).not.toHaveProperty('waiting');
     expect(check(10)).toBe('stop');
     // A tool named observe that the caller did not mark keeps the ordinary thresholds.
     expect(checkLoopGuards(observes(3)).kind).toBe('warn');

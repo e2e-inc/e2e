@@ -21,7 +21,12 @@ export interface GuardToolCall {
 
 export type LoopGuardVerdict =
   | { readonly kind: 'clear' }
-  | { readonly kind: 'warn' | 'stop'; readonly reason: string };
+  | {
+      readonly kind: 'warn' | 'stop';
+      readonly reason: string;
+      /** True when the repeats are of a waiting tool (the built-in observe): a wait, not yet a circle. */
+      readonly waiting?: boolean;
+    };
 
 /** Longest cycle period the detector considers. */
 const MAX_CYCLE_PERIOD = 4;
@@ -123,17 +128,18 @@ export function checkLoopGuards(
   let warning: LoopGuardVerdict | undefined;
   for (let period = 1; period <= MAX_CYCLE_PERIOD; period += 1) {
     const repeats = trailingRepeats(calls, period);
+    const waits = period === 1 && waiting.has(calls[calls.length - 1]?.toolName ?? '');
     const [warnAt, stopAt] =
       period > 1
         ? [thresholds.cycleWarn, thresholds.cycleStop]
-        : waiting.has(calls[calls.length - 1]?.toolName ?? '')
+        : waits
           ? [thresholds.observeRepeatWarn, thresholds.observeRepeatStop]
           : [thresholds.repeatWarn, thresholds.repeatStop];
     if (repeats >= stopAt) {
       return { kind: 'stop', reason: describe(calls, period, repeats) };
     }
     if (repeats >= warnAt && warning === undefined) {
-      warning = { kind: 'warn', reason: describe(calls, period, repeats) };
+      warning = { kind: 'warn', reason: describe(calls, period, repeats), ...(waits ? { waiting: true } : {}) };
     }
   }
   return warning ?? { kind: 'clear' };
