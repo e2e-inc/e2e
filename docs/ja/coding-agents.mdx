@@ -75,8 +75,8 @@ cp -R "$repo/plugins/e2e" ~/.cursor/plugins/local/
 新しいセッションを開始してください。Cursor では **Developer: Reload Window** を実行します。
 Cursor Teams と Enterprise でローカルプラグインを使うには、管理者設定の **Allow Local Plugin Imports**
 を有効にするか、管理者が `e2e-inc/e2e` をチームのマーケットプレイスとしてインポートする必要があります。
-プラグインは `e2e`、`create-verification-skill`、`migrate-to-e2e` の各スキルと
-[MCP サーバー](/mcp-server) を追加します。npm パッケージは追加しません。
+プラグインは `e2e`、`create-verification-skill`、`migrate-to-e2e` の各スキルを追加します。npm パッケージは追加しません。
+Codex と Cursor では [MCP サーバー](/mcp-server) も追加します。Claude Code と Grok Build では、サーバーをプロジェクトに登録してください。
 後者 2 つのスキルは、Claude Code では `/e2e:<skill>`、Codex では `$e2e:<skill>`、
 Cursor では `/<skill>` で呼び出します。
 
