@@ -159,7 +159,7 @@ translation moves or goes with it in the same change.
 | redact | छिपाना | |
 | redaction (noun) | रेडैक्शन | m |
 | value | वैल्यू (not मान) | f |
-| character (in a length limit) | कैरेक्टर (not अक्षर, since the limit counts digits and symbols too) | m |
+| character (of a string) | कैरेक्टर (not अक्षर, since a string also holds digits and symbols) | m |
 | command | कमांड | f |
 | call (noun) | कॉल | f |
 | lease | लीज़ | f |

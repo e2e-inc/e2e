@@ -221,10 +221,10 @@ await agent.act('Connect Stripe with the given key', {
 | `credentials.admin.password` | `E2E_USER_ADMIN_PASSWORD` |
 | `secrets['stripe-key']` | `E2E_SECRET_STRIPE_KEY` |
 
-वेरिएबल में एंट्री का नाम अपरकेस में होता है, और `A-Z` और `0-9` के बाहर का हर
-कैरेक्टर `_` बन जाता है। जब दो एंट्री एक ही वेरिएबल पर मैप होती हैं, जैसे
-`stripe-key` और `stripe_key`, तो कॉन्फ़िग लोड `INVALID_CONFIG` के साथ फ़ेल होता
-है।
+वेरिएबल में एंट्री का नाम अपरकेस में होता है, और `A-Z` और `0-9` के बाहर का
+हर कैरेक्टर `_` बन जाता है। जब दो एंट्री एक ही वेरिएबल पर मैप होती हैं,
+जैसे `stripe-key` और `stripe_key`, तो कॉन्फ़िग लोड `INVALID_CONFIG` के साथ
+फ़ेल होता है।
 
 <CodeGroup>
 ```bash npm
