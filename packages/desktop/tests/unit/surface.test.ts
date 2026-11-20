@@ -680,6 +680,21 @@ describe('DesktopSurface', () => {
     }
   });
 
+  it.skipIf(process.platform !== 'darwin')('fails doctor on a bundle init would refuse: no bundle id, or not the target\'s', async () => {
+    const directory = artifacts();
+    const plist = (body: string) => `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>${body}</dict></plist>`;
+    for (const [name, body] of [['Anonymous.app', ''], ['Built.app', '<key>CFBundleIdentifier</key><string>dev.e2e.built</string>']] as const) {
+      mkdirSync(path.join(directory, name, 'Contents'), { recursive: true });
+      writeFileSync(path.join(directory, name, 'Contents', 'Info.plist'), plist(body));
+    }
+    const fake = fakeScenario({ status: [{ ok: true, data: { version: '1.3.1', permissions: { accessibility: { state: 'granted' }, screen_recording: { state: 'granted' } } } }] });
+    const surface = tracked(new DesktopSurface(resolveOptions({ binary: fake.binary }), 'macos'));
+    const appPath = async (app: { appPath: string; bundleId?: string }) => (await surface.doctor({ targetName: 'mac', projectRoot: directory, app, env: fake.env, headed: false, signal, log: () => undefined })).find((check) => check.id === 'app-path');
+    expect(await appPath({ appPath: 'Anonymous.app' })).toMatchObject({ status: 'fail', message: expect.stringMatching(/declares no CFBundleIdentifier/) });
+    expect(await appPath({ appPath: 'Built.app', bundleId: 'com.example.other' })).toMatchObject({ status: 'fail', message: expect.stringMatching(/is not the CFBundleIdentifier "dev.e2e.built"/) });
+    expect(await appPath({ appPath: 'Built.app', bundleId: 'dev.e2e.built' })).toMatchObject({ status: 'pass' });
+  });
+
   it.skipIf(process.platform !== 'darwin')('opens no app bundle once the operation budget is spent', async () => {
     const directory = mkdtempSync(path.join(tmpdir(), 'e2e-desktop-bundle-'));
     mkdirSync(path.join(directory, 'Built.app', 'Contents'), { recursive: true });

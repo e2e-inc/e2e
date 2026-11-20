@@ -303,16 +303,10 @@ export class DesktopSurface {
   private async resolveLaunchTarget(signal: AbortSignal): Promise<string | undefined> {
     if (this.app.appPath === undefined) return this.app.bundleId;
     const bundle = path.resolve(this.projectRoot, this.app.appPath);
-    const plist = path.join(bundle, 'Contents', 'Info.plist');
-    if (!existsSync(plist)) throw new EngineError('ENGINE_FAILURE', `app.appPath ${bundle} is not an app bundle: it has no Contents/Info.plist. Build the app first`, { retryable: false });
-    const { stdout } = await execFileAsync('plutil', ['-extract', 'CFBundleIdentifier', 'raw', '-o', '-', plist], { signal });
-    const bundleId = stdout.trim();
-    if (bundleId === '') throw new EngineError('ENGINE_FAILURE', `${plist} declares no CFBundleIdentifier`, { retryable: false });
-    if (this.app.bundleId !== undefined && this.app.bundleId !== bundleId) {
-      throw new EngineError('ENGINE_FAILURE', `app.bundleId "${this.app.bundleId}" is not the CFBundleIdentifier "${bundleId}" of app.appPath ${bundle}; the build at appPath is what app.open() launches`, { retryable: false });
-    }
+    const checked = await checkBundle(bundle, this.app.bundleId, signal);
+    if ('problem' in checked) throw new EngineError('ENGINE_FAILURE', checked.problem, { retryable: false });
     this.bundle = await realpath(bundle);
-    return bundleId;
+    return checked.bundleId;
   }
 
   async startAttempt(context: EngineAttemptContext): Promise<void> {
@@ -384,15 +378,9 @@ export class DesktopSurface {
     }
     if (info.app.appPath !== undefined) {
       const bundle = path.resolve(info.projectRoot, info.app.appPath);
-      // What init needs of the bundle: its Info.plist, which names the bundle id the launched process is found by.
-      const plist = path.join(bundle, 'Contents', 'Info.plist');
-      checks.push(
-        !existsSync(bundle)
-          ? { id: 'app-path', status: 'fail', message: `app.appPath ${bundle} does not exist; build the app or fix the path` }
-          : !existsSync(plist)
-            ? { id: 'app-path', status: 'fail', message: `app.appPath ${bundle} is not an app bundle: it has no Contents/Info.plist` }
-            : { id: 'app-path', status: 'pass', message: bundle },
-      );
+      // What init checks of the bundle, so a bundle doctor passes is one init accepts.
+      const checked = existsSync(bundle) ? await checkBundle(bundle, info.app.bundleId, info.signal) : { problem: `app.appPath ${bundle} does not exist; build the app or fix the path` };
+      checks.push('problem' in checked ? { id: 'app-path', status: 'fail', message: checked.problem } : { id: 'app-path', status: 'pass', message: bundle });
     }
     return checks;
   }
@@ -1314,6 +1302,24 @@ async function processesCarrying(token: string, signal: AbortSignal): Promise<nu
     .filter((words) => words.includes(marker))
     .map((words) => Number(words[0]))
     .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid);
+}
+
+/**
+ * What `init` needs of an `appPath` bundle: an Info.plist naming the
+ * bundle id the launched process is found by, which is the target's
+ * `bundleId` when that is set too.
+ */
+async function checkBundle(bundle: string, bundleId: string | undefined, signal: AbortSignal): Promise<{ bundleId: string } | { problem: string }> {
+  const plist = path.join(bundle, 'Contents', 'Info.plist');
+  if (!existsSync(plist)) return { problem: `app.appPath ${bundle} is not an app bundle: it has no Contents/Info.plist. Build the app first` };
+  // plutil exits with an error when the key is missing or the file is no plist.
+  const { stdout } = await execFileAsync('plutil', ['-extract', 'CFBundleIdentifier', 'raw', '-o', '-', plist], { signal }).catch(() => ({ stdout: '' }));
+  const declared = stdout.trim();
+  if (declared === '') return { problem: `${plist} declares no CFBundleIdentifier` };
+  if (bundleId !== undefined && bundleId !== declared) {
+    return { problem: `app.bundleId "${bundleId}" is not the CFBundleIdentifier "${declared}" of app.appPath ${bundle}; the build at appPath is what app.open() launches` };
+  }
+  return { bundleId: declared };
 }
 
 /** The run's environment cut to the variables the app and agent-desktop may see (`INHERITED_ENV`, and `LC_*`). */
