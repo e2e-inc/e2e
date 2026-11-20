@@ -94,6 +94,34 @@ function renamed(name: string, from: string, to: string): unknown {
   return JSON.parse(JSON.stringify(snapshotAnswer(name)).replaceAll(from, to)) as unknown;
 }
 
+/**
+ * A surface initialized for an `appPath` target: a bundle in a scratch
+ * directory, and a stand-in for macOS's `open` first on PATH. The stand-in
+ * writes its arguments to `recorded`, then runs `body` (sh), where `SPAWNED`
+ * names the file the fake lists started processes from.
+ */
+async function appPathSurface(body: string) {
+  const directory = artifacts();
+  const bundle = path.join(directory, 'Built.app');
+  mkdirSync(path.join(bundle, 'Contents'), { recursive: true });
+  writeFileSync(path.join(bundle, 'Contents', 'Info.plist'), '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>dev.e2e.built</string></dict></plist>');
+  const fake = fakeScenario({
+    status: [{ ok: true, data: { version: '1.3.1', permissions: { accessibility: { state: 'granted' } } } }],
+    'list-apps': [{ ok: true, data: { apps: [] } }, { spawnedApps: { name: 'Built', bundle_id: 'dev.e2e.built' } }],
+    'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid: SPAWNED, process_instance: 'spawned-$spawned', is_focused: true }] }],
+    snapshot: [snapshotAnswer('macos/appkit-form')],
+  });
+  fakes.push(fake);
+  const bin = path.join(directory, 'bin');
+  mkdirSync(bin);
+  const recorded = path.join(directory, 'open-args');
+  const spawnedFile = path.join(path.dirname(fake.binary), 'calls.jsonl.spawned');
+  writeFileSync(path.join(bin, 'open'), `#!/bin/sh\nSPAWNED=${JSON.stringify(spawnedFile)}\nprintf '%s\\n' "$@" > ${JSON.stringify(recorded)}\n${body}`, { mode: 0o755 });
+  const surface = tracked(new DesktopSurface(resolveOptions({ binary: fake.binary, settle: false }), 'macos'));
+  await surface.init({ runId: 'r', targetName: 'mac', projectRoot: directory, app: { appPath: 'Built.app' }, env: { ...fake.env, PATH: `${bin}:${process.env.PATH ?? ''}` }, headed: false, workerSlot: 0, signal, log: () => undefined });
+  return { surface, fake, bundle, recorded };
+}
+
 interface Launch {
   readonly snapshot?: string;
   readonly openTimeoutMs?: number;
@@ -552,40 +580,26 @@ describe('DesktopSurface', () => {
   });
 
   it.skipIf(process.platform !== 'darwin')('opens an appPath build by its path in the background, takes the copy carrying its token, and quits it', async () => {
-    const directory = mkdtempSync(path.join(tmpdir(), 'e2e-desktop-bundle-'));
-    const bundle = path.join(directory, 'Built.app');
-    mkdirSync(path.join(bundle, 'Contents'), { recursive: true });
-    writeFileSync(path.join(bundle, 'Contents', 'Info.plist'), '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>dev.e2e.built</string></dict></plist>');
-    try {
-      const fake = fakeScenario({
-        status: [{ ok: true, data: { version: '1.3.1', permissions: { accessibility: { state: 'granted' } } } }],
-        'list-apps': [{ ok: true, data: { apps: [] } }, { spawnedApps: { name: 'Built', bundle_id: 'dev.e2e.built' } }],
-        'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid: SPAWNED, process_instance: 'spawned-$spawned', is_focused: true }] }],
-        snapshot: [snapshotAnswer('macos/appkit-form')],
-      });
-      fakes.push(fake);
-      // A stand-in for macOS's `open`: it records its arguments and starts a process with the one variable `--env` names, as LaunchServices starts the app.
-      const bin = path.join(directory, 'bin');
-      mkdirSync(bin);
-      const recorded = path.join(directory, 'open-args');
-      const spawnedFile = path.join(path.dirname(fake.binary), 'calls.jsonl.spawned');
-      writeFileSync(
-        path.join(bin, 'open'),
-        `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(recorded)}\nwhile [ $# -gt 0 ]; do [ "$1" = "--env" ] && variable="$2"; shift; done\nenv "$variable" ${JSON.stringify(process.execPath)} -e 'setTimeout(() => {}, 60000)' >/dev/null 2>&1 &\necho $! >> ${JSON.stringify(spawnedFile)}\n`,
-        { mode: 0o755 },
-      );
-      const surface = tracked(new DesktopSurface(resolveOptions({ binary: fake.binary, settle: false }), 'macos'));
-      await surface.init({ runId: 'r', targetName: 'mac', projectRoot: directory, app: { appPath: 'Built.app' }, env: { ...fake.env, PATH: `${bin}:${process.env.PATH ?? ''}` }, headed: false, workerSlot: 0, signal, log: () => undefined });
-      await surface.restart(operation());
-      const args = readFileSync(recorded, 'utf8').trimEnd().split('\n');
-      expect(args).toEqual(['-g', '-n', '--env', expect.stringMatching(/^E2E_DESKTOP_LAUNCH=[\w-]+$/), realpathSync(bundle), '--args', '-ApplePersistenceIgnoreState', 'YES']);
-      const opened = fake.spawned().at(-1)!;
-      expect((await surface.observe(operation(), undefined)).root.children?.some((node) => node.testId === 'username')).toBe(true);
-      await surface.endAttempt({ signal, timeoutMs: 5_000 });
-      expect(await gone(opened)).toBe(true);
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
+    const { surface, fake, bundle, recorded } = await appPathSurface(
+      // As LaunchServices does: a process with the one variable `--env` names.
+      `while [ $# -gt 0 ]; do [ "$1" = "--env" ] && variable="$2"; shift; done\nenv "$variable" ${JSON.stringify(process.execPath)} -e 'setTimeout(() => {}, 60000)' >/dev/null 2>&1 &\necho $! >> "$SPAWNED"\n`,
+    );
+    await surface.restart(operation());
+    const args = readFileSync(recorded, 'utf8').trimEnd().split('\n');
+    expect(args).toEqual(['-g', '-n', '--env', expect.stringMatching(/^E2E_DESKTOP_LAUNCH=[\w-]+$/), realpathSync(bundle), '--args', '-ApplePersistenceIgnoreState', 'YES']);
+    const opened = fake.spawned().at(-1)!;
+    expect((await surface.observe(operation(), undefined)).root.children?.some((node) => node.testId === 'username')).toBe(true);
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect(await gone(opened)).toBe(true);
+  });
+
+  it.skipIf(process.platform !== 'darwin')('reports an open LaunchServices refused as a failure that started nothing', async () => {
+    const { surface } = await appPathSurface(`echo 'The application cannot be opened because its executable is missing.' >&2\nexit 1\n`);
+    await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringMatching(/its executable is missing\.$/) });
+    // Nothing to look for at the end of the attempt: no wait, no second error.
+    const started = Date.now();
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect(Date.now() - started).toBeLessThan(1_000);
   });
 
   it('keeps the ids of one window while another window is read', async () => {

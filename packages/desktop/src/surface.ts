@@ -85,6 +85,9 @@ const MENU_CLOSE_MS = 1_000;
 /** The cause of an input that was never sent, because the operation's budget ran out first. */
 const NOT_SENT = new Error('the operation ran out of budget before anything was sent');
 
+/** The cause of an `open` that exited with an error, or never ran: LaunchServices started nothing. */
+const NOT_STARTED = new Error('open started nothing');
+
 /** The cause of a read that found the app's windows but could read none of them. */
 const UNREADABLE = new Error('no window of the app could be read');
 
@@ -417,7 +420,7 @@ export class DesktopSurface {
     } catch (cause) {
       // A launch agent-desktop refused, or one never sent, started nothing; nor did one handed to a copy already running.
       const refused =
-        cause instanceof EngineError && ((cause.cause instanceof AgentDesktopFailure && cause.cause.notDelivered) || cause.cause === HANDED_OVER || cause.cause === NOT_SENT);
+        cause instanceof EngineError && ((cause.cause instanceof AgentDesktopFailure && cause.cause.notDelivered) || cause.cause === HANDED_OVER || cause.cause === NOT_SENT || cause.cause === NOT_STARTED);
       if (this.pid === undefined && !refused) this.pending = launch;
       throw cause;
     }
@@ -493,7 +496,14 @@ export class DesktopSurface {
     try {
       await execFileAsync('open', args, { signal: operation.signal, timeout: operation.timeoutMs, env: this.appEnv });
     } catch (cause) {
-      throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `opening ${bundle} failed: ${(cause as Error).message}`, { retryable: false, cause });
+      const failure = cause as { code?: unknown; killed?: unknown; stderr?: unknown; message: string };
+      // `open` answered that it could not open the bundle (a missing executable, a bad signature), or could not run: nothing started, so there is nothing to look for.
+      if ((typeof failure.code === 'number' && failure.killed !== true) || failure.code === 'ENOENT') {
+        const reason = typeof failure.stderr === 'string' && failure.stderr.trim() !== '' ? failure.stderr.trim() : failure.message;
+        throw new EngineError('ENGINE_FAILURE', `opening ${bundle} failed: ${reason}`, { retryable: false, cause: NOT_STARTED });
+      }
+      // Stopped by the budget or a cancellation: the app may be starting.
+      throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `opening ${bundle} did not finish: ${failure.message}`, { retryable: false, cause });
     }
     const until = Date.now() + Math.min(operation.timeoutMs, LAUNCH_READY_MS);
     try {
