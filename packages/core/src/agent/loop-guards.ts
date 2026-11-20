@@ -61,23 +61,33 @@ export const DEFAULT_LOOP_GUARD_THRESHOLDS: LoopGuardThresholds = {
   failureStop: 5,
 };
 
-/** The tool objects that only wait on the screen; see `observeRepeatWarn`. */
-const waitingTools = new WeakSet<object>();
+/** A tool as the guard sees it: only its handler matters. */
+interface GuardedTool {
+  readonly execute?: unknown;
+}
+
+/** The handlers of tools that only wait on the screen; see `observeRepeatWarn`. */
+const waitingHandlers = new WeakSet<object>();
 
 /**
  * Marks a tool as one that only reads the screen again, so identical calls
- * to it get the waiting thresholds. Only the built-in `observe` is marked: a
- * caller's own tool under the same name keeps the ordinary ones, since it
- * may write.
+ * to it get the waiting thresholds. Only the built-in `observe` is marked.
+ * The mark is on its handler, not the tool object: a caller's own tool under
+ * the same name, or the built-in tool with its `execute` replaced, may write
+ * and keeps the ordinary thresholds.
  */
-export function markWaitingTool<T extends object>(tool: T): T {
-  waitingTools.add(tool);
+export function markWaitingTool<T extends GuardedTool>(tool: T): T {
+  if (typeof tool.execute === 'function') waitingHandlers.add(tool.execute);
   return tool;
 }
 
-/** The names under which a tool set offers a tool marked with `markWaitingTool`. */
-export function waitingToolNames(tools: Readonly<Record<string, object>>): ReadonlySet<string> {
-  return new Set(Object.entries(tools).filter(([, tool]) => waitingTools.has(tool)).map(([name]) => name));
+/** The names under which a tool set offers a tool whose handler `markWaitingTool` marked. */
+export function waitingToolNames(tools: Readonly<Record<string, GuardedTool>>): ReadonlySet<string> {
+  return new Set(
+    Object.entries(tools)
+      .filter(([, tool]) => typeof tool.execute === 'function' && waitingHandlers.has(tool.execute))
+      .map(([name]) => name),
+  );
 }
 
 /**
