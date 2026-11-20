@@ -211,6 +211,32 @@ function sanitizeFilename(name: string): string {
   return name.replaceAll(/[^A-Za-z0-9._-]/g, '_').slice(0, 64) || 'artifact';
 }
 
+/** Every query kind an expression uses, in it and in the expressions it is built from. */
+function queryKinds(expression: LocatorExpression, kinds = new Set<string>()): Set<string> {
+  switch (expression.kind) {
+    case 'query':
+      kinds.add(expression.query.kind);
+      if (expression.scope !== undefined) queryKinds(expression.scope, kinds);
+      break;
+    case 'filter':
+      queryKinds(expression.source, kinds);
+      if (expression.has !== undefined) queryKinds(expression.has, kinds);
+      if (expression.hasNot !== undefined) queryKinds(expression.hasNot, kinds);
+      break;
+    case 'index':
+    case 'frame':
+      queryKinds(expression.source, kinds);
+      break;
+    case 'union':
+      queryKinds(expression.left, kinds);
+      queryKinds(expression.right, kinds);
+      break;
+    default:
+      break;
+  }
+  return kinds;
+}
+
 /** The label a select names: a bare string, or `{ label }`; a `value` is a desktop option's label too, since a native list has no other value. */
 function optionLabel(option: SelectOption): string {
   if (typeof option === 'string') return option;
@@ -903,6 +929,10 @@ export class DesktopSurface {
   }
 
   async locate(expression: LocatorExpression, context: OperationContext): Promise<readonly SemanticNode[]> {
+    // agent-desktop reports no placeholder for a macOS field, so a placeholder query would match nothing, and a negative assertion on it pass.
+    if (queryKinds(expression).has('placeholder')) {
+      throw unsupported("macOS accessibility reports no placeholder to match; a field with no label is named by its placeholder, so find it with getByRole('textbox', name) or getByLabel(name)");
+    }
     const operation = withDeadline(context);
     const screen = await this.capture(operation);
     if (screen === undefined) return [];

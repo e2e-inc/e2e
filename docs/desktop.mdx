@@ -120,8 +120,11 @@ control's name is the one macOS accessibility gives it: its title, or its
 accessibility label. A button's title is its name and its text, so
 `getByText('Sign in')` finds the button as well as any static text that
 reads the same; `getByRole('button', 'Sign in')` finds only the button.
-`getByTestId` finds the control's `AXIdentifier` (`accessibilityIdentifier`
-in AppKit, SwiftUI's `.accessibilityIdentifier`).
+`getByPlaceholder` is not supported: macOS reports no placeholder, and
+names a field with no label by its placeholder, so find that field with
+`getByRole('textbox', 'Username')`. `getByTestId` finds the control's
+`AXIdentifier` (`accessibilityIdentifier` in AppKit, SwiftUI's
+`.accessibilityIdentifier`).
 
 The `desktop` fixture lists the app's windows (`desktop.windows()`), picks
 the one `screen` reads (`desktop.useWindow(window)`), and quits the app

@@ -1091,6 +1091,17 @@ describe('DesktopSurface', () => {
     expect(fake.calls().some((call) => call.key === 'press')).toBe(false);
   });
 
+  it('refuses a placeholder query, which macOS gives nothing to match', async () => {
+    const { surface } = await launched({}, { observe: false, snapshot: 'macos/sign-in-form' });
+    const placeholder = { kind: 'query', query: { kind: 'placeholder', value: { kind: 'string', value: 'Username', exact: true } } } as const;
+    await expect(surface.locate(placeholder, operation())).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+    const textbox = { kind: 'query', query: { kind: 'role', value: { kind: 'string', value: 'textbox', exact: true } } } as const;
+    const scoped = { kind: 'filter', source: textbox, has: placeholder } as const;
+    await expect(surface.locate(scoped, operation())).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+    const named = { kind: 'query', query: { kind: 'role', value: { kind: 'string', value: 'textbox', exact: true }, name: { kind: 'string', value: 'Username', exact: true } } } as const;
+    await expect(surface.locate(named, operation())).resolves.toHaveLength(1);
+  });
+
   it('counts no matches in a window read in part, and lets the locator read again', async () => {
     const partial = snapshotAnswer('macos/appkit-form') as { ok: true; data: Record<string, unknown> };
     const cut = { ...partial, data: { ...partial.data, complete: false } };
