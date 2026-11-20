@@ -166,14 +166,23 @@ export class ScreenPresenter {
   private movedSinceSeen(observation: ExecutorObservation): string {
     if (this.seen === undefined) return '';
     const tabs = tabNote(this.seen.tabs, observation.tabs);
-    const moved = tabs?.moved !== true && this.seen.path !== observation.path;
+    const moved = tabs?.moved !== true && this.newLocation(observation.path);
     return `${tabs === undefined ? '' : `${tabs.note} `}${moved ? `${LOCATION_CHANGED}${observation.path ?? 'none'}. ` : ''}`;
+  }
+
+  /**
+   * True when the screen reports a location and it differs from the last
+   * one reported: an engine that leaves the location out of one capture has
+   * not navigated, and neither has it when the location comes back.
+   */
+  private newLocation(path: string | undefined): boolean {
+    return path !== undefined && this.seen?.path !== undefined && path !== this.seen.path;
   }
 
   /** The step's first screen, whole. */
   initial(observation: ExecutorObservation): string {
     this.shown = observation.treeUnavailable === true ? undefined : indexScreen(observation);
-    this.seen = { tabs: observation.tabs, path: observation.path };
+    this.seen = { tabs: observation.tabs, path: observation.path ?? this.seen?.path };
     return renderFull(observation);
   }
 
@@ -197,11 +206,12 @@ export class ScreenPresenter {
     if (previous === undefined) {
       const notes = this.movedSinceSeen(observation);
       this.shown = next;
-      this.seen = { tabs: next.tabs, path: next.path };
+      this.seen = { tabs: next.tabs, path: next.path ?? this.seen?.path };
       return `${lead}${notes}${renderFull(observation)}`;
     }
     this.shown = next;
-    this.seen = { tabs: next.tabs, path: next.path };
+    const located = this.newLocation(next.path);
+    this.seen = { tabs: next.tabs, path: next.path ?? this.seen?.path };
     const closed = options.keyboardNote === false || options.lead === undefined ? '' : keyboardClosedNote(previous, next);
     const tabs = tabNote(previous.tabs, next.tabs);
     // Another tab is another document: its ids say nothing about the tab the model held.
@@ -209,7 +219,7 @@ export class ScreenPresenter {
     const diff = diffScreens(previous, next);
     const changes = diff.length;
     // A new location with nothing listed changed (a save that only moved the URL) is said, not hidden.
-    const moved = changes === 0 && previous.path !== next.path;
+    const moved = changes === 0 && located;
     // A tab opened or a new location is the action's effect, so an unchanged screen blames no control.
     const expectChange = options.expectChange === true && tabs === undefined && !moved;
     if (tabs !== undefined) lead = `${lead}${tabs.note} `;

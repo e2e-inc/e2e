@@ -61,6 +61,20 @@ describe('ScreenPresenter', () => {
       expect(reportsScreenChange(moved)).toBe(true);
     });
 
+    it('does not take a capture that leaves the location out for navigation, there or back', () => {
+      const presenter = new ScreenPresenter();
+      presenter.open(screen('b1', HOME, { path: '/edit' }));
+      const without = textOf(presenter.present(screen('b2', HOME), { lead: 'Observed.' }));
+      const back = textOf(presenter.present(screen('b3', HOME, { path: '/edit' }), { lead: 'Observed.' }));
+      const noTree = textOf(presenter.present(screen('b4', ['[semantic capture unavailable]'], { treeUnavailable: true, truncated: true }), { lead: 'Observed.' }));
+      for (const text of [without, back, noTree]) {
+        expect(text).not.toContain('The location changed');
+        expect(reportsScreenChange(text)).toBe(false);
+      }
+      // A location reported again after a gap is compared with the last one known.
+      expect(textOf(presenter.present(screen('b5', HOME, { path: '/view' }), { lead: 'Observed.' }))).toContain('The location changed to /view. ');
+    });
+
     it('reports no tab or location change on the first result of a presenter that was never opened', () => {
       for (const active of [1, 2]) {
         const output = textOf(new ScreenPresenter().present(screen('b1', HOME, { tabs: { count: 2, active }, path: '/p' }), { lead: 'Tapped #n3.' }));
