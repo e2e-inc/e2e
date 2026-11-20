@@ -31,16 +31,16 @@ import { openStandaloneAttempt, type OneShotAttempt } from '../run/standalone-ki
 import type { StandaloneAttempt } from '@e2e-dev/core/lib/run/standalone-attempt';
 import { selectStandaloneTest, testLocation } from '../run/standalone-test.ts';
 import type { AgentParams } from '@e2e-dev/core/lib/types';
-import { createSessionCatalog, isGrammarVerb, type SessionCatalog } from './catalog.ts';
+import { createSessionCatalog, isGrammarVerb, type SessionCatalog } from '../session-tools/catalog.ts';
 import { appLines } from './app-lines.ts';
 import { SESSION_BOUNDS } from './bounds.ts';
 import type { EngineSession, LoadedConfig } from './config.ts';
 import type { FactoryRef } from './default-engine.ts';
-import { describeRecording, SessionRecorder } from './recording.ts';
+import { describeRecording, SessionRecorder } from '../session-tools/recording.ts';
 import { SessionRegistry } from './sessions.ts';
 import { describeTestOutcome } from './test-outcome.ts';
 import { SessionUsage, type McpSessionSummary, type SessionEndedBy } from './usage.ts';
-import { actionResult, catalogLine, defineMcpTool, describeToolDetail, errorResult, invokeTool, redacting, redactResult, textResult, type McpToolCallExtra, type McpToolResult, type McpToolSpec } from './tools.ts';
+import { actionResult, catalogLine, defineMcpTool, describeToolDetail, errorResult, invokeTool, redacting, redactResult, textResult, type McpToolCallExtra, type McpToolResult, type McpToolSpec } from '../session-tools/tools.ts';
 
 /** How long one session may live, whatever happens. */
 const SESSION_TTL_MS = 4 * 60 * 60 * 1000;

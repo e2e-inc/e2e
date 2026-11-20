@@ -51,16 +51,18 @@ const SECRET_MARKER = '<secret:';
 /** What the session hands `run_code`. */
 export interface RunCodeSession {
   /** The session's attempt: its fixtures, agent runtime, budget, and engine session. */
-  readonly attempt: StandaloneAttempt;
+  readonly attempt: Pick<StandaloneAttempt, 'agentRuntime' | 'budget' | 'session' | 'runId' | 'attemptId'> & {
+    readonly fixtures: Pick<StandaloneAttempt['fixtures'], 'app'>;
+  };
   /** The fixtures the target's engine contributes, which `run_code` names in a refusal and never runs. */
   readonly engineFixtures: readonly string[];
 }
 
 interface RunCodeOptions extends RunCodeSession {
   /** The session step, observed once the statements ran. */
-  readonly context: StepExecutorContext;
+  readonly context: Pick<StepExecutorContext, 'observe'>;
   /** The session's presenter, so the screen comes back as changes since the one the agent holds. */
-  readonly screen: ScreenPresenter;
+  readonly screen: Pick<ScreenPresenter, 'update'>;
   /** Told the source of every statement that passed and is not a read, in the order they ran, for `test_lines`. */
   readonly record?: ((passed: readonly string[]) => void) | undefined;
 }
@@ -223,7 +225,7 @@ function findsByPart(call: Call): boolean {
  * A screen over the attempt's engine session whose every read passes the
  * secret ledger, wired like the attempt's own through the same factory.
  */
-function redactingScreen(attempt: StandaloneAttempt): Screen {
+function redactingScreen(attempt: RunCodeSession['attempt']): Screen {
   const runtime = attempt.agentRuntime;
   const redaction: NodeRedaction = { redact: runtime.redact, redactCut: runtime.redactCut };
   return createScreen(
@@ -255,7 +257,7 @@ class LineRunner {
   private readonly screen: Screen;
   private readonly app: App;
 
-  constructor(private readonly attempt: StandaloneAttempt) {
+  constructor(private readonly attempt: RunCodeSession['attempt']) {
     this.screen = redactingScreen(attempt);
     this.app = attempt.fixtures.app;
   }
