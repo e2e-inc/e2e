@@ -1301,7 +1301,7 @@ describe('ListReporter', () => {
         step({ phase: 'end', kind: 'locator', api: 'app.open', label: '/', status: 'passed', durationMs: 85, modelCalls: 0 });
         const held: HeldStep = {
           kind: 'step',
-          attachId: 'p1',
+          attachId: 'k3f9',
           target: 'chromium',
           testId: 't1',
           agent: 'default',
@@ -1322,7 +1322,7 @@ describe('ListReporter', () => {
         };
         reporter.showStepPrompt({ steps: [{ step: held, number: 2 }], help: false, holdSteps: true });
         expect(shown()).toEqual([
-          '   └── orders a drink (p1)',
+          '   └── orders a drink (k3f9)',
           '       ✓ app.open "/" 85ms',
           '       ▶ step 2  locator.click "getByRole("radio", name: "Latte")"  tests/coffee.e2e.ts:7',
           '         press enter to run this step, press h to show help, press q to quit',
@@ -1361,7 +1361,7 @@ describe('ListReporter', () => {
         const held = (n: number): NumberedStep => ({
           step: {
             kind: 'step',
-            attachId: 'p1',
+            attachId: 'k3f9',
             target: 'chromium',
             testId: 't1',
             agent: 'default',
@@ -1388,7 +1388,7 @@ describe('ListReporter', () => {
       const reporter = new ListReporter({ write: (line) => lines.push(line) }, { live: false, colors: false });
       const held: HeldStep = {
         kind: 'step',
-        attachId: 'p1',
+        attachId: 'k3f9',
         target: 'chromium',
         testId: 't1',
         agent: 'default',
@@ -1403,9 +1403,9 @@ describe('ListReporter', () => {
       reporter.showStepPrompt({ steps: [{ step: held, number: 3 }, { step: { ...held, api: 'locator.click', label: 'Pay' }, number: 4 }], help: true, holdSteps: true });
       reporter.showStepPrompt(undefined);
       expect(lines).toEqual([
-        'paused (p1) at step 3 of orders a drink [chromium]: app.open "/cart" · press enter to run this step, ' +
+        'paused (k3f9) at step 3 of orders a drink [chromium]: app.open "/cart" · press enter to run this step, ' +
           'n to run this test without holding steps, a to run all without holding steps, q to quit',
-        'paused (p1) at steps 3, 4 of orders a drink [chromium]: app.open "/cart"; locator.click "Pay" · press enter to run these 2 steps, ' +
+        'paused (k3f9) at steps 3, 4 of orders a drink [chromium]: app.open "/cart"; locator.click "Pay" · press enter to run these 2 steps, ' +
           'n to run this test without holding steps, a to run all without holding steps, q to quit',
       ]);
     });
@@ -1420,7 +1420,7 @@ describe('ListReporter', () => {
         reporter.handle(testStarted('t1', 'orders a drink', 'chromium', 'tests/coffee.e2e.ts'));
         const held: HeldStep = {
           kind: 'pause',
-          attachId: 'p1',
+          attachId: 'k3f9',
           target: 'chromium',
           testId: 't1',
           agent: 'default',
@@ -1435,7 +1435,7 @@ describe('ListReporter', () => {
         const window = chunks.at(-1)!.replace(ANSI_PATTERN, '').split('\n').filter((line) => line.trim() !== '');
         const row = window.findIndex((line) => line.includes('orders a drink'));
         expect(window.slice(row, row + 3)).toEqual([
-          '   └── orders a drink (p1)',
+          '   └── orders a drink (k3f9)',
           '       ▶ paused  screen.pause()  tests/coffee.e2e.ts:9',
           '         press enter to resume, press h to show help, press q to quit',
         ]);
@@ -1456,7 +1456,7 @@ describe('ListReporter', () => {
       const reporter = new ListReporter({ write: (line) => lines.push(line) }, { live: false, colors: false });
       const held: HeldStep = {
         kind: 'pause',
-        attachId: 'p1',
+        attachId: 'k3f9',
         target: 'chromium',
         testId: 't1',
         agent: 'default',
@@ -1469,7 +1469,7 @@ describe('ListReporter', () => {
 
       reporter.showStepPrompt({ steps: [{ step: held, number: 0 }], help: false, holdSteps: false });
       expect(lines).toEqual([
-        'paused (p1) in orders a drink [chromium]: screen.pause() (tests/coffee.e2e.ts:9) · press enter to resume, q to quit',
+        'paused (k3f9) in orders a drink [chromium]: screen.pause() (tests/coffee.e2e.ts:9) · press enter to resume, q to quit',
       ]);
     });
 
@@ -1789,7 +1789,7 @@ describe('ListReporter', () => {
         }
         const held: HeldStep = {
           kind: 'pause',
-          attachId: 'p1',
+          attachId: 'k3f9',
           target: 'chromium',
           testId: 'h',
           agent: 'default',
@@ -1802,7 +1802,7 @@ describe('ListReporter', () => {
 
         reporter.showStepPrompt({ steps: [{ step: held, number: 0 }], help: false, holdSteps: false });
         const window = chunks.at(-1)!.replace(ANSI_PATTERN, '');
-        expect(window).toContain('test h (p1)');
+        expect(window).toContain('test h (k3f9)');
         expect(window).toContain('▶ paused  screen.pause()  tests/a.e2e.ts:9');
         expect(window).toContain('press enter to resume');
       } finally {

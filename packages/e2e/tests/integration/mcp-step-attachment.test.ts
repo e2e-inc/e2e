@@ -5,6 +5,7 @@ import { once } from 'node:events';
 import { existsSync, readFileSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
@@ -12,13 +13,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Report1Document } from '../../src/report/build.ts';
 import { AttachHello, AttachRequest, type AttachReply } from '../../src/run/step-attachment-wire.ts';
 import { parseLine, readSocketLines, stepAddress } from '../../src/run/step-socket.ts';
+import { printedPauseId } from '../helpers/pause-id.ts';
 import { contentsUnder, createProject, type FixtureProject } from '../helpers/run-project.ts';
 
 const CLI = fileURLToPath(new URL('../../dist/cli/bin.js', import.meta.url));
 const ENV = { ...process.env, CI: '', NO_COLOR: '1' };
 const STEP = 'await app.open("/after");';
 const PASSWORD = 'fixture-password';
-const CONFIG = `import { createFakeEngine, FAKE_APP } from '../../helpers/fake-engine.ts';
+const CREDENTIAL_PASSWORD = 'fixture-credential-password';
+const CONFIG = `import { defineTool } from 'e2e/agent';
+import { z } from 'zod';
+import { createFakeEngine, FAKE_APP } from '../../helpers/fake-engine.ts';
 
 let appLog;
 const { engine } = createFakeEngine({
@@ -38,6 +43,8 @@ const { engine } = createFakeEngine({
         }
       },
     },
+    { id: 'email', role: 'textbox', name: 'Email' },
+    { id: 'password', role: 'textbox', name: 'Password', inputPurpose: 'password' },
     { id: 'receipt', role: 'status', text: 'Receipt ${PASSWORD}' },
   ],
 });
@@ -45,6 +52,17 @@ const { engine } = createFakeEngine({
 export default {
   targets: [{ name: 'fake', platform: 'fake', engine, app: FAKE_APP }],
   secrets: { password: '${PASSWORD}' },
+  credentials: { buyer: { username: 'buyer@example.test', password: '${CREDENTIAL_PASSWORD}' } },
+  agents: {
+    default: {
+      tools: {
+        checkout_status: defineTool({
+          inputSchema: z.object({}),
+          execute: async () => 'ready',
+        }, { mutates: false }),
+      },
+    },
+  },
   workers: 1,
 };
 `;
@@ -81,17 +99,6 @@ function e2e(dir: string, ...args: string[]) {
   return result;
 }
 
-/** Reads the pause ID from the header. */
-function printedId(text: string): string {
-  const id = /^Paused \((p\d+)\) /m.exec(text)?.[1];
-
-  if (id === undefined) {
-    throw new Error(`no attachment id in output:\n${text}`);
-  }
-
-  return id;
-}
-
 /** Runs until the first explicit pause. */
 async function pause(dir: string, ...flags: string[]) {
   const child = spawn(process.execPath, [CLI, 'run', ...flags], {
@@ -108,7 +115,7 @@ async function pause(dir: string, ...flags: string[]) {
     });
   }
   await vi.waitFor(() => expect(output).toContain('Next: e2e run --step next'), { timeout: 25_000 });
-  return { id: printedId(output), exited };
+  return { id: printedPauseId(output), exited };
 }
 
 /** Opens an MCP client in the run directory with the same temp directory settings. */
@@ -140,9 +147,9 @@ async function invoke(client: Client, name: string, args: Record<string, unknown
   };
 }
 
-/** Attaches to the paused test and reads the session ID from the reply. */
-async function attach(client: Client, id: string) {
-  const reply = await invoke(client, 'open_session', { attach: id });
+/** Opens a session and reads its ID from the reply. */
+async function openSession(client: Client, args: Record<string, unknown> = {}) {
+  const reply = await invoke(client, 'open_session', args);
   expect(reply.isError, reply.text).toBe(false);
   const session = /^Session (\S+) open on target/.exec(reply.text)?.[1];
 
@@ -151,6 +158,14 @@ async function attach(client: Client, id: string) {
   }
 
   return { session, text: reply.text };
+}
+
+/** Reads the tool names from a session's catalog. */
+async function toolNames(client: Client, session: string): Promise<string[]> {
+  const reply = await invoke(client, 'tools', { session });
+  expect(reply.isError, reply.text).toBe(false);
+
+  return [...reply.text.matchAll(/^- ([\w-]+)[ {:]/gm)].flatMap((match) => match[1] ?? []);
 }
 
 afterEach(async () => {
@@ -168,7 +183,7 @@ describe('MCP attachments to held tests', { timeout: 60_000 }, () => {
     const dir = project(`await screen.pause(); ${STEP}`);
     const held = await pause(dir);
     const { client } = await mcp(dir);
-    const opened = await attach(client, held.id);
+    const opened = await openSession(client, { attach: held.id });
     expect(opened.text).toContain('Current screen');
     expect(opened.text).toContain('button "Submit"');
 
@@ -195,7 +210,7 @@ describe('MCP attachments to held tests', { timeout: 60_000 }, () => {
     const dir = project('await screen.pause();');
     const held = await pause(dir);
     const { client } = await mcp(dir);
-    const opened = await attach(client, held.id);
+    const opened = await openSession(client, { attach: held.id });
     const observed = await invoke(client, 'call', { tool: 'observe' });
     const located = await invoke(client, 'call', { tool: 'locate', args: { role: 'status' } });
     const failed = await invoke(client, 'call', { tool: PASSWORD });
@@ -214,15 +229,14 @@ describe('MCP attachments to held tests', { timeout: 60_000 }, () => {
     const dir = project(`await app.open("/review"); ${STEP}`);
     const first = e2e(dir, 'run', '--step');
     expect(first.status).toBe(0);
-    expect(first.stdout).toContain('Paused (p1) before step 2');
+    const id = printedPauseId(first.stdout);
+    expect(first.stdout).toContain(`Paused (${id}) before step 2`);
     const { client } = await mcp(dir);
-    const id = printedId(first.stdout);
-    const opened = await attach(client, id);
+    const opened = await openSession(client, { attach: id });
 
     const next = e2e(dir, 'run', '--step', 'next');
     expect(next.status).toBe(0);
-    expect(next.stdout).toContain('Paused (p1) before step 3');
-    expect(printedId(next.stdout)).toBe(id);
+    expect(next.stdout).toContain(`Paused (${id}) before step 3`);
     await vi.waitFor(async () => {
       const later = await invoke(client, 'call', { session: opened.session, tool: 'observe' });
       expect(later.isError).toBe(true);
@@ -235,7 +249,8 @@ describe('MCP attachments to held tests', { timeout: 60_000 }, () => {
     const dir = project('await screen.pause();');
     const held = await pause(dir);
     const { client } = await mcp(dir);
-    const reply = await invoke(client, 'open_session', { attach: 'p999' });
+    const unknown = `${held.id.startsWith('a') ? 'b' : 'a'}${held.id.slice(1)}`;
+    const reply = await invoke(client, 'open_session', { attach: unknown });
     expect(reply.isError).toBe(true);
     expect(reply.text).toContain('Held tests:');
     expect(reply.text).toContain(`${held.id}  completes checkout [fake]`);
@@ -244,7 +259,7 @@ describe('MCP attachments to held tests', { timeout: 60_000 }, () => {
   it('explains how to hold a test when no run listens in this directory', async () => {
     const dir = project(STEP);
     const { client } = await mcp(dir);
-    const reply = await invoke(client, 'open_session', { attach: 'p1' });
+    const reply = await invoke(client, 'open_session', { attach: 'unmatched' });
     expect(reply.isError).toBe(true);
     expect(reply.text).toContain('No test in this directory is held');
     expect(reply.text).toContain('screen.pause()');
@@ -263,7 +278,7 @@ describe('MCP attachments to held tests', { timeout: 60_000 }, () => {
     };
 
     for (const [field, value] of Object.entries(excluded)) {
-      const reply = await invoke(client, 'open_session', { attach: 'p1', [field]: value });
+      const reply = await invoke(client, 'open_session', { attach: 'unmatched', [field]: value });
       expect(reply.isError).toBe(true);
       expect(reply.text).toContain(`INVALID_ARGUMENT: open_session: attach cannot be combined with ${field}`);
     }
@@ -273,9 +288,9 @@ describe('MCP attachments to held tests', { timeout: 60_000 }, () => {
     const dir = project(`await screen.pause(); ${STEP}`);
     const held = await pause(dir);
     const { client } = await mcp(dir);
-    const first = await attach(client, held.id);
+    const first = await openSession(client, { attach: held.id });
     expect((await invoke(client, 'close_session', { session: first.session })).isError).toBe(false);
-    const second = await attach(client, held.id);
+    const second = await openSession(client, { attach: held.id });
     expect(second.session).not.toBe(first.session);
     expect(second.text).toContain('path /checkout');
   });
@@ -298,7 +313,15 @@ describe('MCP attachments to held tests', { timeout: 60_000 }, () => {
           case 'attach': {
             const reply: AttachReply = {
               type: 'opening',
-              opening: { target: 'fake', summary: '', catalog: [], observation: '' },
+              opening: {
+                target: 'fake',
+                platform: 'fake',
+                headed: false,
+                projectTools: [],
+                summary: '',
+                catalog: [],
+                observation: '',
+              },
             };
             socket.write(`${JSON.stringify(reply)}\n`);
             return true;
@@ -323,7 +346,7 @@ describe('MCP attachments to held tests', { timeout: 60_000 }, () => {
       await listening;
 
       const { client } = await mcp(dir);
-      const { session } = await attach(client, 'p1');
+      const { session } = await openSession(client, { attach: 'fixture' });
       const closed = await invoke(client, 'close_session', { session });
       expect(closed.isError, closed.text).toBe(false);
       expect(closed.text).toContain(`Session ${session} closed`);
@@ -344,7 +367,7 @@ ${CONFIG.replace('  video: true,', `  video: true,
   },`)}`);
     const held = await pause(dir);
     const { client } = await mcp(dir);
-    const { session, text } = await attach(client, held.id);
+    const { session, text } = await openSession(client, { attach: held.id });
     const target = /^[ \t]*#(\S+) button "Submit"/m.exec(text)?.[1];
 
     if (target === undefined) {
@@ -375,7 +398,7 @@ ${CONFIG.replace('  video: true,', `  video: true,
     const dir = project(`await screen.pause(); ${STEP}`);
     const held = await pause(dir);
     const first = await mcp(dir);
-    await attach(first.client, held.id);
+    await openSession(first.client, { attach: held.id });
     const pid = first.transport.pid;
 
     if (pid === null) {
@@ -385,7 +408,7 @@ ${CONFIG.replace('  video: true,', `  video: true,
     process.kill(pid, 'SIGKILL');
 
     const { client } = await mcp(dir);
-    const reopened = await vi.waitFor(() => attach(client, held.id), { timeout: 5_000 });
+    const reopened = await vi.waitFor(() => openSession(client, { attach: held.id }), { timeout: 5_000 });
     expect(reopened.text).toContain('path /checkout');
   });
 
@@ -393,7 +416,7 @@ ${CONFIG.replace('  video: true,', `  video: true,
     const dir = project(`await screen.pause(); ${STEP}`);
     const held = await pause(dir, '--trace', 'on');
     const { client } = await mcp(dir);
-    await attach(client, held.id);
+    await openSession(client, { attach: held.id });
     const navigated = await invoke(client, 'call', { tool: 'navigate', args: { url: '/attached-only' } });
     expect(navigated.isError, navigated.text).toBe(false);
     expect(navigated.text).toContain('/attached-only');
@@ -412,27 +435,119 @@ ${CONFIG.replace('  video: true,', `  video: true,
     expect(pages[0]?.[1]).not.toContain('/attached-only');
   });
 
-  it('keeps test code, recording and secret fills out of the attached catalog', async () => {
+  it('offers the normal session tools for the same target while preserving the test video', async () => {
+    const dir = project('await screen.pause();');
+    const { client } = await mcp(dir);
+    const normal = await openSession(client);
+    const normalTools = await toolNames(client, normal.session);
+    expect(normalTools).toEqual(expect.arrayContaining(['checkout_status', 'start_recording', 'stop_recording']));
+    expect((await invoke(client, 'close_session', { session: normal.session })).isError).toBe(false);
+
+    const held = await pause(dir, '--video', 'on');
+    const attached = await openSession(client, { attach: held.id });
+    const attachedTools = await toolNames(client, attached.session);
+    // The engine contract exposes one recorder per session, already used by the run's video.
+    const recordingTools = new Set(['start_recording', 'stop_recording']);
+    expect(attachedTools.toSorted()).toEqual(normalTools.filter((name) => !recordingTools.has(name)).toSorted());
+    expect((await invoke(client, 'call', { tool: 'checkout_status' })).text).toBe('ready');
+
+    expect(e2e(dir, 'run', '--step', 'next').status).toBe(0);
+    expect(await held.exited).toBe(0);
+    expect(contentsUnder(path.join(dir, '.e2e/results')).map(([file]) => file)).toEqual(
+      expect.arrayContaining([expect.stringMatching(/fake\.webm$/)]),
+    );
+  });
+
+  it('runs test statements under the call timeout and leaves them out of the report', async () => {
+    const dir = project(`test.setTimeout(750); await screen.pause(); ${STEP}`);
+    const held = await pause(dir);
+    await sleep(750);
+    const { client } = await mcp(dir);
+    await openSession(client, { attach: held.id });
+
+    const ran = await invoke(client, 'call', {
+      tool: 'run_code',
+      args: {
+        code: 'await app.open("/from-code"); await screen.getByRole("button", "Submit").tap();',
+        timeout: 500,
+      },
+    });
+    expect(ran.isError, ran.text).toBe(false);
+    expect(ran.text).toContain('All 2 statements passed.');
+    expect(ran.text).toContain('Submitted');
+    expect((await invoke(client, 'call', { tool: 'test_lines' })).text).toContain('await app.open("/from-code");');
+
+    const missed = await invoke(client, 'call', {
+      tool: 'run_code',
+      args: { code: 'await screen.getByRole("button", "Missing").tap();', timeout: 50 },
+    });
+    expect(missed.isError, missed.text).toBe(true);
+    expect(missed.text).toContain('Each statement waited at most 50 ms.');
+    expect(missed.text).toContain('LOCATOR_NOT_FOUND');
+
+    expect(e2e(dir, 'run', '--step', 'next').status).toBe(0);
+    expect(await held.exited).toBe(0);
+    const report = readFileSync(path.join(dir, '.e2e/report.json'), 'utf8');
+    expect(report).toContain('/after');
+    expect(report).not.toContain('/from-code');
+    expect(report).not.toContain('Missing');
+  });
+
+  it('fills configured secrets only into authorized fields and redacts their values', async () => {
     const dir = project('await screen.pause();');
     const held = await pause(dir);
     const { client } = await mcp(dir);
-    await attach(client, held.id);
-    const { text } = await invoke(client, 'tools');
-    for (const tool of ['run_code', 'start_recording', 'stop_recording', 'type_secret']) {
-      expect(text).not.toContain(`- ${tool}`);
-      const reply = await invoke(client, 'call', { tool });
-      expect(reply.isError).toBe(true);
-      expect(reply.text).toContain(tool === 'type_secret' ? 'POLICY_DENIED' : 'UNKNOWN_TOOL');
-    }
-    const screenshot = await invoke(client, 'tools', { tool: 'screenshot' });
-    expect(screenshot.isError).toBe(false);
-    expect(screenshot.text).not.toContain('"path"');
+    const opened = await openSession(client, { attach: held.id });
+    expect(opened.text).toContain('"buyer" (username "buyer@example.test", password secret "buyer.password")');
+    expect(opened.text).toContain('Secrets: "password"');
+    const email = /^[ \t]*#(\S+) textbox "Email"/m.exec(opened.text)?.[1];
 
-    const screenshotWithPath = await invoke(client, 'call', { tool: 'screenshot', args: { path: 'shot.png' } });
-    expect(screenshotWithPath.isError).toBe(true);
-    expect(screenshotWithPath.text).toContain('INVALID_ARGUMENT');
-    expect(screenshotWithPath.text).toContain('"path"');
-    expect(screenshotWithPath.text).toContain('An attached session returns the image without saving a file.');
+    if (email === undefined) {
+      throw new Error(opened.text);
+    }
+
+    const denied = await invoke(client, 'call', { tool: 'type_secret', args: { target: email, name: 'buyer.password' } });
+    expect(denied.isError).toBe(true);
+    expect(denied.text).toContain('POLICY_DENIED');
+
+    const filled = await invoke(client, 'call', { tool: 'type_secret', args: { target: email, name: 'password' } });
+    expect(filled.isError, filled.text).toBe(false);
+    expect(filled.text).toContain('Filled secret "password"');
+    const observed = await invoke(client, 'call', { tool: 'observe' });
+    expect(observed.text).toMatch(/textbox "Email".*<secret:password>/);
+    const password = /^[ \t]*#(\S+) textbox "Password"/m.exec(observed.text)?.[1];
+
+    if (password === undefined) {
+      throw new Error(observed.text);
+    }
+
+    const entered = await invoke(client, 'call', { tool: 'type_secret', args: { target: password, name: 'buyer.password' } });
+    expect(entered.isError, entered.text).toBe(false);
+    const lines = await invoke(client, 'call', { tool: 'test_lines' });
+    expect(lines.text).toContain('credentials.user("buyer").password');
+
+    for (const text of [opened.text, denied.text, filled.text, observed.text, entered.text, lines.text]) {
+      expect(text).not.toContain(PASSWORD);
+      expect(text).not.toContain(CREDENTIAL_PASSWORD);
+    }
+  });
+
+  it('saves a masked attached screenshot to the requested project path', async () => {
+    const dir = project('await screen.pause();');
+    const held = await pause(dir);
+    const { client } = await mcp(dir);
+    await openSession(client, { attach: held.id });
+    const screenshot = await invoke(client, 'tools', { tool: 'screenshot' });
+    expect(screenshot.text).toContain('"path"');
+
+    const saved = await invoke(client, 'call', { tool: 'screenshot', args: { path: 'shots/checkout.png' } });
+    const file = path.join(dir, 'shots/checkout.png');
+    expect(saved.isError, saved.text).toBe(false);
+    expect(saved.text).toContain(`Saved to ${file}`);
+    expect(readFileSync(file).subarray(1, 4).toString()).toBe('PNG');
+    expect(contentsUnder(path.join(dir, '.e2e/results')).map(([name]) => name)).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/screenshots\/fake\.png$/)]),
+    );
   });
 
   it('names both e2e versions when attachment protocols differ', async () => {

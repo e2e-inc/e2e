@@ -34,6 +34,10 @@ export const AttachReply = z.discriminatedUnion('type', [
     type: z.literal('opening'),
     opening: z.object({
       target: z.string(),
+      platform: z.string(),
+      engine: z.object({ name: z.string(), version: z.string() }).optional(),
+      headed: z.boolean(),
+      projectTools: z.array(z.string()).readonly(),
       summary: z.string(),
       catalog: z.array(z.string()).readonly(),
       observation: z.string(),
@@ -43,6 +47,7 @@ export const AttachReply = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('result'),
     requestId,
+    errorCode: z.string().optional(),
     result: z.object({
       content: z.array(z.discriminatedUnion('type', [
         z.object({ type: z.literal('text'), text: z.string() }),
@@ -67,6 +72,8 @@ export type AttachReply = z.infer<typeof AttachReply>;
 
 type AttachmentResult = Omit<Extract<AttachReply, { type: 'result' }>['result'], 'isError'> & {
   readonly isError?: boolean;
+  /** The runner code of a failed call, when the worker reported one. */
+  readonly errorCode?: string;
 };
 
 /** The summary, catalog, and first screen for a new attachment. */

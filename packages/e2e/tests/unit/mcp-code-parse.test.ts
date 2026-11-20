@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { parseCode, type Statement } from '../../src/mcp/code-parse.ts';
+import { parseCode, type Statement } from '../../src/session-tools/code-parse.ts';
 
 /** A target whose engine contributes a `browser` fixture, as the web engine's does. */
 const WEB = { fixtures: ['browser'] } as const;

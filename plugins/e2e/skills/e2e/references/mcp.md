@@ -240,13 +240,14 @@ Resources: `e2e://guide` and `e2e://guide/<topic>` hold this skill.
 
 ## Attaching to a held test
 
-Pass only `attach` to `open_session`. For a header like `Paused (p1)`, use
-`open_session {attach: "p1"}`. Run MCP from the test run's directory with the
-same e2e version. Use `tools` and `call` to inspect or drive the app. While
-attached, you can't use `run_code`, recording tools, or `type_secret`. Use
-`screenshot` to get an image without saving a file. Use `close_session` to
-detach and leave the test held. Press Enter or run `npx e2e run --step next`
-to resume the test and end the attachment.
+Pass only `attach` to `open_session`, using the four-character ID from
+the pause header. For `Paused (k3f9)`, call `open_session {attach: "k3f9"}`.
+Run MCP from the test run's directory with the same e2e version. Use the
+target's normal tools to inspect and drive the app. To record the app
+while attached, start the run with `--video`.
+
+Use `close_session` to detach and leave the test held. Press Enter or run
+`npx e2e run --step next` to resume the test and end the attachment.
 
 ## Fixing a failing test
 

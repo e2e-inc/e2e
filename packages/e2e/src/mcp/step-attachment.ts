@@ -11,7 +11,6 @@ import {
   NO_HELD_TEST,
 } from '../run/step-attachment-wire.ts';
 import { parseLine, readSocketLines, stepAddress } from '../run/step-socket.ts';
-import type { McpToolResult } from './tools.ts';
 
 const DETACH_TIMEOUT_MS = 5_000;
 
@@ -117,7 +116,7 @@ class AttachmentClient {
   }
 
   /** Drives the held test via the runner and returns the worker's MCP result. */
-  async call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<McpToolResult> {
+  async call(name: string, args: Record<string, unknown>, signal?: AbortSignal): ReturnType<HeldTestAttachment['call']> {
     const reply = await this.request({ type: 'call', requestId: uuidv7(), name, args }, signal);
 
     if (reply.type !== 'result') {
@@ -125,7 +124,11 @@ class AttachmentClient {
     }
 
     const { content, isError } = reply.result;
-    return { content, ...(isError === undefined ? {} : { isError }) };
+    return {
+      content,
+      ...(isError === undefined ? {} : { isError }),
+      ...(reply.errorCode === undefined ? {} : { errorCode: reply.errorCode }),
+    };
   }
 
   /** Waits for detach to finish so an immediate reattach can claim the attempt. */

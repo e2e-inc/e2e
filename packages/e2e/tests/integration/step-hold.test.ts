@@ -14,6 +14,7 @@ import type { HeldTestAttachment } from '../../src/run/step-attachment-wire.ts';
 import type { BeforeStep, HeldStep, StepHoldContext } from '../../src/run/step-hold.ts';
 import { createFakeEngine, FAKE_APP } from '../helpers/fake-engine.ts';
 import { gate } from '../helpers/gate.ts';
+import { printedPauseId } from '../helpers/pause-id.ts';
 import {
   contentsUnder,
   createProject,
@@ -220,7 +221,7 @@ describe('reading the held screen', () => {
     expect(screens).toEqual([expect.stringContaining('button "Submit"')]);
   }, 60_000);
 
-  it('shows each paused test with its own screen when three workers pause', async () => {
+  it('shows distinct pause IDs and the screen of each paused worker', async () => {
     const stepGate = new StepGate(() => {}, { holdSteps: false });
     const names = ['alpha', 'beta', 'gamma'];
     const prompts: Promise<string>[] = [];
@@ -266,9 +267,9 @@ export default { targets: [{ name: 'fake', platform: 'fake', engine, app: FAKE_A
       expect(outcome.exitCode).toBe(0);
       const shown = await Promise.all(prompts);
       expect(shown).toHaveLength(3);
+      expect(new Set(shown.map(printedPauseId)).size).toBe(3);
       for (const name of names) {
         const prompt = shown.find((text) => text.includes(` in ${name} is paused [fake]:`));
-        expect(prompt).toMatch(/^Paused \(p\d+\) in /);
         expect(prompt).toContain(`Screen:\n  ${FAKE_APP.url}/${name}\n`);
       }
     } finally {
@@ -752,7 +753,7 @@ describe('hold.ask ending a hold', () => {
               ask: async (step, { show }) => {
                 show({ steps: [{ step, number: 1 }], help: false, holdSteps: true });
                 await sleep(200);
-                shownWhileHeld = stderr.some((text) => text.startsWith('paused (p1) at step 1 of waits'));
+                shownWhileHeld = stderr.some((text) => text.startsWith(`paused (${step.attachId}) at step 1 of waits`));
                 show(undefined);
               },
             },

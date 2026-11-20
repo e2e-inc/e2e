@@ -15,7 +15,7 @@ import type { DebugSnapshot } from '@e2e-dev/core/lib/internal/debug';
 import type { SerializedError } from '@e2e-dev/core/lib/internal/errors';
 import type { AttemptRecord, ResultRecord, RunError, SerialAttemptRecord, SerialGroupRecord, SerialMemberRecord, WireResultRecord } from '@e2e-dev/core/lib/run/records';
 import type { SerialAttemptStart } from '../serial.ts';
-import type { McpToolResult } from '../../mcp/tools.ts';
+import type { McpToolResult } from '../../session-tools/tools.ts';
 import type { HeldTestOpening } from '../step-attachment-wire.ts';
 import type { StepHold } from '../step-hold.ts';
 import type { StepProgress } from '@e2e-dev/core/lib/run/steps';
@@ -321,7 +321,7 @@ export interface ScreenReplyMessage {
 export type StepAttachmentResponse =
   | { readonly kind: 'attach'; readonly opening: HeldTestOpening }
   | { readonly kind: 'detail'; readonly text: string }
-  | { readonly kind: 'call'; readonly result: McpToolResult }
+  | { readonly kind: 'call'; readonly result: McpToolResult; readonly errorCode: string | undefined }
   | { readonly kind: 'detach' }
   | { readonly kind: 'error'; readonly error: Pick<SerializedError, 'category' | 'code' | 'message'> };
 

@@ -1,19 +1,22 @@
 import { GRAMMAR_TOOL_NAMES } from '@e2e-dev/core/lib/agent/action-names';
-import { ActionDispatcher } from '@e2e-dev/core/lib/agent/action-dispatcher';
+import { validateParams } from '@e2e-dev/core/lib/agent/act-validation';
 import { loadAiSdkIfInstalled } from '@e2e-dev/core/lib/agent/ai-sdk';
 import type { StepExecutorContext } from '@e2e-dev/core/lib/agent/executor';
 import type { AgentContext } from '@e2e-dev/core/lib/agent/invocation';
-import { ObservationFeed } from '@e2e-dev/core/lib/agent/observation-feed';
 import { OperationQueue } from '@e2e-dev/core/lib/agent/operation-queue';
 import { executorRedactors } from '@e2e-dev/core/lib/agent/redaction';
 import { ScreenPresenter } from '@e2e-dev/core/lib/agent/screen-update';
-import { StepAccounting } from '@e2e-dev/core/lib/agent/step-accounting';
+import { createStepExecution } from '@e2e-dev/core/lib/agent/step-execution';
+import type { ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
 import { classifyError, ConfigurationError, errorMessage } from '@e2e-dev/core/lib/internal/errors';
 import { abortError, cancelledError, Deadline, withAbort } from '@e2e-dev/core/lib/internal/time';
 import { LocatorEngine } from '@e2e-dev/core/lib/locator/engine';
+import { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
+import { createApp } from '@e2e-dev/core/lib/run/fixtures';
 import { StepRecorder } from '@e2e-dev/core/lib/run/steps';
-import type { SessionCatalog } from '../../mcp/catalog.ts';
-import { actionResult, catalogLine, describeToolDetail, errorResult, invokeTool, redactResult } from '../../mcp/tools.ts';
+import type { SessionCatalog } from '../../session-tools/catalog.ts';
+import { actionResult, catalogLine, describeToolDetail, errorResult, invokeTool, redactResult, unavailableSessionTool } from '../../session-tools/tools.ts';
+import { sessionFills, sessionSecretLines, sessionSecretParams } from '../../session-tools/secrets.ts';
 import { heldTestToolCallScope } from './held-test-tool-scope.ts';
 import type { StepAttachmentRequest, StepAttachmentResponse, StepHoldMessage } from './protocol.ts';
 
@@ -34,7 +37,8 @@ export class HeldTestTools {
   constructor(
     private readonly runtime: AgentContext,
     private readonly runId: string,
-    private readonly agent: string,
+    private readonly target: ResolvedTarget,
+    private readonly headed: boolean,
   ) {}
 
   /** The ID of the attempt running in this worker. */
@@ -94,28 +98,26 @@ export class HeldTestTools {
           const { attachment, catalog } = this.catalogFor(request.attachmentId);
 
           try {
-            if (request.name === 'screenshot' && Object.hasOwn(request.args, 'path')) {
-              throw new ConfigurationError(
-                'INVALID_ARGUMENT',
-                'Unsupported "path" argument for screenshot. An attached session returns the image without saving a file.',
-              );
-            }
+            return await this.run(requestId, attachment, async (signal) => {
+              const result = await invokeTool(request.name, this.tool(catalog, request.name), request.args, { signal });
+              const output = GRAMMAR_TOOL_NAMES.has(request.name) ? actionResult(request.name, result) : result;
+              const errorCode = heldTestToolCallScope.getStore()?.errorCode;
 
-            const result = await this.run(requestId, attachment, (signal) =>
-              invokeTool(request.name, this.tool(catalog, request.name), request.args, { signal }),
-            );
-            const output = GRAMMAR_TOOL_NAMES.has(request.name) ? actionResult(request.name, result) : result;
-
-            return { kind: 'call', result: redactResult(output, redact) };
+              return { kind: 'call', result: redactResult(output, redact), errorCode };
+            });
           } catch (cause) {
-            return { kind: 'call', result: redactResult(errorResult(cause), redact) };
+            return {
+              kind: 'call',
+              result: redactResult(errorResult(cause), redact),
+              errorCode: redact(classifyError(cause).code),
+            };
           }
         }
       }
     } catch (cause) {
       const { category, code, message } = classifyError(cause);
 
-      return { kind: 'error', error: { category, code, message: redact(message) } };
+      return { kind: 'error', error: { category, code: redact(code), message: redact(message) } };
     }
   }
 
@@ -157,12 +159,23 @@ export class HeldTestTools {
       });
 
       const title = attempt.titlePath.join(' › ');
-      const summary = `Attached to ${attachId}, "${title}" on target "${target.name}".`;
+      const summary = [
+        `Attached to ${attachId}, "${title}" on target "${target.name}".`,
+        ...sessionSecretLines(this.runtime.config),
+      ].join('\n');
+      const engine = this.target.engine;
 
       return {
         kind: 'attach',
         opening: {
           target: redact(target.name),
+          platform: redact(target.platform),
+          engine: engine === undefined ? undefined : {
+            name: redact(engine.name),
+            version: redact(engine.version),
+          },
+          headed: this.headed,
+          projectTools: [...catalog.project].map(redact),
           summary: redact(summary),
           catalog: Object.entries(catalog.tools).map(([name, tool]) =>
             catalogLine(name, tool, catalog.readOnly.has(name), redact),
@@ -215,14 +228,7 @@ export class HeldTestTools {
       return tool;
     }
 
-    if (name === 'type_secret') {
-      throw new ConfigurationError(
-        'POLICY_DENIED',
-        "type_secret requires secrets in step parameters. Attachments don't have step parameters.",
-      );
-    }
-
-    throw new ConfigurationError('UNKNOWN_TOOL', `tool "${name}" is not available in this attachment`);
+    throw unavailableSessionTool(this.runtime.target.name, catalog, name);
   }
 
   /** Runs one call at a time and releases its queue slot as soon as it is cancelled. */
@@ -233,7 +239,11 @@ export class HeldTestTools {
 
     try {
       return await attachment.queue.run(async () => {
-        const call = { signal, running: true };
+        const call = {
+          signal,
+          running: true,
+          errorCode: undefined,
+        };
         attachment.running = true;
 
         try {
@@ -251,7 +261,7 @@ export class HeldTestTools {
   /** Builds the reusable grammar and observation context without opening a recorded step. */
   private async createCatalog(callSignal: AbortSignal, signal: AbortSignal, screen: ScreenPresenter): Promise<SessionCatalog> {
     const [{ createSessionCatalog }] = await Promise.all([
-      import('../../mcp/catalog.ts'),
+      import('../../session-tools/catalog.ts'),
       loadAiSdkIfInstalled(),
     ]);
 
@@ -268,48 +278,34 @@ export class HeldTestTools {
     };
 
     const session = this.runtime.engine.session;
-    const engine = new LocatorEngine({
-      session,
-      budget,
-      redact,
-      runId: this.runId,
-      attemptId: this.attemptId,
-      actionTimeout: config.actionTimeout,
-      assertionTimeout: config.assertionTimeout,
-    });
-
-    // The tools need a recorder. Use an empty one to keep their activity out of the test report.
-    const runtime: AgentContext = {
+    const engine = this.locator(budget);
+    const { debug: _debug, ...runtime } = {
       ...this.runtime,
       engine,
-      steps: new StepRecorder(this.attemptId),
+      steps: new StepRecorder(this.attemptId, { redact }),
     };
-    const { debug: _debug, ...unrecorded } = runtime;
-
-    const accounting = new StepAccounting(unrecorded, {
-      api: 'attachment',
-      timeoutMs: 0,
-      maxActions: Number.POSITIVE_INFINITY,
-      maxModelCalls: 0,
-      contextBytes: 0,
-      callSignal: () => budget.signal,
-    });
-
-    const queue = new OperationQueue();
-    const agent = config.agents.get(this.agent) ?? config.agent;
-
-    const feed = new ObservationFeed(unrecorded, accounting, queue, {
-      pixelsAllowed: true,
-      maxObservationBytes: agent.maxObservationBytes,
-      maxInputTokens: agent.maxInputTokens,
-      instructionBytes: 0,
-    });
-
-    const dispatcher = new ActionDispatcher(unrecorded, accounting, feed, queue, {
-      instruction: '',
-      params: undefined,
-      secrets: new Map(),
-      trace: () => undefined,
+    const agent = config.agent;
+    const { projected, secrets } = validateParams(sessionSecretParams(config), 'session');
+    const { accounting, bindings } = createStepExecution(runtime, {
+      accounting: {
+        api: 'attachment',
+        timeoutMs: 0,
+        maxActions: Number.POSITIVE_INFINITY,
+        maxModelCalls: 0,
+        contextBytes: 0,
+        callSignal: () => budget.signal,
+      },
+      observation: {
+        pixelsAllowed: true,
+        maxObservationBytes: agent.maxObservationBytes,
+        maxInputTokens: agent.maxInputTokens,
+      },
+      actions: {
+        instruction: '',
+        params: projected,
+        secrets,
+        trace: () => undefined,
+      },
     });
 
     const context: StepExecutorContext = {
@@ -317,8 +313,11 @@ export class HeldTestTools {
         kind: 'act',
         index: 0,
         instruction: '',
-        params: undefined,
-        secrets: [],
+        params: projected,
+        secrets: [...secrets.values()].map((secret) => ({
+          name: secret.name,
+          purpose: secret.purpose,
+        })),
       },
       attempt: runtime.attempt,
       target: runtime.target,
@@ -329,17 +328,7 @@ export class HeldTestTools {
       providerOptions: undefined,
       ledger: '',
       agentContext: undefined,
-      observe: (options) => feed.observe(options),
-      read: (target, options) => feed.read(target, options),
-      actions: dispatcher.actions,
-      budgets: {
-        maxActions: accounting.maxActions,
-        maxModelCalls: accounting.maxModelCalls,
-        actionsUsed: () => accounting.metrics.actionSteps,
-        remainingMs: () => accounting.remainingMs(),
-        recordModelCall: (usage) => accounting.recordModelCall(usage),
-        runTool: (call, body) => dispatcher.runTool(call, body),
-      },
+      ...bindings,
       attachTranscript: () => undefined,
       attachTurns: () => undefined,
       attachScreenshot: () => Promise.reject(
@@ -357,9 +346,59 @@ export class HeldTestTools {
       tools: agent.tools,
       redaction: { redact, redactCut },
       projectRoot: config.projectRoot,
+      attemptDir: runtime.artifacts.dir,
       recorder: undefined,
+      fills: sessionFills(config),
+      onActionFailed: (cause) => {
+        const call = heldTestToolCallScope.getStore();
+
+        if (call !== undefined) {
+          call.errorCode = redact(classifyError(cause).code);
+        }
+      },
+      runCode: {
+        engineFixtures: Object.keys(this.target.engine?.fixtures ?? {}),
+        attempt: (requestSignal) => {
+          const statementBudget = new AttemptBudget(requestSignal ?? signal, new Deadline(Number.POSITIVE_INFINITY));
+          const steps = new StepRecorder(this.attemptId, { redact });
+          const locator = this.locator(statementBudget);
+          const { artifacts } = runtime;
+
+          return {
+            agentRuntime: { ...runtime, engine: locator, steps },
+            budget: statementBudget,
+            session,
+            runId: this.runId,
+            attemptId: this.attemptId,
+            fixtures: {
+              app: createApp({
+                config,
+                steps,
+                target: this.target,
+                session,
+                artifacts,
+              }, locator),
+            },
+          };
+        },
+      },
       warn: () => undefined,
       appBase: runtime.app.base,
+    });
+  }
+
+  /** Creates a locator over the held session with the attachment's budget. */
+  private locator(budget: Pick<AttemptBudget, 'signal' | 'deadline'>): LocatorEngine {
+    const { config, redact } = this.runtime;
+
+    return new LocatorEngine({
+      session: this.runtime.engine.session,
+      budget,
+      redact,
+      runId: this.runId,
+      attemptId: this.attemptId,
+      actionTimeout: config.actionTimeout,
+      assertionTimeout: config.assertionTimeout,
     });
   }
 }

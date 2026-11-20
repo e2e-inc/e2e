@@ -17,7 +17,7 @@ import { traceScreen, type TraceScreenOptions } from '@e2e-dev/core/lib/run/step
 
 /** A step held before it runs, or a paused test, as the runner's `hold` hook sees it. */
 export interface HeldStep extends StepHold {
-  /** The short attempt ID shown at every hold for the same attempt. */
+  /** The random four-character ID shown at every hold of this attempt. */
   readonly attachId: string;
 }
 

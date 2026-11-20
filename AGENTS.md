@@ -87,7 +87,8 @@ suites that consume the built packages the way a user would.
     then `host.openSession({ name })` for each test's fixtures, deadline,
     steps, artifacts, and trace at close. Only one hosted attempt may be
     opening, live, or closing per process; close it before opening another),
-    `src/collect/` registration+selection, `src/mcp/` the `e2e mcp` server (a live session that rides
+    `src/collect/` registration+selection, `src/session-tools/` the shared session tool catalog and handlers,
+    `src/mcp/` the `e2e mcp` server (a live session that rides
     the `act` socket with a queue executor so every MCP call is a harness
     action; in a directory with no config, `open_session {engine}` names the
     engine as a package, whose default export is called, or as a factory

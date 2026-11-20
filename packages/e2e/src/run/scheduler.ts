@@ -15,8 +15,6 @@ import type { AiTraceSnapshot } from '@e2e-dev/core/lib/internal/ai-trace';
 import type { DebugSnapshot } from '@e2e-dev/core/lib/internal/debug';
 import {
   classifyError,
-  ConfigurationError,
-  E2EError,
   InfrastructureError,
   type SerializedError,
   TestError,
@@ -24,13 +22,12 @@ import {
   serializeError,
 } from '@e2e-dev/core/lib/internal/errors';
 import { timestamp, uuidv7 } from '@e2e-dev/core/lib/internal/ids';
-import { abortError, cancelledError, MAX_TIMER_MS } from '@e2e-dev/core/lib/internal/time';
+import { MAX_TIMER_MS } from '@e2e-dev/core/lib/internal/time';
 import type { AttemptRecord, ResultRecord, RunError, SerialGroupRecord } from '@e2e-dev/core/lib/run/records';
 import { retryVerdict } from './retry.ts';
 import { SerialGroupProgress, serialGroupId } from './serial.ts';
 import type { HeldStep, StepHold, StepHoldContext } from './step-hold.ts';
-import type { HeldTestAttachment } from './step-attachment-wire.ts';
-import { errorResult } from '../mcp/tools.ts';
+import { StepAttachmentRelay } from './step-attachment-relay.ts';
 import type { StepProgress } from '@e2e-dev/core/lib/run/steps';
 import type { SpawnUnitRunner, UnitRunner } from './unit-runner.ts';
 import {
@@ -51,8 +48,6 @@ import {
   type AttemptDeadlineMessage,
   type OutputMessage,
   type PairStart,
-  type StepAttachmentRequest,
-  type StepAttachmentResponse,
   type StepHoldMessage,
   type WirePair,
   type WorkerToMain,
@@ -384,34 +379,10 @@ class SchedulerWorker {
   }
 }
 
-type HeldAttemptState = {
-  readonly attemptId: string;
-  readonly attachId: string;
-  labels: StepHoldMessage['attachmentLabels'];
-  attachment: AbortController | undefined;
-};
-
 type SchedulerHold = {
   readonly worker: SchedulerWorker;
   readonly controller: AbortController;
-  readonly attempt: HeldAttemptState;
 };
-
-type PendingAttachmentReply = {
-  readonly worker: SchedulerWorker;
-  readonly resolve: (response: StepAttachmentResponse) => void;
-  readonly reject: (reason: Error) => void;
-};
-
-type AttachmentReply<Kind extends StepAttachmentRequest['kind']> = Extract<StepAttachmentResponse, { kind: Kind }>;
-
-/** Narrows a worker reply to the kind of its matching request. */
-function isAttachmentReply<Kind extends StepAttachmentRequest['kind']>(
-  response: StepAttachmentResponse,
-  kind: Kind,
-): response is AttachmentReply<Kind> {
-  return response.kind === kind;
-}
 
 class Scheduler {
   private readonly targets = new Map<string, TargetState>();
@@ -433,9 +404,7 @@ class Scheduler {
   /** Steps waiting for `beforeStep`, by hold id: the worker holding each, and what ends its wait. */
   private readonly holds = new Map<string, SchedulerHold>();
 
-  private readonly heldAttempts = new Map<SchedulerWorker, HeldAttemptState>();
-  private nextAttachId = 0;
-  private readonly attachmentReplies = new Map<string, PendingAttachmentReply>();
+  private readonly attachments = new StepAttachmentRelay(() => this.interrupting);
 
   /** Pending `screen-request` calls, keyed by request ID. */
   private readonly screenReplies = new Map<string, { readonly worker: SchedulerWorker; readonly resolve: (screen: string | undefined) => void }>();
@@ -607,24 +576,11 @@ class Scheduler {
   ): void {
     if (this.interrupting) return;
 
-    let attempt = this.heldAttempts.get(worker);
-
-    if (attempt?.attemptId !== attemptId) {
-      attempt = {
-        attemptId,
-        attachId: `p${++this.nextAttachId}`,
-        labels: attachmentLabels,
-        attachment: undefined,
-      };
-      this.heldAttempts.set(worker, attempt);
-    } else {
-      attempt.labels = attachmentLabels;
-    }
-
+    const attachId = this.attachments.hold(worker.runner, holdId, attemptId, attachmentLabels);
     const beforeStep = this.options.beforeStep ?? (() => Promise.resolve());
     const controller = new AbortController();
     if (this.holds.size === 0) this.heldSince = Date.now();
-    this.holds.set(holdId, { worker, controller, attempt });
+    this.holds.set(holdId, { worker, controller });
     const signal = AbortSignal.any([controller.signal, this.options.interruptSignal]);
 
     const readScreen = (): Promise<string | undefined> =>
@@ -641,9 +597,9 @@ class Scheduler {
       });
 
     // Called inside the chain, so a hook that throws stops the run like one that rejects.
-    const held = { ...step, attachId: attempt.attachId };
+    const held = { ...step, attachId };
     Promise.resolve()
-      .then(() => beforeStep(held, { signal, readScreen, attach: this.attachToHeldTest }))
+      .then(() => beforeStep(held, { signal, readScreen, attach: this.attachments.attach }))
       .then(
       () => {
         // An answer that came after the hold ended (an interrupt, say) lets nothing run.
@@ -673,9 +629,7 @@ class Scheduler {
     }
 
     this.holds.delete(holdId);
-    const { attempt } = hold;
-    attempt.attachment?.abort(new ConfigurationError('NO_SESSION', reason));
-    attempt.attachment = undefined;
+    this.attachments.release(holdId, reason);
 
     if (this.holds.size === 0 && this.heldSince !== undefined) {
       const heldMs = Date.now() - this.heldSince;
@@ -697,156 +651,6 @@ class Scheduler {
       this.endHold(holdId, reason);
       hold.controller.abort();
     }
-  }
-
-  /** Opens an attachment to the worker running the test named by the pause ID. */
-  private readonly attachToHeldTest = async (attachId: string, openingSignal?: AbortSignal): Promise<HeldTestAttachment> => {
-    const held = [...this.holds].find(([, { attempt }]) => attempt.attachId === attachId);
-
-    if (held === undefined || this.interrupting) {
-      const heldTests = new Set(
-        [...this.holds.values()].map(({ attempt }) =>
-          `${attempt.attachId}  ${attempt.labels.title} [${attempt.labels.target}]`,
-        ),
-      );
-      const list = heldTests.size === 0 ? ['No tests are held.'] : ['Held tests:', ...heldTests];
-
-      throw new ConfigurationError('NO_SESSION', ['no held test matches that attachment id', ...list].join('\n'));
-    }
-
-    const [holdId, { worker, attempt }] = held;
-
-    if (attempt.attachment !== undefined) {
-      throw new ConfigurationError('INVALID_ARGUMENT', 'this test already has an attachment');
-    }
-
-    const controller = new AbortController();
-    const { signal } = controller;
-    const attachmentId = uuidv7();
-    attempt.attachment = controller;
-
-    /** Releases the test's attachment after the worker acknowledges the detach. */
-    const detach = async (): Promise<void> => {
-      if (signal.aborted) {
-        return;
-      }
-
-      controller.abort(new ConfigurationError('NO_SESSION', 'the attachment was detached'));
-
-      try {
-        await this.requestAttachment(worker, uuidv7(), { kind: 'detach', attachmentId });
-      } finally {
-        if (attempt.attachment === controller) {
-          attempt.attachment = undefined;
-        }
-      }
-    };
-
-    try {
-      const opening = await this.requestAttachment(
-        worker,
-        attachmentId,
-        { kind: 'attach', holdId, attachId },
-        openingSignal === undefined ? signal : AbortSignal.any([signal, openingSignal]),
-      );
-
-      if (signal.aborted) {
-        throw abortError(signal, cancelledError);
-      }
-
-      if (openingSignal?.aborted === true) {
-        throw abortError(openingSignal, cancelledError);
-      }
-
-      return {
-        opening: opening.opening,
-        signal,
-        detail: async (name) => {
-          const detail = await this.requestAttachment(worker, uuidv7(), { kind: 'detail', attachmentId, name }, signal);
-
-          return detail.text;
-        },
-        call: async (name, args, cancel) => {
-          try {
-            const call = await this.requestAttachment(
-              worker,
-              uuidv7(),
-              { kind: 'call', attachmentId, name, args },
-              cancel === undefined ? signal : AbortSignal.any([signal, cancel]),
-            );
-
-            return call.result;
-          } catch (cause) {
-            return errorResult(cause);
-          }
-        },
-        detach,
-      };
-    } catch (cause) {
-      if (openingSignal?.aborted === true && !signal.aborted) {
-        await detach();
-      } else if (attempt.attachment === controller) {
-        attempt.attachment = undefined;
-      }
-
-      throw cause;
-    }
-  };
-
-  /** Sends a request to the worker and waits for its reply or cancellation. */
-  private async requestAttachment<Kind extends StepAttachmentRequest['kind']>(
-    worker: SchedulerWorker,
-    requestId: string,
-    request: StepAttachmentRequest & { readonly kind: Kind },
-    signal?: AbortSignal,
-  ): Promise<AttachmentReply<Kind>> {
-    if (signal?.aborted === true) {
-      throw abortError(signal, cancelledError);
-    }
-
-    if (!worker.runner.alive) {
-      throw new ConfigurationError('NO_SESSION', 'the worker exited');
-    }
-
-    const response = await new Promise<StepAttachmentResponse>((resolve, reject) => {
-      /** Removes the waiter when the request settles. */
-      const finish = (): void => {
-        this.attachmentReplies.delete(requestId);
-        signal?.removeEventListener('abort', cancel);
-      };
-
-      /** Rejects the waiter and asks the worker to cancel the request. */
-      const cancel = (): void => {
-        finish();
-        reject(signal === undefined ? cancelledError() : abortError(signal, cancelledError));
-        worker.runner.send({ type: 'step-attachment-cancel', requestId });
-      };
-
-      this.attachmentReplies.set(requestId, {
-        worker,
-        resolve: (reply) => {
-          finish();
-          resolve(reply);
-        },
-        reject: (reason) => {
-          finish();
-          reject(reason);
-        },
-      });
-      signal?.addEventListener('abort', cancel, { once: true });
-      worker.runner.send({ type: 'step-attachment-request', requestId, request });
-    });
-
-    if (response.kind === 'error') {
-      const { category, code, message } = response.error;
-      throw new E2EError(category, code, message);
-    }
-
-    if (!isAttachmentReply(response, request.kind)) {
-      throw new Error('attachment reply does not match its request');
-    }
-
-    return response;
   }
 
   private wakeUp(): void {
@@ -1153,7 +957,7 @@ class Scheduler {
       case 'attempt-end': {
         worker.unwatch();
         this.cancelHolds('the test attempt ended', (_, holder) => holder === worker);
-        this.heldAttempts.delete(worker);
+        this.attachments.endAttempt(worker.runner);
         break;
       }
       case 'pong': {
@@ -1174,12 +978,7 @@ class Scheduler {
         break;
       }
       case 'step-attachment-reply': {
-        const pending = this.attachmentReplies.get(message.requestId);
-
-        if (pending?.worker === worker) {
-          pending.resolve(message.response);
-        }
-
+        this.attachments.reply(worker.runner, message);
         break;
       }
       case 'progress': {
@@ -1290,13 +1089,7 @@ class Scheduler {
   private onExit(worker: SchedulerWorker, detail: string, signal: NodeJS.Signals | null, active: WatchedAttempt | undefined): void {
     const reason = 'the worker exited';
     this.cancelHolds(reason, (_, holder) => holder === worker);
-    this.heldAttempts.delete(worker);
-
-    for (const waiting of this.attachmentReplies.values()) {
-      if (waiting.worker === worker) {
-        waiting.reject(new ConfigurationError('NO_SESSION', reason));
-      }
-    }
+    this.attachments.workerExited(worker.runner, reason);
 
     for (const [requestId, waiting] of this.screenReplies) {
       if (waiting.worker !== worker) {

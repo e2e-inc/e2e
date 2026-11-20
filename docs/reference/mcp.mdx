@@ -121,7 +121,7 @@ open_session {target: "web", headed: true}
 | `test` | string | no | One test to run first, named like an `e2e run` positional. The session stops where the test stopped. See [Running a test](#running-a-test). |
 | `engine` | string or object | no | The session's engine in a directory with no config file, as a package name or `{package, export, options}`. See [Without a config](#without-a-config). |
 | `app` | object | no | The app under test for an `engine` session, as `url`, `bundleId`, or `appPath`. |
-| `attach` | string | no | ID of a [held test](#attaching-to-a-held-test), such as `p1`. Set it without the other fields. |
+| `attach` | string | no | Four-character ID of a [held test](#attaching-to-a-held-test). Pass only this field. |
 
 #### `tools`
 
@@ -589,6 +589,8 @@ A session closes:
 - when the client disconnects,
 - on SIGINT or SIGTERM.
 
+The idle and lifetime limits apply to sessions that open their own attempt.
+
 The client disconnects when it closes the server's stdin or dies. Then every
 session closes, the app commands the sessions started stop, and the server
 exits.
@@ -613,24 +615,24 @@ Sessions enforce what tests enforce:
 
 ## Attaching to a held test
 
-Use the ID in the pause header, such as `Paused (p1)`, to connect to that
-test's app. Start the MCP server from the run's directory and use the same
-e2e version for `e2e mcp` and `e2e run`.
+Use the four-character ID in the pause header, such as `Paused (k3f9)`.
+The random ID stays the same across holds of one attempt. Start MCP from
+the run's directory with the same e2e version.
 
 ```txt
-open_session {attach: "p1"}
+open_session {attach: "k3f9"}
 ```
 
-Pass only `attach`. Use `tools` and `call` to inspect or drive the app.
-While attached, you can't use `run_code`, recording tools, or `type_secret`.
-Use `screenshot` to get an image without saving a file.
+Pass only `attach`. Use the target's normal session tools to inspect and
+drive the app. To record activity while attached, start the run with
+`--video`.
 
 Use `close_session` to detach and leave the test held. Press Enter or run
 `npx e2e run --step next` to resume the test and end the attachment.
 
-Attached calls aren't recorded as steps in the report or trace. App logs
-and screen updates aren't recorded during an attached call. You may see
-late effects in the trace after the call returns or is cancelled by a resume.
+The report and trace record the test's own steps. App logs and screen
+updates from an attached call can appear in the trace if they arrive after
+the call ends.
 
 ## Running a test
 

@@ -383,8 +383,8 @@ function attachmentConnection(client: net.Socket, options: AttachmentSocketOptio
 
           requestIdToClear = requestId;
           calls.set(requestId, cancel);
-          const result = await attached.call(name, args, cancel.signal);
-          write({ type: 'result', requestId, result });
+          const { errorCode, ...result } = await attached.call(name, args, cancel.signal);
+          write({ type: 'result', requestId, result, errorCode });
 
           return;
         }

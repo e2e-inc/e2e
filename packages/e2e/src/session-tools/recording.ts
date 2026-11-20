@@ -157,8 +157,11 @@ function describe(recording: { readonly index: number; readonly name: string | u
   return `Recording ${String(recording.index)}${recording.name === undefined ? '' : ` "${recording.name}"`}`;
 }
 
+/** The recording operations the session tools call. */
+export type RecordingControls = Pick<SessionRecorder, 'start' | 'stop'>;
+
 /** The session's `start_recording` and `stop_recording` tools. */
-export function recordingTools(recorder: SessionRecorder): ToolSet {
+export function recordingTools(recorder: RecordingControls): ToolSet {
   return {
     start_recording: {
       description:

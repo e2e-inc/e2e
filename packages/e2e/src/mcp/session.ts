@@ -18,7 +18,6 @@ import { openInteractiveStep, type InteractiveStep } from '../agent/interactive-
 import { ScreenPresenter } from '@e2e-dev/core/lib/agent/screen-update';
 import type { ResolvedConfig, ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
 import { launchesPinnedApp } from '@e2e-dev/core/lib/config/targets';
-import { secretHandle } from '@e2e-dev/core/lib/secrets';
 import { classifyError, ConfigurationError, errorMessage, InfrastructureError, type SerializedError } from '@e2e-dev/core/lib/internal/errors';
 import { abortError, cancelledError } from '@e2e-dev/core/lib/internal/time';
 import { LocatorEngine } from '@e2e-dev/core/lib/locator/engine';
@@ -31,17 +30,17 @@ import { processSecrets, registerStaticSecrets } from '@e2e-dev/core/lib/run/sec
 import { openStandaloneAttempt, type OneShotAttempt } from '../run/standalone-kinds.ts';
 import type { StandaloneAttempt } from '@e2e-dev/core/lib/run/standalone-attempt';
 import { selectStandaloneTest, testLocation } from '../run/standalone-test.ts';
-import type { AgentParams } from '@e2e-dev/core/lib/types';
-import { createSessionCatalog, isGrammarVerb, type SessionCatalog } from './catalog.ts';
+import { createSessionCatalog, isGrammarVerb, type SessionCatalog } from '../session-tools/catalog.ts';
+import { sessionFills, sessionSecretLines, sessionSecretParams } from '../session-tools/secrets.ts';
 import { appLines } from './app-lines.ts';
-import { SESSION_BOUNDS } from './bounds.ts';
+import { SESSION_BOUNDS } from '../session-tools/bounds.ts';
 import type { EngineSession, LoadedConfig } from './config.ts';
 import type { FactoryRef } from './default-engine.ts';
-import { describeRecording, SessionRecorder } from './recording.ts';
+import { describeRecording, SessionRecorder } from '../session-tools/recording.ts';
 import { SessionRegistry } from './sessions.ts';
 import { describeTestOutcome } from './test-outcome.ts';
 import { SessionUsage, type McpSessionSummary, type SessionEndedBy } from './usage.ts';
-import { actionResult, catalogLine, defineMcpTool, describeToolDetail, errorResult, invokeTool, redacting, redactResult, textResult, type McpToolCallExtra, type McpToolResult, type McpToolSpec } from './tools.ts';
+import { actionResult, catalogLine, defineMcpTool, describeToolDetail, errorResult, invokeTool, redacting, redactResult, textResult, unavailableSessionTool, type McpToolCallExtra, type McpToolResult, type McpToolSpec } from '../session-tools/tools.ts';
 
 /** How long one session may live, whatever happens. */
 const SESSION_TTL_MS = 4 * 60 * 60 * 1000;
@@ -78,12 +77,13 @@ type AttachedSession = {
   readonly kind: 'attached';
   readonly target: Pick<ResolvedTarget, 'name'>;
   readonly attachment: HeldTestAttachment;
+  readonly usage: SessionUsage;
 };
 
 type Session = LiveSession | AttachedSession;
 
 export interface OpenSessionOptions {
-  /** Set to the ID in a pause header to attach to that test. */
+  /** Set to the four-character ID in a pause header to attach to that test. */
   readonly attach?: string | undefined;
   /** The target to open; otherwise the server's `--target`, else the config's only target. */
   readonly target?: string | undefined;
@@ -175,23 +175,18 @@ export class SessionHost {
    */
   open(options: OpenSessionOptions, signal?: AbortSignal): Promise<string> {
     const { attach, target, config, test, engine, app } = options;
+    const headed = attach === undefined ? options.headed ?? this.options.headed : false;
+    const usage = new SessionUsage(this.sessions.liveCount, headed, attach !== undefined);
+    const clash = attach === undefined ? undefined : Object.entries({ target, config, test, engine, app, headed: options.headed })
+      .find(([, value]) => value !== undefined)?.[0];
 
-    if (attach !== undefined) {
-      const clash = Object.entries({ target, config, test, engine, app, headed: options.headed })
-        .find(([, value]) => value !== undefined)?.[0];
+    const opening = clash === undefined
+      ? this.sessions.admit((id) => attach === undefined
+        ? this.openSession(id, options, headed, usage, signal)
+        : this.openAttachment(id, attach, usage, signal))
+      : Promise.reject(new ConfigurationError('INVALID_ARGUMENT', `open_session: attach cannot be combined with ${clash}`));
 
-      if (clash !== undefined) {
-        return Promise.reject(
-          new ConfigurationError('INVALID_ARGUMENT', `open_session: attach cannot be combined with ${clash}`),
-        );
-      }
-
-      return this.sessions.admit((id) => this.openAttachment(id, attach, signal));
-    }
-
-    const headed = options.headed ?? this.options.headed;
-    const usage = new SessionUsage(this.sessions.liveCount, headed);
-    return this.sessions.admit((id) => this.openSession(id, options, headed, usage, signal)).catch((cause: unknown) => {
+    return opening.catch((cause: unknown) => {
       this.options.onSessionEnd?.(usage.openFailed(classifyError(cause).code));
       throw cause;
     });
@@ -213,7 +208,7 @@ export class SessionHost {
   /** Detaches from the test or closes the standalone attempt. Returns a summary. */
   private async teardown(live: Session, reason: string, endedBy: SessionEndedBy): Promise<string> {
     if (live.kind === 'attached') {
-      await live.attachment.detach();
+      await live.attachment.detach().finally(() => this.options.onSessionEnd?.(live.usage.closed(endedBy)));
 
       return processSecrets.redact(`Session ${live.id} closed (${reason}).`);
     }
@@ -279,7 +274,7 @@ export class SessionHost {
       return [`Session ${live.id} on target "${live.target.name}": ${Object.keys(live.catalog.tools).length} tools. Run one with call {tool, args}; tools {tool} shows a tool's arguments.`, ...this.catalogLines(live)].join('\n');
     }
     const found = live.catalog.tools[tool];
-    if (found === undefined) throw this.unknownTool(live, tool);
+    if (found === undefined) throw unavailableSessionTool(live.target.name, live.catalog, tool);
     return describeToolDetail(tool, found, live.catalog.readOnly.has(tool));
   }
 
@@ -287,13 +282,27 @@ export class SessionHost {
   call(session: string | undefined, name: string, args: Record<string, unknown>, extra: McpToolCallExtra): Promise<McpToolResult> {
     const live = this.sessions.resolve(session);
     if (live.kind === 'attached') {
-      return live.attachment.call(name, args, extra.signal);
+      live.usage.called(name, live.attachment.opening.projectTools.includes(name));
+
+      return live.attachment.call(name, args, extra.signal).then(
+        ({ errorCode, ...result }) => {
+          if (result.isError === true || errorCode !== undefined) {
+            live.usage.failed(errorCode);
+          }
+
+          return result;
+        },
+        (cause: unknown) => {
+          live.usage.failed(classifyError(cause).code);
+          throw cause;
+        },
+      );
     }
 
     const tool = live.catalog.tools[name];
     live.usage.called(name, live.catalog.project.has(name));
     if (tool === undefined) {
-      const error = this.unknownTool(live, name);
+      const error = unavailableSessionTool(live.target.name, live.catalog, name);
       live.usage.failed(error.code);
       throw error;
     }
@@ -315,7 +324,7 @@ export class SessionHost {
   }
 
   /** Opens an attachment and returns its summary, catalog, and first screen. */
-  private async openAttachment(id: string, attach: string, request?: AbortSignal): Promise<string> {
+  private async openAttachment(id: string, attach: string, usage: SessionUsage, request?: AbortSignal): Promise<string> {
     const opening = request === undefined ? this.shutdown.signal : AbortSignal.any([this.shutdown.signal, request]);
     const connect = this.options.connectAttachment;
     if (connect === undefined) {
@@ -329,12 +338,15 @@ export class SessionHost {
       throw abortError(opening.aborted ? opening : attachment.signal, cancelledError);
     }
 
-    const { target, summary, catalog, observation } = attachment.opening;
+    const { target, platform, engine, headed, summary, catalog, observation } = attachment.opening;
+    usage.resolved(platform, engine, headed);
+
     const attachedSession: AttachedSession = {
       kind: 'attached',
       id,
       target: { name: target },
       attachment,
+      usage,
     };
     this.sessions.activate(attachedSession);
     attachment.signal.addEventListener(
@@ -400,10 +412,10 @@ export class SessionHost {
     const cancel = (): void => abort.abort();
     if (opening.aborted) cancel();
     else opening.addEventListener('abort', cancel, { once: true });
-    let attempt: OneShotAttempt | undefined;
+    let attemptToClose: OneShotAttempt | undefined;
     let step: InteractiveStep | undefined;
     try {
-      attempt = await openStandaloneAttempt({
+      const attempt = await openStandaloneAttempt({
         // A session records video only between start_recording and
         // stop_recording: the configured video mode is for runs, and would
         // record everything.
@@ -417,6 +429,7 @@ export class SessionHost {
         notice: (scope, message) => this.log('info', `${scope}: ${message}`),
         ...(test === undefined ? {} : { test, agent: test.pair.agent }),
       });
+      attemptToClose = attempt;
       // A device has no URL for the first screen to navigate to, so its
       // pinned app launches here, as a test's `app.open()` launches it, or
       // the first observation finds no app open. A test opens the app itself.
@@ -426,7 +439,7 @@ export class SessionHost {
       const ran = await attempt.test?.run();
       // The coding agent is the brain: the step is driven from here, and the
       // configured model stays out of the way.
-      const params = this.secretParams(config);
+      const params = sessionSecretParams(config);
       step = await openInteractiveStep(attempt.agentRuntime, {
         instruction: SESSION_INSTRUCTION,
         ...(params === undefined ? {} : { params }),
@@ -444,10 +457,7 @@ export class SessionHost {
         attemptDir: attempt.artifactsDir,
         recorder,
         appBase: target.app.base,
-        fills: {
-          credentials: [...config.credentials.values()].map((credential) => ({ name: credential.name, username: credential.username, password: credential.password.name })),
-          secrets: [...config.secrets.keys()],
-        },
+        fills: sessionFills(config),
         testRan: test === undefined ? undefined : testLocation(test.pair.test),
         locator: new LocatorEngine({
           session: attempt.session,
@@ -459,7 +469,7 @@ export class SessionHost {
         }),
         warn: (message) => this.log('warning', message),
         onActionFailed: (cause) => usage.failed(classifyError(cause).code),
-        runCode: { attempt, engineFixtures: Object.keys(target.engine?.fixtures ?? {}) },
+        runCode: { attempt: () => attempt, engineFixtures: Object.keys(target.engine?.fixtures ?? {}) },
       });
       const live: LiveSession = {
         kind: 'standalone',
@@ -494,7 +504,7 @@ export class SessionHost {
       return text;
     } catch (cause) {
       opening.removeEventListener('abort', cancel);
-      await this.closeAttempt(attempt, abort, async () => {
+      await this.closeAttempt(attemptToClose, abort, async () => {
         await step?.end({ status: 'failed', summary: 'opening the session failed' });
       }).catch(() => undefined);
       throw cause;
@@ -603,15 +613,7 @@ export class SessionHost {
       `Session ${live.id} open on target "${live.target.name}" (platform ${live.target.platform}, engine ${engine === undefined ? 'none' : `${engine.name} ${engine.version}`}), ${live.headed ? 'headed' : 'headless'}; ${live.origin}`,
     ];
     lines.push(...appLines(live.target, outcome !== undefined));
-    if (config.credentials.size > 0) {
-      const described = [...config.credentials.values()].map(
-        (credential) => `"${credential.name}" (username ${JSON.stringify(credential.username)}, password secret "${credential.password.name}")`,
-      );
-      lines.push(`Credentials: ${described.join(', ')}. Type the username with type; fill the password with type_secret and its password secret's name.`);
-    }
-    if (config.secrets.size > 0) {
-      lines.push(`Secrets: ${[...config.secrets.keys()].map((name) => `"${name}"`).join(', ')}. Fill one into any input with type_secret and its name; you never see the value.`);
-    }
+    lines.push(...sessionSecretLines(config));
     lines.push(
       `Pass session "${live.id}" to every tools, call, and close_session; with several sessions open, a call without it fails.`,
     );
@@ -625,22 +627,6 @@ export class SessionHost {
 
   private catalogLines(live: LiveSession): string[] {
     return Object.entries(live.catalog.tools).map(([name, tool]) => catalogLine(name, tool, live.catalog.readOnly.has(name)));
-  }
-
-  /** Every configured secret, passwords included, as a step secret, so `type_secret` can fill it. */
-  private secretParams(config: ResolvedConfig): AgentParams | undefined {
-    if (config.allSecrets.size === 0) return undefined;
-    return Object.fromEntries([...config.allSecrets.values()].map((secret) => [secret.name, secretHandle(secret)]));
-  }
-
-  private unknownTool(live: LiveSession, name: string): ConfigurationError {
-    if (isGrammarVerb(name)) {
-      return new ConfigurationError(
-        'UNSUPPORTED_CAPABILITY',
-        `tool "${name}" is not available in this session: the engine of target "${live.target.name}" declares no such action; tools lists what it can do`,
-      );
-    }
-    return new ConfigurationError('UNKNOWN_TOOL', `tool "${name}" is not available in this session; tools: ${Object.keys(live.catalog.tools).join(', ')}`);
   }
 
   private touch(live: LiveSession): void {
@@ -669,12 +655,12 @@ export class SessionHost {
         '{engine: "@e2e-dev/web", app: {url: "http://localhost:3000"}}.',
         'Pass test to run one test first. You can inspect the screen where it passed or failed.',
         'If it failed, the failure and its line appear before the catalog.',
-        'To use a held test, pass only attach, for example {attach: "p1"}.',
+        'To use a held test, pass only attach, for example {attach: "k3f9"}.',
         'The reply includes a session ID, the catalog, and the first observation.',
         'Pass the session ID to later calls. Use call {tool: "observe"} to see the current screen.',
       ].join(' '),
       inputSchema: z.object({
-        attach: z.string().min(1).optional().describe('Pass only attach with an ID from a pause header, such as p1'),
+        attach: z.string().min(1).optional().describe('Pass only attach with the four-character ID from a pause header, such as k3f9'),
         target: z.string().min(1).optional().describe('Target name from the config; required when the config declares several'),
         config: z.string().min(1).optional().describe("Path to an e2e config file, absolute or relative to the server's working directory; default: the nearest e2e.config.ts, .mts, .js, or .mjs"),
         headed: z
@@ -723,7 +709,7 @@ export class SessionHost {
     return defineMcpTool({
       name: 'tools',
       description:
-        "List the tools a session can run through call: observe, the grammar its engine honors (one tool per action the engine declares, type_secret when a secret is configured, and screenshot and the point tools), locate, run_code (test statements run on the live app), test_lines (the test line each action printed and the statements run_code passed, as a draft test body), start_recording and stop_recording when the engine records video, and the project's own tools. With tool, shows that tool's full description and the JSON Schema of its arguments.",
+        "List the tools a session can run through call: observe, the grammar its engine honors (one tool per action the engine declares, type_secret when a secret is configured, and screenshot and the point tools), locate, run_code (test statements run on the live app), test_lines (the test line each action printed and the statements run_code passed, as a draft test body), start_recording and stop_recording in standalone sessions on engines with video, and the project's own tools. With tool, shows that tool's full description and the JSON Schema of its arguments.",
       inputSchema: z.object({
         tool: z.string().min(1).optional().describe('A catalog tool name, for its full contract'),
         session: z.string().min(1).optional().describe('Session id from open_session; may be omitted only while one session is open'),

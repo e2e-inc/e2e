@@ -3,7 +3,7 @@
  * complete EngineError -> runner taxonomy mapping.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   EngineError,
   type EngineErrorCode,
@@ -173,6 +173,17 @@ describe('LocatorEngine read retry contract', () => {
 });
 
 describe('LocatorEngine resolve retry contract', () => {
+  it('reports a wait that ran out as no shorter than its timeout when the resolve starts after the deadline does', async () => {
+    const { engine } = makeEngine({ resolve: Array.from({ length: 50 }, () => () => []) });
+    const deadline = engine.deadline(101);
+    // The resolve polls 100 ms after its own start, which is the deadline's 101st.
+    vi.advanceTimersByTime(1);
+    await expect(engine.resolveExactlyOne(EXPRESSION, deadline)).rejects.toMatchObject({
+      code: 'LOCATOR_NOT_FOUND',
+      details: { waitedMs: 101 },
+    });
+  });
+
   it('retries retryable frame misses until the engine recovers', async () => {
     const { engine, calls } = makeEngine({ resolve: ['frame', 'stale', () => [REF]] });
     expect(await engine.resolveExactlyOne(EXPRESSION, engine.deadline())).toEqual(REF);
@@ -393,7 +404,7 @@ describe('LocatorEngine step deadline', () => {
   it('waits past the action timeout with timeout 0, until the phase deadline', async () => {
     const budget = new AttemptBudget(new AbortController().signal, new Deadline(600));
     const { engine } = makeEngine({ resolve: Array.from({ length: 50 }, () => () => [] as readonly NodeRef[]) }, { actionTimeout: 100, budget });
-    expect(engine.deadline(0)).toBe(budget.deadline);
+    expect(engine.deadline(0).endsAt).toBe(budget.deadline.endsAt);
     const started = Date.now();
     await expect(engine.perform(EXPRESSION, { kind: 'tap' }, 0)).rejects.toMatchObject({ code: 'LOCATOR_NOT_FOUND' });
     expect(Date.now() - started).toBeGreaterThanOrEqual(550);

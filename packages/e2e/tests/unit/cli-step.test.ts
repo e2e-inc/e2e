@@ -8,7 +8,7 @@ const KEY_GUARD_MS = 150;
 function step(label: string, testId = 'checkout', target = 'web'): HeldStep {
   return {
     kind: 'step',
-    attachId: 'p1',
+    attachId: 'k3f9',
     target,
     testId,
     agent: 'default',
@@ -22,7 +22,7 @@ function step(label: string, testId = 'checkout', target = 'web'): HeldStep {
 function pause(testId = 'checkout', target = 'web'): HeldStep {
   return {
     kind: 'pause',
-    attachId: 'p1',
+    attachId: 'k3f9',
     target,
     testId,
     agent: 'default',

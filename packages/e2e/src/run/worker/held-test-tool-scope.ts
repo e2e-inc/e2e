@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 type HeldTestToolCall = {
   readonly signal: AbortSignal;
   running: boolean;
+  errorCode: string | undefined;
 };
 
 export const heldTestToolCallScope = new AsyncLocalStorage<HeldTestToolCall>();

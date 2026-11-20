@@ -36,7 +36,7 @@ import { ERROR_CODE_LIMIT, feedback, FEEDBACK_LIMITS, FEEDBACK_TYPES, type Feedb
 import { guide } from './guide.ts';
 import { addInitOptions, checkInitFlags, type InitFlagValues } from './init/flags.ts';
 import { parseList, parseNames } from './parse-names.ts';
-import { SESSION_BOUNDS } from '../mcp/bounds.ts';
+import { SESSION_BOUNDS } from '../session-tools/bounds.ts';
 import { PROVIDER_NAMES } from '../oauth/provider-ids.ts';
 import type { LoginFlags } from '../oauth/cli.ts';
 import { SignalLadder } from './signals.ts';
@@ -633,7 +633,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
       ].join('\n'),
     )
     .action(async (options: { config?: string; target?: string; headed?: boolean; maxSessions?: number }) => {
-      const { mcp } = await import('./mcp.ts');
+      const { mcp } = await import('../mcp-command.ts');
       process.exitCode = await mcp(version, options, telemetry);
     });
 
