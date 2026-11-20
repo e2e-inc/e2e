@@ -352,6 +352,31 @@ describe('the loop guard waits longer on the built-in observe only', () => {
     expect(warned?.lastPrompt).not.toContain('going in circles');
   });
 
+  it('lets the act loop go on to the step\'s next action when the tenth observe shows the save finished', async () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    let looks = 0;
+    const observe = async () => {
+      looks += 1;
+      // The opening look and nine observes show the save in progress; the tenth observe shows it done.
+      const done = looks > 10;
+      return { revision: String(looks), text: done ? '#n1 button "Saved"\n#n2 link "Product list"' : '#n1 button "Saving" [disabled]', truncated: false, viewport: { width: 800, height: 600 } };
+    };
+    const tools: string[] = [];
+    const model = installFakeLoopModel((call) => {
+      if (call.toolNames.length === 1) return [{ toolName: 'complete_step', input: { status: 'failed', summary: 'forced' } }];
+      // The loop let the tap through: that is all this test asks, whatever the fake engine does with it.
+      if (tools.at(-1) === 'tap') return [{ toolName: 'complete_step', input: { status: 'passed', summary: 'saved, then opened the list' } }];
+      if (call.lastToolResult.includes('"Product list"')) {
+        tools.push('tap');
+        return [{ toolName: 'tap', input: { target: 'n2' } }];
+      }
+      tools.push('observe');
+      return [{ toolName: 'observe', input: {} }];
+    });
+    await expect(createBuiltInAgent().runStep({ ...context, model, observe })).resolves.toMatchObject({ status: 'passed' });
+    expect(tools).toEqual([...Array.from({ length: 10 }, () => 'observe'), 'tap']);
+  });
+
   it('keeps the ordinary limit for a caller\'s own tool named observe, which may write', async () => {
     const { context } = fakeExecutorContext({ secrets: [] });
     const writes: string[] = [];

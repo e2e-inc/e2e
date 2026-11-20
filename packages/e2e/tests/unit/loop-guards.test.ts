@@ -4,6 +4,7 @@ import {
   checkFailureStreak,
   checkLoopGuards,
   DEFAULT_LOOP_GUARD_THRESHOLDS,
+  extractGuardCalls,
   extractToolResults,
   type GuardToolCall,
   type GuardToolResult,
@@ -49,6 +50,23 @@ describe('loop guards', () => {
     // A tool named observe that the caller did not mark keeps the ordinary thresholds.
     expect(checkLoopGuards(observes(3)).kind).toBe('warn');
     expect(checkLoopGuards(observes(5)).kind).toBe('stop');
+  });
+
+  it('ends a waiting streak at the observe that saw the screen change, so the wait can lead on to the next action', () => {
+    const waiting = new Set(['observe']);
+    const turn = (id: string, text: string): ModelMessage[] => [
+      { role: 'assistant', content: [{ type: 'tool-call', toolCallId: id, toolName: 'observe', input: {} }] },
+      { role: 'tool', content: [{ type: 'tool-result', toolCallId: id, toolName: 'observe', output: { type: 'text', value: text } }] },
+    ];
+    const still = (n: number) => `Observed.\n\nScreen unchanged since revision b${n} (re-observed as revision b${n + 1}); the ids you have stay valid.`;
+    const waits = Array.from({ length: 9 }, (_, index) => turn(`o${index}`, still(index))).flat();
+    expect(checkLoopGuards(extractGuardCalls(waits, 'complete_step', waiting), DEFAULT_LOOP_GUARD_THRESHOLDS, waiting).kind).toBe('warn');
+    const saved = [...waits, ...turn('o9', 'Observed.\n\nScreen changes since revision b9 (now revision b10): 1 changed.\nchanged #n1 button "Saved" (was: #n1 button "Saving" [disabled])')];
+    expect(checkLoopGuards(extractGuardCalls(saved, 'complete_step', waiting), DEFAULT_LOOP_GUARD_THRESHOLDS, waiting).kind).toBe('clear');
+    // Ten unchanged looks still force the verdict, and without the waiting set every observe counts.
+    const stuck = [...waits, ...turn('o9', still(9))];
+    expect(checkLoopGuards(extractGuardCalls(stuck, 'complete_step', waiting), DEFAULT_LOOP_GUARD_THRESHOLDS, waiting).kind).toBe('stop');
+    expect(checkLoopGuards(extractGuardCalls(saved, 'complete_step')).kind).toBe('stop');
   });
 
   it('recognizes a waiting handler marked by another installed copy, and nothing else', () => {

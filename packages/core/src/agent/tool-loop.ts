@@ -652,13 +652,10 @@ class LoopRun {
     }
 
     if (this.guardStop === undefined) {
-      const guard = checkLoopGuards(
-        extractGuardCalls(prepared, 'complete_step'),
-        DEFAULT_LOOP_GUARD_THRESHOLDS,
-        // Read per turn: a handler replaced after the tools were built (in
-        // buildPrompt, say) may write, and loses the waiting room.
-        waitingToolNames(tools),
-      );
+      // Read per turn: a handler replaced after the tools were built (in
+      // buildPrompt, say) may write, and loses the waiting room.
+      const waiting = waitingToolNames(tools);
+      const guard = checkLoopGuards(extractGuardCalls(prepared, 'complete_step', waiting), DEFAULT_LOOP_GUARD_THRESHOLDS, waiting);
       if (guard.kind === 'stop') {
         this.guardStop = guard.reason;
       } else if (guard.kind === 'warn' && guard.reason !== this.noticedGuardReason) {

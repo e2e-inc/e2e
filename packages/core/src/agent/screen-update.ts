@@ -109,6 +109,14 @@ export function toolResultTexts(output: ToolResultPart['output']): string[] {
   return output.value.flatMap((item) => (item.type === 'text' ? [item.text] : []));
 }
 
+/** How an update with no change at all starts: the screen and the screenshot are as they were. */
+const UNCHANGED_SCREEN = 'Screen unchanged since revision ';
+
+/** True when a tool result reports the screen exactly as it was, nothing listed or drawn changed. */
+export function reportsUnchangedScreen(text: string): boolean {
+  return text.includes(UNCHANGED_SCREEN);
+}
+
 /** Renders one step's screens for the model and remembers what it has seen. */
 export class ScreenPresenter {
   private shown: ShownScreen | undefined;
@@ -295,7 +303,7 @@ function renderUnchanged(since: string, observation: ExecutorObservation, expect
   if (pixels === 'changed') {
     return `Since revision ${since} (${looked}): listed nodes unchanged; the screenshot changed. Read the effect off the image (a focus ring alone is no effect); the ids you have stay valid.`;
   }
-  if (!expectedChange) return `Screen unchanged since revision ${since} (${looked}); the ids you have stay valid.`;
+  if (!expectedChange) return `${UNCHANGED_SCREEN}${since} (${looked}); the ids you have stay valid.`;
   switch (pixels) {
     case 'unchanged':
       return `The screen did not change within the wait after this action (${looked}); the ids you have stay valid. If a change was expected and the control commits something (a save, a submit), it may still have gone through: check before you commit again by any route. Otherwise, if a change was expected, the control had no visible effect here: look for another way rather than repeating it.`;

@@ -12,7 +12,7 @@
 import type { ModelMessage } from 'ai';
 import { realmSlot } from '../internal/realm-slot.ts';
 import { GRAMMAR_TOOL_NAMES } from './action-names.ts';
-import { toolResultTexts } from './screen-update.ts';
+import { reportsUnchangedScreen, toolResultTexts } from './screen-update.ts';
 
 /** One tool call as identity: the name plus its exact serialized input. */
 export interface GuardToolCall {
@@ -107,16 +107,34 @@ export function waitingToolNames(tools: Readonly<Record<string, GuardedTool>>): 
 export function extractGuardCalls(
   messages: readonly ModelMessage[],
   concludeToolName: string,
+  waiting: ReadonlySet<string> = new Set(),
 ): GuardToolCall[] {
+  const moved = waiting.size === 0 ? new Set<string>() : waitsThatSawChange(messages, waiting);
   const calls: GuardToolCall[] = [];
   for (const message of messages) {
     if (message.role !== 'assistant' || !Array.isArray(message.content)) continue;
     for (const part of message.content) {
       if (part.type !== 'tool-call' || part.toolName === concludeToolName) continue;
-      calls.push({ toolName: part.toolName, input: safeStringify(part.input) });
+      // A wait that saw the screen change is progress, not a repeat: it ends the streak.
+      const input = safeStringify(part.input);
+      calls.push({ toolName: part.toolName, input: moved.has(part.toolCallId) ? `${input}#changed:${part.toolCallId}` : input });
     }
   }
   return calls;
+}
+
+/** The call ids of waiting tools whose result reported a change on screen. */
+function waitsThatSawChange(messages: readonly ModelMessage[], waiting: ReadonlySet<string>): Set<string> {
+  const moved = new Set<string>();
+  for (const message of messages) {
+    if (message.role !== 'tool' || !Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (part.type !== 'tool-result' || !waiting.has(part.toolName)) continue;
+      const text = toolResultTexts(part.output).join('\n');
+      if (text !== '' && !reportsUnchangedScreen(text)) moved.add(part.toolCallId);
+    }
+  }
+  return moved;
 }
 
 /**
