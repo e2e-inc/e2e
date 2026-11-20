@@ -59,11 +59,12 @@ async function captureOnce(context: ScreenContext, request: CaptureRequest, read
     box = node.rect;
   }
   const observation = await reads.read((timeoutMs) => engine.session.observe(engine.readOperation(timeoutMs), { pixels: true, comparable: true }));
-  if (observation.pixels === undefined) return { missing: 'the engine returned no screenshot' };
-  if (!pixelsProvenMasked(observation.redaction)) {
+  const { pixels } = observation;
+  const withheld = observation.kind === 'semantic' && observation.pixelsWithheld !== undefined;
+  if (withheld || (pixels !== undefined && !pixelsProvenMasked(observation.redaction))) {
     throw new ConfigurationError('POLICY_DENIED', `${request.api} could not prove every secure field on screen was masked, so the screenshot is not kept`);
   }
-  const { pixels } = observation;
+  if (pixels === undefined) return { missing: 'the engine returned no screenshot' };
   const scale = pixels.scale > 0 ? pixels.scale : 1;
   const raw = decodePng(pixels.data);
   let image = resampleImage(raw, Math.max(1, Math.round(raw.width / scale)), Math.max(1, Math.round(raw.height / scale)));

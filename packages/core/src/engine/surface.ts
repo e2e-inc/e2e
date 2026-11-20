@@ -74,6 +74,9 @@ export type GrammarVerb =
   | 'pressKey'
   | 'dismissKeyboard';
 
+/** Why pixels a caller asked for are not part of an observation. */
+export type PixelsWithheld = 'MASKING_UNPROVEN';
+
 export type Observation = ObservationMetadata & (
   | {
       readonly kind: 'semantic';
@@ -82,6 +85,11 @@ export type Observation = ObservationMetadata & (
       /** The engine's measured keyboard state (`EngineSnapshot.keyboardVisible`); `false` when it measured none, absent only when it did not measure. */
       readonly keyboardVisible?: boolean;
       readonly pixels?: ObservationPixels;
+      /**
+       * Why a screenshot the engine took is not here: it reported
+       * `maskedRegionCount` without `pixels`, and fewer than the secure nodes.
+       */
+      readonly pixelsWithheld?: PixelsWithheld;
     }
   | {
       readonly kind: 'pixels';

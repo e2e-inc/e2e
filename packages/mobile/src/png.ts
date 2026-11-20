@@ -45,6 +45,16 @@ export function maskPng(bytes: Uint8Array, rects: readonly Rect[]): Uint8Array {
   return encodeRgba(image);
 }
 
+/** Whether the bytes decode as a PNG: one that does not is no capture at all, masked or not. */
+export function decodesAsPng(bytes: Uint8Array): boolean {
+  try {
+    decodeRgba(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Decodes PNG bytes to 8-bit RGBA, whatever the color type, bit depth, or
  * palette; throws on bytes that are not a PNG. An 8-bit RGB screenshot is

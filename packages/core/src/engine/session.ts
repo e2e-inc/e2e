@@ -22,6 +22,7 @@ import {
 import { requireKey } from '../internal/keys.ts';
 import { timestamp } from '../internal/ids.ts';
 import { bound } from '../internal/text.ts';
+import { pixelsProvenMasked } from '../run/secrecy.ts';
 import type { AppLogEntry, EngineHandle, EngineSnapshot, EngineTabs } from './index.ts';
 import {
   type AppEvent,
@@ -413,6 +414,11 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
         truncated: snapshot.truncated === true,
         ...(snapshot.keyboardVisible === undefined ? {} : { keyboardVisible: snapshot.keyboardVisible }),
         ...(snapshot.pixels === undefined ? {} : { pixels: snapshot.pixels }),
+        ...(snapshot.pixels === undefined
+          && snapshot.maskedRegionCount !== undefined
+          && !pixelsProvenMasked(metadata.redaction)
+          ? { pixelsWithheld: 'MASKING_UNPROVEN' as const }
+          : {}),
       };
       showScreen(observation);
       return observation;

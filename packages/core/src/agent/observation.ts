@@ -2,7 +2,7 @@
 
 import { appLocation, appNavigation } from '../cache/route.ts';
 import { OBSERVED_NAME_LIMIT, OBSERVED_TEXT_LIMIT } from '../engine/contract.ts';
-import type { Observation, SemanticNode, ViewportSize } from '../engine/surface.ts';
+import type { Observation, PixelsWithheld, SemanticNode, ViewportSize } from '../engine/surface.ts';
 import { CLOCK_TIME } from '../internal/dates.ts';
 import { sha256Hex } from '../internal/ids.ts';
 import type { SecretLedger } from '../internal/redact.ts';
@@ -20,9 +20,6 @@ const TRUNCATION_MARKER = '[observation truncated at the resolved observation by
 const ENGINE_TRUNCATION_MARKER = '[observation truncated: the engine stopped listing nodes at its limit]';
 /** Missing semantics are unknown, including on a surface that appears empty. */
 const UNAVAILABLE_TREE_MARKER = '[semantic capture unavailable: no nodes were read; previous node ids are no longer valid. Use the screenshot, never infer absence from this listing]';
-
-/** Why pixels the caller asked for are not part of this observation. */
-type PixelsWithheld = 'MASKING_UNPROVEN';
 
 export type AgentObservation = AgentObservationMetadata & (
   | {
@@ -363,14 +360,18 @@ export function observationDetail(observation: AgentObservation): { count?: numb
  * Every secure node the engine observed must be covered by a masked region.
  * When it is not, the engine masked less than it saw and the image cannot be
  * proven redacted, so it is dropped exactly like an incompletely redacted
- * artifact — the semantic tree still goes out.
+ * artifact, and the semantic tree still goes out. A screenshot the engine
+ * itself withheld for the same reason reads the same way.
  */
 function clearPixels(observation: Observation): {
   cleared?: ExecutorPixels;
   withheld?: PixelsWithheld;
 } {
   const pixels = observation.pixels;
-  if (pixels === undefined) return {};
+  if (pixels === undefined) {
+    const withheld = observation.kind === 'semantic' ? observation.pixelsWithheld : undefined;
+    return withheld === undefined ? {} : { withheld };
+  }
   if (!pixelsProvenMasked(observation.redaction)) return { withheld: 'MASKING_UNPROVEN' };
   return { cleared: { ...pixels, maskedRegionCount: observation.redaction.maskedRegionCount } };
 }
