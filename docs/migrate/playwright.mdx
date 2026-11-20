@@ -133,6 +133,7 @@ run only in a browser, so a test that uses it declares
 | Playwright | e2e |
 | --- | --- |
 | `toBeVisible()`, `toBeHidden()`, `toBeEnabled()`, `toBeDisabled()`, `toBeChecked()`, `toBeFocused()`, `toBeAttached()`, `toHaveText()`, `toContainText()`, `toHaveValue()`, `toHaveAttribute()`, `toHaveCount()`, `toHaveAccessibleName()`, `toHaveRole()` | the same, with `{ visible }`, `{ enabled }`, `{ checked }`, `{ attached }`, and `{ ignoreCase }` |
+| `toBeEmpty()` | the same, with `{ timeout }` |
 | `toHaveId(id)`, `toContainClass(name)` | `toHaveAttribute('id', id)`, `toHaveAttribute('class', RegExp)` |
 | `expect(page).toHaveURL()`, `toHaveTitle()` | `expect(browser).toHaveURL()`, `toHaveTitle()` |
 | `expect(page).toHaveScreenshot()`, `expect(locator).toHaveScreenshot()` | `expect(screen).toHaveScreenshot()` and the locator form, see [Visual comparison](/visual-testing) |
@@ -260,7 +261,7 @@ purpose. Use the workaround, or keep the test in Playwright.
 | Playwright | Use today |
 | --- | --- |
 | `expect(fn).toPass()`, `expect.poll(fn, { intervals })` | `expect.poll(async () => { ...; return true }).toBe(true)` |
-| `toBeEmpty()`, `toBeEditable()`, `toBeInViewport()` | `toHaveValue('')` on a form control, `toHaveText('')` on other elements; `toBeEnabled()` and `.not.toHaveAttribute('readonly')`; `expect.poll` over `boundingBox()` |
+| `toBeEditable()`, `toBeInViewport()` | `toBeEnabled()` and `.not.toHaveAttribute('readonly')`; `expect.poll` over `boundingBox()` |
 | `locator.screenshot()`, `{ fullPage, clip }`, `snapshotPathTemplate`, `ignoreSnapshots` | The viewport or one locator in `toHaveScreenshot`; a tag and `--exclude-tag` to skip visual tests |
 | `expect.configure()` | `{ timeout }` on each call |
 | `@axe-core/playwright` | axe-core through `browser.addInitScript({ path: 'node_modules/axe-core/axe.min.js' })`, then `axe.run()` in `browser.evaluate` |
@@ -357,9 +358,17 @@ purpose. Use the workaround, or keep the test in Playwright.
   screen.getByRole('button', 'save changes');          // no match, case differs
   screen.getByLabel('Email');                                    // no match
   ```
-- Text reads are rendered text. `textContent()`, `toHaveText`, and
-  `toContainText` read what `innerText` returns, so hidden text is left out
-  and `text-transform` applies. See [locator reads](/reference/screen#locator-reads).
+- Text reads are rendered text. `textContent()`, `toHaveText`,
+  `toContainText`, and `toBeEmpty` read what `innerText` returns, so hidden
+  text is left out (a node whose only text is hidden is empty) and
+  `text-transform` applies. See [locator reads](/reference/screen#locator-reads).
+- `toBeEmpty` decides by role, not by tag. Playwright reads the value of an
+  `input` or `textarea` and the text of anything else; here a node with a
+  value role reads its value (except an `option`, which reads its text), and
+  other nodes read their own text. So an ARIA combobox or listbox, an ARIA
+  `textbox` that is not `contenteditable`, a native `select`, a submit
+  button input, and a checkbox all read as empty here, though Playwright finds
+  them not empty.
 - `toHaveRole` takes the `getByRole` vocabulary, so `paragraph`, `generic`,
   and the other roles it leaves out are type errors, and `img` reads as
   `image`. It compares the role the tree reads, where a `contenteditable`

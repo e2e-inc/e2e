@@ -126,6 +126,7 @@ const LOCATOR_MATCHERS = members({
   toBeSelected: matcher(0, 1),
   toBeExpanded: matcher(0, 1),
   toBeFocused: matcher(0, 1),
+  toBeEmpty: matcher(0, 1),
   toHaveText: matcher(1, 2),
   toContainText: matcher(1, 2),
   toHaveValue: matcher(1, 2),
