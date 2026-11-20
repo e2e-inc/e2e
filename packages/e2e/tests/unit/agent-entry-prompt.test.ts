@@ -64,6 +64,8 @@ describe('the built-in agent from its agents entry', () => {
     expect(system).toContain('A step that asks for several commits (add two items, send two messages) presses once for each.');
     expect(system).toContain('When the check shows neither, do not press it again: conclude from the screen you have.');
     expect(system).toContain('Do not leave the screen (navigate, go back, open another page) to confirm a commit unless the step asks for that.');
+    expect(system).toContain('or once to check whether a save or submit committed (see below).');
+    expect(system).toContain('or once when a save or submit showed no confirmation.');
     expect(system).not.toContain('means the decisive action did not land: act again');
   });
 
