@@ -363,6 +363,7 @@ export class ListReporter {
    * while a first-run download narrates above the live window.
    */
   private startedAt: Date | undefined;
+  private holdTiming: RunEventOf<'run-hold'> | undefined;
   /** File groups keyed `${target}\u0000${file}`, in first-seen order. */
   private readonly groups = new Map<string, FileGroup>();
   /** Pairs that started and whose result is still to come, keyed by `pairKey`, in start order. */
@@ -472,6 +473,9 @@ export class ListReporter {
         break;
       case 'setup':
         this.setupStep(event);
+        break;
+      case 'run-hold':
+        this.holdTiming = event;
         break;
       case 'test-started':
         this.testStarted(event);
@@ -1114,8 +1118,9 @@ export class ListReporter {
     }
     const startedAt = this.startedAt ?? (final ? this.launchedAt : undefined);
     if (startedAt !== undefined) {
+      const elapsed = (this.holdTiming?.heldSince ?? Date.now()) - startedAt.getTime() - (this.holdTiming?.heldMs ?? 0);
       rows.push(padTitle(pc, 'Start at') + formatClock(startedAt));
-      rows.push(padTitle(pc, 'Duration') + durationText(pc, Date.now() - startedAt.getTime(), this.startupMs));
+      rows.push(padTitle(pc, 'Duration') + durationText(pc, elapsed, this.startupMs));
     }
     return rows;
   }

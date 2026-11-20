@@ -498,6 +498,9 @@ does not carry them.
       Results  https://example.test/runs/0192c…
 ```
 
+The terminal's `Duration` row excludes time at a held step or pause. The
+run timestamps in `report.json` use wall time.
+
 ##### Artifacts
 
 - Artifact paths in the report are POSIX paths relative to `artifactsRoot`.
@@ -570,6 +573,7 @@ type RunEventFact =
   | { type: 'output'; target; pair; stream: 'stdout' | 'stderr'; text }
   | { type: 'setup'; step: SetupStep; state: 'started' }
   | { type: 'setup'; step: SetupStep; state: 'finished'; durationMs; outcome?: 'reused' | 'failed' | 'timed-out' }
+  | { type: 'run-hold'; heldMs: number; heldSince: number | null }
   | { type: 'test-started'; testId; agent; repeat; title; file; serialId; target }
   | { type: 'step'; testId; agent; repeat; target; progress: StepProgress }
   | { type: 'test-finished'; result: RunEventResult }
@@ -602,6 +606,10 @@ type RunEventFact =
   `collect`, `filter` for a test filter's progress and summary, or `run`.
 - `output` is one write a test made to stdout or stderr; `pair` names the
   test running at the time and is undefined between tests.
+- `run-hold` marks the first hold opening or the last closing in a terminal
+  run. `heldMs` counts the time in completed hold intervals across all workers.
+  `heldSince` is the current interval's start in Unix milliseconds, or `null`
+  once it closes.
 - `test-finished` carries the full result record, including every attempt's
   artifacts.
 - `explore` appears only in an `e2e explore` run: `started`, `planning`,

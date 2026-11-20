@@ -80,6 +80,8 @@ export interface SchedulerEvents {
    * worker is being interrupted.
    */
   onTimeLimit?(): void;
+  /** The first hold opened or the last one closed, with the time spent in completed hold intervals. */
+  onHoldChange?(heldMs: number, heldSince: number | null): void;
   /** A worker began executing one test-target pair. */
   onTestStart?(start: PairStart, targetName: string): void;
   /** Live step progress of one running pair, identified by test id, agent, and repeat. */
@@ -421,6 +423,8 @@ class Scheduler {
   private timeLimitTimer: NodeJS.Timeout | undefined;
   /** When the steps held now began waiting, while any is. */
   private heldSince: number | undefined;
+  /** Time spent waiting for holds that have already ended, counting overlaps once. */
+  private heldMs = 0;
 
   constructor(private readonly options: RunUnitsOptions) {}
 
@@ -587,8 +591,12 @@ class Scheduler {
     const attachId = this.attachments.hold(worker.runner, holdId, attemptId, attachmentLabels);
     const beforeStep = this.options.beforeStep ?? (() => Promise.resolve());
     const controller = new AbortController();
-    if (this.holds.size === 0) this.heldSince = Date.now();
     this.holds.set(holdId, { worker, controller });
+    if (this.holds.size === 1) {
+      this.heldSince = Date.now();
+      this.options.events.onHoldChange?.(this.heldMs, this.heldSince);
+    }
+
     const signal = AbortSignal.any([controller.signal, this.options.interruptSignal]);
 
     const request = (type: HoldRequest['type']): Promise<HoldReply | undefined> =>
@@ -660,6 +668,9 @@ class Scheduler {
     if (this.holds.size === 0 && this.heldSince !== undefined) {
       const heldMs = Date.now() - this.heldSince;
       this.heldSince = undefined;
+      this.heldMs += heldMs;
+      this.options.events.onHoldChange?.(this.heldMs, null);
+
       const limit = this.options.timeLimit;
       if (limit !== undefined && this.timeLimitDue > 0) {
         this.timeLimitDue += heldMs;

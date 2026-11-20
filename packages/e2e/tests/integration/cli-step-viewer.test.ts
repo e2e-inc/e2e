@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -14,6 +14,7 @@ import { stripVTControlCharacters } from 'node:util';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { describe, expect, it, type TestContext } from 'vitest';
+import type { Report1Document } from '../../src/report/build.ts';
 import { FAKE_APP_URL } from '../helpers/fake-engine.ts';
 import { PAUSE_ID_PATTERN, printedPauseId } from '../helpers/pause-id.ts';
 import { createProject, workerFakeConfigSource } from '../helpers/run-project.ts';
@@ -22,6 +23,7 @@ const CLI = fileURLToPath(new URL('../../dist/cli/bin.js', import.meta.url));
 const ENV = { ...process.env, CI: '', NO_COLOR: '1' };
 const POLL = { timeout: 10_000, interval: 20 };
 const KEY_GUARD_MS = 400;
+const ACTIVE_WORK_MS = 150;
 const ENTER_SCREEN = '\u001b[?1049h';
 const HIDE_CURSOR = '\u001b[?25l';
 const RESTORE_SCREEN = '\u001b[?1049l\u001b[?25h';
@@ -46,6 +48,16 @@ test('checks out', async ({ app }) => {
   await app.open('/cart');
   await app.open('/receipt');
   console.log('The test reached the receipt.');
+});
+`;
+
+const TIMED_STEPS = `import { setTimeout as sleep } from 'node:timers/promises';
+import { test } from 'e2e';
+
+test('checks out', async ({ app }) => {
+  await app.open('/cart');
+  await app.open('/receipt');
+  await sleep(${ACTIVE_WORK_MS});
 });
 `;
 
@@ -187,6 +199,86 @@ async function heldRun(
   return run;
 }
 
+/** Reads the last terminal Duration row in milliseconds. */
+function durationMs(output: string): number {
+  const row = [...output.matchAll(/^ +Duration +(\d+(?:\.\d+)?)(ms|s)\b/gm)].at(-1);
+  assert(row?.[1] !== undefined, 'the run printed a Duration row');
+  return Math.round(Number(row[1]) * (row[2] === 's' ? 1_000 : 1));
+}
+
+/** Reads the wall time between the run timestamps in report.json. */
+function reportWallMs(dir: string): number {
+  const { run }: Report1Document = JSON.parse(readFileSync(path.join(dir, '.e2e', 'report.json'), 'utf8'));
+  return Date.parse(run.finishedAt) - Date.parse(run.startedAt);
+}
+
+describe('the terminal run duration', () => {
+  it('freezes Duration while a step waits and prints only active time at the end', async (context) => {
+    const run = terminalRun(context, {
+      'e2e.config.ts': APP,
+      'tests/checkout.e2e.ts': TIMED_STEPS,
+    }, ['--step']);
+    await run.shows(STEP_PROMPT);
+    const held = durationMs(run.printed());
+
+    await sleep(KEY_GUARD_MS);
+    const repaint = run.output().length;
+    await run.shows(STEP_PROMPT, repaint);
+    expect(durationMs(run.printed(repaint))).toBe(held);
+
+    const releasedAt = performance.now();
+    run.press('\r');
+    await run.finishes(0);
+    const activeAfterRelease = durationMs(run.printed()) - held;
+    expect(activeAfterRelease).toBeGreaterThanOrEqual(ACTIVE_WORK_MS - 10);
+    expect(activeAfterRelease).toBeLessThanOrEqual(Math.ceil(performance.now() - releasedAt) + 10);
+    expect(reportWallMs(run.dir)).toBeGreaterThanOrEqual(held + KEY_GUARD_MS + ACTIVE_WORK_MS - 20);
+  });
+
+  it('counts elapsed time when the run has no holds', async (context) => {
+    const startedAt = performance.now();
+    const run = terminalRun(context, {
+      'e2e.config.ts': APP,
+      'tests/checkout.e2e.ts': TIMED_STEPS,
+    }, []);
+    await run.finishes(0);
+
+    const elapsed = durationMs(run.printed());
+    expect(elapsed).toBeGreaterThanOrEqual(ACTIVE_WORK_MS - 10);
+    expect(elapsed).toBeGreaterThanOrEqual(reportWallMs(run.dir) - 20);
+    expect(elapsed).toBeLessThanOrEqual(Math.ceil(performance.now() - startedAt) + 10);
+  });
+
+  it('starts a fresh Duration when watch runs the test again', async (context) => {
+    const suite = `import { existsSync, writeFileSync } from 'node:fs';
+import { test } from 'e2e';
+
+test('checks out', async ({ app, screen }) => {
+  await app.open('/cart');
+  const receipt = new URL('../.e2e/has-paused', import.meta.url);
+
+  if (!existsSync(receipt)) {
+    await screen.pause();
+    writeFileSync(receipt, '');
+  }
+
+  await app.open('/receipt');
+});
+`;
+    const run = await heldRun(context, { suite, args: ['--watch'], prompt: PAUSE_PROMPT });
+    await run.shows('Waiting for file changes...', run.press('\r'));
+
+    const rerun = run.press('a');
+    await run.shows('Waiting for file changes...', rerun);
+    expect(run.printed(rerun)).toContain('1 passed (1)');
+    expect(run.printed(rerun)).not.toMatch(PAUSE_PROMPT);
+    expect(durationMs(run.printed(rerun))).toBeGreaterThanOrEqual(reportWallMs(run.dir) - 20);
+
+    run.press('q');
+    await run.finishes(0);
+  });
+});
+
 describe('the terminal screen and app log viewer', () => {
   it("shows the held step's screen and returns to the same prompt on q", async (context) => {
     const run = await heldRun(context);
@@ -287,16 +379,19 @@ describe('the terminal screen and app log viewer', () => {
 
   it('restores the main screen and interrupts the run on Ctrl-C in the viewer', async (context) => {
     const run = await heldRun(context);
+    const held = durationMs(run.printed());
     const opened = run.press('s');
     await run.frame('1-6 of 22', opened);
     expect(run.output(opened)).toContain(ENTER_SCREEN + HIDE_CURSOR);
 
+    const interruptedAt = performance.now();
     const interrupted = run.press('\u0003');
     await run.finishes(130);
     const output = run.output(interrupted);
     expect(output).toContain(RESTORE_SCREEN);
     expect(stripVTControlCharacters(output.slice(output.indexOf(RESTORE_SCREEN)))).toContain('1 interrupted');
     expect(run.printed()).not.toContain('The test reached the receipt.');
+    expect(durationMs(run.printed(interrupted)) - held).toBeLessThanOrEqual(Math.ceil(performance.now() - interruptedAt) + 10);
   });
 
   it('restores the main screen and exits watch mode on Ctrl-C in the viewer', async (context) => {
@@ -328,14 +423,17 @@ test('checks out', async ({ app }) => {
 });
 `;
     const run = await heldRun(context, { suite });
+    const held = durationMs(run.printed());
     await run.frame('1-6 of 22', run.press('s'));
 
     const before = run.output().length;
+    const stoppedAt = performance.now();
     writeFileSync(path.join(run.dir, 'exit-worker'), '');
     await run.finishes(3);
     const output = run.output(before);
     expect(output).toContain(RESTORE_SCREEN);
     expect(stripVTControlCharacters(output.slice(output.indexOf(RESTORE_SCREEN)))).toContain('WORKER_CRASH');
+    expect(durationMs(run.printed(before)) - held).toBeLessThanOrEqual(Math.ceil(performance.now() - stoppedAt) + 10);
   });
 
   it('prints output from another worker in order after the viewer closes', async (context) => {
@@ -372,6 +470,7 @@ test('prints while checkout is paused', async () => {
       'tests/other.e2e.ts': other,
     }, []);
     await run.shows(PAUSE_PROMPT);
+    const held = durationMs(run.printed());
     await sleep(KEY_GUARD_MS);
     const opened = run.press('s');
     await run.shows('button "Submit"', opened);
@@ -389,6 +488,8 @@ test('prints while checkout is paused', async () => {
     const mainScreen = stripVTControlCharacters(output.slice(output.indexOf(RESTORE_SCREEN)));
     expect(mainScreen).toContain('First line from the other test.');
     expect(mainScreen.indexOf('First line from the other test.')).toBeLessThan(mainScreen.indexOf('Second line from the other test.'));
+    await run.shows(PAUSE_PROMPT, closed);
+    expect(durationMs(run.printed(closed))).toBe(held);
 
     await sleep(KEY_GUARD_MS);
     run.press('\r');

@@ -1190,6 +1190,9 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
           onTimeLimit: () => {
             stoppedEarly = true;
           },
+          onHoldChange: (heldMs, heldSince) => {
+            emit({ type: 'run-hold', heldMs, heldSince });
+          },
           onTestStart: (start, targetName) =>
             emit({ type: 'test-started', ...start, target: targetName }),
           onProgress: (pair, targetName, progress) =>

@@ -153,7 +153,9 @@ hosted service's video by URL.
   last `Failed`, one entry per failed test (file and line, error's first
   line, trace page when written), so `| tail` keeps it. Past a minute `Duration`
   repeats as minutes and seconds, setup time split out as `startup` in the
-  same parenthetical (`682.97s (11m 23s, startup 43.00s)`).
+  same parenthetical (`682.97s (11m 23s, startup 43.00s)`). In a terminal,
+  `Duration` stops while any step is held or any test is paused. The
+  timestamps in `report.json` use wall time.
 - `report.json`, for scripts rather than reading (`jq`, CI tools; a reader
   takes the terminal and the trace pages), the one record of every result,
   passing ones included, written whatever the reporters, holds `run.status`,

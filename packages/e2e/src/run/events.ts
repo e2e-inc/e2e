@@ -169,6 +169,14 @@ export type RunEventFact =
       readonly outcome?: SetupOutcome;
     }
   | {
+      /** The first hold opened or the last hold closed in a terminal run. */
+      readonly type: 'run-hold';
+      /** Total milliseconds spent in completed holds, counting overlapping holds once. */
+      readonly heldMs: number;
+      /** The current hold interval's start as Unix milliseconds, or null when no hold is open. */
+      readonly heldSince: number | null;
+    }
+  | {
       readonly type: 'test-started';
       readonly testId: string;
       /** The configured agent the test runs as; a test run as several starts once per agent. */

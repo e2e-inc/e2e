@@ -295,10 +295,11 @@ the viewer is open.
 - A key pressed within 150 ms of a prompt is ignored, so a key meant for the
   last step never runs this one. Ctrl-C works at any time, also while a step
   runs. The same guard applies after you close the viewer.
-- The time a step is held counts toward nothing: not its duration, not the
-  test's `timeout`, not `maxDuration`. A test that hangs after a step still
+- The step's duration, the test's `timeout`, `maxDuration`, and the terminal's
+  `Duration` row all exclude held time. A test that hangs after a step still
   times out on the time it had left. The test's own duration in the report
-  includes the holds.
+  includes the holds. The run timestamps in `report.json` and the run
+  durations that reports calculate from them use wall time.
 - Setup tests, retries, `afterEach` hooks, fixture teardowns, and steps inside
   an `expect.poll` read run without stopping. An `agent.act` is one step.
 - Steps started together, as in `Promise.all`, share one prompt and run on one
@@ -453,7 +454,8 @@ for what each answer holds.
   run is stopped after 30 minutes at a pause without a command.
 - The test is paused on every attempt, retries and setup tests included.
 - With several workers, pauses are shown one at a time, oldest first, while
-  the other workers keep running.
+  the other workers keep running. The terminal's `Duration` row and
+  `maxDuration` clock stop while any test is paused.
 - Call `screen.pause()` with `await` in a
   [`beforeEach`](/reference/test#beforeeach) hook,
   [fixture](/fixtures) setup, or the test body. See
