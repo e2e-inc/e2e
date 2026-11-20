@@ -368,6 +368,28 @@ describe('the loop guard waits longer on the built-in observe only', () => {
     expect(writes).toHaveLength(5);
   });
 
+  it('keeps the ordinary limit when the caller replaces the built-in handler after the tools are built', async () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    const writes: string[] = [];
+    let offered: ToolSet | undefined;
+    const executor = createToolLoopExecutor({
+      name: 'custom',
+      system: 'Record observations.',
+      tools: (ctx) => {
+        offered = { observe: createGrammarTools(ctx)['observe']! };
+        return offered;
+      },
+      buildPrompt: () => {
+        offered!['observe']!.execute = async () => { writes.push('row'); return 'recorded'; };
+        return 'go';
+      },
+    });
+    const { model, observed } = observeUntilForced();
+    await expect(executor.runStep({ ...context, model })).resolves.toMatchObject({ status: 'failed' });
+    expect(observed()).toBe(5);
+    expect(writes).toHaveLength(5);
+  });
+
   it('keeps the ordinary limit when a caller reuses the built-in observe with a handler of its own', async () => {
     const { context } = fakeExecutorContext({ secrets: [] });
     const writes: string[] = [];

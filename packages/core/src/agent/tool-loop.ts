@@ -246,8 +246,6 @@ class LoopRun {
   private readonly clockWindDownMs: number;
   /** Request hints for the model's provider; a no-op for providers without any. */
   private readonly hints: ProviderHints;
-  /** Names of the offered tools that only wait on the screen; the loop guard gives them more room. */
-  private waitingTools: ReadonlySet<string> = new Set();
   /** The history the last request went out with, for shrinking after an overflow. */
   private lastRequest: ModelMessage[] | undefined;
   /** A digest of what each message of the last request held, for telling a rewritten message from a carried one. */
@@ -313,7 +311,6 @@ class LoopRun {
       ...this.options.tools(this.context, helpers),
       complete_step: this.conclusion.tool,
     };
-    this.waitingTools = waitingToolNames(tools);
     const tracker = trackModelCalls(
       this.context,
       this.model as { provider?: string; modelId?: string },
@@ -429,7 +426,7 @@ class LoopRun {
         ({ steps }) => this.turnOffset + steps.length >= this.maxTurns,
       ],
       prepareStep: ({ messages, stepNumber, steps }) =>
-        this.prepareTurn(messages, this.turnOffset + stepNumber, steps.at(-1)),
+        this.prepareTurn(messages, this.turnOffset + stepNumber, steps.at(-1), tools),
     });
   }
 
@@ -607,6 +604,7 @@ class LoopRun {
     messages: ModelMessage[],
     stepNumber: number,
     previous: StepResult<ToolSet> | undefined,
+    tools: ToolSet,
   ): Promise<{
     messages?: ModelMessage[];
     activeTools?: string[];
@@ -657,7 +655,9 @@ class LoopRun {
       const guard = checkLoopGuards(
         extractGuardCalls(prepared, 'complete_step'),
         DEFAULT_LOOP_GUARD_THRESHOLDS,
-        this.waitingTools,
+        // Read per turn: a handler replaced after the tools were built (in
+        // buildPrompt, say) may write, and loses the waiting room.
+        waitingToolNames(tools),
       );
       if (guard.kind === 'stop') {
         this.guardStop = guard.reason;
