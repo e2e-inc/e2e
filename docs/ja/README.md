@@ -95,6 +95,6 @@ translation moves or goes with it in the same change.
 | semantic tree | セマンティックツリー |
 | redact, redaction | マスキング |
 | secure field | 機密フィールド |
-| location (current URL or screen) | 現在の画面位置 |
+| location (current URL or screen) | ロケーション |
 | budget | 予算 |
 | planned, not planned | 実装予定, 実装予定なし |
