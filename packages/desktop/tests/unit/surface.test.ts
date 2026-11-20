@@ -890,8 +890,9 @@ describe('DesktopSurface', () => {
   });
 
   it('keeps a launch whose lookup ran out of time, so the next quit looks again', async () => {
+    // A copy whose environment cannot be read: no token tells it apart, only the app list.
     const { surface, fake } = await initialized({
-      launch: [{ spawn: true, ...(failure('TIMEOUT', 'delivered_unverified') as object) }],
+      launch: [{ spawn: 'unreadable', ...(failure('TIMEOUT', 'delivered_unverified') as object) }],
       'list-apps': [{ ok: true, data: { apps: [] } }, { sleepMs: 3_000, ok: true, data: { apps: [] } }, { spawnedApps: { name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form' } }],
     });
     await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
@@ -1115,18 +1116,28 @@ describe('DesktopSurface', () => {
 
   it('keeps the launch record of a launch whose process was never found, so the next run can quit it', async () => {
     const { surface, fake } = await initialized({
-      launch: [{ spawn: true, ...(failure('TIMEOUT', 'delivered_unverified') as object) }],
-      'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [], complete: false } }],
+      launch: [{ spawn: 'unreadable', ...(failure('TIMEOUT', 'delivered_unverified') as object) }],
+      // A complete list first, then only partial ones: the last answer decides.
+      'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [] } }, { ok: true, data: { apps: [], complete: false } }],
     });
     const home = fake.calls()[0]!.home!;
     try {
       await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
       await expect(surface.dispose({ signal, timeoutMs: 1_000 })).rejects.toThrow(/only in part/);
-      const { token } = JSON.parse(readFileSync(path.join(home, 'app.json'), 'utf8')) as { token: string };
-      expect(await environmentOf(fake.spawned()[0]!)).toContain(`E2E_DESKTOP_LAUNCH=${token}`);
+      expect(JSON.parse(readFileSync(path.join(home, 'app.json'), 'utf8'))).toMatchObject({ token: expect.any(String) });
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
+  });
+
+  it('quits the process carrying the launch token of a launch the app list never showed', async () => {
+    const { surface, fake } = await initialized({
+      launch: [{ spawn: true, ...(failure('TIMEOUT', 'delivered_unverified') as object) }],
+      'list-apps': [{ ok: true, data: { apps: [] } }],
+    });
+    await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
+    await surface.endAttempt({ signal, timeoutMs: 1_000 });
+    expect(await gone(fake.spawned()[0]!)).toBe(true);
   });
 
   it('quits the app a killed worker left running, by its launch token, and nothing else', async () => {

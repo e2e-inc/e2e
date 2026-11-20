@@ -662,31 +662,37 @@ export class DesktopSurface {
     if (this.pid === undefined && pending !== undefined) {
       // A launch whose outcome was unknown: look for the process it started, which may still be registering, under this quit's own budget.
       const until = Date.now() + Math.min(timeoutMs, PENDING_SETTLE_MS);
-      // The pending launch stays until it is claimed or a whole wait found none: a lookup that failed leaves it for the next quit.
-      // Only a lookup that answered counts: one that ran out of time, or listed the apps in part, proves nothing, and leaves the launch pending.
-      let answered = false;
+      // The pending launch stays until it is claimed or the wait's last answer found none: an answer that listed the apps in part proves nothing, and a lookup that ran out of time is no answer.
+      let lastShowedNone = false;
       while (Date.now() < until && !signal.aborted) {
-        const found = await this.claim(pending, { signal, timeoutMs: Math.max(until - Date.now(), 0) }).then(
-          (claimed) => {
-            if (claimed !== undefined) answered = true;
-            return claimed === true;
-          },
-          (cause: unknown) => {
-            if (cause instanceof EngineError && cause.code === 'OPERATION_TIMEOUT') return false;
-            throw cause;
-          },
-        );
-        if (found) break;
+        const found = await this.claim(pending, { signal, timeoutMs: Math.max(until - Date.now(), 0) }).catch((cause: unknown) => {
+          if (cause instanceof EngineError && cause.code === 'OPERATION_TIMEOUT') return 'timeout' as const;
+          throw cause;
+        });
+        if (found === true) break;
+        if (found !== 'timeout') lastShowedNone = found === false;
         await sleep(Math.min(LAUNCH_POLL_MS, Math.max(until - Date.now(), 0)), signal);
       }
       if (signal.aborted) throw new EngineError('CANCELLED', `looking for the process a launch of ${pending.target} started was cancelled`, { retryable: false });
-      if (this.pid === undefined && !answered) {
-        throw new EngineError('ENGINE_FAILURE', `could not tell whether a launch of ${pending.target} started the app: listing the apps ran out of time or listed them only in part; quitting tries again`, { retryable: false });
-      }
-      this.pending = undefined;
       if (this.pid === undefined) {
+        // A process carrying the launch's token is its own, whether or not the app list shows it yet.
+        const carriers = await processesCarrying(pending.token, signal);
+        for (const carrier of carriers) {
+          try {
+            process.kill(carrier, 'SIGKILL');
+          } catch {
+            // Gone already.
+          }
+        }
+        if (carriers.length === 0 && !lastShowedNone) {
+          throw new EngineError('ENGINE_FAILURE', `could not tell whether a launch of ${pending.target} started the app: listing the apps ran out of time or listed them only in part; quitting tries again`, { retryable: false });
+        }
+        this.pending = undefined;
+        if (this.home !== undefined) await rm(path.join(this.home, APP_FILE), { force: true }).catch(() => undefined);
+        if (carriers.length > 0) return;
         throw new EngineError('ENGINE_FAILURE', `a launch of ${pending.target} failed, and no process it started was found; if the app is running, quit it by hand`, { retryable: false });
       }
+      this.pending = undefined;
     }
     const { pid, instance, appName } = this;
     this.forget();
