@@ -103,6 +103,22 @@ test('condition false runs on', async () => {
   test.skip(false, 'never');
 });
 
+test('unset condition runs on', async () => {
+  test.skip(undefined as unknown as boolean, 'only on CI');
+});
+
+test('string condition skips with the second argument as the reason', async () => {
+  test.skip('1' as unknown as boolean, 'the real reason');
+});
+
+test('promise condition', async () => {
+  test.skip(Promise.resolve(false) as unknown as boolean, 'async check');
+});
+
+test('function condition', async () => {
+  test.skip((() => false) as unknown as boolean, 'not called');
+});
+
 test('bare skip', async () => {
   test.skip();
 });
@@ -122,6 +138,23 @@ test('consumer', { session: 'admin' }, async () => {});
       expect(conditional.attempts[0]?.status).toBe('skipped');
       expect(conditional.attempts[0]?.steps.map((step) => step.api)).toEqual(['app.open']);
       expect(resultByTitle(outcome, 'condition false runs on').status).toBe('passed');
+      // The condition is read by truthiness, as in Playwright: an unset env var reads as undefined.
+      expect(resultByTitle(outcome, 'unset condition runs on').status).toBe('passed');
+      const stringCondition = resultByTitle(outcome, 'string condition skips with the second argument as the reason');
+      expect(stringCondition.skip).toEqual({ cause: 'explicit', reason: 'the real reason' });
+      // A Promise is always truthy, so a forgotten await fails the test instead of skipping it.
+      const promise = resultByTitle(outcome, 'promise condition');
+      expect(promise.status).toBe('failed');
+      expect(promise.attempts[0]?.error).toMatchObject({
+        code: 'INVALID_ARGUMENT',
+        message: expect.stringContaining('test.skip() got a Promise'),
+      });
+      const fn = resultByTitle(outcome, 'function condition');
+      expect(fn.status).toBe('failed');
+      expect(fn.attempts[0]?.error).toMatchObject({
+        code: 'INVALID_ARGUMENT',
+        message: expect.stringContaining('test.skip() got a function'),
+      });
       expect(resultByTitle(outcome, 'bare skip').skip).toEqual({ cause: 'explicit', reason: 'skipped' });
       const setup = resultByTitle(outcome, 'sign in');
       expect(setup.status).toBe('failed');

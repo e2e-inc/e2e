@@ -10,6 +10,7 @@
 
 import { currentAttempt } from '@e2e-dev/core/lib/expect/attempt';
 import { CollectionError, TestError } from '@e2e-dev/core/lib/internal/errors';
+import { isPromiseLike } from './promise-like.ts';
 
 const runtimeSkipBrand: unique symbol = Symbol.for('e2e.runtimeSkip.v1');
 
@@ -38,17 +39,44 @@ export type ModifierCall =
 
 /**
  * `skip(title, fn)` registers a skipped test; `skip(condition, reason?)` and
- * `skip(reason?)` skip the running one, and `fail` takes the same shapes. A
- * string alone is a reason, never a title: a registration always carries its
- * body.
+ * `skip(reason?)` skip the running one, and `fail` takes the same shapes.
+ * `args` are the call's own arguments: `skip(undefined, reason)` and
+ * `skip(reason?)` differ only in their count. A condition is read by
+ * truthiness and the reason is the second argument, as in Playwright.
  */
-export function parseModifierCall(first: unknown, second: unknown): ModifierCall {
-  if (typeof first === 'string' && typeof second === 'function') return { kind: 'register', title: first, fn: second };
-  return {
-    kind: 'runtime',
-    condition: typeof first === 'boolean' ? first : true,
-    reason: typeof first === 'string' ? first : typeof second === 'string' ? second : undefined,
-  };
+export function parseModifierCall(api: string, args: readonly unknown[]): ModifierCall {
+  const [first, second] = args;
+  if (typeof first === 'string' && typeof second === 'function') {
+    return { kind: 'register', title: first, fn: second };
+  }
+  if (args.length <= 1 && (first === undefined || typeof first === 'string')) {
+    return { kind: 'runtime', condition: true, reason: first };
+  }
+  const reason = typeof second === 'string' ? second : undefined;
+  // Outside a body the call itself is the mistake, and the skip or fail it reaches says so.
+  if (currentAttempt() === undefined) return { kind: 'runtime', condition: Boolean(first), reason };
+  const refuse = (message: string): TestError => new TestError('INVALID_ARGUMENT', message);
+  // A function is always truthy, like a Promise. Playwright takes one only on a describe block.
+  if (typeof first === 'function') {
+    throw refuse(`${api} got a function as its condition; call it and pass the result`);
+  }
+  return { kind: 'runtime', condition: readCondition(api, first, refuse), reason };
+}
+
+/**
+ * The truthiness of a test modifier's condition. A Promise is always truthy,
+ * so an unawaited async check would decide nothing: it throws the error
+ * `refuse` builds from the message.
+ */
+export function readCondition(
+  api: string,
+  condition: unknown,
+  refuse: (message: string) => Error,
+): boolean {
+  if (isPromiseLike(condition)) {
+    throw refuse(`${api} got a Promise as its condition; await it before the call`);
+  }
+  return Boolean(condition);
 }
 
 /**

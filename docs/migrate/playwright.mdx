@@ -173,7 +173,7 @@ run only in a browser, so a test that uses it declares
 | --- | --- |
 | `import { test, expect } from '@playwright/test'` | `import { test } from '@e2e-dev/web'` and `import { expect } from 'e2e'` |
 | `{ page }` in a test | `{ screen, app, browser }` |
-| `test()`, `test.describe()`, `test.only`, `test.fail()`, `test.skip(title, fn)`, `test.skip(condition, reason)` | the same; the conditional `skip` works inside a test body or `beforeEach` |
+| `test()`, `test.describe()`, `test.only`, `test.fail()`, `test.skip(title, fn)`, `test.skip(condition, reason)` | the same; the conditional `skip` works inside a test body or `beforeEach`. `test.skip(process.env.CI)` always skips: write `test.skip(!!process.env.CI)` |
 | `beforeEach`, `afterEach`, `beforeAll`, `afterAll` | the same, with no title; `beforeAll` and `afterAll` get worker fixtures, not `browser`, `app`, or `screen` |
 | `test.describe.skip`, `test.describe.serial`, `describe.configure({ mode: 'serial', retries, timeout })` | `test.describe(title, { skip, serial, retries, timeout }, fn)` |
 | `{ tag: '@smoke' }` | `{ tags: ['smoke'] }` on a test or group |

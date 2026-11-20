@@ -23,6 +23,7 @@ import { codedMessage, ConfigurationError, errorMessage, InfrastructureError } f
 import { describeIssue } from '@e2e-dev/core/lib/internal/standard-schema';
 import { processSecrets } from '@e2e-dev/core/lib/run/secrecy';
 import type { StandardSchemaV1 } from '@e2e-dev/core/lib/types';
+import { isPromiseLike } from '../internal/promise-like.ts';
 
 /** One MCP content part this server emits. */
 export type McpContent =
@@ -102,7 +103,7 @@ const CATALOG_SENTENCE_MAX = 160;
 export function toolJsonSchema(tool: ToolSet[string]): JSONSchema7 {
   const sdk = loadedAiSdk();
   const raw = sdk === undefined ? standardJsonSchema(tool.inputSchema) : sdk.asSchema(tool.inputSchema).jsonSchema;
-  if (raw === undefined || typeof (raw as PromiseLike<JSONSchema7>).then === 'function') return { type: 'object' };
+  if (raw === undefined || isPromiseLike(raw)) return { type: 'object' };
   const { $schema: _draft, ...schema } = raw as JSONSchema7;
   return schema;
 }

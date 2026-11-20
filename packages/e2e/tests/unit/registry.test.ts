@@ -458,6 +458,12 @@ describe('registration', () => {
     expect(() => test.fail(false)).toThrow(/must be called inside a test body/);
   });
 
+  it('points a Promise condition outside a test body at the body, not at the await', async () => {
+    const pending = Promise.resolve(false) as unknown as boolean;
+    expect(() => test.skip(pending, 'not here')).toThrow(/must be called inside a test body/);
+    expect(() => test.fail(pending, 'not here')).toThrow(/must be called inside a test body/);
+  });
+
   it('validates titles', async () => {
     await expect(
       collectModule(async () => {
