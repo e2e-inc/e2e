@@ -61,20 +61,19 @@ something, such as Save or Submit, one time for each commit the step asks
 for. Before it repeats a commit, the model must find on the current screen
 that the first press didn't commit, such as a validation error that
 blocked the save. A tap that only closed the on-screen keyboard counts as
-not committed. When the model
-can't tell, it doesn't press again.
+not committed. When the model can't tell, it doesn't press again.
 
 The model checks a save on the screen the step is on and doesn't navigate
 away to confirm it. When an app saves without a confirmation on that
-screen, the step can end `failed`. Name the check in the step instead,
-for example "save the product, then confirm it appears in the product
-list".
+screen, the step can end `failed`. Name the check in the step instead, for
+example "save the product, then confirm it appears in the product list".
 
-The loop detects repeated calls and cycles. After three failed actions in a
-row, it tells the model to change its approach. After five, it asks for a
-verdict. Repeated `observe` calls, which wait on a save or a load in
-progress, get more room: a notice after six in a row, a verdict after ten. The same limits apply in assertion exploration. It also asks for a verdict when the budget or the deadline is
-near.
+The loop detects repeated calls and cycles. After three failed actions in
+a row, it tells the model to change its approach. After five, it asks for
+a verdict. Repeated `observe` calls, which wait on a save or a load in
+progress, get more room: a notice after six in a row, a verdict after ten.
+The same limits apply in assertion exploration. It also asks for a verdict
+when the budget or the deadline is near.
 
 ## Assertion exploration
 
