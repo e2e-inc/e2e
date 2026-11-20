@@ -100,7 +100,7 @@ function renamed(name: string, from: string, to: string): unknown {
  * writes its arguments to `recorded`, then runs `body` (sh), where `SPAWNED`
  * names the file the fake lists started processes from.
  */
-async function appPathSurface(body: string) {
+async function appPathSurface(body: string, scenario: Scenario = {}) {
   const directory = artifacts();
   const bundle = path.join(directory, 'Built.app');
   mkdirSync(path.join(bundle, 'Contents'), { recursive: true });
@@ -110,6 +110,7 @@ async function appPathSurface(body: string) {
     'list-apps': [{ ok: true, data: { apps: [] } }, { spawnedApps: { name: 'Built', bundle_id: 'dev.e2e.built' } }],
     'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid: SPAWNED, process_instance: 'spawned-$spawned', is_focused: true }] }],
     snapshot: [snapshotAnswer('macos/appkit-form')],
+    ...scenario,
   });
   fakes.push(fake);
   const bin = path.join(directory, 'bin');
@@ -605,6 +606,16 @@ describe('DesktopSurface', () => {
     expect((await surface.observe(operation(), undefined)).root.children?.some((node) => node.testId === 'username')).toBe(true);
     await surface.endAttempt({ signal, timeoutMs: 5_000 });
     expect(await gone(opened)).toBe(true);
+  });
+
+  it.skipIf(process.platform !== 'darwin')('never brings a background app that opens no window forward, and says it needs headed', async () => {
+    const { surface, recorded } = await appPathSurface(
+      `while [ $# -gt 0 ]; do [ "$1" = "--env" ] && variable="$2"; shift; done\nenv "$variable" ${JSON.stringify(process.execPath)} -e 'setTimeout(() => {}, 60000)' >/dev/null 2>&1 &\necho $! >> "$SPAWNED"\n`,
+      { 'list-windows': [{ ok: true, data: [] }] },
+    );
+    await expect(surface.restart({ ...operation(), timeoutMs: 15_000 })).rejects.toThrow(/opened no window.*desktop\(\{ headed: true \}\)/);
+    // The one `open` was the background launch: no second one by path brought the app, or another copy of it, forward.
+    expect(readFileSync(recorded, 'utf8').split('\n')[0]).toBe('-g');
   });
 
   it.skipIf(process.platform !== 'darwin')('reports an open cancelled while it ran as cancelled', async () => {

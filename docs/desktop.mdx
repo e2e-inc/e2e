@@ -96,8 +96,9 @@ export default {
 
 ## Write a test
 
-Import `test` from `@e2e-dev/desktop`. `app.open()` launches the app in the
-background, so it does not take your keyboard. When the engine launched it
+Import `test` from `@e2e-dev/desktop`. By default, `app.open()` leaves the
+app in the background. Use `desktop({ headed: true })` for apps that need to
+come forward before they show a window. When the engine launched it
 before, it quits that copy first. A copy you opened yourself is left alone,
 and the engine never reads or drives it. Every test ends with the app quit,
 and no window the app saved at its last quit comes back.
@@ -137,7 +138,7 @@ the one `screen` reads (`desktop.useWindow(window)`), and quits the app
 
 | Area | On a desktop target |
 | --- | --- |
-| Input | The app runs in the background, and actions use the accessibility API, so your pointer, focus, and typing stay where they are. An app that opens no window in the background, such as a document-based one, is brought forward once |
+| Input | The app runs in the background, and actions use the accessibility API, so your pointer, focus, and typing stay where they are. An app that opens no window in the background, such as a document-based one, fails to open; it needs `headed: true` |
 | Physical input | `doubleTap`, `hover`, point taps, and typing into whatever has focus need `desktop({ headed: true })`, which brings the app forward and uses the real pointer and keyboard |
 | Keys | `press` on a control sends the key only while that control has focus, in the window the app sends keys to. An app in the background gets keys by its name, so while another copy of it runs, such as a second desktop target on the same app, `press` needs `headed: true` |
 | Select | `selectOption` takes an option's label, not an index |

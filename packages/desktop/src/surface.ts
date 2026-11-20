@@ -69,9 +69,6 @@ const EXIT_WAIT_MS = 500;
 /** How long a launch waits for its process to appear, and then for the app's window to become readable, before it reports why it did not. */
 const LAUNCH_READY_MS = 10_000;
 
-/** How long an app launched in the background may show no window before the engine brings it forward to ask for one. */
-const ACTIVATE_AFTER_MS = 2_000;
-
 /**
  * How long agent-desktop may look for an option in a list. A select of an
  * option that exists answers in well under a second; one of an option that
@@ -599,15 +596,14 @@ export class DesktopSurface {
    * later, and an observation then would show the agent an empty screen. A
    * window that stays unreadable for `LAUNCH_READY_MS` fails the open: every
    * later step would only time out on an empty screen. Any other failure of a
-   * read is reported as it is. An app launched in the background that shows
-   * no window after `ACTIVATE_AFTER_MS` (a document-based app opens its first
-   * window only when it is brought forward) is brought forward once.
+   * read is reported as it is. An app in the background is never brought
+   * forward: one that opens no window there (a document-based app opens its
+   * first one only when it comes forward) fails the open, and needs `headed`.
    */
   private async windowReadable(operation: OperationContext): Promise<void> {
     const budgetBound = operation.timeoutMs < LAUNCH_READY_MS;
-    const started = Date.now();
-    const deadline = started + Math.min(operation.timeoutMs, LAUNCH_READY_MS);
-    let activated = this.options.headed;
+    const deadline = Date.now() + Math.min(operation.timeoutMs, LAUNCH_READY_MS);
+    let sawWindow = false;
     while (Date.now() < deadline) {
       if (operation.signal.aborted) throw new EngineError('CANCELLED', `opening ${this.appName ?? 'the app'} was cancelled`, { retryable: false });
       let screen: ProjectedScreen | undefined;
@@ -619,42 +615,32 @@ export class DesktopSurface {
         if (cause instanceof EngineError && cause.code === 'OPERATION_TIMEOUT') break;
         // A window not readable yet, or an app that quit, is what this wait looks at below.
         if (!(cause instanceof EngineError && (cause.cause === UNREADABLE || cause.cause === QUIT))) throw cause;
+        if (cause.cause === UNREADABLE) sawWindow = true;
       }
       if (screen !== undefined) return;
-      // An app that quit (or crashed) on its own never shows a window, and bringing its bundle forward would start a copy the engine does not own.
+      // An app that quit (or crashed) on its own never shows a window.
       if (this.pid !== undefined && !alive(this.pid)) {
         this.forget();
         this.pid = undefined;
         this.instance = undefined;
         throw new EngineError('ENGINE_FAILURE', `${this.appName ?? 'the app'} quit right after it launched, before it showed a window`, { retryable: false });
       }
-      if (!activated && Date.now() - started >= ACTIVATE_AFTER_MS) {
-        activated = true;
-        await this.activate(operation);
-      }
       await sleep(Math.min(LAUNCH_POLL_MS, Math.max(deadline - Date.now(), 0)), operation.signal);
     }
     // The open's own budget ran out first: that is a timeout, not a window that cannot be read.
     if (budgetBound) throw new EngineError('OPERATION_TIMEOUT', `${this.appName ?? 'the app'} launched, but the open ran out of time before its window could be read`, { retryable: false });
+    if (!sawWindow && !this.options.headed) {
+      throw new EngineError(
+        'ENGINE_FAILURE',
+        `${this.appName ?? 'the app'} launched in the background and opened no window. Some apps, such as document-based ones, show a window only once they come forward; set desktop({ headed: true }) for them`,
+        { retryable: false },
+      );
+    }
     throw new EngineError(
       'ENGINE_FAILURE',
       `${this.appName ?? 'the app'} launched, but its window cannot be read through accessibility. On macOS the screen may be locked, or the window may be off screen`,
       { retryable: false },
     );
-  }
-
-  /**
-   * Brings the launched app forward, which makes a document-based app open
-   * its first window. LaunchServices activates the running copy of the
-   * bundle (or bundle id); when the developer runs a copy of the same build
-   * too, it may pick theirs, which is brought forward but never driven, and
-   * the open then fails on the window that never came.
-   */
-  private async activate(operation: OperationContext): Promise<void> {
-    const target = this.launchTarget;
-    if (target === undefined) return;
-    const args = this.bundle !== undefined ? [this.bundle] : /^[\w-]+(\.[\w-]+)+$/.test(target) ? ['-b', target] : ['-a', target];
-    await execFileAsync('open', args, { signal: operation.signal, timeout: Math.max(operation.timeoutMs, 1), env: this.appEnv }).catch(() => undefined);
   }
 
   /** The windows of the app the engine launched, for the `desktop` fixture; none while it is not running. */

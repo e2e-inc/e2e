@@ -31,10 +31,11 @@ export interface DesktopOptions {
   /**
    * Allows physical input: the real pointer and keyboard, which take focus
    * and move the cursor. Off by default: every action goes through the
-   * accessibility API and leaves the user's pointer and focus alone (only
-   * `app.open()` brings the app forward). On, the engine also offers
-   * `doubleTap`, `hover`, point-addressed taps, and keystrokes into whatever
-   * has focus (the keyboard capability).
+   * accessibility API and leaves the user's pointer and focus alone, and
+   * the app stays in the background. On, `app.open()` brings the app
+   * forward, which some apps need before they show a window, and the
+   * engine also offers `doubleTap`, `hover`, point-addressed taps, and
+   * keystrokes into whatever has focus (the keyboard capability).
    */
   readonly headed?: boolean | undefined;
   /**
