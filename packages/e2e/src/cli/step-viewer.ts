@@ -188,8 +188,9 @@ class StepViewer {
         return;
       case 'p': {
         const text = [this.title, ...this.lines].join('\n');
-        this.close();
+        // Queue the text while the live window is suspended so it prints before the prompt is repainted.
         this.output.printLine(text);
+        this.close();
         return;
       }
       case 'q':

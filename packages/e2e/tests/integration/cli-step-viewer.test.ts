@@ -347,13 +347,15 @@ describe('the terminal screen and app log viewer', () => {
 
     const printed = run.press('p');
     await run.shows('button "Item 20"', printed);
+    await run.shows(STEP_PROMPT, printed + run.output(printed).indexOf('button "Item 20"'));
+
     const output = run.output(printed);
     const restored = output.indexOf(RESTORE_SCREEN);
     expect(restored).toBeGreaterThanOrEqual(0);
     const mainScreen = stripVTControlCharacters(output.slice(restored + RESTORE_SCREEN.length));
     expect(mainScreen).toContain('Screen before step 2 · checks out [fake]');
     expect(mainScreen).toContain('button "Item 20"');
-    await run.shows(STEP_PROMPT, printed + output.indexOf('button "Item 20"'));
+    expect(mainScreen.indexOf('button "Item 20"')).toBeLessThan(mainScreen.search(STEP_PROMPT));
 
     await sleep(KEY_GUARD_MS);
     run.press('\r');
