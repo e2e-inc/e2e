@@ -19,8 +19,7 @@ afterEach(async () => {
   // Disposing removes each surface's private agent-desktop state directory.
   for (const surface of surfaces.splice(0)) await surface.dispose({ signal, timeoutMs: 2_000 }).catch(() => undefined);
   for (const child of children.splice(0)) child.kill('SIGKILL');
-  cleanupFakes();
-  for (const directory of artifactDirs.splice(0)) rmSync(directory, { recursive: true, force: true });
+  // Before cleanupFakes, which removes the files that list the processes the fakes started.
   for (const fake of fakes.splice(0)) {
     for (const pid of fake.spawned()) {
       try {
@@ -30,6 +29,8 @@ afterEach(async () => {
       }
     }
   }
+  cleanupFakes();
+  for (const directory of artifactDirs.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
 /** The artifact directories attempts were given, removed after each test. */
