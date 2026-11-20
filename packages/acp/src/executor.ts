@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { AgentError, type JsonValue, type StepExecutor, type StepExecutorContext, type StepVerdict } from 'e2e';
-import { BASE_RULES, redactProviderKeys, redactSecrets, registerProviderKeys, VERDICT_RULES } from 'e2e/agent';
+import { BASE_RULES, redactSecrets, redactStepText, registerProviderKeys, VERDICT_RULES } from 'e2e/agent';
 import { ConfigurationError } from 'e2e/engine';
 import { claudeCodeLaunch, codexLaunch, registerSavedCodexLogin } from './presets.ts';
 import type { Usage } from '@agentclientprotocol/sdk/unstable';
@@ -86,8 +86,8 @@ function executor(name: string, options: AcpAgentOptions, launch: () => Promise<
       const { held, session } = await ready(ctx, launch, memoryKey).finally(registerLogin);
       ctx.signal.throwIfAborted();
       const active = activeStep(ctx);
-      // Provider keys only, and only now: one the agent's start registered, or its saved login, may be in `system` or in step text core built before it knew the key. Not every secret: the process ledger also holds values earlier tests learned.
-      const text = redactProviderKeys(await untilAborted(stepMessage(active, held.tools, held.introduced ? undefined : [RULES, options.system, ctx.agentContext]), ctx.signal));
+      // With the step's own redactor, and only now: `system` is the config's text, which core never saw, and a key the agent's start or its saved login made known may be in step text core built before it knew the key.
+      const text = redactStepText(ctx, await untilAborted(stepMessage(active, held.tools, held.introduced ? undefined : [RULES, options.system, ctx.agentContext]), ctx.signal));
       // A step that ended while its screen was read sends no prompt, which no cancel would reach.
       ctx.signal.throwIfAborted();
       held.introduced = true;

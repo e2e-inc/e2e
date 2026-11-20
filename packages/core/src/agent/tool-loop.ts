@@ -12,7 +12,7 @@
  */
 
 import { executorRedactors, redactToolResult } from './redaction.ts';
-import { processSecrets } from '../run/secrecy.ts';
+import { processSecrets, redactProviderKeys } from '../run/secrecy.ts';
 import type { StepTurn } from '../run/steps.ts';
 import type { AssistantModelMessage, ModelMessage, StepResult, ToolCallPart, ToolSet } from 'ai';
 import { asSdkLanguageModel, loadAiSdk, type AiSdk, type SdkLanguageModel } from './ai-sdk.ts';
@@ -768,7 +768,8 @@ class LoopRun {
     const system =
       typeof this.options.system === 'function' ? this.options.system(this.context) : this.options.system;
     if (system !== undefined && system.trim() !== '') {
-      parts.push(system);
+      // Written by the config or an executor, so core never redacted it: the step's own redactor, which knows this test's secrets and the keys of the moment, not values earlier tests learned.
+      parts.push((executorRedactors.get(this.context) ?? redactProviderKeys)(system));
     }
     const project = this.context.agentContext;
     if (project !== undefined && project.trim() !== '') {

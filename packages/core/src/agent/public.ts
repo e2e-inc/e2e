@@ -30,5 +30,5 @@ export {
 } from './primitives.ts';
 export { BASE_RULES } from './default-agent.ts';
 export { isRuntimeHardStop } from './executor.ts';
-export { redactProviderKeys, redactSecrets, registerProviderKey, registerProviderKeys } from './provider-keys.ts';
+export { redactSecrets, redactStepText, registerProviderKey, registerProviderKeys } from './provider-keys.ts';
 export type { ScreenOutput } from './screen-update.ts';

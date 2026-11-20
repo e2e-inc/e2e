@@ -6,8 +6,10 @@
  */
 
 import { processSecrets, redactProviderKeys, registerProviderKey, registerProviderKeys } from '../run/secrecy.ts';
+import type { StepExecutorContext } from './executor.ts';
+import { executorRedactors } from './redaction.ts';
 
-export { redactProviderKeys, registerProviderKey, registerProviderKeys };
+export { registerProviderKey, registerProviderKeys };
 
 /**
  * `text` with every secret and provider key the process knows replaced by
@@ -17,4 +19,16 @@ export { redactProviderKeys, registerProviderKey, registerProviderKeys };
  */
 export function redactSecrets(text: string): string {
   return processSecrets.redact(text);
+}
+
+/**
+ * `text` redacted for the step `ctx` runs: the run's secrets, the values this
+ * test learned, and every provider key known now, but no value an earlier
+ * test learned, which text no test built (a prompt with an executor's own
+ * `system`) may hold by chance. Call it last, right before the text leaves,
+ * so a key the agent's start made known is caught too. With a context the
+ * run did not build, provider keys only.
+ */
+export function redactStepText(ctx: StepExecutorContext, text: string): string {
+  return (executorRedactors.get(ctx) ?? redactProviderKeys)(text);
 }

@@ -410,6 +410,18 @@ describe('a key only the agent is given', () => {
     expect(prompt).not.toContain(key.slice(-12));
   });
 
+  it('reaches the agent with a run secret in its system text as the marker the step\'s redactor gives', async () => {
+    const log = join(mkdtempSync(join(tmpdir(), 'e2e-acp-secret-')), 'agent.jsonl');
+    cleanups.push(() => rmSync(dirname(log), { recursive: true, force: true }));
+    const executor = acp({ command: process.execPath, args: [AGENT], system: 'Log in with fake-app-password-0001 when asked.', env: { ACP_SCRIPT: JSON.stringify([[pass]]), ACP_LOG: log } });
+    const ctx = stepContext();
+    // The redactor core attaches to the context of each step it runs.
+    Object.defineProperty(ctx, Symbol.for('e2e.executor-redactor.v1'), { value: (text: string) => text.replaceAll('fake-app-password-0001', '<secret:appPassword>') });
+    await expect(executor.runStep(ctx)).resolves.toMatchObject({ status: 'passed' });
+    const prompt = String(readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>).find((entry) => 'prompt' in entry)?.['prompt']);
+    expect(prompt).toContain('Log in with <secret:appPassword> when asked.');
+  });
+
   it('builds an executor with no env of its own', () => {
     expect(acp({ command: process.execPath, args: [AGENT] }).name).toBe('acp');
   });

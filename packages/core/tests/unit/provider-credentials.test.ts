@@ -1,10 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TargetSession } from '../../src/engine/surface.ts';
-import { redactProviderKeys, redactSecrets, registerProviderKey, registerProviderKeys } from '../../src/agent/public.ts';
+import { redactSecrets, registerProviderKey, registerProviderKeys } from '../../src/agent/public.ts';
 import {
   carriedSecrets,
   processSecrets,
+  redactProviderKeys,
   redactsDownloads,
   registerStaticSecrets,
   releaseSessionLedger,

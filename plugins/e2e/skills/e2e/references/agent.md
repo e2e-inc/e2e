@@ -513,7 +513,7 @@ before writing the AI trace.
   agent reads from its own login file), call
   `registerProviderKey(name, value)` from `e2e/agent`; an executor that cuts
   text itself calls `redactSecrets(text)` first, and one that sends its agent
-  text of its own calls `redactProviderKeys(text)`.
+  text of its own calls `redactStepText(ctx, text)`.
 
 Reference: https://e2e.com/docs/agents
 
