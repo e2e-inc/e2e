@@ -476,6 +476,22 @@ describe('lifecycle', () => {
     expect(new Set(optioned.sessions)).toEqual(new Set(['mine-0']));
   });
 
+  it('hands a launch() host\'s bindings to its worker under a variable of its own, so a host inside a run never reads the run\'s', async () => {
+    const h = harness({ device: undefined });
+    h.fake.respond('devices.list', () => [{ platform: 'ios', id: 'B', name: 'B', booted: true }]);
+    const info = { runId: 'run-1', targetName: 'ios', hostId: 'abc123', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: () => undefined };
+    const handed = (await h.prepare(info))?.env ?? {};
+    // The run's own worker holds device A under the target's plain variable, in the environment the host inherits.
+    const run = harness({ device: undefined });
+    run.fake.respond('devices.list', () => [{ platform: 'ios', id: 'A', name: 'A', booted: true }]);
+    const inherited = (await run.prepare({ ...info, hostId: undefined }))?.env ?? {};
+    expect(Object.keys(handed)).not.toEqual(Object.keys(inherited));
+    // A worker in another process has no bindings in memory: it reads the host's variable, not the run's.
+    const worker = harness({ device: undefined });
+    await worker.engine.init!({ runId: 'run-1', targetName: 'ios', hostId: 'abc123', projectRoot: PROJECT_ROOT, app: worker.app, env: { ...inherited, ...handed }, headed: false, workerSlot: 0, log: () => undefined, signal: new AbortController().signal });
+    expect(worker.fake.lastArgs('devices.boot')).toEqual({ platform: 'ios', udid: 'B' });
+  });
+
   it('drives a discovered Android emulator by its serial, and reads a configured serial, UDID, or name as agent-device does', async () => {
     const h = harness({ device: undefined, platform: 'android' });
     h.fake.respond('devices.list', () => [{ platform: 'android', id: 'emulator-5554', name: 'test', booted: true }]);

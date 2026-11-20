@@ -239,8 +239,8 @@ export class DevicePool {
    * invariant: the runner caps the target at the workers this engine
    * declared or reported.
    */
-  binding(targetName: string, slot: number, env: Readonly<Record<string, string | undefined>>): SlotBinding | undefined {
-    const bindings = this.bound.get(targetName) ?? decodeBindings(env[bindingsVariable(targetName)]) ?? this.source.fallback;
+  binding({ targetName, hostId }: SessionOwner, slot: number, env: Readonly<Record<string, string | undefined>>): SlotBinding | undefined {
+    const bindings = this.bound.get(targetName) ?? decodeBindings(env[bindingsVariable(targetName, hostId)]) ?? this.source.fallback;
     if (bindings === undefined) return undefined;
     const binding = bindings[slot];
     if (binding === undefined) {
@@ -265,7 +265,7 @@ export class DevicePool {
     const bindings = await this.source.bind(info);
     await this.warm(bindings, info);
     this.bound.set(info.targetName, bindings);
-    return { workers: bindings.length, env: { [bindingsVariable(info.targetName)]: encodeBindings(bindings) } };
+    return { workers: bindings.length, env: { [bindingsVariable(info.targetName, info.hostId)]: encodeBindings(bindings) } };
   }
 
   /**

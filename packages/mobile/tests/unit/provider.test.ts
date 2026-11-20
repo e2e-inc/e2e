@@ -133,7 +133,7 @@ describe('device provider', () => {
     // Nothing left: a second finish releases nothing, and no released lease's daemon is handed out again.
     await h.engine.finish!(finishInfo());
     expect(cloud.released).toHaveLength(2);
-    expect(h.surface.pool.binding('ios', 0, {})).toBeUndefined();
+    expect(h.surface.pool.binding({ targetName: 'ios' }, 0, {})).toBeUndefined();
   });
 
   it('releases the provider lease while a retained session close is pending', async () => {

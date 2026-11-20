@@ -659,7 +659,7 @@ export class AgentDeviceSurface {
   async init(info: EngineInitInfo): Promise<void> {
     this.projectRoot = info.projectRoot;
     this.app = info.app;
-    const binding = this.pool.binding(info.targetName, info.workerSlot, info.env);
+    const binding = this.pool.binding(info, info.workerSlot, info.env);
     this.device = binding;
     const session = this.pool.session(info, info.workerSlot);
     const label = deviceLabel(binding);
