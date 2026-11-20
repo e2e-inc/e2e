@@ -116,7 +116,7 @@ translation moves or goes with it in the same change.
 | bug bash | Bug Bash (keep in English) | m |
 | finding (explore, bug bash) | फ़ाइंडिंग (plural also फ़ाइंडिंग) | f |
 | exploration; `explore` in prose | एक्सप्लोरेशन; explore (keep in English) | m |
-| defect | खामी | f |
+| defect | दोष | m |
 | secret fill | सीक्रेट भरना (fill as a noun: फ़िल, m) | |
 | visual testing | विज़ुअल टेस्टिंग | f |
 | self-healing | सेल्फ़-हीलिंग | f |
@@ -157,6 +157,9 @@ translation moves or goes with it in the same change.
 | attempt | प्रयास | m |
 | verdict | फ़ैसला | m |
 | redact | छिपाना | |
+| redaction (noun) | रेडैक्शन | m |
+| value | वैल्यू (not मान) | f |
+| character (in a length limit) | कैरेक्टर (not अक्षर, since the limit counts digits and symbols too) | m |
 | command | कमांड | f |
 | call (noun) | कॉल | f |
 | lease | लीज़ | f |
