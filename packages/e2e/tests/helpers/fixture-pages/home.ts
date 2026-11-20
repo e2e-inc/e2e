@@ -348,6 +348,8 @@ line2  </textarea>
   <input type="radio" aria-label="Pick" readonly />
   <div role="textbox" aria-label="Attribute on div" readonly>8</div>
   <div contenteditable="true" role="textbox" aria-label="Locked editor" aria-readonly="true">Fixed</div>
+  <div contenteditable="true" data-testid="plain-host" aria-readonly="true">Open</div>
+  <table role="grid"><tr><td contenteditable="true" data-testid="grid-cell" aria-readonly="true">5</td></tr></table>
   <button>Save</button>
 </body>
 </html>`),

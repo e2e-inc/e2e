@@ -175,9 +175,10 @@ export interface SemanticNode {
    * pressed state; `secure` marks a field whose value is never observed.
    * `readonly` is present only on a node that has a read-only state, as
    * Playwright's `getReadonly` decides on the web (an input, textarea, or
-   * select by its `readonly` attribute, an `aria-readonly` role by that
-   * attribute, any other editing host `false`), and only where the platform
-   * knows: absent means the node has no read-only state to read, not `false`.
+   * select by its `readonly` attribute, an element whose ARIA role takes
+   * `aria-readonly` by that attribute, any other editing host `false`), and
+   * only where the platform knows, as Android does: absent means the node has
+   * no read-only state to read, not `false`.
    */
   readonly states?: Readonly<
     Partial<

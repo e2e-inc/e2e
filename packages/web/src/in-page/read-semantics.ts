@@ -400,7 +400,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     }
   };
 
-  const implicitRole = memoized((el: Element): string | null => {
+  const computeRole = (el: Element, editorHostIsTextbox: boolean): string | null => {
     const explicit = explicitRole(el);
     const tag = el.tagName.toLowerCase();
     if (
@@ -412,10 +412,17 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     }
     // Ahead of the tag: an editor's host is the control, whatever landmark or
     // structure its tag would otherwise be.
-    if (isEditingHost(el)) return 'textbox';
+    if (editorHostIsTextbox && isEditingHost(el)) return 'textbox';
     const role = tagRole(el);
     return role === null ? null : inheritedPresentationRole(el) ?? role;
-  });
+  };
+
+  const implicitRole = memoized((el: Element): string | null => computeRole(el, true));
+  /**
+   * The ARIA role Playwright's `getAriaRole` reads: the tag's role, without the
+   * editor-host textbox. A plain `<div contenteditable>` has none.
+   */
+  const ariaRoleOf = memoized((el: Element): string | null => computeRole(el, false));
 
   /** Rendered text as a person sees it: innerText, aria-hidden glyphs included. */
   const textOf = (el: Element): string => {
@@ -1659,13 +1666,17 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   /**
    * Whether the element is read-only, as Playwright's `getReadonly` reads it:
    * an input, textarea, or select by its own `readonly` attribute alone; an
-   * `aria-readonly` role by that attribute, case folded; an editing host
-   * (or any element inside one) never. Null for anything else, which has no
+   * `aria-readonly` role by that attribute, case folded (an editing host by
+   * its ARIA role, not the textbox it reads as); an editing host (or any
+   * element inside one) otherwise never. Null for anything else, which has no
    * read-only state: Playwright's `toBeEditable` throws on it.
    */
   const readOnlyOf = (el: Element, tag: string, role: string | null): boolean | null => {
     if (tag === 'input' || tag === 'textarea' || tag === 'select') return el.hasAttribute('readonly');
-    if (role !== null && ARIA_READONLY_ROLES.indexOf(role) !== -1) {
+    // Playwright reads `aria-readonly` by the element's ARIA role, and an
+    // editing host with no ARIA role is editable whatever that attribute says.
+    const ariaRole = isEditingHost(el) ? ariaRoleOf(el) : role;
+    if (ariaRole !== null && ARIA_READONLY_ROLES.indexOf(ariaRole) !== -1) {
       return (el.getAttribute('aria-readonly') ?? '').toLowerCase() === 'true';
     }
     if (el instanceof HTMLElement && el.isContentEditable) return false;
