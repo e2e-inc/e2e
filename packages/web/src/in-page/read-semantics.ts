@@ -21,9 +21,26 @@ import type { RawNodeData, RawObservedNode, SemanticMode, SemanticResult } from 
  * modes also project nodes differently; those differences are data (see
  * `projection` below), not scattered branches.
  */
+/**
+ * Where each light child of a tracked closed root's host is slotted: by slot
+ * name for a root that assigns by name, by element for one that assigns by
+ * hand (`closedSlotsOf` inside the reader).
+ */
+export type ClosedSlots = Map<ShadowRoot, { readonly byName: Map<string, Element>; readonly byElement: Map<Element, Element> }>;
+
+/**
+ * What consecutive reads of one synchronous selector operation share. A
+ * selector engine reads each candidate in its own call, and the page cannot
+ * change between them, so the closed roots' slots are read once per
+ * operation instead of once per match.
+ */
+export interface SharedReads {
+  readonly closedSlots: ClosedSlots;
+}
+
 export const readSemanticsFunction = <Mode extends SemanticMode>(
   element: Element,
-  options: { testIdAttribute: string; secureFieldSelector: string; mode: Mode },
+  options: { testIdAttribute: string; secureFieldSelector: string; mode: Mode; shared?: SharedReads },
 ): SemanticResult<Mode> => {
   const SKIP_TAGS = [
     'script',
@@ -410,6 +427,19 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   /** Computed style of any element, SVG included, or undefined in a document with no view. */
   const styleOf = (el: Element): CSSStyleDeclaration | undefined =>
     el.ownerDocument.defaultView?.getComputedStyle(el);
+
+  /**
+   * The `display` values on which `content-visibility: hidden` skips nothing,
+   * since the box cannot contain its contents: no box of its own
+   * (`contents`), a non-atomic inline box, and table rows, row groups and
+   * ruby text, each checked against `checkVisibility()` in Chromium. A table
+   * cell and an inline block do skip theirs.
+   */
+  const BOXES_THAT_SKIP_NOTHING = new Set(['contents', 'inline', 'table-row', 'table-row-group', 'table-header-group', 'table-footer-group', 'ruby-text']);
+
+  /** Whether an element with this computed style renders nothing under it: `content-visibility: hidden` on a box that can contain its contents. */
+  const skipsContents = (style: CSSStyleDeclaration | undefined): boolean =>
+    style?.getPropertyValue('content-visibility') === 'hidden' && !BOXES_THAT_SKIP_NOTHING.has(style.display);
 
   /** A walk from the top, with the elements that may not contribute again already visited. */
   const nameWalk = (visited: readonly Element[], accessible: boolean, fromContent = false): NameWalk => ({
@@ -848,11 +878,11 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
 
   /**
    * Text owned directly by an element, excluding descendant elements. An
-   * element with `content-visibility: hidden` renders none of it, as its
-   * `innerText` reads empty, so it owns none.
+   * element that skips its contents (`skipsContents`) renders none of it, as
+   * its `innerText` reads empty, so it owns none.
    */
   const directTextOf = memoized((el: Element): string => {
-    if (styleOf(el)?.getPropertyValue('content-visibility') === 'hidden') return '';
+    if (skipsContents(styleOf(el))) return '';
     let out = '';
     for (const child of Array.from(el.childNodes)) {
       if (child.nodeType === 3) out += child.nodeValue ?? '';
@@ -1103,13 +1133,33 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     return rect.width > 0 && rect.height > 0;
   };
 
-  /** A `<details>` element's summary: its first child that is an HTML `<summary>`, as the browser picks it. */
-  const firstSummaryOf = (details: Element): Element | undefined =>
-    Array.from(details.children).find((child) => child.localName === 'summary' && isHtml(child));
+  /**
+   * A `<details>` element's summary: its first child that is an HTML
+   * `<summary>`, as the browser picks it. Memoized, so the children of a wide
+   * `<details>` share one look.
+   */
+  const firstSummaryOf = memoized((details: Element): Element | null => {
+    for (let child = details.firstElementChild; child !== null; child = child.nextElementSibling) {
+      if (child.localName === 'summary' && isHtml(child)) return child;
+    }
+    return null;
+  });
 
   /**
-   * True for content a closed `<details>` folds away: anything under it in
-   * the flat tree that is not in its first HTML `<summary>` child, so what is
+   * Whether a `<details>` element skips rendering its body: what its
+   * `::details-content` computes for `content-visibility`, which the browser
+   * sets to `hidden` while the element is closed and a page's CSS can set back
+   * to `visible` to show a closed body. A browser without that pseudo element
+   * computes nothing for it, and then the `open` attribute decides.
+   */
+  const foldsBody = memoized((details: Element): boolean => {
+    const skip = details.ownerDocument.defaultView?.getComputedStyle(details, '::details-content').getPropertyValue('content-visibility') ?? '';
+    return skip === '' ? !details.hasAttribute('open') : skip === 'hidden';
+  });
+
+  /**
+   * True for content a closed `<details>` folds away (`foldsBody`): anything
+   * under it in the flat tree that is not in its first HTML `<summary>` child, so what is
    * slotted into a `<details>` of a shadow root folds with it, and so does
    * the shadow tree of a host under one. Every closed `<details>` on the way
    * up is asked, so a summary's own controls stay visible while the closed
@@ -1121,20 +1171,21 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   const isInClosedDetails = memoized((el: Element): boolean => {
     const parent = flatParentOf(el);
     if (parent === null) return false;
-    if (parent.localName === 'details' && isHtml(parent) && !parent.hasAttribute('open') && firstSummaryOf(parent) !== el) return true;
+    if (parent.localName === 'details' && isHtml(parent) && firstSummaryOf(parent) !== el && foldsBody(parent)) return true;
     return isInClosedDetails(parent);
   });
 
   /**
-   * True when an ancestor in the flat tree has `content-visibility: hidden`:
-   * it keeps its own box and skips rendering everything under it, slotted
-   * and shadow content included, as `checkVisibility()` reads it. Memoized,
-   * so siblings under one ancestor share the walk up.
+   * True when an ancestor in the flat tree skips its contents
+   * (`skipsContents`): it keeps its own box and skips rendering
+   * everything under it, slotted and shadow content included, as
+   * `checkVisibility()` reads it. Memoized, so siblings under one ancestor
+   * share the walk up.
    */
   const isSkippedContent = memoized((el: Element): boolean => {
     const parent = flatParentOf(el);
     if (parent === null) return false;
-    return styleOf(parent)?.getPropertyValue('content-visibility') === 'hidden' || isSkippedContent(parent);
+    return skipsContents(styleOf(parent)) || isSkippedContent(parent);
   });
 
   /**
@@ -1269,7 +1320,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * to its slot. One read of the slots per root, however many children the
    * host has.
    */
-  const closedSlots = new Map<ShadowRoot, { readonly byName: Map<string, Element>; readonly byElement: Map<Element, Element> }>();
+  const closedSlots: ClosedSlots = options.shared?.closedSlots ?? new Map();
   const closedSlotsOf = (shadow: ShadowRoot): { readonly byName: Map<string, Element>; readonly byElement: Map<Element, Element> } => {
     let slots = closedSlots.get(shadow);
     if (slots === undefined) {
@@ -1855,7 +1906,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     }
     if (OPAQUE_TAGS.indexOf(tag) !== -1) return;
     // The element keeps its box, and nothing under it renders (`isSkippedContent`).
-    if (style?.getPropertyValue('content-visibility') === 'hidden') return;
+    if (skipsContents(style)) return;
     for (const child of Array.from(el.children)) walk(child, nextParent);
     // A shadow root is part of what the user sees, so it is part of what the
     // model is shown. Walking the host's light children and its shadow tree

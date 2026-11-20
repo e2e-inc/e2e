@@ -25,7 +25,18 @@ export const SHOWN_SELECTOR = `${SHOWN_SELECTOR_ENGINE}=`;
  */
 export const SHOWN_SELECTOR_ENGINE_SOURCE = `() => {
   const read = (${readSemanticsFunction.toString()});
-  const options = { testIdAttribute: '', secureFieldSelector: ${JSON.stringify(SECURE_FIELD_SELECTOR)}, mode: { kind: 'hidden' } };
-  const queryAll = (root) => (read(root, options) ? [] : [root]);
+  // Reads of one synchronous selector operation share what the page cannot change between them (\`SharedReads\`); a microtask ends the operation.
+  let shared = null;
+  const sharedReads = () => {
+    if (shared === null) {
+      shared = { closedSlots: new Map() };
+      queueMicrotask(() => { shared = null; });
+    }
+    return shared;
+  };
+  const queryAll = (root) => {
+    const options = { testIdAttribute: '', secureFieldSelector: ${JSON.stringify(SECURE_FIELD_SELECTOR)}, mode: { kind: 'hidden' }, shared: sharedReads() };
+    return read(root, options) ? [] : [root];
+  };
   return { queryAll, query: (root) => queryAll(root)[0] ?? null };
 }`;
