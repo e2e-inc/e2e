@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { redactError } from '@e2e-dev/core/lib/run/secrecy';
 import {
   detectPackageManager,
   detectWorkspacePackageManager,
@@ -632,7 +633,8 @@ async function readTargets(configPath: string): Promise<CiTarget[] | undefined> 
   try {
     return configTargets(await loadConfigModule(configPath));
   } catch (cause) {
-    clack.log.warn(`Could not read the targets of ${path.basename(configPath)}: ${cause instanceof Error ? cause.message : String(cause)}`);
+    // Redacted: the config may have loaded a key and quoted it as it failed.
+    clack.log.warn(`Could not read the targets of ${path.basename(configPath)}: ${redactError(cause instanceof Error ? cause.message : String(cause))}`);
     return undefined;
   }
 }

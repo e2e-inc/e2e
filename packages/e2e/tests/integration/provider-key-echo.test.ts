@@ -21,6 +21,8 @@ import { contentsUnder, createProject, runExisting, type FixtureProject } from '
 
 const execFileAsync = promisify(execFile);
 const CLI = fileURLToPath(new URL('../../dist/cli/bin.js', import.meta.url));
+/** The built `e2e/runner` entry, as a program imports it. */
+const RUNNER = new URL('../../dist/runner.js', import.meta.url).href;
 /** The run of 8 characters the redactor treats as a fragment of a value. */
 const FRAGMENT = 8;
 
@@ -148,11 +150,16 @@ describe.each(Object.entries(FAILING_CONFIGS))('a config that loads a key from .
   });
 
   /** One command of the built CLI in the project, the key in no variable of its own: its exit code and output. */
-  async function cli(...command: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  function cli(...command: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+    return node(CLI, ...command);
+  }
+
+  /** Node in the project with `args`, the key in no variable of its own: its exit code and output. */
+  async function node(...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
     const env: NodeJS.ProcessEnv = { ...process.env, CI: '', NO_COLOR: '1', E2E_TELEMETRY_DISABLED: '1' };
     for (const name of ['GROQ_API_KEY', 'NODE_DEBUG']) delete env[name];
     try {
-      const result = await execFileAsync(process.execPath, [CLI, ...command], { cwd: project.dir, env, timeout: 60_000 });
+      const result = await execFileAsync(process.execPath, args, { cwd: project.dir, env, timeout: 60_000 });
       return { code: 0, stdout: result.stdout, stderr: result.stderr };
     } catch (error) {
       const failed = error as { code?: number; stdout?: string; stderr?: string };
@@ -163,6 +170,15 @@ describe.each(Object.entries(FAILING_CONFIGS))('a config that loads a key from .
   it.each(['run', 'list', 'doctor', 'cache stats'])('e2e %s names the key by its marker and prints no piece of it', async (command) => {
     const { code, stdout, stderr } = await cli(...command.split(' '));
     expect(code).toBe(2);
+    expect(stdout + stderr).toContain('<secret:GROQ_API_KEY>');
+    expect(piecesOf(key, random, stdout + stderr)).toEqual([]);
+  }, 90_000);
+
+  // A program that does not catch: Node prints the rejection, its cause included, to stderr.
+  it.each(['list', 'explore'])('the public %s() rejects with the marker, and printed uncaught shows no piece of the key', async (api) => {
+    const options = api === 'explore' ? "{ cwd: process.cwd(), goal: 'look around' }" : '{ cwd: process.cwd() }';
+    const { code, stdout, stderr } = await node('--input-type=module', '-e', `import { ${api} } from ${JSON.stringify(RUNNER)};\nawait ${api}(${options});\n`);
+    expect(code).not.toBe(0);
     expect(stdout + stderr).toContain('<secret:GROQ_API_KEY>');
     expect(piecesOf(key, random, stdout + stderr)).toEqual([]);
   }, 90_000);
