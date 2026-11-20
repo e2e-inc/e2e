@@ -63,7 +63,8 @@ describe('the built-in agent from its agents entry', () => {
     expect(system).toContain('Press it again only when the check shows that the first press did not commit, such as an error you corrected,');
     expect(system).toContain('or when the result reports only the keyboard closing: then the tap was spent closing the keyboard.');
     expect(system).toContain('A step that asks for several commits (add two items, send two messages) presses once for each.');
-    expect(system).toContain('When the check shows neither, do not press it again: conclude from the screen you have.');
+    expect(system).toContain('while the check still shows the commit in progress, observe again instead of pressing.');
+    expect(system).toContain('When the check shows neither and nothing in progress, do not press it again: conclude from the screen you have.');
     expect(system).toContain('Do not leave the screen (navigate, go back, open another page) to confirm a commit unless the step asks for that.');
     expect(system).toContain('or once to check whether a save or submit committed (see below).');
     expect(system).toContain('or once when a save or submit showed no confirmation.');
