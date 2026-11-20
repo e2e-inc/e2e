@@ -594,6 +594,13 @@ describe('DesktopSurface', () => {
     expect(await gone(opened)).toBe(true);
   });
 
+  it.skipIf(process.platform !== 'darwin')('reports an open cancelled while it ran as cancelled', async () => {
+    const { surface } = await appPathSurface('sleep 5\n');
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 300);
+    await expect(surface.restart({ ...operation(), signal: controller.signal })).rejects.toMatchObject({ code: 'CANCELLED' });
+  });
+
   it.skipIf(process.platform !== 'darwin')('reports an open LaunchServices refused as a failure that started nothing', async () => {
     const { surface } = await appPathSurface(`echo 'The application cannot be opened because its executable is missing.' >&2\nexit 1\n`);
     await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringMatching(/its executable is missing\.$/) });

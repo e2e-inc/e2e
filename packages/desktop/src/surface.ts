@@ -486,6 +486,8 @@ export class DesktopSurface {
       await execFileAsync('open', args, { signal: operation.signal, timeout: operation.timeoutMs, env: this.appEnv });
     } catch (cause) {
       const failure = cause as { code?: unknown; killed?: unknown; stderr?: unknown; message: string };
+      // A cancelled open may have started the app all the same: the launch stays pending.
+      if (operation.signal.aborted) throw new EngineError('CANCELLED', `opening ${bundle} was cancelled`, { retryable: false, cause });
       // `open` answered that it could not open the bundle (a missing executable, a bad signature), or could not run: nothing started, so there is nothing to look for.
       if ((typeof failure.code === 'number' && failure.killed !== true) || failure.code === 'ENOENT') {
         const reason = typeof failure.stderr === 'string' && failure.stderr.trim() !== '' ? failure.stderr.trim() : failure.message;
@@ -508,6 +510,7 @@ export class DesktopSurface {
       }
     } catch (cause) {
       // `open` ran, so the app may be starting whatever went wrong after it: the launch stays pending, and the end of the attempt looks for it.
+      if (operation.signal.aborted) throw new EngineError('CANCELLED', `looking for the process ${bundle} started was cancelled`, { retryable: false, cause });
       if (cause instanceof EngineError && cause.code === 'ACTION_MAY_HAVE_COMMITTED') throw cause;
       throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `${bundle} was opened, but looking for its process failed: ${(cause as Error).message}`, { retryable: false, cause });
     }
