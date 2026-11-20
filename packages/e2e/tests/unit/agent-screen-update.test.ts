@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ExecutorObservation } from '@e2e-dev/core/lib/agent/executor';
-import { ScreenPresenter } from '@e2e-dev/core/lib/agent/screen-update';
+import { reportsScreenChange, ScreenPresenter } from '@e2e-dev/core/lib/agent/screen-update';
 
 function screen(revision: string, lines: readonly string[], extra: Partial<ExecutorObservation> = {}): ExecutorObservation {
   return {
@@ -22,6 +22,46 @@ const HOME = [
 ];
 
 describe('ScreenPresenter', () => {
+  describe('says what a wait can count as progress', () => {
+    const textOf = (output: ReturnType<ScreenPresenter['present']>) => (typeof output === 'string' ? output : output.text);
+    const noTree = (revision: string, extra: Partial<ExecutorObservation> = {}) =>
+      screen(revision, ['[semantic capture unavailable: no nodes were read]'], { treeUnavailable: true, truncated: true, ...extra });
+
+    it('names a new location when nothing listed changed, and does not blame the control for it', () => {
+      const presenter = new ScreenPresenter();
+      presenter.open(screen('b1', HOME, { path: '/products/new' }));
+      const tapped = textOf(presenter.present(screen('b2', HOME, { path: '/products/123' }), { lead: 'Tapped #n3.', expectChange: true }));
+      expect(tapped).toContain('The location changed to /products/123. ');
+      expect(tapped).not.toContain('had no visible effect');
+      // A look is what the wait counts: observe's result leads with "Observed." and the line after it.
+      const looked = textOf(presenter.present(screen('b3', HOME, { path: '/products/124' }), { lead: 'Observed.' }));
+      expect(looked).toContain('The location changed to /products/124. ');
+      expect(reportsScreenChange(looked)).toBe(true);
+      const still = textOf(presenter.present(screen('b4', HOME, { path: '/products/124' }), { lead: 'Observed.' }));
+      expect(still).not.toContain('The location changed');
+      expect(reportsScreenChange(still)).toBe(false);
+    });
+
+    it('counts the listing coming back after a screen with no tree, not another screen with no tree', () => {
+      const presenter = new ScreenPresenter();
+      presenter.open(screen('b1', HOME));
+      expect(reportsScreenChange(textOf(presenter.present(noTree('b2'), { lead: 'Observed.' })))).toBe(false);
+      expect(reportsScreenChange(textOf(presenter.present(noTree('b3'), { lead: 'Observed.' })))).toBe(false);
+      const back = textOf(presenter.present(screen('b4', HOME), { lead: 'Observed.' }));
+      expect(back).toContain('Current screen (revision b4');
+      expect(reportsScreenChange(back)).toBe(true);
+    });
+
+    it('says a tab opened even while the screen has no tree', () => {
+      const presenter = new ScreenPresenter();
+      presenter.open(screen('b1', HOME));
+      presenter.present(noTree('b2'), { lead: 'Observed.' });
+      const opened = textOf(presenter.present(noTree('b3', { tabs: { count: 2, active: 1 } }), { lead: 'Observed.' }));
+      expect(opened).toContain('The app opened');
+      expect(reportsScreenChange(opened)).toBe(true);
+    });
+  });
+
   it('retires semantic history through repeated unavailable captures and shows recovery whole', () => {
     const presenter = new ScreenPresenter();
     presenter.initial(screen('b1', ['#root', ' #save button "Save"']));
