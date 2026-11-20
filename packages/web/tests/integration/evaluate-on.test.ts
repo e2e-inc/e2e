@@ -80,6 +80,14 @@ describe('PlaywrightSurface.evaluateOn', () => {
     }
     await page.evaluate('1');
     expect(objects.size - before).toBeLessThanOrEqual(2);
+    await page.evaluate(() => document.body.append(Object.assign(document.createElement('p'), { textContent: 'two' })));
+    const stale = objects.size;
+    for (let index = 0; index < 25; index += 1) {
+      await expect(surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, true))
+        .rejects.toMatchObject({ code: 'NODE_STALE' });
+    }
+    await page.evaluate('1');
+    expect(objects.size - stale).toBeLessThanOrEqual(2);
   });
 
   it.each([
