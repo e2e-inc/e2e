@@ -7,6 +7,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { compileEvaluation, evaluationValue, pageFunctionSource, pageValueEncoder, readEvaluation } from '../../src/evaluation.ts';
+import { SECURE_FIELD_SELECTOR } from '../../src/read-node.ts';
 
 /** What `browser.evaluate` returns for a page report. */
 function decode(text: string): unknown {
@@ -64,13 +65,13 @@ describe('compileEvaluation', () => {
   });
 
   it('calls a function on the element first, then the argument', async () => {
-    const element = { isConnected: true, id: 'nav' };
+    const element = { isConnected: true, matches: () => false, id: 'nav' };
     const evaluate = compileEvaluation('(el, suffix) => el.id + suffix', ['element', 'arg']);
     expect(decode(await evaluate(element, '-main'))).toBe('nav-main');
   });
 
   it('reads a result that is not JSON as a value, which only the throwing form refuses', async () => {
-    const report = await compileEvaluation('(el) => el', ['element', 'arg'])({ isConnected: true, run: () => 1 });
+    const report = await compileEvaluation('(el) => el', ['element', 'arg'])({ isConnected: true, matches: () => false, run: () => 1 });
     expect(readEvaluation(report)).toEqual({ ok: false, invalid: expect.stringContaining('must be JSON-safe') });
     expect(() => decode(report)).toThrow(expect.objectContaining({ code: 'INVALID_ARGUMENT' }));
   });
@@ -81,6 +82,20 @@ describe('compileEvaluation', () => {
     const report = await compileEvaluation('() => ran()', ['element', 'arg'])({ isConnected: false }, undefined);
     expect(() => readEvaluation(report)).toThrow(expect.objectContaining({ code: 'NODE_STALE', retryable: true }));
     expect(ran).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a password field', () => true],
+    ['an element whose matches throws', () => { throw new Error('replaced'); }],
+  ])('refuses %s as POLICY_DENIED without running the source', async (_, matches) => {
+    const ran = vi.fn();
+    vi.stubGlobal('ran', ran);
+    const selectors: unknown[] = [];
+    const element = { isConnected: true, matches: (selector: unknown) => { selectors.push(selector); return matches(); } };
+    const report = await compileEvaluation('() => ran()', ['element', 'arg'])(element, undefined);
+    expect(() => readEvaluation(report)).toThrow(expect.objectContaining({ code: 'POLICY_DENIED' }));
+    expect(ran).not.toHaveBeenCalled();
+    expect(selectors).toEqual([SECURE_FIELD_SELECTOR]);
   });
 });
 

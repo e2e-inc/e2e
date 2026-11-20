@@ -92,6 +92,28 @@ const secureField = content(`<html>
   <label>Password <input type="password" class="field" style="color: blue" value="app-generated-0xBEEF"></label>
 </html>`);
 
+/**
+ * A page whose `#turning` is a text field until the engine first reads its
+ * value, and becomes a password field holding `app-secret-0xBEEF` in the
+ * microtask after that read: after the locate checked it, before the
+ * read's page code runs.
+ */
+const turningSecure = content(`<html><label>Code <input id="turning" value="plain"></label><script>
+  const field = document.getElementById('turning');
+  const value = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+  let turned = false;
+  Object.defineProperty(field, 'value', {
+    get() {
+      if (!turned) {
+        turned = true;
+        queueMicrotask(() => { field.type = 'password'; value.set.call(field, 'app-secret-0xBEEF'); });
+      }
+      return value.get.call(this);
+    },
+    set(next) { value.set.call(this, next); },
+  });
+</script></html>`);
+
 /** A page whose `#real` has class `real`, and which makes every `getAttribute` call answer `fake`. */
 const lyingAttributes = content(`<html><p id="real" class="real">Real</p><script>
   Element.prototype.getAttribute = () => 'fake';
@@ -451,6 +473,24 @@ test.describe('expect(browser) locator matchers', { requires: ['browser'] }, () 
       const error = await failure(call);
       expect(error).toHaveProperty('code', 'POLICY_DENIED');
       expect(String((error as Error).message)).not.toContain('0xBEEF');
+    }
+  });
+
+  test('refuse a node that becomes a secure field after the locate, before its page code runs', async ({ browser }) => {
+    const field = browser.locator('#turning');
+    for (const call of [
+      () => browser.evaluateOn(field, (element) => {
+        (window as { ran?: boolean }).ran = true;
+        return (element as HTMLInputElement).value;
+      }),
+      () => expect(browser).toHaveJSProperty(field, 'value', 'app-secret-0xBEEF'),
+      () => expect(browser).toHaveCSS(field, 'display', 'inline-block'),
+    ]) {
+      await browser.goto(turningSecure);
+      const error = await failure(call);
+      expect(error).toHaveProperty('code', 'POLICY_DENIED');
+      expect(String((error as Error).message)).not.toContain('0xBEEF');
+      expect(await browser.evaluate('window.ran === undefined && document.getElementById("turning").type')).toBe('password');
     }
   });
 

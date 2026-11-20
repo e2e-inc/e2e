@@ -939,7 +939,14 @@ export class PlaywrightSurface {
         // cannot expand JsonValue.
         const input: unknown = arg;
         const handle = await element.evaluateHandle(evaluate, input);
-        return await handle.jsonValue();
+        // The handle holds a string, but Playwright keeps a handle object for
+        // it on both sides of its connection until it is disposed, and a
+        // matcher polls this many times in one page.
+        try {
+          return await handle.jsonValue();
+        } finally {
+          void handle.dispose().catch(() => undefined);
+        }
       } catch (cause) {
         const page = this.requirePage();
         const failure = await pageScriptFailure(

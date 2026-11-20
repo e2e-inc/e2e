@@ -1,6 +1,7 @@
 /** Separates exceptions thrown by trusted page code from failures of the evaluation transport. */
 import type { JsonValue } from '@e2e-dev/core';
-import { EngineError, TestError } from '@e2e-dev/core/engine';
+import { ConfigurationError, EngineError, TestError } from '@e2e-dev/core/engine';
+import { SECURE_FIELD_SELECTOR } from './read-node.ts';
 import { message } from './support.ts';
 
 /** The `__name` helper tsx's `keepNames` output calls, declared beside test code serialized into the page; it takes `defineProperty` before that code runs. */
@@ -49,13 +50,15 @@ export type EvaluationResult =
 
 /**
  * What the page-side boundary reports, as JSON text: the result, a thrown
- * message, why the result is not JSON, or an element that left its document.
+ * message, why the result is not JSON, an element that left its document,
+ * or an element that is a secure field.
  */
 type EvaluationReport =
   | { ok: true; value?: JsonValue }
   | { ok: false; message: string }
   | { ok: false; invalid: string }
-  | { ok: false; detached: true };
+  | { ok: false; detached: true }
+  | { ok: false; secure: true };
 
 /**
  * Thrown by a `pageValueEncoder` encoder for a value that is not JSON; the
@@ -134,8 +137,11 @@ export function pageValueEncoder(): (root: unknown) => string | undefined {
  * source in this process. The source is one expression: a function it
  * evaluates to is called with what `call` names, any other value is the
  * result. A call that starts with the element runs on the element
- * Playwright supplies, and reports a detached one instead of running the
- * source. The boundary resolves to JSON text, a primitive the caller takes
+ * Playwright supplies, and reports a detached one or a secure field instead
+ * of running the source. The secure check runs in the same task as the
+ * source, so a node that turns into a password field after the caller's
+ * locate is still refused; a `matches` that throws counts as secure. The
+ * boundary resolves to JSON text, a primitive the caller takes
  * back without Playwright serializing it in the page, so a page that deleted
  * or replaced a global the serializer needs still returns its result;
  * `readEvaluation` reads it.
@@ -154,7 +160,12 @@ export function compileEvaluation(
   try {
     return new Function(...(onElement ? ['element', 'arg'] : ['arg']), `
       ${KEEP_NAMES_HELPER}${onElement ? `
-      if (!element.isConnected) return '{"ok":false,"detached":true}';` : ''}
+      if (!element.isConnected) return '{"ok":false,"detached":true}';
+      let secure = true;
+      try {
+        secure = element.matches(${JSON.stringify(SECURE_FIELD_SELECTOR)}) !== false;
+      } catch {}
+      if (secure) return '{"ok":false,"secure":true}';` : ''}
       return (async (encode, run) => {
         const report = (ok, key, text) => \`{"ok":\${ok}\${text === undefined ? '' : \`,"\${key}":\${text}\`}}\`;
         let value;
@@ -187,8 +198,8 @@ export function compileEvaluation(
 /**
  * The result of the boundary `compileEvaluation` compiled, from the JSON
  * text it resolved to. Throws what the page threw as `EVALUATE_FAILED`, as
- * it does an unreadable report, and an element that left its document as
- * retryable `NODE_STALE`.
+ * it does an unreadable report, an element that left its document as
+ * retryable `NODE_STALE`, and a secure field as `POLICY_DENIED`.
  */
 export function readEvaluation(text: string): EvaluationResult {
   let report: EvaluationReport;
@@ -203,6 +214,9 @@ export function readEvaluation(text: string): EvaluationResult {
     throw new EngineError('NODE_STALE', 'node is detached; resolve it again before evaluating', {
       retryable: true,
     });
+  }
+  if ('secure' in report) {
+    throw new ConfigurationError('POLICY_DENIED', 'reading values from a secure field is denied: the node became a secure field');
   }
   if ('invalid' in report) return { ok: false, invalid: report.invalid };
   throw new TestError('EVALUATE_FAILED', report.message);

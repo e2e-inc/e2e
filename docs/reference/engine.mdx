@@ -2396,6 +2396,9 @@ evaluateOn: (target: Locator, source: string) =>
   states, and attributes, so reading those needs no further engine call.
 - `withNode` is a read: a secure field is `POLICY_DENIED` before `use` runs,
   as the locator getters deny it.
+  The page can turn the node into a secure field after that check.
+  A `use` that runs page code on the element checks again in the same page
+  task, before that code runs, as the web engine's `evaluateOn` does.
 - `use` throws a retryable `NODE_STALE` when its ref no longer names the
   node. `withNode` resolves again while the deadline remains and calls `use`
   again, so throw it only before work that must not run twice.
