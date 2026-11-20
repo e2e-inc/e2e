@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { aiSdk, loadAiSdk } from '@e2e-dev/core/lib/agent/ai-sdk';
 import { AgentError } from '@e2e-dev/core/lib/agent/error';
-import { isFailedResult } from '@e2e-dev/core/lib/agent/loop-guards';
+import { isFailedResult, waitingToolNames } from '@e2e-dev/core/lib/agent/loop-guards';
 import { GRAMMAR_TOOL_NAMES } from '@e2e-dev/core/lib/agent/action-names';
 import { createGrammarTools, createVerdictTool, grammarTools } from '@e2e-dev/core/lib/agent/primitives';
 import { createBuiltInAgent, projectTools } from '@e2e-dev/core/lib/agent/default-agent';
@@ -339,6 +339,13 @@ describe('the loop guard waits longer on the built-in observe only', () => {
     });
     return { model, observed: () => observed };
   };
+
+  it('marks observe and the plain screenshot as waiting tools, and not the screenshot that saves a file', () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    expect([...waitingToolNames(grammarTools(context, {}))].toSorted()).toEqual(['observe', 'screenshot']);
+    expect([...waitingToolNames(createGrammarTools(context))].toSorted()).toEqual(['observe', 'screenshot']);
+    expect([...waitingToolNames(grammarTools(context, { saveScreenshot: async (file) => file }))]).toEqual(['observe']);
+  });
 
   it('lets the built-in act loop observe ten times while a save stays in progress', async () => {
     const { context } = fakeExecutorContext({ secrets: [] });
