@@ -9,6 +9,8 @@ export interface Keypress {
   readonly sequence?: string | undefined;
 }
 
+type PauseOptions = { readonly interrupt?: boolean };
+
 /** Ctrl-C and Ctrl-D: in raw mode they arrive as keypresses, never as a signal. */
 function isInterruptPress(press: Keypress): boolean {
   return press.ctrl && (press.name === 'c' || press.name === 'd');
@@ -59,10 +61,12 @@ export class Keyboard<Key> {
     this.stdin.resume();
   }
 
-  /** Hands the terminal to a prompt: raw mode off, no key but Ctrl-C delivered. */
-  pause(): void {
+  /** Hands the terminal to a prompt: raw mode off, no key but Ctrl-C delivered by default. */
+  pause({ interrupt = true }: PauseOptions = {}): void {
     this.stdin.off('keypress', this.onKeypress);
-    this.stdin.on('keypress', this.onInterruptOnly);
+    if (interrupt) {
+      this.stdin.on('keypress', this.onInterruptOnly);
+    }
     this.stdin.setRawMode?.(false);
   }
 

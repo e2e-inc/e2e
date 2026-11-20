@@ -18,7 +18,7 @@ import type { SerialAttemptStart } from '../serial.ts';
 import type { McpToolResult } from '../../session-tools/tools.ts';
 import type { HeldTestOpening } from '../step-attachment-wire.ts';
 import type { StepHold } from '../step-hold.ts';
-import type { StepProgress } from '@e2e-dev/core/lib/run/steps';
+import type { AppLogRecord, StepProgress } from '@e2e-dev/core/lib/run/steps';
 
 /** One runnable pair on the wire; the worker resolves the test function. */
 export interface WirePair {
@@ -158,6 +158,13 @@ export interface ScreenRequestMessage {
   readonly requestId: string;
 }
 
+/** Reads the attempt's log while `holdId` is still waiting, like `screen-request`. */
+type LogsRequestMessage = {
+  readonly type: 'logs-request';
+  readonly holdId: string;
+  readonly requestId: string;
+};
+
 /**
  * Requests for a held test attachment. The attach request names a hold.
  * Later requests use the ID of the attach request.
@@ -197,6 +204,7 @@ export type MainToWorker =
   | PingMessage
   | StepReleaseMessage
   | ScreenRequestMessage
+  | LogsRequestMessage
   | StepAttachmentRequestMessage
   | StepAttachmentCancelMessage
   | ContinueMessage;
@@ -318,6 +326,13 @@ export interface ScreenReplyMessage {
   readonly requestId: string;
   readonly screen?: string;
 }
+
+/** The reply to `logs-request`. The logs are absent if the wait has ended. */
+type LogsReplyMessage = {
+  readonly type: 'logs-reply';
+  readonly requestId: string;
+  readonly logs?: readonly AppLogRecord[];
+};
 
 /**
  * Replies to attachment requests. The worker redacts each result with the
@@ -446,6 +461,7 @@ export type WorkerToMain =
   | StepHoldMessage
   | StepCancelMessage
   | ScreenReplyMessage
+  | LogsReplyMessage
   | StepAttachmentReplyMessage
   | OutputMessage
   | NoticeMessage

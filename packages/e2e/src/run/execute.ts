@@ -45,7 +45,7 @@ import { interruptedInPhase, interruptedSkip, pairKey, unitResult, unstartedResu
 import { carriedSecrets, processSecrets, redactForSession, sessionLedger, staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
 import { SessionStaging } from '@e2e-dev/core/lib/run/sessions';
 import { isOwnStep, StepRecorder, type StepHoldRequest, type StepProgress } from '@e2e-dev/core/lib/run/steps';
-import { holdAttemptSteps, readHeldScreen, type AttemptHolds, type StepHold, type StepHoldContext } from './step-hold.ts';
+import { holdAttemptSteps, readHeldScreen, type AttemptHolds, type HoldReads, type StepHold } from './step-hold.ts';
 import { HeldTestTools } from './worker/held-test-tools.ts';
 import { WorkerModels } from '@e2e-dev/core/lib/run/worker-models';
 import { classifyAttemptStatus, EngineSessions, type EngineSessionsOptions } from '@e2e-dev/core/lib/run/engine-sessions';
@@ -93,11 +93,12 @@ type ExecutorHold = {
   /**
    * Asks the runner at each pause, and before each step when `steps` is set.
    * The runner can call `readScreen` to read the screen during the wait.
+   * It can call `readLogs` to read the attempt's app log.
    */
   readonly ask: (
     step: StepHold,
     signal: AbortSignal,
-    readScreen: StepHoldContext['readScreen'],
+    reads: HoldReads,
     tools: HeldTestTools,
   ) => Promise<void>;
   /**
@@ -778,8 +779,9 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
             repeat: pair.repeat,
             title: pair.test.titlePath.join(' › '),
           },
-          ask: (step, signal, readScreen) => hold.ask(step, signal, readScreen, tools),
+          ask: (step, signal, reads) => hold.ask(step, signal, reads, tools),
           readScreen: (signal: AbortSignal) => readHeldScreen(session, this.op(attemptId, this.config.actionTimeout, signal), screens),
+          readLogs: () => steps.appLog().slice(),
         });
       }
       // `expect.poll` and `expect.soft` take no fixture, so the attempt they

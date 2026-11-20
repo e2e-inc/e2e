@@ -252,14 +252,20 @@ bunx e2e run tests/checkout.e2e.ts --step --headed
 ```
 </CodeGroup>
 
-The held step shows under its test, below the steps that already ran:
+The held step shows under its test, below the steps that already ran.
+The keys appear below the summary:
 
 ```text
  ❯ |web| tests/checkout.e2e.ts 0/1
    └── pays with a card (k3f9)
        ✓ app.open "/checkout" 412ms
-       ▶ step 2  locator.fill "getByLabel("Email")"  tests/checkout.e2e.ts:9
-         press enter to run this step, press h to show help, press q to quit
+       ⏸ step 2  locator.fill "getByLabel("Email")"  tests/checkout.e2e.ts:9
+
+ Test Files  0 passed (1)
+      Tests  0 passed (1)
+
+Paused (k3f9) at step 2
+  press enter to run this step, press h to show help, press q to quit
 ```
 
 The keys follow [`--watch`](/reference/cli#watch-mode). These work at a prompt:
@@ -267,14 +273,28 @@ The keys follow [`--watch`](/reference/cli#watch-mode). These work at a prompt:
 | Key | Does |
 | --- | --- |
 | Enter | runs the held step and holds the next one |
+| `s` | opens the screen's accessibility tree |
+| `l` | opens the current attempt's app log at its newest lines |
 | `n` | runs the rest of this test, retries included, and holds at the next test |
 | `a` | runs the rest of the run without holding steps |
 | `h` | shows every key under the prompt, or hides them |
 | `q`, Esc | stops the run as Ctrl-C does: the test ends `interrupted`, the rest are skipped, exit 130 |
 
+The screen and log open in a full-screen viewer. The test stays paused while
+the viewer is open.
+
+| Viewer key | Does |
+| --- | --- |
+| Up, Down, `k`, `j` | scrolls one line |
+| Page Up, Page Down, `b`, Space | scrolls one page |
+| `g`, `G` | goes to the top or bottom |
+| `s`, `l` | switches to the screen or log |
+| `p` | closes the viewer and prints its text above the live summary |
+| `q`, Esc | returns to the prompt |
+
 - A key pressed within 150 ms of a prompt is ignored, so a key meant for the
   last step never runs this one. Ctrl-C works at any time, also while a step
-  runs.
+  runs. The same guard applies after you close the viewer.
 - The time a step is held counts toward nothing: not its duration, not the
   test's `timeout`, not `maxDuration`. A test that hangs after a step still
   times out on the time it had left. The test's own duration in the report
@@ -385,17 +405,23 @@ bunx e2e run tests/checkout.e2e.ts --headed
 ```
 </CodeGroup>
 
-In a terminal, the pause is shown under its test:
+In a terminal, the pause is shown under its test. The keys follow the summary:
 
 ```text
  ❯ |web| tests/checkout.e2e.ts 0/1
    └── pays with a card (k3f9)
-       ▶ paused  screen.pause()  tests/checkout.e2e.ts:5
-         press enter to resume, press h to show help, press q to quit
+       ⏸ paused  screen.pause()  tests/checkout.e2e.ts:5
+
+ Test Files  0 passed (1)
+      Tests  0 passed (1)
+
+Paused (k3f9) at screen.pause()
+  press enter to resume, press h to show help, press q to quit
 ```
 
 Press Enter to resume the test, `h` to list the keys, or `q` to stop the run
 with exit 130, as at a [`--step` prompt](#step-through-a-test).
+Press `s` for the screen or `l` for the app log, including under `--watch`.
 
 Without a terminal, as in a coding agent's shell, the pause is printed with
 the screen it waits on:

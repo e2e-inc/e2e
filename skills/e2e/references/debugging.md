@@ -141,9 +141,9 @@ jq '.run.results[] | select(.selected and .status != "passed") | .attempts[-1]
 | Do | When |
 | --- | --- |
 | `--headed` | Watch the failing step |
-| `--step --headed` | A person steps through the test one key per step |
+| `--step --headed` | A person steps through the test one key per step. Press `s` for the screen or `l` for the app log. |
 | `--step`, then `e2e run --step next` | An agent steps through the test: each command prints how the step it ran ended and returns at the next held step with the screen it waits on; `stop` ends the run |
-| `await screen.pause()` in the test | Pause the test at that line, with the app open, each time the line runs, in any `e2e run`. Call it with `await` between steps in fixture setup, `beforeEach`, or the body. Anywhere else, the test isn't paused. Paused time doesn't count toward any timeout. In a terminal, the user presses Enter to resume or `q` to quit. Without a terminal, the pause is printed with its screen. There, a run with a paused test is stopped after 30 minutes without a command. With or without a terminal, run `e2e run --step next` from the same directory to resume the test, or `e2e run --step stop` to end the run. |
+| `await screen.pause()` in the test | Pause the test at that line, with the app open, each time the line runs, in any `e2e run`. Call it with `await` between steps in fixture setup, `beforeEach`, or the body. Anywhere else, the test isn't paused. Paused time doesn't count toward any timeout. In a terminal, the user presses Enter to resume or `q` to quit. Press `h` for the keys, `s` for the screen, or `l` for the app log. Without a terminal, the pause is printed with its screen. There, a run with a paused test is stopped after 30 minutes without a command. With or without a terminal, run `e2e run --step next` from the same directory to resume the test, or `e2e run --step stop` to end the run. |
 | `--workers 1 --retries 0` | Take parallelism and retries out of the picture |
 | `--action-timeout 5000` | While writing a test: a wrong locator fails in 5 s instead of 30 s (`--assertion-timeout` for `expect`). Keep it longer than the slowest screen takes to load |
 | `--no-cache` | Rule out a stale `agent.act` replay; one run, not every rerun. A failed run already deletes the replay that ran into the failure, so rerun with the cache on first. When the failure repeats after a replay the trace page shows as kept and the `--no-cache` run passes, tighten the next check or wait after that goal (the arrange block's closing wait, or the assertions): the stale replay then fails it and is deleted |
@@ -154,6 +154,12 @@ jq '.run.results[] | select(.selected and .status != "passed") | .attempts[-1]
 | `await app.screenshot('before-submit')` | Evidence at a point you choose; it masks secure fields only |
 | `app.startRecording()`, then `await app.stopRecording()` | One transition as a video; fails while the test's `video` records |
 | `CI=1 npx e2e run` | Reproduce CI-only behaviour (defaults: topic running) |
+
+The terminal prompt lists keys below the live summary. In the viewer, use
+Up, Down, `k`, or `j` to scroll one line. Use Page Up, Page Down, `b`, or
+Space to scroll one page. Press `g` for the top or `G` for the bottom.
+Press `s` or `l` to switch views, `p` to print to scrollback, or `q` or Esc
+to return to the prompt. The prompt ignores keys for 150 ms after the viewer closes.
 
 ## Flaky tests
 

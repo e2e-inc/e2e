@@ -9,8 +9,11 @@ import type { Keypress } from './keyboard.ts';
 import type { BeforeStep, HeldStep, NumberedStep, StepHoldContext, StepPrompt } from '../run/step-hold.ts';
 import { pairKey } from '../run/units.ts';
 
+/** The views the step prompt can open. */
+export type StepView = 'screen' | 'logs';
+
 /** A key the step prompt acts on. Ctrl-C, Ctrl-D, and Ctrl-Z arrive as keypresses in raw mode, not as signals. */
-export type StepKey = 'continue' | 'test' | 'rest' | 'help' | 'stop' | 'interrupt' | 'suspend';
+export type StepKey = 'continue' | 'test' | 'rest' | 'help' | 'stop' | 'interrupt' | 'suspend' | StepView;
 
 /**
  * The step key a keypress means, or none. The keys follow `--watch`, as
@@ -32,6 +35,10 @@ export function stepKeyOf(press: Keypress): StepKey | undefined {
       return 'rest';
     case 'h':
       return 'help';
+    case 's':
+      return 'screen';
+    case 'l':
+      return 'logs';
     case 'q':
     case 'escape':
       return 'stop';
@@ -55,12 +62,20 @@ const KEY_GUARD_MS = 150;
 /** Options for a `StepGate.press` call. Set `guard` to false to skip the key guard. */
 type PressOptions = { readonly guard: boolean };
 
+type StepGateOptions = {
+  readonly now?: () => number;
+  readonly holdSteps?: boolean;
+  readonly viewer?: boolean;
+};
+
+/** The held step and its reads, as the viewer sees them. */
+export type HeldPromptStep = NumberedStep & { readonly context: StepHoldContext };
+
 /** One held step waiting for its prompt, or showing it. */
-interface Waiting extends NumberedStep {
-  readonly context: StepHoldContext;
+type Waiting = HeldPromptStep & {
   readonly resolve: () => void;
   readonly onAbort: () => void;
-}
+};
 
 /** The test a step belongs to, on its target: what `t` lets through. */
 function testKey(step: HeldStep): string {
@@ -101,6 +116,7 @@ export class StepGate {
 
   private readonly now: () => number;
   private readonly holdSteps: boolean;
+  private readonly viewer: boolean;
 
   /**
    * `stop` interrupts the run. `holdSteps` is false for a run without
@@ -108,10 +124,11 @@ export class StepGate {
    */
   constructor(
     private readonly stop: () => void,
-    options: { readonly now?: () => number; readonly holdSteps?: boolean } = {},
+    options: StepGateOptions = {},
   ) {
     this.now = options.now ?? Date.now;
     this.holdSteps = options.holdSteps ?? true;
+    this.viewer = options.viewer ?? false;
   }
 
   /** The runner's `hold` hook. */
@@ -150,14 +167,24 @@ export class StepGate {
     });
   };
 
+  /** The wait the viewer may read once the key guard has passed. */
+  inspect(): HeldPromptStep | undefined {
+    return this.now() - this.shownAt < KEY_GUARD_MS ? undefined : this.queue[0];
+  }
+
+  /** A key pressed in the viewer must not act on the prompt that returns. */
+  guardKeys(): void {
+    this.shownAt = this.now();
+  }
+
   /** Acts on one key. Ctrl-C works at any time; the others only on a prompt, once it has been up for the key guard. */
-  press(key: Exclude<StepKey, 'suspend'>, options: PressOptions = { guard: true }): void {
+  press(key: Exclude<StepKey, 'suspend' | StepView>, options: PressOptions = { guard: true }): void {
     if (key === 'interrupt') {
       this.stop();
       return;
     }
-    const shown = this.queue[0];
-    if (shown === undefined || (options.guard && this.now() - this.shownAt < KEY_GUARD_MS)) return;
+    const shown = options.guard ? this.inspect() : this.queue[0];
+    if (shown === undefined) return;
     const test = testKey(shown.step);
     switch (key) {
       case 'continue':
@@ -209,7 +236,7 @@ export class StepGate {
 
   /** Shows the next prompt, or takes the prompt down when no step waits. */
   private showNext(): void {
-    this.shownAt = this.now();
+    this.guardKeys();
     const show = this.queue[0]?.context.show;
     const draw = show ?? this.show;
     this.show = show;
@@ -221,6 +248,11 @@ export class StepGate {
     const [first, ...rest] = this.queue;
     if (first === undefined) return undefined;
     const numbered = ({ step, number }: Waiting): NumberedStep => ({ step, number });
-    return { steps: [numbered(first), ...rest.filter((waiting) => samePrompt(waiting.step, first.step)).map(numbered)], help: this.help, holdSteps: this.holdSteps };
+    return {
+      steps: [numbered(first), ...rest.filter((waiting) => samePrompt(waiting.step, first.step)).map(numbered)],
+      help: this.help,
+      holdSteps: this.holdSteps,
+      ...(this.viewer ? { viewer: true } : {}),
+    };
   }
 }

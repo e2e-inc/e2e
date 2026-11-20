@@ -48,6 +48,7 @@ function gate(holdSteps = true) {
     signal,
     show: (prompt) => shown.push(prompt),
     readScreen: () => Promise.resolve(undefined),
+    readLogs: () => Promise.resolve(undefined),
     attach: () => Promise.reject(new Error('no held tests')),
   });
   /** Holds `held` and reports, after the microtasks drain, whether it was let through. */
@@ -77,6 +78,8 @@ describe('stepKeyOf', () => {
     expect(stepKeyOf({ name: 'n', ctrl: false })).toBe('test');
     expect(stepKeyOf({ name: 'a', ctrl: false })).toBe('rest');
     expect(stepKeyOf({ name: 'h', ctrl: false })).toBe('help');
+    expect(stepKeyOf({ name: 's', ctrl: false })).toBe('screen');
+    expect(stepKeyOf({ name: 'l', ctrl: false })).toBe('logs');
     expect(stepKeyOf({ name: 'q', ctrl: false })).toBe('stop');
     expect(stepKeyOf({ name: 'escape', ctrl: false })).toBe('stop');
     expect(stepKeyOf({ name: 'c', ctrl: true })).toBe('interrupt');

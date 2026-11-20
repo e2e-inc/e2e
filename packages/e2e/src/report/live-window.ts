@@ -66,6 +66,24 @@ function rowsOf(text: string, columns: number): number {
 }
 
 export class LiveWindow {
+  private static readonly running = new Set<LiveWindow>();
+  private static suspended = false;
+
+  /** Clears the main screen's live blocks before the viewer opens and repaints them after its output is flushed. */
+  static suspend(): () => void {
+    for (const window of LiveWindow.running) {
+      window.erase();
+    }
+
+    LiveWindow.suspended = true;
+    return () => {
+      LiveWindow.suspended = false;
+      for (const window of LiveWindow.running) {
+        window.redraw();
+      }
+    };
+  }
+
   /** Rows the block currently occupies below the log. */
   private rows = 0;
   /**
@@ -100,6 +118,7 @@ export class LiveWindow {
   start(): void {
     if (this.raw === undefined || this.active) return;
     this.active = true;
+    LiveWindow.running.add(this);
     this.timer = setInterval(() => this.redraw(), REPAINT_INTERVAL_MS);
     this.timer.unref();
     this.redraw();
@@ -114,7 +133,7 @@ export class LiveWindow {
 
   /** Repaints the block below the log; every line is clamped so the row count stays exact. */
   redraw(): void {
-    if (this.raw === undefined || !this.active) return;
+    if (this.raw === undefined || !this.active || LiveWindow.suspended) return;
     const columns = terminalColumns();
     const all = this.getWindow(this.room());
     // Safety net under the reporter's own budget: a block taller than the
@@ -141,6 +160,7 @@ export class LiveWindow {
     if (this.timer !== undefined) clearInterval(this.timer);
     this.timer = undefined;
     this.active = false;
+    LiveWindow.running.delete(this);
     this.erase();
   }
 }

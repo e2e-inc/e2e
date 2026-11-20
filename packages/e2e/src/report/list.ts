@@ -55,6 +55,7 @@ import {
   sumUsage,
   tally,
   terminalColumns,
+  terminalRows,
   usageText,
   type AiUsage,
   type CacheTally,
@@ -65,7 +66,7 @@ import {
 import { leftOutTests } from './left-out.ts';
 import { ExploreView } from './list-explore.ts';
 import { isShownEvent, type ConfiguredModel, type FileGroup, type PausedTest, type ReplayNotice, type RunningTest, type TestLine } from './list-model.ts';
-import { replayLine, replayNotices, stepLine, stepPromptLine } from './list-steps.ts';
+import { replayLine, replayNotices, stepLine, stepPromptLine, stepPromptRows } from './list-steps.ts';
 import { LiveWindow } from './live-window.ts';
 import { repeatGroups, repeatLine, repeatSummary, type RepeatRun } from './repeats.ts';
 import { RunningTree } from './running-tree.ts';
@@ -511,8 +512,8 @@ export class ListReporter {
   };
 
   /**
-   * Shows the `e2e run --step` prompt under its test in the live window, or
-   * takes it down. Without a window it prints once, as a permanent line.
+   * Shows the held steps under their test and the keys below the summary.
+   * Without a window it prints the prompt once, as a permanent line.
    */
   showStepPrompt(prompt: StepPrompt | undefined): void {
     this.prompt = prompt;
@@ -1157,14 +1158,15 @@ export class ListReporter {
     return this.interrupted ? pc.yellow(`${cut} (interrupted)`) : pc.dim(none);
   }
 
-  /** The live window: the running tree, then the summary. */
-  /** The block's rows for `room` screen rows under the permanent log. */
+  /** The running tree, summary, and keys for `room` rows under the permanent log. */
   private renderWindow(room: number): string[] {
     const running = [...this.pairs.values()].filter((test) => test.executing);
     if (this.explore !== undefined) {
       return this.explore.liveRows(this.exploreBadge(), running[0]?.current?.events, this.summaryRows(false), Date.now(), room);
     }
-    return this.tree.render(running, this.summaryRows(false), Date.now(), room, { setup: this.inFlight, paused: this.paused() });
+    const footer = this.prompt === undefined ? [] : stepPromptRows(this.pc, this.prompt).slice(0, terminalRows() - 1);
+
+    return this.tree.render(running, this.summaryRows(false), Date.now(), room, { setup: this.inFlight, paused: this.paused(), footer });
   }
 
   /** The running test the `--step` prompt holds, with the prompt. */

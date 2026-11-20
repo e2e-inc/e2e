@@ -356,6 +356,11 @@ function appLogLine(entry: AppLogRecord): string {
   return entry.level === 'info' ? `${glyph} ${source}: ${text}` : `${glyph} ${source} ${entry.level}: ${text}`;
 }
 
+/** One app log line with the step number that goes with it. */
+export function numberedAppLogLine(entry: AppLogRecord, number: number | undefined): string {
+  return `${number === undefined ? 'before step 1' : `step ${number}`} · ${appLogLine(entry)}`;
+}
+
 /**
  * The lines under one step on the page, oldest first: the cache's decision
  * for an agent step, then each action it took (the node it landed on), each
@@ -391,7 +396,7 @@ function appLogLines(steps: readonly ReportStep[], appLog: readonly AppLogRecord
   const numbers = new Map(steps.map((step, position) => [step.index, position + 1]));
   const items = appLog.map((entry) => {
     const number = entry.step === undefined ? undefined : numbers.get(entry.step);
-    return { at: entry.at, important: entry.level !== 'info', line: `${number === undefined ? 'before step 1' : `step ${number}`} · ${appLogLine(entry)}` };
+    return { at: entry.at, important: entry.level !== 'info', line: numberedAppLogLine(entry, number) };
   });
   const { shown, left } = importantThenLatest(items, MAX_APP_LOG_LINES);
   return [...(left === 0 ? [] : [`${left} ${left === 1 ? 'line' : 'lines'} left out`]), ...shown.map((item) => item.line)];
