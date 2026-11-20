@@ -339,8 +339,8 @@ export class DesktopSurface {
       await this.quit(context.signal, context.timeoutMs);
       quit = true;
     } finally {
-      // An app that would not quit stays named in the state directory, whose sweep at the next run's init quits it by its token.
-      const leftRunning = !quit && this.pid !== undefined;
+      // An app that would not quit, or a launch whose process was never found, stays named in the state directory, whose sweep at the next run's init quits it by its token.
+      const leftRunning = !quit && (this.pid !== undefined || this.pending !== undefined);
       if (this.home !== undefined && !leftRunning) await rm(this.home, { recursive: true, force: true }).catch(() => undefined);
       this.home = undefined;
       this.cli = undefined;
@@ -414,6 +414,13 @@ export class DesktopSurface {
     await this.quit(operation.signal, operation.timeoutMs);
     // Marks the process this launch starts, so it is told apart from every other copy by evidence, never by timing.
     const launch: Launch = { target, token: randomUUID(), before: await this.runningCopies(target, operation) };
+    // Written before anything is sent, so the app stays findable by its token if this worker is killed mid-launch or never finds its process.
+    if (this.home !== undefined) {
+      // Renamed into place, so a worker killed mid-write never leaves half a record.
+      const record = path.join(this.home, APP_FILE);
+      await writeFile(`${record}.partial`, JSON.stringify({ token: launch.token }));
+      await rename(`${record}.partial`, record);
+    }
     try {
       if (this.bundle === undefined) await this.launchById(launch, operation);
       else await this.openBundle(this.bundle, launch, operation);
@@ -425,12 +432,6 @@ export class DesktopSurface {
       throw cause;
     }
     this.forget();
-    if (this.home !== undefined && this.pid !== undefined) {
-      // Renamed into place, so a worker killed mid-write never leaves half a record.
-      const record = path.join(this.home, APP_FILE);
-      await writeFile(`${record}.partial`, JSON.stringify({ pid: this.pid, token: launch.token }));
-      await rename(`${record}.partial`, record);
-    }
     await this.windowReadable(operation);
   }
 
@@ -1270,6 +1271,31 @@ async function carriesToken(pid: number, token: string, signal: AbortSignal): Pr
   return words.some((word) => /^(HOME|PATH|USER)=/.test(word)) ? false : undefined;
 }
 
+/**
+ * The processes whose environment carries a launch token: the app the
+ * launch that made it started, whatever its process id. A process whose
+ * environment cannot be read is never among them.
+ */
+async function processesCarrying(token: string, signal: AbortSignal): Promise<number[]> {
+  const marker = `${LAUNCH_TOKEN}=${token}`;
+  if (process.platform === 'linux') {
+    const found: number[] = [];
+    for (const entry of await readdir('/proc').catch(() => [] as string[])) {
+      if (!/^\d+$/.test(entry)) continue;
+      const environ = await readFile(`/proc/${entry}/environ`, 'utf8').catch(() => '');
+      if (environ.split('\0').includes(marker)) found.push(Number(entry));
+    }
+    return found;
+  }
+  const { stdout } = await execFileAsync('ps', ['-E', '-ww', '-ax', '-o', 'pid=,command='], { signal, maxBuffer: 256 * 1024 * 1024 }).catch(() => ({ stdout: '' }));
+  return stdout
+    .split('\n')
+    .map((line) => line.trim().split(/\s+/))
+    .filter((words) => words.includes(marker))
+    .map((words) => Number(words[0]))
+    .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid);
+}
+
 /** The run's environment cut to the variables the app and agent-desktop may see (`INHERITED_ENV`, and `LC_*`). */
 function inheritedEnv(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
   const kept: Record<string, string> = {};
@@ -1285,9 +1311,8 @@ function inheritedEnv(env: Readonly<Record<string, string | undefined>>): Record
  * removed its own. A directory goes once the process its owner file names
  * is gone, or, with no owner file, once it is a day old. One still in use
  * is never touched. The app such a worker launched and left running is
- * quit too, but only while its environment still shows the launch token:
- * a process that took over its id since, or whose environment cannot be
- * read, is left alone.
+ * quit too: every process whose environment carries the token its launch
+ * record names. One whose environment cannot be read is left alone.
  */
 async function sweepStateDirectories(): Promise<void> {
   const root = tmpdir();
@@ -1301,12 +1326,14 @@ async function sweepStateDirectories(): Promise<void> {
     // A record cut short by the kill that left it names no process: the directory still goes.
     const parsed: unknown = await readFile(path.join(directory, APP_FILE), 'utf8').then((text): unknown => JSON.parse(text)).catch(() => undefined);
     const launched = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
-    const { pid, token } = launched;
-    if (typeof pid === 'number' && typeof token === 'string' && alive(pid) && (await carriesToken(pid, token, AbortSignal.timeout(5_000))) === true) {
-      try {
-        process.kill(pid, 'SIGKILL');
-      } catch {
-        // Gone already.
+    const { token } = launched;
+    if (typeof token === 'string' && token !== '') {
+      for (const pid of await processesCarrying(token, AbortSignal.timeout(5_000))) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // Gone already.
+        }
       }
     }
     await rm(directory, { recursive: true, force: true }).catch(() => undefined);

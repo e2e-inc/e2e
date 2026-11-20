@@ -443,7 +443,8 @@ describe('DesktopSurface', () => {
     const home = fake.calls()[0]!.home!;
     try {
       await expect(surface.dispose({ signal, timeoutMs: 5_000 })).rejects.toThrow(/listed the apps only in part/);
-      expect(JSON.parse(readFileSync(path.join(home, 'app.json'), 'utf8'))).toMatchObject({ pid: app.pid });
+      const { token } = JSON.parse(readFileSync(path.join(home, 'app.json'), 'utf8')) as { token: string };
+      expect(await environmentOf(app.pid)).toContain(`E2E_DESKTOP_LAUNCH=${token}`);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -1071,6 +1072,22 @@ describe('DesktopSurface', () => {
     expect(after.root.children?.[0]?.ref.id).toBe(before.root.children?.[0]?.ref.id);
   });
 
+  it('keeps the launch record of a launch whose process was never found, so the next run can quit it', async () => {
+    const { surface, fake } = await initialized({
+      launch: [{ spawn: true, ...(failure('TIMEOUT', 'delivered_unverified') as object) }],
+      'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [], complete: false } }],
+    });
+    const home = fake.calls()[0]!.home!;
+    try {
+      await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
+      await expect(surface.dispose({ signal, timeoutMs: 1_000 })).rejects.toThrow(/only in part/);
+      const { token } = JSON.parse(readFileSync(path.join(home, 'app.json'), 'utf8')) as { token: string };
+      expect(await environmentOf(fake.spawned()[0]!)).toContain(`E2E_DESKTOP_LAUNCH=${token}`);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it('quits the app a killed worker left running, by its launch token, and nothing else', async () => {
     const dead = spawn(process.execPath, ['-e', '']);
     await new Promise((resolve) => dead.on('exit', resolve));
@@ -1081,7 +1098,8 @@ describe('DesktopSurface', () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     const directories = ['token-1', 'token-1'].map(() => mkdtempSync(path.join(tmpdir(), 'e2e-agent-desktop-')));
     writeFileSync(path.join(directories[0]!, 'owner'), String(dead.pid));
-    writeFileSync(path.join(directories[0]!, 'app.json'), JSON.stringify({ pid: leaked.pid, token: 'token-1' }));
+    // Written before the launch: the token alone, since the worker may be killed before it learns the process id.
+    writeFileSync(path.join(directories[0]!, 'app.json'), JSON.stringify({ token: 'token-1' }));
     writeFileSync(path.join(directories[1]!, 'owner'), String(dead.pid));
     writeFileSync(path.join(directories[1]!, 'app.json'), JSON.stringify({ pid: theirs.pid, token: 'token-1' }));
     try {
