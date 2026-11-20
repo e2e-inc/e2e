@@ -152,6 +152,14 @@ describe('e2e/core', { timeout: 60_000 }, () => {
     const opened = await host(defineEngine({ name: long, version: '1', spiVersion: ENGINE_SPI_VERSION, async startAttempt() {}, async endAttempt() {} }));
     expect(opened.platform).toBe(long);
     await (await opened.newSession()).close();
+    // A platform of 40 characters still leads the name; one of 41 is left out whole.
+    const named = async (platform: string): Promise<string | undefined> => {
+      let name: string | undefined;
+      await host(defineEngine({ name: 'edge', platform, version: '1', spiVersion: ENGINE_SPI_VERSION, async init(info) { name = info.targetName; }, async startAttempt() {}, async endAttempt() {} }));
+      return name;
+    };
+    expect(await named('a'.repeat(40))).toMatch(/^a{40}-host-[0-9a-f]{24}$/);
+    expect(await named('a'.repeat(41))).toMatch(/^host-[0-9a-f]{24}$/);
     // A platform that is a secret's value: the host's name keeps none of it, so no notice carries a part the redactor cannot match.
     const secret = 's3cr3t'.repeat(7);
     const notices: string[] = [];

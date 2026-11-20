@@ -88,7 +88,7 @@ try {
 | --- | --- |
 | Ownership | Each `launch` takes its own engine instance: `launch(web())`. A second host on the same instance fails with `WORKER_PROTOCOL`. |
 | Sessions | One session at a time on a host. Close it before `newSession()`. For parallel work, launch more hosts. |
-| Devices | Each host's target is named after its platform and a random token, so a `mobile()` host drives a device under an agent-device session of its own. See [Several hosts on devices](#several-hosts-on-devices). |
+| Devices | Each host's target is named after its platform and a random token (`host-<token>` alone for a platform over 40 characters), so a `mobile()` host drives a device under an agent-device session of its own. See [Several hosts on devices](#several-hosts-on-devices). |
 | Timeouts | An action, a wait, or a read gets 30000 ms. `app.open()` and `app.restart()` get 120000 ms. `launch({ timeout })` or `session.setDefaultTimeout(ms)` sets one value for all of them. There is no session deadline. |
 | Cancellation | `launch({ signal })` and `newSession({ signal })` stop what is running. |
 | Ctrl-C | The host closes on SIGINT, SIGTERM, and SIGHUP, so its browser or device session does not stay behind. Then the program ends by the signal, unless it listens for the signal itself. Turn it off with `handleSignals: false`. |
@@ -109,23 +109,32 @@ holds, whether that is another host or a worker of `e2e run`.
   run's devices in the target's `device` option.
 - Two hosts that open at the same moment can pick the same free device. The
   later one fails with `ENGINE_FAILURE`. Open device hosts one after another.
+- A host holds its device from the moment its app opens. A target that names
+  only `appPath` opens no app at launch, so a second host launched before the
+  first one's `app.open()` can pick the same device. Open each host's app
+  before you launch the next one, or name each host's device in its `device`
+  option.
 - A program that ends without closing a host it opened an app on
   (`process.exit()`, a kill) leaves its device held. Later hosts and
-  `e2e run` skip that device until you close the session the error names.
+  `e2e run` skip that device until you close the session the error names, in
+  the workspace the error names. Replace `SESSION` with that name:
 
 <CodeGroup>
 ```bash npm
-npx agent-device close --session e2e-ios-host-<token>-0
+npx agent-device close --session "SESSION"
 ```
 
 ```bash pnpm
-pnpm exec agent-device close --session e2e-ios-host-<token>-0
+pnpm exec agent-device close --session "SESSION"
 ```
 
 ```bash bun
-bunx agent-device close --session e2e-ios-host-<token>-0
+bunx agent-device close --session "SESSION"
 ```
 </CodeGroup>
+
+`agent-device daemon stop` frees every held device at once, and ends every
+other session on the machine with them.
 
 ## Drive an app on a device
 
