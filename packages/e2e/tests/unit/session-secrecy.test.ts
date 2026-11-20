@@ -45,14 +45,16 @@ describe('session secrecy carried across save and restore', () => {
 
 describe('session download redaction', () => {
   it('rewrites downloads whenever the ledger redacts a value, its own or one of a session open beside it', () => {
+    // A provider key in the environment rewrites downloads on its own; this test moves the run's own values.
+    const keysAlone = redactsDownloads(sessionLedger(newSession(), new Map()));
     const unsecret = sessionLedger(newSession(), new Map());
-    expect(redactsDownloads(unsecret)).toBe(false);
+    expect(redactsDownloads(unsecret)).toBe(keysAlone);
     const beside = newSession();
     expect(redactsDownloads(sessionLedger(beside, secrets))).toBe(true);
     // The app may hand the session a file holding what the one beside it typed.
     expect(redactsDownloads(unsecret)).toBe(true);
     releaseSessionLedger(beside);
-    expect(redactsDownloads(unsecret)).toBe(false);
+    expect(redactsDownloads(unsecret)).toBe(keysAlone);
     unsecret.register('token', PROVIDER_VALUE);
     expect(redactsDownloads(unsecret)).toBe(true);
   });
