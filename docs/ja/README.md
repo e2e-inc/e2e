@@ -73,7 +73,6 @@ translation moves or goes with it in the same change.
 | executor, custom executor | エグゼキューター, カスタムエグゼキューター |
 | tool, project tool | ツール, プロジェクトツール |
 | custom tool (an executor's own) | カスタムツール |
-| custom store | カスタムストア |
 | provider | プロバイダー |
 | hosted browser | ホスト型ブラウザ |
 | device | デバイス |
