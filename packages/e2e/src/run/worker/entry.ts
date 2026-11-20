@@ -28,7 +28,7 @@ import type {
   WorkerBootstrap,
   WorkerToMain,
 } from './protocol.ts';
-import { inHeldTestToolCall } from './held-test-tools.ts';
+import { inHeldTestToolCall } from './held-test-tool-scope.ts';
 import { TargetWorker, type ResolvedUnitPairs, type TargetWorkerDeps } from './session.ts';
 import { isAbandonedRejection } from '@e2e-dev/core/lib/internal/abandoned';
 

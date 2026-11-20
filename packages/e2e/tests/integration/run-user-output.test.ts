@@ -231,6 +231,7 @@ it('keeps attached project tool output out of the run and report', async () => {
   const builtOutput = '../../dist/run/process-output.js';
   const { withProcessOutput }: typeof import('../../src/run/process-output.ts') = await import(builtOutput);
   const line = 'printed during an attached call';
+  const lateLine = 'printed by a tool timer after the attached call';
   const project = createProject({
     'tests/paused.e2e.ts': `import { test } from 'e2e';
 test('prints and pauses', async ({ screen }) => {
@@ -249,6 +250,11 @@ export default {
       inputSchema: z.object({}),
       execute: async () => {
         process.stdout.write(${JSON.stringify(line + '\n')});
+
+        setTimeout(() => {
+          process.stdout.write(${JSON.stringify(lateLine + '\n')});
+        }, 0);
+
         return 'printed';
       },
     }, { mutates: false }),
@@ -260,6 +266,11 @@ export default {
     inputSchema: z.object({}),
     execute: async () => {
       process.stdout.write(`${line}\n`);
+
+      setTimeout(() => {
+        process.stdout.write(`${lateLine}\n`);
+      }, 0);
+
       return 'printed';
     },
   }, { mutates: false });
@@ -282,6 +293,8 @@ export default {
               const attached = await attach(step.attachId);
               const reply = await attached.call('print_line', {});
               expect(reply).toEqual({ content: [{ type: 'text', text: 'printed' }] });
+
+              await vi.waitFor(() => expect(output, worker).toContain(lateLine));
             },
           },
         };

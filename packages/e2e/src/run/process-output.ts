@@ -11,7 +11,7 @@
 import { StreamRedactor, type SecretLedger } from '@e2e-dev/core/lib/internal/redact';
 import { AsyncLocalStorage, AsyncResource } from 'node:async_hooks';
 import { realmSlot } from '@e2e-dev/core/lib/internal/realm-slot';
-import { inHeldTestToolCall } from './worker/held-test-tools.ts';
+import { inHeldTestToolCall } from './worker/held-test-tool-scope.ts';
 
 export type OutputStream = 'stdout' | 'stderr';
 

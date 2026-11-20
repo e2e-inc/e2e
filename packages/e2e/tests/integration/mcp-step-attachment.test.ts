@@ -427,6 +427,12 @@ ${CONFIG.replace('  video: true,', `  video: true,
     const screenshot = await invoke(client, 'tools', { tool: 'screenshot' });
     expect(screenshot.isError).toBe(false);
     expect(screenshot.text).not.toContain('"path"');
+
+    const screenshotWithPath = await invoke(client, 'call', { tool: 'screenshot', args: { path: 'shot.png' } });
+    expect(screenshotWithPath.isError).toBe(true);
+    expect(screenshotWithPath.text).toContain('INVALID_ARGUMENT');
+    expect(screenshotWithPath.text).toContain('"path"');
+    expect(screenshotWithPath.text).toContain('An attached session returns the image without saving a file.');
   });
 
   it('names both e2e versions when attachment protocols differ', async () => {

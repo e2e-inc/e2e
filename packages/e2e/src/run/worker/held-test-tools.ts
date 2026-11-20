@@ -1,4 +1,3 @@
-import { AsyncLocalStorage } from 'node:async_hooks';
 import { GRAMMAR_TOOL_NAMES } from '@e2e-dev/core/lib/agent/action-names';
 import { ActionDispatcher } from '@e2e-dev/core/lib/agent/action-dispatcher';
 import { loadAiSdkIfInstalled } from '@e2e-dev/core/lib/agent/ai-sdk';
@@ -15,14 +14,8 @@ import { LocatorEngine } from '@e2e-dev/core/lib/locator/engine';
 import { StepRecorder } from '@e2e-dev/core/lib/run/steps';
 import type { SessionCatalog } from '../../mcp/catalog.ts';
 import { actionResult, catalogLine, describeToolDetail, errorResult, invokeTool, redactResult } from '../../mcp/tools.ts';
+import { heldTestToolCallScope } from './held-test-tool-scope.ts';
 import type { StepAttachmentRequest, StepAttachmentResponse, StepHoldMessage } from './protocol.ts';
-
-const callScope = new AsyncLocalStorage<AbortSignal>();
-
-/** Reports whether the current work started in an attached tool call. */
-export function inHeldTestToolCall(): boolean {
-  return callScope.getStore() !== undefined;
-}
 
 type Attachment = {
   readonly id: string;
@@ -101,6 +94,13 @@ export class HeldTestTools {
           const { attachment, catalog } = this.catalogFor(request.attachmentId);
 
           try {
+            if (request.name === 'screenshot' && Object.hasOwn(request.args, 'path')) {
+              throw new ConfigurationError(
+                'INVALID_ARGUMENT',
+                'Unsupported "path" argument for screenshot. An attached session returns the image without saving a file.',
+              );
+            }
+
             const result = await this.run(requestId, attachment, (signal) =>
               invokeTool(request.name, this.tool(catalog, request.name), request.args, { signal }),
             );
@@ -233,11 +233,13 @@ export class HeldTestTools {
 
     try {
       return await attachment.queue.run(async () => {
+        const call = { signal, running: true };
         attachment.running = true;
 
         try {
-          return await callScope.run(signal, () => withAbort(() => body(signal), signal, cancelledError));
+          return await heldTestToolCallScope.run(call, () => withAbort(() => body(signal), signal, cancelledError));
         } finally {
+          call.running = false;
           attachment.running = false;
         }
       });
@@ -260,7 +262,7 @@ export class HeldTestTools {
     const { config, redact, redactCut } = this.runtime;
     const budget = {
       get signal() {
-        return callScope.getStore() ?? signal;
+        return heldTestToolCallScope.getStore()?.signal ?? signal;
       },
       deadline: new Deadline(Number.POSITIVE_INFINITY),
     };
