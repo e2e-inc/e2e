@@ -621,6 +621,58 @@ test('opens a page after the pause', async ({ app, screen }) => {
   }
 });
 
+it('reports a timed-out attached recording in attempt cleanup after the test resumes', async () => {
+  const { engine } = createFakeEngine({
+    video: true,
+    onStopVideo: () => new Promise(() => {}),
+  });
+  const notices: string[] = [];
+  const { outcome, project } = await runProject({
+    'tests/recording.e2e.ts': `import { test } from 'e2e';
+test('continues after the pause', async ({ app, screen }) => {
+  await app.open('/before');
+  await screen.pause();
+  await app.open('/after');
+});
+`,
+  }, {
+    config: {
+      cleanupTimeout: 500,
+      targets: [{ name: 'fake', platform: 'fake', engine, app: FAKE_APP }],
+    },
+    runOptions: {
+      onEvent: (event) => {
+        if (event.type === 'notice') {
+          notices.push(event.message);
+        }
+      },
+      hold: {
+        steps: false,
+        ask: async (step, { attach }) => {
+          const attached = await attach(step.attachId);
+          const started = await attached.call('start_recording', {});
+          expect(started.content).toEqual([
+            { type: 'text', text: expect.stringContaining('Recording 1 started.') },
+          ]);
+        },
+      },
+    },
+  });
+
+  try {
+    const attempt = resultByTitle(outcome, 'continues after the pause').attempts[0];
+    expect(attempt?.status).toBe('passed');
+    expect(attempt?.steps).toEqual(expect.arrayContaining([expect.objectContaining({ label: '/after' })]));
+    expect(attempt?.cleanup).toBe('failed');
+    expect(attempt?.secondaryErrors).toEqual([
+      expect.objectContaining({ code: 'CLEANUP_TIMEOUT', phase: 'cleanup' }),
+    ]);
+    expect(notices.join('\n')).toContain('The running recording could not be saved: stopping the attached recording timed out');
+  } finally {
+    project.cleanup();
+  }
+});
+
 describe('holding steps and the run limits', () => {
   it('stops the time limit while a step is held', async () => {
     const { beforeStep } = holder(3_000);

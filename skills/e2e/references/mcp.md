@@ -252,10 +252,13 @@ Use `start_recording` and `stop_recording` to save a video under
 `<output>/videos/<session>/`. If the run already records the attempt,
 `start_recording` returns an error with the run's video directory.
 
-Use `close_session` to detach and leave the test held. Press Enter or run
-`npx e2e run --step next` to resume the test and end the attachment.
-Both save any attached recording still running. The closing reply or the
-server log shows the saved path.
+Use `close_session` to detach and leave the test held. The reply includes
+the path of any recording saved on detach.
+
+Press Enter or run `npx e2e run --step next` to resume the test and end the
+attachment right away. Any recording still running saves in the background.
+The runner logs the saved path or the error. The MCP server logs the same
+result if it's still connected.
 
 ## Fixing a failing test
 

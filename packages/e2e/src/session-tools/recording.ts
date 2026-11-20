@@ -14,7 +14,6 @@ import path from 'node:path';
 import type { ToolSet } from 'ai';
 import { z } from 'zod';
 import type { OperationContext, VideoSegment } from '@e2e-dev/core/lib/engine/surface';
-import { errorMessage } from '@e2e-dev/core/lib/internal/errors';
 
 export interface SessionRecorderOptions {
   /** Checks whether this session may use the engine's recorder. */
@@ -132,12 +131,8 @@ export class SessionRecorder {
   async saveOnClose(): Promise<string | undefined> {
     this.closing = true;
 
-    try {
-      await this.stop();
-      return this.savedOnClose === undefined ? undefined : describeRecording(this.savedOnClose);
-    } catch (cause) {
-      return `The running recording could not be saved: ${errorMessage(cause)}`;
-    }
+    await this.stop();
+    return this.savedOnClose === undefined ? undefined : describeRecording(this.savedOnClose);
   }
 
   /** Runs `body` after every call before it has settled. */

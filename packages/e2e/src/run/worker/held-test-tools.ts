@@ -1,3 +1,4 @@
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { GRAMMAR_TOOL_NAMES } from '@e2e-dev/core/lib/agent/action-names';
 import { validateParams } from '@e2e-dev/core/lib/agent/act-validation';
@@ -9,9 +10,10 @@ import { executorRedactors } from '@e2e-dev/core/lib/agent/redaction';
 import { ScreenPresenter } from '@e2e-dev/core/lib/agent/screen-update';
 import { createStepExecution } from '@e2e-dev/core/lib/agent/step-execution';
 import type { ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
-import { classifyError, ConfigurationError, errorMessage } from '@e2e-dev/core/lib/internal/errors';
-import { abortError, cancelledError, Deadline, withAbort } from '@e2e-dev/core/lib/internal/time';
+import { classifyError, ConfigurationError, errorMessage, InfrastructureError } from '@e2e-dev/core/lib/internal/errors';
+import { abortError, cancelledError, Deadline, withAbort, withTimeout } from '@e2e-dev/core/lib/internal/time';
 import { LocatorEngine } from '@e2e-dev/core/lib/locator/engine';
+import { createAttemptArtifacts, type AttemptArtifacts } from '@e2e-dev/core/lib/run/artifacts';
 import { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
 import { createApp } from '@e2e-dev/core/lib/run/fixtures';
 import { outputLayout } from '@e2e-dev/core/lib/run/output';
@@ -35,10 +37,15 @@ type Attachment = {
   running: boolean;
 };
 
+type RecordingSave = {
+  readonly text?: string | undefined;
+  readonly error?: unknown;
+};
+
 /** Tool calls on the engine session of a held test attempt. */
 export class HeldTestTools {
   private attachment: Attachment | undefined;
-  private saving: Promise<string | undefined> | undefined;
+  private readonly saves: Promise<RecordingSave>[] = [];
 
   constructor(
     private readonly runtime: AgentContext,
@@ -46,6 +53,7 @@ export class HeldTestTools {
     private readonly target: ResolvedTarget,
     private readonly headed: boolean,
     private readonly runRecordsVideo: boolean,
+    private readonly notice: ((message: string) => void) | undefined,
   ) {}
 
   /** The ID of the attempt running in this worker. */
@@ -83,7 +91,8 @@ export class HeldTestTools {
 
         case 'detach':
           if (this.attachment?.id === request.attachmentId) {
-            const recording = await this.end(new ConfigurationError('NO_SESSION', 'the attachment was detached'));
+            const saved = await this.end(new ConfigurationError('NO_SESSION', 'the attachment was detached'));
+            const recording = saved?.text;
 
             return recording === undefined ? { kind: 'detach' } : { kind: 'detach', recording };
           }
@@ -153,7 +162,6 @@ export class HeldTestTools {
     };
 
     this.attachment = attachment;
-    this.saving = undefined;
 
     try {
       const { catalog, observation } = await this.run(requestId, attachment, async (callSignal) => {
@@ -219,22 +227,53 @@ export class HeldTestTools {
     this.attachment?.requests.get(requestId)?.abort();
   }
 
-  /** Ends the attachment before a test step can drive the app again. */
-  end(reason: Error): Promise<string | undefined> | undefined {
+  /** Ends the attachment and starts saving its recording. */
+  end(reason: Error): Promise<RecordingSave> | undefined {
     const attachment = this.attachment;
 
     if (attachment === undefined) {
-      return this.saving;
+      return undefined;
     }
 
     this.attachment = undefined;
     attachment.controller.abort(reason);
-    const { redact } = this.runtime;
-    this.saving = attachment.recorder?.saveOnClose().then((recording) =>
-      recording === undefined ? undefined : redact(recording),
-    );
 
-    return this.saving;
+    if (attachment.recorder === undefined) {
+      return undefined;
+    }
+
+    const { config, redact } = this.runtime;
+    const saving = withTimeout(
+      attachment.recorder.saveOnClose(),
+      config.cleanupTimeout,
+      () => new InfrastructureError('CLEANUP_TIMEOUT', 'stopping the attached recording timed out'),
+    ).then(
+      (recording): RecordingSave => {
+        const text = recording === undefined ? undefined : redact(recording);
+
+        if (text !== undefined) {
+          this.notice?.(text);
+        }
+
+        return { text };
+      },
+      (cause: unknown): RecordingSave => {
+        const text = redact(`The running recording could not be saved: ${errorMessage(cause)}`);
+        this.notice?.(text);
+
+        return { text, error: cause };
+      },
+    );
+    this.saves.push(saving);
+
+    return saving;
+  }
+
+  /** Waits for recording saves before the engine session closes. */
+  async settleRecordings(): Promise<unknown[]> {
+    const saves = await Promise.all(this.saves);
+
+    return saves.flatMap((save) => 'error' in save ? [save.error] : []);
   }
 
   /** Resolves a catalog entry, excluding inherited object members. */
@@ -367,6 +406,7 @@ export class HeldTestTools {
       },
     });
 
+    let screenshots: AttemptArtifacts | undefined;
     const context: StepExecutorContext = {
       step: {
         kind: 'act',
@@ -390,9 +430,20 @@ export class HeldTestTools {
       ...bindings,
       attachTranscript: () => undefined,
       attachTurns: () => undefined,
-      attachScreenshot: () => Promise.reject(
-        new ConfigurationError('UNSUPPORTED_CAPABILITY', "you can't add screenshot artifacts to a test through an attachment"),
-      ),
+      /** Keeps observed pixels as an artifact of the attachment. */
+      attachScreenshot: async (pixels, label) => {
+        screenshots ??= createAttemptArtifacts({
+          artifactsRoot: outputLayout(config.output).results,
+          segments: ['mcp', sessionId],
+          attemptId: sessionId,
+        });
+        const name = `${label.replace(/[^A-Za-z0-9_-]+/g, '-')}.png`;
+        await writeFile(path.join(screenshots.dir, name), pixels.data);
+        const id = screenshots.sink.register('screenshot', name);
+        runtime.steps.attachArtifact(id);
+
+        return id;
+      },
     };
 
     executorRedactors.set(context, redact);

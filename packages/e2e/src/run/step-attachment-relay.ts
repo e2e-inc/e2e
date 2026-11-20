@@ -13,7 +13,7 @@ type HeldAttemptState = {
   readonly attemptId: string;
   readonly attachId: string;
   labels: StepHoldMessage['attachmentLabels'];
-  attachment: ((reason: string) => Promise<string | undefined>) | undefined;
+  attachment: ((reason: string, releasing?: boolean) => Promise<string | undefined>) | undefined;
 };
 
 type PendingAttachmentReply = {
@@ -66,7 +66,7 @@ export class StepAttachmentRelay {
 
     if (hold !== undefined) {
       this.holds.delete(holdId);
-      void hold.attempt.attachment?.(reason).catch(() => undefined);
+      void hold.attempt.attachment?.(reason, true).catch(() => undefined);
     }
   }
 
@@ -134,13 +134,13 @@ export class StepAttachmentRelay {
     const attachmentId = uuidv7();
     let closing: Promise<string | undefined> | undefined;
 
-    /** Cancels calls now and ends the attachment once the worker saves its recording. */
-    const end = (reason: string): Promise<string | undefined> => {
+    /** Cancels calls and asks the worker to save the recording. */
+    const end = (reason: string, releasing = false): Promise<string | undefined> => {
       if (closing === undefined) {
         controller.abort(new ConfigurationError('NO_SESSION', reason));
         closing = this.requestAttachment(worker, uuidv7(), { kind: 'detach', attachmentId }).then(
           ({ recording }) => {
-            ended.abort(new ConfigurationError('NO_SESSION', recording === undefined ? reason : `${reason}\n${recording}`));
+            ended.abort(new ConfigurationError('NO_SESSION', reason));
             return recording;
           },
           (cause: unknown) => {
@@ -152,6 +152,10 @@ export class StepAttachmentRelay {
             attempt.attachment = undefined;
           }
         });
+      }
+
+      if (releasing) {
+        ended.abort(new ConfigurationError('NO_SESSION', reason));
       }
 
       return closing;

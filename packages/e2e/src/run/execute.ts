@@ -78,7 +78,7 @@ export interface ExecutionEvents {
   ): void;
   /** The attempt `onAttemptDeadline` announced has ended, or one that never got that far has. */
   onAttemptEnd?(): void;
-  /** One line of progress the engine's `init` reported, already naming the target and worker slot. */
+  /** A message from the worker about engine setup or an attached recording. */
   onNotice?(message: string): void;
   /**
    * A run-level configuration failure met mid-run, such as an unusable model
@@ -753,7 +753,14 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         test: { file: pair.test.file, titlePath: pair.test.titlePath, writtenScreenshots: this.writtenScreenshots },
       });
       if (hold !== undefined) {
-        const tools = new HeldTestTools(agentRuntime, this.options.runId, this.target, this.options.headed, video !== undefined);
+        const tools = new HeldTestTools(
+          agentRuntime,
+          this.options.runId,
+          this.target,
+          this.options.headed,
+          video !== undefined,
+          this.options.events?.onNotice,
+        );
         heldTools = tools;
         const screens = {
           ledger: sessionLedger(session, this.config.allSecrets),
@@ -894,10 +901,12 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         };
         const bodyWork = this.debug.time('test.body', () => timeout.race(body, onTimeout));
 
-        await bodyWork.finally(() => heldTools?.end(new ConfigurationError(
-          'NO_SESSION',
-          this.interruptSignal.aborted ? 'the run was interrupted' : 'the test attempt ended',
-        )));
+        await bodyWork.finally(() => {
+          heldTools?.end(new ConfigurationError(
+            'NO_SESSION',
+            this.interruptSignal.aborted ? 'the run was interrupted' : 'the test attempt ended',
+          ));
+        });
       } catch (cause) {
         // The race has settled: a rejection surfacing while the evidence is
         // captured is recorded, not aimed at it.
@@ -987,6 +996,11 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         serialize: (error) => serializeError(error, { phase: 'body', projectRoot: this.config.projectRoot, redact }),
         redact,
       });
+      for (const cause of await heldTools?.settleRecordings() ?? []) {
+        record.cleanup = 'failed';
+        secondaryErrors.push(serializeError(classifyError(cause), { phase: 'cleanup', projectRoot: this.config.projectRoot, redact }));
+      }
+
       // A serial member's recording ends with the member, not the group.
       if (openSession !== null && shared !== undefined) {
         await this.stopRunningRecording(openSession, attemptId, record, artifacts.sink, secondaryErrors);

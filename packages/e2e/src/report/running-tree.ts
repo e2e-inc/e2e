@@ -6,7 +6,7 @@
  * moves as calls come and go.
  */
 
-import { bounded, F_POINTER, formatTime, terminalColumns, terminalRows, withActor, type Colors } from './format.ts';
+import { bounded, F_POINTER, fitColumns, formatTime, terminalColumns, terminalRows, withActor, type Colors } from './format.ts';
 import type { CurrentStep, FileGroup, PausedTest, RunningTest, SetupInFlight } from './list-model.ts';
 import { eventLine, quotedLabel, stepLine, stepPromptRows } from './list-steps.ts';
 import { REPAINT_INTERVAL_MS, WIDTH_MARGIN } from './live-window.ts';
@@ -117,7 +117,8 @@ export class RunningTree {
     }
     const capacity = terminalRows() - summary.length - CHROME_ROWS;
     let budget = capacity;
-    const maxWidth = terminalColumns() - WIDTH_MARGIN - DETAIL_INDENT.length;
+    const columns = terminalColumns() - WIDTH_MARGIN;
+    const maxWidth = columns - DETAIL_INDENT.length;
     const promptRows = paused === undefined ? 0 : stepPromptRows(pc, paused.prompt, { maxWidth }).length;
     const perTest = Math.max(
       0,
@@ -148,10 +149,17 @@ export class RunningTree {
         }
         const glyph = index === tests.length - 1 ? F_TREE_END : F_TREE_MIDDLE;
         const held = paused?.test === test ? paused : undefined;
-        const state = held === undefined
-          ? this.clock(now - test.startedMs)
-          : pc.bold(pc.cyan(`(${held.prompt.steps[0].step.attachId})`));
-        lines.push(`${pc.bold(pc.yellow(`   ${glyph} `))}${test.title} ${state}`);
+        if (held === undefined) {
+          lines.push(`${pc.bold(pc.yellow(`   ${glyph} `))}${test.title} ${this.clock(now - test.startedMs)}`);
+        } else {
+          const { attachId } = held.prompt.steps[0].step;
+          const id = `(${attachId})`;
+          const prefix = `   ${glyph} `;
+          const titleWidth = columns - prefix.length - id.length - 1;
+          const title = fitColumns(test.title, titleWidth);
+
+          lines.push(`${pc.bold(pc.yellow(prefix))}${title} ${pc.bold(pc.cyan(id))}`);
+        }
         budget -= 1;
         const rows = held === undefined ? perTest : perTest + promptRows;
         const detail = this.detailRows(test, Math.min(MAX_EVENTS, rows), Math.min(rows, budget), now, held);

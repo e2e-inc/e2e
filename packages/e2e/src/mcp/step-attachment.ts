@@ -20,12 +20,19 @@ type PendingReply<Value> = {
 };
 
 /** Connects to a held test in the MCP server's directory. */
-export async function connectHeldTest(cwd: string, version: string, id: string, sessionId: string, signal: AbortSignal): Promise<HeldTestAttachment> {
+export async function connectHeldTest(
+  cwd: string,
+  version: string,
+  id: string,
+  sessionId: string,
+  signal: AbortSignal,
+  onRecording: (text: string) => void,
+): Promise<HeldTestAttachment> {
   if (signal.aborted) {
     throw abortError(signal, cancelledError);
   }
 
-  const client = new AttachmentClient(stepAddress(cwd).socket, version, { type: 'attach', id, sessionId });
+  const client = new AttachmentClient(stepAddress(cwd).socket, version, { type: 'attach', id, sessionId }, onRecording);
 
   /** Closes the connection if the client cancels the open request. */
   const cancel = (): void => client.end(abortError(signal, cancelledError));
@@ -66,7 +73,12 @@ class AttachmentClient {
   });
   readonly signal = this.attachmentEnd.signal;
 
-  constructor(socket: string, version: string, private readonly attach: Extract<AttachRequest, { type: 'attach' }>) {
+  constructor(
+    socket: string,
+    version: string,
+    private readonly attach: Extract<AttachRequest, { type: 'attach' }>,
+    private readonly onRecording: (text: string) => void,
+  ) {
     this.socket = net.connect(socket, () => {
       this.socket.write(`${JSON.stringify({ type: 'hello', protocol: ATTACH_PROTOCOL, version })}\n`);
     });
@@ -79,12 +91,18 @@ class AttachmentClient {
     this.socket.once('close', () => this.end(new ConfigurationError('NO_SESSION', 'the step socket closed')));
     readSocketLines(this.socket, (line) => {
       this.receive(parseLine(line, AttachReply));
-      return !this.signal.aborted;
+      return !this.socket.destroyed;
     });
   }
 
-  /** Closes the connection. A pending detach completes when the connection ends. */
-  end(reason: Error): void {
+  /** Ends the session, leaving the socket open only to receive a recording result. */
+  end(reason: Error, keepSocket = false): void {
+    if (keepSocket) {
+      this.socket.unref();
+    } else {
+      this.socket.destroy();
+    }
+
     if (this.signal.aborted) {
       return;
     }
@@ -98,8 +116,6 @@ class AttachmentClient {
     for (const request of this.pending.values()) {
       request.reject(reason);
     }
-
-    this.socket.destroy();
   }
 
   /** Reads the detailed contract of one tool. */
@@ -147,6 +163,18 @@ class AttachmentClient {
 
   /** Dispatches a frame in handshake order, then by its request id. */
   private receive(reply: AttachReply | undefined): void {
+    if (this.signal.aborted) {
+      if (reply?.type === 'recording') {
+        if (reply.text !== undefined) {
+          this.onRecording(reply.text);
+        }
+
+        this.socket.destroy();
+      }
+
+      return;
+    }
+
     if (reply?.type === 'error') {
       const error = new E2EError(reply.category, reply.code, reply.message);
 
@@ -168,7 +196,7 @@ class AttachmentClient {
     if (reply?.type === 'ended') {
       this.detachReply?.(reply.reason);
       this.detachReply = undefined;
-      this.end(new ConfigurationError('NO_SESSION', reply.reason));
+      this.end(new ConfigurationError('NO_SESSION', reply.reason), true);
     } else if (this.phase === 'opening' && reply?.type === 'opening') {
       this.phase = 'open';
       this.opening?.resolve(reply.opening);

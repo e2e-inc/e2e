@@ -219,7 +219,11 @@ export class SessionHost {
       await live.step.end({ status: 'passed', summary: `session closed: ${reason}` });
       const outcome = await live.step.done;
       // The recorder runs this after a start or stop still in flight, even one the step's deadline abandoned.
-      return { outcome, saved: await live.recorder?.saveOnClose() };
+      const saved = await live.recorder?.saveOnClose().catch((cause: unknown) =>
+        `The running recording could not be saved: ${errorMessage(cause)}`,
+      );
+
+      return { outcome, saved };
     }).finally(() => this.options.onSessionEnd?.(live.usage.closed(endedBy)));
     const lines = [`Session ${live.id} closed (${reason}); ${live.actions} tool calls ran.`];
     if (value.saved !== undefined) lines.push(value.saved);
@@ -695,7 +699,7 @@ export class SessionHost {
     return defineMcpTool({
       name: 'tools',
       description:
-        "List the tools a session can run through call: observe, the grammar its engine honors (one tool per action the engine declares, type_secret when a secret is configured, and screenshot and the point tools), locate, run_code (test statements run on the live app), test_lines (the test line each action printed and the statements run_code passed, as a draft test body), start_recording and stop_recording in standalone sessions on engines with video, and the project's own tools. With tool, shows that tool's full description and the JSON Schema of its arguments.",
+        "List the tools a session can run through call: observe, the grammar its engine honors (one tool per action the engine declares, type_secret when a secret is configured, and screenshot and the point tools), locate, run_code (test statements run on the live app), test_lines (the test line each action printed and the statements run_code passed, as a draft test body), start_recording and stop_recording on engines with video, and the project's own tools. With tool, shows that tool's full description and the JSON Schema of its arguments.",
       inputSchema: z.object({
         tool: z.string().min(1).optional().describe('A catalog tool name, for its full contract'),
         session: z.string().min(1).optional().describe('Session id from open_session; may be omitted only while one session is open'),

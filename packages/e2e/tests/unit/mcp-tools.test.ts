@@ -35,7 +35,7 @@ describe('catalogLine', () => {
   });
 
   it('redacts a secret that spans the catalog sentence cutoff', () => {
-    const secret = 'private.part is not for the catalog';
+    const secret = 'private. part is not for the catalog';
     const tool = { ...tap, description: `Uses ${secret}. More details.` };
     expect(catalogLine('tap', tool, false, (value) => value.replaceAll(secret, '<secret:token>')))
       .toBe('- tap {target, times?}: Uses <secret:token>.');

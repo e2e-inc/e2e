@@ -1350,6 +1350,40 @@ describe('ListReporter', () => {
       }
     });
 
+    it('clips a long paused test title and keeps the attachment id visible', () => {
+      const restore = withTerminalSize({ columns: 80, rows: 40 });
+
+      try {
+        const { chunks, output } = liveCapture();
+        const reporter = new ListReporter(output, { live: true, colors: false });
+        const title = 'orders a drink '.repeat(12);
+        reporter.handle(runStarted({ stepping: true }));
+        reporter.handle(plan([{ file: 'tests/case.e2e.ts', tests: 1 }]));
+        reporter.handle(testStarted('t1', title, 'chromium'));
+        const held: HeldStep = {
+          kind: 'pause',
+          attachId: 'k3f9',
+          target: 'chromium',
+          testId: 't1',
+          agent: 'default',
+          repeat: 0,
+          title,
+          api: 'screen.pause',
+          label: 'pause',
+        };
+        reporter.showStepPrompt({
+          steps: [{ step: held, number: 0 }],
+          help: false,
+          holdSteps: true,
+        });
+
+        expect(chunks.at(-1)?.replace(ANSI_PATTERN, '')).toMatch(/└── orders a drink[^\n]*… \(k3f9\)\n/);
+        reporter.showStepPrompt(undefined);
+      } finally {
+        restore();
+      }
+    });
+
     it('keeps the --step keys on a short terminal, cutting held steps first', () => {
       const restore = withTerminalSize({ columns: 120, rows: 18 });
       try {

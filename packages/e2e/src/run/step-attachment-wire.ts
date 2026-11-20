@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 
-export const ATTACH_PROTOCOL = 2;
+export const ATTACH_PROTOCOL = 3;
 
 export const AttachHello = z.object({
   type: z.literal('hello'),
@@ -72,6 +72,7 @@ export const AttachReply = z.discriminatedUnion('type', [
     recording: z.string().optional(),
   }),
   z.object({ type: z.literal('ended'), reason: z.string() }),
+  z.object({ type: z.literal('recording'), text: z.string().optional() }),
 ]);
 
 /** Replies and end notices on an attachment socket. */

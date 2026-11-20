@@ -2,7 +2,7 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -21,13 +21,23 @@ const ENV = { ...process.env, CI: '', NO_COLOR: '1' };
 const STEP = 'await app.open("/after");';
 const PASSWORD = 'fixture-password';
 const CREDENTIAL_PASSWORD = 'fixture-credential-password';
-const CONFIG = `import { defineTool } from 'e2e/agent';
+const CONFIG = `import { defineTool, getToolContext } from 'e2e/agent';
 import { z } from 'zod';
 import { createFakeEngine, FAKE_APP } from '../../helpers/fake-engine.ts';
 
 let appLog;
 const { engine } = createFakeEngine({
   video: true,
+  pixels: () => ({
+    pixels: {
+      data: Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      mediaType: 'image/png',
+      width: 1,
+      height: 1,
+      scale: 1,
+    },
+    maskedRegionCount: 1,
+  }),
   onStartAttempt(context) {
     appLog = context.appLog;
   },
@@ -59,6 +69,19 @@ export default {
         checkout_status: defineTool({
           inputSchema: z.object({}),
           execute: async () => 'ready',
+        }, { mutates: false }),
+        capture_evidence: defineTool({
+          inputSchema: z.object({}),
+          async execute(_input, options) {
+            const context = getToolContext(options);
+            const { pixels } = await context.observe({ pixels: true });
+
+            if (pixels === undefined) {
+              throw new Error('No pixels to save.');
+            }
+
+            return await context.attachScreenshot(pixels, 'checkout-evidence');
+          },
         }, { mutates: false }),
       },
     },
@@ -115,7 +138,7 @@ async function pause(dir: string, ...flags: string[]) {
     });
   }
   await vi.waitFor(() => expect(output).toContain('Next: e2e run --step next'), { timeout: 25_000 });
-  return { id: printedPauseId(output), exited };
+  return { id: printedPauseId(output), exited, output: () => output };
 }
 
 /** Opens an MCP client in the run directory with the same temp directory settings. */
@@ -398,11 +421,13 @@ ${CONFIG.replace('  video: true,', `  video: true,
     expect(observed.text).toContain('path /checkout');
   });
 
-  it('leaves the test held and attachable again if the MCP server is killed', async () => {
+  it('logs the saved recording and leaves the test attachable after the MCP server is killed', async () => {
     const dir = project(`await screen.pause(); ${STEP}`);
     const held = await pause(dir);
     const first = await mcp(dir);
-    await openSession(first.client, { attach: held.id });
+    const { session } = await openSession(first.client, { attach: held.id });
+    const started = await invoke(first.client, 'call', { session, tool: 'start_recording', args: { name: 'disconnected' } });
+    expect(started.isError, started.text).toBe(false);
     const pid = first.transport.pid;
 
     if (pid === null) {
@@ -414,6 +439,9 @@ ${CONFIG.replace('  video: true,', `  video: true,
     const { client } = await mcp(dir);
     const reopened = await vi.waitFor(() => openSession(client, { attach: held.id }), { timeout: 5_000 });
     expect(reopened.text).toContain('path /checkout');
+    const file = path.join(dir, '.e2e/videos', session, '1-disconnected.webm');
+    await vi.waitFor(() => expect(held.output()).toContain(file));
+    expect(readFileSync(file).subarray(0, 4).toString('hex')).toBe('1a45dfa3');
   });
 
   it('keeps attached actions and their app logs out of the report and the trace page', async () => {
@@ -439,12 +467,14 @@ ${CONFIG.replace('  video: true,', `  video: true,
     expect(pages[0]?.[1]).not.toContain('/attached-only');
   });
 
-  it('lists exactly the normal session tools and keeps the run video when the agent does not record', async () => {
+  it('lists the normal session tools, saves project tool evidence, and keeps the run video', async () => {
     const dir = project('await screen.pause();');
     const { client } = await mcp(dir);
     const normal = await openSession(client);
     const normalTools = await toolNames(client, normal.session);
-    expect(normalTools).toEqual(expect.arrayContaining(['checkout_status', 'start_recording', 'stop_recording']));
+    expect(normalTools).toEqual(expect.arrayContaining([
+      'checkout_status', 'capture_evidence', 'start_recording', 'stop_recording',
+    ]));
     expect((await invoke(client, 'close_session', { session: normal.session })).isError).toBe(false);
 
     const held = await pause(dir, '--video', 'on');
@@ -453,8 +483,15 @@ ${CONFIG.replace('  video: true,', `  video: true,
     expect(attachedTools.toSorted()).toEqual(normalTools.toSorted());
     expect((await invoke(client, 'call', { tool: 'checkout_status' })).text).toBe('ready');
 
+    const captured = await invoke(client, 'call', { tool: 'capture_evidence' });
+    const evidence = path.join(dir, '.e2e/results/mcp', attached.session, 'checkout-evidence.png');
+    expect(captured.isError, captured.text).toBe(false);
+    expect(captured.text).toBe(`${attached.session}:artifact:0`);
+    expect(readFileSync(evidence).subarray(1, 4).toString()).toBe('PNG');
+
     expect(e2e(dir, 'run', '--step', 'next').status).toBe(0);
     expect(await held.exited).toBe(0);
+    expect(readFileSync(path.join(dir, '.e2e/report.json'), 'utf8')).not.toContain(captured.text);
     expect(contentsUnder(path.join(dir, '.e2e/results')).map(([file]) => file)).toEqual(
       expect.arrayContaining([expect.stringMatching(/fake\.webm$/)]),
     );
@@ -517,14 +554,23 @@ ${CONFIG.replace('  video: true,', `  video: true,
     expect(existsSync(path.join(dir, '.e2e/videos', session))).toBe(false);
   });
 
-  it('saves an attached recording before the test resumes and logs the path', async () => {
-    const dir = project(`await screen.pause();
-    const { readdirSync } = await import('node:fs');
-    const saved = readdirSync(new URL('../.e2e/videos/', import.meta.url), { recursive: true });
-    if (!saved.some((name) => name.endsWith('1-paused.webm'))) {
-      throw new Error('The recording was missing when the test resumed.');
+  it('resumes the test and ends the attachment before the recording saves, then logs the path', async () => {
+    const dir = project(
+      `await screen.pause();
+      const { writeFileSync } = await import('node:fs');
+      writeFileSync(new URL('../test-resumed', import.meta.url), '');
+      ${STEP}`,
+      `import { existsSync, writeFileSync } from 'node:fs';
+import { setTimeout as sleep } from 'node:timers/promises';
+${CONFIG.replace('  video: true,', `  video: true,
+  async onStopVideo() {
+    writeFileSync(new URL('./stop-started', import.meta.url), '');
+
+    while (!existsSync(new URL('./finish-save', import.meta.url))) {
+      await sleep(20);
     }
-    ${STEP}`);
+  },`).replace('  workers: 1,', '  workers: 1,\n  cleanupTimeout: 15_000,')}`,
+    );
     const held = await pause(dir);
     const server = await mcp(dir);
     const { client } = server;
@@ -532,16 +578,35 @@ ${CONFIG.replace('  video: true,', `  video: true,
 
     const started = await invoke(client, 'call', { session, tool: 'start_recording', args: { name: 'paused' } });
     expect(started.isError, started.text).toBe(false);
-    expect(e2e(dir, 'run', '--step', 'next').status).toBe(0);
-    expect(await held.exited).toBe(0);
 
     const file = path.join(dir, '.e2e/videos', session, '1-paused.webm');
-    expect(readFileSync(file).subarray(0, 4).toString('hex')).toBe('1a45dfa3');
-    await vi.waitFor(() => {
-      const log = server.log.join('');
-      expect(log).toContain(`session ${session} ended: the test resumed`);
-      expect(log).toContain(file);
+    const next = spawn(process.execPath, [CLI, 'run', '--step', 'next'], {
+      cwd: dir,
+      env: ENV,
+      stdio: 'ignore',
     });
+    const nextExit = once(next, 'close');
+
+    try {
+      await vi.waitFor(() => {
+        expect(existsSync(path.join(dir, 'stop-started'))).toBe(true);
+        expect(existsSync(path.join(dir, 'test-resumed'))).toBe(true);
+        expect(server.log.join('')).toContain(`session ${session} ended: the test resumed`);
+      }, { timeout: 5_000 });
+
+      const closed = await invoke(client, 'tools', { session });
+      expect(closed.isError).toBe(true);
+      expect(closed.text).toContain('the test resumed');
+      expect(existsSync(file)).toBe(false);
+    } finally {
+      writeFileSync(path.join(dir, 'finish-save'), '');
+    }
+
+    expect((await nextExit)[0]).toBe(0);
+    expect(await held.exited).toBe(0);
+    expect(readFileSync(file).subarray(0, 4).toString('hex')).toBe('1a45dfa3');
+    expect(held.output()).toContain(file);
+    await vi.waitFor(() => expect(server.log.join('')).toContain(file));
   });
 
   it('runs test statements under the call timeout and leaves them out of the report', async () => {
@@ -616,6 +681,51 @@ ${CONFIG.replace('  video: true,', `  video: true,
       expect(text).not.toContain(PASSWORD);
       expect(text).not.toContain(CREDENTIAL_PASSWORD);
     }
+  });
+
+  it('fills a password through attached run_code only in a password field and keeps its value out of the output', async () => {
+    const dir = project('await screen.pause();');
+    const held = await pause(dir, '--trace', 'on');
+    const { client, log } = await mcp(dir);
+    const opened = await openSession(client, { attach: held.id });
+    const denied = await invoke(client, 'call', {
+      tool: 'run_code',
+      args: { code: 'await screen.getByRole("textbox", "Email").fill(credentials.user("buyer").password);' },
+    });
+    expect(denied.isError).toBe(true);
+    expect(denied.text).toContain('POLICY_DENIED');
+
+    const allowed = await invoke(client, 'call', {
+      tool: 'run_code',
+      args: { code: 'await screen.getByRole("textbox", "Password").fill(credentials.user("buyer").password);' },
+    });
+    expect(allowed.isError, allowed.text).toBe(false);
+    expect(allowed.text).toContain('The statement passed.');
+
+    const observed = await invoke(client, 'call', { tool: 'observe' });
+    expect(observed.text).toMatch(/textbox "Password".*<secret:buyer\.password>/);
+    expect(observed.text).not.toMatch(/textbox "Email".*<secret:buyer\.password>/);
+
+    const lines = await invoke(client, 'call', { tool: 'test_lines' });
+    expect(lines.text).toContain('getByRole("textbox", "Password").fill(credentials.user("buyer").password)');
+
+    const next = e2e(dir, 'run', '--step', 'next');
+    expect(next.status).toBe(0);
+    expect(await held.exited).toBe(0);
+
+    const output = [
+      opened.text,
+      denied.text,
+      allowed.text,
+      observed.text,
+      lines.text,
+      held.output(),
+      next.stdout,
+      next.stderr,
+      ...log,
+      ...contentsUnder(path.join(dir, '.e2e')).flat(),
+    ].join('\n');
+    expect(output).not.toContain(CREDENTIAL_PASSWORD);
   });
 
   it('saves a masked attached screenshot to the requested project path', async () => {

@@ -292,9 +292,23 @@ function attachmentConnection(client: net.Socket, options: AttachmentSocketOptio
 
   /** Notifies the client when the run ends its attachment. */
   const onAttachmentEnd = (): void => {
-    if (attachment !== undefined && !detachRequested) {
-      closeWithReply({ type: 'ended', reason: errorMessage(attachment.signal.reason) });
+    if (attachment === undefined || detachRequested) {
+      return;
     }
+
+    detachRequested = true;
+    write({
+      type: 'ended',
+      reason: errorMessage(attachment.signal.reason),
+    });
+    void attachment.detach().then(
+      (text) => closeWithReply({ type: 'recording', text }),
+      (cause: unknown) => {
+        const { category, code, message } = classifyError(cause);
+
+        closeWithReply({ type: 'error', category, code, message });
+      },
+    );
   };
 
   client.once('close', () => {
@@ -353,6 +367,10 @@ function attachmentConnection(client: net.Socket, options: AttachmentSocketOptio
         }
 
         case 'detach': {
+          if (detachRequested && attachment?.signal.aborted === true) {
+            return;
+          }
+
           const attached = requireAttachment();
           detachRequested = true;
 
