@@ -294,7 +294,7 @@ is not a step, so it skips the report and secret redaction.
 
 | Appium | Use today |
 | --- | --- |
-| Android permissions off the list, iOS location `always` | `app.permissions: 'all'` grants every permission an Android app declares, or run `adb shell pm grant` before the run. For iOS location `always`, tap the prompt's button |
+| Android permissions off the list, iOS location `always` | `app.permissions: 'all'` grants every permission an Android app declares, and location `always` on an iOS simulator. Or run `adb shell pm grant` before the run, and on a physical iPhone tap the prompt's button |
 | Device settings and alerts on a `browserstack()` or `testmu()` device | Tap the prompt as UI. Run those tests on a local device |
 | `bstack:options.local`, `lt:options.tunnel` | Point the app at a backend the hosted device can reach |
 | `appium:appActivity`, `appWaitActivity`, `startActivity()` | `device.openLink(url)`, or `client.apps.open` through [`unstable_raw`](/reference/mobile#unstable_raw) |

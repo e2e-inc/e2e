@@ -2509,7 +2509,7 @@ describe('device fixture', () => {
     ]);
   });
 
-  it('grants every permission before each fresh launch with \'all\': one agent-device all on Android, each name but notifications on iOS, and for one openApp', async () => {
+  it('grants every permission before each fresh launch with \'all\', in one agent-device all on either platform, and for one openApp', async () => {
     for (const platform of ['ios', 'android'] as const) {
       const h = harness({ platform, bundleId: 'com.example.app', permissions: 'all' });
       h.fake.respond('apps.open', () => ({ session: 's', appName: 'Example', appBundleId: 'com.example.app', identifiers: {} }));
@@ -2520,10 +2520,8 @@ describe('device fixture', () => {
       await h.engine.session!.restart!(operation());
       await h.engine.session!.reset!(operation());
       await device.openApp('com.other', { relaunch: true, permissions: 'all' });
-      // Android grants the app's declared permissions in one call; iOS ignores that call's `all` service, so each name but notifications goes in turn.
-      const IOS = ['camera', 'microphone', 'photos', 'contacts', 'calendar', 'location', 'reminders', 'motion', 'siri', 'media-library'];
-      const grant = (permission: string, app: string): [string, unknown] => ['settings.update', { setting: 'permission', permission, state: 'grant', platform, app }];
-      const all = (app: string): [string, unknown][] => (platform === 'android' ? [grant('all', app)] : IOS.map((name) => grant(name, app)));
+      // agent-device expands `all` itself: the app's declared permissions on Android, each privacy service on iOS.
+      const all = (app: string): [string, unknown][] => [['settings.update', { setting: 'permission', permission: 'all', state: 'grant', platform, app }]];
       const fresh: [string, unknown] = ['apps.open', { platform, app: 'com.example.app', relaunch: true }];
       expect(h.fake.calls.slice(before).map((call) => [call.method, call.args]), platform).toEqual([
         ...all('com.example.app'),
@@ -2535,41 +2533,6 @@ describe('device fixture', () => {
         ['apps.open', { platform, app: 'com.other', relaunch: true }],
       ]);
     }
-  });
-
-  it('skips an iOS service the runtime refuses under \'all\', fails on any other error, and fails when every service is refused', async () => {
-    const launch = async (refuse: (permission: string) => Error | undefined) => {
-      const h = harness({ platform: 'ios', bundleId: 'com.example.app', permissions: 'all' });
-      h.fake.respond('apps.open', () => ({ session: 's', appName: 'Example', appBundleId: 'com.example.app', identifiers: {} }));
-      h.fake.respond('settings.update', (args) => {
-        const error = refuse((args as { permission: string }).permission);
-        if (error !== undefined) throw error;
-        return {};
-      });
-      await boot(h, 'ios');
-      await h.engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
-      const before = h.fake.calls.length;
-      const result = h.engine.session!.restart!(operation());
-      return { h, before, result };
-    };
-    const refusal = () => new AppError('UNSUPPORTED_OPERATION', 'iOS simulator does not support setting camera permission via simctl privacy on this runtime.');
-
-    // agent-device refuses a service this Xcode runtime lacks; the rest still go in and the app launches.
-    const skipped = await launch((permission) => (permission === 'camera' ? refusal() : undefined));
-    await skipped.result;
-    const methods = skipped.h.fake.calls.slice(skipped.before).map((call) => call.method);
-    expect(methods.filter((method) => method === 'settings.update')).toHaveLength(10);
-    expect(methods.at(-1)).toBe('apps.open');
-
-    // Any other failure is no runtime gap, so it stops the launch at that service.
-    const failed = await launch((permission) => (permission === 'microphone' ? new AppError('COMMAND_FAILED', 'simctl exited 1') : undefined));
-    await expect(failed.result).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
-    expect(failed.h.fake.calls.slice(failed.before).map((call) => call.method)).toEqual(['settings.update', 'settings.update']);
-
-    // A runtime that refuses every service grants nothing, so the launch fails with the refusal.
-    const none = await launch(() => refusal());
-    await expect(none.result).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
-    expect(none.h.fake.calls.slice(none.before).some((call) => call.method === 'apps.open')).toBe(false);
   });
 
   it('launches any app with its own arguments and permissions, set on that app by name', async () => {

@@ -371,24 +371,6 @@ const MOBILE_OPTION_KEYS: readonly string[] = Object.keys({
 /** Every `snapshot` value, kept equal to `MobileOptions['snapshot']` by the compiler. */
 const SNAPSHOT_MODES: readonly string[] = Object.keys({ full: true, interactive: true } satisfies Record<NonNullable<MobileOptions['snapshot']>, true>);
 
-/**
- * What `permissions: 'all'` grants on iOS, one by one: each `simctl privacy`
- * service a `DevicePermission` names, but `notifications`, which the
- * simulator refuses to set.
- */
-const IOS_GRANT_ALL = [
-  'camera',
-  'microphone',
-  'photos',
-  'contacts',
-  'calendar',
-  'location',
-  'reminders',
-  'motion',
-  'siri',
-  'media-library',
-] as const satisfies readonly DevicePermission[];
-
 /** Every state a permission takes, kept equal to `PermissionState` by the compiler. */
 const PERMISSION_STATES: readonly string[] = Object.keys({ grant: true, deny: true, reset: true } satisfies Record<PermissionState, true>);
 
@@ -933,32 +915,14 @@ export class AgentDeviceSurface {
    * Puts an app's permissions in place before it launches, never after: iOS
    * terminates a running app whose permission changed, and Android one whose
    * permission was revoked, so a change after the launch would leave the
-   * test on no screen. `'all'` grants every permission the platform can
-   * set: on Android one agent-device `all`, which grants each permission the
-   * app declares; on iOS each name but `notifications` in turn, since the
-   * simulator ignores the `all` service `simctl privacy grant all` records
-   * and refuses a notifications change. A service the runtime refuses
-   * (`UNSUPPORTED_CAPABILITY`; the services vary by Xcode runtime) is
-   * skipped, and only a runtime that refuses every one fails the launch.
+   * test on no screen. `'all'` is one agent-device `all` grant: on Android
+   * it grants each permission the app declares, and on an iOS simulator each
+   * privacy service the runtime can change, skipping one it refuses (the
+   * simulator refuses `notifications`).
    */
   private async presetPermissions(app: string, permissions: LaunchPermissions, signal: AbortSignal): Promise<void> {
     if (permissions === 'all') {
-      if (this.options.platform === 'android') {
-        await this.permission('all', 'grant', app, signal);
-        return;
-      }
-      let refused: EngineError | undefined;
-      let granted = false;
-      for (const permission of IOS_GRANT_ALL) {
-        try {
-          await this.permission(permission, 'grant', app, signal);
-          granted = true;
-        } catch (cause) {
-          if (!(cause instanceof EngineError && cause.code === 'UNSUPPORTED_CAPABILITY')) throw cause;
-          refused = cause;
-        }
-      }
-      if (!granted && refused !== undefined) throw refused;
+      await this.permission('all', 'grant', app, signal);
       return;
     }
     const entries = Object.entries(permissions).filter(
