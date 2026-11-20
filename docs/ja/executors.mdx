@@ -10,7 +10,7 @@ description: エージェントのループをカスタマイズするか、独�
 | 選択肢 | 自分で実装するもの | ランナーが引き続き担当するもの |
 | --- | --- | --- |
 | `e2e/agent` の `createToolLoopExecutor` | ツールとプロンプト。ループが追加するのは `complete_step` だけ | 予算、繰り返し呼び出しの検出、判定、使用量の集計、デバッグ用トランスクリプト |
-| `StepExecutor` | `runStep(ctx)`。モデルは任意で、`e2e` と `e2e/engine` の型は `ai` パッケージなしでコンパイルできる | ステップの期限、機密情報をマスキングした観測、検証済みの操作、判定の記録 |
+| `StepExecutor` | `runStep(ctx)`。モデルは任意で、`e2e` と `e2e/engine` の型は `ai` パッケージなしでコンパイルできる | ステップの期限、機密情報を秘匿した観測、検証済みの操作、判定の記録 |
 
 どちらも `agents` エントリーの `executor` に設定します。そのエントリーの `model`、`judge`、`context`、予算は引き続き使われますが、`system` と `tools` は拒否されます。これらは `createToolLoopExecutor` に渡してください。選択肢を限定した回答を返すプロバイダーには、[デシジョンエグゼキューター](/decision-models)を参照してください。
 
@@ -118,8 +118,8 @@ export default {
 | メンバー | 内容 |
 | --- | --- |
 | `ctx.step` | `kind`、指示、パラメーター、試行のタイムライン内の `index`。指示やパラメーター内の設定済みシークレットは `<secret:name>` になります。`secrets.get()` のハンドルは名前だけのプレースホルダーとして届き、`typeSecret` が入力します |
-| `ctx.observe({ tree, pixels })` | 機密情報をマスキングした画面テキスト。任意でノードツリーとマスキング済みスクリーンショットも含む |
-| `ctx.read({ id }, { style })` | 現在列挙されているノードの、シークレットをマスキングした計算済みスタイル。[プロジェクトツール](/tools#read-a-nodes-computed-style)を参照 |
+| `ctx.observe({ tree, pixels })` | 機密情報を秘匿した画面テキスト。任意でノードツリーとマスキング済みスクリーンショットも含む |
+| `ctx.read({ id }, { style })` | 現在列挙されているノードの、シークレットを秘匿した計算済みスタイル。[プロジェクトツール](/tools#read-a-nodes-computed-style)を参照 |
 | `ctx.actions` | 検証・記録される操作: `tap`、`doubleTap`、`longPress`、`secondaryTap`、`hover`、`type`、`typeSecret`、`press`、`select`、`check`、`drag`、`scrollTo`、`scrollUntil`、`upload`、`scroll`、`navigate`、`back`、`resize`、`switchTab`、`closeTab`、および以下の座標・キーボード操作 |
 | `ctx.target` | ターゲットの `name`、`platform`、エンジンが対応する操作を示す `verbs`。モデルにはこれらだけを提供します。`tap`、`doubleTap`、`secondaryTap` が `{ modifiers }` を受け取れる場合、`tapModifiers` は true です |
 | `ctx.signal` | キャンセル、ステップの期限、その他の強制停止で中断されます。期限を無視する処理は止められません |

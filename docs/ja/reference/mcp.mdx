@@ -417,9 +417,9 @@ open_session {engine: {package: "@e2e-dev/mobile", options: {platform: "ios"}}, 
 ## 出力
 
 - 操作状況の出力は `e2e mcp:` を付けて stderr に送ります。stdout はプロトコル専用です。
-- コードが `console`、`process.stdout`、`process.stderr` に書き込む内容（設定のトップレベルコード、プロジェクトツール、セッションが実行するテスト）は、シークレットの値をマスキングして stderr に送ります。
+- コードが `console`、`process.stdout`、`process.stderr` に書き込む内容（設定のトップレベルコード、プロジェクトツール、セッションが実行するテスト）は、シークレットの値を秘匿して stderr に送ります。
 - 設定の読み込み中の出力は、読み込み後に表示します。読み込みに失敗した場合、設定のシークレットが不明なので、その出力は表示しません。
-- セッションのテストが未処理のまま残した Promise の reject は、通常の実行と同様にそのテストを失敗にします。テスト本体の終了後に reject した場合は、`close_session` の結果に `UNHANDLED_REJECTION` 行を含め、セッション終了後なら stderr に警告を出します。どのセッションもまだテストを実行していない段階の reject を含め、それ以外の未処理エラーはマスキングしてログに記録し、サーバーを終了します。
+- セッションのテストが未処理のまま残した Promise の reject は、通常の実行と同様にそのテストを失敗にします。テスト本体の終了後に reject した場合は、`close_session` の結果に `UNHANDLED_REJECTION` 行を含め、セッション終了後なら stderr に警告を出します。どのセッションもまだテストを実行していない段階の reject を含め、それ以外の未処理エラーは秘匿してログに記録し、サーバーを終了します。
 
 <Note>
 サーバーの stdio を継承する子プロセスの出力には、この処理は適用されません。
@@ -443,7 +443,7 @@ open_session {engine: {package: "@e2e-dev/mobile", options: {platform: "ios"}}, 
 
 - ノード ID が有効なのは、最新の観測に対してだけです。
 - シークレットを入力できるのは `type_secret` または [`run_code`](#run_code) の `fill` だけで、同じ確認を行います。
-- 設定の読み込み後は、ツールが返すすべてのテキスト、`locate` が見つけたノード、操作結果、`open_session` や `close_session` の失敗、クリーンアップの行、サーバー自身のログ行から、設定のシークレットの値をマスキングします。
+- 設定の読み込み後は、ツールが返すすべてのテキスト、`locate` が見つけたノード、操作結果、`open_session` や `close_session` の失敗、クリーンアップの行、サーバー自身のログ行から、設定のシークレットの値を秘匿します。
 - セッション内の操作は、テスト結果としては記録しません。リプレイキャッシュを読み書きするのは、セッションが実行するテストだけです（[テストの実行](#running-a-test)）。成果物は `<output>/results/mcp/<target>-<attemptId>/`、動画は `<output>/videos/` に保存します。後で `e2e run` を実行すると `<output>/results` は消去しますが、動画は残ります。
 - 待機中にクライアントがキャンセルした呼び出しは、順番が来ても実行しません。
 

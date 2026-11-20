@@ -127,7 +127,7 @@ test('signs in', async ({ app, screen, browser }) => {
 | `Thread.sleep`, `Actions.pause`, `wait.until(elementToBeClickable(...))` | 待ちたい状態へのロケーターアサーション。各アクションは自身のノードを待つ |
 | ダイアログが開いた後の `switchTo().alert()`、`alertIsPresent()` | ダイアログを開く操作の前に `browser.onDialog(handler)` |
 | 実際の Safari、IE モード | Safari に最も近いビルドは `webkit`。IE モードのテストは Selenium に残す |
-| `executeCdpCommand`、`DevTools.send`、ドライバーを受け取る SDK | Selenium に残す。生のドライバー呼び出しは記録もマスキングもされない |
+| `executeCdpCommand`、`DevTools.send`、ドライバーを受け取る SDK | Selenium に残す。生のドライバー呼び出しは記録も秘匿もされない |
 | Allure レポート | `junit` レポーターの XML を Allure に渡すか、`htmlReporter()` を使用 |
 
 ## 意図的に異なる点

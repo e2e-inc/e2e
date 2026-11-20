@@ -315,7 +315,7 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 | `page.waitForTimeout(ms)`, `page.waitForNavigation()` | 待ちたい状態へのロケーターアサーション。`browser.waitForURL(url)` |
 | ルートの glob 内のリテラル `?` と `{a,b}` | `RegExp`。glob では `?` はワイルドカード、`{a,b}` はリテラル |
 | `--only-changed` | `filters` の[テストフィルター](/filters)と `--changed-since <ref>` |
-| `page.$()`、`$eval()`、`elementHandle()`、JSON 以外の `evaluate` 値、`locator.page()` | ロケーターと、JSON を入出力する `browser.evaluate`。レポートに記録し、シークレットをマスキング。ページオブジェクトには `browser` を渡す |
+| `page.$()`、`$eval()`、`elementHandle()`、JSON 以外の `evaluate` 値、`locator.page()` | ロケーターと、JSON を入出力する `browser.evaluate`。レポートに記録し、シークレットを秘匿。ページオブジェクトには `browser` を渡す |
 | ハンドラーなしで黙って閉じられるダイアログ | `browser.onDialog('dismiss')`。未処理のダイアログは次のステップを失敗させる |
 | `page.goto('data:...')`, `'file://...'` | アプリの URL に `route.fulfill({ body, contentType: 'text/html' })`。開けるのは `http` と `https` のみ |
 | `getByRole(role, { includeHidden })` | `browser.locator('role=button[include-hidden=true]')`。ロールクエリはアクセシビリティツリーに従う |
@@ -344,7 +344,7 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 - ロケーターは厳密です。複数一致した場合、アクション、読み取り、肯定形のマッチャーは `LOCATOR_AMBIGUOUS` になります。Playwright の `page.click(selector)` や `isVisible()` は最初の一致を使います。`filter` や `first()` で絞り込んでください。
 - `.not.toBeChecked()` はボタンや見出しでも成功します。コントロールの種類が変わったら失敗するように、ロールで対象を探してください。
 - セッションは 1 回の実行内だけ有効です。`test.setup` が名前付きで状態を保存し、`{ session }` が復元します。ファイルは暗号化し、クリーンアップ時に削除するため、再利用する `.auth/user.json` はありません。
-- テストには生の `Page` を渡しません。その上の操作は記録もマスキングもされないためです。`surfaceOf(engine)` はテストコード向けではなく、[カスタムエグゼキューター](/executors#driving-the-page-yourself)向けです。
+- テストには生の `Page` を渡しません。その上の操作は記録も秘匿もマスキングもされないためです。`surfaceOf(engine)` はテストコード向けではなく、[カスタムエグゼキューター](/executors#driving-the-page-yourself)向けです。
 
 ## デフォルト値の違い
 

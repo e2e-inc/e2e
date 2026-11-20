@@ -89,7 +89,7 @@ process.exitCode = result.exitCode;
 
 - テストファイルがインポートするヘルパーモジュールは、同じプロセスでの `run` 呼び出し間でキャッシュに残ります。変更を反映するには新しいプロセスが必要です。
 - レポートを返す実行ごとに、匿名の [`e2e_run_completed`](/telemetry) イベントを 1 回送ります。CLI と同じ方法でオプトアウトできます。最初の呼び出しでは、stderr にテレメトリーの通知を表示することがあります。
-- スイートの出力には UTF-8 テキストのマスキングを適用するため、バイナリデータは維持しません。アプリケーションのログや進捗コールバックの出力は、呼び出し側で管理します。
+- スイートの出力には UTF-8 テキストの秘匿を適用するため、バイナリデータは維持しません。アプリケーションのログや進捗コールバックの出力は、呼び出し側で管理します。
 
 #### `explore`
 
@@ -148,7 +148,7 @@ console.log(result.status, result.explore.ended, result.explore.findings.length)
 
 | フィールド | 意味 |
 | --- | --- |
-| `explore.goal`, `explore.budgets` | シークレットの値をマスキングしたゴールと、実行時のステップ数・時間の予算です。 |
+| `explore.goal`, `explore.budgets` | シークレットの値を秘匿したゴールと、実行時のステップ数・時間の予算です。 |
 | `explore.ended` | 探索の終了理由です。`finished`、`skipped`（`changedSince` 指定時に、変更にはユーザーから見える影響がないとプランナーが判断した場合。実行は成功します）、`step-limit`、`time`、`stuck`、`aborted` のいずれかです。 |
 | `explore.summary` | エージェントが最後の評価を示した場合、その内容です。 |
 | `explore.change` | `changedSince` 指定時に計画の基にした変更です。`base` はマージベース、`files` は変更ファイル数です。 |
@@ -306,7 +306,7 @@ await session.fixtures.app.open('/checkout');
 | `TARGET_REQUIRED` | 設定に複数のターゲットがあり、`target` を指定していない場合。 |
 | `RUNNER_BUSY` | スイートが実行中の場合。ホストを開く前に await してください。 |
 
-オープンの失敗は、分類・マスキング済みのエラーです。エンジン由来の生の原因は公開しません。[`isE2EError`](#ise2eerror) と `error.code` で判別してください。
+オープンの失敗は、分類済みで機密情報を秘匿したエラーです。エンジン由来の生の原因は公開しません。[`isE2EError`](#ise2eerror) と `error.code` で判別してください。
 
 #### `isE2EError`
 
@@ -368,7 +368,7 @@ const session = await host.openSession({
 - `timeout` はセッション内の操作の期限をミリ秒で指定します。正の有限値が必要で、セッションが開いてから数えます。準備やオープン処理の時間は制限せず、セッションを閉じることもありません。
 - `signal` はオープン処理または実行中のフィクスチャ呼び出しをキャンセルします。ホストの `signal` も適用されます。準備は `openHost` で行うため、準備をキャンセルできるのはホストの `signal` だけです。起動はいずれのシグナルでもキャンセルできます。
 - `agent` は、呼び出しで名前を指定しない場合に `agent` フィクスチャが使うエージェントです。
-- `onStep` は、レポーターと同じリアルタイムの `StepProgress` を受け取ります。ブロックや例外の送出をしないでください。`phase` は `start`、`event`、`activity`、`replay`、`end` のいずれかです。`end` イベントには `status`、`durationMs`、`modelCalls` を含み、ステップが失敗した場合はマスキング済みの `error` も含みます。
+- `onStep` は、レポーターと同じリアルタイムの `StepProgress` を受け取ります。ブロックや例外の送出をしないでください。`phase` は `start`、`event`、`activity`、`replay`、`end` のいずれかです。`end` イベントには `status`、`durationMs`、`modelCalls` を含み、ステップが失敗した場合は秘匿済みの `error` も含みます。
 - `timeout`、`agent`、`onStep` はセッションのオプションであり、`openHost` のオプションではありません。
 
 | 投げるエラー | 発生条件 |
@@ -434,11 +434,11 @@ if (failures.length > 0) throw new AggregateError(failures, 'e2e session close f
 
 #### 成果物
 
-成果物は `<output>/results/host/<resultSegment>/` に置きます。クローズ時に、e2e はレポートと同じマスキング済みの形式で、そこに `trace.md` を書き込みます。
+成果物は `<output>/results/host/<resultSegment>/` に置きます。クローズ時に、e2e はレポートと同じ秘匿処理を適用した形式で、そこに `trace.md` を書き込みます。
 
 - e2e は名前と試行固有の識別情報から、安全な `resultSegment` を生成します。名前をそのままパス要素にすることはありません。
 - 同じ名前やリトライには、それぞれ別のディレクトリを使います。
-- プロバイダーから取得するシークレットがある場合、未解決の値はタイトルのスラッグからマスキングできないため、ディレクトリには識別情報だけを使います。トレースには引き続きマスキング済みの名前を表示します。
+- プロバイダーから取得するシークレットがある場合、未解決の値はタイトルのスラッグから秘匿できないため、ディレクトリには識別情報だけを使います。トレースには引き続き秘匿済みの名前を表示します。
 - 成果物のパスは `session.artifactsDir` ではなく、`<output>/results` からの相対パスです。
 - 動画は、初回試行に対するターゲットのモードに従います。失敗時だけの動画は、ソフトアサーションの失敗や、失敗、ブロック、タイムアウト、キャンセルになったステップで保存します。
 

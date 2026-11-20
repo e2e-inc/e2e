@@ -93,7 +93,8 @@ translation moves or goes with it in the same change.
 | config, configuration | 設定 |
 | screenshot | スクリーンショット |
 | semantic tree | セマンティックツリー |
-| redact, redaction | マスキング |
+| redact, redaction | 秘匿 |
+| mask, masking (pixels) | マスキング |
 | secure field | 機密フィールド |
 | location (current URL or screen) | ロケーション |
 | budget | 予算 |

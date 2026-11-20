@@ -609,7 +609,7 @@ $ npx e2e run --debug
 - `interrupted` は、シグナル、`--max-failures`、`--max-duration`、`MODEL_UNAVAILABLE` などの実行全体のエラーにより、判定前に止められたテストです。失敗には数えません。
 - `executed` は、少なくとも 1 回試行した選択済みの結果です。直列グループのメンバーは、グループのいずれかの試行がそのメンバーに達すれば試行済みです。本体が始まった場合（`test.skip()` を呼んだ本体も含む）、または起動時などにそのメンバーで試行が失敗した場合を指します。フックや先行テストの失敗、実行の中断で開始できなかったメンバーは含めません。
 
-`--ai-trace` を指定すると、AI SDK devtools データベースの `<output>/ai-trace.json` も書き込みます。モデルとの 1 往復ごとに、正確なプロンプト、ツール定義、応答、使用量、プロバイダーメタデータを記録します。観測はマスキング済みで、インライン画像やファイルのバイト列はバイト数に置き換えます。[unbox-ai](https://github.com/e2e-inc/unbox-ai) で開いてください。`npx unbox-ai runs .e2e/ai-trace.json` で実行を一覧表示できます。[実行のデバッグ](/debugging#agent-steps)を参照してください。[テストフィルター](/filters)のモデル呼び出しは記録しません。
+`--ai-trace` を指定すると、AI SDK devtools データベースの `<output>/ai-trace.json` も書き込みます。モデルとの 1 往復ごとに、正確なプロンプト、ツール定義、応答、使用量、プロバイダーメタデータを記録します。観測の機密情報は秘匿済みで、インライン画像やファイルのバイト列はバイト数に置き換えます。[unbox-ai](https://github.com/e2e-inc/unbox-ai) で開いてください。`npx unbox-ai runs .e2e/ai-trace.json` で実行を一覧表示できます。[実行のデバッグ](/debugging#agent-steps)を参照してください。[テストフィルター](/filters)のモデル呼び出しは記録しません。
 
 <a id="watch-mode" />
 
