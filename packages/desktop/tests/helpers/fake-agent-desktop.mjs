@@ -43,9 +43,11 @@ if (answer.spawnedApps !== undefined) {
 if (answer.writePng !== undefined) writeFileSync(args.at(-1), blackPng(answer.writePng.width, answer.writePng.height));
 if (answer.sleepMs !== undefined) await new Promise((resolve) => setTimeout(resolve, answer.sleepMs));
 if (answer.noEnvelope === true) process.exit(1);
-// `"$spawned"` in an answer stands for the pid of the newest process `spawn` started.
+// `"$spawned"` in an answer stands for the pid of the newest process `spawn` started, and `"spawned-$spawned"` for the process instance `spawnedApps` lists it with.
 const spawned = existsSync(`${log}.spawned`) ? readFileSync(`${log}.spawned`, 'utf8').split('\n').findLast(Boolean) : undefined;
-const text = JSON.stringify({ version: '2.6', command: args[0], ...answer.envelope ?? answer }).replaceAll('"$spawned"', spawned ?? 'null');
+const text = JSON.stringify({ version: '2.6', command: args[0], ...answer.envelope ?? answer })
+  .replaceAll('"spawned-$spawned"', `"spawned-${spawned ?? ''}"`)
+  .replaceAll('"$spawned"', spawned ?? 'null');
 process.stdout.write(`${text}\n`);
 process.exitCode = answer.ok === false ? 1 : 0;
 

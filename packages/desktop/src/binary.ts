@@ -130,11 +130,12 @@ export async function resolveExecutable(binary: string | undefined, projectRoot:
 /**
  * Downloads and unpacks the pinned release unless a whole, checked copy is
  * already in the cache; a damaged one is replaced. Any failure but a
- * cancellation is `AGENT_DESKTOP_INSTALL_FAILED`.
+ * cancellation is `AGENT_DESKTOP_INSTALL_FAILED`. `digests` is the pinned
+ * table, which only a test replaces, to unpack an archive of its own.
  */
-export async function installPinned(env: Readonly<Record<string, string | undefined>>, signal: AbortSignal, log: (line: string) => void): Promise<string> {
+export async function installPinned(env: Readonly<Record<string, string | undefined>>, signal: AbortSignal, log: (line: string) => void, digests: Readonly<Record<string, string>> = ARCHIVE_DIGESTS): Promise<string> {
   const target = releaseTarget();
-  const digest = target === undefined ? undefined : ARCHIVE_DIGESTS[target];
+  const digest = target === undefined ? undefined : digests[target];
   if (target === undefined || digest === undefined) {
     throw new ConfigurationError('INVALID_CONFIG', `agent-desktop has no release for ${process.platform} on ${process.arch}; pass desktop({ binary }) to use a build of your own`);
   }

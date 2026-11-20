@@ -1,4 +1,6 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -37,6 +39,40 @@ describe('the pinned agent-desktop', () => {
       });
       await expect(installPinned(env, new AbortController().signal, () => undefined)).rejects.toMatchObject({ code: 'AGENT_DESKTOP_INSTALL_FAILED' });
       expect(fetched).toBe(1);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('unpacks a checked archive into the cache once, however many runs install it at the same time', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'e2e-desktop-cache-'));
+    try {
+      const release = path.join(home, 'release');
+      mkdirSync(release);
+      for (const name of ['agent-desktop', 'agent-desktop-macos-helper']) writeFileSync(path.join(release, name), '#!/bin/sh\necho 1.3.1\n', { mode: 0o755 });
+      const archive = path.join(home, 'release.tar.gz');
+      execFileSync('tar', ['-czf', archive, '-C', release, '.']);
+      const bytes = readFileSync(archive);
+      const digest = createHash('sha256').update(bytes).digest('hex');
+      const digests = Object.fromEntries(['aarch64-apple-darwin', 'x86_64-apple-darwin', 'aarch64-unknown-linux-gnu', 'x86_64-unknown-linux-gnu'].map((target) => [target, digest]));
+      let fetched = 0;
+      vi.stubGlobal('fetch', () => {
+        fetched += 1;
+        return Promise.resolve(new Response(new Uint8Array(bytes)));
+      });
+      const env = { HOME: home, USERPROFILE: home, XDG_CACHE_HOME: path.join(home, 'cache'), LOCALAPPDATA: path.join(home, 'local') };
+      const install = () => installPinned(env, new AbortController().signal, () => undefined, digests);
+      const [first, second] = await Promise.all([install(), install()]);
+      expect(first).toBe(pinnedExecutable(env));
+      expect(second).toBe(first);
+      expect(execFileSync(first, { encoding: 'utf8' }).trim()).toBe('1.3.1');
+      expect(readFileSync(path.join(path.dirname(first), '.verified'), 'utf8')).toBe(digest);
+      // Nothing but the entry is left beside it: no staging directory, no stale copy.
+      expect(readdirSync(path.dirname(path.dirname(first)))).toEqual([path.basename(path.dirname(first))]);
+      // A whole, checked entry is used as it is.
+      const before = fetched;
+      await install();
+      expect(fetched).toBe(before);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

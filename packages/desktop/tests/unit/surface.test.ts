@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { OperationContext } from '@e2e-dev/core/engine';
@@ -545,6 +545,43 @@ describe('DesktopSurface', () => {
         tracked(new DesktopSurface(resolveOptions({ binary: fake.binary }), 'macos')).init({ runId: 'r', targetName: 'mac', projectRoot: directory, app: { appPath: 'Built.app', bundleId }, env: fake.env, headed: false, workerSlot: 0, signal, log: () => undefined });
       await expect(init('dev.e2e.built')).resolves.toBeUndefined();
       await expect(init('com.example.other')).rejects.toThrow(/is not the CFBundleIdentifier "dev.e2e.built"/);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform !== 'darwin')('opens an appPath build by its path in the background, takes the copy carrying its token, and quits it', async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'e2e-desktop-bundle-'));
+    const bundle = path.join(directory, 'Built.app');
+    mkdirSync(path.join(bundle, 'Contents'), { recursive: true });
+    writeFileSync(path.join(bundle, 'Contents', 'Info.plist'), '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>dev.e2e.built</string></dict></plist>');
+    try {
+      const fake = fakeScenario({
+        status: [{ ok: true, data: { version: '1.3.1', permissions: { accessibility: { state: 'granted' } } } }],
+        'list-apps': [{ ok: true, data: { apps: [] } }, { spawnedApps: { name: 'Built', bundle_id: 'dev.e2e.built' } }],
+        'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid: SPAWNED, process_instance: 'spawned-$spawned', is_focused: true }] }],
+        snapshot: [snapshotAnswer('macos/appkit-form')],
+      });
+      fakes.push(fake);
+      // A stand-in for macOS's `open`: it records its arguments and starts a process with the one variable `--env` names, as LaunchServices starts the app.
+      const bin = path.join(directory, 'bin');
+      mkdirSync(bin);
+      const recorded = path.join(directory, 'open-args');
+      const spawnedFile = path.join(path.dirname(fake.binary), 'calls.jsonl.spawned');
+      writeFileSync(
+        path.join(bin, 'open'),
+        `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(recorded)}\nwhile [ $# -gt 0 ]; do [ "$1" = "--env" ] && variable="$2"; shift; done\nenv "$variable" ${JSON.stringify(process.execPath)} -e 'setTimeout(() => {}, 60000)' >/dev/null 2>&1 &\necho $! >> ${JSON.stringify(spawnedFile)}\n`,
+        { mode: 0o755 },
+      );
+      const surface = tracked(new DesktopSurface(resolveOptions({ binary: fake.binary, settle: false }), 'macos'));
+      await surface.init({ runId: 'r', targetName: 'mac', projectRoot: directory, app: { appPath: 'Built.app' }, env: { ...fake.env, PATH: `${bin}:${process.env.PATH ?? ''}` }, headed: false, workerSlot: 0, signal, log: () => undefined });
+      await surface.restart(operation());
+      const args = readFileSync(recorded, 'utf8').trimEnd().split('\n');
+      expect(args).toEqual(['-g', '-n', '--env', expect.stringMatching(/^E2E_DESKTOP_LAUNCH=[\w-]+$/), realpathSync(bundle), '--args', '-ApplePersistenceIgnoreState', 'YES']);
+      const opened = fake.spawned().at(-1)!;
+      expect((await surface.observe(operation(), undefined)).root.children?.some((node) => node.testId === 'username')).toBe(true);
+      await surface.endAttempt({ signal, timeoutMs: 5_000 });
+      expect(await gone(opened)).toBe(true);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
