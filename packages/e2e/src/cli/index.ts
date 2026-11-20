@@ -263,6 +263,7 @@ function formatListedPair(pair: ListedPair): string {
   const tags = pair.tags.map((tag) => ` #${bounded(tag)}`).join('');
   const line = `${pair.file} › ${pair.titlePath.map(bounded).join(' › ')} [${pair.target}]${tags}`;
   if (pair.filter !== undefined) return `${line} (left out by ${pair.filter}: ${bounded(pair.reason ?? '')})`;
+  if (pair.disposition === 'todo') return `${line} (todo)`;
   return pair.disposition === 'skip' ? `${line} (skipped: ${pair.reason ?? 'skipped'})` : line;
 }
 
@@ -1040,8 +1041,8 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
           return;
         }
         output.end();
-        // `list` includes pairs a selection flag removed. The command prints the ones that run or are skipped, and those a test filter left out.
-        const listed = pairs.filter((pair) => pair.disposition === 'run' || pair.disposition === 'skip' || pair.filter !== undefined);
+        // `list` includes pairs a selection flag removed. The command prints the ones that run, are skipped or are todo, and those a test filter left out.
+        const listed = pairs.filter((pair) => pair.disposition === 'run' || pair.disposition === 'skip' || pair.disposition === 'todo' || pair.filter !== undefined);
         if (options.reporter === 'json') writeTerminal('stdout', `${JSON.stringify({ pairs: listed }, null, 2)}\n`);
         else process.stdout.write(listed.map((pair) => `${formatListedPair(pair)}\n`).join(''));
         process.exitCode = 0;

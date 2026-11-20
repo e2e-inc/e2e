@@ -253,6 +253,9 @@ export function pairKey(testId: string, agent: string, repeat: number): string {
 
 /** Result for a pair reported skipped or unselected without ever dispatching. */
 export function nonRunResult(pair: TestTargetPair): ResultRecord {
+  if (pair.disposition === 'todo') {
+    return pairResult(pair, { status: 'todo', selected: true, attempts: [] });
+  }
   if (pair.disposition === 'skip') {
     return pairResult(pair, { status: 'skipped', selected: true, skip: pair.skip, attempts: [] });
   }

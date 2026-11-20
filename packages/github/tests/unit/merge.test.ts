@@ -104,6 +104,27 @@ describe('foldLastRun', () => {
     expect(folded.run.finishedAt).toBe(rerun.run.finishedAt);
   });
 
+  it('keeps a TODO in the summary when a --last-failed rerun leaves it out', () => {
+    const before = report({
+      status: 'failed',
+      results: [
+        result({ title: 'unfinished', status: 'todo', attempts: [] }),
+        result({ title: 'broken', status: 'failed', attempts: [failedAttempt] }),
+      ],
+    });
+    const lastFailed = report({
+      status: 'failed',
+      results: [
+        result({ title: 'unfinished', status: 'skipped', selected: false, skip: leftOut, attempts: [] }),
+        result({ title: 'broken', status: 'failed', attempts: [failedAttempt] }),
+      ],
+    });
+
+    const folded = foldLastRun(lastFailed, before);
+    expect(byTitle(folded).get('unfinished#0')).toMatchObject({ status: 'todo', selected: true });
+    expect(folded.run.summary).toMatchObject({ selected: 2, todo: 1, skipped: 0, failed: 1 });
+  });
+
   it('folds the repeats a plain rerun ran once into its one result, and carries the repeats of a test it left out', () => {
     const before = report({
       status: 'failed',

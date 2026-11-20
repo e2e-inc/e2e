@@ -88,10 +88,10 @@ describe('dot progress output', () => {
     const output = capture();
     const dots = new DotProgress('stdout', output.write, false);
 
-    for (const status of ['passed', 'flaky', 'failed', 'timed-out', 'interrupted', 'skipped'] as const) dots.result(status);
+    for (const status of ['passed', 'flaky', 'failed', 'timed-out', 'interrupted', 'skipped', 'todo'] as const) dots.result(status);
     dots.end();
 
-    expect(output.text).toEqual({ stdout: '.~FTI-\n', stderr: '' });
+    expect(output.text).toEqual({ stdout: '.~FTI-?\n', stderr: '' });
   });
 
   it.each([false, true])('wraps 2,000 marks at 80 visible columns, colors=%s', (colors) => {

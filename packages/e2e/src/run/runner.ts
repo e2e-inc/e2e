@@ -363,8 +363,8 @@ export interface ListedPair {
   readonly target: string;
   /** The configured agent this pair runs as. */
   readonly agent: string;
-  readonly disposition: 'run' | 'skip' | 'filtered';
-  /** Why the pair is skipped or filtered; omitted when it runs. */
+  readonly disposition: 'run' | 'skip' | 'todo' | 'filtered';
+  /** Why the pair is skipped or filtered; omitted when it runs or is todo. */
   readonly reason?: string;
   /** The name of the test filter that left the pair out; omitted otherwise. */
   readonly filter?: string;

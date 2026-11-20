@@ -299,6 +299,19 @@ describe('ListReporter', () => {
       expect(lines).toEqual([' ✓ |chromium| tests/auth.e2e.ts (2 tests) 150ms']);
     });
 
+    it.each(['failed', 'timed-out'] as const)('keeps the %s test title red when colors are enabled', (status) => {
+      const chunks: string[] = [];
+      const reporter = new ListReporter({ write: (line) => chunks.push(line) }, { live: false, colors: true });
+      reporter.handle(plan([{ file: 'tests/auth.e2e.ts', tests: 1 }]));
+      reporter.handle(finished(
+        result({ status, file: 'tests/auth.e2e.ts', title: ['auth', 'signs in'], attempts: [failedAttempt('still signed in')] }),
+      ));
+      const row = chunks.find((line) => line.includes('auth > signs in'))!;
+      const title = row.indexOf('auth > signs in');
+      expect(row.lastIndexOf('\u001b[31m', title)).toBeGreaterThan(row.lastIndexOf('\u001b[39m', title));
+      expect(row.indexOf('\u001b[39m', title)).toBeGreaterThan(title);
+    });
+
     it('lists every test under the run\u2019s only file', () => {
       const { lines, output } = capture();
       const reporter = plainReporter({ ...output, raw: () => {} }, true);
@@ -309,6 +322,19 @@ describe('ListReporter', () => {
       expect(lines).toEqual([
         ' ✓ |chromium| tests/auth.e2e.ts (1 test) 80ms',
         '   ✓ auth > signs in 80ms',
+      ]);
+    });
+
+    it('marks a TODO as unimplemented and does not print a test duration', () => {
+      const { lines, output } = capture();
+      const reporter = plainReporter({ ...output, raw: () => {} }, true);
+      reporter.handle(plan([{ file: 'tests/checkout.e2e.ts', tests: 1 }]));
+      reporter.handle(finished(
+        result({ status: 'todo', file: 'tests/checkout.e2e.ts', title: ['checkout', 'add coverage'], attempts: [] }),
+      ));
+      expect(lines).toEqual([
+        ' ○ |chromium| tests/checkout.e2e.ts (1 test | 1 todo)',
+        '   ○ checkout > add coverage (todo)',
       ]);
     });
 

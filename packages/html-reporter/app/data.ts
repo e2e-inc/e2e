@@ -114,6 +114,7 @@ export const STATUS_FILTERS = {
   flaky: (status: ResultStatus) => status === 'flaky',
   passed: (status: ResultStatus) => status === 'passed',
   skipped: (status: ResultStatus) => status === 'skipped',
+  todo: (status: ResultStatus) => status === 'todo',
   interrupted: (status: ResultStatus) => status === 'interrupted',
 } as const satisfies Record<string, (status: ResultStatus) => boolean>;
 
@@ -123,8 +124,8 @@ export function isStatusFilter(value: string | null): value is StatusFilter {
   return value !== null && Object.hasOwn(STATUS_FILTERS, value);
 }
 
-/** Failed first, then flaky, interrupted, passed, skipped: what needs reading comes first. */
-const STATUS_RANK: Record<ResultStatus, number> = { failed: 0, 'timed-out': 0, flaky: 1, interrupted: 2, passed: 3, skipped: 4 };
+/** Failed first, then flaky, interrupted, todo, passed, skipped: what needs reading comes first. */
+const STATUS_RANK: Record<ResultStatus, number> = { failed: 0, 'timed-out': 0, flaky: 1, interrupted: 2, todo: 3, passed: 4, skipped: 5 };
 
 export function byStatus(a: Result, b: Result): number {
   return STATUS_RANK[a.status] - STATUS_RANK[b.status];

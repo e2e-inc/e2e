@@ -18,6 +18,8 @@ export type Colors = ReturnType<typeof picocolors.createColors>;
 export const F_POINTER = '❯';
 export const F_CHECK = '✓';
 export const F_CROSS = '×';
+export const F_DOWN = '↓';
+const F_TODO = '○';
 
 /**
  * A step's call under the session it ran on when that is not the test's
@@ -139,11 +141,12 @@ export interface Counters {
   interrupted: number;
   flaky: number;
   skipped: number;
+  todo: number;
   total: number;
 }
 
 export function emptyCounters(): Counters {
-  return { passed: 0, failed: 0, interrupted: 0, flaky: 0, skipped: 0, total: 0 };
+  return { passed: 0, failed: 0, interrupted: 0, flaky: 0, skipped: 0, todo: 0, total: 0 };
 }
 
 /**
@@ -151,8 +154,54 @@ export function emptyCounters(): Counters {
  * interrupted test was stopped by the run, not by its own verdict, so it
  * counts on its own.
  */
-export function statusBucket(status: ResultStatus): 'passed' | 'failed' | 'interrupted' | 'flaky' | 'skipped' {
+export function statusBucket(status: ResultStatus): 'passed' | 'failed' | 'interrupted' | 'flaky' | 'skipped' | 'todo' {
   return status === 'timed-out' ? 'failed' : status;
+}
+
+export type FileOutcome = 'passed' | 'failed' | 'interrupted' | 'skipped' | 'todo';
+
+const TEST_STATUS_GLYPH: Record<ResultStatus, string> = {
+  passed: F_CHECK,
+  flaky: F_CHECK,
+  failed: F_CROSS,
+  'timed-out': F_CROSS,
+  interrupted: F_CROSS,
+  skipped: F_DOWN,
+  todo: F_TODO,
+};
+
+const FILE_STATUS_GLYPH: Record<FileOutcome, string> = {
+  passed: F_CHECK,
+  failed: F_POINTER,
+  interrupted: F_POINTER,
+  skipped: F_DOWN,
+  todo: F_TODO,
+};
+
+function coloredStatusSymbol(pc: Colors, status: ResultStatus, glyph: string): string {
+  switch (status) {
+    case 'passed': return pc.green(glyph);
+    case 'flaky': return pc.yellow(glyph);
+    case 'failed':
+    case 'timed-out': return pc.red(glyph);
+    case 'interrupted': return pc.yellow(glyph);
+    case 'skipped': return pc.dim(pc.gray(glyph));
+    case 'todo': return pc.dim(glyph);
+    default: {
+      const exhaustive: never = status;
+      return exhaustive;
+    }
+  }
+}
+
+/** The status glyph for an individual test row. */
+export function statusSymbol(pc: Colors, status: ResultStatus): string {
+  return coloredStatusSymbol(pc, status, TEST_STATUS_GLYPH[status]);
+}
+
+/** The status glyph for a file row, whose outcome is coarser than a test's. */
+export function fileStatusSymbol(pc: Colors, status: FileOutcome): string {
+  return coloredStatusSymbol(pc, status, FILE_STATUS_GLYPH[status]);
 }
 
 /** A result status, or a filter step's outcome, as a line of text says it: `timed out` for `timed-out`. */
@@ -163,6 +212,7 @@ export const STATUS_WORD: Record<ResultStatus, string> = {
   'timed-out': 'timed out',
   interrupted: 'interrupted',
   skipped: 'skipped',
+  todo: 'todo',
 };
 
 /** Counts results by bucket; `total` is the number of items. */
@@ -175,11 +225,13 @@ export function tally(items: readonly { readonly status: ResultStatus }[]): Coun
   return counters;
 }
 
-/** A file's outcome from its tests: failed if any did, else interrupted if any was, skipped if all were, else passed. */
-export function fileOutcome(counters: Counters): 'passed' | 'failed' | 'interrupted' | 'skipped' {
+/** A file's outcome from its tests: failures first, then interrupted, then all-unrun skips or todos, else passed. */
+export function fileOutcome(counters: Counters): FileOutcome {
   if (counters.failed > 0) return 'failed';
   if (counters.interrupted > 0) return 'interrupted';
-  if (counters.total > 0 && counters.skipped === counters.total) return 'skipped';
+  if (counters.total > 0 && counters.skipped + counters.todo === counters.total) {
+    return counters.todo > 0 ? 'todo' : 'skipped';
+  }
   return 'passed';
 }
 
@@ -191,6 +243,7 @@ export function stateString(pc: Colors, counters: Counters): string {
     pc.bold(pc.green(`${counters.passed} passed`)),
     counters.flaky > 0 ? pc.yellow(`${counters.flaky} flaky`) : undefined,
     counters.skipped > 0 ? pc.gray(`${counters.skipped} skipped`) : undefined,
+    counters.todo > 0 ? pc.dim(`${counters.todo} todo`) : undefined,
   ].filter((part) => part !== undefined);
   return `${parts.join(pc.dim(' | '))}${pc.gray(` (${counters.total})`)}`;
 }

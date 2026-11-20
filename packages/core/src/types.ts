@@ -876,6 +876,8 @@ export interface EachRegistrar<Args extends readonly unknown[]> {
 export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> extends TestRegistrar<Fixtures & Worker> {
   /** Registers one skipped test. */
   skip(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
+  /** Registers a test that is not yet implemented. It is reported as todo and never runs. */
+  todo(title: string): TestCase;
   /**
    * Inside a running test: skips it when `condition` is true (or always,
    * with no condition) by throwing, so nothing after the call runs. The

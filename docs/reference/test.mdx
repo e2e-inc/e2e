@@ -7,7 +7,8 @@ description: Tests, setup tests, groups, hooks, options, and fixtures.
 
 `test` declares tests, setup tests, groups, and hooks. Declarations run
 synchronously while the test file is imported. Use `test.extend` to add
-fixtures and `test.skip` to skip a test at registration or during its body.
+fixtures, `test.skip` to skip a test, and `test.todo` to register unfinished
+work without a body.
 
 ```ts title="tests/checkout.e2e.ts"
 import { beforeEach, describe, expect, test } from 'e2e';
@@ -34,6 +35,7 @@ describe('checkout', { tags: ['billing'] }, () => {
 | [`test.skip`](#test-skip) | `TestCase \| void` |
 | [`test.skipIf`](#test-skipif) | `TestRegistrar` |
 | [`test.runIf`](#test-runif) | `TestRegistrar` |
+| [`test.todo`](#test-todo) | `TestCase` |
 | [`test.each`](#test-each) | `EachRegistrar` |
 | [`test.for`](#test-for) | `EachRegistrar` |
 | [`test.fail`](#test-fail) | `TestCase \| void` |
@@ -171,6 +173,21 @@ test.runIf(process.platform === 'linux')('reads inotify events', async ({ app })
 `test.runIf(condition)` is `test.skipIf(!condition)`.
 Everything in [`test.skipIf`](#test-skipif) applies.
 
+#### `test.todo`
+
+Registers a placeholder by title. It is reported with status `todo`, is never
+executed, and a TODO-only run succeeds. An empty shard still fails with
+`NO_TESTS` unless you pass `--pass-with-no-tests`.
+
+```ts
+describe('checkout', () => {
+  test.todo('add checkout coverage');
+});
+```
+
+| Throws | When |
+| --- | --- |
+| `COLLECTION_ERROR` | A body is passed to `test.todo`; TODO placeholders have no body. |
 #### `test.each`
 
 Returns a function that registers one test per row, like `test(title, fn)`,
@@ -985,6 +1002,8 @@ export interface EachRegistrar<Args extends readonly unknown[]> {
 export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> extends TestRegistrar<Fixtures & Worker> {
   /** Registers one skipped test. */
   skip(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
+  /** Registers a test that is not yet implemented. It is reported as todo and never runs. */
+  todo(title: string): TestCase;
   /**
    * Inside a running test: skips it when `condition` is true (or always,
    * with no condition) by throwing, so nothing after the call runs. The

@@ -190,6 +190,7 @@ describe('carryForward', () => {
     });
   const failed = (id: string, extra: Row = {}): Row => ({ id, status: 'failed', attempts: [{ artifacts: [{ path: `web/${id}/attempt-0/failure.png` }] }], ...extra });
   const passed = (id: string, extra: Row = {}): Row => ({ id, status: 'passed', attempts: [{ artifacts: [] }], ...extra });
+  const todo = (id: string, extra: Row = {}): Row => ({ id, status: 'todo', attempts: [], ...extra });
   const carriedIds = (carried: ReturnType<typeof carryForward>) => carried?.results.map((result) => result.testId);
   const scope = { file: 'tests/a.e2e.ts', targetId: 'web', titlePath: ['teardown'] };
   const afterAll = { code: 'HOOK_FAILED', phase: 'afterAll', scopeId: 'teardown', scope };
@@ -247,6 +248,13 @@ describe('carryForward', () => {
     // A scope test the rerun selected but never ran does not show the hook passing.
     const limited = { id: 'in-scope', titlePath: ['teardown', 'in-scope'], status: 'skipped', skip: { cause: 'failure-limit', reason: 'stopped' } };
     expect(carry(before, document([limited, leftOut('sibling')]))?.errors).toEqual([afterAll]);
+  });
+
+  it('keeps a hook failure when a TODO is selected but its body never ran', () => {
+    const before = document([inScope(passed), passed('sibling', { titlePath: ['teardown', 'sibling'] })], [afterAll]);
+    const rerun = carry(before, document([inScope(todo), leftOut('sibling')]));
+    expect(carriedIds(rerun)).toEqual(['sibling']);
+    expect(rerun?.errors).toEqual([afterAll]);
   });
 
   it('carries a test on a target or agent the rerun did not select, while the test and the target are still there', () => {

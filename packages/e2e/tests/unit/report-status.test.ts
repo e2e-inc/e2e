@@ -10,11 +10,18 @@ import { resolveConfig } from '../../src/config/resolve-run.ts';
 import type { SerializedError } from '@e2e-dev/core/lib/internal/errors';
 import { uuidv7 } from '@e2e-dev/core/lib/internal/ids';
 import { buildReport, type BuildReportOptions } from '../../src/report/build.ts';
+import { fileOutcome, tally } from '../../src/report/format.ts';
 import type { AttemptRecord, ResultRecord, SerialAttemptRecord, SerialGroupRecord } from '@e2e-dev/core/lib/run/records';
 import type { StepRecord } from '@e2e-dev/core/lib/run/steps';
 import { assertValidReport } from '../helpers/report-schema.ts';
 
 const AT = '2026-01-01T00:00:00.000Z';
+
+describe('fileOutcome', () => {
+  it('marks a file containing only TODO results as todo', () => {
+    expect(fileOutcome(tally([{ status: 'todo' }]))).toBe('todo');
+  });
+});
 
 const target = {
   name: 'web',

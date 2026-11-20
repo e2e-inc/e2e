@@ -53,8 +53,8 @@ export interface TestTargetPair {
    */
   readonly repeat: number;
   readonly options: ResolvedTestOptions;
-  /** run: execute; skip: report skipped; filtered: report as unselected. */
-  readonly disposition: 'run' | 'skip' | 'filtered';
+  /** run: execute; skip: report skipped; todo: report without executing; filtered: report as unselected. */
+  readonly disposition: 'run' | 'skip' | 'todo' | 'filtered';
   readonly skip: SkipInfo | undefined;
 }
 
@@ -369,10 +369,10 @@ export function select(
   const withSessions = applySessionSelection(withExclusions, sessionProducers, collection.uncollected);
   assertFixtureUse(withSessions, collection, config.projectRoot);
 
-  const runnableOrdinary = withSessions.filter(
-    (pair) => pair.disposition === 'run' && pair.test.kind === 'test',
+  const selectedOrdinary = withSessions.filter(
+    (pair) => (pair.disposition === 'run' || pair.disposition === 'todo') && pair.test.kind === 'test',
   );
-  if (runnableOrdinary.length === 0 && flags.passWithNoTests !== true) {
+  if (selectedOrdinary.length === 0 && flags.passWithNoTests !== true) {
     throw new ConfigurationError(
       'NO_TESTS',
       `${describeNoTests(collection, config, filters, withSessions)}; ${flags.noTestsHint ?? 'pass --pass-with-no-tests to allow this'}`,
@@ -721,6 +721,8 @@ function classifyPair(
     return { ...base, disposition: 'filtered', skip: { cause: 'filtered', reason: 'setup test not required by selection' } };
   }
 
+  if (test.mode === 'todo') return { ...base, disposition: 'todo', skip: undefined };
+
   return { ...base, disposition: 'run', skip: undefined };
 }
 
@@ -752,7 +754,7 @@ function applySerialClosure(pairs: readonly TestTargetPair[]): TestTargetPair[] 
     if (!selectedSerialUnits.has(key)) return pair;
     if (pair.disposition === 'run') return pair;
     if (pair.disposition === 'filtered' && pair.skip?.cause === 'filtered') {
-      return { ...pair, disposition: 'run' as const, skip: undefined };
+      return { ...pair, disposition: pair.test.mode === 'todo' ? ('todo' as const) : ('run' as const), skip: undefined };
     }
     return pair;
   });
@@ -790,9 +792,10 @@ function shardItem(pair: TestTargetPair): string {
  * one item, the first shards taking the remainder. Applied after every flag
  * and the serial closure, before the test filters' exclusions and before the
  * setup tests are chosen, so the cut never depends on what a filter answers
- * and each shard brings only the setups it needs. A skipped test is not an
- * item: the shard holding the item before it in report order reports it, the
- * first shard when none comes before, so the shards together report it once.
+ * and each shard brings only the setups it needs. A skipped or TODO test is
+ * not an item: the shard holding the item before it in report order reports
+ * it, the first shard when none comes before, so the shards together report
+ * it once.
  */
 function applyShard(pairs: readonly TestTargetPair[], shard: Shard): TestTargetPair[] {
   const items = shardItems(pairs);
@@ -806,6 +809,11 @@ function applyShard(pairs: readonly TestTargetPair[], shard: Shard): TestTargetP
     if (pair.test.kind !== 'test') return pair;
     if (pair.disposition === 'filtered') return pair;
     if (pair.disposition === 'skip') return previousKept ? pair : { ...pair, disposition: 'filtered' as const };
+    if (pair.disposition === 'todo') {
+      return previousKept
+        ? pair
+        : { ...pair, disposition: 'filtered' as const, skip: { cause: 'filtered' as const, reason: FILTERED_REASON.shard } };
+    }
     previousKept = kept.has(shardItem(pair));
     if (previousKept) return pair;
     return { ...pair, disposition: 'filtered' as const, skip: { cause: 'filtered' as const, reason: FILTERED_REASON.shard } };

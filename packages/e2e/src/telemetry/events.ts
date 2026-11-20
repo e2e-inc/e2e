@@ -459,6 +459,7 @@ export function runCompletedEvent(report: Report1Document, context: RunContext):
       tests_interrupted: run.summary.interrupted,
       tests_flaky: run.summary.flaky,
       tests_skipped: run.summary.skipped,
+      tests_todo: run.summary.todo ?? 0,
       tests_failed_as_expected: run.results.filter((result) => result.attempts.at(-1)?.expectedFailure?.error !== undefined).length,
       filters_run: run.filters?.length ?? 0,
       filters_timed_out: run.filters?.filter((record) => record.outcome === 'timed-out').length ?? 0,

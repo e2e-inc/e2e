@@ -32,6 +32,7 @@ describe('checkout', { tags: ['billing'] }, () => {
 | [`test.skip`](#test-skip) | `TestCase \| void` |
 | [`test.skipIf`](#test-skipif) | `TestRegistrar` |
 | [`test.runIf`](#test-runif) | `TestRegistrar` |
+| [`test.todo`](#test-todo) | `TestCase` |
 | [`test.each`](#test-each) | `EachRegistrar` |
 | [`test.for`](#test-for) | `EachRegistrar` |
 | [`test.fail`](#test-fail) | `TestCase \| void` |
@@ -143,6 +144,19 @@ test.runIf(process.platform === 'linux')('reads inotify events', async ({ app })
 
 `test.runIf(condition)` 等同于 `test.skipIf(!condition)`。[`test.skipIf`](#test-skipif) 的全部规则都适用。
 
+#### `test.todo`
+
+仅通过标题注册一个占位测试。它会以 `todo` 状态报告，不会执行。仅包含 TODO 的运行会成功；空分片仍会报 `NO_TESTS`，除非传入 `--pass-with-no-tests`。
+
+```ts
+describe('checkout', () => {
+  test.todo('add checkout coverage');
+});
+```
+
+| 错误 | 条件 |
+| --- | --- |
+| `COLLECTION_ERROR` | 为 `test.todo` 传入了测试主体。TODO 占位测试没有主体。 |
 #### `test.each`
 
 返回一个函数，像 `test(title, fn)` 一样按行的顺序为每一行注册一个测试。用于以不同数据执行相同步骤。
@@ -783,6 +797,8 @@ export interface EachRegistrar<Args extends readonly unknown[]> {
 export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> extends TestRegistrar<Fixtures & Worker> {
   /** Registers one skipped test. */
   skip(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
+  /** Registers a test that is not yet implemented. It is reported as todo and never runs. */
+  todo(title: string): TestCase;
   /**
    * Inside a running test: skips it when `condition` is true (or always,
    * with no condition) by throwing, so nothing after the call runs. The

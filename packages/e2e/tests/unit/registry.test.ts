@@ -155,8 +155,10 @@ describe('registration', () => {
       test.skip('skipped', noop);
       test.only('focused', noop);
       test('opt-skip', { skip: 'flaky upstream' }, noop);
+      test.describe('checkout', () => test.todo('add checkout coverage'));
     });
-    expect(registration.tests.map((item) => item.mode)).toEqual(['skip', 'only', 'skip']);
+    expect(registration.tests.map((item) => item.mode)).toEqual(['skip', 'only', 'skip', 'todo']);
+    expect(registration.tests[3]!.titlePath).toEqual(['checkout', 'add checkout coverage']);
     expect(registration.tests[2]!.options.skip).toBe('flaky upstream');
   });
 
@@ -435,6 +437,14 @@ describe('registration', () => {
       });
     });
     expect(registration.tests.map((item) => item.mode)).toEqual(['normal']);
+  });
+
+  it('rejects a body passed to test.todo at runtime', async () => {
+    await expect(
+      collectModule(async () => {
+        Reflect.apply(test.todo, test, ['has a body', noop]);
+      }),
+    ).rejects.toThrow('test.todo() accepts a title only');
   });
 
   it('registers expected failures by test.fail(title, fn) and the fail option, and checks the option', async () => {

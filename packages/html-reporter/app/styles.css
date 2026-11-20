@@ -96,6 +96,7 @@
   --color-status-flaky: light-dark(#a85a00, #ffb547);
   --color-status-skipped: light-dark(var(--color-e2e-neutral-600), var(--color-e2e-neutral-500));
   --color-status-interrupted: light-dark(var(--color-e2e-neutral-600), var(--color-e2e-neutral-400));
+  --color-status-todo: light-dark(var(--color-e2e-blue-600), var(--color-e2e-blue-400));
 }
 
 /* The design system's type scale, the sizes the page uses. Captions and headings are lowercase there too. */

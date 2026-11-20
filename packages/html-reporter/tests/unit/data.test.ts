@@ -1,6 +1,6 @@
 import type { Report } from 'e2e';
 import { describe, expect, it } from 'vitest';
-import { buildModel, formatDuration, formatTokens, onTarget, selectedTarget, statusTabs, timedVideos, videoName, videoPosition, type Artifact, type Step } from '../../app/data.ts';
+import { buildModel, byStatus, formatDuration, formatTokens, onTarget, selectedTarget, statusTabs, STATUS_FILTERS, timedVideos, videoName, videoPosition, type Artifact, type Step } from '../../app/data.ts';
 import fixture from '../../../e2e/schema/fixtures/report-v1.valid.json' with { type: 'json' };
 
 // The page's own tsconfig checks this file: the model it tests reads the DOM.
@@ -39,6 +39,17 @@ describe('serial members', () => {
       ['skipped', failure.message],
       ['failed in afterAll', failure.message],
     ]);
+  });
+});
+
+describe('todo results', () => {
+  it('has its own filter and sorts ahead of completed tests', () => {
+    const todo = { ...REPORT.run.results[0]!, status: 'todo' as const };
+    const passed = { ...REPORT.run.results[0]!, status: 'passed' as const };
+
+    expect(STATUS_FILTERS.todo('todo')).toBe(true);
+    expect(STATUS_FILTERS.todo('passed')).toBe(false);
+    expect(byStatus(todo, passed)).toBeLessThan(0);
   });
 });
 
@@ -105,7 +116,7 @@ describe('selectedTarget', () => {
 });
 
 describe('statusTabs', () => {
-  const counts = { all: 3, failed: 0, flaky: 0, passed: 2, skipped: 1, interrupted: 0 };
+  const counts = { all: 3, failed: 0, flaky: 0, passed: 2, skipped: 1, interrupted: 0, todo: 0 };
 
   it('keeps every status with results, in tab order, with all first', () => {
     expect(statusTabs(counts, 'all')).toEqual(['all', 'passed', 'skipped']);

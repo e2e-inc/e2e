@@ -122,6 +122,7 @@ function RunHeader({ model, counts, target }: { model: ReportModel; counts: Reco
     { label: 'failed', value: counts.failed, color: 'bg-status-failed' },
     { label: 'interrupted', value: counts.interrupted, color: 'bg-status-interrupted' },
     { label: 'skipped', value: counts.skipped, color: 'bg-status-skipped' },
+    { label: 'todo', value: counts.todo, color: 'bg-status-todo' },
   ].filter((segment) => segment.value > 0);
   const total = segments.reduce((sum, segment) => sum + segment.value, 0);
 

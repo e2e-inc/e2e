@@ -75,15 +75,17 @@ npx e2e run 'tests/**/*.smoke.e2e.ts' --target chromium --workers 1 --retries 0
 CI=1 npx e2e run            # the CI defaults, locally
 ```
 
+An all-TODO `e2e run` makes no attempts and exits 0.
+
 `list` takes the same files and selection flags (`--config`, `--target`,
 `--tag`, `--tag-mode`, `--exclude-tag`, `--grep`, `--grep-invert`,
 `--changed-since`, `--last-failed`, `--shard`, `--pass-with-no-tests`),
-prints one line per test-target pair, `file › title [target] #tag`, skipped
-pairs ending in ` (skipped: <reason>)`, and starts no app, engine, or
-worker. With `--changed-since`, the configured filters run as for `run`; a
+prints one line per test-target pair, `file › title [target] #tag`, TODO
+pairs ending in `(todo)`, skipped pairs ending in ` (skipped: <reason>)`,
+and starts no app, engine, or worker. With `--changed-since`, the configured filters run as for `run`; a
 pair one left out ends in ` (left out by <filter>: <reason>)`. `--reporter json` prints
-`{ "pairs": [...] }`, naming a skip or left-out reason `reason` and the
-filter that left a pair out `filter`.
+`{ "pairs": [...] }`; TODO pairs have disposition `todo`, while skipped and
+filtered pairs have a `reason` and filtered pairs also have a `filter`.
 
 `import { list } from 'e2e/runner'` returns that selection plus the pairs a
 filter removed, positional arguments that matched no file, and the selected
@@ -163,7 +165,7 @@ hosted service's video by URL.
   `--repeat-each`), `selected`, `status`, `attempts[]` of `steps[]`,
   `artifacts[]`, `error`. `run.summary` counts the selected results:
   `passed`, `failed` (timed out included), `interrupted` (stopped by the
-  run: a signal, `--max-failures`, `--max-duration`, a run-level error; not a failure), `flaky`, and `skipped` add up
+  run: a signal, `--max-failures`, `--max-duration`, a run-level error; not a failure), `flaky`, `skipped`, and `todo` add up
   to `selected`; `discovered - selected` were left out.
 - `dot`: one ASCII mark per selected test's final result after retries, wrapped at 80 marks; colors follow terminal settings and `NO_COLOR`. It shares `list`'s header, failure details, summary, run errors, and step prompts. Use `--reporter dot,json` (or `list,json`) for all terminal output on stderr and the JSON report on stdout.
 - `junit`: `junit.xml` for CI summaries; `--reporter list,junit` keeps the
@@ -201,7 +203,7 @@ hosted service's video by URL.
 
 | Code | Meaning |
 | ---: | --- |
-| 0 | Every selected test passed, was flaky, or was skipped |
+| 0 | Every selected test passed, was flaky, was skipped, or was marked TODO |
 | 1 | A test or setup test failed or timed out |
 | 2 | CLI, config, collection, credential, model-config, or policy error |
 | 3 | Engine, app process, model provider, artifact, or cleanup failure |

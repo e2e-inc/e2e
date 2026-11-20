@@ -1,9 +1,9 @@
 import { defineConfig } from 'vitest/config';
 
-/** Pure unit tests: a temp directory and the built page template. */
+/** Unit tests for report data and the page components. */
 export default defineConfig({
   test: {
-    include: ['tests/unit/**/*.test.ts'],
+    include: ['tests/unit/**/*.test.ts', 'tests/unit/**/*.test.tsx'],
     testTimeout: 30_000,
     pool: 'forks',
   },

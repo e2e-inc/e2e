@@ -164,7 +164,7 @@ export function carryForward(lastRun: Report1Document, current: Report1Document,
   const reportedAgain = (error: ReportError): boolean => failedAgain.some((again) => sameHook(again, error));
   const passedAgain = (error: ReportError): boolean =>
     !reportedAgain(error) &&
-    current.run.results.some((result) => result.selected !== false && result.status !== 'skipped' && inHookScope(result, error));
+    current.run.results.some((result) => result.selected !== false && result.attempts.length > 0 && inHookScope(result, error));
   const unresolved = hooks.filter((error) => !passedAgain(error));
 
   // A test the run before left out is known by the row it carried, not by its filtered one.

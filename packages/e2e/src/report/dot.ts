@@ -44,6 +44,7 @@ export class DotProgress {
       'timed-out': pc.red('T'),
       interrupted: pc.yellow('I'),
       skipped: pc.gray('-'),
+      todo: pc.dim('?'),
     };
   }
 

@@ -117,6 +117,7 @@ synchronous (`async` is a `COLLECTION_ERROR`).
 ```ts
 test('title', async ({ app, screen }) => {});
 test('title', { tags: ['smoke'], retries: 2, timeout: 60_000 }, async ({ app }) => {});
+test.todo('add checkout coverage'); // title only; listed as todo and never executed
 describe('group', { tags: ['billing'] }, () => { /* tests and hooks */ });
 describe('checkout flow', { serial: true }, () => { /* ordered, shared app state */ });
 beforeEach(async ({ app }) => {});     // per attempt, with test fixtures
@@ -145,6 +146,10 @@ A setup test cannot skip from its body (`INVALID_ARGUMENT`), and neither a
 setup test nor a serial member can call `test.fail`. `test.fail` covers test
 failures and timeouts only: an infrastructure error such as `ENGINE_FAILURE`
 or a blocked agent verdict still fails the test.
+
+`test.todo(title)` registers a placeholder without a body. The runner reports
+it as `todo` without creating an attempt; a selection containing only TODOs
+does not fail with `NO_TESTS`.
 
 | Option | Default | Notes |
 | --- | --- | --- |

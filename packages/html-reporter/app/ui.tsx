@@ -8,6 +8,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  CircleDashed,
   Maximize,
   Minus,
   Monitor,
@@ -25,6 +26,7 @@ import type { ResultStatus, Step } from './data.ts';
 
 const ICONS = {
   check: Check,
+  'circle-dashed': CircleDashed,
   close: X,
   'triangle-alert': TriangleAlert,
   minus: Minus,
@@ -77,7 +79,7 @@ export function Logo({ className }: { className: string }) {
   );
 }
 
-type Tone = 'passed' | 'failed' | 'flaky' | 'skipped' | 'interrupted';
+type Tone = 'passed' | 'failed' | 'flaky' | 'skipped' | 'interrupted' | 'todo';
 
 const TONE_TEXT: Record<Tone, string> = {
   passed: 'text-status-passed',
@@ -85,12 +87,22 @@ const TONE_TEXT: Record<Tone, string> = {
   flaky: 'text-status-flaky',
   skipped: 'text-status-skipped',
   interrupted: 'text-status-interrupted',
+  todo: 'text-status-todo',
 };
 
-const TONE_ICON: Record<Tone, IconName> = { passed: 'check', failed: 'close', flaky: 'triangle-alert', skipped: 'minus', interrupted: 'minus' };
+const TONE_ICON: Record<Tone, IconName> = { passed: 'check', failed: 'close', flaky: 'triangle-alert', skipped: 'minus', interrupted: 'minus', todo: 'circle-dashed' };
 
 function resultTone(status: ResultStatus): Tone {
-  return status === 'timed-out' ? 'failed' : status;
+  switch (status) {
+    case 'timed-out': return 'failed';
+    case 'passed':
+    case 'failed':
+    case 'flaky':
+    case 'skipped':
+    case 'interrupted':
+    case 'todo': return status;
+    default: return 'interrupted';
+  }
 }
 
 const STEP_TONE: Record<Step['status'], Tone> = { passed: 'passed', failed: 'failed', blocked: 'failed', 'timed-out': 'failed', cancelled: 'skipped' };
@@ -154,6 +166,7 @@ const STATUS_HINT: Partial<Record<ResultStatus, string>> = {
   'timed-out': 'Ran past its time limit and was stopped.',
   interrupted: 'The run stopped before this test finished.',
   skipped: 'Did not run: skipped in the test file, or left out by a filter.',
+  todo: 'Not implemented yet; no attempt was run.',
 };
 
 export function StatusTag({ status, align }: { status: ResultStatus; align?: HintAlign }) {

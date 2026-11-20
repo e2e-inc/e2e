@@ -103,7 +103,8 @@
       "failed": 0,
       "interrupted": -1,
       "flaky": 0,
-      "skipped": 0
+      "skipped": 0,
+      "todo": 0
     },
     "changes": {
       "base": "main",

@@ -561,7 +561,7 @@
         "tags": { "type": "array", "items": { "type": "string", "pattern": "^[^\\s,](?:[^,]*[^\\s,])?$" }, "uniqueItems": true },
         "selected": { "type": "boolean" },
         "serialGroupId": { "type": "string", "minLength": 1 },
-        "status": { "enum": ["passed", "flaky", "failed", "timed-out", "interrupted", "skipped"] },
+        "status": { "enum": ["passed", "flaky", "failed", "timed-out", "interrupted", "skipped", "todo"] },
         "skip": { "$ref": "#/$defs/skip" },
         "expectedFailure": {
           "description": "Why the test was expected to fail, when its last attempt was marked test.fail. Absent in older reports.",
@@ -601,11 +601,23 @@
               }
             },
             "else": {
-              "properties": {
-                "attempts": {
-                  "type": "array",
-                  "minItems": 1,
-                  "items": { "$ref": "#/$defs/attempt" }
+              "if": { "properties": { "status": { "const": "todo" } } },
+              "then": {
+                "properties": {
+                  "attempts": {
+                    "type": "array",
+                    "maxItems": 0,
+                    "items": { "$ref": "#/$defs/attempt" }
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "attempts": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": { "$ref": "#/$defs/attempt" }
+                  }
                 }
               }
             }
@@ -615,6 +627,15 @@
           "if": { "properties": { "status": { "const": "skipped" } } },
           "then": { "properties": { "expectedFailure": false } },
           "else": { "properties": { "skip": false } }
+        },
+        {
+          "if": { "properties": { "status": { "const": "todo" } } },
+          "then": {
+            "properties": {
+              "selected": { "const": true },
+              "expectedFailure": false
+            }
+          }
         },
         {
           "if": { "properties": { "kind": { "const": "setup" } } },
@@ -668,7 +689,8 @@
         "failed": { "type": "integer", "minimum": 0 },
         "interrupted": { "type": "integer", "minimum": 0 },
         "flaky": { "type": "integer", "minimum": 0 },
-        "skipped": { "type": "integer", "minimum": 0 }
+        "skipped": { "type": "integer", "minimum": 0 },
+        "todo": { "type": "integer", "minimum": 0 }
       }
     },
     "limits": {

@@ -67,8 +67,8 @@ function memberRan(member: ReportSerialGroup['attempts'][number]['members'][numb
  * status counts are over the selected ones, and a serial member executed when
  * one of its group's attempts ran its body, a body that skipped itself included.
  */
-function summarize(results: readonly ReportResult[], serialGroups: readonly ReportSerialGroup[], base: ReportSummary): ReportSummary {
-  const summary: ReportSummary = { ...base, discovered: results.length, selected: 0, executed: 0, passed: 0, failed: 0, interrupted: 0, flaky: 0, skipped: 0 };
+function summarize(results: readonly ReportResult[], serialGroups: readonly ReportSerialGroup[]): Required<ReportSummary> {
+  const summary: Required<ReportSummary> = { discovered: results.length, selected: 0, executed: 0, passed: 0, failed: 0, interrupted: 0, flaky: 0, skipped: 0, todo: 0 };
   const ranMembers = new Set(
     serialGroups.flatMap((group) =>
       group.attempts.flatMap((attempt) =>
@@ -84,6 +84,7 @@ function summarize(results: readonly ReportResult[], serialGroups: readonly Repo
     else if (result.status === 'flaky') summary.flaky += 1;
     else if (result.status === 'interrupted') summary.interrupted += 1;
     else if (FAILED_STATUSES.has(result.status)) summary.failed += 1;
+    else if (result.status === 'todo') summary.todo += 1;
     else summary.skipped += 1;
   }
   return summary;
@@ -168,7 +169,7 @@ export function foldLastRun(current: Report, lastRun: Report): Report {
       serialGroups,
       results,
       errors: [...current.run.errors, ...carriedErrors],
-      summary: summarize(results, serialGroups, current.run.summary),
+      summary: summarize(results, serialGroups),
       filters: lastRun.run.filters,
       changes: lastRun.run.changes,
     },

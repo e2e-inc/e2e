@@ -43,6 +43,30 @@ describe.each(schemas)('%s schema', (name) => {
   }
 
   if (name === 'report-v1') {
+    it('accepts selected todo results without attempts and rejects attempts or an unselected todo', () => {
+      const report = readJson('fixtures', 'report-v1.valid.json') as {
+        run: {
+          results: Record<string, unknown>[];
+          summary: Record<string, unknown>;
+        };
+      };
+      const result = report.run.results[0]!;
+      const attempts = result['attempts'] as Record<string, unknown>[];
+      result['status'] = 'todo';
+      result['attempts'] = [];
+      delete result['expectedFailure'];
+      report.run.summary['todo'] = 1;
+      expect(validate(report)).toBe(true);
+
+      const attempt = (report.run.results[1]!['attempts'] as Record<string, unknown>[])[0]!;
+      result['attempts'] = [attempt];
+      expect(validate(report)).toBe(false);
+      result['attempts'] = [];
+      result['selected'] = false;
+      expect(validate(report)).toBe(false);
+      result['attempts'] = attempts;
+    });
+
     it('accepts optional runner cut-retry decisions and rejects other types', () => {
       const report = readJson('fixtures', 'report-v1.valid.json') as {
         run: { serialGroups: { attempts: Record<string, unknown>[] }[] };

@@ -552,7 +552,8 @@
       "failed": 1,
       "interrupted": 0,
       "flaky": 0,
-      "skipped": 1
+      "skipped": 1,
+      "todo": 0
     },
     "limits": {
       "maxAgentContextBytes": 16384,

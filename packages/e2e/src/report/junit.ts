@@ -153,6 +153,12 @@ function renderResult(result: ReportResult, groups: ReadonlyMap<string, ReportSe
   })}`;
   const expected = expectedNote(result);
   switch (result.status) {
+    case 'todo':
+      return {
+        lines: [`${open}>`, `  <skipped ${attributes({ message: 'todo: not implemented' })}/>`, '</testcase>'],
+        outcome: 'skipped',
+        durationMs: final.durationMs,
+      };
     case 'passed': {
       if (expected === undefined) return { lines: [`${open}/>`], outcome: 'passed', durationMs: final.durationMs };
       // A test.fail pass failed as expected; its failure screenshot shows that failure.

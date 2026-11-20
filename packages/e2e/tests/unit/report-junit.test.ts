@@ -326,6 +326,13 @@ describe('renderJunitReport', () => {
     expect(rootAttributes(xml)).toMatchObject({ tests: '1', skipped: '1' });
   });
 
+  it('renders TODO results as skipped with a not-implemented note and no attempt time', () => {
+    const xml = render(reportDocument({ results: [reportResult({ status: 'todo', attempts: [] })] }));
+    expect(xml).toContain('<testcase name="auth &gt; signs in [web]" classname="tests/auth.e2e.ts" time="0.000">');
+    expect(xml).toContain('<skipped message="todo: not implemented"/>');
+    expect(rootAttributes(xml)).toMatchObject({ tests: '1', failures: '0', errors: '0', skipped: '1' });
+  });
+
   it('groups results into one suite per file, in report order', () => {
     const xml = render(
       reportDocument({

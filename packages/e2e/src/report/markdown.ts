@@ -105,11 +105,11 @@ interface Entry {
 /** Screenshots first, then the recording; the compiler fails when a kind is missing here. */
 const KIND_RANK: Record<ArtifactKind, number> = { screenshot: 0, video: 1, download: 2, log: 3 };
 
-const ICON: Record<Bucket, string> = { failed: '🔴', interrupted: '⏹️', flaky: '⚠️', skipped: '⏭️', passed: '🟢' };
+const ICON: Record<Bucket, string> = { failed: '🔴', interrupted: '⏹️', flaky: '⚠️', skipped: '⏭️', todo: '📝', passed: '🟢' };
 /** Worst first: the order failures are listed, files are sorted, and a file's glyph is chosen in. */
-const WORST_FIRST: readonly Bucket[] = ['failed', 'interrupted', 'flaky', 'skipped', 'passed'];
-/** The order counts read in: `1 failed, 2 interrupted, 1 flaky, 3 passed, 1 skipped`. */
-const COUNT_ORDER: readonly Bucket[] = ['failed', 'interrupted', 'flaky', 'passed', 'skipped'];
+const WORST_FIRST: readonly Bucket[] = ['failed', 'interrupted', 'flaky', 'skipped', 'todo', 'passed'];
+/** The order counts read in: `1 failed, 2 interrupted, 1 flaky, 3 passed, 1 skipped, 1 todo`. */
+const COUNT_ORDER: readonly Bucket[] = ['failed', 'interrupted', 'flaky', 'passed', 'skipped', 'todo'];
 
 function worstBucket(results: readonly ReportResult[]): Bucket {
   const present = new Set(results.map((result) => statusBucket(result.status)));
@@ -445,24 +445,26 @@ function row(cells: readonly string[]): string {
 /** `⚠️ | title (1 failed attempt first) | 1 step · 4 calls | 3.4s`: one test's row, how it ended noted when it did not simply pass or failed as `test.fail` expected. The file's row above names the target. */
 function testRow({ result, final }: Entry, withAgent: boolean): string {
   const skipped = result.status === 'skipped';
+  const todo = result.status === 'todo';
+  const bucket = statusBucket(result.status);
   const expected = result.attempts.at(-1)?.expectedFailure;
-  const note = skipped
-    ? `skipped: ${cell(result.skip?.reason ?? 'skipped')}`
-    : expected?.error !== undefined
-      ? `failed as expected: ${cell(expected.reason)}, ${cell(expected.error.code)}: ${cell(expected.error.message)}`
-      : result.status === 'flaky'
-        ? `${plural(final.failedAttempts, 'failed attempt')} first`
-        : '';
+  let note = '';
+  if (skipped) note = `skipped: ${cell(result.skip?.reason ?? 'skipped')}`;
+  else if (todo) note = 'not implemented';
+  else if (expected?.error !== undefined) note = `failed as expected: ${cell(expected.reason)}, ${cell(expected.error.code)}: ${cell(expected.error.message)}`;
+  else if (result.status === 'flaky') note = `${plural(final.failedAttempts, 'failed attempt')} first`;
   const name = `${testName(result)}${note === '' ? '' : ` (${note})`}`;
-  return row([ICON[statusBucket(result.status)], name, ...(withAgent ? [agentCell(final.final.steps)] : []), skipped ? '' : formatDuration(final.durationMs)]);
+  return row([ICON[bucket], name, ...(withAgent ? [agentCell(final.final.steps)] : []), skipped || todo ? '' : formatDuration(final.durationMs)]);
 }
 
 /** `⚠️ | **tests/billing.e2e.ts** · 1 failed, 2 passed | 3 steps · 19 calls | 41.2s`: a file's row above its tests, the glyph its worst result's. */
 function fileRow(group: FileGroup, manyTargets: boolean, withAgent: boolean): string {
   const results = group.entries.map((entry) => entry.result);
-  const time = formatDuration(group.entries.reduce((total, entry) => total + entry.final.durationMs, 0));
+  const counts = tally(results);
+  const ranAnAttempt = group.entries.some(({ final }) => final.attempts.length > 0);
+  const time = ranAnAttempt ? formatDuration(group.entries.reduce((total, entry) => total + entry.final.durationMs, 0)) : '';
   const agent = withAgent ? [agentCell(group.entries.flatMap((entry) => entry.final.final.steps))] : [];
-  return row([ICON[worstBucket(results)], `**${fileLabel(group.file, group.target, manyTargets)}** · ${countText(tally(results))}`, ...agent, time]);
+  return row([ICON[worstBucket(results)], `**${fileLabel(group.file, group.target, manyTargets)}** · ${countText(counts)}`, ...agent, time]);
 }
 
 /**

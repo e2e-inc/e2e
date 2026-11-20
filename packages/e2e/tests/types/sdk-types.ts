@@ -630,6 +630,9 @@ void test.skipIf(isFeatureOn());
 void test.runIf(Promise.resolve(true));
 // @ts-expect-error a union with a Promise could still be a Promise
 void test.runIf(isFeatureOn() as Promise<boolean> | boolean);
+test.todo('add checkout coverage') satisfies ReturnType<typeof test>;
+// @ts-expect-error a todo registers a title only; it cannot receive a body
+test.todo('add checkout coverage', async () => {});
 // each spreads an array row before the fixtures and passes any other row whole; for never spreads. Both register one test per row.
 test.each([{ user: 'Ada' }])('signs in as $user', async ({ user }, { app }) => { user satisfies string; void app; }) satisfies readonly ReturnType<typeof test>[];
 test.each([[1, 'one']])('%i is %s', async (n, word, { platform }) => { n satisfies number; word satisfies string; platform satisfies string; });

@@ -37,7 +37,10 @@ import {
   emptyUsage,
   F_CHECK,
   F_CROSS,
+  F_DOWN,
   F_POINTER,
+  fileStatusSymbol,
+  statusSymbol,
   fileOutcome,
   formatClock,
   formatTime,
@@ -70,7 +73,6 @@ import { LiveWindow } from './live-window.ts';
 import { repeatGroups, repeatLine, repeatSummary, type RepeatRun } from './repeats.ts';
 import { RunningTree } from './running-tree.ts';
 
-const F_DOWN = '↓';
 const F_RIGHT = '→';
 /** Indentation under a badge line, matching vitest's banner padding. */
 const BADGE_PADDING = '      ';
@@ -955,20 +957,14 @@ export class ListReporter {
     const { pc } = this;
     const counts = tally(group.lines);
     const outcome = fileOutcome(counts);
-    const symbol =
-      outcome === 'failed'
-        ? pc.red(F_POINTER)
-        : outcome === 'interrupted'
-          ? pc.yellow(F_POINTER)
-          : outcome === 'skipped'
-            ? pc.dim(pc.gray(F_DOWN))
-            : pc.green(F_CHECK);
+    const symbol = fileStatusSymbol(pc, outcome);
     const state = [
       pc.dim(`${counts.total} test${counts.total === 1 ? '' : 's'}`),
       counts.failed > 0 ? pc.red(`${counts.failed} failed`) : undefined,
       counts.interrupted > 0 ? pc.yellow(`${counts.interrupted} interrupted`) : undefined,
       counts.flaky > 0 ? pc.yellow(`${counts.flaky} flaky`) : undefined,
       counts.skipped > 0 ? pc.yellow(`${counts.skipped} skipped`) : undefined,
+      counts.todo > 0 ? pc.dim(`${counts.todo} todo`) : undefined,
     ]
       .filter((part) => part !== undefined)
       .join(pc.dim(' | '));
@@ -978,7 +974,7 @@ export class ListReporter {
       ` ${symbol} ${this.badge(group.target)} ${bounded(group.file)}`,
       `${pc.dim('(')}${state}${pc.dim(')')}`,
     ];
-    // A file whose tests all skipped never ran; `0ms` would only invite a question.
+    // A file whose tests all skipped or are todo never ran; `0ms` would only invite a question.
     if (durationMs > 0) parts.push(pc.dim(formatTime(durationMs)));
     if (ai !== undefined) parts.push(pc.dim(ai));
     this.print(parts.join(' '));
@@ -1012,13 +1008,13 @@ export class ListReporter {
     switch (line.status) {
       case 'passed':
         return [
-          `   ${pc.green(F_CHECK)} ${title}${this.expectedTag(line)} ${duration}${ai}`,
+          `   ${statusSymbol(pc, line.status)} ${title}${this.expectedTag(line)} ${duration}${ai}`,
           ...this.expectedFailureLines(line),
           ...this.cleanupLines(line),
         ];
       case 'flaky':
         return [
-          `   ${pc.yellow(F_CHECK)} ${title} ${pc.yellow('(flaky)')}${this.expectedTag(line)} ${duration}${ai}`,
+          `   ${statusSymbol(pc, line.status)} ${title} ${pc.yellow('(flaky)')}${this.expectedTag(line)} ${duration}${ai}`,
           ...this.expectedFailureLines(line),
           ...this.cleanupLines(line),
         ];
@@ -1028,13 +1024,15 @@ export class ListReporter {
           line.skipReason === undefined || line.skipReason === 'skipped'
             ? ''
             : pc.dim(pc.gray(` [${line.skipReason}]`));
-        return [`   ${pc.dim(pc.gray(F_DOWN))} ${title}${reason}`];
+        return [`   ${statusSymbol(pc, line.status)} ${title}${reason}`];
       }
+      case 'todo':
+        return [`   ${statusSymbol(pc, line.status)} ${title} ${pc.dim('(todo)')}`];
       case 'interrupted':
-        return [`   ${pc.yellow(F_CROSS)} ${title} ${pc.yellow('(interrupted)')} ${duration}${ai}`];
+        return [`   ${statusSymbol(pc, line.status)} ${title} ${pc.yellow('(interrupted)')} ${duration}${ai}`];
       default: {
         const status = line.status === 'failed' ? '' : pc.red(` (${line.status})`);
-        const rows = [`   ${pc.red(`${F_CROSS} ${title}`)}${status} ${duration}${ai}`];
+        const rows = [`   ${statusSymbol(pc, line.status)} ${pc.red(title)}${status} ${duration}${ai}`];
         if (line.firstErrorLine !== undefined) {
           // A glance line; the `Failed Tests` section carries the whole message.
           const glance = fitColumns(line.firstErrorLine, terminalColumns() - ERROR_GLANCE_INDENT);

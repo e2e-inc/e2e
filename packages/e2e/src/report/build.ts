@@ -381,7 +381,7 @@ export interface ReportUsage {
 
 /**
  * The run's counts by result. `passed`, `failed` (timed out included),
- * `interrupted`, `flaky`, and `skipped` count selected results only and add
+ * `interrupted`, `flaky`, `skipped`, and `todo` count selected results only and add
  * up to `selected`; `discovered` minus `selected` is what the selection left
  * out.
  */
@@ -395,6 +395,8 @@ export interface ReportSummary {
   interrupted: number;
   flaky: number;
   skipped: number;
+  /** Absent in report-1 documents written before TODO results were supported. */
+  todo?: number;
 }
 
 /**
@@ -648,6 +650,7 @@ function computeSummary(results: readonly ResultRecord[], serialGroups: readonly
   let interrupted = 0;
   let flaky = 0;
   let skipped = 0;
+  let todo = 0;
   for (const result of results) {
     if (result.attempts.length > 0 || (result.serialGroupId !== undefined && ranMembers.has(`${result.serialGroupId}\u0000${result.test.id}`))) {
       executed += 1;
@@ -671,9 +674,12 @@ function computeSummary(results: readonly ResultRecord[], serialGroups: readonly
       case 'skipped':
         skipped += 1;
         break;
+      case 'todo':
+        todo += 1;
+        break;
     }
   }
-  return { discovered: results.length, selected, executed, passed, failed, interrupted, flaky, skipped };
+  return { discovered: results.length, selected, executed, passed, failed, interrupted, flaky, skipped, todo };
 }
 
 /**

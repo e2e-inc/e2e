@@ -272,12 +272,12 @@ process sees an edit.
 | `sessions` | Session names a setup produces. `[]` on an ordinary test. |
 | `serialId` | Set when the test belongs to a serial group, otherwise `undefined`. |
 | `target`, `agent` | The target name and the configured agent this pair runs as. |
-| `disposition` | `run`, `skip`, or `filtered`. |
-| `reason` | Why the pair is skipped or filtered, such as `title does not match --grep`. Omitted when it runs. |
+| `disposition` | `run`, `skip`, `todo`, or `filtered`. |
+| `reason` | Why the pair is skipped or filtered, such as `title does not match --grep`. Omitted when it runs or is todo. |
 | `filter` | The name of the test filter that left the pair out. A pair a selection flag filtered has none. |
 
-`e2e list` prints the `run` and `skip` pairs, and the pairs a test filter
-left out. `list` returns every `filtered` pair.
+`e2e list` prints the `run`, `skip`, and `todo` pairs, and the pairs a test
+filter left out. `list` returns every `filtered` pair.
 
 ##### Errors
 

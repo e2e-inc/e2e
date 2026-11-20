@@ -762,6 +762,20 @@ describe('select with what the test filters left out', () => {
     ]);
   });
 
+  it('keeps a TODO in a selected serial group as TODO', async () => {
+    const col = await collection(() => {
+      test.describe('wizard', { serial: true }, () => {
+        test('ready', noop);
+        test.todo('future');
+      });
+    });
+    const selection = select(col, config(), { grep: [/ready/] });
+    expect(selection.pairs.map((pair) => [pair.test.title, pair.disposition])).toEqual([
+      ['ready', 'run'],
+      ['future', 'todo'],
+    ]);
+  });
+
   it('runs a setup only for the consumers the filters kept', async () => {
     const col = await collection(() => {
       test.setup('sign in', { sessions: ['member'] }, noop);
@@ -966,5 +980,16 @@ describe('positional file selection', () => {
       ['tests/b.e2e.ts'],
     );
     expect(() => select(col, config())).toThrow(/none is runnable: 1 file not selected by a positional argument, 1 skipped with test.skip/);
+  });
+});
+
+describe('select TODO sharding', () => {
+  it('allows a TODO-only selection but rejects a shard with no selected tests', async () => {
+    const col = await collection(() => {
+      test.todo('future');
+    });
+    expect(select(col, config()).pairs.map((pair) => pair.disposition)).toEqual(['todo']);
+    expect(() => select(col, config(), { shard: { index: 2, total: 2 } })).toThrow('fall outside shard 2/2');
+    expect(() => select(col, config(), { shard: { index: 2, total: 2 } }, { passWithNoTests: true })).not.toThrow();
   });
 });

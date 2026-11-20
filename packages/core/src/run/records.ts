@@ -208,7 +208,10 @@ export interface SerialGroupRecord {
   attempts: SerialAttemptRecord[];
 }
 
-export type ResultStatus = 'passed' | 'flaky' | 'failed' | 'timed-out' | 'interrupted' | 'skipped';
+export type ResultStatus = 'passed' | 'flaky' | 'failed' | 'timed-out' | 'interrupted' | 'skipped' | 'todo';
+
+/** Result statuses produced by an executed attempt; TODO results have no attempts. */
+export type ExecutedResultStatus = Exclude<ResultStatus, 'todo'>;
 
 /** How one attempt of a test or serial member ended. */
 export type AttemptStatus = 'passed' | 'failed' | 'timed-out' | 'interrupted' | 'skipped';
@@ -222,7 +225,7 @@ export type FailedStatus = Exclude<AttemptStatus, 'passed' | 'skipped'>;
  * retry, or keeping a recording. A body that skipped itself is not one.
  */
 export function isFailedStatus(status: AttemptStatus | ResultStatus): status is FailedStatus {
-  return status !== 'passed' && status !== 'skipped' && status !== 'flaky';
+  return status !== 'passed' && status !== 'skipped' && status !== 'flaky' && status !== 'todo';
 }
 
 /**

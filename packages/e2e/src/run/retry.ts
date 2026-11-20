@@ -1,7 +1,7 @@
 /** Shared retry policy for ordinary tests, setup tests, and serial groups. */
 
 import type { SerializedError } from '@e2e-dev/core/lib/internal/errors';
-import type { AttemptStatus, ResultStatus, SerialAttemptRecord } from '@e2e-dev/core/lib/run/records';
+import type { AttemptStatus, ExecutedResultStatus, SerialAttemptRecord } from '@e2e-dev/core/lib/run/records';
 
 /**
  * Whether a retry's member records are not the verdict. True when the retry
@@ -38,7 +38,7 @@ export async function runWithRetries(
   maxAttempts: number,
   interruptSignal: AbortSignal,
   runOnce: (attemptIndex: number) => Promise<RetryAttempt | undefined>,
-): Promise<ResultStatus> {
+): Promise<ExecutedResultStatus> {
   const attempts: RetryAttempt[] = [];
   for (let attemptIndex = 0; attemptIndex < maxAttempts; attemptIndex += 1) {
     if (interruptSignal.aborted) break;
@@ -58,8 +58,8 @@ export async function runWithRetries(
  * and a self-skip decides. Also the verdict of attempts a worker finished
  * before the run's interrupt stopped it, so both read alike.
  */
-export function retryVerdict(attempts: readonly RetryAttempt[]): ResultStatus {
-  let verdict: ResultStatus = 'failed';
+export function retryVerdict(attempts: readonly RetryAttempt[]): ExecutedResultStatus {
+  let verdict: ExecutedResultStatus = 'failed';
   for (const [index, attempt] of attempts.entries()) {
     switch (attempt.status) {
       case 'passed':
