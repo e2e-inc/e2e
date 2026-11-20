@@ -1103,23 +1103,27 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     return rect.width > 0 && rect.height > 0;
   };
 
+  /** A `<details>` element's summary: its first child that is an HTML `<summary>`, as the browser picks it. */
+  const firstSummaryOf = (details: Element): Element | undefined =>
+    Array.from(details.children).find((child) => child.localName === 'summary' && isHtml(child));
+
   /**
-   * True for content a closed `<details>` folds away: anything under it that
-   * is not in its `<summary>`. Every closed ancestor is asked, so a summary's
-   * own controls stay visible while the closed body's do not, nested
-   * `<details>` and their summaries included.
+   * True for content a closed `<details>` folds away: anything under it in
+   * the flat tree that is not in its first HTML `<summary>` child, so what is
+   * slotted into a `<details>` of a shadow root folds with it, and so does
+   * the shadow tree of a host under one. Every closed `<details>` on the way
+   * up is asked, so a summary's own controls stay visible while the closed
+   * body's do not, nested `<details>` and their summaries included.
+   * Memoized, so siblings under one ancestor share the walk up. A
+   * `<details>` is known by its name, not `instanceof`: one adopted from
+   * another frame keeps that frame's prototype.
    */
-  const isInClosedDetails = (el: Element): boolean => {
-    let details = el.parentElement?.closest('details') ?? null;
-    while (details !== null) {
-      if (!details.open) {
-        const summary = details.querySelector(':scope > summary');
-        if (summary === null || !summary.contains(el)) return true;
-      }
-      details = details.parentElement?.closest('details') ?? null;
-    }
-    return false;
-  };
+  const isInClosedDetails = memoized((el: Element): boolean => {
+    const parent = flatParentOf(el);
+    if (parent === null) return false;
+    if (parent.localName === 'details' && isHtml(parent) && !parent.hasAttribute('open') && firstSummaryOf(parent) !== el) return true;
+    return isInClosedDetails(parent);
+  });
 
   /**
    * True when an ancestor in the flat tree has `content-visibility: hidden`:
@@ -1128,7 +1132,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * so siblings under one ancestor share the walk up.
    */
   const isSkippedContent = memoized((el: Element): boolean => {
-    const parent = el.assignedSlot ?? parentOrHostOf(el);
+    const parent = flatParentOf(el);
     if (parent === null) return false;
     return styleOf(parent)?.getPropertyValue('content-visibility') === 'hidden' || isSkippedContent(parent);
   });
@@ -1254,20 +1258,49 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     return found;
   };
 
+  /** Whether `node` is an HTML element: `slot` and `summary` also match SVG or MathML elements of those names, which slot and summarize nothing. */
+  const isHtml = (node: Element): boolean => node.namespaceURI === 'http://www.w3.org/1999/xhtml';
+
+  /**
+   * Where each light child of a tracked closed root's host is slotted, read
+   * once per root in a read: a named root maps each slot name to its first
+   * HTML slot in tree order, as named assignment picks it, and a root that
+   * assigns by hand (`slotAssignment: 'manual'`) maps each assigned element
+   * to its slot. One read of the slots per root, however many children the
+   * host has.
+   */
+  const closedSlots = new Map<ShadowRoot, { readonly byName: Map<string, Element>; readonly byElement: Map<Element, Element> }>();
+  const closedSlotsOf = (shadow: ShadowRoot): { readonly byName: Map<string, Element>; readonly byElement: Map<Element, Element> } => {
+    let slots = closedSlots.get(shadow);
+    if (slots === undefined) {
+      slots = { byName: new Map(), byElement: new Map() };
+      const manual = shadow.slotAssignment === 'manual';
+      for (const slot of Array.from(shadow.querySelectorAll('slot'))) {
+        if (!isHtml(slot)) continue;
+        if (manual) {
+          for (const assigned of (slot as HTMLSlotElement).assignedElements()) if (!slots.byElement.has(assigned)) slots.byElement.set(assigned, slot);
+        } else {
+          const name = slot.getAttribute('name') ?? '';
+          if (!slots.byName.has(name)) slots.byName.set(name, slot);
+        }
+      }
+      closedSlots.set(shadow, slots);
+    }
+    return slots;
+  };
+
   /**
    * The slot an element is assigned to: `assignedSlot`, which a closed root
-   * hides from the outside, else the tracked closed root's own slots, read
-   * the way `contentChildrenOf` reads them.
+   * hides from the outside, else the tracked closed root's slot for it
+   * (`closedSlotsOf`), by the element's `slot` name or by hand.
    */
   const slotOf = (el: Element): Element | null => {
     if (el.assignedSlot !== null) return el.assignedSlot;
     const host = el.parentElement;
     const shadow = host === null ? undefined : closedShadowRoots?.get(host);
     if (shadow === undefined) return null;
-    for (const slot of Array.from(shadow.querySelectorAll('slot'))) {
-      if (slot.assignedElements().indexOf(el) !== -1) return slot;
-    }
-    return null;
+    const slots = closedSlotsOf(shadow);
+    return shadow.slotAssignment === 'manual' ? (slots.byElement.get(el) ?? null) : (slots.byName.get(el.getAttribute('slot') ?? '') ?? null);
   };
 
   /** An element's parent in the flat tree: its slot, the tree parent, or the host at a shadow root. */

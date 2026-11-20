@@ -401,6 +401,26 @@ export const FIXTURE_PAGES: readonly FixturePage[] = [
     `,
   },
   {
+    name: 'closed details and skipped content across shadow boundaries',
+    html: `
+      <details><summary>Shadow details</summary><shadow-body></shadow-body></details>
+      <slot-details><button>Slotted in open root</button></slot-details>
+      <closed-slot-details><button>Slotted in closed root</button></closed-slot-details>
+      <summary-slot><button slot="s">Slotted in summary</button><button>Slotted in body</button></summary-slot>
+      <closed-skip><button>Skipped in closed root</button></closed-skip>
+      <script>
+        const define = (name, mode, html) => customElements.define(name, class extends HTMLElement {
+          constructor() { super(); this.attachShadow({ mode }).innerHTML = html; }
+        });
+        define('shadow-body', 'open', '<button>Shadow under closed details</button>');
+        define('slot-details', 'open', '<details><summary>Open root details</summary><slot></slot></details>');
+        define('closed-slot-details', 'closed', '<details><summary>Closed root details</summary><slot></slot></details>');
+        define('summary-slot', 'open', '<details><summary><slot name="s"></slot></summary><slot></slot></details>');
+        define('closed-skip', 'closed', '<div style="content-visibility:hidden;width:200px;height:40px"><slot></slot></div>');
+      </script>
+    `,
+  },
+  {
     name: 'list rebuilt every millisecond',
     html: `
       <div id="rebuilt-list"></div>
