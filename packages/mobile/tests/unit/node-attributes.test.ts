@@ -63,6 +63,7 @@ describe('device node attributes', () => {
     expect(text.roots[0]?.attributes).toEqual({ label: 'Log in', class: 'android.widget.TextView' });
     const hint = projectSnapshot([{ index: 0, type: 'android.widget.EditText', label: 'Type your name', text: '', hintShowing: true }], view);
     expect(hint.roots[0]?.attributes?.label).toBeUndefined();
+    expect(hint.roots[0]?.attributes?.['content-desc']).toBeUndefined();
   });
 
   it('drops the XCUIElementType prefix and leaves out what the platform did not report', () => {

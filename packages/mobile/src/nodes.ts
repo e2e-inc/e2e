@@ -414,7 +414,8 @@ function nodeAttributes(
   projected: { readonly label: string | undefined; readonly identifier: string | undefined; readonly placeholder: string | undefined },
 ): Record<string, string> | undefined {
   const description = nonEmpty(source.contentDescription);
-  const descriptionOnly = source.text === '' ? nonEmpty(source.label) : undefined;
+  const descriptionOnly =
+    source.text === '' && source.hintShowing !== true ? nonEmpty(source.label) : undefined;
   const contentDescription = android ? (description ?? descriptionOnly) : undefined;
   const ownText = source.hintShowing === true ? undefined : nonEmpty(source.label);
   const entries: [string, string | undefined][] = [
