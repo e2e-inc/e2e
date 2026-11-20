@@ -241,6 +241,8 @@ export class DesktopSurface {
    */
   private pending: Launch | undefined;
   private attempt: Attempt | undefined;
+  /** The launch or quit running now, which the next one waits for. */
+  private lifecycle: Promise<unknown> = Promise.resolve();
   /** The window a test chose with `desktop.useWindow`, which every read and command then uses until the app quits. */
   private chosenWindow: string | undefined;
   /** The window of the newest screen handed to the harness, by observe or locate: the one a point is measured in. */
@@ -396,10 +398,16 @@ export class DesktopSurface {
    * of the attempt quits it.
    */
   async restart(context: OperationContext): Promise<void> {
+    // The budget counts from the call, so time spent waiting for another launch or quit is part of it.
     const operation = withDeadline(context);
+    await this.serially(() => this.launchFresh(operation));
+  }
+
+  /** `restart` once no other launch or quit of this surface is running. */
+  private async launchFresh(operation: OperationContext): Promise<void> {
     const target = this.launchTarget;
     if (target === undefined) throw unsupported("launching the app needs the target's app.bundleId or app.appPath");
-    await this.quit(operation.signal, operation.timeoutMs);
+    await this.quitNow(operation.signal, operation.timeoutMs);
     // Marks the process this launch starts, so it is told apart from every other copy by evidence, never by timing.
     const launch: Launch = { target, token: randomUUID(), before: await this.runningCopies(target, operation) };
     // Written before anything is sent, so the app stays findable by its token if this worker is killed mid-launch or never finds its process.
@@ -657,7 +665,23 @@ export class DesktopSurface {
    * process is known to be gone, the engine keeps it as its own, so a quit
    * that failed is tried again.
    */
-  private async quit(signal: AbortSignal, timeoutMs: number): Promise<void> {
+  /**
+   * Runs launches and quits of this surface one at a time: two at once would
+   * each launch a copy into the one process id and launch record the engine
+   * keeps, and the end of the attempt would quit only one of them.
+   */
+  private serially<T>(run: () => Promise<T>): Promise<T> {
+    const next = this.lifecycle.then(run, run);
+    this.lifecycle = next.catch(() => undefined);
+    return next;
+  }
+
+  /** `quitNow` once no other launch or quit of this surface is running. */
+  private quit(signal: AbortSignal, timeoutMs: number): Promise<void> {
+    return this.serially(() => this.quitNow(signal, timeoutMs));
+  }
+
+  private async quitNow(signal: AbortSignal, timeoutMs: number): Promise<void> {
     const pending = this.pending;
     if (this.pid === undefined && pending !== undefined) {
       // A launch whose outcome was unknown: look for the process it started, which may still be registering, under this quit's own budget.

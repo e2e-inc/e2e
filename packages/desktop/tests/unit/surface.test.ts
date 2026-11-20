@@ -1130,6 +1130,14 @@ describe('DesktopSurface', () => {
     }
   });
 
+  it('runs two overlapping opens one after the other, and leaves no copy running', async () => {
+    const { surface, fake } = await initialized((pid) => ({ 'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [{ pid, process_instance: 'instance-1' }] } }, { ok: true, data: { apps: [] } }, { ok: true, data: { apps: [{ pid, process_instance: 'instance-1' }] } }] }));
+    await Promise.all([surface.restart(operation()), surface.restart(operation())]);
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect(fake.spawned()).toHaveLength(2);
+    for (const pid of fake.spawned()) expect(await gone(pid)).toBe(true);
+  });
+
   it('quits the process carrying the launch token of a launch the app list never showed', async () => {
     const { surface, fake } = await initialized({
       launch: [{ spawn: true, ...(failure('TIMEOUT', 'delivered_unverified') as object) }],
