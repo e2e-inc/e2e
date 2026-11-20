@@ -43,9 +43,16 @@ export interface DesktopOptions {
    * steps never wait: `expect` polls their outcome. Default 150.
    */
   readonly settle?: number | false | undefined;
+  /**
+   * How many levels of a window's accessibility tree a read goes down, from
+   * 1 to 255. A read cut short at this depth cannot prove a control absent or
+   * the only one, so a locator on such a window reads again until its
+   * timeout: raise it for an app nested deeper. Default 24.
+   */
+  readonly maxDepth?: number | undefined;
 }
 
-const OPTION_KEYS = Object.keys({ binary: true, snapshot: true, headed: true, settle: true } satisfies Record<keyof DesktopOptions, true>);
+const OPTION_KEYS = Object.keys({ binary: true, snapshot: true, headed: true, settle: true, maxDepth: true } satisfies Record<keyof DesktopOptions, true>);
 
 /** The options with defaults applied, checked once at config load. */
 export interface ResolvedDesktopOptions {
@@ -53,16 +60,23 @@ export interface ResolvedDesktopOptions {
   readonly interactiveOnly: boolean;
   readonly headed: boolean;
   readonly settleMs: number;
+  readonly maxDepth: number;
 }
 
 const DEFAULT_SETTLE_MS = 150;
+
+/** How deep a read goes by default: deeper than the controls of the apps tried, and quick to read. */
+const DEFAULT_MAX_DEPTH = 24;
+
+/** The deepest read agent-desktop takes. */
+const MAX_DEPTH_LIMIT = 255;
 
 /** Checks the option bag the way every config option is checked: unknown keys and wrong types fail the config load. */
 export function resolveOptions(options: DesktopOptions | undefined): ResolvedDesktopOptions {
   const bag: DesktopOptions = options ?? {};
   if (typeof bag !== 'object' || bag === null) throw new ConfigurationError('INVALID_CONFIG', 'desktop() options must be an object');
   rejectUnknownKeys('desktop() options', bag, OPTION_KEYS);
-  const { binary, snapshot, headed, settle } = bag;
+  const { binary, snapshot, headed, settle, maxDepth } = bag;
   if (binary !== undefined && (typeof binary !== 'string' || binary === '')) {
     throw new ConfigurationError('INVALID_CONFIG', 'desktop({ binary }) must be a path to an agent-desktop executable');
   }
@@ -75,11 +89,15 @@ export function resolveOptions(options: DesktopOptions | undefined): ResolvedDes
   if (settle !== undefined && settle !== false && (!Number.isInteger(settle) || settle < 0)) {
     throw new ConfigurationError('INVALID_CONFIG', 'desktop({ settle }) must be a whole number of milliseconds, or false');
   }
+  if (maxDepth !== undefined && (!Number.isInteger(maxDepth) || maxDepth < 1 || maxDepth > MAX_DEPTH_LIMIT)) {
+    throw new ConfigurationError('INVALID_CONFIG', `desktop({ maxDepth }) must be a whole number from 1 to ${MAX_DEPTH_LIMIT}`);
+  }
   return {
     ...(binary === undefined ? {} : { binary }),
     interactiveOnly: snapshot === 'interactive',
     headed: headed === true,
     settleMs: settle === false ? 0 : (settle ?? DEFAULT_SETTLE_MS),
+    maxDepth: maxDepth ?? DEFAULT_MAX_DEPTH,
   };
 }
 

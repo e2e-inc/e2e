@@ -1091,6 +1091,12 @@ describe('DesktopSurface', () => {
     expect(fake.calls().some((call) => call.key === 'press')).toBe(false);
   });
 
+  it('reads a window as deep as desktop({ maxDepth }) says', async () => {
+    const { fake } = await launched({}, { options: { maxDepth: 64 } });
+    const snapshot = fake.calls().find((call) => call.key === 'snapshot')!.args;
+    expect(snapshot[snapshot.indexOf('--max-depth') + 1]).toBe('64');
+  });
+
   it('refuses a placeholder query, which macOS gives nothing to match', async () => {
     const { surface } = await launched({}, { observe: false, snapshot: 'macos/sign-in-form' });
     const placeholder = { kind: 'query', query: { kind: 'placeholder', value: { kind: 'string', value: 'Username', exact: true } } } as const;

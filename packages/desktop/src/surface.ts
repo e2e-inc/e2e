@@ -45,9 +45,6 @@ import { encodePng, windowImage } from './png.ts';
 
 const execFileAsync = promisify(execFile);
 
-/** How deep a snapshot reads. */
-const MAX_DEPTH = 24;
-
 /** The least budget agent-desktop gets for its own wait, however little the operation has left. */
 const MIN_TOOL_MS = 200;
 
@@ -834,7 +831,7 @@ export class DesktopSurface {
         ? [...windows.filter((window) => window.is_focused === true), ...windows.filter((window) => window.is_focused !== true && window.visible !== false), ...windows.filter((window) => window.is_focused !== true && window.visible === false)]
         : windows.filter((window) => window.id === windowId);
     for (const window of candidates) {
-      const args = ['snapshot', '--window-id', window.id, '--include-bounds', '--max-depth', String(MAX_DEPTH), '--timeout-ms', String(this.toolBudget(operation))];
+      const args = ['snapshot', '--window-id', window.id, '--include-bounds', '--max-depth', String(this.options.maxDepth), '--timeout-ms', String(this.toolBudget(operation))];
       if (this.options.interactiveOnly && !forMask) args.push('-i');
       try {
         const raw = await this.run<RawSnapshot>(args, { label: 'snapshot', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs, raw: true });
@@ -948,7 +945,7 @@ export class DesktopSurface {
     if (screen.truncated) {
       throw new EngineError(
         'NODE_STALE',
-        `the window was read only in part (it ran out of time, or is deeper than the ${MAX_DEPTH} levels a snapshot reads), so the matches cannot be counted`,
+        `the window was read only in part (it ran out of time, or is deeper than the ${this.options.maxDepth} levels a snapshot reads; desktop({ maxDepth }) raises that), so the matches cannot be counted`,
         { retryable: true },
       );
     }
