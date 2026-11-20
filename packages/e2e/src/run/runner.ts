@@ -892,7 +892,7 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
       recordFailure(selected.error, 'collection');
       return;
     }
-    const { targets } = selected;
+    const { targets, device } = selected;
 
     /**
      * Narrates and times one setup step on the event spine, its `finished`
@@ -1034,7 +1034,7 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
             plans,
             runWorkers,
             engines,
-            { runId, projectRoot: config.projectRoot, env, signal: interrupted, headed: options.headed ?? false, device: 'device' in selected ? selected.device : undefined, notice },
+            { runId, projectRoot: config.projectRoot, env, signal: interrupted, headed: options.headed ?? false, device, notice },
             emit,
           ),
         );
