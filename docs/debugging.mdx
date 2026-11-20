@@ -280,7 +280,7 @@ The keys follow [`--watch`](/reference/cli#watch-mode). These work at a prompt:
   times out on the time it had left. The test's own duration in the report
   includes the holds.
 - Setup tests, retries, `afterEach` hooks, fixture teardowns, and steps inside
-  an `expect.poll` read run without stopping. An `agent.act` is one step.
+  an `expect.poll` read or a `toPass` block run without stopping. An `agent.act` is one step.
 - Steps started together, as in `Promise.all`, share one prompt and run on one
   Enter, so a `waitForResponse` beside the click that triggers it never waits
   for a key. A step already running when another is held keeps running on its
