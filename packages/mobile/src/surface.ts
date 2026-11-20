@@ -915,11 +915,8 @@ export class AgentDeviceSurface {
    * Puts an app's permissions in place before it launches, never after: iOS
    * terminates a running app whose permission changed, and Android one whose
    * permission was revoked, so a change after the launch would leave the
-   * test on no screen. `'all'` is one agent-device `all` grant: on Android
-   * it grants each runtime permission the app declares (and refuses an app
-   * that declares none), and on an iOS simulator each
-   * privacy service the runtime can change, skipping one it refuses (the
-   * simulator refuses `notifications`).
+   * test on no screen. `'all'` is one agent-device `all` grant on either
+   * platform; `LaunchPermissions` says what it grants on each.
    */
   private async presetPermissions(app: string, permissions: LaunchPermissions, signal: AbortSignal): Promise<void> {
     if (permissions === 'all') {
