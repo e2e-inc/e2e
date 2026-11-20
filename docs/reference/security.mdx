@@ -258,7 +258,8 @@ can't put it in a report. Each shows as `<secret:NAME>`.
 | Whole keys only | A key matches as a whole, in the forms above. Cut short at a length limit, it matches when at least half of it is there, and no fewer than 16 characters. Any other part of one isn't a match: keys of one provider start alike. |
 | Length | A value shorter than 20 characters is left alone, so a placeholder for a local model server, such as `ollama`, doesn't rewrite ordinary words. Name a shorter real key under [`secrets`](/reference/config#secrets). A value longer than 8,192 characters is left alone too, as is a shorter one the redactor can't build a pattern for, such as thousands of punctuation characters: neither is a key or token a provider issues. |
 | Output | The run holds back the end of an unfinished line that could still become a key, as it does for a secret. A prompt printed without a newline shows with the next output, and is lost if the test then blocks the process until it is stopped. |
-| Downloads | A text download is rewritten for a provider key too, whole keys only: an app you give one through `inheritEnv` or `command.env` can serve it. A test that reads such a download back sees the marker. |
+| Downloads | A text download is rewritten for a provider key too, whole keys only: an app you give one through `inheritEnv` or `command.env` can serve it. The rewrite runs once the download is saved, so a test that reads the file right after `waitForDownload` can see it before or after; the kept artifact has the marker. |
+| Errors | A failed model call's error, as a test or a program catches it, has its text redacted and no `cause`: the provider SDK's error keeps fields no redaction reaches. Match it by `error.code`. |
 | Sessions | A provider key is never added to a [session](#sessions)'s saved secrets. What the app keeps in its own state, such as browser storage, is saved as the app wrote it, encrypted. |
 | A key that is also a secret | Stays your secret: its name, and its parts are matched too, as for any secret. |
 
@@ -319,13 +320,14 @@ Redaction matches strings. These pass through:
 
 ### Downloads
 
-A download is what the app served. When the session knows a secret value,
-the runner rewrites a text download (`.txt`, `.csv`, `.json`, `.html`, or
+A download is what the app served. When the session knows a secret value or
+a [provider key](#provider-keys), the runner rewrites a text download (`.txt`, `.csv`, `.json`, `.html`, or
 `.htm`) and labels it `redaction: "complete"`. It replaces with `<secret:name>`:
 
 - every whole occurrence of a value,
-- any run of 8 or more of its characters, whitespace collapsed or not, so
-  unrelated text that shares 8 characters with a value is masked too,
+- for a secret, any run of 8 or more of its characters, whitespace collapsed
+  or not, so unrelated text that shares 8 characters with a value is masked
+  too; a provider key matches only whole,
 - a base64 or base64url run that decodes to either.
 
 Every other download is kept as served and labeled
@@ -333,7 +335,7 @@ Every other download is kept as served and labeled
 
 - any other extension,
 - one that isn't valid UTF-8 or can't be rewritten,
-- any download from a session that knows no secret value.
+- any download from a session that knows no secret value and no provider key.
 
 ### Sessions
 

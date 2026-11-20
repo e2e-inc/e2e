@@ -878,8 +878,9 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     targets: ('targets' in selected ? selected.targets : config.targets).map((target) => target.name),
     ...(config.agentNames.length === 1 && config.agentNames[0] === 'default' ? {} : { agents: config.agentNames }),
     // Redacted for every subscriber: a key given as a model id would otherwise head the terminal output.
-    ...(runAgent?.model === undefined ? {} : { model: processSecrets.redact(modelLabel(runAgent.model)) }),
-    ...(runJudge === undefined ? {} : { judge: processSecrets.redact(modelLabel(runJudge)) }),
+    // This config's secrets and the provider keys known now: not the process ledger, which keeps an earlier run's secrets.
+    ...(runAgent?.model === undefined ? {} : { model: staticOutputLedger(config.allSecrets).redact(modelLabel(runAgent.model)) }),
+    ...(runJudge === undefined ? {} : { judge: staticOutputLedger(config.allSecrets).redact(modelLabel(runJudge)) }),
     ...(options.hold?.steps === true ? { stepping: true } : {}),
   });
 
