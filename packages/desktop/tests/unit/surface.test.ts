@@ -977,12 +977,14 @@ describe('DesktopSurface', () => {
     expect(fake.calls().some((call) => call.key === 'press')).toBe(false);
   });
 
-  it('proves no control absent from a window read in part', async () => {
+  it('counts no matches in a window read in part, and lets the locator read again', async () => {
     const partial = snapshotAnswer('macos/appkit-form') as { ok: true; data: Record<string, unknown> };
-    const { surface } = await launched({ snapshot: [{ ...partial, data: { ...partial.data, complete: false } }] }, { observe: false });
+    const cut = { ...partial, data: { ...partial.data, complete: false } };
+    const { surface } = await launched({ snapshot: [cut, cut, cut, snapshotAnswer('macos/appkit-form')] }, { observe: false });
     const missing = { kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'nowhere', exact: true } } } as const;
-    await expect(surface.locate(missing, operation())).rejects.toThrow(/no match is not proof/);
+    await expect(surface.locate(missing, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringMatching(/read only in part/) });
     const present = { kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'username', exact: true } } } as const;
+    await expect(surface.locate(present, operation())).rejects.toMatchObject({ code: 'NODE_STALE' });
     await expect(surface.locate(present, operation())).resolves.toHaveLength(1);
   });
 

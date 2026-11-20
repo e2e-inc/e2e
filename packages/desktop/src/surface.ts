@@ -864,11 +864,15 @@ export class DesktopSurface {
         // The trace is evidence; a sink that throws never fails the step.
       }
     }
-    const matches = resolveExpression(expression, [screen.root]);
-    // A read cut short at the depth limit proves no control absent: a match may sit below it.
-    if (matches.length === 0 && screen.truncated) {
-      throw new EngineError('ENGINE_FAILURE', `the window is deeper than the ${MAX_DEPTH} levels a snapshot reads, so a control may be below them; no match is not proof it is absent`, { retryable: false });
+    // A read cut short (by its budget, or at the depth limit) can leave out a match: no match would not prove a control absent, and one would not prove it the only one. The locator reads again until its deadline.
+    if (screen.truncated) {
+      throw new EngineError(
+        'NODE_STALE',
+        `the window was read only in part (it ran out of time, or is deeper than the ${MAX_DEPTH} levels a snapshot reads), so the matches cannot be counted`,
+        { retryable: true },
+      );
     }
+    const matches = resolveExpression(expression, [screen.root]);
     this.pointWindow = screen.windowId;
     this.remember(matches.flatMap((match) => screen.bindings.get(match.ref.id) ?? []));
     return matches;
