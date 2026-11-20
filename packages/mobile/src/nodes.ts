@@ -134,38 +134,38 @@ function isKeyboardElement(node: RawNode): boolean {
 }
 
 /**
- * Whether the tree lists a keyboard element that is drawn on screen: a
- * keyboard, a key, or the suggestion strip with a nonzero frame that
- * overlaps the viewport. A keyboard left in the tree off screen after it was
- * dismissed is not one. With no viewport and no window to measure, the
- * screen is read from the tree's own extent, which holds every element it
- * lists, so a listed keyboard element counts, as {@link keyboardBand} counts
- * it.
+ * Whether the tree lists the soft keyboard drawn on screen: a keyboard or a
+ * key with a nonzero frame that overlaps the screen. The suggestion strip
+ * alone is not one: with a hardware keyboard, XCTest lists the strip and no
+ * keys. A keyboard left in the tree off screen after it was dismissed is not
+ * one either, and with no viewport and no window to bound the screen nothing
+ * counts, since the tree's own extent would hold the keyboard it is asked
+ * about.
  */
 export function keyboardOnScreen(nodes: readonly RawNode[], viewport: ViewportSize | undefined): boolean {
-  return keyboardElementsTop(nodes, viewport) !== undefined;
+  const screen = viewport ?? screenOf(nodes);
+  return screen !== undefined && onScreenRects(drawnKeyboardRects(nodes, (node) => KEYBOARD_KINDS.has(kindOf(node))), screen).length > 0;
 }
 
 /**
- * The top edge of the highest keyboard element {@link keyboardOnScreen}
- * counts, the suggestion strip included, so a drag that starts above it
- * starts above everything that answered "the keyboard is up"; undefined when
- * there is none.
+ * The top edge of the highest keyboard element drawn on `viewport`, the
+ * suggestion strip included, so a drag that starts above it starts on
+ * neither the keys nor the strip; undefined when there is none.
  */
-export function keyboardElementsTop(nodes: readonly RawNode[], viewport: ViewportSize | undefined): number | undefined {
-  const screen = viewport ?? viewportOf(nodes);
-  const onScreen = drawnKeyboardRects(nodes).filter(
-    (rect) => screen === undefined || (rect.x < screen.width && rect.x + rect.width > 0 && rect.y < screen.height && rect.y + rect.height > 0),
-  );
+export function keyboardElementsTop(nodes: readonly RawNode[], viewport: ViewportSize): number | undefined {
+  const onScreen = onScreenRects(drawnKeyboardRects(nodes), viewport);
   return onScreen.length === 0 ? undefined : Math.min(...onScreen.map((rect) => rect.y));
 }
 
-/** The frames of the keyboard elements the tree draws: a nonzero frame, not hidden from the user. */
-function drawnKeyboardRects(nodes: readonly RawNode[]): Rect[] {
+/** The rects that overlap a screen of this size. */
+function onScreenRects(rects: readonly Rect[], screen: ViewportSize): Rect[] {
+  return rects.filter((rect) => rect.x < screen.width && rect.x + rect.width > 0 && rect.y < screen.height && rect.y + rect.height > 0);
+}
+
+/** The frames of the tree's drawn nodes (a nonzero frame, not hidden from the user) that `include` picks, by default every keyboard element. */
+function drawnKeyboardRects(nodes: readonly RawNode[], include: (node: RawNode) => boolean = isKeyboardElement): Rect[] {
   return nodes.flatMap((node) =>
-    node.rect !== undefined && node.rect.width > 0 && node.rect.height > 0 && node.visibleToUser !== false && isKeyboardElement(node)
-      ? [node.rect]
-      : [],
+    node.rect !== undefined && node.rect.width > 0 && node.rect.height > 0 && node.visibleToUser !== false && include(node) ? [node.rect] : [],
   );
 }
 
@@ -708,15 +708,7 @@ function quoteTerm(value: string): string {
  * snapshot with no geometry at all.
  */
 export function viewportOf(raw: readonly RawNode[]): ViewportSize | undefined {
-  // The largest window, not the first: a system bar can be a window too, and
-  // a 63-pixel screen would keep every bar as "too tall to be a bar".
-  let screen: ViewportSize | undefined;
-  for (const node of raw) {
-    if (!SCREEN_KINDS.has(kindOf(node)) || node.rect === undefined) continue;
-    const { width, height } = node.rect;
-    if (width <= 0 || height <= 0) continue;
-    if (screen === undefined || width * height > screen.width * screen.height) screen = { width, height };
-  }
+  const screen = screenOf(raw);
   if (screen !== undefined) return screen;
   let width = 0;
   let height = 0;
@@ -726,6 +718,20 @@ export function viewportOf(raw: readonly RawNode[]): ViewportSize | undefined {
     height = Math.max(height, node.rect.y + node.rect.height);
   }
   return width > 0 && height > 0 ? { width, height } : undefined;
+}
+
+/** The screen's logical size from the largest application or window node; undefined when the tree has none. */
+function screenOf(raw: readonly RawNode[]): ViewportSize | undefined {
+  // The largest window, not the first: a system bar can be a window too, and
+  // a 63-pixel screen would keep every bar as "too tall to be a bar".
+  let screen: ViewportSize | undefined;
+  for (const node of raw) {
+    if (!SCREEN_KINDS.has(kindOf(node)) || node.rect === undefined) continue;
+    const { width, height } = node.rect;
+    if (width <= 0 || height <= 0) continue;
+    if (screen === undefined || width * height > screen.width * screen.height) screen = { width, height };
+  }
+  return screen;
 }
 
 /**

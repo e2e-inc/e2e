@@ -163,17 +163,18 @@ function listsApp(entry: string, app: string): boolean {
 }
 
 /**
- * The top edge of the soft keyboard: the band the capture's producer
- * measured, else the highest keyboard element drawn on screen (a key, the
- * keyboard, or the suggestion strip above it, the elements
- * {@link keyboardShownIn} answers from). Undefined when the capture says the
- * keyboard is up but bounds it nowhere, as a visibility probe alone does:
- * the keyboard could reach anywhere, so no point is known to be above it.
+ * The top edge of the soft keyboard: the higher of the band the capture's
+ * producer measured and the highest keyboard element drawn on screen (a key,
+ * the keyboard, or the suggestion strip above it, which a frame derived from
+ * the keys leaves out). Undefined when the capture says the keyboard is up
+ * but bounds it nowhere, as a visibility probe alone does: the keyboard
+ * could reach anywhere, so no point is known to be above it.
  */
 function keyboardTop(raw: RawSnapshot, viewport: ViewportSize): number | undefined {
-  if (raw.keyboard?.kind === 'visible' || raw.keyboard?.kind === 'derived') return Math.min(viewport.height, raw.keyboard.frame.y);
-  const top = keyboardElementsTop(raw.nodes ?? [], raw.viewport ?? viewport);
-  return top === undefined ? undefined : Math.min(viewport.height, top);
+  const elements = keyboardElementsTop(raw.nodes ?? [], raw.viewport ?? viewport);
+  const frame = raw.keyboard?.kind === 'visible' || raw.keyboard?.kind === 'derived' ? raw.keyboard.frame.y : undefined;
+  const tops = [frame, elements].filter((top) => top !== undefined);
+  return tops.length === 0 ? undefined : Math.min(viewport.height, ...tops);
 }
 
 /**
@@ -1741,12 +1742,16 @@ export class AgentDeviceSurface {
    */
   private async keyboardReading(signal: AbortSignal, input: InputBudget): Promise<{ readonly raw: RawSnapshot; readonly shown: boolean | KeyboardUnknown }> {
     let reading: { readonly raw: RawSnapshot; readonly shown: boolean | KeyboardUnknown } | undefined;
+    let captureMs = 0;
     for (const backoffMs of KEYBOARD_SETTLE_BACKOFF_MS) {
       if (reading !== undefined) {
-        if (input.remainingMs() <= backoffMs) return reading;
+        // Another look must fit its wait and a capture as long as the last one, or it would time the call out.
+        if (input.remainingMs() <= backoffMs + captureMs) return reading;
         await sleep(backoffMs, signal);
       }
+      const startedAt = Date.now();
       const raw = await this.snapshot(signal, false, input);
+      captureMs = Date.now() - startedAt;
       reading = { raw, shown: keyboardShownIn(raw, isTruncated(raw)) };
       if (typeof reading.shown === 'boolean' || reading.shown.settling !== true) return reading;
     }

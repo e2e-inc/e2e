@@ -1847,26 +1847,66 @@ describe('device fixture', () => {
       });
     });
 
-    it('starts the drag above the suggestion strip, alone or over the keys', async () => {
-      // A pad of controls covers the centre down to the strip, so the only point clear of controls and above
-      // the strip is above the pad. Under the strip's top but over the keys' top would be on the strip.
-      const pad = { ref: '@e5', index: 4, parentIndex: 1, depth: 2, type: 'other', label: 'Pad', rect: { x: 0, y: 200, width: 390, height: 250 } };
-      const strip = { ref: '@e6', index: 5, parentIndex: 0, depth: 1, type: 'other', identifier: 'SystemInputAssistantView', rect: { x: 0, y: 460, width: 390, height: 44 } };
-      // A strip holding only text is no control, so nothing but the keyboard's top keeps the drag off it.
-      const words = { ref: '@e7', index: 6, parentIndex: 5, depth: 2, type: 'StaticText', label: 'Hello', rect: { x: 0, y: 460, width: 130, height: 44 } };
+    // A pad of controls covers the centre down to the strip, so the only point clear of controls and above
+    // the strip is above the pad. Under the strip's top but over the keys' top would be on the strip.
+    const PAD = { ref: '@e5', index: 4, parentIndex: 1, depth: 2, type: 'other', label: 'Pad', rect: { x: 0, y: 200, width: 390, height: 250 } };
+    const STRIP = { ref: '@e6', index: 5, parentIndex: 0, depth: 1, type: 'other', identifier: 'SystemInputAssistantView', rect: { x: 0, y: 460, width: 390, height: 44 } };
+    // A strip holding only text is no control, so nothing but the keyboard's top keeps the drag off it.
+    const STRIP_WORDS = { ref: '@e7', index: 6, parentIndex: 5, depth: 2, type: 'StaticText', label: 'Hello', rect: { x: 0, y: 460, width: 130, height: 44 } };
+
+    it('starts the drag above the suggestion strip, over the keys or over a frame derived from them', async () => {
       const keys = { ref: '@e8', index: 7, parentIndex: 0, depth: 1, type: 'Keyboard', rect: { x: 0, y: 504, width: 390, height: 216 } };
-      // With a hardware keyboard, XCTest lists the strip alone; with the soft keyboard, the strip above the keys.
-      for (const keyboard of [[strip, words], [strip, words, keys]]) {
+      const derived = { kind: 'derived', derivation: 'docked-tree', frame: keys.rect };
+      const layouts = [
+        { name: 'keys in the tree', nodes: [STRIP, STRIP_WORDS, keys] },
+        { name: 'a frame from the keys', nodes: [STRIP, STRIP_WORDS], keyboard: derived },
+      ];
+      for (const layout of layouts) {
         const h = harness();
         await openAttempt(h);
         await observed(h, 'Back');
         const device = fixture(h);
         h.fake.respond('command.keyboard', NO_DISMISS_KEY);
-        captures(h, [{ ...SETTINGS_SNAPSHOT, viewport: { width: 390, height: 844 }, nodes: [...FORM_NODES, pad, ...keyboard] }, KEYBOARD_GONE]);
+        const up = { ...SETTINGS_SNAPSHOT, viewport: { width: 390, height: 844 }, nodes: [...FORM_NODES, PAD, ...layout.nodes], ...(layout.keyboard === undefined ? {} : { keyboard: layout.keyboard }) };
+        captures(h, [up, KEYBOARD_GONE]);
         await device.dismissKeyboard();
         const { from } = h.fake.lastArgs('interactions.swipe') as { from: { y: number } };
-        expect(from.y, `${keyboard.length} keyboard elements`).toBeLessThan(200);
+        expect(from.y, layout.name).toBeLessThan(200);
       }
+    });
+
+    it('does not take the suggestion strip alone for the soft keyboard', async () => {
+      // With a hardware keyboard, XCTest lists the strip and no keys.
+      const h = harness();
+      await openAttempt(h);
+      await observed(h, 'Back');
+      const device = fixture(h);
+      h.fake.respond('command.keyboard', NO_DISMISS_KEY);
+      captures(h, [{ ...SETTINGS_SNAPSHOT, viewport: { width: 390, height: 844 }, nodes: [...FORM_NODES, PAD, STRIP, STRIP_WORDS] }]);
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+      await device.dismissKeyboard();
+      expect(h.fake.calls.filter((call) => call.method === 'interactions.swipe')).toHaveLength(0);
+    });
+
+    it('keeps each look at the keyboard inside the budget when captures are slow', async () => {
+      autoAdvanceTimers();
+      const h = harness();
+      await openAttempt(h);
+      await observed(h, 'Back');
+      const device = fixture(h);
+      h.fake.respond('command.keyboard', NO_DISMISS_KEY);
+      const moving = { ...SETTINGS_SNAPSHOT, nodes: FORM_NODES, keyboard: { kind: 'tree-rejected', derivation: 'docked-tree' } };
+      const slow = (snapshots: readonly unknown[], ms: number) => {
+        let taken = 0;
+        h.fake.respond('capture.snapshot', () => new Promise((resolve) => setTimeout(() => resolve(snapshots[Math.min(taken++, snapshots.length - 1)]), ms)));
+      };
+      // After the drag the keyboard slides out: a rejected frame and no key, while each capture takes 800 ms of the 5 s budget.
+      slow([KEYBOARD_UP, moving], 800);
+      await device.dismissKeyboard();
+      expect(h.fake.calls.filter((call) => call.method === 'interactions.swipe')).toHaveLength(1);
+      // A read that never settles fails as still moving, not as a timeout.
+      slow([moving], 1_000);
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('Read it again') });
     });
 
     it('drags at the centre of a screen rotated since the last observation', async () => {
@@ -2248,6 +2288,9 @@ describe('device fixture', () => {
         h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, offScreen], ...(keyboard === undefined ? {} : { keyboard }) }));
         await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
       }
+      // With no viewport and no window, nothing bounds the screen, so the keyboard cannot be placed on it.
+      h.fake.respond('capture.snapshot', () => ({ nodes: [offScreen], keyboard: { kind: 'unmeasurable', reason: 'keyboard-viewport-unavailable' } }));
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
       const reasons = ['window-root-unavailable', 'window-list-unavailable', 'keyboard-window-probe-failed', 'keyboard-not-observed', 'keyboard-visibility-probe-unsupported'];
       for (const reason of reasons) {
         h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, keyboard: { kind: 'unmeasurable', reason } }));
