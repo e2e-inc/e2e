@@ -1,6 +1,6 @@
 /**
- * Drives the built CLI on the fake engine. Pipes carry the keys and output.
- * A terminal stand-in supplies the size and resize events to the child.
+ * Tests the built CLI with the fake engine. Keys and output pass through pipes.
+ * The child's terminal size and resize events come from a stand-in.
  */
 
 import assert from 'node:assert/strict';
@@ -15,8 +15,10 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { describe, expect, it, type TestContext } from 'vitest';
 import type { Report1Document } from '../../src/report/build.ts';
+import { formatDuration } from '../../src/report/markdown-text.ts';
 import { FAKE_APP_URL } from '../helpers/fake-engine.ts';
 import { PAUSE_ID_PATTERN, printedPauseId } from '../helpers/pause-id.ts';
+import { assertValidReport } from '../helpers/report-schema.ts';
 import { createProject, workerFakeConfigSource } from '../helpers/run-project.ts';
 
 const CLI = fileURLToPath(new URL('../../dist/cli/bin.js', import.meta.url));
@@ -101,7 +103,7 @@ const { engine } = createFakeEngine({
 export default { targets: [{ name: 'fake', platform: 'fake', engine, app: FAKE_APP }] };
 `;
 
-/** Starts a project on the terminal stand-in and stops the child before removing the project. */
+/** Starts a project on the terminal stand-in. The child is stopped before the project is removed. */
 function terminalRun(
   { onTestFinished }: TestContext,
   files: Readonly<Record<string, string>>,
@@ -148,7 +150,7 @@ function terminalRun(
     exited,
     output: (from = 0) => stdout.slice(from),
     printed: (from = 0) => stripVTControlCharacters(stdout.slice(from)),
-    /** Sends a key sequence and marks where its output will start. */
+    /** Sends a key sequence and returns the current output length. */
     press(keys: string): number {
       const from = stdout.length;
       stdin.write(keys);
@@ -160,7 +162,7 @@ function terminalRun(
       child.send({ rows, columns });
       return from;
     },
-    /** Waits for fresh output when a key can print a line the run has already shown. */
+    /** Waits for new output, even if the same text was shown before the key was pressed. */
     async shows(text: string | RegExp, from = 0): Promise<void> {
       const printed = expect.poll(() => stripVTControlCharacters(stdout.slice(from)), POLL);
 
@@ -170,7 +172,7 @@ function terminalRun(
         await printed.toMatch(text);
       }
     },
-    /** Waits for a new viewer frame with the given range and returns its text. */
+    /** Returns the text from a new viewer frame after the given range is shown. */
     async frame(range: string, from: number): Promise<string> {
       const frame = () => {
         const output = stdout.slice(from);
@@ -188,7 +190,7 @@ function terminalRun(
   };
 }
 
-/** Starts the CLI and waits until the first prompt accepts keys. */
+/** Starts the CLI and waits until keys can be used at the first prompt. */
 async function heldRun(
   context: TestContext,
   { suite = STEPS, config = APP, args = ['--step'], prompt = STEP_PROMPT } = {},
@@ -199,25 +201,31 @@ async function heldRun(
   return run;
 }
 
-/** Reads the last terminal Duration row in milliseconds. */
+/** Reads the last terminal `Duration` row in milliseconds. */
 function durationMs(output: string): number {
   const row = [...output.matchAll(/^ +Duration +(\d+(?:\.\d+)?)(ms|s)\b/gm)].at(-1);
   assert(row?.[1] !== undefined, 'the run printed a Duration row');
   return Math.round(Number(row[1]) * (row[2] === 's' ? 1_000 : 1));
 }
 
-/** Reads the wall time between the run timestamps in report.json. */
-function reportWallMs(dir: string): number {
-  const { run }: Report1Document = JSON.parse(readFileSync(path.join(dir, '.e2e', 'report.json'), 'utf8'));
+/** Reads and validates the report from the CLI run. */
+function reportedRun(dir: string): Report1Document['run'] {
+  const report: Report1Document = JSON.parse(readFileSync(path.join(dir, '.e2e', 'report.json'), 'utf8'));
+  assertValidReport(report);
+  return report.run;
+}
+
+/** Returns the wall time between the run timestamps. */
+function reportWallMs(run: Report1Document['run']): number {
   return Date.parse(run.finishedAt) - Date.parse(run.startedAt);
 }
 
 describe('the terminal run duration', () => {
-  it('freezes Duration while a step waits and prints only active time at the end', async (context) => {
+  it('keeps Duration fixed during a hold. The same active time is shown in the terminal, JSON, and Markdown', async (context) => {
     const run = terminalRun(context, {
       'e2e.config.ts': APP,
       'tests/checkout.e2e.ts': TIMED_STEPS,
-    }, ['--step']);
+    }, ['--step', '--reporter', 'list,markdown']);
     await run.shows(STEP_PROMPT);
     const held = durationMs(run.printed());
 
@@ -229,13 +237,19 @@ describe('the terminal run duration', () => {
     const releasedAt = performance.now();
     run.press('\r');
     await run.finishes(0);
-    const activeAfterRelease = durationMs(run.printed()) - held;
+    const printed = durationMs(run.printed());
+    const activeAfterRelease = printed - held;
     expect(activeAfterRelease).toBeGreaterThanOrEqual(ACTIVE_WORK_MS - 10);
     expect(activeAfterRelease).toBeLessThanOrEqual(Math.ceil(performance.now() - releasedAt) + 10);
-    expect(reportWallMs(run.dir)).toBeGreaterThanOrEqual(held + KEY_GUARD_MS + ACTIVE_WORK_MS - 20);
+    const reported = reportedRun(run.dir);
+    assert(reported.durationMs !== undefined, 'report.json carries the run duration');
+    expect(reportWallMs(reported) - reported.durationMs).toBeGreaterThanOrEqual(KEY_GUARD_MS - 10);
+    expect(Math.abs(printed - reported.durationMs)).toBeLessThanOrEqual(5);
+    const markdown = readFileSync(path.join(run.dir, '.e2e', 'summary.md'), 'utf8');
+    expect(markdown.split('\n').find((line) => line.startsWith('<sub>Tested by'))).toContain(` · ${formatDuration(reported.durationMs)} ·`);
   });
 
-  it('counts elapsed time when the run has no holds', async (context) => {
+  it('counts all elapsed time in a run without holds', async (context) => {
     const startedAt = performance.now();
     const run = terminalRun(context, {
       'e2e.config.ts': APP,
@@ -244,12 +258,14 @@ describe('the terminal run duration', () => {
     await run.finishes(0);
 
     const elapsed = durationMs(run.printed());
+    const reported = reportedRun(run.dir);
     expect(elapsed).toBeGreaterThanOrEqual(ACTIVE_WORK_MS - 10);
-    expect(elapsed).toBeGreaterThanOrEqual(reportWallMs(run.dir) - 20);
+    expect(reported.durationMs).toBe(reportWallMs(reported));
+    expect(Math.abs(elapsed - reportWallMs(reported))).toBeLessThanOrEqual(5);
     expect(elapsed).toBeLessThanOrEqual(Math.ceil(performance.now() - startedAt) + 10);
   });
 
-  it('starts a fresh Duration when watch runs the test again', async (context) => {
+  it('reports a fresh Duration on a watch rerun', async (context) => {
     const suite = `import { existsSync, writeFileSync } from 'node:fs';
 import { test } from 'e2e';
 
@@ -272,7 +288,7 @@ test('checks out', async ({ app, screen }) => {
     await run.shows('Waiting for file changes...', rerun);
     expect(run.printed(rerun)).toContain('1 passed (1)');
     expect(run.printed(rerun)).not.toMatch(PAUSE_PROMPT);
-    expect(durationMs(run.printed(rerun))).toBeGreaterThanOrEqual(reportWallMs(run.dir) - 20);
+    expect(durationMs(run.printed(rerun))).toBeGreaterThanOrEqual(reportWallMs(reportedRun(run.dir)) - 20);
 
     run.press('q');
     await run.finishes(0);
@@ -280,24 +296,7 @@ test('checks out', async ({ app, screen }) => {
 });
 
 describe('the terminal screen and app log viewer', () => {
-  it("shows the held step's screen and returns to the same prompt on q", async (context) => {
-    const run = await heldRun(context);
-    const pauseId = printedPauseId(run.printed());
-    const opened = run.press('s');
-    const screen = await run.frame('1-6 of 22', opened);
-
-    expect(run.output(opened)).toContain(ENTER_SCREEN);
-    expect(screen).toContain('Screen before step 2 · checks out [fake]');
-    expect(screen).toContain(FAKE_APP_URL);
-    expect(screen).toContain('button "Item 02"');
-
-    const closed = run.press('q');
-    await run.shows(`Paused (${pauseId}) at step 2`, closed);
-    expect(run.output(closed)).toContain(RESTORE_SCREEN);
-    expect(run.printed()).not.toContain('The test reached the receipt.');
-  });
-
-  it('opens the app log at the newest lines and switches between the log and screen', async (context) => {
+  it('shows the newest app log lines first. You can switch between the log and screen', async (context) => {
     const run = await heldRun(context);
     const opened = run.press('l');
     const newest = await run.frame('6-11 of 11', opened);
@@ -341,7 +340,7 @@ describe('the terminal screen and app log viewer', () => {
     }
   });
 
-  it('prints the screen as permanent lines above the live prompt on p', async (context) => {
+  it('prints a permanent copy of the screen above the live prompt with p', async (context) => {
     const run = await heldRun(context);
     const visible = await run.frame('1-6 of 22', run.press('s'));
     expect(visible).not.toContain('Item 20');
@@ -362,22 +361,32 @@ describe('the terminal screen and app log viewer', () => {
     expect(run.printed()).toContain('The test reached the receipt.');
   });
 
-  it('keeps the step held on Enter in the viewer and on a repeated q when it closes', async (context) => {
+  it('keeps the step held after Enter in the viewer or a second q right after closing', async (context) => {
     const run = await heldRun(context);
-    await run.frame('1-6 of 22', run.press('s'));
+    const pauseId = printedPauseId(run.printed());
+    const opened = run.press('s');
+    const screen = await run.frame('1-6 of 22', opened);
+
+    expect(run.output(opened)).toContain(ENTER_SCREEN);
+    expect(screen).toContain('Screen before step 2 · checks out [fake]');
+    expect(screen).toContain(FAKE_APP_URL);
+    expect(screen).toContain('button "Item 02"');
 
     await run.frame('2-7 of 22', run.press('\r\u001b[B'));
     expect(run.printed()).not.toContain('The test reached the receipt.');
 
     const closed = run.press('qq');
-    await run.shows(STEP_PROMPT, closed);
+    await run.shows(`Paused (${pauseId}) at step 2`, closed);
+    expect(run.output(closed)).toContain(RESTORE_SCREEN);
+    expect(run.printed()).not.toContain('The test reached the receipt.');
+
     await sleep(KEY_GUARD_MS);
     run.press('\r');
     await run.finishes(0);
     expect(run.printed()).toContain('The test reached the receipt.');
   });
 
-  it('restores the main screen and interrupts the run on Ctrl-C in the viewer', async (context) => {
+  it('interrupts the run with Ctrl-C in the viewer. The main screen is restored', async (context) => {
     const run = await heldRun(context);
     const held = durationMs(run.printed());
     const opened = run.press('s');
@@ -392,9 +401,12 @@ describe('the terminal screen and app log viewer', () => {
     expect(stripVTControlCharacters(output.slice(output.indexOf(RESTORE_SCREEN)))).toContain('1 interrupted');
     expect(run.printed()).not.toContain('The test reached the receipt.');
     expect(durationMs(run.printed(interrupted)) - held).toBeLessThanOrEqual(Math.ceil(performance.now() - interruptedAt) + 10);
+    const reported = reportedRun(run.dir);
+    assert(reported.durationMs !== undefined, 'report.json carries the run duration');
+    expect(reportWallMs(reported) - reported.durationMs).toBeGreaterThanOrEqual(KEY_GUARD_MS - 10);
   });
 
-  it('restores the main screen and exits watch mode on Ctrl-C in the viewer', async (context) => {
+  it('exits watch mode with Ctrl-C in the viewer. The main screen is restored', async (context) => {
     const run = await heldRun(context, { suite: PAUSE, args: ['--watch'], prompt: PAUSE_PROMPT });
     await run.frame('1-6 of 22', run.press('s'));
 
@@ -496,7 +508,7 @@ test('prints while checkout is paused', async () => {
     await run.finishes(0);
   });
 
-  it('says when the screen could not be read', async (context) => {
+  it("reports when the screen can't be read", async (context) => {
     const config = `import { createFakeEngine, FAKE_APP } from '../../helpers/fake-engine.ts';
 
 const { engine } = createFakeEngine({
@@ -518,7 +530,7 @@ export default { targets: [{ name: 'fake', platform: 'fake', engine, app: FAKE_A
     await run.finishes(0);
   });
 
-  it('clips long lines to the terminal width and redraws when the terminal resizes', async (context) => {
+  it('clips long lines to the terminal width. The view is redrawn after a resize', async (context) => {
     const run = await heldRun(context);
     const first = await run.frame('1-6 of 22', run.press('s'));
     const longLine = /^ {2}button "Item 01 x+…$/;
@@ -533,7 +545,7 @@ export default { targets: [{ name: 'fake', platform: 'fake', engine, app: FAKE_A
     expect(lines).toContain('  button "Item 02"');
   });
 
-  it('shows the screen and tells you the app log is empty at a pause without --step', async (context) => {
+  it('can view the screen and see that the app log is empty at a pause without --step', async (context) => {
     const run = await heldRun(context, {
       suite: PAUSE,
       config: workerFakeConfigSource(1),
@@ -561,7 +573,7 @@ export default { targets: [{ name: 'fake', platform: 'fake', engine, app: FAKE_A
   it.for([
     { title: 'pause', suite: PAUSE, args: [], prompt: PAUSE_PROMPT },
     { title: 'held step', suite: STEPS, args: ['--step'], prompt: STEP_PROMPT },
-  ])('closes the viewer and the MCP session when e2e run --step next resumes the $title', async (options, context) => {
+  ])('returns to the terminal after resuming the $title with e2e run --step next. The MCP session ends', async (options, context) => {
     const run = await heldRun(context, options);
     const attach = printedPauseId(run.printed());
     await run.frame('1-6 of 22', run.press('s'));

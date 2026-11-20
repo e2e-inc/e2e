@@ -517,7 +517,7 @@ export class ListReporter {
 
   /**
    * Shows the held steps under their test and the keys below the summary.
-   * Without a window it prints the prompt once, as a permanent line.
+   * Without a live window, the prompt is printed once as a permanent line.
    */
   showStepPrompt(prompt: StepPrompt | undefined): void {
     this.prompt = prompt;
@@ -1080,7 +1080,7 @@ export class ListReporter {
    * there (a config or collection failure, a failed download) counts from
    * the launch instead, so the time it took to fail is still on record.
    */
-  private summaryRows(final: boolean): string[] {
+  private summaryRows(final: boolean, durationMs?: number): string[] {
     const { pc } = this;
     const files = this.fileCounters();
     const tests = this.testCounters();
@@ -1118,7 +1118,7 @@ export class ListReporter {
     }
     const startedAt = this.startedAt ?? (final ? this.launchedAt : undefined);
     if (startedAt !== undefined) {
-      const elapsed = (this.holdTiming?.heldSince ?? Date.now()) - startedAt.getTime() - (this.holdTiming?.heldMs ?? 0);
+      const elapsed = durationMs ?? (this.holdTiming?.heldSince ?? Date.now()) - startedAt.getTime() - (this.holdTiming?.heldMs ?? 0);
       rows.push(padTitle(pc, 'Start at') + formatClock(startedAt));
       rows.push(padTitle(pc, 'Duration') + durationText(pc, elapsed, this.startupMs));
     }
@@ -1163,7 +1163,7 @@ export class ListReporter {
     return this.interrupted ? pc.yellow(`${cut} (interrupted)`) : pc.dim(none);
   }
 
-  /** The running tree, summary, and keys for `room` rows under the permanent log. */
+  /** Formats the running tree, summary, and keys for `room` rows under the permanent log. */
   private renderWindow(room: number): string[] {
     const running = [...this.pairs.values()].filter((test) => test.executing);
     if (this.explore !== undefined) {
@@ -1387,7 +1387,7 @@ export class ListReporter {
     this.printFailures('Skipped After Failure', this.skippedFailures, pages);
     this.printErrors();
     this.print('');
-    for (const row of this.summaryRows(true)) this.print(row);
+    for (const row of this.summaryRows(true, event.durationMs)) this.print(row);
     // The report is for scripts, so a run names it only when it is missing: `--last-failed` reads it next.
     if (event.reportPath === undefined) this.print(padTitle(pc, 'Report') + pc.dim('(not written)'));
     const paged = Object.values(pages);

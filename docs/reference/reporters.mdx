@@ -106,6 +106,10 @@ reporters: ['json'],
 It [prints to stdout](#printsto) and takes no output, so what your code
 prints goes to stderr.
 
+In `report.json`, `run.durationMs` is the run duration in whole milliseconds,
+excluding time spent at a held step or paused test on any worker.
+`run.startedAt` and `run.finishedAt` are wall-clock timestamps.
+
 #### `junit`
 
 Writes `junit.xml` beside the report.
@@ -498,9 +502,6 @@ does not carry them.
       Results  https://example.test/runs/0192c…
 ```
 
-The terminal's `Duration` row excludes time at a held step or pause. The
-run timestamps in `report.json` use wall time.
-
 ##### Artifacts
 
 - Artifact paths in the report are POSIX paths relative to `artifactsRoot`.
@@ -582,7 +583,7 @@ type RunEventFact =
   | { type: 'run-error'; error: SerializedError }
   | { type: 'run-interrupted'; mode: 'graceful' | 'forced' }
   | { type: 'run-stopped'; failures; limit }
-  | { type: 'run-finished'; status; exitCode; reportPath?; aiTracePath?; traces? };
+  | { type: 'run-finished'; status; exitCode; durationMs?; reportPath?; aiTracePath?; traces? };
 ```
 
 - `run-started` comes first and `run-finished` last.
@@ -606,10 +607,10 @@ type RunEventFact =
   `collect`, `filter` for a test filter's progress and summary, or `run`.
 - `output` is one write a test made to stdout or stderr; `pair` names the
   test running at the time and is undefined between tests.
-- `run-hold` marks the first hold opening or the last closing in a terminal
-  run. `heldMs` counts the time in completed hold intervals across all workers.
-  `heldSince` is the current interval's start in Unix milliseconds, or `null`
-  once it closes.
+- `run-hold` is emitted when the first hold opens or the last hold closes.
+  `heldMs` is the total time in completed hold intervals across workers.
+  `heldSince` is the current interval's start in Unix milliseconds, or `null` after the last hold closes.
+- `durationMs` on `run-finished` matches the report's `run.durationMs`.
 - `test-finished` carries the full result record, including every attempt's
   artifacts.
 - `explore` appears only in an `e2e explore` run: `started`, `planning`,

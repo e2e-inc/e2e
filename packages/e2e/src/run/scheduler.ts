@@ -46,7 +46,7 @@ import {
 } from './units.ts';
 import {
   type AttemptDeadlineMessage,
-  type MainToWorker,
+  type HoldRequestMessage,
   type OutputMessage,
   type PairStart,
   type StepHoldMessage,
@@ -55,7 +55,6 @@ import {
   decodeResult,
 } from './worker/protocol.ts';
 
-type HoldRequest = Extract<MainToWorker, { type: 'screen-request' | 'logs-request' }>;
 type HoldReply = Extract<WorkerToMain, { type: 'screen-reply' | 'logs-reply' }>;
 type PendingHoldReply = {
   readonly holdId: string;
@@ -80,7 +79,7 @@ export interface SchedulerEvents {
    * worker is being interrupted.
    */
   onTimeLimit?(): void;
-  /** The first hold opened or the last one closed, with the time spent in completed hold intervals. */
+  /** Callback when the first hold opens or the last hold closes. Time in completed hold intervals is included. */
   onHoldChange?(heldMs: number, heldSince: number | null): void;
   /** A worker began executing one test-target pair. */
   onTestStart?(start: PairStart, targetName: string): void;
@@ -125,7 +124,7 @@ export interface RunUnitsOptions {
    * or the run was interrupted. A rejection otherwise stops the run with its
    * error, or fails the test at a pause. While any step is held, the time
    * limit does not run. `readScreen` asks the worker for the screen at that
-   * wait. `readLogs` asks for the attempt's app log at that wait.
+   * wait. The attempt's app log is available through `readLogs` during the wait.
    */
   readonly beforeStep?: ((step: HeldStep, context: Omit<StepHoldContext, 'show'>) => Promise<void>) | undefined;
   /** App failures buffered during startup, then delivered while target work remains. */
@@ -423,7 +422,7 @@ class Scheduler {
   private timeLimitTimer: NodeJS.Timeout | undefined;
   /** When the steps held now began waiting, while any is. */
   private heldSince: number | undefined;
-  /** Time spent waiting for holds that have already ended, counting overlaps once. */
+  /** Time in completed hold intervals. Overlapping time is counted once. */
   private heldMs = 0;
 
   constructor(private readonly options: RunUnitsOptions) {}
@@ -599,7 +598,7 @@ class Scheduler {
 
     const signal = AbortSignal.any([controller.signal, this.options.interruptSignal]);
 
-    const request = (type: HoldRequest['type']): Promise<HoldReply | undefined> =>
+    const request = (type: HoldRequestMessage['type']): Promise<HoldReply | undefined> =>
       new Promise((resolve) => {
         // The wait has ended or its worker is gone, so no reply can arrive.
         if (signal.aborted || !this.holds.has(holdId) || !worker.runner.alive) {

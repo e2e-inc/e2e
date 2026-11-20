@@ -54,7 +54,7 @@ export interface StepPrompt {
    * release them.
    */
   readonly holdSteps: boolean;
-  /** The terminal can open the screen and app log viewer. */
+  /** Set to enable the screen and app log viewer in the terminal. */
   readonly viewer?: boolean;
 }
 
@@ -65,8 +65,9 @@ export interface StepHoldContext {
   /** Attaches to a held test by its pause ID. */
   attach(id: string, signal?: AbortSignal, sessionId?: string): Promise<HeldTestAttachment>;
   /**
-   * Shows the hold under its test and keys below the summary in the list
-   * reporter's live window, or prints the prompt on stderr. Clears it on `undefined`.
+   * Shows the hold under its test and keys below the summary in the live window.
+   * If there isn't a live window, the prompt is printed on stderr.
+   * Pass `undefined` to clear the prompt.
    */
   show(prompt: StepPrompt | undefined): void;
   /**
@@ -79,7 +80,7 @@ export interface StepHoldContext {
    * after the wait has ended.
    */
   readScreen(): Promise<string | undefined>;
-  /** Reads the attempt's redacted app log so far, or undefined when the wait has ended. */
+  /** Reads the attempt's redacted app log so far. The result is `undefined` after the wait has ended. */
   readLogs(): Promise<readonly AppLogRecord[] | undefined>;
 }
 
@@ -142,12 +143,10 @@ export class AttemptHolds {
 export interface AttemptStepHolds extends Pick<AttemptHoldsOptions, 'timeout' | 'signal'> {
   /** The attempt as every step held in it names it. */
   readonly attempt: Pick<StepHold, 'target' | 'testId' | 'agent' | 'repeat' | 'title'>;
-  /** Asks the runner whether the step may run, with reads it can use while waiting. */
-  readonly ask: (step: StepHold, signal: AbortSignal, reads: HoldReads) => Promise<void>;
+  /** Callback to decide whether the step may run. The screen is available while waiting. */
+  readonly ask: (step: StepHold, signal: AbortSignal, readScreen: HoldReads['readScreen']) => Promise<void>;
   /** Reads the screen a hold starts on. */
   readonly readScreen: (signal: AbortSignal) => Promise<string | undefined>;
-  /** Reads the log of the attempt that holds the step. */
-  readonly readLogs: () => readonly AppLogRecord[];
 }
 
 /** The holds of one test attempt: each hold asks the runner, which can read the screen the hold starts on. */
@@ -162,10 +161,7 @@ export function holdAttemptSteps(options: AttemptStepHolds): AttemptHolds {
       await ask(
         { kind: step.kind, ...attempt, api: step.api, label: step.label, ...(step.source === undefined ? {} : { source: step.source }) },
         signal,
-        {
-          readScreen: () => (heldScreen ??= readScreen(signal)),
-          readLogs: () => Promise.resolve(options.readLogs()),
-        },
+        () => (heldScreen ??= readScreen(signal)),
       );
     },
     // The clock runs again and tells the watchdog itself; the next hold reads a fresh screen.

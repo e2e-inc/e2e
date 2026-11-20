@@ -1,6 +1,6 @@
 /**
- * The terminal keys for `--step` and `screen.pause()`. The viewer shows the
- * held step's screen or app log on the alternate screen while the test waits.
+ * Terminal key handling for `--step` and `screen.pause()`. While the test
+ * waits, its screen or app log is available on the alternate screen.
  */
 
 import { sanitizeText } from '@e2e-dev/core/lib/internal/errors';
@@ -9,48 +9,43 @@ import { fitColumns, terminalColumns, terminalRows, visibleWidth } from '../repo
 import { LiveWindow } from '../report/live-window.ts';
 import { openAlternateScreen, uncaptured, type OutputStream, type RunnerOutput } from '../run/process-output.ts';
 import { Keyboard, type Keypress } from './keyboard.ts';
-import { StepGate, stepKeyOf, type HeldPromptStep, type StepView } from './step.ts';
+import { stepKeyOf, type HeldPromptStep, type StepGate, type StepView } from './step.ts';
 
 type StepKeyboardOptions = {
-  readonly holdSteps?: boolean;
-  readonly interrupt?: () => void;
+  readonly stream: OutputStream | undefined;
+  readonly holdSteps: boolean;
+  readonly interrupt: () => void;
 };
 
-/** Routes keys to the viewer while it owns the terminal, or to the step prompt. */
+/** Terminal key routing for the viewer and step prompt. */
 export class StepKeyboard {
-  readonly gate: StepGate;
   private readonly keyboard: Keyboard<Keypress>;
-  private readonly stream = process.stderr.isTTY === true ? 'stderr' : process.stdout.isTTY === true ? 'stdout' : undefined;
-  private readonly holdSteps: boolean;
-  private readonly interrupt: () => void;
   private viewer: StepViewer | undefined;
 
   constructor(
     stdin: NodeJS.ReadStream,
-    stop: () => void,
+    private readonly gate: StepGate,
     private readonly output: RunnerOutput,
-    { holdSteps = true, interrupt = stop }: StepKeyboardOptions = {},
+    private readonly options: StepKeyboardOptions,
   ) {
-    this.holdSteps = holdSteps;
-    this.interrupt = interrupt;
-    this.gate = new StepGate(stop, { holdSteps, viewer: this.stream !== undefined });
     this.keyboard = new Keyboard(stdin, (press) => press);
   }
 
-  /** Closes the viewer before a socket command resumes the pause. */
-  resumePause(key: 'continue' | 'rest'): void {
+  /** Restores the main screen if the viewer is open. */
+  closeViewer(): void {
     this.viewer?.close();
-    this.gate.press(key, { guard: false });
   }
 
   /** Reads prompt and viewer keys in raw mode. */
   listen(): void {
+    const { stream, holdSteps, interrupt } = this.options;
+
     this.keyboard.listen((press) => {
       const key = stepKeyOf(press);
 
       if (key === 'interrupt') {
-        this.viewer?.close();
-        this.interrupt();
+        this.closeViewer();
+        interrupt();
         return;
       }
 
@@ -62,8 +57,8 @@ export class StepKeyboard {
       if (key === 'screen' || key === 'logs') {
         const held = this.gate.inspect();
 
-        if (held !== undefined && this.stream !== undefined) {
-          this.viewer = new StepViewer(this.stream, held, this.output, () => {
+        if (held !== undefined && stream !== undefined) {
+          this.viewer = new StepViewer(stream, held, this.output, () => {
             this.viewer = undefined;
             this.gate.guardKeys();
           });
@@ -71,7 +66,7 @@ export class StepKeyboard {
         }
       } else if (key === 'suspend') {
         this.keyboard.suspend();
-      } else if (key !== undefined && (this.holdSteps || (key !== 'test' && key !== 'rest'))) {
+      } else if (key !== undefined && (holdSteps || (key !== 'test' && key !== 'rest'))) {
         this.gate.press(key);
       }
     });
@@ -80,7 +75,7 @@ export class StepKeyboard {
   /** Restores the main screen and turns off raw mode. */
   close(): void {
     try {
-      this.viewer?.close();
+      this.closeViewer();
     } finally {
       this.keyboard.close();
     }
@@ -121,7 +116,7 @@ class StepViewer {
     held.context.signal.addEventListener('abort', this.close, { once: true });
   }
 
-  /** Reads the selected view, ignoring a reply after a switch or close. */
+  /** Reads the selected view. Replies to earlier reads are ignored after a switch or close. */
   async show(view: StepView): Promise<void> {
     const request = Symbol();
     this.request = request;
@@ -161,7 +156,7 @@ class StepViewer {
     }
   }
 
-  /** Acts on the viewer's keys without sending them to the test. */
+  /** Handles keys in the viewer. These keys aren't sent to the test. */
   press(press: Keypress): void {
     if (press.ctrl) {
       return;
@@ -231,7 +226,7 @@ class StepViewer {
     return Math.max(0, rows - (rows >= 5 ? 4 : 2));
   }
 
-  /** Paints one row per line, leaving a column free so the terminal never wraps. */
+  /** Paints one row per line. One column stays free to prevent wrapping. */
   private readonly draw = (): void => {
     try {
       const columns = Math.max(1, terminalColumns() - 1);

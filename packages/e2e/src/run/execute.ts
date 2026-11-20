@@ -93,7 +93,7 @@ type ExecutorHold = {
   /**
    * Asks the runner at each pause, and before each step when `steps` is set.
    * The runner can call `readScreen` to read the screen during the wait.
-   * It can call `readLogs` to read the attempt's app log.
+   * The attempt's app log is available through `readLogs` during the wait.
    */
   readonly ask: (
     step: StepHold,
@@ -779,9 +779,13 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
             repeat: pair.repeat,
             title: pair.test.titlePath.join(' › '),
           },
-          ask: (step, signal, reads) => hold.ask(step, signal, reads, tools),
+          ask: (step, signal, readScreen) => hold.ask(
+            step,
+            signal,
+            { readScreen, readLogs: () => Promise.resolve(steps.appLog().slice()) },
+            tools,
+          ),
           readScreen: (signal: AbortSignal) => readHeldScreen(session, this.op(attemptId, this.config.actionTimeout, signal), screens),
-          readLogs: () => steps.appLog().slice(),
         });
       }
       // `expect.poll` and `expect.soft` take no fixture, so the attempt they

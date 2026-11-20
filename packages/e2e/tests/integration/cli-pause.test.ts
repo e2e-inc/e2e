@@ -668,7 +668,7 @@ describe('screen.pause() in --watch without a terminal', () => {
 });
 
 describe('screen.pause() in a terminal', () => {
-  it('returns from the app log to the live pause, then resumes the test on Enter', async () => {
+  it('can return from the app log to the pause and resume the test with Enter', async () => {
     const { dir } = project({ 'tests/pause.e2e.ts': PAUSE_SUITE });
     const stdin = fakeStdin();
     const tty = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');

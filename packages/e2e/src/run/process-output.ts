@@ -106,7 +106,7 @@ function routing(): OutputRouting {
   return state;
 }
 
-/** Gives the viewer the alternate screen until it closes, then replays terminal writes in order. */
+/** Opens the viewer's alternate screen. Buffered terminal writes are replayed in order after the screen is restored. */
 export function openAlternateScreen(stream: OutputStream): AlternateScreen {
   const state = routing();
   const write = state.direct[stream];

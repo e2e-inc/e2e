@@ -114,19 +114,17 @@ describe('StepGate', () => {
     expect(await held.released()).toBe(true);
   });
 
-  it('asks to stop on Ctrl-C at once, guard or no prompt, and on q only at a prompt', async () => {
+  it('asks to stop on q only at a prompt after the key guard', async () => {
     const { gate: subject, hold, stops, later } = gate();
-    subject.press('interrupt');
-    expect(stops()).toBe(1);
     subject.press('stop');
-    expect(stops()).toBe(1);
+    expect(stops()).toBe(0);
     await hold(step('/')).released();
     hold(step('/cart'));
-    subject.press('interrupt');
-    expect(stops()).toBe(2);
+    subject.press('stop');
+    expect(stops()).toBe(0);
     later();
     subject.press('stop');
-    expect(stops()).toBe(3);
+    expect(stops()).toBe(1);
   });
 
   it('shows steps held together in one prompt and runs them on one key, so a wait never outlives its action', async () => {

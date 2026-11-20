@@ -148,19 +148,12 @@ export interface StepReleaseMessage {
 }
 
 /**
- * A request to read the screen at the held step or pause named by `holdId`.
- * The worker handles it right away, like `step-release`, then sends a
- * `screen-reply`.
+ * A request to read the screen or app log at the held step or pause named by
+ * `holdId`. The worker handles it right away, like `step-release`, then sends
+ * a `screen-reply` or `logs-reply`.
  */
-export interface ScreenRequestMessage {
-  readonly type: 'screen-request';
-  readonly holdId: string;
-  readonly requestId: string;
-}
-
-/** Reads the attempt's log while `holdId` is still waiting, like `screen-request`. */
-type LogsRequestMessage = {
-  readonly type: 'logs-request';
+export type HoldRequestMessage = {
+  readonly type: 'screen-request' | 'logs-request';
   readonly holdId: string;
   readonly requestId: string;
 };
@@ -203,8 +196,7 @@ export type MainToWorker =
   | TerminateMessage
   | PingMessage
   | StepReleaseMessage
-  | ScreenRequestMessage
-  | LogsRequestMessage
+  | HoldRequestMessage
   | StepAttachmentRequestMessage
   | StepAttachmentCancelMessage
   | ContinueMessage;

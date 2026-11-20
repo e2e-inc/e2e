@@ -298,8 +298,8 @@ export class TargetWorker {
    * Holds one step or pause until the runner releases it, and rejects with
    * the release's error if it has one. A hold that ends first (the step was
    * abandoned, its attempt ended) tells the runner, so its prompt goes away,
-   * and rejects with the signal's reason. The runner can request the screen
-   * through `readScreen` or the app log through `readLogs` while it's held.
+   * and rejects with the signal's reason. During the hold, the screen is
+   * available through `readScreen` and the app log through `readLogs`.
    */
   private holdStep(
     step: StepHold,

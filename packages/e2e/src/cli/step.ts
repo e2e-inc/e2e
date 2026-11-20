@@ -9,7 +9,7 @@ import type { Keypress } from './keyboard.ts';
 import type { BeforeStep, HeldStep, NumberedStep, StepHoldContext, StepPrompt } from '../run/step-hold.ts';
 import { pairKey } from '../run/units.ts';
 
-/** The views the step prompt can open. */
+/** Screen and app log views available at the step prompt. */
 export type StepView = 'screen' | 'logs';
 
 /** A key the step prompt acts on. Ctrl-C, Ctrl-D, and Ctrl-Z arrive as keypresses in raw mode, not as signals. */
@@ -68,7 +68,7 @@ type StepGateOptions = {
   readonly viewer?: boolean;
 };
 
-/** The held step and its reads, as the viewer sees them. */
+/** The numbered hold and its read callbacks for the viewer. */
 export type HeldPromptStep = NumberedStep & { readonly context: StepHoldContext };
 
 /** One held step waiting for its prompt, or showing it. */
@@ -167,22 +167,18 @@ export class StepGate {
     });
   };
 
-  /** The wait the viewer may read once the key guard has passed. */
+  /** Returns the hold available to read once the key guard has passed. */
   inspect(): HeldPromptStep | undefined {
     return this.now() - this.shownAt < KEY_GUARD_MS ? undefined : this.queue[0];
   }
 
-  /** A key pressed in the viewer must not act on the prompt that returns. */
+  /** Restarts the key guard so a key from the viewer doesn't reach the prompt after the viewer closes. */
   guardKeys(): void {
     this.shownAt = this.now();
   }
 
-  /** Acts on one key. Ctrl-C works at any time; the others only on a prompt, once it has been up for the key guard. */
-  press(key: Exclude<StepKey, 'suspend' | StepView>, options: PressOptions = { guard: true }): void {
-    if (key === 'interrupt') {
-      this.stop();
-      return;
-    }
+  /** Acts on a prompt key once the key guard has passed. */
+  press(key: Exclude<StepKey, 'interrupt' | 'suspend' | StepView>, options: PressOptions = { guard: true }): void {
     const shown = options.guard ? this.inspect() : this.queue[0];
     if (shown === undefined) return;
     const test = testKey(shown.step);

@@ -102,11 +102,12 @@ export class RunningTree {
    * summary go to the running tests, each test's detail shares what remains
    * once every test has its own row, and tests that still do not fit fold
    * into one `more running` marker. `room` is the screen under the permanent
-   * log. The block pads out to it so the summary and keys sit at the bottom.
-   * A held test's row shows the attach ID in place of its clock, with the
-   * held steps below it. The footer takes its rows first. The held test
-   * appears first among the running tests, with space for its held steps
-   * before other tests use the remaining rows.
+   * log. The window is padded so the summary and keys stay at the bottom.
+   *
+   * The attach ID is shown in place of the clock on the held test's row.
+   * Held steps are shown below that row. Rows are reserved for the footer
+   * first. The held test is listed first among the running tests. Space is
+   * set aside for its held steps before rows are given to the other tests.
    */
   render(
     running: readonly RunningTest[],
@@ -185,9 +186,9 @@ export class RunningTree {
   }
 
   /**
-   * Everything under a running test's row: its finished steps, then the
-   * current step and the held steps. Those have priority; finished
-   * steps take the rows left and the oldest fold into one marker.
+   * Formats the finished steps, current step, and held steps under a test.
+   * The current and held steps are given space first. The remaining rows
+   * are for finished steps. The oldest are folded into one marker if needed.
    */
   private detailRows(test: RunningTest, maxEvents: number, budget: number, now: number, held: PausedTest | undefined): string[] {
     const maxWidth = terminalColumns() - WIDTH_MARGIN - DETAIL_INDENT.length;

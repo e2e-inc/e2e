@@ -169,9 +169,9 @@ export type RunEventFact =
       readonly outcome?: SetupOutcome;
     }
   | {
-      /** The first hold opened or the last hold closed in a terminal run. */
+      /** Event emitted when the first hold opens or the last closes, with or without a terminal. */
       readonly type: 'run-hold';
-      /** Total milliseconds spent in completed holds, counting overlapping holds once. */
+      /** Total milliseconds in completed holds. Overlapping time is counted once. */
       readonly heldMs: number;
       /** The current hold interval's start as Unix milliseconds, or null when no hold is open. */
       readonly heldSince: number | null;
@@ -247,6 +247,8 @@ export type RunEventFact =
       readonly type: 'run-finished';
       readonly status: RunStatus;
       readonly exitCode: RunExitCode;
+      /** The report's elapsed run time in milliseconds with holds excluded. */
+      readonly durationMs?: number | undefined;
       readonly reportPath?: string;
       /** Where `--ai-trace` wrote the run's model calls, once the file exists. */
       readonly aiTracePath?: string;

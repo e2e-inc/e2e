@@ -69,7 +69,10 @@ export class LiveWindow {
   private static readonly running = new Set<LiveWindow>();
   private static suspended = false;
 
-  /** Clears the main screen's live blocks before the viewer opens and repaints them after its output is flushed. */
+  /**
+   * Clears the main screen's live blocks before the viewer opens.
+   * Call the returned function after buffered writes are flushed to repaint the blocks.
+   */
   static suspend(): () => void {
     for (const window of LiveWindow.running) {
       window.erase();
@@ -96,7 +99,6 @@ export class LiveWindow {
    * what the block left.
    */
   private above = 0;
-  private active = false;
   private timer: NodeJS.Timeout | undefined;
 
   constructor(
@@ -116,8 +118,7 @@ export class LiveWindow {
 
   /** Begins painting; the block repaints on a timer until `stop`. */
   start(): void {
-    if (this.raw === undefined || this.active) return;
-    this.active = true;
+    if (this.raw === undefined || LiveWindow.running.has(this)) return;
     LiveWindow.running.add(this);
     this.timer = setInterval(() => this.redraw(), REPAINT_INTERVAL_MS);
     this.timer.unref();
@@ -133,7 +134,7 @@ export class LiveWindow {
 
   /** Repaints the block below the log; every line is clamped so the row count stays exact. */
   redraw(): void {
-    if (this.raw === undefined || !this.active || LiveWindow.suspended) return;
+    if (this.raw === undefined || !LiveWindow.running.has(this) || LiveWindow.suspended) return;
     const columns = terminalColumns();
     const all = this.getWindow(this.room());
     // Safety net under the reporter's own budget: a block taller than the
@@ -159,7 +160,6 @@ export class LiveWindow {
   stop(): void {
     if (this.timer !== undefined) clearInterval(this.timer);
     this.timer = undefined;
-    this.active = false;
     LiveWindow.running.delete(this);
     this.erase();
   }

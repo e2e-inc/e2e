@@ -91,7 +91,7 @@ const STEP_KEYS = [
   ['q', 'quit'],
 ] as const;
 
-/** Returns the keys that work at this prompt, beside Enter. */
+/** Returns the available keys other than Enter. */
 function promptKeys(prompt: StepPrompt): readonly (readonly [key: string, does: string])[] {
   return STEP_KEYS.filter(([key]) => {
     if (key === 's' || key === 'l') {
@@ -116,7 +116,7 @@ function heldCall(step: HeldStep): string {
 }
 
 /**
- * The held steps under their test, one row each. Labels are clipped so the
+ * Formats one row per held step under its test. Labels are clipped so the
  * call site stays on the same row.
  */
 export function heldStepRows(pc: Colors, prompt: StepPrompt, maxWidth: number): string[] {
@@ -134,7 +134,7 @@ export function heldStepRows(pc: Colors, prompt: StepPrompt, maxWidth: number): 
   });
 }
 
-/** The heading and keys below the live summary, styled like the watch prompt. */
+/** Formats the heading and keys below the live summary in the style of the watch prompt. */
 export function stepPromptRows(pc: Colors, prompt: StepPrompt): string[] {
   const [first, ...rest] = prompt.steps;
   const at = first.step.kind === 'pause'

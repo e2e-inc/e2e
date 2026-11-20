@@ -252,8 +252,7 @@ bunx e2e run tests/checkout.e2e.ts --step --headed
 ```
 </CodeGroup>
 
-The held step shows under its test, below the steps that already ran.
-The keys appear below the summary:
+The held step shows under its test, below the steps that already ran:
 
 ```text
  ❯ |web| tests/checkout.e2e.ts 0/1
@@ -268,38 +267,38 @@ Paused (k3f9) at step 2
   press enter to run this step, press h to show help, press q to quit
 ```
 
+The keys are below the live summary.
+
 The keys follow [`--watch`](/reference/cli#watch-mode). These work at a prompt:
 
 | Key | Does |
 | --- | --- |
 | Enter | runs the held step and holds the next one |
-| `s` | opens the screen's accessibility tree |
-| `l` | opens the current attempt's app log at its newest lines |
+| `s` | shows the screen's accessibility tree |
+| `l` | shows the current attempt's app log, starting at the newest lines |
 | `n` | runs the rest of this test, retries included, and holds at the next test |
 | `a` | runs the rest of the run without holding steps |
 | `h` | shows every key under the prompt, or hides them |
 | `q`, Esc | stops the run as Ctrl-C does: the test ends `interrupted`, the rest are skipped, exit 130 |
 
-The screen and log open in a full-screen viewer. The test stays paused while
-the viewer is open.
+You can scroll through the screen or app log while the test stays paused.
 
 | Viewer key | Does |
 | --- | --- |
-| Up, Down, `k`, `j` | scrolls one line |
-| Page Up, Page Down, `b`, Space | scrolls one page |
-| `g`, `G` | goes to the top or bottom |
-| `s`, `l` | switches to the screen or log |
-| `p` | closes the viewer and prints its text above the live summary |
-| `q`, Esc | returns to the prompt |
+| Up, Down, `k`, `j` | Scroll one line |
+| Page Up, Page Down, `b`, Space | Scroll one page |
+| `g`, `G` | Go to the top or bottom |
+| `s`, `l` | Switch to the screen or log |
+| `p` | Close the viewer and print its text above the live summary |
+| `q`, Esc | Return to the prompt |
 
 - A key pressed within 150 ms of a prompt is ignored, so a key meant for the
   last step never runs this one. Ctrl-C works at any time, also while a step
-  runs. The same guard applies after you close the viewer.
-- The step's duration, the test's `timeout`, `maxDuration`, and the terminal's
-  `Duration` row all exclude held time. A test that hangs after a step still
+  runs. The same guard applies when you close the viewer.
+- The time a step is held counts toward nothing: not its duration, not the
+  test's `timeout`, not `maxDuration`, and not the run's `Duration`. A test that hangs after a step still
   times out on the time it had left. The test's own duration in the report
-  includes the holds. The run timestamps in `report.json` and the run
-  durations that reports calculate from them use wall time.
+  includes the holds.
 - Setup tests, retries, `afterEach` hooks, fixture teardowns, and steps inside
   an `expect.poll` read run without stopping. An `agent.act` is one step.
 - Steps started together, as in `Promise.all`, share one prompt and run on one
@@ -406,7 +405,7 @@ bunx e2e run tests/checkout.e2e.ts --headed
 ```
 </CodeGroup>
 
-In a terminal, the pause is shown under its test. The keys follow the summary:
+In a terminal, the pause is shown under its test:
 
 ```text
  ❯ |web| tests/checkout.e2e.ts 0/1
@@ -420,9 +419,10 @@ Paused (k3f9) at screen.pause()
   press enter to resume, press h to show help, press q to quit
 ```
 
+The keys are below the live summary.
 Press Enter to resume the test, `h` to list the keys, or `q` to stop the run
 with exit 130, as at a [`--step` prompt](#step-through-a-test).
-Press `s` for the screen or `l` for the app log, including under `--watch`.
+Press `s` for the screen or `l` for the app log, then use the [viewer keys](#step-through-a-test).
 
 Without a terminal, as in a coding agent's shell, the pause is printed with
 the screen it waits on:
@@ -454,8 +454,7 @@ for what each answer holds.
   run is stopped after 30 minutes at a pause without a command.
 - The test is paused on every attempt, retries and setup tests included.
 - With several workers, pauses are shown one at a time, oldest first, while
-  the other workers keep running. The terminal's `Duration` row and
-  `maxDuration` clock stop while any test is paused.
+  the other workers keep running.
 - Call `screen.pause()` with `await` in a
   [`beforeEach`](/reference/test#beforeeach) hook,
   [fixture](/fixtures) setup, or the test body. See

@@ -758,10 +758,10 @@ export async function servePauses(
   /** The run's final answer, returned right away to later commands. */
   let ended: StepReply | undefined;
   /** Reads keys while a pause prompt is shown in a terminal. */
-  const keyboard = stdin === undefined ? undefined : new StepKeyboard(stdin, stop, options.processOutput, { holdSteps: steps, interrupt });
-  let reading = false;
+  let keyboard: StepKeyboard | undefined;
 
-  const gate = keyboard?.gate ?? new StepGate(stop, { holdSteps: steps });
+  const stream = process.stderr.isTTY === true ? 'stderr' : process.stdout.isTTY === true ? 'stdout' : undefined;
+  const gate = new StepGate(stop, { holdSteps: steps, viewer: stdin !== undefined && stream !== undefined });
   // Print beside the list reporter's lines. Keep stdout free for reporters that use it.
   const print = (line: string): void => options.processOutput.printLine(line);
   /**
@@ -805,38 +805,35 @@ export async function servePauses(
         waiting.set(client, '');
         const key = action === 'next' ? 'continue' : 'rest';
 
-        if (keyboard === undefined) {
-          gate.press(key, { guard: false });
-        } else {
-          keyboard.resumePause(key);
-        }
+        keyboard?.closeViewer();
+        gate.press(key, { guard: false });
       }
     },
   });
 
   /** Stops reading pause keys and returns keyboard control to `keys`. */
   const closeKeyboard = (): void => {
-    if (!reading) {
+    if (keyboard === undefined) {
       return;
     }
 
     try {
-      keyboard?.close();
+      keyboard.close();
     } finally {
-      reading = false;
+      keyboard = undefined;
       keys?.resume();
     }
   };
 
   /** Opens the keyboard listener so Ctrl-C is handled between held steps too. */
   const openKeyboard = (): void => {
-    if (keyboard === undefined || reading) {
+    if (stdin === undefined || keyboard !== undefined) {
       return;
     }
 
     keys?.pause({ interrupt: false });
+    keyboard = new StepKeyboard(stdin, gate, options.processOutput, { stream, holdSteps: steps, interrupt });
     keyboard.listen();
-    reading = true;
   };
 
   if (steps) {
@@ -845,12 +842,13 @@ export async function servePauses(
 
   /**
    * Shows a hold under its test and keys below the summary in a terminal.
-   * Without a terminal, it prints the pause in the run's output.
+   * Without a terminal, the pause is printed in the run's output.
+   *
    * Each new pause answers waiting commands. After the run starts stopping,
    * new pauses aren't printed and commands receive the run's final answer.
    */
   const show = (prompt: StepPrompt | undefined, context: StepHoldContext): void => {
-    if (keyboard !== undefined) {
+    if (stdin !== undefined) {
       if (prompt === undefined && !steps) {
         closeKeyboard();
       } else if (prompt !== undefined) {

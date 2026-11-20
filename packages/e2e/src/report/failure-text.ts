@@ -356,7 +356,7 @@ function appLogLine(entry: AppLogRecord): string {
   return entry.level === 'info' ? `${glyph} ${source}: ${text}` : `${glyph} ${source} ${entry.level}: ${text}`;
 }
 
-/** One app log line with the step number that goes with it. */
+/** Formats one app log line with its step number. */
 export function numberedAppLogLine(entry: AppLogRecord, number: number | undefined): string {
   return `${number === undefined ? 'before step 1' : `step ${number}`} · ${appLogLine(entry)}`;
 }

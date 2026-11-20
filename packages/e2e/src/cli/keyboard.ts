@@ -61,7 +61,7 @@ export class Keyboard<Key> {
     this.stdin.resume();
   }
 
-  /** Hands the terminal to a prompt: raw mode off, no key but Ctrl-C delivered by default. */
+  /** Turns off raw mode and hands keys to a prompt. By default, only interrupt keys still reach the original handler. */
   pause({ interrupt = true }: PauseOptions = {}): void {
     this.stdin.off('keypress', this.onKeypress);
     if (interrupt) {
