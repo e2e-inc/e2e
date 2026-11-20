@@ -78,6 +78,31 @@ describe('the pinned agent-desktop', () => {
     }
   });
 
+  it.skipIf(process.platform === 'win32')('replaces a damaged cache entry with a checked unpack', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'e2e-desktop-cache-'));
+    try {
+      const release = path.join(home, 'release');
+      mkdirSync(release);
+      for (const name of ['agent-desktop', 'agent-desktop-macos-helper']) writeFileSync(path.join(release, name), '#!/bin/sh\necho 1.3.1\n', { mode: 0o755 });
+      const archive = path.join(home, 'release.tar.gz');
+      execFileSync('tar', ['-czf', archive, '-C', release, '.']);
+      const bytes = readFileSync(archive);
+      const digest = createHash('sha256').update(bytes).digest('hex');
+      const digests = Object.fromEntries(['aarch64-apple-darwin', 'x86_64-apple-darwin', 'aarch64-unknown-linux-gnu', 'x86_64-unknown-linux-gnu'].map((target) => [target, digest]));
+      vi.stubGlobal('fetch', () => Promise.resolve(new Response(new Uint8Array(bytes))));
+      const env = { HOME: home, USERPROFILE: home, XDG_CACHE_HOME: path.join(home, 'cache'), LOCALAPPDATA: path.join(home, 'local') };
+      // Stamped, but its executable lost: what a cleaner that deleted one file leaves.
+      const entry = path.dirname(pinnedExecutable(env)!);
+      mkdirSync(entry, { recursive: true });
+      writeFileSync(path.join(entry, '.verified'), digest);
+      const executable = await installPinned(env, new AbortController().signal, () => undefined, digests);
+      expect(execFileSync(executable, { encoding: 'utf8' }).trim()).toBe('1.3.1');
+      expect(readdirSync(path.dirname(entry))).toEqual([path.basename(entry)]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it('reports a failed download as AGENT_DESKTOP_INSTALL_FAILED', async () => {
     vi.stubGlobal('fetch', () => Promise.reject(new TypeError('fetch failed')));
     const env = { HOME: '/nonexistent', USERPROFILE: '/nonexistent', XDG_CACHE_HOME: '/nonexistent/cache', LOCALAPPDATA: '/nonexistent/local' };

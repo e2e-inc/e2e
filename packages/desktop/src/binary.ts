@@ -178,7 +178,9 @@ async function download(url: string, archive: string, digest: string, directory:
     if (process.platform !== 'win32') await chmod(path.join(staging, executableName()), 0o755);
     // Written last, so only a whole, checked unpack is ever stamped.
     await writeFile(path.join(staging, STAMP), digest);
-    // Another run may have unpacked the same release meanwhile; its copy is as good as ours.
+    // Into place when there is no entry. A rename onto an existing entry fails, so one another run put there meanwhile is never moved aside.
+    if (await rename(staging, directory).then(() => true, () => false)) return;
+    // Another run unpacked the same release meanwhile; its copy is as good as ours.
     if (await usable(directory, digest)) return;
     // A damaged entry is moved aside, not deleted first, so the executable is missing only between two renames.
     const aside = `${directory}.stale-${process.pid}-${Date.now()}`;
