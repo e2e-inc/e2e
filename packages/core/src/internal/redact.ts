@@ -628,8 +628,6 @@ export class SecretLedger {
    */
   private readonly values: [string, string][] = [];
   private compiled: Compiled | undefined;
-  /** `compiled` over the app's secrets alone, built when a download asks. */
-  private compiledApp: Compiled | undefined;
   /** The revision `beside` had when `compiled` was built. */
   private besideRevision = -1;
 
@@ -652,21 +650,13 @@ export class SecretLedger {
     if (this.values.some(([n, v]) => n === name && v === value)) return false;
     this.values.push([name, value]);
     this.compiled = undefined;
-    this.compiledApp = undefined;
     return true;
   }
 
-  /** Whether the ledger redacts a secret of the app, its own or one beside it; a provider key is not one. */
-  get redactsAppSecrets(): boolean {
-    return this.compileApp().pattern !== undefined;
+  /** Whether the ledger redacts anything at all: its own values, the ones beside it, or a provider key. */
+  get redactsAnything(): boolean {
+    return this.compile().pattern !== undefined;
   }
-
-  /**
-   * `redactFragments` over the app's secrets alone, for a file the app
-   * served: the app holds no provider key, and a file is kept as served
-   * unless it can hold a secret the app was given.
-   */
-  readonly redactAppFragments = (text: string): string => this.compileApp().redactFragments(text);
 
   /** Bound so it can be handed out as a plain function. */
   readonly redact = (text: string): string => this.compile().redact(text);
@@ -750,19 +740,12 @@ export class SecretLedger {
     return this.compiled;
   }
 
-  private compileApp(): Compiled {
-    this.sync();
-    this.compiledApp ??= compile(this.appValues());
-    return this.compiledApp;
-  }
-
   /** Drops what was compiled once `beside` has moved. */
   private sync(): void {
     const { revision } = this.beside;
     if (revision === this.besideRevision) return;
     this.besideRevision = revision;
     this.compiled = undefined;
-    this.compiledApp = undefined;
   }
 
   /** The ledger's values and the ones shared beside it. A value it holds is usually shared too; one alternative each is enough. */

@@ -251,7 +251,7 @@ describe('download redaction', () => {
     expect(readFileSync(path.join(artifacts.dir, 'downloads', 'headers.txt'), 'utf8')).toBe('authorization: <secret:api-key>\n');
   });
 
-  it('leaves a provider key in a download as the app served it, rewritten for the secret or not', async () => {
+  it('rewrites a provider key in a download whole, beside a secret of the run or alone', async () => {
     const key = 'sk-proj-artifact-4c9e1a7f2b6d8035';
     const beside = { revision: 1, values: () => [], providerKeys: () => [['OPENAI_API_KEY', key] as const] };
     const withSecret = new SecretLedger([['api-key', SECRET]], beside);
@@ -262,15 +262,15 @@ describe('download redaction', () => {
     rewritten.sink.register('download', 'downloads/export.txt');
     await rewritten.settle();
     expect(rewritten.records[0]).toMatchObject({ redaction: 'complete' });
-    expect(readFileSync(path.join(rewritten.dir, 'downloads', 'export.txt'), 'utf8')).toBe(`secret <secret:api-key>\nkey ${key}\n`);
+    expect(readFileSync(path.join(rewritten.dir, 'downloads', 'export.txt'), 'utf8')).toBe('secret <secret:api-key>\nkey <secret:OPENAI_API_KEY>\n');
 
     const keyOnly = createAttemptArtifacts({ artifactsRoot: root(), segments: ['web', 'test-2', 'attempt-0'], attemptId: 'att-2', ledger: () => new SecretLedger([], beside) });
     mkdirSync(path.join(keyOnly.dir, 'downloads'));
     writeFileSync(path.join(keyOnly.dir, 'downloads', 'export.txt'), `key ${key}\n`);
     keyOnly.sink.register('download', 'downloads/export.txt');
     await keyOnly.settle();
-    expect(keyOnly.records[0]).toMatchObject({ redaction: 'incomplete' });
-    expect(readFileSync(path.join(keyOnly.dir, 'downloads', 'export.txt'), 'utf8')).toBe(`key ${key}\n`);
+    expect(keyOnly.records[0]).toMatchObject({ redaction: 'complete' });
+    expect(readFileSync(path.join(keyOnly.dir, 'downloads', 'export.txt'), 'utf8')).toBe('key <secret:OPENAI_API_KEY>\n');
   });
 
   it('labels a rewritten download complete, and stores the rewritten bytes', async () => {

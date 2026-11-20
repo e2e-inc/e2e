@@ -25,10 +25,11 @@ export function pixelsProvenMasked(redaction: { readonly secureNodeCount: number
  * one shared beside it. A value reaches the app in ways the runner never
  * sees (a URL or a `fill` the test spelled it into, the app's own config, a
  * session open beside this one), so downloads are redacted like every
- * report and observation, not only after a fill.
+ * report and observation, not only after a fill. A provider key counts too:
+ * a config can give the app one (`inheritEnv`), and it matches only whole.
  */
 export function redactsDownloads(ledger: SecretLedger): boolean {
-  return ledger.redactsAppSecrets;
+  return ledger.redactsAnything;
 }
 
 /**

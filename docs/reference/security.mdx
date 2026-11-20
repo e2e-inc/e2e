@@ -258,9 +258,9 @@ can't put it in a report. Each shows as `<secret:NAME>`.
 | Whole keys only | A key matches as a whole, in the forms above. Cut short at a length limit, it matches when at least half of it is there, and no fewer than 16 characters. Any other part of one isn't a match: keys of one provider start alike. |
 | Length | A value shorter than 20 characters is left alone, so a placeholder for a local model server, such as `ollama`, doesn't rewrite ordinary words. Name a shorter real key under [`secrets`](/reference/config#secrets). A value longer than 8,192 characters is left alone too, as is a shorter one the redactor can't build a pattern for, such as thousands of punctuation characters: neither is a key or token a provider issues. |
 | Output | The run holds back the end of an unfinished line that could still become a key, as it does for a secret. A prompt printed without a newline shows with the next output, and is lost if the test then blocks the process until it is stopped. |
-| Downloads | Never rewritten for a provider key. An app you give one through `inheritEnv` or `command.env` can serve it in a download, which is kept as served; name that key under [`secrets`](/reference/config#secrets) to have downloads rewritten. |
+| Downloads | A text download is rewritten for a provider key too, whole keys only: an app you give one through `inheritEnv` or `command.env` can serve it. A test that reads such a download back sees the marker. |
 | Sessions | A provider key is never added to a [session](#sessions)'s saved secrets. What the app keeps in its own state, such as browser storage, is saved as the app wrote it, encrypted. |
-| A key that is also a secret | Stays your secret: its name, and the [download](#downloads) rule. |
+| A key that is also a secret | Stays your secret: its name, and its parts are matched too, as for any secret. |
 
 These keys are not redacted:
 

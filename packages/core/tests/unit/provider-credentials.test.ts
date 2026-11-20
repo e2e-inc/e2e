@@ -157,12 +157,11 @@ describe('provider credentials in the environment', () => {
 });
 
 describe('provider credentials leave the rest of secrecy as it was', () => {
-  it('does not turn on download rewriting', () => {
+  it('turns on download rewriting: a config can give the app a key', () => {
     vi.stubEnv('OPENAI_API_KEY', fakeKey());
-    vi.stubEnv('ANTHROPIC_API_KEY', fakeKey());
     const ledger = sessionLedger(newSession(), NO_SECRETS);
     expect(ledger.redact(process.env['OPENAI_API_KEY']!)).toBe('<secret:OPENAI_API_KEY>');
-    expect(redactsDownloads(ledger)).toBe(false);
+    expect(redactsDownloads(ledger)).toBe(true);
   });
 
   it('still rewrites downloads once the session holds a secret of the run', () => {
@@ -213,12 +212,13 @@ describe('provider keys and the rest of redaction', () => {
     expect(ledger.redact(`title ${key} ${key}-worker`)).toBe(`title ${key} ${key}-worker`);
   });
 
-  it('leaves a key in a download as the app served it, even when the download is rewritten for a secret of the run', () => {
+  it('rewrites a key in a download whole, beside a secret of the run, and leaves a part of one alone', () => {
     const key = fakeKey();
     vi.stubEnv('OPENAI_API_KEY', key);
     const ledger = sessionLedger(newSession(), NO_SECRETS);
     ledger.register('token', 'run-secret-value-7702');
-    expect(ledger.redactAppFragments(`export run-secret-value-7702 ${key}`)).toBe(`export <secret:token> ${key}`);
+    expect(ledger.redactFragments(`export run-secret-value-7702 ${key}`)).toBe('export <secret:token> <secret:OPENAI_API_KEY>');
+    expect(ledger.redactFragments(`prefix ${key.slice(0, 12)} only`)).toBe(`prefix ${key.slice(0, 12)} only`);
   });
 
   it('matches a key whole, never in part: keys of one provider share a prefix', () => {
@@ -237,7 +237,7 @@ describe('provider keys and the rest of redaction', () => {
     ledger.register('apiKey', key);
     expect(ledger.redact(key)).toBe('<secret:apiKey>');
     expect(redactsDownloads(ledger)).toBe(true);
-    expect(ledger.redactAppFragments(key)).toBe('<secret:apiKey>');
+    expect(ledger.redactFragments(key)).toBe('<secret:apiKey>');
   });
 });
 
@@ -305,19 +305,18 @@ describe('the ledger and what is beside it', () => {
     const { SecretLedger } = await import('../../src/internal/redact.ts');
     const ledger = new SecretLedger([['token', 'alone-secret-value-3391']]);
     expect(ledger.redact('alone-secret-value-3391')).toBe('<secret:token>');
-    expect(ledger.redactsAppSecrets).toBe(true);
-    expect(ledger.redactAppFragments('secret-value-33')).toBe('<secret:token>');
+    expect(ledger.redactsAnything).toBe(true);
+    expect(ledger.redactFragments('secret-value-33')).toBe('<secret:token>');
     expect(ledger.redact('plain text stays as written')).toBe('plain text stays as written');
-    expect(new SecretLedger().redactsAppSecrets).toBe(false);
+    expect(new SecretLedger().redactsAnything).toBe(false);
   });
 
   it('rewrites downloads from the moment a session beside it holds a secret, before it redacts anything else', () => {
     const ledger = sessionLedger(newSession(), NO_SECRETS);
-    // What the app-only view holds now; a secret another test file shared for good may be in it.
-    expect(ledger.redactAppFragments('adjacent-ledger-token-8812')).toBe('adjacent-ledger-token-8812');
+    expect(ledger.redactFragments('adjacent-ledger-token-8812')).toBe('adjacent-ledger-token-8812');
     sessionLedger(newSession(), new Map([['beside', { name: 'beside', purpose: 'generic-secret', value: 'adjacent-ledger-token-8812' }]]) as never);
     expect(redactsDownloads(ledger)).toBe(true);
-    expect(ledger.redactAppFragments('adjacent-ledger-token-8812')).toBe('<secret:beside>');
+    expect(ledger.redactFragments('adjacent-ledger-token-8812')).toBe('<secret:beside>');
   });
 
   it('keeps two secrets apart whose name and value run together to the same text', async () => {
@@ -327,7 +326,7 @@ describe('the ledger and what is beside it', () => {
       ['toke', 'nA-shared-value-1'],
     ]);
     expect(ledger.redact('enA-shared-value-1')).toBe('<secret:tok>');
-    expect(ledger.redactAppFragments('enA-shared-value-1')).toBe('<secret:tok>');
+    expect(ledger.redactFragments('enA-shared-value-1')).toBe('<secret:tok>');
   });
 
   it('sees a key and a shared secret that arrive together after it last redacted', () => {
