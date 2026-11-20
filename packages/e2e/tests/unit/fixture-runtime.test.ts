@@ -354,14 +354,14 @@ describe('context.withNode', () => {
    * each locate answers, and a match named in `secure` is a secure field.
    */
   function probeRuntime(
-    matches: () => readonly string[],
+    matches: () => readonly string[] | Promise<readonly string[]>,
     overrides: Partial<E2EConfig> = {},
     secure: readonly string[] = [],
   ) {
     const engine = defineEngine({
       name: 'fake', version: '1', spiVersion: 1,
       observe: async () => snapshot([]),
-      locate: async () => matches().map((id) => ({
+      locate: async () => (await matches()).map((id) => ({
         ref: { id, revision: '' },
         role: 'navigation',
         ...(secure.includes(id) ? { states: { secure: true } } : {}),
@@ -438,6 +438,20 @@ describe('context.withNode', () => {
       budget = operation.timeoutMs;
       return 'read';
     }, 300);
+    expect(budget).toBeLessThanOrEqual(300);
+  });
+
+  it('lets use run as long as the slowest read of its wait, past the deadline the locate used up', async () => {
+    const { screen, probe } = probeRuntime(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      return ['nav'];
+    });
+    let budget: number | undefined;
+    await probe.run(screen.getByRole('navigation'), async (_ref, operation) => {
+      budget = operation.timeoutMs;
+      return 'read';
+    }, 300);
+    expect(budget).toBeGreaterThanOrEqual(200);
     expect(budget).toBeLessThanOrEqual(300);
   });
 

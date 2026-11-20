@@ -153,7 +153,7 @@ test('checkout', async ({ app, agent, screen }) => {
 | `page.waitForEvent('popup')` | `browser.waitForPopup(() => trigger)`，会激活新标签页，参阅[标签页](/reference/web#tabs) |
 | `context.pages()`, `context.newPage()`, `page.bringToFront()` | `browser.tabs()`、`browser.newTab()`、`tab.activate()`；没有 `context.on('page')` 事件 |
 | `page.evaluate(fn, arg)` | `browser.evaluate(fn, arg)`，输入和输出均为 JSON |
-| `locator.evaluate(fn, arg)` | `browser.evaluateOn(locator, fn, arg)`，输入和输出均为 JSON；不接受 `{ timeout }`，最长等待到 `actionTimeout` |
+| `locator.evaluate(fn, arg)` | `browser.evaluateOn(locator, fn, arg)`，输入和输出均为 JSON；不接受 `{ timeout }`，最长等待到 `actionTimeout`；运行期间发生导航时为 `ENGINE_FAILURE`，退出码 3 |
 | `page.addInitScript()`, `page.emulateMedia({ colorScheme, reducedMotion })` | `browser.addInitScript()` 或 `web({ initScripts })`；`browser.emulateMedia()` |
 | `context.addCookies()`, `cookies()`, `clearCookies()` | `browser.setCookies()`、`browser.cookies()`、`browser.clearCookies()` |
 

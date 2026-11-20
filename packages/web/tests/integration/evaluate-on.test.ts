@@ -64,6 +64,24 @@ describe('PlaywrightSurface.evaluateOn', () => {
       .rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringContaining('matches 0 elements') });
   });
 
+  it('releases the element and result handles of every evaluation', async () => {
+    // Playwright keeps a client object per handle until it is disposed; the
+    // connection's object map is the only place that count shows.
+    const connection: unknown = Reflect.get(page, '_connection');
+    const objects: unknown = typeof connection === 'object' && connection !== null ? Reflect.get(connection, '_objects') : undefined;
+    if (!(objects instanceof Map)) throw new Error('playwright-core no longer keeps its objects in _connection._objects');
+    await page.setContent('<p>one</p>');
+    const ref = await locateOne(paragraph);
+    await surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, true);
+    await page.evaluate('1');
+    const before = objects.size;
+    for (let index = 0; index < 50; index += 1) {
+      await surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, true);
+    }
+    await page.evaluate('1');
+    expect(objects.size - before).toBeLessThanOrEqual(2);
+  });
+
   it.each([
     ['a label', nameField],
     ['a selector', { kind: 'selector', selector: 'input' } as const],

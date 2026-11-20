@@ -396,7 +396,7 @@ if (sampled && reads.cutOff(cause)) throw await notFound(cause);
     for (;;) {
       const ref = wait
         ? (await this.resolveCounted(expression, reads)).ref
-        : await this.singleOf(await this.resolveOnce(expression, reads, 'empty'), expression);
+        : await this.singleOf(await this.resolveNow(expression, reads), expression);
       if (ref === null) {
         const described = describeExpression(expression);
         throw new TestError('LOCATOR_NOT_FOUND', `locator matched no nodes: ${described}`, {

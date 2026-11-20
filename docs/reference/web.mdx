@@ -693,8 +693,9 @@ const width = await browser.evaluateOn(
 - It is meant for reads. The code can change the page, but act through the
   locator instead, so the step records the action.
 - The code runs once. A navigation while it runs fails the call with
-  `ENGINE_FAILURE`, and the code is never run again on the new page.
-  Playwright throws here too.
+  `ENGINE_FAILURE`, exit code 3, as it fails [`evaluate`](#evaluate), and
+  the code is never run again on the new page. Playwright reports the same
+  case as a test failure.
 - To wait for a value, use
   [`toHaveCSS`](/reference/expect#tohavecss) or
   [`toHaveJSProperty`](/reference/expect#tohavejsproperty).

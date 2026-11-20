@@ -216,7 +216,10 @@ export function readEvaluation(text: string): EvaluationResult {
     });
   }
   if ('secure' in report) {
-    throw new ConfigurationError('POLICY_DENIED', 'reading values from a secure field is denied: the node became a secure field');
+    throw new ConfigurationError(
+      'POLICY_DENIED',
+      'reading values from a secure field is denied: the node is a secure field, or its type cannot be checked',
+    );
   }
   if ('invalid' in report) return { ok: false, invalid: report.invalid };
   throw new TestError('EVALUATE_FAILED', report.message);
