@@ -72,8 +72,8 @@ test('signs in', async ({ app, screen }) => {
 - Not supported yet: the menu bar, and web content (a browser window, an
   Electron app, a web view).
 - One worker per target: its workers would share one screen. Two desktop
-  targets can still run at the same time; with `headed: true`, set the run's
-  `workers: 1`.
+  targets run at the same time. With `headed: true` they would share the
+  pointer and keyboard too, so set the run's `workers: 1`.
 
 ## License
 

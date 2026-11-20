@@ -757,12 +757,13 @@ export class DesktopSurface {
    * read that only places secure fields: it reads every node even with
    * `snapshot: 'interactive'`, which leaves out a secure node with no action
    * of its own, and hands out no ids, so the ids of the screen the harness
-   * holds stay as they are. Undefined before `app.open()` and while the app
-   * has no window; a copy of the app the engine did not launch is never
-   * read. None of these is an empty screen, which would let a negative
-   * assertion pass: an app that quit is `INVALID_STATE`, as is a chosen
-   * window that closed, and windows none of which could be read are a
-   * retryable `NODE_STALE`, so a locator reads again until its deadline.
+   * holds stay as they are. Undefined, an empty screen, before `app.open()`
+   * and while the running app has no window; a copy of the app the engine
+   * did not launch is never read. A read that fails is no empty screen,
+   * which would let a negative assertion pass: an app that quit is
+   * `INVALID_STATE`, as is a chosen window that closed, and windows none of
+   * which could be read are a retryable `NODE_STALE`, so a locator reads
+   * again until its deadline.
    */
   private async capture(operation: OperationContext, windowId = this.chosenWindow, forMask = false): Promise<ProjectedScreen | undefined> {
     const windows = await this.ownWindows(operation);
