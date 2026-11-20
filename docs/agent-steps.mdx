@@ -70,10 +70,11 @@ example "save the product, then confirm it appears in the product list".
 
 The loop detects repeated calls and cycles. After three failed actions in
 a row, it tells the model to change its approach. After five, it asks for
-a verdict. Repeated `observe` calls, which wait on a save or a load in
-progress, get more room: a notice after six in a row, a verdict after ten.
-The same limits apply in assertion exploration. It also asks for a verdict
-when the budget or the deadline is near.
+a verdict. Looks that wait on a save or a load in progress, `observe` and
+`screenshot` repeated or in turn, get more room: a notice after six looks
+at an unchanged screen, a verdict after ten. A look that shows a change
+starts the count again. The same limits apply in assertion exploration. It
+also asks for a verdict when the budget or the deadline is near.
 
 ## Assertion exploration
 
