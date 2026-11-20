@@ -110,6 +110,8 @@ async function openHostWorker<Fixtures extends object>(options: OpenHostOptions)
           signal: sessionOptions.signal ?? new AbortController().signal,
           timeoutMs: sessionOptions.timeout ?? config.timeout,
           agent: sessionOptions.agent,
+          // The external runner reports what a step throws, so it gets the classified, redacted error, as a `launch` program does.
+          redactThrown: true,
           ...(sessionOptions.onStep === undefined ? {} : { onProgress: sessionOptions.onStep }),
         });
         return {

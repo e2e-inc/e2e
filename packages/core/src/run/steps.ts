@@ -320,6 +320,8 @@ function redactErrorInPlace(thrown: unknown, redact: (text: string) => string): 
     try {
       error.message = redact(error.message);
       if (error.stack !== undefined) error.stack = redact(error.stack);
+      // An agent error keeps its message twice: as `message` and as `explanation`.
+      if (isAgentError(error)) (error as { explanation: string }).explanation = redact(error.explanation);
       redactErrorDetails(error, redact);
     } catch {
       // A frozen error keeps its text; nothing more can be done to it here.
@@ -772,6 +774,8 @@ export class StepRecorder {
       record.error = serializeError(error, { projectRoot: this.projectRoot, redact: this.redact });
       if (!this.redactThrown) throw cause;
       if (this.redact !== undefined) redactErrorInPlace(error, this.redact);
+      // A caller with no report around it gets the classified error alone: a provider SDK's cause keeps fields no redaction reaches.
+      Reflect.deleteProperty(error, 'cause');
       throw error;
     } finally {
       this.running.delete(record.id);
