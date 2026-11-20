@@ -150,9 +150,12 @@ the one `screen` reads (`desktop.useWindow(window)`), and quits the app
 | Secrets | A password field shows no value, and screenshots paint it black |
 
 A screenshot that cannot cover a password field is not saved. agent-desktop
-keeps the text of other fields in each worker's private state directory. The
-engine removes it when the worker ends. The next run removes one a killed
-worker left behind, and quits the app that worker left running.
+keeps the text of other fields in each worker's private state directory.
+When a worker exits, the engine removes that text. If the app could not be
+quit, the engine keeps a record of the launch for a later desktop run. That
+run quits the app when it can show that the process belongs to the launch:
+by the launch token, or by the process id and the time the process started.
+The next run also does this for a worker that was killed.
 
 ## Options
 

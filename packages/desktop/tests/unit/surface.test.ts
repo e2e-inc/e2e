@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { OperationContext } from '@e2e-dev/core/engine';
@@ -438,13 +438,19 @@ describe('DesktopSurface', () => {
     expect(fake.calls().filter((call) => call.key === 'list-apps')).toHaveLength(3);
   });
 
-  it('keeps the state directory, and the app it names, when dispose could not quit the app', async () => {
+  it('keeps the launch record, and the process it names, when dispose could not quit the app, and drops the field text', async () => {
     const { surface, fake, app } = await launched({ 'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [], complete: false } }] }, { observe: false });
     const home = fake.calls()[0]!.home!;
+    // What agent-desktop keeps of the app's fields in its state directory.
+    mkdirSync(path.join(home, 'refs'));
+    writeFileSync(path.join(home, 'refs', 'fields.json'), '{"value":"ada"}');
     try {
       await expect(surface.dispose({ signal, timeoutMs: 5_000 })).rejects.toThrow(/listed the apps only in part/);
-      const { token } = JSON.parse(readFileSync(path.join(home, 'app.json'), 'utf8')) as { token: string };
-      expect(await environmentOf(app.pid)).toContain(`E2E_DESKTOP_LAUNCH=${token}`);
+      expect(readdirSync(home).toSorted()).toEqual(['app.json', 'owner']);
+      const record = JSON.parse(readFileSync(path.join(home, 'app.json'), 'utf8')) as { token: string; pid: number; started: string };
+      expect(await environmentOf(app.pid)).toContain(`E2E_DESKTOP_LAUNCH=${record.token}`);
+      // The process, by its id and when it started, so a later run can quit it without reading its environment.
+      expect(record).toMatchObject({ pid: app.pid, started: execFileSync('ps', ['-o', 'lstart=', '-p', String(app.pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }).trim() });
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -1200,6 +1206,34 @@ describe('DesktopSurface', () => {
       await initialized({});
       expect(await gone(leaked.pid!)).toBe(true);
       expect(await gone(theirs.pid!, 300)).toBe(false);
+    } finally {
+      for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("quits the process a killed worker's record names by its id and start, though its environment cannot be read, and not a later one given that id", async () => {
+    const dead = spawn(process.execPath, ['-e', '']);
+    await new Promise((resolve) => dead.on('exit', resolve));
+    const leaked = unreadableCopy();
+    const reused = unreadableCopy();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const startOf = (pid: number) => execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }).trim();
+    const records = [
+      { token: 'token-1', pid: leaked, started: startOf(leaked) },
+      // The id the record names now belongs to a process that started at another time.
+      { token: 'token-2', pid: reused, started: 'Thu Jan  1 00:00:00 1970' },
+    ];
+    const directories = records.map((record) => {
+      const directory = mkdtempSync(path.join(tmpdir(), 'e2e-agent-desktop-'));
+      writeFileSync(path.join(directory, 'owner'), String(dead.pid));
+      writeFileSync(path.join(directory, 'app.json'), JSON.stringify(record));
+      return directory;
+    });
+    try {
+      await initialized({});
+      expect(await gone(leaked)).toBe(true);
+      expect(await gone(reused, 300)).toBe(false);
+      for (const directory of directories) expect(existsSync(directory)).toBe(false);
     } finally {
       for (const directory of directories) rmSync(directory, { recursive: true, force: true });
     }

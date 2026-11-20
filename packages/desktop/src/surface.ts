@@ -63,6 +63,9 @@ const HANDED_OVER = new Error('the launch handed over to a copy already running'
 /** How long a quit looks for the process of a launch whose outcome was unknown. */
 const PENDING_SETTLE_MS = 3_000;
 
+/** How much of a quit's budget is kept for a killed process to exit. */
+const EXIT_WAIT_MS = 500;
+
 /** How long a launch waits for its process to appear, and then for the app's window to become readable, before it reports why it did not. */
 const LAUNCH_READY_MS = 10_000;
 
@@ -153,6 +156,13 @@ interface Launch {
   readonly target: string;
   readonly token: string;
   readonly before: ReadonlySet<number> | undefined;
+}
+
+/** What a state directory's launch record keeps: the launch's token, and once the process is shown to be its own, its id and when it started. */
+interface LaunchRecord {
+  readonly token: string;
+  readonly pid?: number;
+  readonly started?: string;
 }
 
 /** One attempt's bookkeeping. */
@@ -358,9 +368,9 @@ export class DesktopSurface {
       await this.quit(context.signal, context.timeoutMs);
       quit = true;
     } finally {
-      // An app that would not quit, or a launch whose process was never found, stays named in the state directory, whose sweep at the next run's init quits it by its token.
+      // An app that would not quit, or a launch whose process was never found, stays named in the launch record, which the next run's sweep quits; the text agent-desktop kept of the app's fields goes either way.
       const leftRunning = !quit && (this.pid !== undefined || this.pending !== undefined);
-      if (this.home !== undefined && !leftRunning) await rm(this.home, { recursive: true, force: true }).catch(() => undefined);
+      if (this.home !== undefined) await (leftRunning ? keepOnlyRecord(this.home) : rm(this.home, { recursive: true, force: true })).catch(() => undefined);
       this.home = undefined;
       this.cli = undefined;
       this.attempt = undefined;
@@ -434,12 +444,7 @@ export class DesktopSurface {
     // Marks the process this launch starts, so it is told apart from every other copy by evidence, never by timing.
     const launch: Launch = { target, token: randomUUID(), before: await this.runningCopies(target, operation) };
     // Written before anything is sent, so the app stays findable by its token if this worker is killed mid-launch or never finds its process.
-    if (this.home !== undefined) {
-      // Renamed into place, so a worker killed mid-write never leaves half a record.
-      const record = path.join(this.home, APP_FILE);
-      await writeFile(`${record}.partial`, JSON.stringify({ token: launch.token }));
-      await rename(`${record}.partial`, record);
-    }
+    await this.writeRecord({ token: launch.token });
     try {
       if (this.bundle === undefined) await this.launchById(launch, operation);
       else await this.openBundle(this.bundle, launch, operation);
@@ -450,8 +455,19 @@ export class DesktopSurface {
       if (this.pid === undefined && !refused) this.pending = launch;
       throw cause;
     }
+    // The process now shown to be the launch's, with when it started, so a later run can quit it even when its environment cannot be read, and never a later process given the same id.
+    const started = this.pid === undefined ? undefined : await startedAt(this.pid, operation.signal);
+    if (this.pid !== undefined && started !== undefined) await this.writeRecord({ token: launch.token, pid: this.pid, started });
     this.forget();
     await this.windowReadable(operation);
+  }
+
+  /** Puts the launch record in the state directory, renamed into place so a worker killed mid-write never leaves half a record. */
+  private async writeRecord(record: LaunchRecord): Promise<void> {
+    if (this.home === undefined) return;
+    const file = path.join(this.home, APP_FILE);
+    await writeFile(`${file}.partial`, JSON.stringify(record));
+    await rename(`${file}.partial`, file);
   }
 
   /**
@@ -698,10 +714,12 @@ export class DesktopSurface {
   }
 
   private async quitNow(signal: AbortSignal, timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
     const pending = this.pending;
     if (this.pid === undefined && pending !== undefined) {
       // A launch whose outcome was unknown: look for the process it started, which may still be registering, under this quit's own budget.
-      const until = Date.now() + Math.min(timeoutMs, PENDING_SETTLE_MS);
+      // Short of the quit's budget by `EXIT_WAIT_MS`, so a process found at the end can still be seen to exit.
+      const until = Date.now() + Math.min(Math.max(timeoutMs - EXIT_WAIT_MS, 0), PENDING_SETTLE_MS);
       // The pending launch stays until it is claimed or the wait's last answer found none: an answer that listed the apps in part proves nothing, and a lookup that ran out of time is no answer.
       let lastShowedNone = false;
       while (Date.now() < until && !signal.aborted) {
@@ -717,16 +735,11 @@ export class DesktopSurface {
       if (this.pid === undefined) {
         // A process carrying the launch's token is its own, whether or not the app list shows it yet.
         const carriers = await processesCarrying(pending.token, signal);
-        // A lookup that failed shows nothing, and the launch record is what the next quit or sweep finds the app by: it stays.
         if (carriers === undefined) {
-          throw new EngineError('ENGINE_FAILURE', `could not look for the processes a launch of ${pending.target} started: listing the running processes failed; quitting tries again`, { retryable: false });
+          throw new EngineError('ENGINE_FAILURE', `could not tell whether a launch of ${pending.target} started the app: looking for its token among the processes failed; quitting tries again`, { retryable: false });
         }
-        for (const carrier of carriers) {
-          try {
-            process.kill(carrier, 'SIGKILL');
-          } catch {
-            // Gone already.
-          }
+        if (!(await killed(carriers, deadline, signal))) {
+          throw new EngineError('ENGINE_FAILURE', `the process a launch of ${pending.target} started did not exit; quitting tries again`, { retryable: false });
         }
         if (carriers.length === 0 && !lastShowedNone) {
           throw new EngineError('ENGINE_FAILURE', `could not tell whether a launch of ${pending.target} started the app: listing the apps ran out of time or listed them only in part; quitting tries again`, { retryable: false });
@@ -741,22 +754,11 @@ export class DesktopSurface {
     const { pid, instance, appName } = this;
     this.forget();
     if (pid === undefined || appName === undefined) return;
-    const deadline = Date.now() + timeoutMs;
     const { apps, complete } = await this.run<{ apps?: readonly RawApp[]; complete?: boolean }>(['list-apps', '--app', appName], { label: `find ${appName}`, input: false, signal, timeoutMs });
     const running = apps?.some((app) => app.pid === pid && (instance === undefined || app.process_instance === instance)) === true;
     // An inventory that skipped some processes cannot say the app is gone; it stays the engine's, to quit again.
     if (!running && complete === false) throw new EngineError('ENGINE_FAILURE', `could not tell whether the app (process ${pid}) is still running: agent-desktop listed the apps only in part`, { retryable: false });
-    if (running) {
-      try {
-        process.kill(pid, 'SIGKILL');
-      } catch {
-        // Gone between the lookup and the kill.
-      }
-      while (alive(pid)) {
-        if (signal.aborted || Date.now() >= deadline) throw new EngineError('ENGINE_FAILURE', `the app (process ${pid}) did not exit`, { retryable: false });
-        await sleep(LAUNCH_POLL_MS, signal);
-      }
-    }
+    if (running && !(await killed([pid], deadline, signal))) throw new EngineError('ENGINE_FAILURE', `the app (process ${pid}) did not exit`, { retryable: false });
     this.pid = undefined;
     this.instance = undefined;
     if (this.home !== undefined) await rm(path.join(this.home, APP_FILE), { force: true }).catch(() => undefined);
@@ -1347,8 +1349,7 @@ async function carriesToken(pid: number, token: string, signal: AbortSignal): Pr
  * The processes whose environment carries a launch token: the app the
  * launch that made it started, whatever its process id. A process whose
  * environment cannot be read is never among them. Undefined when the
- * processes could not be listed at all, which shows nothing: an empty list
- * means the lookup worked and found none.
+ * processes could not be listed, which shows nothing.
  */
 async function processesCarrying(token: string, signal: AbortSignal): Promise<number[] | undefined> {
   const marker = `${LAUNCH_TOKEN}=${token}`;
@@ -1420,9 +1421,10 @@ function inheritedEnv(env: Readonly<Record<string, string | undefined>>): Record
  * is gone, or, with no owner file, once it is a day old. One still in use
  * is never touched. The app such a worker launched and left running is
  * quit too: every process whose environment carries the token its launch
- * record names. One whose environment cannot be read is left alone. When
- * that lookup fails or a process will not die, the record stays for the next
- * sweep, and only the cached field text beside it is removed.
+ * record names, and the process the record names when it is still the one
+ * that started then. A process shown to be the launch's by neither is left
+ * alone. When the processes cannot be looked up, or one does not exit, the
+ * record stays, without the field text, for the next run to try again.
  */
 async function sweepStateDirectories(): Promise<void> {
   const root = tmpdir();
@@ -1436,37 +1438,58 @@ async function sweepStateDirectories(): Promise<void> {
     // A record cut short by the kill that left it names no process: the directory still goes.
     const parsed: unknown = await readFile(path.join(directory, APP_FILE), 'utf8').then((text): unknown => JSON.parse(text)).catch(() => undefined);
     const launched = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
-    const { token } = launched;
-    if (typeof token === 'string' && token !== '' && !(await quitCarriers(token))) {
-      // The app may still run and the record is the only way to find it: it stays for the next sweep, and the field text agent-desktop cached beside it goes now.
-      for (const name of await readdir(directory).catch(() => [] as string[])) {
-        if (name !== OWNER_FILE && name !== APP_FILE) await rm(path.join(directory, name), { recursive: true, force: true }).catch(() => undefined);
-      }
-      continue;
+    const signal = AbortSignal.timeout(5_000);
+    const owned: number[] = [];
+    let known = true;
+    if (typeof launched.token === 'string' && launched.token !== '') {
+      const carriers = await processesCarrying(launched.token, signal);
+      if (carriers === undefined) known = false;
+      else owned.push(...carriers);
     }
-    await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+    const { pid, started } = launched;
+    if (typeof pid === 'number' && typeof started === 'string' && alive(pid)) {
+      const now = await startedAt(pid, signal);
+      // Running, but when it started cannot be read: whether it is the launch's process is unknown.
+      if (now === undefined) known = false;
+      else if (now === started && !owned.includes(pid)) owned.push(pid);
+    }
+    const settled = known && (await killed(owned, Date.now() + 2_000, signal));
+    await (settled ? rm(directory, { recursive: true, force: true }) : keepOnlyRecord(directory)).catch(() => undefined);
   }
 }
 
-/**
- * Kills every process carrying a launch token. True once none is left to
- * kill: the lookup worked and every carrier it found is gone. False when the
- * lookup failed or a carrier could not be killed, so the caller keeps the
- * record that names the token.
- */
-async function quitCarriers(token: string): Promise<boolean> {
-  const carriers = await processesCarrying(token, AbortSignal.timeout(5_000));
-  if (carriers === undefined) return false;
-  let done = true;
-  for (const pid of carriers) {
+/** Removes everything in a state directory but its owner file and launch record: the text agent-desktop kept of the app's fields. */
+async function keepOnlyRecord(directory: string): Promise<void> {
+  for (const entry of await readdir(directory).catch(() => [] as string[])) {
+    if (entry !== OWNER_FILE && entry !== APP_FILE) await rm(path.join(directory, entry), { recursive: true, force: true });
+  }
+}
+
+/** Kills each process and waits until all of them exited; false when one still runs at `until`. */
+async function killed(pids: readonly number[], until: number, signal: AbortSignal): Promise<boolean> {
+  for (const pid of pids) {
     try {
       process.kill(pid, 'SIGKILL');
-    } catch (cause) {
-      // Gone already is what the sweep wants.
-      if ((cause as NodeJS.ErrnoException).code !== 'ESRCH') done = false;
+    } catch {
+      // Gone already.
     }
   }
-  return done;
+  while (pids.some((pid) => alive(pid))) {
+    if (signal.aborted || Date.now() >= until) return false;
+    await sleep(LAUNCH_POLL_MS, signal);
+  }
+  return true;
+}
+
+/**
+ * When a process started, as `ps` prints it: with its id, what tells it
+ * from a later process the OS gives the same id. Undefined when it is not
+ * running or `ps` failed.
+ */
+async function startedAt(pid: number, signal: AbortSignal): Promise<string | undefined> {
+  const { stdout } = await execFileAsync('ps', ['-o', 'lstart=', '-p', String(pid)], { signal, env: { ...process.env, LC_ALL: 'C' } }).catch(() => ({ stdout: '' }));
+  const text = stdout.trim();
+  return text === '' ? undefined : text;
 }
 
 /**
