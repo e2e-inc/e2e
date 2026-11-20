@@ -881,15 +881,29 @@ describe('DesktopSurface', () => {
     expect(fake.calls().filter((call) => call.key === 'press')).toHaveLength(1);
   });
 
-  it('closes the menu a select of a missing option left open, and reports the option missing', async () => {
+  it('closes the menu a select of a missing option left open, and names the option it may lack', async () => {
     const { surface, fake, byTestId } = await launched((pid) => ({
       snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')],
       select: [failure('APP_UNRESPONSIVE', 'delivered_unverified')],
       'list-surfaces': [{ ok: true, data: { pid, surfaces: [{ type: 'context_menu' }] } }, { ok: true, data: { pid, surfaces: [] } }],
     }));
-    await expect(surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Enterprise' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/no option "Enterprise"/) });
+    // A menu left open shows neither the option missing nor nothing chosen: the failure stays one that may have committed.
+    await expect(surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Enterprise' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/may have no option "Enterprise"/) });
     expect(fake.calls().find((call) => call.key === 'select')?.args).toEqual(expect.arrayContaining(['--timeout-ms', '3000']));
     expect(fake.calls().filter((call) => call.key === 'press').map((call) => call.args[1])).toEqual(['escape']);
+  });
+
+  it("reports the select's own failure when closing the menu it left open fails", async () => {
+    const unconfirmed = { ok: false, error: { code: 'STALE_REF', message: 'focus unconfirmed', details: { cause: 'exact_window_focus_unconfirmed' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
+    const theirs = otherCopy();
+    const { surface, byTestId } = await launched((pid) => ({
+      snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')],
+      select: [failure('TIMEOUT', 'delivered_unverified')],
+      press: [unconfirmed],
+      'list-surfaces': [{ ok: true, data: { pid, surfaces: [{ type: 'context_menu' }] } }],
+      'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [{ name: 'SpikeForm', pid: theirs, process_instance: 'theirs' }, { name: 'SpikeForm', pid, process_instance: 'instance-1' }] } }],
+    }));
+    await expect(surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Team' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
   });
 
   it('reports a select that may have chosen something when no menu is left open', async () => {

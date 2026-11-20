@@ -996,8 +996,9 @@ export class DesktopSurface {
    * editable combo box as free text. A stale ref is `NODE_STALE`, so the
    * harness locates the list again. For a pop-up button agent-desktop opens
    * the menu to find the option; when it cannot, it leaves the menu open,
-   * which is closed again here and reported as a missing option, since
-   * nothing was chosen.
+   * which is closed again here. A failure after the menu opened stays one
+   * that may have chosen something: a menu left open does not show which
+   * control opened it, or that the option is missing.
    */
   private async select(binding: NodeBinding, label: string, operation: OperationContext): Promise<void> {
     const ref = this.refOf(binding, 'select');
@@ -1006,8 +1007,9 @@ export class DesktopSurface {
     } catch (cause) {
       // `select` answers ELEMENT_NOT_FOUND for an option it cannot find; a list that is gone is a stale ref.
       if (cause instanceof AgentDesktopFailure && cause.notDelivered && cause.code === 'ELEMENT_NOT_FOUND') throw notActionable(`the list has no option "${label}"`);
-      if (cause instanceof AgentDesktopFailure && !cause.notDelivered && (await this.closeOpenMenu(binding.windowId, operation))) {
-        throw notActionable(`the list has no option "${label}": agent-desktop opened its menu and could not choose it, and the menu was closed`);
+      // A menu that cannot be closed leaves the select's own failure to report.
+      if (cause instanceof AgentDesktopFailure && !cause.notDelivered && (await this.closeOpenMenu(binding.windowId, operation).catch(() => false))) {
+        throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `select "${label}": agent-desktop opened the list's menu and did not choose it; the list may have no option "${label}". The menu was closed`, { retryable: false, cause });
       }
       throw translate(cause, `select "${label}"`, true);
     }
