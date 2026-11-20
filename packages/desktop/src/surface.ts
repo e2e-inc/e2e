@@ -454,8 +454,17 @@ export class DesktopSurface {
     if (typeof launched.pid !== 'number') throw new EngineError('ENGINE_FAILURE', `agent-desktop launched ${target} but reported no process id, so the engine cannot tell its copy from another`, { retryable: false });
     // A launch handed to a copy already running is not this launch's, and is never driven or quit: a process that ran before the launch, or one whose readable environment lacks the token.
     // An unreadable environment (a macOS system app) leaves agent-desktop's report, of a fresh instance it started, standing.
-    if (launch.before?.has(launched.pid) === true || (await carriesToken(launched.pid, token, operation.signal)) === false) {
+    const carries = await carriesToken(launched.pid, token, operation.signal);
+    if (launch.before?.has(launched.pid) === true || carries === false) {
       throw new EngineError('ENGINE_FAILURE', `launching ${target} handed over to a copy already running (process ${launched.pid}), which the engine does not drive or quit; quit that copy and run again`, { retryable: false, cause: HANDED_OVER });
+    }
+    // With no token to read and no whole list of the copies that ran before, nothing shows the process is new: it may be a copy already running.
+    if (carries === undefined && launch.before === undefined) {
+      throw new EngineError(
+        'ENGINE_FAILURE',
+        `launched ${target}, but process ${launched.pid} cannot be shown to be this launch's: its environment cannot be read, and agent-desktop listed the running apps only in part before the launch. The engine does not drive or quit it; run again`,
+        { retryable: false, cause: HANDED_OVER },
+      );
     }
     this.appName = launched.app ?? target;
     this.pid = launched.pid;
@@ -481,7 +490,7 @@ export class DesktopSurface {
     }
     const until = Date.now() + Math.min(operation.timeoutMs, LAUNCH_READY_MS);
     try {
-      while (!(await this.claim(launch, operation))) {
+      while ((await this.claim(launch, operation)) !== true) {
         if (Date.now() + LAUNCH_POLL_MS >= until || operation.signal.aborted) {
           throw new EngineError(
             'ACTION_MAY_HAVE_COMMITTED',
@@ -503,12 +512,15 @@ export class DesktopSurface {
    * started: the one that carries its token in its environment, else, when
    * no environment can be read (a build signed with the `restrict` flag, a
    * system app), the one new process of the app, which was not running
-   * before the launch. False when there is none (yet). A copy without the
-   * token, the developer's own or another worker's, is never taken.
+   * before the launch. False when there is none (yet); undefined when
+   * agent-desktop listed the apps only in part and none carries the token,
+   * which shows nothing: the launch's copy may be among the ones left out.
+   * A copy without the token, the developer's own or another worker's, is
+   * never taken.
    */
-  private async claim(launch: Launch, operation: Pick<OperationContext, 'signal' | 'timeoutMs'>): Promise<boolean> {
+  private async claim(launch: Launch, operation: Pick<OperationContext, 'signal' | 'timeoutMs'>): Promise<boolean | undefined> {
     const { target, token, before } = launch;
-    const { apps } = await this.run<{ apps?: readonly RawApp[] }>(['list-apps'], { label: 'list apps', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
+    const { apps, complete } = await this.run<{ apps?: readonly RawApp[]; complete?: boolean }>(['list-apps'], { label: 'list apps', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
     const unreadable: RawApp[] = [];
     for (const app of apps ?? []) {
       if (typeof app.pid !== 'number' || (app.bundle_id !== target && app.name !== target)) continue;
@@ -518,6 +530,8 @@ export class DesktopSurface {
       if (carries === true) return this.take(app, target);
       if (carries === undefined && before !== undefined) unreadable.push(app);
     }
+    // A list with copies left out can hide a second new one, so its single new copy proves nothing.
+    if (complete === false) return undefined;
     // Without a token to read, only a single new copy is evidence enough: two could be anyone's.
     const [only] = unreadable;
     return only !== undefined && unreadable.length === 1 ? this.take(only, target) : false;
@@ -639,13 +653,13 @@ export class DesktopSurface {
       // A launch whose outcome was unknown: look for the process it started, which may still be registering, under this quit's own budget.
       const until = Date.now() + Math.min(timeoutMs, PENDING_SETTLE_MS);
       // The pending launch stays until it is claimed or a whole wait found none: a lookup that failed leaves it for the next quit.
-      // Only a lookup that answered counts: one that ran out of time proves nothing, and leaves the launch pending.
+      // Only a lookup that answered counts: one that ran out of time, or listed the apps in part, proves nothing, and leaves the launch pending.
       let answered = false;
       while (Date.now() < until && !signal.aborted) {
         const found = await this.claim(pending, { signal, timeoutMs: Math.max(until - Date.now(), 0) }).then(
           (claimed) => {
-            answered = true;
-            return claimed;
+            if (claimed !== undefined) answered = true;
+            return claimed === true;
           },
           (cause: unknown) => {
             if (cause instanceof EngineError && cause.code === 'OPERATION_TIMEOUT') return false;
@@ -657,7 +671,7 @@ export class DesktopSurface {
       }
       if (signal.aborted) throw new EngineError('CANCELLED', `looking for the process a launch of ${pending.target} started was cancelled`, { retryable: false });
       if (this.pid === undefined && !answered) {
-        throw new EngineError('ENGINE_FAILURE', `could not tell whether a launch of ${pending.target} started the app: listing the apps ran out of time; quitting tries again`, { retryable: false });
+        throw new EngineError('ENGINE_FAILURE', `could not tell whether a launch of ${pending.target} started the app: listing the apps ran out of time or listed them only in part; quitting tries again`, { retryable: false });
       }
       this.pending = undefined;
       if (this.pid === undefined) {

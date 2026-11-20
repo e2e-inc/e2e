@@ -721,6 +721,31 @@ describe('DesktopSurface', () => {
     expect(await gone(theirs, 300)).toBe(false);
   });
 
+  it('takes no single new copy whose environment cannot be read from a list that left copies out', async () => {
+    const theirs = unreadableCopy();
+    const { surface } = await initialized({
+      launch: [failure('TIMEOUT', 'delivered_unverified')],
+      'list-apps': [
+        { ok: true, data: { apps: [] } },
+        { ok: true, data: { apps: [{ name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form', pid: theirs, process_instance: 'theirs' }], complete: false } },
+      ],
+    });
+    await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
+    await expect(surface.endAttempt({ signal, timeoutMs: 1_000 })).rejects.toThrow(/only in part/);
+    expect(await gone(theirs, 300)).toBe(false);
+  });
+
+  it('refuses a launch agent-desktop reports for a process it cannot show is new', async () => {
+    const theirs = unreadableCopy();
+    const { surface } = await initialized({
+      launch: [{ ok: true, data: { app: 'SpikeForm', pid: theirs, process_instance: 'theirs' } }],
+      'list-apps': [{ ok: true, data: { apps: [], complete: false } }],
+    });
+    await expect(surface.restart(operation())).rejects.toThrow(/cannot be shown to be this launch's/);
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect(await gone(theirs, 300)).toBe(false);
+  });
+
   it('takes neither of two new copies whose environment cannot be read', async () => {
     const first = unreadableCopy();
     const second = unreadableCopy();
