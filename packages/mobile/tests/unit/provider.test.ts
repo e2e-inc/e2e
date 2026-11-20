@@ -75,6 +75,16 @@ describe('device provider', () => {
     );
   });
 
+  it('refuses --device on a target whose devices a provider leases, before leasing any', async () => {
+    const cloud = provider();
+    const h = harness({ device: cloud.impl });
+    await expect(h.prepare({ ...prepareInfo({}, 1), device: 'iPhone 17 Pro' })).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('leases its devices from a device provider, so --device cannot name a local one'),
+    });
+    expect(cloud.acquired).toEqual([]);
+  });
+
   it('leases one device per slot at prepare, warms each through its own daemon, and hands the bindings to the workers', async () => {
     const cloud = provider();
     const h = harness({ device: cloud.impl });

@@ -538,6 +538,7 @@ describe('engine protocol', () => {
       { ...base, methods: ['engine/readStyle'] },
       { ...base, methods: ['engine/observe'], actions: ['tap'] },
       { ...base, methods: ['engine/observe'], tapModifiers: true },
+      { ...base, methods: ['engine/observe'], selectsDevice: true },
       { ...base, methods: ['engine/observe'], pointerActions: ['tap'] },
       { ...base, methods: ['engine/locate'] },
       { ...base, methods: ['engine/observe', 'keyboard/type'] },

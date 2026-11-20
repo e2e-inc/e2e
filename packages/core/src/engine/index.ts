@@ -455,6 +455,12 @@ export interface EnginePrepareInfo {
   /** Whether the run asked for a visible surface (`--headed`), as `EngineInitInfo` declares it. */
   readonly headed: boolean;
   /**
+   * The device `e2e run --device` names for this target, by name or id: the
+   * one to bind instead of the configured one. Only an engine that declares
+   * `selectsDevice` receives it.
+   */
+  readonly device?: string;
+  /**
    * Reports one line of progress. The runner streams it as a `notice` run
    * event, so it reaches the reporter and every host sink instead of being
    * written to a worker's stderr underneath the live status block.
@@ -861,6 +867,13 @@ export interface Engine {
    * that predates the field never drops one silently.
    */
   readonly tapModifiers?: boolean;
+  /**
+   * `prepare` binds the target to the device `EnginePrepareInfo.device`
+   * names, for `e2e run --device`, over the device the engine was configured
+   * with. Without it the runner refuses the flag for the target before
+   * anything is prepared.
+   */
+  readonly selectsDevice?: boolean;
   /** capability: keyboard - requires observation. Input to whatever holds focus; see `EngineKeyboard`. */
   readonly keyboard?: EngineKeyboard;
   /**

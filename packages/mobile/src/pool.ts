@@ -251,10 +251,26 @@ export class DevicePool {
    */
   async prepare(info: EnginePrepareInfo): Promise<EnginePrepareResult> {
     if (info.slots === 0) return {};
-    const bindings = await this.source.bind(info);
+    const source = info.device === undefined ? this.source : this.named(info.device, info.targetName);
+    const bindings = await source.bind(info);
     await this.warm(bindings, info);
     this.bound.set(info.targetName, bindings);
     return { workers: bindings.length, env: { [bindingsVariable(info.targetName)]: encodeBindings(bindings) } };
+  }
+
+  /**
+   * The one device `e2e run --device` names, in place of the configured
+   * source. A provider leases hosted devices, so there is no local one to
+   * swap in.
+   */
+  private named(device: string, targetName: string): DeviceSource {
+    if (this.source instanceof LeasedDevices) {
+      throw new ConfigurationError(
+        'UNSUPPORTED_CAPABILITY',
+        `target "${targetName}" leases its devices from a device provider, so --device cannot name a local one; run without --device, or pick a target with a local device`,
+      );
+    }
+    return new ConfiguredDevices([namedDevice(device)]);
   }
 
   /**

@@ -884,6 +884,7 @@ describe('e2e --version and --help', () => {
       '--shard',
       '--pass-with-no-tests',
       '--headed',
+      '--device',
       '--agent',
       '--workers',
       '--retries',
