@@ -298,9 +298,9 @@ function renderUnchanged(since: string, observation: ExecutorObservation, expect
   if (!expectedChange) return `Screen unchanged since revision ${since} (${looked}); the ids you have stay valid.`;
   switch (pixels) {
     case 'unchanged':
-      return `The screen did not change within the wait after this action (${looked}); the ids you have stay valid. If a change was expected, the control had no visible effect here: look for another way rather than repeating it. If the control commits something (a save, a submit), it may still have gone through: check before you commit again by any route.`;
+      return `The screen did not change within the wait after this action (${looked}); the ids you have stay valid. If a change was expected and the control commits something (a save, a submit), it may still have gone through: check before you commit again by any route. Otherwise, if a change was expected, the control had no visible effect here: look for another way rather than repeating it.`;
     case 'unavailable':
-      return `No listed node changed within the wait after this action (${looked}); the ids you have stay valid. No screenshot can be taken in this step, so the listing is the only evidence: if a change was expected, look for another way rather than repeating it. If the control commits something (a save, a submit), it may still have gone through: check before you commit again by any route.`;
+      return `No listed node changed within the wait after this action (${looked}); the ids you have stay valid. No screenshot can be taken in this step, so the listing is the only evidence. If a change was expected and the control commits something (a save, a submit), it may still have gone through: check before you commit again by any route. Otherwise, if a change was expected, look for another way rather than repeating it.`;
     case 'none':
       return `No listed node changed within the wait after this action (${looked}); the ids you have stay valid. The listing shows only what the tree describes: a drawn change needs a screenshot to see.`;
   }
