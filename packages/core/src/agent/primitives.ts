@@ -77,7 +77,7 @@ const MODEL_BLOCKABLE_CODES = MODEL_ERROR_CODES.filter((code) => BLOCKABLE_CODES
 /** The verdict rules the built-in agent appends to its instructions. */
 export const VERDICT_RULES = `Verdict rules:
 - When the step's goal is achieved, or you are certain it cannot be, call complete_step exactly once.
-- Conclude from the newest screen and changes already in this conversation; never guess success. Observe again before concluding only when the newest result shows work still in progress (a spinner, "Saving…", a pending state), or once when a press that commits something (a save, a submit, a delete) showed no confirmation.
+- Conclude from the newest screen and changes already in this conversation; never guess success. Observe again before concluding only when the newest result shows work still in progress (a spinner, "Saving…", a pending state), or when a press that commits something (a save, a submit, a delete) showed no confirmation.
 - "passed" means the application behaved as the step required. "failed" means it did not. "blocked" means credentials, the environment, or test setup prevented a product verdict — blocked says nothing about the product and requires an errorCode.`;
 
 /**
@@ -364,7 +364,7 @@ export function grammarTools(
   const tools: ToolSet = {
     observe: screenTool({
       description:
-        'Look at the screen again and get what changed since the screen you last received. Action results already include their changes, so call this only after waiting for something in progress, or once to check whether a press that commits something (a save, a submit, a delete) went through; never to re-read another action\'s result.',
+        'Look at the screen again and get what changed since the screen you last received. Action results already include their changes, so call this only after waiting for something in progress, or to check whether a press that commits something (a save, a submit, a delete) went through; never to re-read another action\'s result.',
       inputSchema: z.object({}),
       execute: () => inOrder(() => guard(() => present('Observed.', { expectChange: false, keyboardNote: false }))),
     }),

@@ -315,10 +315,10 @@ describe('type_secret leaves the act tool set the same across steps', () => {
 });
 
 describe('observe matches the act rules on checking a commit', () => {
-  it('allows one observe to check any press that commits something, not only a save or submit', () => {
+  it('allows observe to check any press that commits something, not only a save or submit', () => {
     const { context } = fakeExecutorContext();
     const description = grammarTools(context, { secretsListedByCaller: true })['observe']?.description;
-    expect(description).toContain('or once to check whether a press that commits something (a save, a submit, a delete) went through');
+    expect(description).toContain('or to check whether a press that commits something (a save, a submit, a delete) went through');
     expect(description).toContain("never to re-read another action's result");
   });
 });

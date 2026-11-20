@@ -135,8 +135,8 @@ Options:
 The tools, one per engine action. Name the target as the screen names it
 (files in `params`); the agent picks the verb:
 
-- `observe`: re-read the screen after waiting on work in progress, or once
-  to check whether a press that commits something went through.
+- `observe`: re-read the screen after waiting on work in progress, or to
+  check whether a press that commits something went through.
 - `tap`: button, link, menu item, tab, checkbox, row, field.
 - `double_tap`/`long_press`/`right_click`: second-click item, long-press
   menu, context menu only.
