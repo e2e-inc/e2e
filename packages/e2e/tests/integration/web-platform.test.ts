@@ -125,6 +125,9 @@ test('toBeEditable reads readonly, aria-readonly, and the disabled state', async
   await app.open('/editable-matcher');
   await expect(screen.getByLabel('Name')).toBeEditable();
   await expect(screen.getByLabel('Size')).toBeEditable();
+  // A native select reads readonly and ignores aria-readonly.
+  await expect(screen.getByLabel('Size locked')).not.toBeEditable();
+  await expect(screen.getByLabel('Size aria')).toBeEditable();
   await expect(screen.getByTestId('editor')).toBeEditable();
   await expect(screen.getByLabel('Notes')).not.toBeEditable();
   await expect(screen.getByLabel('Total')).toBeEditable({ editable: false });

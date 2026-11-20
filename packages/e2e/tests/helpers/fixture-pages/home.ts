@@ -340,6 +340,8 @@ line2  </textarea>
   <textarea aria-label="Notes" readonly></textarea>
   <div role="textbox" aria-label="Total" aria-readonly="true">42</div>
   <select aria-label="Size"><option>S</option><option>M</option></select>
+  <select aria-label="Size locked" readonly><option>S</option></select>
+  <select aria-label="Size aria" aria-readonly="true"><option>S</option></select>
   <fieldset disabled><input aria-label="Locked" /></fieldset>
   <div contenteditable="true" data-testid="editor">Draft<p data-testid="editor-line">Line</p></div>
   <input aria-label="Secret" type="password" readonly value="marker-3b9d" />

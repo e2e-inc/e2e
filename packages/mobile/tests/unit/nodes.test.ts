@@ -565,8 +565,9 @@ describe('snapshot projection', () => {
       // and text view from the element type, so the flag says nothing there.
       { ref: 'e7', type: 'TextView', label: 'Terms', editable: true },
       { ref: 'e8', type: 'TextField', label: 'Street', editable: true },
+      { ref: 'e9', type: 'android.widget.EditText', label: 'Zip' },
     ]);
-    const [name, orderId, city, country, hint, searchCity, terms, street] = projected.index.map((entry) => entry.node);
+    const [name, orderId, city, country, hint, searchCity, terms, street, zip] = projected.index.map((entry) => entry.node);
     expect(name).toMatchObject({ role: 'textbox', states: { readonly: false } });
     expect(orderId).toMatchObject({ role: 'textbox', states: { readonly: true } });
     // No flag: unknown, so no state, rather than an editable guess.
@@ -582,6 +583,9 @@ describe('snapshot projection', () => {
     expect(terms!.states?.readonly).toBeUndefined();
     expect(street!.role).toBe('textbox');
     expect(street!.states?.readonly).toBeUndefined();
+    // An Android field with no flag is unknown too, not read-only.
+    expect(zip!.role).toBe('textbox');
+    expect(zip!.states?.readonly).toBeUndefined();
   });
 
   it('keeps a role that already takes text when the platform reports it editable, and trusts the flag on a control role', () => {

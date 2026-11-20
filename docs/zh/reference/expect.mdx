@@ -114,7 +114,7 @@ await expect(screen.getByLabel('Email')).toBeEditable();
 await expect(screen.getByLabel('Order id')).toBeEditable({ editable: false }); // read-only or disabled
 ```
 
-- 只读是引擎报告的状态，在 Web 上的判定方式与 Playwright 的 `toBeEditable` 相同。`input`、`textarea` 和 `select` 只读取自身的 `readonly` 属性（任意值）。接受 `aria-readonly` 的角色（`textbox`、`searchbox`、`combobox`、`listbox`、`checkbox`、`switch`、`slider`、`spinbutton`、`gridcell` 等）的元素读取 `aria-readonly="true"`（不区分大小写）。编辑宿主只按其 ARIA 角色读取它（显式角色或标签的角色，网格中的 `td` 是 `gridcell`）；普通的 `<div contenteditable>` 没有角色。其他编辑宿主及其内部的任何元素都不是只读的。
+- 只读是引擎报告的状态。Web 引擎对原生控件和 `aria-readonly` 遵循 Playwright 的规则，角色使用 e2e 的角色，禁用状态使用 `toBeEnabled()` 报告的状态。`input`、`textarea` 和 `select` 只读取自身的 `readonly` 属性（任意值）。接受 `aria-readonly` 的角色（`textbox`、`searchbox`、`combobox`、`listbox`、`checkbox`、`switch`、`slider`、`spinbutton`、`gridcell` 等）的元素读取 `aria-readonly="true"`（不区分大小写）。编辑宿主只按其 ARIA 角色读取它（显式角色或标签的角色，网格中的 `td` 是 `gridcell`）；普通的 `<div contenteditable>` 没有角色。其他编辑宿主及其内部的任何元素都不是只读的。
 - 禁用的节点也不可编辑，禁用的判定与 [`toBeEnabled`](#tobeenabled-and-tobedisabled) 相同。
 - 其他节点（例如按钮）没有只读状态。无论是否取反，匹配器都会失败，失败信息会说明这一点。
 - 在设备上，只有当平台报告文本字段是否接受输入时（例如 Android），该字段才有只读状态。iOS 不报告，因此 iOS 字段会让匹配器失败，而不是靠猜测通过。

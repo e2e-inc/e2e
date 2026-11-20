@@ -114,7 +114,7 @@ await expect(screen.getByLabel('Email')).toBeEditable();
 await expect(screen.getByLabel('Order id')).toBeEditable({ editable: false }); // read-only or disabled
 ```
 
-- 読み取り専用かどうかはエンジンが報告する状態で、Web では Playwright の `toBeEditable` と同じ方法で決まります。`input`、`textarea`、`select` は自身の `readonly` 属性だけを読みます（値は問いません）。`aria-readonly` を取るロール（`textbox`、`searchbox`、`combobox`、`listbox`、`checkbox`、`switch`、`slider`、`spinbutton`、`gridcell` など）の要素は `aria-readonly="true"` を読みます（大文字小文字は問いません）。編集ホストは ARIA ロール（明示したもの、またはタグのロール。グリッド内の `td` は `gridcell`）でだけこれを読みます。ただの `<div contenteditable>` にはロールがありません。それ以外の編集ホストとその中の要素は読み取り専用になりません。
+- 読み取り専用かどうかはエンジンが報告する状態です。Web エンジンはネイティブコントロールと `aria-readonly` について Playwright のルールに従い、ロールは e2e のもの、無効状態は `toBeEnabled()` が報告するものを使います。`input`、`textarea`、`select` は自身の `readonly` 属性だけを読みます（値は問いません）。`aria-readonly` を取るロール（`textbox`、`searchbox`、`combobox`、`listbox`、`checkbox`、`switch`、`slider`、`spinbutton`、`gridcell` など）の要素は `aria-readonly="true"` を読みます（大文字小文字は問いません）。編集ホストは ARIA ロール（明示したもの、またはタグのロール。グリッド内の `td` は `gridcell`）でだけこれを読みます。ただの `<div contenteditable>` にはロールがありません。それ以外の編集ホストとその中の要素は読み取り専用になりません。
 - 無効なノードも編集可能ではありません。無効の判定は [`toBeEnabled`](#tobeenabled-and-tobedisabled) と同じです。
 - ボタンなどそれ以外のノードには読み取り専用の状態がありません。否定してもマッチャーは失敗し、失敗メッセージにそのことが表示されます。
 - デバイスでは、プラットフォームがテキストを受け付けるかどうかを報告する場合（Android など）だけ、テキストフィールドに読み取り専用の状態があります。iOS は報告しないので、iOS のフィールドでは推測で成功させずにマッチャーが失敗します。

@@ -146,8 +146,9 @@ await expect(screen.getByLabel('Email')).toBeEditable();
 await expect(screen.getByLabel('Order id')).toBeEditable({ editable: false }); // read-only or disabled
 ```
 
-- Read-only is the state the engine reports, decided on the web as
-  Playwright's `toBeEditable` decides it. An `input`, `textarea`, or
+- Read-only is the state the engine reports. The web engine follows
+  Playwright's rules for native controls and `aria-readonly`, using e2e's
+  roles and the disabled state that `toBeEnabled()` reports. An `input`, `textarea`, or
   `select` reads its `readonly` attribute alone, with any value. An element
   of a role that takes `aria-readonly` (`textbox`, `searchbox`, `combobox`,
   `listbox`, `checkbox`, `switch`, `slider`, `spinbutton`, `gridcell`, and
