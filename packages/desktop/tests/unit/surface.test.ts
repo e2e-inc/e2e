@@ -920,6 +920,20 @@ describe('DesktopSurface', () => {
     }
   });
 
+  it('sweeps a state directory whose launch record was cut short, and starts', async () => {
+    const dead = spawn(process.execPath, ['-e', '']);
+    await new Promise((resolve) => dead.on('exit', resolve));
+    const left = mkdtempSync(path.join(tmpdir(), 'e2e-agent-desktop-'));
+    writeFileSync(path.join(left, 'owner'), String(dead.pid));
+    writeFileSync(path.join(left, 'app.json'), '{"pid":');
+    try {
+      await initialized({});
+      expect(existsSync(left)).toBe(false);
+    } finally {
+      rmSync(left, { recursive: true, force: true });
+    }
+  });
+
   it('sweeps the state directories of workers that are gone, and keeps the ones in use', async () => {
     const dead = spawn(process.execPath, ['-e', '']);
     await new Promise((resolve) => dead.on('exit', resolve));

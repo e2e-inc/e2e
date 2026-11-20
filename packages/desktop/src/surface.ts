@@ -9,7 +9,7 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -412,7 +412,12 @@ export class DesktopSurface {
       throw cause;
     }
     this.forget();
-    if (this.home !== undefined && this.pid !== undefined) await writeFile(path.join(this.home, APP_FILE), JSON.stringify({ pid: this.pid, token: launch.token }));
+    if (this.home !== undefined && this.pid !== undefined) {
+      // Renamed into place, so a worker killed mid-write never leaves half a record.
+      const record = path.join(this.home, APP_FILE);
+      await writeFile(`${record}.partial`, JSON.stringify({ pid: this.pid, token: launch.token }));
+      await rename(`${record}.partial`, record);
+    }
     await this.windowReadable(operation);
   }
 
@@ -1235,7 +1240,8 @@ async function sweepStateDirectories(): Promise<void> {
     const owner = Number((await readFile(path.join(directory, OWNER_FILE), 'utf8').catch(() => '')).trim());
     const stale = Number.isInteger(owner) && owner > 0 ? !alive(owner) : await stat(directory).then((info) => Date.now() - info.mtimeMs > ORPHAN_AGE_MS, () => false);
     if (!stale) continue;
-    const parsed: unknown = await readFile(path.join(directory, APP_FILE), 'utf8').then((text): unknown => JSON.parse(text), () => undefined);
+    // A record cut short by the kill that left it names no process: the directory still goes.
+    const parsed: unknown = await readFile(path.join(directory, APP_FILE), 'utf8').then((text): unknown => JSON.parse(text)).catch(() => undefined);
     const launched = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
     const { pid, token } = launched;
     if (typeof pid === 'number' && typeof token === 'string' && alive(pid) && (await carriesToken(pid, token, AbortSignal.timeout(5_000))) === true) {
