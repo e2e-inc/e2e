@@ -95,6 +95,33 @@ function datedReceipt(time: string): Buffer {
   return Buffer.concat([png.subarray(0, 33), chunk, png.subarray(33)]);
 }
 
+/** Every booted iOS simulator, with the directory that holds its data. */
+function bootedSimulators(): { udid: string; dataPath: string }[] {
+  const booted = execFileSync('xcrun', ['simctl', 'list', 'devices', 'booted', '-j'], { encoding: 'utf8' });
+  const devices = JSON.parse(booted) as { devices: Record<string, { udid: string; state: string; dataPath: string }[]> };
+  return Object.values(devices.devices)
+    .flat()
+    .filter((device) => device.state === 'Booted');
+}
+
+/**
+ * Puts every booted simulator on the `en_US` locale, in English, with the
+ * default 12-hour clock, whatever region the host Mac is set to. A new
+ * simulator copies the Mac's settings, and the recordings name things by
+ * locale (`Photo, October 15, 10:27 AM`), so a recording and its replay need
+ * the same one. Each simulator is set once per process; an app that is
+ * already running may keep its old locale until it is launched again.
+ */
+const localized = new Set<string>();
+function setSimulatorLocale(): void {
+  for (const { udid } of bootedSimulators()) {
+    if (localized.has(udid)) continue;
+    execFileSync('xcrun', ['simctl', 'spawn', udid, 'defaults', 'write', '-g', 'AppleLocale', 'en_US']);
+    execFileSync('xcrun', ['simctl', 'spawn', udid, 'defaults', 'write', '-g', 'AppleLanguages', '-array', 'en']);
+    localized.add(udid);
+  }
+}
+
 /**
  * The photo the picker scenario expects in the library, added once to every
  * booted simulator. A marker in the simulator's own data directory keeps a
@@ -107,11 +134,7 @@ function datedReceipt(time: string): Buffer {
  */
 function seedReceiptPhoto(): void {
   const time = receiptCaptureTime();
-  const booted = execFileSync('xcrun', ['simctl', 'list', 'devices', 'booted', '-j'], { encoding: 'utf8' });
-  const devices = JSON.parse(booted) as { devices: Record<string, { udid: string; state: string; dataPath: string }[]> };
-  const pending = Object.values(devices.devices)
-    .flat()
-    .filter((device) => device.state === 'Booted')
+  const pending = bootedSimulators()
     .map((device) => ({ device, marker: resolve(device.dataPath, 'Media', 'e2e-mobile-benchmark-receipt') }))
     .filter(({ marker }) => readMarker(marker) !== time);
   if (pending.length === 0) return;
@@ -326,6 +349,7 @@ async function complete(
   scenario: Scenario,
   { agent, app, device, platform, screen }: { agent: Agent; app: App; device: Device; platform: string; screen: Screen },
 ): Promise<void> {
+  if (platform === 'ios') setSimulatorLocale();
   await scenario.prepare?.({ device, platform });
   await openScenario({ app, device, screen }, scenario.name);
   const instruction = scenario.pixels === true

@@ -65,9 +65,7 @@ on the CI simulator only, and strict mode waits on them.
   title, `Login Form`, where a Mac reads the back button's `Benchmark
   Examples`, so the recorded start route does not match.
 - Photo Picker (CI only, until a CI run shows otherwise): the recorded tap
-  names the photo by its capture time, `Photo, October 15, 10:27`. The
-  workflow sets the simulators to the recording Mac's region and 24-hour
-  clock; a recording made in another region needs the same settings.
+  names the photo by its capture time, `Photo, October 15, 10:27 AM`.
 - Permission Prompt (CI only): every recorded action replays, but the
   recorded end state, `Microphone enabled`, does not show.
 Each job posts its first pass to the pull request as one comment (`e2e ios:
