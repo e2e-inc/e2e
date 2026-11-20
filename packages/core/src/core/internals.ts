@@ -6,21 +6,19 @@
 
 import { MODEL_UNREACHABLE_CODES } from '../agent/error.ts';
 import type { AttemptSettlement, SurvivedFailure } from '../cache/context.ts';
-import type { ResolvedConfig } from '../config/resolve.ts';
+import type { ResolvedConfig, ResolvedTarget } from '../config/resolve.ts';
 import { currentAttempt } from '../expect/attempt.ts';
 import { currentPollScope, outlivesTest } from '../expect/poll-scope.ts';
 import { TestError } from '../internal/errors.ts';
 import type { AttemptGuests, GuestSession, GuestSteps } from '../run/guest-steps.ts';
 import type { SessionVideo } from '../run/records.ts';
-import type { SessionIdentity } from '../run/sessions.ts';
 import type { StandaloneAttempt } from '../run/standalone-attempt.ts';
 import type { StepProgress, StepRecord, StepRecorder } from '../run/steps.ts';
 
 export interface SessionInternals {
   readonly attempt: StandaloneAttempt;
   readonly config: ResolvedConfig;
-  /** The target an agent's replay cache keys its recordings to: the host's, under the name its config resolved rather than the host's own. */
-  readonly cacheTarget: SessionIdentity;
+  readonly target: ResolvedTarget;
   /** Run in order when the session closes, before its attempt ends: an agent settles its replay cache here. */
   readonly closers: (() => Promise<void>)[];
   /** How the session's steps went, as the replay cache settles what its agents recorded; undefined once it was cancelled. */

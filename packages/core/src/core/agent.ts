@@ -15,6 +15,7 @@ import { AgentError } from '../agent/error.ts';
 import { TestError } from '../internal/errors.ts';
 import { rejectUnknownKeys } from '../internal/options.ts';
 import { lazily, lazyBuiltInAgent } from '../run/fixtures.ts';
+import { targetIdentity } from '../run/sessions.ts';
 import { WorkerModels } from '../run/worker-models.ts';
 import type { ActOptions, ActResult, Agent, AgentConfig, CacheStore } from '../types.ts';
 import { sessionInternals } from './internals.ts';
@@ -115,7 +116,7 @@ export function createAgent(session: Session, options: CreateAgentOptions): Cach
   if (typeof options !== 'object' || options === null) throw new TestError('INVALID_ARGUMENT', 'createAgent options must be an object with a model');
   const { cache, ...entry } = options;
   const resolved = resolveAgentConfig(entry as AgentConfig, 'createAgent');
-  const { config, attempt, cacheTarget } = internals;
+  const { config, attempt, target } = internals;
   const cacheConfig = cache === undefined ? undefined : resolveAgentCache(cache, config.projectRoot);
   // A missing model fails the first call that needs one, as `MODEL_UNAVAILABLE`, never the construction.
   const models = new WorkerModels(() => undefined);
@@ -149,7 +150,7 @@ export function createAgent(session: Session, options: CreateAgentOptions): Cach
     if (context === undefined) {
       context = createAgentCacheContext({
         cache: cacheConfig, projectRoot: config.projectRoot, projectId: CACHE_PROJECT_ID,
-        testId: `core:${cacheKey}`, target: cacheTarget, attemptIndex: 0,
+        testId: `core:${cacheKey}`, target: targetIdentity(target), attemptIndex: 0,
         recordings: storedRecordingsFor(cacheConfig),
       });
       if (context !== undefined) caches.set(cacheKey, context);

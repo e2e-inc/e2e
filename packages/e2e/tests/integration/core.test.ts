@@ -119,48 +119,53 @@ describe('e2e/core', { timeout: 60_000 }, () => {
     await expect(host(fake.engine)).rejects.toMatchObject({ code: 'WORKER_PROTOCOL' });
   });
 
-  it('gives each host its own target name, so an engine that names a device session after it never hands one device to two hosts', async () => {
+  it('hands the engine of each host a token of its own and leaves the target named as the program wrote it', async () => {
     const fakes = [createFakeEngine(), createFakeEngine(), createFakeEngine()];
     await Promise.all(fakes.slice(0, 2).map((fake) => host(fake.engine)));
     await host(fakes[2]!.engine);
-    const names = fakes.map((fake) => fake.inits[0]?.targetName);
-    expect(new Set(names).size).toBe(3);
-    for (const name of names) expect(name).toMatch(/^fake-host-[0-9a-f]{24}$/);
+    const ids = fakes.map((fake) => fake.inits[0]?.hostId);
+    expect(new Set(ids).size).toBe(3);
+    for (const id of ids) expect(id).toMatch(/^[0-9a-f]{24}$/);
+    expect(fakes.map((fake) => fake.inits[0]?.targetName)).toEqual(['fake', 'fake', 'fake']);
+    // `prepare`, `init`, and `finish` of one host see one token.
+    const seen: (string | undefined)[] = [];
+    const opened = await host(defineEngine({
+      name: 'hooks', version: '1', spiVersion: ENGINE_SPI_VERSION,
+      async prepare(info) { seen.push(info.hostId); },
+      async init(info) { seen.push(info.hostId); },
+      async finish(info) { seen.push(info.hostId); },
+      async startAttempt() {}, async endAttempt() {},
+    }));
+    await opened.close();
+    expect(seen).toHaveLength(3);
+    expect(seen[0]).toMatch(/^[0-9a-f]{24}$/);
+    expect(new Set(seen).size).toBe(1);
     // Hosts in two worker threads share the process and load their own copy of the module.
     const script = path.join(dir, 'thread-host.mjs');
     writeFileSync(script, [
       `import { parentPort } from 'node:worker_threads';`,
       `import { launch } from ${JSON.stringify(import.meta.resolve('@e2e-dev/core'))};`,
       `import { defineEngine, ENGINE_SPI_VERSION } from ${JSON.stringify(import.meta.resolve('@e2e-dev/core/engine'))};`,
-      `let name;`,
-      `const engine = defineEngine({ name: 'fake', version: '1', spiVersion: ENGINE_SPI_VERSION, init(info) { name = info.targetName; }, startAttempt() {}, endAttempt() {}, dispose() {} });`,
+      `let id;`,
+      `const engine = defineEngine({ name: 'fake', version: '1', spiVersion: ENGINE_SPI_VERSION, init(info) { id = info.hostId; }, startAttempt() {}, endAttempt() {}, dispose() {} });`,
       `const opened = await launch(engine, { cwd: ${JSON.stringify(dir)}, env: {}, handleSignals: false });`,
       `await opened.close();`,
-      `parentPort.postMessage(name);`,
+      `parentPort.postMessage(id);`,
     ].join('\n'));
-    const threadNames = await Promise.all([0, 1].map(() => new Promise((resolve, reject) => {
+    const threadIds = await Promise.all([0, 1].map(() => new Promise((resolve, reject) => {
       const thread = new Worker(script);
       thread.once('message', resolve);
       thread.once('error', reject);
     })));
-    expect(threadNames[0]).toMatch(/^fake-host-[0-9a-f]{24}$/);
-    expect(threadNames[1]).not.toBe(threadNames[0]);
+    expect(threadIds[0]).toMatch(/^[0-9a-f]{24}$/);
+    expect(threadIds[1]).not.toBe(threadIds[0]);
   });
 
-  it('opens a session on an engine whose long name labels its host, and reports config errors under the name the program gave', async () => {
+  it('opens a session on an engine whose long name labels its host, and keeps a platform that is a secret out of its notices', async () => {
     const long = 'p'.repeat(210);
     const opened = await host(defineEngine({ name: long, version: '1', spiVersion: ENGINE_SPI_VERSION, async startAttempt() {}, async endAttempt() {} }));
     expect(opened.platform).toBe(long);
     await (await opened.newSession()).close();
-    // A platform of 40 characters still leads the name; one of 41 is left out whole.
-    const named = async (platform: string): Promise<string | undefined> => {
-      let name: string | undefined;
-      await host(defineEngine({ name: 'edge', platform, version: '1', spiVersion: ENGINE_SPI_VERSION, async init(info) { name = info.targetName; }, async startAttempt() {}, async endAttempt() {} }));
-      return name;
-    };
-    expect(await named('a'.repeat(40))).toMatch(/^a{40}-host-[0-9a-f]{24}$/);
-    expect(await named('a'.repeat(41))).toMatch(/^host-[0-9a-f]{24}$/);
-    // A platform that is a secret's value: the host's name keeps none of it, so no notice carries a part the redactor cannot match.
     const secret = 's3cr3t'.repeat(7);
     const notices: string[] = [];
     await host(defineEngine({ name: 'labelled', platform: secret, version: '1', spiVersion: ENGINE_SPI_VERSION, async init(info) { info.log('ready'); }, async startAttempt() {}, async endAttempt() {} }), {
@@ -169,8 +174,6 @@ describe('e2e/core', { timeout: 60_000 }, () => {
     });
     expect(notices.some((message) => message.includes('ready'))).toBe(true);
     expect(notices.filter((message) => message.includes(secret.slice(0, 20)))).toEqual([]);
-    await expect(host(createFakeEngine().engine, { app: { url: 'http://127.0.0.1:1', linkBase: 'not a url' } }))
-      .rejects.toMatchObject({ message: expect.stringContaining('target "fake"') });
   });
 
   it('names a host\'s artifact folders after its token, so a platform that is a secret\'s value never reaches a path', async () => {
@@ -459,7 +462,7 @@ describe('e2e/core', { timeout: 60_000 }, () => {
       expect(readdirSync(cacheDir, { recursive: true }).filter((file) => String(file).endsWith('.json'))).toHaveLength(1);
     });
 
-    it('replays a recording another host made, since a host\'s own target name is not part of the key', async () => {
+    it('replays a recording another host made, since a host\'s token is not part of the key', async () => {
       const brain = scripted();
       const cacheDir = path.join(dir, 'cache');
       for (const round of [1, 2]) {

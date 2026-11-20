@@ -88,7 +88,7 @@ try {
 | --- | --- |
 | Ownership | Each `launch` takes its own engine instance: `launch(web())`. A second host on the same instance fails with `WORKER_PROTOCOL`. |
 | Sessions | One session at a time on a host. Close it before `newSession()`. For parallel work, launch more hosts. |
-| Devices | Each host's target is named after its platform and a random token (`host-<token>` alone for a platform over 40 characters), so a `mobile()` host drives a device under an agent-device session of its own. See [Several hosts on devices](#several-hosts-on-devices). |
+| Devices | A `mobile()` host drives a device under an agent-device session of its own. See [Several hosts on devices](#several-hosts-on-devices). |
 | Timeouts | An action, a wait, or a read gets 30000 ms. `app.open()` and `app.restart()` get 120000 ms. `launch({ timeout })` or `session.setDefaultTimeout(ms)` sets one value for all of them. There is no session deadline. |
 | Cancellation | `launch({ signal })` and `newSession({ signal })` stop what is running. |
 | Ctrl-C | The host closes on SIGINT, SIGTERM, and SIGHUP, so its browser or device session does not stay behind. Then the program ends by the signal, unless it listens for the signal itself. Turn it off with `handleSignals: false`. |
@@ -99,8 +99,8 @@ The [reference](/reference/core) lists every option.
 ### Several hosts on devices
 
 Without a `session` option, each `mobile()` host drives its device under an
-agent-device session of its own, named after the host's target
-(`e2e-ios-host-<token>-0`). A host never takes over a device another session
+agent-device session of its own, named after its target and a random token
+(`e2e-ios-<token>-0`). A host never takes over a device another session
 holds, whether that is another host or a worker of `e2e run`.
 
 - Boot one free device per host. Inside a test, the run's workers hold their

@@ -18,7 +18,7 @@ import { MAX_TIMER_MS } from '../internal/time.ts';
 import { builtInFixtures, CORE_FIXTURES } from '../run/fixtures.ts';
 import { redactOpening } from '../run/redact-opening.ts';
 import { processSecrets, sessionLedger, shareStaticSecrets } from '../run/secrecy.ts';
-import { targetIdentity, type SessionIdentity } from '../run/sessions.ts';
+import { targetIdentity } from '../run/sessions.ts';
 import { openCoreHost, type StandaloneHost } from '../run/standalone.ts';
 import type { StandaloneAttempt } from '../run/standalone-attempt.ts';
 import { secretHandle } from '../secrets.ts';
@@ -127,23 +127,6 @@ const RETAINED_STEPS = 500;
 /** The core fixtures that belong to a test. A session has no test, so it exposes every other built-in fixture. */
 const TEST_FIXTURES = new Set(Object.entries(CORE_FIXTURES).flatMap(([name, fixture]) => (fixture.scope === 'test' ? [name] : [])));
 
-/** The longest platform a host's target name starts with, so the names an engine builds from it (a device session, a provider's tag) stay short. */
-const HOST_NAME_PLATFORM_MAX = 40;
-
-/**
- * The name a host's target goes by once its config resolved: its platform
- * and a random token. An engine may name what a target holds after it, such
- * as the mobile engine's device session, and the platform alone would give
- * every host the name another host, or a test's own target, already holds.
- * `token` is drawn per host, so hosts in other processes, worker threads,
- * or copies of this package get names of their own. A longer platform is
- * left out whole rather than cut: a cut could keep part of a secret the
- * redactor only knows in full.
- */
-function hostTargetName(platform: string, token: string): string {
-  return platform.length > HOST_NAME_PLATFORM_MAX ? `host-${token}` : `${platform}-host-${token}`;
-}
-
 /**
  * Launches `engine`: prepares it (a first-run browser download, a device
  * lease), initializes one worker, and returns the host that opens sessions
@@ -173,7 +156,7 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
     const mark = handlesSignals ? engineListeners() : () => undefined;
     try { return await redactOpening(open); } finally { mark(); }
   };
-  let opened: { readonly config: ResolvedConfig; readonly target: ResolvedTarget; readonly cacheTarget: SessionIdentity; readonly host: StandaloneHost };
+  let opened: { readonly config: ResolvedConfig; readonly target: ResolvedTarget; readonly host: StandaloneHost };
   /** Stops sharing the host's secrets with the sessions beside it; set once they are shared. */
   let withdrawSecrets = (): void => undefined;
   try {
@@ -191,24 +174,20 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
         },
         { projectRoot, env },
       );
-      const resolvedTarget = resolved.targets[0]!;
-      // The replay cache keys on the name the config resolved, so a recording replays on any host.
-      const cacheTarget = targetIdentity(resolvedTarget);
-      // Renamed past resolution, so a config error names the target as the program wrote it.
-      const token = randomBytes(12).toString('hex');
-      const target: ResolvedTarget = { ...resolvedTarget, name: hostTargetName(resolvedTarget.name, token) };
       // Set past resolution, which keeps a run's output inside its project: a host's lives where the program says.
-      const config: ResolvedConfig = { ...resolved, output, targets: [target] };
+      const config: ResolvedConfig = { ...resolved, output };
       withdrawSecrets = shareStaticSecrets(config.allSecrets);
+      const target = config.targets[0]!;
       const notice = options.onNotice;
       const host = await openCoreHost({
         config, target, env, headed: options.headed ?? false,
-        // The artifact folders carry the token alone: the platform can be a secret's value, and a path is never redacted.
-        folder: `host-${token}`,
+        // Hosts name their targets alike, so the engine gets a token per host to keep what it holds apart: a device session.
+        // Random, so hosts in other processes, worker threads, or copies of this package differ too.
+        hostId: randomBytes(12).toString('hex'),
         signal: anySignal(options.signal, seat?.signal),
         ...(notice === undefined ? {} : { notice: (_target: string, message: string) => notice(message) }),
       });
-      return { config, target, cacheTarget, host };
+      return { config, target, host };
     });
   } catch (cause) {
     withdrawSecrets();
@@ -216,7 +195,7 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
     if (seat?.signal.aborted === true) owner?.gaveUp(cause);
     throw cause;
   }
-  const { config, target, cacheTarget, host } = opened;
+  const { config, target, host } = opened;
   const identity: StateIdentity = {
     engine: target.engine?.name ?? 'none',
     platform: target.platform,
@@ -281,7 +260,7 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
       ...(state === undefined ? {} : { state }),
     });
     failures.watch(attempt.steps);
-    const session = coreSession<Fixtures>(attempt, config, identity, target, cacheTarget, failures, guest, timeout, () => {
+    const session = coreSession<Fixtures>(attempt, config, identity, target, failures, guest, timeout, () => {
       if (closeOpen === session.close) closeOpen = undefined;
     });
     closeOpen = session.close;
@@ -320,7 +299,6 @@ function coreSession<Fixtures extends object>(
   config: ResolvedConfig,
   identity: StateIdentity,
   target: ResolvedTarget,
-  cacheTarget: SessionIdentity,
   failures: FailureWatch,
   guest: SessionGuest,
   timeout: number | undefined,
@@ -372,8 +350,7 @@ function coreSession<Fixtures extends object>(
   Object.defineProperties(session, Object.getOwnPropertyDescriptors(controls));
   const typed = Object.freeze(session);
   registerSession(typed, {
-    attempt, config, closers,
-    cacheTarget,
+    attempt, config, target, closers,
     // A cancelled session implicates nothing, so its recordings are neither written nor evicted.
     settlement: () => attempt.budget.signal.aborted ? undefined : failures.settlement(attempt.steps),
   });

@@ -564,7 +564,7 @@ export class AgentDeviceSurface {
 
   /** The checks of `e2e doctor`, under the session a run's first slot uses; see `mobileDoctor`. */
   doctor(info: EngineDoctorInfo): Promise<readonly EngineDoctorCheck[]> {
-    return mobileDoctor(this.options, this.createClient, this.pool.session(info.targetName, 0), info);
+    return mobileDoctor(this.options, this.createClient, this.pool.session(info, 0), info);
   }
 
   /** The app `app.open()` launches: the target's `bundleId`, else the app its build `appPath` installed. */
@@ -661,7 +661,7 @@ export class AgentDeviceSurface {
     this.app = info.app;
     const binding = this.pool.binding(info.targetName, info.workerSlot, info.env);
     this.device = binding;
-    const session = this.pool.session(info.targetName, info.workerSlot);
+    const session = this.pool.session(info, info.workerSlot);
     const label = deviceLabel(binding);
     this.where = `session ${session}${label === undefined ? '' : ` on ${label}`}`;
     this.client ??= this.createClient(session, binding);

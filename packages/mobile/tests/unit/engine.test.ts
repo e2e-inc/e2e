@@ -455,6 +455,24 @@ describe('lifecycle', () => {
     expect(held.fake.methods()).not.toContain('devices.boot');
   });
 
+  it('names a launch() host\'s session after its host id, so it leaves the device a worker of the same target holds', async () => {
+    const h = harness({ device: undefined });
+    h.fake.respond('devices.list', () => [
+      { platform: 'ios', id: 'A', name: 'A', booted: true, claimedBy: { session: 'e2e-ios-0', workspace: '/project' } },
+      { platform: 'ios', id: 'B', name: 'B', booted: true },
+    ]);
+    const info = { runId: 'run-1', targetName: 'ios', hostId: 'abc123', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: () => undefined };
+    expect(await h.prepare(info)).toMatchObject({ workers: 1 });
+    expect(h.fake.calls.filter((call) => call.method === 'devices.boot').map((call) => call.args)).toEqual([{ platform: 'ios', udid: 'B' }]);
+    expect(new Set(h.sessions)).toEqual(new Set(['e2e-ios-abc123-0']));
+
+    // The `session` option names the session whole, as it documents.
+    const optioned = harness({ device: undefined, session: 'mine' });
+    optioned.fake.respond('devices.list', () => [{ platform: 'ios', id: 'B', name: 'B', booted: true }]);
+    await optioned.prepare(info);
+    expect(new Set(optioned.sessions)).toEqual(new Set(['mine-0']));
+  });
+
   it('drives a discovered Android emulator by its serial, and reads a configured serial, UDID, or name as agent-device does', async () => {
     const h = harness({ device: undefined, platform: 'android' });
     h.fake.respond('devices.list', () => [{ platform: 'android', id: 'emulator-5554', name: 'test', booted: true }]);

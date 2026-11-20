@@ -67,7 +67,13 @@ export function bootRequest(selection: DeviceSelection): DeviceSelection & Pick<
 }
 
 /** The agent-device session slot `slot` of a target drives: the `session` option or `e2e-<target>`, then `-<slot>`. */
-type SessionNamer = (targetName: string, slot: number) => string;
+/** What names a slot's session: the target, and the `launch()` host holding it, if one does. */
+export interface SessionOwner {
+  readonly targetName: string;
+  readonly hostId?: string | undefined;
+}
+
+type SessionNamer = (owner: SessionOwner, slot: number) => string;
 
 /** Whether the `device` option names a pool of devices rather than one device or a provider. */
 export function isDeviceList(device: unknown): device is readonly string[] {
@@ -135,8 +141,8 @@ class BootedDevices implements DeviceSource {
   ) {}
 
   async bind(info: EnginePrepareInfo): Promise<readonly SlotBinding[]> {
-    const booted = await this.inventory(info.targetName, info.signal);
-    const own = new Set(Array.from({ length: info.slots }, (_, slot) => this.session(info.targetName, slot)));
+    const booted = await this.inventory(info, info.signal);
+    const own = new Set(Array.from({ length: info.slots }, (_, slot) => this.session(info, slot)));
     const held = booted.filter((device) => device.claimedBy !== undefined && !own.has(device.claimedBy));
     const chosen = booted.filter((device) => !held.includes(device)).slice(0, info.slots);
     const heldBy = held.map((device) => `${device.name} by session "${device.claimedBy}"`).join(', ');
@@ -157,8 +163,8 @@ class BootedDevices implements DeviceSource {
   }
 
   /** Every booted device of the platform, by stable id and name, with the session holding it, in agent-device's inventory order. */
-  private async inventory(targetName: string, signal: AbortSignal): Promise<BootedDevice[]> {
-    const client = this.createClient(this.session(targetName, 0));
+  private async inventory(owner: SessionOwner, signal: AbortSignal): Promise<BootedDevice[]> {
+    const client = this.createClient(this.session(owner, 0));
     const inventory: unknown = await runCommand('devices', () => client.devices.list({ platform: this.platform }), signal);
     if (!Array.isArray(inventory)) return [];
     return inventory
@@ -192,7 +198,7 @@ export class DevicePool {
     private readonly options: MobileOptions,
     private readonly createClient: ClientFactory,
   ) {
-    this.source = sourceFor(options, createClient, (targetName, slot) => this.session(targetName, slot));
+    this.source = sourceFor(options, createClient, (owner, slot) => this.session(owner, slot));
   }
 
   /**
@@ -214,9 +220,14 @@ export class DevicePool {
     return this.source.size;
   }
 
-  /** The agent-device session a worker slot drives its device under: the `session` option or `e2e-<target>`, then `-<slot>`. */
-  session(targetName: string, slot: number): string {
-    return `${this.options.session ?? `e2e-${targetName}`}-${slot}`;
+  /**
+   * The agent-device session a worker slot drives its device under: the
+   * `session` option or `e2e-<target>`, then `-<slot>`. A `launch()` host's
+   * id follows the target, since every unnamed host's target is named alike.
+   */
+  session(owner: SessionOwner, slot: number): string {
+    const host = owner.hostId === undefined ? '' : `-${owner.hostId}`;
+    return `${this.options.session ?? `e2e-${owner.targetName}${host}`}-${slot}`;
   }
 
   /**
@@ -301,7 +312,7 @@ export class DevicePool {
     for (const [slot, binding] of bindings.entries()) {
       const label = deviceLabel(binding) ?? `a booted ${this.options.platform} device`;
       const where = deviceSelection(this.options.platform, binding);
-      const session = this.session(info.targetName, slot);
+      const session = this.session(info, slot);
       const at = `session ${session} on ${label}`;
       const client = this.createClient(session, binding);
       this.retain(info.targetName, client);
