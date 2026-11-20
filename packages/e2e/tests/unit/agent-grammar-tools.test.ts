@@ -15,6 +15,7 @@ import { isFailedResult } from '@e2e-dev/core/lib/agent/loop-guards';
 import { GRAMMAR_TOOL_NAMES } from '@e2e-dev/core/lib/agent/action-names';
 import { createGrammarTools, createVerdictTool, grammarTools } from '@e2e-dev/core/lib/agent/primitives';
 import { createBuiltInAgent, projectTools } from '@e2e-dev/core/lib/agent/default-agent';
+import { createToolLoopExecutor } from '@e2e-dev/core/lib/agent/tool-loop';
 import { defineTool } from '@e2e-dev/core/lib/agent/tool';
 import { fakeExecutorContext } from '../helpers/fake-executor-context.ts';
 import { installFakeLoopModel, loopCalls } from '../helpers/fake-loop-model.ts';
@@ -320,5 +321,48 @@ describe('observe matches the act rules on checking a commit', () => {
     const description = grammarTools(context, { secretsListedByCaller: true })['observe']?.description;
     expect(description).toContain('or to check whether a press that commits something (a save, a submit, a delete) went through');
     expect(description).toContain("never to re-read another action's result");
+  });
+});
+
+describe('the loop guard waits longer on the built-in observe only', () => {
+  beforeAll(() => loadAiSdk());
+
+  /** A model that observes until the loop forces a verdict, and how many times it observed. */
+  const observeUntilForced = () => {
+    let observed = 0;
+    const model = installFakeLoopModel((call) => {
+      if (call.toolNames.length === 1 && call.toolNames[0] === 'complete_step') {
+        return [{ toolName: 'complete_step', input: { status: 'failed', summary: 'still saving' } }];
+      }
+      observed += 1;
+      return [{ toolName: 'observe', input: {} }];
+    });
+    return { model, observed: () => observed };
+  };
+
+  it('lets the built-in act loop observe ten times while a save stays in progress', async () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    const observe = async () => ({ revision: '1', text: '#n1 button "Saving" [disabled]', truncated: false, viewport: { width: 800, height: 600 } });
+    const { model, observed } = observeUntilForced();
+    await expect(createBuiltInAgent().runStep({ ...context, model, observe })).resolves.toMatchObject({ status: 'failed' });
+    expect(observed()).toBe(10);
+    expect(loopCalls.some((call) => call.lastPrompt.includes('issued 6 times in a row'))).toBe(true);
+  });
+
+  it('keeps the ordinary limit for a caller\'s own tool named observe, which may write', async () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    const writes: string[] = [];
+    const executor = createToolLoopExecutor({
+      name: 'custom',
+      system: 'Record observations.',
+      buildPrompt: () => 'go',
+      tools: () => ({
+        observe: { description: 'Records an observation.', inputSchema: aiSdk().zodSchema(z.object({})), execute: async () => { writes.push('row'); return 'recorded'; } },
+      }) as ToolSet,
+    });
+    const { model, observed } = observeUntilForced();
+    await expect(executor.runStep({ ...context, model })).resolves.toMatchObject({ status: 'failed' });
+    expect(observed()).toBe(5);
+    expect(writes).toHaveLength(5);
   });
 });

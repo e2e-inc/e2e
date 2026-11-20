@@ -35,9 +35,10 @@ export interface LoopGuardThresholds {
   readonly repeatWarn: number;
   readonly repeatStop: number;
   /**
-   * Identical `observe` calls in a row: reading the screen again while a save
-   * or a load is still in progress is waiting, not a loop, so it gets more
-   * room than an action. The step budget and deadline still bound it.
+   * Identical calls in a row to a tool marked with `markWaitingTool` (the
+   * built-in `observe`): reading the screen again while a save or a load is
+   * still in progress is waiting, not a loop, so it gets more room than an
+   * action. The step budget and deadline still bound it.
    */
   readonly observeRepeatWarn: number;
   readonly observeRepeatStop: number;
@@ -59,6 +60,25 @@ export const DEFAULT_LOOP_GUARD_THRESHOLDS: LoopGuardThresholds = {
   failureWarn: 3,
   failureStop: 5,
 };
+
+/** The tool objects that only wait on the screen; see `observeRepeatWarn`. */
+const waitingTools = new WeakSet<object>();
+
+/**
+ * Marks a tool as one that only reads the screen again, so identical calls
+ * to it get the waiting thresholds. Only the built-in `observe` is marked: a
+ * caller's own tool under the same name keeps the ordinary ones, since it
+ * may write.
+ */
+export function markWaitingTool<T extends object>(tool: T): T {
+  waitingTools.add(tool);
+  return tool;
+}
+
+/** The names under which a tool set offers a tool marked with `markWaitingTool`. */
+export function waitingToolNames(tools: Readonly<Record<string, object>>): ReadonlySet<string> {
+  return new Set(Object.entries(tools).filter(([, tool]) => waitingTools.has(tool)).map(([name]) => name));
+}
 
 /**
  * Extracts the tool-call identity sequence from a model transcript,
@@ -88,6 +108,7 @@ export function extractGuardCalls(
 export function checkLoopGuards(
   calls: readonly GuardToolCall[],
   thresholds: LoopGuardThresholds = DEFAULT_LOOP_GUARD_THRESHOLDS,
+  waiting: ReadonlySet<string> = new Set(),
 ): LoopGuardVerdict {
   let warning: LoopGuardVerdict | undefined;
   for (let period = 1; period <= MAX_CYCLE_PERIOD; period += 1) {
@@ -95,7 +116,7 @@ export function checkLoopGuards(
     const [warnAt, stopAt] =
       period > 1
         ? [thresholds.cycleWarn, thresholds.cycleStop]
-        : calls[calls.length - 1]?.toolName === 'observe'
+        : waiting.has(calls[calls.length - 1]?.toolName ?? '')
           ? [thresholds.observeRepeatWarn, thresholds.observeRepeatStop]
           : [thresholds.repeatWarn, thresholds.repeatStop];
     if (repeats >= stopAt) {
@@ -112,7 +133,8 @@ export function checkLoopGuards(
 function trailingRepeats(calls: readonly GuardToolCall[], period: number): number {
   if (calls.length < period) return 0;
   // A period-p cycle must not be a disguised shorter cycle: "A A A A" matches
-  // period 2 as well, but period 1 owns it and applies the stricter policy.
+  // period 2 as well, but period 1 owns it, so the repeated tool's own
+  // thresholds apply (the waiting ones for observe).
   if (period > 1 && isUniformWindow(calls, period)) return 0;
   const same = (a: GuardToolCall | undefined, b: GuardToolCall | undefined): boolean =>
     a !== undefined && b !== undefined && a.toolName === b.toolName && a.input === b.input;

@@ -35,14 +35,16 @@ describe('loop guards', () => {
     expect((stopped as { reason: string }).reason).toContain('"tap"');
   });
 
-  it('gives repeated observe calls more room: waiting on a save in progress is not a loop', () => {
-    const observes = (count: number) => Array.from({ length: count }, () => call('observe'));
-    expect(checkLoopGuards([call('tap', '{"target":"n1"}'), ...observes(5)]).kind).toBe('clear');
-    expect(checkLoopGuards([call('tap', '{"target":"n1"}'), ...observes(6)]).kind).toBe('warn');
-    const stopped = checkLoopGuards([call('tap', '{"target":"n1"}'), ...observes(10)]);
-    expect(stopped.kind).toBe('stop');
-    expect((stopped as { reason: string }).reason).toContain('"observe"');
-    expect(DEFAULT_LOOP_GUARD_THRESHOLDS.repeatWarn).toBe(3);
+  it('gives repeated calls to a waiting tool more room: waiting on a save in progress is not a loop', () => {
+    const observes = (count: number) => [call('tap', '{"target":"n1"}'), ...Array.from({ length: count }, () => call('observe'))];
+    const waiting = new Set(['observe']);
+    const check = (count: number) => checkLoopGuards(observes(count), DEFAULT_LOOP_GUARD_THRESHOLDS, waiting).kind;
+    expect(check(5)).toBe('clear');
+    expect(check(6)).toBe('warn');
+    expect(check(10)).toBe('stop');
+    // A tool named observe that the caller did not mark keeps the ordinary thresholds.
+    expect(checkLoopGuards(observes(3)).kind).toBe('warn');
+    expect(checkLoopGuards(observes(5)).kind).toBe('stop');
   });
 
   it('identical inputs are required: alternating targets are not a repeat', () => {

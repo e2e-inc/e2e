@@ -22,6 +22,7 @@ import type { AgentErrorCode } from '../types.ts';
 import { READ_ONLY_GRAMMAR } from './action-names.ts';
 import { isRuntimeHardStop, BLOCKABLE_CODES, type StepExecutorContext, type StepVerdict } from './executor.ts';
 import { cacheTokenFields, readCost } from './model/sdk.ts';
+import { markWaitingTool } from './loop-guards.ts';
 import { OperationQueue } from './operation-queue.ts';
 import { imagePointToViewport, POINT_VERBS } from './point-tap.ts';
 import { SAMPLE_NAMES, SAMPLE_PREFIX } from './sample-files.ts';
@@ -362,12 +363,12 @@ export function grammarTools(
     .describe('Node id from any screen in this conversation that is still present, e.g. "n42"');
 
   const tools: ToolSet = {
-    observe: screenTool({
+    observe: markWaitingTool(screenTool({
       description:
         'Look at the screen again and get what changed since the screen you last received. Action results already include their changes, so call this only after waiting for something in progress, or to check whether a press that commits something (a save, a submit, a delete) went through; never to re-read another action\'s result.',
       inputSchema: z.object({}),
       execute: () => inOrder(() => guard(() => present('Observed.', { expectChange: false, keyboardNote: false }))),
-    }),
+    })),
   };
   const modifiers = z
     .array(z.enum(KEY_MODIFIERS))
