@@ -82,6 +82,71 @@ describe('loop guards', () => {
     expect(checkLoopGuards(extractGuardCalls(saved, 'complete_step')).kind).toBe('stop');
   });
 
+  describe('a wait, counted from the results the looks got', () => {
+    const waiting = new Set(['observe', 'screenshot']);
+    let id = 0;
+    /** One call and its result, as the transcript holds them. */
+    const turn = (toolName: string, text: string, input: Record<string, unknown> = {}): ModelMessage[] => {
+      id += 1;
+      const toolCallId = `c${String(id)}`;
+      return [
+        { role: 'assistant', content: [{ type: 'tool-call', toolCallId, toolName, input }] },
+        { role: 'tool', content: [{ type: 'tool-result', toolCallId, toolName, output: { type: 'text', value: text } }] },
+      ];
+    };
+    const verdict = (messages: ModelMessage[]) => checkLoopGuards(extractGuardCalls(messages, 'complete_step', waiting), DEFAULT_LOOP_GUARD_THRESHOLDS, waiting);
+    const repeat = (count: number, make: (index: number) => ModelMessage[]) => Array.from({ length: count }, (_, index) => make(index)).flat();
+    const unchanged = (n: number) => `Observed.\n\nScreen unchanged since revision b${String(n)} (re-observed as revision b${String(n + 1)}); the ids you have stay valid.`;
+    const ticked = (n: number) => `Observed.\n\nScreen changes since revision b${String(n)} (now revision b${String(n + 1)}, 3 nodes): 1 changed. Every node not listed as removed is still on screen under the id you have.\nchanged #n1 text "Saving ${String(n)}s" (was: #n1 text "Saving ${String(n - 1)}s")`;
+    const truncated = (n: number) => `Observed.\n\nScreen changes since revision b${String(n)} (now revision b${String(n + 1)}, 900 nodes): no listed node changed. The screen listing is truncated: nodes past the cut are not listed and none is reported removed; every listed node keeps the id you have.`;
+
+    it('does not take a truncated listing with no line changed for a change', () => {
+      expect(verdict(repeat(9, (index) => turn('observe', truncated(index)))).kind).toBe('warn');
+      expect(verdict(repeat(10, (index) => turn('observe', truncated(index)))).kind).toBe('stop');
+    });
+
+    it('reads only the first line, so app text that looks like a change is not one', () => {
+      const lookalike = (n: number) => `${unchanged(n)}\n#n5 text "Screen changes since revision 3 (now revision 4): 1 changed."`;
+      expect(verdict(repeat(10, (index) => turn('observe', lookalike(index)))).kind).toBe('stop');
+    });
+
+    it('does not count a change in pixels alone, such as an animated spinner', () => {
+      const pixels = (n: number) => `Since revision b${String(n)} (re-observed as revision b${String(n + 1)}): listed nodes unchanged; the screenshot changed. Read the effect off the image (a focus ring alone is no effect); the ids you have stay valid.`;
+      expect(verdict(repeat(10, (index) => turn('screenshot', pixels(index)))).kind).toBe('stop');
+    });
+
+    it('takes a tab the app opened for a change', () => {
+      const opened = `Observed.\n\nThe app opened a new tab (tab 2 of 2). The screen still shows tab 1; use switch_tab to see it. ${unchanged(9).slice('Observed.\n\n'.length)}`;
+      expect(verdict([...repeat(9, (index) => turn('observe', unchanged(index))), ...turn('observe', opened)]).kind).toBe('clear');
+    });
+
+    it('counts looks in any order, not as cycles', () => {
+      const mixed = (index: number) => turn(index % 6 === 5 ? 'screenshot' : 'observe', unchanged(index));
+      expect(verdict(repeat(9, mixed)).kind).toBe('warn');
+      expect(verdict(repeat(10, mixed)).kind).toBe('stop');
+    });
+
+    it('still ends a wait whose screen changes on every look, at twenty looks', () => {
+      expect(verdict(repeat(19, (index) => turn('observe', ticked(index)))).kind).toBe('clear');
+      const stopped = verdict(repeat(20, (index) => turn('observe', ticked(index))));
+      expect(stopped).toMatchObject({ kind: 'stop' });
+      expect((stopped as { reason: string }).reason).toContain('20 times in a row while it kept changing');
+    });
+
+    it('keeps the cycle limit for a submit and a look in turn, even when every look shows a change', () => {
+      const cycle = (index: number) => [...turn('tap', `Tapped #n1.\n\n${ticked(index).slice('Observed.\n\n'.length)}`, { target: 'n1' }), ...turn('observe', ticked(index + 100))];
+      expect(verdict(repeat(2, cycle)).kind).toBe('warn');
+      expect(verdict(repeat(3, cycle)).kind).toBe('stop');
+    });
+
+    it('gives the waiting notice the same reason on every turn, so it is given once', () => {
+      const six = verdict(repeat(6, (index) => turn('observe', unchanged(index))));
+      const eight = verdict(repeat(8, (index) => turn('observe', unchanged(index))));
+      expect(six).toMatchObject({ kind: 'warn', waiting: true });
+      expect((six as { reason: string }).reason).toBe((eight as { reason: string }).reason);
+    });
+  });
+
   it('recognizes a waiting handler marked by another installed copy, and nothing else', () => {
     const own = markWaitingTool({ execute: async () => 'observed' });
     // Another copy of the package marks through the same registry symbol, not through this module's state.

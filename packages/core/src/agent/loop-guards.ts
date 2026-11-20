@@ -12,12 +12,14 @@
 import type { ModelMessage } from 'ai';
 import { realmSlot } from '../internal/realm-slot.ts';
 import { GRAMMAR_TOOL_NAMES } from './action-names.ts';
-import { reportsUnchangedScreen, toolResultTexts } from './screen-update.ts';
+import { reportsScreenChange, toolResultTexts } from './screen-update.ts';
 
 /** One tool call as identity: the name plus its exact serialized input. */
 export interface GuardToolCall {
   readonly toolName: string;
   readonly input: string;
+  /** Set on a call to a waiting tool whose result showed the listing or the tabs change; not part of the identity. */
+  readonly sawChange?: true;
 }
 
 export type LoopGuardVerdict =
@@ -25,7 +27,7 @@ export type LoopGuardVerdict =
   | {
       readonly kind: 'warn' | 'stop';
       readonly reason: string;
-      /** True when the repeats are of a waiting tool (the built-in observe): a wait, not yet a circle. */
+      /** True when the calls are looks of the waiting tools (the built-in observe and screenshot): a wait, not yet a circle. */
       readonly waiting?: boolean;
     };
 
@@ -42,13 +44,15 @@ export interface LoopGuardThresholds {
   readonly repeatStop: number;
   /**
    * Calls in a row to tools marked with `markWaitingTool` (the built-in
-   * `observe` and plain `screenshot`), repeated or in a cycle, counted in
-   * calls: reading the screen again while a save or a load is still in
-   * progress is waiting, not a loop, so it gets more room than an action.
-   * The step budget and deadline still bound it.
+   * `observe` and plain `screenshot`), in any order, since the last one whose
+   * result showed a change: reading the screen again while a save or a load
+   * is still in progress is waiting, not a loop, so it gets more room than an
+   * action.
    */
   readonly observeRepeatWarn: number;
   readonly observeRepeatStop: number;
+  /** Calls in a row to waiting tools however many showed a change: a screen that ticks forever still ends the wait. */
+  readonly waitingStop: number;
   readonly cycleWarn: number;
   readonly cycleStop: number;
   /** Consecutive failed tool results that warn, then force the conclusion. */
@@ -62,6 +66,7 @@ export const DEFAULT_LOOP_GUARD_THRESHOLDS: LoopGuardThresholds = {
   repeatStop: 5,
   observeRepeatWarn: 6,
   observeRepeatStop: 10,
+  waitingStop: 20,
   cycleWarn: 2,
   cycleStop: 3,
   failureWarn: 3,
@@ -81,8 +86,9 @@ interface GuardedTool {
 const waitingHandler = realmSlot<true>('e2e.agent.waiting-handler.v1');
 
 /**
- * Marks a tool as one that only reads the screen again, so identical calls
- * to it get the waiting thresholds. Only the built-in `observe` is marked.
+ * Marks a tool as one that only reads the screen again, so a run of calls to
+ * it gets the waiting thresholds. Only the built-in `observe` and the plain
+ * `screenshot` (not the variant that saves a file) are marked.
  * The mark is on its handler, not the tool object: a caller's own tool under
  * the same name, or the built-in tool with its `execute` replaced, may write
  * and keeps the ordinary thresholds.
@@ -116,9 +122,11 @@ export function extractGuardCalls(
     if (message.role !== 'assistant' || !Array.isArray(message.content)) continue;
     for (const part of message.content) {
       if (part.type !== 'tool-call' || part.toolName === concludeToolName) continue;
-      // A wait that saw the screen change is progress, not a repeat: it ends the streak.
-      const input = safeStringify(part.input);
-      calls.push({ toolName: part.toolName, input: moved.has(part.toolCallId) ? `${input}#changed:${part.toolCallId}` : input });
+      calls.push({
+        toolName: part.toolName,
+        input: safeStringify(part.input),
+        ...(moved.has(part.toolCallId) ? { sawChange: true as const } : {}),
+      });
     }
   }
   return calls;
@@ -131,18 +139,22 @@ function waitsThatSawChange(messages: readonly ModelMessage[], waiting: Readonly
     if (message.role !== 'tool' || !Array.isArray(message.content)) continue;
     for (const part of message.content) {
       if (part.type !== 'tool-result' || !waiting.has(part.toolName)) continue;
-      const text = toolResultTexts(part.output).join('\n');
-      if (text !== '' && !reportsUnchangedScreen(text)) moved.add(part.toolCallId);
+      if (reportsScreenChange(toolResultTexts(part.output).join('\n'))) moved.add(part.toolCallId);
     }
   }
   return moved;
 }
 
+/** The waiting notice's reason: the same on every turn, so the notice is given once per wait. */
+const WAITING_REASON = 'the screen was looked at several times in a row with no change';
+
 /**
  * Checks the trailing calls for exact repetition (period 1) and short exact
  * cycles (periods 2..4). Identity includes the serialized input, so two taps
  * on different targets never count as a repeat — only literally re-issuing
- * the same work does.
+ * the same work does. A trailing run of calls to the `waiting` tools is a
+ * wait and is counted on its own, in calls and in any order; a window with
+ * any other call in it gets the ordinary thresholds.
  */
 export function checkLoopGuards(
   calls: readonly GuardToolCall[],
@@ -150,33 +162,50 @@ export function checkLoopGuards(
   waiting: ReadonlySet<string> = new Set(),
 ): LoopGuardVerdict {
   let warning: LoopGuardVerdict | undefined;
+  const wait = trailingWait(calls, waiting);
+  if (wait.looks >= thresholds.waitingStop) {
+    return { kind: 'stop', reason: `the screen was looked at ${String(wait.looks)} times in a row while it kept changing` };
+  }
+  if (wait.unchanged >= thresholds.observeRepeatStop) {
+    return { kind: 'stop', reason: `the screen was looked at ${String(wait.unchanged)} times in a row with no change` };
+  }
+  if (wait.unchanged >= thresholds.observeRepeatWarn) warning = { kind: 'warn', reason: WAITING_REASON, waiting: true };
   for (let period = 1; period <= MAX_CYCLE_PERIOD; period += 1) {
+    // A window of waiting calls alone is the wait above, not a circle.
+    if (period <= wait.looks) continue;
     const repeats = trailingRepeats(calls, period);
-    // A window of waiting tools alone (observe, or observe and screenshot in
-    // turn) is a wait: it gets the waiting thresholds, counted in calls.
-    const window = calls.slice(-period);
-    const waits = window.length === period && window.every((call) => waiting.has(call.toolName));
-    const [warnAt, stopAt] = waits
-      ? [Math.ceil(thresholds.observeRepeatWarn / period), Math.ceil(thresholds.observeRepeatStop / period)]
-      : period > 1
-        ? [thresholds.cycleWarn, thresholds.cycleStop]
-        : [thresholds.repeatWarn, thresholds.repeatStop];
+    const [warnAt, stopAt] = period > 1 ? [thresholds.cycleWarn, thresholds.cycleStop] : [thresholds.repeatWarn, thresholds.repeatStop];
     if (repeats >= stopAt) {
       return { kind: 'stop', reason: describe(calls, period, repeats) };
     }
     if (repeats >= warnAt && warning === undefined) {
-      warning = { kind: 'warn', reason: describe(calls, period, repeats), ...(waits ? { waiting: true } : {}) };
+      warning = { kind: 'warn', reason: describe(calls, period, repeats) };
     }
   }
   return warning ?? { kind: 'clear' };
+}
+
+/**
+ * The trailing run of calls to waiting tools: how many there are, and how
+ * many came after the last one that showed a change.
+ */
+function trailingWait(calls: readonly GuardToolCall[], waiting: ReadonlySet<string>): { readonly looks: number; readonly unchanged: number } {
+  let looks = 0;
+  let unchanged: number | undefined;
+  for (let index = calls.length - 1; index >= 0; index -= 1) {
+    const call = calls[index]!;
+    if (!waiting.has(call.toolName)) break;
+    if (call.sawChange === true && unchanged === undefined) unchanged = looks;
+    looks += 1;
+  }
+  return { looks, unchanged: unchanged ?? looks };
 }
 
 /** How many times the trailing window of `period` calls repeats consecutively. */
 function trailingRepeats(calls: readonly GuardToolCall[], period: number): number {
   if (calls.length < period) return 0;
   // A period-p cycle must not be a disguised shorter cycle: "A A A A" matches
-  // period 2 as well, but period 1 owns it, so the repeated tool's own
-  // thresholds apply (the waiting ones for observe).
+  // period 2 as well, but period 1 owns it and applies the stricter policy.
   if (period > 1 && isUniformWindow(calls, period)) return 0;
   const same = (a: GuardToolCall | undefined, b: GuardToolCall | undefined): boolean =>
     a !== undefined && b !== undefined && a.toolName === b.toolName && a.input === b.input;

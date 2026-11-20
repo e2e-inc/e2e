@@ -109,12 +109,26 @@ export function toolResultTexts(output: ToolResultPart['output']): string[] {
   return output.value.flatMap((item) => (item.type === 'text' ? [item.text] : []));
 }
 
-/** How an update with no change at all starts: the screen and the screenshot are as they were. */
-const UNCHANGED_SCREEN = 'Screen unchanged since revision ';
+/** Leads of an update that changed the listing or the tabs; the loop guard reads them. */
+const CHANGED_SUBSTANTIALLY = 'The screen changed substantially since revision ';
+const CHANGES_SINCE = 'Screen changes since revision ';
+const NOTHING_LISTED_CHANGED = 'no listed node changed';
+const TAB_OPENED = 'The app opened ';
+const TABS_CLOSED = 'The other tab';
+const TAB_SHOWN = 'The screen shows tab ';
 
-/** True when a tool result reports the screen exactly as it was, nothing listed or drawn changed. */
-export function reportsUnchangedScreen(text: string): boolean {
-  return text.includes(UNCHANGED_SCREEN);
+/**
+ * True when a tool result's first line, which this module writes, reports a
+ * change to the listing or to the open tabs. Only that line is read: node
+ * text comes after it, so app content can never pass for a change. A
+ * truncated listing with no line changed, a screen with no tree, and a
+ * change in pixels alone (an animated spinner) report no change here.
+ */
+export function reportsScreenChange(text: string): boolean {
+  const headline = text.split('\n').find((line) => line.trim() !== '' && line.trim() !== 'Observed.') ?? '';
+  // Leads, not substrings: the location in the line is the app's own text.
+  if ([CHANGED_SUBSTANTIALLY, TAB_OPENED, TABS_CLOSED, TAB_SHOWN].some((lead) => headline.startsWith(lead))) return true;
+  return headline.startsWith(CHANGES_SINCE) && !headline.includes(`): ${NOTHING_LISTED_CHANGED}. `);
 }
 
 /** Renders one step's screens for the model and remembers what it has seen. */
@@ -173,13 +187,13 @@ export class ScreenPresenter {
       return `${lead}${renderUnchanged(previous.revision, observation, expectChange, pixels)}${closed}`;
     }
     if (changes >= MAX_DIFF_LINES || changes > MAX_DIFF_SHARE * next.order.length) {
-      return `${lead}The screen changed substantially since revision ${previous.revision}. ${renderFull(observation)}${closed}`;
+      return `${lead}${CHANGED_SUBSTANTIALLY}${previous.revision}. ${renderFull(observation)}${closed}`;
     }
     const assurance = observation.truncated
       ? 'The screen listing is truncated: nodes past the cut are not listed and none is reported removed; every listed node keeps the id you have.'
       : 'Every node not listed as removed is still on screen under the id you have.';
     return [
-      `${lead}Screen changes since revision ${previous.revision} (now revision ${observation.revision}${describeLocation(observation)}, ${String(next.nodes)} nodes): ${describeCounts(diff)}. ${assurance}`,
+      `${lead}${CHANGES_SINCE}${previous.revision} (now revision ${observation.revision}${describeLocation(observation)}, ${String(next.nodes)} nodes): ${describeCounts(diff)}. ${assurance}`,
       ...diff,
     ].join('\n') + closed;
   }
@@ -271,7 +285,7 @@ function describeCounts(diff: readonly string[]): string {
     .filter(([n]) => n > 0)
     .map(([n, kind]) => `${String(n)} ${kind}`)
     .join(', ');
-  return counts === '' ? 'no listed node changed' : counts;
+  return counts === '' ? NOTHING_LISTED_CHANGED : counts;
 }
 
 /** One full screen, headed so the elision can find it later. */
@@ -303,7 +317,7 @@ function renderUnchanged(since: string, observation: ExecutorObservation, expect
   if (pixels === 'changed') {
     return `Since revision ${since} (${looked}): listed nodes unchanged; the screenshot changed. Read the effect off the image (a focus ring alone is no effect); the ids you have stay valid.`;
   }
-  if (!expectedChange) return `${UNCHANGED_SCREEN}${since} (${looked}); the ids you have stay valid.`;
+  if (!expectedChange) return `Screen unchanged since revision ${since} (${looked}); the ids you have stay valid.`;
   switch (pixels) {
     case 'unchanged':
       return `The screen did not change within the wait after this action (${looked}); the ids you have stay valid. If a change was expected and the control commits something (a save, a submit), it may still have gone through: check before you commit again by any route. Otherwise, if a change was expected, the control had no visible effect here: look for another way rather than repeating it.`;
@@ -344,10 +358,10 @@ function tabNote(previous: ShownScreen['tabs'], next: ShownScreen['tabs']): { re
     const opened = added === 1
       ? `a new tab (tab ${total} of ${total})`
       : `${String(added)} new tabs (tabs ${String(before.count + 1)} to ${total} of ${total})`;
-    return { note: `The app opened ${opened}. The screen still shows tab ${String(after.active)}; use switch_tab to see ${added === 1 ? 'it' : 'one'}.`, moved: false };
+    return { note: `${TAB_OPENED}${opened}. The screen still shows tab ${String(after.active)}; use switch_tab to see ${added === 1 ? 'it' : 'one'}.`, moved: false };
   }
-  if (next === undefined) return { note: `The other tab${before.count > 2 ? 's' : ''} closed; the screen shows the one tab still open.`, moved: true };
-  return { note: `The screen shows tab ${String(after.active)} of ${String(after.count)} now.`, moved: true };
+  if (next === undefined) return { note: `${TABS_CLOSED}${before.count > 2 ? 's' : ''} closed; the screen shows the one tab still open.`, moved: true };
+  return { note: `${TAB_SHOWN}${String(after.active)} of ${String(after.count)} now.`, moved: true };
 }
 
 /** Node id at the head of one rendered line, or undefined for a marker line. */
