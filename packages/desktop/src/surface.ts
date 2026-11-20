@@ -619,13 +619,13 @@ export class DesktopSurface {
    * back to the focused window.
    */
   async useWindow(id: string | undefined, signal: AbortSignal, timeoutMs: number): Promise<void> {
-    if (id === undefined) {
-      this.chosenWindow = undefined;
-      return;
+    if (id !== undefined) {
+      const windows = await this.ownWindows({ signal, timeoutMs });
+      if (!windows.some((window) => window.id === id)) throw notActionable(`the app has no window ${id}; desktop.windows() lists the ones it has`);
     }
-    const windows = await this.ownWindows({ signal, timeoutMs });
-    if (!windows.some((window) => window.id === id)) throw notActionable(`the app has no window ${id}; desktop.windows() lists the ones it has`);
     this.chosenWindow = id;
+    // A point taken in the window read before is not in this one's coordinates: the next point action measures from the window now in use.
+    this.pointWindow = undefined;
   }
 
   private chosenClosed(): EngineError {

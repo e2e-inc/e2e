@@ -495,6 +495,20 @@ describe('DesktopSurface', () => {
     expect(calls.at(-1)).toEqual(['mouse-click', '--xy=511.5,116.25', '--headed']);
   });
 
+  it('taps a point in the window a test chose after a read of another one', async () => {
+    const windows = (pid: number) => [
+      { id: 'w-8032', pid, process_instance: 'instance-1', is_focused: true, bounds: { x: 100, y: 100, width: 400, height: 300 } },
+      { id: 'w-panel', pid, process_instance: 'instance-1', is_focused: false, bounds: { x: 600, y: 100, width: 300, height: 200 } },
+    ];
+    const { surface, fake } = await launched((pid) => ({ 'list-windows': [{ ok: true, data: windows(pid) }] }), { options: { headed: true } });
+    await surface.locate({ kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'sign-in', exact: true } } }, operation());
+    await surface.useWindow('w-panel', signal, 5_000);
+    await surface.performAt({ x: 10, y: 20 }, { kind: 'tap' }, operation());
+    const calls = fake.calls().map((call) => call.args);
+    expect(calls.at(-2)).toEqual(['focus-window', '--window-id', 'w-panel', '--headed']);
+    expect(calls.at(-1)).toEqual(['mouse-click', '--xy=610,120', '--headed']);
+  });
+
   it('refuses a point outside the window, which would land on another app', async () => {
     const { surface, fake } = await launched((pid) => ({ 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true, bounds: { x: 100, y: 100, width: 100, height: 100 } }] }] }), { observe: false, options: { headed: true } });
     await expect(surface.performAt({ x: 115, y: 20 }, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
