@@ -93,6 +93,10 @@ translation moves or goes with it in the same change.
 | goal, atomic goal | लक्ष्य, एटॉमिक लक्ष्य | m |
 | replay cache | रीप्ले कैश | m |
 | strict cache mode | स्ट्रिक्ट कैश मोड | m |
+| cache miss | कैश मिस | m |
+| stale (recording, entry) | पुरानी पड़ चुकी (not पुरानी, which only means older) | |
+| recording, cache entry | रिकॉर्डिंग, एंट्री | f |
+| test id (prose) | टेस्ट id | f |
 | replay | रीप्ले (noun), रीप्ले करना (verb) | m |
 | executor | एक्ज़ीक्यूटर | m |
 | provider | प्रोवाइडर | m |
