@@ -448,9 +448,11 @@ describe('redactFragments', () => {
     // Typed arrays live outside the heap, so both count; a collection mid-scan only lowers the figure.
     const used = (): number => process.memoryUsage().heapUsed + process.memoryUsage().arrayBuffers;
     const before = used();
-    const started = performance.now();
+    // CPU time, not wall time: time other processes hold this CPU does not count.
+    const cpu = process.cpuUsage();
     const redacted = ledger.redactFragments(text);
-    expect(performance.now() - started).toBeLessThan(5_000);
+    const { user, system } = process.cpuUsage(cpu);
+    expect((user + system) / 1_000).toBeLessThan(5_000);
     expect(used() - before).toBeLessThan(text.length * 16);
     expect(redacted.endsWith('<secret:apiKey>')).toBe(true);
   });
