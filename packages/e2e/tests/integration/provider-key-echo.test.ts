@@ -127,39 +127,56 @@ describe.each([400, 401])('a provider that echoes the key in an HTTP %i error', 
   });
 });
 
-describe.each([['run'], ['list'], ['doctor'], ['doctor', '--json']])('a config that loads a key from .env and then fails, through e2e %s', (...command) => {
+/** Configs that load a key from `.env` and then fail in a way that quotes it: a plain error, an e2e error, and a value the config check quotes. */
+const FAILING_CONFIGS = {
+  'a plain error': "process.loadEnvFile('.env');\nthrow new Error('config failed with ' + process.env.GROQ_API_KEY);\n",
+  'an e2e error': "import { ConfigurationError } from 'e2e/engine';\nprocess.loadEnvFile('.env');\nthrow new ConfigurationError('INVALID_CONFIG', 'config failed with ' + process.env.GROQ_API_KEY);\n",
+  'a value the config check quotes': "process.loadEnvFile('.env');\nexport default { targets: [process.env.GROQ_API_KEY] };\n",
+};
+
+describe.each(Object.entries(FAILING_CONFIGS))('a config that loads a key from .env and then fails with %s', (_failure, configSource) => {
   const random = randomBytes(16).toString('hex');
   const key = `gsk-dotenv-${random}`;
   let project: FixtureProject;
-  let output = '';
 
-  beforeAll(async () => {
-    project = createProject({
-      '.env': `GROQ_API_KEY=${key}\n`,
-      'e2e.config.ts': "process.loadEnvFile('.env');\nthrow new Error('config failed with ' + process.env.GROQ_API_KEY);\n",
-    });
-    const env: NodeJS.ProcessEnv = { ...process.env, CI: '', NO_COLOR: '1', E2E_TELEMETRY_DISABLED: '1' };
-    for (const name of ['GROQ_API_KEY', 'NODE_DEBUG']) delete env[name];
-    try {
-      const result = await execFileAsync(process.execPath, [CLI, ...command], { cwd: project.dir, env, timeout: 60_000 });
-      output = result.stdout + result.stderr;
-    } catch (error) {
-      const failed = error as { stdout?: string; stderr?: string };
-      output = (failed.stdout ?? '') + (failed.stderr ?? '');
-    }
-  }, 90_000);
+  beforeAll(() => {
+    project = createProject({ '.env': `GROQ_API_KEY=${key}\n`, 'e2e.config.ts': configSource });
+  });
 
   afterAll(() => {
     project?.cleanup();
   });
 
-  it('names the key by its marker in the failure', () => {
-    expect(output).toContain('config failed with <secret:GROQ_API_KEY>');
-  });
+  /** One command of the built CLI in the project, the key in no variable of its own: its exit code and output. */
+  async function cli(...command: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+    const env: NodeJS.ProcessEnv = { ...process.env, CI: '', NO_COLOR: '1', E2E_TELEMETRY_DISABLED: '1' };
+    for (const name of ['GROQ_API_KEY', 'NODE_DEBUG']) delete env[name];
+    try {
+      const result = await execFileAsync(process.execPath, [CLI, ...command], { cwd: project.dir, env, timeout: 60_000 });
+      return { code: 0, stdout: result.stdout, stderr: result.stderr };
+    } catch (error) {
+      const failed = error as { code?: number; stdout?: string; stderr?: string };
+      return { code: failed.code ?? -1, stdout: failed.stdout ?? '', stderr: failed.stderr ?? '' };
+    }
+  }
 
-  it('prints no piece of the key', () => {
-    expect(piecesOf(key, random, output)).toEqual([]);
-  });
+  it.each([['run'], ['list'], ['doctor'], ['cache', 'stats']])('e2e %s names the key by its marker and prints no piece of it', async (...command) => {
+    const { code, stdout, stderr } = await cli(...command);
+    expect(code).toBe(2);
+    expect(stdout + stderr).toContain('<secret:GROQ_API_KEY>');
+    expect(piecesOf(key, random, stdout + stderr)).toEqual([]);
+  }, 90_000);
+
+  it('e2e doctor --json reports the failed config check with the marker in its message', async () => {
+    const { code, stdout, stderr } = await cli('doctor', '--json');
+    expect(code).toBe(2);
+    const report = JSON.parse(stdout) as { schemaVersion: string; checks: { id: string; status: string; message?: string }[] };
+    expect(report.schemaVersion).toBe('doctor-1');
+    const check = report.checks.find((entry) => entry.id === 'config');
+    expect(check?.status).toBe('fail');
+    expect(check?.message).toContain('<secret:GROQ_API_KEY>');
+    expect(piecesOf(key, random, stdout + stderr)).toEqual([]);
+  }, 90_000);
 });
 
 describe('a key only the environment handed to a run or a host holds', () => {

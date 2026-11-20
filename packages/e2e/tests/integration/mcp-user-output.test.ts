@@ -86,6 +86,11 @@ const DOTENV_CONFIG = `process.loadEnvFile('.env');
 throw new Error('config failed with ' + process.env.GROQ_API_KEY);
 `;
 
+/** A config that loads the key and exports it where a target belongs, which the config check quotes. */
+const DOTENV_INVALID_CONFIG = `process.loadEnvFile('.env');
+export default { targets: [process.env.GROQ_API_KEY] };
+`;
+
 interface ToolText {
   readonly text: string;
   readonly isError: boolean;
@@ -114,6 +119,7 @@ describe('e2e mcp redacts what user code prints', { timeout: 120_000 }, () => {
       'kiosk.ts': KIOSK,
       'broken.config.ts': BROKEN_CONFIG,
       'dotenv.config.ts': DOTENV_CONFIG,
+      'dotenv-invalid.config.ts': DOTENV_INVALID_CONFIG,
       '.env': `GROQ_API_KEY=${DOTENV_KEY}\n`,
     });
     const transport = new StdioClientTransport({
@@ -148,6 +154,14 @@ describe('e2e mcp redacts what user code prints', { timeout: 120_000 }, () => {
     const opened = await invoke('open_session', { config: 'dotenv.config.ts' });
     expect(opened.isError).toBe(true);
     expect(opened.text).toContain('config failed with <secret:GROQ_API_KEY>');
+    expect(opened.text).not.toContain(DOTENV_KEY.slice(-16));
+    expect(stderr).not.toContain(DOTENV_KEY.slice(-16));
+  });
+
+  it('names a key the config loaded by its marker when the config check quotes it', async () => {
+    const opened = await invoke('open_session', { config: 'dotenv-invalid.config.ts' });
+    expect(opened.isError).toBe(true);
+    expect(opened.text).toContain('<secret:GROQ_API_KEY>');
     expect(opened.text).not.toContain(DOTENV_KEY.slice(-16));
     expect(stderr).not.toContain(DOTENV_KEY.slice(-16));
   });

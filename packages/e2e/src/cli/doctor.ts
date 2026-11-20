@@ -26,7 +26,7 @@ import { loginOf } from '../oauth/login-model.ts';
 import { apiKeyFor, getProvider, loginHint, type ProviderId } from '../oauth/providers.ts';
 import { defaultCredentialStore } from '../oauth/store.ts';
 import { bounded } from '../report/format.ts';
-import { processSecrets, registerStaticSecrets } from '@e2e-dev/core/lib/run/secrecy';
+import { redactError, registerStaticSecrets } from '@e2e-dev/core/lib/run/secrecy';
 import type { RunnerOutput } from '../run/process-output.ts';
 
 /** The `schemaVersion` of `e2e doctor --json`, described by `schema/doctor-v1.schema.json`. */
@@ -147,13 +147,13 @@ export async function doctor(options: DoctorOptions): Promise<DoctorReport> {
   return doctorReport(options.version, checks);
 }
 
-/** The report, every message redacted of the config's secrets: an engine or a provider error may quote one. */
+/** The report, every message redacted of the config's secrets and the provider keys in the environment, which the config may have just loaded: an engine, a provider, or a config error may quote one. */
 function doctorReport(version: string, checks: readonly DoctorCheck[]): DoctorReport {
   return {
     schemaVersion: DOCTOR_SCHEMA_VERSION,
     version,
     ok: checks.every((check) => check.status !== 'fail'),
-    checks: checks.map((check) => (check.message === undefined ? check : { ...check, message: processSecrets.redact(check.message) })),
+    checks: checks.map((check) => (check.message === undefined ? check : { ...check, message: redactError(check.message) })),
   };
 }
 
