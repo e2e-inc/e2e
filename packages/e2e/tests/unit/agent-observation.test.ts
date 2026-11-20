@@ -1,6 +1,6 @@
 import { assert, describe, expect, it, vi } from 'vitest';
 import type { Observation, SemanticNode } from '@e2e-dev/core/lib/engine/surface';
-import { changeShape, interactiveNodeCount, isTransitionalObservation, observationShape, prepareObservation, projectTree, redactNode, redactNodesAgain, settleObservation } from '@e2e-dev/core/lib/agent/observation';
+import { changeShape, interactiveNodeCount, isTransitionalObservation, observationShape, pixelsForModel, prepareObservation, projectTree, redactNode, redactNodesAgain, settleObservation } from '@e2e-dev/core/lib/agent/observation';
 import { OBSERVED_NAME_LIMIT, OBSERVED_TEXT_LIMIT } from '@e2e-dev/core/lib/engine/contract';
 import { SecretLedger } from '@e2e-dev/core/lib/internal/redact';
 import { describeDelta } from '@e2e-dev/core/lib/cache/anchors';
@@ -113,6 +113,16 @@ describe('prepareObservation', () => {
     assert(prepared.kind === 'semantic');
     expect(prepared.pixelsWithheld).toBe('MASKING_UNPROVEN');
     expect(prepared.text).toBe('#root');
+  });
+
+  it('reads a screenshot the engine withheld, unable to mask it, as withheld for masking', () => {
+    const withheld: Observation = { ...observation(node('root')), pixelsWithheld: 'MASKING_UNPROVEN' };
+    const prepared = prepareObservation(withheld, { redact: NO_REDACT, redactCut: NO_REDACT, maxBytes: 4_096 });
+    assert(prepared.kind === 'semantic');
+    expect(prepared.pixelsWithheld).toBe('MASKING_UNPROVEN');
+    expect(pixelsForModel(prepared)).toEqual({ withheld: 'MASKING_UNPROVEN' });
+    const untaken = prepareObservation(observation(node('root')), { redact: NO_REDACT, redactCut: NO_REDACT, maxBytes: 4_096 });
+    expect(pixelsForModel(untaken)).toEqual({ withheld: 'UNSUPPORTED_CAPABILITY' });
   });
 
   it('serializes the tree with node references and indentation', () => {

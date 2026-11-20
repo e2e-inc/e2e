@@ -941,12 +941,13 @@ describe('observation', () => {
     expect(androidAt(100, 290 / 2)).toEqual([0, 0, 0]);
     expect(androidAt(100, 240 / 2)).toEqual([255, 255, 255]);
 
-    // A secure node without bounds cannot be masked: the tree ships, the image does not.
+    // A secure node without bounds cannot be masked: the tree ships, the image does not, and no region counts as masked.
     h.fake.respond('capture.snapshot', () => ({
       nodes: [{ ref: 'e1', type: 'SecureTextField', label: 'PIN', value: '1234' }],
     }));
     const unmaskable = await h.engine.observe!(operation(), { pixels: true });
     expect(unmaskable.pixels).toBeUndefined();
+    expect(unmaskable.maskedRegionCount).toBe(0);
     expect(unmaskable.root.children).toHaveLength(1);
     // A snapshot without geometry keeps the viewport the session last learned.
     expect(unmaskable.viewport).toEqual({ width: 390, height: 844 });
@@ -957,6 +958,8 @@ describe('observation', () => {
     });
     const treeOnly = await h.engine.observe!(operation(), { pixels: true });
     expect(treeOnly.pixels).toBeUndefined();
+    // No screenshot was taken, so none was withheld.
+    expect(treeOnly.maskedRegionCount).toBeUndefined();
     expect(treeOnly.root.children).toHaveLength(1);
   });
 
@@ -975,7 +978,7 @@ describe('observation', () => {
     expect(asked).toEqual([undefined, true]);
   });
 
-  it('withholds the pixels of a screen with a secure field when the image cannot be read or decoded', async () => {
+  it('withholds the pixels of a screen with a secure field, bounded or not, when the image cannot be read or decoded', async () => {
     const h = harness();
     // A PNG signature and header naming the size, with no image data behind them: the size reads, the decode fails.
     const headerOnly = encodePng({ width: 195, height: 422, channels: 4, pixels: new Uint8Array(195 * 422 * 4) }).subarray(0, 33);
@@ -985,12 +988,24 @@ describe('observation', () => {
       return { path: (args as { path: string }).path };
     });
     await openAttempt(h);
-    for (const bytes of [new Uint8Array([1, 2, 3]), headerOnly]) {
-      shot = bytes;
-      const observation = await h.engine.observe!(operation(), { pixels: true });
-      expect(observation.pixels).toBeUndefined();
-      expect(observation.root.children).toHaveLength(1);
-      await expect(h.engine.artifacts!.screenshot('password', operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
+    // A secure field without bounds cannot be masked either, but an image that does not decode is still no image.
+    const unbounded = {
+      nodes: [
+        { ref: 'e1', index: 0, depth: 0, type: 'application', label: 'Bank', rect: { x: 0, y: 0, width: 390, height: 844 } },
+        { ref: 'e2', index: 1, parentIndex: 0, depth: 1, type: 'SecureTextField', label: 'PIN' },
+      ],
+    };
+    for (const screen of [SETTINGS_SNAPSHOT, unbounded]) {
+      h.fake.respond('capture.snapshot', () => screen);
+      for (const bytes of [new Uint8Array([1, 2, 3]), headerOnly]) {
+        shot = bytes;
+        const observation = await h.engine.observe!(operation(), { pixels: true });
+        expect(observation.pixels).toBeUndefined();
+        // No usable image was taken, so none was withheld, and the matcher waits for the next one.
+        expect(observation.maskedRegionCount).toBeUndefined();
+        expect(observation.root.children).toHaveLength(1);
+        await expect(h.engine.artifacts!.screenshot('password', operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
+      }
     }
     expect(existsSync(path.join(artifactsDir, 'screenshots'))).toBe(false);
   });
@@ -1569,7 +1584,7 @@ describe('session hooks, viewport swipe, location, artifacts', () => {
     h.fake.respond('capture.snapshot', () => ({
       nodes: [{ ref: 'e1', type: 'SecureTextField', label: 'PIN', value: '1234' }],
     }));
-    await expect(h.engine.artifacts!.screenshot('leak', operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
+    await expect(h.engine.artifacts!.screenshot('leak', operation())).rejects.toMatchObject({ code: 'POLICY_DENIED' });
     expect(existsSync(path.join(artifactsDir, 'screenshots', '002-leak.png'))).toBe(false);
     expect(new Set(temporaryFiles).size).toBe(temporaryFiles.length);
     for (const file of temporaryFiles) {
