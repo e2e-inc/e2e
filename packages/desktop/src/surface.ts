@@ -437,9 +437,10 @@ export class DesktopSurface {
    * be new, and a launch is told by its token alone.
    */
   private async runningCopies(target: string, operation: Pick<OperationContext, 'signal' | 'timeoutMs'>): Promise<ReadonlySet<number> | undefined> {
-    const { apps, complete } = await this.run<{ apps?: readonly RawApp[]; complete?: boolean }>(['list-apps'], { label: 'list apps', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
+    // agent-desktop matches the app the way its launch does (any case, the localized name too), so every copy the launch could hand over to is listed.
+    const { apps, complete } = await this.run<{ apps?: readonly RawApp[]; complete?: boolean }>(['list-apps', '--app', target], { label: 'list apps', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
     if (complete === false) return undefined;
-    return new Set((apps ?? []).filter((app) => typeof app.pid === 'number' && (app.bundle_id === target || app.name === target)).map((app) => app.pid!));
+    return new Set((apps ?? []).filter((app) => typeof app.pid === 'number').map((app) => app.pid!));
   }
 
   /** Launches an installed app by bundle id or name through agent-desktop, which reports the process it started. */
@@ -526,10 +527,10 @@ export class DesktopSurface {
    */
   private async claim(launch: Launch, operation: Pick<OperationContext, 'signal' | 'timeoutMs'>): Promise<boolean | undefined> {
     const { target, token, before } = launch;
-    const { apps, complete } = await this.run<{ apps?: readonly RawApp[]; complete?: boolean }>(['list-apps'], { label: 'list apps', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
+    const { apps, complete } = await this.run<{ apps?: readonly RawApp[]; complete?: boolean }>(['list-apps', '--app', target], { label: 'list apps', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
     const unreadable: RawApp[] = [];
     for (const app of apps ?? []) {
-      if (typeof app.pid !== 'number' || (app.bundle_id !== target && app.name !== target)) continue;
+      if (typeof app.pid !== 'number') continue;
       // A copy that ran before the launch is never its own, whatever its environment says.
       if (before?.has(app.pid) === true) continue;
       const carries = await carriesToken(app.pid, token, operation.signal);

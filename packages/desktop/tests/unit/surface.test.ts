@@ -803,6 +803,18 @@ describe('DesktopSurface', () => {
     expect(await gone(theirs, 300)).toBe(false);
   });
 
+  it('lists the running copies the way agent-desktop matches the app, its localized name too', async () => {
+    const theirs = unreadableCopy();
+    const { surface, fake } = await initialized({
+      launch: [{ ok: true, data: { app: '계산기', pid: theirs, process_instance: 'theirs' } }],
+      'list-apps': [{ ok: true, data: { apps: [{ name: '계산기', bundle_id: 'com.apple.calculator', pid: theirs, process_instance: 'theirs' }] } }],
+    });
+    await expect(surface.restart(operation())).rejects.toThrow(/handed over to a copy already running/);
+    expect(fake.calls().find((call) => call.key === 'list-apps')?.args).toEqual(['list-apps', '--app', 'dev.e2e.spike.form']);
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect(await gone(theirs, 300)).toBe(false);
+  });
+
   it('takes neither of two new copies whose environment cannot be read', async () => {
     const first = unreadableCopy();
     const second = unreadableCopy();
