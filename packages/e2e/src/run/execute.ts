@@ -6,6 +6,7 @@ import { isCiMode, type ResolvedConfig } from '@e2e-dev/core/lib/config/resolve'
 import { classifyError, ConfigurationError, E2EError, serializeError, sanitizeRecordedText, truncateUtf8, TestError, TestTimeoutError, withHint, type SerializedError } from '@e2e-dev/core/lib/internal/errors';
 import { isRuntimeSkip, type RuntimeSkip } from '../internal/skip.ts';
 import { lateExpectedFailureError } from '@e2e-dev/core/lib/internal/expected-failure';
+import { lateTimeoutError } from '@e2e-dev/core/lib/internal/test-timeout';
 import { settleExpectedFailure } from './expected-failure.ts';
 import type { ExecutorAttempt } from '@e2e-dev/core/lib/agent/executor';
 import { isModelUnreachable } from '@e2e-dev/core/lib/agent/error';
@@ -18,7 +19,7 @@ import type { ModuleRegistration, RegisteredTest } from '../collect/registry.ts'
 import { pairRecordings, type TestTargetPair } from '../collect/select.ts';
 import type { ArtifactStore } from '@e2e-dev/core/lib/types';
 import { attemptSegments, createAttemptArtifacts, resultSegment } from '@e2e-dev/core/lib/run/artifacts';
-import { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
+import { AttemptBudget, AttemptTimeout } from '@e2e-dev/core/lib/run/budget';
 import { planAttemptFixtures, WorkerFixturePool } from './fixture-pool.ts';
 import { captureFailureEvidence } from './failure-evidence.ts';
 import { createFixtures } from '@e2e-dev/core/lib/run/fixtures';
@@ -66,13 +67,14 @@ export interface ExecutionEvents {
   /** Live step progress of one running attempt, for reporters. */
   onProgress?(pair: TestTargetPair, progress: StepProgress): void;
   /**
-   * An attempt's test timeout started, as its `beforeEach` hooks and body
-   * begin; again with `remainingMs` each time its test clock runs again
-   * after `e2e run --step` held a step.
+   * An attempt's test timeout (`timeoutMs`, the test's own or what
+   * `test.setTimeout` changed it to) started, as its `beforeEach` hooks and
+   * body begin; again with `remainingMs` each time its test clock runs again
+   * after `e2e run --step` held a step, and each time `test.setTimeout` moves it.
    */
   onAttemptDeadline?(
     pair: TestTargetPair,
-    attempt: { readonly index: number; readonly id: string; readonly startedAt: string; readonly remainingMs?: number },
+    attempt: { readonly index: number; readonly id: string; readonly startedAt: string; readonly timeoutMs: number; readonly remainingMs?: number },
   ): void;
   /** The attempt `onAttemptDeadline` announced has ended, or one that never got that far has. */
   onAttemptEnd?(): void;
@@ -706,9 +708,12 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         );
       });
 
-      const testDeadline = new Deadline(pair.options.timeout);
-      this.options.events?.onAttemptDeadline?.(pair, { index: attemptIndex, id: attemptId, startedAt });
-      const budget = new AttemptBudget(attemptAbort.signal, testDeadline);
+      // The runner's watchdog keeps the test deadline too: it hears each move and what is left.
+      const announce = (remainingMs?: number): void =>
+        this.options.events?.onAttemptDeadline?.(pair, { index: attemptIndex, id: attemptId, startedAt, timeoutMs: timeout.timeoutMs, ...(remainingMs === undefined ? {} : { remainingMs }) });
+      const budget = new AttemptBudget(attemptAbort.signal, new Deadline(pair.options.timeout));
+      const timeout = new AttemptTimeout(budget, pair.options.timeout, announce);
+      announce();
       const saveSession =
         context.kind !== 'setup'
           ? undefined
@@ -757,7 +762,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         };
 
         holds = holdAttemptSteps({
-          budget,
+          timeout,
           signal: attemptAbort.signal,
           attempt: {
             target: this.target.name,
@@ -768,13 +773,6 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
           },
           ask: (step, signal, readScreen) => hold.ask(step, signal, readScreen, tools),
           readScreen: (signal: AbortSignal) => readHeldScreen(session, this.op(attemptId, this.config.actionTimeout, signal), screens),
-          // The runner's watchdog keeps the test deadline too; it gets what is left.
-          onResume: (remainingMs) => this.options.events?.onAttemptDeadline?.(pair, {
-            index: attemptIndex,
-            id: attemptId,
-            startedAt,
-            remainingMs,
-          }),
         });
       }
       // `expect.poll` and `expect.soft` take no fixture, so the attempt they
@@ -797,6 +795,10 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
                 },
               }
             : {}),
+          setTimeout: (timeoutMs: number) => {
+            if (phase !== 'beforeEach' && phase !== 'body') throw lateTimeoutError();
+            return timeout.set(timeoutMs);
+          },
         },
         attemptEnd.signal,
       );
@@ -888,11 +890,9 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         const onTimeout = (): Error => {
           timedOut = true;
           attemptAbort.abort();
-          return new TestTimeoutError(`test timed out after ${pair.options.timeout} ms in phase ${phase}`);
+          return new TestTimeoutError(`test timed out after ${timeout.timeoutMs} ms in phase ${phase}`);
         };
-        const bodyWork = this.debug.time('test.body', () =>
-          holds === undefined ? withTimeout(body, Math.max(1, testDeadline.remaining()), onTimeout) : holds.race(body, onTimeout),
-        );
+        const bodyWork = this.debug.time('test.body', () => timeout.race(body, onTimeout));
 
         await bodyWork.finally(() => heldTools?.end(new ConfigurationError(
           'NO_SESSION',

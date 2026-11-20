@@ -185,7 +185,7 @@ export class TargetWorker {
               attempt: attempt.index,
               attemptId: attempt.id,
               startedAt: attempt.startedAt,
-              timeoutMs: pair.options.timeout,
+              timeoutMs: attempt.timeoutMs,
               ...(attempt.remainingMs === undefined ? {} : { remainingMs: attempt.remainingMs }),
               graceMs: deps.config.cleanupTimeout,
             });
