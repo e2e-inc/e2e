@@ -4,7 +4,8 @@
  * attempt's start, in either direction; from a `beforeAll` hook it replaces
  * that hook's timeout, the device calls it makes included; `afterEach` and
  * `afterAll` hooks, worker fixture teardowns, a bad value, and a call outside
- * a running test are refused.
+ * a running test are refused. A test that raised its timeout still skips itself
+ * as fixme after the timeout it started with.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -208,6 +209,36 @@ test.describe('seeds through the device', () => {
       }
     },
     90_000,
+  );
+
+  it(
+    'skips a test as fixme when it reaches test.fixme after the timeout it raised',
+    async () => {
+      const file = `import { test } from 'e2e';
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test('fixme past the first timeout', { timeout: 300 }, async () => {
+  test.setTimeout(10_000);
+  await sleep(900);
+  test.fixme('not ready');
+});
+`;
+      const { outcome, project } = await runProject({ 'tests/fixme.e2e.ts': file }, {});
+      try {
+        assertValidReport(outcome.report);
+        const result = resultByTitle(outcome, 'fixme past the first timeout');
+        const skip = { cause: 'fixme', reason: 'fixme: not ready' };
+        expect(result).toMatchObject({ status: 'skipped', skip });
+        expect(result.attempts[0]).toMatchObject({ status: 'skipped', skip });
+        // The skip came after the 300 ms the test started with.
+        expect(result.attempts[0]!.durationMs).toBeGreaterThanOrEqual(900);
+        expect(outcome.exitCode).toBe(0);
+      } finally {
+        project.cleanup();
+      }
+    },
+    120_000,
   );
 
   it(
