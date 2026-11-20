@@ -526,7 +526,7 @@ e2e run [files...]
 | --- | --- |
 | `--reporter <ids>` | `config.reporters` の組み込みレポーターを置き換えます。`list`、`dot`、`json`、`junit`、`markdown` をカンマ区切りで指定します。デフォルトは設定値です。`junit({ outputFile })` のように設定で構成した組み込みレポーターは、そのオプションを保ちます。`json` と併用すると、`list` と `dot` は stderr に出力します。`dot` と `list` の併用は `INVALID_CONFIG` です。設定内の[その他のレポーター](/reference/reporters)は引き続き実行します。 |
 | `--output <dir>` | 設定の [`output`](/reference/config#output) より優先する、この実行の結果ディレクトリです。レポート、レポーターのファイル、AI トレース、`results/`、`sessions/` を含みます。デフォルトは設定値、なければ `.e2e` です。プロジェクトルートから解決し、その内側のディレクトリである必要があります。ルート自体や、実行が所有できないその他のディレクトリ（リンク先に一覧）は `INVALID_CONFIG` です。テスト開始時に `results/` を消去しますが、`--last-failed` の再実行では前回のレポートが参照するものを残します。 |
-| `--cache-dir <dir>` | [`E2E_CACHE_DIR`](/reference/environment#replay-cache) と [`cache.dir`](/reference/config#cache) より優先する、この実行のリプレイキャッシュディレクトリです。デフォルトは `E2E_CACHE_DIR`、次に `cache.dir`、なければ `.e2e/cache` です。プロジェクトルートから解決し、`~` または先頭の `~/` はホームディレクトリです。キャッシュモードは設定のままです。カスタムの `cache.store` との併用は `INVALID_CONFIG` です。 |
+| `--cache-dir <dir>` | [`E2E_CACHE_DIR`](/reference/environment#replay-cache) と [`cache.dir`](/reference/config#cache) より優先する、この実行のリプレイキャッシュディレクトリです。デフォルトは `E2E_CACHE_DIR`、次に `cache.dir`、なければ `.e2e/cache` です。プロジェクトルートから解決し、`~` または先頭の `~/` はホームディレクトリです。キャッシュモードは設定のままです。独自の `cache.store` との併用は `INVALID_CONFIG` です。 |
 | `--timings <file>` | 実行終了時に更新する[所要時間の履歴](/ci#cache-the-timings-history)です。`<output>/timings.json` より優先します。複数ワーカーでは、時間の記録がないファイルを先に、残りを所要時間の長い順に開始します。プロジェクトルートから解決します。ファイルがない、または不正な場合は履歴なしとして扱い、エラーにはしません。 |
 | `--debug` | 実行後、stderr にフェーズ別の時間とエージェントステップの表を出力します。[デバッグ出力](#debug-output)を参照してください。 |
 | `--ai-trace` | すべてのモデル呼び出しを `<output>/ai-trace.json` に記録します。[出力](#output)を参照してください。 |
@@ -900,7 +900,7 @@ tests/signup.e2e.ts::signs%20up  web     9ab7715ce004  3d   7 (truncated)
 - ランナーが書いていないファイルには触れません。
 
 <Note>
-これらのコマンドが読むのはファイルストアだけです。カスタムの `cache.store` がある場合は、その旨を示して 2 で終了します。
+これらのコマンドが読むのはファイルストアだけです。独自の `cache.store` がある場合は、その旨を示して 2 で終了します。
 </Note>
 
 #### `e2e upgrade`

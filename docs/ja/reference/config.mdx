@@ -733,7 +733,7 @@ video: 'retain-on-failure', // default: 'off'
 
 ### agents
 
-名前付きのエージェントです。各エントリーは通常のオブジェクトで、組み込みエージェントのオプション、またはカスタムの実行ロジックを使う `{ executor }` を指定します。
+名前付きのエージェントです。各エントリーは通常のオブジェクトで、組み込みエージェントのオプション、または独自の実行ロジックを使う `{ executor }` を指定します。
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
@@ -856,7 +856,7 @@ tools: { lookupOrder },
 
 #### `executor`
 
-`agent.act()` が組み込みエージェントの代わりに呼び出す、カスタムの実行ロジックです。
+`agent.act()` が組み込みエージェントの代わりに呼び出す、独自の実行ロジックです。
 
 ```ts
 house: { executor: houseBrain, model: gateway('openai/gpt-6-luna-fast'), maxModelCalls: 10 },
@@ -1107,7 +1107,7 @@ cache: 'read-write', // default: 'read-write' locally, 'read-only' in CI
 
 #### `store`
 
-ファイルストアを置き換える、カスタムのエントリーストアです。
+ファイルストアを置き換える、独自のエントリーストアです。
 
 ```ts
 cache: { store: createStore(cacheUrl) },
