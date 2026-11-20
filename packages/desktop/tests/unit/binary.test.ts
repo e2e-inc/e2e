@@ -51,14 +51,18 @@ describe('the pinned agent-desktop', () => {
     expect(existsSync(pinnedExecutable(env)!)).toBe(false);
   });
 
-  it('downloads again over a cache entry no verified unpack stamped', async () => {
+  it('downloads again over a cache entry that is whole but no verified unpack stamped, or one stamped for another release', async () => {
     const home = mkdtempSync(path.join(tmpdir(), 'e2e-desktop-cache-'));
     try {
       const env = { HOME: home, USERPROFILE: home, XDG_CACHE_HOME: path.join(home, 'cache'), LOCALAPPDATA: path.join(home, 'local') };
       const executable = pinnedExecutable(env)!;
-      mkdirSync(path.dirname(executable), { recursive: true });
-      writeFileSync(executable, '#!/bin/sh\n');
-      chmodSync(executable, 0o755);
+      const entry = path.dirname(executable);
+      mkdirSync(entry, { recursive: true });
+      // Everything a checked unpack leaves but the stamp, so the stamp alone decides.
+      for (const name of [executable, path.join(entry, 'agent-desktop-macos-helper')]) {
+        writeFileSync(name, '#!/bin/sh\n');
+        chmodSync(name, 0o755);
+      }
       let fetched = 0;
       vi.stubGlobal('fetch', () => {
         fetched += 1;
@@ -66,6 +70,9 @@ describe('the pinned agent-desktop', () => {
       });
       await expect(installPinned(env, new AbortController().signal, () => undefined)).rejects.toMatchObject({ code: 'AGENT_DESKTOP_INSTALL_FAILED' });
       expect(fetched).toBe(1);
+      writeFileSync(path.join(entry, '.verified'), 'the digest of another release');
+      await expect(installPinned(env, new AbortController().signal, () => undefined)).rejects.toMatchObject({ code: 'AGENT_DESKTOP_INSTALL_FAILED' });
+      expect(fetched).toBe(2);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
