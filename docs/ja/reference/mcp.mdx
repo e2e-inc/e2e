@@ -101,7 +101,7 @@ open_session {target: "web", headed: true}
 | `test` | string | いいえ | 最初に実行する 1 つのテストです。`e2e run` の位置引数と同じ形式で指定します。セッションはテストが止まった場所で停止します。[テストの実行](#running-a-test)を参照してください。 |
 | `engine` | string または object | いいえ | 設定ファイルのないディレクトリで使うセッションのエンジンです。パッケージ名、または `{package, export, options}` を指定します。[設定ファイルなしで使う](#without-a-config)を参照してください。 |
 | `app` | object | いいえ | `engine` セッションのテスト対象アプリです。`url`、`bundleId`、`appPath` で指定します。 |
-| `attach` | string | いいえ | [一時停止中のテスト](#attaching-to-a-held-test)で、一時停止のヘッダーに表示される ID です。このフィールドだけを渡します。 |
+| `attach` | string | いいえ | [一時停止中のテスト](#attaching-to-a-held-test)の一時停止ヘッダーに表示される ID です。このフィールドだけを渡します。 |
 
 #### `tools`
 
