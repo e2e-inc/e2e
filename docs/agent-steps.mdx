@@ -72,7 +72,8 @@ list".
 
 The loop detects repeated calls and cycles. After three failed actions in a
 row, it tells the model to change its approach. After five, it asks for a
-verdict. It also asks for a verdict when the budget or the deadline is
+verdict. Repeated `observe` calls, which wait on a save or a load in
+progress, get more room: a notice after six in a row, a verdict after ten. It also asks for a verdict when the budget or the deadline is
 near.
 
 ## Assertion exploration
