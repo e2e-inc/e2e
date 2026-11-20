@@ -1,7 +1,7 @@
 /** Attempt-scoped step timeline. */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { isAgentError } from '../agent/error.ts';
+import { AgentError, isAgentError } from '../agent/error.ts';
 import type { ReplayHandOffReason } from '../agent/executor.ts';
 import type { CacheWrite } from '../cache/context.ts';
 import type { TraceReplayMissReason } from '../cache/decide.ts';
@@ -328,6 +328,24 @@ function redactErrorInPlace(thrown: unknown, redact: (text: string) => string): 
     }
     error = error.cause;
   }
+}
+
+/**
+ * A failed model call, rebuilt as this copy's own agent error with its code,
+ * its `blocked` flag, and its text redacted, and no cause. Whoever catches a
+ * step's error gets this: the cause is the provider SDK's error, whose own
+ * fields (a response body, the request) no redaction reaches, and a provider
+ * may quote the key back in them. An agent error from another installed copy
+ * of core is rebuilt the same way. Every other error is left to the caller.
+ */
+function modelFailure(cause: unknown, redact: (text: string) => string): AgentError | undefined {
+  if (!isAgentError(cause) || cause.code !== 'MODEL_PROVIDER_FAILED') return undefined;
+  const error = new AgentError(cause.code, redact(cause.explanation), {
+    blocked: cause.blocked,
+    ...(cause.screenshot === undefined ? {} : { screenshot: cause.screenshot }),
+  });
+  if (cause.stack !== undefined) error.stack = redact(cause.stack);
+  return error;
 }
 
 export interface StepRecorderOptions {
@@ -772,10 +790,10 @@ export class StepRecorder {
             ? 'blocked'
             : 'failed';
       record.error = serializeError(error, { projectRoot: this.projectRoot, redact: this.redact });
+      const failure = modelFailure(cause, this.redact ?? processSecrets.redact);
+      if (failure !== undefined) throw failure;
       if (!this.redactThrown) throw cause;
       if (this.redact !== undefined) redactErrorInPlace(error, this.redact);
-      // An agent error's cause is a provider SDK's error, whose own fields (a response body, a request) no redaction reaches: a caller gets the agent error alone.
-      if (isAgentError(error)) Reflect.deleteProperty(error, 'cause');
       throw error;
     } finally {
       this.running.delete(record.id);

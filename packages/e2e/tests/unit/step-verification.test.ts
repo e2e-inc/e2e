@@ -5,6 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { StepRecorder } from '@e2e-dev/core/lib/run/steps';
+import { AgentError } from '@e2e-dev/core/lib/agent/error';
 
 const pass = async (): Promise<void> => undefined;
 
@@ -48,6 +49,31 @@ describe('StepRecorder.lastVerifiedStepIndex', () => {
     const kept = new Error('the page printed hunter2');
     await new StepRecorder('attempt', { redact }).run('app', 'app.open', '/', () => Promise.reject(kept)).catch(() => undefined);
     expect(kept.message).toContain('hunter2');
+  });
+
+  it('keeps the cause of an agent error that is not a failed model call, such as a hook\'s own error', async () => {
+    const mine = new Error('the test stopped the run');
+    const steps = new StepRecorder('attempt', { redact: (text) => text, redactThrown: true });
+    const caught = await steps.run('agent', 'agent.act', 'x', () => Promise.reject(new AgentError('ACTION_FAILED', 'hook failed', { cause: mine }))).then(() => undefined, (cause: Error) => cause);
+    expect(caught?.cause).toBe(mine);
+  });
+
+  it('rebuilds a failed model call, from this copy or another, as its own agent error with its text redacted and no cause', async () => {
+    const redact = (text: string): string => text.replaceAll('sk-fake-step-7d2e', '<secret:k>');
+    // As another installed copy of core throws it: the brand, not this copy's class.
+    const foreign = Object.assign(new Error('provider said sk-fake-step-7d2e'), {
+      code: 'MODEL_PROVIDER_FAILED', explanation: 'provider said sk-fake-step-7d2e', blocked: false,
+      cause: { responseBody: 'sk-fake-step-7d2e' },
+    });
+    Object.defineProperty(foreign, Symbol.for('e2e.agent-error.v1'), { value: true });
+    for (const thrown of [foreign, new AgentError('MODEL_PROVIDER_FAILED', 'provider said sk-fake-step-7d2e', { cause: { responseBody: 'sk-fake-step-7d2e' } })]) {
+      for (const redactThrown of [false, true]) {
+        const caught = await new StepRecorder('attempt', { redact, redactThrown }).run('agent', 'agent.act', 'x', () => Promise.reject(thrown)).then(() => undefined, (cause: unknown) => cause);
+        expect(caught).toBeInstanceOf(AgentError);
+        expect(caught).toMatchObject({ code: 'MODEL_PROVIDER_FAILED', message: 'provider said <secret:k>', explanation: 'provider said <secret:k>' });
+        expect((caught as Error).cause).toBeUndefined();
+      }
+    }
   });
 
   it('does not advance on a verification step that failed', async () => {
