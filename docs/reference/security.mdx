@@ -243,7 +243,7 @@ instruction, the strings in `agent.act` params, `agentContext`, and an
 
 The keys your model provider or coding agent signs in with are redacted from
 the terminal, reports, trace pages, and what the run sends the model of
-the screen, tool results, and the model's own prose. A provider or proxy that quotes a rejected key back in its error
+the screen, tool results, the model's own prose, and the prompt `acp()` sends its agent. A provider or proxy that quotes a rejected key back in its error
 can't put it in a report. Each shows as `<secret:NAME>`.
 
 | Source | Name in the marker |
