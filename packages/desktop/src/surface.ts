@@ -724,6 +724,10 @@ export class DesktopSurface {
       if (this.pid === undefined) {
         // A process carrying the launch's token is its own, whether or not the app list shows it yet.
         const carriers = await processesCarrying(pending.token, signal);
+        // A lookup that failed shows nothing, and the launch record is what the next quit or sweep finds the app by: it stays.
+        if (carriers === undefined) {
+          throw new EngineError('ENGINE_FAILURE', `could not look for the processes a launch of ${pending.target} started: listing the running processes failed; quitting tries again`, { retryable: false });
+        }
         for (const carrier of carriers) {
           try {
             process.kill(carrier, 'SIGKILL');
@@ -1349,21 +1353,26 @@ async function carriesToken(pid: number, token: string, signal: AbortSignal): Pr
 /**
  * The processes whose environment carries a launch token: the app the
  * launch that made it started, whatever its process id. A process whose
- * environment cannot be read is never among them.
+ * environment cannot be read is never among them. Undefined when the
+ * processes could not be listed at all, which shows nothing: an empty list
+ * means the lookup worked and found none.
  */
-async function processesCarrying(token: string, signal: AbortSignal): Promise<number[]> {
+async function processesCarrying(token: string, signal: AbortSignal): Promise<number[] | undefined> {
   const marker = `${LAUNCH_TOKEN}=${token}`;
   if (process.platform === 'linux') {
+    const entries = await readdir('/proc').catch(() => undefined);
+    if (entries === undefined) return undefined;
     const found: number[] = [];
-    for (const entry of await readdir('/proc').catch(() => [] as string[])) {
+    for (const entry of entries) {
       if (!/^\d+$/.test(entry)) continue;
       const environ = await readFile(`/proc/${entry}/environ`, 'utf8').catch(() => '');
       if (environ.split('\0').includes(marker)) found.push(Number(entry));
     }
     return found;
   }
-  const { stdout } = await execFileAsync('ps', ['-E', '-ww', '-ax', '-o', 'pid=,command='], { signal, maxBuffer: 256 * 1024 * 1024 }).catch(() => ({ stdout: '' }));
-  return stdout
+  const listed = await execFileAsync('ps', ['-E', '-ww', '-ax', '-o', 'pid=,command='], { signal, maxBuffer: 256 * 1024 * 1024 }).catch(() => undefined);
+  if (listed === undefined) return undefined;
+  return listed.stdout
     .split('\n')
     .map((line) => line.trim().split(/\s+/))
     .filter((words) => words.includes(marker))
@@ -1405,7 +1414,9 @@ function inheritedEnv(env: Readonly<Record<string, string | undefined>>): Record
  * is gone, or, with no owner file, once it is a day old. One still in use
  * is never touched. The app such a worker launched and left running is
  * quit too: every process whose environment carries the token its launch
- * record names. One whose environment cannot be read is left alone.
+ * record names. One whose environment cannot be read is left alone. When
+ * that lookup fails or a process will not die, the record stays for the next
+ * sweep, and only the cached field text beside it is removed.
  */
 async function sweepStateDirectories(): Promise<void> {
   const root = tmpdir();
@@ -1420,17 +1431,36 @@ async function sweepStateDirectories(): Promise<void> {
     const parsed: unknown = await readFile(path.join(directory, APP_FILE), 'utf8').then((text): unknown => JSON.parse(text)).catch(() => undefined);
     const launched = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
     const { token } = launched;
-    if (typeof token === 'string' && token !== '') {
-      for (const pid of await processesCarrying(token, AbortSignal.timeout(5_000))) {
-        try {
-          process.kill(pid, 'SIGKILL');
-        } catch {
-          // Gone already.
-        }
+    if (typeof token === 'string' && token !== '' && !(await quitCarriers(token))) {
+      // The app may still run and the record is the only way to find it: it stays for the next sweep, and the field text agent-desktop cached beside it goes now.
+      for (const name of await readdir(directory).catch(() => [] as string[])) {
+        if (name !== OWNER_FILE && name !== APP_FILE) await rm(path.join(directory, name), { recursive: true, force: true }).catch(() => undefined);
       }
+      continue;
     }
     await rm(directory, { recursive: true, force: true }).catch(() => undefined);
   }
+}
+
+/**
+ * Kills every process carrying a launch token. True once none is left to
+ * kill: the lookup worked and every carrier it found is gone. False when the
+ * lookup failed or a carrier could not be killed, so the caller keeps the
+ * record that names the token.
+ */
+async function quitCarriers(token: string): Promise<boolean> {
+  const carriers = await processesCarrying(token, AbortSignal.timeout(5_000));
+  if (carriers === undefined) return false;
+  let done = true;
+  for (const pid of carriers) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch (cause) {
+      // Gone already is what the sweep wants.
+      if ((cause as NodeJS.ErrnoException).code !== 'ESRCH') done = false;
+    }
+  }
+  return done;
 }
 
 /**

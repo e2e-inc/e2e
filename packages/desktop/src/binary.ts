@@ -188,7 +188,10 @@ async function download(url: string, archive: string, digest: string, directory:
       const aside = `${directory}.stale-${process.pid}-${Date.now()}`;
       await rename(directory, aside).catch(() => undefined);
       try {
-        await rename(staging, directory);
+        await rename(staging, directory).catch(async (cause: unknown) => {
+          // A run that found no entry publishes without the lock, so it can fill the gap this repair made: a verified copy there is as good as ours.
+          if (!(await usable(directory, digest))) throw cause;
+        });
       } finally {
         await rm(aside, { recursive: true, force: true });
       }

@@ -1195,6 +1195,39 @@ describe('DesktopSurface', () => {
     }
   });
 
+  // The Linux lookup reads /proc, which a test cannot make fail; elsewhere it is `ps`.
+  it.skipIf(process.platform === 'linux')('keeps the launch record of a killed worker when the process lookup fails, and quits its app at the next sweep', async () => {
+    const dead = spawn(process.execPath, ['-e', '']);
+    await new Promise((resolve) => dead.on('exit', resolve));
+    const leaked = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { env: { ...process.env, E2E_DESKTOP_LAUNCH: 'token-keep' } });
+    children.push(leaked);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const left = mkdtempSync(path.join(tmpdir(), 'e2e-agent-desktop-'));
+    writeFileSync(path.join(left, 'owner'), String(dead.pid));
+    writeFileSync(path.join(left, 'app.json'), JSON.stringify({ token: 'token-keep' }));
+    writeFileSync(path.join(left, 'fields.json'), '{"text":"typed"}');
+    const brokenPs = artifacts();
+    writeFileSync(path.join(brokenPs, 'ps'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    const originalPath = process.env.PATH;
+    try {
+      process.env.PATH = `${brokenPs}${path.delimiter}${originalPath}`;
+      try {
+        await initialized({});
+      } finally {
+        process.env.PATH = originalPath;
+      }
+      expect(await gone(leaked.pid!, 300)).toBe(false);
+      expect(existsSync(path.join(left, 'app.json'))).toBe(true);
+      expect(existsSync(path.join(left, 'owner'))).toBe(true);
+      expect(existsSync(path.join(left, 'fields.json'))).toBe(false);
+      await initialized({});
+      expect(await gone(leaked.pid!)).toBe(true);
+      expect(existsSync(left)).toBe(false);
+    } finally {
+      rmSync(left, { recursive: true, force: true });
+    }
+  });
+
   it('sweeps a state directory whose launch record was cut short, and starts', async () => {
     const dead = spawn(process.execPath, ['-e', '']);
     await new Promise((resolve) => dead.on('exit', resolve));
