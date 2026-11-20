@@ -505,7 +505,8 @@ export class DesktopSurface {
    * Starts a new process of the `.app` bundle an `appPath` names, by its
    * path: launching by bundle id would let LaunchServices pick another copy
    * with the same id (an installed release, another checkout's build). The
-   * process is then found among the app's running copies (see `claim`); one
+   * process is then found by its launch token among the app's running copies
+   * (see `claim`), since `open` reports no process id; one
    * that cannot be found within `LAUNCH_READY_MS` fails the open, and stays
    * pending, so the end of the attempt still looks for it.
    */
@@ -533,7 +534,7 @@ export class DesktopSurface {
         if (Date.now() + LAUNCH_POLL_MS >= until || operation.signal.aborted) {
           throw new EngineError(
             'ACTION_MAY_HAVE_COMMITTED',
-            `${bundle} was opened, but no process of ${launch.target} could be shown to be this launch's: none carries its token, and no single new one appeared. Quit other copies of the app that are starting, and run again`,
+            `${bundle} was opened, but no process of ${launch.target} carries this launch's token, so none can be shown to be its own. A build whose environment macOS hides cannot be told from another copy; launch it by app.bundleId instead`,
             { retryable: false },
           );
         }
@@ -549,32 +550,24 @@ export class DesktopSurface {
 
   /**
    * Takes as the engine's own the running copy of the app this launch
-   * started: the one that carries its token in its environment, else, when
-   * no environment can be read (a build signed with the `restrict` flag, a
-   * system app), the one new process of the app, which was not running
-   * before the launch. False when there is none (yet); undefined when
-   * agent-desktop listed the apps only in part and none carries the token,
-   * which shows nothing: the launch's copy may be among the ones left out.
-   * A copy without the token, the developer's own or another worker's, is
-   * never taken.
+   * started: the one that carries its token in its environment. False when
+   * there is none (yet); undefined when agent-desktop listed the apps only
+   * in part and none carries the token, which shows nothing: the launch's
+   * copy may be among the ones left out. A copy without the token is never
+   * taken, not even the one new copy whose environment cannot be read: being
+   * new does not show this launch started it, and the developer's own copy
+   * may be the one that just started.
    */
   private async claim(launch: Launch, operation: Pick<OperationContext, 'signal' | 'timeoutMs'>): Promise<boolean | undefined> {
     const { target, token, before } = launch;
     const { apps, complete } = await this.run<{ apps?: readonly RawApp[]; complete?: boolean }>(['list-apps', '--app', target], { label: 'list apps', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
-    const unreadable: RawApp[] = [];
     for (const app of apps ?? []) {
       if (typeof app.pid !== 'number') continue;
       // A copy that ran before the launch is never its own, whatever its environment says.
       if (before?.has(app.pid) === true) continue;
-      const carries = await carriesToken(app.pid, token, operation.signal);
-      if (carries === true) return this.take(app, target);
-      if (carries === undefined && before !== undefined) unreadable.push(app);
+      if ((await carriesToken(app.pid, token, operation.signal)) === true) return this.take(app, target);
     }
-    // A list with copies left out can hide a second new one, so its single new copy proves nothing.
-    if (complete === false) return undefined;
-    // Without a token to read, only a single new copy is evidence enough: two could be anyone's.
-    const [only] = unreadable;
-    return only !== undefined && unreadable.length === 1 ? this.take(only, target) : false;
+    return complete === false ? undefined : false;
   }
 
   private take(app: RawApp, target: string): true {
@@ -1383,7 +1376,10 @@ async function processesCarrying(token: string, signal: AbortSignal): Promise<nu
 /**
  * What `init` needs of an `appPath` bundle: an Info.plist naming the
  * bundle id the launched process is found by, which is the target's
- * `bundleId` when that is set too.
+ * `bundleId` when that is set too, and a signature that lets the launch
+ * token be read: macOS hides the environment of its own apps and of a build
+ * signed with the `restrict` flag, so the copy `open` starts could not be
+ * told from another.
  */
 async function checkBundle(bundle: string, bundleId: string | undefined, signal: AbortSignal): Promise<{ bundleId: string } | { problem: string }> {
   const plist = path.join(bundle, 'Contents', 'Info.plist');
@@ -1394,6 +1390,16 @@ async function checkBundle(bundle: string, bundleId: string | undefined, signal:
   if (declared === '') return { problem: `${plist} declares no CFBundleIdentifier` };
   if (bundleId !== undefined && bundleId !== declared) {
     return { problem: `app.bundleId "${bundleId}" is not the CFBundleIdentifier "${declared}" of app.appPath ${bundle}; the build at appPath is what app.open() launches` };
+  }
+  // codesign prints the signature to stderr, and fails on a bundle that is not signed, which hides nothing.
+  const signature = await execFileAsync('codesign', ['-dv', bundle], { signal }).then(
+    ({ stderr }) => stderr,
+    (cause: { stderr?: unknown }) => (typeof cause.stderr === 'string' ? cause.stderr : ''),
+  );
+  if (/^Platform identifier=/m.test(signature) || /flags=0x[\da-f]+\([^)]*\brestrict\b/.test(signature)) {
+    return {
+      problem: `app.appPath ${bundle} is a macOS app or a build signed with the restrict flag, whose environment macOS hides, so the engine cannot tell the copy it opens from another; set app.bundleId "${declared}" and leave out appPath, so agent-desktop's launch reports the process it starts`,
+    };
   }
   return { bundleId: declared };
 }

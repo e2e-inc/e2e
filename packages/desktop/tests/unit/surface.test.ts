@@ -797,16 +797,27 @@ describe('DesktopSurface', () => {
     expect(fake.calls().find((call) => call.key === 'launch')?.args).toContain('--activate');
   });
 
-  it('takes the one new copy a failed launch started when no environment can be read, and leaves an older one', async () => {
+  it('takes no copy whose environment cannot be read after a failed launch, not even the one new copy', async () => {
     const theirs = unreadableCopy();
     const { surface, fake } = await initialized({
       launch: [{ spawn: 'unreadable', ...(failure('TIMEOUT', 'delivered_unverified') as object) }],
-      'list-apps': [{ spawnedApps: { name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form' }, alsoRunning: [theirs] }],
+      // The copy that started after the list before the launch may be the developer's: being new shows nothing.
+      'list-apps': [
+        { ok: true, data: { apps: [{ name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form', pid: theirs, process_instance: 'theirs' }] } },
+        { spawnedApps: { name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form' }, alsoRunning: [theirs] },
+      ],
     });
     await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
-    await surface.endAttempt({ signal, timeoutMs: 5_000 });
-    expect(await gone(fake.spawned()[0]!)).toBe(true);
+    await expect(surface.endAttempt({ signal, timeoutMs: 1_000 })).rejects.toThrow(/no process it started was found/);
+    expect(await gone(fake.spawned()[0]!, 300)).toBe(false);
     expect(await gone(theirs, 300)).toBe(false);
+  });
+
+  it.skipIf(process.platform !== 'darwin')('refuses an appPath to a macOS app, whose launch token cannot be read', async () => {
+    const fake = fakeScenario({ status: [{ ok: true, data: { version: '1.3.1', permissions: { accessibility: { state: 'granted' } } } }] });
+    const surface = tracked(new DesktopSurface(resolveOptions({ binary: fake.binary, settle: false }), 'macos'));
+    const init = surface.init({ runId: 'r', targetName: 'mac', projectRoot: artifacts(), app: { appPath: '/System/Applications/Calculator.app' }, env: fake.env, headed: false, workerSlot: 0, signal, log: () => undefined });
+    await expect(init).rejects.toThrow(/macOS hides.*set app\.bundleId "com\.apple\.calculator"/);
   });
 
   it('takes no copy whose environment cannot be read when the copies before the launch are unknown', async () => {
@@ -897,15 +908,14 @@ describe('DesktopSurface', () => {
   });
 
   it('keeps a launch whose lookup ran out of time, so the next quit looks again', async () => {
-    // A copy whose environment cannot be read: no token tells it apart, only the app list.
-    const { surface, fake } = await initialized({
+    // A copy whose environment cannot be read, so no token search finds it: only a lookup that answers settles the launch.
+    const { surface } = await initialized({
       launch: [{ spawn: 'unreadable', ...(failure('TIMEOUT', 'delivered_unverified') as object) }],
-      'list-apps': [{ ok: true, data: { apps: [] } }, { sleepMs: 3_000, ok: true, data: { apps: [] } }, { spawnedApps: { name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form' } }],
+      'list-apps': [{ ok: true, data: { apps: [] } }, { sleepMs: 3_000, ok: true, data: { apps: [] } }, { ok: true, data: { apps: [] } }],
     });
     await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
     await expect(surface.endAttempt({ signal, timeoutMs: 1_000 })).rejects.toThrow(/ran out of time/);
-    await surface.dispose({ signal, timeoutMs: 5_000 });
-    expect(await gone(fake.spawned()[0]!)).toBe(true);
+    await expect(surface.dispose({ signal, timeoutMs: 1_000 })).rejects.toThrow(/no process it started was found/);
   });
 
   it('reads only the window a test chose, until it goes back to the focused one', async () => {

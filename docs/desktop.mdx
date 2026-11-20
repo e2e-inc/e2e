@@ -71,7 +71,10 @@ The app gets only these variables of the run's environment: `HOME`, `USER`,
 `LOGNAME`, `SHELL`, `PATH`, `TMPDIR`, `LANG`, `LC_*`, and
 `__CF_USER_TEXT_ENCODING`. Secrets, model keys, and CI tokens in the
 environment never reach it. The engine also sets `E2E_DESKTOP_LAUNCH`, a
-token it uses to find the copy it launched.
+token it uses to find the copy it launched. macOS hides that token in its
+own apps and in a build signed with the `restrict` flag, so an `appPath` to
+one of them is refused. Launch such an app by its `bundleId`: agent-desktop
+then reports the process it started.
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
