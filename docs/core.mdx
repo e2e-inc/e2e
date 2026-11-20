@@ -111,13 +111,13 @@ holds, whether that is another host or a worker of `e2e run`.
   later one fails with `ENGINE_FAILURE`. Open device hosts one after another.
 - A host holds its device from the moment its app opens. A target that names
   only `appPath` opens no app at launch, so a second host launched before the
-  first one's `app.open()` can pick the same device. Open each host's app
-  before you launch the next one, or name each host's device in its `device`
-  option.
+  first one opens its app can pick the same device. Call
+  `device.installApp()` and then `app.open()` on each host's session before
+  you launch the next one, or name each host's device in its `device` option.
 - A program that ends without closing a host it opened an app on
   (`process.exit()`, a kill) leaves its device held. Later hosts and
-  `e2e run` skip that device until you close the session the error names, in
-  the workspace the error names. Replace `SESSION` with that name:
+  `e2e run` skip that device until you close the session the error names.
+  Replace `SESSION` with that name:
 
 <CodeGroup>
 ```bash npm
@@ -133,8 +133,6 @@ bunx agent-device close --session "SESSION"
 ```
 </CodeGroup>
 
-`agent-device daemon stop` frees every held device at once, and ends every
-other session on the machine with them.
 
 ## Drive an app on a device
 
