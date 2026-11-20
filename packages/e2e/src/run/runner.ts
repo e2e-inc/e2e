@@ -388,7 +388,8 @@ export interface ListResult {
  * expanded. `unmatched` is the positional arguments that selected no file,
  * `targets` the selected target names in config order. An empty selection
  * throws `NO_TESTS` unless `passWithNoTests`. Config, collection, and
- * selection failures throw the same classified error `run` records. Each
+ * selection failures throw the same classified error `run` records; the
+ * public `list` on `e2e/runner` redacts it and drops its cause. Each
  * call imports the test files again, so a later call sees an edit. With
  * `changedSince`, the configured test filters then judge the selection,
  * which may call a model: a pair one left out is `filtered`, with its
@@ -408,6 +409,8 @@ export async function list(options: ListOptions = {}): Promise<ListResult> {
 export async function listSelection(options: ListOptions, notice: (message: string) => void, processOutput?: RunnerOutput): Promise<ListResult> {
   const cwd = options.cwd ?? process.cwd();
   const env = options.env ?? process.env;
+  // As `run` does: a key only this environment holds is redacted from a failure that quotes it.
+  registerProviderKeys(env);
   const runOptions = toSelectionRunOptions(options);
   const loadConfig = async (): Promise<ResolvedRunConfig> => {
     const loaded = await loadRunConfig(runOptions, cwd, env, runOptions.output === undefined ? {} : { output: runOptions.output });

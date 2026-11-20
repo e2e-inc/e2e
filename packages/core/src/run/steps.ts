@@ -19,6 +19,7 @@ import { APP_LOG_LIMITS } from '../engine/session.ts';
 import type { AppEvent } from '../engine/surface.ts';
 import { compareScreens, type ScreenText, type StepScreen } from './step-screens.ts';
 import { insidePollRead } from '../expect/poll-scope.ts';
+import { processSecrets } from './secrecy.ts';
 
 /** The closed step kind set; the type is derived from it, so the two cannot drift. */
 export const STEP_KINDS = ['agent', 'locator', 'assertion', 'screen', 'app', 'session', 'resource'] as const;
@@ -1013,7 +1014,8 @@ export class StepRecorder {
     const current = this.current();
     if (current === undefined) return;
     if (details.metrics !== undefined) current.metrics = details.metrics;
-    if (details.model !== undefined) current.model = details.model;
+    // A key given as a model id or an agent's model label is redacted like any other text the report holds.
+    if (details.model !== undefined) current.model = { ...details.model, provider: processSecrets.redact(details.model.provider), model: processSecrets.redact(details.model.model) };
     if (details.cache !== undefined) current.cache = details.cache;
     if (details.observationRevision !== undefined) {
       current.observationRevision = details.observationRevision;

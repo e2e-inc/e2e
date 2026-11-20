@@ -67,6 +67,32 @@ describe('a provider key the model repeats', () => {
     expect(loopCalls[1]?.lastToolResult).toBe('looked');
   });
 
+  it('is redacted in the system text a config wrote it into, before the model reads it', async () => {
+    const key = 'sk-loop-system-5e1a8c3f9d2b7046';
+    registerProviderKey('loop.system-key', key);
+    const model = installFakeLoopModel(() => [conclude]);
+    const { fixtures } = runtime({ agents: { default: { model, system: `Sign in with ${key} when the form asks.` } } });
+
+    await fixtures.agent.act('look around');
+
+    expect(loopCalls[0]?.system).toContain('Sign in with <secret:loop.system-key> when the form asks.');
+    expect(loopCalls[0]?.system).not.toContain(key.slice(-12));
+  });
+
+  it('is redacted from the model the step records, when the key was given as its id', async () => {
+    const key = 'sk-loop-model-id-4b9e2d7a1c6f3085';
+    registerProviderKey('loop.model-key', key);
+    const model = installFakeLoopModel(() => [conclude]);
+    Object.defineProperty(model, 'modelId', { value: key });
+    const { fixtures, steps } = runtime({ agents: { default: { model } } });
+
+    await fixtures.agent.act('look around');
+
+    const recorded = steps.all()[0]?.model;
+    expect(recorded?.model).toBe('<secret:loop.model-key>');
+    expect(JSON.stringify(steps.all())).not.toContain(key.slice(-12));
+  });
+
   it.each([
     ['the 600 characters a reported turn is cut to', 579],
     ['the 1000 characters a turn\'s prose is cut to', 990],

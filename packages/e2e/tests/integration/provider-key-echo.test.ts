@@ -174,6 +174,14 @@ describe.each(Object.entries(FAILING_CONFIGS))('a config that loads a key from .
     expect(piecesOf(key, random, stdout + stderr)).toEqual([]);
   }, 90_000);
 
+  // `e2e report` loads the config only to find the output directory, so it fails on the configs that throw while they load.
+  it.runIf(!configSource.includes('targets'))('e2e report names the key by its marker and prints no piece of it', async () => {
+    const { code, stdout, stderr } = await cli('report');
+    expect(code).toBe(2);
+    expect(stdout + stderr).toContain('<secret:GROQ_API_KEY>');
+    expect(piecesOf(key, random, stdout + stderr)).toEqual([]);
+  }, 90_000);
+
   // A program that does not catch: Node prints the rejection, its cause included, to stderr.
   it.each(['list', 'explore'])('the public %s() rejects with the marker, and printed uncaught shows no piece of the key', async (api) => {
     const options = api === 'explore' ? "{ cwd: process.cwd(), goal: 'look around' }" : '{ cwd: process.cwd() }';
@@ -192,6 +200,58 @@ describe.each(Object.entries(FAILING_CONFIGS))('a config that loads a key from .
     expect(check?.status).toBe('fail');
     expect(check?.message).toContain('<secret:GROQ_API_KEY>');
     expect(piecesOf(key, random, stdout + stderr)).toEqual([]);
+  }, 90_000);
+});
+
+describe('a key a program hands e2e itself', () => {
+  const projects: FixtureProject[] = [];
+  afterAll(() => {
+    for (const project of projects.splice(0)) project.cleanup();
+  });
+
+  /** Node in `project` with `args`, no provider key in its environment: its output. */
+  async function node(project: FixtureProject, ...args: string[]): Promise<string> {
+    const env: NodeJS.ProcessEnv = { ...process.env, CI: '', NO_COLOR: '1', E2E_TELEMETRY_DISABLED: '1' };
+    for (const name of ['OPENAI_API_KEY', 'GROQ_API_KEY', 'NODE_DEBUG']) delete env[name];
+    try {
+      const result = await execFileAsync(process.execPath, args, { cwd: project.dir, env, timeout: 60_000 });
+      return result.stdout + result.stderr;
+    } catch (error) {
+      const failed = error as { stdout?: string; stderr?: string };
+      return (failed.stdout ?? '') + (failed.stderr ?? '');
+    }
+  }
+
+  it('in list()\'s env, is redacted from the failure of a config that quotes it', async () => {
+    const random = randomBytes(16).toString('hex');
+    const key = `sk-list-env-${random}`;
+    const project = createProject({ 'tests/none.e2e.ts': '' });
+    projects.push(project);
+    const script = `import { list } from ${JSON.stringify(RUNNER)};\nconst key = ${JSON.stringify(key)};\ntry { await list({ cwd: process.cwd(), config: { targets: [key] }, env: { OPENAI_API_KEY: key } }); } catch (error) { console.log(error.code, error.message); }\n`;
+    const output = await node(project, '--input-type=module', '-e', script);
+    expect(output).toContain('INVALID_CONFIG');
+    expect(output).toContain('<secret:OPENAI_API_KEY>');
+    expect(piecesOf(key, random, output)).toEqual([]);
+  }, 90_000);
+
+  it('given as a model id, is redacted from e2e doctor --json', async () => {
+    const random = randomBytes(16).toString('hex');
+    const key = `sk-model-id-${random}`;
+    const project = createProject({
+      '.env': `OPENAI_API_KEY=${key}\n`,
+      'e2e.config.ts': [
+        "import { createFakeEngine, FAKE_APP } from '../../helpers/fake-engine.ts';",
+        "process.loadEnvFile('.env');",
+        "const model = { specificationVersion: 'v2', provider: 'openai.chat', modelId: process.env.OPENAI_API_KEY, supportedUrls: {}, doGenerate: async () => { throw new Error('not called'); }, doStream: async () => { throw new Error('not called'); } };",
+        "export default { targets: [{ name: 'web', platform: 'web', engine: createFakeEngine().engine, app: FAKE_APP }], agents: { default: { model } } };",
+        '',
+      ].join('\n'),
+    });
+    projects.push(project);
+    const output = await node(project, CLI, 'doctor', '--json');
+    const report = JSON.parse(output.slice(output.indexOf('{'))) as { checks: { id: string; model?: { modelId: string } }[] };
+    expect(report.checks.find((check) => check.id === 'model')?.model?.modelId).toBe('<secret:OPENAI_API_KEY>');
+    expect(piecesOf(key, random, output)).toEqual([]);
   }, 90_000);
 });
 

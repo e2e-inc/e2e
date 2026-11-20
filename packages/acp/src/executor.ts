@@ -86,8 +86,9 @@ function executor(name: string, options: AcpAgentOptions, launch: () => Promise<
       const { held, session } = await ready(ctx, launch, memoryKey).finally(registerLogin);
       ctx.signal.throwIfAborted();
       const active = activeStep(ctx);
-      // Redacted whole, once the agent's login is known: `system` and the step's text may quote a key core did not know when it built the step.
-      const text = redactSecrets(await untilAborted(stepMessage(active, held.tools, held.introduced ? undefined : [RULES, options.system, ctx.agentContext]), ctx.signal));
+      // `system` is the config's own text, which core never sees; core redacts the step's text with this test's ledger.
+      const system = options.system === undefined ? undefined : redactSecrets(options.system);
+      const text = await untilAborted(stepMessage(active, held.tools, held.introduced ? undefined : [RULES, system, ctx.agentContext]), ctx.signal);
       // A step that ended while its screen was read sends no prompt, which no cancel would reach.
       ctx.signal.throwIfAborted();
       held.introduced = true;

@@ -768,7 +768,8 @@ class LoopRun {
     const system =
       typeof this.options.system === 'function' ? this.options.system(this.context) : this.options.system;
     if (system !== undefined && system.trim() !== '') {
-      parts.push(system);
+      // A config may write a key into its system text; the rest of the model's input is redacted on the way in.
+      parts.push(processSecrets.redact(system));
     }
     const project = this.context.agentContext;
     if (project !== undefined && project.trim() !== '') {

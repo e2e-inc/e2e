@@ -348,7 +348,8 @@ async function modelCheck(
 }
 
 function doctorModel(model: ResolvedModel): DoctorModel {
-  return { provider: model.provider, modelId: model.id };
+  // A key passed where the model id belongs would otherwise reach the JSON as it is.
+  return { provider: redactError(model.provider), modelId: redactError(model.id) };
 }
 
 /** The credential `provider`'s calls read: its API key variable when set, else the stored login, which must be there. */
