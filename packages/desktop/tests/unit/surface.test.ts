@@ -672,6 +672,11 @@ describe('DesktopSurface', () => {
     expect(fake.calls().some((call) => call.key === 'press')).toBe(false);
   });
 
+  it('reports a select agent-desktop could not find the option of, but may have delivered, as possibly committed', async () => {
+    const { surface, byTestId } = await launched({ select: [failure('ELEMENT_NOT_FOUND', 'delivered_unverified')] });
+    await expect(surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Enterprise' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });
+  });
+
   it('never types a missing option into an editable list as free text', async () => {
     const editable = { ok: true, data: { snapshot_id: 's5', window: { id: 'w-mine' }, tree: { role: 'window', name: 'Form', children: [{ role: 'combobox', name: 'Plan', ref_id: '@s5:e1', available_actions: ['Click', 'SetValue', 'SetFocus'] }] } } };
     const { surface, fake } = await launched({ snapshot: [editable], select: [failure('ELEMENT_NOT_FOUND', 'not_delivered')] }, { observe: false });
