@@ -774,8 +774,8 @@ export class StepRecorder {
       record.error = serializeError(error, { projectRoot: this.projectRoot, redact: this.redact });
       if (!this.redactThrown) throw cause;
       if (this.redact !== undefined) redactErrorInPlace(error, this.redact);
-      // A caller with no report around it gets the classified error alone: a provider SDK's cause keeps fields no redaction reaches.
-      Reflect.deleteProperty(error, 'cause');
+      // An agent error's cause is a provider SDK's error, whose own fields (a response body, a request) no redaction reaches: a caller gets the agent error alone.
+      if (isAgentError(error)) Reflect.deleteProperty(error, 'cause');
       throw error;
     } finally {
       this.running.delete(record.id);
