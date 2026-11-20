@@ -60,6 +60,7 @@ describe('the built-in agent from its agents entry', () => {
     await fixtures.agent.act('save the product');
     const system = loopCalls[0]!.system;
     expect(system).toContain('Never repeat a commit before you check whether the first press committed.');
+    expect(system).toContain('Press it again only when the check shows that the first press did not commit, such as an error you corrected,');
     expect(system).toContain('or when the result reports only the keyboard closing: then the tap was spent closing the keyboard.');
     expect(system).toContain('A step that asks for several commits (add two items, send two messages) presses once for each.');
     expect(system).toContain('When the check shows neither, do not press it again: conclude from the screen you have.');
