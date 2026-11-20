@@ -119,8 +119,9 @@ export function extractGuardCalls(
   messages: readonly ModelMessage[],
   concludeToolName: string,
   waiting: ReadonlySet<string> = new Set(),
+  seen: Map<string, boolean> = new Map(),
 ): GuardToolCall[] {
-  const moved = waiting.size === 0 ? new Set<string>() : waitsThatSawChange(messages, waiting);
+  const moved = waiting.size === 0 ? new Set<string>() : waitsThatSawChange(messages, waiting, seen);
   const calls: GuardToolCall[] = [];
   for (const message of messages) {
     if (message.role !== 'assistant' || !Array.isArray(message.content)) continue;
@@ -136,14 +137,24 @@ export function extractGuardCalls(
   return calls;
 }
 
-/** The call ids of waiting tools whose result reported a change on screen. */
-function waitsThatSawChange(messages: readonly ModelMessage[], waiting: ReadonlySet<string>): Set<string> {
+/**
+ * The call ids of waiting tools whose result reported a change on screen.
+ * A result is read once and its answer kept in `seen`: transcript compaction
+ * later elides old full screens, lead line and all, and a look that showed
+ * the listing come back must stay one.
+ */
+function waitsThatSawChange(messages: readonly ModelMessage[], waiting: ReadonlySet<string>, seen: Map<string, boolean>): Set<string> {
   const moved = new Set<string>();
   for (const message of messages) {
     if (message.role !== 'tool' || !Array.isArray(message.content)) continue;
     for (const part of message.content) {
       if (part.type !== 'tool-result' || !waiting.has(part.toolName)) continue;
-      if (reportsScreenChange(toolResultTexts(part.output).join('\n'))) moved.add(part.toolCallId);
+      let changed = seen.get(part.toolCallId);
+      if (changed === undefined) {
+        changed = reportsScreenChange(toolResultTexts(part.output).join('\n'));
+        seen.set(part.toolCallId, changed);
+      }
+      if (changed) moved.add(part.toolCallId);
     }
   }
   return moved;

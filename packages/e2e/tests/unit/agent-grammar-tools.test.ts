@@ -352,6 +352,49 @@ describe('the loop guard waits longer on the built-in observe only', () => {
     expect(warned?.lastPrompt).not.toContain('going in circles');
   });
 
+  it('gives each notice of a wait once, however the wait alternates between ticking and standing still', async () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    let looks = 0;
+    const observe = async () => {
+      looks += 1;
+      // Observes 1-12 tick, 13-18 stand still on the last tick, 19 on tick again until the guard ends the wait at twenty.
+      const call = looks - 1;
+      const second = call <= 12 || call >= 19 ? call : 12;
+      return { revision: String(looks), text: `#n1 text "Saving ${String(second)}s"`, truncated: false, viewport: { width: 800, height: 600 } };
+    };
+    const model = installFakeLoopModel((call) => {
+      if (call.toolNames.length === 1) return [{ toolName: 'complete_step', input: { status: 'failed', summary: 'forced' } }];
+      return [{ toolName: 'observe', input: {} }];
+    });
+    await createBuiltInAgent().runStep({ ...context, model, observe });
+    const added = (notice: string) =>
+      loopCalls.filter((call, index) => index > 0 && call.userMessages > loopCalls[index - 1]!.userMessages && call.lastPrompt.includes(notice)).length;
+    expect(added('looked at many times in a row while it kept changing')).toBe(1);
+    expect(added('looked at several times in a row with no change')).toBe(1);
+  });
+
+  it('keeps a recovered listing as progress after compaction elides it from the history the model reads', async () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    const big = Array.from({ length: 900 }, (_, index) => `#n${String(index + 10)} text "row ${String(index)} ${'x'.repeat(40)}"`).join('\n');
+    let looks = 0;
+    const observe = async () => {
+      looks += 1;
+      // Opening look, then: no tree, no tree, the listing back (large) on the third observe, no tree after it.
+      if (looks === 4) return { revision: String(looks), text: big, truncated: false, viewport: { width: 800, height: 600 } };
+      if (looks === 1) return { revision: '1', text: '#n1 button "Saving" [disabled]', truncated: false, viewport: { width: 800, height: 600 } };
+      return { revision: String(looks), text: '[semantic capture unavailable]', truncated: true, treeUnavailable: true as const, viewport: { width: 800, height: 600 } };
+    };
+    let observed = 0;
+    const model = installFakeLoopModel((call) => {
+      if (call.toolNames.length === 1) return [{ toolName: 'complete_step', input: { status: 'failed', summary: 'forced' } }];
+      observed += 1;
+      return [{ toolName: 'observe', input: {} }];
+    });
+    await createBuiltInAgent().runStep({ ...context, model, observe });
+    // The third observe saw the listing come back, so ten unchanged looks are counted from the fourth: thirteen in all.
+    expect(observed).toBe(13);
+  });
+
   it('warns each wait in a step, not only the first', async () => {
     const { context } = fakeExecutorContext({ secrets: [] });
     let looks = 0;

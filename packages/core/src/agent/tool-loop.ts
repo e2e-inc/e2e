@@ -234,6 +234,10 @@ class LoopRun {
   private hardStop: AgentError | undefined;
   private guardStop: string | undefined;
   private noticedGuardReason: string | undefined;
+  /** The waits already warned in this step, by key: other notices in between do not make a wait warned again. */
+  private readonly noticedWaits = new Set<string>();
+  /** Whether each look (by call id) showed a change, read when the result was new and kept past compaction. */
+  private readonly looks = new Map<string, boolean>();
   private noticedLowClock = false;
   /** Every turn that ran, oldest first: the debug transcript is rendered from it, the report keeps the tail. */
   private readonly turns: LoopTurn[] = [];
@@ -655,11 +659,17 @@ class LoopRun {
       // Read per turn: a handler replaced after the tools were built (in
       // buildPrompt, say) may write, and loses the waiting room.
       const waiting = waitingToolNames(tools);
-      const guard = checkLoopGuards(extractGuardCalls(prepared, 'complete_step', waiting), DEFAULT_LOOP_GUARD_THRESHOLDS, waiting);
+      // Each look is read while it is the newest, before compaction can elide
+      // its lead line, and the answer is kept for the turns after.
+      const guard = checkLoopGuards(extractGuardCalls(messages, 'complete_step', waiting, this.looks), DEFAULT_LOOP_GUARD_THRESHOLDS, waiting);
+      const fresh =
+        guard.kind === 'warn' &&
+        (guard.key === undefined ? guard.reason !== this.noticedGuardReason : !this.noticedWaits.has(guard.key));
       if (guard.kind === 'stop') {
         this.guardStop = guard.reason;
-      } else if (guard.kind === 'warn' && (guard.key ?? guard.reason) !== this.noticedGuardReason) {
-        this.noticedGuardReason = guard.key ?? guard.reason;
+      } else if (guard.kind === 'warn' && fresh) {
+        if (guard.key === undefined) this.noticedGuardReason = guard.reason;
+        else this.noticedWaits.add(guard.key);
         this.note(`loop guard warned before turn ${String(stepNumber + 1)}: ${guard.reason}`);
         // Repeated looks at a save or load still in progress are a wait the
         // rules ask for, so the notice bounds the wait instead of calling it a circle.
