@@ -76,11 +76,12 @@ The loop detects repeated calls and cycles. After three failed actions in
 a row, it tells the model to change its approach. After five, it asks for
 a verdict. Looks that wait on a save or a load in progress, `observe` and
 `screenshot` in any order, get more room: a notice after six looks with no
-change, a verdict after ten. A look whose listing or tabs changed starts
-the count again; a change in pixels alone, such as a spinner, does not.
-Twenty looks in a row end the wait even when the screen keeps changing.
-The same limits apply in assertion exploration. It also asks for a verdict
-when the budget or the deadline is near.
+change, a verdict after ten. A look whose listing, location, or tabs
+changed starts the count again; a change in pixels alone, such as a
+spinner, does not. A wait whose screen keeps changing gets a notice after
+twelve looks in a row and a verdict after twenty. The same limits apply in
+assertion exploration. It also asks for a verdict when the budget or the
+deadline is near.
 
 ## Assertion exploration
 
