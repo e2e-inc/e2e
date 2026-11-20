@@ -56,6 +56,11 @@ transcripts, reports, or AI traces.
 A targeted action times out after at most 15 seconds. [Project tools](/tools)
 add your own operations, with declared budgets and platforms.
 
+The agent's rules tell the model to press a control that commits
+something, such as Save or Submit, one time. Before a second press, the
+model must find on the current screen that the first one didn't commit:
+an error, for example. When it can't tell, it doesn't press again.
+
 The loop detects repeated calls and cycles. After three failed actions in a
 row, it tells the model to change its approach. After five, it asks for a
 verdict. It also asks for a verdict when the budget or the deadline is
