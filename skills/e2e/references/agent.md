@@ -187,8 +187,9 @@ secure fields only (topic writing-tests). A result says when an action
 closed an on-screen keyboard; on a touch screen that tap was often spent
 closing it, so act again. A control that commits something (save, submit,
 delete) is pressed once for each commit the step asks for: before a
-second press the agent checks the screen, and presses again only on an
-error, or when the tap only closed the keyboard.
+second press the agent checks the screen, and presses again only when the
+screen shows the first press did not commit (an error you corrected, for
+example), or when the tap only closed the keyboard.
 
 ## assert, waitFor, extract: one question
 
