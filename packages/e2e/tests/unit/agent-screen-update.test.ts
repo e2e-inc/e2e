@@ -133,6 +133,7 @@ describe('ScreenPresenter', () => {
     const after = textOf(denied.present(screen('c3', HOME), { lead: 'Tapped #n3.', expectChange: true }));
     expect(after).toContain('No screenshot can be taken in this step');
     expect(after).toContain('look for another way rather than repeating it');
+    expect(after).toContain('If the control commits something (a save, a submit), it may still have gone through: check before you commit again by any route.');
     expect(after).not.toContain('needs a screenshot to see');
   });
 
@@ -148,6 +149,7 @@ describe('ScreenPresenter', () => {
     // The same image again: the tree describes this screen, so the control is blamed as before.
     const still = textOf(presenter.present(screen('b3', HOME, { pixels: shot(2) }), { lead: 'Tapped #n3.', expectChange: true }));
     expect(still).toContain('had no visible effect');
+    expect(still).toContain('it may still have gone through: check before you commit again by any route.');
     expect(still).not.toContain('the screenshot changed');
     // A moved image is reported whether or not a change was expected.
     const observed = textOf(presenter.present(screen('b4', HOME, { pixels: shot(3) }), { lead: 'Observed.', expectChange: false }));
