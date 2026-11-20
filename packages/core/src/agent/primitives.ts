@@ -645,7 +645,8 @@ export function grammarTools(
   const save = options.saveScreenshot;
   tools['screenshot'] =
     save === undefined
-      ? screenTool({ description, inputSchema: z.object({}), execute: () => inOrder(() => guard(look)) })
+      ? // Only looks, like observe: waiting on a save by screenshots is a wait too. The variant that saves a file is not marked.
+        markWaitingTool(screenTool({ description, inputSchema: z.object({}), execute: () => inOrder(() => guard(look)) }))
       : screenTool({
           description: `${description} With path, also saves the masked full-resolution screenshot as a PNG file and returns its absolute path.`,
           inputSchema: z.object({

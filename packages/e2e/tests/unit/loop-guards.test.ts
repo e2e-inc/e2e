@@ -52,6 +52,19 @@ describe('loop guards', () => {
     expect(checkLoopGuards(observes(5)).kind).toBe('stop');
   });
 
+  it('counts observe and screenshot in turn as one wait, in calls, and keeps the cycle limits for anything else in the cycle', () => {
+    const waiting = new Set(['observe', 'screenshot']);
+    const alternating = (pairs: number) => [call('tap', '{"target":"n1"}'), ...Array.from({ length: pairs }, () => [call('observe'), call('screenshot')]).flat()];
+    const check = (pairs: number) => checkLoopGuards(alternating(pairs), DEFAULT_LOOP_GUARD_THRESHOLDS, waiting);
+    expect(check(2).kind).toBe('clear');
+    expect(check(3)).toMatchObject({ kind: 'warn', waiting: true });
+    expect(check(5).kind).toBe('stop');
+    // A cycle with an action in it is a circle, whatever else it contains.
+    const withTap = [call('observe'), call('tap', '{"target":"n1"}')];
+    expect(checkLoopGuards([...withTap, ...withTap], DEFAULT_LOOP_GUARD_THRESHOLDS, waiting).kind).toBe('warn');
+    expect(checkLoopGuards([...withTap, ...withTap, ...withTap], DEFAULT_LOOP_GUARD_THRESHOLDS, waiting).kind).toBe('stop');
+  });
+
   it('ends a waiting streak at the observe that saw the screen change, so the wait can lead on to the next action', () => {
     const waiting = new Set(['observe']);
     const turn = (id: string, text: string): ModelMessage[] => [

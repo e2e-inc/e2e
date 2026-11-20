@@ -41,10 +41,11 @@ export interface LoopGuardThresholds {
   readonly repeatWarn: number;
   readonly repeatStop: number;
   /**
-   * Identical calls in a row to a tool marked with `markWaitingTool` (the
-   * built-in `observe`): reading the screen again while a save or a load is
-   * still in progress is waiting, not a loop, so it gets more room than an
-   * action. The step budget and deadline still bound it.
+   * Calls in a row to tools marked with `markWaitingTool` (the built-in
+   * `observe` and plain `screenshot`), repeated or in a cycle, counted in
+   * calls: reading the screen again while a save or a load is still in
+   * progress is waiting, not a loop, so it gets more room than an action.
+   * The step budget and deadline still bound it.
    */
   readonly observeRepeatWarn: number;
   readonly observeRepeatStop: number;
@@ -151,13 +152,15 @@ export function checkLoopGuards(
   let warning: LoopGuardVerdict | undefined;
   for (let period = 1; period <= MAX_CYCLE_PERIOD; period += 1) {
     const repeats = trailingRepeats(calls, period);
-    const waits = period === 1 && waiting.has(calls[calls.length - 1]?.toolName ?? '');
-    const [warnAt, stopAt] =
-      period > 1
+    // A window of waiting tools alone (observe, or observe and screenshot in
+    // turn) is a wait: it gets the waiting thresholds, counted in calls.
+    const window = calls.slice(-period);
+    const waits = window.length === period && window.every((call) => waiting.has(call.toolName));
+    const [warnAt, stopAt] = waits
+      ? [Math.ceil(thresholds.observeRepeatWarn / period), Math.ceil(thresholds.observeRepeatStop / period)]
+      : period > 1
         ? [thresholds.cycleWarn, thresholds.cycleStop]
-        : waits
-          ? [thresholds.observeRepeatWarn, thresholds.observeRepeatStop]
-          : [thresholds.repeatWarn, thresholds.repeatStop];
+        : [thresholds.repeatWarn, thresholds.repeatStop];
     if (repeats >= stopAt) {
       return { kind: 'stop', reason: describe(calls, period, repeats) };
     }
