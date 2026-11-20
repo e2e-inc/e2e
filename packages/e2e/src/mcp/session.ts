@@ -715,7 +715,7 @@ export class SessionHost {
       lines.push(`- ${toolSignature('run_code', runCode)}: JavaScript with loops, variables, and return values. Use it for most of the work: one call that reads, computes, acts, and asserts, in place of many single actions. A read's value shows in the result unless the code returns or logs. Its API:`, ...runCodeApi({ attempt: () => live.attempt, engineFixtures: Object.keys(live.target.engine?.fixtures ?? {}) }).map((line) => `  ${line}`));
     }
     lines.push(
-      'Node ids ("n42") are valid only for the newest observation. Every action prints the test line that repeats it. When most of the screen changed, an action result sends the whole screen instead, with large subtrees that did not change folded to one line each, naming how many nodes each holds and the revision that last listed it in full; the ids inside a folded subtree stay valid, and observe shows the whole tree again. Call close_session when you are done.',
+      'Node ids ("n42") are valid only for the newest observation. Every action prints the test line that repeats it. When most of the screen changed, an action result sends the whole screen instead, with large subtrees that match an earlier listing folded to one line each, naming how many nodes each holds and the revision it matches; the ids inside a folded subtree stay valid, and observe shows the whole tree again. Call close_session when you are done.',
       READ_WRITING_GUIDE,
     );
     return `${lines.join('\n')}\n\n${screen}`;
