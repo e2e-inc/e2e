@@ -32,6 +32,8 @@ export type {
   RoleOptions,
   ScrollDirection,
   Screen,
+  ScreenCoordinate,
+  ScreenPoint,
   Secret,
   SelectOption,
   SwipeOptions,
