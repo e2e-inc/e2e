@@ -5,18 +5,20 @@
  * support.ts).
  */
 
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Locator as PwLocator, Page } from 'playwright-core';
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { EngineError, TestError, type LocatorAction } from '@e2e-dev/core/engine';
 import { classifyActionError, dispatchLocatorAction, dispatchPointerAction } from '../../src/actions.ts';
 import { dispatchedInput, type ActionTarget } from '../../src/support.ts';
 
 /** A real file: setInputFiles stats every path before it touches the element. */
-const UPLOAD = path.join(mkdtempSync(path.join(tmpdir(), 'e2e-actions-')), 'a.txt');
+const UPLOAD_DIR = mkdtempSync(path.join(tmpdir(), 'e2e-actions-'));
+const UPLOAD = path.join(UPLOAD_DIR, 'a.txt');
 writeFileSync(UPLOAD, 'a');
+afterAll(() => rmSync(UPLOAD_DIR, { recursive: true, force: true }));
 
 vi.mock('node:timers/promises', () => ({
   setTimeout: (ms: number, value?: unknown, options?: { signal?: AbortSignal }) =>

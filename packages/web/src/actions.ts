@@ -233,11 +233,12 @@ function radioKind(element: ElementHandle<Element>): Promise<'native' | 'aria' |
  * with the chooser already awaited, and fails if no chooser opens. Every
  * step shares the operation's deadline, and a cancelled operation sets no
  * files, even when its chooser opens after the cancel. A path that does not
- * exist or cannot be read fails before anything is clicked.
+ * exist or sits under a directory the runner cannot search fails before
+ * anything is clicked.
  */
 async function uploadFiles(target: ActionTarget, paths: readonly string[], operation: ConnectionBudget): Promise<void> {
   const missing = paths.find((file) => statPath(file) === undefined);
-  if (missing !== undefined) throw new TestError('INVALID_ARGUMENT', `setInputFiles path does not exist or cannot be read: ${missing}`);
+  if (missing !== undefined) throw new TestError('INVALID_ARGUMENT', `setInputFiles path does not exist or is under a directory the runner cannot search: ${missing}`);
   const deadline = new Deadline(operation.timeoutMs);
   const remaining = (): number => Math.max(1, deadline.remaining());
   const element =

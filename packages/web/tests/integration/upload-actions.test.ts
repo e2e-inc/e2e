@@ -113,7 +113,7 @@ describe.each(KINDS)('through the %s target', (kind) => {
     await page.setContent(`${html}${COUNT_CLICKS}`);
     for (const missing of [path.join(path.dirname(file), 'missing.png'), path.join(file, 'inside-a-file.png')]) {
       const error = await upload(await targetOf(kind, selector), [file, missing]);
-      expect(error).toMatchObject({ code: 'INVALID_ARGUMENT', category: 'test', message: `setInputFiles path does not exist or cannot be read: ${missing}` });
+      expect(error).toMatchObject({ code: 'INVALID_ARGUMENT', category: 'test', message: `setInputFiles path does not exist or is under a directory the runner cannot search: ${missing}` });
     }
     expect(await state()).toEqual({ files: '', clicks: 0 });
   });
@@ -130,7 +130,7 @@ describe.each(KINDS)('through the %s target', (kind) => {
       chmodSync(locked, 0o000);
       try {
         const error = await upload(await targetOf(kind, '#avatar'), [hidden]);
-        expect(error).toMatchObject({ code: 'INVALID_ARGUMENT', category: 'test', message: `setInputFiles path does not exist or cannot be read: ${hidden}` });
+        expect(error).toMatchObject({ code: 'INVALID_ARGUMENT', category: 'test', message: `setInputFiles path does not exist or is under a directory the runner cannot search: ${hidden}` });
       } finally {
         chmodSync(locked, 0o700);
       }
