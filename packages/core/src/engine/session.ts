@@ -394,8 +394,8 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
         },
       };
       if (snapshot.treeUnavailable === true) {
-        if (observeOptions?.pixelFallback !== true || snapshot.pixels === undefined) {
-          throw new TestError('UNSUPPORTED_CAPABILITY', 'unavailable semantics require permitted fallback pixels');
+        if (observeOptions?.pixelFallback !== true || snapshot.pixels === undefined || !pixelsProvenMasked(metadata.redaction)) {
+          throw new TestError('UNSUPPORTED_CAPABILITY', 'unavailable semantics require permitted, proven-masked fallback pixels');
         }
         if (Object.keys(snapshot.root).some((key) => key !== 'ref')) {
           throw new EngineError('INVALID_STATE', 'an unavailable semantic tree must contain only the stable root reference', { retryable: false });
@@ -407,10 +407,10 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
       }
       revision += 1;
       root = metadata.root;
-      // Pixels stay only when their masked regions cover every secure node. A
-      // screenshot the engine took without that proof, sent or withheld, is
-      // marked instead, so no reader of the observation checks it again. An
-      // unavailable tree above holds no secure node, so its pixels are proven.
+      // Pixels stay only when their masked regions cover every secure node,
+      // as for an unavailable tree above. A screenshot the engine took without
+      // that proof, sent or withheld, is marked instead, so no reader of the
+      // observation checks it again.
       const captured = snapshot.pixels !== undefined || snapshot.maskedRegionCount !== undefined;
       const proven = pixelsProvenMasked(metadata.redaction);
       const observation: Observation = {

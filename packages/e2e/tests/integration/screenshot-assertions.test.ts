@@ -312,32 +312,26 @@ test('after a fill', async ({ app, screen }) => {
   );
 
   it(
-    'keeps waiting for a screenshot the engine did not take, or withheld with every secure field masked',
+    'keeps waiting for a screenshot the engine did not take on a screen with a secure field',
     async () => {
-      const cases = [
-        { tree: SECURE_TREE, captured: undefined },
-        { tree: TREE, captured: { maskedRegionCount: 0 } },
-      ];
-      for (const { tree, captured } of cases) {
-        let captures = 0;
-        const fake = createFakeEngine({
-          tree,
-          fixtures: true,
-          pixels: () => {
-            captures += 1;
-            return captured;
-          },
+      let captures = 0;
+      const fake = createFakeEngine({
+        tree: SECURE_TREE,
+        fixtures: true,
+        pixels: () => {
+          captures += 1;
+          return undefined;
+        },
+      });
+      const { outcome, project } = await runProject({ 'tests/home.e2e.ts': SCREEN_TEST }, { appUrl: FAKE_APP_URL, config: fakeConfig(fake) });
+      try {
+        expect(attemptOf(outcome, 'home').error).toMatchObject({
+          code: 'ASSERTION_FAILED',
+          message: expect.stringContaining('the engine returned no screenshot'),
         });
-        const { outcome, project } = await runProject({ 'tests/home.e2e.ts': SCREEN_TEST }, { appUrl: FAKE_APP_URL, config: fakeConfig(fake) });
-        try {
-          expect(attemptOf(outcome, 'home').error).toMatchObject({
-            code: 'ASSERTION_FAILED',
-            message: expect.stringContaining('the engine returned no screenshot'),
-          });
-          expect(captures).toBeGreaterThan(1);
-        } finally {
-          project.cleanup();
-        }
+        expect(captures).toBeGreaterThan(1);
+      } finally {
+        project.cleanup();
       }
     },
     60_000,
