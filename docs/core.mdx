@@ -115,8 +115,10 @@ holds, whether that is another host or a worker of `e2e run`.
   `device.installApp()` and then `app.open()` on each host's session before
   you launch the next one, or name each host's device in its `device` option.
 - A program that ends without closing a host it opened an app on
-  (`process.exit()`, a kill) leaves its device held. Later hosts and
-  `e2e run` skip that device until you close the session the error names.
+  (`process.exit()`, a kill) leaves its device held, and so does a host
+  whose session fails to close: its `close()` throws an error that names the
+  session. Later hosts and `e2e run` skip that device until you close the
+  session the error names.
   Replace `SESSION` with that name:
 
 <CodeGroup>
@@ -125,7 +127,7 @@ npx agent-device close --session "SESSION"
 ```
 
 ```bash pnpm
-pnpm exec agent-device close --session "SESSION"
+pnpm dlx agent-device close --session "SESSION"
 ```
 
 ```bash bun

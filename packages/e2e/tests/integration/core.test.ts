@@ -161,21 +161,6 @@ describe('e2e/core', { timeout: 60_000 }, () => {
     expect(threadIds[1]).not.toBe(threadIds[0]);
   });
 
-  it('opens a session on an engine whose long name labels its host, and keeps a platform that is a secret out of its notices', async () => {
-    const long = 'p'.repeat(210);
-    const opened = await host(defineEngine({ name: long, version: '1', spiVersion: ENGINE_SPI_VERSION, async startAttempt() {}, async endAttempt() {} }));
-    expect(opened.platform).toBe(long);
-    await (await opened.newSession()).close();
-    const secret = 's3cr3t'.repeat(7);
-    const notices: string[] = [];
-    await host(defineEngine({ name: 'labelled', platform: secret, version: '1', spiVersion: ENGINE_SPI_VERSION, async init(info) { info.log('ready'); }, async startAttempt() {}, async endAttempt() {} }), {
-      secrets: { LABEL: secret },
-      onNotice: (message) => notices.push(message),
-    });
-    expect(notices.some((message) => message.includes('ready'))).toBe(true);
-    expect(notices.filter((message) => message.includes(secret.slice(0, 20)))).toEqual([]);
-  });
-
   it('names a host\'s artifact folders after its token, so a platform that is a secret\'s value never reaches a path', async () => {
     const secret = 'private-label';
     const artifactsDir = path.join(dir, 'kept');

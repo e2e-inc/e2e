@@ -22,7 +22,7 @@ import {
   type EnginePrepareResult,
 } from '@e2e-dev/core/engine';
 import { bindingsVariable, decodeBindings, deviceLabel, encodeBindings, pinnedApp, type DeviceSource, type SlotBinding } from './bindings.ts';
-import { isRunnerFailure, message, runCommand } from './errors.ts';
+import { isNoSession, isRunnerFailure, message, runCommand } from './errors.ts';
 import type { AgentDeviceClient, MobileOptions, MobilePlatform, ClientFactory } from './options.ts';
 import { asDeviceProvider, LeasedDevices, type RecordingDeviceProvider } from './provider.ts';
 
@@ -64,6 +64,12 @@ export function deviceSelection(
 export function bootRequest(selection: DeviceSelection): DeviceSelection & Pick<DeviceBootOptions, 'pick'> {
   const named = selection.device ?? selection.udid ?? selection.serial;
   return named === undefined ? { ...selection, pick: 'newest' } : selection;
+}
+
+/** A session `warm` opened, under the name `finish` reports it by. */
+interface WarmedSession {
+  readonly session: string;
+  readonly client: AgentDeviceClient;
 }
 
 /** What names a slot's session: the target, and the `launch()` host holding it, if one does. */
@@ -192,7 +198,7 @@ export class DevicePool {
   /** What this process's `prepare` bound, per target: a handle may serve several targets and runs. */
   private readonly bound = new Map<string, readonly SlotBinding[]>();
   /** The clients `warm` opened sessions with, per target, held for `finish` to close whatever `warm` got to. */
-  private readonly warmed = new Map<string, AgentDeviceClient[]>();
+  private readonly warmed = new Map<string, WarmedSession[]>();
 
   constructor(
     private readonly options: MobileOptions,
@@ -273,18 +279,37 @@ export class DevicePool {
    * what the source acquired. This is the normal run-end close for leased
    * slots and a fallback for local sessions or a failed `prepare`. Session
    * closes and source release run concurrently under the hook's cleanup
-   * budget, so a hung close does not delay lease release.
+   * budget, so a hung close does not delay lease release. A `launch()`
+   * host's session that stays open fails the hook: no later host or run
+   * shares its name, so nothing would take its device back.
    */
   async finish(info: EngineFinishInfo): Promise<void> {
-    const clients = this.warmed.get(info.targetName) ?? [];
+    const sessions = this.warmed.get(info.targetName) ?? [];
     this.warmed.delete(info.targetName);
     // A released lease's daemon must not serve a later init, and an engine reused across hosts must not pile up their bindings.
     this.bound.delete(info.targetName);
+    const open = new Map<string, string>(sessions.map(({ session }) => [session, 'the close did not finish in time']));
     const closing = withinCleanupBudget(
-      Promise.allSettled(clients.map((client) => client.sessions.close())),
+      Promise.all(sessions.map(async ({ session, client }) => {
+        try {
+          await client.sessions.close();
+          open.delete(session);
+        } catch (cause) {
+          // A session that is gone was closed by its worker first.
+          if (isNoSession(cause)) open.delete(session);
+          else open.set(session, message(cause));
+        }
+      })),
       info,
     );
     await Promise.all([closing, this.source.finish?.(info)]);
+    if (info.hostId === undefined || this.options.session !== undefined || open.size === 0) return;
+    const held = Array.from(open, ([session, why]) => `"${session}" (${why})`).join(', ');
+    throw new EngineError(
+      'ENGINE_FAILURE',
+      `agent-device session ${held} did not close, so its device stays held; close it with \`agent-device close --session <name>\``,
+      { retryable: false },
+    );
   }
 
   /**
@@ -315,7 +340,7 @@ export class DevicePool {
       const session = this.session(info, slot);
       const at = `session ${session} on ${label}`;
       const client = this.createClient(session, binding);
-      this.retain(info.targetName, client);
+      this.retain(info.targetName, { session, client });
       info.log(`booting ${label} (${slot + 1} of ${bindings.length})`);
       const took: string[] = [];
       try {
@@ -342,10 +367,10 @@ export class DevicePool {
   }
 
   /** Holds a warm-up client for `finish`, before its first command: a boot that fails still opened the session. */
-  private retain(targetName: string, client: AgentDeviceClient): void {
-    const clients = this.warmed.get(targetName) ?? [];
-    clients.push(client);
-    this.warmed.set(targetName, clients);
+  private retain(targetName: string, warmed: WarmedSession): void {
+    const sessions = this.warmed.get(targetName) ?? [];
+    sessions.push(warmed);
+    this.warmed.set(targetName, sessions);
   }
 }
 

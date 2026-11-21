@@ -492,6 +492,39 @@ describe('lifecycle', () => {
     expect(worker.fake.lastArgs('devices.boot')).toEqual({ platform: 'ios', udid: 'B' });
   });
 
+  it('fails a launch() host\'s finish when its session will not close, since no later host shares the name to take the device back', async () => {
+    const info = { runId: 'run-1', targetName: 'ios', hostId: 'abc123', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: () => undefined };
+    const finish = { ...info, timeoutMs: 5_000 };
+    const booted = () => [{ platform: 'ios', id: 'B', name: 'B', booted: true }];
+    const refusing = (options: Parameters<typeof harness>[0]) => {
+      const h = harness(options);
+      h.fake.respond('devices.list', booted);
+      h.fake.respond('sessions.close', () => { throw new AppError('COMMAND_FAILED', 'daemon refused'); });
+      return h;
+    };
+    const host = refusing({ device: undefined });
+    await host.prepare(info);
+    await expect(host.engine.finish!(finish)).rejects.toMatchObject({
+      code: 'ENGINE_FAILURE',
+      message: expect.stringMatching(/session "e2e-ios-abc123-0" \(daemon refused\) did not close, so its device stays held/),
+    });
+
+    // A session its worker already closed is closed.
+    const gone = harness({ device: undefined });
+    gone.fake.respond('devices.list', booted);
+    gone.fake.respond('sessions.close', () => { throw new AppError('SESSION_NOT_FOUND', 'no such session'); });
+    await gone.prepare(info);
+    await gone.engine.finish!(finish);
+
+    // A run's worker and a `session` option keep their names, so the next one takes the device back.
+    const worker = refusing({ device: undefined });
+    await worker.prepare({ ...info, hostId: undefined });
+    await worker.engine.finish!({ ...finish, hostId: undefined });
+    const optioned = refusing({ device: undefined, session: 'mine' });
+    await optioned.prepare(info);
+    await optioned.engine.finish!(finish);
+  });
+
   it('drives a discovered Android emulator by its serial, and reads a configured serial, UDID, or name as agent-device does', async () => {
     const h = harness({ device: undefined, platform: 'android' });
     h.fake.respond('devices.list', () => [{ platform: 'android', id: 'emulator-5554', name: 'test', booted: true }]);
