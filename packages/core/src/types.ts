@@ -769,7 +769,12 @@ export interface TestOptions {
    * around a serial group.
    */
   fail?: boolean | string;
-  /** Focuses the test locally. CI rejects it with `ONLY_IN_CI`. */
+  /**
+   * Focuses the test locally; on a group, focuses every test in it that is
+   * not skipped. The innermost `only` wins, so `false` on an inner group or
+   * a test opts it out. CI rejects it with `ONLY_IN_CI`. Not allowed inside a
+   * serial group; a serial group itself can be focused.
+   */
   only?: boolean;
   /** Platforms the test runs on; other targets skip it. Innermost wins. */
   platforms?: readonly string[];
@@ -803,7 +808,7 @@ export interface TestOptions {
   video?: RecordingMode;
 }
 
-export interface DescribeOptions extends Omit<TestOptions, 'only'> {
+export interface DescribeOptions extends TestOptions {
   /** Runs the group as one ordered retry unit with shared app state. Nesting one serial group in another is a `COLLECTION_ERROR`. */
   serial?: boolean;
 }
@@ -857,6 +862,8 @@ export interface DescribeRegistrar<Options = DescribeOptions> {
 export interface DescribeAPI extends DescribeRegistrar {
   /** Declares a group whose tests are expected to fail, as if it had `fail: true`; a reason goes in the `fail` option of `describe`. */
   fail: DescribeRegistrar<Omit<DescribeOptions, 'fail'>>;
+  /** Declares a focused group, as if it had `only: true`: its tests are focused the way `test.only` focuses one. CI rejects it with `ONLY_IN_CI`. */
+  only: DescribeRegistrar<Omit<DescribeOptions, 'only'>>;
 }
 
 /** The two call forms of `test`, shared with what `test.skipIf` and `test.runIf` return. */

@@ -44,6 +44,7 @@ describe('checkout', { tags: ['billing'] }, () => {
 | [`test.extend`](#test-extend) | `TestAPI` |
 | [`describe`](#describe) | `void` |
 | [`describe.fail`](#describe-fail) | `void` |
+| [`describe.only`](#describe-only) | `void` |
 | [Hooks](#hooks) | `void` |
 
 `describe` and the four hooks are also top-level exports, the same functions
@@ -344,7 +345,8 @@ test.only('pays', async ({ app }) => {
 ```
 
 Other tests are reported as `filtered`. A CI run with a focused test fails
-with `ONLY_IN_CI`.
+with `ONLY_IN_CI`. To focus every test in a group, use
+[`describe.only`](#describe-only).
 
 #### `test.setup`
 
@@ -414,7 +416,7 @@ describe('checkout', { tags: ['smoke'], serial: true }, () => {
 });
 ```
 
-- A group takes the [options](#options) a test takes, except `only`, plus
+- A group takes the [options](#options) a test takes, plus
   [`serial`](#serial).
 - The body is synchronous.
 
@@ -445,6 +447,38 @@ describe('legacy checkout', { fail: 'old payment form' }, () => {}); // with a r
 | --- | --- |
 | `COLLECTION_ERROR` | The group is serial or inside a serial group, or a serial group is inside it. |
 | `COLLECTION_ERROR` | A `fail` option on `describe.fail`. It is also a type error. |
+
+#### `describe.only`
+
+Declares a focused group, the same as `only: true` on `describe`. Every
+test in it, nested groups included, is focused the way
+[`test.only`](#test-only) focuses one.
+
+```ts
+describe.only('checkout', () => {
+  test('pays by card', async ({ screen }) => {}); // runs
+  describe('refunds', () => {
+    test('refunds a card', async ({ screen }) => {}); // runs
+  });
+});
+test('signs in', async ({ app }) => {}); // filtered
+describe('checkout', { only: true }, () => {}); // the same, by option
+```
+
+- Focused groups and `test.only` combine: every focused test runs, and the
+  rest are reported as `filtered`.
+- A skipped test, by `test.skip`, `test.fixme`, or a skipped inner group, is
+  not focused, so it is `filtered` too, as beside `test.only`.
+- The innermost `only` wins: `only: false` on an inner group or a test opts
+  it out of the focus.
+- A CI run with a focused group fails with `ONLY_IN_CI`.
+- A serial group can be focused whole. `only` inside a serial group is
+  refused, since the group runs as one unit.
+
+| Throws | When |
+| --- | --- |
+| `COLLECTION_ERROR` | The group is inside a serial group. |
+| `COLLECTION_ERROR` | An `only` option on `describe.only`. It is also a type error. |
 
 ### Hooks
 
@@ -601,7 +635,7 @@ blocked event loop hangs it.
 | [`sessions`](#sessions) | `readonly string[]` | required |
 
 `test` takes every option but `serial` and `sessions`. `describe` takes
-every option but `only` and `sessions`. `test.setup` requires
+every option but `sessions`. `test.setup` requires
 `sessions` and takes no `session`, `only`, `skip`, or `fail`.
 
 Resolution order: test, nearest group, outer groups, config, built-in
@@ -666,10 +700,12 @@ describe('legacy checkout', { fail: 'old payment form' }, () => {});
 
 #### `only`
 
-Focuses the test locally. CI rejects it with `ONLY_IN_CI`.
+Focuses the test locally, or every test in a group; see
+[`describe.only`](#describe-only). CI rejects it with `ONLY_IN_CI`.
 
 ```ts
 test('pays', { only: true }, async ({ app }) => {});
+describe('checkout', { only: true }, () => {});
 ```
 
 #### `platforms`
@@ -1029,6 +1065,8 @@ export interface DescribeRegistrar<Options = DescribeOptions> {
 export interface DescribeAPI extends DescribeRegistrar {
   /** Declares a group whose tests are expected to fail, as if it had `fail: true`; a reason goes in the `fail` option of `describe`. */
   fail: DescribeRegistrar<Omit<DescribeOptions, 'fail'>>;
+  /** Declares a focused group, as if it had `only: true`: its tests are focused the way `test.only` focuses one. CI rejects it with `ONLY_IN_CI`. */
+  only: DescribeRegistrar<Omit<DescribeOptions, 'only'>>;
 }
 
 /** The two call forms of `test`, shared with what `test.skipIf` and `test.runIf` return. */
@@ -1235,7 +1273,12 @@ export interface TestOptions {
    * around a serial group.
    */
   fail?: boolean | string;
-  /** Focuses the test locally. CI rejects it with `ONLY_IN_CI`. */
+  /**
+   * Focuses the test locally; on a group, focuses every test in it that is
+   * not skipped. The innermost `only` wins, so `false` on an inner group or
+   * a test opts it out. CI rejects it with `ONLY_IN_CI`. Not allowed inside a
+   * serial group; a serial group itself can be focused.
+   */
   only?: boolean;
   /** Platforms the test runs on; other targets skip it. Innermost wins. */
   platforms?: readonly string[];
@@ -1269,7 +1312,7 @@ export interface TestOptions {
   video?: RecordingMode;
 }
 
-export interface DescribeOptions extends Omit<TestOptions, 'only'> {
+export interface DescribeOptions extends TestOptions {
   /** Runs the group as one ordered retry unit with shared app state. Nesting one serial group in another is a `COLLECTION_ERROR`. */
   serial?: boolean;
 }

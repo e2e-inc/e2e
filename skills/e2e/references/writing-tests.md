@@ -136,6 +136,7 @@ test('big import', async () => { test.setTimeout(180_000); }); // body or before
 test.fail('known gap', async () => {}); // expected to fail: a test failure passes it, a pass fails it with UNEXPECTED_PASS
 test('gap on web', async ({ platform }) => { test.fail(platform === 'web', 'known gap'); }); // marks, does not throw; the body runs on
 describe.fail('legacy', () => {}); // every test inside expected to fail; a reason: describe('legacy', { fail: 'reason' }, fn)
+describe.only('checkout', () => {}); // local only: every test inside focused; CI fails with ONLY_IN_CI
 test.setup('sign in', { sessions: ['admin'] }, async ({ app, screen, session }) => {}); // see Sign-in sessions
 const wsTest = test.extend<{ ws: Ws }>({ ws: async ({ browser }, use) => { await use(await seed()); await drop(); } });
 wsTest('uses the workspace', async ({ ws }) => {}); // code after use() is teardown, runs after failures too
