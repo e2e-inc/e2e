@@ -98,7 +98,7 @@ describe('compileEvaluation', () => {
       expect.objectContaining({
         code: 'POLICY_DENIED',
         category: 'configuration',
-        message: 'reading values from a secure field is denied: the node is a secure field, or its type cannot be checked',
+        message: 'reading values from a secure field is denied: the element turned into one after it was located, or its type cannot be checked',
       }),
     );
     expect(ran).not.toHaveBeenCalled();
