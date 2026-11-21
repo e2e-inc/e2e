@@ -408,8 +408,8 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
       revision += 1;
       root = metadata.root;
       // Pixels stay only when their masked regions cover every secure node,
-      // as for an unavailable tree above. A screenshot the engine took without
-      // that proof, sent or withheld, is marked instead, so no reader of the
+      // as for an unavailable tree above. Pixels or a count the engine answered
+      // with, short of that proof, are marked instead, so no reader of the
       // observation checks it again.
       const captured = snapshot.pixels !== undefined || snapshot.maskedRegionCount !== undefined;
       const proven = pixelsProvenMasked(metadata.redaction);

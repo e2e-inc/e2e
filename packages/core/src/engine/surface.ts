@@ -87,7 +87,7 @@ export type Observation = ObservationMetadata & (
       /** The screenshot, only when its masked regions cover every secure node. */
       readonly pixels?: ObservationPixels;
       /**
-       * Why a screenshot the engine took is not here: its masked regions
+       * Why pixels the engine answered with are not here: its masked regions
        * (`maskedRegionCount`) are fewer than the secure nodes, whether the
        * engine sent the pixels or withheld them itself.
        */
@@ -111,8 +111,8 @@ interface ObservationMetadata {
   readonly capturedAt: string;
   readonly viewport: ViewportSize;
   /**
-   * What the engine masked against what it saw. Pixel completeness is judged
-   * downstream from these counts: fewer masked regions than secure nodes
+   * What the engine masked against what it saw. The session judges pixel
+   * completeness from these counts: fewer masked regions than secure nodes
    * withholds the pixels and keeps the tree.
    */
   readonly redaction: {

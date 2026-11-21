@@ -997,18 +997,22 @@ describe('observation', () => {
       expect(observation.root.children).toHaveLength(1);
       await expect(h.engine.artifacts!.screenshot('password', operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
     }
-    // A secure field without bounds is unmaskable whatever the image holds, so it is withheld, not retried.
-    shot = new Uint8Array([1, 2, 3]);
+    // A secure field without bounds is unmaskable whatever the device would capture, so no screenshot is taken.
+    h.fake.respond('capture.screenshot', () => {
+      throw new Error('screenshot failed');
+    });
     h.fake.respond('capture.snapshot', () => ({
       nodes: [
         { ref: 'e1', index: 0, depth: 0, type: 'application', label: 'Bank', rect: { x: 0, y: 0, width: 390, height: 844 } },
         { ref: 'e2', index: 1, parentIndex: 0, depth: 1, type: 'SecureTextField', label: 'PIN' },
       ],
     }));
+    const screenshots = h.fake.methods().filter((method) => method === 'capture.screenshot').length;
     const unbounded = await h.engine.observe!(operation(), { pixels: true });
     expect(unbounded.pixels).toBeUndefined();
     expect(unbounded.maskedRegionCount).toBe(0);
     await expect(h.engine.artifacts!.screenshot('password', operation())).rejects.toMatchObject({ code: 'POLICY_DENIED' });
+    expect(h.fake.methods().filter((method) => method === 'capture.screenshot')).toHaveLength(screenshots);
     expect(existsSync(path.join(artifactsDir, 'screenshots'))).toBe(false);
   });
 

@@ -91,19 +91,19 @@ export function prepareObservation(
     ...(observation.tabs === undefined ? {} : { tabs: { count: observation.tabs.count, active: observation.tabs.active + 1 } }),
     viewport: observation.viewport,
   };
-  const pixels = clearPixels(observation);
   if (observation.kind === 'pixels') {
-    if (options.pixelsAllowed !== true || pixels.cleared === undefined) {
-      throw new TestError('UNSUPPORTED_CAPABILITY', 'semantic capture is unavailable and no permitted, proven-masked screenshot can replace it');
+    if (options.pixelsAllowed !== true) {
+      throw new TestError('UNSUPPORTED_CAPABILITY', 'semantic capture is unavailable and no permitted screenshot can replace it');
     }
     return {
       ...metadata,
       kind: 'pixels',
       text: UNAVAILABLE_TREE_MARKER,
       bytes: new TextEncoder().encode(UNAVAILABLE_TREE_MARKER).byteLength,
-      pixels: pixels.cleared,
+      pixels: { ...observation.pixels, maskedRegionCount: observation.redaction.maskedRegionCount },
     };
   }
+  const pixels = clearPixels(observation);
   const tree = redactNode(observation.tree, options);
   const nodes = new Map<string, RedactedNode>();
   const parents = new Map<string, string>();
@@ -359,11 +359,11 @@ export function observationDetail(observation: AgentObservation): { count?: numb
  * cover every secure node, and marks the rest `MASKING_UNPROVEN`, so the
  * semantic tree still goes out without them.
  */
-function clearPixels(observation: Observation): {
+function clearPixels(observation: Extract<Observation, { kind: 'semantic' }>): {
   cleared?: ExecutorPixels;
   withheld?: PixelsWithheld;
 } {
-  if (observation.kind === 'semantic' && observation.pixelsWithheld !== undefined) return { withheld: observation.pixelsWithheld };
+  if (observation.pixelsWithheld !== undefined) return { withheld: observation.pixelsWithheld };
   const pixels = observation.pixels;
   return pixels === undefined ? {} : { cleared: { ...pixels, maskedRegionCount: observation.redaction.maskedRegionCount } };
 }
