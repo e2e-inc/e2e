@@ -454,6 +454,7 @@ test('offline banner', { platforms: ['android'] }, async ({ app, device, screen 
 | [`closeApp`](#closeapp) | `Promise<void>` |
 | [`clearKeychain`](#clearkeychain) | `Promise<void>` |
 | [`foregroundApp`](#foregroundapp) | `Promise<ForegroundApp>` |
+| [`viewport`](#viewport) | `Promise<ViewportSize>` |
 | [`home`](#home) | `Promise<void>` |
 | [`back`](#back) | `Promise<void>` |
 | [`alert`](#alert) | `Promise<void>` |
@@ -921,6 +922,25 @@ const { name, bundleId } = await device.foregroundApp();
 | Throws | When |
 | --- | --- |
 | `APP_NOT_OPEN` | `closeApp` ended the session. |
+
+#### `viewport`
+
+```ts
+/** Reads the screen size in the coordinate space of screen taps. */
+viewport(): Promise<ViewportSize>;
+```
+
+Returns `{ width, height }` in the coordinate space of `screen.tapAt()`,
+read fresh on each call. `ViewportSize` is exported from `@e2e-dev/mobile`.
+
+```ts
+const { width, height } = await device.viewport();
+await screen.tapAt({ x: width / 2, y: height / 2 });
+```
+
+| Throws | When |
+| --- | --- |
+| `ENGINE_FAILURE` | The device's screen size cannot be determined. |
 
 #### `home`
 
