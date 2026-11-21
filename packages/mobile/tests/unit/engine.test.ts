@@ -275,6 +275,21 @@ describe('lifecycle', () => {
     expect(single.fake.lastArgs('devices.boot')).toEqual({ platform: 'ios', device: 'iPhone 16e' });
   });
 
+  it('binds the device --device names in prepare, over a configured pool or the booted devices, and declares that it selects one', async () => {
+    const info = (device: string) => ({ runId: 'run-1', targetName: 'ios', projectRoot: PROJECT_ROOT, slots: 2, env: {}, signal: new AbortController().signal, headed: false, device, log: () => undefined });
+    for (const configured of [['iPhone 16e', 'iPad Pro 11-inch'], undefined]) {
+      const h = harness(configured === undefined ? {} : { device: configured });
+      expect(h.engine.selectsDevice).toBe(true);
+      const result = await h.prepare(info('iPhone 17 Pro'));
+      // One named device is one worker, whatever the run planned.
+      expect(result?.workers).toBe(1);
+      expect(h.fake.lastArgs('devices.boot')).toEqual({ platform: 'ios', device: 'iPhone 17 Pro' });
+      expect(h.fake.methods()).not.toContain('devices.list');
+      const handed = result?.env ?? {};
+      expect(handed[poolVariableIn(handed, 'IOS')]).toBe(JSON.stringify([{ device: 'iPhone 17 Pro' }]));
+    }
+  });
+
   it('warms each device with a plain open and no launch arguments', async () => {
     const h = harness({ device: 'iPhone 16e', launchArguments: ['-e2e', 'YES'], permissions: { camera: 'grant' } });
     const result = await h.prepare({ runId: 'run-1', targetName: 'ios', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: () => undefined });

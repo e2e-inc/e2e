@@ -506,6 +506,7 @@ e2e run [files...]
 | 选项 | 说明 |
 | --- | --- |
 | `--headed` | 引擎支持时显示 UI。 |
+| `--device <name>` | 本次运行中，所选移动测试目标改在按名称、UDID 或序列号指定的模拟器、仿真器或真机上运行，覆盖其 `device` 选项。选择了多个移动测试目标时，用 `--target` 选出一个，否则运行以 `TARGET_REQUIRED` 失败。在没有可选设备的测试目标（`web()`）或由提供方租用设备的测试目标上，它是 `UNSUPPORTED_CAPABILITY`。`e2e login --device` 是另一个参数。 |
 | `--agent <names>` | 让未固定智能体的测试针对每个所选智能体运行一次，以逗号分隔或重复传入。默认：`default`。对于带有 `{ agent }` 的测试，如果名称有交集，则选择共同名称，否则保留测试自身的设置。未知名称会报 `INVALID_CONFIG`。 |
 | `--retries <n>` | 替代 `config.retries`；范围为 0–10 的整数。默认：配置值。 |
 | `--workers <n>` | 替代 `config.workers`；范围为 1–1024 的整数。默认：配置值。 |
