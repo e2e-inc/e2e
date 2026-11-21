@@ -349,7 +349,7 @@ function elementType(type: string): string {
 }
 
 /** One element-type spelling for `NavigationBar`, `XCUIElementTypeNavigationBar`, `navigation-bar`, and `android.widget.NavigationBar` alike. */
-export function normalizeKind(type: string): string {
+function normalizeKind(type: string): string {
   const simple = elementType(type.slice(type.lastIndexOf('.') + 1));
   return simple
     .replaceAll(/([a-z0-9])([A-Z])/g, '$1-$2')
