@@ -1660,13 +1660,16 @@ export class AgentDeviceSurface {
       notActionable(`${verb} tapped node ${entry.id} but its checked state did not change${detail}`);
     for (let first = true; ; first = false) {
       const startedMs = Date.now();
-      const found = this.refind(entry, this.project(await this.snapshot(operation.signal, false, budget)).index);
+      const raw = await this.snapshot(operation.signal, false, budget);
+      const found = this.refind(entry, this.project(raw).index);
       const readMs = Date.now() - startedMs;
-      if (found === undefined) {
+      // A truncated or sparse capture may simply omit the control, so a miss
+      // there says nothing about replacement: read again.
+      if (found === undefined && !isTruncated(raw)) {
         if (first) return;
         throw unchanged(' before the control was replaced');
       }
-      if (found.node.states?.checked === wanted) return;
+      if (found?.node.states?.checked === wanted) return;
       if (budget.remainingMs() <= CHECKED_POLL_MS + readMs) throw unchanged();
       await sleep(CHECKED_POLL_MS, operation.signal);
       if (operation.signal.aborted) throw new EngineError('CANCELLED', `${verb} cancelled`, { retryable: false });

@@ -1579,6 +1579,28 @@ describe('perform', () => {
     ]);
   });
 
+  it('does not read a truncated capture without the toggle as the control being replaced', async () => {
+    const withoutAirplane = SETTINGS_NODES.filter((node) => node.label !== 'Airplane Mode');
+    const h = harness();
+    const airplane = toggling(SETTINGS_NODES, { '@e6': [6] });
+    let pressed = false;
+    let reads = 0;
+    h.fake.respond('capture.snapshot', () => {
+      if (!pressed) return { ...SETTINGS_SNAPSHOT, nodes: airplane.nodes() };
+      reads += 1;
+      // The first read after the tap is cut and lacks the toggle; the second, whole, shows it still unset.
+      return reads === 1 ? { ...SETTINGS_SNAPSHOT, nodes: withoutAirplane, truncated: true } : { ...SETTINGS_SNAPSHOT, nodes: SETTINGS_NODES };
+    });
+    h.fake.respond('interactions.press', () => {
+      pressed = true;
+    });
+    await openAttempt(h);
+    const toggle = await observed(h, 'Airplane Mode');
+    const performed = h.engine.perform!(toggle.ref, { kind: 'check' }, operation());
+    await expect(performed).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+    expect(reads).toBeGreaterThan(1);
+  });
+
   it('counts a toggle gone at the first read after the press as checked, and one gone later as a failure', async () => {
     const withoutAirplane = SETTINGS_NODES.filter((node) => node.label !== 'Airplane Mode');
     for (const [readsBeforeGone, outcome] of [[0, 'done'], [1, 'NOT_ACTIONABLE']] as const) {
