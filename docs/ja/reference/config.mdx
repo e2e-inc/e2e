@@ -210,11 +210,14 @@ reporters: ['list', 'junit'], // default: ['list']
 | 値 | 動作 |
 | --- | --- |
 | `'list'`、`list()` | ターミナルに進捗、失敗、実行サマリーを表示します。 |
-| `'dot'`、`dot()` | ターミナルに簡潔な進捗、失敗、実行サマリーを表示します。`list` とは排他で、併用すると `INVALID_CONFIG` です。 |
+| `'dot'`、`dot()` | ターミナルに簡潔な進捗、失敗、実行サマリーを表示します。 |
+| `'line'`、`line()` | 対話型ターミナルで[進捗を 1 行で表示します](/reference/reporters#line)。 |
 | `'junit'`、`junit()` | `<output>/junit.xml`、または `outputFile` に書き込みます。 |
 | `'markdown'`、`markdown()` | `<output>/summary.md`、または `outputFile` に書き込みます。 |
-| `'json'`、`json()` | レポートを stdout に出力します。併用すると、`list` または `dot` は `stream` を指定しない限り stderr に出力します。 |
+| `'json'`、`json()` | レポートを stdout に出力します。併用すると、`list`、`dot`、`line` は `stream` を指定しない限り stderr に出力します。 |
 | その他の `Reporter` オブジェクト | 組み込みレポーターと一緒に実行します。`--reporter` では取り除かれません。 |
+
+同じストリームに出力できるレポーターは 1 つだけです。`['list', 'line']` は、どちらもデフォルトで stdout に出力するため `INVALID_CONFIG` になります。stdout と stderr が同じ端末に出力される場合は、進捗の更新で他のレポーターの出力が消えないよう、端末用のレポーターは 1 つだけ使ってください。
 
 ID は、そのファクトリーをオプションなしで呼び出したものと同じです。未知の ID は `INVALID_CONFIG` です。[レポーター](/reference/reporters)を参照してください。
 

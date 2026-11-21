@@ -24,8 +24,8 @@ To pass a built-in reporter options, call its factory from `e2e/reporters`
 in place of the id: `junit({ outputFile: 'reports/junit.xml' })`. An id is
 its factory called with no options.
 
-The built-in reporters use only the [`Reporter`](#custom-reporters) contract,
-so a reporter of your own can do anything they do.
+Built-in and custom reporters receive run events, output, and summary rows
+through the same [`Reporter`](#custom-reporters) hooks.
 
 ## Reference
 
@@ -35,6 +35,7 @@ so a reporter of your own can do anything they do.
 | --- | --- |
 | [`list`](#list) | Terminal progress and run summary |
 | [`dot`](#dot) | Compact progress and run summary |
+| [`line`](#line) | Single-row progress and run summary |
 | [`json`](#json) | Report document to stdout |
 | [`junit`](#junit) | Writes `<output>/junit.xml` |
 | [`markdown`](#markdown) | Writes `<output>/summary.md` |
@@ -44,7 +45,7 @@ so a reporter of your own can do anything they do.
 | Throws | When |
 | --- | --- |
 | `INVALID_CONFIG` | `reporters` is not an array. |
-| `INVALID_CONFIG` | An id other than `list`, `dot`, `json`, `junit`, or `markdown`. |
+| `INVALID_CONFIG` | An id other than `list`, `dot`, `line`, `json`, `junit`, or `markdown`. |
 | `INVALID_CONFIG` | A factory not called, such as `junit` for `junit()`. |
 | `INVALID_CONFIG` | An entry that is neither an id nor an object with a `name` and at least one hook. |
 | `INVALID_CONFIG` | Two reporters that [print to](#printsto) one stream, such as `list` and `dot`. |
@@ -94,6 +95,36 @@ stdout holds the JSON report.
 
 Unlike Playwright, e2e uses ASCII marks and prints only the final result
 after retries, with no mark for each retried attempt.
+
+#### `line`
+
+In an interactive terminal, `line` updates one progress row as tests start
+and final results arrive.
+
+```ts
+reporters: ['line'],
+```
+
+The row shows the target and `file > title`. A count of `[2/10]` means two of
+the ten selected tests have a final result. Each test counts once, after any
+retries.
+
+The reporter clears the progress row before printing logs, failure details, or
+the summary. When cursor updates could interfere with other output, it appends
+one line per final result. This also applies to redirected output, `TERM=dumb`,
+and watch reruns. Some terminals may leave fragments of the old progress row
+when the window narrows.
+
+If the final result is a failure or timeout, `line` prints the error and any
+available diagnostics immediately. The final `Failed` summary lists the paths
+to any trace pages for those failures.
+
+Playwright counts test starts, including retries. Its row includes the
+`file:line:col` location and can show the current step. Playwright also prints
+failure details immediately for `flaky` and `interrupted` results.
+
+If you omit `stream`, `line` prints to stdout, or to stderr when used with
+`json`. You can also choose stderr explicitly with `line({ stream: 'stderr' })`.
 
 #### `json`
 
@@ -484,7 +515,7 @@ a reporter it abandoned, cutting off what it still does; under
 ##### Summary rows
 
 The rows a reporter resolves with, and the rows of its labeled report files,
-reach every [`onSummary`](#onsummary). `list` and `dot` print them under
+reach every [`onSummary`](#onsummary). `list`, `dot`, and `line` print them under
 their summary, in the same layout as their own rows. The `json` reporter
 does not carry them.
 
@@ -719,8 +750,8 @@ reporter every run, each starting with its first event.
 `Reporter`, `FinishedRun`, `ReportFile`, `ReporterOutput`, `ReporterSummary`, `StepPrompt`,
 `Report`, `RunEvent`, and `RunEventOf` are exported from the main
 entrypoint, and so is `renderMarkdownReport(report, options)`. `e2e/reporters`
-exports `list`, `dot`, `json`, `junit`, and `markdown`, with
-`ListReporterOptions`, `DotReporterOptions`, `JunitReporterOptions`, and
+exports `list`, `dot`, `line`, `json`, `junit`, and `markdown`, with
+`ListReporterOptions`, `DotReporterOptions`, `LineReporterOptions`, `JunitReporterOptions`, and
 `MarkdownReporterOptions`.
 
 ## Related

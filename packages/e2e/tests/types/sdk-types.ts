@@ -5,7 +5,7 @@
  */
 
 import { z } from 'zod';
-import { json, junit, list as listReporter, markdown } from '../../src/reporters.ts';
+import { json, junit, line, list as listReporter, markdown } from '../../src/reporters.ts';
 import {
   credentials,
   expect,
@@ -346,6 +346,7 @@ unique(7);
 declare const reporter: Reporter;
 ({ targets, reporters: ['list', reporter] }) satisfies E2EConfig;
 ({ targets, reporters: ['dot'] }) satisfies E2EConfig;
+({ targets, reporters: [line({ stream: 'stderr' }), 'line'] }) satisfies E2EConfig;
 ({ targets, reporters: [reporter] }) satisfies E2EConfig;
 ({
   name: 'upload',

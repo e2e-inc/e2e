@@ -20,7 +20,7 @@ export default {
 
 組み込みレポーターにオプションを渡すには、ID の代わりに `e2e/reporters` からそのファクトリーを呼び出します（`junit({ outputFile: 'reports/junit.xml' })`）。ID は、そのファクトリーをオプションなしで呼び出したものと同じです。
 
-組み込みレポーターは [`Reporter`](#custom-reporters) の契約だけを使っています。そのため、独自のレポーターでも組み込みレポーターと同じことがすべてできます。
+組み込みレポーターも独自のレポーターも、実行イベントや出力、サマリー行を同じ [`Reporter`](#custom-reporters) フックで受け取ります。
 
 ## リファレンス
 
@@ -30,6 +30,7 @@ export default {
 | --- | --- |
 | [`list`](#list) | ターミナルの進捗と実行サマリー |
 | [`dot`](#dot) | 簡潔な進捗と実行サマリー |
+| [`line`](#line) | 1 行の進捗表示と実行サマリー |
 | [`json`](#json) | レポートを stdout に出力 |
 | [`junit`](#junit) | `<output>/junit.xml` に書き込み |
 | [`markdown`](#markdown) | `<output>/summary.md` に書き込み |
@@ -39,7 +40,7 @@ export default {
 | 投げるエラー | 発生条件 |
 | --- | --- |
 | `INVALID_CONFIG` | `reporters` が配列でない場合。 |
-| `INVALID_CONFIG` | `list`、`dot`、`json`、`junit`、`markdown` 以外の ID を指定した場合。 |
+| `INVALID_CONFIG` | `list`、`dot`、`line`、`json`、`junit`、`markdown` 以外の ID を指定した場合。 |
 | `INVALID_CONFIG` | `junit()` の代わりに `junit` と書くなど、ファクトリーを呼び出していない場合。 |
 | `INVALID_CONFIG` | エントリーが ID でも、`name` と 1 つ以上のフックを持つオブジェクトでもない場合。 |
 | `INVALID_CONFIG` | `list` と `dot` のように、2 つのレポーターが同じストリームに[出力する](#printsto)場合。 |
@@ -75,6 +76,24 @@ reporters: ['dot'],
 デフォルトでは stdout に出力し、`dot({ stream: 'stderr' })` で stderr に移せます。`--reporter dot,json` のように `json` と併用すると、`dot` はすべてを stderr に出力するため、stdout には JSON レポートが入ります。
 
 Playwright と異なり、e2e は ASCII の記号を使い、リトライ後の最終結果だけを出力します。リトライした各試行の記号は出力しません。
+
+#### `line`
+
+`line` レポーターは、対話型ターミナルでテストが開始されたときと最終結果が出たときに、同じ進捗行を更新します。
+
+```ts
+reporters: ['line'],
+```
+
+進捗行にはターゲットと `file > title` が表示されます。`[2/10]` は、選択された 10 件のテストのうち、2 件の最終結果が確定したことを示します。リトライがあっても、各テストは最終結果が出た時点で 1 件だけ数えます。
+
+ログや失敗の詳細、サマリーを出力する前に、進捗行を消去します。カーソル操作がほかの出力に干渉するおそれがある場合は、最終結果を 1 件 1 行で追記します。出力をリダイレクトした場合や `TERM=dumb` の場合、`--watch` で再実行する際も同様です。端末によっては、ウィンドウを狭くすると元の進捗行の一部が画面に残ることがあります。
+
+最終結果が失敗またはタイムアウトの場合は、エラーと利用できる診断情報をすぐに表示します。最後の `Failed` 欄には、生成されたトレースページのパスが表示されます。
+
+Playwright はリトライも含めてテストの開始回数を数えます。進捗行には `file:line:col` の位置情報が含まれ、実行中のステップも表示できます。結果が `flaky` または `interrupted` の場合も、失敗の詳細をすぐに表示します。
+
+`stream` を指定しなければ、`line` は通常 stdout に、`json` と併用する場合は stderr に出力します。stderr を明示的に指定するには `line({ stream: 'stderr' })` を使います。
 
 #### `json`
 
@@ -368,7 +387,7 @@ type ReporterSummary = readonly { label: string; text: string }[];
 
 ##### サマリー行
 
-レポーターが resolve 時に返す行と、ラベル付きのレポートファイルの行は、すべての [`onSummary`](#onsummary) に届きます。`list` と `dot` は、それらを自身のサマリーの下に、自身の行と同じレイアウトで表示します。`json` レポーターには含めません。
+レポーターが resolve 時に返す行と、ラベル付きのレポートファイルの行は、すべての [`onSummary`](#onsummary) に届きます。`list`、`dot`、`line` は、それらを自身のサマリーの下に、自身の行と同じレイアウトで表示します。`json` レポーターには含めません。
 
 ```
    Test Files  2 passed (2)
@@ -531,7 +550,7 @@ bunx e2e run --reporter list,junit
 
 ## 型
 
-`Reporter`、`FinishedRun`、`ReportFile`、`ReporterOutput`、`ReporterSummary`、`StepPrompt`、`Report`、`RunEvent`、`RunEventOf` はメインエントリーポイントからエクスポートします。`renderMarkdownReport(report, options)` も同様です。`e2e/reporters` は `list`、`dot`、`json`、`junit`、`markdown` を、`ListReporterOptions`、`DotReporterOptions`、`JunitReporterOptions`、`MarkdownReporterOptions` とともにエクスポートします。
+`Reporter`、`FinishedRun`、`ReportFile`、`ReporterOutput`、`ReporterSummary`、`StepPrompt`、`Report`、`RunEvent`、`RunEventOf` はメインエントリーポイントからエクスポートします。`renderMarkdownReport(report, options)` も同様です。`e2e/reporters` は `list`、`dot`、`line`、`json`、`junit`、`markdown` を、`ListReporterOptions`、`DotReporterOptions`、`LineReporterOptions`、`JunitReporterOptions`、`MarkdownReporterOptions` とともにエクスポートします。
 
 ## 関連情報
 

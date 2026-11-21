@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { resultId } from '@e2e-dev/core/lib/internal/ids';
 import { visibleWidth } from '../../src/report/format.ts';
 import { ListReporter } from '../../src/report/list.ts';
+import { LineProgress } from '../../src/report/line.ts';
 import { userFrame } from '../../src/report/code-frame.ts';
 import type { CacheWrite } from '@e2e-dev/core/lib/cache/context';
 import type { RunEventFact, RunEventOf, RunEventResult } from '../../src/run/events.ts';
@@ -2451,5 +2452,99 @@ describe('screenshots row', () => {
       ...Array.from({ length: 9 }, (_, index) => `             .e2e/artifacts/s/${index + 1}.png`),
       '             and 2 more (the report lists every artifact)',
     ]);
+  });
+});
+
+describe('compact progress failure reporting', () => {
+  it.each(['immediate', 'at-end'] as const)('prints the failure block once with %s timing', (failureTiming) => {
+    const { lines, output } = capture();
+    const progress = { failureTiming, result() {}, settle() {} };
+    const reporter = new ListReporter(output, { colors: false, progress });
+    reporter.handle(runStarted());
+    reporter.handle(finished(result({ status: 'failed', attempts: [failedAttempt('wrong value')] })));
+
+    const diagnostic = 'ASSERTION_FAILED: wrong value';
+    expect(lines.filter((line) => line === diagnostic)).toHaveLength(failureTiming === 'immediate' ? 1 : 0);
+    reporter.handle(runFinished({ status: 'failed', exitCode: 1 }));
+    expect(lines.filter((line) => line === diagnostic)).toHaveLength(1);
+  });
+});
+
+describe('line progress through ListReporter', () => {
+  it('restores the output heading after another test finishes', () => {
+    const rows: string[] = [];
+    const progress = new LineProgress({ write: (chunk) => rows.push(chunk), interactive: false, columns: () => 80 });
+    const reporter = new ListReporter({ write: (row) => rows.push(row) }, { colors: false, progress });
+    reporter.handle(runStarted());
+    reporter.handle(plan([{ file: 'tests/case.e2e.ts', tests: 2 }]));
+    reporter.handle(testStarted('a', 'alpha', 'chromium'));
+    reporter.handle(testStarted('b', 'beta', 'chromium'));
+    const log = (text: string) => reporter.handle({
+      type: 'output', target: 'chromium', pair: { testId: 'a', agent: 'default', repeat: 0 }, stream: 'stdout', text,
+    });
+    const start = rows.length;
+    log('first\n');
+    reporter.handle(finished(result({ status: 'passed', id: 'b', title: ['beta'] })));
+    log('second\n');
+    const heading = expect.stringMatching(/^stdout \| .*alpha$/u);
+    expect(rows.slice(start)).toEqual([heading, 'first', '[1/2] [chromium] tests/case.e2e.ts > beta (passed)', heading, 'second']);
+  });
+
+  it('starts at zero, replaces progress in completion order, and clears it before permanent output', () => {
+    const out: string[] = [];
+    const erase = '\r\u001b[2K';
+    let columns = 80;
+    const progress = new LineProgress({ write: (text) => out.push(text), interactive: true, columns: () => columns });
+    const reporter = new ListReporter(
+      { write: (line) => out.push(`${line}\n`) },
+      { colors: false, progress },
+    );
+    reporter.handle(runStarted());
+    reporter.handle(plan([{ file: 'tests/case.e2e.ts', tests: 3 }]));
+    reporter.handle({ type: 'setup', step: { kind: 'app', label: 'probe' }, state: 'finished', durationMs: 10 });
+    reporter.handle(testStarted('first', 'first', 'chromium'));
+    expect(out.at(-1)).toBe(`${erase}[0/3] [chromium] tests/case.e2e.ts > first (running)`);
+    reporter.handle(testStarted('second', 'second', 'chromium'));
+    reporter.handle(finished(result({ status: 'passed', title: ['second'], id: 'second', declarationIndex: 1 })));
+    reporter.handle(finished(result({ status: 'passed', title: ['first'], id: 'first' })));
+    const rows = out.filter((chunk) => chunk.startsWith(erase) && chunk.length > erase.length);
+    expect(rows).toEqual([
+      `${erase}[0/3] [chromium] tests/case.e2e.ts > first (running)`,
+      `${erase}[0/3] [chromium] tests/case.e2e.ts > second (running)`,
+      `${erase}[1/3] [chromium] tests/case.e2e.ts > second (passed)`,
+      `${erase}[2/3] [chromium] tests/case.e2e.ts > first (passed)`,
+    ]);
+
+    const beforeLog = out.length;
+    reporter.processOutput('stdout', 'app says hi\n');
+    const permanent = out.slice(beforeLog);
+    expect(permanent[0]).toBe(erase);
+    expect(permanent.filter((chunk) => chunk === erase)).toHaveLength(1);
+    expect(permanent.join('')).toContain('app says hi');
+
+    columns = 60;
+    const beforeFailure = out.length;
+    reporter.handle(finished(result({
+      status: 'failed',
+      title: ['third\nwide 漢字漢字漢字漢字漢字漢字漢字'],
+      id: 'third',
+      declarationIndex: 2,
+      attempts: [failedAttempt('wrong value')],
+    })));
+    const [narrow = '', cleared] = out.slice(beforeFailure);
+    expect(cleared).toBe(erase);
+    expect(out.slice(beforeFailure + 2).join('')).toContain('ASSERTION_FAILED: wrong value');
+    expect(narrow.startsWith(erase)).toBe(true);
+    expect(narrow).not.toContain('\n');
+    expect(narrow).toMatch(/\(failed\)$/u);
+    expect(narrow).toContain('third wide');
+    expect(visibleWidth(narrow.slice(erase.length))).toBeLessThanOrEqual(59);
+
+    const beforeFinish = out.length;
+    reporter.handle(runFinished({ status: 'failed', exitCode: 1 }));
+    const summary = out.slice(beforeFinish).join('');
+    expect(summary).not.toContain(' FAIL ');
+    expect(summary).not.toContain(erase);
+    expect(summary).toContain('Tests');
   });
 });

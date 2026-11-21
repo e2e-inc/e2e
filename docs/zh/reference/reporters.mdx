@@ -20,7 +20,7 @@ export default {
 
 要为内置报告器传入选项，请用 `e2e/reporters` 中的工厂函数调用代替 ID：`junit({ outputFile: 'reports/junit.xml' })`。ID 等同于不带选项调用其工厂函数。
 
-内置报告器只使用 [`Reporter`](#custom-reporters) 契约，因此你自己的报告器能做到它们能做的一切。
+内置报告器和自定义报告器通过相同的 [`Reporter`](#custom-reporters) 钩子接收运行事件、输出和摘要行。
 
 ## 参考
 
@@ -30,6 +30,7 @@ export default {
 | --- | --- |
 | [`list`](#list) | 终端进度和运行摘要 |
 | [`dot`](#dot) | 简洁进度和运行摘要 |
+| [`line`](#line) | 单行进度和运行摘要 |
 | [`json`](#json) | 将报告文档输出到 stdout |
 | [`junit`](#junit) | 写入 `<output>/junit.xml` |
 | [`markdown`](#markdown) | 写入 `<output>/summary.md` |
@@ -39,7 +40,7 @@ export default {
 | 抛出 | 条件 |
 | --- | --- |
 | `INVALID_CONFIG` | `reporters` 不是数组。 |
-| `INVALID_CONFIG` | ID 不是 `list`、`dot`、`json`、`junit` 或 `markdown`。 |
+| `INVALID_CONFIG` | ID 不是 `list`、`dot`、`line`、`json`、`junit` 或 `markdown`。 |
 | `INVALID_CONFIG` | 工厂函数未被调用，例如写成 `junit` 而不是 `junit()`。 |
 | `INVALID_CONFIG` | 条目既不是 ID，也不是包含 `name` 和至少一个钩子的对象。 |
 | `INVALID_CONFIG` | 两个报告器[输出到](#printsto)同一个流，例如 `list` 和 `dot`。 |
@@ -75,6 +76,24 @@ reporters: ['dot'],
 它默认输出到 stdout；`dot({ stream: 'stderr' })` 可将其改为输出到 stderr。与 `json` 同时使用时（例如 `--reporter dot,json`），`dot` 的全部输出都发送到 stderr，因此 stdout 留给 JSON 报告。
 
 与 Playwright 不同，e2e 使用 ASCII 标记，并且只在重试结束后输出最终结果，不为每次重试单独输出标记。
+
+#### `line`
+
+在交互式终端中，`line` 报告器用同一行显示进度。测试开始或得出最终结果时，报告器会更新这一行。
+
+```ts
+reporters: ['line'],
+```
+
+进度行显示测试目标和 `file > title`。`[2/10]` 表示选中的 10 个测试中已有 2 个得出最终结果。每个测试只在得出最终结果时计数一次，即使发生重试也是如此。
+
+输出日志、失败详情或摘要前，报告器会先清除进度行。如果移动光标可能影响其他输出，报告器就会逐行追加最终结果。重定向输出、设置 `TERM=dumb` 或在 `--watch` 模式下重新运行测试时，也会采用这种格式。缩窄窗口后，有些终端可能会保留原进度行的一部分。
+
+如果最终结果为失败或超时，`line` 会立即输出错误和可用的诊断信息。最后的 `Failed` 摘要会列出这些失败对应的追踪记录页面路径。
+
+Playwright 统计测试的开始次数，包括重试的开始次数。它的进度行包含 `file:line:col` 位置信息，也可以显示当前步骤。测试结果为 `flaky` 或 `interrupted` 时，Playwright 也会立即输出失败详情。
+
+未指定 `stream` 时，`line` 默认输出到 stdout，与 `json` 一起使用时则输出到 stderr。也可以用 `line({ stream: 'stderr' })` 直接指定 stderr。
 
 #### `json`
 
@@ -368,7 +387,7 @@ type ReporterSummary = readonly { label: string; text: string }[];
 
 ##### 摘要行
 
-报告器完成时返回的行，以及其带标签的报告文件的行，会传给每个 [`onSummary`](#onsummary)。`list` 和 `dot` 将它们显示在自身摘要下方，布局与其自身的行相同。`json` 报告器不包含这些行。
+报告器完成时返回的行，以及其带标签的报告文件的行，会传给每个 [`onSummary`](#onsummary)。`list`、`dot` 和 `line` 将它们显示在自身摘要下方，布局与其自身的行相同。`json` 报告器不包含这些行。
 
 ```
    Test Files  2 passed (2)
@@ -531,7 +550,7 @@ bunx e2e run --reporter list,junit
 
 ## 类型
 
-`Reporter`、`FinishedRun`、`ReportFile`、`ReporterOutput`、`ReporterSummary`、`StepPrompt`、`Report`、`RunEvent` 和 `RunEventOf` 从主入口导出，`renderMarkdownReport(report, options)` 也一样。`e2e/reporters` 导出 `list`、`dot`、`json`、`junit` 和 `markdown`，以及 `ListReporterOptions`、`DotReporterOptions`、`JunitReporterOptions` 和 `MarkdownReporterOptions`。
+`Reporter`、`FinishedRun`、`ReportFile`、`ReporterOutput`、`ReporterSummary`、`StepPrompt`、`Report`、`RunEvent` 和 `RunEventOf` 从主入口导出，`renderMarkdownReport(report, options)` 也一样。`e2e/reporters` 导出 `list`、`dot`、`line`、`json`、`junit` 和 `markdown`，以及 `ListReporterOptions`、`DotReporterOptions`、`LineReporterOptions`、`JunitReporterOptions` 和 `MarkdownReporterOptions`。
 
 ## 相关内容
 

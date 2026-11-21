@@ -9,7 +9,7 @@ import type { Report1Document } from './report/build.ts';
 import type { ProjectConfig } from '@e2e-dev/core/lib/types';
 
 /** The reporters the runner ships, named by id; each is a `Reporter` on the same contract. */
-export type BuiltinReporter = 'list' | 'dot' | 'json' | 'junit' | 'markdown';
+export type BuiltinReporter = 'list' | 'dot' | 'line' | 'json' | 'junit' | 'markdown';
 
 /**
  * The run's report document, the one `.e2e/report.json` holds. Its
@@ -90,16 +90,14 @@ export interface ReporterOutput {
 }
 
 /**
- * A reporter in `reporters`, the contract the built-in `list`, `dot`,
- * `json`, `junit`, and `markdown` reporters are built on, with nothing the runner
- * gives them alone. Every hook is optional, but a reporter has at least one,
- * and every reporter that has a hook gets it.
+ * Built-in and custom reporters use the same hooks. A reporter implements
+ * at least one, and the runner invokes each one provided.
  *
  * - `onEvent` sees every run event as it happens and must not block: a
  *   throw quarantines it for the rest of the run. Event types are added
  *   over time; a reporter handles the ones it knows and ignores the rest.
  * - `onOutput` and `onStepPrompt` are live too. Unless a reporter that
- *   prints to the terminal has them, as `list` and `dot` do, the runner
+ *   prints to the terminal has them, as `list`, `dot`, and `line` do, the runner
  *   also prints output, run errors, and the `--step` prompt itself; it
  *   takes them back once that reporter's hook throws or rejects. A terminal
  *   reporter with `onOutput` prints the `run-error` events too.
@@ -247,7 +245,7 @@ export interface TestFilterResult {
 export interface E2EConfig extends ProjectConfig {
   /**
    * The run's reporters: built-in ids, each its factory from
-   * `e2e/reporters` with no options, and reporter objects. `list` and `dot`
+   * `e2e/reporters` with no options, and reporter objects. `list`, `dot`, and `line`
    * show the run on stdout, or on stderr beside `json`, which prints the
    * report; `junit` writes `<output>/junit.xml` and `markdown`
    * `<output>/summary.md`. `--reporter` replaces the built-ins only.

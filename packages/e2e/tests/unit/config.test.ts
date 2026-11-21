@@ -9,7 +9,7 @@ import { ConfigurationError, defineEngine } from '@e2e-dev/core/lib/engine/index
 import { protocolEngine } from '@e2e-dev/core/lib/engine/protocol/client';
 import { secrets } from '@e2e-dev/core/lib/secrets';
 import type { CommandConfig, Target, TargetApp } from '@e2e-dev/core/lib/types';
-import { dot, junit, list } from '../../src/reporters.ts';
+import { dot, junit, line, list } from '../../src/reporters.ts';
 import type { BuiltinReporter, E2EConfig, Reporter, TestFilter } from '../../src/run-types.ts';
 import { snapshot } from '../helpers/snapshot.ts';
 import { invalid } from '../helpers/invalid.ts';
@@ -561,8 +561,8 @@ describe('resolveConfig', () => {
     expect(() => resolve({ reporters: ['xunit'] as never })).toThrow(/unknown reporter "xunit"/);
   });
 
-  it('moves the list or dot id beside json to stderr', () => {
-    for (const id of ['list', 'dot'] as const) {
+  it('moves a terminal reporter id beside json to stderr', () => {
+    for (const id of ['list', 'dot', 'line'] as const) {
       const streams = resolve({ reporters: [id, 'json'] }).reporters.map((reporter) => [reporter.name, reporter.printsTo]);
       expect(streams).toEqual([[id, 'stderr'], ['json', 'stdout']]);
     }
@@ -577,6 +577,16 @@ describe('resolveConfig', () => {
 
   it.each([['list', 'dot'], ['dot', 'list']] as const)('rejects %s combined with %s reporters', (first, second) => {
     expect(() => resolve({ reporters: [first, second] })).toThrow(/list.*dot|dot.*list/u);
+  });
+
+  it('resolves line by stream for a factory, id, or CLI override', () => {
+    expect(resolve({ reporters: [line(), 'line', 'json'] }).reporters.map((reporter) => [reporter.name, reporter.printsTo])).toEqual([
+      ['line', 'stderr'], ['json', 'stdout'],
+    ]);
+    expect(reporterNames([list(), line({ stream: 'stderr' })])).toEqual(['list', 'line']);
+    expect(() => reporterNames(['junit'], ['line', 'dot'])).toThrow(expect.objectContaining({
+      code: 'INVALID_CONFIG', message: expect.stringContaining('both print to stdout'),
+    }));
   });
 
   it('refuses two reporters printing to one stream, a built-in or not, and takes any number of live ones', () => {

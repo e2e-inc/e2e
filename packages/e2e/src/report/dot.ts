@@ -3,6 +3,7 @@
 import picocolors from 'picocolors';
 import type { ResultStatus } from '@e2e-dev/core/lib/run/records';
 import type { Reporter } from '../run-types.ts';
+import type { TerminalProgress, TerminalProgressResult } from './progress.ts';
 import type { Colors } from './format.ts';
 import { ListReporter, runView } from './list.ts';
 
@@ -22,11 +23,12 @@ export interface DotReporterOptions {
 export function dot(options: DotReporterOptions = {}): Reporter {
   const stream = options.stream ?? 'stdout';
   const write = (to: OutputStream, text: string): void => void process[to].write(text);
-  return runView('dot', stream, options.stream === undefined, (output) => new ListReporter(output, { live: false, dots: new DotProgress(stream, write) }));
+  return runView('dot', stream, options.stream === undefined, (output) => new ListReporter(output, { live: false, progress: new DotProgress(stream, write) }));
 }
 
 /** The marks of the `dot` reporter, and the user output it prints between them. */
-export class DotProgress {
+export class DotProgress implements TerminalProgress {
+  readonly failureTiming = 'at-end';
   private readonly marks: Record<ResultStatus, string>;
   private columns = 0;
   private readonly unfinished = new Set<OutputStream>();
@@ -48,7 +50,7 @@ export class DotProgress {
   }
 
   /** A retry contributes just the one mark its final verdict calls for. */
-  result(status: ResultStatus): void {
+  result({ status }: Pick<TerminalProgressResult, 'status'>): void {
     const prefix = this.unfinished.delete(this.stream) ? '\n' : '';
     this.output(this.stream, prefix + this.marks[status]);
     this.columns += 1;
@@ -65,8 +67,8 @@ export class DotProgress {
     else this.unfinished.add(destination);
   }
 
-  /** Releases any pending text in the destination view once the run is over. */
-  end(): void {
+  /** Finishes the row of marks and adds a newline to any unfinished log lines. */
+  settle(): void {
     this.finishMarks();
     for (const stream of this.unfinished) this.output(stream, '\n');
     this.unfinished.clear();
