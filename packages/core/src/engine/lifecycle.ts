@@ -4,6 +4,7 @@
  * worker exists, and what `finish` is handed after the last worker is gone.
  */
 
+import type { EngineHostIdentity } from './contract.ts';
 import type { EngineAppInfo, EngineCleanupContext } from './index.ts';
 
 /**
@@ -28,7 +29,7 @@ export interface EnginePrepareResult {
  * Facts handed to `prepare`, once per run and target in the runner process,
  * before any worker exists.
  */
-export interface EnginePrepareInfo {
+export interface EnginePrepareInfo extends EngineHostIdentity {
   /** The run id. */
   readonly runId: string;
   /** The target being prepared. */
@@ -77,7 +78,7 @@ export interface EnginePrepareInfo {
 }
 
 /** Handed to `finish`, once per run and target after the last worker is gone, with the cleanup budget of one hook. */
-export interface EngineFinishInfo extends EngineCleanupContext {
+export interface EngineFinishInfo extends EngineCleanupContext, EngineHostIdentity {
   /** The run id. */
   readonly runId: string;
   /** The target being finished. */
