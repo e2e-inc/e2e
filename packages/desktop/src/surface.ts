@@ -39,6 +39,7 @@ import {
 import { AGENT_DESKTOP_VERSION, installPinned, pinnedExecutable, pinnedInstalled, resolveExecutable } from './binary.ts';
 import { AgentDesktopCli, AgentDesktopFailure, translate } from './cli.ts';
 import { toCombo } from './keys.ts';
+import { launchArgumentList } from './launch-arguments.ts';
 import { ROOT_ID, projectSnapshot, type NodeBinding, type ProjectedScreen, type RawSnapshot, type Rect } from './nodes.ts';
 import type { DesktopPlatform, ResolvedDesktopOptions } from './options.ts';
 import { encodePng, windowImage } from './png.ts';
@@ -484,7 +485,7 @@ export class DesktopSurface {
     const { target, token } = launch;
     // In the background unless physical input is on: the app never takes the keyboard from whoever is at the Mac.
     const args = ['launch', target, '--no-attach', ...(this.options.headed ? ['--activate'] : []), '--timeout', String(this.toolBudget(operation)), `--env=${LAUNCH_TOKEN}=${token}`];
-    for (const argument of [...FRESH_STATE_ARGUMENTS, ...(this.app.launchArguments ?? [])]) args.push(`--arg=${argument}`);
+    for (const argument of [...FRESH_STATE_ARGUMENTS, ...launchArgumentList(this.app.launchArguments)]) args.push(`--arg=${argument}`);
     let launched: { app?: string; pid?: number; process_instance?: string };
     try {
       launched = await this.run(args, { label: `launch ${target}`, input: true, signal: operation.signal, timeoutMs: operation.timeoutMs, raw: true });
@@ -526,7 +527,7 @@ export class DesktopSurface {
   private async openBundle(bundle: string, launch: Launch, operation: OperationContext): Promise<void> {
     if (operation.timeoutMs <= 0) throw new EngineError('OPERATION_TIMEOUT', `opening ${bundle}: the operation's budget ran out before it was sent`, { retryable: false, cause: NOT_SENT });
     // `-g` keeps the app in the background unless physical input is on; `open` hands the app its own environment, so it runs with the trimmed one.
-    const args = [...(this.options.headed ? [] : ['-g']), '-n', '--env', `${LAUNCH_TOKEN}=${launch.token}`, bundle, '--args', ...FRESH_STATE_ARGUMENTS, ...(this.app.launchArguments ?? [])];
+    const args = [...(this.options.headed ? [] : ['-g']), '-n', '--env', `${LAUNCH_TOKEN}=${launch.token}`, bundle, '--args', ...FRESH_STATE_ARGUMENTS, ...launchArgumentList(this.app.launchArguments)];
     try {
       await execFileAsync('open', args, { signal: operation.signal, timeout: operation.timeoutMs, env: this.appEnv });
     } catch (cause) {

@@ -35,6 +35,7 @@ export type { ComputedStyleProperty, ComputedStyleValues } from './computed-styl
 // config options get.
 export { ConfigurationError, InfrastructureError, TestError } from '../internal/errors.ts';
 export { rejectUnknownKeys, rejectUnknownOptions } from '../internal/options.ts';
+export { checkLaunchArguments } from '../internal/launch-arguments.ts';
 export { validateJsonValue, type JsonValueRules } from '../internal/json-value.ts';
 export { describePattern, matchesText, toTextPattern } from '../internal/text.ts';
 export { resolveExpression, type ResolveExpressionOptions } from './resolve.ts';
@@ -51,7 +52,7 @@ export type {
 export { Deadline, pollCondition, stepTimeout, withTimeout, withinCleanupBudget, type PollConditionOptions } from '../internal/time.ts';
 export { isRefusedLinkScheme, sameSite, siteOf, urlMatches } from '../internal/urls.ts';
 export { obj, type WithoutUndefined } from '../internal/objects.ts';
-import type { AppPermissionState, Expectable, Locator, Screen, Secret } from '../types.ts';
+import type { AppPermissionState, Expectable, Locator, ResolvedLaunchArguments, Screen, Secret } from '../types.ts';
 import type {
   EngineHostIdentity,
   EngineSpiVersion,
@@ -83,7 +84,7 @@ export {
   RETRYABLE_ENGINE_ERROR_CODES,
   parseKey,
 } from './contract.ts';
-export type { AppPermissionState, Expectable, JsonValue, Locator, Screen, Secret } from '../types.ts';
+export type { AppPermissionState, Expectable, JsonValue, LaunchArgumentValue, LaunchArguments, Locator, ResolvedLaunchArguments, Screen, Secret } from '../types.ts';
 export { isSecret } from '../secrets.ts';
 
 /**
@@ -170,7 +171,7 @@ export interface EngineAppInfo {
   /** The build to install, as the target declared it; relative to `projectRoot`. */
   readonly appPath?: string;
   /** Arguments every fresh launch passes the app. */
-  readonly launchArguments?: readonly string[];
+  readonly launchArguments?: ResolvedLaunchArguments;
   /** Permissions the app holds, by name; what each state means is the engine's (a device sets them before every fresh launch). */
   readonly permissions?: Readonly<Record<string, AppPermissionState>>;
 }

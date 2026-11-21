@@ -2,7 +2,7 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { OperationContext } from '@e2e-dev/core/engine';
+import type { EngineAppInfo, OperationContext } from '@e2e-dev/core/engine';
 import { afterEach, describe, expect, it } from 'vitest';
 import { pinnedExecutable } from '../../src/binary.ts';
 import { resolveOptions } from '../../src/options.ts';
@@ -100,7 +100,7 @@ function renamed(name: string, from: string, to: string): unknown {
  * writes its arguments to `recorded`, then runs `body` (sh), where `SPAWNED`
  * names the file the fake lists started processes from.
  */
-async function appPathSurface(body: string, scenario: Scenario = {}) {
+async function appPathSurface(body: string, scenario: Scenario = {}, launchArguments?: EngineAppInfo['launchArguments']) {
   const directory = artifacts();
   const bundle = path.join(directory, 'Built.app');
   mkdirSync(path.join(bundle, 'Contents'), { recursive: true });
@@ -119,7 +119,7 @@ async function appPathSurface(body: string, scenario: Scenario = {}) {
   const spawnedFile = path.join(path.dirname(fake.binary), 'calls.jsonl.spawned');
   writeFileSync(path.join(bin, 'open'), `#!/bin/sh\nSPAWNED=${JSON.stringify(spawnedFile)}\nprintf '%s\\n' "$@" > ${JSON.stringify(recorded)}\n${body}`, { mode: 0o755 });
   const surface = tracked(new DesktopSurface(resolveOptions({ binary: fake.binary, settle: false }), 'macos'));
-  await surface.init({ runId: 'r', targetName: 'mac', projectRoot: directory, app: { appPath: 'Built.app' }, env: { ...fake.env, PATH: `${bin}:${process.env.PATH ?? ''}` }, headed: false, workerSlot: 0, signal, log: () => undefined });
+  await surface.init({ runId: 'r', targetName: 'mac', projectRoot: directory, app: { appPath: 'Built.app', ...(launchArguments === undefined ? {} : { launchArguments }) }, env: { ...fake.env, PATH: `${bin}:${process.env.PATH ?? ''}` }, headed: false, workerSlot: 0, signal, log: () => undefined });
   return { surface, fake, bundle, recorded };
 }
 
@@ -128,6 +128,7 @@ interface Launch {
   readonly openTimeoutMs?: number;
   readonly observe?: boolean;
   readonly options?: Parameters<typeof resolveOptions>[0];
+  readonly launchArguments?: EngineAppInfo['launchArguments'];
 }
 
 /**
@@ -136,7 +137,7 @@ interface Launch {
  * environment (its token) and reports it, as agent-desktop does; `app.pid`
  * is that process once launched.
  */
-async function initialized(scenario: Scenario | ((pid: number) => Scenario), { snapshot = 'macos/appkit-form', options = {} }: Launch = {}) {
+async function initialized(scenario: Scenario | ((pid: number) => Scenario), { snapshot = 'macos/appkit-form', options = {}, launchArguments }: Launch = {}) {
   const fake = fakeScenario({
     status: [{ ok: true, data: { version: '1.3.1', permissions: { accessibility: { state: 'granted' } } } }],
     launch: [{ spawn: true, ok: true, data: { app: 'SpikeForm', pid: SPAWNED, process_instance: 'instance-1' } }],
@@ -159,7 +160,7 @@ async function initialized(scenario: Scenario | ((pid: number) => Scenario), { s
     runId: 'run',
     targetName: 'macos',
     projectRoot: process.cwd(),
-    app: { bundleId: 'dev.e2e.spike.form' },
+    app: { bundleId: 'dev.e2e.spike.form', ...(launchArguments === undefined ? {} : { launchArguments }) },
     // A secret in the run's environment, which neither agent-desktop nor the app it launches may see.
     env: { ...fake.env, E2E_PROBE_SECRET: 'hunter2' },
     headed: false,
@@ -201,6 +202,12 @@ const startAttempt = (surface: DesktopSurface) =>
   });
 
 describe('DesktopSurface', () => {
+  it('passes the target\'s launch arguments after its own, an object spelled as user defaults', async () => {
+    const { fake } = await launched({}, { launchArguments: { AppleLanguages: ['fr'], e2e: true } });
+    const launch = fake.calls().find((call) => call.key === 'launch')?.args ?? [];
+    expect(launch.filter((arg) => arg.startsWith('--arg='))).toEqual(['--arg=-ApplePersistenceIgnoreState', '--arg=YES', '--arg=-AppleLanguages', '--arg=(fr)', '--arg=-e2e', '--arg=YES']);
+  });
+
   it('launches the app by id and reads only the window of the process it launched', async () => {
     const { fake } = await launched({});
     const calls = fake.calls();
@@ -606,6 +613,17 @@ describe('DesktopSurface', () => {
     expect((await surface.observe(operation(), undefined)).root.children?.some((node) => node.testId === 'username')).toBe(true);
     await surface.endAttempt({ signal, timeoutMs: 5_000 });
     expect(await gone(opened)).toBe(true);
+  });
+
+  it.skipIf(process.platform !== 'darwin')('passes an appPath build the target\'s launch arguments after its own, an object spelled as user defaults', async () => {
+    const { surface, recorded } = await appPathSurface(
+      `while [ $# -gt 0 ]; do [ "$1" = "--env" ] && variable="$2"; shift; done\nenv "$variable" ${JSON.stringify(process.execPath)} -e 'setTimeout(() => {}, 60000)' >/dev/null 2>&1 &\necho $! >> "$SPAWNED"\n`,
+      {},
+      { AppleLanguages: ['fr'], e2e: true },
+    );
+    await surface.restart(operation());
+    const args = readFileSync(recorded, 'utf8').trimEnd().split('\n');
+    expect(args.slice(args.indexOf('--args') + 1)).toEqual(['-ApplePersistenceIgnoreState', 'YES', '-AppleLanguages', '(fr)', '-e2e', 'YES']);
   });
 
   it.skipIf(process.platform !== 'darwin')('never brings a background app that opens no window forward, and says it needs headed', async () => {
