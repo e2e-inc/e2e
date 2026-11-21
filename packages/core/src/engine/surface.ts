@@ -84,10 +84,12 @@ export type Observation = ObservationMetadata & (
       readonly truncated: boolean;
       /** The engine's measured keyboard state (`EngineSnapshot.keyboardVisible`); `false` when it measured none, absent only when it did not measure. */
       readonly keyboardVisible?: boolean;
+      /** The screenshot, only when its masked regions cover every secure node. */
       readonly pixels?: ObservationPixels;
       /**
-       * Why a screenshot the engine took is not here: it reported
-       * `maskedRegionCount` without `pixels`, and fewer than the secure nodes.
+       * Why a screenshot the engine took is not here: its masked regions
+       * (`maskedRegionCount`) are fewer than the secure nodes, whether the
+       * engine sent the pixels or withheld them itself.
        */
       readonly pixelsWithheld?: PixelsWithheld;
     }

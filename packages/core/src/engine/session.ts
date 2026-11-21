@@ -407,18 +407,20 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
       }
       revision += 1;
       root = metadata.root;
+      // Pixels stay only when their masked regions cover every secure node. A
+      // screenshot the engine took without that proof, sent or withheld, is
+      // marked instead, so no reader of the observation checks it again. An
+      // unavailable tree above holds no secure node, so its pixels are proven.
+      const captured = snapshot.pixels !== undefined || snapshot.maskedRegionCount !== undefined;
+      const proven = pixelsProvenMasked(metadata.redaction);
       const observation: Observation = {
         ...metadata,
         kind: 'semantic',
         tree: stampRevision(snapshot.root, minted),
         truncated: snapshot.truncated === true,
         ...(snapshot.keyboardVisible === undefined ? {} : { keyboardVisible: snapshot.keyboardVisible }),
-        ...(snapshot.pixels === undefined ? {} : { pixels: snapshot.pixels }),
-        ...(snapshot.pixels === undefined
-          && snapshot.maskedRegionCount !== undefined
-          && !pixelsProvenMasked(metadata.redaction)
-          ? { pixelsWithheld: 'MASKING_UNPROVEN' as const }
-          : {}),
+        ...(snapshot.pixels === undefined || !proven ? {} : { pixels: snapshot.pixels }),
+        ...(captured && !proven ? { pixelsWithheld: 'MASKING_UNPROVEN' as const } : {}),
       };
       showScreen(observation);
       return observation;

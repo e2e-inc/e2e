@@ -64,7 +64,7 @@ import {
 } from './nodes.ts';
 import { keyboardDragStart } from './keyboard.ts';
 import { DEVICE_PERMISSIONS, type AgentDeviceClient, type ClientFactory, type DevicePermission, type LaunchPermissions, type MobileOptions, type PermissionState } from './options.ts';
-import { decodesAsPng, maskPng } from './png.ts';
+import { maskPng } from './png.ts';
 import { mobileDoctor } from './doctor.ts';
 import { deviceLabel, pinnedApp, type SlotBinding } from './bindings.ts';
 import { assertAppId } from './links.ts';
@@ -1909,16 +1909,16 @@ export class AgentDeviceSurface {
   private async maskedScreenshot(operation: OperationContext, budget: InputBudget): Promise<{ data: Uint8Array; masked: number }> {
     const projected = this.project(await this.snapshotOrEmpty(operation, false, budget));
     const data = await this.rawScreenshot(operation.signal, {}, budget);
-    const masked = redactSecure(data, projected, this.knownViewport);
-    if (masked === 'unbounded') {
+    const redacted = redactSecure(data, projected, this.knownViewport);
+    if (redacted.kind === 'unbounded') {
       throw new ConfigurationError('POLICY_DENIED', 'a secure field on screen has no bounds to mask, so the screenshot is withheld');
     }
-    if (masked === undefined) {
-      throw new EngineError('ENGINE_FAILURE', 'a secure field on screen could not be masked; screenshot withheld', {
+    if (redacted.kind === 'unreadable') {
+      throw new EngineError('ENGINE_FAILURE', 'the screenshot could not be read to mask the secure fields on screen; screenshot withheld', {
         retryable: false,
       });
     }
-    return masked;
+    return redacted;
   }
 
   /**
@@ -1943,8 +1943,8 @@ export class AgentDeviceSurface {
       return undefined;
     }
     const redacted = redactSecure(raw, projected, viewport);
-    if (redacted === 'unbounded') return { masked: 0 };
-    if (redacted === undefined) return undefined;
+    if (redacted.kind === 'unbounded') return { masked: 0 };
+    if (redacted.kind === 'unreadable') return undefined;
     const size = readPngSize(redacted.data);
     if (size === undefined) return undefined;
     const scale = viewport.width > 0 ? size.width / viewport.width : 1;
@@ -1955,34 +1955,36 @@ export class AgentDeviceSurface {
   }
 }
 
+/** What masking one screenshot gave: the masked image, or why there is none. */
+type Redaction =
+  | { readonly kind: 'masked'; readonly data: Uint8Array; readonly masked: number }
+  | { readonly kind: 'unbounded' }
+  | { readonly kind: 'unreadable' };
+
 /**
  * Paints every secure node's bounds black on a screenshot of the same
  * screen. Returns the masked bytes and how many regions were covered,
- * `'unbounded'` when a secure node on an image that decodes has no bounds to
- * paint, or undefined when the image cannot be read or edited: the caller
- * then withholds the image rather than ship one it could not prove redacted.
- * Bounds are in logical points; the image may be at device scale, so they
- * are scaled by the image-to-viewport ratio.
+ * `unbounded` when a secure node has no bounds to paint, which no image
+ * changes, or `unreadable` when the image cannot be read or edited: the
+ * caller then withholds the image rather than ship one it could not prove
+ * redacted. Bounds are in logical points; the image may be at device scale,
+ * so they are scaled by the image-to-viewport ratio.
  */
-function redactSecure(
-  data: Uint8Array,
-  projected: ProjectedSnapshot,
-  viewport: ViewportSize | undefined,
-): { data: Uint8Array; masked: number } | 'unbounded' | undefined {
+function redactSecure(data: Uint8Array, projected: ProjectedSnapshot, viewport: ViewportSize | undefined): Redaction {
   const secure = projected.index.filter((entry) => entry.node.states?.secure === true);
-  if (secure.length === 0) return { data, masked: 0 };
-  const size = readPngSize(data);
-  if (size === undefined) return undefined;
-  const scale = viewport !== undefined && viewport.width > 0 ? size.width / viewport.width : 1;
-  const rects: Rect[] = [];
+  if (secure.length === 0) return { kind: 'masked', data, masked: 0 };
+  const bounds: Rect[] = [];
   for (const entry of secure) {
-    const rect = entry.node.rect;
-    if (rect === undefined) return decodesAsPng(data) ? 'unbounded' : undefined;
-    rects.push({ x: rect.x * scale, y: rect.y * scale, width: rect.width * scale, height: rect.height * scale });
+    if (entry.node.rect === undefined) return { kind: 'unbounded' };
+    bounds.push(entry.node.rect);
   }
+  const size = readPngSize(data);
+  if (size === undefined) return { kind: 'unreadable' };
+  const scale = viewport !== undefined && viewport.width > 0 ? size.width / viewport.width : 1;
+  const rects = bounds.map((rect) => ({ x: rect.x * scale, y: rect.y * scale, width: rect.width * scale, height: rect.height * scale }));
   try {
-    return { data: maskPng(data, rects), masked: rects.length };
+    return { kind: 'masked', data: maskPng(data, rects), masked: rects.length };
   } catch {
-    return undefined;
+    return { kind: 'unreadable' };
   }
 }

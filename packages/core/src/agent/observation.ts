@@ -8,7 +8,6 @@ import { sha256Hex } from '../internal/ids.ts';
 import type { SecretLedger } from '../internal/redact.ts';
 import { collapseText } from '../internal/text.ts';
 import { sleep } from '../internal/time.ts';
-import { pixelsProvenMasked } from '../run/secrecy.ts';
 import type { VisionDegradation } from '../run/steps.ts';
 import type { ExecutorNode, ExecutorObservation, ExecutorPixels } from './executor.ts';
 import { sizeForModel } from './pixels.ts';
@@ -355,25 +354,18 @@ export function observationDetail(observation: AgentObservation): { count?: numb
 }
 
 /**
- * Clears captured pixels for model input, or withholds them.
- *
- * Every secure node the engine observed must be covered by a masked region.
- * When it is not, the engine masked less than it saw and the image cannot be
- * proven redacted, so it is dropped exactly like an incompletely redacted
- * artifact, and the semantic tree still goes out. A screenshot the engine
- * itself withheld for the same reason reads the same way.
+ * Clears captured pixels for model input, or passes on why they are withheld.
+ * The session keeps pixels on an observation only once their masked regions
+ * cover every secure node, and marks the rest `MASKING_UNPROVEN`, so the
+ * semantic tree still goes out without them.
  */
 function clearPixels(observation: Observation): {
   cleared?: ExecutorPixels;
   withheld?: PixelsWithheld;
 } {
+  if (observation.kind === 'semantic' && observation.pixelsWithheld !== undefined) return { withheld: observation.pixelsWithheld };
   const pixels = observation.pixels;
-  if (pixels === undefined) {
-    const withheld = observation.kind === 'semantic' ? observation.pixelsWithheld : undefined;
-    return withheld === undefined ? {} : { withheld };
-  }
-  if (!pixelsProvenMasked(observation.redaction)) return { withheld: 'MASKING_UNPROVEN' };
-  return { cleared: { ...pixels, maskedRegionCount: observation.redaction.maskedRegionCount } };
+  return pixels === undefined ? {} : { cleared: { ...pixels, maskedRegionCount: observation.redaction.maskedRegionCount } };
 }
 
 /**

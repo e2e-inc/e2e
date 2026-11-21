@@ -978,7 +978,7 @@ describe('observation', () => {
     expect(asked).toEqual([undefined, true]);
   });
 
-  it('withholds the pixels of a screen with a secure field, bounded or not, when the image cannot be read or decoded', async () => {
+  it('withholds the pixels of a screen with a secure field when the image cannot be read or decoded', async () => {
     const h = harness();
     // A PNG signature and header naming the size, with no image data behind them: the size reads, the decode fails.
     const headerOnly = encodePng({ width: 195, height: 422, channels: 4, pixels: new Uint8Array(195 * 422 * 4) }).subarray(0, 33);
@@ -988,25 +988,27 @@ describe('observation', () => {
       return { path: (args as { path: string }).path };
     });
     await openAttempt(h);
-    // A secure field without bounds cannot be masked either, but an image that does not decode is still no image.
-    const unbounded = {
+    for (const bytes of [new Uint8Array([1, 2, 3]), headerOnly]) {
+      shot = bytes;
+      const observation = await h.engine.observe!(operation(), { pixels: true });
+      expect(observation.pixels).toBeUndefined();
+      // No usable image was taken, so none was withheld, and the matcher waits for the next one.
+      expect(observation.maskedRegionCount).toBeUndefined();
+      expect(observation.root.children).toHaveLength(1);
+      await expect(h.engine.artifacts!.screenshot('password', operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
+    }
+    // A secure field without bounds is unmaskable whatever the image holds, so it is withheld, not retried.
+    shot = new Uint8Array([1, 2, 3]);
+    h.fake.respond('capture.snapshot', () => ({
       nodes: [
         { ref: 'e1', index: 0, depth: 0, type: 'application', label: 'Bank', rect: { x: 0, y: 0, width: 390, height: 844 } },
         { ref: 'e2', index: 1, parentIndex: 0, depth: 1, type: 'SecureTextField', label: 'PIN' },
       ],
-    };
-    for (const screen of [SETTINGS_SNAPSHOT, unbounded]) {
-      h.fake.respond('capture.snapshot', () => screen);
-      for (const bytes of [new Uint8Array([1, 2, 3]), headerOnly]) {
-        shot = bytes;
-        const observation = await h.engine.observe!(operation(), { pixels: true });
-        expect(observation.pixels).toBeUndefined();
-        // No usable image was taken, so none was withheld, and the matcher waits for the next one.
-        expect(observation.maskedRegionCount).toBeUndefined();
-        expect(observation.root.children).toHaveLength(1);
-        await expect(h.engine.artifacts!.screenshot('password', operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
-      }
-    }
+    }));
+    const unbounded = await h.engine.observe!(operation(), { pixels: true });
+    expect(unbounded.pixels).toBeUndefined();
+    expect(unbounded.maskedRegionCount).toBe(0);
+    await expect(h.engine.artifacts!.screenshot('password', operation())).rejects.toMatchObject({ code: 'POLICY_DENIED' });
     expect(existsSync(path.join(artifactsDir, 'screenshots'))).toBe(false);
   });
 
