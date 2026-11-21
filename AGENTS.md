@@ -239,11 +239,10 @@ suites that consume the built packages the way a user would.
   iOS simulators and Android emulators for the mobile engine
   (`DeviceProvider`), through agent-device's `@agent-device/revyl` plugin.
   Revyl installs the build from an `https` `app` URL when it starts each
-  device. `@e2e-dev/revyl/web` is `revylWeb()`, an engine of its own built
-  with `defineEngine` on `@e2e-dev/core/engine`: Revyl does not expose its
-  browsers over CDP, so it drives Revyl's hosted Chrome through Revyl's HTTP
-  API and reads the page as Maestro's web hierarchy plus CSS queries. Verify
-  a change against live Revyl web sessions with `REVYL_API_KEY` set.
+  device. `revylBrowsers()` from `@e2e-dev/revyl/web` (`BrowserProvider`,
+  attempt scope only) starts a Revyl web session per attempt and leases the
+  single-use CDP URL Revyl mints for it. Verify a change against live Revyl
+  sessions with `REVYL_API_KEY` set.
 - `packages/browserstack` — the published `@e2e-dev/browserstack` package:
   BrowserStack App Automate real Android and iOS devices for the mobile
   engine (`DeviceProvider`), through agent-device's built-in `browserstack`
