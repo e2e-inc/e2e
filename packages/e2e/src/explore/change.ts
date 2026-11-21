@@ -49,8 +49,8 @@ const NOTE_BYTES = 96;
 const GIT_MAX_BUFFER = 16 * 1024 * 1024;
 /** Every git call reading the brief together, after the change is measured. */
 const READ_BUDGET_MS = 30_000;
-/** How the change is read: the user's diff and textconv drivers never run, so the brief is the same on every machine. */
-const DIFF_FLAGS = ['--no-color', '--no-ext-diff', '--no-textconv', '--no-renames'];
+/** Use Git's own diff and show submodule pointers without expanding the dependency's diff. */
+const DIFF_FLAGS = ['--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--ignore-submodules=none', '--submodule=short'];
 
 /** The change an exploration plans from. */
 export interface ExploreChange {
@@ -154,7 +154,7 @@ class GitReader {
    * Untracked files are in the change already, as not committed.
    */
   async dirtyFiles(): Promise<Set<string> | undefined> {
-    const output = await this.output(['diff', '--name-only', '-z', '--no-renames', '--no-ext-diff', 'HEAD', '--']);
+    const output = await this.output(['diff', '--name-only', '-z', ...DIFF_FLAGS, 'HEAD', '--']);
     return output === undefined ? undefined : new Set(output.split('\0').filter((file) => file !== ''));
   }
 

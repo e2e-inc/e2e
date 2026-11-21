@@ -114,8 +114,10 @@ reaches the model. See
 ## Explore a pull request's change
 
 Add `--changed-since <ref>` to explore what the branch changed. The planner
-reads the commit messages and the committed diff since the merge base with
-the ref. It spends its steps on the screens that the change can affect.
+uses a brief of the commit messages and the committed diff since the merge
+base with the ref. A submodule patch shows the old and new commit IDs when
+Git can read it and it fits the brief. The planner spends its steps on the
+screens that the change can affect.
 
 <CodeGroup>
 ```bash npm

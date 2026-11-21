@@ -52,6 +52,8 @@ export function scriptedJudge(
   return { model, requests };
 }
 
+// --- Temporary Git repository helpers ---
+
 /** Runs git in `cwd` with the user's and the system's config shut out. */
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', ['-c', 'commit.gpgsign=false', '-c', 'init.defaultBranch=main', ...args], {
@@ -116,6 +118,31 @@ export function commitAll(repo: ChangedRepo): void {
   git(repo.root, 'add', '--all');
   git(repo.root, 'commit', '--quiet', '-m', 'change');
 }
+
+/** A normal source change accompanying a submodule update Git usually hides. */
+export function repoWithSubmoduleUpdate(baseFiles: Readonly<Record<string, string>>) {
+  const dependency = changedRepo({ 'catalog.txt': 'old catalog\n' }, { 'catalog.txt': 'new catalog contents\n' });
+  const previous = dependency.base;
+  const next = git(dependency.root, 'rev-parse', 'HEAD');
+  const repo = changedRepo(baseFiles, {});
+  const submodule = 'fixtures/catalog';
+  git(repo.root, '-c', 'protocol.file.allow=always', 'submodule', 'add', '--quiet', dependency.root, submodule);
+  const checkout = path.join(repo.root, submodule);
+  git(checkout, 'checkout', '--quiet', previous);
+  git(repo.root, 'config', '-f', '.gitmodules', `submodule.${submodule}.ignore`, 'all');
+  git(repo.root, 'config', 'diff.submodule', 'diff');
+  commitAll(repo);
+  const base = git(repo.root, 'rev-parse', 'HEAD');
+
+  git(checkout, 'checkout', '--quiet', next);
+  const ordinary = 'README.md';
+  writeFiles(repo.root, { [ordinary]: 'Document the catalog\n' });
+  git(repo.root, 'add', submodule);
+  commitAll(repo);
+  return { repo: { ...repo, base, files: [ordinary, submodule] }, submodule, previous, next };
+}
+
+// --- End temporary Git repository helpers ---
 
 /** A secret every context's `redact` replaces. */
 export const SECRET = 'sk-test-4f9c2b7e1d';

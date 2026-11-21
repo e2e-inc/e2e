@@ -85,6 +85,9 @@ pair one left out ends in ` (left out by <filter>: <reason>)`. `--reporter json`
 `{ "pairs": [...] }`, naming a skip or left-out reason `reason` and the
 filter that left a pair out `filter`.
 
+Changed submodules are included even when Git normally hides them. The
+decision filter gets the old and new commit IDs for committed updates.
+
 `import { list } from 'e2e/runner'` returns that selection plus the pairs a
 filter removed, positional arguments that matched no file, and the selected
 target names.

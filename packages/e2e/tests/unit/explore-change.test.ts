@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_LIMITS } from '@e2e-dev/core/lib/config/agent';
 import { changeContext, readExploreChange } from '../../src/explore/change.ts';
 import { staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
-import { commitFiles, initRepo, runGit, useTempDirs } from '../helpers/git-repo.ts';
+import { commitFiles, initRepo, runGit, submoduleChange, useTempDirs } from '../helpers/git-repo.ts';
 
 const tempDir = useTempDirs();
 
@@ -80,6 +80,27 @@ describe('readExploreChange', () => {
     expect(brief).not.toContain('PRIVATE KEY');
     expect(brief).not.toContain('outside the repository');
     expect(brief).not.toContain('edited in the working tree');
+  });
+
+  it('shows the committed submodule pointer without expanding its contents', async () => {
+    const dir = tempDir();
+    const { submodule, previous, next } = submoduleChange(dir, tempDir());
+    const { text } = await changeOf(dir);
+    expect(text).toContain(submodule);
+    expect(text).toContain(`-Subproject commit ${previous}`);
+    expect(text).toContain(`+Subproject commit ${next}`);
+    expect(text).not.toContain('dependency implementation changed');
+  });
+
+  it('keeps the brief incomplete when an ignored submodule also has local edits', async () => {
+    const dir = tempDir();
+    const { submodule, next } = submoduleChange(dir, tempDir());
+    writeFileSync(path.join(dir, submodule, 'file.txt'), 'local dependency edits\n');
+    const { text, complete } = await changeOf(dir);
+    expect(complete).toBe(false);
+    expect(text).toContain(`${submodule} (+1 -1; full patch below; also changed locally, not shown)`);
+    expect(text).toContain(`+Subproject commit ${next}`);
+    expect(text).not.toContain('local dependency edits');
   });
 
   it('is not shown whole once an uncommitted file is listed', async () => {

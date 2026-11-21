@@ -10,7 +10,7 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { findChanges } from '../../src/run/changes.ts';
 import type { TestFilterChanges } from '../../src/run-types.ts';
-import { commitFiles, initRepo, runGit, useTempDirs } from '../helpers/git-repo.ts';
+import { commitFiles, initRepo, runGit, submoduleChange, useTempDirs } from '../helpers/git-repo.ts';
 
 const tempDir = useTempDirs();
 
@@ -102,6 +102,12 @@ describe('findChanges with --changed-since', () => {
     runGit(dir, 'mv', 'file.txt', 'moved.txt');
     commitFiles(dir, {}, 'rename');
     expect(filesOf(await lookUp(dir))).toEqual(['file.txt', 'moved.txt', 'src/app.ts', 'tests/new.e2e.ts']);
+  });
+
+  it('includes a changed submodule pointer even when the repository ignores submodule diffs', async () => {
+    const dir = tempDir();
+    const { submodule } = submoduleChange(dir, tempDir());
+    expect(filesOf(await lookUp(dir))).toEqual(['README.md', submodule]);
   });
 
   it('finds no change, naming the merge base, when the working tree matches it', async () => {

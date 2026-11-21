@@ -5,7 +5,7 @@ import { web } from '@e2e-dev/web';
 import { list } from 'e2e/runner';
 import { describe, expect, it } from 'vitest';
 import { decisionFilter } from '../src/index.ts';
-import { changedRepo, scriptedJudge, type ChangedRepo } from './filter-helpers.ts';
+import { changedRepo, repoWithSubmoduleUpdate, scriptedJudge, type ChangedRepo } from './filter-helpers.ts';
 
 /** The lines between a private key's armor. Each starts with a letter, so git names the one before a hunk in its header. */
 const KEY_BODY = [
@@ -57,6 +57,34 @@ describe('decisionFilter through e2e/runner', () => {
       ['adds an item', 'run', undefined],
       ['signs in', 'filtered', 'decision'],
     ]);
+  });
+
+  it('keeps a test when its submodule dependency changes under an ignored diff', async () => {
+    const { repo, submodule, previous, next } = repoWithSubmoduleUpdate({
+      'tests/cart.e2e.ts': "import { test } from 'e2e';\ntest('reads the catalog', async () => {});\n",
+      'tests/login.e2e.ts': "import { test } from 'e2e';\ntest('signs in', async () => {});\n",
+    });
+    linkE2E(repo);
+    let seesUpdate = false;
+    const { model, requests } = scriptedJudge((text) => (seesUpdate && text.includes('reads the catalog') ? 1 : 0.05), (_index, { state }) => {
+      const { diff } = state as { diff: string };
+      seesUpdate = diff.includes(`diff --git a/${submodule} b/${submodule}`) && diff.includes(`+Subproject commit ${next}`);
+    });
+    const { pairs } = await list({
+      cwd: repo.root,
+      changedSince: repo.base,
+      env: { ...process.env, CI: '', GITHUB_ACTIONS: '' },
+      config: { targets: [{ engine: web(), app: { url: 'http://127.0.0.1:9' } }], filters: [decisionFilter({ model })] },
+    });
+    expect(pairs.map((pair) => [pair.title, pair.disposition])).toEqual([
+      ['reads the catalog', 'run'],
+      ['signs in', 'filtered'],
+    ]);
+    expect(requests).toHaveLength(1);
+    const { diff } = requests[0]!.state as { diff: string };
+    expect(diff).toContain(`-Subproject commit ${previous}`);
+    expect(diff).toContain('+Document the catalog');
+    expect(diff).not.toContain('new catalog contents');
   });
 
   it("sends no line of a configured private key when commits edit the line after it or one in its middle, the diff's context lines and hunk headers included", async () => {

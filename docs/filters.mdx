@@ -75,6 +75,9 @@ returns. It gets a file only the working tree changes, uncommitted or
 untracked, by name alone, never its contents, so a file a CI step writes
 doesn't reach it.
 
+Submodule changes count even when Git is configured to hide them. For a
+committed submodule update, the model sees the old and new commit IDs.
+
 The filter leaves out a test when the model rates both the test and its
 setup under 20% likely affected. Tests the model can't judge run, and the
 filter's note says why: a diff over 60 kB, a test or setup file too large

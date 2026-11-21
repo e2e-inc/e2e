@@ -78,6 +78,10 @@ configured secrets are redacted (topic `writing-tests`).
 | `--timeout <ms>` | 600000 (180000 to 7200000) | Wall clock; the last minute is for the assessment. |
 | `--headed`, `--reporter`, `--output`, `--debug`, `--ai-trace`, `--trace [mode]`, `--video [mode]` | as `run` | Same meaning as for `e2e run`. The exploration is one attempt, so a retry mode (`on-first-retry`, `on-all-retries`) records nothing (the run's notice says to pass `--trace on`); put the goal before a bare `--trace` or `--video`. |
 
+With `--changed-since`, a committed submodule patch shows the old and new
+commit IDs if Git can read it and it fits the change brief. The planner
+never reads the dependency's diff.
+
 Per-step action and model-call budgets default to 40 each;
 `agents.<name>.maxSteps` and `agents.<name>.maxModelCalls` in the config
 override them. The replay cache is off and retries are zero for the

@@ -28,8 +28,8 @@ const MAX_FAILURES = 3;
 const MAX_DIFF_BUFFER = 64 * 1024 * 1024;
 /** Most characters of paths one `git diff` names, well within the 32,767 of a Windows command line. */
 const MAX_PATHSPEC_CHARS = 16_000;
-/** Plain `git diff` output whatever the repository's config says. */
-const DIFF_FLAGS = ['--no-color', '--no-ext-diff', '--no-textconv', '-U3'];
+/** Plain Git diffs, including the submodule pointers the runner counted but never their contents. */
+const DIFF_FLAGS = ['--no-color', '--no-ext-diff', '--no-textconv', '--ignore-submodules=none', '--submodule=short', '-U3'];
 /**
  * Files that can change what any test does, by name at any depth: the
  * config files e2e discovers, the lockfiles of every package manager, and
@@ -419,7 +419,7 @@ function testsIn(tests: readonly TestFilterCandidate[]): string {
  * files once the diff is past `MAX_DIFF_BYTES`.
  */
 async function changeDiff({ base, root, files }: TestFilterChanges, signal: AbortSignal): Promise<string> {
-  const committed = new Set((await git(root, ['diff', '--name-only', '--no-renames', '--no-ext-diff', '-z', base, 'HEAD', '--'], signal)).split('\0'));
+  const committed = new Set((await git(root, ['diff', '--name-only', '--no-renames', '--no-ext-diff', '--ignore-submodules=none', '-z', base, 'HEAD', '--'], signal)).split('\0'));
   let diff = '';
   for (const paths of pathspecs(files.filter((file) => committed.has(file)))) {
     diff += await git(root, ['--literal-pathspecs', 'diff', ...DIFF_FLAGS, '-M', '--irreversible-delete', base, 'HEAD', '--', ...paths], signal);

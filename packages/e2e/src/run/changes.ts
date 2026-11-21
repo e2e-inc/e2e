@@ -94,11 +94,12 @@ async function lookUp(ref: string, cwd: string, signal: AbortSignal): Promise<Te
  * Every file in the working tree that differs from `base`, staged or not,
  * and the untracked files, sorted by code point. An untracked nested
  * repository, which git lists as its directory, is not this repository's
- * change.
+ * change. Include submodules even when Git ordinarily hides their changes:
+ * changing a checked-in dependency can affect which tests need to run.
  */
 async function changesSince(root: string, base: string, signal: AbortSignal): Promise<TestFilterChanges> {
   const [diff, untracked] = await Promise.all([
-    gitOutput(root, ['diff', '--name-only', '--no-renames', '--no-ext-diff', '-z', base, '--'], signal),
+    gitOutput(root, ['diff', '--name-only', '--no-renames', '--no-ext-diff', '--ignore-submodules=none', '-z', base, '--'], signal),
     gitOutput(root, ['ls-files', '--others', '--exclude-standard', '--full-name', '-z'], signal),
   ]);
   const files = [...new Set([...diff.split('\0'), ...untracked.split('\0').filter((file) => !file.endsWith('/'))])].filter((file) => file !== '').toSorted(compareCodePoints);

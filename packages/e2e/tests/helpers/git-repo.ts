@@ -6,6 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach } from 'vitest';
 
+// --- Temporary Git repository helpers ---
+
 /** Runs git in `cwd` with the user's config shut out, returning trimmed stdout. */
 export function runGit(cwd: string, ...args: string[]): string {
   return execFileSync('git', ['-c', 'commit.gpgsign=false', '-c', 'init.defaultBranch=main', ...args], {
@@ -48,6 +50,26 @@ export function commitFiles(dir: string, files: Readonly<Record<string, string>>
   return runGit(dir, 'rev-parse', 'HEAD');
 }
 
+/** A dependency update that Git hides by default, alongside an ordinary file change. */
+export function submoduleChange(dir: string, dependency: string) {
+  const previous = initRepo(dependency);
+  const next = commitFiles(dependency, { 'file.txt': 'dependency implementation changed\n' });
+  initRepo(dir);
+  const submodule = 'fixtures/catalog';
+  runGit(dir, '-c', 'protocol.file.allow=always', 'submodule', 'add', '--quiet', dependency, submodule);
+  const checkout = path.join(dir, submodule);
+  runGit(checkout, 'checkout', '--quiet', previous);
+  runGit(dir, 'config', '-f', '.gitmodules', `submodule.${submodule}.ignore`, 'all');
+  runGit(dir, 'config', 'diff.submodule', 'diff');
+  const base = commitFiles(dir, { 'README.md': 'before\n' }, 'base');
+
+  runGit(dir, 'checkout', '--quiet', '-b', 'feature');
+  runGit(checkout, 'checkout', '--quiet', next);
+  runGit(dir, 'add', submodule);
+  commitFiles(dir, { 'README.md': 'after\n' }, 'update catalog and README');
+  return { base, submodule, previous, next };
+}
+
 /**
  * Makes fresh empty directories under the system temp directory, resolved
  * so a test crosses no symlink it did not make (macOS keeps it behind
@@ -65,3 +87,5 @@ export function useTempDirs(): () => string {
     return dir;
   };
 }
+
+// --- End temporary Git repository helpers ---
