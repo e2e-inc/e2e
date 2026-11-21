@@ -389,6 +389,39 @@ describe('browser.route decisions', () => {
     expect(hits.get('/api/quote')).toBeUndefined();
   });
 
+  /**
+   * One grammar: each row answers the same through `route` (a fetch from the
+   * page reaches the handler) and `waitForURL` (the page at that URL
+   * satisfies the wait), relative patterns resolved against the app's URL.
+   */
+  const SHARED_PATTERNS: readonly (readonly [pattern: string, pathname: string, matches: boolean])[] = [
+    ['**/api/quote', '/api/quote', true],
+    ['/api/quote', '/api/quote', true],
+    ['/api/*', '/api/quote', true],
+    ['/api/*', '/api/a/b', false],
+    ['/api/**', '/api/a/b', true],
+    ['**/api/{quote,flags}', '/api/flags', true],
+    ['**/api/{quote,flags}', '/api/other', false],
+    ['**/api/quote?id=*', '/api/quote?id=7', true],
+    ['**/api/quote?id=?', '/api/quote?id=7', false],
+    ['**/api/q?ote', '/api/quote', false],
+    ['**/api/my file*', '/api/my%20file.txt', true],
+  ];
+
+  it.each(SHARED_PATTERNS)('reads %s against %s the same through route, waitForURL, and waitForResponse', async (pattern, pathname, expected) => {
+    await browser.route(pattern, (route) => route.fulfill({ body: 'routed' }));
+    expect((await fetchText(`${origin}${pathname}`)) === 'routed', 'route').toBe(expected);
+    await browser.unrouteAll();
+    await page.goto(`${origin}${pathname}`);
+    const waited = await browser.waitForURL(pattern, { timeout: 200 }).then(() => true, () => false);
+    expect(waited, 'waitForURL').toBe(expected);
+    const [responded] = await Promise.all([
+      browser.waitForResponse(pattern, { timeout: 300 }).then(() => true, () => false),
+      page.evaluate((url) => { void fetch(url).then((reply) => reply.text()).catch(() => undefined); }, `${origin}${pathname}`),
+    ]);
+    expect(responded, 'waitForResponse').toBe(expected);
+  });
+
   it('continue goes to the network past an earlier route', async () => {
     let earlier = 0;
     await browser.route('**/api/**', (route) => {

@@ -594,7 +594,8 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
   `back({ timeout? })`, `forward({ timeout? })`: navigation on the test
   timeout by default; `goto` takes a base-relative path.
 - `url()`, `title()`, `waitForURL(url | RegExp, { timeout? })`: reads and a
-  URL wait; `waitForURL` matches like `toHaveURL`.
+  URL wait; `waitForURL` takes a URL glob such as `'**/checkout'` or a
+  `RegExp`, and `toHaveURL` compares a string exactly.
 - `locator(css)`: raw CSS or XPath; not portable, a last resort.
 - `frameLocator(css)`: a `Screen` scoped to one iframe
   (`browser.frameLocator('#payment').getByLabel('Card number')`); keeps
@@ -649,9 +650,10 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
   key or modifier until `up(key)`. `press(key)` presses and releases within
   the call. Prefer `locator.press` and `locator.fill`.
 
-A `route`, `unroute`, or `waitForResponse` pattern is a glob string or
-`RegExp` matched against the full URL (`*` stays within one path segment,
-`**` crosses `/`, `?` is one character); a predicate function is
+A `route`, `unroute`, `waitForResponse`, or `waitForURL` pattern is a glob
+string or `RegExp`, in Playwright's grammar (`*` stays within one path
+segment, `**` crosses `/`, `{a,b}` is either, `?` is literal); a relative
+one resolves against the base URL, and a predicate function is
 `INVALID_ARGUMENT`.
 
 ## Habits
