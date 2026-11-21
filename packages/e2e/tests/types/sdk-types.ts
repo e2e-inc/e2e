@@ -689,6 +689,14 @@ test.fail('known gap');
 test.setTimeout(60_000);
 // @ts-expect-error the timeout is a number of milliseconds
 test.setTimeout('60s');
+// slow takes the runtime shapes of skip and fail, and no registration form.
+void (test.slow() satisfies void);
+test.slow(true, 'imports a large file');
+test.slow('imports a large file');
+// @ts-expect-error there is no test.slow(title, fn); call test.slow() in the body
+test.slow('slow', async () => {});
+// @ts-expect-error the condition is a boolean
+test.slow(1);
 test.fail('gap', async () => {}) satisfies ReturnType<typeof test>;
 void (test.fail(false) satisfies void);
 test('gap', { fail: 'known gap' }, async () => {});
