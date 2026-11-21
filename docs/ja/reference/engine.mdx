@@ -1762,7 +1762,7 @@ const password = isSecret(options.password)
 セキュアフィールドの読み取りに対する `POLICY_DENIED` エラーです。`subject` はメッセージの末尾に入り、読み取った対象か、エンジンが拒否した理由を示します。独自のエラーを書かずにこれを投げると、すべてのエンジンがランナーと同じ文言で拒否します。
 
 ```ts
-if (field.secure) throw secureReadDenied('the field is a password field');
+if (node.states?.secure === true) throw secureReadDenied('the field is a password field');
 // POLICY_DENIED: reading values from a secure field is denied: the field is a password field
 ```
 
