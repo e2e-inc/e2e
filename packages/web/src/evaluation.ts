@@ -1,6 +1,6 @@
 /** Separates exceptions thrown by trusted page code from failures of the evaluation transport. */
 import type { JsonValue } from '@e2e-dev/core';
-import { ConfigurationError, EngineError, TestError } from '@e2e-dev/core/engine';
+import { EngineError, secureReadDenied, TestError } from '@e2e-dev/core/engine';
 import { SECURE_FIELD_SELECTOR } from './read-node.ts';
 import { message } from './support.ts';
 
@@ -216,10 +216,7 @@ export function readEvaluation(text: string): EvaluationResult {
     });
   }
   if ('secure' in report) {
-    throw new ConfigurationError(
-      'POLICY_DENIED',
-      'reading values from a secure field is denied: the node is a secure field, or its type cannot be checked',
-    );
+    throw secureReadDenied('the node is a secure field, or its type cannot be checked');
   }
   if ('invalid' in report) return { ok: false, invalid: report.invalid };
   throw new TestError('EVALUATE_FAILED', report.message);

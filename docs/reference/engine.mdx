@@ -1657,6 +1657,7 @@ reproduces these semantics; import them instead of carrying a copy.
 | [`obj`](#obj) | `WithoutUndefined<T>` |
 | [`raceAbort`, `withTimeout`, `withinCleanupBudget`](#timing-helpers) | `Promise<T>`, `Promise<T>`, `Promise<void>` |
 | [`isSecret`](#issecret) | `boolean` |
+| [`secureReadDenied`](#securereaddenied) | `ConfigurationError` |
 | [`isProviderRecording`, `stopProviderRecording`](#provider-recordings) | `boolean`, `Promise<VideoSegment>` |
 
 #### Text patterns
@@ -1908,6 +1909,18 @@ either.
 const password = isSecret(options.password)
   ? await context.resolveSecret(options.password)
   : options.password;
+```
+
+#### `secureReadDenied`
+
+The `POLICY_DENIED` error for a read of a value, text, or attribute on a
+secure field. `subject` names what was read and ends the message. Throw it
+instead of writing your own, so every engine refuses with the runner's
+wording.
+
+```ts
+if (node.states?.secure === true) throw secureReadDenied(label);
+// POLICY_DENIED: reading values from a secure field is denied: getByLabel("Password")
 ```
 
 ### State

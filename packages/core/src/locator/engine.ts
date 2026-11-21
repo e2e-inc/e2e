@@ -15,6 +15,7 @@ import {
   ConfigurationError,
   E2EError,
   isE2EError,
+  secureReadDenied,
   TestError,
   translateEngineError,
   type ErrorDetails,
@@ -52,7 +53,7 @@ export function attributeOf(node: SemanticNode, name: string): string | null {
  */
 export function denySecureRead(nodes: readonly SemanticNode[], label: string): void {
   if (nodes.some((node) => node.states?.secure === true)) {
-    throw new ConfigurationError('POLICY_DENIED', `reading values from a secure field is denied: ${label}`);
+    throw secureReadDenied(label);
   }
 }
 

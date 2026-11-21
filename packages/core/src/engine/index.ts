@@ -33,7 +33,7 @@ export type { ComputedStyleProperty, ComputedStyleValues } from './computed-styl
 // semantic tree, URL matching, assertion polling, option-bag validation, the
 // JSON-value rules for data a fixture returns, and the unknown-key check
 // config options get.
-export { ConfigurationError, InfrastructureError, TestError } from '../internal/errors.ts';
+export { ConfigurationError, InfrastructureError, secureReadDenied, TestError } from '../internal/errors.ts';
 export { rejectUnknownKeys, rejectUnknownOptions } from '../internal/options.ts';
 export { validateJsonValue, type JsonValueRules } from '../internal/json-value.ts';
 export { compareText, describePattern, matchesText, toTextPattern } from '../internal/text.ts';

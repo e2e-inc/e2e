@@ -94,7 +94,13 @@ describe('compileEvaluation', () => {
     const selectors: unknown[] = [];
     const element = { isConnected: true, matches: (selector: unknown) => { selectors.push(selector); return matches(); } };
     const report = await compileEvaluation('() => ran()', ['element', 'arg'])(element, undefined);
-    expect(() => readEvaluation(report)).toThrow(expect.objectContaining({ code: 'POLICY_DENIED', category: 'configuration' }));
+    expect(() => readEvaluation(report)).toThrow(
+      expect.objectContaining({
+        code: 'POLICY_DENIED',
+        category: 'configuration',
+        message: 'reading values from a secure field is denied: the node is a secure field, or its type cannot be checked',
+      }),
+    );
     expect(ran).not.toHaveBeenCalled();
     expect(selectors).toEqual([SECURE_FIELD_SELECTOR]);
   });
