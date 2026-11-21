@@ -1615,6 +1615,7 @@ export class AgentDeviceSurface {
         case 'scrollIntoView':
         case 'selectOption':
         case 'setInputFiles':
+        case 'blur':
           // Not in DEVICE_ACTIONS (actions.ts), so the harness never sends them; kept exhaustive.
           throw unsupported(`agent-device cannot perform "${action.kind}" on a device surface`);
       }

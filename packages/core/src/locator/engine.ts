@@ -73,7 +73,7 @@ const STEP_COUNT_BUDGET_MS = 500;
 interface LocatorEngineOptions {
   readonly session: TargetSession;
   /** The running phase's signal and deadline, read per operation. */
-  readonly budget: AttemptBudget;
+  readonly budget: Pick<AttemptBudget, 'signal' | 'deadline'>;
   readonly runId: string;
   readonly attemptId: string;
   readonly actionTimeout: number;

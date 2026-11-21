@@ -601,6 +601,8 @@ export interface Locator extends Omit<Screen, 'tree' | 'debug' | 'pause'> {
   selectOption(value: SelectOption, options?: ActionOptions): Promise<void>;
   /** Focuses exactly one node. */
   focus(options?: ActionOptions): Promise<void>;
+  /** Removes focus from exactly one node if it is focused. */
+  blur(options?: ActionOptions): Promise<void>;
   /** Hovers over exactly one matching actionable node. */
   hover(options?: ActionOptions): Promise<void>;
   /** Sets the files of exactly one file input, or of a control that opens a file chooser; paths resolve from the project root, and an empty array clears the input. */
@@ -887,6 +889,18 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    */
   skip(condition: boolean, reason?: string): void;
   skip(reason?: string): void;
+  /** Registers one skipped test marked fixme, reported with the skip cause and reason `fixme`. */
+  fixme(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
+  /**
+   * Inside a running test: skips it as fixme when `condition` is true (or
+   * always, with no condition), as `test.skip` does. The skip cause is
+   * `fixme`, and the reason `fixme`, or `fixme: <reason>` when `reason` is not
+   * blank. A setup test cannot skip. Outside a test body this form is
+   * `COLLECTION_ERROR`; use `test.fixme(title, fn)` to mark a test fixme at
+   * collection.
+   */
+  fixme(condition: boolean, reason?: string): void;
+  fixme(reason?: string): void;
   /**
    * Returns a function that registers one test, like `test(title, fn)`:
    * skipped when `condition` is truthy, as if it had the `skip` option. The

@@ -15,7 +15,9 @@ import type { DebugSnapshot } from '@e2e-dev/core/lib/internal/debug';
 import type { SerializedError } from '@e2e-dev/core/lib/internal/errors';
 import type { AttemptRecord, ResultRecord, RunError, SerialAttemptRecord, SerialGroupRecord, SerialMemberRecord, WireResultRecord } from '@e2e-dev/core/lib/run/records';
 import type { SerialAttemptStart } from '../serial.ts';
-import type { HeldStep } from '../step-hold.ts';
+import type { McpToolResult } from '../../session-tools/tools.ts';
+import type { HeldTestOpening } from '../step-attachment-wire.ts';
+import type { StepHold } from '../step-hold.ts';
 import type { StepProgress } from '@e2e-dev/core/lib/run/steps';
 
 /** One runnable pair on the wire; the worker resolves the test function. */
@@ -156,6 +158,37 @@ export interface ScreenRequestMessage {
   readonly requestId: string;
 }
 
+/**
+ * Requests for a held test attachment. The attach request names a hold.
+ * Later requests use the ID of the attach request.
+ */
+export type StepAttachmentRequest =
+  | {
+      readonly kind: 'attach';
+      readonly holdId: string;
+      readonly attachId: string;
+      readonly sessionId: string;
+    }
+  | { readonly kind: 'detail'; readonly attachmentId: string; readonly name: string }
+  | {
+      readonly kind: 'call';
+      readonly attachmentId: string;
+      readonly name: string;
+      readonly args: Record<string, unknown>;
+    }
+  | { readonly kind: 'detach'; readonly attachmentId: string };
+
+type StepAttachmentRequestMessage = {
+  readonly type: 'step-attachment-request';
+  readonly requestId: string;
+  readonly request: StepAttachmentRequest;
+};
+
+type StepAttachmentCancelMessage = {
+  readonly type: 'step-attachment-cancel';
+  readonly requestId: string;
+};
+
 export type MainToWorker =
   | RunUnitMessage
   | InterruptMessage
@@ -164,6 +197,8 @@ export type MainToWorker =
   | PingMessage
   | StepReleaseMessage
   | ScreenRequestMessage
+  | StepAttachmentRequestMessage
+  | StepAttachmentCancelMessage
   | ContinueMessage;
 
 export interface ReadyMessage {
@@ -268,7 +303,10 @@ export interface PongMessage {
 export interface StepHoldMessage {
   readonly type: 'step-hold';
   readonly holdId: string;
-  readonly step: HeldStep;
+  readonly attemptId: string;
+  readonly step: StepHold;
+  /** Labels to quote in attachment errors, redacted in the worker. */
+  readonly attachmentLabels: Pick<StepHold, 'title' | 'target'>;
 }
 
 /**
@@ -280,6 +318,23 @@ export interface ScreenReplyMessage {
   readonly requestId: string;
   readonly screen?: string;
 }
+
+/**
+ * Replies to attachment requests. The worker redacts each result with the
+ * attempt's secret ledger before sending it.
+ */
+export type StepAttachmentResponse =
+  | { readonly kind: 'attach'; readonly opening: HeldTestOpening }
+  | { readonly kind: 'detail'; readonly text: string }
+  | { readonly kind: 'call'; readonly result: McpToolResult; readonly errorCode: string | undefined }
+  | { readonly kind: 'detach'; readonly recording?: string }
+  | { readonly kind: 'error'; readonly error: Pick<SerializedError, 'category' | 'code' | 'message'> };
+
+type StepAttachmentReplyMessage = {
+  readonly type: 'step-attachment-reply';
+  readonly requestId: string;
+  readonly response: StepAttachmentResponse;
+};
 
 /** The hold `holdId` names ended without a release: its step was abandoned, or its attempt ended. */
 export interface StepCancelMessage {
@@ -391,6 +446,7 @@ export type WorkerToMain =
   | StepHoldMessage
   | StepCancelMessage
   | ScreenReplyMessage
+  | StepAttachmentReplyMessage
   | OutputMessage
   | NoticeMessage
   | ResultMessage

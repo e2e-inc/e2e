@@ -32,6 +32,7 @@ describe('checkout', { tags: ['billing'] }, () => {
 | --- | --- |
 | [`test`](#test) | `TestCase` |
 | [`test.skip`](#test-skip) | `TestCase \| void` |
+| [`test.fixme`](#test-fixme) | `TestCase \| void` |
 | [`test.skipIf`](#test-skipif) | `TestRegistrar` |
 | [`test.runIf`](#test-runif) | `TestRegistrar` |
 | [`test.each`](#test-each) | `EachRegistrar` |
@@ -127,8 +128,34 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | Called in a setup test. A setup test cannot skip because other tests depend on its sessions. |
+| `INVALID_ARGUMENT` | Called in a setup test with a true condition, or none. A setup test cannot skip because other tests depend on its sessions. |
 | `COLLECTION_ERROR` | The conditional form, outside a test body. |
+| `COLLECTION_ERROR` | The registration form, inside a serial group. Set [`skip`](#skip) on the serial `describe` instead. |
+
+#### `test.fixme`
+
+Registers a skipped test marked fixme, or skips the running test as fixme.
+
+```ts
+test.fixme('exports a PDF', async ({ app }) => {}); // at registration
+test.fixme(platform === 'android', 'crashes on Android'); // inside a body
+test.fixme(); // inside a body, always
+```
+
+- It takes the same three forms as [`test.skip`](#test-skip), and the rules of
+  its body form apply.
+- The test is reported `skipped`, with `skip.cause` `fixme` in
+  `report.json` where `test.skip` reports `explicit`. The reason is `fixme`,
+  or `fixme: <reason>` when a call inside a body gives a reason that is not
+  blank. The list reporter shows it as `[fixme: crashes on Android]`.
+- The registration form takes no test options.
+- At registration it returns a `TestCase`; inside a body, `void`.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_ARGUMENT` | Called in a setup test with a true condition, or none. A setup test cannot skip because other tests depend on its sessions. |
+| `COLLECTION_ERROR` | The conditional form, outside a test body. Use `test.fixme(title, fn)` at collection. |
+| `COLLECTION_ERROR` | The registration form, inside a serial group. Set [`skip`](#skip) on the serial `describe` instead. |
 
 #### `test.skipIf`
 
@@ -744,7 +771,7 @@ describe('checkout', { serial: true }, () => {
 | Throws | When |
 | --- | --- |
 | `COLLECTION_ERROR` | A member sets `retries`, `trace`, `video`, `session`, `platforms`, `requires`, `skip`, `only`, or a nested `serial`. |
-| `COLLECTION_ERROR` | A member registers through `test.skipIf` or `test.runIf`. |
+| `COLLECTION_ERROR` | A member registers through `test.skip(title, fn)`, `test.skipIf`, `test.runIf`, or `test.fixme(title, fn)`. |
 
 #### `sessions`
 
@@ -996,6 +1023,18 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    */
   skip(condition: boolean, reason?: string): void;
   skip(reason?: string): void;
+  /** Registers one skipped test marked fixme, reported with the skip cause and reason `fixme`. */
+  fixme(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
+  /**
+   * Inside a running test: skips it as fixme when `condition` is true (or
+   * always, with no condition), as `test.skip` does. The skip cause is
+   * `fixme`, and the reason `fixme`, or `fixme: <reason>` when `reason` is not
+   * blank. A setup test cannot skip. Outside a test body this form is
+   * `COLLECTION_ERROR`; use `test.fixme(title, fn)` to mark a test fixme at
+   * collection.
+   */
+  fixme(condition: boolean, reason?: string): void;
+  fixme(reason?: string): void;
   /**
    * Returns a function that registers one test, like `test(title, fn)`:
    * skipped when `condition` is truthy, as if it had the `skip` option. The
