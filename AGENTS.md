@@ -331,8 +331,11 @@ suites that consume the built packages the way a user would.
   effort: keep the English pages current in every change, and leave the
   translations to lag behind, since no contributor is expected to update a
   language they don't speak. `scripts/check-docs-translations.ts` warns on a
-  stale outline, code block, or label and fails only on a translation whose
-  English page is gone (`authoring-docs` "Translations").
+  stale outline, code block, or label. It fails on a translation whose English
+  page is gone or that has no title, a language with no `navigation.json`, and
+  a translated line of 12 or more characters that repeats the end of the line
+  above it in the same paragraph, the trace of a review suggestion anchored
+  one line too high (`authoring-docs` "Translations").
   The `e2e` build copies the
   pages to `packages/e2e/docs/` (gitignored,
   `packages/e2e/scripts/prepare-build.ts`) so the published package ships
