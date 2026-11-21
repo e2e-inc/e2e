@@ -21,8 +21,9 @@ unless the agents entry sets a [custom one](/executors).
 For `act`, the first prompt holds the instruction, the params, the completed
 steps, and a redacted text snapshot of the screen: roles, names, text, and
 states. It holds no raw HTML, cookies, headers, or environment values.
-Password fields are masked, and a configured secret value on screen becomes
-`<secret:name>`.
+Password fields are masked, unless a page script hides one from e2e
+([where redaction stops](/reference/security#where-redaction-stops)).
+A configured secret value on screen becomes `<secret:name>`.
 
 After an action, the model gets the changes to the screen, or a new full
 snapshot when most of it changed. Node ids stay the same while their

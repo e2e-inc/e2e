@@ -1254,7 +1254,8 @@ export class AgentDeviceSurface {
       ...(isTruncated(raw) ? { truncated: true } : {}),
       ...(keyboardVisible === undefined ? {} : { keyboardVisible }),
       ...(location === undefined ? {} : { location }),
-      ...(capture === undefined ? {} : { pixels: capture.pixels, maskedRegionCount: capture.masked }),
+      ...(capture?.pixels === undefined ? {} : { pixels: capture.pixels }),
+      ...(capture === undefined ? {} : { maskedRegionCount: capture.masked }),
     };
   }
 
@@ -1855,8 +1856,8 @@ export class AgentDeviceSurface {
    * A redacted screenshot artifact. The device paints secure fields as dots,
    * but the last typed character shows in clear, so every secure node's
    * bounds are painted over before the file is kept. A secure node without
-   * bounds cannot be masked, and an image that cannot be redacted is not
-   * written at all.
+   * bounds cannot be masked, so the screenshot is refused with POLICY_DENIED,
+   * and an image that cannot be redacted is not written at all.
    */
   async screenshot(label: string | undefined, operation: OperationContext, budget: InputBudget): Promise<string> {
     const attempt = this.attempt;
@@ -1906,11 +1907,14 @@ export class AgentDeviceSurface {
    * hold a credential must not leave the engine.
    */
   private async maskedScreenshot(operation: OperationContext, budget: InputBudget): Promise<{ data: Uint8Array; masked: number }> {
-    const projected = this.project(await this.snapshotOrEmpty(operation, false, budget));
+    const secure = secureBounds(this.project(await this.snapshotOrEmpty(operation, false, budget)));
+    if (secure === undefined) {
+      throw new ConfigurationError('POLICY_DENIED', 'a secure field on screen has no bounds to mask, so the screenshot is withheld');
+    }
     const data = await this.rawScreenshot(operation.signal, {}, budget);
-    const masked = redactSecure(data, projected, this.knownViewport);
+    const masked = redactSecure(data, secure, this.knownViewport);
     if (masked === undefined) {
-      throw new EngineError('ENGINE_FAILURE', 'a secure field on screen could not be masked; screenshot withheld', {
+      throw new EngineError('ENGINE_FAILURE', 'the screenshot could not be read to mask the secure fields on screen; screenshot withheld', {
         retryable: false,
       });
     }
@@ -1920,7 +1924,9 @@ export class AgentDeviceSurface {
   /**
    * Viewport pixels for an observation. Best-effort: a screenshot that cannot
    * be produced or redacted costs the observation its image, not the step,
-   * unless the operation's budget ran out.
+   * unless the operation's budget ran out. A screen with a secure field that
+   * has no bounds to mask takes none and reports no regions masked, so the
+   * harness knows the pixels were withheld.
    */
   private async capturePixels(
     operation: OperationContext,
@@ -1928,7 +1934,9 @@ export class AgentDeviceSurface {
     viewport: ViewportSize,
     capture: ScreenshotCapture,
     budget: InputBudget,
-  ): Promise<{ pixels: ObservationPixels; masked: number } | undefined> {
+  ): Promise<{ pixels?: ObservationPixels; masked: number } | undefined> {
+    const secure = secureBounds(projected);
+    if (secure === undefined) return { masked: 0 };
     let raw: Uint8Array;
     try {
       raw = await this.rawScreenshot(operation.signal, capture, budget);
@@ -1936,7 +1944,7 @@ export class AgentDeviceSurface {
       if (cause instanceof EngineError && cause.code === 'OPERATION_TIMEOUT') throw cause;
       return undefined;
     }
-    const redacted = redactSecure(raw, projected, viewport);
+    const redacted = redactSecure(raw, secure, viewport);
     if (redacted === undefined) return undefined;
     const size = readPngSize(redacted.data);
     if (size === undefined) return undefined;
@@ -1949,29 +1957,37 @@ export class AgentDeviceSurface {
 }
 
 /**
- * Paints every secure node's bounds black on a screenshot of the same
- * screen. Returns the masked bytes and how many regions were covered, or
- * undefined when a secure node has no bounds or the image format cannot be
- * edited: the caller then withholds the image rather than ship one it could
- * not prove redacted. Bounds are in logical points; the image may be at
- * device scale, so they are scaled by the image-to-viewport ratio.
+ * The bounds of every secure node on the screen, in logical points, or
+ * undefined when one has none: no screenshot of that screen can be masked.
+ */
+function secureBounds(projected: ProjectedSnapshot): readonly Rect[] | undefined {
+  const bounds: Rect[] = [];
+  for (const entry of projected.index) {
+    if (entry.node.states?.secure !== true) continue;
+    if (entry.node.rect === undefined) return undefined;
+    bounds.push(entry.node.rect);
+  }
+  return bounds;
+}
+
+/**
+ * Paints the secure bounds black on a screenshot of the same screen.
+ * Returns the masked bytes and how many regions were covered, or undefined
+ * when the image cannot be read or edited: the caller then withholds the
+ * image rather than ship one it could not prove redacted. Bounds are in
+ * logical points; the image may be at device scale, so they are scaled by
+ * the image-to-viewport ratio.
  */
 function redactSecure(
   data: Uint8Array,
-  projected: ProjectedSnapshot,
+  secure: readonly Rect[],
   viewport: ViewportSize | undefined,
 ): { data: Uint8Array; masked: number } | undefined {
-  const secure = projected.index.filter((entry) => entry.node.states?.secure === true);
   if (secure.length === 0) return { data, masked: 0 };
   const size = readPngSize(data);
   if (size === undefined) return undefined;
   const scale = viewport !== undefined && viewport.width > 0 ? size.width / viewport.width : 1;
-  const rects: Rect[] = [];
-  for (const entry of secure) {
-    const rect = entry.node.rect;
-    if (rect === undefined) return undefined;
-    rects.push({ x: rect.x * scale, y: rect.y * scale, width: rect.width * scale, height: rect.height * scale });
-  }
+  const rects = secure.map((rect) => ({ x: rect.x * scale, y: rect.y * scale, width: rect.width * scale, height: rect.height * scale }));
   try {
     return { data: maskPng(data, rects), masked: rects.length };
   } catch {

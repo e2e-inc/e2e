@@ -941,12 +941,13 @@ describe('observation', () => {
     expect(androidAt(100, 290 / 2)).toEqual([0, 0, 0]);
     expect(androidAt(100, 240 / 2)).toEqual([255, 255, 255]);
 
-    // A secure node without bounds cannot be masked: the tree ships, the image does not.
+    // A secure node without bounds cannot be masked: the tree ships, the image does not, and no region counts as masked.
     h.fake.respond('capture.snapshot', () => ({
       nodes: [{ ref: 'e1', type: 'SecureTextField', label: 'PIN', value: '1234' }],
     }));
     const unmaskable = await h.engine.observe!(operation(), { pixels: true });
     expect(unmaskable.pixels).toBeUndefined();
+    expect(unmaskable.maskedRegionCount).toBe(0);
     expect(unmaskable.root.children).toHaveLength(1);
     // A snapshot without geometry keeps the viewport the session last learned.
     expect(unmaskable.viewport).toEqual({ width: 390, height: 844 });
@@ -957,6 +958,8 @@ describe('observation', () => {
     });
     const treeOnly = await h.engine.observe!(operation(), { pixels: true });
     expect(treeOnly.pixels).toBeUndefined();
+    // No screenshot was taken, so none was withheld.
+    expect(treeOnly.maskedRegionCount).toBeUndefined();
     expect(treeOnly.root.children).toHaveLength(1);
   });
 
@@ -989,9 +992,27 @@ describe('observation', () => {
       shot = bytes;
       const observation = await h.engine.observe!(operation(), { pixels: true });
       expect(observation.pixels).toBeUndefined();
+      // No usable image was taken, so none was withheld, and the matcher waits for the next one.
+      expect(observation.maskedRegionCount).toBeUndefined();
       expect(observation.root.children).toHaveLength(1);
       await expect(h.engine.artifacts!.screenshot('password', operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
     }
+    // A secure field without bounds is unmaskable whatever the device would capture, so no screenshot is taken.
+    h.fake.respond('capture.screenshot', () => {
+      throw new Error('screenshot failed');
+    });
+    h.fake.respond('capture.snapshot', () => ({
+      nodes: [
+        { ref: 'e1', index: 0, depth: 0, type: 'application', label: 'Bank', rect: { x: 0, y: 0, width: 390, height: 844 } },
+        { ref: 'e2', index: 1, parentIndex: 0, depth: 1, type: 'SecureTextField', label: 'PIN' },
+      ],
+    }));
+    const screenshots = h.fake.methods().filter((method) => method === 'capture.screenshot').length;
+    const unbounded = await h.engine.observe!(operation(), { pixels: true });
+    expect(unbounded.pixels).toBeUndefined();
+    expect(unbounded.maskedRegionCount).toBe(0);
+    await expect(h.engine.artifacts!.screenshot('password', operation())).rejects.toMatchObject({ category: 'configuration', code: 'POLICY_DENIED' });
+    expect(h.fake.methods().filter((method) => method === 'capture.screenshot')).toHaveLength(screenshots);
     expect(existsSync(path.join(artifactsDir, 'screenshots'))).toBe(false);
   });
 
@@ -1569,7 +1590,7 @@ describe('session hooks, viewport swipe, location, artifacts', () => {
     h.fake.respond('capture.snapshot', () => ({
       nodes: [{ ref: 'e1', type: 'SecureTextField', label: 'PIN', value: '1234' }],
     }));
-    await expect(h.engine.artifacts!.screenshot('leak', operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
+    await expect(h.engine.artifacts!.screenshot('leak', operation())).rejects.toMatchObject({ category: 'configuration', code: 'POLICY_DENIED' });
     expect(existsSync(path.join(artifactsDir, 'screenshots', '002-leak.png'))).toBe(false);
     expect(new Set(temporaryFiles).size).toBe(temporaryFiles.length);
     for (const file of temporaryFiles) {
