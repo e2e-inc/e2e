@@ -6,7 +6,7 @@
  * nothing or a path that does not exist fails.
  */
 
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { chromium, type Browser, type Page } from 'playwright-core';
@@ -113,10 +113,30 @@ describe.each(KINDS)('through the %s target', (kind) => {
     await page.setContent(`${html}${COUNT_CLICKS}`);
     for (const missing of [path.join(path.dirname(file), 'missing.png'), path.join(file, 'inside-a-file.png')]) {
       const error = await upload(await targetOf(kind, selector), [file, missing]);
-      expect(error).toMatchObject({ code: 'INVALID_ARGUMENT', category: 'test', message: `setInputFiles path does not exist: ${missing}` });
+      expect(error).toMatchObject({ code: 'INVALID_ARGUMENT', category: 'test', message: `setInputFiles path does not exist or cannot be read: ${missing}` });
     }
     expect(await state()).toEqual({ files: '', clicks: 0 });
   });
+
+  // Permission bits do not stop a Windows or root process, so only a non-root POSIX runner sees `EACCES`.
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'fails a path under a directory it may not search as INVALID_ARGUMENT',
+    async () => {
+      await page.setContent(`<input id="avatar" type="file">${COUNT_CLICKS}`);
+      const locked = path.join(path.dirname(file), `locked-${kind}`);
+      mkdirSync(locked);
+      const hidden = path.join(locked, 'avatar.png');
+      writeFileSync(hidden, 'png');
+      chmodSync(locked, 0o000);
+      try {
+        const error = await upload(await targetOf(kind, '#avatar'), [hidden]);
+        expect(error).toMatchObject({ code: 'INVALID_ARGUMENT', category: 'test', message: `setInputFiles path does not exist or cannot be read: ${hidden}` });
+      } finally {
+        chmodSync(locked, 0o700);
+      }
+      expect(await state()).toEqual({ files: '', clicks: 0 });
+    },
+  );
 
   it('fails when the button opens no file chooser', async () => {
     await page.setContent(`<button id="pick" type="button">Choose avatar</button><input id="avatar" type="file" hidden>${COUNT_CLICKS}`);
