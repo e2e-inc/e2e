@@ -254,6 +254,22 @@ const ELEMENT_PLUS_CASES = [
   ['radio', '#large'],
 ] as const;
 
+const VISUALLY_HIDDEN_PAGE = `<style>
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border-width:0}
+.visually-hidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+label{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+.track{width:44px;height:24px;border-radius:12px;background:#ccc}
+</style>
+<label><input type="checkbox" class="sr-only" id="toggle"><div class="track"></div><span>Email notifications</span></label>
+<label><input type="checkbox" class="sr-only" id="plain"><span>Plain label</span></label>
+<label><input type="radio" name="plan" class="visually-hidden" id="pro"><span>Pro</span></label>`;
+
+const VISUALLY_HIDDEN_CASES = [
+  ['Tailwind sr-only toggle switch', '#toggle'],
+  ['Tailwind sr-only checkbox in a text label', '#plain'],
+  ['Bootstrap visually-hidden radio', '#pro'],
+] as const;
+
 describe.each(KINDS)('a control its own label covers, through the %s target', (kind) => {
   it.each(ELEMENT_PLUS_CASES)('checks an Element Plus %s', async (_, selector) => {
     await page.setContent(ELEMENT_PLUS_PAGE);
@@ -308,6 +324,114 @@ describe.each(KINDS)('a control its own label covers, through the %s target', (k
     }
   });
 
+  it.each(VISUALLY_HIDDEN_CASES)('checks and taps a %s through its label', async (_, selector) => {
+    for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
+      await page.setContent(VISUALLY_HIDDEN_PAGE);
+      expect(await perform(await targetOf(kind, selector), action)).toBeUndefined();
+      expect(await page.isChecked(selector)).toBe(true);
+    }
+  });
+
+  it('unchecks a Tailwind sr-only toggle switch through its label', async () => {
+    await page.setContent(VISUALLY_HIDDEN_PAGE);
+    await page.evaluate(() => {
+      (document.getElementById('toggle') as HTMLInputElement).checked = true;
+    });
+    expect(await perform(await targetOf(kind, '#toggle'), { kind: 'uncheck' })).toBeUndefined();
+    expect(await page.isChecked('#toggle')).toBe(false);
+  });
+
+  it('still refuses a Tailwind sr-only checkbox whose label has a link at its centre, and follows no link', async () => {
+    await page.setContent(`<style>.sr-only{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0)}</style>
+      <label style="display:inline-block;width:120px;text-align:center"><input type="checkbox" class="sr-only" id="c"><a href="#went">Terms</a></label>`);
+    for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
+      expect(await perform(await targetOf(kind, '#c'), action, REFUSAL_TIMEOUT_MS)).toMatchObject({ code: 'NOT_ACTIONABLE' });
+      expect(await page.isChecked('#c')).toBe(false);
+      expect(page.url()).not.toContain('#went');
+    }
+  });
+
+  it('checks a Tailwind sr-only checkbox inside a padded label at its own point, past a link at the label centre', async () => {
+    await page.setContent(`<style>.sr-only{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0)}</style>
+      <label style="display:inline-block;padding:6px"><input type="checkbox" class="sr-only" id="c">I agree to the <a href="#went">Terms of Service and the Privacy Policy</a></label>`);
+    for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
+      await page.evaluate(() => {
+        (document.getElementById('c') as HTMLInputElement).checked = false;
+      });
+      expect(await perform(await targetOf(kind, '#c'), action)).toBeUndefined();
+      expect(await page.isChecked('#c')).toBe(true);
+      expect(page.url()).not.toContain('#went');
+    }
+  });
+
+  it('still refuses a Tailwind sr-only checkbox whose label has a link at its centre once its dialog takes pointer events, and follows no link', async () => {
+    for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
+      await page.setContent(`<style>.sr-only{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0)}</style>
+        <div id="dialog" style="pointer-events:none"><label style="display:inline-block;width:140px;text-align:center"><input type="checkbox" class="sr-only" id="c"><a href="#went">Terms</a></label></div>
+        <script>setTimeout(() => document.getElementById('dialog').style.pointerEvents = '', 300)</script>`);
+      expect(await perform(await targetOf(kind, '#c'), action, REFUSAL_TIMEOUT_MS * 2)).toMatchObject({ code: 'NOT_ACTIONABLE' });
+      expect(await page.isChecked('#c')).toBe(false);
+      expect(page.url()).not.toContain('#went');
+    }
+  });
+
+  it('still refuses a Tailwind sr-only checkbox placed over a link in its own label, and follows no link', async () => {
+    await page.setContent(`<style>.sr-only{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0)}</style>
+      <label style="position:relative;display:inline-block;width:260px"><a href="#went">Terms</a> and the rest of the label text<input
+        type="checkbox" class="sr-only" id="c" style="left:12px;top:8px"></label>`);
+    for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
+      expect(await perform(await targetOf(kind, '#c'), action, REFUSAL_TIMEOUT_MS)).toMatchObject({ code: 'NOT_ACTIONABLE' });
+      expect(await page.isChecked('#c')).toBe(false);
+      expect(page.url()).not.toContain('#went');
+    }
+  });
+
+  it('checks a Tailwind sr-only checkbox through a bordered label at its own centre, not past the border onto a link', async () => {
+    await page.setContent(`<style>.sr-only{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0)}</style>
+      <label style="position:relative;display:inline-block;border-left:60px solid #ccc"><span style="display:inline-block;width:60px">Accept</span><a
+        href="#went">Terms</a><input type="checkbox" class="sr-only" id="c" style="left:20px;top:8px"></label>`);
+    for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
+      await page.evaluate(() => {
+        (document.getElementById('c') as HTMLInputElement).checked = false;
+      });
+      expect(await perform(await targetOf(kind, '#c'), action)).toBeUndefined();
+      expect(await page.isChecked('#c')).toBe(true);
+      expect(page.url()).not.toContain('#went');
+    }
+  });
+
+  it('checks a Tailwind sr-only checkbox through a label that wraps, whose box centre falls between its lines', async () => {
+    await page.setContent(`<style>.sr-only{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0)}</style>
+      <div style="width:200px;font:16px monospace">aaaaaaaaaaaaaaaaa <label><input type="checkbox" class="sr-only" id="c">ab cdefghijk</label></div>`);
+    for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
+      await page.evaluate(() => {
+        (document.getElementById('c') as HTMLInputElement).checked = false;
+      });
+      expect(await perform(await targetOf(kind, '#c'), action)).toBeUndefined();
+      expect(await page.isChecked('#c')).toBe(true);
+    }
+  });
+
+  it('checks a boxless checkbox through a label that wraps, whose box centre falls between its lines', async () => {
+    await page.setContent(`<div style="width:200px;font:16px monospace">aaaaaaaaaaaaaaaaa
+      <input type="checkbox" style="display:none" id="c"><label for="c">ab cdefghijk</label></div>`);
+    for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
+      await page.evaluate(() => {
+        (document.getElementById('c') as HTMLInputElement).checked = false;
+      });
+      expect(await perform(await targetOf(kind, '#c'), action)).toBeUndefined();
+      expect(await page.isChecked('#c')).toBe(true);
+    }
+  });
+
+  it('checks a visible one-pixel checkbox whose only label is hidden as itself', async () => {
+    await page.setContent(`
+      <label for="c" style="display:none">C</label>
+      <input type="checkbox" id="c" style="width:1px;height:1px;margin:0">`);
+    expect(await perform(await targetOf(kind, '#c'), { kind: 'check' })).toBeUndefined();
+    expect(await page.isChecked('#c')).toBe(true);
+  });
+
   it('still refuses a radio whose label covers it from outside the label box', async () => {
     await page.setContent(`
       <label style="display:inline-block;width:60px;height:20px">Pick<input type="radio" id="r"
@@ -319,6 +443,37 @@ describe.each(KINDS)('a control its own label covers, through the %s target', (k
         message: expect.stringContaining('intercepts pointer events'),
       });
       expect(await page.isChecked('#r')).toBe(false);
+    }
+  });
+
+  it.each([
+    ['in a page zoomed to 2', 'zoom:2', 'width:1px;height:1px'],
+    ['in a page scaled by 2', 'transform:scale(2);transform-origin:0 0', 'width:1px;height:1px'],
+  ])('checks and taps a visually hidden checkbox %s through its label', async (_, page_, size) => {
+    for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
+      await page.setContent(`<div style="${page_}"><label style="display:inline-flex;gap:8px"><input type="checkbox" id="c"
+        style="position:absolute;${size};margin:-1px;overflow:hidden;clip:rect(0,0,0,0)"><span>Agree</span></label></div>`);
+      expect(await perform(await targetOf(kind, '#c'), action)).toBeUndefined();
+      expect(await page.isChecked('#c')).toBe(true);
+    }
+  });
+
+  it('checks a Tailwind sr-only checkbox through a label set apart from it, at the label centre', async () => {
+    for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
+      await page.setContent(`<style>.sr-only{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0)}</style>
+        <input type="checkbox" class="sr-only" id="c"><span style="display:inline-block;width:80px"></span><label for="c">Agree</label>`);
+      expect(await perform(await targetOf(kind, '#c'), action)).toBeUndefined();
+      expect(await page.isChecked('#c')).toBe(true);
+    }
+  });
+
+  it('waits for the label of a Tailwind sr-only checkbox to take pointer events, then checks through it', async () => {
+    for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
+      await page.setContent(`<style>.sr-only{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0)}</style>
+        <div id="dialog" style="pointer-events:none"><label style="display:inline-flex;gap:8px"><input type="checkbox" class="sr-only" id="c"><span>Agree</span></label></div>
+        <script>setTimeout(() => document.getElementById('dialog').style.pointerEvents = '', 300)</script>`);
+      expect(await perform(await targetOf(kind, '#c'), action)).toBeUndefined();
+      expect(await page.isChecked('#c')).toBe(true);
     }
   });
 
