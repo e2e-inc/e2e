@@ -3,7 +3,7 @@
  * engine acts on: a file input and a label for one take the files without a
  * click, a button that opens a hidden input's chooser is clicked and the
  * chooser takes them, an empty list clears either, and a button that opens
- * nothing fails.
+ * nothing or a path that does not exist fails.
  */
 
 import { mkdtempSync, writeFileSync } from 'node:fs';
@@ -104,6 +104,18 @@ describe.each(KINDS)('through the %s target', (kind) => {
     expect(await upload(await targetOf(kind, selector), [])).toBeUndefined();
     expect((await state()).files).toBe('');
     expect(await page.evaluate(() => (window as unknown as { events: string[] }).events)).toEqual(['input', 'change']);
+  });
+
+  it.each([
+    ['a file input', '<input id="avatar" type="file">', '#avatar'],
+    ['a button over a hidden input', `<button id="pick" type="button" onclick="document.getElementById('avatar').click()">Choose avatar</button><input id="avatar" type="file" hidden>`, '#pick'],
+  ])('fails a path that does not exist as INVALID_ARGUMENT before it touches %s', async (_name, html, selector) => {
+    await page.setContent(`${html}${COUNT_CLICKS}`);
+    for (const missing of [path.join(path.dirname(file), 'missing.png'), path.join(file, 'inside-a-file.png')]) {
+      const error = await upload(await targetOf(kind, selector), [file, missing]);
+      expect(error).toMatchObject({ code: 'INVALID_ARGUMENT', category: 'test', message: `setInputFiles path does not exist: ${missing}` });
+    }
+    expect(await state()).toEqual({ files: '', clicks: 0 });
   });
 
   it('fails when the button opens no file chooser', async () => {

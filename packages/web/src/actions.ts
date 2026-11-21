@@ -1,7 +1,8 @@
 /** Locator action dispatch for the Playwright engine. */
 
+import { statSync } from 'node:fs';
 import type { ElementHandle, Page } from 'playwright-core';
-import { Deadline, EngineError, pollCondition, type KeyModifier, type LocatorAction, type NodeRef, type PointerAction, type ViewportPoint } from '@e2e-dev/core/engine';
+import { Deadline, EngineError, pollCondition, TestError, type KeyModifier, type LocatorAction, type NodeRef, type PointerAction, type ViewportPoint } from '@e2e-dev/core/engine';
 import {
   asActionable,
   isClassified,
@@ -231,9 +232,12 @@ function radioKind(element: ElementHandle<Element>): Promise<'native' | 'aria' |
  * Playwright retargets a label to its control. Anything else is clicked
  * with the chooser already awaited, and fails if no chooser opens. Every
  * step shares the operation's deadline, and a cancelled operation sets no
- * files, even when its chooser opens after the cancel.
+ * files, even when its chooser opens after the cancel. A path that does not
+ * exist fails before anything is clicked.
  */
 async function uploadFiles(target: ActionTarget, paths: readonly string[], operation: ConnectionBudget): Promise<void> {
+  const missing = paths.find((file) => statSync(file, { throwIfNoEntry: false }) === undefined);
+  if (missing !== undefined) throw new TestError('INVALID_ARGUMENT', `setInputFiles path does not exist: ${missing}`);
   const deadline = new Deadline(operation.timeoutMs);
   const remaining = (): number => Math.max(1, deadline.remaining());
   const element =
