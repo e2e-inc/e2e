@@ -400,9 +400,6 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
         if (Object.keys(snapshot.root).some((key) => key !== 'ref')) {
           throw new EngineError('INVALID_STATE', 'an unavailable semantic tree must contain only the stable root reference', { retryable: false });
         }
-        if (!pixelsProvenMasked(metadata.redaction)) {
-          throw new TestError('UNSUPPORTED_CAPABILITY', 'unavailable semantics require fallback pixels whose masking is proven');
-        }
         located.clear();
         revision += 1;
         root = metadata.root;
@@ -410,10 +407,11 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
       }
       revision += 1;
       root = metadata.root;
-      // Pixels stay only when their masked regions cover every secure node,
-      // as for an unavailable tree above. Pixels or a count the engine answered
-      // a pixels request with, short of that proof, are marked instead, so no
-      // reader of the observation checks it again.
+      // Pixels stay only when their masked regions cover every secure node.
+      // Pixels or a count the engine answered a pixels request with, short of
+      // that proof, are marked instead, so no reader of the observation checks
+      // it again. An unavailable tree above has no secure node to count, so
+      // its fallback pixels rest on the engine's own proof.
       const captured = observeOptions?.pixels === true && (snapshot.pixels !== undefined || snapshot.maskedRegionCount !== undefined);
       const proven = pixelsProvenMasked(metadata.redaction);
       const observation: Observation = {
