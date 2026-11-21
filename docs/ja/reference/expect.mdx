@@ -259,6 +259,8 @@ await expect(screen).toHaveScreenshot('feed.png', { mask: [screen.getByTestId('t
 | [`toHaveURL`](#tohaveurl) | 現在の URL が一致するまで待機 |
 | [`toHaveTitle`](#tohavetitle) | 現在のタイトルが一致するまで待機 |
 | [`toHaveClass`](#tohaveclass) | 対象の `class` が一致するまで待機 |
+| [`toHaveCSS`](#tohavecss) | 計算済みスタイルが一致するまで待機 |
+| [`toHaveJSProperty`](#tohavejsproperty) | DOM プロパティの値が一致するまで待機 |
 
 受け付けないオプションキーは `INVALID_ARGUMENT` になります。たとえば `toHaveTitle` の `ignoreCase` は、Playwright と同様に受け付けません。
 
@@ -294,7 +296,42 @@ await expect(browser).toHaveClass(browser.locator('.card'), 'card active');
 
 - ノード自体もポーリングします。対象にまだ一致するノードがなければ、即座に失敗せず、アサーションのタイムアウトまでポーリングを続けます。
 - 対象が曖昧な場合は、直ちに `LOCATOR_AMBIGUOUS` で失敗します。
+- e2e のロケーターでない対象や、別の screen や試行のロケーターは、直ちに `INVALID_LOCATOR` になります。
+- セキュアなフィールドは、`getAttribute()` と同じく `POLICY_DENIED` になります。
 - `class` 属性を読み取るため、`''` は `class=""` に一致しますが、`class` 属性自体がない要素には一致しません。Playwright の `toHaveClass('')` はどちらも受け付けます。
+
+#### `toHaveCSS`
+
+対象の計算済みスタイルのプロパティ 1 つが一致するまで待ちます。文字列なら値全体と比較し、`RegExp` なら値に適用します。どちらも `getPropertyValue` が返す元の値を、空白も含めてそのまま使います。Playwright と同じです。
+
+```ts
+const nav = screen.getByRole('navigation', { name: 'Main' });
+await expect(browser).toHaveCSS(nav, 'position', 'sticky');
+await expect(browser).toHaveCSS(nav, '--accent', /red/);
+```
+
+- `getComputedStyle(element).getPropertyValue(property)` をページのコードとして実行します。そのため、これらの関数を上書きしたページでは読み取る値が変わります。名前はケバブケース（`background-color`）で、カスタムプロパティ（`--accent`）も使えます。
+- 対象は [`browser.evaluateOn`](/reference/web#evaluateon) と同じく、スコープとフレームで解決します。対象にまだ一致するノードがなければ、失敗せずにアサーションのタイムアウトまでポーリングを続けます。対象が曖昧な場合は、直ちに `LOCATOR_AMBIGUOUS` で失敗します。e2e のロケーターでない対象や、別の screen や試行のロケーターは、直ちに `INVALID_LOCATOR` になります。
+- セキュアなフィールドは、[`browser.evaluateOn`](/reference/web#evaluateon) と同じく、スタイルであっても `POLICY_DENIED` になります。
+- 読み取り中にナビゲーションが起きた場合は、新しいページで対象をもう一度解決します。
+- 空の、または文字列でない `property` は `INVALID_ARGUMENT` になります。
+
+#### `toHaveJSProperty`
+
+対象の要素上のプロパティパスにある JavaScript の値が、JSON として `expected` と等しくなるまで待ちます。
+
+```ts
+const sidebar = browser.frameLocator('iframe').locator('aside');
+await expect(browser).toHaveJSProperty(sidebar, 'offsetWidth', 240);
+await expect(browser).toHaveJSProperty(screen.getByRole('navigation'), 'dataset.state', 'open');
+```
+
+- `path` はプロパティ名、またはドット区切りのパスで、Playwright と同じ方法でたどります。最後のキー以外のキーは、`null` でないオブジェクトから読みます。最後のキーは、たどり着いた値が何であってもその値から読みます。たとえば input の `value.length` は値の長さを読みます。
+- 存在しないプロパティは `undefined` として読み、一致しません。そのため `.not` が成功します。最後のキーより前のキーを文字列、関数、`null` から読むことになるパスも同じです。Playwright は、最後のキーより前の `null`、または最後のキーの直前の `undefined` で例外をスローします。
+- `style` や要素など、JSON でない値は一致しません。失敗メッセージには `is not JSON` と表示されます。
+- オブジェクトと配列は構造で比較します。オブジェクトのキーの順序は問いません。
+- 対象の解決と待機は [`toHaveCSS`](#tohavecss) と同じです。
+- 空の、または文字列でない `path`、あるいは [`JsonValue`](/reference/web#jsonvalue) でない `expected` は `INVALID_ARGUMENT` になります。
 
 ### 値のマッチャー
 
@@ -625,9 +662,12 @@ last: expected "running" not to be "running"
 | --- | --- |
 | `toHaveValue`, `toHaveText`, `toContainText` | `inputValue()` や `textContent()` と同じく `POLICY_DENIED`。否定やリスト形式も同様 |
 | `toHaveAttribute` | `getAttribute()` と同じく `POLICY_DENIED`。すべての属性名と否定も対象 |
+| `expect(browser)` の `toHaveClass`、`toHaveCSS`、`toHaveJSProperty` | `POLICY_DENIED`。否定も同様 |
 | `toHaveAccessibleName`、`toHaveRole`、状態のマッチャー | 通常どおりに判定 |
 
 伏せられた値を `''` と読むと、入力済みのパスワード欄を空だと判定してしまいます。また、伏せられた `value` 属性を不存在と読むと、実際には属性のあるパスワード欄で `not.toHaveAttribute('value')` が成功してしまいます。フィールドそのものではなく、入力した結果を検証してください。
+
+`expect(browser)` のマッチャーが確認するのは、ロケーターが一致した要素です。`<label>` の `control.value` のように別の要素にたどり着く `toHaveJSProperty` のパスは、その要素の値を読み取ります。
 
 ### オプションの検証
 
@@ -773,6 +813,29 @@ export interface BrowserExpectation {
   toHaveTitle(expected: TextMatch, options?: { timeout?: number }): Promise<void>;
   /** Waits for the target's `class` attribute to match: a string is the whole normalized class list, a RegExp is tested against it. */
   toHaveClass(target: Locator, expected: TextMatch, options?: { timeout?: number }): Promise<void>;
+  /**
+   * Waits for the target's computed `property` (kebab-case, a custom
+   * `--property` included) to match: a string is the whole value, a RegExp
+   * is tested against it.
+   */
+  toHaveCSS(
+    target: Locator,
+    property: string,
+    expected: TextMatch,
+    options?: { timeout?: number },
+  ): Promise<void>;
+  /**
+   * Waits for the JavaScript value at `path` on the target's element (a
+   * property name, or a dotted path such as `dataset.state`) to equal
+   * `expected` as JSON. A path that runs out before its end, or a value that
+   * is not JSON, never matches.
+   */
+  toHaveJSProperty(
+    target: Locator,
+    path: string,
+    expected: JsonValue,
+    options?: { timeout?: number },
+  ): Promise<void>;
 }
 ```
 

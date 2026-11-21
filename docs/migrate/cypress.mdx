@@ -102,6 +102,7 @@ describe('todos', () => {
 | `.should('be.visible')`, `be.checked`, `be.disabled`, `be.focused`, `exist` | `await expect(locator).toBeVisible()`, `toBeChecked()`, `toBeDisabled()`, `toBeFocused()`, `toBeAttached()` |
 | `have.text`, `contain`, `have.value`, `have.attr`, `have.length`, `not.exist` | `toHaveText`, `toContainText`, `toHaveValue`, `toHaveAttribute`, `toHaveCount(n)`, `toHaveCount(0)` |
 | `cy.url().should('include', p)`, `cy.title()` | `expect(browser).toHaveURL(/p/)`, `expect(browser).toHaveTitle(t)` |
+| `have.css`, `have.prop` | `expect(browser).toHaveCSS(locator, name, value)`, `expect(browser).toHaveJSProperty(locator, name, value)` |
 | `cy.intercept('/api/users', body)` | `browser.route('**/api/users', route => route.fulfill({ json: body }))`, a glob on the full URL |
 | `cy.on('window:confirm')`, `cy.on('window:alert')` | `await browser.onDialog('accept')` before the action, `'dismiss'` to cancel |
 | `cy.session` | `test.setup` and `{ session }` |
@@ -117,8 +118,8 @@ Planned gaps are on the roadmap, and Not yet gaps have no date. Not planned gaps
 | Cypress | Use today |
 | --- | --- |
 | `.find('css')`, `.filter('css')`, `.not('css')` | Chain a `getBy*` query, or write one selector: `browser.locator('li.active >> .title')` |
-| `.invoke()`, `.its()`, `.then($el => ...)`, `.should($el => ...)` | `getAttribute()`, `textContent()`, `inputValue()`, else `browser.evaluate`; wrap in `expect.poll` to retry |
-| `have.class`, `have.css`, `have.prop`, `be.empty` | `expect(browser).toHaveClass(locator, /regexp/)`, `expect(locator).toHaveText('')`; else `expect.poll(() => browser.evaluate(...))` |
+| `.invoke()`, `.its()`, `.then($el => ...)`, `.should($el => ...)` | `getAttribute()`, `textContent()`, `inputValue()`, else `browser.evaluateOn(locator, fn)`; wrap in `expect.poll` to retry |
+| `have.class`, `be.empty` | `expect(browser).toHaveClass(locator, /regexp/)`, `expect(locator).toHaveText('')`; else `expect.poll(() => browser.evaluateOn(locator, fn))` |
 | `.trigger()`, `cy.scrollTo()`, `.blur()` | `hover()`, `dragTo()`, `scrollIntoView()`, `press('Tab')`; else `browser.evaluate` |
 | `cy.intercept('POST', url)` and other method or header matchers | Check `route.request.method` in the handler, else call `route.fallback()` |
 | `cy.wait('@alias')`, `.its('request.body')`, `@alias.all` | Start `browser.waitForResponse(pattern)` before the action; read the request in a `browser.route` handler |

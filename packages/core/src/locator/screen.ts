@@ -100,6 +100,25 @@ export function locatorInternals(locator: unknown): LocatorInternals | undefined
   return internalsSlot.get(locator);
 }
 
+/**
+ * The internals of a locator `context` may resolve: an e2e locator made by
+ * this attempt's screen for the same target. One made elsewhere would be
+ * evaluated through this target's engine, so it is refused before any step.
+ */
+export function ownLocator(candidate: unknown, context: ScreenContext, api: string): LocatorInternals {
+  const internals = locatorInternals(candidate);
+  if (internals === undefined) {
+    throw new TestError('INVALID_LOCATOR', `${api} requires an e2e locator`);
+  }
+  if (internals.context !== context) {
+    throw new TestError(
+      'INVALID_LOCATOR',
+      `${api} requires a locator made by this screen; the one given belongs to another target's screen or another attempt`,
+    );
+  }
+  return internals;
+}
+
 /** Creates the screen fixture for one attempt. */
 export function createScreen(context: ScreenContext): Screen {
   return new ScreenImpl(context, undefined);
@@ -262,7 +281,7 @@ class ScreenImpl implements Screen {
     target: Locator,
     options?: { direction?: ScrollDirection; momentum?: Momentum; timeout?: number },
   ): Promise<void> {
-    const internals = this.ownLocator(target, 'scrollUntilVisible');
+    const internals = ownLocator(target, this.context, 'scrollUntilVisible');
     rejectUnknownOptions('scrollUntilVisible', options, ['direction', 'momentum', 'timeout']);
     const direction = options?.direction ?? 'down';
     const momentum = options?.momentum ?? 'slow';
@@ -344,24 +363,6 @@ class ScreenImpl implements Screen {
     });
   }
 
-  /**
-   * The internals of a locator this screen may resolve: an e2e locator made
-   * by this attempt's screen for the same target. One made elsewhere would be
-   * evaluated through this target's engine, so it is refused before any step.
-   */
-  protected ownLocator(candidate: unknown, api: string): LocatorInternals {
-    const internals = locatorInternals(candidate);
-    if (internals === undefined) {
-      throw new TestError('INVALID_LOCATOR', `${api} requires an e2e locator`);
-    }
-    if (internals.context !== this.context) {
-      throw new TestError(
-        'INVALID_LOCATOR',
-        `${api} requires a locator made by this screen; the one given belongs to another target's screen or another attempt`,
-      );
-    }
-    return internals;
-  }
 }
 
 class LocatorImpl extends ScreenImpl implements Locator {
@@ -550,7 +551,7 @@ class LocatorImpl extends ScreenImpl implements Locator {
   }
 
   dragTo(target: Locator, options?: ActionOptions): Promise<void> {
-    const internals = this.ownLocator(target, 'dragTo');
+    const internals = ownLocator(target, this.context, 'dragTo');
     // The drop target resolves inside the retry, so a superseded target ref
     // is re-resolved along with the source instead of looping until timeout.
     return this.perform(
@@ -677,9 +678,9 @@ class LocatorImpl extends ScreenImpl implements Locator {
   filter(options: { hasText?: TextMatch; hasNotText?: TextMatch; has?: Locator; hasNot?: Locator }): Locator {
     rejectUnknownOptions('filter', options, ['hasText', 'hasNotText', 'has', 'hasNot'], 'INVALID_LOCATOR');
     const { hasText, hasNotText, has, hasNot } = options ?? {};
-    const hasExpression = has === undefined ? undefined : this.ownLocator(has, 'filter({ has })').expression;
+    const hasExpression = has === undefined ? undefined : ownLocator(has, this.context, 'filter({ has })').expression;
     const hasNotExpression =
-      hasNot === undefined ? undefined : this.ownLocator(hasNot, 'filter({ hasNot })').expression;
+      hasNot === undefined ? undefined : ownLocator(hasNot, this.context, 'filter({ hasNot })').expression;
     return new LocatorImpl(
       this.context,
       filterExpression(this.expression, {
@@ -692,7 +693,7 @@ class LocatorImpl extends ScreenImpl implements Locator {
   }
 
   or(other: Locator): Locator {
-    const right = this.ownLocator(other, 'or').expression;
+    const right = ownLocator(other, this.context, 'or').expression;
     return new LocatorImpl(this.context, { kind: 'union', left: this.expression, right });
   }
 

@@ -1645,7 +1645,7 @@ reproduces these semantics; import them instead of carrying a copy.
 
 | Export | Returns |
 | --- | --- |
-| [`matchesText`, `toTextPattern`, `describePattern`](#text-patterns) | `boolean`, `TextPattern`, `string` |
+| [`matchesText`, `compareText`, `toTextPattern`, `describePattern`](#text-patterns) | `boolean`, `boolean`, `TextPattern`, `string` |
 | [`resolveExpression`](#resolveexpression) | `SemanticNode[]` |
 | [`urlMatches`](#urlmatches) | `boolean` |
 | [`siteOf`, `sameSite`](#site-helpers) | `string`, `boolean` |
@@ -1657,15 +1657,23 @@ reproduces these semantics; import them instead of carrying a copy.
 | [`obj`](#obj) | `WithoutUndefined<T>` |
 | [`raceAbort`, `withTimeout`, `withinCleanupBudget`](#timing-helpers) | `Promise<T>`, `Promise<T>`, `Promise<void>` |
 | [`isSecret`](#issecret) | `boolean` |
+| [`secureReadDenied`](#securereaddenied) | `ConfigurationError` |
 | [`isProviderRecording`, `stopProviderRecording`](#provider-recordings) | `boolean`, `Promise<VideoSegment>` |
 
 #### Text patterns
 
-`TextPattern` matching for `locate` and text matchers.
+`TextPattern` matching for `locate` and text matchers. `matchesText` is
+`compareText` with `{ mode: 'equals', normalize: true }`, which collapses
+whitespace in the text and in a string pattern, and tests a `RegExp` against
+the collapsed text. Pass `normalize: false` to compare a value the
+platform reports verbatim, such as a computed style; `mode: 'contains'`
+accepts the expected string anywhere, and `ignoreCase` folds a string
+pattern's case.
 
 ```ts
 export function toTextPattern(match: TextMatch, options?: { exact?: boolean }): TextPattern;
 export function matchesText(actual: string, pattern: TextPattern): boolean;
+export function compareText(actual: string, pattern: TextPattern, comparison: TextComparison): boolean;
 export function describePattern(pattern: TextPattern): string;
 ```
 
@@ -1769,14 +1777,17 @@ await pollCondition({
   deadline,
   signal: context.signal,
   negated: false,
-  evaluate: async () => (await read(context.operation(deadline.remaining()))) === 'Paid',
+  evaluate: async (reads) =>
+    (await reads.read((timeoutMs) => read(context.operation(timeoutMs)))) === 'Paid',
   onTimeout: (cause) => new TestError('ASSERTION_FAILED', 'status never became Paid', { cause }),
 });
 ```
 
-- Bound each read `evaluate` makes by `deadline`
-  (`context.operation(deadline.remaining())`). A read on the action timeout
-  can outlast the assertion's own.
+- Run each read `evaluate` makes through `reads.read` (a `PollReads` over
+  `deadline`). It hands the read its budget (`context.operation(timeoutMs)`),
+  since a read on the action timeout can outlast the assertion's own. It
+  also times the read, so a read the deadline cuts off is judged against the
+  slowest one before it.
 - It reads at 0, 20, and 50 ms, then at every multiple of 100 ms from its
   start. Each read starts at least 10 ms and at most 100 ms after the one
   before ends. Actions and `waitFor` wait for their node the same way.
@@ -1898,6 +1909,17 @@ either.
 const password = isSecret(options.password)
   ? await context.resolveSecret(options.password)
   : options.password;
+```
+
+#### `secureReadDenied`
+
+The `POLICY_DENIED` error for a read on a secure field. `subject` ends the
+message: what was read, or why the engine refused it. Throw it instead of
+writing your own, so every engine refuses with the runner's wording.
+
+```ts
+if (node.states?.secure === true) throw secureReadDenied('the field is a password field');
+// POLICY_DENIED: reading values from a secure field is denied: the field is a password field
 ```
 
 ### State
@@ -2200,13 +2222,15 @@ The factory runs once per attempt with an `EngineFixtureContext`:
 | `attachViewport(viewport)` | Records the viewport the current step established. |
 | `locator(expression)` | Mints a public locator from a raw expression. |
 | `screen(scope)` | Mints a screen scope. |
+| [`withNode(api, locator, use, options?)`](#running-code-on-a-located-node) | Runs `use` on the one node a locator matches. |
 | [`expectable(target, factory)`](#expectations) | Makes `expect(fixture)` return matchers. |
 
 | Throws | When |
 | --- | --- |
 | `INVALID_CONFIG` | The factory returns a plain surface, not one declared through `context.fixture`, the first time a test reaches for it. |
 | `APP_URL_REQUIRED` | `app.resolveUrl` on a target that declares no URL. |
-| `POLICY_DENIED` | `app.resolveUrl` with any scheme but `http:` and `https:` (`about:blank` aside). |
+| `POLICY_DENIED` | `app.resolveUrl` with any scheme but `http:` and `https:` (`about:blank` aside), or `withNode` on a secure field. |
+| `INVALID_LOCATOR` | `withNode` with a value that is not an e2e locator, or one from another screen or attempt. The message names `api`. |
 
 ```ts
 /**
@@ -2258,6 +2282,28 @@ export interface EngineFixtureContext {
   locator(expression: LocatorExpression): Locator;
   /** Mints a screen scope whose every query is wrapped by `scope` (a nested document, say). */
   screen(scope: (expression: LocatorExpression) => LocatorExpression): Screen;
+  /**
+   * Resolves the one node `locator` matches, with its scope, strictness, and
+   * frame, waiting for it like a locator read (the action timeout, or
+   * `timeout`), then calls `use` with its ref, the budget that read has left,
+   * and the node as that resolve read it. It is a read: a secure field is
+   * `POLICY_DENIED` before `use` runs, as the locator getters deny it.
+   * Zero matches by the deadline is `LOCATOR_NOT_FOUND`, two or more
+   * `LOCATOR_AMBIGUOUS` at once. A retryable `NODE_STALE` from `use`
+   * re-resolves while the deadline remains and runs `use` again, so report
+   * it only before work that must not repeat. `wait: false` resolves without
+   * waiting for a match: zero matches are `LOCATOR_NOT_FOUND` at once, for a
+   * caller that polls itself. A value that is not an e2e locator, or a
+   * locator from another screen or attempt, is `INVALID_LOCATOR` before any
+   * resolve, and its message names `api`, the public call that took the
+   * locator.
+   */
+  withNode<T>(
+    api: string,
+    locator: Locator,
+    use: (ref: NodeRef, operation: OperationContext, node: SemanticNode) => Promise<T>,
+    options?: { timeout?: number; wait?: boolean },
+  ): Promise<T>;
   /**
    * Attaches an expectation surface to a fixture object so `expect(fixture)`
    * returns it. The harness records every matcher call as an assertion step
@@ -2344,6 +2390,45 @@ export type FixtureOperations<T extends object> = {
 };
 ```
 
+#### Running code on a located node
+
+`withNode(api, locator, use, options?)` resolves the one node a test's locator
+matches and calls `use` with its `NodeRef` and the node as the resolve read it.
+A fixture method that takes a `Locator` uses it to reach the engine's own
+handle for that node, such as an element to run page code on.
+
+```ts
+evaluateOn: (target: Locator, source: string) =>
+  context.withNode('browser.evaluateOn', target, (ref, operation) =>
+    // `driver` stands for the engine's own client, which knows the element behind a ref.
+    driver.evaluateOn(ref.id, source, { timeoutMs: operation.timeoutMs })),
+```
+
+- `api` is the public call that took the locator. An `INVALID_LOCATOR`
+  message names it.
+- The locator keeps its scope, strictness, and frame. `withNode` waits for a
+  match as a locator read does, up to `actionTimeout` or `options.timeout`.
+- `use` gets the read's own `OperationContext`. Bound engine calls by it.
+- `use` also gets the `SemanticNode` the resolve read, with its role, name,
+  states, and attributes, so reading those needs no further engine call.
+- `withNode` is a read: a secure field is `POLICY_DENIED` before `use` runs,
+  as the locator getters deny it.
+  The page can turn the node into a secure field after that check.
+  A `use` that runs page code on the element checks again in the same page
+  task, before that code runs, as the web engine's `evaluateOn` does.
+- `use` throws a retryable `NODE_STALE` when its ref no longer names the
+  node. `withNode` resolves again while the deadline remains and calls `use`
+  again, so throw it only before work that must not run twice.
+- `options.wait: false` resolves once without waiting for a match: zero
+  matches is `LOCATOR_NOT_FOUND` at once. A matcher that polls on its own
+  uses it, so its poll, not the locator read, waits for the node.
+- `options.timeout: 0` gives the wait no deadline of its own; the test's
+  budget still bounds it.
+- Any other error from `use` is translated like an engine error from a
+  locator read.
+- Declare the method `timeout: false`, so the step's deadline does not race
+  the wait for the node.
+
 #### Expectations
 
 `expectable` attaches an expectation surface so `expect(fixture)` returns it.
@@ -2370,7 +2455,7 @@ return context.fixture('printer', printer, { print: { kind: 'resource' } });
 `LOCATOR_ACTION_KINDS`, `KNOWN_LOCATOR_ACTION_KINDS`, `POINTER_ACTION_KINDS`, `KEY_MODIFIERS`,
 `KEY_NAMES`, `parseKey`, `ENGINE_ERROR_CODES`, `RETRYABLE_ENGINE_ERROR_CODES`,
 `Secret`, `isSecret`, `TextMatch`, `JsonValue`, `JsonValueRules`,
-`ResolveExpressionOptions`, `PollConditionOptions`, `WithoutUndefined`,
+`ResolveExpressionOptions`, `PollConditionOptions`, `PollReads`, `TextComparison`, `WithoutUndefined`,
 `FixtureOperation`, `EngineIsolation`, `OBSERVED_NAME_LIMIT`, and `OBSERVED_TEXT_LIMIT` are
 exported from `e2e/engine`. So are the [engine protocol](/reference/engine-protocol)'s
 `connectEngine`, `serveEngine`, `describeEngine`, `spawnTransport`,

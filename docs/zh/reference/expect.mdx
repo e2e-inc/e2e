@@ -259,6 +259,8 @@ await expect(screen).toHaveScreenshot('feed.png', { mask: [screen.getByTestId('t
 | [`toHaveURL`](#tohaveurl) | 等待当前 URL |
 | [`toHaveTitle`](#tohavetitle) | 等待当前标题 |
 | [`toHaveClass`](#tohaveclass) | 等待目标元素的 `class` |
+| [`toHaveCSS`](#tohavecss) | 等待计算样式 |
+| [`toHaveJSProperty`](#tohavejsproperty) | 等待 DOM 属性值 |
 
 任何其他选项键都会导致 `INVALID_ARGUMENT`，例如 `toHaveTitle` 上的 `ignoreCase`，Playwright 同样不接受它。
 
@@ -294,7 +296,42 @@ await expect(browser).toHaveClass(browser.locator('.card'), 'card active');
 
 - 它也会轮询节点：目标暂时没有匹配项时，会继续轮询，而不是立即失败，直到断言超时。
 - 存在歧义的目标仍会立即因 `LOCATOR_AMBIGUOUS` 失败。
+- 不是 e2e 定位器的目标，或来自另一个屏幕或尝试的定位器，会立即导致 `INVALID_LOCATOR`。
+- 安全字段与 `getAttribute()` 一样触发 `POLICY_DENIED`。
 - 它读取 `class` 属性，因此 `''` 匹配 `class=""`，但不匹配完全没有 `class` 属性的元素。Playwright 的 `toHaveClass('')` 接受这两种情况。
+
+#### `toHaveCSS`
+
+等待目标元素的一个计算样式属性匹配：字符串对应整个值，`RegExp` 则对该值进行测试。两者都使用 `getPropertyValue` 返回的原始值，包括空白，与 Playwright 相同。
+
+```ts
+const nav = screen.getByRole('navigation', { name: 'Main' });
+await expect(browser).toHaveCSS(nav, 'position', 'sticky');
+await expect(browser).toHaveCSS(nav, '--accent', /red/);
+```
+
+- 它以页面代码的形式运行 `getComputedStyle(element).getPropertyValue(property)`，因此覆盖了这些函数的页面会改变读取结果。名称使用短横线形式（`background-color`），自定义属性（`--accent`）也可以使用。
+- 目标按其作用域和框架解析，与 [`browser.evaluateOn`](/reference/web#evaluateon) 相同。目标暂时没有匹配项时，会继续轮询，而不是失败，直到断言超时。存在歧义的目标会立即因 `LOCATOR_AMBIGUOUS` 失败。不是 e2e 定位器的目标，或来自另一个屏幕或尝试的定位器，会立即导致 `INVALID_LOCATOR`。
+- 安全字段与 [`browser.evaluateOn`](/reference/web#evaluateon) 一样触发 `POLICY_DENIED`，样式也不例外。
+- 读取期间发生导航时，会在新页面上重新解析目标。
+- 空的或非字符串的 `property` 会导致 `INVALID_ARGUMENT`。
+
+#### `toHaveJSProperty`
+
+等待目标元素上某个属性路径处的 JavaScript 值，以 JSON 形式等于 `expected`。
+
+```ts
+const sidebar = browser.frameLocator('iframe').locator('aside');
+await expect(browser).toHaveJSProperty(sidebar, 'offsetWidth', 240);
+await expect(browser).toHaveJSProperty(screen.getByRole('navigation'), 'dataset.state', 'open');
+```
+
+- `path` 是属性名或以点分隔的路径，按 Playwright 的方式遍历。除最后一个键外，每个键都从非 `null` 的对象上读取。最后一个键从遍历到达的任意值上读取，因此 input 上的 `value.length` 读取其值的长度。
+- 不存在的属性读取为 `undefined`，永远不会匹配，因此 `.not` 会通过。需要从字符串、函数或 `null` 上读取最后一个键之前的键时，结果也一样。Playwright 则会在最后一个键之前遇到 `null`，或在最后一个键的前一项遇到 `undefined` 时抛出错误。
+- 不是 JSON 的值，例如 `style` 或元素，永远不会匹配。失败信息显示 `is not JSON`。
+- 对象和数组按结构比较。对象的键顺序不限。
+- 目标的解析和等待与 [`toHaveCSS`](#tohavecss) 相同。
+- 空的或非字符串的 `path`，或不是 [`JsonValue`](/reference/web#jsonvalue) 的 `expected`，会导致 `INVALID_ARGUMENT`。
 
 ### 值匹配器
 
@@ -625,9 +662,12 @@ last: expected "running" not to be "running"
 | --- | --- |
 | `toHaveValue`、`toHaveText`、`toContainText` | 与 `inputValue()` 和 `textContent()` 一样触发 `POLICY_DENIED`，取反或列表形式也如此 |
 | `toHaveAttribute` | 与 `getAttribute()` 一样触发 `POLICY_DENIED`，所有属性名以及取反形式都如此 |
+| `expect(browser)` 的 `toHaveClass`、`toHaveCSS` 和 `toHaveJSProperty` | 触发 `POLICY_DENIED`，取反形式也如此 |
 | `toHaveAccessibleName`、`toHaveRole` 和状态匹配器 | 正常返回结果 |
 
 如果将未提供的值读取为 `''`，就会把已填入的密码字段当作已清空而通过；如果将未提供的 `value` 属性读取为不存在，就会让具有该属性的密码字段通过 `not.toHaveAttribute('value')`。请断言填入操作的结果，而不是字段本身。
+
+`expect(browser)` 的匹配器检查的是其定位器匹配的元素。通向另一个元素的 `toHaveJSProperty` 路径（例如 `<label>` 上的 `control.value`）会读取那个元素的值。
 
 ### 选项校验
 
@@ -773,6 +813,29 @@ export interface BrowserExpectation {
   toHaveTitle(expected: TextMatch, options?: { timeout?: number }): Promise<void>;
   /** Waits for the target's `class` attribute to match: a string is the whole normalized class list, a RegExp is tested against it. */
   toHaveClass(target: Locator, expected: TextMatch, options?: { timeout?: number }): Promise<void>;
+  /**
+   * Waits for the target's computed `property` (kebab-case, a custom
+   * `--property` included) to match: a string is the whole value, a RegExp
+   * is tested against it.
+   */
+  toHaveCSS(
+    target: Locator,
+    property: string,
+    expected: TextMatch,
+    options?: { timeout?: number },
+  ): Promise<void>;
+  /**
+   * Waits for the JavaScript value at `path` on the target's element (a
+   * property name, or a dotted path such as `dataset.state`) to equal
+   * `expected` as JSON. A path that runs out before its end, or a value that
+   * is not JSON, never matches.
+   */
+  toHaveJSProperty(
+    target: Locator,
+    path: string,
+    expected: JsonValue,
+    options?: { timeout?: number },
+  ): Promise<void>;
 }
 ```
 

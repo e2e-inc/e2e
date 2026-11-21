@@ -360,7 +360,7 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 
 `browser` はブラウザ全体を表し、1 つのアクティブなタブを表示します。
 
-- ページを読む操作やアクションは、アクティブなタブに対して行います。`goto`、`reload`、`back`、`forward`、`url`、`title`、`waitForURL`、`locator`、`frameLocator`、`evaluate`、`waitForResponse`、`waitForDownload`、`keyboard`、`mouse`、`expect(browser)` のマッチャー、すべての `screen` クエリが対象です。
+- ページを読む操作やアクションは、アクティブなタブに対して行います。`goto`、`reload`、`back`、`forward`、`url`、`title`、`waitForURL`、`locator`、`frameLocator`、`evaluate`、`evaluateOn`、`waitForResponse`、`waitForDownload`、`keyboard`、`mouse`、`expect(browser)` のマッチャー、すべての `screen` クエリが対象です。
 - ブラウザ全体に属する操作は、すべてのタブに適用します。`cookies`、`setCookies`、`clearCookies`、`route`、`unroute`、`unrouteAll`、`onDialog`、`addInitScript` が対象です。
 - `setViewport` は、アクティブなタブとそれ以降に開くタブのサイズを設定します。
 - [`emulateMedia`](#media-emulation) は、すべての既存タブと今後のタブのメディア特性を変更します。
@@ -368,7 +368,7 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 - `locator` と `frameLocator` を除くすべての `browser` 呼び出しは、`browser.<method>` ステップとして記録します。この 2 つはページに触れずにロケーターを作り、それを使うアクションやアサーションがステップになります。
 - 相対 URL はターゲットの `app.url` を基準に解決します。なければ `APP_URL_REQUIRED` です。
 - ほかのプラットフォームでも動くスイートでは、`requires: ['browser']` を宣言してください。
-- `expect(browser)` は、エンジンが付ける `BrowserExpectation` を返します。`toHaveURL`、`toHaveTitle`、`toHaveClass` を使えます。[browser のマッチャー](/reference/expect#browser-matchers)を参照してください。
+- `expect(browser)` は、エンジンが付ける `BrowserExpectation` を返します。`toHaveURL`、`toHaveTitle`、`toHaveClass`、`toHaveCSS`、`toHaveJSProperty` を使えます。[browser のマッチャー](/reference/expect#browser-matchers)を参照してください。
 
 | メンバー | 戻り値 |
 | --- | --- |
@@ -382,6 +382,7 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 | [`locator`](#locator) | `Locator` |
 | [`frameLocator`](#framelocator) | `FrameScreen` |
 | [`evaluate`](#evaluate) | `Promise<T>` |
+| [`evaluateOn`](#evaluateon) | `Promise<T>` |
 | [`addInitScript`](#init-scripts) | `Promise<void>` |
 | [`route`](#route) | `Promise<void>` |
 | [`unroute`](#unroute) | `Promise<void>` |
@@ -407,7 +408,7 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 - `waitForURL`: [`assertionTimeout`](/reference/config#assertiontimeout)。
 - それ以外: [`actionTimeout`](/reference/config#actiontimeout)。`locator` と `frameLocator` はページに触れず、時間上限を使いません。
 
-`goto`、`reload`、`back`、`forward`、`waitForResponse`、`waitForPopup`、`waitForDownload`、`waitForDownloads` は、`{ timeout }` で上書きできます。ただし、テストの期限（`afterEach` 内では `cleanupTimeout`）が上限で、`0` はその期限まで待ちます。`url`、`title`、`evaluate`、`addInitScript`、`route`、`unroute`、`unrouteAll`、`cookies`、`setCookies`、`clearCookies`、`setViewport`、`emulateMedia`、`onDialog`、`newTab`、`BrowserTab` のメソッド、`keyboard.*`、`mouse.*` に上書きオプションはありません。
+`goto`、`reload`、`back`、`forward`、`waitForResponse`、`waitForPopup`、`waitForDownload`、`waitForDownloads` は、`{ timeout }` で上書きできます。ただし、テストの期限（`afterEach` 内では `cleanupTimeout`）が上限で、`0` はその期限まで待ちます。`url`、`title`、`evaluate`、`evaluateOn`、`addInitScript`、`route`、`unroute`、`unrouteAll`、`cookies`、`setCookies`、`clearCookies`、`setViewport`、`emulateMedia`、`onDialog`、`newTab`、`BrowserTab` のメソッド、`keyboard.*`、`mouse.*` に上書きオプションはありません。
 
 #### `goto`
 
@@ -535,6 +536,37 @@ const title = await browser.evaluate<string>('document.title');
 | `EVALUATE_FAILED` | 評価したコードが例外をスローした場合、またはページがエンジンに必要な `Map` などの JavaScript 組み込みを置き換えた場合。エラーにメッセージを含めます。 |
 | `ACTION_FAILED` | Playwright のタイムアウト。 |
 | `ENGINE_FAILURE` | ページが閉じたか、コンテキストが失われた場合。 |
+
+#### `evaluateOn`
+
+ロケーターが一致する 1 つの要素に対して、信頼できるテストコードをページ内で評価し、その結果を返します。
+
+```ts
+const nav = screen.getByRole('navigation', { name: 'Main' });
+const position = await browser.evaluateOn(nav, (el) => getComputedStyle(el).position);
+const width = await browser.evaluateOn(
+  browser.frameLocator('iframe').locator('aside'),
+  (el, extra: number) => (el as HTMLElement).offsetWidth + extra,
+  10,
+);
+```
+
+- ロケーターはロケーターの読み取りと同じように解決します。スコープ、フレーム、ちょうど 1 つの一致を、`actionTimeout` まで待ちます。コードが実行される前にページがノードを置き換えた場合は、もう一度解決します。
+- 関数は要素、続いて `arg` を引数に呼び出されます。要素はページ内にだけ存在し、テストが保持することはありません。関数、文字列、結果の規則は [`evaluate`](#evaluate) と同じです。
+- 読み取り用です。コードでページを変更することもできますが、ステップが操作を記録できるよう、ロケーターを通して操作してください。
+- コードは 1 回だけ実行します。実行中にナビゲーションが起きると、[`evaluate`](#evaluate) と同じく `ENGINE_FAILURE`(終了コード 3)で失敗し、新しいページでコードを再実行することはありません。Playwright は同じ場合をテストの失敗として報告します。
+- 値を待つには [`toHaveCSS`](/reference/expect#tohavecss) または [`toHaveJSProperty`](/reference/expect#tohavejsproperty) を使います。
+
+| エラー | 発生条件 |
+| --- | --- |
+| `INVALID_LOCATOR` | 対象が e2e のロケーターではない場合、または別のターゲットや試行のものである場合。メッセージは `browser.evaluateOn` を示します。 |
+| `LOCATOR_NOT_FOUND` | `actionTimeout` 内に何も一致しない場合。 |
+| `LOCATOR_AMBIGUOUS` | 2 つ以上の要素が一致した場合。 |
+| `POLICY_DENIED` | 要素がパスワード入力などのセキュアなフィールドの場合。コードは実行しません。 |
+| `INVALID_ARGUMENT` | `arg` または戻り値が [`JsonValue`](#jsonvalue) ではない場合。 |
+| `EVALUATE_FAILED` | 評価したコードが例外をスローした場合、またはトップレベルのページがエンジンに必要な JavaScript 組み込みを置き換えた場合。エラーにメッセージを含めます。 |
+| `ACTION_FAILED` | コードが `actionTimeout` 内に終わらなかった場合。 |
+| `ENGINE_FAILURE` | ページが閉じたか、コンテキストが失われた場合。またはコードの実行中にページがナビゲーションした場合。 |
 
 #### `route`
 
@@ -1083,6 +1115,28 @@ export interface Browser extends Expectable<BrowserExpectation> {
   /** Evaluates trusted test code with one required JSON-safe argument. */
   evaluate<T extends JsonValue, Arg extends JsonValue>(
     fn: string | ((arg: Arg) => T | Promise<T>),
+    arg: Arg,
+  ): Promise<T>;
+  /**
+   * Evaluates trusted test code in the page on the one element `target`
+   * matches, with the locator's scope, strictness, and frame, waiting for it
+   * like a read. The element is passed inside the page only; the result is
+   * JSON. Meant for reads: the code can change the page, but a test should
+   * act through the locator instead. The code runs once: a navigation while
+   * it runs fails the call with `ENGINE_FAILURE`. A secure field is
+   * `POLICY_DENIED`, as the locator getters deny it.
+   */
+  evaluateOn<T extends JsonValue>(
+    target: Locator,
+    fn: string | ((element: Element) => T | Promise<T>),
+  ): Promise<T>;
+  /**
+   * Evaluates trusted test code on the one element `target` matches, with
+   * one required JSON-safe argument.
+   */
+  evaluateOn<T extends JsonValue, Arg extends JsonValue>(
+    target: Locator,
+    fn: string | ((element: Element, arg: Arg) => T | Promise<T>),
     arg: Arg,
   ): Promise<T>;
   /** Adds a script every document runs before the page's own, from the next navigation on. */

@@ -1526,7 +1526,7 @@ export class InfrastructureError extends E2EError {
 
 | 导出 | 返回值 |
 | --- | --- |
-| [`matchesText`、`toTextPattern`、`describePattern`](#text-patterns) | `boolean`、`TextPattern`、`string` |
+| [`matchesText`、`compareText`、`toTextPattern`、`describePattern`](#text-patterns) | `boolean`、`boolean`、`TextPattern`、`string` |
 | [`resolveExpression`](#resolveexpression) | `SemanticNode[]` |
 | [`urlMatches`](#urlmatches) | `boolean` |
 | [`siteOf`、`sameSite`](#site-helpers) | `string`、`boolean` |
@@ -1538,15 +1538,17 @@ export class InfrastructureError extends E2EError {
 | [`obj`](#obj) | `WithoutUndefined<T>` |
 | [`raceAbort`、`withTimeout`、`withinCleanupBudget`](#timing-helpers) | `Promise<T>`、`Promise<T>`、`Promise<void>` |
 | [`isSecret`](#issecret) | `boolean` |
+| [`secureReadDenied`](#securereaddenied) | `ConfigurationError` |
 | [`isProviderRecording`、`stopProviderRecording`](#provider-recordings) | `boolean`、`Promise<VideoSegment>` |
 
 #### 文本模式
 
-供 `locate` 和文本匹配器使用的 `TextPattern` 匹配。
+供 `locate` 和文本匹配器使用的 `TextPattern` 匹配。`matchesText` 即指定 `{ mode: 'equals', normalize: true }` 的 `compareText`，会先合并文本和字符串模式中的空白再比较，`RegExp` 则针对合并后的文本进行匹配。若要比较平台原样报告的值（例如计算样式），请传入 `normalize: false`。`mode: 'contains'` 接受期望字符串出现在任意位置，`ignoreCase` 则对字符串模式忽略大小写。
 
 ```ts
 export function toTextPattern(match: TextMatch, options?: { exact?: boolean }): TextPattern;
 export function matchesText(actual: string, pattern: TextPattern): boolean;
+export function compareText(actual: string, pattern: TextPattern, comparison: TextComparison): boolean;
 export function describePattern(pattern: TextPattern): string;
 ```
 
@@ -1643,12 +1645,13 @@ await pollCondition({
   deadline,
   signal: context.signal,
   negated: false,
-  evaluate: async () => (await read(context.operation(deadline.remaining()))) === 'Paid',
+  evaluate: async (reads) =>
+    (await reads.read((timeoutMs) => read(context.operation(timeoutMs)))) === 'Paid',
   onTimeout: (cause) => new TestError('ASSERTION_FAILED', 'status never became Paid', { cause }),
 });
 ```
 
-- 用 `deadline` 限制 `evaluate` 发起的每次读取（`context.operation(deadline.remaining())`）。使用操作超时时间的读取可能超过断言自身的超时时间。
+- 通过 `reads.read`（基于 `deadline` 的 `PollReads`）运行 `evaluate` 发起的每次读取。它为读取提供时限（`context.operation(timeoutMs)`），因为使用操作超时时间的读取可能超过断言自身的超时时间。它还会记录读取耗时，因此被截止时间中断的读取会与此前最慢的读取比较来判定。
 - 它在 0、20 和 50 ms 时读取，然后在从开始时刻起每隔 100 ms 的时间点读取。每次读取至少在上次读取结束 10 ms 后开始，最多间隔 100 ms。操作和 `waitFor` 也以同样的方式等待节点。
 - `evaluate` 产生的 `OPERATION_TIMEOUT` 会按[截止时间附近的超时](#timeouts-at-a-deadline)中的规则结束轮询。`onTimeout(cause)` 用它构造失败错误。
 
@@ -1752,6 +1755,15 @@ const operation = context.operation(stepTimeout(options?.timeout, 'kiosk.print')
 const password = isSecret(options.password)
   ? await context.resolveSecret(options.password)
   : options.password;
+```
+
+#### `secureReadDenied`
+
+读取安全字段时使用的 `POLICY_DENIED` 错误。`subject` 位于消息末尾，说明读取的对象或引擎拒绝的原因。抛出它而不是自己编写错误，这样每个引擎都会使用与运行器相同的措辞拒绝。
+
+```ts
+if (node.states?.secure === true) throw secureReadDenied('the field is a password field');
+// POLICY_DENIED: reading values from a secure field is denied: the field is a password field
 ```
 
 ### 状态
@@ -2024,13 +2036,15 @@ test('prints a receipt', { requires: ['printer'] }, async ({ printer }) => {
 | `attachViewport(viewport)` | 记录当前步骤设置的视口。 |
 | `locator(expression)` | 从原始表达式创建公共定位器。 |
 | `screen(scope)` | 创建屏幕作用域。 |
+| [`withNode(api, locator, use, options?)`](#running-code-on-a-located-node) | 在定位器匹配的单个节点上运行 `use`。 |
 | [`expectable(target, factory)`](#expectations) | 让 `expect(fixture)` 返回匹配器。 |
 
 | 抛出的错误 | 条件 |
 | --- | --- |
 | `INVALID_CONFIG` | 测试首次使用工厂时，工厂返回普通接口，而非通过 `context.fixture` 声明的接口。 |
 | `APP_URL_REQUIRED` | 在未声明 URL 的测试目标上调用 `app.resolveUrl`。 |
-| `POLICY_DENIED` | `app.resolveUrl` 使用 `http:` 和 `https:` 以外的协议（`about:blank` 除外）。 |
+| `POLICY_DENIED` | `app.resolveUrl` 使用 `http:` 和 `https:` 以外的协议（`about:blank` 除外），或对安全字段调用 `withNode`。 |
+| `INVALID_LOCATOR` | 传给 `withNode` 的值不是 e2e 定位器，或是来自另一个屏幕或尝试的定位器。消息会指明 `api`。 |
 
 ```ts
 /**
@@ -2082,6 +2096,28 @@ export interface EngineFixtureContext {
   locator(expression: LocatorExpression): Locator;
   /** Mints a screen scope whose every query is wrapped by `scope` (a nested document, say). */
   screen(scope: (expression: LocatorExpression) => LocatorExpression): Screen;
+  /**
+   * Resolves the one node `locator` matches, with its scope, strictness, and
+   * frame, waiting for it like a locator read (the action timeout, or
+   * `timeout`), then calls `use` with its ref, the budget that read has left,
+   * and the node as that resolve read it. It is a read: a secure field is
+   * `POLICY_DENIED` before `use` runs, as the locator getters deny it.
+   * Zero matches by the deadline is `LOCATOR_NOT_FOUND`, two or more
+   * `LOCATOR_AMBIGUOUS` at once. A retryable `NODE_STALE` from `use`
+   * re-resolves while the deadline remains and runs `use` again, so report
+   * it only before work that must not repeat. `wait: false` resolves without
+   * waiting for a match: zero matches are `LOCATOR_NOT_FOUND` at once, for a
+   * caller that polls itself. A value that is not an e2e locator, or a
+   * locator from another screen or attempt, is `INVALID_LOCATOR` before any
+   * resolve, and its message names `api`, the public call that took the
+   * locator.
+   */
+  withNode<T>(
+    api: string,
+    locator: Locator,
+    use: (ref: NodeRef, operation: OperationContext, node: SemanticNode) => Promise<T>,
+    options?: { timeout?: number; wait?: boolean },
+  ): Promise<T>;
   /**
    * Attaches an expectation surface to a fixture object so `expect(fixture)`
    * returns it. The harness records every matcher call as an assertion step
@@ -2158,6 +2194,28 @@ export type FixtureOperations<T extends object> = {
 };
 ```
 
+#### 在定位到的节点上运行代码
+
+`withNode(api, locator, use, options?)` 解析测试定位器匹配的单个节点，并以其 `NodeRef` 和解析时读取的节点调用 `use`。接受 `Locator` 的测试夹具方法用它获取引擎自己对该节点的句柄，例如要在其上运行页面代码的元素。
+
+```ts
+evaluateOn: (target: Locator, source: string) =>
+  context.withNode('browser.evaluateOn', target, (ref, operation) =>
+    // `driver` stands for the engine's own client, which knows the element behind a ref.
+    driver.evaluateOn(ref.id, source, { timeoutMs: operation.timeoutMs })),
+```
+
+- `api` 是接受该定位器的公开调用。`INVALID_LOCATOR` 的消息会指明它。
+- 定位器保留其作用域、严格性和框架。`withNode` 像定位器读取一样等待匹配，最长到 `actionTimeout` 或 `options.timeout`。
+- `use` 获得该读取自己的 `OperationContext`。请用它约束引擎调用。
+- `use` 还会获得解析时读取的 `SemanticNode`（角色、名称、状态和属性），因此读取这些内容无需再次调用引擎。
+- `withNode` 是读取操作：与定位器的读取方法一样，对安全字段会在运行 `use` 之前以 `POLICY_DENIED` 失败。
+- 当 ref 不再指向该节点时，`use` 抛出可重试的 `NODE_STALE`。只要截止时间未到，`withNode` 就会重新解析并再次调用 `use`，因此只应在不能运行两次的工作之前抛出它。
+- `options.wait: false` 只解析一次，不等待匹配：没有匹配项时立即为 `LOCATOR_NOT_FOUND`。自行轮询的匹配器使用它，由自己的轮询而不是定位器读取来等待节点。
+- `options.timeout: 0` 不给等待设置自己的截止时间，但测试的总时限仍会约束它。
+- `use` 抛出的其他错误，按定位器读取中的引擎错误进行转换。
+- 将该方法声明为 `timeout: false`，这样步骤的截止时间不会与等待节点相互竞争。
+
 #### 期望
 
 `expectable` 附加一个期望接口，让 `expect(fixture)` 返回它。使用 `context.fixture('expect', matchers,
@@ -2174,7 +2232,7 @@ return context.fixture('printer', printer, { print: { kind: 'resource' } });
 
 ### 导出的名称
 
-`EngineCleanupContext`、`EngineDisposeContext`、`OperationContext`、`TextPattern`、`SemanticQuery`、`LocatorExpression`、`NodeRef`、`SemanticNode`、`ViewportPoint`、`ViewportSize`、`ObservationPixels`、`LocatorAction`、`LocatorActionKind`、`PointerAction`、`PointerActionKind`、`ScrollDirection`、`Momentum`、`SelectOption`、`Key`、`KeyModifier`、`KeyName`、`ParsedKey`、`ENGINE_SPI_VERSION`、`LOCATOR_ACTION_KINDS`、`KNOWN_LOCATOR_ACTION_KINDS`、`POINTER_ACTION_KINDS`、`KEY_MODIFIERS`、`KEY_NAMES`、`parseKey`、`ENGINE_ERROR_CODES`、`RETRYABLE_ENGINE_ERROR_CODES`、`Secret`、`isSecret`、`TextMatch`、`JsonValue`、`JsonValueRules`、`ResolveExpressionOptions`、`PollConditionOptions`、`WithoutUndefined`、`FixtureOperation`、`EngineIsolation`、`OBSERVED_NAME_LIMIT` 和 `OBSERVED_TEXT_LIMIT` 均从 `e2e/engine` 导出。[引擎协议](/reference/engine-protocol)的 `connectEngine`、`serveEngine`、`describeEngine`、`spawnTransport`、`socketTransport`、`loopbackTransport`、`ENGINE_METHODS`、`ENGINE_PROTOCOL_VERSION` 及其类型也从这里导出。
+`EngineCleanupContext`、`EngineDisposeContext`、`OperationContext`、`TextPattern`、`SemanticQuery`、`LocatorExpression`、`NodeRef`、`SemanticNode`、`ViewportPoint`、`ViewportSize`、`ObservationPixels`、`LocatorAction`、`LocatorActionKind`、`PointerAction`、`PointerActionKind`、`ScrollDirection`、`Momentum`、`SelectOption`、`Key`、`KeyModifier`、`KeyName`、`ParsedKey`、`ENGINE_SPI_VERSION`、`LOCATOR_ACTION_KINDS`、`KNOWN_LOCATOR_ACTION_KINDS`、`POINTER_ACTION_KINDS`、`KEY_MODIFIERS`、`KEY_NAMES`、`parseKey`、`ENGINE_ERROR_CODES`、`RETRYABLE_ENGINE_ERROR_CODES`、`Secret`、`isSecret`、`TextMatch`、`JsonValue`、`JsonValueRules`、`ResolveExpressionOptions`、`PollConditionOptions`、`PollReads`、`TextComparison`、`WithoutUndefined`、`FixtureOperation`、`EngineIsolation`、`OBSERVED_NAME_LIMIT` 和 `OBSERVED_TEXT_LIMIT` 均从 `e2e/engine` 导出。[引擎协议](/reference/engine-protocol)的 `connectEngine`、`serveEngine`、`describeEngine`、`spawnTransport`、`socketTransport`、`loopbackTransport`、`ENGINE_METHODS`、`ENGINE_PROTOCOL_VERSION` 及其类型也从这里导出。
 
 ### `SemanticNode`
 

@@ -64,7 +64,7 @@ description: モデル入力、ツール呼び出し、シークレット、秘�
 | `about:blank` を除き、`http:` と `https:` 以外のスキームへのナビゲーション | `file:`、`data:`、`javascript:` と、`view-source:file:` などのラッパーは、ローカルまたはインラインの内容を読み込むためです。 |
 | 不正な形式の URL | 自動修正は行いません。 |
 | JSON を受け取る箇所への `Secret` の受け渡し | ハンドルは値を保持せず、値をシリアライズすることも許可されません。 |
-| getter、または `toHaveValue`、`toHaveText`、`toContainText`、`toHaveAttribute` マッチャーによる、機密フィールドからの値、テキスト、属性の読み取り | シークレット自体ではなく、操作の結果をアサートしてください。非公開の値は秘匿された値であり、空でも欠落でもありません。 |
+| getter、または `toHaveValue`、`toHaveText`、`toContainText`、`toHaveAttribute` マッチャーによる、機密フィールドからの値、テキスト、属性の読み取り、および `browser.evaluateOn` や `expect(browser)` のロケーターマッチャーによる機密フィールドの読み取り | シークレット自体ではなく、操作の結果をアサートしてください。非公開の値は秘匿された値であり、空でも欠落でもありません。 |
 | 未宣言の名前を使う `type_secret` | ステップのパラメーターに含まれるシークレットだけを入力できます。 |
 | 無効または編集不能なノードへの `type_secret`、または MCP の `run_code` 内の `fill` | 入力先は `textbox`、`searchbox`、`combobox` です。 |
 | パスワードフィールド以外へのパスワード入力 | 用途が一致する必要があります。汎用シークレットは、編集可能な任意の入力欄に入力できます。 |

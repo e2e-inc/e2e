@@ -311,6 +311,8 @@ assertion step.
 | [`toHaveURL`](#tohaveurl) | Waits for the current URL |
 | [`toHaveTitle`](#tohavetitle) | Waits for the current title |
 | [`toHaveClass`](#tohaveclass) | Waits for a target's `class` |
+| [`toHaveCSS`](#tohavecss) | Waits for a computed style |
+| [`toHaveJSProperty`](#tohavejsproperty) | Waits for a DOM property value |
 
 Any other option key is `INVALID_ARGUMENT`, such as `ignoreCase` on
 `toHaveTitle`, which Playwright does not take either.
@@ -351,9 +353,66 @@ await expect(browser).toHaveClass(browser.locator('.card'), 'card active');
 - It polls for the node too: a target that matches nothing yet is one more
   poll, not a failure, until the assertion timeout runs out.
 - An ambiguous target still fails at once with `LOCATOR_AMBIGUOUS`.
+- A target that is not an e2e locator, or one from another screen or
+  attempt, is `INVALID_LOCATOR` at once.
+- A target that is a secure field is `POLICY_DENIED`, as `getAttribute()` is.
 - It reads the `class` attribute, so `''` matches `class=""` and not an
   element with no `class` attribute at all. Playwright's `toHaveClass('')`
   accepts both.
+
+#### `toHaveCSS`
+
+Waits for one computed style property of the target to match: a string is
+the whole value, a `RegExp` is tested against it. Both see the raw value
+`getPropertyValue` returns, whitespace included, as in Playwright.
+
+```ts
+const nav = screen.getByRole('navigation', { name: 'Main' });
+await expect(browser).toHaveCSS(nav, 'position', 'sticky');
+await expect(browser).toHaveCSS(nav, '--accent', /red/);
+```
+
+- It runs `getComputedStyle(element).getPropertyValue(property)` as page
+  code, so a page that overrides those functions changes what it reads.
+  Names are kebab-case (`background-color`), and a custom property
+  (`--accent`) works.
+- The target resolves with its scope and frame, as
+  [`browser.evaluateOn`](/reference/web#evaluateon) does. A target that
+  matches nothing yet is one more poll, not a failure, until the assertion
+  timeout runs out. An ambiguous target fails at once with
+  `LOCATOR_AMBIGUOUS`. A target that is not an e2e locator, or one from
+  another screen or attempt, is `INVALID_LOCATOR` at once.
+- A target that is a secure field is `POLICY_DENIED`, a style included, as
+  in [`browser.evaluateOn`](/reference/web#evaluateon).
+- A navigation while it reads resolves the target again on the new page.
+- An empty or non-string `property` is `INVALID_ARGUMENT`.
+
+#### `toHaveJSProperty`
+
+Waits for the JavaScript value at a property path on the target's element
+to equal `expected` as JSON.
+
+```ts
+const sidebar = browser.frameLocator('iframe').locator('aside');
+await expect(browser).toHaveJSProperty(sidebar, 'offsetWidth', 240);
+await expect(browser).toHaveJSProperty(screen.getByRole('navigation'), 'dataset.state', 'open');
+```
+
+- `path` is a property name or a dotted path, walked as Playwright walks
+  it. Every key but the last is read off a non-null object. The last key is
+  read off whatever value the walk reaches, so `value.length` on an input
+  reads the length of its value.
+- A missing property reads as `undefined`, which never matches, so `.not`
+  passes on it. So does a path that would read a key before the last off a
+  string, a function, or `null`. Playwright throws instead on a `null`
+  before the last key, or an `undefined` just before it.
+- A value that is not JSON, such as `style` or an element, never matches.
+  The failure says `is not JSON`.
+- Objects and arrays compare structurally. Object keys may come in any
+  order.
+- The target resolves and waits as in [`toHaveCSS`](#tohavecss).
+- An empty or non-string `path`, or an `expected` that is not a
+  [`JsonValue`](/reference/web#jsonvalue), is `INVALID_ARGUMENT`.
 
 ### Value matchers
 
@@ -772,12 +831,17 @@ withholds its value and text.
 | --- | --- |
 | `toHaveValue`, `toHaveText`, `toContainText` | `POLICY_DENIED`, like `inputValue()` and `textContent()`, negated or in list form too |
 | `toHaveAttribute` | `POLICY_DENIED`, like `getAttribute()`, for every attribute name and negated too |
+| `expect(browser)`'s `toHaveClass`, `toHaveCSS`, and `toHaveJSProperty` | `POLICY_DENIED`, negated too |
 | `toHaveAccessibleName`, `toHaveRole`, and the state matchers | Answer as usual |
 
 Reading the withheld value as `''` would pass a filled password field as
 cleared, and reading the withheld `value` attribute as absent would pass
 `not.toHaveAttribute('value')` on a password field that has one. Assert the
 outcome of the fill, not the field.
+
+The `expect(browser)` matchers check the element their locator matches. A
+`toHaveJSProperty` path that walks to another element, such as
+`control.value` on a `<label>`, reads that element's value.
 
 ### Option validation
 
@@ -928,6 +992,29 @@ export interface BrowserExpectation {
   toHaveTitle(expected: TextMatch, options?: { timeout?: number }): Promise<void>;
   /** Waits for the target's `class` attribute to match: a string is the whole normalized class list, a RegExp is tested against it. */
   toHaveClass(target: Locator, expected: TextMatch, options?: { timeout?: number }): Promise<void>;
+  /**
+   * Waits for the target's computed `property` (kebab-case, a custom
+   * `--property` included) to match: a string is the whole value, a RegExp
+   * is tested against it.
+   */
+  toHaveCSS(
+    target: Locator,
+    property: string,
+    expected: TextMatch,
+    options?: { timeout?: number },
+  ): Promise<void>;
+  /**
+   * Waits for the JavaScript value at `path` on the target's element (a
+   * property name, or a dotted path such as `dataset.state`) to equal
+   * `expected` as JSON. A path that runs out before its end, or a value that
+   * is not JSON, never matches.
+   */
+  toHaveJSProperty(
+    target: Locator,
+    path: string,
+    expected: JsonValue,
+    options?: { timeout?: number },
+  ): Promise<void>;
 }
 ```
 

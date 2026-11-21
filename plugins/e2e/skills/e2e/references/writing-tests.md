@@ -397,7 +397,7 @@ typed; prefer it when the app already has a schema for the response.
 
 | Locator matchers | Browser matchers | Value matchers |
 | --- | --- | --- |
-| `toBeVisible`, `toBeHidden`, `toBeAttached`, `toBeEnabled`, `toBeDisabled`, `toBeChecked`, `toBeSelected`, `toBeExpanded`, `toBeFocused`, `toHaveText`, `toContainText`, `toHaveValue`, `toHaveAttribute`, `toHaveCount`, `toHaveAccessibleName`, `toHaveRole`, `toHaveScreenshot` (also on `screen`) | `toHaveURL`, `toHaveTitle`, `toHaveClass(locator, expected)` | `toBe`, `toEqual`, `toMatchObject`, `toBeTruthy`, `toBeFalsy`, `toBeNull`, `toBeUndefined`, `toBeDefined`, `toHaveLength`, `toHaveProperty`, `toContain`, `toMatch`, `toBeGreaterThan`, `toBeGreaterThanOrEqual`, `toBeLessThan`, `toBeLessThanOrEqual`, `toBeCloseTo`, `toMatchSchema` |
+| `toBeVisible`, `toBeHidden`, `toBeAttached`, `toBeEnabled`, `toBeDisabled`, `toBeChecked`, `toBeSelected`, `toBeExpanded`, `toBeFocused`, `toHaveText`, `toContainText`, `toHaveValue`, `toHaveAttribute`, `toHaveCount`, `toHaveAccessibleName`, `toHaveRole`, `toHaveScreenshot` (also on `screen`) | `toHaveURL`, `toHaveTitle`, `toHaveClass(locator, expected)`, `toHaveCSS(locator, property, expected)`, `toHaveJSProperty(locator, path, expected)` | `toBe`, `toEqual`, `toMatchObject`, `toBeTruthy`, `toBeFalsy`, `toBeNull`, `toBeUndefined`, `toBeDefined`, `toHaveLength`, `toHaveProperty`, `toContain`, `toMatch`, `toBeGreaterThan`, `toBeGreaterThanOrEqual`, `toBeLessThan`, `toBeLessThanOrEqual`, `toBeCloseTo`, `toMatchSchema` |
 
 `toHaveText` compares the whole normalized text, `toContainText` a substring
 or RegExp, `toHaveValue` a form control's value as is, whitespace included
@@ -408,7 +408,12 @@ in order; `toContainText(['Alpha', 'Beta'])` needs each entry in a distinct
 match, in order, extra matches allowed. `toHaveAttribute(name)` checks
 presence, `toHaveAttribute(name, value)` the value; `toBeAttached` waits for
 a match, hidden or not; `toHaveClass` compares the whole normalized class
-list or tests a RegExp. A failed matcher is `ASSERTION_FAILED`, exit code 1.
+list or tests a RegExp; `toHaveCSS` compares one computed property
+(kebab-case, `--custom` too) as its raw string; `toHaveJSProperty` compares the
+JSON at a dotted path (`dataset.state`, `offsetWidth`) by deep equality. A
+matcher whose value never matches is `ASSERTION_FAILED`, exit code 1, and one
+whose page never answers a read in time is `ACTION_FAILED`. An ambiguous
+locator is `LOCATOR_AMBIGUOUS` at once.
 
 Playwright's `{ checked: false }`, `{ enabled: false }`, `{ visible: false }`,
 and `{ attached: false }` flip their matchers, and `{ ignoreCase: true }`
@@ -603,6 +608,10 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
 - `evaluate(fn | source, arg?)`: runs a function or source string in the
   page, JSON in and out, no closures; a throw in the page is
   `EVALUATE_FAILED`.
+- `evaluateOn(locator, fn | source, arg?)`: the same, called with the one
+  element the locator matches (its scope, frame, and exactly-one rule), then
+  `arg`; waits for the match like a read. Use it for reads, never a
+  `document.querySelector` in `evaluate`, which can find another element.
 - `addInitScript(source | { path } | fn)`, `addInitScript(fn, arg)`: runs
   before the page's own scripts; call it before `app.open`. `arg` is JSON.
 - `route(pattern, handler)`, `unroute(pattern)`: intercept requests, newest

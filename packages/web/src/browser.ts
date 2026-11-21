@@ -17,17 +17,12 @@ import type { ActionOptions, Expectable, JsonValue, Locator, Screen, TextMatch }
 import {
   ConfigurationError,
   Deadline,
-  describePattern,
-  EngineError,
-  matchesText,
   obj,
-  pollCondition,
   raceAbort,
   stepTimeout,
   rejectUnknownOptions,
   TestError,
   toTextPattern,
-  urlMatches,
   validateJsonValue,
   withTimeout,
   type EngineFixtureContext,
@@ -41,14 +36,20 @@ import { classifyInputError } from './actions.ts';
 import type { AttemptTab } from './attempt-session.ts';
 import type { DialogHandler } from './dialogs.ts';
 import { saveDownloadsTo, saveFromBrowser, saveLocally } from './downloads.ts';
-import { isTestErrorCode, message as causeMessage, pageScriptFailure, translatePwError } from './support.ts';
-import { compileEvaluation, decodeEvaluation, pageFunctionSource } from './evaluation.ts';
+import { message as causeMessage, pageScriptFailure, translatePwError } from './support.ts';
+import {
+  compileEvaluation,
+  evaluationValue,
+  pageFunctionSource,
+  readEvaluation,
+} from './evaluation.ts';
 import { initScriptLabel, testInitScriptSource } from './init-scripts.ts';
 import { MEDIA_KEYS, mediaLabel, mediaProblem, type WebMedia } from './media.ts';
 import { lowercaseNames } from './protected-app.ts';
 import { parseContinue, parseFulfill, requireNoArguments } from './route-options.ts';
 import { routePatternMatches, routePatternsEqual } from './route-pattern.ts';
 import type { PlaywrightSurface } from './surface.ts';
+import { createBrowserExpectation, expectedLabel } from './browser-expectation.ts';
 
 /**
  * One of `json`, `body`, or `path`, or none for an empty body. `path` names a
@@ -198,6 +199,29 @@ export interface BrowserExpectation {
   toHaveTitle(expected: TextMatch, options?: { timeout?: number }): Promise<void>;
   /** Waits for the target's `class` attribute to match: a string is the whole normalized class list, a RegExp is tested against it. */
   toHaveClass(target: Locator, expected: TextMatch, options?: { timeout?: number }): Promise<void>;
+  /**
+   * Waits for the target's computed `property` (kebab-case, a custom
+   * `--property` included) to match: a string is the whole value, a RegExp
+   * is tested against it.
+   */
+  toHaveCSS(
+    target: Locator,
+    property: string,
+    expected: TextMatch,
+    options?: { timeout?: number },
+  ): Promise<void>;
+  /**
+   * Waits for the JavaScript value at `path` on the target's element (a
+   * property name, or a dotted path such as `dataset.state`) to equal
+   * `expected` as JSON. A path that runs out before its end, or a value that
+   * is not JSON, never matches.
+   */
+  toHaveJSProperty(
+    target: Locator,
+    path: string,
+    expected: JsonValue,
+    options?: { timeout?: number },
+  ): Promise<void>;
 }
 
 /**
@@ -278,6 +302,28 @@ export interface Browser extends Expectable<BrowserExpectation> {
   /** Evaluates trusted test code with one required JSON-safe argument. */
   evaluate<T extends JsonValue, Arg extends JsonValue>(
     fn: string | ((arg: Arg) => T | Promise<T>),
+    arg: Arg,
+  ): Promise<T>;
+  /**
+   * Evaluates trusted test code in the page on the one element `target`
+   * matches, with the locator's scope, strictness, and frame, waiting for it
+   * like a read. The element is passed inside the page only; the result is
+   * JSON. Meant for reads: the code can change the page, but a test should
+   * act through the locator instead. The code runs once: a navigation while
+   * it runs fails the call with `ENGINE_FAILURE`. A secure field is
+   * `POLICY_DENIED`, as the locator getters deny it.
+   */
+  evaluateOn<T extends JsonValue>(
+    target: Locator,
+    fn: string | ((element: Element) => T | Promise<T>),
+  ): Promise<T>;
+  /**
+   * Evaluates trusted test code on the one element `target` matches, with
+   * one required JSON-safe argument.
+   */
+  evaluateOn<T extends JsonValue, Arg extends JsonValue>(
+    target: Locator,
+    fn: string | ((element: Element, arg: Arg) => T | Promise<T>),
     arg: Arg,
   ): Promise<T>;
   /**
@@ -579,13 +625,21 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
   const deadlineFor = (timeout: number | undefined, api: string): Deadline =>
     new Deadline(context.operation(stepTimeout(timeout, api) ?? context.timeouts.assertion).timeoutMs);
 
-  /** The page URL, read within the action timeout or, for a matcher poll, within the poll's deadline. */
-  const currentUrl = (deadline?: Deadline) =>
-    surface.guard(context.operation(deadline?.remaining()), 'url', async () => surface.requirePage().url());
-  /** The page title, read within the action timeout or, for a matcher poll, within the poll's deadline. */
-  const currentTitle = (deadline?: Deadline) =>
-    surface.guard(context.operation(deadline?.remaining()), 'title', () => surface.requirePage().title());
-  const expectation = createBrowserExpectation({ currentUrl, currentTitle, baseHref, deadlineFor, context });
+  /** The page URL, read within `timeoutMs`, else within the action timeout. */
+  const currentUrl = (timeoutMs?: number) =>
+    surface.guard(context.operation(timeoutMs), 'url', async () => surface.requirePage().url());
+  /** The page title, read within `timeoutMs`, else within the action timeout. */
+  const currentTitle = (timeoutMs?: number) =>
+    surface.guard(context.operation(timeoutMs), 'title', () => surface.requirePage().title());
+  const expectation = createBrowserExpectation({
+    currentUrl,
+    currentTitle,
+    readNode: (ref, source, arg, operation) =>
+      surface.evaluateOn(ref, source, arg, operation, true),
+    baseHref,
+    deadlineFor,
+    context,
+  });
 
   const browser: Omit<Browser, keyof Expectable<BrowserExpectation>> = {
     goto(url, options) {
@@ -625,7 +679,7 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     ): Promise<T> {
       const source = typeof fn === 'string' ? fn : pageFunctionSource(fn);
       validateJsonValue(arg, 'evaluate argument');
-      const evaluate = compileEvaluation(source, arg !== undefined);
+      const evaluate = compileEvaluation(source, arg !== undefined ? ['arg'] : []);
       // JSON safety is checked above; Playwright's recursive argument type cannot expand JsonValue.
       const input: unknown = arg;
       // A handle, not a value: the boundary resolves to a string, which Playwright
@@ -634,12 +688,29 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
         const page = surface.requirePage();
         try {
           const handle = await page.evaluateHandle(evaluate, input);
-          return await handle.jsonValue();
+          // Playwright keeps a handle object until it is disposed, and a poll
+          // over evaluate makes one per read.
+          try {
+            return await handle.jsonValue();
+          } finally {
+            void handle.dispose().catch(() => undefined);
+          }
         } catch (cause) {
           throw (await pageScriptFailure(page, cause, 'evaluate', operation.timeoutMs)) ?? cause;
         }
       });
-      return decodeEvaluation(report) as T;
+      return evaluationValue(readEvaluation(report), 'evaluate') as T;
+    },
+    async evaluateOn<T extends JsonValue>(
+      target: Locator,
+      fn: string | ((element: Element, arg?: never) => T | Promise<T>),
+      arg?: JsonValue,
+    ): Promise<T> {
+      const source = typeof fn === 'string' ? fn : pageFunctionSource(fn);
+      validateJsonValue(arg, 'evaluateOn argument');
+      const result = await context.withNode('browser.evaluateOn', target, (ref, operation) =>
+        surface.evaluateOn(ref, source, arg, operation, false));
+      return evaluationValue(result, 'evaluateOn') as T;
     },
     async addInitScript(script: unknown, ...rest: unknown[]) {
       const source = await testInitScriptSource(script, rest.length === 0 ? undefined : { arg: rest[0] }, (file) => surface.projectPath(file));
@@ -920,6 +991,16 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     toHaveURL: { kind: 'assertion', timeout: false, label: (expected) => String(expected) },
     toHaveTitle: { kind: 'assertion', timeout: false, label: (expected) => String(expected) },
     toHaveClass: { kind: 'assertion', timeout: false, label: (_target, expected) => String(expected) },
+    toHaveCSS: {
+      kind: 'assertion',
+      timeout: false,
+      label: (_target, property, expected) => `${String(property)} ${String(expected)}`,
+    },
+    toHaveJSProperty: {
+      kind: 'assertion',
+      timeout: false,
+      label: (_target, path, expected) => `${String(path)} ${expectedLabel(expected)}`,
+    },
     get not() { return matchers; },
   };
   return context.fixture('browser', context.expectable(browser, () => context.fixture('expect', expectation, matchers)), {
@@ -931,6 +1012,9 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     title: action,
     waitForURL: { ...navigationCall, verifies: true, label: patternLabel },
     evaluate: action,
+    // withNode bounds the wait for the node and the evaluation, so the step
+    // sets no deadline of its own.
+    evaluateOn: { ...action, timeout: false },
     addInitScript: { ...action, label: (script) => initScriptLabel(script) },
     route: { ...action, label: patternLabel },
     unroute: { ...action, label: patternLabel },
@@ -949,144 +1033,6 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     keyboard: { down: { ...action, label: (key) => key }, up: { ...action, label: (key) => key }, press: { ...action, label: (key) => key }, type: { ...action, label: (text) => `${text.length} chars` } },
     mouse: { move: action, wheel: action, down: action, up: action },
   });
-}
-
-interface ExpectationDeps {
-  currentUrl(deadline: Deadline): Promise<string>;
-  currentTitle(deadline: Deadline): Promise<string>;
-  baseHref(): string;
-  deadlineFor(timeout: number | undefined, api: string): Deadline;
-  readonly context: EngineFixtureContext;
-}
-
-/**
- * The expected URL as `toHaveURL` compares it: a string resolved against the
- * base, the way `urlMatches` resolves it, so it reads beside the absolute
- * observed URL. A string that does not parse, and a RegExp, print as written.
- */
-function describeExpectedUrl(expected: string | RegExp, baseHref: string): string {
-  if (typeof expected !== 'string') return String(expected);
-  try {
-    return new URL(expected, baseHref).href;
-  } catch {
-    return expected;
-  }
-}
-
-/** One read of a browser matcher poll: whether the condition holds (undefined: not evaluable yet), and what was seen. */
-interface BrowserSample {
-  readonly matches: boolean | undefined;
-  readonly observed: string;
-}
-
-/**
- * `expect(browser)` matchers: URL, title, and class polling against the
- * assertion budget. Every read is bounded by the poll's deadline, so a page
- * that stops answering ends the assertion at its own timeout, and the
- * failure reports the last read instead of reading a hung page again.
- */
-function createBrowserExpectation(deps: ExpectationDeps, negated = false): BrowserExpectation {
-  const poll = async (
-    api: string,
-    label: string,
-    read: (deadline: Deadline) => Promise<BrowserSample>,
-    timeout: number | undefined,
-  ): Promise<void> => {
-    const deadline = deps.deadlineFor(timeout, api);
-    // pollCondition calls onTimeout only after a read completed, so a sample is always there.
-    let last: BrowserSample | undefined;
-    await pollCondition({
-      deadline,
-      signal: deps.context.signal,
-      negated,
-      evaluate: async () => {
-        last = await read(deadline);
-        return last.matches;
-      },
-      onTimeout: (cause) =>
-        new TestError(
-          'ASSERTION_FAILED',
-          `expect.${negated ? 'not.' : ''}${api} failed\nexpected: ${negated ? 'not ' : ''}${label}\nobserved: ${last?.observed ?? 'nothing'}`,
-          cause === undefined ? undefined : { cause },
-        ),
-    });
-  };
-  const validate = (api: string, options: object | undefined, keys: readonly string[] = ['timeout']): void =>
-    rejectUnknownOptions(`expect.${negated ? 'not.' : ''}${api}`, options, keys);
-  return {
-    get not() {
-      return createBrowserExpectation(deps, !negated);
-    },
-    toHaveURL(expected, options) {
-      validate('toHaveURL', options, ['ignoreCase', 'timeout']);
-      const ignoreCase = options?.ignoreCase;
-      if (ignoreCase !== undefined && typeof ignoreCase !== 'boolean') {
-        throw new TestError('INVALID_ARGUMENT', `expect.${negated ? 'not.' : ''}toHaveURL option ignoreCase must be a boolean`);
-      }
-      const target = deps.baseHref();
-      return poll(
-        'toHaveURL',
-        `URL ${describeExpectedUrl(expected, target)}${ignoreCase === true ? ' (ignoring case)' : ''}`,
-        async (deadline) => {
-          const url = await deps.currentUrl(deadline);
-          return { matches: urlMatches(url, expected, target, ignoreCase), observed: `URL ${url}` };
-        },
-        options?.timeout,
-      );
-    },
-    toHaveTitle(expected, options) {
-      validate('toHaveTitle', options);
-      const pattern = toTextPattern(expected, { exact: true });
-      return poll(
-        'toHaveTitle',
-        `title ${describePattern(pattern)}`,
-        async (deadline) => {
-          const title = await deps.currentTitle(deadline);
-          return { matches: matchesText(title, pattern), observed: `title ${JSON.stringify(title)}` };
-        },
-        options?.timeout,
-      );
-    },
-    toHaveClass(target, expected, options) {
-      validate('toHaveClass', options);
-      const pattern = toTextPattern(expected, { exact: true });
-      return poll(
-        'toHaveClass',
-        `class ${describePattern(pattern)}`,
-        async (deadline) => {
-          let value: string | null | undefined;
-          try {
-            // A locator read takes the action timeout; the poll's deadline is the tighter bound.
-            value = await withTimeout(
-              readClass(target),
-              deadline.remaining(),
-              () => new EngineError('OPERATION_TIMEOUT', 'class read timed out', { retryable: false }),
-            );
-          } catch (error) {
-            if (isTestErrorCode(error, 'LOCATOR_NOT_FOUND')) return { matches: undefined, observed: 'no node' };
-            throw error;
-          }
-          if (value === undefined) return { matches: undefined, observed: 'no node' };
-          if (value === null) return { matches: false, observed: 'no class attribute' };
-          return {
-            matches: matchesText(value.trim().split(/\s+/).join(' '), pattern),
-            observed: `class ${JSON.stringify(value)}`,
-          };
-        },
-        options?.timeout,
-      );
-    },
-  };
-}
-
-/**
- * The class attribute of one match, `undefined` while nothing matches. A
- * read waits for its match until the action timeout, so the poll samples
- * absence first: a node that never arrives stays an assertion failure.
- */
-async function readClass(target: Locator): Promise<string | null | undefined> {
-  if ((await target.count()) === 0) return undefined;
-  return target.getAttribute('class');
 }
 
 function requireSelector(method: string, selector: unknown): string {

@@ -6,11 +6,17 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { compileEvaluation, decodeEvaluation, pageFunctionSource, pageValueEncoder } from '../../src/evaluation.ts';
+import { compileEvaluation, evaluationValue, pageFunctionSource, pageValueEncoder, readEvaluation } from '../../src/evaluation.ts';
+import { SECURE_FIELD_SELECTOR } from '../../src/read-node.ts';
+
+/** What `browser.evaluate` returns for a page report. */
+function decode(text: string): unknown {
+  return evaluationValue(readEvaluation(text), 'evaluate');
+}
 
 /** Runs the compiled boundary in this process and decodes its report like `browser.evaluate`. */
 async function run(source: string, hasArgument: boolean, arg?: unknown): Promise<unknown> {
-  return decodeEvaluation(await compileEvaluation(source, hasArgument)(arg));
+  return decode(await compileEvaluation(source, hasArgument ? ['arg'] : [])(arg));
 }
 
 describe('compileEvaluation', () => {
@@ -56,6 +62,47 @@ describe('compileEvaluation', () => {
       code: 'INVALID_ARGUMENT',
       message: 'evaluate result must be JSON-safe, found undefined',
     });
+  });
+
+  it('calls a function on the element first, then the argument', async () => {
+    const element = { isConnected: true, matches: () => false, id: 'nav' };
+    const evaluate = compileEvaluation('(el, suffix) => el.id + suffix', ['element', 'arg']);
+    expect(decode(await evaluate(element, '-main'))).toBe('nav-main');
+  });
+
+  it('reads a result that is not JSON as a value, which only the throwing form refuses', async () => {
+    const report = await compileEvaluation('(el) => el', ['element', 'arg'])({ isConnected: true, matches: () => false, run: () => 1 });
+    expect(readEvaluation(report)).toEqual({ ok: false, invalid: expect.stringContaining('must be JSON-safe') });
+    expect(() => decode(report)).toThrow(expect.objectContaining({ code: 'INVALID_ARGUMENT' }));
+  });
+
+  it('reports a detached element as a retryable stale node without running the source', async () => {
+    const ran = vi.fn();
+    vi.stubGlobal('ran', ran);
+    const report = await compileEvaluation('() => ran()', ['element', 'arg'])({ isConnected: false }, undefined);
+    expect(() => readEvaluation(report)).toThrow(expect.objectContaining({ code: 'NODE_STALE', retryable: true }));
+    expect(ran).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a password field', () => true],
+    ['an element whose matches throws', () => { throw new Error('replaced'); }],
+    ['an element whose matches answers no boolean', () => undefined],
+  ])('refuses %s as POLICY_DENIED without running the source', async (_, matches) => {
+    const ran = vi.fn();
+    vi.stubGlobal('ran', ran);
+    const selectors: unknown[] = [];
+    const element = { isConnected: true, matches: (selector: unknown) => { selectors.push(selector); return matches(); } };
+    const report = await compileEvaluation('() => ran()', ['element', 'arg'])(element, undefined);
+    expect(() => readEvaluation(report)).toThrow(
+      expect.objectContaining({
+        code: 'POLICY_DENIED',
+        category: 'configuration',
+        message: 'reading values from a secure field is denied: the element is one now but was not when located, or its type cannot be checked',
+      }),
+    );
+    expect(ran).not.toHaveBeenCalled();
+    expect(selectors).toEqual([SECURE_FIELD_SELECTOR]);
   });
 });
 

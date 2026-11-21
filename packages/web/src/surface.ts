@@ -35,6 +35,7 @@ import {
   type NodeRef,
   type ComputedStyleProperty,
   type ComputedStyleValues,
+  type JsonValue,
   validateComputedStyleProperties,
   type OperationContext,
   type PointerAction,
@@ -69,6 +70,7 @@ import { SECURE_FIELD_SELECTOR, type RawNodeData } from './read-node.ts';
 import { readSelector, takeReadsFunction } from './read-selector.ts';
 import { credentialOrigins, httpCredentials, installConfiguredHeaders, lowercaseNames, configuredHeadersFor } from './protected-app.ts';
 import { RefRegistry } from './refs.ts';
+import { compileEvaluation, readEvaluation, type EvaluationResult } from './evaluation.ts';
 import {
   cancelled,
   DEFAULT_VIEWPORT,
@@ -908,6 +910,58 @@ export class PlaywrightSurface {
     }, navigationStaleOr);
   }
 
+  /**
+   * Runs trusted page code on the element a ref names, the element first and
+   * `arg` second, and returns the JSON it resolves to, or why that is not
+   * JSON. Nothing waits: a located ref that no longer matches exactly one
+   * element, or an element that left its document, is retryable
+   * `NODE_STALE`, so the caller resolves again. Those are found before
+   * `source` runs. A navigation while it may be running is retryable only
+   * when `repeatable` says running it again is safe, as for a read the
+   * engine owns; test code fails instead, as `browser.evaluate` does.
+   */
+  async evaluateOn(
+    ref: NodeRef,
+    source: string,
+    arg: JsonValue | undefined,
+    operation: OperationContext,
+    repeatable: boolean,
+  ): Promise<EvaluationResult> {
+    const evaluate = compileEvaluation(source, ['element', 'arg']);
+    const report = await this.guard(operation, 'evaluateOn', async (currentOperation) => {
+      const target = await this.requireSession().refs.lookup(ref);
+      currentOperation.signal.throwIfAborted();
+      const element = target.kind === 'element'
+        ? target.element
+        : await soleElement(target.locator);
+      try {
+        // JSON safety is the caller's; Playwright's recursive argument type
+        // cannot expand JsonValue.
+        const input: unknown = arg;
+        const handle = await element.evaluateHandle(evaluate, input);
+        // The handle holds a string, but Playwright keeps a handle object for
+        // it on both sides of its connection until it is disposed, and a
+        // matcher polls this many times in one page.
+        try {
+          return await handle.jsonValue();
+        } finally {
+          void handle.dispose().catch(() => undefined);
+        }
+      } catch (cause) {
+        const page = this.requirePage();
+        const failure = await pageScriptFailure(
+          page, cause, 'evaluateOn', currentOperation.timeoutMs,
+        );
+        if (failure !== undefined) throw failure;
+        if (!repeatable && isNavigationRace(cause)) throw translatePwError(cause, 'evaluateOn');
+        throw cause;
+      } finally {
+        if (target.kind === 'locator') void element.dispose().catch(() => undefined);
+      }
+    }, navigationStaleOr);
+    return readEvaluation(report);
+  }
+
   // --- location tier ---
 
   /**
@@ -1455,4 +1509,18 @@ function inFrame(node: SemanticNode, frame: Rect | null | undefined): SemanticNo
   if (frame === undefined || node.rect === undefined) return node;
   const { rect, origin, ...rest } = node;
   return frame === null ? rest : { ...rest, ...placeBoxInFrame(rect, origin, frame) };
+}
+
+/**
+ * The one element a located ref's strict locator matches now, without
+ * waiting. Zero or several mean the page changed since the locate, so the
+ * ref is stale and the caller resolves again.
+ */
+async function soleElement(locator: Locator): Promise<ElementHandle<Element>> {
+  const handles = (await locator.elementHandles()) as ElementHandle<Element>[];
+  const [only] = handles;
+  if (only !== undefined && handles.length === 1) return only;
+  for (const handle of handles) void handle.dispose().catch(() => undefined);
+  const reason = `located node now matches ${handles.length} elements; resolve it again`;
+  throw new EngineError('NODE_STALE', reason, { retryable: true });
 }

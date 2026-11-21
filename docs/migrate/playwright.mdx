@@ -135,6 +135,7 @@ run only in a browser, so a test that uses it declares
 | `toBeVisible()`, `toBeHidden()`, `toBeEnabled()`, `toBeDisabled()`, `toBeChecked()`, `toBeFocused()`, `toBeAttached()`, `toHaveText()`, `toContainText()`, `toHaveValue()`, `toHaveAttribute()`, `toHaveCount()`, `toHaveAccessibleName()`, `toHaveRole()` | the same, with `{ visible }`, `{ enabled }`, `{ checked }`, `{ attached }`, and `{ ignoreCase }` |
 | `toHaveId(id)`, `toContainClass(name)` | `toHaveAttribute('id', id)`, `toHaveAttribute('class', RegExp)` |
 | `expect(page).toHaveURL()`, `toHaveTitle()` | `expect(browser).toHaveURL()`, `toHaveTitle()` |
+| `expect(locator).toHaveCSS(name, value)`, `toHaveJSProperty(name, value)` | `expect(browser).toHaveCSS(locator, name, value)`, `expect(browser).toHaveJSProperty(locator, name, value)`; no `pseudo` option, and `undefined` is not an expected value |
 | `expect(page).toHaveScreenshot()`, `expect(locator).toHaveScreenshot()` | `expect(screen).toHaveScreenshot()` and the locator form, see [Visual comparison](/visual-testing) |
 | `expect(value)` with `toBe()`, `toEqual()`, `toMatchObject()`, `toContain()`, `toHaveLength()`, `toHaveProperty()`, `toMatch()`, and the truthiness and number matchers | the same, see [value matchers](/reference/expect#value-matchers) |
 | `expect(locator, 'message')`, `expect(page, 'message').toHaveScreenshot()`, `expect(value, 'message')` | the same, `expect(screen, 'message')` for the page; the message opens the failure, see [locator matchers](/reference/expect#locator-matchers) |
@@ -163,6 +164,7 @@ run only in a browser, so a test that uses it declares
 | `page.waitForEvent('popup')` | `browser.waitForPopup(() => trigger)`, which makes the new tab active, see [Tabs](/reference/web#tabs) |
 | `context.pages()`, `context.newPage()`, `page.bringToFront()` | `browser.tabs()`, `browser.newTab()`, `tab.activate()`; no `context.on('page')` event |
 | `page.evaluate(fn, arg)` | `browser.evaluate(fn, arg)`, JSON in and out |
+| `locator.evaluate(fn, arg)` | `browser.evaluateOn(locator, fn, arg)`, JSON in and out; it takes no `{ timeout }` and waits up to `actionTimeout`, and a navigation while it runs is `ENGINE_FAILURE`, exit code 3 |
 | `page.addInitScript()`, `page.emulateMedia({ colorScheme, reducedMotion })` | `browser.addInitScript()` or `web({ initScripts })`; `browser.emulateMedia()` |
 | `context.addCookies()`, `cookies()`, `clearCookies()` | `browser.setCookies()`, `browser.cookies()`, `browser.clearCookies()` |
 
@@ -252,7 +254,7 @@ purpose. Use the workaround, or keep the test in Playwright.
 | Playwright | Use today |
 | --- | --- |
 | `locator.locator(selector)`, `locator.and()`, `filter({ visible })` | One `browser.locator` selector, such as `'.card >> .close'`, or a `screen` query inside the scope |
-| `locator.evaluate()`, `expect(locator).toHaveClass()`, `toHaveCSS()`, `dispatchEvent()` | `browser.evaluate(fn, selector)`; `expect(browser).toHaveClass(locator, cls)` |
+| `expect(locator).toHaveClass()`, `dispatchEvent()` | `expect(browser).toHaveClass(locator, cls)`; `browser.evaluateOn(locator, (el, type) => el.dispatchEvent(new Event(type)), 'change')` |
 | `setInputFiles({ buffer })`, `selectOption([...])`, `click({ clickCount })`, `hover({ position })` | A temp file path; `browser.evaluate` for a multi-select; `browser.mouse` with `boundingBox()` |
 
 </Accordion>
