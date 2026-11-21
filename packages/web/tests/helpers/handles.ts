@@ -9,12 +9,18 @@ import type { Page } from 'playwright-core';
  */
 export async function connectionObjectCount(page: Page): Promise<() => number> {
   const connection: unknown = Reflect.get(page, '_connection');
-  const objects: unknown = typeof connection === 'object' && connection !== null ? Reflect.get(connection, '_objects') : undefined;
-  if (!(objects instanceof Map)) throw new Error('playwright-core no longer keeps its objects in _connection._objects');
+  const objects: unknown = typeof connection === 'object' && connection !== null
+    ? Reflect.get(connection, '_objects')
+    : undefined;
+  if (!(objects instanceof Map)) {
+    throw new Error('playwright-core no longer keeps its objects in _connection._objects');
+  }
   const before = objects.size;
   const handle = await page.evaluateHandle('1');
   const kept = objects.size - before;
   await handle.dispose();
-  if (kept !== 1) throw new Error(`an undisposed handle added ${kept} objects to _connection._objects, not 1`);
+  if (kept !== 1) {
+    throw new Error(`an undisposed handle added ${kept} objects to _connection._objects, not 1`);
+  }
   return () => objects.size;
 }

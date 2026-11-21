@@ -216,7 +216,9 @@ export function readEvaluation(text: string): EvaluationResult {
     });
   }
   if ('secure' in report) {
-    throw secureReadDenied('the element turned into one after it was located, or its type cannot be checked');
+    throw secureReadDenied(
+      'the element is one now but was not when located, or its type cannot be checked',
+    );
   }
   if ('invalid' in report) return { ok: false, invalid: report.invalid };
   throw new TestError('EVALUATE_FAILED', report.message);

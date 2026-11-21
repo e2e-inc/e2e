@@ -1914,8 +1914,8 @@ const password = isSecret(options.password)
 #### `secureReadDenied`
 
 The `POLICY_DENIED` error for a read on a secure field. `subject` ends the
-message: what was read, or why the engine refused it. Throw it instead of writing your own, so every engine refuses
-with the runner's wording.
+message: what was read, or why the engine refused it. Throw it instead of
+writing your own, so every engine refuses with the runner's wording.
 
 ```ts
 if (field.secure) throw secureReadDenied('the field is a password field');

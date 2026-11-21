@@ -300,7 +300,10 @@ export class ConfigurationError extends E2EError {
  * one, so the wording cannot drift between core and an engine.
  */
 export function secureReadDenied(subject: string): ConfigurationError {
-  return new ConfigurationError('POLICY_DENIED', `reading values from a secure field is denied: ${subject}`);
+  return new ConfigurationError(
+    'POLICY_DENIED',
+    `reading values from a secure field is denied: ${subject}`,
+  );
 }
 
 export class CollectionError extends ConfigurationError {
