@@ -750,10 +750,11 @@ export interface EngineSnapshot {
   readonly pixels?: ObservationPixels;
   /**
    * Regions masked in the screenshot; the harness checks it covers every secure
-   * node. Report it only when the harness asked for pixels. An engine that
-   * cannot mask every secure node on screen omits `pixels` and still reports
-   * the count, so `toHaveScreenshot` fails with `POLICY_DENIED` and the agent
-   * reads `MASKING_UNPROVEN`, not a missing screenshot.
+   * node. Report it only when the harness asked for pixels (`pixels` or
+   * `pixelFallback`). An engine that cannot mask every secure node on screen
+   * omits `pixels` and still reports the count, so `toHaveScreenshot` fails
+   * with `POLICY_DENIED` and the agent reads `MASKING_UNPROVEN`, not a missing
+   * screenshot.
    */
   readonly maskedRegionCount?: number;
 }
