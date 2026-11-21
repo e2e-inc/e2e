@@ -1011,7 +1011,7 @@ describe('observation', () => {
     const unbounded = await h.engine.observe!(operation(), { pixels: true });
     expect(unbounded.pixels).toBeUndefined();
     expect(unbounded.maskedRegionCount).toBe(0);
-    await expect(h.engine.artifacts!.screenshot('password', operation())).rejects.toMatchObject({ code: 'POLICY_DENIED' });
+    await expect(h.engine.artifacts!.screenshot('password', operation())).rejects.toMatchObject({ category: 'configuration', code: 'POLICY_DENIED' });
     expect(h.fake.methods().filter((method) => method === 'capture.screenshot')).toHaveLength(screenshots);
     expect(existsSync(path.join(artifactsDir, 'screenshots'))).toBe(false);
   });
@@ -1590,7 +1590,7 @@ describe('session hooks, viewport swipe, location, artifacts', () => {
     h.fake.respond('capture.snapshot', () => ({
       nodes: [{ ref: 'e1', type: 'SecureTextField', label: 'PIN', value: '1234' }],
     }));
-    await expect(h.engine.artifacts!.screenshot('leak', operation())).rejects.toMatchObject({ code: 'POLICY_DENIED' });
+    await expect(h.engine.artifacts!.screenshot('leak', operation())).rejects.toMatchObject({ category: 'configuration', code: 'POLICY_DENIED' });
     expect(existsSync(path.join(artifactsDir, 'screenshots', '002-leak.png'))).toBe(false);
     expect(new Set(temporaryFiles).size).toBe(temporaryFiles.length);
     for (const file of temporaryFiles) {

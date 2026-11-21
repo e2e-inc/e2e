@@ -5,4 +5,4 @@
 "e2e": patch
 ---
 
-On iOS and Android, `toHaveScreenshot` now fails at once with `POLICY_DENIED` instead of waiting out its timeout when a secure field on screen has no bounds to mask, `app.screenshot()` fails with `POLICY_DENIED` there too, and an agent step reports `MASKING_UNPROVEN` for its screenshot.
+On iOS and Android, when a secure field on screen has no bounds to mask, `toHaveScreenshot` now fails at once with `POLICY_DENIED` instead of after its timeout, `app.screenshot()` fails with `POLICY_DENIED` instead of `ENGINE_FAILURE`, and an agent step reports `MASKING_UNPROVEN` for its screenshot.
