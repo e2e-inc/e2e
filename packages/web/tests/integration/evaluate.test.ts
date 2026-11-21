@@ -120,6 +120,19 @@ describe('browser.evaluate error boundaries', () => {
       .resolves.toBe('quote " line\n\u2028 \ud83d\ude00 lone \ud800');
   });
 
+  it('releases the result handle of every evaluation', async () => {
+    // Playwright keeps a client object per handle until it is disposed; the
+    // connection's object map is the only place that count shows.
+    const connection: unknown = Reflect.get(page, '_connection');
+    const objects: unknown = typeof connection === 'object' && connection !== null ? Reflect.get(connection, '_objects') : undefined;
+    if (!(objects instanceof Map)) throw new Error('playwright-core no longer keeps its objects in _connection._objects');
+    await browser.evaluate('() => 1');
+    const before = objects.size;
+    for (let index = 0; index < 50; index += 1) await browser.evaluate('() => 1');
+    await page.evaluate('1');
+    expect(objects.size - before).toBeLessThanOrEqual(2);
+  });
+
   it('returns a result after the page deletes or replaces the globals the transport could use', async () => {
     await expect(browser.evaluate(
       '() => { delete window.Array; window.Map = 1; window.JSON = 1; window.Object = 1; window.String = 1; return { items: [1, "two"], ok: true }; }',

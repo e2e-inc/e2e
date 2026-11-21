@@ -688,7 +688,13 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
         const page = surface.requirePage();
         try {
           const handle = await page.evaluateHandle(evaluate, input);
-          return await handle.jsonValue();
+          // Playwright keeps a handle object until it is disposed, and a poll
+          // over evaluate makes one per read.
+          try {
+            return await handle.jsonValue();
+          } finally {
+            void handle.dispose().catch(() => undefined);
+          }
         } catch (cause) {
           throw (await pageScriptFailure(page, cause, 'evaluate', operation.timeoutMs)) ?? cause;
         }
