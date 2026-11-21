@@ -382,7 +382,7 @@ describe('checkout', { tags: ['smoke'], serial: true }, () => {
 });
 ```
 
-- 分组接受测试的[选项](#options)，但不包括 `only`，另外还接受 [`serial`](#serial)。
+- 分组接受测试的[选项](#options)，另外还接受 [`serial`](#serial)。
 - 主体必须同步执行。
 
 | 抛出 | 条件 |
@@ -415,9 +415,7 @@ describe('legacy checkout', { fail: 'old payment form' }, () => {}); // with a r
 
 #### `describe.only`
 
-Declares a focused group, the same as `only: true` on `describe`. Every
-test in it, nested groups included, is focused the way
-[`test.only`](#test-only) focuses one.
+声明一个单独运行的分组，等同于在 `describe` 上设置 `only: true`。分组中的每个测试（包括嵌套分组中的测试）都会像 [`test.only`](#test-only) 那样单独运行。
 
 ```ts
 describe.only('checkout', () => {
@@ -430,20 +428,16 @@ test('signs in', async ({ app }) => {}); // filtered
 describe('checkout', { only: true }, () => {}); // the same, by option
 ```
 
-- Focused groups and `test.only` combine: every focused test runs, and the
-  rest are reported as `filtered`.
-- A skipped test, by `test.skip`, `test.fixme`, or a skipped inner group, is
-  not focused, so it is `filtered` too, as beside `test.only`.
-- The innermost `only` wins: `only: false` on an inner group or a test opts
-  it out of the focus.
-- A CI run with a focused group fails with `ONLY_IN_CI`.
-- A serial group can be focused whole. `only` inside a serial group is
-  refused, since the group runs as one unit.
+- 单独运行的分组可以与 `test.only` 一起使用：所有单独运行的测试都会运行，其余测试报告为 `filtered`。
+- 通过 `test.skip`、`test.fixme` 或被跳过的内层分组跳过的测试不会单独运行，因此与在 `test.only` 旁边一样报告为 `filtered`。
+- 最内层的 `only` 生效：在内层分组或测试上设置 `only: false` 可以将其排除在外。
+- CI 运行中包含单独运行的分组时会以 `ONLY_IN_CI` 失败。
+- serial 分组可以整体单独运行。serial 分组作为一个单元运行，因此其内部的 `only` 会被拒绝。
 
-| Throws | When |
+| 抛出 | 条件 |
 | --- | --- |
-| `COLLECTION_ERROR` | The group is inside a serial group. |
-| `COLLECTION_ERROR` | An `only` option on `describe.only`. It is also a type error. |
+| `COLLECTION_ERROR` | 分组位于 serial 分组内部。 |
+| `COLLECTION_ERROR` | 在 `describe.only` 上设置 `only` 选项。这也是类型错误。 |
 
 ### 钩子
 

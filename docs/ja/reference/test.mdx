@@ -383,7 +383,7 @@ describe('checkout', { tags: ['smoke'], serial: true }, () => {
 });
 ```
 
-- グループは `only` を除くテストの[オプション](#options)に加え、[`serial`](#serial) を受け取ります。
+- グループはテストの[オプション](#options)に加え、[`serial`](#serial) を受け取ります。
 - 本体は同期的に実行します。
 
 | エラー | 発生条件 |
@@ -416,9 +416,7 @@ describe('legacy checkout', { fail: 'old payment form' }, () => {}); // with a r
 
 #### `describe.only`
 
-Declares a focused group, the same as `only: true` on `describe`. Every
-test in it, nested groups included, is focused the way
-[`test.only`](#test-only) focuses one.
+`describe` に `only: true` を指定した場合と同じく、実行対象を絞ったグループを宣言します。ネストしたグループを含め、グループ内のすべてのテストが [`test.only`](#test-only) と同じように対象になります。
 
 ```ts
 describe.only('checkout', () => {
@@ -431,20 +429,16 @@ test('signs in', async ({ app }) => {}); // filtered
 describe('checkout', { only: true }, () => {}); // the same, by option
 ```
 
-- Focused groups and `test.only` combine: every focused test runs, and the
-  rest are reported as `filtered`.
-- A skipped test, by `test.skip`, `test.fixme`, or a skipped inner group, is
-  not focused, so it is `filtered` too, as beside `test.only`.
-- The innermost `only` wins: `only: false` on an inner group or a test opts
-  it out of the focus.
-- A CI run with a focused group fails with `ONLY_IN_CI`.
-- A serial group can be focused whole. `only` inside a serial group is
-  refused, since the group runs as one unit.
+- 対象を絞ったグループと `test.only` は併用できます。対象のテストはすべて実行し、ほかのテストは `filtered` と報告します。
+- `test.skip`、`test.fixme`、またはスキップした内側のグループによるスキップ対象のテストは対象にならず、`test.only` と並べた場合と同じく `filtered` になります。
+- いちばん内側の `only` が優先されます。内側のグループやテストに `only: false` を指定すると、そのグループやテストは対象から外れます。
+- 対象を絞ったグループがあると、CI では `ONLY_IN_CI` で実行が失敗します。
+- serial グループはグループ全体を対象にできます。serial グループは 1 単位として実行するため、その内側の `only` は拒否します。
 
-| Throws | When |
+| エラー | 発生条件 |
 | --- | --- |
-| `COLLECTION_ERROR` | The group is inside a serial group. |
-| `COLLECTION_ERROR` | An `only` option on `describe.only`. It is also a type error. |
+| `COLLECTION_ERROR` | グループが serial グループの内側にある場合。 |
+| `COLLECTION_ERROR` | `describe.only` に `only` オプションを指定した場合。型エラーにもなります。 |
 
 ### フック
 
