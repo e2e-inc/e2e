@@ -288,9 +288,9 @@ test('shows the offline banner', { platforms: ['android'] }, async ({ app, devic
 });
 ```
 
+`device.clearKeychain()` सिम्युलेटर का keychain रीसेट करता है। `app.clearState()`
 keychain को नहीं छूता। `clearKeychain()` कॉल करने पर, पहले से सेव किया हुआ सेशन
 टोकन अगले लॉन्च पर नहीं रहता। `clearKeychain()` सिर्फ़ iOS पर है।
-लॉन्च पर नहीं रहता। `clearKeychain()` सिर्फ़ iOS पर है।
 
 जो काम `device` में नहीं है, उसके लिए `device.unstable_raw` है। इसमें टेस्ट के
 सेशन से जुड़ा एक [agent-device](https://github.com/callstack/agent-device)
