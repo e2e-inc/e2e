@@ -527,7 +527,7 @@ describe('createEngineSession pixels-only observation', () => {
     raw = { root: raw.root, viewport: raw.viewport, treeUnavailable: true };
     await expect(session.observe(OP, { pixelFallback: true })).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
     // Pixels whose masking an engine reports short of the secure nodes are no fallback either.
-    raw = { ...raw, pixels: { data: new Uint8Array(8), mediaType: 'image/png', width: 2, height: 2, scale: 1 }, maskedRegionCount: -1 };
+    raw = { ...raw, root: { ref: raw.root.ref }, pixels: { data: new Uint8Array(8), mediaType: 'image/png', width: 2, height: 2, scale: 1 }, maskedRegionCount: -1 };
     await expect(session.observe(OP, { pixelFallback: true })).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
   });
 
