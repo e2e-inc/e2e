@@ -3,7 +3,7 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { OperationContext, SemanticNode } from '@e2e-dev/core/engine';
+import type { EngineAppInfo, OperationContext, SemanticNode } from '@e2e-dev/core/engine';
 import { afterEach, describe, expect, it } from 'vitest';
 import { pinnedExecutable } from '../../src/binary.ts';
 import { resolveOptions } from '../../src/options.ts';
@@ -137,6 +137,7 @@ interface Launch {
   readonly openTimeoutMs?: number;
   readonly observe?: boolean;
   readonly options?: Parameters<typeof resolveOptions>[0];
+  readonly launchArguments?: EngineAppInfo['launchArguments'];
 }
 
 /**
@@ -145,7 +146,7 @@ interface Launch {
  * environment (its token) and reports it, as agent-desktop does; `app.pid`
  * is that process once launched.
  */
-async function initialized(scenario: Scenario | ((pid: number) => Scenario), { snapshot = 'macos/appkit-form', options = {}, runHeaded = false }: Launch = {}) {
+async function initialized(scenario: Scenario | ((pid: number) => Scenario), { snapshot = 'macos/appkit-form', options = {}, runHeaded = false, launchArguments }: Launch = {}) {
   const fake = fakeScenario({
     status: [{ ok: true, data: { version: '1.3.1', permissions: { accessibility: { state: 'granted' } } } }],
     launch: [{ spawn: true, ok: true, data: { app: 'SpikeForm', pid: SPAWNED, process_instance: 'instance-1' } }],
@@ -168,7 +169,7 @@ async function initialized(scenario: Scenario | ((pid: number) => Scenario), { s
     runId: 'run',
     targetName: 'macos',
     projectRoot: process.cwd(),
-    app: { bundleId: 'dev.e2e.spike.form' },
+    app: { bundleId: 'dev.e2e.spike.form', ...(launchArguments === undefined ? {} : { launchArguments }) },
     // A secret in the run's environment, which neither agent-desktop nor the app it launches may see.
     env: { ...fake.env, E2E_PROBE_SECRET: 'hunter2' },
     headed: runHeaded,
@@ -210,6 +211,12 @@ const startAttempt = (surface: DesktopSurface) =>
   });
 
 describe('DesktopSurface', () => {
+  it('passes the target\'s launch arguments after its own, an object spelled as user defaults', async () => {
+    const { fake } = await launched({}, { launchArguments: { AppleLanguages: ['fr'], e2e: true } });
+    const launch = fake.calls().find((call) => call.key === 'launch')?.args ?? [];
+    expect(launch.filter((arg) => arg.startsWith('--arg='))).toEqual(['--arg=-ApplePersistenceIgnoreState', '--arg=YES', '--arg=-AppleLanguages', '--arg=(fr)', '--arg=-e2e', '--arg=YES']);
+  });
+
   it('launches the app by id and reads only the window of the process it launched', async () => {
     const { fake } = await launched({});
     const calls = fake.calls();
