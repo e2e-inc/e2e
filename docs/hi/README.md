@@ -134,7 +134,7 @@ translation moves or goes with it in the same change.
 | secret fill | सीक्रेट भरना (fill as a noun: फ़िल, m) | |
 | visual testing | विज़ुअल टेस्टिंग | f |
 | self-healing | सेल्फ़-हीलिंग | f |
-| pull request | पुल रिक्वेस्ट (PR) | m |
+| pull request | पुल रिक्वेस्ट (PR) | f |
 | config, configuration | कॉन्फ़िग, कॉन्फ़िगरेशन | m, m |
 | config file | कॉन्फ़िग फ़ाइल | f |
 | screen | स्क्रीन | f |
