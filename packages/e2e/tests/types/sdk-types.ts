@@ -235,8 +235,11 @@ customExecutorObservation.keyboardVisible satisfies boolean | undefined;
 ({
   targets: [{ engine, app: { bundleId: 'dev.shop.app', appPath: './build/Shop.app', launchArguments: ['-e2e'], permissions: { camera: 'grant' } } }],
 }) satisfies E2EConfig;
+({ targets: [{ engine, app: { bundleId: 'dev.shop.app', permissions: 'all' } }] }) satisfies E2EConfig;
 // @ts-expect-error a permission is granted, denied, or reset; there is no `allow`
 ({ targets: [{ engine, app: { bundleId: 'dev.shop.app', permissions: { camera: 'allow' } } }] }) satisfies E2EConfig;
+// @ts-expect-error `'all'` is the one shorthand; anything else names each permission
+({ targets: [{ engine, app: { bundleId: 'dev.shop.app', permissions: 'every' } }] }) satisfies E2EConfig;
 // @ts-expect-error launch arguments are the strings the launch command takes
 ({ targets: [{ engine, app: { bundleId: 'dev.shop.app', launchArguments: [1] } }] }) satisfies E2EConfig;
 // @ts-expect-error the app URL is the target's app.url, not a key of the target itself

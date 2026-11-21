@@ -1,6 +1,7 @@
 /**
  * A web target's `app.permissions`: the browser permissions every page of an
- * attempt holds. The surface grants them on each context the attempt opens.
+ * attempt holds, or `'all'` for every one its browser grants. The surface
+ * grants them on each context the attempt opens.
  */
 
 import { ConfigurationError, rejectUnknownKeys, type AppPermissionState } from '@e2e-dev/core/engine';
@@ -22,8 +23,10 @@ const BROWSER_PERMISSIONS = {
  * Playwright only grants, and Chromium denies every permission a grant
  * leaves out, so neither `deny` nor `reset` can mean what it does on a
  * device. The harness has checked the map's shape and states already.
+ * `'all'` names only permissions the browser grants, so it needs no check.
  */
-export function validatePermissions(targetName: string, browser: BrowserName, permissions: Readonly<Record<string, AppPermissionState>>): void {
+export function validatePermissions(targetName: string, browser: BrowserName, permissions: Readonly<Record<string, AppPermissionState>> | 'all'): void {
+  if (permissions === 'all') return;
   const where = `target "${targetName}" app.permissions`;
   rejectUnknownKeys(`${where} on ${browser}`, permissions, BROWSER_PERMISSIONS[browser]);
   for (const [name, state] of Object.entries(permissions)) {
@@ -34,4 +37,9 @@ export function validatePermissions(targetName: string, browser: BrowserName, pe
       );
     }
   }
+}
+
+/** The permission names a context on `browser` is granted: each one `browser` grants for `'all'`, else the map's names. */
+export function grantedPermissions(browser: BrowserName, permissions: Readonly<Record<string, AppPermissionState>> | 'all' | undefined): readonly string[] {
+  return permissions === 'all' ? BROWSER_PERMISSIONS[browser] : Object.keys(permissions ?? {});
 }

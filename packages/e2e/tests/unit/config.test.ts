@@ -511,6 +511,9 @@ describe('resolveConfig', () => {
     expect(() => resolveApp({ permissions: { camera: 'allow' } } as never)).toThrow(
       'app.permissions.camera must be grant, deny, or reset, got "allow"',
     );
+    expect(() => resolveApp({ permissions: 'every' } as never)).toThrow(
+      "app.permissions must be 'all' or an object of permission name to grant, deny, or reset",
+    );
     expect(() => resolve({ targets: [{ ...WEB, app: 'https://app.test' }] } as never)).toThrow('target "web" app must be an object');
     expect(() => resolve({ targets: [{ ...WEB, app: { url: 'https://app.test' } }] })).toThrow(
       'target "web" declares app without an engine',
@@ -522,6 +525,7 @@ describe('resolveConfig', () => {
       launchArguments: ['-e2e'],
       permissions: { camera: 'grant' },
     });
+    expect(resolveApp({ bundleId: 'dev.shop.app', permissions: 'all' }).permissions).toBe('all');
   });
 
   it("hands the declaration to the engine's validateApp, which names the target", () => {
