@@ -194,6 +194,35 @@ describe('SessionTestLines', () => {
     expect(noteOf(await session.run('tap', { target: 'n4' }))).toBe('Test line: await screen.getByTestId("star").tap();');
   });
 
+  it('finds a control nothing names by its role: alone, under its row, or by position', async () => {
+    const quantity: Fake = { id: 'n40', role: 'spinbutton', y: 80 };
+    const only = await harness({ screen: [quantity, save], matches: { 'getByRole("spinbutton")': [quantity] } });
+    expect(noteOf(await only.run('type', { target: 'n40', value: '10' }))).toBe(
+      'Test line: await screen.getByRole("spinbutton").fill("10"); // the only spinbutton on the screen, found by its role alone; a name or test id holds up better',
+    );
+
+    const other: Fake = { id: 'n41', role: 'spinbutton', y: 120 };
+    const rows: Fake[] = [
+      { id: 'n42', role: 'row', y: 80, children: [{ id: 'n43', text: 'Boxes', y: 80 }, quantity] },
+      { id: 'n44', role: 'row', y: 120, children: [{ id: 'n45', text: 'Crates', y: 120 }, other] },
+    ];
+    const scoped = await harness({
+      screen: rows,
+      matches: { 'getByRole("spinbutton")': [quantity, other], 'getByRole("row").filter({ hasText: "Crates" }) >> getByRole("spinbutton")': [other] },
+    });
+    expect(noteOf(await scoped.run('type', { target: 'n41', value: '3' }))).toBe(
+      'Test line: await screen.getByRole("row").filter({ hasText: "Crates" }).getByRole("spinbutton").fill("3");',
+    );
+
+    const placed = await harness({ screen: [quantity, other], matches: { 'getByRole("spinbutton")': [quantity, other] } });
+    expect(noteOf(await placed.run('type', { target: 'n41', value: '3' }))).toBe(
+      'Test line: await screen.getByRole("spinbutton").nth(1).fill("3"); // 2 of 2 matches, by position; a unique name or test id holds up better',
+    );
+    // A node with no role getByRole takes still has nothing to find it by.
+    const bare = await harness({ screen: [{ id: 'n46', y: 200 }], matches: {} });
+    expect(noteOf(await bare.run('tap', { target: 'n46' }))).toBe('No test line: the node has no name, text, placeholder, or test id to find it by.');
+  });
+
   it('never prints a locator whose one match is another node', async () => {
     const caption: Fake = { id: 'n9', text: 'Save', y: 300 };
     const session = await harness({ screen: [save, caption], matches: { 'getByText("Save")': [caption] } });
@@ -443,10 +472,10 @@ describe('SessionTestLines', () => {
     );
   });
 
-  it('drafts the statements run_code passed among the action lines, each awaited and ended', async () => {
+  it('drafts the lines run_code passed among the action lines', async () => {
     const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] } });
     session.lines.opened();
-    session.lines.ran(["await screen.getByLabel('Email').fill(credentials.user('admin').password);", "expect(screen.getByRole('status')).toHaveText('Saved')"]);
+    session.lines.ran(["await screen.getByLabel('Email').fill(credentials.user('admin').password);", "await expect(screen.getByRole('status')).toHaveText('Saved');"]);
     await session.run('tap', { target: 'n2' });
     const draft = session.lines.draft();
     expect(draft.split('\n').slice(0, 6)).toEqual([

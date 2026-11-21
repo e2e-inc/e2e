@@ -301,6 +301,7 @@ describe('MCP attachments to held tests', { timeout: 60_000 }, () => {
       test: 'checkout',
       engine: '@e2e-dev/web',
       app: {},
+      path: '/echo',
       headed: false,
     };
 
@@ -624,16 +625,16 @@ ${CONFIG.replace('  video: true,', `  video: true,
       },
     });
     expect(ran.isError, ran.text).toBe(false);
-    expect(ran.text).toContain('All 2 statements passed.');
+    expect(ran.text).toContain('Test lines: 2.');
     expect(ran.text).toContain('Submitted');
-    expect((await invoke(client, 'call', { tool: 'test_lines' })).text).toContain('await app.open("/from-code");');
+    expect((await invoke(client, 'call', { tool: 'test_lines' })).text).toContain("await app.open('/from-code');");
 
     const missed = await invoke(client, 'call', {
       tool: 'run_code',
       args: { code: 'await screen.getByRole("button", "Missing").tap();', timeout: 50 },
     });
     expect(missed.isError, missed.text).toBe(true);
-    expect(missed.text).toContain('Each statement waited at most 50 ms.');
+    expect(missed.text).toContain('Test lines: 1, 1 failed.');
     expect(missed.text).toContain('LOCATOR_NOT_FOUND');
 
     expect(e2e(dir, 'run', '--step', 'next').status).toBe(0);
@@ -683,31 +684,24 @@ ${CONFIG.replace('  video: true,', `  video: true,
     }
   });
 
-  it('fills a password through attached run_code only in a password field and keeps its value out of the output', async () => {
+  it('fills a password through attached run_code and keeps its value out of the output', async () => {
     const dir = project('await screen.pause();');
     const held = await pause(dir, '--trace', 'on');
     const { client, log } = await mcp(dir);
     const opened = await openSession(client, { attach: held.id });
-    const denied = await invoke(client, 'call', {
-      tool: 'run_code',
-      args: { code: 'await screen.getByRole("textbox", "Email").fill(credentials.user("buyer").password);' },
-    });
-    expect(denied.isError).toBe(true);
-    expect(denied.text).toContain('POLICY_DENIED');
-
     const allowed = await invoke(client, 'call', {
       tool: 'run_code',
       args: { code: 'await screen.getByRole("textbox", "Password").fill(credentials.user("buyer").password);' },
     });
     expect(allowed.isError, allowed.text).toBe(false);
-    expect(allowed.text).toContain('The statement passed.');
+    expect(allowed.text).toContain('Test lines: 1.');
 
     const observed = await invoke(client, 'call', { tool: 'observe' });
     expect(observed.text).toMatch(/textbox "Password".*<secret:buyer\.password>/);
     expect(observed.text).not.toMatch(/textbox "Email".*<secret:buyer\.password>/);
 
     const lines = await invoke(client, 'call', { tool: 'test_lines' });
-    expect(lines.text).toContain('getByRole("textbox", "Password").fill(credentials.user("buyer").password)');
+    expect(lines.text).toContain("getByRole('textbox', 'Password').fill(credentials.user('buyer').password)");
 
     const next = e2e(dir, 'run', '--step', 'next');
     expect(next.status).toBe(0);
@@ -715,7 +709,6 @@ ${CONFIG.replace('  video: true,', `  video: true,
 
     const output = [
       opened.text,
-      denied.text,
       allowed.text,
       observed.text,
       lines.text,

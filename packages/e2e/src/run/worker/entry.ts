@@ -31,6 +31,7 @@ import type {
 import { inHeldTestToolCall } from './held-test-tool-scope.ts';
 import { TargetWorker, type ResolvedUnitPairs, type TargetWorkerDeps } from './session.ts';
 import { isAbandonedRejection } from '@e2e-dev/core/lib/internal/abandoned';
+import { claimRunCodeStray } from '../../session-tools/code-strays.ts';
 
 /**
  * Outbound messages in flight. `process.send` is asynchronous and a
@@ -241,7 +242,11 @@ function main(): void {
   // Interrupts arrive over IPC; terminal signals target the runner process.
   process.on('SIGINT', () => undefined);
   process.on('SIGTERM', () => undefined);
-  process.on('uncaughtException', (cause) => fatal(cause));
+  // Code an attached session ran on a held test is not the test: what it throws outside its call stays out of the attempt.
+  const fromRunCode = (cause: unknown): boolean => claimRunCodeStray(cause, () => undefined);
+  process.on('uncaughtException', (cause) => {
+    if (!fromRunCode(cause)) fatal(cause);
+  });
   // A step or poll the test did not await rejects on a promise nobody holds
   // once it is cancelled; the attempt has already recorded it as STEP_NOT_AWAITED.
   // Any other rejection nobody caught is charged to the attempt in flight,
@@ -249,6 +254,7 @@ function main(): void {
   // has finished is it the worker's.
   process.on('unhandledRejection', (cause) => {
     if (isAbandonedRejection(cause)) return;
+    if (fromRunCode(cause)) return;
     if (worker?.strayRejection(cause) !== true) fatal(cause);
   });
 

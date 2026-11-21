@@ -57,7 +57,13 @@ larger budget. [How agent steps work](/agent-steps) explains a step in full.
   on a built-in tool that declares fields, never runs. The model reads the refusal
   as the call's result and tries again.
 - The runner never evaluates model text as code, selectors, shell commands,
-  or config.
+  or config. The one exception is the MCP server's
+  [`run_code`](/reference/mcp#run_code): it runs a coding agent's JavaScript
+  in the server's Node process, unconfined, with the authority of a test
+  file. The agent can already write a test and run it. What `run_code`
+  returns has the exact value of each configured secret redacted, but the
+  code itself can read a secret the app shows, so don't connect an agent you
+  don't trust with the project's files and secrets.
 
 | Fails with | When |
 | --- | --- |
@@ -76,9 +82,8 @@ These calls fail with `POLICY_DENIED`.
 | A `Secret` reaching a JSON sink | Handles carry no value, and no value may be serialized. |
 | Reading a value, text, or attribute from a secure field, with a getter or a `toHaveValue`, `toHaveText`, `toContainText`, or `toHaveAttribute` matcher | Assert the outcome, not the secret. A withheld value is redacted, not empty or absent. |
 | `type_secret` with an undeclared name | Only secrets in the step's params can be filled. |
-| `type_secret`, or a `fill` in MCP `run_code`, into a disabled or non-editable node | Sinks are `textbox`, `searchbox`, and `combobox`. |
+| `type_secret` into a disabled or non-editable node | Sinks are `textbox`, `searchbox`, and `combobox`. |
 | A password into a field that isn't a password field | Purpose must match. A generic secret fills any editable input. |
-| An MCP `run_code` locator found by part of a text (a regular expression, an `exact` other than `true`, `hasText`) when the config declares a secret | The engine matches it on unredacted text, so whether it matches could spell a secret out one piece at a time. `run_code` matchers compare redacted text instead. |
 | A mutating project tool requesting an observation | Observe in a separate call. |
 | `vision: 'only'` when pixels are withheld | There is nothing to fall back to. |
 | `browser.setCookies` with a cookie URL that isn't `http:` or `https:` | Only a web origin holds cookies. |
