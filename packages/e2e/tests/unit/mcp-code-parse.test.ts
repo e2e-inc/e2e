@@ -200,7 +200,7 @@ describe('parseCode refuses', () => {
     ["await expect(screen).toHaveScreenshot('home')", 'run_code: expect(screen) at 1:14 only compares screenshots, which run in a test; look with the screenshot tool'],
     ["await expect(screen.getByRole('main')).toHaveScreenshot()", 'run_code: "toHaveScreenshot" at 1:40 is left out of run_code: it compares against screenshots kept beside a test file, so it runs only in a test; look with the screenshot tool'],
     ["await app.screenshot('after')", 'run_code: "screenshot" at 1:11 is left out of run_code: it writes into the test attempt; use the screenshot tool with path to save a file'],
-    ["screen.getByLabel('Upload').setInputFiles('/etc/passwd')", 'run_code: "setInputFiles" at 1:29 is left out of run_code: it reads files from disk; attach files with the upload tool, which checks the paths'],
+    ["screen.getByLabel('Upload').setInputFiles('/etc/passwd')", 'run_code: "setInputFiles" at 1:29 is left out of run_code: it accepts file paths or in-memory payloads; use the upload tool for checked file paths'],
     ['screen.debug()', "run_code: \"debug\" at 1:8 is left out of run_code: it prints to the server's own output; read the screen with screen.tree() or the observe tool"],
     ['await screen.pause()', 'run_code: "pause" at 1:14 is left out of run_code: it pauses a test until someone resumes it; a session already keeps the app open between calls'],
     ["screen.getByRol('button').tap()", 'run_code: "getByRol" at 1:8 is not something run_code runs on screen; did you mean "getByRole"?'],

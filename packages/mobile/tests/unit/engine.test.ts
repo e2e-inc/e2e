@@ -1579,6 +1579,7 @@ describe('perform', () => {
     for (const action of [
       { kind: 'selectOption', value: 'x' },
       { kind: 'setInputFiles', paths: ['/tmp/x'] },
+      { kind: 'setInputFilePayloads', files: [{ name: 'x', mimeType: 'text/plain', buffer: new Uint8Array([120]) }] },
       { kind: 'scrollIntoView' },
       // Named keys other than Enter and Space, and every modifier, have no soft-keyboard equivalent.
       { kind: 'press', key: 'Escape' },
