@@ -44,7 +44,7 @@ async function labeled(): Promise<LabeledPullRequest[]> {
             pageInfo { hasNextPage endCursor }
             nodes {
               number mergeable isDraft
-              latestOpinionatedReviews(first: 100) { nodes { state author { login } } }
+              latestOpinionatedReviews(first: 100, writersOnly: true) { nodes { state author { login } } }
             }
           }
         }

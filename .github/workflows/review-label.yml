@@ -5,9 +5,9 @@ name: review-label
 # off as soon as that stops being true:
 # - `drop`: any later push, from the agent, a bot, or a human, and a move back
 #   to draft.
-# - `sweep`: a merge conflict or a standing change request, checked on every
-#   labeled PR (scripts/review-label/sweep.ts) when main moves and when a
-#   review requests changes.
+# - `sweep`: a merge conflict or a maintainer's standing change request,
+#   checked on every labeled PR (scripts/review-label/sweep.ts) when main
+#   moves and when a review requests changes.
 # pull_request_target so fork pushes get a token that can edit labels. A
 # `pull_request_review` run on a fork PR gets a read-only token, so
 # review-verdict.yml only marks the event and the sweep follows it through
@@ -55,7 +55,9 @@ jobs:
 
   sweep:
     # review-verdict skips its only job unless the review requests changes.
-    if: ${{ github.event_name != 'pull_request_target' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') }}
+    # That run uses the PR's copy of the file, so nothing is read from it and
+    # any other conclusion sweeps too; the push to main is the backstop.
+    if: ${{ github.event_name != 'pull_request_target' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion != 'skipped') }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:

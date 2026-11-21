@@ -148,11 +148,12 @@ the PR:
   review summary a person wrote. Reviews take the reaction through GraphQL
   only: `gh api graphql -f query='mutation($id:ID!){addReaction(input:{subjectId:$id,content:THUMBS_UP}){reaction{content}}}' -f id=<review node_id>`,
   with the `node_id` from `gh api repos/{owner}/{repo}/pulls/<pr>/reviews`.
-- No conflict, no draft, no standing change request, no `needs:compliance`
-  label, checks reported and green.
+- No conflict, no draft, no maintainer's standing change request, no
+  `needs:compliance` label, checks reported and green.
 
-Reach `READY` first, then comment `/ready` and give the 👍 to the workflow's
-reply if it posts one. Never resolve or react to get past the gate.
+Reach `READY` first, then comment `/ready`. A first PR's CI waits for a
+maintainer's approval, and `/ready` is refused until it has run. Never resolve
+or react to get past the gate.
 
 ## Learn
 

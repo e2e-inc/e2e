@@ -10,7 +10,11 @@ export interface LabeledPullRequest {
   /** GraphQL `MergeableState`; `UNKNOWN` while GitHub is still computing it. */
   mergeable: string;
   isDraft: boolean;
-  /** Each reviewer's latest approve, change request, or dismissal; plain comments never replace one. */
+  /**
+   * The latest approve, change request, or dismissal of each reviewer with
+   * write access; plain comments never replace one. Anyone can review a public
+   * PR, so a verdict from an account without write access is not counted.
+   */
   verdicts: { state: string; author: string | null }[];
 }
 

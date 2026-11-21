@@ -22,8 +22,8 @@ const GUIDELINES = 'https://github.com/e2e-inc/e2e/blob/main/CONTRIBUTING.md#rea
 
 const COMPLIANCE_LABEL = 'needs:compliance';
 
-// STALE: GitHub expired a result nobody refreshed; it needs a rerun, not trust.
-const FAILED = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'STALE', 'ERROR']);
+// Anything else, a value GitHub adds later included, counts as failing.
+const PASSED = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 const PENDING = new Set(['PENDING', 'EXPECTED']);
 
 /** A CheckRun carries `status` and `conclusion`; a legacy StatusContext only `state`. */
@@ -53,6 +53,11 @@ export interface Candidate extends LabeledPullRequest {
   author: string | null;
   labels: string[];
   checks: Check[];
+  /**
+   * The workflow runs on the head. One held for a maintainer's approval, as a
+   * first-time contributor's are, starts no job and so shows up in no check.
+   */
+  runs: { status: string; conclusion: string | null }[];
   threads: Thread[];
   feedback: Feedback[];
 }
@@ -96,7 +101,7 @@ export interface CommentPayload {
 export function readyRequest({ issue, comment }: CommentPayload): number | undefined {
   if (issue.pull_request === undefined || issue.state !== 'open') return undefined;
   if (issue.user === null || comment.user?.id !== issue.user.id) return undefined;
-  return comment.body.trim() === READY_COMMAND ? issue.number : undefined;
+  return comment.body.trimEnd() === READY_COMMAND ? issue.number : undefined;
 }
 
 /** A check name reduced to plain characters, short enough to list. */
@@ -132,18 +137,24 @@ export function readyBlockers(pr: Candidate): string[] {
     const outcome = check.conclusion ?? check.state;
     if (check.status !== undefined && check.status !== 'COMPLETED') pending.push(check);
     else if (outcome === undefined || outcome === null || PENDING.has(outcome)) pending.push(check);
-    else if (FAILED.has(outcome)) failing.push(check);
+    else if (!PASSED.has(outcome)) failing.push(check);
   }
   if (pr.checks.length === 0) blockers.push('no checks have reported on the latest commit');
   if (failing.length > 0) blockers.push(`failing checks: ${listed(failing)}`);
   if (pending.length > 0) blockers.push(`checks still running: ${listed(pending)}`);
+  const done = pr.runs.filter(({ status }) => status === 'COMPLETED');
+  const held = done.filter(({ conclusion }) => conclusion === 'ACTION_REQUIRED');
+  const broken = done.filter(({ conclusion }) => conclusion !== 'ACTION_REQUIRED' && (conclusion === null || !PASSED.has(conclusion)));
+  if (held.length > 0) blockers.push(`${held.length} workflow run(s) waiting for a maintainer to approve them, so CI has not run on the latest commit`);
+  if (done.length < pr.runs.length) blockers.push(`${pr.runs.length - done.length} workflow run(s) still running`);
+  if (broken.length > 0) blockers.push(`${broken.length} workflow run(s) did not pass`);
   // Review feedback is never cleared by the author alone and unseen: a thread
   // has to be resolved, one somebody else opened needs the author's reply
   // before the author resolves it, and a comment needs the author's 👍.
   const unresolved = pr.threads.filter(({ isResolved }) => !isResolved);
   if (unresolved.length > 0) blockers.push(`${unresolved.length} unresolved review thread(s): ${linked(unresolved)}`);
   const silenced = pr.threads.filter(
-    ({ isResolved, resolvedBy, authors }) => isResolved && resolvedBy === pr.author && authors[0] !== pr.author && !authors.includes(pr.author),
+    ({ isResolved, resolvedBy, authors }) => isResolved && resolvedBy === pr.author && !authors.includes(pr.author),
   );
   if (silenced.length > 0) blockers.push(`${silenced.length} review thread(s) you resolved without a reply: ${linked(silenced)}`);
   const unacknowledged = pr.feedback.filter(({ author, thumbs }) => author !== pr.author && !thumbs.includes(pr.author));

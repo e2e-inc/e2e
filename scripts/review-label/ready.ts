@@ -25,6 +25,7 @@ import {
   type RawReview,
 } from './gates.ts';
 import { addReadyLabel, graphql, removeReadyLabel, setMarkerComment } from './github.ts';
+import { staleReasons } from './stale.ts';
 
 interface Connection<T> {
   pageInfo: { hasNextPage: boolean; endCursor: string | null };
@@ -48,7 +49,14 @@ interface PullRequest {
   }>;
   comments: Connection<RawComment>;
   reviews: Connection<RawReview>;
-  commits: { nodes: { commit: { statusCheckRollup: { contexts: Connection<Context> } | null } }[] };
+  commits: {
+    nodes: {
+      commit: {
+        checkSuites: { nodes: { status: string; conclusion: string | null; workflowRun: { databaseId: number } | null }[] };
+        statusCheckRollup: { contexts: Connection<Context> } | null;
+      };
+    }[];
+  };
 }
 
 const FEEDBACK = 'url body author { login kind: __typename } reactions(content: THUMBS_UP, first: 100) { nodes { user { login } } }';
@@ -59,7 +67,7 @@ const QUERY = `query($owner: String!, $name: String!, $number: Int!, $threads: S
       state isDraft mergeable headRefOid
       author { login }
       labels(first: 100) { nodes { name } }
-      latestOpinionatedReviews(first: 100) { nodes { state author { login } } }
+      latestOpinionatedReviews(first: 100, writersOnly: true) { nodes { state author { login } } }
       reviewThreads(first: 50, after: $threads) {
         pageInfo { hasNextPage endCursor }
         nodes { isResolved resolvedBy { login } comments(first: 100) { nodes { url author { login } } } }
@@ -75,6 +83,7 @@ const QUERY = `query($owner: String!, $name: String!, $number: Int!, $threads: S
       commits(last: 1) {
         nodes {
           commit {
+            checkSuites(first: 100) { nodes { status conclusion workflowRun { databaseId } } }
             statusCheckRollup {
               contexts(first: 100, after: $checks) {
                 pageInfo { hasNextPage endCursor }
@@ -91,17 +100,24 @@ const QUERY = `query($owner: String!, $name: String!, $number: Int!, $threads: S
   }
 }`;
 
-/** The PR as it is now, with every review thread, comment, review, and check on its head. */
-async function snapshot(number: number): Promise<Candidate & { state: string; head: string }> {
+/**
+ * The PR as it is now, with every review thread, comment, review, and check
+ * on its head. `moved` when a push landed between pages, which leaves checks
+ * from two heads mixed together.
+ */
+async function snapshot(number: number): Promise<Candidate & { state: string; head: string; moved: boolean }> {
   const threads: Candidate['threads'] = [];
   const comments: RawComment[] = [];
   const reviews: RawReview[] = [];
   const checks: Check[] = [];
   const cursors: Record<'threads' | 'comments' | 'reviews' | 'checks', string | null> = { threads: null, comments: null, reviews: null, checks: null };
+  let head: string | undefined;
   for (;;) {
     const data: { repository: { pullRequest: PullRequest } } = await graphql(QUERY, { number, ...cursors });
     const pr = data.repository.pullRequest;
-    const contexts = pr.commits.nodes[0]?.commit.statusCheckRollup?.contexts;
+    head ??= pr.headRefOid;
+    const commit = pr.commits.nodes[0]?.commit;
+    const contexts = commit?.statusCheckRollup?.contexts;
     // A page past a list's end is empty, so a list that ends first is not read twice.
     for (const thread of pr.reviewThreads.nodes) {
       threads.push({
@@ -120,11 +136,15 @@ async function snapshot(number: number): Promise<Candidate & { state: string; he
       cursors[key] = pages[key]?.endCursor ?? cursors[key];
       more ||= pages[key]?.hasNextPage === true;
     }
-    if (more) continue;
+    const moved = pr.headRefOid !== head;
+    if (more && !moved) continue;
     return {
       number,
       state: pr.state,
       head: pr.headRefOid,
+      moved,
+      // Apps that never report leave a queued suite with no run behind it.
+      runs: (commit?.checkSuites.nodes ?? []).filter(({ workflowRun }) => workflowRun !== null),
       isDraft: pr.isDraft,
       mergeable: pr.mergeable,
       author: pr.author?.login ?? null,
@@ -154,7 +174,7 @@ if (pr.state !== 'OPEN') {
   console.log(`#${number} is no longer open; nothing to do`);
   process.exit(0);
 }
-const blockers = readyBlockers(pr);
+const blockers = pr.moved ? ['a push landed while the PR was being checked; comment `/ready` again once its checks are green'] : readyBlockers(pr);
 if (blockers.length > 0) {
   console.log(`#${number} is not ready:\n${blockers.map((blocker) => `- ${blocker}`).join('\n')}`);
   if (!dryRun) await setMarkerComment(number, READY_MARKER, blockedComment(blockers));
@@ -164,10 +184,11 @@ console.log(`#${number} is ready at ${pr.head}${dryRun ? ' (dry run)' : ''}`);
 if (dryRun) process.exit(0);
 await addReadyLabel(number);
 await setMarkerComment(number, READY_MARKER, undefined);
-// The label vouches for the head the gates read. A push in between ran its
-// own label drop before the label existed, so it is taken back here.
+// The label vouches for the head the gates read. A push or a move to draft in
+// between ran its own label drop before the label existed, so it is taken
+// back here.
 const after = await snapshot(number);
-if (after.head !== pr.head) {
-  console.log(`#${number} moved to ${after.head} meanwhile; removing the label`);
+if (after.head !== pr.head || staleReasons(after).length > 0) {
+  console.log(`#${number} changed meanwhile; removing the label`);
   await removeReadyLabel(number);
 }

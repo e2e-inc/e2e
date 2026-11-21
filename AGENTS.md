@@ -469,7 +469,7 @@ thread handled, and labeled `Ready for Human Review`. "It compiles" and
   the PR's author once the gates in
   [CONTRIBUTING.md](./CONTRIBUTING.md#ready-for-human-review) hold: green,
   conflict-free, every review thread replied to and resolved, every comment
-  from a maintainer or a bot acknowledged with your 👍. The workflow refuses
+  from anyone else acknowledged with your 👍. The workflow refuses
   it otherwise and lists what is open. Never resolve a thread or react just to
   pass: handle the feedback first.
 - Never merge or approve.

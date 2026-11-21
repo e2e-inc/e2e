@@ -21,6 +21,7 @@ const pr = (overrides: Partial<Candidate> = {}): Candidate => ({
   author: 'ada',
   labels: [],
   checks: [{ name: 'check', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+  runs: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }],
   threads: [],
   feedback: [],
   ...overrides,
@@ -33,7 +34,7 @@ const payload = (overrides: { issue?: Partial<CommentPayload['issue']>; comment?
 
 test('takes the command from the PR author, alone in the comment', () => {
   assert.equal(readyRequest(payload()), 7);
-  assert.equal(readyRequest(payload({ comment: { body: '  /ready\r\n' } })), 7);
+  assert.equal(readyRequest(payload({ comment: { body: '/ready\r\n' } })), 7);
 });
 
 test('ignores the command from anyone else, on an issue, on a closed PR, or among other text', () => {
@@ -44,6 +45,7 @@ test('ignores the command from anyone else, on an issue, on a closed PR, or amon
   assert.equal(readyRequest(payload({ issue: { state: 'closed' } })), undefined);
   assert.equal(readyRequest(payload({ comment: { body: '/ready please' } })), undefined);
   assert.equal(readyRequest(payload({ comment: { body: 'not /ready' } })), undefined);
+  assert.equal(readyRequest(payload({ comment: { body: ' /ready' } })), undefined);
 });
 
 test('passes a green, mergeable PR with skipped and neutral checks', () => {
@@ -95,6 +97,38 @@ test('blocks on failing, running, and missing checks', () => {
 });
 
 const thread = (overrides: Partial<Thread> = {}): Thread => ({ isResolved: true, resolvedBy: 'grace', authors: ['grace'], url: 'https://github.com/t/1', ...overrides });
+
+test('treats an outcome it does not know as failing', () => {
+  assert.deepEqual(readyBlockers(pr({ checks: [{ name: 'new', status: 'COMPLETED', conclusion: 'SOMETHING_NEW' }] })), ['failing checks: `new`']);
+});
+
+test('blocks while workflow runs wait for approval, run, or did not pass', () => {
+  // A first-time contributor's PR: the only checks that reported are green.
+  assert.deepEqual(
+    readyBlockers(
+      pr({
+        runs: [
+          { status: 'COMPLETED', conclusion: 'SUCCESS' },
+          { status: 'COMPLETED', conclusion: 'ACTION_REQUIRED' },
+          { status: 'COMPLETED', conclusion: 'ACTION_REQUIRED' },
+        ],
+      }),
+    ),
+    ['2 workflow run(s) waiting for a maintainer to approve them, so CI has not run on the latest commit'],
+  );
+  assert.deepEqual(
+    readyBlockers(
+      pr({
+        runs: [
+          { status: 'QUEUED', conclusion: null },
+          { status: 'COMPLETED', conclusion: 'STARTUP_FAILURE' },
+          { status: 'COMPLETED', conclusion: 'SKIPPED' },
+        ],
+      }),
+    ),
+    ['1 workflow run(s) still running', '1 workflow run(s) did not pass'],
+  );
+});
 
 test('blocks on every unresolved thread, answered or not', () => {
   const threads = [

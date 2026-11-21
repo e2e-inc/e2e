@@ -21,17 +21,19 @@ on:
 
 permissions:
   contents: read
+  actions: read
   checks: read
   statuses: read
   pull-requests: write
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.issue.number }}
-
 jobs:
   label:
     # A cheap filter so other comments start no runner; ready.ts decides.
-    if: ${{ github.event.issue.pull_request && startsWith(github.event.comment.body, '/ready') }}
+    if: ${{ github.event.issue.pull_request && github.event.comment.user.id == github.event.issue.user.id && startsWith(github.event.comment.body, '/ready') }}
+    # On the job, so the skipped runs of other comments never queue here and
+    # push a waiting `/ready` out.
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.issue.number }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
