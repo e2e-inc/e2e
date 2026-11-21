@@ -159,11 +159,7 @@ export async function withProcessOutput<T>(ledger: SecretLedger, run: (output: R
   }
 }
 
-/**
- * Writes a reporter's own document straight to the terminal's `stream`, past
- * the routing of user output: `--reporter json` keeps stdout for its report
- * while what user code prints moves to stderr.
- */
+/** Writes the runner's own text straight to the terminal's `stream`, past the routing of user output. */
 export function writeTerminal(stream: OutputStream, text: string): void {
   const terminal = routingSlot.get(process)?.terminal;
   if (terminal === undefined) process[stream].write(text);
@@ -171,17 +167,17 @@ export function writeTerminal(stream: OutputStream, text: string): void {
 }
 
 /**
- * Runs `hook`, a call into a reporter that prints to the terminal, past the
- * routing of user output: what it writes to either stream, and what the
- * timers it starts write, reach the terminal as written. Both: `list` prints
- * a test's stderr on stderr while it prints to stdout.
+ * Runs `hook`, a call into an interactive reporter, past the routing of
+ * user output: what it writes to either stream, and what the timers it
+ * starts write, reach the terminal as written. Both: `list` prints a test's
+ * stderr on stderr while it prints to stdout.
  */
 export function uncaptured<T>(hook: () => T): T {
   const state = routingSlot.get(process);
   return state === undefined ? hook() : state.scope.run(null, hook);
 }
 
-/** Where runner output goes instead of the terminal while the terminal reporter shows the run. */
+/** Where runner output goes instead of the terminal while a run hands it to its reporters. */
 export interface OutputView {
   /** Prints redacted text from `stream`. */
   show(stream: OutputStream, text: string): void;
@@ -250,7 +246,7 @@ export class RunnerOutput {
   private view: OutputView | undefined;
   /** Set in the async contexts whose writes go to the terminal as written: see `passThrough`. */
   private readonly passing = new AsyncLocalStorage<boolean>();
-  /** The terminal stream user stdout lands on: stderr once a reporter keeps stdout for its document. */
+  /** The terminal stream user stdout lands on: stderr once a run left stdout to its reporters. */
   private stdoutTo: OutputStream = 'stdout';
   constructor(
     private readonly terminal: Readonly<Record<OutputStream, TerminalWrite>>,
@@ -316,27 +312,26 @@ export class RunnerOutput {
     return this.passing.run(false, hook);
   }
 
-  /** Prints what user code writes to stdout on stderr from now on: a reporter prints a document on stdout (`--reporter json`). */
-  keepStdoutForReport(): void {
+  /** Prints what user code writes to stdout on stderr from now on: during a run stdout holds only what a reporter prints there, such as a document (`--reporter json`). */
+  leaveStdout(): void {
     this.stdoutTo = 'stderr';
   }
 
   /**
    * Prints a line of the runner's own, such as a pause without a terminal,
-   * as its other output: through the reporters that show the run, under
-   * `runner`, or to the terminal, on stderr while a reporter prints a
-   * document on stdout.
+   * as its other output: to the reporters as an `output` event, which an
+   * interactive one shows under `runner`, or to the terminal, on stderr
+   * during a run.
    */
   printLine(line: string): void {
     this.emit('stdout', `${line}\n`);
   }
 
   /**
-   * Prints a test's output, which its worker already redacted, to the
-   * terminal, past the view: the runner hands it to the reporters itself,
-   * with the test it came from.
+   * Prints already redacted output to the terminal, past the view: the
+   * runner handed it to the reporters itself, and none shows it.
    */
-  testOutput(stream: OutputStream, text: string): void {
+  print(stream: OutputStream, text: string): void {
     this.terminal[stream === 'stdout' ? this.stdoutTo : stream](text);
   }
 

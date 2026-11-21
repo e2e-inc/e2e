@@ -21,11 +21,13 @@ interface BuiltinMark {
   readonly id: BuiltinReporter;
   /** Called without the options its id depends on, so it is the id: `list()` prints to stderr beside `json`, as `'list'` does. */
   readonly asId: boolean;
+  /** The terminal stream `list` or `dot` was told to print to; absent for the others. */
+  readonly stream?: 'stdout' | 'stderr';
 }
 
 /** Marks `reporter` as the built-in `id`; every built-in factory returns through this. */
-export function builtin<R extends Reporter>(id: BuiltinReporter, reporter: R, asId = false): R {
-  Object.defineProperty(reporter, BUILTIN_ID, { value: { id, asId } satisfies BuiltinMark });
+export function builtin<R extends Reporter>(id: BuiltinReporter, reporter: R, asId = false, stream?: 'stdout' | 'stderr'): R {
+  Object.defineProperty(reporter, BUILTIN_ID, { value: { id, asId, ...(stream === undefined ? {} : { stream }) } satisfies BuiltinMark });
   return reporter;
 }
 
@@ -33,8 +35,9 @@ export function builtin<R extends Reporter>(id: BuiltinReporter, reporter: R, as
 export function builtinMark(reporter: Reporter): BuiltinMark | undefined {
   const mark: unknown = (reporter as { [BUILTIN_ID]?: unknown })[BUILTIN_ID];
   if (typeof mark !== 'object' || mark === null) return undefined;
-  const { id, asId } = mark as Partial<Record<keyof BuiltinMark, unknown>>;
-  return typeof id === 'string' && isBuiltinReporter(id) ? { id, asId: asId === true } : undefined;
+  const { id, asId, stream } = mark as Partial<Record<keyof BuiltinMark, unknown>>;
+  if (typeof id !== 'string' || !isBuiltinReporter(id)) return undefined;
+  return { id, asId: asId === true, ...(stream === 'stdout' || stream === 'stderr' ? { stream } : {}) };
 }
 
 /** The built-in id a factory marked `reporter` with; undefined for any other reporter. */

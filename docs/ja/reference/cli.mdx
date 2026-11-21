@@ -522,7 +522,7 @@ e2e run [files...]
 | `--strict-cache` | この実行で `cache.strict` を有効にします。記録はあるがリプレイできなくなったステップは、エージェントに引き継がず `REPLAY_STALE` で失敗します。リトライもリプレイし、キャッシュには書き込みません。[古くなった記録で失敗させる](/cache#fail-on-a-stale-recording)を参照してください。 |
 | `-u`, `--update-snapshots` | [`toHaveScreenshot`](/reference/expect#screenshot-matchers) が未保存または相違ありと判断したスクリーンショットを書き込み、マッチャーを成功にします。未指定では、未保存のものを書き込んで失敗にし、CI では結果への添付だけを行います。 |
 | `-w`, `--watch` | 実行後、テストファイルや設定の変更、またはキー操作で再実行します。[監視モード](#watch-mode)を参照してください。 |
-| `--step` | 最初のステップを実行し、以後の各ステップはキー入力まで待機します。Enter はそのステップ、`n` はテストの残り、`a` は実行の残りを進め、`h` はキー一覧、`q` は終了コード 130 で停止します。待機時間はどのタイムアウトにも含めません。ターミナルがなければバックグラウンドで進み、各コマンドは次の待機ステップで画面を返します。`--step next` はそのステップ、`--step rest` は残り、`--step stop` は終了です。`--step next`、`rest`、`stop` は、[`screen.pause()`](/debugging#pause-a-test) で一時停止したテストの再開や停止にも使えます。ワーカーは 1 つで、CI、`--watch`、1 を超える `--workers`、json レポーターとの併用は拒否します（終了コード 2）。[ステップごとにテストを進める](/debugging#step-through-a-test)と[ターミナルなしで進める](/debugging#step-through-a-test-without-a-terminal)を参照してください。 |
+| `--step` | 最初のステップを実行し、以後の各ステップはキー入力まで待機します。Enter はそのステップ、`n` はテストの残り、`a` は実行の残りを進め、`h` はキー一覧、`q` は終了コード 130 で停止します。待機時間はどのタイムアウトにも含めません。ターミナルがなければバックグラウンドで進み、各コマンドは次の待機ステップで画面を返します。`--step next` はそのステップ、`--step rest` は残り、`--step stop` は終了です。`--step next`、`rest`、`stop` は、[`screen.pause()`](/debugging#pause-a-test) で一時停止したテストの再開や停止にも使えます。ワーカーは 1 つで、CI、`--watch`、1 を超える `--workers` との併用は拒否します（終了コード 2）。json レポーターとの併用にはターミナルが必要です。[ステップごとにテストを進める](/debugging#step-through-a-test)と[ターミナルなしで進める](/debugging#step-through-a-test-without-a-terminal)を参照してください。 |
 
 **出力**
 
@@ -604,7 +604,7 @@ $ npx e2e run --debug
 
 テスト開始前に停止した実行は、これらを何も書かず、前回のファイルを残します。設定や収集のエラー、`NO_TESTS`、`NO_LAST_RUN`、`UNSUPPORTED_ARTIFACT`、アプリコマンドの起動失敗、中断が該当します。エラーはターミナルと終了コードで示します。`junit.xml` または `summary.md` の書き込み失敗は stderr の 1 行で示し、実行エラーにはしません。
 
-`list` と `dot` レポーターは実行エラーを `Run Errors` の下に表示します。どちらも、また [`onOutput`](/reference/reporters#onoutput) でターミナルに出力する他のレポーターもなければ、`json` の場合も含め、各エラーを stderr に `CODE: message` として表示します。
+`list` と `dot` レポーターは実行エラーを `Run Errors` の下に表示します。どちらも、また他の[インタラクティブ](/reference/reporters#interactive)なレポーターもなければ、`json` の場合も含め、各エラーを stderr に `CODE: message` として表示します。
 
 レポートの `run.summary` は結果を集計します。
 

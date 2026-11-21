@@ -441,7 +441,7 @@ pnpm --filter @e2e-dev/testbed run test:headed
   `tests/types/sdk-types.ts` a test.
 - Integration tests need Chromium: `pnpm --filter @e2e-dev/web exec
   playwright-core install chromium`. The web engine's `prepare` hook
-  also installs a missing browser once per run, in the runner, before `plan`
+  also installs a missing browser once per run, in the runner, before `collected`
   is emitted and the run's clock starts.
 
 ## Definition of done

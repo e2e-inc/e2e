@@ -378,9 +378,11 @@ describe('e2e run argument parsing', () => {
       expect(process.exitCode).toBe(2);
       expect(written(stderrSpy)).toContain('cannot be combined with --watch');
       process.exitCode = undefined;
+      // Beside the json reporter it needs a terminal: without one, the steps would land in the document.
+      process.stdout.isTTY = false;
       await invoke('run', '--step', '--reporter', 'json');
       expect(process.exitCode).toBe(2);
-      expect(written(stderrSpy)).toContain('--step cannot be combined with --reporter json');
+      expect(written(stderrSpy)).toContain('--step cannot be combined with --reporter json without a terminal');
     } finally {
       process.stdin.isTTY = tty.stdin;
       process.stdout.isTTY = tty.stdout;

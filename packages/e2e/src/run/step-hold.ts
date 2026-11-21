@@ -13,6 +13,7 @@ import type { StepHoldRequest } from '@e2e-dev/core/lib/run/steps';
 import type { OperationContext, TargetSession } from '@e2e-dev/core/lib/engine/surface';
 import type { HeldTestAttachment } from './step-attachment-wire.ts';
 import { traceScreen, type TraceScreenOptions } from '@e2e-dev/core/lib/run/step-screens';
+import type { PausedStep, RunEventOf } from './events.ts';
 
 /** A step held before it runs, or a paused test, as the runner's `hold` hook sees it. */
 export interface HeldStep extends Omit<StepHold, 'number'> {
@@ -49,6 +50,74 @@ export interface StepPrompt {
   readonly holdSteps: boolean;
   /** Set to enable the screen and app log viewer in the terminal. */
   readonly viewer?: boolean;
+  /** False when no keyboard answers the prompt: `e2e run --step` commands do. */
+  readonly keyboard?: false;
+}
+
+/** What Enter does at a prompt: it runs every step on it, or resumes the test at a pause. */
+function enterDoes(prompt: StepPrompt): string {
+  if (prompt.steps[0].step.kind === 'pause') {
+    return 'resume';
+  }
+
+  return prompt.steps.length === 1 ? 'run this step' : `run these ${prompt.steps.length} steps`;
+}
+
+/** The prompt's other keys, in `--watch`'s words. */
+const STEP_KEYS = [
+  ['s', 'show the screen'],
+  ['l', 'show the app log'],
+  ['n', 'run this test without holding steps'],
+  ['a', 'run all without holding steps'],
+  ['q', 'quit'],
+] as const;
+
+/** Returns the available keys other than Enter. */
+function promptKeys(prompt: StepPrompt): readonly (readonly [key: string, does: string])[] {
+  return STEP_KEYS.filter(([key]) => {
+    if (key === 's' || key === 'l') {
+      return prompt.viewer === true;
+    }
+
+    return key === 'q' || prompt.holdSteps;
+  });
+}
+
+/**
+ * The keys a `paused` event lists: Enter, then `h` and `q`, or every key
+ * once `h` asked for them. None when no keyboard answers the prompt.
+ */
+function shownKeys(prompt: StepPrompt): { key: string; does: string }[] {
+  if (prompt.keyboard === false) return [];
+  const rest = prompt.help ? promptKeys(prompt) : ([['h', 'show help'], ['q', 'quit']] as const);
+  return [{ key: 'enter', does: enterDoes(prompt) }, ...rest.map(([key, does]) => ({ key, does }))];
+}
+
+/** Whether a held step belongs to the test `paused` names. */
+export function sameTest(paused: Pick<RunEventOf<'paused'>, 'testId' | 'agent' | 'repeat' | 'target'>, step: HeldStep): boolean {
+  return paused.testId === step.testId && paused.agent === step.agent && paused.repeat === step.repeat && paused.target === step.target;
+}
+
+/** The `paused` event of `prompt`: its test, the calls that wait, and the keys a keyboard takes. */
+export function pausedFact(prompt: StepPrompt): Omit<RunEventOf<'paused'>, 'type'> {
+  const waits = ({ step, number }: NumberedStep): PausedStep => ({
+    number,
+    api: step.api,
+    label: step.label,
+    ...(step.source === undefined ? {} : { source: step.source }),
+  });
+  const [first, ...rest] = prompt.steps;
+  const { step } = first;
+  return {
+    testId: step.testId,
+    agent: step.agent,
+    repeat: step.repeat,
+    target: step.target,
+    reason: step.kind === 'pause' ? 'pause' : 'step',
+    attachId: step.attachId,
+    steps: [waits(first), ...rest.map(waits)],
+    keys: shownKeys(prompt),
+  };
 }
 
 /** What the runner hands its `hold` hook beside the step. */
@@ -62,9 +131,9 @@ export interface StepHoldContext {
   /** Attaches to a held test by its pause ID. */
   attach(id: string, signal?: AbortSignal, sessionId?: string): Promise<HeldTestAttachment>;
   /**
-   * Shows the hold under its test and keys below the summary in the live window.
-   * If there isn't a live window, the prompt is printed on stderr.
-   * Pass `undefined` to clear the prompt.
+   * Tells the reporters the test waits, as a `paused` event, and `resumed`
+   * once passed `undefined`. Unless an interactive reporter shows it, a
+   * prompt a keyboard answers is printed on stderr.
    */
   show(prompt: StepPrompt | undefined): void;
   /**
