@@ -1759,7 +1759,7 @@ const password = isSecret(options.password)
 
 #### `secureReadDenied`
 
-读取安全字段的值、文本或属性时使用的 `POLICY_DENIED` 错误。`subject` 位于消息末尾，说明读取的对象或引擎拒绝的原因。抛出它而不是自己编写错误，这样每个引擎都会使用与运行器相同的措辞拒绝。
+读取安全字段时使用的 `POLICY_DENIED` 错误。`subject` 位于消息末尾，说明读取的对象或引擎拒绝的原因。抛出它而不是自己编写错误，这样每个引擎都会使用与运行器相同的措辞拒绝。
 
 ```ts
 if (field.secure) throw secureReadDenied('the field is a password field');

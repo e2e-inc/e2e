@@ -294,11 +294,10 @@ export class ConfigurationError extends E2EError {
 }
 
 /**
- * The `POLICY_DENIED` a read of a value, text, or attribute fails with when
- * the node is a secure field. `subject` ends the message: what was read,
- * such as a locator label, or why the read was refused. Every place that
- * denies such a read throws this one, so the wording cannot drift between
- * core and an engine.
+ * The `POLICY_DENIED` a read fails with when the node is a secure field.
+ * `subject` ends the message: what was read, such as a locator label, or
+ * why the read was refused. Every place that denies such a read throws this
+ * one, so the wording cannot drift between core and an engine.
  */
 export function secureReadDenied(subject: string): ConfigurationError {
   return new ConfigurationError('POLICY_DENIED', `reading values from a secure field is denied: ${subject}`);

@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import type { Page } from 'playwright-core';
 import type { LocatorExpression, NodeRef, OperationContext } from '@e2e-dev/core/engine';
 import { PlaywrightSurface } from '../../src/surface.ts';
+import { connectionObjectCount } from '../helpers/handles.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
 const paragraph: LocatorExpression = { kind: 'selector', selector: 'p' };
@@ -65,29 +66,25 @@ describe('PlaywrightSurface.evaluateOn', () => {
   });
 
   it('releases the element and result handles of every evaluation', async () => {
-    // Playwright keeps a client object per handle until it is disposed; the
-    // connection's object map is the only place that count shows.
-    const connection: unknown = Reflect.get(page, '_connection');
-    const objects: unknown = typeof connection === 'object' && connection !== null ? Reflect.get(connection, '_objects') : undefined;
-    if (!(objects instanceof Map)) throw new Error('playwright-core no longer keeps its objects in _connection._objects');
+    const objects = await connectionObjectCount(page);
     await page.setContent('<p>one</p>');
     const ref = await locateOne(paragraph);
     await surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, true);
     await page.evaluate('1');
-    const before = objects.size;
+    const before = objects();
     for (let index = 0; index < 50; index += 1) {
       await surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, true);
     }
     await page.evaluate('1');
-    expect(objects.size - before).toBeLessThanOrEqual(2);
+    expect(objects() - before).toBeLessThanOrEqual(2);
     await page.evaluate(() => document.body.append(Object.assign(document.createElement('p'), { textContent: 'two' })));
-    const stale = objects.size;
+    const stale = objects();
     for (let index = 0; index < 25; index += 1) {
       await expect(surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, true))
         .rejects.toMatchObject({ code: 'NODE_STALE' });
     }
     await page.evaluate('1');
-    expect(objects.size - stale).toBeLessThanOrEqual(2);
+    expect(objects() - stale).toBeLessThanOrEqual(2);
   });
 
   it.each([

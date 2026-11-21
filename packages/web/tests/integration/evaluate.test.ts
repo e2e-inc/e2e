@@ -6,6 +6,7 @@ import type { Page } from 'playwright-core';
 import type { EngineFixtureContext } from '@e2e-dev/core/engine';
 import { PlaywrightSurface } from '../../src/surface.ts';
 import { createBrowserFixture, type Browser } from '../../src/browser.ts';
+import { connectionObjectCount } from '../helpers/handles.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
 describe('browser.evaluate error boundaries', () => {
@@ -121,16 +122,12 @@ describe('browser.evaluate error boundaries', () => {
   });
 
   it('releases the result handle of every evaluation', async () => {
-    // Playwright keeps a client object per handle until it is disposed; the
-    // connection's object map is the only place that count shows.
-    const connection: unknown = Reflect.get(page, '_connection');
-    const objects: unknown = typeof connection === 'object' && connection !== null ? Reflect.get(connection, '_objects') : undefined;
-    if (!(objects instanceof Map)) throw new Error('playwright-core no longer keeps its objects in _connection._objects');
+    const objects = await connectionObjectCount(page);
     await browser.evaluate('() => 1');
-    const before = objects.size;
+    const before = objects();
     for (let index = 0; index < 50; index += 1) await browser.evaluate('() => 1');
     await page.evaluate('1');
-    expect(objects.size - before).toBeLessThanOrEqual(2);
+    expect(objects() - before).toBeLessThanOrEqual(2);
   });
 
   it('returns a result after the page deletes or replaces the globals the transport could use', async () => {
