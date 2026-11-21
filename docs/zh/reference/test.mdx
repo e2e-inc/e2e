@@ -30,6 +30,7 @@ describe('checkout', { tags: ['billing'] }, () => {
 | --- | --- |
 | [`test`](#test) | `TestCase` |
 | [`test.skip`](#test-skip) | `TestCase \| void` |
+| [`test.fixme`](#test-fixme) | `TestCase \| void` |
 | [`test.skipIf`](#test-skipif) | `TestRegistrar` |
 | [`test.runIf`](#test-runif) | `TestRegistrar` |
 | [`test.each`](#test-each) | `EachRegistrar` |
@@ -109,8 +110,30 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 
 | 抛出 | 条件 |
 | --- | --- |
-| `INVALID_ARGUMENT` | 在准备测试中调用。准备测试不能跳过，因为其他测试依赖它的会话。 |
+| `INVALID_ARGUMENT` | 在准备测试中调用，且条件为真或未给出条件。准备测试不能跳过，因为其他测试依赖它的会话。 |
 | `COLLECTION_ERROR` | 在测试主体之外使用条件形式。 |
+| `COLLECTION_ERROR` | 在串行分组内使用注册形式。请改为在串行 `describe` 上设置 [`skip`](#skip)。 |
+
+#### `test.fixme`
+
+注册一个标记为 fixme 的跳过测试，或将正在运行的测试作为 fixme 跳过。
+
+```ts
+test.fixme('exports a PDF', async ({ app }) => {}); // at registration
+test.fixme(platform === 'android', 'crashes on Android'); // inside a body
+test.fixme(); // inside a body, always
+```
+
+- 它接受与 [`test.skip`](#test-skip) 相同的三种形式，并适用其主体形式的规则。
+- 测试报告为 `skipped`，`report.json` 中的 `skip.cause` 为 `fixme`，而 `test.skip` 为 `explicit`。原因为 `fixme`；在测试主体中调用并给出非空白原因时，原因为 `fixme: <reason>`。列表报告器将其显示为 `[fixme: crashes on Android]`。
+- 注册形式不接受测试选项。
+- 注册时返回 `TestCase`；在测试主体中返回 `void`。
+
+| 抛出 | 条件 |
+| --- | --- |
+| `INVALID_ARGUMENT` | 在准备测试中调用，且条件为真或未给出条件。准备测试不能跳过，因为其他测试依赖它的会话。 |
+| `COLLECTION_ERROR` | 在测试主体之外使用条件形式。在收集阶段请使用 `test.fixme(title, fn)`。 |
+| `COLLECTION_ERROR` | 在串行分组内使用注册形式。请改为在串行 `describe` 上设置 [`skip`](#skip)。 |
 
 #### `test.skipIf`
 
@@ -615,7 +638,7 @@ describe('checkout', { serial: true }, () => {
 | 抛出 | 条件 |
 | --- | --- |
 | `COLLECTION_ERROR` | 成员设置了 `retries`、`trace`、`video`、`session`、`platforms`、`requires`、`skip`、`only` 或嵌套的 `serial`。 |
-| `COLLECTION_ERROR` | 成员通过 `test.skipIf` 或 `test.runIf` 注册。 |
+| `COLLECTION_ERROR` | 成员通过 `test.skip(title, fn)`、`test.skipIf`、`test.runIf` 或 `test.fixme(title, fn)` 注册。 |
 
 #### `sessions`
 
@@ -794,6 +817,18 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    */
   skip(condition: boolean, reason?: string): void;
   skip(reason?: string): void;
+  /** Registers one skipped test marked fixme, reported with the skip cause and reason `fixme`. */
+  fixme(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
+  /**
+   * Inside a running test: skips it as fixme when `condition` is true (or
+   * always, with no condition), as `test.skip` does. The skip cause is
+   * `fixme`, and the reason `fixme`, or `fixme: <reason>` when `reason` is not
+   * blank. A setup test cannot skip. Outside a test body this form is
+   * `COLLECTION_ERROR`; use `test.fixme(title, fn)` to mark a test fixme at
+   * collection.
+   */
+  fixme(condition: boolean, reason?: string): void;
+  fixme(reason?: string): void;
   /**
    * Returns a function that registers one test, like `test(title, fn)`:
    * skipped when `condition` is truthy, as if it had the `skip` option. The

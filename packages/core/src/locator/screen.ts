@@ -530,6 +530,11 @@ class LocatorImpl extends ScreenImpl implements Locator {
     return this.perform('focus', { kind: 'focus' }, options);
   }
 
+  /** Removes focus from the matched node. */
+  blur(options?: ActionOptions): Promise<void> {
+    return this.perform('blur', { kind: 'blur' }, options);
+  }
+
   hover(options?: ActionOptions): Promise<void> {
     return this.perform('hover', { kind: 'hover' }, options);
   }

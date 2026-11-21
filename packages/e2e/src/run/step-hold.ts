@@ -12,10 +12,17 @@ import type { SourceLocation } from '@e2e-dev/core/lib/internal/source';
 import type { AttemptTimeout } from '@e2e-dev/core/lib/run/budget';
 import type { StepHoldRequest } from '@e2e-dev/core/lib/run/steps';
 import type { OperationContext, TargetSession } from '@e2e-dev/core/lib/engine/surface';
+import type { HeldTestAttachment } from './step-attachment-wire.ts';
 import { traceScreen, type TraceScreenOptions } from '@e2e-dev/core/lib/run/step-screens';
 
 /** A step held before it runs, or a paused test, as the runner's `hold` hook sees it. */
-export interface HeldStep {
+export interface HeldStep extends StepHold {
+  /** The ID shown at every hold of this attempt. */
+  readonly attachId: string;
+}
+
+/** A held step or pause without the runner-assigned attachment ID. */
+export interface StepHold {
   /** Whether this wait is for a held step or a paused test. */
   readonly kind: StepHoldRequest['kind'];
   readonly target: string;
@@ -53,6 +60,8 @@ export interface StepPrompt {
 export interface StepHoldContext {
   /** Aborts once the answer no longer matters: the step was abandoned, its attempt ended, or the run was interrupted. */
   readonly signal: AbortSignal;
+  /** Attaches to a held test by its pause ID. */
+  attach(id: string, signal?: AbortSignal, sessionId?: string): Promise<HeldTestAttachment>;
   /**
    * Shows the step waiting for a key, or no prompt: under its test in the
    * list reporter's live window, else on stderr.
@@ -128,9 +137,9 @@ export class AttemptHolds {
 /** What a test attempt's holds are built from. */
 export interface AttemptStepHolds extends Pick<AttemptHoldsOptions, 'timeout' | 'signal'> {
   /** The attempt as every step held in it names it. */
-  readonly attempt: Pick<HeldStep, 'target' | 'testId' | 'agent' | 'repeat' | 'title'>;
+  readonly attempt: Pick<StepHold, 'target' | 'testId' | 'agent' | 'repeat' | 'title'>;
   /** Asks the runner whether the step may run. The runner can call `readScreen` to read the screen during the wait. */
-  readonly ask: (step: HeldStep, signal: AbortSignal, readScreen: StepHoldContext['readScreen']) => Promise<void>;
+  readonly ask: (step: StepHold, signal: AbortSignal, readScreen: StepHoldContext['readScreen']) => Promise<void>;
   /** Reads the screen a hold starts on. */
   readonly readScreen: (signal: AbortSignal) => Promise<string | undefined>;
 }
