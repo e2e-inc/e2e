@@ -617,10 +617,11 @@ daemon चलाती है, वह काम करेगी। प्रो�
 
 [Expo Simulators](/integrations/eas) के लिए `@e2e-dev/eas` का
 `expoSimulators()` इस्तेमाल करें। [TestMu AI](/integrations/testmu) के लिए
-`@e2e-dev/testmu` का `testmu()`।
+`@e2e-dev/testmu` का `testmu()` इस्तेमाल करें।
 [BrowserStack](/integrations/browserstack) के लिए `@e2e-dev/browserstack` का
-`browserstack()`। [E2B](/integrations/e2b) पर Android के लिए `@e2e-dev/e2b` का
-`e2b()`। [Revyl](/integrations/revyl) के लिए `@e2e-dev/revyl` का `revyl()`।
+`browserstack()` इस्तेमाल करें। [E2B](/integrations/e2b) पर Android के लिए
+`@e2e-dev/e2b` का `e2b()` इस्तेमाल करें। [Revyl](/integrations/revyl) के लिए
+`@e2e-dev/revyl` का `revyl()` इस्तेमाल करें।
 किसी और सर्विस के लिए कुछ दर्जन लाइनों का प्रोवाइडर लिख लें, जैसे नीचे के
 उदाहरण वाला `hostedDevices`:
 
@@ -865,7 +866,7 @@ export function cloudDevices(options: { provider: string; device: string; osVers
 है। इसलिए पहले मैसेज पढ़ें, कोड बाद में: अक्सर गड़बड़ ऐप में नहीं होती।
 
 **iOS ऑटोमेशन रनर बिज़ी है, अटक गया है, या स्नैपशॉट नहीं दिखा पा रहा।** भारी
-या एनिमेट हो रही स्क्रीन रनर पर भारी पड़ सकती है। Ctrl-C से रोका गया रन भी उसे
+या एनिमेट हो रही स्क्रीन रनर को ओवरलोड कर सकती है। Ctrl-C से रोका गया रन भी उसे
 बिज़ी छोड़ सकता है। मैसेज में रनर का नाम और पहला कदम लिखा होता है, आम तौर पर
 दोबारा रन करना। अगले रन में भी यही हो, तो नीचे दी कमांड से daemon रोकें और
 सिम्युलेटर रीबूट करें।
