@@ -76,14 +76,14 @@ cp -R "$repo/plugins/e2e" ~/.cursor/plugins/local/
 </CodeGroup>
 
 फिर नया सेशन शुरू करें। Cursor में **Developer: Reload Window** चलाएँ। Cursor
-Teams और Enterprise पर लोकल प्लगइन तभी चलते हैं जब एडमिन सेटिंग **Allow Local
-Plugin Imports** चालू हो। या फिर कोई एडमिन `e2e-inc/e2e` को टीम मार्केटप्लेस
+Teams और Enterprise पर लोकल प्लगइन के लिए एडमिन सेटिंग **Allow Local Plugin
+Imports** चालू होनी चाहिए, या फिर कोई एडमिन `e2e-inc/e2e` को टीम मार्केटप्लेस
 की तरह इंपोर्ट कर दे। प्लगइन `e2e`, `create-verification-skill` और
-`migrate-to-e2e` स्किल जोड़ता है, लेकिन npm पैकेज इंस्टॉल नहीं करता। Codex और Cursor में
-प्लगइन [MCP सर्वर](/mcp-server) भी जोड़ देता है। Claude Code और Grok Build में
-सर्वर को प्रोजेक्ट में खुद रजिस्टर करें। बाकी दो स्किल प्लगइन के नाम से
-चलाएँ: Claude Code में `/e2e:<skill>` और Codex में `$e2e:<skill>`। Cursor में
-इन्हें `/<skill>` से चलाएँ।
+`migrate-to-e2e` स्किल जोड़ता है, लेकिन npm पैकेज इंस्टॉल नहीं करता। Codex और
+Cursor में प्लगइन [MCP सर्वर](/mcp-server) भी जोड़ देता है। Claude Code और
+Grok Build में सर्वर को प्रोजेक्ट में खुद रजिस्टर करें। बाकी दो स्किल प्लगइन
+के नाम से चलाएँ: Claude Code में `/e2e:<skill>` और Codex में `$e2e:<skill>`।
+Cursor में इन्हें `/<skill>` से चलाएँ।
 
 प्लगइन का वर्ज़न e2e की रिलीज़ के साथ बढ़ता है। अपडेट करने के लिए ये कमांड
 चलाएँ और नया सेशन शुरू करें। Cursor में ऊपर वाली कमांड फिर से चला दें।

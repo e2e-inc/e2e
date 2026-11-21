@@ -45,7 +45,7 @@ test('adds an item', async ({ app, agent, screen }) => {
 | --- | --- |
 | `expect(locator).toHaveText(...)` और दूसरे लोकेटर मैचर | सादी वैल्यू पर `expect(value).toBe(...)` |
 | `expect(browser).toHaveURL(...)` और दूसरे इंजन असर्शन | `expect.poll(...)` |
-| `locator.waitFor()`, `browser.waitForURL()` | `locator.textContent()` और वैल्यू पढ़ने वाले दूसरे कॉल |
+| `locator.waitFor()`, `browser.waitForURL()` | `locator.textContent()` और वैल्यू पढ़ने वाली दूसरी कॉल |
 | `agent.assert(...)`, `agent.waitFor(...)` | `agent.extract(...)`, कोई दूसरा `act`, अटेम्प्ट का पास होना |
 
 `step.cache.write` सिर्फ़ रिपोर्ट में आता है। इससे पता चलता है कि अटेम्प्ट ख़त्म
