@@ -129,9 +129,12 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     'tablist', 'tabpanel', 'term', 'textbox', 'time', 'timer', 'toolbar', 'tooltip',
     'tree', 'treegrid', 'treeitem',
   ];
+  /** An ARIA token attribute (`role` or a state) lowercased, as Chrome reads it; null when absent. */
+  const ariaToken = (el: Element, name: string): string | null => el.getAttribute(name)?.toLowerCase() ?? null;
+
   /** ARIA uses the first recognized token, then native semantics if none is recognized. */
   const explicitRole = memoized((el: Element): string | null =>
-    (el.getAttribute('role') ?? '').split(/[ \t\n\f\r]+/).find((role) => ARIA_ROLES.indexOf(role) !== -1) ?? null);
+    (ariaToken(el, 'role') ?? '').split(/[ \t\n\f\r]+/).find((role) => ARIA_ROLES.indexOf(role) !== -1) ?? null);
 
   /**
    * True when an element carries a name of its own (HTML-AAM: `aria-label`,
@@ -141,10 +144,16 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   const hasOwnName = (el: Element): boolean =>
     ['aria-label', 'aria-labelledby', 'title'].some((attribute) => (el.getAttribute(attribute) ?? '').trim() !== '');
 
-  const SECTIONING_SCOPE = [
-    'article', 'aside', 'main', 'nav', 'section',
-    ...['article', 'complementary', 'main', 'navigation', 'region'].map((role) => `[role~="${role}"]`),
-  ].join(', ');
+  const SECTIONING_TAGS = ['article', 'aside', 'main', 'nav', 'section'];
+  const SECTIONING_ROLES = ['article', 'complementary', 'main', 'navigation', 'region'];
+  /** A sectioning element, or one whose effective explicit role (its first recognized token) is a sectioning role. */
+  const isSectioning = (el: Element): boolean => {
+    if (SECTIONING_TAGS.indexOf(el.tagName.toLowerCase()) !== -1) return true;
+    const role = explicitRole(el);
+    // Chrome never scopes a header by region; only the lowercase token Playwright's [role=region] matches does.
+    if (role === 'region') return (el.getAttribute('role') ?? '').split(/[ \t\n\f\r]+/).indexOf('region') !== -1;
+    return SECTIONING_ROLES.indexOf(role ?? '') !== -1;
+  };
 
   /**
    * True when a `<header>` or `<footer>` is the page's, not an article's or a
@@ -154,7 +163,9 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    */
   const isPageLevel = (el: Element): boolean => {
     for (let candidate: Element | null = el; candidate !== null;) {
-      if (candidate.closest(SECTIONING_SCOPE) !== null) return false;
+      for (let ancestor: Element | null = candidate; ancestor !== null; ancestor = ancestor.parentElement) {
+        if (isSectioning(ancestor)) return false;
+      }
       const root = candidate.getRootNode();
       candidate = root instanceof ShadowRoot ? root.host : null;
     }
@@ -538,7 +549,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
 
   /** True for a subtree the name computation drops: aria-hidden, or hidden by style as innerText leaves it out. */
   const isNameHidden = (el: Element, style: CSSStyleDeclaration | undefined): boolean =>
-    (el.getAttribute('aria-hidden') ?? '').toLowerCase() === 'true' ||
+    ariaToken(el, 'aria-hidden') === 'true' ||
     (style !== undefined && (style.display === 'none' || style.visibility === 'hidden'));
 
   /** `alt` of an element HTML-AAM names by it: an `<img>` or an `<input type="image">`. */
@@ -646,7 +657,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
         const listbox = role === 'combobox' ? ariaOwnedOf(el).find((owned) => implicitRole(owned) === 'listbox') : el;
         selected = listbox === undefined
           ? []
-          : ariaOwnedOf(listbox).filter((owned) => owned.getAttribute('aria-selected') === 'true' && implicitRole(owned) === 'option');
+          : ariaOwnedOf(listbox).filter((owned) => ariaToken(owned, 'aria-selected') === 'true' && implicitRole(owned) === 'option');
       }
       if (selected.length === 0 && el instanceof HTMLInputElement) return el.value;
       return selected.map((option) => contentNameOf(option, styleOf(option), walk)).join(' ');
@@ -1214,7 +1225,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   const isDrawnByLabel = (el: Element, style: CSSStyleDeclaration | undefined): boolean => {
     if (!(el instanceof HTMLInputElement) || (el.type !== 'checkbox' && el.type !== 'radio')) return false;
     if (style?.visibility !== 'visible' || isSkippedContent(el)) return false;
-    const INTERACTIVE = 'a,button,input,select,textarea,summary,[contenteditable],[role="button"],[role="link"]';
+    const INTERACTIVE = 'a,button,input,select,textarea,summary,[contenteditable],[role="button" i],[role="link" i]';
     return associatedLabels(el).some(
       (label) =>
         styleOf(label)?.display !== 'contents' &&
@@ -1236,7 +1247,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * unlisted.
    */
   const hidesSubtree = (el: Element, style: CSSStyleDeclaration | undefined): boolean =>
-    (el.getAttribute('aria-hidden') ?? '').toLowerCase() === 'true' ||
+    ariaToken(el, 'aria-hidden') === 'true' ||
     isInert(el, style) ||
     style === undefined ||
     style.display === 'none' ||
@@ -1576,7 +1587,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * disabled ancestor costs one walk, not one per node.
    */
   const ariaDisabledInChain = memoized((el: Element): boolean => {
-    const attribute = (el.getAttribute('aria-disabled') ?? '').toLowerCase();
+    const attribute = ariaToken(el, 'aria-disabled');
     if (attribute === 'true') return true;
     if (attribute === 'false') return false;
     const parent = parentOrHostOf(el);
@@ -1593,7 +1604,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    */
   const isDisabled = (el: Element): boolean => {
     if (el.matches(':disabled')) return true;
-    if (el.getAttribute('aria-disabled') === 'true') return true;
+    if (ariaToken(el, 'aria-disabled') === 'true') return true;
     const role = implicitRole(el);
     return role !== null && ARIA_DISABLED_ROLES.indexOf(role) !== -1 && ariaDisabledInChain(el);
   };
@@ -1638,18 +1649,18 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     // nothing about what the browser will submit. ARIA fills in only where the
     // element has no native state.
     if (checked === null) {
-      const ariaChecked = el.getAttribute('aria-checked');
+      const ariaChecked = ariaToken(el, 'aria-checked');
       if (ariaChecked !== null) checked = ariaChecked === 'true';
     }
     if (selectedState === null) {
-      const ariaSelected = el.getAttribute('aria-selected');
-      if (ariaSelected !== null) selectedState = ariaSelected.toLowerCase() === 'true';
+      const ariaSelected = ariaToken(el, 'aria-selected');
+      if (ariaSelected !== null) selectedState = ariaSelected === 'true';
     }
 
     const disabled = isDisabled(el);
 
-    const ariaExpanded = el.getAttribute('aria-expanded');
-    const ariaPressed = el.getAttribute('aria-pressed');
+    const ariaExpanded = ariaToken(el, 'aria-expanded');
+    const ariaPressed = ariaToken(el, 'aria-pressed');
     // Matched against the shared selector rather than re-derived from tag and
     // type, so this node's `secure` flag and the screenshot mask agree by
     // construction.

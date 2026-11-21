@@ -106,8 +106,9 @@ The web engine derives the roles from HTML the way HTML-AAM does:
   `columnheader`.
 - `<figure>` is `figure`, `<article>` is `article`.
 - `<header>` and `<footer>` are `banner` and `contentinfo` only outside
-  sectioning content or an element with a sectioning role (`article`,
-  `complementary`, `main`, `navigation`, `region`).
+  sectioning content or an element with a sectioning role: its first
+  recognized `role` token is `article`, `complementary`, `main`, or
+  `navigation` in any letter case, or `region` written in lowercase.
 - `<form>` and `<section>` are `form` and `region` only when they carry an
   `aria-label`, `aria-labelledby`, or `title`.
 - `<menu>` is a `list`; only `role="menu"` is a `menu`.

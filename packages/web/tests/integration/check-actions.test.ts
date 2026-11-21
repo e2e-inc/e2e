@@ -173,8 +173,18 @@ describe.each(KINDS)('through the %s target', (kind) => {
     expect(await page.getAttribute('#pro', 'aria-checked')).toBe('false');
   });
 
-  it('fails an ARIA radio whose click keeps it checked, naming the radio group', async () => {
-    await page.setContent('<div role="radio" id="pro" aria-checked="true" tabindex="0">Pro</div>');
+  it('unchecks an ARIA radio the reader cannot read: its role only adds a hint to a failure', async () => {
+    // A `labels` getter that returns strings makes the reader throw on the node.
+    await page.setContent(`
+      <script>customElements.define('plan-choice', class extends HTMLElement { get labels() { return ['Pro', 'Recommended']; } });</script>
+      <plan-choice role="radio" id="pro" aria-checked="true" tabindex="0"
+        onclick="this.setAttribute('aria-checked', 'false')">Pro</plan-choice>`);
+    expect(await perform(await targetOf(kind, '#pro'), { kind: 'uncheck' })).toBeUndefined();
+    expect(await page.getAttribute('#pro', 'aria-checked')).toBe('false');
+  });
+
+  it.each(['radio', 'Radio', 'unknown RADIO'])('fails an ARIA radio (role="%s") whose click keeps it checked, naming the radio group', async (role) => {
+    await page.setContent(`<div role="${role}" id="pro" aria-checked="true" tabindex="0">Pro</div>`);
     expect(await perform(await targetOf(kind, '#pro'), { kind: 'uncheck' })).toMatchObject({
       code: 'NOT_ACTIONABLE',
       message: expect.stringContaining('another radio in its group'),
@@ -365,6 +375,19 @@ describe.each(KINDS)('a control its own label covers, through the %s target', (k
       });
       expect(await page.isChecked('#c')).toBe(false);
       expect(page.url()).not.toContain('#went');
+    }
+  });
+
+  it('still refuses a boxless checkbox whose visible label is a button in any letter case', async () => {
+    await page.setContent(`
+      <input type="checkbox" id="c" style="display:none">
+      <label for="c" role="Button" style="display:inline-block">Terms</label>`);
+    for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
+      expect(await perform(await targetOf(kind, '#c'), action, REFUSAL_TIMEOUT_MS)).toMatchObject({
+        code: 'NOT_ACTIONABLE',
+        message: expect.stringContaining('not visible'),
+      });
+      expect(await page.isChecked('#c')).toBe(false);
     }
   });
 

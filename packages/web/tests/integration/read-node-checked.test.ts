@@ -95,6 +95,8 @@ describe('checked and selected', () => {
       <label><input class="shrunk" type="checkbox" data-testid="link">Accept <a href="#terms">the terms</a></label>
       <label role="button"><input class="shrunk" type="checkbox" data-testid="button-label">Button</label>
       <label role="link"><input class="shrunk" type="checkbox" data-testid="link-label">Link</label>
+      <label role="Button"><input class="shrunk" type="checkbox" data-testid="button-label-upper">Button upper</label>
+      <label role="LINK"><input class="shrunk" type="checkbox" data-testid="link-label-upper">Link upper</label>
       <label contenteditable><input class="shrunk" type="checkbox" data-testid="editable-label">Editable</label>
       <script>
         customElements.define('skip-slot', class extends HTMLElement {
@@ -105,7 +107,7 @@ describe('checked and selected', () => {
       </script>
     `);
     const nodes = await captureByTestId();
-    for (const id of ['invisible', 'text', 'skipped', 'contents', 'link', 'button-label', 'link-label', 'editable-label']) {
+    for (const id of ['invisible', 'text', 'skipped', 'contents', 'link', 'button-label', 'link-label', 'button-label-upper', 'link-label-upper', 'editable-label']) {
       expect(nodes.has(id), id).toBe(false);
     }
   });
@@ -142,6 +144,42 @@ describe('checked and selected', () => {
     expect(nodes.get('embedded')?.name).toBe('Pick Chosen');
     expect(await page.getByRole('tab', { selected: true }).allTextContents()).toEqual(['All', 'Recent']);
     expect(await page.getByRole('button', { name: 'Pick Chosen', exact: true }).count()).toBe(1);
+  });
+
+  it('reads roles and checked, expanded, pressed, and disabled values without case sensitivity, as Chrome does', async () => {
+    await page.setContent(`
+      <div role="checkbox" aria-checked="True" tabindex="0" data-testid="checked">Remember me</div>
+      <div role="Switch" aria-checked="TRUE" tabindex="0" data-testid="switch">Wi-Fi</div>
+      <button aria-expanded="True" data-testid="expanded">Menu</button>
+      <button aria-pressed="TRUE" data-testid="pressed">Bold</button>
+      <h3 aria-disabled="TrUe" data-testid="disabled">Archived</h3>
+      <div role="Button" tabindex="0" data-testid="role">Save</div>
+      <header data-testid="page-header">Site</header>
+      <div role="Article" aria-label="Post"><header data-testid="article-header">Post header</header></div>
+      <div role="group ARTICLE"><header data-testid="upper-fallback-header">Site header</header></div>
+      <div role="group article"><header data-testid="lower-fallback-header">Site header</header></div>
+      <div role="Region" aria-label="R1"><header data-testid="mixed-region-header">Region header</header></div>
+      <div role="REGION"><header data-testid="upper-region-header">Region header</header></div>
+      <div role="button" data-testid="embedded">Pick <div role="listbox"><div role="option" aria-selected="TRUE">Chosen</div><div role="option" aria-selected="false">Other</div></div></div>
+    `);
+    const nodes = await captureByTestId();
+    expect(nodes.get('checked')?.states?.checked).toBe(true);
+    expect(nodes.get('switch')).toMatchObject({ role: 'switch', states: { checked: true } });
+    expect(nodes.get('expanded')?.states?.expanded).toBe(true);
+    expect(nodes.get('pressed')?.states?.pressed).toBe(true);
+    // A heading is outside the roles an inherited aria-disabled reaches, so only the element's own read counts.
+    expect(nodes.get('disabled')).toMatchObject({ role: 'heading', states: { disabled: true } });
+    expect(nodes.get('role')).toMatchObject({ role: 'button', name: 'Save' });
+    // A header is the page banner unless a sectioning role scopes it, in any case.
+    expect(nodes.get('page-header')?.role).toBe('banner');
+    expect(nodes.get('article-header')?.role).not.toBe('banner');
+    // Only an ancestor's first recognized role token scopes a header, as Chrome reads it.
+    expect(nodes.get('upper-fallback-header')?.role).toBe('banner');
+    expect(nodes.get('lower-fallback-header')?.role).toBe('banner');
+    // Chrome never scopes a header by region; only the lowercase token Playwright's [role=region] matches does.
+    expect(nodes.get('mixed-region-header')?.role).toBe('banner');
+    expect(nodes.get('upper-region-header')?.role).toBe('banner');
+    expect(nodes.get('embedded')?.name).toBe('Pick Chosen');
   });
 
   it('excludes uppercase hidden subtrees from observations and names but reads hidden references whole', async () => {
