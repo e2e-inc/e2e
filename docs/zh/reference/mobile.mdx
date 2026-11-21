@@ -162,7 +162,8 @@ export default {
  * agent-device session name, before the worker slot: slot `n` drives its
  * device under `<session>-<n>`, `e2e-<target name>-<n>` by default. One run
  * per session at a time: concurrent runs on the same session interleave
- * taps.
+ * taps. Without this option a `launch()` host
+ * drives `e2e-<target name>-<host token>-<n>`, a session of its own.
  */
 readonly session?: string | undefined;
 ```
@@ -1184,7 +1185,7 @@ export type BiometricSensor = 'faceid' | 'touchid' | 'fingerprint';
 /** The raw driver session behind `device`; see `Device.unstable_raw`. */
 export interface DeviceSession {
   readonly platform: MobilePlatform;
-  /** The raw driver session name: `e2e-<target>-<worker slot>`, or `<session>-<worker slot>` with the `session` option. */
+  /** The raw driver session name: `e2e-<target>-<worker slot>` (`e2e-<target>-<hostId>-<worker slot>` for a `launch()` host), or `<session>-<worker slot>` with the `session` option. */
   readonly session: string;
   /** The device id: a simulator UDID or an Android serial. */
   readonly deviceId: string;
