@@ -526,8 +526,12 @@ describe('createEngineSession pixels-only observation', () => {
     await expect(session.observe(OP, { pixelFallback: true })).rejects.toMatchObject({ code: 'INVALID_STATE' });
     raw = { root: raw.root, viewport: raw.viewport, treeUnavailable: true };
     await expect(session.observe(OP, { pixelFallback: true })).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+    const fallback = { data: new Uint8Array(8), mediaType: 'image/png' as const, width: 2, height: 2, scale: 1 };
+    // A tree with a secure node is not an unavailable one, masked or not.
+    raw = { ...raw, root: { ref: raw.root.ref, children: [{ ref: { id: 'pin', revision: '' }, role: 'textbox', states: { secure: true } }] }, pixels: fallback };
+    await expect(session.observe(OP, { pixelFallback: true })).rejects.toMatchObject({ code: 'INVALID_STATE' });
     // Pixels whose masking an engine reports short of the secure nodes are no fallback either.
-    raw = { ...raw, root: { ref: raw.root.ref }, pixels: { data: new Uint8Array(8), mediaType: 'image/png', width: 2, height: 2, scale: 1 }, maskedRegionCount: -1 };
+    raw = { ...raw, root: { ref: raw.root.ref }, pixels: fallback, maskedRegionCount: -1 };
     await expect(session.observe(OP, { pixelFallback: true })).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
   });
 
@@ -572,6 +576,11 @@ describe('createEngineSession pixels-only observation', () => {
     // No screenshot taken, or one withheld on a screen with nothing to mask, withholds nothing.
     expect(await look(snapshot([pin, label]))).toEqual({ pixels: undefined, withheld: undefined });
     expect(await look(snapshot([label], { maskedRegionCount: 0 }))).toEqual({ pixels: undefined, withheld: undefined });
+    // A count no pixels request asked for withholds nothing either.
+    raw = snapshot([pin, label], { maskedRegionCount: 0 });
+    const unasked = await session.observe(OP);
+    assert(unasked.kind === 'semantic');
+    expect(unasked.pixelsWithheld).toBeUndefined();
   });
 });
 

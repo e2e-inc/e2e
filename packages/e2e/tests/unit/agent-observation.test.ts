@@ -100,6 +100,18 @@ describe('prepareObservation', () => {
     expect(result.kind).toBe('pixels');
     expect(captures).toBe(1);
   });
+  it('tells the model how many regions the engine masked in the pixels it passes on', () => {
+    const pixels = { data: new Uint8Array(4), mediaType: 'image/png' as const, width: 2, height: 2, scale: 1 };
+    const options = { redact: NO_REDACT, redactCut: NO_REDACT, maxBytes: 4_096, pixelsAllowed: true };
+    const semantic = prepareObservation({ ...observation(node('root'), pixels), redaction: { secureNodeCount: 1, maskedRegionCount: 2 } }, options);
+    expect(semantic.pixels?.maskedRegionCount).toBe(2);
+    const unavailable = prepareObservation({
+      kind: 'pixels', root: node('root').ref, revision: 'r1', capturedAt: '',
+      viewport: { width: 2, height: 2 }, pixels, redaction: { secureNodeCount: 0, maskedRegionCount: 3 },
+    }, options);
+    expect(unavailable.pixels?.maskedRegionCount).toBe(3);
+  });
+
   it('passes on pixels the session withheld for masking and keeps the tree', () => {
     const withheld: Observation = { ...observation(node('root')), pixelsWithheld: 'MASKING_UNPROVEN' };
     const prepared = prepareObservation(withheld, { redact: NO_REDACT, redactCut: NO_REDACT, maxBytes: 4_096 });
