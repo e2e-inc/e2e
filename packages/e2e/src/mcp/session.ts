@@ -15,7 +15,7 @@
 import { z } from 'zod';
 import { loadAiSdkIfInstalled } from '@e2e-dev/core/lib/agent/ai-sdk';
 import { openInteractiveStep, type InteractiveStep } from '../agent/interactive-step.ts';
-import { ScreenPresenter } from '@e2e-dev/core/lib/agent/screen-update';
+import type { ScreenPresenter } from '@e2e-dev/core/lib/agent/screen-update';
 import type { ResolvedConfig, ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
 import { launchesPinnedApp } from '@e2e-dev/core/lib/config/targets';
 import { classifyError, ConfigurationError, errorMessage, InfrastructureError, type SerializedError } from '@e2e-dev/core/lib/internal/errors';
@@ -31,6 +31,7 @@ import { openStandaloneAttempt, type OneShotAttempt } from '../run/standalone-ki
 import type { StandaloneAttempt } from '@e2e-dev/core/lib/run/standalone-attempt';
 import { selectStandaloneTest, testLocation } from '../run/standalone-test.ts';
 import { createSessionCatalog, isGrammarVerb, type SessionCatalog } from '../session-tools/catalog.ts';
+import { createSessionScreenPresenter } from '../session-tools/screen.ts';
 import { sessionFills, sessionSecretLines, sessionSecretParams } from '../session-tools/secrets.ts';
 import { appLines } from './app-lines.ts';
 import { SESSION_BOUNDS } from '../session-tools/bounds.ts';
@@ -49,6 +50,7 @@ const SESSION_IDLE_MS = 30 * 60 * 1000;
 /** How long the attempt outlives its step, so a step that hit the TTL is still closed in order. */
 const CLOSE_GRACE_MS = 60 * 1000;
 const SESSION_INSTRUCTION = 'Interactive session: a coding agent drives the app over MCP.';
+
 /** Where an agent reads how to write a test, said in the server's instructions and every session's opening. */
 export const READ_WRITING_GUIDE = 'Before you write or edit a test, read the writing-tests guide: the resource e2e://guide/writing-tests, or npx e2e guide writing-tests in a shell.';
 
@@ -450,7 +452,7 @@ export class SessionHost {
         ...(params === undefined ? {} : { params }),
         timeout: ttlMs,
       });
-      const screen = new ScreenPresenter();
+      const screen = createSessionScreenPresenter();
       const recorder = this.recorder(id, config, attempt);
       const catalog = createSessionCatalog({
         context: step.context,
@@ -609,7 +611,7 @@ export class SessionHost {
     );
     lines.push(`Tools (run one with call {tool, args}; tools {tool} shows a tool's arguments):`, ...this.catalogLines(live));
     lines.push(
-      'Node ids ("n42") are valid only for the newest observation; every action reports what changed on screen and the test line that repeats it (test_lines returns them all), and observe shows the whole screen. Call close_session when you are done.',
+      'Node ids ("n42") are valid only for the newest observation; every action reports what changed on screen and the test line that repeats it (test_lines returns them all), and observe shows the whole screen. When most of the screen changed, an action result sends the whole screen instead, with large subtrees that match an earlier listing folded to one line each, naming how many nodes each holds and the revision it matches; the ids inside a folded subtree stay valid, and observe shows the whole tree again. Call close_session when you are done.',
       READ_WRITING_GUIDE,
     );
     return `${lines.join('\n')}\n\n${screen}`;
