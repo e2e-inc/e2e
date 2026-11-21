@@ -461,9 +461,17 @@ thread handled, and labeled `Ready for Human Review`. "It compiles" and
 - Open every PR through the `ship-pr` skill (`.dev/skills/ship-pr`):
   checks, verification, fresh-context self-review, the PR, then the
   `babysit` skill (`.dev/skills/babysit`) until the label is on. Asking
-  for a PR means asking for all of that. A push removes the label
+  for a PR means asking for all of that. A push, a merge conflict, a change
+  request, or a move back to draft removes the label
   (`.github/workflows/review-label.yml`), so a labeled PR is always labeled
   for its current head.
+- On a PR from a fork you cannot add the label. Comment exactly `/ready` as
+  the PR's author once the gates in
+  [CONTRIBUTING.md](./CONTRIBUTING.md#ready-for-human-review) hold: green,
+  conflict-free, every review thread replied to and resolved, every comment
+  from a maintainer or a bot acknowledged with your 👍. The workflow refuses
+  it otherwise and lists what is open. Never resolve a thread or react just to
+  pass: handle the feedback first.
 - Never merge or approve.
 - When a reviewer (human or bot) corrects the same thing twice, encode it:
   make it impossible in types or structure, else a lint rule or a test, else

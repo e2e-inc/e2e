@@ -63,6 +63,32 @@ Keep PRs small, and write the description yourself, briefly. Long
 AI-generated descriptions may be ignored. If you can't explain the change in
 a few lines, the PR is probably too big.
 
+### Ready for Human Review
+
+Maintainers review PRs that carry the `Ready for Human Review` label. It says
+that everything a machine can check is done, so a person only spends time on
+judgment. Whether you or a coding agent drives the PR, the steps are the same.
+
+Contributors cannot add labels. When the PR is ready, its author comments
+exactly `/ready`, alone in the comment. A workflow adds the label, or replies
+with what is missing, when all of these hold:
+
+- No merge conflict, not a draft, and no `needs:compliance` label.
+- Checks have reported on the latest commit, and none is failing or still
+  running.
+- No reviewer's latest review requests changes.
+- Every review thread, from a maintainer or a review bot, is resolved. Fix it
+  or reply with why it does not apply, then resolve it. A thread someone else
+  opened does not count if you resolved it without replying.
+- Every comment and every maintainer review summary from someone else has
+  your 👍, which says you read it. For a review summary, react in the web UI
+  or with the GraphQL `addReaction` mutation on the review's `node_id`.
+
+The label vouches for one commit. A push, a merge conflict, a review that
+requests changes, or a move back to draft removes it; comment `/ready` again
+once the PR is back in shape. Do not ask for the label while review feedback
+is still open.
+
 ## The contract
 
 There is no separate spec document. The code is the contract, pinned in three
@@ -167,7 +193,8 @@ squash-merged, so the PR title is the commit; the
 [`writing-pr`](./.dev/skills/writing-pr/SKILL.md) skill describes the body,
 including the `## Verified` section every PR carries. Coding agents open PRs
 through the [`ship-pr`](./.dev/skills/ship-pr/SKILL.md) skill and babysit
-them until the `Ready for Human Review` label is on; a later push removes it.
+them until the [`Ready for Human Review`](#ready-for-human-review) label is
+on.
 
 ### Changesets
 
