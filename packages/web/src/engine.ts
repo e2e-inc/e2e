@@ -20,7 +20,7 @@ import {
 } from '@e2e-dev/core/engine';
 import { createRequire } from 'node:module';
 import type { WebFixtures } from './fixtures.ts';
-import { asBrowserProvider } from './provider.ts';
+import { asBrowserProvider, type BrowserProvider } from './provider.ts';
 import { PlaywrightSurface, type WebOptions } from './surface.ts';
 import { createBrowserFixture } from './browser.ts';
 import { validateInitScripts } from './init-scripts.ts';
@@ -76,8 +76,7 @@ export function web(options: WebOptions = {}): WebEngine {
     );
   }
   rejectUnknownKeys('web()', options, WEB_OPTION_KEYS);
-  if (options.browser !== undefined) validateBrowser(options.browser);
-  const provider = typeof options.browser === 'object' && options.browser !== null ? asBrowserProvider(options.browser) : undefined;
+  const provider = resolveBrowser(options.browser);
   if (provider !== undefined && options.connect !== undefined) {
     throw new ConfigurationError(
       'INVALID_CONFIG',
@@ -397,9 +396,10 @@ function isTimeZone(timeZone: string): boolean {
  */
 const ATTRIBUTE_NAME = /^[A-Za-z_:][A-Za-z0-9_:.-]*$/;
 
-/** `web({ browser })`: a name the engine launches, or a provider object that `asBrowserProvider` checks. `browserType` reads any other string as Chromium. */
-function validateBrowser(browser: unknown): void {
-  if (typeof browser === 'string' ? isBrowserName(browser) : isRecord(browser)) return;
+/** `web({ browser })`: undefined for a name the engine launches or no browser, the checked provider for an object, and a refusal for anything else. `browserType` reads any other string as Chromium. */
+function resolveBrowser(browser: unknown): BrowserProvider | undefined {
+  if (browser === undefined || (typeof browser === 'string' && isBrowserName(browser))) return undefined;
+  if (isRecord(browser)) return asBrowserProvider(browser);
   throw new ConfigurationError(
     'INVALID_CONFIG',
     `web({ browser }) must be one of ${BROWSER_NAMES.join(', ')}, or a browser provider, got ${typeof browser === 'string' ? JSON.stringify(browser) : kindOf(browser)}`,
