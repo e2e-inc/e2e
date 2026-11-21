@@ -361,11 +361,12 @@ continuously, or for the whole `timeout` when that is shorter, so it never
 returns sooner. `expect(locator, message?)`, `expect(screen, message?)`, and
 their `expect.soft` forms open each assertion failure with the message.
 `expect(value, message?)` is synchronous.
-`expect.poll(read, { timeout?, intervals?, message? })` re-reads until a value
+`expect.poll(read, { timeout?, interval?, intervals?, message? })` re-reads until a value
 matcher passes (`assertionTimeout` and `[100, 250, 500, 1000]` ms by default, stopping with the
 attempt); a throwing read keeps polling, and it is not a report step. A
 poll that the body or a hook returns without awaiting is cancelled and fails
 that phase with `STEP_NOT_AWAITED`.
+Use `intervals: [<ms>]` in place of the deprecated `interval` option.
 `timeout: 0` on a locator or fixture action, `waitFor`, a matcher, or
 `expect.poll` sets no deadline of its own: the test timeout
 (`cleanupTimeout` in `afterEach`) still bounds it, and `expect.poll` with 0

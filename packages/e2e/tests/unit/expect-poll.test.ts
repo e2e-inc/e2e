@@ -1,4 +1,4 @@
-import { describe, expect as vexpect, it } from 'vitest';
+import { describe, expect as vexpect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { currentAttempt, publishAttempt } from '@e2e-dev/core/lib/expect/attempt';
 import { expect as e2eExpect } from '../../src/expect/index.ts';
@@ -185,16 +185,40 @@ describe('expect.poll', () => {
     vexpect(reads).toEqual([0, 100, 350, 850, 1850, 2850]);
   });
 
-  it('refuses the removed interval option before reading', () => {
+  it('uses the deprecated interval for each pause and warns once across two polls', async () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      for (let i = 0; i < 2; i++) {
+        const start = Date.now();
+        const reads: number[] = [];
+        await e2eExpect.poll(() => reads.push(Date.now() - start), { interval: 50 }).toBe(3);
+        vexpect(reads).toEqual([0, 50, 100]);
+      }
+      vexpect(stderr).toHaveBeenCalledExactlyOnceWith(
+        'e2e: [warning] expect.poll interval is deprecated. Pass intervals: [<ms>].\n',
+      );
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it('refuses interval and intervals together before reading', () => {
     let reads = 0;
-    const options = { timeout: 100, interval: 10 };
+    const options = { timeout: 100, interval: 10, intervals: [20] };
     vexpect(() => e2eExpect.poll(() => ++reads, options).toBe(1)).toThrowError(
       vexpect.objectContaining({
         code: 'INVALID_CONFIG',
-        message: 'expect.poll interval was removed: pass { intervals: [<ms>] }',
+        message: 'expect.poll cannot take both interval and intervals',
       }),
     );
     vexpect(reads).toBe(0);
+  });
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])('refuses an invalid deprecated interval of %s', (interval) => {
+    vexpect(() => e2eExpect.poll(() => 1, { interval })).toThrowError(vexpect.objectContaining({
+      code: 'INVALID_CONFIG',
+      message: `expect.poll interval must be a finite number of milliseconds above 0; got ${String(interval)}`,
+    }));
   });
 
   it('refuses a non-plain poll options object', () => {

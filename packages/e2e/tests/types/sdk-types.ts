@@ -526,8 +526,7 @@ declare const valueMatcherNames: Exclude<keyof ValueExpectation<string>, 'not'>;
 pollMatcherNames satisfies typeof valueMatcherNames;
 valueMatcherNames satisfies typeof pollMatcherNames;
 void (expect.poll(() => 'x', { timeout: 15_000, intervals: [250], message: 'never settled' }).toBe('x') satisfies Promise<void>);
-// @ts-expect-error interval was removed. Pass intervals instead.
-void expect.poll(() => 'x', { interval: 250 });
+void (expect.poll(() => 'x', { interval: 250 }).toBe('x') satisfies Promise<void>);
 void (expect.poll(async () => 1).not.toBeGreaterThan(1) satisfies Promise<void>);
 void (expect.poll(() => 1, { intervals: [10, 50] as const }).toBe(1) satisfies Promise<void>);
 const block = async () => 1;

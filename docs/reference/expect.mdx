@@ -654,6 +654,7 @@ await expect.poll(() => readStatus(), { message: 'the batch never finished' }).n
 | Option | Type | Default |
 | --- | --- | --- |
 | `timeout` | `number` | `config.assertionTimeout` during an attempt or hook, 5000 ms outside both |
+| `interval` (deprecated) | `number` | - |
 | `intervals` | `readonly number[]` | `[100, 250, 500, 1000]` |
 | `message` | `string` | - |
 
@@ -663,6 +664,9 @@ await expect.poll(() => readStatus(), { message: 'the batch never finished' }).n
   it is capped by the hook deadline. `0` polls until that cap, so outside a
   test, hook, or hosted session it is `INVALID_CONFIG`. The maximum timeout
   is 2147483647 ms.
+- `interval` is the pause between reads in milliseconds, a finite number
+  above 0. It is deprecated: pass `intervals: [<ms>]`. It will be removed no
+  earlier than April 1, 2027.
 - `intervals` is a non-empty list of pauses in milliseconds. Each entry
   must be finite and above 0. Pauses are used in order. The last pause is
   repeated.
@@ -698,7 +702,7 @@ last: expected "running" not to be "running"
 | Throws | When |
 | --- | --- |
 | `ASSERTION_FAILED` | The deadline passed without a passing sample |
-| `INVALID_CONFIG` | Options not a plain object, an unknown option, or `timeout` or `intervals` out of range, before the first read |
+| `INVALID_CONFIG` | Options not a plain object, an unknown option, `timeout`, `interval`, or `intervals` out of range, or both `interval` and `intervals` set, before the first read |
 | `CANCELLED` | The attempt was cancelled or timed out |
 | `STEP_NOT_AWAITED` | The phase that started the poll returned while it still ran |
 | `HOOK_FAILED` | A `beforeAll` or `afterAll` hook returned while its poll still ran |
@@ -1111,6 +1115,11 @@ export interface AsymmetricMatcher {
 export interface PollOptions {
   /** Deadline in milliseconds. Default 5000. */
   timeout?: number;
+  /**
+   * Pause between reads in milliseconds.
+   * @deprecated Pass `intervals: [<ms>]`.
+   */
+  interval?: number;
   /** Pauses between reads in milliseconds. Default [100, 250, 500, 1000]. The last pause is repeated. */
   intervals?: readonly number[];
   /** Extra line in the timeout error, after the matcher line. */

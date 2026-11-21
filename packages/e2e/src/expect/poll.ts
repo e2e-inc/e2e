@@ -10,6 +10,7 @@ import { createValueExpectation } from './values.ts';
 
 /** Outside an attempt or hook (a standalone script) there is no config to read `assertionTimeout` from. */
 const DEFAULT_TIMEOUT_MS = 5000;
+const WARNED_INTERVAL = Symbol.for('e2e.expect.poll.interval.warned');
 
 /** `satisfies` keeps this list equal to the ValueExpectation matcher set. */
 const MATCHERS = {
@@ -63,7 +64,7 @@ function pollMatcher(
     api: 'expect.poll',
     label: `expect.poll(...).${negated ? 'not.' : ''}${name}(...)`,
     timeout: options.timeout ?? context?.assertionTimeout ?? DEFAULT_TIMEOUT_MS,
-    intervals: options.intervals ?? DEFAULT_PASS_OPTIONS.intervals,
+    intervals: options.intervals ?? (options.interval === undefined ? DEFAULT_PASS_OPTIONS.intervals : [options.interval]),
     message: options.message,
     noSample: 'no read completed',
   }, context);
@@ -94,5 +95,9 @@ export function createPollExpectation<T>(
   options: PollOptions = {},
 ): PollExpectation<T> {
   checkOptions('expect.poll', options);
+  if (options.interval !== undefined && Reflect.get(process, WARNED_INTERVAL) !== true) {
+    Object.defineProperty(process, WARNED_INTERVAL, { value: true });
+    process.stderr.write('e2e: [warning] expect.poll interval is deprecated. Pass intervals: [<ms>].\n');
+  }
   return build(read, options, false);
 }

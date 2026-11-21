@@ -1,8 +1,8 @@
 ---
-'e2e': minor
-'@e2e-dev/core': minor
+'e2e': patch
+'@e2e-dev/core': patch
 ---
 
-**Breaking:** `expect.poll` no longer takes `interval`. Pass `intervals`, a list of pauses whose last entry repeats. The default pauses are now `[100, 250, 500, 1000]` ms instead of a flat 100 ms.
+Added `expect(fn).toPass()` for retrying a block of assertions, with `.not` and `expect.soft` forms. `expect.poll` accepts a list of `intervals`, and its default pauses are now `[100, 250, 500, 1000]` ms. Defaults for `toPass` can be set with `toPass` in the config.
 
-Added `expect(fn).toPass()` for retrying a block of assertions, with `.not` and `expect.soft` forms. Defaults for `toPass` can be set with `toPass` in the config.
+Deprecated: the `interval` option of `expect.poll`. Pass `intervals: [<ms>]`. It will be removed no earlier than April 1, 2027.

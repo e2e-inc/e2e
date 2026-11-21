@@ -1240,6 +1240,11 @@ export type SoftValueExpectation<T> = Omit<ValueExpectation<T>, 'toMatchSchema' 
 export interface PollOptions {
   /** Deadline in milliseconds. Default 5000. */
   timeout?: number;
+  /**
+   * Pause between reads in milliseconds.
+   * @deprecated Pass `intervals: [<ms>]`.
+   */
+  interval?: number;
   /** Pauses between reads in milliseconds. Default [100, 250, 500, 1000]. The last pause is repeated. */
   intervals?: readonly number[];
   /** Extra line in the timeout error, after the matcher line. */

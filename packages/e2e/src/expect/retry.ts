@@ -181,11 +181,9 @@ export function checkOptions(api: string, options: unknown): void {
   if (!isPlainObject(options)) {
     throw new ConfigurationError('INVALID_CONFIG', `${api} options must be a plain object`);
   }
-  if (api === 'expect.poll' && 'interval' in options) {
-    throw new ConfigurationError('INVALID_CONFIG', 'expect.poll interval was removed: pass { intervals: [<ms>] }');
-  }
-  rejectUnknownKeys(`${api} options`, options, api === 'expect.poll' ? ['timeout', 'intervals', 'message'] : ['timeout', 'intervals']);
-  const { timeout, intervals } = options;
+  const poll = api === 'expect.poll';
+  rejectUnknownKeys(`${api} options`, options, poll ? ['timeout', 'interval', 'intervals', 'message'] : ['timeout', 'intervals']);
+  const { timeout, interval, intervals } = options;
   if (timeout !== undefined && !(typeof timeout === 'number' && Number.isFinite(timeout) && timeout >= 0)) {
     throw new ConfigurationError(
       'INVALID_CONFIG',
@@ -194,6 +192,17 @@ export function checkOptions(api: string, options: unknown): void {
   }
   if (timeout !== undefined && timeout > MAX_TIMER_MS) {
     throw new ConfigurationError('INVALID_CONFIG', `${api} timeout must be at most ${MAX_TIMER_MS} milliseconds, got ${timeout}`);
+  }
+  if (interval !== undefined) {
+    if (intervals !== undefined) {
+      throw new ConfigurationError('INVALID_CONFIG', 'expect.poll cannot take both interval and intervals');
+    }
+    if (!(typeof interval === 'number' && Number.isFinite(interval) && interval > 0)) {
+      throw new ConfigurationError(
+        'INVALID_CONFIG',
+        `expect.poll interval must be a finite number of milliseconds above 0; got ${String(interval)}`,
+      );
+    }
   }
   checkIntervals(`${api} intervals`, intervals);
 }
