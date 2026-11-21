@@ -13,7 +13,8 @@ import { redactToolResult } from './redaction.ts';
 import type { StepResult, Tool, ToolSet } from 'ai';
 import { z } from 'zod';
 import { isTapActionName, type NodeActionName, type PointActionName } from '../cache/trace.ts';
-import { KEY_MODIFIERS, type KeyModifier } from '../engine/contract.ts';
+import { isRemoteKey, KEY_MODIFIERS, type KeyModifier } from '../engine/contract.ts';
+import { movesFocusOnly, REMOTE_KEY_HINT } from './keys.ts';
 import type { ViewportPoint } from '../engine/surface.ts';
 import { codedMessage, hasCause, TestError } from '../internal/errors.ts';
 import { VIEWPORT_LIMITS } from '../internal/geometry.ts';
@@ -60,17 +61,6 @@ const MAX_SCROLL_TIMES = 20;
 const MAX_SCROLL_TO_TEXT_CHARS = 200;
 /** Presses one `press` call may repeat: a selection of a word, a caret moved a few steps. */
 const MAX_PRESS_TIMES = 20;
-
-/**
- * Keys whose whole effect is where the focus or the caret sits, which the
- * tree does not record. An unchanged screen after one of these is the normal
- * outcome, not a control that did nothing.
- */
-const FOCUS_ONLY_KEYS = /^(?:(?:Shift|Control|Alt|Meta)\+)*(?:Tab|Arrow(?:Left|Right|Up|Down)|Home|End|PageUp|PageDown)$/i;
-
-function movesFocusOnly(key: string): boolean {
-  return FOCUS_ONLY_KEYS.test(key.trim());
-}
 
 /** The model-pickable codes a blocked verdict accepts; derived, never restated. */
 const MODEL_BLOCKABLE_CODES = MODEL_ERROR_CODES.filter((code) => BLOCKABLE_CODES.has(code));
@@ -471,8 +461,12 @@ export function grammarTools(
       .max(MAX_PRESS_TIMES)
       .optional()
       .describe(`Press the key this many times in this one call, 1 to ${String(MAX_PRESS_TIMES)}; default 1. Use more to extend a selection or move a caret several steps at once.`);
+    const remoteHint = context.target.remoteKeys ? REMOTE_KEY_HINT : '';
     const pressed = (key: string, count: number, where: string) =>
       count === 1 ? `Pressed ${key} ${where}.` : `Pressed ${key} ${String(count)} times ${where}.`;
+    /** Where a press lands: a remote button goes to the device whatever the target. */
+    const pressedWhere = (key: string, id: string | undefined) =>
+      isRemoteKey(key) ? 'on the remote' : id === undefined ? 'on the focused field' : `on #${id}`;
     // Each repeat is one recorded action against the budget, as a scroll repeat
     // is. The first press addresses the node; the rest go to whatever has focus,
     // since a targeted press refocuses the node first and a repeated Tab would
@@ -489,7 +483,7 @@ export function grammarTools(
           ? 'Send one key (e.g. "Enter", "Escape", "Tab") to one node, or to whatever has focus when target is omitted.'
           : verbs.has('press')
             ? 'Send one key (e.g. "Enter", "Escape", "Tab") to one node.'
-            : 'Send one key (e.g. "Enter", "Escape", "Tab") to whatever has focus.') + selecting,
+            : 'Send one key (e.g. "Enter", "Escape", "Tab") to whatever has focus.') + selecting + remoteHint,
       inputSchema: z.object({
         target: both ? target.optional() : verbs.has('press') ? target : z.undefined().optional(),
         key: z.string().min(1).max(64),
@@ -498,8 +492,8 @@ export function grammarTools(
       execute: ({ target: id, key, times: count }) =>
         acting(
           {
-            done: pressed(key, count ?? 1, id === undefined ? 'on the focused field' : `on #${id}`),
-            attempt: `press ${key} ${id === undefined ? 'on the focused field' : `on #${id}`}`,
+            done: pressed(key, count ?? 1, pressedWhere(key, id)),
+            attempt: `press ${key} ${pressedWhere(key, id)}`,
           },
           () => pressing(key, id, count ?? 1),
           { expectChange: !movesFocusOnly(key) },
@@ -892,12 +886,16 @@ function createPointTools(
         ' Last resort: when the screen lists the control, press by id.',
       inputSchema: z.object({ x, y, key: z.string().min(1).max(64) }),
       execute: ({ x: px, y: py, key }) =>
-        atPoint('press_at', px, py, async (point) => {
-          const found = await focusAt(point, px, py, 'press_at');
-          if (found.kind === 'control') await context.actions.press(found.control, key);
-          else await context.actions.pressKey(key);
-          return `Pressed ${key} on ${found.summary}.`;
-        }),
+        // A remote button is not aimed at a point, and must not tap whatever lies under one first.
+        // A target with no remote takes the point path, whose press refuses the key by name.
+        context.target.remoteKeys && isRemoteKey(key)
+          ? Promise.resolve(`No point takes a TV remote button: call press with key "${key}" and no target.`)
+          : atPoint('press_at', px, py, async (point) => {
+              const found = await focusAt(point, px, py, 'press_at');
+              if (found.kind === 'control') await context.actions.press(found.control, key);
+              else await context.actions.pressKey(key);
+              return `Pressed ${key} on ${found.summary}.`;
+            }),
     });
   }
   if (verbs.has('select')) {

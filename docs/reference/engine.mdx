@@ -112,6 +112,7 @@ rules:
 | `perform`, `actions` | One without the other. An `actions` list that is empty, repeats a kind, or names one outside `KNOWN_LOCATOR_ACTION_KINDS`. |
 | `performAt`, `pointerActions` | One without the other. A `pointerActions` list that is empty, repeats a kind, or names one outside `POINTER_ACTION_KINDS`. |
 | `tapModifiers` | Not a boolean, or `true` without `perform`. |
+| `remoteKeys` | Not a boolean, or `true` without `keyboard`. |
 | `isolation` | Anything but `'attempt'` or `'worker'`. |
 | `keyboard`, `state`, `artifacts`, `session` | An unknown key or a non-function member. `keyboard` without `type` and `press`; `state` without both `capture` and `restore`; `artifacts` without `screenshot`; `startVideo` without `stopVideo`, or the reverse. |
 | `secrets` | Not an array of `secrets.get()` handles. |
@@ -142,6 +143,7 @@ The body of one target. Every member but `name`, `version`, and
 | [`locate`](#capabilities) | method |
 | [`performAt`, `pointerActions`](#pointer-actions) | method, kinds |
 | [`tapModifiers`](#capabilities) | `boolean` |
+| [`remoteKeys`](#keys) | `boolean` |
 | [`keyboard`](#keyboard) | `EngineKeyboard` |
 | [`fixtures`](#contributed-fixtures) | factories |
 | [`isolation`](#fixture-isolation) | `'attempt' \| 'worker'` |
@@ -243,6 +245,13 @@ export interface Engine {
    * reaches the engine.
    */
   readonly tapModifiers?: boolean;
+  /**
+   * The surface presses TV remote keys (`REMOTE_KEY_NAMES`), which reach it
+   * through `keyboard.press` and never through `perform`. Without it the
+   * harness fails a remote key with `UNSUPPORTED_CAPABILITY` before it
+   * reaches the engine. Requires `keyboard`.
+   */
+  readonly remoteKeys?: boolean;
   /** capability: keyboard - requires observation. Input to whatever holds focus; see `EngineKeyboard`. */
   readonly keyboard?: EngineKeyboard;
   /**
@@ -392,6 +401,7 @@ member. Three gaps end differently:
 | `perform` + `actions` | `actions` | `observe` | Node actions of the declared kinds, with platform actionability checks. |
 | `locate` | `location` | `observe` | `screen`, `Locator`, `expect(locator)`. |
 | `tapModifiers: true` | - | `perform` | `modifiers` on `tap`, `doubleTap`, and `secondaryTap`. |
+| `remoteKeys: true` | - | `keyboard` | [TV remote keys](#keys) in `press`, and the agent's hint naming them. |
 | `performAt` + `pointerActions` | `pointer` | `observe` | One pointer action at a viewport point, with no node behind it. |
 | `keyboard.{type,press,dismiss?}` | `keyboard` | `observe` | Input to whatever holds focus. |
 | `fixtures.<name>` | `<name>` | - | A contributed fixture. |
@@ -469,9 +479,9 @@ An undeclared verb is absent from the toolset.
 #### Test APIs
 
 The test-facing APIs each engine member backs. A `screen` or `Locator`
-method for an undeclared kind, or a call with `modifiers` and no
-`tapModifiers`, fails with `UNSUPPORTED_CAPABILITY` before it reaches the
-engine.
+method for an undeclared kind, a call with `modifiers` and no
+`tapModifiers`, or a TV remote key and no `remoteKeys`, fails with
+`UNSUPPORTED_CAPABILITY` before it reaches the engine.
 
 | API | Needs |
 | --- | --- |
@@ -479,6 +489,7 @@ engine.
 | `screen` and `Locator` actions | `perform`, each only for a kind listed in `actions` |
 | `screen.swipe()` | `perform` with `swipe` on the observation root |
 | `modifiers` on a tap (`row.click({ modifiers: ['Shift'] })`) | `tapModifiers: true`; the keys are held for the click |
+| a TV remote key in `press` (`locator.press('menu')`) | `remoteKeys: true` |
 | `screen.tapAt`, `tap({ position })` | `performAt` with the `tap` pointer kind |
 | `screen.doubleTapAt` | `performAt` with the `doubleTap` pointer kind |
 | `screen.swipe({ from, to })` | `performAt` with the `swipeTo` pointer kind |
@@ -1310,6 +1321,7 @@ The key grammar of `press`, shared by every engine, and its parser.
 parseKey('Control+a'); // { modifiers: ['Control'], key: { kind: 'char', char: 'a' } }
 parseKey('Shift+Tab'); // { modifiers: ['Shift'], key: { kind: 'named', name: 'Tab' } }
 parseKey('Ctrl+a'); // undefined: Ctrl is not a modifier of the grammar
+isRemoteKey('menu'); // true: a TV remote button, which parseKey does not read
 ```
 
 ```ts
@@ -1323,10 +1335,19 @@ parseKey('Ctrl+a'); // undefined: Ctrl is not a modifier of the grammar
  *   `Delete`, `ArrowUp`..., `Home`, `End`, `PageUp`, `PageDown`, `Insert`,
  *   `Space`, `F1`..`F12`).
  * - Any single printable character (`a`, `A`, `1`, `$`), typed as itself.
+ * - TV remote buttons: those in `REMOTE_KEY_NAMES` (the D-pad `up`, `down`,
+ *   `left`, `right`, `select`, then `back`, `menu`, `home`, and the media
+ *   keys `play`, `pause`, `play-pause`, `stop`, `rewind`, `fast-forward`,
+ *   `next`, `previous`), lowercase so none is mistaken for the keyboard key
+ *   of the same word (`home` is the remote's Home button, `Home` the
+ *   keyboard's line start). A remote button is the whole key: it takes no
+ *   modifier and has no node. It reaches only an engine that declares
+ *   `remoteKeys`, and only through `keyboard.press`.
  *
- * `Control+a`, `Shift+Tab`, `Enter`, `$`. A platform without a key maps it
+ * `Control+a`, `Shift+Tab`, `Enter`, `$`, `menu`. A platform without a key maps it
  * or throws `UNSUPPORTED_CAPABILITY`; it never reinterprets the spelling.
- * `parseKey` is the one parser, exported so no engine carries its own.
+ * `parseKey` is the one parser of the keyboard keys, exported so no engine
+ * carries its own, and `isRemoteKey` tells a remote button apart.
  */
 export type Key = string;
 
@@ -1362,7 +1383,32 @@ export const KEY_NAMES = [
   'F12',
 ] as const;
 
-/** One parsed `press` key: its modifiers and either a named key or a single character. */
+/** The TV remote buttons of the key grammar; only an engine that declares `remoteKeys` receives them. */
+export const REMOTE_KEY_NAMES = [
+  'up',
+  'down',
+  'left',
+  'right',
+  'select',
+  'back',
+  'menu',
+  'home',
+  'play',
+  'pause',
+  'play-pause',
+  'stop',
+  'rewind',
+  'fast-forward',
+  'next',
+  'previous',
+] as const;
+
+export type RemoteKeyName = (typeof REMOTE_KEY_NAMES)[number];
+
+/** Whether a `press` key is a TV remote button. Not a `parseKey` key: it has no modifiers and no keyboard. */
+export function isRemoteKey(key: string): key is RemoteKeyName;
+
+/** One parsed keyboard key: its modifiers and either a named key or a single character. */
 export interface ParsedKey {
   /** Modifiers, in the order written. */
   readonly modifiers: readonly KeyModifier[];
@@ -1372,6 +1418,17 @@ export interface ParsedKey {
 
 export function parseKey(key: string): ParsedKey | undefined;
 ```
+
+A remote button reaches an engine only when the engine declares
+`remoteKeys: true`, as `@e2e-dev/mobile` does, and only through
+`keyboard.press`: a remote button has no node, so a `press` that names one
+waits for the node and then goes to the keyboard, and `perform` never
+receives one. In `keyboard.press`, check `isRemoteKey(key)` before
+`parseKey(key)`. On any other engine the harness refuses a remote key with
+`UNSUPPORTED_CAPABILITY` first, naming the keyboard key of the same word when
+there is one, so an engine that passes keys through to its platform never
+reads `home` as the keyboard's `Home`. A device that has no remote, or lacks
+the button, still refuses it with `UNSUPPORTED_CAPABILITY`.
 
 ### App
 
@@ -2388,9 +2445,9 @@ return context.fixture('printer', printer, { print: { kind: 'resource' } });
 `NodeRef`, `SemanticNode`, `ViewportPoint`, `ViewportSize`,
 `ObservationPixels`, `LocatorAction`, `LocatorActionKind`, `PointerAction`,
 `PointerActionKind`, `ScrollDirection`, `Momentum`, `SelectOption`, `Key`,
-`KeyModifier`, `KeyName`, `ParsedKey`, `ENGINE_SPI_VERSION`,
+`KeyModifier`, `KeyName`, `RemoteKeyName`, `ParsedKey`, `ENGINE_SPI_VERSION`,
 `LOCATOR_ACTION_KINDS`, `KNOWN_LOCATOR_ACTION_KINDS`, `POINTER_ACTION_KINDS`, `KEY_MODIFIERS`,
-`KEY_NAMES`, `parseKey`, `ENGINE_ERROR_CODES`, `RETRYABLE_ENGINE_ERROR_CODES`,
+`KEY_NAMES`, `REMOTE_KEY_NAMES`, `parseKey`, `isRemoteKey`, `ENGINE_ERROR_CODES`, `RETRYABLE_ENGINE_ERROR_CODES`,
 `Secret`, `isSecret`, `TextMatch`, `JsonValue`, `JsonValueRules`,
 `ResolveExpressionOptions`, `PollConditionOptions`, `WithoutUndefined`,
 `FixtureOperation`, `EngineIsolation`, `OBSERVED_NAME_LIMIT`, and `OBSERVED_TEXT_LIMIT` are

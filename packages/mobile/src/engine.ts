@@ -48,6 +48,9 @@ export function buildEngine(surface: AgentDeviceSurface): MobileEngine {
     actions: DEVICE_ACTIONS,
     performAt: (point, action, operation) => surface.performAt(point, action, operation, surface.inputBudget(action.kind, operation)),
     pointerActions: DEVICE_POINTER_ACTIONS,
+    // agent-device's `tv-remote` takes the remote keys; a device with no
+    // remote refuses them with UNSUPPORTED_CAPABILITY.
+    remoteKeys: true,
     keyboard: {
       type: (text, keyboardOptions, operation) => surface.typeText(text, keyboardOptions, operation, surface.inputBudget('type', operation)),
       press: (key, operation) => surface.pressFocusedKey(key, operation, surface.inputBudget('press', operation)),

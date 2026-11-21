@@ -80,7 +80,9 @@ export {
   OBSERVED_NAME_LIMIT,
   OBSERVED_TEXT_LIMIT,
   POINTER_ACTION_KINDS,
+  REMOTE_KEY_NAMES,
   RETRYABLE_ENGINE_ERROR_CODES,
+  isRemoteKey,
   parseKey,
 } from './contract.ts';
 export type { AppPermissionState, Expectable, JsonValue, Locator, Screen, Secret } from '../types.ts';
@@ -129,7 +131,8 @@ export interface EngineKeyboard {
   type(text: string, options: { readonly replace: boolean }, context: OperationContext): Promise<void>;
   /**
    * Sends one key of the contract grammar (`Enter`, `Escape`, `Tab`,
-   * `Shift+Tab`, a character) to whatever holds focus. The harness has
+   * `Shift+Tab`, a character) to whatever holds focus, or a TV remote button
+   * to the remote when the engine declares `remoteKeys`. The harness has
    * already validated the key's shape; refuse with `UNSUPPORTED_CAPABILITY`
    * a key the surface cannot deliver.
    */
@@ -869,6 +872,14 @@ export interface Engine {
    * that predates the field never drops one silently.
    */
   readonly tapModifiers?: boolean;
+  /**
+   * The surface presses TV remote keys (`REMOTE_KEY_NAMES`), which reach it
+   * through `keyboard.press` and never through `perform`: a remote button has
+   * no node. Without it the harness fails a remote key with
+   * `UNSUPPORTED_CAPABILITY` before it reaches the engine, so one that
+   * predates the field never reads `home` as a keyboard key. Requires `keyboard`.
+   */
+  readonly remoteKeys?: boolean;
   /** capability: keyboard - requires observation. Input to whatever holds focus; see `EngineKeyboard`. */
   readonly keyboard?: EngineKeyboard;
   /**

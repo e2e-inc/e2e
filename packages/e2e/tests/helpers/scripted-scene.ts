@@ -9,7 +9,7 @@
  */
 
 import type { LocatorAction, LocatorExpression, SemanticNode } from '@e2e-dev/core/lib/engine/index';
-import { engineFailure, obj, parseKey, resolveExpression } from './engine-runtime.ts';
+import { engineFailure, isRemoteKey, obj, parseKey, resolveExpression } from './engine-runtime.ts';
 
 /** The stable id of the observation root; `perform(root, swipe)` is the viewport swipe. */
 const SCENE_ROOT_ID = 'root';
@@ -65,7 +65,7 @@ export interface Scene {
   perform(id: string, action: LocatorAction): void;
   /** `keyboard.type` into the focused field. */
   type(text: string, replace: boolean): void;
-  /** `keyboard.press` on the focused field. */
+  /** `keyboard.press` on the focused field; a TV remote button runs the focused node's hook instead. */
   press(key: string): void;
 }
 
@@ -238,6 +238,12 @@ export function createScene(build: (stage: Stage) => ScriptedNode[], initialLoca
       node.value = replace ? text : `${node.value ?? ''}${text}`;
     },
     press(key) {
+      if (isRemoteKey(key)) {
+        // A TV remote button reaches whatever view holds focus, editable or not.
+        const node = allNodes().find((entry) => entry.states?.focused === true);
+        node?.on?.({ kind: 'press', key }, node);
+        return;
+      }
       applyKey(focused(), key);
     },
   };

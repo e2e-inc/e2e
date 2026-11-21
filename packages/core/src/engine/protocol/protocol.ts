@@ -116,6 +116,8 @@ export interface EngineManifest {
   readonly pointerActions?: readonly PointerActionKind[];
   /** See `Engine.tapModifiers`. */
   readonly tapModifiers?: boolean;
+  /** See `Engine.remoteKeys`. */
+  readonly remoteKeys?: boolean;
   /** See `Engine.isolation`; left out for `attempt`. */
   readonly isolation?: 'worker';
 }

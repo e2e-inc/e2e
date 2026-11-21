@@ -528,9 +528,11 @@ describe('engine protocol', () => {
         pointerActions: ['tap'],
         performAt: async () => {},
         keyboard: { type: async () => {}, press: async () => {} },
+        remoteKeys: true,
         init: async () => {},
       }),
     );
+    expect(describeEngine(local).remoteKeys).toBe(true);
     expect(validate(describeEngine(local))).toBe(true);
     const base = { name: 'x', version: '1', spiVersion: 1 };
     for (const refused of [
@@ -538,6 +540,7 @@ describe('engine protocol', () => {
       { ...base, methods: ['engine/readStyle'] },
       { ...base, methods: ['engine/observe'], actions: ['tap'] },
       { ...base, methods: ['engine/observe'], tapModifiers: true },
+      { ...base, methods: ['engine/observe'], remoteKeys: true },
       { ...base, methods: ['engine/observe'], pointerActions: ['tap'] },
       { ...base, methods: ['engine/locate'] },
       { ...base, methods: ['engine/observe', 'keyboard/type'] },

@@ -206,8 +206,9 @@ export class LocatorEngine {
   /**
    * Refuses an action the session would refuse, before the locator is
    * resolved: an undeclared kind, or modifiers on an engine that does not
-   * declare `tapModifiers`, is `UNSUPPORTED_CAPABILITY`, a `press` key
-   * outside the grammar is `INVALID_ARGUMENT`. Waiting for a node the engine
+   * declare `tapModifiers`, or a TV remote key on one that does not declare
+   * `remoteKeys`, is `UNSUPPORTED_CAPABILITY`, a `press` key outside the
+   * grammar is `INVALID_ARGUMENT`. Waiting for a node the engine
    * could never act on would report it as missing instead.
    */
   private checkAction(action: LocatorAction): void {
@@ -225,7 +226,7 @@ export class LocatorEngine {
         `modifiers on the "${action.kind}" action are not available on this target: its engine does not declare tapModifiers`,
       );
     }
-    if (action.kind === 'press') requireKey(action.key);
+    if (action.kind === 'press') requireKey(action.key, this.session.remoteKeys);
   }
 
   /** Refuses a pointer action the session would refuse: an undeclared kind is `UNSUPPORTED_CAPABILITY`. */

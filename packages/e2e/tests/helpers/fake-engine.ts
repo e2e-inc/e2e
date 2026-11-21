@@ -135,6 +135,8 @@ export interface FakeEngineBehavior {
   keyboard?: boolean;
   /** Declares `tapModifiers`, so modifiers on the tap actions reach `perform`. */
   tapModifiers?: boolean;
+  /** Declares `remoteKeys`, so TV remote keys reach `keyboard.press`. */
+  remoteKeys?: boolean;
   /** Declares `session.back`, `restart`, and `reset` beside `open`; with a scene, the last two close the app. */
   navigation?: boolean;
   /**
@@ -366,6 +368,7 @@ export function createFakeEngine(behavior: FakeEngineBehavior = {}): FakeEngineH
       await behavior.perform?.(ref, action, operation, current);
     },
     ...(behavior.tapModifiers === undefined ? {} : { tapModifiers: behavior.tapModifiers }),
+    ...(behavior.remoteKeys === undefined ? {} : { remoteKeys: behavior.remoteKeys }),
     ...(behavior.isolation === undefined ? {} : { isolation: behavior.isolation }),
     ...(behavior.pointerActions === undefined
       ? {}

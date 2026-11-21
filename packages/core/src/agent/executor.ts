@@ -216,6 +216,7 @@ export interface ExecutorActions {
    * or any model.
    */
   typeSecret(target: ExecutorTarget, name: string): Promise<void>;
+  /** Sends one key to a node. A TV remote button has no node, so it is pressed and recorded as `pressKey`. */
   press(target: ExecutorTarget, key: string): Promise<void>;
   select(target: ExecutorTarget, value: string): Promise<void>;
   /**
@@ -314,7 +315,16 @@ export interface ExecutorActions {
    * Needs the engine's `keyboard` capability (`typeText` in `target.verbs`).
    */
   typeText(value: string, options?: { readonly replace?: boolean }): Promise<void>;
-  /** Sends one key to whatever holds focus (`pressKey` in `target.verbs`). */
+  /**
+   * Sends one key to whatever holds focus (`pressKey` in `target.verbs`), in
+   * the contract's key grammar: a TV remote button such as `menu` goes to
+   * the device's remote. A key outside the grammar rejects with
+   * `INVALID_ARGUMENT`; a key the engine or device lacks (a remote button on
+   * a browser or a phone) rejects with `UNSUPPORTED_CAPABILITY`. Catch it
+   * here to fall back: one left to escape `runStep` fails the step, and
+   * `agent.act` reports it as `POLICY_DENIED` with the engine's error as its
+   * `cause`.
+   */
   pressKey(key: string): Promise<void>;
   /** Hides an on-screen keyboard (`dismissKeyboard` in `target.verbs`). */
   dismissKeyboard(): Promise<void>;
@@ -464,13 +474,15 @@ export interface StepExecutorContext {
    * `verbs` is the subset of the action grammar the engine declared, so an
    * executor offers a model exactly the vocabulary the surface can honor.
    * `tapModifiers` is true when `tap`, `doubleTap`, and `secondaryTap` accept
-   * `modifiers`.
+   * `modifiers`. `remoteKeys` is true when `press` and `pressKey` take the
+   * TV remote keys (`REMOTE_KEY_NAMES`).
    */
   readonly target: {
     readonly name: string;
     readonly platform: string;
     readonly verbs: ReadonlySet<ExecutorVerb>;
     readonly tapModifiers: boolean;
+    readonly remoteKeys: boolean;
   };
   /**
    * Present when a cached replay ran part of this step before handing it

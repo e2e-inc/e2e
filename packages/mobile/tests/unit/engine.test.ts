@@ -1093,6 +1093,7 @@ describe('observation', () => {
     ['tap at point', 'interactions.press', (h, op) => h.engine.performAt!({ x: 10, y: 10 }, { kind: 'tap' }, op)],
     ['type', 'interactions.type', (h, op) => h.engine.keyboard!.type('hi', { replace: false }, op)],
     ['press', 'command.keyboard', (h, op) => h.engine.keyboard!.press('Enter', op)],
+    ['remote key', 'command.tvRemote', (h, op) => h.engine.keyboard!.press('menu', op)],
     ['keyboard dismiss', 'command.keyboard', (h, op) => h.engine.keyboard!.dismiss!(op)],
     ['back', 'command.back', (h, op) => h.engine.session!.back!(op)],
     ['open link', 'apps.open', (h, op) => h.engine.session!.openLink!('e2e-benchmark://orders/42', op)],
@@ -1538,6 +1539,64 @@ describe('perform', () => {
     expect(h.fake.calls.slice(before).map((call) => call.method)).toEqual([key === 'Enter' ? 'command.keyboard' : 'interactions.type']);
   });
 
+  it.each([
+    ['up', 'up'],
+    ['down', 'down'],
+    ['left', 'left'],
+    ['right', 'right'],
+    ['select', 'select'],
+    ['back', 'back'],
+    ['menu', 'menu'],
+    ['home', 'home'],
+    ['play', 'media-play'],
+    ['pause', 'media-pause'],
+    ['play-pause', 'media-play-pause'],
+    ['stop', 'media-stop'],
+    ['rewind', 'media-rewind'],
+    ['fast-forward', 'media-fast-forward'],
+    ['next', 'media-next'],
+    ['previous', 'media-previous'],
+  ])('presses the %s remote key as the agent-device tv-remote button %s', async (key, button) => {
+    const h = harness();
+    await openAttempt(h);
+    const before = h.fake.calls.length;
+    await h.engine.keyboard!.press(key, operation());
+    expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([['command.tvRemote', { button }]]);
+  });
+
+  it.each([
+    ['Home', 'On a TV, the remote\'s button is "home"'],
+    ['ArrowUp', 'On a TV, the remote\'s button is "up"'],
+    ['Tab', 'On a TV, press a remote button by its lowercase name: up, down, left, right, select, back, menu, home, play'],
+    // Backspace deletes text; the remote's back leaves the screen, so it is not suggested.
+    ['Backspace', 'On a TV, press a remote button by its lowercase name: up, down, left, right, select, back, menu, home, play'],
+  ])('refuses the keyboard key %s and names the remote key to press instead', async (key, next) => {
+    const h = harness();
+    await openAttempt(h);
+    await expect(h.engine.keyboard!.press(key, operation())).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining(next),
+    });
+    const about = await observed(h, 'About');
+    await expect(h.engine.perform!(about.ref, { kind: 'press', key }, operation())).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining(next),
+    });
+  });
+
+  it('declares remoteKeys, so the harness hands it the remote keys', () => {
+    expect(harness().engine.remoteKeys).toBe(true);
+  });
+
+  it('fails a remote key the device has no button for with UNSUPPORTED_CAPABILITY', async () => {
+    const h = harness();
+    await openAttempt(h);
+    h.fake.respond('command.tvRemote', () => {
+      throw new AppError('UNSUPPORTED_OPERATION', 'tv-remote is not supported on this device');
+    });
+    await expect(h.engine.keyboard!.press('menu', operation())).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+  });
+
   it.each(['e2', ''])('presses the innermost control even when the row ref is %j', async (rowRef) => {
     const h = harness();
     h.fake.respond('capture.snapshot', () => ({
@@ -1806,6 +1865,21 @@ describe('device fixture', () => {
     } as unknown as EngineFixtureContext;
     return h.engine.fixtures!['device']!(context) as Device;
   }
+
+  it('presses a remote key with no node through device.pressRemote, and refuses a name outside the list', async () => {
+    const h = harness();
+    await openAttempt(h);
+    const device = fixture(h);
+    const before = h.fake.calls.length;
+    await device.pressRemote('play-pause');
+    await device.pressRemote('select');
+    expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
+      ['command.tvRemote', { button: 'media-play-pause' }],
+      ['command.tvRemote', { button: 'select' }],
+    ]);
+    await expect(device.pressRemote('Menu' as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('not a remote key') });
+    expect(h.fake.calls).toHaveLength(before + 2);
+  });
 
   describe('viewport', () => {
     it.each(['ios', 'android'] as const)('reads the %s viewport as a recorded resource without capturing pixels', async (platform) => {
@@ -2548,7 +2622,7 @@ describe('device fixture', () => {
     expect(h.fake.lastArgs('interactions.scroll')).toEqual({ direction: 'down', postGestureStabilization: false });
   });
 
-  it('counts a back, home, alert, keyboard, rotation, or fold as an action, so a control that arrives with it waits out the transition budget', async () => {
+  it('counts a back, home, remote press, alert, keyboard, rotation, or fold as an action, so a control that arrives with it waits out the transition budget', async () => {
     autoAdvanceTimers();
     const h = harness({ transition: 120 });
     await openAttempt(h);
@@ -2557,6 +2631,7 @@ describe('device fixture', () => {
     for (const change of [
       () => device.back(),
       () => device.home(),
+      () => device.pressRemote('menu'),
       () => device.alert('accept'),
       () => device.dismissKeyboard(),
       () => device.setOrientation('landscape-left'),

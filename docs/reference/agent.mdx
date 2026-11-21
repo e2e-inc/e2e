@@ -368,7 +368,7 @@ click, as a Shift-click extends a selection.
 | `hover({ target })` | `hover` | Moves the pointer over one node without pressing: hover menus, flyouts, tooltips, controls revealed on mouse-over. |
 | `type({ target?, value, replace? })` | `fill`; without `target`, `keyboard` | Replaces the node's value; without a target, types into whatever has focus. |
 | `type_secret({ target, name })` | `fill` | Fills a secret declared in the step's params. On a step that declares none, it fills nothing. |
-| `press({ target?, key, times? })` | `press`; without `target`, `keyboard` | Sends one key to a node or to the focused control, up to 20 times in one call. Each press is one action; with a target, the first press addresses the node and the rest go to whatever has focus, so a repeated `Tab` walks on. |
+| `press({ target?, key, times? })` | `press`; without `target`, `keyboard` | Sends one key to a node or to the focused control, up to 20 times in one call. Each press is one action; with a target, the first press addresses the node and the rest go to whatever has focus, so a repeated `Tab` walks on. On an engine that declares `remoteKeys`, the description names the [TV remote keys](/reference/engine#keys). A remote key goes to the remote even with a target, and is recorded with no node. |
 | `select({ target, value })` | `selectOption` | Picks an option by its visible label. |
 | `check({ target, checked? })` | `check` and `uncheck` | Sets a checkbox, switch, or radio to a state (`true` by default). A control already in that state is left alone, unlike a tap, which flips it. |
 | `scroll({ direction, target?, times? })` | `swipe` | Scrolls the viewport or one scrollable node, up to 20 screens per call. |
@@ -463,7 +463,7 @@ The built-in agent offers these tools:
 | `hover_at({ x, y })` | Moves the pointer to the coordinates. On an engine that cannot, hovers the listed control at the point by node id. Needs the `hover` action or pointer kind. |
 | `drag_at({ x, y, to_x, to_y })` | Drags from one point to the other, for a shape on a canvas or a pin on a map. On an engine that cannot, drags by node id when the points land on two different listed controls. Needs the `dragTo` action or pointer kind. |
 | `type_at({ x, y, value, replace? })` | Replaces a listed input's value. For an unlisted input, taps to focus and types at the caret unless `replace` is set. Unlisted inputs require keyboard support. |
-| `press_at({ x, y, key })` | Sends a key to the control at the point. If no control is listed, taps to focus and uses the engine's keyboard. |
+| `press_at({ x, y, key })` | Sends a key to the control at the point. If no control is listed, taps to focus and uses the engine's keyboard. On an engine that declares `remoteKeys`, a [TV remote key](/reference/engine#keys) is not sent to a point: the tool answers that `press` takes it, and taps nothing. |
 | `select_at({ x, y, value })` | Selects an option by visible label in the control at the point. |
 
 - Coordinates refer to the latest screenshot. The model must take a

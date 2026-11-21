@@ -717,16 +717,17 @@ describe('project tool dispatch', () => {
 });
 
 describe('press key grammar', () => {
-  /** An engine that records every located expression and performed action. */
-  function keyboard() {
+  /** An engine that records every located expression, performed action, and key its keyboard takes. */
+  function keyboard(remoteKeys = true) {
     const locates: number[] = [];
     const performed: string[] = [];
     const engine = defineEngine({
-      name: 'fake', version: '1', spiVersion: 1,
+      name: 'fake', version: '1', spiVersion: 1, remoteKeys,
       observe: async () => snapshot([{ ref: { id: 'field', revision: '' }, role: 'textbox', name: 'Name' }]),
       locate: async () => { locates.push(1); return [{ ref: { id: 'field', revision: '' }, role: 'textbox', name: 'Name' }]; },
       actions: ['tap', 'press'],
       perform: async (_ref, action) => { performed.push(action.kind === 'press' ? `press:${action.key}` : action.kind); },
+      keyboard: { type: async () => {}, press: async (key) => { performed.push(`key:${key}`); } },
     });
     return { engine, locates, performed };
   }
@@ -734,7 +735,7 @@ describe('press key grammar', () => {
   it('rejects a key outside the grammar in the locator tier before the locator is resolved', async () => {
     const { engine, locates, performed } = keyboard();
     const { fixtures } = runtime(engine);
-    for (const key of ['Ctrl+a', 'Enter+Shift', '', 'ab', 'Shift']) {
+    for (const key of ['Ctrl+a', 'Enter+Shift', '', 'ab', 'Shift', 'Menu', 'channel-up', 'Shift+menu']) {
       await expect(fixtures.screen.getByLabel('Name').press(key)).rejects.toMatchObject({
         code: 'INVALID_ARGUMENT',
         message: expect.stringContaining(`press key ${JSON.stringify(key)} is not a key`),
@@ -745,6 +746,28 @@ describe('press key grammar', () => {
     await fixtures.screen.getByLabel('Name').press('Control+a');
     await fixtures.screen.getByLabel('Name').press('Shift++');
     expect(performed).toEqual(['press:Control+a', 'press:Shift++']);
+  });
+
+  it('waits for the node of a TV remote press, then sends the key through the keyboard and never to perform', async () => {
+    const { engine, locates, performed } = keyboard();
+    const { fixtures } = runtime(engine);
+    await fixtures.screen.getByLabel('Name').press('menu');
+    expect(locates).toHaveLength(1);
+    expect(performed).toEqual(['key:menu']);
+  });
+
+  it('refuses a TV remote key before the locator resolves when the engine does not declare remoteKeys', async () => {
+    const { engine, locates, performed } = keyboard(false);
+    const { fixtures } = runtime(engine);
+    await expect(fixtures.screen.getByLabel('Name').press('home')).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('"home" is a TV remote key, and this target\'s engine does not declare remoteKeys; for the keyboard key press "Home"'),
+    });
+    await expect(fixtures.screen.getByLabel('Name').press('menu')).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+    expect(locates).toEqual([]);
+    expect(performed).toEqual([]);
+    await fixtures.screen.getByLabel('Name').press('Home');
+    expect(performed).toEqual(['press:Home']);
   });
 
   it('rejects a key outside the grammar in the agent dispatcher before any engine call', async () => {
@@ -758,11 +781,13 @@ describe('press key grammar', () => {
         rejected = cause;
       }
       await context.actions.press({ id: 'field' }, 'Shift+Tab');
+      // A remote button has no node: the dispatcher sends it as pressKey.
+      await context.actions.press({ id: 'field' }, 'menu');
       return { status: 'passed', summary: 'pressed' };
     } } } } });
     await fixtures.agent.act('press keys');
     expect(rejected).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('"Ctrl+a" is not a key') });
-    expect(performed).toEqual(['press:Shift+Tab']);
+    expect(performed).toEqual(['press:Shift+Tab', 'key:menu']);
   });
 
   it('fails an undeclared action kind with UNSUPPORTED_CAPABILITY before the locator is resolved', async () => {

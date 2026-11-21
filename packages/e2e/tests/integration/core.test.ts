@@ -447,6 +447,47 @@ describe('e2e/core', { timeout: 60_000 }, () => {
       expect(readdirSync(cacheDir, { recursive: true }).filter((file) => String(file).endsWith('.json'))).toHaveLength(1);
     });
 
+    it('records a TV remote press aimed at a node with no node, and replays it with no model', async () => {
+      let calls = 0;
+      const remote: StepExecutor = {
+        name: 'remote', version: '1',
+        runStep: async (context) => {
+          calls += 1;
+          const { text } = await context.observe();
+          await context.actions.press({ id: idOf(text, 'button', 'Now playing') }, 'menu');
+          return { status: 'passed' as const, summary: 'opened the menu' };
+        },
+      };
+      const cacheDir = path.join(dir, 'cache');
+      const tv = (): ScriptedNode[] => {
+        const menu: ScriptedNode = { id: 'menu', role: 'status', name: 'Menu', text: 'closed' };
+        const player: ScriptedNode = {
+          id: 'player', role: 'button', name: 'Now playing', states: { focused: true },
+          on: (action) => { if (action.kind === 'press' && action.key === 'menu') menu.text = 'open'; },
+        };
+        return [player, menu];
+      };
+      const fake = createFakeEngine({ scene: tv, keyboard: true, remoteKeys: true });
+      const opened = await host(fake.engine, { app: FAKE_APP });
+      for (const round of [1, 2]) {
+        const session = await opened.newSession();
+        await session.app.open('/');
+        const agent = createAgent(session, { executor: remote, cache: { dir: cacheDir } });
+        const result = await agent.act('open the menu with the remote', { cacheKey: 'menu' });
+        expect(await session.screen.getByRole('status', 'Menu').textContent()).toBe('open');
+        // A check after the step confirms its recording.
+        await session.screen.getByRole('status', 'Menu').waitFor();
+        expect(result.cache?.mode).toBe(round === 1 ? 'missed' : 'self-finalized');
+        await session.close();
+        expect(calls).toBe(1);
+      }
+      const presses = fake.attempts.flatMap((attempt) => fake.callsOf(attempt.attemptId, 'keyboard')).map((call) => [call.method, call.text]);
+      expect(presses).toEqual([['press', 'menu'], ['press', 'menu']]);
+      const entry = readdirSync(cacheDir, { recursive: true }).find((file) => String(file).endsWith('.json'));
+      const { payload } = JSON.parse(readFileSync(path.join(cacheDir, String(entry)), 'utf8')) as { payload: { actions: unknown[] } };
+      expect(payload.actions).toEqual([{ name: 'pressKey', summary: 'press "menu" on the remote', key: 'menu' }]);
+    });
+
     it('replays a recording another host made, since a host\'s token is not part of the key', async () => {
       const brain = scripted();
       const cacheDir = path.join(dir, 'cache');

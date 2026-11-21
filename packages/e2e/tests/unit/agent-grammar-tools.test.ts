@@ -17,6 +17,8 @@ import { createGrammarTools, createVerdictTool, grammarTools } from '@e2e-dev/co
 import { createBuiltInAgent, projectTools } from '@e2e-dev/core/lib/agent/default-agent';
 import { createToolLoopExecutor } from '@e2e-dev/core/lib/agent/tool-loop';
 import { defineTool } from '@e2e-dev/core/lib/agent/tool';
+import { describeAction } from '@e2e-dev/core/lib/agent/actions';
+import type { ExecutorVerb } from '@e2e-dev/core/lib/agent/executor';
 import { fakeExecutorContext } from '../helpers/fake-executor-context.ts';
 import { installFakeLoopModel, loopCalls } from '../helpers/fake-loop-model.ts';
 
@@ -536,5 +538,90 @@ describe('the loop guard waits longer on the built-in observe only', () => {
     await expect(executor.runStep({ ...context, model })).resolves.toMatchObject({ status: 'failed' });
     expect(observed()).toBe(5);
     expect(writes).toHaveLength(5);
+  });
+});
+
+describe('press on a TV remote key', () => {
+  /** A context whose observation never changes and whose keyboard presses succeed. */
+  function remoteContext(remoteKeys: boolean, verbs: readonly ExecutorVerb[] = ['pressKey']) {
+    const { context } = fakeExecutorContext({ verbs, remoteKeys });
+    const observation = { revision: '1', text: '#n1 button "Now playing"', truncated: false, viewport: { width: 1920, height: 1080 } };
+    const pressed: string[] = [];
+    return {
+      pressed,
+      context: {
+        ...context,
+        observe: async () => observation,
+        actions: {
+          ...context.actions,
+          pressKey: async (key: string) => { pressed.push(key); },
+          press: async (target: { id: string }, key: string) => { pressed.push(`#${target.id}:${key}`); },
+        },
+      },
+    };
+  }
+  const run = async (tools: ToolSet, key: string) => {
+    const execute = tools['press']!.execute as unknown as (input: { key: string }, options: { toolCallId: string; messages: [] }) => Promise<unknown>;
+    return String(await execute({ key }, { toolCallId: 'call', messages: [] }));
+  };
+
+  it('names the remote keys only on a target whose engine declares remoteKeys', () => {
+    const description = (remoteKeys: boolean) => createGrammarTools(remoteContext(remoteKeys).context).press!.description!;
+    expect(description(true)).toContain('menu, home, play');
+    expect(description(true)).toContain('play-pause');
+    expect(description(true)).toContain('("home" is the remote\'s, "Home" the keyboard\'s)');
+    expect(description(false)).not.toContain('remote');
+  });
+
+  it('reports a remote key named with a node as pressed on the remote, and leaves the route to the dispatcher', async () => {
+    const { context, pressed } = remoteContext(true, ['press', 'pressKey']);
+    const tools = createGrammarTools(context);
+    const execute = tools['press']!.execute as unknown as (input: { target?: string; key: string; times?: number }, options: { toolCallId: string; messages: [] }) => Promise<unknown>;
+    expect(String(await execute({ target: 'n1', key: 'menu', times: 2 }, { toolCallId: 'call', messages: [] }))).toMatch(/^Pressed menu 2 times on the remote\./);
+    await execute({ target: 'n1', key: 'Enter' }, { toolCallId: 'call', messages: [] });
+    // The fake's press is the dispatcher's seat, which is where a remote key loses its node.
+    expect(pressed).toEqual(['#n1:menu', 'menu', '#n1:Enter']);
+  });
+
+  it('reports a remote key as pressed on the remote, expects home to change the screen, and lets the D-pad move focus only', async () => {
+    const { context, pressed } = remoteContext(true);
+    const tools = createGrammarTools(context);
+    // The first press shows the whole screen; the later ones read against it.
+    expect(await run(tools, 'select')).toMatch(/^Pressed select on the remote\./);
+    const home = await run(tools, 'home');
+    expect(home).toMatch(/^Pressed home on the remote\./);
+    expect(home).toContain('No listed node changed within the wait after this action');
+    const up = await run(tools, 'up');
+    expect(up).toMatch(/^Pressed up on the remote\./);
+    expect(up).toContain('Screen unchanged since revision');
+    const keyboardHome = await run(tools, 'Home');
+    expect(keyboardHome).toMatch(/^Pressed Home on the focused field\./);
+    expect(keyboardHome).toContain('Screen unchanged since revision');
+    expect(pressed).toEqual(['select', 'home', 'up', 'Home']);
+  });
+
+  it('answers a remote key on press_at without tapping the point or pressing, and keeps the hint off press_at', async () => {
+    const { context, pressed } = remoteContext(true);
+    const tools = createGrammarTools(context);
+    expect(tools['press_at']!.description).not.toContain('remote');
+    const execute = tools['press_at']!.execute as unknown as (input: { x: number; y: number; key: string }, options: { toolCallId: string; messages: [] }) => Promise<unknown>;
+    // The fake context refuses tapAt and hitTest, so a tap first would fail the call.
+    const said = String(await execute({ x: 10, y: 20, key: 'select' }, { toolCallId: 'call', messages: [] }));
+    expect(said).toBe('No point takes a TV remote button: call press with key "select" and no target.');
+    expect(pressed).toEqual([]);
+  });
+
+  it('sends a remote key on press_at down the point path on a target with no remote, where press refuses it', async () => {
+    const { context, pressed } = remoteContext(false);
+    const execute = createGrammarTools(context)['press_at']!.execute as unknown as (input: { x: number; y: number; key: string }, options: { toolCallId: string; messages: [] }) => Promise<unknown>;
+    // The point path asks for a screenshot first; the remote answer never does.
+    expect(String(await execute({ x: 10, y: 20, key: 'home' }, { toolCallId: 'call', messages: [] }))).toMatch(/^No screenshot has been taken in this step: press_at coordinates/);
+    expect(pressed).toEqual([]);
+  });
+
+  it('records a remote key as pressed on the remote', () => {
+    const options = { redact: (text: string) => text, redactCut: (text: string) => text };
+    expect(describeAction({ name: 'pressKey', key: 'menu' }, options).summary).toBe('press "menu" on the remote');
+    expect(describeAction({ name: 'pressKey', key: 'Enter' }, options).summary).toBe('press "Enter" on the focused field');
   });
 });

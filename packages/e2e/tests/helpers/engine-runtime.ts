@@ -13,7 +13,7 @@ const builtEngineModule = '@e2e-dev/core/lib/engine/index';
 
 const built = (await import(builtEngineModule)) as typeof import('@e2e-dev/core/lib/engine/index');
 
-export const { defineEngine, ENGINE_SPI_VERSION, LOCATOR_ACTION_KINDS, POINTER_ACTION_KINDS, obj, parseKey, resolveExpression } =
+export const { defineEngine, ENGINE_SPI_VERSION, isRemoteKey, LOCATOR_ACTION_KINDS, POINTER_ACTION_KINDS, obj, parseKey, resolveExpression } =
   built;
 
 /** A thrown `EngineError` from the built package, for a fake that fails on purpose. */

@@ -236,6 +236,7 @@ export function createFixtures(environment: AttemptEnvironment): AttemptFixtures
       platform: environment.target.platform,
       verbs: environment.session.verbs,
       tapModifiers: environment.session.tapModifiers,
+      remoteKeys: environment.session.remoteKeys,
     },
     app: environment.target.app,
     attempt: environment.attempt,

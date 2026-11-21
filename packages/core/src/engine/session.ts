@@ -6,7 +6,8 @@
  * makes it the one place three rules are enforced: a capability the engine
  * does not declare fails loud with `UNSUPPORTED_CAPABILITY` at the moment of
  * use, a `press` key outside the contract grammar fails with
- * `INVALID_ARGUMENT` before any engine sees it, and anything an engine throws
+ * `INVALID_ARGUMENT` before any engine sees it (and a TV remote button
+ * reaches the engine through `keyboard.press` alone), and anything an engine throws
  * that is not an `EngineError` is normalized to
  * a non-retryable `ENGINE_FAILURE`, so a crashed engine is an infrastructure
  * failure everywhere and never a retry-eligible test failure.
@@ -20,6 +21,7 @@ import {
   TestError,
 } from '../internal/errors.ts';
 import { requireKey } from '../internal/keys.ts';
+import { isRemoteKey } from './contract.ts';
 import { timestamp } from '../internal/ids.ts';
 import { bound } from '../internal/text.ts';
 import { pixelsProvenMasked } from '../run/secrecy.ts';
@@ -298,6 +300,8 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
   const performAtRaw = guard('point actions', engine?.performAt);
   const pointerActions: ReadonlySet<PointerActionKind> = new Set(engine?.pointerActions ?? []);
   const tapModifiers = engine?.tapModifiers === true;
+  const remoteKeys = engine?.remoteKeys === true;
+  const pressKey = guard('keyboard input', engine?.keyboard?.press);
 
   const app: SessionApp = {
     open: guard('navigation', engine?.session?.open),
@@ -339,6 +343,7 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
     actions,
     pointerActions,
     tapModifiers,
+    remoteKeys,
     app,
     artifacts,
     appLog: createAppLogRoute(),
@@ -462,8 +467,10 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
       if ('modifiers' in action && action.modifiers !== undefined && !tapModifiers) {
         unsupported(`modifiers on the "${action.kind}" action`);
       }
-      if (action.kind === 'press') requireKey(action.key);
+      if (action.kind === 'press') requireKey(action.key, remoteKeys);
       rejectSupersededLocate(ref);
+      // A remote button has no node: the keyboard is its one route into the engine.
+      if (action.kind === 'press' && isRemoteKey(action.key)) return pressKey(action.key, operation);
       if (action.kind === 'dragTo') rejectSupersededLocate(action.target);
       await performRaw(ref, action, operation);
     },
@@ -479,8 +486,8 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
     keyboard: {
       type: guard('keyboard input', engine?.keyboard?.type),
       press: (key, operation) => {
-        requireKey(key);
-        return guard('keyboard input', engine?.keyboard?.press)(key, operation);
+        requireKey(key, remoteKeys);
+        return pressKey(key, operation);
       },
       dismiss: guard('keyboard dismissal', engine?.keyboard?.dismiss),
     },

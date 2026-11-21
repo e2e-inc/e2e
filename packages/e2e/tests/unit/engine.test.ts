@@ -2,8 +2,10 @@ import { assert, describe, expect, it } from 'vitest';
 import {
   defineEngine,
   isEngineHandle,
+  isRemoteKey,
   LOCATOR_ACTION_KINDS,
   parseKey,
+  REMOTE_KEY_NAMES,
   type Engine,
   type EngineCleanupContext,
   type EngineSnapshot,
@@ -69,6 +71,15 @@ describe('defineEngine', () => {
     expect(() => defineEngine(observingEngine({ actions: ['tap'], perform, tapModifiers: 'yes' as never }))).toThrow(
       /tapModifiers must be a boolean/,
     );
+  });
+
+  it('carries remoteKeys onto the handle only with keyboard, and only as a boolean', () => {
+    const perform = async () => undefined;
+    const keyboard = { type: async () => undefined, press: async () => undefined };
+    expect(defineEngine(observingEngine({ keyboard, remoteKeys: true })).remoteKeys).toBe(true);
+    expect(defineEngine(observingEngine({ keyboard, remoteKeys: false })).remoteKeys).toBeUndefined();
+    expect(() => defineEngine(observingEngine({ actions: ['press'], perform, remoteKeys: true }))).toThrow(/remoteKeys without keyboard/);
+    expect(() => defineEngine(observingEngine({ keyboard, remoteKeys: 'yes' as never }))).toThrow(/remoteKeys must be a boolean/);
   });
 
   it('closes the action list: known kinds, each once, at least one', () => {
@@ -282,6 +293,21 @@ describe('parseKey', () => {
       modifiers: ['ControlOrMeta', 'Shift'],
       key: { kind: 'named', name: 'ArrowLeft' },
     });
+  });
+
+  it('keeps every TV remote button out of the keyboard keys: lowercase, without modifiers, read by isRemoteKey', () => {
+    for (const name of REMOTE_KEY_NAMES) {
+      expect(isRemoteKey(name), name).toBe(true);
+      expect(parseKey(name), name).toBeUndefined();
+      expect(isRemoteKey(`Shift+${name}`), name).toBe(false);
+      expect(parseKey(`Shift+${name}`), name).toBeUndefined();
+    }
+    expect(isRemoteKey('Home')).toBe(false);
+    expect(parseKey('Home')).toEqual({ modifiers: [], key: { kind: 'named', name: 'Home' } });
+    for (const key of ['Menu', 'Play', 'MENU', 'channel-up', 'media-play']) {
+      expect(isRemoteKey(key), key).toBe(false);
+      expect(parseKey(key), key).toBeUndefined();
+    }
   });
 
   it('treats a trailing + as the plus character', () => {

@@ -838,7 +838,12 @@ await screen.getByRole('textbox', 'Notes').press('ControlOrMeta+a');
 ```
 
 A key is zero or more modifiers and one key, joined with `+`, as the
-[key grammar](/reference/engine#keys) lists them. `Shift++` presses `+`.
+[key grammar](/reference/engine#keys) lists them. `Shift++` presses `+`. On a TV, `menu`, `home`, `play`, the D-pad,
+and the other lowercase [remote keys](/reference/engine#keys) press the
+remote's button once the node the locator names is there; with no node to name, use
+[`device.pressRemote`](/reference/mobile#pressremote). An engine that does
+not declare `remoteKeys`, the web engine among them, refuses them with
+`UNSUPPORTED_CAPABILITY` before the locator resolves.
 
 | Throws | When |
 | --- | --- |

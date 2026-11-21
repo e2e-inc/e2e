@@ -25,5 +25,6 @@
   ],
   "actions": ["tap", "doubleTap", "longPress", "fill", "clear", "press", "check", "uncheck", "focus", "scrollIntoView", "dragTo", "swipe"],
   "pointerActions": ["tap", "doubleTap", "longPress", "dragTo", "swipe", "swipeTo"],
+  "remoteKeys": true,
   "isolation": "worker"
 }
