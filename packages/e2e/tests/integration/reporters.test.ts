@@ -258,8 +258,8 @@ describe('reporter objects', () => {
           ...engineConfig(createFakeEngine().engine),
           tests: 'tests/**/*.e2e.ts',
           reporters: [
-            { name: 'view', printsTo: 'stderr', onOutput: () => undefined, onSummary: shown },
-            { name: 'document', printsTo: 'stdout', onRunFinished: printed },
+            { name: 'view', interactive: true, onEvent: () => undefined, onSummary: shown },
+            { name: 'document', onRunFinished: printed },
           ],
           cache: 'off' as const,
         },
@@ -271,6 +271,41 @@ describe('reporter objects', () => {
     } finally {
       stdout.mockRestore();
     }
+  }, 120_000);
+
+  it('gives report files a few seconds after a forced stop, then gives up on them', async () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const force = new AbortController();
+    let aborted = false;
+    const started = Date.now();
+    try {
+      const outcome = await runExisting(project, {
+        config: {
+          ...engineConfig(createFakeEngine().engine),
+          tests: 'tests/**/*.e2e.ts',
+          reporters: [
+            {
+              name: 'stuck',
+              reportFiles: (_run, signal) => {
+                signal.addEventListener('abort', () => (aborted = true));
+                return new Promise<never>(() => undefined);
+              },
+            },
+          ],
+          cache: 'off' as const,
+        },
+        runOptions: { forceSignal: force.signal, onEvent: (event) => { if (event.type === 'run-finished') force.abort(); } },
+      });
+      expect(outcome.exitCode).toBe(0);
+      expect(stderr.mock.calls.map((call) => String(call[0])).join('')).toContain('e2e: reporter "stuck" abandoned: the run was forced to stop');
+    } finally {
+      stderr.mockRestore();
+    }
+    // Far short of the one-minute budget, and not at once.
+    const waited = Date.now() - started;
+    expect(waited).toBeGreaterThanOrEqual(4_500);
+    expect(waited).toBeLessThan(30_000);
+    expect(aborted).toBe(true);
   }, 120_000);
 
   it('writes report files after a forced stop, but never over report.json', async () => {

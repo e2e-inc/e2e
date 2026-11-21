@@ -66,6 +66,8 @@ type StepGateOptions = {
   readonly now?: () => number;
   readonly holdSteps?: boolean;
   readonly viewer?: boolean;
+  /** False when commands answer the prompt and no keyboard does. */
+  readonly keyboard?: boolean;
 };
 
 /** The numbered hold and its read callbacks for the viewer. */
@@ -117,6 +119,7 @@ export class StepGate {
   private readonly now: () => number;
   private readonly holdSteps: boolean;
   private readonly viewer: boolean;
+  private readonly keyboard: boolean;
 
   /**
    * `stop` interrupts the run. `holdSteps` is false for a run without
@@ -129,6 +132,7 @@ export class StepGate {
     this.now = options.now ?? Date.now;
     this.holdSteps = options.holdSteps ?? true;
     this.viewer = options.viewer ?? false;
+    this.keyboard = options.keyboard ?? true;
   }
 
   /** The runner's `hold` hook. */
@@ -244,6 +248,7 @@ export class StepGate {
       help: this.help,
       holdSteps: this.holdSteps,
       ...(this.viewer ? { viewer: true } : {}),
+      ...(this.keyboard ? {} : { keyboard: false }),
     };
   }
 }

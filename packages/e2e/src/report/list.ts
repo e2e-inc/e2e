@@ -14,7 +14,6 @@ import type { SerializedError } from '@e2e-dev/core/lib/internal/errors';
 import { resultId } from '@e2e-dev/core/lib/internal/ids';
 import { packageVersion } from '@e2e-dev/core/lib/internal/package-version';
 import type { RunEventFact, RunEventOf, RunEventResult, SetupStep } from '../run/events.ts';
-import type { StepPrompt } from '../run/step-hold.ts';
 import type { AppLogRecord, StepRecord } from '@e2e-dev/core/lib/run/steps';
 import { cleanupErrorsOf, expectedFailureOf, failureBeforeSkip, type ArtifactRecord, type AttemptRecord, type AttemptStatus, type FailureEvidence, type ResultStatus, type SerialGroupRecord } from '@e2e-dev/core/lib/run/records';
 import type { Reporter, ReporterSummary } from '../run-types.ts';
@@ -66,7 +65,7 @@ import {
 import { leftOutTests } from './left-out.ts';
 import { ExploreView } from './list-explore.ts';
 import { isShownEvent, type ConfiguredModel, type FileGroup, type PausedTest, type ReplayNotice, type RunningTest, type TestLine } from './list-model.ts';
-import { replayLine, replayNotices, stepLine, stepPromptLine, stepPromptRows } from './list-steps.ts';
+import { pausedLine, replayLine, replayNotices, stepLine, stepPromptRows } from './list-steps.ts';
 import { LiveWindow } from './live-window.ts';
 import { repeatGroups, repeatLine, repeatSummary, type RepeatRun } from './repeats.ts';
 import { RunningTree } from './running-tree.ts';
@@ -298,8 +297,8 @@ export interface ListReporterOptions {
 /**
  * The built-in `list` reporter: the run for a person in the terminal, with a
  * live window of what is running on a TTY. It prints what user code writes,
- * a test's under its title and the runner's under `runner`, the `--step`
- * prompt, and, last, every reporter's summary rows.
+ * a test's under its title and the runner's under `runner`, a test waiting
+ * at a pause with its keys, and, last, every reporter's summary rows.
  */
 export function list(options: ListReporterOptions = {}): Reporter {
   const stream = options.stream ?? 'stdout';
@@ -321,23 +320,15 @@ export function runView(id: 'list' | 'dot', stream: 'stdout' | 'stderr', asId: b
   const current = (): ListReporter => (view ??= create(output));
   return builtin(id, {
     name: id,
-    printsTo: stream,
-    onEvent: (event) => {
-      // A test's output arrives through `onOutput`, with the runner's, in the order it was printed.
-      if (event.type !== 'output') current().handle(event);
-    },
-    onOutput: ({ stream: from, text, target, pair }) => {
-      if (target === undefined) current().processOutput(from, text);
-      else current().handle({ type: 'output', target, pair, stream: from, text });
-    },
-    onStepPrompt: (prompt) => current().showStepPrompt(prompt),
+    interactive: true,
+    onEvent: (event) => current().handle(event),
     onSummary: (rows) => {
       const finished = current();
       view = undefined;
       finished.endProcessOutput();
       finished.rows(rows);
     },
-  }, asId);
+  }, asId, stream);
 }
 
 /**
@@ -355,10 +346,10 @@ export class ListReporter {
   private artifactsRoot: string | undefined;
   /** Selected targets in declaration order; decides each badge's color. */
   private targets: readonly string[] = [];
-  /** When the run was launched (`run-started`): what a run that never reached `plan` reports. */
+  /** When the run was launched (`run-started`): what a run that never reached `collected` reports. */
   private launchedAt = new Date();
   /**
-   * When the run began executing (`plan`): the summary's `Start at` and the
+   * When the run began executing (`collected`): the summary's `Start at` and the
    * origin of `Duration`. Undefined until then, so the clock never ticks
    * while a first-run download narrates above the live window.
    */
@@ -372,10 +363,12 @@ export class ListReporter {
   private readonly live: boolean;
   /** The run holds its steps (`e2e run --step`), as `run-started` says: the live window lists every finished step, not only agent ones. */
   private stepping = false;
-  /** The `e2e run --step` prompt up now, shown under its test. */
-  private prompt: StepPrompt | undefined;
-  /** The prompt line printed last without a live window, so `h`, which changes nothing there, prints nothing. */
-  private promptLine: string | undefined;
+  /** The test waiting for a key now, shown under its test with the keys below the summary. */
+  private pausedAt: RunEventOf<'paused'> | undefined;
+  /** The pause line printed last without a live window, so the same wait told again prints nothing. */
+  private printedPause: string | undefined;
+  /** Each test's title path as `collected` listed it, joined, by test id. */
+  private readonly titlePaths = new Map<string, string>();
   private readonly failures: Failure[] = [];
   private readonly skippedFailures: Failure[] = [];
   /** Every result a test filter left out, in the order they arrived, for the `Left out` row. */
@@ -464,8 +457,8 @@ export class ListReporter {
       case 'run-started':
         this.runStarted(event);
         break;
-      case 'plan':
-        this.plan(event);
+      case 'collected':
+        this.collected(event);
         break;
       case 'notice':
         if (this.inFlight !== undefined) this.inFlight.narrated = true;
@@ -484,7 +477,15 @@ export class ListReporter {
         this.step(event);
         break;
       case 'output':
-        this.testOutput(event);
+        if (event.target === undefined) this.processOutput(event.stream, event.text);
+        else this.testOutput({ ...event, target: event.target });
+        break;
+      case 'paused':
+        // With no key to press, commands answer the wait and print it themselves.
+        this.showPaused(event.keys.length === 0 ? undefined : event);
+        break;
+      case 'resumed':
+        this.showPaused(undefined);
         break;
       case 'test-finished':
         this.testFinished(event.result);
@@ -517,14 +518,14 @@ export class ListReporter {
 
   /**
    * Shows the held steps under their test and the keys below the summary.
-   * Without a live window, the prompt is printed once as a permanent line.
+   * Without a live window, the pause is printed once as a permanent line.
    */
-  showStepPrompt(prompt: StepPrompt | undefined): void {
-    this.prompt = prompt;
+  private showPaused(paused: RunEventOf<'paused'> | undefined): void {
+    this.pausedAt = paused;
     if (!this.live) {
-      const line = prompt === undefined ? undefined : stepPromptLine(prompt);
-      if (line !== undefined && line !== this.promptLine) this.print(line);
-      this.promptLine = line;
+      const line = paused === undefined ? undefined : pausedLine(paused, this.titlePaths.get(paused.testId) ?? this.paused()?.test.title ?? paused.testId);
+      if (line !== undefined && line !== this.printedPause) this.print(line);
+      this.printedPause = line;
       return;
     }
     this.window.redraw();
@@ -548,7 +549,7 @@ export class ListReporter {
    * only lines a newline has ended print; the rest waits for the next write,
    * the test's result, or the end of the run.
    */
-  private testOutput(event: RunEventOf<'output'>): void {
+  private testOutput(event: RunEventOf<'output'> & { readonly target: string }): void {
     if (this.dots !== undefined) {
       this.dots.show(event.stream, event.text);
       return;
@@ -565,7 +566,7 @@ export class ListReporter {
    * test's output under a `stdout | runner` heading. The runner hands it
    * here already redacted, only while this reporter shows the run.
    */
-  processOutput(stream: 'stdout' | 'stderr', text: string): void {
+  private processOutput(stream: 'stdout' | 'stderr', text: string): void {
     if (this.dots !== undefined) {
       this.dots.show(stream, text);
       return;
@@ -678,12 +679,13 @@ export class ListReporter {
   }
 
   /**
-   * The plan is settled once collection and every target's `prepare` are
+   * The tests are settled once collection and every target's `prepare` are
    * done, so its arrival is when the run starts executing and the clock
    * starts: a browser downloaded moments earlier is not on it.
    */
-  private plan(event: RunEventOf<'plan'>): void {
+  private collected(event: RunEventOf<'collected'>): void {
     this.startedAt = new Date();
+    for (const test of event.tests) this.titlePaths.set(test.testId, test.titlePath.join(' › '));
     for (const planned of event.files) {
       this.group(planned.file, planned.target).planned = planned.tests;
     }
@@ -1076,7 +1078,7 @@ export class ListReporter {
    * vitest's padded summary, shared by the live window and the final report:
    * files, tests, model usage, the trace cache's part, run errors, start
    * time, and elapsed time. The
-   * clock rows wait for `plan`; the final summary of a run that never got
+   * clock rows wait for `collected`; the final summary of a run that never got
    * there (a config or collection failure, a failed download) counts from
    * the launch instead, so the time it took to fail is still on record.
    */
@@ -1169,18 +1171,18 @@ export class ListReporter {
     if (this.explore !== undefined) {
       return this.explore.liveRows(this.exploreBadge(), running[0]?.current?.events, this.summaryRows(false), Date.now(), room);
     }
-    const footer = this.prompt === undefined ? [] : stepPromptRows(this.pc, this.prompt).slice(0, terminalRows() - 1);
+    const footer = this.pausedAt === undefined ? [] : stepPromptRows(this.pc, this.pausedAt, terminalColumns()).slice(0, terminalRows() - 1);
 
     return this.tree.render(running, this.summaryRows(false), Date.now(), room, { setup: this.inFlight, paused: this.paused(), footer });
   }
 
-  /** The running test the `--step` prompt holds, with the prompt. */
+  /** The running test that waits for a key, with its `paused` event. */
   private paused(): PausedTest | undefined {
-    const { prompt } = this;
-    if (prompt === undefined) return undefined;
-    const { testId, agent, target, repeat } = prompt.steps[0].step;
+    const { pausedAt } = this;
+    if (pausedAt === undefined) return undefined;
+    const { testId, agent, target, repeat } = pausedAt;
     const test = this.pairs.get(pairKey(testId, agent, target, repeat));
-    return test === undefined ? undefined : { test, prompt };
+    return test === undefined ? undefined : { test, paused: pausedAt };
   }
 
   /**

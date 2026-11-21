@@ -41,7 +41,7 @@ export default {
   reporters: ['list', {
     name: 'chatty',
     onEvent(event) {
-      if (event.type === 'plan') console.log(\`reporter onEvent: \${token}\`);
+      if (event.type === 'collected') console.log(\`reporter onEvent: \${token}\`);
       if (event.type === 'run-finished') process.stdout.write(\`reporter unfinished: \${token}\`);
     },
     onRunFinished() {
@@ -90,7 +90,8 @@ describe('e2e run redacts what user code prints outside a test', () => {
     expect(cli.status, cli.stdout + cli.stderr).toBe(0);
     const output = `${cli.stdout}\n${cli.stderr}`;
     expect(output).not.toContain(TOKEN);
-    expect(cli.stdout).toContain(`after the run, unfinished: ${TOKEN.slice(0, 9)}`);
+    // The runner prints nothing on stdout itself, not even what user code leaves for after the run.
+    expect(cli.stderr).toContain(`after the run, unfinished: ${TOKEN.slice(0, 9)}`);
     const lines = output.split('\n');
     for (const line of [
       'config console.log: <secret:apiToken>',
@@ -108,13 +109,15 @@ describe('e2e run redacts what user code prints outside a test', () => {
     }
   });
 
-  it('hands output to every reporter that takes it, beside list, with where it came from', () => {
+  it('hands output to every reporter as an event, beside list, with where it came from', () => {
     const mirrored = CONFIG.replace("import { defineEngine }", "import { appendFileSync } from 'node:fs';\nimport { defineEngine }").replace(
       "reporters: ['list', {",
       `reporters: ['list', {
     name: 'mirror',
-    onOutput(output) {
-      appendFileSync('mirror.jsonl', JSON.stringify(output) + '\\n');
+    onEvent(event) {
+      if (event.type !== 'output') return;
+      const { stream, text, target, pair } = event;
+      appendFileSync('mirror.jsonl', JSON.stringify({ stream, text, target, pair }) + '\\n');
     },
   }, {`,
     );
@@ -129,14 +132,16 @@ describe('e2e run redacts what user code prints outside a test', () => {
     expect(cli.stdout.split('\n')).toEqual(expect.arrayContaining(['test file top level: <secret:apiToken>', 'test body: <secret:apiToken>']));
   });
 
-  it('still prints output itself when the reporter printing to stdout does not show it, whoever else records it', () => {
+  it('still prints output itself, on stderr, when no interactive reporter shows it, whoever else records it', () => {
     const mirrored = CONFIG.replace("import { defineEngine }", "import { appendFileSync } from 'node:fs';\nimport { defineEngine }").replace(
       "reporters: ['list', {",
       `reporters: ['list', {
     name: 'mirror',
-    onOutput(output) {
-      appendFileSync('mirror.jsonl', JSON.stringify(output) + '\\n');
-      setTimeout(() => process.stderr.write('echo\\n'), 0);
+    onEvent(event) {
+      if (event.type !== 'output') return;
+      const { stream, text, target, pair } = event;
+      appendFileSync('mirror.jsonl', JSON.stringify({ stream, text, target, pair }) + '\\n');
+      setTimeout(() => process.stdout.write('echo\\n'), 0);
     },
   }, {`,
     );
@@ -153,19 +158,26 @@ describe('e2e run redacts what user code prints outside a test', () => {
     expect(cli.stderr).toContain('echo\n');
   });
 
-  it('prints output itself once the reporter showing it throws', () => {
-    const broken = CONFIG.replace("reporters: ['list', {", `reporters: [{ name: 'broken-view', printsTo: 'stdout', onOutput() { throw new Error('VIEW_BOOM'); } }, {`);
+  it('prints output itself, the write that broke it included, once the interactive reporter throws', () => {
+    const broken = CONFIG.replace(
+      "reporters: ['list', {",
+      `reporters: [{ name: 'broken-view', interactive: true, onEvent(event) { if (event.type === 'output' && event.text.startsWith('test file')) throw new Error('VIEW_BOOM'); } }, {`,
+    );
     const cli = runCli({ 'e2e.config.ts': broken, 'tests/print.e2e.ts': TEST }, []);
     expect(cli.status, cli.stdout + cli.stderr).toBe(0);
-    expect(cli.stderr.split('\n')).toContain('e2e: reporter "broken-view" threw in onOutput: VIEW_BOOM; ignoring it for the rest of the run');
-    expect(cli.stdout.split('\n')).toEqual(expect.arrayContaining(['test file top level: <secret:apiToken>', 'test body: <secret:apiToken>']));
+    const lines = cli.stderr.split('\n');
+    expect(lines).toContain('e2e: reporter "broken-view" threw on output: VIEW_BOOM; ignoring it for the rest of the run');
+    expect(lines).toEqual(expect.arrayContaining(['test file top level: <secret:apiToken>', 'test body: <secret:apiToken>']));
+    // The runner prints for it on stderr.
+    expect(cli.stdout).not.toContain('test body');
     expect(`${cli.stdout}\n${cli.stderr}`).not.toContain(TOKEN);
   });
 
-  it('prints a test body on its own stream without the list reporter', () => {
+  it('prints a test body on stderr without an interactive reporter, leaving stdout alone', () => {
     const cli = runCli({ 'e2e.config.ts': CONFIG, 'tests/print.e2e.ts': TEST }, ['--reporter', 'junit']);
     expect(cli.status, cli.stdout + cli.stderr).toBe(0);
-    expect(cli.stdout.split('\n')).toContain('test body: <secret:apiToken>');
+    expect(cli.stderr.split('\n')).toContain('test body: <secret:apiToken>');
+    expect(cli.stdout).toBe('');
     expect(`${cli.stdout}\n${cli.stderr}`).not.toContain(TOKEN);
   });
 
@@ -178,6 +190,23 @@ describe('e2e run redacts what user code prints outside a test', () => {
       expect(lines).toContain(line);
     }
     expect(cli.stderr).not.toContain(TOKEN);
+  });
+
+  it('keeps stdout for the json report beside list, whatever the config, a reporter, or a timer prints', () => {
+    const cli = runCli({ 'e2e.config.ts': CONFIG, 'tests/print.e2e.ts': TEST }, ['--reporter', 'list,json']);
+    expect(cli.status, cli.stdout + cli.stderr).toBe(0);
+    expect(JSON.parse(cli.stdout)).toMatchObject({ schemaVersion: 'report-1' });
+    const lines = cli.stderr.split('\n');
+    for (const line of ['config console.log: <secret:apiToken>', 'reporter onRunFinished: <secret:apiToken>', 'test body: <secret:apiToken>', 'after the run: <secret:apiToken>']) {
+      expect(lines).toContain(line);
+    }
+  });
+
+  it('lets any reporter print a document to stdout from onSummary', () => {
+    const tap = CONFIG.replace("reporters: ['list', {", `reporters: ['list', { name: 'tap', onSummary() { process.stdout.write('TAP version 14\\n'); } }, {`);
+    const cli = runCli({ 'e2e.config.ts': tap, 'tests/print.e2e.ts': TEST }, ['--reporter', 'junit']);
+    expect(cli.status, cli.stdout + cli.stderr).toBe(0);
+    expect(cli.stdout).toBe('TAP version 14\n');
   });
 
   it('decodes a string written with an encoding, in the config and a test body', () => {
@@ -205,12 +234,12 @@ test('prints encoded', () => {
 `;
     const cli = runCli({ 'e2e.config.ts': config, 'tests/print.e2e.ts': test }, ['--reporter', 'junit']);
     expect(cli.status, cli.stdout + cli.stderr).toBe(0);
-    const stdout = cli.stdout.split('\n');
-    expect(stdout.filter((line) => line === 'config hex'), cli.stdout).toHaveLength(2);
-    expect(stdout).toContain('test hex: <secret:apiToken>');
-    expect(stdout).toContain('test latin1: café');
-    expect(stdout).toContain('test upper hex');
-    expect(cli.stderr.split('\n')).toContain('test base64');
+    const printed = cli.stderr.split('\n');
+    expect(printed.filter((line) => line === 'config hex'), cli.stderr).toHaveLength(2);
+    expect(printed).toContain('test hex: <secret:apiToken>');
+    expect(printed).toContain('test latin1: café');
+    expect(printed).toContain('test upper hex');
+    expect(printed).toContain('test base64');
     const output = `${cli.stdout}\n${cli.stderr}`;
     for (const encoded of [hex('config hex\n'), hex(`test hex: ${TOKEN}\n`), base64('test base64\n'), latin1('test latin1: café\n'), hex('test upper hex\n')]) {
       expect(output).not.toContain(encoded);

@@ -578,7 +578,7 @@ export async function serveSteps(options: RunOptions, version: string, signals: 
     stopping = true;
     signals.escalate();
   };
-  const gate = new StepGate(stop);
+  const gate = new StepGate(stop, { keyboard: false });
   /** Sends `reply` and any new run output to every waiting command. */
   const send = (reply: StepReply): void => {
     answered = true;
@@ -667,6 +667,8 @@ export async function serveSteps(options: RunOptions, version: string, signals: 
     return gate.beforeStep(step, {
       ...context,
       show: (shown) => {
+        // The reporters learn of the wait; the commands answer it.
+        context.show(shown);
         unseen = shown === undefined ? undefined : { prompt: shown, readScreen: context.readScreen };
         held = shown !== undefined;
         restartIdle();
@@ -691,7 +693,7 @@ export async function serveSteps(options: RunOptions, version: string, signals: 
     return options.onEvent?.(event);
   };
   try {
-    const outcome = await run({ ...options, hold: { ask: beforeStep, steps: true }, onEvent });
+    const outcome = await run({ ...options, hold: { ask: beforeStep, steps: true, keyboard: false }, onEvent });
     ended = { text: ENDED, exitCode: outcome.exitCode };
     return outcome;
   } catch (cause) {
@@ -761,7 +763,7 @@ export async function servePauses(
   let keyboard: StepKeyboard | undefined;
 
   const stream = process.stderr.isTTY === true ? 'stderr' : process.stdout.isTTY === true ? 'stdout' : undefined;
-  const gate = new StepGate(stop, { holdSteps: steps, viewer: stdin !== undefined && stream !== undefined });
+  const gate = new StepGate(stop, { holdSteps: steps, viewer: stdin !== undefined && stream !== undefined, keyboard: stdin !== undefined });
   // Print beside the list reporter's lines. Keep stdout free for reporters that use it.
   const print = (line: string): void => options.processOutput.printLine(line);
   /**
@@ -838,8 +840,9 @@ export async function servePauses(
   }
 
   /**
-   * Shows a hold under its test and keys below the summary in a terminal.
-   * Without a terminal, the pause is printed in the run's output.
+   * Shows a hold to the reporters: in a terminal, under its test with the
+   * keys below the summary. Without a terminal, the pause is also printed
+   * in the run's output, with the commands that answer it.
    *
    * Each new pause answers waiting commands. After the run starts stopping,
    * new pauses aren't printed and commands receive the run's final answer.
@@ -851,9 +854,9 @@ export async function servePauses(
       } else if (prompt !== undefined) {
         openKeyboard();
       }
-
-      context.show(prompt);
     }
+
+    context.show(prompt);
 
     const first = prompt?.steps[0].step;
 

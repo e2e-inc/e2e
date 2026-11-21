@@ -375,22 +375,41 @@ if (runEvent.type === 'step') {
 junit({ output: 'reports' });
 ({
   name: 'dots',
-  printsTo: 'stdout',
-  onOutput: ({ stream, text, target, pair }) => void process[stream].write(`${target ?? 'runner'} ${pair?.testId ?? ''} ${text}`),
-  onStepPrompt: (prompt) => {
-    prompt?.steps[0].step.label satisfies string | undefined;
-    prompt?.steps[0].step.attachId satisfies string | undefined;
-    // @ts-expect-error reporters receive prompt data without the runner's attach hook
-    prompt?.attach;
+  interactive: true,
+  onEvent: (event) => {
+    if (event.type === 'output') {
+      void process[event.stream].write(`${event.target ?? 'runner'} ${event.pair?.testId ?? ''} ${event.text}`);
+    }
+    if (event.type === 'collected') {
+      event.repeatEach satisfies number;
+      event.tests[0]?.titlePath satisfies readonly string[] | undefined;
+      event.tests[0]?.source?.line satisfies number | undefined;
+      event.tests[0]?.disposition satisfies 'run' | 'skip' | 'filtered' | undefined;
+    }
+    if (event.type === 'step' && event.progress.phase === 'start') {
+      event.progress.source?.file satisfies string | undefined;
+    }
+    if (event.type === 'paused') {
+      event.reason satisfies 'step' | 'pause';
+      event.steps[0].label satisfies string;
+      event.steps[0].source?.line satisfies number | undefined;
+      event.attachId satisfies string;
+      event.keys[0]?.does satisfies string | undefined;
+      // @ts-expect-error reporters only observe a pause: the event has no way to answer it
+      event.attach;
+    }
+    if (event.type === 'resumed') event.testId satisfies string;
   },
   onSummary: (rows) => void rows.map((row) => row.label),
 }) satisfies Reporter;
+// @ts-expect-error output is an event, not a hook of its own
+({ name: 'logs', onOutput: () => undefined }) satisfies Reporter;
 ({
   name: 'pages',
   reportFiles: async (finished) => [{ path: 'reports/run.txt', content: finished.report.run.status, label: 'Run' }],
 }) satisfies Reporter;
-// @ts-expect-error printsTo names a terminal stream
-({ name: 'logs', printsTo: 'console', onEvent: () => undefined }) satisfies Reporter;
+// @ts-expect-error interactive is a flag
+({ name: 'logs', interactive: 'stdout', onEvent: () => undefined }) satisfies Reporter;
 // @ts-expect-error a report file holds text
 ({ name: 'pages', reportFiles: () => [{ path: 'run.bin', content: new Uint8Array() }] }) satisfies Reporter;
 

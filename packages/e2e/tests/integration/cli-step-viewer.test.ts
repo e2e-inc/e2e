@@ -581,8 +581,8 @@ test('prints while checkout is paused', async () => {
     'list',
     {
       name: 'record received output',
-      onOutput({ text }) {
-        if (text.includes('Second line from the other test.')) {
+      onEvent(event) {
+        if (event.type === 'output' && event.text.includes('Second line from the other test.')) {
           process.stderr.write('Output redirected from the reporter.\\n');
           writeFileSync(new URL('./received', import.meta.url), '');
         }

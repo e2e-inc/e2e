@@ -161,7 +161,7 @@ console.log(result.status, result.explore.ended, result.explore.findings.length)
 - `onEvent` receives the same events as for `run`, plus an `explore` event
   for each planning decision, step, and finding. What `e2e explore` prints
   before the run starts, such as the target it chose, arrives as a `notice`
-  event with target `run`, before the `plan` event.
+  event with target `run`, before the `collected` event.
 - Recording and output settings, such as `video`, `trace`, and `output`,
   come from the config.
 
