@@ -285,7 +285,7 @@ test('renders the report', async ({ platform }) => {
 });
 ```
 
-- その時点で有効なタイムアウトを 3 倍にします。[`test.setTimeout`](#test-settimeout) と同じく試行の開始から数え、その規則に従います。`test.setTimeout(10_000)` の後なら 30 秒になり、呼び出すたびにさらに 3 倍になります。
+- その時点で有効なタイムアウトを 3 倍にします。[`test.setTimeout`](#test-settimeout) と同じく試行の開始から数え、その規則に従います。`test.setTimeout(10_000)` の後なら 30 秒になり、呼び出すたびにさらに 3 倍になります（上限は 2147483647 ミリ秒）。
 - 条件が偽なら何もしません。理由は読み手のためのもので、レポートには残りません。
 - リトライは [`timeout`](#timeout) オプションの値から始まります。
 - `test.slow(title, fn)` はありません。本体の最初で `test.slow()` を呼ぶか、`timeout` を渡してください。
@@ -467,7 +467,7 @@ test.beforeAll(async ({ database, device }) => {
 
 スイートのフックが実行したステップは、どのテストの記録にも含まれません。失敗した場合、エラーにはそのフックのスコープが示されます。
 
-各 `beforeAll` フックは設定の `timeout` で動きます。その中で [`test.setTimeout`](#test-settimeout) または [`test.slow`](#test-slow) を呼ぶとそのフックのタイムアウトが変わり、そのフックがセットアップするワーカーフィクスチャも変更後のタイムアウトで動きます。
+各 `beforeAll` フックは設定の `timeout` で動きます。その中で [`test.setTimeout`](#test-settimeout) または [`test.slow`](#test-slow) を呼ぶとそのフックのタイムアウトが変わり、その後にフックが行うエンジンの呼び出しも変更後のタイムアウトで動きます。フックが名前で指定するワーカーフィクスチャは本体の実行前にセットアップされるため、設定の `timeout` のままです。
 
 | エラー | 発生条件 |
 | --- | --- |

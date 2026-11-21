@@ -21,6 +21,12 @@ test('outlasts its own timeout', { timeout: 300 }, async () => {
   await sleep(600);
 });
 
+test('triples again on each call', { timeout: 100 }, async () => {
+  test.slow();
+  test.slow();
+  await sleep(600);
+});
+
 test('times out without it', { timeout: 300 }, async () => {
   await sleep(10_000);
 });
@@ -103,6 +109,8 @@ describe('test.slow', () => {
         expect(result('outlasts its own timeout').status).toBe('passed');
         expect(result('takes a condition and a reason').status).toBe('passed');
         expect(result('outlasts its own timeout too').status).toBe('passed');
+        // 100 ms tripled once is 300 ms, short of the 600 ms sleep; twice is 900 ms.
+        expect(result('triples again on each call').status).toBe('passed');
 
         expect(result('times out without it').status).toBe('timed-out');
         expect(result('leaves the timeout on a false condition').status).toBe('timed-out');

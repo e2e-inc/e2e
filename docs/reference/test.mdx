@@ -353,7 +353,7 @@ test('renders the report', async ({ platform }) => {
 - It triples the timeout in force, counted from the start of the attempt
   like [`test.setTimeout`](#test-settimeout), whose rules it follows. After
   `test.setTimeout(10_000)` it gives 30 seconds, and each call triples
-  again.
+  again, up to 2147483647 milliseconds.
 - With a false condition it does nothing. The reason is for the reader and
   is not reported.
 - A retry starts from the [`timeout`](#timeout) option again.
@@ -566,8 +566,10 @@ The steps a suite hook takes are in no test's record. A failure names the
 hook's scope.
 
 Each `beforeAll` hook runs on the config `timeout`.
-[`test.setTimeout`](#test-settimeout) or [`test.slow`](#test-slow) inside it changes that hook's, and
-the worker fixtures it sets up run on the changed timeout too.
+[`test.setTimeout`](#test-settimeout) or [`test.slow`](#test-slow) inside it changes that hook's
+timeout, and the engine calls the hook makes after it run on the changed one.
+The worker fixtures the hook names are set up before its body runs, so they
+keep the config `timeout`.
 
 | Throws | When |
 | --- | --- |

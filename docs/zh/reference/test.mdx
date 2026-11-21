@@ -285,7 +285,7 @@ test('renders the report', async ({ platform }) => {
 });
 ```
 
-- 它将当前生效的超时乘以 3，与 [`test.setTimeout`](#test-settimeout) 一样从本次尝试开始时计算，并遵循其规则。在 `test.setTimeout(10_000)` 之后得到 30 秒，每次调用都会再乘以 3。
+- 它将当前生效的超时乘以 3，与 [`test.setTimeout`](#test-settimeout) 一样从本次尝试开始时计算，并遵循其规则。在 `test.setTimeout(10_000)` 之后得到 30 秒，每次调用都会再乘以 3，上限为 2147483647 毫秒。
 - 条件为假时不做任何事。原因只供读者参考，不会写入报告。
 - 重试会重新从 [`timeout`](#timeout) 选项的值开始。
 - 没有 `test.slow(title, fn)`。请在主体开头调用 `test.slow()`，或传入 `timeout`。
@@ -467,7 +467,7 @@ test.beforeAll(async ({ database, device }) => {
 
 测试套件钩子执行的步骤不属于任何测试的记录。失败时会指出钩子的作用域。
 
-每个 `beforeAll` 钩子按配置中的 `timeout` 运行。在其中调用 [`test.setTimeout`](#test-settimeout) 或 [`test.slow`](#test-slow) 会更改该钩子的超时，它设置的工作进程测试夹具也按更改后的超时运行。
+每个 `beforeAll` 钩子按配置中的 `timeout` 运行。在其中调用 [`test.setTimeout`](#test-settimeout) 或 [`test.slow`](#test-slow) 会更改该钩子的超时，钩子之后发起的引擎调用也按更改后的超时运行。钩子指名的工作进程测试夹具在主体运行前就已设置，因此仍使用配置中的 `timeout`。
 
 | 抛出 | 条件 |
 | --- | --- |
