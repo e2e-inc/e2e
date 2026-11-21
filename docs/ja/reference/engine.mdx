@@ -1538,6 +1538,7 @@ export class InfrastructureError extends E2EError {
 | [`obj`](#obj) | `WithoutUndefined<T>` |
 | [`raceAbort`, `withTimeout`, `withinCleanupBudget`](#timing-helpers) | `Promise<T>`, `Promise<T>`, `Promise<void>` |
 | [`isSecret`](#issecret) | `boolean` |
+| [`secureReadDenied`](#securereaddenied) | `ConfigurationError` |
 | [`isProviderRecording`, `stopProviderRecording`](#provider-recordings) | `boolean`, `Promise<VideoSegment>` |
 
 #### テキストパターン
@@ -1754,6 +1755,15 @@ const operation = context.operation(stepTimeout(options?.timeout, 'kiosk.print')
 const password = isSecret(options.password)
   ? await context.resolveSecret(options.password)
   : options.password;
+```
+
+#### `secureReadDenied`
+
+セキュアフィールドの値、テキスト、属性の読み取りに対する `POLICY_DENIED` エラーです。`subject` はメッセージの末尾に入り、読み取った対象か、エンジンが拒否した理由を示します。独自のエラーを書かずにこれを投げると、すべてのエンジンがランナーと同じ文言で拒否します。
+
+```ts
+if (field.secure) throw secureReadDenied('the field is a password field');
+// POLICY_DENIED: reading values from a secure field is denied: the field is a password field
 ```
 
 ### 状態

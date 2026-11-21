@@ -1538,6 +1538,7 @@ export class InfrastructureError extends E2EError {
 | [`obj`](#obj) | `WithoutUndefined<T>` |
 | [`raceAbort`、`withTimeout`、`withinCleanupBudget`](#timing-helpers) | `Promise<T>`、`Promise<T>`、`Promise<void>` |
 | [`isSecret`](#issecret) | `boolean` |
+| [`secureReadDenied`](#securereaddenied) | `ConfigurationError` |
 | [`isProviderRecording`、`stopProviderRecording`](#provider-recordings) | `boolean`、`Promise<VideoSegment>` |
 
 #### 文本模式
@@ -1754,6 +1755,15 @@ const operation = context.operation(stepTimeout(options?.timeout, 'kiosk.print')
 const password = isSecret(options.password)
   ? await context.resolveSecret(options.password)
   : options.password;
+```
+
+#### `secureReadDenied`
+
+读取安全字段的值、文本或属性时使用的 `POLICY_DENIED` 错误。`subject` 位于消息末尾，说明读取的对象或引擎拒绝的原因。抛出它而不是自己编写错误，这样每个引擎都会使用与运行器相同的措辞拒绝。
+
+```ts
+if (field.secure) throw secureReadDenied('the field is a password field');
+// POLICY_DENIED: reading values from a secure field is denied: the field is a password field
 ```
 
 ### 状态

@@ -1914,13 +1914,13 @@ const password = isSecret(options.password)
 #### `secureReadDenied`
 
 The `POLICY_DENIED` error for a read of a value, text, or attribute on a
-secure field. `subject` names what was read and ends the message. Throw it
-instead of writing your own, so every engine refuses with the runner's
-wording.
+secure field. `subject` ends the message: what was read, or why the engine
+refused it. Throw it instead of writing your own, so every engine refuses
+with the runner's wording.
 
 ```ts
-if (node.states?.secure === true) throw secureReadDenied(label);
-// POLICY_DENIED: reading values from a secure field is denied: getByLabel("Password")
+if (field.secure) throw secureReadDenied('the field is a password field');
+// POLICY_DENIED: reading values from a secure field is denied: the field is a password field
 ```
 
 ### State
