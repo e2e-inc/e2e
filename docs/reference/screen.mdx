@@ -1065,6 +1065,14 @@ getAttribute(name: string): Promise<string | null>;
 const href = await screen.getByRole('link', 'Docs').getAttribute('href');
 ```
 
+On a device, a node carries `label` (the accessibility label: the iOS label, the
+Android content description, or its text when it has none), `resource-id` (its test id; on iOS the
+accessibility identifier, which Appium reads as `name`), `class` (the Android
+class, or the iOS element type without its prefix, such as `TextField`, which
+Appium reads as `type`), `content-desc` on Android, and `placeholder` when the
+platform reports one. For the text a field holds, use `inputValue()` or
+`textContent()`.
+
 #### `isVisible`
 
 ```ts

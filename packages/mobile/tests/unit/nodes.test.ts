@@ -59,7 +59,8 @@ describe('snapshot projection', () => {
     expect(secure.inputPurpose).toBe('password');
     expect(byName('Hidden').states).toEqual({ disabled: true, hidden: true });
     expect(byName('About').testId).toBe('ABOUT');
-    expect(byName('About').attributes).toBeUndefined();
+    expect(byName('About').attributes).toMatchObject({ label: 'About', 'resource-id': 'ABOUT' });
+    expect(byName('About').attributes).not.toHaveProperty('placeholder');
     expect(byName('About').selector).toBe('id=ABOUT');
     expect(byName('Search').selector).toBeUndefined();
     expect(byName('Back').rect).toEqual({ x: 0, y: 47, width: 390, height: 44 });
@@ -347,7 +348,7 @@ describe('snapshot projection', () => {
     // A role description outside the vocabulary leaves the class role; an empty description leaves the label as the name.
     expect(plain).toMatchObject({ role: 'group', name: 'Plain' });
     expect(total).toMatchObject({ role: 'text', name: 'Total', text: 'Total' });
-    expect(total?.attributes).toBeUndefined();
+    expect(total?.attributes).not.toHaveProperty('placeholder');
   });
 
   it('reads the role and state React Native spells into an iOS accessibility value, and reports the rest as the value', () => {
@@ -465,7 +466,7 @@ describe('snapshot projection', () => {
     ] as const) {
       const kept = field(label, children, extra).index[1]?.node;
       expect(kept?.name).toBe(label);
-      expect(kept?.attributes).toBeUndefined();
+      expect(kept?.attributes).not.toHaveProperty('placeholder');
       expect(kept?.children).toHaveLength(children.length);
     }
   });

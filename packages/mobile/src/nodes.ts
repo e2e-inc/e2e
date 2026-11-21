@@ -343,9 +343,14 @@ function isAndroidClass(type: string | undefined): boolean {
   return type !== undefined && type.includes('.');
 }
 
+/** An element type without the `XCUIElementType` prefix a WebDriver-backed iOS snapshot may carry. */
+function elementType(type: string): string {
+  return type.replace(/^XCUIElementType(?=[A-Z])/, '');
+}
+
 /** One element-type spelling for `NavigationBar`, `XCUIElementTypeNavigationBar`, `navigation-bar`, and `android.widget.NavigationBar` alike. */
 function normalizeKind(type: string): string {
-  const simple = type.slice(type.lastIndexOf('.') + 1).replace(/^XCUIElementType(?=[A-Z])/, '');
+  const simple = elementType(type.slice(type.lastIndexOf('.') + 1));
   return simple
     .replaceAll(/([a-z0-9])([A-Z])/g, '$1-$2')
     .replaceAll(/[\s_]+/g, '-')
@@ -423,6 +428,37 @@ function foldedPlaceholder(
 /** The string itself, or undefined for an absent or empty one. */
 function nonEmpty(value: string | undefined): string | undefined {
   return value === undefined || value === '' ? undefined : value;
+}
+
+/**
+ * What `getAttribute` reads on a device node, under the names an Appium
+ * suite asks for: `label` (the accessibility label: the iOS label, the Android
+ * content description or, when it has none, its text, as Detox defines it),
+ * `resource-id` (the Android resource id or the iOS accessibility
+ * identifier, the test id), `class` (the Android class or the iOS element
+ * type without its `XCUIElementType` prefix, also the tag name),
+ * `content-desc` (Android only), and `placeholder`. Undefined when the node
+ * carries none of them.
+ */
+function nodeAttributes(
+  source: RawNode,
+  android: boolean,
+  projected: { readonly label: string | undefined; readonly identifier: string | undefined; readonly placeholder: string | undefined },
+): Record<string, string> | undefined {
+  const description = nonEmpty(source.contentDescription);
+  const descriptionOnly =
+    source.text === '' && source.hintShowing !== true ? nonEmpty(source.label) : undefined;
+  const contentDescription = android ? (description ?? descriptionOnly) : undefined;
+  const ownText = source.hintShowing === true ? undefined : nonEmpty(source.label);
+  const entries: [string, string | undefined][] = [
+    ['label', android ? (description ?? ownText) : projected.label],
+    ['resource-id', projected.identifier],
+    ['class', nonEmpty(source.type === undefined ? undefined : elementType(source.type))],
+    ['content-desc', contentDescription],
+    ['placeholder', projected.placeholder],
+  ];
+  const present = entries.filter((entry): entry is [string, string] => entry[1] !== undefined);
+  return present.length === 0 ? undefined : Object.fromEntries(present);
 }
 
 /**
@@ -594,6 +630,7 @@ export function projectSnapshot(
     const label = folded === undefined ? nonEmpty(source.label) : folded.label;
     const name = nonEmpty(source.contentDescription) ?? label;
     const placeholder = folded?.placeholder ?? nonEmpty(source.placeholder);
+    const attributes = nodeAttributes(source, android, { label, identifier, placeholder });
     const projected: { node: SemanticNode | undefined } = { node: undefined };
     const entry: ProjectedNode = {
       id,
@@ -638,7 +675,7 @@ export function projectSnapshot(
         : { value }),
       ...(secure ? { inputPurpose: 'password' as const } : {}),
       ...(Object.keys(states).length === 0 ? {} : { states }),
-      ...(placeholder === undefined ? {} : { attributes: { placeholder } }),
+      ...(attributes === undefined ? {} : { attributes }),
       // The accessibility identifier (iOS) or resource id (Android) is the node's test id.
       ...(identifier === undefined ? {} : { testId: identifier }),
       ...(source.rect === undefined ? {} : { rect: { ...source.rect } }),
