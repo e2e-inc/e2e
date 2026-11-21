@@ -52,7 +52,7 @@
     "@sindresorhus/slugify": "4.0.1",
     "@types/node": "26.6.6",
     "ajv": "8.20.0",
-    "fallow": "3.43.2",
+    "fallow": "3.45.0",
     "oxlint": "1.94.0",
     "remark-gfm": "4.0.1",
     "typescript": "7.0.2"
