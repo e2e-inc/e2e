@@ -285,7 +285,8 @@ test('renders the report', async ({ platform }) => {
 });
 ```
 
-- 它将当前生效的超时乘以 3，与 [`test.setTimeout`](#test-settimeout) 一样从本次尝试开始时计算，并遵循其规则。在 `test.setTimeout(10_000)` 之后得到 30 秒，每次调用都会再乘以 3，上限为 2147483647 毫秒。
+- 它将当前生效的超时乘以 3，与 [`test.setTimeout`](#test-settimeout) 一样从本次尝试开始时计算，并遵循其规则。在 `test.setTimeout(10_000)` 之后得到 30 秒，上限为 2147483647 毫秒。
+- 与 Playwright 一样，每次尝试只生效一次：在主体或 `beforeEach` 钩子中再次调用不会做任何事。之后调用 `test.setTimeout` 仍会替换超时。
 - 条件为假时不做任何事。原因只供读者参考，不会写入报告。
 - 重试会重新从 [`timeout`](#timeout) 选项的值开始。
 - 没有 `test.slow(title, fn)`。请在主体开头调用 `test.slow()`，或传入 `timeout`。

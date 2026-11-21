@@ -5,7 +5,7 @@ import { InfrastructureError } from '../internal/errors.ts';
 import { realmSlot } from '../internal/realm-slot.ts';
 import type { AttemptBudget } from '../run/budget.ts';
 import type { AttemptGuests } from '../run/guest-steps.ts';
-import type { TimeoutApi, TimeoutUpdate } from '../internal/test-timeout.ts';
+import type { TimeoutChange, TimeoutUpdate } from '../internal/test-timeout.ts';
 import type { SoftFailures } from './soft.ts';
 import type { PollScope } from './poll-scope.ts';
 
@@ -25,11 +25,11 @@ export interface PublishedAttempt {
   readonly expectFailure?: (reason: string) => void;
   /**
    * Gives the attempt the test timeout `update` makes of the one in force,
-   * counted from its start (`test.setTimeout`, `test.slow`); false once the
-   * attempt's timeout race settled. A refusal names `api`. Absent in a
-   * hosted session, which runs no e2e test.
+   * counted from its start (`test.setTimeout`, `test.slow`), and says what
+   * it did; core words any refusal. Absent in a hosted session, which runs
+   * no e2e test.
    */
-  readonly setTimeout?: (update: TimeoutUpdate, api: TimeoutApi) => boolean;
+  readonly setTimeout?: (update: TimeoutUpdate) => TimeoutChange;
   /** Hosted callers have no runner-owned body lineage; their polls belong to the session. */
   readonly polls?: PollScope;
   /**

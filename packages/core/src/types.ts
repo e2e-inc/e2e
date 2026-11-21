@@ -980,15 +980,11 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   fail(condition: boolean, reason?: string): void;
   fail(reason?: string): void;
   /**
-   * Inside a running test or a `beforeEach` hook: triples the test's timeout
-   * when `condition` is true (or always, with no condition), as Playwright's
-   * `test.slow()` does. It triples the timeout in force, counted from the
-   * start of the attempt like the `timeout` option, so each call triples it
-   * again; a retry starts from the option. Inside a `beforeAll` hook it
-   * triples that hook's timeout. `reason` says why, for the reader; it is not
-   * reported. `afterEach` and `afterAll` hooks run on `cleanupTimeout` and
-   * cannot change it. Outside a running test or hook the call is
-   * `COLLECTION_ERROR`, so use the `timeout` option there.
+   * Triples the running test's timeout in force when `condition` is true (or
+   * always), as Playwright's `test.slow()` does: once per attempt, so a
+   * second call does nothing. In a `beforeAll` hook it triples that hook's
+   * timeout. Otherwise it follows `setTimeout`'s rules; `reason` is not
+   * reported.
    */
   slow(condition: boolean, reason?: string): void;
   slow(reason?: string): void;

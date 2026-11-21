@@ -285,7 +285,8 @@ test('renders the report', async ({ platform }) => {
 });
 ```
 
-- その時点で有効なタイムアウトを 3 倍にします。[`test.setTimeout`](#test-settimeout) と同じく試行の開始から数え、その規則に従います。`test.setTimeout(10_000)` の後なら 30 秒になり、呼び出すたびにさらに 3 倍になります（上限は 2147483647 ミリ秒）。
+- その時点で有効なタイムアウトを 3 倍にします。[`test.setTimeout`](#test-settimeout) と同じく試行の開始から数え、その規則に従います。`test.setTimeout(10_000)` の後なら 30 秒になります（上限は 2147483647 ミリ秒）。
+- Playwright と同じく、1 回の試行で効くのは 1 回だけです。本体や `beforeEach` フックでの 2 回目以降の呼び出しは何もしません。後から `test.setTimeout` を呼ぶとタイムアウトは置き換わります。
 - 条件が偽なら何もしません。理由は読み手のためのもので、レポートには残りません。
 - リトライは [`timeout`](#timeout) オプションの値から始まります。
 - `test.slow(title, fn)` はありません。本体の最初で `test.slow()` を呼ぶか、`timeout` を渡してください。

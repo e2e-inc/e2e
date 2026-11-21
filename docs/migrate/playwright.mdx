@@ -175,7 +175,7 @@ run only in a browser, so a test that uses it declares
 | `{ page }` in a test | `{ screen, app, browser }` |
 | `test()`, `test.describe()`, `test.only`, `test.fail()`, `test.skip(title, fn)`, `test.skip(condition, reason)`, `test.fixme(title, fn)`, `test.fixme(condition, reason)` | the same, but a serial group takes `skip` on the group instead; the conditional forms work inside a test body or `beforeEach` |
 | `test.setTimeout()` | the same inside a test body, `beforeEach`, or `beforeAll` (that hook's own timeout); `afterEach` and `afterAll` cannot call it. In a `describe` callback, pass `{ timeout }` to `test.describe` instead. There is no `0` for no timeout: pass a large value |
-| `test.slow()`, `test.slow(condition, description)` | the same inside a test body or `beforeEach`: triples the test's timeout in force; in `beforeAll`, that hook's own timeout. The callback form at describe level is not there: call it in a `beforeEach` |
+| `test.slow()`, `test.slow(condition, description)` | the same inside a test body or `beforeEach`: triples the test's timeout in force; in `beforeAll`, that hook's own timeout. Once per attempt, as in Playwright. At describe level (any form) it is a `COLLECTION_ERROR`: call it in a `beforeEach` |
 | `beforeEach`, `afterEach`, `beforeAll`, `afterAll` | the same, with no title; `beforeAll` and `afterAll` get worker fixtures, not `browser`, `app`, or `screen` |
 | `test.describe.skip`, `test.describe.serial`, `describe.configure({ mode: 'serial', retries, timeout })` | `test.describe(title, { skip, serial, retries, timeout }, fn)` |
 | `test.fail()` on a describe | `test.describe.fail(title, fn)`, or `{ fail: 'reason' }` on the group; for a condition, `test.fail(condition, 'reason')` in a `beforeEach` |

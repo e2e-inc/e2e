@@ -1,8 +1,9 @@
 /**
  * `test.slow()` through the real runner: from a body or a `beforeEach` hook
  * it triples the attempt's timeout in force, counted from the attempt's
- * start; `test.slow(false)` leaves it; from a `beforeAll` hook it triples
- * that hook's timeout; a retry starts from the test's own timeout again;
+ * start, once per attempt as in Playwright; `test.slow(false)` leaves it;
+ * a later `test.setTimeout` replaces it; from a `beforeAll` hook it triples
+ * that hook's timeout, once; a retry starts from the test's own timeout again;
  * `afterEach` and `afterAll` hooks, a call outside a running test, and the
  * registration form `test.slow(title, fn)` are refused.
  */
@@ -21,10 +22,39 @@ test('outlasts its own timeout', { timeout: 300 }, async () => {
   await sleep(600);
 });
 
-test('triples again on each call', { timeout: 100 }, async () => {
+test('slows an attempt once', { timeout: 100 }, async () => {
   test.slow();
   test.slow();
-  await sleep(600);
+  await sleep(10_000);
+});
+
+test('is replaced by a later setTimeout', { timeout: 30_000 }, async () => {
+  test.slow();
+  test.setTimeout(200);
+  test.slow();
+  await sleep(10_000);
+});
+
+describe('slowed twice from beforeAll', () => {
+  beforeAll(async () => {
+    test.slow();
+    test.slow();
+    // Past the once-tripled 1500 ms, inside a twice-tripled 4500 ms.
+    await sleep(2_500);
+  });
+
+  test('never runs', async () => {});
+});
+
+describe('slowed from beforeEach and the body', () => {
+  beforeEach(() => {
+    test.slow();
+  });
+
+  test('is slowed once', { timeout: 100 }, async () => {
+    test.slow();
+    await sleep(10_000);
+  });
 });
 
 test('times out without it', { timeout: 300 }, async () => {
@@ -109,8 +139,11 @@ describe('test.slow', () => {
         expect(result('outlasts its own timeout').status).toBe('passed');
         expect(result('takes a condition and a reason').status).toBe('passed');
         expect(result('outlasts its own timeout too').status).toBe('passed');
-        // 100 ms tripled once is 300 ms, short of the 600 ms sleep; twice is 900 ms.
-        expect(result('triples again on each call').status).toBe('passed');
+        // As in Playwright, a second call does nothing: 100 ms tripled once, not twice.
+        for (const title of ['slows an attempt once', 'is slowed once']) {
+          expect(result(title).status, title).toBe('timed-out');
+          expect(error(title), title).toMatchObject({ code: 'TEST_TIMEOUT', message: expect.stringContaining('test timed out after 300 ms') });
+        }
 
         expect(result('times out without it').status).toBe('timed-out');
         expect(result('leaves the timeout on a false condition').status).toBe('timed-out');
@@ -138,7 +171,11 @@ describe('test.slow', () => {
           message: expect.stringContaining('test timed out after 300 ms'),
         });
 
+        // test.slow() after setTimeout(200) in the same attempt does nothing: 200 ms, not 600.
+        expect(error('is replaced by a later setTimeout')).toMatchObject({ code: 'TEST_TIMEOUT', message: expect.stringContaining('test timed out after 200 ms') });
+
         expect(result('runs after a beforeAll that outlasted the config timeout').status).toBe('passed');
+        expect(result('never runs').status).not.toBe('passed');
         expect(result('runs before it').status).toBe('passed');
         expect(outcome.report.run.errors.map(({ code, phase, message }) => ({ code, phase, message }))).toContainEqual({
           code: 'HOOK_FAILED',

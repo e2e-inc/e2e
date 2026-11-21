@@ -23,7 +23,6 @@ import {
   classifyError, ConfigurationError, E2EError, InfrastructureError, serializeError, TestError, TestTimeoutError, type ErrorPhase, type SerializedError,
 } from '@e2e-dev/core/lib/internal/errors';
 import type { ExpectedFailureInfo } from '@e2e-dev/core/lib/internal/expected-failure';
-import { lateTimeoutError } from '@e2e-dev/core/lib/internal/test-timeout';
 import { isRuntimeSkip, type CaughtRuntimeSkip } from '../internal/skip.ts';
 import { settleExpectedFailure } from './expected-failure.ts';
 import { withAbort, withTimeout } from '@e2e-dev/core/lib/internal/time';
@@ -301,9 +300,9 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
           soft,
           polls,
           expectFailure: (reason) => (expectedFailure ??= reason),
-          setTimeout: (update, api) => {
-            if (phase !== 'beforeEach' && phase !== 'body') throw lateTimeoutError(undefined, api);
-            return timeout.set(update(timeout.timeoutMs));
+          setTimeout: (update) => {
+            if (phase !== 'beforeEach' && phase !== 'body') return 'teardown';
+            return timeout.set(update(timeout.timeoutMs)) ? 'set' : 'ended';
           },
         },
         publication.signal,
@@ -480,7 +479,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
         const publication = new AbortController();
         const leaveWorkerFixtures = started.fixtures?.enter();
         try {
-          publishAttempt({ attemptId, owner: 'host', testKind: 'test', assertionTimeout: config.assertionTimeout, budget, soft, polls: new PollScope('the test teardown'), setTimeout: (_update, api) => { throw lateTimeoutError(undefined, api); } }, publication.signal);
+          publishAttempt({ attemptId, owner: 'host', testKind: 'test', assertionTimeout: config.assertionTimeout, budget, soft, polls: new PollScope('the test teardown'), setTimeout: () => 'teardown' }, publication.signal);
           steps.phase = 'afterEach';
           // Each teardown gets its own cleanup budget, as in a run's attempt.
           for (const hook of started.teardowns) {

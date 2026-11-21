@@ -352,8 +352,11 @@ test('renders the report', async ({ platform }) => {
 
 - It triples the timeout in force, counted from the start of the attempt
   like [`test.setTimeout`](#test-settimeout), whose rules it follows. After
-  `test.setTimeout(10_000)` it gives 30 seconds, and each call triples
-  again, up to 2147483647 milliseconds.
+  `test.setTimeout(10_000)` it gives 30 seconds, up to 2147483647
+  milliseconds.
+- As in Playwright, it slows an attempt once: a second call, in the body or
+  a `beforeEach` hook, does nothing. A later `test.setTimeout` still
+  replaces the timeout.
 - With a false condition it does nothing. The reason is for the reader and
   is not reported.
 - A retry starts from the [`timeout`](#timeout) option again.
