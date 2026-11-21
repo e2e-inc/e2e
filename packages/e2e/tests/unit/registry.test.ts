@@ -90,9 +90,6 @@ describe('registration', () => {
     await expect(register(() => test.describe('group', { searial: true } as never, () => {}))).rejects.toThrow(
       'describe options has unknown key "searial"; did you mean "serial"?',
     );
-    await expect(register(() => test.describe('group', { only: true } as never, () => {}))).rejects.toThrow(
-      /describe options has unknown key "only"; expected one of timeout, retries/,
-    );
     await expect(register(() => test.setup('login', { sessions: ['admin'], tag: ['auth'] } as never, noop))).rejects.toThrow(
       'setup options has unknown key "tag"; did you mean "tags"?',
     );
@@ -542,6 +539,68 @@ describe('registration', () => {
         "describe.fail() takes no fail option; give a reason with describe(title, { fail: 'reason' }, fn)",
       );
     }
+  });
+
+  it('focuses the tests of a group marked by describe.only(title, fn) or the only option, and checks both', async () => {
+    const registration = await collectModule(async () => {
+      test.describe.only('shortcut', () => {
+        test('a', noop);
+        test.describe('nested', () => test('b', noop));
+        test.skip('skipped inside', noop);
+        test.fixme('fixme inside', noop);
+        test.describe('skipped group', { skip: 'broken' }, () => test('in a skipped group', noop));
+        test.describe('opted out', { only: false }, () => test('in an opted-out group', noop));
+        test('opted out itself', { only: false }, noop);
+      });
+      test.describe.only('shortcut with options', { tags: ['smoke'] }, () => test('c', noop));
+      test.describe('by option', { only: true }, () => test('d', noop));
+      test.describe('not focused', { only: false }, () => test('e', noop));
+      registry.describe.only('top-level import', () => test('f', noop));
+      test('outside', noop);
+    });
+    expect(registration.tests.map((item) => [item.title, item.mode])).toEqual([
+      ['a', 'only'],
+      ['b', 'only'],
+      ['skipped inside', 'skip'],
+      ['fixme inside', 'fixme'],
+      ['in a skipped group', 'normal'],
+      ['in an opted-out group', 'normal'],
+      ['opted out itself', 'normal'],
+      ['c', 'only'],
+      ['d', 'only'],
+      ['e', 'normal'],
+      ['f', 'only'],
+      ['outside', 'normal'],
+    ]);
+    expect(registration.tests.find((item) => item.title === 'c')!.tags).toEqual(['smoke']);
+    await expect(collectModule(async () => test.describe('group', { only: 'yes' } as never, () => {}))).rejects.toThrow(
+      'describe options: only must be true or false, got "yes"',
+    );
+    // describe.only rejects what describe() rejects, including keys a spread would drop.
+    const hidden = Object.defineProperty({}, 'bogus', { value: 1, enumerable: false });
+    await expect(collectModule(async () => test.describe.only('group', hidden as never, () => {}))).rejects.toThrow('unknown key "bogus"');
+    for (const only of [true, false]) {
+      await expect(collectModule(async () => test.describe.only('group', { only } as never, () => {}))).rejects.toThrow(
+        'describe.only() takes no only option; it focuses the group already',
+      );
+    }
+  });
+
+  it('focuses a serial group whole but refuses only inside one', async () => {
+    const registration = await collectModule(async () => {
+      test.describe.only('unit', { serial: true }, () => {
+        test('first', noop);
+        test('second', noop);
+      });
+    });
+    expect(registration.tests.map((item) => item.mode)).toEqual(['only', 'only']);
+    const insideRule = 'describe option "only" cannot be set inside a serial group, which runs as one unit; focus the serial group instead';
+    await expect(
+      collectModule(async () => test.describe('unit', { serial: true }, () => test.describe.only('inner', () => {}))),
+    ).rejects.toThrow(insideRule);
+    await expect(
+      collectModule(async () => test.describe('unit', { serial: true }, () => test.describe('inner', { only: true }, () => {}))),
+    ).rejects.toThrow(insideRule);
   });
 
   it('refuses fail on, inside, or around a serial group', async () => {

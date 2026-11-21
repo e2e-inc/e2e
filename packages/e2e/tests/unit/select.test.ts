@@ -348,6 +348,32 @@ describe('select', () => {
     expect(focused.disposition).toBe('run');
   });
 
+  it('focuses the tests of a describe.only group, alongside a test.only elsewhere', async () => {
+    const col = await collection(() => {
+      test('outside', noop);
+      test.describe.only('checkout', () => {
+        test('pays', noop);
+        test.describe('nested', () => test('refunds', noop));
+        test.skip('skipped inside', noop);
+      });
+      test.describe('other', () => {
+        test('sibling', noop);
+        test.only('focused elsewhere', noop);
+      });
+    });
+    const selection = select(col, config());
+    expect(selection.pairs.map((pair) => [pair.test.title, pair.disposition])).toEqual([
+      ['outside', 'filtered'],
+      ['pays', 'run'],
+      ['refunds', 'run'],
+      // Focus filters every unfocused test, a skipped one too, as beside a test.only.
+      ['skipped inside', 'filtered'],
+      ['sibling', 'filtered'],
+      ['focused elsewhere', 'run'],
+    ]);
+    expect(() => select(col, config({}, { ...ENV, CI: '1' } as NodeJS.ProcessEnv))).toThrow(/\.only is rejected in CI/);
+  });
+
   it('rejects .only in CI', async () => {
     const col = await collection(() => {
       test.only('focused', noop);
