@@ -474,6 +474,27 @@ expected to update a language they don't speak.
   language switcher miss until it is back in line) and the same code blocks.
   `pnpm docs:check` (`scripts/check-docs-translations.ts`) warns, without
   failing, on every page and label that is behind.
+- Keep the meaning of every English sentence when you split, join, or
+  reorder it:
+  - Each part of a split sentence is a whole sentence, with its own subject
+    and verb.
+    A leftover phrase such as "as on a physical iPhone." is not.
+  - Logic words keep their meaning and their reach: "or" stays "or", not
+    "only when", and "a value or URL" does not shrink to "a value".
+  - After a split, each pronoun still points at the noun the English meant.
+    "It fails" must not come to mean "the test fails" when the English
+    subject is the agent pin.
+  - Add no reason, purpose, or example that the English sentence does not
+    state.
+- After you apply a review suggestion on wrapped prose, read the whole
+  paragraph against the English page.
+  A suggestion anchored on the wrong lines replaces those lines, so it can
+  delete a sentence and leave an old one in place.
+  `pnpm docs:check` catches one shape of this, a suggestion anchored one line
+  too high whose last line keeps the old ending.
+  It fails on a translated line of 12 or more characters that repeats the end
+  of the line above it in the same paragraph.
+  It cannot see a deleted line, or a repeat that the suggestion reworded.
 
 ## Before you commit
 

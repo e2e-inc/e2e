@@ -21,6 +21,8 @@
  * (`apps/site/lib/i18n/deepl-review.ts`); keep the two in step.
  */
 
+import { FRONTMATTER } from './docs-prose.ts';
+
 /**
  * Below this, on both scores, a pair is flagged. Set from the first run on the
  * UI copy: the one real mistranslation ("previous" as 前へ, which DeepL reads
@@ -222,7 +224,6 @@ export interface Section {
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 const HEADING = /^ {0,3}(#{1,4})\s+(.*)$/;
-const FRONTMATTER = /^---\n([\s\S]*?)\n---\n/;
 const READABLE_FRONTMATTER = /^(title|description|sidebarTitle):\s*(.*)$/;
 const READABLE_ATTRIBUTE = /\b(?:title|subtitle|description|label|alt|aria-label)="([^"]*)"/g;
 
