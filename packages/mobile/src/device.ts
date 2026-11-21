@@ -202,12 +202,32 @@ export interface Device {
    * screen has one, to avoid pressing a button or toggling a checkbox. A
    * control the tree leaves out, such as pressable text, can still be hit. The
    * simulator's "Speed up your typing" tip goes through its Continue button
-   * first. A screen with no clear point above the keyboard, or a keyboard that
-   * outlives both drags, fails with `UNSUPPORTED_CAPABILITY`; the message
-   * names the alternatives (the app's own Done or close control, or pressing
-   * Enter on the field).
+   * first. A screen with no clear point above the keyboard, a keyboard reported
+   * up with no frame and no keyboard element on screen (so no point is known
+   * to be above it), or a keyboard that outlives both drags, fails with
+   * `UNSUPPORTED_CAPABILITY`; the message names the alternatives (the app's
+   * own Done or close control, or pressing Enter on the field).
    */
   dismissKeyboard(): Promise<void>;
+  /**
+   * Whether the soft keyboard is on screen, from a capture (taken again,
+   * within the action timeout, while the keyboard is still moving): what
+   * agent-device reported for it (a visibility probe, a measured or derived
+   * keyboard frame, or proof that there is none), else the keyboard or a key
+   * drawn on screen in the accessibility tree (the suggestion strip alone,
+   * as with a hardware keyboard, is not one). Only agent-device's proof
+   * answers `false`. Fails when the capture cannot answer: `ENGINE_FAILURE`
+   * while the keyboard is moving or the tree is still incomplete,
+   * `UNSUPPORTED_CAPABILITY` when agent-device did not prove the keyboard
+   * absent and the tree lists none. It reads the screen as it is now, so
+   * right after an action that opens or closes the keyboard, poll it with
+   * `expect.poll`. A poll reads again after any error: an `ENGINE_FAILURE`
+   * clears once the keyboard settles, while an `UNSUPPORTED_CAPABILITY`
+   * that lasts (a provider that cannot read the keyboard at all) makes the
+   * poll wait out its whole timeout before it fails.
+   * Changes nothing on the device.
+   */
+  isKeyboardShown(): Promise<boolean>;
   /** Reads the clipboard. */
   clipboard(): Promise<string>;
   /** Writes the clipboard. */
@@ -356,6 +376,9 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     async dismissKeyboard() {
       await surface.dismissKeyboard(context.signal, surface.inputBudget('device.dismissKeyboard', { timeoutMs: context.timeouts.action, signal: context.signal }));
     },
+    async isKeyboardShown() {
+      return surface.keyboardShown(context.signal, surface.inputBudget('device.isKeyboardShown', { timeoutMs: context.timeouts.action, signal: context.signal }));
+    },
     async clipboard() {
       const result = await surface.command(
         'device.clipboard',
@@ -392,6 +415,7 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     back: action,
     alert: { ...action, label: (value) => value },
     dismissKeyboard: action,
+    isKeyboardShown: action,
     clipboard: action,
     setClipboard: { ...action, label: (text) => `${text.length} chars` },
   });

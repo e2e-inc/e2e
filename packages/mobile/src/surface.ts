@@ -51,10 +51,9 @@ import { pointerInteraction, DEFAULT_LONG_PRESS_MS } from './actions.ts';
 import { resolveExpression } from './locate.ts';
 import {
   isWithin,
-  KEYBOARD_KINDS,
+  keyboardElementsTop,
   keyboardBand,
   mayTakeText,
-  normalizeKind,
   projectSnapshot,
   ROOT_ID,
   screenRoot,
@@ -62,7 +61,7 @@ import {
   type ProjectedNode,
   type ProjectedSnapshot,
 } from './nodes.ts';
-import { keyboardDragStart } from './keyboard.ts';
+import { keyboardDragStart, keyboardShownIn, type KeyboardUnknown } from './keyboard.ts';
 import { DEVICE_PERMISSIONS, type AgentDeviceClient, type ClientFactory, type DevicePermission, type LaunchPermissions, type MobileOptions, type PermissionState } from './options.ts';
 import { maskPng } from './png.ts';
 import { mobileDoctor } from './doctor.ts';
@@ -164,14 +163,18 @@ function listsApp(entry: string, app: string): boolean {
 }
 
 /**
- * The top edge of the soft keyboard: the band the capture's producer
- * measured, else the highest keyboard or key element, else the bottom of the
- * screen.
+ * The top edge of the soft keyboard: the higher of the band the capture's
+ * producer measured and the highest keyboard element drawn on screen (a key,
+ * the keyboard, or the suggestion strip above it, which a frame derived from
+ * the keys leaves out). Undefined when the capture says the keyboard is up
+ * but bounds it nowhere, as a visibility probe alone does: the keyboard
+ * could reach anywhere, so no point is known to be above it.
  */
-function keyboardTop(raw: RawSnapshot, viewport: ViewportSize): number {
-  if (raw.keyboard?.kind === 'visible' || raw.keyboard?.kind === 'derived') return raw.keyboard.frame.y;
-  const keys = (raw.nodes ?? []).filter((node) => node.rect !== undefined && KEYBOARD_KINDS.has(normalizeKind(node.type ?? '')));
-  return Math.min(viewport.height, ...keys.map((node) => node.rect!.y));
+function keyboardTop(raw: RawSnapshot, viewport: ViewportSize): number | undefined {
+  const elements = keyboardElementsTop(raw.nodes ?? [], raw.viewport ?? viewport);
+  const frame = raw.keyboard?.kind === 'visible' || raw.keyboard?.kind === 'derived' ? raw.keyboard.frame.y : undefined;
+  const tops = [frame, elements].filter((top) => top !== undefined);
+  return tops.length === 0 ? undefined : Math.min(viewport.height, ...tops);
 }
 
 /**
@@ -192,14 +195,12 @@ function measuredKeyboard(raw: RawSnapshot): boolean | undefined {
 }
 
 /**
- * Whether a capture shows the soft keyboard: the band its producer measured
- * when it measured one, else a keyboard or key element in the tree, the probe
- * Maestro's `hideKeyboard` uses. A capture that says nothing either way
- * counts as no keyboard: a drag on a guess costs more than a keyboard a later
- * tap refuses against by name.
+ * Whether a capture shows the soft keyboard, by {@link keyboardShownIn}: a
+ * capture that cannot answer counts as no keyboard here, since a drag on a
+ * guess costs more than a keyboard a later tap refuses against by name.
  */
 function keyboardShowing(raw: RawSnapshot): boolean {
-  return measuredKeyboard(raw) ?? (raw.nodes ?? []).some((node) => KEYBOARD_KINDS.has(normalizeKind(node.type ?? '')));
+  return keyboardShownIn(raw, isTruncated(raw)) === true;
 }
 
 /**
@@ -321,6 +322,14 @@ interface LeaseRecorder {
  * returning the sparse tree costs the model a confused turn.
  */
 const SPARSE_RETRY_BACKOFF_MS = [0, 1_200, 3_000] as const;
+
+/**
+ * Waits between captures while the keyboard reads as moving
+ * ({@link KeyboardUnknown.settling}): an iPhone keyboard slides in or out in
+ * about a third of a second, longer on a loaded simulator, and a reading
+ * taken mid-slide can say neither way.
+ */
+const KEYBOARD_SETTLE_BACKOFF_MS = [0, 250, 500, 1_000] as const;
 
 /** Number of parent hops from `entry` up to `ancestor`. */
 function depthBelow(entry: ProjectedNode, ancestor: ProjectedNode): number {
@@ -1715,6 +1724,42 @@ export class AgentDeviceSurface {
   }
 
   /**
+   * Whether the soft keyboard is on screen, from a capture taken again while
+   * the tree is sparse or the keyboard is still moving (see
+   * {@link keyboardReading}): see {@link keyboardShownIn}. A capture that
+   * cannot answer fails, with the reason, instead of guessing.
+   * Changes nothing on the device.
+   */
+  async keyboardShown(signal: AbortSignal, input: InputBudget): Promise<boolean> {
+    const { shown } = await this.keyboardReading(signal, input);
+    if (typeof shown === 'boolean') return shown;
+    throw new EngineError(shown.code, shown.message, { retryable: false });
+  }
+
+  /**
+   * A capture and what {@link keyboardShownIn} reads in it, captured again
+   * while the keyboard reads as moving, as long as the budget allows. The
+   * last reading is answered, settled or not.
+   */
+  private async keyboardReading(signal: AbortSignal, input: InputBudget): Promise<{ readonly raw: RawSnapshot; readonly shown: boolean | KeyboardUnknown }> {
+    let reading: { readonly raw: RawSnapshot; readonly shown: boolean | KeyboardUnknown } | undefined;
+    let captureMs = 0;
+    for (const backoffMs of KEYBOARD_SETTLE_BACKOFF_MS) {
+      if (reading !== undefined) {
+        // Another look must fit its wait and a capture as long as the last one, or it would time the call out.
+        if (input.remainingMs() <= backoffMs + captureMs) return reading;
+        await sleep(backoffMs, signal);
+      }
+      const startedAt = Date.now();
+      const raw = await this.snapshot(signal, false, input);
+      captureMs = Date.now() - startedAt;
+      reading = { raw, shown: keyboardShownIn(raw, isTruncated(raw)) };
+      if (typeof reading.shown === 'boolean' || reading.shown.settling !== true) return reading;
+    }
+    return reading!;
+  }
+
+  /**
    * Hides the soft keyboard, so a control it covered can be reached.
    * agent-device hides an Android keyboard itself and refuses every visible
    * iOS one, because a touch on the screen is a guess about it that
@@ -1756,12 +1801,22 @@ export class AgentDeviceSurface {
    * keyboard.
    */
   private async dismissKeyboardByGesture(signal: AbortSignal, input: InputBudget): Promise<void> {
-    let raw = await this.dismissKeyboardTip(await this.snapshot(signal, false, input), signal, input);
-    if (!keyboardShowing(raw)) return;
+    let reading = await this.keyboardReading(signal, input);
+    if (await this.dismissKeyboardTip(reading.raw, signal, input)) reading = await this.keyboardReading(signal, input);
+    if (reading.shown !== true) return;
     for (const axis of ['horizontal', 'vertical'] as const) {
+      const { raw } = reading;
       const projected = projectSnapshot(raw.nodes ?? [], { mintId: () => 'keyboard', viewport: raw.viewport });
       const viewport = await this.viewportFor(projected, signal, input);
-      const from = keyboardDragStart(projected, viewport, keyboardTop(raw, viewport));
+      const top = keyboardTop(raw, viewport);
+      if (top === undefined) {
+        throw new EngineError(
+          'UNSUPPORTED_CAPABILITY',
+          `keyboard dismissal failed: agent-device reports the keyboard up without a frame or any keyboard element on screen, so a drag could start on the keyboard. ${KEYBOARD_ALTERNATIVES}`,
+          { retryable: false },
+        );
+      }
+      const from = keyboardDragStart(projected, viewport, top);
       if (from === undefined) {
         throw new EngineError(
           'UNSUPPORTED_CAPABILITY',
@@ -1773,8 +1828,8 @@ export class AgentDeviceSurface {
         ? { x: from.x - viewport.width * KEYBOARD_DRAG_RATIO, y: from.y }
         : { x: from.x, y: from.y - viewport.height * KEYBOARD_DRAG_RATIO };
       await this.command('keyboard.dismiss', (client) => input.send(() => client.interactions.swipe({ from, to })), signal);
-      raw = await this.snapshot(signal, false, input);
-      if (!keyboardShowing(raw)) return;
+      reading = await this.keyboardReading(signal, input);
+      if (reading.shown !== true) return;
     }
     throw new EngineError(
       'UNSUPPORTED_CAPABILITY',
@@ -1786,18 +1841,17 @@ export class AgentDeviceSurface {
   /**
    * The simulator shows a "Speed up your typing" tip over the keyboard the
    * first time it appears; its Continue button is the only way past it, and
-   * Maestro's `hideKeyboard` presses it too. Answers the capture after the
-   * press, or the one given when no tip is showing.
+   * Maestro's `hideKeyboard` presses it too. Answers whether it pressed.
    */
-  private async dismissKeyboardTip(raw: RawSnapshot, signal: AbortSignal, input: InputBudget): Promise<RawSnapshot> {
+  private async dismissKeyboardTip(raw: RawSnapshot, signal: AbortSignal, input: InputBudget): Promise<boolean> {
     const nodes = raw.nodes ?? [];
     const tip = nodes.find((node) => (node.label ?? node.value ?? '').startsWith('Speed up your typing'));
-    if (tip?.rect === undefined) return raw;
+    if (tip?.rect === undefined) return false;
     const tipTop = tip.rect.y;
     const button = nodes.find((node) => node.label === 'Continue' && node.rect !== undefined && node.rect.y > tipTop);
-    if (button?.rect === undefined) return raw;
+    if (button?.rect === undefined) return false;
     await this.command('keyboard.dismiss', (client) => input.press(client, centreOf(button.rect!)), signal);
-    return await this.snapshot(signal, false, input);
+    return true;
   }
 
   async back(operation: OperationContext, input: InputBudget): Promise<void> {
