@@ -2045,6 +2045,25 @@ describe('device fixture', () => {
       expect((await h.engine.locate!(byText('Suggestion'), operation()))[0]?.states).toBeUndefined();
     });
 
+    it('still drags in a full-screen scroll view agent-device marks covered when the screen has no other', async () => {
+      const h = harness();
+      await openAttempt(h);
+      await observed(h, 'Back');
+      const device = fixture(h);
+      h.fake.respond('command.keyboard', NO_DISMISS_KEY);
+      const feed = [
+        { ref: '@e1', index: 0, depth: 0, type: 'application', label: 'Feed', rect: { x: 0, y: 0, width: 390, height: 844 } },
+        { ref: '@e2', index: 1, parentIndex: 0, depth: 1, type: 'scroll-view', interactionBlocked: 'covered', rect: { x: 0, y: 0, width: 390, height: 844 } },
+        { ref: '@e3', index: 2, parentIndex: 1, depth: 2, type: 'text-field', label: 'Search', rect: { x: 20, y: 150, width: 350, height: 44 } },
+      ];
+      captures(h, [
+        { ...SETTINGS_SNAPSHOT, nodes: feed, keyboard: { kind: 'visible', frame: KEYBOARD_FRAME } },
+        { ...SETTINGS_SNAPSHOT, nodes: feed, keyboard: { kind: 'absent' } },
+      ]);
+      await device.dismissKeyboard();
+      expect((h.fake.lastArgs('interactions.swipe') as { from: unknown }).from).toEqual({ x: 195, y: 422 });
+    });
+
     it('drags from the point nearest the centre that no control covers, and stops once the keyboard is gone', async () => {
       const h = harness();
       await openAttempt(h);
@@ -3674,6 +3693,24 @@ describe('input freshness', () => {
     expect(h.fake.lastArgs('capture.snapshot')).toEqual({ interactiveOnly: false });
   });
 
+  it('fills a field agent-device marked covered after it was observed, leaving the cover to agent-device (#1324)', async () => {
+    const h = harness({ transition: 0 });
+    await openAttempt(h);
+    h.fake.respond('capture.snapshot', () => form());
+    const old = await observed(h, 'Account');
+    // A cover in between is agent-device's to refuse, so the fill goes ahead without a re-observation.
+    h.fake.respond('capture.snapshot', () => form(237, { interactionBlocked: 'covered' }));
+    await h.engine.perform!(old.ref, { kind: 'fill', value: 'example', sensitive: true }, operation());
+    expect(h.fake.methods().filter((method) => method === 'interactions.fill')).toHaveLength(1);
+    // A field the platform already hid when it was observed has not changed, so it goes ahead as on main.
+    const still = harness({ transition: 0 });
+    await openAttempt(still);
+    still.fake.respond('capture.snapshot', () => form(237, { visibleToUser: false }));
+    const hidden = (await still.engine.locate!({ kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'account', exact: true } } }, operation()))[0]!;
+    await still.engine.perform!(hidden.ref, { kind: 'fill', value: 'example', sensitive: true }, operation());
+    expect(still.fake.methods().filter((method) => method === 'interactions.fill')).toHaveLength(1);
+  });
+
   it('does not silently accept changed security facts during a transition', async () => {
     const h = harness();
     await openAttempt(h);
@@ -4334,3 +4371,92 @@ describe('deterministic actions', () => {
   });
 });
 
+describe('nodes agent-device refuses as covered (#1324)', () => {
+  const NEXT = { kind: 'button', label: 'Next', rect: { x: 195, y: 360, width: 195, height: 112 } };
+
+  /** agent-device's hint for a target the Next button covers, as `coveredInteractionDetails` words it. */
+  const NEXT_HINT =
+    'Covered by the button "Next" at (195, 360 195x112). Dismiss or close that element, scroll the target clear of it, or inspect with snapshot/screenshot before retrying.';
+
+  /** agent-device's refusal of a covered target, in the shape its interaction runtime throws (`coveredInteractionDetails`, `discloseDispatch`). */
+  function coveredRefusal(ref: string): AppError {
+    return new AppError('COMMAND_FAILED', `Ref ${ref} is covered by another visible element and cannot be tapped safely`, {
+      reason: 'target_covered',
+      hint: NEXT_HINT,
+      ref,
+      interactionBlocked: 'covered',
+      coveredBy: NEXT,
+      dispatched: 'no',
+    });
+  }
+
+  it("finds a covered button by role, and its tap fails not actionable with agent-device's refusal as the cause", async () => {
+    const h = harness();
+    await openAttempt(h);
+    // Save sits under the footer's Next button; the mark and the refusal stand in for agent-device's.
+    h.fake.respond('capture.snapshot', () => ({
+      nodes: [
+        { index: 0, ref: '@e1', depth: 0, type: 'Application', label: 'Covered', rect: { x: 0, y: 0, width: 390, height: 844 } },
+        {
+          index: 1, ref: '@e2', parentIndex: 0, type: 'Button', label: 'Save', rect: { x: 230, y: 380, width: 100, height: 40 },
+          hittable: false, interactionBlocked: 'covered', coveredBy: NEXT,
+        },
+        { index: 2, ref: '@e3', parentIndex: 0, type: 'Button', label: 'Next', rect: NEXT.rect },
+      ],
+      appName: 'Covered',
+      appBundleId: 'dev.e2erepro.coveredinput',
+      truncated: false,
+    }));
+    h.fake.respond('interactions.press', () => {
+      throw coveredRefusal('@e2');
+    });
+    const [save] = await h.engine.locate!(
+      { kind: 'query', query: { kind: 'role', value: { kind: 'string', value: 'button', exact: true }, name: { kind: 'string', value: 'Save', exact: true } } },
+      operation(),
+    );
+    expect(save?.states?.hidden).toBe(true);
+    await expect(h.engine.perform!(save!.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({
+      code: 'NOT_ACTIONABLE',
+      message: `perform tap failed: Ref @e2 is covered by another visible element and cannot be tapped safely Hint: ${NEXT_HINT}`,
+      cause: { code: 'COMMAND_FAILED', details: { reason: 'target_covered', ref: '@e2' } },
+    });
+  });
+
+  it("hides a covered node while the keyboard is gone, and not while agent-device reports an Android keyboard it could not measure", async () => {
+    const h = harness({ platform: 'android' });
+    await openAttempt(h);
+    const app = 'dev.e2erepro.coveredinput';
+    const nodes = [
+      { index: 0, ref: '@e1', depth: 0, type: 'android.widget.FrameLayout', bundleId: app, rect: { x: 0, y: 0, width: 1080, height: 2400 } },
+      {
+        index: 1, ref: '@e2', parentIndex: 0, type: 'android.widget.EditText', bundleId: app, label: 'Brand', focused: true,
+        interactionBlocked: 'covered', rect: { x: 24, y: 1600, width: 1032, height: 120 },
+      },
+    ];
+    const brand = { kind: 'query', query: { kind: 'text', value: { kind: 'string', value: 'Brand', exact: true } } } as const;
+    const snapshot = (keyboard: unknown) => ({ nodes, appName: 'Covered', appBundleId: app, truncated: false, keyboard });
+    h.fake.respond('capture.snapshot', () => snapshot({ kind: 'absent' }));
+    expect((await h.engine.locate!(brand, operation()))[0]?.states).toEqual({ focused: true, hidden: true });
+    h.fake.respond('capture.snapshot', () => snapshot({ kind: 'unmeasurable', reason: 'window-bounds-unavailable' }));
+    expect((await h.engine.locate!(brand, operation()))[0]?.states).toEqual({ focused: true });
+  });
+
+  it('keeps hiding a covered node on iOS while agent-device reports a keyboard it did not observe', async () => {
+    // A Limrun iOS capture with no keyboard in its tree reports it unmeasurable (`keyboard-not-observed`); agent-device never counts the iOS keyboard as a cover.
+    const h = harness();
+    await openAttempt(h);
+    h.fake.respond('capture.snapshot', () => ({
+      nodes: [
+        { index: 0, ref: '@e1', depth: 0, type: 'Application', label: 'Feed', rect: { x: 0, y: 0, width: 402, height: 874 } },
+        { index: 1, ref: '@e2', parentIndex: 0, type: 'Cell', label: 'Row 9', interactionBlocked: 'covered', rect: { x: 0, y: 800, width: 402, height: 60 } },
+        { index: 2, ref: '@e3', parentIndex: 0, type: 'TabBar', label: 'Tab Bar', rect: { x: 0, y: 791, width: 402, height: 83 } },
+      ],
+      appName: 'Feed',
+      appBundleId: 'dev.e2e.benchmark',
+      truncated: false,
+      keyboard: { kind: 'unmeasurable', reason: 'keyboard-not-observed' },
+    }));
+    const row = { kind: 'query', query: { kind: 'text', value: { kind: 'string', value: 'Row 9', exact: true } } } as const;
+    expect((await h.engine.locate!(row, operation()))[0]?.states).toEqual({ hidden: true });
+  });
+});

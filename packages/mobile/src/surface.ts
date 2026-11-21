@@ -53,6 +53,7 @@ import {
   isWithin,
   keyboardElementsTop,
   keyboardBand,
+  keyboardUnplaced,
   mayTakeText,
   projectSnapshot,
   ROOT_ID,
@@ -226,6 +227,12 @@ interface NodeBinding {
   readonly originUnknown: boolean;
   /** Whether `fill` and `clear` may type into the node, judged with the children `node` leaves out. */
   readonly takesText: boolean;
+  /**
+   * Whether the platform or the keyboard hides the node (`ProjectedNode.platformHidden`):
+   * the hidden state a fill compares before it types. A cover agent-device
+   * marks in between is its own to refuse.
+   */
+  readonly platformHidden: boolean;
 }
 
 
@@ -1187,6 +1194,7 @@ export class AgentDeviceSurface {
    * replaces the known one.
    */
   private project(raw: RawSnapshot): ProjectedScreen {
+    const keyboard = keyboardBand(raw.nodes ?? [], raw.keyboard, raw.viewport);
     const projected = {
       ...projectSnapshot(raw.nodes ?? [], {
         mintId: () => {
@@ -1195,7 +1203,8 @@ export class AgentDeviceSurface {
         },
         viewport: raw.viewport,
         refsGeneration: raw.refsGeneration,
-        keyboard: keyboardBand(raw.nodes ?? [], raw.keyboard, raw.viewport),
+        keyboard,
+        keyboardUnplaced: keyboardUnplaced(raw.keyboard, keyboard, this.options.platform),
       }),
       keyboardVisible: keyboardShowing(raw),
       originUnknown: raw.warnings?.includes(ORIGIN_WARNING) === true,
@@ -1360,6 +1369,7 @@ export class AgentDeviceSurface {
       keyboardVisible: snapshot.keyboardVisible,
       originUnknown: snapshot.originUnknown,
       takesText: mayTakeText(entry.node),
+      platformHidden: entry.platformHidden,
       refsGeneration: snapshot.refsGeneration,
     };
   }
@@ -1491,7 +1501,7 @@ export class AgentDeviceSurface {
       entry.node.inputPurpose !== found.node.inputPurpose ||
       entry.node.states?.disabled !== found.node.states?.disabled ||
       entry.node.states?.secure !== found.node.states?.secure ||
-      entry.node.states?.hidden !== found.node.states?.hidden)) {
+      entry.platformHidden !== found.platformHidden)) {
       throw new EngineError('NODE_STALE', `input node ${entry.id} changed before mutation; observe and authorize it again`, { retryable: true });
     }
     if (found === undefined) {
