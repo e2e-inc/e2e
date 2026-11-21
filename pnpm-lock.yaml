@@ -177,8 +177,8 @@ importers:
         specifier: 26.6.6
         version: 26.6.6
       ai:
-        specifier: 7.0.177
-        version: 7.0.177(zod@4.6.7)
+        specifier: 7.0.179
+        version: 7.0.179(zod@4.6.7)
       typescript:
         specifier: 7.0.2
         version: 7.0.2
