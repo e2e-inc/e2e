@@ -861,7 +861,7 @@ await screen.getByRole('checkbox', 'Remember me').uncheck();
 
 | Throws | When |
 | --- | --- |
-| `ACTION_FAILED` | A checked radio button (on the web, a native one), which only another radio in its group clears, or a control whose checked state did not change after the click or tap before the timeout. |
+| `ACTION_FAILED` | A checked radio button (on the web, a native one; on a device, any radio), which only another radio in its group clears, or a control whose checked state did not change after the click or tap before the timeout. A device control whose name or text changes with its state counts as replaced and passes without the state being confirmed. |
 
 #### `selectOption`
 

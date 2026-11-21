@@ -1563,7 +1563,7 @@ describe('perform', () => {
   });
 
   it('checks from a test without settling the tap, then reads the toggle back', async () => {
-    const h = harness();
+    const h = harness({ transition: 0 });
     const airplane = toggling(SETTINGS_NODES, { '@e6': [6] });
     h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: airplane.nodes() }));
     h.fake.respond('interactions.press', airplane.press);
@@ -1572,11 +1572,31 @@ describe('perform', () => {
     const before = h.fake.calls.length;
     await h.engine.perform!(toggle.ref, { kind: 'check' }, { ...operation(), origin: 'test' });
     expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
-      // The launch's transition is still running, so the toggle is found again first.
-      ['capture.snapshot', { interactiveOnly: false }],
       ['interactions.press', { ref: '@e6' }],
       ['capture.snapshot', { interactiveOnly: false }],
     ]);
+  });
+
+  it('counts a check that fails as unchanged as an action, so the next control waits out the transition from its tap', async () => {
+    autoAdvanceTimers();
+    const h = harness({ transition: 5_000 });
+    h.fake.respond('capture.snapshot', () => SETTINGS_SNAPSHOT);
+    await openAttempt(h);
+    const toggle = await observed(h, 'Airplane Mode');
+    // The launch's transition is long over when the tap goes out.
+    await new Promise((resolve) => setTimeout(resolve, 6_000));
+    await expect(h.engine.perform!(toggle.ref, { kind: 'check' }, { ...operation(), timeoutMs: 300 })).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+    h.fake.respond('capture.snapshot', () => ({
+      ...SETTINGS_SNAPSHOT,
+      nodes: [
+        ...SETTINGS_NODES,
+        { ref: '@e11', index: 10, parentIndex: 0, depth: 1, type: 'button', label: 'Submit', rect: { x: 0, y: 600, width: 390, height: 44 } },
+      ],
+    }));
+    const startedAt = Date.now();
+    const submit = await observed(h, 'Submit');
+    await h.engine.perform!(submit.ref, { kind: 'tap' }, { ...operation(), origin: 'test' });
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(4_000);
   });
 
   it('does not read a truncated capture without the toggle as the control being replaced', async () => {
