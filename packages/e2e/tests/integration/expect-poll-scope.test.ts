@@ -288,7 +288,7 @@ test('uses the config timeout', async () => {
 
 test('overrides the timeout and keeps the config intervals', async () => {
   let tries = 0;
-  await expect(() => expect(++tries).toBe(2)).toPass({ timeout: 350 });
+  await expect(() => expect(++tries).toBe(3)).toPass({ timeout: 350 });
 });
 
 test('overrides the intervals', async () => {
@@ -593,7 +593,7 @@ test('runs after the extended hook', async () => {});
       });
       expect(resultByTitle(outcome, 'overrides the timeout and keeps the config intervals').attempts[0]?.error).toMatchObject({
         code: 'ASSERTION_FAILED',
-        message: 'expect(...).toPass() timed out after 350 ms\nlast: expected 1 to be 2',
+        message: 'expect(...).toPass() timed out after 350 ms\nlast: expected 2 to be 3',
       });
       expect(resultByTitle(outcome, 'overrides the intervals').status).toBe('passed');
       expect(outcome.report.run.errors).toEqual([]);

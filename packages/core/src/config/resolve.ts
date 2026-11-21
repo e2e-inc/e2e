@@ -13,7 +13,7 @@ import { isStepExecutor } from '../agent/executor.ts';
 import { compileGlob, compileGlobList, literalPrefix } from '../internal/globs.ts';
 import { isPlainObject, rejectUnknownKeys } from '../internal/options.ts';
 import { isRecord } from './command.ts';
-import { boundedInt, checkIntervals, DEFAULT_PASS_OPTIONS, describeValue, positiveInt, timerMs } from './validate.ts';
+import { boundedInt, checkIntervals, DEFAULT_PASS_OPTIONS, describeValue, timerMs } from './validate.ts';
 import type { ArtifactStore, ArtifactsConfig, CacheMode, ModelInstance, PassOptions, SecretProvider, SecretPurpose, RecordingMode, CacheStore, ProjectConfig } from '../types.ts';
 import { isModelInstance, resolveAgentConfig, runLimits, type ResolvedAgentConfig, type ResolvedLimits } from './agent.ts';
 import { bindTargets, digestTargets, resolveTargets, TARGET_NAME_PATTERN, type PortAssignments, type ResolvedTarget } from './targets.ts';
@@ -335,9 +335,6 @@ function resolvePassOptions(value: PassOptions | undefined): Readonly<Required<P
   const { timeout, intervals } = value;
   const timeoutMs = timeout === 0 ? 0 : timerMs(timeout, 'toPass.timeout');
   checkIntervals('toPass.intervals', intervals);
-  for (const [index, interval] of intervals?.entries() ?? []) {
-    positiveInt(interval, `toPass.intervals[${index}]`, 'milliseconds');
-  }
 
   return {
     timeout: timeoutMs ?? DEFAULT_PASS_OPTIONS.timeout,

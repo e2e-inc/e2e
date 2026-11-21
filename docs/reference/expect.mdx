@@ -668,7 +668,7 @@ await expect.poll(() => readStatus(), { message: 'the batch never finished' }).n
   above 0. It is deprecated: pass `intervals: [<ms>]`. It will be removed no
   earlier than April 1, 2027.
 - `intervals` is a non-empty list of pauses in milliseconds. Each entry
-  must be finite and above 0. Pauses are used in order. The last pause is
+  must be a positive safe integer. Pauses are used in order. The last pause is
   repeated.
 - `message` is an extra line in the timeout error, after the matcher line.
 
@@ -677,7 +677,8 @@ Every value matcher is available, returning a promise.
 - Each sample calls `read` and runs the matcher. A matcher failure or a
   `read` that throws is one failing sample unless `read` calls `test.skip()`
   or `test.fixme()`; a `read` that hangs is cut at the deadline. Either call
-  ends the poll and marks the test skipped.
+  ends the poll and marks the test skipped. When a pause is cut short, a
+  final sample is taken at the deadline.
 - `toMatchSchema` resolves to the schema's output for the passing read.
 - When the attempt is cancelled, the loop stops with `CANCELLED`. At the
   attempt's deadline the test or hosted session fails with `TEST_TIMEOUT`.
@@ -743,8 +744,8 @@ await expect(async () => {
 - `timeout` is the deadline in milliseconds, from 0 through 2147483647. At
   `0` there is no timeout, and the block is retried until the test or hook
   deadline. Outside a test or hook, a positive `timeout` is required.
-- `intervals` is the list of pauses between tries, in milliseconds. The last
-  entry repeats.
+- `intervals` is the list of pauses between tries, in milliseconds. Each
+  entry must be a positive safe integer. The last entry repeats.
 
 Each try calls the block and awaits it.
 

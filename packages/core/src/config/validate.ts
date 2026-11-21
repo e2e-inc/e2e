@@ -19,8 +19,12 @@ export function positiveInt(
   label: string,
   unit?: 'milliseconds',
 ): number | undefined {
-  if (value === undefined) return undefined;
-  if (!Number.isSafeInteger(value) || value <= 0) {
+  return value === undefined ? undefined : requiredPositiveInt(value, label, unit);
+}
+
+/** Validates a required positive safe integer. */
+function requiredPositiveInt(value: unknown, label: string, unit?: 'milliseconds'): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
     const expected = unit === undefined ? 'a positive safe integer' : `a positive safe integer of ${unit}`;
     throw new ConfigurationError(
       'INVALID_CONFIG',
@@ -48,13 +52,8 @@ export function checkIntervals(label: string, intervals: unknown): void {
   if (!Array.isArray(intervals) || intervals.length === 0) {
     throw new ConfigurationError('INVALID_CONFIG', `${label} must be a non-empty array of milliseconds`);
   }
-  for (const entry of intervals) {
-    if (!(Number.isFinite(entry) && entry > 0)) {
-      throw new ConfigurationError(
-        'INVALID_CONFIG',
-        `${label} must contain finite numbers of milliseconds above 0; got ${describeValue(entry)}`,
-      );
-    }
+  for (const [index, entry] of intervals.entries()) {
+    requiredPositiveInt(entry, `${label}[${index}]`, 'milliseconds');
   }
 }
 

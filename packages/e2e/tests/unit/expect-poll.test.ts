@@ -185,6 +185,51 @@ describe('expect.poll', () => {
     vexpect(reads).toEqual([0, 100, 350, 850, 1850, 2850]);
   });
 
+  it('reads once more when a pause reaches the deadline', async () => {
+    const start = Date.now();
+    const reads: number[] = [];
+    await e2eExpect.poll(() => {
+      const elapsed = Date.now() - start;
+      reads.push(elapsed);
+      return elapsed >= 900;
+    }, { timeout: 1200 }).toBe(true);
+    vexpect(reads).toEqual([0, 100, 350, 850, 1200]);
+  });
+
+  it('fails when the value only becomes ready after the deadline', async () => {
+    const start = Date.now();
+    await failsWith(
+      () => e2eExpect.poll(() => Date.now() - start > 1200, { timeout: 1200 }).toBe(true),
+      /timed out after 1200 ms\nlast: expected false to be true$/,
+    );
+    vexpect(Date.now() - start).toBe(1200);
+  });
+
+  it('cuts a pending final read without waiting past the deadline', async () => {
+    const start = Date.now();
+    const reads: number[] = [];
+    await failsWith(
+      () => e2eExpect.poll(() => {
+        const elapsed = Date.now() - start;
+        reads.push(elapsed);
+        return elapsed < 1200 ? false : new Promise<boolean>((resolve) => setTimeout(resolve, 1, true));
+      }, { timeout: 1200 }).toBe(true),
+      /timed out after 1200 ms\nlast: expected false to be true$/,
+    );
+    vexpect(Date.now() - start).toBe(1200);
+    vexpect(reads).toEqual([0, 100, 350, 850, 1200]);
+  });
+
+  it('ignores a synchronous read that returns after the deadline', async () => {
+    await failsWith(
+      () => e2eExpect.poll(() => {
+        vi.advanceTimersByTime(60);
+        return true;
+      }, { timeout: 10 }).toBe(true),
+      /timed out after 10 ms\nlast: no read completed$/,
+    );
+  });
+
   it('uses the deprecated interval for each pause and warns once across two polls', async () => {
     const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     try {
@@ -237,6 +282,13 @@ describe('expect.poll', () => {
     vexpect(() => e2eExpect.poll(() => 1, { intervals })).toThrowError(
       vexpect.objectContaining({ code: 'INVALID_CONFIG', message: vexpect.stringContaining('expect.poll intervals') }),
     );
+  });
+
+  it('refuses a fractional pause in intervals', () => {
+    vexpect(() => e2eExpect.poll(() => true, { intervals: [0.5] })).toThrow(vexpect.objectContaining({
+      code: 'INVALID_CONFIG',
+      message: 'expect.poll intervals[0] must be a positive safe integer of milliseconds, got 0.5',
+    }));
   });
 
   it('runs every value matcher', async () => {
@@ -623,6 +675,36 @@ describe('expect(fn).toPass()', () => {
     vexpect(tries).toEqual([0, 100, 350, 850, 1850, 2850]);
   });
 
+  it('lets an immediately settling final try pass at the deadline', async () => {
+    const start = Date.now();
+    const tries: number[] = [];
+    await e2eExpect(async () => {
+      await Promise.resolve();
+      const elapsed = Date.now() - start;
+      tries.push(elapsed);
+      e2eExpect(elapsed).toBeGreaterThanOrEqual(900);
+    }).toPass({ timeout: 1200 });
+    vexpect(tries).toEqual([0, 100, 350, 850, 1200]);
+  });
+
+  it('tries at a phase deadline before the phase cancels', async () => {
+    const live = attempt({ assertionTimeout: 20, deadlineMs: 150 });
+    try {
+      const start = Date.now();
+      await e2eExpect(() => e2eExpect(Date.now() - start).toBe(150)).toPass({ intervals: [1000] });
+      vexpect(Date.now() - start).toBe(150);
+    } finally {
+      live.end();
+    }
+  });
+
+  it('times out when a synchronous block passes after the deadline', async () => {
+    await failsWith(
+      () => e2eExpect(() => { vi.advanceTimersByTime(60); }).toPass({ timeout: 10 }),
+      /timed out after 10 ms\nlast: no try completed$/,
+    );
+  });
+
   it('requires a positive timeout outside a test', async () => {
     await vexpect(e2eExpect(() => {}).toPass()).rejects.toMatchObject({
       code: 'INVALID_CONFIG',
@@ -707,7 +789,14 @@ describe('expect(fn).toPass()', () => {
     const assertion = e2eExpect(() => {});
     await vexpect(Reflect.apply(assertion.toPass, assertion, [{ intervals: [10, '20'] }])).rejects.toMatchObject({
       code: 'INVALID_CONFIG',
-      message: 'expect(...).toPass() intervals must contain finite numbers of milliseconds above 0; got "20"',
+      message: 'expect(...).toPass() intervals[1] must be a positive safe integer of milliseconds, got "20"',
+    });
+  });
+
+  it('refuses a fractional pause in toPass intervals', async () => {
+    await vexpect(e2eExpect(() => {}).toPass({ timeout: 10, intervals: [0.5] })).rejects.toMatchObject({
+      code: 'INVALID_CONFIG',
+      message: 'expect(...).toPass() intervals[0] must be a positive safe integer of milliseconds, got 0.5',
     });
   });
 
@@ -734,6 +823,16 @@ describe('expect(fn).toPass()', () => {
       code: 'ASSERTION_FAILED',
       message: 'expect(...).not.toPass() timed out after 100 ms\nlast: the block passed',
     });
+  });
+
+  it('does not pass a negated check when the block throws after the deadline', async () => {
+    await failsWith(
+      () => e2eExpect(() => {
+        vi.advanceTimersByTime(60);
+        throw new Error('too late');
+      }).not.toPass({ timeout: 10 }),
+      /timed out after 10 ms\nlast: no try completed$/,
+    );
   });
 
   it('stops waiting for a hung try at the deadline', async () => {
