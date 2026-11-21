@@ -361,11 +361,6 @@ function costSource(usage: ReportUsage, modelCalls: number): 'provider' | 'none'
   return modelCalls > 0 ? 'none' : null;
 }
 
-function durationMs(startedAt: string, finishedAt: string): number | null {
-  const duration = Date.parse(finishedAt) - Date.parse(startedAt);
-  return Number.isFinite(duration) ? Math.max(0, duration) : null;
-}
-
 /** What the CLI knows of a run beyond its report. */
 export interface RunContext {
   /** `run` or `explore`. */
@@ -449,7 +444,7 @@ export function runCompletedEvent(report: Report1Document, context: RunContext):
       command: context.command,
       status: run.status,
       exit_code: run.exitCode,
-      duration_ms: durationMs(run.startedAt, run.finishedAt),
+      duration_ms: run.durationMs ?? null,
       flags: [...context.flags],
       tests_discovered: run.summary.discovered,
       tests_selected: run.summary.selected,
@@ -543,6 +538,7 @@ export function mcpSessionEvent(summary: McpSessionSummary, client: McpClient | 
       platform: summary.platform === undefined ? null : plainToken(summary.platform),
       engine: summary.engine === undefined ? null : engineLabel(summary.engine),
       headed: summary.headed,
+      attached: summary.attached,
       duration_ms: Math.max(0, Math.round(summary.durationMs)),
       sessions_open: summary.concurrent,
       calls_total: [...calls.values()].reduce((total, count) => total + count, 0),

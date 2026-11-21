@@ -14,6 +14,7 @@ const leftOut = { cause: 'filtered' as const, reason: 'did not fail in the last 
 
 const firstPass = report({
   status: 'failed',
+  durationMs: 2_000,
   results: [
     result({ title: 'steady', status: 'passed', attempts: [attempt({ durationMs: 500 })] }),
     result({ title: 'recovers', status: 'failed', attempts: [failedAttempt, failedAttempt] }),
@@ -24,6 +25,7 @@ const firstPass = report({
 
 const rerun = report({
   status: 'failed',
+  durationMs: 1_000,
   results: [
     result({ title: 'steady', status: 'skipped', selected: false, skip: leftOut }),
     result({ title: 'recovers', status: 'passed', attempts: [attempt({ durationMs: 900 })] }),
@@ -98,10 +100,16 @@ describe('foldLastRun', () => {
     expect(entries.get('never wanted#0')).toMatchObject({ status: 'skipped', skip: { cause: 'explicit' } });
     expect(entries.get('new since#0')).toMatchObject({ status: 'passed', selected: true });
     expect(folded.run.summary).toMatchObject({ discovered: 5, selected: 5, executed: 4, passed: 2, flaky: 1, failed: 1, interrupted: 0, skipped: 1 });
-    // The rerun decides the outcome; the start is the run before's, so the duration spans both.
     expect(folded.run.status).toBe('failed');
     expect(folded.run.startedAt).toBe(firstPass.run.startedAt);
     expect(folded.run.finishedAt).toBe(rerun.run.finishedAt);
+    expect(renderMarkdownReport(folded)).toContain('· 3.0s ·');
+  });
+
+  it('adds the wall time of an older saved run to the rerun duration', () => {
+    const saved = report({ status: 'failed', finishedAt: '2026-07-24T12:00:07.000Z' });
+    delete saved.run.durationMs;
+    expect(renderMarkdownReport(foldLastRun(rerun, saved))).toContain('· 8.0s ·');
   });
 
   it('folds the repeats a plain rerun ran once into its one result, and carries the repeats of a test it left out', () => {
@@ -349,7 +357,7 @@ describe('foldLastRun', () => {
     expect(page).not.toContain('left out by filters');
   });
 
-  it('counts a serial member executed when its body ran in any group attempt, one that skipped itself included', () => {
+  it.each(['explicit', 'fixme'] as const)('counts a serial member executed when its body ran in any group attempt, one that skipped itself (cause %s) included', (cause) => {
     const titles = ['one', 'two', 'three'];
     const memberIds = titles.map((title) => `tests/example.e2e.ts::wizard::${title}`);
     const blocked = { cause: 'serial-predecessor-failed' as const, reason: 'member 0 failed in this group attempt' };
@@ -361,7 +369,7 @@ describe('foldLastRun', () => {
         index,
         testId: memberIds[index]!,
         status: status === 'failed' ? ('failed' as const) : ('skipped' as const),
-        ...(status === 'failed' ? {} : { error: undefined, skip: status === 'self-skipped' ? { cause: 'explicit' as const, reason: 'not here' } : blocked }),
+        ...(status === 'failed' ? {} : { error: undefined, skip: status === 'self-skipped' ? { cause, reason: 'not here' } : blocked }),
       }));
       return report({
         status: 'failed',
@@ -374,6 +382,9 @@ describe('foldLastRun', () => {
     const folded = foldLastRun(run(['self-skipped', 'failed', 'skipped']), run(['failed', 'skipped', 'skipped']));
     // One ran in both runs and skipped itself in the rerun, two ran in the rerun, three never started.
     expect(folded.run.summary).toMatchObject({ selected: 3, executed: 2, failed: 1, skipped: 2 });
+    // Two ran only in the rerun, where it skipped itself.
+    const selfSkippedOnly = foldLastRun(run(['failed', 'self-skipped', 'skipped']), run(['failed', 'skipped', 'skipped']));
+    expect(selfSkippedOnly.run.summary).toMatchObject({ selected: 3, executed: 2, failed: 1, skipped: 2 });
   });
 
   it('leaves the rerun alone when the run before is another project\'s', () => {

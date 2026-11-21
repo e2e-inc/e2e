@@ -284,6 +284,7 @@ export type LocatorAction =
         | 'uncheck'
         | 'clear'
         | 'focus'
+        | 'blur'
         | 'hover'
         | 'scrollIntoView';
     }
@@ -302,7 +303,7 @@ export type LocatorAction =
 /** Every action kind; what an engine declares in `actions`. */
 export type LocatorActionKind = LocatorAction['kind'];
 
-/** The closed list of action kinds, in contract order; the type is derived from it. */
+/** The locator action kinds of SPI v1. List newer kinds explicitly. Use KNOWN_LOCATOR_ACTION_KINDS to check an action kind. */
 export const LOCATOR_ACTION_KINDS = [
   'tap',
   'doubleTap',
@@ -321,6 +322,9 @@ export const LOCATOR_ACTION_KINDS = [
   'dragTo',
   'swipe',
 ] as const satisfies readonly LocatorActionKind[];
+
+/** Every action kind understood by this version of core. */
+export const KNOWN_LOCATOR_ACTION_KINDS = [...LOCATOR_ACTION_KINDS, 'blur'] as const satisfies readonly LocatorActionKind[];
 
 /**
  * One action `performAt` carries out at a viewport point, with no node
@@ -513,4 +517,14 @@ export class EngineError extends Error {
     this.code = code;
     this.retryable = options.retryable;
   }
+}
+
+/** Who holds a target, for the lifecycle hooks: `prepare`, `init`, `finish`. */
+export interface EngineHostIdentity {
+  /**
+   * Set when a `launch()` host holds the target: a token no other host has.
+   * Hosts name their targets alike, so an engine that names what it holds
+   * after the target (a device session) adds this to keep hosts apart.
+   */
+  readonly hostId?: string | undefined;
 }

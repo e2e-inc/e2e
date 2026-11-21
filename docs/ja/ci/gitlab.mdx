@@ -27,7 +27,7 @@ Expo や bare React Native アプリのビルドも含まれます。[CI パイ�
 ## Web
 
 このジョブは、各マージリクエストとデフォルトブランチへの各プッシュで、決定論的テストとエージェントテストを実行します。
-設定の [command](/web#starting-your-app) でアプリを起動する構成です。
+設定の [command](/web#starting-your-app) でアプリを起動する前提です。
 プロジェクトの Node バージョンに合う `node` イメージを使ってください。
 
 ```yaml title=".gitlab-ci.yml" expandable
@@ -123,7 +123,7 @@ printf %s "$AI_GATEWAY_API_KEY" | glab variable set AI_GATEWAY_API_KEY --masked 
 [テストフィルター](/filters) で変更の影響を受けないテストを除外するには、
 マージリクエストのベースを `--changed-since` に渡します。
 全履歴を取得するため、ジョブの `variables` に `GIT_DEPTH: 0` を追加してください。
-次に `npx e2e run` の行を以下に置き換えます。マージトレインではフラグを省略します。
+次に `npx e2e run` の行を以下に置き換えます。この行は、マージトレインではフラグを渡しません。
 
 ```yaml
   script:

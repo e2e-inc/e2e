@@ -4,6 +4,7 @@
     "id": "not-a-uuid",
     "status": "passed",
     "exitCode": 4,
+    "durationMs": -1,
     "targets": [],
     "results": [
       {
@@ -75,7 +76,7 @@
         "status": "skipped",
         "attempts": [],
         "skip": {
-          "cause": "explicit",
+          "cause": "fixme",
           "reason": "only a filtered test names the filter that left it out",
           "filter": "areas"
         }
