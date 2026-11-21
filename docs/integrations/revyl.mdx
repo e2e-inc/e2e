@@ -1,12 +1,14 @@
 ---
-title: Test mobile apps on Revyl
+title: Test on Revyl
 sidebarTitle: Revyl
-description: Run mobile app tests on Revyl's hosted iOS simulators and Android emulators with @e2e-dev/revyl.
+description: Run mobile app tests on Revyl's hosted iOS simulators and Android emulators, and web tests in Revyl's hosted Chrome, with @e2e-dev/revyl.
 ---
 
 `@e2e-dev/revyl` is a hosted device provider for the mobile engine.
 It starts a Revyl device for each worker, installs your app on it, and releases the device when the run ends.
 Use the standard `app`, `screen`, and `expect` APIs to test your app's user flows.
+For websites, `@e2e-dev/revyl/web` is an engine of its own; see
+[Test websites](#test-websites).
 
 ## Install and authenticate
 
@@ -122,6 +124,130 @@ Unknown or invalid options fail config load with `INVALID_CONFIG`.
   `setLocation`, `clearLocation`, `setAppearance`, `setOrientation`,
   `setBiometrics`, `enrollBiometrics`, `clearKeychain`, `clipboard`, and
   `setClipboard`. `foregroundApp` fails on Android, and `back` fails on iOS.
+
+## Test websites
+
+`revylWeb()` from `@e2e-dev/revyl/web` runs web targets in Chrome on Revyl.
+It is an engine, not a browser provider for `@e2e-dev/web`: Revyl does not
+expose its browsers over CDP, so the engine drives each session through
+Revyl's API. Each worker starts one Revyl web session and stops it when the
+worker exits. It needs no Playwright or `@e2e-dev/web`:
+
+<CodeGroup>
+```bash npm
+npm install --save-dev e2e @e2e-dev/revyl
+```
+
+```bash pnpm
+pnpm add -D e2e @e2e-dev/revyl
+```
+
+```bash bun
+bun add -d e2e @e2e-dev/revyl
+```
+</CodeGroup>
+
+Sessions run under a Revyl Web app. Create one in Revyl, or with
+`revyl app create --platform web`, and pass its id as `app`:
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { revylWeb } from '@e2e-dev/revyl/web';
+
+export default {
+  targets: [
+    {
+      name: 'revyl-web',
+      engine: revylWeb({ app: process.env.REVYL_WEB_APP_ID! }),
+      app: { url: 'https://staging.example.com' },
+    },
+  ],
+  workers: 2,
+  assertionTimeout: 15_000,
+} satisfies E2EConfig;
+```
+
+Each session starts on `startUrl`, registered as a URL build of the app,
+and `app.open()` navigates from there. Tests use the same `app`, `screen`,
+`expect`, and `agent` APIs as on any web target, except the ones under
+[Web limits](#web-limits). Each action waits for the page to settle, so it
+takes 2 to 4 seconds; keep `assertionTimeout` at `15_000`.
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `app` | required | Id of the Revyl Web app the sessions run under. |
+| `startUrl` | the origin of `app.url` | Page each session opens first. It must load without an error: a site whose root answers 404 needs a `startUrl` that loads. |
+| `viewport` | `{ width: 1280, height: 800 }` | CSS viewport, width 320 to 3840 and height 240 to 2160. |
+| `idleTimeoutSeconds` | `600` | Seconds without a command before Revyl ends the session. |
+| `testIdAttribute` | `'data-testid'` | Attribute an exact `getByTestId` reads. |
+
+### How locators resolve
+
+The engine reads the page as Revyl's web hierarchy: every element with its
+own text, its box, and one identifier (its `id`, `aria-label`, `name`,
+`title`, `for`, or `data-testid`, in that order). The hierarchy has no
+tags or roles, so the engine asks Revyl which elements match a CSS selector
+for each role, exact test id, or exact placeholder a locator names.
+
+- `getByRole` matches the elements HTML gives that role, mapped as the
+  `web()` engine maps them (a number input is a `spinbutton`, a search
+  input a `searchbox`, a multi-row `select` a `listbox`), and any element
+  with that `role` attribute, which wins over the implicit one. The name of
+  a button, link, heading, or list item is its text; the name of a field is
+  its identifier.
+- `getByTestId` with an exact string matches `testIdAttribute`; a regular
+  expression matches the identifier.
+- `getByLabel` matches a field's identifier, not the text of its `<label>`.
+- An element's text is its own text, not its descendants'. In
+  `<span><b>2</b> items left</span>`, `2` and `items left` are two nodes, so
+  `getByText('2 items left')` finds nothing.
+- The value of a field or `select` is its text: what is typed, or the label
+  of the chosen option. An empty field reads as its placeholder, else its
+  `aria-label`, so a field whose value equals its `aria-label` reads as
+  empty.
+- `toBeChecked` and `toBeDisabled` read `:checked` and `:disabled`, and
+  `aria-checked="true"` and `aria-disabled="true"`.
+- An element with no size is hidden.
+- Images and SVG are not in the hierarchy, so `getByRole('img')` finds
+  nothing.
+- Elements inside a same-origin `iframe` are part of the page and match
+  without scoping. Revyl does not read a cross-origin `iframe`, and a page
+  built with `<frameset>` fails with `ENGINE_FAILURE`.
+
+### Web limits
+
+- The website runs on Revyl's network: it cannot reach `localhost` or a
+  server on your network.
+- One session serves every test of a worker, as one device does on mobile:
+  cookies and storage carry over from test to test, and `app.clearState()`
+  fails with `UNSUPPORTED_CAPABILITY`. Each test starts at the configured
+  `viewport`, whatever the test before it resized to.
+- There is no `browser` fixture: no route mocking, cookies, storage state,
+  downloads, dialogs, or `expect(browser)` matchers.
+- `check`, `uncheck`, `focus`, `setInputFiles`, and `pressSequentially`
+  fail with `UNSUPPORTED_CAPABILITY`. Tap a checkbox instead of checking it.
+- A link that opens a tab, a Control-click included, shows the new tab. Each
+  test starts on the first tab: the engine closes the others.
+- `dragTo` fails with `UNSUPPORTED_CAPABILITY` while a second tab is open,
+  since Revyl ends the session when it drags then.
+- Revyl has no focus action, so `press` taps a text field that is not
+  focused, and fails with `UNSUPPORTED_CAPABILITY` on any other element that
+  is not focused, since a tap would activate it. Revyl presses named keys
+  (`Enter`, `Tab`, arrows, and the like) and a letter or digit with a
+  modifier; type other text with `fill`.
+- `selectOption` takes an option's label, as a string or `{ label }`;
+  `{ value }` and `{ index }` fail with `UNSUPPORTED_CAPABILITY`.
+- The page's location has no query string or fragment, since Revyl reports
+  only the origin and path.
+- A password field's value is never reported. Revyl cannot mask one in a
+  screenshot, and reports a password field's text as empty whether or not
+  it holds a value, so `app.screenshot()` fails with
+  `UNSUPPORTED_CAPABILITY` while a password field is on screen without its
+  placeholder showing. The agent cannot type a secret it observed; `fill`
+  with a secret sends it to Revyl like any other text.
+- Revyl web sessions do not record video for e2e; use `app.screenshot()`.
+- Revyl refuses CSS queries on a very large page with `413
+  capacity_exhausted`, and the step fails with `ENGINE_FAILURE`.
 
 ## Next
 

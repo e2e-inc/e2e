@@ -254,6 +254,11 @@ start a script that brings them up and serves the app.
   session state. Recovery never repeats a dispatched operation; exhausting
   the budget is `OPERATION_TIMEOUT`. Without `reconnectEndpoint` a dropped
   connection is reacquired at the next attempt.
+- `revylWeb({ app })` from `@e2e-dev/revyl/web` is an engine of its own, not
+  a `browser` provider: it drives Chrome on Revyl through Revyl's API (no
+  CDP), reads `REVYL_API_KEY`, and has no `browser` fixture. `app` is a Revyl
+  Web app id. Set `assertionTimeout: 15_000`; the limits are on the
+  [Revyl page](https://e2e.com/docs/integrations/revyl#web-limits).
 
 Two browsers, one app declaration:
 

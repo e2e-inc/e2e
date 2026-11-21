@@ -7,7 +7,7 @@
 
 import type { DeviceLease, DeviceProvider, DeviceRequest } from '@e2e-dev/mobile';
 import { agentDeviceLeases, agentDevicePlugin, type LeaseSelectors } from '@e2e-dev/mobile/lease';
-import { ConfigurationError, rejectUnknownKeys } from 'e2e/engine';
+import { ConfigurationError, rejectUnknownKeys } from '@e2e-dev/core/engine';
 import { credentialsEnv, revylCredentials } from './credentials.ts';
 
 /** agent-device's name for Revyl, as the lease provider and the tenant. */

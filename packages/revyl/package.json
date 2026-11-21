@@ -1,7 +1,7 @@
 {
   "name": "@e2e-dev/revyl",
   "version": "0.0.1",
-  "description": "Revyl for e2e: hosted iOS simulators and Android emulators for mobile tests",
+  "description": "Revyl for e2e: hosted iOS simulators and Android emulators for mobile tests, and hosted Chrome for web tests",
   "keywords": [
     "e2e",
     "end-to-end",
@@ -12,7 +12,9 @@
     "ios-simulator",
     "android-emulator",
     "agent-device",
-    "ci"
+    "ci",
+    "cloud-browsers",
+    "hosted-browsers"
   ],
   "license": "Apache-2.0",
   "contributors": [
@@ -37,6 +39,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./web": {
+      "types": "./dist/web.d.ts",
+      "default": "./dist/web.js"
     }
   },
   "files": [
@@ -52,10 +58,20 @@
     "test:unit": "vitest run tests/unit"
   },
   "peerDependencies": {
+    "@e2e-dev/core": ">=0.24.0 <1",
     "@e2e-dev/mobile": ">=0.12.8 <1",
-    "e2e": ">=0.15.0 <1"
+    "e2e": ">=0.23.2 <1"
+  },
+  "peerDependenciesMeta": {
+    "@e2e-dev/mobile": {
+      "optional": true
+    },
+    "e2e": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "@e2e-dev/core": "workspace:*",
     "@e2e-dev/mobile": "workspace:*",
     "@types/node": "26.6.6",
     "e2e": "workspace:*",
