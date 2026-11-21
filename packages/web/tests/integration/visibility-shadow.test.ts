@@ -14,6 +14,7 @@ import { CLOSED_SHADOW_ROOTS_INIT_SCRIPT } from '../../src/closed-shadow.ts';
 import { captureDocument } from '../../src/observation.ts';
 import { readSemanticsFunction } from '../../src/in-page/read-semantics.ts';
 import { SECURE_FIELD_SELECTOR } from '../../src/read-node.ts';
+import { SHOWN_SELECTOR_ENGINE_SOURCE } from '../../src/shown-selector.ts';
 
 let browser: Browser;
 let context: BrowserContext;
@@ -56,6 +57,24 @@ const PAGE = `
   <table><tr><td style="content-visibility:hidden"><button id="cv-td">Cell button</button></td></tr></table>
   <table><tr style="content-visibility:hidden"><td><button id="cv-tr">Row button</button></td></tr></table>
   <div style="display:contents;content-visibility:hidden">Loose text under a box-less wrapper</div>
+  <style>.laid-out::details-content { display: contents; }</style>
+  <details class="laid-out"><summary>Laid out</summary><button id="laid-out-light">Laid out light</button><x-laid-out-host></x-laid-out-host></details>
+  <table style="content-visibility:hidden"><tr><td><button id="cv-table">Table button</button></td></tr></table>
+  <x-cv-table-closed><button id="cv-table-closed">Table slotted</button></x-cv-table-closed>
+  <div style="display:inline-table;content-visibility:hidden"><button id="cv-inline-table">Inline table button</button></div>
+  <ruby style="content-visibility:hidden"><button id="cv-ruby">Ruby button</button></ruby>
+  <ul><li style="display:inline list-item;content-visibility:hidden"><button id="cv-inline-li">Inline item button</button></li></ul>
+  <svg style="content-visibility:hidden" width="100" height="40"><a href="#" id="cv-svg-link"><text x="5" y="20">Svg link</text></a></svg>
+  <span style="display:inline-block;content-visibility:hidden;width:120px;height:30px"><button id="cv-inline-block">Inline block button</button></span>
+  <button aria-label="Inline button" style="display:inline;content-visibility:hidden"><span id="cv-button-span">Inside an inline button</span></button>
+  <button aria-label="Ruby button" style="display:ruby;content-visibility:hidden"><span id="cv-ruby-button-span">Inside a ruby button</span></button>
+  <fieldset style="display:contents;content-visibility:hidden"><button id="cv-fieldset-contents">Fieldset contents</button></fieldset>
+  <svg width="100" height="40"><svg style="content-visibility:hidden"><a href="#" id="cv-inner-svg-link"><text x="5" y="20">Inner svg link</text></a></svg></svg>
+  <svg width="200" height="60"><foreignObject width="200" height="60"><svg style="content-visibility:hidden" width="100" height="40"><a href="#" id="cv-fo-svg-link"><text x="5" y="20">Foreign object svg link</text></a></svg></foreignObject></svg>
+  <svg width="100" height="40"><svg style="display:block;content-visibility:hidden"><a href="#" id="cv-inner-block-svg-link"><text x="5" y="20">Inner block svg link</text></a></svg></svg>
+  <x-ns-slot><button id="ns-slot">Namespaced slot attribute</button></x-ns-slot>
+  <x-ns-name><button id="ns-name" slot="y">Namespaced slot name</button></x-ns-name>
+  <fieldset id="cv-fieldset" style="display:inline;content-visibility:hidden">Loose fieldset text<button id="cv-fieldset-inline">Inline fieldset button</button></fieldset>
   <script>
     const define = (name, mode, html) => customElements.define(name, class extends HTMLElement {
       constructor() { super(); this.attachShadow({ mode }).innerHTML = html; }
@@ -100,6 +119,23 @@ const PAGE = `
     define('x-acc-shown-closed', 'closed', shownBody);
     define('x-cv-contents-direct', 'open', '<div style="content-visibility:hidden;display:contents"><button id="cv-contents-direct">Contents direct</button></div>');
     define('x-cv-inline-closed', 'closed', '<span style="content-visibility:hidden"><slot></slot></span>');
+    define('x-laid-out-host', 'open', '<button id="laid-out-shadow">Laid out shadow</button>');
+    customElements.define('x-ns-slot', class extends HTMLElement {
+      constructor() {
+        super();
+        this.attachShadow({ mode: 'closed' }).innerHTML = '<details><summary>Ns</summary><slot name="x"></slot></details><slot></slot>';
+        this.querySelector('#ns-slot').setAttributeNS('urn:e2e:not-html', 'slot', 'x');
+      }
+    });
+    customElements.define('x-ns-name', class extends HTMLElement {
+      constructor() {
+        super();
+        const root = this.attachShadow({ mode: 'closed' });
+        root.innerHTML = '<details><summary>Ns name</summary><slot></slot></details><slot name="y"></slot>';
+        root.querySelector('slot').setAttributeNS('urn:e2e:not-html', 'name', 'y');
+      }
+    });
+    define('x-cv-table-closed', 'closed', '<table style="content-visibility:hidden"><tr><td><slot></slot></td></tr></table>');
     customElements.define('x-manual', class extends HTMLElement {
       constructor() {
         super();
@@ -173,6 +209,23 @@ describe('visibility across shadow boundaries, in the flat tree', () => {
     ['a button slotted into closed details whose body CSS shows, in an open root', '#slotted-shown', false],
     ['a button slotted into closed details whose body CSS shows, in a closed root', '#slotted-shown-closed', false],
     ['a button under a details element that is not HTML', '#in-foreign-details', false],
+    ['a light button in closed details whose body is laid out as display: contents', '#laid-out-light', false],
+    ['a shadow button in closed details whose body is laid out as display: contents', '#laid-out-shadow', false],
+    ['a button in a table with content-visibility: hidden', '#cv-table', false],
+    ['a button slotted under a table with content-visibility: hidden in a closed root', '#cv-table-closed', false],
+    ['a button under an inline table with content-visibility: hidden', '#cv-inline-table', false],
+    ['a button under ruby with content-visibility: hidden', '#cv-ruby', false],
+    ['a button under an inline list item with content-visibility: hidden', '#cv-inline-li', false],
+    ['a link in an inline svg with content-visibility: hidden', '#cv-svg-link', true],
+    ['a button under an inline block with content-visibility: hidden', '#cv-inline-block', true],
+    ['text in an inline button with content-visibility: hidden', '#cv-button-span', true],
+    ['text in a ruby button with content-visibility: hidden', '#cv-ruby-button-span', true],
+    ['a link in an svg in a foreignObject, with content-visibility: hidden on that svg', '#cv-fo-svg-link', true],
+    ['a link in a block svg nested in another, with content-visibility: hidden on the inner one', '#cv-inner-block-svg-link', false],
+    ['a button whose slot attribute is in a namespace, so it goes to the default slot of a closed root', '#ns-slot', false],
+    ['a button slotted by name past a slot whose name attribute is in a namespace, in a closed root', '#ns-name', false],
+    ['a button in a display: contents fieldset with content-visibility: hidden', '#cv-fieldset-contents', false],
+    ['a link in an svg nested in another, with content-visibility: hidden on the inner one', '#cv-inner-svg-link', false],
   ])('%s', async (_case, selector, hidden) => {
     const locator = page.locator(selector);
     const raw = await locator.evaluate(readSemanticsFunction<typeof READ_OPTIONS.mode>, READ_OPTIONS);
@@ -192,7 +245,7 @@ describe('visibility across shadow boundaries, in the flat tree', () => {
       { framePath: [], budget: 200, deadline: Date.now() + 10_000, signal: new AbortController().signal },
     );
     const buttons = flatten(tree).filter((node) => node.role === 'button').map((node) => node.name);
-    expect(buttons).toEqual(['In summary slot', 'In summary', 'In open', 'Closed summary slot', 'Manual summary', 'Direct summary', 'Past an SVG slot', 'Named with a NUL', 'HTML summary after a foreign one', 'In foreign details', 'Expanded light', 'Expanded shadow', 'Contents closed', 'Contents open', 'Inline closed', 'Contents direct', 'Slotted shown', 'Slotted shown closed', 'Row button']);
+    expect(buttons).toEqual(['In summary slot', 'In summary', 'In open', 'Closed summary slot', 'Manual summary', 'Direct summary', 'Past an SVG slot', 'Named with a NUL', 'HTML summary after a foreign one', 'In foreign details', 'Expanded light', 'Expanded shadow', 'Contents closed', 'Contents open', 'Inline closed', 'Contents direct', 'Slotted shown', 'Slotted shown closed', 'Row button', 'Laid out light', 'Laid out shadow', 'Table button', 'Table slotted', 'Inline table button', 'Ruby button', 'Inline item button', 'Inline button', 'Ruby button', 'Fieldset contents', 'Namespaced slot attribute', 'Namespaced slot name']);
     expect(flatten(tree).some((node) => [node.name, node.text].some((text) => text?.includes('Loose text under a box-less wrapper')))).toBe(true);
   });
 
@@ -241,8 +294,44 @@ describe('visibility across shadow boundaries, in the flat tree', () => {
       other,
       { framePath: [], budget: 200, deadline: Date.now() + 10_000, signal: new AbortController().signal },
     );
-    // One listing of the root's 1,001 slots and one read of each, not one per slotted child.
-    expect(await other.evaluate(() => (globalThis as unknown as { counts: { scans: number; lists: number } }).counts)).toEqual({ scans: 1001, lists: 1 });
+    // One listing of the root's 1,001 slots, not one per slotted child, and a root that assigns by name never lists what a slot holds.
+    expect(await other.evaluate(() => (globalThis as unknown as { counts: { scans: number; lists: number } }).counts)).toEqual({ scans: 0, lists: 1 });
+    await other.close();
+  });
+
+  it.each([
+    ['a named slot each', 100, (index: number) => `<slot name="s${index}"></slot>`, (index: number) => `<button slot="s${index}">Row</button>`],
+    ['one default slot', 1000, () => '', () => '<button>Row</button>'],
+  ])('reads one match of a locator, slotted into a closed root by name (%s), without listing what the slots hold', async (_shape, count, slot, row) => {
+    const other = await context.newPage();
+    const slots = Array.from({ length: count }, (_, index) => slot(index)).join('') + '<slot></slot>';
+    const rows = Array.from({ length: count }, (_, index) => row(index)).join('');
+    await other.setContent(`<many-host>${rows}</many-host><script>
+      customElements.define('many-host', class extends HTMLElement {
+        constructor() { super(); this.attachShadow({ mode: 'closed' }).innerHTML = '<div>${slots}</div>'; }
+      });
+    </script>`);
+    const work = await other.evaluate((engineSource) => {
+      const counts = { held: 0, lists: 0, shown: 0 };
+      const scan = HTMLSlotElement.prototype.assignedElements;
+      HTMLSlotElement.prototype.assignedElements = function (this: HTMLSlotElement, options?: AssignedNodesOptions) {
+        const found = scan.call(this, options);
+        counts.held += found.length;
+        return found;
+      };
+      const list = ShadowRoot.prototype.querySelectorAll;
+      ShadowRoot.prototype.querySelectorAll = function (this: ShadowRoot, selectors: string) {
+        if (selectors === 'slot') counts.lists += 1;
+        return list.call(this, selectors);
+      } as typeof list;
+      // eslint-disable-next-line no-new-func
+      const engine = (new Function(`return (${engineSource})()`) as () => { queryAll: (root: Element, selector: string) => Element[] })();
+      // The `visible: true` engine, called once per candidate the way a locator reads its matches.
+      for (const button of Array.from(document.querySelectorAll('many-host > button'))) counts.shown += engine.queryAll(button, '').length;
+      return counts;
+    }, SHOWN_SELECTOR_ENGINE_SOURCE);
+    // Every match shown, one listing of the slots per match, and nothing a slot holds read: the slot comes from the button's name.
+    expect(work).toEqual({ held: 0, lists: count, shown: count });
     await other.close();
   });
 
@@ -280,9 +369,86 @@ describe('visibility across shadow boundaries, in the flat tree', () => {
     await other.close();
   });
 
+  it('never looks for the summary of an open details, so reading its children one call each stays linear', async () => {
+    const other = await context.newPage();
+    // No summary, so a look would walk all 100 children, once per reader call.
+    await other.setContent(`<details open>${'<button>Row</button>'.repeat(100)}</details>`);
+    await other.addScriptTag({ content: `globalThis.read = ${readSemanticsFunction.toString()};` });
+    await other.evaluate(() => {
+      const counter = { reads: 0 };
+      (globalThis as unknown as { counter: typeof counter }).counter = counter;
+      for (const name of ['firstElementChild', 'nextElementSibling'] as const) {
+        const property = Object.getOwnPropertyDescriptor(Element.prototype, name)!;
+        Object.defineProperty(Element.prototype, name, {
+          configurable: true,
+          get(this: Element) {
+            if (this.localName === 'details' || this.parentElement?.localName === 'details') counter.reads += 1;
+            return property.get!.call(this);
+          },
+        });
+      }
+    });
+    // A locator reads each match in its own reader call.
+    await other.evaluate((options) => {
+      const read = (globalThis as unknown as { read: (el: Element, opts: typeof options) => unknown }).read;
+      for (const button of Array.from(document.querySelectorAll('details > button'))) read(button, options);
+    }, READ_OPTIONS);
+    // A look per call would be 100 x 100 steps; each call's own work on its button is a few.
+    expect(await other.evaluate(() => (globalThis as unknown as { counter: { reads: number } }).counter.reads)).toBeLessThanOrEqual(5 * 100);
+    await other.close();
+  });
+
   it('reads a table cell with content-visibility: hidden as skipping what is in it', async () => {
     // Chromium skips a table cell's contents, as checkVisibility() reports; Firefox and WebKit paint them.
     const raw = await page.locator('#cv-td').evaluate(readSemanticsFunction<typeof READ_OPTIONS.mode>, READ_OPTIONS);
     expect(raw.states.hidden).toBe(true);
+  });
+
+  it('reads an inline fieldset with content-visibility: hidden as skipping what is in it', async () => {
+    // A fieldset makes a box of its own whatever its display; Chromium and Firefox skip its contents, WebKit paints them.
+    expect(await hiddenOf(page, '#cv-fieldset-inline')).toEqual({ reader: true, playwright: true });
+    // Its own text renders no more than its button does, so the agent's tree does not carry it.
+    expect(await page.locator('#cv-fieldset').evaluate((el) => (el as HTMLElement).innerText)).toBe('');
+    let nextId = 1;
+    const { tree } = await captureDocument(
+      {
+        testIdAttribute: 'data-testid',
+        site: undefined,
+        reserveIds: (count) => { const first = nextId; nextId += count; return first; },
+        commit: () => undefined,
+      },
+      page,
+      { framePath: [], budget: 200, deadline: Date.now() + 10_000, signal: new AbortController().signal },
+    );
+    expect(flatten(tree).some((node) => [node.name, node.text].some((text) => text?.includes('Loose fieldset text')))).toBe(false);
+  });
+
+  it('does not walk into an inline fieldset with content-visibility: hidden while building the agent tree', async () => {
+    const other = await context.newPage();
+    await other.setContent(`<button>Before</button><fieldset id="skipped" style="display:inline;content-visibility:hidden">${'<button>Row</button>'.repeat(200)}</fieldset>`);
+    await other.evaluate(() => {
+      const counter = { styled: 0 };
+      (globalThis as unknown as { counter: typeof counter }).counter = counter;
+      const skipped = document.getElementById('skipped')!;
+      const style = window.getComputedStyle;
+      window.getComputedStyle = function (el: Element, pseudo?: string | null) {
+        if (el !== skipped && skipped.contains(el)) counter.styled += 1;
+        return style.call(window, el, pseudo);
+      } as typeof style;
+    });
+    let nextId = 1;
+    await captureDocument(
+      {
+        testIdAttribute: 'data-testid',
+        site: undefined,
+        reserveIds: (count) => { const first = nextId; nextId += count; return first; },
+        commit: () => undefined,
+      },
+      other,
+      { framePath: [], budget: 500, deadline: Date.now() + 10_000, signal: new AbortController().signal },
+    );
+    // Nothing under the fieldset renders, so the walk stops at it rather than reading each of its 200 buttons.
+    expect(await other.evaluate(() => (globalThis as unknown as { counter: { styled: number } }).counter.styled)).toBe(0);
+    await other.close();
   });
 });

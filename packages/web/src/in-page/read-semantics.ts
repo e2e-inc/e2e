@@ -412,11 +412,22 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     el.ownerDocument.defaultView?.getComputedStyle(el);
 
   /** `display` values on which `content-visibility: hidden` skips nothing (checked against `checkVisibility()` in Chromium). */
-  const BOXES_THAT_SKIP_NOTHING = new Set(['contents', 'inline', 'table-row', 'table-row-group', 'table-header-group', 'table-footer-group', 'ruby-text']);
+  const BOXES_THAT_SKIP_NOTHING = new Set(['contents', 'inline', 'inline list-item', 'table', 'inline-table', 'table-row', 'table-row-group', 'table-header-group', 'table-footer-group', 'ruby', 'ruby-text']);
 
-  /** Whether an element with this style renders nothing under it. */
-  const skipsContents = (style: CSSStyleDeclaration | undefined): boolean =>
-    style?.getPropertyValue('content-visibility') === 'hidden' && !BOXES_THAT_SKIP_NOTHING.has(style.display);
+  /**
+   * Whether an element with this style renders nothing under it. In SVG only
+   * an outermost `<svg>`, one whose parent is not SVG or is a
+   * `<foreignObject>`, has a box for `content-visibility` to act on, and as a
+   * replaced element it skips whatever its `display`. An HTML `<button>` or
+   * `<fieldset>` also makes a box of its own short of `display: contents`.
+   */
+  const skipsContents = (el: Element, style: CSSStyleDeclaration | undefined): boolean => {
+    if (style?.getPropertyValue('content-visibility') !== 'hidden') return false;
+    const svg = 'http://www.w3.org/2000/svg';
+    if (el.namespaceURI === svg) return el.localName === 'svg' && (el.parentElement?.namespaceURI !== svg || el.parentElement.localName === 'foreignObject');
+    if (!BOXES_THAT_SKIP_NOTHING.has(style.display)) return true;
+    return (el.localName === 'button' || el.localName === 'fieldset') && el.namespaceURI === 'http://www.w3.org/1999/xhtml' && style.display !== 'contents';
+  };
 
   /** A walk from the top, with the elements that may not contribute again already visited. */
   const nameWalk = (visited: readonly Element[], accessible: boolean, fromContent = false): NameWalk => ({
@@ -859,7 +870,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * its `innerText` reads empty, so it owns none.
    */
   const directTextOf = memoized((el: Element): string => {
-    if (skipsContents(styleOf(el))) return '';
+    if (skipsContents(el, styleOf(el))) return '';
     let out = '';
     for (const child of Array.from(el.childNodes)) {
       if (child.nodeType === 3) out += child.nodeValue ?? '';
@@ -1120,12 +1131,14 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
 
   /**
    * Whether a `<details>` element hides its body: its `::details-content`
-   * computes `content-visibility: hidden`, so page CSS can show a closed body.
+   * skips its contents (`skipsContents`), so page CSS can show a closed body,
+   * by `content-visibility` or by laying it out as `display: contents`.
    * Without that pseudo element, the `open` attribute decides.
    */
   const foldsBody = memoized((details: Element): boolean => {
-    const skip = details.ownerDocument.defaultView?.getComputedStyle(details, '::details-content').getPropertyValue('content-visibility') ?? '';
-    return skip === '' ? !details.hasAttribute('open') : skip === 'hidden';
+    const style = details.ownerDocument.defaultView?.getComputedStyle(details, '::details-content');
+    const skip = style?.getPropertyValue('content-visibility') ?? '';
+    return skip === '' ? !details.hasAttribute('open') : skipsContents(details, style);
   });
 
   /**
@@ -1137,7 +1150,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   const isInClosedDetails = memoized((el: Element): boolean => {
     const parent = flatParentOf(el);
     if (parent === null) return false;
-    if (parent.localName === 'details' && isHtml(parent) && firstSummaryOf(parent) !== el && foldsBody(parent)) return true;
+    if (parent.localName === 'details' && isHtml(parent) && foldsBody(parent) && firstSummaryOf(parent) !== el) return true;
     return isInClosedDetails(parent);
   });
 
@@ -1149,7 +1162,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   const isSkippedContent = memoized((el: Element): boolean => {
     const parent = flatParentOf(el);
     if (parent === null) return false;
-    return skipsContents(styleOf(parent)) || isSkippedContent(parent);
+    return skipsContents(parent, styleOf(parent)) || isSkippedContent(parent);
   });
 
   /**
@@ -1276,8 +1289,14 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   /** Whether `node` is an HTML element; an SVG `slot` or a foreign `summary` does nothing. */
   const isHtml = (node: Element): boolean => node.namespaceURI === 'http://www.w3.org/1999/xhtml';
 
-  /** Each element a tracked closed root's HTML slots hold, mapped to its slot; read once per root in a read. */
-  const closedSlots = new Map<ShadowRoot, Map<Element, Element>>();
+  /**
+   * A tracked closed root's HTML slots, read once per root in a read: by
+   * name, the first slot of each name in tree order, as named assignment
+   * picks it; in a root that assigns by hand, by each element a slot holds.
+   * A named lookup never lists what a slot holds, so a locator's read of one
+   * match costs one pass over the root's slots.
+   */
+  const closedSlots = new Map<ShadowRoot, Map<string | Element, Element>>();
 
   /** The slot an element is assigned to: `assignedSlot`, which a closed root hides from the outside, else the tracked closed root's slot for it. */
   const slotOf = (el: Element): Element | null => {
@@ -1285,15 +1304,22 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     const host = el.parentElement;
     const shadow = host === null ? undefined : closedShadowRoots?.get(host);
     if (shadow === undefined) return null;
+    const manual = shadow.slotAssignment === 'manual';
     let slots = closedSlots.get(shadow);
     if (slots === undefined) {
       slots = new Map();
       for (const slot of Array.from(shadow.querySelectorAll('slot'))) {
-        if (isHtml(slot)) for (const assigned of (slot as HTMLSlotElement).assignedElements()) slots.set(assigned, slot);
+        if (!isHtml(slot)) continue;
+        if (manual) {
+          for (const assigned of (slot as HTMLSlotElement).assignedElements()) slots.set(assigned, slot);
+          continue;
+        }
+        const name = slot.getAttributeNS(null, 'name') ?? '';
+        if (!slots.has(name)) slots.set(name, slot);
       }
       closedSlots.set(shadow, slots);
     }
-    return slots.get(el) ?? null;
+    return slots.get(manual ? el : (el.getAttributeNS(null, 'slot') ?? '')) ?? null;
   };
 
   /** An element's parent in the flat tree: its slot, the tree parent, or the host at a shadow root. */
@@ -1848,7 +1874,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     }
     if (OPAQUE_TAGS.indexOf(tag) !== -1) return;
     // The element keeps its box, and nothing under it renders (`isSkippedContent`).
-    if (skipsContents(style)) return;
+    if (skipsContents(el, style)) return;
     for (const child of Array.from(el.children)) walk(child, nextParent);
     // A shadow root is part of what the user sees, so it is part of what the
     // model is shown. Walking the host's light children and its shadow tree

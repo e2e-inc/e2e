@@ -271,7 +271,9 @@ and `waitFor()`: what renders, as Playwright reads it.
   `content-visibility: hidden`.
 - Not hidden: a closed `<details>` body the page's CSS shows through
   `::details-content`, and content under `content-visibility: hidden` set on an
-  element with no box to skip it in (`display: contents`, an inline element).
+  element whose box does not skip it (`display: contents`, an inline element,
+  a table, a table row, ruby). An inline `<svg>`, `<button>`, or `<fieldset>`
+  makes a box of its own, so content under one still reads hidden.
 - Not hidden: `aria-hidden`, since a decorative spinner marked with it still
   paints, so `toBeHidden()` on one waits until it leaves.
 - A child that sets `visibility: visible` under a hidden parent is visible.
