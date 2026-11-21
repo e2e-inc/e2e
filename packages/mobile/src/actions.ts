@@ -24,6 +24,7 @@ export const DEFAULT_LONG_PRESS_MS = 1_000;
 export const DEVICE_ACTIONS: readonly LocatorActionKind[] = [
   'tap',
   'doubleTap',
+  'multiTap',
   'longPress',
   'fill',
   'clear',

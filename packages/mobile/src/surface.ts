@@ -1569,6 +1569,8 @@ export class AgentDeviceSurface {
           return input.press(client, { ...this.actionTarget(target), ...settle });
         case 'doubleTap':
           return input.press(client, { ...this.actionTarget(target), count: 2, ...settle });
+        case 'multiTap':
+          return input.press(client, { ...this.actionTarget(target), count: action.count, ...settle });
         case 'longPress':
           return input.send(
             () => client.interactions.longPress({ ...this.actionTarget(target), ...settle, durationMs: action.durationMs ?? DEFAULT_LONG_PRESS_MS }),
@@ -1625,6 +1627,7 @@ export class AgentDeviceSurface {
         case 'scrollIntoView':
         case 'selectOption':
         case 'setInputFiles':
+        case 'setInputFilePayloads':
         case 'blur':
           // Not in DEVICE_ACTIONS (actions.ts), so the harness never sends them; kept exhaustive.
           throw unsupported(`agent-device cannot perform "${action.kind}" on a device surface`);

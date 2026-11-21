@@ -200,6 +200,14 @@ export class LocatorEngine {
    */
   private checkAction(action: LocatorAction): void {
     if (!this.session.actions.has(action.kind)) {
+      if (action.kind === 'setInputFilePayloads') {
+        throw new ConfigurationError(
+          'UNSUPPORTED_CAPABILITY',
+          `in-memory files for setInputFiles are not available on this target; update its engine${
+            this.session.actions.has('setInputFiles') ? ' or pass a file path' : ''
+          }`,
+        );
+      }
       throw new ConfigurationError(
         'UNSUPPORTED_CAPABILITY',
         `the "${action.kind}" action is not available on this target: its engine declares ${
@@ -465,6 +473,11 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
     action: LocatorAction | ActionBuilder,
     timeoutMs?: number,
   ): Promise<void> {
+    // Prefer the original clear action when the engine supports paths.
+    if (typeof action !== 'function' && action.kind === 'setInputFiles' && action.paths.length === 0 &&
+        !this.session.actions.has('setInputFiles') && this.session.actions.has('setInputFilePayloads')) {
+      action = { kind: 'setInputFilePayloads', files: [] };
+    }
     await this.performUntil(expression, action, this.deadline(timeoutMs));
   }
 

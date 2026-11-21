@@ -71,6 +71,20 @@ describe('defineEngine', () => {
     );
   });
 
+  it('keeps the SPI v1 list stable and accepts an explicitly declared upload action', () => {
+    const perform = async () => undefined;
+    const legacy = defineEngine(observingEngine({ actions: LOCATOR_ACTION_KINDS, perform }));
+    expect(legacy.actions).not.toContain('setInputFilePayloads');
+    const enabled = defineEngine(observingEngine({ actions: ['setInputFilePayloads'], perform }));
+    expect(enabled.actions).toEqual(['setInputFilePayloads']);
+  });
+
+  it.each([null, {}, 42, 'setInputFilePayloads'])('reports malformed action lists as INVALID_CONFIG: %j', (actions) => {
+    expect(() => defineEngine(observingEngine({
+      actions: actions as never, perform: async () => undefined,
+    }))).toThrow(expect.objectContaining({ code: 'INVALID_CONFIG' }));
+  });
+
   it('closes the action list: known kinds, each once, at least one', () => {
     const withActions = (actions: unknown) =>
       defineEngine(observingEngine({ actions: actions as never, perform: async () => undefined }));

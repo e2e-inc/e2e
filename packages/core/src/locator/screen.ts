@@ -16,6 +16,7 @@ import { isTextMatch, normalizeText } from '../internal/text.ts';
 import type {
   ActionOptions,
   ClickOptions,
+  FilePayload,
   LongPressOptions,
   Locator,
   Momentum,
@@ -408,13 +409,26 @@ class LocatorImpl extends ScreenImpl implements Locator {
   }
 
   /**
-   * One tap of the node: the platform's own, or, with a position, the pointer
-   * dispatched at that offset of the node's box.
+   * `count` taps of the node: the platform's own, or, with a position, the
+   * pointer dispatched at that offset of the node's box. Two taps are the
+   * `doubleTap` kind, so `tap({ count: 2 })` is `doubleTap()` on every
+   * engine; three or more are `multiTap`.
    */
   private tapWith(api: 'tap' | 'click', options: TapOptions | undefined): Promise<void> {
-    rejectUnknownOptions(api, options, ['timeout', 'position', 'modifiers']);
+    rejectUnknownOptions(api, options, ['timeout', 'position', 'modifiers', 'count']);
     const modifiers = requireModifiers(options?.modifiers, api);
-    if (options?.position === undefined) return this.dispatchTap(api, 'tap', modifiers, options?.timeout);
+    const count = requireTapCount(options?.count, api);
+    if (options?.position === undefined) {
+      if (count === 1) return this.dispatchTap(api, 'tap', modifiers, options?.timeout);
+      if (count === 2) return this.dispatchTap(api, 'doubleTap', modifiers, options?.timeout);
+      const label = `${this.label} ${count} times${modifiers.modifiers === undefined ? '' : ` with ${modifiers.modifiers.join('+')}`}`;
+      return this.context.steps.run('locator', `locator.${api}`, label, () =>
+        this.context.engine.perform(this.expression, { kind: 'multiTap', count, ...modifiers }, options?.timeout),
+      );
+    }
+    if (count !== 1) {
+      throw new TestError('INVALID_ARGUMENT', `${api}() does not take count with a position yet; drop one of them`);
+    }
     if (modifiers.modifiers !== undefined) {
       throw new TestError('INVALID_ARGUMENT', `${api}() does not take modifiers with a position yet; drop one of them`);
     }
@@ -539,14 +553,34 @@ class LocatorImpl extends ScreenImpl implements Locator {
     return this.perform('hover', { kind: 'hover' }, options);
   }
 
-  setInputFiles(paths: string | readonly string[], options?: ActionOptions): Promise<void> {
-    const list = typeof paths === 'string' ? [paths] : [...paths];
-    if (list.some((entry) => typeof entry !== 'string' || entry.trim() === '')) {
-      throw new TestError('INVALID_ARGUMENT', 'setInputFiles paths must be non-empty strings');
+  setInputFiles(files: string | readonly string[] | FilePayload | readonly FilePayload[], options?: ActionOptions): Promise<void> {
+    const list: readonly unknown[] = Array.isArray(files) ? [...files] : [files];
+    if (list.some((entry) => typeof entry === 'string') && list.some(isPlainObject)) {
+      throw new TestError('INVALID_ARGUMENT', 'File paths cannot be mixed with buffers');
     }
-    const base = this.context.projectRoot;
-    const resolved = list.map((entry) => (base === undefined ? entry : nodePath.resolve(base, entry)));
-    return this.perform('setInputFiles', { kind: 'setInputFiles', paths: resolved }, options);
+    if (list.length === 0 || typeof list[0] === 'string') {
+      const base = this.context.projectRoot;
+      const paths = list.map((entry) => {
+        if (typeof entry !== 'string' || entry.trim() === '') {
+          throw new TestError('INVALID_ARGUMENT', 'setInputFiles paths must be non-empty strings');
+        }
+        return base === undefined ? entry : nodePath.resolve(base, entry);
+      });
+      return this.perform('setInputFiles', { kind: 'setInputFiles', paths }, options);
+    }
+    const payloads = list.map((entry) => {
+      if (!isPlainObject(entry) || typeof entry['name'] !== 'string' || entry['name'].trim() === '' ||
+          typeof entry['mimeType'] !== 'string' || !Buffer.isBuffer(entry['buffer'])) {
+        throw new TestError('INVALID_ARGUMENT', 'setInputFiles payloads require a non-empty name, a mimeType string, and a Buffer');
+      }
+      rejectUnknownOptions('setInputFiles payload', entry, ['name', 'mimeType', 'buffer']);
+      return { name: entry['name'], mimeType: entry['mimeType'], buffer: entry['buffer'] };
+    });
+    if (payloads.reduce((size, file) => size + file.buffer.byteLength, 0) >= 50 * 1024 * 1024) {
+      throw new TestError('INVALID_ARGUMENT', 'Cannot set buffer larger than 50Mb, please write it to a file and pass its path instead.');
+    }
+    const snapshots = payloads.map((file) => ({ ...file, buffer: new Uint8Array(file.buffer) }));
+    return this.perform('setInputFiles', { kind: 'setInputFilePayloads', files: snapshots }, options);
   }
 
   dragTo(target: Locator, options?: ActionOptions): Promise<void> {
@@ -796,6 +830,15 @@ function validateSwipeDuration(duration: number | undefined): number | undefined
  * The `modifiers` of a click, validated: a list of distinct key modifiers,
  * spread into the action only when it names one.
  */
+/** A tap `count`: a positive safe integer, 1 when unset. */
+function requireTapCount(value: unknown, api: string): number {
+  if (value === undefined) return 1;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+    throw new TestError('INVALID_ARGUMENT', `${api}() count must be a positive integer, got ${describeValue(value)}`);
+  }
+  return value;
+}
+
 function requireModifiers(value: unknown, api: string): { modifiers?: readonly KeyModifier[] } {
   if (value === undefined) return {};
   if (!Array.isArray(value)) {

@@ -56,6 +56,13 @@ export type JsonValue =
   | { readonly [key: string]: JsonValue }
   | readonly JsonValue[];
 
+/** An in-memory file to attach without writing it to disk. */
+export interface FilePayload {
+  readonly name: string;
+  readonly mimeType: string;
+  readonly buffer: Buffer;
+}
+
 export type Capability = string;
 
 export interface StandardSchemaV1<Input = unknown, Output = Input> {
@@ -481,6 +488,12 @@ export interface TapOptions extends ClickOptions {
    * a box, which needs the engine's `tap` pointer action.
    */
   position?: Point;
+  /**
+   * How many taps in a row, a positive integer, default 1. `2` is the same as
+   * `doubleTap()`; 3 or more needs an engine that declares the `multiTap`
+   * action, `UNSUPPORTED_CAPABILITY` otherwise. Not combined with `position`.
+   */
+  count?: number;
 }
 
 /** `longPress` options: the hold time in milliseconds, 100 through 10000, default the engine's own. */
@@ -569,7 +582,7 @@ export interface Screen {
 }
 
 export interface Locator extends Omit<Screen, 'tree' | 'debug' | 'pause'> {
-  /** Taps exactly one matching actionable node; with `position`, taps that point of its box once it is in view, with no other actionability check. */
+  /** Taps exactly one matching actionable node, `count` times in a row; with `position`, taps that point of its box once it is in view, with no other actionability check. */
   tap(options?: TapOptions): Promise<void>;
   /** Alias of tap. */
   click(options?: TapOptions): Promise<void>;
@@ -605,8 +618,8 @@ export interface Locator extends Omit<Screen, 'tree' | 'debug' | 'pause'> {
   blur(options?: ActionOptions): Promise<void>;
   /** Hovers over exactly one matching actionable node. */
   hover(options?: ActionOptions): Promise<void>;
-  /** Sets the files of exactly one file input, or of a control that opens a file chooser; paths resolve from the project root, and an empty array clears the input. */
-  setInputFiles(paths: string | readonly string[], options?: ActionOptions): Promise<void>;
+  /** Sets the files of exactly one file input, or of a control that opens a file chooser; paths resolve from the project root, payloads supply bytes in memory, and an empty array clears the input. */
+  setInputFiles(files: string | readonly string[] | FilePayload | readonly FilePayload[], options?: ActionOptions): Promise<void>;
   /** Drags exactly one node to exactly one target. */
   dragTo(target: Locator, options?: ActionOptions): Promise<void>;
   /** Scrolls exactly one node into view. */

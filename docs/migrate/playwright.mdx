@@ -121,6 +121,7 @@ run only in a browser, so a test that uses it declares
 | `click({ button: 'right' })`, `click({ delay })` | `secondaryTap()`, `longPress({ duration })` |
 | `click({ position })`, `click({ modifiers })` | `tap({ position })`, `tap({ modifiers })` |
 | `fill()`, `pressSequentially()`, `clear()`, `focus()`, `blur()`, `hover()`, `check()`, `uncheck()`, `dragTo()`, `setInputFiles(path)`, `selectOption({ label })` or `{ value }` | the same, without `force`, `trial`, or `position` |
+| `setInputFiles({ name, mimeType, buffer })` | Web only. Pass a plain object with only `name`, `mimeType`, and `buffer`. |
 | `press(key)` | the same for one character or a [named key](/reference/engine#keys); `browser.keyboard.press` after `focus()` for a key code |
 | `innerText()`, `allInnerTexts()`, `scrollIntoViewIfNeeded()` | `textContent()`, `allTextContents()`, `scrollIntoView()` |
 | `textContent()`, `allTextContents()`, `inputValue()`, `getAttribute()`, `boundingBox()`, `isVisible()`, `isHidden()`, `isEnabled()`, `isDisabled()`, `isChecked()`, `waitFor({ state })` | the same |
@@ -253,7 +254,7 @@ purpose. Use the workaround, or keep the test in Playwright.
 | --- | --- |
 | `locator.locator(selector)`, `locator.and()`, `filter({ visible })` | One `browser.locator` selector, such as `'.card >> .close'`, or a `screen` query inside the scope |
 | `locator.evaluate()`, `expect(locator).toHaveClass()`, `toHaveCSS()`, `dispatchEvent()` | `browser.evaluate(fn, selector)`; `expect(browser).toHaveClass(locator, cls)` |
-| `setInputFiles({ buffer })`, `selectOption([...])`, `click({ clickCount })`, `hover({ position })` | A temp file path; `browser.evaluate` for a multi-select; `browser.mouse` with `boundingBox()` |
+| `selectOption([...])`, `click({ clickCount })`, `hover({ position })` | `browser.evaluate` for a multi-select; `browser.mouse` with `boundingBox()` |
 
 </Accordion>
 <Accordion title="Assertions">

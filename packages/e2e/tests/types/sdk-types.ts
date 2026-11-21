@@ -694,6 +694,21 @@ void (test.fail(false) satisfies void);
 test('gap', { fail: 'known gap' }, async () => {});
 // @ts-expect-error a group cannot expect failure; mark each test
 test.describe('gaps', { fail: true }, () => {});
+declare const payloadUploadAction: Extract<import('../../src/engine/index.ts').LocatorAction, { kind: 'setInputFilePayloads' }>;
+payloadUploadAction.files[0]!.buffer satisfies Uint8Array;
+// Existing engines can keep reading paths after narrowing the original action kind.
+declare const pathUploadAction: Extract<import('../../src/engine/index.ts').LocatorAction, { kind: 'setInputFiles' }>;
+pathUploadAction.paths satisfies readonly string[];
+void screen.getByLabel('Receipt').setInputFiles({ name: 'receipt.txt', mimeType: 'text/plain', buffer: Buffer.from('receipt') });
+void screen.getByLabel('Receipt').setInputFiles([{ name: 'empty.txt', mimeType: 'text/plain', buffer: Buffer.alloc(0) }]);
+void screen.getByLabel('Receipt').setInputFiles(['fixtures/receipt.txt']);
+void screen.getByLabel('Receipt').setInputFiles([]);
+// @ts-expect-error file payloads require bytes, not an encoded string
+void screen.getByLabel('Receipt').setInputFiles({ name: 'a.txt', mimeType: 'text/plain', buffer: 'data' });
+// @ts-expect-error a payload requires its MIME type
+void screen.getByLabel('Receipt').setInputFiles({ name: 'a.txt', buffer: Buffer.alloc(0) });
+// @ts-expect-error paths and payloads cannot be mixed in one array
+void screen.getByLabel('Receipt').setInputFiles(['a.txt', { name: 'a.txt', mimeType: 'text/plain', buffer: Buffer.alloc(0) }]);
 void screen.getByLabel('Plan').selectOption({ value: 'pro' });
 // @ts-expect-error one of label, value, or index, never two
 void screen.getByLabel('Plan').selectOption({ value: 'pro', index: 1 });
@@ -724,6 +739,15 @@ void screen.getByRole('row').dblclick({ modifiers: ['Shift'], timeout: 1_000 });
 // @ts-expect-error modifiers are the key grammar's modifier names
 void screen.getByRole('row').doubleTap({ modifiers: ['Hyper'] });
 void screen.getByRole('image').click({ position: point });
+void screen.getByRole('button').tap({ count: 3, timeout: 1_000 });
+void screen.getByRole('button').click({ count: 3, modifiers: ['Shift'] });
+// @ts-expect-error a tap count is a number
+void screen.getByRole('button').tap({ count: '3' });
+// @ts-expect-error a double tap is two taps already; count rides tap and click only
+void screen.getByRole('button').doubleTap({ count: 3 });
+declare const multiTapAction: Extract<import('../../src/engine/index.ts').LocatorAction, { kind: 'multiTap' }>;
+void (multiTapAction.count satisfies number);
+void (multiTapAction.modifiers satisfies readonly KeyModifier[] | undefined);
 // @ts-expect-error a point has both coordinates.
 void screen.tapAt({ x: 1 });
 // @ts-expect-error a path swipe names both ends.
