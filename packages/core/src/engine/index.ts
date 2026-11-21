@@ -748,7 +748,14 @@ export interface EngineSnapshot {
   readonly treeUnavailable?: true;
   /** Masked pixels, when requested and producible; omitted otherwise. */
   readonly pixels?: ObservationPixels;
-  /** Regions masked in `pixels`; the harness checks it covers every secure node. */
+  /**
+   * Regions masked in the screenshot; the harness checks it covers every secure
+   * node. An engine asked for pixels (`pixels: true`) that cannot mask every
+   * secure node on screen omits `pixels` and still reports the regions it
+   * could mask, fewer than the secure nodes, so `toHaveScreenshot` fails with
+   * `POLICY_DENIED` and the agent reads `MASKING_UNPROVEN`, not a missing
+   * screenshot.
+   */
   readonly maskedRegionCount?: number;
 }
 
