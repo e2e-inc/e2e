@@ -278,8 +278,10 @@ flow. Full reference: docs/debugging.mdx.
 
 A custom `executor` (`StepExecutor` or `createToolLoopExecutor`) keeps the
 runner's observations, budgets, and report; `system` or `tools` beside
-`executor` is `INVALID_CONFIG`. Full reference: docs/tools.mdx,
-docs/executors.mdx.
+`executor` is `INVALID_CONFIG`. A `complete_step` sent in the same turn as
+other calls waits for the calls before it, and is refused when one failed or
+the last one changed nothing; calls after it don't run. Full reference:
+docs/tools.mdx, docs/executors.mdx.
 
 ## In CI
 
