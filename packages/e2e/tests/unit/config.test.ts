@@ -116,7 +116,7 @@ describe('resolveConfig', () => {
     { value: { intervals: [] }, message: 'toPass.intervals must be a non-empty array of milliseconds' },
     { value: { intervals: [0] }, message: 'toPass.intervals must contain finite numbers of milliseconds above 0; got 0' },
     { value: { intervals: [10, -1] }, message: 'toPass.intervals must contain finite numbers of milliseconds above 0; got -1' },
-    { value: { intervals: [10, '20'] }, message: 'toPass.intervals must contain finite numbers of milliseconds above 0; got 20' },
+    { value: { intervals: [10, '20'] }, message: 'toPass.intervals must contain finite numbers of milliseconds above 0; got "20"' },
     { value: { intervals: [Number.NaN] }, message: 'toPass.intervals must contain finite numbers of milliseconds above 0; got NaN' },
     { value: { intervals: [Number.POSITIVE_INFINITY] }, message: 'toPass.intervals must contain finite numbers of milliseconds above 0; got Infinity' },
     { value: { intervals: [10, 20.5] }, message: 'toPass.intervals[1] must be a positive safe integer of milliseconds, got 20.5' },

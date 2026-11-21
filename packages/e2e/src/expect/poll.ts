@@ -1,7 +1,7 @@
 /** expect.poll: re-reads a value until a synchronous matcher passes. */
 
 import { DEFAULT_PASS_OPTIONS } from '@e2e-dev/core/lib/config/validate';
-import { ConfigurationError, errorMessage, isE2EError } from '@e2e-dev/core/lib/internal/errors';
+import { errorMessage, isE2EError } from '@e2e-dev/core/lib/internal/errors';
 import { runningSuiteHook } from '@e2e-dev/core/lib/internal/test-timeout';
 import type { PollExpectation, PollOptions, ValueExpectation, ValueMatcherName } from '@e2e-dev/core/lib/types';
 import { currentAttempt } from '@e2e-dev/core/lib/expect/attempt';
@@ -93,9 +93,6 @@ export function createPollExpectation<T>(
   read: () => T | Promise<T>,
   options: PollOptions = {},
 ): PollExpectation<T> {
-  if ('interval' in options) {
-    throw new ConfigurationError('INVALID_CONFIG', 'expect.poll interval was removed: pass { intervals: [<ms>] }');
-  }
   checkOptions('expect.poll', options);
   return build(read, options, false);
 }

@@ -2,10 +2,11 @@
 
 import { checkIntervals } from '@e2e-dev/core/lib/config/validate';
 import { ConfigurationError, TestError } from '@e2e-dev/core/lib/internal/errors';
+import { isPlainObject, rejectUnknownKeys } from '@e2e-dev/core/lib/internal/options';
 import { abortError, cancelledError, Deadline, MAX_TIMER_MS, sleep, withAbort, withTimeout } from '@e2e-dev/core/lib/internal/time';
-import type { PollOptions } from '@e2e-dev/core/lib/types';
 import { currentAttempt, type PublishedAttempt } from '@e2e-dev/core/lib/expect/attempt';
 import { currentPollScope, pollRead, pollReadSignal } from '@e2e-dev/core/lib/expect/poll-scope';
+import { isRuntimeSkip } from '../internal/skip.ts';
 
 /** Frames kept for the line a poll was called on; the user's line is a few frames up. */
 const CALL_STACK_FRAMES = 20;
@@ -29,12 +30,16 @@ type RetryOptions = {
 };
 
 /** A read that outlived the deadline, as opposed to one that failed. */
-class ReadHung extends Error {}
+class ReadHung extends Error {
+  constructor(readonly deadline: Deadline) {
+    super();
+  }
+}
 
 /** One read, cut at the deadline and at the attempt signal; a hung read's outcome is dropped. */
-function sample(
+async function sample(
   read: () => unknown,
-  deadline: Deadline,
+  currentDeadline: () => Deadline,
   signal: AbortSignal | undefined,
 ): Promise<Sample> {
   const cutoff = new AbortController();
@@ -48,10 +53,20 @@ function sample(
     }
   }, readSignal);
   const cancellable = signal === undefined ? work : withAbort(work, signal, cancelledError);
-  return withTimeout(cancellable, deadline.remaining(), () => {
-    cutoff.abort();
-    return new ReadHung();
-  });
+  for (;;) {
+    const deadline = currentDeadline();
+    let moved = false;
+    try {
+      return await withTimeout(cancellable, deadline.remaining(), () => {
+        const current = currentDeadline();
+        moved = current !== deadline && !current.expired();
+        if (!moved) cutoff.abort();
+        return new ReadHung(current);
+      });
+    } catch (error) {
+      if (!(error instanceof ReadHung) || !moved) throw error;
+    }
+  }
 }
 
 /** The stack at a poll's call, for the error that names it when its phase did not await it. */
@@ -90,20 +105,23 @@ export function retry(
     // deadline in the body, the hook's cleanup budget in afterEach) and stops
     // the moment the attempt is cancelled, so a timed-out test never keeps
     // reading through teardown. A timeout of 0 sets no deadline of its own.
-    const phase = budget?.deadline;
+    const initial = own ?? budget?.deadline;
+    if (initial === undefined) {
+      throw new ConfigurationError('INVALID_CONFIG', `${api} timeout 0 waits for the test deadline, so it runs only inside a test or hook; pass a positive timeout`);
+    }
     /**
      * The poll's own deadline capped by its phase's. A poll without one of its
      * own (`timeout: 0`) waits for the phase's, so it needs a phase to bound it.
      */
-    const deadline = own !== undefined && phase !== undefined ? Deadline.min(own, phase) : own ?? phase;
-    if (deadline === undefined) {
-      throw new ConfigurationError('INVALID_CONFIG', `${api} timeout 0 waits for the test deadline, so it runs only inside a test or hook; pass a positive timeout`);
-    }
+    const currentDeadline = (): Deadline => {
+      const phase = budget?.deadline;
+      return own !== undefined && phase !== undefined ? Deadline.min(own, phase) : phase ?? initial;
+    };
     let last: FailedSample | undefined;
     let index = 0;
     let interval: number | undefined;
 
-    const assertionFailure = (endedAt: number): TestError => {
+    const assertionFailure = (deadline: Deadline, endedAt: number): TestError => {
       const ending = deadline === own
         ? `timed out after ${timeout} ms`
         : `stopped at the attempt deadline after ${endedAt - startedAt} ms`;
@@ -114,44 +132,61 @@ export function retry(
       );
     };
 
-    let endedAt: number | undefined;
+    let end: { readonly deadline: Deadline; readonly at: number } | undefined;
     try {
-      while (!deadline.expired()) {
-        if (signal?.aborted) throw abortError(signal, cancelledError);
-        let result: Sample;
-        try {
-          result = await sample(read, deadline, signal);
-        } catch (error) {
+      for (;;) {
+        let deadline = currentDeadline();
+        while (!deadline.expired()) {
           if (signal?.aborted) throw abortError(signal, cancelledError);
-          if (error instanceof ReadHung) break;
-          throw error;
+          let result: Sample;
+          try {
+            result = await sample(read, currentDeadline, signal);
+          } catch (error) {
+            if (signal?.aborted) throw abortError(signal, cancelledError);
+            if (!(error instanceof ReadHung)) throw error;
+            deadline = currentDeadline();
+            if (deadline === error.deadline) break;
+            continue;
+          }
+          if (signal?.aborted) throw abortError(signal, cancelledError);
+          if ('error' in result && isRuntimeSkip(result.error)) throw result.error;
+          const outcome = evaluate(result);
+          if ('value' in outcome) return outcome.value;
+          last = outcome;
+          interval = intervals[index++] ?? interval;
+          await sleep(Math.min(interval ?? 0, currentDeadline().remaining()), signal);
+          deadline = currentDeadline();
         }
         if (signal?.aborted) throw abortError(signal, cancelledError);
-        const outcome = evaluate(result);
-        if ('value' in outcome) return outcome.value;
-        last = outcome;
-        interval = intervals[index++] ?? interval;
-        await sleep(Math.min(interval ?? 0, deadline.remaining()), signal);
+        end = { deadline, at: Date.now() };
+        if (deadline === own) break;
+        await sleep(PHASE_TIMEOUT_GRACE_MS, signal);
+        if (currentDeadline() === deadline) break;
       }
-      if (signal?.aborted) throw abortError(signal, cancelledError);
-      endedAt = Date.now();
-      if (deadline !== own) await sleep(PHASE_TIMEOUT_GRACE_MS, signal);
     } catch (error) {
+      const deadline = currentDeadline();
       if (deadline !== own && deadline.expired() && phaseSignal?.aborted === true && last !== undefined) {
-        context?.recordSecondaryError?.(assertionFailure(endedAt ?? Date.now()));
+        context?.recordSecondaryError?.(assertionFailure(deadline, end?.deadline === deadline ? end.at : Date.now()));
       }
       throw error;
     }
-    throw assertionFailure(endedAt);
+    throw assertionFailure(end.deadline, end.at);
   };
 
   return scope === undefined ? run() : scope.track(options.label, callStack(), run);
 }
 
 /** A malformed option would poll forever; it is refused before the first read. */
-export function checkOptions(api: string, options: PollOptions): void {
+export function checkOptions(api: string, options: unknown): void {
+  if (!isPlainObject(options)) {
+    throw new ConfigurationError('INVALID_CONFIG', `${api} options must be a plain object`);
+  }
+  if (api === 'expect.poll' && 'interval' in options) {
+    throw new ConfigurationError('INVALID_CONFIG', 'expect.poll interval was removed: pass { intervals: [<ms>] }');
+  }
+  rejectUnknownKeys(`${api} options`, options, api === 'expect.poll' ? ['timeout', 'intervals', 'message'] : ['timeout', 'intervals']);
   const { timeout, intervals } = options;
-  if (timeout !== undefined && !(Number.isFinite(timeout) && timeout >= 0)) {
+  if (timeout !== undefined && !(typeof timeout === 'number' && Number.isFinite(timeout) && timeout >= 0)) {
     throw new ConfigurationError(
       'INVALID_CONFIG',
       `${api} timeout must be a finite number of milliseconds, 0 or more; got ${String(timeout)}`,

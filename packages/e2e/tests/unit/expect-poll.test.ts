@@ -18,18 +18,19 @@ useFakeTime();
 function attempt(options: { assertionTimeout: number; deadlineMs: number }) {
   const cancel = new AbortController();
   const end = new AbortController();
+  const budget = new AttemptBudget(cancel.signal, new Deadline(options.deadlineMs));
   publishAttempt(
     {
       attemptId: 'attempt',
       owner: 'suite',
       testKind: 'test',
       assertionTimeout: options.assertionTimeout,
-      budget: new AttemptBudget(cancel.signal, new Deadline(options.deadlineMs)),
+      budget,
       soft: new SoftFailures(),
     },
     end.signal,
   );
-  return { cancel: () => cancel.abort(), end: () => end.abort() };
+  return { budget, cancel: () => cancel.abort(), end: () => end.abort() };
 }
 
 async function failsWith(run: () => Promise<void>, ...patterns: RegExp[]): Promise<string> {
@@ -194,6 +195,18 @@ describe('expect.poll', () => {
       }),
     );
     vexpect(reads).toBe(0);
+  });
+
+  it('refuses a non-plain poll options object', () => {
+    vexpect(() => Reflect.apply(e2eExpect.poll, undefined, [() => 1, null])).toThrow(
+      vexpect.objectContaining({ code: 'INVALID_CONFIG', message: 'expect.poll options must be a plain object' }),
+    );
+  });
+
+  it('names the nearest poll option for an unknown key', () => {
+    vexpect(() => Reflect.apply(e2eExpect.poll, undefined, [() => 1, { tiemout: 100 }])).toThrow(
+      vexpect.objectContaining({ code: 'INVALID_CONFIG', message: 'expect.poll options has unknown key "tiemout"; did you mean "timeout"?' }),
+    );
   });
 
   it.each([[], [0], [-1], [Number.NaN], [10, Number.POSITIVE_INFINITY]].map((intervals) => ({ intervals })))('refuses invalid intervals $intervals before reading', ({ intervals }) => {
@@ -616,6 +629,21 @@ describe('expect(fn).toPass()', () => {
     }
   });
 
+  it('keeps the toPass timeout when the phase deadline moves during a pause', async () => {
+    const live = attempt({ assertionTimeout: 5000, deadlineMs: 80 });
+    try {
+      const started = Date.now();
+      setTimeout(() => live.budget.shiftDeadline(1000), 40);
+      await failsWith(
+        () => e2eExpect(() => e2eExpect(false).toBe(true)).toPass({ timeout: 200, intervals: [500] }),
+        /^expect\(\.\.\.\)\.toPass\(\) timed out after 200 ms\n/,
+      );
+      vexpect(Date.now() - started).toBe(200);
+    } finally {
+      live.end();
+    }
+  });
+
   it('refuses call timeouts longer than a timer can wait', async () => {
     const timeout = 2 ** 31;
     vexpect(() => e2eExpect.poll(() => true, { timeout })).toThrow(
@@ -633,6 +661,30 @@ describe('expect(fn).toPass()', () => {
     await vexpect(assertion.toPass({ timeout: -1 })).rejects.toMatchObject({ code: 'INVALID_CONFIG' });
     await vexpect(assertion.toPass({ timeout: 100, intervals: [] })).rejects.toMatchObject({ code: 'INVALID_CONFIG' });
     vexpect(tries).toBe(0);
+  });
+
+  it.each([{ options: null }, { options: [] }, { options: new Date() }])('refuses a non-plain toPass options object: $options', async ({ options }) => {
+    const assertion = e2eExpect(() => {});
+    await vexpect(Reflect.apply(assertion.toPass, assertion, [options])).rejects.toMatchObject({
+      code: 'INVALID_CONFIG',
+      message: 'expect(...).toPass() options must be a plain object',
+    });
+  });
+
+  it('names intervals when toPass receives interval', async () => {
+    const assertion = e2eExpect(() => {});
+    await vexpect(Reflect.apply(assertion.toPass, assertion, [{ interval: 5, timeout: 3000 }])).rejects.toMatchObject({
+      code: 'INVALID_CONFIG',
+      message: vexpect.stringMatching(/unknown key "interval".*"intervals"/),
+    });
+  });
+
+  it('quotes a string in the interval list', async () => {
+    const assertion = e2eExpect(() => {});
+    await vexpect(Reflect.apply(assertion.toPass, assertion, [{ intervals: [10, '20'] }])).rejects.toMatchObject({
+      code: 'INVALID_CONFIG',
+      message: 'expect(...).toPass() intervals must contain finite numbers of milliseconds above 0; got "20"',
+    });
   });
 
   it('refuses to run a value that is not a function', async () => {

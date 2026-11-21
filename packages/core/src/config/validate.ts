@@ -1,6 +1,6 @@
 /** Scalar validators shared by the config resolvers; one message per rule. */
 
-import { ConfigurationError, errorMessage } from '../internal/errors.ts';
+import { ConfigurationError } from '../internal/errors.ts';
 import { MAX_TIMER_MS } from '../internal/time.ts';
 import type { PassOptions } from '../types.ts';
 
@@ -43,7 +43,7 @@ export function timerMs(value: number | undefined, label: string): number | unde
 }
 
 /** Validates the pauses between reads or tries before the first read or try. */
-export function checkIntervals(label: string, intervals: readonly number[] | undefined): void {
+export function checkIntervals(label: string, intervals: unknown): void {
   if (intervals === undefined) return;
   if (!Array.isArray(intervals) || intervals.length === 0) {
     throw new ConfigurationError('INVALID_CONFIG', `${label} must be a non-empty array of milliseconds`);
@@ -52,7 +52,7 @@ export function checkIntervals(label: string, intervals: readonly number[] | und
     if (!(Number.isFinite(entry) && entry > 0)) {
       throw new ConfigurationError(
         'INVALID_CONFIG',
-        `${label} must contain finite numbers of milliseconds above 0; got ${errorMessage(entry)}`,
+        `${label} must contain finite numbers of milliseconds above 0; got ${describeValue(entry)}`,
       );
     }
   }

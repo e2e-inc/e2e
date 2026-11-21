@@ -165,6 +165,45 @@ test('soft toPass failures allow the body to finish', async ({ app }) => {
   await app.open();
 });
 
+test('skips from toPass', async ({ screen }) => {
+  await expect(() => {
+    expect(screen.getByRole('button', 'Submit')).toHaveCount(2, { timeout: 0 });
+    test.skip('skipped from toPass');
+  }).toPass({ timeout: 200 });
+});
+
+test('skips from negated toPass', async () => {
+  await expect(() => test.skip('skipped from negated toPass')).not.toPass({ timeout: 200 });
+});
+
+test('skips from soft toPass', async () => {
+  await expect.soft(() => test.skip('skipped from soft toPass')).toPass({ timeout: 200 });
+});
+
+test('skips from a poll read', async () => {
+  await expect.poll(() => test.skip('skipped from a poll read'), { timeout: 200 }).toBeUndefined();
+});
+
+test('marks a toPass test fixme', async () => {
+  await expect(() => test.fixme('not ready')).toPass({ timeout: 200 });
+});
+
+test('toPass continues past the original test deadline', { timeout: 200 }, async () => {
+  const started = Date.now();
+  let tries = 0;
+  await expect(() => {
+    if (++tries === 1) test.setTimeout(2000);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(280);
+  }).toPass();
+});
+
+test('toPass stops at an earlier test deadline', { timeout: 2000 }, async () => {
+  await expect(() => {
+    test.setTimeout(150);
+    throw new Error('not ready at the shorter deadline');
+  }).toPass({ timeout: 1000, intervals: [500] });
+});
+
 test('toPass without a timeout ends at the test deadline', { timeout: 300 }, async () => {
   await expect(() => new Promise(() => {})).toPass();
 });
@@ -451,6 +490,35 @@ describe('expect.poll not awaited, in a run', () => {
   });
 
   it.each([
+    ['skips from toPass', 'explicit', 'skipped from toPass'],
+    ['skips from negated toPass', 'explicit', 'skipped from negated toPass'],
+    ['skips from soft toPass', 'explicit', 'skipped from soft toPass'],
+    ['skips from a poll read', 'explicit', 'skipped from a poll read'],
+    ['marks a toPass test fixme', 'fixme', 'fixme: not ready'],
+  ])('preserves the skip verdict when a test %s', (title, cause, reason) => {
+    const result = resultByTitle(outcome, title);
+    expect(result.status).toBe('skipped');
+    expect(result.skip).toEqual({ cause, reason });
+    if (title === 'skips from toPass') {
+      expect(result.attempts[0]?.steps).toMatchObject([{ status: 'cancelled' }]);
+    }
+  });
+
+  it('passes when toPass continues past the original test deadline', () => {
+    const result = resultByTitle(outcome, 'toPass continues past the original test deadline');
+    expect(result.attempts[0]?.status).toBe('passed');
+  });
+
+  it('reports the earlier test deadline and keeps the last failed try', () => {
+    const attempt = resultByTitle(outcome, 'toPass stops at an earlier test deadline').attempts[0];
+    expect(attempt?.error).toMatchObject({ code: 'TEST_TIMEOUT', message: expect.stringContaining('test timed out after 150 ms') });
+    expect(attempt?.secondaryErrors).toMatchObject([{
+      code: 'ASSERTION_FAILED',
+      message: expect.stringMatching(/stopped at the attempt deadline after \d+ ms\nlast: not ready at the shorter deadline$/),
+    }]);
+  });
+
+  it.each([
     ['the test deadline keeps the last failed toPass try', 'last: job still running'],
     ['the test deadline keeps the last failed poll read', 'last: expected "running" to be "done"'],
   ])('reports TEST_TIMEOUT and the last assertion failure for %s', (title, last) => {
@@ -487,6 +555,32 @@ describe('expect.poll not awaited, in a run', () => {
 });
 
 describe('toPass defaults in a project', () => {
+  it('lets a beforeAll poll read finish past the original hook deadline', async () => {
+    const suite = `import { test, expect } from 'e2e';
+test.beforeAll(async () => {
+  let reads = 0;
+  await expect.poll(async () => {
+    await Promise.resolve();
+    if (++reads === 1) test.setTimeout(2000);
+    await new Promise((resolve) => setTimeout(resolve, 280));
+    return true;
+  }).toBe(true);
+  expect(reads).toBe(1);
+});
+test('runs after the extended hook', async () => {});
+`;
+    const { outcome, project } = await runProjectWithConfigFile(
+      { 'tests/extended-hook.e2e.ts': suite },
+      { configSource: workerFakeConfigSource(1, '\n  timeout: 200,') },
+    );
+    try {
+      expect(outcome.report.run.errors).toEqual([]);
+      expect(resultByTitle(outcome, 'runs after the extended hook').status).toBe('passed');
+    } finally {
+      project.cleanup();
+    }
+  });
+
   it('reads the config and applies call overrides independently', async () => {
     const { outcome, project } = await runProjectWithConfigFile(
       { 'tests/to-pass-defaults.e2e.ts': PASS_DEFAULTS_SUITE },
