@@ -73,8 +73,8 @@ translation moves or goes with it in the same change.
   of a list item (**टेस्ट पर कम समय।**). Use Latin `,`, `?`, `!`, `:`, and
   `"` quotes. The one exception is “की” in “की” प्रेस (key press), written in
   curly quotes as Apple's Hindi guides do, so it never reads as the possessive
-  की. Write a keyboard key itself as कीबोर्ड का बटन. A
-  sentence that ends in inline code, a URL, or a Latin name still ends with `।`.
+  की. Write a keyboard key itself as कीबोर्ड का बटन. A sentence that ends in
+  inline code, a URL, or a Latin name still ends with `।`.
 - Use Western digits (1, 2, 3), not Devanagari digits, so numbers match the
   code and the terminal.
 - Write the nukta in loanwords: फ़ाइल, ब्राउज़र, फ़ीचर, कॉन्फ़िग. Write `ऑ` for
