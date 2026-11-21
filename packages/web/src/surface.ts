@@ -41,6 +41,7 @@ import {
   type Secret,
   type SemanticNode,
   type VideoSegment,
+  type ViewportIntersection,
   type ViewportPoint,
   type ViewportSize,
 } from '@e2e-dev/core/engine';
@@ -908,6 +909,45 @@ export class PlaywrightSurface {
     }, navigationStaleOr);
   }
 
+  /**
+   * Measures how much of a located or observed element is inside the
+   * viewport with the page's `IntersectionObserver`, the check Playwright's
+   * `toBeInViewport` makes, so scrolling and overflow ancestors and frames
+   * clip it. An element with no box, or an empty one, is outside. It runs
+   * in the page's own world, as `readStyle` does, so an app that replaces
+   * `IntersectionObserver` changes what it reads.
+   */
+  viewportIntersection(ref: NodeRef, operation: OperationContext): Promise<ViewportIntersection> {
+    return this.guard(operation, 'measure viewport intersection', (currentOperation) => this.readingTab(async () => {
+      const target = await this.requireSession().refs.lookup(ref);
+      let element: ElementHandle;
+      if (target.kind === 'element') {
+        element = target.element;
+      } else {
+        // A strict locator that matches anything but one element no longer names the node it located.
+        const handles = await target.locator.elementHandles();
+        if (handles.length !== 1) {
+          for (const handle of handles) void handle.dispose().catch(() => undefined);
+          throw new EngineError('NODE_STALE', `node reference ${ref.id} no longer matches one element`, { retryable: true });
+        }
+        element = handles[0]!;
+      }
+      try {
+        currentOperation.signal.throwIfAborted();
+        const measured = await element.evaluate(measureViewportIntersection);
+        if (measured === 'detached') throw new EngineError('NODE_STALE', 'node is detached; locate it again', { retryable: true });
+        if (measured === 'unsupported') {
+          throw new EngineError('UNSUPPORTED_CAPABILITY', 'the browser has no IntersectionObserver to measure the viewport with', {
+            retryable: false,
+          });
+        }
+        return measured;
+      } finally {
+        if (target.kind === 'locator') void element.dispose().catch(() => undefined);
+      }
+    }), navigationStaleOr);
+  }
+
   // --- location tier ---
 
   /**
@@ -1455,4 +1495,29 @@ function inFrame(node: SemanticNode, frame: Rect | null | undefined): SemanticNo
   if (frame === undefined || node.rect === undefined) return node;
   const { rect, origin, ...rest } = node;
   return frame === null ? rest : { ...rest, ...placeBoxInFrame(rect, origin, frame) };
+}
+
+/**
+ * The in-page half of `viewportIntersection`: one `IntersectionObserver`
+ * callback, which reports the element's first intersection right after it
+ * is observed. The empty animation frame makes Firefox deliver it.
+ */
+function measureViewportIntersection(element: Element): Promise<ViewportIntersection | 'detached' | 'unsupported'> {
+  if (!element.isConnected) return Promise.resolve('detached');
+  const box = element.getBoundingClientRect();
+  if (element.getClientRects().length === 0 || box.width <= 0 || box.height <= 0) {
+    return Promise.resolve({ intersects: false, ratio: 0 });
+  }
+  const view = element.ownerDocument.defaultView;
+  if (view === null || typeof view.IntersectionObserver !== 'function') return Promise.resolve('unsupported');
+  return new Promise((resolve) => {
+    const observer = new view.IntersectionObserver((entries) => {
+      observer.disconnect();
+      // Clamped: a browser can round a fully visible box a hair past 1.
+      const ratio = Math.min(1, Math.max(0, entries.at(-1)?.intersectionRatio ?? 0));
+      resolve({ intersects: ratio > 0, ratio });
+    });
+    observer.observe(element);
+    view.requestAnimationFrame(() => {});
+  });
 }

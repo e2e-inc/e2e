@@ -41,6 +41,7 @@ import {
   type ProviderRecording,
   type VideoSegment,
   type SemanticNode,
+  type ViewportIntersection,
   type ViewportPoint,
   type ViewportSize,
   ConfigurationError,
@@ -1291,6 +1292,35 @@ export class AgentDeviceSurface {
         ...(location === undefined ? {} : { location }),
       }),
     );
+  }
+
+  /**
+   * Whether a positive area of a node is on the screen, read off the capture
+   * that located it. agent-device clips each rect to the window and to its
+   * scrolling ancestors, and leaves out a node with nothing on screen, so a
+   * rect is only the visible part of a box: the share of the whole is
+   * unknown, and the answer carries no `ratio`. The screen is the one the
+   * session confirmed, not a capture's own size, which an app drawn smaller
+   * than the screen shrinks. A rect whose window could not be placed on the
+   * screen is refused rather than guessed at.
+   */
+  async viewportIntersection(ref: NodeRef): Promise<ViewportIntersection> {
+    const entry = this.resolveRef(ref);
+    const rect = entry.node.rect;
+    const screen = this.knownViewport;
+    if (entry.originUnknown) {
+      throw new EngineError('UNSUPPORTED_CAPABILITY', `whether node ${ref.id} is in the viewport is unknown: the ${ORIGIN_UNKNOWN_BOUNDS}`, {
+        retryable: false,
+      });
+    }
+    if (rect === undefined || screen === undefined) {
+      throw new EngineError('UNSUPPORTED_CAPABILITY', `node ${ref.id} has no bounds on a screen of known size, so whether it is in the viewport is unknown`, {
+        retryable: false,
+      });
+    }
+    const width = Math.min(rect.x + rect.width, screen.width) - Math.max(rect.x, 0);
+    const height = Math.min(rect.y + rect.height, screen.height) - Math.max(rect.y, 0);
+    return { intersects: width > 0 && height > 0 };
   }
 
   private resolveRef(ref: NodeRef): NodeBinding {

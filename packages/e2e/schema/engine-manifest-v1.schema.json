@@ -41,6 +41,7 @@
         "enum": [
           "engine/observe",
           "engine/readStyle",
+          "engine/viewportIntersection",
           "engine/locate",
           "engine/perform",
           "engine/performAt",
@@ -217,6 +218,7 @@
                 "engine/perform",
                 "engine/locate",
                 "engine/readStyle",
+                "engine/viewportIntersection",
                 "engine/performAt",
                 "keyboard/type",
                 "keyboard/press",

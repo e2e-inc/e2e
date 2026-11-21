@@ -120,6 +120,7 @@ const APP = members({
 const LOCATOR_MATCHERS = members({
   toBeVisible: matcher(0, 1),
   toBeHidden: matcher(0, 1),
+  toBeInViewport: matcher(0, 1),
   toBeAttached: matcher(0, 1),
   toBeEnabled: matcher(0, 1),
   toBeDisabled: matcher(0, 1),
