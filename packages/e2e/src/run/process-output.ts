@@ -71,7 +71,7 @@ function routing() {
 
     const forward = streams[name].write.bind(streams[name]) as (chunk: string | Uint8Array, encoding?: BufferEncoding | (() => void), callback?: () => void) => boolean;
 
-    // FIXME: An older dispatcher ignores the viewer. Replace it in the shared slot,
+    // An older dispatcher ignores the viewer. Replace it in the shared slot,
     // but keep its terminal writer so the viewer can reach the underlying stream.
     if (!installed) {
       direct[name] = (text, callback) => {
