@@ -455,6 +455,76 @@ describe('lifecycle', () => {
     expect(held.fake.methods()).not.toContain('devices.boot');
   });
 
+  it('names a launch() host\'s session after its host id, so it leaves the device a worker of the same target holds and keeps the one it holds itself', async () => {
+    const h = harness({ device: undefined });
+    h.fake.respond('devices.list', () => [
+      { platform: 'ios', id: 'A', name: 'A', booted: true, claimedBy: { session: 'e2e-ios-0', workspace: '/project' } },
+      { platform: 'ios', id: 'B', name: 'B', booted: true, claimedBy: { session: 'e2e-ios-abc123-0', workspace: '/project' } },
+    ]);
+    const info = { runId: 'run-1', targetName: 'ios', hostId: 'abc123', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: () => undefined };
+    const prepared = await h.prepare(info);
+    expect(prepared).toMatchObject({ workers: 1 });
+    expect(h.fake.calls.filter((call) => call.method === 'devices.boot').map((call) => call.args)).toEqual([{ platform: 'ios', udid: 'B' }]);
+    // The worker's init resumes the session prepare warmed, not the target's plain one.
+    await h.engine.init!({ runId: 'run-1', targetName: 'ios', hostId: 'abc123', projectRoot: PROJECT_ROOT, app: h.app, env: prepared?.env ?? {}, headed: false, workerSlot: 0, log: () => undefined, signal: new AbortController().signal });
+    expect(new Set(h.sessions)).toEqual(new Set(['e2e-ios-abc123-0']));
+
+    // The `session` option names the session whole, as it documents.
+    const optioned = harness({ device: undefined, session: 'mine' });
+    optioned.fake.respond('devices.list', () => [{ platform: 'ios', id: 'B', name: 'B', booted: true }]);
+    await optioned.prepare(info);
+    expect(new Set(optioned.sessions)).toEqual(new Set(['mine-0']));
+  });
+
+  it('hands a launch() host\'s bindings to its worker under a variable of its own, so a host inside a run never reads the run\'s', async () => {
+    const h = harness({ device: undefined });
+    h.fake.respond('devices.list', () => [{ platform: 'ios', id: 'B', name: 'B', booted: true }]);
+    const info = { runId: 'run-1', targetName: 'ios', hostId: 'abc123', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: () => undefined };
+    const handed = (await h.prepare(info))?.env ?? {};
+    // The run's own worker holds device A under the target's plain variable, in the environment the host inherits.
+    const run = harness({ device: undefined });
+    run.fake.respond('devices.list', () => [{ platform: 'ios', id: 'A', name: 'A', booted: true }]);
+    const inherited = (await run.prepare({ ...info, hostId: undefined }))?.env ?? {};
+    expect(Object.keys(handed)).not.toEqual(Object.keys(inherited));
+    // A worker in another process has no bindings in memory: it reads the host's variable, not the run's.
+    const worker = harness({ device: undefined });
+    await worker.engine.init!({ runId: 'run-1', targetName: 'ios', hostId: 'abc123', projectRoot: PROJECT_ROOT, app: worker.app, env: { ...inherited, ...handed }, headed: false, workerSlot: 0, log: () => undefined, signal: new AbortController().signal });
+    expect(worker.fake.lastArgs('devices.boot')).toEqual({ platform: 'ios', udid: 'B' });
+  });
+
+  it('fails a launch() host\'s finish when its session will not close, since no later host shares the name to take the device back', async () => {
+    const info = { runId: 'run-1', targetName: 'ios', hostId: 'abc123', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: () => undefined };
+    const finish = { ...info, timeoutMs: 5_000 };
+    const booted = () => [{ platform: 'ios', id: 'B', name: 'B', booted: true }];
+    const refusing = (options: Parameters<typeof harness>[0]) => {
+      const h = harness(options);
+      h.fake.respond('devices.list', booted);
+      h.fake.respond('sessions.close', () => { throw new AppError('COMMAND_FAILED', 'daemon refused'); });
+      return h;
+    };
+    const host = refusing({ device: undefined });
+    await host.prepare(info);
+    await expect(host.engine.finish!(finish)).rejects.toMatchObject({
+      code: 'ENGINE_FAILURE',
+      message: expect.stringMatching(/session "e2e-ios-abc123-0" \(daemon refused\) did not close, so its device stays held/),
+    });
+
+    // A session its worker already closed is closed.
+    const gone = harness({ device: undefined });
+    gone.fake.respond('devices.list', booted);
+    gone.fake.respond('sessions.close', () => { throw new AppError('SESSION_NOT_FOUND', 'no such session'); });
+    await gone.prepare(info);
+    await gone.engine.finish!(finish);
+
+    // A run's worker and a `session` option keep their names, so the next one takes the device back.
+    const worker = refusing({ device: undefined });
+    await worker.prepare({ ...info, hostId: undefined });
+    await worker.engine.finish!({ ...finish, hostId: undefined });
+    const optioned = refusing({ device: undefined, session: 'mine' });
+    await optioned.prepare(info);
+    await optioned.engine.finish!(finish);
+  });
+
   it('drives a discovered Android emulator by its serial, and reads a configured serial, UDID, or name as agent-device does', async () => {
     const h = harness({ device: undefined, platform: 'android' });
     h.fake.respond('devices.list', () => [{ platform: 'android', id: 'emulator-5554', name: 'test', booted: true }]);
