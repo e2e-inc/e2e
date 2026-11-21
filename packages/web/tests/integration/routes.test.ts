@@ -365,6 +365,58 @@ describe('browser.route decisions', () => {
     expect(await fetchText(`${origin}/api/quote`)).toBe('network:/api/quote');
   });
 
+  it('rejects a path-only pattern without changing registered routes', async () => {
+    const registered = vi.spyOn(surface, 'route');
+    const removed = vi.spyOn(surface, 'unroute');
+    try {
+      await browser.route(`${origin}/api/quote`, route => route.fulfill({ body: 'absolute' }));
+      expect(await fetchText(`${origin}/api/quote`)).toBe('absolute');
+      await expect(browser.route('/api/quote', route => route.fulfill({ body: 'never' }))).rejects.toMatchObject({
+        code: 'INVALID_ARGUMENT',
+        message: expect.stringMatching(/full HTTP\(S\) URL.*"\*\*\/api\/quote".*regular expression/),
+      });
+      expect(registered).toHaveBeenCalledTimes(1);
+      expect(await fetchText(`${origin}/api/quote`)).toBe('absolute');
+      await browser.route(/\/api\/quote$/, route => route.fulfill({ body: 'regexp' }));
+      expect(await fetchText(`${origin}/api/quote`)).toBe('regexp');
+      expect(registered).toHaveBeenCalledTimes(2);
+      await browser.unrouteAll();
+      expect(removed).toHaveBeenCalledTimes(2);
+      expect(await fetchText(`${origin}/api/quote`)).toBe('network:/api/quote');
+    } finally {
+      registered.mockRestore();
+      removed.mockRestore();
+    }
+  });
+
+  it('rejects a missing-scheme pattern from unroute and waitForResponse as a rejected promise', async () => {
+    const removed = vi.spyOn(surface, 'unroute');
+    const waited = vi.spyOn(page, 'waitForResponse');
+    try {
+      const unroute = browser.unroute('localhost:3000/api/quote');
+      await expect(unroute).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('browser.unroute pattern') });
+      const wait = browser.waitForResponse('/api/quote', { timeout: 30 });
+      await expect(wait).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('browser.waitForResponse pattern') });
+      expect(removed).not.toHaveBeenCalled();
+      expect(waited).not.toHaveBeenCalled();
+    } finally {
+      removed.mockRestore();
+      waited.mockRestore();
+    }
+  });
+
+  it('reports a pending route handler failure before a path-only route pattern', async () => {
+    const registered = vi.spyOn(surface, 'route');
+    const failure = new TestError('ASSERTION_FAILED', 'latched handler failure');
+    surface.latch.latch(failure);
+    try {
+      await expect(browser.route('/api/quote', route => route.fulfill({ body: 'never' }))).rejects.toBe(failure);
+      expect(registered).not.toHaveBeenCalled();
+    } finally {
+      registered.mockRestore();
+    }
+  });
+
   it('routes real native dialogs by kind even when their messages are identical', async () => {
     const kinds: string[] = [];
     const off = await browser.onDialog(async dialog => {

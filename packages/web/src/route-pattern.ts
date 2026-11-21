@@ -1,6 +1,6 @@
 /** Route URL pattern grammar. */
 
-import type { TextPattern } from '@e2e-dev/core/engine';
+import { TestError, type TextPattern, toTextPattern } from '@e2e-dev/core/engine';
 
 /** Escapes one character for literal use inside a regexp source. */
 function escapeRegexpChar(ch: string): string {
@@ -53,4 +53,38 @@ export function routePatternsEqual(a: TextPattern, b: TextPattern): boolean {
   if (a.kind === 'string' && b.kind === 'string') return a.value === b.value;
   if (a.kind === 'regexp' && b.kind === 'regexp') return a.source === b.source && a.flags === b.flags;
   return false;
+}
+
+/** Converts a route pattern and rejects common invalid URL prefixes. */
+export function parseRoutePattern(
+  method: 'route' | 'unroute' | 'waitForResponse',
+  pattern: Parameters<typeof toTextPattern>[0],
+): TextPattern {
+  const wire = toTextPattern(pattern);
+  if (wire.kind !== 'string') return wire;
+  if (wire.value.startsWith('**')) return wire;
+  // A leading `*` cannot match `/`, so the remaining prefix must align with a URL scheme.
+  const single = wire.value.startsWith('*');
+  const rest = single ? wire.value.slice(1) : wire.value;
+  const raw = /^(?:\\[\s\S]?|[^\\*?])*/.exec(rest)![0];
+  const literalPrefix = raw.replace(/\\([\s\S]?)/g, '$1');
+  const hasWildcard = raw.length < rest.length;
+  const agrees = (candidate: string) =>
+    literalPrefix.startsWith(candidate) || (hasWildcard && candidate.startsWith(literalPrefix));
+  for (const scheme of ['http://', 'https://']) {
+    if (!single) {
+      if (agrees(scheme)) return wire;
+      continue;
+    }
+    for (let index = 0; index <= scheme.indexOf('/'); index += 1) {
+      if (agrees(scheme.slice(index))) return wire;
+    }
+  }
+  const hint = wire.value.startsWith('/')
+    ? `Use ${JSON.stringify(`**${wire.value}`)} to match that path on any origin, or a regular expression`
+    : 'Use a glob on the full URL, such as "**/api/orders" or "http://localhost:3000/**", or a regular expression';
+  throw new TestError(
+    'INVALID_ARGUMENT',
+    `browser.${method} pattern ${JSON.stringify(wire.value)} must match a full HTTP(S) URL. ${hint}`,
+  );
 }
