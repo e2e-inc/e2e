@@ -133,7 +133,11 @@ export function slowRunningTest(condition: boolean): void {
   if (!condition) return;
   const owner = code.hook ?? code.attempt;
   const done = slowed();
-  if (done.has(owner)) return;
+  if (done.has(owner)) {
+    // Slowed already: change nothing, but still refuse where the timeout cannot change (teardown, a test that ended).
+    changeTimeout(code, (currentMs) => currentMs, 'test.slow()');
+    return;
+  }
   changeTimeout(code, (currentMs) => Math.min(currentMs * SLOW_FACTOR, MAX_TIMER_MS), 'test.slow()');
   done.add(owner);
 }

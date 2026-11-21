@@ -95,7 +95,29 @@ describe('from afterEach', () => {
   test('is refused', async () => {});
 });
 
+describe('from afterEach after the body slowed', () => {
+  afterEach(() => {
+    test.slow();
+  });
+
+  test('is refused too', async () => {
+    test.slow();
+  });
+});
+
 const marker = new URL('./retried.marker', import.meta.url);
+const slowedMarker = new URL('./slowed-retry.marker', import.meta.url);
+
+test('slows a retry again', { timeout: 300, retries: 1 }, async () => {
+  test.slow();
+  if (!fs.existsSync(slowedMarker)) {
+    fs.writeFileSync(slowedMarker, '');
+    throw new Error('first attempt fails');
+  }
+  // Past the 300 ms option, inside the retry's own tripled 900 ms.
+  await sleep(600);
+});
+
 
 test('starts a retry from its own timeout', { timeout: 300, retries: 1 }, async () => {
   if (!fs.existsSync(marker)) {
@@ -164,6 +186,15 @@ describe('test.slow', () => {
           message: expect.stringContaining('test.slow() cannot change the timeout from an afterEach hook'),
         });
 
+        // Once the body slowed the attempt, a call from afterEach is still refused.
+        expect(error('is refused too')).toMatchObject({
+          code: 'INVALID_ARGUMENT',
+          message: expect.stringContaining('test.slow() cannot change the timeout from an afterEach hook'),
+        });
+
+        // A retry is a new attempt, so it can be slowed again.
+        expect(result('slows a retry again').attempts.map((attempt) => attempt.status)).toEqual(['failed', 'passed']);
+
         const retried = result('starts a retry from its own timeout');
         expect(retried.attempts.map((attempt) => attempt.status)).toEqual(['failed', 'timed-out']);
         expect(error('starts a retry from its own timeout', 1)).toMatchObject({
@@ -175,7 +206,11 @@ describe('test.slow', () => {
         expect(error('is replaced by a later setTimeout')).toMatchObject({ code: 'TEST_TIMEOUT', message: expect.stringContaining('test timed out after 200 ms') });
 
         expect(result('runs after a beforeAll that outlasted the config timeout').status).toBe('passed');
-        expect(result('never runs').status).not.toBe('passed');
+        // Slowed once, not twice: the hook times out at 1500 ms, before its 2500 ms sleep ends.
+        expect(outcome.report.run.errors).toContainEqual(
+          expect.objectContaining({ code: 'HOOK_FAILED', scopeId: 'slowed twice from beforeAll', message: 'beforeAll failed: beforeAll hook timed out' }),
+        );
+        expect(result('never runs')).toMatchObject({ status: 'skipped', skip: { cause: 'hook-failed' } });
         expect(result('runs before it').status).toBe('passed');
         expect(outcome.report.run.errors.map(({ code, phase, message }) => ({ code, phase, message }))).toContainEqual({
           code: 'HOOK_FAILED',
