@@ -730,6 +730,19 @@ void screen.tapAt({ x: 1 });
 void screen.swipe({ from: point });
 // @ts-expect-error a swipe is a direction or a path, never both.
 void screen.swipe({ direction: 'up', to: point });
+// Viewport points also take percentages of the viewport, mixed with pixels; a Point is a ScreenPoint.
+void screen.tapAt({ x: '50%', y: '50%' });
+void screen.doubleTapAt({ x: '12.5%', y: 40 }, { timeout: 1_000 });
+void screen.swipe({ from: { x: '50%', y: '90%' }, to: { x: '50%', y: '10%' }, duration: 300 });
+void screen.getByRole('list').tapAt({ x: '50%', y: 0 });
+const screenPoint: import('../../src/index.ts').ScreenPoint = point;
+void screen.tapAt(screenPoint);
+// @ts-expect-error a percentage carries its % sign.
+void screen.tapAt({ x: '50', y: 1 });
+// @ts-expect-error a position is relative to the node, so it stays in pixels.
+void screen.getByRole('image').tap({ position: { x: '50%', y: 0 } });
+// @ts-expect-error the executor's point verbs aim at screenshot pixels, never percentages.
+void executorContext.actions.tapAt({ x: '50%', y: 0 });
 // @ts-expect-error a locator swipe is directional; the path form is screen.swipe.
 void screen.getByRole('image').swipe({ from: point, to: point });
 // @ts-expect-error a directional swipe takes no duration.
@@ -1010,14 +1023,17 @@ if (typeof rendered !== 'string') rendered.pixels.mediaType satisfies string;
 // @ts-expect-error limits left the config: maxInputTokens is per agent, the rest are fixed by the runner
 ({ targets, limits: { maxModelTokensPerCall: 1_000 } }) satisfies E2EConfig;
 
-// The report carries the exploration record only on an explore run; a finding's evidence is one of the attempt's artifacts.
 declare const report: Report;
+report.run.durationMs satisfies number | undefined;
+// @ts-expect-error the field may be absent in older reports
+report.run.durationMs satisfies number;
 // Every result carries its tags, an empty list when the test declares none.
 report.run.results[0]!.tags satisfies readonly string[];
 // Every result says which `--repeat-each` run it is, 0 without the flag.
 report.run.results[0]!.repeat satisfies number;
 // Interrupted tests are counted on their own, never in failed.
 report.run.summary.interrupted satisfies number;
+// The report carries the exploration record only on an explore run; a finding's evidence is one of the attempt's artifacts.
 report.run.explore satisfies { goal: string; findings: readonly { severity: 1 | 2 | 3 | 4 | 5; artifactId?: string | undefined }[] } | undefined;
 // A --last-failed rerun carries what it owed and left out as full results, groups, and hook errors, never a looser shape.
 report.run.carried satisfies
