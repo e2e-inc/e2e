@@ -1596,7 +1596,7 @@ describe('perform', () => {
     });
     await openAttempt(h);
     const toggle = await observed(h, 'Airplane Mode');
-    const performed = h.engine.perform!(toggle.ref, { kind: 'check' }, operation());
+    const performed = h.engine.perform!(toggle.ref, { kind: 'check' }, { ...operation(), timeoutMs: 1_000 });
     await expect(performed).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
     expect(reads).toBeGreaterThan(1);
   });
