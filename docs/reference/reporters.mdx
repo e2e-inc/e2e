@@ -603,9 +603,12 @@ type RunEventFact =
   `collect`, `filter` for a test filter's progress and summary, or `run`.
 - `output` is one write a test made to stdout or stderr; `pair` names the
   test running at the time and is undefined between tests.
-- `run-hold` is emitted when the first hold opens or the last hold closes.
-  `heldMs` is the total time in completed hold intervals across workers.
-  `heldSince` is the current interval's start in Unix milliseconds, or `null` after the last hold closes.
+- `run-hold` is emitted at the start and end of each interval with every
+  running worker held.
+  `heldMs` is the total time in milliseconds across completed intervals when
+  every running worker was held.
+  `heldSince` is the current interval's start in Unix milliseconds, or `null`
+  when no such interval is open.
 - `durationMs` on `run-finished` matches the report's `run.durationMs`.
 - `test-finished` carries the full result record, including every attempt's
   artifacts.

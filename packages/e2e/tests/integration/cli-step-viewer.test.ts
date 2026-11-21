@@ -95,7 +95,7 @@ const { engine } = createFakeEngine({
       for (let line = 1; line <= 9; line++) {
         log({ source: 'console', level: 'info', text: 'Cart line ' + line });
       }
-      log({ source: 'network', level: 'error', text: 'GET /checkout 500' });
+      log({ source: 'network', level: 'error', text: 'GET /checkout 500 | \`details\`\\u001b[31m' });
     }
   },
 });
@@ -149,6 +149,7 @@ function terminalRun(
     dir: project.dir,
     exited,
     output: (from = 0) => stdout.slice(from),
+    errors: () => stderr,
     printed: (from = 0) => stripVTControlCharacters(stdout.slice(from)),
     /** Sends a key sequence and returns the current output length. */
     press(keys: string): number {
@@ -180,7 +181,7 @@ function terminalRun(
         return start === -1 ? '' : stripVTControlCharacters(output.slice(start + CLEAR_SCREEN.length));
       };
 
-      await expect.poll(frame, POLL).toMatch(new RegExp(`^[^\\r\\n]* ${range}\\r\\n[\\s\\S]*\\r\\n  press ↑ ↓ to scroll`));
+      await expect.poll(frame, POLL).toMatch(new RegExp(`^[^\\r\\n]* ${range}\\r\\n[\\s\\S]*\\r\\n  press q to go back`));
       return frame();
     },
     /** Checks the status with both streams available when the CLI exits early. */
@@ -265,6 +266,46 @@ describe('the terminal run duration', () => {
     expect(elapsed).toBeLessThanOrEqual(Math.ceil(performance.now() - startedAt) + 10);
   });
 
+  it('counts work done during a pause and excludes time when only the paused test is left', async (context) => {
+    const workMs = 2_500;
+    const heldMs = 700;
+    const run = terminalRun(context, {
+      'e2e.config.ts': workerFakeConfigSource(2),
+      'tests/a.e2e.ts': PAUSE,
+      'tests/b.e2e.ts': `import { existsSync } from 'node:fs';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { test } from 'e2e';
+
+test('keeps working during the pause', async ({ app }) => {
+  await app.open('/cart');
+  while (!existsSync(new URL('../work', import.meta.url))) {
+    await sleep(20);
+  }
+
+  await sleep(${workMs});
+});
+`,
+    }, ['--workers', '2']);
+
+    await run.shows(PAUSE_PROMPT);
+    writeFileSync(path.join(run.dir, 'work'), '');
+    await run.shows(/Tests +1 passed \(2\)/);
+    await sleep(heldMs);
+    run.press('\r');
+    await run.finishes(0);
+
+    const reported = reportedRun(run.dir);
+    const worked = reported.results.find(({ file }) => file === 'tests/b.e2e.ts')?.attempts[0]?.durationMs;
+    assert(worked !== undefined, 'report.json carries the duration of the test that finished during the pause');
+    assert(reported.durationMs !== undefined, 'report.json carries the run duration');
+    expect(worked).toBeGreaterThanOrEqual(workMs);
+    expect(reported.durationMs).toBeGreaterThanOrEqual(worked);
+    const printed = durationMs(run.printed());
+    expect(Math.abs(printed - reported.durationMs)).toBeLessThanOrEqual(50);
+    expect(reportWallMs(reported) - reported.durationMs).toBeGreaterThanOrEqual(heldMs - 100);
+    expect(reportWallMs(reported) - reported.durationMs).toBeLessThan(workMs);
+  });
+
   it('reports a fresh Duration on a watch rerun', async (context) => {
     const suite = `import { existsSync, writeFileSync } from 'node:fs';
 import { test } from 'e2e';
@@ -334,10 +375,8 @@ test('checks out', async ({ app, agent, screen }) => {
     await run.shows(PAUSE_PROMPT, run.press('\r'));
     await sleep(KEY_GUARD_MS);
     const logs = await run.frame('1-3 of 3', run.press('l'));
-    const cartLog = 'step 3 · ℹ console: `/cart`';
-    const receiptLog = 'ℹ console: `/receipt`';
-    expect(logs).toContain(cartLog);
-    expect(logs).toContain(`step ${number} · ${receiptLog}`);
+    expect(logs).toContain('step 3 · ℹ console: /cart');
+    expect(logs).toContain(`step ${number} · ℹ console: /receipt`);
 
     await run.shows(PAUSE_PROMPT, run.press('q'));
     await sleep(KEY_GUARD_MS);
@@ -348,8 +387,8 @@ test('checks out', async ({ app, agent, screen }) => {
     const [traceFile] = globSync('*/trace.md', { cwd: results });
     assert(traceFile !== undefined, 'the run wrote a trace page');
     const trace = readFileSync(path.join(results, traceFile), 'utf8');
-    expect(trace).toContain(`- ${cartLog}`);
-    expect(trace).toContain(`- step ${number} · ${receiptLog}`);
+    expect(trace).toContain('- step 3 · ℹ console: `/cart`');
+    expect(trace).toContain(`- step ${number} · ℹ console: \`/receipt\``);
   });
 
   it('shows the newest app log lines first. You can switch between the log and screen', async (context) => {
@@ -358,13 +397,14 @@ test('checks out', async ({ app, agent, screen }) => {
     const newest = await run.frame('6-11 of 11', opened);
 
     expect(newest).toContain('App log · checks out [fake]');
-    expect(newest).toContain('step 1 · ℹ console: `Cart line 5`');
-    expect(newest).toContain('step 1 · ✗ network error: `GET /checkout 500`');
+    expect(newest).toContain('step 1 · ℹ console: Cart line 5');
+    expect(newest).toContain('step 1 · ✗ network error: GET /checkout 500 | `details`');
+    expect(run.output(opened)).not.toContain('\u001b[31m');
     expect(newest).not.toContain('App started');
     expect(newest.indexOf('Cart line 5')).toBeLessThan(newest.indexOf('GET /checkout 500'));
 
     const oldest = await run.frame('1-6 of 11', run.press('g'));
-    expect(oldest).toContain('before step 1 · ℹ console: `App started`');
+    expect(oldest).toContain('before step 1 · ℹ console: App started');
 
     const screen = await run.frame('1-6 of 22', run.press('s'));
     expect(screen).toContain('Screen before step 2 · checks out [fake]');
@@ -417,6 +457,21 @@ test('checks out', async ({ app, agent, screen }) => {
     run.press('\r');
     await run.finishes(0);
     expect(run.printed()).toContain('The test reached the receipt.');
+  });
+
+  it('redacts the test and target in the viewer and in the printed copy', async (context) => {
+    const suite = STEPS.replace('checks out', 'checks out order-123');
+    const config = APP
+      .replace("name: 'fake'", "name: 'workspace-456'")
+      .replace('export default {', "export default { secrets: { order: 'order-123', workspace: 'workspace-456' },");
+    const run = await heldRun(context, { suite, config });
+    const labels = 'checks out <secret:order> [<secret:workspace>]';
+    expect(await run.frame('6-11 of 11', run.press('l'))).toContain(`App log · ${labels}`);
+    expect(await run.frame('1-6 of 22', run.press('s'))).toContain(`Screen before step 2 · ${labels}`);
+
+    const printed = run.press('p');
+    await run.shows('button "Item 20"', printed);
+    expect(run.printed(printed)).toContain(`Screen before step 2 · ${labels}`);
   });
 
   it('keeps the step held after Enter in the viewer or a second q right after closing', async (context) => {
@@ -506,7 +561,7 @@ test('checks out', async ({ app }) => {
     expect(durationMs(run.printed(before)) - held).toBeLessThanOrEqual(Math.ceil(performance.now() - stoppedAt) + 10);
   });
 
-  it('prints output from another worker in order after the viewer closes', async (context) => {
+  it('holds terminal output until the viewer closes and sends redirected output right away', async (context) => {
     const other = `import { existsSync } from 'node:fs';
 import { setTimeout } from 'node:timers/promises';
 import { test } from 'e2e';
@@ -528,6 +583,7 @@ test('prints while checkout is paused', async () => {
       name: 'record received output',
       onOutput({ text }) {
         if (text.includes('Second line from the other test.')) {
+          process.stderr.write('Output redirected from the reporter.\\n');
           writeFileSync(new URL('./received', import.meta.url), '');
         }
       },
@@ -540,13 +596,13 @@ test('prints while checkout is paused', async () => {
       'tests/other.e2e.ts': other,
     }, []);
     await run.shows(PAUSE_PROMPT);
-    const held = durationMs(run.printed());
     await sleep(KEY_GUARD_MS);
     const opened = run.press('s');
     await run.shows('button "Submit"', opened);
 
     writeFileSync(path.join(run.dir, 'print'), '');
     await expect.poll(() => existsSync(path.join(run.dir, 'received')), POLL).toBe(true);
+    await expect.poll(run.errors, POLL).toContain('Output redirected from the reporter.');
     const alternateScreen = stripVTControlCharacters(run.output(opened).split(ENTER_SCREEN).at(-1) ?? '');
     expect(alternateScreen).not.toContain('First line from the other test.');
     expect(alternateScreen).not.toMatch(PAUSE_PROMPT);
@@ -559,19 +615,27 @@ test('prints while checkout is paused', async () => {
     expect(mainScreen).toContain('First line from the other test.');
     expect(mainScreen.indexOf('First line from the other test.')).toBeLessThan(mainScreen.indexOf('Second line from the other test.'));
     await run.shows(PAUSE_PROMPT, closed);
-    expect(durationMs(run.printed(closed))).toBe(held);
 
     await sleep(KEY_GUARD_MS);
     run.press('\r');
     await run.finishes(0);
   });
 
-  it("reports when the screen can't be read", async (context) => {
-    const config = `import { createFakeEngine, FAKE_APP } from '../../helpers/fake-engine.ts';
+  it('can retry a failed screen read and print the screen once it is ready', async (context) => {
+    const config = `import { existsSync } from 'node:fs';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { createFakeEngine, FAKE_APP } from '../../helpers/fake-engine.ts';
 
 const { engine } = createFakeEngine({
-  observe() {
-    throw new Error('The app closed the screen.');
+  state: true,
+  async observe() {
+    if (!existsSync(new URL('./retry', import.meta.url))) {
+      throw new Error('The app closed the screen.');
+    }
+
+    while (!existsSync(new URL('./ready', import.meta.url))) {
+      await sleep(20);
+    }
   },
 });
 export default { targets: [{ name: 'fake', platform: 'fake', engine, app: FAKE_APP }] };
@@ -581,26 +645,37 @@ export default { targets: [{ name: 'fake', platform: 'fake', engine, app: FAKE_A
     await run.shows('The screen could not be read.', opened);
     expect(run.printed(opened)).toContain('Screen before step 2 · checks out [fake]');
 
-    const closed = run.press('q');
-    await run.shows(STEP_PROMPT, closed);
+    writeFileSync(path.join(run.dir, 'retry'), '');
+    await run.shows('Reading the screen…', run.press('s'));
+    const early = run.press('pG');
+    await run.shows('Reading the screen…', early);
+    expect(run.output(early)).not.toContain(RESTORE_SCREEN);
+
+    const ready = run.output().length;
+    writeFileSync(path.join(run.dir, 'ready'), '');
+    await run.shows('button "Submit"', ready);
+    const printed = run.press('p');
+    await run.shows('button "Submit"', printed);
+    expect(run.output(printed)).toContain(RESTORE_SCREEN);
     await sleep(KEY_GUARD_MS);
     run.press('\r');
     await run.finishes(0);
   });
 
-  it('clips long lines to the terminal width. The view is redrawn after a resize', async (context) => {
+  it('clips long lines and keeps the exit key visible when the terminal narrows', async (context) => {
     const run = await heldRun(context);
     const first = await run.frame('1-6 of 22', run.press('s'));
     const longLine = /^ {2}button "Item 01 x+…$/;
     expect(first.split('\r\n').find((line) => line.includes('Item 01'))).toMatch(longLine);
 
-    const columns = 65;
+    const columns = 32;
     const resized = await run.frame('1-4 of 22', run.resize(8, columns));
     const lines = resized.split('\r\n');
     expect(lines).toHaveLength(8);
     expect(lines.every((line) => line.length <= columns)).toBe(true);
     expect(lines.find((line) => line.includes('Item 01'))).toMatch(longLine);
     expect(lines).toContain('  button "Item 02"');
+    expect(lines.at(-1)).toContain('press q to go back');
   });
 
   it('can view the screen and see that the app log is empty at a pause without --step', async (context) => {

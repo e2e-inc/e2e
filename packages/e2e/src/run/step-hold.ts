@@ -55,6 +55,8 @@ export interface StepPrompt {
 export interface StepHoldContext {
   /** Expected position of the held step in the trace. A pause uses 0. */
   readonly number: number;
+  /** The test title and target name after redaction. */
+  readonly labels: Pick<HeldStep, 'title' | 'target'>;
   /** Aborts once the answer no longer matters: the step was abandoned, its attempt ended, or the run was interrupted. */
   readonly signal: AbortSignal;
   /** Attaches to a held test by its pause ID. */
@@ -147,7 +149,7 @@ export interface AttemptStepHolds extends Pick<AttemptHoldsOptions, 'timeout' | 
 /** The holds of one test attempt: each hold asks the runner, which can read the screen the hold starts on. */
 export function holdAttemptSteps(options: AttemptStepHolds): AttemptHolds {
   const { attempt, ask, readScreen } = options;
-  // Steps held together (one `Promise.all`) wait on one screen, read once.
+  // Steps held together (one `Promise.all`) share a screen read.
   let heldScreen: Promise<string | undefined> | undefined;
   return new AttemptHolds({
     timeout: options.timeout,
@@ -156,7 +158,20 @@ export function holdAttemptSteps(options: AttemptStepHolds): AttemptHolds {
       await ask(
         { ...step, ...attempt },
         signal,
-        () => (heldScreen ??= readScreen(signal)),
+        () => {
+          if (heldScreen === undefined) {
+            const request = readScreen(signal).then((screen) => {
+              if (screen === undefined && heldScreen === request) {
+                heldScreen = undefined;
+              }
+
+              return screen;
+            });
+            heldScreen = request;
+          }
+
+          return heldScreen;
+        },
       );
     },
     // The clock runs again and tells the watchdog itself; the next hold reads a fresh screen.

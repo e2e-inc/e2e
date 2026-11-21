@@ -1,8 +1,43 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { describe, expect, it } from 'vitest';
 import { SecretLedger } from '@e2e-dev/core/lib/internal/redact';
-import { RunnerOutput, type OutputStream } from '../../src/run/process-output.ts';
+import { realmSlot } from '@e2e-dev/core/lib/internal/realm-slot';
+import { claimProcessOutput, RunnerOutput, type OutputStream } from '../../src/run/process-output.ts';
 
 const TOKEN = 'runner-output-token-1';
+
+it('redacts process output when an older install already owns the output routing', () => {
+  const slot = realmSlot<unknown>('e2e.process-output.routing.v1');
+  const previous = slot.get(process);
+  const stdout = process.stdout.write;
+  const stderr = process.stderr.write;
+  slot.set(process, {
+    scope: new AsyncLocalStorage(),
+    terminal: { stdout: stdout.bind(process.stdout), stderr: stderr.bind(process.stderr) },
+    dispatchers: {},
+    process: undefined,
+  });
+
+  const shown: string[] = [];
+  try {
+    const secrets = new SecretLedger();
+    secrets.register('apiToken', TOKEN);
+    const claimed = claimProcessOutput(secrets);
+    claimed.showThrough({ show: (_stream, text) => shown.push(text), end: () => {} });
+    process.stdout.write(`token: ${TOKEN}\n`);
+    claimed.end();
+  } finally {
+    process.stdout.write = stdout;
+    process.stderr.write = stderr;
+    if (previous === undefined) {
+      slot.delete(process);
+    } else {
+      slot.set(process, previous);
+    }
+  }
+
+  expect(shown).toEqual(['token: <secret:apiToken>\n']);
+});
 
 function output() {
   const ledger = new SecretLedger();

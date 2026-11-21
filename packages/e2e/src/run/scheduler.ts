@@ -79,7 +79,7 @@ export interface SchedulerEvents {
    * worker is being interrupted.
    */
   onTimeLimit?(): void;
-  /** Callback when the first hold opens or the last hold closes. Time in completed hold intervals is included. */
+  /** Called when an interval with every running worker held begins or ends. */
   onHoldChange?(heldMs: number, heldSince: number | null): void;
   /** A worker began executing one test-target pair. */
   onTestStart?(start: PairStart, targetName: string): void;
@@ -420,9 +420,10 @@ class Scheduler {
   /** When the time limit is reached, 0 when it is not running; every hold pushes it back by how long it lasted. */
   private timeLimitDue = 0;
   private timeLimitTimer: NodeJS.Timeout | undefined;
-  /** When the steps held now began waiting, while any is. */
+  private timeLimitHeldSince: number | undefined;
+  /** Start of the current interval with every running worker held. */
   private heldSince: number | undefined;
-  /** Time in completed hold intervals. Overlapping time is counted once. */
+  /** Time in completed intervals when all running workers were held. */
   private heldMs = 0;
 
   constructor(private readonly options: RunUnitsOptions) {}
@@ -566,7 +567,7 @@ class Scheduler {
   private checkTimeLimit(limit: TimeLimit): void {
     clearTimeout(this.timeLimitTimer);
     this.timeLimitTimer = undefined;
-    if (this.heldSince !== undefined) return;
+    if (this.timeLimitHeldSince !== undefined) return;
     const left = this.timeLimitDue - Date.now();
     if (left > 0) this.timeLimitTimer = setTimeout(() => this.checkTimeLimit(limit), left);
     else this.timeUp(limit);
@@ -591,10 +592,8 @@ class Scheduler {
     const beforeStep = this.options.beforeStep ?? (() => Promise.resolve());
     const controller = new AbortController();
     this.holds.set(holdId, { worker, controller });
-    if (this.holds.size === 1) {
-      this.heldSince = Date.now();
-      this.options.events.onHoldChange?.(this.heldMs, this.heldSince);
-    }
+    this.timeLimitHeldSince ??= Date.now();
+    this.updateHeldTime();
 
     const signal = AbortSignal.any([controller.signal, this.options.interruptSignal]);
 
@@ -626,7 +625,7 @@ class Scheduler {
     const { number, ...details } = step;
     const held = { ...details, attachId };
     Promise.resolve()
-      .then(() => beforeStep(held, { number, signal, ...reads, attach: this.attachments.attach }))
+      .then(() => beforeStep(held, { number, signal, labels: attachmentLabels, ...reads, attach: this.attachments.attach }))
       .then(
         () => {
           // An answer that came after the hold ended (an interrupt, say) lets nothing run.
@@ -665,11 +664,11 @@ class Scheduler {
       }
     }
 
-    if (this.holds.size === 0 && this.heldSince !== undefined) {
-      const heldMs = Date.now() - this.heldSince;
-      this.heldSince = undefined;
-      this.heldMs += heldMs;
-      this.options.events.onHoldChange?.(this.heldMs, null);
+    this.updateHeldTime();
+
+    if (this.holds.size === 0 && this.timeLimitHeldSince !== undefined) {
+      const heldMs = Date.now() - this.timeLimitHeldSince;
+      this.timeLimitHeldSince = undefined;
 
       const limit = this.options.timeLimit;
       if (limit !== undefined && this.timeLimitDue > 0) {
@@ -678,6 +677,24 @@ class Scheduler {
       }
     }
     return true;
+  }
+
+  /** Updates the run duration when all running workers enter or leave a hold. */
+  private updateHeldTime(): void {
+    if (this.holds.size === 0 && this.heldSince === undefined) return;
+
+    const heldWorkers = new Set([...this.holds.values()].map(({ worker }) => worker));
+    const running = this.workers.filter((worker) => worker.unit !== undefined);
+    const allHeld = running.length > 0 && running.every((worker) => heldWorkers.has(worker));
+
+    if (allHeld && this.heldSince === undefined) {
+      this.heldSince = Date.now();
+      this.options.events.onHoldChange?.(this.heldMs, this.heldSince);
+    } else if (!allHeld && this.heldSince !== undefined) {
+      this.heldMs += Date.now() - this.heldSince;
+      this.heldSince = undefined;
+      this.options.events.onHoldChange?.(this.heldMs, null);
+    }
   }
 
   /** Ends the waits of one hold, or of every hold a worker has, with no answer: its prompt goes away. */
@@ -776,8 +793,10 @@ class Scheduler {
         this.returnUnit(state, unit);
         return;
       }
-      if (worker.state === 'idle') worker.dispatch(unit, this.answersFailures);
-      else worker.queued = unit;
+      if (worker.state === 'idle') {
+        worker.dispatch(unit, this.answersFailures);
+        this.updateHeldTime();
+      } else worker.queued = unit;
     }
   }
 
@@ -972,7 +991,10 @@ class Scheduler {
         worker.state = 'idle';
         const queued = worker.queued;
         worker.queued = undefined;
-        if (queued !== undefined) worker.dispatch(queued, this.answersFailures);
+        if (queued !== undefined) {
+          worker.dispatch(queued, this.answersFailures);
+          this.updateHeldTime();
+        }
         this.wakeUp();
         break;
       }
@@ -1079,6 +1101,7 @@ class Scheduler {
         const unit = worker.unit;
         worker.unit = undefined;
         worker.inFlightPair = undefined;
+        this.updateHeldTime();
         if (unit !== undefined && unit.id !== message.unitId) {
           this.options.events.onRunError({
             error: serializeError(
@@ -1126,11 +1149,12 @@ class Scheduler {
 
   private onExit(worker: SchedulerWorker, detail: string, signal: NodeJS.Signals | null, active: WatchedAttempt | undefined): void {
     const reason = 'the worker exited';
-    this.cancelHolds(reason, (_, holder) => holder === worker);
-    this.attachments.workerExited(worker.runner, reason);
-
     const tracked = this.workers.includes(worker);
     this.forget(worker);
+    this.cancelHolds(reason, (_, holder) => holder === worker);
+    this.attachments.workerExited(worker.runner, reason);
+    this.updateHeldTime();
+
     const state = this.targetState(worker);
     const unit = worker.unit;
     worker.unit = undefined;

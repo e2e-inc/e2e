@@ -37,44 +37,52 @@ export function writtenChunk(chunk: string | Uint8Array, encoding: unknown): str
 interface OutputRouting {
   readonly scope: AsyncLocalStorage<RunnerOutput | null>;
   readonly terminal: Record<OutputStream, TerminalWrite>;
-  readonly direct: Record<OutputStream, TerminalWrite>;
+  direct?: Record<OutputStream, TerminalWrite>;
   readonly dispatchers: Partial<Record<OutputStream, typeof process.stdout.write>>;
   process: RunnerOutput | undefined;
-  held: BufferedWrite[] | undefined;
+  held?: BufferedWrite[] | undefined;
 }
 
 const routingSlot = realmSlot<OutputRouting>('e2e.process-output.routing.v1');
 
 /** One process dispatcher preserves redaction for asynchronous work that outlives a suite. */
-function routing(): OutputRouting {
+function routing() {
   const streams = { stdout: process.stdout, stderr: process.stderr } as const;
   let state = routingSlot.get(process);
   if (state === undefined) {
-    const direct = {
-      stdout: streams.stdout.write.bind(streams.stdout),
-      stderr: streams.stderr.write.bind(streams.stderr),
-    };
-
     state = {
       scope: new AsyncLocalStorage(),
-      terminal: { ...direct },
-      direct,
+      terminal: {
+        stdout: streams.stdout.write.bind(streams.stdout),
+        stderr: streams.stderr.write.bind(streams.stderr),
+      },
       dispatchers: {},
       process: undefined,
-      held: undefined,
     };
     routingSlot.set(process, state);
   }
+
+  const upgrading = state.direct === undefined;
+  const direct = state.direct ??= { ...state.terminal };
+
   for (const name of ['stdout', 'stderr'] as const) {
-    if (streams[name].write === state.dispatchers[name]) continue;
+    const installed = streams[name].write === state.dispatchers[name];
+    if (installed && !upgrading) continue;
+
     const forward = streams[name].write.bind(streams[name]) as (chunk: string | Uint8Array, encoding?: BufferEncoding | (() => void), callback?: () => void) => boolean;
-    state.direct[name] = (text, callback) => {
-      const done = callback === undefined ? undefined : AsyncResource.bind(callback);
-      return state.scope.run(null, () => forward(text, done));
-    };
+
+    // FIXME: An older dispatcher ignores the viewer. Replace it in the shared slot,
+    // but keep its terminal writer so the viewer can reach the underlying stream.
+    if (!installed) {
+      direct[name] = (text, callback) => {
+        const done = callback === undefined ? undefined : AsyncResource.bind(callback);
+        return state.scope.run(null, () => forward(text, done));
+      };
+    }
+
     state.terminal[name] = (text, callback) => {
-      if (state.held === undefined) {
-        return state.direct[name](text, callback);
+      if (state.held === undefined || streams[name].isTTY !== true) {
+        return direct[name](text, callback);
       }
 
       state.held.push({ stream: name, text: typeof text === 'string' ? text : Buffer.from(text) });
@@ -96,20 +104,21 @@ function routing(): OutputRouting {
 
       const context = state.scope.getStore();
       const output = context === null ? undefined : context ?? state.process;
-      if (output === undefined && state.held === undefined) return forward(chunk, encoding, callback);
+      if (output === undefined && (state.held === undefined || streams[name].isTTY !== true)) return forward(chunk, encoding, callback);
       const text = writtenChunk(chunk, encoding);
       return output === undefined ? state.terminal[name](text, done) : output.write(name, text, done);
     }) as typeof process.stdout.write;
     state.dispatchers[name] = dispatch;
     streams[name].write = dispatch;
   }
-  return state;
+
+  return { state, direct };
 }
 
 /** Opens the viewer's alternate screen. Buffered terminal writes are replayed in order after the screen is restored. */
 export function openAlternateScreen(stream: OutputStream): AlternateScreen {
-  const state = routing();
-  const write = state.direct[stream];
+  const { state, direct } = routing();
+  const write = direct[stream];
   const held: BufferedWrite[] = [];
   const leave = '\u001b[?1049l\u001b[?25h';
   const restore = (): void => {
@@ -121,7 +130,7 @@ export function openAlternateScreen(stream: OutputStream): AlternateScreen {
     process.off('exit', restore);
 
     for (const { stream: destination, text } of held) {
-      state.direct[destination](text);
+      direct[destination](text);
     }
   };
 
@@ -134,14 +143,14 @@ export function openAlternateScreen(stream: OutputStream): AlternateScreen {
 
 /** The CLI owns every process write, including timers that print after a run ends. */
 export function claimProcessOutput(ledger: SecretLedger): RunnerOutput {
-  const state = routing();
+  const { state } = routing();
   state.process ??= new RunnerOutput(state.terminal, ledger);
   return state.process;
 }
 
 /** Embedded runs own their async output; caller output resumes once cleanup ends. */
 export async function withProcessOutput<T>(ledger: SecretLedger, run: (output: RunnerOutput) => Promise<T>): Promise<T> {
-  const state = routing();
+  const { state } = routing();
   const output = new RunnerOutput(state.terminal, ledger);
   try {
     return await state.scope.run(output, () => run(output));

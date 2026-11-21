@@ -48,6 +48,12 @@ export class StepKeyboard {
         return;
       }
 
+      if (key === 'suspend') {
+        this.closeViewer();
+        this.keyboard.suspend();
+        return;
+      }
+
       if (this.viewer !== undefined) {
         this.viewer.press(press);
         return;
@@ -63,8 +69,6 @@ export class StepKeyboard {
           });
           void this.viewer.show(key);
         }
-      } else if (key === 'suspend') {
-        this.keyboard.suspend();
       } else if (key !== undefined && (holdSteps || (key !== 'test' && key !== 'rest'))) {
         this.gate.press(key);
       }
@@ -95,8 +99,8 @@ class StepViewer {
     private readonly output: RunnerOutput,
     private readonly onClose: () => void,
   ) {
-    const { step, number } = held;
-    const test = sanitizeText(`${step.title} [${step.target}]`).replace(/\s+/g, ' ');
+    const { step, number, context: { labels } } = held;
+    const test = sanitizeText(`${labels.title} [${labels.target}]`).replace(/\s+/g, ' ');
     this.screenTitle = `Screen ${step.kind === 'pause' ? 'at screen.pause()' : `before step ${number}`} · ${test}`;
     this.logTitle = `App log · ${test}`;
     this.resume = uncaptured(() => LiveWindow.suspend());
@@ -130,6 +134,7 @@ class StepViewer {
       return;
     }
 
+    this.request = undefined;
     this.lines = lines;
     this.offset = view === 'logs' ? lines.length : 0;
     this.draw();
@@ -166,6 +171,10 @@ class StepViewer {
         void this.show(press.name === 's' ? 'screen' : 'logs');
         return;
       case 'p': {
+        if (this.request !== undefined) {
+          return;
+        }
+
         const text = [this.title, ...this.lines].join('\n');
         // Queue the text while the live window is suspended so it prints before the prompt is repainted.
         this.output.printLine(text);
@@ -213,7 +222,7 @@ class StepViewer {
     const title = fitColumns(this.title, Math.max(1, columns - range.length - 2));
     const heading = columns > range.length + 2 && visible.length > 0 ? `${title}${' '.repeat(columns - visibleWidth(title) - range.length)}${range}` : this.title;
     const other = this.view === 'screen' ? 'l to show the app log' : 's to show the screen';
-    const help = `  press ↑ ↓ to scroll, press ${other}, press p to print, press q to go back`;
+    const help = `  press q to go back, press ↑ ↓ to scroll, press ${other}, press p to print`;
     const gap = terminalRows() >= 5 ? [''] : [];
     const rows = [heading, ...gap, ...visible.map((line) => `  ${line}`)];
 

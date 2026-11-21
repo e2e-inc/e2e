@@ -423,7 +423,7 @@ export interface Report1Document {
     exitCode: BuildReportOptions['exitCode'];
     startedAt: string;
     finishedAt: string;
-    /** Elapsed run time in milliseconds with holds excluded. The field may be absent in older reports. */
+    /** Elapsed run time in milliseconds, excluding intervals when all running workers were held. The field may be absent in older reports. */
     durationMs?: number;
     project: { id: string; configDigest: string };
     environment: {

@@ -785,7 +785,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
             signal,
             {
               readScreen,
-              readLogs: () => Promise.resolve(numberedAppLogLines(steps.all(), steps.appLog()).map(({ line }) => line)),
+              readLogs: () => Promise.resolve(numberedAppLogLines(steps.all(), steps.appLog(), 'text').map(({ line }) => line)),
             },
             tools,
           ),

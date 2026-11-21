@@ -50,18 +50,19 @@ function gate(holdSteps = true) {
     },
     { now: () => now, holdSteps },
   );
-  const context = (number: number, signal = new AbortController().signal): StepHoldContext => ({
-    number,
-    signal,
-    show: (prompt) => shown.push(prompt),
-    readScreen: () => Promise.resolve(undefined),
-    readLogs: () => Promise.resolve(undefined),
-    attach: () => Promise.reject(new Error('no held tests')),
-  });
   /** Holds `held` and reports, after the microtasks drain, whether it was let through. */
-  const hold = ({ step: heldStep, number }: NumberedStep, signal?: AbortSignal) => {
+  const hold = ({ step: heldStep, number }: NumberedStep, signal = new AbortController().signal) => {
     let released = false;
-    void subject.beforeStep(heldStep, context(number, signal)).then(() => {
+    const context: StepHoldContext = {
+      number,
+      signal,
+      labels: heldStep,
+      show: (prompt) => shown.push(prompt),
+      readScreen: () => Promise.resolve(undefined),
+      readLogs: () => Promise.resolve(undefined),
+      attach: () => Promise.reject(new Error('no held tests')),
+    };
+    void subject.beforeStep(heldStep, context).then(() => {
       released = true;
     });
     return { released: async () => { await Promise.resolve(); await Promise.resolve(); return released; } };
