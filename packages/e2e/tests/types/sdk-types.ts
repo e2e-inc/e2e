@@ -1010,14 +1010,17 @@ if (typeof rendered !== 'string') rendered.pixels.mediaType satisfies string;
 // @ts-expect-error limits left the config: maxInputTokens is per agent, the rest are fixed by the runner
 ({ targets, limits: { maxModelTokensPerCall: 1_000 } }) satisfies E2EConfig;
 
-// The report carries the exploration record only on an explore run; a finding's evidence is one of the attempt's artifacts.
 declare const report: Report;
+report.run.durationMs satisfies number | undefined;
+// @ts-expect-error the field may be absent in older reports
+report.run.durationMs satisfies number;
 // Every result carries its tags, an empty list when the test declares none.
 report.run.results[0]!.tags satisfies readonly string[];
 // Every result says which `--repeat-each` run it is, 0 without the flag.
 report.run.results[0]!.repeat satisfies number;
 // Interrupted tests are counted on their own, never in failed.
 report.run.summary.interrupted satisfies number;
+// The report carries the exploration record only on an explore run; a finding's evidence is one of the attempt's artifacts.
 report.run.explore satisfies { goal: string; findings: readonly { severity: 1 | 2 | 3 | 4 | 5; artifactId?: string | undefined }[] } | undefined;
 // A --last-failed rerun carries what it owed and left out as full results, groups, and hook errors, never a looser shape.
 report.run.carried satisfies
