@@ -2037,6 +2037,68 @@ describe('device fixture', () => {
       });
     });
 
+    // A pad of controls covers the centre down to the strip, so the only point clear of controls and above
+    // the strip is above the pad. Under the strip's top but over the keys' top would be on the strip.
+    const PAD = { ref: '@e5', index: 4, parentIndex: 1, depth: 2, type: 'other', label: 'Pad', rect: { x: 0, y: 200, width: 390, height: 250 } };
+    const STRIP = { ref: '@e6', index: 5, parentIndex: 0, depth: 1, type: 'other', identifier: 'SystemInputAssistantView', rect: { x: 0, y: 460, width: 390, height: 44 } };
+    // A strip holding only text is no control, so nothing but the keyboard's top keeps the drag off it.
+    const STRIP_WORDS = { ref: '@e7', index: 6, parentIndex: 5, depth: 2, type: 'StaticText', label: 'Hello', rect: { x: 0, y: 460, width: 130, height: 44 } };
+
+    it('starts the drag above the suggestion strip, over the keys or over a frame derived from them', async () => {
+      const keys = { ref: '@e8', index: 7, parentIndex: 0, depth: 1, type: 'Keyboard', rect: { x: 0, y: 504, width: 390, height: 216 } };
+      const derived = { kind: 'derived', derivation: 'docked-tree', frame: keys.rect };
+      const layouts = [
+        { name: 'keys in the tree', nodes: [STRIP, STRIP_WORDS, keys] },
+        { name: 'a frame from the keys', nodes: [STRIP, STRIP_WORDS], keyboard: derived },
+      ];
+      for (const layout of layouts) {
+        const h = harness();
+        await openAttempt(h);
+        await observed(h, 'Back');
+        const device = fixture(h);
+        h.fake.respond('command.keyboard', NO_DISMISS_KEY);
+        const up = { ...SETTINGS_SNAPSHOT, viewport: { width: 390, height: 844 }, nodes: [...FORM_NODES, PAD, ...layout.nodes], ...(layout.keyboard === undefined ? {} : { keyboard: layout.keyboard }) };
+        captures(h, [up, KEYBOARD_GONE]);
+        await device.dismissKeyboard();
+        const { from } = h.fake.lastArgs('interactions.swipe') as { from: { y: number } };
+        expect(from.y, layout.name).toBeLessThan(200);
+      }
+    });
+
+    it('does not take the suggestion strip alone for the soft keyboard', async () => {
+      // With a hardware keyboard, XCTest lists the strip and no keys.
+      const h = harness();
+      await openAttempt(h);
+      await observed(h, 'Back');
+      const device = fixture(h);
+      h.fake.respond('command.keyboard', NO_DISMISS_KEY);
+      captures(h, [{ ...SETTINGS_SNAPSHOT, viewport: { width: 390, height: 844 }, nodes: [...FORM_NODES, PAD, STRIP, STRIP_WORDS] }]);
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+      await device.dismissKeyboard();
+      expect(h.fake.calls.filter((call) => call.method === 'interactions.swipe')).toHaveLength(0);
+    });
+
+    it('keeps each look at the keyboard inside the budget when captures are slow', async () => {
+      autoAdvanceTimers();
+      const h = harness();
+      await openAttempt(h);
+      await observed(h, 'Back');
+      const device = fixture(h);
+      h.fake.respond('command.keyboard', NO_DISMISS_KEY);
+      const moving = { ...SETTINGS_SNAPSHOT, nodes: FORM_NODES, keyboard: { kind: 'tree-rejected', derivation: 'docked-tree' } };
+      const slow = (snapshots: readonly unknown[], ms: number) => {
+        let taken = 0;
+        h.fake.respond('capture.snapshot', () => new Promise((resolve) => setTimeout(() => resolve(snapshots[Math.min(taken++, snapshots.length - 1)]), ms)));
+      };
+      // After the drag the keyboard slides out: a rejected frame and no key, while each capture takes 800 ms of the 5 s budget.
+      slow([KEYBOARD_UP, moving], 800);
+      await device.dismissKeyboard();
+      expect(h.fake.calls.filter((call) => call.method === 'interactions.swipe')).toHaveLength(1);
+      // A read that never settles fails as still moving, not as a timeout.
+      slow([moving], 1_000);
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('Read it again') });
+    });
+
     it('drags at the centre of a screen rotated since the last observation', async () => {
       const h = harness();
       await openAttempt(h);
@@ -2057,6 +2119,27 @@ describe('device fixture', () => {
         from: { x: 422, y: 195 },
         to: { x: expect.closeTo(396.68, 2), y: 195 },
       });
+    });
+
+    it('refuses to drag a keyboard that is up but has no bounds, rather than guess where it is', async () => {
+      const h = harness();
+      await openAttempt(h);
+      await observed(h, 'Back');
+      const device = fixture(h);
+      h.fake.respond('command.keyboard', NO_DISMISS_KEY);
+      // A probe that says visible, with no frame and no keyboard element in the tree: the bottom of the
+      // screen is no bound, and the centre of this landscape screen may be on the keyboard.
+      const landscape = [
+        { ref: '@e1', index: 0, depth: 0, type: 'application', label: 'Order', rect: { x: 0, y: 0, width: 844, height: 390 } },
+        { ref: '@e2', index: 1, parentIndex: 0, depth: 1, type: 'scroll-view', rect: { x: 0, y: 60, width: 844, height: 330 } },
+        { ref: '@e3', index: 2, parentIndex: 1, depth: 2, type: 'text-field', label: 'Notes', rect: { x: 20, y: 80, width: 804, height: 44 } },
+      ];
+      captures(h, [{ ...SETTINGS_SNAPSHOT, viewport: { width: 844, height: 390 }, nodes: landscape, keyboard: { kind: 'visibility-only', visible: true } }]);
+      await expect(device.dismissKeyboard()).rejects.toMatchObject({
+        code: 'UNSUPPORTED_CAPABILITY',
+        message: expect.stringContaining('without a frame or any keyboard element on screen'),
+      });
+      expect(h.fake.calls.filter((call) => call.method === 'interactions.swipe')).toHaveLength(0);
     });
 
     it('tries a vertical drag when the horizontal one left the keyboard up', async () => {
@@ -2128,6 +2211,19 @@ describe('device fixture', () => {
       captures(h, [flattened, KEYBOARD_GONE]);
       await device.dismissKeyboard();
       expect(h.fake.lastArgs('interactions.swipe')).toMatchObject({ from: { x: 195, y: 422 } });
+    });
+
+    it('waits for a keyboard still sliding in before it decides there is nothing to drag', async () => {
+      autoAdvanceTimers();
+      const h = harness();
+      await openAttempt(h);
+      await observed(h, 'Back');
+      const device = fixture(h);
+      h.fake.respond('command.keyboard', NO_DISMISS_KEY);
+      const moving = { ...SETTINGS_SNAPSHOT, nodes: FORM_NODES, keyboard: { kind: 'tree-rejected', derivation: 'docked-tree' } };
+      captures(h, [moving, KEYBOARD_UP, KEYBOARD_GONE]);
+      await device.dismissKeyboard();
+      expect(h.fake.calls.filter((call) => call.method === 'interactions.swipe')).toHaveLength(1);
     });
 
     it('refuses to drag when every point above the keyboard is on a control', async () => {
@@ -2259,6 +2355,149 @@ describe('device fixture', () => {
       });
       await expect(device.dismissKeyboard()).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
       expect(h.fake.calls.filter((call) => call.method === 'interactions.swipe')).toHaveLength(0);
+    });
+  });
+
+  describe('isKeyboardShown', () => {
+    const KEYBOARD_NODE = { ref: '@e20', index: 10, parentIndex: 0, depth: 1, type: 'XCUIElementTypeKeyboard', rect: { x: 0, y: 583, width: 390, height: 261 } };
+
+    it('answers from the keyboard agent-device measured, with one capture and nothing sent to the device', async () => {
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      const before = h.fake.calls.length;
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, keyboard: { kind: 'visible', frame: KEYBOARD_NODE.rect } }));
+      expect(await device.isKeyboardShown()).toBe(true);
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, KEYBOARD_NODE], keyboard: { kind: 'absent' } }));
+      // The measurement wins over a keyboard element the tree still lists.
+      expect(await device.isKeyboardShown()).toBe(false);
+      expect(h.fake.methods().slice(before)).toEqual(['capture.snapshot', 'capture.snapshot']);
+    });
+
+    it('trusts a keyboard element in the tree when the capture measured nothing, and never reads its absence as no keyboard', async () => {
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, KEYBOARD_NODE] }));
+      expect(await device.isKeyboardShown()).toBe(true);
+      // An older agent-device that reports no keyboard reading: no keys in the tree proves nothing.
+      h.fake.respond('capture.snapshot', () => SETTINGS_SNAPSHOT);
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY', retryable: false, message: expect.stringContaining('no keyboard reading') });
+    });
+
+    it('reads every keyboard fact agent-device reports the way the keyboard band does, whatever the tree still lists', async () => {
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      const frame = KEYBOARD_NODE.rect;
+      const cases: ReadonlyArray<readonly [unknown, readonly unknown[], boolean]> = [
+        [{ kind: 'derived', derivation: 'docked-tree', frame }, SETTINGS_NODES, true],
+        [{ kind: 'visibility-only', visible: true }, SETTINGS_NODES, true],
+        [{ kind: 'visibility-only', visible: false }, [...SETTINGS_NODES, KEYBOARD_NODE], false],
+        [{ kind: 'tree-rejected', derivation: 'docked-tree', visible: false }, [...SETTINGS_NODES, KEYBOARD_NODE], false],
+        [{ kind: 'tree-rejected', derivation: 'docked-tree', visible: true }, SETTINGS_NODES, true],
+        // A keyboard still sliding in: agent-device lists its keys but rejects the frame.
+        [{ kind: 'tree-rejected', derivation: 'docked-tree' }, [...SETTINGS_NODES, KEYBOARD_NODE], true],
+        [{ kind: 'unmeasurable', reason: 'window-list-unavailable' }, [...SETTINGS_NODES, KEYBOARD_NODE], true],
+      ];
+      for (const [keyboard, nodes, shown] of cases) {
+        h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes, keyboard }));
+        expect([keyboard, await device.isKeyboardShown()]).toEqual([keyboard, shown]);
+      }
+    });
+
+    it('drags the keyboard away only when isKeyboardShown would say it is up', async () => {
+      const h = harness();
+      await openAttempt(h);
+      await observed(h, 'Back');
+      const device = fixture(h);
+      h.fake.respond('command.keyboard', () => {
+        throw new AppError('UNSUPPORTED_OPERATION', 'Unable to dismiss the iOS keyboard: the keyboard exposes no dismiss key');
+      });
+      // A probe that says hidden outranks keys the tree still lists, for both.
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, KEYBOARD_NODE], keyboard: { kind: 'visibility-only', visible: false } }));
+      expect(await device.isKeyboardShown()).toBe(false);
+      await device.dismissKeyboard();
+      expect(h.fake.calls.filter((call) => call.method === 'interactions.swipe')).toHaveLength(0);
+    });
+
+    it('fails rather than answer false from a tree that stays sparse', async () => {
+      autoAdvanceTimers();
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      h.fake.respond('capture.snapshot', () => ({ nodes: [{ ref: '@e1', type: 'application' }], snapshotQuality: { state: 'sparse' } }));
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'ENGINE_FAILURE', retryable: false });
+      // A sparse capture that still carries the producer's reading answers from it.
+      h.fake.respond('capture.snapshot', () => ({ nodes: [{ ref: '@e1', type: 'application' }], snapshotQuality: { state: 'sparse' }, keyboard: { kind: 'absent' } }));
+      expect(await device.isKeyboardShown()).toBe(false);
+    });
+
+    it('trusts the keys a cut tree lists, and fails only when a cut tree lists none', async () => {
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, truncated: true, nodes: [...SETTINGS_NODES, KEYBOARD_NODE] }));
+      expect(await device.isKeyboardShown()).toBe(true);
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, truncated: true }));
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'ENGINE_FAILURE', retryable: false, message: expect.stringContaining('incomplete') });
+    });
+
+    it('captures again while a rejected frame says nothing and no key is drawn on screen, and fails if that lasts', async () => {
+      autoAdvanceTimers();
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      const moving = { ...SETTINGS_SNAPSHOT, nodes: SETTINGS_NODES, keyboard: { kind: 'tree-rejected', derivation: 'docked-tree' } };
+      let taken = 0;
+      // A number pad sliding in lists no key until it lands.
+      h.fake.respond('capture.snapshot', () => (taken++ < 2 ? moving : { ...SETTINGS_SNAPSHOT, keyboard: { kind: 'derived', derivation: 'docked-tree', frame: KEYBOARD_NODE.rect } }));
+      expect(await device.isKeyboardShown()).toBe(true);
+      expect(taken).toBe(3);
+
+      const offScreen = { ...KEYBOARD_NODE, rect: { ...KEYBOARD_NODE.rect, y: 900 } };
+      // No key at all, and a keyboard left below the screen after it was dismissed.
+      for (const nodes of [SETTINGS_NODES, [...SETTINGS_NODES, offScreen]]) {
+        taken = 0;
+        h.fake.respond('capture.snapshot', () => {
+          taken += 1;
+          return { ...moving, nodes };
+        });
+        await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'ENGINE_FAILURE', retryable: false, message: expect.stringContaining('Read it again') });
+        expect(taken).toBe(4);
+      }
+    });
+
+    it('fails when agent-device did not prove the keyboard absent and the tree lists none', async () => {
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      const offScreen = { ...KEYBOARD_NODE, rect: { ...KEYBOARD_NODE.rect, y: 900 } };
+      // A keyboard left below the screen after it was dismissed is no keyboard shown, with no reading or an unmeasurable one.
+      for (const keyboard of [undefined, { kind: 'unmeasurable', reason: 'keyboard-not-observed' }]) {
+        h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, offScreen], ...(keyboard === undefined ? {} : { keyboard }) }));
+        await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+      }
+      // With no viewport and no window, nothing bounds the screen, so the keyboard cannot be placed on it.
+      h.fake.respond('capture.snapshot', () => ({ nodes: [offScreen], keyboard: { kind: 'unmeasurable', reason: 'keyboard-viewport-unavailable' } }));
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+      const reasons = ['window-root-unavailable', 'window-list-unavailable', 'keyboard-window-probe-failed', 'keyboard-not-observed', 'keyboard-visibility-probe-unsupported'];
+      for (const reason of reasons) {
+        h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, keyboard: { kind: 'unmeasurable', reason } }));
+        await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY', retryable: false, message: expect.stringContaining(reason) });
+      }
+    });
+
+    it('captures a sparse tree again instead of reading it as no keyboard', async () => {
+      autoAdvanceTimers();
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      const sparse = { nodes: [{ ref: '@e1', type: 'application' }], snapshotQuality: { state: 'sparse' } };
+      let taken = 0;
+      h.fake.respond('capture.snapshot', () => (taken++ === 0 ? sparse : { ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, KEYBOARD_NODE] }));
+      expect(await device.isKeyboardShown()).toBe(true);
+      expect(taken).toBe(2);
     });
   });
 

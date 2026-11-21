@@ -457,6 +457,7 @@ test('offline banner', { platforms: ['android'] }, async ({ app, device, screen 
 | [`back`](#back) | `Promise<void>` |
 | [`alert`](#alert) | `Promise<void>` |
 | [`dismissKeyboard`](#dismisskeyboard) | `Promise<void>` |
+| [`isKeyboardShown`](#iskeyboardshown) | `Promise<boolean>` |
 | [`clipboard`](#clipboard) | `Promise<string>` |
 | [`setClipboard`](#setclipboard) | `Promise<void>` |
 
@@ -966,10 +967,11 @@ await device.alert('accept');
  * screen has one, to avoid pressing a button or toggling a checkbox. A
  * control the tree leaves out, such as pressable text, can still be hit. The
  * simulator's "Speed up your typing" tip goes through its Continue button
- * first. A screen with no clear point above the keyboard, or a keyboard that
- * outlives both drags, fails with `UNSUPPORTED_CAPABILITY`; the message
- * names the alternatives (the app's own Done or close control, or pressing
- * Enter on the field).
+ * first. A screen with no clear point above the keyboard, a keyboard reported
+ * up with no frame and no keyboard element on screen (so no point is known
+ * to be above it), or a keyboard that outlives both drags, fails with
+ * `UNSUPPORTED_CAPABILITY`; the message names the alternatives (the app's
+ * own Done or close control, or pressing Enter on the field).
  */
 dismissKeyboard(): Promise<void>;
 ```
@@ -980,7 +982,42 @@ await device.dismissKeyboard();
 
 | Throws | When |
 | --- | --- |
-| `UNSUPPORTED_CAPABILITY` | Every point above the keyboard (in a scroll view, when the screen has one) is on a control, or the keyboard outlives both drags. |
+| `UNSUPPORTED_CAPABILITY` | Every point above the keyboard (in a scroll view, when the screen has one) is on a control, agent-device reports the keyboard up with no frame and no keyboard element on screen, or the keyboard outlives both drags. |
+
+#### `isKeyboardShown`
+
+```ts
+/**
+ * Whether the soft keyboard is on screen, from a capture (taken again,
+ * within the action timeout, while the keyboard is still moving): what
+ * agent-device reported for it (a visibility probe, a measured or derived
+ * keyboard frame, or proof that there is none), else the keyboard or a key
+ * drawn on screen in the accessibility tree (the suggestion strip alone,
+ * as with a hardware keyboard, is not one). Only agent-device's proof
+ * answers `false`. Fails when the capture cannot answer: `ENGINE_FAILURE`
+ * while the keyboard is moving or the tree is still incomplete,
+ * `UNSUPPORTED_CAPABILITY` when agent-device did not prove the keyboard
+ * absent and the tree lists none. It reads the screen as it is now, so
+ * right after an action that opens or closes the keyboard, poll it with
+ * `expect.poll`. A poll reads again after any error: an `ENGINE_FAILURE`
+ * clears once the keyboard settles, while an `UNSUPPORTED_CAPABILITY`
+ * that lasts (a provider that cannot read the keyboard at all) makes the
+ * poll wait out its whole timeout before it fails.
+ * Changes nothing on the device.
+ */
+isKeyboardShown(): Promise<boolean>;
+```
+
+```ts
+await screen.getByTestId('email-input').fill('jane@example.com');
+await device.dismissKeyboard();
+await expect.poll(() => device.isKeyboardShown()).toBe(false);
+```
+
+| Throws | When |
+| --- | --- |
+| `ENGINE_FAILURE` | agent-device measured nothing and the tree it returned was sparse or cut, or it found keyboard elements but rejected where they sit and none is drawn on screen, as while the keyboard slides in or out. Read it again; `expect.poll` does. |
+| `UNSUPPORTED_CAPABILITY` | The tree shows no keyboard or key drawn on screen (the suggestion strip alone is not one), and agent-device did not prove the keyboard absent: for example an Android capture without the input method's window, a WebDriver provider with no keyboard probe, or no keyboard reading at all. The message names the reason. When it lasts, `expect.poll` waits out its timeout before it fails. |
 
 #### `clipboard`
 
