@@ -677,8 +677,7 @@ Every value matcher is available, returning a promise.
 - Each sample calls `read` and runs the matcher. A matcher failure or a
   `read` that throws is one failing sample unless `read` calls `test.skip()`
   or `test.fixme()`; a `read` that hangs is cut at the deadline. Either call
-  ends the poll and marks the test skipped. When a pause is cut short, a
-  final sample is taken at the deadline.
+  ends the poll and marks the test skipped.
 - `toMatchSchema` resolves to the schema's output for the passing read.
 - When the attempt is cancelled, the loop stops with `CANCELLED`. At the
   attempt's deadline the test or hosted session fails with `TEST_TIMEOUT`.

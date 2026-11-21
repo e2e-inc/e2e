@@ -185,41 +185,6 @@ describe('expect.poll', () => {
     vexpect(reads).toEqual([0, 100, 350, 850, 1850, 2850]);
   });
 
-  it('reads once more when a pause reaches the deadline', async () => {
-    const start = Date.now();
-    const reads: number[] = [];
-    await e2eExpect.poll(() => {
-      const elapsed = Date.now() - start;
-      reads.push(elapsed);
-      return elapsed >= 900;
-    }, { timeout: 1200 }).toBe(true);
-    vexpect(reads).toEqual([0, 100, 350, 850, 1200]);
-  });
-
-  it('fails when the value only becomes ready after the deadline', async () => {
-    const start = Date.now();
-    await failsWith(
-      () => e2eExpect.poll(() => Date.now() - start > 1200, { timeout: 1200 }).toBe(true),
-      /timed out after 1200 ms\nlast: expected false to be true$/,
-    );
-    vexpect(Date.now() - start).toBe(1200);
-  });
-
-  it('cuts a pending final read without waiting past the deadline', async () => {
-    const start = Date.now();
-    const reads: number[] = [];
-    await failsWith(
-      () => e2eExpect.poll(() => {
-        const elapsed = Date.now() - start;
-        reads.push(elapsed);
-        return elapsed < 1200 ? false : new Promise<boolean>((resolve) => setTimeout(resolve, 1, true));
-      }, { timeout: 1200 }).toBe(true),
-      /timed out after 1200 ms\nlast: expected false to be true$/,
-    );
-    vexpect(Date.now() - start).toBe(1200);
-    vexpect(reads).toEqual([0, 100, 350, 850, 1200]);
-  });
-
   it('ignores a synchronous read that returns after the deadline', async () => {
     await failsWith(
       () => e2eExpect.poll(() => {
@@ -673,29 +638,6 @@ describe('expect(fn).toPass()', () => {
       e2eExpect(tries.length).toBe(6);
     }).toPass({ timeout: 5000 });
     vexpect(tries).toEqual([0, 100, 350, 850, 1850, 2850]);
-  });
-
-  it('lets an immediately settling final try pass at the deadline', async () => {
-    const start = Date.now();
-    const tries: number[] = [];
-    await e2eExpect(async () => {
-      await Promise.resolve();
-      const elapsed = Date.now() - start;
-      tries.push(elapsed);
-      e2eExpect(elapsed).toBeGreaterThanOrEqual(900);
-    }).toPass({ timeout: 1200 });
-    vexpect(tries).toEqual([0, 100, 350, 850, 1200]);
-  });
-
-  it('tries at a phase deadline before the phase cancels', async () => {
-    const live = attempt({ assertionTimeout: 20, deadlineMs: 150 });
-    try {
-      const start = Date.now();
-      await e2eExpect(() => e2eExpect(Date.now() - start).toBe(150)).toPass({ intervals: [1000] });
-      vexpect(Date.now() - start).toBe(150);
-    } finally {
-      live.end();
-    }
   });
 
   it('times out when a synchronous block passes after the deadline', async () => {

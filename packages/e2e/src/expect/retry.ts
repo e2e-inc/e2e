@@ -50,23 +50,17 @@ async function sample(
     } catch (error) {
       result = { error };
     }
-    // A sample counts if it settles within its remaining time, with a final
-    // sample allowed to settle in its starting turn in under one millisecond.
+    // A sample counts if it settles within the time that remained when it started.
     const deadline = currentDeadline();
-    const remaining = deadline.remaining(startedAt);
-    const elapsed = performance.now() - start;
-    const late = remaining === 0 ? elapsed >= 1 : elapsed > remaining;
+    const late = performance.now() - start > deadline.remaining(startedAt);
     if (late || 'error' in result) cutoff.abort();
     return late ? { cut: deadline } : result;
   }, readSignal);
   const cancellable = signal === undefined ? work : withAbort(work, signal, cancelledError);
   for (;;) {
     const deadline = currentDeadline();
-    const remaining = deadline.remaining();
     try {
-      if (remaining > 0) return await withTimeout(cancellable, remaining, () => READ_HUNG);
-      const result = await Promise.race([cancellable, new Promise<undefined>((resolve) => process.nextTick(resolve, undefined))]);
-      if (result !== undefined) return result;
+      return await withTimeout(cancellable, deadline.remaining(), () => READ_HUNG);
     } catch (error) {
       if (error !== READ_HUNG) throw error;
     }
@@ -128,7 +122,6 @@ export function retry(
     let last: FailedSample | undefined;
     let index = 0;
     let interval: number | undefined;
-    let finalAt: Deadline | undefined;
 
     const assertionFailure = (deadline: Deadline, endedAt: number): TestError => {
       const ending = deadline === own
@@ -146,8 +139,7 @@ export function retry(
       for (;;) {
         let deadline = currentDeadline();
         if (signal?.aborted) throw abortError(signal, cancelledError);
-        if (!deadline.expired() || finalAt === deadline) {
-          finalAt = undefined;
+        if (!deadline.expired()) {
           const result = await sample(read, currentDeadline, signal);
           if (signal?.aborted) throw abortError(signal, cancelledError);
           if ('cut' in result) {
@@ -159,14 +151,11 @@ export function retry(
             if ('value' in outcome) return outcome.value;
             last = outcome;
             deadline = currentDeadline();
+            interval = intervals[index++] ?? interval;
+            const pause = interval ?? 0;
             const remaining = deadline.remaining();
-            if (remaining > 0) {
-              interval = intervals[index++] ?? interval;
-              const pause = interval ?? 0;
-              if (pause >= remaining) finalAt = deadline;
-              await sleep(Math.min(pause, remaining), signal);
-              continue;
-            }
+            if (remaining > 0) await sleep(Math.min(pause, remaining), signal);
+            if (pause < remaining || currentDeadline() !== deadline) continue;
           }
         }
         if (signal?.aborted) throw abortError(signal, cancelledError);
