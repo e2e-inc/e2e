@@ -17,12 +17,12 @@ import { keyboardBand, projectSnapshot, screenRoot, screenTitle } from '../../sr
 const ROOT = path.join(import.meta.dirname, '../fixtures/snapshots');
 const UPDATE = process.env['E2E_GOLDEN_UPDATE'] === '1';
 /**
- * Attributes the tree leaves out: `label`, `resource-id`, and `content-desc`
- * restate the text, the test id, and the name, and `class` is the raw type on
+ * Attributes the tree leaves out: `label` and `resource-id`
+ * restate the text and the test id, and `class` is the raw type on
  * every node, which neither the model's text nor a locator reads.
  * `node-attributes.test.ts` covers them.
  */
-const RESTATED_ATTRIBUTES = new Set(['label', 'resource-id', 'content-desc', 'class']);
+const RESTATED_ATTRIBUTES = new Set(['label', 'resource-id', 'class']);
 const STATES = ['checked', 'disabled', 'selected', 'expanded', 'pressed', 'focused', 'hidden', 'secure'] as const;
 
 /** One line per node: role, name, text, value, states, test id, and attributes; geometry is left out as capture noise. */

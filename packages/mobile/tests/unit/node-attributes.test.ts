@@ -59,8 +59,10 @@ describe('device node attributes', () => {
     const view = { mintId: () => 'n1', viewport: { width: 400, height: 800 } };
     const icon = projectSnapshot([{ index: 0, type: 'android.widget.ImageButton', label: 'Close', text: '' }], view);
     expect(icon.roots[0]?.attributes).toEqual({ label: 'Close', class: 'android.widget.ImageButton', 'content-desc': 'Close' });
-    const text = projectSnapshot([{ index: 0, type: 'android.widget.TextView', label: 'Log in', text: 'Log in' }], view);
+    const text = projectSnapshot([{ index: 0, type: 'android.widget.TextView', label: 'Log in' }], view);
     expect(text.roots[0]?.attributes).toEqual({ label: 'Log in', class: 'android.widget.TextView' });
+    const same = projectSnapshot([{ index: 0, type: 'android.widget.Button', label: 'Save', text: 'Save' }], view);
+    expect(same.roots[0]?.attributes).toEqual({ label: 'Save', class: 'android.widget.Button' });
     const hint = projectSnapshot([{ index: 0, type: 'android.widget.EditText', label: 'Type your name', text: '', hintShowing: true }], view);
     expect(hint.roots[0]?.attributes?.label).toBeUndefined();
     expect(hint.roots[0]?.attributes?.['content-desc']).toBeUndefined();

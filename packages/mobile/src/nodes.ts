@@ -443,7 +443,7 @@ function nonEmpty(value: string | undefined): string | undefined {
 function nodeAttributes(
   source: RawNode,
   android: boolean,
-  projected: { readonly label: string | undefined; readonly identifier: string | undefined; readonly placeholder: string | undefined },
+  projected: { readonly identifier: string | undefined; readonly placeholder: string | undefined },
 ): Record<string, string> | undefined {
   const description = nonEmpty(source.contentDescription);
   const descriptionOnly =
@@ -451,7 +451,7 @@ function nodeAttributes(
   const contentDescription = android ? (description ?? descriptionOnly) : undefined;
   const ownText = source.hintShowing === true ? undefined : nonEmpty(source.label);
   const entries: [string, string | undefined][] = [
-    ['label', android ? (description ?? ownText) : projected.label],
+    ['label', android ? (description ?? ownText) : nonEmpty(source.label)],
     ['resource-id', projected.identifier],
     ['class', nonEmpty(source.type === undefined ? undefined : elementType(source.type))],
     ['content-desc', contentDescription],
@@ -630,7 +630,7 @@ export function projectSnapshot(
     const label = folded === undefined ? nonEmpty(source.label) : folded.label;
     const name = nonEmpty(source.contentDescription) ?? label;
     const placeholder = folded?.placeholder ?? nonEmpty(source.placeholder);
-    const attributes = nodeAttributes(source, android, { label, identifier, placeholder });
+    const attributes = nodeAttributes(source, android, { identifier, placeholder });
     const projected: { node: SemanticNode | undefined } = { node: undefined };
     const entry: ProjectedNode = {
       id,

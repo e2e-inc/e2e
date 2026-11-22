@@ -451,6 +451,8 @@ describe('snapshot projection', () => {
     expect(empty.index.map((entry) => entry.node.name)).toEqual(['with-kotlin-multiplatform', 'Name']);
     expect(empty.index[1]?.node).toMatchObject({ role: 'textbox', name: 'Name', attributes: { placeholder: 'Ada Lovelace' } });
     expect(empty.index[1]?.node.children).toBeUndefined();
+    // getAttribute('label') is the device's own label, as Appium reads it, not the folded name.
+    expect(empty.index[1]?.node.attributes?.['label']).toBe('Name, Ada Lovelace');
     // Typed text drops the placeholder from the label and is the value.
     const typed = field('Name', [], { value: 'Grace' });
     expect(typed.index[1]?.node).toMatchObject({ name: 'Name', value: 'Grace' });
