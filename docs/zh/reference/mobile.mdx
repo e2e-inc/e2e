@@ -401,6 +401,7 @@ test('offline banner', { platforms: ['android'] }, async ({ app, device, screen 
 | [`setClipboard`](#setclipboard) | `Promise<void>` |
 
 每个异步方法都会记录为名为 `device.<method>` 的步骤，受 `config.actionTimeout` 限制。`back`、`home`、`lock`、`unlock`、`alert`、`dismissKeyboard`、`setOrientation` 和 `fold` 在 [`transition`](#transition) 预算中计为操作。以下各条目展示相应成员的声明；它们使用的类型见[类型](#device-fixture)。
+
 | 抛出错误 | 发生条件 |
 | --- | --- |
 | `APP_NOT_OPEN` | 会话丢失。 |
