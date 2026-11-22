@@ -112,7 +112,7 @@ bunx e2e init --yes --gateway openrouter --skills .agents/skills --mcp .mcp.json
 | Option | Description |
 | --- | --- |
 | `[directory]` | Where to scaffold; created when missing. Default: the working directory. |
-| `-y`, `--yes` | Skips the prompts. For a fresh project, defaults to the Web engine, Vercel AI Gateway, both skill directories, all three MCP config files, no CI pipeline, and no install. |
+| `-y`, `--yes` | Skips the prompts. Defaults to the Web engine and Vercel AI Gateway when creating a config, no CI pipeline, and no install. If no existing e2e skill locations or MCP registrations are detected for an option, that option defaults to both skill directories or all three MCP config files, respectively. |
 | `--example <name>` | Starts from an example app: `with-vite`, `with-next`, `with-astro`, `with-angular`, `with-expo`, `with-swiftui`, `with-compose`, `with-kotlin-multiplatform`, `with-flutter`, or `with-maui`. The `with-` prefix is optional. See [Starting from an example](#starting-from-an-example). |
 | `--engine <ids>` | The engines for a new config: `web`, `mobile`, or `none`. Comma-separated or repeated; `web,mobile` writes a target for each. Default: asked. |
 | `--gateway <id>` | The model gateway for agent steps in a new config: `vercel`, `openrouter`, `openai-compatible`, `chatgpt`, `copilot`, `opencode-console`, `grok`, or `none`. Default: asked. |
