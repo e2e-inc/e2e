@@ -422,6 +422,16 @@ describe('a key only the agent is given', () => {
     expect(prompt).toContain('Log in with <secret:appPassword> when asked.');
   });
 
+  it('is redacted when it is the token Claude Code signs in with, which a failed start quotes', async () => {
+    const token = 'sk-ant-oat01-test-claude-code-4d9a1f7c2e6b';
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', undefined);
+    const directory = project(['@agentclientprotocol/claude-agent-acp']);
+    const executor = inProject(directory, () => claudeCode({ env: { CLAUDE_CODE_OAUTH_TOKEN: token, ACP_STARTUP_STDERR: `fatal: invalid token ${token}\n` } }));
+    const failure = await stepFailure(executor);
+    expect(failure).toContain('the agent exited (code 3): fatal: invalid token <secret:CLAUDE_CODE_OAUTH_TOKEN>');
+    expect(failure).not.toContain(token.slice(-12));
+  });
+
   it('builds an executor with no env of its own', () => {
     expect(acp({ command: process.execPath, args: [AGENT] }).name).toBe('acp');
   });

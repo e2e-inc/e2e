@@ -248,7 +248,7 @@ can't put it in a report. Each shows as `<secret:NAME>`.
 
 | Source | Name in the marker |
 | --- | --- |
-| The key variable of each [model provider](/models), such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AI_GATEWAY_API_KEY`, and `OPENROUTER_API_KEY`, plus `ANTHROPIC_AUTH_TOKEN`, `CODEX_API_KEY`, `LLM_API_KEY`, `OPENCODE_API_KEY`, and `VERCEL_OIDC_TOKEN`, in the environment of the run or of an `acp()` agent | The variable |
+| The key variable of each [model provider](/models), such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AI_GATEWAY_API_KEY`, and `OPENROUTER_API_KEY`, plus `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `CODEX_API_KEY`, `LLM_API_KEY`, `OPENCODE_API_KEY`, and `VERCEL_OIDC_TOKEN`, in the environment of the run or of an `acp()` agent | The variable |
 | A [subscription login](/subscriptions) the run sends | `<provider>.access-token`, `<provider>.refresh-token` |
 | The login `codex()` finds in `auth.json` under the agent's `CODEX_HOME`, or `.codex` in its home | `codex.api-key`, `codex.id-token`, `codex.access-token`, `codex.refresh-token` |
 | A key you register with [`registerProviderKey`](/executors#provider-keys) | The name you give |
