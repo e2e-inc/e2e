@@ -1118,10 +1118,12 @@ export class DesktopSurface {
    * never by setting the value, which would put a missing option in an
    * editable combo box as free text. A stale ref is `NODE_STALE`, so the
    * harness locates the list again. For a pop-up button agent-desktop opens
-   * the menu to find the option; when it cannot, it leaves the menu open,
-   * which is closed again here. A failure after the menu opened stays one
-   * that may have chosen something: a menu left open does not show which
-   * control opened it, or that the option is missing.
+   * the menu to find the option; when it cannot, it may leave the menu open,
+   * which is closed again here with Escape. A failure after the menu opened
+   * stays one that may have chosen something: a menu left open does not show
+   * which control opened it, or that the option is missing. A menu Escape
+   * cannot close (an app in the background takes no key) is named in the
+   * error, since it covers the window for the steps after.
    */
   private async select(binding: NodeBinding, label: string, operation: OperationContext): Promise<void> {
     const ref = this.refOf(binding, 'select');
@@ -1130,34 +1132,43 @@ export class DesktopSurface {
     } catch (cause) {
       // `select` answers ELEMENT_NOT_FOUND for an option it cannot find; a list that is gone is a stale ref.
       if (cause instanceof AgentDesktopFailure && cause.notDelivered && cause.code === 'ELEMENT_NOT_FOUND') throw notActionable(`the list has no option "${label}"`);
-      // A menu that cannot be closed leaves the select's own failure to report.
-      if (cause instanceof AgentDesktopFailure && !cause.notDelivered && (await this.closeOpenMenu(binding.windowId, operation).catch(() => false))) {
-        throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `select "${label}": agent-desktop opened the list's menu and did not choose it; the list may have no option "${label}". The menu was closed`, { retryable: false, cause });
+      if (cause instanceof AgentDesktopFailure && !cause.notDelivered) {
+        const menu = await this.closeOpenMenu(binding.windowId, operation).catch(() => 'unknown' as const);
+        if (menu === 'closed') {
+          throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `select "${label}": agent-desktop opened the list's menu and could not confirm a choice, so whether "${label}" was chosen is unknown; the list may have no option "${label}". The menu was closed`, { retryable: false, cause });
+        }
+        if (menu === 'open') {
+          const why = this.options.headed ? 'Escape did not close it' : 'the app runs in the background, which takes no key, so it could not be closed; desktop({ headed: true }) closes it with Escape';
+          throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `select "${label}": ${cause.message} (the input may have reached the app). The list's menu is still open: ${why}`, { retryable: false, cause });
+        }
       }
       throw translate(cause, `select "${label}"`, true);
     }
   }
 
   /**
-   * Closes a menu the launched process has open, with Escape. True only when
-   * a menu was open and is closed now; false when there was none, or it
-   * cannot be told whose it is (another copy shares the app's name).
+   * Closes a menu the launched process has open, with Escape: `closed` when
+   * one was open and is closed now, `none` when there was none, `open` when
+   * one is still open, and `unknown` when it cannot be told whose a menu is
+   * (another copy shares the app's name).
    */
-  private async closeOpenMenu(window: string | undefined, operation: OperationContext): Promise<boolean> {
+  private async closeOpenMenu(window: string | undefined, operation: OperationContext): Promise<'closed' | 'none' | 'open' | 'unknown'> {
     const { appName, pid } = this;
-    if (appName === undefined || pid === undefined || window === undefined) return false;
+    if (appName === undefined || pid === undefined || window === undefined) return 'unknown';
     const menus = async (): Promise<number | undefined> => {
       const listed = await this.run<{ pid?: number; surfaces?: readonly { type?: string }[] }>(['list-surfaces', '--app', appName], { label: 'list surfaces', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs }).catch(() => undefined);
       if (listed?.pid !== pid) return undefined;
       return (listed.surfaces ?? []).filter((surface) => surface.type?.includes('menu') === true).length;
     };
-    if (((await menus()) ?? 0) === 0) return false;
-    await this.sendKey('escape', window, 'close menu', operation);
+    const before = await menus();
+    if (before === undefined) return 'unknown';
+    if (before === 0) return 'none';
+    if (!(await this.sendKey('escape', window, 'close menu', operation).then(() => true, () => false))) return 'open';
     // A menu takes a moment to close after Escape.
     const until = Date.now() + Math.min(MENU_CLOSE_MS, operation.timeoutMs);
     for (;;) {
-      if ((await menus()) === 0) return true;
-      if (Date.now() + LAUNCH_POLL_MS >= until) return false;
+      if ((await menus()) === 0) return 'closed';
+      if (Date.now() + LAUNCH_POLL_MS >= until) return 'open';
       await sleep(LAUNCH_POLL_MS, operation.signal);
     }
   }
