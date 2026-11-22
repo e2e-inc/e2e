@@ -123,6 +123,9 @@ const INHERITED_ENV = new Set(['HOME', 'USER', 'LOGNAME', 'SHELL', 'PATH', 'TMPD
 /** Launch arguments every launch gets first: no window or document the app saved at its last quit comes back. */
 const FRESH_STATE_ARGUMENTS = ['-ApplePersistenceIgnoreState', 'YES'];
 
+/** The most text agent-desktop's `type` takes, in UTF-8 bytes (its `MAX_TEXT_LEN`). */
+const MAX_TYPE_BYTES = 10_000;
+
 /** How many node bindings stay usable; the oldest go first. */
 const MAX_BINDINGS = 4096;
 
@@ -1231,6 +1234,9 @@ export class DesktopSurface {
 
   /** The keyboard capability's `type` (declared with `headed` only): keystrokes into the focused field, which a fresh snapshot names. */
   async typeText(text: string, options: { readonly replace: boolean }, context: OperationContext): Promise<void> {
+    // What agent-desktop's type refuses, refused before anything is sent: with replace, the select-all and delete would already have emptied the field.
+    if (Buffer.byteLength(text, 'utf8') > MAX_TYPE_BYTES) throw notActionable(`agent-desktop types at most ${MAX_TYPE_BYTES} bytes of text at once; this is ${Buffer.byteLength(text, 'utf8')}`);
+    if (text.includes('\0')) throw notActionable('agent-desktop cannot type a NUL character');
     const operation = withDeadline(context);
     const screen = await this.capture(operation);
     const focused = screen === undefined ? undefined : [...screen.bindings.values()].find((binding) => binding.ref !== undefined && binding.states?.focused === true);

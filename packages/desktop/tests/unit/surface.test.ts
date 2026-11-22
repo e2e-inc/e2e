@@ -524,6 +524,17 @@ describe('DesktopSurface', () => {
     expect(actions(fake.calls()).filter((key) => key !== 'snapshot')).toEqual([]);
   });
 
+  it('refuses text agent-desktop cannot type before any key is sent, so a replace never empties the field for nothing', async () => {
+    const { surface, fake } = await launched({}, { options: { headed: true } });
+    for (const text of ['é'.repeat(5_001), 'a\0b']) {
+      await expect(surface.typeText(text, { replace: true }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+    }
+    expect(actions(fake.calls()).filter((key) => key !== 'snapshot')).toEqual([]);
+    // At the limit is fine.
+    await surface.typeText('a'.repeat(10_000), { replace: false }, operation());
+    expect(fake.calls().filter((call) => call.key === 'type')).toHaveLength(1);
+  });
+
   it('reports a type after a clear that changed the field as possibly committed', async () => {
     const { surface } = await launched({ type: [failure('STALE_REF', 'not_delivered')] });
     await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });
