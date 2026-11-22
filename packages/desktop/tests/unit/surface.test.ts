@@ -415,6 +415,19 @@ describe('DesktopSurface', () => {
     await launched((pid) => ({ 'list-windows': [{ ok: true, data: [], sleepMs: 9_100 }, { ok: true, data: [{ id: 'w-mine', title: 'Spike Form', pid, process_instance: 'instance-1', is_focused: true }] }] }), { openTimeoutMs: 15_000, observe: false });
   }, 30_000);
 
+  it('says the screen is locked when macOS reports it so, rather than that the app opened no window', async () => {
+    const locked = artifacts();
+    writeFileSync(path.join(locked, 'ioreg'), "#!/bin/sh\nprintf '<key>CGSSessionScreenIsLocked</key>\\n<true/>\\n'\n", { mode: 0o755 });
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${locked}${path.delimiter}${originalPath}`;
+    try {
+      // What a locked screen gives: a window list that finishes and lists none.
+      await expect(launched({ 'list-windows': [{ ok: true, data: [] }] }, { openTimeoutMs: 15_000 })).rejects.toThrow(/screen is locked/);
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  }, 30_000);
+
   it('reports an open that ran out of its own budget as a timeout, not a locked screen', async () => {
     const hidden = { ok: false, error: { code: 'ACTION_NOT_SUPPORTED', message: 'not exposed', details: { kind: 'window_without_accessibility_element' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
     await expect(launched({ snapshot: [hidden] }, { openTimeoutMs: 1_500 })).rejects.toMatchObject({ code: 'OPERATION_TIMEOUT' });
