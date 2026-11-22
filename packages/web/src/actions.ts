@@ -1,7 +1,7 @@
 /** Locator action dispatch for the Playwright engine. */
 
 import type { ElementHandle, Page } from 'playwright-core';
-import { Deadline, EngineError, pollCondition, type KeyModifier, type LocatorAction, type NodeRef, type PointerAction, type ViewportPoint } from '@e2e-dev/core/engine';
+import { Deadline, EngineError, pollCondition, TestError, type KeyModifier, type LocatorAction, type NodeRef, type PointerAction, type ViewportPoint } from '@e2e-dev/core/engine';
 import {
   asActionable,
   isClassified,
@@ -14,6 +14,7 @@ import {
   performPointerDrag,
   performViewportSwipe,
   POST_DISPATCH_PATTERN,
+  statPath,
   translatePwError,
   targetPage,
   type ActionTarget,
@@ -231,9 +232,15 @@ function radioKind(element: ElementHandle<Element>): Promise<'native' | 'aria' |
  * Playwright retargets a label to its control. Anything else is clicked
  * with the chooser already awaited, and fails if no chooser opens. Every
  * step shares the operation's deadline, and a cancelled operation sets no
- * files, even when its chooser opens after the cancel.
+ * files, even when its chooser opens after the cancel. A path that does not
+ * exist or sits under a directory the runner cannot search fails before
+ * anything is clicked.
  */
 async function uploadFiles(target: ActionTarget, paths: readonly string[], operation: ConnectionBudget): Promise<void> {
+  for (const file of paths) {
+    const stats = statPath(file);
+    if (stats instanceof Error) throw new TestError('INVALID_ARGUMENT', `setInputFiles path does not exist or is under a directory the runner cannot search: ${stats.message}`);
+  }
   const deadline = new Deadline(operation.timeoutMs);
   const remaining = (): number => Math.max(1, deadline.remaining());
   const element =
@@ -316,6 +323,23 @@ export async function dispatchLocatorAction(
       // ElementHandle.focus takes no timeout: the element is already resolved.
       if (target.kind === 'locator') await target.locator.focus({ timeout });
       else await target.element.focus();
+      return;
+    case 'blur':
+      if (target.kind === 'locator') await target.locator.blur({ timeout });
+      else {
+        const attached = await target.element.evaluate((node) => {
+          const view = node.ownerDocument.defaultView;
+          if (!node.isConnected || view === null) return false;
+          // Bypass instance overrides. Prototype overrides still apply in the page world.
+          if (node instanceof view.HTMLElement) view.HTMLElement.prototype.blur.call(node);
+          else if (node instanceof view.SVGElement) view.SVGElement.prototype.blur.call(node);
+          else if (typeof view.MathMLElement === 'function' && node instanceof view.MathMLElement) {
+            view.MathMLElement.prototype.blur.call(node);
+          }
+          return true;
+        });
+        if (!attached) throw new EngineError('NODE_STALE', 'element is detached', { retryable: true });
+      }
       return;
     case 'hover':
       await locator.hover({ timeout });

@@ -20,6 +20,7 @@ import { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
 import { defineEngine, LOCATOR_ACTION_KINDS } from '@e2e-dev/core/lib/engine/index';
 import { createEngineSession } from '@e2e-dev/core/lib/engine/session';
 import { describeExpression, filterExpression, indexExpression, roleQuery, testIdQuery, textQuery } from '@e2e-dev/core/lib/locator/expression';
+import { screenOver } from '../helpers/screen-over.ts';
 import { snapshot } from '../helpers/snapshot.ts';
 import { useFakeTime } from '../helpers/fake-time.ts';
 
@@ -122,6 +123,29 @@ function makeEngine(script: ScreenScript, options: { actionTimeout?: number; bud
   });
   return { engine, calls, origins, resolveTimeouts, performed };
 }
+
+describe('locator.blur', () => {
+  it.each([true, false])('honors the declared capability (supported: %s)', async (supported) => {
+    const locate = vi.fn(async () => [NODE]);
+    const perform = vi.fn(async () => undefined);
+    const { screen } = screenOver({
+      actions: supported ? ['blur'] : ['tap'],
+      locate,
+      perform,
+      observe: () => snapshot([NODE]),
+      timeoutMs: 1_000,
+    });
+    const blur = screen.getByRole('button', 'Submit').blur();
+    if (supported) {
+      await blur;
+      expect(perform).toHaveBeenCalledWith(expect.anything(), { kind: 'blur' }, expect.anything());
+    } else {
+      await expect(blur).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+      expect(locate).not.toHaveBeenCalled();
+      expect(perform).not.toHaveBeenCalled();
+    }
+  });
+});
 
 describe('LocatorEngine read retry contract', () => {
   it('shares the original deadline with a resolution after a stale read', async () => {

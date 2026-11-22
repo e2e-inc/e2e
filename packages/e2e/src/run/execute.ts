@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { TargetSession } from '@e2e-dev/core/lib/engine/surface';
 import { isCiMode, type ResolvedConfig } from '@e2e-dev/core/lib/config/resolve';
 import { classifyError, ConfigurationError, E2EError, serializeError, sanitizeRecordedText, truncateUtf8, TestError, TestTimeoutError, withHint, type SerializedError } from '@e2e-dev/core/lib/internal/errors';
-import { isRuntimeSkip, type RuntimeSkip } from '../internal/skip.ts';
+import { isRuntimeSkip, runtimeSkipCause, type CaughtRuntimeSkip } from '../internal/skip.ts';
 import { lateExpectedFailureError } from '@e2e-dev/core/lib/internal/expected-failure';
 import { lateTimeoutError } from '@e2e-dev/core/lib/internal/test-timeout';
 import { settleExpectedFailure } from './expected-failure.ts';
@@ -12,7 +12,7 @@ import type { ExecutorAttempt } from '@e2e-dev/core/lib/agent/executor';
 import { isModelUnreachable } from '@e2e-dev/core/lib/agent/error';
 import { withAiTraceScope } from '@e2e-dev/core/lib/internal/ai-trace';
 import { resultId, timestamp, uuidv7 } from '@e2e-dev/core/lib/internal/ids';
-import { Deadline, withAbort, withTimeout } from '@e2e-dev/core/lib/internal/time';
+import { abortError, cancelledError, Deadline, withAbort, withTimeout } from '@e2e-dev/core/lib/internal/time';
 import { createAgentCacheContext, settleStagedTraces } from '@e2e-dev/core/lib/cache/context';
 import { storedRecordingsFor, type StoredRecordings } from '@e2e-dev/core/lib/cache/rekeyed';
 import type { ModuleRegistration, RegisteredTest } from '../collect/registry.ts';
@@ -45,11 +45,12 @@ import { interruptedInPhase, interruptedSkip, pairKey, unitResult, unstartedResu
 import { carriedSecrets, processSecrets, redactForSession, sessionLedger, staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
 import { SessionStaging } from '@e2e-dev/core/lib/run/sessions';
 import { isOwnStep, StepRecorder, type StepHoldRequest, type StepProgress } from '@e2e-dev/core/lib/run/steps';
-import { holdAttemptSteps, readHeldScreen, type AttemptHolds, type StepHold, type StepHoldContext } from './step-hold.ts';
+import { holdAttemptSteps, readHeldScreen, type AttemptHolds, type HoldReads, type StepHold } from './step-hold.ts';
 import { HeldTestTools } from './worker/held-test-tools.ts';
 import { WorkerModels } from '@e2e-dev/core/lib/run/worker-models';
 import { classifyAttemptStatus, EngineSessions, type EngineSessionsOptions } from '@e2e-dev/core/lib/run/engine-sessions';
 import type { EngineDisposeContext } from '@e2e-dev/core/lib/engine/index';
+import { numberedAppLogLines } from '../report/failure-text.ts';
 
 export interface ExecutionEvents {
   onResult?(result: ResultRecord): void;
@@ -93,11 +94,12 @@ type ExecutorHold = {
   /**
    * Asks the runner at each pause, and before each step when `steps` is set.
    * The runner can call `readScreen` to read the screen during the wait.
+   * The attempt's app log is available through `readLogs` during the wait.
    */
   readonly ask: (
     step: StepHold,
     signal: AbortSignal,
-    readScreen: StepHoldContext['readScreen'],
+    reads: HoldReads,
     tools: HeldTestTools,
   ) => Promise<void>;
   /**
@@ -587,8 +589,8 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
 
     let failure: E2EError | undefined;
     let failurePhase: AttemptPhase | undefined;
-    /** Set when the body (or a beforeEach) skipped the test with `test.skip(...)`. */
-    let skipped: RuntimeSkip | undefined;
+    /** Set when the body (or a beforeEach) skipped the test with `test.skip(...)` or `test.fixme(...)`. */
+    let skipped: CaughtRuntimeSkip | undefined;
     /** Why the attempt is expected to fail: the `fail` option, else the first `test.fail(...)` that marked it. */
     let expectedFailure = pair.options.expectedFailure;
     let phase: AttemptPhase = 'launch';
@@ -724,9 +726,9 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
                   `target "${this.target.name}" has no engine state capability for session.save()`,
                 );
               }
-              const state = await session.captureState(
-                this.op(attemptId, this.config.actionTimeout, attemptAbort.signal),
-              );
+              const signal = budget.signal;
+              const state = await session.captureState(this.op(attemptId, this.config.actionTimeout, signal));
+              if (signal.aborted) throw abortError(signal, cancelledError);
               context.staging.stage(
                 name,
                 state,
@@ -778,7 +780,15 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
             repeat: pair.repeat,
             title: pair.test.titlePath.join(' › '),
           },
-          ask: (step, signal, readScreen) => hold.ask(step, signal, readScreen, tools),
+          ask: (step, signal, readScreen) => hold.ask(
+            step,
+            signal,
+            {
+              readScreen,
+              readLogs: () => Promise.resolve(numberedAppLogLines(steps.all(), steps.appLog(), 'text').map(({ line }) => line)),
+            },
+            tools,
+          ),
           readScreen: (signal: AbortSignal) => readHeldScreen(session, this.op(attemptId, this.config.actionTimeout, signal), screens),
         });
       }
@@ -792,6 +802,10 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
           owner: 'suite',
           testKind: pair.test.kind,
           assertionTimeout: this.config.assertionTimeout,
+          toPass: this.config.toPass,
+          recordSecondaryError: (error) => {
+            secondaryErrors.push(serializeError(error, { phase, projectRoot: this.config.projectRoot, redact }));
+          },
           budget,
           soft,
           ...(context.kind === 'ordinary'
@@ -980,14 +994,14 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       // recording is worth.
       if (failure === undefined && skipped !== undefined) {
         record.status = 'skipped';
-        record.skip = { cause: 'explicit', reason: truncateUtf8(sanitizeRecordedText(redact(skipped.reason)), 8192) };
+        record.skip = { cause: runtimeSkipCause(skipped), reason: truncateUtf8(sanitizeRecordedText(redact(skipped.reason)), 8192) };
       } else if (failure === undefined) {
         record.status = 'passed';
       } else {
         record.status = classifyAttemptStatus(failure, timedOut, this.interruptSignal.aborted);
         record.error = serializeError(failure, { phase: failurePhase ?? phase, projectRoot: this.config.projectRoot, redact });
         // A failure outranks the skip; the reason stays beside it.
-        if (skipped !== undefined) record.skip = { cause: 'explicit', reason: truncateUtf8(sanitizeRecordedText(redact(skipped.reason)), 8192) };
+        if (skipped !== undefined) record.skip = { cause: runtimeSkipCause(skipped), reason: truncateUtf8(sanitizeRecordedText(redact(skipped.reason)), 8192) };
         // A failure that first landed in teardown has had no look yet.
         await captureEvidence();
       }
