@@ -485,6 +485,24 @@ describe('a key the agent repeats where its text is cut', () => {
     expect(failure).not.toContain('fatal:');
   });
 
+  it('decodes stderr as one UTF-8 stream when a character spans writes', async () => {
+    const key = 'synthetic-token-café-test-value';
+    vi.stubEnv('OPENAI_API_KEY', key);
+    const bytes = Buffer.from(`fatal: ${key} rejected\n`);
+    const split = bytes.indexOf(Buffer.from('é')) + 1;
+    const failure = await stepFailure(acp({
+      command: process.execPath,
+      args: [AGENT],
+      env: {
+        ACP_STDERR_BYTES: '1',
+        ACP_STARTUP_STDERR: bytes.subarray(0, split).toString('latin1'),
+        ACP_STARTUP_STDERR_REST: bytes.subarray(split).toString('latin1'),
+      },
+    }));
+    expect(failure).toContain('fatal: <secret:OPENAI_API_KEY> rejected');
+    expect(failure).not.toContain('synthetic-token-caf');
+  });
+
   it('redacts a secret that spans lines before taking the last line of the reply', async () => {
     const key = `sk-test-two-line-key\nsecond-line-of-the-key-9d3f`;
     registerProviderKey('agent.two-line-key', key);

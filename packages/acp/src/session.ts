@@ -130,9 +130,9 @@ export async function startSession(
     env,
   });
   let stderr = '';
-  child.stderr.on('data', (data: Buffer) => {
+  child.stderr.setEncoding('utf8').on('data', (data: string) => {
     // Kept raw, and far longer than what is shown of it: a key in pieces across two writes is whole again here.
-    stderr = (stderr + data.toString()).slice(-STDERR_KEPT);
+    stderr = (stderr + data).slice(-STDERR_KEPT);
   });
   // A dead agent must not take the test worker down with a pipe error.
   child.stdin.on('error', () => undefined);

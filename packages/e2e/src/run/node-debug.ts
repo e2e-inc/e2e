@@ -12,6 +12,7 @@
  */
 
 import { debuglog } from 'node:util';
+import { redactError } from '@e2e-dev/core/lib/run/secrecy';
 
 const SECTION_PRINTS: Readonly<Record<string, string>> = {
   child_process: 'the environment of every process e2e starts',
@@ -43,5 +44,5 @@ export function warnOfNodeDebug(prints: (section: string) => boolean = nodePrint
   if (warned) return;
   warned = true;
   const warning = nodeDebugWarning(process.env['NODE_DEBUG'], prints);
-  if (warning !== undefined) process.stderr.write(`${warning}\n`);
+  if (warning !== undefined) process.stderr.write(`${redactError(warning)}\n`);
 }

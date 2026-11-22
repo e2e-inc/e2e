@@ -140,11 +140,13 @@ log({ pid: process.pid });
 // A short-lived child holds stdout open, so the client sees the exit, with its stderr, before the connection closes.
 if (process.env['ACP_STARTUP_STDERR'] !== undefined) {
   spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', 'inherit', 'ignore'], detached: true }).unref();
-  await new Promise((resolve) => process.stderr.write(process.env['ACP_STARTUP_STDERR']!, resolve));
+  // Latin-1 lets a fixture supply individual bytes, including half of a UTF-8 character.
+  const encoding = process.env['ACP_STDERR_BYTES'] === '1' ? 'latin1' : 'utf8';
+  await new Promise((resolve) => process.stderr.write(process.env['ACP_STARTUP_STDERR']!, encoding, resolve));
   const rest = process.env['ACP_STARTUP_STDERR_REST'];
   if (rest !== undefined) {
     await new Promise((resolve) => setTimeout(resolve, 50));
-    await new Promise((resolve) => process.stderr.write(rest, resolve));
+    await new Promise((resolve) => process.stderr.write(rest, encoding, resolve));
   }
   process.exit(3);
 }

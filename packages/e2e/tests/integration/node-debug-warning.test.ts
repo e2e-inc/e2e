@@ -47,21 +47,19 @@ function runWith(value: string | undefined): { exitCode: number | null; warnings
   return { exitCode: result.status, warnings };
 }
 
-const OPEN_HOST = new URL('../../dist/run/open-session.js', import.meta.url).href;
-
 /** The `e2e:` lines about NODE_DEBUG a process printed. */
 function warningsIn(result: { stdout: string; stderr: string }): string[] {
   return `${result.stdout}\n${result.stderr}`.split('\n').filter((line) => line.startsWith('e2e:') && line.includes('NODE_DEBUG'));
 }
 
-/** `args` run by Node in a fresh project, with `NODE_DEBUG` set to `value` or unset, and `input` on stdin: the warnings it printed. */
-function warningsOf(args: string[], value: string | undefined, input = ''): string[] {
+/** `args` run by Node in a fresh project, with `NODE_DEBUG` set to `value` or unset, and empty stdin: the warnings it printed. */
+function warningsOf(args: string[], value: string | undefined, extraEnv: NodeJS.ProcessEnv = {}): string[] {
   const project = createProject({ 'tests/none.e2e.ts': '' });
   projects.push(project);
-  const env: NodeJS.ProcessEnv = { ...process.env, CI: '', NO_COLOR: '1', E2E_TELEMETRY_DISABLED: '1' };
+  const env: NodeJS.ProcessEnv = { ...process.env, ...extraEnv, CI: '', NO_COLOR: '1', E2E_TELEMETRY_DISABLED: '1' };
   delete env['NODE_DEBUG'];
   if (value !== undefined) env['NODE_DEBUG'] = value;
-  const result = spawnSync(process.execPath, args, { cwd: project.dir, env, input, encoding: 'utf8', timeout: 60_000, maxBuffer: 256 * 1024 * 1024 });
+  const result = spawnSync(process.execPath, args, { cwd: project.dir, env, input: '', encoding: 'utf8', timeout: 60_000, maxBuffer: 256 * 1024 * 1024 });
   expect(result.error).toBeUndefined();
   return warningsIn(result);
 }
@@ -74,12 +72,20 @@ describe('NODE_DEBUG outside e2e run', () => {
     if (count > 0) expect(warnings[0]).toContain(`NODE_DEBUG=${String(value)}`);
   });
 
+  const openHost = ['--input-type=module', '-e', "import { openHost } from 'e2e/runner'; await openHost({ cwd: process.cwd() }).then(host => host.close(), () => undefined);"];
   // No config in the directory: the host refuses to open, after it has warned.
   it.each([['child_process', 1], [undefined, 0]] as const)('openHost warns %s: %i time(s)', (value, count) => {
-    const script = `const { openHost } = await import(${JSON.stringify(OPEN_HOST)});\nawait openHost({ cwd: process.cwd() }).then((host) => host.close(), () => undefined);\n`;
-    const warnings = warningsOf(['--input-type=module', '-e', script], value);
+    const warnings = warningsOf(openHost, value);
     expect(warnings).toHaveLength(count);
     if (count > 0) expect(warnings[0]).toContain(`NODE_DEBUG=${String(value)}`);
+  });
+
+  it('redacts a known provider key in the warning openHost writes to stderr', () => {
+    const key = 'synthetic-warning-marker-for-redaction';
+    const warnings = warningsOf(openHost, 'net,' + key, { OPENAI_API_KEY: key });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('NODE_DEBUG=net,<secret:OPENAI_API_KEY>');
+    expect(warnings[0]).not.toContain(key);
   });
 });
 
