@@ -76,6 +76,18 @@ describe('StepRecorder.lastVerifiedStepIndex', () => {
     }
   });
 
+  it.each(['CONTEXT_OVERFLOW', 'MODEL_OUTPUT_INVALID'] as const)('drops the raw cause from %s', async (code) => {
+    const key = 'sk-fake-model-error-29c8';
+    const redact = (text: string): string => text.replaceAll(key, '<secret:k>');
+    for (const redactThrown of [false, true]) {
+      const steps = new StepRecorder('attempt', { redact, redactThrown });
+      const thrown = new AgentError(code, `provider said ${key}`, { cause: { responseBody: key } });
+      const caught = await steps.run('agent', 'agent.act', 'x', () => Promise.reject(thrown)).catch((error: unknown) => error);
+      expect(caught).toMatchObject({ code, message: 'provider said <secret:k>' });
+      expect(caught).not.toHaveProperty('cause');
+    }
+  });
+
   it('does not advance on a verification step that failed', async () => {
     const steps = new StepRecorder('attempt');
     await steps.run('assertion', 'expect.toBeVisible', 'the row', pass, { verifies: true });

@@ -600,10 +600,8 @@ export interface SecretsBeside {
   readonly revision: number;
   values(): SecretList;
   /**
-   * The keys the run's model providers and agents sign in with. Redacted
-   * like any value from text the run writes, but they are not the app's
-   * secrets: the app never receives one, so they do not decide whether a
-   * download is rewritten, and a fragment of one is not a match.
+   * The keys the run's model providers and agents sign in with. These
+   * match whole values only, including when the runner scans a download.
    */
   providerKeys(): SecretList;
 }
@@ -651,6 +649,12 @@ export class SecretLedger {
     this.values.push([name, value]);
     this.compiled = undefined;
     return true;
+  }
+
+  /** Whether this ledger or a session beside it holds an app secret value. */
+  get hasAppSecrets(): boolean {
+    return this.values.some(([, value]) => value.length > 0) ||
+      this.beside.values().some(([, value]) => value.length > 0);
   }
 
   /** Whether the ledger redacts anything at all: its own values, the ones beside it, or a provider key. */

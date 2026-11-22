@@ -44,7 +44,8 @@ async function echoingProvider(status: number): Promise<{ server: Server; url: s
   return { server, url: `http://127.0.0.1:${address.port}/v1`, seen };
 }
 
-function config(providerUrl: string, modelId = "'gpt-echo'"): string {
+function config(providerUrl: string, modelId = "'gpt-echo'", judgeId?: string): string {
+  const judge = judgeId === undefined ? '' : `, judge: createOpenAI({ baseURL: ${JSON.stringify(providerUrl)} })(${judgeId})`;
   return `import type { E2EConfig } from 'e2e';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createFakeEngine, FAKE_APP } from '../../helpers/fake-engine.ts';
@@ -54,7 +55,7 @@ export default {
   targets: [{ name: 'fake', platform: 'fake', engine: createFakeEngine({ state: true }).engine, app: FAKE_APP }],
   workers: 1,
   cache: 'off',
-  agents: { default: { model: createOpenAI({ baseURL: ${JSON.stringify(providerUrl)} })(${modelId}) } },
+  agents: { default: { model: createOpenAI({ baseURL: ${JSON.stringify(providerUrl)} })(${modelId})${judge} } },
 } satisfies E2EConfig;
 `;
 }
@@ -213,7 +214,7 @@ describe('a key given as the model id, through e2e run --ai-trace', () => {
 
   beforeAll(async () => {
     provider = await echoingProvider(400);
-    project = createProject({ 'e2e.config.ts': config(provider.url, 'process.env.OPENAI_API_KEY!'), 'tests/echo.e2e.ts': SUITE });
+    project = createProject({ 'e2e.config.ts': config(provider.url, 'process.env.OPENAI_API_KEY!', 'process.env.OPENAI_API_KEY!'), 'tests/echo.e2e.ts': SUITE });
     const env: NodeJS.ProcessEnv = { ...process.env, CI: '', NO_COLOR: '1', E2E_TELEMETRY_DISABLED: '1', OPENAI_API_KEY: key };
     for (const name of ['CODEX_API_KEY', 'ANTHROPIC_API_KEY', 'AI_GATEWAY_API_KEY', 'OPENROUTER_API_KEY', 'NODE_DEBUG']) delete env[name];
     try {
@@ -238,6 +239,10 @@ describe('a key given as the model id, through e2e run --ai-trace', () => {
   it('heads the terminal output with the marker as the model', () => {
     expect(output).toMatch(/model [^\n]*<secret:OPENAI_API_KEY>/);
     expect(piecesOf(key, random, output)).toEqual([]);
+  });
+
+  it('heads the terminal output with the marker as the judge', () => {
+    expect(output).toMatch(/judge [^\n]*<secret:OPENAI_API_KEY>/);
   });
 
   it('writes the marker as the model id in ai-trace.json and the report, and no piece of the key anywhere', () => {

@@ -339,7 +339,10 @@ function redactErrorInPlace(thrown: unknown, redact: (text: string) => string): 
  * of core is rebuilt the same way. Every other error is left to the caller.
  */
 function modelFailure(cause: unknown, redact: (text: string) => string): AgentError | undefined {
-  if (!isAgentError(cause) || cause.code !== 'MODEL_PROVIDER_FAILED') return undefined;
+  if (!isAgentError(cause)) return undefined;
+  if (cause.code !== 'MODEL_PROVIDER_FAILED' && cause.code !== 'CONTEXT_OVERFLOW' && cause.code !== 'MODEL_OUTPUT_INVALID') {
+    return undefined;
+  }
   const error = new AgentError(cause.code, redact(cause.explanation), {
     blocked: cause.blocked,
     ...(cause.screenshot === undefined ? {} : { screenshot: cause.screenshot }),
