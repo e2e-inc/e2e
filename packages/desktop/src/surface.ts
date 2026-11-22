@@ -1323,6 +1323,8 @@ export class DesktopSurface {
     const window = await this.ownWindow(operation);
     if (window === undefined) throw this.chosenWindow === undefined ? invalidState('the app is not running; open it with app.open()') : this.chosenClosed();
     await this.sendKey(combo, window.id, `press ${key}`, operation);
+    // As after every other agent action: the app reacts to the key before the agent reads the screen again.
+    await this.settle(operation);
   }
 
   /**

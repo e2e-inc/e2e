@@ -581,6 +581,13 @@ describe('DesktopSurface', () => {
     expect(fake.calls().filter((call) => call.key === 'type')).toHaveLength(1);
   });
 
+  it("waits out settle after an agent's key press, as after its other actions", async () => {
+    const { surface } = await launched({}, { options: { headed: true, settle: 600 } });
+    const started = Date.now();
+    await surface.pressKey('Tab', operation('agent'));
+    expect(Date.now() - started).toBeGreaterThanOrEqual(550);
+  });
+
   it('reports a type after a clear that changed the field as possibly committed', async () => {
     const { surface } = await launched({ type: [failure('STALE_REF', 'not_delivered')] });
     await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });
