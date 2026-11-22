@@ -926,6 +926,11 @@ export class DesktopSurface {
     const { apps, complete } = await this.run<{ apps?: readonly RawApp[]; complete?: boolean }>(['list-apps', '--app', appName, '--timeout-ms', String(this.toolBudget(operation))], { label: `find ${appName}`, input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
     if (apps?.some((app) => app.pid === pid && app.process_instance === instance) === true) return;
     if (complete === false) throw new EngineError('NODE_STALE', `could not tell whether ${appName} still runs: agent-desktop listed the apps only in part`, { retryable: true, cause: UNREADABLE });
+    // A complete list leaves out a process macOS no longer presents as an app (a prohibited activation policy), which may come back: while it is still the launch's, the read is tried again.
+    const reused = apps?.some((app) => app.pid === pid && app.process_instance !== instance) === true;
+    if (!reused && alive(pid) && (await this.stillLaunched(pid, operation.signal))) {
+      throw new EngineError('NODE_STALE', `${appName} (process ${pid}) still runs, but agent-desktop does not list it as an app now; reading again`, { retryable: true, cause: UNLISTED });
+    }
     throw quit();
   }
 

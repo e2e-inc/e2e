@@ -378,6 +378,13 @@ describe('DesktopSurface', () => {
     expect(await surface.locate(byName, operation())).toHaveLength(1);
   });
 
+  it('reads again, never reports a quit, while the app list leaves out the app that still runs', async () => {
+    // The window list finds no window, and the app list no longer shows the process, which still runs as the launch's.
+    const { surface } = await launched((pid) => ({ 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }, { ok: true, data: [] }], 'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [] } }] }), { observe: false });
+    const username = { kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'username', exact: true } } } as const;
+    await expect(surface.locate(username, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
+  });
+
   it('reads an app with no window as an empty screen', async () => {
     const { surface } = await launched((pid) => ({ 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }, { ok: true, data: [] }] }), { observe: false });
     const matches = await surface.locate({ kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'username', exact: true } } }, operation());
