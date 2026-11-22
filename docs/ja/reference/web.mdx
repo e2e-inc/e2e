@@ -43,6 +43,7 @@ web({ viewport: { width: 390, height: 844 }, locale: 'de-DE' });
 | オプション | 型 | デフォルト |
 | --- | --- | --- |
 | [`browser`](#browser) | `BrowserName \| BrowserProvider` | `'chromium'` |
+| [`chromiumSandbox`](#chromiumsandbox) | `boolean` | `true`（Linux では `false`） |
 | [`viewport`](#viewport) | `ViewportSize \| null` | 1280 × 720 |
 | [`screencast`](#screencast) | `WebScreencastOptions` | ビューポートのサイズ |
 | [`connect`](#connect) | `WebConnectOptions` | ローカルで起動 |
@@ -82,6 +83,23 @@ web({ browser: 'firefox' }); // default: 'chromium'
 | エラー | 発生条件 |
 | --- | --- |
 | `INVALID_CONFIG` | `browser: provider` と `connect` を併用した場合。 |
+
+#### `chromiumSandbox`
+
+ローカルで起動する Chromium を OS のサンドボックス付きで動かすかどうかです。
+
+```ts
+web({ chromiumSandbox: true }); // default: true on macOS and Windows, false on Linux
+```
+
+- サンドボックスは、エージェントが到達したページでのレンダラーの脆弱性悪用を封じ込める助けになります。[セキュリティ](/security)を参照してください。
+- Linux のサンドボックスには非特権ユーザー名前空間が必要ですが、root、多くのコンテナ、Ubuntu 23.10 以降はこれをブロックします。許可しているホストでは `true` を設定してください。
+- `connect` やプロバイダー経由のブラウザはそのホストが起動し、Firefox と WebKit にはこのオプションがないため、いずれもこの設定を読みません。
+
+| エラー | 発生条件 |
+| --- | --- |
+| `INVALID_CONFIG` | 真偽値以外の値を渡した場合（設定の読み込み時）。 |
+| `ENGINE_FAILURE` | サンドボックスが有効で、このホストでは起動できない場合。 |
 
 #### `viewport`
 
@@ -158,8 +176,8 @@ interface WebConnectOptions {
 
 - 切断後の次の操作で、その操作のタイムアウトと中断シグナルの範囲内で `reconnectEndpoint` を 1 回呼びます。リゾルバーは既存のブラウザのエンドポイントを返す必要があります。
 - エンジンは永続的なデフォルトコンテキストの ID と、アクティブなタブのターゲット ID を確認します。デフォルトコンテキストの ID を公開しないブラウザは拒否します。アクティブなタブがない、またはコンテキストが異なる場合は、試行が失敗します。同じ URL でも代わりのタブを選ぶことはありません。ほかのタブもターゲット ID で探し、なくなったものは除外します。
-- エンジンは各 CDP 接続を利用可能にする前に、機密フィールドのマスク処理を設定します。Playwright のバージョンに互換性がない場合、画像を公開せず接続を失敗させます。
-- 元のページのフレームには、閉じたシャドウ DOM を追跡するフックが残っている必要があります。既存の閉じたルートは、アプリを再読み込みしないと追跡を復旧できません。マスク用のクエリは、追跡されていないドキュメントを拒否します。
+- エンジンは各 CDP 接続を利用可能にする前に、機密フィールドのマスキングを設定します。Playwright のバージョンに互換性がない場合、画像を公開せず接続を失敗させます。
+- 元のページのフレームには、閉じたシャドウ DOM を追跡するフックが残っている必要があります。既存の閉じたルートは、アプリを再読み込みしないと追跡を復旧できません。マスキング用のクエリは、追跡されていないドキュメントを拒否します。
 - エンドポイントの解決、CDP 接続、準備、操作の送信は、1 つのタイムアウトを共有します。同時に待っている別の呼び出しをキャンセルしても、復旧を始めた操作はキャンセルしません。復旧を開始した操作がキャンセルされると、共有する復旧処理も失敗します。
 
 | エラー | 発生条件 |
@@ -188,7 +206,7 @@ interface WebConnectOptions {
 
 #### `headers`
 
-アプリのオリジン（`app.url` のスキーム、ホスト、ポート）から始まるすべてのリクエストに加えるヘッダーです。別ポート、サブドメイン、ほかのホストから始まるリクエストには付きません。リダイレクトでは、転送先のオリジンにかかわらず、最初のリクエストのヘッダーを維持します。
+最初の宛先がアプリのオリジン（`app.url` のスキーム、ホスト、ポート）であるすべてのリクエストに加えるヘッダーです。最初の宛先が別ポート、サブドメイン、ほかのホストのリクエストには付きません。リダイレクトでは、転送先のオリジンにかかわらず、最初のリクエストのヘッダーを維持します。
 
 ```ts
 web({ headers: { 'x-preview-token': process.env.PREVIEW_TOKEN ?? '' } });
@@ -216,7 +234,7 @@ import { secrets } from 'e2e';
 web({ basicAuth: { username: 'staging', password: secrets.get('staging-password') } });
 ```
 
-`secrets.get(name)` のパスワードは各試行の開始時に解決し、設定済みのほかのシークレットと同じように伏せ字にします。それを Base64 化した `Authorization` ヘッダーの認証情報も同様です。
+`secrets.get(name)` のパスワードは各試行の開始時に解決し、設定済みのほかのシークレットと同じように秘匿します。それを Base64 化した `Authorization` ヘッダーの認証情報も同様です。
 
 ```ts
 /** HTTP basic authentication the browser answers a `401` challenge from the app's origin with. */
@@ -237,7 +255,7 @@ WebKit は、スキームのデフォルトポート（`https://staging.example.
 </Note>
 
 <Warning>
-シークレットの保護対象はテキストだけです。ページがパスワードを画面に表示した場合、スクリーンショットやモデルに送る画像ではマスクされません（[セキュリティルール](/reference/security#secrets-in-engine-options)）。
+シークレットの保護対象はテキストだけです。ページがパスワードを画面に表示した場合、スクリーンショットやモデルに送る画像ではマスキングされません（[セキュリティルール](/reference/security#secrets-in-engine-options)）。
 </Warning>
 
 #### `credentialOrigins`
@@ -455,7 +473,7 @@ const conditions = browser.locator(
 );
 ```
 
-- セレクターはデフォルトで CSS です。`xpath=` または先頭の `//` で XPath になり、`>>` で連結できます。そのため、例では CSS の検索範囲を 1 行に限定しています。
+- セレクターはデフォルトで CSS です。`xpath=` または先頭の `//` で XPath になり、`>>` で連結できます。例では、この連結を使って CSS の検索範囲を 1 行に絞っています。
 - 別の要素を内包する要素には、`filter({ has })` を使います。
 
 | エラー | 発生条件 |
@@ -475,7 +493,7 @@ const payment = browser.frameLocator('#payment-frame');
 await payment.getByLabel('Card number').fill('4242424242424242');
 ```
 
-フレーム内からクエリ結果を返す `Screen` である `FrameScreen` を返します。フレームの `locator` は、コントロールにアクセシブルな名前、ラベル、プレースホルダー、テスト ID がない場合にだけ使ってください。該当する状況は[ブラウザガイド](/browser#reach-into-an-iframe)で説明しています。
+`FrameScreen` を返します。これは、クエリがフレーム内の要素を返す `Screen` です。フレームの `locator` は、コントロールにアクセシブルな名前、ラベル、プレースホルダー、テスト ID がない場合にだけ使ってください。該当する状況は[ブラウザガイド](/browser#reach-into-an-iframe)で説明しています。
 
 ```ts
 export interface FrameScreen extends Screen {
@@ -513,7 +531,7 @@ const title = await browser.evaluate<string>('document.title');
 
 | エラー | 発生条件 |
 | --- | --- |
-| `INVALID_ARGUMENT` | `arg` または戻り値が [`JsonValue`](#jsonvalue) ではない場合。`DOMRect` や要素などのクラスインスタンスは該当しません。`rect.toJSON()` または必要なフィールドを返してください。 |
+| `INVALID_ARGUMENT` | `arg` または戻り値が [`JsonValue`](#jsonvalue) ではない場合。`DOMRect` や要素などのクラスインスタンスも該当します。`rect.toJSON()` または必要なフィールドを返してください。 |
 | `EVALUATE_FAILED` | 評価したコードが例外をスローした場合、またはページがエンジンに必要な `Map` などの JavaScript 組み込みを置き換えた場合。エラーにメッセージを含めます。 |
 | `ACTION_FAILED` | Playwright のタイムアウト。 |
 | `ENGINE_FAILURE` | ページが閉じたか、コンテキストが失われた場合。 |
@@ -526,11 +544,18 @@ const title = await browser.evaluate<string>('document.title');
 await browser.route('**/api/quote', async (route) => {
   await route.fulfill({ json: { cents: 4200 } });
 });
+
+await browser.route({ method: 'POST', url: '**/api/orders' }, async (route) => {
+  await route.fulfill({ json: { id: 7 } });
+});
 ```
 
-`route.fetch()` は、ルートの処理方法を決定せずに、転送先の `{ url, status, headers, body(), text(), json() }` を返します。対象オリジンが設定済みヘッダーの送信対象なら、そのヘッダーを使います。アクションのタイムアウトが適用されます。ページ遷移のルールを超える可能性があるため、リダイレクトには従いません。
+`route.fetch()` は、ルートの処理方法を決定せずに、本来の送信先からの `{ url, status, headers, body(), text(), json() }` を返します。対象オリジンが設定済みヘッダーの送信対象なら、そのヘッダーを使います。アクションのタイムアウトが適用されます。ページ遷移のルールを超える可能性があるため、リダイレクトには従いません。
 
 - パターンは文字列または `RegExp` で、どちらも URL 全体と照合します。文字列の `*` はパスの 1 セグメント内、`**` は `/` をまたいで一致し、`?` は任意の 1 文字、`\` は次の文字をエスケープします。`unroute` と `waitForResponse` も同じパターンを使います。
+- `{ method, url }` を渡すと、HTTP メソッドも 1 つに絞り込めます。`method` は大文字と小文字を区別せず、`url` は上記の文字列または `RegExp` の構文を使い、`unroute` と `waitForResponse` も同じ形式を受け付けます。
+- メソッドが一致しないルートは、それより前に登録したルート、次にネットワークへ処理を渡します。URL が一致しなかった場合と同じ扱いです。
+- メソッドパターンはそのメソッドだけに一致します。`GET` のルートは `HEAD` に応答しません。
 - ルートは `app.restart()`、`app.clearState()`、セッションの復元をまたいでも残ります。
 - 新しく登録したルートから順に実行します。
 - ハンドラーは `fulfill`、`continue`、`fallback`、`abort` のいずれかで、必ず 1 回だけ処理を決定します。それぞれの説明は下の `WebRoute` にあります。
@@ -541,7 +566,7 @@ await browser.route('**/api/quote', async (route) => {
 
 | エラー | 発生条件 |
 | --- | --- |
-| `INVALID_ARGUMENT` | パターンに述語関数を渡した場合。また、処理の決定で受け付けないオプション（Playwright の `abort(errorCode)`、誤記したキーなど）がある場合は、リクエストを中断して次のステップを失敗させます。 |
+| `INVALID_ARGUMENT` | パターンが文字列、`RegExp`、`{ method, url }` のいずれでもない場合。`{ method, url }` パターンにキーの不足または余分なキーがある場合、`method` が HTTP メソッドでない場合、`url` が文字列でも `RegExp` でもない場合。また、処理の決定で受け付けないオプション（Playwright の `abort(errorCode)`、`bodyy` のような誤記したキー）がある場合は、リクエストを中断して次のステップを失敗させます。 |
 | `ACTION_FAILED` | ハンドラーが処理を 2 回決定したか、決定しなかった場合。 |
 | `POLICY_DENIED` | `continue` の URL が禁止スキームを使う場合。 |
 | `CLEANUP_TIMEOUT` | ハンドラーがクリーンアップの時間を超えた場合。試行を失敗させます。 |
@@ -577,6 +602,18 @@ export interface RouteContinueOverrides {
   postData?: string;
 }
 
+/** A URL pattern narrowed to one HTTP method. */
+export interface RouteMatcher {
+  /** The HTTP method to match, case-insensitive: `'POST'` and `'post'` are the same. */
+  readonly method: string;
+  /**
+   * The URL pattern: a string using the same grammar as a plain `route`
+   * pattern, or a `RegExp`. `route` and `waitForResponse` match requests
+   * against it; `unroute` compares it structurally.
+   */
+  readonly url: string | RegExp;
+}
+
 export interface WebRoute {
   /** The intercepted request. */
   readonly request: {
@@ -600,15 +637,16 @@ export interface WebRoute {
 
 #### `unroute`
 
-[`route`](#route) と同じパターン構文で、一致する試行内のルートを削除します。
+登録時と同じパターンのルートを削除します。文字列は同じ文字列、`RegExp` は同じ source と flags、`{ method, url }` は同じメソッドと URL である必要があります。URL のマッチングは行わないため、`unroute('**/api/*')` は `'**/api/orders'` で登録したルートを削除しません。
 
 ```ts
 await browser.unroute('**/api/quote');
+await browser.unroute({ method: 'POST', url: '**/api/orders' });
 ```
 
 | エラー | 発生条件 |
 | --- | --- |
-| `INVALID_ARGUMENT` | パターンに述語関数を渡した場合。 |
+| `INVALID_ARGUMENT` | パターンが文字列、`RegExp`、`{ method, url }` のいずれでもない場合。`{ method, url }` パターンにキーの不足または余分なキーがある場合、`method` が HTTP メソッドでない場合、`url` が文字列でも `RegExp` でもない場合。 |
 
 #### `unrouteAll`
 
@@ -627,6 +665,13 @@ const response = await browser.waitForResponse('**/api/orders');
 expect(response.status).toBe(201);
 ```
 
+```ts
+const created = browser.waitForResponse({ method: 'POST', url: '**/api/orders' });
+await screen.getByRole('button', 'Place order').tap();
+expect((await created).status).toBe(201);
+```
+
+- `{ method, url }` パターンは、そのメソッドへのレスポンスだけに一致します。別のメソッドへのレスポンスは対象外です。
 - 期限が制限するのは、一致するレスポンスを待つ時間です。ヘッダーが届いた時点で解決します。
 - `body()`、`text()`、`json()` は、それぞれ独自の時間上限で本文を待ちます。`config.actionTimeout` を使い、テストの期限を上限とします。
 - `url`、`status`、`headers` は常に読めます。
@@ -634,7 +679,7 @@ expect(response.status).toBe(201);
 
 | エラー | 発生条件 |
 | --- | --- |
-| `INVALID_ARGUMENT` | パターンに述語関数を渡した場合。 |
+| `INVALID_ARGUMENT` | パターンが文字列、`RegExp`、`{ method, url }` のいずれでもない場合。`{ method, url }` パターンにキーの不足または余分なキーがある場合、`method` が HTTP メソッドでない場合、`url` が文字列でも `RegExp` でもない場合。 |
 | `ACTION_FAILED` | 期限内に一致するレスポンスがなかった場合。`body()`、`text()`、`json()` では、期限時点でも本文の受信が続いている場合や、ブラウザが本文を読めなかった場合も、空文字列の代わりにこのエラーになります。後者には、宣言された `Content-Length` に達する前の接続リセット、ページが中断したリクエスト、ブラウザが本文を保持しないリダイレクトが含まれます。 |
 
 ```ts
@@ -833,7 +878,7 @@ const file = await browser.waitForDownload(() =>
 
 #### `keyboard`
 
-フォーカスのある場所へ、ビューポート単位でキーボード入力を送ります。
+要素を指定せず、ページ全体に対してキーボード入力を送ります。入力はフォーカスのある要素に届きます。
 
 ```ts
 await browser.keyboard.press('Escape');
@@ -846,7 +891,7 @@ await browser.keyboard.type('hello');
 
 #### `mouse`
 
-エージェントの観測とは独立して、テストコードからビューポート単位のポインター入力を行います。
+エージェントの観測とは独立して、テストコードからビューポートの座標でポインター入力を行います。
 
 ```ts
 await browser.mouse.move(120, 240);
@@ -885,10 +930,10 @@ bunx @e2e-dev/web install chromium --with-deps
 
 セマンティック情報の読み取りがタイムアウトすると、エージェントの観測は、新しいビューポートのスクリーンショットを使って続行できる場合があります。
 
-- Playwright は、開いたシャドウルートと閉じたシャドウルートを含む、到達可能なすべてのフレームで機密フィールドのマスクを再確認します。すべての確認が成功する必要があります。
+- Playwright は、開いたシャドウルートと閉じたシャドウルートを含む、到達可能なすべてのフレームで機密フィールドのマスキングを再確認します。すべての確認が成功する必要があります。
 - 観測はセマンティック情報が利用不能であることを示し、それ以前のノード参照を消去します。
 - 復旧には、操作の残り時間とランナーの許可が必要です。`act` は許可します。判定では `vision: true` または `'only'` が必要です。
-- マスク処理の失敗、キャンセル、回復不能なエンジンエラーでは、観測を停止します。
+- マスキングの失敗、キャンセル、回復不能なエンジンエラーでは、観測を停止します。
 
 フォールバックが許可されている場合、読み取り処理は残りの観測時間の 4 分の 1（最大 2 秒）をスクリーンショット用に確保します。期限には、ページの走査、メタデータと要素の読み戻し、入れ子のフレームがすべて含まれます。
 
@@ -924,7 +969,7 @@ live!.context();                  // its BrowserContext
 `BrowserReleaseContext`、`BrowserProviderDownloads`、
 `BrowserDownloadContext`、`PlaywrightLiveSurface`、`Browser`、`FrameScreen`、
 `BrowserExpectation`、`WebRoute`、`RouteFulfillResponse`、
-`RouteContinueOverrides`、`WebResponse`、`Cookie`、`CookieFields`、
+`RouteContinueOverrides`、`RouteMatcher`、`WebResponse`、`Cookie`、`CookieFields`、
 `CookieFilter`、`Dialog`、`DialogHandler`。
 
 実行時のエクスポートは `web`、[`surfaceOf`](#surfaceof)、および `browser` フィクスチャの型を持つ `test`、`describe`、`beforeEach`、`afterEach`、`beforeAll`、`afterAll` です。
@@ -1071,18 +1116,22 @@ export interface Browser extends Expectable<BrowserExpectation> {
   addInitScript(script: string | { path: string } | (() => unknown)): Promise<void>;
   /** Adds an init script function called with one JSON argument. */
   addInitScript<Arg extends JsonValue>(script: (arg: Arg) => unknown, arg: Arg): Promise<void>;
-  /** Adds an attempt-scoped network route. */
+  /** Adds an attempt-scoped network route, optionally narrowed to one HTTP method. */
   route(
-    pattern: string | RegExp,
+    pattern: string | RegExp | RouteMatcher,
     handler: (route: WebRoute) => void | Promise<void>,
   ): Promise<void>;
-  /** Removes matching attempt-scoped routes. */
-  unroute(pattern: string | RegExp): Promise<void>;
+  /**
+   * Removes the routes registered with the same pattern: the same string or
+   * `RegExp` source and flags, and the same method for a `{ method, url }`
+   * pattern. It does not URL-match registered routes.
+   */
+  unroute(pattern: string | RegExp | RouteMatcher): Promise<void>;
   /** Removes all routes registered by this browser fixture, preserving the configured headers. */
   unrouteAll(): Promise<void>;
-  /** Waits for a matching response. */
+  /** Waits for a matching response, optionally narrowed to one HTTP method. */
   waitForResponse(
-    pattern: string | RegExp,
+    pattern: string | RegExp | RouteMatcher,
     options?: { timeout?: number },
   ): Promise<WebResponse>;
   /** Returns cookies visible to the current context. */

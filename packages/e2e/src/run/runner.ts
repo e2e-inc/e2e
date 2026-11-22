@@ -47,7 +47,7 @@ import { allocateAppPorts } from './app-ports.ts';
 import { inProcessSpawner } from './in-process.ts';
 import { cleanupErrorsOf, someSkippedAfterFailure, tracedResultIds, type ResultRecord, type RunError, type SerialGroupRecord } from '@e2e-dev/core/lib/run/records';
 import { runUnits, type TargetFailure } from './scheduler.ts';
-import type { BeforeStep, HeldStep, StepHoldContext, StepPrompt } from './step-hold.ts';
+import type { BeforeStep, StepPrompt } from './step-hold.ts';
 import { stepPromptLine } from '../report/list-steps.ts';
 import { buildWorkPlans, nonRunResult, orderWorkPlans, plannedSlots, type TargetWorkPlan, type TimeLimit } from './units.ts';
 import { SessionStore } from '@e2e-dev/core/lib/run/sessions';
@@ -463,6 +463,7 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
    * time, and the span is the time it took to fail.
    */
   let startedAt = timestamp();
+  let heldMs = 0;
   const debug = new DebugTrace(options.debug === true);
   const aiTrace = options.aiTrace === true ? new AiTraceCollector() : undefined;
   /** The in-process recorder; child-process workers own their own. */
@@ -649,6 +650,7 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
       config: loaded.config,
       vcs,
       startedAt,
+      heldMs,
       status: statusOf(exitCode),
       exitCode,
       results,
@@ -793,6 +795,7 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
       type: 'run-finished',
       status,
       exitCode,
+      durationMs: report.run.durationMs,
       ...(reportPath === undefined ? {} : { reportPath }),
       ...(aiTracePath === undefined ? {} : { aiTracePath }),
       ...(traces.size === 0 ? {} : { traces: Object.fromEntries(traces) }),
@@ -1168,7 +1171,7 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
         ...(options.maxFailures === undefined ? {} : { maxFailures: options.maxFailures }),
         ...(timeLimit === undefined ? {} : { timeLimit }),
         spawn,
-        ...(hold === undefined ? {} : { beforeStep: (step: HeldStep, signal: AbortSignal, readScreen: StepHoldContext['readScreen']) => hold.ask(step, { signal, show: showStep, readScreen }) }),
+        ...(hold === undefined ? {} : { beforeStep: (step, context) => hold.ask(step, { ...context, show: showStep }) }),
         interruptGraceMs: config.timeout + config.cleanupTimeout,
         interruptSignal: interrupted,
         forceSignal: forceController.signal,
@@ -1189,6 +1192,10 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
           onFailureLimit: stopEarly,
           onTimeLimit: () => {
             stoppedEarly = true;
+          },
+          onHoldChange: (total, heldSince) => {
+            heldMs = total;
+            emit({ type: 'run-hold', heldMs, heldSince });
           },
           onTestStart: (start, targetName) =>
             emit({ type: 'test-started', ...start, target: targetName }),

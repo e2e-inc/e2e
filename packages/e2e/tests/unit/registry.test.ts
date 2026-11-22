@@ -437,6 +437,50 @@ describe('registration', () => {
     expect(registration.tests.map((item) => item.mode)).toEqual(['normal']);
   });
 
+  it('registers test.fixme(title, fn) as fixme with the reason fixme, and rejects it in a serial group', async () => {
+    const registration = await collectModule(async () => {
+      test.fixme('not yet', noop);
+      test.describe('plain group', () => {
+        test.fixme('grouped', noop);
+      });
+    });
+    expect(registration.tests.map((item) => [item.title, item.mode, item.options])).toEqual([
+      ['not yet', 'fixme', { skip: 'fixme' }],
+      ['grouped', 'fixme', { skip: 'fixme' }],
+    ]);
+    await expect(
+      collectModule(async () => {
+        test.describe('unit', { serial: true }, () => {
+          test.describe('nested', () => {
+            test.fixme('member', noop);
+          });
+        });
+      }),
+    ).rejects.toThrow('test.fixme() cannot be used inside a serial group, which skips as one unit; set skip on the serial describe instead');
+    expect(() => test.fixme('outside', noop)).toThrow(/^test\.fixme\(\) can only be called while a test module is being collected/);
+  });
+
+  it('rejects test.skip(title, fn) in a serial group, naming test.skip()', async () => {
+    await expect(
+      collectModule(async () => {
+        test.describe('unit', { serial: true }, () => {
+          test.describe('nested', () => {
+            test.skip('member', noop);
+          });
+        });
+      }),
+    ).rejects.toThrow('test.skip() cannot be used inside a serial group, which skips as one unit; set skip on the serial describe instead');
+  });
+
+  it('rejects the runtime test.fixme forms outside a test body, pointing at test.fixme(title, fn)', async () => {
+    const message =
+      'test.fixme(condition, reason) skips the running test and must be called inside a test body; to mark a test fixme at collection, register it with test.fixme(title, fn)';
+    await expect(collectModule(async () => test.fixme(true, 'flaky on webkit'))).rejects.toThrow(message);
+    await expect(collectModule(async () => test.fixme(false))).rejects.toThrow(message);
+    await expect(collectModule(async () => test.fixme('flaky on webkit'))).rejects.toThrow(message);
+    await expect(collectModule(async () => test.fixme())).rejects.toThrow(CollectionError);
+  });
+
   it('registers expected failures by test.fail(title, fn) and the fail option, and checks the option', async () => {
     const registration = await collectModule(async () => {
       test.fail('registered', noop);
@@ -449,13 +493,53 @@ describe('registration', () => {
     await expect(collectModule(async () => test('bad', { fail: 1 } as never, noop))).rejects.toThrow(
       'test options: fail must be true, false, or a reason string, got 1',
     );
-    await expect(collectModule(async () => test.describe('group', { fail: true } as never, () => {}))).rejects.toThrow(/unknown key "fail"/);
     await expect(collectModule(async () => test.setup('login', { sessions: ['admin'], fail: true } as never, noop))).rejects.toThrow(/unknown key "fail"/);
+  });
+
+  it('marks a group by describe.fail(title, fn) or the fail option, and checks both', async () => {
+    const registration = await collectModule(async () => {
+      test.describe.fail('shortcut', () => test('a', noop));
+      test.describe.fail('shortcut with options', { tags: ['legacy'] }, () => test('b', noop));
+      test.describe('by option', { fail: 'known gap' }, () => test('c', noop));
+      registry.describe.fail('top-level import', () => test('d', noop));
+    });
+    expect(registration.tests.map((item) => item.group?.options.fail)).toEqual([true, true, 'known gap', true]);
+    expect(registration.tests[1]!.tags).toEqual(['legacy']);
+    await expect(collectModule(async () => test.describe('group', { fail: 1 } as never, () => {}))).rejects.toThrow(
+      'describe options: fail must be true, false, or a reason string, got 1',
+    );
+    // describe.fail rejects what describe() rejects, including keys a spread would drop.
+    const hidden = Object.defineProperty({}, 'bogus', { value: 1, enumerable: false });
+    for (const [options, message] of [[[], 'unknown key "length"'], [hidden, 'unknown key "bogus"']] as const) {
+      await expect(collectModule(async () => test.describe('group', options as never, () => {}))).rejects.toThrow(message);
+      await expect(collectModule(async () => test.describe.fail('group', options as never, () => {}))).rejects.toThrow(message);
+    }
+    for (const fail of ['legacy checkout', false, 1]) {
+      await expect(collectModule(async () => test.describe.fail('group', { fail } as never, () => {}))).rejects.toThrow(
+        "describe.fail() takes no fail option; give a reason with describe(title, { fail: 'reason' }, fn)",
+      );
+    }
+  });
+
+  it('refuses fail on, inside, or around a serial group', async () => {
+    const serialRule = 'describe option "fail" cannot be set on or inside a serial group, which runs as one unit';
+    await expect(collectModule(async () => test.describe('unit', { serial: true, fail: true }, () => {}))).rejects.toThrow(serialRule);
+    await expect(collectModule(async () => test.describe.fail('unit', { serial: true }, () => {}))).rejects.toThrow(serialRule);
+    await expect(
+      collectModule(async () => test.describe('unit', { serial: true }, () => test.describe.fail('inner', () => {}))),
+    ).rejects.toThrow(serialRule);
+    await expect(
+      collectModule(async () => test.describe.fail('outer', () => test.describe('unit', { serial: true }, () => {}))),
+    ).rejects.toThrow('a serial group cannot sit inside a group marked fail; its members cannot be expected to fail');
+    await expect(
+      collectModule(async () => test.describe('outer', { fail: false }, () => test.describe('unit', { serial: true }, () => {}))),
+    ).resolves.toBeDefined();
   });
 
   it('rejects test.fail(condition) outside a test body', async () => {
     expect(() => test.fail(true, 'not here')).toThrow(CollectionError);
     expect(() => test.fail(false)).toThrow(/must be called inside a test body/);
+    expect(() => test.fail(false)).toThrow(/describe\.fail\(title, fn\).*test or describe option/);
   });
 
   it('validates titles', async () => {
@@ -755,15 +839,17 @@ describe('test.extend', () => {
     expect(() => test.extend({ database: [fixture, { scop: 'worker' }] } as never)).toThrow(/options has unknown key "scop"/);
   });
 
-  it('carries the chain through skipIf and runIf on an extended test', async () => {
+  it('carries the chain through skipIf, runIf, and fixme on an extended test', async () => {
     const extended = test.extend<{ one: string }>({ one: fixture });
     const registration = await collectModule(async () => {
       extended.skipIf(true)('skipped', noop);
       extended.runIf(true)('runs', noop);
+      extended.fixme('fixme', noop);
     });
     expect(registration.tests.map((item) => [item.mode, item.fixtures.map((definition) => definition.name)])).toEqual([
       ['skip', ['one']],
       ['normal', ['one']],
+      ['fixme', ['one']],
     ]);
   });
 

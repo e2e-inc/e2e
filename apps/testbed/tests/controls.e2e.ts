@@ -60,6 +60,15 @@ test.describe('controls', { requires: ['browser'], tags: ['controls'] }, () => {
     await expect(screen.getByRole('button', { name: 'Publish', disabled: false })).toHaveCount(1);
   });
 
+  test('retries a block until Publish is enabled and matches the enabled query', async ({ screen }) => {
+    await screen.getByRole('button', 'Prepare').tap();
+
+    await expect(async () => {
+      await expect(screen.getByRole('button', 'Publish')).toBeEnabled({ timeout: 25 });
+      await expect(screen.getByRole('button', { name: 'Publish', disabled: false })).toHaveCount(1, { timeout: 25 });
+    }).toPass({ timeout: 3000, intervals: [25, 50, 100] });
+  });
+
   test('check and uncheck move checked state, and one radio checks at a time', async ({ screen }) => {
     const agree = screen.getByLabel('Agree to terms');
     expect(await agree.isChecked()).toBe(false);
@@ -117,6 +126,41 @@ test.describe('controls', { requires: ['browser'], tags: ['controls'] }, () => {
 
     await second.press('Shift+Tab');
     await expect(first).toBeFocused();
+  });
+
+  test('blur removes focus only from the matched node', async ({ browser }) => {
+    const first = browser.locator('#first');
+    const second = browser.locator('#second');
+
+    await first.focus();
+    await expect(first).toBeFocused();
+    await second.blur();
+    await expect(first).toBeFocused();
+
+    await first.blur({ timeout: 1_000 });
+    await expect(first).not.toBeFocused();
+  });
+
+  test('blur works on an input matched by its current value', async ({ browser, screen }) => {
+    const first = screen.getByLabel('First');
+    await first.fill('Find by value');
+    await browser.evaluate("() => { document.querySelector('#first').blur = () => {}; }");
+    await first.focus();
+    await expect(first).toBeFocused();
+
+    await screen.getByDisplayValue('Find by value').blur();
+    await expect(first).not.toBeFocused();
+  });
+
+  test('blur removes focus from MathML matched by label', async ({ browser, screen }) => {
+    await browser.evaluate(`() => {
+      document.body.insertAdjacentHTML('beforeend', '<math><mi tabindex="0" aria-label="Formula" id="term">x</mi></math>');
+      document.querySelector('#term').focus();
+    }`);
+    const term = screen.getByLabel('Formula');
+    await expect(term).toBeFocused();
+    await term.blur();
+    await expect(term).not.toBeFocused();
   });
 
   test('press spells modifiers the way the app sees them', async ({ screen }) => {

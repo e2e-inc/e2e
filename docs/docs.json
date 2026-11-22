@@ -74,8 +74,15 @@
             "pages": [
               "web",
               "mobile",
+              "desktop",
               "api-testing",
               "core"
+            ]
+          },
+          {
+            "group": "Frameworks",
+            "pages": [
+              "frameworks/nextjs"
             ]
           },
           {

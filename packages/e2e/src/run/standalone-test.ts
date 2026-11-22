@@ -23,10 +23,11 @@ import {
   classifyError, ConfigurationError, E2EError, InfrastructureError, serializeError, TestError, TestTimeoutError, type ErrorPhase, type SerializedError,
 } from '@e2e-dev/core/lib/internal/errors';
 import type { ExpectedFailureInfo } from '@e2e-dev/core/lib/internal/expected-failure';
-import { isRuntimeSkip, type RuntimeSkip } from '../internal/skip.ts';
+import { lateTimeoutError } from '@e2e-dev/core/lib/internal/test-timeout';
+import { isRuntimeSkip, type CaughtRuntimeSkip } from '../internal/skip.ts';
 import { settleExpectedFailure } from './expected-failure.ts';
 import { withAbort, withTimeout } from '@e2e-dev/core/lib/internal/time';
-import type { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
+import { AttemptTimeout, type AttemptBudget } from '@e2e-dev/core/lib/run/budget';
 import type { TargetExecutor } from './execute.ts';
 import { classifyAttemptStatus } from '@e2e-dev/core/lib/run/engine-sessions';
 import { planAttemptFixtures, type AttemptCleanup, type TestAttemptFixtures } from './fixture-pool.ts';
@@ -246,7 +247,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
     const secondaryErrors: SerializedError[] = [];
     let failure: E2EError | undefined;
     let failurePhase: RunPhase = 'beforeAll';
-    let skipped: RuntimeSkip | undefined;
+    let skipped: CaughtRuntimeSkip | undefined;
     let expectedFailure = pair.options.expectedFailure;
     let timedOut = false;
     // As in a run's attempt: confirmation stops at what was verified when the
@@ -278,8 +279,9 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
     if (hookFailure !== undefined) {
       fail(new E2EError('test', hookFailure.code, hookFailure.message), 'beforeAll');
     } else {
-      // The test's own timeout bounds its hooks and body.
+      // The test's own timeout bounds its hooks and body; `test.setTimeout` changes it for this run.
       const bodyAbort = budget.enter(env.signal, pair.options.timeout);
+      const timeout = new AttemptTimeout(budget, pair.options.timeout);
       // Planned and bound before the attempt is published: a fixture rule broken here leaves nothing to undo.
       const attemptFixtures = planAttemptFixtures(env.target, registered, {
         beforeEach: executor.realms.hooksFor(realm, registered, 'beforeEach'),
@@ -295,10 +297,16 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
           owner: 'host',
           testKind: 'test',
           assertionTimeout: config.assertionTimeout,
+          toPass: config.toPass,
+          recordSecondaryError: (error) => { secondaryErrors.push(serialize(error, phase)); },
           budget,
           soft,
           polls,
           expectFailure: (reason) => (expectedFailure ??= reason),
+          setTimeout: (timeoutMs) => {
+            if (phase !== 'beforeEach' && phase !== 'body') throw lateTimeoutError();
+            return timeout.set(timeoutMs);
+          },
         },
         publication.signal,
       );
@@ -352,10 +360,10 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
           }),
         ]);
         try {
-          await withTimeout(body, Math.max(1, pair.options.timeout), () => {
+          await timeout.race(body, () => {
             timedOut = true;
             bodyAbort.abort();
-            return new TestTimeoutError(`test timed out after ${pair.options.timeout} ms in phase ${phase}`);
+            return new TestTimeoutError(`test timed out after ${timeout.timeoutMs} ms in phase ${phase}`);
           });
         } catch (cause) {
           polls.close();
@@ -467,6 +475,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       if (started === undefined) return lateErrors;
       return takeTurn(async () => {
         const errors: SerializedError[] = [];
+        const retryErrors: SerializedError[] = [];
         strayInTurn = (cause) => errors.push(serialize(cause, 'afterEach'));
         const soft = new SoftFailures();
         // As after a run's body: a soft matcher in a teardown hook finds the collection closed.
@@ -474,7 +483,11 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
         const publication = new AbortController();
         const leaveWorkerFixtures = started.fixtures?.enter();
         try {
-          publishAttempt({ attemptId, owner: 'host', testKind: 'test', assertionTimeout: config.assertionTimeout, budget, soft, polls: new PollScope('the test teardown') }, publication.signal);
+          publishAttempt({
+            attemptId, owner: 'host', testKind: 'test', assertionTimeout: config.assertionTimeout, toPass: config.toPass,
+            budget, soft, polls: new PollScope('the test teardown'), setTimeout: () => { throw lateTimeoutError(); },
+            recordSecondaryError: (error) => { retryErrors.push(serialize(error, 'afterEach')); },
+          }, publication.signal);
           steps.phase = 'afterEach';
           // Each teardown gets its own cleanup budget, as in a run's attempt.
           for (const hook of started.teardowns) {
@@ -486,6 +499,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
             }
           }
           await executor.settleAttempt(env.session, attemptId).catch((cause: unknown) => errors.push(serialize(cause, 'afterEach')));
+          publication.abort();
           await executor.realms.leave(started.realm, env.session).catch((cause: unknown) => errors.push(serialize(cause, 'afterAll')));
         } finally {
           leaveWorkerFixtures?.();
@@ -495,7 +509,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
           const live = liveRuns.indexOf(self);
           if (live !== -1) liveRuns.splice(live, 1);
         }
-        return [...lateErrors, ...errors];
+        return [...lateErrors, ...errors, ...retryErrors];
       }).catch((cause: unknown) => [...lateErrors, serialize(cause, 'cleanup')]);
     })();
     return tearingDown;

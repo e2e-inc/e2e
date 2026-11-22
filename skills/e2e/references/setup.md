@@ -201,12 +201,28 @@ target's `app`:
 | `environment` | `'test'`, `'staging'`, `'production'`; inferred from the host, labels the report and cache key. |
 | `identity` | Stable identity for cache and session keys when the origin changes per deploy (preview URLs). Defaults to the URL's origin and path, else `bundleId`, else `appPath`. |
 
-A Next.js 16 dev server blocks cross-origin requests to its dev resources, so
-a target that opens `127.0.0.1` or `[::1]` while `next dev` identifies as
-`localhost` never hydrates. Add the host to `allowedDevOrigins` in
-`next.config.ts` (`'127.0.0.1'`, or `'[::1]'` for the bracket form). A
-`localhost` target needs no entry, and a production `next start` target is
-unaffected.
+Next.js ([guide](https://e2e.com/docs/frameworks/nextjs)): set `app.command` to `next
+dev` locally and `next start` when `CI` is set (e2e reads `''`, `0`, and
+`false` as unset; read it the same way in the config), with `next build`
+before `e2e run` in CI; `reuseExisting: true` reuses a dev server already on
+the port, and `dev` and `start` must listen on the `app.url` port.
+
+- A Next.js 16 dev server blocks cross-origin requests to its dev resources,
+  so a target that opens `127.0.0.1` or `[::1]` (port `0` included) while
+  `next dev` identifies as `localhost` never hydrates. Add the host to
+  `allowedDevOrigins` in `next.config.ts` (`'127.0.0.1'`, or `'[::1]'` for
+  the bracket form). A `localhost` target needs no entry, and a production
+  `next start` target is unaffected.
+- The App Router renders an empty `role="alert"` route announcer on every
+  page, so `getByRole('alert')` matches it too: filter yours by text
+  (`.filter({ hasText: '...' })`).
+- When `next dev` recompiles during a run, its watcher reads `.e2e/`: keep
+  the `.e2e/` entries `init` adds to `.gitignore`, and with webpack set
+  `config.watchOptions.ignored` in `next.config.ts` to include
+  `'**/.e2e/**'` (keep `.git`, `.next`, `node_modules`, and any entry the
+  config already has).
+- A new app can start from the example:
+  `npx create-next-app --example https://github.com/e2e-inc/e2e/tree/main/examples/with-next my-app`.
 
 There is no `services` key in this version: it is an unknown key wherever it
 appears. Start dependency processes before the run, or have `app.command`
@@ -216,8 +232,8 @@ start a script that brings them up and serves the app.
 
 | Option | Meaning |
 | --- | --- |
-| `browser` | `'chromium'` (default), `'firefox'`, `'webkit'`, or a `BrowserProvider` leasing hosted browsers over CDP ([`browserRun()`](https://e2e.com/docs/integrations/browser-run) from `@e2e-dev/browser-run`, `kernel()` from `@e2e-dev/kernel`, `notte()` from `@e2e-dev/notte`, `smol()` from `@e2e-dev/smol`, `lightpanda()` from `@e2e-dev/lightpanda`, `moli()` from `@e2e-dev/moli`, `testmuBrowsers()` from `@e2e-dev/testmu/web`, `e2bBrowsers()` from `@e2e-dev/e2b/web`, or your own), which implies chromium and excludes `connect`. Scope `'worker'` (default): one browser per worker slot from `prepare` to `finish`; `'attempt'`: one per attempt, with `reconnectEndpoint`'s limits (`lightpanda()`, `moli()`, and `testmuBrowsers()` are worker scope only; `notte()` is attempt scope only). |
-| `viewport` | `{ width, height }`, default 1280x720; `null` follows the browser window (hosted live view, headed run). On a headed hosted browser (Kernel) use `null` and size the service's screen; a fixed size gives a smaller, unmaximized window. |
+| `browser` | `'chromium'` (default), `'firefox'`, `'webkit'`, or a `BrowserProvider` leasing hosted browsers over CDP ([`browserRun()`](https://e2e.com/docs/integrations/browser-run) from `@e2e-dev/browser-run`, `kernel()` from `@e2e-dev/kernel`, `notte()` from `@e2e-dev/notte`, `smol()` from `@e2e-dev/smol`, `lightpanda()` from `@e2e-dev/lightpanda`, `moli()` from `@e2e-dev/moli`, `testmuBrowsers()` from `@e2e-dev/testmu/web`, `e2bBrowsers()` from `@e2e-dev/e2b/web`, or your own), which implies chromium and excludes `connect`; any other name is `INVALID_CONFIG` at load. Scope `'worker'` (default): one browser per worker slot from `prepare` to `finish`; `'attempt'`: one per attempt, with `reconnectEndpoint`'s limits (`lightpanda()`, `moli()`, and `testmuBrowsers()` are worker scope only; `notte()` is attempt scope only). |
+| `viewport` | `{ width, height }` in whole pixels, default 1280x720, else `INVALID_CONFIG` at load; `null` follows the browser window (hosted live view, headed run). On a headed hosted browser (Kernel) use `null` and size the service's screen; a fixed size gives a smaller, unmaximized window. |
 | `connect` | `{ cdpEndpoint }` attaches to a remote Chromium over CDP; `cdpEndpoint` is required, and both it and `reconnectEndpoint` are resolvers `(signal) => url` or `(signal) => ({ endpoint, headers })` for authenticated CDP connections, not strings, else `INVALID_CONFIG` at load. With `reconnectEndpoint` it rides one persistent default context, needs a fresh browser from `cdpEndpoint` every attempt, and reconnects only to the original browser and page. |
 | `headers` | Sent to the app's origin only (scheme, host, and port of `app.url`; Vercel's `x-vercel-protection-bypass`, ngrok's `ngrok-skip-browser-warning`), `agent.act` included; `credentialOrigins: ['https://api.example.com']` adds exact origins for `headers` and `basicAuth`. A request keeps them through its redirects, to any origin. Disables the browser HTTP cache and service workers. |
 | `basicAuth` | `{ username, password }` for a `401` challenge from the app's origin, or one `credentialOrigins` lists (a redirect to `www` or `https:` is another origin; WebKit answers any origin when one is on a default port or an IPv6 host); `password` may be `secrets.get('name')`, resolved per attempt and redacted like any secret, the base64 `Authorization` credential too. |
@@ -226,6 +242,7 @@ start a script that brings them up and serves the app.
 | `colorScheme`, `reducedMotion` | The `prefers-color-scheme` (`'light'`, `'dark'`, `'no-preference'`) and `prefers-reduced-motion` (`'reduce'`, `'no-preference'`) every page reports to its `@media` rules and `matchMedia`, from first paint. |
 | `initScripts` | Scripts every document runs before the page's own: source, `{ path }`, or a function with no closures. |
 | `testIdAttribute` | What `getByTestId` reads; default `data-testid`. |
+| `chromiumSandbox` | Whether a locally launched Chromium runs with its OS sandbox on; default `true` on macOS and Windows, `false` on Linux, where root and most containers cannot start it. |
 | `screencast` | `{ size?, quality? }` for the engine's own video: frame size (default the viewport's), JPEG quality 0 to 100. |
 
 - `basicAuth` via `secrets.get()` masks text, not screenshots or model pixels
@@ -435,6 +452,7 @@ export default {
   `setPermission`, `setNetwork`, `setAppearance`, `clearKeychain`, `fold`
   for a foldable's hinge (iPhone Duo, Android foldable emulators), `locator`, more). Portable suites declare
   `requires: ['device']`.
+- `device.viewport()` reads `{ width, height }` fresh on each call, in the coordinate space of `screen.tapAt()`.
 - `device.unstable_raw` gives the session name, device id and name, a
   `selection` to spread into a call, and a
   raw driver `client` bound to the test's session, for what `device`
