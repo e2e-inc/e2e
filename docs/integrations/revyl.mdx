@@ -197,7 +197,7 @@ Unknown or invalid options fail config load with `INVALID_CONFIG`.
 - The CDP URL works once. A dropped connection is not reattached, and the
   attempt fails; a retry starts a new session.
 - Video and downloads are unavailable: Revyl keeps the screencast for its own
-  session recording, and the browser saves no files. Use `app.screenshot()`
+  session recording, and its browser refuses downloads. Use `app.screenshot()`
   for evidence.
 - The site runs on Revyl's network, so point `url` and `app.url` at a
   deployed URL, not `localhost`.

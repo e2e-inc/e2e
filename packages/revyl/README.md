@@ -33,6 +33,10 @@ build from, and `device` and `osVersion` are names from Revyl's device catalog.
 For websites, `revylBrowsers()` from `@e2e-dev/revyl/web` runs each test in Chrome on Revyl,
 as a browser provider for `@e2e-dev/web`:
 
+```sh
+npm install --save-dev e2e @e2e-dev/web @e2e-dev/revyl
+```
+
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
 import { web } from '@e2e-dev/web';

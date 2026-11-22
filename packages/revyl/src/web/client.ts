@@ -5,6 +5,7 @@
  * run's API key and is bounded by its caller's signal.
  */
 
+import { createRequire } from 'node:module';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { RevylCredentials } from '../credentials.ts';
 
@@ -13,7 +14,7 @@ const CONTROL_TIMEOUT_MS = 60_000;
 const READ_ATTEMPTS = 3;
 const TERMINAL_STATUSES = new Set(['failed', 'completed', 'cancelled', 'timeout', 'stopping']);
 // Revyl's edge refuses requests without a client user agent.
-const USER_AGENT = 'e2e-dev-revyl';
+const USER_AGENT = `e2e-revyl/${(createRequire(import.meta.url)('../../package.json') as { version: string }).version}`;
 
 export interface WebViewport {
   readonly width: number;
@@ -51,7 +52,7 @@ export class RevylWebClient {
 
   /** Registers `url` as a build of the Revyl web app; Revyl answers the same build for a URL it already holds. */
   async registerUrlBuild(appId: string, url: string, signal: AbortSignal): Promise<string> {
-    const build = fields(await this.#json('POST', `/api/v1/apps/${encodeURIComponent(appId)}/builds/external`, { url }, signal));
+    const build = fields(await this.#read(signal, () => this.#json('POST', `/api/v1/apps/${encodeURIComponent(appId)}/builds/external`, { url }, signal)));
     if (typeof build.id !== 'string') throw new Error('Revyl did not return a build id for the start URL');
     return build.id;
   }
@@ -79,7 +80,7 @@ export class RevylWebClient {
 
   /** Mints a single-use `wss://` URL to the session's browser, valid for about a minute. */
   async cdpUrl(workflowRunId: string, signal: AbortSignal): Promise<string> {
-    const minted = fields(await this.#json('POST', `/api/v1/execution/device-proxy/${encodeURIComponent(workflowRunId)}/cdp`, undefined, signal));
+    const minted = fields(await this.#read(signal, () => this.#json('POST', `/api/v1/execution/device-proxy/${encodeURIComponent(workflowRunId)}/cdp`, undefined, signal)));
     if (typeof minted.url !== 'string' || minted.url === '') throw new Error('Revyl did not return a CDP URL for the session');
     return minted.url;
   }

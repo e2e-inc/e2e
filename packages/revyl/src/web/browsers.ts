@@ -56,7 +56,7 @@ export function revylBrowsers(options: RevylBrowsersOptions): BrowserProvider {
   const { viewport } = options;
   if (
     viewport !== undefined &&
-    !(Number.isInteger(viewport.width) && Number.isInteger(viewport.height) && viewport.width >= 320 && viewport.width <= 3840 && viewport.height >= 240 && viewport.height <= 2160)
+    !(typeof viewport === 'object' && viewport !== null && Number.isInteger(viewport.width) && Number.isInteger(viewport.height) && viewport.width >= 320 && viewport.width <= 3840 && viewport.height >= 240 && viewport.height <= 2160)
   ) {
     throw new ConfigurationError('INVALID_CONFIG', 'revylBrowsers: `viewport` must be whole CSS pixels, width 320 to 3840 and height 240 to 2160');
   }

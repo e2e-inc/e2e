@@ -73,6 +73,7 @@ describe('revylBrowsers()', () => {
     ['a missing url', { app: 'app-1' }],
     ['a url that is not http(s)', { app: 'app-1', url: 'file:///tmp/index.html' }],
     ['a url with credentials', { app: 'app-1', url: 'https://user:pass@staging.example.com' }],
+    ['a null viewport', { ...options, viewport: null }],
     ['a fractional viewport', { ...options, viewport: { width: 1280.5, height: 800 } }],
     ['a viewport out of range', { ...options, viewport: { width: 200, height: 800 } }],
     ['an idle timeout under a minute', { ...options, idleTimeoutSeconds: 30 }],
@@ -99,7 +100,7 @@ describe('revylBrowsers()', () => {
       web: { viewport: { width: 1440, height: 900 } },
     });
     expect(paths().at(-1)).toBe('POST /api/v1/execution/device-proxy/run-1/cdp');
-    expect(calls.every((call) => call.url.startsWith('https://backend.revyl.ai/') && call.headers.Authorization === 'Bearer revyl-key' && call.headers['User-Agent'] !== undefined)).toBe(true);
+    expect(calls.every((call) => call.url.startsWith('https://backend.revyl.ai/') && call.headers.Authorization === 'Bearer revyl-key' && /^e2e-revyl\/\d+\.\d+\.\d+/.test(call.headers['User-Agent']!))).toBe(true);
     expect(lines).toEqual([`session ${lease.id}, watch at https://app.revyl.ai/sessions/${lease.id}`]);
     expect(stops()).toEqual([]);
   });
@@ -161,6 +162,18 @@ describe('revylBrowsers()', () => {
     routes['POST /api/v1/execution/device/sessions/'] = () => json({ detail: 'down' }, 500);
 
     await expect(revylBrowsers(options).acquire(request())).rejects.toThrow(/stopping it failed, so Revyl ends it after 600 s idle/);
+  });
+
+  it('mints the CDP URL again after a gateway error, before the session is given up', async () => {
+    let answers = 0;
+    const minted = routes['POST /api/v1/execution/device-proxy/run-1/cdp']!;
+    routes['POST /api/v1/execution/device-proxy/run-1/cdp'] = (call) => (++answers === 1 ? new Response('<html>bad gateway</html>', { status: 502 }) : minted(call));
+
+    const lease = await revylBrowsers(options).acquire(request());
+
+    expect(lease.cdpEndpoint).toBe(CDP_URL);
+    expect(answers).toBe(2);
+    expect(stops()).toEqual([]);
   });
 
   it('stops the session on release, and counts one Revyl already ended as stopped', async () => {
