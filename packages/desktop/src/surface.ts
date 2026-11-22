@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import {
+  ConfigurationError,
   EngineError,
   OBSERVED_NAME_LIMIT,
   OBSERVED_TEXT_LIMIT,
@@ -976,13 +977,16 @@ export class DesktopSurface {
     }
     this.pointWindow = screen.windowId;
     this.remember(screen.bindings.values());
+    let withheld = false;
     const pixels = options?.pixels === true ? await this.pixelsFor(screen, operation).catch((cause: unknown) => {
       if (cause instanceof EngineError && cause.code === 'OPERATION_TIMEOUT') throw cause;
+      withheld = true;
       return undefined;
     }) : undefined;
+    // Pixels withheld still report the regions masked, none, so the harness reads masking it could not prove (MASKING_UNPROVEN), not a missing screenshot.
     return {
       ...this.snapshotOf(screen),
-      ...(pixels === undefined ? {} : { pixels: pixels.pixels, maskedRegionCount: pixels.masked }),
+      ...(pixels === undefined ? (withheld ? { maskedRegionCount: 0 } : {}) : { pixels: pixels.pixels, maskedRegionCount: pixels.masked }),
     };
   }
 
@@ -1387,7 +1391,8 @@ export class DesktopSurface {
     const screen = this.options.interactiveOnly ? await this.capture(operation, observed.windowId, true) : observed;
     if (screen?.windowId === undefined) throw new EngineError('ENGINE_FAILURE', 'the window could not be read whole to find its secure fields; screenshot withheld', { retryable: false });
     const secure = screen.secureRects;
-    if (secure === undefined) throw new EngineError('ENGINE_FAILURE', 'a secure field on screen has no bounds to mask; screenshot withheld', { retryable: false });
+    // A refusal of policy, as on the mobile engine: the image could hold a credential, so it never leaves the engine.
+    if (secure === undefined) throw new ConfigurationError('POLICY_DENIED', 'a secure field on screen has no bounds to mask, so the screenshot is withheld');
     // A snapshot cut short can leave out a secure field, which would then go unmasked.
     if (screen.truncated) throw new EngineError('ENGINE_FAILURE', 'the snapshot did not read the whole window, so a secure field may be missing from it; screenshot withheld', { retryable: false });
     const directory = await mkdtemp(path.join(this.home ?? tmpdir(), 'shot-'));

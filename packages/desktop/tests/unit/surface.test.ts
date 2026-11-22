@@ -430,6 +430,18 @@ describe('DesktopSurface', () => {
     await expect(surface.screenshot('partial', operation())).rejects.toThrow(/did not read the whole window/);
     const observed = await surface.observe(operation(), { pixels: true });
     expect(observed.pixels).toBeUndefined();
+    // Withheld pixels still report the regions masked, none, so the harness reads unproven masking, not a missing screenshot.
+    expect(observed.maskedRegionCount).toBe(0);
+  });
+
+  it('refuses a screenshot as a policy when a password field has no bounds to mask', async () => {
+    // The AppKit form's password field was captured with no bounds.
+    const { surface } = await launched({});
+    await startAttempt(surface);
+    await expect(surface.screenshot('unmaskable', operation())).rejects.toMatchObject({ code: 'POLICY_DENIED' });
+    const observed = await surface.observe(operation(), { pixels: true });
+    expect(observed.pixels).toBeUndefined();
+    expect(observed.maskedRegionCount).toBe(0);
   });
 
   it('withholds a screenshot when a secure field moved while it was captured, and keeps one that did not', async () => {
