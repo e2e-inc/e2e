@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { OperationContext, SemanticNode } from '@e2e-dev/core/engine';
@@ -1573,7 +1573,8 @@ describe('DesktopSurface', () => {
       expect(await gone(victim.pid!, 300)).toBe(false);
       expect(existsSync(path.join(planted, 'app.json'))).toBe(true);
     } finally {
-      rmSync(link, { force: true });
+      // The link itself, never its target: rmSync on a link to a directory throws on Node 24.8.
+      unlinkSync(link);
     }
   });
 
