@@ -208,7 +208,7 @@ describe('DesktopSurface', () => {
     expect(launch).toEqual(expect.arrayContaining(['launch', 'dev.e2e.spike.form', '--no-attach', '--arg=-ApplePersistenceIgnoreState', '--arg=YES']));
     // In the background: the app never takes the keyboard from whoever is at the Mac.
     expect(launch).not.toContain('--activate');
-    expect(calls.find((call) => call.key === 'list-windows')?.args).toEqual(['list-windows', '--app', 'SpikeForm']);
+    expect(calls.find((call) => call.key === 'list-windows')?.args.slice(0, 3)).toEqual(['list-windows', '--app', 'SpikeForm']);
     const snapshot = calls.find((call) => call.key === 'snapshot');
     expect(snapshot?.args).toEqual(expect.arrayContaining(['--window-id', 'w-mine', '--include-bounds']));
     expect(calls.some((call) => call.args.includes('w-theirs'))).toBe(false);
@@ -347,6 +347,17 @@ describe('DesktopSurface', () => {
     const { surface } = await launched((pid) => ({ 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }, failure('APP_NOT_FOUND', 'not_delivered')] }), { observe: false });
     const username = { kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'username', exact: true } } } as const;
     await expect(surface.locate(username, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
+  });
+
+  it("gives every app and window inventory the operation's budget, not agent-desktop's own 5 s default", async () => {
+    const { surface, fake } = await launched({}, { observe: false });
+    await surface.observe({ ...operation(), timeoutMs: 2_000 }, undefined);
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    const inventories = fake.calls().filter((call) => call.key === 'list-windows' || call.key === 'list-apps');
+    expect(inventories.length).toBeGreaterThan(0);
+    for (const call of inventories) expect(call.args).toContain('--timeout-ms');
+    const observed = fake.calls().findLast((call) => call.key === 'list-windows')!;
+    expect(Number(observed.args[observed.args.indexOf('--timeout-ms') + 1])).toBeLessThanOrEqual(2_000);
   });
 
   it('reads an app with no window as an empty screen', async () => {
@@ -924,7 +935,7 @@ describe('DesktopSurface', () => {
       'list-apps': [{ ok: true, data: { apps: [{ name: '계산기', bundle_id: 'com.apple.calculator', pid: theirs, process_instance: 'theirs' }] } }],
     });
     await expect(surface.restart(operation())).rejects.toThrow(/handed over to a copy already running/);
-    expect(fake.calls().find((call) => call.key === 'list-apps')?.args).toEqual(['list-apps', '--app', 'dev.e2e.spike.form']);
+    expect(fake.calls().find((call) => call.key === 'list-apps')?.args.slice(0, 3)).toEqual(['list-apps', '--app', 'dev.e2e.spike.form']);
     await surface.endAttempt({ signal, timeoutMs: 5_000 });
     expect(await gone(theirs, 300)).toBe(false);
   });

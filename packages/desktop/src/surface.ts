@@ -480,7 +480,7 @@ export class DesktopSurface {
    */
   private async runningCopies(target: string, operation: Pick<OperationContext, 'signal' | 'timeoutMs'>): Promise<ReadonlySet<number> | undefined> {
     // agent-desktop matches the app the way its launch does (any case, the localized name too), so every copy the launch could hand over to is listed.
-    const { apps, complete } = await this.run<{ apps?: readonly RawApp[]; complete?: boolean }>(['list-apps', '--app', target], { label: 'list apps', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
+    const { apps, complete } = await this.run<{ apps?: readonly RawApp[]; complete?: boolean }>(['list-apps', '--app', target, '--timeout-ms', String(this.toolBudget(operation))], { label: 'list apps', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
     if (complete === false) return undefined;
     return new Set((apps ?? []).filter((app) => typeof app.pid === 'number').map((app) => app.pid!));
   }
@@ -579,7 +579,7 @@ export class DesktopSurface {
    */
   private async claim(launch: Launch, operation: Pick<OperationContext, 'signal' | 'timeoutMs'>): Promise<boolean | undefined> {
     const { target, token, before } = launch;
-    const { apps, complete } = await this.run<{ apps?: readonly RawApp[]; complete?: boolean }>(['list-apps', '--app', target], { label: 'list apps', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
+    const { apps, complete } = await this.run<{ apps?: readonly RawApp[]; complete?: boolean }>(['list-apps', '--app', target, '--timeout-ms', String(this.toolBudget(operation))], { label: 'list apps', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
     for (const app of apps ?? []) {
       if (typeof app.pid !== 'number') continue;
       // A copy that ran before the launch is never its own, whatever its environment says.
@@ -751,7 +751,7 @@ export class DesktopSurface {
     const { pid, instance, appName } = this;
     this.forget();
     if (pid === undefined || appName === undefined) return;
-    const { apps, complete } = await this.run<{ apps?: readonly RawApp[]; complete?: boolean }>(['list-apps', '--app', appName], { label: `find ${appName}`, input: false, signal, timeoutMs });
+    const { apps, complete } = await this.run<{ apps?: readonly RawApp[]; complete?: boolean }>(['list-apps', '--app', appName, '--timeout-ms', String(this.toolBudget({ timeoutMs }))], { label: `find ${appName}`, input: false, signal, timeoutMs });
     const running = apps?.some((app) => app.pid === pid && (instance === undefined || app.process_instance === instance)) === true;
     // An inventory that skipped some processes cannot say the app is gone; it stays the engine's, to quit again.
     if (!running && complete === false) throw new EngineError('ENGINE_FAILURE', `could not tell whether the app (process ${pid}) is still running: agent-desktop listed the apps only in part`, { retryable: false });
@@ -864,7 +864,7 @@ export class DesktopSurface {
     const quit = (): EngineError => new EngineError('INVALID_STATE', `${appName ?? 'the app'} quit (process ${pid}); open it again with app.open()`, { retryable: false, cause: QUIT });
     if (!alive(pid)) throw quit();
     if (instance === undefined || appName === undefined) return;
-    const { apps, complete } = await this.run<{ apps?: readonly RawApp[]; complete?: boolean }>(['list-apps', '--app', appName], { label: `find ${appName}`, input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
+    const { apps, complete } = await this.run<{ apps?: readonly RawApp[]; complete?: boolean }>(['list-apps', '--app', appName, '--timeout-ms', String(this.toolBudget(operation))], { label: `find ${appName}`, input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
     if (apps?.some((app) => app.pid === pid && app.process_instance === instance) === true) return;
     if (complete === false) throw new EngineError('NODE_STALE', `could not tell whether ${appName} still runs: agent-desktop listed the apps only in part`, { retryable: true, cause: UNREADABLE });
     throw quit();
@@ -884,7 +884,7 @@ export class DesktopSurface {
     if (pid === undefined || appName === undefined) return [];
     let listed: readonly RawWindow[];
     try {
-      listed = await this.run<readonly RawWindow[]>(['list-windows', '--app', appName], { label: 'list windows', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs, raw: true });
+      listed = await this.run<readonly RawWindow[]>(['list-windows', '--app', appName, '--timeout-ms', String(this.toolBudget(operation))], { label: 'list windows', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs, raw: true });
     } catch (cause) {
       if (cause instanceof AgentDesktopFailure && NO_WINDOW_CODES.has(cause.code)) {
         if (!strict) return [];
@@ -1304,7 +1304,7 @@ export class DesktopSurface {
   // --- plumbing ---
 
   /** agent-desktop's own wait inside one command: the operation's budget less a margin, so it answers before it is killed. */
-  private toolBudget(operation: OperationContext): number {
+  private toolBudget(operation: Pick<OperationContext, 'timeoutMs'>): number {
     return Math.max(operation.timeoutMs - ANSWER_MARGIN_MS, MIN_TOOL_MS);
   }
 
