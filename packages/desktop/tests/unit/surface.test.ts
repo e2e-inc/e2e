@@ -1309,6 +1309,20 @@ describe('DesktopSurface', () => {
     expect(failed?.message).not.toMatch(/Escape did not close it/);
   });
 
+  it('never says the menu was closed when agent-desktop could not check the window for one', async () => {
+    const { surface, byTestId } = await launched((pid) => ({
+      snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')],
+      select: [failure('APP_UNRESPONSIVE', 'delivered_unverified')],
+      'list-surfaces': [{ ok: true, data: { pid, surfaces: [{ type: 'context_menu' }] } }, { ok: true, data: { pid, surfaces: [{ type: 'window', unclassified: ['menu'] }] } }],
+    }));
+    const failed = await surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Enterprise' }, operation()).then(
+      () => undefined,
+      (cause: unknown) => cause as Error,
+    );
+    expect(failed?.message).not.toMatch(/The menu was closed/);
+    expect(failed?.message).toMatch(/menu is still open/);
+  });
+
   it('reports a select that may have chosen something when no menu is left open', async () => {
     const { surface, byTestId } = await launched((pid) => ({
       select: [failure('TIMEOUT', 'delivered_unverified')],

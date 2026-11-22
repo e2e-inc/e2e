@@ -1246,8 +1246,10 @@ export class DesktopSurface {
     const { appName, pid } = this;
     if (appName === undefined || pid === undefined || window === undefined) return 'unknown';
     const menus = async (): Promise<number | undefined> => {
-      const listed = await this.run<{ pid?: number; surfaces?: readonly { type?: string }[] }>(['list-surfaces', '--app', appName], { label: 'list surfaces', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs }).catch(() => undefined);
+      const listed = await this.run<{ pid?: number; surfaces?: readonly { type?: string; unclassified?: readonly string[] }[] }>(['list-surfaces', '--app', appName], { label: 'list surfaces', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs }).catch(() => undefined);
       if (listed?.pid !== pid) return undefined;
+      // A window agent-desktop could not check for a menu (a busy app) says so in `unclassified`: whether a menu is open there is unknown, not no.
+      if ((listed.surfaces ?? []).some((surface) => surface.unclassified?.includes('menu') === true)) return undefined;
       return (listed.surfaces ?? []).filter((surface) => surface.type?.includes('menu') === true).length;
     };
     const before = await menus();
