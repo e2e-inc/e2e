@@ -194,11 +194,11 @@ export default {
         name: 'install-smoke-core-only',
         private: true,
         type: 'module',
-        dependencies: { '@e2e-dev/core': tarball('e2e-dev-core-'), '@e2e-dev/web': tarball('e2e-dev-web-'), '@e2e-dev/mobile': tarball('e2e-dev-mobile-') },
+        dependencies: { '@e2e-dev/core': tarball('e2e-dev-core-'), '@e2e-dev/web': tarball('e2e-dev-web-'), '@e2e-dev/mobile': tarball('e2e-dev-mobile-'), '@e2e-dev/desktop': tarball('e2e-dev-desktop-') },
       }),
     );
     writeFileSync(join(coreOnly, 'main-entries.mjs'), `
-for (const [name, factory, options] of [['@e2e-dev/web', 'web', undefined], ['@e2e-dev/mobile', 'mobile', { platform: 'ios' }]]) {
+for (const [name, factory, options] of [['@e2e-dev/web', 'web', undefined], ['@e2e-dev/mobile', 'mobile', { platform: 'ios' }], ['@e2e-dev/desktop', 'desktop', undefined]]) {
   const entry = await import(name);
   entry[factory](options);
   try {
