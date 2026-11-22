@@ -1225,6 +1225,10 @@ export class DesktopSurface {
     const screen = await this.capture(operation);
     const focused = screen === undefined ? undefined : [...screen.bindings.values()].find((binding) => binding.ref !== undefined && binding.states?.focused === true);
     if (focused === undefined) throw notActionable('no field has keyboard focus; tap or focus the field first');
+    // agent-desktop types only into a control that offers TypeText; a list or button with focus would take the select-all and delete as commands.
+    if (!focused.actions.includes('TypeText')) {
+      throw notActionable(`the ${focused.role ?? 'control'}${focused.name === undefined ? '' : ` "${focused.name}"`} that has keyboard focus takes no text; tap or focus a text field first`);
+    }
     if (options.replace) {
       // Cleared as on a keyboard, select all and then delete: the app's key handlers see it, and a field that takes keys but refuses an accessibility write is cleared too.
       const window = focused.windowId ?? (await this.ownWindow(operation))?.id;

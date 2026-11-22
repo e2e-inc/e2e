@@ -511,6 +511,19 @@ describe('DesktopSurface', () => {
     expect(presses).toEqual(['cmd+a', 'backspace']);
   });
 
+  it('sends nothing when the control with keyboard focus takes no text, so no select-all or delete reaches a list or button', async () => {
+    const focusedButton = JSON.parse(
+      JSON.stringify(snapshotAnswer('macos/appkit-form'))
+        .replace('"states":["focused"]', '"states":[]')
+        .replace('"native_id":{"kind":"ax_identifier","value":"sign-in"}', '"native_id":{"kind":"ax_identifier","value":"sign-in"},"states":["focused"]'),
+    ) as unknown;
+    const { surface, fake } = await launched({ snapshot: [focusedButton] }, { options: { headed: true } });
+    for (const replace of [true, false]) {
+      await expect(surface.typeText('ada', { replace }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/takes no text/) });
+    }
+    expect(actions(fake.calls()).filter((key) => key !== 'snapshot')).toEqual([]);
+  });
+
   it('reports a type after a clear that changed the field as possibly committed', async () => {
     const { surface } = await launched({ type: [failure('STALE_REF', 'not_delivered')] });
     await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });
