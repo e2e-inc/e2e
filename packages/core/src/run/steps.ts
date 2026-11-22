@@ -793,9 +793,11 @@ export class StepRecorder {
       // A step that failed on its own, or that another abort reached first, keeps that failure.
       const name = this.named.get(record.id);
       const cause = name !== undefined && thrown === name.reason ? name.error : thrown;
+      const failure = modelFailure(cause, this.redact ?? processSecrets.redact);
       if (this.abandoned.has(record.id)) {
-        markAbandonedRejection(cause);
-        throw cause;
+        const rejection = failure ?? cause;
+        markAbandonedRejection(rejection);
+        throw rejection;
       }
       record.durationMs = Date.now() - startedMs;
       const error = classifyError(cause);
@@ -808,7 +810,6 @@ export class StepRecorder {
             ? 'blocked'
             : 'failed';
       record.error = serializeError(error, { projectRoot: this.projectRoot, redact: this.redact });
-      const failure = modelFailure(cause, this.redact ?? processSecrets.redact);
       if (reading?.aborted === true && (error.code === 'CANCELLED' || thrown === reading.reason)) {
         markAbandonedRejection(failure ?? (this.redactThrown ? error : cause));
       }

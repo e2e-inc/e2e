@@ -88,6 +88,23 @@ describe('StepRecorder.lastVerifiedStepIndex', () => {
     }
   });
 
+  it('sanitizes a provider error after the caller leaves the step running', async () => {
+    const key = 'sk-fake-late-model-4775';
+    const redact = (text: string): string => text.replaceAll(key, '<secret:k>');
+    const steps = new StepRecorder('attempt', { redact });
+    const gate = deferred();
+    const work = steps.run('agent', 'agent.act', 'x', async () => {
+      await gate.promise;
+      throw new AgentError('MODEL_PROVIDER_FAILED', `provider said ${key}`, { cause: { responseBody: key } });
+    });
+    expect(steps.abandonRunning()?.code).toBe('STEP_NOT_AWAITED');
+    gate.resolve();
+    const caught = await work.catch((error: unknown) => error);
+    expect(caught).toMatchObject({ code: 'MODEL_PROVIDER_FAILED', message: 'provider said <secret:k>' });
+    expect(caught).not.toHaveProperty('cause');
+    expect(steps.all()[0]?.error?.code).toBe('STEP_NOT_AWAITED');
+  });
+
   it('does not advance on a verification step that failed', async () => {
     const steps = new StepRecorder('attempt');
     await steps.run('assertion', 'expect.toBeVisible', 'the row', pass, { verifies: true });

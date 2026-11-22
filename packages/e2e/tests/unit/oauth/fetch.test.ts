@@ -402,4 +402,3 @@ describe('createOAuthFetch', () => {
     expect(processSecrets.redact(renewed.refresh)).toBe('<secret:test.refresh-token>');
   });
 });
-
