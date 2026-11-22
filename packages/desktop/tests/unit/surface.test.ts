@@ -494,6 +494,16 @@ describe('DesktopSurface', () => {
     }
   });
 
+  it('replaces the focused field as a keyboard does, select all and delete, and never by an accessibility clear', async () => {
+    // The form's Username field has keyboard focus.
+    const { surface, fake } = await launched({}, { options: { headed: true } });
+    await surface.typeText('ada', { replace: true }, operation());
+    const sent = actions(fake.calls()).filter((key) => key !== 'snapshot');
+    expect(sent).toEqual(['press', 'press', 'type']);
+    const presses = fake.calls().filter((call) => call.key === 'press').map((call) => call.args[1]);
+    expect(presses).toEqual(['cmd+a', 'backspace']);
+  });
+
   it('reports a type after a clear that changed the field as possibly committed', async () => {
     const { surface } = await launched({ type: [failure('STALE_REF', 'not_delivered')] });
     await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });

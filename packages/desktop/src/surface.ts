@@ -1205,7 +1205,13 @@ export class DesktopSurface {
     const screen = await this.capture(operation);
     const focused = screen === undefined ? undefined : [...screen.bindings.values()].find((binding) => binding.ref !== undefined && binding.states?.focused === true);
     if (focused === undefined) throw notActionable('no field has keyboard focus; tap or focus the field first');
-    if (options.replace) await this.refCommand('clear', focused, operation);
+    if (options.replace) {
+      // Cleared as on a keyboard, select all and then delete: the app's key handlers see it, and a field that takes keys but refuses an accessibility write is cleared too.
+      const window = focused.windowId ?? (await this.ownWindow(operation))?.id;
+      if (window === undefined) throw this.chosenWindow === undefined ? invalidState('the app is not running; open it with app.open()') : this.chosenClosed();
+      await this.sendKey('cmd+a', window, 'select all', operation);
+      await afterChange('delete the selection', () => this.sendKey('backspace', window, 'delete the selection', operation));
+    }
     // Keystrokes, which only physical input sends: without it agent-desktop sets the text, and the app's key handlers never run.
     const type = (): Promise<unknown> => this.tryRef('type', focused, operation, [], text, true);
     if (options.replace) await afterChange('type', type);
