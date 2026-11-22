@@ -99,8 +99,10 @@ describe('todos', () => {
 | `.type('text')`、`.type('{enter}')`、`.clear().type('text')` | `.pressSequentially('text')` 通过键盘事件追加文本、`.press('Enter')`、`.fill('text')` |
 | `.select('Pro')` | `.selectOption('Pro')` 匹配标签；按值需使用 `{ value: 'pro' }`，按索引需使用 `{ index: 1 }` |
 | `.should('be.visible')`、`be.checked`、`be.disabled`、`be.focused`、`exist` | `await expect(locator).toBeVisible()`、`toBeChecked()`、`toBeDisabled()`、`toBeFocused()`、`toBeAttached()` |
+| `.should($el => ...)` | 多个断言使用 [`expect(fn).toPass()`](/reference/expect#retrying-a-block)；单个会变化的值使用 [`expect.poll`](/reference/expect#polling-a-value) |
 | `have.text`、`contain`、`have.value`、`have.attr`、`have.length`、`not.exist` | `toHaveText`、`toContainText`、`toHaveValue`、`toHaveAttribute`、`toHaveCount(n)`、`toHaveCount(0)` |
 | `cy.url().should('include', p)`、`cy.title()` | `expect(browser).toHaveURL(/p/)`、`expect(browser).toHaveTitle(t)` |
+| `have.css`、`have.prop` | `expect(browser).toHaveCSS(locator, name, value)`、`expect(browser).toHaveJSProperty(locator, name, value)` |
 | `cy.intercept('/api/users', body)` | `browser.route('**/api/users', route => route.fulfill({ json: body }))`，对完整 URL 使用 glob 匹配 |
 | `cy.intercept('POST', '/api/users', body)` | `browser.route({ method: 'POST', url: '**/api/users' }, route => route.fulfill({ json: body }))` |
 | `cy.on('window:confirm')`、`cy.on('window:alert')` | 操作前调用 `await browser.onDialog('accept')`，取消则使用 `'dismiss'` |
@@ -117,8 +119,8 @@ describe('todos', () => {
 | Cypress | 当前替代方式 |
 | --- | --- |
 | `.find('css')`、`.filter('css')`、`.not('css')` | 链式调用 `getBy*` 查询，或编写一个选择器：`browser.locator('li.active >> .title')` |
-| `.invoke()`、`.its()`、`.then($el => ...)`、`.should($el => ...)` | `getAttribute()`、`textContent()`、`inputValue()`，其他情况使用 `browser.evaluate`；用 `expect.poll` 包装以重试 |
-| `have.class`、`have.css`、`have.prop`、`be.empty` | `expect(browser).toHaveClass(locator, /regexp/)`、`expect(locator).toHaveText('')`；其他情况使用 `expect.poll(() => browser.evaluate(...))` |
+| `.invoke()`、`.its()`、`.then($el => ...)` | `getAttribute()`、`textContent()`、`inputValue()`，其他情况使用 `browser.evaluateOn(locator, fn)`；用 `expect.poll` 包装以重试 |
+| `have.class`、`be.empty` | `expect(browser).toHaveClass(locator, /regexp/)`、`expect(locator).toHaveText('')`；其他情况使用 `expect.poll(() => browser.evaluateOn(locator, fn))` |
 | `.trigger()`、`cy.scrollTo()`、`.blur()` | `hover()`、`dragTo()`、`scrollIntoView()`、`press('Tab')`；其他情况使用 `browser.evaluate` |
 | `cy.intercept({ headers })` 和其他请求头匹配器 | 在处理函数中检查 `route.request.headers`，否则调用 `route.fallback()` |
 | `cy.wait('@alias')`、`.its('request.body')`、`@alias.all` | 在操作前启动 `browser.waitForResponse(pattern)`；在 `browser.route` 处理函数中读取请求 |

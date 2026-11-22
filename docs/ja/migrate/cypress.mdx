@@ -99,8 +99,10 @@ describe('todos', () => {
 | `.type('text')`, `.type('{enter}')`, `.clear().type('text')` | キーイベント付きで追記する `.pressSequentially('text')`、`.press('Enter')`、`.fill('text')` |
 | `.select('Pro')` | `.selectOption('Pro')` はラベルと照合。値なら `{ value: 'pro' }`、インデックスなら `{ index: 1 }` |
 | `.should('be.visible')`, `be.checked`, `be.disabled`, `be.focused`, `exist` | `await expect(locator).toBeVisible()`、`toBeChecked()`、`toBeDisabled()`、`toBeFocused()`、`toBeAttached()` |
+| `.should($el => ...)` | 複数のアサーションには [`expect(fn).toPass()`](/reference/expect#retrying-a-block) を使う。変化する単一の値には [`expect.poll`](/reference/expect#polling-a-value) を使う |
 | `have.text`, `contain`, `have.value`, `have.attr`, `have.length`, `not.exist` | `toHaveText`、`toContainText`、`toHaveValue`、`toHaveAttribute`、`toHaveCount(n)`、`toHaveCount(0)` |
 | `cy.url().should('include', p)`, `cy.title()` | `expect(browser).toHaveURL(/p/)`、`expect(browser).toHaveTitle(t)` |
+| `have.css`, `have.prop` | `expect(browser).toHaveCSS(locator, name, value)`、`expect(browser).toHaveJSProperty(locator, name, value)` |
 | `cy.intercept('/api/users', body)` | `browser.route('**/api/users', route => route.fulfill({ json: body }))`。URL 全体に対する glob |
 | `cy.intercept('POST', '/api/users', body)` | `browser.route({ method: 'POST', url: '**/api/users' }, route => route.fulfill({ json: body }))` |
 | `cy.on('window:confirm')`, `cy.on('window:alert')` | 操作前に `await browser.onDialog('accept')`。キャンセルには `'dismiss'` |
@@ -117,8 +119,8 @@ describe('todos', () => {
 | Cypress | 現在使える方法 |
 | --- | --- |
 | `.find('css')`, `.filter('css')`, `.not('css')` | `getBy*` クエリを連結、または `browser.locator('li.active >> .title')` のような単一のセレクター |
-| `.invoke()`, `.its()`, `.then($el => ...)`, `.should($el => ...)` | `getAttribute()`、`textContent()`、`inputValue()`、それ以外は `browser.evaluate`。リトライには `expect.poll` で包む |
-| `have.class`, `have.css`, `have.prop`, `be.empty` | `expect(browser).toHaveClass(locator, /regexp/)`、`expect(locator).toHaveText('')`。それ以外は `expect.poll(() => browser.evaluate(...))` |
+| `.invoke()`, `.its()`, `.then($el => ...)` | `getAttribute()`、`textContent()`、`inputValue()`、それ以外は `browser.evaluateOn(locator, fn)`。リトライには `expect.poll` で包む |
+| `have.class`, `be.empty` | `expect(browser).toHaveClass(locator, /regexp/)`、`expect(locator).toHaveText('')`。それ以外は `expect.poll(() => browser.evaluateOn(locator, fn))` |
 | `.trigger()`, `cy.scrollTo()`, `.blur()` | `hover()`、`dragTo()`、`scrollIntoView()`、`press('Tab')`。それ以外は `browser.evaluate` |
 | `cy.intercept({ headers })` など、ヘッダーのマッチャー | ハンドラー内で `route.request.headers` を確認し、対象外なら `route.fallback()` |
 | `cy.wait('@alias')`, `.its('request.body')`, `@alias.all` | 操作前に `browser.waitForResponse(pattern)` を開始。リクエストは `browser.route` のハンドラーで読む |
