@@ -238,6 +238,181 @@ describe('registration', () => {
     );
   });
 
+  it('registers one test.each test per row, in row order, titled from the row', async () => {
+    const registration = await collectModule(async () => {
+      test.each([{ user: 'Ada', plan: { name: 'pro' } }, { user: 'Grace', plan: { name: 'free' } }])(
+        'signs in as $user on $plan.name',
+        noop,
+      );
+      test.each([[1, 2, 3], [2, 2, 4]])('%i + %i = %d', noop);
+      test.each(['a', 'b'])('row %# of letter %s, number %$', noop);
+      test.for([[1, { a: 'x' }]])('%i and %j via test.for, title as in test.each', noop);
+      test.each([{ a: [1, 2] }])('%o', noop);
+      test.each([{ id: 1 }])('$missing $id.deep %s 100%% %s', noop);
+      test.each([7])('only $user stays as written', noop);
+      test.each([{ text: '%s and $id', id: 9 }])('$text is not read again', noop);
+      test.each([['42px', '1.5e3', '2.5kg', 1e21]])('%i %f %f %i', noop);
+      test.each([[Symbol('s'), Symbol('t'), Symbol('u')]])('%d %i %f', noop);
+      test.each([[[1, 2, 3, 4, 5, 6, 7]]])('ids %s', noop);
+      test.each([{ tags: ['a', 'b', 'c', 'd', 'e', 'f', 'g'], deep: { a: { b: { c: { d: 1 } } } } }])('$tags %o', noop);
+      test.each([[-0, '-0']])('%f %f', noop);
+      test.each([[function named(a: unknown) {
+        return a;
+      }, Symbol('s'), undefined]])('%j %j %j', noop);
+      test.each([{ 名前: 'Ada', ユーザー: { 名: 'L' } }])('$名前 $ユーザー.名', noop);
+      test.each([[new Error('boom'), new TypeError('bad')]])('%s %o', noop);
+      test.each([{ error: new RangeError('too far') }])('fails with $error', noop);
+      const inner = new Error('inner');
+      inner.stack = 'Error: inner\n    at somewhere (file.js:1:1)';
+      test.each([[{ cause: inner }, Symbol('a\nb')]])('%s %s', noop);
+    });
+    expect(registration.tests.map((item) => [item.title, item.mode])).toEqual([
+      ['signs in as Ada on pro', 'normal'],
+      ['signs in as Grace on free', 'normal'],
+      ['1 + 2 = 3', 'normal'],
+      ['2 + 2 = 4', 'normal'],
+      ['row 0 of letter a, number 1', 'normal'],
+      ['row 1 of letter b, number 2', 'normal'],
+      ['1 and {"a":"x"} via test.for, title as in test.each', 'normal'],
+      ['{ a: [ 1, 2 ] }', 'normal'],
+      ['undefined undefined { id: 1 } 100% %s', 'normal'],
+      ['only $user stays as written', 'normal'],
+      ['%s and $id is not read again', 'normal'],
+      ['42 1500 2.5 1', 'normal'],
+      ['NaN NaN NaN', 'normal'],
+      ['ids [ 1, 2, 3, 4, 5, 6, 7 ]', 'normal'],
+      ["[ 'a', 'b', 'c', 'd', 'e', 'f', 'g' ] { tags: [ 'a', 'b', 'c', 'd', 'e', 'f', 'g' ], deep: { a: { b: { c: { d: 1 } } } } }", 'normal'],
+      ['-0 -0', 'normal'],
+      ['undefined undefined undefined', 'normal'],
+      ['Ada L', 'normal'],
+      ['Error: boom TypeError: bad', 'normal'],
+      ['fails with RangeError: too far', 'normal'],
+      ['{ cause: Error: inner at somewhere (file.js:1:1) } Symbol(a b)', 'normal'],
+    ]);
+    const indexes = registration.tests.map((item) => item.declarationIndex);
+    expect(indexes).toEqual(indexes.toSorted((a, b) => a - b));
+  });
+
+  it('spreads test.each rows before the fixtures only when every row is an array, and passes test.for rows whole', async () => {
+    const calls: unknown[][] = [];
+    const spread = async (n: unknown, word: unknown, { app }: { app: unknown }) => {
+      calls.push([n, word, { app }]);
+    };
+    const whole = async (row: unknown, { app }: { app: unknown }) => {
+      calls.push([row, { app }]);
+    };
+    const registration = await collectModule(async () => {
+      test.each([[1, 'one'], [2, 'two']])('each %#', spread as never);
+      test.each([[1, 'one'], { user: 'Ada' }, 'plain'])('mixed %#', whole as never);
+      test.for([[1, 'one'], { user: 'Ada' }])('for %#', whole as never);
+    });
+    expect(registration.tests.map((item) => item.names)).toEqual(Array.from({ length: 7 }, () => ['app']));
+    const fixtures = { app: 'app fixture' };
+    for (const registered of registration.tests) await (registered.fn as (fixtures: unknown) => Promise<void>)(fixtures);
+    expect(calls).toEqual([
+      [1, 'one', fixtures],
+      [2, 'two', fixtures],
+      [[1, 'one'], fixtures],
+      [{ user: 'Ada' }, fixtures],
+      ['plain', fixtures],
+      [[1, 'one'], fixtures],
+      [{ user: 'Ada' }, fixtures],
+    ]);
+  });
+
+  it('reads a test.each body\'s fixtures from the parameter after the row', async () => {
+    const registration = await collectModule(async () => {
+      test.each([[1, 2]])('spread %#', async (_a: number, _b: number, { app, screen }: { app: unknown; screen: unknown }) => {
+        void app;
+        void screen;
+      });
+      test.each([{ user: 'Ada' }])('object %#', async ({ user }: { user: string }, { app }: { app: unknown }) => {
+        void user;
+        void app;
+      });
+      test.for([[1, 2]])('for %#', async ([a]: number[], { screen }: { screen: unknown }) => {
+        void a;
+        void screen;
+      });
+      test.each([1])('no fixtures %#', async (_n: number) => {});
+    });
+    expect(registration.tests.map((item) => [item.title, item.names])).toEqual([
+      ['spread 0', ['app', 'screen']],
+      ['object 0', ['app']],
+      ['for 0', ['screen']],
+      ['no fixtures 0', []],
+    ]);
+    await expect(collectModule(async () => {
+      test.each([[1, 2]])('whole %#', async (_a: number, _b: number, fixtures: unknown) => {
+        void fixtures;
+      });
+    })).rejects.toThrow(/test "whole 0" must destructure parameter 3, where it takes the fixtures, as in \(\{ app, screen \}\) => \{\}; it takes "fixtures"/);
+    await expect(collectModule(async () => {
+      test.each([[1, 2]])('rest %#', async (...args: unknown[]) => {
+        void args;
+      });
+    })).rejects.toThrow(/test "rest 0" must destructure parameter 3, where it takes the fixtures.*it takes "\.\.\.args"/);
+    // Each row is spread on its own, so a row with fewer items puts the fixtures in a parameter that names an item.
+    await expect(collectModule(async () => {
+      test.each([[1, 2], [3]] as number[][])('short %#', (async (a: number, b: number, { app }: { app: unknown }) => void [a, b, app]) as never);
+    })).rejects.toThrow(/test "short 1" must destructure parameter 2, where it takes the fixtures.*it takes "b"/);
+  });
+
+  it('applies test.each options to every row and works on an extended test', async () => {
+    const extended = test.extend({ workspace: async ({}, use: (value: string) => Promise<void>) => use('w') });
+    const registration = await collectModule(async () => {
+      test.each([1, 2])('skipped %s', { skip: 'not yet', tags: ['@each'] }, noop);
+      test.for([1])('focused %s', { only: true }, noop);
+      extended.each([1])('extended %s', noop);
+    });
+    expect(
+      registration.tests.map((item) => [item.title, item.mode, item.options, item.tags, item.fixtures.map((definition) => definition.name)]),
+    ).toEqual([
+      ['skipped 1', 'skip', { skip: 'not yet', tags: ['@each'] }, ['@each'], []],
+      ['skipped 2', 'skip', { skip: 'not yet', tags: ['@each'] }, ['@each'], []],
+      ['focused 1', 'only', { only: true }, [], []],
+      ['extended 1', 'normal', {}, [], ['workspace']],
+    ]);
+  });
+
+  it('rejects test.each and test.for rows that are not a non-empty array, and bad calls', async () => {
+    expect(() => test.each('ab' as never)).toThrow('test.each() takes an array of rows, got "ab"');
+    expect(() => test.for(undefined as never)).toThrow(/^test\.for\(\) takes an array of rows, got undefined/);
+    expect(() => test.each([])).toThrow('test.each() got no rows; pass at least one');
+    expect(() => test.for([])).toThrow('test.for() got no rows; pass at least one');
+    const tagged = test.each as unknown as (strings: TemplateStringsArray, ...values: unknown[]) => unknown;
+    expect(() => tagged`a | b\n${1} | ${2}`).toThrow('test.each() takes an array of rows, not a template literal table');
+    // Only a template's own `raw` marks it: one the rows inherit does not.
+    const inherits: number[] = Object.setPrototypeOf([1], Object.create(Array.prototype, { raw: { value: [] } }));
+    expect(() => test.each(inherits)).not.toThrow();
+    expect(() => test.each([1])('outside %s', noop)).toThrow(/^test\.each\(\) /);
+    await expect(collectModule(async () => test.each([1])('no body %s', {} as never))).rejects.toThrow(
+      'test body function is required',
+    );
+    await expect(collectModule(async () => test.each([1])('bad', { retry: 1 } as never, noop))).rejects.toThrow(
+      /test options has unknown key "retry"/,
+    );
+    await expect(collectModule(async () => test.each([[1], [2n]])('%j', noop))).rejects.toThrow(
+      /^%j cannot format the row at index 1: Do not know how to serialize a BigInt/,
+    );
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const formatted = await collectModule(async () => {
+      test.each([[circular]])('%j', noop);
+    });
+    expect(formatted.tests.map((item) => item.title)).toEqual(['[Circular]']);
+    const own = { toJSON: () => { throw new TypeError('circular reference in my model'); } };
+    await expect(collectModule(async () => test.each([[own]])('%j', noop))).rejects.toThrow(
+      /^%j cannot format the row at index 0: circular reference in my model/,
+    );
+    const same = await collectModule(async () => {
+      test.each([1, 2])('same title', noop);
+    });
+    expect(() => collectFromRegistration('/root', '/root/tests/each.e2e.ts', same)).toThrow(
+      'duplicate title path same title in tests/each.e2e.ts',
+    );
+  });
+
   it('rejects test.skipIf and test.runIf in a serial group whatever the condition', async () => {
     const calls: Array<[string, () => void]> = [
       ['test.skipIf()', () => test.skipIf(true)('member', noop)],
@@ -262,6 +437,50 @@ describe('registration', () => {
     expect(registration.tests.map((item) => item.mode)).toEqual(['normal']);
   });
 
+  it('registers test.fixme(title, fn) as fixme with the reason fixme, and rejects it in a serial group', async () => {
+    const registration = await collectModule(async () => {
+      test.fixme('not yet', noop);
+      test.describe('plain group', () => {
+        test.fixme('grouped', noop);
+      });
+    });
+    expect(registration.tests.map((item) => [item.title, item.mode, item.options])).toEqual([
+      ['not yet', 'fixme', { skip: 'fixme' }],
+      ['grouped', 'fixme', { skip: 'fixme' }],
+    ]);
+    await expect(
+      collectModule(async () => {
+        test.describe('unit', { serial: true }, () => {
+          test.describe('nested', () => {
+            test.fixme('member', noop);
+          });
+        });
+      }),
+    ).rejects.toThrow('test.fixme() cannot be used inside a serial group, which skips as one unit; set skip on the serial describe instead');
+    expect(() => test.fixme('outside', noop)).toThrow(/^test\.fixme\(\) can only be called while a test module is being collected/);
+  });
+
+  it('rejects test.skip(title, fn) in a serial group, naming test.skip()', async () => {
+    await expect(
+      collectModule(async () => {
+        test.describe('unit', { serial: true }, () => {
+          test.describe('nested', () => {
+            test.skip('member', noop);
+          });
+        });
+      }),
+    ).rejects.toThrow('test.skip() cannot be used inside a serial group, which skips as one unit; set skip on the serial describe instead');
+  });
+
+  it('rejects the runtime test.fixme forms outside a test body, pointing at test.fixme(title, fn)', async () => {
+    const message =
+      'test.fixme(condition, reason) skips the running test and must be called inside a test body; to mark a test fixme at collection, register it with test.fixme(title, fn)';
+    await expect(collectModule(async () => test.fixme(true, 'flaky on webkit'))).rejects.toThrow(message);
+    await expect(collectModule(async () => test.fixme(false))).rejects.toThrow(message);
+    await expect(collectModule(async () => test.fixme('flaky on webkit'))).rejects.toThrow(message);
+    await expect(collectModule(async () => test.fixme())).rejects.toThrow(CollectionError);
+  });
+
   it('registers expected failures by test.fail(title, fn) and the fail option, and checks the option', async () => {
     const registration = await collectModule(async () => {
       test.fail('registered', noop);
@@ -274,13 +493,53 @@ describe('registration', () => {
     await expect(collectModule(async () => test('bad', { fail: 1 } as never, noop))).rejects.toThrow(
       'test options: fail must be true, false, or a reason string, got 1',
     );
-    await expect(collectModule(async () => test.describe('group', { fail: true } as never, () => {}))).rejects.toThrow(/unknown key "fail"/);
     await expect(collectModule(async () => test.setup('login', { sessions: ['admin'], fail: true } as never, noop))).rejects.toThrow(/unknown key "fail"/);
+  });
+
+  it('marks a group by describe.fail(title, fn) or the fail option, and checks both', async () => {
+    const registration = await collectModule(async () => {
+      test.describe.fail('shortcut', () => test('a', noop));
+      test.describe.fail('shortcut with options', { tags: ['legacy'] }, () => test('b', noop));
+      test.describe('by option', { fail: 'known gap' }, () => test('c', noop));
+      registry.describe.fail('top-level import', () => test('d', noop));
+    });
+    expect(registration.tests.map((item) => item.group?.options.fail)).toEqual([true, true, 'known gap', true]);
+    expect(registration.tests[1]!.tags).toEqual(['legacy']);
+    await expect(collectModule(async () => test.describe('group', { fail: 1 } as never, () => {}))).rejects.toThrow(
+      'describe options: fail must be true, false, or a reason string, got 1',
+    );
+    // describe.fail rejects what describe() rejects, including keys a spread would drop.
+    const hidden = Object.defineProperty({}, 'bogus', { value: 1, enumerable: false });
+    for (const [options, message] of [[[], 'unknown key "length"'], [hidden, 'unknown key "bogus"']] as const) {
+      await expect(collectModule(async () => test.describe('group', options as never, () => {}))).rejects.toThrow(message);
+      await expect(collectModule(async () => test.describe.fail('group', options as never, () => {}))).rejects.toThrow(message);
+    }
+    for (const fail of ['legacy checkout', false, 1]) {
+      await expect(collectModule(async () => test.describe.fail('group', { fail } as never, () => {}))).rejects.toThrow(
+        "describe.fail() takes no fail option; give a reason with describe(title, { fail: 'reason' }, fn)",
+      );
+    }
+  });
+
+  it('refuses fail on, inside, or around a serial group', async () => {
+    const serialRule = 'describe option "fail" cannot be set on or inside a serial group, which runs as one unit';
+    await expect(collectModule(async () => test.describe('unit', { serial: true, fail: true }, () => {}))).rejects.toThrow(serialRule);
+    await expect(collectModule(async () => test.describe.fail('unit', { serial: true }, () => {}))).rejects.toThrow(serialRule);
+    await expect(
+      collectModule(async () => test.describe('unit', { serial: true }, () => test.describe.fail('inner', () => {}))),
+    ).rejects.toThrow(serialRule);
+    await expect(
+      collectModule(async () => test.describe.fail('outer', () => test.describe('unit', { serial: true }, () => {}))),
+    ).rejects.toThrow('a serial group cannot sit inside a group marked fail; its members cannot be expected to fail');
+    await expect(
+      collectModule(async () => test.describe('outer', { fail: false }, () => test.describe('unit', { serial: true }, () => {}))),
+    ).resolves.toBeDefined();
   });
 
   it('rejects test.fail(condition) outside a test body', async () => {
     expect(() => test.fail(true, 'not here')).toThrow(CollectionError);
     expect(() => test.fail(false)).toThrow(/must be called inside a test body/);
+    expect(() => test.fail(false)).toThrow(/describe\.fail\(title, fn\).*test or describe option/);
   });
 
   it('validates titles', async () => {
@@ -349,6 +608,21 @@ describe('the fixtures a registration names', () => {
     }
     const rest = await failure(() => test('rest', (async ({ ...all }: object) => void all) as never));
     expect(rest.message).toContain('test "rest" takes the rest property "...all"');
+  });
+
+  it('puts the stack trace limit back when reading the stack throws', async () => {
+    const limit = Error.stackTraceLimit;
+    const prepare = Error.prepareStackTrace;
+    Error.prepareStackTrace = () => {
+      throw new RangeError('no stack');
+    };
+    try {
+      await expect(collectModule(async () => void test('x', noop))).rejects.toThrow('no stack');
+      expect(Error.stackTraceLimit).toBe(limit);
+    } finally {
+      Error.prepareStackTrace = prepare;
+      Error.stackTraceLimit = limit;
+    }
   });
 
   it('records where a hook was registered', async () => {
@@ -565,15 +839,17 @@ describe('test.extend', () => {
     expect(() => test.extend({ database: [fixture, { scop: 'worker' }] } as never)).toThrow(/options has unknown key "scop"/);
   });
 
-  it('carries the chain through skipIf and runIf on an extended test', async () => {
+  it('carries the chain through skipIf, runIf, and fixme on an extended test', async () => {
     const extended = test.extend<{ one: string }>({ one: fixture });
     const registration = await collectModule(async () => {
       extended.skipIf(true)('skipped', noop);
       extended.runIf(true)('runs', noop);
+      extended.fixme('fixme', noop);
     });
     expect(registration.tests.map((item) => [item.mode, item.fixtures.map((definition) => definition.name)])).toEqual([
       ['skip', ['one']],
       ['normal', ['one']],
+      ['fixme', ['one']],
     ]);
   });
 

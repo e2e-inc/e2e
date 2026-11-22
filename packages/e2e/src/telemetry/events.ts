@@ -17,6 +17,7 @@ import { modelLabel } from '@e2e-dev/core/lib/config/agent';
 import type { ResolvedRunConfig } from '../config/resolve-run.ts';
 import type { McpClient } from '../mcp/server.ts';
 import type { McpSessionSummary } from '../mcp/usage.ts';
+import { builtinId } from '../report/builtin-id.ts';
 import type { Report1Document, ReportError, ReportExplore, ReportStep, ReportUsage } from '../report/build.ts';
 import { memberRan } from '@e2e-dev/core/lib/run/records';
 import { STEP_KINDS } from '@e2e-dev/core/lib/run/steps';
@@ -360,11 +361,6 @@ function costSource(usage: ReportUsage, modelCalls: number): 'provider' | 'none'
   return modelCalls > 0 ? 'none' : null;
 }
 
-function durationMs(startedAt: string, finishedAt: string): number | null {
-  const duration = Date.parse(finishedAt) - Date.parse(startedAt);
-  return Number.isFinite(duration) ? Math.max(0, duration) : null;
-}
-
 /** What the CLI knows of a run beyond its report. */
 export interface RunContext {
   /** `run` or `explore`. */
@@ -395,8 +391,8 @@ function configFeatures(config: ResolvedRunConfig): Record<string, JsonValue> {
     config_cache_mode: config.cache.mode,
     config_cache_store: config.cache.store === undefined ? 'file' : 'custom',
     config_cache_strict: config.cache.strict !== false,
-    config_reporters: unique(config.reporters),
-    config_custom_reporters: config.customReporters.length,
+    config_reporters: unique(config.reporters.flatMap((reporter) => builtinId(reporter) ?? [])),
+    config_custom_reporters: config.reporters.filter((reporter) => builtinId(reporter) === undefined).length,
     config_filters: config.filters.length,
     config_artifact_store: config.artifactStore !== undefined,
     config_trace_modes: unique(config.targets.map((target) => target.trace.mode)),
@@ -448,7 +444,7 @@ export function runCompletedEvent(report: Report1Document, context: RunContext):
       command: context.command,
       status: run.status,
       exit_code: run.exitCode,
-      duration_ms: durationMs(run.startedAt, run.finishedAt),
+      duration_ms: run.durationMs ?? null,
       flags: [...context.flags],
       tests_discovered: run.summary.discovered,
       tests_selected: run.summary.selected,
@@ -542,6 +538,7 @@ export function mcpSessionEvent(summary: McpSessionSummary, client: McpClient | 
       platform: summary.platform === undefined ? null : plainToken(summary.platform),
       engine: summary.engine === undefined ? null : engineLabel(summary.engine),
       headed: summary.headed,
+      attached: summary.attached,
       duration_ms: Math.max(0, Math.round(summary.durationMs)),
       sessions_open: summary.concurrent,
       calls_total: [...calls.values()].reduce((total, count) => total + count, 0),

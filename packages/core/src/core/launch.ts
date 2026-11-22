@@ -5,6 +5,7 @@
  * one at a time. Parallel work is more hosts.
  */
 
+import { randomBytes } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,13 +17,13 @@ import { rejectUnknownKeys, rejectUnknownOptions } from '../internal/options.ts'
 import { MAX_TIMER_MS } from '../internal/time.ts';
 import { builtInFixtures, CORE_FIXTURES } from '../run/fixtures.ts';
 import { redactOpening } from '../run/redact-opening.ts';
-import { processSecrets, registerStaticSecrets, sessionLedger } from '../run/secrecy.ts';
+import { processSecrets, sessionLedger, shareStaticSecrets } from '../run/secrecy.ts';
 import { targetIdentity } from '../run/sessions.ts';
 import { openCoreHost, type StandaloneHost } from '../run/standalone.ts';
 import type { StandaloneAttempt } from '../run/standalone-attempt.ts';
 import { secretHandle } from '../secrets.ts';
 import type { App, Screen, Secret, TargetApp } from '../types.ts';
-import { FailureWatch, registerSession } from './internals.ts';
+import { currentGuests, FailureWatch, registerSession, sessionGuest, type SessionGuest } from './internals.ts';
 import { closeOnSignals, engineListeners } from './signals.ts';
 import { restoredStateFor, SessionState, type StateIdentity } from './state.ts';
 
@@ -136,6 +137,9 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
     const got = typeof engine === 'function' ? 'a function' : engine === null ? 'null' : typeof engine;
     throw new TestError('INVALID_ARGUMENT', `launch takes an engine as its first argument and got ${got}: call the engine's factory, such as launch(web()) with web from @e2e-dev/web/engine`);
   }
+  /** What the test launching the host offers, when one is, and the host's seat in it: reserved before anything is awaited, so the host is that test's and no later one's. */
+  const owner = currentGuests();
+  const seat = owner?.host();
   rejectUnknownOptions('launch', options, LAUNCH_OPTION_KEYS);
   if (options.app !== undefined) rejectUnknownKeys('launch app', options.app, LAUNCH_APP_KEYS, 'INVALID_ARGUMENT');
   const timeout = options.timeout;
@@ -153,6 +157,8 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
     try { return await redactOpening(open); } finally { mark(); }
   };
   let opened: { readonly config: ResolvedConfig; readonly target: ResolvedTarget; readonly host: StandaloneHost };
+  /** Stops sharing the host's secrets with the sessions beside it; set once they are shared. */
+  let withdrawSecrets = (): void => undefined;
   try {
     opened = await opening(async () => {
       const env = options.env ?? process.env;
@@ -170,18 +176,23 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
       );
       // Set past resolution, which keeps a run's output inside its project: a host's lives where the program says.
       const config: ResolvedConfig = { ...resolved, output };
-      registerStaticSecrets(config.allSecrets);
+      withdrawSecrets = shareStaticSecrets(config.allSecrets);
       const target = config.targets[0]!;
       const notice = options.onNotice;
       const host = await openCoreHost({
         config, target, env, headed: options.headed ?? false,
-        signal: options.signal ?? new AbortController().signal,
+        // Hosts name their targets alike, so the engine gets a token per host to keep what it holds apart: a device session.
+        // Random, so hosts in other processes, worker threads, or copies of this package differ too.
+        hostId: randomBytes(12).toString('hex'),
+        signal: anySignal(options.signal, seat?.signal),
         ...(notice === undefined ? {} : { notice: (_target: string, message: string) => notice(message) }),
       });
       return { config, target, host };
     });
   } catch (cause) {
+    withdrawSecrets();
     await removeOutput();
+    if (seat?.signal.aborted === true) owner?.gaveUp(cause);
     throw cause;
   }
   const { config, target, host } = opened;
@@ -192,6 +203,8 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
     ...(target.app.identity === undefined ? {} : { app: target.app.identity }),
   };
   let closing: Promise<void> | undefined;
+  /** Whether the test that launched the host has taken charge of its end. */
+  let owned = false;
   /** The open session's close, so the host closes it the way a program would, its agents' recordings settled. */
   let closeOpen: (() => Promise<void>) | undefined;
   const close = (): Promise<void> => {
@@ -203,13 +216,61 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
       } catch (cause) {
         errors.push(...(cause instanceof AggregateError ? cause.errors as E2EError[] : [classifyError(cause)]));
       }
-      errors.push(...await host.close());
+      try {
+        errors.push(...await host.close());
+      } finally {
+        // A test that launched the host keeps its secrets shared until the test ends.
+        if (!owned) withdrawSecrets();
+      }
       await removeOutput().catch(() => undefined);
       throwClosingErrors(errors, 'closing the host');
     })();
     return closing;
   };
   const unregister = handlesSignals ? closeOnSignals(close) : () => undefined;
+  // A host a test launched is the test's to end: the attempt closes it if the test does not.
+  owned = seat?.take({ close, release: withdrawSecrets }) === true;
+  if (seat !== undefined && !owned) {
+    await close();
+    const gaveUp = new E2EError('infrastructure', 'CANCELLED', 'the test that launched the host ended before it was open');
+    owner?.gaveUp(gaveUp);
+    throw gaveUp;
+  }
+  /** Opens one session on the host, for the guest that was decided when the call was made. */
+  async function openSession(sessionOptions: NewSessionOptions, guest: SessionGuest): Promise<Session<Fixtures>> {
+    rejectUnknownOptions('newSession', sessionOptions, SESSION_OPTION_KEYS);
+    if (closing !== undefined) throw new InfrastructureError('WORKER_PROTOCOL', 'the host is closed');
+    const state = sessionOptions.state === undefined ? undefined : restoredStateFor(sessionOptions.state, identity);
+    const failures = new FailureWatch();
+    const attempt = await host.openAttempt({
+      signal: anySignal(sessionOptions.signal, guest.signal),
+      // No session deadline: each operation keeps its own timeout.
+      timeoutMs: MAX_TIMER_MS,
+      onProgress: failures.onProgress,
+      mirror: guest.mirror,
+      // A test that keeps videos keeps one of each session it opens too, when the engine can record it; a program's own session records none.
+      ...(guest.recordsVideo ? { video: { keep: 'always', policy: 'best-effort' } as const } : {}),
+      cancelsOnClose: {
+        closed: () => new E2EError('infrastructure', 'CANCELLED', 'the session is closed'),
+        cut: (call) => new E2EError('infrastructure', 'CANCELLED', `the session closed while ${call} was running`),
+      },
+      // No report stands between an operation's error and the program, so the error itself is classified and redacted.
+      redactThrown: true,
+      retainSteps: RETAINED_STEPS,
+      ...(state === undefined ? {} : { state }),
+    });
+    failures.watch(attempt.steps);
+    const session = coreSession<Fixtures>(attempt, config, identity, target, failures, guest, timeout, () => {
+      if (closeOpen === session.close) closeOpen = undefined;
+    });
+    closeOpen = session.close;
+    if (!guest.attach({ root: config.projectRoot, busy: () => attempt.steps.busy, abandonRunning: () => attempt.steps.abandonRunning(), close: session.close })) {
+      await session.close();
+      throw new E2EError('infrastructure', 'CANCELLED', 'the test that opened the session ended before it was open');
+    }
+    return session;
+  }
+
   return {
     platform: target.platform,
     secret: (name: string) => {
@@ -220,32 +281,13 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
       }
       return secretHandle({ name, purpose: registered.purpose });
     },
-    newSession: (sessionOptions = {}) => opening(async () => {
-      rejectUnknownOptions('newSession', sessionOptions, SESSION_OPTION_KEYS);
-      if (closing !== undefined) throw new InfrastructureError('WORKER_PROTOCOL', 'the host is closed');
-      const state = sessionOptions.state === undefined ? undefined : restoredStateFor(sessionOptions.state, identity);
-      const failures = new FailureWatch();
-      const attempt = await host.openAttempt({
-        signal: sessionOptions.signal ?? new AbortController().signal,
-        // No session deadline: each operation keeps its own timeout.
-        timeoutMs: MAX_TIMER_MS,
-        onProgress: failures.onProgress,
-        cancelsOnClose: {
-          closed: () => new E2EError('infrastructure', 'CANCELLED', 'the session is closed'),
-          cut: (call) => new E2EError('infrastructure', 'CANCELLED', `the session closed while ${call} was running`),
-        },
-        // No report stands between an operation's error and the program, so the error itself is classified and redacted.
-        redactThrown: true,
-        retainSteps: RETAINED_STEPS,
-        ...(state === undefined ? {} : { state }),
+    newSession: (sessionOptions = {}) => {
+      const guest = sessionGuest();
+      return opening(() => openSession(sessionOptions, guest)).catch((cause: unknown) => {
+        guest.failed(cause);
+        throw cause;
       });
-      failures.watch(attempt.steps);
-      const session = coreSession<Fixtures>(attempt, config, identity, target, failures, timeout, () => {
-        if (closeOpen === session.close) closeOpen = undefined;
-      });
-      closeOpen = session.close;
-      return session;
-    }),
+    },
     close,
     [Symbol.asyncDispose]: close,
   };
@@ -258,6 +300,7 @@ function coreSession<Fixtures extends object>(
   identity: StateIdentity,
   target: ResolvedTarget,
   failures: FailureWatch,
+  guest: SessionGuest,
   timeout: number | undefined,
   onClosed: () => void,
 ): Session<Fixtures> {
@@ -274,6 +317,7 @@ function coreSession<Fixtures extends object>(
         try { await closer(); } catch (cause) { errors.push(serializeError(classifyError(cause), { phase: 'cleanup', redact: processSecrets.redact })); }
       }
       errors.push(...await attempt.close());
+      try { await guest.videos(attempt.videos()); } catch (cause) { errors.push(serializeError(classifyError(cause), { phase: 'cleanup', redact: processSecrets.redact })); }
       onClosed();
       throwClosingErrors(errors, 'closing the session');
     })();
@@ -311,6 +355,12 @@ function coreSession<Fixtures extends object>(
     settlement: () => attempt.budget.signal.aborted ? undefined : failures.settlement(attempt.steps),
   });
   return typed;
+}
+
+/** A signal that aborts when any of the given ones does; one that never aborts when none is given. */
+function anySignal(...signals: readonly (AbortSignal | undefined)[]): AbortSignal {
+  const given = signals.filter((signal) => signal !== undefined);
+  return given.length === 1 ? given[0]! : AbortSignal.any(given);
 }
 
 /** Throws what closing found, redacted, as one `AggregateError`; nothing when it found nothing. */

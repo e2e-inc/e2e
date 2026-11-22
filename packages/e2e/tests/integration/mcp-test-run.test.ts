@@ -118,6 +118,18 @@ test('outlives its timeout', { timeout: 1_000 }, async ({ app }) => {
   await new Promise((resolve) => setTimeout(resolve, 2_000));
   await app.open('/about');
 });
+test('lowers its timeout', { timeout: 30_000 }, async ({ app }) => {
+  await app.open('/');
+  test.setTimeout(500);
+  await new Promise((resolve) => setTimeout(resolve, 5_000));
+});
+
+test('raises its timeout', { timeout: 300 }, async ({ app }) => {
+  test.setTimeout(10_000);
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  await app.open('/');
+});
+
 `;
 
 const HOOKS = `import { beforeAll, test } from 'e2e';
@@ -171,6 +183,16 @@ test.setup('member signs in', { sessions: ['member'] }, async ({ app, session })
 });
 `;
 
+const PAUSE = `import { expect, test } from 'e2e';
+
+test('counts past a pause', async ({ app, screen }) => {
+  await app.open('/');
+  await screen.pause();
+  await screen.getByRole('button', { name: 'Increment' }).tap();
+  await expect(screen.getByRole('status', { name: 'Counter' })).toHaveText('1');
+});
+`;
+
 /** The one-based line of the first line of `source` that holds `fragment`. */
 const lineOf = (source: string, fragment: string): number => source.split('\n').findIndex((line) => line.includes(fragment)) + 1;
 
@@ -217,6 +239,7 @@ describe('open_session {test}', { timeout: 120_000 }, () => {
         'tests/visual.e2e.ts': VISUAL,
         'tests/expected.e2e.ts': EXPECTED,
         'tests/marked-hooks.e2e.ts': MARKED_HOOKS,
+        'tests/pause.e2e.ts': PAUSE,
       });
       const transport = new StdioClientTransport({
         command: process.execPath,
@@ -250,6 +273,14 @@ describe('open_session {test}', { timeout: 120_000 }, () => {
       const closed = await invoke('close_session');
       expect(closed.text).toMatch(/^Session \S+ closed/);
       expect(readFileSync(marker, 'utf8')).toBe('ran');
+    });
+
+    it('runs the test past its screen.pause() right away', async () => {
+      const opened = await invoke('open_session', { test: 'tests/pause.e2e.ts:3' });
+      expect(opened.isError, opened.text).toBe(false);
+      expect(opened.text).toMatch(/^Test "counts past a pause" \(tests\/pause\.e2e\.ts:3\) passed after \S+; 3 steps ran\.\n/);
+      expect(await observe()).toContain('status "Counter" text="1"');
+      expect((await invoke('close_session')).isError).toBe(false);
     });
 
     it('opens a failing test with its code, line, code frame, and nearest nodes, on the screen it failed on', async () => {
@@ -326,6 +357,15 @@ describe('open_session {test}', { timeout: 120_000 }, () => {
       const observed = await observe();
       expect(observed).toContain('heading "Home"');
       expect(observed).not.toContain('document "About page"');
+      await invoke('close_session');
+    });
+
+    it('applies test.setTimeout to the test it runs, lowered or raised', async () => {
+      const lowered = await invoke('open_session', { test: `tests/sloppy.e2e.ts:${lineOf(SLOPPY, "test('lowers its timeout'")}` });
+      expect(lowered.text).toMatch(/^Test "lowers its timeout" .* timed out after \S+; 1 step ran\.\nTEST_TIMEOUT: test timed out after 500 ms in phase body\n/);
+      await invoke('close_session');
+      const raised = await invoke('open_session', { test: `tests/sloppy.e2e.ts:${lineOf(SLOPPY, "test('raises its timeout'")}` });
+      expect(raised.text).toMatch(/^Test "raises its timeout" .* passed/);
       await invoke('close_session');
     });
 

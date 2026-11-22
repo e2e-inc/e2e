@@ -126,6 +126,7 @@ test('consumer', { session: 'admin' }, async () => {});
       const setup = resultByTitle(outcome, 'sign in');
       expect(setup.status).toBe('failed');
       expect(setup.attempts[0]?.error?.code).toBe('INVALID_ARGUMENT');
+      expect(setup.attempts[0]?.error?.message).toContain('test.skip() cannot skip a setup test');
       expect(resultByTitle(outcome, 'consumer').skip?.cause).toBe('setup-failed');
       // The skipped tests do not fail the run; the setup does.
       expect(outcome.exitCode).toBe(1);
@@ -239,6 +240,196 @@ test('plain', async () => {});
   );
 
   it(
+    'reports test.fixme tests skipped with the reason fixme, registered or from a body or hook',
+    async () => {
+      const file = `import { test } from 'e2e';
+
+test.fixme('registered', async () => {
+  throw new Error('a test.fixme(title, fn) body must never run');
+});
+
+test('conditional', async ({ app }) => {
+  await app.open();
+  test.fixme(true, 'flaky on webkit');
+  throw new Error('unreachable after a fixme');
+});
+
+test('condition false runs on', async () => {
+  test.fixme(false);
+});
+
+test('bare', async () => {
+  test.fixme();
+});
+
+test('blank reason', async () => {
+  test.fixme('   ');
+});
+
+test.describe('hooked', () => {
+  test.beforeEach(() => {
+    test.fixme('hook says not yet');
+  });
+  test('member', async () => {
+    throw new Error('unreachable after a fixme in beforeEach');
+  });
+});
+
+test.setup('sign in', { sessions: ['admin'] }, async ({ session }) => {
+  test.fixme(true, 'a setup may not skip');
+  await session.save('admin');
+});
+
+test('consumer', { session: 'admin' }, async () => {});
+`;
+      const { outcome, project } = await runProject({ 'tests/fixme.e2e.ts': file }, {});
+      const registered = resultByTitle(outcome, 'registered');
+      expect(registered.status).toBe('skipped');
+      expect(registered.skip).toEqual({ cause: 'fixme', reason: 'fixme' });
+      expect(registered.attempts).toEqual([]);
+      const conditional = resultByTitle(outcome, 'conditional');
+      expect(conditional.status).toBe('skipped');
+      expect(conditional.skip).toEqual({ cause: 'fixme', reason: 'fixme: flaky on webkit' });
+      expect(conditional.attempts[0]?.steps.map((step) => step.api)).toEqual(['app.open']);
+      expect(resultByTitle(outcome, 'condition false runs on').status).toBe('passed');
+      expect(resultByTitle(outcome, 'bare').skip).toEqual({ cause: 'fixme', reason: 'fixme' });
+      expect(resultByTitle(outcome, 'blank reason').skip).toEqual({ cause: 'fixme', reason: 'fixme' });
+      expect(resultByTitle(outcome, 'member').skip).toEqual({ cause: 'fixme', reason: 'fixme: hook says not yet' });
+      const setup = resultByTitle(outcome, 'sign in');
+      expect(setup.status).toBe('failed');
+      expect(setup.attempts[0]?.error).toMatchObject({
+        code: 'INVALID_ARGUMENT',
+        message: expect.stringContaining('test.fixme() cannot skip a setup test'),
+      });
+      expect(resultByTitle(outcome, 'consumer').skip?.cause).toBe('setup-failed');
+      assertValidReport(outcome.report);
+      expect(outcome.exitCode).toBe(1);
+      project.cleanup();
+    },
+    120_000,
+  );
+
+  it(
+    'runs one test per test.each and test.for row with the row and the fixtures, each located at its call',
+    async () => {
+      const file = `import { test } from 'e2e';
+
+test.each([{ user: 'Ada' }, { user: 'Grace' }])('signs in as $user', async ({ user }, { platform }) => {
+  if (platform !== 'fake') throw new Error('unexpected platform ' + platform);
+  if (user !== 'Ada' && user !== 'Grace') throw new Error('unexpected row ' + user);
+});
+test.each([[1, 2, 3]])('%i + %i = %i', async (a, b, sum, { platform }) => {
+  if (a + b !== sum || platform !== 'fake') throw new Error('bad arguments');
+});
+test.for([[2, 2]])('pair %i and %i', async ([a, b], { platform }) => {
+  if (a !== b || platform !== 'fake') throw new Error('bad arguments');
+});
+test.each(['left', 'right'])('fails on %s', { skip: 'not this one' }, async () => {
+  throw new Error('a skipped row must never run');
+});
+test.each([{ ok: false }])('row $ok fails', async ({ ok }) => {
+  if (!ok) throw new Error('row says fail');
+});
+test('plain', async () => {});
+`;
+      const { outcome, project } = await runProject({ 'tests/each.e2e.ts': file }, {});
+      const plain = resultByTitle(outcome, 'plain').test.source!;
+      expect(plain.file).toMatch(/tests\/each\.e2e\.ts$/);
+      const rows: Array<[string, string]> = [
+        ['signs in as Ada', 'passed'],
+        ['signs in as Grace', 'passed'],
+        ['1 + 2 = 3', 'passed'],
+        ['pair 2 and 2', 'passed'],
+        ['fails on left', 'skipped'],
+        ['fails on right', 'skipped'],
+        ['row false fails', 'failed'],
+        ['plain', 'passed'],
+      ];
+      expect(outcome.results.map((result) => result.test.title).toSorted()).toEqual(rows.map(([title]) => title).toSorted());
+      const line = (title: string): number => {
+        const result = resultByTitle(outcome, title);
+        expect([title, result.status, result.test.source?.file]).toEqual([title, rows.find(([row]) => row === title)![1], plain.file]);
+        return result.test.source!.line;
+      };
+      // Every row of one call is located at that call; the calls keep their order in the file.
+      expect(line('signs in as Grace')).toBe(line('signs in as Ada'));
+      expect(line('fails on right')).toBe(line('fails on left'));
+      const calls = ['signs in as Ada', '1 + 2 = 3', 'pair 2 and 2', 'fails on left', 'row false fails', 'plain'].map(line);
+      expect(calls).toEqual([...new Set(calls)].toSorted((a, b) => a - b));
+      expect(resultByTitle(outcome, 'fails on left').skip).toEqual({ cause: 'explicit', reason: 'not this one' });
+      expect(outcome.exitCode).toBe(1);
+      project.cleanup();
+    },
+    120_000,
+  );
+
+  it(
+    'keeps the fixme cause beside a failure that outranks the skip',
+    async () => {
+      const file = `import { test } from 'e2e';
+
+test.afterEach(() => {
+  throw new Error('teardown broke');
+});
+test('member', async () => {
+  test.fixme('not ready');
+});
+`;
+      const { outcome, project } = await runProject({ 'tests/fixme-failed.e2e.ts': file }, {});
+      const member = resultByTitle(outcome, 'member');
+      expect(member.status).toBe('failed');
+      expect(member.attempts[0]).toMatchObject({ status: 'failed', skip: { cause: 'fixme', reason: 'fixme: not ready' } });
+      assertValidReport(outcome.report);
+      project.cleanup();
+    },
+    120_000,
+  );
+
+  it(
+    'counts a serial member that marks itself fixme as executed, with the cause fixme',
+    async () => {
+      const file = `import { test } from 'e2e';
+
+test.describe('wizard', { serial: true }, () => {
+  test('step 1 is not ready', async () => {
+    test.fixme('crashes on step 1');
+  });
+  test('step 2 runs', async () => {});
+});
+`;
+      const { outcome, project } = await runProject({ 'tests/fixme-serial.e2e.ts': file }, {});
+      const step1 = resultByTitle(outcome, 'step 1 is not ready');
+      expect(step1.status).toBe('skipped');
+      expect(step1.skip).toEqual({ cause: 'fixme', reason: 'fixme: crashes on step 1' });
+      expect(resultByTitle(outcome, 'step 2 runs').status).toBe('passed');
+      expect(outcome.report.run.summary).toMatchObject({ selected: 2, executed: 2, passed: 1, skipped: 1 });
+      assertValidReport(outcome.report);
+      expect(outcome.exitCode).toBe(0);
+      project.cleanup();
+    },
+    120_000,
+  );
+
+  it(
+    'rejects test.fixme(condition) outside a test body at collection, pointing at test.fixme(title, fn)',
+    async () => {
+      const file = `import { test } from 'e2e';
+
+test.fixme(true, 'not here');
+test('never registered', async () => {});
+`;
+      const { outcome, project } = await runProject({ 'tests/fixme-outside.e2e.ts': file }, {});
+      expect(outcome.exitCode).toBe(2);
+      expect(outcome.report.run.errors.map((error) => error.code)).toEqual(['COLLECTION_ERROR']);
+      expect(outcome.report.run.errors[0]?.message).toContain(
+        'test.fixme(condition, reason) skips the running test and must be called inside a test body; to mark a test fixme at collection, register it with test.fixme(title, fn)',
+      );
+      project.cleanup();
+    },
+    120_000,
+  );
+
+  it(
     'rejects test.skip(condition) outside a test body at collection',
     async () => {
       const file = `import { test } from 'e2e';
@@ -249,7 +440,9 @@ test('never registered', async () => {});
       const { outcome, project } = await runProject({ 'tests/skip-outside.e2e.ts': file }, {});
       expect(outcome.exitCode).toBe(2);
       expect(outcome.report.run.errors.map((error) => error.code)).toEqual(['COLLECTION_ERROR']);
-      expect(outcome.report.run.errors[0]?.message).toMatch(/must be called inside a test body/);
+      expect(outcome.report.run.errors[0]?.message).toContain(
+        'test.skip(condition, reason) skips the running test and must be called inside a test body; to skip at collection, pass { skip: true } or a reason string as the test option',
+      );
       project.cleanup();
     },
     120_000,

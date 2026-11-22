@@ -7,12 +7,10 @@
  * links each failure to the page the runner wrote for it.
  */
 
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { Report1Document, ReportAttempt, ReportExplore, ReportExploreFinding, ReportFilter, ReportResult, ReportSerialGroup, ReportStep } from '../../src/report/build.ts';
-import { markdownReporter, renderMarkdownReport } from '../../src/report/markdown.ts';
+import { markdown, renderMarkdownReport } from '../../src/report/markdown.ts';
 import type { FinishedRun } from '../../src/run-types.ts';
 import { REPORT_AT, reportAttempt, reportDocument, reportError, reportResult, reportStep, reportTarget } from '../helpers/report.ts';
 
@@ -267,6 +265,9 @@ describe('renderMarkdownReport', () => {
     // A step that is not the agent's reads as the one call it was.
     const single = named({ title: 'one', status: 'failed', attempts: [attempt({ status: 'failed', error: { code: 'E', message: 'm' }, steps: [step({ index: 0, label: 'only', status: 'failed', error: reportError({ code: 'E', message: 'm' }) })] })] });
     expect(renderMarkdownReport(page({ status: 'failed', results: [single] }))).toContain('**E** at step 1 of 1: `screen.tap only`, after 900ms');
+    // A step of a session the test opened beside its own says whose it is.
+    const guest = named({ title: 'two', status: 'failed', attempts: [attempt({ status: 'failed', error: { code: 'E', message: 'm' }, steps: [step({ index: 0, label: 'only', actor: 'launch-1', status: 'failed', error: reportError({ code: 'E', message: 'm' }) })] })] });
+    expect(renderMarkdownReport(page({ status: 'failed', results: [guest] }))).toContain('**E** at step 1 of 1 on launch-1: `screen.tap only`, after 900ms');
   });
 
   it('names the step whose error ended the test, not an earlier failure the test caught and went on from', () => {
@@ -429,11 +430,11 @@ describe('renderMarkdownReport', () => {
     expect(renderMarkdownReport(page({ status: 'failed', results: [prose] }))).toContain(`> ${'m'.repeat(598)}💥…`);
   });
 
-  it('rounds a duration to whole seconds before splitting off the minutes, and formats tokens and cost as the terminal does', () => {
-    const at = (finishedAt: string) => renderMarkdownReport(page({ results: [passing], finishedAt }));
-    expect(at('2026-01-01T00:01:59.500Z')).toContain('· 2m 0s ·');
-    expect(at('2026-01-01T00:01:29.400Z')).toContain('· 1m 29s ·');
-    expect(at('2026-01-01T00:00:59.940Z')).toContain('· 59.9s ·');
+  it('rounds the recorded duration to whole seconds before showing minutes. Tokens and cost match the terminal formats', () => {
+    const at = (durationMs: number) => renderMarkdownReport(page({ results: [passing], durationMs }));
+    expect(at(119_500)).toContain('· 2m 0s ·');
+    expect(at(89_400)).toContain('· 1m 29s ·');
+    expect(at(59_940)).toContain('· 59.9s ·');
     const usage = (modelTokens: number, estimatedCostUsd: number) => {
       const document = page({ results: [judged] });
       document.run.usage = { ...document.run.usage, modelTokens, estimatedCostUsd };
@@ -949,12 +950,7 @@ describe('a run test filters narrowed', () => {
   });
 });
 
-describe('markdownReporter', () => {
-  const dirs: string[] = [];
-  afterAll(() => {
-    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
-  });
-
+describe('markdown', () => {
   function finished(document: Report1Document, root: string, artifactsRoot = path.join(root, '.e2e', 'artifacts')): FinishedRun {
     return {
       report: document,
@@ -962,6 +958,7 @@ describe('markdownReporter', () => {
       exitCode: document.run.exitCode,
       projectRoot: root,
       reportPath: path.join(root, '.e2e', 'report.json'),
+      outputDir: path.join(root, '.e2e'),
       artifactsRoot,
       aiTracePath: undefined,
       traces: new Map(),
@@ -969,32 +966,35 @@ describe('markdownReporter', () => {
     };
   }
 
-  it('writes summary.md beside the report with paths from the project root, and returns its row', async () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'e2e-markdown-'));
-    dirs.push(root);
-    const rows = await markdownReporter.onRunFinished!(finished(explored(), root), new AbortController().signal);
-    expect(rows).toEqual([{ label: 'Markdown', text: path.join('.e2e', 'summary.md') }]);
-    const text = readFileSync(path.join(root, '.e2e', 'summary.md'), 'utf8');
-    expect(text.startsWith('### 🔴 e2e explore: 1 issue\n')).toBe(true);
-    expect(text).toContain('   Evidence: screenshot `.e2e/artifacts/web/explore-checkout-d287e8aead677d36/default/attempt-0/finding-0.png`');
+  /** The one file the reporter renders for `run`. */
+  async function rendered(run: FinishedRun, options?: Parameters<typeof markdown>[0]) {
+    const files = await markdown(options).reportFiles!(run, new AbortController().signal);
+    expect(files).toHaveLength(1);
+    return files[0]!;
+  }
+
+  it('renders summary.md beside the report with paths from the project root, and names its row', async () => {
+    const root = '/project';
+    const file = await rendered(finished(explored(), root));
+    expect(file).toMatchObject({ path: path.join(root, '.e2e', 'summary.md'), label: 'Markdown' });
+    expect(file.content.startsWith('### 🔴 e2e explore: 1 issue\n')).toBe(true);
+    expect(file.content).toContain('   Evidence: screenshot `.e2e/artifacts/web/explore-checkout-d287e8aead677d36/default/attempt-0/finding-0.png`');
     // Artifacts at the project root itself list from `.`.
-    await markdownReporter.onRunFinished!(finished(explored(), root, root), new AbortController().signal);
-    expect(readFileSync(path.join(root, '.e2e', 'summary.md'), 'utf8')).toContain('   Evidence: screenshot `web/explore-checkout-d287e8aead677d36/default/attempt-0/finding-0.png`');
+    expect((await rendered(finished(explored(), root, root))).content).toContain('   Evidence: screenshot `web/explore-checkout-d287e8aead677d36/default/attempt-0/finding-0.png`');
+  });
+
+  it('goes where outputFile says', async () => {
+    expect((await rendered(finished(page(), '/project'), { outputFile: 'reports/e2e.md' })).path).toBe('reports/e2e.md');
   });
 
   it('links each failure block to the page the runner wrote for it', async () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'e2e-markdown-'));
-    dirs.push(root);
     const document = page({ status: 'failed', results: [passing, failing] });
     const pages = new Map([[failing.id, '.e2e/traces/members-an-email-invitation-1a2b3c4d.md']]);
-    const rows = await markdownReporter.onRunFinished!({ ...finished(document, root), traces: pages }, new AbortController().signal);
-    expect(rows).toEqual([{ label: 'Markdown', text: path.join('.e2e', 'summary.md') }]);
-    const summary = readFileSync(path.join(root, '.e2e', 'summary.md'), 'utf8');
-    expect(summary).toContain('Trace: `.e2e/traces/members-an-email-invitation-1a2b3c4d.md`');
-    expect(readdirSync(path.join(root, '.e2e'))).toEqual(['summary.md']);
+    const { content } = await rendered({ ...finished(document, '/project'), traces: pages });
+    expect(content).toContain('Trace: `.e2e/traces/members-an-email-invitation-1a2b3c4d.md`');
   });
 
   it('writes nothing when the report itself was not written', async () => {
-    expect(await markdownReporter.onRunFinished!({ ...finished(page(), '/nowhere'), reportPath: undefined }, new AbortController().signal)).toBeUndefined();
+    expect(await markdown().reportFiles!({ ...finished(page(), '/nowhere'), reportPath: undefined }, new AbortController().signal)).toEqual([]);
   });
 });

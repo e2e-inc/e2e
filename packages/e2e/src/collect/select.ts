@@ -28,7 +28,7 @@ export interface ResolvedTestOptions {
    */
   readonly agents: readonly string[];
   readonly skipReason: string | undefined;
-  /** Why the test is expected to fail (its `fail` option), or undefined when it is not. */
+  /** Why the test is expected to fail (its or a group's `fail` option), or undefined when it is not. */
   readonly expectedFailure: string | undefined;
   readonly serial: boolean;
   /**
@@ -143,6 +143,7 @@ export function resolveOptions(test: CollectedTest, config: ResolvedConfig): Res
   let session: string | undefined;
   let pin: readonly string[] | undefined;
   let skipReason: string | undefined;
+  let fail: TestOptions['fail'];
   let trace: TestOptions['trace'];
   let video: TestOptions['video'];
   const agentContextParts: string[] = [];
@@ -160,6 +161,9 @@ export function resolveOptions(test: CollectedTest, config: ResolvedConfig): Res
     if (layer.skip !== undefined && layer.skip !== false) {
       skipReason = typeof layer.skip === 'string' ? layer.skip : 'skipped';
     }
+    // A mark without a reason (`true` or a blank string) keeps an outer layer's reason.
+    if (typeof layer.fail === 'string' && layer.fail.trim() !== '') fail = layer.fail;
+    else if (expectedFailureOption(layer.fail) !== undefined && fail === undefined) fail = true;
   }
 
   // Retries and recordings belong to the serial unit: one retry loop and one
@@ -198,7 +202,7 @@ export function resolveOptions(test: CollectedTest, config: ResolvedConfig): Res
     agents: effectiveAgents(test, pin, config.agentNames),
     agentContext: agentContextParts.length === 0 ? undefined : agentContextParts.join('\n'),
     skipReason: skipReason === undefined ? undefined : truncateUtf8(sanitizeRecordedText(staticSecretLedger(config.allSecrets).redact(skipReason)), 8192),
-    expectedFailure: expectedFailureOption(test.options.fail),
+    expectedFailure: expectedFailureOption(fail),
     serial: serialRoot !== undefined,
     trace,
     video,
@@ -501,7 +505,10 @@ function describeNoTests(
     }
     switch (pair.skip?.cause) {
       case 'explicit':
-        count('skipped with test.skip', pair.test);
+        count('skipped explicitly', pair.test);
+        break;
+      case 'fixme':
+        count('marked fixme', pair.test);
         break;
       case 'platform-unavailable':
         count(`declare platforms other than ${pair.target.platform}`, pair.test);
@@ -713,7 +720,7 @@ function classifyPair(
     return {
       ...base,
       disposition: 'skip',
-      skip: { cause: 'explicit', reason: options.skipReason },
+      skip: { cause: test.mode === 'fixme' ? 'fixme' : 'explicit', reason: options.skipReason },
     };
   }
 

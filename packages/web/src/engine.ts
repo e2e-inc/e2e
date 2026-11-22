@@ -20,14 +20,14 @@ import {
 } from '@e2e-dev/core/engine';
 import { createRequire } from 'node:module';
 import type { WebFixtures } from './fixtures.ts';
-import { asBrowserProvider } from './provider.ts';
+import { asBrowserProvider, type BrowserProvider } from './provider.ts';
 import { PlaywrightSurface, type WebOptions } from './surface.ts';
 import { createBrowserFixture } from './browser.ts';
 import { validateInitScripts } from './init-scripts.ts';
 import { MEDIA_KEYS, mediaProblem } from './media.ts';
 import { FIELD_VALUE_CONTROL, headerProblem, originProblem } from './protected-app.ts';
 import { validatePermissions } from './permissions.ts';
-import type { BrowserName } from './browser-connection.ts';
+import { BROWSER_NAMES, isBrowserName, type BrowserName } from './browser-connection.ts';
 
 /** App fields only a device target reads. */
 const NATIVE_APP_KEYS = ['bundleId', 'appPath', 'launchArguments'] as const;
@@ -55,7 +55,14 @@ export function surfaceOf(engine: EngineHandle): PlaywrightLiveSurface | undefin
   return { page: () => surface.requirePage(), context: () => surface.requireContext() };
 }
 
-export function web(options: WebOptions = {}): EngineHandle<WebFixtures> {
+/**
+ * The handle `web()` returns. Declared here so a config's inferred type
+ * names this package: a project sees `@e2e-dev/core` only through its
+ * dependencies, and TypeScript cannot write that path in a declaration.
+ */
+export interface WebEngine extends EngineHandle<WebFixtures> {}
+
+export function web(options: WebOptions = {}): WebEngine {
   if ('allowedOrigins' in options) {
     throw new ConfigurationError(
       'INVALID_CONFIG',
@@ -69,7 +76,7 @@ export function web(options: WebOptions = {}): EngineHandle<WebFixtures> {
     );
   }
   rejectUnknownKeys('web()', options, WEB_OPTION_KEYS);
-  const provider = typeof options.browser === 'object' && options.browser !== null ? asBrowserProvider(options.browser) : undefined;
+  const provider = resolveBrowser(options.browser);
   if (provider !== undefined && options.connect !== undefined) {
     throw new ConfigurationError(
       'INVALID_CONFIG',
@@ -87,11 +94,13 @@ export function web(options: WebOptions = {}): EngineHandle<WebFixtures> {
   if (options.basicAuth !== undefined) validateBasicAuth(options.basicAuth);
   if (options.credentialOrigins !== undefined) validateCredentialOrigins(options);
   if (options.testIdAttribute !== undefined) validateTestIdAttribute(options.testIdAttribute);
+  if (options.chromiumSandbox !== undefined) validateChromiumSandbox(options.chromiumSandbox);
   if (options.userAgent !== undefined) validateUserAgent(options.userAgent, options.headers);
   if (options.locale !== undefined) validateLocale(options.locale, options.headers);
   if (options.timezoneId !== undefined) validateTimezoneId(options.timezoneId);
   validateMedia(options);
   if (options.initScripts !== undefined) validateInitScripts(options.initScripts);
+  if (options.viewport !== undefined && options.viewport !== null) validatePixelSize('web({ viewport })', options.viewport);
   if (options.screencast !== undefined) validateScreencast(options.screencast);
   const reconnecting = options.connect?.reconnectEndpoint !== undefined;
   // A per-attempt lease rides the same persistent context as `reconnectEndpoint`, with the same limits.
@@ -122,8 +131,8 @@ export function web(options: WebOptions = {}): EngineHandle<WebFixtures> {
     readStyle: (ref, properties, operation) => surface.readStyle(ref, properties, operation),
     locate: (expression, operation) => surface.locate(expression, operation),
     perform: (ref, action, operation) => surface.perform(ref, action, operation),
-    // A browser honors every action kind of the contract; `actions.ts` dispatches each.
-    actions: LOCATOR_ACTION_KINDS,
+    // A browser honors the SPI v1 actions and blur; `actions.ts` dispatches each.
+    actions: [...LOCATOR_ACTION_KINDS, 'blur'],
     // Playwright holds each modifier for the click.
     tapModifiers: true,
     // A page takes every pointer action of the contract at a bare point too.
@@ -169,6 +178,7 @@ export function web(options: WebOptions = {}): EngineHandle<WebFixtures> {
 /** Every option `web()` takes, kept equal to `WebOptions` by the compiler. */
 const WEB_OPTION_KEYS: readonly string[] = Object.keys({
   browser: true,
+  chromiumSandbox: true,
   viewport: true,
   screencast: true,
   connect: true,
@@ -386,6 +396,29 @@ function isTimeZone(timeZone: string): boolean {
  */
 const ATTRIBUTE_NAME = /^[A-Za-z_:][A-Za-z0-9_:.-]*$/;
 
+/** `web({ browser })`: undefined for a name the engine launches or no browser, the checked provider for an object, and a refusal for anything else. `browserType` reads any other string as Chromium. */
+function resolveBrowser(browser: unknown): BrowserProvider | undefined {
+  if (browser === undefined || (typeof browser === 'string' && isBrowserName(browser))) return undefined;
+  if (isRecord(browser)) return asBrowserProvider(browser);
+  throw new ConfigurationError(
+    'INVALID_CONFIG',
+    `web({ browser }) must be one of ${BROWSER_NAMES.join(', ')}, or a browser provider, got ${typeof browser === 'string' ? JSON.stringify(browser) : kindOf(browser)}`,
+  );
+}
+
+/** A `{ width, height }` size in whole pixels, each at least 1, with no other key; `option` names it in the message. */
+function validatePixelSize(option: string, size: unknown): void {
+  const fields = isPlainObject(size) ? size : {};
+  const { width, height } = fields as { width?: unknown; height?: unknown };
+  const unknownKey = Object.keys(fields).find((key) => key !== 'width' && key !== 'height');
+  if (unknownKey !== undefined) {
+    throw new ConfigurationError('INVALID_CONFIG', `${option} has unknown key "${unknownKey}"; it is { width, height }`);
+  }
+  if (!Number.isInteger(width) || !Number.isInteger(height) || (width as number) < 1 || (height as number) < 1) {
+    throw new ConfigurationError('INVALID_CONFIG', `${option} must be { width, height } in whole pixels, each at least 1`);
+  }
+}
+
 /** `web({ screencast })`: a whole-pixel frame size and a 0-100 JPEG quality, each optional. */
 function validateScreencast(screencast: unknown): void {
   if (!isPlainObject(screencast)) {
@@ -397,17 +430,7 @@ function validateScreencast(screencast: unknown): void {
     }
   }
   const { size, quality } = screencast as { size?: unknown; quality?: unknown };
-  if (size !== undefined) {
-    const fields = isPlainObject(size) ? size : {};
-    const { width, height } = fields as { width?: unknown; height?: unknown };
-    const unknownKey = Object.keys(fields).find((key) => key !== 'width' && key !== 'height');
-    if (unknownKey !== undefined) {
-      throw new ConfigurationError('INVALID_CONFIG', `web({ screencast: { size } }) has unknown key "${unknownKey}"; it is { width, height }`);
-    }
-    if (!Number.isInteger(width) || !Number.isInteger(height) || (width as number) < 1 || (height as number) < 1) {
-      throw new ConfigurationError('INVALID_CONFIG', 'web({ screencast: { size } }) must be { width, height } in whole pixels, each at least 1');
-    }
-  }
+  if (size !== undefined) validatePixelSize('web({ screencast: { size } })', size);
   if (quality !== undefined && (!Number.isInteger(quality) || (quality as number) < 0 || (quality as number) > 100)) {
     throw new ConfigurationError('INVALID_CONFIG', 'web({ screencast: { quality } }) must be an integer from 0 through 100');
   }
@@ -426,6 +449,16 @@ function validateTestIdAttribute(attribute: unknown): void {
     throw new ConfigurationError(
       'INVALID_CONFIG',
       `web({ testIdAttribute }) must be an attribute name such as "data-testid", got ${JSON.stringify(attribute)}`,
+    );
+  }
+}
+
+/** Refuses a sandbox opt-out that is not a boolean, at config load. */
+function validateChromiumSandbox(chromiumSandbox: unknown): void {
+  if (typeof chromiumSandbox !== 'boolean') {
+    throw new ConfigurationError(
+      'INVALID_CONFIG',
+      `web({ chromiumSandbox }) must be a boolean, got ${JSON.stringify(chromiumSandbox)}`,
     );
   }
 }

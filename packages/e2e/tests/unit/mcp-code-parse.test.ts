@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { parseCode, type Statement } from '../../src/mcp/code-parse.ts';
+import { parseCode, type Statement } from '../../src/session-tools/code-parse.ts';
 
 /** A target whose engine contributes a `browser` fixture, as the web engine's does. */
 const WEB = { fixtures: ['browser'] } as const;
@@ -15,7 +15,7 @@ const ARGUMENTS =
   "an argument is a string, number, boolean, null, regular expression, array, or object, a locator on screen, credentials.user('name').username, or a secret as fill's value";
 const STATEMENTS = 'a statement starts with screen, app, or expect(...)';
 const LOCATOR_MEMBERS =
-  'getByRole, getByLabel, getByPlaceholder, getByText, getByDisplayValue, getByTestId, tapAt, doubleTapAt, swipe, scrollUntilVisible, filter, or, first, last, nth, tap, click, doubleTap, dblclick, secondaryTap, longPress, fill, pressSequentially, clear, press, check, uncheck, selectOption, focus, hover, dragTo, scrollIntoView, waitFor, textContent, inputValue, getAttribute, isVisible, isHidden, isEnabled, isDisabled, isChecked, boundingBox, count, allTextContents';
+  'getByRole, getByLabel, getByPlaceholder, getByText, getByDisplayValue, getByTestId, tapAt, doubleTapAt, swipe, scrollUntilVisible, filter, or, first, last, nth, tap, click, doubleTap, dblclick, secondaryTap, longPress, fill, pressSequentially, clear, press, check, uncheck, selectOption, focus, blur, hover, dragTo, scrollIntoView, waitFor, textContent, inputValue, getAttribute, isVisible, isHidden, isEnabled, isDisabled, isChecked, boundingBox, count, allTextContents';
 const SECRET_PLACE = "is accepted only as fill's value, such as screen.getByLabel('Password').fill(credentials.user('admin').password)";
 
 /** The message `run_code` refuses `code` with. */
@@ -202,6 +202,7 @@ describe('parseCode refuses', () => {
     ["await app.screenshot('after')", 'run_code: "screenshot" at 1:11 is left out of run_code: it writes into the test attempt; use the screenshot tool with path to save a file'],
     ["screen.getByLabel('Upload').setInputFiles('/etc/passwd')", 'run_code: "setInputFiles" at 1:29 is left out of run_code: it reads files from disk; attach files with the upload tool, which checks the paths'],
     ['screen.debug()', "run_code: \"debug\" at 1:8 is left out of run_code: it prints to the server's own output; read the screen with screen.tree() or the observe tool"],
+    ['await screen.pause()', 'run_code: "pause" at 1:14 is left out of run_code: it pauses a test until someone resumes it; a session already keeps the app open between calls'],
     ["screen.getByRol('button').tap()", 'run_code: "getByRol" at 1:8 is not something run_code runs on screen; did you mean "getByRole"?'],
     ['app.launch()', 'run_code: "launch" at 1:5 is not something run_code runs on app; app takes open, restart, clearState, back'],
     ["screen.getByText('a').constructor('return 1')()", `run_code: "constructor" at 1:23 is not something run_code runs on a locator; a locator takes ${LOCATOR_MEMBERS}`],

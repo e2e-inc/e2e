@@ -9,15 +9,16 @@ import type { RecordedModel, DerivedReason } from '../cache/trace.ts';
 import { bound } from '../internal/text.ts';
 import { markAbandonedRejection, relocateStack } from '../internal/abandoned.ts';
 import { withAiTraceStep } from '../internal/ai-trace.ts';
-import { classifyError, serializeError, TestError, withHint, type SerializedError } from '../internal/errors.ts';
+import { classifyError, redactErrorDetails, serializeError, TestError, withHint, type SerializedError } from '../internal/errors.ts';
 import { timestamp } from '../internal/ids.ts';
-import { withAbort } from '../internal/time.ts';
+import { abortError, cancelledError, withAbort } from '../internal/time.ts';
 import { sourceLocation, type SourceLocation } from '../internal/source.ts';
+import type { GuestRecord } from './guest-steps.ts';
 import type { AppLogEntry, AppLogSource } from '../engine/index.ts';
 import { APP_LOG_LIMITS } from '../engine/session.ts';
 import type { AppEvent } from '../engine/surface.ts';
 import { compareScreens, type ScreenText, type StepScreen } from './step-screens.ts';
-import { insidePollRead } from '../expect/poll-scope.ts';
+import { insidePollRead, pollReadSignal } from '../expect/poll-scope.ts';
 
 /** The closed step kind set; the type is derived from it, so the two cannot drift. */
 export const STEP_KINDS = ['agent', 'locator', 'assertion', 'screen', 'app', 'session', 'resource'] as const;
@@ -194,6 +195,13 @@ export interface StepRecord {
   kind: StepKind;
   api: string;
   label: string;
+  /**
+   * The session the step ran on, when it is not the test's own: one the test
+   * drives beside it through `launch()`, named in the order they joined it
+   * (`launch-1`), which is when the test opened one, or first used one
+   * opened outside it. Absent for a step of the test's own session.
+   */
+  actor?: string;
   /** The test line the step was called from; absent when no project line was on the stack. */
   source?: SourceLocation;
   status: 'passed' | 'failed' | 'blocked' | 'timed-out' | 'cancelled';
@@ -223,6 +231,11 @@ export interface StepRecord {
   artifacts: string[];
 }
 
+/** Whether a step ran on the test's own session, not on one the test drives beside it. */
+export function isOwnStep(step: Pick<StepRecord, 'actor'>): boolean {
+  return step.actor === undefined;
+}
+
 /** The hooks a step can run in outside the test body. */
 export type StepPhase = 'beforeEach' | 'afterEach';
 
@@ -240,10 +253,12 @@ interface StepProgressIdentity {
   readonly attemptIndex: number;
   readonly stepId: string;
   readonly stepIndex: number;
+  /** The session the step ran on when it is not the test's own; see `StepRecord.actor`. */
+  readonly actor?: string;
 }
 
 /** One progress payload before the recorder attaches its identity. */
-type StepProgressFact =
+export type StepProgressFact =
   | { readonly phase: 'start'; readonly kind: StepKind; readonly api: string; readonly label: string }
   | {
       readonly phase: 'end';
@@ -297,13 +312,14 @@ export interface StepRunOptions {
 /** How many causes down a thrown error is redacted; a chain is rarely three deep. */
 const MAX_REDACTED_CAUSES = 8;
 
-/** Replaces secret values in the message and stack of a thrown error and of the causes under it, keeping each error's identity. */
+/** Replaces secret values in the message, stack, and details of a thrown error and of the causes under it, keeping each error's identity. */
 function redactErrorInPlace(thrown: unknown, redact: (text: string) => string): void {
   let error: unknown = thrown;
   for (let depth = 0; error instanceof Error && depth < MAX_REDACTED_CAUSES; depth += 1) {
     try {
       error.message = redact(error.message);
       if (error.stack !== undefined) error.stack = redact(error.stack);
+      redactErrorDetails(error, redact);
     } catch {
       // A frozen error keeps its text; nothing more can be done to it here.
     }
@@ -318,6 +334,8 @@ export interface StepRecorderOptions {
   readonly maxEventsPerStep?: number;
   /** Live progress sink; omitted in contexts with no reporter to feed. */
   readonly onProgress?: (progress: StepProgress) => void;
+  /** Takes each progress with the record it is of, for the recorder of a session whose steps a test's recorder mirrors (`run/guest-steps.ts`). */
+  readonly mirror?: (progress: StepProgress, record: StepRecord) => void;
   /** The project root; with it, every step and step error names the test line it came from. */
   readonly projectRoot?: string;
   /** Replaces secret values in a step's label, and in its error's message and details, before the record keeps them. */
@@ -338,16 +356,41 @@ export interface StepRecorderOptions {
    */
   readonly retainSteps?: number;
   /**
-   * Holds a top-level step of a phase that `holdable` allows until it may
-   * run (`e2e run --step`). It resolves when the step may run and rejects
-   * when it must not; `signal` aborts when the step is abandoned while held.
-   * No record of the step exists until the hold resolves.
+   * Set `hold` to wait at held steps and pauses. Without it, a pause returns
+   * right away.
    */
-  readonly hold?: (step: StepHoldRequest, signal: AbortSignal) => Promise<void>;
+  readonly hold?: RecorderHold;
 }
 
-/** A step about to wait at `StepRecorderOptions.hold`: what the person stepping through the test is shown. */
+/** Options for holding an attempt at steps and pauses. */
+type RecorderHold = {
+  /**
+   * Waits at each `screen.pause()` call, and before each step when `steps` is
+   * set.
+   *
+   * - If the promise resolves, the attempt continues.
+   * - If it rejects, the attempt fails.
+   *
+   * The signal is aborted if the wait is abandoned.
+   */
+  readonly ask: (request: StepHoldRequest, signal: AbortSignal) => Promise<void>;
+  /**
+   * Set `steps` to wait at `ask` before each top-level step in a holdable
+   * phase (`e2e run --step`). The step isn't recorded until `ask` resolves.
+   * Otherwise, only `screen.pause()` waits at `ask`.
+   */
+  readonly steps: boolean;
+};
+
+/** A step or pause about to wait at `StepRecorderOptions.hold`: what the person stepping through the test is shown. */
 export interface StepHoldRequest {
+  /**
+   * The kind of wait. `step` means a step is held before it runs. `pause`
+   * means the test has reached `screen.pause()`.
+   */
+  readonly kind: 'step' | 'pause';
+  /** Expected position in the trace, from 1. A pause uses 0. */
+  readonly number: number;
   readonly api: string;
   /** Already redacted. */
   readonly label: string;
@@ -363,6 +406,19 @@ interface HeldCall {
   readonly options: StepRunOptions;
   readonly cancel: AbortController;
   promise: Promise<unknown>;
+}
+
+/**
+ * A pause waiting at `hold`. If the body returns without awaiting it, the
+ * test fails with `STEP_NOT_AWAITED`.
+ */
+interface HeldPause {
+  readonly api: string;
+  /** The `owner` the pause was started by. */
+  readonly owner: string;
+  readonly stack: string | undefined;
+  readonly cancel: AbortController;
+  promise: Promise<void>;
 }
 
 /** Frames kept when a step captures where it was called from; the user's line is a few frames up. */
@@ -425,10 +481,16 @@ export class StepRecorder {
    * `the beforeEach hook`.
    */
   owner = 'the test body';
-  /** Whether a top-level step started now waits at `hold`: in `beforeEach` and the body, never in launch or teardown. */
+  /**
+   * Whether a top-level step started now waits at `hold`: in `beforeEach` and
+   * the body, never in launch or teardown. A pause fails outside these parts
+   * of the attempt, and after the body ends.
+   */
   holdable = false;
   /** Step calls waiting at their hold, in call order. */
   private readonly held = new Set<HeldCall>();
+  /** Pauses waiting at `hold`, ordered by when they were called. */
+  private readonly pauses = new Set<HeldPause>();
   /** IDs of steps whose bodies are still executing. */
   private readonly running = new Set<string>();
   /** The promise each running step returned to its caller, to observe when the caller did not. */
@@ -456,15 +518,17 @@ export class StepRecorder {
   /** Where the app went before the attempt's first step, told under it once it starts. */
   private readonly earlyNavigations: { line: string; at: string }[] = [];
   private readonly maxEventsPerStep: number;
-  private readonly onProgress: ((progress: StepProgress) => void) | undefined;
-  private readonly projectRoot: string | undefined;
+  private readonly onProgress: StepRecorderOptions['onProgress'];
+  private readonly mirror: StepRecorderOptions['mirror'];
+  /** The root step sources are read against. */
+  readonly projectRoot: string | undefined;
   private readonly redact: ((text: string) => string) | undefined;
   private readonly signal: AbortSignal | undefined;
   private readonly redactThrown: boolean;
   private readonly retainSteps: number | undefined;
   /** Steps opened so far, the next step's index: `steps` may have dropped its oldest. */
   private opened = 0;
-  private readonly hold: StepRecorderOptions['hold'];
+  private readonly hold: RecorderHold | undefined;
 
   constructor(
     private readonly attemptId: string,
@@ -473,6 +537,7 @@ export class StepRecorder {
     this.attempt = options.attempt ?? { id: attemptId, index: 0 };
     this.maxEventsPerStep = options.maxEventsPerStep ?? 1_000;
     this.onProgress = options.onProgress;
+    this.mirror = options.mirror;
     this.projectRoot = options.projectRoot;
     this.redact = options.redact;
     this.signal = options.signal;
@@ -484,6 +549,11 @@ export class StepRecorder {
   /** Replaces secret values in text the way every record is redacted; identity without a redactor. */
   redactText(text: string): string {
     return this.redact?.(text) ?? text;
+  }
+
+  /** Whether a step is still executing. */
+  get busy(): boolean {
+    return this.running.size > 0;
   }
 
   /** The step currently executing, when inside StepRecorder.run. */
@@ -509,30 +579,104 @@ export class StepRecorder {
     body: () => Promise<T>,
     options: StepRunOptions = {},
   ): Promise<T> {
+    const reading = pollReadSignal();
+    if (reading?.aborted === true) {
+      const error = abortError(reading, cancelledError);
+      markAbandonedRejection(error);
+      return Promise.reject(error);
+    }
     // The label is published, reported, and traced as is: a secret the test
     // spelled into an instruction or a locator stops here, once.
     const label = this.redact?.(rawLabel) ?? rawLabel;
     const parent = this.current();
     const stack = stepStack(this.projectRoot);
     // A step inside another (an `onAction` hook's) or inside an `expect.poll`
-    // read is part of what holds it, so only a top-level step waits.
-    if (this.hold !== undefined && this.holdable && parent === undefined && !insidePollRead()) {
-      return this.runHeld(this.hold, { kind, api, label, stack, options, cancel: new AbortController(), promise: Promise.resolve() }, body);
+    // read or a `toPass` block is part of what holds it, so only a top-level step waits.
+    if (this.hold?.steps === true && this.holdable && parent === undefined && !insidePollRead()) {
+      return this.runHeld(this.hold.ask, { kind, api, label, stack, options, cancel: new AbortController(), promise: Promise.resolve() }, body);
     }
     return this.start(kind, api, label, stack, body, options, parent);
+  }
+
+  /**
+   * Pauses the attempt at `screen.pause()` until `hold.ask` resolves. Without
+   * `hold`, as in a program or an MCP session, it returns right away.
+   *
+   * With `hold`, the call fails outside a holdable part of the attempt or
+   * inside another step or an `expect.poll` read or a `toPass` block. The timers there keep
+   * running during a pause.
+   *
+   * The pause and any error that ends it are reported at the test line that
+   * called it, even if the runner sent the error from another process.
+   */
+  async pause(): Promise<void> {
+    if (this.hold === undefined) {
+      return;
+    }
+
+    const request: StepHoldRequest = { kind: 'pause', number: 0, api: 'screen.pause', label: '' };
+    const stack = stepStack(this.projectRoot);
+    const source = sourceLocation(stack, this.projectRoot);
+    const pause: HeldPause = { api: request.api, owner: this.owner, stack, cancel: new AbortController(), promise: Promise.resolve() };
+
+    try {
+      // Teardown's separate timer would count time spent paused.
+      // Code the test didn't await would pause a test that has ended.
+      if (!this.holdable) {
+        throw new TestError(
+          'INVALID_ARGUMENT',
+          withHint(
+            `${request.api}() was called after the test body ended (in an afterEach hook, a fixture teardown, or code the test did not await)`,
+            'call it in fixture setup, a beforeEach hook, or the test body, and await it',
+          ),
+        );
+      }
+
+      // Another step or an `expect.poll` read or a `toPass` block has a separate timer that
+      // counts the pause.
+      if (this.current() !== undefined || insidePollRead()) {
+        throw new TestError(
+          'INVALID_ARGUMENT',
+          withHint(
+            `${request.api}() was called inside another step (an onAction hook or a project tool), an expect.poll read, or a toPass block`,
+            'call it between steps in fixture setup, a beforeEach hook, or the test body',
+          ),
+        );
+      }
+
+      this.pauses.add(pause);
+      pause.promise = this.hold.ask(source === undefined ? request : { ...request, source }, pause.cancel.signal);
+      await pause.promise;
+    } catch (cause) {
+      if (cause instanceof Error) {
+        relocateStack(cause, stack);
+      }
+
+      // Only `abandonRunning` cancels a pause and records its failure.
+      if (pause.cancel.signal.aborted) {
+        markAbandonedRejection(cause);
+      }
+
+      throw cause;
+    } finally {
+      this.pauses.delete(pause);
+    }
   }
 
   /**
    * Waits at the hold, then starts the step as if it were called now: its
    * index, start, and verification boundary are those of its release, so
    * steps called together in one `Promise.all` keep their call order.
+   * The prompt uses the position the step would get if the pending holds
+   * started in order with no other steps recorded between them.
    */
-  private runHeld<T>(hold: NonNullable<StepRecorderOptions['hold']>, call: HeldCall, body: () => Promise<T>): Promise<T> {
+  private runHeld<T>(ask: RecorderHold['ask'], call: HeldCall, body: () => Promise<T>): Promise<T> {
     const source = sourceLocation(call.stack, this.projectRoot);
     this.held.add(call);
+    const number = this.steps.length + this.held.size;
     const promise = (async () => {
       try {
-        await hold({ api: call.api, label: call.label, ...(source === undefined ? {} : { source }) }, call.cancel.signal);
+        await ask({ kind: 'step', number, api: call.api, label: call.label, ...(source === undefined ? {} : { source }) }, call.cancel.signal);
         // Released in the same turn the body abandoned it: it must not run.
         call.cancel.signal.throwIfAborted();
       } catch (cause) {
@@ -568,28 +712,33 @@ export class StepRecorder {
     return promise;
   }
 
-  /** Records a step as started now and tells reporters. */
-  private open(kind: StepKind, api: string, label: string, stack: string | undefined, options: StepRunOptions): StepRecord {
+  /** Mints a step's record at the next index, started now in the running phase. */
+  private file(step: Pick<StepRecord, 'kind' | 'api' | 'label'> & { readonly [Key in 'source' | 'agent' | 'actor']?: StepRecord[Key] | undefined }): StepRecord {
     const index = this.opened;
     this.opened += 1;
-    const startedAt = timestamp();
-    const source = sourceLocation(stack, this.projectRoot);
     const record: StepRecord = {
       id: `${this.attemptId}:${index}`,
       index,
-      kind,
-      api,
-      label,
-      ...(source === undefined ? {} : { source }),
+      kind: step.kind,
+      api: step.api,
+      label: step.label,
+      ...(step.actor === undefined ? {} : { actor: step.actor }),
+      ...(step.source === undefined ? {} : { source: step.source }),
       status: 'passed',
-      startedAt,
+      startedAt: timestamp(),
       durationMs: 0,
       events: [],
-      ...(options.agent === undefined ? {} : { agent: options.agent }),
+      ...(step.agent === undefined ? {} : { agent: step.agent }),
       ...(this.phase === undefined ? {} : { phase: this.phase }),
       artifacts: [],
     };
     this.steps.push(record);
+    return record;
+  }
+
+  /** Records a step as started now and tells reporters. */
+  private open(kind: StepKind, api: string, label: string, stack: string | undefined, options: StepRunOptions): StepRecord {
+    const record = this.file({ kind, api, label, source: sourceLocation(stack, this.projectRoot), agent: options.agent });
     this.running.add(record.id);
     // Only a finished step is dropped, and only from the front, so a running
     // one keeps its record, the one opened here included: with nothing
@@ -604,10 +753,14 @@ export class StepRecorder {
 
   private async execute<T>(record: StepRecord, body: () => Promise<T>, options: StepRunOptions, verifiesBefore: number): Promise<T> {
     const startedMs = Date.now();
+    const reading = pollReadSignal();
+    const signal = reading === undefined || this.signal === undefined
+      ? reading ?? this.signal
+      : AbortSignal.any([reading, this.signal]);
     try {
       // Model calls made inside the body are attributed to this step.
       const work = this.scope.run(record, () => withAiTraceStep(record.api, record.label, body));
-      const result = await (this.signal === undefined ? work : withAbort(work, this.signal, () => new TestError('CANCELLED', `${record.api} cancelled`)));
+      const result = await (signal === undefined ? work : withAbort(work, signal, () => new TestError('CANCELLED', `${record.api} cancelled`)));
       if (this.abandoned.has(record.id)) return result;
       record.durationMs = Date.now() - startedMs;
       if (options.verifies === true) this.lastVerified = Math.max(this.lastVerified, verifiesBefore);
@@ -631,6 +784,9 @@ export class StepRecorder {
             ? 'blocked'
             : 'failed';
       record.error = serializeError(error, { projectRoot: this.projectRoot, redact: this.redact });
+      if (reading?.aborted === true && (error.code === 'CANCELLED' || thrown === reading.reason)) {
+        markAbandonedRejection(this.redactThrown ? error : cause);
+      }
       if (!this.redactThrown) throw cause;
       if (this.redact !== undefined) redactErrorInPlace(error, this.redact);
       throw error;
@@ -658,6 +814,7 @@ export class StepRecorder {
    * Each such step is recorded as failed at the line it was called on, its
    * later outcome is dropped, and its rejection is observed here: a step its
    * code abandoned must not take the worker down as an unhandled rejection.
+   * Waiting pauses are cancelled the same way.
    */
   abandonRunning(): TestError | undefined {
     // A step still held never ran: it is recorded here, at its call, so it
@@ -669,10 +826,27 @@ export class StepRecorder {
       this.pending.set(record.id, call.promise);
       return record;
     });
+    // A pause doesn't record a step, so it's cancelled here.
+    const pauses = [...this.pauses];
+    for (const pause of pauses) {
+      this.pauses.delete(pause);
+      pause.cancel.abort();
+      this.abandonedPromises.push(pause.promise);
+    }
     const running = this.steps.filter((step) => this.running.has(step.id) && !this.abandoned.has(step.id));
+    const count = running.length + pauses.length;
+    const [pause] = pauses;
     let first: TestError | undefined;
+    if (pause !== undefined) {
+      const more = count > 1 ? ` and ${count - 1} more` : '';
+      first = new TestError(
+        'STEP_NOT_AWAITED',
+        withHint(`${pause.owner} returned before ${pause.api}()${more} finished`, 'put `await` in front of screen.pause()'),
+      );
+      relocateStack(first, pause.stack);
+    }
     for (const step of running) {
-      const more = first === undefined && running.length > 1 ? ` and ${running.length - 1} more` : '';
+      const more = first === undefined && count > 1 ? ` and ${count - 1} more` : '';
       const error = new TestError(
         'STEP_NOT_AWAITED',
         withHint(`${this.owners.get(step.id) ?? this.owner} returned before ${callName(step)}${more} finished`, 'put `await` in front of every step call'),
@@ -745,9 +919,7 @@ export class StepRecorder {
   attachArtifact(artifactId: string): void {
     // Cleanup outside a scope may attach to the last step. Work inherited
     // from a closed scope must never attach to a newer step.
-    const target = this.scope.getStore() === undefined
-      ? this.steps[this.steps.length - 1]
-      : this.current();
+    const target = this.scope.getStore() === undefined ? this.lastOwn() : this.current();
     if (target !== undefined) target.artifacts.push(artifactId);
   }
 
@@ -767,7 +939,7 @@ export class StepRecorder {
    * is an event of the step, and one before the first step waits for it.
    */
   recordAppEvent(event: AppEvent, at: string = timestamp()): void {
-    const target = this.current() ?? this.steps.at(-1);
+    const target = this.current() ?? this.lastOwn();
     if (event.kind === 'navigation') {
       if (target === undefined) {
         // A step takes no more events than this, so no more wait for one.
@@ -886,9 +1058,36 @@ export class StepRecorder {
     return this.steps;
   }
 
-  /** Steps whose execution has finished, e.g. as prior-step prompt context. */
+  /** Steps of the test's own session whose execution has finished, e.g. as prior-step prompt context. */
   completed(): readonly StepRecord[] {
-    return this.steps.filter((step) => !this.running.has(step.id));
+    return this.steps.filter((step) => isOwnStep(step) && !this.running.has(step.id));
+  }
+
+  /**
+   * Files a step another session runs (`run/guest-steps.ts`) and tells
+   * reporters it started. The step takes the next index, so the report tells
+   * both sessions' steps in the order they began. It is the other session's
+   * in every other way: never the running step here, so it is not held and
+   * it verifies nothing.
+   */
+  guest(step: Pick<StepRecord, 'kind' | 'api' | 'label' | 'actor'> & { readonly source: SourceLocation | undefined }): GuestRecord {
+    const record = this.file({ ...step, label: this.redactText(step.label) });
+    this.publish(record, { phase: 'start', kind: record.kind, api: record.api, label: record.label });
+    return {
+      tell: (progress) => {
+        if (progress.phase === 'event') this.push(record, progress.event);
+        else this.publish(record, progress);
+      },
+      end: (result) => {
+        Object.assign(record, result);
+        this.publishEnd(record);
+      },
+    };
+  }
+
+  /** The last step of the test's own session, the one an event with no running step belongs to. */
+  private lastOwn(): StepRecord | undefined {
+    return this.steps.findLast(isOwnStep);
   }
 
   private current(): StepRecord | undefined {
@@ -897,15 +1096,19 @@ export class StepRecorder {
   }
 
   /** Publishes a phase with the owning record's identity, including nested and finishing steps. */
-  private publish(record: StepRecord, progress: StepProgressFact): void {
-    this.onProgress?.({
-      ...progress,
+  private publish(record: StepRecord, fact: StepProgressFact): void {
+    if (this.onProgress === undefined && this.mirror === undefined) return;
+    const progress: StepProgress = {
+      ...fact,
       identity: {
         attemptId: this.attempt.id,
         attemptIndex: this.attempt.index,
         stepId: record.id,
         stepIndex: record.index,
+        ...(record.actor === undefined ? {} : { actor: record.actor }),
       },
-    });
+    };
+    this.onProgress?.(progress);
+    this.mirror?.(progress, record);
   }
 }

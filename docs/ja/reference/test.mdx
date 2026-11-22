@@ -30,13 +30,18 @@ describe('checkout', { tags: ['billing'] }, () => {
 | --- | --- |
 | [`test`](#test) | `TestCase` |
 | [`test.skip`](#test-skip) | `TestCase \| void` |
+| [`test.fixme`](#test-fixme) | `TestCase \| void` |
 | [`test.skipIf`](#test-skipif) | `TestRegistrar` |
 | [`test.runIf`](#test-runif) | `TestRegistrar` |
+| [`test.each`](#test-each) | `EachRegistrar` |
+| [`test.for`](#test-for) | `EachRegistrar` |
 | [`test.fail`](#test-fail) | `TestCase \| void` |
+| [`test.setTimeout`](#test-settimeout) | `void` |
 | [`test.only`](#test-only) | `TestCase` |
 | [`test.setup`](#test-setup) | `TestCase` |
 | [`test.extend`](#test-extend) | `TestAPI` |
 | [`describe`](#describe) | `void` |
+| [`describe.fail`](#describe-fail) | `void` |
 | [フック](#hooks) | `void` |
 
 `describe` と 4 つのフックはトップレベルからもエクスポートされます。`test.describe`、`test.beforeEach` などと同じ関数です。`import { describe, beforeEach, test } from 'e2e'` のように使えます。
@@ -106,8 +111,30 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 
 | エラー | 発生条件 |
 | --- | --- |
-| `INVALID_ARGUMENT` | セットアップテストで呼び出した場合。他のテストがそのセッションに依存するため、セットアップテストはスキップできません。 |
+| `INVALID_ARGUMENT` | セットアップテストで、条件が true か条件なしで呼び出した場合。他のテストがそのセッションに依存するため、セットアップテストはスキップできません。 |
 | `COLLECTION_ERROR` | 条件付きの形式をテスト本体の外で呼び出した場合。 |
+| `COLLECTION_ERROR` | 登録時の形式を直列実行グループ内で呼び出した場合。代わりに直列実行の `describe` に [`skip`](#skip) を設定します。 |
+
+#### `test.fixme`
+
+fixme と印を付けたスキップするテストを登録するか、実行中のテストを fixme としてスキップします。
+
+```ts
+test.fixme('exports a PDF', async ({ app }) => {}); // at registration
+test.fixme(platform === 'android', 'crashes on Android'); // inside a body
+test.fixme(); // inside a body, always
+```
+
+- [`test.skip`](#test-skip) と同じ 3 つの形式を受け付け、本体内の形式のルールが適用されます。
+- テストは `skipped` と報告します。`report.json` の `skip.cause` は、`test.skip` の `explicit` ではなく `fixme` です。理由は `fixme` です。テスト本体内の呼び出しで空白でない理由を渡した場合は `fixme: <reason>` です。リスト形式のレポーターは `[fixme: crashes on Android]` と表示します。
+- 登録時の形式はテストオプションを受け付けません。
+- 登録時の戻り値は `TestCase`、テスト本体内では `void` です。
+
+| エラー | 発生条件 |
+| --- | --- |
+| `INVALID_ARGUMENT` | セットアップテストで、条件が true か条件なしで呼び出した場合。他のテストがそのセッションに依存するため、セットアップテストはスキップできません。 |
+| `COLLECTION_ERROR` | 条件付きの形式をテスト本体の外で呼び出した場合。収集時には `test.fixme(title, fn)` を使います。 |
+| `COLLECTION_ERROR` | 登録時の形式を直列実行グループ内で呼び出した場合。代わりに直列実行の `describe` に [`skip`](#skip) を設定します。 |
 
 #### `test.skipIf`
 
@@ -140,6 +167,61 @@ test.runIf(process.platform === 'linux')('reads inotify events', async ({ app })
 
 `test.runIf(condition)` は `test.skipIf(!condition)` と同じです。[`test.skipIf`](#test-skipif) のルールがすべて適用されます。
 
+#### `test.each`
+
+`test(title, fn)` と同じようにテストを登録する関数を返します。行ごとに 1 つ、行の順にテストを登録します。同じ手順を別のデータで実行するときに使います。
+
+```ts
+test.each([{ user: 'Ada' }, { user: 'Grace' }])('signs in as $user', async ({ user }, { app }) => {
+  await app.open();
+  // ...
+});
+
+test.each([
+  ['standard', '5.00'],
+  ['express', '15.00'],
+])('ships %s for %s', async (speed, price, { screen }) => {});
+```
+
+- 本体は最初に行を、最後にフィクスチャを受け取ります。すべての行が配列の場合、各行は展開され、`[speed, price]` は `(speed, price, fixtures)` として渡されます。配列でない行が 1 つでもある場合、Vitest や Jest と同じく、すべての行がそのまま `(row, fixtures)` として渡されます。
+- 本体は、行のあとの引数の分割代入で、使う[フィクスチャ](#fixtures)を指定します。e2e はそれだけをセットアップします。フィクスチャを使わない本体は、その引数を省略できます。
+- タイトルは行から作られます。
+
+  | タイトル内 | 置き換え後 |
+  | --- | --- |
+  | `$name`、`$name.path` | オブジェクトの行のそのキー。文字列はそのまま、それ以外の値は Node の `inspect` の表示になります。 |
+  | `%s` | 次の項目。同じ方法で表示します。 |
+  | `%o` | 次の項目を Node の `inspect` で表示します。文字列は引用符付きになります。 |
+  | `%d` | 次の項目を数値にしたもの（`Number(item)`）。ただし `BigInt` は `n` 接尾辞を残し、`Symbol` は `NaN` と表示します。 |
+  | `%i`、`%f` | 次の項目を `parseInt` / `parseFloat` のように整数または浮動小数点数として読んだもの。`'42px'` は `42` になります。`%i` では `BigInt` は `n` 接尾辞を残します。 |
+  | `%j` | 次の項目の JSON。循環する値は `[Circular]`、関数、`Symbol`、`undefined` は `undefined` になります。 |
+  | `%#`、`%$` | 0 から始まる行のインデックスと、1 から始まる行番号。 |
+  | `%%` | パーセント記号。 |
+
+  項目は配列の行ならその要素を順に、それ以外の行なら行そのものを 1 つの項目として使います。残りの項目がないプレースホルダーや、オブジェクトでない行に対する `$name` は、書いたまま残ります。文字列以外の値は常に 1 行で表示します。文字列は改行も含めて書いたまま表示します。`Error` は名前とメッセージで表示し、スタックは含みません。
+- タイトルはテスト ID の一部です。`%#` と `%$` は行を追加したり移動したりすると変わるため、安定した ID には `$name` や値のプレースホルダーを使ってください。
+- タイトルはいくつかの点で Vitest と異なります。`$0` や `$1` は配列の行を読みません。`$name` は配列の行の最初の要素からは読みません。`%s` はオブジェクトを独自の `toString` ではなく `inspect` で表示します（`URL` は href として表示されません）。`%O` と `%c` はプレースホルダーではありません。テンプレートリテラルで書いた表は読みません。本体も異なります。Vitest の `test.each` の本体は行だけを受け取りますが、ここでは行のあとにフィクスチャが続きます。
+- 各行は個別のテストで、それぞれ独自の ID、レポート項目、リトライを持ちます。オプションはすべての行に適用されるため、[`skip`](#skip) や [`tags`](#tags) オプションはすべての行をスキップ、またはタグ付けします。
+- [`test`](#test) と同じ 2 つの形式を受け付け、同じフィクスチャを持ちます。拡張した `test` でも同様です。
+
+| エラー | 発生条件 |
+| --- | --- |
+| `COLLECTION_ERROR` | 行が配列でない場合、配列が空の場合、または行がテンプレートリテラルの表の場合。 |
+| `COLLECTION_ERROR` | 2 つの行が同じタイトルになる場合。行を区別できるプレースホルダーをタイトルに入れてください。 |
+| `COLLECTION_ERROR` | `%j` の項目を循環以外の理由（`BigInt` など）で JSON にできない場合。メッセージに行が示されます。 |
+| `COLLECTION_ERROR` | 本体がフィクスチャをまるごと受け取る場合（`async (row, fixtures) => {}`）、残余引数で受け取る場合（`async (...args) => {}`）、またはほかの[フィクスチャの指定ルール](#fixtures)に反する場合。 |
+
+#### `test.for`
+
+[`test.each`](#test-each) と同じですが、配列の行を展開しません。本体は常に `(row, fixtures)` を受け取ります。タイトルは同じ方法で作られます。
+
+```ts
+test.for([
+  ['standard', '5.00'],
+  ['express', '15.00'],
+])('ships %s for %s', async ([speed, price], { screen }) => {});
+```
+
 #### `test.fail`
 
 失敗を期待するテストを登録するか、実行中のテストにその印を付けます。
@@ -150,6 +232,8 @@ test.fail(platform === 'web', 'tap on a display: contents element'); // inside a
 test.fail('known gap'); // inside a body, always
 test('exports a PDF', { fail: 'PDF export is broken' }, async ({ app }) => {}); // by option
 ```
+
+To mark every test in a group, use [`describe.fail`](#describe-fail).
 
 - 呼び出し後もテスト本体は続行します。`beforeEach` フックから印を付けることもできます。
 - アサーションやアクションの失敗、スローされたエラー、タイムアウトは、テストを `passed` にします。レポートには理由とエラーが残ります。
@@ -162,6 +246,29 @@ test('exports a PDF', { fail: 'PDF export is broken' }, async ({ app }) => {}); 
 | --- | --- |
 | `INVALID_ARGUMENT` | セットアップテスト、直列実行グループのメンバー、`afterEach` フック、フィクスチャの後処理で、条件が true の場合。 |
 | `COLLECTION_ERROR` | 条件付きの形式をテスト本体の外で呼び出した場合、または直列実行グループ内で `fail` オプションを使った場合。 |
+
+#### `test.setTimeout`
+
+実行中のテストのタイムアウトをテスト本体または `beforeEach` フックから変更します。`beforeAll` フックの中では、そのフック自身のタイムアウトを変更します。
+
+```ts
+test('imports a large file', async ({ app }) => {
+  test.setTimeout(180_000);
+  await app.open('/import');
+});
+```
+
+- 新しいタイムアウトは [`timeout`](#timeout) オプションと同じく試行の開始から数え、この試行ではオプションの値を置き換えます。リトライはオプションの値から始まります。
+- すでに経過した時間より短いタイムアウトを指定すると、テストはその場でタイムアウトします。
+- `beforeAll` フックの中では、そのフックのタイムアウト（設定の `timeout`）を置き換え、フックの開始から数えます。テストは自身のタイムアウトのままです。
+- `afterEach` フック、`afterAll` フック、フィクスチャの後処理は `cleanupTimeout` で動くため、タイムアウトを変更できません。
+- [`host.openSession`](/reference/runner#host-opensession) のセッションは e2e のテストを実行しないため、変更できません。`host.openSession` に `timeout` を渡してください。
+- タイムアウトなしを意味する `0` はありません。代わりに大きな値を渡してください。
+
+| エラー | 発生条件 |
+| --- | --- |
+| `INVALID_ARGUMENT` | タイムアウトがミリ秒の正の安全な整数でない場合、2147483647 を超える場合、または `afterEach` フック、`afterAll` フック、フィクスチャの後処理、ホストされたセッションから呼び出した場合。テストやフックの終了後も動き続けているコードから呼び出した場合も同様です。 |
+| `COLLECTION_ERROR` | 実行中のテストやフックの外で呼び出した場合。そこでは `timeout` オプションを使ってください。 |
 
 #### `test.only`
 
@@ -243,6 +350,29 @@ describe('checkout', { tags: ['smoke'], serial: true }, () => {
 | `COLLECTION_ERROR` | 本体が `async` の場合。型エラーにもなります。 |
 | `COLLECTION_ERROR` | 本体内に `test.setup` がある場合。 |
 
+#### `describe.fail`
+
+Declares a group whose tests are all expected to fail, the same as
+`fail: true` on `describe`. For a reason, use the [`fail`](#fail) option.
+
+```ts
+describe.fail('legacy checkout', () => {
+  test('pays by card', async ({ screen }) => {}); // expected to fail
+  test('applies a coupon', async ({ screen }) => {}); // expected to fail
+});
+describe('legacy checkout', { fail: 'old payment form' }, () => {}); // with a reason
+```
+
+- Each test is judged on its own, as with [`test.fail`](#test-fail): a
+  failure passes it, and a pass fails it with `UNEXPECTED_PASS`.
+- A `fail` reason on a test or an inner group wins over an outer one.
+  `fail: false` on a test or an inner group does not unmark it.
+
+| Throws | When |
+| --- | --- |
+| `COLLECTION_ERROR` | The group is serial or inside a serial group, or a serial group is inside it. |
+| `COLLECTION_ERROR` | A `fail` option on `describe.fail`. It is also a type error. |
+
 ### フック
 
 | フック | 実行タイミング |
@@ -279,7 +409,7 @@ test.afterEach(async ({ app }) => {
 ```
 
 - 最も内側のグループから、宣言とは逆の順序で実行します。失敗やタイムアウトの後も実行します。
-- 各 `afterEach` フックには、動作するフィクスチャと独立した `cleanupTimeout` が与えられます。そのため、テスト本体がタイムアウトしても、後処理でアプリを操作できます。
+- 各 `afterEach` フックには、それぞれ独立した `cleanupTimeout` が与えられ、その間もフィクスチャは動作します。そのため、テスト本体がタイムアウトしても、後処理でアプリを操作できます。
 - テストのフィクスチャを受け取ります。フックが指定したフィクスチャは、最初の `beforeEach` より前に、テストのタイムアウト内でセットアップします。フックの開始時ではありません。
 - セットアップに失敗したフィクスチャを指定したフックはスキップします。
 
@@ -306,11 +436,13 @@ test.beforeAll(async ({ database, device }) => {
 モバイルターゲットでは、次のように動作します。
 
 - テストが入るスコープの `beforeAll` フックは、専用の短いエンジン試行 1 回の中でまとめて実行します。この試行は何も起動しません。テストが出るスコープの `afterAll` フックも同様です。
-- この試行は、`device`、`app`、`screen` のいずれか、またはそのいずれかを指定するワーカーフィクスチャを指定した最初のフックのために開きます。どれも指定しないフックは、試行を開きません。
+- この試行は、`device`、`app`、`screen` のいずれかを指定した最初のフックで開かれます。これらのいずれかを指定するワーカーフィクスチャを使うフックも同じ扱いです。どれも指定しないフックは、試行を開きません。
 - 直列実行グループ、または `e2e mcp` セッションが実行するテストでは、フックはすでに開いている試行の上で実行します。
 - その試行を開けない場合や、実行が中断された場合も、フックは実行します。その場合、`device`、`app`、`screen` を読み取ると、理由を示す例外をスローします。試行を開けなかった失敗は、フェーズ `launch` の 1 件の実行エラーになります。
 
-スイートのフックが実行したステップは、どのテストの記録にも含まれません。失敗には、フックのスコープを示します。
+スイートのフックが実行したステップは、どのテストの記録にも含まれません。失敗した場合、エラーにはそのフックのスコープが示されます。
+
+各 `beforeAll` フックは設定の `timeout` で動きます。その中で [`test.setTimeout`](#test-settimeout) を呼ぶとそのフックのタイムアウトが変わり、そのフックがセットアップするワーカーフィクスチャも変更後のタイムアウトで動きます。
 
 | エラー | 発生条件 |
 | --- | --- |
@@ -362,7 +494,7 @@ afterAll(async () => {
 | [`serial`](#serial) | `boolean` | - |
 | [`sessions`](#sessions) | `readonly string[]` | 必須 |
 
-`test` は `serial` と `sessions` 以外を受け付けます。`describe` は `only`、`fail`、`sessions` 以外を受け付けます。`test.setup` では `sessions` が必須で、`session`、`only`、`skip`、`fail` は受け付けません。
+`test` は `serial` と `sessions` 以外を受け付けます。`describe` は `only` と `sessions` 以外を受け付けます。`test.setup` では `sessions` が必須で、`session`、`only`、`skip`、`fail` は受け付けません。
 
 優先順位は、テスト、最も近いグループ、外側のグループ、設定、組み込みのデフォルト値の順です。[直列実行グループ](#serial)内では、グループの `retries`、`trace`、`video` を適用します。
 
@@ -402,7 +534,7 @@ describe('checkout', { tags: ['billing', 'smoke'] }, () => {});
 
 #### `skip`
 
-収集時にテストをスキップします。文字列は理由になります。どれかの階層に真と評価される値があればスキップします。実行時の `test.skip` を含むスキップ理由は、報告前にシークレットの伏せ字化とサニタイズを行い、UTF-8 で 8,192 バイトに制限します。
+収集時にテストをスキップします。文字列は理由になります。どれかの階層に真と評価される値があればスキップします。実行時の `test.skip` を含むスキップ理由は、報告前にシークレットの秘匿とサニタイズを行い、UTF-8 で 8,192 バイトに制限します。
 
 ```ts
 test('exports a PDF', { skip: 'PDF export is off on staging' }, async ({ app }) => {});
@@ -410,10 +542,11 @@ test('exports a PDF', { skip: 'PDF export is off on staging' }, async ({ app }) 
 
 #### `fail`
 
-テストの失敗を期待します。[`test.fail`](#test-fail) を参照してください。文字列は理由になります。直列実行グループ内では使えません。
+テストの失敗を期待します。[`test.fail`](#test-fail) を参照してください。文字列は理由になります。 A layer with `true` or any string marks, and the innermost reason wins. Not allowed on, inside, or around a serial group.
 
 ```ts
 test('exports a PDF', { fail: 'PDF export is broken' }, async ({ app }) => {});
+describe('legacy checkout', { fail: 'old payment form' }, () => {});
 ```
 
 #### `only`
@@ -477,7 +610,7 @@ test('checks out', { agent: ['fast', 'smart'] }, async ({ agent }) => {}); // on
 
 - リストを指定すると、各エージェントでテストを 1 回ずつ実行し、それぞれを 1 件の結果にします。
 - 最も内側の指定を優先します。各呼び出し自身の `agent` オプションは、さらに優先されます。
-- `--agent` はリストを両方に含まれる名前に絞ります。フラグに含まれない名前への固定指定を、別の名前で上書きすることはありません。
+- `--agent` は、リストを `--agent` とリストの両方にある名前に絞ります。テストで固定したエージェントが `--agent` に含まれない場合も、その固定を上書きしません。
 - セットアップテストはターゲットごとに 1 回実行するため、指定できるエージェントは最大 1 つです。
 
 | エラー | 発生条件 |
@@ -523,7 +656,7 @@ describe('checkout', { serial: true }, () => {
 });
 ```
 
-- シークレットの状態も共有します。1 つのメンバーが解決した値は、そのグループの試行の残りでも伏せ字の対象になります。リトライでは新しい状態から始めます。
+- シークレットの状態も共有します。1 つのメンバーが解決した値は、そのグループの試行の残りでも秘匿の対象になります。リトライでは新しい状態から始めます。
 - メンバーには、直列実行の `describe` またはそれを囲むグループの `trace` と `video` を適用します。動画はグループの試行ごとに 1 本記録します。
 - ファイルの読み込みやセッションの起動に失敗し、グループの試行が始まらないこともあります。その場合、最初のメンバーをそのエラーで失敗にし、残りは原因 `serial-predecessor-failed` でスキップします。起動中に実行が中断された場合は、代わりに全メンバーをスキップします。
 - リトライが中断された場合や、メンバーの実行まで到達しなかった場合、各メンバーは最後に実行された試行の判定と所要時間を保持します。
@@ -532,7 +665,7 @@ describe('checkout', { serial: true }, () => {
 | エラー | 発生条件 |
 | --- | --- |
 | `COLLECTION_ERROR` | メンバーが `retries`、`trace`、`video`、`session`、`platforms`、`requires`、`skip`、`only`、または入れ子の `serial` を指定した場合。 |
-| `COLLECTION_ERROR` | メンバーが `test.skipIf` または `test.runIf` で登録された場合。 |
+| `COLLECTION_ERROR` | メンバーが `test.skip(title, fn)`、`test.skipIf`、`test.runIf`、または `test.fixme(title, fn)` で登録された場合。 |
 
 #### `sessions`
 
@@ -567,7 +700,7 @@ test.setup('authenticate', { sessions: ['member', 'admin'] }, async ({ session }
 
 `session` は `test.setup` の本体だけに渡されます。コアのフィクスチャの説明は [`TestFixtures`](#testfixtures) にあります。それ以外のフィクスチャは、[独自のフィクスチャ](#your-own-fixtures)です。
 
-テスト本体、フック、フィクスチャ関数は、最初の引数の分割代入で、使うフィクスチャを指定します（`async ({ app, screen }) => {}`）。e2e は関数のソースから名前を読み取ります。
+テスト本体、フック、フィクスチャ関数は、最初の引数の分割代入で、使うフィクスチャを指定します（`async ({ app, screen }) => {}`）。e2e は関数のソースから名前を読み取ります。[`test.each`](#test-each) や [`test.for`](#test-for) の本体は、行のあとの引数で指定します。
 
 | エラー | 発生条件 |
 | --- | --- |
@@ -678,12 +811,36 @@ export const test = base.extend({
 ### `TestAPI`
 
 ```ts
+/** The two call forms of `describe`. */
+export interface DescribeRegistrar<Options = DescribeOptions> {
+  /** Declares a group synchronously. */
+  <Result>(title: string, body: SynchronousBody<Result>): void;
+  /** Declares a configured group synchronously. */
+  <Result>(title: string, options: Options, body: SynchronousBody<Result>): void;
+}
+
+export interface DescribeAPI extends DescribeRegistrar {
+  /** Declares a group whose tests are expected to fail, as if it had `fail: true`; a reason goes in the `fail` option of `describe`. */
+  fail: DescribeRegistrar<Omit<DescribeOptions, 'fail'>>;
+}
+
 /** The two call forms of `test`, shared with what `test.skipIf` and `test.runIf` return. */
 export interface TestRegistrar<Fixtures = TestFixtures & WorkerFixtures> {
   /** Registers one test synchronously during module evaluation. */
   (title: string, fn: TestFn<Fixtures>): TestCase;
   /** Registers one configured test synchronously during module evaluation. */
   (title: string, options: TestOptions, fn: TestFn<Fixtures>): TestCase;
+}
+
+/**
+ * The two call forms of `test` for `test.each` and `test.for`: one test per
+ * row, each titled from the row. `Args` are the body's arguments.
+ */
+export interface EachRegistrar<Args extends readonly unknown[]> {
+  /** Registers one test per row synchronously during module evaluation. */
+  (title: string, fn: EachFn<Args>): readonly TestCase[];
+  /** Registers one configured test per row synchronously during module evaluation. */
+  (title: string, options: TestOptions, fn: EachFn<Args>): readonly TestCase[];
 }
 
 export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> extends TestRegistrar<Fixtures & Worker> {
@@ -700,6 +857,18 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    */
   skip(condition: boolean, reason?: string): void;
   skip(reason?: string): void;
+  /** Registers one skipped test marked fixme, reported with the skip cause and reason `fixme`. */
+  fixme(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
+  /**
+   * Inside a running test: skips it as fixme when `condition` is true (or
+   * always, with no condition), as `test.skip` does. The skip cause is
+   * `fixme`, and the reason `fixme`, or `fixme: <reason>` when `reason` is not
+   * blank. A setup test cannot skip. Outside a test body this form is
+   * `COLLECTION_ERROR`; use `test.fixme(title, fn)` to mark a test fixme at
+   * collection.
+   */
+  fixme(condition: boolean, reason?: string): void;
+  fixme(reason?: string): void;
   /**
    * Returns a function that registers one test, like `test(title, fn)`:
    * skipped when `condition` is truthy, as if it had the `skip` option. The
@@ -718,6 +887,30 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    * skipped when `condition` is falsy, `test.skipIf(!condition)`.
    */
   runIf<Condition>(condition: SynchronousCondition<Condition>): TestRegistrar<Fixtures & Worker>;
+  /**
+   * Returns a function that registers one test per row, like `test(title,
+   * fn)`, in row order. The title is formatted from the row: `$name` and
+   * `$name.path` read an object row, and `%s`, `%d`, `%i`, `%f`, `%j`, `%o`
+   * take an array row's items in order (any other row is the one item). `%#`
+   * is the row index, `%$` the row number, `%%` a percent sign. When every
+   * row is an array, each row is spread into the body's arguments; otherwise
+   * every row is the first one. The fixtures come last:
+   *
+   *   test.each([{ user: 'Ada' }, { user: 'Grace' }])('signs in as $user', async ({ user }, { app }) => {});
+   *   test.each([[1, 2, 3]])('%i + %i = %i', async (a, b, sum, { app }) => {});
+   *
+   * Rows must be a non-empty array. Two rows that format to the same title
+   * fail as duplicate titles. As in a test body, destructure the fixtures
+   * (`{ app }`): e2e sets up only the ones named there.
+   */
+  each<Row extends readonly unknown[] | [unknown]>(rows: readonly Row[]): EachRegistrar<[...Row, Fixtures & Worker]>;
+  each<Row>(rows: readonly Row[]): EachRegistrar<EachArgs<Row, Fixtures & Worker>>;
+  /**
+   * `test.each` that never spreads: the body takes `(row, fixtures)` for
+   * every row, an array row included. Titles format as in `test.each`.
+   */
+  for<Row extends readonly unknown[] | [unknown]>(rows: readonly Row[]): EachRegistrar<[Row, Fixtures & Worker]>;
+  for<Row>(rows: readonly Row[]): EachRegistrar<[Row, Fixtures & Worker]>;
   /** Registers one test that is expected to fail. */
   fail(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
@@ -796,14 +989,8 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   extend<Extra = {}, ExtraWorker = {}>(
     fixtures: FixtureDefinitions<Fixtures & Worker, Extra, Worker, ExtraWorker>,
   ): TestAPI<Fixtures & Extra, Worker & ExtraWorker>;
-  /** Declares a group synchronously. */
-  describe<Result>(title: string, body: SynchronousBody<Result>): void;
-  /** Declares a configured group synchronously. */
-  describe<Result>(
-    title: string,
-    options: DescribeOptions,
-    body: SynchronousBody<Result>,
-  ): void;
+  /** Declares a group synchronously; `describe.fail` declares one whose tests are expected to fail. */
+  describe: DescribeAPI;
   /** Registers a test-attempt setup hook: it runs after the test's fixtures are set up. */
   beforeEach(fn: TestHookFn<Fixtures & Worker>): void;
   /** Registers a test-attempt teardown hook: it runs before the test's fixtures are torn down. */
@@ -836,8 +1023,9 @@ export interface TestOptions {
   skip?: boolean | string;
   /**
    * Expects the test to fail; a string is the reason. A test failure then
-   * passes it, and a pass fails it with `UNEXPECTED_PASS`. Not allowed inside
-   * a serial group.
+   * passes it, and a pass fails it with `UNEXPECTED_PASS`. A layer with `true`
+   * or any string marks; the innermost reason wins. Not allowed on, inside, or
+   * around a serial group.
    */
   fail?: boolean | string;
   /** Focuses the test locally. CI rejects it with `ONLY_IN_CI`. */
@@ -874,7 +1062,7 @@ export interface TestOptions {
   video?: RecordingMode;
 }
 
-export interface DescribeOptions extends Omit<TestOptions, 'only' | 'fail'> {
+export interface DescribeOptions extends Omit<TestOptions, 'only'> {
   /** Runs the group as one ordered retry unit with shared app state. Nesting one serial group in another is a `COLLECTION_ERROR`. */
   serial?: boolean;
 }
@@ -1037,6 +1225,21 @@ export type SuiteHookFn = TestHookFn<WorkerFixtures>;
 export type SynchronousBody<Result> = Extract<Result, PromiseLike<unknown>> extends never
   ? () => Result
   : never;
+
+/**
+ * The `test.each` body arguments for the rows' type: array rows spread, then
+ * the fixtures. Rows that are not all arrays are passed whole. Not
+ * distributive, so a mixed table is decided once, as at run time. An
+ * `unknown` row may be either at run time, so only the fixtures, last, are known.
+ */
+export type EachArgs<Row, Fixtures> = [Row] extends [readonly unknown[]]
+  ? [...Row, Fixtures]
+  : unknown extends Row
+    ? [...unknown[], Fixtures]
+    : [Row, Fixtures];
+
+/** A `test.each` or `test.for` body: the row's arguments, then the fixtures. */
+export type EachFn<Args extends readonly unknown[]> = (...args: Args) => void | Promise<void>;
 
 /** A `test.skipIf` or `test.runIf` condition. A Promise is a type error. */
 export type SynchronousCondition<Condition> = Extract<Condition, PromiseLike<unknown>> extends never

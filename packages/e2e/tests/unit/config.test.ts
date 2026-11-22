@@ -9,7 +9,8 @@ import { ConfigurationError, defineEngine } from '@e2e-dev/core/lib/engine/index
 import { protocolEngine } from '@e2e-dev/core/lib/engine/protocol/client';
 import { secrets } from '@e2e-dev/core/lib/secrets';
 import type { CommandConfig, Target, TargetApp } from '@e2e-dev/core/lib/types';
-import type { E2EConfig, TestFilter } from '../../src/run-types.ts';
+import { dot, junit, list } from '../../src/reporters.ts';
+import type { BuiltinReporter, E2EConfig, Reporter, TestFilter } from '../../src/run-types.ts';
 import { snapshot } from '../helpers/snapshot.ts';
 import { invalid } from '../helpers/invalid.ts';
 
@@ -83,12 +84,46 @@ describe('resolveConfig', () => {
     expect(config.launchTimeout).toBe(60_000);
     expect(config.actionTimeout).toBe(30_000);
     expect(config.assertionTimeout).toBe(5_000);
+    expect(config.toPass).toEqual({ timeout: 0, intervals: [100, 250, 500, 1000] });
     expect(config.cleanupTimeout).toBe(30_000);
     expect(config.retries).toBe(0);
     expect(config.tests).toEqual(['tests/**/*.e2e.ts']);
     expect(config.targets[0]!.trace).toEqual({ mode: 'retain-on-failure', source: 'default' });
     expect(config.targets[0]!.video).toEqual({ mode: 'off', source: 'default' });
-    expect(config.reporters).toEqual(['list']);
+    expect(config.reporters.map((reporter) => reporter.name)).toEqual(['list']);
+  });
+
+  it('defaults each toPass option independently', () => {
+    expect(resolve({ toPass: {} }).toPass).toEqual({ timeout: 0, intervals: [100, 250, 500, 1000] });
+    expect(resolve({ toPass: { timeout: 200 } }).toPass).toEqual({ timeout: 200, intervals: [100, 250, 500, 1000] });
+    expect(resolve({ toPass: { intervals: [5, 10] } }).toPass).toEqual({ timeout: 0, intervals: [5, 10] });
+    expect(resolve({ toPass: { timeout: 0, intervals: [20] } }).toPass).toEqual({ timeout: 0, intervals: [20] });
+    expect(resolve({ toPass: { timeout: 2 ** 31 - 1 } }).toPass.timeout).toBe(2 ** 31 - 1);
+  });
+
+  it.each([
+    { value: null, message: 'toPass must be an object, got null' },
+    { value: [], message: 'toPass must be an object, got an array' },
+    { value: '200', message: 'toPass must be an object, got "200"' },
+    { value: { tiemout: 200 }, message: 'toPass has unknown key "tiemout"; did you mean "timeout"?' },
+    { value: { timeout: -1 }, message: 'toPass.timeout must be a positive safe integer of milliseconds, got -1' },
+    { value: { timeout: 0.5 }, message: 'toPass.timeout must be a positive safe integer of milliseconds, got 0.5' },
+    { value: { timeout: '200ms' }, message: 'toPass.timeout must be a positive safe integer of milliseconds, got "200ms"' },
+    { value: { timeout: Number.NaN }, message: 'toPass.timeout must be a positive safe integer of milliseconds, got NaN' },
+    { value: { timeout: Number.POSITIVE_INFINITY }, message: 'toPass.timeout must be a positive safe integer of milliseconds, got Infinity' },
+    { value: { timeout: 2 ** 31 }, message: 'toPass.timeout must be at most 2147483647 milliseconds, got 2147483648' },
+    { value: { intervals: 10 }, message: 'toPass.intervals must be a non-empty array of milliseconds' },
+    { value: { intervals: [] }, message: 'toPass.intervals must be a non-empty array of milliseconds' },
+    { value: { intervals: [0] }, message: 'toPass.intervals[0] must be a positive safe integer of milliseconds, got 0' },
+    { value: { intervals: [10, -1] }, message: 'toPass.intervals[1] must be a positive safe integer of milliseconds, got -1' },
+    { value: { intervals: [10, '20'] }, message: 'toPass.intervals[1] must be a positive safe integer of milliseconds, got "20"' },
+    { value: { intervals: [undefined] }, message: 'toPass.intervals[0] must be a positive safe integer of milliseconds, got undefined' },
+    { value: { intervals: [Number.NaN] }, message: 'toPass.intervals[0] must be a positive safe integer of milliseconds, got NaN' },
+    { value: { intervals: [Number.POSITIVE_INFINITY] }, message: 'toPass.intervals[0] must be a positive safe integer of milliseconds, got Infinity' },
+    { value: { intervals: [10, 20.5] }, message: 'toPass.intervals[1] must be a positive safe integer of milliseconds, got 20.5' },
+    { value: { intervals: [Number.MAX_SAFE_INTEGER + 1] }, message: 'toPass.intervals[0] must be a positive safe integer of milliseconds, got 9007199254740992' },
+  ])('refuses invalid toPass config with "$message"', ({ value, message }) => {
+    expect(() => resolve(invalid({ toPass: value }))).toThrow(expect.objectContaining({ code: 'INVALID_CONFIG', message }));
   });
 
   it('validates tests as globs at resolution, not at collection', () => {
@@ -545,42 +580,81 @@ describe('resolveConfig', () => {
     expect(resolveApp().site).toBeUndefined();
   });
 
-  it('rejects json combined with list reporters', () => {
-    expect(() => resolve({ reporters: ['json', 'list'] })).toThrow(/json renderer/);
+  /** The names of the reporters `raw` resolves to, under `--reporter` when given. */
+  const reporterNames = (reporters: NonNullable<E2EConfig['reporters']>, cli?: readonly BuiltinReporter[]): string[] =>
+    resolveConfig({ targets: TARGETS, reporters }, { projectRoot: ROOT, env: BASE_ENV, ...(cli === undefined ? {} : { cli: { reporters: cli } }) }).reporters.map(
+      (reporter) => reporter.name,
+    );
+
+  it('resolves ids to the built-in factories, and rejects unknown ids', () => {
+    expect(reporterNames(['junit'])).toEqual(['junit']);
+    expect(reporterNames(['list', 'junit'])).toEqual(['list', 'junit']);
+    expect(reporterNames(['json', 'markdown'])).toEqual(['json', 'markdown']);
+    const [printer] = resolve({ reporters: ['list'] }).reporters;
+    expect(printer?.printsTo).toBe('stdout');
+    expect(() => resolve({ reporters: ['xunit'] as never })).toThrow(/unknown reporter "xunit"/);
+  });
+
+  it('moves the list or dot id beside json to stderr', () => {
+    for (const id of ['list', 'dot'] as const) {
+      const streams = resolve({ reporters: [id, 'json'] }).reporters.map((reporter) => [reporter.name, reporter.printsTo]);
+      expect(streams).toEqual([[id, 'stderr'], ['json', 'stdout']]);
+    }
+    const cli = resolveConfig({ targets: TARGETS, reporters: ['dot'] }, { projectRoot: ROOT, env: BASE_ENV, cli: { reporters: ['dot', 'json'] } });
+    expect(cli.reporters.map((reporter) => reporter.printsTo)).toEqual(['stderr', 'stdout']);
+    // A factory called without a stream is its id; one given a stream keeps it.
+    expect(resolve({ reporters: [list(), 'json'] }).reporters.map((reporter) => reporter.printsTo)).toEqual(['stderr', 'stdout']);
+    const flagged = resolveConfig({ targets: TARGETS, reporters: [dot(), 'junit'] }, { projectRoot: ROOT, env: BASE_ENV, cli: { reporters: ['dot', 'json'] } });
+    expect(flagged.reporters.map((reporter) => reporter.printsTo)).toEqual(['stderr', 'stdout']);
+    expect(() => resolve({ reporters: [list({ stream: 'stdout' }), 'json'] })).toThrow(/reporters "list" and "json" both print to stdout/);
   });
 
   it.each([['list', 'dot'], ['dot', 'list']] as const)('rejects %s combined with %s reporters', (first, second) => {
     expect(() => resolve({ reporters: [first, second] })).toThrow(/list.*dot|dot.*list/u);
   });
 
-  it('accepts the junit reporter beside list or json, and rejects unknown ids', () => {
-    expect(resolve({ reporters: ['junit'] }).reporters).toEqual(['junit']);
-    expect(resolve({ reporters: ['list', 'junit'] }).reporters).toEqual(['list', 'junit']);
-    expect(resolve({ reporters: ['json', 'junit'] }).reporters).toEqual(['json', 'junit']);
-    expect(() => resolve({ reporters: ['xunit'] as never })).toThrow(/unknown reporter "xunit"/);
+  it('refuses two reporters printing to one stream, a built-in or not, and takes any number of live ones', () => {
+    const dots: Reporter = { name: 'dots', printsTo: 'stdout', onEvent: () => undefined };
+    expect(() => resolve({ reporters: [list(), dots] })).toThrow(/reporters "list" and "dots" both print to stdout/);
+    expect(() => resolve({ reporters: [list({ stream: 'stderr' }), dot({ stream: 'stderr' })] })).toThrow(/both print to stderr/);
+    expect(reporterNames([list({ stream: 'stderr' }), dots])).toEqual(['list', 'dots']);
+    expect(reporterNames([dots, 'junit'])).toEqual(['junit', 'dots']);
+    const live = (name: string): Reporter => ({ name, onOutput: () => undefined, onStepPrompt: () => undefined, onSummary: () => undefined });
+    expect(reporterNames(['list', live('socket'), live('overlay')])).toEqual(['list', 'socket', 'overlay']);
   });
 
-  it('accepts reporter objects beside the ids and keeps them under --reporter', () => {
+  it('keeps reporter objects under --reporter and reuses the options of the built-ins it names', () => {
     const upload = { name: 'upload', onRunFinished: async () => undefined };
-    const config = resolve({ reporters: ['list', upload] });
-    expect(config.reporters).toEqual(['list']);
-    expect(config.customReporters).toEqual([upload]);
-    const overridden = resolveConfig(
-      { targets: TARGETS, reporters: ['list', upload] },
-      { projectRoot: ROOT, env: BASE_ENV, cli: { reporters: ['junit'] } },
-    );
-    expect(overridden.reporters).toEqual(['junit']);
-    expect(overridden.customReporters).toEqual([upload]);
+    expect(reporterNames(['list', upload])).toEqual(['list', 'upload']);
+    expect(reporterNames(['list', upload], ['junit'])).toEqual(['junit', 'upload']);
     // Objects alone leave the terminal silent, as `['junit']` does.
-    expect(resolve({ reporters: [upload] }).reporters).toEqual([]);
+    expect(reporterNames([upload])).toEqual(['upload']);
+
+    const configured = junit({ outputFile: 'reports/junit.xml' });
+    const overridden = resolveConfig(
+      { targets: TARGETS, reporters: ['list', configured, upload] },
+      { projectRoot: ROOT, env: BASE_ENV, cli: { reporters: ['junit', 'markdown'] } },
+    );
+    expect(overridden.reporters[0]).toBe(configured);
+    expect(overridden.reporters.map((reporter) => reporter.name)).toEqual(['junit', 'markdown', 'upload']);
   });
 
-  it('rejects a reporter object without a name or a handler', () => {
+  it('runs an id named twice once', () => {
+    expect(reporterNames(['junit', 'junit'])).toEqual(['junit']);
+    expect(reporterNames(['list', list()])).toEqual(['list']);
+    expect(reporterNames(['junit'], ['list', 'list'])).toEqual(['list']);
+  });
+
+  it('rejects a reporter object without a name or a hook, and a factory not called', () => {
     const handler = async () => undefined;
-    expect(() => resolve({ reporters: [{ onRunFinished: handler }] as never })).toThrow(/object with a name/);
-    expect(() => resolve({ reporters: [{ name: '', onRunFinished: handler }] as never })).toThrow(/object with a name/);
-    expect(() => resolve({ reporters: [{ name: 'x' }] as never })).toThrow(/object with a name/);
-    expect(() => resolve({ reporters: [{ name: 'x', onEvent: 'no' }] as never })).toThrow(/object with a name/);
+    expect(() => resolve({ reporters: [{ onRunFinished: handler }] as never })).toThrow(/reporters\[0\] must be a built-in id/);
+    expect(() => resolve({ reporters: [{ name: '', onRunFinished: handler }] as never })).toThrow(/must be a built-in id/);
+    expect(() => resolve({ reporters: [{ name: 'x' }] as never })).toThrow(/must be a built-in id/);
+    expect(() => resolve({ reporters: [{ name: 'x', onEvent: 'no' }] as never })).toThrow(/must be a built-in id/);
+    expect(() => resolve({ reporters: [{ name: 'x', printsTo: 'console', onEvent: handler }] as never })).toThrow(/must be a built-in id/);
+    expect(() => resolve({ reporters: ['list', junit] as never })).toThrow(/reporters\[1\] is the function junit; call it/);
+    // A reporter of your own may share a built-in's name; `--reporter` never replaces it.
+    expect(reporterNames([{ name: 'json', onRunFinished: handler }], ['list'])).toEqual(['list', 'json']);
   });
 
   it('keeps reporter objects and artifact stores out of the config digest, whatever they hold', () => {

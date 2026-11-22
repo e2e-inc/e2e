@@ -5,8 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { serializeError, TestError } from '@e2e-dev/core/lib/internal/errors';
 import type { FinishedRun } from '../../src/run-types.ts';
 import type { Report1Document, ReportSerialGroup } from '../../src/report/build.ts';
-import { junitReporter, renderJunitReport, type JunitReportOptions } from '../../src/report/junit.ts';
-import { REPORT_AT as AT, reportAttempt, reportDocument, reportError, reportResult } from '../helpers/report.ts';
+import { junit, renderJunitReport, type JunitReportOptions } from '../../src/report/junit.ts';
+import { REPORT_AT as AT, reportAttempt, reportDocument, reportError, reportResult, reportStep } from '../helpers/report.ts';
 
 /** XML 1.0 `Char`, over code points: a lone surrogate is a code point of its own and falls outside every range. */
 // oxlint-disable-next-line no-control-regex -- the allowed range is the point
@@ -209,6 +209,15 @@ describe('renderJunitReport', () => {
         'ASSERTION_FAILED: expected &quot;Sign in&quot; to be visible</failure>',
     );
     expect(rootAttributes(xml)).toMatchObject({ failures: '1', errors: '0' });
+  });
+
+  it('names the session the failed step ran on when it is not the test\'s own', () => {
+    const error = reportError({ code: 'LOCATOR_NOT_FOUND', message: 'locator matched no nodes' });
+    const attempt = (actor?: string) =>
+      reportAttempt({ status: 'failed', error, steps: [reportStep({ status: 'failed', error, ...(actor === undefined ? {} : { actor }) })] });
+    const failure = (actor?: string) => render(reportDocument({ results: [reportResult({ status: 'failed', attempts: [attempt(actor)] })] }));
+    expect(failure('launch-1')).toContain('>LOCATOR_NOT_FOUND on launch-1: locator matched no nodes</failure>');
+    expect(failure()).toContain('>LOCATOR_NOT_FOUND: locator matched no nodes</failure>');
   });
 
   it('renders infrastructure and configuration errors as <error>', () => {
@@ -700,7 +709,7 @@ function failedWithShot(
   });
 }
 
-describe('junitReporter', () => {
+describe('junit', () => {
   const tmpDirs: string[] = [];
 
   /** A fresh directory removed after each test. */
@@ -723,13 +732,15 @@ describe('junitReporter', () => {
       projectRoot,
       artifactsRoot,
       reportPath: path.join(artifactsRoot, 'report.json'),
+      outputDir: artifactsRoot,
       aiTracePath: undefined,
       report: failedWithShot(),
       traces: new Map(),
       redact: (text) => text,
     };
-    await junitReporter.onRunFinished!(run, new AbortController().signal);
-    const xml = fs.readFileSync(path.join(artifactsRoot, 'junit.xml'), 'utf8');
+    const files = await junit().reportFiles!(run, new AbortController().signal);
+    expect(files).toMatchObject([{ path: path.join(artifactsRoot, 'junit.xml'), label: 'JUnit' }]);
+    const xml = files[0]!.content;
     assertWellFormed(xml);
     return /\[\[ATTACHMENT\|([^\]]*)\]\]/.exec(xml)?.[1];
   }

@@ -12,7 +12,7 @@ description: ChatGPT、GitHub Copilot、OpenCode Console、SuperGrok の契約�
 | ChatGPT Plus または Pro | `npx e2e login openai` |
 | GitHub Copilot | `npx e2e login github-copilot` |
 | OpenCode Console（OpenCode Zen と OpenCode Go） | `npx e2e login opencode-console` |
-| SuperGrok または X Premium+ | `npx e2e login spacexai` |
+| SuperGrok または X Premium+ | `npx e2e login spacexsi` |
 | Claude Max または Team（Claude Code） | API キー。プランの利用枠ではなく、月間 API クレジットから支払う |
 | Claude Code または Codex のログイン | [コーディングエージェントでステップを実行する](#use-your-coding-agent) |
 
@@ -98,23 +98,23 @@ const agent = { model: opencodeConsole('deepseek-v4.1-flash') };
 const goAgent = { model: opencodeConsole('go/deepseek-v4.1-flash') };
 ```
 
-Anthropic 経由では、`maxOutputTokens` を設定しない呼び出しは 8192 を要求します。Anthropic SDK は OpenCode がそこで提供する ID を認識しておらず、そのままでは警告を出すだけでリクエストを 4096 トークンに制限するためです。
+Anthropic 経由では、`maxOutputTokens` を設定しない呼び出しは 8192 を要求します。Anthropic SDK は OpenCode がそこで提供する ID を認識しておらず、そのままではリクエストを 4096 トークンに制限し、警告を出すだけだからです。
   </Tab>
   <Tab title="SuperGrok">
 <CodeGroup>
 ```bash npm
 npm install -D ai @ai-sdk/xai
-npx e2e login spacexai
+npx e2e login spacexsi
 ```
 
 ```bash pnpm
 pnpm add -D ai @ai-sdk/xai
-pnpm exec e2e login spacexai
+pnpm exec e2e login spacexsi
 ```
 
 ```bash bun
 bun add -d ai @ai-sdk/xai
-bunx e2e login spacexai
+bunx e2e login spacexsi
 ```
 </CodeGroup>
 
@@ -197,17 +197,21 @@ ID は、ベンダーのアプリに表示される名前と同じとは限り�
 
 モデル呼び出しのキャンセルは、トークン更新の待機中にも適用されます。
 
+`npx e2e login` で保存したログインの期限が切れると、並列のワーカーの間で、更新は 1 回だけ行われます。
+ワーカーは、別のワーカーによる更新を最大 30 秒待ちます。
+それを過ぎると、そのワーカーのステップは `MODEL_PROVIDER_FAILED` で失敗します。ただし、先にステップ自身のタイムアウトに達した場合は `STEP_TIMEOUT` になります。
+
 ## CI
 
 CI では API キーを使ってください。Claude Max と Team は、もともと API キーを使います。OpenCode Console では、`OPENCODE_API_KEY` に OpenCode Go サブスクリプションの API キー、または Console の Service Accounts → API Keys で作成したサービスアカウントの API キーを設定します。ChatGPT、Copilot、SuperGrok では [API プロバイダー](/models)を使ってください。
 
-[`E2E_OAUTH_CREDENTIALS`](/reference/environment) で保存済みログインを CI に渡すこともできますが、e2e は更新したトークンを書き戻しません。更新トークンがローテーションするログインは、限られた期間しか使えません。
+[`E2E_OAUTH_CREDENTIALS`](/reference/environment) で保存済みログインを CI に渡すこともできますが、e2e は更新したトークンを書き戻しません。更新トークンがローテーションするログインは、この方法では限られた期間しか使えません。
 
 ## コーディングエージェントを使う
 
 `@e2e-dev/acp` は、[Agent Client Protocol](https://agentclientprotocol.com) 経由で、Claude Code または Codex に `agent.act` と `agent.assert` を実行させます。エージェント自身のログインまたは API キーで認証するため、e2e 側にモデルプロバイダーは不要です。
 
-エージェントには `complete_step` と、ターゲットのエンジンが対応する動詞に応じた組み込みエージェントの操作ツールが渡されます。ランナーがすべての操作を記録するため、エージェントを使わずに[キャッシュ](/cache)から再生できます。テストの変更は不要です。
+エージェントには `complete_step` と、ターゲットのエンジンが対応する動詞に応じた組み込みエージェントの操作ツールが渡されます。ランナーがすべての操作を記録するため、ステップはエージェントを使わずに[キャッシュ](/cache)から再生できます。テストの変更は不要です。
 
 <Tabs>
   <Tab title="Claude Code">
@@ -277,7 +281,7 @@ export default {
 | `system` | 最初のステップで渡すルールに追記するテキスト。 |
 | `name` | レポートに表示するエグゼキューター名。 |
 
-予期しない転送エラーが発生すると ACP セッションが停止し、ランナーの失敗出力にシークレットをマスキングして表示します。HTTP クライアントには、例外のテキストを含めず、一般的なエラーまたはストリームの終了が返されます。
+予期しない転送エラーが起きると ACP セッションは停止し、エラーはシークレットを秘匿した状態でランナーの失敗出力に表示されます。HTTP クライアントには、例外のテキストを含めず、一般的なエラーまたはストリームの終了が返されます。
 
 ### エージェントが使えるもの
 

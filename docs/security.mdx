@@ -61,12 +61,20 @@ which case it drops the keys and runs; a project tool follows its own
 `file:`, fails with `POLICY_DENIED`. There is no origin allowlist: the agent can
 follow the app to another site and use the step's secrets there.
 
+On macOS and Windows, Chromium launches with its OS sandbox on, which helps
+contain a renderer exploit on a page the agent reaches. On Linux it is opt-in:
+see [`chromiumSandbox`](/reference/web#chromiumsandbox).
+
 ## What runs with your permissions
 
 Your tests, config, engines, tools, reporters, stores, secret providers, and
 app commands run with your operating-system permissions, unsandboxed. Run
 untrusted pull request code in an external sandbox with no secrets or write
 tokens.
+
+A macOS app that [`@e2e-dev/desktop`](/desktop) launches gets only a few
+variables of the run's environment, such as `HOME` and `PATH`, so your
+secrets and model keys never reach it.
 
 ## What leaves your computer
 

@@ -1,10 +1,16 @@
 /** `e2e/core` (`@e2e-dev/core`): hosts, sessions, saved state, secrets, timeouts, link bases, and the agent's cache. */
-import { mkdirSync, mkdtempSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { Worker } from 'node:worker_threads';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { StepExecutor, StepExecutorContext } from '@e2e-dev/core/lib/agent/executor';
 import { createAgent } from '@e2e-dev/core/agent';
 import { launch, SessionState, type Host, type Session } from '@e2e-dev/core';
+import { defineEngine, ENGINE_SPI_VERSION } from '@e2e-dev/core/engine';
+import { publishAttempt } from '@e2e-dev/core/lib/expect/attempt';
+import { SoftFailures } from '@e2e-dev/core/lib/expect/soft';
+import { Deadline } from '@e2e-dev/core/lib/internal/time';
+import { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
 import { createFakeEngine, FAKE_APP } from '../helpers/fake-engine.ts';
 import type { ScriptedNode } from '../helpers/scripted-scene.ts';
 
@@ -97,10 +103,75 @@ describe('e2e/core', { timeout: 60_000 }, () => {
     await expect(opened.newSession()).rejects.toMatchObject({ code: 'WORKER_PROTOCOL' });
   });
 
+  it('runs past screen.pause() right away in a program', async () => {
+    const fake = createFakeEngine({ scene: shop });
+    const opened = await host(fake.engine, { app: FAKE_APP });
+    const session = await opened.newSession();
+    await session.app.open('/');
+    await session.screen.pause();
+    expect(await session.screen.getByTestId('sale-price').textContent()).toBe('39,000');
+    await session.close();
+  });
+
   it('refuses a second host on the engine instance another host owns', async () => {
     const fake = createFakeEngine();
     await host(fake.engine);
     await expect(host(fake.engine)).rejects.toMatchObject({ code: 'WORKER_PROTOCOL' });
+  });
+
+  it('hands the engine of each host a token of its own and leaves the target named as the program wrote it', async () => {
+    const fakes = [createFakeEngine(), createFakeEngine(), createFakeEngine()];
+    await Promise.all(fakes.slice(0, 2).map((fake) => host(fake.engine)));
+    await host(fakes[2]!.engine);
+    const ids = fakes.map((fake) => fake.inits[0]?.hostId);
+    expect(new Set(ids).size).toBe(3);
+    for (const id of ids) expect(id).toMatch(/^[0-9a-f]{24}$/);
+    expect(fakes.map((fake) => fake.inits[0]?.targetName)).toEqual(['fake', 'fake', 'fake']);
+    // `prepare`, `init`, and `finish` of one host see one token.
+    const seen: (string | undefined)[] = [];
+    const opened = await host(defineEngine({
+      name: 'hooks', version: '1', spiVersion: ENGINE_SPI_VERSION,
+      async prepare(info) { seen.push(info.hostId); },
+      async init(info) { seen.push(info.hostId); },
+      async finish(info) { seen.push(info.hostId); },
+      async startAttempt() {}, async endAttempt() {},
+    }));
+    await opened.close();
+    expect(seen).toHaveLength(3);
+    expect(seen[0]).toMatch(/^[0-9a-f]{24}$/);
+    expect(new Set(seen).size).toBe(1);
+    // Hosts in two worker threads share the process and load their own copy of the module.
+    const script = path.join(dir, 'thread-host.mjs');
+    writeFileSync(script, [
+      `import { parentPort } from 'node:worker_threads';`,
+      `import { launch } from ${JSON.stringify(import.meta.resolve('@e2e-dev/core'))};`,
+      `import { defineEngine, ENGINE_SPI_VERSION } from ${JSON.stringify(import.meta.resolve('@e2e-dev/core/engine'))};`,
+      `let id;`,
+      `const engine = defineEngine({ name: 'fake', version: '1', spiVersion: ENGINE_SPI_VERSION, init(info) { id = info.hostId; }, startAttempt() {}, endAttempt() {}, dispose() {} });`,
+      `const opened = await launch(engine, { cwd: ${JSON.stringify(dir)}, env: {}, handleSignals: false });`,
+      `await opened.close();`,
+      `parentPort.postMessage(id);`,
+    ].join('\n'));
+    const threadIds = await Promise.all([0, 1].map(() => new Promise((resolve, reject) => {
+      const thread = new Worker(script);
+      thread.once('message', resolve);
+      thread.once('error', reject);
+    })));
+    expect(threadIds[0]).toMatch(/^[0-9a-f]{24}$/);
+    expect(threadIds[1]).not.toBe(threadIds[0]);
+  });
+
+  it('names a host\'s artifact folders after its token, so a platform that is a secret\'s value never reaches a path', async () => {
+    const secret = 'private-label';
+    const artifactsDir = path.join(dir, 'kept');
+    const opened = await host(defineEngine({ name: 'labelled', platform: secret, version: '1', spiVersion: ENGINE_SPI_VERSION, async startAttempt() {}, async endAttempt() {} }), {
+      secrets: { LABEL: secret }, artifactsDir,
+    });
+    await (await opened.newSession()).close();
+    await opened.close();
+    const entries = readdirSync(artifactsDir, { recursive: true }).map(String);
+    expect(entries.some((entry) => /(^|[\\/])core[\\/]host-[0-9a-f]{24}-[^\\/]+$/.test(entry))).toBe(true);
+    expect(entries.filter((entry) => entry.includes(secret))).toEqual([]);
   });
 
   it('refuses what is not an engine, an app key it does not take, and a relative artifactsDir resolves from cwd', async () => {
@@ -225,6 +296,63 @@ describe('e2e/core', { timeout: 60_000 }, () => {
     await session.close();
   });
 
+  it('redacts in each session the values every other host was given, and carries none of them in its saved state', async () => {
+    const BROWSER = 'browser-only-secret-5511';
+    const PHONE = 'phone-only-secret-8823';
+    const showing = (text: string) => (): ScriptedNode[] => [{ id: 'echo', role: 'paragraph', name: '', text }];
+    const browser = await host(createFakeEngine({ scene: showing(`the phone sent ${PHONE}`), state: true }).engine, { app: FAKE_APP, secrets: { BROWSER }, timeout: 200 });
+    const onBrowser = await browser.newSession();
+    await onBrowser.app.open('/');
+    expect(await onBrowser.screen.tree()).toContain(PHONE);
+
+    // A session opened before the other host redacts its values from the moment it declares them; one opened after does too.
+    const phone = await host(createFakeEngine({ scene: showing(`the browser sent ${BROWSER}`) }).engine, { app: FAKE_APP, secrets: { PHONE } });
+    expect(await onBrowser.screen.tree()).toContain('the phone sent <secret:PHONE>');
+    const onPhone = await phone.newSession();
+    await onPhone.app.open('/');
+    expect(await onPhone.screen.tree()).toContain('the browser sent <secret:BROWSER>');
+
+    const failure = await onBrowser.screen.getByText(PHONE).tap().then(() => undefined, (cause: Error) => cause);
+    expect(failure).toMatchObject({ code: 'LOCATOR_NOT_FOUND', message: expect.stringContaining('<secret:PHONE>'), details: { locator: expect.stringContaining('<secret:PHONE>') } });
+    expect(`${failure?.message} ${failure?.stack} ${JSON.stringify((failure as { details?: unknown }).details)}`).not.toContain(PHONE);
+
+    // The browser session redacts the phone's value and does not hold it: its exported state names its own secret alone.
+    const exported = Buffer.from(await (await onBrowser.saveState()).export({ key: Buffer.alloc(32, 7) })).toString('latin1');
+    expect(exported).toContain('BROWSER');
+    expect(exported).not.toContain('PHONE');
+
+    // A program's host shares its values while it is open, and no longer.
+    await phone.close();
+    expect(await onBrowser.screen.tree()).toContain(PHONE);
+  });
+
+  it('closes a host, and a session, whose test gave up its seat while it was opening', async () => {
+    const ended = new AbortController();
+    let seats = 0;
+    const gaveUp = { signal: new AbortController().signal, take: () => undefined };
+    const steps = { progress: () => undefined, video: () => Promise.resolve() };
+    publishAttempt(
+      {
+        attemptId: 'a1', owner: 'suite', testKind: 'test', assertionTimeout: 1_000, budget: new AttemptBudget(ended.signal, new Deadline(1_000)), soft: new SoftFailures(),
+        // The first host is taken, with a session nobody takes; the second host is not taken either.
+        guests: { video: false, host: () => ((seats += 1) === 1 ? { signal: gaveUp.signal, take: () => true as const } : gaveUp), session: () => gaveUp, visit: () => steps, gaveUp: () => undefined },
+      },
+      ended.signal,
+    );
+    try {
+      const kept = createFakeEngine({ scene: shop });
+      const opened = await host(kept.engine, { app: FAKE_APP });
+      await expect(opened.newSession()).rejects.toMatchObject({ code: 'CANCELLED', message: expect.stringContaining('ended before it was open') });
+      expect(kept.stats()).toMatchObject({ attemptsStarted: 1, attemptsEnded: 1 });
+
+      const dropped = createFakeEngine({ scene: shop });
+      await expect(launch(dropped.engine, { app: FAKE_APP, cwd: dir, env: {}, handleSignals: false })).rejects.toMatchObject({ code: 'CANCELLED', message: expect.stringContaining('ended before it was open') });
+      expect(dropped.stats()).toMatchObject({ inits: 1, disposes: 1 });
+    } finally {
+      ended.abort();
+    }
+  });
+
   it('hands secrets out by name and redacts their values from what the screen reads', async () => {
     const fake = createFakeEngine({ scene: () => [{ id: 'password', role: 'textbox', name: 'Password', value: '' }] });
     const opened = await host(fake.engine, { app: FAKE_APP, secrets: { SHOP_PASSWORD: 'hunter2-secret' } });
@@ -317,6 +445,24 @@ describe('e2e/core', { timeout: 60_000 }, () => {
         expect(brain.calls).toBe(1);
       }
       expect(readdirSync(cacheDir, { recursive: true }).filter((file) => String(file).endsWith('.json'))).toHaveLength(1);
+    });
+
+    it('replays a recording another host made, since a host\'s token is not part of the key', async () => {
+      const brain = scripted();
+      const cacheDir = path.join(dir, 'cache');
+      for (const round of [1, 2]) {
+        const opened = await host(createFakeEngine({ scene: shop }).engine, { app: FAKE_APP });
+        const session = await opened.newSession();
+        await session.app.open('/');
+        const agent = createAgent(session, { executor: brain, cache: { dir: cacheDir } });
+        const result = await agent.act('checkout with the coupon', { cacheKey: 'checkout' });
+        await session.screen.getByRole('status', 'Paid').waitFor();
+        expect(result.cache?.mode).toBe(round === 1 ? 'missed' : 'self-finalized');
+        await opened.close();
+      }
+      expect(brain.calls).toBe(1);
+      const entry = readdirSync(cacheDir, { recursive: true }).find((file) => String(file).endsWith('.json'));
+      expect(readFileSync(path.join(cacheDir, String(entry)), 'utf8')).toMatch(/"targetId":\s*"fake"/);
     });
 
     it('keeps a confirmed recording when the host closes the session, and after a failure the program caught', async () => {

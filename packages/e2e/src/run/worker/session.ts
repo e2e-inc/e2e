@@ -10,12 +10,14 @@ import type { ModuleRegistration } from '../../collect/registry.ts';
 import type { TestTargetPair } from '../../collect/select.ts';
 import type { ResolvedConfig, ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
 import { DebugTrace } from '@e2e-dev/core/lib/internal/debug';
+import { ConfigurationError, E2EError, type SerializedError } from '@e2e-dev/core/lib/internal/errors';
 import { uuidv7 } from '@e2e-dev/core/lib/internal/ids';
 import { abortError, cancelledError } from '@e2e-dev/core/lib/internal/time';
 import { TargetExecutor, type InMemoryAttempts } from '../execute.ts';
 import { encodeResult, type RunError } from '@e2e-dev/core/lib/run/records';
 import type { SessionStore } from '@e2e-dev/core/lib/run/sessions';
-import type { HeldStep, StepHolding } from '../step-hold.ts';
+import type { HoldReads, StepHold } from '../step-hold.ts';
+import type { HeldTestTools } from './held-test-tools.ts';
 import { countsTowardFailureLimit, disappearedResult } from '../units.ts';
 import type { MainToWorker, RunUnitMessage, WirePair, WorkerToMain } from './protocol.ts';
 
@@ -58,8 +60,8 @@ export interface TargetWorkerDeps {
   readonly debug?: DebugTrace;
   /** See `TargetExecutorOptions.inMemory`; only an in-process worker has tests registered in memory. */
   readonly inMemory?: InMemoryAttempts | undefined;
-  /** How steps wait for the runner's `step-release` (`e2e run --step`); undefined when they never do. */
-  readonly step?: StepHolding | undefined;
+  /** Whether steps wait for the runner's `step-release` (`e2e run --step`). Pauses always wait. */
+  readonly holdSteps: boolean;
 }
 
 /** Transport callbacks a target worker needs. */
@@ -70,6 +72,11 @@ export interface TargetWorkerHost {
   /** Graceful end of life, after engine disposal. */
   finished(): void;
 }
+
+type WorkerHold = HoldReads & {
+  readonly release: (error: SerializedError | undefined) => void;
+  readonly tools: HeldTestTools;
+};
 
 export class TargetWorker {
   private readonly interruptController = new AbortController();
@@ -99,8 +106,14 @@ export class TargetWorker {
   private queue: Promise<void> = Promise.resolve();
   /** Disposal happens once, whichever of shutdown or terminate asks first. */
   private shutdownOnce: Promise<void> | undefined;
-  /** Each step waiting for `step-release`, by hold id: what lets it run. */
-  private readonly holds = new Map<string, () => void>();
+  /** Steps and pauses waiting for `step-release`, by hold ID. */
+  private readonly holds = new Map<string, WorkerHold>();
+
+  /** Gets any pending hold for a request that names the attachment rather than the hold. */
+  private get firstHold(): WorkerHold | undefined {
+    // A worker runs one attempt at a time, so all its holds share that attempt's tools.
+    return this.holds.values().next().value;
+  }
 
   constructor(
     private readonly host: TargetWorkerHost,
@@ -124,9 +137,10 @@ export class TargetWorker {
         env: deps.env,
         isolated: deps.isolated,
         interruptSignal: this.interruptController.signal,
-        ...(deps.step === undefined
-          ? {}
-          : { holdStep: (step: HeldStep, signal: AbortSignal) => this.holdStep(step, signal), heldScreens: deps.step === 'screen' }),
+        hold: {
+          ask: (step, signal, reads, tools) => this.holdStep(step, signal, reads, tools),
+          steps: deps.holdSteps,
+        },
         ...(deps.debug !== undefined ? { debug: deps.debug } : {}),
         inMemory: deps.inMemory,
         beforePair: () => this.failuresAnswered(),
@@ -170,7 +184,7 @@ export class TargetWorker {
               attempt: attempt.index,
               attemptId: attempt.id,
               startedAt: attempt.startedAt,
-              timeoutMs: pair.options.timeout,
+              timeoutMs: attempt.timeoutMs,
               ...(attempt.remainingMs === undefined ? {} : { remainingMs: attempt.remainingMs }),
               graceMs: deps.config.cleanupTimeout,
             });
@@ -221,41 +235,121 @@ export class TargetWorker {
         return;
       case 'step-release':
         // Now too: the unit it releases is the one running.
-        this.holds.get(message.holdId)?.();
+        this.holds.get(message.holdId)?.release(message.error);
         return;
       case 'continue':
         // Now too: the running unit is what waits for it.
         this.unanswered -= 1;
         if (this.unanswered === 0) this.answered?.();
         return;
+      case 'step-attachment-request': {
+        const { requestId, request } = message;
+
+        const hold = request.kind === 'attach' ? this.holds.get(request.holdId) : this.firstHold;
+
+        if (hold === undefined) {
+          this.host.emit({
+            type: 'step-attachment-reply',
+            requestId,
+            response: request.kind === 'detach'
+              ? { kind: 'detach' }
+              : {
+                  kind: 'error',
+                  error: {
+                    category: 'configuration',
+                    code: 'NO_SESSION',
+                    message: 'the test resumed',
+                  },
+                },
+          });
+        } else {
+          void hold.tools.request(requestId, request).then((response) => {
+            this.host.emit({ type: 'step-attachment-reply', requestId, response });
+          });
+        }
+        return;
+      }
+      case 'step-attachment-cancel':
+        this.firstHold?.tools.cancel(message.requestId);
+        return;
+      case 'screen-request':
+      case 'logs-request': {
+        // Handle this right away because the waiting unit is still running.
+        const { requestId, holdId } = message;
+        const hold = this.holds.get(holdId);
+
+        if (message.type === 'screen-request') {
+          void Promise.resolve(hold?.readScreen()).then((screen) => {
+            this.host.emit({ type: 'screen-reply', requestId, ...(screen === undefined ? {} : { screen }) });
+          });
+        } else {
+          void Promise.resolve(hold?.readLogs()).then((logs) => {
+            this.host.emit({ type: 'logs-reply', requestId, ...(logs === undefined ? {} : { logs }) });
+          });
+        }
+        return;
+      }
       default:
         message satisfies never;
     }
   }
 
   /**
-   * Holds one step until the runner releases it. A hold that ends first
-   * (the step was abandoned, its attempt ended) tells the runner, so its
-   * prompt goes away, and rejects with the signal's reason.
+   * Holds one step or pause until the runner releases it, and rejects with
+   * the release's error if it has one. A hold that ends first (the step was
+   * abandoned, its attempt ended) tells the runner, so its prompt goes away,
+   * and rejects with the signal's reason. During the hold, the screen is
+   * available through `readScreen` and the app log through `readLogs`.
    */
-  private holdStep(step: HeldStep, signal: AbortSignal): Promise<void> {
+  private holdStep(
+    step: StepHold,
+    signal: AbortSignal,
+    reads: HoldReads,
+    tools: HeldTestTools,
+  ): Promise<void> {
     const holdId = uuidv7();
     return new Promise<void>((resolve, reject) => {
-      const settle = (): void => {
+      // The wait was abandoned before it started. Don't send it to the runner.
+      if (signal.aborted) {
+        reject(abortError(signal, cancelledError));
+        return;
+      }
+
+      const settle = (reason: Error): void => {
         this.holds.delete(holdId);
         signal.removeEventListener('abort', cancel);
+        tools.end(reason);
       };
+
       const cancel = (): void => {
-        settle();
+        const reason = this.interruptController.signal.aborted ? 'the run was interrupted' : 'the test hold ended';
+        settle(abortError(signal, () => new ConfigurationError('NO_SESSION', reason)));
         this.host.emit({ type: 'step-cancel', holdId });
         reject(abortError(signal, cancelledError));
       };
-      this.holds.set(holdId, () => {
-        settle();
-        resolve();
+
+      this.holds.set(holdId, {
+        release: (error) => {
+          settle(new ConfigurationError('NO_SESSION', error === undefined ? 'the test resumed' : 'the test hold failed'));
+
+          if (error === undefined) {
+            resolve();
+          } else {
+            reject(new E2EError(error.category, error.code, error.message));
+          }
+        },
+        ...reads,
+        tools,
       });
       signal.addEventListener('abort', cancel, { once: true });
-      this.host.emit({ type: 'step-hold', holdId, step });
+
+      this.host.emit({
+        type: 'step-hold',
+        holdId,
+        attemptId: tools.attemptId,
+        step,
+        attachmentLabels: tools.attachmentLabels,
+      });
     });
   }
 

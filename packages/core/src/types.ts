@@ -453,12 +453,21 @@ export interface ActionOptions {
 }
 
 /**
- * A point in CSS pixels. For `screen.tapAt`, `screen.doubleTapAt`, and `screen.swipe` the origin is
- * the viewport's top-left corner, the space `boundingBox()` reports in; for
- * `tap({ position })` it is the node's own top-left corner, inside its
- * border on a document platform.
+ * A point in CSS pixels. For `tap({ position })` the origin is the node's own
+ * top-left corner, inside its border on a document platform. A `Point` is
+ * also a `ScreenPoint`, whose origin is the viewport's top-left corner, the
+ * space `boundingBox()` reports in.
  */
 export type Point = ViewportPoint;
+
+/** CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`), `'0%'` through `'100%'`. */
+export type ScreenCoordinate = number | `${number}%`;
+
+/** A viewport point in pixels, percentages, or both: `{ x: '50%', y: 120 }`. */
+export interface ScreenPoint {
+  readonly x: ScreenCoordinate;
+  readonly y: ScreenCoordinate;
+}
 
 /** `tap`, `click`, `doubleTap`, `dblclick`, and `secondaryTap` options: the action timeout and the keys held for the click. */
 export interface ClickOptions extends ActionOptions {
@@ -509,9 +518,9 @@ export interface SwipeOptions {
 /** A swipe along a path between two viewport points: a touch swipe on a device, a pointer drag on a document platform. */
 export interface SwipePathOptions {
   /** Where the finger goes down. */
-  from: Point;
+  from: ScreenPoint;
   /** Where it lifts. */
-  to: Point;
+  to: ScreenPoint;
   /** Gesture duration in milliseconds; omitted = the engine's default. */
   duration?: number;
   direction?: never;
@@ -533,10 +542,10 @@ export interface Screen {
   getByDisplayValue(value: TextMatch, options?: TextMatchOptions): Locator;
   /** Creates a lazy test-id query: a string matches the whole id, case-sensitive; a RegExp tests it. An engine may also match an id without its platform's namespacing. */
   getByTestId(id: TextMatch, options?: { visible?: boolean }): Locator;
-  /** Taps a viewport point, with no node behind it. */
-  tapAt(point: Point, options?: ActionOptions): Promise<void>;
-  /** Double-taps a viewport point, with no node behind it. */
-  doubleTapAt(point: Point, options?: ActionOptions): Promise<void>;
+  /** Taps a viewport point, in pixels or percentages, with no node behind it. */
+  tapAt(point: ScreenPoint, options?: ActionOptions): Promise<void>;
+  /** Double-taps a viewport point, in pixels or percentages, with no node behind it. */
+  doubleTapAt(point: ScreenPoint, options?: ActionOptions): Promise<void>;
   /** Performs a viewport-level swipe: in a direction, or along a path from one point to another. */
   swipe(options: SwipeOptions | SwipePathOptions): Promise<void>;
   /**
@@ -556,9 +565,19 @@ export interface Screen {
   tree(options?: ActionOptions): Promise<string>;
   /** Prints `tree()` to the test's output. */
   debug(options?: ActionOptions): Promise<void>;
+  /**
+   * Pauses the test at this line, with the app open, until it is resumed with
+   * Enter in the terminal or with `e2e run --step next` from another shell in
+   * the same directory. In `e2e run`, the test is paused each time the line
+   * runs. Paused time doesn't count toward the test's timeout. Call it with
+   * `await` on `screen`, between steps in fixture setup, a `beforeEach` hook,
+   * or the test body. Anywhere else, or with `CI` set, the test isn't paused
+   * and the call fails.
+   */
+  pause(): Promise<void>;
 }
 
-export interface Locator extends Omit<Screen, 'tree' | 'debug'> {
+export interface Locator extends Omit<Screen, 'tree' | 'debug' | 'pause'> {
   /** Taps exactly one matching actionable node; with `position`, taps that point of its box once it is in view, with no other actionability check. */
   tap(options?: TapOptions): Promise<void>;
   /** Alias of tap. */
@@ -591,6 +610,8 @@ export interface Locator extends Omit<Screen, 'tree' | 'debug'> {
   selectOption(value: SelectOption, options?: ActionOptions): Promise<void>;
   /** Focuses exactly one node. */
   focus(options?: ActionOptions): Promise<void>;
+  /** Removes focus from exactly one node if it is focused. */
+  blur(options?: ActionOptions): Promise<void>;
   /** Hovers over exactly one matching actionable node. */
   hover(options?: ActionOptions): Promise<void>;
   /** Sets the files of exactly one file input, or of a control that opens a file chooser; paths resolve from the project root, and an empty array clears the input. */
@@ -743,8 +764,9 @@ export interface TestOptions {
   skip?: boolean | string;
   /**
    * Expects the test to fail; a string is the reason. A test failure then
-   * passes it, and a pass fails it with `UNEXPECTED_PASS`. Not allowed inside
-   * a serial group.
+   * passes it, and a pass fails it with `UNEXPECTED_PASS`. A layer with `true`
+   * or any string marks; the innermost reason wins. Not allowed on, inside, or
+   * around a serial group.
    */
   fail?: boolean | string;
   /** Focuses the test locally. CI rejects it with `ONLY_IN_CI`. */
@@ -781,7 +803,7 @@ export interface TestOptions {
   video?: RecordingMode;
 }
 
-export interface DescribeOptions extends Omit<TestOptions, 'only' | 'fail'> {
+export interface DescribeOptions extends Omit<TestOptions, 'only'> {
   /** Runs the group as one ordered retry unit with shared app state. Nesting one serial group in another is a `COLLECTION_ERROR`. */
   serial?: boolean;
 }
@@ -824,12 +846,51 @@ export interface TestCase {
   readonly [testCaseBrand]: true;
 }
 
+/** The two call forms of `describe`. */
+export interface DescribeRegistrar<Options = DescribeOptions> {
+  /** Declares a group synchronously. */
+  <Result>(title: string, body: SynchronousBody<Result>): void;
+  /** Declares a configured group synchronously. */
+  <Result>(title: string, options: Options, body: SynchronousBody<Result>): void;
+}
+
+export interface DescribeAPI extends DescribeRegistrar {
+  /** Declares a group whose tests are expected to fail, as if it had `fail: true`; a reason goes in the `fail` option of `describe`. */
+  fail: DescribeRegistrar<Omit<DescribeOptions, 'fail'>>;
+}
+
 /** The two call forms of `test`, shared with what `test.skipIf` and `test.runIf` return. */
 export interface TestRegistrar<Fixtures = TestFixtures & WorkerFixtures> {
   /** Registers one test synchronously during module evaluation. */
   (title: string, fn: TestFn<Fixtures>): TestCase;
   /** Registers one configured test synchronously during module evaluation. */
   (title: string, options: TestOptions, fn: TestFn<Fixtures>): TestCase;
+}
+
+/**
+ * The `test.each` body arguments for the rows' type: array rows spread, then
+ * the fixtures. Rows that are not all arrays are passed whole. Not
+ * distributive, so a mixed table is decided once, as at run time. An
+ * `unknown` row may be either at run time, so only the fixtures, last, are known.
+ */
+export type EachArgs<Row, Fixtures> = [Row] extends [readonly unknown[]]
+  ? [...Row, Fixtures]
+  : unknown extends Row
+    ? [...unknown[], Fixtures]
+    : [Row, Fixtures];
+
+/** A `test.each` or `test.for` body: the row's arguments, then the fixtures. */
+export type EachFn<Args extends readonly unknown[]> = (...args: Args) => void | Promise<void>;
+
+/**
+ * The two call forms of `test` for `test.each` and `test.for`: one test per
+ * row, each titled from the row. `Args` are the body's arguments.
+ */
+export interface EachRegistrar<Args extends readonly unknown[]> {
+  /** Registers one test per row synchronously during module evaluation. */
+  (title: string, fn: EachFn<Args>): readonly TestCase[];
+  /** Registers one configured test per row synchronously during module evaluation. */
+  (title: string, options: TestOptions, fn: EachFn<Args>): readonly TestCase[];
 }
 
 /**
@@ -851,6 +912,18 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    */
   skip(condition: boolean, reason?: string): void;
   skip(reason?: string): void;
+  /** Registers one skipped test marked fixme, reported with the skip cause and reason `fixme`. */
+  fixme(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
+  /**
+   * Inside a running test: skips it as fixme when `condition` is true (or
+   * always, with no condition), as `test.skip` does. The skip cause is
+   * `fixme`, and the reason `fixme`, or `fixme: <reason>` when `reason` is not
+   * blank. A setup test cannot skip. Outside a test body this form is
+   * `COLLECTION_ERROR`; use `test.fixme(title, fn)` to mark a test fixme at
+   * collection.
+   */
+  fixme(condition: boolean, reason?: string): void;
+  fixme(reason?: string): void;
   /**
    * Returns a function that registers one test, like `test(title, fn)`:
    * skipped when `condition` is truthy, as if it had the `skip` option. The
@@ -869,6 +942,30 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    * skipped when `condition` is falsy, `test.skipIf(!condition)`.
    */
   runIf<Condition>(condition: SynchronousCondition<Condition>): TestRegistrar<Fixtures & Worker>;
+  /**
+   * Returns a function that registers one test per row, like `test(title,
+   * fn)`, in row order. The title is formatted from the row: `$name` and
+   * `$name.path` read an object row, and `%s`, `%d`, `%i`, `%f`, `%j`, `%o`
+   * take an array row's items in order (any other row is the one item). `%#`
+   * is the row index, `%$` the row number, `%%` a percent sign. When every
+   * row is an array, each row is spread into the body's arguments; otherwise
+   * every row is the first one. The fixtures come last:
+   *
+   *   test.each([{ user: 'Ada' }, { user: 'Grace' }])('signs in as $user', async ({ user }, { app }) => {});
+   *   test.each([[1, 2, 3]])('%i + %i = %i', async (a, b, sum, { app }) => {});
+   *
+   * Rows must be a non-empty array. Two rows that format to the same title
+   * fail as duplicate titles. As in a test body, destructure the fixtures
+   * (`{ app }`): e2e sets up only the ones named there.
+   */
+  each<Row extends readonly unknown[] | [unknown]>(rows: readonly Row[]): EachRegistrar<[...Row, Fixtures & Worker]>;
+  each<Row>(rows: readonly Row[]): EachRegistrar<EachArgs<Row, Fixtures & Worker>>;
+  /**
+   * `test.each` that never spreads: the body takes `(row, fixtures)` for
+   * every row, an array row included. Titles format as in `test.each`.
+   */
+  for<Row extends readonly unknown[] | [unknown]>(rows: readonly Row[]): EachRegistrar<[Row, Fixtures & Worker]>;
+  for<Row>(rows: readonly Row[]): EachRegistrar<[Row, Fixtures & Worker]>;
   /** Registers one test that is expected to fail. */
   fail(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
@@ -882,6 +979,18 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    */
   fail(condition: boolean, reason?: string): void;
   fail(reason?: string): void;
+  /**
+   * Inside a running test or a `beforeEach` hook: gives the test a timeout
+   * of `timeout` ms, counted from the start of the attempt like the
+   * `timeout` option, which it replaces for this attempt. A timeout shorter
+   * than the time already spent times the test out at once. Inside a
+   * `beforeAll` hook: gives that hook a timeout of `timeout` ms, counted from
+   * its start. `afterEach` and `afterAll` hooks run on `cleanupTimeout` and
+   * cannot change it. A timeout that is not a positive integer is
+   * `INVALID_ARGUMENT`; outside a running test or hook the call is
+   * `COLLECTION_ERROR`, so use the `timeout` option there.
+   */
+  setTimeout(timeout: number): void;
   /** Registers one focused local test. CI rejects focused tests. */
   only(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /** Registers one setup test with statically declared session outputs. */
@@ -947,14 +1056,8 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   extend<Extra = {}, ExtraWorker = {}>(
     fixtures: FixtureDefinitions<Fixtures & Worker, Extra, Worker, ExtraWorker>,
   ): TestAPI<Fixtures & Extra, Worker & ExtraWorker>;
-  /** Declares a group synchronously. */
-  describe<Result>(title: string, body: SynchronousBody<Result>): void;
-  /** Declares a configured group synchronously. */
-  describe<Result>(
-    title: string,
-    options: DescribeOptions,
-    body: SynchronousBody<Result>,
-  ): void;
+  /** Declares a group synchronously; `describe.fail` declares one whose tests are expected to fail. */
+  describe: DescribeAPI;
   /** Registers a test-attempt setup hook: it runs after the test's fixtures are set up. */
   beforeEach(fn: TestHookFn<Fixtures & Worker>): void;
   /** Registers a test-attempt teardown hook: it runs before the test's fixtures are torn down. */
@@ -1156,11 +1259,33 @@ export type SoftValueExpectation<T> = Omit<ValueExpectation<T>, 'toMatchSchema' 
 export interface PollOptions {
   /** Deadline in milliseconds. Default 5000. */
   timeout?: number;
-  /** Pause between reads in milliseconds. Default 100. */
+  /**
+   * Pause between reads in milliseconds.
+   * @deprecated Pass `intervals: [<ms>]`.
+   */
   interval?: number;
+  /** Pauses between reads in milliseconds. Default [100, 250, 500, 1000]. The last pause is repeated. */
+  intervals?: readonly number[];
   /** Extra line in the timeout error, after the matcher line. */
   message?: string;
 }
+
+export type PassOptions = {
+  /** Timeout in milliseconds. By default, only the phase deadline applies. */
+  timeout?: number;
+  /** Pauses between tries in milliseconds. Default [100, 250, 500, 1000]. The last pause is repeated. */
+  intervals?: readonly number[];
+};
+
+type PassMatcher = {
+  /** Retries the block until the assertion passes or the deadline is reached. */
+  toPass(options?: PassOptions): Promise<void>;
+};
+
+/** Value matchers for a function, with retries for positive and negated assertions. */
+export type PassExpectation<T, Value = ValueExpectation<T>> = Omit<Value, 'not'> & PassMatcher & {
+  readonly not: NegatedValueExpectation<T, PassExpectation<T, Value>> & PassMatcher;
+};
 
 /**
  * The asynchronous form of every `ValueExpectation<T>` matcher: the same
@@ -1204,6 +1329,7 @@ export interface ExpectCall {
   /** `message` opens each assertion failure, before the matcher. */
   <S extends Screen>(actual: NotAny<S>, message?: string): ScreenExpectation;
   <E extends object>(actual: Expectable<E>): E;
+  <F extends () => unknown>(actual: NotAny<F>, message?: string): PassExpectation<F>;
   /** `message` opens the failure text, so a bare `expected false to be true` says which check it was. */
   <T>(actual: T, message?: string): ValueExpectation<T>;
 }
@@ -1215,6 +1341,7 @@ export interface SoftExpectCall {
   /** `message` opens each assertion failure, before the matcher. */
   <S extends Screen>(actual: NotAny<S>, message?: string): ScreenExpectation;
   <E extends object>(actual: Expectable<E>): E;
+  <F extends () => unknown>(actual: NotAny<F>, message?: string): PassExpectation<F, SoftValueExpectation<F>>;
   /** `message` opens the failure text, so a bare `expected false to be true` says which check it was. */
   <T>(actual: T, message?: string): SoftValueExpectation<T>;
 }
@@ -1646,6 +1773,8 @@ export interface ProjectConfig {
   actionTimeout?: number;
   /** Default `expect` deadline in milliseconds; default 5000. */
   assertionTimeout?: number;
+  /** Default timeout and pauses for `expect(fn).toPass()`. */
+  toPass?: PassOptions;
   /** Budget of each `afterEach` hook, fixture teardown, and engine cleanup in milliseconds; default 30000. */
   cleanupTimeout?: number;
   /** Retries per test, 0 through 10; default 1 in CI, else 0. */

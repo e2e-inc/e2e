@@ -14,11 +14,11 @@ import { packageVersion } from '@e2e-dev/core/lib/internal/package-version';
 import { MAX_TIMER_MS } from '@e2e-dev/core/lib/internal/time';
 import { classifyError, codedMessage, exitCodeForCategory } from '@e2e-dev/core/lib/internal/errors';
 import type { Shard, TagMode } from '../collect/select.ts';
-import { listSelection, run, type ListedPair, type RunOptions, type RunOutcome } from '../run/runner.ts';
+import { listSelection, type ListedPair, type RunOptions, type RunOutcome } from '../run/runner.ts';
 import { claimRunnerOutput } from './run-output.ts';
 import { writeTerminal } from '../run/process-output.ts';
 import { STEP_BOUNDS, TIMEOUT_BOUNDS } from '../explore/bounds.ts';
-import { BUILTIN_REPORTERS, isBuiltinReporter } from '../report/builtin.ts';
+import { BUILTIN_REPORTERS, isBuiltinReporter } from '../report/builtin-id.ts';
 import { bounded, failureLine } from '../report/format.ts';
 import type { RecordingMode } from '@e2e-dev/core/lib/types';
 import type { BuiltinReporter } from '../run-types.ts';
@@ -36,12 +36,12 @@ import { ERROR_CODE_LIMIT, feedback, FEEDBACK_LIMITS, FEEDBACK_TYPES, type Feedb
 import { guide } from './guide.ts';
 import { addInitOptions, checkInitFlags, type InitFlagValues } from './init/flags.ts';
 import { parseList, parseNames } from './parse-names.ts';
-import { SESSION_BOUNDS } from '../mcp/bounds.ts';
-import { PROVIDER_IDS } from '../oauth/provider-ids.ts';
+import { SESSION_BOUNDS } from '../session-tools/bounds.ts';
+import { PROVIDER_NAMES } from '../oauth/provider-ids.ts';
 import type { LoginFlags } from '../oauth/cli.ts';
-import { Keyboard } from './keyboard.ts';
 import { SignalLadder } from './signals.ts';
-import { isStepAction, StepGate, stepKeyOf } from './step.ts';
+import { isStepAction } from './step.ts';
+import { stepAddress } from '../run/step-socket.ts';
 import { skillTopics } from './skill.ts';
 import { UpdateCheck } from './update-check.ts';
 import { telemetry as telemetryCommand, TELEMETRY_ACTIONS, type TelemetryAction } from './telemetry.ts';
@@ -375,25 +375,6 @@ async function driveStepped(command: Command, drive: () => Promise<number>): Pro
 }
 
 /**
- * One run stepped through from the keyboard: raw-mode keys for the run's
- * whole length, so Ctrl-C (a keypress then, not a signal) still climbs the
- * ladder while a step runs, and `q` is the ladder's first rung.
- */
-async function stepped(options: RunOptions, signals: SignalLadder): Promise<RunOutcome> {
-  const gate = new StepGate(() => signals.escalate());
-  const keyboard = new Keyboard(process.stdin, stepKeyOf);
-  keyboard.listen((key) => {
-    if (key === 'suspend') keyboard.suspend();
-    else gate.press(key);
-  });
-  try {
-    return await run({ ...options, beforeStep: gate.beforeStep });
-  } finally {
-    keyboard.close();
-  }
-}
-
-/**
  * Runs the watch loop under the Ctrl-C ladder, armed once for every run of
  * the session; each run is recorded for telemetry as it ends, and the exit
  * code is the last run's. What throws before a run starts prints as a
@@ -573,16 +554,16 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
     .command('login')
     .summary('sign in to a ChatGPT, GitHub Copilot, OpenCode Console, or SuperGrok subscription for agent steps')
     .description(
-      'Sign in once to a personal subscription and store the login for the e2e/oauth models: openai (ChatGPT Plus/Pro, the Codex sign-in), github-copilot (GitHub Copilot; reuses the GitHub CLI login or runs a device flow for your OAuth App), opencode-console (OpenCode Console, device code), spacexai (SuperGrok or X Premium+, device code). The config then constructs the model with chatgpt(), copilot(), opencodeConsole(), or grok() from e2e/oauth/<provider>.',
+      'Sign in once to a personal subscription and store the login for the e2e/oauth models: openai (ChatGPT Plus/Pro, the Codex sign-in), github-copilot (GitHub Copilot; reuses the GitHub CLI login or runs a device flow for your OAuth App), opencode-console (OpenCode Console, device code), spacexsi (SuperGrok or X Premium+, device code). The config then constructs the model with chatgpt(), copilot(), opencodeConsole(), or grok() from e2e/oauth/<provider>.',
     )
-    .addArgument(new Argument('[provider]', 'openai, github-copilot, opencode-console, or spacexai; omitted, a picker').choices(PROVIDER_IDS))
+    .addArgument(new Argument('[provider]', 'openai, github-copilot, opencode-console, or spacexsi; omitted, a picker').choices(PROVIDER_NAMES))
     .option('--device', 'ChatGPT: show a code to enter on another device instead of opening a browser')
     .option('--client-id <id>', 'GitHub Copilot: the client id of your GitHub OAuth App with the device flow enabled')
     .option('--from-gh', 'GitHub Copilot: reuse the token of the signed-in GitHub CLI')
     .option('--enterprise-url <host>', 'GitHub Copilot: the GitHub Enterprise host')
     .addHelpText(
       'after',
-      ['', examples(['e2e login openai', 'e2e login github-copilot --from-gh', 'e2e login opencode-console', 'e2e login spacexai', 'e2e login']), '', docsLine('/subscriptions')].join('\n'),
+      ['', examples(['e2e login openai', 'e2e login github-copilot --from-gh', 'e2e login opencode-console', 'e2e login spacexsi', 'e2e login']), '', docsLine('/subscriptions')].join('\n'),
     )
     .action(async (provider: string | undefined, options: LoginFlags) => {
       const { runLogin } = await import('../oauth/cli.ts');
@@ -592,8 +573,8 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
   program
     .command('logout')
     .summary('forget a stored subscription login')
-    .description('Remove the stored login of one provider (openai, github-copilot, opencode-console, spacexai). Without a provider, a picker over the stored logins.')
-    .addArgument(new Argument('[provider]', 'openai, github-copilot, opencode-console, or spacexai; omitted, a picker').choices(PROVIDER_IDS))
+    .description('Remove the stored login of one provider (openai, github-copilot, opencode-console, spacexsi). Without a provider, a picker over the stored logins.')
+    .addArgument(new Argument('[provider]', 'openai, github-copilot, opencode-console, or spacexsi; omitted, a picker').choices(PROVIDER_NAMES))
     .addHelpText('after', ['', examples(['e2e logout', 'e2e logout openai']), '', docsLine('/subscriptions')].join('\n'))
     .action(async (provider: string | undefined) => {
       const { runLogout } = await import('../oauth/cli.ts');
@@ -606,7 +587,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
     .description(
       'Ask the vendor which models the stored login, or OPENCODE_API_KEY for opencode-console, serves and print their ids, the ones chatgpt(), copilot(), opencodeConsole(), and grok() take. Without a provider, every stored login and set key in turn.',
     )
-    .addArgument(new Argument('[provider]', 'openai, github-copilot, opencode-console, or spacexai; omitted, every stored login').choices(PROVIDER_IDS))
+    .addArgument(new Argument('[provider]', 'openai, github-copilot, opencode-console, or spacexsi; omitted, every stored login').choices(PROVIDER_NAMES))
     .addHelpText('after', ['', examples(['e2e models', 'e2e models openai']), '', docsLine('/subscriptions#pick-a-model')].join('\n'))
     .action(async (provider: string | undefined) => {
       const { runModels } = await import('../oauth/cli.ts');
@@ -652,7 +633,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
       ].join('\n'),
     )
     .action(async (options: { config?: string; target?: string; headed?: boolean; maxSessions?: number }) => {
-      const { mcp } = await import('./mcp.ts');
+      const { mcp } = await import('../mcp-command.ts');
       process.exitCode = await mcp(version, options, telemetry);
     });
 
@@ -687,7 +668,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
     .option('-w, --watch', 'run, then run again whenever a test or source file or the config changes or a key asks: a (all), r (current), f (failed), u, p, t, q; not in CI')
     .option(
       '--step',
-      'run the first step, then hold each later one until a key: enter runs it, n runs to the next test, a runs all, h lists the keys, q stops. Without a terminal the run goes on in the background and returns at each held step with its screen; e2e run --step next runs that step, rest runs the rest, stop ends the run. One worker, not in CI',
+      'run the first step, then hold each later one until a key: enter runs it, s shows the screen, l shows the app log, n runs to the next test, a runs all (a test is still paused at screen.pause()), h lists the keys, q stops with exit 130. Without a terminal the run goes on in the background and returns at each held step with its screen; e2e run --step next runs that step, rest runs the rest, stop ends the run. One worker, not in CI',
     )
     .addOption(new Option('--step-serve <log>').hideHelp())
     .optionsGroup('Output:')
@@ -779,7 +760,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
             command.error(`error: --step ${stepAction} takes no files or other flags: it drives the run e2e run --step started`, { exitCode: 2 });
           }
           await driveStepped(command, async () => {
-            const { sendStep, stepAddress } = await import('./step-control.ts');
+            const { sendStep } = await import('./step-control.ts');
             return sendStep(stepAddress(process.cwd()), stepAction);
           });
           return;
@@ -816,7 +797,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
         const serveLog = options.step === true ? options.stepServe : undefined;
         if (options.step === true && serveLog === undefined && !hasTerminal()) {
           await driveStepped(command, async () => {
-            const { startStepped, stepAddress } = await import('./step-control.ts');
+            const { startStepped } = await import('./step-control.ts');
             return startStepped(stepAddress(process.cwd()), process.argv.slice(2));
           });
           return;
@@ -826,19 +807,28 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
           if (options.watch === true) {
             await watchToOutcome(telemetry, command, async (signals, record) => {
               const { watchSession } = await import('./watch.ts');
+              const { servePauses } = await import('./step-control.ts');
+              const stdin = process.stdin.isTTY === true ? process.stdin : undefined;
               return watchSession({
                 base: runOptions,
                 cwd: process.cwd(),
                 signals,
-                run: (iteration, cancel) =>
-                  run({
-                    ...iteration,
-                    interruptSignal: AbortSignal.any([signals.interruptSignal, cancel.interruptSignal]),
-                    forceSignal: AbortSignal.any([signals.forceSignal, cancel.forceSignal]),
-                    processOutput: output,
-                  }).then(record),
-                stdin: process.stdin.isTTY === true ? process.stdin : undefined,
-                write: output.listOutput.raw,
+                run: (iteration, cancel, keys) =>
+                  servePauses(
+                    {
+                      ...iteration,
+                      interruptSignal: AbortSignal.any([signals.interruptSignal, cancel.interruptSignal]),
+                      forceSignal: AbortSignal.any([signals.forceSignal, cancel.forceSignal]),
+                      processOutput: output,
+                    },
+                    version,
+                    cancel.stop,
+                    stdin,
+                    keys,
+                    { interrupt: () => signals.escalate() },
+                  ).then(record),
+                stdin,
+                write: (text) => writeTerminal('stdout', text),
                 writeError: (text) => void process.stderr.write(text),
                 pc: picocolors.createColors(process.stdout.isTTY === true),
                 clear: process.stdout.isTTY === true,
@@ -849,10 +839,18 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
           await runToOutcome(telemetry, command, async (signals) => {
             const base = { ...runOptions, interruptSignal: signals.interruptSignal, forceSignal: signals.forceSignal, processOutput: output };
             if (serveLog !== undefined) {
-              const { serveSteps, stepAddress } = await import('./step-control.ts');
-              return serveSteps(base, signals, { ...stepAddress(process.cwd()), log: serveLog });
+              const { serveSteps } = await import('./step-control.ts');
+              return serveSteps(base, version, signals, { ...stepAddress(process.cwd()), log: serveLog });
             }
-            return options.step === true ? stepped(base, signals) : run(base);
+            const { servePauses } = await import('./step-control.ts');
+            return servePauses(
+              base,
+              version,
+              () => signals.escalate(),
+              hasTerminal() ? process.stdin : undefined,
+              undefined,
+              { holdSteps: options.step === true },
+            );
           });
         } finally {
           output.end();

@@ -1,6 +1,6 @@
 {
   "name": "@e2e-dev/mobile",
-  "version": "0.12.7",
+  "version": "0.12.8",
   "description": "Mobile engine (iOS and Android) for e2e agentic end-to-end testing, built on agent-device",
   "keywords": [
     "e2e",
@@ -18,8 +18,8 @@
   ],
   "license": "Apache-2.0",
   "contributors": [
-    "Oskar Kwa\u015bniewski <oskar@tester.army>",
-    "Szymon Rybczak <szymon@tester.army>"
+    "Oskar Kwa\u015bniewski <oskar@e2e.com>",
+    "Szymon Rybczak <szymon@e2e.com>"
   ],
   "repository": {
     "type": "git",
@@ -68,11 +68,11 @@
   },
   "dependencies": {
     "@napi-rs/image": "1.16.0",
-    "agent-device": "0.21.38",
+    "agent-device": "0.21.41",
     "zod": "4.6.7"
   },
   "peerDependencies": {
-    "@e2e-dev/core": ">=0.23.2 <1",
+    "@e2e-dev/core": ">=0.24.1 <1",
     "ai": "^7.0.0",
     "e2e": ">=0.23.2 <1"
   },
@@ -87,10 +87,10 @@
   "devDependencies": {
     "@e2e-dev/core": "workspace:*",
     "@types/node": "26.6.6",
-    "ai": "7.0.173",
+    "ai": "7.0.179",
     "e2e": "workspace:*",
     "typescript": "7.0.2",
-    "vitest": "5.1.0"
+    "vitest": "5.1.1"
   },
   "engines": {
     "node": "^22.22.3 || >=24.8.0"

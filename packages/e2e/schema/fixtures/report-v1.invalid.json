@@ -4,6 +4,7 @@
     "id": "not-a-uuid",
     "status": "passed",
     "exitCode": 4,
+    "durationMs": -1,
     "targets": [],
     "results": [
       {
@@ -46,6 +47,7 @@
                 "kind": "agent",
                 "api": "agent.assert",
                 "label": "the result is visible",
+                "actor": "",
                 "source": {
                   "file": "tests/example.e2e.ts",
                   "line": 3,
@@ -74,7 +76,7 @@
         "status": "skipped",
         "attempts": [],
         "skip": {
-          "cause": "explicit",
+          "cause": "fixme",
           "reason": "only a filtered test names the filter that left it out",
           "filter": "areas"
         }

@@ -1,8 +1,9 @@
 /**
  * A first install, the way a new user meets it: packs the built `e2e`,
- * `@e2e-dev/web`, and `@e2e-dev/mobile`, installs them with a given pnpm
+ * `@e2e-dev/web`, `@e2e-dev/mobile`, and `@e2e-dev/desktop`, installs them with a given pnpm
  * into a fresh project outside this repository, installs again from the
- * lockfile, typechecks a custom mobile tool, and runs a TypeScript test
+ * lockfile, typechecks a custom mobile tool, emits the declaration of a config
+ * that infers its engines, and runs a TypeScript test
  * through the installed CLI. `@e2e-dev/core` is packed too and reaches the
  * project only through `e2e`'s dependency and the engines' peer, as it does
  * for a user, and the install must hold one copy of it: two would split the
@@ -35,7 +36,7 @@ if (pnpmVersion === undefined) {
 }
 
 /** The packages a new user installs: the runner and its engines, and the core both build on. */
-const PACKAGES = ['core', 'e2e', 'web', 'mobile'] as const;
+const PACKAGES = ['core', 'e2e', 'web', 'mobile', 'desktop'] as const;
 
 const root = mkdtempSync(join(tmpdir(), 'e2e-install-smoke-'));
 const tarballs = join(root, 'tarballs');
@@ -82,6 +83,7 @@ try {
         e2e: tarball('e2e-0'),
         '@e2e-dev/web': tarball('e2e-dev-web-'),
         '@e2e-dev/mobile': tarball('e2e-dev-mobile-'),
+        '@e2e-dev/desktop': tarball('e2e-dev-desktop-'),
         typescript: mobileManifest.devDependencies['typescript'],
         '@types/node': mobileManifest.devDependencies['@types/node'],
         '@types/json-schema': '7.0.15',
@@ -130,10 +132,28 @@ export async function checkFixture(device: Device) {
 }
 `);
 
+  // pnpm links `@e2e-dev/core` only inside the engines' own folders, so a
+  // declaration that names a core type has no path this project can import (TS2883).
+  writeFileSync(join(project, 'engines.config.ts'), `
+import { desktop } from '@e2e-dev/desktop';
+import { mobile } from '@e2e-dev/mobile';
+import { web } from '@e2e-dev/web';
+import type { E2EConfig } from 'e2e';
+
+export default {
+  targets: [
+    { name: 'web', engine: web() },
+    { name: 'ios', engine: mobile({ platform: 'ios' }) },
+    { name: 'mac', engine: desktop() },
+  ],
+} satisfies E2EConfig;
+`);
+
   for (const [step, args] of [
     ['pnpm install', ['install']],
     ['pnpm install --frozen-lockfile', ['install', '--frozen-lockfile']],
     ['mobile tool types', ['exec', 'tsc', '--noEmit', '--strict', '--types', 'node,json-schema', '--module', 'NodeNext', '--target', 'ES2024', 'mobile-types.ts']],
+    ['config declaration', ['exec', 'tsc', '--declaration', '--emitDeclarationOnly', '--outDir', 'types', '--strict', '--skipLibCheck', '--types', 'node', '--module', 'ESNext', '--moduleResolution', 'Bundler', '--target', 'ES2024', 'engines.config.ts']],
     ['e2e run', ['exec', 'e2e', 'run', '--workers', '1']],
   ] as const) {
     const { status, output } = pnpm(args);
@@ -174,11 +194,11 @@ export async function checkFixture(device: Device) {
         name: 'install-smoke-core-only',
         private: true,
         type: 'module',
-        dependencies: { '@e2e-dev/core': tarball('e2e-dev-core-'), '@e2e-dev/web': tarball('e2e-dev-web-'), '@e2e-dev/mobile': tarball('e2e-dev-mobile-') },
+        dependencies: { '@e2e-dev/core': tarball('e2e-dev-core-'), '@e2e-dev/web': tarball('e2e-dev-web-'), '@e2e-dev/mobile': tarball('e2e-dev-mobile-'), '@e2e-dev/desktop': tarball('e2e-dev-desktop-') },
       }),
     );
     writeFileSync(join(coreOnly, 'main-entries.mjs'), `
-for (const [name, factory, options] of [['@e2e-dev/web', 'web', undefined], ['@e2e-dev/mobile', 'mobile', { platform: 'ios' }]]) {
+for (const [name, factory, options] of [['@e2e-dev/web', 'web', undefined], ['@e2e-dev/mobile', 'mobile', { platform: 'ios' }], ['@e2e-dev/desktop', 'desktop', undefined]]) {
   const entry = await import(name);
   entry[factory](options);
   try {
@@ -207,5 +227,5 @@ if (problems.length > 0) {
   process.stderr.write(`${problems.join('\n\n')}\n`);
   process.exitCode = 1;
 } else {
-  process.stdout.write(`install smoke: pnpm ${pnpmVersion} installs ${PACKAGES.join(', ')} with no build scripts, typechecks a mobile tool, runs a TypeScript test, and loads the engines' main entries without e2e\n`);
+  process.stdout.write(`install smoke: pnpm ${pnpmVersion} installs ${PACKAGES.join(', ')} with no build scripts, typechecks a mobile tool, emits a config's declaration, runs a TypeScript test, and loads the engines' main entries without e2e\n`);
 }

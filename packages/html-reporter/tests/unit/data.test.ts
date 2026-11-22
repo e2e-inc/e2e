@@ -1,10 +1,25 @@
 import type { Report } from 'e2e';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { buildModel, formatDuration, formatTokens, onTarget, selectedTarget, statusTabs } from '../../app/data.ts';
+import { buildModel, formatDuration, formatTokens, onTarget, selectedTarget, statusTabs, timedVideos, videoName, videoPosition, type Artifact, type Step } from '../../app/data.ts';
+import { ListView } from '../../app/list.tsx';
 import fixture from '../../../e2e/schema/fixtures/report-v1.valid.json' with { type: 'json' };
 
 // The page's own tsconfig checks this file: the model it tests reads the DOM.
 const REPORT = fixture as unknown as Report;
+
+describe('the run summary', () => {
+  it('shows the recorded run duration. For older reports the duration comes from the timestamps', () => {
+    const report = { ...REPORT, run: { ...REPORT.run, durationMs: 765 } };
+    const model = buildModel({ report, media: { mode: 'none' }, resultsDir: '.e2e/results', traces: {}, sources: {} });
+    const page = createElement(ListView, { model, status: 'all', search: '', target: undefined });
+
+    expect(renderToStaticMarkup(page)).toContain('>765ms<');
+    delete model.run.durationMs;
+    expect(renderToStaticMarkup(page)).toContain('>1.0s<');
+  });
+});
 
 describe('serial members', () => {
   it('show their own error, never the group\'s once they passed, and the group\'s when they have none', () => {
@@ -113,5 +128,39 @@ describe('statusTabs', () => {
 
   it('keeps the active tab even at 0, so a filter never strands itself', () => {
     expect(statusTabs(counts, 'failed')).toEqual(['all', 'failed', 'passed', 'skipped']);
+  });
+});
+
+describe('videos of a test that drove a second session', () => {
+  const at = (seconds: number): string => new Date(Date.UTC(2026, 0, 1, 0, 0, seconds)).toISOString();
+  const video = (id: string, startedAt: string, actor?: string): Artifact => ({
+    id, kind: 'video', mediaType: 'video/webm', path: `t/attempt-1/video/${id}.webm`, startedAt,
+    redaction: 'incomplete', producer: { kind: 'attempt' }, ...(actor === undefined ? {} : { actor }),
+  });
+  const step = (startedAt: string, actor?: string): Step => ({ startedAt, ...(actor === undefined ? {} : { actor }) }) as Step;
+  // The test's own video in two parts, and the session's video recorded while the first part ran.
+  const videos = timedVideos([video('video', at(0)), video('launch-1', at(2), 'launch-1'), video('video-part2', at(10))], { mode: 'link', base: 'results' });
+
+  it('ends each recording where the next of its own session begins', () => {
+    expect(videos.map((each) => [each.artifact.id, each.endsAt])).toEqual([
+      ['video', Date.parse(at(10))],
+      ['launch-1', Infinity],
+      ['video-part2', Infinity],
+    ]);
+  });
+
+  it('places a step in the recording of the session it ran on', () => {
+    expect(videoPosition(step(at(5)), videos)).toEqual({ video: 0, seconds: 5 });
+    expect(videoPosition(step(at(5), 'launch-1'), videos)).toEqual({ video: 1, seconds: 3 });
+    expect(videoPosition(step(at(12)), videos)).toEqual({ video: 2, seconds: 2 });
+    // Before its session's recording began, at that recording's start; a session with no recording, nowhere.
+    expect(videoPosition(step(at(1), 'launch-1'), videos)).toEqual({ video: 1, seconds: 0 });
+    expect(videoPosition(step(at(5), 'launch-2'), videos)).toBeUndefined();
+  });
+
+  it('names each recording by its session, and the test\'s own parts by number', () => {
+    expect(videos.map((each) => videoName(each, videos))).toEqual(['test part 1', 'launch-1', 'test part 2']);
+    const alone = timedVideos([video('video', at(0)), video('video-part2', at(10))], { mode: 'link', base: 'results' });
+    expect(alone.map((each) => videoName(each, alone))).toEqual(['part 1', 'part 2']);
   });
 });

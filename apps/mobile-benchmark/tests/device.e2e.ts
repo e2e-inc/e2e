@@ -39,8 +39,8 @@ test.describe('permission prompt', () => {
 
 // Every step auto-focuses its field and keeps the keyboard up on Return
 // (`submitBehavior="submit"`), so the keyboard covers Continue from the start
-// and `device.dismissKeyboard()` is the way past it: the dismiss key on
-// Android and iPad, a short drag on an iPhone, which the wizard's scroll view
+// and `device.dismissKeyboard()` is the way past it: Android hides the
+// keyboard directly, iOS takes a short drag, which the wizard's scroll view
 // turns into a dismissal. The success screen echoes the values, so a stray key
 // press fails it.
 test('sequential onboarding echoes the exact values', async ({ app, device, screen }) => {
@@ -63,6 +63,17 @@ test('sequential onboarding echoes the exact values', async ({ app, device, scre
   await expect(screen.getByTestId('echo-email')).toHaveText('jane@example.com');
   await expect(screen.getByTestId('echo-name')).toHaveText('Jane Merchant');
   await expect(screen.getByTestId('echo-phone')).toHaveText('0612435678');
+});
+
+// The Android emulator in CI draws no soft keyboard, even for a tapped field,
+// so the keyboard reads run where one comes up. The email field autofocuses,
+// and the keyboard slides in and out, so both reads poll.
+test('isKeyboardShown follows the keyboard up and through a dismissal', { platforms: ['ios'] }, async ({ app, device, screen }) => {
+  await openScenario({ app, device, screen }, 'Sequential Onboarding');
+  await screen.getByTestId('email-input').fill('jane@example.com');
+  await expect.poll(() => device.isKeyboardShown()).toBe(true);
+  await device.dismissKeyboard();
+  await expect.poll(() => device.isKeyboardShown()).toBe(false);
 });
 
 test('onboarding rejects a malformed email before advancing', async ({ app, device, screen }) => {

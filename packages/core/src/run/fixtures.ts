@@ -44,13 +44,15 @@ export interface ArtifactSink {
     options?: ArtifactRegistration,
   ): string;
   /** Registers a video a hosted service keeps, by URL, and returns its report artifact ID; nothing is read or stored. */
-  link(url: string, options: { readonly mediaType: string; readonly startedAt: string }): string;
+  link(url: string, options: { readonly mediaType: string; readonly startedAt: string; readonly actor?: string | undefined }): string;
 }
 
 /** Facts about a produced artifact its file does not carry. */
 export interface ArtifactRegistration {
   /** When a time-based artifact (a video segment) began recording. */
   readonly startedAt?: string;
+  /** The session that produced it when it is not the test's own; see `StepRecord.actor`. */
+  readonly actor?: string;
 }
 
 export interface AttemptEnvironment {
@@ -599,7 +601,10 @@ function unreachableApp(cause: unknown, url: string, command: CommandConfig | un
 }
 
 /** Builds the portable app fixture with the session's shared screenshot policy. */
-function createApp(environment: AttemptEnvironment, engine: LocatorEngine): App {
+export function createApp(
+  environment: Pick<AttemptEnvironment, 'config' | 'steps' | 'target' | 'session' | 'artifacts'>,
+  engine: LocatorEngine,
+): App {
   const { config, steps, target } = environment;
   const recordings = sessionRecordings(environment.session, target.name);
   /** What bounds an open, a restart, or a link open: the default a program set, else the test's timeout. */

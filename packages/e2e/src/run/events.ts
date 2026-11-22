@@ -96,6 +96,8 @@ export type RunEventFact =
        * form; absent when judgments use `model`.
        */
       readonly judge?: string;
+      /** Present when the run holds each step for a person to let through (`e2e run --step`). */
+      readonly stepping?: true;
     }
   | {
       /**
@@ -165,6 +167,14 @@ export type RunEventFact =
       readonly state: 'finished';
       readonly durationMs: number;
       readonly outcome?: SetupOutcome;
+    }
+  | {
+      /** Emitted when an interval with every running worker held begins or ends. */
+      readonly type: 'run-hold';
+      /** Total milliseconds in completed intervals when all running workers were held. */
+      readonly heldMs: number;
+      /** The start of the current held interval as Unix milliseconds, or null outside that interval. */
+      readonly heldSince: number | null;
     }
   | {
       readonly type: 'test-started';
@@ -237,6 +247,8 @@ export type RunEventFact =
       readonly type: 'run-finished';
       readonly status: RunStatus;
       readonly exitCode: RunExitCode;
+      /** The report's run time in milliseconds, excluding intervals when all running workers were held. */
+      readonly durationMs?: number | undefined;
       readonly reportPath?: string;
       /** Where `--ai-trace` wrote the run's model calls, once the file exists. */
       readonly aiTracePath?: string;
