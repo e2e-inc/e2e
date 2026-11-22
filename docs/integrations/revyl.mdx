@@ -196,9 +196,12 @@ Unknown or invalid options fail config load with `INVALID_CONFIG`.
   browser, so `browser.setViewport` and a set `viewport` fail.
 - The CDP URL works once. A dropped connection is not reattached, and the
   attempt fails; a retry starts a new session.
-- Video and downloads are unavailable: Revyl keeps the screencast for its own
-  session recording, and its browser refuses downloads. Use `app.screenshot()`
-  for evidence.
+- An attempt that records video, such as with `--video`, gets Revyl's own
+  recording of the session as `video/recording.mp4`. Revyl publishes it only
+  once the session ends, so stopping it ends the session: at the end of an
+  attempt that changes nothing, but `app.stopRecording()` in the middle of a
+  test leaves the rest of the test without a browser.
+- Downloads are unavailable: Revyl's browser refuses them.
 - The site runs on Revyl's network, so point `url` and `app.url` at a
   deployed URL, not `localhost`.
 - When an attempt ends, on every exit path, the provider stops its session.

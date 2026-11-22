@@ -4,12 +4,14 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import type { BrowserLease, BrowserProvider, BrowserReleaseContext, BrowserRequest } from '@e2e-dev/web';
-import { ConfigurationError, rejectUnknownKeys } from 'e2e/engine';
+import { ConfigurationError, rejectUnknownKeys, type ProviderRecordContext, type ProviderRecording } from 'e2e/engine';
 import { revylCredentials } from '../credentials.ts';
 import { DEFAULT_API_URL, RevylWebClient, type WebViewport } from './client.ts';
 
 const APP_URL = 'https://app.revyl.ai';
+const RECORDING_FILE = 'recording.mp4';
 
 /** Every option `revylBrowsers()` takes, kept equal to `RevylBrowsersOptions` by the compiler. */
 const OPTION_KEYS: readonly string[] = Object.keys({
@@ -42,7 +44,8 @@ export interface RevylBrowsersOptions {
  * shared per-worker browser needs to keep tests apart. Each lease's
  * `cdpEndpoint` is a single-use URL that expires about a minute after the
  * session is ready, so a dropped connection is not reattached and fails the
- * attempt. `REVYL_API_KEY` comes from the run's environment, and
+ * attempt. An attempt that records video gets the session's own recording.
+ * `REVYL_API_KEY` comes from the run's environment, and
  * `REVYL_API_URL` when set.
  */
 export function revylBrowsers(options: RevylBrowsersOptions): BrowserProvider {
@@ -93,6 +96,22 @@ export function revylBrowsers(options: RevylBrowsersOptions): BrowserProvider {
     },
     async release(lease: BrowserLease, context: BrowserReleaseContext): Promise<void> {
       await new RevylWebClient(revylCredentials(context.env)).stopSession(lease.id, context.signal);
+    },
+    /**
+     * Revyl records every web session from its start. Stopping the recording
+     * stops the session, since Revyl publishes the recording only then, and
+     * saves it as the attempt's `recording.mp4`.
+     */
+    async record(lease: BrowserLease, context: ProviderRecordContext): Promise<ProviderRecording> {
+      const client = new RevylWebClient(revylCredentials(context.env));
+      return {
+        startedAt: await client.startedAt(lease.id, context.signal),
+        async stop({ dir, signal }) {
+          await client.stopSession(lease.id, signal);
+          await client.downloadRecording(lease.id, path.join(dir, RECORDING_FILE), signal);
+          return { file: RECORDING_FILE };
+        },
+      };
     },
   };
 }

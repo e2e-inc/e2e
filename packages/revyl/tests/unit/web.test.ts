@@ -4,7 +4,11 @@
  * on every path. The CDP attach itself is `@e2e-dev/web`'s, tested there.
  */
 
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type { BrowserReleaseContext, BrowserRequest } from '@e2e-dev/web';
+import type { ProviderRecordContext } from 'e2e/engine';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { revylBrowsers, type RevylBrowsersOptions } from '../../src/web.ts';
 
@@ -30,7 +34,7 @@ beforeEach(() => {
   routes = {
     'POST /api/v1/apps/app-1/builds/external': () => json({ id: 'build-1' }),
     'POST /api/v1/execution/start_device': (call) => json({ session_id: (call.body as { session_id: string }).session_id, workflow_run_id: 'run-1' }),
-    'GET /api/v1/execution/device-sessions/': () => json({ status: 'running', workflow_run_id: 'run-1', viewer_kind: 'whep' }),
+    'GET /api/v1/execution/device-sessions/': () => json({ status: 'running', workflow_run_id: 'run-1', viewer_kind: 'whep', started_at: '2026-11-21T23:44:44.536193+00:00' }),
     'POST /api/v1/execution/device-proxy/run-1/cdp': () => json({ url: CDP_URL, expires_at: '2026-11-21T00:01:00Z' }),
     'POST /api/v1/execution/device/sessions/': () => json({ ok: true }),
   };
@@ -52,6 +56,7 @@ function request(overrides: Partial<BrowserRequest> = {}): BrowserRequest {
   return { runId: 'run', targetName: 'web', slot: 0, slots: 1, attemptId: 'attempt-1', env, signal: new AbortController().signal, log: () => undefined, ...overrides };
 }
 
+const recordContext: ProviderRecordContext = { runId: 'run', targetName: 'web', attemptId: 'attempt-1', env, signal: new AbortController().signal };
 const context: BrowserReleaseContext = { runId: 'run', targetName: 'web', env, signal: new AbortController().signal, log: () => undefined };
 const failure = (pending: Promise<unknown>): Promise<Error> => pending.then(() => new Error('resolved'), (error: unknown) => error as Error);
 const paths = () => calls.map((call) => `${call.method} ${new URL(call.url).pathname}`);
@@ -64,7 +69,6 @@ describe('revylBrowsers()', () => {
     expect(provider.name).toBe('revyl');
     expect(provider.scope).toBe('attempt');
     expect(provider.downloads).toBeUndefined();
-    expect(provider.record).toBeUndefined();
   });
 
   it.each<[string, unknown]>([
@@ -184,6 +188,33 @@ describe('revylBrowsers()', () => {
     await provider.release({ id: 'session-2', cdpEndpoint: CDP_URL }, context);
 
     expect(paths()).toEqual(['POST /api/v1/execution/device/sessions/session-1/stop', 'POST /api/v1/execution/device/sessions/session-2/stop']);
+  });
+
+  it("records with the session's own recording, which it saves once the session stops", async () => {
+    let timelines = 0;
+    routes['GET /api/v1/reports-v3/reports/by-session/session-1/video-timeline'] = () =>
+      json(++timelines < 2 ? { recording_status: 'pending', video_url: null } : { recording_status: 'ready', video_url: 'https://videos.example.com/session-1.mp4?X-Amz-Signature=s' });
+    routes['GET /session-1.mp4'] = () => new Response(new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]));
+    const dir = mkdtempSync(path.join(tmpdir(), 'revyl-recording-'));
+
+    const recording = await revylBrowsers(options).record!({ id: 'session-1', cdpEndpoint: CDP_URL }, recordContext);
+    expect(recording.startedAt).toBe('2026-11-21T23:44:44.536193+00:00');
+    expect(stops()).toEqual([]);
+    const result = await recording.stop({ dir, signal: new AbortController().signal });
+
+    expect(result).toEqual({ file: 'recording.mp4' });
+    expect([...readFileSync(path.join(dir, 'recording.mp4'))]).toEqual([0, 0, 0, 24, 102, 116, 121, 112]);
+    const order = paths();
+    expect(order.indexOf('POST /api/v1/execution/device/sessions/session-1/stop')).toBeLessThan(order.indexOf('GET /api/v1/reports-v3/reports/by-session/session-1/video-timeline'));
+    expect(timelines).toBe(2);
+    expect(calls.find((call) => call.url.startsWith('https://videos.example.com/'))!.headers).toBeUndefined();
+  });
+
+  it('fails a recording Revyl did not keep', async () => {
+    routes['GET /api/v1/reports-v3/reports/by-session/session-1/video-timeline'] = () => json({ recording_status: 'unavailable', video_url: null });
+    const recording = await revylBrowsers(options).record!({ id: 'session-1', cdpEndpoint: CDP_URL }, recordContext);
+
+    await expect(recording.stop({ dir: tmpdir(), signal: new AbortController().signal })).rejects.toThrow('Revyl kept no recording of session session-1 (unavailable)');
   });
 
   it('stops again after a gateway error, since a stop is idempotent', async () => {

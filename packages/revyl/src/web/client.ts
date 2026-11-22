@@ -5,7 +5,10 @@
  * run's API key and is bounded by its caller's signal.
  */
 
+import { createWriteStream } from 'node:fs';
 import { createRequire } from 'node:module';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { RevylCredentials } from '../credentials.ts';
 
@@ -83,6 +86,35 @@ export class RevylWebClient {
     const minted = fields(await this.#read(signal, () => this.#json('POST', `/api/v1/execution/device-proxy/${encodeURIComponent(workflowRunId)}/cdp`, undefined, signal)));
     if (typeof minted.url !== 'string' || minted.url === '') throw new Error('Revyl did not return a CDP URL for the session');
     return minted.url;
+  }
+
+  /** When the session's browser started running, as Revyl reports it: the start of its recording, to within a tenth of a second. */
+  async startedAt(sessionId: string, signal: AbortSignal): Promise<string> {
+    const detail = fields(await this.#read(signal, () => this.#json('GET', `/api/v1/execution/device-sessions/${encodeURIComponent(sessionId)}`, undefined, signal)));
+    if (typeof detail.started_at !== 'string' || Number.isNaN(Date.parse(detail.started_at))) throw new Error(`Revyl reports no start time for session ${sessionId}`);
+    return detail.started_at;
+  }
+
+  /**
+   * Writes an ended session's recording to `file`. Revyl publishes it once the
+   * session stops, so this waits while it is pending; a session Revyl kept no
+   * recording of fails.
+   */
+  async downloadRecording(sessionId: string, file: string, signal: AbortSignal): Promise<void> {
+    for (;;) {
+      const timeline = fields(
+        await this.#read(signal, () => this.#json('GET', `/api/v1/reports-v3/reports/by-session/${encodeURIComponent(sessionId)}/video-timeline`, undefined, signal)),
+      );
+      if (timeline.recording_status === 'ready' && typeof timeline.video_url === 'string') {
+        // A presigned storage URL, which refuses the API key.
+        const response = await fetch(timeline.video_url, { signal });
+        if (!response.ok || response.body === null) throw new Error(`downloading session ${sessionId}'s recording answered ${response.status}`);
+        await pipeline(Readable.fromWeb(response.body), createWriteStream(file), { signal });
+        return;
+      }
+      if (timeline.recording_status !== 'pending') throw new Error(`Revyl kept no recording of session ${sessionId} (${String(timeline.recording_status)})`);
+      await sleep(1_000, signal);
+    }
   }
 
   /**
