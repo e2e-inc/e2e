@@ -247,8 +247,8 @@ describe('DesktopSurface', () => {
     expect(actions(fake.calls()).slice(-2)).toEqual(['check', 'uncheck']);
   });
 
-  it('never sets the value of an editable list select refused, so no label lands in it as free text', async () => {
-    const editable = { ok: true, data: { snapshot_id: 's5', window: { id: 'w-mine' }, tree: { role: 'window', name: 'Form', children: [{ role: 'combobox', name: 'Plan', ref_id: '@s5:e1', available_actions: ['Click', 'SetValue', 'SetFocus'] }] } } };
+  it('never sets the value of a list select refused, so no label lands in it as free text', async () => {
+    const editable = { ok: true, data: { snapshot_id: 's5', window: { id: 'w-mine' }, tree: { role: 'window', name: 'Form', children: [{ role: 'combobox', name: 'Plan', ref_id: '@s5:e1', available_actions: ['Click', 'SetFocus'] }] } } };
     const refusals = { ACTION_NOT_SUPPORTED: 'UNSUPPORTED_CAPABILITY', POLICY_DENIED: 'UNSUPPORTED_CAPABILITY', TIMEOUT: 'NOT_ACTIONABLE', AMBIGUOUS_TARGET: 'NOT_ACTIONABLE' } as const;
     for (const [refusal, code] of Object.entries(refusals)) {
       const { surface, fake } = await launched({ snapshot: [editable], select: [failure(refusal, 'not_delivered')] }, { observe: false });
@@ -781,12 +781,13 @@ describe('DesktopSurface', () => {
     await expect(surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Enterprise' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });
   });
 
-  it('never types a missing option into an editable list as free text', async () => {
+  it('never types a missing option into an editable combo box as free text: a select there is refused, and nothing is sent', async () => {
+    // agent-desktop's select sets an editable combo box's value and reads it back, which any text passes.
     const editable = { ok: true, data: { snapshot_id: 's5', window: { id: 'w-mine' }, tree: { role: 'window', name: 'Form', children: [{ role: 'combobox', name: 'Plan', ref_id: '@s5:e1', available_actions: ['Click', 'SetValue', 'SetFocus'] }] } } };
-    const { surface, fake } = await launched({ snapshot: [editable], select: [failure('ELEMENT_NOT_FOUND', 'not_delivered')] }, { observe: false });
+    const { surface, fake } = await launched({ snapshot: [editable] }, { observe: false });
     const observed = await surface.observe(operation(), undefined);
-    await expect(surface.perform(observed.root.children![0]!.ref, { kind: 'selectOption', value: 'Enterprise' }, operation())).rejects.toThrow(/no option "Enterprise"/);
-    expect(fake.calls().some((call) => call.key === 'set-value')).toBe(false);
+    await expect(surface.perform(observed.root.children![0]!.ref, { kind: 'selectOption', value: 'Enterprise' }, operation())).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY', message: expect.stringMatching(/editable.*fill\(\)/) });
+    expect(fake.calls().some((call) => call.key === 'select' || call.key === 'set-value')).toBe(false);
   });
 
   it('reads the next window when the focused-first one is a panel accessibility cannot read', async () => {

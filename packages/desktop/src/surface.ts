@@ -1127,7 +1127,8 @@ export class DesktopSurface {
   /**
    * Chooses an option of a list or dropdown with agent-desktop's `select`,
    * never by setting the value, which would put a missing option in an
-   * editable combo box as free text. A stale ref is `NODE_STALE`, so the
+   * editable combo box as free text: agent-desktop's select does just that
+   * for a combo box whose value is settable, so one is refused. A stale ref is `NODE_STALE`, so the
    * harness locates the list again. For a pop-up button agent-desktop opens
    * the menu to find the option; when it cannot, it may leave the menu open,
    * which is closed again here with Escape. A failure after the menu opened
@@ -1137,6 +1138,10 @@ export class DesktopSurface {
    * error, since it covers the window for the steps after.
    */
   private async select(binding: NodeBinding, label: string, operation: OperationContext): Promise<void> {
+    // An editable combo box takes any text: agent-desktop's select sets its value and reads it back, which a missing option passes as well.
+    if (binding.role === 'combobox' && binding.actions.includes('SetValue')) {
+      throw unsupported(`this combo box is editable and takes any text, so a select of "${label}" could not tell a missing option from a chosen one; fill() it and check its value`);
+    }
     const ref = this.refOf(binding, 'select');
     try {
       await this.run(['select', ref, '--timeout-ms', String(Math.min(this.toolBudget(operation), SELECT_WAIT_MS)), '--', label], { label: 'select', input: true, signal: operation.signal, timeoutMs: operation.timeoutMs, raw: true });
