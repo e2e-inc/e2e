@@ -588,7 +588,7 @@ describe('DesktopSurface', () => {
 
   it('replaces the focused field as a keyboard does, select all and delete, and never by an accessibility clear', async () => {
     // The form's Username field has keyboard focus.
-    const { surface, fake } = await launched({}, { options: { headed: true } });
+    const { surface, fake } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')] }, { options: { headed: true } });
     await surface.typeText('ada', { replace: true }, operation());
     const sent = actions(fake.calls()).filter((key) => key !== 'snapshot');
     expect(sent).toEqual(['press', 'press', 'type']);
@@ -625,6 +625,20 @@ describe('DesktopSurface', () => {
     const started = Date.now();
     await surface.pressKey('Tab', operation('agent'));
     expect(Date.now() - started).toBeGreaterThanOrEqual(550);
+  });
+
+  it('sends no delete when select all moved focus off the field, so it never reaches another control', async () => {
+    const form = renamed('macos/appkit-form', 'w-8032', 'w-mine');
+    // After Cmd+A the app moved focus from Username to the Sign in button.
+    const moved = JSON.parse(
+      JSON.stringify(form)
+        .replace('"states":["focused"]', '"states":[]')
+        .replace('"native_id":{"kind":"ax_identifier","value":"sign-in"}', '"native_id":{"kind":"ax_identifier","value":"sign-in"},"states":["focused"]'),
+    ) as unknown;
+    const { surface, fake } = await launched({ snapshot: [form, form, form, moved] }, { options: { headed: true } });
+    await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/lost keyboard focus after select all/) });
+    expect(fake.calls().filter((call) => call.key === 'press').map((call) => call.args[1])).toEqual(['cmd+a']);
+    expect(fake.calls().some((call) => call.key === 'type')).toBe(false);
   });
 
   it('reports a type after a clear that changed the field as possibly committed', async () => {

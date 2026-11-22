@@ -1137,14 +1137,8 @@ export class DesktopSurface {
           if (windows.length > 1 && home.is_focused !== true) {
             throw notActionable(`node ${binding.id} is in a window that cannot be shown to be the app's key window, so the key could land in another window`);
           }
-          // Focusing can hand focus on (a dialog it opens): the key goes only when the control still holds it. A control with an identity keeps its id; a look-alike has a new id in every read, so it is found by role and place, with as many twins around it as before: a twin that went could have let another take its place.
-          const now = await this.capture(operation, window);
-          const held = [...(now?.bindings.values() ?? [])].some(
-            (candidate) =>
-              candidate.states?.focused === true &&
-              (binding.stable ? candidate.id === binding.id : candidate.role === binding.role && sameRect(candidate.rect, binding.rect) && candidate.likeness === binding.likeness),
-          );
-          if (!held) throw notActionable(`node ${binding.id} did not keep keyboard focus, so the key would land on another control`);
+          // Focusing can hand focus on (a dialog it opens): the key goes only when the control still holds it.
+          if (!(await this.holdsFocus(binding, window, operation))) throw notActionable(`node ${binding.id} did not keep keyboard focus, so the key would land on another control`);
           await this.sendKey(combo, window, `press ${action.key}`, operation);
         } catch (cause) {
           // The focus already moved: a retry of the whole press would focus the control a second time, which an app's focus handler sees.
@@ -1192,6 +1186,22 @@ export class DesktopSurface {
     // Last, so a value after `--` is never read as a flag.
     args.push(...extra);
     return await this.run(args, { label: command, input: true, signal: operation.signal, timeoutMs: operation.timeoutMs, raw: true, ...(stdin === undefined ? {} : { stdin }) });
+  }
+
+  /**
+   * Whether the control a binding names holds keyboard focus in a fresh read
+   * of its window. A control with an identity keeps its id; a look-alike has
+   * a new id in every read, so it is found by role and place, with as many
+   * twins around it as before: a twin that went could have let another take
+   * its place.
+   */
+  private async holdsFocus(binding: NodeBinding, window: string, operation: OperationContext): Promise<boolean> {
+    const now = await this.capture(operation, window);
+    return [...(now?.bindings.values() ?? [])].some(
+      (candidate) =>
+        candidate.states?.focused === true &&
+        (binding.stable ? candidate.id === binding.id : candidate.role === binding.role && sameRect(candidate.rect, binding.rect) && candidate.likeness === binding.likeness),
+    );
   }
 
   /**
@@ -1336,7 +1346,11 @@ export class DesktopSurface {
       const window = focused.windowId ?? (await this.ownWindow(operation))?.id;
       if (window === undefined) throw this.chosenWindow === undefined ? invalidState('the app is not running; open it with app.open()') : this.chosenClosed();
       await this.sendKey('cmd+a', window, 'select all', operation);
-      await afterChange('delete the selection', () => this.sendKey('backspace', window, 'delete the selection', operation));
+      // The app may move focus on select all: the delete goes only to the field that still holds it.
+      await afterChange('delete the selection', async () => {
+        if (!(await this.holdsFocus(focused, window, operation))) throw notActionable('the field lost keyboard focus after select all, so no delete was sent');
+        await this.sendKey('backspace', window, 'delete the selection', operation);
+      });
     }
     // Keystrokes, which only physical input sends: without it agent-desktop sets the text, and the app's key handlers never run.
     const type = (): Promise<unknown> => this.tryRef('type', focused, operation, [], text, true);
