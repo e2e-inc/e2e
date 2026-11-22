@@ -116,6 +116,13 @@ describe('projectSnapshot', () => {
     expect(resolveExpression({ kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'password', exact: true } } }, [root])).toHaveLength(1);
   });
 
+  it("reads an empty text field's value as the empty string, so getByDisplayValue('') finds it, and a password field's never", () => {
+    const { root } = project('macos/sign-in-form');
+    const empty = resolveExpression({ kind: 'query', query: { kind: 'displayValue', value: { kind: 'string', value: '', exact: true } } }, [root]);
+    expect(empty.map((node) => node.testId)).toEqual(['username']);
+    expect(byTestId(root, 'password')?.value).toBeUndefined();
+  });
+
   it('gives a control the same identity in every snapshot, its value aside', () => {
     const mint = minter();
     const before = projectSnapshot(load('macos/appkit-form'), mint);

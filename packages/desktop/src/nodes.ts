@@ -273,7 +273,8 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
     // A control shows its name (a button's title) as its text, as on a device; an input's name is a label, not what it holds.
     const text = isText ? label(node.value ?? node.name) : INPUT_ROLES.has(node.role) ? undefined : name;
     // A checkbox's value is its state ("0", "1"), already in `checked`; a secure field's is never reported.
-    const value = secure || isText || CHECKABLE_ROLES.has(node.role) ? undefined : node.value;
+    // agent-desktop leaves out the value of an empty text field; it is the empty string, as inputValue() reads it, so getByDisplayValue('') finds the field.
+    const value = secure || isText || CHECKABLE_ROLES.has(node.role) ? undefined : node.role === 'textfield' ? (node.value ?? '') : node.value;
     const rect = node.bounds === undefined ? undefined : { x: node.bounds.x - window.x, y: node.bounds.y - window.y, width: node.bounds.width, height: node.bounds.height };
     if (secure) {
       // A box with no area masks nothing, so it proves nothing about a field that may still show.
