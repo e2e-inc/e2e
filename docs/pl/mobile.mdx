@@ -405,7 +405,7 @@ w trace'ie drzewo pickera.
 emulatora Androida (profil Pixel Fold albo ogólny „7.6in Foldable”)
 w podanej pozycji. `closed` włącza zewnętrzny ekran, a `half-open` i `open`
 wewnętrzny. Na Duo wywołanie kończy się, gdy zawias osiągnie pozycję,
-zwykle po 10–16 sekundach, więc ustaw `actionTimeout` na co najmniej 20
+zwykle po upływie od 10 do 16 sekund, więc ustaw `actionTimeout` na co najmniej 20
 sekund; `half-open` oznacza tam urządzenie rozłożone jak książka pod kątem
 130°. Na emulatorze Androida wywołanie kończy się w ciągu kilku sekund, gdy
 Android zatwierdzi odpowiedni stan urządzenia; `half-open` to kąt z profilu
@@ -867,7 +867,7 @@ export function cloudDevices(options: { provider: string; device: string; osVers
   `device.dismissKeyboard()` albo przewiń ekran tak, żeby węzeł wyszedł spod
   klawiatury. Zobacz [Widoczność](/reference/mobile#visibility).
 - `doubleTap()` i `screen.doubleTapAt()` na iOS to dwa tapnięcia w odstępie
-  około 285–335 ms. Ustaw w detektorze podwójnego tapnięcia okno co
+  od około 285 do 335 ms. Ustaw w detektorze podwójnego tapnięcia okno co
   najmniej 350 ms.
 - Na iOS `device.foregroundApp()` nadal zwraca aplikację sesji po
   `device.home()`. Zamiast tego sprawdź, co jest na ekranie.

@@ -6,7 +6,7 @@ description: Wskaż silnikowi webowemu swoją aplikację albo pozwól runnerowi 
 ---
 
 `@e2e-dev/web` uruchamia testy w przeglądarce pod adresem URL twojej aplikacji.
-Trasy, ciasteczka, okna dialogowe i pobieranie plików opisuje strona
+Przechwytywanie żądań, ciasteczka, okna dialogowe i pobieranie plików opisuje strona
 [Praca z przeglądarką](/browser).
 
 ## Uruchamianie aplikacji
@@ -19,7 +19,7 @@ engine: web(),
 app: { url: process.env.APP_URL ?? 'http://localhost:3000' },
 ```
 
-URL bez schematu dostaje HTTPS, a w przypadku hosta loopback – HTTP. Zwykłe
+URL bez schematu dostaje HTTPS, a URL hosta loopback dostaje HTTP. Zwykłe
 HTTP działa tylko na hoście loopback.
 
 ### Niech runner uruchomi aplikację
@@ -185,7 +185,7 @@ export default {
 Każdy test uruchamia się na każdym targecie, z osobnym wynikiem dla każdej
 nazwy targetu. Każda ponowna próba startuje z rozmiarem targetu.
 
-- Jeden rozmiar uruchomisz przez `npx e2e run --target phone`. Pary test–target
+- Jeden rozmiar uruchomisz przez `npx e2e run --target phone`. Pary test-target
   wypiszesz przez `npx e2e list`.
 - Targety, które deklarują to samo `app.command`, współdzielą jeden serwer
   deweloperski.
@@ -204,7 +204,7 @@ pokazałby stronę 1280 na 720 w rogu okna:
 ```
 
 Lokalnie w trybie headed przeglądarka otwiera małe okno. Przeglądarka
-w chmurze ma taki rozmiar okna, jaki zamówiłeś w usłudze.
+w chmurze ma taki rozmiar okna, jaki ustawisz w usłudze.
 `browser.setViewport` nadal działa.
 
 ### Zmiana rozmiaru w trakcie testu
@@ -244,7 +244,7 @@ i wyróżniony tekst.
 
 Agent widzi też, razem ze stanem zaznaczenia, checkbox albo radio button,
 który biblioteka komponentów zmniejsza do zera i chowa pod jego własną
-etykietą (tak robi np. Element Plus). Dotknięcie takiej kontrolki klika
+etykietą (tak robi np. Element Plus). Tapnięcie takiej kontrolki klika
 etykietę. Gdy etykieta jest linkiem albo zawiera link lub inną kontrolkę,
 agent widzi tekst etykiety i tę kontrolkę, ale nie checkbox, bo kliknięcie
 etykiety mogłoby trafić w link. Locatory nadal uznają taki checkbox lub radio
@@ -311,7 +311,7 @@ uprawnienie w targecie:
 
 <CardGroup cols={2}>
   <Card title="Praca z przeglądarką" icon="globe" href="/browser">
-    Mockuj trasy, ustawiaj ciasteczka, obsługuj okna dialogowe i pobieraj pliki.
+    Mockuj żądania, ustawiaj ciasteczka, obsługuj okna dialogowe i pobieraj pliki.
   </Card>
   <Card title="Referencja silnika webowego" icon="masks-theater" href="/reference/web">
     Wszystkie opcje `web()` i wszystkie metody `browser`.

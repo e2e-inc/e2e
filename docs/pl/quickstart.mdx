@@ -15,7 +15,7 @@ export const setupPrompt = `Skonfiguruj w tym projekcie testy end-to-end w e2e. 
 1. Uruchom \`npx e2e init --yes\` (albo odpowiednik dla pnpm lub bun, jeśli projekt ich używa). Polecenie tworzy konfigurację web opartą na Vercel AI Gateway, przykładowy test, skill e2e i konfigurację MCP. Na razie niczego nie instaluje.
 2. Przeczytaj skill e2e (\`npx e2e guide\` wypisuje cały skill, \`npx e2e guide <topic>\` wybrany temat) i trzymaj się go we wszystkich kolejnych krokach.
 3. Wskaż tę aplikację w targecie. W aplikacji webowej ustaw jej URL i polecenie, które uruchamia serwer deweloperski. W aplikacji na iOS lub Androida zamień @e2e-dev/web na @e2e-dev/mobile i przepisz przykładowy test pod silnik mobilny.
-4. Zapytaj mnie, jakiego modelu użyć w krokach agenta: z subskrypcji ChatGPT, GitHub Copilot, OpenCode Console lub SuperGrok, przez klucz API czy lokalnego. Skonfiguruj go za pomocą pakietu jego dostawcy. Jeśli wymaga zalogowania, podaj mi polecenie \`npx e2e login\` i poczekaj, aż potwierdzę.
+4. Zapytaj mnie, jakiego modelu użyć w krokach agenta: z subskrypcji ChatGPT, GitHub Copilot, OpenCode Console lub SuperGrok, z klucza API czy lokalny model. Skonfiguruj go za pomocą pakietu jego dostawcy. Jeśli wymaga zalogowania, podaj mi polecenie \`npx e2e login\` i poczekaj, aż potwierdzę.
 5. Zainstaluj zależności, uruchom przykładowy test i poprawiaj błędy konfiguracji, aż test przejdzie.
 6. Napisz jeden test najważniejszej ścieżki użytkownika w tej aplikacji, uruchom go i poprawiaj, aż przejdzie.`;
 
@@ -261,7 +261,7 @@ bunx e2e run tests/agent.e2e.ts
 ```
 </CodeGroup>
 
-Jeśli w kreatorze wybrano **None**, najpierw [dodaj model](/models). Dodaj
+Jeśli w kreatorze wybierzesz **None**, najpierw [dodaj model](/models). Dodaj
 `--headed`, żeby oglądać przebieg testu webowego. Dodaj `--no-cache`, żeby wywołać
 model zamiast odtwarzać akcje zapisane w cache'u.
 
@@ -320,7 +320,7 @@ współdzielą jeden proces serwera.
     Cele, asercje i locatory.
   </Card>
   <Card title="Uwierzytelnianie" icon="key" href="/authentication">
-    Używaj wielokrotnie raz zapisanego logowania i nie wysyłaj haseł do modelu.
+    Używaj ponownie zapisanego logowania i nie wysyłaj haseł do modelu.
   </Card>
   <Card title="Debugowanie" icon="bug" href="/debugging">
     Analizuj błędy, zrzuty ekranu i trace'y.
