@@ -274,9 +274,10 @@ describe('a key a program hands e2e itself', () => {
   it('in list()\'s env, is redacted from the failure of a config that quotes it', async () => {
     const random = randomBytes(16).toString('hex');
     const key = `sk-list-env-${random}`;
-    const project = createProject({ 'tests/none.e2e.ts': '' });
+    // The key is a file the program reads: it is no part of the program's text, and so of no argument Node starts with.
+    const project = createProject({ 'tests/none.e2e.ts': '', 'list-key.txt': key });
     projects.push(project);
-    const script = `import { list } from ${JSON.stringify(RUNNER)};\nconst key = ${JSON.stringify(key)};\ntry { await list({ cwd: process.cwd(), config: { targets: [key] }, env: { OPENAI_API_KEY: key } }); } catch (error) { console.log(error.code, error.message); }\n`;
+    const script = `import { readFileSync } from 'node:fs';\nimport { list } from ${JSON.stringify(RUNNER)};\nconst key = readFileSync('list-key.txt', 'utf8');\ntry { await list({ cwd: process.cwd(), config: { targets: [key] }, env: { OPENAI_API_KEY: key } }); } catch (error) { console.log(error.code, error.message); }\n`;
     const output = await node(project, '--input-type=module', '-e', script);
     expect(output).toContain('INVALID_CONFIG');
     expect(output).toContain('<secret:OPENAI_API_KEY>');
@@ -332,7 +333,11 @@ describe('a key only the environment handed to a run or a host holds', () => {
 
   it('is redacted in the error of a host whose config loads the key itself and then fails', async () => {
     const key = `sk-host-config-${randomBytes(12).toString('hex')}`;
-    const project = createProject({ 'e2e.config.ts': `process.env.DEEPSEEK_API_KEY = ${JSON.stringify(key)};\nthrow new Error('config failed with ' + process.env.DEEPSEEK_API_KEY);\n` });
+    // The key is a file the config reads: it is no part of the config's text.
+    const project = createProject({
+      'host-key.txt': key,
+      'e2e.config.ts': "import { readFileSync } from 'node:fs';\nprocess.env.DEEPSEEK_API_KEY = readFileSync(new URL('host-key.txt', import.meta.url), 'utf8');\nthrow new Error('config failed with ' + process.env.DEEPSEEK_API_KEY);\n",
+    });
     projects.push(project);
     const built = '../../dist/run/open-session.js';
     const { openHost } = (await import(built)) as typeof import('../../src/run/open-session.ts');

@@ -620,9 +620,12 @@ describe('the login Codex saved', () => {
     mkdirSync(home);
     const codexBin = join(directory, 'codex');
     // Stands in for a Codex that saves a login while the session starts, after the step's first look.
-    writeFileSync(codexBin, `#!/bin/sh\nprintf '%s' '${login({ OPENAI_API_KEY: key })}' > "$CODEX_HOME/auth.json"\necho '[]'\n`);
+    // The login is a file the script copies: its text never becomes part of the script.
+    const loginToSave = join(directory, 'login-to-save.json');
+    writeFileSync(loginToSave, login({ OPENAI_API_KEY: key }));
+    writeFileSync(codexBin, '#!/bin/sh\ncat "$CODEX_LOGIN_TO_SAVE" > "$CODEX_HOME/auth.json"\necho \'[]\'\n');
     chmodSync(codexBin, 0o755);
-    const executor = inProject(directory, () => codex({ env: { CODEX_PATH: codexBin, CODEX_HOME: home, ACP_AUTH_REQUIRED: '1' } }));
+    const executor = inProject(directory, () => codex({ env: { CODEX_PATH: codexBin, CODEX_HOME: home, CODEX_LOGIN_TO_SAVE: loginToSave, ACP_AUTH_REQUIRED: '1' } }));
     expect(redactSecrets(key)).toBe(key);
     expect(await stepFailure(executor)).toContain('the agent is not signed in');
     expect(redactSecrets(key)).toBe('<secret:codex.api-key>');
