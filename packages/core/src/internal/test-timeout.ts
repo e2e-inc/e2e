@@ -1,6 +1,8 @@
 /** Changing the running test's timeout from inside it: `test.setTimeout(timeout)` and `test.slow()`. */
 
 import { currentAttempt, type PublishedAttempt } from '../expect/attempt.ts';
+import type { AttemptBudget } from '../run/budget.ts';
+import type { PassOptions } from '../types.ts';
 import { slowedBrand, suiteHookBrand } from './brands.ts';
 import { CollectionError, TestError } from './errors.ts';
 import { realmSlot } from './realm-slot.ts';
@@ -27,12 +29,21 @@ export type TimeoutChange = 'set' | 'ended' | 'teardown';
 export interface RunningSuiteHook {
   /** What runs, as a refusal names it: `an afterAll hook`. */
   readonly name: string;
-  /** Moves the hook's timeout to what `update` makes of it. */
+  readonly budget: AttemptBudget;
+  readonly assertionTimeout: number;
+  readonly toPass: Readonly<Required<PassOptions>>;
+  readonly recordSecondaryError?: (error: TestError) => void;
+  /** Moves the hook's timeout to what `update` makes of it, and says what it did; core words any refusal. */
   readonly setTimeout?: (update: TimeoutUpdate) => TimeoutChange;
 }
 
 /** On `globalThis`, as the published attempt is: test modules share nothing else with the runner. */
 const suiteHookSlot = realmSlot<RunningSuiteHook>(suiteHookBrand);
+
+/** Returns the suite hook running outside a test attempt. */
+export function runningSuiteHook(): RunningSuiteHook | undefined {
+  return suiteHookSlot.get(globalThis);
+}
 
 /** Names `hook` as the running suite hook while `run` runs; one runs at a time per process. */
 export async function inSuiteHook<T>(hook: RunningSuiteHook, run: () => Promise<T>): Promise<T> {
@@ -49,7 +60,7 @@ type RunningCode = { readonly hook: RunningSuiteHook; readonly attempt?: undefin
 
 /** The running suite hook or attempt; outside both the call is a collection error saying what to use instead. */
 function runningCode(outside: string): RunningCode {
-  const hook = suiteHookSlot.get(globalThis);
+  const hook = runningSuiteHook();
   if (hook !== undefined) return { hook };
   const attempt = currentAttempt();
   if (attempt === undefined) throw new CollectionError(outside);
