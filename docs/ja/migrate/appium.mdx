@@ -189,6 +189,7 @@ await agent.act('sign in as {username}', { params: { username: ada.username, pas
 | `driver.url('myapp://x')`, `mobile: deepLink` | `device.openLink('myapp://x')` |
 | `driver.back()`、`driver.hideKeyboard()`、Home 用の `pressKeyCode` | `app.back()`、`device.dismissKeyboard()`、`device.home()` |
 | `driver.isKeyboardShown()` | `device.isKeyboardShown()`。現在の画面をそのまま読むので、キーボードを開閉する操作の直後は `expect.poll` でポーリングする |
+| `driver.lock()`, `driver.unlock()` | [`device.lock()`](/reference/mobile#lock)、[`device.unlock()`](/reference/mobile#unlock)。agent-device の sleep / wake ハードウェアボタンを送る（Android では `KEYCODE_SLEEP` / `KEYCODE_WAKEUP`）。Android のみ。iOS ではいずれも `UNSUPPORTED_CAPABILITY`。PIN やパスワードは入力しない |
 | `driver.getPageSource()` | `screen.tree()`。表示するなら `screen.debug()` |
 | `driver.takeScreenshot()` | `app.screenshot('label')`。機密フィールドはマスキング |
 | `startRecordingScreen()`, `stopRecordingScreen()` | `app.startRecording()`、`app.stopRecording()`、または `npx e2e run --video` |
@@ -312,7 +313,7 @@ bunx e2e run --target ios --reporter list,junit
 | --- | --- |
 | `driver.getLogs('logcat')`, `'syslog'`, `'crashlog'` | フックから `adb logcat` または `xcrun simctl spawn <udid> log stream` を実行 |
 | `driver.queryAppState(id)` | 一部のみ対応: インストールの有無は `device.isAppInstalled(id)`、前面のアプリは `device.foregroundApp()`。バックグラウンドの実行状態に相当するものはありません |
-| `driver.lock()`、`unlock()`、電源・音量ボタン | [`unstable_raw`](/reference/mobile#unstable_raw) 経由の `client.command.hardwareButton` |
+| 電源・音量ボタン | [`unstable_raw`](/reference/mobile#unstable_raw) 経由の `client.command.hardwareButton` |
 | `driver.openNotifications()`, `mobile: pushNotification` | 上端からの `screen.swipe({ from, to })`。Node からの `xcrun simctl push` |
 | `driver.pushFile()`, `pullFile()`, `pullFolder()` | Node から `adb push`、`adb pull`、`xcrun simctl addmedia`。ローカルデバイスのみ |
 | `driver.getAlertText()` | iOS は `screen.getByRole('alert').textContent()`、Android は `getByText` |

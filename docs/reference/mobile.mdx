@@ -252,10 +252,10 @@ mobile({ platform: 'ios', transition: 800 }); // default: 500
 
 If the control changes during the wait, the action finds it again within its timeout before acting.
 
-`back`, `home`, `alert`, `dismissKeyboard`, `setOrientation`, and `fold` on
-[`device`](#device) change the screen, so they count as actions for this
-budget the way a tap does. A control that arrives with the screen they reveal
-waits out the budget before the next action lands on it.
+`back`, `home`, `lock`, `unlock`, `alert`, `dismissKeyboard`, `setOrientation`,
+and `fold` on [`device`](#device) change the screen, so they count as actions
+for this budget the way a tap does. A control that arrives with the screen they
+reveal waits out the budget before the next action lands on it.
 
 `fill` and `clear` re-read the field before typing. Missing fields, changed
 security state, or incomplete captures return `NODE_STALE` before mutation,
@@ -457,6 +457,8 @@ test('offline banner', { platforms: ['android'] }, async ({ app, device, screen 
 | [`viewport`](#viewport) | `Promise<ViewportSize>` |
 | [`home`](#home) | `Promise<void>` |
 | [`back`](#back) | `Promise<void>` |
+| [`lock`](#lock) | `Promise<void>` |
+| [`unlock`](#unlock) | `Promise<void>` |
 | [`alert`](#alert) | `Promise<void>` |
 | [`dismissKeyboard`](#dismisskeyboard) | `Promise<void>` |
 | [`isKeyboardShown`](#iskeyboardshown) | `Promise<boolean>` |
@@ -464,8 +466,8 @@ test('offline banner', { platforms: ['android'] }, async ({ app, device, screen 
 | [`setClipboard`](#setclipboard) | `Promise<void>` |
 
 Every async method is a recorded step named `device.<method>`, bounded by
-`config.actionTimeout`. `back`, `home`, `alert`, `dismissKeyboard`,
-`setOrientation`, and `fold` count as actions for the
+`config.actionTimeout`. `back`, `home`, `lock`, `unlock`, `alert`,
+`dismissKeyboard`, `setOrientation`, and `fold` count as actions for the
 [`transition`](#transition) budget. Each entry below shows its member's
 declaration; the types they use are under [Types](#device-fixture).
 
@@ -963,6 +965,45 @@ back(): Promise<void>;
 ```ts
 await device.back();
 ```
+
+#### `lock`
+
+```ts
+/**
+ * Locks the device screen through agent-device's sleep hardware button
+ * (`KEYCODE_SLEEP` on Android). Android only; on iOS it is
+ * `UNSUPPORTED_CAPABILITY`.
+ */
+lock(): Promise<void>;
+```
+
+```ts
+await device.lock();
+```
+
+| Throws | When |
+| --- | --- |
+| `UNSUPPORTED_CAPABILITY` | On iOS, or when the device cannot press the sleep button. |
+
+#### `unlock`
+
+```ts
+/**
+ * Wakes the device screen through agent-device's wake hardware button
+ * (`KEYCODE_WAKEUP` on Android). Android only; on iOS it is
+ * `UNSUPPORTED_CAPABILITY`. It does not enter a PIN or password; keep the
+ * device unlocked when a credential gate is required.
+ */
+unlock(): Promise<void>;
+```
+
+```ts
+await device.unlock();
+```
+
+| Throws | When |
+| --- | --- |
+| `UNSUPPORTED_CAPABILITY` | On iOS, or when the device cannot press the wake button. |
 
 #### `alert`
 

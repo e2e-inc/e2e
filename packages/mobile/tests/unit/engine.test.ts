@@ -2548,7 +2548,7 @@ describe('device fixture', () => {
     expect(h.fake.lastArgs('interactions.scroll')).toEqual({ direction: 'down', postGestureStabilization: false });
   });
 
-  it('counts a back, home, alert, keyboard, rotation, or fold as an action, so a control that arrives with it waits out the transition budget', async () => {
+  it('counts a back, home, lock, unlock, alert, keyboard, rotation, or fold as an action, so a control that arrives with it waits out the transition budget', async () => {
     autoAdvanceTimers();
     const h = harness({ transition: 120 });
     await openAttempt(h);
@@ -2557,6 +2557,8 @@ describe('device fixture', () => {
     for (const change of [
       () => device.back(),
       () => device.home(),
+      () => device.lock(),
+      () => device.unlock(),
       () => device.alert('accept'),
       () => device.dismissKeyboard(),
       () => device.setOrientation('landscape-left'),
@@ -2685,6 +2687,8 @@ describe('device fixture', () => {
     expect(await device.foregroundApp()).toEqual({ name: 'Settings', bundleId: 'com.apple.Preferences' });
     await device.home();
     await device.back();
+    await device.lock();
+    await device.unlock();
     await device.alert('accept');
     await device.dismissKeyboard();
     expect(await device.clipboard()).toBe('pasted');
@@ -2705,11 +2709,15 @@ describe('device fixture', () => {
       ['command.appState', {}],
       ['command.home', { platform: 'ios' }],
       ['command.back', { settle: true, settleQuietMs: 150 }],
+      ['command.hardwareButton', { platform: 'ios', button: 'sleep' }],
+      ['command.hardwareButton', { platform: 'ios', button: 'wake' }],
       ['command.alert', { platform: 'ios', action: 'accept' }],
       ['command.keyboard', { action: 'dismiss' }],
       ['command.clipboard', { platform: 'ios', action: 'read' }],
       ['command.clipboard', { platform: 'ios', action: 'write', text: 'x' }],
     ]);
+    expect(declared!.lock).toEqual({ kind: 'resource' });
+    expect(declared!.unlock).toEqual({ kind: 'resource' });
   });
 
   it('changes a permission on the pinned app by name and on the worker\'s device, with no open first, whatever the session is on', async () => {

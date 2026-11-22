@@ -233,7 +233,7 @@ mobile({ platform: 'ios', transition: 800 }); // default: 500
 
 如果控件在等待期间变化，操作会在自身超时范围内重新查找控件，再执行操作。
 
-[`device`](#device) 上的 `back`、`home`、`alert`、`dismissKeyboard`、`setOrientation` 和 `fold` 会改变屏幕，因此在此预算中与点击一样计为操作。随它们打开的屏幕一起出现的控件，会等待该预算耗尽后才接受下一次操作。
+[`device`](#device) 上的 `back`、`home`、`lock`、`unlock`、`alert`、`dismissKeyboard`、`setOrientation` 和 `fold` 会改变屏幕，因此在此预算中与点击一样计为操作。随它们打开的屏幕一起出现的控件，会等待该预算耗尽后才接受下一次操作。
 
 `fill` 和 `clear` 会在输入前重新读取字段。字段缺失、安全状态变化或捕获不完整时，会在修改前返回 `NODE_STALE`，然后在重新观察后重试。非输入测试目标返回 `UNSUPPORTED_CAPABILITY`。iOS 的 `other` 是平台未分类元素的类型；当它包含值或仅包含文本时，可以向其中输入，因为自绘字段（Compose Multiplatform、Flutter）可能以这种形式呈现。
 
@@ -392,14 +392,15 @@ test('offline banner', { platforms: ['android'] }, async ({ app, device, screen 
 | [`foregroundApp`](#foregroundapp) | `Promise<ForegroundApp>` |
 | [`home`](#home) | `Promise<void>` |
 | [`back`](#back) | `Promise<void>` |
+| [`lock`](#lock) | `Promise<void>` |
+| [`unlock`](#unlock) | `Promise<void>` |
 | [`alert`](#alert) | `Promise<void>` |
 | [`dismissKeyboard`](#dismisskeyboard) | `Promise<void>` |
 | [`isKeyboardShown`](#iskeyboardshown) | `Promise<boolean>` |
 | [`clipboard`](#clipboard) | `Promise<string>` |
 | [`setClipboard`](#setclipboard) | `Promise<void>` |
 
-每个异步方法都会记录为名为 `device.<method>` 的步骤，受 `config.actionTimeout` 限制。`back`、`home`、`alert`、`dismissKeyboard`、`setOrientation` 和 `fold` 在 [`transition`](#transition) 预算中计为操作。以下各条目展示相应成员的声明；它们使用的类型见[类型](#device-fixture)。
-
+每个异步方法都会记录为名为 `device.<method>` 的步骤，受 `config.actionTimeout` 限制。`back`、`home`、`lock`、`unlock`、`alert`、`dismissKeyboard`、`setOrientation` 和 `fold` 在 [`transition`](#transition) 预算中计为操作。以下各条目展示相应成员的声明；它们使用的类型见[类型](#device-fixture)。
 | 抛出错误 | 发生条件 |
 | --- | --- |
 | `APP_NOT_OPEN` | 会话丢失。 |
@@ -852,6 +853,45 @@ back(): Promise<void>;
 ```ts
 await device.back();
 ```
+
+#### `lock`
+
+```ts
+/**
+ * Locks the device screen through agent-device's sleep hardware button
+ * (`KEYCODE_SLEEP` on Android). Android only; on iOS it is
+ * `UNSUPPORTED_CAPABILITY`.
+ */
+lock(): Promise<void>;
+```
+
+```ts
+await device.lock();
+```
+
+| 抛出错误 | 发生条件 |
+| --- | --- |
+| `UNSUPPORTED_CAPABILITY` | 在 iOS 上，或设备无法按下 sleep 键。 |
+
+#### `unlock`
+
+```ts
+/**
+ * Wakes the device screen through agent-device's wake hardware button
+ * (`KEYCODE_WAKEUP` on Android). Android only; on iOS it is
+ * `UNSUPPORTED_CAPABILITY`. It does not enter a PIN or password; keep the
+ * device unlocked when a credential gate is required.
+ */
+unlock(): Promise<void>;
+```
+
+```ts
+await device.unlock();
+```
+
+| 抛出错误 | 发生条件 |
+| --- | --- |
+| `UNSUPPORTED_CAPABILITY` | 在 iOS 上，或设备无法按下 wake 键。 |
 
 #### `alert`
 

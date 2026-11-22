@@ -176,7 +176,8 @@ on purpose.
 | `maestro hierarchy` as a terminal command | A one-line test that calls `screen.debug()` |
 | `--device-locale` | `app.launchArguments: ['-AppleLanguages', '(de)', '-AppleLocale', 'de_DE']` on iOS, see [Run the app in another language](/mobile#run-the-app-in-another-language); on Android, set the device language before the run |
 | Maestro Cloud | Your [CI](/ci) with a [hosted device provider](/mobile#hosted-devices) |
-| `pressKey: lock`, `power`, `volume up`, `volume down` | `client.command.hardwareButton` on [`unstable_raw`](/reference/mobile#unstable_raw): power and volume on Android, volume on a physical iPhone |
+| `pressKey: lock` | [`device.lock()`](/reference/mobile#lock); wake with [`device.unlock()`](/reference/mobile#unlock) |
+| `pressKey: power`, `volume up`, `volume down` | `client.command.hardwareButton` on [`unstable_raw`](/reference/mobile#unstable_raw): power and volume on Android, volume on a physical iPhone |
 | JUnit `properties`, a JUnit path with `--output` | Ids in tags or the title; copy `.e2e/junit.xml` after the run |
 | `--device` on the command line | `device: process.env.DEVICE` in the config |
 

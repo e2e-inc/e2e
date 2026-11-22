@@ -180,6 +180,7 @@ await agent.act('sign in as {username}', { params: { username: ada.username, pas
 | `driver.url('myapp://x')`, `mobile: deepLink` | `device.openLink('myapp://x')` |
 | `driver.back()`、`driver.hideKeyboard()`、用于 Home 的 `pressKeyCode` | `app.back()`, `device.dismissKeyboard()`, `device.home()` |
 | `driver.isKeyboardShown()` | `device.isKeyboardShown()`。它读取的是当前屏幕，因此在打开或关闭键盘的操作之后，用 `expect.poll` 轮询 |
+| `driver.lock()`, `driver.unlock()` | [`device.lock()`](/reference/mobile#lock)、[`device.unlock()`](/reference/mobile#unlock)。发送 agent-device 的 sleep / wake 硬件按键（Android 上为 `KEYCODE_SLEEP` / `KEYCODE_WAKEUP`）。仅 Android；iOS 上均为 `UNSUPPORTED_CAPABILITY`。不会输入 PIN 或密码 |
 | `driver.getPageSource()` | `screen.tree()`，或使用 `screen.debug()` 输出它 |
 | `driver.takeScreenshot()` | `app.screenshot('label')`，安全字段会被遮罩 |
 | `startRecordingScreen()`, `stopRecordingScreen()` | `app.startRecording()`、`app.stopRecording()`，或 `npx e2e run --video` |
@@ -300,7 +301,7 @@ bunx e2e run --target ios --reporter list,junit
 | --- | --- |
 | `driver.getLogs('logcat')`, `'syslog'`, `'crashlog'` | 在钩子中运行 `adb logcat` 或 `xcrun simctl spawn <udid> log stream` |
 | `driver.queryAppState(id)` | 部分对应：`device.isAppInstalled(id)` 判断是否安装，`device.foregroundApp()` 获取前台应用。后台运行状态没有对应方法 |
-| `driver.lock()`、`unlock()`、电源和音量按钮 | 通过 [`unstable_raw`](/reference/mobile#unstable_raw) 调用 `client.command.hardwareButton` |
+| 电源和音量按钮 | 通过 [`unstable_raw`](/reference/mobile#unstable_raw) 调用 `client.command.hardwareButton` |
 | `driver.openNotifications()`, `mobile: pushNotification` | 从顶部边缘执行 `screen.swipe({ from, to })`；在 Node 中运行 `xcrun simctl push` |
 | `driver.pushFile()`, `pullFile()`, `pullFolder()` | 在 Node 中运行 `adb push`、`adb pull` 或 `xcrun simctl addmedia`；仅限本地设备 |
 | `driver.getAlertText()` | iOS 上使用 `screen.getByRole('alert').textContent()`，Android 上使用 `getByText` |

@@ -15,6 +15,12 @@ declare const fixtures: MobileFixtures;
 void (device.viewport() satisfies Promise<ViewportSize>);
 void (entryDevice.viewport() satisfies Promise<ViewportSize>);
 void (fixtures.device.viewport() satisfies Promise<ViewportSize>);
+void (device.lock() satisfies Promise<void>);
+void (device.unlock() satisfies Promise<void>);
+void (entryDevice.lock() satisfies Promise<void>);
+void (entryDevice.unlock() satisfies Promise<void>);
+void (fixtures.device.lock() satisfies Promise<void>);
+void (fixtures.device.unlock() satisfies Promise<void>);
 
 type Exact<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
 void (true satisfies Exact<ReturnType<Device['viewport']>, Promise<ViewportSize>>);

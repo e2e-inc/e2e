@@ -453,6 +453,10 @@ export default {
   for a foldable's hinge (iPhone Duo, Android foldable emulators), `locator`, more). Portable suites declare
   `requires: ['device']`.
 - `device.viewport()` reads `{ width, height }` fresh on each call, in the coordinate space of `screen.tapAt()`.
+- `device.lock()` and `device.unlock()` send agent-device's sleep and wake
+  hardware buttons (`KEYCODE_SLEEP` / `KEYCODE_WAKEUP` on Android). Android
+  only; on iOS both are `UNSUPPORTED_CAPABILITY`. They do not enter a PIN or
+  password.
 - `device.unstable_raw` gives the session name, device id and name, a
   `selection` to spread into a call, and a
   raw driver `client` bound to the test's session, for what `device`

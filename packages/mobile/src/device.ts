@@ -192,6 +192,19 @@ export interface Device {
   home(): Promise<void>;
   /** Navigates back once (in-app back). */
   back(): Promise<void>;
+  /**
+   * Locks the device screen through agent-device's sleep hardware button
+   * (`KEYCODE_SLEEP` on Android). Android only; on iOS it is
+   * `UNSUPPORTED_CAPABILITY`.
+   */
+  lock(): Promise<void>;
+  /**
+   * Wakes the device screen through agent-device's wake hardware button
+   * (`KEYCODE_WAKEUP` on Android). Android only; on iOS it is
+   * `UNSUPPORTED_CAPABILITY`. It does not enter a PIN or password; keep the
+   * device unlocked when a credential gate is required.
+   */
+  unlock(): Promise<void>;
   /** Accepts or dismisses the visible system alert. */
   alert(action: 'accept' | 'dismiss'): Promise<void>;
   /**
@@ -376,6 +389,20 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     async back() {
       await surface.screenCommand('device.back', (client) => client.command.back({ ...surface.settleOptions }), context.signal);
     },
+    async lock() {
+      await surface.screenCommand(
+        'device.lock',
+        (client) => client.command.hardwareButton({ ...surface.selection(), button: 'sleep' }),
+        context.signal,
+      );
+    },
+    async unlock() {
+      await surface.screenCommand(
+        'device.unlock',
+        (client) => client.command.hardwareButton({ ...surface.selection(), button: 'wake' }),
+        context.signal,
+      );
+    },
     async alert(action) {
       await surface.screenCommand('device.alert', (client) => client.command.alert({ ...surface.selection(), action }), context.signal);
     },
@@ -420,6 +447,8 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     foregroundApp: action,
     home: action,
     back: action,
+    lock: action,
+    unlock: action,
     alert: { ...action, label: (value) => value },
     dismissKeyboard: action,
     isKeyboardShown: action,
