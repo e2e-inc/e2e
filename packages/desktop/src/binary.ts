@@ -53,6 +53,16 @@ function executableName(): string {
 /** The file an unpacked release is stamped with once its archive's digest checked out: the digest itself. */
 const STAMP = '.verified';
 
+/** Whether `file` is a regular file this process may run: a directory passes the execute check on macOS, being searchable, but cannot be run. */
+async function executableFile(file: string): Promise<boolean> {
+  try {
+    await access(file, constants.X_OK);
+    return (await stat(file)).isFile();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Whether the cache entry is a whole, checked release: stamped with the
  * pinned digest, its executable still executable, and on macOS the helper
@@ -62,8 +72,8 @@ const STAMP = '.verified';
 async function usable(directory: string, digest: string): Promise<boolean> {
   try {
     if ((await readFile(path.join(directory, STAMP), 'utf8')).trim() !== digest) return false;
-    await access(path.join(directory, executableName()), constants.X_OK);
-    if (process.platform === 'darwin') await access(path.join(directory, 'agent-desktop-macos-helper'), constants.X_OK);
+    if (!(await executableFile(path.join(directory, executableName())))) return false;
+    if (process.platform === 'darwin' && !(await executableFile(path.join(directory, 'agent-desktop-macos-helper')))) return false;
     return true;
   } catch {
     return false;
@@ -108,11 +118,7 @@ export function pinnedExecutable(env: Readonly<Record<string, string | undefined
 export async function resolveExecutable(binary: string | undefined, projectRoot: string, env: Readonly<Record<string, string | undefined>>): Promise<string> {
   if (binary !== undefined) {
     const resolved = path.resolve(projectRoot, binary);
-    try {
-      await access(resolved, constants.X_OK);
-    } catch {
-      throw new ConfigurationError('INVALID_CONFIG', `desktop({ binary }) names ${resolved}, which is not an executable file`);
-    }
+    if (!(await executableFile(resolved))) throw new ConfigurationError('INVALID_CONFIG', `desktop({ binary }) names ${resolved}, which is not an executable file`);
     return resolved;
   }
   const target = releaseTarget();

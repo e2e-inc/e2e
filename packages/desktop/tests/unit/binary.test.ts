@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { installPinned, pinnedExecutable } from '../../src/binary.ts';
+import { installPinned, pinnedExecutable, resolveExecutable } from '../../src/binary.ts';
 
 /** Runs before every rename the install makes, so a test can hold one at a chosen point while another run goes ahead. */
 const hooks = vi.hoisted(() => ({ beforeRename: (_from: string, _to: string): Promise<void> => Promise.resolve() }));
@@ -226,6 +226,15 @@ describe('the pinned agent-desktop', () => {
       for (const leftover of leftovers.slice(0, 2)) utimesSync(leftover, dayAgo, dayAgo);
       await installPinned(env, new AbortController().signal, () => undefined, digests);
       expect(leftovers.map((leftover) => existsSync(leftover))).toEqual([false, false, true]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a directory as the binary, though the execute check passes on a searchable one', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'e2e-desktop-cache-'));
+    try {
+      await expect(resolveExecutable(home, process.cwd(), {})).rejects.toMatchObject({ code: 'INVALID_CONFIG', message: expect.stringMatching(/not an executable file/) });
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
