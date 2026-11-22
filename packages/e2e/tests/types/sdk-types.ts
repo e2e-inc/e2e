@@ -223,6 +223,9 @@ customExecutorObservation.keyboardVisible satisfies boolean | undefined;
 ({ targets, cache: 'read-write' }) satisfies E2EConfig;
 ({ targets, failOnSkippedFailure: true }) satisfies E2EConfig;
 ({ targets, maxDuration: 900_000 }) satisfies E2EConfig;
+({ targets, toPass: { timeout: 200, intervals: [10, 20] } }) satisfies E2EConfig;
+// @ts-expect-error Only timeout and intervals are valid in toPass config.
+({ targets, toPass: { timeout: 200, interval: 10 } }) satisfies E2EConfig;
 ({ targets, cache: { mode: 'read-only', store: remoteStore, dir: 'shared-cache' } }) satisfies E2EConfig;
 ({ targets: [{ platform: 'ios' }] }) satisfies E2EConfig;
 // @ts-expect-error specVersion is gone; the runner version is the format version
@@ -555,8 +558,24 @@ declare const pollMatcherNames: Exclude<keyof PollExpectation<string>, 'not'>;
 declare const valueMatcherNames: Exclude<keyof ValueExpectation<string>, 'not'>;
 pollMatcherNames satisfies typeof valueMatcherNames;
 valueMatcherNames satisfies typeof pollMatcherNames;
-void (expect.poll(() => 'x', { timeout: 15_000, interval: 250, message: 'never settled' }).toBe('x') satisfies Promise<void>);
+void (expect.poll(() => 'x', { timeout: 15_000, intervals: [250], message: 'never settled' }).toBe('x') satisfies Promise<void>);
+void (expect.poll(() => 'x', { interval: 250 }).toBe('x') satisfies Promise<void>);
 void (expect.poll(async () => 1).not.toBeGreaterThan(1) satisfies Promise<void>);
+void (expect.poll(() => 1, { intervals: [10, 50] as const }).toBe(1) satisfies Promise<void>);
+const block = async () => 1;
+void (expect(block, 'eventually').toPass({ intervals: [10, 50], timeout: 500 }) satisfies Promise<void>);
+void (expect(block).not.toPass() satisfies Promise<void>);
+void (expect.soft(block).toPass() satisfies Promise<void>);
+void (expect.soft(block).not.toPass() satisfies Promise<void>);
+expect(block).toBe(block);
+// @ts-expect-error A function is required for toPass.
+void expect('x').toPass();
+// @ts-expect-error Only the value matchers are available after expect.poll.
+void expect.poll(() => 1).toPass();
+// @ts-expect-error Set the message in expect(fn, message).
+void expect(block).toPass({ message: 'retry' });
+// @ts-expect-error The value overload is selected for a value of type any.
+void expect(JSON.parse('{}')).toPass();
 // @ts-expect-error the matcher is typed by what the read returns
 void expect.poll(() => 'x').toBe(1);
 // @ts-expect-error poll takes a read function, not the value itself
@@ -716,7 +735,7 @@ test.for([1])('no body');
 test.each([[1, 'one']])('%i', async (_n, { app }) => { void app; });
 // @ts-expect-error test.for passes the row whole, not spread
 test.for([[1, 'one']])('%i', async (n: number) => { void n; });
-// fail takes the same three shapes and returns nothing inside a body; describe and setup take no fail option.
+// fail takes the same three shapes and returns nothing inside a body; a group takes it as an option or describe.fail, setup never.
 test.fail(true, 'known gap');
 test.fail('known gap');
 test.setTimeout(60_000);
@@ -725,8 +744,15 @@ test.setTimeout('60s');
 test.fail('gap', async () => {}) satisfies ReturnType<typeof test>;
 void (test.fail(false) satisfies void);
 test('gap', { fail: 'known gap' }, async () => {});
-// @ts-expect-error a group cannot expect failure; mark each test
-test.describe('gaps', { fail: true }, () => {});
+test.describe('gaps', { fail: 'legacy checkout' }, () => {});
+void (test.describe.fail('gaps', () => {}) satisfies void);
+describe.fail('gaps', { tags: ['legacy'] }, () => {});
+// @ts-expect-error describe.fail is already marked; a reason goes in describe's fail option
+describe.fail('gaps', { fail: 'legacy checkout' }, () => {});
+// @ts-expect-error describe.fail registration must be synchronous
+test.describe.fail('asynchronous', async () => {});
+// @ts-expect-error a group cannot be focused; describe options take no only
+test.describe.fail('gaps', { only: true }, () => {});
 void screen.getByLabel('Plan').selectOption({ value: 'pro' });
 // @ts-expect-error one of label, value, or index, never two
 void screen.getByLabel('Plan').selectOption({ value: 'pro', index: 1 });
@@ -763,6 +789,19 @@ void screen.tapAt({ x: 1 });
 void screen.swipe({ from: point });
 // @ts-expect-error a swipe is a direction or a path, never both.
 void screen.swipe({ direction: 'up', to: point });
+// Viewport points also take percentages of the viewport, mixed with pixels; a Point is a ScreenPoint.
+void screen.tapAt({ x: '50%', y: '50%' });
+void screen.doubleTapAt({ x: '12.5%', y: 40 }, { timeout: 1_000 });
+void screen.swipe({ from: { x: '50%', y: '90%' }, to: { x: '50%', y: '10%' }, duration: 300 });
+void screen.getByRole('list').tapAt({ x: '50%', y: 0 });
+const screenPoint: import('../../src/index.ts').ScreenPoint = point;
+void screen.tapAt(screenPoint);
+// @ts-expect-error a percentage carries its % sign.
+void screen.tapAt({ x: '50', y: 1 });
+// @ts-expect-error a position is relative to the node, so it stays in pixels.
+void screen.getByRole('image').tap({ position: { x: '50%', y: 0 } });
+// @ts-expect-error the executor's point verbs aim at screenshot pixels, never percentages.
+void executorContext.actions.tapAt({ x: '50%', y: 0 });
 // @ts-expect-error a locator swipe is directional; the path form is screen.swipe.
 void screen.getByRole('image').swipe({ from: point, to: point });
 // @ts-expect-error a directional swipe takes no duration.
@@ -1043,14 +1082,17 @@ if (typeof rendered !== 'string') rendered.pixels.mediaType satisfies string;
 // @ts-expect-error limits left the config: maxInputTokens is per agent, the rest are fixed by the runner
 ({ targets, limits: { maxModelTokensPerCall: 1_000 } }) satisfies E2EConfig;
 
-// The report carries the exploration record only on an explore run; a finding's evidence is one of the attempt's artifacts.
 declare const report: Report;
+report.run.durationMs satisfies number | undefined;
+// @ts-expect-error the field may be absent in older reports
+report.run.durationMs satisfies number;
 // Every result carries its tags, an empty list when the test declares none.
 report.run.results[0]!.tags satisfies readonly string[];
 // Every result says which `--repeat-each` run it is, 0 without the flag.
 report.run.results[0]!.repeat satisfies number;
 // Interrupted tests are counted on their own, never in failed.
 report.run.summary.interrupted satisfies number;
+// The report carries the exploration record only on an explore run; a finding's evidence is one of the attempt's artifacts.
 report.run.explore satisfies { goal: string; findings: readonly { severity: 1 | 2 | 3 | 4 | 5; artifactId?: string | undefined }[] } | undefined;
 // A --last-failed rerun carries what it owed and left out as full results, groups, and hook errors, never a looser shape.
 report.run.carried satisfies
@@ -1130,6 +1172,8 @@ void (expect(await readBody()).toMatchSchema(userSchema) satisfies { id: number 
 void (expect.soft(await readBody()).toMatchSchema(userSchema) satisfies { id: number } | undefined);
 void (expect(JSON.parse('{}')).toMatchSchema(userSchema) satisfies { id: number });
 void (expect.soft(JSON.parse('{}')).toMatchSchema(userSchema) satisfies { id: number } | undefined);
+// @ts-expect-error A function isn't inferred from a return-only generic.
+void expect(await readBody()).toPass();
 
 // describe and the hooks are top-level imports too, typed as their test.* forms.
 describe('group', { tags: ['smoke'] }, () => {
