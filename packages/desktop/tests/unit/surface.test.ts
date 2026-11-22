@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { OperationContext } from '@e2e-dev/core/engine';
@@ -1273,6 +1273,27 @@ describe('DesktopSurface', () => {
       expect(existsSync(left)).toBe(false);
     } finally {
       rmSync(left, { recursive: true, force: true });
+    }
+  });
+
+  it('trusts no state directory it cannot show this user wrote: a symlink in the temporary directory is left alone', async () => {
+    const dead = spawn(process.execPath, ['-e', '']);
+    await new Promise((resolve) => dead.on('exit', resolve));
+    const victim = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { env: { ...process.env, E2E_DESKTOP_LAUNCH: 'token-planted' } });
+    children.push(victim);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    // What another user could put in a shared /tmp: a link named like a state directory, to a record that names a process of this user.
+    const planted = artifacts();
+    writeFileSync(path.join(planted, 'owner'), String(dead.pid));
+    writeFileSync(path.join(planted, 'app.json'), JSON.stringify({ token: 'token-planted' }));
+    const link = path.join(tmpdir(), `e2e-agent-desktop-planted-${process.pid}`);
+    symlinkSync(planted, link);
+    try {
+      await initialized({});
+      expect(await gone(victim.pid!, 300)).toBe(false);
+      expect(existsSync(path.join(planted, 'app.json'))).toBe(true);
+    } finally {
+      rmSync(link, { force: true });
     }
   });
 

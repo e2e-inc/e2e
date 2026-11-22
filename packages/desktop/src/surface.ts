@@ -9,7 +9,7 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -1414,6 +1414,8 @@ async function sweepStateDirectories(): Promise<void> {
   for (const entry of entries) {
     if (!entry.startsWith(STATE_PREFIX)) continue;
     const directory = path.join(root, entry);
+    // A shared temporary directory (`/tmp` when TMPDIR is unset) holds other users' entries too: a record this user did not write names no launch of its own, and its process id must not be killed with this user's rights.
+    if (!(await ownDirectory(directory))) continue;
     const owner = Number((await readFile(path.join(directory, OWNER_FILE), 'utf8').catch(() => '')).trim());
     const stale = Number.isInteger(owner) && owner > 0 ? !alive(owner) : await stat(directory).then((info) => Date.now() - info.mtimeMs > ORPHAN_AGE_MS, () => false);
     if (!stale) continue;
@@ -1438,6 +1440,13 @@ async function sweepStateDirectories(): Promise<void> {
     const settled = known && (await killed(owned, Date.now() + 2_000, signal));
     await (settled ? rm(directory, { recursive: true, force: true }) : keepOnlyRecord(directory)).catch(() => undefined);
   }
+}
+
+/** Whether `directory` is a real directory (not a symlink) that belongs to the user this process runs as. */
+async function ownDirectory(directory: string): Promise<boolean> {
+  const info = await lstat(directory).catch(() => undefined);
+  if (info === undefined || !info.isDirectory()) return false;
+  return process.getuid === undefined || info.uid === process.getuid();
 }
 
 /** Removes everything in a state directory but its owner file and launch record: the text agent-desktop kept of the app's fields. */
