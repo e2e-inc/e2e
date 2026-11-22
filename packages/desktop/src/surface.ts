@@ -314,6 +314,8 @@ export class DesktopSurface {
   async init(info: EngineInitInfo): Promise<void> {
     this.projectRoot = info.projectRoot;
     this.app = info.app;
+    // An engine handle can serve one host after another: nothing of the last one's app carries over.
+    this.bundle = undefined;
     this.foreground = this.options.headed || info.headed;
     const executable = await resolveExecutable(this.options.binary, info.projectRoot, info.env);
     this.appEnv = inheritedEnv(info.env);

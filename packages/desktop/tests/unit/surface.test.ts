@@ -713,6 +713,15 @@ describe('DesktopSurface', () => {
     expect(readFileSync(recorded, 'utf8').split('\n')).not.toContain('-g');
   });
 
+  it.skipIf(process.platform !== 'darwin')("launches a bundleId target by its id, not the appPath build an earlier host on the same handle named", async () => {
+    const { surface, fake, recorded } = await appPathSurface('exit 1\n');
+    await surface.dispose({ signal, timeoutMs: 5_000 });
+    await surface.init({ runId: 'r2', targetName: 'mac', projectRoot: process.cwd(), app: { bundleId: 'dev.e2e.spike.form' }, env: fake.env, headed: false, workerSlot: 0, signal, log: () => undefined });
+    await surface.restart(operation()).catch(() => undefined);
+    expect(existsSync(recorded)).toBe(false);
+    expect(fake.calls().some((call) => call.key === 'launch')).toBe(true);
+  });
+
   it.skipIf(process.platform !== 'darwin')('reports an open cancelled while it ran as cancelled', async () => {
     const { surface } = await appPathSurface('sleep 5\n');
     const controller = new AbortController();
