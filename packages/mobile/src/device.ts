@@ -193,9 +193,9 @@ export interface Device {
   /** Navigates back once (in-app back). */
   back(): Promise<void>;
   /**
-   * Locks the device screen through agent-device's sleep hardware button
-   * (`KEYCODE_SLEEP` on Android). Android only; on iOS it is
-   * `UNSUPPORTED_CAPABILITY`.
+   * Turns the screen off through agent-device's sleep hardware button
+   * (`KEYCODE_SLEEP` on Android); the device locks only when a screen lock
+   * is configured. Android only; on iOS it is `UNSUPPORTED_CAPABILITY`.
    */
   lock(): Promise<void>;
   /**

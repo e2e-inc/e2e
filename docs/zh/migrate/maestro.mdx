@@ -163,7 +163,7 @@ test('asks for the email', async ({ app, agent, screen }) => {
 | 作为终端命令的 `maestro hierarchy` | 一个调用 `screen.debug()` 的单行测试 |
 | `--device-locale` | iOS 使用 `app.launchArguments: ['-AppleLanguages', '(de)', '-AppleLocale', 'de_DE']`，参阅[以其他语言运行应用](/mobile#run-the-app-in-another-language)；Android 在运行前设置设备语言 |
 | Maestro Cloud | 你的 [CI](/ci) 配合[托管设备提供方](/mobile#hosted-devices) |
-| `pressKey: lock` | [`device.lock()`](/reference/mobile#lock)；唤醒用 [`device.unlock()`](/reference/mobile#unlock) |
+| `pressKey: lock` | Android：[`device.lock()`](/reference/mobile#lock)；唤醒用 [`device.unlock()`](/reference/mobile#unlock)（不会输入 PIN 或密码）。无 iOS 等价项 |
 | `pressKey: power`、`volume up`、`volume down` | [`unstable_raw`](/reference/mobile#unstable_raw) 上的 `client.command.hardwareButton`：Android 支持电源和音量键，iPhone 真机支持音量键 |
 | JUnit `properties`、通过 `--output` 设置 JUnit 路径 | 将 ID 放入标签或标题；运行后复制 `.e2e/junit.xml` |
 | 命令行中的 `--device` | 配置中的 `device: process.env.DEVICE` |

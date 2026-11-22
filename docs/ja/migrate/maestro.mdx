@@ -175,7 +175,7 @@ test('asks for the email', async ({ app, agent, screen }) => {
 | ターミナルコマンドとしての `maestro hierarchy` | `screen.debug()` を呼ぶ 1 行のテスト |
 | `--device-locale` | iOS では `app.launchArguments: ['-AppleLanguages', '(de)', '-AppleLocale', 'de_DE']`。[別の言語でアプリを実行する](/mobile#run-the-app-in-another-language)を参照。Android は実行前にデバイスの言語を設定 |
 | Maestro Cloud | [ホスト型デバイスプロバイダー](/mobile#hosted-devices)を使う自身の [CI](/ci) |
-| `pressKey: lock` | [`device.lock()`](/reference/mobile#lock)。起こすには [`device.unlock()`](/reference/mobile#unlock) |
+| `pressKey: lock` | Android: [`device.lock()`](/reference/mobile#lock)。起こすには [`device.unlock()`](/reference/mobile#unlock)（PIN やパスワードは入力しない）。iOS 相当なし |
 | `pressKey: power`, `volume up`, `volume down` | [`unstable_raw`](/reference/mobile#unstable_raw) の `client.command.hardwareButton`。Android では電源と音量、iPhone 実機では音量 |
 | JUnit の `properties`、`--output` による JUnit のパス | タグやタイトルに ID を含める。実行後に `.e2e/junit.xml` をコピー |
 | コマンドラインの `--device` | 設定の `device: process.env.DEVICE` |
