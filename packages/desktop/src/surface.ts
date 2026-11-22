@@ -280,6 +280,9 @@ export class DesktopSurface {
   private pid: number | undefined;
   /** agent-desktop's identity of that process, which a later process given the same id does not share. */
   private instance: string | undefined;
+  /** When that process started, as `ps` prints it, and the token its launch put in its environment: what shows it is still the launch's once the app list no longer shows it. */
+  private started: string | undefined;
+  private token: string | undefined;
   /**
    * A launch whose outcome is unknown (it timed out, or failed after it may
    * have started the app): its token, so the next quit can still find and
@@ -474,6 +477,8 @@ export class DesktopSurface {
     }
     // The process now shown to be the launch's, with when it started, so a later run can quit it even when its environment cannot be read, and never a later process given the same id.
     const started = this.pid === undefined ? undefined : await startedAt(this.pid, operation.signal);
+    this.started = started;
+    this.token = launch.token;
     if (this.pid !== undefined && started !== undefined) await this.writeRecord({ token: launch.token, pid: this.pid, started });
     this.forget();
     await this.windowReadable(operation);
@@ -650,6 +655,8 @@ export class DesktopSurface {
         this.forget();
         this.pid = undefined;
         this.instance = undefined;
+        this.started = undefined;
+        this.token = undefined;
         throw new EngineError('ENGINE_FAILURE', `${this.appName ?? 'the app'} quit right after it launched, before it showed a window`, { retryable: false });
       }
       await sleep(Math.min(LAUNCH_POLL_MS, Math.max(deadline - Date.now(), 0)), operation.signal);
@@ -768,13 +775,42 @@ export class DesktopSurface {
     this.forget();
     if (pid === undefined || appName === undefined) return;
     const { apps, complete } = await this.run<{ apps?: readonly RawApp[]; complete?: boolean }>(['list-apps', '--app', appName, '--timeout-ms', String(this.toolBudget({ timeoutMs }))], { label: `find ${appName}`, input: false, signal, timeoutMs });
-    const running = apps?.some((app) => app.pid === pid && (instance === undefined || app.process_instance === instance)) === true;
+    const listed = apps?.some((app) => app.pid === pid && (instance === undefined || app.process_instance === instance)) === true;
     // An inventory that skipped some processes cannot say the app is gone; it stays the engine's, to quit again.
-    if (!running && complete === false) throw new EngineError('ENGINE_FAILURE', `could not tell whether the app (process ${pid}) is still running: agent-desktop listed the apps only in part`, { retryable: false });
+    if (!listed && complete === false) throw new EngineError('ENGINE_FAILURE', `could not tell whether the app (process ${pid}) is still running: agent-desktop listed the apps only in part`, { retryable: false });
+    // The list showing the id as another process is evidence it is not the launch's; the list leaving it out is not.
+    const reused = instance !== undefined && apps?.some((app) => app.pid === pid && app.process_instance !== instance) === true;
+    const running = listed || (!reused && alive(pid) && (await this.stillLaunched(pid, signal)));
     if (running && !(await killed([pid], deadline, signal))) throw new EngineError('ENGINE_FAILURE', `the app (process ${pid}) did not exit`, { retryable: false });
     this.pid = undefined;
     this.instance = undefined;
+    this.started = undefined;
+    this.token = undefined;
     if (this.home !== undefined) await rm(path.join(this.home, APP_FILE), { force: true }).catch(() => undefined);
+  }
+
+  /**
+   * Whether a live process the app list left out is still the one the
+   * launch started. A complete list leaves out a process macOS no longer
+   * presents as an app (one that set its activation policy to prohibited),
+   * so its absence does not show it exited: its start time, or else its
+   * launch token, does. A process that cannot be looked up throws, and stays
+   * the engine's, so a quit tries again and the launch record stays.
+   */
+  private async stillLaunched(pid: number, signal: AbortSignal): Promise<boolean> {
+    const unknown = (): EngineError => new EngineError('ENGINE_FAILURE', `could not tell whether process ${pid}, which the app list no longer shows, is still the app the engine launched; quitting tries again`, { retryable: false });
+    if (this.started !== undefined) {
+      const now = await startedAt(pid, signal);
+      if (now === undefined) {
+        if (!alive(pid)) return false;
+        throw unknown();
+      }
+      return now === this.started;
+    }
+    if (this.token === undefined) throw unknown();
+    const carriers = await processesCarrying(this.token, signal);
+    if (carriers === undefined) throw unknown();
+    return carriers.includes(pid);
   }
 
   /** Every binding of the screen before: after a launch or a quit, none names a control that still exists. */

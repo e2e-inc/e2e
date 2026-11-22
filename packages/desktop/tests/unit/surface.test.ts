@@ -440,7 +440,8 @@ describe('DesktopSurface', () => {
   });
 
   it('kills nothing when the id it launched now names another process', async () => {
-    const { surface, app } = await launched({ 'list-apps': [{ ok: true, data: { apps: [] } }] });
+    // agent-desktop lists the id with another process instance: the process the engine launched is gone, and another took its id.
+    const { surface, app } = await launched((pid) => ({ 'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [{ pid, process_instance: 'instance-2' }] } }] }));
     await surface.endAttempt({ signal, timeoutMs: 5_000 });
     await surface.dispose({ signal, timeoutMs: 5_000 });
     expect(await gone(app.pid, 300)).toBe(false);
@@ -500,6 +501,14 @@ describe('DesktopSurface', () => {
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
+  });
+
+  it('quits the app a complete app list leaves out while its process still runs, as macOS does for a prohibited activation policy', async () => {
+    const { surface, fake, app } = await launched({ 'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [] } }] }, { observe: false });
+    const home = fake.calls()[0]!.home!;
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect(await gone(app.pid)).toBe(true);
+    expect(existsSync(path.join(home, 'app.json'))).toBe(false);
   });
 
   it('quits the app a failed dispose left running at the next init in the same process', async () => {
