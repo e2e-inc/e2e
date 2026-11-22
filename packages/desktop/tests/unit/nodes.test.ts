@@ -89,6 +89,8 @@ describe('projectSnapshot', () => {
           bounds: { x: 100, y: 200, width: 400, height: 300 },
           children: [
             { role: 'button', name: 'Close', ref_id: '@s:e1', bounds: { x: 108, y: 208, ...small } },
+            { role: 'button', name: 'Minimize', ref_id: '@s:e3', bounds: { x: 131, y: 208, ...small } },
+            { role: 'button', name: 'Zoom', ref_id: '@s:e4', bounds: { x: 154, y: 208, ...small } },
             { role: 'button', name: 'Close', ref_id: '@s:e2', bounds: { x: 460, y: 320, ...small } },
           ],
         },
@@ -96,6 +98,25 @@ describe('projectSnapshot', () => {
       minter(),
     );
     expect(all(panel.root).filter((node) => node.role === 'button' && node.name === 'Close').map((node) => node.rect)).toEqual([{ x: 360, y: 120, ...small }]);
+    expect(all(panel.root).filter((node) => node.name === 'Minimize' || node.name === 'Zoom')).toEqual([]);
+    // An app's own small Close button in the title bar's far corner stands alone, apart from the window's row of buttons: it is kept.
+    const corner = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'Panel',
+          bounds: { x: 100, y: 200, width: 400, height: 300 },
+          children: [
+            { role: 'button', name: 'Close', ref_id: '@s:e1', bounds: { x: 108, y: 208, ...small } },
+            { role: 'button', name: 'Minimize', ref_id: '@s:e3', bounds: { x: 131, y: 208, ...small } },
+            { role: 'button', name: 'Close', ref_id: '@s:e2', bounds: { x: 476, y: 208, ...small } },
+          ],
+        },
+      },
+      minter(),
+    );
+    expect(all(corner.root).filter((node) => node.role === 'button' && node.name === 'Close').map((node) => node.rect)).toEqual([{ x: 376, y: 8, ...small }]);
   });
 
   it('marks no id stable that sits inside a look-alike, whose own id is new every snapshot', () => {

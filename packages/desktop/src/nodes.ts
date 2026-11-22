@@ -211,6 +211,23 @@ function windowControl(raw: RawNode, window: Rect | undefined): boolean {
   );
 }
 
+/** How far apart, at most, two neighbouring title-bar buttons are, left edge to left edge, in points: macOS spaces them about 23. */
+const WINDOW_CONTROL_GAP = 30;
+
+/**
+ * The window's own title-bar buttons among its direct children: each a
+ * `windowControl` beside another of a different name, in one row, as macOS
+ * draws Close, Minimize, and Zoom together. agent-desktop reports no subrole
+ * that names them, so a lone small Close button, such as an app's own in a
+ * corner of the title bar, is kept.
+ */
+function titleBarButtons(tree: RawNode): ReadonlySet<RawNode> {
+  const candidates = (tree.children ?? []).filter((child) => windowControl(child, tree.bounds));
+  const beside = (a: RawNode, b: RawNode): boolean =>
+    a !== b && a.name !== b.name && a.bounds !== undefined && b.bounds !== undefined && Math.abs(a.bounds.y - b.bounds.y) <= 2 && Math.abs(a.bounds.x - b.bounds.x) <= WINDOW_CONTROL_GAP;
+  return new Set(candidates.filter((candidate) => candidates.some((other) => beside(candidate, other))));
+}
+
 /** A node agent-desktop reports but nothing reads: a wrapper with no name, value, id, ref, or text of its own. */
 function transparent(raw: RawNode): boolean {
   // A secure node is never dropped: its bounds are what a screenshot masks.
@@ -250,6 +267,7 @@ function identityOf(node: RawNode, named = false): string {
  */
 export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | undefined) => string): ProjectedScreen {
   const window = raw.tree.bounds ?? { x: 0, y: 0, width: 0, height: 0 };
+  const titleBar = titleBarButtons(raw.tree);
   const bindings = new Map<string, NodeBinding>();
   const secureRects: Rect[] = [];
   let unmaskable = false;
@@ -306,7 +324,7 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
       if (transparent(child)) for (const grandchild of child.children ?? []) collect(grandchild);
       else kept.push(child);
     };
-    for (const child of node.children ?? []) if (id !== ROOT_ID || !windowControl(child, raw.tree.bounds)) collect(child);
+    for (const child of node.children ?? []) if (id !== ROOT_ID || !titleBar.has(child)) collect(child);
     const tally = (named: boolean): Map<string, number> => {
       const counts = new Map<string, number>();
       for (const child of kept) counts.set(identityOf(child, named), (counts.get(identityOf(child, named)) ?? 0) + 1);
