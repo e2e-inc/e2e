@@ -1335,8 +1335,8 @@ describe('DesktopSurface', () => {
       () => undefined,
       (cause: unknown) => cause as Error,
     );
-    expect(failed?.message).not.toMatch(/The menu was closed/);
-    expect(failed?.message).toMatch(/menu is still open/);
+    expect(failed?.message).not.toMatch(/The menu was closed|menu is still open/);
+    expect(failed?.message).toMatch(/whether it closed could not be told/);
   });
 
   it('reports a select that may have chosen something when no menu is left open', async () => {

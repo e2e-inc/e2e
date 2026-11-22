@@ -1223,6 +1223,9 @@ export class DesktopSurface {
         if (menu === 'closed') {
           throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `select "${label}": agent-desktop opened the list's menu and could not confirm a choice, so whether "${label}" was chosen is unknown; the list may have no option "${label}". The menu was closed`, { retryable: false, cause });
         }
+        if (menu === 'unconfirmed') {
+          throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `select "${label}": ${cause.message} (the input may have reached the app). Escape was sent to close the list's menu, but whether it closed could not be told`, { retryable: false, cause });
+        }
         if (menu === 'open' || menu === 'refused') {
           const why =
             menu === 'open'
@@ -1240,12 +1243,13 @@ export class DesktopSurface {
   /**
    * Closes a menu the launched process has open, with Escape: `closed` when
    * one was open and is closed now, `none` when there was none, `open` when
-   * one is still open after the Escape, `refused` when no Escape could be
+   * one is still open after the Escape, `unconfirmed` when the Escape went
+   * but whether the menu closed cannot be told, `refused` when no Escape could be
    * sent (agent-desktop sends a key only to the active window), and
    * `unknown` when it cannot be told whose a menu is (another copy shares
    * the app's name).
    */
-  private async closeOpenMenu(window: string | undefined, operation: OperationContext): Promise<'closed' | 'none' | 'open' | 'refused' | 'unknown'> {
+  private async closeOpenMenu(window: string | undefined, operation: OperationContext): Promise<'closed' | 'none' | 'open' | 'unconfirmed' | 'refused' | 'unknown'> {
     const { appName, pid } = this;
     if (appName === undefined || pid === undefined || window === undefined) return 'unknown';
     const menus = async (): Promise<number | undefined> => {
@@ -1264,11 +1268,12 @@ export class DesktopSurface {
       (cause: unknown) => (cause instanceof EngineError && cause.code === 'ACTION_MAY_HAVE_COMMITTED' ? ('sent' as const) : ('refused' as const)),
     );
     if (sent === 'refused') return 'refused';
-    // A menu takes a moment to close after Escape.
+    // A menu takes a moment to close after Escape. The last look decides: one that could not tell leaves it unknown.
     const until = Date.now() + Math.min(MENU_CLOSE_MS, operation.timeoutMs);
     for (;;) {
-      if ((await menus()) === 0) return 'closed';
-      if (Date.now() + LAUNCH_POLL_MS >= until) return 'open';
+      const open = await menus();
+      if (open === 0) return 'closed';
+      if (Date.now() + LAUNCH_POLL_MS >= until) return open === undefined ? 'unconfirmed' : 'open';
       await sleep(LAUNCH_POLL_MS, operation.signal);
     }
   }
