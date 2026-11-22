@@ -511,6 +511,27 @@ describe('DesktopSurface', () => {
     expect(existsSync(path.join(home, 'app.json'))).toBe(false);
   });
 
+  it("starts a reused handle's next host clean, though the last one left a launch it could not settle", async () => {
+    const { surface, fake } = await initialized({
+      launch: [failure('TIMEOUT', 'unknown')],
+      'list-apps': [{ ok: true, data: { apps: [], complete: false } }],
+    });
+    await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
+    await expect(surface.endAttempt({ signal, timeoutMs: 5_000 })).rejects.toThrow(/could not tell/);
+    await expect(surface.dispose({ signal, timeoutMs: 5_000 })).rejects.toThrow(/could not tell/);
+    // The next host's app is healthy: it launches and lists as it should.
+    writeFileSync(path.join(path.dirname(fake.binary), 'scenario.json'), JSON.stringify({
+      status: [{ ok: true, data: { version: '1.3.1', permissions: { accessibility: { state: 'granted' } } } }],
+      launch: [{ spawn: true, ok: true, data: { app: 'SpikeForm', pid: '$spawned', process_instance: 'instance-1' } }],
+      'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid: '$spawned', process_instance: 'instance-1', is_focused: true }] }],
+      'list-apps': [{ ok: true, data: { apps: [{ pid: '$spawned', process_instance: 'instance-1' }] } }],
+      snapshot: [snapshotAnswer('macos/appkit-form')],
+    }));
+    await surface.init({ runId: 'run-2', targetName: 'macos', projectRoot: process.cwd(), app: { bundleId: 'dev.e2e.spike.second' }, env: fake.env, headed: false, workerSlot: 0, signal, log: () => undefined });
+    await surface.restart(operation());
+    expect(fake.calls().findLast((call) => call.key === 'launch')?.args[1]).toBe('dev.e2e.spike.second');
+  }, 30_000);
+
   it('quits the app a failed dispose left running at the next init in the same process', async () => {
     const { surface, fake, app } = await launched({ 'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [], complete: false } }] }, { observe: false });
     const home = fake.calls()[0]!.home!;

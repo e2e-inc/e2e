@@ -322,8 +322,15 @@ export class DesktopSurface {
   async init(info: EngineInitInfo): Promise<void> {
     this.projectRoot = info.projectRoot;
     this.app = info.app;
-    // An engine handle can serve one host after another: nothing of the last one's app carries over.
+    // An engine handle can serve one host after another: nothing of the last one's app carries over. A launch it could not settle stays in its launch record, which the sweep below takes.
     this.bundle = undefined;
+    this.appName = undefined;
+    this.pid = undefined;
+    this.instance = undefined;
+    this.started = undefined;
+    this.token = undefined;
+    this.pending = undefined;
+    this.forget();
     this.foreground = this.options.headed || info.headed;
     const executable = await resolveExecutable(this.options.binary, info.projectRoot, info.env);
     this.appEnv = inheritedEnv(info.env);
