@@ -111,6 +111,18 @@ function glyphTolerantName(name: string, exact: boolean): RegExp {
 }
 
 /**
+ * A text query's string as a pattern that also matches where a line break
+ * renders the space the DOM text lacks: "Line one line two" matches
+ * `Line one<br>line two`, which `textContent()` reads that way.
+ */
+function breakTolerantText(text: string, exact: boolean): string | RegExp {
+  const words = text.trim().split(/\s+/);
+  if (words.length < 2) return text;
+  const body = words.map((word) => word.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')).join('\\s*');
+  return selectorSafeRegExp(exact ? new RegExp(`^\\s*${body}\\s*$`, 'u') : new RegExp(body, 'iu'));
+}
+
+/**
  * The one table of query kinds: each declares its Playwright getter or its
  * CSS candidate set. An exact label query is the one kind whose candidates
  * depend on the pattern: exact goes to the `e2e-label` engine, substring
@@ -147,8 +159,10 @@ function candidatesOf(query: SemanticQuery, testIdAttribute: string): Candidates
         : { kind: 'playwright', locate: (roots) => roots.getByLabel(patternToPw(query.value), { exact: false }) };
     case 'placeholder':
       return { kind: 'playwright', locate: (roots) => roots.getByPlaceholder(patternToPw(query.value), { exact: patternExact(query.value) }) };
-    case 'text':
-      return { kind: 'playwright', locate: (roots) => roots.getByText(patternToPw(query.value), { exact: patternExact(query.value) }) };
+    case 'text': {
+      const text = query.value.kind === 'string' ? breakTolerantText(query.value.value, query.value.exact) : patternToPw(query.value);
+      return { kind: 'playwright', locate: (roots) => roots.getByText(text, { exact: patternExact(query.value) }) };
+    }
     case 'displayValue':
       return { kind: 'css', selector: VALUED_SELECTOR };
     case 'testId':
