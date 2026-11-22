@@ -457,6 +457,21 @@ describe('DesktopSurface', () => {
     }
   });
 
+  it('quits the app a failed dispose left running at the next init in the same process', async () => {
+    const { surface, fake, app } = await launched({ 'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [], complete: false } }] }, { observe: false });
+    const home = fake.calls()[0]!.home!;
+    try {
+      await expect(surface.dispose({ signal, timeoutMs: 5_000 })).rejects.toThrow(/listed the apps only in part/);
+      expect(await gone(app.pid, 300)).toBe(false);
+      // A second host in this process, as a program that opens one after another does.
+      await initialized({});
+      expect(await gone(app.pid)).toBe(true);
+      expect(existsSync(home)).toBe(false);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it('reports a type after a clear that changed the field as possibly committed', async () => {
     const { surface } = await launched({ type: [failure('STALE_REF', 'not_delivered')] });
     await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });

@@ -97,6 +97,9 @@ const STATE_PREFIX = 'e2e-agent-desktop-';
 /** The file in a state directory that names the process that owns it. */
 const OWNER_FILE = 'owner';
 
+/** What the owner file holds once its worker gave the directory up: a later sweep takes it, though the process that wrote it may still run another worker. */
+const ABANDONED = 'abandoned';
+
 /** The file in a state directory that names the app the worker launched and its launch token, so a sweep can quit an app a killed worker left running. */
 const APP_FILE = 'app.json';
 
@@ -367,7 +370,7 @@ export class DesktopSurface {
     } finally {
       // An app that would not quit, or a launch whose process was never found, stays named in the launch record, which the next run's sweep quits; the text agent-desktop kept of the app's fields goes either way.
       const leftRunning = !quit && (this.pid !== undefined || this.pending !== undefined);
-      if (this.home !== undefined) await (leftRunning ? keepOnlyRecord(this.home) : rm(this.home, { recursive: true, force: true })).catch(() => undefined);
+      if (this.home !== undefined) await (leftRunning ? abandon(this.home) : rm(this.home, { recursive: true, force: true })).catch(() => undefined);
       this.home = undefined;
       this.cli = undefined;
       this.attempt = undefined;
@@ -1416,8 +1419,10 @@ async function sweepStateDirectories(): Promise<void> {
     const directory = path.join(root, entry);
     // A shared temporary directory (`/tmp` when TMPDIR is unset) holds other users' entries too: a record this user did not write names no launch of its own, and its process id must not be killed with this user's rights.
     if (!(await ownDirectory(directory))) continue;
-    const owner = Number((await readFile(path.join(directory, OWNER_FILE), 'utf8').catch(() => '')).trim());
-    const stale = Number.isInteger(owner) && owner > 0 ? !alive(owner) : await stat(directory).then((info) => Date.now() - info.mtimeMs > ORPHAN_AGE_MS, () => false);
+    const ownerText = (await readFile(path.join(directory, OWNER_FILE), 'utf8').catch(() => '')).trim();
+    const owner = Number(ownerText);
+    const stale =
+      ownerText === ABANDONED || (Number.isInteger(owner) && owner > 0 ? !alive(owner) : await stat(directory).then((info) => Date.now() - info.mtimeMs > ORPHAN_AGE_MS, () => false));
     if (!stale) continue;
     // A record cut short by the kill that left it names no process: the directory still goes.
     const parsed: unknown = await readFile(path.join(directory, APP_FILE), 'utf8').then((text): unknown => JSON.parse(text)).catch(() => undefined);
@@ -1447,6 +1452,17 @@ async function ownDirectory(directory: string): Promise<boolean> {
   const info = await lstat(directory).catch(() => undefined);
   if (info === undefined || !info.isDirectory()) return false;
   return process.getuid === undefined || info.uid === process.getuid();
+}
+
+/**
+ * Gives up a state directory whose launch record still names an app: only
+ * the record stays, and the owner file says the directory has no worker any
+ * more, so the next sweep takes it even while this process runs on, as a
+ * program that opens one host after another does.
+ */
+async function abandon(directory: string): Promise<void> {
+  await keepOnlyRecord(directory);
+  await writeFile(path.join(directory, OWNER_FILE), ABANDONED);
 }
 
 /** Removes everything in a state directory but its owner file and launch record: the text agent-desktop kept of the app's fields. */
