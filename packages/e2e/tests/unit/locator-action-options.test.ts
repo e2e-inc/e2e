@@ -293,7 +293,10 @@ describe('locator action options', () => {
       code: 'UNSUPPORTED_CAPABILITY',
       message: 'in-memory files for setInputFiles are not available on this target; update its engine',
     });
-    await expect(screen.getByLabel('Agree').setInputFiles([])).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+    await expect(screen.getByLabel('Agree').setInputFiles([])).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: 'the "setInputFiles" action is not available on this target: its engine declares tap',
+    });
     expect(locate).not.toHaveBeenCalled();
     expect(perform).not.toHaveBeenCalled();
   });
