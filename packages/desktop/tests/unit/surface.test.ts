@@ -406,6 +406,10 @@ describe('DesktopSurface', () => {
     await expect(launched({ 'list-windows': [{ ok: true, data: [], sleepMs: 700 }] }, { openTimeoutMs: 15_000 })).rejects.toThrow(/opened no window.*desktop\(\{ headed: true \}\)/);
   }, 30_000);
 
+  it('says a foreground launch listed no window, rather than that its window cannot be read', async () => {
+    await expect(launched({ 'list-windows': [{ ok: true, data: [] }] }, { runHeaded: true, openTimeoutMs: 15_000 })).rejects.toThrow(/listed no window within 10 s/);
+  }, 30_000);
+
   it('reports an open that ran out of its own budget as a timeout, not a locked screen', async () => {
     const hidden = { ok: false, error: { code: 'ACTION_NOT_SUPPORTED', message: 'not exposed', details: { kind: 'window_without_accessibility_element' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
     await expect(launched({ snapshot: [hidden] }, { openTimeoutMs: 1_500 })).rejects.toMatchObject({ code: 'OPERATION_TIMEOUT' });

@@ -678,6 +678,14 @@ export class DesktopSurface {
         { retryable: false },
       );
     }
+    // In the foreground there is no background to blame: the app listed no window at all, which a locked screen can cause too.
+    if (!sawWindow && !timedOut) {
+      throw new EngineError(
+        'ENGINE_FAILURE',
+        `${this.appName ?? 'the app'} launched, but listed no window within ${LAUNCH_READY_MS / 1000} s: it may open none (a menu-bar app) or take longer to, or on macOS the screen may be locked`,
+        { retryable: false },
+      );
+    }
     throw new EngineError(
       'ENGINE_FAILURE',
       `${this.appName ?? 'the app'} launched, but its window cannot be read through accessibility${timedOut ? ' (a read ran out of time)' : ''}. On macOS the screen may be locked, or the window may be off screen`,
