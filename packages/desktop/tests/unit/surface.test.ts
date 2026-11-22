@@ -2,7 +2,7 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { OperationContext } from '@e2e-dev/core/engine';
+import type { OperationContext, SemanticNode } from '@e2e-dev/core/engine';
 import { afterEach, describe, expect, it } from 'vitest';
 import { pinnedExecutable } from '../../src/binary.ts';
 import { resolveOptions } from '../../src/options.ts';
@@ -360,6 +360,22 @@ describe('DesktopSurface', () => {
     for (const call of inventories) expect(call.args).toContain('--timeout-ms');
     const observed = fake.calls().findLast((call) => call.key === 'list-windows')!;
     expect(Number(observed.args[observed.args.indexOf('--timeout-ms') + 1])).toBeLessThanOrEqual(2_000);
+  });
+
+  it("cuts an observation's names at 256 and text at 512, and still locates by the whole text", async () => {
+    const long = 'L'.repeat(1_200);
+    const labelled = JSON.parse(JSON.stringify(snapshotAnswer('macos/appkit-form')).replace('"name":"Username"', `"name":"${long}"`)) as unknown;
+    const { surface } = await launched({ snapshot: [labelled] }, { observe: false });
+    const observed = await surface.observe(operation(), undefined);
+    const field = observed.root.children?.find((node) => node.testId === 'username');
+    expect(field?.name).toBe(long.slice(0, 256));
+    const all = (node: SemanticNode): SemanticNode[] => [node, ...(node.children ?? []).flatMap(all)];
+    for (const node of all(observed.root)) {
+      expect(node.name?.length ?? 0).toBeLessThanOrEqual(256);
+      expect(node.text?.length ?? 0).toBeLessThanOrEqual(512);
+    }
+    const byName = { kind: 'query', query: { kind: 'role', value: { kind: 'string', value: 'textbox', exact: true }, name: { kind: 'string', value: long, exact: true } } } as const;
+    expect(await surface.locate(byName, operation())).toHaveLength(1);
   });
 
   it('reads an app with no window as an empty screen', async () => {

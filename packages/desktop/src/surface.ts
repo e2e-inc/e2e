@@ -15,6 +15,8 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import {
   EngineError,
+  OBSERVED_NAME_LIMIT,
+  OBSERVED_TEXT_LIMIT,
   resolveExpression,
   type EngineAppInfo,
   type EngineAttemptContext,
@@ -940,7 +942,7 @@ export class DesktopSurface {
     const app = this.appName;
     const location = app === undefined ? screen.title : screen.title === undefined ? app : `${app} › ${screen.title}`;
     return {
-      root: screen.root,
+      root: bounded(screen.root),
       viewport: screen.viewport,
       ...(screen.truncated ? { truncated: true } : {}),
       ...(location === undefined ? {} : { location }),
@@ -1577,6 +1579,31 @@ async function afterChange(label: string, run: () => Promise<unknown>): Promise<
   } catch (cause) {
     throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `${label}: ${(cause as Error).message} (an earlier command of this step changed the app)`, { retryable: false, cause });
   }
+}
+
+/**
+ * An observation tree with each field cut at the contract's limit, the end
+ * dropped: a name at `OBSERVED_NAME_LIMIT`, text, a value, and a selection at
+ * `OBSERVED_TEXT_LIMIT`. The harness reads a field exactly at its limit as
+ * one that may have been cut (and redacts a secret it may end with), and one
+ * long label can no longer crowd the controls after it out of what the agent
+ * reads. `locate` matches on the whole tree, and single-node reads carry the
+ * whole value.
+ */
+function bounded(node: SemanticNode): SemanticNode {
+  const cut = (text: string | undefined, limit: number): { readonly text?: string } => (text === undefined ? {} : { text: text.length > limit ? text.slice(0, limit) : text });
+  const name = cut(node.name, OBSERVED_NAME_LIMIT).text;
+  const text = cut(node.text, OBSERVED_TEXT_LIMIT).text;
+  const value = cut(node.value, OBSERVED_TEXT_LIMIT).text;
+  const selection = cut(node.selection, OBSERVED_TEXT_LIMIT).text;
+  return {
+    ...node,
+    ...(name === undefined ? {} : { name }),
+    ...(text === undefined ? {} : { text }),
+    ...(value === undefined ? {} : { value }),
+    ...(selection === undefined ? {} : { selection }),
+    ...(node.children === undefined ? {} : { children: node.children.map(bounded) }),
+  };
 }
 
 /** Whether two rects are the same; two missing rects are not. */
