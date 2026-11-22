@@ -607,6 +607,8 @@ export class DesktopSurface {
     const budgetBound = operation.timeoutMs < LAUNCH_READY_MS;
     const deadline = Date.now() + Math.min(operation.timeoutMs, LAUNCH_READY_MS);
     let sawWindow = false;
+    // A read that ran out of time saw nothing: it does not show the app has no window.
+    let timedOut = false;
     while (Date.now() < deadline) {
       if (operation.signal.aborted) throw new EngineError('CANCELLED', `opening ${this.appName ?? 'the app'} was cancelled`, { retryable: false });
       let screen: ProjectedScreen | undefined;
@@ -615,7 +617,10 @@ export class DesktopSurface {
         screen = await this.capture(withDeadline({ ...operation, timeoutMs: Math.max(deadline - Date.now(), 0) }));
       } catch (cause) {
         // The last read ran out of budget: the window never became readable in time.
-        if (cause instanceof EngineError && cause.code === 'OPERATION_TIMEOUT') break;
+        if (cause instanceof EngineError && cause.code === 'OPERATION_TIMEOUT') {
+          timedOut = true;
+          break;
+        }
         // A window not readable yet, or an app that quit, is what this wait looks at below.
         if (!(cause instanceof EngineError && (cause.cause === UNREADABLE || cause.cause === QUIT))) throw cause;
         if (cause.cause === UNREADABLE) sawWindow = true;
@@ -632,7 +637,7 @@ export class DesktopSurface {
     }
     // The open's own budget ran out first: that is a timeout, not a window that cannot be read.
     if (budgetBound) throw new EngineError('OPERATION_TIMEOUT', `${this.appName ?? 'the app'} launched, but the open ran out of time before its window could be read`, { retryable: false });
-    if (!sawWindow && !this.options.headed) {
+    if (!sawWindow && !timedOut && !this.options.headed) {
       throw new EngineError(
         'ENGINE_FAILURE',
         `${this.appName ?? 'the app'} launched in the background and opened no window. Some apps, such as document-based ones, show a window only once they come forward; set desktop({ headed: true }) for them`,
@@ -641,7 +646,7 @@ export class DesktopSurface {
     }
     throw new EngineError(
       'ENGINE_FAILURE',
-      `${this.appName ?? 'the app'} launched, but its window cannot be read through accessibility. On macOS the screen may be locked, or the window may be off screen`,
+      `${this.appName ?? 'the app'} launched, but its window cannot be read through accessibility${timedOut ? ' (a read ran out of time)' : ''}. On macOS the screen may be locked, or the window may be off screen`,
       { retryable: false },
     );
   }
