@@ -948,7 +948,7 @@ Web only. Pass a plain object with only the fields of `FilePayload`: `name: stri
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | A blank path, an invalid payload, mixed paths and payloads, or payloads totaling 50 MiB or more. |
+| `INVALID_ARGUMENT` | A blank or missing path, a path under a directory the runner cannot search, an invalid payload, mixed paths and payloads, or payloads totaling 50 MiB or more. |
 | `UNSUPPORTED_CAPABILITY` | On a device, or for payloads on an engine that does not declare `setInputFilePayloads`. |
 | `ACTION_FAILED` | A button that opens no file chooser. |
 

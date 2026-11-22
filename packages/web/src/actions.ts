@@ -1,7 +1,7 @@
 /** Locator action dispatch for the Playwright engine. */
 
 import type { ElementHandle, Page } from 'playwright-core';
-import { Deadline, EngineError, pollCondition, type KeyModifier, type LocatorAction, type NodeRef, type PointerAction, type ViewportPoint } from '@e2e-dev/core/engine';
+import { Deadline, EngineError, pollCondition, TestError, type KeyModifier, type LocatorAction, type NodeRef, type PointerAction, type ViewportPoint } from '@e2e-dev/core/engine';
 import {
   asActionable,
   isClassified,
@@ -14,6 +14,7 @@ import {
   performPointerDrag,
   performViewportSwipe,
   POST_DISPATCH_PATTERN,
+  statPath,
   translatePwError,
   targetPage,
   type ActionTarget,
@@ -231,7 +232,9 @@ function radioKind(element: ElementHandle<Element>): Promise<'native' | 'aria' |
  * Playwright retargets a label to its control. Anything else is clicked
  * with the chooser already awaited, and fails if no chooser opens. Every
  * step shares the operation's deadline, and a cancelled operation sets no
- * files, even when its chooser opens after the cancel.
+ * files, even when its chooser opens after the cancel. A path that does not
+ * exist or sits under a directory the runner cannot search fails before
+ * anything is clicked.
  */
 async function uploadFiles(target: ActionTarget, files: Parameters<ElementHandle['setInputFiles']>[0], operation: ConnectionBudget): Promise<void> {
   const deadline = new Deadline(operation.timeoutMs);
@@ -354,6 +357,10 @@ export async function dispatchLocatorAction(
       return;
     }
     case 'setInputFiles':
+      for (const file of action.paths) {
+        const stats = statPath(file);
+        if (stats instanceof Error) throw new TestError('INVALID_ARGUMENT', `setInputFiles path does not exist or is under a directory the runner cannot search: ${stats.message}`);
+      }
       await uploadFiles(target, [...action.paths], operation);
       return;
     case 'setInputFilePayloads': {
