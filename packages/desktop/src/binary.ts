@@ -196,8 +196,10 @@ const PUBLISH_TRIES = 10;
  * whole once moved (another run put it there meanwhile) goes back.
  */
 async function publish(staging: string, directory: string, digest: string): Promise<void> {
+  // Why the last rename into place failed: an entry another run put there, or something else (permissions, a full disk), which the error names.
+  let failure: NodeJS.ErrnoException | undefined;
   for (let tries = 0; tries < PUBLISH_TRIES; tries += 1) {
-    if (await rename(staging, directory).then(() => true, () => false)) return;
+    if (await rename(staging, directory).then(() => true, (cause: unknown) => ((failure = cause as NodeJS.ErrnoException), false))) return;
     if (await usable(directory, digest)) return;
     // A damaged entry is moved aside, not deleted first, so the executable is missing only between two renames. Of two runs that move it, one fails and looks again.
     const aside = `${directory}.stale-${process.pid}-${randomUUID()}`;
@@ -206,5 +208,6 @@ async function publish(staging: string, directory: string, digest: string): Prom
     await rm(aside, { recursive: true, force: true });
   }
   if (await usable(directory, digest)) return;
-  throw new InfrastructureError('AGENT_DESKTOP_INSTALL_FAILED', `could not put agent-desktop in place at ${directory}: other runs kept changing it`);
+  const raced = failure === undefined || failure.code === 'EEXIST' || failure.code === 'ENOTEMPTY';
+  throw new InfrastructureError('AGENT_DESKTOP_INSTALL_FAILED', `could not put agent-desktop in place at ${directory}: ${raced ? 'other runs kept changing it' : failure?.message}`, failure === undefined ? {} : { cause: failure });
 }

@@ -198,6 +198,20 @@ describe('the pinned agent-desktop', () => {
     }
   });
 
+  it('names why the unpack could not be put in place, when it is not another run', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'e2e-desktop-cache-'));
+    try {
+      const { bytes, digests } = release(home);
+      vi.stubGlobal('fetch', () => Promise.resolve(new Response(new Uint8Array(bytes))));
+      const env = { HOME: home, USERPROFILE: home, XDG_CACHE_HOME: path.join(home, 'cache'), LOCALAPPDATA: path.join(home, 'local') };
+      const entry = path.dirname(pinnedExecutable(env)!);
+      hooks.beforeRename = (_from, to) => (to === entry ? Promise.reject(Object.assign(new Error(`EACCES: permission denied, rename -> '${to}'`), { code: 'EACCES' })) : Promise.resolve());
+      await expect(installPinned(env, new AbortController().signal, () => undefined, digests)).rejects.toMatchObject({ code: 'AGENT_DESKTOP_INSTALL_FAILED', message: expect.stringMatching(/EACCES: permission denied/), cause: expect.objectContaining({ code: 'EACCES' }) });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it('reports a failed download as AGENT_DESKTOP_INSTALL_FAILED', async () => {
     vi.stubGlobal('fetch', () => Promise.reject(new TypeError('fetch failed')));
     const env = { HOME: '/nonexistent', USERPROFILE: '/nonexistent', XDG_CACHE_HOME: '/nonexistent/cache', LOCALAPPDATA: '/nonexistent/local' };
