@@ -69,6 +69,9 @@ const EXIT_WAIT_MS = 500;
 /** How long a launch waits for its process to appear, and then for the app's window to become readable, before it reports why it did not. */
 const LAUNCH_READY_MS = 10_000;
 
+/** The least of that wait a read of the window starts with: one cut shorter would time out, and a timeout of a read then says nothing about the window. */
+const LAUNCH_READ_MIN_MS = 1_000;
+
 /**
  * How long agent-desktop may look for an option in a list. A select of an
  * option that exists answers in well under a second; one of an option that
@@ -618,6 +621,8 @@ export class DesktopSurface {
     let timedOut = false;
     while (Date.now() < deadline) {
       if (operation.signal.aborted) throw new EngineError('CANCELLED', `opening ${this.appName ?? 'the app'} was cancelled`, { retryable: false });
+      // A read given less than one takes only times out, which shows nothing about the window: the wait is over.
+      if (!budgetBound && deadline - Date.now() < LAUNCH_READ_MIN_MS) break;
       let screen: ProjectedScreen | undefined;
       try {
         // Each read gets what is left of the readiness wait, not of the whole operation, shared by its commands.

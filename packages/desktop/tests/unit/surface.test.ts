@@ -378,6 +378,11 @@ describe('DesktopSurface', () => {
     await expect(launched({ 'list-windows': [failure('TIMEOUT', 'not_delivered')] }, { openTimeoutMs: 15_000 })).rejects.toThrow(/cannot be read through accessibility \(a read ran out of time\)/);
   });
 
+  it('says a background app that opens no window needs headed, however the wait ends against a slow window list', async () => {
+    // Each read takes 700 ms: without a floor, the last read of the wait gets a sliver of it, times out, and the open blames a locked screen.
+    await expect(launched({ 'list-windows': [{ ok: true, data: [], sleepMs: 700 }] }, { openTimeoutMs: 15_000 })).rejects.toThrow(/opened no window.*desktop\(\{ headed: true \}\)/);
+  }, 30_000);
+
   it('reports an open that ran out of its own budget as a timeout, not a locked screen', async () => {
     const hidden = { ok: false, error: { code: 'ACTION_NOT_SUPPORTED', message: 'not exposed', details: { kind: 'window_without_accessibility_element' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
     await expect(launched({ snapshot: [hidden] }, { openTimeoutMs: 1_500 })).rejects.toMatchObject({ code: 'OPERATION_TIMEOUT' });
