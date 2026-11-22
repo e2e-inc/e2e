@@ -198,9 +198,10 @@ Unknown or invalid options fail config load with `INVALID_CONFIG`.
   attempt fails; a retry starts a new session.
 - An attempt that records video, such as with `--video`, gets Revyl's own
   recording of the session as `video/recording.mp4`. Revyl publishes it only
-  once the session ends, so stopping it ends the session: at the end of an
-  attempt that changes nothing, but `app.stopRecording()` in the middle of a
-  test leaves the rest of the test without a browser.
+  once the session ends, so stopping a recording ends the session. In a test
+  with `video: 'off'` that calls `app.startRecording()`, the
+  `app.stopRecording()` call ends the session, and the rest of the test has
+  no browser.
 - Downloads are unavailable: Revyl's browser refuses them.
 - The site runs on Revyl's network, so point `url` and `app.url` at a
   deployed URL, not `localhost`.

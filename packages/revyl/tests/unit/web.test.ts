@@ -4,12 +4,12 @@
  * on every path. The CDP attach itself is `@e2e-dev/web`'s, tested there.
  */
 
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { BrowserReleaseContext, BrowserRequest } from '@e2e-dev/web';
 import type { ProviderRecordContext } from 'e2e/engine';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { revylBrowsers, type RevylBrowsersOptions } from '../../src/web.ts';
 
 const env = { REVYL_API_KEY: 'revyl-key' };
@@ -196,6 +196,7 @@ describe('revylBrowsers()', () => {
       json(++timelines < 2 ? { recording_status: 'pending', video_url: null } : { recording_status: 'ready', video_url: 'https://videos.example.com/session-1.mp4?X-Amz-Signature=s' });
     routes['GET /session-1.mp4'] = () => new Response(new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]));
     const dir = mkdtempSync(path.join(tmpdir(), 'revyl-recording-'));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
 
     const recording = await revylBrowsers(options).record!({ id: 'session-1', cdpEndpoint: CDP_URL }, recordContext);
     expect(recording.startedAt).toBe('2026-11-21T23:44:44.536193+00:00');
