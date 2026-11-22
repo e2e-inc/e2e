@@ -1788,7 +1788,7 @@ describe('device fixture', () => {
   const minted: unknown[] = [];
   /** What the fixture declared to the harness recorder last, for the step labels. */
   let declared: FixtureOperations<Device> | undefined;
-  function fixture(h: Harness): Device {
+  function fixture(h: Harness, operationForCall: () => OperationContext = () => ({ ...operation(), timeoutMs: 5_000, origin: 'test' })): Device {
     const context = {
       targetName: 'ios-simulator',
       fixture: (_name: string, value: object, operations: FixtureOperations<Device>) => {
@@ -1798,6 +1798,7 @@ describe('device fixture', () => {
       signal: new AbortController().signal,
       headed: false,
       timeouts: { test: 30_000, action: 5_000, assertion: 5_000 },
+      operation: operationForCall,
       locator: (expression: unknown) => {
         minted.push(expression);
         return { minted: true };
@@ -1805,6 +1806,134 @@ describe('device fixture', () => {
     } as unknown as EngineFixtureContext;
     return h.engine.fixtures!['device']!(context) as Device;
   }
+
+  describe('viewport', () => {
+    it.each(['ios', 'android'] as const)('reads the %s viewport as a recorded resource without capturing pixels', async (platform) => {
+      const h = harness({ platform });
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, viewport: { width: 402, height: 874 } }));
+      await openAttempt(h);
+      const device = fixture(h);
+      const before = h.fake.calls.length;
+
+      expect(await device.viewport()).toEqual({ width: 402, height: 874 });
+      expect(declared?.viewport).toEqual({ kind: 'resource' });
+      expect(h.fake.methods().slice(before)).toEqual(['capture.snapshot']);
+    });
+
+    it('keeps its learned size isolated from the returned object and reads a new orientation', async () => {
+      const h = harness();
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, viewport: { width: 390, height: 844 } }));
+      await openAttempt(h);
+      const device = fixture(h);
+      const portrait = await device.viewport();
+      expect(portrait).toEqual({ width: 390, height: 844 });
+      Object.assign(portrait, { width: 1, height: 1 });
+      const screenshotsBeforeRotation = h.fake.methods().filter((method) => method === 'capture.screenshot').length;
+      await device.setOrientation('landscape-left');
+      h.fake.respond('capture.snapshot', () => ({ nodes: [] }));
+      expect(await device.viewport()).toEqual({ width: 390, height: 844 });
+
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, viewport: { width: 844, height: 390 } }));
+      expect(await device.viewport()).toEqual({ width: 844, height: 390 });
+      expect(h.fake.methods().filter((method) => method === 'capture.screenshot')).toHaveLength(screenshotsBeforeRotation);
+    });
+
+    it.each([
+      { logicalWidth: 390, logicalHeight: 844, width: 1170, height: 2532, pixelDensity: 3 },
+      { width: 1170, height: 2532, pixelDensity: 3 },
+    ])('reuses logical screenshot dimensions when landscape snapshots have no bounds: %j', async (screenshot) => {
+      const h = harness({}, false);
+      h.fake.respond('capture.snapshot', () => ({ nodes: [] }));
+      h.fake.respond('capture.screenshot', () => screenshot);
+      await openAttempt(h);
+      const device = fixture(h);
+      await device.setOrientation('landscape-left');
+
+      expect(await device.viewport()).toEqual({ width: 390, height: 844 });
+      expect(await device.viewport()).toEqual({ width: 390, height: 844 });
+      expect(h.fake.methods().filter((method) => method === 'capture.screenshot')).toHaveLength(1);
+    });
+
+    it('preserves the existing failure when neither the snapshot nor screenshot establishes the viewport', async () => {
+      const h = harness({}, false);
+      h.fake.respond('capture.snapshot', () => ({ nodes: [] }));
+      h.fake.respond('capture.screenshot', () => ({ width: 1170, height: 2532 }));
+      await openAttempt(h);
+
+      await expect(fixture(h).viewport()).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('viewport is unknown') });
+    });
+
+    it('shares one action budget between snapshot and screenshot, reading the current budget per call', async () => {
+      vi.useFakeTimers();
+      const h = harness({}, false);
+      await openAttempt(h);
+      h.fake.respond('capture.snapshot', async () => {
+        await sleep(60);
+        return { nodes: [] };
+      });
+      h.fake.respond('capture.screenshot', async () => {
+        await sleep(60);
+        return { logicalWidth: 390, logicalHeight: 844 };
+      });
+      let timeoutMs = 100;
+      const device = fixture(h, () => ({ ...operation(), timeoutMs, origin: 'test' }));
+      const timedOut = expect(device.viewport()).rejects.toMatchObject({ code: 'OPERATION_TIMEOUT', message: expect.stringContaining('device.viewport') });
+      await vi.advanceTimersByTimeAsync(100);
+      await timedOut;
+      await vi.advanceTimersByTimeAsync(20);
+
+      timeoutMs = 200;
+      const next = device.viewport();
+      await vi.advanceTimersByTimeAsync(120);
+      expect(await next).toEqual({ width: 390, height: 844 });
+    });
+
+    it('cancels a pending read and follows the same fixture into a fresh teardown signal', async () => {
+      const h = harness();
+      await openAttempt(h);
+      let controller = new AbortController();
+      let release!: () => void;
+      let captured!: () => void;
+      const pendingCapture = new Promise<void>((resolve) => { release = resolve; });
+      const started = new Promise<void>((resolve) => { captured = resolve; });
+      h.fake.respond('capture.snapshot', async () => {
+        captured();
+        await pendingCapture;
+        return SETTINGS_SNAPSHOT;
+      });
+      const device = fixture(h, () => ({ ...operation(controller.signal), timeoutMs: 5_000, origin: 'test' }));
+      const cancelled = expect(device.viewport()).rejects.toMatchObject({ code: 'CANCELLED' });
+      await started;
+      controller.abort();
+      await cancelled;
+      release();
+      const before = h.fake.calls.length;
+      await expect(device.viewport()).rejects.toMatchObject({ code: 'CANCELLED' });
+      expect(h.fake.calls).toHaveLength(before);
+
+      controller = new AbortController();
+      h.fake.respond('capture.snapshot', () => SETTINGS_SNAPSHOT);
+      expect(await device.viewport()).toEqual({ width: 390, height: 844 });
+    });
+
+    it('does not start a new transition wait for controls that appear after the read', async () => {
+      autoAdvanceTimers();
+      const h = harness({ transition: 120 });
+      await openAttempt(h);
+      await observed(h, 'Back');
+      await sleep(150);
+      const startedAt = Date.now();
+      await fixture(h).viewport();
+      h.fake.respond('capture.snapshot', () => ({
+        ...SETTINGS_SNAPSHOT,
+        nodes: [...SETTINGS_NODES, { ref: '@e11', index: 10, parentIndex: 0, depth: 1, type: 'button', label: 'Submit', rect: { x: 0, y: 600, width: 390, height: 44 } }],
+      }));
+      const submit = await observed(h, 'Submit');
+      await h.engine.perform!(submit.ref, { kind: 'tap' }, { ...operation(), origin: 'test' });
+
+      expect(Date.now() - startedAt).toBeLessThan(120);
+    });
+  });
 
   describe('unstable_raw', () => {
     const BOOTED = { platform: 'ios', id: '5A1C0DE5-0000-4000-8000-000000000001', device: 'iPhone 17 Pro', booted: true };
@@ -3022,6 +3151,7 @@ describe('snapshot generations', () => {
       }
     };
     h.fake.respond('interactions.press', (args) => admit((args as { ref: string }).ref));
+    h.fake.respond('interactions.fill', (args) => admit((args as { ref: string }).ref));
     h.fake.respond('interactions.drag', (args) => {
       const { source, destination } = args as { source: string; destination: string };
       admit(source);

@@ -764,8 +764,9 @@ export interface TestOptions {
   skip?: boolean | string;
   /**
    * Expects the test to fail; a string is the reason. A test failure then
-   * passes it, and a pass fails it with `UNEXPECTED_PASS`. Not allowed inside
-   * a serial group.
+   * passes it, and a pass fails it with `UNEXPECTED_PASS`. A layer with `true`
+   * or any string marks; the innermost reason wins. Not allowed on, inside, or
+   * around a serial group.
    */
   fail?: boolean | string;
   /** Focuses the test locally. CI rejects it with `ONLY_IN_CI`. */
@@ -802,7 +803,7 @@ export interface TestOptions {
   video?: RecordingMode;
 }
 
-export interface DescribeOptions extends Omit<TestOptions, 'only' | 'fail'> {
+export interface DescribeOptions extends Omit<TestOptions, 'only'> {
   /** Runs the group as one ordered retry unit with shared app state. Nesting one serial group in another is a `COLLECTION_ERROR`. */
   serial?: boolean;
 }
@@ -843,6 +844,19 @@ export type SynchronousCondition<Condition> = Extract<Condition, PromiseLike<unk
 /** Opaque handle of a registered test. */
 export interface TestCase {
   readonly [testCaseBrand]: true;
+}
+
+/** The two call forms of `describe`. */
+export interface DescribeRegistrar<Options = DescribeOptions> {
+  /** Declares a group synchronously. */
+  <Result>(title: string, body: SynchronousBody<Result>): void;
+  /** Declares a configured group synchronously. */
+  <Result>(title: string, options: Options, body: SynchronousBody<Result>): void;
+}
+
+export interface DescribeAPI extends DescribeRegistrar {
+  /** Declares a group whose tests are expected to fail, as if it had `fail: true`; a reason goes in the `fail` option of `describe`. */
+  fail: DescribeRegistrar<Omit<DescribeOptions, 'fail'>>;
 }
 
 /** The two call forms of `test`, shared with what `test.skipIf` and `test.runIf` return. */
@@ -1042,14 +1056,8 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   extend<Extra = {}, ExtraWorker = {}>(
     fixtures: FixtureDefinitions<Fixtures & Worker, Extra, Worker, ExtraWorker>,
   ): TestAPI<Fixtures & Extra, Worker & ExtraWorker>;
-  /** Declares a group synchronously. */
-  describe<Result>(title: string, body: SynchronousBody<Result>): void;
-  /** Declares a configured group synchronously. */
-  describe<Result>(
-    title: string,
-    options: DescribeOptions,
-    body: SynchronousBody<Result>,
-  ): void;
+  /** Declares a group synchronously; `describe.fail` declares one whose tests are expected to fail. */
+  describe: DescribeAPI;
   /** Registers a test-attempt setup hook: it runs after the test's fixtures are set up. */
   beforeEach(fn: TestHookFn<Fixtures & Worker>): void;
   /** Registers a test-attempt teardown hook: it runs before the test's fixtures are torn down. */
@@ -1249,11 +1257,33 @@ export type SoftValueExpectation<T> = Omit<ValueExpectation<T>, 'toMatchSchema' 
 export interface PollOptions {
   /** Deadline in milliseconds. Default 5000. */
   timeout?: number;
-  /** Pause between reads in milliseconds. Default 100. */
+  /**
+   * Pause between reads in milliseconds.
+   * @deprecated Pass `intervals: [<ms>]`.
+   */
   interval?: number;
+  /** Pauses between reads in milliseconds. Default [100, 250, 500, 1000]. The last pause is repeated. */
+  intervals?: readonly number[];
   /** Extra line in the timeout error, after the matcher line. */
   message?: string;
 }
+
+export type PassOptions = {
+  /** Timeout in milliseconds. By default, only the phase deadline applies. */
+  timeout?: number;
+  /** Pauses between tries in milliseconds. Default [100, 250, 500, 1000]. The last pause is repeated. */
+  intervals?: readonly number[];
+};
+
+type PassMatcher = {
+  /** Retries the block until the assertion passes or the deadline is reached. */
+  toPass(options?: PassOptions): Promise<void>;
+};
+
+/** Value matchers for a function, with retries for positive and negated assertions. */
+export type PassExpectation<T, Value = ValueExpectation<T>> = Omit<Value, 'not'> & PassMatcher & {
+  readonly not: NegatedValueExpectation<T, PassExpectation<T, Value>> & PassMatcher;
+};
 
 /**
  * The asynchronous form of every `ValueExpectation<T>` matcher: the same
@@ -1297,6 +1327,7 @@ export interface ExpectCall {
   /** `message` opens each assertion failure, before the matcher. */
   <S extends Screen>(actual: NotAny<S>, message?: string): ScreenExpectation;
   <E extends object>(actual: Expectable<E>): E;
+  <F extends () => unknown>(actual: NotAny<F>, message?: string): PassExpectation<F>;
   /** `message` opens the failure text, so a bare `expected false to be true` says which check it was. */
   <T>(actual: T, message?: string): ValueExpectation<T>;
 }
@@ -1308,6 +1339,7 @@ export interface SoftExpectCall {
   /** `message` opens each assertion failure, before the matcher. */
   <S extends Screen>(actual: NotAny<S>, message?: string): ScreenExpectation;
   <E extends object>(actual: Expectable<E>): E;
+  <F extends () => unknown>(actual: NotAny<F>, message?: string): PassExpectation<F, SoftValueExpectation<F>>;
   /** `message` opens the failure text, so a bare `expected false to be true` says which check it was. */
   <T>(actual: T, message?: string): SoftValueExpectation<T>;
 }
@@ -1739,6 +1771,8 @@ export interface ProjectConfig {
   actionTimeout?: number;
   /** Default `expect` deadline in milliseconds; default 5000. */
   assertionTimeout?: number;
+  /** Default timeout and pauses for `expect(fn).toPass()`. */
+  toPass?: PassOptions;
   /** Budget of each `afterEach` hook, fixture teardown, and engine cleanup in milliseconds; default 30000. */
   cleanupTimeout?: number;
   /** Retries per test, 0 through 10; default 1 in CI, else 0. */
