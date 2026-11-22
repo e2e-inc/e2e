@@ -182,16 +182,21 @@ const WINDOW_CONTROLS = new Set(['Close', 'Minimize', 'Zoom', 'Full Screen']);
 /** The largest a title-bar button is, in points: macOS draws them 14 to 16 points across. */
 const WINDOW_CONTROL_SIZE = 20;
 
+/** How far down from the window's top edge a title-bar button can reach, in points: the title bar, or a unified title bar and toolbar, is at most this tall. */
+const TITLE_BAR_HEIGHT = 52;
+
 /**
  * A window's own title-bar button: a button straight under the window, with
- * no developer id, named only for what it does to the window, and the size
- * of a title-bar button. Left out, so `getByRole('button', 'Close')` finds
- * the app's Close button and not the window's; an app's own button of the
- * same name is larger, and one with no bounds is kept.
+ * no developer id, named only for what it does to the window, the size of a
+ * title-bar button, and in the window's title bar. Left out, so
+ * `getByRole('button', 'Close')` finds the app's Close button and not the
+ * window's; an app's own button of the same name is larger or lower in the
+ * window, and one with no bounds, or in a window with none, is kept.
  */
-function windowControl(raw: RawNode): boolean {
+function windowControl(raw: RawNode, window: Rect | undefined): boolean {
   const bounds = raw.bounds;
   return (
+    window !== undefined &&
     raw.role === 'button' &&
     raw.native_id === undefined &&
     raw.name !== undefined &&
@@ -200,7 +205,9 @@ function windowControl(raw: RawNode): boolean {
     label(raw.description) === undefined &&
     bounds !== undefined &&
     bounds.width <= WINDOW_CONTROL_SIZE &&
-    bounds.height <= WINDOW_CONTROL_SIZE
+    bounds.height <= WINDOW_CONTROL_SIZE &&
+    bounds.y >= window.y &&
+    bounds.y + bounds.height <= window.y + TITLE_BAR_HEIGHT
   );
 }
 
@@ -298,7 +305,7 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
       if (transparent(child)) for (const grandchild of child.children ?? []) collect(grandchild);
       else kept.push(child);
     };
-    for (const child of node.children ?? []) if (id !== ROOT_ID || !windowControl(child)) collect(child);
+    for (const child of node.children ?? []) if (id !== ROOT_ID || !windowControl(child, raw.tree.bounds)) collect(child);
     const tally = (named: boolean): Map<string, number> => {
       const counts = new Map<string, number>();
       for (const child of kept) counts.set(identityOf(child, named), (counts.get(identityOf(child, named)) ?? 0) + 1);

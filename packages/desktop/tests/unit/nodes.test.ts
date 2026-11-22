@@ -78,6 +78,24 @@ describe('projectSnapshot', () => {
     expect(all(own.root).filter((node) => node.role === 'button' && node.name === 'Close')).toHaveLength(2);
     const sheet = projectSnapshot({ snapshot_id: 's', tree: { role: 'window', name: 'About', children: [{ role: 'button', name: 'Close', ref_id: '@s:e1', bounds: { x: 0, y: 0, width: 80, height: 18 } }] } }, minter());
     expect(all(sheet.root).filter((node) => node.role === 'button' && node.name === 'Close')).toHaveLength(1);
+    // A small Close button of the app's, below the title bar, is the app's; the one in the title bar is the window's.
+    const small = { width: 16, height: 16 };
+    const panel = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'Panel',
+          bounds: { x: 100, y: 200, width: 400, height: 300 },
+          children: [
+            { role: 'button', name: 'Close', ref_id: '@s:e1', bounds: { x: 108, y: 208, ...small } },
+            { role: 'button', name: 'Close', ref_id: '@s:e2', bounds: { x: 460, y: 320, ...small } },
+          ],
+        },
+      },
+      minter(),
+    );
+    expect(all(panel.root).filter((node) => node.role === 'button' && node.name === 'Close').map((node) => node.rect)).toEqual([{ x: 360, y: 120, ...small }]);
   });
 
   it('marks no id stable that sits inside a look-alike, whose own id is new every snapshot', () => {
