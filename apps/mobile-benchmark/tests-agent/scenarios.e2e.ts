@@ -106,7 +106,7 @@ function bootedSimulators(): { udid: string; dataPath: string }[] {
 
 /**
  * Puts every booted simulator on the `en_US` locale, in English, with the
- * default 12-hour clock, whatever region the host Mac is set to. A new
+ * 12-hour clock (a leftover 24-hour override is cleared), whatever region the host Mac is set to. A new
  * simulator copies the Mac's settings, and the recordings name things by
  * locale (`Photo, October 15, 10:27 AM`), so a recording and its replay need
  * the same one. Each simulator is set once per process; an app that is
@@ -118,6 +118,7 @@ function setSimulatorLocale(): void {
     if (localized.has(udid)) continue;
     execFileSync('xcrun', ['simctl', 'spawn', udid, 'defaults', 'write', '-g', 'AppleLocale', 'en_US']);
     execFileSync('xcrun', ['simctl', 'spawn', udid, 'defaults', 'write', '-g', 'AppleLanguages', '-array', 'en']);
+    execFileSync('xcrun', ['simctl', 'spawn', udid, 'defaults', 'write', '-g', 'AppleICUForce24HourTime', '-bool', 'NO']);
     localized.add(udid);
   }
 }
