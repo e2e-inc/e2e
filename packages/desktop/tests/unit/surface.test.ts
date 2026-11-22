@@ -585,7 +585,7 @@ describe('DesktopSurface', () => {
       { id: 'w-mine', pid, process_instance: 'instance-1', is_focused: first === 0, bounds: { x: 100, y: 100, width: 400, height: 300 } },
       { id: 'w-other', pid, process_instance: 'instance-1', is_focused: first === 1, bounds: { x: 700, y: 200, width: 400, height: 300 } },
     ];
-    const { surface, fake } = await launched((pid) => ({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], 'list-windows': [{ ok: true, data: windows(pid, 0) }, { ok: true, data: windows(pid, 0) }, { ok: true, data: windows(pid, 1) }] }), { options: { headed: true } });
+    const { surface, fake } = await launched((pid) => ({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], 'list-windows': [{ ok: true, data: windows(pid, 0) }, { ok: true, data: windows(pid, 0) }, { ok: true, data: windows(pid, 1) }, { ok: true, data: windows(pid, 0) }] }), { options: { headed: true } });
     await surface.performAt({ x: 10, y: 20 }, { kind: 'tap' }, operation());
     const calls = fake.calls().map((call) => call.args);
     expect(calls.findLast((call) => call[0] === 'focus-window')).toEqual(['focus-window', '--window-id', 'w-mine', '--headed']);
@@ -606,17 +606,28 @@ describe('DesktopSurface', () => {
   });
 
   it('taps a point in the window a test chose after a read of another one', async () => {
-    const windows = (pid: number) => [
-      { id: 'w-8032', pid, process_instance: 'instance-1', is_focused: true, bounds: { x: 100, y: 100, width: 400, height: 300 } },
-      { id: 'w-panel', pid, process_instance: 'instance-1', is_focused: false, bounds: { x: 600, y: 100, width: 300, height: 200 } },
+    const windows = (pid: number, panel = false) => [
+      { id: 'w-8032', pid, process_instance: 'instance-1', is_focused: !panel, bounds: { x: 100, y: 100, width: 400, height: 300 } },
+      { id: 'w-panel', pid, process_instance: 'instance-1', is_focused: panel, bounds: { x: 600, y: 100, width: 300, height: 200 } },
     ];
-    const { surface, fake } = await launched((pid) => ({ 'list-windows': [{ ok: true, data: windows(pid) }] }), { options: { headed: true } });
+    // The panel has focus once it is brought forward, the fifth listing.
+    const { surface, fake } = await launched((pid) => ({ 'list-windows': [...Array.from({ length: 4 }, () => ({ ok: true, data: windows(pid) })), { ok: true, data: windows(pid, true) }] }), { options: { headed: true } });
     await surface.locate({ kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'sign-in', exact: true } } }, operation());
     await surface.useWindow('w-panel', signal, 5_000);
     await surface.performAt({ x: 10, y: 20 }, { kind: 'tap' }, operation());
     const calls = fake.calls().map((call) => call.args);
     expect(calls.findLast((call) => call[0] === 'focus-window')).toEqual(['focus-window', '--window-id', 'w-panel', '--headed']);
     expect(calls.at(-1)).toEqual(['mouse-click', '--xy=610,120', '--headed']);
+  });
+
+  it('refuses a point when another window took focus as the target came forward, since the click carries no window', async () => {
+    const windows = (pid: number, sheet: boolean) => [
+      { id: 'w-mine', pid, process_instance: 'instance-1', is_focused: !sheet, bounds: { x: 100, y: 100, width: 400, height: 300 } },
+      ...(sheet ? [{ id: 'w-sheet', pid, process_instance: 'instance-1', is_focused: true, bounds: { x: 100, y: 120, width: 400, height: 200 } }] : []),
+    ];
+    const { surface, fake } = await launched((pid) => ({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], 'list-windows': [{ ok: true, data: windows(pid, false) }, { ok: true, data: windows(pid, false) }, { ok: true, data: windows(pid, false) }, { ok: true, data: windows(pid, true) }] }), { options: { headed: true } });
+    await expect(surface.performAt({ x: 10, y: 20 }, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/another window took focus/) });
+    expect(fake.calls().some((call) => call.key === 'mouse-click')).toBe(false);
   });
 
   it('measures a point from where the window is once it was brought forward', async () => {

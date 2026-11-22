@@ -1201,8 +1201,11 @@ export class DesktopSurface {
     // Physical input lands on whatever is frontmost at the point: bring the window forward first.
     await this.run(['focus-window', '--window-id', target.id, '--headed'], { label: 'focus window', input: true, signal: operation.signal, timeoutMs: operation.timeoutMs });
     // Coming forward can move the window (onto another space, out from under the menu bar): the click is measured from where it is now.
-    const focused = (await this.ownWindows(operation)).find((candidate) => candidate.id === target.id)?.bounds;
-    if (focused === undefined) throw notActionable('the window the point was taken from closed as it was brought forward; observe again');
+    const forward = (await this.ownWindows(operation)).find((candidate) => candidate.id === target.id);
+    const focused = forward?.bounds;
+    if (forward === undefined || focused === undefined) throw notActionable('the window the point was taken from closed as it was brought forward; observe again');
+    // A click carries no window, only screen coordinates: if another window (a sheet, a panel the app raised) took focus as this one came forward, it could be the one under the point.
+    if (forward.is_focused !== true) throw notActionable('another window took focus as the window the point was taken from was brought forward, and could be under the point; observe again');
     if (point.x >= focused.width || point.y >= focused.height) {
       throw notActionable(`(${point.x}, ${point.y}) is outside the ${focused.width}x${focused.height} window; a click there would land on another app`);
     }
