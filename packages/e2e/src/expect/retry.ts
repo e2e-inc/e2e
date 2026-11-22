@@ -1,7 +1,7 @@
 /** Retries for `expect.poll` and `expect(fn).toPass()`. */
 
 import { checkIntervals } from '@e2e-dev/core/lib/config/validate';
-import { ConfigurationError, TestError } from '@e2e-dev/core/lib/internal/errors';
+import { ConfigurationError, errorMessage, TestError } from '@e2e-dev/core/lib/internal/errors';
 import { isPlainObject, rejectUnknownKeys } from '@e2e-dev/core/lib/internal/options';
 import { abortError, cancelledError, Deadline, MAX_TIMER_MS, sleep, withAbort, withTimeout } from '@e2e-dev/core/lib/internal/time';
 import { currentAttempt, type PublishedAttempt } from '@e2e-dev/core/lib/expect/attempt';
@@ -17,7 +17,7 @@ const PHASE_TIMEOUT_GRACE_MS = 50;
 type RetryContext = Pick<PublishedAttempt, 'budget' | 'recordSecondaryError'>;
 
 type Sample = { readonly value: unknown } | { readonly error: unknown };
-type CutSample = { readonly cut: Deadline };
+type CutSample = { readonly cut: Deadline; readonly error?: unknown };
 type FailedSample = { readonly last: string; readonly cause?: unknown };
 type RetryResult = { readonly value: unknown } | FailedSample;
 
@@ -54,7 +54,7 @@ async function sample(
     const deadline = currentDeadline();
     const late = performance.now() - start > deadline.remaining(startedAt);
     if (late || 'error' in result) cutoff.abort();
-    return late ? { cut: deadline } : result;
+    return late ? { cut: deadline, ...('error' in result ? result : {}) } : result;
   }, readSignal);
   const cancellable = signal === undefined ? work : withAbort(work, signal, cancelledError);
   for (;;) {
@@ -142,11 +142,12 @@ export function retry(
         if (!deadline.expired()) {
           const result = await sample(read, currentDeadline, signal);
           if (signal?.aborted) throw abortError(signal, cancelledError);
+          if ('error' in result && isRuntimeSkip(result.error)) throw result.error;
           if ('cut' in result) {
+            if ('error' in result) last = { last: errorMessage(result.error), cause: result.error };
             deadline = currentDeadline();
             if (deadline !== result.cut) continue;
           } else {
-            if ('error' in result && isRuntimeSkip(result.error)) throw result.error;
             const outcome = evaluate(result);
             if ('value' in outcome) return outcome.value;
             last = outcome;

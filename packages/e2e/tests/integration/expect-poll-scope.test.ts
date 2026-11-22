@@ -172,6 +172,14 @@ test('skips from toPass', async ({ screen }) => {
   }).toPass({ timeout: 200 });
 });
 
+test('skips from a late toPass try', async () => {
+  await expect(async () => {
+    const until = performance.now() + 80;
+    while (performance.now() < until) {}
+    test.skip('late skip');
+  }).toPass({ timeout: 20 });
+});
+
 test('skips from negated toPass', async () => {
   await expect(() => test.skip('skipped from negated toPass')).not.toPass({ timeout: 200 });
 });
@@ -491,6 +499,7 @@ describe('expect.poll not awaited, in a run', () => {
 
   it.each([
     ['skips from toPass', 'explicit', 'skipped from toPass'],
+    ['skips from a late toPass try', 'explicit', 'late skip'],
     ['skips from negated toPass', 'explicit', 'skipped from negated toPass'],
     ['skips from soft toPass', 'explicit', 'skipped from soft toPass'],
     ['skips from a poll read', 'explicit', 'skipped from a poll read'],

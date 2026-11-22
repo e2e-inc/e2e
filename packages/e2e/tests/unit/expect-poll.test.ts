@@ -767,14 +767,18 @@ describe('expect(fn).toPass()', () => {
     });
   });
 
-  it('does not pass a negated check when the block throws after the deadline', async () => {
-    await failsWith(
-      () => e2eExpect(() => {
-        vi.advanceTimersByTime(60);
-        throw new Error('too late');
-      }).not.toPass({ timeout: 10 }),
-      /timed out after 10 ms\nlast: no try completed$/,
-    );
+  it.each(['toPass', 'not.toPass'])('%s keeps a late throw in the timeout error', async (matcher) => {
+    const cause = new Error('too late');
+    const assertion = e2eExpect(() => {
+      vi.advanceTimersByTime(60);
+      throw cause;
+    });
+    const target = matcher === 'toPass' ? assertion : assertion.not;
+    await vexpect(target.toPass({ timeout: 10 })).rejects.toMatchObject({
+      code: 'ASSERTION_FAILED',
+      message: `expect(...).${matcher}() timed out after 10 ms\nlast: too late`,
+      cause,
+    });
   });
 
   it('stops waiting for a hung try at the deadline', async () => {
