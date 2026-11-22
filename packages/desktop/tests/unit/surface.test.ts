@@ -343,6 +343,12 @@ describe('DesktopSurface', () => {
     await expect(surface.locate(username, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
   });
 
+  it('reads again when the window list does not find the app while its process still runs, never an empty screen', async () => {
+    const { surface } = await launched((pid) => ({ 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }, failure('APP_NOT_FOUND', 'not_delivered')] }), { observe: false });
+    const username = { kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'username', exact: true } } } as const;
+    await expect(surface.locate(username, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
+  });
+
   it('reads an app with no window as an empty screen', async () => {
     const { surface } = await launched((pid) => ({ 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }, { ok: true, data: [] }] }), { observe: false });
     const matches = await surface.locate({ kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'username', exact: true } } }, operation());

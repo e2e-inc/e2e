@@ -88,6 +88,9 @@ const NOT_STARTED = new Error('open started nothing');
 /** The cause of a read that found the app's windows but could read none of them. */
 const UNREADABLE = new Error('no window of the app could be read');
 
+/** The cause of a read whose window list did not find the app, while its process still runs. */
+const UNLISTED = new Error('the window list did not find the running app');
+
 /** The cause of a read of an app that quit since it launched. */
 const QUIT = new Error('the app quit');
 
@@ -621,8 +624,8 @@ export class DesktopSurface {
           timedOut = true;
           break;
         }
-        // A window not readable yet, or an app that quit, is what this wait looks at below.
-        if (!(cause instanceof EngineError && (cause.cause === UNREADABLE || cause.cause === QUIT))) throw cause;
+        // A window not readable yet, an app the window list missed, or an app that quit, is what this wait looks at below.
+        if (!(cause instanceof EngineError && (cause.cause === UNREADABLE || cause.cause === QUIT || cause.cause === UNLISTED))) throw cause;
         if (cause.cause === UNREADABLE) sawWindow = true;
       }
       if (screen !== undefined) return;
@@ -815,7 +818,7 @@ export class DesktopSurface {
    * again until its deadline.
    */
   private async capture(operation: OperationContext, windowId = this.chosenWindow, forMask = false): Promise<ProjectedScreen | undefined> {
-    const windows = await this.ownWindows(operation);
+    const windows = await this.ownWindows(operation, true);
     const chosen = windowId !== undefined && windowId === this.chosenWindow;
     if (chosen && !windows.some((window) => window.id === windowId)) throw this.chosenClosed();
     if (windows.length === 0 && this.pid !== undefined) await this.requireRunning(operation);
@@ -867,15 +870,27 @@ export class DesktopSurface {
     throw quit();
   }
 
-  /** The windows of the process the engine launched; none before `app.open()` or after the app quit. */
-  private async ownWindows(operation: Pick<OperationContext, 'signal' | 'timeoutMs'>): Promise<readonly RawWindow[]> {
+  /**
+   * The windows of the process the engine launched; none before
+   * `app.open()` or after the app quit. agent-desktop lists a running app
+   * with no window as an empty list, and answers `APP_NOT_FOUND` only when
+   * no running app has the name. `strict` is for a read of the screen,
+   * where that answer must not pass for an empty one: an app that quit is
+   * `INVALID_STATE`, and one that still runs, which the list missed, a
+   * retryable `NODE_STALE`.
+   */
+  private async ownWindows(operation: Pick<OperationContext, 'signal' | 'timeoutMs'>, strict = false): Promise<readonly RawWindow[]> {
     const { pid, appName } = this;
     if (pid === undefined || appName === undefined) return [];
     let listed: readonly RawWindow[];
     try {
       listed = await this.run<readonly RawWindow[]>(['list-windows', '--app', appName], { label: 'list windows', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs, raw: true });
     } catch (cause) {
-      if (cause instanceof AgentDesktopFailure && NO_WINDOW_CODES.has(cause.code)) return [];
+      if (cause instanceof AgentDesktopFailure && NO_WINDOW_CODES.has(cause.code)) {
+        if (!strict) return [];
+        await this.requireRunning(operation);
+        throw new EngineError('NODE_STALE', `agent-desktop found no running app named ${appName}, though process ${pid} still runs; reading again`, { retryable: true, cause: UNLISTED });
+      }
       throw translate(cause, 'list windows', false);
     }
     const { instance } = this;
