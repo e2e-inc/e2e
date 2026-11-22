@@ -6,7 +6,7 @@
  * nothing or a path that does not exist fails.
  */
 
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { chromium, type Browser, type Page } from 'playwright-core';
@@ -67,6 +67,16 @@ function state(): Promise<{ files: string; clicks: number }> {
 
 const COUNT_CLICKS = '<script>window.clicks = 0; document.addEventListener("click", () => window.clicks++, true)</script>';
 
+/** Node's own message for a path that cannot be stat'ed, which the engine reports as is. */
+function statFailure(target: string): string {
+  try {
+    statSync(target);
+  } catch (cause) {
+    return (cause as Error).message;
+  }
+  throw new Error(`${target} exists`);
+}
+
 describe.each(KINDS)('through the %s target', (kind) => {
   it('sets a file input directly', async () => {
     await page.setContent(`<input id="avatar" type="file">${COUNT_CLICKS}`);
@@ -113,7 +123,8 @@ describe.each(KINDS)('through the %s target', (kind) => {
     await page.setContent(`${html}${COUNT_CLICKS}`);
     for (const missing of [path.join(path.dirname(file), 'missing.png'), path.join(file, 'inside-a-file.png')]) {
       const error = await upload(await targetOf(kind, selector), [file, missing]);
-      expect(error).toMatchObject({ code: 'INVALID_ARGUMENT', category: 'test', message: `setInputFiles path does not exist or is under a directory the runner cannot search: ${missing}` });
+      expect(error).toMatchObject({ code: 'INVALID_ARGUMENT', category: 'test', message: `setInputFiles path does not exist or is under a directory the runner cannot search: ${statFailure(missing)}` });
+      expect((error as Error).message).toContain(missing);
     }
     expect(await state()).toEqual({ files: '', clicks: 0 });
   });
@@ -130,7 +141,7 @@ describe.each(KINDS)('through the %s target', (kind) => {
       chmodSync(locked, 0o000);
       try {
         const error = await upload(await targetOf(kind, '#avatar'), [hidden]);
-        expect(error).toMatchObject({ code: 'INVALID_ARGUMENT', category: 'test', message: `setInputFiles path does not exist or is under a directory the runner cannot search: ${hidden}` });
+        expect(error).toMatchObject({ code: 'INVALID_ARGUMENT', category: 'test', message: `setInputFiles path does not exist or is under a directory the runner cannot search: EACCES: permission denied, stat '${hidden}'` });
       } finally {
         chmodSync(locked, 0o700);
       }

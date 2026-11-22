@@ -192,12 +192,12 @@ export function message(cause: unknown): string {
   return text.replace(ANSI_PATTERN, '');
 }
 
-/** Stats a caller-supplied path, or undefined when it is missing or a directory on it may not be searched (`EACCES`). */
-export function statPath(file: string): Stats | undefined {
+/** Stats a caller-supplied path, or returns Node's error when it is missing or a directory on it may not be searched (`EACCES`). */
+export function statPath(file: string): Stats | Error {
   try {
-    return statSync(file, { throwIfNoEntry: false });
-  } catch {
-    return undefined;
+    return statSync(file);
+  } catch (cause) {
+    return cause as Error;
   }
 }
 

@@ -173,7 +173,8 @@ function requireBody(value: unknown): string | Buffer {
 
 /** Rejects a path that does not name a regular file; synchronous so the check lands before the decision. */
 function requireFile(file: string): void {
-  if (statPath(file)?.isFile() !== true) {
+  const stats = statPath(file);
+  if (stats instanceof Error || !stats.isFile()) {
     throw new TestError('INVALID_ARGUMENT', `route.fulfill path is not a readable file: ${file}`);
   }
 }

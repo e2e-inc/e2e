@@ -237,8 +237,10 @@ function radioKind(element: ElementHandle<Element>): Promise<'native' | 'aria' |
  * anything is clicked.
  */
 async function uploadFiles(target: ActionTarget, paths: readonly string[], operation: ConnectionBudget): Promise<void> {
-  const missing = paths.find((file) => statPath(file) === undefined);
-  if (missing !== undefined) throw new TestError('INVALID_ARGUMENT', `setInputFiles path does not exist or is under a directory the runner cannot search: ${missing}`);
+  for (const file of paths) {
+    const stats = statPath(file);
+    if (stats instanceof Error) throw new TestError('INVALID_ARGUMENT', `setInputFiles path does not exist or is under a directory the runner cannot search: ${stats.message}`);
+  }
   const deadline = new Deadline(operation.timeoutMs);
   const remaining = (): number => Math.max(1, deadline.remaining());
   const element =
