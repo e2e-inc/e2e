@@ -1201,8 +1201,13 @@ export class DesktopSurface {
         if (menu === 'closed') {
           throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `select "${label}": agent-desktop opened the list's menu and could not confirm a choice, so whether "${label}" was chosen is unknown; the list may have no option "${label}". The menu was closed`, { retryable: false, cause });
         }
-        if (menu === 'open') {
-          const why = this.foreground ? 'Escape did not close it' : 'the app runs in the background, which takes no key, so it could not be closed; desktop({ headed: true }) closes it with Escape';
+        if (menu === 'open' || menu === 'refused') {
+          const why =
+            menu === 'open'
+              ? 'Escape did not close it'
+              : this.options.headed
+                ? 'agent-desktop sent no Escape to close it'
+                : "the app's window is not the active one, so no Escape could be sent to close it; desktop({ headed: true }) closes it with Escape";
           throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `select "${label}": ${cause.message} (the input may have reached the app). The list's menu is still open: ${why}`, { retryable: false, cause });
         }
       }
@@ -1213,10 +1218,12 @@ export class DesktopSurface {
   /**
    * Closes a menu the launched process has open, with Escape: `closed` when
    * one was open and is closed now, `none` when there was none, `open` when
-   * one is still open, and `unknown` when it cannot be told whose a menu is
-   * (another copy shares the app's name).
+   * one is still open after the Escape, `refused` when no Escape could be
+   * sent (agent-desktop sends a key only to the active window), and
+   * `unknown` when it cannot be told whose a menu is (another copy shares
+   * the app's name).
    */
-  private async closeOpenMenu(window: string | undefined, operation: OperationContext): Promise<'closed' | 'none' | 'open' | 'unknown'> {
+  private async closeOpenMenu(window: string | undefined, operation: OperationContext): Promise<'closed' | 'none' | 'open' | 'refused' | 'unknown'> {
     const { appName, pid } = this;
     if (appName === undefined || pid === undefined || window === undefined) return 'unknown';
     const menus = async (): Promise<number | undefined> => {
@@ -1227,7 +1234,12 @@ export class DesktopSurface {
     const before = await menus();
     if (before === undefined) return 'unknown';
     if (before === 0) return 'none';
-    if (!(await this.sendKey('escape', window, 'close menu', operation).then(() => true, () => false))) return 'open';
+    const sent = await this.sendKey('escape', window, 'close menu', operation).then(
+      () => 'sent' as const,
+      // A failure that may have reached the app is an Escape sent; any other sent nothing.
+      (cause: unknown) => (cause instanceof EngineError && cause.code === 'ACTION_MAY_HAVE_COMMITTED' ? ('sent' as const) : ('refused' as const)),
+    );
+    if (sent === 'refused') return 'refused';
     // A menu takes a moment to close after Escape.
     const until = Date.now() + Math.min(MENU_CLOSE_MS, operation.timeoutMs);
     for (;;) {

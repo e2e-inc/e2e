@@ -1246,7 +1246,26 @@ describe('DesktopSurface', () => {
       'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [{ name: 'SpikeForm', pid: theirs, process_instance: 'theirs' }, { name: 'SpikeForm', pid, process_instance: 'instance-1' }] } }],
     }));
     // In the background no key reaches the app, so the menu stays open, and the error says so.
-    await expect(surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Team' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/menu is still open.*headed: true/) });
+    await expect(surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Team' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/menu is still open: the app's window is not the active one, so no Escape could be sent.*headed: true/) });
+  });
+
+  it('says no Escape was sent, not that Escape failed, when the run is --headed but the window is not active', async () => {
+    const unconfirmed = { ok: false, error: { code: 'STALE_REF', message: 'focus unconfirmed', details: { cause: 'exact_window_focus_unconfirmed' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
+    const { surface, byTestId } = await launched(
+      (pid) => ({
+        snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')],
+        select: [failure('TIMEOUT', 'delivered_unverified')],
+        press: [unconfirmed],
+        'list-surfaces': [{ ok: true, data: { pid, surfaces: [{ type: 'context_menu' }] } }],
+      }),
+      { runHeaded: true },
+    );
+    const failed = await surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Team' }, operation()).then(
+      () => undefined,
+      (cause: unknown) => cause as Error,
+    );
+    expect(failed?.message).toMatch(/no Escape could be sent.*headed: true/);
+    expect(failed?.message).not.toMatch(/Escape did not close it/);
   });
 
   it('reports a select that may have chosen something when no menu is left open', async () => {
