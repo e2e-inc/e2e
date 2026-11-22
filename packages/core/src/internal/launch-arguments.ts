@@ -1,12 +1,16 @@
 /**
  * The shape of `launchArguments`, checked once for the runner's config and
  * for a launch a test asks for by hand, so an engine never spells a value
- * the declaration did not allow.
+ * the declaration did not allow. Also the `-name value` spelling that the
+ * iOS and macOS engines share.
  */
 
 import { ConfigurationError, TestError } from './errors.ts';
 import { isPlainObject } from './options.ts';
 import type { LaunchArgumentValue, ResolvedLaunchArguments } from '../types.ts';
+
+/** What an old-style plist string may hold unquoted. `NSUserDefaults` reads a bare value that starts with `-` as the next argument's name. */
+const PLIST_UNQUOTED = /^[A-Za-z0-9_$/:.][A-Za-z0-9_$/:.-]*$/;
 
 const LAUNCH_ARGUMENTS_SHAPE = 'an array of strings or an object of argument name to string, number, boolean, or array of strings';
 
@@ -51,6 +55,29 @@ export function checkLaunchArguments(label: string, declared: unknown, code: 'IN
     entries.push([name, value]);
   }
   return Object.fromEntries(entries);
+}
+
+/**
+ * Launch arguments as Apple process arguments. A list stays as it is. An
+ * object becomes `-name value` for each entry, as `NSUserDefaults` reads it:
+ * `YES` or `NO` for a boolean, an old-style plist array for a list, and a
+ * quoted plist string for a value the parser would otherwise misread, such
+ * as `(draft)` or `-1`.
+ */
+export function appleUserDefaults(launchArguments: ResolvedLaunchArguments): readonly string[] {
+  if (Array.isArray(launchArguments)) return launchArguments;
+  return Object.entries(launchArguments).flatMap(([name, value]) => [`-${name}`, appleUserDefault(value)]);
+}
+
+function appleUserDefault(value: LaunchArgumentValue): string {
+  if (typeof value === 'boolean') return value ? 'YES' : 'NO';
+  if (typeof value === 'number' || typeof value === 'string') return plistString(String(value));
+  return `(${value.map(plistString).join(', ')})`;
+}
+
+/** An old-style plist string: bare when its characters allow, else quoted with `\\` and `"` escaped. */
+function plistString(item: string): string {
+  return PLIST_UNQUOTED.test(item) ? item : `"${item.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 }
 
 /** A string, a boolean, or a finite number below 2^53 in magnitude. */

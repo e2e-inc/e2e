@@ -1708,6 +1708,7 @@ reproduces these semantics; import them instead of carrying a copy.
 | [`validateJsonValue`](#validatejsonvalue) | `void` |
 | [`rejectUnknownKeys`](#rejectunknownkeys) | `void` |
 | [`checkLaunchArguments`](#checklauncharguments) | `ResolvedLaunchArguments \| undefined` |
+| [`appleUserDefaults`](#appleuserdefaults) | `readonly string[]` |
 | [`rejectUnknownOptions`](#rejectunknownoptions) | `void` |
 | [`obj`](#obj) | `WithoutUndefined<T>` |
 | [`raceAbort`, `withTimeout`, `withinCleanupBudget`](#timing-helpers) | `Promise<T>`, `Promise<T>`, `Promise<void>` |
@@ -1909,6 +1910,26 @@ const launchArguments = checkLaunchArguments('device.openApp({ launchArguments }
   boolean, or a list of strings. Nothing holds a NUL character.
 - The engine adds its platform's rules after this check, with the same
   `code`.
+
+#### `appleUserDefaults`
+
+Spells launch arguments as the process arguments of an iOS or macOS app. A
+list stays as it is. An object becomes `-name value` for each entry, in the
+form `NSUserDefaults` reads. Pass the result to the launch command.
+
+```ts
+export function appleUserDefaults(launchArguments: ResolvedLaunchArguments): readonly string[];
+```
+
+```ts
+appleUserDefaults({ AppleLanguages: ['fr', 'en-GB'], e2e: true, offset: -1, mode: '(draft)' });
+// ['-AppleLanguages', '(fr, en-GB)', '-e2e', 'YES', '-offset', '"-1"', '-mode', '"(draft)"']
+```
+
+- A boolean is `YES` or `NO`. A list is an old-style plist array.
+- A string or number is bare when it holds only letters, digits, and
+  `_ $ / : . -` and does not start with `-`. Other values are quoted, with
+  `\` and `"` escaped.
 
 #### `rejectUnknownOptions`
 
