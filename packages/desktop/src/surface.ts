@@ -685,16 +685,6 @@ export class DesktopSurface {
   }
 
   /**
-   * Quits the app the engine launched, forcefully: a test needs it gone, not
-   * asked to save. It is ended by its process id, so another instance of the
-   * same app (the developer's own copy) is left alone, and waited for, so the
-   * next launch cannot find it still running. The process is looked up
-   * first: one that exited on its own, or whose id the OS gave to another
-   * process since, is not running any more, and nothing is killed. Until the
-   * process is known to be gone, the engine keeps it as its own, so a quit
-   * that failed is tried again.
-   */
-  /**
    * Runs launches and quits of this surface one at a time: two at once would
    * each launch a copy into the one process id and launch record the engine
    * keeps, and the end of the attempt would quit only one of them.
@@ -710,6 +700,16 @@ export class DesktopSurface {
     return this.serially(() => this.quitNow(signal, timeoutMs));
   }
 
+  /**
+   * Quits the app the engine launched, forcefully: a test needs it gone, not
+   * asked to save. It is ended by its process id, so another instance of the
+   * same app (the developer's own copy) is left alone, and waited for, so the
+   * next launch cannot find it still running. The process is looked up
+   * first: one that exited on its own, or whose id the OS gave to another
+   * process since, is not running any more, and nothing is killed. Until the
+   * process is known to be gone, the engine keeps it as its own, so a quit
+   * that failed is tried again.
+   */
   private async quitNow(signal: AbortSignal, timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     const pending = this.pending;
