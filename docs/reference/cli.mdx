@@ -112,13 +112,13 @@ bunx e2e init --yes --gateway openrouter --skills .agents/skills --mcp .mcp.json
 | Option | Description |
 | --- | --- |
 | `[directory]` | Where to scaffold; created when missing. Default: the working directory. |
-| `-y`, `--yes` | Skips the prompts. Each answer not given as a flag takes its default: Web engine, Vercel AI Gateway, skill and MCP config in both locations, no CI pipeline, no install. |
+| `-y`, `--yes` | Skips the prompts. For a fresh project, defaults to the Web engine, Vercel AI Gateway, both skill directories, all three MCP config files, no CI pipeline, and no install. |
 | `--example <name>` | Starts from an example app: `with-vite`, `with-next`, `with-astro`, `with-angular`, `with-expo`, `with-swiftui`, `with-compose`, `with-kotlin-multiplatform`, `with-flutter`, or `with-maui`. The `with-` prefix is optional. See [Starting from an example](#starting-from-an-example). |
 | `--engine <ids>` | The engines for a new config: `web`, `mobile`, or `none`. Comma-separated or repeated; `web,mobile` writes a target for each. Default: asked. |
 | `--gateway <id>` | The model gateway for agent steps in a new config: `vercel`, `openrouter`, `openai-compatible`, `chatgpt`, `copilot`, `opencode-console`, `grok`, or `none`. Default: asked. |
 | `--endpoint <url>` | Base URL for `--gateway openai-compatible`, and implies it. HTTPS, or HTTP on a loopback host. Default: asked; `http://127.0.0.1:11434/v1` with `--yes`. |
 | `--skills <dirs>` | Where to install the agent skill: `.agents/skills`, `.claude/skills`, or `none`. Comma-separated or repeated. Default: asked. |
-| `--mcp <files>` | Where to register the MCP server: `.mcp.json`, `.cursor/mcp.json`, `.codex/config.toml`, or `none`. Comma-separated or repeated. Default: asked. |
+| `--mcp <files>` | Where to register the MCP server: `.mcp.json`, `.cursor/mcp.json`, `.codex/config.toml`, or `none`. Comma-separated or repeated. Use `none` to skip registration. Default: asked. |
 | `--ci <id>` | The CI pipeline for the tests, one job per platform: `github-actions`, `gitlab`, or `none`. See [CI pipeline](#ci-pipeline). Default: asked; `none` with `--yes`. |
 | `--install`, `--no-install` | Whether to install dependencies. Default: asked; `--no-install` with `--yes`. |
 
@@ -315,10 +315,11 @@ bunx e2e init my-app --example with-expo
 - MCP registration keeps extra settings on the e2e server, such as
   environment variables and client timeouts, even when it repairs the launch
   command. A current registration stays byte-for-byte unchanged.
-- Once a skill directory exists, later runs refresh copies that differ from
-  the installed version. They never add a directory the project did not
-  choose. `--skills` and `--mcp` name the exact locations instead and leave
-  the others as they are.
+- Without `--skills` or `--mcp`, re-running uses the detected locations of
+  the e2e skill or MCP registration for that option. If none are detected,
+  init asks or uses the `--yes` defaults. Existing skill copies refresh to the
+  installed version. The flags select exact locations and leave the others
+  unchanged.
 - A `.claude/skills/e2e/` copy from an earlier version becomes the symlink
   when it holds only the shipped files. A copy with other files stays a copy
   and is refreshed.
