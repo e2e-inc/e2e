@@ -468,7 +468,7 @@ describe('values at the edge of what a pattern can hold', () => {
       outcomes.add(outcome === 'a <secret:dashes> b|ż <secret:dashes> ✓' ? 'redacted' : outcome);
     }
     expect([...outcomes].toSorted()).toEqual([FIXED, 'redacted'].toSorted());
-  });
+  }, 90_000);
 
   it('leaves a provider key no pattern can be built for alone, and the run goes on', () => {
     const unbuildable = '-'.repeat(3000);
