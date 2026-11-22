@@ -441,11 +441,14 @@ describe('a key the agent repeats where its text is cut', () => {
     const key = `eyJ-test-long-token-${'k7'.repeat(1500)}`;
     vi.stubEnv('VERCEL_OIDC_TOKEN', key);
     const half = Math.floor(key.length / 2);
-    const crash = [
-      "require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', 'inherit', 'ignore'], detached: true }).unref();",
-      `process.stderr.write(${JSON.stringify(`an earlier line\nfatal: ${key.slice(0, half)}`)}, () => setTimeout(() => process.stderr.write(${JSON.stringify(`${key.slice(half)} rejected\n`)}, () => process.exit(3)), 50));`,
-    ].join('\n');
-    const failure = await stepFailure(acp({ command: process.execPath, args: ['-e', crash] }));
+    const failure = await stepFailure(acp({
+      command: process.execPath,
+      args: [AGENT],
+      env: {
+        ACP_STARTUP_STDERR: `an earlier line\nfatal: ${key.slice(0, half)}`,
+        ACP_STARTUP_STDERR_REST: `${key.slice(half)} rejected\n`,
+      },
+    }));
     expect(failure).toContain('the agent exited (code 3): fatal: <secret:VERCEL_OIDC_TOKEN> rejected');
     expect(failure).not.toContain('earlier line');
     expect(failure).not.toContain('k7k7k7k7');
@@ -469,12 +472,12 @@ describe('a key the agent repeats where its text is cut', () => {
     // A child of the agent keeps its output open, so the exit is what the step hears of, not a closed connection.
     // The key starts 10 characters before the last 2000 of the line, so keeping the end first would keep its tail.
     const line = `fatal: ${key.slice(0, 10)}`.length;
-    const crash = [
-      "require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', 'inherit', 'ignore'], detached: true }).unref();",
-      `process.stderr.write(${JSON.stringify(`fatal: ${key}${'y'.repeat(2000 - (key.length - 10))}\n`)}, () => process.exit(3));`,
-    ].join('\n');
     expect(line).toBe(17);
-    const failure = await stepFailure(acp({ command: process.execPath, args: ['-e', crash] }));
+    const failure = await stepFailure(acp({
+      command: process.execPath,
+      args: [AGENT],
+      env: { ACP_STARTUP_STDERR: `fatal: ${key}${'y'.repeat(2000 - (key.length - 10))}\n` },
+    }));
     expect(failure).toContain('the agent exited (code 3): ');
     expect(failure).toContain(`OPENAI_API_KEY>${'y'.repeat(50)}`);
     expect(failure).not.toContain(key.slice(10));

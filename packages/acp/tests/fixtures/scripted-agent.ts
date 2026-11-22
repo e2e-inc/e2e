@@ -141,6 +141,11 @@ log({ pid: process.pid });
 if (process.env['ACP_STARTUP_STDERR'] !== undefined) {
   spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', 'inherit', 'ignore'], detached: true }).unref();
   await new Promise((resolve) => process.stderr.write(process.env['ACP_STARTUP_STDERR']!, resolve));
+  const rest = process.env['ACP_STARTUP_STDERR_REST'];
+  if (rest !== undefined) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => process.stderr.write(rest, resolve));
+  }
   process.exit(3);
 }
 log({ env: Object.keys(process.env).filter((name) => name.toUpperCase().startsWith('E2E_')).toSorted(), codexConfig: codexConfig(process.env['CODEX_CONFIG']), defaultAuthRequest: authRequest(process.env['DEFAULT_AUTH_REQUEST']), authEnv: authEnv(), nodeDebug: nodeDebug() });
