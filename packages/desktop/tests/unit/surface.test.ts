@@ -560,6 +560,17 @@ describe('DesktopSurface', () => {
     expect(fake.calls().findLast((call) => call.key === 'launch')?.args[1]).toBe('dev.e2e.spike.second');
   }, 30_000);
 
+  it.skipIf(process.platform === 'win32')('quits the process a failed launch started, claimed by its token, though the app list then leaves it out', async () => {
+    const { surface, fake } = await initialized({
+      launch: [{ spawn: true, ...(failure('TIMEOUT', 'delivered_unverified') as object) }],
+      // Before the launch: none. The quit claims the process by its token, and the list after leaves it out (a prohibited activation policy).
+      'list-apps': [{ ok: true, data: { apps: [] } }, { spawnedApps: { name: 'SpikeForm', bundle_id: 'dev.e2e.spike.form' } }, { ok: true, data: { apps: [] } }],
+    });
+    await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect(await gone(fake.spawned().at(-1)!)).toBe(true);
+  });
+
   it('quits the app a failed dispose left running at the next init in the same process', async () => {
     const { surface, fake, app } = await launched({ 'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [], complete: false } }] }, { observe: false });
     const home = fake.calls()[0]!.home!;

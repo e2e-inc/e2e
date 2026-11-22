@@ -609,15 +609,18 @@ export class DesktopSurface {
       if (typeof app.pid !== 'number') continue;
       // A copy that ran before the launch is never its own, whatever its environment says.
       if (before?.has(app.pid) === true) continue;
-      if ((await carriesToken(app.pid, token, operation.signal)) === true) return this.take(app, target);
+      if ((await carriesToken(app.pid, token, operation.signal)) === true) return this.take(app, target, token);
     }
     return complete === false ? undefined : false;
   }
 
-  private take(app: RawApp, target: string): true {
+  /** Takes a process shown to carry the launch's token as the engine's own, the token with it, which shows it is still the launch's once the app list leaves it out. */
+  private take(app: RawApp, target: string, token: string): true {
     this.appName = app.name ?? target;
     this.pid = app.pid;
     this.instance = app.process_instance;
+    this.token = token;
+    this.started = undefined;
     return true;
   }
 
