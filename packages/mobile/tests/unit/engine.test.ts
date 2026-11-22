@@ -2557,8 +2557,6 @@ describe('device fixture', () => {
     for (const change of [
       () => device.back(),
       () => device.home(),
-      () => device.lock(),
-      () => device.unlock(),
       () => device.alert('accept'),
       () => device.dismissKeyboard(),
       () => device.setOrientation('landscape-left'),
@@ -2580,6 +2578,28 @@ describe('device fixture', () => {
       await h.engine.perform!(submit.ref, { kind: 'tap' }, { ...operation(), origin: 'test' });
       expect(Date.now() - startedAt).toBeGreaterThanOrEqual(100);
       expect(h.fake.lastArgs('interactions.press')).toEqual({ ref: '@e11' });
+    }
+    // lock/unlock are Android only; they still count toward the transition budget there.
+    const android = harness({ platform: 'android', bundleId: 'com.example.app', transition: 120 });
+    await openAttempt(android);
+    await observed(android, 'Back');
+    const androidDevice = fixture(android);
+    for (const change of [() => androidDevice.lock(), () => androidDevice.unlock()]) {
+      android.fake.respond('capture.snapshot', () => SETTINGS_SNAPSHOT);
+      await observed(android, 'Back');
+      await change();
+      android.fake.respond('capture.snapshot', () => ({
+        ...SETTINGS_SNAPSHOT,
+        nodes: [
+          ...SETTINGS_NODES,
+          { ref: '@e11', index: 10, parentIndex: 0, depth: 1, type: 'button', label: 'Submit', rect: { x: 0, y: 600, width: 390, height: 44 } },
+        ],
+      }));
+      const startedAt = Date.now();
+      const submit = await observed(android, 'Submit');
+      await android.engine.perform!(submit.ref, { kind: 'tap' }, { ...operation(), origin: 'test' });
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(100);
+      expect(android.fake.lastArgs('interactions.press')).toEqual({ ref: '@e11' });
     }
     // A read leaves the budget alone: the clipboard changes no screen.
     await device.clipboard();
@@ -2687,8 +2707,6 @@ describe('device fixture', () => {
     expect(await device.foregroundApp()).toEqual({ name: 'Settings', bundleId: 'com.apple.Preferences' });
     await device.home();
     await device.back();
-    await device.lock();
-    await device.unlock();
     await device.alert('accept');
     await device.dismissKeyboard();
     expect(await device.clipboard()).toBe('pasted');
@@ -2709,8 +2727,6 @@ describe('device fixture', () => {
       ['command.appState', {}],
       ['command.home', { platform: 'ios' }],
       ['command.back', { settle: true, settleQuietMs: 150 }],
-      ['command.hardwareButton', { platform: 'ios', button: 'sleep' }],
-      ['command.hardwareButton', { platform: 'ios', button: 'wake' }],
       ['command.alert', { platform: 'ios', action: 'accept' }],
       ['command.keyboard', { action: 'dismiss' }],
       ['command.clipboard', { platform: 'ios', action: 'read' }],
@@ -2718,6 +2734,35 @@ describe('device fixture', () => {
     ]);
     expect(declared!.lock).toEqual({ kind: 'resource' });
     expect(declared!.unlock).toEqual({ kind: 'resource' });
+  });
+
+  it('locks and unlocks on Android through sleep/wake and refuses on iOS before any device command', async () => {
+    const android = harness({ platform: 'android', bundleId: 'com.example.app' });
+    await openAttempt(android);
+    const before = android.fake.calls.length;
+    const androidDevice = fixture(android);
+    await androidDevice.lock();
+    await androidDevice.unlock();
+    expect(android.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
+      ['command.hardwareButton', { platform: 'android', button: 'sleep' }],
+      ['command.hardwareButton', { platform: 'android', button: 'wake' }],
+    ]);
+    expect(declared!.lock).toEqual({ kind: 'resource' });
+    expect(declared!.unlock).toEqual({ kind: 'resource' });
+
+    const ios = harness();
+    await openAttempt(ios);
+    const count = ios.fake.calls.length;
+    const iosDevice = fixture(ios);
+    await expect(iosDevice.lock()).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('Android'),
+    });
+    await expect(iosDevice.unlock()).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('Android'),
+    });
+    expect(ios.fake.calls.length).toBe(count);
   });
 
   it('changes a permission on the pinned app by name and on the worker\'s device, with no open first, whatever the session is on', async () => {

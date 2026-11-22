@@ -390,6 +390,13 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
       await surface.screenCommand('device.back', (client) => client.command.back({ ...surface.settleOptions }), context.signal);
     },
     async lock() {
+      // Refuse before the hardware button, the way clearKeychain refuses the
+      // wrong platform: agent-device's Apple leaf has no sleep button, and its
+      // UNSUPPORTED_OPERATION ("No Apple leaf carries this system button") is
+      // opaque to a test author.
+      if (surface.options.platform !== 'android') {
+        throw unsupported('device.lock turns the screen off on Android; iOS has no sleep hardware button');
+      }
       await surface.screenCommand(
         'device.lock',
         (client) => client.command.hardwareButton({ ...surface.selection(), button: 'sleep' }),
@@ -397,6 +404,9 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
       );
     },
     async unlock() {
+      if (surface.options.platform !== 'android') {
+        throw unsupported('device.unlock wakes the screen on Android; iOS has no wake hardware button');
+      }
       await surface.screenCommand(
         'device.unlock',
         (client) => client.command.hardwareButton({ ...surface.selection(), button: 'wake' }),
