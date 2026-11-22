@@ -267,7 +267,13 @@ await screen.getByTestId('memory-list', { visible: true }).getByRole('listitem')
 and `waitFor()`: what renders, as Playwright reads it.
 
 - Hidden: `display: none`, `visibility: hidden`, a box with no size, a closed
-  `<details>` body, and content under `content-visibility: hidden`.
+  `<details>` body, shadow and slotted content included, and content under
+  `content-visibility: hidden`.
+- Not hidden: a closed `<details>` body the page's CSS shows through
+  `::details-content`, and content under `content-visibility: hidden` set on an
+  element whose box does not skip it (`display: contents`, an inline element,
+  a table, a table row, ruby). An inline `<svg>`, `<button>`, or `<fieldset>`
+  makes a box of its own, so content under one still reads hidden.
 - Not hidden: `aria-hidden`, since a decorative spinner marked with it still
   paints, so `toBeHidden()` on one waits until it leaves.
 - A child that sets `visibility: visible` under a hidden parent is visible.
@@ -943,7 +949,7 @@ Web only. An empty array clears the input and fires `input` and `change`. It als
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | A blank path. |
+| `INVALID_ARGUMENT` | A blank path, or a path that does not exist or sits under a directory the runner cannot search. |
 | `UNSUPPORTED_CAPABILITY` | On a device, which has no file input. |
 | `ACTION_FAILED` | A button that opens no file chooser. |
 
