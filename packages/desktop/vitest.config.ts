@@ -15,6 +15,8 @@ export default defineConfig({
         test: {
           name: 'unit',
           include: ['tests/unit/**/*.test.ts'],
+          // A private os.tmpdir() per test file: see the setup file.
+          setupFiles: ['tests/helpers/private-tmpdir.ts'],
           testTimeout: 30_000,
           hookTimeout: 30_000,
           pool: 'forks',
