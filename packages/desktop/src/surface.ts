@@ -262,6 +262,8 @@ export class DesktopSurface {
   private projectRoot = process.cwd();
   /** The app's bundle id or name: the target's `bundleId`, or the bundle id read from its `appPath`. */
   private launchTarget: string | undefined;
+  /** Whether the app is launched in the foreground: with `desktop({ headed })`, or a run that asked for a visible surface (`--headed`). Physical input stays with `desktop({ headed })` alone, since the engine declares it when it is created. */
+  private foreground = false;
   /** The `.app` bundle an `appPath` names, resolved; the launched process must run from it. */
   private bundle: string | undefined;
   /** The process name agent-desktop reported at launch, which window lookups filter by before they keep the launched process's own. */
@@ -309,6 +311,7 @@ export class DesktopSurface {
   async init(info: EngineInitInfo): Promise<void> {
     this.projectRoot = info.projectRoot;
     this.app = info.app;
+    this.foreground = this.options.headed || info.headed;
     const executable = await resolveExecutable(this.options.binary, info.projectRoot, info.env);
     this.appEnv = inheritedEnv(info.env);
     // agent-desktop keeps the text of plain fields in its state directory: a worker that was killed left its own behind.
@@ -427,7 +430,8 @@ export class DesktopSurface {
 
   /**
    * `app.open()`: the copy of the app the engine launched is quit, and the
-   * app launched fresh, in the background unless `headed`, with the target's
+   * app launched fresh, in the background unless `headed` or the run's
+   * `--headed`, with the target's
    * launch arguments. A copy the engine did not launch (the developer's own)
    * is left alone, and never read or driven. A launch that failed after the
    * app started still leaves the engine owning the new process, so the end
@@ -489,7 +493,7 @@ export class DesktopSurface {
   private async launchById(launch: Launch, operation: OperationContext): Promise<void> {
     const { target, token } = launch;
     // In the background unless physical input is on: the app never takes the keyboard from whoever is at the Mac.
-    const args = ['launch', target, '--no-attach', ...(this.options.headed ? ['--activate'] : []), '--timeout', String(this.toolBudget(operation)), `--env=${LAUNCH_TOKEN}=${token}`];
+    const args = ['launch', target, '--no-attach', ...(this.foreground ? ['--activate'] : []), '--timeout', String(this.toolBudget(operation)), `--env=${LAUNCH_TOKEN}=${token}`];
     for (const argument of [...FRESH_STATE_ARGUMENTS, ...(this.app.launchArguments ?? [])]) args.push(`--arg=${argument}`);
     let launched: { app?: string; pid?: number; process_instance?: string };
     try {
@@ -532,7 +536,7 @@ export class DesktopSurface {
   private async openBundle(bundle: string, launch: Launch, operation: OperationContext): Promise<void> {
     if (operation.timeoutMs <= 0) throw new EngineError('OPERATION_TIMEOUT', `opening ${bundle}: the operation's budget ran out before it was sent`, { retryable: false, cause: NOT_SENT });
     // `-g` keeps the app in the background unless physical input is on; `open` hands the app its own environment, so it runs with the trimmed one.
-    const args = [...(this.options.headed ? [] : ['-g']), '-n', '--env', `${LAUNCH_TOKEN}=${launch.token}`, bundle, '--args', ...FRESH_STATE_ARGUMENTS, ...(this.app.launchArguments ?? [])];
+    const args = [...(this.foreground ? [] : ['-g']), '-n', '--env', `${LAUNCH_TOKEN}=${launch.token}`, bundle, '--args', ...FRESH_STATE_ARGUMENTS, ...(this.app.launchArguments ?? [])];
     try {
       await execFileAsync('open', args, { signal: operation.signal, timeout: operation.timeoutMs, env: this.appEnv });
     } catch (cause) {
@@ -640,10 +644,10 @@ export class DesktopSurface {
     }
     // The open's own budget ran out first: that is a timeout, not a window that cannot be read.
     if (budgetBound) throw new EngineError('OPERATION_TIMEOUT', `${this.appName ?? 'the app'} launched, but the open ran out of time before its window could be read`, { retryable: false });
-    if (!sawWindow && !timedOut && !this.options.headed) {
+    if (!sawWindow && !timedOut && !this.foreground) {
       throw new EngineError(
         'ENGINE_FAILURE',
-        `${this.appName ?? 'the app'} launched in the background and opened no window. Some apps, such as document-based ones, show a window only once they come forward; set desktop({ headed: true }) for them`,
+        `${this.appName ?? 'the app'} launched in the background and opened no window. Some apps, such as document-based ones, show a window only once they come forward; set desktop({ headed: true }) for them, or run with --headed`,
         { retryable: false },
       );
     }
@@ -1138,7 +1142,7 @@ export class DesktopSurface {
           throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `select "${label}": agent-desktop opened the list's menu and could not confirm a choice, so whether "${label}" was chosen is unknown; the list may have no option "${label}". The menu was closed`, { retryable: false, cause });
         }
         if (menu === 'open') {
-          const why = this.options.headed ? 'Escape did not close it' : 'the app runs in the background, which takes no key, so it could not be closed; desktop({ headed: true }) closes it with Escape';
+          const why = this.foreground ? 'Escape did not close it' : 'the app runs in the background, which takes no key, so it could not be closed; desktop({ headed: true }) closes it with Escape';
           throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `select "${label}": ${cause.message} (the input may have reached the app). The list's menu is still open: ${why}`, { retryable: false, cause });
         }
       }

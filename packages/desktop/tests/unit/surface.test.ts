@@ -100,7 +100,7 @@ function renamed(name: string, from: string, to: string): unknown {
  * writes its arguments to `recorded`, then runs `body` (sh), where `SPAWNED`
  * names the file the fake lists started processes from.
  */
-async function appPathSurface(body: string, scenario: Scenario = {}) {
+async function appPathSurface(body: string, scenario: Scenario = {}, runHeaded = false) {
   const directory = artifacts();
   const bundle = path.join(directory, 'Built.app');
   mkdirSync(path.join(bundle, 'Contents'), { recursive: true });
@@ -119,12 +119,14 @@ async function appPathSurface(body: string, scenario: Scenario = {}) {
   const spawnedFile = path.join(path.dirname(fake.binary), 'calls.jsonl.spawned');
   writeFileSync(path.join(bin, 'open'), `#!/bin/sh\nSPAWNED=${JSON.stringify(spawnedFile)}\nprintf '%s\\n' "$@" > ${JSON.stringify(recorded)}\n${body}`, { mode: 0o755 });
   const surface = tracked(new DesktopSurface(resolveOptions({ binary: fake.binary, settle: false }), 'macos'));
-  await surface.init({ runId: 'r', targetName: 'mac', projectRoot: directory, app: { appPath: 'Built.app' }, env: { ...fake.env, PATH: `${bin}:${process.env.PATH ?? ''}` }, headed: false, workerSlot: 0, signal, log: () => undefined });
+  await surface.init({ runId: 'r', targetName: 'mac', projectRoot: directory, app: { appPath: 'Built.app' }, env: { ...fake.env, PATH: `${bin}:${process.env.PATH ?? ''}` }, headed: runHeaded, workerSlot: 0, signal, log: () => undefined });
   return { surface, fake, bundle, recorded };
 }
 
 interface Launch {
   readonly snapshot?: string;
+  /** The run's own `--headed`, as `init` receives it. */
+  readonly runHeaded?: boolean;
   readonly openTimeoutMs?: number;
   readonly observe?: boolean;
   readonly options?: Parameters<typeof resolveOptions>[0];
@@ -136,7 +138,7 @@ interface Launch {
  * environment (its token) and reports it, as agent-desktop does; `app.pid`
  * is that process once launched.
  */
-async function initialized(scenario: Scenario | ((pid: number) => Scenario), { snapshot = 'macos/appkit-form', options = {} }: Launch = {}) {
+async function initialized(scenario: Scenario | ((pid: number) => Scenario), { snapshot = 'macos/appkit-form', options = {}, runHeaded = false }: Launch = {}) {
   const fake = fakeScenario({
     status: [{ ok: true, data: { version: '1.3.1', permissions: { accessibility: { state: 'granted' } } } }],
     launch: [{ spawn: true, ok: true, data: { app: 'SpikeForm', pid: SPAWNED, process_instance: 'instance-1' } }],
@@ -162,7 +164,7 @@ async function initialized(scenario: Scenario | ((pid: number) => Scenario), { s
     app: { bundleId: 'dev.e2e.spike.form' },
     // A secret in the run's environment, which neither agent-desktop nor the app it launches may see.
     env: { ...fake.env, E2E_PROBE_SECRET: 'hunter2' },
-    headed: false,
+    headed: runHeaded,
     workerSlot: 0,
     signal,
     log: () => undefined,
@@ -663,6 +665,23 @@ describe('DesktopSurface', () => {
     await expect(surface.restart({ ...operation(), timeoutMs: 15_000 })).rejects.toThrow(/opened no window.*desktop\(\{ headed: true \}\)/);
     // The one `open` was the background launch: no second one by path brought the app, or another copy of it, forward.
     expect(readFileSync(recorded, 'utf8').split('\n')[0]).toBe('-g');
+  });
+
+  it("launches the app in the foreground when the run asks for --headed, though the target's desktop() is not headed", async () => {
+    const { fake } = await launched({}, { runHeaded: true, observe: false });
+    expect(fake.calls().find((call) => call.key === 'launch')?.args).toContain('--activate');
+    const { fake: background } = await launched({}, { observe: false });
+    expect(background.calls().find((call) => call.key === 'launch')?.args).not.toContain('--activate');
+  });
+
+  it.skipIf(process.platform !== 'darwin')('opens an appPath build in the foreground when the run asks for --headed', async () => {
+    const { surface, recorded } = await appPathSurface(
+      `while [ $# -gt 0 ]; do [ "$1" = "--env" ] && variable="$2"; shift; done\nenv "$variable" ${JSON.stringify(process.execPath)} -e 'setTimeout(() => {}, 60000)' >/dev/null 2>&1 &\necho $! >> "$SPAWNED"\n`,
+      {},
+      true,
+    );
+    await surface.restart(operation());
+    expect(readFileSync(recorded, 'utf8').split('\n')).not.toContain('-g');
   });
 
   it.skipIf(process.platform !== 'darwin')('reports an open cancelled while it ran as cancelled', async () => {

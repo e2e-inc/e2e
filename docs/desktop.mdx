@@ -98,7 +98,9 @@ export default {
 
 Import `test` from `@e2e-dev/desktop`. By default, `app.open()` leaves the
 app in the background. Use `desktop({ headed: true })` for apps that need to
-come forward before they show a window. When the engine launched it
+come forward before they show a window. `e2e run --headed` also launches
+the app in the foreground, but only `desktop({ headed: true })` turns on the
+physical input described below. When the engine launched it
 before, it quits that copy first. A copy you opened yourself is left alone,
 and the engine never reads or drives it. Every test ends with the app quit,
 and no window the app saved at its last quit comes back.
@@ -138,7 +140,7 @@ the one `screen` reads (`desktop.useWindow(window)`), and quits the app
 
 | Area | On a desktop target |
 | --- | --- |
-| Input | The app runs in the background, and actions use the accessibility API, so your pointer, focus, and typing stay where they are. An app that opens no window in the background, such as a document-based one, fails to open; it needs `headed: true` |
+| Input | The app runs in the background, and actions use the accessibility API, so your pointer, focus, and typing stay where they are. An app that opens no window in the background, such as a document-based one, fails to open; it needs `headed: true`, or a run with `--headed` |
 | Physical input | `doubleTap`, `hover`, `press`, point taps, and typing into whatever has focus need `desktop({ headed: true })`, which brings the app forward and uses the real pointer and keyboard |
 | Keys | agent-desktop sends a key only to the active window, which an app in the background never has, so `press` needs `headed: true`. The engine never sends a key by the app's name, which could reach another copy of it. A key goes to a control only while that control has focus, in the window the app sends keys to |
 | Select | `selectOption` takes an option's label, not an index. When a pop-up button has no such option, its menu can stay open, and the engine closes it with Escape. An app in the background takes no key, so there the menu stays open and the error says so; use `headed: true` to have it closed |
