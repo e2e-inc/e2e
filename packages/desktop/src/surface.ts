@@ -1122,10 +1122,12 @@ export class DesktopSurface {
           if (windows.length > 1 && home.is_focused !== true) {
             throw notActionable(`node ${binding.id} is in a window that cannot be shown to be the app's key window, so the key could land in another window`);
           }
-          // Focusing can hand focus on (a dialog it opens): the key goes only when the control still holds it. A control with an identity keeps its id; a look-alike has a new id in every read, so it is found by role and place.
+          // Focusing can hand focus on (a dialog it opens): the key goes only when the control still holds it. A control with an identity keeps its id; a look-alike has a new id in every read, so it is found by role and place, with as many twins around it as before: a twin that went could have let another take its place.
           const now = await this.capture(operation, window);
           const held = [...(now?.bindings.values() ?? [])].some(
-            (candidate) => candidate.states?.focused === true && (binding.stable ? candidate.id === binding.id : candidate.role === binding.role && sameRect(candidate.rect, binding.rect)),
+            (candidate) =>
+              candidate.states?.focused === true &&
+              (binding.stable ? candidate.id === binding.id : candidate.role === binding.role && sameRect(candidate.rect, binding.rect) && candidate.likeness === binding.likeness),
           );
           if (!held) throw notActionable(`node ${binding.id} did not keep keyboard focus, so the key would land on another control`);
           await this.sendKey(combo, window, `press ${action.key}`, operation);

@@ -940,6 +940,17 @@ describe('DesktopSurface', () => {
     expect(fake.calls().at(-1)?.args).toEqual(['press', 'a', '--window-id', 'w-mine']);
   });
 
+  it('sends no key when a twin went as the field was focused, so the other could have taken its place', async () => {
+    const field = (ref: string, y: number, focused: boolean) => ({ role: 'textfield', name: 'Item', ref_id: ref, bounds: { x: 10, y, width: 100, height: 20 }, ...(focused ? { states: ['focused'] } : {}) });
+    const both = { ok: true, data: { snapshot_id: 's1', window: { id: 'w-mine' }, tree: { role: 'window', name: 'List', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [field('@s1:e1', 10, false), field('@s1:e2', 40, false)] } } };
+    // The focus handler removed the second field, and the first moved into its place and took focus.
+    const one = { ok: true, data: { snapshot_id: 's2', window: { id: 'w-mine' }, tree: { role: 'window', name: 'List', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [field('@s2:e1', 40, true)] } } };
+    const { surface, fake } = await launched({ snapshot: [both, both, one] }, { observe: false });
+    const observed = await surface.observe(operation(), undefined);
+    await expect(surface.perform(observed.root.children![1]!.ref, { kind: 'press', key: 'a' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+    expect(fake.calls().some((call) => call.key === 'press')).toBe(false);
+  });
+
   it('refuses a key agent-desktop cannot press before it moves focus', async () => {
     const { surface, fake, byTestId } = await launched({});
     await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Insert' }, operation())).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });

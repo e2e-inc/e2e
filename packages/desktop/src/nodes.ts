@@ -64,6 +64,12 @@ export interface NodeBinding {
   readonly rect?: Rect;
   /** Whether the id comes from the node's identity and every ancestor's, and so names it in the next snapshot too; a look-alike's, or one inside a look-alike, is new in every snapshot. */
   readonly stable: boolean;
+  /**
+   * How many look-alikes the node and each of its ancestors have among their
+   * siblings, root first (`/1/2/1`): a look-alike found again by its role and
+   * place is the same one only if no twin around it came or went.
+   */
+  readonly likeness: string;
 }
 
 /** A snapshot as the engine keeps it: the tree the harness sees, and a binding for every node in it. */
@@ -273,7 +279,7 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
   let unmaskable = false;
   let scrollTarget: string | undefined;
 
-  const project = (node: RawNode, id: string, stable: boolean): SemanticNode => {
+  const project = (node: RawNode, id: string, stable: boolean, likeness: string): SemanticNode => {
     const rawStates = new Set(node.states ?? []);
     const role = ROLE_MAP[node.role] ?? (node.role === 'unknown' ? undefined : node.role);
     const secure = rawStates.has('secure');
@@ -318,6 +324,7 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
       ...(raw.window === undefined ? {} : { windowId: raw.window.id }),
       ...(rect === undefined ? {} : { rect }),
       stable,
+      likeness,
     });
     const kept: RawNode[] = [];
     const collect = (child: RawNode): void => {
@@ -339,7 +346,7 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
     const children = kept.map((child) => {
       const identity = plain.get(identityOf(child)) === 1 ? identityOf(child) : named.get(identityOf(child, true)) === 1 ? identityOf(child, true) : undefined;
       // A child's id is built on its parent's: under a look-alike, whose id is new every snapshot, so is the child's.
-      return project(child, idFor(identity === undefined ? undefined : `${id}/${identity}`), stable && identity !== undefined);
+      return project(child, idFor(identity === undefined ? undefined : `${id}/${identity}`), stable && identity !== undefined, `${likeness}/${plain.get(identityOf(child)) ?? 1}`);
     });
     return {
       ref: { id, revision: '' },
@@ -357,7 +364,7 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
     };
   };
 
-  const root = project(raw.tree, ROOT_ID, true);
+  const root = project(raw.tree, ROOT_ID, true, '');
   return {
     root,
     bindings,
