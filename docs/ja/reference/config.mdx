@@ -35,6 +35,7 @@ export default {
 | [`launchTimeout`](#launchtimeout) | `number` | `60000` |
 | [`actionTimeout`](#actiontimeout) | `number` | `30000` |
 | [`assertionTimeout`](#assertiontimeout) | `number` | `5000` |
+| [`toPass`](#topass) | `PassOptions` | [デフォルトを参照](#topass) |
 | [`cleanupTimeout`](#cleanuptimeout) | `number` | `30000` |
 | [`retries`](#retries) | `number` | `0`、CI では `1` |
 | [`failOnSkippedFailure`](#failonskippedfailure) | `boolean` | `false` |
@@ -136,6 +137,26 @@ assertionTimeout: 10_000, // default: 5000
 
 - マッチャー自身の `timeout` オプションが優先されます。`timeout: 0` はそのマッチャー固有の期限をなくしますが、テストのタイムアウト、または `afterEach` 内の `cleanupTimeout` は引き続き適用します。
 - `--assertion-timeout <ms>` で 1 回の実行について上書きできます。
+
+#### `toPass`
+
+[ブロックのリトライ](/reference/expect#retrying-a-block)のデフォルトのタイムアウトと待ち時間を指定します。呼び出しの各オプションは、対応する設定のフィールドより優先されます。
+
+```ts
+toPass: { timeout: 10_000, intervals: [100, 250, 500] },
+```
+
+| オプション | 型 | デフォルト |
+| --- | --- | --- |
+| `timeout` | `number` | `0` |
+| `intervals` | `readonly number[]` | `[100, 250, 500, 1000]` |
+
+- `timeout` は 0 から 2147483647 までの整数（ミリ秒）です。`0` では、リトライの上限はテストまたはフックの期限だけです。
+- `intervals` は正の整数（ミリ秒）の空でないリストです。最後の値を繰り返します。
+
+不正な値や未知のキーは、設定の読み込み時に `INVALID_CONFIG` として報告します。
+
+`beforeAll`、`afterAll`、ワーカーフィクスチャの後処理では、`expect.poll` と `toPass` に設定のデフォルトを使います。リトライの上限はフックの期限です。
 
 #### `cleanupTimeout`
 
@@ -1289,6 +1310,8 @@ export interface E2EConfig {
   actionTimeout?: number;
   /** Default `expect` deadline in milliseconds; default 5000. */
   assertionTimeout?: number;
+  /** Default timeout and pauses for `expect(fn).toPass()`. */
+  toPass?: PassOptions;
   /** Budget of each `afterEach` hook, fixture teardown, and engine cleanup in milliseconds; default 30000. */
   cleanupTimeout?: number;
   /** Retries per test, 0 through 10; default 1 in CI, else 0. */

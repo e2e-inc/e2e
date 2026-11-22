@@ -45,6 +45,7 @@ e2e は同じプロジェクト内で Playwright と並行して動かせるた�
 | `testDir`, `testMatch`, `testIgnore` | プロジェクトルートからの glob を指定する `tests`。先頭の `!` で除外 |
 | `retries`, `workers`, `timeout` | 同名。[デフォルト値は一部異なります](#defaults-that-differ)。`workers` は整数 |
 | `expect.timeout`, `use.actionTimeout`, `globalTimeout` | `assertionTimeout`、`actionTimeout`、`maxDuration`。`maxDuration` の計測はアプリの起動時ではなくテスト開始時から |
+| `expect.toPass` | トップレベルの [`toPass`](/reference/config#topass) |
 | `maxFailures`, `use.headless: false` | CLI の `--max-failures <n>` と `--headed` |
 | `reporter`, `outputDir` | `reporters: ['list', 'junit', htmlReporter()]`。`htmlReporter` は `@e2e-dev/html-reporter` から。`dot`、`json`、`markdown` も利用可能。出力先は `output`、デフォルトは `.e2e` |
 | `use.viewport`, `locale`, `timezoneId`, `colorScheme`, `reducedMotion`, `userAgent`, `testIdAttribute` | `web({ ... })` 内の同名キー |
@@ -128,7 +129,9 @@ test('checkout', async ({ app, agent, screen }) => {
 | `expect(page).toHaveScreenshot()`, `expect(locator).toHaveScreenshot()` | `expect(screen).toHaveScreenshot()` とロケーター形式。[視覚的な比較](/visual-testing)を参照 |
 | `expect(value)` の `toBe()`、`toEqual()`、`toMatchObject()`、`toContain()`、`toHaveLength()`、`toHaveProperty()`、`toMatch()`、真偽性と数値のマッチャー | 同じ。[値のマッチャー](/reference/expect#value-matchers)を参照 |
 | `expect(locator, 'message')`, `expect(page, 'message').toHaveScreenshot()`, `expect(value, 'message')` | 同じ。ページには `expect(screen, 'message')`。メッセージは失敗の先頭に付きます。[ロケーターのマッチャー](/reference/expect#locator-matchers)を参照 |
-| `expect.any()`, `anything()`, `objectContaining()`, `arrayContaining()`, `stringMatching()`, `stringContaining()`, `expect.poll()`, `expect.soft()` | 同じ。`poll` は単一の `interval` を指定 |
+| `expect.any()`, `anything()`, `objectContaining()`, `arrayContaining()`, `stringMatching()`, `stringContaining()`, `expect.poll()`, `expect.soft()` | 同じ |
+| `expect.poll(read, { intervals })` | 同じ。[値のポーリング](/reference/expect#polling-a-value)を参照 |
+| `expect(fn).toPass(options?)` | 同じ。[ブロックのリトライ](/reference/expect#retrying-a-block)を参照 |
 
 </Accordion>
 <Accordion title="ページ遷移とアプリ">
@@ -248,7 +251,6 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 
 | Playwright | 現在使える方法 |
 | --- | --- |
-| `expect(fn).toPass()`, `expect.poll(fn, { intervals })` | `expect.poll(async () => { ...; return true }).toBe(true)` |
 | `toBeEmpty()`, `toBeEditable()`, `toBeInViewport()` | フォームには `toHaveValue('')`、ほかの要素には `toHaveText('')`。`toBeEnabled()` と `.not.toHaveAttribute('readonly')`。`boundingBox()` を `expect.poll` で確認 |
 | `locator.screenshot()`, `{ fullPage, clip }`, `snapshotPathTemplate`, `ignoreSnapshots` | `toHaveScreenshot` でビューポートまたは 1 つのロケーターを比較。ビジュアルテストのスキップにはタグと `--exclude-tag` |
 | `expect.configure()` | 各呼び出しに `{ timeout }` |
@@ -348,6 +350,8 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 - `toHaveRole` は `getByRole` と同じロール名を使います。`paragraph`、`generic` など、そこにないロールは型エラーになり、`img` は `image` と読みます。比較するのはツリー上のロールで、`contenteditable` エディターは `textbox` です。
 - ロケーターは厳密です。複数一致した場合、アクション、読み取り、肯定形のマッチャーは `LOCATOR_AMBIGUOUS` になります。Playwright の `page.click(selector)` や `isVisible()` は最初の一致を使います。`filter` や `first()` で絞り込んでください。
 - `.not.toBeChecked()` はボタンや見出しでも成功します。コントロールの種類が変わったら失敗するように、ロールで対象を探してください。
+- `expect.poll` の読み取りが例外をスローした場合は、リトライします。
+- `toPass` では、レポートに表示されるのは各トライ内のステップだけです。
 - セッションは 1 回の実行内だけ有効です。`test.setup` が名前付きで状態を保存し、`{ session }` が復元します。ファイルは暗号化し、クリーンアップ時に削除するため、再利用する `.auth/user.json` はありません。
 - テストには生の `Page` を渡しません。その上の操作は記録も秘匿もマスキングもされないためです。`surfaceOf(engine)` はテストコード向けではなく、[カスタムエグゼキューター](/executors#driving-the-page-yourself)向けです。
 
