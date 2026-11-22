@@ -410,6 +410,11 @@ describe('DesktopSurface', () => {
     await expect(launched({ 'list-windows': [{ ok: true, data: [] }] }, { runHeaded: true, openTimeoutMs: 15_000 })).rejects.toThrow(/listed no window within 10 s/);
   }, 30_000);
 
+  it('reads until the end of the launch wait, so a window that shows up late still opens', async () => {
+    // The first window list takes 9.1 s of the 10 s wait and lists none; the next one finds the window.
+    await launched((pid) => ({ 'list-windows': [{ ok: true, data: [], sleepMs: 9_100 }, { ok: true, data: [{ id: 'w-mine', title: 'Spike Form', pid, process_instance: 'instance-1', is_focused: true }] }] }), { openTimeoutMs: 15_000, observe: false });
+  }, 30_000);
+
   it('reports an open that ran out of its own budget as a timeout, not a locked screen', async () => {
     const hidden = { ok: false, error: { code: 'ACTION_NOT_SUPPORTED', message: 'not exposed', details: { kind: 'window_without_accessibility_element' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
     await expect(launched({ snapshot: [hidden] }, { openTimeoutMs: 1_500 })).rejects.toMatchObject({ code: 'OPERATION_TIMEOUT' });

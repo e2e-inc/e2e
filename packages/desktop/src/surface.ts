@@ -72,8 +72,6 @@ const EXIT_WAIT_MS = 500;
 /** How long a launch waits for its process to appear, and then for the app's window to become readable, before it reports why it did not. */
 const LAUNCH_READY_MS = 10_000;
 
-/** The least of that wait a read of the window starts with: one cut shorter would time out, and a timeout of a read then says nothing about the window. */
-const LAUNCH_READ_MIN_MS = 1_000;
 
 /**
  * How long agent-desktop may look for an option in a list. A select of an
@@ -637,16 +635,17 @@ export class DesktopSurface {
     const budgetBound = operation.timeoutMs < LAUNCH_READY_MS;
     const deadline = Date.now() + Math.min(operation.timeoutMs, LAUNCH_READY_MS);
     let sawWindow = false;
-    // A read that ran out of time saw nothing: it does not show the app has no window.
+    // Whether a read finished and listed no window of the app: only that shows it opened none. A read that ran out of time saw nothing.
+    let listedNone = false;
     let timedOut = false;
     while (Date.now() < deadline) {
       if (operation.signal.aborted) throw new EngineError('CANCELLED', `opening ${this.appName ?? 'the app'} was cancelled`, { retryable: false });
-      // A read given less than one takes only times out, which shows nothing about the window: the wait is over.
-      if (!budgetBound && deadline - Date.now() < LAUNCH_READ_MIN_MS) break;
       let screen: ProjectedScreen | undefined;
+      let read = false;
       try {
         // Each read gets what is left of the readiness wait, not of the whole operation, shared by its commands.
         screen = await this.capture(withDeadline({ ...operation, timeoutMs: Math.max(deadline - Date.now(), 0) }));
+        read = true;
       } catch (cause) {
         // The last read ran out of budget: the window never became readable in time.
         if (cause instanceof EngineError && cause.code === 'OPERATION_TIMEOUT') {
@@ -658,6 +657,7 @@ export class DesktopSurface {
         if (cause.cause === UNREADABLE) sawWindow = true;
       }
       if (screen !== undefined) return;
+      if (read) listedNone = true;
       // An app that quit (or crashed) on its own never shows a window.
       if (this.pid !== undefined && !alive(this.pid)) {
         this.forget();
@@ -671,7 +671,7 @@ export class DesktopSurface {
     }
     // The open's own budget ran out first: that is a timeout, not a window that cannot be read.
     if (budgetBound) throw new EngineError('OPERATION_TIMEOUT', `${this.appName ?? 'the app'} launched, but the open ran out of time before its window could be read`, { retryable: false });
-    if (!sawWindow && !timedOut && !this.foreground) {
+    if (!sawWindow && listedNone && !this.foreground) {
       throw new EngineError(
         'ENGINE_FAILURE',
         `${this.appName ?? 'the app'} launched in the background and opened no window. Some apps, such as document-based ones, show a window only once they come forward; set desktop({ headed: true }) for them, or run with --headed`,
@@ -679,7 +679,7 @@ export class DesktopSurface {
       );
     }
     // In the foreground there is no background to blame: the app listed no window at all, which a locked screen can cause too.
-    if (!sawWindow && !timedOut) {
+    if (!sawWindow && listedNone) {
       throw new EngineError(
         'ENGINE_FAILURE',
         `${this.appName ?? 'the app'} launched, but listed no window within ${LAUNCH_READY_MS / 1000} s: it may open none (a menu-bar app) or take longer to, or on macOS the screen may be locked`,
