@@ -8,7 +8,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -141,6 +141,7 @@ export async function installPinned(env: Readonly<Record<string, string | undefi
   }
   const directory = cacheDirectory(env, target);
   const executable = path.join(directory, executableName());
+  await sweepLeftovers(directory);
   if (await usable(directory, digest)) return executable;
   const archive = `agent-desktop-v${AGENT_DESKTOP_VERSION}-${target}.tar.gz`;
   const url = `https://github.com/vercel-labs/agent-desktop/releases/download/v${AGENT_DESKTOP_VERSION}/${archive}`;
@@ -181,6 +182,26 @@ async function download(url: string, archive: string, digest: string, directory:
     await publish(staging, directory, digest);
   } finally {
     await rm(staging, { recursive: true, force: true });
+  }
+}
+
+/** How old an unpack or a moved-aside entry must be before a later install removes it: no install still running is using one that old. */
+const LEFTOVER_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Removes the unpacks (`.partial-*`) and moved-aside entries (`.stale-*`)
+ * beside the cache entry that an install killed mid-way left behind, each
+ * a whole copy of agent-desktop. Only ones a day old go: an install running
+ * now may still be using a newer one. Best effort; a failure leaves them.
+ */
+async function sweepLeftovers(directory: string): Promise<void> {
+  const parent = path.dirname(directory);
+  const base = path.basename(directory);
+  for (const entry of await readdir(parent).catch(() => [] as string[])) {
+    if (!entry.startsWith(`${base}.partial-`) && !entry.startsWith(`${base}.stale-`)) continue;
+    const leftover = path.join(parent, entry);
+    const old = await stat(leftover).then((info) => Date.now() - info.mtimeMs > LEFTOVER_AGE_MS, () => false);
+    if (old) await rm(leftover, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 

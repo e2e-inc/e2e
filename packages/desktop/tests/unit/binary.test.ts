@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -207,6 +207,25 @@ describe('the pinned agent-desktop', () => {
       const entry = path.dirname(pinnedExecutable(env)!);
       hooks.beforeRename = (_from, to) => (to === entry ? Promise.reject(Object.assign(new Error(`EACCES: permission denied, rename -> '${to}'`), { code: 'EACCES' })) : Promise.resolve());
       await expect(installPinned(env, new AbortController().signal, () => undefined, digests)).rejects.toMatchObject({ code: 'AGENT_DESKTOP_INSTALL_FAILED', message: expect.stringMatching(/EACCES: permission denied/), cause: expect.objectContaining({ code: 'EACCES' }) });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('removes the unpacks and moved-aside entries a killed install left a day ago, and keeps newer ones', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'e2e-desktop-cache-'));
+    try {
+      const { bytes, digests } = release(home);
+      vi.stubGlobal('fetch', () => Promise.resolve(new Response(new Uint8Array(bytes))));
+      const env = { HOME: home, USERPROFILE: home, XDG_CACHE_HOME: path.join(home, 'cache'), LOCALAPPDATA: path.join(home, 'local') };
+      const entry = path.dirname(pinnedExecutable(env)!);
+      mkdirSync(path.dirname(entry), { recursive: true });
+      const leftovers = ['.partial-old', '.stale-1-old', '.partial-new'].map((suffix) => `${entry}${suffix}`);
+      for (const leftover of leftovers) mkdirSync(leftover);
+      const dayAgo = new Date(Date.now() - 25 * 60 * 60 * 1000);
+      for (const leftover of leftovers.slice(0, 2)) utimesSync(leftover, dayAgo, dayAgo);
+      await installPinned(env, new AbortController().signal, () => undefined, digests);
+      expect(leftovers.map((leftover) => existsSync(leftover))).toEqual([false, false, true]);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
