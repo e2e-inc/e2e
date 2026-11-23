@@ -481,6 +481,13 @@ describe('DesktopSurface', () => {
     }
   }, 30_000);
 
+  it('reads again when agent-desktop says a read of the window may be retried, as when its window list changed', async () => {
+    const changed = { ok: false, error: { code: 'APP_UNRESPONSIVE', message: 'Accessibility surface read was incomplete for AXWindows', details: { kind: 'surface_array_incomplete', retryable: true }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
+    const { fake } = await launched({ snapshot: [changed, snapshotAnswer('macos/appkit-form')] }, { observe: false });
+    expect(fake.calls().filter((call) => call.key === 'snapshot').length).toBeGreaterThanOrEqual(2);
+    expect(fake.spawned()).toHaveLength(1);
+  });
+
   it('reads again when the window was replaced while the open read it, and launches once', async () => {
     const replaced = { ok: false, error: { code: 'STALE_REF', message: 'root went stale', details: { kind: 'locator_root_invalid' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
     const { fake } = await launched({ snapshot: [replaced, snapshotAnswer('macos/appkit-form')] }, { observe: false });
