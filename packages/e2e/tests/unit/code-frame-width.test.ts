@@ -63,4 +63,13 @@ describe('code-frame terminal columns', () => {
     expect(wide[0]).toBe("  1| const key = '<secret:frame.key>'; throw new Error();");
     expect(wide[1]).toBe(`   |${' '.repeat("const key = '<secret:frame.key>'; ".length + 1)}^`);
   });
+
+  it('omits a caret inside a redacted value and keeps a caret before it', () => {
+    const value = 'fixture-code-frame-0123456789abcdef0123456789abcdef';
+    registerProviderKey('frame.inside', value);
+    const prefix = 'const value = "';
+    const source = `${prefix}${value}";`;
+    expect(render(source, prefix.length + 39, 120)).toEqual(['  1| const value = "<secret:frame.inside>";']);
+    expect(render(source, prefix.length + 1, 120)[1]).toBe(`   |${' '.repeat(prefix.length + 1)}^`);
+  });
 });

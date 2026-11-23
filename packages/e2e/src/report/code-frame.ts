@@ -38,13 +38,19 @@ export function codeFrame(frame: StackFrame, pc: Colors, maxChars = Math.max(20,
   const gutter = (no: number | '' = ''): string => pc.gray(`${String(no).padStart(3)}|`);
   const rows: string[] = [];
   for (let i = start; i <= end; i += 1) {
-    const raw = bounded(processSecrets.redact(lines[i] ?? '')).replaceAll('\t', ' ');
+    const line = lines[i] ?? '';
+    const redacted = processSecrets.redact(line);
+    const raw = bounded(redacted);
     if (raw.length > MAX_FRAME_LINE_CHARS) return [];
     const text = fitColumns(raw.trimEnd(), maxChars);
     rows.push(`${gutter(i + 1)}${text === '' ? '' : ` ${text}`}`);
     if (i === index) {
-      const prefix = bounded(processSecrets.redact((lines[i] ?? '').slice(0, Math.max(0, frame.column - 1))));
-      const column = visibleWidth(prefix);
+      const offset = Math.max(0, frame.column - 1);
+      const prefix = processSecrets.redact(line.slice(0, offset));
+      // If redacting at the split changes the result, the caret would point
+      // into a replacement whose display width no longer maps to the source.
+      if (redacted !== line && redacted !== prefix + processSecrets.redact(line.slice(offset))) continue;
+      const column = visibleWidth(bounded(prefix));
       // A clipped-away location has no visible token to annotate.
       const limit = text === raw.trimEnd() ? maxChars : visibleWidth(text) - 1;
       if (column < limit) {
