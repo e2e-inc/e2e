@@ -669,7 +669,7 @@ describe('DesktopSurface', () => {
       const record = JSON.parse(readFileSync(path.join(home, 'app.json'), 'utf8')) as { token: string; pid: number; started: string };
       expect(await environmentOf(app.pid)).toContain(`E2E_DESKTOP_LAUNCH=${record.token}`);
       // The process, by its id and when it started, so a later run can quit it without reading its environment.
-      expect(record).toMatchObject({ pid: app.pid, started: execFileSync('ps', ['-o', 'lstart=', '-p', String(app.pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }).trim() });
+      expect(record).toMatchObject({ pid: app.pid, started: execFileSync('ps', ['-o', 'lstart=', '-p', String(app.pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } }).trim() });
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -1697,7 +1697,7 @@ describe('DesktopSurface', () => {
     const leaked = unreadableCopy();
     const reused = unreadableCopy();
     await new Promise((resolve) => setTimeout(resolve, 200));
-    const startOf = (pid: number) => execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }).trim();
+    const startOf = (pid: number) => execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } }).trim();
     const records = [
       { token: 'token-1', pid: leaked, started: startOf(leaked) },
       // The id the record names now belongs to a process that started at another time.
@@ -1787,6 +1787,29 @@ describe('DesktopSurface', () => {
       expect(started).toMatch(/\d{4}$/);
     } finally {
       rmSync(left, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'linux')('keeps the state directory and app of a live worker that runs in another time zone', async () => {
+    const worker = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { env: { ...process.env, TZ: 'UTC' } });
+    const app = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { env: { ...process.env, E2E_DESKTOP_LAUNCH: 'token-live' } });
+    children.push(worker, app);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    // What the worker wrote of itself, under its own TZ.
+    const started = execFileSync('ps', ['-o', 'lstart=', '-p', String(worker.pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } }).trim();
+    const used = mkdtempSync(path.join(tmpdir(), 'e2e-agent-desktop-'));
+    writeFileSync(path.join(used, 'owner'), `${worker.pid}\n${started}`);
+    writeFileSync(path.join(used, 'app.json'), JSON.stringify({ token: 'token-live' }));
+    const originalTz = process.env.TZ;
+    process.env.TZ = 'Pacific/Kiritimati';
+    try {
+      await initialized({});
+      expect(existsSync(used)).toBe(true);
+      expect(await gone(app.pid!, 300)).toBe(false);
+    } finally {
+      if (originalTz === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTz;
+      rmSync(used, { recursive: true, force: true });
     }
   });
 

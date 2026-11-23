@@ -1762,7 +1762,8 @@ async function screenLocked(signal: AbortSignal): Promise<boolean | undefined> {
  * running or `ps` failed.
  */
 async function startedAt(pid: number, signal: AbortSignal): Promise<string | undefined> {
-  const { stdout } = await execFileAsync('ps', ['-o', 'lstart=', '-p', String(pid)], { signal, env: { ...process.env, LC_ALL: 'C' } }).catch(() => ({ stdout: '' }));
+  // \`lstart\` is local time: every reader must print it in one zone, or a run with another TZ takes a live process for a later one.
+  const { stdout } = await execFileAsync('ps', ['-o', 'lstart=', '-p', String(pid)], { signal, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } }).catch(() => ({ stdout: '' }));
   const text = stdout.trim();
   return text === '' ? undefined : text;
 }
