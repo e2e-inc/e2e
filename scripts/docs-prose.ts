@@ -44,7 +44,10 @@ export function split(source: string): { prose: string[]; code: string[] } {
  * The lines of a page's prose that equal or end the line above them in the
  * same paragraph, with their 1-based line numbers. That is the trace of a
  * review suggestion anchored one line too high: it replaces the line above
- * the one it meant and leaves the old line's tail below the new text.
+ * the one it meant and leaves the old line's tail below the new text. No page
+ * has one on purpose, so only the change that adds a repeat trips the check,
+ * and its author can compare the paragraph with the English page. It cannot
+ * see a deleted line, or a repeat that the suggestion reworded.
  */
 export function repeatedLines(source: string): { line: number; text: string }[] {
   const frontmatter = FRONTMATTER.exec(source)?.[0] ?? '';

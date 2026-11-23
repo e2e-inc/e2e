@@ -40,7 +40,7 @@ describe('check-docs-translations', () => {
     );
     assert.equal(status, 1);
     assert.match(stderr, /docs\/hi\/mobile\.mdx:6: "लॉन्च पर नहीं रहता। यह सिर्फ़ iOS पर है।" repeats the end/);
-    assert.match(stderr, /has a title, and repeats no line/);
+    assert.match(stderr, /no line repeats the end of the line above it/);
   });
 
   it('passes the same page without the repeat', () => {

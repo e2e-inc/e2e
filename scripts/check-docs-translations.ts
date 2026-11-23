@@ -22,12 +22,9 @@
  *
  * It fails on a translation with no English page (delete or move it with
  * its English page), a translation without a `title`, and a language with no
- * `navigation.json`, none of which needs the language to fix. It also fails
- * on a translated line of 12 or more characters that repeats the end of the
- * line above it in the same paragraph, the trace of a review suggestion
- * anchored one line too high (`docs-prose.ts`). Only the change that makes
- * the repeat fails on it, and its author can compare the paragraph with the
- * English page.
+ * `navigation.json`, none of which needs the language to fix, and on a line
+ * that repeats the end of the line above it (`repeatedLines` in
+ * `docs-prose.ts`).
  *
  * Usage: `node scripts/check-docs-translations.ts`, part of `pnpm docs:check`.
  * Prints every warning (as an annotation on GitHub Actions) and exits 1
@@ -175,7 +172,7 @@ if (warnings.length > 0) {
 
 if (problems.length > 0) {
   process.stderr.write(
-    `${problems.join('\n')}\n\nA translation sits at the same path as its English page, has a title, and repeats no line, and each language has a navigation.json. See authoring-docs, "Translations".\n`,
+    `${problems.join('\n')}\n\nA translation sits at the same path as its English page, has a title, no line repeats the end of the line above it, and each language has a navigation.json. See authoring-docs, "Translations".\n`,
   );
   process.exitCode = 1;
 } else {
