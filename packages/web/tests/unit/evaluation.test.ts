@@ -104,6 +104,81 @@ describe('compileEvaluation', () => {
     expect(ran).not.toHaveBeenCalled();
     expect(selectors).toEqual([SECURE_FIELD_SELECTOR]);
   });
+
+  it('leaves page globals named like its own bindings in reach of the source', async () => {
+    vi.stubGlobal('secure', 'page-secure');
+    vi.stubGlobal('element', 'page-element');
+    vi.stubGlobal('arg', 'page-arg');
+    const report = await compileEvaluation('() => [secure, element, arg]', ['element', 'arg'])(
+      { isConnected: true, matches: () => false },
+      'passed',
+    );
+    expect(readEvaluation(report)).toEqual({ ok: true, value: ['page-secure', 'page-element', 'page-arg'] });
+  });
+
+  it('waits for a promise the source returns, by default', async () => {
+    const report = await compileEvaluation('() => Promise.resolve(7)', [])();
+    expect(readEvaluation(report)).toEqual({ ok: true, value: 7 });
+  });
+
+  describe('without awaitResult', () => {
+    /** Runs the boundary on an element with `awaitResult` off; it must answer synchronously. */
+    const readSync = (source: string): ReturnType<typeof readEvaluation> => {
+      const report = compileEvaluation(source, ['element', 'arg'], false)({ isConnected: true, matches: () => false });
+      expect(typeof report).toBe('string');
+      return readEvaluation(report as string);
+    };
+    const notJson = { ok: false, invalid: expect.stringContaining('must be JSON-safe') };
+
+    it('reports a settled promise as a value that is not JSON', () => {
+      vi.stubGlobal('settled', Promise.resolve(7));
+      expect(readSync('() => settled')).toEqual(notJson);
+    });
+
+    it('reports a thenable as a value that is not JSON, and never calls its then', () => {
+      const then = vi.fn();
+      // oxlint-disable-next-line unicorn/no-thenable -- the boundary must not adopt a thenable
+      vi.stubGlobal('thenable', { then });
+      expect(readSync('() => thenable')).toEqual(notJson);
+      expect(then).not.toHaveBeenCalled();
+    });
+
+    it('reports a non-enumerable thenable as a value that is not JSON, while keeping a non-callable then property', () => {
+      const then = vi.fn();
+      const hidden = { ready: true };
+      // oxlint-disable-next-line unicorn/no-thenable -- tests a non-enumerable thenable without awaiting it
+      Object.defineProperty(hidden, 'then', { value: then });
+      vi.stubGlobal('hiddenThenable', hidden);
+      expect(readSync('() => hiddenThenable')).toEqual(notJson);
+      expect(then).not.toHaveBeenCalled();
+
+      // oxlint-disable-next-line unicorn/no-thenable -- verifies non-callable then stays ordinary JSON
+      expect(readSync('() => ({ ready: true, then: 1 })')).toEqual({ ok: true, value: { ready: true, then: 1 } });
+    });
+
+    it('reports a pending promise as a value that is not JSON, at once', () => {
+      vi.stubGlobal('pending', new Promise(() => undefined));
+      expect(readSync('() => pending')).toEqual(notJson);
+    });
+
+    it('reports a rejected promise as a value that is not JSON, not as a throw', () => {
+      const rejected = Promise.reject(new Error('rejected'));
+      rejected.catch(() => undefined);
+      vi.stubGlobal('rejected', rejected);
+      expect(readSync('() => rejected')).toEqual(notJson);
+    });
+
+    it('reads JSON and undefined as they are', () => {
+      expect(readSync('(el, arg) => ({ a: [1, "x", null] })')).toEqual({ ok: true, value: { a: [1, 'x', null] } });
+      expect(readSync('() => undefined')).toEqual({ ok: true, value: undefined });
+    });
+
+    it('reports a synchronous throw as EVALUATE_FAILED', () => {
+      expect(() => readSync('() => { throw new Error("boom"); }')).toThrow(
+        expect.objectContaining({ code: 'EVALUATE_FAILED', message: 'boom' }),
+      );
+    });
+  });
 });
 
 describe('pageValueEncoder', () => {

@@ -408,6 +408,8 @@ await expect(browser).toHaveJSProperty(screen.getByRole('navigation'), 'dataset.
   string, a function, or `null`. Playwright throws instead on a `null`
   before the last key, or an `undefined` just before it.
 - A value that is not JSON, such as `style` or an element, never matches.
+  Neither does a promise or other thenable: the matcher never awaits it
+  and never calls its `then`.
   The failure says `is not JSON`.
 - Objects and arrays compare structurally. Object keys may come in any
   order.

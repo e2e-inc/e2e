@@ -243,7 +243,7 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 | Playwright | 目前可用的方式 |
 | --- | --- |
 | `locator.locator(selector)`, `locator.and()`, `filter({ visible })` | 一个 `browser.locator` 选择器，例如 `'.card >> .close'`，或作用域内的 `screen` 查询 |
-| `expect(locator).toHaveClass()`, `dispatchEvent()` | `expect(browser).toHaveClass(locator, cls)`；`browser.evaluateOn(locator, (el, type) => el.dispatchEvent(new Event(type)), 'change')` |
+| `expect(locator).toHaveClass()`, `dispatchEvent()` | `expect(browser).toHaveClass(locator, cls)`；`browser.evaluateOn(locator, (el, type) => el.dispatchEvent(new Event(type)), 'change')`；安全字段用 `browser.evaluate` |
 | `setInputFiles({ buffer })`, `selectOption([...])`, `click({ clickCount })`, `hover({ position })` | 临时文件路径；多选使用 `browser.evaluate`；`browser.mouse` 配合 `boundingBox()` |
 
 </Accordion>

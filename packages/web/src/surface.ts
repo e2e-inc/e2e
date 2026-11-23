@@ -916,25 +916,31 @@ export class PlaywrightSurface {
    * JSON. Nothing waits: a located ref that no longer matches exactly one
    * element, or an element that left its document, is retryable
    * `NODE_STALE`, so the caller resolves again. Those are found before
-   * `source` runs. A navigation while it may be running is retryable only
-   * when `repeatable` says running it again is safe, as for a read the
-   * engine owns; test code fails instead, as `browser.evaluate` does.
+   * `source` runs, and an operation that ran out of time while they were
+   * found never starts it. A navigation while it may be running is
+   * retryable only when `options.repeatable` says running it again is safe,
+   * as for a read the engine owns; test code fails instead, as
+   * `browser.evaluate` does. `options.awaitResult`, true unless given, waits
+   * for a promise `source` returns; false reports one as a value that is not
+   * JSON and never calls its `then`.
    */
   async evaluateOn(
     ref: NodeRef,
     source: string,
     arg: JsonValue | undefined,
     operation: OperationContext,
-    repeatable: boolean,
+    options: { readonly repeatable: boolean; readonly awaitResult?: boolean },
   ): Promise<EvaluationResult> {
-    const evaluate = compileEvaluation(source, ['element', 'arg']);
+    const evaluate = compileEvaluation(source, ['element', 'arg'], options.awaitResult ?? true);
     const report = await this.guard(operation, 'evaluateOn', async (currentOperation) => {
       const target = await this.requireSession().refs.lookup(ref);
-      currentOperation.signal.throwIfAborted();
       const element = target.kind === 'element'
         ? target.element
         : await soleElement(target.locator);
       try {
+        // A page that kept the main thread busy while the element was found
+        // may have used up the budget; the source must not start late.
+        currentOperation.signal.throwIfAborted();
         // JSON safety is the caller's; Playwright's recursive argument type
         // cannot expand JsonValue.
         const input: unknown = arg;
@@ -948,12 +954,13 @@ export class PlaywrightSurface {
           void handle.dispose().catch(() => undefined);
         }
       } catch (cause) {
+        if (currentOperation.signal.aborted) throw cause;
         const page = this.requirePage();
         const failure = await pageScriptFailure(
           page, cause, 'evaluateOn', currentOperation.timeoutMs,
         );
         if (failure !== undefined) throw failure;
-        if (!repeatable && isNavigationRace(cause)) throw translatePwError(cause, 'evaluateOn');
+        if (!options.repeatable && isNavigationRace(cause)) throw translatePwError(cause, 'evaluateOn');
         throw cause;
       } finally {
         if (target.kind === 'locator') void element.dispose().catch(() => undefined);

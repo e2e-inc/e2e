@@ -231,7 +231,7 @@ export interface BrowserExpectation {
    * Waits for the JavaScript value at `path` on the target's element (a
    * property name, or a dotted path such as `dataset.state`) to equal
    * `expected` as JSON. A path that runs out before its end, or a value that
-   * is not JSON, never matches.
+   * is not JSON, never matches; a promise or thenable is one, never awaited.
    */
   toHaveJSProperty(
     target: Locator,
@@ -656,7 +656,7 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     currentUrl,
     currentTitle,
     readNode: (ref, source, arg, operation) =>
-      surface.evaluateOn(ref, source, arg, operation, true),
+      surface.evaluateOn(ref, source, arg, operation, { repeatable: true, awaitResult: false }),
     baseHref,
     deadlineFor,
     context,
@@ -730,7 +730,7 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
       const source = typeof fn === 'string' ? fn : pageFunctionSource(fn);
       validateJsonValue(arg, 'evaluateOn argument');
       const result = await context.withNode('browser.evaluateOn', target, (ref, operation) =>
-        surface.evaluateOn(ref, source, arg, operation, false));
+        surface.evaluateOn(ref, source, arg, operation, { repeatable: false }));
       return evaluationValue(result, 'evaluateOn') as T;
     },
     async addInitScript(script: unknown, ...rest: unknown[]) {

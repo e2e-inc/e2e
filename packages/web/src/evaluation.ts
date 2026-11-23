@@ -141,10 +141,18 @@ export function pageValueEncoder(): (root: unknown) => string | undefined {
  * of running the source. The secure check runs in the same task as the
  * source, so a node that turns into a password field after the caller's
  * locate is still refused; a `matches` that throws counts as secure. The
- * boundary resolves to JSON text, a primitive the caller takes
+ * boundary's own bindings are prefixed `__e2e_` and its guard sits in a
+ * block, so the source still reads page globals named `element`, `arg`, or
+ * `secure`. The boundary returns JSON text, a primitive the caller takes
  * back without Playwright serializing it in the page, so a page that deleted
  * or replaced a global the serializer needs still returns its result;
  * `readEvaluation` reads it.
+ *
+ * With `awaitResult`, the default, the boundary is async and reports the
+ * value a returned promise or thenable settles to. Without it, the boundary
+ * runs synchronously and encodes the returned value as it is: a promise or
+ * thenable is a value that is not JSON, and its `then` is never called, so
+ * an engine read of page state cannot adopt a promise the page put there.
  *
  * A function serialized with `toString()` carries whatever the loader compiled
  * it to. e2e before 0.17 loaded tests through tsx, whose esbuild `keepNames`
@@ -155,22 +163,29 @@ export function pageValueEncoder(): (root: unknown) => string | undefined {
 export function compileEvaluation(
   source: string,
   call: EvaluationCall,
-): (...args: unknown[]) => Promise<string> {
+  awaitResult = true,
+): (...args: unknown[]) => Promise<string> | string {
   const onElement = call[0] === 'element';
+  const parameters = onElement ? ['__e2e_element', '__e2e_arg'] : ['__e2e_arg'];
+  const passed = call.map((name) => `__e2e_${name}`).join(', ');
+  const asyncKeyword = awaitResult ? 'async ' : '';
+  const awaitKeyword = awaitResult ? 'await ' : '';
   try {
-    return new Function(...(onElement ? ['element', 'arg'] : ['arg']), `
+    return new Function(...parameters, `
       ${KEEP_NAMES_HELPER}${onElement ? `
-      if (!element.isConnected) return '{"ok":false,"detached":true}';
-      let secure = true;
-      try {
-        secure = element.matches(${JSON.stringify(SECURE_FIELD_SELECTOR)}) !== false;
-      } catch {}
-      if (secure) return '{"ok":false,"secure":true}';` : ''}
-      return (async (encode, run) => {
+      {
+        if (!__e2e_element.isConnected) return '{"ok":false,"detached":true}';
+        let secure = true;
+        try {
+          secure = __e2e_element.matches(${JSON.stringify(SECURE_FIELD_SELECTOR)}) !== false;
+        } catch {}
+        if (secure) return '{"ok":false,"secure":true}';
+      }` : ''}
+      return (${asyncKeyword}(encode, run) => {
         const report = (ok, key, text) => \`{"ok":\${ok}\${text === undefined ? '' : \`,"\${key}":\${text}\`}}\`;
         let value;
         try {
-          value = await run();
+          value = ${awaitKeyword}run();
         } catch (cause) {
           let message;
           try {
@@ -180,7 +195,8 @@ export function compileEvaluation(
           }
           return report(false, 'message', encode(message));
         }
-        try {
+        try {${awaitResult ? '' : `
+          if (value !== null && typeof value === 'object' && typeof value.then === 'function') return report(false, 'invalid', encode('must be JSON-safe'));`}
           return report(true, 'value', encode(value));
         } catch (cause) {
           if (cause !== null && typeof cause === 'object' && typeof cause.invalid === 'string') {
@@ -188,8 +204,8 @@ export function compileEvaluation(
           }
           return '{"ok":false,"message":"evaluate result cannot be read"}';
         }
-      })((${pageValueEncoder.toString()})(), async () => ((result) => typeof result === 'function' ? result(${call.join(', ')}) : result)((${source}\n)));
-    `) as (...args: unknown[]) => Promise<string>;
+      })((${pageValueEncoder.toString()})(), ${asyncKeyword}() => ((result) => typeof result === 'function' ? result(${passed}) : result)((${source}\n)));
+    `) as (...args: unknown[]) => Promise<string> | string;
   } catch (cause) {
     throw new TestError('EVALUATE_FAILED', message(cause), { cause });
   }

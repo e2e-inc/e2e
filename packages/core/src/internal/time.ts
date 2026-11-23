@@ -203,7 +203,7 @@ export const NEGATION_GRACE_MS = 1000;
 
 /** The reads of one `pollCondition`, as its `evaluate` gets them. */
 export interface PollReads {
-  /** Runs one read on the budget the poll has left for it, `timeoutMs`, and times it. */
+  /** Runs one read with the budget the poll has left for it, `timeoutMs`, which the read must honor, and times it. */
   read<T>(call: (timeoutMs: number) => Promise<T>): Promise<T>;
 }
 
@@ -213,8 +213,9 @@ export interface PollConditionOptions {
   readonly negated: boolean;
   /**
    * Evaluates the positive condition once, every read run through
-   * `reads.read`, which bounds it by `deadline` and times it, so a read the
-   * deadline cuts off is judged against the slowest one before it. Returns
+   * `reads.read`, which hands the read its budget from `deadline` and times
+   * it, so a read the deadline cuts off is judged against the slowest one
+   * before it. Returns
    * undefined when the condition cannot be evaluated yet: the positive poll
    * keeps waiting and the negation grace window resets.
    */

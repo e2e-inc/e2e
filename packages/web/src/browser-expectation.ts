@@ -37,7 +37,9 @@ export interface ExpectationDeps {
   currentTitle(timeoutMs: number): Promise<string>;
   /**
    * Runs the engine's own read-only page code on the node `ref` names. A
-   * navigation while it runs re-resolves the node and runs it again.
+   * navigation while it runs re-resolves the node and runs it again. A
+   * promise or thenable the code returns is a value that is not JSON, never
+   * awaited.
    */
   readNode(
     ref: NodeRef,

@@ -21,20 +21,49 @@ const slower = content(`<html><p id="slower">Slower</p><script>
 </script></html>`);
 
 /**
- * A page whose `#r` reloads the page the first time something reads its
- * `state`, and answers that read with a promise that never settles, so the
- * read is still running when the page navigates. After the reload it
- * answers `done`.
+ * A page whose frame `#f` holds `#r`. The first read of `#r.state` replaces
+ * the frame with a new `#f` in the same task, so the frame the read runs in
+ * is detached before the read returns. In the new frame, `state` is `done`.
  */
-const reloading = content(`<html><p id="r">Reloading</p><script>
-  Object.defineProperty(document.getElementById('r'), 'state', {
-    get() {
-      if (sessionStorage.getItem('reloaded') !== null) return 'done';
-      sessionStorage.setItem('reloaded', 'yes');
-      location.reload();
-      return new Promise(() => undefined);
-    },
+const replacing = content(`<html><body><script>
+  const frame = (replaced) => {
+    const next = document.createElement('iframe');
+    next.id = 'f';
+    next.srcdoc = '<p id="r">Replacing</p>';
+    next.addEventListener('load', () => {
+      Object.defineProperty(next.contentDocument.getElementById('r'), 'state', {
+        get() {
+          if (replaced) return 'done';
+          next.replaceWith(frame(true));
+          return 'first';
+        },
+      });
+    });
+    return next;
+  };
+  document.body.append(frame(false));
+</script></body></html>`);
+
+/**
+ * A page whose `#p` holds a settled promise, a thenable that counts its
+ * `then` calls in `window.thenCalls` and resolves to 7, a promise that never
+ * settles, and a rejected promise, and which sets globals named `secure`,
+ * `element`, and `arg`.
+ */
+const promising = content(`<html><p id="p">Promises</p><script>
+  window.thenCalls = 0;
+  window.secure = 'page-secure';
+  window.element = 'page-element';
+  window.arg = 'page-arg';
+  const p = document.getElementById('p');
+  p.settled = Promise.resolve(true);
+  p.thenable = { then(resolve) { window.thenCalls += 1; resolve(7); } };
+  p.hiddenThenable = Object.defineProperty({ ready: true }, 'then', {
+    value(resolve) { window.thenCalls += 1; resolve(7); },
   });
+  p.pending = new Promise(() => undefined);
+  p.rejected = Promise.reject(new Error('rejected'));
+  p.rejected.catch(() => undefined);
 </script></html>`);
 
 /**
@@ -213,6 +242,19 @@ test.describe('browser.evaluateOn', { requires: ['browser'] }, () => {
     }
   });
 
+  test('waits for a promise or thenable the function returns', async ({ browser }) => {
+    await browser.goto(promising);
+    const p = browser.locator('#p');
+    expect(await browser.evaluateOn(p, (el) => (el as unknown as { settled: Promise<boolean> }).settled)).toBe(true);
+    expect(await browser.evaluateOn(p, 'el => el.thenable')).toBe(7);
+  });
+
+  test('reads page globals named like the bindings around its function', async ({ browser }) => {
+    await browser.goto(promising);
+    expect(await browser.evaluateOn(browser.locator('#p'), '() => [secure, element, arg]'))
+      .toEqual(['page-secure', 'page-element', 'page-arg']);
+  });
+
   test('names itself when the target is not a locator', async ({ browser }) => {
     await browser.goto(page);
     const error = await failure(() => browser.evaluateOn('#x' as never, (el) => el.id));
@@ -295,9 +337,48 @@ test.describe('expect(browser).toHaveCSS', { requires: ['browser'] }, () => {
 });
 
 test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () => {
-  test('reads again when the page navigates during its read', async ({ browser }) => {
-    await browser.goto(reloading);
-    await expect(browser).toHaveJSProperty(browser.locator('#r'), 'state', 'done');
+  test('reads again when the frame it reads is replaced during its read', async ({ browser }) => {
+    await browser.goto(replacing);
+    await expect(browser).toHaveJSProperty(browser.frameLocator('#f').locator('#r'), 'state', 'done');
+  });
+
+  test('fails a settled promise as a value that is not JSON, so its negation passes', async ({ browser }) => {
+    await browser.goto(promising);
+    const p = browser.locator('#p');
+    const error = await failure(() => expect(browser).toHaveJSProperty(p, 'settled', true, { timeout: 1000 }));
+    expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
+    expect(error).toHaveProperty('message', expect.stringContaining('observed: property settled is not JSON'));
+    await expect(browser).not.toHaveJSProperty(p, 'settled', true);
+  });
+
+  test('fails a thenable as a value that is not JSON, and never calls its then', async ({ browser }) => {
+    await browser.goto(promising);
+    const error = await failure(() =>
+      expect(browser).toHaveJSProperty(browser.locator('#p'), 'thenable', 7, { timeout: 1000 }));
+    expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
+    expect(error).toHaveProperty('message', expect.stringContaining('observed: property thenable is not JSON'));
+    expect(await browser.evaluate('window.thenCalls')).toBe(0);
+  });
+
+  test('fails a non-enumerable thenable as a value that is not JSON, and never calls its then', async ({ browser }) => {
+    await browser.goto(promising);
+    const p = browser.locator('#p');
+    const error = await failure(() =>
+      expect(browser).toHaveJSProperty(p, 'hiddenThenable', { ready: true }, { timeout: 1000 }));
+    expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
+    expect(error).toHaveProperty('message', expect.stringContaining('observed: property hiddenThenable is not JSON'));
+    await expect(browser).not.toHaveJSProperty(p, 'hiddenThenable', { ready: true });
+    expect(await browser.evaluate('window.thenCalls')).toBe(0);
+  });
+
+  test('passes a negation on a promise that never settles, without waiting for it', async ({ browser }) => {
+    await browser.goto(promising);
+    await expect(browser).not.toHaveJSProperty(browser.locator('#p'), 'pending', 'x', { timeout: 1500 });
+  });
+
+  test('passes a negation on a rejected promise, without reading the rejection as a throw', async ({ browser }) => {
+    await browser.goto(promising);
+    await expect(browser).not.toHaveJSProperty(browser.locator('#p'), 'rejected', 'x');
   });
 
   test('matches a dotted path and a number', async ({ browser, screen }) => {
