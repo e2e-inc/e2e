@@ -87,6 +87,28 @@ describe('browser.setCookies', () => {
     expect((await browser.cookies()).map(({ name, domain }) => ({ name, domain }))).toEqual([{ name: 'session', domain: '127.0.0.1' }]);
   });
 
+  it.each([
+    ['an uppercase host', 'EXAMPLE.test', 'example.test'],
+    ['a punycode host', 'xn--bcher-kva.example', 'xn--bcher-kva.example'],
+    ['a unicode host', 'bücher.example', 'xn--bcher-kva.example'],
+    ['an IPv6 host', '[::1]', '[::1]'],
+  ])('takes %s as the host it names', async (_name, domain, stored) => {
+    await browser.setCookies([{ name: 'session', value: 'root', domain }]);
+    expect((await browser.cookies()).map((cookie) => cookie.domain)).toEqual([stored]);
+  });
+
+  it('takes -1 as a session cookie and the end of the year 9999 as the latest expiry', async () => {
+    await browser.setCookies([
+      { name: 'session', value: 'root', domain: '127.0.0.1', expires: -1 },
+      { name: 'theme', value: 'dark', domain: '127.0.0.1', expires: 253_402_300_799 },
+    ]);
+    const cookies = (await browser.cookies()).map(({ name, expires }) => ({ name, persistent: expires !== undefined }));
+    expect(cookies.toSorted((a, b) => a.name.localeCompare(b.name))).toEqual([
+      { name: 'session', persistent: false },
+      { name: 'theme', persistent: true },
+    ]);
+  });
+
   it('takes back the cookies browser.cookies returns', async () => {
     await browser.setCookies([
       { name: 'session', value: 'root', domain: '127.0.0.1', httpOnly: true, sameSite: 'Strict' },
@@ -112,10 +134,15 @@ describe('browser.setCookies', () => {
     ['a domain with a path', [{ ...base, domain: '127.0.0.1/app' }], 'cookies[0] domain must be a host name like "example.com" or ".example.com", got "127.0.0.1/app"'],
     ['a domain with a port', [{ ...base, domain: '127.0.0.1:4399' }], 'cookies[0] domain must be a host name like "example.com" or ".example.com", got "127.0.0.1:4399"'],
     ['a domain with a space', [{ ...base, domain: ' 127.0.0.1' }], 'cookies[0] domain must be a host name like "example.com" or ".example.com", got " 127.0.0.1"'],
+    ['a short IPv4 domain the parser fills in', [{ ...base, domain: '1.2.3' }], 'cookies[0] domain must be a host name like "example.com" or ".example.com", got "1.2.3"'],
+    ['a percent-encoded domain', [{ ...base, domain: '%41.com' }], 'cookies[0] domain must be a host name like "example.com" or ".example.com", got "%41.com"'],
     ['a missing name', [{ value: 'root', domain: '127.0.0.1' }], 'cookies[0] name must be a string, got undefined'],
     ['a number value', [{ ...base, value: 5 }], 'cookies[0] value must be a string, got 5'],
-    ['a string expires', [{ ...base, expires: '1999999999' }], 'cookies[0] expires must be a Unix timestamp in seconds, got "1999999999"'],
-    ['a NaN expires', [{ ...base, expires: Number.NaN }], 'cookies[0] expires must be a Unix timestamp in seconds, got NaN'],
+    ['a string expires', [{ ...base, expires: '1999999999' }], 'cookies[0] expires must be a Unix timestamp in seconds (not milliseconds), got "1999999999"'],
+    ['a NaN expires', [{ ...base, expires: Number.NaN }], 'cookies[0] expires must be a Unix timestamp in seconds (not milliseconds), got NaN'],
+    ['an expires in milliseconds', [{ ...base, expires: 1_767_225_600_000 }], 'cookies[0] expires must be a Unix timestamp in seconds (not milliseconds), got 1767225600000'],
+    ['a negative expires', [{ ...base, expires: -5 }], 'cookies[0] expires must be a Unix timestamp in seconds (not milliseconds), got -5'],
+    ['an expires past the year 9999', [{ ...base, expires: 253_402_300_800 }], 'cookies[0] expires must be a Unix timestamp in seconds (not milliseconds), got 253402300800'],
     ['a string httpOnly', [{ ...base, httpOnly: 'true' }], 'cookies[0] httpOnly must be a boolean, got "true"'],
     ['a lowercase sameSite', [{ ...base, sameSite: 'strict' }], 'cookies[0] sameSite must be "Strict", "Lax", or "None", got "strict"'],
     ['an unknown key', [{ ...base, maxAge: 60 }], 'cookies[0] has unknown key "maxAge"; expected one of name, value, url, domain, path, expires, httpOnly, secure, sameSite'],

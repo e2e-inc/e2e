@@ -5,13 +5,15 @@
  * engine's.
  */
 
-import { domainToASCII } from 'node:url';
+import { domainToUnicode } from 'node:url';
 import { rejectUnknownKeys, TestError } from '@e2e-dev/core/engine';
 import type { Cookie } from './browser.ts';
 import { describe } from './support.ts';
 
 const COOKIE_KEYS = ['name', 'value', 'url', 'domain', 'path', 'expires', 'httpOnly', 'secure', 'sameSite'] as const;
 const SAME_SITE = ['Strict', 'Lax', 'None'] as const;
+/** The latest `expires` Playwright takes: the end of the year 9999, in seconds. */
+const MAX_EXPIRES = 253_402_300_799;
 
 /** Throws `INVALID_ARGUMENT` naming the first field the `Cookie` type does not allow. */
 export function validateCookies(cookies: unknown): asserts cookies is readonly Cookie[] {
@@ -46,8 +48,8 @@ function cookieProblem(cookie: object): string | undefined {
   }
   if (field('url') === undefined && domain === undefined) return 'needs a url, or a domain with an optional path';
   const expires = field('expires');
-  if (expires !== undefined && (typeof expires !== 'number' || !Number.isFinite(expires))) {
-    return `expires must be a Unix timestamp in seconds, got ${describe(expires)}`;
+  if (expires !== undefined && !isExpiry(expires)) {
+    return `expires must be a Unix timestamp in seconds (not milliseconds), got ${describe(expires)}`;
   }
   for (const key of ['httpOnly', 'secure'] as const) {
     if (field(key) !== undefined && typeof field(key) !== 'boolean') return `${key} must be a boolean, got ${describe(field(key))}`;
@@ -59,14 +61,22 @@ function cookieProblem(cookie: object): string | undefined {
   return undefined;
 }
 
+/** Seconds from 0 through the end of the year 9999, or the `-1` Playwright reads as a session cookie. */
+function isExpiry(expires: unknown): boolean {
+  return typeof expires === 'number' && (expires === -1 || (expires >= 0 && expires <= MAX_EXPIRES));
+}
+
 /**
  * Whether `domain`, less a leading dot, parses back as only that host in the
- * origin `setCookies` checks it under: no scheme, port, path, or whitespace,
- * which the browser would otherwise drop or read as another host.
+ * origin `setCookies` checks it under, changed at most in case or to punycode.
+ * A scheme, port, path, or whitespace would be dropped, and a host the parser
+ * rewrites (`1.2.3` to `1.2.0.3`, `%41.com` to `a.com`) would put the URL rule
+ * on another host than the cookie's.
  */
 function isHostName(domain: string): boolean {
   const host = domain.replace(/^\./, '');
   if (!URL.canParse(`http://${host}`)) return false;
   const url = new URL(`http://${host}`);
-  return url.href === `http://${url.hostname}/` && url.hostname === domainToASCII(host);
+  const written = host.toLowerCase();
+  return url.href === `http://${url.hostname}/` && (url.hostname === written || domainToUnicode(url.hostname) === written);
 }
