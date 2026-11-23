@@ -610,6 +610,18 @@ describe('DesktopSurface', () => {
     await expect(surface.screenshot('moved', operation())).rejects.toMatchObject({ code: 'POLICY_DENIED', message: expect.stringMatching(/window changed while it was captured/) });
   });
 
+  it('withholds a capture as a policy when the read after it fails and a secure field is on screen', async () => {
+    const form = renamed('macos/sign-in-form', 'w-8321', 'w-mine');
+    const { width, height } = (form as { data: { tree: { bounds: { width: number; height: number } } } }).data.tree.bounds;
+    const { surface } = await launched(
+      (pid) => ({ screenshot: [{ ok: true, writePng: { width, height }, data: { scale_factor: 1 } }], 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }], snapshot: [form, form, failure('WINDOW_NOT_FOUND', 'not_delivered')] }),
+      { observe: false, snapshot: 'macos/sign-in-form' },
+    );
+    const observed = await surface.observe(operation(), { pixels: true });
+    expect(observed.pixels).toBeUndefined();
+    expect(observed.maskedRegionCount).toBe(0);
+  });
+
   it('withholds a capture of the wrong size as a policy when a secure field is on screen', async () => {
     const form = renamed('macos/sign-in-form', 'w-8321', 'w-mine');
     const { width, height } = (form as { data: { tree: { bounds: { width: number; height: number } } } }).data.tree.bounds;

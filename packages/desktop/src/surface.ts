@@ -1543,7 +1543,12 @@ export class DesktopSurface {
       // agent-desktop captures to a file of its own under TMPDIR first, unmasked, which a process killed mid-capture leaves behind: here it is under this directory, removed below.
       const shot = await this.run<{ scale_factor?: number }>(['screenshot', '--window-id', screen.windowId, file], { label: 'screenshot', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs, tmpdir: directory });
       // The snapshot and the capture are two commands: read the window again, and withhold the image if a secure field moved, came, or went between them.
-      const after = await this.capture(operation, screen.windowId, true);
+      const after = await this.capture(operation, screen.windowId, true).catch((cause: unknown) => {
+        if (cause instanceof EngineError && (cause.code === 'OPERATION_TIMEOUT' || cause.code === 'CANCELLED')) throw cause;
+        // The image holds a secure field the read after it could not place: that is masking not proven, not a capture that failed.
+        if (secure.length > 0) throw unmasked('the window could not be read again after the capture, so its secure fields cannot be placed');
+        throw cause;
+      });
       if (after === undefined || after.windowId !== screen.windowId || after.truncated || !sameRects(after.secureRects, secure) || after.viewport.width !== screen.viewport.width || after.viewport.height !== screen.viewport.height) {
         // Only a secure field, seen in either read or possibly below the depth a read stops at, makes this a matter of masking; a read that ran out of time is tried again.
         if (secure.length > 0 || (after !== undefined && ((after.truncated && !after.cutShort) || after.secureRects?.length !== 0))) throw unmasked('the window changed while it was captured, so its secure fields cannot be placed');
