@@ -155,7 +155,7 @@ function codexAuth(env: Readonly<Record<string, string>> | undefined): CodexAuth
     return {
       env: withoutRequest,
       loginRefused,
-      signIn: `APP_SERVER_LOGS is set, and the Codex adapter would write sign-in credentials to its log in plain text, so e2e passes it no sign-in request: ${withLoggingDisabled}, or run \`codex login\``,
+      signIn: 'APP_SERVER_LOGS is set, and the Codex adapter would write sign-in credentials to its log in plain text, so e2e passes it no sign-in request: unset APP_SERVER_LOGS, or run `codex login`',
     };
   }
   if (request) {

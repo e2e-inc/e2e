@@ -174,6 +174,15 @@ describe('agent presets', () => {
     expect(redactSecrets(key) === '<secret:codex.api-key>').toBe(true);
   });
 
+  it('leaves validation of malformed authentication JSON to the Codex adapter', async () => {
+    cleanAuthEnv();
+    const { log } = codexProject();
+    const directory = dirname(log);
+    const request = '{';
+    const launch = await inProject(directory, () => codexLaunch({ env: { CODEX_PATH: join(directory, 'codex'), DEFAULT_AUTH_REQUEST: request } }))();
+    expect(launch.env?.['DEFAULT_AUTH_REQUEST']).toBe(request);
+  });
+
   it('names the effective Codex sign-in setting after adapter logging is disabled', async () => {
     cleanAuthEnv();
     const { log } = codexProject();
@@ -243,7 +252,7 @@ describe('agent presets', () => {
     expect(await codexAuthRequest({ DEFAULT_AUTH_REQUEST: '{"methodId":"gateway"}' })).toBeNull();
     vi.stubEnv('OPENAI_API_KEY', 'sk-test-process');
     const { executor } = codexProject({ ACP_AUTH_REQUIRED: '1' });
-    expect(await stepFailure(executor)).toContain('APP_SERVER_LOGS is set, and the Codex adapter would write sign-in credentials to its log in plain text');
+    expect(await stepFailure(executor)).toContain('so e2e passes it no sign-in request: unset APP_SERVER_LOGS, or run `codex login`');
     // The adapter keeps an empty one off, so the key signs in.
     expect(await codexAuthRequest({ APP_SERVER_LOGS: '' })).toEqual(API_KEY_LOGIN);
   });
