@@ -1741,6 +1741,70 @@ describe('perform', () => {
     }
   });
 
+  it('passes a toggle whose label spells its state when the stale read comes first', async () => {
+    const h = harness();
+    let pressed = false;
+    let reads = 0;
+    h.fake.respond('capture.snapshot', () => {
+      if (!pressed) return SETTINGS_SNAPSHOT;
+      reads += 1;
+      if (reads === 1) return SETTINGS_SNAPSHOT;
+      const nodes = SETTINGS_NODES.map((node) => (node.label === 'Airplane Mode' ? { ...node, label: 'Airplane Mode On', value: '1' } : node));
+      return { ...SETTINGS_SNAPSHOT, nodes };
+    });
+    h.fake.respond('interactions.press', () => {
+      pressed = true;
+    });
+    await openAttempt(h);
+    const toggle = await observed(h, 'Airplane Mode');
+    await expect(h.engine.perform!(toggle.ref, { kind: 'check' }, operation())).resolves.toBeUndefined();
+    expect(reads).toBe(2);
+  });
+
+  it('keeps reading when the first capture after the tap is still unreadable', async () => {
+    const h = harness();
+    const airplane = toggling(SETTINGS_NODES, { '@e6': [6] });
+    let pressed = false;
+    let reads = 0;
+    h.fake.respond('capture.snapshot', () => {
+      if (!pressed) return { ...SETTINGS_SNAPSHOT, nodes: airplane.nodes() };
+      reads += 1;
+      if (reads === 1) {
+        throw new AppError('COMMAND_FAILED', 'Android snapshot helper returned insufficient foreground app content', {
+          androidSnapshotHelperFailureReason: 'content-poor-app-window',
+        });
+      }
+      return { ...SETTINGS_SNAPSHOT, nodes: airplane.nodes() };
+    });
+    h.fake.respond('interactions.press', (args) => {
+      pressed = true;
+      airplane.press(args);
+    });
+    await openAttempt(h);
+    const toggle = await observed(h, 'Airplane Mode');
+    await expect(h.engine.perform!(toggle.ref, { kind: 'check' }, operation())).resolves.toBeUndefined();
+    expect(reads).toBe(2);
+  });
+
+  it('counts a toggle gone after a truncated first read as replaced, since it was never seen in its old state', async () => {
+    const withoutAirplane = SETTINGS_NODES.filter((node) => node.label !== 'Airplane Mode');
+    const h = harness();
+    let pressed = false;
+    let reads = 0;
+    h.fake.respond('capture.snapshot', () => {
+      if (!pressed) return SETTINGS_SNAPSHOT;
+      reads += 1;
+      return { ...SETTINGS_SNAPSHOT, nodes: withoutAirplane, truncated: reads === 1 };
+    });
+    h.fake.respond('interactions.press', () => {
+      pressed = true;
+    });
+    await openAttempt(h);
+    const toggle = await observed(h, 'Airplane Mode');
+    await expect(h.engine.perform!(toggle.ref, { kind: 'check' }, operation())).resolves.toBeUndefined();
+    expect(reads).toBe(2);
+  });
+
   it('refuses what a device surface cannot express, and reports daemon ref misses as retryable', async () => {
     const h = harness();
     await openAttempt(h);

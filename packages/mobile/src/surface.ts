@@ -255,6 +255,7 @@ const GESTURE_STEADY_POLL_MS = 100;
 
 /** Pause between the reads that confirm a toggle took the state a check or uncheck tapped it into. */
 const CHECKED_POLL_MS = 100;
+const CHECKED_MARGIN_MS = 50;
 
 /** How one screenshot is taken. */
 interface ScreenshotCapture {
@@ -1662,7 +1663,7 @@ export class AgentDeviceSurface {
    * Re-reads a toggle after the tap of a check or uncheck until it reports
    * the wanted state, as the web engine does after its click: a tap the app
    * ignores, or one that lands beside the control, fails at the end of the
-   * budget instead of passing. A control gone at the first read took the tap
+   * budget instead of passing. A control gone before any read found it took the tap
    * (an app that replaces a picked option, or navigates on change), so the
    * action is done. One that goes later, still in its old state, fails
    * rather than passing on a tap the app may have rejected. Another read
@@ -1676,20 +1677,44 @@ export class AgentDeviceSurface {
     const verb = wanted ? 'check' : 'uncheck';
     const unchanged = (detail = ''): EngineError =>
       notActionable(`${verb} tapped node ${entry.id} but its checked state did not change${detail}`);
-    for (let first = true; ; first = false) {
+    let seen = false;
+    for (;;) {
       const startedMs = Date.now();
-      const raw = await this.snapshot(operation.signal, false, budget);
-      const found = this.refind(entry, this.project(raw).index);
+      let found: ProjectedNode | undefined;
+      let truncated = false;
+      try {
+        const raw = await this.snapshot(operation.signal, false, budget);
+        const index = this.project(raw).index;
+        truncated = isTruncated(raw);
+        found = this.refind(entry, index);
+        // A toggle whose label spells its state is a new name after the tap:
+        // the same role and test id in the same place, already as wanted.
+        found ??= index.find(
+          (candidate) =>
+            candidate.node.role === entry.node.role &&
+            candidate.node.testId === entry.node.testId &&
+            sameRect(candidate.node.rect, entry.node.rect) &&
+            candidate.node.states?.checked === wanted,
+        );
+      } catch (cause) {
+        // A capture the app is still drawing says nothing about the toggle.
+        if (operation.signal.aborted || !isUnreadableCapture(cause) || budget.remainingMs() < Date.now() - startedMs) throw cause;
+        truncated = true;
+      }
       const readMs = Date.now() - startedMs;
       // A truncated or sparse capture may simply omit the control, so a miss
       // there says nothing about replacement: read again.
-      if (found === undefined && !isTruncated(raw)) {
-        if (first) return;
+      if (found === undefined && !truncated) {
+        if (!seen) return;
         throw unchanged(' before the control was replaced');
       }
+      if (found !== undefined) seen = true;
       if (found?.node.states?.checked === wanted) return;
-      if (budget.remainingMs() <= CHECKED_POLL_MS + readMs) throw unchanged();
-      await sleep(CHECKED_POLL_MS, operation.signal);
+      // Sleep only as long as one more read of this length still fits, with a
+      // margin for timer jitter, so the last poll is a short one, not none.
+      const sleepMs = Math.min(CHECKED_POLL_MS, budget.remainingMs() - readMs - CHECKED_MARGIN_MS);
+      if (sleepMs <= 0) throw unchanged();
+      await sleep(sleepMs, operation.signal);
       if (operation.signal.aborted) throw new EngineError('CANCELLED', `${verb} cancelled`, { retryable: false });
     }
   }
