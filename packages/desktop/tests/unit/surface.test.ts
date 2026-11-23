@@ -1208,6 +1208,18 @@ describe('DesktopSurface', () => {
     expect(reads.at(-1)?.args).not.toContain('-i');
   });
 
+  it('gives no id to a control under a node a read cut short, which may hide its twin', async () => {
+    const window = { role: 'window', name: 'Rows', bounds: { x: 0, y: 0, width: 300, height: 300 } };
+    const remove = (ref: string, x: number) => ({ role: 'button', name: 'Delete', ref_id: ref, bounds: { x, y: 10, width: 60, height: 20 } });
+    const list = (nodes: readonly unknown[], cut = false) => ({ role: 'list', name: 'Rows', ...(cut ? { subtree_truncated: true } : {}), children: nodes });
+    const read = (tree: unknown, complete = true) => ({ ok: true, data: { snapshot_id: 's', complete, window: { id: 'w-mine' }, tree: { ...window, children: [tree] } } });
+    // Row B's button alone; then row A's appears ahead of it, and a read cut short reaches only row A's.
+    const { surface } = await launched({ snapshot: [read(list([remove('@s:e1', 200)])), read(list([remove('@s:e1', 200)])), read(list([remove('@s:e2', 10)], true), false)] }, { observe: false });
+    const first = await surface.observe(operation(), undefined);
+    const cut = await surface.observe(operation(), undefined);
+    expect(cut.root.children?.[0]?.children?.[0]?.ref.id).not.toBe(first.root.children?.[0]?.children?.[0]?.ref.id);
+  });
+
   it('passes no id on through a read cut short that saw two controls share a developer id', async () => {
     const window = { role: 'window', name: 'Menu', bounds: { x: 0, y: 0, width: 300, height: 300 } };
     const item = (name: string, ref: string) => ({ role: 'menuitem', name, ref_id: ref, native_id: { kind: 'ax_identifier', value: 'menuItemSelected:' }, bounds: { x: 10, y: 10, width: 100, height: 20 } });

@@ -368,8 +368,10 @@ export function projectSnapshot(
     // look-alike that still matches has no identity: if the first of two
     // "Delete" buttons goes, the second must not take over its id, so each
     // look-alike gets a new id every snapshot.
+    // A node whose children the read cut off lists only some of them: one that looks unique may have a twin the read did not reach, so none takes an id.
+    const cut = node.subtree_truncated === true || (node.children_count !== undefined && node.children_count > (node.children?.length ?? 0));
     const children = kept.map((child) => {
-      const identity = plain.get(identityOf(child)) === 1 ? identityOf(child) : named.get(identityOf(child, true)) === 1 ? identityOf(child, true) : undefined;
+      const identity = cut ? undefined : plain.get(identityOf(child)) === 1 ? identityOf(child) : named.get(identityOf(child, true)) === 1 ? identityOf(child, true) : undefined;
       // An identity two siblings share may pass on to neither, even where their names tell them apart now.
       if ((plain.get(identityOf(child)) ?? 0) > 1) onLookAlike?.(`${id}/${identityOf(child)}`);
       if ((named.get(identityOf(child, true)) ?? 0) > 1) onLookAlike?.(`${id}/${identityOf(child, true)}`);
