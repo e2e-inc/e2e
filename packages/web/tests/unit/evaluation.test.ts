@@ -131,6 +131,18 @@ describe('pageValueEncoder', () => {
       .toThrow(expect.objectContaining({ invalid: 'must be JSON-safe' }));
   });
 
+  it("never runs a value getter the page put on its own Object.prototype", () => {
+    const page = createContext({ reads: 0 });
+    runInContext("Object.defineProperty(Object.prototype, 'value', { get() { reads++; } })", page);
+    const encodeInPage = runInContext(`(${pageValueEncoder.toString()})()`, page) as typeof encodePageValue;
+    const foreign = runInContext(
+      "const p = Object.create(null); Object.defineProperty(p, 'constructor', { get: () => Object }); Object.create(p)",
+      createContext(),
+    );
+    expect(() => encodeInPage(foreign)).toThrow(expect.objectContaining({ invalid: 'must be JSON-safe' }));
+    expect(page.reads).toBe(0);
+  });
+
   it('encodes a null-prototype object', () => {
     expect(encodePageValue(Object.assign(Object.create(null), { sku: 'a' }))).toBe('{"sku":"a"}');
   });

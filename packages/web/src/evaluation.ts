@@ -57,10 +57,13 @@ interface InvalidPageValue {
  * it captures nothing from this module.
  */
 export function pageValueEncoder(): (root: unknown) => string | undefined {
-  const { getOwnPropertyDescriptor, getPrototypeOf, keys } = ({}).constructor as ObjectConstructor;
+  const { getOwnPropertyDescriptor, getPrototypeOf, hasOwn, keys } = ({}).constructor as ObjectConstructor;
   const objectPrototype: unknown = getPrototypeOf({});
-  /** An own data property's value, or undefined for an accessor, whose getter it never calls. */
-  const own = (target: object, key: string): unknown => getOwnPropertyDescriptor(target, key)?.value;
+  /** An own data property's value, or undefined for an accessor; never runs a getter the page defined. */
+  const own = (target: object, key: string): unknown => {
+    const descriptor = getOwnPropertyDescriptor(target, key);
+    return descriptor !== undefined && hasOwn(descriptor, 'value') ? descriptor.value : undefined;
+  };
   /**
    * This realm's Object.prototype, or another same-origin frame's: a prototype with a null
    * prototype whose own `constructor` is a function named `Object` that points back to it.
