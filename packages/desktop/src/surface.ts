@@ -705,8 +705,27 @@ export class DesktopSurface {
 
   /** The windows of the app the engine launched, for the `desktop` fixture; none while it is not running. */
   async windows(signal: AbortSignal, timeoutMs: number): Promise<readonly DesktopWindow[]> {
+    const deadline = Date.now() + timeoutMs;
     const windows = await this.ownWindows({ signal, timeoutMs });
-    return windows.map((window) => ({ id: window.id, title: window.title ?? '', focused: window.is_focused === true }));
+    const listed: DesktopWindow[] = [];
+    for (const window of windows) listed.push({ id: window.id, title: await this.titleOf(window, signal, deadline), focused: window.is_focused === true });
+    return listed;
+  }
+
+  /**
+   * A window's title. Without Screen Recording permission macOS hides the
+   * title the window list reads, and agent-desktop lists the app's name in
+   * its place; the window's accessibility root still carries the title, so
+   * a title that reads as the app's name is read from there. A read that
+   * fails leaves the title as listed.
+   */
+  private async titleOf(window: RawWindow, signal: AbortSignal, deadline: number): Promise<string> {
+    const listed = window.title ?? '';
+    if (window.app_name === undefined || listed !== window.app_name) return listed;
+    const timeoutMs = deadline - Date.now();
+    const raw = await this.run<RawSnapshot>(['snapshot', '--window-id', window.id, '--max-depth', '1', '--timeout-ms', String(this.toolBudget({ timeoutMs }))], { label: 'read window title', input: false, signal, timeoutMs }).catch(() => undefined);
+    const title = raw?.tree.name;
+    return title === undefined || title.trim() === '' ? listed : title;
   }
 
   /**

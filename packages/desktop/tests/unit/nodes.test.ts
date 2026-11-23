@@ -216,6 +216,12 @@ describe('projectSnapshot', () => {
     expect(root.children?.map((node) => node.states?.readonly)).toEqual([true, false, undefined]);
   });
 
+  it("takes the window's title from its accessibility root, not the window list's app name", () => {
+    const screen = projectSnapshot({ snapshot_id: 's', window: { id: 'w-1', title: 'SignInForm' }, tree: { role: 'window', name: 'Sign In', children: [] } }, minter());
+    expect(screen.title).toBe('Sign In');
+    expect(projectSnapshot({ snapshot_id: 's', window: { id: 'w-1', title: 'Untitled' }, tree: { role: 'window', children: [] } }, minter()).title).toBe('Untitled');
+  });
+
   it('swipes a custom view that offers Scroll when no scroll area is on screen', () => {
     const screen = projectSnapshot(
       { snapshot_id: 's', tree: { role: 'window', name: 'Feed', children: [{ role: 'button', name: 'Refresh', ref_id: '@s:e1' }, { role: 'group', name: 'Posts', ref_id: '@s:e2', available_actions: ['Scroll'] }] } },

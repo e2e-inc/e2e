@@ -370,6 +370,7 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
   };
 
   const root = project(raw.tree, ROOT_ID, true, '');
+  const title = label(raw.tree.name) ?? label(raw.window?.title);
   return {
     root,
     bindings,
@@ -378,7 +379,8 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
     secureRects: unmaskable ? undefined : secureRects,
     truncated: raw.complete === false || raw.truncated === true || hasTruncatedSubtree(raw.tree),
     ...(raw.window === undefined ? {} : { windowId: raw.window.id }),
-    ...(raw.window?.title === undefined || raw.window.title === '' ? {} : { title: raw.window.title }),
+    // The window's accessibility root carries its title; the window list's, which agent-desktop copies here, is the app's name without Screen Recording permission.
+    ...(title === undefined ? {} : { title }),
     ...(scrollTarget === undefined ? {} : { scrollTarget }),
   };
 }

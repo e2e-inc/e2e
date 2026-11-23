@@ -1231,6 +1231,22 @@ describe('DesktopSurface', () => {
     await expect(surface.dispose({ signal, timeoutMs: 1_000 })).rejects.toThrow(/no process it started was found/);
   });
 
+  it("reads a window's title from its accessibility root when the window list gives the app's name, as without Screen Recording", async () => {
+    const { surface, fake } = await launched((pid) => ({
+      'list-windows': [
+        { ok: true, data: [{ id: 'w-mine', title: 'SignInForm', app_name: 'SignInForm', pid, process_instance: 'instance-1', is_focused: true }] },
+        { ok: true, data: [{ id: 'w-mine', title: 'SignInForm', app_name: 'SignInForm', pid, process_instance: 'instance-1', is_focused: true }, { id: 'w-prefs', title: 'Preferences', app_name: 'SignInForm', pid, process_instance: 'instance-1' }] },
+      ],
+    }), { observe: false });
+    const before = fake.calls().length;
+    expect(await surface.windows(signal, 5_000)).toEqual([
+      { id: 'w-mine', title: 'Spike Form', focused: true },
+      { id: 'w-prefs', title: 'Preferences', focused: false },
+    ]);
+    // Only the window listed under the app's name is read again.
+    expect(fake.calls().slice(before).filter((call) => call.key === 'snapshot').map((call) => call.args[call.args.indexOf('--window-id') + 1])).toEqual(['w-mine']);
+  });
+
   it('reads only the window a test chose, until it goes back to the focused one', async () => {
     const { surface, fake } = await launched((pid) => ({
       'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }, { id: 'w-panel', pid, process_instance: 'instance-1', is_focused: false }] }],
