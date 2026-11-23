@@ -46,9 +46,8 @@ Choose **Web (Playwright)** and a model provider. The wizard writes
 `.e2e/` run output to `.gitignore`. See the [Quickstart](/quickstart) for
 each choice.
 
-The wizard finds Next.js in `package.json` and writes a target that starts
-your app, as the next section shows. It prints the commands and the URL it
-used:
+The wizard finds Next.js in `package.json`, writes a target that starts
+your app, and prints what it wrote:
 
 ```text title="Output"
 Found Next.js: the web target starts npm run dev on http://localhost:3000, and npm run start in CI after npm run build
@@ -57,9 +56,9 @@ Found Next.js: the web target starts npm run dev on http://localhost:3000, and n
 ## Start the app from the config
 
 `app.command` starts your app, and the runner waits until `app.url`
-answers. `init` writes this target for you, with your package manager and
-the port from your `dev` script. To add it to a config you already have,
-copy it and keep your model import and `agents` entry:
+answers. `init` writes a target like this one, with your package manager
+and the port from your `dev` script. To add it to an existing config, keep
+your model import and `agents` entry:
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
@@ -133,12 +132,11 @@ bunx e2e run
 ```
 </CodeGroup>
 
-For a full workflow, run `e2e init --ci github-actions` or `--ci gitlab`.
-In a Next.js app, the web job it writes runs the build before the tests. See
-[CI pipeline](/reference/cli#ci-pipeline). To write the job by hand, take
-the [GitHub Actions](/ci/github-actions#web) job and add the build step
-before the e2e step. Leave out its `APP_URL`: this config doesn't read it.
-For CI defaults, see [Continuous integration](/ci).
+For a full workflow, run `e2e init --ci github-actions` or `--ci gitlab`:
+the web job it writes runs the build before the tests
+([CI pipeline](/reference/cli#ci-pipeline)). To write the job by hand, add
+the build step to the [GitHub Actions](/ci/github-actions#web) job and leave
+out its `APP_URL`. For CI defaults, see [Continuous integration](/ci).
 
 To test each Vercel preview deployment instead, see
 [Vercel Previews](/ci/vercel-previews).

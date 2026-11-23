@@ -170,8 +170,7 @@ For a new project, the wizard asks for:
   preselects the service the repository's remote, `.github/` folder, or
   `.gitlab-ci.yml` points to. See [CI pipeline](#ci-pipeline).
 
-In a Next.js app, the web target starts the app, and no question asks for
-its URL. `init` prints the commands and the URL it wrote. See
+In a Next.js app, the web target starts the app. See
 [Next.js apps](#nextjs-apps).
 
 After you confirm the file changes, the wizard asks whether to install the
@@ -195,10 +194,11 @@ field or lockfile, then the invoking package manager, then npm.
 
 `init` finds a Next.js app when `package.json` has `next` in `dependencies`
 or `devDependencies`. The web target then runs the app's own scripts with
-the project's package manager:
+the project's package manager, and `init` prints the commands and the URL
+it wrote:
 
 - `app.url` is `http://localhost:<port>`, with the port from the `dev`
-  script's `--port` or `-p` flag, else 3000. It's never `127.0.0.1`, which
+  script's `--port` or `-p` flag or `PORT=` variable, else 3000. It's never `127.0.0.1`, which
   [doesn't hydrate](/frameworks/nextjs#fix-next-js-problems) on `next dev`.
 - Locally, `app.command` runs the `dev` script with `reuseExisting: true`.
 - When the app also has `build` and `start` scripts on the same port,
@@ -208,7 +208,7 @@ the project's package manager:
 
 Without a `dev` script, or with a port that isn't a number, such as `$PORT`,
 the target reads `APP_URL` as in any other project, and `init` says what to
-set. A project without `next` gets the same files as before.
+set.
 
 <a id="ci-pipeline" />
 ##### CI pipeline
