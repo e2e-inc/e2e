@@ -63,9 +63,11 @@ describe('device node attributes', () => {
     expect(text.roots[0]?.attributes).toEqual({ label: 'Log in', class: 'android.widget.TextView' });
     const same = projectSnapshot([{ index: 0, type: 'android.widget.Button', label: 'Save', text: 'Save' }], view);
     expect(same.roots[0]?.attributes).toEqual({ label: 'Save', class: 'android.widget.Button' });
-    const hint = projectSnapshot([{ index: 0, type: 'android.widget.EditText', label: 'Type your name', text: '', hintShowing: true }], view);
+    const hint = projectSnapshot([{ index: 0, type: 'android.widget.EditText', label: 'Type your name', hintShowing: true }], view);
     expect(hint.roots[0]?.attributes?.label).toBeUndefined();
     expect(hint.roots[0]?.attributes?.['content-desc']).toBeUndefined();
+    const described = projectSnapshot([{ index: 0, type: 'android.widget.EditText', label: 'Email address', text: '', hintShowing: true }], view);
+    expect(described.roots[0]?.attributes).toMatchObject({ label: 'Email address', 'content-desc': 'Email address' });
   });
 
   it('drops the XCUIElementType prefix and leaves out what the platform did not report', () => {

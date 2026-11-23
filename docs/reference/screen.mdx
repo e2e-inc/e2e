@@ -1066,14 +1066,17 @@ const href = await screen.getByRole('link', 'Docs').getAttribute('href');
 ```
 
 On a device, a node carries `label` (the accessibility label: the iOS label, the
-Android content description, or its text when it has none; the iOS label is
+Android content description, or its text when it has none, except an empty field whose description equals its hint, which has neither; the iOS label is
 the device's own, so a field folded into a placeholder keeps its full label),
 `resource-id` (its test id; on iOS the accessibility identifier, which Appium
 reads as `name`), `class` (the Android class, or the iOS element type without
 its prefix, such as `TextField`, which Appium reads as `type`), `content-desc`
 on Android (missing when the description equals the text, because agent-device
 reports it only when it differs), and `placeholder` when the platform reports
-one. For the text a field holds, use `inputValue()`.
+one. On an iOS device cloud that serves an Appium page source, agent-device
+reads the identifier and the label from Appium's `name`, which is the label
+when an element has no identifier, so `resource-id` and `label` can each return
+the other's value there. For the text a field holds, use `inputValue()`.
 
 #### `isVisible`
 

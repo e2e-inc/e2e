@@ -172,7 +172,7 @@ declares `requires: ['device']` on those tests.
 | `driver.keys('Enter')`, `pressKeyCode(66)` | `.press('Enter')` on the field |
 | `.getText()`, `.getValue()`, `.getAttribute('value')` | `.textContent()`, `.inputValue()` |
 | `.isDisplayed()`, `.isEnabled()`, `.getAttribute('checked')` | `.isVisible()`, `.isEnabled()`, `.isChecked()` |
-| `.getAttribute('label')`, `.getAttribute('name')`, `.getAttribute('resource-id')`, `.getAttribute('type')`, `.getAttribute('class')`, `.getAttribute('content-desc')`, `.getTagName()` | `.getAttribute('label')`, `.getAttribute('resource-id')` (also for iOS `name`), `.getAttribute('class')` (also for iOS `type` and the tag name), `.getAttribute('content-desc')` (Android only). [Screen](/reference/screen) lists what each reads. For Android's `text`, use `.textContent()` (on a node with only a content description, it reads the description) |
+| `.getAttribute('label')`, `.getAttribute('name')`, `.getAttribute('resource-id')`, `.getAttribute('type')`, `.getAttribute('class')`, `.getAttribute('content-desc')`, `.getTagName()` | `.getAttribute('label')`, `.getAttribute('resource-id')` (also for iOS `name` on an element with an identifier; Appium's `name` falls back to the label, so read `label` on one without), `.getAttribute('class')` (also for iOS `type` and the tag name), `.getAttribute('content-desc')` (Android only). [Screen](/reference/screen) lists what each reads. For Android's `text`, use `.textContent()` (on a node with only a content description, it reads the description) |
 | `.isExisting()` | `(await locator.count()) > 0` |
 | `.getLocation()`, `.getSize()` | `.boundingBox()` |
 | `.waitForDisplayed({ timeout })` | `await expect(locator).toBeVisible({ timeout })`, or `locator.waitFor()` |
