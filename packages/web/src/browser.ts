@@ -700,7 +700,9 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     ): Promise<T> {
       const source = typeof fn === 'string' ? fn : pageFunctionSource(fn);
       validateJsonValue(arg, 'evaluate argument');
-      const evaluate = compileEvaluation(source, arg !== undefined ? ['arg'] : [], { awaitResult: true });
+      const evaluate = compileEvaluation(
+        source, arg !== undefined ? ['arg'] : [], { awaitResult: true },
+      );
       // JSON safety is checked above; Playwright's recursive argument type cannot expand JsonValue.
       const input: unknown = arg;
       // A handle, not a value: the boundary resolves to a string, which Playwright

@@ -116,15 +116,17 @@ describe('compileEvaluation', () => {
     expect(readEvaluation(report)).toEqual({ ok: true, value: ['page-secure', 'page-element', 'page-arg'] });
   });
 
-  it('waits for a promise the source returns, by default', async () => {
+  it('waits for a promise the source returns when awaitResult is true', async () => {
     const report = await compileEvaluation('() => Promise.resolve(7)', [], { awaitResult: true })();
     expect(readEvaluation(report)).toEqual({ ok: true, value: 7 });
   });
 
-  describe('without awaitResult', () => {
+  describe('when awaitResult is false', () => {
     /** Runs the boundary on an element with `awaitResult` off; it must answer synchronously. */
     const readSync = (source: string): ReturnType<typeof readEvaluation> => {
-      const report = compileEvaluation(source, ['element', 'arg'], { awaitResult: false })({ isConnected: true, matches: () => false });
+      const report = compileEvaluation(source, ['element', 'arg'], { awaitResult: false })(
+        { isConnected: true, matches: () => false },
+      );
       expect(typeof report).toBe('string');
       return readEvaluation(report as string);
     };
