@@ -170,6 +170,10 @@ For a new project, the wizard asks for:
   preselects the service the repository's remote, `.github/` folder, or
   `.gitlab-ci.yml` points to. See [CI pipeline](#ci-pipeline).
 
+In a Next.js app, the web target starts the app, and no question asks for
+its URL. `init` prints the commands and the URL it wrote. See
+[Next.js apps](#nextjs-apps).
+
 After you confirm the file changes, the wizard asks whether to install the
 selected dependencies. The installer follows the project's `packageManager`
 field or lockfile, then the invoking package manager, then npm.
@@ -179,12 +183,32 @@ field or lockfile, then the invoking package manager, then npm.
 | Creates | Content |
 | --- | --- |
 | `package.json` | Created as a private ESM package when missing; otherwise gets only the missing dependencies and scripts. Sibling packages (`@e2e-dev/web`, `@e2e-dev/mobile`) get the caret range of the version released with the CLI, or that exact version when the CLI is a prerelease. Adds a `test:e2e` script that runs `e2e run`, unless one exists |
-| `e2e.config.ts` | One target per selected engine, with the app in its `app`. Playwright reads `APP_URL` (default `http://localhost:3000`) into `app.url` and shows `app.command` in a comment. Mobile sets `app: { bundleId: 'Settings' }` on iOS and `com.android.settings` on Android, and `workers: 1`. With a gateway, `agents.default` is `{ model, system }` |
+| `e2e.config.ts` | One target per selected engine, with the app in its `app`. Playwright reads `APP_URL` (default `http://localhost:3000`) into `app.url` and shows `app.command` in a comment. In a Next.js app, it sets `app.url` and `app.command` instead; see [Next.js apps](#nextjs-apps). Mobile sets `app: { bundleId: 'Settings' }` on iOS and `com.android.settings` on Android, and `workers: 1`. With a gateway, `agents.default` is `{ model, system }` |
 | `tests/example.e2e.ts` | An app-open test that passes against any page, plus a commented agent test. Device setup gets a Settings check instead. With both engines, `tests/web.e2e.ts` and `tests/mobile.e2e.ts` instead, each test with `requires: ['browser']` or `requires: ['device']` so the other target skips it |
 | `.gitignore` | Appends `node_modules/`, `.e2e/results/`, `.e2e/cache/`, `.e2e/sessions/`, `.e2e/report.json`, `.e2e/ai-trace.json`, `.e2e/timings.json`, `.e2e/junit.xml`, `.e2e/summary.md`, `.e2e/logs/`, and `.e2e/videos/`. Committing the cache is opt-in; see [commit the replay cache](/cache#commit-the-replay-cache) |
 | `.agents/skills/e2e/`, `.claude/skills/e2e/` | `SKILL.md` and one `references/<topic>.md` per `e2e guide` topic. With both chosen, the Claude Code directory is a relative symlink (`../../.agents/skills/e2e`) to the copy, the layout `npx skills add` produces |
 | `.mcp.json`, `.cursor/mcp.json`, `.codex/config.toml` | Registers `e2e mcp` without changing other servers |
 | `.github/workflows/e2e.yml`, `.gitlab-ci.yml` | With `--ci`: a job for each platform the targets run on. At the repository root, also for a project in a subfolder. See [CI pipeline](#ci-pipeline) |
+
+<a id="nextjs-apps" />
+##### Next.js apps
+
+`init` finds a Next.js app when `package.json` has `next` in `dependencies`
+or `devDependencies`. The web target then runs the app's own scripts with
+the project's package manager:
+
+- `app.url` is `http://localhost:<port>`, with the port from the `dev`
+  script's `--port` or `-p` flag, else 3000. It's never `127.0.0.1`, which
+  [doesn't hydrate](/frameworks/nextjs#fix-next-js-problems) on `next dev`.
+- Locally, `app.command` runs the `dev` script with `reuseExisting: true`.
+- When the app also has `build` and `start` scripts on the same port,
+  `app.command` runs `start` in CI, on the production build. A
+  [CI pipeline](#ci-pipeline) from `init` runs `build` before the tests.
+  Otherwise, CI runs `dev` too.
+
+Without a `dev` script, or with a port that isn't a number, such as `$PORT`,
+the target reads `APP_URL` as in any other project, and `init` says what to
+set. A project without `next` gets the same files as before.
 
 <a id="ci-pipeline" />
 ##### CI pipeline
@@ -252,6 +276,9 @@ bunx e2e init --yes --ci gitlab
   with the `gh` or `glab` command that adds it.
 - For a project in a subfolder, the file goes to the repository root and the
   jobs run in the subfolder.
+- When the config serves a Next.js production build (its `app.command`
+  runs the `start` script), the web job runs the `build` script before
+  `e2e run`.
 - `init` warns when the config has no `app.command`, since nothing else
   starts the app on the runner. It also warns about a subscription gateway,
   whose sign-in stays on your machine, and an OpenAI-compatible `baseURL` on
