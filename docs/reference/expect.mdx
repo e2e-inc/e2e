@@ -166,9 +166,10 @@ await expect(screen.getByLabel('Order id')).toBeEditable({ editable: false }); /
 - On a Mac, a text field is read-only when macOS reports its value cannot be
   set. A combo box is editable when it takes text; a pop-up menu, which takes
   none, has no read-only state.
-- The engines report this state from the `@e2e-dev/web` and
-  `@e2e-dev/mobile` releases that need `e2e` 0.25.0. With an older engine,
-  every node fails with `no read-only state`: update the engine with `e2e`.
+- The engines report this state from the `@e2e-dev/web`,
+  `@e2e-dev/mobile`, and `@e2e-dev/desktop` releases that need `e2e`
+  0.25.0. With an older engine, every node fails with
+  `no read-only state`: update the engine with `e2e`.
 
 #### `toBeChecked`, `toBeSelected`, and `toBeExpanded`
 
