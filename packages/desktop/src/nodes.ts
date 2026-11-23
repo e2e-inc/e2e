@@ -168,9 +168,6 @@ const INPUT_ROLES = new Set(['textfield', 'combobox', 'slider', 'incrementor', '
 /** Roles agent-desktop reads text into `value`, which the contract calls `text`. */
 const TEXT_ROLES = new Set(['statictext', 'heading']);
 
-/** Roles a swipe on the observation root scrolls, in preference order. */
-const SCROLLABLE_ROLES = new Set(['scrollarea', 'list', 'listbox', 'table', 'outline', 'grid', 'webarea']);
-
 const STATE_NAMES = ['focused', 'disabled', 'secure', 'expanded', 'selected', 'hidden', 'pressed'] as const;
 
 /**
@@ -317,8 +314,8 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
     const description = label(node.description);
     if (description !== undefined) attributes.description = description;
     if (node.native_id !== undefined) attributes['native-id-kind'] = node.native_id.kind;
-    // A custom view that scrolls has none of those roles, but agent-desktop offers it Scroll.
-    if (scrollTarget === undefined && node.ref_id !== undefined && (SCROLLABLE_ROLES.has(node.role) || node.available_actions?.includes('Scroll') === true)) scrollTarget = id;
+    // A swipe on the window scrolls the first node agent-desktop offers Scroll, which it scrolls only then: a list or table with no scroll mechanism of its own would refuse it.
+    if (scrollTarget === undefined && node.ref_id !== undefined && node.available_actions?.includes('Scroll') === true) scrollTarget = id;
     bindings.set(id, {
       id,
       ...(node.ref_id === undefined ? {} : { ref: node.ref_id }),

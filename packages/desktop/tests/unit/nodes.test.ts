@@ -222,12 +222,23 @@ describe('projectSnapshot', () => {
     expect(projectSnapshot({ snapshot_id: 's', window: { id: 'w-1', title: 'Untitled' }, tree: { role: 'window', children: [] } }, minter()).title).toBe('Untitled');
   });
 
-  it('swipes a custom view that offers Scroll when no scroll area is on screen', () => {
+  it('swipes the first node agent-desktop offers Scroll, past a list or table that cannot scroll', () => {
     const screen = projectSnapshot(
-      { snapshot_id: 's', tree: { role: 'window', name: 'Feed', children: [{ role: 'button', name: 'Refresh', ref_id: '@s:e1' }, { role: 'group', name: 'Posts', ref_id: '@s:e2', available_actions: ['Scroll'] }] } },
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'Feed',
+          children: [
+            { role: 'table', name: 'Filters', ref_id: '@s:e1', available_actions: ['Select'] },
+            { role: 'list', name: 'Sidebar', ref_id: '@s:e2', available_actions: ['Select'] },
+            { role: 'group', name: 'Posts', ref_id: '@s:e3', available_actions: ['Scroll'] },
+          ],
+        },
+      },
       minter(),
     );
-    expect(screen.scrollTarget).toBe(screen.root.children?.[1]?.ref.id);
+    expect(screen.scrollTarget).toBe(screen.root.children?.[2]?.ref.id);
   });
 
   it('counts a node with children it did not list as a cut-short tree', () => {

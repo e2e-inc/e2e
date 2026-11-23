@@ -332,7 +332,7 @@ describe('DesktopSurface', () => {
   });
 
   it('scrolls the window on a root swipe right after a restart', async () => {
-    const scrollable = { ok: true, data: { snapshot_id: 's9', window: { id: 'w-mine' }, tree: { role: 'window', name: 'List', bounds: { x: 0, y: 0, width: 100, height: 100 }, children: [{ role: 'scrollarea', ref_id: '@s9:e1' }] } } };
+    const scrollable = { ok: true, data: { snapshot_id: 's9', window: { id: 'w-mine' }, tree: { role: 'window', name: 'List', bounds: { x: 0, y: 0, width: 100, height: 100 }, children: [{ role: 'scrollarea', ref_id: '@s9:e1', available_actions: ['Scroll'] }] } } };
     const { surface, fake } = await launched({ snapshot: [scrollable] }, { observe: false });
     await surface.restart(operation());
     await surface.perform({ id: 'root', revision: '' }, { kind: 'swipe', direction: 'down' }, operation());
@@ -815,7 +815,7 @@ describe('DesktopSurface', () => {
   });
 
   it('scrolls the window as it is now on a root swipe, not the container of an older observation', async () => {
-    const screen = (id: string) => ({ ok: true, data: { snapshot_id: id, window: { id: 'w-mine' }, tree: { role: 'window', name: 'List', bounds: { x: 0, y: 0, width: 100, height: 100 }, children: [{ role: 'scrollarea', name: id, ref_id: `@${id}:e1` }] } } });
+    const screen = (id: string) => ({ ok: true, data: { snapshot_id: id, window: { id: 'w-mine' }, tree: { role: 'window', name: 'List', bounds: { x: 0, y: 0, width: 100, height: 100 }, children: [{ role: 'scrollarea', name: id, ref_id: `@${id}:e1`, available_actions: ['Scroll'] }] } } });
     const { surface, fake } = await launched({ snapshot: [screen('s1'), screen('s1'), screen('s2')] });
     await surface.perform({ id: 'root', revision: '' }, { kind: 'swipe', direction: 'down' }, operation());
     expect(fake.calls().at(-1)?.args.slice(0, 2)).toEqual(['scroll', '@s2:e1']);
