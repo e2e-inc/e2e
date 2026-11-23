@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FinishedRun, Report, Reporter, ReporterSummary } from 'e2e';
+import { formatSize } from './format.ts';
 import { embedPayload, type ReportMedia } from './payload.ts';
 
 export interface HtmlReporterOptions {
@@ -183,7 +184,3 @@ function toPosix(relative: string): string {
   return relative.split(path.sep).join('/');
 }
 
-export function formatSize(bytes: number): string {
-  const kb = Math.ceil(bytes / 1024);
-  return kb < 1024 ? `${kb} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}

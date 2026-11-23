@@ -20,6 +20,7 @@ import { discoverConfig, loadConfigModule, missingConfigError } from '../config/
 import { resolveConfig } from '../config/resolve-run.ts';
 import { errorMessage } from '@e2e-dev/core/lib/internal/errors';
 import { visibleWidth } from '../report/format.ts';
+import { formatBytes } from './format-bytes.ts';
 import { docsLine, examples } from './help.ts';
 
 type CacheCommand = 'ls' | 'clear' | 'stats';
@@ -327,9 +328,3 @@ function formatAge(createdAt: string, now: number): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const tenths = Math.round(bytes / 102.4);
-  if (tenths < 10_240) return `${(tenths / 10).toFixed(1)} KiB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
-}

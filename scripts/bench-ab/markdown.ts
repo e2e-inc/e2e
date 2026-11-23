@@ -14,7 +14,7 @@ export interface Header {
   readonly suiteDiffers: boolean;
 }
 
-export function duration(ms: number): string {
+function duration(ms: number): string {
   if (!Number.isFinite(ms)) return '-';
   const rounded = Math.round(ms);
   return rounded < 1000 ? `${rounded} ms` : `${(ms / 1000).toFixed(2)} s`;

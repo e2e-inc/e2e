@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatSize } from '../../src/reporter.ts';
+import { formatSize } from '../../src/format.ts';
 
 describe('formatSize', () => {
   it('rounds up to whole KB before choosing KB or MB, so just under 1 MB reads 1.0 MB', () => {
