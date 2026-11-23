@@ -2,19 +2,4 @@
 '@e2e-dev/desktop': patch
 ---
 
-A read while the Mac's screen is locked retries instead of passing as an empty screen or a closed window.
-`toBeEditable` reads a desktop text field and an editable combo box.
-`desktop({ maxDepth })` takes 1 to 50, the depth agent-desktop reads.
-A swipe on the window scrolls a custom view that offers scrolling.
-A screenshot the Mac refused (no Screen Recording permission) no longer reads as masking that could not be proven.
-`desktop.windows()` and the screen's location give the window's own title without Screen Recording permission, not the app's name.
-Every screenshot withheld for a password field fails with `POLICY_DENIED`. `toHaveScreenshot` and the agent's observations capture again when a window with no password field changed size during the capture; `app.screenshot()` fails with `ENGINE_FAILURE`.
-`app.open()` reads again when the app replaces its window while the open reads it.
-`@e2e-dev/desktop` now needs `@e2e-dev/core` and `e2e` 0.25.0 or later, since it reports the `readonly` state that is new there.
-A control collapsed to no width or height reads as hidden.
-A screenshot cut off mid-capture leaves no unmasked image in the system's temporary directory.
-The cleanup of a killed worker's state no longer waits on a later process that the OS gave the worker's id.
-`toHaveScreenshot` and the agent's observations capture again when agent-desktop ran out of time reading a window with no password field; a window deeper than `maxDepth` fails with `POLICY_DENIED`, which says to raise it.
-With `snapshot: 'interactive'`, locators and `expect` still read the whole window, so they find static text.
-The controls of a minimized window read as hidden.
-Everything under a hidden or off-screen node reads as hidden.
+More `desktop()` fixes. `@e2e-dev/desktop` now needs `@e2e-dev/core` and `e2e` 0.25.0 or later: it reports the `readonly` state `toBeEditable` reads. A read on a locked screen, a read cut short, or one agent-desktop says may be retried reads again instead of passing as an empty screen or failing for good; a minimized window, a control with no size, and everything under a hidden node read as hidden. Window titles come from accessibility, so they are right without Screen Recording permission. Node ids stay put across partial and interactive reads, and a key goes to a look-alike field only when its name and developer id still match. Screenshots: one withheld for a password field fails with `POLICY_DENIED` (a window deeper than `maxDepth` too); `toHaveScreenshot` captures again after a capture that failed; agent-desktop's raw capture never stays in the system temporary directory; static text and a window locator count as in view. `desktop({ maxDepth })` takes 1 to 50, `desktop(null)` is refused, quit shortcuts such as `ControlOrMeta+q` are refused before focus moves, `press` reaches a window on another Space, and `app.open()` works again after a failed launch. The cleanup of a killed worker's state tells it from a later process with its id, in any time zone.
