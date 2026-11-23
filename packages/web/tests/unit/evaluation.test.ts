@@ -120,8 +120,12 @@ describe('pageValueEncoder', () => {
     ["an object whose constructor's prototype is a getter",
       "const p = Object.create(null); const F = { Object: () => {} }.Object;"
         + " Object.defineProperty(F, 'prototype', { get: () => p }); p.constructor = F; Object.create(p)"],
+    ['an object on a Proxy prototype whose getPrototypeOf trap throws',
+      "Object.create(new Proxy({}, { getPrototypeOf() { throw new Error('trap'); } }))"],
+    ['an object on a Proxy prototype whose getOwnPropertyDescriptor trap throws',
+      "Object.create(new Proxy(Object.create(null), { getOwnPropertyDescriptor() { throw new Error('trap'); } }))"],
     ['a plain object of a realm whose Object has a name getter',
-      "Object.defineProperty(Object, 'name', { get() { throw new Error('read name'); } }); ({ a: 1 })"],
+      "Object.defineProperty(Object, 'name', { get: () => 'Object' }); ({ a: 1 })"],
   ])('rejects %s from another realm', (_label, source) => {
     expect(() => encodePageValue(runInContext(source, createContext())))
       .toThrow(expect.objectContaining({ invalid: 'must be JSON-safe' }));

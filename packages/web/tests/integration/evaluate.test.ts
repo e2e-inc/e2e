@@ -155,7 +155,14 @@ describe('browser.evaluate error boundaries', () => {
     const inFrame = (expression: string) => `() => document.getElementById("f").contentWindow.eval(${JSON.stringify(expression)})`;
     await expect(browser.evaluate(inFrame('({ a: 1, nested: { b: [2] } })'))).resolves.toEqual({ a: 1, nested: { b: [2] } });
     await expect(browser.evaluate(inFrame('[1, 2]'))).resolves.toEqual([1, 2]);
-    for (const expression of ['new Date(0)', 'new Map()', 'document.body', 'new (class Cart {})()', 'Object.create(Object.create(null))']) {
+    for (const expression of [
+      'new Date(0)',
+      'new Map()',
+      'document.body',
+      'new (class Cart {})()',
+      'Object.create(Object.create(null))',
+      'Object.create(new Proxy({}, { getPrototypeOf() { throw new Error("trap"); } }))',
+    ]) {
       await expect(browser.evaluate(inFrame(expression))).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: 'evaluate result must be JSON-safe' });
     }
   });

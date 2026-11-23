@@ -59,19 +59,24 @@ interface InvalidPageValue {
 export function pageValueEncoder(): (root: unknown) => string | undefined {
   const { getOwnPropertyDescriptor, getPrototypeOf, keys } = ({}).constructor as ObjectConstructor;
   const objectPrototype: unknown = getPrototypeOf({});
-  /** An own data property's value; never runs a getter the page defined. */
+  /** An own data property's value, or undefined for an accessor, whose getter it never calls. */
   const own = (target: object, key: string): unknown => getOwnPropertyDescriptor(target, key)?.value;
   /**
    * This realm's Object.prototype, or another same-origin frame's: a prototype with a null
    * prototype whose own `constructor` is a function named `Object` that points back to it.
+   * A Proxy trap that throws during the check means the prototype is not one.
    */
   const isObjectPrototype = (prototype: object): boolean => {
     if (prototype === objectPrototype) return true;
-    if (getPrototypeOf(prototype) !== null) return false;
-    const constructor = own(prototype, 'constructor');
-    return typeof constructor === 'function'
-      && own(constructor, 'name') === 'Object'
-      && own(constructor, 'prototype') === prototype;
+    try {
+      if (getPrototypeOf(prototype) !== null) return false;
+      const constructor = own(prototype, 'constructor');
+      return typeof constructor === 'function'
+        && own(constructor, 'name') === 'Object'
+        && own(constructor, 'prototype') === prototype;
+    } catch {
+      return false;
+    }
   };
   const { isArray } = ([] as unknown[]).constructor as ArrayConstructor;
   const charCodeAt = ''.charCodeAt;
