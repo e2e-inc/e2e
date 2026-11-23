@@ -34,7 +34,7 @@ export default {
 } satisfies E2EConfig;
 ```
 
-`app.bundleId` names an installed app instead (`'com.apple.TextEdit'`, or an
+`app.bundleId` names an installed app instead (`'com.apple.calculator'`, or an
 app name), and `app.launchArguments` are passed to every launch.
 
 ```ts title="tests/sign-in.e2e.ts"
