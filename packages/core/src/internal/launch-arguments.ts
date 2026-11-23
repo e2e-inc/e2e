@@ -1,13 +1,6 @@
-/**
- * The shape of `launchArguments`, checked once for the runner's config and
- * for a launch a test asks for by hand, so an engine never spells a value
- * the declaration did not allow. Also the `-name value` spelling that the
- * iOS and macOS engines share.
- */
-
 import { ConfigurationError, TestError } from './errors.ts';
 import { isPlainObject } from './options.ts';
-import type { LaunchArgumentValue, ResolvedLaunchArguments } from '../types.ts';
+import type { LaunchArgumentValue, LaunchArgumentValues, ResolvedLaunchArguments } from '../types.ts';
 
 /** What an old-style plist string may hold unquoted. `NSUserDefaults` reads a bare value that starts with `-` as the next argument's name. */
 const PLIST_UNQUOTED = /^[A-Za-z0-9_$/:.][A-Za-z0-9_$/:.-]*$/;
@@ -60,6 +53,14 @@ export function checkLaunchArguments(label: string, declared: unknown, code: 'IN
   return Object.fromEntries(entries);
 }
 
+export function engineLaunchArguments(launchArguments: ResolvedLaunchArguments | undefined): {
+  readonly launchArguments?: readonly string[];
+  readonly launchArgumentValues?: LaunchArgumentValues;
+} {
+  if (launchArguments === undefined) return {};
+  return Array.isArray(launchArguments) ? { launchArguments } : { launchArgumentValues: launchArguments as LaunchArgumentValues };
+}
+
 /**
  * Launch arguments as Apple process arguments. A list stays as it is. An
  * object becomes `-name value` for each entry, as `NSUserDefaults` reads it:
@@ -83,7 +84,6 @@ function plistString(item: string): string {
   return PLIST_UNQUOTED.test(item) && !item.startsWith('//') ? item : `"${item.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 }
 
-/** A string, a boolean, or a finite number below 2^53 in magnitude. */
 function isLaunchArgumentScalar(value: unknown): value is string | number | boolean {
   if (typeof value === 'string' || typeof value === 'boolean') return true;
   return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER;
@@ -94,7 +94,6 @@ function holdsNul(value: LaunchArgumentValue): boolean {
   return Array.isArray(value) && value.some((item) => item.includes('\u0000'));
 }
 
-/** A value's kind for an error message: `null`, `undefined`, `an array`, `a Map`, `an object`, `NaN`, `a number beyond 2^53 - 1`, `a number`. */
 function describe(value: unknown): string {
   if (value === null) return 'null';
   if (value === undefined) return 'undefined';

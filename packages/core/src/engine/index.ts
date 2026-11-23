@@ -54,7 +54,7 @@ export type {
 export { Deadline, pollCondition, stepTimeout, withTimeout, withinCleanupBudget, type PollConditionOptions } from '../internal/time.ts';
 export { isRefusedLinkScheme, sameSite, siteOf, urlMatches } from '../internal/urls.ts';
 export { obj, type WithoutUndefined } from '../internal/objects.ts';
-import type { AppPermissionState, Expectable, Locator, ResolvedLaunchArguments, Screen, Secret } from '../types.ts';
+import type { AppPermissionState, Expectable, LaunchArgumentValues, Locator, Screen, Secret } from '../types.ts';
 import type {
   EngineHostIdentity,
   EngineSpiVersion,
@@ -86,7 +86,7 @@ export {
   RETRYABLE_ENGINE_ERROR_CODES,
   parseKey,
 } from './contract.ts';
-export type { AppPermissionState, Expectable, JsonValue, LaunchArgumentValue, LaunchArguments, Locator, ResolvedLaunchArguments, Screen, Secret } from '../types.ts';
+export type { AppPermissionState, Expectable, JsonValue, LaunchArgumentValue, LaunchArgumentValues, LaunchArguments, Locator, ResolvedLaunchArguments, Screen, Secret } from '../types.ts';
 export { isSecret } from '../secrets.ts';
 
 /**
@@ -172,8 +172,16 @@ export interface EngineAppInfo {
   readonly bundleId?: string;
   /** The build to install, as the target declared it; relative to `projectRoot`. */
   readonly appPath?: string;
-  /** Arguments every fresh launch passes the app. */
-  readonly launchArguments?: ResolvedLaunchArguments;
+  /** Arguments every fresh launch passes the app, when the target declared them as a list of strings. */
+  readonly launchArguments?: readonly string[];
+  /**
+   * Arguments every fresh launch passes the app, when the target declared
+   * them as an object of argument name to value; the engine spells them for
+   * its launch command. Only an engine that declares `launchArgumentValues`
+   * receives one: for any other engine the object is `INVALID_CONFIG` at
+   * config load.
+   */
+  readonly launchArgumentValues?: LaunchArgumentValues;
   /** Permissions the app holds, by name; what each state means is the engine's (a device sets them before every fresh launch). */
   readonly permissions?: Readonly<Record<string, AppPermissionState>>;
 }
@@ -804,6 +812,13 @@ export interface Engine {
    * anything is prepared.
    */
   readonly selectsDevice?: boolean;
+  /**
+   * The engine reads the object form of `app.launchArguments` from
+   * `EngineAppInfo.launchArgumentValues`. Without it the harness refuses an
+   * object at config load, so an engine that predates the object form only
+   * ever receives a list in `EngineAppInfo.launchArguments`.
+   */
+  readonly launchArgumentValues?: boolean;
   /** capability: keyboard - requires observation. Input to whatever holds focus; see `EngineKeyboard`. */
   readonly keyboard?: EngineKeyboard;
   /**

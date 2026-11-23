@@ -36,7 +36,7 @@ function resolve(raw: Partial<E2EConfig>, env: NodeJS.ProcessEnv = BASE_ENV) {
 
 /** A minimal observing engine, the way web() or mobile() would drive a target. */
 function fakeEngine() {
-  return defineEngine({ name: 'fake', version: '1.0.0', spiVersion: 1, observe: async () => snapshot([]) });
+  return defineEngine({ name: 'fake', version: '1.0.0', spiVersion: 1, launchArgumentValues: true, observe: async () => snapshot([]) });
 }
 
 /** One web target on the fake engine declaring `app`. */

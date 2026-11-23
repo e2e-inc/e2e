@@ -1,9 +1,3 @@
-/**
- * The object form of `app.launchArguments`, spelled for the platform's launch
- * command: `-name value` process arguments on iOS, `am start` extras of the
- * value's type on Android. A list is handed over as it is.
- */
-
 import { ConfigurationError, TestError, appleUserDefaults, checkLaunchArguments, type LaunchArgumentValue, type ResolvedLaunchArguments } from '@e2e-dev/core/engine';
 import type { MobilePlatform } from './options.ts';
 
@@ -26,10 +20,6 @@ const IOS_ONLY_ARGUMENTS: ReadonlySet<string> = new Set([
   'NSForceRightToLeftWritingDirection',
 ]);
 
-/**
- * The launch arguments a test hands `device.openApp`, checked like the
- * target's: the declared shape, then the platform's rules.
- */
 export function launchArgumentsForOpen(platform: MobilePlatform, declared: unknown): ResolvedLaunchArguments | undefined {
   const label = 'device.openApp({ launchArguments })';
   const launchArguments = checkLaunchArguments(label, declared, 'INVALID_ARGUMENT');
@@ -66,7 +56,6 @@ function androidListProblem(items: readonly string[]): string | undefined {
   return undefined;
 }
 
-/** The arguments a launch passes the platform's launch command; undefined when there are none. */
 export function launchArgumentList(platform: MobilePlatform, launchArguments: ResolvedLaunchArguments | undefined): readonly string[] | undefined {
   if (launchArguments === undefined) return undefined;
   const list = platform === 'android' ? androidArguments(launchArguments) : appleUserDefaults(launchArguments);
@@ -94,7 +83,6 @@ function androidExtra(name: string, value: LaunchArgumentValue): string[] {
   return ['--esa', name, value.join(',')];
 }
 
-/** `--ei` for a whole number Java's `int` holds, `--el` for a larger one, `--ef` for a fraction. */
 function androidNumberFlag(value: number): '--ei' | '--el' | '--ef' {
   if (!Number.isInteger(value)) return '--ef';
   return value >= INT32_MIN && value <= INT32_MAX ? '--ei' : '--el';

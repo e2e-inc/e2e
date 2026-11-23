@@ -1,9 +1,6 @@
-import { appleUserDefaults, type ResolvedLaunchArguments } from '@e2e-dev/core/engine';
+import { appleUserDefaults, type EngineAppInfo } from '@e2e-dev/core/engine';
 
-/**
- * The process arguments `app.launchArguments` passes the app: a list as it
- * is, an object as `-name value` user defaults.
- */
-export function launchArgumentList(launchArguments: ResolvedLaunchArguments | undefined): readonly string[] {
+export function launchArgumentList(app: Pick<EngineAppInfo, 'launchArguments' | 'launchArgumentValues'>): readonly string[] {
+  const launchArguments = app.launchArgumentValues ?? app.launchArguments;
   return launchArguments === undefined ? [] : appleUserDefaults(launchArguments);
 }

@@ -1446,8 +1446,11 @@ export type LaunchArgumentValue = string | number | boolean | readonly string[];
  */
 export type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue | undefined>>;
 
-/** Launch arguments after the shape check: the `undefined` entries are gone. */
-export type ResolvedLaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue>>;
+/** The object form of launch arguments after the shape check: argument name to value, the `undefined` entries gone. */
+export type LaunchArgumentValues = Readonly<Record<string, LaunchArgumentValue>>;
+
+/** Launch arguments after the shape check: a list of strings, or the object form. */
+export type ResolvedLaunchArguments = readonly string[] | LaunchArgumentValues;
 
 /**
  * The app one target tests, declared on the target and nowhere else: engines

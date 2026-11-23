@@ -7,7 +7,7 @@
 import type { EngineAppDeclaration, EngineAppInfo, EngineHandle } from '../engine/index.ts';
 import { ConfigurationError } from '../internal/errors.ts';
 import { obj } from '../internal/objects.ts';
-import { checkLaunchArguments } from '../internal/launch-arguments.ts';
+import { checkLaunchArguments, engineLaunchArguments } from '../internal/launch-arguments.ts';
 import { rejectUnknownKeys } from '../internal/options.ts';
 import { didYouMean } from '../internal/suggest.ts';
 import { isImplicitTestHost, isRefusedLinkScheme, normalizeBaseUrl, portOf, requestsFreePort, siteOf, withPort, type NormalizedBaseUrl } from '../internal/urls.ts';
@@ -139,6 +139,12 @@ export function checkTargetApp(targetName: string, engine: EngineHandle | undefi
     throw new ConfigurationError('INVALID_CONFIG', `${where}.environment must be one of test, staging, production, got ${JSON.stringify(environment)}`);
   }
   const launchArguments = checkLaunchArguments(`${where}.launchArguments`, app.launchArguments);
+  if (launchArguments !== undefined && !Array.isArray(launchArguments) && engine !== undefined && engine.launchArgumentValues !== true) {
+    throw new ConfigurationError(
+      'INVALID_CONFIG',
+      `${where}.launchArguments is an object, and engine "${engine.name}" takes only a list of strings: write the arguments as a list, or use an engine version that supports the object syntax`,
+    );
+  }
   if (permissions !== undefined && !isRecord(permissions)) {
     throw new ConfigurationError('INVALID_CONFIG', `${where}.permissions must be an object of permission name to grant, deny, or reset`);
   }
@@ -160,7 +166,7 @@ export function checkTargetApp(targetName: string, engine: EngineHandle | undefi
     readyUrl: nonEmptyString(app.readyUrl, `${where}.readyUrl`),
   };
   const { url, bundleId, appPath } = checked;
-  engine?.validateApp?.(obj({ url, bundleId, appPath, launchArguments, permissions }) satisfies EngineAppDeclaration, { targetName });
+  engine?.validateApp?.(obj({ url, bundleId, appPath, ...engineLaunchArguments(launchArguments), permissions }) satisfies EngineAppDeclaration, { targetName });
   return checked;
 }
 
@@ -303,7 +309,7 @@ export function resolveTargetApp(targetName: string, app: TargetAppDeclaration, 
 export function engineAppInfo(app: ResolvedApp): EngineAppInfo {
   const { base, portRequest, site, bundleId, appPath, launchArguments, permissions } = app;
   const unassigned = portRequest !== undefined && portRequest.port === undefined;
-  return obj({ origin: unassigned ? undefined : base?.origin, site, bundleId, appPath, launchArguments, permissions });
+  return obj({ origin: unassigned ? undefined : base?.origin, site, bundleId, appPath, ...engineLaunchArguments(launchArguments), permissions });
 }
 
 /**

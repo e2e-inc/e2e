@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppError } from 'agent-device';
 import { decodePng, encodePng } from '../helpers/png.ts';
 import type { EngineFixtureContext, EngineSnapshot, FixtureOperations, LocatorExpression, OperationContext, SemanticNode } from '@e2e-dev/core/engine';
+import { describeEngine } from '@e2e-dev/core/engine';
 import type { Device } from '../../src/device.ts';
 import type { RawNode } from '../../src/nodes.ts';
 import { buildEngine, mobile } from '../../src/engine.ts';
@@ -101,6 +102,7 @@ describe('manifest', () => {
     const pinned = harness().engine;
     expect([...pinned.capabilities].toSorted()).toEqual(['actions', 'artifacts', 'device', 'keyboard', 'location', 'observation', 'pointer']);
     expect(pinned.name).toBe('mobile');
+    expect(describeEngine(pinned).launchArgumentValues).toBe(true);
     expect(pinned.version).not.toBe('unknown');
     expect(Object.keys(pinned.session!).toSorted()).toEqual(['back', 'openLink', 'reset', 'restart']);
     // No `open`: a device app has no URL. No select verb either: the touch surface has no option lists to pick from.
@@ -148,7 +150,7 @@ describe('manifest', () => {
     const info = { targetName: 'pixel' };
     const android = harness({ platform: 'android' }).engine.validateApp!;
     const ios = harness().engine.validateApp!;
-    const app = (launchArguments: unknown) => ({ bundleId: 'com.example.app', launchArguments }) as never;
+    const app = (launchArguments: unknown) => ({ bundleId: 'com.example.app', ...(Array.isArray(launchArguments) ? { launchArguments } : { launchArgumentValues: launchArguments }) }) as never;
 
     expect(() => android(app({ AppleLocale: 'fr_FR' }), info)).toThrowError(
       expect.objectContaining({
@@ -3460,7 +3462,7 @@ describe('device fixture', () => {
 
   it('spells a launch-argument object for the platform on every fresh launch of the pinned app, and sends nothing for an empty object', async () => {
     const launchArguments = { AppleLanguages: ['fr', 'en-GB'], AppleLocale: 'fr_FR', e2e: true, retries: 3 };
-    const ios = harness({ bundleId: 'com.example.app', launchArguments });
+    const ios = harness({ bundleId: 'com.example.app', launchArgumentValues: launchArguments });
     await openAttempt(ios);
     await ios.engine.session!.restart!(operation());
 
@@ -3471,7 +3473,7 @@ describe('device fixture', () => {
       launchArgs: ['-AppleLanguages', '(fr, en-GB)', '-AppleLocale', 'fr_FR', '-e2e', 'YES', '-retries', '3'],
     });
 
-    const android = harness({ platform: 'android', bundleId: ANDROID_APP_PACKAGE, launchArguments: { e2e: true, locale: 'fr_FR', retries: 3, tags: ['a', 'b'] } });
+    const android = harness({ platform: 'android', bundleId: ANDROID_APP_PACKAGE, launchArgumentValues: { e2e: true, locale: 'fr_FR', retries: 3, tags: ['a', 'b'] } });
 
     await openAttempt(android);
     await android.engine.session!.restart!(operation());
@@ -3482,7 +3484,7 @@ describe('device fixture', () => {
       launchArgs: ['--ez', 'e2e', 'true', '--es', 'locale', 'fr_FR', '--ei', 'retries', '3', '--esa', 'tags', 'a,b'],
     });
 
-    const empty = harness({ bundleId: 'com.example.app', launchArguments: {} });
+    const empty = harness({ bundleId: 'com.example.app', launchArgumentValues: {} });
     await openAttempt(empty);
     await empty.engine.session!.restart!(operation());
     expect(empty.fake.lastArgs('apps.open')).toEqual({ platform: 'ios', app: 'com.example.app', relaunch: true });
