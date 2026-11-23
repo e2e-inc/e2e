@@ -2387,29 +2387,6 @@
       }
     },
     {
-      "slug": "stim",
-      "title": "Testing Stim's mobile app on an owned iOS simulator with e2e",
-      "shortTitle": "Stim",
-      "description": "Two flows of Stim's React Native app against mocked data, on the iOS simulator a Stim environment owns.",
-      "source": "community",
-      "repository": "https://github.com/appandflow/stim/tree/cba1f8bc41f2f45b2a1e396b6b5f9edde8b872b2/test/mobile-e2e",
-      "author": {
-        "name": "App&Flow",
-        "github": "appandflow"
-      },
-      "license": "MIT",
-      "licenseUrl": "https://github.com/appandflow/stim/blob/cba1f8bc41f2f45b2a1e396b6b5f9edde8b872b2/LICENSE",
-      "tags": {
-        "framework": [
-          "react-native",
-          "expo"
-        ],
-        "platform": [
-          "ios"
-        ]
-      }
-    },
-    {
       "slug": "tidytv",
       "title": "Testing TidyTV's Play Store screenshot editor with e2e",
       "shortTitle": "TidyTV",
