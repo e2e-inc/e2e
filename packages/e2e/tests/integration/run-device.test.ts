@@ -82,9 +82,20 @@ describe('e2e run --device', () => {
     }
   });
 
-  it('refuses a run whose selected targets have no device to select', async () => {
+  it('refuses a run whose selected targets have no device to select, and names only those targets in the header', async () => {
+    const android = engine(true);
     const web = engine(false);
-    const { outcome, project } = await runProject(SUITE, { config: { targets: [target('web', web.engine)] }, runOptions: { device: 'iPhone 17 Pro' } });
+    const started: (readonly string[])[] = [];
+    const { outcome, project } = await runProject(SUITE, {
+      config: { targets: [target('android', android.engine), target('web', web.engine)] },
+      runOptions: {
+        device: 'Pixel_9',
+        targetIds: ['web'],
+        onEvent: (event) => {
+          if (event.type === 'run-started') started.push(event.targets);
+        },
+      },
+    });
     try {
       expect(runErrors(outcome)).toEqual([
         {
@@ -92,7 +103,8 @@ describe('e2e run --device', () => {
           message: '--device names the device a target runs on, and no selected target\'s engine selects one ("web"); use it with a mobile() target on local devices, not a device provider\'s',
         },
       ]);
-      expect(web.prepares).toEqual([]);
+      expect(started).toEqual([['web']]);
+      expect([...android.prepares, ...web.prepares]).toEqual([]);
       expect(outcome.report.run.results).toEqual([]);
     } finally {
       project.cleanup();
