@@ -76,10 +76,11 @@ test('isKeyboardShown follows the keyboard up and through a dismissal', { platfo
   await expect.poll(() => device.isKeyboardShown()).toBe(false);
 });
 
-// The benchmark is a release build with no shake handler, so the shake changes
-// nothing on screen: this proves the command reaches the simulator and the
-// emulator, and that the screen is still readable after it.
-test('a shake reaches the device and leaves the screen as it was', async ({ app, device, screen }) => {
+// The benchmark is a release build with no shake handler, so nothing on screen
+// answers a shake. This checks only that the simulator and the emulator take
+// the command without an error and that the screen reads afterwards; that a
+// shake reaches an app is proven outside this suite, on an app that counts them.
+test('a shake is sent without an error and leaves the screen readable', async ({ app, device, screen }) => {
   await openScenario({ app, device, screen }, 'Sequential Onboarding');
   await device.shake();
   await expect(screen.getByTestId('email-input')).toBeVisible();
