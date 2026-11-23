@@ -240,6 +240,12 @@ describe('projectSnapshot', () => {
     expect(byName('Inside')?.states?.hidden).toBeUndefined();
   });
 
+  it('reads every node of a minimized window as hidden, the window itself too', () => {
+    const { root } = projectSnapshot(load('macos/sign-in-form'), minter(), true);
+    expect(resolveExpression({ kind: 'query', query: { kind: 'role', value: { kind: 'string', value: 'window', exact: true }, visible: true } }, [root])).toEqual([]);
+    expect(all(root).every((node) => node.states?.hidden === true)).toBe(true);
+  });
+
   it("takes the window's title from its accessibility root, not the window list's app name", () => {
     const screen = projectSnapshot({ snapshot_id: 's', window: { id: 'w-1', title: 'SignInForm' }, tree: { role: 'window', name: 'Sign In', children: [] } }, minter());
     expect(screen.title).toBe('Sign In');

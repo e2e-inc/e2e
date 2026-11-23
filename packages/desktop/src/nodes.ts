@@ -286,7 +286,7 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
     const secure = rawStates.has('secure');
     const states: Record<string, boolean> = {};
     for (const state of STATE_NAMES) if (rawStates.has(state)) states[state] = true;
-    if (rawStates.has('offscreen') || (minimized && id !== ROOT_ID)) states.hidden = true;
+    if (rawStates.has('offscreen') || minimized) states.hidden = true;
     // A control collapsed to no width or height draws nothing, and agent-desktop will not act on it. Only a leaf: a container with no box can still hold drawn children.
     if (id !== ROOT_ID && node.bounds !== undefined && (node.bounds.width <= 0 || node.bounds.height <= 0) && (node.children ?? []).length === 0) states.hidden = true;
     // A mixed checkbox is neither checked nor unchecked: no state, so check() and uncheck() always reach the control.
