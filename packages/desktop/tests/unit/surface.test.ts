@@ -834,16 +834,16 @@ describe('DesktopSurface', () => {
     await expect(away.surface.perform(hidden!.ref, { kind: 'scrollIntoView' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
   });
 
-  it("takes the agent's point from the window of its last image, not of a later observation without one", async () => {
+  it("measures the agent's point in the newest observation's window, as core hit-tests it, though that observation had no image", async () => {
     const read = (id: string, x: number) => ({ ok: true, data: { snapshot_id: id, window: { id }, tree: { role: 'window', name: id, bounds: { x, y: 0, width: 200, height: 100 }, children: [{ role: 'button', name: 'OK', ref_id: `@${id}:e1`, bounds: { x: x + 10, y: 10, width: 40, height: 20 } }] } } });
     const windows = (pid: number) => [
-      { id: 'w-a', pid, process_instance: 'instance-1', is_focused: true, bounds: { x: 100, y: 0, width: 200, height: 100 } },
-      { id: 'w-b', pid, process_instance: 'instance-1', bounds: { x: 500, y: 0, width: 200, height: 100 } },
+      { id: 'w-a', pid, process_instance: 'instance-1', bounds: { x: 100, y: 0, width: 200, height: 100 } },
+      { id: 'w-b', pid, process_instance: 'instance-1', is_focused: true, bounds: { x: 500, y: 0, width: 200, height: 100 } },
     ];
     const { surface, fake } = await launched(
       (pid) => ({
         'list-windows': [{ ok: true, data: windows(pid) }],
-        // The open's read, the first observation and the read after its capture show window A; the second observation reads B, whose capture fails.
+        // The open's read, the first observation and the read after its capture show window A; the second observation reads dialog B, whose capture fails.
         snapshot: [read('w-a', 100), read('w-a', 100), read('w-a', 100), read('w-b', 500)],
         screenshot: [{ ok: true, writePng: { width: 200, height: 100 }, data: { scale_factor: 1 } }, failure('INTERNAL', 'not_delivered', 'capture failed')],
       }),
@@ -851,10 +851,8 @@ describe('DesktopSurface', () => {
     );
     expect((await surface.observe(operation('agent'), { pixels: true })).pixels).toBeDefined();
     expect((await surface.observe(operation('agent'), { pixels: true })).pixels).toBeUndefined();
-    // A read that asks for no image, as a hook after an action takes, leaves it too.
-    await surface.observe(operation('agent'), undefined);
     await surface.performAt({ x: 20, y: 30 }, { kind: 'tap' }, operation('agent'));
-    expect(fake.calls().at(-1)?.args).toEqual(['mouse-click', '--xy=120,30', '--headed']);
+    expect(fake.calls().at(-1)?.args).toEqual(['mouse-click', '--xy=520,30', '--headed']);
   });
 
   it("measures a test's point in the window of the newest read, though that read took no image", async () => {
