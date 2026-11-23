@@ -378,6 +378,27 @@ describe('LocatorEngine perform contract', () => {
     ]);
   });
 
+  it('polls a positioned tap until its node is visible with a box', async () => {
+    const boxed: SemanticNode = { ...NODE, rect: { x: 10, y: 20, width: 100, height: 40 } };
+    const hidden: SemanticNode = { ...boxed, states: { hidden: true } };
+    const { engine, performed, calls } = makeEngine({ read: [() => NODE, () => hidden, () => boxed] });
+    await engine.performWithin(EXPRESSION, { x: 1, y: 2 }, { kind: 'tap' });
+    expect(calls.read).toBe(3);
+    expect(performed.at(-1)).toEqual({ point: { x: 11, y: 22 }, action: { kind: 'tap' } });
+  });
+
+  it('fails a positioned tap whose node never gets a box with LOCATOR_NOT_FOUND, no later than the deadline', async () => {
+    const { engine, performed } = makeEngine({ read: Array.from({ length: 50 }, () => () => NODE) }, { actionTimeout: 350 });
+    const started = Date.now();
+    await expect(engine.performWithin(EXPRESSION, { x: 1, y: 2 }, { kind: 'tap' })).rejects.toMatchObject({
+      code: 'LOCATOR_NOT_FOUND',
+      message: expect.stringContaining('did not become visible with a box to act within'),
+    });
+    // The old loop slept past the deadline and read again at 400 ms.
+    expect(Date.now() - started).toBeLessThan(400);
+    expect(performed).toEqual([{ kind: 'scrollIntoView' }]);
+  });
+
   it('marks every action it performs with the test origin, so an engine can act without settling', async () => {
     const { engine, origins } = makeEngine({});
     await engine.perform(EXPRESSION, { kind: 'tap' });
