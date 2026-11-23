@@ -1,5 +1,5 @@
 /**
- * The `headers`, `basicAuth`, `credentialOrigins`, `testIdAttribute`, `userAgent`, `locale`, `timezoneId`, `colorScheme`, `reducedMotion`, `initScripts`, and `screencast` options are checked at
+ * The `headers`, `basicAuth`, `credentialOrigins`, `testIdAttribute`, `hasTouch`, `userAgent`, `locale`, `timezoneId`, `colorScheme`, `reducedMotion`, `initScripts`, and `screencast` options are checked at
  * config load, so a header the browser could never send or an attribute no
  * element could carry fails the run before a browser launches. What the
  * browser does with valid ones is in tests/integration.
@@ -106,6 +106,14 @@ describe('web({ testIdAttribute })', () => {
         /testIdAttribute.*must be an attribute name/,
       );
     }
+  });
+});
+
+describe('web({ hasTouch })', () => {
+  it('rejects a value that is not a boolean as INVALID_CONFIG', () => {
+    expect(() => web({ hasTouch: 'yes' as unknown as boolean })).toThrow(
+      expect.objectContaining({ code: 'INVALID_CONFIG', message: 'web({ hasTouch }) must be a boolean, got "yes"' }),
+    );
   });
 });
 
@@ -270,7 +278,7 @@ describe('web() option keys', () => {
       refused('web() has unknown key "viewprt"; did you mean "viewport"?'),
     );
     expect(() => web({ launchOptions: {} } as unknown as Parameters<typeof web>[0])).toThrow(
-      refused('web() has unknown key "launchOptions"; expected one of browser, chromiumSandbox, viewport, screencast, connect, headers, basicAuth, credentialOrigins, testIdAttribute, userAgent, locale, timezoneId, colorScheme, reducedMotion, initScripts'),
+      refused('web() has unknown key "launchOptions"; expected one of browser, chromiumSandbox, viewport, screencast, connect, headers, basicAuth, credentialOrigins, testIdAttribute, hasTouch, userAgent, locale, timezoneId, colorScheme, reducedMotion, initScripts'),
     );
   });
 

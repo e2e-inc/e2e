@@ -140,7 +140,7 @@ export interface WebConnectOptions {
    * same browser after a transport drop. Called once before the next
    * operation, within its budget. The original browser and page must survive.
    * Dispatched operations are never retried. The host owns browser cleanup.
-   * Context replacement, headers, basicAuth, userAgent, locale, and timezoneId are unavailable in this mode.
+   * Context replacement, headers, basicAuth, hasTouch, userAgent, locale, and timezoneId are unavailable in this mode.
    */
   readonly reconnectEndpoint?: CdpEndpointResolver;
 }
@@ -241,6 +241,16 @@ export interface WebOptions {
    */
   readonly testIdAttribute?: string;
   /**
+   * Whether every attempt's context emulates a touchscreen, as Playwright's
+   * own `hasTouch` context option sets it: a `tap` touches the screen instead
+   * of clicking, and a swipe along a path (`screen.swipe({ from, to })`)
+   * sends touch events, which only Chromium can, so it is
+   * `UNSUPPORTED_CAPABILITY` on another browser. Default `false`. A
+   * persistent context (`connect.reconnectEndpoint`, or a provider with
+   * `scope: 'attempt'`) is `INVALID_CONFIG`.
+   */
+  readonly hasTouch?: boolean;
+  /**
    * The `User-Agent` every attempt's context sends and `navigator.userAgent`
    * reports, as Playwright's own `userAgent` context option sets it: for an
    * app that switches into a test mode on a marker in the agent string.
@@ -317,6 +327,7 @@ export class PlaywrightSurface {
   private credentialScope: ReadonlySet<string> = new Set();
   private readonly basicAuth: WebBasicAuth | undefined;
   private readonly testIdAttribute: string;
+  private readonly hasTouch: boolean;
   private readonly userAgent: string | undefined;
   private readonly locale: string | undefined;
   private readonly timezoneId: string | undefined;
@@ -355,6 +366,7 @@ export class PlaywrightSurface {
     this.credentialOrigins = options.credentialOrigins;
     this.basicAuth = options.basicAuth;
     this.testIdAttribute = options.testIdAttribute ?? DEFAULT_TEST_ID_ATTRIBUTE;
+    this.hasTouch = options.hasTouch ?? false;
     this.userAgent = options.userAgent;
     this.locale = options.locale;
     this.timezoneId = options.timezoneId;
@@ -557,6 +569,7 @@ export class PlaywrightSurface {
         viewport: this.viewport,
         acceptDownloads: true,
         ...(credentials === undefined ? {} : { httpCredentials: credentials }),
+        hasTouch: this.hasTouch,
         ...(this.userAgent === undefined ? {} : { userAgent: this.userAgent }),
         ...(this.locale === undefined ? {} : { locale: this.locale }),
         ...(this.timezoneId === undefined ? {} : { timezoneId: this.timezoneId }),
@@ -1073,7 +1086,7 @@ export class PlaywrightSurface {
         return refs.lookup(ref).then(async (target) => {
           currentOperation.signal.throwIfAborted();
           try {
-            await dispatchLocatorAction(target, action, currentOperation, (other) => refs.lookup(other));
+            await dispatchLocatorAction(target, action, currentOperation, (other) => refs.lookup(other), this.hasTouch);
           } catch (cause) {
             // The input went out and its own tab closed: closing was what it did.
             if (dispatchedInput(cause) && session.tabClosed(page)) return;
@@ -1089,7 +1102,7 @@ export class PlaywrightSurface {
   performAt(point: ViewportPoint, action: PointerAction, operation: OperationContext): Promise<void> {
     return this.acted(operation, this.guard(operation, `${action.kind} at point`, (currentOperation) => {
       this.requireSession().requireObservation();
-      return dispatchPointerAction(this.requirePage(), point, action, currentOperation.signal);
+      return dispatchPointerAction(this.requirePage(), point, action, currentOperation.signal, this.hasTouch ? this.browserName : undefined);
     }, classifyInputError));
   }
 

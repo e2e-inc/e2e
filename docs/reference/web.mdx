@@ -56,6 +56,7 @@ web({ viewport: { width: 390, height: 844 }, locale: 'de-DE' });
 | [`basicAuth`](#basicauth) | `WebBasicAuth` | - |
 | [`credentialOrigins`](#credentialorigins) | `string[]` | - |
 | [`testIdAttribute`](#testidattribute) | `string` | `'data-testid'` |
+| [`hasTouch`](#hastouch) | `boolean` | `false` |
 | [`userAgent`](#useragent) | `string` | the browser's own |
 | [`locale`](#locale) | `string` | the browser's own |
 | [`timezoneId`](#timezoneid) | `string` | the machine's |
@@ -75,7 +76,7 @@ web({ viewport: { width: 390, height: 844 }, locale: 'de-DE' });
 | Throws | When |
 | --- | --- |
 | `INVALID_CONFIG` | An option `web()` does not take (`url` or any other app key included), or an unknown key inside `connect` or `basicAuth`. The message names the nearest known key for a likely typo (`viewprt` is `viewport`), else every key. |
-| `INVALID_CONFIG` | `headers`, `basicAuth`, `userAgent`, `locale`, or `timezoneId` on a [persistent context](#recovering-a-cdp-transport) (`connect.reconnectEndpoint`, or a provider with `scope: 'attempt'`). |
+| `INVALID_CONFIG` | `headers`, `basicAuth`, `hasTouch`, `userAgent`, `locale`, or `timezoneId` on a [persistent context](#recovering-a-cdp-transport) (`connect.reconnectEndpoint`, or a provider with `scope: 'attempt'`). |
 
 #### `browser`
 
@@ -262,8 +263,8 @@ To reuse one sign-in across files, keep isolated contexts (no
 A saved session carries it, not a shared browser.
 
 <Note>
-A persistent context does not support `headers`, `basicAuth`, `userAgent`,
-`locale`, `timezoneId` (see [Options](#options)), `app.clearState`, or
+A persistent context does not support `headers`, `basicAuth`, `hasTouch`,
+`userAgent`, `locale`, `timezoneId` (see [Options](#options)), `app.clearState`, or
 session state capture and restore. `app.clearState` fails with
 `UNSUPPORTED_CAPABILITY`. `app.restart` remains available.
 </Note>
@@ -364,6 +365,27 @@ The attribute that carries an element's test id: what the `testId` query
 ```ts
 web({ testIdAttribute: 'data-test' }); // default: 'data-testid'
 ```
+
+#### `hasTouch`
+
+Whether every attempt's context emulates a touchscreen, as Playwright's
+`hasTouch` context option does. Use it to test an app's touch handlers.
+
+```ts
+web({ hasTouch: true }); // default: false
+```
+
+- A `tap`, on a node or at a point (`screen.tapAt`, `tap({ position })`),
+  sends `touchstart` and `touchend`. The browser follows them with a click.
+- A swipe along a path (`screen.swipe({ from, to })`) sends `touchstart`,
+  `touchmove`, and `touchend` on Chromium.
+- Every other action stays mouse and keyboard input, a directional swipe
+  included.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_CONFIG` | A value that is not a boolean. |
+| `UNSUPPORTED_CAPABILITY` | A swipe along a path in Firefox or WebKit, which cannot send touch moves. |
 
 #### `userAgent`
 
@@ -1263,6 +1285,16 @@ export interface WebOptions {
    * Defaults to `data-testid`.
    */
   readonly testIdAttribute?: string;
+  /**
+   * Whether every attempt's context emulates a touchscreen, as Playwright's
+   * own `hasTouch` context option sets it: a `tap` touches the screen instead
+   * of clicking, and a swipe along a path (`screen.swipe({ from, to })`)
+   * sends touch events, which only Chromium can, so it is
+   * `UNSUPPORTED_CAPABILITY` on another browser. Default `false`. A
+   * persistent context (`connect.reconnectEndpoint`, or a provider with
+   * `scope: 'attempt'`) is `INVALID_CONFIG`.
+   */
+  readonly hasTouch?: boolean;
   /**
    * The `User-Agent` every attempt's context sends and `navigator.userAgent`
    * reports, for an app that switches into a test mode on a marker in the

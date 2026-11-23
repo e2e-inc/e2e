@@ -406,7 +406,7 @@ tab, so the remote browser must contain only that context. The limits of
 [`connect.reconnectEndpoint`](/reference/web#recovering-a-cdp-transport)
 apply:
 
-- No `headers`, `basicAuth`, `userAgent`, `locale`, or `timezoneId`. Each
+- No `headers`, `basicAuth`, `hasTouch`, `userAgent`, `locale`, or `timezoneId`. Each
   is `INVALID_CONFIG`.
 - No `app.clearState()`. It is `UNSUPPORTED_CAPABILITY`, naming the scope.
 - No session state capture or restore. A run whose tests use a
