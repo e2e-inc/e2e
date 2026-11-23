@@ -215,9 +215,8 @@ export interface PollConditionOptions {
    * Evaluates the positive condition once, every read run through
    * `reads.read`, which hands the read its budget from `deadline` and times
    * it, so a read the deadline cuts off is judged against the slowest one
-   * before it. Returns
-   * undefined when the condition cannot be evaluated yet: the positive poll
-   * keeps waiting and the negation grace window resets.
+   * before it. Returns undefined when the condition cannot be evaluated yet:
+   * the positive poll keeps waiting and the negation grace window resets.
    */
   evaluate(reads: PollReads): Promise<boolean | undefined>;
   /** Builds the poll's failure; `cause` is the read the deadline cut off, when one did. */

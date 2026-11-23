@@ -16,7 +16,7 @@ function decode(text: string): unknown {
 
 /** Runs the compiled boundary in this process and decodes its report like `browser.evaluate`. */
 async function run(source: string, hasArgument: boolean, arg?: unknown): Promise<unknown> {
-  return decode(await compileEvaluation(source, hasArgument ? ['arg'] : [])(arg));
+  return decode(await compileEvaluation(source, hasArgument ? ['arg'] : [], { awaitResult: true })(arg));
 }
 
 describe('compileEvaluation', () => {
@@ -66,12 +66,12 @@ describe('compileEvaluation', () => {
 
   it('calls a function on the element first, then the argument', async () => {
     const element = { isConnected: true, matches: () => false, id: 'nav' };
-    const evaluate = compileEvaluation('(el, suffix) => el.id + suffix', ['element', 'arg']);
+    const evaluate = compileEvaluation('(el, suffix) => el.id + suffix', ['element', 'arg'], { awaitResult: true });
     expect(decode(await evaluate(element, '-main'))).toBe('nav-main');
   });
 
   it('reads a result that is not JSON as a value, which only the throwing form refuses', async () => {
-    const report = await compileEvaluation('(el) => el', ['element', 'arg'])({ isConnected: true, matches: () => false, run: () => 1 });
+    const report = await compileEvaluation('(el) => el', ['element', 'arg'], { awaitResult: true })({ isConnected: true, matches: () => false, run: () => 1 });
     expect(readEvaluation(report)).toEqual({ ok: false, invalid: expect.stringContaining('must be JSON-safe') });
     expect(() => decode(report)).toThrow(expect.objectContaining({ code: 'INVALID_ARGUMENT' }));
   });
@@ -79,7 +79,7 @@ describe('compileEvaluation', () => {
   it('reports a detached element as a retryable stale node without running the source', async () => {
     const ran = vi.fn();
     vi.stubGlobal('ran', ran);
-    const report = await compileEvaluation('() => ran()', ['element', 'arg'])({ isConnected: false }, undefined);
+    const report = await compileEvaluation('() => ran()', ['element', 'arg'], { awaitResult: true })({ isConnected: false }, undefined);
     expect(() => readEvaluation(report)).toThrow(expect.objectContaining({ code: 'NODE_STALE', retryable: true }));
     expect(ran).not.toHaveBeenCalled();
   });
@@ -93,7 +93,7 @@ describe('compileEvaluation', () => {
     vi.stubGlobal('ran', ran);
     const selectors: unknown[] = [];
     const element = { isConnected: true, matches: (selector: unknown) => { selectors.push(selector); return matches(); } };
-    const report = await compileEvaluation('() => ran()', ['element', 'arg'])(element, undefined);
+    const report = await compileEvaluation('() => ran()', ['element', 'arg'], { awaitResult: true })(element, undefined);
     expect(() => readEvaluation(report)).toThrow(
       expect.objectContaining({
         code: 'POLICY_DENIED',
@@ -109,7 +109,7 @@ describe('compileEvaluation', () => {
     vi.stubGlobal('secure', 'page-secure');
     vi.stubGlobal('element', 'page-element');
     vi.stubGlobal('arg', 'page-arg');
-    const report = await compileEvaluation('() => [secure, element, arg]', ['element', 'arg'])(
+    const report = await compileEvaluation('() => [secure, element, arg]', ['element', 'arg'], { awaitResult: true })(
       { isConnected: true, matches: () => false },
       'passed',
     );
@@ -117,7 +117,7 @@ describe('compileEvaluation', () => {
   });
 
   it('waits for a promise the source returns, by default', async () => {
-    const report = await compileEvaluation('() => Promise.resolve(7)', [])();
+    const report = await compileEvaluation('() => Promise.resolve(7)', [], { awaitResult: true })();
     expect(readEvaluation(report)).toEqual({ ok: true, value: 7 });
   });
 

@@ -656,7 +656,7 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     currentUrl,
     currentTitle,
     readNode: (ref, source, arg, operation) =>
-      surface.evaluateOn(ref, source, arg, operation, { repeatable: true, awaitResult: false }),
+      surface.evaluateOn(ref, source, arg, operation, { owner: 'engine' }),
     baseHref,
     deadlineFor,
     context,
@@ -700,7 +700,7 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     ): Promise<T> {
       const source = typeof fn === 'string' ? fn : pageFunctionSource(fn);
       validateJsonValue(arg, 'evaluate argument');
-      const evaluate = compileEvaluation(source, arg !== undefined ? ['arg'] : []);
+      const evaluate = compileEvaluation(source, arg !== undefined ? ['arg'] : [], { awaitResult: true });
       // JSON safety is checked above; Playwright's recursive argument type cannot expand JsonValue.
       const input: unknown = arg;
       // A handle, not a value: the boundary resolves to a string, which Playwright
@@ -730,7 +730,7 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
       const source = typeof fn === 'string' ? fn : pageFunctionSource(fn);
       validateJsonValue(arg, 'evaluateOn argument');
       const result = await context.withNode('browser.evaluateOn', target, (ref, operation) =>
-        surface.evaluateOn(ref, source, arg, operation, { repeatable: false }));
+        surface.evaluateOn(ref, source, arg, operation, { owner: 'test' }));
       return evaluationValue(result, 'evaluateOn') as T;
     },
     async addInitScript(script: unknown, ...rest: unknown[]) {

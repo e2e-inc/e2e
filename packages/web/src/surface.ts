@@ -917,25 +917,22 @@ export class PlaywrightSurface {
    * element, or an element that left its document, is retryable
    * `NODE_STALE`, so the caller resolves again. Those are found before
    * `source` runs, and an operation that ran out of time while they were
-   * found never starts it. A navigation while it may be running is
-   * retryable only when `options.repeatable` says running it again is safe,
-   * as for a read the engine owns; test code fails instead, as
-   * `browser.evaluate` does. `options.awaitResult`, true unless given, waits
-   * for a promise `source` returns; false reports one as a value that is not
-   * JSON and never calls its `then`.
+   * found never starts it. `options.owner` says whose code `source` is.
+   * The engine's own read of page state is safe to run again, so a
+   * navigation while it may be running is retryable, and a promise it
+   * returns is a value that is not JSON, its `then` never called. Test code
+   * is not run again, so that navigation fails it as `browser.evaluate`
+   * does, and a promise it returns is awaited.
    */
   async evaluateOn(
     ref: NodeRef,
     source: string,
     arg: JsonValue | undefined,
     operation: OperationContext,
-    options: { readonly repeatable: boolean; readonly awaitResult?: boolean },
+    options: { readonly owner: 'engine' | 'test' },
   ): Promise<EvaluationResult> {
-    const evaluate = compileEvaluation(
-      source,
-      ['element', 'arg'],
-      options.awaitResult === undefined ? undefined : { awaitResult: options.awaitResult },
-    );
+    const testCode = options.owner === 'test';
+    const evaluate = compileEvaluation(source, ['element', 'arg'], { awaitResult: testCode });
     const report = await this.guard(operation, 'evaluateOn', async (currentOperation) => {
       const target = await this.requireSession().refs.lookup(ref);
       const element = target.kind === 'element'
@@ -964,7 +961,7 @@ export class PlaywrightSurface {
           page, cause, 'evaluateOn', currentOperation.timeoutMs,
         );
         if (failure !== undefined) throw failure;
-        if (!options.repeatable && isNavigationRace(cause)) throw translatePwError(cause, 'evaluateOn');
+        if (testCode && isNavigationRace(cause)) throw translatePwError(cause, 'evaluateOn');
         throw cause;
       } finally {
         if (target.kind === 'locator') void element.dispose().catch(() => undefined);

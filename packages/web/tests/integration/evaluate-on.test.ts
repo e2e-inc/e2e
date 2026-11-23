@@ -107,10 +107,10 @@ describe('PlaywrightSurface.evaluateOn', () => {
   it('reports a ref whose strict locator now matches two elements as retryable NODE_STALE', async () => {
     await page.setContent('<p>one</p>');
     const ref = await locateOne(paragraph);
-    await expect(surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, { repeatable: false }))
+    await expect(surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, { owner: 'test' }))
       .resolves.toEqual({ ok: true, value: 'one' });
     await page.evaluate(() => document.body.append(Object.assign(document.createElement('p'), { textContent: 'two' })));
-    await expect(surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, { repeatable: false }))
+    await expect(surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, { owner: 'test' }))
       .rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
   });
 
@@ -118,7 +118,7 @@ describe('PlaywrightSurface.evaluateOn', () => {
     await page.setContent('<p>one</p>');
     const ref = await locateOne(paragraph);
     await page.evaluate(() => document.querySelector('p')!.remove());
-    await expect(surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, { repeatable: false }))
+    await expect(surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, { owner: 'test' }))
       .rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringContaining('matches 0 elements') });
   });
 
@@ -126,18 +126,18 @@ describe('PlaywrightSurface.evaluateOn', () => {
     const objects = await connectionObjectCount(page);
     await page.setContent('<p>one</p>');
     const ref = await locateOne(paragraph);
-    await surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, { repeatable: true });
+    await surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, { owner: 'engine' });
     await page.evaluate('1');
     const before = objects();
     for (let index = 0; index < 50; index += 1) {
-      await surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, { repeatable: true });
+      await surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, { owner: 'engine' });
     }
     await page.evaluate('1');
     expect(objects() - before).toBeLessThanOrEqual(2);
     await page.evaluate(() => document.body.append(Object.assign(document.createElement('p'), { textContent: 'two' })));
     const stale = objects();
     for (let index = 0; index < 25; index += 1) {
-      await expect(surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, { repeatable: true }))
+      await expect(surface.evaluateOn(ref, '(el) => el.textContent', undefined, operation, { owner: 'engine' }))
         .rejects.toMatchObject({ code: 'NODE_STALE' });
     }
     await page.evaluate('1');
@@ -164,7 +164,7 @@ describe('PlaywrightSurface.evaluateOn', () => {
           '() => { window.ran = true; return 1; }',
           undefined,
           { ...operation, signal: controller.signal },
-          { repeatable: false },
+          { owner: 'test' },
         ),
       ).rejects.toMatchObject({ code: 'CANCELLED' });
       await withTimeout(released, 5_000, () => new Error('timed out waiting for element handle dispose'));
@@ -186,7 +186,7 @@ describe('PlaywrightSurface.evaluateOn', () => {
     await page.setContent('<label>Name <input value="Ada"></label>');
     const ref = await locateOne(expression);
     await page.evaluate('window.Map = 1');
-    await expect(surface.evaluateOn(ref, '(el) => el.value', undefined, operation, { repeatable: false }))
+    await expect(surface.evaluateOn(ref, '(el) => el.value', undefined, operation, { owner: 'test' }))
       .rejects.toMatchObject({ code: 'EVALUATE_FAILED', category: 'test' });
   });
 });

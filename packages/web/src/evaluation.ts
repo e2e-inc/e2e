@@ -148,8 +148,8 @@ export function pageValueEncoder(): (root: unknown) => string | undefined {
  * in the page, so a page that deleted or replaced a global the serializer
  * needs still returns its result; `readEvaluation` reads it.
  *
- * With `options.awaitResult`, true by default, the boundary is async and
- * reports the value a returned promise or thenable settles to. Without it, the
+ * With `options.awaitResult`, the boundary is async and reports the value a
+ * returned promise or thenable settles to. Without it, the
  * boundary runs synchronously and encodes the returned value as it is: a
  * promise or thenable is a value that is not JSON, and its `then` is never
  * called, so an engine read of page state cannot adopt a promise the page put
@@ -164,9 +164,9 @@ export function pageValueEncoder(): (root: unknown) => string | undefined {
 export function compileEvaluation(
   source: string,
   call: EvaluationCall,
-  options?: { readonly awaitResult?: boolean },
+  options: { readonly awaitResult: boolean },
 ): (...args: unknown[]) => Promise<string> | string {
-  const awaitResult = options?.awaitResult ?? true;
+  const { awaitResult } = options;
   const onElement = call[0] === 'element';
   const parameters = onElement ? ['__e2e_element', '__e2e_arg'] : ['__e2e_arg'];
   const passed = call.map((name) => `__e2e_${name}`).join(', ');
