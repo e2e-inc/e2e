@@ -1134,7 +1134,7 @@ export interface BrowserExpectation {
    * Waits for the JavaScript value at `path` on the target's element (a
    * property name, or a dotted path such as `dataset.state`) to equal
    * `expected` as JSON. A path that runs out before its end, or a value that
-   * is not JSON, never matches.
+   * is not JSON, never matches; a promise or thenable is one, never awaited.
    */
   toHaveJSProperty(
     target: Locator,
