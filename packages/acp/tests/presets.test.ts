@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -164,6 +164,26 @@ describe('agent presets', () => {
 
   /** The request the preset sends: the method alone, never the key. */
   const API_KEY_LOGIN = logged('{"methodId":"api-key"}');
+
+  it('registers the key from a custom Codex API-key request while preserving its exact text', async () => {
+    cleanAuthEnv();
+    const key = randomUUID();
+    const request = JSON.stringify({ methodId: 'api-key', _meta: { 'api-key': { apiKey: key } } }, null, 2);
+    vi.stubEnv('DEFAULT_AUTH_REQUEST', request);
+    expect(await codexAuthRequest({})).toEqual(logged(request));
+    expect(redactSecrets(key) === '<secret:codex.api-key>').toBe(true);
+  });
+
+  it('names the effective Codex sign-in setting after adapter logging is disabled', async () => {
+    cleanAuthEnv();
+    const { log } = codexProject();
+    const directory = dirname(log);
+    const env = { CODEX_PATH: join(directory, 'codex'), APP_SERVER_LOGS: '/tmp/codex-logs', CODEX_API_KEY: 'fixture-codex', OPENAI_API_KEY: 'fixture-openai' };
+    const withKey = await inProject(directory, () => codexLaunch({ env }))();
+    expect(withKey.loginRefused).toContain('unset APP_SERVER_LOGS and set a working CODEX_API_KEY');
+    const withRequest = await inProject(directory, () => codexLaunch({ env: { ...env, DEFAULT_AUTH_REQUEST: '{"methodId":"chat-gpt"}' } }))();
+    expect(withRequest.loginRefused).toContain('unset APP_SERVER_LOGS and fix DEFAULT_AUTH_REQUEST');
+  });
 
   it('signs Codex in with an API key from its env or the process environment, sending the method alone', async () => {
     cleanAuthEnv();

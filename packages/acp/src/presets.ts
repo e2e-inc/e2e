@@ -25,6 +25,24 @@ const CodexServerList = z.array(z.object({ name: z.string() }));
 /** The `bin` field of a package manifest. */
 const PackageBin = z.object({ bin: z.union([z.string(), z.record(z.string(), z.string())]).optional() });
 
+/** The credential Codex ACP reads from an explicit API-key auth request. */
+const CodexApiKeyRequest = z.object({
+  methodId: z.literal('api-key'),
+  _meta: z.object({ 'api-key': z.object({ apiKey: z.string() }) }),
+});
+
+function registerCodexRequestKey(request: string): void {
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(request);
+  } catch {
+    // The adapter owns validation and gets the original text.
+    return;
+  }
+  const parsed = CodexApiKeyRequest.safeParse(decoded);
+  if (parsed.success) registerProviderKey('codex.api-key', parsed.data._meta['api-key'].apiKey);
+}
+
 /** Claude Code with no built-in tools, no user or project settings or MCP servers, and no saved session. */
 export function claudeCodeLaunch(options: AcpAgentOptions): () => Promise<AgentLaunch> {
   const bin = adapterBin('@agentclientprotocol/claude-agent-acp', 'claude-agent-acp');
@@ -123,28 +141,28 @@ function codexAuth(env: Readonly<Record<string, string>> | undefined): CodexAuth
     APP_SERVER_LOGS: value('APP_SERVER_LOGS'),
   };
   const signIn = 'run `codex login`, or set OPENAI_API_KEY';
-  // What a fresh sign-in would use: the user's request, else CODEX_API_KEY before OPENAI_API_KEY; with the adapter log on, neither.
-  const fresh =
-    pinned['APP_SERVER_LOGS'] !== ''
-      ? '`codex login`, or unset APP_SERVER_LOGS and set a working OPENAI_API_KEY'
-      : pinned['DEFAULT_AUTH_REQUEST'] !== ''
-        ? '`codex login`, or fix DEFAULT_AUTH_REQUEST'
-        : `\`codex login\` or set a working ${pinned['CODEX_API_KEY'] === '' ? 'OPENAI_API_KEY' : 'CODEX_API_KEY'}`;
+  const logged = pinned['APP_SERVER_LOGS'] !== '';
+  const request = pinned['DEFAULT_AUTH_REQUEST'] !== '';
+  const keyName = pinned['CODEX_API_KEY'] === '' ? 'OPENAI_API_KEY' : 'CODEX_API_KEY';
+  const freshAction = request ? 'fix DEFAULT_AUTH_REQUEST' : `set a working ${keyName}`;
+  const withLoggingDisabled = `unset APP_SERVER_LOGS and ${freshAction}`;
+  const fresh = logged ? `\`codex login\`, or ${withLoggingDisabled}` : `\`codex login\`${request ? ',' : ''} or ${freshAction}`;
   const loginRefused = `the model provider refused Codex's credentials. If Codex signed in with a saved login or key, run \`codex logout\` first, then ${fresh}. If they come from a custom model provider's key, fix that key`;
   const withoutRequest = { ...pinned, DEFAULT_AUTH_REQUEST: '' };
-  const request = pinned['DEFAULT_AUTH_REQUEST'] !== '';
   const key = pinned['CODEX_API_KEY'] !== '' || pinned['OPENAI_API_KEY'] !== '';
   // The adapter logs whenever the variable is not empty, spaces included.
-  if (pinned['APP_SERVER_LOGS'] !== '' && (request || key)) {
+  if (logged && (request || key)) {
     return {
       env: withoutRequest,
       loginRefused,
-      signIn: 'APP_SERVER_LOGS is set, and the Codex adapter would write sign-in credentials to its log in plain text, so e2e passes it no sign-in request: unset APP_SERVER_LOGS, or run `codex login`',
+      signIn: `APP_SERVER_LOGS is set, and the Codex adapter would write sign-in credentials to its log in plain text, so e2e passes it no sign-in request: ${withLoggingDisabled}, or run \`codex login\``,
     };
   }
-  if (request) return { env: pinned, signIn: 'the DEFAULT_AUTH_REQUEST you set did not sign Codex in: fix or unset it, or run `codex login`', loginRefused };
+  if (request) {
+    registerCodexRequestKey(pinned['DEFAULT_AUTH_REQUEST']);
+    return { env: pinned, signIn: 'the DEFAULT_AUTH_REQUEST you set did not sign Codex in: fix or unset it, or run `codex login`', loginRefused };
+  }
   if (!key) {
-    const logged = pinned['APP_SERVER_LOGS'] !== '';
     return { env: withoutRequest, signIn: logged ? 'run `codex login`, or unset APP_SERVER_LOGS and set OPENAI_API_KEY' : signIn, loginRefused };
   }
   return { env: { ...pinned, DEFAULT_AUTH_REQUEST: JSON.stringify({ methodId: 'api-key' }) }, signIn, loginRefused };
