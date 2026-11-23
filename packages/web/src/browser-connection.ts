@@ -23,10 +23,12 @@ export interface CdpTarget {
   readonly headers?: Readonly<Record<string, string>> | undefined;
 }
 
-/** What a feature adds to the launch of a browser: command-line arguments on Chromium, preferences on Firefox. */
+/** What a feature adds to the launch of a browser. */
 export interface BrowserLaunchOptions {
-  readonly args?: string[];
-  readonly firefoxUserPrefs?: Record<string, string | number | boolean>;
+  /** Command-line arguments, after the browser's own. */
+  readonly args?: readonly string[];
+  /** Firefox preferences, as `about:config` names them. */
+  readonly preferences?: Readonly<Record<string, string | number | boolean>>;
 }
 
 /** Whether `name` is a browser the engine launches. */
@@ -123,7 +125,8 @@ export class BrowserConnection {
       return await type.launch({
         headless: !headed,
         timeout: timeoutMs,
-        ...launch,
+        ...(launch?.args === undefined ? {} : { args: [...launch.args] }),
+        ...(launch?.preferences === undefined ? {} : { firefoxUserPrefs: { ...launch.preferences } }),
         ...RUNNER_OWNS_SIGNALS,
         ...(name === 'chromium' ? { chromiumSandbox } : {}),
       });

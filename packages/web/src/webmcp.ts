@@ -60,7 +60,7 @@ const WEBMCP_LAUNCH_ARG = '--enable-features=WebMCP';
  */
 export function webmcpLaunch(browser: BrowserName): BrowserLaunchOptions {
   return browser === 'firefox'
-    ? { firefoxUserPrefs: { 'dom.modelcontext.enabled': true, 'dom.modelcontext.testing.enabled': true } }
+    ? { preferences: { 'dom.modelcontext.enabled': true, 'dom.modelcontext.testing.enabled': true } }
     : { args: [`--enable-features=${[...playwrightChromiumFeatures(), 'WebMCP'].join(',')}`] };
 }
 
