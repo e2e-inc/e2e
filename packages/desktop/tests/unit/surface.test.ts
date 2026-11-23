@@ -471,6 +471,13 @@ describe('DesktopSurface', () => {
     }
   }, 30_000);
 
+  it('reads again when the window was replaced while the open read it, and launches once', async () => {
+    const replaced = { ok: false, error: { code: 'STALE_REF', message: 'root went stale', details: { kind: 'locator_root_invalid' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
+    const { fake } = await launched({ snapshot: [replaced, snapshotAnswer('macos/appkit-form')] }, { observe: false });
+    expect(fake.calls().filter((call) => call.key === 'snapshot').length).toBeGreaterThanOrEqual(2);
+    expect(fake.spawned()).toHaveLength(1);
+  });
+
   it('reports an open that ran out of its own budget as a timeout, not a locked screen', async () => {
     const hidden = { ok: false, error: { code: 'ACTION_NOT_SUPPORTED', message: 'not exposed', details: { kind: 'window_without_accessibility_element' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
     await expect(launched({ snapshot: [hidden] }, { openTimeoutMs: 1_500 })).rejects.toMatchObject({ code: 'OPERATION_TIMEOUT' });

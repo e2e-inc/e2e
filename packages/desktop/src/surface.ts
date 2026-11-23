@@ -659,8 +659,10 @@ export class DesktopSurface {
           break;
         }
         // A window not readable yet, an app the window list missed, or an app that quit, is what this wait looks at below.
-        if (!(cause instanceof EngineError && (cause.cause === UNREADABLE || cause.cause === QUIT || cause.cause === UNLISTED))) throw cause;
-        if (cause.cause === UNREADABLE) sawWindow = true;
+        // So is a window replaced while it was read (agent-desktop's root went stale), a retryable read of a window that was there.
+        const stale = cause instanceof EngineError && cause.code === 'NODE_STALE' && cause.retryable;
+        if (!(cause instanceof EngineError && (stale || cause.cause === QUIT || cause.cause === UNLISTED))) throw cause;
+        if (stale && cause.cause !== UNLISTED) sawWindow = true;
       }
       if (screen !== undefined) return;
       if (read) listedNone = true;
