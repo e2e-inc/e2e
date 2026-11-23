@@ -1199,11 +1199,14 @@ export class DesktopSurface {
         if (window === undefined) throw notActionable(`node ${binding.id} was read in no window to press a key into`);
         await this.refCommand('focus', binding, operation);
         try {
-          // The key goes to the process, which hands it to its key window: with more than one window, the control's must be the one shown focused.
-          const windows = (await this.ownWindows(operation)).filter((candidate) => candidate.visible !== false);
+          // The key goes to the process, which hands it to its key window: with another window that could be it, the control's must be the one shown focused.
+          // A window on another Space, which agent-desktop lists as not visible, is still the control's: press --headed brings it forward.
+          const windows = await this.ownWindows(operation);
           const home = windows.find((candidate) => candidate.id === window);
           if (home === undefined) throw notActionable(`the window node ${binding.id} was read in is gone`);
-          if (windows.length > 1 && home.is_focused !== true) {
+          if (home.minimized === true) throw notActionable(`the window node ${binding.id} was read in is minimized, so no key reaches it`);
+          const rivals = windows.filter((candidate) => candidate.id !== window && candidate.visible !== false && candidate.minimized !== true);
+          if (rivals.length > 0 && home.is_focused !== true) {
             throw notActionable(`node ${binding.id} is in a window that cannot be shown to be the app's key window, so the key could land in another window`);
           }
           // Focusing can hand focus on (a dialog it opens): the key goes only when the control still holds it.

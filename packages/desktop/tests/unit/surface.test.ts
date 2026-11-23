@@ -1150,6 +1150,12 @@ describe('DesktopSurface', () => {
     expect(fake.calls().some((call) => call.key === 'press')).toBe(false);
   });
 
+  it('presses a key into a control whose window is on another Space, which agent-desktop lists as not visible', async () => {
+    const { surface, fake, byTestId } = await launched((pid) => ({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true, visible: false }] }] }), { options: { headed: true } });
+    await surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, operation());
+    expect(fake.calls().at(-1)?.args.slice(0, 4)).toEqual(['press', 'return', '--window-id', 'w-mine']);
+  });
+
   it('sends no key when a twin went as the field was focused, so the other could have taken its place', async () => {
     const field = (ref: string, y: number, focused: boolean) => ({ role: 'textfield', name: 'Item', ref_id: ref, bounds: { x: 10, y, width: 100, height: 20 }, ...(focused ? { states: ['focused'] } : {}) });
     const both = { ok: true, data: { snapshot_id: 's1', window: { id: 'w-mine' }, tree: { role: 'window', name: 'List', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [field('@s1:e1', 10, false), field('@s1:e2', 40, false)] } } };
