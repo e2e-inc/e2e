@@ -205,7 +205,12 @@ Next.js ([guide](https://e2e.com/docs/frameworks/nextjs)): set `app.command` to 
 dev` locally and `next start` when `CI` is set (e2e reads `''`, `0`, and
 `false` as unset; read it the same way in the config), with `next build`
 before `e2e run` in CI; `reuseExisting: true` reuses a dev server already on
-the port, and `dev` and `start` must listen on the `app.url` port.
+the port, and `dev` and `start` must listen on the `app.url` port. `e2e init`
+writes this target in a project with `next` in `dependencies` or
+`devDependencies` and a `dev` script: the `dev` script's `--port` or `-p`
+(else 3000) on `localhost`, `start` in CI only when `build` and `start`
+scripts exist on the same port, and a `build` step in the pipeline `--ci`
+writes.
 
 - A Next.js 16 dev server blocks cross-origin requests to its dev resources,
   so a target that opens `127.0.0.1` or `[::1]` (port `0` included) while
