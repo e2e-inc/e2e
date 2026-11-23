@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -12,6 +13,12 @@ import { cleanupFakes, failure, fakeScenario, snapshotAnswer, type Scenario } fr
 const signal = new AbortController().signal;
 
 const children: ChildProcess[] = [];
+
+/** This file run's launch tokens: the sweep finds a token in any process on the machine, so another run of these tests must not share one. */
+const RUN = randomUUID();
+function launchToken(name: string): string {
+  return `${name}-${RUN}`;
+}
 const fakes: { spawned: () => number[] }[] = [];
 const surfaces: DesktopSurface[] = [];
 
@@ -1889,15 +1896,15 @@ describe('DesktopSurface', () => {
     await new Promise((resolve) => dead.on('exit', resolve));
     const left = (token: string) => spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { env: { ...process.env, E2E_DESKTOP_LAUNCH: token } });
     const theirs = left('another-token');
-    const leaked = left('token-1');
+    const leaked = left(launchToken('token-1'));
     children.push(theirs, leaked);
     await new Promise((resolve) => setTimeout(resolve, 200));
-    const directories = ['token-1', 'token-1'].map(() => mkdtempSync(path.join(tmpdir(), 'e2e-agent-desktop-')));
+    const directories = [launchToken('token-1'), launchToken('token-1')].map(() => mkdtempSync(path.join(tmpdir(), 'e2e-agent-desktop-')));
     writeFileSync(path.join(directories[0]!, 'owner'), String(dead.pid));
     // Written before the launch: the token alone, since the worker may be killed before it learns the process id.
-    writeFileSync(path.join(directories[0]!, 'app.json'), JSON.stringify({ token: 'token-1' }));
+    writeFileSync(path.join(directories[0]!, 'app.json'), JSON.stringify({ token: launchToken('token-1') }));
     writeFileSync(path.join(directories[1]!, 'owner'), String(dead.pid));
-    writeFileSync(path.join(directories[1]!, 'app.json'), JSON.stringify({ pid: theirs.pid, token: 'token-1' }));
+    writeFileSync(path.join(directories[1]!, 'app.json'), JSON.stringify({ pid: theirs.pid, token: launchToken('token-1') }));
     try {
       await initialized({});
       expect(await gone(leaked.pid!)).toBe(true);
@@ -1915,9 +1922,9 @@ describe('DesktopSurface', () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     const startOf = (pid: number) => execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } }).trim();
     const records = [
-      { token: 'token-1', pid: leaked, started: startOf(leaked) },
+      { token: launchToken('token-1'), pid: leaked, started: startOf(leaked) },
       // The id the record names now belongs to a process that started at another time.
-      { token: 'token-2', pid: reused, started: 'Thu Jan  1 00:00:00 1970' },
+      { token: launchToken('token-2'), pid: reused, started: 'Thu Jan  1 00:00:00 1970' },
     ];
     const directories = records.map((record) => {
       const directory = mkdtempSync(path.join(tmpdir(), 'e2e-agent-desktop-'));
@@ -1939,12 +1946,12 @@ describe('DesktopSurface', () => {
   it.skipIf(process.platform === 'linux')('keeps the launch record of a killed worker when the process lookup fails, and quits its app at the next sweep', async () => {
     const dead = spawn(process.execPath, ['-e', '']);
     await new Promise((resolve) => dead.on('exit', resolve));
-    const leaked = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { env: { ...process.env, E2E_DESKTOP_LAUNCH: 'token-keep' } });
+    const leaked = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { env: { ...process.env, E2E_DESKTOP_LAUNCH: launchToken('token-keep') } });
     children.push(leaked);
     await new Promise((resolve) => setTimeout(resolve, 200));
     const left = mkdtempSync(path.join(tmpdir(), 'e2e-agent-desktop-'));
     writeFileSync(path.join(left, 'owner'), String(dead.pid));
-    writeFileSync(path.join(left, 'app.json'), JSON.stringify({ token: 'token-keep' }));
+    writeFileSync(path.join(left, 'app.json'), JSON.stringify({ token: launchToken('token-keep') }));
     writeFileSync(path.join(left, 'fields.json'), '{"text":"typed"}');
     const brokenPs = artifacts();
     writeFileSync(path.join(brokenPs, 'ps'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
@@ -1971,13 +1978,13 @@ describe('DesktopSurface', () => {
   it('trusts no state directory it cannot show this user wrote: a symlink in the temporary directory is left alone', async () => {
     const dead = spawn(process.execPath, ['-e', '']);
     await new Promise((resolve) => dead.on('exit', resolve));
-    const victim = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { env: { ...process.env, E2E_DESKTOP_LAUNCH: 'token-planted' } });
+    const victim = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { env: { ...process.env, E2E_DESKTOP_LAUNCH: launchToken('token-planted') } });
     children.push(victim);
     await new Promise((resolve) => setTimeout(resolve, 200));
     // What another user could put in a shared /tmp: a link named like a state directory, to a record that names a process of this user.
     const planted = artifacts();
     writeFileSync(path.join(planted, 'owner'), String(dead.pid));
-    writeFileSync(path.join(planted, 'app.json'), JSON.stringify({ token: 'token-planted' }));
+    writeFileSync(path.join(planted, 'app.json'), JSON.stringify({ token: launchToken('token-planted') }));
     const link = path.join(tmpdir(), `e2e-agent-desktop-planted-${process.pid}`);
     symlinkSync(planted, link);
     try {
@@ -2008,14 +2015,14 @@ describe('DesktopSurface', () => {
 
   it.skipIf(process.platform === 'linux')('keeps the state directory and app of a live worker that runs in another time zone', async () => {
     const worker = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { env: { ...process.env, TZ: 'UTC' } });
-    const app = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { env: { ...process.env, E2E_DESKTOP_LAUNCH: 'token-live' } });
+    const app = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { env: { ...process.env, E2E_DESKTOP_LAUNCH: launchToken('token-live') } });
     children.push(worker, app);
     await new Promise((resolve) => setTimeout(resolve, 200));
     // What the worker wrote of itself, under its own TZ.
     const started = execFileSync('ps', ['-o', 'lstart=', '-p', String(worker.pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } }).trim();
     const used = mkdtempSync(path.join(tmpdir(), 'e2e-agent-desktop-'));
     writeFileSync(path.join(used, 'owner'), `${worker.pid}\n${started}`);
-    writeFileSync(path.join(used, 'app.json'), JSON.stringify({ token: 'token-live' }));
+    writeFileSync(path.join(used, 'app.json'), JSON.stringify({ token: launchToken('token-live') }));
     const originalTz = process.env.TZ;
     process.env.TZ = 'Pacific/Kiritimati';
     try {
