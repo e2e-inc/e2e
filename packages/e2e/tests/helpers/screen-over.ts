@@ -16,7 +16,9 @@ import {
   type LocatorExpression,
   type NodeRef,
   type OperationContext,
+  type PointerAction,
   type SemanticNode,
+  type ViewportPoint,
 } from '@e2e-dev/core/lib/engine/index';
 import { prepareObservation } from '@e2e-dev/core/lib/agent/observation';
 import { createEngineSession } from '@e2e-dev/core/lib/engine/session';
@@ -36,6 +38,8 @@ export interface ScreenOverOptions {
   readonly perform?: (ref: NodeRef, action: LocatorAction, operation: OperationContext) => void | Promise<void>;
   /** Action kinds the engine declares with `perform`; default every kind. */
   readonly actions?: readonly LocatorActionKind[];
+  /** Receives every pointer action at a viewport point; with it the engine declares the `tap` pointer action. */
+  readonly performAt?: (point: ViewportPoint, action: PointerAction) => void | Promise<void>;
   /** The keyboard the engine declares, if any. */
   readonly keyboard?: EngineKeyboard;
   /** Whether the engine declares `tapModifiers`; default not. */
@@ -46,7 +50,7 @@ export interface ScreenOverOptions {
 
 /** A screen and the recorder of its steps over the engine `options` describe. */
 export function screenOver(options: ScreenOverOptions): { screen: Screen; steps: StepRecorder } {
-  const { perform } = options;
+  const { perform, performAt } = options;
   const engine = defineEngine({
     name: 'fake',
     version: '1',
@@ -59,6 +63,14 @@ export function screenOver(options: ScreenOverOptions): { screen: Screen; steps:
           actions: options.actions ?? KNOWN_LOCATOR_ACTION_KINDS,
           perform: async (ref: NodeRef, action: LocatorAction, operation: OperationContext) => {
             await perform(ref, action, operation);
+          },
+        }),
+    ...(performAt === undefined
+      ? {}
+      : {
+          pointerActions: ['tap'] as const,
+          performAt: async (point: ViewportPoint, action: PointerAction) => {
+            await performAt(point, action);
           },
         }),
     ...(options.keyboard === undefined ? {} : { keyboard: options.keyboard }),

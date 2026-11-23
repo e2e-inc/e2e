@@ -193,13 +193,13 @@ describe('locator action options', () => {
       expect(received).toEqual([{ kind: 'tap' }, { kind: 'tap' }]);
     });
 
-    it('sends count 2 as doubleTap, the same action and step doubleTap() records', async () => {
+    it('sends count 2 as the action doubleTap() sends, labelled with the count', async () => {
       const { screen, steps, received } = countScreen(LOCATOR_ACTION_KINDS);
       await screen.getByLabel('Agree').tap({ count: 2 });
       await screen.getByLabel('Agree').doubleTap();
       expect(received).toEqual([{ kind: 'doubleTap' }, { kind: 'doubleTap' }]);
       expect(steps.all()).toEqual([
-        expect.objectContaining({ api: 'locator.tap', label: 'getByLabel("Agree")', status: 'passed' }),
+        expect.objectContaining({ api: 'locator.tap', label: 'getByLabel("Agree") 2 times', status: 'passed' }),
         expect.objectContaining({ api: 'locator.doubleTap', label: 'getByLabel("Agree")', status: 'passed' }),
       ]);
     });
@@ -224,7 +224,10 @@ describe('locator action options', () => {
         { kind: 'multiTap', count: 3, modifiers: ['Shift'] },
         { kind: 'doubleTap', modifiers: ['Shift'] },
       ]);
-      expect(steps.all()[0]).toMatchObject({ label: 'getByLabel("Agree") 3 times with Shift' });
+      expect(steps.all().map((step) => step.label)).toEqual([
+        'getByLabel("Agree") 3 times with Shift',
+        'getByLabel("Agree") 2 times with Shift',
+      ]);
     });
 
     it('refuses count 3 on an engine without multiTap before resolving, while count 2 still works there', async () => {
@@ -238,13 +241,13 @@ describe('locator action options', () => {
       expect(received).toEqual([{ kind: 'doubleTap' }]);
     });
 
-    it('sends the largest count, 10, as one multiTap', async () => {
+    it('leaves the upper limit to the engine, sending count 50 as one multiTap', async () => {
       const { screen, received } = countScreen();
-      await screen.getByLabel('Agree').tap({ count: 10 });
-      expect(received).toEqual([{ kind: 'multiTap', count: 10 }]);
+      await screen.getByLabel('Agree').tap({ count: 50 });
+      expect(received).toEqual([{ kind: 'multiTap', count: 50 }]);
     });
 
-    it.each([0, -1, 1.5, 11, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53, '3', null])(
+    it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53, '3', null])(
       'rejects count %j before any lookup, action, or step',
       async (count) => {
         const { screen, steps, received, locate } = countScreen();
@@ -252,7 +255,7 @@ describe('locator action options', () => {
           Promise.resolve().then(() => screen.getByLabel('Agree').tap(invalid<TapOptions>({ count }))),
         ).rejects.toMatchObject({
           code: 'INVALID_ARGUMENT',
-          message: expect.stringMatching(/^tap\(\) count must be an integer from 1 through 10, got /),
+          message: expect.stringMatching(/^tap\(\) count must be a positive safe integer, got /),
         });
         expect(locate).not.toHaveBeenCalled();
         expect(received).toEqual([]);
@@ -266,6 +269,29 @@ describe('locator action options', () => {
         Promise.resolve().then(() => screen.getByLabel('Agree').tap({ count: 2, position: { x: 1, y: 1 } })),
       ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('count with a position') });
       expect(received).toEqual([]);
+    });
+
+    it('still taps at the point for count 1 with a position, the default count', async () => {
+      const box = { ...BOX, rect: { x: 10, y: 20, width: 100, height: 40 } };
+      const received: LocatorAction[] = [];
+      const at: string[] = [];
+      const { screen, steps } = screenOver({
+        locate: async (expression) => resolveExpression(expression, [box]),
+        observe: () => snapshot([box]),
+        perform: (_ref, action) => {
+          received.push(action);
+        },
+        performAt: (point, action) => {
+          at.push(`${action.kind} @ ${point.x},${point.y}`);
+        },
+        timeoutMs: 1_000,
+      });
+      await screen.getByLabel('Agree').tap({ count: 1, position: { x: 1, y: 1 } });
+      expect(at).toEqual(['tap @ 11,21']);
+      expect(received.filter((action) => action.kind !== 'scrollIntoView')).toEqual([]);
+      expect(steps.all()).toEqual([
+        expect.objectContaining({ api: 'locator.tap', label: 'getByLabel("Agree") at (1, 1)', status: 'passed' }),
+      ]);
     });
   });
 
