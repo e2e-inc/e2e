@@ -327,9 +327,9 @@ function formatAge(createdAt: string, now: number): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
-function formatBytes(bytes: number): string {
+export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
-  const kib = bytes / 1024;
-  if (kib < 1024) return `${kib.toFixed(1)} KiB`;
-  return `${(kib / 1024).toFixed(1)} MiB`;
+  const tenths = Math.round(bytes / 102.4);
+  if (tenths < 10_240) return `${(tenths / 10).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
