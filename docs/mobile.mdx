@@ -482,6 +482,11 @@ If none are booted, it boots a shut-down one: on iOS an iPhone before an iPad
 before an Apple TV, on Android a phone or tablet before a TV, then the newest
 OS, then name order. Two workers never drive the same device.
 
+To run a target on another device for one run, pass its name or id with
+`--device`, and the target with `--target` when the config has several
+mobile ones: `e2e run --target iphone --device 'iPad Pro 13-inch (M5)'`.
+The run drives that one device, in place of the target's `device`.
+
 ## Agent tools
 
 The agent already has basic actions such as `tap`, `type`, and `scroll`.

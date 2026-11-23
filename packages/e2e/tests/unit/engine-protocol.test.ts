@@ -538,6 +538,9 @@ describe('engine protocol', () => {
       { ...base, methods: ['engine/readStyle'] },
       { ...base, methods: ['engine/observe'], actions: ['tap'] },
       { ...base, methods: ['engine/observe'], tapModifiers: true },
+      { ...base, methods: ['engine/observe'], selectsDevice: true },
+      // The client serves prepare for finish alone, which would drop the device it never forwards.
+      { ...base, methods: ['lifecycle/finish'], selectsDevice: true },
       { ...base, methods: ['engine/observe'], pointerActions: ['tap'] },
       { ...base, methods: ['engine/locate'] },
       { ...base, methods: ['engine/observe', 'keyboard/type'] },

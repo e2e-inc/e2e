@@ -42,7 +42,7 @@ For a migration that spans several sessions, the [`migrate-to-e2e` skill](/codin
 | --- | --- |
 | `appId` at the top of every flow | `app: { bundleId: 'com.example.app' }` on the target, the app `app.open()` launches |
 | a different `appId` per flow, or a second one mid-flow | `device.openApp(id)` in the test, or one config per app |
-| `--platform`, `--device` | `mobile({ platform: 'ios', device: 'iPhone 17' })`, one target per platform; a `device` list is a pool |
+| `--platform`, `--device` | `mobile({ platform: 'ios', device: 'iPhone 17' })`, one target per platform; a `device` list is a pool. For one run, `e2e run --target ios --device 'iPhone 17'` |
 | `.maestro/config.yaml` `flows`, `'!helper.yaml'` | `tests: ['tests/**/*.e2e.ts', '!tests/helpers/**']` |
 | `tags`, `--include-tags`, `--exclude-tags` | `{ tags: [...] }` on a test or group; `--tag`, `--exclude-tag` on the CLI |
 | `env` and `${VAR}` | module constants, and `params` in a goal: `agent.act('sign in as {email}', { params: { email } })` |
@@ -179,7 +179,6 @@ on purpose.
 | Maestro Cloud | Your [CI](/ci) with a [hosted device provider](/mobile#hosted-devices) |
 | `pressKey: lock`, `power`, `volume up`, `volume down` | `client.command.hardwareButton` on [`unstable_raw`](/reference/mobile#unstable_raw): power and volume on Android, volume on a physical iPhone |
 | JUnit `properties`, a JUnit path with `--output` | Ids in tags or the title; copy `.e2e/junit.xml` after the run |
-| `--device` on the command line | `device: process.env.DEVICE` in the config |
 
 ### Not yet
 

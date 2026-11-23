@@ -644,6 +644,7 @@ Test files, directories, or globs relative to the project root:
 | Option | Description |
 | --- | --- |
 | `--headed` | Visible UI when the engine supports it. |
+| `--device <name>` | The simulator, emulator, or phone the selected mobile target runs on, by name, UDID, or serial, over its `device` option, for this run. With several mobile targets selected, pick one with `--target`, or the run fails with `TARGET_REQUIRED`. On a target with no device to choose (`web()`), or one whose devices a provider leases, it is `UNSUPPORTED_CAPABILITY`. `e2e login --device` is a different flag. |
 | `--agent <names>` | Runs unpinned tests once per selected agent, comma-separated or repeated. Default: `default`. For a test with `{ agent }`, it selects the shared names when they overlap, else keeps the test's own. An unknown name is `INVALID_CONFIG`. |
 | `--retries <n>` | Replaces `config.retries`; an integer 0-10. Default: the config. |
 | `--workers <n>` | Replaces `config.workers`; an integer 1-1024. Default: the config. |
@@ -1474,7 +1475,8 @@ On Bun 1.4.3 or newer, the CLI runs without Node.js. When Node.js is
 installed, `bunx e2e` and `bun run` follow the CLI's `node` shebang and run it
 on Node.js. `bunx --bun e2e` and `bun --bun run` run it on Bun. Without
 Node.js, all of them run it on Bun. The web engine runs on Bun.
-`@e2e-dev/mobile` and the integrations are not verified on Bun yet.
+`@e2e-dev/mobile`, `@e2e-dev/desktop`, and the integrations are not verified
+on Bun yet.
 
 Bun compiles the config and test files with its own TypeScript support. Where
 that differs from Node.js:
