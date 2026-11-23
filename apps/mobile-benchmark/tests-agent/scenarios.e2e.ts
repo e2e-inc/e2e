@@ -106,10 +106,10 @@ function bootedSimulators(): { udid: string; dataPath: string }[] {
 
 /**
  * Puts every booted simulator on the `en_US` locale, in English, with the
- * 12-hour clock (a leftover 24-hour override is cleared), whatever region the host Mac is set to. A new
- * simulator copies the Mac's settings, and the recordings name things by
- * locale (`Photo, October 15, 10:27 AM`), so a recording and its replay need
- * the same one. Each simulator is set once per process; an app that is
+ * 12-hour clock (a leftover 24-hour override is cleared), whatever region
+ * the host Mac is set to. A new simulator copies the Mac's settings, and the
+ * recordings name things by locale (`Photo, October 15, 10:27 AM`), so a
+ * recording and its replay need the same one. Each simulator is set once per process; an app that is
  * already running may keep its old locale until it is launched again.
  */
 const localized = new Set<string>();
