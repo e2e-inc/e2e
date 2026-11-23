@@ -914,7 +914,7 @@ export class DesktopSurface {
         used.add(scoped);
         return this.idFor(scoped);
       },
-      { minimized, interactive, onLookAlike: (identity) => shared.add(`${scope}${identity}`) },
+      { minimized, interactive, onLookAlike: (identity) => shared.add(`${scope}${identity}`), priorIdOf: (identity) => this.ids.get(`${scope}${identity}`) },
     );
     // A read that ran out of time saw only part of the window: what it did not reach may still be there, so only an identity it saw a twin take retires.
     const partial = raw.complete === false || raw.truncated === true;

@@ -1413,6 +1413,21 @@ describe('DesktopSurface', () => {
     expect(cut.root.children?.[0]?.children?.[0]?.ref.id).not.toBe(first.root.children?.[0]?.children?.[0]?.ref.id);
   });
 
+  it('passes no id on through a read cut short that gave the twins\' parent a fresh id', async () => {
+    const window = { role: 'window', name: 'Menu', bounds: { x: 0, y: 0, width: 300, height: 300 } };
+    const item = (name: string, ref: string) => ({ role: 'menuitem', name, ref_id: ref, native_id: { kind: 'ax_identifier', value: 'menuItemSelected:' }, bounds: { x: 10, y: 10, width: 100, height: 20 } });
+    const menu = (items: readonly unknown[]) => ({ role: 'menu', name: 'Actions', children: items });
+    // agent-desktop flags every ancestor of a cut, the window included, so the cut read gives the menu a fresh id.
+    const read = (items: readonly unknown[], cut = false) => ({ ok: true, data: { snapshot_id: 's', ...(cut ? { complete: false, truncated: true } : {}), window: { id: 'w-mine' }, tree: { ...window, ...(cut ? { subtree_truncated: true } : {}), children: [menu(items)] } } });
+    const { surface } = await launched({ snapshot: [read([item('Archive', '@s:e1')]), read([item('Archive', '@s:e1')]), read([item('Archive', '@s:e1'), item('Delete', '@s:e2')], true), read([item('Delete', '@s:e2')])] }, { observe: false });
+    const first = await surface.observe(operation(), undefined);
+    await surface.observe(operation(), undefined);
+    const last = await surface.observe(operation(), undefined);
+    const only = (screen: typeof first) => screen.root.children?.[0]?.children?.[0];
+    expect(only(last)?.name).toBe('Delete');
+    expect(only(last)?.ref.id).not.toBe(only(first)?.ref.id);
+  });
+
   it('passes no id on through a read cut short that saw two controls share a developer id', async () => {
     const window = { role: 'window', name: 'Menu', bounds: { x: 0, y: 0, width: 300, height: 300 } };
     const item = (name: string, ref: string) => ({ role: 'menuitem', name, ref_id: ref, native_id: { kind: 'ax_identifier', value: 'menuItemSelected:' }, bounds: { x: 10, y: 10, width: 100, height: 20 } });

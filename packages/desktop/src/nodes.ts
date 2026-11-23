@@ -277,12 +277,19 @@ function identityOf(node: RawNode, named = false): string {
  * but nothing of it is on screen. `interactive` marks the bindings of a read
  * agent-desktop pruned (`-i`), whose tree, and so whose ids and look-alike
  * counts, differ from a whole read's. `onLookAlike` hears each identity a
- * look-alike sibling made shared, for a caller that must retire it.
+ * look-alike sibling made shared, for a caller that must retire it, keyed by
+ * the id the parent held before (`priorIdOf` looks it up without handing one
+ * out), since a read cut short gives that parent a fresh one.
  */
 export function projectSnapshot(
   raw: RawSnapshot,
   idFor: (identity: string | undefined) => string,
-  { minimized = false, interactive = false, onLookAlike }: { readonly minimized?: boolean; readonly interactive?: boolean; readonly onLookAlike?: (identity: string) => void } = {},
+  {
+    minimized = false,
+    interactive = false,
+    onLookAlike,
+    priorIdOf,
+  }: { readonly minimized?: boolean; readonly interactive?: boolean; readonly onLookAlike?: (identity: string) => void; readonly priorIdOf?: (identity: string) => string | undefined } = {},
 ): ProjectedScreen {
   const window = raw.tree.bounds ?? { x: 0, y: 0, width: 0, height: 0 };
   const titleBar = titleBarButtons(raw.tree);
@@ -292,7 +299,8 @@ export function projectSnapshot(
   let scrollTarget: string | undefined;
 
   // `hiddenAbove`: an ancestor is hidden, a wrapper left out included, so nothing under it is on screen; the resolver reads each node's own state only.
-  const project = (node: RawNode, id: string, stable: boolean, likeness: string, hiddenAbove: boolean): SemanticNode => {
+  // `prior`: the id the node held before, which a cut gave it a fresh one in place of; look-alikes under it are reported against that id, which their identities are kept under.
+  const project = (node: RawNode, id: string, stable: boolean, likeness: string, hiddenAbove: boolean, prior: string | undefined): SemanticNode => {
     const rawStates = new Set(node.states ?? []);
     const role = ROLE_MAP[node.role] ?? (node.role === 'unknown' ? undefined : node.role);
     const secure = rawStates.has('secure');
@@ -377,12 +385,16 @@ export function projectSnapshot(
     // A node whose children the read cut off lists only some of them: one that looks unique may have a twin the read did not reach, so none takes an id.
     const cut = childrenCut(node) || wrapperCut;
     const children = kept.map((child) => {
-      const identity = cut ? undefined : plain.get(identityOf(child)) === 1 ? identityOf(child) : named.get(identityOf(child, true)) === 1 ? identityOf(child, true) : undefined;
+      const seen = plain.get(identityOf(child)) === 1 ? identityOf(child) : named.get(identityOf(child, true)) === 1 ? identityOf(child, true) : undefined;
+      const identity = cut ? undefined : seen;
       // An identity two siblings share may pass on to neither, even where their names tell them apart now.
-      if ((plain.get(identityOf(child)) ?? 0) > 1) onLookAlike?.(`${id}/${identityOf(child)}`);
-      if ((named.get(identityOf(child, true)) ?? 0) > 1) onLookAlike?.(`${id}/${identityOf(child, true)}`);
+      if (prior !== undefined && (plain.get(identityOf(child)) ?? 0) > 1) onLookAlike?.(`${prior}/${identityOf(child)}`);
+      if (prior !== undefined && (named.get(identityOf(child, true)) ?? 0) > 1) onLookAlike?.(`${prior}/${identityOf(child, true)}`);
       // A child's id is built on its parent's: under a look-alike, whose id is new every snapshot, so is the child's, and no identity is kept for it.
-      return project(child, idFor(stable && identity !== undefined ? `${id}/${identity}` : undefined), stable && identity !== undefined, `${likeness}/${plain.get(identityOf(child)) ?? 1}`, states.hidden === true || underHidden.has(child));
+      const childStable = stable && identity !== undefined;
+      const childId = idFor(childStable ? `${id}/${identity}` : undefined);
+      const childPrior = childStable ? childId : prior !== undefined && seen !== undefined ? priorIdOf?.(`${prior}/${seen}`) : undefined;
+      return project(child, childId, childStable, `${likeness}/${plain.get(identityOf(child)) ?? 1}`, states.hidden === true || underHidden.has(child), childPrior);
     });
     return {
       ref: { id, revision: '' },
@@ -400,7 +412,7 @@ export function projectSnapshot(
     };
   };
 
-  const root = project(raw.tree, ROOT_ID, true, '', false);
+  const root = project(raw.tree, ROOT_ID, true, '', false, ROOT_ID);
   const title = label(raw.tree.name) ?? label(raw.window?.title);
   return {
     root,
