@@ -133,7 +133,7 @@ run only in a browser, so a test that uses it declares
 
 | Playwright | e2e |
 | --- | --- |
-| `toBeVisible()`, `toBeHidden()`, `toBeEnabled()`, `toBeDisabled()`, `toBeChecked()`, `toBeFocused()`, `toBeAttached()`, `toHaveText()`, `toContainText()`, `toHaveValue()`, `toHaveAttribute()`, `toHaveCount()`, `toHaveAccessibleName()`, `toHaveRole()` | the same, with `{ visible }`, `{ enabled }`, `{ checked }`, `{ attached }`, and `{ ignoreCase }` |
+| `toBeVisible()`, `toBeHidden()`, `toBeEnabled()`, `toBeDisabled()`, `toBeChecked()`, `toBeFocused()`, `toBeAttached()`, `toHaveText()`, `toContainText()`, `toHaveValue()`, `toHaveAttribute()`, `toHaveCount()`, `toHaveAccessibleName()`, `toHaveRole()`, `toBeEditable()` | the same, with `{ visible }`, `{ enabled }`, `{ editable }`, `{ checked }`, `{ attached }`, and `{ ignoreCase }` |
 | `toHaveId(id)`, `toContainClass(name)` | `toHaveAttribute('id', id)`, `toHaveAttribute('class', RegExp)` |
 | `expect(page).toHaveURL()`, `toHaveTitle()` | `expect(browser).toHaveURL()`, `toHaveTitle()` |
 | `expect(locator).toHaveCSS(name, value)`, `toHaveJSProperty(name, value)` | `expect(browser).toHaveCSS(locator, name, value)`, `expect(browser).toHaveJSProperty(locator, name, value)`; no `pseudo` option, and `undefined` is not an expected value |
@@ -266,7 +266,7 @@ purpose. Use the workaround, or keep the test in Playwright.
 
 | Playwright | Use today |
 | --- | --- |
-| `toBeEmpty()`, `toBeEditable()`, `toBeInViewport()` | `toHaveValue('')` on a form control, `toHaveText('')` on other elements; `toBeEnabled()` and `.not.toHaveAttribute('readonly')`; `expect.poll` over `boundingBox()` |
+| `toBeEmpty()`, `toBeInViewport()` | `toHaveValue('')` on a form control, `toHaveText('')` on other elements; `expect.poll` over `boundingBox()` |
 | `locator.screenshot()`, `{ fullPage, clip }`, `snapshotPathTemplate`, `ignoreSnapshots` | The viewport or one locator in `toHaveScreenshot`; a tag and `--exclude-tag` to skip visual tests |
 | `expect.configure()` | `{ timeout }` on each call |
 | `@axe-core/playwright` | axe-core through `browser.addInitScript({ path: 'node_modules/axe-core/axe.min.js' })`, then `axe.run()` in `browser.evaluate` |

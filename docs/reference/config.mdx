@@ -397,6 +397,9 @@ target. A target with `app` needs an [engine](#engine).
   `launchArguments`.
 - A `mobile()` target needs `app.bundleId` or `app.appPath`. `app.url` on a
   mobile target is not supported yet.
+- A `desktop()` target needs `app.bundleId` or `app.appPath` and refuses
+  `app.url` and `app.permissions`. With both, it launches the `appPath`
+  build, whose bundle id must equal `bundleId`.
 - `app.linkBase` needs an engine that opens links, such as `mobile()`.
 - An unknown key in `app` or `app.command` fails with a did-you-mean.
 
@@ -431,7 +434,8 @@ url: 'http://localhost:3000',
 #### `bundleId`
 
 The installed app a device launches: a bundle id, an Android package name, or
-a display name the device resolves (`Settings`).
+a display name the device resolves (`Settings`). On a `desktop()` target, the
+bundle id or name of an installed macOS app.
 
 ```ts
 bundleId: 'com.example.app',
@@ -442,7 +446,8 @@ A link is `INVALID_CONFIG`: a test opens one with `device.openLink`.
 #### `appPath`
 
 The build the suite runs against, an iOS `.app` bundle or an Android `.apk`,
-resolved against the project root.
+resolved against the project root. On a `desktop()` target, a macOS `.app`
+bundle.
 
 ```ts
 appPath: './build/App.app',

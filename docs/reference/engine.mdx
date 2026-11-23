@@ -112,6 +112,7 @@ rules:
 | `perform`, `actions` | One without the other. An `actions` list that is empty, repeats a kind, or names one outside `KNOWN_LOCATOR_ACTION_KINDS`. |
 | `performAt`, `pointerActions` | One without the other. A `pointerActions` list that is empty, repeats a kind, or names one outside `POINTER_ACTION_KINDS`. |
 | `tapModifiers` | Not a boolean, or `true` without `perform`. |
+| `selectsDevice` | Not a boolean, or `true` without `prepare`. |
 | `isolation` | Anything but `'attempt'` or `'worker'`. |
 | `keyboard`, `state`, `artifacts`, `session` | An unknown key or a non-function member. `keyboard` without `type` and `press`; `state` without both `capture` and `restore`; `artifacts` without `screenshot`; `startVideo` without `stopVideo`, or the reverse. |
 | `secrets` | Not an array of `secrets.get()` handles. |
@@ -142,6 +143,7 @@ The body of one target. Every member but `name`, `version`, and
 | [`locate`](#capabilities) | method |
 | [`performAt`, `pointerActions`](#pointer-actions) | method, kinds |
 | [`tapModifiers`](#capabilities) | `boolean` |
+| [`selectsDevice`](#capabilities) | `boolean` |
 | [`keyboard`](#keyboard) | `EngineKeyboard` |
 | [`fixtures`](#contributed-fixtures) | factories |
 | [`isolation`](#fixture-isolation) | `'attempt' \| 'worker'` |
@@ -243,6 +245,12 @@ export interface Engine {
    * reaches the engine.
    */
   readonly tapModifiers?: boolean;
+  /**
+   * `prepare` binds the target to the device `EnginePrepareInfo.device`
+   * names, for `e2e run --device`. Without it the runner refuses the flag
+   * for the target before anything is prepared.
+   */
+  readonly selectsDevice?: boolean;
   /** capability: keyboard - requires observation. Input to whatever holds focus; see `EngineKeyboard`. */
   readonly keyboard?: EngineKeyboard;
   /**
@@ -392,6 +400,7 @@ member. Three gaps end differently:
 | `perform` + `actions` | `actions` | `observe` | Node actions of the declared kinds, with platform actionability checks. |
 | `locate` | `location` | `observe` | `screen`, `Locator`, `expect(locator)`. |
 | `tapModifiers: true` | - | `perform` | `modifiers` on `tap`, `doubleTap`, and `secondaryTap`. |
+| `selectsDevice: true` | - | `prepare` | `e2e run --device`, the device `prepare` binds. |
 | `performAt` + `pointerActions` | `pointer` | `observe` | One pointer action at a viewport point, with no node behind it. |
 | `keyboard.{type,press,dismiss?}` | `keyboard` | `observe` | Input to whatever holds focus. |
 | `fixtures.<name>` | `<name>` | - | A contributed fixture. |
@@ -674,6 +683,12 @@ export interface EnginePrepareInfo extends EngineHostIdentity {
   readonly signal: AbortSignal;
   /** Whether the run asked for a visible surface (`--headed`), as `EngineInitInfo` declares it. */
   readonly headed: boolean;
+  /**
+   * The device `e2e run --device` names for this target, by name or id: the
+   * one to bind instead of the configured one. Only an engine that declares
+   * `selectsDevice` receives it.
+   */
+  readonly device?: string;
   /**
    * Reports one line of progress. The runner streams it as a `notice` run
    * event, so it reaches the reporter and every host sink instead of being
@@ -2519,11 +2534,17 @@ export interface SemanticNode {
   /**
    * Boolean states the platform reports. `pressed` is a toggle button's
    * pressed state; `secure` marks a field whose value is never observed.
+   * `readonly` is present only on a node that has a read-only state, as
+   * Playwright's `getReadonly` decides on the web (an input, textarea, or
+   * select by its `readonly` attribute, an element whose ARIA role takes
+   * `aria-readonly` by that attribute, any other editing host `false`), and
+   * only where the platform knows, as Android does: absent means the node has
+   * no read-only state to read, not `false`.
    */
   readonly states?: Readonly<
     Partial<
       Record<
-        'checked' | 'disabled' | 'selected' | 'expanded' | 'pressed' | 'focused' | 'hidden' | 'secure',
+        'checked' | 'disabled' | 'selected' | 'expanded' | 'pressed' | 'focused' | 'hidden' | 'secure' | 'readonly',
         boolean
       >
     >

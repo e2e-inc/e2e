@@ -227,6 +227,14 @@ export class DevicePool {
   }
 
   /**
+   * Whether `e2e run --device` can name the device: a local pool can bind
+   * any device by name or id, and a provider's leases have none to name.
+   */
+  get selectsDevice(): boolean {
+    return !(this.source instanceof LeasedDevices);
+  }
+
+  /**
    * The agent-device session a worker slot drives its device under: the
    * `session` option or `e2e-<target>`, then `-<slot>`. A `launch()` host's
    * id follows the target, since every unnamed host's target is named alike.
@@ -268,7 +276,8 @@ export class DevicePool {
    */
   async prepare(info: EnginePrepareInfo): Promise<EnginePrepareResult> {
     if (info.slots === 0) return {};
-    const bindings = await this.source.bind(info);
+    const source = info.device === undefined ? this.source : new ConfiguredDevices([namedDevice(info.device)]);
+    const bindings = await source.bind(info);
     await this.warm(bindings, info);
     this.bound.set(info.targetName, bindings);
     return { workers: bindings.length, env: { [bindingsVariable(info.targetName, info.hostId)]: encodeBindings(bindings) } };
