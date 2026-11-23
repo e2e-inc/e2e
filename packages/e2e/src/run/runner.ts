@@ -137,6 +137,11 @@ export interface RunOptions {
   changedSince?: string | undefined;
   targetIds?: readonly string[] | undefined;
   headed?: boolean | undefined;
+  /**
+   * The device the one selected target whose engine selects devices runs on
+   * (`--device`), by name or id, over its configured one.
+   */
+  device?: string | undefined;
   retries?: number | undefined;
   workers?: number | undefined;
   /**
@@ -863,7 +868,7 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
   const runJudge = runAgent?.judge?.model === runAgent?.model?.model ? undefined : runAgent?.judge;
   // Settled once, before the header: the header names what --target
   // selected, and an unknown --target fails the run once it begins.
-  const selected = selectRunTargets(config.targets, options.targetIds);
+  const selected = selectRunTargets(config.targets, options.targetIds, options.device);
   emit({
     type: 'run-started',
     runId,
@@ -871,7 +876,7 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     projectRoot: config.projectRoot,
     artifactsRoot: outputLayout(config.output).results,
     ci: isCiMode(env),
-    targets: ('targets' in selected ? selected.targets : config.targets).map((target) => target.name),
+    targets: (selected.targets ?? config.targets).map((target) => target.name),
     ...(config.agentNames.length === 1 && config.agentNames[0] === 'default' ? {} : { agents: config.agentNames }),
     ...(runAgent?.model === undefined ? {} : { model: modelLabel(runAgent.model) }),
     ...(runJudge === undefined ? {} : { judge: modelLabel(runJudge) }),
@@ -890,7 +895,7 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
       recordFailure(selected.error, 'collection');
       return;
     }
-    const { targets } = selected;
+    const { targets, device } = selected;
 
     /**
      * Narrates and times one setup step on the event spine, its `finished`
@@ -1028,7 +1033,13 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     if (hasWork) {
       try {
         plans = await debug.time('engine.prepare', () =>
-          prepareEngines(plans, runWorkers, engines, { runId, projectRoot: config.projectRoot, env, signal: interrupted, headed: options.headed ?? false, notice }, emit),
+          prepareEngines(
+            plans,
+            runWorkers,
+            engines,
+            { runId, projectRoot: config.projectRoot, env, signal: interrupted, headed: options.headed ?? false, device, notice },
+            emit,
+          ),
         );
       } catch (cause) {
         if (!interrupted.aborted) recordFailure(cause, 'launch');
@@ -1485,18 +1496,48 @@ async function loadRunConfig(
 
 /**
  * The targets the run is for, as `--target` selected them in config order,
- * or the `UNKNOWN_TARGET` error an unknown target ID raised. The run records
- * the error once it begins, so `run-started` still comes first.
+ * and the one `--device` binds; or the error an unknown target ID or a
+ * `--device` no single target can take raised, with the targets `--target`
+ * selected when it was `--device` that failed, so the header still names
+ * them. The run records the error once it begins, so `run-started` still
+ * comes first.
  */
 function selectRunTargets(
   targets: readonly ResolvedTarget[],
   targetIds: readonly string[] | undefined,
-): { readonly targets: readonly ResolvedTarget[] } | { readonly error: unknown } {
+  device: string | undefined,
+):
+  | { readonly targets: readonly ResolvedTarget[]; readonly device: PrepareScope['device'] }
+  | { readonly error: unknown; readonly targets?: readonly ResolvedTarget[] } {
+  let selected: readonly ResolvedTarget[];
   try {
-    return { targets: selectTargets(targets, targetIds) };
+    selected = selectTargets(targets, targetIds);
   } catch (error) {
     return { error };
   }
+  try {
+    return { targets: selected, device: device === undefined ? undefined : deviceTarget(selected, device) };
+  } catch (error) {
+    return { error, targets: selected };
+  }
+}
+
+/**
+ * The one selected target `--device` binds: the one whose engine selects
+ * devices. One name rarely fits two platforms, so with several such targets
+ * the run asks for `--target` instead of guessing.
+ */
+function deviceTarget(targets: readonly ResolvedTarget[], name: string): NonNullable<PrepareScope['device']> {
+  const takers = targets.filter((target) => target.engine?.selectsDevice === true);
+  const quoted = (some: readonly ResolvedTarget[]): string => some.map((target) => `"${target.name}"`).join(', ');
+  if (takers.length === 1) return { target: takers[0]!.name, name };
+  if (takers.length === 0) {
+    throw new ConfigurationError(
+      'UNSUPPORTED_CAPABILITY',
+      `--device names the device a target runs on, and no selected target's engine selects one (${quoted(targets)}); use it with a mobile() target on local devices, not a device provider's`,
+    );
+  }
+  throw new ConfigurationError('TARGET_REQUIRED', `--device names one device, and ${quoted(takers)} each select one; pick a target with --target`);
 }
 
 /**

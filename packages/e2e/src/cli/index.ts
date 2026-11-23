@@ -55,6 +55,13 @@ function parsePositiveInt(value: string): number {
   return parsed;
 }
 
+/** A device name or id for `--device`, trimmed; a blank one would name no device. */
+function parseDevice(value: string): string {
+  const device = value.trim();
+  if (device === '') throw new InvalidArgumentError('must name a simulator, emulator, or phone');
+  return device;
+}
+
 /** Shape check only; the config resolver applies each flag's bounds. */
 function parseNonNegativeInt(value: string): number {
   const parsed = Number(value);
@@ -650,6 +657,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
   selectionOptions(runCommand)
     .optionsGroup('Execution:')
     .option('--headed', 'show the UI while tests run, when the engine supports it')
+    .option('--device <name>', "the simulator, emulator, or phone the selected mobile target runs on, by name or id, over its configured device", parseDevice)
     .option(
       '--agent <names>',
       'the configured agent unpinned tests run with (default: agents.default); comma-separated or repeated names run each such test once per agent',
@@ -688,6 +696,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
         examples([
           'e2e run',
           'e2e run tests/signup.e2e.ts --headed',
+          'e2e run --target ios --device "iPhone 17 Pro"',
           'e2e run tests/checkout.e2e.ts --step --headed',
           'e2e run tests/checkout.e2e.ts --step   # no terminal: then e2e run --step next',
           'e2e run --watch',
@@ -724,6 +733,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
           config?: string;
           target?: string[];
           headed?: boolean;
+          device?: string;
           agent?: string[];
           retries?: number;
           workers?: number;
@@ -771,6 +781,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
           targetIds: options.target,
           ...selectionRunOptions(options),
           headed: options.headed,
+          device: options.device,
           agent: options.agent,
           retries: options.retries,
           // A stepped run is one test at a time, so there is one prompt at a time.

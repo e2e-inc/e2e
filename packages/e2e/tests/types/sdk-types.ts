@@ -247,6 +247,8 @@ customExecutorObservation.keyboardVisible satisfies boolean | undefined;
 // @ts-expect-error an engine only drives the app: the target declares it
 ({ name: 'toy', version: '1.0.0', spiVersion: 1, app: { url: 'http://localhost:3000' } }) satisfies Engine;
 ({ name: 'toy', version: '1.0.0', spiVersion: 1, validateApp: (app, { targetName }) => void [app.bundleId, targetName] }) satisfies Engine;
+// `e2e run --device`: an engine that selects devices reads the name `prepare` hands it.
+({ name: 'toy', version: '1.0.0', spiVersion: 1, selectsDevice: true, prepare: async ({ device }) => void (device satisfies string | undefined) }) satisfies Engine;
 // @ts-expect-error a target declares its app; there is no services list in this version
 ({ targets: [{ engine, app: { url: 'http://localhost:3000' }, services: [] }] }) satisfies E2EConfig;
 declare const model: ModelInstance;
@@ -513,6 +515,12 @@ void asyncExpectation.toHaveRole('paragraph');
 void asyncExpectation.toHaveRole(/button/);
 // @ts-expect-error a role has no case to ignore
 void asyncExpectation.toHaveRole('button', { ignoreCase: true });
+// toBeEditable takes Playwright's editable flag and a timeout.
+void (asyncExpectation.not.toBeEditable({ editable: false, timeout: 1000 }) satisfies Promise<void>);
+// @ts-expect-error the flag is a boolean
+void asyncExpectation.toBeEditable({ editable: 'yes' });
+// @ts-expect-error toBeEditable has no enabled flag; that is toBeEnabled's
+void asyncExpectation.toBeEditable({ enabled: true });
 
 void (screen.getByRole('row').filter({ hasNotText: 'Paid' }) satisfies Locator);
 void (screen.getByRole('row').filter({ hasText: 'Invoice', hasNotText: /Paid/i }) satisfies Locator);
@@ -723,6 +731,22 @@ describe.fail('gaps', { fail: 'legacy checkout' }, () => {});
 test.describe.fail('asynchronous', async () => {});
 // @ts-expect-error a group cannot be focused; describe options take no only
 test.describe.fail('gaps', { only: true }, () => {});
+
+declare const payloadUploadAction: Extract<import('../../src/engine/index.ts').LocatorAction, { kind: 'setInputFilePayloads' }>;
+payloadUploadAction.files[0]!.buffer satisfies Uint8Array;
+// Existing engines can keep reading paths after narrowing the original action kind.
+declare const pathUploadAction: Extract<import('../../src/engine/index.ts').LocatorAction, { kind: 'setInputFiles' }>;
+pathUploadAction.paths satisfies readonly string[];
+void screen.getByLabel('Receipt').setInputFiles({ name: 'receipt.txt', mimeType: 'text/plain', buffer: Buffer.from('receipt') });
+void screen.getByLabel('Receipt').setInputFiles([{ name: 'empty.txt', mimeType: 'text/plain', buffer: Buffer.alloc(0) }]);
+void screen.getByLabel('Receipt').setInputFiles(['fixtures/receipt.txt']);
+void screen.getByLabel('Receipt').setInputFiles([]);
+// @ts-expect-error file payloads require bytes, not an encoded string
+void screen.getByLabel('Receipt').setInputFiles({ name: 'a.txt', mimeType: 'text/plain', buffer: 'data' });
+// @ts-expect-error a payload requires its MIME type
+void screen.getByLabel('Receipt').setInputFiles({ name: 'a.txt', buffer: Buffer.alloc(0) });
+// @ts-expect-error paths and payloads cannot be mixed in one array
+void screen.getByLabel('Receipt').setInputFiles(['a.txt', { name: 'a.txt', mimeType: 'text/plain', buffer: Buffer.alloc(0) }]);
 void screen.getByLabel('Plan').selectOption({ value: 'pro' });
 // @ts-expect-error one of label, value, or index, never two
 void screen.getByLabel('Plan').selectOption({ value: 'pro', index: 1 });

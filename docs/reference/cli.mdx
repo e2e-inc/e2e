@@ -644,6 +644,7 @@ Test files, directories, or globs relative to the project root:
 | Option | Description |
 | --- | --- |
 | `--headed` | Visible UI when the engine supports it. |
+| `--device <name>` | The simulator, emulator, or phone the selected mobile target runs on for this run, in place of its `device` option: a device name, a simulator UDID, or an emulator serial (`emulator-5554`). It applies to the one selected target that can take a device; the other selected targets (`web()`, or a target whose devices a provider leases) still run as configured. With several selected targets that can take one, pick one with `--target`, or the run fails with `TARGET_REQUIRED`. When none can, it is `UNSUPPORTED_CAPABILITY`. `e2e login --device` is a different flag. |
 | `--agent <names>` | Runs unpinned tests once per selected agent, comma-separated or repeated. Default: `default`. For a test with `{ agent }`, it selects the shared names when they overlap, else keeps the test's own. An unknown name is `INVALID_CONFIG`. |
 | `--retries <n>` | Replaces `config.retries`; an integer 0-10. Default: the config. |
 | `--workers <n>` | Replaces `config.workers`; an integer 1-1024. Default: the config. |
