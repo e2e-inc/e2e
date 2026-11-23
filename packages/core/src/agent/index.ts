@@ -16,7 +16,7 @@ import { describeIssue, requireStandardSchema } from '../internal/standard-schem
 import { sleep } from '../internal/time.ts';
 import type { StepRunOptions } from '../run/steps.ts';
 import type { Agent, AgentParams, JsonValue, StandardSchemaV1, VisionMode } from '../types.ts';
-import { redactParams, validateParams } from './act-validation.ts';
+import { redactParams, validateInstruction, validateParams } from './act-validation.ts';
 import { AgentError, isAgentError, toAgentError } from './error.ts';
 import { isUnservedModelError, unservedModelError } from './model/sdk.ts';
 import { resolveBoundedBudget, resolveTimeout } from './call-options.ts';
@@ -155,7 +155,8 @@ export function createAgentFixture(runtime: AgentContext): Agent {
     // The rest parameter exists only to catch the pre-0.8 three-argument call.
     act: (instruction, options, ...legacy: readonly unknown[]) =>
       runActStep(runtime, instruction, options, legacy.length),
-    waitFor(condition, options) {
+    waitFor(rawCondition, options) {
+      const condition = validateInstruction(rawCondition, 'agent.waitFor');
       rejectUnknownOptions('agent.waitFor', options, WAIT_FOR_KEYS);
       const params = judgmentParams(options?.params, 'agent.waitFor');
       const intervalMs = validateInterval(options?.interval);
@@ -195,7 +196,8 @@ export function createAgentFixture(runtime: AgentContext): Agent {
       );
     },
 
-    extract(instruction, options) {
+    extract(rawInstruction, options) {
+      const instruction = validateInstruction(rawInstruction, 'agent.extract');
       rejectUnknownOptions('agent.extract', options, EXTRACT_KEYS);
       requireStandardSchema(options?.schema, 'schema');
       const schema = options.schema;
@@ -258,7 +260,8 @@ export function createAgentFixture(runtime: AgentContext): Agent {
       );
     },
 
-    assert(assertion, options) {
+    assert(rawAssertion, options) {
+      const assertion = validateInstruction(rawAssertion, 'agent.assert');
       rejectUnknownOptions('agent.assert', options, ASSERT_KEYS);
       if (options?.explore !== undefined && typeof options.explore !== 'boolean') {
         throw new TestError('INVALID_ARGUMENT', 'explore must be a boolean');
