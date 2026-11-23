@@ -152,8 +152,9 @@ the one `screen` reads (`desktop.useWindow(window)`), and quits the app
 | State | `app.clearState()` is not supported |
 | Secrets | A password field shows no value, and screenshots paint it black |
 
-A screenshot that cannot cover a password field is not saved. agent-desktop
-keeps the text of other fields in each worker's private state directory.
+A screenshot that cannot cover a password field is not saved, and fails with
+`POLICY_DENIED`. agent-desktop keeps the text of other fields in each
+worker's private state directory.
 When a worker exits, the engine removes that text. If the app could not be
 quit, the engine keeps a record of the launch for a later desktop run. That
 run quits the app when it can show that the process belongs to the launch:

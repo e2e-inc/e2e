@@ -492,7 +492,7 @@ describe('DesktopSurface', () => {
     const partial = snapshotAnswer('macos/sign-in-form') as { ok: true; data: Record<string, unknown> };
     const { surface } = await launched({ snapshot: [{ ...partial, data: { ...partial.data, complete: false } }] }, { snapshot: 'macos/sign-in-form' });
     await startAttempt(surface);
-    await expect(surface.screenshot('partial', operation())).rejects.toThrow(/did not read the whole window/);
+    await expect(surface.screenshot('partial', operation())).rejects.toMatchObject({ code: 'POLICY_DENIED', message: expect.stringMatching(/did not read the whole window/) });
     const observed = await surface.observe(operation(), { pixels: true });
     expect(observed.pixels).toBeUndefined();
     // Withheld pixels still report the regions masked, none, so the harness reads unproven masking, not a missing screenshot.
@@ -530,7 +530,32 @@ describe('DesktopSurface', () => {
     await expect(steady.surface.screenshot('steady', operation())).resolves.toMatch(/steady\.png$/);
     const { surface } = await launched((pid) => ({ ...capture(pid), snapshot: [form, form, form, moved] }), { snapshot: 'macos/sign-in-form' });
     await startAttempt(surface);
-    await expect(surface.screenshot('moved', operation())).rejects.toThrow(/window changed while it was captured/);
+    await expect(surface.screenshot('moved', operation())).rejects.toMatchObject({ code: 'POLICY_DENIED', message: expect.stringMatching(/window changed while it was captured/) });
+  });
+
+  it('withholds a capture of the wrong size as a policy when a secure field is on screen', async () => {
+    const form = renamed('macos/sign-in-form', 'w-8321', 'w-mine');
+    const { width, height } = (form as { data: { tree: { bounds: { width: number; height: number } } } }).data.tree.bounds;
+    const { surface } = await launched((pid) => ({ screenshot: [{ ok: true, writePng: { width: width + 10, height }, data: { scale_factor: 1 } }], 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }], snapshot: [form] }), { snapshot: 'macos/sign-in-form' });
+    await startAttempt(surface);
+    await expect(surface.screenshot('wrong-size', operation())).rejects.toMatchObject({ code: 'POLICY_DENIED', message: expect.stringMatching(/does not match the window/) });
+    const observed = await surface.observe(operation(), { pixels: true });
+    expect(observed.pixels).toBeUndefined();
+    expect(observed.maskedRegionCount).toBe(0);
+  });
+
+  it('reports a window with no secure field that changed size during the capture as no screenshot, so the next capture may work', async () => {
+    const plain = JSON.parse(JSON.stringify(renamed('macos/sign-in-form', 'w-8321', 'w-mine')).replaceAll('"secure"', '"required"')) as { data: { tree: { bounds: { width: number; height: number } } } };
+    const grown = JSON.parse(JSON.stringify(plain).replace('"height":352', '"height":360')) as unknown;
+    const { width, height } = plain.data.tree.bounds;
+    const capture = (pid: number) => ({ screenshot: [{ ok: true, writePng: { width, height }, data: { scale_factor: 1 } }], 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }] });
+    const shot = await launched((pid) => ({ ...capture(pid), snapshot: [plain, plain, plain, grown] }), { snapshot: 'macos/sign-in-form' });
+    await startAttempt(shot.surface);
+    await expect(shot.surface.screenshot('grown', operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringMatching(/changed size while it was captured/) });
+    const { surface } = await launched((pid) => ({ ...capture(pid), snapshot: [plain, plain, plain, grown] }), { snapshot: 'macos/sign-in-form' });
+    const observed = await surface.observe(operation(), { pixels: true });
+    expect(observed.pixels).toBeUndefined();
+    expect(observed).not.toHaveProperty('maskedRegionCount');
   });
 
   it('kills nothing when the id it launched now names another process', async () => {

@@ -1463,18 +1463,21 @@ export class DesktopSurface {
    * come from the snapshot taken just before, and the window is read again
    * after the capture: a secure field without bounds, a partial snapshot, or
    * a field that moved in between withholds the image rather than ship it
-   * unproven.
+   * unproven. That is a refusal of policy, `POLICY_DENIED`, as on the mobile
+   * engine: the image could hold a credential. A window with no secure field
+   * that closed or changed size is a capture that failed, and the next one
+   * may work.
    */
   private async pixelsFor(observed: ProjectedScreen, operation: OperationContext): Promise<{ pixels: ObservationPixels; masked: number }> {
     if (observed.windowId === undefined) throw notActionable('the observed surface has no window to capture');
+    const unmasked = (reason: string): ConfigurationError => new ConfigurationError('POLICY_DENIED', `${reason}, so the screenshot is withheld`, { cause: UNMASKED });
     // The secure fields come from a whole read of the window, never an interactive one, which can leave a secure node out.
     const screen = this.options.interactiveOnly ? await this.capture(operation, observed.windowId, true) : observed;
-    if (screen?.windowId === undefined) throw new EngineError('ENGINE_FAILURE', 'the window could not be read whole to find its secure fields; screenshot withheld', { retryable: false, cause: UNMASKED });
+    if (screen?.windowId === undefined) throw new EngineError('ENGINE_FAILURE', 'the window closed before it could be captured', { retryable: false });
     const secure = screen.secureRects;
-    // A refusal of policy, as on the mobile engine: the image could hold a credential, so it never leaves the engine.
-    if (secure === undefined) throw new ConfigurationError('POLICY_DENIED', 'a secure field on screen has no bounds to mask, so the screenshot is withheld', { cause: UNMASKED });
+    if (secure === undefined) throw unmasked('a secure field on screen has no bounds to mask');
     // A snapshot cut short can leave out a secure field, which would then go unmasked.
-    if (screen.truncated) throw new EngineError('ENGINE_FAILURE', 'the snapshot did not read the whole window, so a secure field may be missing from it; screenshot withheld', { retryable: false, cause: UNMASKED });
+    if (screen.truncated) throw unmasked('the snapshot did not read the whole window, so a secure field may be missing from it');
     const directory = await mkdtemp(path.join(this.home ?? tmpdir(), 'shot-'));
     try {
       const file = path.join(directory, 'window.png');
@@ -1482,7 +1485,9 @@ export class DesktopSurface {
       // The snapshot and the capture are two commands: read the window again, and withhold the image if a secure field moved, came, or went between them.
       const after = await this.capture(operation, screen.windowId, true);
       if (after === undefined || after.windowId !== screen.windowId || after.truncated || !sameRects(after.secureRects, secure) || after.viewport.width !== screen.viewport.width || after.viewport.height !== screen.viewport.height) {
-        throw new EngineError('ENGINE_FAILURE', 'the window changed while it was captured, so its secure fields cannot be placed; screenshot withheld', { retryable: false, cause: UNMASKED });
+        // Only a secure field, seen in either read or possibly left out of a partial one, makes this a matter of masking.
+        if (secure.length > 0 || (after !== undefined && (after.truncated || after.secureRects?.length !== 0))) throw unmasked('the window changed while it was captured, so its secure fields cannot be placed');
+        throw new EngineError('ENGINE_FAILURE', 'the window closed or changed size while it was captured', { retryable: false });
       }
       const scale = typeof shot.scale_factor === 'number' && shot.scale_factor > 0 ? shot.scale_factor : 1;
       const raw = new Uint8Array(await readFile(file));
@@ -1490,7 +1495,9 @@ export class DesktopSurface {
       const rects: Rect[] = secure.map((rect) => ({ x: rect.x * scale, y: rect.y * scale, width: rect.width * scale, height: rect.height * scale }));
       const image = windowImage(raw, expected, rects);
       if (image === undefined) {
-        throw new EngineError('ENGINE_FAILURE', `the window capture does not match the window's ${expected.width}x${expected.height} pixels, so its secure fields cannot be placed; screenshot withheld`, { retryable: false, cause: UNMASKED });
+        const mismatch = `the window capture does not match the window's ${expected.width}x${expected.height} pixels`;
+        if (rects.length > 0) throw unmasked(`${mismatch}, so its secure fields cannot be placed`);
+        throw new EngineError('ENGINE_FAILURE', mismatch, { retryable: false });
       }
       return { pixels: { data: encodePng(image), mediaType: 'image/png', width: image.width, height: image.height, scale }, masked: rects.length };
     } finally {
