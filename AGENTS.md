@@ -828,7 +828,22 @@ trees, on both platforms, without a device.
     `resolveNavigationUrl`: only `http:`, `https:`, and the exact
     `about:blank` pass; every other scheme (`view-source:file:` included) and
     a malformed URL is `POLICY_DENIED` (a relative URL on a target with no
-    `app.url` is `APP_URL_REQUIRED`). `device.openLink` takes custom app
+    `app.url` is `APP_URL_REQUIRED`). One exception: on a target whose
+    `app.url` is itself a `file:` URL (one file, no host, never a directory),
+    a `file:` URL passes for a file in that file's directory or below it,
+    compared as decoded paths with symbolic links resolved, so neither an
+    encoded separator nor a link climbs out, and never for a directory,
+    whose listing links to its parent; a path that cannot be resolved is
+    outside. The agent names navigation URLs and a page can tell it to, so
+    anything wider would let a local page read any file the user can and
+    carry it to an http(s) address. A link or a script in the local page
+    can still take the browser anywhere a file page may go, which an
+    http(s) page cannot, so `checkObservedLocation` holds the same bound
+    over every observation taken for a model (`agent/observation-feed.ts`,
+    `agent/invocation.ts`): out of the directory, the screen is withheld.
+    A test's own locator reads are trusted and not gated there. The web
+    engine opens a file app only in a browser it launches itself, since the
+    bound is checked against the runner's disk. `device.openLink` takes custom app
     schemes, so it refuses a list instead (`packages/mobile/src/links.ts`):
     `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, `filesystem:`.
     There is no origin or host allowlist; PR #290 removed them on purpose, since a

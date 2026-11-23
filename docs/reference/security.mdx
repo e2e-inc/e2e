@@ -84,6 +84,8 @@ These calls fail with `POLICY_DENIED`.
 | --- | --- |
 | Navigation to any scheme but `http:` and `https:`, other than `about:blank` | `file:`, `data:`, `javascript:`, and wrappers such as `view-source:file:` would load local or inline content. |
 | A `request` call to any scheme but `http:` and `https:`, `about:blank` included | It sends an HTTP request; nothing else has an answer to read. |
+| On a target whose `app.url` is a file: navigation to a file outside that file's directory, or to a directory | The agent names navigation URLs, and a page can tell it to. It could open any file you can read, and then carry it to an http(s) address. A directory listing links to its parent. |
+| On such a target: an agent step's observation once the page itself has gone to a file outside the directory, or to a directory | A link or a script in a local page can take the browser there, where a typed URL cannot. The screen is withheld from the model. |
 | A malformed URL | Nothing is repaired. |
 | A `Secret` reaching a JSON sink | Handles carry no value, and no value may be serialized. |
 | Reading a value, text, or attribute from a secure field, with a getter or a `toHaveValue`, `toHaveText`, `toContainText`, or `toHaveAttribute` matcher | Assert the outcome, not the secret. A withheld value is redacted, not empty or absent. |
@@ -101,6 +103,7 @@ These calls fail with `POLICY_DENIED`.
 
 | Entry point | Accepts | Refuses |
 | --- | --- | --- |
+| `app.open`, `browser.goto`, the agent's `navigate` verb | `http:`, `https:`, and the exact `about:blank`. On a target whose [`app.url` is a file](/reference/config#a-file-as-the-app), a `file:` URL of a file in that file's directory or below it | Every other scheme; on a file target, a file outside the directory and any directory |
 | `app.open`, `browser.goto`, the agent's `navigate` verb | `http:`, `https:`, and the exact `about:blank` | Every other scheme |
 | The [`request`](/reference/request) fixture | `http:` and `https:`, with no credentials in the URL | Every other scheme, `about:blank` included |
 | `app.open(path)` on a device target with `app.linkBase` | The joined link, or an absolute link: an app's custom scheme, or `http:` and `https:` | `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, `filesystem:` |
@@ -110,6 +113,15 @@ These calls fail with `POLICY_DENIED`.
 
 - The runner doesn't re-check redirects or attach to popup pages. Register
   `browser.onDialog` to handle browser dialogs.
+- On a file target, a link or a script in the page can still take the
+  browser to any file it can read. The model is shown nothing there, but
+  your test's own reads (`textContent()`, `screen.tree()`) still work, as
+  test code is trusted.
+- A local page that embeds another file in a frame keeps it out of the
+  tree, not out of a screenshot the model asks for. Open only pages whose
+  markup you trust as files.
+- The directory of the app's file is the whole readable scope. In a project
+  root that includes `.env` and `.git`.
 
 <Warning>
 There is no origin allowlist. The agent can follow the app to other sites

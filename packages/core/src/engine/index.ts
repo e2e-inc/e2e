@@ -161,13 +161,15 @@ export interface EngineAppInfo {
    * The origin of the app's `url` on the run's port (`scheme://host:port`, as
    * `URL.origin` serializes it): where credentials an engine injects into
    * requests (headers, basic auth) go by default. Absent for an app without
-   * a URL, and for a free port the run has not assigned (`e2e doctor`).
+   * a URL, for one whose URL is a file, and for a free port the run has not
+   * assigned (`e2e doctor`).
    */
   readonly origin?: string;
   /**
    * The site of the app's `url`, its registrable domain as `siteOf` reads it:
    * whose child frames an observation reads; `sameSite` applies it. Absent
-   * for an app without a URL, which is no policy at all.
+   * for an app without a URL or with a file for one, which is no policy at
+   * all.
    */
   readonly site?: string;
   /** The installed app to launch, as the target declared it. */

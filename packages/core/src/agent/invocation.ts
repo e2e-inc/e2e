@@ -15,6 +15,7 @@ import type { TargetSession } from '../engine/surface.ts';
 import type { DebugTrace } from '../internal/debug.ts';
 import { timestamp } from '../internal/ids.ts';
 import { Deadline } from '../internal/time.ts';
+import { checkObservedLocation } from '../internal/urls.ts';
 import type { LocatorEngine } from '../locator/engine.ts';
 import type { SecretResolver } from '../locator/screen.ts';
 import type { ArtifactSink } from '../run/fixtures.ts';
@@ -236,6 +237,7 @@ export class Invocation {
           guard: (cause) => this.checkDeadline(cause),
           signal: this.runtime.engine.signal,
         });
+        checkObservedLocation(raw.location, this.runtime.app.base);
         const prepared = prepareObservation(raw, {
           redact: this.runtime.redact,
           redactCut: this.runtime.redactCut,
