@@ -24,6 +24,10 @@ const PAGE = [
   '<div role="scrollbar" aria-label="Page" aria-controls="x" aria-valuenow="20" tabindex="0"></div>',
   '<progress aria-label="Indeterminate"></progress>',
   '<div role="progressbar" aria-label="Stray" value="20"></div>',
+  '<progress aria-label="Mixed" value="7" max="10" aria-valuenow="70"></progress>',
+  '<div role="slider" aria-label="Spaced text" aria-valuenow="50" aria-valuetext="  " tabindex="0"></div>',
+  '<div role="slider" aria-label="Padded" aria-valuetext=" On " tabindex="0"></div>',
+  '<meter aria-label="Unset"></meter>',
 ].join('');
 
 test('reads range widgets', async ({ app, browser, screen }) => {
@@ -42,6 +46,9 @@ test('reads range widgets', async ({ app, browser, screen }) => {
   await expect(screen.getByRole('slider', { name: 'Blank text' })).toHaveValue('50');
   await expect(screen.getByRole('spinbutton', { name: 'Month' })).toHaveValue('05');
   await expect(screen.getByRole('scrollbar', { name: 'Page' })).toHaveValue('20');
+  await expect(screen.getByRole('progressbar', { name: 'Mixed' })).toHaveValue('70');
+  await expect(screen.getByRole('slider', { name: 'Spaced text' })).toHaveValue('50');
+  await expect(screen.getByRole('slider', { name: 'Padded' })).toHaveValue(' On ');
   await expect(screen.getByRole('slider', { name: 'Volume' })).not.toHaveValue('51');
   expect(await screen.getByRole('slider', { name: 'Power' }).inputValue()).toBe('On');
 });
@@ -68,6 +75,24 @@ test('still refuses a stray value attribute on a range widget', async ({ app, br
   await app.open('/');
   await browser.evaluate((html) => { document.body.innerHTML = html; }, PAGE);
   await expect(screen.getByRole('progressbar', { name: 'Stray' })).toHaveValue('20', { timeout: 300 });
+});
+
+test('still refuses a meter with no value attribute', async ({ app, browser, screen }) => {
+  await app.open('/');
+  await browser.evaluate((html) => { document.body.innerHTML = html; }, PAGE);
+  await expect(screen.getByRole('meter', { name: 'Unset' })).toHaveValue('0', { timeout: 300 });
+});
+
+test('never runs a range widget value getter while finding another field', async ({ app, browser, screen }) => {
+  await app.open('/');
+  await browser.evaluate(() => {
+    customElements.define('upload-progress', class extends HTMLElement {
+      get value(): number { throw new Error('upload-progress: not ready'); }
+    });
+    document.body.innerHTML = '<label>Email <input value="ada@example.test"></label><upload-progress role="progressbar" aria-label="Upload"></upload-progress>';
+  });
+  await expect(screen.getByLabel('Email', { exact: true })).toHaveCount(1);
+  await expect(screen.getByLabel('Email', { exact: true })).toHaveValue('ada@example.test');
 });
 
 test('clamps a progress adopted from another frame', async ({ app, browser, screen }) => {
@@ -107,11 +132,14 @@ describe('toHaveValue outside form controls', () => {
     const refused = resultByTitle(outcome, 'still refuses a range widget with no value');
     expect(refused.status).toBe('failed');
     expect(refused.attempts.at(-1)?.error?.message).toContain('no value (not a form control)');
-    for (const title of ['still refuses a range widget with a blank value', 'still refuses an indeterminate progress', 'still refuses a stray value attribute on a range widget']) {
+    for (const title of ['still refuses a range widget with a blank value', 'still refuses an indeterminate progress', 'still refuses a stray value attribute on a range widget', 'still refuses a meter with no value attribute']) {
       const failed = resultByTitle(outcome, title);
       expect(failed.status, title).toBe('failed');
       expect(failed.attempts.at(-1)?.error?.message, title).toContain('no value (not a form control)');
     }
+    const getter = resultByTitle(outcome, 'never runs a range widget value getter while finding another field');
+    expect(getter.attempts.at(-1)?.error, JSON.stringify(getter.attempts.at(-1)?.error)).toBeUndefined();
+    expect(getter.status).toBe('passed');
     const moved = resultByTitle(outcome, 'clamps a progress adopted from another frame');
     expect(moved.attempts.at(-1)?.error, JSON.stringify(moved.attempts.at(-1)?.error)).toBeUndefined();
     expect(moved.status).toBe('passed');
