@@ -820,7 +820,7 @@ describe('DesktopSurface', () => {
     await expect(away.surface.perform(hidden!.ref, { kind: 'scrollIntoView' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
   });
 
-  it('takes a point from the window of the last image, not of a later observation whose image failed', async () => {
+  it('takes a point from the window of the last image, not of a later observation without one', async () => {
     const read = (id: string, x: number) => ({ ok: true, data: { snapshot_id: id, window: { id }, tree: { role: 'window', name: id, bounds: { x, y: 0, width: 200, height: 100 }, children: [{ role: 'button', name: 'OK', ref_id: `@${id}:e1`, bounds: { x: x + 10, y: 10, width: 40, height: 20 } }] } } });
     const windows = (pid: number) => [
       { id: 'w-a', pid, process_instance: 'instance-1', is_focused: true, bounds: { x: 100, y: 0, width: 200, height: 100 } },
@@ -837,6 +837,8 @@ describe('DesktopSurface', () => {
     );
     expect((await surface.observe(operation(), { pixels: true })).pixels).toBeDefined();
     expect((await surface.observe(operation(), { pixels: true })).pixels).toBeUndefined();
+    // A read that asks for no image, as a hook after an action takes, leaves it too.
+    await surface.observe(operation(), undefined);
     await surface.performAt({ x: 20, y: 30 }, { kind: 'tap' }, operation());
     expect(fake.calls().at(-1)?.args).toEqual(['mouse-click', '--xy=120,30', '--headed']);
   });
@@ -890,7 +892,18 @@ describe('DesktopSurface', () => {
       { id: 'w-mine', pid, process_instance: 'instance-1', is_focused: first === 0, bounds: { x: 100, y: 100, width: 400, height: 300 } },
       { id: 'w-other', pid, process_instance: 'instance-1', is_focused: first === 1, bounds: { x: 700, y: 200, width: 400, height: 300 } },
     ];
-    const { surface, fake } = await launched((pid) => ({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], 'list-windows': [{ ok: true, data: windows(pid, 0) }, { ok: true, data: windows(pid, 0) }, { ok: true, data: windows(pid, 1) }, { ok: true, data: windows(pid, 0) }] }), { options: { headed: true } });
+    const form = renamed('macos/sign-in-form', 'w-8321', 'w-mine');
+    const { width, height } = (form as { data: { tree: { bounds: { width: number; height: number } } } }).data.tree.bounds;
+    // The open's read, the observation and the read after its capture list w-mine focused; then w-other takes focus, and w-mine comes back once brought forward.
+    const { surface, fake } = await launched(
+      (pid) => ({
+        snapshot: [form],
+        screenshot: [{ ok: true, writePng: { width, height }, data: { scale_factor: 1 } }],
+        'list-windows': [{ ok: true, data: windows(pid, 0) }, { ok: true, data: windows(pid, 0) }, { ok: true, data: windows(pid, 0) }, { ok: true, data: windows(pid, 1) }, { ok: true, data: windows(pid, 0) }],
+      }),
+      { observe: false, options: { headed: true } },
+    );
+    expect((await surface.observe(operation(), { pixels: true })).pixels).toBeDefined();
     await surface.performAt({ x: 10, y: 20 }, { kind: 'tap' }, operation());
     const calls = fake.calls().map((call) => call.args);
     expect(calls.findLast((call) => call[0] === 'focus-window')).toEqual(['focus-window', '--window-id', 'w-mine', '--headed']);
