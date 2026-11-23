@@ -40,7 +40,7 @@ function registerCodexRequestKey(request: string): void {
     return;
   }
   const parsed = CodexApiKeyRequest.safeParse(decoded);
-  if (parsed.success) registerProviderKey('codex.api-key', parsed.data._meta['api-key'].apiKey);
+  if (parsed.success) registerProviderKey('codex.api-key', parsed.data['_meta']['api-key'].apiKey);
 }
 
 /** Claude Code with no built-in tools, no user or project settings or MCP servers, and no saved session. */
