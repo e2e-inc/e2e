@@ -92,6 +92,7 @@ describe('browser.setCookies', () => {
     ['a punycode host', 'xn--bcher-kva.example', 'xn--bcher-kva.example'],
     ['a unicode host', 'bücher.example', 'xn--bcher-kva.example'],
     ['an IPv6 host', '[::1]', '[::1]'],
+    ['a host with a trailing dot', 'example.test.', 'example.test.'],
   ])('takes %s as the host it names', async (_name, domain, stored) => {
     await browser.setCookies([{ name: 'session', value: 'root', domain }]);
     expect((await browser.cookies()).map((cookie) => cookie.domain)).toEqual([stored]);
@@ -136,6 +137,8 @@ describe('browser.setCookies', () => {
     ['a domain with a space', [{ ...base, domain: ' 127.0.0.1' }], 'cookies[0] domain must be a host name like "example.com" or ".example.com", got " 127.0.0.1"'],
     ['a short IPv4 domain the parser fills in', [{ ...base, domain: '1.2.3' }], 'cookies[0] domain must be a host name like "example.com" or ".example.com", got "1.2.3"'],
     ['a percent-encoded domain', [{ ...base, domain: '%41.com' }], 'cookies[0] domain must be a host name like "example.com" or ".example.com", got "%41.com"'],
+    ['a domain with an empty label', [{ ...base, domain: 'a..example.com' }], 'cookies[0] domain must be a host name like "example.com" or ".example.com", got "a..example.com"'],
+    ['a domain with two leading dots', [{ ...base, domain: '..example.com' }], 'cookies[0] domain must be a host name like "example.com" or ".example.com", got "..example.com"'],
     ['a missing name', [{ value: 'root', domain: '127.0.0.1' }], 'cookies[0] name must be a string, got undefined'],
     ['a number value', [{ ...base, value: 5 }], 'cookies[0] value must be a string, got 5'],
     ['a string expires', [{ ...base, expires: '1999999999' }], 'cookies[0] expires must be a Unix timestamp in seconds (not milliseconds), got "1999999999"'],
