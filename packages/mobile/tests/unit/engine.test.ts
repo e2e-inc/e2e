@@ -1668,6 +1668,24 @@ describe('perform', () => {
     });
   });
 
+  it('reads once more in the last stretch of the budget, so a toggle that flips late still counts as checked', async () => {
+    const h = harness();
+    const airplane = toggling(SETTINGS_NODES, { '@e6': [6] });
+    let pressed = false;
+    // 40 ms reads in a 300 ms budget: the poll at ~180 ms leaves 120 ms, enough for one more read only when the sleep is cut short.
+    h.fake.respond('capture.snapshot', () => {
+      if (!pressed) return { ...SETTINGS_SNAPSHOT, nodes: airplane.nodes() };
+      return new Promise((resolve) => setTimeout(() => resolve({ ...SETTINGS_SNAPSHOT, nodes: airplane.nodes() }), 40));
+    });
+    h.fake.respond('interactions.press', () => {
+      pressed = true;
+      setTimeout(() => airplane.press({ ref: '@e6' }), 225);
+    });
+    await openAttempt(h);
+    const toggle = await observed(h, 'Airplane Mode');
+    await expect(h.engine.perform!(toggle.ref, { kind: 'check' }, { ...operation(), timeoutMs: 300 })).resolves.toBeUndefined();
+  });
+
   it('checks from a test without settling the tap, then reads the toggle back', async () => {
     const h = harness({ transition: 0 });
     const airplane = toggling(SETTINGS_NODES, { '@e6': [6] });
