@@ -70,6 +70,8 @@ export interface NodeBinding {
    * place is the same one only if no twin around it came or went.
    */
   readonly likeness: string;
+  /** The developer id (`AXIdentifier`), which a look-alike found again by its place must still carry. */
+  readonly testId?: string;
   /** Read with `-i`, whose ids and look-alike counts a check of the same control must read the same way to compare. */
   readonly interactive: boolean;
 }
@@ -344,6 +346,7 @@ export function projectSnapshot(
       stable,
       likeness,
       interactive,
+      ...(node.native_id === undefined || node.native_id.value === '' ? {} : { testId: node.native_id.value }),
     });
     const kept: RawNode[] = [];
     const underHidden = new Set<RawNode>();

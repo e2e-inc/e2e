@@ -1201,6 +1201,15 @@ describe('DesktopSurface', () => {
     expect(fake.calls().some((call) => call.key === 'press')).toBe(false);
   });
 
+  it('sends no key when focusing a look-alike field replaced it with one of the same name but another developer id', async () => {
+    const field = (testId: string, ref: string, y: number, focused: boolean) => ({ role: 'textfield', name: 'Item', native_id: { kind: 'ax_identifier', value: testId }, ref_id: ref, bounds: { x: 10, y, width: 100, height: 20 }, ...(focused ? { states: ['focused'] } : {}) });
+    const form = (id: string, testId: string, focusSecond: boolean) => ({ ok: true, data: { snapshot_id: id, window: { id: 'w-mine' }, tree: { role: 'window', name: 'List', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [field(testId, `@${id}:e1`, 10, false), field(testId, `@${id}:e2`, 40, focusSecond)] } } });
+    const { surface, fake } = await launched({ snapshot: [form('s1', 'Old', false), form('s1', 'Old', false), form('s2', 'New', true)] }, { observe: false, options: { headed: true } });
+    const observed = await surface.observe(operation(), undefined);
+    await expect(surface.perform(observed.root.children![1]!.ref, { kind: 'press', key: 'a' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+    expect(fake.calls().some((call) => call.key === 'press')).toBe(false);
+  });
+
   it('sends no key when focusing a look-alike field replaced the form with other fields in the same places', async () => {
     const field = (name: string, ref: string, y: number, focused: boolean) => ({ role: 'textfield', name, ref_id: ref, bounds: { x: 10, y, width: 100, height: 20 }, ...(focused ? { states: ['focused'] } : {}) });
     const form = (id: string, name: string, focusSecond: boolean) => ({ ok: true, data: { snapshot_id: id, window: { id: 'w-mine' }, tree: { role: 'window', name: 'List', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [field(name, `@${id}:e1`, 10, false), field(name, `@${id}:e2`, 40, focusSecond)] } } });
