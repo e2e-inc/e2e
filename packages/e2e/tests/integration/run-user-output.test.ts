@@ -22,6 +22,13 @@ const CLI = fileURLToPath(new URL('../../dist/cli/bin.js', import.meta.url));
 
 const TOKEN = 'run-output-token-42';
 
+/** Prints once the run is over. */
+const AFTER_RUN = `process.once('beforeExit', () => {
+  console.log(\`after the run: \${token}\`);
+  process.stdout.write(\`after the run, unfinished: \${token.slice(0, 9)}\`);
+});
+`;
+
 const CONFIG = `import { defineEngine } from 'e2e/engine';
 
 const token = '${TOKEN}';
@@ -29,11 +36,7 @@ console.log(\`config console.log: \${token}\`);
 console.error(\`config console.error: \${token}\`);
 process.stdout.write(\`config split: \${token.slice(0, 9)}\`);
 process.stdout.write(\`\${token.slice(9)}\\n\`);
-process.once('beforeExit', () => {
-  console.log(\`after the run: \${token}\`);
-  process.stdout.write(\`after the run, unfinished: \${token.slice(0, 9)}\`);
-});
-
+${AFTER_RUN}
 export default {
   targets: [{ name: 'headless', platform: 'test', engine: defineEngine({ name: 'noop', version: '1', spiVersion: 1 }) }],
   workers: 1,
@@ -237,7 +240,7 @@ describe('e2e run redacts what user code prints outside a test', () => {
 
   it('keeps stdout for the json report in an embedded run, and leaves it to user code without one', () => {
     // Once `run` returns, the embedding program's streams are its own again.
-    const config = CONFIG.replace(/process\.once\('beforeExit'[\s\S]*?\n\}\);\n/, '');
+    const config = CONFIG.replace(AFTER_RUN, '');
     expect(config).not.toContain('beforeExit');
     const json = runCli({ 'e2e.config.ts': config.replace("reporters: ['list', {", "reporters: ['json', {"), 'tests/print.e2e.ts': TEST }, [], EMBEDDED);
     expect(json.status, json.stdout + json.stderr).toBe(0);
