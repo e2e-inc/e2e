@@ -2,8 +2,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FinishedRun, Report, Reporter, ReporterSummary } from 'e2e';
-import { formatSize } from './format.ts';
 import { embedPayload, type ReportMedia } from './payload.ts';
+import { formatSize } from './format.ts';
 
 export interface HtmlReporterOptions {
   /**
