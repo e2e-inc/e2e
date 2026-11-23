@@ -668,10 +668,9 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     // stray `value` attribute on a generic widget is not read. By tag, since an
     // element adopted from another frame keeps that frame's prototype.
     const tag = el.tagName.toLowerCase();
-    const native = (el as Element & { readonly value?: unknown }).value;
-    if (typeof native !== 'number') return null;
-    if (tag === 'meter') return String(native);
-    return tag === 'progress' && el.hasAttribute('value') ? String(native) : null;
+    if (!('value' in el) || typeof el.value !== 'number') return null;
+    if (tag === 'meter') return String(el.value);
+    return tag === 'progress' && el.hasAttribute('value') ? String(el.value) : null;
   };
 
   /**

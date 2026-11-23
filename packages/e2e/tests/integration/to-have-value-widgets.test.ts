@@ -23,6 +23,7 @@ const PAGE = [
   '<div role="spinbutton" aria-label="Month" contenteditable aria-valuenow="5" aria-valuetext="May">05</div>',
   '<div role="scrollbar" aria-label="Page" aria-controls="x" aria-valuenow="20" tabindex="0"></div>',
   '<progress aria-label="Indeterminate"></progress>',
+  '<div role="progressbar" aria-label="Stray" value="20"></div>',
 ].join('');
 
 test('reads range widgets', async ({ app, browser, screen }) => {
@@ -63,6 +64,12 @@ test('still refuses an indeterminate progress', async ({ app, browser, screen })
   await expect(screen.getByRole('progressbar', { name: 'Indeterminate' })).toHaveValue('', { timeout: 300 });
 });
 
+test('still refuses a stray value attribute on a range widget', async ({ app, browser, screen }) => {
+  await app.open('/');
+  await browser.evaluate((html) => { document.body.innerHTML = html; }, PAGE);
+  await expect(screen.getByRole('progressbar', { name: 'Stray' })).toHaveValue('20', { timeout: 300 });
+});
+
 test('clamps a progress adopted from another frame', async ({ app, browser, screen }) => {
   await app.open('/');
   await browser.evaluate(() => {
@@ -100,7 +107,7 @@ describe('toHaveValue outside form controls', () => {
     const refused = resultByTitle(outcome, 'still refuses a range widget with no value');
     expect(refused.status).toBe('failed');
     expect(refused.attempts.at(-1)?.error?.message).toContain('no value (not a form control)');
-    for (const title of ['still refuses a range widget with a blank value', 'still refuses an indeterminate progress']) {
+    for (const title of ['still refuses a range widget with a blank value', 'still refuses an indeterminate progress', 'still refuses a stray value attribute on a range widget']) {
       const failed = resultByTitle(outcome, title);
       expect(failed.status, title).toBe('failed');
       expect(failed.attempts.at(-1)?.error?.message, title).toContain('no value (not a form control)');

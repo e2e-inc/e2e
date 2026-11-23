@@ -294,8 +294,8 @@ await expect(screen.getByLabel('Search')).toHaveValue('');
   has no value and is refused.
 - On a device, a node reads the accessibility value the platform reports.
   Android drops a value that only repeats a text view's label.
-- Any other node with no value, such as a heading, a link, or a `progressbar`
-  with no value, never satisfies `toHaveValue`, negated or not. The message reads
+- Any other node with no value, such as a heading or a link, never satisfies
+  `toHaveValue`, negated or not. The message reads
   `no value (not a form control)`.
 
 #### `toHaveAttribute`
