@@ -87,7 +87,8 @@ A stable id for the project.
 projectId: 'acme-web', // default: the root package.json name
 ```
 
-- 1 through 256 characters.
+- A string of 1 through 256 characters; anything else is `INVALID_CONFIG`
+  before a test runs.
 - Without a `name` in the root `package.json`, it falls back to
   `unportable-<sha256 of the project root, 32 hex>`.
 

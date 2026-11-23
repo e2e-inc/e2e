@@ -765,8 +765,11 @@ function rejectDirectoryEntry(entry: string, projectRoot: string): void {
   );
 }
 
-function resolveProjectId(explicit: string | undefined, projectRoot: string): string {
+function resolveProjectId(explicit: unknown, projectRoot: string): string {
   if (explicit !== undefined) {
+    if (typeof explicit !== 'string') {
+      throw new ConfigurationError('INVALID_CONFIG', `projectId must be a string of 1 through 256 characters, got ${describeValue(explicit)}`);
+    }
     if (explicit.length === 0 || explicit.length > 256) {
       throw new ConfigurationError('INVALID_CONFIG', 'projectId must be 1 through 256 characters');
     }

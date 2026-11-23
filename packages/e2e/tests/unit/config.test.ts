@@ -89,6 +89,20 @@ describe('resolveConfig', () => {
     expect(() => resolve(invalid({ maxDuration: 2 ** 31 }))).toThrow('maxDuration must be at most 2147483647 milliseconds, got 2147483648');
   });
 
+  it('takes a projectId of 1 through 256 characters and refuses any other value before a test runs', () => {
+    expect(resolve({ projectId: 'acme-web' }).projectId).toBe('acme-web');
+    expect(resolve({ projectId: '12345' }).projectId).toBe('12345');
+    expect(resolve({ projectId: 'x'.repeat(256) }).projectId).toBe('x'.repeat(256));
+    for (const [value, got] of [[12345, '12345'], [0, '0'], [true, 'true'], [null, 'null'], [{}, 'an object'], [['acme'], 'an array']] as const) {
+      expect(() => resolve(invalid({ projectId: value }))).toThrow(
+        expect.objectContaining({ code: 'INVALID_CONFIG', message: `projectId must be a string of 1 through 256 characters, got ${got}` }),
+      );
+    }
+    for (const value of ['', 'x'.repeat(257)]) {
+      expect(() => resolve({ projectId: value })).toThrow(expect.objectContaining({ code: 'INVALID_CONFIG', message: 'projectId must be 1 through 256 characters' }));
+    }
+  });
+
   it('applies specification defaults', () => {
     const config = resolve({});
     expect(config.timeout).toBe(120_000);
