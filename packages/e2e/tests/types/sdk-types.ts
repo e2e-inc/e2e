@@ -510,6 +510,12 @@ void asyncExpectation.toHaveRole('paragraph');
 void asyncExpectation.toHaveRole(/button/);
 // @ts-expect-error a role has no case to ignore
 void asyncExpectation.toHaveRole('button', { ignoreCase: true });
+// toBeEditable takes Playwright's editable flag and a timeout.
+void (asyncExpectation.not.toBeEditable({ editable: false, timeout: 1000 }) satisfies Promise<void>);
+// @ts-expect-error the flag is a boolean
+void asyncExpectation.toBeEditable({ editable: 'yes' });
+// @ts-expect-error toBeEditable has no enabled flag; that is toBeEnabled's
+void asyncExpectation.toBeEditable({ enabled: true });
 
 void (screen.getByRole('row').filter({ hasNotText: 'Paid' }) satisfies Locator);
 void (screen.getByRole('row').filter({ hasText: 'Invoice', hasNotText: /Paid/i }) satisfies Locator);
