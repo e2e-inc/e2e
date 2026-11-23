@@ -15,7 +15,7 @@ const count = previous.filter((entry) => entry.key === key).length;
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
 const stdin = Buffer.concat(chunks).toString('utf8');
-appendFileSync(log, `${JSON.stringify({ key, args, stdin, home: process.env.AGENT_DESKTOP_HOME, envNames: Object.keys(process.env).filter((name) => !name.startsWith('FAKE_AD_')) })}\n`);
+appendFileSync(log, `${JSON.stringify({ key, args, stdin, home: process.env.AGENT_DESKTOP_HOME, tmpdir: process.env.TMPDIR, envNames: Object.keys(process.env).filter((name) => !name.startsWith('FAKE_AD_')) })}\n`);
 const answers = scenario[key] ?? [{ ok: true, data: {} }];
 let answer = answers[Math.min(count, answers.length - 1)];
 // `spawn`: start a process standing in for the launched app, with agent-desktop's environment and the one the launch passed (--env=K=V).

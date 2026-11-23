@@ -1487,7 +1487,8 @@ export class DesktopSurface {
     const directory = await mkdtemp(path.join(this.home ?? tmpdir(), 'shot-'));
     try {
       const file = path.join(directory, 'window.png');
-      const shot = await this.run<{ scale_factor?: number }>(['screenshot', '--window-id', screen.windowId, file], { label: 'screenshot', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
+      // agent-desktop captures to a file of its own under TMPDIR first, unmasked, which a process killed mid-capture leaves behind: here it is under this directory, removed below.
+      const shot = await this.run<{ scale_factor?: number }>(['screenshot', '--window-id', screen.windowId, file], { label: 'screenshot', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs, tmpdir: directory });
       // The snapshot and the capture are two commands: read the window again, and withhold the image if a secure field moved, came, or went between them.
       const after = await this.capture(operation, screen.windowId, true);
       if (after === undefined || after.windowId !== screen.windowId || after.truncated || !sameRects(after.secureRects, secure) || after.viewport.width !== screen.viewport.width || after.viewport.height !== screen.viewport.height) {
@@ -1523,13 +1524,13 @@ export class DesktopSurface {
    * unless `raw` asks for agent-desktop's own, which a caller reads to try
    * another way.
    */
-  private async run<T>(args: readonly string[], call: { label: string; input: boolean; signal: AbortSignal; timeoutMs: number; stdin?: string; raw?: boolean }): Promise<T> {
+  private async run<T>(args: readonly string[], call: { label: string; input: boolean; signal: AbortSignal; timeoutMs: number; stdin?: string; raw?: boolean; tmpdir?: string }): Promise<T> {
     const cli = this.cli;
     if (cli === undefined) throw invalidState('the desktop engine is not initialized');
     // Nothing is sent once the operation's budget is spent: a later rung of a fallback never starts past the deadline.
     if (call.timeoutMs <= 0) throw new EngineError('OPERATION_TIMEOUT', `${call.label}: the operation's budget ran out before it was sent`, { retryable: false, cause: NOT_SENT });
     try {
-      return await cli.run<T>({ args, input: call.input, signal: call.signal, timeoutMs: call.timeoutMs, label: call.label, ...(call.stdin === undefined ? {} : { stdin: call.stdin }) });
+      return await cli.run<T>({ args, input: call.input, signal: call.signal, timeoutMs: call.timeoutMs, label: call.label, ...(call.stdin === undefined ? {} : { stdin: call.stdin }), ...(call.tmpdir === undefined ? {} : { tmpdir: call.tmpdir }) });
     } catch (cause) {
       if (call.raw === true && cause instanceof AgentDesktopFailure) throw cause;
       throw translate(cause, call.label, call.input);

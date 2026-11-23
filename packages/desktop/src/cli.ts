@@ -62,6 +62,8 @@ export interface CliCall {
   readonly timeoutMs: number;
   /** Names the command in an error message. */
   readonly label: string;
+  /** The command's `TMPDIR`, in place of the run's: where it writes files of its own that a killed process leaves behind. */
+  readonly tmpdir?: string;
 }
 
 /** A failure agent-desktop reported, before translation, for a caller that tries another way when nothing was sent. */
@@ -122,7 +124,7 @@ export class AgentDesktopCli {
   private spawn(call: CliCall): Promise<{ stdout: string; stderr: string; cutOff?: 'aborted' | 'timeout' }> {
     return new Promise((resolve, reject) => {
       const child = spawn(this.executable, call.args, {
-        env: this.env,
+        env: call.tmpdir === undefined ? this.env : { ...this.env, TMPDIR: call.tmpdir },
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
       });

@@ -538,6 +538,20 @@ describe('DesktopSurface', () => {
     expect(observed.maskedRegionCount).toBe(0);
   });
 
+  it("gives agent-desktop's own capture file a TMPDIR inside the worker's directory, removed after the screenshot", async () => {
+    const form = renamed('macos/sign-in-form', 'w-8321', 'w-mine');
+    const { width, height } = (form as { data: { tree: { bounds: { width: number; height: number } } } }).data.tree.bounds;
+    const { surface, fake } = await launched((pid) => ({ screenshot: [{ ok: true, writePng: { width, height }, data: { scale_factor: 1 } }], 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }], snapshot: [form] }), { snapshot: 'macos/sign-in-form' });
+    await startAttempt(surface);
+    await surface.screenshot('shot', operation());
+    const shot = fake.calls().find((call) => call.key === 'screenshot');
+    expect(shot?.tmpdir).toBeDefined();
+    expect(shot!.tmpdir!.startsWith(`${shot!.home!}${path.sep}`)).toBe(true);
+    expect(existsSync(shot!.tmpdir!)).toBe(false);
+    // Every other command keeps the run's TMPDIR.
+    expect(fake.calls().find((call) => call.key === 'snapshot')?.tmpdir).not.toBe(shot!.tmpdir);
+  });
+
   it('withholds a screenshot when a secure field moved while it was captured, and keeps one that did not', async () => {
     const form = renamed('macos/sign-in-form', 'w-8321', 'w-mine');
     const moved = JSON.parse(JSON.stringify(form).replace('"y":675', '"y":700')) as unknown;
