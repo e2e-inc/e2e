@@ -1015,9 +1015,10 @@ finding do (`stuck`).
 
 #### `e2e list`
 
-A dry run: `list` selects tests exactly as `run` does, prints one line per
-test-target pair, and exits. It starts no app process, engine, or worker, and
-writes nothing.
+`list` previews the test-target pairs that `run` would select without starting
+an app process, engine, or worker, or writing a run report. With
+`--changed-since`, it can run configured [test filters](/filters#preview-locally),
+including filters that call a model. Omit the flag to skip those filters.
 
 <CodeGroup>
 ```bash npm
