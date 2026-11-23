@@ -216,6 +216,30 @@ describe('projectSnapshot', () => {
     expect(root.children?.map((node) => node.states?.readonly)).toEqual([true, false, undefined]);
   });
 
+  it('reads a control collapsed to no width or height as hidden, but not a container with children', () => {
+    const { root } = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'Form',
+          bounds: { x: 0, y: 0, width: 200, height: 200 },
+          children: [
+            { role: 'button', name: 'Collapsed', ref_id: '@s:e1', bounds: { x: 10, y: 10, width: 0, height: 20 } },
+            { role: 'button', name: 'Shown', ref_id: '@s:e2', bounds: { x: 10, y: 40, width: 80, height: 20 } },
+            { role: 'group', name: 'Wrapper', bounds: { x: 0, y: 0, width: 0, height: 0 }, children: [{ role: 'button', name: 'Inside', ref_id: '@s:e3', bounds: { x: 10, y: 70, width: 80, height: 20 } }] },
+          ],
+        },
+      },
+      minter(),
+    );
+    const byName = (name: string) => all(root).find((node) => node.name === name);
+    expect(byName('Collapsed')?.states?.hidden).toBe(true);
+    expect(byName('Shown')?.states?.hidden).toBeUndefined();
+    expect(byName('Wrapper')?.states?.hidden).toBeUndefined();
+    expect(byName('Inside')?.states?.hidden).toBeUndefined();
+  });
+
   it("takes the window's title from its accessibility root, not the window list's app name", () => {
     const screen = projectSnapshot({ snapshot_id: 's', window: { id: 'w-1', title: 'SignInForm' }, tree: { role: 'window', name: 'Sign In', children: [] } }, minter());
     expect(screen.title).toBe('Sign In');
