@@ -940,7 +940,10 @@ export class DesktopSurface {
       } catch (cause) {
         // A panel accessibility cannot read, or a window that just closed: try the next one.
         if (cause instanceof AgentDesktopFailure && NO_WINDOW_CODES.has(cause.code)) {
-          if (chosen) throw this.chosenClosed();
+          if (chosen) {
+            await this.unlessLocked(operation);
+            throw this.chosenClosed();
+          }
           continue;
         }
         if (cause instanceof AgentDesktopFailure && cause.details.kind === 'window_without_accessibility_element') continue;
