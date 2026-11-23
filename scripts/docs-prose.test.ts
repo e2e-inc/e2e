@@ -9,7 +9,8 @@ function repeats(...lines: string[]): string[] {
 
 describe('split', () => {
   it('blanks each line of a code block, so prose keeps its line numbers and its paragraphs', () => {
-    const { prose, code } = split('Run the command below.\n```bash\nnpx e2e run\n```\nRun the command below.');
+    const page = 'Run the command below.\n```bash\nnpx e2e run\n```\nRun the command below.';
+    const { prose, code } = split(page);
     assert.deepEqual(prose, ['Run the command below.', '', '', '', 'Run the command below.']);
     assert.deepEqual(code, ['```bash\nnpx e2e run\n```']);
   });
@@ -44,7 +45,9 @@ describe('repeatedLines', () => {
       'टोकन अगले लॉन्च पर नहीं रहता। `clearKeychain()` सिर्फ़ iOS पर है।',
       'लॉन्च पर नहीं रहता। `clearKeychain()` सिर्फ़ iOS पर है।',
     ].join('\n');
-    assert.deepEqual(repeatedLines(page), [{ line: 11, text: 'लॉन्च पर नहीं रहता। `clearKeychain()` सिर्फ़ iOS पर है।' }]);
+    assert.deepEqual(repeatedLines(page), [
+      { line: 11, text: 'लॉन्च पर नहीं रहता। `clearKeychain()` सिर्फ़ iOS पर है।' },
+    ]);
   });
 
   it('passes the same paragraph once the suggestion is applied to the right lines', () => {
@@ -69,8 +72,14 @@ describe('repeatedLines', () => {
 
   it('compares each line with the one directly above it in the same paragraph only', () => {
     assert.deepEqual(repeats('The job exits with code 1.', '', 'The job exits with code 1.'), []);
-    assert.deepEqual(repeats('The job exits with code 1.', 'Then the next step runs.', 'The job exits with code 1.'), []);
-    assert.deepEqual(repeats('The job exits with code 1.', '```', 'x', '```', 'The job exits with code 1.'), []);
+    assert.deepEqual(
+      repeats('The job exits with code 1.', 'Then the next step runs.', 'The job exits with code 1.'),
+      [],
+    );
+    assert.deepEqual(
+      repeats('The job exits with code 1.', '```', 'x', '```', 'The job exits with code 1.'),
+      [],
+    );
   });
 
   it('reads no code inside a tilde fence', () => {
@@ -79,7 +88,8 @@ describe('repeatedLines', () => {
 
   it('ends the frontmatter at its first closing line, even with a --- line in a later code block', () => {
     // docs/ja/migrate/maestro.mdx has a `---` line inside a code block.
-    const page = ['---', 'title: Maestro', '---', '', '```yaml', 'appId: x', '---', '```', 'The job exits 1.', 'job exits 1.'];
+    const page = ['---', 'title: Maestro', '---', '', '```yaml', 'appId: x', '---', '```'];
+    page.push('The job exits 1.', 'job exits 1.');
     assert.deepEqual(repeatedLines(page.join('\n')), [{ line: 10, text: 'job exits 1.' }]);
   });
 
@@ -97,12 +107,15 @@ describe('repeatedLines', () => {
   });
 
   it('reads no frontmatter, where one key can end the key above it', () => {
-    const page = ['---', 'og:description: Run the suite in CI.', 'description: Run the suite in CI.', '---', 'Body.'];
+    const page = ['---', 'og:description: Run the suite in CI.', 'description: Run the suite in CI.'];
+    page.push('---', 'Body.');
     assert.deepEqual(repeats(...page), []);
   });
 
   it('ignores indentation, so a list item continuation counts too', () => {
-    assert.deepEqual(repeats('- Check the config, then stop the run here.  ', '  stop the run here.'), ['stop the run here.']);
+    assert.deepEqual(repeats('- Check the config, then stop the run here.  ', '  stop the run here.'), [
+      'stop the run here.',
+    ]);
   });
 
   it('flags a repeat of 12 characters and leaves a shorter one, which can end a line by chance', () => {
