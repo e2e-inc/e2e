@@ -337,8 +337,8 @@ desatualizadas ficam até que uma execução `read-write` as substitua. Um
 `cache.store` personalizado substitui o armazenamento em arquivos e não usa
 `read-only` por padrão na CI. As sessões de `e2e explore` e de
 `e2e mcp` não usam o cache. Um teste que uma sessão roda
-([`open_session {test}`](/reference/mcp#running-a-test)) o usa como a
-primeira tentativa de uma execução o usa.
+([`open_session {test}`](/reference/mcp#running-a-test)) usa o cache da
+mesma forma que a primeira tentativa de uma execução.
 
 ## Compartilhe o cache entre checkouts
 
