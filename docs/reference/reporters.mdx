@@ -506,10 +506,11 @@ onSummary(rows) {
 It runs last, once every `onRunFinished` is done or given up on, and also
 after a second Ctrl-C.
 
-Print here. What `onSummary` writes is redacted and goes to the stream it
-was written to, stdout included, so a reporter can print a document of its
-own there. Beside `json`, stdout holds only the JSON report, and what any
-other reporter writes to stdout prints on stderr.
+Print here. Unless the reporter is [interactive](#interactive), what
+`onSummary` writes is redacted. It goes to the stream it was written to,
+stdout included, so a reporter can print a document of its own there.
+Beside `json`, stdout holds only the JSON report, and what any other
+reporter writes to stdout prints on stderr.
 
 ## Events
 
@@ -539,8 +540,9 @@ type RunEventFact =
   | { type: 'run-finished'; status; exitCode; durationMs?; reportPath?; aiTracePath?; traces? };
 ```
 
-- `run-started` comes first and `run-finished` last. Only `output` can
-  follow `run-finished`: what a reporter prints while it handles it.
+- `run-started` comes first. After `run-finished` only two events can
+  follow: `output`, what a reporter prints while it handles it, and
+  `run-interrupted`, when Ctrl-C arrives while the reporters finish.
 - `targets` on `run-started` names the targets the run selected with
   `--target`, in config order, or every configured target without it or
   when `--target` names an unknown target, which fails the run with

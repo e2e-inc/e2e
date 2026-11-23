@@ -385,6 +385,8 @@ export type RunEventSink = (event: RunEvent) => void | Promise<void>;
 export interface RunEventSubscriber {
   readonly name: string;
   readonly onEvent: RunEventSink;
+  /** Set for a sink that shows the run: it also gets the events emitted for `'viewers'` alone. */
+  readonly viewer?: true;
   /** Called once when the sink is quarantined, before the stderr line. */
   readonly onQuarantine?: () => void;
 }
@@ -406,15 +408,19 @@ export function toEventResult(record: ResultRecord): RunEventResult {
  * Each event is frozen before any sink sees it: every sink is handed the
  * same object, and none may rewrite it for the next. The freeze is one
  * level deep; the records an event carries are shared, read-only by contract.
+ *
+ * An event emitted for `'viewers'` reaches only the sinks that show the run:
+ * what a sink prints while it is handed output, which must not come back to
+ * it or to another sink that would print it again.
  */
 export function createRunEventEmitter(
   subscribers: readonly RunEventSubscriber[],
   warn: (line: string) => void,
-): (fact: RunEventFact) => void {
+): (fact: RunEventFact, audience?: 'viewers') => void {
   let seq = 0;
   // A sink that emits while it is handed an event, as one that prints does,
   // waits its turn: every sink sees the events in `seq` order.
-  const pending: RunEvent[] = [];
+  const pending: { readonly event: RunEvent; readonly viewers: boolean }[] = [];
   let delivering = false;
   const quarantined = new Set<RunEventSubscriber>();
   const quarantine = (subscriber: RunEventSubscriber, event: RunEvent, cause: unknown): void => {
@@ -425,9 +431,9 @@ export function createRunEventEmitter(
     subscriber.onQuarantine?.();
     warn(`e2e: reporter "${subscriber.name}" threw on ${event.type}: ${errorMessage(cause)}; ignoring it for the rest of the run\n`);
   };
-  const deliver = (event: RunEvent): void => {
+  const deliver = (event: RunEvent, viewers: boolean): void => {
     for (const subscriber of subscribers) {
-      if (quarantined.has(subscriber)) continue;
+      if (quarantined.has(subscriber) || (viewers && subscriber.viewer !== true)) continue;
       try {
         const result = subscriber.onEvent(event);
         // An async sink's rejection must neither surface as an unhandled
@@ -438,13 +444,13 @@ export function createRunEventEmitter(
       }
     }
   };
-  return (fact) => {
+  return (fact, audience) => {
     seq += 1;
-    pending.push(Object.freeze({ seq, at: timestamp(), ...fact }));
+    pending.push({ event: Object.freeze({ seq, at: timestamp(), ...fact }), viewers: audience === 'viewers' });
     if (delivering) return;
     delivering = true;
     try {
-      for (let event = pending.shift(); event !== undefined; event = pending.shift()) deliver(event);
+      for (let next = pending.shift(); next !== undefined; next = pending.shift()) deliver(next.event, next.viewers);
     } finally {
       delivering = false;
     }

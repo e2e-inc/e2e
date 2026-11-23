@@ -377,7 +377,7 @@ onSummary(rows) {
 
 它在所有 `onRunFinished` 完成或被放弃后最后运行，第二次 Ctrl-C 之后也会运行。
 
-在这里打印。`onSummary` 写入的内容会先脱敏，再输出到写入的流，包括 stdout，因此报告器可以在那里打印自己的文档。与 `json` 一起使用时，stdout 只包含 JSON 报告，其他报告器写入 stdout 的内容会输出到 stderr。
+在这里打印。除非报告器是[交互式](#interactive)的，否则 `onSummary` 写入的内容会先脱敏。内容输出到写入的流，包括 stdout，因此报告器可以在那里打印自己的文档。与 `json` 一起使用时，stdout 只包含 JSON 报告，其他报告器写入 stdout 的内容会输出到 stderr。
 
 ## 事件
 
@@ -405,7 +405,7 @@ type RunEventFact =
   | { type: 'run-finished'; status; exitCode; reportPath?; aiTracePath?; traces? };
 ```
 
-- `run-started` 最先出现，`run-finished` 最后出现。只有 `output` 可能出现在 `run-finished` 之后：报告器在处理它时打印的内容。
+- `run-started` 最先出现。`run-finished` 之后只可能出现两种事件：`output`，即报告器在处理它时打印的内容；以及 `run-interrupted`，即报告器收尾期间收到 Ctrl-C。
 - `run-started` 上的 `targets` 按配置顺序列出运行通过 `--target` 选择的测试目标；未指定该选项时列出全部配置的测试目标。`--target` 指定未知测试目标时也列出全部，并以 `UNKNOWN_TARGET` 导致运行失败。报告中的 `run.targets` 始终列出全部配置的测试目标。
 - `run-started` 上的 `judge` 是运行所用智能体的判定模型，仅在判定使用不同于 `model` 的模型时存在。运行为 `--step` 暂停每个步骤时，`stepping` 为 `true`。
 - `setup` 标记测试开始前工作的起止。其 `step.kind` 为 `collect`、`filter`（一个[测试筛选器](/filters)，以 `name` 标识）、`prepare`、`service` 或 `app`。`app` 步骤的 `url` 是就绪探针轮询的 URL，已填入空闲端口，且不含用户信息或查询参数。服务或应用命令连接到已在该 URL 提供服务的进程时，`outcome` 为 `reused`；筛选器抛出异常或返回无效结果时为 `failed`；筛选器运行超过 5 分钟时为 `timed-out`。

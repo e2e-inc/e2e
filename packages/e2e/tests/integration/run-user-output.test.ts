@@ -8,7 +8,7 @@
  * secrets anyone knows, so what it printed is withheld, not passed on raw.
  */
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -138,6 +138,29 @@ describe('e2e run redacts what user code prints outside a test', () => {
     expect(cli.stdout.split('\n')).toEqual(expect.arrayContaining(['test file top level: <secret:apiToken>', 'test body: <secret:apiToken>']));
   });
 
+  it('shows what a reporter prints while it is handed output through list, once, and in order without it', () => {
+    const logger = `{
+    name: 'logger',
+    onEvent(event) {
+      if (event.type === 'output' && event.target !== undefined) console.log('LOGGER saw ' + JSON.stringify(event.text));
+    },
+  }`;
+    const beside = (first: string) => CONFIG.replace("reporters: ['list', {", `reporters: ['${first}', ${logger}, {`);
+    const listed = runCli({ 'e2e.config.ts': beside('list'), 'tests/print.e2e.ts': TEST });
+    expect(listed.status, listed.stdout + listed.stderr).toBe(0);
+    const saw = 'LOGGER saw "test body: <secret:apiToken>\\n"';
+    expect(listed.stdout.split('\n').filter((line) => line === saw)).toHaveLength(1);
+    expect(listed.stderr).not.toContain('LOGGER saw');
+
+    // Without list the runner prints both, the test's line before what the logger said of it.
+    const plain = runCli({ 'e2e.config.ts': beside('junit'), 'tests/print.e2e.ts': TEST });
+    expect(plain.status, plain.stdout + plain.stderr).toBe(0);
+    const lines = plain.stderr.split('\n');
+    expect(lines.filter((line) => line === saw)).toHaveLength(1);
+    expect(lines.indexOf('test body: <secret:apiToken>')).toBeGreaterThan(-1);
+    expect(lines.indexOf('test body: <secret:apiToken>')).toBeLessThan(lines.indexOf(saw));
+  });
+
   it('still prints output itself, on stderr, when no interactive reporter shows it, whoever else records it', () => {
     const mirrored = CONFIG.replace("import { defineEngine }", "import { appendFileSync } from 'node:fs';\nimport { defineEngine }").replace(
       "reporters: ['list', {",
@@ -230,6 +253,23 @@ describe('e2e run redacts what user code prints outside a test', () => {
     for (const line of ['VIEW LINE', 'VIEW SUMMARY', 'SUMMARY LINE: <secret:apiToken>']) expect(lines).toContain(line);
     expect(cli.stderr).not.toContain(TOKEN);
   });
+
+  it("prints the json report without waiting for another reporter's onRunFinished", async () => {
+    const slow = "{ name: 'slow', onRunFinished: () => new Promise((resolve) => setTimeout(resolve, 3000)) }";
+    const project = createProject({ 'e2e.config.ts': CONFIG.replace("reporters: ['list', {", `reporters: ['json', ${slow}, {`), 'tests/print.e2e.ts': TEST });
+    projects.push(project);
+    const child = spawn(process.execPath, [CLI, 'run'], { cwd: project.dir, env: { ...process.env, CI: '', E2E_TELEMETRY_DISABLED: '1', NO_COLOR: '1' } });
+    let stdout = '';
+    let printedAt: number | undefined;
+    child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+      printedAt ??= Date.now();
+      stdout += chunk;
+    });
+    const status = await new Promise<number | null>((resolve) => child.once('close', resolve));
+    expect(status).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({ schemaVersion: 'report-1' });
+    expect(Date.now() - printedAt!).toBeGreaterThan(2000);
+  }, 30_000);
 
   it('prints one json report however often the config names the reporter', () => {
     const config = `import { json } from 'e2e/reporters';\n${CONFIG.replace("reporters: ['list', {", "reporters: ['json', json(), json(), {")}`;

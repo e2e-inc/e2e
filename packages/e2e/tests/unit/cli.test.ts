@@ -360,7 +360,7 @@ describe('e2e run argument parsing', () => {
 
   it('refuses --step in CI, beside --workers and --watch, and beside the json reporter without a terminal, exit code 2, without running', async () => {
     const ci = process.env.CI;
-    const tty = { stdin: process.stdin.isTTY, stdout: process.stdout.isTTY };
+    const tty = { stdin: process.stdin.isTTY, stdout: process.stdout.isTTY, stderr: process.stderr.isTTY };
     try {
       process.env.CI = '1';
       await invoke('run', '--step');
@@ -377,16 +377,17 @@ describe('e2e run argument parsing', () => {
       await invoke('run', '--step', '--watch');
       expect(process.exitCode).toBe(2);
       expect(written(stderrSpy)).toContain('cannot be combined with --watch');
-      // Beside the json reporter it needs a terminal: commands would print the report among the steps.
+      // Beside the json reporter it needs a terminal, on stderr too, where the prompt is.
       process.exitCode = undefined;
-      process.stdout.isTTY = false;
+      process.stderr.isTTY = false;
       await invoke('run', '--step', '--reporter', 'json');
       expect(process.exitCode).toBe(2);
-      expect(written(stderrSpy)).toContain('--step cannot be combined with --reporter json without a terminal');
+      expect(written(stderrSpy)).toContain('--step cannot be combined with --reporter json without a terminal on stdin, stdout, and stderr');
       process.exitCode = undefined;
     } finally {
       process.stdin.isTTY = tty.stdin;
       process.stdout.isTTY = tty.stdout;
+      process.stderr.isTTY = tty.stderr;
       if (ci === undefined) delete process.env.CI;
       else process.env.CI = ci;
     }

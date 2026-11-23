@@ -36,8 +36,8 @@ interface HostOptions {
 
 /** A run's reporters as the runner drives them. */
 interface ReporterHost {
-  /** Emits one fact to every reporter's `onEvent`, the embedder's sink, and the runner's own printing. */
-  emit(fact: RunEventFact): void;
+  /** Emits one fact to every reporter's `onEvent`, the embedder's sink, and the runner's own printing; for `'viewers'`, only to whoever shows the run. */
+  emit(fact: RunEventFact, audience?: 'viewers'): void;
   /** Whether an interactive reporter shows the run, so the runner prints no output, run error, or pause itself; false once its `onEvent` broke. */
   showsRun(): boolean;
   /** Finishes every reporter once the report is written: its files, its `onRunFinished`, then its `onSummary`. */
@@ -45,15 +45,15 @@ interface ReporterHost {
 }
 
 /**
- * Calls a hook of `reporter` that may print. An interactive reporter's
- * output is what the terminal shows, as written. The `json` reporter's is
- * the run's document, alone on stdout. Any other reporter prints as user
- * code does, redacted; its `summary` prints on the stream it wrote to,
- * stdout included, unless the document is there.
+ * Calls a finished-run hook of `reporter`, or its `onEvent`. An interactive
+ * reporter's output is what the terminal shows, as written. The `json`
+ * reporter's is the run's document, alone on stdout. Any other reporter
+ * prints as user code does, redacted; its `summary` prints on the stream it
+ * wrote to, stdout included, unless the document is there.
  */
 function inContext<T>(reporter: Reporter, processOutput: RunnerOutput | undefined, hook: () => T, summary = false): T {
   if (processOutput === undefined) return reporter.interactive === true ? uncaptured(hook) : hook();
-  if (summary && builtinId(reporter) === 'json') return processOutput.asDocument(hook);
+  if (builtinId(reporter) === 'json') return processOutput.asDocument(hook);
   if (reporter.interactive === true) return processOutput.asWritten(hook);
   return summary ? processOutput.asPrinted(hook) : hook();
 }
@@ -66,8 +66,9 @@ function inContext<T>(reporter: Reporter, processOutput: RunnerOutput | undefine
  * what it showed.
  *
  * What a sink prints while it is handed output, now or after an `await`,
- * goes to the terminal, redacted, never back to the sinks, so one that logs
- * what it is handed cannot feed itself.
+ * is output only whoever shows the run gets: the interactive reporter, or
+ * the runner's own printing. It never comes back to the sink, so one that
+ * logs what it is handed cannot feed itself.
  */
 export function hostReporters(reporters: readonly Reporter[], options: HostOptions): ReporterHost {
   const { processOutput } = options;
@@ -83,6 +84,7 @@ export function hostReporters(reporters: readonly Reporter[], options: HostOptio
     return [
       {
         name: reporter.name,
+        ...(reporter.interactive === true ? { viewer: true as const } : {}),
         onEvent: handing((event) => inContext(reporter, processOutput, () => onEvent.call(reporter, event))),
         // The runner shows the pause the last interactive reporter was showing.
         onQuarantine: () => {
@@ -94,11 +96,11 @@ export function hostReporters(reporters: readonly Reporter[], options: HostOptio
   const emit = createRunEventEmitter(
     [
       // First, so a reporter that breaks on a pause leaves the runner showing the current one.
-      { name: 'runner (tracking pauses)', onEvent: plain.track },
+      { name: 'runner (tracking pauses)', viewer: true, onEvent: plain.track },
       ...sinks,
       ...(options.onEvent === undefined ? [] : [{ name: 'onEvent', onEvent: handing(options.onEvent) }]),
       // Last, once every reporter had its chance to show the event.
-      { name: 'runner (printing)', onEvent: plain.print },
+      { name: 'runner (printing)', viewer: true, onEvent: plain.print },
     ],
     // The runner's own line, outside any reporter's output context, so it is redacted like any other.
     (line) => {
@@ -173,7 +175,9 @@ async function finishReporters(reporters: readonly Reporter[], finished: Finishe
     const timer = setTimeout(() => abandon.abort(new ReporterAbandoned(`did not finish within ${budget}`)), timeoutMs);
     let forcedTimer: NodeJS.Timeout | undefined;
     const onForce = (): void => {
-      forcedTimer = setTimeout(() => abandon.abort(new ReporterAbandoned(forced)), forcedGraceMs);
+      // No grace is none: a timer would let a hook that settles in the same turn through.
+      if (forcedGraceMs === 0) abandon.abort(new ReporterAbandoned(forced));
+      else forcedTimer = setTimeout(() => abandon.abort(new ReporterAbandoned(forced)), forcedGraceMs);
     };
     if (forcedGraceMs !== undefined) {
       if (force.aborted) onForce();

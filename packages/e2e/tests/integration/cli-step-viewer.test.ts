@@ -562,7 +562,10 @@ test('checks out', async ({ app }) => {
   });
 
   it('opens no viewer on the stdout a json report prints to', async (context) => {
-    const run = terminalRun(context, { 'e2e.config.ts': APP, 'tests/checkout.e2e.ts': STEPS }, ['--step', '--reporter', 'json']);
+    // The config sets json: with `--reporter json` the CLI refuses a stderr that is no terminal.
+    const config = APP.replace('export default {', "export default { reporters: ['json'],");
+    expect(config).toContain("reporters: ['json']");
+    const run = terminalRun(context, { 'e2e.config.ts': config, 'tests/checkout.e2e.ts': STEPS }, ['--step']);
     const prompt = () => stripVTControlCharacters(run.errors());
     await expect.poll(prompt, POLL).toMatch(/paused \(.+\) at step 2/);
     await sleep(KEY_GUARD_MS);
@@ -579,7 +582,7 @@ test('checks out', async ({ app }) => {
     expect(prompt()).not.toContain('show the screen');
   });
 
-  it('holds terminal output until the viewer closes and sends redirected output right away', async (context) => {
+  it('holds terminal output until the viewer closes, what a reporter prints of it included', async (context) => {
     const other = `import { existsSync } from 'node:fs';
 import { setTimeout } from 'node:timers/promises';
 import { test } from 'e2e';
@@ -601,7 +604,7 @@ test('prints while checkout is paused', async () => {
       name: 'record received output',
       onEvent(event) {
         if (event.type === 'output' && event.text.includes('Second line from the other test.')) {
-          process.stderr.write('Output redirected from the reporter.\\n');
+          process.stderr.write('Output from the reporter.\\n');
           writeFileSync(new URL('./received', import.meta.url), '');
         }
       },
@@ -620,13 +623,15 @@ test('prints while checkout is paused', async () => {
 
     writeFileSync(path.join(run.dir, 'print'), '');
     await expect.poll(() => existsSync(path.join(run.dir, 'received')), POLL).toBe(true);
-    await expect.poll(run.errors, POLL).toContain('Output redirected from the reporter.');
     const alternateScreen = stripVTControlCharacters(run.output(opened).split(ENTER_SCREEN).at(-1) ?? '');
     expect(alternateScreen).not.toContain('First line from the other test.');
     expect(alternateScreen).not.toMatch(PAUSE_PROMPT);
 
     const closed = run.press('q');
     await run.shows('Second line from the other test.', closed);
+    // list shows what the reporter printed while it was handed that line, after it.
+    await run.shows('Output from the reporter.', closed);
+    expect(run.errors()).not.toContain('Output from the reporter.');
     const output = run.output(closed);
     expect(output).toContain(RESTORE_SCREEN);
     const mainScreen = stripVTControlCharacters(output.slice(output.indexOf(RESTORE_SCREEN)));

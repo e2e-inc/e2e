@@ -377,7 +377,7 @@ onSummary(rows) {
 
 すべての `onRunFinished` が終わるか打ち切られた後、最後に実行されます。2 回目の Ctrl-C の後も実行されます。
 
-出力はここで行います。`onSummary` が書き込んだ内容は秘匿され、stdout を含めて書き込み先のストリームに出力されるため、レポーターは独自のドキュメントを stdout に出力できます。`json` と併用すると stdout には JSON レポートだけが出力され、他のレポーターが stdout に書き込んだ内容は stderr に出力されます。
+出力はここで行います。レポーターが[インタラクティブ](#interactive)でない限り、`onSummary` が書き込んだ内容は秘匿されます。内容は stdout を含めて書き込み先のストリームに出力されるため、レポーターは独自のドキュメントを stdout に出力できます。`json` と併用すると stdout には JSON レポートだけが出力され、他のレポーターが stdout に書き込んだ内容は stderr に出力されます。
 
 ## イベント
 
@@ -405,7 +405,7 @@ type RunEventFact =
   | { type: 'run-finished'; status; exitCode; reportPath?; aiTracePath?; traces? };
 ```
 
-- 最初が `run-started`、最後が `run-finished` です。`run-finished` の後に来るのは `output` だけです。レポーターが `run-finished` の処理中に出力した内容です。
+- 最初が `run-started` です。`run-finished` の後に来るのは 2 種類だけです。レポーターが `run-finished` の処理中に出力した内容である `output` と、レポーターの終了処理中に Ctrl-C が届いた場合の `run-interrupted` です。
 - `run-started` の `targets` は、`--target` で選んだターゲットを設定順で列挙します。指定がない場合、または `--target` に未知のターゲットを指定した場合は、設定済みのすべてのターゲットを列挙します。未知のターゲットの場合、実行は `UNKNOWN_TARGET` で失敗します。レポートの `run.targets` は、いずれの場合も設定済みの全ターゲットを列挙します。
 - `run-started` の `judge` は、実行エージェントのジャッジモデルです。判定に `model` 以外のモデルを使う場合だけ存在します。`stepping` は、実行が `--step` のために各ステップで止まる場合に `true` です。
 - `setup` はテスト開始前の処理の開始と終了を示します。`step.kind` は `collect`、`filter`（`name` で示す 1 つの[テストフィルター](/filters)）、`prepare`、`service`、`app` のいずれかです。`app` ステップの `url` は、準備完了チェックがポーリングする URL で、空きポートを反映し、ユーザー情報とクエリを除いています。`outcome` は、サービスやアプリのコマンドが、その URL ですでに稼働するプロセスを再利用した場合に `reused`、フィルターが例外を投げるか不正な結果を返した場合に `failed`、5 分を超えた場合に `timed-out` になります。

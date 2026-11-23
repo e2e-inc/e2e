@@ -564,7 +564,11 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
   const { emit } = host;
   // Until the run is over, what user code prints in this process is an
   // `output` event like a test's, with no target.
-  processOutput?.showThrough({ show: (stream, text) => emit({ type: 'output', stream, text }), end: () => undefined });
+  processOutput?.showThrough({
+    show: (stream, text) => emit({ type: 'output', stream, text }),
+    showHanded: (stream, text) => emit({ type: 'output', stream, text }, 'viewers'),
+    end: () => undefined,
+  });
   /** Each collected test's title path by its id, once the run has collected. */
   const titlePaths = new Map<string, readonly string[]>();
   const pauses = pauseEvents(emit, (testId) => titlePaths.get(testId));
@@ -1042,10 +1046,10 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     // `collected` marks the moment and the report's `startedAt` agrees with it, so
     // everything a run pays for every time (the app, the tests, the report)
     // is on the clock and a one-off download is not.
-    startedAt = timestamp();
     const tests = collectedTests(config.projectRoot, selection);
     for (const test of tests) titlePaths.set(test.testId, test.titlePath);
     const files = plannedFiles(selection);
+    startedAt = timestamp();
     emit({ type: 'plan', total: selection.pairs.length, files });
     emit({
       type: 'collected',
