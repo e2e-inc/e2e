@@ -701,12 +701,13 @@ export class SecretLedger {
   holdFrom(text: string): number {
     const { pattern, spansLines, maxFormLength, maxMarkerLength } = this.compile();
     if (pattern === undefined) return text.length;
-    let cut = Math.max(0, text.length - (maxFormLength - 1));
-    if (!spansLines) cut = Math.max(cut, text.lastIndexOf('\n') + 1);
+    const lineStart = spansLines ? 0 : text.lastIndexOf('\n') + 1;
+    let cut = Math.max(lineStart, text.length - (maxFormLength - 1));
+    // An unfinished marker holds no line break, so the cut stays on the line that starts at `lineStart`.
     cut = unfinishedMarkerBefore(text, cut, maxMarkerLength);
     if (cut === 0 || cut === text.length) return cut;
     if (!spansLines && text.charCodeAt(cut - 1) === 0x0a) return cut;
-    pattern.lastIndex = spansLines ? 0 : text.lastIndexOf('\n', cut - 1) + 1;
+    pattern.lastIndex = lineStart;
     for (let match = pattern.exec(text); match !== null && match.index < cut; match = pattern.exec(text)) {
       if (match.index + match[0].length > cut) return match.index;
     }
