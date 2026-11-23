@@ -1417,9 +1417,9 @@ describe('DesktopSurface', () => {
   });
 
   it('reads a window as deep as desktop({ maxDepth }) says', async () => {
-    const { fake } = await launched({}, { options: { maxDepth: 64 } });
+    const { fake } = await launched({}, { options: { maxDepth: 40 } });
     const snapshot = fake.calls().find((call) => call.key === 'snapshot')!.args;
-    expect(snapshot[snapshot.indexOf('--max-depth') + 1]).toBe('64');
+    expect(snapshot[snapshot.indexOf('--max-depth') + 1]).toBe('40');
   });
 
   it('refuses a placeholder query, which macOS gives nothing to match', async () => {

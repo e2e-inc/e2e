@@ -46,7 +46,7 @@ export interface DesktopOptions {
   readonly settle?: number | false | undefined;
   /**
    * How many levels of a window's accessibility tree a read goes down, from
-   * 1 to 255. A read cut short at this depth cannot prove a control absent or
+   * 1 to 50. A read cut short at this depth cannot prove a control absent or
    * the only one, so a locator on such a window reads again until its
    * timeout: raise it for an app nested deeper. Default 24.
    */
@@ -69,8 +69,8 @@ const DEFAULT_SETTLE_MS = 150;
 /** How deep a read goes by default: deeper than the controls of the apps tried, and quick to read. */
 const DEFAULT_MAX_DEPTH = 24;
 
-/** The deepest read agent-desktop takes. */
-const MAX_DEPTH_LIMIT = 255;
+/** The deepest read agent-desktop takes: its macOS reader stops at 50 levels and refuses a deeper `--max-depth`. */
+const MAX_DEPTH_LIMIT = 50;
 
 /** Checks the option bag the way every config option is checked: unknown keys and wrong types fail the config load. */
 export function resolveOptions(options: DesktopOptions | undefined): ResolvedDesktopOptions {
