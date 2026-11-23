@@ -9,6 +9,8 @@ describe('formatDuration', () => {
     expect(formatDuration(12_340)).toBe('12.3s');
     expect(formatDuration(59_949)).toBe('59.9s');
     expect(formatDuration(59_960)).toBe('1m 0s');
+    expect(formatDuration(119_400)).toBe('1m 59s');
+    expect(formatDuration(119_600)).toBe('2m 0s');
     expect(formatDuration(125_000)).toBe('2m 5s');
   });
 });
