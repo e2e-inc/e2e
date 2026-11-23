@@ -306,8 +306,10 @@ export class DesktopSurface {
   private lifecycle: Promise<unknown> = Promise.resolve();
   /** The window a test chose with `desktop.useWindow`, which every read and command then uses until the app quits. */
   private chosenWindow: string | undefined;
-  /** The window of the newest screen handed to the harness, by observe or locate: the one a point is measured in. */
+  /** The window of the newest screen handed to the harness, by observe or locate: the one a test's point is measured in. */
   private pointWindow: string | undefined;
+  /** The window of the newest image an observation delivered: the one the agent's point, taken from that image, is measured in. */
+  private imageWindow: string | undefined;
   /** The newest binding of every node id an observation or a locate handed out, newest last. */
   private readonly bindings = new Map<string, NodeBinding>();
   /** The id handed out for each node identity since the app launched; see `projectSnapshot`. */
@@ -755,6 +757,7 @@ export class DesktopSurface {
     this.chosenWindow = id;
     // A point taken in the window read before is not in this one's coordinates: the next point action measures from the window now in use.
     this.pointWindow = undefined;
+    this.imageWindow = undefined;
   }
 
   private chosenClosed(): EngineError {
@@ -875,6 +878,7 @@ export class DesktopSurface {
   /** Every binding of the screen before: after a launch or a quit, none names a control that still exists. */
   private forget(): void {
     this.pointWindow = undefined;
+    this.imageWindow = undefined;
     this.chosenWindow = undefined;
     this.bindings.clear();
     this.ids.clear();
@@ -1069,8 +1073,9 @@ export class DesktopSurface {
       withheld = cause instanceof Error && cause.cause === UNMASKED;
       return undefined;
     }) : undefined;
-    // A point is taken from the last image the agent got: only an observation that delivered one moves it; a read without an image, asked for or not, leaves it on the window that image showed.
-    if (pixels !== undefined) this.pointWindow = screen.windowId;
+    // A test measures its points (a percentage of the viewport) in the newest read; the agent takes its points from the newest image it got, which a read without one leaves as it was.
+    this.pointWindow = screen.windowId;
+    if (pixels !== undefined) this.imageWindow = screen.windowId;
     // Pixels withheld for their secure fields still report the regions masked, none, so the harness reads masking it could not prove (MASKING_UNPROVEN), not a missing screenshot.
     return {
       ...this.snapshotOf(screen),
@@ -1387,8 +1392,8 @@ export class DesktopSurface {
   /** Physical pointer input at a point in the window: only with `headed`, and only then declared. */
   async performAt(point: ViewportPoint, action: PointerAction, context: OperationContext): Promise<void> {
     const operation = withDeadline(context);
-    // The point is in the observed window's coordinates: find that window where it is now (it may have moved), or the app's own window before any observation.
-    const observed = this.pointWindow;
+    // The point is in the observed window's coordinates (the agent's: of its newest image): find that window where it is now (it may have moved), or the app's own window before any observation.
+    const observed = context.origin === 'agent' ? (this.imageWindow ?? this.pointWindow) : this.pointWindow;
     const target = observed === undefined ? await this.ownWindow(operation) : (await this.ownWindows(operation)).find((candidate) => candidate.id === observed);
     const window = target?.bounds;
     if (target === undefined || window === undefined) throw notActionable('the window the point was taken from is no longer on screen; observe again');
