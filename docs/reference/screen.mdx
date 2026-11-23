@@ -191,7 +191,7 @@ await screen.getByPlaceholder('Search memory...').fill('launch');
 #### `getByText`
 
 ```ts
-/** Creates a lazy visible-text query. An engine may also match one part of a label merged from several texts (the mobile engine does on iOS). */
+/** Creates a lazy visible-text query. One part of a label merged from several texts is also matched on some engines (the mobile engine on iOS). */
 getByText(text: TextMatch, options?: TextMatchOptions): Locator;
 ```
 
@@ -207,8 +207,10 @@ the engine applies the same rule, since iOS reports a React Native `Text` as
 a host view plus a `StaticText` child with the same label. Two matches that
 do not contain each other remain `LOCATOR_AMBIGUOUS`.
 
+##### Merged labels on iOS
+
 On iOS, a control's texts are merged into its label (`Trail Mix, 250 g`),
-so `getByText` also matches one part of that label. See the
+so one part of that label is also matched by `getByText`. See the
 [mobile engine's `locate`](/reference/mobile#capabilities) for which nodes
 are split.
 

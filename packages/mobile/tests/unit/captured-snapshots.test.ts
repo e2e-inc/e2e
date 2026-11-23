@@ -134,7 +134,10 @@ describe('captured device snapshots', () => {
   }
 });
 
-/** The role and test id of each node `getByText` matches on one captured screen, the test id read off the nearest node that has one. */
+/**
+ * Returns the role and test id of each node that `getByText` matches on one captured screen.
+ * The test id comes from the node, or from its parent when the node doesn't have one.
+ */
 function textMatches(platform: MobilePlatform, scenario: string, value: TextPattern): string[][] {
   const { projected } = project(path.join(ROOT, platform, `${scenario}.json`));
   const matches = resolveExpression({ kind: 'query', query: { kind: 'text', value } }, projected.index, platform);
@@ -145,15 +148,15 @@ function exact(value: string): TextPattern {
   return { kind: 'string', value, exact: true };
 }
 
-describe('text queries over the label iOS merges from a control\'s texts', () => {
-  it('finds a button by one part of its merged label, as Android finds the text inside it', () => {
+describe('text queries on an iOS label merged from a control\'s texts', () => {
+  it('finds a button by one part of its merged label, like the text inside the button on Android', () => {
     expect(textMatches('ios', 'bottom-tabs', exact('Feed'))).toEqual([['button', 'tab-feed']]);
     expect(textMatches('android', 'bottom-tabs', exact('Feed'))).toEqual([['text', 'tab-feed']]);
     expect(textMatches('ios', 'product-catalog', exact('500 g · $6.99'))).toEqual([['other', 'product-trail-mix-500']]);
     expect(textMatches('android', 'product-catalog', exact('500 g · $6.99'))).toEqual([['text', 'product-trail-mix-500']]);
   });
 
-  it('finds a flattened form by one part of its merged label, as Android finds the text inside it', () => {
+  it('finds a flattened form by one part of its merged label, like the text inside the form on Android', () => {
     expect(textMatches('ios', 'flattened-login', exact('SIGN IN'))).toEqual([['other', '']]);
     expect(textMatches('android', 'flattened-login', exact('SIGN IN'))).toEqual([['text', '']]);
   });
@@ -166,7 +169,7 @@ describe('text queries over the label iOS merges from a control\'s texts', () =>
     ]);
   });
 
-  it('keeps an exact query to whole parts, case-sensitive', () => {
+  it('applies exact, substring, and RegExp matching to each part', () => {
     expect(textMatches('ios', 'bottom-tabs', exact('Fee'))).toEqual([]);
     expect(textMatches('ios', 'bottom-tabs', exact('feed'))).toEqual([]);
     expect(textMatches('ios', 'bottom-tabs', exact('Feed, tab'))).toEqual([]);

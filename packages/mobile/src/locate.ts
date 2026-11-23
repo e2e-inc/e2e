@@ -118,25 +118,25 @@ function subtreeHasText(
 }
 
 /**
- * The separator iOS puts between the parts of a merged label.
+ * The separator between the parts of a merged label on iOS.
  *
- * When an accessibility element doesn't have a label, it gets one from its
- * subviews' labels joined with ", " (React Native's
- * `RCTRecursiveAccessibilityLabel` on the new architecture, the old one
- * joins them with a space). XCTest then reports the element without those
- * texts. So a button over "Trail Mix" and "250 g" reads `Trail Mix, 250 g`
- * on iOS, while Android and the web keep each text as a child that
- * `getByText` finds.
+ * When an accessibility element doesn't have a label, its label is built
+ * from its subviews' labels, joined with ", " (React Native's
+ * `RCTRecursiveAccessibilityLabel` on the new architecture). On the old
+ * architecture, they're joined with a space. The texts below the element
+ * aren't listed in the XCTest tree. So on iOS, the label of a button over
+ * "Trail Mix" and "250 g" is `Trail Mix, 250 g`. On Android and the web,
+ * each text is listed as a child node that can be matched by `getByText`.
  *
- * To match that, a text query on iOS also tests each part of the label of a
- * node that doesn't have any text below it. Texts, images, and fields are
- * skipped, since their labels aren't merged. One catch is that the tree
- * doesn't say whether the app set the label, so an app's label with ", " in
- * it is split too.
+ * To get the same result on iOS, a text query is also tested against each
+ * part of the label of a node without any text below it. Texts, images, and
+ * fields are skipped, since their labels aren't merged. One catch is that
+ * the tree doesn't say whether the app set the label, so a label the app
+ * set with ", " in it is split the same way.
  */
 const MERGED_LABEL_SEPARATOR = ', ';
 
-/** Whether any node below `node` has a name or a text. */
+/** Checks whether any node below `node` has a name or a text. */
 function hasTextBelow(node: SemanticNode): boolean {
   return (node.children ?? []).some((child) => child.name !== undefined || child.text !== undefined || hasTextBelow(child));
 }
@@ -149,7 +149,7 @@ const STATE_KEYS = ['checked', 'disabled', 'selected', 'expanded', 'pressed'] as
  * answer with every node and leave visibility to the action or assertion,
  * unless the query says `visible`, which drops hidden nodes for every kind.
  * `withoutPackage` matches a test id by its short form (`ANDROID_RESOURCE_ID`).
- * On iOS, a text query also matches one part of a merged label (`MERGED_LABEL_SEPARATOR`).
+ * On iOS, a text query is also tested against each part of a merged label (`MERGED_LABEL_SEPARATOR`).
  */
 function matchesQuery(entry: ProjectedNode, query: SemanticQuery, platform: MobilePlatform, withoutPackage: boolean): boolean {
   const node = entry.node;

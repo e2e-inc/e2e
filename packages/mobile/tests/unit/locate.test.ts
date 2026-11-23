@@ -79,7 +79,7 @@ describe('locator expressions over a device snapshot', () => {
     expect(resolveExpression(query('role', 'textbox'), index, 'ios')).toHaveLength(2);
   });
 
-  it('finds an iOS control by one part of its merged label, but not a text, image, or field by part of its own', () => {
+  it('finds an iOS control by one part of its merged label, but doesn\'t split the label of a text, image, or field', () => {
     const nodes: readonly RawNode[] = [
       { ref: '@e1', index: 0, depth: 0, type: 'Application', label: 'Fixture' },
       { ref: '@e2', index: 1, parentIndex: 0, depth: 1, type: 'Button', label: 'Dismiss, Close', identifier: 'merged' },
