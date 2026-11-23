@@ -381,12 +381,14 @@ test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () 
     await expect(browser).not.toHaveJSProperty(browser.locator('#p'), 'rejected', 'x');
   });
 
-  test('matches a dotted path and a number', async ({ browser, screen }) => {
+  test('matches a dotted path, a number, and null', async ({ browser, screen }) => {
     await browser.goto(page);
     const main = screen.getByRole('navigation', { name: 'Main' });
     await expect(browser).toHaveJSProperty(main, 'dataset.x', '1');
     await expect(browser).toHaveJSProperty(main, 'style.position', 'sticky');
     await expect(browser).toHaveJSProperty(browser.frameLocator('iframe').locator('aside'), 'offsetWidth', 240);
+    await expect(browser).toHaveJSProperty(browser.locator('#holder'), 'holder.inner', null);
+    await expect(browser).toHaveJSProperty(browser.locator('#holder'), 'onclick', null);
     await expect(browser).not.toHaveJSProperty(main, 'dataset.missing.deeper', '1');
   });
 

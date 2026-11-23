@@ -124,7 +124,7 @@ describe('compileEvaluation', () => {
   describe('without awaitResult', () => {
     /** Runs the boundary on an element with `awaitResult` off; it must answer synchronously. */
     const readSync = (source: string): ReturnType<typeof readEvaluation> => {
-      const report = compileEvaluation(source, ['element', 'arg'], false)({ isConnected: true, matches: () => false });
+      const report = compileEvaluation(source, ['element', 'arg'], { awaitResult: false })({ isConnected: true, matches: () => false });
       expect(typeof report).toBe('string');
       return readEvaluation(report as string);
     };
@@ -168,8 +168,9 @@ describe('compileEvaluation', () => {
       expect(readSync('() => rejected')).toEqual(notJson);
     });
 
-    it('reads JSON and undefined as they are', () => {
+    it('reads JSON, null, and undefined as they are', () => {
       expect(readSync('(el, arg) => ({ a: [1, "x", null] })')).toEqual({ ok: true, value: { a: [1, 'x', null] } });
+      expect(readSync('() => null')).toEqual({ ok: true, value: null });
       expect(readSync('() => undefined')).toEqual({ ok: true, value: undefined });
     });
 

@@ -140,19 +140,20 @@ export function pageValueEncoder(): (root: unknown) => string | undefined {
  * Playwright supplies, and reports a detached one or a secure field instead
  * of running the source. The secure check runs in the same task as the
  * source, so a node that turns into a password field after the caller's
- * locate is still refused; a `matches` that throws counts as secure. The
- * boundary's own bindings are prefixed `__e2e_` and its guard sits in a
- * block, so the source still reads page globals named `element`, `arg`, or
- * `secure`. The boundary returns JSON text, a primitive the caller takes
- * back without Playwright serializing it in the page, so a page that deleted
- * or replaced a global the serializer needs still returns its result;
- * `readEvaluation` reads it.
+ * locate is still refused; a `matches` that throws counts as secure. Except
+ * for the `__name` helper below, the boundary's own bindings are prefixed
+ * `__e2e_` and its guard sits in a block, so the source still reads page
+ * globals named `element`, `arg`, or `secure`. The boundary returns JSON
+ * text, a primitive the caller takes back without Playwright serializing it
+ * in the page, so a page that deleted or replaced a global the serializer
+ * needs still returns its result; `readEvaluation` reads it.
  *
- * With `awaitResult`, the default, the boundary is async and reports the
- * value a returned promise or thenable settles to. Without it, the boundary
- * runs synchronously and encodes the returned value as it is: a promise or
- * thenable is a value that is not JSON, and its `then` is never called, so
- * an engine read of page state cannot adopt a promise the page put there.
+ * With `options.awaitResult`, true by default, the boundary is async and
+ * reports the value a returned promise or thenable settles to. Without it, the
+ * boundary runs synchronously and encodes the returned value as it is: a
+ * promise or thenable is a value that is not JSON, and its `then` is never
+ * called, so an engine read of page state cannot adopt a promise the page put
+ * there.
  *
  * A function serialized with `toString()` carries whatever the loader compiled
  * it to. e2e before 0.17 loaded tests through tsx, whose esbuild `keepNames`
@@ -163,8 +164,9 @@ export function pageValueEncoder(): (root: unknown) => string | undefined {
 export function compileEvaluation(
   source: string,
   call: EvaluationCall,
-  awaitResult = true,
+  options?: { readonly awaitResult?: boolean },
 ): (...args: unknown[]) => Promise<string> | string {
+  const awaitResult = options?.awaitResult ?? true;
   const onElement = call[0] === 'element';
   const parameters = onElement ? ['__e2e_element', '__e2e_arg'] : ['__e2e_arg'];
   const passed = call.map((name) => `__e2e_${name}`).join(', ');

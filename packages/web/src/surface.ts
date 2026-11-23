@@ -931,7 +931,11 @@ export class PlaywrightSurface {
     operation: OperationContext,
     options: { readonly repeatable: boolean; readonly awaitResult?: boolean },
   ): Promise<EvaluationResult> {
-    const evaluate = compileEvaluation(source, ['element', 'arg'], options.awaitResult ?? true);
+    const evaluate = compileEvaluation(
+      source,
+      ['element', 'arg'],
+      options.awaitResult === undefined ? undefined : { awaitResult: options.awaitResult },
+    );
     const report = await this.guard(operation, 'evaluateOn', async (currentOperation) => {
       const target = await this.requireSession().refs.lookup(ref);
       const element = target.kind === 'element'

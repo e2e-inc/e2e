@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { Page } from 'playwright-core';
-import type { LocatorExpression, NodeRef, OperationContext } from '@e2e-dev/core/engine';
+import { withTimeout, type LocatorExpression, type NodeRef, type OperationContext } from '@e2e-dev/core/engine';
 import { PlaywrightSurface } from '../../src/surface.ts';
 import { connectionObjectCount } from '../helpers/handles.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
@@ -43,6 +43,32 @@ async function watchNextDispose(page: Page): Promise<{ readonly released: Promis
     });
   });
   return { released, restore };
+}
+
+/**
+ * Fires `onResolved` as soon as the next Playwright `elementHandles` lookup
+ * receives real handles from the page, then restores the prototype method.
+ */
+function watchNextElementHandles(page: Page, onResolved: () => void): () => void {
+  const probe = page.locator('p');
+  let owner: object | null = Object.getPrototypeOf(probe) as object | null;
+  while (owner !== null && !Object.hasOwn(owner, 'elementHandles')) owner = Object.getPrototypeOf(owner) as object | null;
+  if (owner === null) throw new Error('playwright-core locators no longer have an elementHandles method');
+  const prototype = owner;
+  const elementHandles = Reflect.get(prototype, 'elementHandles') as (this: unknown, ...args: unknown[]) => Promise<unknown[]>;
+  let active = true;
+  const restore = (): void => {
+    if (!active) return;
+    active = false;
+    Reflect.set(prototype, 'elementHandles', elementHandles);
+  };
+  Reflect.set(prototype, 'elementHandles', async function watched(this: unknown, ...args: unknown[]) {
+    restore();
+    const handles = await elementHandles.apply(this, args);
+    onResolved();
+    return handles;
+  });
+  return restore;
 }
 
 describe('PlaywrightSurface.evaluateOn', () => {
@@ -118,35 +144,38 @@ describe('PlaywrightSurface.evaluateOn', () => {
     expect(objects() - stale).toBeLessThanOrEqual(2);
   });
 
-  it('never starts the source when the budget ran out while the element was found', async () => {
+  it('never starts the source or probes the page when aborted while the element was found', async () => {
     await page.setContent('<p>one</p>');
     const ref = await locateOne(paragraph);
-    let busy: () => void = () => undefined;
-    const blocked = new Promise<void>((resolve) => { busy = resolve; });
-    await page.exposeFunction('e2eBusy', () => busy());
     const objects = await connectionObjectCount(page);
-    const { released, restore } = await watchNextDispose(page);
-    onTestFinished(restore);
+    const controller = new AbortController();
+    const { released, restore: restoreDispose } = await watchNextDispose(page);
+    onTestFinished(restoreDispose);
+    const restoreLookup = watchNextElementHandles(page, () => controller.abort());
+    onTestFinished(restoreLookup);
+    const locatorSpy = vi.spyOn(page, 'locator');
+    onTestFinished(() => locatorSpy.mockRestore());
     try {
       await page.evaluate('1');
       const before = objects();
-      await page.evaluate(`setTimeout(() => {
-        window.e2eBusy();
-        const start = Date.now();
-        while (Date.now() - start < 350);
-      }, 0)`);
-      await blocked;
-      const source = '() => { window.ran = true; return 1; }';
-      await expect(surface.evaluateOn(ref, source, undefined, { ...operation, timeoutMs: 60 }, { repeatable: true }))
-        .rejects.toMatchObject({ code: 'OPERATION_TIMEOUT' });
-      // The timed-out call keeps running until it releases a handle, which it
-      // does only after any page code it started has run.
-      await released;
+      await expect(
+        surface.evaluateOn(
+          ref,
+          '() => { window.ran = true; return 1; }',
+          undefined,
+          { ...operation, signal: controller.signal },
+          { repeatable: false },
+        ),
+      ).rejects.toMatchObject({ code: 'CANCELLED' });
+      await withTimeout(released, 5_000, () => new Error('timed out waiting for element handle dispose'));
       await expect(page.evaluate('window.ran')).resolves.toBeUndefined();
+      expect(locatorSpy).not.toHaveBeenCalled();
       await page.evaluate('1');
       expect(objects() - before).toBe(0);
     } finally {
-      restore();
+      restoreLookup();
+      restoreDispose();
+      locatorSpy.mockRestore();
     }
   });
 
