@@ -1433,7 +1433,7 @@ export class DesktopSurface {
     await this.settle(operation);
   }
 
-  /** One key to whatever holds focus in the app; agent-desktop sends it to the process without focusing its window. */
+  /** One key to whatever holds focus in the app's window: agent-desktop brings that window forward (`headed`, which declares this) and sends the key to it. */
   async pressKey(key: string, context: OperationContext): Promise<void> {
     const operation = withDeadline(context);
     const combo = toCombo(key);
