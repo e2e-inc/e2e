@@ -1242,7 +1242,7 @@ export class DesktopSurface {
   /**
    * Whether the control a binding names holds keyboard focus in a fresh read
    * of its window. A control with an identity keeps its id; a look-alike has
-   * a new id in every read, so it is found by role and place, with as many
+   * a new id in every read, so it is found by role, name, and place, with as many
    * twins around it as before: a twin that went could have let another take
    * its place.
    */
@@ -1251,7 +1251,7 @@ export class DesktopSurface {
     return [...(now?.bindings.values() ?? [])].some(
       (candidate) =>
         candidate.states?.focused === true &&
-        (binding.stable ? candidate.id === binding.id : candidate.role === binding.role && sameRect(candidate.rect, binding.rect) && candidate.likeness === binding.likeness),
+        (binding.stable ? candidate.id === binding.id : candidate.role === binding.role && candidate.name === binding.name && sameRect(candidate.rect, binding.rect) && candidate.likeness === binding.likeness),
     );
   }
 

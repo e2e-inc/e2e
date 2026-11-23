@@ -1095,6 +1095,15 @@ describe('DesktopSurface', () => {
     expect(fake.calls().some((call) => call.key === 'press')).toBe(false);
   });
 
+  it('sends no key when focusing a look-alike field replaced the form with other fields in the same places', async () => {
+    const field = (name: string, ref: string, y: number, focused: boolean) => ({ role: 'textfield', name, ref_id: ref, bounds: { x: 10, y, width: 100, height: 20 }, ...(focused ? { states: ['focused'] } : {}) });
+    const form = (id: string, name: string, focusSecond: boolean) => ({ ok: true, data: { snapshot_id: id, window: { id: 'w-mine' }, tree: { role: 'window', name: 'List', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [field(name, `@${id}:e1`, 10, false), field(name, `@${id}:e2`, 40, focusSecond)] } } });
+    const { surface, fake } = await launched({ snapshot: [form('s1', 'Old', false), form('s1', 'Old', false), form('s2', 'New', true)] }, { observe: false });
+    const observed = await surface.observe(operation(), undefined);
+    await expect(surface.perform(observed.root.children![1]!.ref, { kind: 'press', key: 'a' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+    expect(fake.calls().some((call) => call.key === 'press')).toBe(false);
+  });
+
   it('refuses a key agent-desktop cannot press before it moves focus', async () => {
     const { surface, fake, byTestId } = await launched({});
     await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Insert' }, operation())).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
