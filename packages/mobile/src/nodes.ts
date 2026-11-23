@@ -434,8 +434,8 @@ function nonEmpty(value: string | undefined): string | undefined {
  * What `getAttribute` reads on a device node, under the names an Appium
  * suite asks for: `label` (the accessibility label: the iOS label, the Android
  * content description or, when it has none, its text, as Detox defines it;
- * an empty field whose description equals its hint reads neither, because
- * agent-device sends a description only when it differs from the text),
+ * a hint-only field with no `text` key reads neither, while a described
+ * empty field with `text: ""` keeps both `label` and `content-desc`),
  * `resource-id` (the Android resource id or the iOS accessibility
  * identifier, the test id), `class` (the Android class or the iOS element
  * type without its `XCUIElementType` prefix, also the tag name),

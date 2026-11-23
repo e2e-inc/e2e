@@ -19,8 +19,9 @@ const UPDATE = process.env['E2E_GOLDEN_UPDATE'] === '1';
 /**
  * Attributes the tree leaves out: `resource-id` restates the test id and
  * `class` is the raw type on every node, which neither the model's text nor
- * a locator reads. `label` is left out too: on Android it is the content
- * description, which `content-desc` already shows, and on iOS it is the name.
+ * a locator reads. `label` is left out too: Android repeats its content
+ * description or visible text, and iOS repeats its label in the rendered name
+ * or text.
  * `node-attributes.test.ts` covers them.
  */
 const RESTATED_ATTRIBUTES = new Set(['label', 'resource-id', 'class']);
