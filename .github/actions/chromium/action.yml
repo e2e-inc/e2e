@@ -40,7 +40,7 @@ runs:
         printf 'Dir::Cache::Archives "%s/";\nAPT::Keep-Downloaded-Packages "true";\n' "$ARCHIVES" \
           | sudo tee /etc/apt/apt.conf.d/99chromium-archives > /dev/null
         echo "archives=$ARCHIVES" >> "$GITHUB_OUTPUT"
-        echo "prefix=chromium-debs-$ID-$VERSION_ID-$(uname -m)-playwright-$PLAYWRIGHT" >> "$GITHUB_OUTPUT"
+        echo "prefix=chromium-apt-$ID-$VERSION_ID-$(uname -m)-playwright-$PLAYWRIGHT" >> "$GITHUB_OUTPUT"
     # No entry has exactly this key: restore-keys picks the newest entry with
     # the prefix.
     - name: Restore the archives
@@ -50,8 +50,30 @@ runs:
         path: ${{ steps.apt.outputs.archives }}/*.deb
         key: ${{ steps.apt.outputs.prefix }}
         restore-keys: ${{ steps.apt.outputs.prefix }}-
+    # Entries saved before the set was pruned to the installed versions can
+    # hold two versions of one package; apt takes one file per package.
+    - name: Keep the newest version of each package
+      shell: bash
+      env:
+        ARCHIVES: ${{ steps.apt.outputs.archives }}
+      run: |
+        set -euo pipefail
+        shopt -s nullglob
+        declare -A newest
+        for deb in "$ARCHIVES"/*.deb; do
+          read -r pkg version < <(dpkg-deb --show --showformat '${Package}:${Architecture} ${Version}\n' "$deb")
+          kept="${newest[$pkg]:-}"
+          if [[ -z "$kept" ]]; then
+            newest[$pkg]="$version $deb"
+          elif dpkg --compare-versions "$version" gt "${kept%% *}"; then
+            rm -f "${kept#* }"
+            newest[$pkg]="$version $deb"
+          else
+            rm -f "$deb"
+          fi
+        done
     # A restored entry holds every package `--with-deps` installed or upgraded
-    # on the image that saved it, one version each, so apt resolves them
+    # on the image that saved it, so apt resolves them
     # against the installed ones with no package lists and nothing to
     # download. On a different image apt may need a downgrade or a removal,
     # which it refuses, and the dry run fails when the image lacks a package
