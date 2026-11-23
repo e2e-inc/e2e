@@ -120,7 +120,8 @@ const ORPHAN_AGE_MS = 24 * 60 * 60 * 1000;
  * The variables of the run's environment the app under test and
  * agent-desktop get, and nothing else: the run's secrets, model keys, and CI
  * tokens never reach a process the runner does not control. `LC_*` passes
- * too.
+ * too. agent-desktop also gets `AGENT_DESKTOP_HOME`, its private state
+ * directory, and an app it launches by bundle id inherits that path.
  */
 const INHERITED_ENV = new Set(['HOME', 'USER', 'LOGNAME', 'SHELL', 'PATH', 'TMPDIR', 'LANG', '__CF_USER_TEXT_ENCODING']);
 

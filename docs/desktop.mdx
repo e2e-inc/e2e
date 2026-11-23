@@ -75,7 +75,9 @@ environment never reach it. The engine also sets `E2E_DESKTOP_LAUNCH`, a
 token it uses to find the copy it launched. macOS hides that token in its
 own apps and in a build signed with the `restrict` flag, so an `appPath` to
 one of them is refused. Launch such an app by its `bundleId`: agent-desktop
-then reports the process it started.
+then reports the process it started. An app launched by `bundleId` also gets
+`AGENT_DESKTOP_HOME`, the path of the worker's private agent-desktop
+directory, since agent-desktop starts it with its own environment.
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
