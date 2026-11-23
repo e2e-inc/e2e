@@ -3,11 +3,45 @@
  * minted as verification steps, whatever their kind or api name.
  */
 
-import { describe, expect, it } from 'vitest';
-import { StepRecorder } from '@e2e-dev/core/lib/run/steps';
+import { randomUUID } from 'node:crypto';
+import { describe, expect, it, vi } from 'vitest';
+import { StepRecorder, type StepCacheInfo } from '@e2e-dev/core/lib/run/steps';
 import { AgentError } from '@e2e-dev/core/lib/agent/error';
+import { processSecrets } from '@e2e-dev/core/lib/run/secrecy';
 
 const pass = async (): Promise<void> => undefined;
+
+it('refreshes provider key registration before recording a failure', async () => {
+  const key = randomUUID();
+  let registeredDuringSerialization = false;
+  const steps = new StepRecorder('attempt', {
+    redact(text) {
+      if (text === 'fixture failure') registeredDuringSerialization = processSecrets.redact(key) === '<secret:OPENAI_API_KEY>';
+      return text;
+    },
+  });
+  try {
+    await expect(steps.run('agent', 'agent.act', 'fixture step', async () => {
+      vi.stubEnv('OPENAI_API_KEY', key);
+      throw new Error('fixture failure');
+    })).rejects.toThrow('fixture failure');
+    expect(registeredDuringSerialization).toBe(true);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
+it('redacts recorded model metadata only in the step record', async () => {
+  const redact = (text: string): string => text.replaceAll('fixture-value', '<secret:fixture>');
+  const steps = new StepRecorder('attempt', { redact });
+  const cache: StepCacheInfo = {
+    mode: 'self-finalized', replayedActions: 2, totalActions: 2, entry: 'entry-key',
+    recordedBy: { provider: 'fixture-value', model: 'model-fixture-value' },
+  };
+  await steps.run('agent', 'agent.act', 'replayed step', async () => steps.attachAgentDetails({ cache }));
+  expect(steps.all()[0]?.cache).toEqual({ ...cache, recordedBy: { provider: '<secret:fixture>', model: 'model-<secret:fixture>' } });
+  expect(cache.recordedBy).toEqual({ provider: 'fixture-value', model: 'model-fixture-value' });
+});
 
 describe('StepRecorder.lastVerifiedStepIndex', () => {
   it('is -1 until a verification step passes', async () => {

@@ -67,6 +67,57 @@ test('asks the agent', async ({ app, agent }) => {
 });
 `;
 
+it('registers a provider key first loaded by beforeEach in a worker', async () => {
+  const project = createProject({
+    'credentials.env': `OPENAI_API_KEY=fixture-${randomBytes(16).toString('hex')}\n`,
+    'e2e.config.ts': `import type { E2EConfig } from 'e2e';
+import { redactSecrets } from 'e2e/agent';
+import { createFakeEngine, FAKE_APP } from '../../helpers/fake-engine.ts';
+
+export default {
+  tests: 'tests/**/*.e2e.ts',
+  targets: [{ name: 'fake', platform: 'fake', engine: createFakeEngine({ state: true }).engine, app: FAKE_APP }],
+  workers: 1,
+  agents: { default: { executor: {
+    name: 'registration-check', version: '1', cache: 'off',
+    async runStep() {
+      const key = process.env.OPENAI_API_KEY;
+      if (!key || redactSecrets(key) !== '<secret:OPENAI_API_KEY>') {
+        throw new Error('beforeEach key was not registered');
+      }
+      return { status: 'passed', summary: 'registered' };
+    },
+  } } },
+} satisfies E2EConfig;
+`,
+    'tests/registration.e2e.ts': `import { test } from 'e2e';
+import { loadEnvFile } from 'node:process';
+
+test.beforeEach(async ({ app }) => {
+  await app.open();
+  loadEnvFile(new URL('../credentials.env', import.meta.url));
+});
+test('registers the provider key', async ({ agent }) => {
+  await agent.act('Check provider key registration');
+});
+`,
+  });
+  const env: NodeJS.ProcessEnv = { ...process.env, CI: '', NO_COLOR: '1', E2E_TELEMETRY_DISABLED: '1' };
+  delete env['OPENAI_API_KEY'];
+  try {
+    const { stdout } = await execFileAsync(process.execPath, [CLI, 'run', '--reporter', 'list'], { cwd: project.dir, env, timeout: 60_000 }).catch((error: unknown) => {
+      const output = error as { stdout?: string; stderr?: string };
+      if (`${output.stdout ?? ''}${output.stderr ?? ''}`.includes('beforeEach key was not registered')) {
+        throw new Error('The worker did not register the key loaded by beforeEach');
+      }
+      throw error;
+    });
+    expect(stdout).toContain('registers the provider key');
+  } finally {
+    project.cleanup();
+  }
+}, 65_000);
+
 /** Every piece of `key`'s random part at least `FRAGMENT` long that `text` holds, plainly or URL-encoded. */
 function piecesOf(key: string, random: string, text: string): string[] {
   const start = key.length - random.length;

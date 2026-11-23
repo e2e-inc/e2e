@@ -19,7 +19,7 @@ import { APP_LOG_LIMITS } from '../engine/session.ts';
 import type { AppEvent } from '../engine/surface.ts';
 import { compareScreens, type ScreenText, type StepScreen } from './step-screens.ts';
 import { insidePollRead, pollReadSignal } from '../expect/poll-scope.ts';
-import { processSecrets } from './secrecy.ts';
+import { processSecrets, registerProviderKeys } from './secrecy.ts';
 
 /** The closed step kind set; the type is derived from it, so the two cannot drift. */
 export const STEP_KINDS = ['agent', 'locator', 'assertion', 'screen', 'app', 'session', 'resource'] as const;
@@ -609,6 +609,8 @@ export class StepRecorder {
       markAbandonedRejection(error);
       return Promise.reject(error);
     }
+    // A hook or test may set a provider key after the session opened.
+    registerProviderKeys(process.env);
     // The label is published, reported, and traced as is: a secret the test
     // spelled into an instruction or a locator stops here, once.
     const label = this.redact?.(rawLabel) ?? rawLabel;
@@ -790,6 +792,7 @@ export class StepRecorder {
       if (options.verifies === true) this.lastVerified = Math.max(this.lastVerified, verifiesBefore);
       return result;
     } catch (thrown) {
+      registerProviderKeys(process.env);
       // A step that failed on its own, or that another abort reached first, keeps that failure.
       const name = this.named.get(record.id);
       const cause = name !== undefined && thrown === name.reason ? name.error : thrown;
@@ -1060,7 +1063,15 @@ export class StepRecorder {
     if (details.metrics !== undefined) current.metrics = details.metrics;
     // A key given as a model id or an agent's model label is redacted like any other text the report holds.
     if (details.model !== undefined) current.model = { ...details.model, provider: processSecrets.redact(details.model.provider), model: processSecrets.redact(details.model.model) };
-    if (details.cache !== undefined) current.cache = details.cache;
+    if (details.cache !== undefined) {
+      const { recordedBy } = details.cache;
+      const redact = this.redact ?? processSecrets.redact;
+      // Older recordings may hold a model label that the current run redacts.
+      current.cache = recordedBy === undefined ? details.cache : {
+        ...details.cache,
+        recordedBy: { provider: redact(recordedBy.provider), model: redact(recordedBy.model) },
+      };
+    }
     if (details.observationRevision !== undefined) {
       current.observationRevision = details.observationRevision;
     }
