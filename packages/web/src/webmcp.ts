@@ -157,6 +157,7 @@ async function askModelContext(call: PageCall | null): Promise<PageAnswer> {
     }
   };
   // The text Chromium gives for a result: JSON for an object, the text itself for a string, and how the value prints otherwise.
+  // A function has no text there; neither has a symbol here, which Chromium 159 crashes on.
   const textOf = (value: unknown): string => {
     if (typeof value === 'function' || typeof value === 'symbol') return 'undefined';
     if (typeof value !== 'object' || value === null) return String(value);

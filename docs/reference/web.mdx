@@ -1146,11 +1146,12 @@ expect(result).toEqual({ content: [{ type: 'text', text: '42' }] });
   to, usually an object with a `content` array. `input` is a JSON object; left out or
   `null`, the tool gets an empty object. A result with `isError: true` comes back as it is, and
   a tool that resolves with nothing gives `null`.
-- The result is the same in Chromium and Firefox. An object or array comes
-  back as its JSON: a property left `undefined` is not in it, and a `Date`
-  inside is a string. A tool that resolves with any other value gives its
-  text, parsed when the text is JSON, so `'42'` and `42` both give `42`.
-  Resolve with an object to keep the types.
+- An object or array comes back as its JSON, the same in Chromium and
+  Firefox: a property left `undefined` is not in it, and a `Date` inside is
+  a string. A tool that resolves with any other value gives its text, parsed
+  when the text is JSON: `'42'` and `42` both give `42`, and a number past
+  2^53 loses digits. An empty string gives `'Operation succeeded'` in
+  Chromium. Resolve with an object to keep the value as it is.
 - A tool that sends the page to another URL ends the call before it answers.
   The call fails with `ACTION_FAILED` once the new page has loaded, and the
   message says the tool may have run. A tool still running when the time runs
