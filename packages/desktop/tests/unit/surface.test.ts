@@ -1267,6 +1267,19 @@ describe('DesktopSurface', () => {
     expect(fake.calls().at(-1)?.args.slice(0, 4)).toEqual(['press', 'a', '--window-id', 'w-mine']);
   });
 
+  it('takes no screenshot with interactive snapshots when the window changed size between the read and the whole read', async () => {
+    const tree = (width: number) => ({ role: 'window', name: 'Form', bounds: { x: 0, y: 0, width, height: 100 }, children: [{ role: 'button', name: 'Save', ref_id: '@s:e1', bounds: { x: width - 50, y: 10, width: 40, height: 20 } }] });
+    const read = (width: number) => ({ ok: true, data: { snapshot_id: 's', window: { id: 'w-mine' }, tree: tree(width) } });
+    const { surface } = await launched(
+      { snapshot: [read(100), read(100), read(200)], screenshot: [{ ok: true, writePng: { width: 200, height: 100 }, data: { scale_factor: 1 } }] },
+      { observe: false, options: { snapshot: 'interactive' } },
+    );
+    const observed = await surface.observe(operation(), { pixels: true });
+    expect(observed.viewport.width).toBe(100);
+    expect(observed.pixels).toBeUndefined();
+    expect(observed).not.toHaveProperty('maskedRegionCount');
+  });
+
   it('reads the whole window for a screenshot even with interactive snapshots', async () => {
     const { surface, fake } = await launched({ snapshot: [renamed('macos/sign-in-form', 'w-8321', 'w-mine')] }, { options: { snapshot: 'interactive' } });
     await startAttempt(surface);

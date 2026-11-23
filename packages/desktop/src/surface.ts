@@ -1497,6 +1497,10 @@ export class DesktopSurface {
     // The secure fields come from a whole read of the window, never an interactive one, which can leave a secure node out.
     const screen = this.options.interactiveOnly ? await this.capture(operation, observed.windowId, true) : observed;
     if (screen?.windowId === undefined) throw new EngineError('ENGINE_FAILURE', 'the window closed before it could be captured', { retryable: false });
+    // The image goes out beside the observed tree: a window that changed size since that read would pair it with the wrong viewport and boxes.
+    if (screen.viewport.width !== observed.viewport.width || screen.viewport.height !== observed.viewport.height) {
+      throw new EngineError('ENGINE_FAILURE', 'the window changed size between the read and the capture', { retryable: false });
+    }
     const secure = screen.secureRects;
     if (secure === undefined) throw unmasked('a secure field on screen has no bounds to mask');
     // A snapshot cut short can leave out a secure field, which would then go unmasked.
