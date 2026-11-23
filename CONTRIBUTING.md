@@ -59,6 +59,23 @@ Once a day, community PRs open for more than a month with fewer than 2
 positive reactions (👍 ❤️ 🎉 🚀) and no maintainer approval are closed too.
 If one was closed by mistake, say so on the PR.
 
+### Maintainer takeover
+
+A maintainer may finish a community PR themselves, for example when it is
+close to done and landing it is faster than another review round. They add the
+`maintainer takeover` label, and a comment on the PR names who took it over.
+From then on:
+
+- The maintainer owns the PR: review comments, failing checks, conflicts, and
+  the merge. You do not need to do anything else.
+- Do not push more commits to the branch. If you have something to add,
+  comment on the PR.
+- You keep the credit for the change.
+- The bot above no longer flags or closes the PR.
+
+If you would rather finish it yourself, say so on the PR and the maintainer
+removes the label.
+
 The PR description is the source of truth for the change. Reviewers read it
 before the diff, so it follows the template:
 
