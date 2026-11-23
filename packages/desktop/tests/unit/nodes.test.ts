@@ -240,6 +240,30 @@ describe('projectSnapshot', () => {
     expect(byName('Inside')?.states?.hidden).toBeUndefined();
   });
 
+  it('reads everything under a hidden node as hidden, under a wrapper it leaves out too, and swipes none of it', () => {
+    const pane = (name: string, ref: string) => ({ role: 'scrollarea', name, ref_id: ref, available_actions: ['Scroll'], children: [{ role: 'button', name: `${name} item`, ref_id: `${ref}b` }] });
+    const screen = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'Panes',
+          children: [
+            { role: 'group', states: ['hidden'], children: [pane('Drawer', '@s:e1')] },
+            { role: 'group', name: 'Panel', states: ['hidden'], children: [{ role: 'button', name: 'Panel item', ref_id: '@s:e3' }] },
+            pane('Main', '@s:e2'),
+          ],
+        },
+      },
+      minter(),
+    );
+    const byName = (name: string) => all(screen.root).find((node) => node.name === name);
+    for (const name of ['Drawer', 'Drawer item', 'Panel', 'Panel item']) expect(byName(name)?.states?.hidden).toBe(true);
+    expect(byName('Main')?.states?.hidden).toBeUndefined();
+    expect(byName('Main item')?.states?.hidden).toBeUndefined();
+    expect(screen.scrollTarget).toBe(byName('Main')?.ref.id);
+  });
+
   it('reads every node of a minimized window as hidden, the window itself too', () => {
     const { root } = projectSnapshot(load('macos/sign-in-form'), minter(), true);
     expect(resolveExpression({ kind: 'query', query: { kind: 'role', value: { kind: 'string', value: 'window', exact: true }, visible: true } }, [root])).toEqual([]);

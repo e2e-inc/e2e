@@ -280,13 +280,14 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
   let unmaskable = false;
   let scrollTarget: string | undefined;
 
-  const project = (node: RawNode, id: string, stable: boolean, likeness: string): SemanticNode => {
+  // `hiddenAbove`: an ancestor is hidden, a wrapper left out included, so nothing under it is on screen; the resolver reads each node's own state only.
+  const project = (node: RawNode, id: string, stable: boolean, likeness: string, hiddenAbove: boolean): SemanticNode => {
     const rawStates = new Set(node.states ?? []);
     const role = ROLE_MAP[node.role] ?? (node.role === 'unknown' ? undefined : node.role);
     const secure = rawStates.has('secure');
     const states: Record<string, boolean> = {};
     for (const state of STATE_NAMES) if (rawStates.has(state)) states[state] = true;
-    if (rawStates.has('offscreen') || minimized) states.hidden = true;
+    if (rawStates.has('offscreen') || minimized || hiddenAbove) states.hidden = true;
     // A control collapsed to no width or height draws nothing, and agent-desktop will not act on it. Only a leaf: a container with no box can still hold drawn children.
     if (id !== ROOT_ID && node.bounds !== undefined && (node.bounds.width <= 0 || node.bounds.height <= 0) && (node.children ?? []).length === 0) states.hidden = true;
     // A mixed checkbox is neither checked nor unchecked: no state, so check() and uncheck() always reach the control.
@@ -335,11 +336,17 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
       likeness,
     });
     const kept: RawNode[] = [];
-    const collect = (child: RawNode): void => {
-      if (transparent(child)) for (const grandchild of child.children ?? []) collect(grandchild);
-      else kept.push(child);
+    const underHidden = new Set<RawNode>();
+    const collect = (child: RawNode, throughHidden: boolean): void => {
+      if (transparent(child)) {
+        const hiddenWrapper = throughHidden || child.states?.includes('hidden') === true || child.states?.includes('offscreen') === true;
+        for (const grandchild of child.children ?? []) collect(grandchild, hiddenWrapper);
+      } else {
+        kept.push(child);
+        if (throughHidden) underHidden.add(child);
+      }
     };
-    for (const child of node.children ?? []) if (id !== ROOT_ID || !titleBar.has(child)) collect(child);
+    for (const child of node.children ?? []) if (id !== ROOT_ID || !titleBar.has(child)) collect(child, false);
     const tally = (named: boolean): Map<string, number> => {
       const counts = new Map<string, number>();
       for (const child of kept) counts.set(identityOf(child, named), (counts.get(identityOf(child, named)) ?? 0) + 1);
@@ -354,7 +361,7 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
     const children = kept.map((child) => {
       const identity = plain.get(identityOf(child)) === 1 ? identityOf(child) : named.get(identityOf(child, true)) === 1 ? identityOf(child, true) : undefined;
       // A child's id is built on its parent's: under a look-alike, whose id is new every snapshot, so is the child's.
-      return project(child, idFor(identity === undefined ? undefined : `${id}/${identity}`), stable && identity !== undefined, `${likeness}/${plain.get(identityOf(child)) ?? 1}`);
+      return project(child, idFor(identity === undefined ? undefined : `${id}/${identity}`), stable && identity !== undefined, `${likeness}/${plain.get(identityOf(child)) ?? 1}`, states.hidden === true || underHidden.has(child));
     });
     return {
       ref: { id, revision: '' },
@@ -372,7 +379,7 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
     };
   };
 
-  const root = project(raw.tree, ROOT_ID, true, '');
+  const root = project(raw.tree, ROOT_ID, true, '', false);
   const title = label(raw.tree.name) ?? label(raw.window?.title);
   return {
     root,
