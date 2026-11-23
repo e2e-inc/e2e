@@ -573,6 +573,8 @@ describe('engine protocol', () => {
       { ...base, methods: ['engine/observe', 'engine/teleport'] },
       { ...base, methods: ['engine/readStyle'] },
       { ...base, methods: ['engine/observe'], actions: ['tap'] },
+      { ...base, methods: ['engine/observe'], actions: ['blur'] },
+      { ...base, methods: ['engine/viewportIntersection'] },
       { ...base, methods: ['engine/observe'], tapModifiers: true },
       { ...base, methods: ['engine/observe'], selectsDevice: true },
       // The client serves prepare for finish alone, which would drop the device it never forwards.
@@ -586,6 +588,8 @@ describe('engine protocol', () => {
       expect(validate(refused), JSON.stringify(refused)).toBe(false);
       expect(() => connectEngine({ manifest: refused as never, transport: loopbackTransport(local) }), JSON.stringify(refused)).toThrow(ConfigurationError);
     }
+    // Only a worker-isolated engine names its isolation; `attempt` is the default, left out.
+    expect(validate({ ...base, methods: ['engine/observe'], isolation: 'attempt' })).toBe(false);
   });
 
   describe('launch arguments', () => {
