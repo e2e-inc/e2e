@@ -216,6 +216,14 @@ describe('projectSnapshot', () => {
     expect(root.children?.map((node) => node.states?.readonly)).toEqual([true, false, undefined]);
   });
 
+  it('swipes a custom view that offers Scroll when no scroll area is on screen', () => {
+    const screen = projectSnapshot(
+      { snapshot_id: 's', tree: { role: 'window', name: 'Feed', children: [{ role: 'button', name: 'Refresh', ref_id: '@s:e1' }, { role: 'group', name: 'Posts', ref_id: '@s:e2', available_actions: ['Scroll'] }] } },
+      minter(),
+    );
+    expect(screen.scrollTarget).toBe(screen.root.children?.[1]?.ref.id);
+  });
+
   it('counts a node with children it did not list as a cut-short tree', () => {
     const screen = projectSnapshot({ snapshot_id: 's', complete: true, tree: { role: 'window', name: 'W', children: [{ role: 'group', name: 'Deep', children_count: 3 }] } }, minter());
     expect(screen.truncated).toBe(true);

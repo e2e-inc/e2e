@@ -317,7 +317,8 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
     const description = label(node.description);
     if (description !== undefined) attributes.description = description;
     if (node.native_id !== undefined) attributes['native-id-kind'] = node.native_id.kind;
-    if (scrollTarget === undefined && node.ref_id !== undefined && SCROLLABLE_ROLES.has(node.role)) scrollTarget = id;
+    // A custom view that scrolls has none of those roles, but agent-desktop offers it Scroll.
+    if (scrollTarget === undefined && node.ref_id !== undefined && (SCROLLABLE_ROLES.has(node.role) || node.available_actions?.includes('Scroll') === true)) scrollTarget = id;
     bindings.set(id, {
       id,
       ...(node.ref_id === undefined ? {} : { ref: node.ref_id }),
