@@ -1162,7 +1162,13 @@ export class DesktopSurface {
   async perform(ref: NodeRef, action: LocatorAction, context: OperationContext): Promise<void> {
     const operation = withDeadline(context);
     if (ref.id === ROOT_ID) {
-      if (action.kind !== 'swipe') throw notActionable(`the window takes swipe only, not ${action.kind}; act on a node`);
+      // The window is in view unless it is minimized: toHaveScreenshot on a window locator scrolls it into view first.
+      if (action.kind === 'scrollIntoView') {
+        const shown = await this.capture(operation);
+        if (shown === undefined || shown.root.states?.hidden === true) throw notActionable('the window is not on screen (minimized, or closed), so it cannot be brought into view');
+        return;
+      }
+      if (action.kind !== 'swipe') throw notActionable(`the window takes swipe and scrollIntoView only, not ${action.kind}; act on a node`);
       // The root is the window as it is now: read it again, since a locate or a restart may have moved on from the last observation.
       const screen = await this.capture(operation);
       if (screen !== undefined) this.remember(screen.bindings.values());

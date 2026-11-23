@@ -833,6 +833,13 @@ describe('DesktopSurface', () => {
     expect(fake.calls().some((call) => call.key === 'uncheck')).toBe(true);
   });
 
+  it('takes a visible window as in view, and refuses a minimized one', async () => {
+    const shown = await launched({}, { observe: false });
+    await shown.surface.perform({ id: 'root', revision: '' }, { kind: 'scrollIntoView' }, operation());
+    const minimized = await launched((pid) => ({ 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }, { ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', minimized: true, visible: false }] }] }), { observe: false });
+    await expect(minimized.surface.perform({ id: 'root', revision: '' }, { kind: 'scrollIntoView' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/not on screen/) });
+  });
+
   it('scrolls nothing to bring visible static text into view, and refuses hidden text it cannot scroll to', async () => {
     const read = (states: readonly string[]) => ({ ok: true, data: { snapshot_id: 's', window: { id: 'w-mine' }, tree: { role: 'window', name: 'Form', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [{ role: 'statictext', value: 'Sign in to the testbed', states, bounds: { x: 10, y: 10, width: 150, height: 20 } }] } } });
     const text = { kind: 'query', query: { kind: 'text', value: { kind: 'string', value: 'Sign in to the testbed', exact: true } } } as const;
