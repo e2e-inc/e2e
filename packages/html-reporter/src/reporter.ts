@@ -183,6 +183,7 @@ function toPosix(relative: string): string {
   return relative.split(path.sep).join('/');
 }
 
-function formatSize(bytes: number): string {
-  return bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+export function formatSize(bytes: number): string {
+  const kb = Math.ceil(bytes / 1024);
+  return kb < 1024 ? `${kb} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
