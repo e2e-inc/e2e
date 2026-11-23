@@ -40,7 +40,7 @@ import { classifyInputError } from './actions.ts';
 import type { AttemptTab } from './attempt-session.ts';
 import type { DialogHandler } from './dialogs.ts';
 import { saveDownloadsTo, saveFromBrowser, saveLocally } from './downloads.ts';
-import { isTestErrorCode, message as causeMessage, pageScriptFailure, translatePwError } from './support.ts';
+import { describe, isTestErrorCode, message as causeMessage, pageScriptFailure, translatePwError } from './support.ts';
 import { compileEvaluation, decodeEvaluation, pageFunctionSource } from './evaluation.ts';
 import { initScriptLabel, testInitScriptSource } from './init-scripts.ts';
 import { MEDIA_KEYS, mediaLabel, mediaProblem, type WebMedia } from './media.ts';
@@ -898,11 +898,13 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
       }
       return surface.guard(context.operation(), 'clearCookies', () => surface.requireContext().clearCookies(options));
     },
-    setViewport: (size) =>
-      surface.guard(context.operation(), 'setViewport', async () => {
-        await surface.setViewport(size);
-        context.attachViewport({ width: size.width, height: size.height, scale: 1 });
-      }),
+    setViewport(size) {
+      const { width, height } = viewportSize(size);
+      return surface.guard(context.operation(), 'setViewport', async () => {
+        await surface.setViewport({ width, height });
+        context.attachViewport({ width, height, scale: 1 });
+      });
+    },
     async emulateMedia(media) {
       if (typeof media !== 'object' || media === null) {
         throw new TestError('INVALID_ARGUMENT', 'browser.emulateMedia takes { colorScheme?, reducedMotion? }');
@@ -996,6 +998,28 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     mouse: { move: action, wheel: action, down: action, up: action },
     webmcp: { tools: action, callTool: { ...action, label: (name) => String(name) } },
   });
+}
+
+/**
+ * The size `browser.setViewport` takes, read once: `{ width, height }` in
+ * whole, non-negative pixels and no other key. A wrong one is the test's
+ * mistake, so it is refused before the engine is asked.
+ */
+function viewportSize(size: unknown): { readonly width: number; readonly height: number } {
+  const usage = 'browser.setViewport takes { width, height } in whole, non-negative pixels';
+  if (typeof size !== 'object' || size === null || Array.isArray(size)) {
+    throw new TestError('INVALID_ARGUMENT', `${usage}, got ${describe(size)}`);
+  }
+  const unknownKey = Object.getOwnPropertyNames(size).find((key) => key !== 'width' && key !== 'height');
+  if (unknownKey !== undefined) throw new TestError('INVALID_ARGUMENT', `${usage}; it has no key ${JSON.stringify(unknownKey)}`);
+  const width: unknown = Reflect.get(size, 'width');
+  const height: unknown = Reflect.get(size, 'height');
+  for (const [name, side] of [['width', width], ['height', height]] as const) {
+    if (typeof side !== 'number' || !Number.isInteger(side) || side < 0) {
+      throw new TestError('INVALID_ARGUMENT', `${usage}, got ${name} ${describe(side)}`);
+    }
+  }
+  return { width: width as number, height: height as number };
 }
 
 interface ExpectationDeps {

@@ -945,6 +945,10 @@ await app.open('/');
 - The size holds for the rest of the attempt, through `app.restart()` and
   `app.clearState()`.
 
+| Throws | When |
+| --- | --- |
+| `INVALID_ARGUMENT` | The size is not `{ width, height }` in whole, non-negative pixels, or has another key. The viewport stays as it was. |
+
 #### `onDialog`
 
 Registers an attempt-scoped handler for native dialogs and returns an
