@@ -109,7 +109,7 @@ export function web(options: WebOptions = {}): WebEngine {
   // A per-attempt lease rides the same persistent context as `reconnectEndpoint`, with the same limits.
   const recoverable = reconnecting || provider?.scope === 'attempt';
   const mode = provider === undefined ? 'connect.reconnectEndpoint' : `browser provider "${provider.name}" with scope "attempt"`;
-  const creationOptions = CREATION_OPTION_KEYS.filter((key) => options[key] !== undefined);
+  const creationOptions = CREATION_OPTION_KEYS.filter((key) => options[key] !== undefined && options[key] !== false);
   if (recoverable && creationOptions.length > 0) {
     throw new ConfigurationError(
       'INVALID_CONFIG',

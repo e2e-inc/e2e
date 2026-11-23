@@ -483,8 +483,8 @@ await screen.swipe({ from: { x: '50%', y: '80%' }, to: { x: '50%', y: '20%' } })
 
 `{ from, to, duration? }` is a swipe along a path between two viewport
 points: a touch swipe on a device and on Chromium with
-[`web({ hasTouch: true })`](/reference/web#hastouch), a pointer drag on any
-other document platform.
+[`web({ hasTouch: true })`](/reference/web#hastouch), a pointer drag on a web
+target without `hasTouch`.
 Use it to reveal a row action, dismiss a sheet, or drag a card between
 columns.
 
@@ -1411,7 +1411,7 @@ export interface SwipeOptions {
   duration?: never;
 }
 
-/** A swipe along a path between two viewport points: a touch swipe on a device, a pointer drag on a document platform. */
+/** A swipe along a path between two viewport points: a touch swipe on a device or an emulated touchscreen, a pointer drag on any other document platform. */
 export interface SwipePathOptions {
   /** Where the finger goes down. */
   from: ScreenPoint;

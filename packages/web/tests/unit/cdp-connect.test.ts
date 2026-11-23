@@ -42,6 +42,7 @@ describe('web({ connect })', () => {
     expect(() => web({ connect, locale: 'de-DE' })).toThrow(/persistent context; locale requires/);
     expect(() => web({ connect, timezoneId: 'Europe/Berlin' })).toThrow(/persistent context; timezoneId requires/);
     expect(() => web({ connect, hasTouch: true })).toThrow(/persistent context; hasTouch requires/);
+    expect(() => web({ connect, hasTouch: false })).not.toThrow();
   });
 
   it('rejects connect with a non-chromium browser as INVALID_CONFIG', () => {

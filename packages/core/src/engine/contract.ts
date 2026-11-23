@@ -346,9 +346,9 @@ export const KNOWN_LOCATOR_ACTION_KINDS = [...LOCATOR_ACTION_KINDS, 'blur', 'set
  * kinds are the pointer subset of `LocatorAction` with the same meanings;
  * `dragTo` ends at a second point, and `swipe` is a scroll gesture started at
  * the point. `swipeTo` is the one kind with no node form: the finger's path
- * from the point to `target`, a touch swipe on a device and a pointer drag on
- * a document platform, which is distinct from `dragTo` where a platform holds
- * before it drags.
+ * from the point to `target`, a touch swipe on a device or an emulated
+ * touchscreen and a pointer drag on any other document platform, which is
+ * distinct from `dragTo` where a platform holds before it drags.
  */
 export type PointerAction =
   | { readonly kind: 'tap' | 'doubleTap' | 'secondaryTap' | 'hover' }

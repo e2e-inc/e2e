@@ -376,9 +376,11 @@ web({ hasTouch: true }); // default: false
 ```
 
 - A `tap`, on a node or at a point (`screen.tapAt`, `tap({ position })`),
-  sends `touchstart` and `touchend`. The browser follows them with a click.
+  sends `touchstart` and `touchend`. The browser then clicks, unless the app
+  cancels the touch.
 - A swipe along a path (`screen.swipe({ from, to })`) sends `touchstart`,
-  `touchmove`, and `touchend` on Chromium.
+  `touchmove`, and `touchend` on Chromium. Without a `duration` it is a fast
+  flick, which can fling a scrolling page as a finger does.
 - Every other action stays mouse and keyboard input, a directional swipe
   included.
 

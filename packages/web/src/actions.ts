@@ -447,9 +447,11 @@ export async function dispatchPointerAction(
       }
       const session = await page.context().newCDPSession(page);
       try {
+        signal?.throwIfAborted();
         await performPointDrag(cdpTouchscreen(session), point, action.target, action.durationMs, signal);
       } finally {
-        await session.detach();
+        // A swipe can close its own tab, and a failed detach must not replace the drag's own error.
+        void session.detach().catch(() => undefined);
       }
       return;
     }

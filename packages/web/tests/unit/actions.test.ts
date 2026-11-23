@@ -492,6 +492,16 @@ describe('dispatchPointerAction', () => {
     expect(calls).toEqual(['touchStart 10,20', 'touchMove 60,20', 'touchMove 110,20', 'touchEnd', 'detach']);
   });
 
+  it('sends no touch when the operation is cancelled while the CDP session opens', async () => {
+    const { page, calls } = stubPage();
+    const controller = new AbortController();
+    controller.abort(new Error('cancelled'));
+    await expect(
+      dispatchPointerAction(page, { x: 10, y: 20 }, { kind: 'swipeTo', target: { x: 110, y: 20 } }, controller.signal, 'chromium'),
+    ).rejects.toThrow('cancelled');
+    expect(calls).toEqual(['detach']);
+  });
+
   it.each(['firefox', 'webkit'] as const)('refuses a swipe along a path with a touchscreen on %s before any input', async (browser) => {
     const { page, calls } = stubPage();
     await expect(
