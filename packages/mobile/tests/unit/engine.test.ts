@@ -573,6 +573,15 @@ describe('lifecycle', () => {
     const byUdid = harness({ device: '2BBF3F07-AF66-4F95-82AB-BF442506FC89' });
     await boot(byUdid);
     expect(byUdid.fake.lastArgs('devices.boot')).toEqual({ platform: 'ios', udid: '2BBF3F07-AF66-4F95-82AB-BF442506FC89' });
+    // A physical iPhone's hardware UDID, in the current and the pre-2018 form, is a UDID too.
+    for (const udid of ['00008030-001A2B3C0E12802E', 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678']) {
+      const physical = harness({ device: udid });
+      await boot(physical);
+      expect(physical.fake.lastArgs('devices.boot')).toEqual({ platform: 'ios', udid });
+    }
+    const nearMiss = harness({ device: '00008030-001A2B3C' });
+    await boot(nearMiss);
+    expect(nearMiss.fake.lastArgs('devices.boot')).toEqual({ platform: 'ios', device: '00008030-001A2B3C' });
   });
 
   it('binds a configured Android name that is a listed device id as its adb serial, a physical phone included, and keeps every other entry a name', async () => {

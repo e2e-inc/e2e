@@ -26,8 +26,12 @@ import { isNoSession, isRunnerFailure, message, runCommand } from './errors.ts';
 import type { AgentDeviceClient, MobileOptions, MobilePlatform, ClientFactory } from './options.ts';
 import { asDeviceProvider, LeasedDevices, type RecordingDeviceProvider } from './provider.ts';
 
-/** An Apple simulator UDID. */
-const UDID = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
+/**
+ * An Apple UDID, the id agent-device lists an Apple device under: a
+ * simulator's (`8-4-4-4-12`), a physical device's hardware UDID from 2018 on
+ * (`00008030-001A2B3C0E12802E`), or an older one's 40 hex digits.
+ */
+const UDID = /^(?:[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}|[0-9A-F]{8}-[0-9A-F]{16}|[0-9A-F]{40})$/i;
 /** An Android emulator's adb serial. */
 const EMULATOR_SERIAL = /^emulator-\d+$/;
 
