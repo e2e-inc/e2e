@@ -563,13 +563,15 @@ await screen.getByText('Shipping address').tap({ count: 3 });
 
 オプションは [`TapOptions`](#types) です。
 
+- `count`: 連続して行うタップの回数です。1 から 10 までの整数で、既定値は 1 です。タップは一続きの操作として届くため、プラットフォームは 1 回の複数クリックとして扱います。たとえばブラウザでトリプルクリックすると段落が選択されます。`count: 2` は [`doubleTap()`](#doubletap) と同じアクションです。3 以上には `multiTap` アクションを列挙するエンジンが必要で、ブラウザエンジンとモバイルエンジンはどちらも対応しています。
 - `modifiers`: ブラウザエンジンが指定のキーを押したままにします。
 - `position`: ノードの左上からのオフセットです。境界の内側を CSS ピクセルで指定します。エンジンが `scrollIntoView` に対応していれば、ノードを表示範囲にスクロールします。その後、ノードのボックスを読み、指定の点にポインター操作を送ります。ジェスチャー自体にはノードが紐付かないため、有効か、覆われていないかといった、プラットフォームのほかの操作可能性の検証は行いません。
 
 | エラー | 発生条件 |
 | --- | --- |
-| `INVALID_ARGUMENT` | 未知または重複した修飾キー、あるいは `modifiers` と `position` の併用。 |
+| `INVALID_ARGUMENT` | 未知または重複した修飾キー、`modifiers` と `position` の併用、1 から 10 までの整数でない `count`、あるいは `position` と併用した 1 より大きい `count`。 |
 | `UNSUPPORTED_CAPABILITY` | モバイルエンジンなど、`tapModifiers` を宣言していないエンジンで `modifiers` を指定した場合。操作前にスローします。 |
+| `UNSUPPORTED_CAPABILITY` | `multiTap` アクションのないエンジンで 3 以上の `count` を指定した場合。操作前にスローします。 |
 | `UNSUPPORTED_CAPABILITY` | `tap` ポインターアクションのないエンジンで `position` を指定した場合。 |
 | `ACTION_FAILED` | ブラウザエンジンが表示範囲に入れられないノードで `position` を指定した場合。スクロール処理は可視になるまで待ちます。ほかのエンジンでは、それぞれが報告するエラーになります。 |
 | `LOCATOR_NOT_FOUND` | `position` の対象ノードは解決できても、タイムアウト内に可視のボックスが得られなかった場合。 |
@@ -1271,8 +1273,8 @@ export interface TapOptions extends ClickOptions {
   /**
    * How many taps in a row, an integer from 1 through 10, default 1. `2` is
    * the same as `doubleTap()`; 3 or more needs an engine that declares the
-   * `multiTap` action, `UNSUPPORTED_CAPABILITY` otherwise. Not combined with
-   * `position`.
+   * `multiTap` action, `UNSUPPORTED_CAPABILITY` otherwise. A count above 1 is
+   * not combined with `position`.
    */
   count?: number;
 }

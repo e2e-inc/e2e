@@ -369,7 +369,7 @@ export interface OperationContext {
 | `readStyle` | `computed-style` | `observe` | 供只读项目工具使用的允许列表中的渲染属性。 |
 | `perform` + `actions` | `actions` | `observe` | 已声明种类的节点操作，带有平台可操作性检查。 |
 | `locate` | `location` | `observe` | `screen`、`Locator`、`expect(locator)`。 |
-| `tapModifiers: true` | - | `perform` | `tap`、`doubleTap` 和 `secondaryTap` 的 `modifiers`。 |
+| `tapModifiers: true` | - | `perform` | `tap`、`doubleTap`、`multiTap` 和 `secondaryTap` 的 `modifiers`。 |
 | `selectsDevice: true` | - | `prepare` | `e2e run --device`，由 `prepare` 绑定指定的设备。 |
 | `performAt` + `pointerActions` | `pointer` | `observe` | 在视口坐标点上执行一次指针操作，无需对应节点。 |
 | `keyboard.{type,press,dismiss?}` | `keyboard` | `observe` | 向当前焦点所在位置输入。 |

@@ -500,8 +500,8 @@ export interface TapOptions extends ClickOptions {
   /**
    * How many taps in a row, an integer from 1 through 10, default 1. `2` is
    * the same as `doubleTap()`; 3 or more needs an engine that declares the
-   * `multiTap` action, `UNSUPPORTED_CAPABILITY` otherwise. Not combined with
-   * `position`.
+   * `multiTap` action, `UNSUPPORTED_CAPABILITY` otherwise. A count above 1 is
+   * not combined with `position`.
    */
   count?: number;
 }

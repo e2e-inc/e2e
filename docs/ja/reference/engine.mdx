@@ -369,7 +369,7 @@ export interface OperationContext {
 | `readStyle` | `computed-style` | `observe` | 読み取り専用プロジェクトツール向けの、許可リスト内の描画プロパティ。 |
 | `perform` + `actions` | `actions` | `observe` | 宣言した種類のノード操作と、プラットフォームの操作可否の検査。 |
 | `locate` | `location` | `observe` | `screen`、`Locator`、`expect(locator)`。 |
-| `tapModifiers: true` | - | `perform` | `tap`、`doubleTap`、`secondaryTap` の `modifiers`。 |
+| `tapModifiers: true` | - | `perform` | `tap`、`doubleTap`、`multiTap`、`secondaryTap` の `modifiers`。 |
 | `selectsDevice: true` | - | `prepare` | `e2e run --device`。`prepare` が指定のデバイスを割り当てます。 |
 | `performAt` + `pointerActions` | `pointer` | `observe` | 対応するノードのないビューポート座標でのポインター操作。 |
 | `keyboard.{type,press,dismiss?}` | `keyboard` | `observe` | フォーカス中の対象への入力。 |
