@@ -1331,6 +1331,24 @@ export default {
       expect(output()).not.toContain('Found Next.js');
     });
 
+    it('builds the app for an existing config that serves start on another port than dev', async () => {
+      nextApp({ dev: 'next dev -p 3100', build: 'next build', start: 'next start' }, { devDependencies: { '@e2e-dev/web': '*' } });
+      writeFileSync(path.join(dir, 'e2e.config.ts'), `const ci = process.env.CI === 'true';
+export default {
+  targets: [{
+    platform: 'web',
+    app: {
+      url: ci ? 'http://localhost:3000' : 'http://localhost:3100',
+      command: ci ? { executable: 'npm', args: ['run', 'start'] } : { executable: 'npm', args: ['run', 'dev'] },
+    },
+  }],
+};
+`);
+      expect((await init(dir, { yes: true, ci: 'github-actions' })).exitCode).toBe(0);
+      const steps = (parseYaml(read('.github/workflows/e2e.yml')) as { jobs: { web: { steps: { name?: string; run?: string }[] } } }).jobs.web.steps;
+      expect(steps.find((step) => step.name === 'Build the app')?.run).toBe('npm run build');
+    });
+
     it('builds nothing for an existing config that runs only next dev', async () => {
       nextApp(undefined, { devDependencies: { '@e2e-dev/web': '*' } });
       writeFileSync(path.join(dir, 'e2e.config.ts'), `export default {

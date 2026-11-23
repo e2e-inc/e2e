@@ -67,6 +67,18 @@ function findDetector(manifest: FrameworkManifest): FrameworkDetector | undefine
 }
 
 /**
+ * The scripts that build and serve the production app of a framework init
+ * recognizes, whatever port they use, or undefined when the project has no
+ * such framework or lacks either script. A pipeline added to an existing
+ * config builds when that config runs the start script.
+ */
+export function productionScripts(manifest: FrameworkManifest): { readonly build: string; readonly start: string } | undefined {
+  if (findDetector(manifest) === undefined) return undefined;
+  const scripts = manifest.scripts ?? {};
+  return scripts[BUILD_SCRIPT] === undefined || scripts[START_SCRIPT] === undefined ? undefined : { build: BUILD_SCRIPT, start: START_SCRIPT };
+}
+
+/**
  * The framework the project's package.json declares in `dependencies` or
  * `devDependencies`, with how to start it, or undefined when it declares
  * none init knows. A project with the framework but no `dev` script, or a

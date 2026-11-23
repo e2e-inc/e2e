@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectFramework } from '../../src/cli/init/frameworks.ts';
+import { detectFramework, productionScripts } from '../../src/cli/init/frameworks.ts';
 
 /** The scripts `create-next-app` writes. */
 const NEXT_SCRIPTS = { dev: 'next dev', build: 'next build', start: 'next start' };
@@ -74,4 +74,12 @@ describe('detectFramework', () => {
     expect(production({ dev: 'next dev', build: 'next build' })).toBeUndefined();
   });
 
+  it('finds the production scripts of an existing app on any port', () => {
+    expect(productionScripts({ dependencies: { next: '*' }, scripts: { dev: 'next dev -p 3100', build: 'next build', start: 'next start' } }))
+      .toEqual({ build: 'build', start: 'start' });
+    expect(productionScripts({ dependencies: { next: '*' }, scripts: { build: 'next build', start: 'next start' } }))
+      .toEqual({ build: 'build', start: 'start' });
+    expect(productionScripts({ dependencies: { next: '*' }, scripts: { start: 'next start' } })).toBeUndefined();
+    expect(productionScripts({ scripts: NEXT_SCRIPTS })).toBeUndefined();
+  });
 });

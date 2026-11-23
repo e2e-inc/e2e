@@ -52,7 +52,7 @@ import {
 import { MCP_LOCATIONS, type CiChoice } from './init/choices.ts';
 import { loadConfigModule } from '../config/load.ts';
 import { getEnginePreset, getEnginePresets, DEFAULT_ENGINE_IDS, type EngineId } from './init/engines.ts';
-import { detectFramework, type FrameworkApp } from './init/frameworks.ts';
+import { detectFramework, productionScripts, type FrameworkApp, type FrameworkManifest } from './init/frameworks.ts';
 import { copyExample, ExampleCopyCancelled, ExampleDownloadError, findExample, isEmptyDirectory, type ExampleCopy } from './init/examples.ts';
 import { DEFAULT_ENDPOINT, GATEWAYS, getGatewayPreset, validateEndpoint, type GatewayId } from './init/gateways.ts';
 import { isCiMode } from '@e2e-dev/core/lib/config/resolve';
@@ -746,14 +746,13 @@ function describeApp(app: FrameworkApp, manager: PackageManager): string {
 
 /**
  * The production build an existing config serves in CI: the build script of
- * an app init recognizes, when the config runs its start script. The
- * pipeline builds it before the tests, since the start script serves only a
- * build.
+ * an app init recognizes, when the config runs its start script, on any
+ * port. The pipeline builds it before the tests, since the start script
+ * serves only a build.
  */
-function servedBuild(manifest: Parameters<typeof detectFramework>[0], config: string): string | undefined {
-  const framework = detectFramework(manifest);
-  if (framework?.kind !== 'app' || framework.production === undefined) return undefined;
-  return configRunsScript(config, framework.production.start) ? framework.production.build : undefined;
+function servedBuild(manifest: FrameworkManifest, config: string): string | undefined {
+  const scripts = productionScripts(manifest);
+  return scripts !== undefined && configRunsScript(config, scripts.start) ? scripts.build : undefined;
 }
 
 /** The major version of the pnpm on this machine, for `pnpm/action-setup`; `latest` when it cannot be read. */
