@@ -97,7 +97,7 @@ bunx e2e init --yes --gateway openrouter --skills .agents/skills --mcp .mcp.json
 | --- | --- |
 | `[directory]` | 生成脚手架的目录；不存在时创建。默认：工作目录。 |
 | `-y`、`--yes` | 跳过提示。未通过标志给出的答案使用默认值：网页端引擎、Vercel AI Gateway、在两个位置安装技能和 MCP 配置、不添加 CI 流水线、不安装依赖项。 |
-| `--example <name>` | 从示例应用开始：`with-vite`、`with-next`、`with-astro`、`with-angular`、`with-expo`、`with-swiftui`、`with-compose`、`with-kotlin-multiplatform`、`with-flutter` 或 `with-maui`。`with-` 前缀可省略。参阅[从示例开始](#starting-from-an-example)。 |
+| `--example [name]` | 从示例应用开始：`with-vite`、`with-next`、`with-astro`、`with-angular`、`with-expo`、`with-swiftui`、`with-compose`、`with-kotlin-multiplatform`、`with-flutter` 或 `with-maui`。`with-` 前缀可省略。不带名称时，从列表中选择。参阅[从示例开始](#starting-from-an-example)。 |
 | `--engine <ids>` | 新配置使用的引擎：`web`、`mobile` 或 `none`。以逗号分隔或重复传入；`web,mobile` 会为每个引擎写入一个测试目标。默认：询问。 |
 | `--gateway <id>` | 新配置中智能体步骤使用的模型网关：`vercel`、`openrouter`、`openai-compatible`、`chatgpt`、`copilot`、`opencode-console`、`grok` 或 `none`。默认：询问。 |
 | `--endpoint <url>` | `--gateway openai-compatible` 的基础 URL，并隐含该选项。支持 HTTPS，或回环主机上的 HTTP。默认：询问；使用 `--yes` 时为 `http://127.0.0.1:11434/v1`。 |
@@ -115,6 +115,7 @@ bunx e2e init --yes --gateway openrouter --skills .agents/skills --mcp .mcp.json
 | 2 | 未知的标志值。在任何写入前退出，并列出有效值。 |
 | 2 | `package.json` 无效。在任何写入前退出。 |
 | 2 | stdin 和 stdout 均未连接终端，且未指定 `--yes`。提示信息会指出该标志。 |
+| 2 | `--example` 不带名称，且指定了 `--yes` 或未连接终端。提示信息会列出名称。 |
 | 2 | `--example` 指定的目录中已有文件，或示例下载失败。不会留下任何内容。 |
 | 2 | 依赖项安装失败。 |
 | 130 | 绘制标志或下载示例时收到 Ctrl-C 或 SIGTERM，或安装依赖项期间收到 SIGINT。下载不完整的示例会被移除。 |
@@ -195,7 +196,7 @@ bunx e2e init --yes --ci gitlab
 <a id="starting-from-an-example" />
 ##### 从示例开始
 
-`--example` 将一个[示例应用](https://github.com/e2e-inc/e2e/tree/main/examples)复制到新目录或空目录，然后在其中的 e2e 项目中运行向导。对于网页应用或 Expo 应用，e2e 项目就是该目录本身；对于原生应用，则是其 `e2e/` 文件夹。
+`--example` 将一个[示例应用](https://github.com/e2e-inc/e2e/tree/main/examples)复制到新目录或空目录，然后在其中的 e2e 项目中运行向导。对于网页应用或 Expo 应用，e2e 项目就是该目录本身；对于原生应用，则是其 `e2e/` 文件夹。不带名称时，从列表中选择。
 
 <CodeGroup>
 ```bash npm

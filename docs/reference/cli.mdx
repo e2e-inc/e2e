@@ -113,7 +113,7 @@ bunx e2e init --yes --gateway openrouter --skills .agents/skills --mcp .mcp.json
 | --- | --- |
 | `[directory]` | Where to scaffold; created when missing. Default: the working directory. |
 | `-y`, `--yes` | Skips the prompts. Each answer not given as a flag takes its default: Web engine, Vercel AI Gateway, skill and MCP config in both locations, no CI pipeline, no install. |
-| `--example <name>` | Starts from an example app: `with-vite`, `with-next`, `with-astro`, `with-angular`, `with-expo`, `with-swiftui`, `with-compose`, `with-kotlin-multiplatform`, `with-flutter`, or `with-maui`. The `with-` prefix is optional. See [Starting from an example](#starting-from-an-example). |
+| `--example [name]` | Starts from an example app: `with-vite`, `with-next`, `with-astro`, `with-angular`, `with-expo`, `with-swiftui`, `with-compose`, `with-kotlin-multiplatform`, `with-flutter`, or `with-maui`. The `with-` prefix is optional. Without a name, lists them to pick from. See [Starting from an example](#starting-from-an-example). |
 | `--engine <ids>` | The engines for a new config: `web`, `mobile`, or `none`. Comma-separated or repeated; `web,mobile` writes a target for each. Default: asked. |
 | `--gateway <id>` | The model gateway for agent steps in a new config: `vercel`, `openrouter`, `openai-compatible`, `chatgpt`, `copilot`, `opencode-console`, `grok`, or `none`. Default: asked. |
 | `--endpoint <url>` | Base URL for `--gateway openai-compatible`, and implies it. HTTPS, or HTTP on a loopback host. Default: asked; `http://127.0.0.1:11434/v1` with `--yes`. |
@@ -132,6 +132,7 @@ bunx e2e init --yes --gateway openrouter --skills .agents/skills --mcp .mcp.json
 | 2 | An unknown flag value. Exits before any write and lists the valid values. |
 | 2 | An invalid `package.json`. Exits before any write. |
 | 2 | No terminal on stdin and stdout, and no `--yes`. The message names the flag. |
+| 2 | `--example` without a name, with `--yes` or without a terminal. The message lists the names. |
 | 2 | `--example` with a directory that has files in it, or the example download failed. Nothing stays behind. |
 | 2 | The dependency installation failed. |
 | 130 | Ctrl-C or SIGTERM while the logo is drawn or the example downloads, or SIGINT during the dependency installation. A partial example is removed. |
@@ -301,7 +302,7 @@ bunx e2e init --yes --ci gitlab
 [example apps](https://github.com/e2e-inc/e2e/tree/main/examples) into a
 new or empty directory, then runs the wizard in its e2e project. That is
 the directory itself for a web or Expo app, and its `e2e/` folder for a
-native app.
+native app. Without a name, it lists the examples to pick from.
 
 <CodeGroup>
 ```bash npm

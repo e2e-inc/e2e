@@ -729,6 +729,13 @@ describe('e2e init argument parsing', () => {
     );
   });
 
+  it('reads --example without a name as a request to pick one, and a name as that example', async () => {
+    await invoke('init', 'my-app', '--example');
+    expect(initMock).toHaveBeenLastCalledWith(path.resolve(process.cwd(), 'my-app'), expect.objectContaining({ example: true }));
+    await invoke('init', 'my-app', '--example', 'expo');
+    expect(initMock).toHaveBeenLastCalledWith(path.resolve(process.cwd(), 'my-app'), expect.objectContaining({ example: 'with-expo' }));
+  });
+
   it('reads none as no location, and --no-install as declining the install', async () => {
     await invoke('init', '--engine', 'none', '--gateway', 'none', '--skills', 'none', '--mcp', 'none', '--no-install');
     expect(initMock).toHaveBeenCalledExactlyOnceWith(
@@ -741,6 +748,10 @@ describe('e2e init argument parsing', () => {
     [['--engine', 'playwright'], 'error: --engine: unknown engine "playwright"; expected web, mobile, none'],
     [['--engine', 'web,none'], 'error: --engine: none cannot be combined with other values'],
     [['--gateway', 'anthropic'], 'Allowed choices are vercel, openrouter, openai-compatible, chatgpt, copilot, opencode-console, grok, none.'],
+    [['--example'], 'error: --example without a name asks which example, and --yes skips the prompts; name one of with-vite'],
+    [['--example', 'my-app'], 'unknown example "my-app"; expected with-vite'],
+    [['--example', 'my-app'], 'A directory goes before --example'],
+    [['--example', 'vite', '--engine', 'web'], 'error: an example brings its own e2e.config.ts; drop --engine'],
     [['--skills', '.cursor/skills'], 'error: --skills: unknown skill directory ".cursor/skills"; expected .agents/skills, .claude/skills, none'],
     [['--skills', ''], 'must name at least one skill directory'],
     [['--mcp', 'claude'], 'error: --mcp: unknown MCP config file "claude"; expected .mcp.json, .cursor/mcp.json, .codex/config.toml, none'],

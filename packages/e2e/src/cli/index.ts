@@ -536,6 +536,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
           'e2e init',
           'e2e init my-app',
           'e2e init my-app --example with-expo',
+          'e2e init my-app --example',
           'e2e init --yes',
           'e2e init --yes --gateway openrouter --skills .agents/skills --mcp none --install',
           'e2e init --yes --ci github-actions',
