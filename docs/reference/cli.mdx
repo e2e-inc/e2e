@@ -1015,10 +1015,9 @@ finding do (`stuck`).
 
 #### `e2e list`
 
-`list` previews the test-target pairs that `run` would select without starting
-an app process, engine, or worker, or writing a run report. With
-`--changed-since`, it can run configured [test filters](/filters#preview-locally),
-including filters that call a model. Omit the flag to skip those filters.
+A dry run: `list` selects tests exactly as `run` does, prints one line per
+test-target pair, and exits. It starts no app process, engine, or worker, and
+writes nothing.
 
 <CodeGroup>
 ```bash npm
@@ -1052,7 +1051,7 @@ bunx e2e list --changed-since origin/main
 | Option | Description |
 | --- | --- |
 | `[files...]` | As for [`run`](#positional-arguments). |
-| `--config`, `--target`, `--tag`, `--tag-mode`, `--exclude-tag`, `--grep`, `--grep-invert`, `--changed-since`, `--last-failed`, `--shard`, `--pass-with-no-tests` | As for [`run`](#flags). `--last-failed` reads `report.json` under the config's [`output`](/reference/config#output). The configured [test filters](/filters) run as for `run`, and their lines go to stderr. |
+| `--config`, `--target`, `--tag`, `--tag-mode`, `--exclude-tag`, `--grep`, `--grep-invert`, `--changed-since`, `--last-failed`, `--shard`, `--pass-with-no-tests` | As for [`run`](#flags). `--last-failed` reads `report.json` under the config's [`output`](/reference/config#output). With `--changed-since`, the configured [test filters](/filters) run as for `run`, model calls included, and their lines go to stderr. |
 | `--reporter <id>` | `list` or `json`. Default: `list`. |
 
 | Reporter | Writes |
