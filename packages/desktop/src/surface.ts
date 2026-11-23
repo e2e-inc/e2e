@@ -692,7 +692,7 @@ export class DesktopSurface {
     // The open's own budget ran out first: that is a timeout, not a window that cannot be read.
     if (budgetBound) throw new EngineError('OPERATION_TIMEOUT', `${this.appName ?? 'the app'} launched, but the open ran out of time before its window could be read`, { retryable: false });
     // A locked screen hides every window from accessibility, and can list none or time out: neither read tells it from an app with no window, so macOS is asked.
-    if ((await screenLocked(operation.signal)) === true) {
+    if ((await screenLocked(operation.signal, operation.timeoutMs)) === true) {
       throw new EngineError('ENGINE_FAILURE', `${this.appName ?? 'the app'} launched, but the Mac's screen is locked, so no window can be read through accessibility; unlock it and run again`, { retryable: false });
     }
     if (!sawWindow && listedNone && !this.foreground) {
@@ -995,8 +995,8 @@ export class DesktopSurface {
    * then lists none of the app's windows, which must not read as a window
    * that closed or an app with none open.
    */
-  private async unlessLocked(operation: Pick<OperationContext, 'signal'>): Promise<void> {
-    if ((await screenLocked(operation.signal)) !== true) return;
+  private async unlessLocked(operation: Pick<OperationContext, 'signal' | 'timeoutMs'>): Promise<void> {
+    if ((await screenLocked(operation.signal, operation.timeoutMs)) !== true) return;
     throw new EngineError('NODE_STALE', `the Mac's screen is locked, so no window of ${this.appName ?? 'the app'} can be read through accessibility; reading again`, { retryable: true, cause: UNREADABLE });
   }
 
@@ -1800,11 +1800,21 @@ async function killed(pids: readonly number[], until: number, signal: AbortSigna
 /**
  * Whether macOS reports the console session's screen locked (ioreg's
  * `CGSSessionScreenIsLocked`); undefined when that cannot be told, off macOS
- * or when ioreg fails.
+ * or when ioreg fails. The question runs within the operation's budget: a
+ * cancellation or a budget that ran out ends the operation, never passes as
+ * an unknown answer that lets a read go on as if unlocked.
  */
-async function screenLocked(signal: AbortSignal): Promise<boolean | undefined> {
-  const listed = await execFileAsync('ioreg', ['-n', 'Root', '-d1', '-a'], { signal, maxBuffer: 16 * 1024 * 1024 }).catch(() => undefined);
-  const match = /<key>CGSSessionScreenIsLocked<\/key>\s*<(true|false)\/>/.exec(listed?.stdout ?? '');
+async function screenLocked(signal: AbortSignal, timeoutMs: number): Promise<boolean | undefined> {
+  if (timeoutMs <= 0) throw new EngineError('OPERATION_TIMEOUT', "asking macOS whether the screen is locked: the operation's budget ran out", { retryable: false });
+  let stdout: string;
+  try {
+    ({ stdout } = await execFileAsync('ioreg', ['-n', 'Root', '-d1', '-a'], { signal, timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 }));
+  } catch (cause) {
+    if (signal.aborted) throw new EngineError('CANCELLED', 'asking macOS whether the screen is locked was cancelled', { retryable: false, cause });
+    if ((cause as { killed?: boolean }).killed === true) throw new EngineError('OPERATION_TIMEOUT', 'asking macOS whether the screen is locked ran out of time', { retryable: false, cause });
+    return undefined;
+  }
+  const match = /<key>CGSSessionScreenIsLocked<\/key>\s*<(true|false)\/>/.exec(stdout);
   return match === null ? undefined : match[1] === 'true';
 }
 

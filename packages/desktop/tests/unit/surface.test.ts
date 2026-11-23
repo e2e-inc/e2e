@@ -451,6 +451,22 @@ describe('DesktopSurface', () => {
     }
   });
 
+  it('ends a read whose budget runs out while it asks macOS whether the screen is locked, rather than read an empty screen', async () => {
+    const { surface } = await launched((pid) => ({ 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }, { ok: true, data: [] }] }), { observe: false });
+    const slow = artifacts();
+    writeFileSync(path.join(slow, 'ioreg'), "#!/bin/sh\nsleep 3\nprintf '<key>CGSSessionScreenIsLocked</key>\\n<false/>\\n'\n", { mode: 0o755 });
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${slow}${path.delimiter}${originalPath}`;
+    try {
+      const username = { kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'username', exact: true } } } as const;
+      const started = Date.now();
+      await expect(surface.locate(username, { ...operation(), timeoutMs: 1_500 })).rejects.toMatchObject({ code: 'OPERATION_TIMEOUT' });
+      expect(Date.now() - started).toBeLessThan(2_500);
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+
   it('fails the open when the window never becomes readable, as on a locked screen', async () => {
     const hidden = { ok: false, error: { code: 'ACTION_NOT_SUPPORTED', message: 'not exposed', details: { kind: 'window_without_accessibility_element' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
     await expect(launched({ snapshot: [hidden] }, { openTimeoutMs: 15_000 })).rejects.toThrow(/cannot be read through accessibility/);
