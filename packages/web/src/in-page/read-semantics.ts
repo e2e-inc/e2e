@@ -663,9 +663,12 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     };
     const aria = filled('aria-valuetext') ?? filled('aria-valuenow');
     if (aria !== null) return aria;
+    // Only a native range control has a value beyond its ARIA attributes; a
+    // generic widget with no `aria-valuenow`/`aria-valuetext` has none, as
+    // Chrome reports, so a stray `value` attribute on it is not read.
     if (el instanceof HTMLMeterElement) return String(el.value);
     if (el instanceof HTMLProgressElement) return el.hasAttribute('value') ? String(el.value) : null;
-    return filled('value');
+    return null;
   };
 
   /**

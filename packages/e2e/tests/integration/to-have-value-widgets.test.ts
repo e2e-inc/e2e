@@ -21,6 +21,8 @@ const PAGE = [
   '<meter aria-label="Full" value="150" max="100"></meter>',
   '<div role="slider" aria-label="Blank text" aria-valuenow="50" aria-valuetext="" tabindex="0"></div>',
   '<div role="spinbutton" aria-label="Month" contenteditable aria-valuenow="5" aria-valuetext="May">05</div>',
+  '<div role="scrollbar" aria-label="Page" aria-controls="x" aria-valuenow="20" tabindex="0"></div>',
+  '<progress aria-label="Indeterminate"></progress>',
 ].join('');
 
 test('reads range widgets', async ({ app, browser, screen }) => {
@@ -38,6 +40,7 @@ test('reads range widgets', async ({ app, browser, screen }) => {
   await expect(screen.getByRole('meter', { name: 'Full' })).toHaveValue('100');
   await expect(screen.getByRole('slider', { name: 'Blank text' })).toHaveValue('50');
   await expect(screen.getByRole('spinbutton', { name: 'Month' })).toHaveValue('05');
+  await expect(screen.getByRole('scrollbar', { name: 'Page' })).toHaveValue('20');
   await expect(screen.getByRole('slider', { name: 'Volume' })).not.toHaveValue('51');
   expect(await screen.getByRole('slider', { name: 'Power' }).inputValue()).toBe('On');
 });
@@ -52,6 +55,7 @@ test('still refuses a range widget with a blank value', async ({ app, browser, s
   await app.open('/');
   await browser.evaluate((html) => { document.body.innerHTML = html; }, PAGE);
   await expect(screen.getByRole('progressbar', { name: 'Blank' })).toHaveValue('', { timeout: 300 });
+  await expect(screen.getByRole('progressbar', { name: 'Indeterminate' })).toHaveValue('', { timeout: 300 });
 });
 `;
 
