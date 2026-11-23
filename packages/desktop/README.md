@@ -60,7 +60,9 @@ test('signs in', async ({ app, screen }) => {
   driven, or quit. Every test ends with the app quit.
 - The app gets only `HOME`, `USER`, `LOGNAME`, `SHELL`, `PATH`, `TMPDIR`,
   `LANG`, `LC_*`, and `__CF_USER_TEXT_ENCODING` of the run's environment, and
-  `E2E_DESKTOP_LAUNCH`, the token the engine finds its copy by.
+  `E2E_DESKTOP_LAUNCH`, the token the engine finds its copy by. An app
+  launched by `bundleId` also gets `AGENT_DESKTOP_HOME`, the path of the
+  worker's private agent-desktop directory.
 - An observation is one agent-desktop snapshot of the app's window. Roles map
   onto the ARIA names other engines use (`textbox`, `checkbox`, `combobox`,
   `button`); the developer id (`AXIdentifier`) is the node's test id, so
