@@ -370,11 +370,9 @@ export function projectSnapshot(
     // look-alike gets a new id every snapshot.
     const children = kept.map((child) => {
       const identity = plain.get(identityOf(child)) === 1 ? identityOf(child) : named.get(identityOf(child, true)) === 1 ? identityOf(child, true) : undefined;
-      if (identity === undefined) {
-        // The identities this control could have had are now shared with a twin: neither may pass on.
-        onLookAlike?.(`${id}/${identityOf(child)}`);
-        onLookAlike?.(`${id}/${identityOf(child, true)}`);
-      }
+      // An identity two siblings share may pass on to neither, even where their names tell them apart now.
+      if ((plain.get(identityOf(child)) ?? 0) > 1) onLookAlike?.(`${id}/${identityOf(child)}`);
+      if ((named.get(identityOf(child, true)) ?? 0) > 1) onLookAlike?.(`${id}/${identityOf(child, true)}`);
       // A child's id is built on its parent's: under a look-alike, whose id is new every snapshot, so is the child's.
       return project(child, idFor(identity === undefined ? undefined : `${id}/${identity}`), stable && identity !== undefined, `${likeness}/${plain.get(identityOf(child)) ?? 1}`, states.hidden === true || underHidden.has(child));
     });

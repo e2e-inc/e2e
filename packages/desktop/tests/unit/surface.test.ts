@@ -1208,6 +1208,18 @@ describe('DesktopSurface', () => {
     expect(reads.at(-1)?.args).not.toContain('-i');
   });
 
+  it('passes no id on through a read cut short that saw two controls share a developer id', async () => {
+    const window = { role: 'window', name: 'Menu', bounds: { x: 0, y: 0, width: 300, height: 300 } };
+    const item = (name: string, ref: string) => ({ role: 'menuitem', name, ref_id: ref, native_id: { kind: 'ax_identifier', value: 'menuItemSelected:' }, bounds: { x: 10, y: 10, width: 100, height: 20 } });
+    const read = (nodes: readonly unknown[], complete = true) => ({ ok: true, data: { snapshot_id: 's', complete, window: { id: 'w-mine' }, tree: { ...window, children: nodes } } });
+    const { surface } = await launched({ snapshot: [read([item('Archive', '@s:e1')]), read([item('Archive', '@s:e1')]), read([item('Archive', '@s:e1'), item('Delete', '@s:e2')], false), read([item('Delete', '@s:e2')])] }, { observe: false });
+    const first = await surface.observe(operation(), undefined);
+    await surface.observe(operation(), undefined);
+    const last = await surface.observe(operation(), undefined);
+    expect(last.root.children?.[0]?.name).toBe('Delete');
+    expect(last.root.children?.[0]?.ref.id).not.toBe(first.root.children?.[0]?.ref.id);
+  });
+
   it('keeps the id of a control a read cut short did not reach, and retires one it saw a twin take', async () => {
     const window = { role: 'window', name: 'Mail', bounds: { x: 0, y: 0, width: 300, height: 300 } };
     const mail = { role: 'textfield', name: 'To', ref_id: '@s:e1', native_id: { kind: 'ax_identifier', value: 'mail' }, bounds: { x: 10, y: 10, width: 100, height: 20 } };
