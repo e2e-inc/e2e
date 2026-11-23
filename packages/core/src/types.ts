@@ -56,6 +56,13 @@ export type JsonValue =
   | { readonly [key: string]: JsonValue }
   | readonly JsonValue[];
 
+/** An in-memory file to attach without writing it to disk. */
+export interface FilePayload {
+  readonly name: string;
+  readonly mimeType: string;
+  readonly buffer: Buffer;
+}
+
 export type Capability = string;
 
 export interface StandardSchemaV1<Input = unknown, Output = Input> {
@@ -614,8 +621,8 @@ export interface Locator extends Omit<Screen, 'tree' | 'debug' | 'pause'> {
   blur(options?: ActionOptions): Promise<void>;
   /** Hovers over exactly one matching actionable node. */
   hover(options?: ActionOptions): Promise<void>;
-  /** Sets the files of exactly one file input, or of a control that opens a file chooser; paths resolve from the project root, and an empty array clears the input. */
-  setInputFiles(paths: string | readonly string[], options?: ActionOptions): Promise<void>;
+  /** Sets the files of exactly one file input, or of a control that opens a file chooser; paths resolve from the project root, payloads supply bytes in memory, and an empty array clears the input. */
+  setInputFiles(files: string | readonly string[] | FilePayload | readonly FilePayload[], options?: ActionOptions): Promise<void>;
   /** Drags exactly one node to exactly one target. */
   dragTo(target: Locator, options?: ActionOptions): Promise<void>;
   /** Scrolls exactly one node into view. */

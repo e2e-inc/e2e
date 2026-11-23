@@ -876,7 +876,7 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     projectRoot: config.projectRoot,
     artifactsRoot: outputLayout(config.output).results,
     ci: isCiMode(env),
-    targets: ('targets' in selected ? selected.targets : config.targets).map((target) => target.name),
+    targets: (selected.targets ?? config.targets).map((target) => target.name),
     ...(config.agentNames.length === 1 && config.agentNames[0] === 'default' ? {} : { agents: config.agentNames }),
     ...(runAgent?.model === undefined ? {} : { model: modelLabel(runAgent.model) }),
     ...(runJudge === undefined ? {} : { judge: modelLabel(runJudge) }),
@@ -1497,19 +1497,28 @@ async function loadRunConfig(
 /**
  * The targets the run is for, as `--target` selected them in config order,
  * and the one `--device` binds; or the error an unknown target ID or a
- * `--device` no single target can take raised. The run records the error
- * once it begins, so `run-started` still comes first.
+ * `--device` no single target can take raised, with the targets `--target`
+ * selected when it was `--device` that failed, so the header still names
+ * them. The run records the error once it begins, so `run-started` still
+ * comes first.
  */
 function selectRunTargets(
   targets: readonly ResolvedTarget[],
   targetIds: readonly string[] | undefined,
   device: string | undefined,
-): { readonly targets: readonly ResolvedTarget[]; readonly device: PrepareScope['device'] } | { readonly error: unknown } {
+):
+  | { readonly targets: readonly ResolvedTarget[]; readonly device: PrepareScope['device'] }
+  | { readonly error: unknown; readonly targets?: readonly ResolvedTarget[] } {
+  let selected: readonly ResolvedTarget[];
   try {
-    const selected = selectTargets(targets, targetIds);
-    return { targets: selected, device: device === undefined ? undefined : deviceTarget(selected, device) };
+    selected = selectTargets(targets, targetIds);
   } catch (error) {
     return { error };
+  }
+  try {
+    return { targets: selected, device: device === undefined ? undefined : deviceTarget(selected, device) };
+  } catch (error) {
+    return { error, targets: selected };
   }
 }
 
