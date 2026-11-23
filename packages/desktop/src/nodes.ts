@@ -320,8 +320,8 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
     const description = label(node.description);
     if (description !== undefined) attributes.description = description;
     if (node.native_id !== undefined) attributes['native-id-kind'] = node.native_id.kind;
-    // A swipe on the window scrolls the first node agent-desktop offers Scroll, which it scrolls only then: a list or table with no scroll mechanism of its own would refuse it.
-    if (scrollTarget === undefined && node.ref_id !== undefined && node.available_actions?.includes('Scroll') === true) scrollTarget = id;
+    // A swipe on the window scrolls the first node agent-desktop offers Scroll, which it scrolls only then and only while visible and enabled: a list with no scroll mechanism, or a pane off screen, would refuse it.
+    if (scrollTarget === undefined && node.ref_id !== undefined && node.available_actions?.includes('Scroll') === true && states.hidden !== true && states.disabled !== true) scrollTarget = id;
     bindings.set(id, {
       id,
       ...(node.ref_id === undefined ? {} : { ref: node.ref_id }),
