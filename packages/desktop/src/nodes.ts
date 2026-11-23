@@ -70,6 +70,8 @@ export interface NodeBinding {
    * place is the same one only if no twin around it came or went.
    */
   readonly likeness: string;
+  /** Read with `-i`, whose ids and look-alike counts a check of the same control must read the same way to compare. */
+  readonly interactive: boolean;
 }
 
 /** A snapshot as the engine keeps it: the tree the harness sees, and a binding for every node in it. */
@@ -270,9 +272,11 @@ function identityOf(node: RawNode, named = false): string {
  * and their children lifted, so the model reads the controls, not the
  * scaffolding, and the window's title-bar buttons are left out. Every node
  * of a `minimized` window is hidden: accessibility still reads its controls,
- * but nothing of it is on screen.
+ * but nothing of it is on screen. `interactive` marks the bindings of a read
+ * agent-desktop pruned (`-i`), whose tree, and so whose ids and look-alike
+ * counts, differ from a whole read's.
  */
-export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | undefined) => string, minimized = false): ProjectedScreen {
+export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | undefined) => string, { minimized = false, interactive = false }: { readonly minimized?: boolean; readonly interactive?: boolean } = {}): ProjectedScreen {
   const window = raw.tree.bounds ?? { x: 0, y: 0, width: 0, height: 0 };
   const titleBar = titleBarButtons(raw.tree);
   const bindings = new Map<string, NodeBinding>();
@@ -334,6 +338,7 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
       ...(rect === undefined ? {} : { rect }),
       stable,
       likeness,
+      interactive,
     });
     const kept: RawNode[] = [];
     const underHidden = new Set<RawNode>();

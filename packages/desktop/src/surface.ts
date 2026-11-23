@@ -891,20 +891,21 @@ export class DesktopSurface {
    * on to another. Another window's identities stay, so its controls keep
    * their ids when it is read again.
    */
-  private projectWindow(raw: RawSnapshot, minimized: boolean): ProjectedScreen {
-    const window = raw.window?.id ?? '';
+  private projectWindow(raw: RawSnapshot, minimized: boolean, interactive: boolean): ProjectedScreen {
+    // An interactive read (-i) prunes the tree, a whole one does not: each keeps its own identities, so one never retires the other's ids.
+    const scope = `${raw.window?.id ?? ''}|${interactive ? 'i' : 'w'}|`;
     const used = new Set<string>();
     const screen = projectSnapshot(
       raw,
       (identity) => {
         if (identity === undefined) return this.idFor(undefined);
-        const scoped = `${window}|${identity}`;
+        const scoped = `${scope}${identity}`;
         used.add(scoped);
         return this.idFor(scoped);
       },
-      minimized,
+      { minimized, interactive },
     );
-    for (const identity of this.ids.keys()) if (identity.startsWith(`${window}|`) && !used.has(identity)) this.ids.delete(identity);
+    for (const identity of this.ids.keys()) if (identity.startsWith(scope) && !used.has(identity)) this.ids.delete(identity);
     return screen;
   }
 
@@ -945,10 +946,11 @@ export class DesktopSurface {
         : windows.filter((window) => window.id === windowId);
     for (const window of candidates) {
       const args = ['snapshot', '--window-id', window.id, '--include-bounds', '--max-depth', String(this.options.maxDepth), '--timeout-ms', String(this.toolBudget(operation))];
-      if (this.options.interactiveOnly && !forMask && !whole) args.push('-i');
+      const interactive = this.options.interactiveOnly && !forMask && !whole;
+      if (interactive) args.push('-i');
       try {
         const raw = await this.run<RawSnapshot>(args, { label: 'snapshot', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs, raw: true });
-        if (!forMask) return this.projectWindow(raw, window.minimized === true);
+        if (!forMask) return this.projectWindow(raw, window.minimized === true, interactive);
         let scratch = 0;
         return projectSnapshot(raw, () => `mask${(scratch += 1)}`);
       } catch (cause) {
@@ -1258,7 +1260,8 @@ export class DesktopSurface {
    * its place.
    */
   private async holdsFocus(binding: NodeBinding, window: string, operation: OperationContext): Promise<boolean> {
-    const now = await this.capture(operation, window);
+    // Read as the binding was: a locator's binding comes from a whole read, an observation's from an interactive one.
+    const now = await this.capture(operation, window, false, !binding.interactive);
     return [...(now?.bindings.values() ?? [])].some(
       (candidate) =>
         candidate.states?.focused === true &&

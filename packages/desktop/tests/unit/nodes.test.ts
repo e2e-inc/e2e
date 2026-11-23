@@ -265,7 +265,7 @@ describe('projectSnapshot', () => {
   });
 
   it('reads every node of a minimized window as hidden, the window itself too', () => {
-    const { root } = projectSnapshot(load('macos/sign-in-form'), minter(), true);
+    const { root } = projectSnapshot(load('macos/sign-in-form'), minter(), { minimized: true });
     expect(resolveExpression({ kind: 'query', query: { kind: 'role', value: { kind: 'string', value: 'window', exact: true }, visible: true } }, [root])).toEqual([]);
     expect(all(root).every((node) => node.states?.hidden === true)).toBe(true);
   });
