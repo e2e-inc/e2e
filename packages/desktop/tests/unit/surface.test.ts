@@ -805,6 +805,27 @@ describe('DesktopSurface', () => {
     expect(fake.calls().some((call) => call.key === 'uncheck')).toBe(true);
   });
 
+  it('takes a point from the window of the last image, not of a later observation whose image failed', async () => {
+    const read = (id: string, x: number) => ({ ok: true, data: { snapshot_id: id, window: { id }, tree: { role: 'window', name: id, bounds: { x, y: 0, width: 200, height: 100 }, children: [{ role: 'button', name: 'OK', ref_id: `@${id}:e1`, bounds: { x: x + 10, y: 10, width: 40, height: 20 } }] } } });
+    const windows = (pid: number) => [
+      { id: 'w-a', pid, process_instance: 'instance-1', is_focused: true, bounds: { x: 100, y: 0, width: 200, height: 100 } },
+      { id: 'w-b', pid, process_instance: 'instance-1', bounds: { x: 500, y: 0, width: 200, height: 100 } },
+    ];
+    const { surface, fake } = await launched(
+      (pid) => ({
+        'list-windows': [{ ok: true, data: windows(pid) }],
+        // The open's read, the first observation and the read after its capture show window A; the second observation reads B, whose capture fails.
+        snapshot: [read('w-a', 100), read('w-a', 100), read('w-a', 100), read('w-b', 500)],
+        screenshot: [{ ok: true, writePng: { width: 200, height: 100 }, data: { scale_factor: 1 } }, failure('INTERNAL', 'not_delivered', 'capture failed')],
+      }),
+      { observe: false, options: { headed: true } },
+    );
+    expect((await surface.observe(operation(), { pixels: true })).pixels).toBeDefined();
+    expect((await surface.observe(operation(), { pixels: true })).pixels).toBeUndefined();
+    await surface.performAt({ x: 20, y: 30 }, { kind: 'tap' }, operation());
+    expect(fake.calls().at(-1)?.args).toEqual(['mouse-click', '--xy=120,30', '--headed']);
+  });
+
   it('taps a point in the window where it is now, with no observation first', async () => {
     const { surface, fake } = await launched((pid) => ({ 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true, bounds: { x: 300, y: 200, width: 400, height: 300 } }] }] }), { observe: false, options: { headed: true } });
     await surface.performAt({ x: 20, y: 30 }, { kind: 'tap' }, operation());

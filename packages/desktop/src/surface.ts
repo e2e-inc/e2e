@@ -1052,7 +1052,6 @@ export class DesktopSurface {
     if (screen === undefined) {
       return { root: { ref: { id: ROOT_ID, revision: '' }, role: 'window' }, viewport: { width: 0, height: 0 } };
     }
-    this.pointWindow = screen.windowId;
     this.remember(screen.bindings.values());
     let withheld = false;
     const pixels = options?.pixels === true ? await this.pixelsFor(screen, operation).catch((cause: unknown) => {
@@ -1062,6 +1061,8 @@ export class DesktopSurface {
       withheld = cause instanceof Error && cause.cause === UNMASKED;
       return undefined;
     }) : undefined;
+    // A point is taken from the last image the agent got: an observation whose image failed leaves it on the window that image showed.
+    if (options?.pixels !== true || pixels !== undefined) this.pointWindow = screen.windowId;
     // Pixels withheld for their secure fields still report the regions masked, none, so the harness reads masking it could not prove (MASKING_UNPROVEN), not a missing screenshot.
     return {
       ...this.snapshotOf(screen),
