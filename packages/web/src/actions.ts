@@ -280,8 +280,8 @@ function isFileInput(element: ElementHandle<Element>): Promise<boolean> {
 /**
  * Dispatches one deterministic locator action onto a Playwright target with the
  * platform's own actionability checks. `lookup` resolves the second ref of a
- * drag; everything else needs only the target. With `touch`, a tap touches
- * the screen instead of clicking.
+ * drag; everything else needs only the target. With `touch`, a tap is sent
+ * as a touch instead of a click.
  */
 export async function dispatchLocatorAction(
   target: ActionTarget,
@@ -401,8 +401,8 @@ export async function dispatchLocatorAction(
  * Dispatches one pointer action at a viewport point with nothing resolved
  * behind it: no actionability wait, because there is no element to wait on,
  * and the page decides what the gesture lands on, as it does for a person.
- * `touch` names the browser when the context has a touchscreen: a tap then
- * touches the screen, and a swipe along a path drags a finger, which only
+ * `touch` is the browser's name when the context has a touchscreen. A tap is
+ * then sent as a touch, and a swipe along a path as a finger drag, which only
  * Chromium can send.
  */
 export async function dispatchPointerAction(
@@ -450,7 +450,7 @@ export async function dispatchPointerAction(
         signal?.throwIfAborted();
         await performPointDrag(cdpTouchscreen(session), point, action.target, action.durationMs, signal);
       } finally {
-        // A swipe can close its own tab, and a failed detach must not replace the drag's own error.
+        // The swipe can close its tab, so the detach can fail. That failure must not replace the drag's error.
         void session.detach().catch(() => undefined);
       }
       return;

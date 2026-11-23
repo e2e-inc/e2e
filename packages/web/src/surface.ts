@@ -241,13 +241,13 @@ export interface WebOptions {
    */
   readonly testIdAttribute?: string;
   /**
-   * Whether every attempt's context emulates a touchscreen, as Playwright's
-   * own `hasTouch` context option sets it: a `tap` touches the screen instead
-   * of clicking, and a swipe along a path (`screen.swipe({ from, to })`)
-   * sends touch events, which only Chromium can, so it is
-   * `UNSUPPORTED_CAPABILITY` on another browser. Default `false`. A
-   * persistent context (`connect.reconnectEndpoint`, or a provider with
-   * `scope: 'attempt'`) is `INVALID_CONFIG`.
+   * Set to `true` to emulate a touchscreen in every attempt's context, as
+   * Playwright's own `hasTouch` context option does, for an app with touch
+   * handlers. A `tap` is then sent as a touch instead of a click. A swipe
+   * along a path (`screen.swipe({ from, to })`) is sent as touch events on
+   * Chromium, and is `UNSUPPORTED_CAPABILITY` in Firefox and WebKit.
+   * Defaults to `false`. A persistent context (`connect.reconnectEndpoint`,
+   * or a provider with `scope: 'attempt'`) is `INVALID_CONFIG`.
    */
   readonly hasTouch?: boolean;
   /**

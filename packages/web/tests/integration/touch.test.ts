@@ -1,4 +1,4 @@
-/** Touch emulation: with `web({ hasTouch: true })` a tap touches the screen and a swipe along a path drags a finger, in a real Chromium. */
+/** Touch emulation in a real Chromium: with `web({ hasTouch: true })`, a tap is sent as a touch and a swipe along a path as a finger drag. */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';

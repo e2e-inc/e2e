@@ -480,9 +480,13 @@ export function nearestPixel(point: ViewportPoint): ViewportPoint {
 }
 
 /**
- * Chromium's touchscreen with the mouse's `move`, `down`, and `up`, sent as
- * `Input.dispatchTouchEvent` over CDP, since Playwright's touchscreen only
- * taps: a move before `down` places the finger, one after it drags it.
+ * Returns Chromium's touchscreen with the mouse's `move`, `down`, and `up`, so
+ * `performPointDrag` can drag a finger. Each call is sent as
+ * `Input.dispatchTouchEvent` over CDP, since Playwright's touchscreen can
+ * only tap.
+ *
+ * A move before `down` places the finger, and a move after it drags the
+ * finger.
  */
 export function cdpTouchscreen(session: CDPSession): Pick<Mouse, 'move' | 'down' | 'up'> {
   let at = { x: 0, y: 0 };
