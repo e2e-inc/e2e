@@ -83,6 +83,7 @@ describe('browser.setViewport', () => {
     ['null', null, ', got null'],
     ['a number', 390, ', got 390'],
     ['an array', [390, 844], ', got an array'],
+    ['a class instance', new (class { width = 390; height = 844; })(), ', got an object'],
     ['a missing height', { width: 800 }, ', got height undefined'],
     ['a fractional width', { width: 585.5, height: 600 }, ', got width 585.5'],
     ['a negative width', { width: -1, height: 600 }, ', got width -1'],
@@ -93,7 +94,7 @@ describe('browser.setViewport', () => {
     expect(() => browser.setViewport(size as { width: number; height: number })).toThrow(
       expect.objectContaining({
         code: 'INVALID_ARGUMENT',
-        message: `browser.setViewport takes { width, height } in whole, non-negative pixels${suffix}`,
+        message: `browser.setViewport size must be { width, height } in whole pixels, each at least 0${suffix}`,
       }),
     );
     expect(page.viewportSize()).toEqual(before);

@@ -24,7 +24,6 @@ import {
   pollCondition,
   raceAbort,
   stepTimeout,
-  rejectUnknownKeys,
   rejectUnknownOptions,
   TestError,
   toTextPattern,
@@ -41,12 +40,13 @@ import { classifyInputError } from './actions.ts';
 import type { AttemptTab } from './attempt-session.ts';
 import type { DialogHandler } from './dialogs.ts';
 import { saveDownloadsTo, saveFromBrowser, saveLocally } from './downloads.ts';
-import { describe, isTestErrorCode, message as causeMessage, pageScriptFailure, translatePwError } from './support.ts';
+import { isTestErrorCode, message as causeMessage, pageScriptFailure, translatePwError } from './support.ts';
 import { compileEvaluation, decodeEvaluation, pageFunctionSource } from './evaluation.ts';
 import { initScriptLabel, testInitScriptSource } from './init-scripts.ts';
 import { MEDIA_KEYS, mediaLabel, mediaProblem, type WebMedia } from './media.ts';
 import { lowercaseNames } from './protected-app.ts';
 import { parseContinue, parseFulfill, requireNoArguments } from './route-options.ts';
+import { pixelSize } from './viewport.ts';
 import {
   patternLabel,
   routeMethodMatches,
@@ -900,7 +900,7 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
       return surface.guard(context.operation(), 'clearCookies', () => surface.requireContext().clearCookies(options));
     },
     setViewport(size) {
-      const { width, height } = viewportSize(size);
+      const { width, height } = pixelSize('browser.setViewport size', size, { min: 0, code: 'INVALID_ARGUMENT' });
       return surface.guard(context.operation(), 'setViewport', async () => {
         await surface.setViewport({ width, height });
         context.attachViewport({ width, height, scale: 1 });
@@ -999,27 +999,6 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     mouse: { move: action, wheel: action, down: action, up: action },
     webmcp: { tools: action, callTool: { ...action, label: (name) => String(name) } },
   });
-}
-
-/**
- * The size `browser.setViewport` takes, read once: `{ width, height }` in
- * whole, non-negative pixels and no other key. A wrong one is the test's
- * mistake, so it is refused before the engine is asked.
- */
-function viewportSize(size: unknown): { readonly width: number; readonly height: number } {
-  const usage = 'browser.setViewport takes { width, height } in whole, non-negative pixels';
-  if (typeof size !== 'object' || size === null || Array.isArray(size)) {
-    throw new TestError('INVALID_ARGUMENT', `${usage}, got ${describe(size)}`);
-  }
-  rejectUnknownKeys('browser.setViewport size', size, ['width', 'height'], 'INVALID_ARGUMENT');
-  const width: unknown = Reflect.get(size, 'width');
-  const height: unknown = Reflect.get(size, 'height');
-  for (const [name, side] of [['width', width], ['height', height]] as const) {
-    if (typeof side !== 'number' || !Number.isInteger(side) || side < 0) {
-      throw new TestError('INVALID_ARGUMENT', `${usage}, got ${name} ${describe(side)}`);
-    }
-  }
-  return { width: width as number, height: height as number };
 }
 
 interface ExpectationDeps {

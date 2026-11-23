@@ -27,6 +27,8 @@ import { validateInitScripts } from './init-scripts.ts';
 import { MEDIA_KEYS, mediaProblem } from './media.ts';
 import { FIELD_VALUE_CONTROL, headerProblem, originProblem } from './protected-app.ts';
 import { validatePermissions } from './permissions.ts';
+import { isPlainObject } from './support.ts';
+import { pixelSize } from './viewport.ts';
 import { BROWSER_NAMES, isBrowserName, type BrowserName } from './browser-connection.ts';
 
 /** App fields only a device target reads. */
@@ -100,7 +102,7 @@ export function web(options: WebOptions = {}): WebEngine {
   if (options.timezoneId !== undefined) validateTimezoneId(options.timezoneId);
   validateMedia(options);
   if (options.initScripts !== undefined) validateInitScripts(options.initScripts);
-  if (options.viewport !== undefined && options.viewport !== null) validatePixelSize('web({ viewport })', options.viewport);
+  if (options.viewport !== undefined && options.viewport !== null) pixelSize('web({ viewport })', options.viewport, { min: 1, code: 'INVALID_CONFIG' });
   if (options.screencast !== undefined) validateScreencast(options.screencast);
   if (options.webmcp !== undefined) validateWebmcp(options, provider);
   const reconnecting = options.connect?.reconnectEndpoint !== undefined;
@@ -429,19 +431,6 @@ function resolveBrowser(browser: unknown): BrowserProvider | undefined {
   );
 }
 
-/** A `{ width, height }` size in whole pixels, each at least 1, with no other key; `option` names it in the message. */
-function validatePixelSize(option: string, size: unknown): void {
-  const fields = isPlainObject(size) ? size : {};
-  const { width, height } = fields as { width?: unknown; height?: unknown };
-  const unknownKey = Object.keys(fields).find((key) => key !== 'width' && key !== 'height');
-  if (unknownKey !== undefined) {
-    throw new ConfigurationError('INVALID_CONFIG', `${option} has unknown key "${unknownKey}"; it is { width, height }`);
-  }
-  if (!Number.isInteger(width) || !Number.isInteger(height) || (width as number) < 1 || (height as number) < 1) {
-    throw new ConfigurationError('INVALID_CONFIG', `${option} must be { width, height } in whole pixels, each at least 1`);
-  }
-}
-
 /** `web({ screencast })`: a whole-pixel frame size and a 0-100 JPEG quality, each optional. */
 function validateScreencast(screencast: unknown): void {
   if (!isPlainObject(screencast)) {
@@ -453,17 +442,10 @@ function validateScreencast(screencast: unknown): void {
     }
   }
   const { size, quality } = screencast as { size?: unknown; quality?: unknown };
-  if (size !== undefined) validatePixelSize('web({ screencast: { size } })', size);
+  if (size !== undefined) pixelSize('web({ screencast: { size } })', size, { min: 1, code: 'INVALID_CONFIG' });
   if (quality !== undefined && (!Number.isInteger(quality) || (quality as number) < 0 || (quality as number) > 100)) {
     throw new ConfigurationError('INVALID_CONFIG', 'web({ screencast: { quality } }) must be an integer from 0 through 100');
   }
-}
-
-/** An object literal (or `Object.create(null)`): not an array, a class instance, or a primitive. */
-function isPlainObject(value: unknown): value is object {
-  if (typeof value !== 'object' || value === null) return false;
-  const prototype: unknown = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
 }
 
 /** Refuses a test-id attribute no element could carry, at config load. */

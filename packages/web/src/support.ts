@@ -178,6 +178,13 @@ export async function performPointerDrag(
 // oxlint-disable-next-line no-control-regex -- intentionally matches the ESC control character
 const ANSI_PATTERN = /\u001b\[\d+(?:;\d+)*m/g;
 
+/** An object literal (or `Object.create(null)`): not an array, a class instance, or a primitive. */
+export function isPlainObject(value: unknown): value is object {
+  if (typeof value !== 'object' || value === null) return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 /** A value as an error message shows it: a string quoted, another primitive as written, anything else by its kind, never serialized. */
 export function describe(value: unknown): string {
   if (typeof value === 'string') return JSON.stringify(value);

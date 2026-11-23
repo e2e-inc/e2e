@@ -206,6 +206,16 @@ describe('web({ screencast })', () => {
     expect(() => web({ screencast: { mode: 'on' } } as unknown as Parameters<typeof web>[0])).toThrow(/which attempts record is the config's video/);
   });
 
+  it('checks a frame size with the viewport rule, each side at least 1', () => {
+    expect(() => web({ screencast: { size: { width: 1280, height: 0 } } })).toThrow(
+      expect.objectContaining({ code: 'INVALID_CONFIG', message: 'web({ screencast: { size } }) must be { width, height } in whole pixels, each at least 1, got height 0' }),
+    );
+    expect(() => web({ screencast: { size: { width: 1280, heigth: 720 } } } as unknown as Parameters<typeof web>[0])).toThrow(
+      expect.objectContaining({ code: 'INVALID_CONFIG', message: 'web({ screencast: { size } }) has unknown key "heigth"; did you mean "height"?' }),
+    );
+    expect(() => web({ screencast: { size: { width: 1, height: 1 } } })).not.toThrow();
+  });
+
   it('refuses the old video key, naming screencast', () => {
     for (const video of [{}, { size: { width: 1280, height: 720 } }, undefined]) {
       expect(() => web({ video } as unknown as Parameters<typeof web>[0])).toThrow(
@@ -240,19 +250,30 @@ describe('web({ browser })', () => {
 });
 
 describe('web({ viewport })', () => {
-  it('rejects a viewport that is not a size of whole pixels, each side at least 1', () => {
-    const invalid = [390, [390, 844], 'large', {}, { width: 390 }, { width: '390', height: '844' }, { width: Number.NaN, height: 10 }, { width: 1.5, height: 10 }, { width: 10, height: -5 }, { width: 0, height: 0 }, { width: 100, height: 0 }];
-    for (const viewport of invalid) {
-      expect(() => web({ viewport } as unknown as Parameters<typeof web>[0])).toThrow(
-        expect.objectContaining({ code: 'INVALID_CONFIG', message: 'web({ viewport }) must be { width, height } in whole pixels, each at least 1' }),
-      );
-    }
+  it.each<[string, unknown, string]>([
+    ['a number', 390, 'got 390'],
+    ['an array', [390, 844], 'got an array'],
+    ['a string', 'large', 'got "large"'],
+    ['a class instance', new (class { width = 390; height = 844; })(), 'got an object'],
+    ['an empty size', {}, 'got width undefined'],
+    ['a missing height', { width: 390 }, 'got height undefined'],
+    ['string sides', { width: '390', height: '844' }, 'got width "390"'],
+    ['a NaN width', { width: Number.NaN, height: 10 }, 'got width NaN'],
+    ['a fractional width', { width: 1.5, height: 10 }, 'got width 1.5'],
+    ['a negative height', { width: 10, height: -5 }, 'got height -5'],
+    ['a zero size', { width: 0, height: 0 }, 'got width 0'],
+    ['a zero height', { width: 100, height: 0 }, 'got height 0'],
+  ])('rejects %s, which is not a size of whole pixels, each side at least 1', (_name, viewport, got) => {
+    expect(() => web({ viewport } as unknown as Parameters<typeof web>[0])).toThrow(
+      expect.objectContaining({ code: 'INVALID_CONFIG', message: `web({ viewport }) must be { width, height } in whole pixels, each at least 1, ${got}` }),
+    );
   });
 
-  it('names a key a size does not have', () => {
-    expect(() => web({ viewport: { width: 390, height: 844, deviceScaleFactor: 2 } } as unknown as Parameters<typeof web>[0])).toThrow(
-      expect.objectContaining({ code: 'INVALID_CONFIG', message: 'web({ viewport }) has unknown key "deviceScaleFactor"; it is { width, height }' }),
-    );
+  it.each([
+    ['deviceScaleFactor', { width: 390, height: 844, deviceScaleFactor: 2 }, 'web({ viewport }) has unknown key "deviceScaleFactor"; expected one of width, height'],
+    ['heigth', { width: 390, heigth: 844 }, 'web({ viewport }) has unknown key "heigth"; did you mean "height"?'],
+  ])('names the key %s a size does not have', (_name, viewport, message) => {
+    expect(() => web({ viewport } as unknown as Parameters<typeof web>[0])).toThrow(expect.objectContaining({ code: 'INVALID_CONFIG', message }));
   });
 
   it('takes a size, and null for the browser window', () => {
