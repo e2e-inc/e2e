@@ -1285,15 +1285,23 @@ describe('DesktopSurface', () => {
     const { surface, fake } = await launched((pid) => ({
       'list-windows': [
         { ok: true, data: [{ id: 'w-mine', title: 'SignInForm', app_name: 'SignInForm', pid, process_instance: 'instance-1', is_focused: true }] },
-        { ok: true, data: [{ id: 'w-mine', title: 'SignInForm', app_name: 'SignInForm', pid, process_instance: 'instance-1', is_focused: true }, { id: 'w-prefs', title: 'Preferences', app_name: 'SignInForm', pid, process_instance: 'instance-1' }] },
+        {
+          ok: true,
+          data: [
+            { id: 'w-mine', title: 'SignInForm', app_name: 'SignInForm', pid, process_instance: 'instance-1', is_focused: true },
+            { id: 'w-prefs', title: 'Preferences', app_name: 'SignInForm', pid, process_instance: 'instance-1' },
+            { id: 'w-hidden', title: 'SignInForm', app_name: 'SignInForm', pid, process_instance: 'instance-1', accessible: false },
+          ],
+        },
       ],
     }), { observe: false });
     const before = fake.calls().length;
     expect(await surface.windows(signal, 5_000)).toEqual([
       { id: 'w-mine', title: 'Spike Form', focused: true },
       { id: 'w-prefs', title: 'Preferences', focused: false },
+      { id: 'w-hidden', title: 'SignInForm', focused: false },
     ]);
-    // Only the window listed under the app's name is read again.
+    // Only a readable window listed under the app's name is read again.
     expect(fake.calls().slice(before).filter((call) => call.key === 'snapshot').map((call) => call.args[call.args.indexOf('--window-id') + 1])).toEqual(['w-mine']);
   });
 

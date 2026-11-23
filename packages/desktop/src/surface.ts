@@ -142,6 +142,8 @@ interface RawWindow {
   readonly title?: string;
   readonly is_focused?: boolean;
   readonly visible?: boolean;
+  /** False for a window accessibility cannot read. */
+  readonly accessible?: boolean;
   readonly app_name?: string;
   readonly pid?: number;
   readonly process_instance?: string;
@@ -718,12 +720,13 @@ export class DesktopSurface {
    * A window's title. Without Screen Recording permission macOS hides the
    * title the window list reads, and agent-desktop lists the app's name in
    * its place; the window's accessibility root still carries the title, so
-   * a title that reads as the app's name is read from there. A read that
-   * fails leaves the title as listed.
+   * a title that reads as the app's name is read from there, unless
+   * accessibility cannot read the window. A read that fails leaves the title
+   * as listed.
    */
   private async titleOf(window: RawWindow, signal: AbortSignal, deadline: number): Promise<string> {
     const listed = window.title ?? '';
-    if (window.app_name === undefined || listed !== window.app_name) return listed;
+    if (window.app_name === undefined || listed !== window.app_name || window.accessible === false) return listed;
     const timeoutMs = deadline - Date.now();
     const raw = await this.run<RawSnapshot>(['snapshot', '--window-id', window.id, '--max-depth', '1', '--timeout-ms', String(this.toolBudget({ timeoutMs }))], { label: 'read window title', input: false, signal, timeoutMs }).catch(() => undefined);
     const title = raw?.tree.name;
