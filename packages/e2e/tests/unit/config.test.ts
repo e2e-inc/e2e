@@ -93,13 +93,19 @@ describe('resolveConfig', () => {
     expect(resolve({ projectId: 'acme-web' }).projectId).toBe('acme-web');
     expect(resolve({ projectId: '12345' }).projectId).toBe('12345');
     expect(resolve({ projectId: 'x'.repeat(256) }).projectId).toBe('x'.repeat(256));
-    for (const [value, got] of [[12345, '12345'], [0, '0'], [true, 'true'], [null, 'null'], [{}, 'an object'], [['acme'], 'an array']] as const) {
+    for (const [value, got] of [
+      [12345, '12345'],
+      [0, '0'],
+      [true, 'true'],
+      [null, 'null'],
+      [{}, 'an object'],
+      [['acme'], 'an array'],
+      ['', '""'],
+      ['x'.repeat(257), JSON.stringify('x'.repeat(257))],
+    ] as const) {
       expect(() => resolve(invalid({ projectId: value }))).toThrow(
         expect.objectContaining({ code: 'INVALID_CONFIG', message: `projectId must be a string of 1 through 256 characters, got ${got}` }),
       );
-    }
-    for (const value of ['', 'x'.repeat(257)]) {
-      expect(() => resolve({ projectId: value })).toThrow(expect.objectContaining({ code: 'INVALID_CONFIG', message: 'projectId must be 1 through 256 characters' }));
     }
   });
 
