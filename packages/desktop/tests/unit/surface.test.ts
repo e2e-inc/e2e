@@ -1184,6 +1184,22 @@ describe('DesktopSurface', () => {
     await surface.endAttempt({ signal, timeoutMs: 5_000 });
   });
 
+  it('reads the whole window for a locator even with interactive snapshots, so a label is found', async () => {
+    const window = { role: 'window', name: 'Form', bounds: { x: 0, y: 0, width: 100, height: 100 } };
+    const label = { role: 'statictext', value: 'Not signed in', bounds: { x: 10, y: 40, width: 80, height: 20 } };
+    const button = { role: 'button', name: 'Sign in', ref_id: '@s:e1', bounds: { x: 10, y: 10, width: 50, height: 20 } };
+    const interactive = { ok: true, data: { snapshot_id: 's', window: { id: 'w-mine' }, tree: { ...window, children: [button] } } };
+    const whole = { ok: true, data: { snapshot_id: 's', window: { id: 'w-mine' }, tree: { ...window, children: [button, label] } } };
+    // The fake answers by call order: the open's read, the observation (interactive), then the locator's (whole).
+    const { surface, fake } = await launched({ snapshot: [interactive, interactive, whole] }, { observe: false, options: { snapshot: 'interactive' } });
+    await surface.observe(operation(), undefined);
+    const matches = await surface.locate({ kind: 'query', query: { kind: 'text', value: { kind: 'string', value: 'Not signed in', exact: true } } }, operation());
+    expect(matches).toHaveLength(1);
+    const reads = fake.calls().filter((call) => call.key === 'snapshot');
+    expect(reads.at(-2)?.args).toContain('-i');
+    expect(reads.at(-1)?.args).not.toContain('-i');
+  });
+
   it('reads the whole window for a screenshot even with interactive snapshots', async () => {
     const { surface, fake } = await launched({ snapshot: [renamed('macos/sign-in-form', 'w-8321', 'w-mine')] }, { options: { snapshot: 'interactive' } });
     await startAttempt(surface);

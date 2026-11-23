@@ -24,8 +24,8 @@ export interface DesktopOptions {
   readonly binary?: string | undefined;
   /**
    * What an observation captures. `full` (default) includes static text, so
-   * judgments and `toHaveText` can read labels; `interactive` keeps only the
-   * controls agent-desktop gives a ref.
+   * judgments can read labels; `interactive` keeps only the controls
+   * agent-desktop gives a ref. Locators read the whole window either way.
    */
   readonly snapshot?: 'full' | 'interactive' | undefined;
   /**

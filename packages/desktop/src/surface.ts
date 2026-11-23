@@ -912,7 +912,9 @@ export class DesktopSurface {
    * read that only places secure fields: it reads every node even with
    * `snapshot: 'interactive'`, which leaves out a secure node with no action
    * of its own, and hands out no ids, so the ids of the screen the harness
-   * holds stay as they are. Undefined, an empty screen, before `app.open()`
+   * holds stay as they are. `whole` reads every node too, with ids, for a
+   * locator: a label left out of an interactive read would match nothing,
+   * and a negative assertion on it pass. Undefined, an empty screen, before `app.open()`
    * and while the running app has no window; a copy of the app the engine
    * did not launch is never read. A read that fails is no empty screen,
    * which would let a negative assertion pass: an app that quit is
@@ -920,7 +922,7 @@ export class DesktopSurface {
    * which could be read, or none listed while the screen is locked, are a
    * retryable `NODE_STALE`, so a locator reads again until its deadline.
    */
-  private async capture(operation: OperationContext, windowId = this.chosenWindow, forMask = false): Promise<ProjectedScreen | undefined> {
+  private async capture(operation: OperationContext, windowId = this.chosenWindow, forMask = false, whole = false): Promise<ProjectedScreen | undefined> {
     const windows = await this.ownWindows(operation, true);
     const chosen = windowId !== undefined && windowId === this.chosenWindow;
     if (chosen && !windows.some((window) => window.id === windowId)) {
@@ -937,7 +939,7 @@ export class DesktopSurface {
         : windows.filter((window) => window.id === windowId);
     for (const window of candidates) {
       const args = ['snapshot', '--window-id', window.id, '--include-bounds', '--max-depth', String(this.options.maxDepth), '--timeout-ms', String(this.toolBudget(operation))];
-      if (this.options.interactiveOnly && !forMask) args.push('-i');
+      if (this.options.interactiveOnly && !forMask && !whole) args.push('-i');
       try {
         const raw = await this.run<RawSnapshot>(args, { label: 'snapshot', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs, raw: true });
         if (!forMask) return this.projectWindow(raw);
@@ -1071,7 +1073,8 @@ export class DesktopSurface {
       throw unsupported("macOS accessibility reports no placeholder to match; a field with no label is named by its placeholder, so find it with getByRole('textbox', name) or getByLabel(name)");
     }
     const operation = withDeadline(context);
-    const screen = await this.capture(operation);
+    // A locator reads the whole window whatever `snapshot` says, as on the mobile engine: the interactive read leaves out static text.
+    const screen = await this.capture(operation, this.chosenWindow, false, true);
     if (screen === undefined) return [];
     const sink = this.attempt?.screen;
     if (sink !== undefined) {
