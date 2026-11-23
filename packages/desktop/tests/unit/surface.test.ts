@@ -805,6 +805,19 @@ describe('DesktopSurface', () => {
     expect(fake.calls().some((call) => call.key === 'uncheck')).toBe(true);
   });
 
+  it('scrolls nothing to bring visible static text into view, and refuses hidden text it cannot scroll to', async () => {
+    const read = (states: readonly string[]) => ({ ok: true, data: { snapshot_id: 's', window: { id: 'w-mine' }, tree: { role: 'window', name: 'Form', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [{ role: 'statictext', value: 'Sign in to the testbed', states, bounds: { x: 10, y: 10, width: 150, height: 20 } }] } } });
+    const text = { kind: 'query', query: { kind: 'text', value: { kind: 'string', value: 'Sign in to the testbed', exact: true } } } as const;
+    const shown = await launched({ snapshot: [read([])] }, { observe: false });
+    const [label] = await shown.surface.locate(text, operation());
+    const before = shown.fake.calls().length;
+    await shown.surface.perform(label!.ref, { kind: 'scrollIntoView' }, operation());
+    expect(shown.fake.calls().slice(before).some((call) => call.key === 'scroll-to')).toBe(false);
+    const away = await launched({ snapshot: [read(['offscreen'])] }, { observe: false });
+    const [hidden] = await away.surface.locate(text, operation());
+    await expect(away.surface.perform(hidden!.ref, { kind: 'scrollIntoView' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+  });
+
   it('takes a point from the window of the last image, not of a later observation whose image failed', async () => {
     const read = (id: string, x: number) => ({ ok: true, data: { snapshot_id: id, window: { id }, tree: { role: 'window', name: id, bounds: { x, y: 0, width: 200, height: 100 }, children: [{ role: 'button', name: 'OK', ref_id: `@${id}:e1`, bounds: { x: x + 10, y: 10, width: 40, height: 20 } }] } } });
     const windows = (pid: number) => [

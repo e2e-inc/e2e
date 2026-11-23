@@ -1185,6 +1185,8 @@ export class DesktopSurface {
         await this.refCommand(action.kind, binding, operation);
         break;
       case 'scrollIntoView':
+        // Static text gets no ref to scroll to; agent-desktop marks a node outside the window offscreen, read as hidden, so one not hidden is in view already.
+        if (binding.ref === undefined && binding.states?.hidden !== true) break;
         await this.refCommand('scroll-to', binding, operation);
         break;
       case 'hover':
