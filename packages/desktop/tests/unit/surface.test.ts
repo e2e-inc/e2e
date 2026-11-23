@@ -481,6 +481,16 @@ describe('DesktopSurface', () => {
     expect(observed.maskedRegionCount).toBe(0);
   });
 
+  it('reports a capture that failed as no screenshot, not as masking it could not prove', async () => {
+    const denied = failure('PERM_DENIED', 'not_delivered', 'Screen Recording permission not granted');
+    const { surface } = await launched({ screenshot: [denied, denied] }, { snapshot: 'macos/sign-in-form' });
+    await startAttempt(surface);
+    await expect(surface.screenshot('denied', operation())).rejects.toThrow(/Screen Recording permission not granted/);
+    const observed = await surface.observe(operation(), { pixels: true });
+    expect(observed.pixels).toBeUndefined();
+    expect(observed).not.toHaveProperty('maskedRegionCount');
+  });
+
   it('refuses a screenshot as a policy when a password field has no bounds to mask', async () => {
     // The AppKit form's password field was captured with no bounds.
     const { surface } = await launched({});
