@@ -345,8 +345,10 @@ export default {
   (`ProcessInfo.processInfo.arguments`). Android appends them to `am start`,
   so `['--ez', 'e2e', 'true']` is a boolean intent extra.
 - An object names each argument. On iOS an entry becomes `-name value` as
-  `NSUserDefaults` reads it: a string the parser would take for a plist, such
-  as `(draft)` or `a b`, is quoted. On Android it becomes an `am start` extra
+  `NSUserDefaults` reads it: a string the parser would take for a plist or a
+  comment, such as `(draft)`, `a b`, or `//cdn`, is quoted. An app that reads
+  `ProcessInfo.processInfo.arguments` sees that spelling, `NO` for `false`
+  and the quotes included, so keep the list form for it. On Android it becomes an `am start` extra
   of the value's type, so the app reads it with the matching `Intent` getter;
   a whole number such as `1.0` is an `int`. Android reads none of Apple's
   arguments, so `AppleLanguages` or `AppleLocale` in an object on an Android

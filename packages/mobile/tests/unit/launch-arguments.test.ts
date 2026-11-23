@@ -35,6 +35,15 @@ describe('launchArgumentList', () => {
       '("a b", "say \\"hi\\"", "back\\\\slash", "x,y", ok_1.2:3/4-5$)',
     ]);
     expect(launchArgumentList('ios', { empty: [] })).toEqual(['-empty', '()']);
+    expect(launchArgumentList('ios', { tags: ['', 'a'], blank: '' })).toEqual(['-tags', '("", a)', '-blank', '""']);
+  });
+
+  it('quotes a string that starts with //, which the plist parser reads as a comment', () => {
+    expect(launchArgumentList('ios', { endpoints: ['//cdn.example/assets', 'b'], cdn: '//cdn.example', path: 'a//b' })).toEqual([
+      '-endpoints', '("//cdn.example/assets", b)',
+      '-cdn', '"//cdn.example"',
+      '-path', 'a//b',
+    ]);
   });
 
   it('quotes a value that starts with a dash, which NSUserDefaults would read as the next name', () => {
@@ -57,6 +66,11 @@ describe('launchArgumentList', () => {
       '--el', 'epoch', '2147483648',
       '--ei', 'negative', '-1',
       '--es', 'spaced', 'a b',
+    ]);
+    expect(launchArgumentList('android', { max: 2147483647, min: -2147483648, below: -2147483649 })).toEqual([
+      '--ei', 'max', '2147483647',
+      '--ei', 'min', '-2147483648',
+      '--el', 'below', '-2147483649',
     ]);
     expect(launchArgumentList('android', { tags: ['a', 'b c', 'd'] })).toEqual(['--esa', 'tags', 'a,b c,d']);
   });

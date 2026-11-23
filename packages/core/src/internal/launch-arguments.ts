@@ -16,9 +16,9 @@ const LAUNCH_ARGUMENTS_SHAPE = 'an array of strings or an object of argument nam
 
 /**
  * Launch arguments as declared: a list of strings, or a plain object of
- * argument name (non-empty, no whitespace or control characters) to string,
- * finite number below 2^53 in magnitude, boolean, or list of strings, none
- * holding a NUL character. An `undefined` value, read from the
+ * argument name (non-empty, no leading dash, no whitespace or control
+ * characters) to string, finite number below 2^53 in magnitude, boolean,
+ * or list of strings, none holding a NUL character. An `undefined` value, read from the
  * environment, is the entry left out. `code` picks the error: a target's
  * config fails with `INVALID_CONFIG`, a test's own launch with
  * `INVALID_ARGUMENT`.
@@ -44,6 +44,9 @@ export function checkLaunchArguments(label: string, declared: unknown, code: 'IN
     if (name === '') fail(code, `${label} has an empty argument name`);
     if (/[\s\p{Cc}]/u.test(name)) {
       fail(code, `${label} argument name ${JSON.stringify(name)} must have no whitespace or control characters`);
+    }
+    if (name.startsWith('-')) {
+      fail(code, `${label} argument name ${JSON.stringify(name)} starts with a dash; write it without one, the engine adds it`);
     }
     if (Array.isArray(value)) {
       const index = value.findIndex((item) => typeof item !== 'string');
@@ -75,9 +78,9 @@ function appleUserDefault(value: LaunchArgumentValue): string {
   return `(${value.map(plistString).join(', ')})`;
 }
 
-/** An old-style plist string: bare when its characters allow, else quoted with `\\` and `"` escaped. */
+/** An old-style plist string: bare when its characters allow and it does not open a `//` comment, else quoted with `\\` and `"` escaped. */
 function plistString(item: string): string {
-  return PLIST_UNQUOTED.test(item) ? item : `"${item.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
+  return PLIST_UNQUOTED.test(item) && !item.startsWith('//') ? item : `"${item.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 }
 
 /** A string, a boolean, or a finite number below 2^53 in magnitude. */

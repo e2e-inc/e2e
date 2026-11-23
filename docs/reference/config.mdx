@@ -533,8 +533,8 @@ type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumen
 ```
 
 - An object value is a string, a finite number below 2^53 in magnitude, a
-  boolean, or a list of strings. A name has no whitespace or control
-  characters, and nothing holds a NUL character. A value read from the
+  boolean, or a list of strings. A name has no leading dash, whitespace, or
+  control characters, and nothing holds a NUL character. A value read from the
   environment may be `undefined`: that entry is left out.
 - The table under
   [Launch arguments and permissions](/reference/mobile#launch-arguments-and-permissions)
