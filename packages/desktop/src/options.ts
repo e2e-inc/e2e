@@ -74,7 +74,8 @@ const MAX_DEPTH_LIMIT = 50;
 
 /** Checks the option bag the way every config option is checked: unknown keys and wrong types fail the config load. */
 export function resolveOptions(options: DesktopOptions | undefined): ResolvedDesktopOptions {
-  const bag: DesktopOptions = options ?? {};
+  // Only a missing bag defaults: a null one (from JSON an agent wrote for e2e mcp) is a config error, not the defaults.
+  const bag: DesktopOptions = options === undefined ? {} : options;
   if (typeof bag !== 'object' || bag === null) throw new ConfigurationError('INVALID_CONFIG', 'desktop() options must be an object');
   rejectUnknownKeys('desktop() options', bag, OPTION_KEYS);
   const { binary, snapshot, headed, settle, maxDepth } = bag;
