@@ -216,7 +216,7 @@ describe('projectSnapshot', () => {
     expect(root.children?.map((node) => node.states?.readonly)).toEqual([true, false, undefined]);
   });
 
-  it('reads a control collapsed to no width or height as hidden, but not a container with children', () => {
+  it('reads a control collapsed to no width or height as hidden, but not a container with children, listed or cut off', () => {
     const { root } = projectSnapshot(
       {
         snapshot_id: 's',
@@ -228,6 +228,7 @@ describe('projectSnapshot', () => {
             { role: 'button', name: 'Collapsed', ref_id: '@s:e1', bounds: { x: 10, y: 10, width: 0, height: 20 } },
             { role: 'button', name: 'Shown', ref_id: '@s:e2', bounds: { x: 10, y: 40, width: 80, height: 20 } },
             { role: 'group', name: 'Wrapper', bounds: { x: 0, y: 0, width: 0, height: 0 }, children: [{ role: 'button', name: 'Inside', ref_id: '@s:e3', bounds: { x: 10, y: 70, width: 80, height: 20 } }] },
+            { role: 'group', name: 'Deep', bounds: { x: 0, y: 0, width: 0, height: 0 }, children_count: 3 },
           ],
         },
       },
@@ -237,6 +238,7 @@ describe('projectSnapshot', () => {
     expect(byName('Collapsed')?.states?.hidden).toBe(true);
     expect(byName('Shown')?.states?.hidden).toBeUndefined();
     expect(byName('Wrapper')?.states?.hidden).toBeUndefined();
+    expect(byName('Deep')?.states?.hidden).toBeUndefined();
     expect(byName('Inside')?.states?.hidden).toBeUndefined();
   });
 
