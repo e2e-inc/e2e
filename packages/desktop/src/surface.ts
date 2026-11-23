@@ -1266,6 +1266,8 @@ export class DesktopSurface {
   private async holdsFocus(binding: NodeBinding, window: string, operation: OperationContext): Promise<boolean> {
     // Read as the binding was: a locator's binding comes from a whole read, an observation's from an interactive one.
     const now = await this.capture(operation, window, false, !binding.interactive);
+    // A read that ran out of time gives every control a fresh id, so it cannot tell which one holds focus: that is no lost focus.
+    if (now?.cutShort === true) throw new EngineError('NODE_STALE', 'the window was read only in part, as agent-desktop ran out of time, so which control holds focus cannot be told', { retryable: true, cause: UNREADABLE });
     return [...(now?.bindings.values() ?? [])].some(
       (candidate) =>
         candidate.states?.focused === true &&
