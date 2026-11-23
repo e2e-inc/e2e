@@ -24,6 +24,7 @@ import {
   pollCondition,
   raceAbort,
   stepTimeout,
+  rejectUnknownKeys,
   rejectUnknownOptions,
   TestError,
   toTextPattern,
@@ -1010,8 +1011,7 @@ function viewportSize(size: unknown): { readonly width: number; readonly height:
   if (typeof size !== 'object' || size === null || Array.isArray(size)) {
     throw new TestError('INVALID_ARGUMENT', `${usage}, got ${describe(size)}`);
   }
-  const unknownKey = Object.getOwnPropertyNames(size).find((key) => key !== 'width' && key !== 'height');
-  if (unknownKey !== undefined) throw new TestError('INVALID_ARGUMENT', `${usage}; it has no key ${JSON.stringify(unknownKey)}`);
+  rejectUnknownKeys('browser.setViewport size', size, ['width', 'height'], 'INVALID_ARGUMENT');
   const width: unknown = Reflect.get(size, 'width');
   const height: unknown = Reflect.get(size, 'height');
   for (const [name, side] of [['width', width], ['height', height]] as const) {

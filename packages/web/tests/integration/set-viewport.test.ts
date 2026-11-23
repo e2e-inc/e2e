@@ -88,7 +88,6 @@ describe('browser.setViewport', () => {
     ['a negative width', { width: -1, height: 600 }, ', got width -1'],
     ['a NaN height', { width: 800, height: Number.NaN }, ', got height NaN'],
     ['a string width', { width: '800', height: 600 }, ', got width "800"'],
-    ['an unknown key', { width: 800, height: 600, deviceScaleFactor: 2 }, '; it has no key "deviceScaleFactor"'],
   ])('refuses %s with INVALID_ARGUMENT, leaving the page as it was', async (_name, size, suffix) => {
     const before = page.viewportSize();
     expect(() => browser.setViewport(size as { width: number; height: number })).toThrow(
@@ -97,6 +96,16 @@ describe('browser.setViewport', () => {
         message: `browser.setViewport takes { width, height } in whole, non-negative pixels${suffix}`,
       }),
     );
+    expect(page.viewportSize()).toEqual(before);
+    expect(attached).toEqual([]);
+  });
+
+  it.each<[string, object, string]>([
+    ['an unknown key', { width: 800, height: 600, deviceScaleFactor: 2 }, 'browser.setViewport size has unknown key "deviceScaleFactor"; expected one of width, height'],
+    ['a misspelled key', { width: 800, heigth: 600 }, 'browser.setViewport size has unknown key "heigth"; did you mean "height"?'],
+  ])('refuses %s with INVALID_ARGUMENT, naming it', async (_name, size, message) => {
+    const before = page.viewportSize();
+    expect(() => browser.setViewport(size as { width: number; height: number })).toThrow(expect.objectContaining({ code: 'INVALID_ARGUMENT', message }));
     expect(page.viewportSize()).toEqual(before);
     expect(attached).toEqual([]);
   });
