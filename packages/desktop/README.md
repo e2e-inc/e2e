@@ -9,7 +9,9 @@ target unchanged.
 
 > [!NOTE]
 > This is a prototype, and it runs on macOS only. A config with a desktop
-> target still loads elsewhere, but the target fails to start.
+> target still loads elsewhere, and its other targets run there when you pick
+> them with `--target`. A run that includes the desktop target stops before
+> any test starts.
 
 ## Install
 
