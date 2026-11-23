@@ -1044,8 +1044,9 @@ Return the surface as it is right now. The runner mints the revision and
 stamps it onto every ref. When `pixels` are present, it checks that
 `maskedRegionCount` covers every `secure` node. An engine asked for pixels
 (`pixels: true`) that cannot mask every secure node on screen omits `pixels`
-and reports `maskedRegionCount` alone, the regions it could mask, fewer than
-the secure nodes. `toHaveScreenshot` then fails with
+and reports `maskedRegionCount` alone, the regions it could mask. A count with
+no `pixels` always reads as withheld, even when the tree holds no `secure`
+node, since a tree read only in part can leave one out. `toHaveScreenshot` then fails with
 `POLICY_DENIED`, and the agent reads `MASKING_UNPROVEN`, instead of waiting for
 a screenshot.
 A valid empty tree may have a childless root and include `pixels`.
@@ -1105,9 +1106,10 @@ export interface EngineSnapshot {
    * Regions masked in the screenshot; the harness checks it covers every secure
    * node. An engine asked for pixels (`pixels: true`) that cannot mask every
    * secure node on screen omits `pixels` and still reports the regions it
-   * could mask, fewer than the secure nodes, so `toHaveScreenshot` fails with
-   * `POLICY_DENIED` and the agent reads `MASKING_UNPROVEN`, not a missing
-   * screenshot.
+   * could mask. A count with no `pixels` always reads as withheld, even when
+   * the tree holds no secure node, since a tree read only in part can leave
+   * one out: `toHaveScreenshot` fails with `POLICY_DENIED` and the agent reads
+   * `MASKING_UNPROVEN`, not a missing screenshot.
    */
   readonly maskedRegionCount?: number;
 }
@@ -1189,6 +1191,7 @@ honors in `actions` and `pointerActions`.
 | `scrollIntoView` | - | yes | - |
 | `selectOption` | `value` | yes | - |
 | `setInputFiles` | `paths`; empty clears the input | yes | - |
+| `setInputFilePayloads` | `files` with `name`, `mimeType`, and `Uint8Array` `buffer`. An empty `files` array clears the input. The runner uses it to clear when the engine declares this action without `setInputFiles`. | yes | - |
 | `dragTo` | `target`: a `NodeRef` or a `ViewportPoint` | yes | yes |
 | `swipe` | `direction`, `momentum?` | yes | yes |
 | `swipeTo` | `target`, `durationMs?` | - | yes |
@@ -1240,6 +1243,11 @@ export type LocatorAction =
   | { readonly kind: 'press'; readonly key: Key }
   | { readonly kind: 'selectOption'; readonly value: SelectOption }
   | { readonly kind: 'setInputFiles'; readonly paths: readonly string[] }
+  | {
+      readonly kind: 'setInputFilePayloads';
+      /** In-memory files; an empty array clears the input. The protocol encodes bytes only on the wire. */
+      readonly files: readonly { readonly name: string; readonly mimeType: string; readonly buffer: Uint8Array }[];
+    }
   | { readonly kind: 'dragTo'; readonly target: NodeRef }
   | {
       readonly kind: 'swipe';
@@ -1271,7 +1279,7 @@ export const LOCATOR_ACTION_KINDS = [
 ] as const satisfies readonly LocatorActionKind[];
 
 /** Every action kind understood by this version of core. */
-export const KNOWN_LOCATOR_ACTION_KINDS = [...LOCATOR_ACTION_KINDS, 'blur'] as const satisfies readonly LocatorActionKind[];
+export const KNOWN_LOCATOR_ACTION_KINDS = [...LOCATOR_ACTION_KINDS, 'blur', 'setInputFilePayloads'] as const satisfies readonly LocatorActionKind[];
 ```
 
 #### Pointer actions
