@@ -82,6 +82,8 @@ export interface ProjectedScreen {
   /** Rects of the secure fields, in the viewport's points, for masking. Undefined when a secure field has no bounds to mask. */
   readonly secureRects: readonly Rect[] | undefined;
   readonly truncated: boolean;
+  /** The read ran out of time (`complete: false`), which the next read may not; a tree cut only at its depth limit is cut the same way every time. */
+  readonly cutShort: boolean;
   readonly windowId?: string;
   readonly title?: string;
   /** The first scrollable node, which the observation root's swipe scrolls. */
@@ -377,6 +379,7 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
     viewport: { width: window.width, height: window.height },
     secureRects: unmaskable ? undefined : secureRects,
     truncated: raw.complete === false || raw.truncated === true || hasTruncatedSubtree(raw.tree),
+    cutShort: raw.complete === false || raw.truncated === true,
     ...(raw.window === undefined ? {} : { windowId: raw.window.id }),
     // The window's accessibility root carries its title; the window list's, which agent-desktop copies here, is the app's name without Screen Recording permission.
     ...(title === undefined ? {} : { title }),

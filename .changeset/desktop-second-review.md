@@ -14,3 +14,4 @@ Every screenshot withheld for a password field fails with `POLICY_DENIED`; one o
 A control collapsed to no width or height reads as hidden.
 A screenshot cut off mid-capture leaves no unmasked image in the system's temporary directory.
 The cleanup of a killed worker's state no longer waits on a later process that the OS gave the worker's id.
+A screenshot of a window read only in part because agent-desktop ran out of time is taken again; one deeper than `maxDepth` fails with `POLICY_DENIED` and says to raise it.

@@ -506,6 +506,26 @@ describe('DesktopSurface', () => {
     expect(observed.maskedRegionCount).toBe(0);
   });
 
+  it('tries a window with no secure field again when its read ran out of time, and refuses one deeper than maxDepth', async () => {
+    type Answer = { ok: true; data: { complete?: boolean; tree: { bounds: { width: number; height: number }; children_count?: number } } };
+    const plain = JSON.parse(JSON.stringify(renamed('macos/sign-in-form', 'w-8321', 'w-mine')).replaceAll('"secure"', '"required"')) as Answer;
+    const { width, height } = plain.data.tree.bounds;
+    const capture = (pid: number) => ({ screenshot: [{ ok: true, writePng: { width, height }, data: { scale_factor: 1 } }], 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }] });
+    const outOfTime = { ...plain, data: { ...plain.data, complete: false } };
+    const timed = await launched((pid) => ({ ...capture(pid), snapshot: [plain, outOfTime, plain] }), { observe: false });
+    const first = await timed.surface.observe(operation(), { pixels: true });
+    expect(first.pixels).toBeUndefined();
+    expect(first).not.toHaveProperty('maskedRegionCount');
+    const second = await timed.surface.observe(operation(), { pixels: true });
+    expect(second.pixels).toBeDefined();
+    expect(second.maskedRegionCount).toBe(0);
+    const deep = { ...plain, data: { ...plain.data, tree: { ...plain.data.tree, children_count: 999 } } };
+    const { surface } = await launched((pid) => ({ ...capture(pid), snapshot: [plain, deep] }), { observe: false });
+    await startAttempt(surface);
+    await expect(surface.screenshot('deep', operation())).rejects.toMatchObject({ code: 'POLICY_DENIED', message: expect.stringMatching(/deeper than desktop\(\{ maxDepth \}\) reads \(24 levels\)/) });
+    expect((await surface.observe(operation(), { pixels: true })).maskedRegionCount).toBe(0);
+  });
+
   it('reports a capture that failed as no screenshot, not as masking it could not prove', async () => {
     const denied = failure('PERM_DENIED', 'not_delivered', 'Screen Recording permission not granted');
     const { surface } = await launched({ screenshot: [denied, denied] }, { snapshot: 'macos/sign-in-form' });

@@ -1472,8 +1472,8 @@ export class DesktopSurface {
    * a field that moved in between withholds the image rather than ship it
    * unproven. That is a refusal of policy, `POLICY_DENIED`, as on the mobile
    * engine: the image could hold a credential. A window with no secure field
-   * that closed or changed size is a capture that failed, and the next one
-   * may work.
+   * that closed, changed size, or was read in part because the read ran out
+   * of time is a capture that failed, and the next one may work.
    */
   private async pixelsFor(observed: ProjectedScreen, operation: OperationContext): Promise<{ pixels: ObservationPixels; masked: number }> {
     if (observed.windowId === undefined) throw notActionable('the observed surface has no window to capture');
@@ -1484,7 +1484,15 @@ export class DesktopSurface {
     const secure = screen.secureRects;
     if (secure === undefined) throw unmasked('a secure field on screen has no bounds to mask');
     // A snapshot cut short can leave out a secure field, which would then go unmasked.
-    if (screen.truncated) throw unmasked('the snapshot did not read the whole window, so a secure field may be missing from it');
+    if (screen.truncated) {
+      // One that ran out of time and saw no secure field may read whole next time: a capture that failed, not a refusal.
+      if (screen.cutShort && secure.length === 0) throw new EngineError('ENGINE_FAILURE', 'the window was read only in part, as agent-desktop ran out of time, so it cannot be shown to hold no secure field', { retryable: false });
+      throw unmasked(
+        screen.cutShort
+          ? 'the snapshot did not read the whole window, so a secure field may be missing from it'
+          : `the window is deeper than desktop({ maxDepth }) reads (${this.options.maxDepth} levels), so a secure field may be missing from the read; raise maxDepth`,
+      );
+    }
     const directory = await mkdtemp(path.join(this.home ?? tmpdir(), 'shot-'));
     try {
       const file = path.join(directory, 'window.png');
@@ -1493,8 +1501,8 @@ export class DesktopSurface {
       // The snapshot and the capture are two commands: read the window again, and withhold the image if a secure field moved, came, or went between them.
       const after = await this.capture(operation, screen.windowId, true);
       if (after === undefined || after.windowId !== screen.windowId || after.truncated || !sameRects(after.secureRects, secure) || after.viewport.width !== screen.viewport.width || after.viewport.height !== screen.viewport.height) {
-        // Only a secure field, seen in either read or possibly left out of a partial one, makes this a matter of masking.
-        if (secure.length > 0 || (after !== undefined && (after.truncated || after.secureRects?.length !== 0))) throw unmasked('the window changed while it was captured, so its secure fields cannot be placed');
+        // Only a secure field, seen in either read or possibly below the depth a read stops at, makes this a matter of masking; a read that ran out of time is tried again.
+        if (secure.length > 0 || (after !== undefined && ((after.truncated && !after.cutShort) || after.secureRects?.length !== 0))) throw unmasked('the window changed while it was captured, so its secure fields cannot be placed');
         throw new EngineError('ENGINE_FAILURE', 'the window closed or changed size while it was captured', { retryable: false });
       }
       const scale = typeof shot.scale_factor === 'number' && shot.scale_factor > 0 ? shot.scale_factor : 1;
