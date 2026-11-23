@@ -172,8 +172,9 @@ describe('locator action options', () => {
     /** A screen over the box whose engine declares `actions`, keeping every action it receives. */
     function countScreen(actions?: readonly LocatorActionKind[], tapModifiers?: boolean) {
       const received: LocatorAction[] = [];
+      const locate = vi.fn(async (expression: LocatorExpression) => resolveExpression(expression, NODES));
       const { screen, steps } = screenOver({
-        locate: (expression) => resolveExpression(expression, NODES),
+        locate,
         observe: () => snapshot(NODES),
         perform: (_ref, action) => {
           received.push(action);
@@ -182,7 +183,7 @@ describe('locator action options', () => {
         ...(tapModifiers === undefined ? {} : { tapModifiers }),
         timeoutMs: 1_000,
       });
-      return { screen, steps, received };
+      return { screen, steps, received, locate };
     }
 
     it('taps once for count 1, as with no count', async () => {
@@ -227,24 +228,33 @@ describe('locator action options', () => {
     });
 
     it('refuses count 3 on an engine without multiTap before resolving, while count 2 still works there', async () => {
-      const { screen, received } = countScreen(LOCATOR_ACTION_KINDS);
-      const started = Date.now();
+      const { screen, received, locate } = countScreen(LOCATOR_ACTION_KINDS);
       await expect(screen.getByLabel('Missing').tap({ count: 3 })).rejects.toMatchObject({
         code: 'UNSUPPORTED_CAPABILITY',
         message: expect.stringContaining('the "multiTap" action is not available on this target'),
       });
-      expect(Date.now() - started).toBeLessThan(500);
+      expect(locate).not.toHaveBeenCalled();
       await screen.getByLabel('Agree').tap({ count: 2 });
       expect(received).toEqual([{ kind: 'doubleTap' }]);
     });
 
-    it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53, '3', null])(
+    it('sends the largest count, 10, as one multiTap', async () => {
+      const { screen, received } = countScreen();
+      await screen.getByLabel('Agree').tap({ count: 10 });
+      expect(received).toEqual([{ kind: 'multiTap', count: 10 }]);
+    });
+
+    it.each([0, -1, 1.5, 11, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53, '3', null])(
       'rejects count %j before any lookup, action, or step',
       async (count) => {
-        const { screen, steps, received } = countScreen();
+        const { screen, steps, received, locate } = countScreen();
         await expect(
           Promise.resolve().then(() => screen.getByLabel('Agree').tap(invalid<TapOptions>({ count }))),
-        ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringMatching(/^tap\(\) count must be a positive integer/) });
+        ).rejects.toMatchObject({
+          code: 'INVALID_ARGUMENT',
+          message: expect.stringMatching(/^tap\(\) count must be an integer from 1 through 10, got /),
+        });
+        expect(locate).not.toHaveBeenCalled();
         expect(received).toEqual([]);
         expect(steps.all()).toEqual([]);
       },

@@ -854,18 +854,24 @@ function validateSwipeDuration(duration: number | undefined): number | undefined
 }
 
 /**
- * The `modifiers` of a click, validated: a list of distinct key modifiers,
- * spread into the action only when it names one.
+ * A tap `count`: an integer from 1 through 10, 1 when unset. agent-device
+ * accepts up to 200, but no real multi-tap needs more than 10.
  */
-/** A tap `count`: a positive safe integer, 1 when unset. */
 function requireTapCount(value: unknown, api: string): number {
   if (value === undefined) return 1;
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
-    throw new TestError('INVALID_ARGUMENT', `${api}() count must be a positive integer, got ${describeValue(value)}`);
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 10) {
+    throw new TestError(
+      'INVALID_ARGUMENT',
+      `${api}() count must be an integer from 1 through 10, got ${describeValue(value)}`,
+    );
   }
   return value;
 }
 
+/**
+ * The `modifiers` of a click, validated: a list of distinct key modifiers,
+ * spread into the action only when it names one.
+ */
 function requireModifiers(value: unknown, api: string): { modifiers?: readonly KeyModifier[] } {
   if (value === undefined) return {};
   if (!Array.isArray(value)) {
