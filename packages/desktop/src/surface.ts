@@ -1324,6 +1324,8 @@ export class DesktopSurface {
     // A menu takes a moment to close after Escape. The last look decides: one that could not tell leaves it unknown.
     const until = Date.now() + Math.min(MENU_CLOSE_MS, operation.timeoutMs);
     for (;;) {
+      // Cancelled, each look fails at once and the wait would never yield: it cannot tell any more.
+      if (operation.signal.aborted) return 'unconfirmed';
       const open = await menus();
       if (open === 0) return 'closed';
       if (Date.now() + LAUNCH_POLL_MS >= until) return open === undefined ? 'unconfirmed' : 'open';

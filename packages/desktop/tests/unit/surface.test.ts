@@ -1403,6 +1403,22 @@ describe('DesktopSurface', () => {
     expect(failed?.message).not.toMatch(/Escape did not close it/);
   });
 
+  it('stops waiting for a menu to close once the step is cancelled, rather than spin until the wait ends', async () => {
+    const { surface, fake, byTestId } = await launched((pid) => ({
+      snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')],
+      select: [failure('TIMEOUT', 'delivered_unverified')],
+      // The look before Escape finds the menu; the first look after it is still running when the step is cancelled.
+      'list-surfaces': [{ ok: true, data: { pid, surfaces: [{ type: 'context_menu' }] } }, { sleepMs: 5_000, ok: true, data: { pid, surfaces: [{ type: 'context_menu' }] } }],
+    }));
+    const controller = new AbortController();
+    const settled = surface.perform(byTestId('plan'), { kind: 'selectOption', value: 'Team' }, { ...operation(), signal: controller.signal }).catch(() => undefined);
+    while (fake.calls().filter((call) => call.key === 'list-surfaces').length < 2) await new Promise((resolve) => setTimeout(resolve, 10));
+    const cancelled = Date.now();
+    controller.abort();
+    await settled;
+    expect(Date.now() - cancelled).toBeLessThan(500);
+  });
+
   it('never says the menu was closed when agent-desktop could not check the window for one', async () => {
     const { surface, byTestId } = await launched((pid) => ({
       snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')],
