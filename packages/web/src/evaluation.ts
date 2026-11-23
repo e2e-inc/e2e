@@ -51,13 +51,28 @@ interface InvalidPageValue {
  * Called before the caller's code runs, it takes the intrinsics it needs from
  * literals, so code that deletes or replaces `Array`, `Object`, or `JSON`
  * cannot reach it. Only JSON passes: `null`, booleans, finite numbers,
- * strings, arrays, and plain objects. Anything else throws `{ invalid }` with
+ * strings, arrays, and plain objects, including those made in another
+ * same-origin frame. Anything else throws `{ invalid }` with
  * the reason `validateJsonValue` gives. Embedded into the page as source, so
  * it captures nothing from this module.
  */
 export function pageValueEncoder(): (root: unknown) => string | undefined {
-  const { getPrototypeOf, keys } = ({}).constructor as ObjectConstructor;
+  const { getOwnPropertyDescriptor, getPrototypeOf, keys } = ({}).constructor as ObjectConstructor;
   const objectPrototype: unknown = getPrototypeOf({});
+  /** An own data property's value; never runs a getter the page defined. */
+  const own = (target: object, key: string): unknown => getOwnPropertyDescriptor(target, key)?.value;
+  /**
+   * This realm's Object.prototype, or another same-origin frame's: a prototype with a null
+   * prototype whose own `constructor` is a function named `Object` that points back to it.
+   */
+  const isObjectPrototype = (prototype: object): boolean => {
+    if (prototype === objectPrototype) return true;
+    if (getPrototypeOf(prototype) !== null) return false;
+    const constructor = own(prototype, 'constructor');
+    return typeof constructor === 'function'
+      && own(constructor, 'name') === 'Object'
+      && own(constructor, 'prototype') === prototype;
+  };
   const { isArray } = ([] as unknown[]).constructor as ArrayConstructor;
   const charCodeAt = ''.charCodeAt;
   const hex = '0123456789abcdef';
@@ -88,8 +103,8 @@ export function pageValueEncoder(): (root: unknown) => string | undefined {
         throw invalid(`must be JSON-safe, found ${typeof value}`);
     }
     const array = isArray(value);
-    const prototype: unknown = getPrototypeOf(value);
-    if (!array && prototype !== objectPrototype && prototype !== null) throw invalid('must be JSON-safe');
+    const prototype: object | null = getPrototypeOf(value);
+    if (!array && prototype !== null && !isObjectPrototype(prototype)) throw invalid('must be JSON-safe');
     for (let i = 0; i < ancestors.length; i++) {
       if (ancestors[i] === value) throw invalid('contains a cycle');
     }

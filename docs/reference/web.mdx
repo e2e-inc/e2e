@@ -663,6 +663,8 @@ const title = await browser.evaluate<string>('document.title');
   evaluates to a function, that function is called with `arg`. Else its
   value is the result.
 - A promise, from either, is awaited.
+- A plain object made in a same-origin iframe, such as one that
+  `iframe.contentWindow.eval(...)` returns, is returned too.
 
 | Throws | When |
 | --- | --- |

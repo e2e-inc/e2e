@@ -143,4 +143,20 @@ describe('browser.evaluate error boundaries', () => {
     await expect(browser.evaluate((n: number) => ({ items: [n, 'two'] }), 1)).resolves.toEqual({ items: [1, 'two'] });
     await expect(browser.evaluate('() => [1, 2]')).resolves.toEqual([1, 2]);
   });
+
+  it('returns a plain object on a page that renamed Object', async () => {
+    await page.setContent('<script>Object.defineProperty(Object, "name", { value: "Renamed" });</script>');
+    await expect(browser.evaluate('() => ({ a: 1 })')).resolves.toEqual({ a: 1 });
+  });
+
+  it('returns a plain object made in a same-origin iframe, and still rejects its other objects', async () => {
+    await page.setContent('<iframe id="f" srcdoc="<p>frame</p>"></iframe>');
+    await page.frameLocator('#f').locator('p').waitFor();
+    const inFrame = (expression: string) => `() => document.getElementById("f").contentWindow.eval(${JSON.stringify(expression)})`;
+    await expect(browser.evaluate(inFrame('({ a: 1, nested: { b: [2] } })'))).resolves.toEqual({ a: 1, nested: { b: [2] } });
+    await expect(browser.evaluate(inFrame('[1, 2]'))).resolves.toEqual([1, 2]);
+    for (const expression of ['new Date(0)', 'new Map()', 'document.body', 'new (class Cart {})()', 'Object.create(Object.create(null))']) {
+      await expect(browser.evaluate(inFrame(expression))).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: 'evaluate result must be JSON-safe' });
+    }
+  });
 });

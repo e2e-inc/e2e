@@ -5,6 +5,7 @@
  * references a module-scoped `__name` helper.
  */
 
+import { createContext, runInContext } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { compileEvaluation, decodeEvaluation, pageFunctionSource, pageValueEncoder } from '../../src/evaluation.ts';
 
@@ -94,6 +95,36 @@ describe('pageValueEncoder', () => {
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
     expect(() => encodePageValue(cyclic)).toThrow(expect.objectContaining({ invalid: 'contains a cycle' }));
+  });
+
+  it('encodes a plain object made in another realm', () => {
+    expect(encodePageValue(runInContext('({ a: 1, nested: { b: [2] } })', createContext())))
+      .toBe('{"a":1,"nested":{"b":[2]}}');
+  });
+
+  it.each([
+    ['a Date', 'new Date(0)'],
+    ['a Map', 'new Map()'],
+    ['a class instance', 'new (class Cart {})()'],
+    ['an instance of a class named Object', 'new (class Object {})()'],
+    ['an object on a null-prototype prototype', 'Object.create(Object.create(null))'],
+    ['an object whose constructor is not a function',
+      "const p = Object.create(null); p.constructor = { name: 'Object', prototype: p }; Object.create(p)"],
+    ['an object whose constructor is not named Object',
+      'const p = Object.create(null); p.constructor = function F() {}; p.constructor.prototype = p; Object.create(p)'],
+    ['an object whose constructor does not point back to its prototype',
+      'const p = Object.create(null); p.constructor = Object; Object.create(p)'],
+    ['an object whose constructor is a getter',
+      "const p = Object.create(null); const F = function Object() {}; F.prototype = p;"
+        + " Object.defineProperty(p, 'constructor', { get: () => F }); Object.create(p)"],
+    ["an object whose constructor's prototype is a getter",
+      "const p = Object.create(null); const F = { Object: () => {} }.Object;"
+        + " Object.defineProperty(F, 'prototype', { get: () => p }); p.constructor = F; Object.create(p)"],
+    ['a plain object of a realm whose Object has a name getter',
+      "Object.defineProperty(Object, 'name', { get() { throw new Error('read name'); } }); ({ a: 1 })"],
+  ])('rejects %s from another realm', (_label, source) => {
+    expect(() => encodePageValue(runInContext(source, createContext())))
+      .toThrow(expect.objectContaining({ invalid: 'must be JSON-safe' }));
   });
 
   it('encodes a null-prototype object', () => {
