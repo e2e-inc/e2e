@@ -197,8 +197,9 @@ or `devDependencies`. The web target then runs the app's own scripts with
 the project's package manager, and `init` prints the commands and the URL
 it wrote:
 
-- `app.url` is `http://localhost:<port>`, with the port from the `dev`
-  script's `--port` or `-p` flag or `PORT=` variable, else 3000. It's never `127.0.0.1`, which
+- `app.url` is `http://localhost:<port>`, with the port from the `--port`
+  or `-p` flag or `PORT=` variable of the `next` command in the `dev`
+  script, else 3000. It's never `127.0.0.1`, which
   [doesn't hydrate](/frameworks/nextjs#fix-next-js-problems) on `next dev`.
 - Locally, `app.command` runs the `dev` script with `reuseExisting: true`.
 - When the app also has `build` and `start` scripts on the same port,
@@ -206,9 +207,9 @@ it wrote:
   [CI pipeline](#ci-pipeline) from `init` runs `build` before the tests.
   Otherwise, CI runs `dev` too.
 
-Without a `dev` script, or with a port that isn't a number, such as `$PORT`,
-the target reads `APP_URL` as in any other project, and `init` says what to
-set.
+Without a `dev` script, or with a port that isn't a fixed number (such as
+`$PORT`) or that another command in the script sets, the target reads
+`APP_URL` as in any other project, and `init` says what to set.
 
 <a id="ci-pipeline" />
 ##### CI pipeline

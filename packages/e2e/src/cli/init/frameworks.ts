@@ -46,39 +46,47 @@ interface FrameworkDetector {
   readonly docs: string;
   /** The package whose dependency marks the framework. */
   readonly dependency: string;
+  /** The command a script runs to start the framework's server, whose arguments carry the port. */
+  readonly binary: string;
   /** The port the dev server and the production server listen on when their scripts set none. */
   readonly defaultPort: number;
 }
 
 const DETECTORS: readonly FrameworkDetector[] = [
-  { name: 'Next.js', docs: '/frameworks/nextjs', dependency: 'next', defaultPort: 3000 },
+  { name: 'Next.js', docs: '/frameworks/nextjs', dependency: 'next', binary: 'next', defaultPort: 3000 },
 ];
 
 const DEV_SCRIPT = 'dev';
 const BUILD_SCRIPT = 'build';
 const START_SCRIPT = 'start';
 
+/** The detector for the framework the project's package.json declares in `dependencies` or `devDependencies`. */
+function findDetector(manifest: FrameworkManifest): FrameworkDetector | undefined {
+  return DETECTORS.find(({ dependency }) =>
+    manifest.dependencies?.[dependency] !== undefined || manifest.devDependencies?.[dependency] !== undefined);
+}
+
 /**
  * The framework the project's package.json declares in `dependencies` or
  * `devDependencies`, with how to start it, or undefined when it declares
  * none init knows. A project with the framework but no `dev` script, or a
- * `dev` script whose port is not a number, is `unsupported`.
+ * `dev` script whose port init cannot read as a fixed number, is
+ * `unsupported`.
  */
 export function detectFramework(manifest: FrameworkManifest): Detection | undefined {
-  const detector = DETECTORS.find(({ dependency }) =>
-    manifest.dependencies?.[dependency] !== undefined || manifest.devDependencies?.[dependency] !== undefined);
+  const detector = findDetector(manifest);
   if (detector === undefined) return undefined;
   const scripts = manifest.scripts ?? {};
   const dev = scripts[DEV_SCRIPT];
   if (dev === undefined) {
     return { kind: 'unsupported', framework: detector.name, docs: detector.docs, reason: `package.json has no ${DEV_SCRIPT} script` };
   }
-  const port = scriptPort(dev, detector.defaultPort);
+  const port = scriptPort(dev, detector);
   if (port === undefined) {
-    return { kind: 'unsupported', framework: detector.name, docs: detector.docs, reason: `the port in the ${DEV_SCRIPT} script is not a fixed number` };
+    return { kind: 'unsupported', framework: detector.name, docs: detector.docs, reason: `init cannot read a fixed port from the ${DEV_SCRIPT} script` };
   }
   const start = scripts[START_SCRIPT];
-  const production = scripts[BUILD_SCRIPT] !== undefined && start !== undefined && scriptPort(start, detector.defaultPort) === port;
+  const production = scripts[BUILD_SCRIPT] !== undefined && start !== undefined && scriptPort(start, detector) === port;
   return {
     kind: 'app',
     framework: detector.name,
@@ -92,28 +100,43 @@ export function detectFramework(manifest: FrameworkManifest): Detection | undefi
 
 const PORT_FLAGS = new Set(['--port', '-p']);
 
+/** The words of one shell command, with the quotes around each stripped. */
+function words(command: string): string[] {
+  return command.split(/\s+/u).map((word) => word.replace(/^["']|["']$/gu, '')).filter((word) => word !== '');
+}
+
 /**
- * The port a script's server listens on: the value of its `--port` or `-p`
- * flag (`--port 3100`, `--port=3100`, `-p 3100`, `-p3100`), else a `PORT=`
- * variable it sets, else `fallback`. Undefined when the value is not a fixed
- * port, such as `$PORT` or `0`, which init cannot write into `app.url`.
+ * The port one command sets: the value of its `--port` or `-p` flag
+ * (`--port 3100`, `--port=3100`, `-p 3100`, `-p3100`), else a `PORT=`
+ * variable, else undefined. The value is raw, so `$PORT` stays as written.
  */
-function scriptPort(script: string, fallback: number): number | undefined {
-  const tokens = script.split(/\s+/u).map((token) => token.replace(/^["']|["']$/gu, '')).filter((token) => token !== '');
-  let flag: string | undefined;
+function portSetting(tokens: readonly string[]): string | undefined {
   let variable: string | undefined;
   for (const [index, token] of tokens.entries()) {
-    const value = PORT_FLAGS.has(token)
+    const flag = PORT_FLAGS.has(token)
       ? tokens[index + 1] ?? ''
       : /^--port=(.*)$/u.exec(token)?.[1] ?? /^-p(\d.*)$/u.exec(token)?.[1];
-    if (value !== undefined) {
-      flag ??= value;
-      continue;
-    }
+    if (flag !== undefined) return flag;
     variable ??= /^PORT=(.*)$/u.exec(token)?.[1];
   }
-  const value = flag ?? variable;
-  if (value === undefined) return fallback;
+  return variable;
+}
+
+/**
+ * The port a script's server listens on, read from the command that runs the
+ * framework's binary (`next` in `node check.js -p 8080 && next dev`), else the
+ * framework's default port. Undefined when init cannot write the port into
+ * `app.url`: a value that is not a fixed port, such as `$PORT` or `0`, or a
+ * port another command in the script sets, which may or may not reach the
+ * server. A script that never runs the binary, such as `turbo run dev`, is
+ * read as one command.
+ */
+function scriptPort(script: string, detector: FrameworkDetector): number | undefined {
+  const commands = script.split(/&&|\|\||[;&|]/u).map(words);
+  const server = commands.findIndex((command) => command.includes(detector.binary));
+  if (server !== -1 && commands.some((command, index) => index !== server && portSetting(command) !== undefined)) return undefined;
+  const value = portSetting(server === -1 ? commands.flat() : commands[server] ?? []);
+  if (value === undefined) return detector.defaultPort;
   if (!/^\d+$/u.test(value)) return undefined;
   const port = Number(value);
   return port >= 1 && port <= 65_535 ? port : undefined;

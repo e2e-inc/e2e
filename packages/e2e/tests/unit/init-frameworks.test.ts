@@ -29,6 +29,8 @@ describe('detectFramework', () => {
     ['PORT=4100 next dev', 4100],
     ['PORT=4100 next dev --port 4200', 4200],
     ['concurrently "next dev -p 4300" "tsc --watch"', 4300],
+    ['next dev -p 4400 && echo ready', 4400],
+    ['node scripts/preflight.js && next dev --port 4500', 4500],
     ['next dev', 3000],
     ['turbo run dev', 3000],
   ])('reads the port of %j as %d', (dev, port) => {
@@ -36,14 +38,21 @@ describe('detectFramework', () => {
     expect(found).toMatchObject({ kind: 'app', url: `http://localhost:${port}` });
   });
 
-  it.each(['next dev -p $PORT', 'next dev --port 0', 'next dev --port 70000', 'next dev --port'])(
-    'cannot start an app whose dev script is %j, with no fixed port',
+  it.each([
+    'next dev -p $PORT',
+    'next dev --port 0',
+    'next dev --port 70000',
+    'next dev --port',
+    'node scripts/preflight.js -p 8080 && next dev',
+    'export PORT=4000 && next dev',
+  ])(
+    'cannot start an app whose dev script is %j, with no port it can read',
     (dev) => {
       expect(detectFramework({ dependencies: { next: '*' }, scripts: { dev } })).toEqual({
         kind: 'unsupported',
         framework: 'Next.js',
         docs: '/frameworks/nextjs',
-        reason: 'the port in the dev script is not a fixed number',
+        reason: 'init cannot read a fixed port from the dev script',
       });
     },
   );
@@ -64,4 +73,5 @@ describe('detectFramework', () => {
     expect(production({ dev: 'next dev', start: 'next start' })).toBeUndefined();
     expect(production({ dev: 'next dev', build: 'next build' })).toBeUndefined();
   });
+
 });
