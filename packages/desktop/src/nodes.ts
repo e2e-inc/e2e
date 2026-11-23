@@ -274,9 +274,14 @@ function identityOf(node: RawNode, named = false): string {
  * of a `minimized` window is hidden: accessibility still reads its controls,
  * but nothing of it is on screen. `interactive` marks the bindings of a read
  * agent-desktop pruned (`-i`), whose tree, and so whose ids and look-alike
- * counts, differ from a whole read's.
+ * counts, differ from a whole read's. `onLookAlike` hears each identity a
+ * look-alike sibling made shared, for a caller that must retire it.
  */
-export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | undefined) => string, { minimized = false, interactive = false }: { readonly minimized?: boolean; readonly interactive?: boolean } = {}): ProjectedScreen {
+export function projectSnapshot(
+  raw: RawSnapshot,
+  idFor: (identity: string | undefined) => string,
+  { minimized = false, interactive = false, onLookAlike }: { readonly minimized?: boolean; readonly interactive?: boolean; readonly onLookAlike?: (identity: string) => void } = {},
+): ProjectedScreen {
   const window = raw.tree.bounds ?? { x: 0, y: 0, width: 0, height: 0 };
   const titleBar = titleBarButtons(raw.tree);
   const bindings = new Map<string, NodeBinding>();
@@ -365,6 +370,11 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
     // look-alike gets a new id every snapshot.
     const children = kept.map((child) => {
       const identity = plain.get(identityOf(child)) === 1 ? identityOf(child) : named.get(identityOf(child, true)) === 1 ? identityOf(child, true) : undefined;
+      if (identity === undefined) {
+        // The identities this control could have had are now shared with a twin: neither may pass on.
+        onLookAlike?.(`${id}/${identityOf(child)}`);
+        onLookAlike?.(`${id}/${identityOf(child, true)}`);
+      }
       // A child's id is built on its parent's: under a look-alike, whose id is new every snapshot, so is the child's.
       return project(child, idFor(identity === undefined ? undefined : `${id}/${identity}`), stable && identity !== undefined, `${likeness}/${plain.get(identityOf(child)) ?? 1}`, states.hidden === true || underHidden.has(child));
     });

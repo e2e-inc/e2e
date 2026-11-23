@@ -886,15 +886,17 @@ export class DesktopSurface {
 
   /**
    * Projects a snapshot of one window, its node identities scoped to that
-   * window. An identity of that window the snapshot no longer has is retired:
-   * a control that went, or now has a look-alike sibling, never passes its id
-   * on to another. Another window's identities stay, so its controls keep
-   * their ids when it is read again.
+   * window. An identity of that window a complete snapshot no longer has is
+   * retired: a control that went, or now has a look-alike sibling, never
+   * passes its id on to another. A snapshot cut short retires only the
+   * identities it saw a look-alike take. Another window's identities stay, so
+   * its controls keep their ids when it is read again.
    */
   private projectWindow(raw: RawSnapshot, minimized: boolean, interactive: boolean): ProjectedScreen {
     // An interactive read (-i) prunes the tree, a whole one does not: each keeps its own identities, so one never retires the other's ids.
     const scope = `${raw.window?.id ?? ''}|${interactive ? 'i' : 'w'}|`;
     const used = new Set<string>();
+    const shared = new Set<string>();
     const screen = projectSnapshot(
       raw,
       (identity) => {
@@ -903,9 +905,11 @@ export class DesktopSurface {
         used.add(scoped);
         return this.idFor(scoped);
       },
-      { minimized, interactive },
+      { minimized, interactive, onLookAlike: (identity) => shared.add(`${scope}${identity}`) },
     );
-    for (const identity of this.ids.keys()) if (identity.startsWith(scope) && !used.has(identity)) this.ids.delete(identity);
+    // A read that ran out of time saw only part of the window: what it did not reach may still be there, so only an identity it saw a twin take retires.
+    const partial = raw.complete === false || raw.truncated === true;
+    for (const identity of this.ids.keys()) if (identity.startsWith(scope) && !used.has(identity) && (!partial || shared.has(identity))) this.ids.delete(identity);
     return screen;
   }
 

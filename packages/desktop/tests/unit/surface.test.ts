@@ -1208,6 +1208,21 @@ describe('DesktopSurface', () => {
     expect(reads.at(-1)?.args).not.toContain('-i');
   });
 
+  it('keeps the id of a control a read cut short did not reach, and retires one it saw a twin take', async () => {
+    const window = { role: 'window', name: 'Mail', bounds: { x: 0, y: 0, width: 300, height: 300 } };
+    const mail = { role: 'textfield', name: 'To', ref_id: '@s:e1', native_id: { kind: 'ax_identifier', value: 'mail' }, bounds: { x: 10, y: 10, width: 100, height: 20 } };
+    const send = { role: 'button', name: 'Send', ref_id: '@s:e2', bounds: { x: 10, y: 40, width: 60, height: 20 } };
+    const read = (nodes: readonly unknown[], complete = true) => ({ ok: true, data: { snapshot_id: 's', complete, window: { id: 'w-mine' }, tree: { ...window, children: nodes } } });
+    const { surface } = await launched({ snapshot: [read([mail, send]), read([mail, send]), read([{ ...send, ref_id: '@s:e3' }, send], false), read([mail, send])] }, { observe: false });
+    const idOf = (root: SemanticNode, name: string) => root.children?.find((node) => node.name === name)?.ref.id;
+    const first = await surface.observe(operation(), undefined);
+    // Cut short: the field is not reached, and a second Send button shares the first's identity.
+    await surface.observe(operation(), undefined);
+    const last = await surface.observe(operation(), undefined);
+    expect(idOf(last.root, 'To')).toBe(idOf(first.root, 'To'));
+    expect(idOf(last.root, 'Send')).not.toBe(idOf(first.root, 'Send'));
+  });
+
   it('presses a key into a located field among look-alike cards with interactive snapshots, and keeps the observation ids', async () => {
     const window = { role: 'window', name: 'Notes', bounds: { x: 0, y: 0, width: 300, height: 300 } };
     const field = (focused: boolean) => ({ role: 'textfield', name: 'Note', ref_id: '@s:e1', native_id: { kind: 'ax_identifier', value: 'note' }, bounds: { x: 10, y: 10, width: 100, height: 20 }, ...(focused ? { states: ['focused'] } : {}) });
