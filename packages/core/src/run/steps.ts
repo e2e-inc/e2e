@@ -5,7 +5,8 @@ import { AgentError, isAgentError } from '../agent/error.ts';
 import type { ReplayHandOffReason } from '../agent/executor.ts';
 import type { CacheWrite } from '../cache/context.ts';
 import type { TraceReplayMissReason } from '../cache/decide.ts';
-import type { RecordedModel, DerivedReason } from '../cache/trace.ts';
+import { MAX_TRACE_DESCRIPTOR_CHARS, type RecordedModel, type DerivedReason } from '../cache/trace.ts';
+import { readRecordedModel } from '../cache/trace-fields.ts';
 import { bound } from '../internal/text.ts';
 import { markAbandonedRejection, relocateStack } from '../internal/abandoned.ts';
 import { withAiTraceStep } from '../internal/ai-trace.ts';
@@ -1063,15 +1064,7 @@ export class StepRecorder {
     if (details.metrics !== undefined) current.metrics = details.metrics;
     // A key given as a model id or an agent's model label is redacted like any other text the report holds.
     if (details.model !== undefined) current.model = { ...details.model, provider: processSecrets.redact(details.model.provider), model: processSecrets.redact(details.model.model) };
-    if (details.cache !== undefined) {
-      const { recordedBy } = details.cache;
-      const redact = this.redact ?? processSecrets.redact;
-      // Older recordings may hold a model label that the current run redacts.
-      current.cache = recordedBy === undefined ? details.cache : {
-        ...details.cache,
-        recordedBy: { provider: redact(recordedBy.provider), model: redact(recordedBy.model) },
-      };
-    }
+    if (details.cache !== undefined) current.cache = this.cacheForReport(details.cache);
     if (details.observationRevision !== undefined) {
       current.observationRevision = details.observationRevision;
     }
@@ -1118,10 +1111,21 @@ export class StepRecorder {
         else this.publish(record, progress);
       },
       end: (result) => {
-        Object.assign(record, result);
+        const { cache, ...fields } = result;
+        Object.assign(record, fields);
+        if (cache !== undefined) record.cache = this.cacheForReport(cache);
         this.publishEnd(record);
       },
     };
+  }
+
+  /** The report may know values that an older recording or a guest session did not. */
+  private cacheForReport(cache: StepCacheRecord): StepCacheRecord {
+    if (cache.recordedBy === undefined) return cache;
+    const { recordedBy, ...rest } = cache;
+    const redact = this.redact ?? processSecrets.redact;
+    const model = readRecordedModel({ provider: redact(recordedBy.provider), model: redact(recordedBy.model) }, MAX_TRACE_DESCRIPTOR_CHARS);
+    return model === undefined ? rest : { ...rest, recordedBy: model };
   }
 
   /** The last step of the test's own session, the one an event with no running step belongs to. */

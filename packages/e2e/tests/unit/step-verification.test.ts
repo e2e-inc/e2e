@@ -43,6 +43,23 @@ it('redacts recorded model metadata only in the step record', async () => {
   expect(cache.recordedBy).toEqual({ provider: 'fixture-value', model: 'model-fixture-value' });
 });
 
+it('redacts a guest step cache with the host ledger and drops attribution that no longer fits the report', async () => {
+  const redact = (text: string): string => text.replaceAll('!', '<secret:fixture>');
+  const steps = new StepRecorder('attempt', { redact });
+  const cache: StepCacheInfo = {
+    mode: 'self-finalized', replayedActions: 2, totalActions: 2, entry: 'entry-key',
+    recordedBy: { provider: 'provider!', model: 'model!' },
+  };
+  const guest = steps.guest({ kind: 'agent', api: 'agent.act', label: 'guest step', actor: 'fixture-guest', source: undefined });
+  guest.end({ status: 'passed', durationMs: 1, cache });
+  expect(steps.all()[0]?.cache?.recordedBy).toEqual({ provider: 'provider<secret:fixture>', model: 'model<secret:fixture>' });
+  expect(cache.recordedBy).toEqual({ provider: 'provider!', model: 'model!' });
+
+  const longCache = { ...cache, recordedBy: { provider: 'provider', model: `${'m'.repeat(299)}!` } };
+  await steps.run('agent', 'agent.act', 'own step', async () => steps.attachAgentDetails({ cache: longCache }));
+  expect(steps.all()[1]?.cache).toEqual({ mode: 'self-finalized', replayedActions: 2, totalActions: 2, entry: 'entry-key' });
+});
+
 describe('StepRecorder.lastVerifiedStepIndex', () => {
   it('is -1 until a verification step passes', async () => {
     const steps = new StepRecorder('attempt');
