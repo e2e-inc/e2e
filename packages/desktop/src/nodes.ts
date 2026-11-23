@@ -347,8 +347,11 @@ export function projectSnapshot(
     });
     const kept: RawNode[] = [];
     const underHidden = new Set<RawNode>();
+    // Whether a wrapper left out had children the read cut off: its unread children are this node's, and one could be a twin of a listed one.
+    let wrapperCut = false;
     const collect = (child: RawNode, throughHidden: boolean): void => {
       if (transparent(child)) {
+        if (childrenCut(child)) wrapperCut = true;
         const hiddenWrapper = throughHidden || child.states?.includes('hidden') === true || child.states?.includes('offscreen') === true;
         for (const grandchild of child.children ?? []) collect(grandchild, hiddenWrapper);
       } else {
@@ -369,7 +372,7 @@ export function projectSnapshot(
     // "Delete" buttons goes, the second must not take over its id, so each
     // look-alike gets a new id every snapshot.
     // A node whose children the read cut off lists only some of them: one that looks unique may have a twin the read did not reach, so none takes an id.
-    const cut = node.subtree_truncated === true || (node.children_count !== undefined && node.children_count > (node.children?.length ?? 0));
+    const cut = childrenCut(node) || wrapperCut;
     const children = kept.map((child) => {
       const identity = cut ? undefined : plain.get(identityOf(child)) === 1 ? identityOf(child) : named.get(identityOf(child, true)) === 1 ? identityOf(child, true) : undefined;
       // An identity two siblings share may pass on to neither, even where their names tell them apart now.
@@ -417,9 +420,11 @@ function headingLevel(node: RawNode): { level?: number } {
   return match === null ? {} : { level: Number(match[1]) };
 }
 
+/** Whether the read listed only some of a node's children: agent-desktop flags the node, or counts more children than it listed at the depth limit. */
+function childrenCut(node: RawNode): boolean {
+  return node.subtree_truncated === true || (node.children_count !== undefined && node.children_count > (node.children?.length ?? 0));
+}
+
 function hasTruncatedSubtree(node: RawNode): boolean {
-  if (node.subtree_truncated === true) return true;
-  // At the depth limit agent-desktop counts the children it did not list.
-  if (node.children_count !== undefined && node.children_count > (node.children?.length ?? 0)) return true;
-  return (node.children ?? []).some(hasTruncatedSubtree);
+  return childrenCut(node) || (node.children ?? []).some(hasTruncatedSubtree);
 }

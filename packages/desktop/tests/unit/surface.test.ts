@@ -1220,6 +1220,17 @@ describe('DesktopSurface', () => {
     expect(cut.root.children?.[0]?.children?.[0]?.ref.id).not.toBe(first.root.children?.[0]?.children?.[0]?.ref.id);
   });
 
+  it('gives no id to a control beside a wrapper the read cut off at the depth limit, which may hide its twin', async () => {
+    const window = { role: 'window', name: 'Rows', bounds: { x: 0, y: 0, width: 300, height: 300 } };
+    const remove = (ref: string, x: number) => ({ role: 'button', name: 'Delete', ref_id: ref, bounds: { x, y: 10, width: 60, height: 20 } });
+    const read = (nodes: readonly unknown[]) => ({ ok: true, data: { snapshot_id: 's', window: { id: 'w-mine' }, tree: { ...window, children: [{ role: 'list', name: 'Rows', children: nodes }] } } });
+    // Row B's button alone; then row A's beside an anonymous wrapper whose children the depth limit cut off.
+    const { surface } = await launched({ snapshot: [read([remove('@s:e1', 200)]), read([remove('@s:e1', 200)]), read([remove('@s:e2', 10), { role: 'group', children_count: 2 }])] }, { observe: false });
+    const first = await surface.observe(operation(), undefined);
+    const cut = await surface.observe(operation(), undefined);
+    expect(cut.root.children?.[0]?.children?.[0]?.ref.id).not.toBe(first.root.children?.[0]?.children?.[0]?.ref.id);
+  });
+
   it('passes no id on through a read cut short that saw two controls share a developer id', async () => {
     const window = { role: 'window', name: 'Menu', bounds: { x: 0, y: 0, width: 300, height: 300 } };
     const item = (name: string, ref: string) => ({ role: 'menuitem', name, ref_id: ref, native_id: { kind: 'ax_identifier', value: 'menuItemSelected:' }, bounds: { x: 10, y: 10, width: 100, height: 20 } });
