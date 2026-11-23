@@ -203,6 +203,11 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+/** A read that ran out of time, which proves nothing absent: a retryable `NODE_STALE` that says what it could not tell. */
+function partialRead(what: string): EngineError {
+  return new EngineError('NODE_STALE', `the window was read only in part, as agent-desktop ran out of time, so ${what} cannot be told`, { retryable: true, cause: UNREADABLE });
+}
+
 function notActionable(text: string): EngineError {
   return new EngineError('NOT_ACTIONABLE', text, { retryable: false });
 }
@@ -1160,6 +1165,7 @@ export class DesktopSurface {
       const screen = await this.capture(operation);
       if (screen !== undefined) this.remember(screen.bindings.values());
       const target = screen?.scrollTarget;
+      if (target === undefined && screen?.cutShort === true) throw partialRead('what in it scrolls');
       if (target === undefined) throw notActionable('the window has nothing that scrolls');
       await this.scroll(this.binding({ id: target, revision: '' }), action.direction, action.momentum, operation);
       return this.settle(operation);
@@ -1277,7 +1283,7 @@ export class DesktopSurface {
     // Read as the binding was: a locator's binding comes from a whole read, an observation's from an interactive one.
     const now = await this.capture(operation, window, false, !binding.interactive);
     // A read that ran out of time gives every control a fresh id, so it cannot tell which one holds focus: that is no lost focus.
-    if (now?.cutShort === true) throw new EngineError('NODE_STALE', 'the window was read only in part, as agent-desktop ran out of time, so which control holds focus cannot be told', { retryable: true, cause: UNREADABLE });
+    if (now?.cutShort === true) throw partialRead('which control holds focus');
     return [...(now?.bindings.values() ?? [])].some(
       (candidate) =>
         candidate.states?.focused === true &&
@@ -1421,6 +1427,8 @@ export class DesktopSurface {
     const operation = withDeadline(context);
     const screen = await this.capture(operation);
     const focused = screen === undefined ? undefined : [...screen.bindings.values()].find((binding) => binding.ref !== undefined && binding.states?.focused === true);
+    // A read that ran out of time may stop short of the focused field: no proof that none has focus.
+    if (focused === undefined && screen?.cutShort === true) throw partialRead('which field has keyboard focus');
     if (focused === undefined) throw notActionable('no field has keyboard focus; tap or focus the field first');
     // agent-desktop types only into a control that offers TypeText; a list or button with focus would take the select-all and delete as commands.
     if (!focused.actions.includes('TypeText')) {

@@ -1199,6 +1199,15 @@ describe('DesktopSurface', () => {
     expect(fake.calls().at(-1)?.args).toEqual(['press', 'a', '--window-id', 'w-mine']);
   });
 
+  it('reads again, rather than find no focused field or nothing to scroll, when a read runs out of time', async () => {
+    const window = { role: 'window', name: 'Form', bounds: { x: 0, y: 0, width: 200, height: 200 } };
+    const cut = { ok: true, data: { snapshot_id: 's', complete: false, truncated: true, window: { id: 'w-mine' }, tree: { ...window, subtree_truncated: true, children: [{ role: 'button', name: 'OK', ref_id: '@s:e1', bounds: { x: 10, y: 10, width: 40, height: 20 } }] } } };
+    const whole = { ok: true, data: { snapshot_id: 's', window: { id: 'w-mine' }, tree: { ...window, children: [] } } };
+    const { surface } = await launched({ snapshot: [whole, cut] }, { observe: false, options: { headed: true } });
+    await expect(surface.typeText('ada', { replace: false }, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringMatching(/which field has keyboard focus/) });
+    await expect(surface.perform({ id: 'root', revision: '' }, { kind: 'swipe', direction: 'down' }, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringMatching(/what in it scrolls/) });
+  });
+
   it('says the read was cut short, not that focus moved, when the focus check runs out of time', async () => {
     const window = { role: 'window', name: 'Form', bounds: { x: 0, y: 0, width: 200, height: 200 } };
     const field = (name: string, ref: string, y: number, focused: boolean) => ({ role: 'textfield', name, ref_id: ref, bounds: { x: 10, y, width: 100, height: 20 }, ...(focused ? { states: ['focused'] } : {}) });
