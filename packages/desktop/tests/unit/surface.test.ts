@@ -516,6 +516,18 @@ describe('DesktopSurface', () => {
     expect(observed).not.toHaveProperty('maskedRegionCount');
   });
 
+  it('fails an observation cancelled while its pixels are captured, rather than return it without them', async () => {
+    const { surface, fake } = await launched({ screenshot: [{ sleepMs: 5_000, ok: true, data: { scale_factor: 1 } }] }, { snapshot: 'macos/sign-in-form' });
+    const controller = new AbortController();
+    const observed = surface.observe({ ...operation(), signal: controller.signal }, { pixels: true }).then(
+      () => undefined,
+      (cause: unknown) => cause,
+    );
+    while (!fake.calls().some((call) => call.key === 'screenshot')) await new Promise((resolve) => setTimeout(resolve, 10));
+    controller.abort();
+    expect(await observed).toMatchObject({ code: 'CANCELLED' });
+  });
+
   it('refuses a screenshot as a policy when a password field has no bounds to mask', async () => {
     // The AppKit form's password field was captured with no bounds.
     const { surface } = await launched({});

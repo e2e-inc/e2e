@@ -1040,7 +1040,8 @@ export class DesktopSurface {
     this.remember(screen.bindings.values());
     let withheld = false;
     const pixels = options?.pixels === true ? await this.pixelsFor(screen, operation).catch((cause: unknown) => {
-      if (cause instanceof EngineError && cause.code === 'OPERATION_TIMEOUT') throw cause;
+      // Out of time or cancelled is no screenshot at all, and the observation with it.
+      if (cause instanceof EngineError && (cause.code === 'OPERATION_TIMEOUT' || cause.code === 'CANCELLED')) throw cause;
       // A capture that failed (no Screen Recording permission) is no screenshot, as on the mobile engine, not masking that could not be proven.
       withheld = cause instanceof Error && cause.cause === UNMASKED;
       return undefined;
