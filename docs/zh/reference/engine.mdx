@@ -1581,6 +1581,7 @@ export class InfrastructureError extends E2EError {
 | [`validateJsonValue`](#validatejsonvalue) | `void` |
 | [`rejectUnknownKeys`](#rejectunknownkeys) | `void` |
 | [`checkLaunchArguments`](#checklauncharguments) | `ResolvedLaunchArguments \| undefined` |
+| [`appleUserDefaults`](#appleuserdefaults) | `readonly string[]` |
 | [`rejectUnknownOptions`](#rejectunknownoptions) | `void` |
 | [`obj`](#obj) | `WithoutUndefined<T>` |
 | [`raceAbort`、`withTimeout`、`withinCleanupBudget`](#timing-helpers) | `Promise<T>`、`Promise<T>`、`Promise<void>` |
@@ -1753,6 +1754,17 @@ export function checkLaunchArguments(
 ```ts
 const launchArguments = checkLaunchArguments('device.openApp({ launchArguments })', options.launchArguments, 'INVALID_ARGUMENT');
 // device.openApp({ launchArguments }).env must be a string, number, boolean, or array of strings, got null
+```
+
+#### `appleUserDefaults`
+
+```ts
+export function appleUserDefaults(launchArguments: ResolvedLaunchArguments): readonly string[];
+```
+
+```ts
+appleUserDefaults({ AppleLanguages: ['fr', 'en-GB'], e2e: true, offset: -1, mode: '(draft)' });
+// ['-AppleLanguages', '(fr, en-GB)', '-e2e', 'YES', '-offset', '"-1"', '-mode', '"(draft)"']
 ```
 
 #### `rejectUnknownOptions`

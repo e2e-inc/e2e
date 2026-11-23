@@ -344,20 +344,38 @@ export default {
 - iOS hands the arguments to the app process
   (`ProcessInfo.processInfo.arguments`). Android appends them to `am start`,
   so `['--ez', 'e2e', 'true']` is a boolean intent extra.
-- An object names each argument. On iOS an entry becomes `-name value` as
-  `NSUserDefaults` reads it: a string the parser would take for a plist or a
-  comment, such as `(draft)`, `a b`, or `//cdn`, is quoted. An app that reads
-  `ProcessInfo.processInfo.arguments` sees that spelling, `NO` for `false`
-  and the quotes included, so keep the list form for it. On Android it becomes an `am start` extra
-  of the value's type, so the app reads it with the matching `Intent` getter;
-  a whole number such as `1.0` is an `int`. Android reads none of Apple's
-  arguments, so `AppleLanguages` or `AppleLocale` in an object on an Android
-  target fails with `INVALID_CONFIG`; a list of strings is passed through as
-  given.
-- `am start` splits a list extra on each comma not preceded by a backslash
-  and keeps that backslash, so on Android a list in an object is not empty,
-  and no item is empty, holds a comma, or ends in a backslash. Each of those
-  fails with `INVALID_CONFIG`.
+- An object gives each argument a name.
+  - On iOS, each entry becomes `-name value` in the format that
+    `NSUserDefaults` reads. A string that the parser could read as a plist or
+    a comment, such as `(draft)`, `a b`, or `//cdn`, gets quotes. An app that
+    reads `ProcessInfo.processInfo.arguments` receives this format, with `NO`
+    for `false` and the quotes included. If your app reads
+    `ProcessInfo.processInfo.arguments`, use the `launchArguments` list format
+    instead:
+
+    ```ts title="e2e.config.ts"
+    export default {
+      targets: [
+        {
+          name: 'iphone',
+          engine: mobile({ platform: 'ios' }),
+          app: {
+            bundleId: 'com.example.app',
+            launchArguments: ['-flag', 'false', '-title', 'a b'],
+          },
+        },
+      ],
+    } satisfies E2EConfig;
+    ```
+  - On Android, each entry becomes an `am start` extra of the value's type.
+    The app reads it with the matching `Intent` getter. A whole number such
+    as `1.0` is an `int`. Android does not read Apple arguments, so
+    `AppleLanguages` or `AppleLocale` in an object on an Android target fails
+    with `INVALID_CONFIG`. A list of strings goes to `am start` unchanged.
+- `am start` splits a list extra at each comma that has no backslash before
+  it, and it keeps that backslash. So on Android, a list in an object fails
+  with `INVALID_CONFIG` when the list is empty, or when an item is empty,
+  contains a comma, or ends with a backslash.
 
 | Value | iOS | Android |
 | --- | --- | --- |
