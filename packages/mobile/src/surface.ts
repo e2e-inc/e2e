@@ -383,6 +383,11 @@ const SNAPSHOT_MODES: readonly string[] = Object.keys({ full: true, interactive:
 /** Every state a permission takes, kept equal to `PermissionState` by the compiler. */
 const PERMISSION_STATES: readonly string[] = Object.keys({ grant: true, deny: true, reset: true } satisfies Record<PermissionState, true>);
 
+/** The target's `app.permissions` as a launch takes them: `'all'` arrives from the harness as `allPermissions`. */
+function configuredPermissions(app: EngineAppInfo): LaunchPermissions | undefined {
+  return app.allPermissions === true ? 'all' : app.permissions;
+}
+
 /**
  * Refuses a permissions map before any device command: anything but `'all'`
  * or a plain object, a name agent-device
@@ -899,7 +904,7 @@ export class AgentDeviceSurface {
     // permission change there would terminate the app it means to keep.
     const configured = relaunch && app === this.pinnedApp;
     const launchArguments = options.launchArguments ?? (configured ? this.app.launchArguments : undefined);
-    const permissions = options.permissions ?? (configured ? this.app.permissions : undefined);
+    const permissions = options.permissions ?? (configured ? configuredPermissions(this.app) : undefined);
     if (permissions !== undefined) await this.presetPermissions(app, permissions, signal);
     await this.open(app, relaunch, launchArguments, signal);
   }

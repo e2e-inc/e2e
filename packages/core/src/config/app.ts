@@ -150,6 +150,13 @@ export function checkTargetApp(targetName: string, engine: EngineHandle | undefi
       }
     }
   }
+  // An engine that predates 'all' would read the string as a map of names.
+  if (permissions === 'all' && engine !== undefined && engine.grantsAllPermissions !== true) {
+    throw new ConfigurationError(
+      'INVALID_CONFIG',
+      `${where}.permissions is 'all', which engine "${engine.name}" does not take (it declares no grantsAllPermissions); name each permission instead, or upgrade an engine released before 'all'`,
+    );
+  }
   const checked: TargetAppDeclaration = {
     url: nonEmptyString(app.url, `${where}.url`),
     bundleId: nonEmptyString(app.bundleId, `${where}.bundleId`),
@@ -163,7 +170,7 @@ export function checkTargetApp(targetName: string, engine: EngineHandle | undefi
     readyUrl: nonEmptyString(app.readyUrl, `${where}.readyUrl`),
   };
   const { url, bundleId, appPath } = checked;
-  engine?.validateApp?.(obj({ url, bundleId, appPath, launchArguments, permissions }) satisfies EngineAppDeclaration, { targetName });
+  engine?.validateApp?.(obj({ url, bundleId, appPath, launchArguments, ...enginePermissions(permissions) }) satisfies EngineAppDeclaration, { targetName });
   return checked;
 }
 
@@ -308,7 +315,13 @@ export function resolveTargetApp(targetName: string, app: TargetAppDeclaration, 
 export function engineAppInfo(app: ResolvedApp): EngineAppInfo {
   const { base, portRequest, site, bundleId, appPath, launchArguments, permissions } = app;
   const unassigned = portRequest !== undefined && portRequest.port === undefined;
-  return obj({ origin: unassigned ? undefined : base?.origin, site, bundleId, appPath, launchArguments, permissions });
+  return obj({ origin: unassigned ? undefined : base?.origin, site, bundleId, appPath, launchArguments, ...enginePermissions(permissions) });
+}
+
+/** `app.permissions` as an engine receives it: a map under `permissions`, or `'all'` as `allPermissions`. */
+function enginePermissions(permissions: ResolvedApp['permissions']): Pick<EngineAppInfo, 'permissions' | 'allPermissions'> {
+  if (permissions === 'all') return { allPermissions: true };
+  return permissions === undefined ? {} : { permissions };
 }
 
 /**

@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { discoverConfig } from '../../src/config/load.ts';
+import { engineAppInfo } from '@e2e-dev/core/lib/config/app';
 import { isCiMode, type CliOverrides } from '@e2e-dev/core/lib/config/resolve';
 import { resolveConfig } from '../../src/config/resolve-run.ts';
 import { ConfigurationError, defineEngine } from '@e2e-dev/core/lib/engine/index';
@@ -559,7 +560,33 @@ describe('resolveConfig', () => {
       launchArguments: ['-e2e'],
       permissions: { camera: 'grant' },
     });
-    expect(resolveApp({ bundleId: 'dev.shop.app', permissions: 'all' }).permissions).toBe('all');
+  });
+
+  it("takes 'all' only on an engine that declares grantsAllPermissions, which receives it as allPermissions", () => {
+    // An engine that predates 'all' would read the string as a map of names.
+    expect(() => resolveApp({ bundleId: 'dev.shop.app', permissions: 'all' })).toThrow(
+      new ConfigurationError(
+        'INVALID_CONFIG',
+        `target "web" app.permissions is 'all', which engine "fake" does not take (it declares no grantsAllPermissions); name each permission instead, or upgrade an engine released before 'all'`,
+      ),
+    );
+    const seen: unknown[] = [];
+    const granting = defineEngine({
+      name: 'granting',
+      version: '1.0.0',
+      spiVersion: 1,
+      grantsAllPermissions: true,
+      validateApp(app) {
+        seen.push(app);
+      },
+    });
+    const [target] = resolve({ targets: [{ ...WEB, engine: granting, app: { bundleId: 'dev.shop.app', permissions: 'all' } }] }).targets;
+    expect(target!.app.permissions).toBe('all');
+    expect(seen).toEqual([{ bundleId: 'dev.shop.app', allPermissions: true }]);
+    expect(engineAppInfo(target!.app)).toEqual({ bundleId: 'dev.shop.app', allPermissions: true });
+    expect(() => defineEngine({ name: 'bad', version: '1.0.0', spiVersion: 1, grantsAllPermissions: invalid<boolean>('yes') })).toThrow(
+      /grantsAllPermissions must be a boolean/,
+    );
   });
 
   it("hands the declaration to the engine's validateApp, which names the target", () => {

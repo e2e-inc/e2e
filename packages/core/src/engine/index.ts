@@ -173,12 +173,14 @@ export interface EngineAppInfo {
   readonly appPath?: string;
   /** Arguments every fresh launch passes the app. */
   readonly launchArguments?: readonly string[];
+  /** Permissions the app holds, by name; what each state means is the engine's (a device sets them before every fresh launch). */
+  readonly permissions?: Readonly<Record<string, AppPermissionState>>;
   /**
-   * Permissions the app holds, by name; what each state means is the
-   * engine's (a device sets them before every fresh launch). `'all'` grants
-   * every permission the engine can grant.
+   * `app.permissions: 'all'`: grant every permission the engine can grant,
+   * in place of `permissions`. Only an engine that declares
+   * `grantsAllPermissions` receives it; for any other, the config is refused.
    */
-  readonly permissions?: Readonly<Record<string, AppPermissionState>> | 'all';
+  readonly allPermissions?: true;
 }
 
 /**
@@ -806,6 +808,12 @@ export interface Engine {
    * anything is prepared.
    */
   readonly selectsDevice?: boolean;
+  /**
+   * The engine grants `app.permissions: 'all'`, which reaches it as
+   * `EngineAppInfo.allPermissions`. Without it the harness refuses `'all'` at
+   * config load, so an engine that predates the value never receives it.
+   */
+  readonly grantsAllPermissions?: boolean;
   /** capability: keyboard - requires observation. Input to whatever holds focus; see `EngineKeyboard`. */
   readonly keyboard?: EngineKeyboard;
   /**

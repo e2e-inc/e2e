@@ -284,6 +284,7 @@ describe('lifecycle', () => {
     for (const configured of [['iPhone 16e', 'iPad Pro 11-inch'], undefined]) {
       const h = harness(configured === undefined ? {} : { device: configured });
       expect(h.engine.selectsDevice).toBe(true);
+      expect(h.engine.grantsAllPermissions).toBe(true);
       const result = await h.prepare(info('iPhone 17 Pro'));
       // One named device is one worker, whatever the run planned.
       expect(result?.workers).toBe(1);
@@ -2985,7 +2986,7 @@ describe('device fixture', () => {
 
   it('grants every permission before each fresh launch with \'all\', in one agent-device all on either platform, and for one openApp', async () => {
     for (const platform of ['ios', 'android'] as const) {
-      const h = harness({ platform, bundleId: 'com.example.app', permissions: 'all' });
+      const h = harness({ platform, bundleId: 'com.example.app', allPermissions: true });
       h.fake.respond('apps.open', () => ({ session: 's', appName: 'Example', appBundleId: 'com.example.app', identifiers: {} }));
       await boot(h, platform);
       await h.engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });

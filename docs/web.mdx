@@ -297,7 +297,7 @@ the app use the clipboard, grant it on the target:
   `INVALID_CONFIG`: leave the permission out instead.
 - The names are Playwright's, and each browser grants its own set. See
   [`permissions`](/reference/config#permissions).
-- `permissions: 'all'` grants every name the target's browser grants.
+- `permissions: 'all'` grants every name the target's browser grants. An older browser attached over CDP that refuses a name as unknown (such as `local-network-access`) gets the rest of the list.
 
 ## Next
 

@@ -61,7 +61,7 @@ import {
   beforeEach,
   describe,
 } from '../../src/index.ts';
-import type { Engine, EngineAttemptContext, EngineCleanupContext, EngineDisposeContext, EngineFixtureContext, EngineHandle, EngineObserveOptions, EngineSnapshot } from '../../src/engine/index.ts';
+import type { AppPermissionState, Engine, EngineAttemptContext, EngineCleanupContext, EngineDisposeContext, EngineFixtureContext, EngineHandle, EngineObserveOptions, EngineSnapshot } from '../../src/engine/index.ts';
 import {
   BASE_RULES,
   createGrammarTools,
@@ -250,6 +250,11 @@ customExecutorObservation.keyboardVisible satisfies boolean | undefined;
 // @ts-expect-error an engine only drives the app: the target declares it
 ({ name: 'toy', version: '1.0.0', spiVersion: 1, app: { url: 'http://localhost:3000' } }) satisfies Engine;
 ({ name: 'toy', version: '1.0.0', spiVersion: 1, validateApp: (app, { targetName }) => void [app.bundleId, targetName] }) satisfies Engine;
+// An engine reads `app.permissions` as a map; `'all'` reaches only one that declares `grantsAllPermissions`, as `allPermissions`.
+({
+  name: 'toy', version: '1.0.0', spiVersion: 1, grantsAllPermissions: true,
+  validateApp: (app) => void [app.permissions?.['camera'] satisfies AppPermissionState | undefined, app.allPermissions satisfies true | undefined],
+}) satisfies Engine;
 // `e2e run --device`: an engine that selects devices reads the name `prepare` hands it.
 ({ name: 'toy', version: '1.0.0', spiVersion: 1, selectsDevice: true, prepare: async ({ device }) => void (device satisfies string | undefined) }) satisfies Engine;
 // @ts-expect-error a target declares its app; there is no services list in this version

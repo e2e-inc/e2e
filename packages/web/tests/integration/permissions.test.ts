@@ -41,7 +41,7 @@ describe('app permissions', () => {
     const engine = web();
     await engine.init!({
       runId: 'run-permissions', targetName: 'web', projectRoot: process.cwd(),
-      app: { site: new URL(app.url).hostname, ...(permissions === undefined ? {} : { permissions }) }, env: {}, headed: false,
+      app: { site: new URL(app.url).hostname, ...(permissions === undefined ? {} : permissions === 'all' ? { allPermissions: true as const } : { permissions }) }, env: {}, headed: false,
       workerSlot: 0, log: () => undefined, signal: new AbortController().signal,
     });
     await engine.startAttempt!({ attemptId: 'p1', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
