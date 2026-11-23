@@ -266,7 +266,8 @@ export class LocatorEngine {
           if (missingFrame === 'empty' && engineError.code === 'FRAME_NOT_FOUND') return [];
           if (!reads.deadline.expired()) {
             retried = cause;
-            await sleep(pollDelay(Date.now() - startedMs), this.signal);
+            const now = Date.now();
+            await sleep(Math.min(pollDelay(now - startedMs), reads.deadline.remaining(now)), this.signal);
             continue;
           }
         }
@@ -559,6 +560,8 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
       negated: false,
       reads: this.reads(deadline),
       evaluate: async (reads) => {
+        // A box read at the deadline could never be tapped: skip the read so the wait ends as LOCATOR_NOT_FOUND.
+        if (deadline.expired()) return false;
         const { node } = await this.tryRead(expression, reads);
         if (!isNodeVisible(node) || node.rect === undefined) return false;
         origin = node.origin ?? node.rect;
