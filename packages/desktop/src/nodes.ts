@@ -268,9 +268,11 @@ function identityOf(node: RawNode, named = false): string {
  * The window is always `root`.
  * Wrappers nothing reads (anonymous groups) are dropped
  * and their children lifted, so the model reads the controls, not the
- * scaffolding, and the window's title-bar buttons are left out.
+ * scaffolding, and the window's title-bar buttons are left out. Every node
+ * of a `minimized` window is hidden: accessibility still reads its controls,
+ * but nothing of it is on screen.
  */
-export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | undefined) => string): ProjectedScreen {
+export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | undefined) => string, minimized = false): ProjectedScreen {
   const window = raw.tree.bounds ?? { x: 0, y: 0, width: 0, height: 0 };
   const titleBar = titleBarButtons(raw.tree);
   const bindings = new Map<string, NodeBinding>();
@@ -284,7 +286,7 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
     const secure = rawStates.has('secure');
     const states: Record<string, boolean> = {};
     for (const state of STATE_NAMES) if (rawStates.has(state)) states[state] = true;
-    if (rawStates.has('offscreen')) states.hidden = true;
+    if (rawStates.has('offscreen') || (minimized && id !== ROOT_ID)) states.hidden = true;
     // A control collapsed to no width or height draws nothing, and agent-desktop will not act on it. Only a leaf: a container with no box can still hold drawn children.
     if (id !== ROOT_ID && node.bounds !== undefined && (node.bounds.width <= 0 || node.bounds.height <= 0) && (node.children ?? []).length === 0) states.hidden = true;
     // A mixed checkbox is neither checked nor unchecked: no state, so check() and uncheck() always reach the control.

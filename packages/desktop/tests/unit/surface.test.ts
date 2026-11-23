@@ -385,6 +385,14 @@ describe('DesktopSurface', () => {
     await expect(surface.locate(username, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
   });
 
+  it('reads the controls of a minimized window as hidden, still found by test id', async () => {
+    const { surface } = await launched((pid) => ({
+      'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }, { ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', visible: false, minimized: true }] }],
+    }), { observe: false });
+    const [username] = await surface.locate({ kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'username', exact: true } } }, operation());
+    expect(username?.states?.hidden).toBe(true);
+  });
+
   it('reads an app with no window as an empty screen', async () => {
     const { surface } = await launched((pid) => ({ 'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }] }, { ok: true, data: [] }] }), { observe: false });
     const matches = await surface.locate({ kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'username', exact: true } } }, operation());

@@ -144,6 +144,8 @@ interface RawWindow {
   readonly visible?: boolean;
   /** False for a window accessibility cannot read. */
   readonly accessible?: boolean;
+  /** True for a window in the Dock, whose controls accessibility still reads. */
+  readonly minimized?: boolean;
   readonly app_name?: string;
   readonly pid?: number;
   readonly process_instance?: string;
@@ -889,15 +891,19 @@ export class DesktopSurface {
    * on to another. Another window's identities stay, so its controls keep
    * their ids when it is read again.
    */
-  private projectWindow(raw: RawSnapshot): ProjectedScreen {
+  private projectWindow(raw: RawSnapshot, minimized: boolean): ProjectedScreen {
     const window = raw.window?.id ?? '';
     const used = new Set<string>();
-    const screen = projectSnapshot(raw, (identity) => {
-      if (identity === undefined) return this.idFor(undefined);
-      const scoped = `${window}|${identity}`;
-      used.add(scoped);
-      return this.idFor(scoped);
-    });
+    const screen = projectSnapshot(
+      raw,
+      (identity) => {
+        if (identity === undefined) return this.idFor(undefined);
+        const scoped = `${window}|${identity}`;
+        used.add(scoped);
+        return this.idFor(scoped);
+      },
+      minimized,
+    );
     for (const identity of this.ids.keys()) if (identity.startsWith(`${window}|`) && !used.has(identity)) this.ids.delete(identity);
     return screen;
   }
@@ -942,7 +948,7 @@ export class DesktopSurface {
       if (this.options.interactiveOnly && !forMask && !whole) args.push('-i');
       try {
         const raw = await this.run<RawSnapshot>(args, { label: 'snapshot', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs, raw: true });
-        if (!forMask) return this.projectWindow(raw);
+        if (!forMask) return this.projectWindow(raw, window.minimized === true);
         let scratch = 0;
         return projectSnapshot(raw, () => `mask${(scratch += 1)}`);
       } catch (cause) {
