@@ -90,7 +90,7 @@ export function isDeviceList(device: unknown): device is readonly string[] {
 function sourceFor(options: MobileOptions, createClient: ClientFactory, session: SessionNamer): DeviceSource {
   const { device } = options;
   if (device === undefined) return new BootedDevices(options.platform, createClient, session);
-  if (typeof device === 'string') return new ConfiguredDevices([namedDevice(device)]);
+  if (typeof device === 'string') return new ConfiguredDevices([namedDevice(device)], options.platform, createClient, session);
   if (isDeviceList(device)) {
     if (device.length === 0) {
       throw new ConfigurationError(
@@ -98,7 +98,7 @@ function sourceFor(options: MobileOptions, createClient: ClientFactory, session:
         'mobile: `device` is an empty pool; name at least one simulator or emulator, or omit it to use every booted one',
       );
     }
-    return new ConfiguredDevices(device.map(namedDevice));
+    return new ConfiguredDevices(device.map(namedDevice), options.platform, createClient, session);
   }
   return new LeasedDevices(asDeviceProvider(device), options);
 }
@@ -111,18 +111,55 @@ function namedDevice(device: unknown): string {
   return device;
 }
 
-/** The devices named in the config, bound in order, as many as the run has slots. */
+/**
+ * The devices named in the config, bound in order, as many as the run has
+ * slots. agent-device matches a `device` name against device names only, so
+ * on Android a name that is a connected device's adb serial binds as that
+ * serial: a physical phone has no name of its own to tell it apart from
+ * another of the same model. An emulator serial needs no lookup.
+ */
 class ConfiguredDevices implements DeviceSource {
   readonly size: number;
   readonly fallback: readonly SlotBinding[];
 
-  constructor(devices: readonly string[]) {
+  constructor(
+    private readonly devices: readonly string[],
+    private readonly platform: MobilePlatform,
+    private readonly createClient: ClientFactory,
+    private readonly session: SessionNamer,
+  ) {
     this.size = devices.length;
     this.fallback = devices.map((device) => ({ device }));
   }
 
   async bind(info: EnginePrepareInfo): Promise<readonly SlotBinding[]> {
-    return this.fallback.slice(0, Math.min(info.slots, this.size));
+    const devices = this.devices.slice(0, Math.min(info.slots, this.size));
+    if (this.platform !== 'android' || devices.every((device) => EMULATOR_SERIAL.test(device))) return devices.map((device) => ({ device }));
+    const serials = await this.serials(info);
+    return devices.map((device) => (serials.has(device) ? { deviceId: device } : { device }));
+  }
+
+  /**
+   * The ids agent-device lists Android devices under, their adb serials. A
+   * failed listing is logged and leaves every entry a name, as it was before
+   * serials were looked up; a cancelled one ends `prepare`.
+   */
+  private async serials(info: EnginePrepareInfo): Promise<ReadonlySet<string>> {
+    const client = this.createClient(this.session(info, 0));
+    try {
+      const inventory: unknown = await runCommand('devices', () => client.devices.list({ platform: this.platform }), info.signal);
+      if (!Array.isArray(inventory)) return new Set();
+      return new Set(
+        inventory.flatMap((device: unknown) => {
+          const { id, platform } = (typeof device === 'object' && device !== null ? device : {}) as { id?: unknown; platform?: unknown };
+          return platform === this.platform && typeof id === 'string' ? [id] : [];
+        }),
+      );
+    } catch (cause) {
+      if (info.signal.aborted) throw cause;
+      info.log(`could not list ${this.platform} devices to match a configured \`device\` by adb serial (${message(cause)}); selecting by name`);
+      return new Set();
+    }
   }
 }
 
@@ -276,7 +313,7 @@ export class DevicePool {
    */
   async prepare(info: EnginePrepareInfo): Promise<EnginePrepareResult> {
     if (info.slots === 0) return {};
-    const source = info.device === undefined ? this.source : new ConfiguredDevices([namedDevice(info.device)]);
+    const source = info.device === undefined ? this.source : new ConfiguredDevices([namedDevice(info.device)], this.options.platform, this.createClient, (owner, slot) => this.session(owner, slot));
     const bindings = await source.bind(info);
     await this.warm(bindings, info);
     this.bound.set(info.targetName, bindings);

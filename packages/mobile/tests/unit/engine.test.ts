@@ -575,6 +575,42 @@ describe('lifecycle', () => {
     expect(byUdid.fake.lastArgs('devices.boot')).toEqual({ platform: 'ios', udid: '2BBF3F07-AF66-4F95-82AB-BF442506FC89' });
   });
 
+  it('binds a configured Android name that is a listed device id as its adb serial, a physical phone included, and keeps every other entry a name', async () => {
+    const info = (device?: string) => ({ runId: 'run-1', targetName: 'android', projectRoot: PROJECT_ROOT, slots: 3, env: {}, signal: new AbortController().signal, headed: false, ...(device === undefined ? {} : { device }), log: () => undefined });
+    const listed = [
+      { platform: 'android', id: 'R58M12ABCDE', name: 'Pixel 8', booted: true },
+      { platform: 'android', id: '1A2B3C4D', name: 'Pixel 8', booted: true },
+      { platform: 'ios', id: 'Pixel_9', name: 'not android', booted: true },
+    ];
+    const h = harness({ device: ['R58M12ABCDE', '1A2B3C4D', 'Pixel_9'], platform: 'android' });
+    h.fake.respond('devices.list', () => listed);
+    const result = await h.prepare(info());
+    expect(h.fake.lastArgs('devices.list')).toEqual({ platform: 'android' });
+    const handed = result?.env ?? {};
+    expect(handed[poolVariableIn(handed, 'ANDROID')]).toBe(JSON.stringify([{ deviceId: 'R58M12ABCDE' }, { deviceId: '1A2B3C4D' }, { device: 'Pixel_9' }]));
+    const boots = h.fake.calls.filter((call) => call.method === 'devices.boot').map((call) => call.args);
+    expect(boots).toEqual([
+      { platform: 'android', serial: 'R58M12ABCDE' },
+      { platform: 'android', serial: '1A2B3C4D' },
+      { platform: 'android', device: 'Pixel_9' },
+    ]);
+
+    // --device takes a serial the same way.
+    const flag = harness({ platform: 'android' });
+    flag.fake.respond('devices.list', () => listed);
+    await flag.prepare(info('1A2B3C4D'));
+    expect(flag.fake.lastArgs('devices.boot')).toEqual({ platform: 'android', serial: '1A2B3C4D' });
+
+    // An emulator serial needs no listing; a failed listing leaves names as they were.
+    const emulator = harness({ device: 'emulator-5556', platform: 'android' });
+    await emulator.prepare(info());
+    expect(emulator.fake.methods()).not.toContain('devices.list');
+    const offline = harness({ device: 'R58M12ABCDE', platform: 'android' });
+    offline.fake.respond('devices.list', () => { throw new AppError('COMMAND_FAILED', 'adb is missing'); });
+    await offline.prepare(info());
+    expect(offline.fake.lastArgs('devices.boot')).toEqual({ platform: 'android', device: 'R58M12ABCDE' });
+  });
+
   it('carries the configured settle window on actions, and none when settle is false; both budgets are non-negative integers', async () => {
     const slow = harness({ settle: 600 });
     await openAttempt(slow);

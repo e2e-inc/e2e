@@ -119,7 +119,8 @@ mobile({ platform: 'android' });
 ```ts
 /**
  * Device to use: a simulator or emulator by name, simulator UDID, or
- * emulator serial (`emulator-5554`), or a connected phone by name. A list
+ * emulator serial (`emulator-5554`), or a connected phone by name or, on
+ * Android, by its adb serial (as `adb devices` lists it). A list
  * is a pool: the engine declares one worker per entry and worker slot `n`
  * drives the `n`th, so `workers` at or above the pool size runs the target's
  * files across every device at once. Omitted, the pool is every booted device
