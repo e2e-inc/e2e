@@ -1228,7 +1228,7 @@ export type LocatorAction =
       readonly modifiers?: readonly KeyModifier[];
     }
   | {
-      /** `count` taps in a row (3 or more; 2 is `doubleTap`) that the platform reads as one multi-click. */
+      /** `count` taps in a row (3 or more; 2 is `doubleTap`): one multi-click in a browser, presses at the device's cadence on a device. */
       readonly kind: 'multiTap';
       readonly count: number;
       readonly modifiers?: readonly KeyModifier[];

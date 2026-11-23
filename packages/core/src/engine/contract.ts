@@ -286,9 +286,10 @@ export type LocatorAction =
     }
   | {
       /**
-       * `count` taps in a row on one point, close enough together that the
-       * platform reads them as one multi-click (a triple click selects a
-       * paragraph): 3 or more, since 2 is `doubleTap`. Not a kind of SPI v1,
+       * `count` taps in a row on one point: 3 or more, since 2 is
+       * `doubleTap`. A browser reads them as one multi-click (a triple click
+       * selects a paragraph); a device presses them at its own cadence,
+       * which a gesture detector may not read as one. Not a kind of SPI v1,
        * so an engine lists it explicitly.
        */
       readonly kind: 'multiTap';

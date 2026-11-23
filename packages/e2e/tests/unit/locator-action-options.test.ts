@@ -187,10 +187,11 @@ describe('locator action options', () => {
     }
 
     it('taps once for count 1, as with no count', async () => {
-      const { screen, received } = countScreen();
+      const { screen, steps, received } = countScreen();
       await screen.getByLabel('Agree').tap({ count: 1 });
       await screen.getByLabel('Agree').click({ count: 1 });
       expect(received).toEqual([{ kind: 'tap' }, { kind: 'tap' }]);
+      expect(steps.all().map((step) => step.label)).toEqual(['getByLabel("Agree")', 'getByLabel("Agree")']);
     });
 
     it('sends count 2 as the action doubleTap() sends, labelled with the count', async () => {
@@ -241,10 +242,10 @@ describe('locator action options', () => {
       expect(received).toEqual([{ kind: 'doubleTap' }]);
     });
 
-    it('leaves the upper limit to the engine, sending count 50 as one multiTap', async () => {
+    it('leaves the upper limit to the engine, sending the largest safe count as one multiTap', async () => {
       const { screen, received } = countScreen();
-      await screen.getByLabel('Agree').tap({ count: 50 });
-      expect(received).toEqual([{ kind: 'multiTap', count: 50 }]);
+      await screen.getByLabel('Agree').tap({ count: Number.MAX_SAFE_INTEGER });
+      expect(received).toEqual([{ kind: 'multiTap', count: Number.MAX_SAFE_INTEGER }]);
     });
 
     it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53, '3', null])(

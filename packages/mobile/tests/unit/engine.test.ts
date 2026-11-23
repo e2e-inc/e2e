@@ -1542,16 +1542,18 @@ describe('perform', () => {
     expect(presses.every((call) => call.signal instanceof AbortSignal)).toBe(true);
   });
 
-  it('refuses a multiTap above agent-device\'s 200 presses before pressing, and sends 200', async () => {
+  it('refuses a multiTap above agent-device\'s 200 presses before any wait or device call, and sends 200', async () => {
     const h = harness();
     await openAttempt(h);
     const about = await observed(h, 'About');
     const before = h.fake.calls.length;
-    await expect(h.engine.perform!(about.ref, { kind: 'multiTap', count: 201 }, operation())).rejects.toMatchObject({
+    // A test step waits for the node to settle and steady before it presses;
+    // the refusal comes before those waits, so no snapshot and no press.
+    await expect(h.engine.perform!(about.ref, { kind: 'multiTap', count: 201 }, { ...operation(), origin: 'test' })).rejects.toMatchObject({
       code: 'UNSUPPORTED_CAPABILITY',
       message: expect.stringContaining('at most 200'),
     });
-    expect(h.fake.calls.slice(before).filter((call) => call.method === 'interactions.press')).toEqual([]);
+    expect(h.fake.calls.slice(before)).toEqual([]);
     await h.engine.perform!(about.ref, { kind: 'multiTap', count: 200 }, operation());
     expect(h.fake.calls.slice(before).filter((call) => call.method === 'interactions.press').map((call) => call.args)).toEqual([
       { ref: '@e4', count: 200, settle: true, settleQuietMs: 150 },
