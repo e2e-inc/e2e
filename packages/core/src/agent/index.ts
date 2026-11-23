@@ -15,7 +15,7 @@ import { rejectUnknownOptions } from '../internal/options.ts';
 import { describeIssue, requireStandardSchema } from '../internal/standard-schema.ts';
 import { sleep } from '../internal/time.ts';
 import type { StepRunOptions } from '../run/steps.ts';
-import type { Agent, AgentParams, JsonValue, StandardSchemaV1, VisionMode } from '../types.ts';
+import type { Agent, AgentParams, ExtractOptions, JsonValue, StandardSchemaV1, VisionMode } from '../types.ts';
 import { redactParams, validateInstruction, validateParams } from './act-validation.ts';
 import { AgentError, isAgentError, toAgentError } from './error.ts';
 import { isUnservedModelError, unservedModelError } from './model/sdk.ts';
@@ -69,6 +69,24 @@ const VISION_HINT_UNPROVEN =
 const WAIT_FOR_KEYS = ['params', 'timeout', 'interval', 'maxModelCalls', 'vision', 'agent'] as const;
 const EXTRACT_KEYS = ['schema', 'timeout', 'vision', 'agent'] as const;
 const ASSERT_KEYS = ['params', 'timeout', 'screenshot', 'vision', 'agent', 'explore', 'maxSteps', 'maxModelCalls'] as const;
+
+/** Each fixture's `extract` without the instruction checks, for `extractForRunner`. */
+const runnerExtracts = new WeakMap<Agent, Agent['extract']>();
+
+/**
+ * `agent.extract` for an instruction the runner writes itself, such as the
+ * explore planner's: the checks and the byte cap are for what a test passes,
+ * and a planner prompt that carries the run so far grows past the cap. An
+ * agent that is not a built-in fixture runs its own `extract`.
+ */
+export function extractForRunner<Schema extends StandardSchemaV1>(
+  agent: Agent,
+  instruction: string,
+  options: ExtractOptions<Schema>,
+): Promise<StandardSchemaV1.InferOutput<Schema>> {
+  const extract = runnerExtracts.get(agent);
+  return extract === undefined ? agent.extract(instruction, options) : extract(instruction, options);
+}
 
 /** Builds the agent fixture for one attempt. */
 export function createAgentFixture(runtime: AgentContext): Agent {
@@ -151,6 +169,73 @@ export function createAgentFixture(runtime: AgentContext): Agent {
     return projected === undefined ? undefined : redactParams(projected, templates, runtime.redact, api).params;
   };
 
+  /**
+   * `agent.extract` past its instruction checks: the public method runs them
+   * first, and `extractForRunner` skips them for a prompt the runner writes.
+   */
+  const extractData: Agent['extract'] = (instruction, options) => {
+    rejectUnknownOptions('agent.extract', options, EXTRACT_KEYS);
+    requireStandardSchema(options?.schema, 'schema');
+    const schema = options.schema;
+    const { config } = runtime.select(options.agent);
+    const vision = resolveVision(options.vision);
+    return step(
+      {
+        api: 'agent.extract',
+        agent: options.agent,
+        task: 'extract structured data from the observation',
+        timeoutMs: resolveTimeout(options.timeout, config.judgmentTimeout),
+        maxModelCalls: EXTRACT_MODEL_CALLS,
+        vision,
+      },
+      instruction,
+      async (invocation) => {
+        // The shape of the caller's schema lets the provider enforce it;
+        // without one the repair loop is the only shape signal.
+        const shape = await deriveJsonSchema(schema);
+        const observation = await invocation.observe();
+        let repair: PromptInput['repair'];
+        for (;;) {
+          const answer = await invocation.ask({
+            schemaName: EXTRACT_SCHEMA_NAME,
+            schema: shape === undefined ? undefined : extractSchema(shape),
+            validate: validateExtractResponse,
+            prompt: {
+              request: EXTRACT_REQUEST,
+              instruction,
+              observation,
+              ...(repair === undefined ? {} : { repair }),
+            },
+          });
+          if (!answer.found) {
+            const missing = answer.missing ?? 'the observation does not show the requested data';
+            invocation.note({ explanation: missing });
+            throw new AgentError(
+              'ASSERTION_INCONCLUSIVE',
+              explain({ verdict: 'inconclusive', explanation: `nothing to extract: ${missing}` }, vision),
+            );
+          }
+          const validation = await schema['~standard'].validate(answer.value);
+          if (validation.issues === undefined) return validation.value;
+          const issue = validation.issues.map(describeIssue).join('; ');
+          invocation.recordSchemaRejection(EXTRACT_SCHEMA_NAME);
+          if (!invocation.canAsk()) {
+            throw new AgentError(
+              'MODEL_OUTPUT_INVALID',
+              `extracted data failed schema validation: ${issue}`,
+            );
+          }
+          repair = {
+            issue,
+            rawText: safeJson({ found: true, value: answer.value, missing: null }),
+            requiredFields: requiredFields(validation.issues),
+            outlet: EXTRACT_REPAIR_OUTLET,
+          };
+        }
+      },
+    );
+  };
+
   const agent: Agent = {
     // The rest parameter exists only to catch the pre-0.8 three-argument call.
     act: (instruction, options, ...legacy: readonly unknown[]) =>
@@ -196,69 +281,7 @@ export function createAgentFixture(runtime: AgentContext): Agent {
       );
     },
 
-    extract(rawInstruction, options) {
-      const instruction = validateInstruction(rawInstruction, 'agent.extract');
-      rejectUnknownOptions('agent.extract', options, EXTRACT_KEYS);
-      requireStandardSchema(options?.schema, 'schema');
-      const schema = options.schema;
-      const { config } = runtime.select(options.agent);
-      const vision = resolveVision(options.vision);
-      return step(
-        {
-          api: 'agent.extract',
-          agent: options.agent,
-          task: 'extract structured data from the observation',
-          timeoutMs: resolveTimeout(options.timeout, config.judgmentTimeout),
-          maxModelCalls: EXTRACT_MODEL_CALLS,
-          vision,
-        },
-        instruction,
-        async (invocation) => {
-          // The shape of the caller's schema lets the provider enforce it;
-          // without one the repair loop is the only shape signal.
-          const shape = await deriveJsonSchema(schema);
-          const observation = await invocation.observe();
-          let repair: PromptInput['repair'];
-          for (;;) {
-            const answer = await invocation.ask({
-              schemaName: EXTRACT_SCHEMA_NAME,
-              schema: shape === undefined ? undefined : extractSchema(shape),
-              validate: validateExtractResponse,
-              prompt: {
-                request: EXTRACT_REQUEST,
-                instruction,
-                observation,
-                ...(repair === undefined ? {} : { repair }),
-              },
-            });
-            if (!answer.found) {
-              const missing = answer.missing ?? 'the observation does not show the requested data';
-              invocation.note({ explanation: missing });
-              throw new AgentError(
-                'ASSERTION_INCONCLUSIVE',
-                explain({ verdict: 'inconclusive', explanation: `nothing to extract: ${missing}` }, vision),
-              );
-            }
-            const validation = await schema['~standard'].validate(answer.value);
-            if (validation.issues === undefined) return validation.value;
-            const issue = validation.issues.map(describeIssue).join('; ');
-            invocation.recordSchemaRejection(EXTRACT_SCHEMA_NAME);
-            if (!invocation.canAsk()) {
-              throw new AgentError(
-                'MODEL_OUTPUT_INVALID',
-                `extracted data failed schema validation: ${issue}`,
-              );
-            }
-            repair = {
-              issue,
-              rawText: safeJson({ found: true, value: answer.value, missing: null }),
-              requiredFields: requiredFields(validation.issues),
-              outlet: EXTRACT_REPAIR_OUTLET,
-            };
-          }
-        },
-      );
-    },
+    extract: (instruction, options) => extractData(validateInstruction(instruction, 'agent.extract'), options),
 
     assert(rawAssertion, options) {
       const assertion = validateInstruction(rawAssertion, 'agent.assert');
@@ -327,6 +350,7 @@ export function createAgentFixture(runtime: AgentContext): Agent {
     }
   }
 
+  runnerExtracts.set(agent, extractData);
   return agent;
 }
 
