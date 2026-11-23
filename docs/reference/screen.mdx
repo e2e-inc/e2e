@@ -774,7 +774,9 @@ await screen.getByLabel('Password').fill(credentials.user('member').password);
 ```
 
 A `Secret` is resolved on the host right before the call and never logged,
-reported, or sent to a model.
+reported, or sent to a model. Any other value that is not a string, such as
+an unset `process.env` variable, a number, or `null`, is `INVALID_ARGUMENT`
+before any node resolves.
 
 <Note>
 `fill` sets the value directly and fires no key events. An autocomplete, a

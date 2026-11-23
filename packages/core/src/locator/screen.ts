@@ -474,8 +474,11 @@ class LocatorImpl extends ScreenImpl implements Locator {
   }
 
   fill(value: string | Secret, options?: ActionOptions): Promise<void> {
-    rejectUnknownOptions('fill', options, ['timeout']);
     const sensitive = isSecret(value);
+    if (!sensitive && typeof value !== 'string') {
+      throw new TestError('INVALID_ARGUMENT', 'fill requires a string or a Secret');
+    }
+    rejectUnknownOptions('fill', options, ['timeout']);
     // Resolved inside the recorded step, so a failing provider fails the fill.
     return this.action('locator.fill', async () =>
       this.context.engine.perform(

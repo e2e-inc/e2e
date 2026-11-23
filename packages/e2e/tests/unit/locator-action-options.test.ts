@@ -180,6 +180,26 @@ describe('locator action options', () => {
     expect(performed).toEqual([]);
   });
 
+  it.each([undefined, null, 0, 123_456, true, {}, ['ada@example.test'], new String('ada')])(
+    'fill refuses a value of %s before any lookup, action, or step',
+    async (value) => {
+      const { screen, steps, performed, locate } = boxScreen();
+      await expect(Promise.resolve().then(() => screen.getByLabel('Agree').fill(invalid<string>(value)))).rejects.toMatchObject({
+        code: 'INVALID_ARGUMENT',
+        message: 'fill requires a string or a Secret',
+      });
+      expect(locate).not.toHaveBeenCalled();
+      expect(performed).toEqual([]);
+      expect(steps.all()).toEqual([]);
+    },
+  );
+
+  it('fill hands an empty string to the engine as is', async () => {
+    const { screen, actions } = boxScreen();
+    await screen.getByLabel('Agree').fill('');
+    expect(actions).toEqual([{ kind: 'fill', value: '', sensitive: false }]);
+  });
+
   it('setInputFiles hands an empty list to the engine, which clears the input', async () => {
     const { screen, steps, actions } = boxScreen();
     await screen.getByLabel('Agree').setInputFiles([]);
