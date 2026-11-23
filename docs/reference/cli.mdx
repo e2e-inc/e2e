@@ -112,7 +112,7 @@ bunx e2e init --yes --gateway openrouter --skills .agents/skills --mcp .mcp.json
 | Option | Description |
 | --- | --- |
 | `[directory]` | Where to scaffold; created when missing. Default: the working directory. |
-| `-y`, `--yes` | Skips the prompts. Each answer not given as a flag takes its default: Web engine, Vercel AI Gateway, skill and MCP config in both locations, no CI pipeline, no install. |
+| `-y`, `--yes` | Skips the prompts. Each answer not given as a flag takes its default: Web engine and Vercel AI Gateway for a new config, no CI pipeline, no install, and for the skill and MCP server, the locations an earlier run set up, or every location when there are none. |
 | `--example <name>` | Starts from an example app: `with-vite`, `with-next`, `with-astro`, `with-angular`, `with-expo`, `with-swiftui`, `with-compose`, `with-kotlin-multiplatform`, `with-flutter`, or `with-maui`. The `with-` prefix is optional. See [Starting from an example](#starting-from-an-example). |
 | `--engine <ids>` | The engines for a new config: `web`, `mobile`, or `none`. Comma-separated or repeated; `web,mobile` writes a target for each. Default: asked. |
 | `--gateway <id>` | The model gateway for agent steps in a new config: `vercel`, `openrouter`, `openai-compatible`, `chatgpt`, `copilot`, `opencode-console`, `grok`, or `none`. Default: asked. |
@@ -315,10 +315,11 @@ bunx e2e init my-app --example with-expo
 - MCP registration keeps extra settings on the e2e server, such as
   environment variables and client timeouts, even when it repairs the launch
   command. A current registration stays byte-for-byte unchanged.
-- Once a skill directory exists, later runs refresh copies that differ from
-  the installed version. They never add a directory the project did not
-  choose. `--skills` and `--mcp` name the exact locations instead and leave
-  the others as they are.
+- Without `--skills` or `--mcp`, a later run keeps to the locations that already
+  hold the skill or the MCP registration, and refreshes skill copies that
+  differ from the installed version. When there are none, it asks, or `--yes`
+  picks every location. `--skills` and `--mcp` name the exact locations instead
+  and leave the others as they are.
 - A `.claude/skills/e2e/` copy from an earlier version becomes the symlink
   when it holds only the shipped files. A copy with other files stays a copy
   and is refreshed.
