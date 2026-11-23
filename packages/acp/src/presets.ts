@@ -140,10 +140,10 @@ function codexAuth(env: Readonly<Record<string, string>> | undefined): CodexAuth
     DEFAULT_AUTH_REQUEST: nonblank('DEFAULT_AUTH_REQUEST'),
     APP_SERVER_LOGS: value('APP_SERVER_LOGS'),
   };
-  const signIn = 'run `codex login`, or set OPENAI_API_KEY';
   const logged = pinned['APP_SERVER_LOGS'] !== '';
   const request = pinned['DEFAULT_AUTH_REQUEST'] !== '';
   const keyName = pinned['CODEX_API_KEY'] === '' ? 'OPENAI_API_KEY' : 'CODEX_API_KEY';
+  const signIn = `run \`codex login\`, or set ${keyName}`;
   const freshAction = request ? 'fix DEFAULT_AUTH_REQUEST' : `set a working ${keyName}`;
   const withLoggingDisabled = `unset APP_SERVER_LOGS and ${freshAction}`;
   const fresh = logged ? `\`codex login\`, or ${withLoggingDisabled}` : `\`codex login\`${request ? ',' : ''} or ${freshAction}`;

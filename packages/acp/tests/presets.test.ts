@@ -353,6 +353,8 @@ describe('agent presets', () => {
     cleanAuthEnv();
     const { executor } = codexProject({ ACP_AUTH_REQUIRED: '1' });
     expect(await stepFailure(executor)).toContain('the agent is not signed in: run `codex login`, or set OPENAI_API_KEY');
+    const withBothKeys = await stepFailure(codexProject({ ACP_AUTH_REQUIRED: '1', CODEX_API_KEY: 'fixture-codex', OPENAI_API_KEY: 'fixture-openai' }).executor);
+    expect(withBothKeys).toContain('the agent is not signed in: run `codex login`, or set CODEX_API_KEY');
     const withRequest = await stepFailure(codexProject({ ACP_AUTH_REQUIRED: '1', OPENAI_API_KEY: 'sk-test-codex', DEFAULT_AUTH_REQUEST: '{}' }).executor);
     expect(withRequest).toContain('the DEFAULT_AUTH_REQUEST you set did not sign Codex in');
     // With the log on, a key would not be used, so the hint says to turn the log off first.
