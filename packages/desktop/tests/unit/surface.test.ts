@@ -1581,6 +1581,16 @@ describe('DesktopSurface', () => {
     expect(fake.calls().some((call) => call.key === 'launch')).toBe(false);
   });
 
+  it('opens again after a failed launch that left no process, rather than fail on the launch it cannot find', async () => {
+    const { surface, fake } = await initialized({
+      launch: [{ ...(failure('TIMEOUT', 'delivered_unverified') as object) }, { spawn: true, ok: true, data: { app: 'SpikeForm', pid: SPAWNED, process_instance: 'instance-1' } }],
+      'list-apps': [{ ok: true, data: { apps: [] } }, { ok: true, data: { apps: [] } }, { ok: true, data: { apps: [] } }, { ok: true, data: { apps: [] } }, { ok: true, data: { apps: [{ pid: SPAWNED, process_instance: 'instance-1' }] } }],
+    });
+    await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
+    await surface.restart(operation());
+    expect(fake.calls().filter((call) => call.key === 'launch')).toHaveLength(2);
+  }, 30_000);
+
   it('keeps a launch whose lookup ran out of time, so the next quit looks again', async () => {
     // A copy whose environment cannot be read, so no token search finds it: only a lookup that answers settles the launch.
     const { surface } = await initialized({

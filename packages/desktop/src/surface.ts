@@ -482,7 +482,8 @@ export class DesktopSurface {
   private async launchFresh(operation: OperationContext): Promise<void> {
     const target = this.launchTarget;
     if (target === undefined) throw unsupported("launching the app needs the target's app.bundleId or app.appPath");
-    await this.quitNow(operation.signal, operation.timeoutMs);
+    // A failed launch that left no process is nothing to clean up before a new one.
+    await this.quitNow(operation.signal, operation.timeoutMs, false);
     // Marks the process this launch starts, so it is told apart from every other copy by evidence, never by timing.
     const launch: Launch = { target, token: randomUUID(), before: await this.runningCopies(target, operation) };
     // Written before anything is sent, so the app stays findable by its token if this worker is killed mid-launch or never finds its process.
@@ -793,9 +794,11 @@ export class DesktopSurface {
    * first: one that exited on its own, or whose id the OS gave to another
    * process since, is not running any more, and nothing is killed. Until the
    * process is known to be gone, the engine keeps it as its own, so a quit
-   * that failed is tried again.
+   * that failed is tried again. A failed launch that turns out to have left
+   * no process is reported, so the user can look for a copy by hand, unless
+   * `reportMissing` is false, as before a new launch.
    */
-  private async quitNow(signal: AbortSignal, timeoutMs: number): Promise<void> {
+  private async quitNow(signal: AbortSignal, timeoutMs: number, reportMissing = true): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     const pending = this.pending;
     if (this.pid === undefined && pending !== undefined) {
@@ -828,7 +831,7 @@ export class DesktopSurface {
         }
         this.pending = undefined;
         if (this.home !== undefined) await rm(path.join(this.home, APP_FILE), { force: true }).catch(() => undefined);
-        if (carriers.length > 0) return;
+        if (carriers.length > 0 || !reportMissing) return;
         throw new EngineError('ENGINE_FAILURE', `a launch of ${pending.target} failed, and no process it started was found; if the app is running, quit it by hand`, { retryable: false });
       }
       this.pending = undefined;
