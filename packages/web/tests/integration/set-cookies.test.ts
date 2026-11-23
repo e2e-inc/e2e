@@ -82,6 +82,11 @@ describe('browser.setCookies', () => {
     ]);
   });
 
+  it('takes a domain with a leading dot', async () => {
+    await browser.setCookies([{ name: 'session', value: 'root', domain: '.127.0.0.1' }]);
+    expect((await browser.cookies()).map(({ name, domain }) => ({ name, domain }))).toEqual([{ name: 'session', domain: '127.0.0.1' }]);
+  });
+
   it('takes back the cookies browser.cookies returns', async () => {
     await browser.setCookies([
       { name: 'session', value: 'root', domain: '127.0.0.1', httpOnly: true, sameSite: 'Strict' },
@@ -102,14 +107,20 @@ describe('browser.setCookies', () => {
     ['no url and no domain', [{ name: 'session', value: 'root' }], 'cookies[0] needs a url, or a domain with an optional path'],
     ['url and domain', [{ ...base, url: '/' }], 'cookies[0] takes url, or domain with an optional path, not both'],
     ['url and path', [{ name: 'session', value: 'root', url: '/', path: '/admin' }], 'cookies[0] takes url, or domain with an optional path, not both'],
-    ['an empty domain', [{ ...base, domain: '' }], 'cookies[0] domain must be a non-empty string, got ""'],
+    ['an empty domain', [{ ...base, domain: '' }], 'cookies[0] domain must be a host name like "example.com" or ".example.com", got ""'],
+    ['a domain with a scheme', [{ ...base, domain: 'https://127.0.0.1' }], 'cookies[0] domain must be a host name like "example.com" or ".example.com", got "https://127.0.0.1"'],
+    ['a domain with a path', [{ ...base, domain: '127.0.0.1/app' }], 'cookies[0] domain must be a host name like "example.com" or ".example.com", got "127.0.0.1/app"'],
+    ['a domain with a port', [{ ...base, domain: '127.0.0.1:4399' }], 'cookies[0] domain must be a host name like "example.com" or ".example.com", got "127.0.0.1:4399"'],
+    ['a domain with a space', [{ ...base, domain: ' 127.0.0.1' }], 'cookies[0] domain must be a host name like "example.com" or ".example.com", got " 127.0.0.1"'],
     ['a missing name', [{ value: 'root', domain: '127.0.0.1' }], 'cookies[0] name must be a string, got undefined'],
     ['a number value', [{ ...base, value: 5 }], 'cookies[0] value must be a string, got 5'],
     ['a string expires', [{ ...base, expires: '1999999999' }], 'cookies[0] expires must be a Unix timestamp in seconds, got "1999999999"'],
     ['a NaN expires', [{ ...base, expires: Number.NaN }], 'cookies[0] expires must be a Unix timestamp in seconds, got NaN'],
     ['a string httpOnly', [{ ...base, httpOnly: 'true' }], 'cookies[0] httpOnly must be a boolean, got "true"'],
     ['a lowercase sameSite', [{ ...base, sameSite: 'strict' }], 'cookies[0] sameSite must be "Strict", "Lax", or "None", got "strict"'],
-    ['an unknown key', [{ ...base, maxAge: 60 }], 'cookies[0] has no key "maxAge"'],
+    ['an unknown key', [{ ...base, maxAge: 60 }], 'cookies[0] has unknown key "maxAge"; expected one of name, value, url, domain, path, expires, httpOnly, secure, sameSite'],
+    ['a misspelled key', [{ ...base, samesite: 'Lax' }], 'cookies[0] has unknown key "samesite"; did you mean "sameSite"?'],
+    ['a hole', Object.assign([base], { 2: base }), 'browser.setCookies cookies[1] must be an object, got undefined'],
     ['a bad second cookie', [base, { ...base, sameSite: 'lax' }], 'browser.setCookies cookies[1] sameSite'],
   ])('refuses %s with INVALID_ARGUMENT, setting nothing', async (_name, cookies, message) => {
     expect(() => browser.setCookies(cookies as readonly Cookie[])).toThrow(

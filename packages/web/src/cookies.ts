@@ -5,7 +5,8 @@
  * engine's.
  */
 
-import { TestError } from '@e2e-dev/core/engine';
+import { domainToASCII } from 'node:url';
+import { rejectUnknownKeys, TestError } from '@e2e-dev/core/engine';
 import type { Cookie } from './browser.ts';
 import { describe } from './support.ts';
 
@@ -17,19 +18,18 @@ export function validateCookies(cookies: unknown): asserts cookies is readonly C
   if (!Array.isArray(cookies)) {
     throw new TestError('INVALID_ARGUMENT', `browser.setCookies takes an array of cookies, got ${describe(cookies)}`);
   }
-  cookies.forEach((cookie: unknown, index) => {
+  for (const [index, cookie] of cookies.entries()) {
+    const label = `browser.setCookies cookies[${index}]`;
+    if (typeof cookie !== 'object' || cookie === null || Array.isArray(cookie)) {
+      throw new TestError('INVALID_ARGUMENT', `${label} must be an object, got ${describe(cookie)}`);
+    }
+    rejectUnknownKeys(label, cookie, COOKIE_KEYS, 'INVALID_ARGUMENT');
     const problem = cookieProblem(cookie);
-    if (problem !== undefined) throw new TestError('INVALID_ARGUMENT', `browser.setCookies cookies[${index}] ${problem}`);
-  });
+    if (problem !== undefined) throw new TestError('INVALID_ARGUMENT', `${label} ${problem}`);
+  }
 }
 
-function cookieProblem(cookie: unknown): string | undefined {
-  if (typeof cookie !== 'object' || cookie === null || Array.isArray(cookie)) {
-    return `must be an object, got ${describe(cookie)}`;
-  }
-  const known: readonly string[] = COOKIE_KEYS;
-  const unknown = Object.getOwnPropertyNames(cookie).find((key) => !known.includes(key));
-  if (unknown !== undefined) return `has no key ${JSON.stringify(unknown)}; it takes ${COOKIE_KEYS.join(', ')}`;
+function cookieProblem(cookie: object): string | undefined {
   const field = (key: (typeof COOKIE_KEYS)[number]): unknown => Reflect.get(cookie, key);
   for (const key of ['name', 'value'] as const) {
     if (typeof field(key) !== 'string') return `${key} must be a string, got ${describe(field(key))}`;
@@ -38,8 +38,8 @@ function cookieProblem(cookie: unknown): string | undefined {
     if (field(key) !== undefined && typeof field(key) !== 'string') return `${key} must be a string, got ${describe(field(key))}`;
   }
   const domain = field('domain');
-  if (domain !== undefined && (typeof domain !== 'string' || domain.trim() === '')) {
-    return `domain must be a non-empty string, got ${describe(domain)}`;
+  if (domain !== undefined && (typeof domain !== 'string' || !isHostName(domain))) {
+    return `domain must be a host name like "example.com" or ".example.com", got ${describe(domain)}`;
   }
   if (field('url') !== undefined && (domain !== undefined || field('path') !== undefined)) {
     return 'takes url, or domain with an optional path, not both';
@@ -57,4 +57,16 @@ function cookieProblem(cookie: unknown): string | undefined {
     return `sameSite must be "Strict", "Lax", or "None", got ${describe(sameSite)}`;
   }
   return undefined;
+}
+
+/**
+ * Whether `domain`, less a leading dot, parses back as only that host in the
+ * origin `setCookies` checks it under: no scheme, port, path, or whitespace,
+ * which the browser would otherwise drop or read as another host.
+ */
+function isHostName(domain: string): boolean {
+  const host = domain.replace(/^\./, '');
+  if (!URL.canParse(`http://${host}`)) return false;
+  const url = new URL(`http://${host}`);
+  return url.href === `http://${url.hostname}/` && url.hostname === domainToASCII(host);
 }
