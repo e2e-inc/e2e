@@ -1738,6 +1738,22 @@ describe('DesktopSurface', () => {
     }
   });
 
+  it("sweeps a state directory whose owner's id another process took, and records when its own worker started", async () => {
+    // This test's own process id, but another start time: the worker that wrote it is gone, and the OS gave its id to this process.
+    const left = mkdtempSync(path.join(tmpdir(), 'e2e-agent-desktop-'));
+    writeFileSync(path.join(left, 'owner'), `${process.pid}\nMon Jan  1 00:00:00 2001`);
+    try {
+      const { surface } = await initialized({});
+      expect(existsSync(left)).toBe(false);
+      const home = (surface as unknown as { home: string }).home;
+      const [id, started] = readFileSync(path.join(home, 'owner'), 'utf8').split('\n');
+      expect(id).toBe(String(process.pid));
+      expect(started).toMatch(/\d{4}$/);
+    } finally {
+      rmSync(left, { recursive: true, force: true });
+    }
+  });
+
   it('sweeps a state directory whose launch record was cut short, and starts', async () => {
     const dead = spawn(process.execPath, ['-e', '']);
     await new Promise((resolve) => dead.on('exit', resolve));

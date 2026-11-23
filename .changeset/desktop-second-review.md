@@ -13,3 +13,4 @@ Every screenshot withheld for a password field fails with `POLICY_DENIED`; one o
 `@e2e-dev/desktop` now needs `@e2e-dev/core` and `e2e` 0.25.0 or later, since it reports the `readonly` state that is new there.
 A control collapsed to no width or height reads as hidden.
 A screenshot cut off mid-capture leaves no unmasked image in the system's temporary directory.
+The cleanup of a killed worker's state no longer waits on a later process that the OS gave the worker's id.

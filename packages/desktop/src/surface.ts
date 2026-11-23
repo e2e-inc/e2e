@@ -104,7 +104,7 @@ const UNMASKED = new Error('the secure fields of the screenshot could not be pla
 /** The prefix of every worker's private agent-desktop state directory, which a later run sweeps once its worker is gone. */
 const STATE_PREFIX = 'e2e-agent-desktop-';
 
-/** The file in a state directory that names the process that owns it. */
+/** The file in a state directory that names the process that owns it: its id, and on the next line when it started, which tells it from a later process the OS gives the same id. */
 const OWNER_FILE = 'owner';
 
 /** What the owner file holds once its worker gave the directory up: a later sweep takes it, though the process that wrote it may still run another worker. */
@@ -342,7 +342,8 @@ export class DesktopSurface {
     await sweepStateDirectories();
     // A private state directory per worker, named for the process that owns it so a later sweep can tell it was left behind.
     this.home = await mkdtemp(path.join(tmpdir(), STATE_PREFIX));
-    await writeFile(path.join(this.home, OWNER_FILE), String(process.pid));
+    const started = await startedAt(process.pid, info.signal);
+    await writeFile(path.join(this.home, OWNER_FILE), started === undefined ? String(process.pid) : `${process.pid}\n${started}`);
     // agent-desktop starts the app it launches with its own environment, so it gets the trimmed one too.
     this.cli = new AgentDesktopCli(executable, { ...this.appEnv, AGENT_DESKTOP_HOME: this.home });
     const status = await this.run<{ version?: string; permissions?: Record<string, { state?: string }> }>(['status'], { label: 'agent-desktop status', input: false, signal: info.signal, timeoutMs: 15_000 });
@@ -1651,9 +1652,11 @@ async function sweepStateDirectories(): Promise<void> {
     // A shared temporary directory (`/tmp` when TMPDIR is unset) holds other users' entries too: a record this user did not write names no launch of its own, and its process id must not be killed with this user's rights.
     if (!(await ownDirectory(directory))) continue;
     const ownerText = (await readFile(path.join(directory, OWNER_FILE), 'utf8').catch(() => '')).trim();
-    const owner = Number(ownerText);
+    const [ownerId = '', ownerStarted] = ownerText.split('\n');
+    const owner = Number(ownerId);
     const stale =
-      ownerText === ABANDONED || (Number.isInteger(owner) && owner > 0 ? !alive(owner) : await stat(directory).then((info) => Date.now() - info.mtimeMs > ORPHAN_AGE_MS, () => false));
+      ownerText === ABANDONED ||
+      (Number.isInteger(owner) && owner > 0 ? !(await ownerRuns(owner, ownerStarted)) : await stat(directory).then((info) => Date.now() - info.mtimeMs > ORPHAN_AGE_MS, () => false));
     if (!stale) continue;
     // A record cut short by the kill that left it names no process: the directory still goes.
     const parsed: unknown = await readFile(path.join(directory, APP_FILE), 'utf8').then((text): unknown => JSON.parse(text)).catch(() => undefined);
@@ -1676,6 +1679,18 @@ async function sweepStateDirectories(): Promise<void> {
     const settled = known && (await killed(owned, Date.now() + 2_000, signal));
     await (settled ? rm(directory, { recursive: true, force: true }) : keepOnlyRecord(directory)).catch(() => undefined);
   }
+}
+
+/**
+ * Whether the worker process an owner file names still runs: one with its id
+ * that started when the file says. A start time that cannot be read counts
+ * as the same process, so a directory in use is never taken.
+ */
+async function ownerRuns(pid: number, started: string | undefined): Promise<boolean> {
+  if (!alive(pid)) return false;
+  if (started === undefined) return true;
+  const now = await startedAt(pid, AbortSignal.timeout(5_000));
+  return now === undefined || now === started;
 }
 
 /** Whether `directory` is a real directory (not a symlink) that belongs to the user this process runs as. */
