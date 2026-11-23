@@ -391,6 +391,31 @@ describe('DesktopSurface', () => {
     expect(matches).toEqual([]);
   });
 
+  it('reads again, never an empty screen or a closed window, once the screen locks after the open', async () => {
+    const { surface } = await launched((pid) => ({
+      'list-windows': [
+        { ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }, { id: 'w-panel', pid, process_instance: 'instance-1' }] },
+        { ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }, { id: 'w-panel', pid, process_instance: 'instance-1' }] },
+        // A locked screen: the app still runs, and macOS lists none of its windows.
+        { ok: true, data: [] },
+        { ok: true, data: [] },
+      ],
+    }), { observe: false });
+    await surface.useWindow('w-panel', signal, 5_000);
+    const username = { kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'username', exact: true } } } as const;
+    const locked = artifacts();
+    writeFileSync(path.join(locked, 'ioreg'), "#!/bin/sh\nprintf '<key>CGSSessionScreenIsLocked</key>\\n<true/>\\n'\n", { mode: 0o755 });
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${locked}${path.delimiter}${originalPath}`;
+    try {
+      await expect(surface.locate(username, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringMatching(/screen is locked/) });
+      await surface.useWindow(undefined, signal, 5_000);
+      await expect(surface.locate(username, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringMatching(/screen is locked/) });
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+
   it('fails the open when the window never becomes readable, as on a locked screen', async () => {
     const hidden = { ok: false, error: { code: 'ACTION_NOT_SUPPORTED', message: 'not exposed', details: { kind: 'window_without_accessibility_element' }, disposition: { delivery: 'not_delivered', retry: 'safe' } } };
     await expect(launched({ snapshot: [hidden] }, { openTimeoutMs: 15_000 })).rejects.toThrow(/cannot be read through accessibility/);

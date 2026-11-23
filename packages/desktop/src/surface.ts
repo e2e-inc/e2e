@@ -889,14 +889,20 @@ export class DesktopSurface {
    * did not launch is never read. A read that fails is no empty screen,
    * which would let a negative assertion pass: an app that quit is
    * `INVALID_STATE`, as is a chosen window that closed, and windows none of
-   * which could be read are a retryable `NODE_STALE`, so a locator reads
-   * again until its deadline.
+   * which could be read, or none listed while the screen is locked, are a
+   * retryable `NODE_STALE`, so a locator reads again until its deadline.
    */
   private async capture(operation: OperationContext, windowId = this.chosenWindow, forMask = false): Promise<ProjectedScreen | undefined> {
     const windows = await this.ownWindows(operation, true);
     const chosen = windowId !== undefined && windowId === this.chosenWindow;
-    if (chosen && !windows.some((window) => window.id === windowId)) throw this.chosenClosed();
-    if (windows.length === 0 && this.pid !== undefined) await this.requireRunning(operation);
+    if (chosen && !windows.some((window) => window.id === windowId)) {
+      await this.unlessLocked(operation);
+      throw this.chosenClosed();
+    }
+    if (windows.length === 0 && this.pid !== undefined) {
+      await this.requireRunning(operation);
+      await this.unlessLocked(operation);
+    }
     const candidates =
       windowId === undefined
         ? [...windows.filter((window) => window.is_focused === true), ...windows.filter((window) => window.is_focused !== true && window.visible !== false), ...windows.filter((window) => window.is_focused !== true && window.visible === false)]
@@ -925,6 +931,16 @@ export class DesktopSurface {
       `no window of ${this.appName ?? 'the app'} could be read through accessibility (on macOS the screen may be locked), or each closed while it was read`,
       { retryable: true, cause: UNREADABLE },
     );
+  }
+
+  /**
+   * Throws a retryable `NODE_STALE` while the Mac's screen is locked: macOS
+   * then lists none of the app's windows, which must not read as a window
+   * that closed or an app with none open.
+   */
+  private async unlessLocked(operation: Pick<OperationContext, 'signal'>): Promise<void> {
+    if ((await screenLocked(operation.signal)) !== true) return;
+    throw new EngineError('NODE_STALE', `the Mac's screen is locked, so no window of ${this.appName ?? 'the app'} can be read through accessibility; reading again`, { retryable: true, cause: UNREADABLE });
   }
 
   /**
