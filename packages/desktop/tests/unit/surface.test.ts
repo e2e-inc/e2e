@@ -1220,6 +1220,18 @@ describe('DesktopSurface', () => {
     expect(cut.root.children?.[0]?.children?.[0]?.ref.id).not.toBe(first.root.children?.[0]?.children?.[0]?.ref.id);
   });
 
+  it('keeps no identity for a control under a look-alike, so reads do not pile them up', async () => {
+    const window = { role: 'window', name: 'Cards', bounds: { x: 0, y: 0, width: 300, height: 300 } };
+    const card = (ref: string) => ({ role: 'group', name: 'Card', children: [{ role: 'button', name: 'Open', ref_id: ref, bounds: { x: 10, y: 10, width: 60, height: 20 } }] });
+    const read = { ok: true, data: { snapshot_id: 's', complete: false, truncated: true, window: { id: 'w-mine' }, tree: { ...window, subtree_truncated: true, children: [card('@s:e1'), card('@s:e2')] } } };
+    const { surface } = await launched({ snapshot: [read] }, { observe: false });
+    const ids = (surface as unknown as { ids: Map<string, string> }).ids;
+    await surface.observe(operation(), undefined);
+    const size = ids.size;
+    for (let index = 0; index < 5; index += 1) await surface.observe(operation(), undefined);
+    expect(ids.size).toBe(size);
+  });
+
   it('gives no id to a control beside a wrapper the read cut off at the depth limit, which may hide its twin', async () => {
     const window = { role: 'window', name: 'Rows', bounds: { x: 0, y: 0, width: 300, height: 300 } };
     const remove = (ref: string, x: number) => ({ role: 'button', name: 'Delete', ref_id: ref, bounds: { x, y: 10, width: 60, height: 20 } });

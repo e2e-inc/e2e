@@ -378,8 +378,8 @@ export function projectSnapshot(
       // An identity two siblings share may pass on to neither, even where their names tell them apart now.
       if ((plain.get(identityOf(child)) ?? 0) > 1) onLookAlike?.(`${id}/${identityOf(child)}`);
       if ((named.get(identityOf(child, true)) ?? 0) > 1) onLookAlike?.(`${id}/${identityOf(child, true)}`);
-      // A child's id is built on its parent's: under a look-alike, whose id is new every snapshot, so is the child's.
-      return project(child, idFor(identity === undefined ? undefined : `${id}/${identity}`), stable && identity !== undefined, `${likeness}/${plain.get(identityOf(child)) ?? 1}`, states.hidden === true || underHidden.has(child));
+      // A child's id is built on its parent's: under a look-alike, whose id is new every snapshot, so is the child's, and no identity is kept for it.
+      return project(child, idFor(stable && identity !== undefined ? `${id}/${identity}` : undefined), stable && identity !== undefined, `${likeness}/${plain.get(identityOf(child)) ?? 1}`, states.hidden === true || underHidden.has(child));
     });
     return {
       ref: { id, revision: '' },
