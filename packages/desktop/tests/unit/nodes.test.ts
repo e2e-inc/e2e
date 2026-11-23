@@ -192,6 +192,30 @@ describe('projectSnapshot', () => {
     expect(root.children?.[1]?.role).toBe('image');
   });
 
+  it('reports the read-only state toBeEditable reads: of a text field always, of a combo box only when it takes text', () => {
+    const form = project('macos/sign-in-form').root;
+    expect(byTestId(form, 'username')?.states).toMatchObject({ readonly: false });
+    expect(byTestId(form, 'password')?.states).toMatchObject({ readonly: false });
+    // A pop-up menu takes no text, which is not read-only: no state, as on a device.
+    expect(byTestId(form, 'plan')?.states).not.toHaveProperty('readonly');
+    const { root } = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'Form',
+          children: [
+            { role: 'textfield', name: 'Order id', ref_id: '@s:e1', states: ['readonly'], available_actions: ['Click'] },
+            { role: 'combobox', name: 'City', ref_id: '@s:e2', available_actions: ['Click', 'SetValue'] },
+            { role: 'textfield', name: 'Unknown', ref_id: '@s:e3', available_actions: ['Click'] },
+          ],
+        },
+      },
+      minter(),
+    );
+    expect(root.children?.map((node) => node.states?.readonly)).toEqual([true, false, undefined]);
+  });
+
   it('counts a node with children it did not list as a cut-short tree', () => {
     const screen = projectSnapshot({ snapshot_id: 's', complete: true, tree: { role: 'window', name: 'W', children: [{ role: 'group', name: 'Deep', children_count: 3 }] } }, minter());
     expect(screen.truncated).toBe(true);

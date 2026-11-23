@@ -292,6 +292,10 @@ export function projectSnapshot(raw: RawSnapshot, idFor: (identity: string | und
     if (node.role === 'combobox' || node.role === 'disclosure' || node.role === 'menubutton') {
       if (node.available_actions?.includes('Expand') === true || node.available_actions?.includes('Collapse') === true) states.expanded = rawStates.has('expanded');
     }
+    // agent-desktop marks a text field whose value cannot be set `readonly`, and offers SetValue on one whose value can. A combo box takes text only when its value can be set; a pop-up menu takes none, which is not read-only, so it gets no state, as on a device.
+    const settable = node.available_actions?.includes('SetValue') === true;
+    if (node.role === 'textfield' && (settable || rawStates.has('readonly'))) states.readonly = !settable;
+    else if (node.role === 'combobox' && settable) states.readonly = false;
     const isText = TEXT_ROLES.has(node.role);
     const name = label(node.name ?? (isText ? node.value : undefined));
     // A control shows its name (a button's title) as its text, as on a device; an input's name is a label, not what it holds.

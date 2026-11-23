@@ -3,3 +3,4 @@
 ---
 
 A read while the Mac's screen is locked retries instead of passing as an empty screen or a closed window.
+`toBeEditable` reads a desktop text field and an editable combo box.
