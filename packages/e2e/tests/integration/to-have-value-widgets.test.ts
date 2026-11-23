@@ -55,7 +55,26 @@ test('still refuses a range widget with a blank value', async ({ app, browser, s
   await app.open('/');
   await browser.evaluate((html) => { document.body.innerHTML = html; }, PAGE);
   await expect(screen.getByRole('progressbar', { name: 'Blank' })).toHaveValue('', { timeout: 300 });
+});
+
+test('still refuses an indeterminate progress', async ({ app, browser, screen }) => {
+  await app.open('/');
+  await browser.evaluate((html) => { document.body.innerHTML = html; }, PAGE);
   await expect(screen.getByRole('progressbar', { name: 'Indeterminate' })).toHaveValue('', { timeout: 300 });
+});
+
+test('clamps a progress adopted from another frame', async ({ app, browser, screen }) => {
+  await app.open('/');
+  await browser.evaluate(() => {
+    const frame = document.createElement('iframe');
+    document.body.append(frame);
+    const moved = frame.contentDocument!.createElement('progress');
+    moved.setAttribute('aria-label', 'Moved');
+    moved.setAttribute('value', '20');
+    moved.setAttribute('max', '10');
+    document.body.append(moved);
+  });
+  await expect(screen.getByRole('progressbar', { name: 'Moved' })).toHaveValue('10');
 });
 `;
 
@@ -81,8 +100,13 @@ describe('toHaveValue outside form controls', () => {
     const refused = resultByTitle(outcome, 'still refuses a range widget with no value');
     expect(refused.status).toBe('failed');
     expect(refused.attempts.at(-1)?.error?.message).toContain('no value (not a form control)');
-    const blank = resultByTitle(outcome, 'still refuses a range widget with a blank value');
-    expect(blank.status).toBe('failed');
-    expect(blank.attempts.at(-1)?.error?.message).toContain('no value (not a form control)');
+    for (const title of ['still refuses a range widget with a blank value', 'still refuses an indeterminate progress']) {
+      const failed = resultByTitle(outcome, title);
+      expect(failed.status, title).toBe('failed');
+      expect(failed.attempts.at(-1)?.error?.message, title).toContain('no value (not a form control)');
+    }
+    const moved = resultByTitle(outcome, 'clamps a progress adopted from another frame');
+    expect(moved.attempts.at(-1)?.error, JSON.stringify(moved.attempts.at(-1)?.error)).toBeUndefined();
+    expect(moved.status).toBe('passed');
   }, 120_000);
 });

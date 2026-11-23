@@ -652,9 +652,10 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   const RANGE_ROLES = ['progressbar', 'scrollbar', 'slider', 'spinbutton', 'meter'];
 
   /**
-   * A range widget's value as a locator read reports it, as Chrome's
-   * accessibility tree does: a blank ARIA attribute is none, and a native
-   * `<progress>` or `<meter>` reads the value its range clamps it to.
+   * A range widget's value as a locator read reports it. An ARIA value reads
+   * as the author wrote it, for an assertion to compare, where Chrome clamps it
+   * to the range; a blank one is none. A native `<progress>` or `<meter>` reads
+   * the value its range clamps it to, as Chrome does.
    */
   const rangeValueOf = (el: Element): string | null => {
     const filled = (name: string): string | null => {
@@ -663,12 +664,14 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     };
     const aria = filled('aria-valuetext') ?? filled('aria-valuenow');
     if (aria !== null) return aria;
-    // Only a native range control has a value beyond its ARIA attributes; a
-    // generic widget with no `aria-valuenow`/`aria-valuetext` has none, as
-    // Chrome reports, so a stray `value` attribute on it is not read.
-    if (el instanceof HTMLMeterElement) return String(el.value);
-    if (el instanceof HTMLProgressElement) return el.hasAttribute('value') ? String(el.value) : null;
-    return null;
+    // Only a native range control has a value beyond its ARIA attributes, so a
+    // stray `value` attribute on a generic widget is not read. By tag, since an
+    // element adopted from another frame keeps that frame's prototype.
+    const tag = el.tagName.toLowerCase();
+    const native = (el as Element & { readonly value?: unknown }).value;
+    if (typeof native !== 'number') return null;
+    if (tag === 'meter') return String(native);
+    return tag === 'progress' && el.hasAttribute('value') ? String(native) : null;
   };
 
   /**
