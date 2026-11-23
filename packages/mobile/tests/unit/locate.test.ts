@@ -79,6 +79,46 @@ describe('locator expressions over a device snapshot', () => {
     expect(resolveExpression(query('role', 'textbox'), index, 'ios')).toHaveLength(2);
   });
 
+  it('finds an iOS control by one part of its merged label, but not a text, image, or field by part of its own', () => {
+    const nodes: readonly RawNode[] = [
+      { ref: '@e1', index: 0, depth: 0, type: 'Application', label: 'Fixture' },
+      { ref: '@e2', index: 1, parentIndex: 0, depth: 1, type: 'Button', label: 'Dismiss, Close', identifier: 'merged' },
+      { ref: '@e3', index: 2, parentIndex: 0, depth: 1, type: 'Other', label: 'Sign in, Forgot password', identifier: 'flattened' },
+      { ref: '@e4', index: 3, parentIndex: 2, depth: 2, type: 'Other' },
+      { ref: '@e5', index: 4, parentIndex: 0, depth: 1, type: 'StaticText', label: 'Hello, world', identifier: 'static' },
+      { ref: '@e6', index: 5, parentIndex: 0, depth: 1, type: 'Image', label: 'Sunset, Italy', identifier: 'image' },
+      { ref: '@e7', index: 6, parentIndex: 0, depth: 1, type: 'TextField', label: 'Doe, Jane', value: 'Doe, Jane', identifier: 'field' },
+    ];
+    expect(testIds(query('text', 'Dismiss'), { platform: 'ios', nodes })).toEqual(['merged']);
+    expect(testIds(query('text', 'Close'), { platform: 'ios', nodes })).toEqual(['merged']);
+    expect(testIds(query('text', 'Forgot password'), { platform: 'ios', nodes })).toEqual(['flattened']);
+    expect(testIds(query('text', 'Hello'), { platform: 'ios', nodes })).toEqual([]);
+    expect(testIds(query('text', 'Italy'), { platform: 'ios', nodes })).toEqual([]);
+    expect(testIds(query('text', 'Jane'), { platform: 'ios', nodes })).toEqual([]);
+  });
+
+  it('leaves the label of an iOS container whole when its texts are listed below it', () => {
+    const nodes: readonly RawNode[] = [
+      { ref: '@e1', index: 0, depth: 0, type: 'Application', label: 'Fixture' },
+      { ref: '@e2', index: 1, parentIndex: 0, depth: 1, type: 'Other', label: 'Save, Cancel', identifier: 'container' },
+      { ref: '@e3', index: 2, parentIndex: 1, depth: 2, type: 'Button', label: 'Save', identifier: 'save' },
+      { ref: '@e4', index: 3, parentIndex: 0, depth: 1, type: 'Other', label: 'Hello, world', identifier: 'host' },
+      { ref: '@e5', index: 4, parentIndex: 3, depth: 2, type: 'StaticText', label: 'Hello, world' },
+    ];
+    expect(testIds(query('text', 'Save'), { platform: 'ios', nodes })).toEqual(['save']);
+    expect(testIds(query('text', 'Cancel'), { platform: 'ios', nodes })).toEqual([]);
+    expect(testIds(query('text', 'Hello'), { platform: 'ios', nodes })).toEqual([]);
+  });
+
+  it('leaves an Android label whole', () => {
+    const nodes: readonly RawNode[] = [
+      { ref: '@e1', index: 0, depth: 0, type: 'android.widget.FrameLayout' },
+      { ref: '@e2', index: 1, parentIndex: 0, depth: 1, type: 'android.widget.Button', label: 'Dismiss, Close', identifier: 'merged' },
+    ];
+    expect(testIds(query('text', 'Dismiss'), { platform: 'android', nodes })).toEqual([]);
+    expect(testIds(query('text', 'Dismiss, Close'), { platform: 'android', nodes })).toEqual(['merged']);
+  });
+
   it('scopes, filters, and indexes', () => {
     const inBar: LocatorExpression = {
       kind: 'query',

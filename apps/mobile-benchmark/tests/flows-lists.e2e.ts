@@ -16,7 +16,7 @@ test('infinite scroll reaches the target item', async ({ app, device, screen }) 
 
 test('product catalog adds exactly two of the right variant', async ({ app, device, screen }) => {
   await openScenario({ app, device, screen }, 'Product Catalog');
-  await screen.getByTestId('product-trail-mix-500').tap();
+  await screen.getByText('500 g · $6.99').tap();
   await screen.getByTestId('quantity-increase').tap();
   await expect(screen.getByTestId('quantity-value')).toHaveText('2');
   await screen.getByTestId('add-to-cart').tap();

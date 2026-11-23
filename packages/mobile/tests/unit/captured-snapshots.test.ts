@@ -11,8 +11,10 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { CaptureSnapshotResult } from 'agent-device';
-import type { SemanticNode } from '@e2e-dev/core/engine';
+import type { SemanticNode, TextPattern } from '@e2e-dev/core/engine';
+import { resolveExpression } from '../../src/locate.ts';
 import { keyboardBand, projectSnapshot, screenRoot, screenTitle } from '../../src/nodes.ts';
+import type { MobilePlatform } from '../../src/options.ts';
 
 const ROOT = path.join(import.meta.dirname, '../fixtures/snapshots');
 const UPDATE = process.env['E2E_GOLDEN_UPDATE'] === '1';
@@ -130,4 +132,50 @@ describe('captured device snapshots', () => {
       });
     });
   }
+});
+
+/** The role and test id of each node `getByText` matches on one captured screen, the test id read off the nearest node that has one. */
+function textMatches(platform: MobilePlatform, scenario: string, value: TextPattern): string[][] {
+  const { projected } = project(path.join(ROOT, platform, `${scenario}.json`));
+  const matches = resolveExpression({ kind: 'query', query: { kind: 'text', value } }, projected.index, platform);
+  return matches.map((entry) => [entry.node.role ?? '', entry.node.testId ?? entry.parent?.node.testId ?? '']);
+}
+
+function exact(value: string): TextPattern {
+  return { kind: 'string', value, exact: true };
+}
+
+describe('text queries over the label iOS merges from a control\'s texts', () => {
+  it('finds a button by one part of its merged label, as Android finds the text inside it', () => {
+    expect(textMatches('ios', 'bottom-tabs', exact('Feed'))).toEqual([['button', 'tab-feed']]);
+    expect(textMatches('android', 'bottom-tabs', exact('Feed'))).toEqual([['text', 'tab-feed']]);
+    expect(textMatches('ios', 'product-catalog', exact('500 g · $6.99'))).toEqual([['other', 'product-trail-mix-500']]);
+    expect(textMatches('android', 'product-catalog', exact('500 g · $6.99'))).toEqual([['text', 'product-trail-mix-500']]);
+  });
+
+  it('finds a flattened form by one part of its merged label, as Android finds the text inside it', () => {
+    expect(textMatches('ios', 'flattened-login', exact('SIGN IN'))).toEqual([['other', '']]);
+    expect(textMatches('android', 'flattened-login', exact('SIGN IN'))).toEqual([['text', '']]);
+  });
+
+  it('matches every control whose merged label has the part', () => {
+    expect(textMatches('ios', 'product-catalog', exact('Trail Mix'))).toEqual([
+      ['other', 'product-trail-mix-250'],
+      ['other', 'product-trail-mix-500'],
+      ['other', 'product-trail-mix-1000'],
+    ]);
+  });
+
+  it('keeps an exact query to whole parts, case-sensitive', () => {
+    expect(textMatches('ios', 'bottom-tabs', exact('Fee'))).toEqual([]);
+    expect(textMatches('ios', 'bottom-tabs', exact('feed'))).toEqual([]);
+    expect(textMatches('ios', 'bottom-tabs', exact('Feed, tab'))).toEqual([]);
+    expect(textMatches('ios', 'product-catalog', exact('Trail'))).toEqual([]);
+    expect(textMatches('ios', 'bottom-tabs', { kind: 'string', value: 'fee', exact: false })).toEqual([['button', 'tab-feed']]);
+    expect(textMatches('ios', 'bottom-tabs', { kind: 'regexp', source: '^Feed$', flags: '' })).toEqual([['button', 'tab-feed']]);
+  });
+
+  it('still matches the whole merged label', () => {
+    expect(textMatches('ios', 'bottom-tabs', exact('Feed, tab, 2 of 3'))).toEqual([['button', 'tab-feed']]);
+  });
 });

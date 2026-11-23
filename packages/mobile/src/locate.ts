@@ -5,8 +5,8 @@
  * polling, strictness, and staleness stay with the runner.
  */
 
-import { EngineError, matchesText, type LocatorExpression, type SemanticQuery, type TextPattern } from '@e2e-dev/core/engine';
-import { isWithin, type ProjectedNode } from './nodes.ts';
+import { EngineError, matchesText, type LocatorExpression, type SemanticNode, type SemanticQuery, type TextPattern } from '@e2e-dev/core/engine';
+import { isWithin, mayTakeText, type ProjectedNode } from './nodes.ts';
 import type { MobilePlatform } from './options.ts';
 import { compileSelector } from './selector.ts';
 
@@ -27,10 +27,10 @@ export function resolveExpression(
     case 'query': {
       const candidates =
         expression.scope === undefined ? index : descendantsOf(resolveExpression(expression.scope, index, platform), index);
-      const full = candidates.filter((entry) => matchesQuery(entry, expression.query, false));
+      const full = candidates.filter((entry) => matchesQuery(entry, expression.query, platform, false));
       const matches =
         full.length === 0 && platform === 'android' && expression.query.kind === 'testId'
-          ? candidates.filter((entry) => matchesQuery(entry, expression.query, true))
+          ? candidates.filter((entry) => matchesQuery(entry, expression.query, platform, true))
           : full;
       return ECHOED_QUERY_KINDS.has(expression.query.kind) ? innermostOnly(matches) : matches;
     }
@@ -117,6 +117,30 @@ function subtreeHasText(
   );
 }
 
+/**
+ * The separator iOS puts between the parts of a merged label.
+ *
+ * When an accessibility element doesn't have a label, it gets one from its
+ * subviews' labels joined with ", " (React Native's
+ * `RCTRecursiveAccessibilityLabel` on the new architecture, the old one
+ * joins them with a space). XCTest then reports the element without those
+ * texts. So a button over "Trail Mix" and "250 g" reads `Trail Mix, 250 g`
+ * on iOS, while Android and the web keep each text as a child that
+ * `getByText` finds.
+ *
+ * To match that, a text query on iOS also tests each part of the label of a
+ * node that doesn't have any text below it. Texts, images, and fields are
+ * skipped, since their labels aren't merged. One catch is that the tree
+ * doesn't say whether the app set the label, so an app's label with ", " in
+ * it is split too.
+ */
+const MERGED_LABEL_SEPARATOR = ', ';
+
+/** Whether any node below `node` has a name or a text. */
+function hasTextBelow(node: SemanticNode): boolean {
+  return (node.children ?? []).some((child) => child.name !== undefined || child.text !== undefined || hasTextBelow(child));
+}
+
 const STATE_KEYS = ['checked', 'disabled', 'selected', 'expanded', 'pressed'] as const;
 
 /**
@@ -125,8 +149,9 @@ const STATE_KEYS = ['checked', 'disabled', 'selected', 'expanded', 'pressed'] as
  * answer with every node and leave visibility to the action or assertion,
  * unless the query says `visible`, which drops hidden nodes for every kind.
  * `withoutPackage` matches a test id by its short form (`ANDROID_RESOURCE_ID`).
+ * On iOS, a text query also matches one part of a merged label (`MERGED_LABEL_SEPARATOR`).
  */
-function matchesQuery(entry: ProjectedNode, query: SemanticQuery, withoutPackage: boolean): boolean {
+function matchesQuery(entry: ProjectedNode, query: SemanticQuery, platform: MobilePlatform, withoutPackage: boolean): boolean {
   const node = entry.node;
   if (query.visible === true && node.states?.hidden === true) return false;
   switch (query.kind) {
@@ -152,11 +177,13 @@ function matchesQuery(entry: ProjectedNode, query: SemanticQuery, withoutPackage
       const placeholder = node.attributes?.['placeholder'];
       return placeholder !== undefined && matchesText(placeholder, query.value);
     }
-    case 'text':
-      return (
-        (node.name !== undefined && matchesText(node.name, query.value)) ||
-        (node.text !== undefined && matchesText(node.text, query.value))
-      );
+    case 'text': {
+      if (node.name !== undefined && matchesText(node.name, query.value)) return true;
+      if (node.text === undefined) return false;
+      if (matchesText(node.text, query.value)) return true;
+      if (platform !== 'ios' || node.role === 'text' || node.role === 'image' || mayTakeText(node)) return false;
+      return node.text.split(MERGED_LABEL_SEPARATOR).some((part) => matchesText(part, query.value)) && !hasTextBelow(node);
+    }
     case 'displayValue':
       return node.value !== undefined && matchesText(node.value, query.value);
     case 'testId':
