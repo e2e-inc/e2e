@@ -5,7 +5,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { fakeCalls, installFakeModel, judgment } from '../helpers/fake-model.ts';
+import { extracted, fakeCalls, installFakeModel, judgment } from '../helpers/fake-model.ts';
 import { startFixtureApp, type FixtureApp } from '../helpers/fixture-app.ts';
 import { resultByTitle, runProject, type FixtureProject, type RunOutcome } from '../helpers/run-project.ts';
 
@@ -47,6 +47,16 @@ test('assert hands the judge its instruction in NFC', async ({ app, agent }) => 
   await app.open();
   await agent.assert('the cafe\\u0301 heading is visible');
 });
+
+test('waitFor hands the judge its condition in NFC', async ({ app, agent }) => {
+  await app.open();
+  await agent.waitFor('the cre\\u0300me banner is visible', { interval: 100 });
+});
+
+test('extract hands the model its instruction in NFC', async ({ app, agent }) => {
+  await app.open();
+  await agent.extract('the nai\\u0308ve counter', { schema: ${SCHEMA} });
+});
 `;
 
 describe('judgment instructions', () => {
@@ -56,7 +66,10 @@ describe('judgment instructions', () => {
 
   beforeAll(async () => {
     app = await startFixtureApp();
-    const judge = installFakeModel(() => judgment(true, 'the observation supports it'), { modelId: 'judge' });
+    const judge = installFakeModel(
+      (call) => (call.schemaName === 'agent-judgment-2' ? judgment(true, 'the observation supports it') : extracted({ counter: '0' })),
+      { modelId: 'judge' },
+    );
     const result = await runProject(
       { 'tests/instruction.e2e.ts': SUITE },
       {
@@ -81,8 +94,18 @@ describe('judgment instructions', () => {
     expect(error.message).toContain(message);
   });
 
-  it('asks the judge only for the valid instruction, normalized', () => {
-    expect(resultByTitle(outcome, 'assert hands the judge its instruction in NFC').status).toBe('passed');
-    expect(fakeCalls.map((call) => call.instruction)).toStrictEqual(['the café heading is visible']);
+  it('asks the model only for the valid instructions, each in NFC', () => {
+    for (const title of [
+      'assert hands the judge its instruction in NFC',
+      'waitFor hands the judge its condition in NFC',
+      'extract hands the model its instruction in NFC',
+    ]) {
+      expect(resultByTitle(outcome, title).status).toBe('passed');
+    }
+    expect(fakeCalls.map((call) => call.instruction).toSorted()).toStrictEqual([
+      'the café heading is visible',
+      'the crème banner is visible',
+      'the naïve counter',
+    ]);
   });
 });
