@@ -46,7 +46,7 @@ export function checkLaunchArguments(label: string, declared: unknown, code: 'IN
       fail(code, `${label} argument name ${JSON.stringify(name)} must have no whitespace or control characters`);
     }
     if (name.startsWith('-')) {
-      fail(code, `${label} argument name ${JSON.stringify(name)} starts with a dash; write it without one, the engine adds it`);
+      fail(code, `${label} argument name ${JSON.stringify(name)} starts with a dash; remove the dash, the engine adds it`);
     }
     if (Array.isArray(value)) {
       const index = value.findIndex((item) => typeof item !== 'string');

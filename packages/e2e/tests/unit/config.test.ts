@@ -591,7 +591,7 @@ describe('resolveConfig', () => {
       'target "web" app.launchArguments argument name "Apple Locale" must have no whitespace or control characters',
     );
     expect(() => resolveApp({ launchArguments: { '-AppleLocale': 'fr_FR' } })).toThrow(
-      'target "web" app.launchArguments argument name "-AppleLocale" starts with a dash; write it without one, the engine adds it',
+      'target "web" app.launchArguments argument name "-AppleLocale" starts with a dash; remove the dash, the engine adds it',
     );
     expect(() => resolveApp({ launchArguments: { 'a\u0000b': 'x' } })).toThrow('argument name "a\\u0000b" must have no whitespace or control characters');
     expect(() => resolveApp({ launchArguments: { env: 'a\u0000' } })).toThrow('target "web" app.launchArguments.env holds a NUL character');
