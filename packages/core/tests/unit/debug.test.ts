@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMs } from '@e2e-dev/core/lib/internal/debug';
+import { formatMs } from '../../src/internal/debug.ts';
 
 describe('formatMs', () => {
   it('rounds before choosing ms or s, so 9999.6ms reads 10.0s', () => {
