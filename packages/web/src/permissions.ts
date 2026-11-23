@@ -70,7 +70,12 @@ export async function grantPermissions(
   }
 }
 
-/** The name among `names` a browser refused as an unknown permission type, which Playwright sends camel-cased (`localNetworkAccess`). */
+/**
+ * The name among `names` a browser refused as an unknown permission type, which Playwright sends
+ * camel-cased (`localNetworkAccess`). Only names whose protocol type is their camel-cased web name match
+ * (the ones new in recent Chrome: `localNetworkAccess`, `storageAccess`, `localFonts`); a refused
+ * `wakeLockScreen`, `clipboardSanitizedWrite`, `videoCapture` or `sensors` still fails `'all'`.
+ */
 function unknownPermission(error: unknown, names: readonly string[]): string | undefined {
   const type = /Unknown permission type: ([A-Za-z]+)/.exec(error instanceof Error ? error.message : '')?.[1];
   if (type === undefined) return undefined;
