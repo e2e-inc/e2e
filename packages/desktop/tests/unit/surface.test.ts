@@ -278,7 +278,9 @@ describe('DesktopSurface', () => {
   });
 
   it('keeps a control id across observations of a window and acts on its newest ref', async () => {
-    const { surface, fake, byTestId } = await launched({ snapshot: [snapshotAnswer('macos/appkit-form'), snapshotAnswer('macos/appkit-form'), renamed('macos/appkit-form', 's1y1hxmo5pexrl', 'snewer')] });
+    const mine = renamed('macos/appkit-form', 'w-8032', 'w-mine');
+    const newer = JSON.parse(JSON.stringify(mine).replaceAll('s1y1hxmo5pexrl', 'snewer')) as unknown;
+    const { surface, fake, byTestId } = await launched({ snapshot: [mine, mine, newer] });
     const signIn = byTestId('sign-in');
     const again = await surface.observe(operation(), undefined);
     expect(again.root.children?.find((node) => node.testId === 'sign-in')?.ref.id).toBe(signIn.id);
@@ -1042,7 +1044,12 @@ describe('DesktopSurface', () => {
   });
 
   it('keeps the ids of one window while another window is read', async () => {
-    const { surface, byTestId } = await launched({ snapshot: [snapshotAnswer('macos/appkit-form'), snapshotAnswer('macos/appkit-form'), renamed('macos/appkit-form', 'w-8032', 'w-other'), snapshotAnswer('macos/appkit-form')] });
+    const mine = renamed('macos/appkit-form', 'w-8032', 'w-mine');
+    const { surface, byTestId } = await launched((pid) => ({
+      // Both windows stay open; the second observation reads the other one.
+      'list-windows': [{ ok: true, data: [{ id: 'w-mine', pid, process_instance: 'instance-1', is_focused: true }, { id: 'w-other', pid, process_instance: 'instance-1' }] }],
+      snapshot: [mine, mine, renamed('macos/appkit-form', 'w-8032', 'w-other'), mine],
+    }));
     const signIn = byTestId('sign-in');
     await surface.observe(operation(), undefined);
     const back = await surface.observe(operation(), undefined);
@@ -1279,6 +1286,22 @@ describe('DesktopSurface', () => {
     const first = await surface.observe(operation(), undefined);
     const cut = await surface.observe(operation(), undefined);
     expect(cut.root.children?.[0]?.children?.[0]?.ref.id).not.toBe(first.root.children?.[0]?.children?.[0]?.ref.id);
+  });
+
+  it('drops the identities of a window once the app no longer lists it', async () => {
+    const read = (id: string) => ({ ok: true, data: { snapshot_id: id, window: { id }, tree: { role: 'window', name: id, bounds: { x: 0, y: 0, width: 200, height: 100 }, children: [{ role: 'button', name: 'OK', ref_id: `@${id}:e1`, bounds: { x: 10, y: 10, width: 40, height: 20 } }] } } });
+    const { surface } = await launched(
+      (pid) => ({
+        'list-windows': [{ ok: true, data: [{ id: 'w-1', pid, process_instance: 'instance-1', is_focused: true }] }, { ok: true, data: [{ id: 'w-1', pid, process_instance: 'instance-1', is_focused: true }] }, { ok: true, data: [{ id: 'w-2', pid, process_instance: 'instance-1', is_focused: true }] }],
+        snapshot: [read('w-1'), read('w-1'), read('w-2')],
+      }),
+      { observe: false },
+    );
+    const ids = (surface as unknown as { ids: Map<string, string> }).ids;
+    await surface.observe(operation(), undefined);
+    expect([...ids.keys()].some((identity) => identity.startsWith('w-1|'))).toBe(true);
+    await surface.observe(operation(), undefined);
+    expect([...ids.keys()].some((identity) => identity.startsWith('w-1|'))).toBe(false);
   });
 
   it('keeps no identity for a control under a look-alike, so reads do not pile them up', async () => {

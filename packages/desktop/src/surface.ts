@@ -945,6 +945,9 @@ export class DesktopSurface {
       await this.requireRunning(operation);
       await this.unlessLocked(operation);
     }
+    // A window the list no longer has is closed: its identities go, so windows opened and closed one after another do not pile them up.
+    const open = new Set(windows.map((window) => window.id));
+    for (const identity of this.ids.keys()) if (!open.has(identity.slice(0, identity.indexOf('|')))) this.ids.delete(identity);
     const candidates =
       windowId === undefined
         ? [...windows.filter((window) => window.is_focused === true), ...windows.filter((window) => window.is_focused !== true && window.visible !== false), ...windows.filter((window) => window.is_focused !== true && window.visible === false)]
