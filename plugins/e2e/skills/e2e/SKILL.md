@@ -124,11 +124,13 @@ describe('billing', () => {
    `device.openLink`, and data from the app's API (topic `writing-tests`).
    A value a goal needs goes in its `params`; `screen` lines are for a
    short, stable flow, an interaction that is itself the point, and a
-   sign-in form in a setup test. Use `agent.assert` alone when it can judge
-   the full outcome from the screen. Use `expect` for exact checks where
-   it offers a clearer signal. Scope collection checks to the named list or
-   table. For a complete collection check, compare all records and their
-   counts, sorting copies only when order can vary.
+   sign-in form in a setup test. Use `expect` for exact values, counts, or
+   field states. Use `agent.assert` alone when it can judge the full
+   semantic or visual outcome from the screen, and pair a deterministic
+   `expect` beside it when exact phrasing or state must also hold. Scope
+   collection checks to the named list or table. For a complete collection
+   check, compare all records and their counts, sorting copies only when
+   order can vary.
    Put the selectors, fixed values, and prompt
    text the tests repeat inside the shared `describe`, above its tests,
    and keep a single-use one inline. As the spec

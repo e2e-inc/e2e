@@ -337,7 +337,7 @@ import { web } from '@e2e-dev/web/engine';
 test('delivers a message to the recipient', { session: 'sender' }, async ({ app, screen }) => {
   const message = `Hello ${randomUUID()}`;
   await using host = await launch(web(), {
-    app: { url: 'http://127.0.0.1:3000' },
+    app: { url: app.baseUrl },
     secrets: { RECIPIENT_PASSWORD: process.env.RECIPIENT_PASSWORD ?? '' },
   });
   const recipient = await host.newSession();

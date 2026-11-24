@@ -313,9 +313,11 @@ elsewhere on the current screen.
 - Keep arrange actions focused on the starting state. Wait for that
   state before acting on the behavior under test.
 - Start with one call for the act block. Split at a meaningful screen
-  transition when the next step needs a known state. Explain why, then
-  wait for that state. Each call has its own recording and budgets
-  within the test timeout. Verify the complete path together.
+  transition when the next step needs a known state, when a long flow
+  would risk the `maxSteps` or `maxModelCalls` budget, or when a failure
+  in the middle needs its own step boundary. Explain why, then wait for
+  that state. Each call has its own recording and budgets within the
+  test timeout. Verify the complete path together.
 
 ```ts
 test('places an order with a saved card', async ({ app, agent, screen }) => {

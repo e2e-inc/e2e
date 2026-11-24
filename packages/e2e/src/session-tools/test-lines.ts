@@ -90,6 +90,8 @@ export interface TestLineOptions {
   readonly engineFixtures?: readonly string[] | undefined;
   /** The test the session ran before it went live, as `file:line`: the lines carry on from where it stopped. */
   readonly testRan?: string | undefined;
+  /** Whether the session's agent has a model or custom executor, so tests can call `agent.act`. */
+  readonly hasAgent?: boolean | undefined;
 }
 
 /** The names a test fills values from, as the config declares them. */
@@ -198,9 +200,15 @@ export class SessionTestLines {
 
   /** The read-only `test_lines` catalog tool. */
   tool(): ToolSet[string] {
+    const guidance =
+      this.options.testRan === undefined
+        ? 'Split the draft into tests, one behavior each. Arrange the starting state, act, then check the outcome at the end. A check of a screen the flow later leaves belongs to its own test. Name a locator a test repeats.'
+        : "Use these lines to continue the existing test where it stopped. Keep the test's outcome checks together at the end.";
     return {
       description:
-        "Every test line this session's actions printed so far, in order, as a draft test body: the screen.* and app.* calls that repeat each action, with a comment where an action has none, and the lines run_code passed. It is a draft to split, not a test to paste. Write one test per behavior: its arrange lines, the act under test, then its checks together at the end. Every test needs a check of its outcome; add one where the draft has none. A check of a screen the flow later leaves belongs to its own test. Name a locator a test repeats. See topic writing-tests, Structure. After open_session with test, the lines continue that test from where it stopped.",
+        "Every test line this session's actions printed so far, in order: the screen.* and app.* calls that repeat each action, with a comment where an action has none, and the lines run_code passed. " +
+        guidance +
+        ' See topic writing-tests, Structure.',
       inputSchema: z.object({}).strict(),
       execute: async () => this.draft(),
     };
@@ -214,13 +222,17 @@ export class SessionTestLines {
     const body = this.entries.map((entry) => ('line' in entry ? entry.line : `// ${entry.tool}: no test line: ${entry.reason}`));
     const imports = ['credentials', 'secrets'].filter((name) => body.some((line) => line.includes(`${name}.`)));
     const count = `in order (${String(this.entries.filter((entry) => 'line' in entry).length)} lines)`;
-    const { testRan } = this.options;
+    const { testRan, hasAgent } = this.options;
+    const agentGuidance =
+      hasAgent === true
+        ? ' Use agent.act for a long path that can vary, with agent among the test fixtures. Give the agent the steps for one test goal, and split the path into calls only when a later step needs an intermediate screen state. Wait for that state before continuing.'
+        : '';
     // A session that ran a test holds only what came after it: the test's own lines are in its file.
     const [lead, place] =
       testRan === undefined
         ? [
             `Draft test body from this session's actions, ${count}:`,
-            `Split these lines into tests, one behavior each: its arrange lines, the act under test, then its checks together at the end. Each test body is async ({ ${fixturesIn(body, this.options.engineFixtures ?? []).join(', ')} }) => { ... }. Every test needs a check of its outcome; add one where none is here. A check of a screen the flow later leaves belongs to its own test. Name a locator a test uses twice. Use agent.act for a long path that can vary, with agent among the test fixtures. Give the agent the steps for one test goal, and split the path into calls only when a later step needs an intermediate screen state. Wait for that state before continuing. See topic writing-tests, Structure.`,
+            `Split these lines into tests, one behavior each: its arrange lines, the act under test, then its checks together at the end. Each test body is async ({ ${fixturesIn(body, this.options.engineFixtures ?? []).join(', ')} }) => { ... }. Every test needs a check of its outcome; add one where none is here. A check of a screen the flow later leaves belongs to its own test. Name a locator a test uses twice.${agentGuidance} See topic writing-tests, Structure.`,
           ]
         : [
             `Test lines from this session's actions after test ${testRan} stopped, ${count}:`,

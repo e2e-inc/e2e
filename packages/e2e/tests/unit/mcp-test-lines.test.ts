@@ -73,6 +73,7 @@ async function harness(options: {
   readonly actions?: Partial<ExecutorActions>;
   readonly tree?: boolean;
   readonly testRan?: string;
+  readonly hasAgent?: boolean;
 }): Promise<Harness> {
   const root: Fake = { id: 'root', role: 'document', name: 'Page', y: 0, children: options.screen };
   const base = fakeExecutorContext({ secrets: [{ name: 'admin.password', purpose: 'password' }, { name: 'apiKey', purpose: 'generic-secret' }] }).context;
@@ -112,6 +113,7 @@ async function harness(options: {
     appBase: { href: 'http://127.0.0.1:4100/', origin: 'http://127.0.0.1:4100' },
     fills: { credentials: [{ name: 'admin', username: 'ada@example.test', password: 'admin.password' }], secrets: ['apiKey'] },
     testRan: options.testRan,
+    hasAgent: options.hasAgent,
   });
   const watched = lines.watch(context);
   const tools: ToolSet = { ...lines.wrap(createGrammarTools(watched)), test_lines: lines.tool() };
@@ -435,7 +437,7 @@ describe('SessionTestLines', () => {
   });
 
   it('records the opening of the app as app.open() and drafts the lines in order', async () => {
-    const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] } });
+    const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] }, hasAgent: true });
     session.lines.opened();
     await session.run('tap', { target: 'n2' });
     await session.run('scroll', { direction: 'down' });
@@ -450,6 +452,17 @@ describe('SessionTestLines', () => {
         'Split these lines into tests, one behavior each: its arrange lines, the act under test, then its checks together at the end. Each test body is async ({ app, screen }) => { ... }. Every test needs a check of its outcome; add one where none is here. A check of a screen the flow later leaves belongs to its own test. Name a locator a test uses twice. Use agent.act for a long path that can vary, with agent among the test fixtures. Give the agent the steps for one test goal, and split the path into calls only when a later step needs an intermediate screen state. Wait for that state before continuing. See topic writing-tests, Structure.',
       ].join('\n'),
     );
+    expect(session.tools.test_lines?.description).toContain('Split the draft into tests, one behavior each');
+    expect(session.tools.test_lines?.description).not.toContain('continue the existing test');
+  });
+
+  it('omits agent.act advice from the draft when no model or executor is configured', async () => {
+    const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] }, hasAgent: false });
+    session.lines.opened();
+    await session.run('tap', { target: 'n2' });
+    const draft = session.lines.draft();
+    expect(draft).toContain('Split these lines into tests, one behavior each');
+    expect(draft).not.toContain('agent.act');
   });
 
   it('prints no line for a resize, naming the size to set with the engine fixture', async () => {
@@ -470,6 +483,8 @@ describe('SessionTestLines', () => {
         "Put them in that test where it stopped, in place of the line that failed or after its last step. Keep the test's checks together at its end, with one that checks its outcome. See topic writing-tests, Structure.",
       ].join('\n'),
     );
+    expect(session.tools.test_lines?.description).toContain('Use these lines to continue the existing test');
+    expect(session.tools.test_lines?.description).not.toMatch(/split the draft into tests/i);
   });
 
   it('drafts the lines run_code passed among the action lines', async () => {

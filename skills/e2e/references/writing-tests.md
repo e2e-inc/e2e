@@ -108,14 +108,20 @@ themselves failed or the app changed under them.
     nothing after them. In a test body, no check sits in arrange or act.
     A state the test needs before it can go on is a wait on a locator
     narrowed to that state, such as
-    `balance.filter({ hasText: /^\$10\.00$/ }).waitFor()`,
+    `balance.filter({ hasText: /^\$10\.00$/ }).waitFor()` (use anchored
+    `hasText` on leaf status or value nodes, since it matches full subtree
+    text on the web and individual nodes on core and mobile; use
+    `filter({ has: screen.getByText(name) })` for exact row matching),
     `screen.getByRole('switch', 'Lock card', { checked: true }).waitFor()`,
-    or `heading.waitFor({ state: 'hidden' })`. A failed wait reports
-    `LOCATOR_NOT_FOUND` and a failed check `ASSERTION_FAILED`, so the
-    error code distinguishes the wait from the assertion. Use the failed
-    step to tell which state was missing. Wait for a
-    starting value only when the outcome check depends on it. A setup
-    test's `session.save` is bookkeeping and comes after its check.
+    or `heading.waitFor({ state: 'hidden' })` after an earlier positive wait
+    (a `hidden` wait passes immediately on zero matches, including a
+    misspelled locator, and still confirms prior `agent.act` steps for
+    replay). On a zero-match timeout, a wait reports `LOCATOR_NOT_FOUND`
+    and a check reports `ASSERTION_FAILED`, while two matches throw
+    `LOCATOR_AMBIGUOUS` on either. Use the failed step to tell which state
+    was missing. Wait for a starting value only when the outcome check
+    depends on it. A setup test's `session.save` is bookkeeping and comes
+    after its check.
 - **One behavior and one goal per test.** A test verifies one outcome. Its title
   names it: `'marks a todo as done'`, not `'todos work'` or `'adds and
   completes a todo'`. An "and" in a title usually means two tests. Several
@@ -161,17 +167,24 @@ themselves failed or the app changed under them.
   await screen.getByRole('button', `Delete ${other}`).tap();
 
   // Good: deletes the second todo (this list adds new todos at the end),
-  // then checks the first one is still there.
+  // then checks the first one is still there and unchanged.
+  const todo = screen.getByRole('checkbox', title);
+  const otherTodo = screen.getByRole('checkbox', other);
   await agent.act(addTodo, { params: { title: other } });
   await agent.act(addTodo, { params: { title } });
+  await todo.waitFor();
+
   await screen.getByRole('button', `Delete ${title}`).tap();
 
-  await expect(screen.getByRole('checkbox', title)).toHaveCount(0);
-  await expect(screen.getByRole('checkbox', other)).toBeVisible();
+  await expect(todo).toHaveCount(0);
+  await expect(otherTodo).toBeVisible();
+  await expect(otherTodo).not.toBeChecked();
   ```
 
   Before you run the file, find each test that acts on one item of a list
-  and check that it acts on the second item shown.
+  and check that it acts on the second item shown. A read-only list can
+  target an existing non-first item, and a test whose requirement is about
+  position 1 can act on the first item.
 - **Verify the state the action should leave behind.** When success
   includes a saved record, wait for the confirmation before leaving the
   first screen. Open the receipt, history, or detail page afresh and
@@ -187,8 +200,9 @@ themselves failed or the app changed under them.
   returned IDs and original values. After acting, use fresh reads to check
   the target's change and the neighbor's unchanged fields. Wrap the
   creation and `use()` in `try`/`finally` and delete every record created
-  so far in the `finally`, so a setup error after the first record and a
-  failed assertion leave no records behind.
+  so far in the `finally`. Teardown after `use()` already runs when a test
+  fails an assertion, and `try`/`finally` also cleans up partial setup if a
+  later creation fails before `use()`.
 - **Prove a refusal leaves state unchanged.** A refusal message can
   accompany a write. If the requirement promises a visible refusal and
   no persisted change, check each explicitly. End the message test on
@@ -197,8 +211,8 @@ themselves failed or the app changed under them.
   readiness signal independent of the outcome, such as the list finishing
   loading. Then assert that the target and other records are still present
   and unchanged, using their identities and a fresh persisted-state read
-  where available. If the requirement includes a retry, repeat the action
-  on that reopened state and verify its outcome as well.
+  where available. Put a retry after a refusal in its own test instead of
+  asserting a second outcome after checking unchanged state.
 - **Each test owns its starting state.** In a browser every test starts in
   a fresh context. With `session`, it starts from what the setup test
   saved, cookies, local storage, and IndexedDB, never from what an earlier
@@ -226,8 +240,9 @@ themselves failed or the app changed under them.
   read the screen as it is now without waiting, so right after a
   navigation they see a list that has not loaded. Give the test the state
   it needs instead, and make a teardown delete what it owns without
-  asking: a test that deletes the record itself gets a fixture with no
-  teardown. `serial: true` is for a journey whose steps are meant to
+  asking: even when the test deletes the record itself, keep teardown on
+  the fixture and accept a `404` on cleanup so a failure before delete
+  leaves no record behind. `serial: true` is for a journey whose steps are meant to
   chain, not a fix for a test that fails alone. Any one test passes when
   you run it alone, by `file:line`, twice in a row.
 - **Name what the tests repeat.** Inside the shared `describe`, define a
@@ -250,12 +265,13 @@ themselves failed or the app changed under them.
   still matches. Use `screen` lines for a short, stable flow, for an
   interaction that is itself the point of the test, such as `ignores an
   empty submission` above, for a sign-in form in a setup test, and in a
-  project with no model. Use `agent.assert` alone when the relevant screen
-  gives the agent evidence for the full outcome. Specify what to judge,
-  including any exact value the outcome requires. Choose a locator matcher
-  when it gives a clearer signal, such as an exact count or field state.
-  Add a second check when it proves another part of the outcome. The replay
-  cache never skips an assertion. A file of
+  project with no model. Use `expect` for exact values, counts, or field
+  states. Use `agent.assert` alone when the relevant screen gives the agent
+  evidence for the full semantic or visual outcome, and pair a
+  deterministic `expect` beside it when exact phrasing or state must also
+  hold (topic `debugging`, "Flaky tests"). Add a second check when it
+  proves another part of the outcome. The replay cache never skips an
+  assertion. A file of
   `screen` lines only suits a short, stable flow; for anything else, weigh
   it with `/agentic-vs-deterministic` in the docs.
 
@@ -459,10 +475,11 @@ substring; a `RegExp` matches as written.
 - Exactly one match per action, read, or assertion. Two fail at once with
   `LOCATOR_AMBIGUOUS`; at zero, actions and reads poll until the action
   timeout then `LOCATOR_NOT_FOUND`, assertions until the assertion timeout
-  then `ASSERTION_FAILED`. Exceptions:
-  `toHaveCount`, `toBeVisible`, `toBeHidden`, `toBeAttached`, list-form
-  `toHaveText` and `toContainText`, `isVisible()` (false at zero),
-  `isHidden()` (true), `count()`, `all()`, `allTextContents()`.
+  then `ASSERTION_FAILED`. Zero-match exceptions (still `LOCATOR_AMBIGUOUS`
+  on two or more matches): `toBeVisible`, `toBeHidden`, `toBeAttached`,
+  `isVisible()` (false at zero), `isHidden()` (true). Multi-match
+  exceptions (zero or more matches allowed): `toHaveCount`, list-form
+  `toHaveText` and `toContainText`, `count()`, `all()`, `allTextContents()`.
 - Narrow with `filter({ hasText })` (a case-insensitive substring, unlike a
   query), `filter({ hasNotText })` to exclude matching subtree text,
   `filter({ has: locator })`, `filter({ hasNot: locator })`, `first()`,
@@ -644,10 +661,12 @@ Save sign-in state under a name in a setup test, and declare it with
 
 For a test of two users interacting, use distinct accounts in separate
 sessions. Restore the primary user's named session through `session`.
-For the second user, call `launch(web(), options)` from the test with a
-fresh engine, then `host.newSession()`. Sign in with that user's test
-credentials and check the outcome on the screen of the user who should
-see it. See the [chat example](https://e2e.com/docs/core#open-a-host-inside-a-test)
+For the second user, import `launch` from `@e2e-dev/core` and `web` from
+`@e2e-dev/web/engine`, call `launch(web(), options)` from the test with a
+fresh engine, then `host.newSession()`. `launch(web(), options)` starts a
+local default browser rather than reusing target provider options. Sign in
+with that user's test credentials and check the outcome on the screen of
+the user who should see it. See the [chat example](https://e2e.com/docs/core#open-a-host-inside-a-test)
 for sign-in and cleanup. Use `newSession({ state })` only with a core
 `SessionState` from `saveState()` or `SessionState.import()`.
 
@@ -746,6 +765,7 @@ test as close to its screen as the app allows:
   `call`.
 
 ```ts
+import { randomUUID } from 'node:crypto';
 import { describe, test } from '@e2e-dev/web';
 import { expect } from 'e2e';
 import { z } from 'zod';
@@ -757,24 +777,32 @@ const projectTest = test.extend<{ project: { id: string } }>({
     const session = (await browser.cookies()).find((c) => c.name === 'session' && c.domain === domain);
     if (session === undefined) throw new Error('not signed in: no session cookie for the app');
     const headers = { cookie: `session=${session.value}` };
-    const created = await request.post(`${app.baseUrl}/api/projects`, { json: { name: `Project ${Date.now()}` }, headers });
-    expect(created.status).toBe(201);
-    const project = expect(await created.json()).toMatchSchema(z.object({ id: z.string() }));
-    await use(project);
-    await request.delete(`${app.baseUrl}/api/projects/${project.id}`, { headers }); // runs after a failure too
+    let project: { id: string } | undefined;
+    try {
+      const created = await request.post(`${app.baseUrl}/api/projects`, { json: { name: `Project ${randomUUID()}` }, headers });
+      expect(created.status).toBe(201);
+      project = expect(await created.json()).toMatchSchema(z.object({ id: z.string() }));
+      await use(project);
+    } finally {
+      if (project !== undefined) {
+        const deleted = await request.delete(`${app.baseUrl}/api/projects/${project.id}`, { headers });
+        expect([200, 204, 404]).toContain(deleted.status);
+      }
+    }
   },
 });
 
 describe('project settings', { session: 'admin' }, () => {
   projectTest('renames a project', async ({ app, screen, project }) => {
+    const name = screen.getByLabel('Name');
     await app.open(`/projects/${project.id}/settings`); // straight to the screen under test
 
-    await screen.getByLabel('Name').fill('Atlas');
+    await name.fill('Atlas');
     await screen.getByRole('button', 'Save').tap();
     await screen.getByRole('status').filter({ hasText: /^Saved$/ }).waitFor();
     await app.open(`/projects/${project.id}/settings`); // reopened: the promise is that it is saved
 
-    await expect(screen.getByLabel('Name')).toHaveValue('Atlas');
+    await expect(name).toHaveValue('Atlas');
   });
 });
 ```

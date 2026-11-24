@@ -146,7 +146,11 @@ test('filters the shop to items under $20', { session: 'customer' }, async ({ ap
 
   await agent.act('show only items under $20');
 
-  await expect(results).toHaveText('3 items under $20');
+  await expect(results).toHaveText('2 items under $20');
+  await expect(screen.getByRole('list', 'Products').getByRole('listitem')).toHaveText([
+    'Canvas Tote, $14',
+    'Steel Bottle, $18',
+  ]);
 });
 ```
 
