@@ -601,7 +601,6 @@ export class StepRecorder {
     return this.steps.filter((step) => this.active.has(step.id) || this.guestsRunning.has(step));
   }
 
-
   /** The step currently executing, when inside StepRecorder.run. */
   get currentStepId(): string | undefined {
     return this.current()?.id;
