@@ -100,6 +100,18 @@ describe('renderCtrfReport', () => {
     expect(render(doc({ results: [reportResult(), other] })).results.summary).toMatchObject({ tests: 1, suites: 1 });
   });
 
+  it('points filePath and line at the declaration when an imported module declares the test, and counts suites by collected file', () => {
+    const cases = { file: 'tests/cases.ts', line: 6, column: 1 };
+    const cart = reportResult({ id: 'result-1', file: 'tests/cart.e2e.ts', source: cases });
+    const checkout = reportResult({ id: 'result-2', file: 'tests/checkout.e2e.ts', source: cases });
+    const document = render(doc({ results: [cart, checkout] }));
+    expect(document.results.tests).toEqual([
+      expect.objectContaining({ filePath: 'tests/cases.ts', line: 6, suite: ['tests/cart.e2e.ts', 'auth'] }),
+      expect.objectContaining({ filePath: 'tests/cases.ts', line: 6, suite: ['tests/checkout.e2e.ts', 'auth'] }),
+    ]);
+    expect(document.results.summary).toMatchObject({ tests: 2, suites: 2 });
+  });
+
   it('leaves a result the selection did not choose out, and keeps one a filter left out as skipped with the filter named', () => {
     const unselected = reportResult({ id: 'result-2', selected: false, status: 'skipped', skip: { cause: 'filtered', reason: 'file not selected' }, attempts: [] });
     const filtered = reportResult({ id: 'result-3', selected: false, status: 'skipped', skip: { cause: 'filtered', reason: '4% likely affected', filter: 'jev' }, attempts: [] });
@@ -336,6 +348,7 @@ describe('renderCtrfReport', () => {
       const failed = reportResult({
         id: `result-${S}`,
         file: `tests/${S}.e2e.ts`,
+        source: { file: `tests/${S}-cases.ts`, line: 3, column: 1 },
         titlePath: [`describe ${S}`, `as ${S}`],
         tags: [S],
         targetId: `web-${S}`,

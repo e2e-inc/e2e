@@ -339,7 +339,7 @@ function renderResult(result: ReportResult, groups: ReadonlyMap<string, ReportSe
       repeat: result.repeat,
     },
     type: result.kind === 'setup' ? 'setup' : 'e2e',
-    filePath: clean(result.file),
+    filePath: clean(result.source.file),
     ...(before.length === 0 ? {} : { retries: before.length, retryAttempts: before.map((attempt, index) => renderRetryAttempt(attempt, index + 1, options, clean)) }),
     ...(flaky ? { flaky: true } : {}),
     ...(files.length === 0 ? {} : { attachments: files }),
@@ -394,7 +394,8 @@ export function renderCtrfReport(report: Report1Document, options: CtrfReportOpt
         pending: count('pending'),
         other: count('other'),
         flaky: tests.filter((test) => test.flaky === true).length,
-        suites: new Set(tests.map((test) => test.filePath)).size,
+        // A suite is a collected test file, the first entry of each test's `suite`.
+        suites: new Set(tests.map((test) => test.suite[0])).size,
         start,
         stop,
         ...(run.durationMs === undefined ? {} : { duration: run.durationMs }),
