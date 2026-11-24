@@ -43,7 +43,8 @@
  * two clusters up to 2% apart, so use it to look at JIT behavior, not to
  * compare. Either way, counts are not wall time. `--v8-pool-size=0` leaves Node no
  * platform worker threads, and on Linux `setarch -R` turns off address space
- * randomization, so neither moves a count between processes.
+ * randomization when the system allows it (the run warns when it does not),
+ * so neither moves a count between processes.
  *
  * A root's path is read at startup, and how much it allocates there moves
  * where the collector runs inside the measured loop, so two roots with
@@ -115,9 +116,16 @@ function hasValgrind(): boolean {
   return spawnSync('valgrind', ['--version'], { stdio: 'ignore' }).status === 0;
 }
 
-/** `setarch <machine> -R` on Linux when it is installed: the prefix that turns off address space randomization. */
+/**
+ * `setarch <machine> -R` on Linux, the prefix that turns off address space
+ * randomization, when it can run a command here. A container can ship
+ * `setarch` and still refuse the personality change, which would fail every
+ * measured process, so it is tried on `true` first.
+ */
 const NO_ASLR: readonly string[] =
-  process.platform === 'linux' && spawnSync('setarch', ['--version'], { stdio: 'ignore' }).status === 0 ? ['setarch', os.machine(), '-R'] : [];
+  process.platform === 'linux' && spawnSync('setarch', [os.machine(), '-R', 'true'], { stdio: 'ignore' }).status === 0
+    ? ['setarch', os.machine(), '-R']
+    : [];
 
 function shaOf(root: string): string {
   try {
@@ -223,6 +231,9 @@ async function main(): Promise<void> {
   const cases = listCases(options.case);
   const out = path.resolve(options.out ?? path.join(os.tmpdir(), 'e2e-microbench', new Date().toISOString().replaceAll(':', '-')));
   mkdirSync(out, { recursive: true });
+  if (process.platform === 'linux' && NO_ASLR.length === 0) {
+    log('warning: setarch -R cannot run here, so address space randomization stays on and counts may vary more between processes');
+  }
   log(`${tool}, ${modes.join(' and ')}, ${cases.length} case(s), ${trials} trial(s), ${jobs} job(s); writing ${out}`);
 
   // perIteration[mode][case][side][trial]
