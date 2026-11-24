@@ -923,10 +923,11 @@ describe('engine protocol against a server written from the messages alone', () 
     const relative = await remote.artifacts!.screenshot('after login', operation());
     expect(relative).toBe(path.join('screenshots', '001-after_login.png'));
     expect(readFileSync(path.join(artifactsDir, relative), 'utf8')).toBe('png bytes');
-    // A serial group's later tests call under ids of their own on the one attempt open: theirs land there too.
-    const later = await remote.artifacts!.screenshot('later', { ...operation(), attemptId: 'a-later-member' });
+    const later = await remote.artifacts!.screenshot('later', operation());
     expect(later).toBe(path.join('screenshots', '002-later.png'));
     expect(readFileSync(path.join(artifactsDir, later), 'utf8')).toBe('png bytes');
+    // One for an attempt that is not open has no directory to land in.
+    await expect(remote.artifacts!.screenshot('stray', { ...operation(), attemptId: 'not-open' })).rejects.toThrow(/screenshot outside an attempt/);
     expect(facts).toEqual([{ written: 'by hand' }]);
     await remote.dispose!(cleanup);
     expect(received).toEqual(['lifecycle/startAttempt', 'shutdown', 'transport closed']);

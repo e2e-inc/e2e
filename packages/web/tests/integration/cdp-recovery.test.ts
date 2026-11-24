@@ -314,7 +314,7 @@ describe('CDP session recovery', () => {
       await surfaceOf(engine)!.page().evaluate(() => { localStorage.setItem('attempt', 'a1'); });
       await engine.endAttempt!(cleanup());
       await engine.startAttempt!({ attemptId: 'a2', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
-      await engine.session!.open!(`${app.url}/login`, operation());
+      await engine.session!.open!(`${app.url}/login`, { ...operation(), attemptId: 'a2' });
       expect(await surfaceOf(engine)!.page().evaluate(() => localStorage.getItem('attempt'))).toBeNull();
       expect(provisioned).toBe(2);
       await engine.endAttempt!(cleanup());

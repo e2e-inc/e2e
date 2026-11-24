@@ -139,7 +139,7 @@ describe('serial attempt record provenance', () => {
       realms,
       launchSession: async () => {
         if (created === 2 && mode === 'launch') throw new Error('retry launch failed');
-        return createEngineSession({ engine: undefined, targetName: target.name });
+        return createEngineSession({ attemptId: 'attempt-1', engine: undefined, targetName: target.name });
       },
       closeSession: async () => {},
       runAttempt: async (_pair, _registered, _realm, index) => {

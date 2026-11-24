@@ -33,9 +33,6 @@ import { BROWSER_NAMES, isBrowserName } from './browser-connection.ts';
 /** App fields only a device target reads. */
 const NATIVE_APP_KEYS = ['bundleId', 'appPath', 'launchArguments'] as const;
 
-/** How many ended attempts a handle remembers, to refuse a call that arrives for one late. */
-const ENDED_ATTEMPTS_KEPT = 4096;
-
 /** Creates one Playwright engine: one browser per worker, one context per attempt. */
 const surfaces = new WeakMap<EngineHandle, PlaywrightSurface>();
 
@@ -120,29 +117,22 @@ export function web(options: WebOptions = {}): WebEngine {
     );
   }
   const surface = new PlaywrightSurface(options);
-  /** The attempt on `surface`: the worker's own, a test's. Set before its `startAttempt` awaits anything. */
-  let own: string | undefined;
-  /** The surface of each attempt opened while another ran: an actor's, a context of its own on the same browser. */
-  const actors = new Map<string, PlaywrightSurface>();
+  /** The attempt on `surface`: the first one open. Set before its `startAttempt` awaits anything. */
+  let first: string | undefined;
+  /** The surface of each attempt opened while another ran: a context of its own on the same browser. */
+  const others = new Map<string, PlaywrightSurface>();
   /**
-   * The attempts that ended, most recent last: a call still on its way to one
-   * must never reach another attempt's page, the next test's included. Kept
-   * for as long as the handle lives, up to `ENDED_ATTEMPTS_KEPT`.
-   */
-  const ended = new Set<string>();
-  const retire = (attemptId: string): void => {
-    ended.add(attemptId);
-    if (ended.size > ENDED_ATTEMPTS_KEPT) ended.delete(ended.values().next().value!);
-  };
-  /**
-   * The surface of an attempt: an actor's by its id, `surface` for any
-   * other, since a serial group's tests run on one attempt under ids of
-   * their own, and for a harness that names none.
+   * The surface of the attempt a call names. A call for an attempt that is
+   * not open is refused while another is: it must never reach that one's
+   * page. `surface` answers a harness that names no attempt, which runs one
+   * at a time, and says so itself when none is open.
    */
   const of = (attempt: { readonly attemptId?: string | undefined }): PlaywrightSurface => {
-    if (attempt.attemptId === undefined) return surface;
-    if (ended.has(attempt.attemptId)) throw new EngineError('INVALID_STATE', 'the attempt this call belongs to has ended', { retryable: false });
-    return actors.get(attempt.attemptId) ?? surface;
+    const { attemptId } = attempt;
+    if (attemptId === undefined || attemptId === first || (first === undefined && others.size === 0)) return surface;
+    const other = others.get(attemptId);
+    if (other !== undefined) return other;
+    throw new EngineError('INVALID_STATE', 'the attempt this call belongs to is not running: it ended, or never started here', { retryable: false });
   };
   const handle = defineEngine<WebFixtures>({
     name: 'web',
@@ -155,37 +145,34 @@ export function web(options: WebOptions = {}): WebEngine {
     doctor: (info) => surface.doctor(info),
     init: (info) => surface.init(info),
     startAttempt: (context) => {
-      ended.delete(context.attemptId);
       // A persistent context is the one a remote browser has: a second attempt has none to run in, and is refused there.
-      if (own === undefined || recoverable) {
-        own ??= context.attemptId;
+      if (first === undefined || recoverable) {
+        first = context.attemptId;
         return surface.startAttempt(context);
       }
-      const actor = surface.fork();
-      actors.set(context.attemptId, actor);
-      return actor.startAttempt(context);
+      const other = surface.fork();
+      others.set(context.attemptId, other);
+      return other.startAttempt(context);
     },
     settleAttempt: (context) => of(context).settleAttempt(context),
     endAttempt: async (context) => {
-      const actor = context.attemptId === undefined ? undefined : actors.get(context.attemptId);
-      if (actor !== undefined) {
-        actors.delete(context.attemptId!);
-        retire(context.attemptId!);
-        return actor.endAttempt(context);
+      const { attemptId } = context;
+      const other = attemptId === undefined ? undefined : others.get(attemptId);
+      if (other !== undefined) {
+        others.delete(attemptId!);
+        return other.endAttempt(context);
       }
       // An id that is neither is an attempt already ended: nothing of it is left to end.
-      if (context.attemptId !== undefined && context.attemptId !== own) return;
-      // The first attempt of a test that drives only its actors is an actor's: a late call for it is refused like any other's.
-      if (context.attemptId !== undefined) retire(context.attemptId);
-      own = undefined;
+      if (attemptId !== undefined && attemptId !== first) return;
+      first = undefined;
       return surface.endAttempt(context);
     },
     dispose: async (context) => {
-      const open = [...actors.values()];
-      actors.clear();
-      own = undefined;
-      // The browser goes down with `surface`; an actor's context is closed first, so its video is finalized.
-      await Promise.allSettled(open.map((actor) => actor.endAttempt(context)));
+      const open = [...others.values()];
+      others.clear();
+      first = undefined;
+      // The browser goes down with `surface`; every other context is closed first, so its video is finalized.
+      await Promise.allSettled(open.map((other) => other.endAttempt(context)));
       await surface.dispose(context);
     },
     observe: (operation, observeOptions) => of(operation).observe(operation, observeOptions),

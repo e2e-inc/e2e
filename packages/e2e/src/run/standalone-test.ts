@@ -235,7 +235,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       lateErrors.push(serialize(error, 'body'));
     },
   };
-  const operation = (signal: AbortSignal, timeoutMs: number): OperationContext => ({ signal, timeoutMs, runId: env.runId, attemptId, origin: 'test' });
+  const operation = (signal: AbortSignal, timeoutMs: number): OperationContext => executor.op(env.session, timeoutMs, signal);
 
   const execute = async (): Promise<{ started: Started | undefined; outcome: StandaloneTestOutcome }> => {
     const startedMs = Date.now();
@@ -383,7 +383,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
         if (lateSoft !== undefined) fail(lateSoft, 'body');
         // A callback the engine ran for the body (a route handler) fails on a path no step awaits.
         try {
-          await executor.settleAttempt(env.session, attemptId);
+          await executor.settleAttempt(env.session);
         } catch (cause) {
           fail(cause, 'body');
         }
@@ -498,7 +498,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
               errors.push(serialize(cause, 'afterEach'));
             }
           }
-          await executor.settleAttempt(env.session, attemptId).catch((cause: unknown) => errors.push(serialize(cause, 'afterEach')));
+          await executor.settleAttempt(env.session).catch((cause: unknown) => errors.push(serialize(cause, 'afterEach')));
           publication.abort();
           await executor.realms.leave(started.realm, env.session).catch((cause: unknown) => errors.push(serialize(cause, 'afterAll')));
         } finally {

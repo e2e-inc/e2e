@@ -121,7 +121,6 @@ function makeEngine(script: ScreenScript, options: { actionTimeout?: number; bud
     session,
     budget: options.budget ?? new AttemptBudget(new AbortController().signal, new Deadline(30_000)),
     runId: 'run-1',
-    attemptId: 'attempt-1',
     actionTimeout: options.actionTimeout ?? 1_000,
     assertionTimeout: 1_000,
   });
@@ -715,6 +714,7 @@ describe('LocatorEngine visible queries', () => {
   function makeLocatorEngineOverEngine(nodes: readonly SemanticNode[] = twins) {
     const expressions: LocatorExpression[] = [];
     const session = createEngineSession({
+      attemptId: 'attempt-1',
       engine: defineEngine({
         name: 'twins',
         version: '1.0.0',
@@ -731,7 +731,6 @@ describe('LocatorEngine visible queries', () => {
       session,
       budget: new AttemptBudget(new AbortController().signal, new Deadline(30_000)),
       runId: 'run-1',
-      attemptId: 'attempt-1',
       actionTimeout: 1_000,
       assertionTimeout: 1_000,
     });
@@ -858,7 +857,6 @@ describe('locator failure candidate counts', () => {
       session,
       budget: new AttemptBudget(new AbortController().signal, new Deadline(30_000)),
       runId: 'run-1',
-      attemptId: 'attempt-1',
       actionTimeout: options.actionTimeout ?? 20,
       assertionTimeout: 1_000,
     });
@@ -989,7 +987,6 @@ describe('locator failure candidate counts', () => {
       session,
       budget: new AttemptBudget(new AbortController().signal, new Deadline(30_000)),
       runId: 'run-1',
-      attemptId: 'attempt-1',
       actionTimeout: 20,
       assertionTimeout: 1_000,
     });
@@ -1038,7 +1035,6 @@ describe('locator failure candidate counts', () => {
       session,
       budget: new AttemptBudget(controller.signal, new Deadline(30_000)),
       runId: 'run-1',
-      attemptId: 'attempt-1',
       actionTimeout: 20,
       assertionTimeout: 1_000,
     });

@@ -64,7 +64,6 @@ export interface AttemptEnvironment {
   /** The running phase's signal and deadline; read at call time, never captured. */
   readonly budget: AttemptBudget;
   readonly runId: string;
-  readonly attemptId: string;
   /** The attempt as executors see it: identity, end-of-attempt signal, scratch memory. */
   readonly attempt: ExecutorAttempt;
   readonly artifacts: ArtifactSink;
@@ -103,7 +102,6 @@ interface ScreenWiring {
   readonly session: TargetSession;
   readonly budget: AttemptBudget;
   readonly runId: string;
-  readonly attemptId: string;
   readonly config: ResolvedConfig;
   readonly steps: StepRecorder;
   readonly secrets: SecretResolver;
@@ -128,7 +126,6 @@ export function createScreenContext(wiring: ScreenWiring): ScreenContext {
     session: wiring.session,
     budget: wiring.budget,
     runId: wiring.runId,
-    attemptId: wiring.attemptId,
     actionTimeout: config.actionTimeout,
     assertionTimeout: config.assertionTimeout,
     recordEvent: (event) => steps.recordEvent(event),
@@ -161,7 +158,6 @@ export function createFixtures(environment: AttemptEnvironment): AttemptFixtures
     session: environment.session,
     budget: environment.budget,
     runId: environment.runId,
-    attemptId: environment.attemptId,
     config: environment.config,
     steps: environment.steps,
     secrets,
@@ -486,7 +482,7 @@ function fixtureContext(
   const { app } = environment.target;
   return {
     targetName: environment.target.name,
-    attemptId: environment.attemptId,
+    attemptId: environment.session.attemptId,
     fixture: (name, surface, operations) => recorder.fixture(name, surface, operations),
     app: {
       ...engineAppInfo(app),

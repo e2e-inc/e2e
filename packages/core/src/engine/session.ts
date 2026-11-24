@@ -44,6 +44,8 @@ import {
 export interface EngineSessionOptions {
   readonly engine: EngineHandle | undefined;
   readonly targetName: string;
+  /** The attempt the session runs on the engine; see `TargetSession.attemptId`. */
+  readonly attemptId: string;
   /** Whether the attempt keeps a trace; without one, no screen is taken for it, from the engine or an observation. */
   readonly traced?: boolean;
 }
@@ -337,6 +339,7 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
   };
 
   const session: TargetSession = {
+    attemptId: options.attemptId,
     verbs: declaredVerbs(engine),
     actions,
     pointerActions,

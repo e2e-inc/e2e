@@ -88,7 +88,6 @@ interface LocatorEngineOptions {
   /** The running phase's signal and deadline, read per operation. */
   readonly budget: Pick<AttemptBudget, 'signal' | 'deadline'>;
   readonly runId: string;
-  readonly attemptId: string;
   readonly actionTimeout: number;
   readonly assertionTimeout: number;
   /**
@@ -199,7 +198,7 @@ export class LocatorEngine {
       signal: this.signal,
       timeoutMs: Math.max(1, timeoutMs),
       runId: this.options.runId,
-      attemptId: this.options.attemptId,
+      attemptId: this.options.session.attemptId,
       origin: 'test',
     };
   }

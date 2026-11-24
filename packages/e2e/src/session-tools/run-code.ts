@@ -41,7 +41,7 @@ const PROGRAM_TIMEOUT_MS = 300_000;
 const FILENAME = 'run_code';
 
 /** The parts of the attempt the code's objects are built from. */
-type RunCodeAttempt = Pick<StandaloneAttempt, 'agentRuntime' | 'budget' | 'session' | 'runId' | 'attemptId'> & {
+type RunCodeAttempt = Pick<StandaloneAttempt, 'agentRuntime' | 'budget' | 'session' | 'runId'> & {
   readonly fixtures: Pick<StandaloneAttempt['fixtures'], 'app'>;
 };
 
@@ -235,7 +235,6 @@ function objects(options: RunCodeSession, attempt: RunCodeAttempt, timeout: numb
       session: attempt.session,
       budget: attempt.budget,
       runId: attempt.runId,
-      attemptId: attempt.attemptId,
       config: { ...config, actionTimeout: wait(config.actionTimeout), assertionTimeout: wait(config.assertionTimeout) },
       steps: runtime.steps,
       secrets: runtime.secrets,

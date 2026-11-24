@@ -296,12 +296,10 @@ export interface Engine {
    * again with another `attemptId` while an attempt is open. Every
    * operation, attempt callback, and fixture context carries the id its
    * attempt's `startAttempt` got, and `settleAttempt` and `endAttempt` name
-   * the attempt they are for (`EngineCleanupContext.attemptId`). An id no
-   * `startAttempt` got belongs to the first attempt open: a serial group's
-   * later tests and its suite hooks run on that attempt under ids of their
-   * own. The first attempt can end before the others do. Without it, a
-   * test that names an actor on its own target is refused before the run
-   * starts.
+   * the attempt they are for (`EngineCleanupContext.attemptId`). A call for
+   * an attempt that is not open is refused, never run on another's. The
+   * attempts end in any order. Without it, a test that names an actor on
+   * its own target is refused before the run starts.
    */
   readonly actors?: boolean;
   /** capability: state - opaque snapshot capture/restore for session reuse. */
@@ -406,7 +404,7 @@ export interface OperationContext {
   readonly timeoutMs: number;
   /** The run id. */
   readonly runId: string;
-  /** The attempt id. */
+  /** The attempt the call is for: the id its `startAttempt` got. */
   readonly attemptId: string;
   /**
    * Who asked: a test's own deterministic step, or the agent acting on a
@@ -2542,19 +2540,18 @@ Route by attempt id. It is on every `OperationContext`, on the context of
 context:
 
 ```ts
-let first: Surface | undefined;              // the first attempt open
-const others = new Map<string, Surface>();   // each attempt started while it runs
+const open = new Map<string, Surface>();     // each attempt, by the id its startAttempt got
 
-observe: (operation) => (others.get(operation.attemptId) ?? first!).observe(operation),
+observe: (operation) => of(operation.attemptId).observe(operation),
 endAttempt: async ({ attemptId }) => { /* end that attempt, and leave the others open */ },
 ```
 
-- An id you did not start belongs to the first attempt open. A serial
-  group's later tests, and its suite hooks, run there under ids of their own.
-- Refuse a call for an attempt that already ended. Do not let it reach
+- Every call carries the id its attempt's `startAttempt` got. A serial
+  group's tests, and its suite hooks, call under the group's id.
+- Refuse a call for an attempt that is not open. Do not let it reach
   another attempt.
-- The first attempt can end before the others do. It is the test's own
-  session, or an actor's when the test drives only its actors.
+- The attempts end in any order. The first one is the test's own session,
+  or an actor's when the test drives only its actors.
 
 Without `actors`, an actor on the test's own target is a collection error.
 An actor that names another target needs nothing from the engine: the

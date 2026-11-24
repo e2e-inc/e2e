@@ -29,11 +29,10 @@ function runtime(engine: EngineHandle, overrides: Partial<E2EConfig> = {}) {
   const { fixtures } = createFixtures({
     config,
     target: config.targets[0]!,
-    session: createEngineSession({ engine, targetName: 'fake' }),
+    session: createEngineSession({ attemptId: 'attempt', engine, targetName: 'fake' }),
     steps,
     budget: new AttemptBudget(signal, new Deadline(10_000)),
     runId: 'run',
-    attemptId: 'attempt',
     attempt: { testId: 'test', attemptId: 'attempt', titlePath: [], index: 0, signal, memory: new Map() },
     artifacts: { dir: '/tmp', register: () => 'artifact', link: () => 'artifact' },
     priorSteps: () => steps.completed(),

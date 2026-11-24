@@ -226,6 +226,8 @@ export function createFakeEngine(behavior: FakeEngineBehavior = {}): FakeEngineH
   const restoredStates: EngineState[] = [];
   const fixtureCalls: string[] = [];
   const scenes = new Map<string, Scene>();
+  /** The ids of the attempts open now: a call of the harness carries one of them. */
+  const open = new Set<string>();
   let openAttempts = 0;
   let attemptsStarted = 0;
   let attemptsEnded = 0;
@@ -234,6 +236,8 @@ export function createFakeEngine(behavior: FakeEngineBehavior = {}): FakeEngineH
   let current = -1;
 
   function record(method: string, operation: OperationContext): void {
+    // The harness names the attempt a call is for by the id its startAttempt got, a serial group's tests included.
+    if (open.size > 0 && !open.has(operation.attemptId)) throw new Error(`${method} was called for attempt ${operation.attemptId}, which is not open`);
     operations.push({
       method,
       attemptIndex: current,
@@ -264,7 +268,7 @@ export function createFakeEngine(behavior: FakeEngineBehavior = {}): FakeEngineH
   const videoStartedAt = new Map<string, string>();
   /** The artifact directory of the attempt an operation belongs to. */
   const artifactsDirOf = (operation: OperationContext): string | undefined =>
-    (attempts.find((attempt) => attempt.attemptId === operation.attemptId) ?? attempts[current])?.artifactsDir;
+    attempts.find((attempt) => attempt.attemptId === operation.attemptId)?.artifactsDir;
 
   const engine = defineEngine({
     name: behavior.name ?? 'fake',
@@ -284,6 +288,7 @@ export function createFakeEngine(behavior: FakeEngineBehavior = {}): FakeEngineH
       maxConcurrentAttempts = Math.max(maxConcurrentAttempts, openAttempts);
       events.push(`startAttempt:${index}`);
       attempts.push(context);
+      open.add(context.attemptId);
       if (behavior.scene !== undefined) scenes.set(context.attemptId, createScene(behavior.scene, location));
       await behavior.onStartAttempt?.(context, index);
     },
@@ -304,6 +309,7 @@ export function createFakeEngine(behavior: FakeEngineBehavior = {}): FakeEngineH
       events.push(`endAttempt:${index}`);
       const attemptId = attempts[index]?.attemptId;
       if (attemptId !== undefined) {
+        open.delete(attemptId);
         scenes.get(attemptId)?.dispose();
         scenes.delete(attemptId);
       }

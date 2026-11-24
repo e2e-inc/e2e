@@ -72,7 +72,6 @@ export interface RestoredState {
 
 /** What closing an attempt's session needs besides its verdict: the video it started. */
 export interface SessionClose {
-  readonly attemptId: string;
   readonly video: VideoRecording | undefined;
 }
 
@@ -101,9 +100,9 @@ export class EngineSessions {
     return this.options.config;
   }
 
-  /** Builds one engine operation context. */
-  protected op(attemptId: string, timeoutMs: number, signal: AbortSignal): OperationContext {
-    return { signal, timeoutMs, runId: this.options.runId, attemptId, origin: 'test' };
+  /** Builds one engine operation context on `session`, under the id of the attempt it runs on the engine. */
+  op(session: TargetSession, timeoutMs: number, signal: AbortSignal): OperationContext {
+    return { signal, timeoutMs, runId: this.options.runId, attemptId: session.attemptId, origin: 'test' };
   }
 
   /** Run-level errors recorded so far, in order. */
@@ -214,11 +213,11 @@ export class EngineSessions {
       );
     }
     const { video } = plan.recordings;
-    const session = createEngineSession({ engine, targetName: this.target.name, traced: plan.recordings.trace !== undefined });
+    const session = createEngineSession({ engine, targetName: this.target.name, attemptId, traced: plan.recordings.trace !== undefined });
     const launch = <T>(label: string, run: (launchSignal: AbortSignal) => Promise<T>) =>
       this.lifecycle(label, this.config.launchTimeout, 'LAUNCH_TIMEOUT', signal, run);
     const launchOp = (launchSignal: AbortSignal) =>
-      this.op(attemptId, this.config.launchTimeout, launchSignal);
+      this.op(session, this.config.launchTimeout, launchSignal);
     try {
       const startAttempt = engine?.startAttempt?.bind(engine);
       if (startAttempt !== undefined) {
@@ -260,7 +259,7 @@ export class EngineSessions {
       // The attempt's isolation is open, or a timed-out startAttempt may still
       // open it: end it within the cleanup budget, or the retry opens a second
       // one. An engine without startAttempt makes this a no-op.
-      await this.endAttempt(session, attemptId).catch(() => undefined);
+      await this.endAttempt(session).catch(() => undefined);
       throw cause;
     }
     return session;
@@ -295,23 +294,23 @@ export class EngineSessions {
    * The error is the test's, thrown as it was so `classifyError` keeps its
    * code: `lifecycle` would name every non-engine error an engine failure.
    */
-  settleAttempt(session: TargetSession, attemptId: string): Promise<void> {
+  settleAttempt(session: TargetSession): Promise<void> {
     return withScopedBudget(
       this.config.cleanupTimeout,
       this.interruptSignal,
       () => new InfrastructureError('CLEANUP_TIMEOUT', 'settling the attempt timed out'),
-      (signal) => session.settle(this.op(attemptId, this.config.cleanupTimeout, signal)),
+      (signal) => session.settle(this.op(session, this.config.cleanupTimeout, signal)),
     );
   }
 
   /** Ends one attempt's isolation within the cleanup budget; the session's secrets are its own again from here. */
-  private endAttempt(session: TargetSession, attemptId: string): Promise<void> {
+  private endAttempt(session: TargetSession): Promise<void> {
     return this.lifecycle(
       'ending the attempt',
       this.config.cleanupTimeout,
       'CLEANUP_TIMEOUT',
       NEVER_ABORTS,
-      (signal) => session.close(this.op(attemptId, this.config.cleanupTimeout, signal)),
+      (signal) => session.close(this.op(session, this.config.cleanupTimeout, signal)),
     ).finally(() => releaseSessionLedger(session));
   }
 
@@ -327,11 +326,11 @@ export class EngineSessions {
     artifactSink: ArtifactSink,
     secondaryErrors: SerializedError[],
   ): Promise<void> {
-    const { attemptId, video } = close;
-    await this.stopRunningRecording(session, attemptId, record, artifactSink, secondaryErrors);
+    const { video } = close;
+    await this.stopRunningRecording(session, record, artifactSink, secondaryErrors);
     if (session.artifacts.stopVideo !== undefined && video !== undefined) {
       const recordings = sessionRecordings(session, this.target.name);
-      await this.stopVideo(video, attemptId, record, secondaryErrors, async (operation) => {
+      await this.stopVideo(session, video, record, secondaryErrors, async (operation) => {
         const segments = await recordings.stopAttemptVideo(operation);
         // Recorded so a failure could be looked at; a pass has nothing to show.
         if (!keeps(video.keep, record.status)) {
@@ -344,7 +343,7 @@ export class EngineSessions {
       });
     }
     try {
-      await this.debug.time('session.close', () => this.endAttempt(session, attemptId));
+      await this.debug.time('session.close', () => this.endAttempt(session));
     } catch (cause) {
       record.cleanup = 'failed';
       secondaryErrors.push(serializeError(classifyError(cause), { phase: 'cleanup' }));
@@ -358,7 +357,6 @@ export class EngineSessions {
    */
   protected async stopRunningRecording(
     session: TargetSession,
-    attemptId: string,
     record: ClosingRecord,
     artifactSink: ArtifactSink,
     secondaryErrors: SerializedError[],
@@ -371,7 +369,7 @@ export class EngineSessions {
         this.config.cleanupTimeout,
         'CLEANUP_TIMEOUT',
         NEVER_ABORTS,
-        (signal) => recordings.stopSpan(this.op(attemptId, this.config.cleanupTimeout, signal), artifactSink),
+        (signal) => recordings.stopSpan(this.op(session, this.config.cleanupTimeout, signal), artifactSink),
       );
     } catch (cause) {
       record.cleanup = 'failed';
@@ -385,8 +383,8 @@ export class EngineSessions {
    * must show; a best-effort one fails quietly.
    */
   private async stopVideo(
+    session: TargetSession,
     recording: VideoRecording,
-    attemptId: string,
     record: ClosingRecord,
     secondaryErrors: SerializedError[],
     stop: (operation: OperationContext) => Promise<void>,
@@ -397,7 +395,7 @@ export class EngineSessions {
         this.config.cleanupTimeout,
         'CLEANUP_TIMEOUT',
         NEVER_ABORTS,
-        (signal) => stop(this.op(attemptId, this.config.cleanupTimeout, signal)),
+        (signal) => stop(this.op(session, this.config.cleanupTimeout, signal)),
       );
     } catch (cause) {
       if (recording.policy !== 'required') return;

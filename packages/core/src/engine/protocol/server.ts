@@ -304,10 +304,8 @@ class EngineServer {
       controller = new AbortController();
       this.#signals.set(wire.id, controller);
     }
-    // Every attempt that uses the signal keeps it, not only the first to send it. A serial group's tests send
-    // ids of their own on the one attempt open, which keeps their signals.
-    const owner = attemptId !== undefined && this.#attempts.has(attemptId) ? attemptId : this.#onlyAttempt();
-    if (owner !== undefined) this.#attempts.get(owner)?.signals.add(wire.id);
+    // Every attempt that uses the signal keeps it, not only the first to send it.
+    if (attemptId !== undefined) this.#attempts.get(attemptId)?.signals.add(wire.id);
     return controller.signal;
   }
 }

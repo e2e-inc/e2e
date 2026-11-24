@@ -337,13 +337,13 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
   }
 
   /** The test's own screen as the evidence of a failure, when its session is open; `ownStep` is whether the failed step ran there. */
-  private ownEvidence(session: TargetSession | null, attemptId: string, ownStep: boolean): FailureScreen | undefined {
+  private ownEvidence(session: TargetSession | null, ownStep: boolean): FailureScreen | undefined {
     if (session === null) return undefined;
     const appBase = this.target.app.base;
     return {
       session, ownStep, appBase, appOrigin: appBase?.origin,
       ledger: sessionLedger(session, this.config.allSecrets),
-      operation: (signal, timeoutMs) => this.op(attemptId, timeoutMs, signal),
+      operation: (signal, timeoutMs) => this.op(session, timeoutMs, signal),
     };
   }
 
@@ -653,7 +653,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       // What the failure is about: the step a timeout cut, else the last one that failed.
       const failed = (timedOut ? steps.running().at(-1) : undefined) ?? steps.all().findLast((step) => step.status !== 'passed');
       // The screen of the session that step ran on: an actor's for its step, else the test's own.
-      const screen = (failed?.actor === undefined ? undefined : actors?.evidenceOf(failed.actor)) ?? this.ownEvidence(openSession, attemptId, isOwnStep(failed ?? {}));
+      const screen = (failed?.actor === undefined ? undefined : actors?.evidenceOf(failed.actor)) ?? this.ownEvidence(openSession, isOwnStep(failed ?? {}));
       if (screen === undefined) return;
       evidenceTried = true;
       const evidence = await captureFailureEvidence({
@@ -751,7 +751,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
                 );
               }
               const signal = budget.signal;
-              const state = await session.captureState(this.op(attemptId, this.config.actionTimeout, signal));
+              const state = await session.captureState(this.op(session, this.config.actionTimeout, signal));
               if (signal.aborted) throw abortError(signal, cancelledError);
               context.staging.stage(
                 name,
@@ -766,7 +766,6 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         steps,
         budget,
         runId: this.options.runId,
-        attemptId,
         attempt,
         artifacts: artifacts.sink,
         priorSteps,
@@ -815,7 +814,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
             },
             tools,
           ),
-          readScreen: (signal: AbortSignal) => readHeldScreen(session, this.op(attemptId, this.config.actionTimeout, signal), screens),
+          readScreen: (signal: AbortSignal) => readHeldScreen(session, this.op(session, this.config.actionTimeout, signal), screens),
         });
       }
       // `expect.poll` and `expect.soft` take no fixture, so the attempt they
@@ -987,7 +986,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       // next attempt's surprise. Evidence is taken now, before a teardown
       // navigates away from the page the callback saw.
       try {
-        if (session !== undefined) await this.settleAttempt(session, attemptId);
+        if (session !== undefined) await this.settleAttempt(session);
       } catch (cause) {
         recordFailure(cause, 'body');
         await captureEvidence();
@@ -1010,7 +1009,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
           recordFailure(cause, 'afterEach');
         }
       }
-      if (session !== undefined) await this.settleAttempt(session, attemptId).catch((cause: unknown) => recordFailure(cause, 'afterEach'));
+      if (session !== undefined) await this.settleAttempt(session).catch((cause: unknown) => recordFailure(cause, 'afterEach'));
       for (const cause of (await actors?.lateFailures()) ?? []) recordFailure(cause, 'afterEach');
     } catch (cause) {
       recordFailure(cause, phase);
@@ -1050,10 +1049,10 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       actors?.holdSecrets(openSession);
       // A serial member's recording ends with the member, not the group.
       if (openSession !== null && shared !== undefined) {
-        await this.stopRunningRecording(openSession, attemptId, record, artifacts.sink, secondaryErrors);
+        await this.stopRunningRecording(openSession, record, artifacts.sink, secondaryErrors);
       }
       if (openSession !== null && shared === undefined) {
-        await this.closeSession(openSession, { attemptId, video }, record, artifacts.sink, secondaryErrors);
+        await this.closeSession(openSession, { video }, record, artifacts.sink, secondaryErrors);
       }
       if (openSession !== null) {
         const environment = openSession.environment.read(redact);

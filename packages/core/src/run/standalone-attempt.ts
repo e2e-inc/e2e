@@ -232,7 +232,7 @@ export async function launchAttempt<Sessions extends EngineSessions, Extra>(
   session = await executor.launchSession({ session: options.state, recordings: { trace: undefined, video } }, attemptId, artifacts.dir, attemptSignal);
   const opened = session;
   const closeOpened = (record: ClosingRecord): Promise<void> =>
-    executor.closeSession(opened, { attemptId, video }, record, artifacts.sink, attemptErrors);
+    executor.closeSession(opened, { video }, record, artifacts.sink, attemptErrors);
   if (attemptSignal.aborted) {
     await closeOpened({ status: 'interrupted', cleanup: 'complete' });
     throw new InfrastructureError('CANCELLED', 'opening the e2e session was cancelled');
@@ -242,7 +242,7 @@ export async function launchAttempt<Sessions extends EngineSessions, Extra>(
   budget.enter(attemptSignal, options.timeoutMs);
   const attempt: ExecutorAttempt = { testId: identity.testId, attemptId, titlePath: [], index: 0, signal: end.signal, memory: new Map<string, unknown>() };
   const base = {
-    config, target, session: opened, steps, runId, attemptId, attempt, artifacts: artifacts.sink,
+    config, target, session: opened, steps, runId, attempt, artifacts: artifacts.sink,
     priorSteps: () => steps.completed(), agent: options.agent, saveSession: undefined,
     models: new WorkerModels((error) => recordFailure(error, 'body')), debug: worker.debug,
   };
@@ -306,7 +306,7 @@ export async function launchAttempt<Sessions extends EngineSessions, Extra>(
       } catch (cause) { recordFailure(cause, 'cleanup'); }
       try {
         // Settling runs under the worker's signal; an interrupted host still ends its attempt below.
-        if (!worker.signal.aborted) await executor.settleAttempt(opened, attemptId);
+        if (!worker.signal.aborted) await executor.settleAttempt(opened);
       } catch (cause) { recordFailure(cause, 'body'); }
       const record: ClosingRecord = { status: verdict().status, cleanup: 'complete' };
       try {

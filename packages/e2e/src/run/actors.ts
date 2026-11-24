@@ -214,13 +214,13 @@ export class AttemptActors {
   evidenceOf(name: string): FailureScreen | undefined {
     const open = [...this.opened.values()].find((each) => each.actor.name === name);
     if (open === undefined || open.closed()) return undefined;
-    const { session, attemptId } = open.attempt;
+    const { session } = open.attempt;
     const appBase = open.actor.target.app.base;
     return {
       session, ownStep: true, appBase, appOrigin: appBase?.origin,
       actor: { name, dir: path.join(...actorSegments(name)) },
       ledger: sessionLedger(session, this.options.config.allSecrets),
-      operation: (signal, timeoutMs) => ({ signal, timeoutMs, runId: this.options.runId, attemptId, origin: 'test' }),
+      operation: (signal, timeoutMs) => open.sessions.op(session, timeoutMs, signal),
     };
   }
 
@@ -247,7 +247,7 @@ export class AttemptActors {
       // A closed actor's attempt has ended on the engine: nothing of it is left to collect.
       if (closed()) continue;
       try {
-        await sessions.settleAttempt(attempt.session, attempt.attemptId);
+        await sessions.settleAttempt(attempt.session);
       } catch (cause) {
         const error = classifyError(cause);
         failures.push(new E2EError(error.category, error.code, `actor "${actor.name}": ${error.message}`, { cause, retryable: error.retryable }));

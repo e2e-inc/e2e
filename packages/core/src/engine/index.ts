@@ -709,12 +709,10 @@ export interface Engine {
    * again with another `attemptId` while an attempt is open. Every
    * operation, attempt callback, and fixture context carries the id its
    * attempt's `startAttempt` got, and `settleAttempt` and `endAttempt` name
-   * the attempt they are for (`EngineCleanupContext.attemptId`). An id no
-   * `startAttempt` got belongs to the first attempt open: a serial group's
-   * later tests and its suite hooks run on that attempt under ids of their
-   * own. The first attempt can end before the others do. Without it, a
-   * test that names an actor on its own target is refused before the run
-   * starts.
+   * the attempt they are for (`EngineCleanupContext.attemptId`). A call for
+   * an attempt that is not open is refused, never run on another's. The
+   * attempts end in any order. Without it, a test that names an actor on
+   * its own target is refused before the run starts.
    */
   readonly actors?: boolean;
   /** capability: state - opaque snapshot capture/restore for session reuse. */

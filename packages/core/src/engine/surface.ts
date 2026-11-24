@@ -190,6 +190,8 @@ export interface EnvironmentFacts {
 }
 
 export interface TargetSession {
+  /** The attempt the session runs on the engine: the id its `startAttempt` got, which every operation on it carries. */
+  readonly attemptId: string;
   /** Grammar verbs the engine can honor, derived from its declared action kinds and hooks. */
   readonly verbs: ReadonlySet<GrammarVerb>;
   /** Action kinds the engine declared for `perform`; empty without the actions capability. */

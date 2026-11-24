@@ -88,14 +88,14 @@ describe('two attempts at once on one web engine', () => {
     expect(await heading(engine, 'test')).toBe('Hello nobody');
     expect(surfaceOf(engine)!.context().browser()!.contexts()).toHaveLength(1);
     // A call still on its way to the ended actor fails, and never lands on the test's own page.
-    await expect(async () => engine.observe!(operation('actor'))).rejects.toThrow(/the attempt this call belongs to has ended/);
+    await expect(async () => engine.observe!(operation('actor'))).rejects.toThrow(/the attempt this call belongs to is not running/);
     await engine.endAttempt!({ signal, timeoutMs: 5_000, attemptId: 'test' });
-    await expect(async () => engine.observe!(operation('test'))).rejects.toThrow(/the attempt this call belongs to has ended/);
+    await expect(engine.observe!(operation('test'))).rejects.toThrow(/no attempt is running/);
     // Nor on the page of the test that runs next.
     await start(engine, 'next');
     await engine.session!.open!(`${origin}/`, operation('next'));
-    await expect(async () => engine.session!.open!(`${origin}/?late`, operation('actor'))).rejects.toThrow(/the attempt this call belongs to has ended/);
-    await expect(async () => engine.session!.open!(`${origin}/?late`, operation('test'))).rejects.toThrow(/the attempt this call belongs to has ended/);
+    await expect(async () => engine.session!.open!(`${origin}/?late`, operation('actor'))).rejects.toThrow(/the attempt this call belongs to is not running/);
+    await expect(async () => engine.session!.open!(`${origin}/?late`, operation('test'))).rejects.toThrow(/the attempt this call belongs to is not running/);
     expect(await heading(engine, 'next')).toBe('Hello nobody');
     await engine.endAttempt!({ signal, timeoutMs: 5_000, attemptId: 'next' });
   });
@@ -109,13 +109,13 @@ describe('two attempts at once on one web engine', () => {
 
     // The first ends while the second runs: a call still on its way to it never lands on the second's page.
     await engine.endAttempt!({ signal, timeoutMs: 5_000, attemptId: 'author' });
-    await expect(async () => engine.observe!(operation('author'))).rejects.toThrow(/the attempt this call belongs to has ended/);
+    await expect(async () => engine.observe!(operation('author'))).rejects.toThrow(/the attempt this call belongs to is not running/);
     expect(await heading(engine, 'reviewer')).toBe('Hello nobody');
 
     // Nor on the page of the next test, whose first attempt takes the surface while the second of this one is still open.
     await start(engine, 'next-author');
     await engine.session!.open!(`${origin}/`, operation('next-author'));
-    await expect(async () => engine.session!.open!(`${origin}/?late`, operation('author'))).rejects.toThrow(/the attempt this call belongs to has ended/);
+    await expect(async () => engine.session!.open!(`${origin}/?late`, operation('author'))).rejects.toThrow(/the attempt this call belongs to is not running/);
     expect(await heading(engine, 'next-author')).toBe('Hello nobody');
     expect(surfaceOf(engine)!.context().browser()!.contexts()).toHaveLength(2);
     await engine.endAttempt!({ signal, timeoutMs: 5_000, attemptId: 'reviewer' });

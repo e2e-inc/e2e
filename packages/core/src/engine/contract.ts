@@ -40,7 +40,7 @@ export interface OperationContext {
   readonly timeoutMs: number;
   /** The run id. */
   readonly runId: string;
-  /** The attempt id. */
+  /** The attempt the call is for: the id its `startAttempt` got. */
   readonly attemptId: string;
   /**
    * Who asked: a test's own deterministic step, or the agent acting on a

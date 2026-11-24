@@ -427,8 +427,7 @@ class EngineClient {
    * by the client.
    */
   async #screenshot(result: ScreenshotResult, label: string | undefined, attemptId: string | undefined): Promise<string> {
-    // A serial group's later tests call under ids of their own on the one attempt open.
-    const open = (attemptId === undefined ? undefined : this.#attempts.get(attemptId)) ?? (this.#attempts.size === 1 ? this.#attempts.values().next().value : undefined);
+    const open = attemptId === undefined ? undefined : this.#attempts.get(attemptId);
     const attempt = open?.context;
     if ('path' in result) {
       if (attempt !== undefined && (path.isAbsolute(result.path) || relativeToProjectRoot(attempt.artifactsDir, path.resolve(attempt.artifactsDir, result.path)) === undefined)) {
