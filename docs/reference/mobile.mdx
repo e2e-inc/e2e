@@ -394,9 +394,8 @@ export default {
   replaces the map; name permissions instead to deny or reset one.
   - On Android: each runtime permission the app's manifest declares, and app
     ops such as `SYSTEM_ALERT_WINDOW`. Permissions that are not grantable at
-    run time, such as `INTERNET`, are skipped. An app that declares no
-    permissions fails to launch with `'all'` (`ENGINE_FAILURE`, "Could not
-    read declared permissions"), so leave `permissions` unset for it.
+    run time, such as `INTERNET`, are skipped, so an app that declares none
+    launches with nothing changed.
   - On an iOS simulator: each privacy service the runtime can set, with
     location `always`. The simulator refuses notifications, so accept that
     prompt with `device.alert('accept')`.
@@ -1430,9 +1429,9 @@ export type PermissionState = 'grant' | 'deny' | 'reset';
  * Permissions an app holds when it launches, by name, or `'all'` to grant
  * every one the platform can. On Android that is each runtime permission
  * (and app op such as SYSTEM_ALERT_WINDOW) the app declares; the rest are
- * skipped, and an app that declares none fails to launch with `'all'`. On an
- * iOS simulator it is each privacy service the runtime can set, location
- * `always` included. The simulator refuses to set notifications.
+ * skipped. On an iOS simulator it is each privacy service the runtime can
+ * set, location `always` included. The simulator refuses to set
+ * notifications.
  */
 export type LaunchPermissions = Readonly<Partial<Record<DevicePermission, PermissionState>>> | 'all';
 ```

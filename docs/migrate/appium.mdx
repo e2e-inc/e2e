@@ -50,7 +50,7 @@ For a migration that spans several sessions, the [`migrate-to-e2e` skill](/codin
 | `appium:bundleId`, `appium:appPackage` | `app: { bundleId }`, the app `app.open()` launches |
 | `appium:processArguments`, `appium:optionalIntentArguments` | `app.launchArguments`, a list of strings or an object of argument name to value |
 | `appium:permissions` | `app.permissions: { camera: 'grant' }`. Each [`DevicePermission`](/reference/mobile#device-fixture) name takes `grant`, `deny`, or `reset` |
-| `appium:autoGrantPermissions` (Android) | `app.permissions: 'all'`, which grants every runtime permission the app declares. An app that declares none fails to launch with it |
+| `appium:autoGrantPermissions` (Android) | `app.permissions: 'all'`, which grants every runtime permission the app declares |
 | `appium:noReset` | `true` is the default, so nothing clears the app's data. For `false`, call `app.clearState()` at the start of the test |
 | `appium:fullReset` | `device.installApp(path, { reinstall: true })` |
 | `appium:newCommandTimeout`, WebDriverAgent timeouts | Not needed. Actions use `actionTimeout`, assertions `assertionTimeout`, and tests `timeout` |

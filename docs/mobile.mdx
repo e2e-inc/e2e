@@ -93,9 +93,8 @@ app: {
 - `permissions: 'all'` grants every permission the platform can set: each
   runtime permission the app declares on Android, and each privacy service
   the runtime can set on an iOS simulator, with location `always`. Android
-  skips permissions it grants at install, such as `INTERNET`, and an Android
-  app that declares no permissions fails to launch with `'all'`. The
-  simulator refuses to set notifications, so accept that prompt with
+  skips permissions it grants at install, such as `INTERNET`. The simulator
+  refuses to set notifications, so accept that prompt with
   `device.alert('accept')`.
 - The warm-up before the run passes neither, so start each test with
   `app.open()`.
