@@ -34,8 +34,8 @@
  * and head read the same bytes.
  *
  * `jitless`, the default, counts the interpreter only, which also
- * interprets regexps. It is the mode to compare in: two builds of the same
- * commit landed within 0.12% of each other in every case. `jit` keeps V8's
+ * interprets regexps. It is the mode to compare in: in CI, the trials of
+ * one commit spread at most 0.17% in every case. `jit` keeps V8's
  * compilers and makes them as deterministic as V8 allows (`--predictable`
  * compiles on the main thread and runs GC single-threaded, plus the seeds,
  * `--single-threaded`, and `--predictable-gc-schedule`), but V8 still makes

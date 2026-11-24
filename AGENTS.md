@@ -690,7 +690,7 @@ pnpm microbench --tool time --case redact                      # local smoke run
   same length: a different length moved one case by a fixed 0.075% between
   builds of the same code, and the harness warns about it.
 - The default mode, `jitless`, counts the interpreter only, regexps
-  included; two builds of the same commit land within 0.12% of each other.
+  included; in CI, the trials of one commit spread at most 0.17% per case.
   `--mode jit` keeps V8's compilers under `--predictable`,
   `--single-threaded`, `--predictable-gc-schedule`, and fixed seeds, but V8
   still optimizes differently in some processes and its trials cluster up
