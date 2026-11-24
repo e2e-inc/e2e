@@ -5,7 +5,7 @@
  */
 
 import { z } from 'zod';
-import { json, junit, line, list as listReporter, markdown } from '../../src/reporters.ts';
+import { ctrf, json, junit, line, list as listReporter, markdown } from '../../src/reporters.ts';
 import {
   credentials,
   expect,
@@ -17,6 +17,8 @@ import {
   type ActionEvent,
   type ActionName,
   type Agent,
+  type APIRequest,
+  type WebResponse,
   type App,
   type ArtifactStore,
   type AsyncExpectation,
@@ -60,8 +62,9 @@ import {
   beforeAll,
   beforeEach,
   describe,
+  foldLastRun,
 } from '../../src/index.ts';
-import type { Engine, EngineAttemptContext, EngineCleanupContext, EngineDisposeContext, EngineFixtureContext, EngineHandle, EngineObserveOptions, EngineSnapshot } from '../../src/engine/index.ts';
+import type { Engine, EngineAppInfo, EngineAttemptContext, EngineCleanupContext, EngineDisposeContext, EngineFixtureContext, EngineHandle, EngineObserveOptions, EngineSnapshot } from '../../src/engine/index.ts';
 import {
   BASE_RULES,
   createGrammarTools,
@@ -246,6 +249,20 @@ customExecutorObservation.keyboardVisible satisfies boolean | undefined;
 ({ targets: [{ engine, app: { bundleId: 'dev.shop.app', permissions: { camera: 'allow' } } }] }) satisfies E2EConfig;
 // @ts-expect-error launch arguments are the strings the launch command takes
 ({ targets: [{ engine, app: { bundleId: 'dev.shop.app', launchArguments: [1] } }] }) satisfies E2EConfig;
+// An object value is a string, number, boolean, or list of strings, or undefined straight from the environment.
+declare const tokenFromEnv: string | undefined;
+({
+  targets: [{ engine, app: { bundleId: 'dev.shop.app', launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', e2e: true, retries: 3, token: tokenFromEnv } } }],
+}) satisfies E2EConfig;
+// @ts-expect-error an object value is flat: no nested object
+({ targets: [{ engine, app: { bundleId: 'dev.shop.app', launchArguments: { locale: { language: 'fr' } } } }] }) satisfies E2EConfig;
+// @ts-expect-error a list value holds strings only
+({ targets: [{ engine, app: { bundleId: 'dev.shop.app', launchArguments: { languages: [1] } } }] }) satisfies E2EConfig;
+// An engine that predates the object form spreads `launchArguments`; the object arrives in `launchArgumentValues` only.
+declare const engineApp: EngineAppInfo;
+[...(engineApp.launchArguments ?? [])] satisfies string[];
+engineApp.launchArgumentValues?.['AppleLanguages'] satisfies string | number | boolean | readonly string[] | undefined;
+
 // @ts-expect-error the app URL is the target's app.url, not a key of the target itself
 ({ targets: [{ engine, url: 'http://localhost:3000' }] }) satisfies E2EConfig;
 // @ts-expect-error an engine only drives the app: the target declares it
@@ -384,6 +401,9 @@ if (runEvent.type === 'step') {
 ({ targets, reporters: [listReporter(), json(), junit({ outputFile: 'reports/junit.xml' }), markdown(), 'junit', reporter] }) satisfies E2EConfig;
 // @ts-expect-error the junit reporter takes an outputFile, nothing else
 junit({ output: 'reports' });
+({ targets, reporters: ['ctrf', ctrf(), ctrf({ outputFile: 'reports/ctrf.json' })] }) satisfies E2EConfig;
+// @ts-expect-error the ctrf reporter takes an outputFile, nothing else
+ctrf({ output: 'reports' });
 ({
   name: 'dots',
   interactive: true,
@@ -477,6 +497,11 @@ declare const finishedRun: FinishedRun;
 finishedRun.status satisfies RunStatus;
 finishedRun.exitCode satisfies RunExitCode;
 finishedRun.lastRun satisfies FinishedRun['report'] | undefined;
+// A reporter folds a --last-failed rerun into the runs before it the way the runner does.
+foldLastRun(finishedRun.report, finishedRun.lastRun ?? finishedRun.report) satisfies Report;
+finishedRun.report.run.shard?.index satisfies number | undefined;
+// @ts-expect-error the shard marker is set or absent, never false
+({ cause: 'filtered', reason: 'outside the shard', otherShard: false }) satisfies NonNullable<Report['run']['results'][number]['skip']>;
 // @ts-expect-error the run status is a closed union
 'skipped' satisfies RunStatus;
 // @ts-expect-error the exit codes are the closed set a run ends with
@@ -786,6 +811,11 @@ void screen.getByLabel('Plan').selectOption({ value: 'pro' });
 void screen.getByLabel('Plan').selectOption({ value: 'pro', index: 1 });
 // @ts-expect-error role queries never match hidden nodes; visible is the one visibility knob
 screen.getByRole('button', { hidden: true });
+
+// A locator's screenshot is a file path under a label, as app.screenshot's is.
+void (screen.getByTestId('summary').screenshot('summary') satisfies Promise<string>);
+// @ts-expect-error the file goes with the attempt's artifacts; there is no path option.
+void screen.getByTestId('summary').screenshot({ path: 'summary.png' });
 
 // Coordinate input: a viewport point on screen, a node-relative one on a locator.
 declare const point: import('../../src/index.ts').Point;
@@ -1213,6 +1243,37 @@ void (expect(await readBody()).toMatchSchema(userSchema) satisfies { id: number 
 void (expect.soft(await readBody()).toMatchSchema(userSchema) satisfies { id: number } | undefined);
 void (expect(JSON.parse('{}')).toMatchSchema(userSchema) satisfies { id: number });
 void (expect.soft(JSON.parse('{}')).toMatchSchema(userSchema) satisfies { id: number } | undefined);
+
+// request: each call returns the WebResponse waitForResponse and route.fetch() return.
+test('request', async ({ request }) => {
+  void (request satisfies APIRequest);
+  const created = await request.post('/api/orders', { json: { sku: 'A1' }, headers: { authorization: 'Bearer t' } });
+  void (created satisfies WebResponse);
+  void (created.status satisfies number);
+  void ((await created.body()) satisfies Buffer);
+  // @ts-expect-error json() is unknown unless the caller names a type
+  void (await created.json()).id;
+  void ((await created.json<{ id: number }>()).id satisfies number);
+  void (expect(await created.json()).toMatchSchema(userSchema) satisfies { id: number });
+  expect(created.status).toBe(201);
+  await request.fetch('/api/orders', { method: 'PUT', body: 'raw' });
+  await request.get('/api/export', { timeout: 0 });
+  await request.get('/api/login', { redirect: 'manual' });
+  await request.get('/api/login', { redirect: 'follow' });
+  await request.get('/api/login', { redirect: 'error' });
+  // @ts-expect-error redirect accepts only follow, manual, or error
+  await request.get('/api/login', { redirect: 'none' });
+  // @ts-expect-error a timeout is milliseconds, not a string
+  await request.get('/api/export', { timeout: '45s' });
+  // @ts-expect-error the method goes in request.fetch's options, not a shorthand's
+  await request.get('/api/orders', { method: 'POST' });
+  // @ts-expect-error a body is a string; an object goes in json
+  await request.post('/api/orders', { body: { sku: 'A1' } });
+});
+// @ts-expect-error a project fixture typed as its own `request` conflicts with the built-in one
+test.extend<{ request: { hello(): string } }>({ request: async ({}, use) => { await use({ hello: () => 'mine' }); } });
+// @ts-expect-error request is a test fixture, so a worker fixture cannot name it
+test.extend<{}, { seeded: number }>({ seeded: [async ({ request }, use) => { void request; await use(1); }, { scope: 'worker' }] });
 // @ts-expect-error A function isn't inferred from a return-only generic.
 void expect(await readBody()).toPass();
 
