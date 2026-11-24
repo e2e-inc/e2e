@@ -19,7 +19,8 @@ app: { url: process.env.APP_URL ?? 'http://localhost:3000' },
 ```
 
 A URL without a scheme uses HTTPS, or HTTP for a loopback host. Plain HTTP
-works only on a loopback host.
+works only on a loopback host. A `file:` URL opens
+[one file from disk](/reference/config#a-file-as-the-app), with no server.
 
 ### Let the runner start it
 
@@ -188,6 +189,19 @@ Every retry starts at the target's size.
 - Targets that declare the same `app.command` share one dev server.
 - A device target can sit in the same list. See the
   [Mobile engine reference](/reference/mobile).
+
+### High-density screens
+
+`deviceScaleFactor` sets how many device pixels draw one CSS pixel. At 2 the
+page renders as on a Retina display, and saved screenshots are twice the
+viewport's size on each side:
+
+```ts title="Target fragment"
+{ name: 'retina', engine: web({ deviceScaleFactor: 2 }), app }
+```
+
+The factor does not change the image the model reads or the one
+`toHaveScreenshot` compares.
 
 ### Fill the window
 

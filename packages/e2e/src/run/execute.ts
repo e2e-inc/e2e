@@ -647,6 +647,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         ledger: sessionLedger(openSession, this.config.allSecrets),
         config: this.config,
         appOrigin: this.target.app.base?.origin,
+        appBase: this.target.app.base,
         artifacts: artifacts.sink,
         operation: (signal, timeoutMs) => this.op(attemptId, timeoutMs, signal),
         interrupt: this.interruptSignal,
@@ -713,6 +714,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
             ledger: sessionLedger(session, this.config.allSecrets),
             maxBytes: this.config.limits.maxObservationBytes,
             appOrigin: this.target.app.base?.origin,
+            appBase: this.target.app.base,
           }),
         );
       });
@@ -780,6 +782,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
           ledger: sessionLedger(session, this.config.allSecrets),
           maxBytes: this.config.limits.maxObservationBytes,
           appOrigin: this.target.app.base?.origin,
+          appBase: this.target.app.base,
         };
 
         holds = holdAttemptSteps({
