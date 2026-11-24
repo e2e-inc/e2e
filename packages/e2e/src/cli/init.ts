@@ -51,7 +51,7 @@ import {
   type CiTarget,
 } from './init/ci.ts';
 import { MCP_LOCATIONS, type CiChoice } from './init/choices.ts';
-import { configDependencies } from './init/config-dependencies.ts';
+import { missingConfigDependencies } from './init/config-dependencies.ts';
 import { loadConfigModule } from '../config/load.ts';
 import { getEnginePreset, getEnginePresets, DEFAULT_ENGINE_IDS, type EngineId } from './init/engines.ts';
 import { detectFramework, productionScripts, type FrameworkApp, type FrameworkManifest } from './init/frameworks.ts';
@@ -394,6 +394,8 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
     clack.log.warn(`Found ${framework.framework}, but ${framework.reason}; set app.url and app.command in e2e.config.ts, see ${DOCS_URL}${framework.docs}`);
   }
   const scaffold = createScaffold(engines, model, app === undefined ? undefined : { app, manager });
+  // The scaffold's config and example read APP_URL; an existing config says where its own app is.
+  const needsAppUrl = existingConfig === undefined && scaffold.needsAppUrl;
   // The example belongs to a new config: beside an existing one, a test that is gone was deleted on purpose.
   const tests = existingConfig !== undefined
     ? []
@@ -406,15 +408,11 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
   }
   const existingConfigText = existingConfig === undefined ? undefined : readFileSync(path.join(cwd, existingConfig), 'utf8');
   // An existing config keeps its engines and gateway, so its own imports say which packages it needs.
-  let imported: Readonly<Record<string, string>> = {};
-  if (existingConfig !== undefined && existingConfigText !== undefined) {
-    try {
-      imported = configDependencies(existingConfig, existingConfigText);
-    } catch (cause) {
-      clack.log.warn(`Could not read the imports of ${existingConfig}, so its packages were not checked against package.json: ${cause instanceof Error ? cause.message : String(cause)}`);
-    }
-  }
-  const dependencies = addDependencies(pkg.manifest, { ...scaffold.dependencies, ...imported });
+  const imported = existingConfig === undefined || existingConfigText === undefined
+    ? undefined
+    : missingConfigDependencies({ cwd, config: existingConfig, source: existingConfigText, manifest: pkg.manifest, manager });
+  if (imported?.warning !== undefined) clack.log.warn(imported.warning);
+  const dependencies = addDependencies(pkg.manifest, { ...scaffold.dependencies, ...imported?.dependencies });
   const { manifest, additions: scripts } = addScripts(dependencies.manifest, SCRIPTS);
   if (example === undefined && dependencies.additions.length > 0) {
     clack.log.info(`Add dev dependencies: ${dependencies.additions.map(([name, version]) => `${name}@${version}`).join(', ')}`);
@@ -424,7 +422,7 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
   }
 
   const repositoryRoot = findRepositoryRoot(cwd, root);
-  // A new config's engines are the ones just chosen; an existing config's are the ones its package.json declares.
+  // A new config's engines are the ones just chosen; an existing config's are the ones its package.json declares, those this run adds for its imports included.
   const engineInstalled = existingConfig === undefined
     ? engines.length > 0
     : declaresDependency(manifest, '@e2e-dev/web') || declaresDependency(manifest, '@e2e-dev/mobile');
@@ -596,14 +594,14 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
     if (before.length === 0) {
       const target = app !== undefined
         ? ` on ${app.url}`
-        : scaffold.needsAppUrl ? ` on ${process.env['APP_URL'] ?? 'http://localhost:3000'} (set APP_URL for another URL)` : '';
+        : needsAppUrl ? ` on ${process.env['APP_URL'] ?? 'http://localhost:3000'} (set APP_URL for another URL)` : '';
       return finish(`Starting ${command}${target}`, true);
     }
-    const appUrl = scaffold.needsAppUrl && process.env['APP_URL'] === undefined ? 'APP_URL=http://localhost:3000 ' : '';
+    const appUrl = needsAppUrl && process.env['APP_URL'] === undefined ? 'APP_URL=http://localhost:3000 ' : '';
     return finish(`Next: ${[...before, `${appUrl}${execCommand(manager, command)}`].join(', then ')}`);
   }
   const last = example === undefined ? runCommand : runScriptCommand(manager, example.script);
-  const appUrl = example === undefined && scaffold.needsAppUrl ? 'APP_URL=http://localhost:3000 ' : '';
+  const appUrl = example === undefined && needsAppUrl ? 'APP_URL=http://localhost:3000 ' : '';
   return finish(`Next: ${[...before, `${appUrl}${last}`].join(', then ')}`);
 }
 

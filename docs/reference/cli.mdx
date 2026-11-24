@@ -344,7 +344,17 @@ bunx e2e init my-app --example with-expo
   `package.json` lacks, at the ranges a new project gets: `@e2e-dev/web` and
   `@e2e-dev/mobile` with `@e2e-dev/core`, `ai` with `zod`, and the provider
   packages of a gateway `init` offers. Any other package the config imports
-  is yours to add.
+  is yours to add, `zod` on its own included. An import that `tsconfig.json`
+  maps to a project file through `paths` or `baseUrl` is not a package.
+- Those ranges belong to the `e2e` that runs `init`. When `package.json`
+  declares another `e2e`, such as an older pinned version under
+  `npx e2e@latest init`, `init` names the missing packages and adds none.
+  Install the dependencies and run the project's own `e2e init`, or add them
+  at versions that fit your `e2e`. An exact version and a `^` or `~` range
+  are compared with the running version; any other spec, such as
+  `workspace:*`, by the `e2e` under `node_modules`.
+- A config that does not parse gets a warning, and its packages are not
+  checked.
 - MCP registration keeps extra settings on the e2e server, such as
   environment variables and client timeouts, even when it repairs the launch
   command. A current registration stays byte-for-byte unchanged.
