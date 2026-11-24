@@ -140,7 +140,7 @@ CI रनर या शेयर की हुई मशीन पर `EXPO_TOKE
 | `buildId`               | कोई नहीं        | [ऐप इंस्टॉल करें](#install-the-app) देखें। |
 | `applicationArchiveUrl` | कोई नहीं        | [ऐप इंस्टॉल करें](#install-the-app) देखें। |
 | `device`                | Expo जो चुने | iOS डिवाइस का नाम या UDID (`'iPhone 17 Pro'`), या Android AVD हार्डवेयर प्रोफ़ाइल (`'pixel_9'`)। |
-| `maxIdleTimeMinutes`    | `10`        | इतने मिनट तक agent-device की कोई कमांड न आए, तो Expo सेशन बंद कर देता है। इससे किसी मर चुके रन के सेशन भी बंद हो जाते हैं। `maxDurationMinutes` इससे छोटा हो, तो डिफ़ॉल्ट उससे एक कम हो जाता है। |
+| `maxIdleTimeMinutes`    | `10`        | इतने मिनट तक agent-device की कोई कमांड न आए, तो Expo सेशन बंद कर देता है। इससे अचानक बंद हो चुके रन के सेशन भी बंद हो जाते हैं। `maxDurationMinutes` इससे छोटा हो, तो डिफ़ॉल्ट उससे एक कम हो जाता है। |
 | `maxDurationMinutes`    | अकाउंट की लिमिट | सेशन तैयार होने के बाद कितने मिनट चल सकता है। Expo इसे 40 तक सीमित रखता है, या high-priority प्लान पर 115 तक। |
 | `agentDeviceVersion`    | इंजन वाला | सेशन के daemon का agent-device वर्शन। डिफ़ॉल्ट वही है जो `@e2e-dev/mobile` के पिन किए क्लाइंट का है। |
 | `tags`                  | `[]`        | हर सेशन पर लगने वाले टैग, रन के अपने टैग के अलावा। |

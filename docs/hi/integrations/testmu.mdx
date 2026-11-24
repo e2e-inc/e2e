@@ -182,12 +182,12 @@ export default {
 | `browserName` | `'Chrome'` | `'Chrome'` या `'MicrosoftEdge'`। वेब इंजन CDP से जुड़ता है, इसलिए कोई और ब्राउज़र हो तो कॉन्फ़िग फ़ेल हो जाता है। |
 | `capabilities` | कुछ नहीं | `browserVersion`, जो `browserName` के साथ जाता है, और TestMu AI के `LT:Options` फ़ील्ड, जैसे `platform`, `geoLocation`, `timezone`, `video`, `network`, या [TestMu AI Tunnel](https://www.lambdatest.com/support/docs/testing-locally-hosted-pages/) के लिए `tunnel` और `tunnelName`। |
 
-प्रोवाइडर ये फ़ील्ड खुद भेजता है, जब तक `capabilities` इन्हें सेट न करें:
+प्रोवाइडर ये फ़ील्ड खुद भेजता है, जब तक `capabilities` में इन्हें सेट न किया जाए:
 `platform` (`Windows 11`, क्योंकि TestMu AI इसके बिना सेशन नहीं देता), `build`
 (रन id), `project` (`e2e`) और `idleTimeout` (600 सेकंड)। Edge सेशन के
 `browserOptions` में `--user-data-dir=remote-debug-profile-edge` जुड़ता है, जब
-तक `capabilities` अपना कोई सेट न करें। `user`, `accessKey` और `name` प्रोवाइडर
-खुद सेट करता है। इसलिए `capabilities` इनमें से कोई भी सेट करें, तो कॉन्फ़िग
+तक `capabilities` में पहले से कोई सेट न हो। `user`, `accessKey` और `name` प्रोवाइडर
+खुद सेट करता है। इसलिए `capabilities` में इनमें से कोई भी सेट हो, तो कॉन्फ़िग
 `INVALID_CONFIG` के साथ फ़ेल होता है। ये चीज़ें भी कॉन्फ़िग फ़ेल करती हैं: नेस्टेड
 `LT:Options`, `browserName` (इसके लिए ऑप्शन इस्तेमाल करें), ऐसी वैल्यू जो JSON
 में नहीं आ सकती, और `testmuBrowsers()` का गलत स्पेलिंग वाला ऑप्शन। बाकी
@@ -204,7 +204,7 @@ testmuBrowsers({
 
 डिफ़ॉल्ट रूप से डैशबोर्ड हर सेशन को `e2e-<run id>-<target>-<slot>` नाम देता है।
 
-जो अटेम्प्ट [वीडियो](/reference/config#video) रिकॉर्ड करता है, उसे ये मिलता है:
+जो अटेम्प्ट [वीडियो](/reference/config#video) रिकॉर्ड करता है, उसे यह मिलता है:
 
 - **डिवाइस पर**, सेशन की TestMu AI वाली रिकॉर्डिंग का लिंक। यह रिकॉर्डिंग
   सेशन के `build` और `sessionName` से ढूँढी जाती है। रिकॉर्डिंग पूरे सेशन की
@@ -217,7 +217,7 @@ testmuBrowsers({
 
 ## सीमाएँ
 
-- **पैरेलल सेशन।** `workers` गुणा TestMu AI टारगेट की गिनती आपके प्लान के
+- **पैरेलल सेशन।** `workers` गुणा TestMu AI टारगेट की गिनती अपने प्लान के
   पैरेलल सेशन के अंदर रखें। प्लान से ऊपर वाला ब्राउज़र सेशन TestMu AI की क्यू
   में इंतज़ार करता है।
 - **लीज़ रहने तक डिवाइस सेशन की बिलिंग होती है।** डिवाइस सेशन तभी शुरू हो जाता
@@ -241,7 +241,7 @@ testmuBrowsers({
   इंतज़ार जल्दी ख़त्म कर देता है, लेकिन लंबा होने पर वह इसे नहीं बढ़ाता।
   इसके बाद भी जो सेशन क्यू में हो या तैयार हो रहा हो, वह `LAUNCH_TIMEOUT` के साथ
   फ़ेल होता है। `launchTimeout` 60 सेकंड से ज़्यादा हो, तो `ENGINE_FAILURE` के साथ।
-- **टूटे ब्राउज़र कनेक्शन।** ब्राउज़र सेशन दोबारा शुरू नहीं किया जा सकता। इसलिए
+- **टूटे ब्राउज़र कनेक्शन।** ब्राउज़र सेशन रिज़्यूम नहीं किया जा सकता। इसलिए
   कनेक्शन टूटा, तो अटेम्प्ट फ़ेल हो जाता है।
 - **ब्राउज़र डाउनलोड।** TestMu AI के ब्राउज़र डाउनलोड अपनी ही मशीन पर सेव करते
   हैं, इसलिए `browser.waitForDownload` `ENGINE_FAILURE` के साथ फ़ेल होता है।
