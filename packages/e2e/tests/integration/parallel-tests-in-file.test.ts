@@ -20,7 +20,7 @@ interface Mark {
  * inside it at the same time, however loaded the machine is: it fails a
  * test that waits for the others in vain.
  */
-async function runFile(body: string, options: { workers: number; config?: string; runOptions?: Partial<RunOptions> }) {
+async function runFile(body: string, options: { workers: number; config?: string; configSource?: string; runOptions?: Partial<RunOptions> }) {
   const dir = mkdtempSync(path.join(tmpdir(), 'e2e-parallel-'));
   const source = `import { readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -47,7 +47,7 @@ ${body}
 `;
   const { outcome, project } = await runProjectWithConfigFile(
     { 'tests/file.e2e.ts': source },
-    { configSource: workerFakeConfigSource(options.workers, options.config ?? ''), ...(options.runOptions === undefined ? {} : { runOptions: options.runOptions }) },
+    { configSource: options.configSource ?? workerFakeConfigSource(options.workers, options.config ?? ''), ...(options.runOptions === undefined ? {} : { runOptions: options.runOptions }) },
   );
   const marks = readdirSync(dir).filter((entry) => !entry.startsWith('inside-')).map((entry) => JSON.parse(readFileSync(path.join(dir, entry), 'utf8')) as Mark);
   rmSync(dir, { recursive: true, force: true });
@@ -171,6 +171,30 @@ ${[1, 2, 3, 4].map((n) => `withWorker('t${n}', async ({ perWorker }) => { ran +=
       }
     },
     120_000,
+  );
+
+  it(
+    'cuts the file again for the workers prepare reports, so one worker runs the suite hooks once',
+    async () => {
+      const prepared = (workers: number): string => `import type { E2EConfig } from 'e2e';
+import { createFakeEngine, FAKE_APP } from '../../helpers/fake-engine.ts';
+
+export default {
+  targets: [{ name: 'fake', platform: 'fake', engine: createFakeEngine({ state: true, preparedWorkers: ${workers} }).engine, app: FAKE_APP }],
+  workers: 4,
+} satisfies E2EConfig;
+`;
+      const body = `test.describe.configure({ parallel: true });
+test.beforeAll(async () => { await mark('beforeAll'); });
+${FOUR_TESTS}`;
+      const one = await runFile(body, { workers: 4, configSource: prepared(1) });
+      expect(one.outcome.exitCode).toBe(0);
+      expect(one.named('beforeAll')).toHaveLength(1);
+      const two = await runFile(body, { workers: 4, configSource: prepared(2) });
+      expect(two.outcome.exitCode).toBe(0);
+      expect(two.named('beforeAll')).toHaveLength(2);
+    },
+    180_000,
   );
 
   it(

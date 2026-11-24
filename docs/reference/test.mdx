@@ -880,8 +880,10 @@ describe('reports', { parallel: true }, () => {
 - For a whole file, call [`describe.configure`](#describe-configure) at the
   top level. For every file, set
   [`fullyParallel`](/reference/config#fullyparallel).
-- Tests that run apart share no module state: each test, each batch of
-  tests with suite hooks, and each ordered group imports the file again.
+- Tests that run apart share no state in the test file: each test, each
+  batch of tests with suite hooks, and each ordered group imports the file
+  again. A module the file imports stays one instance for the worker,
+  unless it declares tests or hooks itself: then it is imported again too.
 - A [serial](#serial) group inside a parallel scope still runs as one unit
   on one worker.
 - `false` keeps a group inside a parallel scope in order on one worker.
@@ -1078,7 +1080,8 @@ export const test = base.extend<{}, { database: Database }>({
   that run apart in a [parallel](#parallel) scope, so a worker
   fixture the file declares gets a new instance each time, and the old one
   stays set up until the worker ends.
-  Declare worker fixtures in a module the file imports.
+  Declare worker fixtures in a module the file imports, one that declares
+  no tests or hooks of its own.
 - `extend({ ... })` without type arguments infers test fixtures only.
 
 #### Extending a fixture

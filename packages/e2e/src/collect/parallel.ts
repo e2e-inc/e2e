@@ -65,8 +65,10 @@ export interface ParallelPlacement {
   readonly declared: boolean;
   /**
    * The outermost scope around the test that runs in order on one worker, a
-   * serial group or a scope with `parallel: false`, named uniquely within
-   * the file; undefined when no such scope is around it.
+   * serial group or a scope with `parallel: false`, by a name of its own
+   * within the file; undefined when no such scope is around it. Serial
+   * groups with one title path share a name, as they share the serial group
+   * id their records carry: one unit runs them, so the id stays one record.
    */
   readonly ordered: string | undefined;
   /** Whether a scope around the test has a `beforeAll` or `afterAll` hook. */
@@ -78,20 +80,23 @@ export function parallelPlacements(registration: ModuleRegistration): (groups: r
   const hooked = new Set(
     registration.hooks.filter((hook) => hook.kind === 'beforeAll' || hook.kind === 'afterAll').map((hook) => hook.group),
   );
-  const names = new Map<GroupNode, string>();
-  const nameOf = (group: GroupNode): string => {
-    let name = names.get(group);
+  const names = new Map<GroupNode | string, string>();
+  const nameOf = (scope: GroupNode | string): string => {
+    let name = names.get(scope);
     if (name === undefined) {
       name = `group-${names.size}`;
-      names.set(group, name);
+      names.set(scope, name);
     }
     return name;
   };
   return (groups) => {
-    const ordered = groups.find((group) => group.serial || group.parallel === false);
+    const at = groups.findIndex((group) => group.serial || group.parallel === false);
+    const ordered = groups[at];
+    // A serial group is known by its title path, a `parallel: false` group by itself.
+    const scope = ordered?.serial === true ? JSON.stringify(groups.slice(0, at + 1).map((group) => group.title)) : ordered;
     return {
       declared: registration.parallel === true || groups.some((group) => group.parallel === true),
-      ordered: registration.parallel === false ? 'file' : ordered === undefined ? undefined : nameOf(ordered),
+      ordered: registration.parallel === false ? 'file' : scope === undefined ? undefined : nameOf(scope),
       suiteHooks: hooked.has(undefined) || groups.some((group) => hooked.has(group)),
     };
   };

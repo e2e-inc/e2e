@@ -116,7 +116,9 @@ export interface ConfigLoadOptions {
  * receives another realm's instance of it and a second `run()` in one
  * process sees the file as it is now. The files it imports keep one instance
  * per process, unless `graph` names a fresh graph to load them in, shared
- * by every module loaded under that name. Bun ignores the query, so there
+ * by every module loaded under that name, or the file registers tests or
+ * hooks itself, which the loader then evaluates with each load too
+ * (`esm-hooks.ts`, "Registrars"). Bun ignores the query, so there
  * `bun-loader.ts` takes the module out of Bun's registry instead.
  */
 export async function importModule(absolutePath: string, cacheKey = 'module', graph?: string): Promise<unknown> {

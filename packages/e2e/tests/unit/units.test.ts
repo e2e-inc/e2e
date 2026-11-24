@@ -222,10 +222,13 @@ describe('buildWorkPlans with parallel scopes', () => {
     expect(unitsOf(tests)).toEqual([['one', 'two']]);
   });
 
-  it('keeps a file with parallel: false whole under fullyParallel', () => {
+  it('keeps a file with parallel: false whole under fullyParallel, every agent and repeat of it in the one unit', () => {
     const whole = { declared: false, ordered: 'file', suiteHooks: false };
     const tests = [makeTest(FILE, 'one', 0, { parallel: whole }), makeTest(FILE, 'two', 1, { parallel: whole })];
-    expect(unitsOf(tests, { target: { ...target, fullyParallel: true } })).toEqual([['one', 'two']]);
+    const on = { ...target, fullyParallel: true };
+    expect(unitsOf(tests, { target: on })).toEqual([['one', 'two']]);
+    const pairs = tests.flatMap((test) => [0, 1].map((repeat) => makePair(test, { target: on, repeat })));
+    expect(unitsOf(tests, { target: on, pairs })).toEqual([['one', 'one', 'two', 'two']]);
   });
 
   it('keeps a serial group and a parallel: false group in a parallel scope as one unit each', () => {

@@ -79,12 +79,17 @@ describe('parallel scopes', () => {
     expect(whole['two']!.ordered).toBe('file');
   });
 
-  it('keeps two sibling groups that share a title apart', async () => {
+  it('keeps two sibling groups that share a title apart, unless they are serial and so one serial group', async () => {
     const placed = await placements(() => {
       test.describe('same', { parallel: false }, () => test('one', noop));
       test.describe('same', { parallel: false }, () => test('two', noop));
+      test.describe('steps', { serial: true }, () => test('first', noop));
+      test.describe('steps', { serial: true }, () => test('second', noop));
+      test.describe('other steps', { serial: true }, () => test('third', noop));
     });
     expect(placed['one']!.ordered).not.toBe(placed['two']!.ordered);
+    expect(placed['first']!.ordered).toBe(placed['second']!.ordered);
+    expect(placed['third']!.ordered).not.toBe(placed['first']!.ordered);
   });
 
   it('marks the tests with a beforeAll or afterAll in a scope around them', async () => {

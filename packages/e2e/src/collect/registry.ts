@@ -10,6 +10,7 @@ import { CollectionError } from '@e2e-dev/core/lib/internal/errors';
 import { MAX_TIMER_MS } from '@e2e-dev/core/lib/internal/time';
 import { validateTitle } from '@e2e-dev/core/lib/internal/ids';
 import { realmSlot } from '@e2e-dev/core/lib/internal/realm-slot';
+import { registrarModuleSlot } from '../internal/registrar-modules.ts';
 import { expectedFailureOption, markRunningTestExpectedToFail } from '@e2e-dev/core/lib/internal/expected-failure';
 import { setRunningTestTimeout, slowRunningTest } from '@e2e-dev/core/lib/internal/test-timeout';
 import { fixmeReason, parseModifierCall, skipRunningTest } from '../internal/skip.ts';
@@ -648,7 +649,10 @@ function realPath(file: string): string {
  * after `async` for an awaiting caller. JavaScriptCore (Bun) can leave the
  * column out of a module's top-level frame.
  */
-const STACK_FRAME = /^at (?:async )?(?:[^(]*? \()?(.+?):(\d+)(?::(\d+))?\)?$/;
+const STACK_FRAME = /^at (async )?(?:[^(]*? \()?(.+?):(\d+)(?::(\d+))?\)?$/;
+
+/** One stack frame; `awaited` from the first frame of an awaiting caller on: the frames before it are the call running now. */
+type StackFrame = SourceLocation & { readonly awaited: boolean };
 
 /**
  * Every frame of the current stack as a source location, the async frames
@@ -658,7 +662,7 @@ const STACK_FRAME = /^at (?:async )?(?:[^(]*? \()?(.+?):(\d+)(?::(\d+))?\)?$/;
  * and with source maps on Node.js does not hand `Error.prepareStackTrace`
  * the call sites at all.
  */
-function stackLocations(): SourceLocation[] {
+function stackLocations(): StackFrame[] {
   // The default limit of 10 frames cuts the test file's frame off a stack
   // that reaches the runner through a helper, a describe, and `test.each`.
   const limit = Error.stackTraceLimit;
@@ -669,14 +673,17 @@ function stackLocations(): SourceLocation[] {
   } finally {
     Error.stackTraceLimit = limit;
   }
+  let awaited = false;
   return stack.split('\n').slice(1).flatMap((line) => {
-    const match = STACK_FRAME.exec(line.trim());
+    const text = line.trim();
+    awaited ||= text.startsWith('at async ');
+    const match = STACK_FRAME.exec(text);
     if (match === null) return [];
     // An ES module names itself by URL, the loader's cache-busting query included; a mapped frame or CommonJS by path.
-    const file = match[1]!.startsWith('file:') ? fileURLToPath(match[1]!) : match[1]!;
+    const file = match[2]!.startsWith('file:') ? fileURLToPath(match[2]!) : match[2]!;
     // A runtime's own code is no file: Bun names its builtins `native`.
     if (!path.isAbsolute(file)) return [];
-    return [{ file, line: Number(match[2]), column: Number(match[3] ?? 1) }];
+    return [{ file, line: Number(match[3]), column: Number(match[4] ?? 1), awaited }];
   });
 }
 
@@ -689,18 +696,26 @@ function stackLocations(): SourceLocation[] {
  * the runner and outside `node_modules` stands. The runner's own frames,
  * whether source maps relocate them to `src/` or not, and an installed
  * package's frames are never a test's location.
+ *
+ * The outermost frame of the call running now is the module evaluating.
+ * When that is a module the collected one imports, it is reported as a
+ * registrar (`registrar-modules.ts`): the next import of a test file finds
+ * it evaluated already, and would get none of what it registers.
  */
 function captureSource(moduleFile: string | undefined): SourceLocation | undefined {
+  let inModule: SourceLocation | undefined;
   let outsideModule: SourceLocation | undefined;
-  for (const location of stackLocations()) {
+  let evaluating: string | undefined;
+  for (const { awaited, ...location } of stackLocations()) {
     const { file } = location;
     if (RUNNER_ROOTS.some((root) => file.startsWith(root)) || file.startsWith('node:')) continue;
-    if (moduleFile !== undefined && (file === moduleFile || realPath(file) === moduleFile)) {
-      return location;
-    }
-    if (outsideModule === undefined && !NODE_MODULES_SEGMENT.test(file)) outsideModule = location;
+    const own = moduleFile !== undefined && (file === moduleFile || realPath(file) === moduleFile);
+    if (own) inModule ??= location;
+    else if (!NODE_MODULES_SEGMENT.test(file)) outsideModule ??= location;
+    if (!awaited) evaluating = own || NODE_MODULES_SEGMENT.test(file) ? undefined : file;
   }
-  return outsideModule;
+  if (moduleFile !== undefined && evaluating !== undefined) registrarModuleSlot.get(globalThis)?.(evaluating);
+  return inModule ?? outsideModule;
 }
 
 function normalizeArgs<Fn extends TestBody | EachFn<unknown[]>>(
