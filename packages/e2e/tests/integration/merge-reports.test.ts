@@ -156,9 +156,15 @@ it('refuses a live-only reporter and refuses artifacts that resolve outside a sh
   expect(live.stderr).toContain('reporter "live" needs live events');
   const run = report(fixture, 'shard-1');
   const attempt = run.results.find((row) => row.selected)!.attempts[0]!;
-  attempt.artifacts = [...attempt.artifacts, { id: 'external', kind: 'log', mediaType: 'text/plain', redaction: 'complete', producer: { kind: 'attempt' }, path: 'external.log' }];
+  const outside = path.join(fixture.dir, 'e2e.config.ts');
+  const content = readFileSync(outside);
+  attempt.artifacts = [...attempt.artifacts, {
+    id: 'external', kind: 'log', mediaType: 'text/plain', redaction: 'complete',
+    producer: { kind: 'attempt' }, path: 'external.log',
+    size: content.length, sha256: createHash('sha256').update(content).digest('hex'),
+  }];
   const directory = path.join(fixture.dir, 'shard-1');
-  symlinkSync(path.join(fixture.dir, 'e2e.config.ts'), path.join(directory, 'results', 'external.log'));
+  symlinkSync(outside, path.join(directory, 'results', 'external.log'));
   writeFileSync(path.join(directory, 'report.json'), JSON.stringify({ schemaVersion: 'report-1', run }));
   const malformedArtifact = cli(fixture, args);
   expect(malformedArtifact.status).toBe(2);
@@ -209,6 +215,22 @@ for (const title of ['alpha', 'beta', 'gamma', 'delta']) test(title, async () =>
   const invalid = cli(fixture, args);
   expect(invalid.status).toBe(2);
   expect(invalid.stderr).toContain('report-1 document');
+  expect(existsSync(path.join(fixture.dir, 'merged'))).toBe(false);
+}, 60_000);
+
+it('rejects an input missing a field required by the published report schema', () => {
+  const fixture = project();
+  expect(shard(fixture, 1).status).toBe(0);
+  expect(shard(fixture, 2).status).toBe(0);
+  const run = report(fixture, 'shard-2');
+  const { os: _os, ...environment } = run.environment;
+  writeFileSync(path.join(fixture.dir, 'shard-2/report.json'), JSON.stringify({
+    schemaVersion: 'report-1',
+    run: { ...run, environment },
+  }));
+  const merged = cli(fixture, ['merge-reports', 'shard-1', 'shard-2', '--output', 'merged']);
+  expect(merged.status).toBe(2);
+  expect(merged.stderr).toMatch(/shard-2.*\/run\/environment.*required/);
   expect(existsSync(path.join(fixture.dir, 'merged'))).toBe(false);
 }, 60_000);
 
