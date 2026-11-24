@@ -668,6 +668,36 @@ calls the model. A load average above half the cores is warned about; shared
 CI runners are too noisy for wall-time verdicts, so trust the behavior and
 counter sections there. The harness's statistics have unit tests under
 `scripts/bench-ab/` (`pnpm test:scripts`).
+## Microbenchmarks
+
+`pnpm microbench` measures small pure-JS functions (secret redaction,
+locator resolution, mobile tree projection; the cases are in
+`scripts/microbench/cases.mjs`) as instruction counts under Valgrind's
+Cachegrind, so the result does not move with the machine's load. Valgrind
+runs on Linux only; on macOS, `--tool time` runs the same cases on wall time
+as a smoke check.
+
+```bash
+pnpm microbench --mode both --trials 10 --base-root .          # repeatability: one build against itself
+pnpm microbench --base-root /path/to/base/checkout             # base against this checkout
+pnpm microbench --tool time --case redact                      # local smoke run, noisy
+```
+
+- Each trial runs a case in two fresh processes, N and 3N iterations, and
+  keeps the difference: startup, loading, warmup, and compilation cancel.
+  Cases and inputs come from this checkout, the code under test from each
+  `--root`/`--base-root`, which must be built.
+- `jit` keeps V8's compilers and makes them deterministic (`--predictable`,
+  `--single-threaded`, `--predictable-gc-schedule`, fixed seeds); `jitless`
+  counts the interpreter only, regexps included. Counts are not wall time.
+- A direction is reported only when the base and head trial ranges do not
+  overlap. The same directory as both roots is a repeatability check, which
+  exits 1 when any case reports a direction.
+- `.github/workflows/microbench.yml` runs both checks on a Blacksmith runner
+  with one pinned Node version; dispatch it with a `base` ref to compare.
+- A case's `child.mjs` and `cases.mjs` are plain JavaScript: `--jitless`
+  turns off WebAssembly, which Node's TypeScript stripping needs.
+
 ## Golden device trees
 
 `packages/mobile/tests/fixtures/snapshots/{ios,android}/` holds raw
