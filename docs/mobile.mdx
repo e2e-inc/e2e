@@ -537,8 +537,9 @@ mobile({ platform: 'ios', device: 'QA iPhone' })
 mobile({ platform: 'ios', device: '00008030-001A2B3C0E12802E' })
 ```
 
-On iOS the id is the UDID that `xcrun devicectl list devices` shows. On
-Android it is the serial that `adb devices` lists. Use the id to tell two
+The id is the one that list shows: on iOS the phone's hardware UDID (not the
+Identifier column of `xcrun devicectl list devices`, a different id), on
+Android the serial `adb devices` lists. Use the id to tell two
 phones of the same model apart. By name, the first matching device wins.
 Without `device`, a
 paired iPhone or iPad that is reachable (USB or network), or a connected
