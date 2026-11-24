@@ -128,8 +128,8 @@ test('toBeEmpty reads an input or textarea by value and anything else by text co
   await expect(screen.getByTestId('blank-div')).toBeEmpty();
   await expect(screen.getByTestId('blank-editor')).toBeEmpty();
   for (const testId of [
-    'filled-input', 'space-input', 'text', 'hidden-text', 'combobox', 'listbox', 'textbox', 'aria-textbox', 'select',
-    'submit', 'checkbox',
+    'filled-input', 'space-input', 'adopted-input', 'text', 'hidden-text', 'combobox', 'listbox', 'textbox',
+    'aria-textbox', 'select', 'submit', 'checkbox',
   ]) {
     await expect(screen.getByTestId(testId), testId).not.toBeEmpty();
   }

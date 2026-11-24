@@ -344,6 +344,17 @@ line2  </textarea>
   <p data-testid="text">Some text</p>
   <div data-testid="hidden-text"><span hidden>Later</span></div>
   <input aria-label="Secret" type="password" value="marker-9d2a" />
+  <script>
+    // A filled input made in another frame keeps that frame's prototype here.
+    const donor = document.createElement('iframe');
+    donor.hidden = true;
+    document.body.append(donor);
+    const adopted = donor.contentDocument.createElement('input');
+    adopted.setAttribute('data-testid', 'adopted-input');
+    adopted.setAttribute('aria-label', 'Adopted');
+    adopted.value = 'filled';
+    document.body.append(adopted);
+  </script>
   <button data-testid="combobox" role="combobox" aria-expanded="false">Select a fruit</button>
   <ul data-testid="listbox" role="listbox"><li role="option">Apple</li></ul>
   <div data-testid="textbox" role="textbox" contenteditable="true">hello</div>

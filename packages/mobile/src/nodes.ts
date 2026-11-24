@@ -122,23 +122,26 @@ const FIELD_ROLES: ReadonlySet<string> = new Set(['textbox', 'searchbox']);
 
 /**
  * The node a locate hands the harness, with the `empty` state `toBeEmpty`
- * reads: a text field is empty when it holds no value, so its label or hint
- * does not count; any other node when nothing in its subtree shows text or a
- * value. Fields go by role, not `mayTakeText`: an iOS `other` holding only
- * text is as often a container as a custom-drawn field. A secure field gets
+ * reads: empty when it holds no content (`holdsContent`). A secure field gets
  * no state, as it withholds its value. Observations leave the state out: it
  * is no use to the model.
  */
 export function withEmptyState(node: SemanticNode): SemanticNode {
   if (node.states?.secure === true) return node;
-  const field = node.role !== undefined && FIELD_ROLES.has(node.role);
-  const empty = field ? (node.value ?? '') === '' : !showsContent(node);
-  return { ...node, states: { ...node.states, empty } };
+  return { ...node, states: { ...node.states, empty: !holdsContent(node) } };
 }
 
-/** Whether the node or any node below it shows text or a value. */
-function showsContent(node: SemanticNode): boolean {
-  return (node.text ?? '').trim() !== '' || (node.value ?? '').trim() !== '' || (node.children ?? []).some(showsContent);
+/**
+ * Whether the node holds content: a text field its value, as it is, so its
+ * label or hint never counts; a secure field nothing, so a container does not
+ * tell whether one is filled; any other node its own text or value, or any
+ * node below it that holds content. Fields go by role, not `mayTakeText`: an
+ * iOS `other` holding only text is as often a container as a drawn field.
+ */
+function holdsContent(node: SemanticNode): boolean {
+  if (node.states?.secure === true) return false;
+  if (node.role !== undefined && FIELD_ROLES.has(node.role)) return (node.value ?? '') !== '';
+  return (node.text ?? '').trim() !== '' || (node.value ?? '').trim() !== '' || (node.children ?? []).some(holdsContent);
 }
 
 const CHECKABLE_ROLES = new Set(['switch', 'checkbox']);

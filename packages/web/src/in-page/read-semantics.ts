@@ -1690,12 +1690,17 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   /**
    * Whether the element holds nothing, as Playwright's `toBeEmpty` reads it:
    * an input or textarea by its value, as it is, so a space is not empty; any
-   * other element by its text content trimmed, hidden text included. Null on a
-   * secure field, whose value is withheld.
+   * other element by its text content trimmed, hidden text included. Known by
+   * name, not `instanceof`, as Playwright does: an input adopted from another
+   * frame keeps that frame's prototype, and reading its empty text content
+   * instead would pass a filled field. Null on a secure field, whose value is
+   * withheld.
    */
   const emptyOf = (el: Element, secure: boolean): boolean | null => {
     if (secure) return null;
-    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return el.value === '';
+    if (isHtml(el) && (el.localName === 'input' || el.localName === 'textarea')) {
+      return (el as HTMLInputElement | HTMLTextAreaElement).value === '';
+    }
     return (el.textContent ?? '').trim() === '';
   };
 
