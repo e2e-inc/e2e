@@ -584,10 +584,13 @@ expect(created).toBeOK();
 ```
 
 - The failure names the status and the origin and path of `response.url`,
-  the URL after redirects. It leaves out the credentials, query, and
-  fragment, and never reads the body.
-- A value whose type is not `WebResponse`, such as `WebResponse | undefined`,
-  fails to compile. A value typed `any` compiles.
+  the URL of the response being checked. For `request` that is the URL after
+  redirects. It leaves out the credentials, query, and fragment, and never
+  reads the body.
+- `WebResponse | undefined`, a status number, and other types that are not
+  `WebResponse` fail to compile. A value typed `any` compiles. In a generic
+  helper, type the parameter as `WebResponse`: `R extends WebResponse` does
+  not compile.
 - At run time, an object with a numeric `status` and a string `url` is
   checked as a response. Anything else fails as `ASSERTION_FAILED`, negated
   too.

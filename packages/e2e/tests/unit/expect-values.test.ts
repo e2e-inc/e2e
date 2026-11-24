@@ -153,6 +153,10 @@ describe('value matchers', () => {
       () => e2eExpect(response(500, 'https://user:pass@api.test/orders/7?token=t0ken#frag')).toBeOK(),
       /^expected a 2xx status, got 500 from https:\/\/api\.test\/orders\/7$/,
     );
+    failsWith(
+      () => e2eExpect(response(503, 'http://127.0.0.1:4271/api/orders?token=t0ken')).toBeOK(),
+      /^expected a 2xx status, got 503 from http:\/\/127\.0\.0\.1:4271\/api\/orders$/,
+    );
     failsWith(() => e2eExpect(response(500, 'not a url')).toBeOK(), /^expected a 2xx status, got 500$/);
     failsWith(() => e2eExpect(response(500, 'data:text/plain,t0ken')).toBeOK(), /^expected a 2xx status, got 500$/);
     failsWith(() => e2eExpect(response(404), 'the order exists').toBeOK(), /^the order exists: expected a 2xx status, got 404 from/);
@@ -176,9 +180,13 @@ describe('value matchers', () => {
 
   it('toBeOK refusing a look-alike prints neither its URL nor its fields, keeps the message, and reads no getter', () => {
     let bodyReads = 0;
+    let urlReads = 0;
     const lookalike = {
       status: '500',
-      url: 'https://api.test/orders?token=t0ken',
+      get url() {
+        urlReads += 1;
+        throw new Error('the url getter ran');
+      },
       get body() {
         bodyReads += 1;
         return 'secret body';
@@ -188,7 +196,9 @@ describe('value matchers', () => {
       () => e2eExpect(lookalike as never as WebResponse, 'lookup').not.toBeOK(),
       /^lookup: toBeOK requires a response, got an object without a numeric status and a string url$/,
     );
-    vexpect(bodyReads).toBe(0);
+    vexpect([urlReads, bodyReads]).toEqual([0, 0]);
+    const tokenUrl = { status: '500', url: 'https://api.test/orders?token=t0ken' };
+    failsWith(() => e2eExpect(tokenUrl as never as WebResponse).toBeOK(), /^toBeOK requires a response, got an object without a numeric status and a string url$/);
   });
 
   it('toBeOK reads status and url once, so a changing status cannot pass on a later read', () => {

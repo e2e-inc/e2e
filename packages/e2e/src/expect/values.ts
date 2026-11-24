@@ -336,11 +336,16 @@ class ValueExpectationImpl<T> implements ValueExpectation<T> {
   }
 }
 
-/** The two fields toBeOK reads of a `WebResponse`, each read once; `undefined` when either is missing or mistyped. */
+/**
+ * The two fields toBeOK reads of a `WebResponse`, each read once, `url` only
+ * after `status` is a number; `undefined` when either is missing or mistyped.
+ */
 function responseFields(value: unknown): Pick<WebResponse, 'status' | 'url'> | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
-  const { status, url } = value as Partial<Record<'status' | 'url', unknown>>;
-  return typeof status === 'number' && typeof url === 'string' ? { status, url } : undefined;
+  const { status } = value as { status?: unknown };
+  if (typeof status !== 'number') return undefined;
+  const { url } = value as { url?: unknown };
+  return typeof url === 'string' ? { status, url } : undefined;
 }
 
 /** A value's kind for a message that must not print the value itself. */

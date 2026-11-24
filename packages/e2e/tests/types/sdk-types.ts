@@ -1273,6 +1273,8 @@ test('request', async ({ request }) => {
   const maybe = created as WebResponse | undefined;
   // @ts-expect-error a response or undefined is not a response
   expect(maybe).toBeOK();
+  // @ts-expect-error a response or undefined is not a response, negated too
+  expect(maybe).not.toBeOK();
   // @ts-expect-error a response or undefined is not a response, soft too
   expect.soft(maybe).toBeOK();
   // @ts-expect-error a response or undefined is not a response, polled too
