@@ -117,7 +117,7 @@ bunx e2e init --yes --gateway openrouter --skills .agents/skills --mcp .mcp.json
 | `--engine <ids>` | The engines for a new config: `web`, `mobile`, or `none`. Comma-separated or repeated; `web,mobile` writes a target for each. Default: asked. |
 | `--gateway <id>` | The model gateway for agent steps in a new config: `vercel`, `openrouter`, `openai-compatible`, `chatgpt`, `copilot`, `opencode-console`, `grok`, or `none`. Default: asked. |
 | `--endpoint <url>` | Base URL for `--gateway openai-compatible`, and implies it. HTTPS, or HTTP on a loopback host. Default: asked; `http://127.0.0.1:11434/v1` with `--yes`. |
-| `--skills <dirs>` | Where to install the agent skill: `.agents/skills`, `.claude/skills`, or `none`. Comma-separated or repeated. Default: asked. |
+| `--skills <dirs>` | Where to install the agent skill: `.agents/skills`, `.claude/skills`, or `none`. `.agents/skills` also adds the skill line to `AGENTS.md`, and `.claude/skills` to `CLAUDE.md`; `none` leaves both files alone. Comma-separated or repeated. Default: asked. |
 | `--mcp <files>` | Where to register the MCP server: `.mcp.json`, `.cursor/mcp.json`, `.codex/config.toml`, or `none`. Comma-separated or repeated. Default: asked. |
 | `--ci <id>` | The CI pipeline for the tests, one job per platform: `github-actions`, `gitlab`, or `none`. See [CI pipeline](#ci-pipeline). Default: asked; `none` with `--yes`. |
 | `--install`, `--no-install` | Whether to install dependencies. Default: asked; `--no-install` with `--yes`. |
@@ -325,8 +325,8 @@ bunx e2e init my-app --example with-expo
   empty.
 - The example's config, tests, and scripts stay as they are. The wizard
   asks only for the skill, the MCP server, and the install, and adds missing
-  `.gitignore` entries. For a native app these files go in `e2e/`, so open
-  your coding agent there.
+  `.gitignore` entries and the skill line in `AGENTS.md` and `CLAUDE.md`. For
+  a native app these files go in `e2e/`, so open your coding agent there.
 - The e2e project's `package.json` takes the directory's name (with `-e2e`
   beside a native app). `e2e`, `@e2e-dev/web`, and `@e2e-dev/mobile` get the
   ranges `init` writes for a new project.
@@ -358,11 +358,13 @@ bunx e2e init my-app --example with-expo
   link where the link goes.
 - `AGENTS.md` and `CLAUDE.md` stay as they are once they name an installed
   skill file. So does a `CLAUDE.md` that is a symlink to an `AGENTS.md` with
-  the line, or imports it on a line of its own with `@AGENTS.md`. `init`
-  never writes through a symlinked instructions file: one whose target lacks
-  the line is skipped with a warning naming the link and its target. A
-  directory in the file's place, or a file `init` cannot read or write, is
-  skipped with a warning too.
+  the line, or imports it on a line of its own with `@AGENTS.md`, outside a
+  code block. When `init` can't write `AGENTS.md`, that `CLAUDE.md` gets its
+  own line. A UTF-16 file that starts with a byte order mark gets the line in
+  UTF-16. `init` never writes through a symlinked instructions file: one
+  whose target lacks the line is skipped with a warning naming the link and
+  its target. A directory in the file's place, or a file `init` cannot read
+  or write, is skipped with a warning too.
 - A copy with a directory where a file goes, or a file where a directory
   goes, is skipped with a warning naming the entry. `init` removes nothing to
   repair it.
