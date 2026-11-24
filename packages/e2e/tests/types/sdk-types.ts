@@ -1244,6 +1244,11 @@ test('request', async ({ request }) => {
   expect(created.status).toBe(201);
   await request.fetch('/api/orders', { method: 'PUT', body: 'raw' });
   await request.get('/api/export', { timeout: 0 });
+  await request.get('/api/login', { redirect: 'manual' });
+  await request.get('/api/login', { redirect: 'follow' });
+  await request.get('/api/login', { redirect: 'error' });
+  // @ts-expect-error redirect accepts only follow, manual, or error
+  await request.get('/api/login', { redirect: 'none' });
   // @ts-expect-error a timeout is milliseconds, not a string
   await request.get('/api/export', { timeout: '45s' });
   // @ts-expect-error the method goes in request.fetch's options, not a shorthand's

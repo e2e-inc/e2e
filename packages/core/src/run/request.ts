@@ -151,6 +151,9 @@ const UNSENDABLE_HEADERS = new Set(['expect', 'keep-alive', 'transfer-encoding',
 /** The `connection` values sent as written: Node's fetch sends `close` for any value listing it, else `keep-alive`. */
 const CONNECTION_VALUES = new Set(['close', 'keep-alive']);
 
+/** Valid `redirect` modes for `fetch`. */
+const REDIRECT_MODES = new Set<RequestRedirect>(['follow', 'manual', 'error']);
+
 /**
  * The URL a call goes to: a path resolved against the app URL as `app.open`
  * resolves one, or an absolute one. Only http(s) passes, so unlike a
@@ -188,9 +191,9 @@ function shownUrl(url: URL, base: NormalizedBaseUrl | undefined): string {
 }
 
 /** The options every method takes; `request.fetch` takes `method` too. */
-const OPTION_KEYS = ['headers', 'json', 'body', 'timeout'] as const;
+const OPTION_KEYS = ['headers', 'json', 'body', 'timeout', 'redirect'] as const;
 
-/** The fetch init for one call: its method, headers, and body. An option it does not know is refused, never dropped. */
+/** The fetch init for one call: its method, headers, body, and redirect mode. An option it does not know is refused, never dropped. */
 function requestInit(api: string, method: string, options: APIRequestOptions | undefined): RequestInit {
   rejectUnknownOptions(api, options, api === 'request.fetch' ? [...OPTION_KEYS, 'method'] : OPTION_KEYS);
   const given: unknown = options?.headers;
@@ -198,6 +201,7 @@ function requestInit(api: string, method: string, options: APIRequestOptions | u
     throw new TestError('INVALID_ARGUMENT', 'request: headers must be an object of header names to string values');
   }
   const headers = new Headers();
+  let acceptEncodingName: string | undefined;
   for (const [name, value] of Object.entries(given ?? {})) {
     if (typeof value !== 'string') throw new TestError('INVALID_ARGUMENT', `request: header "${name}" must be a string`);
     const lower = name.toLowerCase();
@@ -210,6 +214,7 @@ function requestInit(api: string, method: string, options: APIRequestOptions | u
     if (lower === 'connection' && !CONNECTION_VALUES.has(value.trim().toLowerCase())) {
       throw new TestError('INVALID_ARGUMENT', `request: header "${name}" must be close or keep-alive; fetch manages the connection`);
     }
+    if (lower === 'accept-encoding') acceptEncodingName = name;
     try {
       validateHeaderName(name);
       validateHeaderValue(name, value);
@@ -219,11 +224,32 @@ function requestInit(api: string, method: string, options: APIRequestOptions | u
       throw new TestError('INVALID_ARGUMENT', `request: header "${name}" has an invalid name or value`);
     }
   }
+  if (acceptEncodingName !== undefined && headers.has('range')) {
+    throw new TestError(
+      'INVALID_ARGUMENT',
+      `request: header "${acceptEncodingName}" cannot be combined with "range"; fetch appends identity to accept-encoding on range requests`,
+    );
+  }
   const body = requestBody(options, headers);
   if (body !== undefined && (method === 'GET' || method === 'HEAD')) {
     throw new TestError('INVALID_ARGUMENT', `request: a ${method} request takes no body`);
   }
-  return { method, headers, ...(body === undefined ? {} : { body }) };
+  const redirect = requestRedirect(options?.redirect);
+  return {
+    method,
+    headers,
+    ...(body === undefined ? {} : { body }),
+    ...(redirect === undefined ? {} : { redirect }),
+  };
+}
+
+/** How redirects are handled: `'follow'` by default, or `'manual'` / `'error'`. */
+function requestRedirect(redirect: unknown): RequestRedirect | undefined {
+  if (redirect === undefined) return undefined;
+  if (typeof redirect !== 'string' || !REDIRECT_MODES.has(redirect as RequestRedirect)) {
+    throw new TestError('INVALID_ARGUMENT', 'request: redirect must be "follow", "manual", or "error"');
+  }
+  return redirect as RequestRedirect;
 }
 
 /** The body of one call: `json` serialized, else `body` as given; content-type defaults to JSON for `json`. */

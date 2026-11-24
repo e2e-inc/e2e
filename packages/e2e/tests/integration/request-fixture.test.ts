@@ -2,14 +2,14 @@
 
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { defineEngine } from '@e2e-dev/core/lib/engine/index';
 import type { E2EConfig } from '../../src/index.ts';
 import { createFakeEngine } from '../helpers/fake-engine.ts';
 import { freePort } from '../helpers/free-port.ts';
 import { hookLog, LOG_MODULE } from '../helpers/hook-log.ts';
 import { assertValidReport } from '../helpers/report-schema.ts';
-import { resultByTitle, runProject } from '../helpers/run-project.ts';
+import { createProject, resultByTitle, runExisting, type FixtureProject, type RunProjectOptions } from '../helpers/run-project.ts';
 
 /** A small JSON API on loopback; `closed` lists the hanging calls whose connection the client dropped. */
 interface Api {
@@ -45,7 +45,19 @@ async function startApi(): Promise<Api> {
       request.resume();
       response.setHeader('x-method', request.method ?? '');
       response.setHeader('content-type', 'application/json');
-      response.end(JSON.stringify({ method: request.method, cookie: request.headers.cookie ?? null, connection: request.headers.connection ?? null, contentType: request.headers['content-type'] ?? null }));
+      response.end(JSON.stringify({
+        method: request.method,
+        cookie: request.headers.cookie ?? null,
+        connection: request.headers.connection ?? null,
+        contentType: request.headers['content-type'] ?? null,
+        range: request.headers.range ?? null,
+        acceptEncoding: request.headers['accept-encoding'] ?? null,
+      }));
+      return;
+    }
+    if (url.pathname === '/api/redirect') {
+      response.writeHead(302, { location: '/api/ok', 'set-cookie': ['sid=1; Path=/', 'csrf=2; Path=/'] });
+      response.end('redirecting');
       return;
     }
     if (url.pathname === '/api/slow') {
@@ -86,8 +98,20 @@ async function startApi(): Promise<Api> {
 }
 
 let api: Api;
+const projects: FixtureProject[] = [];
 beforeAll(async () => { api = await startApi(); });
+afterEach(() => { for (const project of projects.splice(0)) project.cleanup(); });
 afterAll(async () => { await api.close(); });
+
+/** Runs a fixture project and registers it for removal after the test. */
+async function runFixture(
+  files: Readonly<Record<string, string>>,
+  options: RunProjectOptions,
+) {
+  const project = createProject(files);
+  projects.push(project);
+  return { outcome: await runExisting(project, options), project };
+}
 
 /** Every step `report.json` holds whose api is a `request` call, in order. */
 function reportedRequestSteps(report: unknown): { label: string }[] {
@@ -131,10 +155,14 @@ test('creates an order', async ({ request }) => {
   }
   expect((await request.head('/api/echo')).headers['x-method']).toBe('HEAD');
   const echoed = await (await request.post('/api/echo', { body: '{"raw":1}', headers: { cookie: 'session=abc', connection: 'Close' } })).json();
-  expect(echoed).toEqual({ method: 'POST', cookie: 'session=abc', connection: 'close', contentType: 'text/plain;charset=UTF-8' });
+  expect(echoed).toMatchObject({ method: 'POST', cookie: 'session=abc', connection: 'close', contentType: 'text/plain;charset=UTF-8' });
+  const encodingOnly = await (await request.get('/api/echo', { headers: { 'accept-encoding': 'gzip' } })).json();
+  expect(encodingOnly).toMatchObject({ acceptEncoding: 'gzip', range: null });
+  const rangeOnly = await (await request.get('/api/echo', { headers: { range: 'bytes=0-9' } })).json();
+  expect(rangeOnly).toMatchObject({ range: 'bytes=0-9' });
 });
 `;
-    const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi() });
+    const { outcome } = await runFixture({ 'tests/api.e2e.ts': file }, { config: onApi() });
     assertValidReport(outcome.report);
     const created = resultByTitle(outcome, 'creates an order');
     expect(created.status, JSON.stringify(created.attempts[0]?.error)).toBe('passed');
@@ -148,7 +176,47 @@ test('creates an order', async ({ request }) => {
       { kind: 'resource', api: 'request.delete', label: 'DELETE /api/echo', status: 'passed' },
       { kind: 'resource', api: 'request.head', label: 'HEAD /api/echo', status: 'passed' },
       { kind: 'resource', api: 'request.post', label: 'POST /api/echo', status: 'passed' },
+      { kind: 'resource', api: 'request.get', label: 'GET /api/echo', status: 'passed' },
+      { kind: 'resource', api: 'request.get', label: 'GET /api/echo', status: 'passed' },
     ]);
+  });
+
+  it('follows redirects by default, returns the 3xx response on redirect manual, and fails on redirect error', async () => {
+    const file = `import { test, expect } from 'e2e';
+
+test('redirect modes', async ({ request }) => {
+  const followed = await request.get('/api/redirect');
+  expect(followed.status).toBe(200);
+  expect(followed.url).toBe('${api.url}/api/ok');
+  expect(followed.headers['set-cookie']).toBeUndefined();
+  expect(await followed.text()).toBe('ok');
+
+  const explicitFollow = await request.get('/api/redirect', { redirect: 'follow' });
+  expect(explicitFollow.status).toBe(200);
+  expect(explicitFollow.url).toBe('${api.url}/api/ok');
+
+  const manual = await request.get('/api/redirect', { redirect: 'manual' });
+  expect(manual.status).toBe(302);
+  expect(manual.url).toBe('${api.url}/api/redirect');
+  expect(manual.headers['location']).toBe('/api/ok');
+  expect(manual.headers['set-cookie']).toBe('sid=1; Path=/\\ncsrf=2; Path=/');
+  expect(await manual.text()).toBe('redirecting');
+
+  const okWithError = await request.get('/api/ok', { redirect: 'error' });
+  expect(okWithError.status).toBe(200);
+});
+
+test('redirect error on redirect', async ({ request }) => {
+  await request.get('/api/redirect', { redirect: 'error' });
+});
+`;
+    const { outcome } = await runFixture({ 'tests/redirect.e2e.ts': file }, { config: onApi() });
+    const modes = resultByTitle(outcome, 'redirect modes');
+    expect(modes.status, JSON.stringify(modes.attempts[0]?.error)).toBe('passed');
+    expect(resultByTitle(outcome, 'redirect error on redirect').attempts[0]!.error).toMatchObject({
+      code: 'ACTION_FAILED',
+      message: expect.stringContaining('GET /api/redirect failed: fetch failed:'),
+    });
   });
 
   it('aborts a call at the action timeout, and an afterEach call runs on its own budget after the body timed out', async () => {
@@ -177,7 +245,7 @@ test.describe('cleanup', () => {
 });
 `;
     const log = hookLog('request-fixture');
-    const { outcome } = await runProject({ 'tests/log.ts': LOG_MODULE, 'tests/hang.e2e.ts': file }, { config: onApi({ actionTimeout: 1_500 }) });
+    const { outcome } = await runFixture({ 'tests/log.ts': LOG_MODULE, 'tests/hang.e2e.ts': file }, { config: onApi({ actionTimeout: 1_500 }) });
     const action = resultByTitle(outcome, 'hangs past the action timeout').attempts[0]!;
     expect(action.error?.code).toBe('ACTION_FAILED');
     expect(action.error?.message).toContain('GET /api/hang exceeded its timeout of 1500ms');
@@ -214,7 +282,7 @@ test('a blank page', async ({ request }) => {
   await request.get('about:blank');
 });
 `;
-    const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: { targets: [{ name: 'api', platform: 'api' }] } });
+    const { outcome } = await runFixture({ 'tests/api.e2e.ts': file }, { config: { targets: [{ name: 'api', platform: 'api' }] } });
     const absolute = resultByTitle(outcome, 'absolute');
     expect(absolute.status, JSON.stringify(absolute.attempts[0]?.error)).toBe('passed');
     expect(absolute.attempts[0]!.steps.map((step) => step.label)).toEqual([`GET ${api.url}/api/ok`]);
@@ -282,6 +350,14 @@ test('an expect header', async ({ request }) => {
   await request.post('/api/refused-options', { body: 'a', headers: { Expect: '100-continue' } });
 });
 
+test('accept-encoding with range', async ({ request }) => {
+  await request.get('/api/refused-options', { headers: { Range: 'bytes=0-9', 'Accept-Encoding': 'gzip, identity;q=0' } });
+});
+
+test('an invalid redirect mode', async ({ request }) => {
+  await request.get('/api/refused-options', { redirect: 'none' as never });
+});
+
 test('a body that is not JSON', async ({ request }) => {
   await (await request.get('/api/ok')).json();
 });
@@ -335,7 +411,7 @@ test('a bigint in json', async ({ request }) => {
   await request.post('/api/orders', { json: { n: 1n } });
 });
 `;
-    const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi({ secrets: { TOKEN: 'request-sink-secret' } }) });
+    const { outcome } = await runFixture({ 'tests/api.e2e.ts': file }, { config: onApi({ secrets: { TOKEN: 'request-sink-secret' } }) });
     const errorOf = (title: string) => resultByTitle(outcome, title).attempts[0]!.error;
     expect(errorOf('a GET with a body')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: a GET request takes no body' });
     expect(errorOf('json and body')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: pass json or body, not both' });
@@ -346,7 +422,7 @@ test('a bigint in json', async ({ request }) => {
     });
     // localhost resolves to two addresses, so Node's refusal is an AggregateError with an empty message.
     expect(errorOf('a refused connection on localhost')?.message).toMatch(new RegExp(`^GET http://localhost:${closed}/api/ok failed: fetch failed: .*ECONNREFUSED`));
-    expect(errorOf('an option request does not take')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request.post options has no keys "data", "params"; it takes headers, json, body, timeout' });
+    expect(errorOf('an option request does not take')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request.post options has no keys "data", "params"; it takes headers, json, body, timeout, redirect' });
     expect(errorOf('headers as a Headers object')?.code).toBe('INVALID_ARGUMENT');
     // V8's own message would quote the start of the body ("ok"), which can be part of a secret.
     expect(errorOf('a body that is not JSON')?.message).toBe('the response body of GET /api/ok is not valid JSON');
@@ -356,6 +432,14 @@ test('a bigint in json', async ({ request }) => {
     expect(errorOf('a header fetch sets itself')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "Sec-Fetch-Mode" is set by fetch itself; leave it out' });
     expect(errorOf('a header fetch refuses')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "Transfer-Encoding" cannot be sent with fetch; leave it out' });
     expect(errorOf('an expect header')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "Expect" cannot be sent with fetch; leave it out' });
+    expect(errorOf('accept-encoding with range')).toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      message: 'request: header "Accept-Encoding" cannot be combined with "range"; fetch appends identity to accept-encoding on range requests',
+    });
+    expect(errorOf('an invalid redirect mode')).toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      message: 'request: redirect must be "follow", "manual", or "error"',
+    });
     expect(errorOf('a connection header fetch would replace')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "connection" must be close or keep-alive; fetch manages the connection' });
     expect(api.paths).not.toContain('/api/refused-options');
     const refusal = resultByTitle(outcome, 'a refusal is a rejected promise and a failed step').attempts[0]!;
@@ -387,7 +471,7 @@ test.beforeAll(async ({ request }) => {
 
 test('runs', async () => {});
 `;
-    const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi() });
+    const { outcome } = await runFixture({ 'tests/api.e2e.ts': file }, { config: onApi() });
     expect(outcome.report.run.errors).toEqual([expect.objectContaining({ code: 'COLLECTION_ERROR', message: expect.stringContaining('beforeAll hook names "request", a test fixture on target "fake"') })]);
   });
 
@@ -399,7 +483,7 @@ test('leaks nothing', async ({ request }) => {
   expect((await request.get('/api/missing/${secret}')).status).toBe(200);
 });
 `;
-    const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi({ secrets: { TOKEN: secret } }) });
+    const { outcome } = await runFixture({ 'tests/api.e2e.ts': file }, { config: onApi({ secrets: { TOKEN: secret } }) });
     const attempt = resultByTitle(outcome, 'leaks nothing').attempts[0]!;
     expect(attempt.error?.code).toBe('ASSERTION_FAILED');
     expect(attempt.steps.map((step) => step.label)).toEqual(['GET /api/missing/<secret:TOKEN>']);
@@ -417,7 +501,7 @@ test('the action timeout', async ({ request }) => {
   await request.get('/api/slow');
 });
 `;
-    const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi({ actionTimeout: 300 }) });
+    const { outcome } = await runFixture({ 'tests/api.e2e.ts': file }, { config: onApi({ actionTimeout: 300 }) });
     const unbounded = resultByTitle(outcome, 'no own timeout');
     expect(unbounded.status, JSON.stringify(unbounded.attempts[0]?.error)).toBe('passed');
     expect(resultByTitle(outcome, 'the action timeout').attempts[0]!.error?.message).toContain('GET /api/slow exceeded its timeout of 300ms');
@@ -432,7 +516,7 @@ export const test = base.extend<{}, { request: { hello(): string } }>({
     const file = `import { test } from './support.ts';
 test('uses it', async ({ request }) => { void request; });
 `;
-    const { outcome } = await runProject({ 'tests/support.ts': support, 'tests/api.e2e.ts': file }, { config: onApi() });
+    const { outcome } = await runFixture({ 'tests/support.ts': support, 'tests/api.e2e.ts': file }, { config: onApi() });
     expect(outcome.report.run.errors).toEqual([expect.objectContaining({
       code: 'COLLECTION_ERROR',
       message: expect.stringContaining('fixture "request" is declared with scope \'worker\', but it extends the built-in "request", a test fixture'),
@@ -447,7 +531,7 @@ test('a long path', async ({ request }) => {
   expect(response.status).toBe(404);
 });
 `;
-    const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi() });
+    const { outcome } = await runFixture({ 'tests/api.e2e.ts': file }, { config: onApi() });
     // The recorder keeps the whole label; report.json cuts it to what its schema admits.
     expect(resultByTitle(outcome, 'a long path').attempts[0]!.steps[0]!.label).toHaveLength('GET /files/'.length + 9000);
     const [reported] = reportedRequestSteps(outcome.report);
@@ -466,7 +550,7 @@ test('a secret across the cut', async ({ request }) => {
   await request.get('/files/' + 'x'.repeat(8170) + '${secret}');
 });
 `;
-    const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi({ secrets: { TOKEN: secret } }) });
+    const { outcome } = await runFixture({ 'tests/api.e2e.ts': file }, { config: onApi({ secrets: { TOKEN: secret } }) });
     const [step] = resultByTitle(outcome, 'a secret across the cut').attempts[0]!.steps;
     expect(step!.label.endsWith('<secret:TOKEN>')).toBe(true);
     const [reported] = reportedRequestSteps(outcome.report);

@@ -489,7 +489,6 @@ export interface AppLogRecord {
 /** Characters of an event's detail the report admits. */
 export const MAX_EVENT_DETAIL_CHARS = 300;
 
-
 /** Characters of a step label an error message quotes before clipping it. */
 const MAX_QUOTED_LABEL_CHARS = 80;
 

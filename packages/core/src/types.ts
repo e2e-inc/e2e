@@ -773,6 +773,8 @@ export interface APIRequestOptions {
   readonly body?: string;
   /** Timeout in milliseconds; defaults to `actionTimeout`. 0 sets none of its own, so only the running test's or hook's budget bounds the call. */
   readonly timeout?: number;
+  /** How redirects are handled; `'follow'` by default. `'manual'` returns the 3xx response as is; `'error'` fails the call with `ACTION_FAILED`. */
+  readonly redirect?: 'follow' | 'manual' | 'error';
 }
 
 /** `request.fetch` options: the method beside the rest. */

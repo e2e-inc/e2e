@@ -62,6 +62,7 @@ A `GET` or `HEAD` request takes no body.
 | `json` | `unknown` | - |
 | `body` | `string` | - |
 | `timeout` | `number` | `actionTimeout` |
+| `redirect` | `'follow' \| 'manual' \| 'error'` | `'follow'` |
 | `method` | `string` | `'GET'` |
 
 - `json` is sent through `JSON.stringify`, with
@@ -75,6 +76,10 @@ A `GET` or `HEAD` request takes no body.
   and binary bodies are not supported yet.
 - `timeout` is in milliseconds, at most 2147483647. `0` sets no timeout of
   its own, so only the running test's or hook's budget bounds the call.
+- `redirect` sets how redirects are handled. `'follow'` follows them;
+  `'manual'` returns the 3xx response as is, with its `location` and
+  `set-cookie` headers; `'error'` fails the call with `ACTION_FAILED` when
+  the server redirects.
 - `method` is an option of `fetch` only.
 
 ### `WebResponse`
@@ -92,7 +97,8 @@ engine's [`browser.waitForResponse`](/reference/web#waitforresponse) and
 | `text()` | `Promise<string>` |
 | `json<T>()` | `Promise<T>` |
 
-- `url` is the URL after redirects. Redirects are followed.
+- `url` is the URL after redirects when `redirect` is `'follow'`, or the
+  requested URL when `redirect` is `'manual'`.
 - `headers` has lower-cased names. Several `set-cookie` values are joined
   with `\n`.
 - `text()` decodes the body as UTF-8. `json()` parses it, `unknown` unless
@@ -121,7 +127,7 @@ URL goes where it names, on any target.
 | --- | --- |
 | `APP_URL_REQUIRED` | The URL is a path and the target declares no `app.url`. |
 | `POLICY_DENIED` | The URL is malformed, or has a scheme other than `http` or `https`, `about:blank` included. Also a `Secret` in `json`. |
-| `INVALID_ARGUMENT` | The URL is not a non-empty string or has credentials (`https://user:pass@...`), an option has the wrong type or is one `request` does not take (Playwright's `data` or `params`, say), `headers` is not a plain object, a header name or value is invalid, the header is `content-length`, `host`, or `sec-fetch-mode`, which `fetch` sets itself, the header is `expect`, `keep-alive`, `transfer-encoding`, or `upgrade`, which `fetch` cannot send, a `connection` header other than `close` or `keep-alive`, `json` and `body` are both set, `json` is not JSON-safe, a `GET` or `HEAD` request has a body, `timeout` is negative or over 2147483647, or the method is not an HTTP method name or is `CONNECT`, `TRACE`, or `TRACK`. |
+| `INVALID_ARGUMENT` | The URL is not a non-empty string or has credentials (`https://user:pass@...`), an option has the wrong type or is one `request` does not take (Playwright's `data` or `params`, say), `headers` is not a plain object, a header name or value is invalid, the header is `content-length`, `host`, or `sec-fetch-mode`, which `fetch` sets itself, the header is `expect`, `keep-alive`, `transfer-encoding`, or `upgrade`, which `fetch` cannot send, a `connection` header other than `close` or `keep-alive`, `accept-encoding` combined with `range` (where `fetch` appends `identity`), `json` and `body` are both set, `json` is not JSON-safe, a `GET` or `HEAD` request has a body, `timeout` is negative or over 2147483647, `redirect` is not `'follow'`, `'manual'`, or `'error'`, or the method is not an HTTP method name or is `CONNECT`, `TRACE`, or `TRACK`. |
 
 ## Steps and timeouts
 
@@ -140,7 +146,7 @@ test that runs out of time fails with its usual timeout error.
 
 | Throws | When |
 | --- | --- |
-| `ACTION_FAILED` | The call ran past its `timeout`, or the network failed: the server refused the connection, or the host does not resolve. |
+| `ACTION_FAILED` | The call ran past its `timeout`, the server redirected with `redirect: 'error'`, or the network failed: the server refused the connection, or the host does not resolve. |
 
 e2e does not retry a call. Node's `fetch` itself sends a request again one
 time when the server answers `421 Misdirected Request`. To retry a read, wrap it in
@@ -186,6 +192,8 @@ export interface APIRequestOptions {
   readonly body?: string;
   /** Timeout in milliseconds; defaults to `actionTimeout`. 0 sets none of its own, so only the running test's or hook's budget bounds the call. */
   readonly timeout?: number;
+  /** How redirects are handled; `'follow'` by default. `'manual'` returns the 3xx response as is; `'error'` fails the call with `ACTION_FAILED`. */
+  readonly redirect?: 'follow' | 'manual' | 'error';
 }
 
 /** `request.fetch` options: the method beside the rest. */
