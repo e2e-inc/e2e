@@ -326,6 +326,24 @@ describe('readExploreChange', () => {
     expect(await changeOf(dir, undefined, { number: undefined, title: 'Change a', body: '<!-- template -->\n' })).toMatchObject({ text: expect.stringContaining('Pull request: Change a\n(no description)\n\nCommit messages') });
   });
 
+  it('keeps a long paragraph of the description whole, and cuts one past the budget between characters', async () => {
+    const { dir } = branchWith({ 'a.txt': 'a\n' }, { 'a.txt': 'b\n' });
+    const paragraph = `${'The cart shows a bulk discount. '.repeat(30)}It applies at 3 or more copies.`;
+    expect((await changeOf(dir, undefined, { number: '#1', title: 'Discount', body: paragraph })).text).toContain(`Pull request #1: Discount\n  ${paragraph}\n\nCommit messages`);
+    const { text } = await changeOf(dir, undefined, { number: '#1', title: 'Discount', body: '標'.repeat(1_000) });
+    const section = text.slice(0, text.indexOf('\n\nCommit messages')).slice(text.indexOf('Pull request'));
+    expect(section).toMatch(/標…$/u);
+    expect(Buffer.byteLength(section)).toBeLessThanOrEqual(1_500);
+  });
+
+  it('keeps an HTML comment the page shows: in code, or unclosed inside a line', async () => {
+    const { dir } = branchWith({ 'a.txt': 'a\n' }, { 'a.txt': 'b\n' });
+    const body = ['Escape a stray `<!--` in attributes.', '', '<!-- Describe the change. -->', '```html', '<!-- header -->', '```', 'Users see the title. A lone <!-- stays too.'].join('\n');
+    const { text } = await changeOf(dir, undefined, { number: '#1', title: 'Escape comments', body });
+    expect(text).toContain(['  Escape a stray `<!--` in attributes.', '', '  ```html', '  <!-- header -->', '  ```', '  Users see the title. A lone <!-- stays too.'].join('\n'));
+    expect(text).not.toContain('Describe the change');
+  });
+
   it('redacts a configured secret in the pull request', async () => {
     const token = `tok_${'k'.repeat(40)}`;
     const { redactFragments } = staticSecretLedger(new Map([['TOKEN', { name: 'TOKEN', purpose: 'generic-secret', value: token }]]));

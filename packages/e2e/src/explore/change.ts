@@ -382,7 +382,8 @@ function renderBrief(
  * commit message's body is, so no line of it reads as one of the brief's own.
  * Both are redacted before anything else; HTML comments, which a description
  * template leaves for its author and the page never shows, are dropped, and
- * a description cut to fit ends in an ellipsis.
+ * a description cut to fit ends in an ellipsis. Its lines are not capped as
+ * a patch's are: a paragraph is often one long line.
  */
 function pullRequestSection(pullRequest: PullRequest, redact: (text: string) => string): string {
   const title = bound(redact(pullRequest.title).replaceAll(/\p{Cc}+/gu, ' ').trim(), MAX_LINE_CHARS);
@@ -390,14 +391,34 @@ function pullRequestSection(pullRequest: PullRequest, redact: (text: string) => 
   const body = redact(pullRequest.body)
     .replaceAll(/\r\n?/gu, '\n')
     .replaceAll(/[^\P{Cc}\n\t]/gu, '')
-    .replaceAll(/<!--[^]*?(?:-->|$)/gu, '')
+    .replaceAll(HIDDEN_COMMENT, (match, ticks: string | undefined) => (ticks === undefined ? '' : match))
     .replaceAll(/[^\S\n]+$/gmu, '')
     .replaceAll(/\n{3,}/gu, '\n\n')
     .trim();
   if (body === '') return `${head}\n(no description)`;
-  const indented = body.replaceAll(/\n(?=.)/gu, '\n  ');
-  const cut = cutLines(`  ${indented}`, PULL_REQUEST_BUDGET_BYTES - Buffer.byteLength(head) - Buffer.byteLength('\n\n  …'));
-  return `${head}\n${cut.text}${cut.cutLines === 0 ? '' : '\n  …'}`;
+  const indented = `  ${body.replaceAll(/\n(?=.)/gu, '\n  ')}`;
+  const room = PULL_REQUEST_BUDGET_BYTES - Buffer.byteLength(head) - 1;
+  return `${head}\n${Buffer.byteLength(indented) <= room ? indented : cutBytes(indented, room)}`;
+}
+
+/**
+ * An HTML comment the page never shows: a closed one, or an unclosed one that
+ * starts a line and so hides the rest. A code span or block comes first and
+ * is kept, `ticks` set, since the page shows a comment written in one.
+ */
+const HIDDEN_COMMENT = /(`+)[^]*?\1|<!--[^]*?-->|^ {0,3}<!--[^]*/gmu;
+
+/** The longest start of `text` within `bytes`, its closing ellipsis included, cut between characters. */
+function cutBytes(text: string, bytes: number): string {
+  let end = 0;
+  let used = Buffer.byteLength('…');
+  for (const char of text) {
+    const size = Buffer.byteLength(char);
+    if (used + size > bytes) break;
+    used += size;
+    end += char.length;
+  }
+  return `${text.slice(0, end).trimEnd()}…`;
 }
 
 /** `+3 -1; full patch below`, or why no patch, or only part of one, follows. */
