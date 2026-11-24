@@ -44,7 +44,7 @@ The wizard picks the engines (web, mobile, or both) and a model provider (**Skip
 and offers to install this skill, register the MCP server for your coding
 agent, and install dependencies. `--yes` picks the web engine (Playwright) and Vercel AI
 Gateway, installs the skill in `.agents/skills/` (`.claude/skills/e2e`
-symlinks to it), registers MCP in `.mcp.json`, `.cursor/mcp.json`, and `.codex/config.toml`, skips
+symlinks to it) with a line in `AGENTS.md` and `CLAUDE.md` that points at it, registers MCP in `.mcp.json`, `.cursor/mcp.json`, and `.codex/config.toml`, skips
 installing dependencies. A flag per question overrides one default:
 `--engine` (`web,mobile` for both), `--gateway`, `--endpoint`, `--skills`,
 `--mcp` (comma-separated locations, or `none`), `--ci github-actions`, `--ci gitlab`, or `--ci none` (a
@@ -64,8 +64,12 @@ install needs a separate entry (topic `mcp`).
 
 Init adds dependencies and a `test:e2e` script to `package.json`, writes
 `e2e.config.ts` and `tests/example.e2e.ts`, updates `.gitignore`, leaves
-existing configs and tests alone. Re-run after upgrading to refresh skill and
-MCP entries.
+existing configs and tests alone. Re-running is safe: beside an existing
+config it writes no example test and adds the engine and model packages the
+config imports that `package.json` lacks. It adds none when `package.json`
+declares another `e2e` than the one running init (an older pin under
+`npx e2e@latest init`): it names them, so run the project's own `e2e init`
+after installing. Re-run after upgrading to refresh skill and MCP entries.
 
 Without the wizard (`ai`, Vercel AI SDK v7, only for `agent.*` steps):
 
@@ -239,6 +243,7 @@ start a script that brings them up and serves the app.
 | --- | --- |
 | `browser` | `'chromium'` (default), `'firefox'`, `'webkit'`, or a `BrowserProvider` leasing hosted browsers over CDP ([`browserRun()`](https://e2e.com/docs/integrations/browser-run) from `@e2e-dev/browser-run`, `kernel()` from `@e2e-dev/kernel`, `notte()` from `@e2e-dev/notte`, `smol()` from `@e2e-dev/smol`, `lightpanda()` from `@e2e-dev/lightpanda`, `moli()` from `@e2e-dev/moli`, `testmuBrowsers()` from `@e2e-dev/testmu/web`, `e2bBrowsers()` from `@e2e-dev/e2b/web`, or your own), which implies chromium and excludes `connect`; any other name is `INVALID_CONFIG` at load. Scope `'worker'` (default): one browser per worker slot from `prepare` to `finish`; `'attempt'`: one per attempt, with `reconnectEndpoint`'s limits (`lightpanda()`, `moli()`, and `testmuBrowsers()` are worker scope only; `notte()` is attempt scope only). |
 | `viewport` | `{ width, height }` in whole pixels, default 1280x720, else `INVALID_CONFIG` at load; `null` follows the browser window (hosted live view, headed run). On a headed hosted browser (Kernel) use `null` and size the service's screen; a fixed size gives a smaller, unmaximized window. |
+| `deviceScaleFactor` | Device pixels per CSS pixel (`window.devicePixelRatio`), default 1. At 2, saved screenshots (`app.screenshot()`, a failure's, an `agent.assert`'s) are twice the viewport's size on each side; the factor does not change the image the model reads or the one `toHaveScreenshot` compares. Not with `viewport: null`. |
 | `connect` | `{ cdpEndpoint }` attaches to a remote Chromium over CDP; `cdpEndpoint` is required, and both it and `reconnectEndpoint` are resolvers `(signal) => url` or `(signal) => ({ endpoint, headers })` for authenticated CDP connections, not strings, else `INVALID_CONFIG` at load. With `reconnectEndpoint` it rides one persistent default context, needs a fresh browser from `cdpEndpoint` every attempt, and reconnects only to the original browser and page. |
 | `headers` | Sent to the app's origin only (scheme, host, and port of `app.url`; Vercel's `x-vercel-protection-bypass`, ngrok's `ngrok-skip-browser-warning`), `agent.act` included; `credentialOrigins: ['https://api.example.com']` adds exact origins for `headers` and `basicAuth`. A request keeps them through its redirects, to any origin. Disables the browser HTTP cache and service workers. |
 | `basicAuth` | `{ username, password }` for a `401` challenge from the app's origin, or one `credentialOrigins` lists (a redirect to `www` or `https:` is another origin; WebKit answers any origin when one is on a default port or an IPv6 host); `password` may be `secrets.get('name')`, resolved per attempt and redacted like any secret, the base64 `Authorization` credential too. |
@@ -256,7 +261,7 @@ start a script that brings them up and serves the app.
   the handle (a reference, not the value) in `app.command.env`, a template
   literal, or `context`; read those from `process.env`.
 - `reconnectEndpoint` or an attempt-scoped provider rides one persistent
-  context without `headers`, `basicAuth`, `userAgent`, `locale`, `timezoneId`, `app.clearState()`, or
+  context without `headers`, `basicAuth`, `userAgent`, `locale`, `timezoneId`, `deviceScaleFactor`, `app.clearState()`, or
   session state. Recovery never repeats a dispatched operation; exhausting
   the budget is `OPERATION_TIMEOUT`. Without `reconnectEndpoint` a dropped
   connection is reacquired at the next attempt.
