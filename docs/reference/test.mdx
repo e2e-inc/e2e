@@ -885,8 +885,8 @@ describe('reports', { parallel: true }, () => {
   again. A module the file imports stays one instance for the worker,
   unless it declares tests or hooks itself or imports a module that does:
   then it is imported again too.
-- Declare shared tests and hooks in ES modules of your project. A module
-  loaded with `require()`, a package from `node_modules`, and every imported
+- Declare shared tests and hooks in ES modules of your project. A CommonJS
+  module, a package from `node_modules`, and every imported
   module on Bun stays one instance, so the tests and hooks it declares
   reach the first import of a file only.
 - A [serial](#serial) group inside a parallel scope still runs as one unit

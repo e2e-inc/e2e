@@ -7,7 +7,7 @@ import { onBun } from '../internal/runtime.ts';
 import { withConfigSecretReferences } from '@e2e-dev/core/lib/secrets';
 import type { E2EConfig } from '../run-types.ts';
 import { explainModuleError } from './diagnose.ts';
-import { freshModuleURL, registerLoader } from './esm-hooks.ts';
+import { duringFreshLoad, freshModuleURL, registerLoader } from './esm-hooks.ts';
 import { CONFIG_NAMES, JS_CONFIG_NAMES, TS_CONFIG_NAMES } from './names.ts';
 
 /** Spellings a config author might reach for that the loader does not read. */
@@ -134,7 +134,7 @@ async function importFresh(absolutePath: string, cacheKey: string, graph: boolea
   const key = `${cacheKey}-${imports}`;
   const graphName = graph === true ? key : graph === false ? undefined : graph;
   if (onBun) return (await import('./bun-loader.ts')).importFreshOnBun(absolutePath, graphName);
-  return import(freshModuleURL(absolutePath, key, graphName));
+  return duringFreshLoad(key, () => import(freshModuleURL(absolutePath, key, graphName)));
 }
 
 /** Loads and returns the raw default export of a config module. */

@@ -143,7 +143,7 @@ function startFixture(
  * imported again (after a failed test, for a serial group or a setup test),
  * so it gets a new instance; one declared in a module the file imports
  * keeps its instance, unless that module registers a test or a hook itself
- * and so evaluates again with the file.
+ * or imports a module that does, and so evaluates again with the file.
  */
 export class WorkerFixturePool {
   private readonly instances = new Map<FixtureDefinition, Promise<unknown>>();

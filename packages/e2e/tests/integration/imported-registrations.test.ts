@@ -274,4 +274,30 @@ test('${name}', async () => { expect(state.libraryLoads).toBe(1); });`;
     },
     120_000,
   );
+
+  it.each([
+    ['the file that calls it imports the module too', '', `import './helper.ts';\n`],
+    ['an earlier file imported the module', `import './helper.ts';\n`, ''],
+  ])(
+    'reach a file one time through a shared module’s function that imports the module, when %s',
+    async (_shape, importInA, importInB) => {
+      const { outcome, project } = await runProjectWithConfigFile(
+        {
+          ...SUPPORT,
+          // One instance for the worker: it registers nothing, and no module it imports statically does.
+          'tests/support.ts': `export async function loadHelper(): Promise<void> { await import('./helper.ts'); }\n`,
+          'tests/a.e2e.ts': `import { test } from 'e2e';\n${importInA}import './support.ts';\n\ntest('a', async () => {});`,
+          'tests/b.e2e.ts': `import { test } from 'e2e';\n${importInB}import { loadHelper } from './support.ts';\n\nawait loadHelper();\ntest('b', async () => {});`,
+        },
+        { configSource: workerFakeConfigSource(1) },
+      );
+      project.cleanup();
+      expect(outcome.report.run.errors).toEqual([]);
+      expect(outcome.results.filter((result) => result.test.file === 'tests/b.e2e.ts').map((result) => [result.test.title, result.status])).toEqual([
+        ['from the helper', 'passed'],
+        ['b', 'passed'],
+      ]);
+    },
+    120_000,
+  );
 });

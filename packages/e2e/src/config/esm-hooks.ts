@@ -82,6 +82,23 @@ const registrars = new Set<string>();
  * file turns out to be a registrar while the load is still importing.
  */
 const firstLoads = new Map<string, string>();
+/**
+ * The keys of the fresh loads importing now, the latest last. A file that
+ * carries no query is one instance for every load, so an import it runs
+ * (a function of it that a test file calls, say) belongs to the load that
+ * is importing, not to the load that first reached the file.
+ */
+const importing: string[] = [];
+
+/** Runs `load`, the import of a module under `key`, as the fresh load importing now. */
+export async function duringFreshLoad<T>(key: string, load: () => Promise<T>): Promise<T> {
+  importing.push(key);
+  try {
+    return await load();
+  } finally {
+    importing.splice(importing.lastIndexOf(key), 1);
+  }
+}
 
 /** Makes `file`, and every project file that reaches it by import, a registrar. */
 function addRegistrar(file: string): void {
@@ -105,7 +122,7 @@ function inFreshLoad(parentURL: string | undefined, resolution: Resolution): Res
   if (known === undefined) importers.set(childFile, (known = new Set()));
   known.add(parentFile);
   if (registrars.has(childFile)) addRegistrar(parentFile);
-  const key = parent.searchParams.get(FRESH_PARAM) ?? firstLoads.get(parentFile);
+  const key = parent.searchParams.get(FRESH_PARAM) ?? importing.at(-1);
   if (key === undefined) return resolution;
   if (!firstLoads.has(childFile)) firstLoads.set(childFile, key);
   if (!registrars.has(childFile) || firstLoads.get(childFile) === key || child.searchParams.has(FRESH_PARAM)) return resolution;
