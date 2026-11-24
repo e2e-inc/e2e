@@ -12,7 +12,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { RunOutcome } from '../../src/run/runner.ts';
-import { createFakeEngine, FAKE_APP, type FakeEngineHandle } from '../helpers/fake-engine.ts';
+import { createFakeEngine, FAKE_APP, FAKE_APP_URL, type FakeEngineHandle } from '../helpers/fake-engine.ts';
 import { assertValidReport } from '../helpers/report-schema.ts';
 import { engineFailure } from '../helpers/engine-runtime.ts';
 import { resultByTitle, runProject, runProjectWithConfigFile, type FixtureProject } from '../helpers/run-project.ts';
@@ -303,7 +303,7 @@ const test = base.extend({ guest: actor() });
 
 test('its actor fails late', async ({ app, guest }) => {
   await app.open('/board');
-  await guest.app.open('/board');
+  await guest.app.open('/board/guest');
 });
 `,
       },
@@ -313,6 +313,8 @@ test('its actor fails late', async ({ app, guest }) => {
       const result = resultByTitle(outcome, 'its actor fails late');
       expect(result.status).toBe('failed');
       expect(result.attempts[0]!.error).toMatchObject({ phase: 'body', message: expect.stringMatching(/^actor "guest": .*a route handler threw$/) });
+      // The screen at the failure is the one of the session the failure came from.
+      expect(result.attempts[0]!.failure?.url).toBe(`${FAKE_APP_URL}/board/guest`);
     } finally {
       project.cleanup();
     }

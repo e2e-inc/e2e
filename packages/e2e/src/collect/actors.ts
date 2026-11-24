@@ -7,12 +7,13 @@
  */
 
 import type { ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
-import { CollectionError } from '@e2e-dev/core/lib/internal/errors';
+import type { CollectionError } from '@e2e-dev/core/lib/internal/errors';
 import { didYouMean } from '@e2e-dev/core/lib/internal/suggest';
-import type { Collection, CollectedTest } from './collect.ts';
-import { declarationSite, FixtureUseError } from './fixture-errors.ts';
-import { planAttempt, type FixturePlan } from './fixture-plan.ts';
-import { hooksFor, type FixtureDefinition, type ModuleRegistration, type TestHook } from './registry.ts';
+import type { CollectedTest } from './collect.ts';
+import { FixtureUseError } from './fixture-errors.ts';
+import type { FixturePlan } from './fixture-plan.ts';
+import type { AttemptPlans } from './fixture-use.ts';
+import type { FixtureDefinition } from './registry.ts';
 
 /** One actor a test opens. */
 export interface PlannedActor {
@@ -101,16 +102,12 @@ function resolvedActors(plan: FixturePlan, own: ResolvedTarget, targets: readonl
  * and target however many agents and repeats it runs as.
  */
 export class ActorPlans {
-  private readonly registrations: ReadonlyMap<string, ModuleRegistration>;
-  private readonly planned = new Map<string, { readonly actors: readonly PlannedActor[] } | { readonly error: FixtureUseError }>();
+  private readonly planned = new Map<string, { readonly actors: readonly PlannedActor[] } | { readonly error: CollectionError }>();
 
   constructor(
-    collection: Collection,
+    private readonly plans: AttemptPlans,
     private readonly targets: readonly ResolvedTarget[],
-    private readonly projectRoot: string,
-  ) {
-    this.registrations = new Map(collection.files.map((file) => [file.file, file.registration]));
-  }
+  ) {}
 
   /**
    * The actors `test` opens on `target`. A fixture rule the test breaks
@@ -121,9 +118,7 @@ export class ActorPlans {
    */
   of(test: CollectedTest, target: ResolvedTarget): readonly PlannedActor[] {
     const planned = this.plan(test, target);
-    if ('error' in planned) {
-      throw new CollectionError(`${declarationSite(planned.error, this.projectRoot, test.file)}: ${planned.error.message}`, { cause: planned.error });
-    }
+    if ('error' in planned) throw planned.error;
     return planned.actors;
   }
 
@@ -137,27 +132,21 @@ export class ActorPlans {
     return 'error' in planned ? [] : actorSessions(planned.actors);
   }
 
-  private plan(test: CollectedTest, target: ResolvedTarget): { readonly actors: readonly PlannedActor[] } | { readonly error: FixtureUseError } {
+  private plan(test: CollectedTest, target: ResolvedTarget): { readonly actors: readonly PlannedActor[] } | { readonly error: CollectionError } {
+    // No chain fixture, no actor: most tests, which need no plan here.
+    if (!test.fixtures.some((definition) => definition.actor !== undefined)) return { actors: [] };
     const key = `${target.name}::${test.id}`;
-    const known = this.planned.get(key);
-    if (known !== undefined) return known;
-    let planned: { readonly actors: readonly PlannedActor[] } | { readonly error: FixtureUseError };
-    try {
-      planned = { actors: this.resolve(test, target) };
-    } catch (cause) {
-      if (!(cause instanceof FixtureUseError)) throw cause;
-      planned = { error: cause };
+    let planned = this.planned.get(key);
+    if (planned === undefined) {
+      const attempt = this.plans.plan(test, target);
+      planned = 'error' in attempt ? attempt : this.plans.checked(test, () => ({ actors: this.resolve(test, target, attempt.plan) }));
+      this.planned.set(key, planned);
     }
-    this.planned.set(key, planned);
     return planned;
   }
 
-  private resolve(test: CollectedTest, target: ResolvedTarget): readonly PlannedActor[] {
-    // No chain fixture, no actor: most tests, which need no plan here.
-    if (!test.fixtures.some((definition) => definition.actor !== undefined)) return [];
-    const registration = this.registrations.get(test.file);
-    const hooks = registration === undefined ? [] : hooksFor(registration, test).filter((hook): hook is TestHook => hook.kind === 'beforeEach' || hook.kind === 'afterEach');
-    const actors = plannedActors(planAttempt(target, test, hooks), target, this.targets);
+  private resolve(test: CollectedTest, target: ResolvedTarget, plan: FixturePlan): readonly PlannedActor[] {
+    const actors = plannedActors(plan, target, this.targets);
     const [first] = actors;
     if (first !== undefined && test.serialId !== undefined) {
       throw new FixtureUseError(

@@ -10,7 +10,7 @@ import { attemptKeep, attemptVideo, pairRecording, type AttemptRecordings } from
 import type { Capability, RecordingMode, TestOptions } from '@e2e-dev/core/lib/types';
 import { excludingEntry, type Collection, type CollectedTest, type UncollectedFile } from './collect.ts';
 import { ActorPlans, actorSessions, type ActorSession, type PlannedActor } from './actors.ts';
-import { assertFixtureUse } from './fixture-use.ts';
+import { assertFixtureUse, AttemptPlans } from './fixture-use.ts';
 import { groupChain } from './registry.ts';
 import type { SkipInfo } from '@e2e-dev/core/lib/run/records';
 
@@ -360,7 +360,8 @@ export function select(
 
   assertSerialAgentsAgree(collection.tests, optionsByTest);
   const sessionProducers = collectSessionProducers(collection.tests);
-  const actorPlans = new ActorPlans(collection, config.targets, config.projectRoot);
+  const attemptPlans = new AttemptPlans(collection, config.projectRoot);
+  const actorPlans = new ActorPlans(attemptPlans, config.targets);
   const pairFilters =
     filters.lastFailed === undefined
       ? filters
@@ -404,7 +405,7 @@ export function select(
   const promoted = applySessionSelection([...withActors, ...actorSetups], sessionProducers, collection.uncollected);
   // A target nothing selected is in the run for the setups an actor needs there, and for nothing else of it.
   const withSessions = planActors(promoted.filter((pair) => targets.includes(pair.target) || pair.disposition === 'run'), 'setup');
-  assertFixtureUse(withSessions, collection, config.projectRoot);
+  assertFixtureUse(withSessions, attemptPlans);
 
   const runnableOrdinary = withSessions.filter(
     (pair) => pair.disposition === 'run' && pair.test.kind === 'test',

@@ -23,14 +23,13 @@ import { createFixtures } from '@e2e-dev/core/lib/run/fixtures';
 import type { GuestMirror } from '@e2e-dev/core/lib/run/guest-steps';
 import { PreparedEngines } from '@e2e-dev/core/lib/run/provision';
 import type { RunError } from '@e2e-dev/core/lib/run/records';
-import { holdSessionSecrets, sessionLedger } from '@e2e-dev/core/lib/run/secrecy';
+import { sessionLedger } from '@e2e-dev/core/lib/run/secrecy';
 import { targetIdentity } from '@e2e-dev/core/lib/run/sessions';
-import type { TargetSession } from '@e2e-dev/core/lib/engine/surface';
 import { launchAttempt, reserveAttempt, type AttemptPolicy, type AttemptWorker, type LaunchedAttempt, type StandaloneAttempt } from '@e2e-dev/core/lib/run/standalone-attempt';
 import type { WorkerModels } from '@e2e-dev/core/lib/run/worker-models';
 import type { PlannedActor } from '../collect/actors.ts';
 import type { FixtureDefinition } from '../collect/registry.ts';
-import type { FailureScreen } from './failure-evidence.ts';
+import type { DrivenSession } from './driven-sessions.ts';
 import type { AttemptGuestSessions } from './guests.ts';
 
 /** One other target's engine as a worker holds it: prepared and initialized for this worker alone. */
@@ -89,11 +88,11 @@ export class ActorHosts {
       };
       await sessions?.dispose();
       errors.push(...(sessions?.collectedRunErrors() ?? []));
-      await engines.finish({ runId, hostId, env: env as NodeJS.ProcessEnv, timeoutMs: config.cleanupTimeout, notice, onFailure: failed }).catch(failed);
+      await engines.finish({ runId, hostId, env, timeoutMs: config.cleanupTimeout, notice, onFailure: failed }).catch(failed);
       return errors;
     };
     try {
-      const prepared = await engines.prepare(target, 1, { runId, hostId, projectRoot: config.projectRoot, env: env as NodeJS.ProcessEnv, signal: interruptSignal, headed, notice });
+      const prepared = await engines.prepare(target, 1, { runId, hostId, projectRoot: config.projectRoot, env, signal: interruptSignal, headed, notice });
       sessions = new EngineSessions({ ...this.options, target, hostId, workerSlot: 0, env: { ...prepared?.env, ...env } });
       await sessions.initEngineOnce();
     } catch (cause) {
@@ -102,6 +101,12 @@ export class ActorHosts {
     }
     return { sessions, close };
   }
+}
+
+/** `cause` as the attempt reports it: the failure it is, told as the actor's. */
+function actorError(name: string, cause: unknown): E2EError {
+  const error = classifyError(cause);
+  return new E2EError(error.category, error.code, `actor "${name}": ${error.message}`, { cause, retryable: error.retryable, ...(error.details === undefined ? {} : { details: error.details }) });
 }
 
 /** Where an actor keeps its artifacts under the attempt's directory. */
@@ -146,16 +151,9 @@ export interface AttemptActorsOptions {
   readonly models: WorkerModels;
 }
 
-/**
- * Opens the actors an attempt's fixture plan lists, or nothing when it lists
- * none. A serial group's members share one session, which an actor opened
- * for one of them would not, so a member that names one is refused.
- */
-export async function openActors(actors: readonly PlannedActor[], options: AttemptActorsOptions & { readonly serial: boolean }): Promise<AttemptActors | undefined> {
+/** Opens the actors an attempt's fixture plan lists, or nothing when it lists none. */
+export async function openActors(actors: readonly PlannedActor[], options: AttemptActorsOptions): Promise<AttemptActors | undefined> {
   if (actors.length === 0) return undefined;
-  if (options.serial) {
-    throw new E2EError('configuration', 'UNSUPPORTED_CAPABILITY', `a test in a serial group names actor "${actors[0]!.name}": the group's tests share one session, and an actor is opened for one test`);
-  }
   const opened = new AttemptActors(options);
   await opened.open(actors);
   return opened;
@@ -163,8 +161,6 @@ export async function openActors(actors: readonly PlannedActor[], options: Attem
 
 export class AttemptActors {
   private readonly opened = new Map<FixtureDefinition, OpenActor>();
-  /** Stops sharing the values `holdSecrets` kept; nothing before it. */
-  private releaseSecrets: (() => void)[] = [];
 
   constructor(private readonly options: AttemptActorsOptions) {}
 
@@ -178,8 +174,7 @@ export class AttemptActors {
       try {
         this.opened.set(actor.definition, await this.openOne(actor));
       } catch (cause) {
-        const error = classifyError(cause);
-        throw new E2EError(error.category, error.code, `actor "${actor.name}": ${error.message}`, { cause, retryable: error.retryable, ...(error.details === undefined ? {} : { details: error.details }) });
+        throw actorError(actor.name, cause);
       }
     }
   }
@@ -207,53 +202,28 @@ export class AttemptActors {
   }
 
   /**
-   * The screen of the actor named `name` as the evidence of a failure on one
-   * of its steps. Undefined when no actor of the attempt has that name: the
-   * step is of a session the test opened with `launch()`.
+   * Each actor as a session the attempt drives (`driven-sessions.ts`): what
+   * its engine holds from a path no step awaited fails the test under the
+   * actor's name, and its screen is told as the actor's.
    */
-  evidenceOf(name: string): FailureScreen | undefined {
-    const open = [...this.opened.values()].find((each) => each.actor.name === name);
-    if (open === undefined || open.closed()) return undefined;
-    const { session } = open.attempt;
-    const appBase = open.actor.target.app.base;
-    return {
-      session, ownStep: true, appBase, appOrigin: appBase?.origin,
-      actor: { name, dir: path.join(...actorSegments(name)) },
-      ledger: sessionLedger(session, this.options.config.allSecrets),
-      operation: (signal, timeoutMs) => open.sessions.op(session, timeoutMs, signal),
-    };
-  }
-
-  /**
-   * Keeps the secret values the test's `own` session and every actor know
-   * shared while the attempt closes them one after another, so what each
-   * writes at its end (a text download) is still rewritten for what the
-   * others learned. `settleRecordings` lets them go.
-   */
-  holdSecrets(own: TargetSession | null): void {
-    const sessions = [...(own === null ? [] : [own]), ...[...this.opened.values()].map((open) => open.attempt.session)];
-    this.releaseSecrets = sessions.map((session) => holdSessionSecrets(session, this.options.config.allSecrets));
-  }
-
-  /**
-   * Collects the failures each actor's engine holds from a path no step
-   * awaited (a route or dialog handler that threw), as the attempt collects
-   * its own session's: each fails the test. Returns them, named after their
-   * actor.
-   */
-  async lateFailures(): Promise<readonly E2EError[]> {
-    const failures: E2EError[] = [];
-    for (const { actor, sessions, attempt, closed } of this.opened.values()) {
-      // A closed actor's attempt has ended on the engine: nothing of it is left to collect.
-      if (closed()) continue;
-      try {
-        await sessions.settleAttempt(attempt.session);
-      } catch (cause) {
-        const error = classifyError(cause);
-        failures.push(new E2EError(error.category, error.code, `actor "${actor.name}": ${error.message}`, { cause, retryable: error.retryable }));
-      }
-    }
-    return failures;
+  sessions(): readonly DrivenSession[] {
+    return [...this.opened.values()].map(({ actor: { name, target }, sessions, attempt: { session }, closed }) => ({
+      actor: name,
+      session,
+      settle: async () => {
+        // A closed actor's attempt has ended on the engine.
+        if (!closed()) await sessions.settleAttempt(session).catch((cause: unknown) => Promise.reject(actorError(name, cause)));
+      },
+      screen: () =>
+        closed()
+          ? undefined
+          : {
+              session, appBase: target.app.base, appOrigin: target.app.base?.origin,
+              actor: { name, dir: path.join(...actorSegments(name)) },
+              ledger: sessionLedger(session, this.options.config.allSecrets),
+              operation: (signal, timeoutMs) => sessions.op(session, timeoutMs, signal),
+            },
+    }));
   }
 
   /**
@@ -262,10 +232,9 @@ export class AttemptActors {
    * own, in the indexes of the test's record, where every session's steps
    * stand in the order they began: a check that passed on any session
    * confirms what an actor did before it. Call it once the actors are
-   * closed and every artifact settled; undefined for an interrupted attempt.
+   * closed; undefined for an interrupted attempt.
    */
   async settleRecordings(settlement: AttemptSettlement | undefined): Promise<void> {
-    for (const release of this.releaseSecrets.splice(0)) release();
     for (const { cache, steps } of this.opened.values()) {
       if (cache === undefined) continue;
       // The actor's first step the test's checks did not reach, in the indexes of its own record, which its cache staged

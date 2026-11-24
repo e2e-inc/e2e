@@ -63,7 +63,7 @@ export interface FailureEvidenceOptions {
 }
 
 /** The session a failure's evidence is read off, and what reading it takes. */
-export type FailureScreen = Pick<FailureEvidenceOptions, 'session' | 'ownStep' | 'actor' | 'ledger' | 'appOrigin' | 'appBase' | 'operation'>;
+export type FailureScreen = Pick<FailureEvidenceOptions, 'session' | 'actor' | 'ledger' | 'appOrigin' | 'appBase' | 'operation'>;
 
 /**
  * Captures the evidence of one failed attempt, or as much of it as the
