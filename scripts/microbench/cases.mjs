@@ -32,16 +32,22 @@ function snapshot(platform, scenario) {
   return JSON.parse(readFileSync(path.join(SNAPSHOTS, platform, `${scenario}.json`), 'utf8'));
 }
 
+/** Values with characters that JSON escapes and URL encoding rewrites, so each spelling below differs from the raw value. */
 const SECRETS = [
-  ['password', 'correct-horse-battery-staple'],
-  ['apiKey', 'sk-live-4f9a8b7c6d5e4f3a2b1c'],
+  ['password', 'correct horse/battery"staple'],
+  ['apiKey', 'sk-live+4f9a/8b7c=6d5e4f3a'],
   ['otp', '482913'],
 ];
 
+/** The spellings each secret is planted in: raw, JSON-escaped, URL-encoded, and upper case. */
+function spellings(value) {
+  return [value, JSON.stringify(value).slice(1, -1), encodeURIComponent(value), value.toUpperCase()];
+}
+
 /**
  * About 50 KB of screen text the way a model reads it: every committed tree
- * of the mobile benchmark, with each secret planted a few times in the
- * spellings redaction has to catch (raw, JSON-escaped, URL-encoded, upper case).
+ * of the mobile benchmark, with each secret planted once in every spelling
+ * redaction has to catch.
  */
 function screenText() {
   const lines = [];
@@ -51,22 +57,22 @@ function screenText() {
       lines.push(...readFileSync(path.join(dir, file), 'utf8').split('\n'));
     }
   }
-  const plants = SECRETS.flatMap(([, value]) => [
-    `textbox "Password" value=${JSON.stringify(value)}`,
-    `link "https://example.test/cb?token=${encodeURIComponent(value)}"`,
-    `text ${JSON.stringify(value.toUpperCase())}`,
-  ]);
+  const plants = SECRETS.flatMap(([, value]) => {
+    const [raw, json, url, upper] = spellings(value);
+    return [`textbox "Password" value=${raw}`, `text "${json}"`, `link "https://example.test/cb?token=${url}"`, `text ${upper}`];
+  });
   const step = Math.floor(lines.length / (plants.length + 1));
   plants.forEach((line, index) => lines.splice((index + 1) * step, 0, line));
   return lines.join('\n');
 }
 
-/** Checks a redacted text: every secret is gone and its marker is there. */
+/** Checks a redacted text: no spelling of any secret is left, and each planted spelling became a marker. */
 function checkRedacted(result) {
   assert.equal(typeof result, 'string');
   for (const [name, value] of SECRETS) {
-    assert(!result.includes(value), `${name} survived redaction`);
-    assert(result.includes(`<secret:${name}>`), `${name} has no marker`);
+    for (const spelling of spellings(value)) assert(!result.includes(spelling), `${name} survived redaction as ${JSON.stringify(spelling)}`);
+    const markers = result.split(`<secret:${name}>`).length - 1;
+    assert(markers >= spellings(value).length, `${name} left ${markers} markers for ${spellings(value).length} plants`);
   }
 }
 
