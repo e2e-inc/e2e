@@ -2,7 +2,8 @@
 
 import path from 'node:path';
 import { execCommand } from '../internal/package-manager.ts';
-import { declaringPackage, installedPackage, RUNNER } from '../internal/project-package.ts';
+import { installedPackage } from '../internal/installed-package.ts';
+import { declaringPackage, RUNNER } from '../internal/project-package.ts';
 import { parseVersion, specAccepts } from '../internal/semver.ts';
 import { MISSING_SKILL_MESSAGE, packagedSkillDirectory, readGuide, skillTopics } from './skill.ts';
 

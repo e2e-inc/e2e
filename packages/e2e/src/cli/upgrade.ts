@@ -14,10 +14,11 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import path from 'node:path';
 import picocolors from 'picocolors';
 import { z } from 'zod';
+import { installedPackage } from '../internal/installed-package.ts';
 import { detectWorkspacePackageManager, execCommand, LOCKFILE_NAMES, type PackageManager } from '../internal/package-manager.ts';
 import { isCiMode } from '@e2e-dev/core/lib/config/resolve';
 import { insideProjectRoot, realpathOfExisting } from '@e2e-dev/core/lib/internal/paths';
-import { DEPENDENCY_SECTIONS, installedPackage, RUNNER } from '../internal/project-package.ts';
+import { DEPENDENCY_SECTIONS, RUNNER } from '../internal/project-package.ts';
 import { compareVersions, parseVersion, satisfies } from '../internal/semver.ts';
 import type { UpgradeOutcome, UpgradeResult } from '../telemetry/events.ts';
 import { describeLinks, describeObstacles, findInstalledSkillDirs, planSkillInstall } from './init/agent-skill.ts';
@@ -255,18 +256,13 @@ function declaredPackages(dir: string, manifest: Manifest): { declared: Declared
     for (const [name, spec] of Object.entries(manifest[section] ?? {})) {
       if ((name !== RUNNER && !name.startsWith(SCOPE)) || seen.has(name)) continue;
       seen.add(name);
-      all.push({ name, section, spec, installed: installedVersion(dir, name) });
+      all.push({ name, section, spec, installed: installedPackage(dir, name)?.version });
     }
   }
   // The runner leads every list the command prints.
   all.sort((a, b) => Number(b.name === RUNNER) - Number(a.name === RUNNER));
   const registry = (entry: Declared): boolean => !NON_REGISTRY_SPEC.test(entry.spec.trim());
   return { declared: all.filter(registry), linked: all.filter((entry) => !registry(entry)) };
-}
-
-/** The version under the nearest `node_modules/<name>`, or undefined (not installed, or Plug'n'Play). */
-function installedVersion(dir: string, name: string): string | undefined {
-  return installedPackage(dir, name)?.version;
 }
 
 /** The registry the package manager would use when it set one for this process, else npm's. */
