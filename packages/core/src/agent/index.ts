@@ -242,7 +242,7 @@ export function createAgentFixture(runtime: AgentContext): Agent {
     act: (instruction, options, ...legacy: readonly unknown[]) =>
       runActStep(runtime, instruction, options, legacy.length),
     waitFor(rawCondition, options) {
-      const condition = validateInstruction(rawCondition, 'agent.waitFor');
+      const condition = validateInstruction(rawCondition, 'agent.waitFor', runtime.redact);
       rejectUnknownOptions('agent.waitFor', options, WAIT_FOR_KEYS);
       const params = judgmentParams(options?.params, 'agent.waitFor');
       const intervalMs = validateInterval(options?.interval);
@@ -282,10 +282,10 @@ export function createAgentFixture(runtime: AgentContext): Agent {
       );
     },
 
-    extract: (instruction, options) => extractData(validateInstruction(instruction, 'agent.extract'), options),
+    extract: (instruction, options) => extractData(validateInstruction(instruction, 'agent.extract', runtime.redact), options),
 
     assert(rawAssertion, options) {
-      const assertion = validateInstruction(rawAssertion, 'agent.assert');
+      const assertion = validateInstruction(rawAssertion, 'agent.assert', runtime.redact);
       rejectUnknownOptions('agent.assert', options, ASSERT_KEYS);
       if (options?.explore !== undefined && typeof options.explore !== 'boolean') {
         throw new TestError('INVALID_ARGUMENT', 'explore must be a boolean');

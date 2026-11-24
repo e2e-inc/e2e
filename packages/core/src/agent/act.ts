@@ -84,7 +84,7 @@ export async function runActStep(
   options: ActOptions | undefined,
   extraArguments = 0,
 ): Promise<ActResult> {
-  const normalized = validateInstruction(instruction, 'agent.act');
+  const normalized = validateInstruction(instruction, 'agent.act', runtime.redact);
   validateActOptions(options, extraArguments);
   const { projected, secrets, templates } = validateParams(options?.params, 'agent.act');
   return dispatchAgentStep(runtime, {

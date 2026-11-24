@@ -7,6 +7,7 @@
 import { ConfigurationError, TestError } from '../internal/errors.ts';
 import { validateJsonValue } from '../internal/json-value.ts';
 import { paramPointer, type ParamTemplate } from '../cache/template.ts';
+import { registerProviderKeys } from '../run/secrecy.ts';
 import { isSecret } from '../secrets.ts';
 import { isUnique } from '../params.ts';
 import type { ActOptions, AgentErrorCode, AgentParams, JsonValue, Secret } from '../types.ts';
@@ -22,20 +23,26 @@ const MAX_INSTRUCTION_BYTES = 8_192;
 export const MAX_PARAMS_BYTES = 65_536;
 const MAX_PARAMS_DEPTH = 32;
 
-/** Normalizes and bounds the instruction per spec 02. */
-export function validateInstruction(instruction: string, api: string): string {
+/**
+ * Bounds the instruction per spec 02 and returns it redacted, then normalized
+ * to NFC. Redaction comes first: NFC can compose a secret's last character
+ * with the one after it, and the composed text no longer matches the value.
+ * Provider keys are read again first, as a step does, so one a hook or the
+ * test set since the session opened is redacted here too.
+ */
+export function validateInstruction(instruction: string, api: string, redact: (text: string) => string): string {
   if (typeof instruction !== 'string' || instruction.trim() === '') {
     throw new TestError('INVALID_ARGUMENT', `${api} requires a non-empty instruction`);
   }
-  const normalized = instruction.normalize('NFC');
-  const bytes = new TextEncoder().encode(normalized).byteLength;
+  const bytes = new TextEncoder().encode(instruction.normalize('NFC')).byteLength;
   if (bytes > MAX_INSTRUCTION_BYTES) {
     throw new TestError(
       'INVALID_ARGUMENT',
       `${api} instruction is ${bytes} bytes; the maximum is ${MAX_INSTRUCTION_BYTES}`,
     );
   }
-  return normalized;
+  registerProviderKeys(process.env);
+  return redact(instruction).normalize('NFC');
 }
 
 const ACT_OPTION_KEYS: ReadonlySet<string> = new Set(['params', 'timeout', 'maxSteps', 'maxModelCalls', 'agent', 'onAction', 'onBeforeAction']);

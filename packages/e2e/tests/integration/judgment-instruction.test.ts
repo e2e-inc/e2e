@@ -4,6 +4,8 @@
  * refused before the judge is asked anything.
  */
 
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { extracted, fakeCalls, installFakeModel, judgment } from '../helpers/fake-model.ts';
 import { startFixtureApp, type FixtureApp } from '../helpers/fixture-app.ts';
@@ -26,6 +28,20 @@ const INVALID: ReadonlyArray<readonly [label: string, source: string, message: (
   ['over 8 KiB of two-byte text', `'\\u00e9'.repeat(4097)`, (api) => `${api} instruction is 8194 bytes; the maximum is 8192`],
 ];
 
+// One secret written decomposed, and one followed by a combining mark that NFC
+// composes into its last letter: only an instruction redacted before NFC keeps both out.
+const SECRET = 'synthetic-probe-cafe\u0301-777';
+const TAIL = 'synthetic-probe-tail';
+const REDACTED = 'look for <secret:probe> and <secret:tail>\u0301';
+// A provider key the test sets after the session opened, followed by a combining mark.
+const LATE_KEY = 'sk-proj-synthetic-late-key-0123456789abcdefghijklmnl';
+const LATE_REDACTED = 'see <secret:OPENAI_API_KEY>\u0301';
+
+const SECRET_CASES = Object.entries(CALLS).map(([api, call]) => ({
+  title: `${api} keeps a secret out of the model input however NFC changes it`,
+  body: `await ${call(`'look for synthetic-probe-cafe\\u0301-777 and synthetic-probe-tail\\u0301'`)};`,
+}));
+
 const CASES = Object.entries(CALLS).flatMap(([api, call]) =>
   INVALID.map(([label, source, message]) => ({
     title: `${api} refuses ${label}`,
@@ -36,12 +52,20 @@ const CASES = Object.entries(CALLS).flatMap(([api, call]) =>
 
 const SUITE = `import { test } from 'e2e';
 
-${CASES.map(
+${[...CASES, ...SECRET_CASES].map(
   ({ title, body }) => `test(${JSON.stringify(title)}, async ({ app, agent }) => {
   await app.open();
   ${body}
 });`,
 ).join('\n\n')}
+
+test('a provider key set during the test stays out of the model input', async ({ app, agent }) => {
+  await app.open();
+  process.env['OPENAI_API_KEY'] = ${JSON.stringify('sk-proj-synthetic-late-key-0123456789abcdefghijklmnl')};
+  await agent.assert('see sk-proj-synthetic-late-key-0123456789abcdefghijklmnl\\u0301');
+  await agent.waitFor('see sk-proj-synthetic-late-key-0123456789abcdefghijklmnl\\u0301', { interval: 100 });
+  await agent.extract('see sk-proj-synthetic-late-key-0123456789abcdefghijklmnl\\u0301', { schema: ${SCHEMA} });
+});
 
 test('assert hands the judge its instruction in NFC', async ({ app, agent }) => {
   await app.open();
@@ -74,7 +98,7 @@ describe('judgment instructions', () => {
       { 'tests/instruction.e2e.ts': SUITE },
       {
         appUrl: app.url,
-        config: { tests: 'tests/**/*.e2e.ts', agents: { default: { model: judge, judge } } },
+        config: { tests: 'tests/**/*.e2e.ts', agents: { default: { model: judge, judge } }, secrets: { probe: SECRET, tail: TAIL } },
       },
     );
     outcome = result.outcome;
@@ -103,9 +127,31 @@ describe('judgment instructions', () => {
       expect(resultByTitle(outcome, title).status).toBe('passed');
     }
     expect(fakeCalls.map((call) => call.instruction).toSorted()).toStrictEqual([
+      REDACTED,
+      REDACTED,
+      REDACTED,
+      LATE_REDACTED,
+      LATE_REDACTED,
+      LATE_REDACTED,
       'the café heading is visible',
       'the crème banner is visible',
       'the naïve counter',
     ]);
+  });
+
+  it('keeps a secret out of the model input and the report however NFC changes it', () => {
+    for (const { title } of SECRET_CASES) {
+      const result = resultByTitle(outcome, title);
+      expect(result.status).toBe('passed');
+      expect(result.attempts.at(-1)!.steps.map((step) => step.label)).toContain(REDACTED);
+    }
+    const written = [JSON.stringify(fakeCalls), readFileSync(path.join(project.dir, '.e2e', 'report.json'), 'utf8')];
+    expect(resultByTitle(outcome, 'a provider key set during the test stays out of the model input').status).toBe('passed');
+    for (const text of written) {
+      expect(text).not.toContain(LATE_KEY);
+      for (const value of [SECRET, SECRET.normalize('NFC'), TAIL, `${TAIL}\u0301`.normalize('NFC')]) {
+        expect(text).not.toContain(value);
+      }
+    }
   });
 });
