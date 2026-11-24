@@ -13,7 +13,7 @@ const CLI = fileURLToPath(new URL('../../dist/cli/bin.js', import.meta.url));
 const projects: FixtureProject[] = [];
 
 afterEach(() => {
-  for (const project of projects.splice(0)) project.cleanup();
+  for (const fixture of projects.splice(0)) fixture.cleanup();
 });
 
 function project() {
@@ -112,7 +112,7 @@ it('keeps both shared setup executions and links each shard’s local evidence',
   const setups = run.results.filter((row) => row.kind === 'setup');
   expect(setups).toHaveLength(1);
   expect(setups[0]?.status).toBe('failed');
-  expect(setups[0]?.attempts.map(({ shard, status }) => [shard, status])).toEqual([[1, 'failed'], [2, 'passed']]);
+  expect(setups[0]?.attempts.map((attempt) => [attempt.shard, attempt.status])).toEqual([[1, 'failed'], [2, 'passed']]);
   const root = path.join(fixture.dir, 'merged/results');
   const trace = readFileSync(path.join(root, resultSegment(setups[0]!), 'trace.md'), 'utf8');
   for (const index of [1, 2]) {

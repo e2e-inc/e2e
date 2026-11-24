@@ -94,7 +94,7 @@ async function readReport(file: string, optional = false): Promise<Report1Docume
     if (optional && (cause as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     // A JSON parse error can echo bytes from a hand-edited input.
     const detail = cause instanceof SyntaxError ? 'invalid JSON' : errorMessage(cause);
-    throw new Error(`could not read ${file}: ${detail}`);
+    throw new Error(`could not read ${file}: ${detail}`, { cause });
   }
 }
 

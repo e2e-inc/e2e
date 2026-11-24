@@ -38,7 +38,7 @@ export async function copyMergedArtifacts(report: Report1Document, inputs: reado
         artifacts.push(artifact);
         continue;
       }
-      if (/^[A-Za-z]:|[\\\\\u0000]/u.test(relative) || relative.split('/').some((part) => part === '' || part === '.' || part === '..')) {
+      if (/^[A-Za-z]:/u.test(relative) || relative.includes('\\') || relative.includes('\0') || relative.split('/').some((part) => part === '' || part === '.' || part === '..')) {
         throw new Error(`invalid local artifact path in shard ${attempt.shard}`);
       }
       const merged = `shard-${attempt.shard}/${relative}`;
