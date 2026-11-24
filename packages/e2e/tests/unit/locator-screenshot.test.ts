@@ -51,6 +51,7 @@ function screenWith(
   node: (captures: number) => SemanticNode,
   timeoutMs = 2_000,
   observed: (captures: number) => void = () => undefined,
+  registered: (relativePath: string) => void = () => undefined,
 ): { card: Locator; captures: () => number } {
   let captures = 0;
   const { screen } = screenOver({
@@ -62,11 +63,12 @@ function screenWith(
     perform: () => undefined,
     screenshot: (label) => {
       captures += 1;
-      const relative = path.join('screenshots', `${String(captures).padStart(3, '0')}${label === undefined ? '' : `-${label}`}.png`);
+      const relative = `screenshots/${String(captures).padStart(3, '0')}${label === undefined ? '' : `-${label}`}.png`;
       writeFileSync(path.join(artifactsDir, relative), encodePng(image));
       return relative;
     },
     artifactsDir,
+    registered,
     timeoutMs,
   });
   return { card: screen.getByTestId('card'), captures: () => captures };
@@ -156,7 +158,99 @@ describe('locator.screenshot', () => {
       if (observations === 1) throw new EngineError('NODE_STALE', 'the document was replaced', { retryable: true });
     });
     expect(isAll(decodePng(readFileSync(await locator.screenshot())), RED)).toBe(true);
-    expect(observations).toBe(2);
+    // One that threw, then the viewport before and after the kept capture.
+    expect(observations).toBe(3);
+  });
+
+  it('cuts the part inside the viewport when the screenshot shows more than the viewport', async () => {
+    // A 100 by 50 viewport at 2x, with 20 more image rows below it; the card's lower 30 rows are outside the viewport.
+    const box = { x: 10, y: 40, width: 20, height: 40 };
+    const image = screenImage(2, box);
+    const taller: RgbaImage = { width: image.width, height: image.height + 20, data: new Uint8Array([...image.data, ...new Uint8Array(image.width * 20 * 4).fill(255)]) };
+    const { card: locator } = screenWith(taller, () => card(box));
+    const cut = decodePng(readFileSync(await locator.screenshot()));
+    expect({ width: cut.width, height: cut.height }).toEqual({ width: 40, height: 20 });
+  });
+
+  it('takes the capture again when the viewport changed size during it', async () => {
+    const box = { x: 10, y: 20, width: 30, height: 15 };
+    let captures = 0;
+    // The first capture is taken as the window doubles: its pixels belong to neither size.
+    const viewport = (): { width: number; height: number } => (captures === 0 ? VIEWPORT : { width: 200, height: 100 });
+    const { screen } = screenOver({
+      locate: (expression) => resolveExpression(expression, [card(box)]),
+      observe: () => snapshot([card(box)], { viewport: viewport() }),
+      perform: () => undefined,
+      screenshot: () => {
+        captures += 1;
+        const relative = `screenshots/${String(captures).padStart(3, '0')}.png`;
+        writeFileSync(path.join(artifactsDir, relative), encodePng(screenImage(captures === 1 ? 2 : 1, captures === 1 ? box : { x: 5, y: 10, width: 15, height: 7.5 })));
+        return relative;
+      },
+      artifactsDir,
+      timeoutMs: 2_000,
+    });
+    const file = await screen.getByTestId('card').screenshot();
+    expect(captures).toBe(2);
+    expect(readdirSync(path.join(artifactsDir, 'screenshots'))).toEqual([path.basename(file)]);
+    const cut = decodePng(readFileSync(file));
+    // The kept capture is the settled one: 100 image pixels across a 200 wide viewport, so the 30 by 15 box is 15 by 8.
+    expect({ width: cut.width, height: cut.height }).toEqual({ width: 15, height: 8 });
+  });
+
+  it('scrolls the match back when the page moved it out of the viewport after the first scroll', async () => {
+    const inView = { x: 10, y: 20, width: 30, height: 15 };
+    let scrolls = 0;
+    // The first scroll lands, then a banner pushes the card below the viewport; the second scroll brings it back.
+    const box = (): typeof inView => (scrolls === 1 ? { ...inView, y: 400 } : inView);
+    let captures = 0;
+    const { screen } = screenOver({
+      locate: (expression) => resolveExpression(expression, [card(box())]),
+      observe: () => snapshot([card(box())], { viewport: VIEWPORT }),
+      perform: (_ref, action) => {
+        if (action.kind === 'scrollIntoView') scrolls += 1;
+      },
+      screenshot: () => {
+        captures += 1;
+        writeFileSync(path.join(artifactsDir, 'screenshots', 'shot.png'), encodePng(screenImage(1, inView)));
+        return 'screenshots/shot.png';
+      },
+      artifactsDir,
+      timeoutMs: 2_000,
+    });
+    expect(isAll(decodePng(readFileSync(await screen.getByTestId('card').screenshot())), RED)).toBe(true);
+    expect(scrolls).toBe(2);
+    expect(captures).toBe(1);
+  });
+
+  it('returns the path the engine named, joined to the artifacts directory', async () => {
+    const box = { x: 10, y: 20, width: 30, height: 15 };
+    const registered: string[] = [];
+    const { card: locator } = screenWith(screenImage(1, box), () => card(box), 2_000, () => undefined, (relative) => registered.push(relative));
+    const file = await locator.screenshot('card');
+    // The report takes `/` only, whatever the platform joins with.
+    expect(registered).toEqual(['screenshots/001-card.png']);
+    expect(file).toBe(path.join(artifactsDir, 'screenshots', '001-card.png'));
+  });
+
+  it('says so when the engine\'s screenshot is not a PNG', async () => {
+    const box = { x: 10, y: 20, width: 30, height: 15 };
+    const { screen } = screenOver({
+      locate: (expression) => resolveExpression(expression, [card(box)]),
+      observe: () => snapshot([card(box)], { viewport: VIEWPORT }),
+      perform: () => undefined,
+      screenshot: () => {
+        writeFileSync(path.join(artifactsDir, 'screenshots', 'shot.jpg'), new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]));
+        return 'screenshots/shot.jpg';
+      },
+      artifactsDir,
+      timeoutMs: 2_000,
+    });
+    await expect(screen.getByTestId('card').screenshot()).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('cuts a PNG of the viewport'),
+    });
+    expect(readdirSync(path.join(artifactsDir, 'screenshots'))).toEqual([]);
   });
 
   it('refuses anything but a label before it captures', () => {

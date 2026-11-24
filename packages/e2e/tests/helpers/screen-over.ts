@@ -42,6 +42,8 @@ export interface ScreenOverOptions {
   readonly screenshot?: (label: string | undefined) => string;
   /** The attempt's artifact directory; `screenshot` needs one. */
   readonly artifactsDir?: string;
+  /** Told the relative path of every artifact the screen registers. */
+  readonly registered?: (relativePath: string) => void;
   /** Whether the engine declares `tapModifiers`; default not. */
   readonly tapModifiers?: boolean;
   /** Action and assertion timeout in milliseconds. */
@@ -82,7 +84,10 @@ export function screenOver(options: ScreenOverOptions): { screen: Screen; steps:
     }),
     steps,
     secrets: { resolve: async () => 'plaintext' },
-    artifacts: { dir: options.artifactsDir ?? '', register: (_kind, relativePath) => relativePath, link: (url) => url },
+    artifacts: { dir: options.artifactsDir ?? '', register: (_kind, relativePath) => {
+        options.registered?.(relativePath);
+        return relativePath;
+      }, link: (url) => url },
     renderTree: (observation) =>
       prepareObservation(observation, { redact: (text) => text, redactCut: (text) => text, maxBytes: 64_000 }).text,
   });

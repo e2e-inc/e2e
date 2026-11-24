@@ -1189,8 +1189,11 @@ const card = await screen.getByTestId('order-summary').screenshot('summary');
   to the match's box: an attempt artifact under `screenshots/`, with the
   same masking and the same pixel density.
 - `label` joins the step's name and the file name.
-- It waits until the match is visible and its box holds still across the
-  capture.
+- It waits until the match is visible, and its box and the viewport hold
+  still across the capture. A match the page moves out of the viewport is
+  scrolled back.
+- The engine's screenshot has to be a PNG of the viewport, as the web,
+  mobile, and desktop engines' are.
 - The `list` reporter names the file in its `Screenshots` row.
 
 | Throws | When |
@@ -1199,7 +1202,7 @@ const card = await screen.getByTestId('order-summary').screenshot('summary');
 | `LOCATOR_NOT_FOUND` | No visible match within the action timeout, one that kept moving, or one outside the viewport on an engine that cannot scroll to it. |
 | `LOCATOR_AMBIGUOUS` | More than one match. |
 | `ACTION_FAILED`, `ENGINE_FAILURE` | The scroll or the capture failed or timed out, as on a web match that never stops animating. |
-| `UNSUPPORTED_CAPABILITY` | The engine takes no screenshots. |
+| `UNSUPPORTED_CAPABILITY` | The engine takes no screenshots, or writes one that is not a PNG. |
 | `POLICY_DENIED` | On iOS and Android, a secure field on screen has no bounds to mask. |
 
 #### `count`
