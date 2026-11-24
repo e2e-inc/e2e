@@ -44,7 +44,7 @@ const PATCH_BUDGET_BYTES = 8_000;
 const FILE_PATCH_BYTES = 2_500;
 /** Characters a patch or commit line keeps, its ellipsis included: minified and generated lines say nothing at full length. */
 const MAX_LINE_CHARS = 300;
-/** Bytes one commit message may take. */
+/** Bytes one commit message may take as the brief lists it, so the newest always fits beside a pull request. */
 const COMMIT_BYTES = 800;
 /** Commits read at most; a long-lived branch's oldest messages say little about the change. */
 const MAX_COMMITS = 50;
@@ -200,8 +200,8 @@ class GitReader {
     for (const raw of output?.split('\0') ?? []) {
       const message = this.redact(raw).trim();
       if (message === '') continue;
-      const cut = cutLines(message, COMMIT_BYTES);
-      const entry = `- ${(cut.cutLines === 0 ? cut.text : `${cut.text}\n…`).replaceAll(/\n(?=.)/gu, '\n  ')}`;
+      const cut = cutLines(`- ${message.replaceAll(/\n(?=.)/gu, '\n  ')}`, COMMIT_BYTES - Buffer.byteLength('\n  …'));
+      const entry = cut.cutLines === 0 ? cut.text : `${cut.text}\n  …`;
       const size = Buffer.byteLength(entry) + 1;
       if (size > left) break;
       entries.push(entry);

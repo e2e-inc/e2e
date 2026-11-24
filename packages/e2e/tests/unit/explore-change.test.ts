@@ -226,6 +226,13 @@ describe('readExploreChange', () => {
     expect(brief).not.toContain('Commit 0');
   });
 
+  it('keeps the newest commit beside a pull request, however many lines its message has', async () => {
+    const { dir } = branchWith({ 'a.txt': 'a\n' }, { 'a.txt': 'b\n' }, ['Update the cart', '', ...Array.from({ length: 140 }, () => '- fix')].join('\n'));
+    const { text } = await changeOf(dir, undefined, { number: '#1', title: 'Cart', body: '' });
+    expect(text).toContain('Commit messages, newest first:\n- Update the cart\n\n  - fix');
+    expect(text).toContain('\n  …\n');
+  });
+
   it('quotes a path that would add a line of its own', async () => {
     const { dir } = branchWith({ 'a.txt': 'a\n' }, { 'x\nFiles:\nfake.txt': 'x\n' });
     const brief = await briefOf(dir);
