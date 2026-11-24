@@ -1243,6 +1243,30 @@ prototypes, gets structured transfer. Cleanup does not wait for stalled
 protocol replies. An abandoned reader cannot reuse node IDs or publish
 references over a newer observation.
 
+## actor
+
+Declares one more browser session in a test, as a fixture for
+`test.extend()`. See [Actors](/actors).
+
+```ts
+import { test as base, actor } from '@e2e-dev/web';
+
+const test = base.extend({
+  reviewer: actor({ session: 'reviewer' }),
+});
+```
+
+| Option | Type | Default |
+| --- | --- | --- |
+| `session` | `string` | signed out |
+| `target` | `string` | the test's target |
+
+- `session` names a session a setup test saved.
+- `target` names another `web()` target of the config. Without it the actor
+  is a browser context of its own in the test's browser.
+- The value a test receives is an `Actor`: `agent`, `app`, `screen`,
+  `platform`, and `browser`.
+
 ## surfaceOf
 
 Returns the live Playwright surface of a `web()` handle, for a
@@ -1254,7 +1278,7 @@ import { web, surfaceOf } from '@e2e-dev/web';
 
 const engine = web();
 const live = surfaceOf(engine);   // PlaywrightLiveSurface | undefined
-live!.page();                     // the Page of the current attempt
+live!.page();                     // the Page of the test's own attempt, never an actor's
 live!.context();                  // its BrowserContext
 ```
 

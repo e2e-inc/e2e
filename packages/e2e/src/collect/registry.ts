@@ -15,6 +15,7 @@ import { setRunningTestTimeout, slowRunningTest } from '@e2e-dev/core/lib/intern
 import { fixmeReason, parseModifierCall, skipRunningTest } from '../internal/skip.ts';
 import { formatEachTitle, readRows } from './each.ts';
 import { unknownKeyMessage } from '@e2e-dev/core/lib/internal/options';
+import { actorDeclaration, type ActorDeclaration } from '@e2e-dev/core/lib/engine/actor';
 import type { SourceLocation } from '@e2e-dev/core/lib/internal/source';
 import { fixtureNames, type FixtureUserFn } from './fixture-names.ts';
 import { checkDeclaredFixtures, describeFixture, describeUser } from './fixture-plan.ts';
@@ -81,6 +82,12 @@ export interface FixtureDefinition {
   readonly layer: number;
   /** Where its `test.extend()` call is. */
   readonly source?: SourceLocation | undefined;
+  /**
+   * What the fixture declares when an engine package's `actor()` made it:
+   * one more session of the test, which the attempt opens and closes
+   * itself, so `fn` is never called. A test fixture that names no other.
+   */
+  readonly actor?: ActorDeclaration | undefined;
 }
 
 export interface RegisteredTest {
@@ -721,15 +728,33 @@ function validateFixtureDefinitions(
   for (const [name, fn] of Object.entries(definitions)) {
     if (name === '') throw new CollectionError('test.extend(): a fixture name must not be empty');
     const definition = fixtureDefinition(name, fn);
-    const names = fixtureNames(definition.fn, describeFixture(name, definition.scope), source);
+    // An actor's function is a marker the runner never calls: it names nothing.
+    const names = definition.actor === undefined ? fixtureNames(definition.fn, describeFixture(name, definition.scope), source) : [];
     added.push({ name, ...definition, names, layer, source });
   }
   checkDeclaredFixtures([...chain, ...added], added);
   return added;
 }
 
-/** The function, scope, and `auto` of one `test.extend()` entry: `fn`, or `[fn, { scope, auto }]`. */
-function fixtureDefinition(name: string, entry: unknown): Pick<FixtureDefinition, 'fn' | 'scope' | 'auto'> {
+/** What an actor may be named: a word that is safe as a file name, and never the `launch-1` a `launch()` session reports under. */
+const ACTOR_NAME = /^[A-Za-z][A-Za-z0-9_]*$/u;
+
+/** The function, scope, and `auto` of one `test.extend()` entry: `fn`, or `[fn, { scope, auto }]`; an `actor()` is a test fixture. */
+function fixtureDefinition(name: string, entry: unknown): Pick<FixtureDefinition, 'fn' | 'scope' | 'auto' | 'actor'> {
+  const declared = declaredFixture(name, entry);
+  const actor = actorDeclaration(declared.fn);
+  if (actor === undefined) return declared;
+  if (declared.scope === 'worker') {
+    throw new CollectionError(`test.extend(): actor "${name}" cannot be a worker fixture: an actor is opened for one test and closed with it`);
+  }
+  // The name labels the actor's steps and names its video and its artifact directory, so it is never more than a word.
+  if (!ACTOR_NAME.test(name)) {
+    throw new CollectionError(`test.extend(): actor ${JSON.stringify(name)} must be named with letters, digits, and _ only, starting with a letter: the name labels its steps and its video`);
+  }
+  return { ...declared, scope: 'test', actor };
+}
+
+function declaredFixture(name: string, entry: unknown): Pick<FixtureDefinition, 'fn' | 'scope' | 'auto'> {
   const shape = `test.extend(): fixture "${name}" must be a function ({ ...fixtures }, use) => Promise<void>, or [fn, { scope: 'test' | 'worker', auto: boolean }]`;
   if (typeof entry === 'function') return { fn: entry as FixtureFn<object, unknown>, scope: undefined, auto: undefined };
   if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'function') throw new CollectionError(shape);

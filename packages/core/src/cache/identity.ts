@@ -59,6 +59,12 @@ export interface TraceCacheKey {
   /** SHA-256 of the agent's redacted context (its `context` then the test's `agentContext`), or of the empty string. */
   readonly agentContextDigest: string;
   readonly policyVersion: string;
+  /**
+   * The actor the step ran as (`StepRecord.actor`), when it is not the
+   * test's own session. Absent otherwise, so the key of a step without an
+   * actor is the one it had before actors existed.
+   */
+  readonly actor?: string;
 }
 
 /** The agent a step runs with, as the key sees it. */
@@ -170,6 +176,7 @@ export function buildTraceCacheKey(parts: {
   readonly callIndex: number;
   readonly agent: CacheAgentIdentity;
   readonly policyVersion: string;
+  readonly actor?: string | undefined;
 }): TraceCacheKey {
   return {
     specVersion: '0.1',
@@ -188,6 +195,7 @@ export function buildTraceCacheKey(parts: {
     agent: parts.agent.name,
     agentContextDigest: sha256Hex(parts.agent.context ?? ''),
     policyVersion: parts.policyVersion,
+    ...(parts.actor === undefined ? {} : { actor: parts.actor }),
   };
 }
 

@@ -40,7 +40,7 @@ export interface PlannedFixture {
   readonly definition: FixtureDefinition;
   /** The scope it has on the target: the one it declares, or the one of the fixture it extends. */
   readonly scope: FixtureScope;
-  /** Whether it names a built-in that needs an attempt on the engine, itself or through a fixture it names. */
+  /** Whether it names a built-in that needs an attempt on the engine, itself or through a fixture it names; an actor is opened on one. */
   readonly usesEngine: boolean;
   readonly inputs: FixtureInputs;
 }
@@ -180,6 +180,10 @@ class Planner {
       throw new FixtureUseError(`fixtures depend on each other in a cycle: ${cycle}. A fixture cannot name one that needs it`, definition.source);
     }
     this.state.set(definition, 'visiting');
+    // An actor holds an `app` and a `screen` of its own: one that took a built-in's name would hide the test's.
+    if (definition.actor !== undefined && this.builtIns.names.includes(definition.name)) {
+      throw new FixtureUseError(`actor "${definition.name}" has the name of a built-in fixture${this.onTarget()}: give the actor a name of its own, such as "reviewer"`, definition.source);
+    }
     this.autoOf(definition);
     const scope = this.scopeOf(definition);
     const what = describeFixture(definition.name, scope === 'unresolved' ? definition.scope : scope);
@@ -253,7 +257,7 @@ function planFixtures(request: PlanRequest): FixturePlan {
     const own = planner.inputs.get(definition) ?? new Map<string, undefined>();
     // `reachesEngine` stops at the first name that reaches the engine, so it cannot be what orders the rest.
     for (const dependency of own.values()) if (dependency !== undefined) place(dependency);
-    const usesEngine = reachesEngine(own);
+    const usesEngine = definition.actor !== undefined || reachesEngine(own);
     const planned: PlannedFixture = { definition, scope: planner.scopeOf(definition) === 'worker' ? 'worker' : 'test', usesEngine, inputs: own };
     placed.set(definition, planned);
     order.push(planned);

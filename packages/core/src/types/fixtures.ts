@@ -24,6 +24,20 @@ export interface WorkerFixtures {
   readonly platform: string;
 }
 
+/**
+ * What `actor()` takes: the fixture an engine package exports for one more
+ * session in a test, beside the test's own.
+ */
+export interface ActorOptions {
+  /** A session a setup test saved, restored into the actor. Without it the actor starts signed out. */
+  readonly session?: string;
+  /**
+   * Another target of the config for the actor to run on, by name: a phone
+   * beside a browser. Without it the actor runs on the test's own target.
+   */
+  readonly target?: string;
+}
+
 /** @deprecated `beforeAll` and `afterAll` receive the worker fixtures: use `WorkerFixtures`. */
 export type SuiteFixtures = WorkerFixtures;
 

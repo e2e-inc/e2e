@@ -261,6 +261,13 @@ export function createAgentCacheContext(options: {
   readonly attemptIndex: number;
   /** The file store's listing under `cache.strict`, shared by the attempts of one worker and target (`storedRecordingsFor`). */
   readonly recordings?: StoredRecordings | undefined;
+  /**
+   * The actor whose agent steps the context keys, for an actor's session
+   * beside the test's own. It joins each key and each entry's step, so two
+   * actors given the same instruction record and replay apart, and each
+   * context counts its own occurrences.
+   */
+  readonly actor?: string | undefined;
 }): AgentCacheContext | undefined {
   if (options.cache.mode === 'off') return undefined;
   const strict = options.cache.strict !== false;
@@ -305,6 +312,7 @@ export function createAgentCacheContext(options: {
         callIndex,
         agent,
         policyVersion: REPLAY_POLICY_VERSION,
+        actor: options.actor,
       });
       return {
         keyHash: traceCacheKeyHash(key),
@@ -316,6 +324,7 @@ export function createAgentCacheContext(options: {
           paramsDigest: signature.paramsDigest,
           callIndex,
           agent: agent.name,
+          ...(options.actor === undefined ? {} : { actor: options.actor }),
         },
       };
     },

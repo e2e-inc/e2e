@@ -457,6 +457,16 @@ export function sessionLedger(
  * Stops sharing what `session` knows, once it has ended: its values are its
  * own again, redacted by its own ledger in what is still reported of it.
  */
+/**
+ * Keeps sharing every value `session` knows now past its own end, until the
+ * returned function is called. What an attempt with more than one session
+ * does while it closes them one after another: the artifacts of each are
+ * still rewritten for what the others learned.
+ */
+export function holdSessionSecrets(session: TargetSession, secrets: ResolvedConfig['allSecrets']): () => void {
+  return share(sessionLedger(session, secrets).entries()).withdraw;
+}
+
 export function releaseSessionLedger(session: TargetSession): void {
   const ledger = ledgerBySession.get(session);
   if (ledger !== undefined) sharingByLedger.get(ledger)?.withdraw();

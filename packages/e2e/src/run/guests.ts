@@ -6,7 +6,7 @@
  * session opened outside every test only has its steps recorded.
  */
 
-import { copyFile, mkdir, rm } from 'node:fs/promises';
+import { copyFile, mkdir, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { markAbandonedRejection } from '@e2e-dev/core/lib/internal/abandoned';
 import { classifyError, InfrastructureError, TestError, withHint, type E2EError } from '@e2e-dev/core/lib/internal/errors';
@@ -33,6 +33,8 @@ export interface AttemptGuestOptions {
   readonly videoPrefix: string;
   /** How long closing one host or session may take, every phase of its own cleanup included. */
   readonly cleanupTimeout: number;
+  /** Cuts the operations running on the attempt's budget, an actor's among them, the way its timeout does. */
+  readonly cut: () => void;
 }
 
 export class AttemptGuestSessions {
@@ -58,6 +60,17 @@ export class AttemptGuestSessions {
 
   /** What the attempt publishes for `launch()` to find. */
   readonly offer: AttemptGuests;
+
+  /**
+   * Reserves a seat for an actor the attempt opens itself (`run/actors.ts`):
+   * a session like one the test opened, under the name of its fixture.
+   */
+  actor(name: string): GuestSeat<GuestSession, GuestSteps> {
+    return this.seat(`actor "${name}"`, (session: GuestSession) => {
+      this.sessions.push(session);
+      return this.mirror(name, session.root);
+    });
+  }
 
   constructor(private readonly steps: StepRecorder, private readonly artifacts: ArtifactSink, private readonly options: AttemptGuestOptions) {
     this.offer = {
@@ -106,7 +119,23 @@ export class AttemptGuestSessions {
    */
   async quiesce(): Promise<void> {
     this.cancelOpenings();
-    await Promise.all(this.sessions.filter((session) => session.busy()).map((session) => this.close(session)));
+    await Promise.all(this.sessions.filter((session) => session.busy()).map((session) => this.cutOrClose(session)));
+  }
+
+  /**
+   * Stops what runs on `session`. An actor's steps run on the attempt's
+   * budget, so they are cut through it and the actor stays open: teardown
+   * may still drive it, as it may the test's own session. A step that does
+   * not end within the cleanup budget, and any other session, is cut by
+   * closing the session.
+   */
+  private async cutOrClose(session: GuestSession): Promise<void> {
+    if (session.settled !== undefined) {
+      this.options.cut();
+      const settled = await withTimeout(session.settled(), this.options.cleanupTimeout, () => new InfrastructureError('CLEANUP_TIMEOUT', 'a step of an actor did not end')).then(() => true, () => false);
+      if (settled) return;
+    }
+    await this.close(session);
   }
 
   /**
@@ -172,7 +201,7 @@ export class AttemptGuestSessions {
   private mirror(actor: string, root: string): GuestSteps {
     const mirror = mirrorGuestSteps(this.steps, actor, root);
     this.mirrors.push(mirror);
-    return { progress: mirror.progress, video: (recording) => this.hold(actor, recording) };
+    return { progress: mirror.progress, wrote: mirror.wrote, verified: mirror.verified, placed: mirror.placed, video: (recording) => this.hold(actor, recording) };
   }
 
   /** Closes a host or session within the cleanup budget, once; a failure is the attempt's cleanup failure, not a throw. */
@@ -203,7 +232,12 @@ export class AttemptGuestSessions {
     this.videos.push({ actor, file, startedAt: recording.startedAt });
     const copying = (async () => {
       await mkdir(path.join(this.artifacts.dir, VIDEO_DIR), { recursive: true });
-      await copyFile(recording.path, path.join(this.artifacts.dir, VIDEO_DIR, name));
+      const kept = path.join(this.artifacts.dir, VIDEO_DIR, name);
+      // An actor records under the attempt's own directory, which nothing else removes: its file is moved, not left
+      // twice. Any other file is copied: its host removes the original, and it may be on another drive.
+      const within = path.relative(this.artifacts.dir, recording.path);
+      if (within.startsWith('..') || path.isAbsolute(within)) await copyFile(recording.path, kept);
+      else await rename(recording.path, kept);
     })().catch((cause: unknown) => {
       this.failures.push(classifyError(cause));
       const failed = this.videos.findIndex((video) => 'file' in video && video.file === file);

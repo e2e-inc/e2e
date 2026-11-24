@@ -101,7 +101,7 @@ const defaultOptions: ResolvedTestOptions = {
 };
 
 function makePair(test: CollectedTest, overrides: Partial<TestTargetPair> = {}): TestTargetPair {
-  return { test, target, agent: 'default', repeat: 0, options: defaultOptions, disposition: 'run', skip: undefined, ...overrides };
+  return { test, target, agent: 'default', repeat: 0, options: defaultOptions, disposition: 'run', skip: undefined, actors: [], ...overrides };
 }
 
 function makeFile(file: string, tests: CollectedTest[]): CollectedFile {
@@ -135,7 +135,7 @@ describe('buildWorkPlans', () => {
         skip: { cause: 'explicit', reason: 'skipped' },
       }),
     ];
-    const selection: Selection = { pairs, perTarget: [{ target, pairs }] };
+    const selection: Selection = { pairs, perTarget: [{ target, pairs }], actorTargets: [] };
     const collection: Collection = {
       files: [
         makeFile('tests/a.e2e.ts', [a1, a2]),
@@ -165,7 +165,7 @@ describe('buildWorkPlans', () => {
     const pairs = [
       makePair(only, { disposition: 'filtered', skip: { cause: 'filtered', reason: 'tags' } }),
     ];
-    const selection: Selection = { pairs, perTarget: [{ target, pairs }] };
+    const selection: Selection = { pairs, perTarget: [{ target, pairs }], actorTargets: [] };
     const collection: Collection = {
       files: [makeFile('tests/a.e2e.ts', [only])],
       tests: [only],
@@ -201,7 +201,7 @@ describe('orderWorkPlans', () => {
       unmatchedPositionals: [],
       uncollected: [],
     };
-    return buildWorkPlans({ pairs: perTarget.flatMap((entry) => entry.pairs), perTarget }, collection, '/project');
+    return buildWorkPlans({ pairs: perTarget.flatMap((entry) => entry.pairs), perTarget, actorTargets: [] }, collection, '/project');
   }
 
   /** The files of each plan in dispatch order, keyed by target. */
@@ -376,6 +376,7 @@ describe('wire protocol', () => {
       options: defaultOptions,
       disposition: 'skip',
       skip: { cause: 'explicit', reason: 'skipped' },
+      actors: [],
     });
     expect('fn' in record.test).toBe(false);
     expect(JSON.parse(JSON.stringify(encodeResult(record))).test.id).toBe(record.test.id);

@@ -7,7 +7,8 @@
  * `mobile()` still loads and `test` throws when used.
  */
 
-import type { TestFixtures } from 'e2e';
+import { defineActor } from '@e2e-dev/core/engine';
+import type { Actor as RunnerActor, ActorOptions, TestFixtures } from 'e2e';
 import type { MobileFixtures } from './fixtures.ts';
 import { runnerTest } from './runner-test.ts';
 
@@ -25,3 +26,17 @@ export const test = runnerTest().extend<{}, MobileFixtures & Pick<TestFixtures, 
 
 /** `describe` and the hooks, the same functions as `test.describe` and `test.beforeEach`, typed with the `device` fixture. */
 export const { describe, beforeEach, afterEach, beforeAll, afterAll } = test;
+
+/** What a test receives for a device actor: `agent`, `app`, `screen`, `platform`, and `device`, over a device of its own. */
+export type Actor = RunnerActor<MobileFixtures>;
+
+/**
+ * One more device in a test, as a fixture: a phone beside a browser, or a
+ * second phone. `target` names the `mobile()` target of the config it runs
+ * on, which needs a device the test's own target does not use.
+ *
+ *   const test = base.extend({ courier: actor({ target: 'ios' }) });
+ *
+ * A device has no saved sessions, so the actor signs in inside the test.
+ */
+export const actor = defineActor<Actor, Pick<ActorOptions, 'target'>>('mobile');

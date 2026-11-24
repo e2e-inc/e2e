@@ -1018,6 +1018,15 @@ export const test = base.extend<{}, { database: Database }>({
   Declare worker fixtures in a module the file imports.
 - `extend({ ... })` without type arguments infers test fixtures only.
 
+#### Actors
+
+An engine package's `actor()` is a fixture definition for one more session
+in the test. See [Actors](/actors).
+
+```ts
+const test = base.extend({ reviewer: actor({ session: 'reviewer' }) });
+```
+
 #### Extending a fixture
 
 A definition named like a fixture the `test` already has extends that fixture.

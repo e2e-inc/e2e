@@ -1096,13 +1096,20 @@ export class StepRecorder {
    * Files a step another session runs (`run/guest-steps.ts`) and tells
    * reporters it started. The step takes the next index, so the report tells
    * both sessions' steps in the order they began. It is the other session's
-   * in every other way: never the running step here, so it is not held and
-   * it verifies nothing.
+   * in every other way: never the running step here, so it is not held, and
+   * it verifies nothing unless the session says it did (`GuestRecord.verified`).
    */
   guest(step: Pick<StepRecord, 'kind' | 'api' | 'label' | 'actor'> & { readonly source: SourceLocation | undefined }): GuestRecord {
+    // The test's own step the session's step began inside, such as an `agent.act` whose `onAction` drives the session.
+    const enclosing = this.current();
     const record = this.file({ ...step, label: this.redactText(step.label) });
     this.publishStart(record);
     return {
+      index: record.index,
+      verified: () => {
+        // As a check nested in one of the test's own steps: it confirms what came before that step, never the step.
+        this.lastVerified = Math.max(this.lastVerified, enclosing?.index ?? record.index);
+      },
       tell: (progress) => {
         if (progress.phase === 'event') this.push(record, progress.event);
         else this.publish(record, progress);
@@ -1112,6 +1119,9 @@ export class StepRecorder {
         Object.assign(record, fields);
         if (cache !== undefined) record.cache = this.cacheForReport(cache);
         this.publishEnd(record);
+      },
+      wrote: (write) => {
+        if (record.cache !== undefined) record.cache.write = write;
       },
     };
   }

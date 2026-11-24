@@ -20,6 +20,7 @@ export type { CacheReadResult, CacheStore } from './cache/store.ts';
 export type { DerivedReason } from './cache/trace.ts';
 export type { StepCacheInfo } from './run/steps.ts';
 export type {
+  ActorOptions,
   FixtureDefinitions,
   FixtureFn,
   FixtureOverride,
@@ -754,6 +755,15 @@ export interface TestFixtures {
   /** The target's platform label: `web`, `ios`, `android`, or an engine's own string. */
   readonly platform: string;
 }
+
+/**
+ * One more session in a test, beside the test's own, declared as a fixture
+ * with an engine package's `actor()`: its own `agent`, `app`, `screen`, and
+ * `platform`, and the fixtures its engine contributes (`EngineFixtures`,
+ * such as `browser` or `device`). The shape of a test's own fixtures, so a
+ * helper written for one takes the other.
+ */
+export type Actor<EngineFixtures extends object = {}> = Omit<TestFixtures, keyof EngineFixtures> & EngineFixtures;
 
 export interface SetupFixtures extends TestFixtures {
   /** Saves the sessions the setup test declared. */

@@ -23,6 +23,8 @@ export const engineBrand = brand('e2e.engine.v1');
 /** Type-only slot naming the fixtures an engine contributes; no handle carries a value under it. */
 export const engineFixtures = brand('e2e.engine.fixtures.v1');
 export const locatorBrand = brand('e2e.locator');
+/** Slot under which an `actor()` fixture carries what it declares for the runner. */
+export const actorBrand = brand('e2e.actor.v1');
 /** Slot under which a fixture carries its attached expectation surface. */
 export const expectationBrand = brand('e2e.expectation.v1');
 /** Slot on `globalThis` naming the running attempt for `expect.poll`. */

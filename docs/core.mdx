@@ -323,7 +323,9 @@ how a replay checks the screen and hands off to the model.
 ## Open a host inside a test
 
 A test that `e2e run` runs can open a host for a second session: another
-user, or a phone beside the browser.
+user, or a phone beside the browser. For a session the test can declare
+before it runs, use an [actor](/actors): it restores a saved login and
+takes its engine from the config.
 
 ```ts title="tests/board.e2e.ts"
 import { test } from '@e2e-dev/web';

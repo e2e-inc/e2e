@@ -312,7 +312,10 @@ export class PlaywrightSurface {
   dialogs = new DialogRouter(this.latch);
 
   private readonly browserName: BrowserName;
-  private readonly connection = new BrowserConnection();
+  /** The worker's browser, which the surface of each actor shares; see `fork`. */
+  private readonly connection: BrowserConnection;
+  /** Whether this surface is an actor's, on a browser another surface owns. */
+  private readonly forked: boolean;
   private readonly chromiumSandbox: boolean;
   /** What the options add to the launch of the browser the engine launches. */
   private readonly launch: BrowserLaunchOptions;
@@ -357,10 +360,12 @@ export class PlaywrightSurface {
    */
   private routes: StoredRoute[] = [];
 
-  constructor(options: WebOptions) {
+  constructor(private readonly options: WebOptions, owner?: PlaywrightSurface) {
     this.browserName = typeof options.browser === 'string' ? options.browser : 'chromium';
     this.chromiumSandbox = options.chromiumSandbox ?? defaultChromiumSandbox();
-    this.leases = typeof options.browser === 'object' && options.browser !== null ? new LeasedBrowsers(options.browser) : undefined;
+    this.forked = owner !== undefined;
+    this.connection = owner?.connection ?? new BrowserConnection();
+    this.leases = owner !== undefined ? owner.leases : typeof options.browser === 'object' && options.browser !== null ? new LeasedBrowsers(options.browser) : undefined;
     this.connect = options.connect;
     this.launch = options.webmcp === true ? webmcpLaunch(this.browserName) : {};
     this.viewport = options.viewport === undefined ? DEFAULT_VIEWPORT : options.viewport;
@@ -373,7 +378,23 @@ export class PlaywrightSurface {
     this.locale = options.locale;
     this.timezoneId = options.timezoneId;
     this.media = obj({ colorScheme: options.colorScheme, reducedMotion: options.reducedMotion });
-    this.configuredInitScripts = new ConfiguredInitScripts(options.initScripts ?? []);
+    this.configuredInitScripts = owner?.configuredInitScripts ?? new ConfiguredInitScripts(options.initScripts ?? []);
+    if (owner !== undefined) {
+      this.app = owner.app;
+      this.credentialScope = owner.credentialScope;
+      this.projectRoot = owner.projectRoot;
+      this.headed = owner.headed;
+    }
+  }
+
+  /**
+   * A surface for one more attempt on this worker's browser while this one's
+   * runs: an actor's. It shares the browser, the provider's lease, and what
+   * `init` learned, and owns everything an attempt owns: its context, pages,
+   * routes, dialogs, and video. Ending its attempt is all that releases it.
+   */
+  fork(): PlaywrightSurface {
+    return new PlaywrightSurface(this.options, this);
   }
 
   // --- lifecycle ---
@@ -595,7 +616,8 @@ export class PlaywrightSurface {
         for (const stored of routes) await target.route(stored.predicate, stored.handler);
       },
       ...(persistent === undefined ? {} : { persistent }),
-      record: this.leases?.recorder(context.attemptId),
+      // A provider records a browser, which the worker's own attempt already does: an actor on it records its pages itself.
+      record: this.forked ? undefined : this.leases?.recorder(context.attemptId),
     });
     this.session = session;
     await session.start(context.signal);
@@ -622,7 +644,8 @@ export class PlaywrightSurface {
     try {
       if (session !== undefined) await session.close(context);
     } finally {
-      await this.leases?.endAttempt(context);
+      // An attempt's lease is the owning surface's; an actor's surface holds none.
+      if (!this.forked) await this.leases?.endAttempt(context);
     }
   }
 

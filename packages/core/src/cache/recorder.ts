@@ -370,7 +370,8 @@ export function recordedProvenance(provenance: TraceProvenance, redact: (text: s
   const testId = redact(provenance.testId);
   const targetId = redact(provenance.targetId);
   const agent = provenance.agent === undefined ? undefined : redact(provenance.agent);
-  const ambiguous = [testId, targetId, agent ?? ''].some((text) => boundIsAmbiguous(text, MAX_TRACE_DESCRIPTOR_CHARS));
+  const actor = provenance.actor === undefined ? undefined : redact(provenance.actor);
+  const ambiguous = [testId, targetId, agent ?? '', actor ?? ''].some((text) => boundIsAmbiguous(text, MAX_TRACE_DESCRIPTOR_CHARS));
   return {
     testId: bound(testId, MAX_TRACE_DESCRIPTOR_CHARS),
     targetId: bound(targetId, MAX_TRACE_DESCRIPTOR_CHARS),
@@ -378,6 +379,8 @@ export function recordedProvenance(provenance: TraceProvenance, redact: (text: s
     ...(provenance.paramsDigest === undefined ? {} : { paramsDigest: provenance.paramsDigest }),
     ...(provenance.callIndex === undefined ? {} : { callIndex: provenance.callIndex }),
     ...(agent === undefined ? {} : { agent: bound(agent, MAX_TRACE_DESCRIPTOR_CHARS) }),
-    ...(ambiguous ? { identityDigest: sha256Hex(JSON.stringify([testId, targetId, agent ?? null])) } : {}),
+    ...(actor === undefined ? {} : { actor: bound(actor, MAX_TRACE_DESCRIPTOR_CHARS) }),
+    // An actor joins the digest only when the step has one, so a step without one keeps the digest it had.
+    ...(ambiguous ? { identityDigest: sha256Hex(JSON.stringify([testId, targetId, agent ?? null, ...(actor === undefined ? [] : [actor])])) } : {}),
   };
 }

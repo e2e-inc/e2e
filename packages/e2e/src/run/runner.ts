@@ -311,7 +311,7 @@ export interface InMemoryExplore {
 
 /** Whether a test of the registration consumes a session a setup test produces. */
 function consumesSession(registration: ModuleRegistration): boolean {
-  return registration.tests.some((test) => test.options.session !== undefined);
+  return registration.tests.some((test) => test.options.session !== undefined || test.fixtures.some((fixture) => fixture.actor?.session !== undefined));
 }
 
 /** How long a reporter's `onRunFinished` may take before the run stops waiting for it. */
@@ -1104,7 +1104,9 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
           ...(reused ? { outcome: 'reused' as const } : {}),
         }),
     };
-    processes = hasWork ? await startDeclaredProcesses(targets, config.projectRoot, processHooks, interrupted, debug) : undefined;
+    // An actor may run on a target nothing selected: its app is started with the others.
+    const appTargets = [...targets, ...selection.actorTargets.filter((target) => !targets.includes(target))];
+    processes = hasWork ? await startDeclaredProcesses(appTargets, config.projectRoot, processHooks, interrupted, debug) : undefined;
     // A run cancelled while the app was starting runs no test: the interrupt
     // alone decides the outcome.
     if (interrupted.aborted) return;

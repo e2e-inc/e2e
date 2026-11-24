@@ -8,7 +8,7 @@
  * execution.
  */
 
-import type { TestTargetPair } from '../collect/select.ts';
+import { pairSessions, type TestTargetPair } from '../collect/select.ts';
 import type { SkipInfo } from '@e2e-dev/core/lib/run/records';
 import type { ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
 import type { AiTraceSnapshot } from '@e2e-dev/core/lib/internal/ai-trace';
@@ -172,6 +172,10 @@ interface TargetState {
   readonly fileQueue: WorkUnit[];
   /** session name -> id of the setup test that failed to produce it */
   readonly failedSessions: Map<string, string>;
+  /** The other targets whose setup tests save a session an actor of this target's tests restores: its tests wait for them too. */
+  readonly awaits: ReadonlySet<string>;
+  /** The other targets an actor of this target's tests runs on: their apps have to be up for those tests. */
+  readonly actorTargets: ReadonlySet<string>;
   initFailures: number;
   unavailable: TargetUnavailable | undefined;
 }
@@ -395,6 +399,8 @@ type SchedulerHold = {
 
 class Scheduler {
   private readonly targets = new Map<string, TargetState>();
+  /** The targets whose app command exited while another target's tests named an actor on them, each with the skip those tests get. */
+  private readonly exitedActorApps = new Map<string, SkipInfo>();
   /** Every worker that has not exited yet, retired ones included. */
   private readonly workers: SchedulerWorker[] = [];
   private wake: (() => void) | undefined;
@@ -486,7 +492,11 @@ class Scheduler {
     state.setupQueue.length = 0;
     state.fileQueue.length = 0;
     for (const unit of units) {
-      for (const pair of unit.pairs) this.report(unstartedResult(pair, skip));
+      for (const pair of unit.pairs) {
+        // A setup that never ran saved no session: a test on another target whose actor restores one is skipped, not run without it.
+        if (pair.test.kind === 'setup') for (const session of pair.test.sessions) state.failedSessions.set(session, pair.test.id);
+        this.report(unstartedResult(pair, skip));
+      }
     }
   }
 
@@ -498,6 +508,12 @@ class Scheduler {
         setupQueue: [...plan.setupUnits],
         fileQueue: [...plan.fileUnits],
         failedSessions: new Map(),
+        awaits: new Set(
+          plan.fileUnits.flatMap((unit) => unit.pairs.flatMap((pair) => pairSessions(pair).flatMap(({ target }) => (target.name === plan.target.name ? [] : [target.name])))),
+        ),
+        actorTargets: new Set(
+          [...plan.setupUnits, ...plan.fileUnits].flatMap((unit) => unit.pairs.flatMap((pair) => pair.actors.flatMap((actor) => (actor.own ? [] : [actor.target.name])))),
+        ),
         initFailures: 0,
         unavailable: undefined,
       });
@@ -547,11 +563,19 @@ class Scheduler {
       const state = this.targets.get(name);
       if (state !== undefined && this.hasPendingWork(state)) affected.push(state);
     }
-    if (affected.length === 0) return;
-    this.options.events.onRunError({ error: failure.error });
     const reason = failure.error.message.split('\n')[0] ?? failure.error.message;
+    const skip: SkipInfo = { cause: 'infrastructure-unavailable', reason };
+    // Another target's tests may name an actor on a target whose app is gone: those tests skip, and the rest of that target runs on.
+    let named = false;
+    for (const name of failure.targetNames) {
+      const consumed = [...this.targets.values()].some((state) => state.actorTargets.has(name) && this.hasPendingWork(state));
+      if (consumed) this.exitedActorApps.set(name, skip);
+      named ||= consumed;
+    }
+    if (affected.length === 0 && !named) return;
+    this.options.events.onRunError({ error: failure.error });
     for (const state of affected) {
-      this.failTarget(state, { kind: 'app-exit', skip: { cause: 'infrastructure-unavailable', reason } });
+      this.failTarget(state, { kind: 'app-exit', skip });
     }
     this.wakeUp();
   }
@@ -812,8 +836,12 @@ class Scheduler {
   private peekUnit(state: TargetState): WorkUnit | undefined {
     if (state.unavailable !== undefined) return undefined;
     if (state.setupQueue.length > 0) return state.setupQueue[0];
-    // Ordinary units wait until every setup for this target has finished.
+    // Ordinary units wait until every setup for this target has finished, and every setup on a target their actors restore a session on.
     if (this.hasPendingSetup(state)) return undefined;
+    for (const name of state.awaits) {
+      const other = this.targets.get(name);
+      if (other !== undefined && other.unavailable === undefined && this.hasPendingSetup(other)) return undefined;
+    }
     return state.fileQueue[0];
   }
 
@@ -841,6 +869,8 @@ class Scheduler {
       const runnable = unit.pairs.filter((pair) => {
         const skip = this.dependencySkip(state, pair);
         if (skip === undefined) return true;
+        // A setup that is skipped saves no session: the tests that start from it skip in turn.
+        if (pair.test.kind === 'setup') for (const session of pair.test.sessions) state.failedSessions.set(session, pair.test.id);
         this.report(pairResult(pair, { status: 'skipped', selected: true, skip, attempts: [] }));
         return false;
       });
@@ -863,16 +893,21 @@ class Scheduler {
     else state.fileQueue.unshift(unit);
   }
 
-  /** Skip info when a pair's session was not produced by a passing setup. */
+  /** Skip info when a pair cannot run for what it depends on: a session no passing setup produced, or an actor's target whose app exited. */
   private dependencySkip(
     state: TargetState,
     pair: TestTargetPair,
-  ): ReturnType<typeof setupFailedSkip> | undefined {
-    const session = pair.options.session;
-    if (session === undefined) return undefined;
-    const failedSetup = state.failedSessions.get(session);
-    if (failedSetup === undefined) return undefined;
-    return setupFailedSkip(session, failedSetup);
+  ): SkipInfo | undefined {
+    for (const actor of pair.actors) {
+      const exited = actor.own ? undefined : this.exitedActorApps.get(actor.target.name);
+      if (exited !== undefined) return exited;
+    }
+    for (const { session, target } of pairSessions(pair)) {
+      // An actor's session is saved on the actor's target, which may not be this one.
+      const failedSetup = (target.name === state.target.name ? state : this.targets.get(target.name))?.failedSessions.get(session);
+      if (failedSetup !== undefined) return setupFailedSkip(session, failedSetup);
+    }
+    return undefined;
   }
 
   // --- workers ---

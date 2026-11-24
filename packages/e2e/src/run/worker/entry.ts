@@ -208,7 +208,8 @@ async function bootstrap(
         missing.push(wire);
         continue;
       }
-      pairs.push({ test, target, agent: wire.agent, repeat: wire.repeat, options: wire.options, disposition: 'run', skip: undefined });
+      // A worker reads a pair's actors off the fixture plan of each attempt; the runner's selection keeps its own.
+      pairs.push({ test, target, agent: wire.agent, repeat: wire.repeat, options: wire.options, disposition: 'run', skip: undefined, actors: [] });
     }
     return { pairs, missing, registration };
   };

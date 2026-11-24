@@ -482,6 +482,7 @@ function fixtureContext(
   const { app } = environment.target;
   return {
     targetName: environment.target.name,
+    attemptId: environment.attemptId,
     fixture: (name, surface, operations) => recorder.fixture(name, surface, operations),
     app: {
       ...engineAppInfo(app),

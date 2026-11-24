@@ -120,6 +120,8 @@ export interface EngineManifest {
   readonly selectsDevice?: boolean;
   /** See `Engine.isolation`; left out for `attempt`. */
   readonly isolation?: 'worker';
+  /** See `Engine.actors`; left out when the engine runs one attempt at a time. */
+  readonly actors?: true;
 }
 
 /** What a connection serves: a run's provisioning, a worker, or `e2e doctor`'s checks. */
@@ -172,6 +174,8 @@ export interface WireOperation {
 export interface WireCleanup {
   readonly signal: WireSignal;
   readonly timeoutMs: number;
+  /** The attempt `lifecycle/settleAttempt` or `lifecycle/endAttempt` is for; see `EngineCleanupContext.attemptId`. */
+  readonly attemptId?: string;
 }
 
 /** `ObservationPixels` on the wire: `data` is base64. */

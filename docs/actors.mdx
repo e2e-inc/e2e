@@ -1,0 +1,214 @@
+---
+title: Actors
+description: Put more than one user in one test, such as a second signed-in user, a guest, or a phone beside the browser.
+---
+
+An actor is one more session in a test, beside the test's own. It has its
+own `app`, `screen`, `agent`, and `browser` or `device`. Use one when two
+users must have the app open at the same time: one edits, and the other's
+screen updates.
+
+You declare an actor as a fixture with `actor()`. The runner opens it only
+for a test that names it.
+
+## Add a second user
+
+Declare the actor with `test.extend()`. Then name it in a test:
+
+<Tabs>
+  <Tab title="tests/fixtures.ts">
+
+```ts
+import { test as base, actor } from '@e2e-dev/web';
+
+export const test = base.extend({
+  reviewer: actor({ session: 'reviewer' }), // a login a setup test saved
+  guest: actor(),                           // signed out
+});
+```
+
+  </Tab>
+  <Tab title="tests/board.e2e.ts">
+
+```ts
+import { expect } from 'e2e';
+import { test } from './fixtures.ts';
+
+test('a note shows up live', { session: 'author' }, async ({ app, screen, reviewer }) => {
+  await app.open('/b/1'); // the test's own session, as before
+  await reviewer.app.open('/b/1');
+
+  await screen.getByLabel('Note').fill('hello');
+  await screen.getByRole('button', 'Post').tap();
+
+  await expect(reviewer.screen.getByText('hello')).toBeVisible();
+});
+```
+
+  </Tab>
+</Tabs>
+
+On a `web()` target each actor is a browser context of its own in the
+test's browser. Cookies and storage are not shared.
+
+## Sign an actor in
+
+`session` restores a login that a [setup test](/authentication#reuse-authenticated-sessions)
+saved. The runner runs that setup for every test that names the actor, even
+when you select only the test.
+
+| Declaration | The actor starts |
+| --- | --- |
+| `actor({ session: 'reviewer' })` | Signed in as `reviewer`. |
+| `actor()` | Signed out. |
+| `actor({ session: 'author' })` in a test with `session: 'author'` | Signed in as the same account, in a second window. |
+
+When the setup fails, the tests that name the actor are skipped, as with
+the test's own `session`.
+
+## Share actors across a suite
+
+Declare every role one time. A test opens only the actors it names, and
+runs only their setups:
+
+```ts
+test('an admin removes a member', async ({ admin, member }) => { /* two actors, two setups */ });
+test('the landing page loads', async ({ app }) => { /* no actor, no setup */ });
+```
+
+A fixture or a hook names an actor like a test does. A fixture that names
+one needs the `Actor` type in its `extend` call:
+
+```ts title="tests/fixtures.ts"
+import { test as base, actor, type Actor } from '@e2e-dev/web';
+
+export const test = base.extend<{ reviewer: Actor; board: string }>({
+  reviewer: actor({ session: 'reviewer' }),
+  /** A board the test's user and the reviewer both have open. */
+  board: async ({ app, reviewer }, use) => {
+    await app.open('/b/1');
+    await reviewer.app.open('/b/1');
+    await use('/b/1');
+  },
+});
+```
+
+An actor has the shape of the test's own fixtures. A helper or a page
+object written for one takes the other:
+
+```ts
+async function postNote(who: Pick<Actor, 'screen'>, text: string) {
+  await who.screen.getByLabel('Note').fill(text);
+  await who.screen.getByRole('button', 'Post').tap();
+}
+
+await postNote({ screen }, 'from the author');
+await postNote(reviewer, 'from the reviewer');
+```
+
+## Drive a phone beside a browser
+
+`target` names another target of the config for the actor to run on. Import
+`actor` from the package of that target's engine:
+
+<Tabs>
+  <Tab title="tests/fixtures.ts">
+
+```ts
+import { test as base } from '@e2e-dev/web';
+import { actor } from '@e2e-dev/mobile';
+
+export const test = base.extend({
+  courier: actor({ target: 'ios' }),
+});
+```
+
+  </Tab>
+  <Tab title="tests/order.e2e.ts">
+
+```ts
+import { expect } from 'e2e';
+import { test } from './fixtures.ts';
+
+test('the courier gets the order', async ({ app, agent, courier }) => {
+  await app.open('/checkout');
+  await agent.act('order one coffee');
+
+  await courier.app.open();
+  await expect(courier.screen.getByText('New order')).toBeVisible();
+});
+```
+
+  </Tab>
+  <Tab title="e2e.config.ts">
+
+```ts
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { mobile } from '@e2e-dev/mobile';
+
+export default {
+  targets: [
+    { name: 'web', engine: web(), app: { url: 'http://localhost:3000' } },
+    { name: 'ios', engine: mobile({ platform: 'ios' }), app: { bundleId: 'com.example.courier' } },
+  ],
+} satisfies E2EConfig;
+```
+
+  </Tab>
+</Tabs>
+
+`npx e2e run --target web` runs the test. The runner starts the `ios`
+target's app command too, and each worker opens the phone the first time a
+test needs it. Each worker needs a device no other session holds, as a
+[`launch()` host](/core#several-hosts-on-devices) does.
+
+It works in the other direction: a `mobile()` test can name a `web()`
+actor, with a `session`. A device has no saved sessions, so a device actor
+signs in inside the test.
+
+<Note>
+  An actor runs on the test's own target only where the engine can open a
+  second session there. A `web()` target can, except with
+  `connect.reconnectEndpoint` or a browser provider in `attempt` scope. A
+  `mobile()` target cannot: give the second device a target of its own and
+  name it with `target`.
+</Note>
+
+## What the report shows
+
+| In the report | Behavior |
+| --- | --- |
+| Steps | Each step of an actor, under the fixture's name: `reviewer › locator.tap`. |
+| Video | Kept beside the test's when the test records one, as `video/reviewer.webm`. |
+| Agent steps | An actor's `agent` is the agent the test runs as. Its [recordings](/cache) are kept under the fixture's name, so two actors can take the same instruction. Rename the fixture and its steps record again. |
+| Secrets | A value one session types is redacted in every session of the test. |
+| Timeout | The test's timeout cuts an actor's step. The actor stays open for `afterEach`. |
+
+## Limits
+
+- A test in a serial group cannot name an actor.
+- A setup test cannot name an actor that has a `session`.
+- An actor is a test fixture. `beforeAll` and worker fixtures cannot name
+  one.
+- `toHaveScreenshot` is not available on an actor's screen.
+- A screenshot or a download an actor makes stays on disk under the test's
+  results. The report does not list it.
+- `open_session { test }` of [`e2e mcp`](/mcp-server) cannot run a test that
+  names an actor. Run it with `npx e2e run`.
+- Name an actor with letters, digits, and `_`.
+
+For a number of sessions known only at run time, or an engine the config
+does not have, open a session with
+[`launch()`](/core#open-a-host-inside-a-test) inside the test.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Authentication" href="/authentication">
+    Save the session an actor starts from.
+  </Card>
+  <Card title="Fixtures" href="/fixtures">
+    How `test.extend()` sets fixtures up, and in what order.
+  </Card>
+</CardGroup>

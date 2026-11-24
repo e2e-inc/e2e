@@ -50,10 +50,10 @@ export interface StandaloneSessionOptions {
   readonly retainSteps?: number;
   /** The test title of a hosted attempt; its policy decides whether the attempt reads it. */
   readonly name?: string;
-  /** A state an earlier session captured, restored at launch. */
-  readonly state?: RestoredState | undefined;
-  /** The video this session records, in place of what the target's mode says. */
-  readonly video?: VideoRecording | undefined;
+  /** What the session starts from: a state an earlier session captured, or the name of a session the run's store holds. */
+  readonly state?: RestoredState | string | undefined;
+  /** The video this session records, or `off` for none, in place of what the target's mode says. */
+  readonly video?: VideoRecording | 'off' | undefined;
 }
 
 export interface StandaloneAttempt<Extra = unknown> {
@@ -228,7 +228,7 @@ export async function launchAttempt<Sessions extends EngineSessions, Extra>(
     if (error === undefined) return { status: 'passed', error };
     return { status: classifyAttemptStatus(error, step?.status === 'timed-out', error.code === 'CANCELLED'), error };
   };
-  const video = options.video ?? attemptVideo(target.video, 0);
+  const video = options.video === 'off' ? undefined : (options.video ?? attemptVideo(target.video, 0));
   session = await executor.launchSession({ session: options.state, recordings: { trace: undefined, video } }, attemptId, artifacts.dir, attemptSignal);
   const opened = session;
   const closeOpened = (record: ClosingRecord): Promise<void> =>

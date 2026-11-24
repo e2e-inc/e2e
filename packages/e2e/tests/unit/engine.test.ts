@@ -491,7 +491,7 @@ describe('createEngineSession', () => {
     expect(performed).toEqual([observed.revision]);
   });
 
-  it('ends the attempt exactly once, handing endAttempt the cleanup budget', async () => {
+  it('ends the attempt exactly once, handing endAttempt the cleanup budget and the attempt it ends', async () => {
     const contexts: EngineCleanupContext[] = [];
     const session = createEngineSession({
       engine: defineEngine(
@@ -504,7 +504,7 @@ describe('createEngineSession', () => {
     await session.close({ ...OP, timeoutMs: 7_000 });
     await session.close({ ...OP, timeoutMs: 7_000 });
     expect(contexts).toHaveLength(1);
-    expect(contexts[0]).toEqual({ signal: OP.signal, timeoutMs: 7_000 });
+    expect(contexts[0]).toEqual({ signal: OP.signal, timeoutMs: 7_000, attemptId: OP.attemptId });
   });
 
   it('reports missing observation as an unsupported capability', async () => {

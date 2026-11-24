@@ -105,6 +105,7 @@ export type EngineCapability =
   | 'keyboard'
   | 'state'
   | 'artifacts'
+  | 'actors'
   | (string & {});
 
 /**
@@ -211,6 +212,11 @@ export type FixtureOperations<T extends object> = {
 export interface EngineFixtureContext {
   /** The target the fixture serves. */
   readonly targetName: string;
+  /**
+   * The attempt the fixture is built for, which an engine that declares
+   * `actors` routes by; absent from a harness that predates actors.
+   */
+  readonly attemptId?: string;
   /** Records the declared operations before invoking them; undeclared accessors retain their identity. */
   fixture<T extends object>(name: string, surface: T, operations: FixtureOperations<T>): T;
   readonly app: EngineAppInfo & {
@@ -582,6 +588,12 @@ export interface EngineCleanupContext {
   readonly signal: AbortSignal;
   /** Remaining cleanup budget when the call starts. */
   readonly timeoutMs: number;
+  /**
+   * The attempt `settleAttempt` or `endAttempt` is for. An engine that
+   * declares `actors` has more than one open at a time and reads it; absent
+   * for `dispose`, and from a harness that predates actors.
+   */
+  readonly attemptId?: string;
 }
 
 /** Cleanup of one worker, with optional permission to leave run-owned resources for a replacement. */
@@ -816,6 +828,21 @@ export interface Engine {
    * lives; see `EngineIsolation`. Defaults to `attempt`.
    */
   readonly isolation?: EngineIsolation;
+  /**
+   * The engine can run an actor beside a test: one more attempt on the same
+   * worker while another is open, isolated from it the way two tests are (on
+   * a browser, another context). `startAttempt` is then called again with
+   * another `attemptId`. Every operation, attempt callback, and fixture
+   * context of an actor carries the id its `startAttempt` got, and
+   * `settleAttempt` and `endAttempt` name the attempt they are for
+   * (`EngineCleanupContext.attemptId`). An id no open `startAttempt` got
+   * belongs to the worker's own attempt, the first one open: a serial
+   * group's later tests and its suite hooks run on that attempt under ids
+   * of their own. The worker's own attempt can end before its actors do.
+   * Without it, a test that names an actor on its own target is refused
+   * before the run starts.
+   */
+  readonly actors?: boolean;
   /** capability: state - opaque snapshot capture/restore for session reuse. */
   readonly state?: EngineStateCapability;
   /** capability: artifacts - screenshots under the attempt directory, and videos there or at a provider. */
@@ -923,6 +950,7 @@ export interface EngineHandle<Fixtures extends object = {}> extends Engine {
 }
 
 export { defineEngine, isEngineHandle } from './manifest.ts';
+export { actorDeclaration, defineActor, type ActorDeclaration } from './actor.ts';
 
 export { connectEngine, type ConnectEngineOptions } from './protocol/client.ts';
 export { describeEngine } from './protocol/manifest.ts';

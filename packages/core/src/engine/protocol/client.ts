@@ -195,7 +195,11 @@ class EngineClient {
   readonly #manifest: EngineManifest;
   readonly #options: ConnectEngineOptions;
   readonly #secrets: ReadonlyMap<string, Secret>;
-  /** One run connection per target: a handle two targets share is prepared and finished once for each. */
+  /**
+   * One run connection per target and host: a handle two targets share is
+   * prepared and finished once for each, and so is a target a run prepares
+   * and a host (a `launch()`, an actor's engine) prepares again.
+   */
   readonly #runs = new Map<string, Promise<Link>>();
   /**
    * Worker connections, oldest first. A handle one process shares (an MCP
@@ -203,8 +207,8 @@ class EngineClient {
    * previous `dispose`: calls go to the newest, `dispose` ends the oldest.
    */
   readonly #workers: Promise<Link>[] = [];
-  #attempt: EngineAttemptContext | undefined;
-  #screenshots = 0;
+  /** The open attempts by id, each with the screenshots written for it: one, or more with `actors`. */
+  readonly #attempts = new Map<string, { readonly context: EngineAttemptContext; screenshots: number }>();
 
   constructor(manifest: EngineManifest, options: ConnectEngineOptions) {
     this.#manifest = manifest;
@@ -242,6 +246,7 @@ class EngineClient {
         tapModifiers: manifest.tapModifiers,
         selectsDevice: manifest.selectsDevice,
         isolation: manifest.isolation,
+        actors: manifest.actors,
         secrets: this.#options.secrets,
         fixtures: this.#options.fixtures,
         validateApp: this.#options.validateApp,
@@ -272,14 +277,17 @@ class EngineClient {
     });
     const result = await this.#call(link, method, params);
     if (spec.result === 'snapshot') return decodeSnapshot(result as WireSnapshot);
-    if (spec.result === 'screenshot') return this.#screenshot(result as ScreenshotResult, params['label'] as string | undefined);
+    if (spec.result === 'screenshot') {
+      const operation = args[spec.args.indexOf('operation')] as OperationContext | undefined;
+      return this.#screenshot(result as ScreenshotResult, params['label'] as string | undefined, operation?.attemptId);
+    }
     return result ?? undefined;
   }
 
   async #prepare(info: EnginePrepareInfo): Promise<void | EnginePrepareResult> {
     const { signal, log, ...rest } = info;
     const pending = this.#open('run', { env: info.env, cwd: info.projectRoot, signal, app: info.app, log });
-    this.#runs.set(info.targetName, pending);
+    this.#runs.set(runKey(info), pending);
     const link = await pending;
     if (!this.#manifest.methods.includes('lifecycle/prepare')) return;
     const result = await this.#call(link, 'lifecycle/prepare', { ...rest, signal: link.signals.encode(signal) });
@@ -287,8 +295,8 @@ class EngineClient {
   }
 
   async #finish(info: EngineFinishInfo): Promise<void> {
-    const pending = this.#runs.get(info.targetName);
-    this.#runs.delete(info.targetName);
+    const pending = this.#runs.get(runKey(info));
+    this.#runs.delete(runKey(info));
     const link = await pending?.catch(() => undefined);
     if (link === undefined) return;
     const deadline = Date.now() + info.timeoutMs;
@@ -334,8 +342,7 @@ class EngineClient {
 
   /** Tracks the attempt, which the server's callbacks and a screenshot's bytes land in, and forwards it when the server answers. */
   async #startAttempt(context: EngineAttemptContext): Promise<void> {
-    this.#attempt = context;
-    this.#screenshots = 0;
+    this.#attempts.set(context.attemptId, { context, screenshots: 0 });
     if (!this.#manifest.methods.includes('lifecycle/startAttempt')) return;
     const link = await this.#workerLink();
     await this.#call(link, 'lifecycle/startAttempt', {
@@ -349,12 +356,18 @@ class EngineClient {
   async #endAttempt(context: EngineCleanupContext): Promise<void> {
     // A hook that outlived its budget settles after the next attempt
     // started: it retires only the attempt it ended.
-    const ending = this.#attempt;
+    const ending = this.#cleanupAttempt(context);
     try {
       if (this.#manifest.methods.includes('lifecycle/endAttempt')) await this.#forward('lifecycle/endAttempt', context);
     } finally {
-      if (this.#attempt === ending) this.#attempt = undefined;
+      if (ending !== undefined && this.#attempts.get(ending.context.attemptId) === ending) this.#attempts.delete(ending.context.attemptId);
     }
+  }
+
+  /** The attempt a cleanup hook is for: the one it names, else the only one open. */
+  #cleanupAttempt(context: EngineCleanupContext): { readonly context: EngineAttemptContext; screenshots: number } | undefined {
+    if (context.attemptId !== undefined) return this.#attempts.get(context.attemptId);
+    return this.#attempts.size === 1 ? this.#attempts.values().next().value : undefined;
   }
 
   /**
@@ -364,7 +377,7 @@ class EngineClient {
    */
   async #dispose(context: EngineDisposeContext): Promise<void> {
     const pending = this.#workers.shift();
-    if (this.#workers.length === 0) this.#attempt = undefined;
+    if (this.#workers.length === 0) this.#attempts.clear();
     const link = await pending?.catch(() => undefined);
     if (link === undefined) return;
     const deadline = Date.now() + context.timeoutMs;
@@ -385,7 +398,11 @@ class EngineClient {
   /** Sends a cleanup hook over the worker connection. */
   async #forward(method: 'lifecycle/settleAttempt' | 'lifecycle/endAttempt', context: EngineCleanupContext): Promise<void> {
     const link = await this.#workerLink();
-    await this.#call(link, method, { signal: link.signals.encode(context.signal), timeoutMs: context.timeoutMs });
+    await this.#call(link, method, {
+      signal: link.signals.encode(context.signal),
+      timeoutMs: context.timeoutMs,
+      ...(context.attemptId === undefined ? {} : { attemptId: context.attemptId }),
+    });
   }
 
   /**
@@ -407,18 +424,20 @@ class EngineClient {
    * the attempt's artifact directory, or the bytes it returned, written there
    * by the client.
    */
-  async #screenshot(result: ScreenshotResult, label: string | undefined): Promise<string> {
-    const attempt = this.#attempt;
+  async #screenshot(result: ScreenshotResult, label: string | undefined, attemptId: string | undefined): Promise<string> {
+    // A serial group's later tests call under ids of their own on the one attempt open.
+    const open = (attemptId === undefined ? undefined : this.#attempts.get(attemptId)) ?? (this.#attempts.size === 1 ? this.#attempts.values().next().value : undefined);
+    const attempt = open?.context;
     if ('path' in result) {
       if (attempt !== undefined && (path.isAbsolute(result.path) || relativeToProjectRoot(attempt.artifactsDir, path.resolve(attempt.artifactsDir, result.path)) === undefined)) {
         throw new EngineError('ENGINE_FAILURE', `engine server wrote a screenshot outside the attempt's artifact directory: ${result.path}`, { retryable: false });
       }
       return result.path;
     }
-    if (attempt === undefined) throw new EngineError('INVALID_STATE', 'screenshot outside an attempt', { retryable: false });
-    this.#screenshots += 1;
+    if (open === undefined || attempt === undefined) throw new EngineError('INVALID_STATE', 'screenshot outside an attempt', { retryable: false });
+    open.screenshots += 1;
     const name = (label ?? 'screenshot').replaceAll(/[^A-Za-z0-9._-]/g, '_').slice(0, 64) || 'screenshot';
-    const relative = path.join('screenshots', `${String(this.#screenshots).padStart(3, '0')}-${name}.png`);
+    const relative = path.join('screenshots', `${String(open.screenshots).padStart(3, '0')}-${name}.png`);
     await mkdir(path.join(attempt.artifactsDir, 'screenshots'), { recursive: true });
     await writeFile(path.join(attempt.artifactsDir, relative), Buffer.from(result.data, 'base64'));
     return relative;
@@ -483,8 +502,7 @@ class EngineClient {
 
   /** A connection over `streams` that routes the server's callbacks to the live attempt and its log lines to `log`. */
   #connection(streams: TransportConnection, log: (line: string) => void, onClose: () => void): Connection {
-    const attempt = (attemptId: string): EngineAttemptContext | undefined =>
-      this.#attempt?.attemptId === attemptId ? this.#attempt : undefined;
+    const attempt = (attemptId: string): EngineAttemptContext | undefined => this.#attempts.get(attemptId)?.context;
     const requireAttempt = (attemptId: string): EngineAttemptContext => {
       const live = attempt(attemptId);
       if (live === undefined) throw new Error(`attempt ${attemptId} is not running`);
@@ -581,6 +599,11 @@ function setMember(engine: Record<string, unknown>, member: string, value: unkno
   }
   const nested = (engine[group] ??= {}) as Record<string, unknown>;
   nested[hook] = value;
+}
+
+/** What names one provisioning of a target: the target, and the host that prepared it, if one did. */
+function runKey(info: { readonly targetName: string; readonly hostId?: string | undefined }): string {
+  return info.hostId === undefined ? info.targetName : JSON.stringify([info.targetName, info.hostId]);
 }
 
 function encodeOperation(link: Link, operation: OperationContext): WireOperation {

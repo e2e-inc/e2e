@@ -487,14 +487,14 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
       dismiss: guard('keyboard dismissal', engine?.keyboard?.dismiss),
     },
     settle: guard('attempt settle', async (operation) => {
-      await engine?.settleAttempt?.({ signal: operation.signal, timeoutMs: operation.timeoutMs });
+      await engine?.settleAttempt?.({ signal: operation.signal, timeoutMs: operation.timeoutMs, attemptId: operation.attemptId });
     }),
     // The engine outlives the attempt; only the per-attempt isolation ends
     // here, exactly once. dispose() belongs to the worker.
     close: guard('attempt end', async (operation) => {
       if (ended) return;
       ended = true;
-      await engine?.endAttempt?.({ signal: operation.signal, timeoutMs: operation.timeoutMs });
+      await engine?.endAttempt?.({ signal: operation.signal, timeoutMs: operation.timeoutMs, attemptId: operation.attemptId });
     }),
   };
   return session;

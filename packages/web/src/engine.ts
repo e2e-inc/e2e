@@ -10,6 +10,7 @@ import type { BrowserContext, Page } from 'playwright-core';
 import {
   ConfigurationError,
   defineEngine,
+  EngineError,
   isSecret,
   LOCATOR_ACTION_KINDS,
   POINTER_ACTION_KINDS,
@@ -31,6 +32,9 @@ import { BROWSER_NAMES, isBrowserName, type BrowserName } from './browser-connec
 
 /** App fields only a device target reads. */
 const NATIVE_APP_KEYS = ['bundleId', 'appPath', 'launchArguments'] as const;
+
+/** How many ended actors a handle remembers, to refuse a call that arrives for one late. */
+const ENDED_ACTORS_KEPT = 4096;
 
 /** Creates one Playwright engine: one browser per worker, one context per attempt. */
 const surfaces = new WeakMap<EngineHandle, PlaywrightSurface>();
@@ -115,6 +119,26 @@ export function web(options: WebOptions = {}): WebEngine {
     );
   }
   const surface = new PlaywrightSurface(options);
+  /** The attempt on `surface`: the worker's own, a test's. Set before its `startAttempt` awaits anything. */
+  let own: string | undefined;
+  /** The surface of each attempt opened while another ran: an actor's, a context of its own on the same browser. */
+  const actors = new Map<string, PlaywrightSurface>();
+  /**
+   * The actors that ended, most recent last: a call still on its way to one
+   * must never reach another attempt's page, the next test's included. Kept
+   * for as long as the handle lives, up to `ENDED_ACTORS_KEPT`.
+   */
+  const ended = new Set<string>();
+  /**
+   * The surface of an attempt: an actor's by its id, `surface` for any
+   * other, since a serial group's tests run on one attempt under ids of
+   * their own, and for a harness that names none.
+   */
+  const of = (attempt: { readonly attemptId?: string | undefined }): PlaywrightSurface => {
+    if (attempt.attemptId === undefined) return surface;
+    if (ended.has(attempt.attemptId)) throw new EngineError('INVALID_STATE', 'the attempt this call belongs to has ended', { retryable: false });
+    return actors.get(attempt.attemptId) ?? surface;
+  };
   const handle = defineEngine<WebFixtures>({
     name: 'web',
     version: ownVersion(),
@@ -124,52 +148,82 @@ export function web(options: WebOptions = {}): WebEngine {
     finish: (info) => surface.finish(info),
     doctor: (info) => surface.doctor(info),
     init: (info) => surface.init(info),
-    startAttempt: (context) => surface.startAttempt(context),
-    settleAttempt: (context) => surface.settleAttempt(context),
-    endAttempt: (context) => surface.endAttempt(context),
-    dispose: (context) => surface.dispose(context),
-    observe: (operation, observeOptions) => surface.observe(operation, observeOptions),
-    readStyle: (ref, properties, operation) => surface.readStyle(ref, properties, operation),
-    locate: (expression, operation) => surface.locate(expression, operation),
-    perform: (ref, action, operation) => surface.perform(ref, action, operation),
+    startAttempt: (context) => {
+      // A persistent context is the one a remote browser has: a second attempt has none to run in, and is refused there.
+      if (own === undefined || recoverable) {
+        own ??= context.attemptId;
+        return surface.startAttempt(context);
+      }
+      const actor = surface.fork();
+      actors.set(context.attemptId, actor);
+      return actor.startAttempt(context);
+    },
+    settleAttempt: (context) => of(context).settleAttempt(context),
+    endAttempt: async (context) => {
+      const actor = context.attemptId === undefined ? undefined : actors.get(context.attemptId);
+      if (actor !== undefined) {
+        actors.delete(context.attemptId!);
+        ended.add(context.attemptId!);
+        if (ended.size > ENDED_ACTORS_KEPT) ended.delete(ended.values().next().value!);
+        return actor.endAttempt(context);
+      }
+      // An id that is neither is an attempt already ended: nothing of it is left to end.
+      if (context.attemptId !== undefined && context.attemptId !== own) return;
+      own = undefined;
+      return surface.endAttempt(context);
+    },
+    dispose: async (context) => {
+      const open = [...actors.values()];
+      actors.clear();
+      own = undefined;
+      // The browser goes down with `surface`; an actor's context is closed first, so its video is finalized.
+      await Promise.allSettled(open.map((actor) => actor.endAttempt(context)));
+      await surface.dispose(context);
+    },
+    observe: (operation, observeOptions) => of(operation).observe(operation, observeOptions),
+    readStyle: (ref, properties, operation) => of(operation).readStyle(ref, properties, operation),
+    locate: (expression, operation) => of(operation).locate(expression, operation),
+    perform: (ref, action, operation) => of(operation).perform(ref, action, operation),
     // A browser honors the SPI v1 actions plus blur and in-memory uploads; `actions.ts` dispatches each.
     actions: [...LOCATOR_ACTION_KINDS, 'blur', 'setInputFilePayloads'],
     // Playwright holds each modifier for the click.
     tapModifiers: true,
     // A page takes every pointer action of the contract at a bare point too.
-    performAt: (point, action, operation) => surface.performAt(point, action, operation),
+    performAt: (point, action, operation) => of(operation).performAt(point, action, operation),
     pointerActions: POINTER_ACTION_KINDS,
     keyboard: {
-      type: (text, keyboardOptions, operation) => surface.typeText(text, keyboardOptions, operation),
-      press: (key, operation) => surface.pressKey(key, operation),
+      type: (text, keyboardOptions, operation) => of(operation).typeText(text, keyboardOptions, operation),
+      press: (key, operation) => of(operation).pressKey(key, operation),
     },
     // A provider or a CDP attach speaks CDP, so it takes Chromium's names.
     validateApp: (app, info) => validateApp(app, info, typeof options.browser === 'string' ? options.browser : 'chromium'),
     ...(isSecret(options.basicAuth?.password) ? { secrets: [options.basicAuth.password] } : {}),
     session: {
-      open: (url, operation) => surface.open(url, operation),
-      back: (operation) => surface.back(operation),
-      resize: (size, operation) => surface.resize(size, operation),
-      switchTab: (index, operation) => surface.switchTab(index, operation),
-      closeTab: (index, operation) => surface.closeTabAt(index, operation),
-      restart: (operation) => surface.restart(operation),
-      reset: recoverable ? () => Promise.reject(persistentContextLimit('app.clearState()', mode, provider !== undefined)) : (operation) => surface.reset(operation),
+      open: (url, operation) => of(operation).open(url, operation),
+      back: (operation) => of(operation).back(operation),
+      resize: (size, operation) => of(operation).resize(size, operation),
+      switchTab: (index, operation) => of(operation).switchTab(index, operation),
+      closeTab: (index, operation) => of(operation).closeTabAt(index, operation),
+      restart: (operation) => of(operation).restart(operation),
+      reset: recoverable ? () => Promise.reject(persistentContextLimit('app.clearState()', mode, provider !== undefined)) : (operation) => of(operation).reset(operation),
     },
     artifacts: {
-      screenshot: (label, operation) => surface.screenshot(label, operation),
-      startVideo: (operation) => surface.startVideo(operation),
-      stopVideo: (operation) => surface.stopVideo(operation),
+      screenshot: (label, operation) => of(operation).screenshot(label, operation),
+      startVideo: (operation) => of(operation).startVideo(operation),
+      stopVideo: (operation) => of(operation).stopVideo(operation),
     },
+    // A persistent context is the one a remote browser has: there is no second one to give an actor, and no state to save.
     ...(recoverable
       ? {}
       : {
+          actors: true,
           state: {
-            capture: (operation) => surface.captureState(operation),
-            restore: (state, operation) => surface.restoreState(state, operation),
+            capture: (operation) => of(operation).captureState(operation),
+            restore: (state, operation) => of(operation).restoreState(state, operation),
           },
         }),
     fixtures: {
-      browser: (context) => createBrowserFixture(surface, context),
+      browser: (context) => createBrowserFixture(of(context), context),
     },
   });
   surfaces.set(handle, surface);

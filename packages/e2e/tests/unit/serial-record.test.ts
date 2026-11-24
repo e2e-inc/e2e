@@ -108,7 +108,7 @@ function serialPairs(target: ResolvedTarget): TestTargetPair[] {
       serialId: `${file}::wizard`,
       selected: true,
     };
-    return { test, target, agent: 'default', repeat: 0, options: OPTIONS, disposition: 'run', skip: undefined };
+    return { test, target, agent: 'default', repeat: 0, options: OPTIONS, disposition: 'run', skip: undefined, actors: [] };
   });
 }
 

@@ -125,6 +125,10 @@
     "isolation": {
       "description": "What one attempt leaves for the next: present only as worker, when the engine's fixtures, app, and screen outlive an attempt.",
       "const": "worker"
+    },
+    "actors": {
+      "description": "Present only as true, when the engine runs an actor beside a test: more than one attempt open at a time on one worker.",
+      "const": true
     }
   },
   "allOf": [

@@ -6,6 +6,8 @@
  * installed, `web()` still loads and `test` throws when used.
  */
 
+import { defineActor } from '@e2e-dev/core/engine';
+import type { Actor as RunnerActor } from 'e2e';
 import type { WebFixtures } from './fixtures.ts';
 import { runnerTest } from './runner-test.ts';
 
@@ -21,3 +23,18 @@ export const test = runnerTest().extend<WebFixtures>();
 
 /** `describe` and the hooks, the same functions as `test.describe` and `test.beforeEach`, typed with the `browser` fixture. */
 export const { describe, beforeEach, afterEach, beforeAll, afterAll } = test;
+
+/** What a test receives for a browser actor: `agent`, `app`, `screen`, `platform`, and `browser`, over a browser context of its own. */
+export type Actor = RunnerActor<WebFixtures>;
+
+/**
+ * One more browser session in a test, as a fixture: another signed-in user,
+ * a guest, the same account in a second window. It gets a browser context
+ * of its own in the test's browser, opened only for a test that names it.
+ *
+ *   const test = base.extend({ reviewer: actor({ session: 'reviewer' }) });
+ *
+ * `session` restores a login a setup test saved. `target` names another
+ * `web()` target of the config for the actor to run on.
+ */
+export const actor = defineActor<Actor>('web');

@@ -9,6 +9,7 @@
 - Locators
 - expect
 - Sign-in sessions
+- More than one user: actors
 - Start near the screen under test
 - The browser fixture (browser only)
 - Habits
@@ -530,6 +531,58 @@ credentials: {
   too: reports, step labels, the executor, and the model see
   `<secret:stripe-key>` (and so does the test id, for a value in a title),
   so the agent cannot type it. Pass the handle.
+
+## More than one user: actors
+
+An actor is one more session in a test, beside the test's own: a second
+signed-in user, a guest, or a phone beside the browser. Declare it as a
+fixture with `actor()` from the engine's package and name it in the test.
+Only a test that names an actor opens it.
+
+```ts
+// tests/fixtures.ts
+import { test as base, actor } from '@e2e-dev/web';
+
+export const test = base.extend({
+  reviewer: actor({ session: 'reviewer' }), // a session a setup test saved
+  guest: actor(),                           // signed out
+});
+```
+
+```ts
+// tests/board.e2e.ts
+import { expect } from 'e2e';
+import { test } from './fixtures.ts';
+
+test('a note shows up for the reviewer', { session: 'author' }, async ({ app, screen, reviewer }) => {
+  await app.open('/b/1');
+  await reviewer.app.open('/b/1');
+
+  await screen.getByLabel('Note').fill('hello');
+  await screen.getByRole('button', 'Post').tap();
+
+  await expect(reviewer.screen.getByText('hello')).toBeVisible();
+});
+```
+
+- An actor holds `app`, `screen`, `agent`, `platform`, and `browser` (or
+  `device`), like the test's own fixtures: a helper typed
+  `Pick<Actor, 'app' | 'screen'>` takes either.
+- On a `web()` target an actor is a browser context of its own in the
+  test's browser. The runner runs the setup test its `session` needs.
+- `actor({ target: 'ios' })` runs the actor on another target of the
+  config. Import `actor` from that target's engine package
+  (`@e2e-dev/mobile` for a phone). A device actor takes no `session`.
+- An actor's steps are in the report under the fixture's name
+  (`reviewer › locator.tap`), and the test's timeout cuts them.
+- A fixture or a `beforeEach` can name an actor; a fixture that does needs
+  `base.extend<{ reviewer: Actor; board: string }>({ ... })`.
+- Not available: an actor in a serial group, in `beforeAll` or a worker
+  fixture, an actor with a `session` in a setup test, and
+  `toHaveScreenshot` on an actor's screen.
+- On a `mobile()` target, and on a `web()` target with
+  `connect.reconnectEndpoint` or a browser provider in `attempt` scope, an
+  actor needs a `target` other than the test's own.
 
 ## Start near the screen under test
 
