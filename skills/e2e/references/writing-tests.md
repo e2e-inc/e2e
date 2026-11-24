@@ -210,7 +210,7 @@ To type fixtures across targets:
    `base.extend<{}, {}, typeof config>()`.
 
 Check `platform` or the fixture value to narrow the fixture type. With
-`requires` or `platforms` on a test, it's narrowed too. On a `describe`, it isn't.
+`platforms` on a test, it's narrowed too. On a `describe`, it isn't.
 
 An `afterEach` that names a fixture whose setup failed is skipped. A fixture
 named like one the `test` already has, built-in ones included, extends it

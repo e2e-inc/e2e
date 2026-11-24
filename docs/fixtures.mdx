@@ -158,13 +158,13 @@ export const test = base.extend<{ signedOut: void }, {}, typeof config>({
 });
 ```
 
-With `requires` or `platforms` on a test, its fixtures are typed for the
-targets that run it:
+With `platforms` on a test, its fixtures are typed for the targets that run
+it:
 
 ```ts title="tests/menu.e2e.ts"
 import { test } from './fixtures.ts';
 
-test('closes the menu with Escape', { requires: ['browser'] }, async ({ browser }) => {
+test('closes the menu with Escape', { platforms: ['web'] }, async ({ browser }) => {
   await browser.keyboard.press('Escape');
 });
 ```

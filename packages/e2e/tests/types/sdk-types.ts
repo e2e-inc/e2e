@@ -1177,19 +1177,17 @@ handsetBase('narrows the base fixtures on the platform', async ({ platform, pane
   if (platform === 'web') await pane.goto('/');
   else await handset.closeApp();
 });
-// A test's requires and platforms options narrow the fixtures to the targets they keep.
-configTest('requires pane', { requires: ['pane'] }, async ({ platform, pane }) => {
+// A test's platforms option narrows the fixtures to the targets it keeps.
+configTest('runs on web', { platforms: ['web'] }, async ({ platform, pane }) => {
   platform satisfies 'web';
   await pane.goto('/');
 });
 configTest('runs on ios', { platforms: ['ios'] }, async ({ handset }) => { await handset.closeApp(); });
-configTest.skipIf(false)('requires handset', { requires: ['handset'] }, async ({ app, handset }) => {
+configTest.skipIf(false)('runs on ios after skipIf', { platforms: ['ios'] }, async ({ app, handset }) => {
   await app.open('/');
   await handset.closeApp();
 });
-// @ts-expect-error a capability that isn't a fixture keeps every target, so handset is possibly undefined
-configTest('requires the keyboard', { requires: ['keyboard'] }, async ({ handset }) => { await handset.closeApp(); });
-const options: TestOptions = { requires: ['handset'] };
+const options: TestOptions = { platforms: ['ios'] };
 // @ts-expect-error options typed as TestOptions keep every target
 configTest('takes options', options, async ({ handset }) => { await handset.closeApp(); });
 // @ts-expect-error a fixture in the first type argument still needs a definition

@@ -947,13 +947,12 @@ export interface TestRegistrar<Fixtures = TestFixtures & WorkerFixtures> {
   (title: string, fn: TestFn<Fixtures>): TestCase;
   /**
    * Registers one configured test synchronously during module evaluation.
-   * Its fixtures are typed for the targets its `requires` and `platforms`
-   * options keep.
+   * Its fixtures are typed for the targets its `platforms` option keeps.
    */
-  <const Required extends Capability = never, const Platform extends string = string>(
+  <const Platform extends string = string>(
     title: string,
-    options: TestOptions & { readonly requires?: readonly Required[]; readonly platforms?: readonly Platform[] },
-    fn: TestFn<SelectedFixtures<Fixtures, Required, Platform>>,
+    options: TestOptions & { readonly platforms?: readonly Platform[] },
+    fn: TestFn<SelectedFixtures<Fixtures, Platform>>,
   ): TestCase;
 }
 

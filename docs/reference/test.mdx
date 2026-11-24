@@ -1039,9 +1039,9 @@ test('signs out', async ({ app, platform, device }) => {
   engine when `as const` isn't used on the config object, fixtures aren't
   narrowed by a `platform` check. Check the fixture instead
   (`device !== undefined`).
-- With `requires` or `platforms` on a test, its fixtures are typed for the
-  targets that run it. With `requires: ['device']`, `device` is typed as
-  `Device`. On a `describe`, these options don't change the types.
+- With `platforms` on a test, its fixtures are typed for the targets that
+  run it. With `platforms: ['ios']`, `device` is typed as `Device`. On a
+  `describe`, `platforms` doesn't change the types.
 - With a type annotation such as `const config: E2EConfig`, the engine types
   are lost. To keep them, use `as const satisfies E2EConfig` instead.
 
@@ -1100,13 +1100,12 @@ export interface TestRegistrar<Fixtures = TestFixtures & WorkerFixtures> {
   (title: string, fn: TestFn<Fixtures>): TestCase;
   /**
    * Registers one configured test synchronously during module evaluation.
-   * Its fixtures are typed for the targets its `requires` and `platforms`
-   * options keep.
+   * Its fixtures are typed for the targets its `platforms` option keeps.
    */
-  <const Required extends Capability = never, const Platform extends string = string>(
+  <const Platform extends string = string>(
     title: string,
-    options: TestOptions & { readonly requires?: readonly Required[]; readonly platforms?: readonly Platform[] },
-    fn: TestFn<SelectedFixtures<Fixtures, Required, Platform>>,
+    options: TestOptions & { readonly platforms?: readonly Platform[] },
+    fn: TestFn<SelectedFixtures<Fixtures, Platform>>,
   ): TestCase;
 }
 

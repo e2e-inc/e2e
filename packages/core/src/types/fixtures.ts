@@ -164,19 +164,16 @@ export type ConfigFixtures<Config, Half extends FixtureScope, Handle = ConfigEng
 export type ConfigBase<Base, Config> = unknown extends Config ? Base : Omit<Base, ConfigFixtureNames<ConfigEngines<Config>> | 'app' | 'screen'>;
 
 /**
- * `Fixtures` without the targets that a test's `requires` and `platforms`
- * options skip: a target whose engine doesn't have a fixture in `Required`,
- * or whose platform isn't in `Platform`. A target whose platform type is
+ * `Fixtures` without the targets that a test's `platforms` option skips: a
+ * target whose platform isn't in `Platform`. A target whose platform type is
  * `string` is kept for any `Platform`.
  */
-export type SelectedFixtures<Fixtures, Required, Platform> = Fixtures extends unknown
-  ? Fixtures extends { readonly [Name in Extract<Required, keyof Fixtures>]: {} }
-    ? Fixtures extends { readonly platform: infer Own }
-      ? [Extract<Own, Platform> | Extract<Platform, Own>] extends [never]
-        ? never
-        : Fixtures
+export type SelectedFixtures<Fixtures, Platform> = Fixtures extends unknown
+  ? Fixtures extends { readonly platform: infer Own }
+    ? [Extract<Own, Platform> | Extract<Platform, Own>] extends [never]
+      ? never
       : Fixtures
-    : never
+    : Fixtures
   : never;
 
 /**
