@@ -88,7 +88,7 @@ test('Wikipedia home screen', async ({ app, screen }) => {
 `BROWSERSTACK_USERNAME` और `BROWSERSTACK_ACCESS_KEY` उस एनवायरनमेंट में सेट
 करें जिसमें `e2e run` शुरू होता है, जैसे CI सीक्रेट में। ये दोनों
 **Account & Profile → My profile → Authentication & Security** से कॉपी करें। Username वही
-है जो वहाँ दिखता है, आपका ईमेल एड्रेस नहीं। इनमें से एक भी न हो, तो कुछ भी
+है जो वहाँ दिखता है, आपका ईमेल एड्रेस नहीं। दोनों में से कोई एक भी छूट जाए, तो कुछ भी
 शुरू होने से पहले ही लीज़ फ़ेल हो जाती है। आपके प्लान में App Automate होना
 चाहिए।
 
@@ -103,7 +103,7 @@ test('Wikipedia home screen', async ({ app, screen }) => {
 | `build`          | रन id      | डैशबोर्ड का बिल्ड, जिसके नीचे सेशन ग्रुप होते हैं। |
 | `sessionName`    | `e2e-<run id>-<target>-<slot>` | डैशबोर्ड पर सेशन का नाम। एक से ज़्यादा वर्कर स्लॉट हों, तो आख़िर में `-<slot>` जुड़ता है। |
 | `orientation`    | डिवाइस का    | `'portrait'` या `'landscape'`। |
-| `geoLocation`    | BrowserStack का  | देश का कोड, जिसकी लोकेशन डिवाइस का IP दिखाता है (`'US'`)। |
+| `geoLocation`    | BrowserStack का  | उस देश का कोड, जहाँ का IP डिवाइस को मिलता है (`'US'`)। |
 | `timezone`       | डिवाइस का    | टाइम ज़ोन (`'New_York'`)। |
 | `language`       | ऐप की       | भाषा (`'fr'`)। |
 | `locale`         | डिवाइस का    | लोकेल (`'fr_FR'`)। |
