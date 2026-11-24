@@ -10,7 +10,7 @@ import { obj } from '../internal/objects.ts';
 import { checkLaunchArguments, engineLaunchArguments } from '../internal/launch-arguments.ts';
 import { rejectUnknownKeys } from '../internal/options.ts';
 import { didYouMean } from '../internal/suggest.ts';
-import { isFileBase, isImplicitTestHost, isRefusedLinkScheme, normalizeBaseUrl, portOf, requestsFreePort, siteOf, withPort, type NormalizedBaseUrl } from '../internal/urls.ts';
+import { isFileBase, isImplicitTestHost, namesFile, isRefusedLinkScheme, normalizeBaseUrl, portOf, requestsFreePort, siteOf, withPort, type NormalizedBaseUrl } from '../internal/urls.ts';
 import type { AppPermissionState, CommandConfig, ResolvedLaunchArguments, TargetApp } from '../types.ts';
 import { checkLog, digestCommand, isRecord, normalizeCommand } from './command.ts';
 import { httpUrl } from './validate.ts';
@@ -166,7 +166,14 @@ export function checkTargetApp(targetName: string, engine: EngineHandle | undefi
     readyUrl: nonEmptyString(app.readyUrl, `${where}.readyUrl`),
   };
   const { url, bundleId, appPath } = checked;
-  engine?.validateApp?.(obj({ url, bundleId, appPath, ...engineLaunchArguments(launchArguments), permissions }) satisfies EngineAppDeclaration, { targetName });
+  const file = url !== undefined && namesFile(url);
+  if (file && engine !== undefined && engine.fileApps !== true) {
+    throw new ConfigurationError(
+      'INVALID_CONFIG',
+      `${where}.url is a file, and engine "${engine.name}" does not declare that it opens one from this machine's disk: use an engine version that does, or serve the app over http(s)`,
+    );
+  }
+  engine?.validateApp?.(obj({ url, bundleId, appPath, ...engineLaunchArguments(launchArguments), permissions }) satisfies EngineAppDeclaration, { targetName, ...(file ? { fileApp: true } : {}) });
   return checked;
 }
 
@@ -263,7 +270,7 @@ export function resolveTargetApp(targetName: string, app: TargetAppDeclaration, 
   const base = declaredBase !== undefined && portRequest?.port !== undefined ? withPort(declaredBase, portRequest.port) : declaredBase;
   const appPort = base === undefined ? undefined : portOf(base);
   // A file has no host: no site to read frames on, no origin, and nothing to poll.
-  const file = base !== undefined && isFileBase(base);
+  const file = isFileApp({ base });
   const hostname = base === undefined || file ? undefined : new URL(base.href).hostname;
 
   if (app.command === undefined && portRequest !== undefined) {
@@ -305,6 +312,11 @@ export function resolveTargetApp(targetName: string, app: TargetAppDeclaration, 
     command,
     readyUrl: command === undefined ? undefined : readyUrl,
   };
+}
+
+/** Whether the target's app is a file the browser opens from disk. */
+export function isFileApp(app: Pick<ResolvedApp, 'base'>): boolean {
+  return app.base !== undefined && isFileBase(app.base);
 }
 
 /**

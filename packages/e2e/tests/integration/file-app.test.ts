@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { installFakeLoopModel, loopCalls, nodeIdFor } from '../helpers/fake-loop-model.ts';
-import { createProject, resultByTitle, runExisting, type FixtureProject, type RunOutcome } from '../helpers/run-project.ts';
+import { contentsUnder, createProject, resultByTitle, runExisting, type FixtureProject, type RunOutcome } from '../helpers/run-project.ts';
 
 const SUITE = `import { test } from '@e2e-dev/web';
 import { expect } from 'e2e';
@@ -33,6 +33,13 @@ for (const target of ['../secret.html', '/etc/hosts', 'file:///etc/hosts', '..%2
 test('browser.goto refuses a file outside the directory', async ({ app, browser }) => {
   await app.open();
   await browser.goto('../secret.html');
+});
+
+test('a failure after the page left the directory', async ({ app, browser, screen }) => {
+  await app.open();
+  await screen.getByRole('link', 'Notes').tap();
+  await browser.waitForURL(/secret\\.html$/);
+  throw new Error('failed on the page outside');
 });
 `;
 
@@ -81,22 +88,46 @@ describe('a file app', () => {
   });
 });
 
+describe('a file app whose page left the directory', () => {
+  let project: FixtureProject;
+  let outcome: RunOutcome;
+
+  beforeAll(async () => {
+    project = createProject({ 'tests/file.e2e.ts': SUITE, ...SITE });
+    outcome = await runExisting(project, { appUrl: fileUrl(project), runOptions: { grep: [/a failure after the page left/] } });
+  });
+
+  afterAll(() => project?.cleanup());
+
+  it('keeps where the failure was, and nothing of the screen: no tree, no screenshot, no trace screen', () => {
+    const attempt = resultByTitle(outcome, 'a failure after the page left the directory').attempts[0]!;
+    expect(attempt.error?.message).toContain('failed on the page outside');
+    expect(attempt.failure).toEqual({ url: expect.stringMatching(/secret\.html$/) });
+    expect(attempt.artifacts.filter((artifact) => artifact.kind === 'screenshot')).toEqual([]);
+    const kept = contentsUnder(path.join(project.dir, '.e2e')).filter(([, content]) => content.includes('TOP-SECRET-NOTES'));
+    expect(kept.map(([file]) => file)).toEqual([]);
+  });
+});
+
 describe('the agent on a file app', () => {
-  it('is refused a file outside the directory by URL, and is shown nothing of one a link leads to', async () => {
+  it('gets no pixels, is refused a file outside the directory by URL, and is shown nothing of one a link leads to', async () => {
     const model = installFakeLoopModel((call) => {
-      if (call.turn === 1) return [{ toolName: 'navigate', input: { url: '../secret.html' } }];
-      if (call.turn === 2) return [{ toolName: 'tap', input: { target: nodeIdFor(call.prompt, /link "Notes"/) } }];
+      if (call.turn === 1) return [{ toolName: 'screenshot', input: {} }];
+      if (call.turn === 2) return [{ toolName: 'navigate', input: { url: '../secret.html' } }];
+      if (call.turn === 3) return [{ toolName: 'tap', input: { target: nodeIdFor(call.prompt, /link "Notes"/) } }];
       return [{ toolName: 'complete_step', input: { status: 'passed', summary: 'read the notes' } }];
     });
     const project = createProject({ 'tests/agent.e2e.ts': AGENT_SUITE, ...SITE });
     try {
       const outcome = await runExisting(project, { appUrl: fileUrl(project), config: { tests: 'tests/**/*.e2e.ts', agents: { default: { model } } } });
+      expect(loopCalls).toHaveLength(4);
+      // A file app's pixels can show a frame of another local file, so the model is sent none, even on request.
+      expect(loopCalls.map((call) => call.imageParts)).toEqual([0, 0, 0, 0]);
       // The typed URL is the navigation rule's: the model reads the refusal and the page has not moved.
-      expect(loopCalls[1]!.lastToolResult).toContain('POLICY_DENIED');
-      expect(loopCalls[1]!.lastToolResult).toContain("stays in the directory of the app's file");
+      expect(loopCalls[2]!.lastToolResult).toContain('POLICY_DENIED');
+      expect(loopCalls[2]!.lastToolResult).toContain("stays in the directory of the app's file");
       // The link is the page's own, so the browser follows it; what it shows there is refused in place of the screen.
-      expect(loopCalls[2]!.lastToolResult).toContain("a file app stays in the directory of the app's file");
-      expect(loopCalls).toHaveLength(3);
+      expect(loopCalls[3]!.lastToolResult).toContain("a file app stays in the directory of the app's file");
       expect(resultByTitle(outcome, 'the agent cannot be led out of the directory').attempts).toHaveLength(1);
       for (const call of loopCalls) {
         expect([call.prompt, call.lastPrompt, ...call.toolResults].join('\n')).not.toContain('TOP-SECRET-NOTES');

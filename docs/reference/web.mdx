@@ -562,7 +562,7 @@ await browser.goto('/dashboard', { waitUntil: 'networkidle' }); // default: 'loa
 
 | Throws | When |
 | --- | --- |
-| `POLICY_DENIED` | A URL whose scheme is not `http:` or `https:`. `about:blank` is admitted. |
+| `POLICY_DENIED` | A URL whose scheme is not `http:` or `https:`. `about:blank` is admitted. On a target whose [`app.url` is a file](/reference/config#a-file-as-the-app), a `file:` URL outside that file's directory, or of a directory. |
 | `APP_URL_REQUIRED` | A relative URL, on a target that declares no `app.url`. |
 | `ACTION_FAILED` | The navigation failed. |
 

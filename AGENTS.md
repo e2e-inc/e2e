@@ -838,12 +838,19 @@ trees, on both platforms, without a device.
     anything wider would let a local page read any file the user can and
     carry it to an http(s) address. A link or a script in the local page
     can still take the browser anywhere a file page may go, which an
-    http(s) page cannot, so `checkObservedLocation` holds the same bound
-    over every observation taken for a model (`agent/observation-feed.ts`,
-    `agent/invocation.ts`): out of the directory, the screen is withheld.
-    A test's own locator reads are trusted and not gated there. The web
-    engine opens a file app only in a browser it launches itself, since the
-    bound is checked against the runner's disk. `device.openLink` takes custom app
+    http(s) page cannot, so `leftFileApp` holds the same bound over every
+    sink that keeps or sends a screen on its own: an observation taken for
+    a model (`checkObservedLocation` in `agent/observation-feed.ts` and
+    `agent/invocation.ts`), the trace's step screens (`traceScreen`), and
+    failure evidence (`run/failure-evidence.ts`). Out of the directory, the
+    screen is withheld and only the location kept. A model is sent no
+    pixels of a file app at all (`isFileApp` where `pixelsAllowed` is
+    set), since pixels can show a frame of another local file that no tree
+    lists. A test's own reads are trusted and not gated. An engine opens a
+    file app only when it declares `fileApps`, and the harness tells its
+    `validateApp` with `fileApp: true`; the scheme is read once, in core
+    (`namesFile`). The web engine refuses a provider and `connect` there,
+    since the bound is checked against the runner's disk. `device.openLink` takes custom app
     schemes, so it refuses a list instead (`packages/mobile/src/links.ts`):
     `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, `filesystem:`.
     There is no origin or host allowlist; PR #290 removed them on purpose, since a

@@ -81,6 +81,17 @@ function fileBase(url: URL, raw: string): NormalizedBaseUrl {
  */
 const FILE_ORIGIN = 'file://';
 
+/**
+ * Whether an app URL, as declared, names a file: the one reading of the
+ * scheme, shared with `normalizeBaseUrl`, so `file:8443/report` stays the
+ * host `file` on port 8443. An unparseable URL names none; `normalizeBaseUrl`
+ * says why.
+ */
+export function namesFile(raw: string): boolean {
+  const spelled = withScheme(raw);
+  return URL.canParse(spelled) && new URL(spelled).protocol === 'file:';
+}
+
 /** True when the app is a file the browser opens from disk: it has no origin, port, or host. */
 export function isFileBase(base: NormalizedBaseUrl): boolean {
   return base.origin === FILE_ORIGIN;
@@ -146,30 +157,35 @@ function fileScope(url: URL, base: NormalizedBaseUrl): 'inside' | 'directory' | 
 }
 
 /**
- * Refuses a `file:` location a file app must not show: a file outside the
- * directory of the app's file, or a directory. `what` names what asked.
+ * Why a file app must not show a `file:` location, or undefined when it may:
+ * a file outside the directory of the app's file, or a directory. `what`
+ * names what asked.
  */
-function checkFileScope(url: URL, base: NormalizedBaseUrl, what: string): void {
+function fileScopeProblem(url: URL, base: NormalizedBaseUrl, what: string): string | undefined {
   const scope = fileScope(url, base);
-  if (scope === 'outside') {
-    throw new ConfigurationError('POLICY_DENIED', `${what} stays in the directory of the app's file: file://${url.pathname} is outside it`);
-  }
-  if (scope === 'directory') {
-    throw new ConfigurationError('POLICY_DENIED', `${what} opens a file, not a directory: file://${url.pathname}`);
-  }
+  if (scope === 'outside') return `${what} stays in the directory of the app's file: file://${url.pathname} is outside it`;
+  if (scope === 'directory') return `${what} opens a file, not a directory: file://${url.pathname}`;
+  return undefined;
 }
 
 /**
- * Refuses the location an observation was taken at when a file app has left
- * the directory of its file: a link or a script in a local page can take
- * the browser to any file the user can read, where a typed URL cannot, and
- * what the page shows there must not reach a model. Any other location, and
- * any other app, passes.
+ * Why the screen at `location` is not one a file app may show, or undefined
+ * when it is: a link or a script in a local page can take the browser to any
+ * file the user can read, where a typed URL cannot. Every sink that keeps or
+ * sends a screen on its own asks this: a model's observation
+ * (`checkObservedLocation`), the trace's step screens, and the evidence of a
+ * failure. Any other location, and any other app, passes.
  */
-export function checkObservedLocation(location: string | undefined, base: NormalizedBaseUrl | undefined): void {
-  if (location === undefined || base === undefined || !isFileBase(base) || !URL.canParse(location)) return;
+export function leftFileApp(location: string | undefined, base: NormalizedBaseUrl | undefined): string | undefined {
+  if (location === undefined || base === undefined || !isFileBase(base) || !URL.canParse(location)) return undefined;
   const url = new URL(location);
-  if (url.protocol === 'file:') checkFileScope(url, base, 'a file app');
+  return url.protocol === 'file:' ? fileScopeProblem(url, base, 'a file app') : undefined;
+}
+
+/** Refuses the location an observation taken for a model was at when a file app has left the directory of its file; see `leftFileApp`. */
+export function checkObservedLocation(location: string | undefined, base: NormalizedBaseUrl | undefined): void {
+  const problem = leftFileApp(location, base);
+  if (problem !== undefined) throw new ConfigurationError('POLICY_DENIED', problem);
 }
 
 /**
@@ -284,7 +300,8 @@ export function resolveNavigationUrl(input: string, base: NormalizedBaseUrl | un
     throw new ConfigurationError('POLICY_DENIED', `malformed URL: ${input}`);
   }
   if (url.protocol === 'file:' && base !== undefined && isFileBase(base)) {
-    checkFileScope(url, base, 'file navigation');
+    const problem = fileScopeProblem(url, base, 'file navigation');
+    if (problem !== undefined) throw new ConfigurationError('POLICY_DENIED', problem);
     return { url: url.href };
   }
   if (!NAVIGABLE_PROTOCOLS.has(url.protocol) && url.href !== BLANK_PAGE) {

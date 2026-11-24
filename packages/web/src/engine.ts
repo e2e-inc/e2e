@@ -121,6 +121,7 @@ export function web(options: WebOptions = {}): WebEngine {
     version: ownVersion(),
     spiVersion: 1,
     platform: 'web',
+    fileApps: true,
     prepare: (info) => surface.prepare(info),
     finish: (info) => surface.finish(info),
     doctor: (info) => surface.doctor(info),
@@ -505,7 +506,7 @@ function validateChromiumSandbox(chromiumSandbox: unknown): void {
  * `app.open()` to open, and the fields that describe an installed device app
  * have nothing to act on here. `permissions` must be ones `browser` grants.
  */
-function validateApp(app: EngineAppDeclaration, { targetName }: EngineAppCheckInfo, options: WebOptions): void {
+function validateApp(app: EngineAppDeclaration, { targetName, fileApp }: EngineAppCheckInfo, options: WebOptions): void {
   for (const key of NATIVE_APP_KEYS) {
     if (app[key] !== undefined) {
       throw new ConfigurationError(
@@ -520,13 +521,8 @@ function validateApp(app: EngineAppDeclaration, { targetName }: EngineAppCheckIn
       `target "${targetName}" needs app.url: web() opens the app at a URL, such as app: { url: 'http://localhost:3000' }`,
     );
   }
-  if (isFileUrl(app.url)) validateFileApp(targetName, options);
+  if (fileApp === true) validateFileApp(targetName, options);
   if (app.permissions !== undefined) validatePermissions(targetName, typeof options.browser === 'string' ? options.browser : 'chromium', app.permissions);
-}
-
-/** Whether `app.url` is a `file:` URL, read as the harness parses it. */
-function isFileUrl(url: string): boolean {
-  return URL.canParse(url) && new URL(url).protocol === 'file:';
 }
 
 /**

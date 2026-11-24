@@ -436,7 +436,7 @@ url: 'http://localhost:3000',
 | `INVALID_APP_URL` | Port `0` on any host other than `127.0.0.1` or `[::1]`, `localhost` included. |
 | `INVALID_APP_URL` | A `file:` URL with a host, or one that names a directory. |
 | `INVALID_CONFIG` | A port-0 `url` with nothing to start on it (no `app.command`). |
-| `INVALID_CONFIG` | A `file:` URL on a `web()` target with a browser provider, `connect`, `headers`, or `basicAuth`. |
+| `INVALID_CONFIG` | A `file:` URL on a `web()` target with a browser provider, `connect`, `headers`, or `basicAuth`, or on an engine that does not declare `fileApps`. |
 
 #### `bundleId`
 
@@ -691,9 +691,12 @@ app: { url: pathToFileURL('dist/index.html').href },
   [Navigation](/reference/security#navigation).
 - A file has no site and no origin. Frames that load another document stay
   out of observations, and the `environment` defaults to `'test'`.
+- The agent works from the tree alone: it is sent no screenshot, since one
+  could show a frame of another local file.
 - A `command` beside it needs a `readyUrl`, since a file answers no poll.
 - The browser reads the file from its own machine's disk, so a `web()`
-  target with a browser provider or `connect` refuses it.
+  target with a browser provider or `connect` refuses it. An engine opens a
+  file app only when it [declares it](/reference/engine#capabilities).
 - An `agent.act` recording is keyed by the file's absolute path, so it
   replays only where the file sits at that path.
 

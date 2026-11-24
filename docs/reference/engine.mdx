@@ -115,6 +115,7 @@ rules:
 | `tapModifiers` | Not a boolean, or `true` without `perform`. |
 | `selectsDevice` | Not a boolean, or `true` without `prepare`. |
 | `launchArgumentValues` | Not a boolean. |
+| `fileApps` | Not a boolean. |
 | `isolation` | Anything but `'attempt'` or `'worker'`. |
 | `keyboard`, `state`, `artifacts`, `session` | An unknown key or a non-function member. `keyboard` without `type` and `press`; `state` without both `capture` and `restore`; `artifacts` without `screenshot`; `startVideo` without `stopVideo`, or the reverse. |
 | `secrets` | Not an array of `secrets.get()` handles. |
@@ -148,6 +149,7 @@ The body of one target. Every member but `name`, `version`, and
 | [`tapModifiers`](#capabilities) | `boolean` |
 | [`selectsDevice`](#capabilities) | `boolean` |
 | [`launchArgumentValues`](#engineappinfo) | `boolean` |
+| [`fileApps`](#capabilities) | `boolean` |
 | [`keyboard`](#keyboard) | `EngineKeyboard` |
 | [`fixtures`](#contributed-fixtures) | factories |
 | [`isolation`](#fixture-isolation) | `'attempt' \| 'worker'` |
@@ -263,6 +265,15 @@ export interface Engine {
    * object at config load.
    */
   readonly launchArgumentValues?: boolean;
+  /**
+   * The engine opens an app whose `url` is a `file:` URL, reading the file
+   * from the disk of the machine the harness runs on. The harness checks
+   * every file navigation against that disk, so an engine whose surface
+   * may read another one must not declare this, or must refuse such a
+   * target in `validateApp` (`EngineAppCheckInfo.fileApp`). Without it the
+   * harness refuses a file `app.url` at config load.
+   */
+  readonly fileApps?: boolean;
   /** capability: keyboard - requires observation. Input to whatever holds focus; see `EngineKeyboard`. */
   readonly keyboard?: EngineKeyboard;
   /**
@@ -415,6 +426,7 @@ member. Three gaps end differently:
 | `tapModifiers: true` | - | `perform` | `modifiers` on `tap`, `doubleTap`, and `secondaryTap`. |
 | `selectsDevice: true` | - | `prepare` | `e2e run --device`, the device `prepare` binds. |
 | `launchArgumentValues: true` | - | - | The object form of `app.launchArguments`, in `EngineAppInfo.launchArgumentValues`. |
+| `fileApps: true` | - | - | A target whose `app.url` is a `file:` URL. `validateApp` is told with `fileApp: true`. |
 | `performAt` + `pointerActions` | `pointer` | `observe` | One pointer action at a viewport point, with no node behind it. |
 | `keyboard.{type,press,dismiss?}` | `keyboard` | `observe` | Input to whatever holds focus. |
 | `fixtures.<name>` | `<name>` | - | A contributed fixture. |

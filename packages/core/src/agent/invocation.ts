@@ -5,6 +5,7 @@
  * explicit deadline, a model-call budget, and no shared model transcript.
  */
 
+import { isFileApp } from '../config/app.ts';
 import type { StepExecutorContext } from './executor.ts';
 import type { JSONSchema7 } from 'ai';
 import type { AgentCacheContext } from '../cache/context.ts';
@@ -231,7 +232,7 @@ export class Invocation {
     const observation = await this.instrument(
       { kind: 'observation', phase: 'agent.observe' },
       async () => {
-        const pixelsAllowed = this.options.vision !== false;
+        const pixelsAllowed = this.options.vision !== false && !isFileApp(this.runtime.app);
         const raw = await retryingObserve({
           capture: () => this.session.observe(this.operation(), { pixels: this.pixelTier, pixelFallback: pixelsAllowed }),
           guard: (cause) => this.checkDeadline(cause),
