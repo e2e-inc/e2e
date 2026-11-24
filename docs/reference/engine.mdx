@@ -1530,12 +1530,18 @@ A list arrives in `launchArguments`. An object arrives in
 `launchArgumentValues`, and only on an engine that declares
 `launchArgumentValues: true`; for any other engine it fails at config load
 with `INVALID_CONFIG`. The harness sets one of the two fields, never both, so
-an engine that takes both forms reads whichever is present:
+an engine that takes both forms reads whichever is present and spells an
+object for its platform's launch command. An iOS or macOS engine spells it
+with `appleUserDefaults`:
 
 ```ts
 const launchArguments = info.app.launchArgumentValues ?? info.app.launchArguments;
 const args = launchArguments === undefined ? [] : appleUserDefaults(launchArguments);
 ```
+
+An engine for another platform spells the object itself. `mobile()` on Android
+sends each entry as an `am start` extra of the value's type, such as
+`--ez e2e true` or `--es locale fr_FR`.
 
 ### Session
 
