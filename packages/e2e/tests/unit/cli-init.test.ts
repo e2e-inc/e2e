@@ -322,17 +322,17 @@ describe('e2e init', () => {
 
     expect((await init(dir, { ci: 'none' })).exitCode).toBe(0);
     expect(clack.select).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      message: expect.stringContaining('Which model gateway'),
+      message: expect.stringContaining('Which model for agent steps?'),
       initialValue: 'vercel',
       options: [
         expect.objectContaining({ value: 'vercel', label: 'Vercel AI Gateway' }),
         expect.objectContaining({ value: 'openrouter' }),
-        expect.objectContaining({ value: 'openai-compatible' }),
+        expect.objectContaining({ value: 'openai-compatible', label: 'OpenAI-compatible / local endpoint' }),
         expect.objectContaining({ value: 'chatgpt' }),
         expect.objectContaining({ value: 'copilot' }),
         expect.objectContaining({ value: 'opencode-console' }),
         expect.objectContaining({ value: 'grok' }),
-        expect.objectContaining({ value: 'none' }),
+        expect.objectContaining({ value: 'none', label: 'Skip for now' }),
       ],
     }));
     expect(clack.text).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ placeholder: 'http://127.0.0.1:11434/v1' }));
@@ -441,7 +441,7 @@ describe('e2e init', () => {
       gateway: 'none',
       install: false,
     });
-    expect(clack.select).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: expect.stringContaining('Which model gateway') }));
+    expect(clack.select).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: expect.stringContaining('Which model for agent steps?') }));
     expect(clack.multiselect).not.toHaveBeenCalled();
     expect(clack.confirm).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: 'Apply these changes?' }));
     expect(existsSync(path.join(dir, '.claude/skills/e2e/SKILL.md'))).toBe(true);
@@ -511,7 +511,7 @@ describe('e2e init', () => {
     });
 
     expect((await init(dir)).exitCode).toBe(0);
-    expect(clack.select).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('AI SDK v7'), initialValue: 'vercel' }));
+    expect(clack.select).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('No API key needed during setup'), initialValue: 'vercel' }));
     expect(clack.confirm).toHaveBeenCalledWith(expect.objectContaining({ message: 'Install dependencies with npm?' }));
     expect(spawnSync).toHaveBeenCalledExactlyOnceWith('npm', ['install'], {
       cwd: dir, stdio: 'inherit', shell: process.platform === 'win32',
@@ -1565,6 +1565,21 @@ export default {
       expect(output()).toContain('Could not read the targets of e2e.config.ts');
       expect(output()).toContain('The pipeline runs every target in one web job');
       expect(output()).not.toContain('No web, iOS, or Android target');
+    });
+
+    it('names a key the existing config loaded by its marker when it does not load', async () => {
+      const key = `gsk-init-${'7c2e9a4f'.repeat(4)}`;
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ devDependencies: { e2e: '*', '@e2e-dev/web': '*' } }));
+      writeFileSync(path.join(dir, '.env.init'), `GROQ_API_KEY=${key}\n`);
+      writeFileSync(path.join(dir, 'e2e.config.ts'), `process.loadEnvFile(${JSON.stringify(path.join(dir, '.env.init'))});\nthrow new Error('config failed with ' + process.env.GROQ_API_KEY);\n`);
+      vi.stubEnv('GROQ_API_KEY', undefined);
+      try {
+        await init(dir, { yes: true, ci: 'github-actions' });
+        expect(output()).toContain('config failed with <secret:GROQ_API_KEY>');
+        expect(output()).not.toContain(key.slice(-16));
+      } finally {
+        delete process.env['GROQ_API_KEY'];
+      }
     });
 
     it('writes no pipeline when an existing mobile config does not load', async () => {
