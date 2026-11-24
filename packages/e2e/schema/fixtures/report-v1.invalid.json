@@ -9,10 +9,12 @@
     "targets": [],
     "results": [
       {
+        "shard": 0,
         "skip": { "cause": "filtered", "reason": "outside the shard", "otherShard": false },
         "tags": [""],
         "attempts": [
           {
+            "shard": 0,
             "expectedFailure": { "error": "a mark always has a reason" },
             "artifacts": [
               {

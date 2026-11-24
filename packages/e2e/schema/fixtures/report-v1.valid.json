@@ -76,6 +76,7 @@
         "status": "failed",
         "attempts": [
           {
+            "shard": 2,
             "id": "018f0f5c-7b2a-7abc-8abc-0123456789ac",
             "index": 0,
             "cutRetry": false,
@@ -126,6 +127,7 @@
     ],
     "results": [
       {
+        "shard": 2,
         "id": "4bbfd0a6dbf44ac1018dd6ca1a6243d742b24607aa735b28d57541e1128507d3",
         "testId": "tests/example.e2e.ts::opens%20app",
         "kind": "test",
@@ -153,6 +155,7 @@
         },
         "attempts": [
           {
+            "shard": 2,
             "id": "018f0f5c-7b2a-7abc-8abc-1123456789ab",
             "index": 0,
             "status": "passed",

@@ -394,6 +394,7 @@
       "additionalProperties": false,
       "required": ["id", "index", "status", "startedAt", "durationMs", "steps", "artifacts", "secondaryErrors", "cleanup"],
       "properties": {
+        "shard": { "type": "integer", "minimum": 1 },
         "id": { "$ref": "#/$defs/uuidV7" },
         "index": { "type": "integer", "minimum": 0 },
         "status": { "enum": ["passed", "failed", "timed-out", "interrupted", "skipped"] },
@@ -488,6 +489,7 @@
       "additionalProperties": false,
       "required": ["id", "index", "status", "startedAt", "durationMs", "members", "artifacts", "secondaryErrors", "cleanup"],
       "properties": {
+        "shard": { "type": "integer", "minimum": 1 },
         "id": { "$ref": "#/$defs/uuidV7" },
         "index": { "type": "integer", "minimum": 0 },
         "cutRetry": { "type": "boolean", "description": "The retry was interrupted or never reached its members, so this attempt's member records are not the verdict. Absent in older reports." },
@@ -548,6 +550,7 @@
       "additionalProperties": false,
       "required": ["id", "testId", "kind", "declarationIndex", "titlePath", "file", "source", "targetId", "platform", "status", "attempts"],
       "properties": {
+        "shard": { "type": "integer", "minimum": 1 },
         "id": { "$ref": "#/$defs/sha256" },
         "testId": { "type": "string", "minLength": 1 },
         "kind": { "enum": ["test", "setup"] },

@@ -81,7 +81,7 @@ function foldGroup(current: ReportSerialGroup, before: readonly ReportSerialGrou
  * The usage of two runs as one: their totals added, their per-step maxima
  * the larger of the two, and the results counted again.
  */
-function addUsage(a: ReportRun['usage'], b: ReportRun['usage'], discoveredResults: number): ReportRun['usage'] {
+export function addUsage(a: ReportRun['usage'], b: ReportRun['usage'], discoveredResults: number): ReportRun['usage'] {
   const optional = (x: number | undefined, y: number | undefined): number | undefined => (x === undefined && y === undefined ? undefined : (x ?? 0) + (y ?? 0));
   const cachedTokens = optional(a.modelCachedTokens, b.modelCachedTokens);
   const cost = optional(a.estimatedCostUsd, b.estimatedCostUsd);
@@ -113,7 +113,7 @@ function rowsById<T extends { readonly id: string; readonly selected?: boolean }
 }
 
 /** Reads the duration of a pass. Wall time is used for older reports. */
-function runDuration(run: ReportRun): number {
+export function runDuration(run: ReportRun): number {
   return run.durationMs ?? Date.parse(run.finishedAt) - Date.parse(run.startedAt);
 }
 

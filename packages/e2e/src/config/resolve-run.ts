@@ -56,7 +56,7 @@ export function resolveConfig(
  * Workers resolve this too and never call a reporter, which the factories
  * allow: constructing one has no side effects.
  */
-function resolveReporters(raw: E2EConfig, cli: RunCliOverrides): readonly Reporter[] {
+export function resolveReporters(raw: Pick<E2EConfig, 'reporters'>, cli: RunCliOverrides): readonly Reporter[] {
   const configured = raw.reporters ?? ['list'];
   if (!Array.isArray(configured)) {
     throw new ConfigurationError(

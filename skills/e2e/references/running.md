@@ -76,6 +76,12 @@ npx e2e run 'tests/**/*.smoke.e2e.ts' --target chromium --workers 1 --retries 0
 CI=1 npx e2e run            # the CI defaults, locally
 ```
 
+After all shards finish, run
+`e2e merge-reports .e2e/shard-* --output .e2e/merged --reporter junit,markdown`.
+Supply every shard's output directory, including its `results/` and any
+`report-with-reruns.json`. Upload the merged directory to keep trace links
+working. Rerun failures with `e2e run --last-failed --output .e2e/merged`.
+
 `list` takes the same files and selection flags (`--config`, `--target`,
 `--tag`, `--tag-mode`, `--exclude-tag`, `--grep`, `--grep-invert`,
 `--changed-since`, `--last-failed`, `--shard`, `--pass-with-no-tests`),

@@ -80,6 +80,7 @@ $ npx e2e --version
 | [`e2e list`](#e2e-list) | Prints the tests a run selects |
 | [`e2e doctor`](#e2e-doctor) | Checks that a run can start |
 | [`e2e cache`](#e2e-cache) | Inspects or clears the replay cache |
+| [`e2e merge-reports`](#e2e-merge-reports) | Merges finished shard reports and artifacts |
 | [`e2e report`](#e2e-report) | Opens the HTML report in a browser |
 | [`e2e upgrade`](#e2e-upgrade) | Upgrades e2e and its packages |
 | [`e2e feedback`](#e2e-feedback) | Sends feedback to the e2e team |
@@ -1449,6 +1450,38 @@ E2E_TELEMETRY_DEBUG=1 bunx e2e run
 - The first command on a machine, other than `e2e init` and
   `e2e telemetry`, prints a notice one time. In CI nothing is printed and no
   file is written.
+
+#### `e2e merge-reports`
+
+```sh
+e2e merge-reports <directories...> --output <dir>
+```
+
+Pass one output directory from each shard of the same run. A matching
+`report-with-reruns.json` takes precedence over `report.json`. The
+command checks the shard indexes and totals, project, runner version,
+commit, and test, target, and agent selection. Different config digests
+produce a warning. A missing shard fails the merge.
+
+| Flag | Meaning |
+| --- | --- |
+| `--output <dir>` | Required. A new directory for `report.json`, copied local artifacts, trace pages, and reporter output. Relative to the project root. |
+| `--config <path>` | Config to load for finished-run reporters. Defaults to the nearest config, if present. |
+| `--reporter <ids>` | Comma-separated built-in reporters, such as `junit,markdown`. Overrides built-in choices in the config and keeps configured third-party reporters. |
+
+Reporters must implement a finished-run hook. The command reads finished
+reports and does not replay live events. Its terminal verdict goes to
+stderr, so the JSON reporter can write the document alone to stdout.
+
+The merged run counts each setup once, keeps its attempts by shard, and
+takes the worst setup verdict. It preserves the shard exit statuses, so a
+per-shard `--max-failures` stop is never treated as a pass. The recorded
+duration spans the earliest shard start to the latest shard finish. The
+`e2e.merge` run extension records the sum of shard durations and each
+shard's filter decisions. The command returns the merged run's
+[exit code](#exit-codes), or 2 if the merge could not be made.
+
+See [Sharding](/ci#sharding) for artifact upload and whole-run reruns.
 
 #### `e2e report`
 

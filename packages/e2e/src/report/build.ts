@@ -237,6 +237,8 @@ export interface ReportStep {
 }
 
 interface ReportAttemptBase {
+  /** The source shard index when this attempt was merged from a shard report. */
+  shard?: number;
   id: string;
   index: number;
   status: AttemptRecord['status'];
@@ -314,6 +316,8 @@ export interface ReportSerialGroup {
 }
 
 export interface ReportResult {
+  /** The owning shard index when this test was merged from a shard report. */
+  shard?: number;
   id: string;
   testId: string;
   kind: 'test' | 'setup';
@@ -471,6 +475,8 @@ export interface Report1Document {
     filters?: readonly ReportFilter[] | undefined;
     /** Present on an `e2e explore` run only. */
     explore?: ReportExplore | undefined;
+    /** Namespaced report metadata, including the sources of a shard merge. */
+    extensions?: Record<string, unknown>;
   };
 }
 

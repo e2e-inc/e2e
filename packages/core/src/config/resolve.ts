@@ -792,8 +792,9 @@ function resolveProjectId(explicit: string | undefined, projectRoot: string): st
  * A credential and a secret may share a name; only a secret named exactly
  * like a password handle collides.
  */
-function resolveSecrets(
-  raw: ProjectConfig,
+/** Resolve fixed secrets without resolving targets, workers, or agents. */
+export function resolveSecrets(
+  raw: Pick<ProjectConfig, 'credentials' | 'secrets'>,
   env: NodeJS.ProcessEnv,
 ): Pick<ResolvedConfig, 'credentials' | 'secrets' | 'allSecrets'> {
   const credentials = new Map<string, ResolvedCredential>();
