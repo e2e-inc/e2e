@@ -5,7 +5,7 @@ name: microbench
 # workflow-level `paths:` filter is safe here, unlike in the gated workflows.
 #
 # `repeatability` measures two builds of the same commit against each other
-# in JIT and jitless mode and fails when any case's trial ranges separate: it
+# in jitless mode and fails when any case's trial ranges separate: it
 # is the evidence that a count is stable enough to compare. `compare`
 # measures the pull request's base against its head (or a dispatched base ref
 # against the branch).
@@ -33,9 +33,9 @@ on:
         type: string
         default: '10'
       mode:
-        description: jit, jitless, or both
+        description: jitless, jit, or both (jit trials cluster up to 2% apart; use it to look at JIT behavior)
         type: string
-        default: both
+        default: jitless
 
 permissions:
   contents: read
@@ -81,7 +81,7 @@ jobs:
       - name: Measure one build against the other
         env:
           TRIALS: ${{ inputs.trials || '10' }}
-          MODE: ${{ inputs.mode || 'both' }}
+          MODE: ${{ inputs.mode || 'jitless' }}
         run: node scripts/microbench.ts --root "$RUNNER_TEMP/mb/b" --base-root "$RUNNER_TEMP/mb/a" --expect-same --mode "$MODE" --trials "$TRIALS" --out "$RUNNER_TEMP/microbench"
       - if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -123,7 +123,7 @@ jobs:
       - name: Measure base against head
         env:
           TRIALS: ${{ inputs.trials || '5' }}
-          MODE: ${{ inputs.mode || 'both' }}
+          MODE: ${{ inputs.mode || 'jitless' }}
         run: node scripts/microbench.ts --root "$RUNNER_TEMP/mb/head" --base-root "$RUNNER_TEMP/mb/base" --mode "$MODE" --trials "$TRIALS" --out "$RUNNER_TEMP/microbench"
       - if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

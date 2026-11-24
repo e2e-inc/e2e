@@ -14,7 +14,7 @@
  *                       it; give both roots paths of the same length
  *   --expect-same       base and head hold the same code: a repeatability
  *                       check (implied when both roots are one directory)
- *   --mode <mode>       jit, jitless, or both (jit)
+ *   --mode <mode>       jitless, jit, or both (jitless)
  *   --tool <tool>       cachegrind (instructions; Linux with valgrind on PATH)
  *                       or time (wall time; noisy, for local smoke runs)
  *   --trials <n>        trials per case, mode, and checkout (3)
@@ -33,11 +33,15 @@
  * come from this checkout and the code under test from each root, so base
  * and head read the same bytes.
  *
- * `jit` keeps V8's compilers but makes them deterministic: `--predictable`
- * compiles on the main thread and runs GC single-threaded, and the seeds,
- * `--single-threaded`, and `--predictable-gc-schedule` remove the rest.
- * `jitless` counts the interpreter only, which also interprets regexps.
- * Either way, counts are not wall time. `--v8-pool-size=0` leaves Node no
+ * `jitless`, the default, counts the interpreter only, which also
+ * interprets regexps. It is the mode to compare in: two builds of the same
+ * commit landed within 0.12% of each other in every case. `jit` keeps V8's
+ * compilers and makes them as deterministic as V8 allows (`--predictable`
+ * compiles on the main thread and runs GC single-threaded, plus the seeds,
+ * `--single-threaded`, and `--predictable-gc-schedule`), but V8 still makes
+ * a different optimization decision in some processes: its trials fall into
+ * two clusters up to 2% apart, so use it to look at JIT behavior, not to
+ * compare. Either way, counts are not wall time. `--v8-pool-size=0` leaves Node no
  * platform worker threads, and on Linux `setarch -R` turns off address space
  * randomization, so neither moves a count between processes.
  *
@@ -79,7 +83,7 @@ const { values: options } = parseArgs({
   options: {
     root: { type: 'string', default: REPO_ROOT },
     'base-root': { type: 'string' },
-    mode: { type: 'string', default: 'jit' },
+    mode: { type: 'string', default: 'jitless' },
     tool: { type: 'string' },
     trials: { type: 'string', default: '3' },
     multiplier: { type: 'string', default: '3' },
@@ -200,7 +204,7 @@ async function main(): Promise<void> {
   if (tool === undefined) fail('valgrind is not on PATH; install it (Linux only), or pass --tool time for noisy wall time');
   if (tool !== 'cachegrind' && tool !== 'time') fail('--tool must be cachegrind or time');
   if (tool === 'cachegrind' && !hasValgrind()) fail('--tool cachegrind needs valgrind on PATH');
-  const modes: Mode[] = options.mode === 'both' ? ['jit', 'jitless'] : options.mode === 'jit' || options.mode === 'jitless' ? [options.mode] : fail('--mode must be jit, jitless, or both');
+  const modes: Mode[] = options.mode === 'both' ? ['jit', 'jitless'] : options.mode === 'jit' || options.mode === 'jitless' ? [options.mode] : fail('--mode must be jitless, jit, or both');
   const trials = integer('trials', 1);
   const multiplier = integer('multiplier', 2);
   const jobs = tool === 'time' ? 1 : integer('jobs', 1);

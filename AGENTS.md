@@ -678,7 +678,7 @@ runs on Linux only; on macOS, `--tool time` runs the same cases on wall time
 as a smoke check.
 
 ```bash
-pnpm microbench --mode both --trials 10 --base-root .          # repeatability: one build against itself
+pnpm microbench --trials 10 --base-root .                      # repeatability: one build against itself
 pnpm microbench --base-root /path/to/base/checkout             # base against this checkout
 pnpm microbench --tool time --case redact                      # local smoke run, noisy
 ```
@@ -689,11 +689,14 @@ pnpm microbench --tool time --case redact                      # local smoke run
   `--root`/`--base-root`, which must be built. Give both roots paths of the
   same length: a different length moved one case by a fixed 0.075% between
   builds of the same code, and the harness warns about it.
-- `jit` keeps V8's compilers and makes them deterministic (`--predictable`,
-  `--single-threaded`, `--predictable-gc-schedule`, fixed seeds); `jitless`
-  counts the interpreter only, regexps included. Both run with
-  `--v8-pool-size=0`, and with ASLR off (`setarch -R`) on Linux. Counts are
-  not wall time.
+- The default mode, `jitless`, counts the interpreter only, regexps
+  included; two builds of the same commit land within 0.12% of each other.
+  `--mode jit` keeps V8's compilers under `--predictable`,
+  `--single-threaded`, `--predictable-gc-schedule`, and fixed seeds, but V8
+  still optimizes differently in some processes and its trials cluster up
+  to 2% apart: use it to look at JIT behavior, not to compare. Every
+  process runs with `--v8-pool-size=0`, and with ASLR off (`setarch -R`) on
+  Linux. Counts are not wall time.
 - A direction is reported only when the base and head trial ranges do not
   overlap and the change reaches the noise floor (`--threshold`, 0.5% for
   instruction counts). `--expect-same` (implied by one directory twice)
