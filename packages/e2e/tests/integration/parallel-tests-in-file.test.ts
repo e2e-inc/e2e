@@ -223,25 +223,30 @@ ${FOUR_TESTS}`;
   );
 
   it(
-    'runs the hooks around an ordered group again for that group, and shares no module state between tests that run apart',
+    'runs the hooks around an ordered group again for that group, in the one import of the file its worker made',
     async () => {
-      const { outcome, named } = await runFile(
+      const { outcome, marks, named } = await runFile(
         `test.describe.configure({ parallel: true });
+void mark('imported', async () => {});
 test.beforeAll(async () => { await mark('beforeAll'); });
 let ran = 0;
 for (const group of ['a', 'b', 'c']) {
   test.describe(group, { parallel: false }, () => {
-    test('one', async () => { ran += 1; await mark(group + '-one-' + ran); });
-    test('two', async () => { ran += 1; await mark(group + '-two-' + ran); });
+    test('one', async () => { ran += 1; await mark('ran-' + ran); });
+    test('two', async () => { ran += 1; await mark('ran-' + ran); });
   });
 }`,
         { workers: 2 },
       );
       expect(outcome.exitCode).toBe(0);
       expect(named('beforeAll')).toHaveLength(3);
-      for (const group of ['a', 'b', 'c']) {
-        expect(named(`${group}-one-1`)).toHaveLength(1);
-        expect(named(`${group}-two-2`)).toHaveLength(1);
+      const ran = marks.filter((mark) => mark.name.startsWith('ran-'));
+      expect(ran).toHaveLength(6);
+      for (const pid of new Set(ran.map((mark) => mark.pid))) {
+        const counts = ran.filter((mark) => mark.pid === pid).map((mark) => Number(mark.name.slice('ran-'.length)));
+        // The groups a worker ran counted on in one module instance.
+        expect(counts.toSorted((x, y) => x - y)).toEqual(counts.map((_, index) => index + 1));
+        expect(named('imported').filter((mark) => mark.pid === pid)).toHaveLength(1);
       }
     },
     120_000,
@@ -272,17 +277,17 @@ test('t3', async () => { await together('t3', 3); });`,
   );
 
   it(
-    'runs the tests of a parallel file apart in a run without worker processes',
+    'runs the tests of a parallel file in one import of the file in a run without worker processes',
     async () => {
       const { outcome, project } = await runProject(
         {
           'tests/file.e2e.ts': `import { expect, test } from 'e2e';
 test.describe.configure({ parallel: true });
 let ran = 0;
-for (const title of ['t1', 't2', 't3']) test(title, async () => { ran += 1; expect(ran).toBe(1); });
+for (const [index, title] of ['t1', 't2', 't3'].entries()) test(title, async () => { ran += 1; expect(ran).toBe(index + 1); });
 test.describe('ordered', { parallel: false }, () => {
   test('first', async () => { ran += 1; });
-  test('second', async () => { expect(ran).toBe(1); });
+  test('second', async () => { expect(ran).toBe(4); });
 });`,
         },
         {},
@@ -295,19 +300,111 @@ test.describe('ordered', { parallel: false }, () => {
   );
 
   it(
-    'runs the tests of a parallel file one at a time on one worker, still apart, when the run has one worker',
+    'runs the tests of a parallel file one at a time in one import of the file when the run has one worker',
     async () => {
-      const { outcome, marks, named } = await runFile(
+      const { outcome, marks, named, one } = await runFile(
         `test.describe.configure({ parallel: true });
+void mark('imported', async () => {});
 let ran = 0;
 ${[1, 2, 3].map((n) => `test('t${n}', async () => { ran += 1; await mark('t${n}-ran-' + ran); });`).join('\n')}`,
         { workers: 1 },
       );
       expect(outcome.exitCode).toBe(0);
-      expect(new Set(marks.map((mark) => mark.pid)).size).toBe(1);
-      const [t1, t2, t3] = [1, 2, 3].map((n) => named(`t${n}-ran-1`)[0]);
-      expect(t1!.end).toBeLessThanOrEqual(t2!.start);
-      expect(t2!.end).toBeLessThanOrEqual(t3!.start);
+      const [t1, t2, t3] = [one('t1-ran-1'), one('t2-ran-2'), one('t3-ran-3')];
+      expect(new Set([t1, t2, t3].map((mark) => mark.pid)).size).toBe(1);
+      expect(named('imported').filter((mark) => mark.pid === t1.pid)).toHaveLength(1);
+      expect(t1.end).toBeLessThanOrEqual(t2.start);
+      expect(t2.end).toBeLessThanOrEqual(t3.start);
+      expect(marks.filter((mark) => mark.pid === t1.pid)).toHaveLength(4);
+    },
+    120_000,
+  );
+
+  it(
+    'runs the tests after a failed one on a new worker, in the one import of the file that worker makes',
+    async () => {
+      const { outcome, named, one } = await runFile(
+        `test.describe.configure({ parallel: true });
+void mark('imported', async () => {});
+let ran = 0;
+test('t1', async () => { ran += 1; await mark('t1-ran-' + ran); });
+test('fails', async () => { ran += 1; await mark('fails-ran-' + ran); throw new Error('always'); });
+test('t3', async () => { ran += 1; await mark('t3-ran-' + ran); });
+test('t4', async () => { ran += 1; await mark('t4-ran-' + ran); });`,
+        { workers: 1 },
+      );
+      expect(outcome.exitCode).toBe(1);
+      expect(resultByTitle(outcome, 'fails').status).toBe('failed');
+      const failed = one('t1-ran-1').pid;
+      expect(one('fails-ran-2').pid).toBe(failed);
+      const next = one('t3-ran-1').pid;
+      expect(next).not.toBe(failed);
+      expect(one('t4-ran-2').pid).toBe(next);
+      for (const pid of [failed, next]) expect(named('imported').filter((mark) => mark.pid === pid)).toHaveLength(1);
+    },
+    120_000,
+  );
+  it(
+    'sets up a worker fixture the file declares one time for the tests a worker runs apart',
+    async () => {
+      const { outcome, marks, named } = await runFile(
+        `const withDatabase = test.extend<object, { database: string }>({
+  database: [async ({ platform }, use) => {
+    await mark('database', async () => {});
+    await use(platform);
+  }, { scope: 'worker' }],
+});
+test.describe.configure({ parallel: true });
+${[1, 2, 3].map((n) => `withDatabase('t${n}', async ({ database }) => { await mark('t${n}-' + database); });`).join('\n')}`,
+        { workers: 1 },
+      );
+      expect(outcome.exitCode).toBe(0);
+      expect(marks.filter((mark) => mark.name.startsWith('t'))).toHaveLength(3);
+      expect(named('database')).toHaveLength(1);
+    },
+    120_000,
+  );
+  it(
+    'keeps the one import of the file across a serial group, which imports the file for itself',
+    async () => {
+      const { outcome, named, one } = await runFile(
+        `test.describe.configure({ parallel: true });
+void mark('imported', async () => {});
+let ran = 0;
+test('t1', async () => { ran += 1; await mark('t1-ran-' + ran); });
+test.describe('group', { serial: true }, () => {
+  test('member', async () => { await mark('member'); });
+});
+test('t2', async () => { ran += 1; await mark('t2-ran-' + ran); });`,
+        { workers: 1 },
+      );
+      expect(outcome.exitCode).toBe(0);
+      const worker = one('member').pid;
+      expect(one('t1-ran-1').pid).toBe(worker);
+      expect(one('t2-ran-2').pid).toBe(worker);
+      // The tests' import, and the group's own.
+      expect(named('imported').filter((mark) => mark.pid === worker)).toHaveLength(2);
+    },
+    120_000,
+  );
+
+  it(
+    'imports the file again for the tests after a beforeAll that failed',
+    async () => {
+      const { outcome, one } = await runFile(
+        `test.describe.configure({ parallel: true });
+let ran = 0;
+test.describe('group', () => {
+  test.beforeAll(async () => { ran += 10; await mark('beforeAll'); throw new Error('always'); });
+  test('member', async () => {});
+});
+test('after', async () => { ran += 1; await mark('after-ran-' + ran); });`,
+        { workers: 1 },
+      );
+      expect(outcome.exitCode).toBe(1);
+      expect(resultByTitle(outcome, 'after').status).toBe('passed');
+      expect(one('beforeAll').end).toBeLessThanOrEqual(one('after-ran-1').start);
+      expect(one('after-ran-1').pid).toBe(one('beforeAll').pid);
     },
     120_000,
   );

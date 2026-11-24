@@ -184,7 +184,7 @@ run only in a browser, so a test that uses it declares
 | `test.slow()`, `test.slow(condition, description)` | the same inside a test body or `beforeEach`: triples the test's timeout in force; in `beforeAll`, that hook's own timeout. Once per attempt, as in Playwright. At describe level (any form) it is a `COLLECTION_ERROR`: call it in a `beforeEach` |
 | `beforeEach`, `afterEach`, `beforeAll`, `afterAll` | the same, with no title; `beforeAll` and `afterAll` get worker fixtures, not `browser`, `app`, or `screen` |
 | `test.describe.skip`, `test.describe.serial`, `describe.configure({ mode: 'serial', retries, timeout })` | `test.describe(title, { skip, serial, retries, timeout }, fn)` |
-| `fullyParallel` in the config or a project, `--fully-parallel` | the same, in the config or on a target. Declare [worker fixtures](/reference/test#worker-fixtures) in a module the test file imports, one that declares no tests or hooks and imports no module that does, or each test sets up its own |
+| `fullyParallel` in the config or a project, `--fully-parallel` | the same, in the config or on a target |
 | `describe.configure({ mode: 'parallel' })`, `test.describe.parallel` | `describe.configure({ parallel: true })`, or `{ parallel: true }` on a `describe`, see [`parallel`](/reference/test#parallel) |
 | `describe.configure({ mode: 'default' })` | `describe.configure({ parallel: false })`, or `{ parallel: false }` on a `describe` |
 | `test.fail()` on a describe | `test.describe.fail(title, fn)`, or `{ fail: 'reason' }` on the group; for a condition, `test.fail(condition, 'reason')` in a `beforeEach` |

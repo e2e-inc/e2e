@@ -1,12 +1,12 @@
 /**
  * Worker process glue. Owns nothing but the process: it loads the config
  * itself (config modules may hold live engine handles that cannot cross
- * IPC), resolves each unit's pairs by re-importing the file, and hands all
+ * IPC), resolves each unit's pairs against its own import of the file, and hands all
  * actual execution to `TargetWorker`.
  */
 
 import { collectFromRegistration } from '../../collect/collect.ts';
-import { collectModule } from '../../collect/registry.ts';
+import { collectModule, type ModuleRegistration } from '../../collect/registry.ts';
 import type { TestTargetPair } from '../../collect/select.ts';
 import { importModule, loadConfigModule } from '../../config/load.ts';
 import { assignPorts } from '@e2e-dev/core/lib/config/resolve';
@@ -29,7 +29,7 @@ import type {
   WorkerToMain,
 } from './protocol.ts';
 import { inHeldTestToolCall } from './held-test-tool-scope.ts';
-import { TargetWorker, type ResolvedUnitPairs, type TargetWorkerDeps } from './session.ts';
+import { TargetWorker, type ResolveUnitPairs, type TargetWorkerDeps } from './session.ts';
 import { isAbandonedRejection } from '@e2e-dev/core/lib/internal/abandoned';
 import { claimRunCodeStray } from '../../session-tools/code-strays.ts';
 
@@ -191,13 +191,16 @@ async function bootstrap(
   );
 
   let collectCounter = 0;
-  const resolvePairs = async (unit: RunUnitMessage): Promise<ResolvedUnitPairs> => {
+  const importUnit = (unit: RunUnitMessage): Promise<ModuleRegistration> => {
     collectCounter += 1;
-    const registration = await collectModule(
+    return collectModule(
       () => importModule(unit.absolutePath, `worker-collect-${collectCounter}`),
       unit.absolutePath,
       staticSecretLedger(config.allSecrets).redact,
     );
+  };
+  const resolvePairs: ResolveUnitPairs = async (unit, reusable) => {
+    const registration = reusable ?? (await importUnit(unit));
     const collected = collectFromRegistration(config.projectRoot, unit.absolutePath, registration);
     const byId = new Map(collected.tests.map((test) => [test.id, test]));
     const pairs: TestTargetPair[] = [];

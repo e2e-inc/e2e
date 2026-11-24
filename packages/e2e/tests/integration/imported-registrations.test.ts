@@ -30,7 +30,7 @@ const SUPPORT = { 'tests/helper.ts': HELPER, 'tests/state.ts': STATE, 'tests/lib
 
 describe('tests and hooks a test file gets from a module it imports', () => {
   it(
-    'reach every test of a parallel file on one worker, each import of the file evaluating the module again',
+    'reach every test of a parallel file on one worker, which imports the file and the module one time',
     async () => {
       const { outcome, project } = await runProjectWithConfigFile(
         {
@@ -52,7 +52,7 @@ for (const title of ['one', 'two', 'three']) {
 declareTest('from the library');
 await declareLater('from the library, later');
 test('counts the imports', async () => {
-  expect(state.helperLoads).toBeGreaterThan(1);
+  expect(state.helperLoads).toBe(1);
 });`,
         },
         { configSource: workerFakeConfigSource(1) },
@@ -69,6 +69,45 @@ test('counts the imports', async () => {
         ['counts the imports', 'passed'],
       ]);
       expect(outcome.exitCode).toBe(0);
+    },
+    120_000,
+  );
+
+  it(
+    'reach every test of a parallel file from a CommonJS module, which no later import of the file evaluates again',
+    async () => {
+      const { outcome, project } = await runProjectWithConfigFile(
+        {
+          'tests/state.cjs': `module.exports.state = { hookRan: false };
+`,
+          'tests/helper.cjs': `const { test } = require('e2e');
+const { state } = require('./state.cjs');
+
+test.beforeEach(() => { state.hookRan = true; });
+`,
+          'tests/file.e2e.ts': `import { createRequire } from 'node:module';
+import { expect, test } from 'e2e';
+
+const require = createRequire(import.meta.url);
+require('./helper.cjs');
+const { state } = require('./state.cjs');
+
+test.describe.configure({ parallel: true });
+// Each test has to get the helper's beforeEach itself: the mark of the test before it is gone.
+test.afterEach(() => { state.hookRan = false; });
+for (const title of ['one', 'two', 'three']) {
+  test(title, async () => { expect(state.hookRan).toBe(true); });
+}`,
+        },
+        { configSource: workerFakeConfigSource(1) },
+      );
+      project.cleanup();
+      expect(outcome.report.run.errors).toEqual([]);
+      expect(outcome.results.map((result) => [result.test.title, result.status])).toEqual([
+        ['one', 'passed'],
+        ['two', 'passed'],
+        ['three', 'passed'],
+      ]);
     },
     120_000,
   );

@@ -111,6 +111,15 @@ export interface RealmManagerOptions {
 export class RealmManager {
   private realmCounter = 0;
   private readonly debug: DebugTrace;
+  /**
+   * By file, the module instance the last unit to run the file ended in with
+   * nothing failed. The file's next unit on this worker runs in it, so tests
+   * of one file that run apart import the file once per worker, and whatever
+   * the file's imports registered on that import stays registered.
+   */
+  private readonly reusable = new Map<string, ModuleRegistration>();
+  /** The realms a suite hook failed in. */
+  private readonly hookFailures = new WeakSet<Realm>();
 
   constructor(private readonly options: RealmManagerOptions) {
     this.debug = options.debug ?? new DebugTrace(false);
@@ -130,14 +139,31 @@ export class RealmManager {
   }
 
   /**
-   * Wraps a registration that was just imported and has run nothing yet as a
-   * realm. The worker imports every unit's file once to resolve its pairs;
-   * adopting that import saves the second, identical one per unit.
+   * Wraps a registration no realm holds as a realm: one that was just
+   * imported and has run nothing yet, or one `takeReusable` handed over. The
+   * worker resolves every unit's pairs against a registration; adopting that
+   * one saves the unit an import of the same file.
    */
   adopt(registration: ModuleRegistration, file: FileRef): Realm {
     const testsByKey = new Map<string, RegisteredTest>();
     for (const test of registration.tests) testsByKey.set(titlePathKey(test.titlePath), test);
     return { file: file.file, registration, testsByKey, entered: new Map() };
+  }
+
+  /** Hands over the instance `retire` kept for a file, which the caller's unit then runs in. */
+  takeReusable(file: string): ModuleRegistration | undefined {
+    const registration = this.reusable.get(file);
+    this.reusable.delete(file);
+    return registration;
+  }
+
+  /**
+   * Leaves a realm in which no test failed, and keeps its instance for the
+   * file's next unit unless a `beforeAll` or an `afterAll` failed in it.
+   */
+  async retire(realm: Realm): Promise<void> {
+    await this.leave(realm);
+    if (!this.hookFailures.has(realm)) this.reusable.set(realm.file, realm.registration);
   }
 
   /**
@@ -251,6 +277,7 @@ export class RealmManager {
       },
     );
     this.options.runErrors.push({ error: failed });
+    this.hookFailures.add(realm);
     return failed;
   }
 

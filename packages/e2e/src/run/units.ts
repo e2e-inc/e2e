@@ -157,7 +157,8 @@ export function withWorkerCap(plan: TargetWorkPlan, workers: number): TargetWork
  *
  * The cut is the same whatever `parallelism` is, but for how many units the
  * pairs with hooks share: a test that runs apart from another does so on
- * one worker too, so a file never passes for sharing state there.
+ * one worker too. Units of a file that one worker runs share its import of
+ * the file (`RealmManager.retire`), so they share the file's state there.
  */
 function splitFile(pairs: readonly TestTargetPair[], fullyParallel: boolean, parallelism: number): TestTargetPair[][] {
   const inOrder: TestTargetPair[] = [];

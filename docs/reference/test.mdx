@@ -880,15 +880,16 @@ describe('reports', { parallel: true }, () => {
 - For a whole file, call [`describe.configure`](#describe-configure) at the
   top level. For every file, set
   [`fullyParallel`](/reference/config#fullyparallel).
-- Tests that run apart share no state in the test file: each test, each
-  batch of tests with suite hooks, and each ordered group imports the file
-  again. A module the file imports stays one instance for the worker,
-  unless it declares tests or hooks itself or imports a module that does:
-  then it is imported again too.
+- Tests that run apart on the same worker share the state in the test
+  file: the worker imports the file one time for them. Tests on different
+  workers do not, so keep no state in the file that one test leaves for
+  another. A `beforeAll` and its `afterAll` can run several times on that
+  state, so create in `beforeAll` what `afterAll` closes.
 - Declare shared tests and hooks in ES modules of your project. A CommonJS
   module, a package from `node_modules`, and every imported
   module on Bun stays one instance, so the tests and hooks it declares
-  reach the first import of a file only.
+  are missing from a retry, from the tests after a failed one, and from a
+  second file that imports it.
 - A [serial](#serial) group inside a parallel scope still runs as one unit
   on one worker.
 - `false` keeps a group inside a parallel scope in order on one worker.
@@ -897,8 +898,8 @@ describe('reports', { parallel: true }, () => {
   runs in order on one worker and runs the hooks one time, and again after
   a failed test. A serial group or a `parallel: false` group runs the hooks
   around it one time more.
-- With one worker the tests run one at a time, still apart, and not always
-  in declaration order.
+- With one worker the tests run one at a time, and not always in
+  declaration order.
 - The report lists the tests in declaration order.
 
 | Throws | When |
@@ -1081,8 +1082,7 @@ export const test = base.extend<{}, { database: Database }>({
   device: it runs in a short engine attempt when the fixture names one of
   them, and without one when it names none.
 - A worker keeps one instance per definition. A test file is imported again
-  after a failed test, for each serial group and setup test, and for tests
-  that run apart in a [parallel](#parallel) scope, so a worker
+  after a failed test and for each serial group and setup test, so a worker
   fixture the file declares gets a new instance each time, and the old one
   stays set up until the worker ends.
   Declare worker fixtures in a module the file imports, one that declares

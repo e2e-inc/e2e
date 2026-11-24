@@ -297,7 +297,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         );
         // A serial group owns its realm; whatever realm ordinary tests were
         // sharing ends here, afterAll included.
-        if (realm !== null) await this.realms.leave(realm);
+        if (realm !== null) await this.realms.retire(realm);
         realm = null;
         await runSerialUnit(this, members, file);
         continue;
@@ -318,7 +318,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         }
       }
     }
-    if (realm !== null) await this.realms.leave(realm);
+    if (realm !== null) await this.realms.retire(realm);
   }
 
   /** Records a deterministic-registration violation as a run-level error. */
