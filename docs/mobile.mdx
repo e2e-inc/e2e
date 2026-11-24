@@ -65,8 +65,7 @@ A device target needs `bundleId`, `appPath`, or both. The engine installs
 nothing on its own. Call `device.installApp()` once per device, in a
 [worker fixture](/fixtures#share-a-fixture-across-a-worker) with
 [`auto: true`](/fixtures#run-a-fixture-for-every-test). With no path, it
-installs `app.appPath`. On a [hosted device](#hosted-devices) that already
-has the build, the call installs nothing.
+installs `app.appPath`.
 Without `bundleId`, `app.open()` launches the app the build installed.
 
 To run the suite in CI, see [Mobile jobs](/ci#mobile-jobs).

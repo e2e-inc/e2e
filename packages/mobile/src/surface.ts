@@ -70,9 +70,9 @@ import { keyboardDragStart, keyboardShownIn, type KeyboardUnknown } from './keyb
 import { DEVICE_PERMISSIONS, type AgentDeviceClient, type ClientFactory, type DevicePermission, type LaunchPermissions, type MobileOptions, type PermissionState } from './options.ts';
 import { maskPng } from './png.ts';
 import { mobileDoctor } from './doctor.ts';
-import { deviceLabel, pinnedApp, type SlotBinding } from './bindings.ts';
+import { deviceLabel, deviceSelection, pinnedApp, type DeviceSelection, type SlotBinding } from './bindings.ts';
 import { assertAppId } from './links.ts';
-import { bootRequest, DevicePool, deviceSelection, type DeviceSelection } from './pool.ts';
+import { bootRequest, DevicePool } from './pool.ts';
 import { recordLease, travelledLease, type DeviceLease, type RecordingDeviceProvider } from './provider.ts';
 import {
   installedIdentity,
@@ -512,8 +512,6 @@ export class AgentDeviceSurface {
   private launching = false;
   /** The app the build `appPath` installed, once `init` has, itself or through a lease. */
   private installedApp: string | undefined;
-  /** The app the device provider installed from the target's `app.appPath`, until an uninstall removes it. */
-  private leaseInstalledApp: string | undefined;
   /** The target's app, as `init` received it. */
   private app: EngineAppInfo = {};
   /** Where relative build paths resolve; the run's project root once init has told us. */
@@ -691,7 +689,6 @@ export class AgentDeviceSurface {
     // from `appPath` says so on the binding, and otherwise the suite installs
     // it where it wants to, with `device.installApp()`.
     this.installedApp = binding?.installedApp;
-    this.leaseInstalledApp = binding?.installedApp;
   }
 
   async startAttempt(context: EngineAttemptContext): Promise<void> {
@@ -866,7 +863,6 @@ export class AgentDeviceSurface {
     this.located.clear();
     this.appIdentity = undefined;
     this.installedApp = undefined;
-    this.leaseInstalledApp = undefined;
     this.knownViewport = undefined;
     let closing: Promise<void> | undefined;
     const close = (): void => {
@@ -1047,8 +1043,6 @@ export class AgentDeviceSurface {
     if (options.reinstall === true && app === undefined) {
       throw invalidState("reinstall needs an app: pass `app`, or pin one with the target's app.bundleId or app.appPath");
     }
-    // The device provider already put this build on the device: the same suite runs on a device that starts without it.
-    if (engineBuild && options.reinstall !== true && this.leaseInstalledApp !== undefined) return { app: this.leaseInstalledApp };
     const result: InstallIdentity = await this.command(
       `install ${resolved}`,
       (client) =>
@@ -1057,7 +1051,7 @@ export class AgentDeviceSurface {
           : client.apps.install({ ...selection, ...(app === undefined ? {} : { app }), appPath: resolved }),
       signal,
     );
-    const installed: InstalledApp = installedIdentity(result, app, resolved);
+    const installed: InstalledApp = installedIdentity(result, app, resolved, "the target's `app.bundleId` or installApp's `app` option");
     // The engine's own build, installed: without `app`, this is what `app.open()` launches from here on.
     if (engineBuild) this.installedApp = installed.app;
     return installed;
@@ -1081,7 +1075,6 @@ export class AgentDeviceSurface {
     this.launching = false;
     this.screenReplaced();
     if (target === this.installedApp || removed === this.installedApp) this.installedApp = undefined;
-    if (target === this.leaseInstalledApp || removed === this.leaseInstalledApp) this.leaseInstalledApp = undefined;
     return result['wasInstalled'] === true;
   }
 

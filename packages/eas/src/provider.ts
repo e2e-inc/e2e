@@ -177,7 +177,9 @@ export function expoSimulators(options: ExpoSimulatorsOptions = {}): DeviceProvi
       request.log(`simulator session ${created.id}, ${created.url}`);
       // Expo bills a session from the moment it starts, and the engine holds only leases `acquire` returned.
       const abandon = async (what: string, cause: unknown): Promise<never> => {
-        idleDeadlines.get(request.runId)?.delete(created.id);
+        const held = idleDeadlines.get(request.runId);
+        held?.delete(created.id);
+        if (held?.size === 0) idleDeadlines.delete(request.runId);
         leaseClients.delete(created.id);
         const outcome = await client.stop(created.id, AbortSignal.timeout(10_000)).then(
           () => 'stopped it',

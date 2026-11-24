@@ -10,8 +10,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { createAgentDeviceClient } from 'agent-device';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { DeviceClientConfig } from '../bindings.ts';
-import { deviceSelection } from '../pool.ts';
+import { deviceSelection, type DeviceClientConfig } from '../bindings.ts';
 import type { DeviceLease, DeviceReleaseContext, DeviceRequest } from '../provider.ts';
 import { installedIdentity } from '../support.ts';
 import { startDriver, stopDriver } from './daemon.ts';
@@ -176,7 +175,7 @@ export async function installLeasedApp(request: DeviceRequest, lease: DeviceLeas
       signal: request.signal,
       ...(request.app === undefined ? {} : { app: request.app }),
     });
-    return { ...lease, installedApp: installedIdentity(installed, request.app, appPath).app };
+    return { ...lease, installedApp: installedIdentity(installed, request.app, appPath, "the target's `app.bundleId`").app };
   } finally {
     await installer.sessions.close({ signal: AbortSignal.timeout(10_000) }).catch(() => {});
   }
