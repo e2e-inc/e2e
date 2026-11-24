@@ -1269,6 +1269,19 @@ test('request', async ({ request }) => {
   await request.get('/api/orders', { method: 'POST' });
   // @ts-expect-error a body is a string; an object goes in json
   await request.post('/api/orders', { body: { sku: 'A1' } });
+  // toBeOK takes a response, on every expect form.
+  void (expect(created).toBeOK() satisfies void);
+  void (expect(created).not.toBeOK() satisfies void);
+  void (expect.soft(created).toBeOK() satisfies void);
+  void (expect.poll(() => request.get('/api/orders')).toBeOK() satisfies Promise<void>);
+  // @ts-expect-error toBeOK takes a response, not its status
+  expect(created.status).toBeOK();
+  // @ts-expect-error toBeOK takes a response, negated too
+  expect(created.status).not.toBeOK();
+  // @ts-expect-error toBeOK takes a response, soft too
+  expect.soft(created.status).toBeOK();
+  // @ts-expect-error toBeOK takes a response, polled too
+  void expect.poll(() => 1).toBeOK();
 });
 // @ts-expect-error a project fixture typed as its own `request` conflicts with the built-in one
 test.extend<{ request: { hello(): string } }>({ request: async ({}, use) => { await use({ hello: () => 'mine' }); } });

@@ -9,7 +9,8 @@ import { testPattern } from '@e2e-dev/core/lib/internal/regexp';
 import { describeIssue, requireStandardSchema } from '@e2e-dev/core/lib/internal/standard-schema';
 import { runningSuiteHook } from '@e2e-dev/core/lib/internal/test-timeout';
 import { toTextPattern } from '@e2e-dev/core/lib/internal/text';
-import type { AsymmetricMatcher, NegatedValueExpectation, PassOptions, PropertyPath, StandardSchemaV1, ValueExpectation } from '@e2e-dev/core/lib/types';
+import { shownUrl } from '@e2e-dev/core/lib/run/request';
+import type { AsymmetricMatcher, NegatedValueExpectation, PassOptions, PropertyPath, StandardSchemaV1, ValueExpectation, WebResponse } from '@e2e-dev/core/lib/types';
 import { withMessage } from './heading.ts';
 import { checkOptions, retry } from './retry.ts';
 
@@ -306,6 +307,18 @@ class ValueExpectationImpl<T> implements ValueExpectation<T> {
     return (this.negated || result.issues !== undefined ? undefined : result.value) as StandardSchemaV1.InferOutput<Schema>;
   }
 
+  /** A status from 200 to 299; a value that is not a response fails negated too, like the number matchers. */
+  toBeOK(): void {
+    const actual = this.actual as unknown;
+    if (!isResponse(actual)) fail(`toBeOK requires a response, got ${format(actual)}`);
+    const got = `got ${actual.status}${responseSource(actual.url)}`;
+    this.check(
+      actual.status >= 200 && actual.status <= 299,
+      () => `expected a 2xx status, ${got}`,
+      () => `expected a status outside 2xx, ${got}`,
+    );
+  }
+
   /** The one body of the four ordering matchers: a number on the left, a phrase for the message. */
   private compareNumber(name: string, expected: number, holds: (actual: number) => boolean, phrase: string): void {
     const actual = this.actual as unknown;
@@ -316,6 +329,19 @@ class ValueExpectationImpl<T> implements ValueExpectation<T> {
       () => `expected ${actual} not to be ${phrase} ${expected}`,
     );
   }
+}
+
+/** What toBeOK reads of a `WebResponse`: anything else is not one. */
+function isResponse(value: unknown): value is Pick<WebResponse, 'status' | 'url'> {
+  if (typeof value !== 'object' || value === null) return false;
+  const { status, url } = value as Partial<Record<'status' | 'url', unknown>>;
+  return typeof status === 'number' && typeof url === 'string';
+}
+
+/** ` from <url>` as a request step names it, for an http(s) URL; nothing for any other. */
+function responseSource(url: string): string {
+  const parsed = URL.canParse(url) ? new URL(url) : undefined;
+  return parsed?.protocol === 'http:' || parsed?.protocol === 'https:' ? ` from ${shownUrl(parsed, undefined)}` : '';
 }
 
 /**

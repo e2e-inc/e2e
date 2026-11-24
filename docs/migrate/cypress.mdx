@@ -107,7 +107,7 @@ describe('todos', () => {
 | `cy.intercept('POST', '/api/users', body)` | `browser.route({ method: 'POST', url: '**/api/users' }, route => route.fulfill({ json: body }))` |
 | `cy.on('window:confirm')`, `cy.on('window:alert')` | `await browser.onDialog('accept')` before the action, `'dismiss'` to cancel |
 | `cy.session` | `test.setup` and `{ session }` |
-| `cy.request(method, url, body)` | `request.fetch(url, { method, json: body })`, or `{ body }` for a string. `cy.request` fails on a status outside 2xx and 3xx and `request` does not, so check `response.status`. See [`request`](/reference/request) |
+| `cy.request(method, url, body)` | `request.fetch(url, { method, json: body })`, or `{ body }` for a string. `cy.request` fails on a status outside 2xx and 3xx and `request` does not, so check it with `expect(response).toBeOK()`. See [`request`](/reference/request) |
 | `cy.task`, `cy.exec`, `cy.fixture` | Node code: `fs`, your database client, `import data from './fixture.json'` |
 | `Cypress.Commands.add` | A function, or a fixture from `test.extend` |
 
