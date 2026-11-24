@@ -466,6 +466,7 @@ await browser.waitForURL(/\/orders\/\d+$/, { timeout: 15_000 });
 | --- | --- |
 | `INVALID_ARGUMENT` | 模式不是字符串或 `RegExp`（例如谓词函数），glob 中的 `{` 嵌套，或 `{`、`}` 未成对，或使用了 `timeout` 之外的选项，例如 Playwright 的 `waitUntil`。 |
 | `ASSERTION_FAILED` | URL 在超时前未匹配。 |
+| `APP_URL_REQUIRED` | 在没有 `app.url` 的目标上使用相对模式。 |
 
 #### `locator`
 

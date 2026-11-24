@@ -161,7 +161,7 @@ run only in a browser, so a test that uses it declares
 
 | Playwright | e2e |
 | --- | --- |
-| `page.route(pattern, handler)`, `unroute()`, `unrouteAll()` | the same on `browser`; a pattern is a `RegExp`, a glob on the full URL, or `{ method, url }` for one HTTP method |
+| `page.route(pattern, handler)`, `unroute()`, `unrouteAll()` | the same on `browser`; a pattern is a `RegExp`, a URL glob resolved against the app URL, or `{ method, url }` for one HTTP method |
 | `route.fulfill()`, `continue()`, `fallback()`, `abort()`, `fetch()` | the same, see [`route`](/reference/web#route) for the options each takes |
 | `page.waitForResponse(pattern)` | `browser.waitForResponse(pattern)` with the same URL globs |
 | `page.on('dialog')`, `page.waitForEvent('download')` | `browser.onDialog('accept')` or a handler; `browser.waitForDownload(() => trigger)` |

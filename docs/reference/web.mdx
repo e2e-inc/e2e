@@ -617,6 +617,7 @@ await browser.waitForURL(/\/orders\/\d+$/, { timeout: 15_000 });
 | --- | --- |
 | `INVALID_ARGUMENT` | A pattern that is not a string or `RegExp` (a predicate function, say), a glob that nests a `{` or leaves a `{` or `}` unmatched, or an option other than `timeout`, such as Playwright's `waitUntil`. |
 | `ASSERTION_FAILED` | The URL did not match before the timeout. |
+| `APP_URL_REQUIRED` | A relative pattern on a target with no `app.url`. |
 
 #### `locator`
 

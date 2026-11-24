@@ -26,7 +26,7 @@ export interface UrlPattern {
  * matches any URL, and a RegExp tests the full URL. `base` is read only for a
  * string that needs it, so a target with no app URL takes every other pattern.
  * A glob that nests a `{` or leaves one unmatched is `INVALID_ARGUMENT` here,
- * before anything is matched.
+ * before it is resolved or anything is matched.
  */
 export function urlPattern(expected: TextPattern, base: () => string): UrlPattern {
   if (expected.kind === 'regexp') {
@@ -36,6 +36,8 @@ export function urlPattern(expected: TextPattern, base: () => string): UrlPatter
     };
   }
   if (expected.value === '') return { matches: () => true, label: '' };
+  // Refuse a bad `{` in the glob as written, before resolving: `..` can drop the segment that holds it (`/{bad/../x`).
+  urlGlobSource(expected.value);
   const glob = resolveUrlGlob(expected.value, base);
   const pattern = new RegExp(urlGlobSource(glob));
   return { matches: (url) => pattern.test(serialized(url)), label: glob };
@@ -116,7 +118,9 @@ function baseFor(glob: string, base: () => string): string | undefined {
  * `resolveGlobBase` does: each path segment that holds a glob character is
  * swapped for a placeholder the URL parser leaves alone, the rest resolves,
  * and the segments go back, lowercased where they landed in the origin (the
- * scheme and host match in any case). A glob that starts with `*` matches any
+ * scheme and host match in any case). Unlike Playwright, which hides a `#`
+ * in a placeholder and so lets a `..` after it eat a path segment, a fragment
+ * is held behind its `#` like a query. A glob that starts with `*` matches any
  * origin and stays as written; so does one that starts with an unresolved
  * scheme, or does not parse against the base.
  */
@@ -139,10 +143,12 @@ function resolveUrlGlob(glob: string, base: () => string): string {
     if (segment === '.' || segment === '..' || segment === '') return segment;
     if (index === 0 && segment.endsWith(':')) return isSchemePattern(segment) ? hold(segment, 'http:') : segment;
     if (!/[*?{}\\]/.test(segment)) return segment;
-    // The query is held on its own, so a later `..` stays in the query instead of eating this segment.
-    const query = segment.indexOf('?');
-    if (query === -1) return hold(segment, `${tag}${String(index)}_$`);
-    return hold(segment.slice(0, query), `${tag}${String(index)}_$`) + hold(segment.slice(query), `?${tag}${String(index)}_$`);
+    // The query or fragment is held behind its own `?` or `#`, so the URL parser still sees where the path ends
+    // and a later `..` stays in the query or fragment instead of eating a path segment.
+    const end = segment.search(/[?#]/);
+    if (end === -1) return hold(segment, `${tag}${String(index)}_$`);
+    const delimiter = segment[end]!;
+    return hold(segment.slice(0, end), `${tag}${String(index)}_$`) + hold(segment.slice(end), `${delimiter}${tag}${String(index)}_$`);
   }).join('/');
   let url: URL;
   try {

@@ -466,6 +466,7 @@ await browser.waitForURL(/\/orders\/\d+$/, { timeout: 15_000 });
 | --- | --- |
 | `INVALID_ARGUMENT` | パターンが文字列や `RegExp` ではない場合（述語関数など）、グロブの `{` が入れ子になっているか、`{` または `}` の対応が取れていない場合、または Playwright の `waitUntil` など、`timeout` 以外のオプションがある場合。 |
 | `ASSERTION_FAILED` | タイムアウトまでに URL が一致しなかった場合。 |
+| `APP_URL_REQUIRED` | `app.url` のないターゲットで相対パターンを使った場合。 |
 
 #### `locator`
 

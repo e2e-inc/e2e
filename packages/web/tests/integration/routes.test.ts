@@ -414,6 +414,7 @@ describe('browser route and waitForResponse decisions', () => {
     ['**/api/quote?id=?', '/api/quote?id=7', false],
     ['**/api/q?ote', '/api/quote', false],
     ['**/api/my file*', '/api/my%20file.txt', true],
+    ['/api/quote#a*/../flags', '/api/flags', false],
   ];
 
   /** A miss is that call's timeout; any other rejection fails the row instead of reading as `false`. */
@@ -460,6 +461,11 @@ describe('browser route and waitForResponse decisions', () => {
     await noAppUrl.unrouteAll();
     await page.goto(`${origin}/api/quote`);
     await noAppUrl.waitForURL(pattern, { timeout: 1_000 });
+  });
+
+  it('refuses a bad { that resolving would drop, and registers no route', async () => {
+    expect(() => browser.route('/{bad/../api/quote', (route) => route.fulfill({ body: 'routed' }))).toThrow(expect.objectContaining({ code: 'INVALID_ARGUMENT' }));
+    expect(await fetchText(`${origin}/api/quote`)).toBe('network:/api/quote');
   });
 
   it('refuses a relative pattern on a target with no app URL', async () => {

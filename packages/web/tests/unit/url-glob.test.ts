@@ -38,6 +38,13 @@ describe('URL globs', () => {
     expect(matches('/x*?q=1/../y', 'http://localhost:3000/y')).toBe(false);
   });
 
+  it('keeps a fragment behind its #, so a later .. stays in the fragment and the host keeps its case rules', () => {
+    expect(matches('/account#tab*/../orders', 'http://localhost:3000/account#tab1/../orders')).toBe(true);
+    expect(matches('/account#tab*/../orders', 'http://localhost:3000/orders')).toBe(false);
+    expect(matches('https://example.com#Tab*', 'https://example.com/#Tab1')).toBe(true);
+    expect(matches('https://example.com#Tab*', 'https://example.com/#tab1')).toBe(false);
+  });
+
   it('globs the scheme, matching it and the host in any case, and keeps the path in its case', () => {
     expect(matches('http{,s}://localhost:3000/a', 'http://localhost:3000/a')).toBe(true);
     expect(matches('http{,s}://localhost:3000/a', 'https://localhost:3000/a')).toBe(true);
@@ -147,5 +154,15 @@ describe('URL globs', () => {
     for (const glob of ['**/{a,{b}}', '**/{a,{b}', '**/{a', '**/a}']) {
       expect(() => urlPattern(toTextPattern(glob), () => BASE), glob).toThrow(expect.objectContaining({ code: 'INVALID_ARGUMENT' }));
     }
+  });
+
+  it('refuses a bad { in the glob as written, even where resolving would drop its segment or needs a base', () => {
+    const noBase = (): string => {
+      throw new TestError('APP_URL_REQUIRED', 'no app url');
+    };
+    for (const glob of ['/{bad/../orders', '/a}/../orders', '/{a,{b}/../orders']) {
+      expect(() => urlPattern(toTextPattern(glob), () => BASE), glob).toThrow(expect.objectContaining({ code: 'INVALID_ARGUMENT' }));
+    }
+    expect(() => urlPattern(toTextPattern('/{bad'), noBase)).toThrow(expect.objectContaining({ code: 'INVALID_ARGUMENT' }));
   });
 });
