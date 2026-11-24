@@ -3,17 +3,16 @@ title: Actors
 description: Put more than one user in one test, such as a second signed-in user, a guest, or a phone beside the browser.
 ---
 
-An actor is one more session in a test, beside the test's own. It has its
-own `app`, `screen`, `agent`, and `browser` or `device`. Use one when two
-users must have the app open at the same time: one edits, and the other's
-screen updates.
+An actor is one user's session in a test. It has its own `app`, `screen`,
+`agent`, and `browser` or `device`. Use actors when two users must have
+the app open at the same time: one edits, and the other's screen updates.
 
 You declare an actor as a fixture with `actor()`. The runner opens it only
 for a test that names it.
 
-## Add a second user
+## Put two users in a test
 
-Declare the actor with `test.extend()`. Then name it in a test:
+Declare each user with `test.extend()`. Then name them in a test:
 
 <Tabs>
   <Tab title="tests/fixtures.ts">
@@ -22,7 +21,8 @@ Declare the actor with `test.extend()`. Then name it in a test:
 import { test as base, actor } from '@e2e-dev/web';
 
 export const test = base.extend({
-  reviewer: actor({ session: 'reviewer' }), // a login a setup test saved
+  author: actor({ session: 'author' }),     // a login a setup test saved
+  reviewer: actor({ session: 'reviewer' }),
   guest: actor(),                           // signed out
 });
 ```
@@ -34,12 +34,12 @@ export const test = base.extend({
 import { expect } from 'e2e';
 import { test } from './fixtures.ts';
 
-test('a note shows up live', { session: 'author' }, async ({ app, screen, reviewer }) => {
-  await app.open('/b/1'); // the test's own session, as before
+test('a note shows up live', async ({ author, reviewer }) => {
+  await author.app.open('/b/1');
   await reviewer.app.open('/b/1');
 
-  await screen.getByLabel('Note').fill('hello');
-  await screen.getByRole('button', 'Post').tap();
+  await author.screen.getByLabel('Note').fill('hello');
+  await author.screen.getByRole('button', 'Post').tap();
 
   await expect(reviewer.screen.getByText('hello')).toBeVisible();
 });
@@ -48,8 +48,31 @@ test('a note shows up live', { session: 'author' }, async ({ app, screen, review
   </Tab>
 </Tabs>
 
-On a `web()` target each actor is a browser context of its own in the
-test's browser. Cookies and storage are not shared.
+On a `web()` target each actor is a browser context of its own in one
+browser. Cookies and storage are not shared. This test opens two contexts.
+
+## Add a user to a test you have
+
+The test's own `app` and `screen` work beside an actor. Name the actor
+and leave the rest of the test as it is:
+
+```ts
+test('a note shows up live', { session: 'author' }, async ({ app, screen, reviewer }) => {
+  await app.open('/b/1'); // the test's own session, as before
+  await screen.getByRole('button', 'Post').tap();
+
+  await reviewer.app.open('/b/1');
+  await expect(reviewer.screen.getByText('hello')).toBeVisible();
+});
+```
+
+The test's own session opens only when something uses it:
+
+| The test | Its own session |
+| --- | --- |
+| Names only actors, as `{ author, reviewer }` does | Not opened. |
+| Names `app`, `screen`, `agent`, or another fixture of its own session. A fixture or a hook that names one counts. | Opened. |
+| Sets `session` | Opened, signed in. |
 
 ## Sign an actor in
 
@@ -180,10 +203,11 @@ signs in inside the test.
 | In the report | Behavior |
 | --- | --- |
 | Steps | Each step of an actor, under the fixture's name: `reviewer › locator.tap`. |
-| Video | Kept beside the test's when the test records one, as `video/reviewer.webm`. |
+| Video | Kept with the test's when the test records one, under `actors/reviewer/video/`. |
 | Agent steps | An actor's `agent` is the agent the test runs as. Its [recordings](/cache) are kept under the fixture's name, so two actors can take the same instruction. Rename the fixture and its steps record again. |
 | Secrets | A value one session types is redacted in every session of the test. |
 | Timeout | The test's timeout cuts an actor's step. The actor stays open for `afterEach`. |
+| Failure | The screen at the failure is the one of the session whose step failed, or was running at a timeout. |
 
 ## Limits
 
@@ -192,8 +216,10 @@ signs in inside the test.
 - An actor is a test fixture. `beforeAll` and worker fixtures cannot name
   one.
 - `toHaveScreenshot` is not available on an actor's screen.
+- `npx e2e run --step` holds the steps of the test's own session, not an
+  actor's.
 - A screenshot or a download an actor makes stays on disk under the test's
-  results. The report does not list it.
+  results. The report does not list it, and an artifact store does not get it.
 - `open_session { test }` of [`e2e mcp`](/mcp-server) cannot run a test that
   names an actor. Run it with `npx e2e run`.
 - Name an actor with letters, digits, and `_`.

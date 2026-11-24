@@ -457,6 +457,11 @@ export function sessionLedger(
  * Stops sharing what `session` knows, once it has ended: its values are its
  * own again, redacted by its own ledger in what is still reported of it.
  */
+export function releaseSessionLedger(session: TargetSession): void {
+  const ledger = ledgerBySession.get(session);
+  if (ledger !== undefined) sharingByLedger.get(ledger)?.withdraw();
+}
+
 /**
  * Keeps sharing every value `session` knows now past its own end, until the
  * returned function is called. What an attempt with more than one session
@@ -465,11 +470,6 @@ export function sessionLedger(
  */
 export function holdSessionSecrets(session: TargetSession, secrets: ResolvedConfig['allSecrets']): () => void {
   return share(sessionLedger(session, secrets).entries()).withdraw;
-}
-
-export function releaseSessionLedger(session: TargetSession): void {
-  const ledger = ledgerBySession.get(session);
-  if (ledger !== undefined) sharingByLedger.get(ledger)?.withdraw();
 }
 
 /**

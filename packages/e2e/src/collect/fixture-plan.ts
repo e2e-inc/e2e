@@ -40,7 +40,7 @@ export interface PlannedFixture {
   readonly definition: FixtureDefinition;
   /** The scope it has on the target: the one it declares, or the one of the fixture it extends. */
   readonly scope: FixtureScope;
-  /** Whether it names a built-in that needs an attempt on the engine, itself or through a fixture it names; an actor is opened on one. */
+  /** Whether it names a built-in that needs an attempt on the engine, itself or through a fixture it names. */
   readonly usesEngine: boolean;
   readonly inputs: FixtureInputs;
 }
@@ -54,7 +54,9 @@ export interface FixturePlan {
   /**
    * Whether the code, or a fixture it needs, names a built-in fixture that
    * needs an attempt on the engine. Code that names none never touches the
-   * engine, so a suite hook needs no attempt for it.
+   * engine through a session of its own: a suite hook needs no attempt for
+   * it, and a test that names only actors, each a session of its own, opens
+   * none beside theirs.
    */
   readonly usesEngine: boolean;
 }
@@ -257,7 +259,7 @@ function planFixtures(request: PlanRequest): FixturePlan {
     const own = planner.inputs.get(definition) ?? new Map<string, undefined>();
     // `reachesEngine` stops at the first name that reaches the engine, so it cannot be what orders the rest.
     for (const dependency of own.values()) if (dependency !== undefined) place(dependency);
-    const usesEngine = definition.actor !== undefined || reachesEngine(own);
+    const usesEngine = reachesEngine(own);
     const planned: PlannedFixture = { definition, scope: planner.scopeOf(definition) === 'worker' ? 'worker' : 'test', usesEngine, inputs: own };
     placed.set(definition, planned);
     order.push(planned);

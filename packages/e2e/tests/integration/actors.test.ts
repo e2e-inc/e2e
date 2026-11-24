@@ -249,7 +249,7 @@ describe('actors a test names', { timeout: 120_000 }, () => {
     const videos = attempt.artifacts.filter((artifact) => artifact.kind === 'video');
     expect(videos.map((video) => video.actor).toSorted()).toEqual(['reviewer', undefined].toSorted());
     const actors = videos.find((video) => video.actor === 'reviewer')!;
-    expect(actors.path).toMatch(/video\/reviewer\.webm$/);
+    expect(actors.path).toMatch(/actors\/reviewer\/video\/[^/]+$/);
     expect(existsSync(path.join(project.dir, '.e2e', 'results', actors.path!))).toBe(true);
   });
 

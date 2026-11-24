@@ -409,7 +409,9 @@ export interface TestAttemptFixtures {
  * Plans the fixtures of one attempt of `test` on `target`, resolved as one
  * unit over its body and `hooks`, before any session exists: a fixture rule
  * one of them breaks throws here. `open` binds the plan to the attempt once
- * its built-in fixtures exist.
+ * its built-in fixtures exist. An attempt that opened no session of its own
+ * has none (`builtIns` undefined), which the plan allows only when it names
+ * none that needs one (`usesEngine`).
  */
 export function planAttemptFixtures(
   target: BuiltInTarget,
@@ -418,13 +420,15 @@ export function planAttemptFixtures(
 ): {
   /** What the attempt sets up, for the actors among it (`plannedActors`). */
   readonly plan: FixturePlan;
-  open(options: { readonly builtIns: object; readonly pool: WorkerFixturePool; readonly signal: AbortSignal; readonly actors?: BindOptions['actors'] }): TestAttemptFixtures;
+  open(options: { readonly builtIns: object | undefined; readonly pool: WorkerFixturePool; readonly signal: AbortSignal; readonly actors?: BindOptions['actors'] }): TestAttemptFixtures;
 } {
   const plan = planAttempt(target, test, [...hooks.beforeEach, ...hooks.afterEach]);
   return {
     plan,
     open({ builtIns, pool, signal, actors }) {
-      const read = attemptBuiltIns(builtIns);
+      const read = builtIns === undefined
+        ? attemptlessBuiltIns(target, (name) => new Error(`"${name}" was read in an attempt that opened no session of its own`))
+        : attemptBuiltIns(builtIns);
       const bound = bindFixtures({ plan, builtIns: read, pool, signal, actors });
       return {
         enter: () => pool.enter(read),

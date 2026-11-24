@@ -542,6 +542,10 @@ export class StepRecorder {
   private readonly pauses = new Set<HeldPause>();
   /** Steps whose bodies are still executing, by id, in the order they started. */
   private readonly active = new Map<string, ActiveStep>();
+  /** Who waits for `idle`. */
+  private readonly idleWaiters: (() => void)[] = [];
+  /** The steps other sessions run that were filed here and have not ended (`guest`). */
+  private readonly guestsRunning = new Set<StepRecord>();
   /** The promises of abandoned steps, for the wait before teardown. */
   private readonly abandonedPromises: Promise<unknown>[] = [];
   /** The index every step before which a passed verification proves, or -1 when none has passed. */
@@ -591,6 +595,25 @@ export class StepRecorder {
   /** Whether a step is still executing. */
   get busy(): boolean {
     return this.active.size > 0;
+  }
+
+  /** The steps still running, another session's filed here among them, in the order they began. */
+  running(): readonly StepRecord[] {
+    return this.steps.filter((step) => this.active.has(step.id) || this.guestsRunning.has(step));
+  }
+
+  /** Resolves once no step is executing, at once when none is; the caller bounds the wait. */
+  idle(): Promise<void> {
+    if (!this.busy) return Promise.resolve();
+    return new Promise((resolve) => {
+      this.idleWaiters.push(resolve);
+    });
+  }
+
+  /** Takes `id` off the steps that execute, and tells who waits for the last of them. */
+  private finished(id: string): void {
+    this.active.delete(id);
+    if (!this.busy) for (const resolve of this.idleWaiters.splice(0)) resolve();
   }
 
   /** The step currently executing, when inside StepRecorder.run. */
@@ -834,7 +857,7 @@ export class StepRecorder {
       if (this.redact !== undefined) redactErrorInPlace(error, this.redact);
       throw error;
     } finally {
-      this.active.delete(record.id);
+      this.finished(record.id);
       // An abandoned step reported its end when the body returned; what it did since is not the test's.
       if (!step.abandoned) {
         this.settleScreen(record, step.seenScreen);
@@ -902,7 +925,7 @@ export class StepRecorder {
       this.publishEnd(record);
     }
     // No body runs for a held step, so nothing else ends what it started.
-    for (const { record } of held) this.active.delete(record.id);
+    for (const { record } of held) this.finished(record.id);
     return first;
   }
 
@@ -1103,6 +1126,7 @@ export class StepRecorder {
     // The test's own step the session's step began inside, such as an `agent.act` whose `onAction` drives the session.
     const enclosing = this.current();
     const record = this.file({ ...step, label: this.redactText(step.label) });
+    this.guestsRunning.add(record);
     this.publishStart(record);
     return {
       index: record.index,
@@ -1115,6 +1139,7 @@ export class StepRecorder {
         else this.publish(record, progress);
       },
       end: (result) => {
+        this.guestsRunning.delete(record);
         const { cache, ...fields } = result;
         Object.assign(record, fields);
         if (cache !== undefined) record.cache = this.cacheForReport(cache);

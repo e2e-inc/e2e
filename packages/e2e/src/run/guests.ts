@@ -6,7 +6,7 @@
  * session opened outside every test only has its steps recorded.
  */
 
-import { copyFile, mkdir, rename, rm } from 'node:fs/promises';
+import { copyFile, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { markAbandonedRejection } from '@e2e-dev/core/lib/internal/abandoned';
 import { classifyError, InfrastructureError, TestError, withHint, type E2EError } from '@e2e-dev/core/lib/internal/errors';
@@ -33,13 +33,32 @@ export interface AttemptGuestOptions {
   readonly videoPrefix: string;
   /** How long closing one host or session may take, every phase of its own cleanup included. */
   readonly cleanupTimeout: number;
-  /** Cuts the operations running on the attempt's budget, an actor's among them, the way its timeout does. */
-  readonly cut: () => void;
+}
+
+/** A session the attempt closes: one the test opened, or an actor the attempt opened for it. */
+interface KeptSession {
+  readonly session: GuestSession;
+  /** Stops what the body left running on it. */
+  stop(): Promise<void>;
+}
+
+/** How an actor the attempt opens itself joins it; see `AttemptGuestSessions.actor`. */
+export interface ActorSeat {
+  readonly steps: GuestMirror;
+  /** Takes a video the actor recorded under the attempt's own directory, where it stays. */
+  video(recording: SessionVideo): Promise<void>;
+  /**
+   * Hands over the open actor. `cut` stops its steps through the attempt's
+   * budget and says whether they ended: the actor then stays open for
+   * teardown, as the test's own session does. One whose steps did not end
+   * is closed.
+   */
+  open(session: GuestSession, cut: () => Promise<boolean>): void;
 }
 
 export class AttemptGuestSessions {
-  /** The sessions the test opened, which the attempt closes. */
-  private readonly sessions: GuestSession[] = [];
+  /** The sessions the test opened and the actors opened for it, which the attempt closes. */
+  private readonly sessions: KeptSession[] = [];
   /** The hosts the test launched, which the attempt closes. */
   private readonly hosts: GuestHost[] = [];
   private readonly mirrors: GuestMirror[] = [];
@@ -62,14 +81,24 @@ export class AttemptGuestSessions {
   readonly offer: AttemptGuests;
 
   /**
-   * Reserves a seat for an actor the attempt opens itself (`run/actors.ts`):
-   * a session like one the test opened, under the name of its fixture.
+   * The place of an actor the attempt opens itself (`run/actors.ts`): its
+   * steps are told under `name`, its fixture's, from the project at `root`.
    */
-  actor(name: string): GuestSeat<GuestSession, GuestSteps> {
-    return this.seat(`actor "${name}"`, (session: GuestSession) => {
-      this.sessions.push(session);
-      return this.mirror(name, session.root);
-    });
+  actor(name: string, root: string): ActorSeat {
+    const steps = mirrorGuestSteps(this.steps, name, root);
+    this.mirrors.push(steps);
+    return {
+      steps,
+      video: (recording) => this.hold(name, recording, 'in place'),
+      open: (session, cut) => {
+        this.sessions.push({
+          session,
+          stop: async () => {
+            if (!(await cut())) await this.close(session);
+          },
+        });
+      },
+    };
   }
 
   constructor(private readonly steps: StepRecorder, private readonly artifacts: ArtifactSink, private readonly options: AttemptGuestOptions) {
@@ -82,7 +111,7 @@ export class AttemptGuestSessions {
       session: () => {
         const actor = this.name();
         return this.seat('host.newSession()', (session: GuestSession) => {
-          this.sessions.push(session);
+          this.sessions.push({ session, stop: () => this.close(session) });
           return this.mirror(actor, session.root);
         });
       },
@@ -98,7 +127,7 @@ export class AttemptGuestSessions {
    * naming them.
    */
   async abandonRunning(): Promise<E2EError[]> {
-    const errors: E2EError[] = this.sessions.flatMap((session) => {
+    const errors: E2EError[] = this.sessions.flatMap(({ session }) => {
       const error = session.abandonRunning();
       return error === undefined ? [] : [classifyError(error)];
     });
@@ -112,30 +141,15 @@ export class AttemptGuestSessions {
 
   /**
    * Stops what the body left in flight once it is over, however it ended:
-   * an opening still under way is cancelled, and a session the test opened
-   * with a step still running is closed, which cuts the step. A timeout or
-   * an interrupt cuts the test's own steps at once, and a session's must not
-   * go on driving the app through teardown.
+   * an opening still under way is cancelled, and a session with a step
+   * still running is stopped. One the test opened is closed, which cuts the
+   * step; an actor's step is cut and the actor stays open (`ActorSeat.open`).
+   * A timeout or an interrupt cuts the test's own steps at once, and a
+   * session's must not go on driving the app through teardown.
    */
   async quiesce(): Promise<void> {
     this.cancelOpenings();
-    await Promise.all(this.sessions.filter((session) => session.busy()).map((session) => this.cutOrClose(session)));
-  }
-
-  /**
-   * Stops what runs on `session`. An actor's steps run on the attempt's
-   * budget, so they are cut through it and the actor stays open: teardown
-   * may still drive it, as it may the test's own session. A step that does
-   * not end within the cleanup budget, and any other session, is cut by
-   * closing the session.
-   */
-  private async cutOrClose(session: GuestSession): Promise<void> {
-    if (session.settled !== undefined) {
-      this.options.cut();
-      const settled = await withTimeout(session.settled(), this.options.cleanupTimeout, () => new InfrastructureError('CLEANUP_TIMEOUT', 'a step of an actor did not end')).then(() => true, () => false);
-      if (settled) return;
-    }
-    await this.close(session);
+    await Promise.all(this.sessions.filter(({ session }) => session.busy()).map((kept) => kept.stop()));
   }
 
   /**
@@ -147,7 +161,7 @@ export class AttemptGuestSessions {
   async settle(status: AttemptRecord['status']): Promise<readonly E2EError[]> {
     this.taking = false;
     this.cancelOpenings();
-    await Promise.all(this.sessions.map((session) => this.close(session)));
+    await Promise.all(this.sessions.map(({ session }) => this.close(session)));
     // A host closes its open session first, so that session's video is handed over before the copies are waited for.
     await Promise.all(this.hosts.map((host) => this.close(host)));
     this.holding = false;
@@ -201,7 +215,7 @@ export class AttemptGuestSessions {
   private mirror(actor: string, root: string): GuestSteps {
     const mirror = mirrorGuestSteps(this.steps, actor, root);
     this.mirrors.push(mirror);
-    return { progress: mirror.progress, wrote: mirror.wrote, verified: mirror.verified, placed: mirror.placed, video: (recording) => this.hold(actor, recording) };
+    return { progress: mirror.progress, video: (recording) => this.hold(actor, recording, 'copied') };
   }
 
   /** Closes a host or session within the cleanup budget, once; a failure is the attempt's cleanup failure, not a throw. */
@@ -218,11 +232,19 @@ export class AttemptGuestSessions {
     return closing;
   }
 
-  /** Takes a video a session recorded. A file is copied under the attempt's artifacts first: its host deletes the original when it closes. */
-  private hold(actor: string, recording: SessionVideo): Promise<void> {
+  /**
+   * Takes a video a session recorded. A file of a session the test opened
+   * is `copied` under the attempt's artifacts first: its host deletes the
+   * original when it closes. An actor's is already there, and stays `in place`.
+   */
+  private hold(actor: string, recording: SessionVideo, kept: 'copied' | 'in place'): Promise<void> {
     if (!this.holding || this.options.keep === undefined) return Promise.resolve();
     if ('url' in recording) {
       this.videos.push({ actor, ...recording });
+      return Promise.resolve();
+    }
+    if (kept === 'in place') {
+      this.videos.push({ actor, file: path.relative(this.artifacts.dir, recording.path).split(path.sep).join('/'), startedAt: recording.startedAt });
       return Promise.resolve();
     }
     const earlier = this.videos.filter((video) => video.actor === actor && 'file' in video).length;
@@ -232,12 +254,7 @@ export class AttemptGuestSessions {
     this.videos.push({ actor, file, startedAt: recording.startedAt });
     const copying = (async () => {
       await mkdir(path.join(this.artifacts.dir, VIDEO_DIR), { recursive: true });
-      const kept = path.join(this.artifacts.dir, VIDEO_DIR, name);
-      // An actor records under the attempt's own directory, which nothing else removes: its file is moved, not left
-      // twice. Any other file is copied: its host removes the original, and it may be on another drive.
-      const within = path.relative(this.artifacts.dir, recording.path);
-      if (within.startsWith('..') || path.isAbsolute(within)) await copyFile(recording.path, kept);
-      else await rename(recording.path, kept);
+      await copyFile(recording.path, path.join(this.artifacts.dir, VIDEO_DIR, name));
     })().catch((cause: unknown) => {
       this.failures.push(classifyError(cause));
       const failed = this.videos.findIndex((video) => 'file' in video && video.file === file);

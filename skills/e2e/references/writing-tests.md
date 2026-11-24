@@ -546,10 +546,10 @@ credentials: {
 
 ## More than one user: actors
 
-An actor is one more session in a test, beside the test's own: a second
-signed-in user, a guest, or a phone beside the browser. Declare it as a
-fixture with `actor()` from the engine's package and name it in the test.
-Only a test that names an actor opens it.
+An actor is one user's session in a test: a signed-in user, a guest, or a
+phone beside the browser. Declare it as a fixture with `actor()` from the
+engine's package and name it in the test. Only a test that names an actor
+opens it.
 
 ```ts
 // tests/fixtures.ts
@@ -582,6 +582,11 @@ test('a note shows up for the reviewer', { session: 'author' }, async ({ app, sc
   `Pick<Actor, 'app' | 'screen'>` takes either.
 - On a `web()` target an actor is a browser context of its own in the
   test's browser. The runner runs the setup test its `session` needs.
+- A test that names only actors (`async ({ author, reviewer }) => ...`)
+  opens no session of its own: two actors are two browser contexts. Its
+  own session opens when the test, a fixture, or a hook names `app`,
+  `screen`, `agent`, or another of its fixtures, or the test sets
+  `session`.
 - `actor({ target: 'ios' })` runs the actor on another target of the
   config. Import `actor` from that target's engine package
   (`@e2e-dev/mobile` for a phone). A device actor takes no `session`.

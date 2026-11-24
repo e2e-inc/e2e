@@ -33,8 +33,8 @@ import { BROWSER_NAMES, isBrowserName } from './browser-connection.ts';
 /** App fields only a device target reads. */
 const NATIVE_APP_KEYS = ['bundleId', 'appPath', 'launchArguments'] as const;
 
-/** How many ended actors a handle remembers, to refuse a call that arrives for one late. */
-const ENDED_ACTORS_KEPT = 4096;
+/** How many ended attempts a handle remembers, to refuse a call that arrives for one late. */
+const ENDED_ATTEMPTS_KEPT = 4096;
 
 /** Creates one Playwright engine: one browser per worker, one context per attempt. */
 const surfaces = new WeakMap<EngineHandle, PlaywrightSurface>();
@@ -125,11 +125,15 @@ export function web(options: WebOptions = {}): WebEngine {
   /** The surface of each attempt opened while another ran: an actor's, a context of its own on the same browser. */
   const actors = new Map<string, PlaywrightSurface>();
   /**
-   * The actors that ended, most recent last: a call still on its way to one
+   * The attempts that ended, most recent last: a call still on its way to one
    * must never reach another attempt's page, the next test's included. Kept
-   * for as long as the handle lives, up to `ENDED_ACTORS_KEPT`.
+   * for as long as the handle lives, up to `ENDED_ATTEMPTS_KEPT`.
    */
   const ended = new Set<string>();
+  const retire = (attemptId: string): void => {
+    ended.add(attemptId);
+    if (ended.size > ENDED_ATTEMPTS_KEPT) ended.delete(ended.values().next().value!);
+  };
   /**
    * The surface of an attempt: an actor's by its id, `surface` for any
    * other, since a serial group's tests run on one attempt under ids of
@@ -151,6 +155,7 @@ export function web(options: WebOptions = {}): WebEngine {
     doctor: (info) => surface.doctor(info),
     init: (info) => surface.init(info),
     startAttempt: (context) => {
+      ended.delete(context.attemptId);
       // A persistent context is the one a remote browser has: a second attempt has none to run in, and is refused there.
       if (own === undefined || recoverable) {
         own ??= context.attemptId;
@@ -165,12 +170,13 @@ export function web(options: WebOptions = {}): WebEngine {
       const actor = context.attemptId === undefined ? undefined : actors.get(context.attemptId);
       if (actor !== undefined) {
         actors.delete(context.attemptId!);
-        ended.add(context.attemptId!);
-        if (ended.size > ENDED_ACTORS_KEPT) ended.delete(ended.values().next().value!);
+        retire(context.attemptId!);
         return actor.endAttempt(context);
       }
       // An id that is neither is an attempt already ended: nothing of it is left to end.
       if (context.attemptId !== undefined && context.attemptId !== own) return;
+      // The first attempt of a test that drives only its actors is an actor's: a late call for it is refused like any other's.
+      if (context.attemptId !== undefined) retire(context.attemptId);
       own = undefined;
       return surface.endAttempt(context);
     },

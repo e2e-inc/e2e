@@ -26,13 +26,6 @@ export interface GuestSession {
   abandonRunning(): Error | undefined;
   /** Closes the session: cancels what runs on it, and hands over the video it recorded. */
   close(): Promise<void>;
-  /**
-   * Resolves once no step of the session is running. Only a session whose
-   * operations the attempt can cut itself has it, an actor's: such a session
-   * is left open through teardown, where a session the test opened with
-   * `launch()` is closed to cut what it runs.
-   */
-  settled?(): Promise<void>;
 }
 
 /** What a host a test launched offers the attempt that takes charge of it. */
@@ -52,22 +45,6 @@ export interface GuestSteps {
    * closes.
    */
   video(recording: SessionVideo): Promise<void>;
-  /**
-   * Takes what became of the recordings of the session's steps once its
-   * replay cache settled, by each step's index in the session's own record,
-   * so the test's record of a step says it too.
-   */
-  wrote(writes: ReadonlyMap<number, CacheWrite>): void;
-  /**
-   * Says a check passed on the session that confirms its steps before
-   * `index` of its own record: the check's own index, or its enclosing
-   * step's for a check nested in one. The test's record counts it as its own
-   * checks count, so it confirms what every session of the test did before
-   * that step.
-   */
-  verified(index: number): void;
-  /** Where the session's step at `index` of its own record stands in the test's record; undefined for one never told here. */
-  placed(index: number): number | undefined;
 }
 
 /**
@@ -149,12 +126,29 @@ export interface GuestRecord {
   wrote(write: CacheWrite): void;
 }
 
-/** The mirror of one session's steps in a test's record. */
+/**
+ * The mirror of one session's steps in a test's record. What it takes beside
+ * `progress` is for a session of the runner's own copy of this package, an
+ * actor's: a session of another copy tells its steps and nothing more.
+ */
 export interface GuestMirror {
   progress: GuestSteps['progress'];
-  wrote: GuestSteps['wrote'];
-  verified: GuestSteps['verified'];
-  placed: GuestSteps['placed'];
+  /**
+   * Takes what became of the recordings of the session's steps once its
+   * replay cache settled, by each step's index in the session's own record,
+   * so the test's record of a step says it too.
+   */
+  wrote(writes: ReadonlyMap<number, CacheWrite>): void;
+  /**
+   * Says a check passed on the session that confirms its steps before
+   * `index` of its own record: the check's own index, or its enclosing
+   * step's for a check nested in one. The test's record counts it as its own
+   * checks count, so it confirms what every session of the test did before
+   * that step.
+   */
+  verified(index: number): void;
+  /** Where the session's step at `index` of its own record stands in the test's record; undefined for one never told here. */
+  placed(index: number): number | undefined;
   /** Ends the mirror: a step still running is told as cancelled, and what the session reports next is dropped. */
   cut(): void;
 }

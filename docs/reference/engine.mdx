@@ -290,18 +290,18 @@ export interface Engine {
    */
   readonly isolation?: EngineIsolation;
   /**
-   * The engine can run an actor beside a test: one more attempt on the same
-   * worker while another is open, isolated from it the way two tests are (on
-   * a browser, another context). `startAttempt` is then called again with
-   * another `attemptId`. Every operation, attempt callback, and fixture
-   * context of an actor carries the id its `startAttempt` got, and
-   * `settleAttempt` and `endAttempt` name the attempt they are for
-   * (`EngineCleanupContext.attemptId`). An id no open `startAttempt` got
-   * belongs to the worker's own attempt, the first one open: a serial
-   * group's later tests and its suite hooks run on that attempt under ids
-   * of their own. The worker's own attempt can end before its actors do.
-   * Without it, a test that names an actor on its own target is refused
-   * before the run starts.
+   * The engine can run the actors of a test: more than one attempt on a
+   * worker at a time, each isolated from the others the way two tests are
+   * (on a browser, a context of its own). `startAttempt` is then called
+   * again with another `attemptId` while an attempt is open. Every
+   * operation, attempt callback, and fixture context carries the id its
+   * attempt's `startAttempt` got, and `settleAttempt` and `endAttempt` name
+   * the attempt they are for (`EngineCleanupContext.attemptId`). An id no
+   * `startAttempt` got belongs to the first attempt open: a serial group's
+   * later tests and its suite hooks run on that attempt under ids of their
+   * own. The first attempt can end before the others do. Without it, a
+   * test that names an actor on its own target is refused before the run
+   * starts.
    */
   readonly actors?: boolean;
   /** capability: state - opaque snapshot capture/restore for session reuse. */
@@ -2529,7 +2529,7 @@ export type EngineIsolation = 'attempt' | 'worker';
 
 #### Actors
 
-`actors: true` declares that the engine can run an [actor](/actors) beside a
+`actors: true` declares that the engine can run the [actors](/actors) of a
 test on one worker: `startAttempt` is called again while an attempt is open.
 `@e2e-dev/web` declares it and gives each attempt a browser context.
 
@@ -2542,18 +2542,19 @@ Route by attempt id. It is on every `OperationContext`, on the context of
 context:
 
 ```ts
-let own: Surface | undefined;                // the worker's own attempt, the first one open
-const actors = new Map<string, Surface>();   // each attempt started while it runs
+let first: Surface | undefined;              // the first attempt open
+const others = new Map<string, Surface>();   // each attempt started while it runs
 
-observe: (operation) => (actors.get(operation.attemptId) ?? own!).observe(operation),
+observe: (operation) => (others.get(operation.attemptId) ?? first!).observe(operation),
 endAttempt: async ({ attemptId }) => { /* end that attempt, and leave the others open */ },
 ```
 
-- An id you did not start belongs to the worker's own attempt. A serial
+- An id you did not start belongs to the first attempt open. A serial
   group's later tests, and its suite hooks, run there under ids of their own.
-- Refuse a call for an actor that already ended. Do not let it reach the
-  worker's own attempt.
-- The worker's own attempt can end before its actors do.
+- Refuse a call for an attempt that already ended. Do not let it reach
+  another attempt.
+- The first attempt can end before the others do. It is the test's own
+  session, or an actor's when the test drives only its actors.
 
 Without `actors`, an actor on the test's own target is a collection error.
 An actor that names another target needs nothing from the engine: the

@@ -11,24 +11,26 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import path from 'node:path';
 import { createAgentCacheContext, settleStagedTraces, type AgentCacheContext, type AttemptSettlement } from '@e2e-dev/core/lib/cache/context';
 import type { StoredRecordings } from '@e2e-dev/core/lib/cache/rekeyed';
 import type { ResolvedConfig, ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
-import { classifyError, E2EError, serializeError } from '@e2e-dev/core/lib/internal/errors';
-import { MAX_TIMER_MS } from '@e2e-dev/core/lib/internal/time';
+import { classifyError, E2EError, InfrastructureError, serializeError } from '@e2e-dev/core/lib/internal/errors';
+import { MAX_TIMER_MS, withTimeout } from '@e2e-dev/core/lib/internal/time';
 import type { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
 import { EngineSessions, type EngineSessionsOptions } from '@e2e-dev/core/lib/run/engine-sessions';
 import { createFixtures } from '@e2e-dev/core/lib/run/fixtures';
-import type { GuestSteps } from '@e2e-dev/core/lib/run/guest-steps';
+import type { GuestMirror } from '@e2e-dev/core/lib/run/guest-steps';
 import { PreparedEngines } from '@e2e-dev/core/lib/run/provision';
 import type { RunError } from '@e2e-dev/core/lib/run/records';
-import { holdSessionSecrets } from '@e2e-dev/core/lib/run/secrecy';
+import { holdSessionSecrets, sessionLedger } from '@e2e-dev/core/lib/run/secrecy';
 import { targetIdentity } from '@e2e-dev/core/lib/run/sessions';
 import type { TargetSession } from '@e2e-dev/core/lib/engine/surface';
 import { launchAttempt, reserveAttempt, type AttemptPolicy, type AttemptWorker, type LaunchedAttempt, type StandaloneAttempt } from '@e2e-dev/core/lib/run/standalone-attempt';
 import type { WorkerModels } from '@e2e-dev/core/lib/run/worker-models';
 import type { PlannedActor } from '../collect/actors.ts';
 import type { FixtureDefinition } from '../collect/registry.ts';
+import type { FailureScreen } from './failure-evidence.ts';
 import type { AttemptGuestSessions } from './guests.ts';
 
 /** One other target's engine as a worker holds it: prepared and initialized for this worker alone. */
@@ -102,8 +104,8 @@ export class ActorHosts {
   }
 }
 
-/** How often an actor is asked whether the steps the attempt cut have ended. */
-const SETTLE_POLL_MS = 5;
+/** Where an actor keeps its artifacts under the attempt's directory. */
+const actorSegments = (name: string): readonly string[] => ['actors', name];
 
 /** The inputs an actor's fixtures are built from, as its attempt hands them over. */
 type ActorFixtureBase = LaunchedAttempt<EngineSessions>['fixtureBase'];
@@ -114,7 +116,9 @@ interface OpenActor {
   readonly sessions: EngineSessions;
   readonly attempt: StandaloneAttempt<ActorFixtureBase>;
   readonly cache: AgentCacheContext | undefined;
-  readonly steps: GuestSteps;
+  readonly steps: GuestMirror;
+  /** Whether the actor was closed: the engine then knows nothing of its attempt. */
+  closed(): boolean;
   fixtures: object | undefined;
 }
 
@@ -125,6 +129,8 @@ export interface AttemptActorsOptions {
   readonly own: EngineSessions;
   readonly hosts: ActorHosts;
   readonly guests: AttemptGuestSessions;
+  /** Cuts the operations running on the attempt's budget, an actor's among them, the way its timeout does. */
+  readonly cut: () => void;
   /** The attempt's artifact directory: an actor's artifacts go in `actors/<name>` there. */
   readonly dir: string;
   readonly test: { readonly id: string; readonly titlePath: readonly string[] };
@@ -201,6 +207,24 @@ export class AttemptActors {
   }
 
   /**
+   * The screen of the actor named `name` as the evidence of a failure on one
+   * of its steps. Undefined when no actor of the attempt has that name: the
+   * step is of a session the test opened with `launch()`.
+   */
+  evidenceOf(name: string): FailureScreen | undefined {
+    const open = [...this.opened.values()].find((each) => each.actor.name === name);
+    if (open === undefined || open.closed()) return undefined;
+    const { session, attemptId } = open.attempt;
+    const appBase = open.actor.target.app.base;
+    return {
+      session, ownStep: true, appBase, appOrigin: appBase?.origin,
+      actor: { name, dir: path.join(...actorSegments(name)) },
+      ledger: sessionLedger(session, this.options.config.allSecrets),
+      operation: (signal, timeoutMs) => ({ signal, timeoutMs, runId: this.options.runId, attemptId, origin: 'test' }),
+    };
+  }
+
+  /**
    * Keeps the secret values the test's `own` session and every actor know
    * shared while the attempt closes them one after another, so what each
    * writes at its end (a text download) is still rewritten for what the
@@ -219,7 +243,9 @@ export class AttemptActors {
    */
   async lateFailures(): Promise<readonly E2EError[]> {
     const failures: E2EError[] = [];
-    for (const { actor, sessions, attempt } of this.opened.values()) {
+    for (const { actor, sessions, attempt, closed } of this.opened.values()) {
+      // A closed actor's attempt has ended on the engine: nothing of it is left to collect.
+      if (closed()) continue;
       try {
         await sessions.settleAttempt(attempt.session, attempt.attemptId);
       } catch (cause) {
@@ -252,33 +278,36 @@ export class AttemptActors {
   private async openOne(actor: PlannedActor): Promise<OpenActor> {
     const { config, runId, guests, test } = this.options;
     const { name } = actor;
-    const seat = guests.actor(name);
+    const seat = guests.actor(name, config.projectRoot);
     const sessions = actor.own ? this.options.own : await this.options.hosts.sessions(actor.target);
     const worker: AttemptWorker = {
-      config, target: actor.target, runId, executor: sessions,
+      // Only what the test's record lists goes to the artifact store: the actor's video and the screen at a failure, registered there.
+      config: { ...config, artifactStore: undefined },
+      target: actor.target, runId, executor: sessions,
       resultsDir: this.options.dir, debug: sessions.debug, signal: sessions.interruptSignal,
     };
     const policy: AttemptPolicy<EngineSessions, ActorFixtureBase> = {
-      identity: () => ({ testId: test.id, segments: ['actors', name] }),
+      identity: () => ({ testId: test.id, segments: actorSegments(name) }),
       launched: ({ fixtureBase }) => fixtureBase,
     };
-    let steps: GuestSteps | undefined;
-    /** How far the actor's own record counts its steps confirmed; it moves when a check passes there. */
-    let verifies = (): number => -1;
+    let attempt: StandaloneAttempt<ActorFixtureBase> | undefined;
+    /** How far the actor's own record counted its steps confirmed when it was last told here. */
     let verified = -1;
     const reservation = reserveAttempt(worker, policy, {
-      signal: seat.signal,
+      // The attempt ends the actor by closing it; only the run's interrupt cancels it from outside.
+      signal: sessions.interruptSignal,
       // No deadline of its own: an actor's operations run on the test's budget.
       timeoutMs: MAX_TIMER_MS,
       agent: this.options.agent,
       mirror: (progress, record) => {
-        steps?.progress(progress, record);
+        seat.steps.progress(progress, record);
         // A check that passed on the actor confirms what the test's other sessions did before it, as one of its own
         // does: up to the step the actor's record counts confirmed, which for a check inside an agent step's
         // onAction is that agent step, never past it.
-        if (progress.phase === 'end' && verifies() > verified) {
-          verified = verifies();
-          steps?.verified(verified);
+        const confirmed = attempt?.steps.lastVerifiedStepIndex ?? -1;
+        if (progress.phase === 'end' && confirmed > verified) {
+          verified = confirmed;
+          seat.steps.verified(confirmed);
         }
       },
       cancelsOnClose: {
@@ -288,31 +317,29 @@ export class AttemptActors {
       video: this.options.video ? { keep: 'always', policy: 'best-effort' } : 'off',
       ...(actor.session === undefined ? {} : { state: actor.session }),
     });
-    const attempt = await launchAttempt(worker, policy, reservation, () => Promise.resolve());
-    verifies = () => attempt.steps.lastVerifiedStepIndex;
+    const launched = await launchAttempt(worker, policy, reservation, () => Promise.resolve());
+    attempt = launched;
+    let closed = false;
     const close = async (): Promise<void> => {
-      const errors = await attempt.close();
-      for (const recording of attempt.videos()) await steps?.video(recording);
+      closed = true;
+      const errors = await launched.close();
+      for (const recording of launched.videos()) await seat.video(recording);
       if (errors.length === 0) return;
       const thrown = errors.map((error) => new E2EError(error.category, error.code, `actor "${name}": ${error.message}`));
       throw new AggregateError(thrown, thrown.map((error) => error.message).join('; '));
     };
-    const settled = async (): Promise<void> => {
-      await attempt.steps.settleAbandoned();
-      // A step cut through the test's budget ends on its own, a few turns of the event loop later.
-      while (attempt.steps.busy) await new Promise<void>((resolve) => setTimeout(resolve, SETTLE_POLL_MS));
+    /** Cuts the actor's steps the way the test's timeout does, and says whether they ended within the cleanup budget. */
+    const cut = (): Promise<boolean> => {
+      this.options.cut();
+      return withTimeout(launched.steps.idle(), config.cleanupTimeout, () => new InfrastructureError('CLEANUP_TIMEOUT', `a step of actor "${name}" did not end`)).then(() => true, () => false);
     };
-    steps = seat.take({ root: config.projectRoot, busy: () => attempt.steps.busy, abandonRunning: () => attempt.steps.abandonRunning(), close, settled });
-    if (steps === undefined) {
-      await close().catch(() => undefined);
-      throw new E2EError('infrastructure', 'CANCELLED', 'the test ended before the actor was open');
-    }
+    seat.open({ root: config.projectRoot, busy: () => launched.steps.busy, abandonRunning: () => launched.steps.abandonRunning(), close }, cut);
     const cache = this.options.caches
       ? createAgentCacheContext({
           cache: config.cache, projectRoot: config.projectRoot, projectId: config.projectId, testId: test.id,
           target: targetIdentity(actor.target), attemptIndex: this.options.attemptIndex, recordings: this.options.recordings, actor: name,
         })
       : undefined;
-    return { actor, sessions, attempt, cache, steps, fixtures: undefined };
+    return { actor, sessions, attempt: launched, cache, steps: seat.steps, closed: () => closed, fixtures: undefined };
   }
 }

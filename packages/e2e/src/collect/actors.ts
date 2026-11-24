@@ -38,9 +38,14 @@ export interface PlannedActor {
 export function plannedActors(plan: FixturePlan, own: ResolvedTarget, targets: readonly ResolvedTarget[]): PlannedActor[] {
   const actors = resolvedActors(plan, own, targets);
   // Another target's engine is one instance for the worker: without `actors` it runs one attempt, so it serves one actor.
+  const served = new Map<string, PlannedActor>();
   for (const actor of actors) {
-    const earlier = actors.find((other) => other !== actor && !other.own && other.target.name === actor.target.name);
-    if (earlier === undefined || actor.own || actors.indexOf(earlier) > actors.indexOf(actor) || actor.target.engine?.capabilities.has('actors') === true) continue;
+    if (actor.own || actor.target.engine?.capabilities.has('actors') === true) continue;
+    const earlier = served.get(actor.target.name);
+    if (earlier === undefined) {
+      served.set(actor.target.name, actor);
+      continue;
+    }
     throw new FixtureUseError(
       `actors "${earlier.name}" and "${actor.name}" both run on target "${actor.target.name}", and engine ${actor.target.engine?.name ?? 'none'}, as configured, drives one session at a time: give each a target of its own`,
       actor.definition.source,

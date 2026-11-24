@@ -152,7 +152,7 @@ describe('what an attempt offers the hosts and sessions a test opens', () => {
   function attempt() {
     const steps = new StepRecorder('test-attempt', { projectRoot: ROOT });
     const sink: ArtifactSink = { dir, register: () => 'artifact', link: () => 'artifact' };
-    return { steps, guests: new AttemptGuestSessions(steps, sink, { keep: undefined, videoPrefix: '', cleanupTimeout: 1_000, cut: () => undefined }) };
+    return { steps, guests: new AttemptGuestSessions(steps, sink, { keep: undefined, videoPrefix: '', cleanupTimeout: 1_000 }) };
   }
   /** A session, and what the attempt did to it. */
   function session(busy = false) {
