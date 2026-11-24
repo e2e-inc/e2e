@@ -287,8 +287,9 @@ await expect(screen.getByLabel('Search')).toHaveValue('');
   a device, reads as `''`.
 - On the web, a `slider`, `spinbutton`, `progressbar`, `meter`, or `scrollbar`
   that is not a native form control or an editor reads its `aria-valuetext`,
-  else its `aria-valuenow`, skipping a blank one. A native `<progress>` or
-  `<meter>` with a `value` attribute reads the value its range clamps it to. A
+  else its `aria-valuenow`, skipping a blank one. Without either, a native
+  `<progress>` or `<meter>` with a `value` attribute reads the value its range
+  clamps it to. A
   `slider` or `spinbutton` with none reads as `''`, and any other widget with
   none, such as an indeterminate `<progress>`, has no value and is refused.
 - On a device, a node reads the accessibility value the platform reports.

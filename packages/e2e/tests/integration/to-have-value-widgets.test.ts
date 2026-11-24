@@ -28,6 +28,12 @@ const PAGE = [
   '<div role="slider" aria-label="Spaced text" aria-valuenow="50" aria-valuetext="  " tabindex="0"></div>',
   '<div role="slider" aria-label="Padded" aria-valuetext=" On " tabindex="0"></div>',
   '<meter aria-label="Unset"></meter>',
+  '<progress aria-label="Percent text" value="70%" max="100"></progress>',
+  '<progress aria-label="Zero max" value="5" max="0"></progress>',
+  '<progress aria-label="Negative" value="-3" max="10"></progress>',
+  '<meter aria-label="Below min" value="1" min="5" max="10"></meter>',
+  '<meter aria-label="Inverted" value="8" min="5" max="2"></meter>',
+  '<div role="slider" aria-label="Bare" tabindex="0"></div>',
 ].join('');
 
 test('reads range widgets', async ({ app, browser, screen }) => {
@@ -47,6 +53,12 @@ test('reads range widgets', async ({ app, browser, screen }) => {
   await expect(screen.getByRole('spinbutton', { name: 'Month' })).toHaveValue('05');
   await expect(screen.getByRole('scrollbar', { name: 'Page' })).toHaveValue('20');
   await expect(screen.getByRole('progressbar', { name: 'Mixed' })).toHaveValue('70');
+  await expect(screen.getByRole('progressbar', { name: 'Percent text' })).toHaveValue('70');
+  await expect(screen.getByRole('progressbar', { name: 'Zero max' })).toHaveValue('1');
+  await expect(screen.getByRole('progressbar', { name: 'Negative' })).toHaveValue('0');
+  await expect(screen.getByRole('meter', { name: 'Below min' })).toHaveValue('5');
+  await expect(screen.getByRole('meter', { name: 'Inverted' })).toHaveValue('5');
+  await expect(screen.getByRole('slider', { name: 'Bare' })).toHaveValue('');
   await expect(screen.getByRole('slider', { name: 'Spaced text' })).toHaveValue('50');
   await expect(screen.getByRole('slider', { name: 'Padded' })).toHaveValue(' On ');
   await expect(screen.getByRole('slider', { name: 'Volume' })).not.toHaveValue('51');
@@ -95,6 +107,38 @@ test('never runs a range widget value getter while finding another field', async
   await expect(screen.getByLabel('Email', { exact: true })).toHaveValue('ada@example.test');
 });
 
+test('never runs a customized built-in value getter', async ({ app, browser, screen }) => {
+  await app.open('/');
+  await browser.evaluate(() => {
+    customElements.define('throwing-progress', class extends HTMLProgressElement {
+      override get value(): number { throw new Error('upload not ready'); }
+    }, { extends: 'progress' });
+    customElements.define('percent-progress', class extends HTMLProgressElement {
+      override get value(): number { return 100; }
+    }, { extends: 'progress' });
+    document.body.innerHTML = '<input aria-label="Email" value="ada">' +
+      '<progress is="throwing-progress" aria-label="Upload" value="1" max="10"></progress>' +
+      '<progress is="percent-progress" aria-label="Percent" value="20" max="10"></progress>';
+  });
+  expect(await screen.getByLabel('Email', { exact: true }).inputValue()).toBe('ada');
+  await expect(screen.getByRole('progressbar', { name: 'Upload' })).toHaveValue('1');
+  await expect(screen.getByRole('progressbar', { name: 'Percent' })).toHaveValue('10');
+});
+
+test('reads a form control adopted from another frame as before', async ({ app, browser, screen }) => {
+  await app.open('/');
+  await browser.evaluate(() => {
+    const frame = document.createElement('iframe');
+    document.body.append(frame);
+    const moved = frame.contentDocument!.createElement('input');
+    moved.type = 'number';
+    moved.setAttribute('aria-label', 'Moved number');
+    moved.setAttribute('aria-valuetext', 'Unset');
+    document.body.append(moved);
+  });
+  expect(await screen.getByLabel('Moved number', { exact: true }).inputValue()).toBe('');
+});
+
 test('clamps a progress adopted from another frame', async ({ app, browser, screen }) => {
   await app.open('/');
   await browser.evaluate(() => {
@@ -137,9 +181,11 @@ describe('toHaveValue outside form controls', () => {
       expect(failed.status, title).toBe('failed');
       expect(failed.attempts.at(-1)?.error?.message, title).toContain('no value (not a form control)');
     }
-    const getter = resultByTitle(outcome, 'never runs a range widget value getter while finding another field');
-    expect(getter.attempts.at(-1)?.error, JSON.stringify(getter.attempts.at(-1)?.error)).toBeUndefined();
-    expect(getter.status).toBe('passed');
+    for (const title of ['never runs a range widget value getter while finding another field', 'never runs a customized built-in value getter', 'reads a form control adopted from another frame as before']) {
+      const passed = resultByTitle(outcome, title);
+      expect(passed.attempts.at(-1)?.error, `${title}: ${JSON.stringify(passed.attempts.at(-1)?.error)}`).toBeUndefined();
+      expect(passed.status, title).toBe('passed');
+    }
     const moved = resultByTitle(outcome, 'clamps a progress adopted from another frame');
     expect(moved.attempts.at(-1)?.error, JSON.stringify(moved.attempts.at(-1)?.error)).toBeUndefined();
     expect(moved.status).toBe('passed');

@@ -654,8 +654,9 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   /**
    * A range widget's value as a locator read reports it. An ARIA value reads
    * as the author wrote it, for an assertion to compare, where Chrome clamps it
-   * to the range; a blank one is none. A native `<progress>` or `<meter>` reads
-   * the value its range clamps it to, as Chrome does.
+   * to the range; a blank one is none. Without one, a native `<progress>` or
+   * `<meter>` with a `value` attribute reads the value its range clamps it to,
+   * as Chrome does.
    */
   const rangeValueOf = (el: Element): string | null => {
     const filled = (name: string): string | null => {
@@ -668,10 +669,22 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     // stray `value` attribute on a generic widget is not read. By tag, since an
     // element adopted from another frame keeps that frame's prototype.
     const tag = el.tagName.toLowerCase();
-    // The tag and attribute first, so a generic element's own `value` getter is never run.
     if ((tag !== 'meter' && tag !== 'progress') || !el.hasAttribute('value')) return null;
-    if (!('value' in el) || typeof el.value !== 'number') return null;
-    return String(el.value);
+    // Computed from the attributes as HTML clamps them, never through `.value`,
+    // which a page's own getter (a customized built-in `<progress is>`) can replace.
+    const number = (name: string, fallback: number): number => {
+      const match = /^[\t\n\f\r ]*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)/.exec(el.getAttribute(name) ?? '');
+      const parsed = match === null ? NaN : Number(match[1]);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    };
+    if (tag === 'progress') {
+      const max = number('max', 1);
+      const top = max > 0 ? max : 1;
+      return String(Math.min(Math.max(number('value', 0), 0), top));
+    }
+    const min = number('min', 0);
+    const max = Math.max(number('max', 1), min);
+    return String(Math.min(Math.max(number('value', 0), min), max));
   };
 
   /**
@@ -1767,7 +1780,11 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
       const text = (el.textContent ?? '').replace(/﻿/g, '');
       value = text === '' || (text.trim() === '' && rendered === '\n') ? '' : rendered;
       if (projection.textLimit !== null) value = value.slice(0, projection.textLimit);
-    } else if (projection.rangeValue && RANGE_ROLES.indexOf(implicitRole(el) ?? '') !== -1) {
+    } else if (
+      projection.rangeValue && RANGE_ROLES.indexOf(implicitRole(el) ?? '') !== -1 &&
+      // A form control adopted from another frame fails the `instanceof` checks above; it is not a range widget.
+      ['input', 'textarea', 'select', 'option'].indexOf(tag) === -1
+    ) {
       value = rangeValueOf(el);
     }
     // A native control's state is the control's, as Playwright reads it: a
