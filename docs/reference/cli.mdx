@@ -1460,8 +1460,10 @@ e2e merge-reports <directories...> --output <dir>
 Pass one output directory from each shard of the same run. A matching
 `report-with-reruns.json` takes precedence over `report.json`. The
 command checks the shard indexes and totals, project, runner version,
-commit, and test, target, and agent selection. Different config digests
-produce a warning. A missing shard fails the merge.
+commit, targets and their environments, and test and agent selection. Fresh
+shards with runnable tests must have the same repeat count. Different config
+digests produce a warning. A missing shard fails the merge. A shard that
+still owes results after a rerun requires its matching folded report.
 
 | Flag | Meaning |
 | --- | --- |
@@ -1474,10 +1476,10 @@ reports and does not replay live events. Its terminal verdict goes to
 stderr, so the JSON reporter can write the document alone to stdout.
 
 The merge regenerates trace pages from recorded attempts, including attempts
-from earlier shard reruns. The merged run counts each setup once, keeps its
-attempts by shard, and
-takes the worst setup verdict. It preserves the shard exit statuses, so a
-per-shard `--max-failures` stop is never treated as a pass. The recorded
+from earlier shard reruns and shards run with `--trace off`. The merged run counts each setup once, keeps its
+attempts by shard, and takes the worst setup verdict. A test still marked
+interrupted after a shard rerun gives the merged run exit code 130. A
+per-shard `--max-failures` stop also keeps its failing verdict. The recorded
 duration spans the earliest shard start to the latest shard finish. The
 `e2e.merge` run extension records the sum of shard durations and each
 shard's filter decisions. The command returns the merged run's

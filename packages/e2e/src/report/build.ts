@@ -535,7 +535,12 @@ function serializeAttemptBase(attempt: AttemptRecord | SerialAttemptRecord): Rep
     status: attempt.status,
     startedAt: attempt.startedAt,
     durationMs: attempt.durationMs,
-    artifacts: attempt.artifacts,
+    // A file that never appeared has no evidence of complete redaction.
+    artifacts: attempt.artifacts.map((artifact) =>
+      artifact.redaction === 'complete' && artifact.path === undefined
+        ? { ...artifact, redaction: 'incomplete' }
+        : artifact,
+    ),
     error: attempt.error === undefined ? undefined : serializeErrorRecord(attempt.error),
     secondaryErrors: attempt.secondaryErrors.map(serializeErrorRecord),
     cleanup: attempt.cleanup,

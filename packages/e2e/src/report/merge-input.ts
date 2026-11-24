@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { readFile, realpath } from 'node:fs/promises';
+import { isRecord } from '@e2e-dev/core/lib/config/command';
 import { errorMessage } from '@e2e-dev/core/lib/internal/errors';
 import { outputLayout } from '@e2e-dev/core/lib/run/output';
 import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020.js';
@@ -10,6 +11,7 @@ export interface ShardInput {
   readonly directory: string;
   readonly document: Report1Document;
   readonly shard: ReportShard;
+  readonly repeatEach?: number;
 }
 
 let validator: ValidateFunction<Report1Document> | undefined;
@@ -27,9 +29,12 @@ function reportValidator(): ValidateFunction<Report1Document> {
   return validator;
 }
 
-async function readReport(file: string, optional = false): Promise<Report1Document | undefined> {
+async function readReport(file: string, historyForRunId?: string): Promise<Report1Document | undefined> {
   try {
     const contents: unknown = JSON.parse(await readFile(file, 'utf8'));
+    const candidateRun = isRecord(contents) && isRecord(contents['run']) ? contents['run'] : undefined;
+    const id = candidateRun?.['id'];
+    if (historyForRunId !== undefined && typeof id === 'string' && id !== historyForRunId) return undefined;
     const validate = reportValidator();
     if (!validate(contents)) {
       const issue = validate.errors?.[0];
@@ -37,7 +42,7 @@ async function readReport(file: string, optional = false): Promise<Report1Docume
     }
     return contents;
   } catch (cause) {
-    if (optional && (cause as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    if (historyForRunId !== undefined && (cause as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     // A JSON parse error can echo bytes from a hand-edited input.
     const detail = cause instanceof SyntaxError ? 'invalid JSON' : errorMessage(cause);
     throw new Error(`could not read ${file}: ${detail}`, { cause });
@@ -48,8 +53,10 @@ export async function readShard(directory: string): Promise<ShardInput> {
   const real = await realpath(directory);
   const layout = outputLayout(real);
   const raw = (await readReport(layout.report))!;
-  const history = await readReport(layout.withReruns, true);
-  const chosen = history?.run.id === raw.run.id ? history : raw;
+  const chosen = await readReport(layout.withReruns, raw.run.id) ?? raw;
+  if (chosen === raw && raw.run.carried !== undefined) {
+    throw new Error(`${layout.report} has unresolved results and requires its matching report-with-reruns.json`);
+  }
   const shard = chosen.run.shard;
   if (chosen.run.finishedAt === undefined) {
     throw new Error(`${layout.report} is unfinished; supply output from a finished shard run`);
@@ -68,5 +75,17 @@ export async function readShard(directory: string): Promise<ShardInput> {
     group.agent ??= 'default';
     group.repeat ??= 0;
   }
-  return { directory: real, document: chosen, shard };
+  // A folded rerun can collapse repeat rows, and an empty shard has no
+  // runnable row from which to read its repeat count.
+  const repeatEach = chosen === raw ? observedRepeatCount(raw.run) : undefined;
+  return { directory: real, document: chosen, shard, ...(repeatEach === undefined ? {} : { repeatEach }) };
+}
+
+function observedRepeatCount(run: Report1Document['run']): number | undefined {
+  const runnable = run.results.filter((row) => row.kind === 'test' && row.selected);
+  const repeatEach = runnable.reduce((max, row) => Math.max(max, row.repeat + 1), 1);
+  if (repeatEach > 1 || runnable.some((row) => row.attempts.length > 0) || run.serialGroups.some((group) => group.attempts.length > 0)) {
+    return repeatEach;
+  }
+  return undefined;
 }

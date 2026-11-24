@@ -13,12 +13,17 @@ function pairKey(row: ReportResult): string {
   return JSON.stringify([row.kind, row.testId, row.targetId, row.agent]);
 }
 
-function groupRows(rows: readonly ReportResult[], index: number): Map<string, ReportResult[]> {
-  const groups = new Map<string, ReportResult[]>();
+function assertUniqueIds(rows: readonly { readonly id: string }[], label: string): void {
   const ids = new Set<string>();
   for (const row of rows) {
-    if (ids.has(row.id)) throw new Error(`shard ${index} repeats result id ${row.id}`);
+    if (ids.has(row.id)) throw new Error(`${label} ${row.id}`);
     ids.add(row.id);
+  }
+}
+
+function groupRows(rows: readonly ReportResult[]): Map<string, ReportResult[]> {
+  const groups = new Map<string, ReportResult[]>();
+  for (const row of rows) {
     const key = pairKey(row);
     const group = groups.get(key);
     if (group === undefined) groups.set(key, [row]);
@@ -67,7 +72,7 @@ function checkCoverage(inputs: readonly ShardInput[]): void {
 }
 
 function checkRun(first: Run, other: Run, index: number): void {
-  const targets = (run: Run) => run.targets.map(({ id, platform }) => JSON.stringify([id, platform])).toSorted();
+  const targets = (run: Run) => run.targets.map(({ id, platform, environment, baseOrigin }) => JSON.stringify([id, platform, environment, baseOrigin])).toSorted();
   if (other.project.id !== first.project.id) throw new Error(`shard ${index} has a different project id`);
   if (other.runner.version !== first.runner.version) throw new Error(`shard ${index} has a different runner version`);
   if (other.vcs?.commit !== first.vcs?.commit) throw new Error(`shard ${index} has a different commit`);
@@ -76,10 +81,20 @@ function checkRun(first: Run, other: Run, index: number): void {
 
 function mergeResults(inputs: readonly ShardInput[]): { results: ReportResult[]; serialGroups: ReportSerialGroup[] } {
   const rows = new Map<string, ShardRows[]>();
+  const setupAgents = new Map<string, string>();
   const groups = new Map<ShardInput, Map<string, ReportSerialGroup>>();
   for (const input of inputs) {
+    assertUniqueIds(input.document.run.serialGroups, `shard ${input.shard.index} repeats serial group id`);
+    assertUniqueIds(input.document.run.results, `shard ${input.shard.index} repeats result id`);
+    for (const row of input.document.run.results) {
+      if (row.kind !== 'setup') continue;
+      const key = JSON.stringify([row.testId, row.targetId]);
+      const agent = setupAgents.get(key);
+      if (agent !== undefined && agent !== row.agent) throw new Error(`incompatible setup agents for ${key}`);
+      setupAgents.set(key, row.agent);
+    }
     groups.set(input, new Map(input.document.run.serialGroups.map((group) => [group.id, group])));
-    for (const [key, candidates] of groupRows(input.document.run.results, input.shard.index)) {
+    for (const [key, candidates] of groupRows(input.document.run.results)) {
       const entry = { input, rows: candidates };
       const existing = rows.get(key);
       if (existing === undefined) rows.set(key, [entry]);
@@ -136,6 +151,8 @@ function mergeResults(inputs: readonly ShardInput[]): { results: ReportResult[];
 export function mergeShardReports(shards: readonly ShardInput[]): Merge {
   const inputs = shards.toSorted((a, b) => a.shard.index - b.shard.index);
   checkCoverage(inputs);
+  const repeatCounts = new Set(inputs.flatMap((input) => input.repeatEach === undefined ? [] : [input.repeatEach]));
+  if (repeatCounts.size > 1) throw new Error('shards used different repeat counts; use the same --repeat-each for each shard');
   const first = inputs[0]!.document.run;
   const warnings: string[] = [];
   for (const { shard, document: { run } } of inputs.slice(1)) {
@@ -143,6 +160,7 @@ export function mergeShardReports(shards: readonly ShardInput[]): Merge {
     if (run.project.configDigest !== first.project.configDigest) warnings.push(`shard ${shard.index} has a different config digest`);
   }
   const { results, serialGroups } = mergeResults(inputs);
+  assertUniqueIds(results, 'merged report repeats result id');
   const targetOrder = new Map(first.targets.map((target, index) => [target.id, index]));
   results.sort((a, b) =>
     compareTests(a, b) || (targetOrder.get(a.targetId) ?? 0) - (targetOrder.get(b.targetId) ?? 0) || a.repeat - b.repeat,
@@ -150,7 +168,8 @@ export function mergeShardReports(shards: readonly ShardInput[]): Merge {
   const runs = inputs.map((input) => input.document.run);
   const summary = summarizeResults(results, serialGroups);
   const errors = runs.flatMap((run) => run.errors);
-  const exitCode = combineExitCodes([...runs.map((run) => run.exitCode), summary.failed > 0 ? 1 : 0]);
+  const resultExitCode = summary.interrupted > 0 ? 130 : summary.failed > 0 ? 1 : 0;
+  const exitCode = combineExitCodes([...runs.map((run) => run.exitCode), resultExitCode]);
   const nonPassing = runs.filter((run) => run.exitCode !== 0);
   const blocked = nonPassing.length > 0 && nonPassing.every((run) => run.status === 'blocked') && errors.length === 0;
   const status = exitCode === 0 ? 'passed' : exitCode === 130 ? 'interrupted' : blocked ? 'blocked' : exitCode === 1 ? 'failed' : 'error';

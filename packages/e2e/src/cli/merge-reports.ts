@@ -38,7 +38,7 @@ export async function mergeReports(directories: readonly string[], options: Merg
     }
     const reporters = await terminal.withholdDuring(async () => {
       const raw = discovered.configPath === undefined ? undefined : await loadConfigModule(discovered.configPath);
-      if (raw !== undefined) registerStaticSecrets(resolveSecrets(raw, process.env).allSecrets);
+      if (raw !== undefined) registerStaticSecrets(resolveSecrets(raw, process.env, 'report').allSecrets);
       const configured = resolveReporters(
         { reporters: raw?.reporters ?? [] },
         options.reporter === undefined ? {} : { reporters: options.reporter },

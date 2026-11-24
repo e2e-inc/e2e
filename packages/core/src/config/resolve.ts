@@ -790,23 +790,27 @@ function resolveProjectId(explicit: string | undefined, projectRoot: string): st
  * and joined once into `allSecrets`, the map `typeSecret`, the ledger, and
  * the trace key on: a credential's password joins as `<credential>.password`.
  * A credential and a secret may share a name; only a secret named exactly
- * like a password handle collides.
+ * like a password handle collides. Report-only callers need available secrets
+ * for redaction, even when the test credentials are not configured.
  */
-/** Resolve fixed secrets without resolving targets, workers, or agents. */
 export function resolveSecrets(
   raw: Pick<ProjectConfig, 'credentials' | 'secrets'>,
   env: NodeJS.ProcessEnv,
+  purpose: 'run' | 'report' = 'run',
 ): Pick<ResolvedConfig, 'credentials' | 'secrets' | 'allSecrets'> {
   const credentials = new Map<string, ResolvedCredential>();
   const secrets = new Map<string, ResolvedSecret>();
   const allSecrets = new Map<string, ResolvedSecret>();
+  const credentialOwners = new Map<string, string>();
   checkEnvNameCollisions('E2E_USER', 'credentials', Object.keys(raw.credentials ?? {}));
   checkEnvNameCollisions('E2E_SECRET', 'secrets', Object.keys(raw.secrets ?? {}));
   for (const [name, credential] of Object.entries(raw.credentials ?? {})) {
     checkCredentialShape(name, credential);
+    const passwordName = credentialSecretName(name);
+    credentialOwners.set(passwordName, name);
     const prefix = envName('E2E_USER', name);
     const username = env[`${prefix}_USERNAME`] ?? credential.username;
-    if (typeof username !== 'string') {
+    if (purpose === 'run' && typeof username !== 'string') {
       throw new ConfigurationError(
         'INVALID_CONFIG',
         `credential "${name}" has no username; set username or ${prefix}_USERNAME`,
@@ -815,22 +819,24 @@ export function resolveSecrets(
     // An env override always wins, including over a provider: the operator
     // rotating a credential must not need to know how it was configured.
     const password = env[`${prefix}_PASSWORD`] ?? credential.password;
+    if (password === undefined && purpose === 'report') continue;
     if (!isSecretValue(password)) {
       throw new ConfigurationError('INVALID_CONFIG', `credential "${name}" password ${secretValueProblem(password)}`);
     }
-    const secret: ResolvedSecret = { name: credentialSecretName(name), purpose: 'password', value: password };
-    credentials.set(name, { name, username, password: secret });
+    const secret: ResolvedSecret = { name: passwordName, purpose: 'password', value: password };
+    if (typeof username === 'string') credentials.set(name, { name, username, password: secret });
     allSecrets.set(secret.name, secret);
   }
   for (const [name, entry] of Object.entries(raw.secrets ?? {})) {
-    const owner = [...credentials.values()].find((credential) => credential.password.name === name);
+    const owner = credentialOwners.get(name);
     if (owner !== undefined) {
       throw new ConfigurationError(
         'INVALID_CONFIG',
-        `secret "${name}" has the name of credential "${owner.name}"'s password handle; rename the secret`,
+        `secret "${name}" has the name of credential "${owner}"'s password handle; rename the secret`,
       );
     }
     const value = env[envName('E2E_SECRET', name)] ?? entry;
+    if (value === undefined && purpose === 'report') continue;
     if (!isSecretValue(value)) {
       throw new ConfigurationError('INVALID_CONFIG', `secret "${name}" ${secretValueProblem(value)}`);
     }

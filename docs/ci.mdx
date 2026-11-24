@@ -273,14 +273,25 @@ Use a final job to publish one report for the matrix:
    directories. Every shard must be present, including empty ones. Upload
    the entire merged directory with `if: always()` to keep trace links working.
 
-```sh
-e2e merge-reports .e2e/shard-* --output .e2e/merged --reporter junit,markdown
+<CodeGroup>
+```bash npm
+npx e2e merge-reports .e2e/shard-* --output .e2e/merged --reporter junit,markdown
 ```
+
+```bash pnpm
+pnpm exec e2e merge-reports .e2e/shard-* --output .e2e/merged --reporter junit,markdown
+```
+
+```bash bun
+bunx e2e merge-reports .e2e/shard-* --output .e2e/merged --reporter junit,markdown
+```
+</CodeGroup>
 
 Configure PR publishers such as `github()` only in the merge job, for
 example by passing a separate `--config` there. Give that job the
 publisher's permissions. To rerun failures from the whole matrix, download
-the merged directory and run `e2e run --last-failed --output .e2e/merged`.
+the merged directory and pass `--last-failed --output .e2e/merged` to the
+run command.
 
 ## Rerunning failures
 

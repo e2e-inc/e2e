@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
@@ -32,7 +32,10 @@ test.setup('sign in', { sessions: ['member'] }, async ({ app, session }) => {
   if (process.env.FAIL_SETUP) throw new Error('sign in failed');
   await session.save('member');
 });
-test('cart', { session: 'member' }, async ({ app }) => { await app.open(); });
+test('cart', { session: 'member' }, async ({ app }) => {
+  await app.open();
+  if (process.env.FAIL_CART) throw new Error('cart failed');
+});
 test('checkout', { session: 'member' }, async ({ app }) => {
   await app.open();
   if (process.env.FAIL_CHECKOUT) throw new Error('checkout failed');
@@ -45,7 +48,7 @@ test('checkout', { session: 'member' }, async ({ app }) => {
 function cli(fixture: FixtureProject, args: string[], env: NodeJS.ProcessEnv = {}) {
   const result = spawnSync(process.execPath, [CLI, ...args], {
     cwd: fixture.dir,
-    env: { ...process.env, CI: '', E2E_TELEMETRY_DISABLED: '1', FAIL_SETUP: '', FAIL_CHECKOUT: '', ...env },
+    env: { ...process.env, CI: '', E2E_TELEMETRY_DISABLED: '1', FAIL_SETUP: '', FAIL_CART: '', FAIL_CHECKOUT: '', ...env },
     encoding: 'utf8',
     timeout: 60_000,
   });
@@ -119,6 +122,12 @@ it('keeps both shared setup executions and links each shard’s local evidence',
     expect(trace).toContain(`../shard-${index}/${artifactPath}`);
     expect(readFileSync(path.join(root, `shard-${index}`, artifactPath), 'utf8')).toBe(`login in shard ${index}`);
   }
+  // Same-length replacement must still fail the artifact digest check.
+  writeFileSync(path.join(fixture.dir, 'shard-1/results', artifactPath), 'login in shard 2');
+  const stale = cli(fixture, ['merge-reports', 'shard-1', 'shard-2', '--output', 'stale']);
+  expect(stale.status).toBe(2);
+  expect(stale.stderr).toContain('does not match its recorded size or digest');
+  expect(existsSync(path.join(fixture.dir, 'stale'))).toBe(false);
   // A rerun plus the merged directory alone must keep the old evidence.
   expect(cli(fixture, ['run', '--last-failed', '--output', 'merged']).status).toBe(0);
   for (const index of [1, 2]) expect(existsSync(path.join(root, `shard-${index}`, artifactPath))).toBe(true);
@@ -180,15 +189,19 @@ it('redacts a merge config secret in config output and reporter errors', () => {
   const value = 'fake-merge-secret-89617+case';
   writeFileSync(path.join(fixture.dir, 'publish.config.mjs'), `
 const value = process.env.MERGE_FIXTURE_SECRET;
-console.log(value);
-export default { secrets: { publishing: value }, reporters: [{
+const login = process.env.MERGE_FIXTURE_PASSWORD;
+console.log(value, login);
+export default { credentials: { account: { password: login } }, secrets: { publishing: value }, reporters: [{
   name: 'publisher', onRunFinished() { throw new Error(value); },
 }] };
 `);
   const merged = cli(fixture, ['merge-reports', 'shard-1', 'shard-2', '--output', 'merged', '--config', 'publish.config.mjs'], {
     MERGE_FIXTURE_SECRET: value,
+    MERGE_FIXTURE_PASSWORD: 'fixture-password-31272',
+    E2E_USER_ACCOUNT_USERNAME: undefined, E2E_USER_ACCOUNT_PASSWORD: undefined,
   });
   expect(merged.status).toBe(0);
+  expect((merged.stdout + merged.stderr).includes('fixture-password-31272')).toBe(false);
   expect(merged.stderr.includes('reporter "publisher" failed: <secret:publishing>')).toBe(true);
   for (const representation of [value, encodeURIComponent(value), Buffer.from(value).toString('base64')]) {
     expect((merged.stdout + merged.stderr).includes(representation)).toBe(false);
@@ -203,7 +216,7 @@ it('rejects different pre-shard selections and invalid result identities', () =>
 for (const title of ['alpha', 'beta', 'gamma', 'delta']) test(title, async () => {});
 `);
   expect(shard(fixture, 1).status).toBe(0);
-  expect(cli(fixture, ['run', '--shard', '2/2', '--output', 'shard-2', '--grep', 'alpha|beta|delta']).status).toBe(0);
+  expect(cli(fixture, ['run', '--shard', '2/2', '--output', 'shard-2', '--repeat-each', '2', '--grep', 'alpha|beta|delta']).status).toBe(0);
   const args = ['merge-reports', 'shard-1', 'shard-2', '--output', 'merged'];
   const incompatible = cli(fixture, args);
   expect(incompatible.status).toBe(2);
@@ -234,6 +247,138 @@ it('rejects an input missing a field required by the published report schema', (
   expect(existsSync(path.join(fixture.dir, 'merged'))).toBe(false);
 }, 60_000);
 
+it('can merge a report when the engine never produced a screenshot file', () => {
+  const fixture = project();
+  writeFileSync(path.join(fixture.dir, 'e2e.config.ts'), `
+import { defineEngine, ENGINE_SPI_VERSION } from 'e2e/engine';
+const engine = defineEngine({
+  name: 'fake', version: '1.0.0', spiVersion: ENGINE_SPI_VERSION,
+  async observe() { throw new Error('no observation required'); },
+  artifacts: { async screenshot() { return 'missing.png'; } },
+});
+export default { targets: [{ name: 'fake', platform: 'fake', engine }], workers: 1, cache: 'off' };
+`);
+  writeFileSync(path.join(fixture.dir, 'tests/shop.e2e.ts'), `
+import { test } from 'e2e';
+test('records a screenshot', async ({ app }) => { await app.screenshot(); });
+`);
+  const ran = cli(fixture, ['run', '--shard', '1/1', '--output', 'shard-1']);
+  expect(ran.status, ran.stderr).toBe(0);
+  const artifact = report(fixture, 'shard-1').results[0]?.attempts[0]?.artifacts[0];
+  expect(artifact).toMatchObject({ kind: 'screenshot', redaction: 'incomplete' });
+  expect(artifact?.path).toBeUndefined();
+  const merged = cli(fixture, ['merge-reports', 'shard-1', '--output', 'merged']);
+  expect(merged.status, merged.stderr).toBe(0);
+  expect(report(fixture, 'merged').summary.passed).toBe(1);
+}, 60_000);
+
+it('rejects fresh shards with different repeat counts', () => {
+  const fixture = project();
+  expect(shard(fixture, 1).status).toBe(0);
+  expect(cli(fixture, ['run', '--shard', '2/2', '--output', 'shard-2']).status).toBe(0);
+  const merged = cli(fixture, ['merge-reports', 'shard-1', 'shard-2', '--output', 'merged']);
+  expect(merged.status).toBe(2);
+  expect(merged.stderr).toContain('different repeat counts');
+}, 60_000);
+
+it('refuses a rerun that still owes tests when its folded history is missing', () => {
+  const fixture = project();
+  const run = ['--shard', '1/1', '--output', 'shard-1'];
+  expect(cli(fixture, ['run', ...run], { FAIL_CART: '1', FAIL_CHECKOUT: '1' }).status).toBe(1);
+  expect(cli(fixture, ['run', ...run, '--last-failed', '--grep', 'cart']).status).toBe(0);
+  expect(report(fixture, 'shard-1').carried?.results.some((row) => row.titlePath.at(-1) === 'checkout')).toBe(true);
+  rmSync(path.join(fixture.dir, 'shard-1/report-with-reruns.json'));
+  const merged = cli(fixture, ['merge-reports', 'shard-1', '--output', 'merged']);
+  expect(merged.status).toBe(2);
+  expect(merged.stderr).toContain('requires its matching report-with-reruns.json');
+  expect(existsSync(path.join(fixture.dir, 'merged'))).toBe(false);
+}, 60_000);
+
+it('rejects incompatible target environments and setup agents', () => {
+  const fixture = project();
+  expect(shard(fixture, 1).status).toBe(0);
+  expect(shard(fixture, 2).status).toBe(0);
+  const run = report(fixture, 'shard-2');
+  const reportPath = path.join(fixture.dir, 'shard-2/report.json');
+  const write = () => writeFileSync(reportPath, JSON.stringify({ schemaVersion: 'report-1', run }));
+  const args = ['merge-reports', 'shard-1', 'shard-2', '--output', 'merged'];
+  const target = run.targets[0]!;
+  const original = target.environment;
+  target.environment = original === 'staging' ? 'production' : 'staging';
+  write();
+  const environment = cli(fixture, args);
+  expect(environment.status).toBe(2);
+  expect(environment.stderr).toContain('different targets');
+  target.environment = original;
+  const setup = run.results.find((row) => row.selected && row.kind === 'setup')!;
+  setup.id = '0'.repeat(64);
+  setup.agent = 'different-agent';
+  write();
+  const agents = cli(fixture, args);
+  expect(agents.status).toBe(2);
+  expect(agents.stderr).toContain('incompatible setup agents');
+}, 60_000);
+
+it('ignores a stale rerun report before validating its schema', () => {
+  const fixture = project();
+  expect(shard(fixture, 1).status).toBe(0);
+  expect(shard(fixture, 2).status).toBe(0);
+  const first = report(fixture, 'shard-1');
+  const second = report(fixture, 'shard-2');
+  const { os: _os, ...environment } = second.environment;
+  const history = path.join(fixture.dir, 'shard-1/report-with-reruns.json');
+  const merge = ['merge-reports', 'shard-1', 'shard-2', '--output'];
+  writeFileSync(history, JSON.stringify({ schemaVersion: 'report-1', run: { ...second, environment } }));
+  const stale = cli(fixture, [...merge, 'merged']);
+  expect(stale.status, stale.stderr).toBe(0);
+  expect(report(fixture, 'merged').summary.failed).toBe(0);
+
+  writeFileSync(history, JSON.stringify({ schemaVersion: 'report-1', run: { ...second, id: first.id, environment } }));
+  const matching = cli(fixture, [...merge, 'invalid']);
+  expect(matching.status).toBe(2);
+  expect(matching.stderr).toMatch(/report-with-reruns.*environment: required/);
+  expect(existsSync(path.join(fixture.dir, 'invalid'))).toBe(false);
+}, 60_000);
+
+it('rejects duplicate merged result ids across different shard owners', () => {
+  const fixture = project();
+  expect(shard(fixture, 1).status).toBe(0);
+  expect(shard(fixture, 2).status).toBe(0);
+  const one = report(fixture, 'shard-1');
+  const two = report(fixture, 'shard-2');
+  const cart = one.results.find((row) => row.selected && row.kind === 'test')!;
+  const marker = two.results.find((row) => row.id === cart.id)!;
+  const checkout = two.results.find((row) => row.selected && row.kind === 'test')!;
+  expect(marker.skip?.otherShard).toBe(true);
+  marker.id = '0'.repeat(64);
+  checkout.id = cart.id;
+  const document = { schemaVersion: 'report-1', run: two };
+  assertValidReport(document);
+  writeFileSync(path.join(fixture.dir, 'shard-2/report.json'), JSON.stringify(document));
+  const merged = cli(fixture, ['merge-reports', 'shard-1', 'shard-2', '--output', 'merged']);
+  expect(merged.status).toBe(2);
+  expect(merged.stderr).toContain('merged report repeats result id');
+  expect(existsSync(path.join(fixture.dir, 'merged'))).toBe(false);
+}, 60_000);
+
+it('reports an interrupted result left behind by a passing shard rerun', () => {
+  const fixture = project();
+  expect(shard(fixture, 1).status).toBe(0);
+  expect(shard(fixture, 2).status).toBe(0);
+  const run = report(fixture, 'shard-1');
+  const cart = run.results.find((row) => row.selected && row.kind === 'test')!;
+  cart.status = 'interrupted';
+  cart.attempts[0]!.status = 'interrupted';
+  const folded = { schemaVersion: 'report-1', run };
+  assertValidReport(folded);
+  writeFileSync(path.join(fixture.dir, 'shard-1/report-with-reruns.json'), JSON.stringify(folded));
+  const merged = cli(fixture, ['merge-reports', 'shard-1', 'shard-2', '--output', 'merged']);
+  expect(merged.status, merged.stderr).toBe(130);
+  const result = report(fixture, 'merged');
+  expect(result.status).toBe('interrupted');
+  expect(result.results.find((row) => row.id === cart.id)?.status).toBe('interrupted');
+}, 60_000);
+
 it('keeps serial group results and shard failure limits in the final verdict', () => {
   const fixture = project();
   writeFileSync(path.join(fixture.dir, 'tests/shop.e2e.ts'), `import { test } from 'e2e';
@@ -262,6 +407,14 @@ test('delta', async () => {});
   expect(run.serialGroups).toHaveLength(1);
   expect(run.serialGroups[0]?.attempts[0]?.shard).toBe(1);
   expect(run.usage.artifactBytes).toBe(before.usage.artifactBytes + after.usage.artifactBytes);
+
+  const duplicate = { schemaVersion: 'report-1', run: { ...before, serialGroups: [...before.serialGroups, ...before.serialGroups] } };
+  assertValidReport(duplicate);
+  writeFileSync(path.join(fixture.dir, 'shard-1/report.json'), JSON.stringify(duplicate));
+  const invalid = cli(fixture, ['merge-reports', 'shard-1', 'shard-2', '--output', 'invalid']);
+  expect(invalid.status).toBe(2);
+  expect(invalid.stderr).toContain('shard 1 repeats serial group id');
+  expect(existsSync(path.join(fixture.dir, 'invalid'))).toBe(false);
 }, 60_000);
 
 it('identifies missing and duplicate shards before writing any report', () => {
