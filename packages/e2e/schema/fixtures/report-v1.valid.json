@@ -55,7 +55,7 @@
       }
     ],
     "extensions": {
-      "example.runMetadata": { "source": "ci" }
+      "example.run-metadata": { "source": "ci" }
     },
     "serialGroups": [
       {
