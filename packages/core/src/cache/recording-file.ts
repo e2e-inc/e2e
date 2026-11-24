@@ -656,7 +656,8 @@ function readSteps(document: unknown): { readonly test: string; readonly file?: 
   only(raw, ['test', 'file', 'steps'], 'the recording');
   const test = readString(raw['test'], 'test');
   const file = raw['file'] === undefined ? undefined : readString(raw['file'], 'file');
-  const steps = list(raw['steps'], 'steps').map((value, index): ReadStep => {
+  // Deleting a file's last step leaves a bare `steps:`, which YAML reads as null: the same as `steps: []`.
+  const steps = list(raw['steps'] === null ? [] : raw['steps'], 'steps').map((value, index): ReadStep => {
     const where = `steps[${String(index)}]`;
     const step = object(value, where);
     only(step, ['act', 'params', 'agent', 'call', 'targets'], where);

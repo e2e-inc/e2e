@@ -554,6 +554,17 @@ describe('FileCacheStore', () => {
     expect((await store.read(KEY, step())).status).toBe('hit');
   });
 
+  it('reads a YAML whose last step was deleted, leaving a bare steps key, as holding nothing', async () => {
+    const { directory, store } = await makeStore();
+    await store.write(KEY, payload());
+    const yaml = await readFile(yamlPath(directory), 'utf8');
+    await writeFile(yamlPath(directory), `${yaml.slice(0, yaml.indexOf('steps:'))}steps:\n`, 'utf8');
+    expect((await store.read(KEY, step())).status).toBe('miss');
+    expect(await store.write(OTHER_KEY, payload('ios'))).toBeDefined();
+    expect((await store.read(OTHER_KEY, step('ios'))).status).toBe('hit');
+    expect(JSON.parse(await readFile(lockPath(directory), 'utf8')).entries).toHaveLength(1);
+  });
+
   it('keeps a recording it cannot read when another is written or evicted beside it', async () => {
     const { directory, store } = await makeStore();
     const second = step('web', { callIndex: 1 });
