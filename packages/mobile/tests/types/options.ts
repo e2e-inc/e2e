@@ -19,7 +19,8 @@ const farm = {
 ({ platform: 'ios', device: farm }) satisfies MobileOptions;
 ({ id: 'lease-1', daemon: { baseUrl: 'http://10.0.0.7:4700' } }) satisfies DeviceLease;
 
-// @ts-expect-error the platform is ios or android.
+({ platform: 'harmonyos' }) satisfies MobileOptions;
+// @ts-expect-error web belongs to the browser engine.
 ({ platform: 'web' }) satisfies MobileOptions;
 // @ts-expect-error the snapshot mode is full or interactive.
 ({ platform: 'ios', snapshot: 'all' }) satisfies MobileOptions;

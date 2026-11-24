@@ -52,7 +52,7 @@ export function deviceSelection(
   const { device, deviceId } = binding ?? {};
   const id = deviceId ?? (device !== undefined && (UDID.test(device) || EMULATOR_SERIAL.test(device)) ? device : undefined);
   if (id === undefined) return obj({ platform, device });
-  return platform === 'android' ? { platform, serial: id } : { platform, udid: id };
+  return platform === 'ios' ? { platform, udid: id } : { platform, serial: id };
 }
 
 /**
@@ -100,7 +100,10 @@ function sourceFor(options: MobileOptions, createClient: ClientFactory, session:
     }
     return new ConfiguredDevices(device.map(namedDevice));
   }
-  return new LeasedDevices(asDeviceProvider(device), options);
+  if (options.platform === 'harmonyos') {
+    throw new ConfigurationError('INVALID_CONFIG', 'HarmonyOS requires a locally connected device.');
+  }
+  return new LeasedDevices(asDeviceProvider(device), { platform: options.platform });
 }
 
 /** A device name from the `device` option; a blank one would select no device, and the daemon would refuse several booted ones as ambiguous. */
@@ -160,6 +163,9 @@ class BootedDevices implements DeviceSource {
       );
     }
     if (chosen.length === 0) {
+      if (this.platform === 'harmonyos') {
+        throw new EngineError('ENGINE_FAILURE', 'Connect a HarmonyOS phone and check hdc list targets.', { retryable: false });
+      }
       info.log(`no booted ${this.platform} device; agent-device boots a shut-down one (iPhone over iPad over Apple TV on iOS, phone or tablet over TV on Android, then newest OS, then name)`);
       return [{}];
     }
@@ -350,10 +356,13 @@ export class DevicePool {
       const at = `session ${session} on ${label}`;
       const client = this.createClient(session, binding);
       this.retain(info.targetName, { session, client });
-      info.log(`booting ${label} (${slot + 1} of ${bindings.length})`);
+      const phase = this.options.platform === 'harmonyos' ? 'preparing' : 'booting';
+      info.log(`${phase} ${label} (${slot + 1} of ${bindings.length})`);
       const took: string[] = [];
       try {
-        await timed(took, 'boot', () => runCommand('boot', () => client.devices.boot(bootRequest(where)), info.signal, at));
+        if (this.options.platform !== 'harmonyos') {
+          await timed(took, 'boot', () => runCommand('boot', () => client.devices.boot(bootRequest(where)), info.signal, at));
+        }
         const runnerUp = this.options.platform !== 'ios' || (await timed(took, 'iOS runner', () => prepareRunner(client, where, info, at)));
         const app = pinnedApp(info.app, binding.installedApp);
         if (app === undefined || !runnerUp) continue;

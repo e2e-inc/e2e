@@ -17,7 +17,7 @@ export type AgentDeviceClient = ReturnType<typeof createAgentDeviceClient>;
  */
 export type ClientFactory = (session: string, connection?: DeviceConnection) => AgentDeviceClient;
 
-export type MobilePlatform = 'ios' | 'android';
+export type MobilePlatform = 'ios' | 'android' | 'harmonyos';
 
 /** Every permission agent-device can grant, deny, or reset on an app: what a target's `app.permissions` and `device.openApp` may name. */
 export const DEVICE_PERMISSIONS = [

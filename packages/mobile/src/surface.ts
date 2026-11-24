@@ -680,8 +680,18 @@ export class AgentDeviceSurface {
       provider === undefined || lease === undefined
         ? undefined
         : { provider, lease, runId: info.runId, targetName: info.targetName, env: info.env };
-    const booted = await this.command('boot', (client) => client.devices.boot(bootRequest(this.selection())), info.signal);
-    this.bound = { session, deviceId: booted.id, deviceName: booted.device };
+    if (this.options.platform === 'harmonyos') {
+      const devices = await this.command('devices', (client) => client.devices.list({ platform: 'harmonyos' }), info.signal);
+      const selected = binding?.deviceId ?? binding?.device;
+      const matches = devices.filter((item) => item.booted && (selected === undefined || item.id === selected || item.name === selected));
+      if (matches.length !== 1) throw invalidState('Expected one connected HarmonyOS phone matching the device selection.');
+      const phone = matches[0]!;
+      this.device = { deviceId: phone.id };
+      this.bound = { session, deviceId: phone.id, deviceName: phone.name };
+    } else {
+      const booted = await this.command('boot', (client) => client.devices.boot(bootRequest(this.selection())), info.signal);
+      this.bound = { session, deviceId: booted.id, deviceName: booted.device };
+    }
     // Nothing is installed here: a device provider that installed the build
     // from `appPath` says so on the binding, and otherwise the suite installs
     // it where it wants to, with `device.installApp()`.
@@ -1189,6 +1199,7 @@ export class AgentDeviceSurface {
   private project(raw: RawSnapshot): ProjectedScreen {
     const projected = {
       ...projectSnapshot(raw.nodes ?? [], {
+        arkUI: this.options.platform === 'harmonyos',
         mintId: () => {
           this.idCounter += 1;
           return `n${this.idCounter}`;

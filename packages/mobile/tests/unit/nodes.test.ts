@@ -13,6 +13,13 @@ function project(nodes: readonly RawNode[]) {
 }
 
 describe('snapshot projection', () => {
+  it('exposes an ArkUI caption as text and preserves a separate accessibility label', () => {
+    const { roots } = projectSnapshot([{ type: 'Button', label: 'Increase count', value: '+1', identifier: 'incrementButton' }], {
+      mintId: () => 'n1', arkUI: true,
+    });
+    expect(roots[0]).toMatchObject({ name: 'Increase count', text: '+1', testId: 'incrementButton', role: 'button' });
+  });
+
   it('rebuilds the tree from parentIndex and keeps document order in the index', () => {
     const projected = project(SETTINGS_NODES);
     expect(projected.roots).toHaveLength(1);

@@ -12,6 +12,10 @@ phones connected to your machine. It is built on
 [agent-device](https://github.com/callstack/agent-device). Tests use the
 same `agent`, `screen`, and `expect` APIs as browser tests.
 
+## Local HarmonyOS prototype
+
+This fork accepts `mobile({ platform: 'harmonyos' })` for a connected, unlocked phone with the target app already installed. Set `app.bundleId` to its bundle name. The [counter example](https://github.com/fryandev/e2e/tree/prototype/harmonyos-local/packages/mobile/examples/harmonyos) exercises app launch, ArkUI test IDs, button taps by role and name, and text assertions.
+
 ## Set up
 
 Install Xcode with an iOS simulator runtime, or the Android SDK with an
