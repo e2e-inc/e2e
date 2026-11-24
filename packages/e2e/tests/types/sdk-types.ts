@@ -1269,7 +1269,14 @@ test('request', async ({ request }) => {
   await request.get('/api/orders', { method: 'POST' });
   // @ts-expect-error a body is a string; an object goes in json
   await request.post('/api/orders', { body: { sku: 'A1' } });
-  // toBeOK takes a response, on every expect form.
+  // toBeOK takes a response, on every expect form, and not a union that may hold something else.
+  const maybe = created as WebResponse | undefined;
+  // @ts-expect-error a response or undefined is not a response
+  expect(maybe).toBeOK();
+  // @ts-expect-error a response or undefined is not a response, soft too
+  expect.soft(maybe).toBeOK();
+  // @ts-expect-error a response or undefined is not a response, polled too
+  void expect.poll(() => maybe).toBeOK();
   void (expect(created).toBeOK() satisfies void);
   void (expect(created).not.toBeOK() satisfies void);
   void (expect.soft(created).toBeOK() satisfies void);

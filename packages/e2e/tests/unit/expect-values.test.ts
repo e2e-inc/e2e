@@ -148,7 +148,7 @@ describe('value matchers', () => {
     vexpect(() => e2eExpect(response(200)).not.not.toBeOK()).not.toThrow();
   });
 
-  it('toBeOK names the URL without its credentials, query, or fragment, as a request step does', () => {
+  it('toBeOK names the origin and path of the response URL, never its credentials, query, or fragment', () => {
     failsWith(
       () => e2eExpect(response(500, 'https://user:pass@api.test/orders/7?token=t0ken#frag')).toBeOK(),
       /^expected a 2xx status, got 500 from https:\/\/api\.test\/orders\/7$/,
@@ -159,10 +159,53 @@ describe('value matchers', () => {
   });
 
   it('toBeOK refuses a value that is not a response, negated too', () => {
-    for (const value of [200, '200', null, undefined, { status: '200', url: 'https://api.test/' }, { status: 200 }]) {
-      failsWith(() => e2eExpect(value as never as WebResponse).toBeOK(), /^toBeOK requires a response, got /);
-      failsWith(() => e2eExpect(value as never as WebResponse).not.toBeOK(), /^toBeOK requires a response, got /);
+    const cases: [unknown, string][] = [
+      [200, 'a number'],
+      ['200', 'a string'],
+      [null, 'null'],
+      [undefined, 'undefined'],
+      [{ status: '200', url: 'https://api.test/' }, 'an object without a numeric status and a string url'],
+      [{ status: 200 }, 'an object without a numeric status and a string url'],
+    ];
+    for (const [value, kind] of cases) {
+      const refused = new RegExp(`^toBeOK requires a response, got ${kind}$`);
+      failsWith(() => e2eExpect(value as never as WebResponse).toBeOK(), refused);
+      failsWith(() => e2eExpect(value as never as WebResponse).not.toBeOK(), refused);
     }
+  });
+
+  it('toBeOK refusing a look-alike prints neither its URL nor its fields, keeps the message, and reads no getter', () => {
+    let bodyReads = 0;
+    const lookalike = {
+      status: '500',
+      url: 'https://api.test/orders?token=t0ken',
+      get body() {
+        bodyReads += 1;
+        return 'secret body';
+      },
+    };
+    failsWith(
+      () => e2eExpect(lookalike as never as WebResponse, 'lookup').not.toBeOK(),
+      /^lookup: toBeOK requires a response, got an object without a numeric status and a string url$/,
+    );
+    vexpect(bodyReads).toBe(0);
+  });
+
+  it('toBeOK reads status and url once, so a changing status cannot pass on a later read', () => {
+    let statusReads = 0;
+    let urlReads = 0;
+    const changing = {
+      get status() {
+        statusReads += 1;
+        return statusReads === 1 ? 503 : 200;
+      },
+      get url() {
+        urlReads += 1;
+        return 'https://api.test/jobs/1';
+      },
+    };
+    failsWith(() => e2eExpect(changing as never as WebResponse).toBeOK(), /^expected a 2xx status, got 503 from https:\/\/api\.test\/jobs\/1$/);
+    vexpect([statusReads, urlReads]).toEqual([1, 1]);
   });
 
   it('a message opens the failure text, and survives negation', () => {

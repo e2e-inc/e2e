@@ -185,12 +185,8 @@ function requestUrl(input: unknown, base: NormalizedBaseUrl | undefined): URL {
   return url;
 }
 
-/**
- * The URL as a step label shows it: the path on the app's origin, the origin
- * too elsewhere; never the credentials, query, or fragment. `toBeOK` names a
- * response's URL the same way.
- */
-export function shownUrl(url: URL, base: NormalizedBaseUrl | undefined): string {
+/** The URL as a step label shows it: the path on the app's origin, the origin too elsewhere; never the query. */
+function shownUrl(url: URL, base: NormalizedBaseUrl | undefined): string {
   return url.origin === base?.origin ? url.pathname : `${url.origin}${url.pathname}`;
 }
 

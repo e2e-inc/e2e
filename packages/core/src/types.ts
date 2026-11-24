@@ -1327,7 +1327,7 @@ export interface ValueExpectation<T> {
   /**
    * Requires a `WebResponse` whose status is 2xx (200 to 299), as `request`,
    * `waitForResponse`, and `route.fetch()` return it. The failure names the
-   * status and the URL without its query; the body is never read.
+   * status and the URL's origin and path; the body is never read.
    */
   toBeOK(...valueIsNotAResponse: [T] extends [WebResponse] ? [] : [never]): void;
 }

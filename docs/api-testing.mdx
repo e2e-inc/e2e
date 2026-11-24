@@ -29,7 +29,7 @@ Each call is a step in the report, such as `GET /api/users`, and fails the
 test when it runs past `actionTimeout`.
 
 [`toBeOK`](/reference/expect#tobeok) requires a 2xx status. When it fails, it
-names the status and the URL.
+names the status and the response's origin and path.
 
 `toMatchSchema` takes any [Standard Schema](/reference/expect#matching-a-schema),
 such as Zod, Valibot, or ArkType, and returns the value, typed. Use the

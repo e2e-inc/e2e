@@ -583,10 +583,14 @@ expect(created).toBeOK();
 // ASSERTION_FAILED: expected a 2xx status, got 404 from https://shop.test/api/orders
 ```
 
-- The failure names the status and the URL without its query. The body is
-  not read.
-- Any other value fails to compile, and fails as `ASSERTION_FAILED` at run
-  time, negated too.
+- The failure names the status and the origin and path of `response.url`,
+  the URL after redirects. It leaves out the credentials, query, and
+  fragment, and never reads the body.
+- A value whose type is not `WebResponse`, such as `WebResponse | undefined`,
+  fails to compile. A value typed `any` compiles.
+- At run time, an object with a numeric `status` and a string `url` is
+  checked as a response. Anything else fails as `ASSERTION_FAILED`, negated
+  too.
 - To wait for a 2xx status, poll the call:
   `await expect.poll(() => request.get('/api/jobs/7')).toBeOK()`.
 
@@ -1130,7 +1134,7 @@ export interface ValueExpectation<T> {
   /**
    * Requires a `WebResponse` whose status is 2xx (200 to 299), as `request`,
    * `waitForResponse`, and `route.fetch()` return it. The failure names the
-   * status and the URL without its query; the body is never read.
+   * status and the URL's origin and path; the body is never read.
    */
   toBeOK(...valueIsNotAResponse: [T] extends [WebResponse] ? [] : [never]): void;
 }

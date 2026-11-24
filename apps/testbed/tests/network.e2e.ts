@@ -7,6 +7,7 @@ test('observes the first navigation response', { requires: ['browser'], tags: ['
     browser.goto('/network'),
   ]);
   expect(response.url).toMatch(/\/network$/);
+  expect(response.status).toBe(200);
   expect(response).toBeOK();
   expect(response.headers['content-type']).toContain('text/html');
   expect(await response.text()).toContain('<title>Network</title>');
@@ -21,6 +22,7 @@ test('calls the API at a path joined onto app.baseUrl', { tags: ['network'] }, a
 
 test('calls the API through the request fixture', { tags: ['network'] }, async ({ request }) => {
   const response = await request.get('/api/users');
+  expect(response.status).toBe(200);
   expect(response).toBeOK();
   expect(response.headers['content-type']).toBe('application/json');
   expect(await response.json()).toEqual([{ name: 'Ada' }, { name: 'Grace' }, { name: 'Margaret' }]);
