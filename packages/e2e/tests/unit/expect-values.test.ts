@@ -25,7 +25,7 @@ function failsWith(fn: () => void, pattern: RegExp): void {
     vexpect((error as TestError).message).toMatch(pattern);
     return;
   }
-  throw new Error('expected assertion to fail');
+  vexpect.fail('expected assertion to fail');
 }
 
 describe('value matchers', () => {
@@ -132,20 +132,20 @@ describe('value matchers', () => {
   });
 
   it('toBeOK passes on a 2xx status and fails on the statuses around it', () => {
-    e2eExpect(response(200)).toBeOK();
-    e2eExpect(response(299)).toBeOK();
+    vexpect(() => e2eExpect(response(200)).toBeOK()).not.toThrow();
+    vexpect(() => e2eExpect(response(299)).toBeOK()).not.toThrow();
     failsWith(() => e2eExpect(response(199)).toBeOK(), /^expected a 2xx status, got 199 from https:\/\/api\.test\/orders$/);
     failsWith(() => e2eExpect(response(300)).toBeOK(), /^expected a 2xx status, got 300 from https:\/\/api\.test\/orders$/);
     failsWith(() => e2eExpect(response(404)).toBeOK(), /^expected a 2xx status, got 404 from https:\/\/api\.test\/orders$/);
   });
 
   it('toBeOK negated passes outside 2xx and fails inside it', () => {
-    e2eExpect(response(199)).not.toBeOK();
-    e2eExpect(response(300)).not.toBeOK();
-    e2eExpect(response(404)).not.toBeOK();
+    vexpect(() => e2eExpect(response(199)).not.toBeOK()).not.toThrow();
+    vexpect(() => e2eExpect(response(300)).not.toBeOK()).not.toThrow();
+    vexpect(() => e2eExpect(response(404)).not.toBeOK()).not.toThrow();
     failsWith(() => e2eExpect(response(200)).not.toBeOK(), /^expected a status outside 2xx, got 200 from https:\/\/api\.test\/orders$/);
     failsWith(() => e2eExpect(response(299)).not.toBeOK(), /^expected a status outside 2xx, got 299 from/);
-    e2eExpect(response(200)).not.not.toBeOK();
+    vexpect(() => e2eExpect(response(200)).not.not.toBeOK()).not.toThrow();
   });
 
   it('toBeOK names the URL without its credentials, query, or fragment, as a request step does', () => {

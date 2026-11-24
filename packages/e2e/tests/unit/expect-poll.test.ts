@@ -93,7 +93,7 @@ describe('expect.poll', () => {
   it('toBeOK re-reads the response until its status is 2xx', async () => {
     const reply = (status: number) => ({ url: 'https://api.test/jobs/1', status, headers: {}, body: async () => Buffer.from(''), json: async <T>() => ({}) as T, text: async () => '' });
     const pending = settling(reply(503), reply(200), 2);
-    await e2eExpect.poll(pending.read, { intervals: [5] }).toBeOK();
+    await vexpect(e2eExpect.poll(pending.read, { intervals: [5] }).toBeOK()).resolves.toBeUndefined();
     vexpect(pending.reads()).toBe(3);
     await failsWith(
       () => e2eExpect.poll(() => reply(503), { timeout: 60, intervals: [10] }).toBeOK(),
