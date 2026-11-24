@@ -25,10 +25,10 @@ export const setupPrompt = `एक Bitrise पाइपलाइन जोड़
 
 ## वर्कफ़्लो
 
-डिवाइस Bitrise स्टेप बूट करते हैं: macOS पर `xcode-start-simulator`, और Linux
+Bitrise के स्टेप डिवाइस बूट करते हैं: macOS पर `xcode-start-simulator`, और Linux
 पर `avd-manager` के साथ `wait-for-android-emulator`। Android वर्कफ़्लो Gradle
-बिल्ड से पहले एम्युलेटर शुरू कर देता है, ताकि APK कंपाइल होते-होते वह बूट हो
-जाए। Release APK का साइन होना ज़रूरी है। React Native और Expo के टेम्पलेट उसे
+बिल्ड से पहले एम्युलेटर शुरू कर देता है, ताकि APK कंपाइल होने के दौरान वह बूट
+होता रहे। Release APK का साइन होना ज़रूरी है। React Native और Expo के टेम्पलेट उसे
 debug keystore से साइन करते हैं।
 
 ```yaml title="bitrise.yml" expandable
