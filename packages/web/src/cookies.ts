@@ -69,10 +69,9 @@ function isExpiry(expires: unknown): boolean {
 /**
  * Whether `domain`, less a leading dot, parses back as only that host in the
  * origin `setCookies` checks it under, changed at most in case or to punycode,
- * with no empty label but a trailing dot's. A scheme, port, path, or
- * whitespace would be dropped, and a host the parser
- * rewrites (`1.2.3` to `1.2.0.3`, `%41.com` to `a.com`) would put the URL rule
- * on another host than the cookie's.
+ * with no empty label but a trailing dot's. A host the parser rewrites
+ * (`1.2.3` to `1.2.0.3`, `%41.com` to `a.com`) would put the URL rule on
+ * another host than the cookie's.
  */
 function isHostName(domain: string): boolean {
   const host = domain.replace(/^\./, '');
@@ -81,7 +80,6 @@ function isHostName(domain: string): boolean {
   const written = host.toLowerCase();
   const labels = url.hostname.replace(/\.$/, '').split('.');
   return (
-    url.href === `http://${url.hostname}/` &&
     !labels.includes('') &&
     (url.hostname === written || domainToUnicode(url.hostname) === written)
   );
