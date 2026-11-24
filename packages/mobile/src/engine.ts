@@ -37,7 +37,7 @@ export function buildEngine(surface: AgentDeviceSurface): MobileEngine {
     ...(surface.pool.size === undefined ? {} : { workers: surface.pool.size }),
     // `e2e run --device` names the device `prepare` binds; see DevicePool.prepare.
     ...(surface.pool.selectsDevice ? { selectsDevice: true } : {}),
-    launchArgumentValues: true,
+    launchArgumentValues: !harmony,
     prepare: (info) => surface.pool.prepare(info),
     finish: (info) => surface.pool.finish(info),
     doctor: (info) => surface.doctor(info),
@@ -63,12 +63,13 @@ export function buildEngine(surface: AgentDeviceSurface): MobileEngine {
     // `app.open()` with `restart`, the fresh launch of the pinned app, which
     // is also the device's "recreate the context".
     session: {
-      back: (operation) => surface.back(operation, surface.inputBudget('back', operation)),
       restart: (operation) => surface.restart(operation),
-      reset: (operation) => surface.reset(operation),
-      // `app.open(path)` on a target with `app.linkBase`: the link opens in the pinned app, as `device.openLink` would.
-      openLink: async (url, operation) =>
-        await surface.openLink(linkTarget(url), undefined, operation.signal, surface.inputBudget('open link', operation)),
+      ...(!harmony && {
+        back: (operation) => surface.back(operation, surface.inputBudget('back', operation)),
+        reset: (operation) => surface.reset(operation),
+        openLink: async (url, operation) =>
+          await surface.openLink(linkTarget(url), undefined, operation.signal, surface.inputBudget('open link', operation)),
+      }),
     },
     artifacts: {
       screenshot: (label, operation) => surface.screenshot(label, operation, surface.inputBudget('screenshot', operation)),
@@ -97,8 +98,8 @@ export function mobile(options: MobileOptions): MobileEngine {
     throw new ConfigurationError('INVALID_CONFIG', `mobile() needs platform: 'ios', 'android', or 'harmonyos', got ${JSON.stringify(platform) ?? 'no platform'}`);
   }
   const factory: ClientFactory = (session, connection) => {
-    // A provider's local daemon must not inherit the user's remote-daemon connection.
-    const local = connection?.client?.stateDir !== undefined && connection.daemon === undefined;
+    // Local-only targets and provider-local daemons connect on this host even when a remote daemon is configured.
+    const local = platform === 'harmonyos' || (connection?.client?.stateDir !== undefined && connection.daemon === undefined);
     return createAgentDeviceClient(
       obj({
         ...connection?.client,
@@ -127,8 +128,11 @@ const LOOPBACK_NOTES: Readonly<Record<MobilePlatform, string>> = {
  */
 function validateApp(app: EngineAppDeclaration, { targetName }: EngineAppCheckInfo, platform: MobilePlatform): void {
   const where = `target "${targetName}"`;
-  if (platform === 'harmonyos' && app.appPath !== undefined) {
-    throw new ConfigurationError('INVALID_CONFIG', 'The local HarmonyOS target requires an installed app and app.bundleId.');
+  if (platform === 'harmonyos' && (app.appPath !== undefined || app.bundleId === undefined)) {
+    throw new ConfigurationError('INVALID_CONFIG', `${where} requires an installed HarmonyOS app. Set app.bundleId and omit app.appPath.`);
+  }
+  if (platform === 'harmonyos' && (app.permissions !== undefined || app.launchArgumentValues !== undefined || app.launchArguments !== undefined)) {
+    throw new ConfigurationError('INVALID_CONFIG', `${where} supports launching an installed HarmonyOS app by bundleId only. Omit permissions and launchArguments.`);
   }
   if (app.url !== undefined) {
     throw new ConfigurationError(

@@ -83,6 +83,22 @@ export function isDeviceList(device: unknown): device is readonly string[] {
 /** The source the `device` option names: a configured pool, the booted devices, or a provider's leases. */
 function sourceFor(options: MobileOptions, createClient: ClientFactory, session: SessionNamer): DeviceSource {
   const { device } = options;
+  if (options.platform === 'harmonyos') {
+    if (device !== undefined && typeof device !== 'string') {
+      throw new ConfigurationError('INVALID_CONFIG', 'A HarmonyOS target drives one local phone. Set device to its HDC serial or name.');
+    }
+    const selected = device === undefined ? undefined : namedDevice(device);
+    return {
+      size: 1,
+      fallback: [selected === undefined ? {} : { device: selected }],
+      async bind(info) {
+        const name = session(info, 0);
+        const client = createClient(name);
+        const phone = await harmonyPhone(client, info.device ?? selected, name, info.signal);
+        return [{ deviceId: phone.id }];
+      },
+    };
+  }
   if (device === undefined) return new BootedDevices(options.platform, createClient, session);
   if (typeof device === 'string') return new ConfiguredDevices([namedDevice(device)]);
   if (isDeviceList(device)) {
@@ -94,10 +110,24 @@ function sourceFor(options: MobileOptions, createClient: ClientFactory, session:
     }
     return new ConfiguredDevices(device.map(namedDevice));
   }
-  if (options.platform === 'harmonyos') {
-    throw new ConfigurationError('INVALID_CONFIG', 'HarmonyOS requires a locally connected device.');
-  }
   return new LeasedDevices(asDeviceProvider(device), { platform: options.platform });
+}
+
+/** Resolve the HDC serial before warm-up or direct worker initialization can open an app. */
+export async function harmonyPhone(client: AgentDeviceClient, selected: string | undefined, session: string, signal: AbortSignal) {
+  const inventory = await runCommand('devices', () => client.devices.list({ platform: 'harmonyos' }), signal);
+  const connected = inventory.filter((item) => item.platform === 'harmonyos' && item.kind === 'device' && item.target === 'mobile' && item.booted);
+  const byId = connected.find((item) => item.id === selected);
+  const matches = byId ? [byId] : connected.filter((item) => selected === undefined || item.name === selected);
+  if (matches.length !== 1) {
+    const reason = matches.length === 0 ? 'No connected HarmonyOS phone matches' : 'Multiple connected HarmonyOS phones match';
+    throw new EngineError('ENGINE_FAILURE', `${reason} ${selected ?? 'this target'}. Check hdc list targets and select one HDC serial with --device.`, { retryable: false });
+  }
+  const phone = matches[0]!;
+  if (phone.claimedBy && phone.claimedBy.session !== session) {
+    throw new EngineError('ENGINE_FAILURE', `HarmonyOS phone ${phone.id} is held by session "${phone.claimedBy.session}". Close that session before running this target.`, { retryable: false });
+  }
+  return phone;
 }
 
 /** A device name from the `device` option; a blank one would select no device, and the daemon would refuse several booted ones as ambiguous. */
@@ -156,9 +186,6 @@ class BootedDevices implements DeviceSource {
       );
     }
     if (chosen.length === 0) {
-      if (this.platform === 'harmonyos') {
-        throw new EngineError('ENGINE_FAILURE', 'Connect a HarmonyOS phone and check hdc list targets.', { retryable: false });
-      }
       info.log(`no booted ${this.platform} device; agent-device boots a shut-down one (iPhone over iPad over Apple TV on iOS, phone or tablet over TV on Android, then newest OS, then name)`);
       return [{}];
     }
@@ -336,7 +363,7 @@ export class DevicePool {
    */
   async prepare(info: EnginePrepareInfo): Promise<EnginePrepareResult> {
     if (info.slots === 0) return {};
-    const source = info.device === undefined ? this.source : new ConfiguredDevices([namedDevice(info.device)]);
+    const source = info.device === undefined || this.options.platform === 'harmonyos' ? this.source : new ConfiguredDevices([namedDevice(info.device)]);
     const bindings = [...(await source.bind(info))];
     // Only a device the pool found may move: a named device (the config's or `e2e run --device`'s) or a provider's lease is what the run asked for.
     const found = source instanceof BootedDevices ? source : undefined;

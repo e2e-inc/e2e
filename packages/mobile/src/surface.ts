@@ -70,7 +70,7 @@ import { maskPng } from './png.ts';
 import { mobileDoctor } from './doctor.ts';
 import { deviceLabel, pinnedApp, type SlotBinding } from './bindings.ts';
 import { assertAppId } from './links.ts';
-import { bootRequest, DevicePool, deviceSelection, type DeviceSelection } from './pool.ts';
+import { bootRequest, DevicePool, deviceSelection, harmonyPhone, type DeviceSelection } from './pool.ts';
 import { recordLease, travelledLease, type DeviceLease, type RecordingDeviceProvider } from './provider.ts';
 import {
   invalidState,
@@ -685,11 +685,7 @@ export class AgentDeviceSurface {
         ? undefined
         : { provider, lease, runId: info.runId, targetName: info.targetName, env: info.env };
     if (this.options.platform === 'harmonyos') {
-      const devices = await this.command('devices', (client) => client.devices.list({ platform: 'harmonyos' }), info.signal);
-      const selected = binding?.deviceId ?? binding?.device;
-      const matches = devices.filter((item) => item.booted && (selected === undefined || item.id === selected || item.name === selected));
-      if (matches.length !== 1) throw invalidState('Expected one connected HarmonyOS phone matching the device selection.');
-      const phone = matches[0]!;
+      const phone = await harmonyPhone(this.client, binding?.deviceId ?? binding?.device, session, info.signal);
       this.device = { deviceId: phone.id };
       this.bound = { session, deviceId: phone.id, deviceName: phone.name };
     } else {
@@ -1045,6 +1041,7 @@ export class AgentDeviceSurface {
    * with no data; a plain install replaces the binary and keeps its data.
    */
   async installApp(appPath: string | undefined, options: InstallAppOptions, signal: AbortSignal): Promise<InstalledApp> {
+    if (this.options.platform === 'harmonyos') throw unsupported('device.installApp is unavailable on HarmonyOS. Install the signed app before the run and set app.bundleId.');
     const build = appPath ?? this.app.appPath;
     if (build === undefined) throw invalidState("installApp needs a build: pass a path, or name one with the target's app.appPath");
     const resolved = path.resolve(this.projectRoot, build);
@@ -1086,6 +1083,7 @@ export class AgentDeviceSurface {
    * `app.open()` asks for an install instead of launching an app that is gone.
    */
   async uninstallApp(app: string | undefined, signal: AbortSignal): Promise<boolean> {
+    if (this.options.platform === 'harmonyos') throw unsupported('device.uninstallApp is unavailable on HarmonyOS. Install the signed app before the run and set app.bundleId.');
     const target = this.appArgument('uninstallApp', app);
     const result = await this.command(`uninstall ${target}`, (client) => client.apps.uninstall({ ...this.selection(), app: target }), signal);
     // agent-device resolves display names too: compare the id it removed, not only the string the caller passed.
