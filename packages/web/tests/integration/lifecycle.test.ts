@@ -962,6 +962,23 @@ describe('web engine lifecycle', () => {
     });
   });
 
+  it('keeps deviceScaleFactor on the contexts that replace the first: a state reset and a session restore', async () => {
+    const engine = web({ viewport: { width: 400, height: 300 }, deviceScaleFactor: 2 });
+    await withAttempt(engine, app, artifactsDir, 'd2', async () => {
+      const ratio = (): Promise<number> => surfaceOf(engine)!.page().evaluate(() => devicePixelRatio);
+      await engine.session!.open!(`${app.url}/form`, operation('d2'));
+      const state = await engine.state!.capture(operation('d2'));
+
+      await engine.session!.reset!(operation('d2'));
+      await engine.session!.open!(`${app.url}/form`, operation('d2'));
+      expect(await ratio()).toBe(2);
+
+      await engine.state!.restore(state, operation('d2'));
+      await engine.session!.open!(`${app.url}/form`, operation('d2'));
+      expect(await ratio()).toBe(2);
+    });
+  });
+
   it('follows the window under viewport: null, reports the measured size, and swipes by it', async () => {
     const engine = web({ viewport: null });
     await withAttempt(engine, app, artifactsDir, 'w1', async () => {

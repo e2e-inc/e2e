@@ -199,8 +199,8 @@ viewport's size on each side:
 { name: 'retina', engine: web({ deviceScaleFactor: 2 }), app }
 ```
 
-The pixels the model reads and `toHaveScreenshot` keep one image pixel per
-CSS pixel.
+The factor does not change the image the model reads or the one
+`toHaveScreenshot` compares.
 
 ### Fill the window
 

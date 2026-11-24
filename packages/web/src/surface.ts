@@ -141,7 +141,7 @@ export interface WebConnectOptions {
    * same browser after a transport drop. Called once before the next
    * operation, within its budget. The original browser and page must survive.
    * Dispatched operations are never retried. The host owns browser cleanup.
-   * Context replacement, headers, basicAuth, userAgent, locale, and timezoneId are unavailable in this mode.
+   * Context replacement, headers, basicAuth, userAgent, locale, timezoneId, and deviceScaleFactor are unavailable in this mode.
    */
   readonly reconnectEndpoint?: CdpEndpointResolver;
 }
@@ -196,9 +196,11 @@ export interface WebOptions {
    * `window.devicePixelRatio` reads it; default 1. At 2 the page renders as
    * on a high-density display, and every saved screenshot
    * (`app.screenshot()`, a failure's, an `agent.assert`'s) is twice the
-   * viewport's size on each side. The pixels the model reads and
-   * `toHaveScreenshot` stay at one image pixel per CSS pixel. It needs a
-   * viewport size, so `viewport: null` refuses it.
+   * viewport's size on each side. The factor does not change the image the
+   * model reads or the one `toHaveScreenshot` compares. It needs a viewport
+   * size, so `viewport: null` refuses it, and a persistent context
+   * (`connect.reconnectEndpoint`, or a provider with `scope: 'attempt'`)
+   * refuses it.
    */
   readonly deviceScaleFactor?: number;
   /**
