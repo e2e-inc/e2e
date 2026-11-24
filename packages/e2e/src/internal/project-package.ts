@@ -1,6 +1,5 @@
-/** What a project says about a package: the spec its package.json declares and the copy under node_modules. */
+/** What a project says about a package: the spec its package.json declares. */
 
-import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { isPlainObject } from '@e2e-dev/core/lib/internal/options';
 import { detectWorkspacePackageManager, readPackageManifest, type PackageManager } from './package-manager.ts';
