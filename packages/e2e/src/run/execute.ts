@@ -648,11 +648,10 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       const sessions = driven();
       // A step of a session the test opened itself (`launch()`) is none of these: the test's own screen is shown for it.
       const shown = from ?? sessions.find((each) => each.actor === failed?.actor) ?? sessions.find((each) => each.actor === undefined);
-      const screen = shown?.screen();
-      if (shown === undefined || screen === undefined) return;
+      if (shown === undefined) return;
       evidenceTried = true;
       const evidence = await captureFailureEvidence({
-        ...screen, ownStep: shown.actor === failed?.actor, error: failure, config: this.config, artifacts: artifacts.sink, interrupt: this.interruptSignal,
+        ...shown.screen(), ownStep: shown.actor === failed?.actor, error: failure, config: this.config, artifacts: artifacts.sink, interrupt: this.interruptSignal,
       }).catch(() => undefined);
       if (evidence !== undefined) record.failure = evidence;
     };

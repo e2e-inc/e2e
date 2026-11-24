@@ -577,8 +577,8 @@ test('a note shows up for the reviewer', { session: 'author' }, async ({ app, sc
 });
 ```
 
-- An actor holds `app`, `screen`, `agent`, `platform`, and `browser` (or
-  `device`), like the test's own fixtures: a helper typed
+- An actor holds `app`, `screen`, `agent`, `request`, `platform`, and
+  `browser` (or `device`), like the test's own fixtures: a helper typed
   `Pick<Actor, 'app' | 'screen'>` takes either.
 - On a `web()` target an actor is a browser context of its own in the
   test's browser. The runner runs the setup test its `session` needs.
@@ -596,7 +596,9 @@ test('a note shows up for the reviewer', { session: 'author' }, async ({ app, sc
   `base.extend<{ reviewer: Actor; board: string }>({ ... })`.
 - Not available: an actor in a serial group, in `beforeAll` or a worker
   fixture, an actor with a `session` in a setup test, and
-  `toHaveScreenshot` on an actor's screen.
+  `toHaveScreenshot` on an actor's screen. The report keeps no app log
+  and no trace screens for an actor, and `screen.pause()` on one returns
+  at once.
 - On a `mobile()` target, and on a `web()` target with
   `connect.reconnectEndpoint` or a browser provider in `attempt` scope, an
   actor needs a `target` other than the test's own.

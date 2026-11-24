@@ -623,9 +623,13 @@ export function renderTracePage(report: Report1Document, result: ReportResult, f
 
   const failure = told.failure;
   if (failure !== undefined) {
-    // A failure on a session beside the test's own is shown with the test's own screen, which is the one the runner can read.
-    lines.push(at?.step.actor === undefined ? '## Screen at failure' : `## Screen of the test's own session at failure`, '');
     const screen = failure.screen === undefined ? undefined : told.artifacts.find((artifact) => artifact.id === failure.screen);
+    const shot = failureScreenshot(told);
+    // Whose screen it is rides on what was captured: an actor's is told as that actor's. A step of a session the test
+    // opened with `launch()` is shown with the test's own screen, the one the runner can read.
+    const shown = (screen ?? shot)?.actor;
+    if (shown !== undefined) lines.push(`## Screen of ${shown} at failure`, '');
+    else lines.push(at?.step.actor === undefined ? '## Screen at failure' : `## Screen of the test's own session at failure`, '');
     const listing = screen?.path === undefined ? undefined : options.readArtifact?.(screen.path);
     const where = [
       ...(failure.url === undefined ? [] : [code(failure.url, MAX_PATH_CHARS)]),
@@ -633,7 +637,6 @@ export function renderTracePage(report: Report1Document, result: ReportResult, f
       ...(failure.nodes === undefined ? [] : [plural(failure.nodes, 'node')]),
     ];
     if (where.length > 0) lines.push(`${where.join(' · ')}  `);
-    const shot = failureScreenshot(told);
     const shotHref = shot?.path === undefined ? undefined : pageHref(shot.path, options);
     if (shotHref !== undefined) lines.push('', `!${link('screenshot at failure', shotHref)}`, '');
     if (failure.candidates !== undefined && failure.candidates.length > 0) {

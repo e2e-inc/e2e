@@ -15,7 +15,7 @@ import path from 'node:path';
 import { createAgentCacheContext, settleStagedTraces, type AgentCacheContext, type AttemptSettlement, type CacheWrite } from '@e2e-dev/core/lib/cache/context';
 import type { StoredRecordings } from '@e2e-dev/core/lib/cache/rekeyed';
 import type { ResolvedConfig, ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
-import { classifyError, E2EError, InfrastructureError, serializeError } from '@e2e-dev/core/lib/internal/errors';
+import { classifyError, E2EError, serializeError } from '@e2e-dev/core/lib/internal/errors';
 import { MAX_TIMER_MS, withTimeout } from '@e2e-dev/core/lib/internal/time';
 import type { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
 import { EngineSessions, type EngineSessionsOptions } from '@e2e-dev/core/lib/run/engine-sessions';
@@ -122,8 +122,6 @@ interface OpenActor {
   readonly attempt: StandaloneAttempt<ActorFixtureBase>;
   readonly cache: AgentCacheContext | undefined;
   readonly steps: GuestMirror;
-  /** Whether the actor was closed: the engine then knows nothing of its attempt. */
-  closed(): boolean;
   fixtures: object | undefined;
 }
 
@@ -200,22 +198,16 @@ export class AttemptActors {
    * actor's name, and its screen is told as the actor's.
    */
   sessions(): readonly DrivenSession[] {
-    return [...this.opened.values()].map(({ actor: { name, target }, sessions, attempt: { session }, closed }) => ({
+    return [...this.opened.values()].map(({ actor: { name, target }, sessions, attempt: { session } }) => ({
       actor: name,
       session,
-      settle: async () => {
-        // A closed actor's attempt has ended on the engine.
-        if (!closed()) await sessions.settleAttempt(session).catch((cause: unknown) => Promise.reject(actorError(name, cause)));
-      },
-      screen: () =>
-        closed()
-          ? undefined
-          : {
-              session, appBase: target.app.base, appOrigin: target.app.base?.origin,
-              actor: { name, dir: path.join(...actorSegments(name)) },
-              ledger: sessionLedger(session, this.options.config.allSecrets),
-              operation: (signal, timeoutMs) => sessions.op(session, timeoutMs, signal),
-            },
+      settle: () => sessions.settleAttempt(session).catch((cause: unknown) => Promise.reject(actorError(name, cause))),
+      screen: () => ({
+        session, appBase: target.app.base, appOrigin: target.app.base?.origin,
+        actor: { name, dir: path.join(...actorSegments(name)) },
+        ledger: sessionLedger(session, this.options.config.allSecrets),
+        operation: (signal, timeoutMs) => sessions.op(session, timeoutMs, signal),
+      }),
     }));
   }
 
@@ -256,8 +248,6 @@ export class AttemptActors {
       launched: ({ fixtureBase }) => fixtureBase,
     };
     let attempt: StandaloneAttempt<ActorFixtureBase> | undefined;
-    /** How far the actor's own record counted its steps confirmed when it was last told here. */
-    let verified = -1;
     const reservation = reserveAttempt(worker, policy, {
       // The attempt ends the actor by closing it; only the run's interrupt cancels it from outside.
       signal: sessions.interruptSignal,
@@ -269,11 +259,7 @@ export class AttemptActors {
         // A check that passed on the actor confirms what the test's other sessions did before it, as one of its own
         // does: up to the step the actor's record counts confirmed, which for a check inside an agent step's
         // onAction is that agent step, never past it.
-        const confirmed = attempt?.steps.lastVerifiedStepIndex ?? -1;
-        if (progress.phase === 'end' && confirmed > verified) {
-          verified = confirmed;
-          seat.steps.verified(confirmed);
-        }
+        if (progress.phase === 'end' && attempt !== undefined) seat.steps.verified(attempt.steps.lastVerifiedStepIndex);
       },
       cancelsOnClose: {
         closed: () => new E2EError('infrastructure', 'CANCELLED', `actor "${name}" is closed`),
@@ -284,27 +270,24 @@ export class AttemptActors {
     });
     const launched = await launchAttempt(worker, policy, reservation, () => Promise.resolve());
     attempt = launched;
-    let closed = false;
     const close = async (): Promise<void> => {
-      closed = true;
       const errors = await launched.close();
       for (const recording of launched.videos()) await seat.video(recording);
-      if (errors.length === 0) return;
-      const thrown = errors.map((error) => new E2EError(error.category, error.code, `actor "${name}": ${error.message}`));
-      throw new AggregateError(thrown, thrown.map((error) => error.message).join('; '));
+      if (errors.length > 0) throw new AggregateError(errors.map((error) => actorError(name, new E2EError(error.category, error.code, error.message))));
     };
-    /** Cuts the actor's steps the way the test's timeout does, and says whether they ended within the cleanup budget. */
-    const cut = (): Promise<boolean> => {
+    // What the body left running on the actor is cut the way the test's own steps are, through the attempt's budget,
+    // and waited for within one cleanup budget: the actor stays open, and teardown starts on a quiet session.
+    const stop = async (): Promise<void> => {
       this.options.cut();
-      return withTimeout(launched.steps.idle(), config.cleanupTimeout, () => new InfrastructureError('CLEANUP_TIMEOUT', `a step of actor "${name}" did not end`)).then(() => true, () => false);
+      await withTimeout(launched.steps.settleAbandoned(), config.cleanupTimeout, () => new Error('abandoned steps did not settle')).catch(() => undefined);
     };
-    seat.open({ root: config.projectRoot, busy: () => launched.steps.busy, abandonRunning: () => launched.steps.abandonRunning(), close }, cut);
+    seat.open({ root: config.projectRoot, busy: () => launched.steps.busy, abandonRunning: () => launched.steps.abandonRunning(), close }, stop);
     const cache = this.options.caches
       ? createAgentCacheContext({
           cache: config.cache, projectRoot: config.projectRoot, projectId: config.projectId, testId: test.id,
           target: targetIdentity(actor.target), attemptIndex: this.options.attemptIndex, recordings: this.options.recordings, actor: name,
         })
       : undefined;
-    return { actor, sessions, attempt: launched, cache, steps: seat.steps, closed: () => closed, fixtures: undefined };
+    return { actor, sessions, attempt: launched, cache, steps: seat.steps, fixtures: undefined };
   }
 }

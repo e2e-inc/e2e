@@ -15,6 +15,9 @@ test.describe('actors', () => {
     await expect(reviewer.screen.getByText('admin: ship it')).toBeVisible();
     await expect(reviewer.browser).toHaveURL(room);
     expect(reviewer.platform).toBe('web');
+    // An actor has the test's HTTP client too, its calls told under the actor's name.
+    const notes = await reviewer.request.get(room.replace('/room', '/api/room'));
+    expect(await notes.json()).toEqual([{ author: 'admin', text: 'ship it' }]);
   });
 
   test('a fixture opens the room for both users', { session: 'admin' }, async ({ screen, reviewer, room }) => {

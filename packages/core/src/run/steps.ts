@@ -198,10 +198,11 @@ export interface StepRecord {
   api: string;
   label: string;
   /**
-   * The session the step ran on, when it is not the test's own: one the test
-   * drives beside it through `launch()`, named in the order they joined it
-   * (`launch-1`), which is when the test opened one, or first used one
-   * opened outside it. Absent for a step of the test's own session.
+   * The session the step ran on, when it is not the test's own. An actor's
+   * is named after its `actor()` fixture (`reviewer`). One the test drives
+   * through `launch()` is named in the order they joined it (`launch-1`),
+   * which is when the test opened one, or first used one opened outside it.
+   * Absent for a step of the test's own session.
    */
   actor?: string;
   /** The test line the step was called from; absent when no project line was on the stack. */
@@ -542,8 +543,6 @@ export class StepRecorder {
   private readonly pauses = new Set<HeldPause>();
   /** Steps whose bodies are still executing, by id, in the order they started. */
   private readonly active = new Map<string, ActiveStep>();
-  /** Who waits for `idle`. */
-  private readonly idleWaiters: (() => void)[] = [];
   /** The steps other sessions run that were filed here and have not ended (`guest`). */
   private readonly guestsRunning = new Set<StepRecord>();
   /** The promises of abandoned steps, for the wait before teardown. */
@@ -592,7 +591,7 @@ export class StepRecorder {
     return this.redact?.(text) ?? text;
   }
 
-  /** Whether a step is still executing. */
+  /** Whether a step of this recorder's own session is still executing; one another session filed here does not count. */
   get busy(): boolean {
     return this.active.size > 0;
   }
@@ -602,19 +601,6 @@ export class StepRecorder {
     return this.steps.filter((step) => this.active.has(step.id) || this.guestsRunning.has(step));
   }
 
-  /** Resolves once no step is executing, at once when none is; the caller bounds the wait. */
-  idle(): Promise<void> {
-    if (!this.busy) return Promise.resolve();
-    return new Promise((resolve) => {
-      this.idleWaiters.push(resolve);
-    });
-  }
-
-  /** Takes `id` off the steps that execute, and tells who waits for the last of them. */
-  private finished(id: string): void {
-    this.active.delete(id);
-    if (!this.busy) for (const resolve of this.idleWaiters.splice(0)) resolve();
-  }
 
   /** The step currently executing, when inside StepRecorder.run. */
   get currentStepId(): string | undefined {
@@ -857,7 +843,7 @@ export class StepRecorder {
       if (this.redact !== undefined) redactErrorInPlace(error, this.redact);
       throw error;
     } finally {
-      this.finished(record.id);
+      this.active.delete(record.id);
       // An abandoned step reported its end when the body returned; what it did since is not the test's.
       if (!step.abandoned) {
         this.settleScreen(record, step.seenScreen);
@@ -925,7 +911,7 @@ export class StepRecorder {
       this.publishEnd(record);
     }
     // No body runs for a held step, so nothing else ends what it started.
-    for (const { record } of held) this.finished(record.id);
+    for (const { record } of held) this.active.delete(record.id);
     return first;
   }
 

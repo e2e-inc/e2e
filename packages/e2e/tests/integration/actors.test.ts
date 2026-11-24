@@ -8,10 +8,11 @@
  * target's engine, initialized once in the worker.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { RunOutcome } from '../../src/run/runner.ts';
+import { sendButton as scene, sessionSetups } from '../helpers/actor-project.ts';
 import { createFakeEngine, FAKE_APP, FAKE_APP_URL, type FakeEngineHandle } from '../helpers/fake-engine.ts';
 import { assertValidReport } from '../helpers/report-schema.ts';
 import { engineFailure } from '../helpers/engine-runtime.ts';
@@ -31,16 +32,6 @@ export const test = base.extend({
     await use('/room');
   },
 });
-`;
-
-const SETUP = `import { test } from 'e2e';
-
-for (const name of ['author', 'reviewer']) {
-  test.setup('sign in as ' + name, { sessions: [name] }, async ({ app, session }) => {
-    await app.open('/login');
-    await session.save(name);
-  });
-}
 `;
 
 const SUITE = `import { expect } from 'e2e';
@@ -67,7 +58,7 @@ test('drives three sessions at once', async ({ app, reviewer, guest }) => {
 
 test('fails on a step of its actor', async ({ app, reviewer }) => {
   await app.open('/board');
-  await reviewer.app.open('/board');
+  await reviewer.app.open('/board/review');
   await reviewer.screen.getByRole('button', 'Never there').tap();
 });
 
@@ -79,9 +70,9 @@ test.describe('past its timeout', () => {
 
   test('times out while its actor waits', { timeout: 1_500 }, async ({ app, guest }) => {
     await app.open('/board');
-    await guest.app.open('/board');
+    await guest.app.open('/board/guest');
     // The wait is capped by the test's deadline, where it and the test's timer end in the same tick: the body waits on neither.
-    globalThis.actorsCutWait = guest.screen.getByRole('button', 'Never there').waitFor({ timeout: 60_000 }).then(() => 'found', () => 'ended');
+    void guest.screen.getByRole('button', 'Never there').waitFor({ timeout: 60_000 }).catch(() => undefined);
     await new Promise(() => undefined);
   });
 });
@@ -114,13 +105,10 @@ test('drives the phone again', async ({ phone }) => {
 });
 `;
 
-const scene = () => [{ id: 'send', role: 'button', name: 'Send' }];
-
 /** The same engines as a config file a worker process loads, so each worker builds its own. */
 const WORKER_CONFIG = `import type { E2EConfig } from 'e2e';
+import { sendButton as scene } from '../../helpers/actor-project.ts';
 import { createFakeEngine, FAKE_APP } from '../../helpers/fake-engine.ts';
-
-const scene = () => [{ id: 'send', role: 'button', name: 'Send' }];
 
 export default {
   targets: [
@@ -150,7 +138,7 @@ describe('actors a test names', { timeout: 120_000 }, () => {
     own = createFakeEngine({ video: true, state: true, actors: true, scene });
     phone = createFakeEngine({ video: true, scene });
     ({ outcome, project } = await runProject(
-      { 'tests/fixtures.ts': FIXTURES, 'tests/auth.setup.e2e.ts': SETUP, 'tests/actors.e2e.ts': SUITE },
+      { 'tests/fixtures.ts': FIXTURES, 'tests/auth.setup.e2e.ts': sessionSetups(['author', 'reviewer']), 'tests/actors.e2e.ts': SUITE },
       {
         config: {
           targets: [
@@ -211,11 +199,16 @@ describe('actors a test names', { timeout: 120_000 }, () => {
     expect(new Set(restores).size).toBe(restores.length);
   });
 
-  it("fails the test with the actor's step, named", () => {
+  it("fails the test with the actor's step, named, and shows the actor's screen though the test's own is open", () => {
     const result = resultByTitle(outcome, 'fails on a step of its actor');
     expect(result.status).toBe('failed');
-    expect(result.attempts[0]!.steps.at(-1)).toMatchObject({ actor: 'reviewer', api: 'locator.tap', status: 'failed' });
-    expect(result.attempts[0]!.error?.code).toBe('LOCATOR_NOT_FOUND');
+    const [attempt] = result.attempts;
+    expect(attempt!.steps.at(-1)).toMatchObject({ actor: 'reviewer', api: 'locator.tap', status: 'failed' });
+    expect(attempt!.error?.code).toBe('LOCATOR_NOT_FOUND');
+    expect(attempt!.failure?.url).toBe(`${FAKE_APP_URL}/board/review`);
+    const screen = attempt!.artifacts.find((artifact) => artifact.id === attempt!.failure?.screen)!;
+    const page = readFileSync(path.join(project.dir, '.e2e', 'results', path.dirname(path.dirname(screen.path!)), 'trace.md'), 'utf8');
+    expect(page).toContain('## Screen of reviewer at failure');
   });
 
   it("cuts an actor's step at the test's timeout, and leaves the actor open for teardown", () => {
@@ -227,6 +220,8 @@ describe('actors a test names', { timeout: 120_000 }, () => {
     // Ended with the test's timeout, long before the minute it asked for.
     expect(cut.durationMs).toBeLessThan(10_000);
     expect((globalThis as { actorsInTeardown?: string }).actorsInTeardown).toBe('still open');
+    // The screen at the failure is the one of the session whose step the timeout cut.
+    expect(result.attempts[0]!.failure?.url).toBe(`${FAKE_APP_URL}/board/guest`);
   });
 
   it('opens a new actor for a retry', () => {
@@ -265,7 +260,7 @@ describe('actors a test names', { timeout: 120_000 }, () => {
 describe('actors in worker processes', { timeout: 120_000 }, () => {
   it('opens each worker\'s actors on its own engines, another target\'s included', async () => {
     const { outcome, project } = await runProjectWithConfigFile(
-      { 'tests/fixtures.ts': FIXTURES, 'tests/auth.setup.e2e.ts': SETUP, 'tests/first.e2e.ts': WORKER_SUITE('first'), 'tests/second.e2e.ts': WORKER_SUITE('second') },
+      { 'tests/fixtures.ts': FIXTURES, 'tests/auth.setup.e2e.ts': sessionSetups(['author', 'reviewer']), 'tests/first.e2e.ts': WORKER_SUITE('first'), 'tests/second.e2e.ts': WORKER_SUITE('second') },
       { configSource: WORKER_CONFIG, runOptions: { targetIds: ['fake'] } },
     );
     try {

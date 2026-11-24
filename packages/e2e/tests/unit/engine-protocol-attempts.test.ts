@@ -1,9 +1,8 @@
 /** The engine protocol with more than one attempt open at a time, and a target a worker prepares again as a host: what actors need of it. */
 
-import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import { defineEngine, type EngineAttemptContext } from '@e2e-dev/core/lib/engine/index';
-import { cleanup, initInfo, operation, overLoopback, toy } from '../helpers/protocol-loopback.ts';
+import { attemptContext, cleanup, initInfo, operation, overLoopback, toy } from '../helpers/protocol-loopback.ts';
 
 describe('engine protocol with more than one attempt', () => {
   it('runs two attempts at once for an engine that declares actors, each with its own callbacks and its own end', async () => {
@@ -28,15 +27,7 @@ describe('engine protocol with more than one attempt', () => {
     expect(remote.actors).toBe(true);
     expect(remote.capabilities.has('actors')).toBe(true);
     const received: string[] = [];
-    const attempt = (attemptId: string): EngineAttemptContext => ({
-      attemptId,
-      artifactsDir: '/tmp',
-      signal: new AbortController().signal,
-      resolveSecret: async () => '',
-      appLog: (entry) => received.push(`${attemptId}:${entry.text}`),
-      navigation: () => {},
-      environment: () => {},
-    });
+    const attempt = (attemptId: string): EngineAttemptContext => attemptContext(attemptId, { appLog: (entry) => received.push(`${attemptId}:${entry.text}`) });
     await remote.init!(initInfo());
     await remote.startAttempt!(attempt('test'));
     await remote.startAttempt!(attempt('actor'));
@@ -70,7 +61,7 @@ describe('engine protocol with more than one attempt', () => {
         endAttempt: async () => {},
       }),
     );
-    const attempt = (attemptId: string): EngineAttemptContext => ({ attemptId, artifactsDir: tmpdir(), signal: new AbortController().signal, resolveSecret: async () => '', appLog: () => {}, navigation: () => {}, environment: () => {} });
+    const attempt = attemptContext;
     // A test and its actor run on one budget: their calls carry the same signal.
     const shared = new AbortController();
     await remote.init!(initInfo());

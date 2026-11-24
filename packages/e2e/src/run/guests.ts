@@ -52,12 +52,11 @@ export interface ActorSeat {
   /** Takes a video the actor recorded under the attempt's own directory, where it stays. */
   video(recording: SessionVideo): Promise<void>;
   /**
-   * Hands over the open actor. `cut` stops its steps through the attempt's
-   * budget and says whether they ended: the actor then stays open for
-   * teardown, as the test's own session does. One whose steps did not end
-   * is closed.
+   * Hands over the open actor. `stop` ends what the body left running on
+   * it without closing it: teardown may still drive an actor, as it may the
+   * test's own session.
    */
-  open(session: GuestSession, cut: () => Promise<boolean>): void;
+  open(session: GuestSession, stop: () => Promise<void>): void;
 }
 
 export class AttemptGuestSessions {
@@ -84,29 +83,6 @@ export class AttemptGuestSessions {
   /** What the attempt publishes for `launch()` to find. */
   readonly offer: AttemptGuests;
 
-  /**
-   * The place of an actor the attempt opens itself (`run/actors.ts`): its
-   * steps are told under `name`, its fixture's, from the project at `root`.
-   */
-  actor(name: string, root: string): ActorSeat {
-    const steps = mirrorGuestSteps(this.steps, name, root);
-    this.mirrors.push(steps);
-    return {
-      steps,
-      video: (recording) => this.hold(name, recording, 'in place'),
-      open: (session, cut) => {
-        const called = `actor "${name}"`;
-        this.sessions.push({
-          session,
-          called,
-          stop: async () => {
-            if (!(await cut())) await this.close(session, called);
-          },
-        });
-      },
-    };
-  }
-
   constructor(private readonly steps: StepRecorder, private readonly artifacts: ArtifactSink, private readonly options: AttemptGuestOptions) {
     this.offer = {
       video: options.keep !== undefined,
@@ -123,6 +99,22 @@ export class AttemptGuestSessions {
       },
       visit: (session) => this.mirror(this.name(), session.root),
       gaveUp: markAbandonedRejection,
+    };
+  }
+
+  /**
+   * The place of an actor the attempt opens itself (`run/actors.ts`): its
+   * steps are told under `name`, its fixture's, from the project at `root`.
+   */
+  actor(name: string, root: string): ActorSeat {
+    const steps = mirrorGuestSteps(this.steps, name, root);
+    this.mirrors.push(steps);
+    return {
+      steps,
+      video: (recording) => this.hold(name, recording, 'in place'),
+      open: (session, stop) => {
+        this.sessions.push({ session, called: `actor "${name}"`, stop });
+      },
     };
   }
 
@@ -230,7 +222,8 @@ export class AttemptGuestSessions {
     if (closing === undefined) {
       closing = withTimeout(what.close(), this.options.cleanupTimeout, () => new InfrastructureError('CLEANUP_TIMEOUT', `${called} did not close`)).catch(
         (cause: unknown) => {
-          this.failures.push(classifyError(cause));
+          // A close that found several failures throws them together: each is the attempt's, as the failure it is.
+          for (const each of cause instanceof AggregateError ? cause.errors : [cause]) this.failures.push(classifyError(each));
         },
       );
       this.closing.set(what, closing);

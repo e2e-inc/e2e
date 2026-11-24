@@ -33,7 +33,6 @@ import { secretHandle } from '@e2e-dev/core/lib/secrets';
 import type { CrashMode } from '../fixtures/protocol-server.ts';
 import { cleanup, initInfo, operation, overLoopback, ROOT, toy } from '../helpers/protocol-loopback.ts';
 
-
 describe('engine protocol', () => {
   it('carries a read request and computed values through JSON-RPC', async () => {
     const read = vi.fn(async () => ({ color: 'rgb(255, 0, 0)' }));
@@ -336,7 +335,6 @@ describe('engine protocol', () => {
     await remote.dispose!(cleanup);
   });
 
-
   it('prepares and finishes each target that shares one handle on its own connection', async () => {
     const finished: string[] = [];
     const { remote } = overLoopback(
@@ -355,7 +353,6 @@ describe('engine protocol', () => {
     await Promise.all([finish('a'), finish('b')]);
     expect(finished.toSorted()).toEqual(['a', 'b']);
   });
-
 
   it('routes attempt callbacks and secret resolution back to the harness', async () => {
     const secret = secretHandle({ name: 'password', purpose: 'generic-secret' });

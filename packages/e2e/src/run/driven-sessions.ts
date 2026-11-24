@@ -20,11 +20,10 @@ export interface DrivenSession {
   /**
    * Collects a failure the session's engine holds from a path no step
    * awaited (a route or dialog handler that threw), and rejects with it.
-   * Nothing is left to collect of a session that is closed.
    */
   settle(): Promise<void>;
-  /** Where the session's screen is read for the evidence of a failure; undefined once it is closed. */
-  screen(): FailureScreen | undefined;
+  /** Where the session's screen is read for the evidence of a failure. */
+  screen(): FailureScreen;
 }
 
 /** The test's own `session` on the worker's engine, as one the attempt drives. */

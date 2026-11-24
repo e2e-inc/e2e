@@ -2546,12 +2546,10 @@ observe: (operation) => of(operation.attemptId).observe(operation),
 endAttempt: async ({ attemptId }) => { /* end that attempt, and leave the others open */ },
 ```
 
-- Every call carries the id its attempt's `startAttempt` got. A serial
-  group's tests, and its suite hooks, call under the group's id.
-- Refuse a call for an attempt that is not open. Do not let it reach
-  another attempt.
-- The attempts end in any order. The first one is the test's own session,
-  or an actor's when the test drives only its actors.
+A serial group's tests, and its suite hooks, call under the group's id. The
+first attempt open is the test's own session, or an actor's when the test
+drives only its actors. [`Engine.actors`](#engine) has the rest of the
+contract.
 
 Without `actors`, an actor on the test's own target is a collection error.
 An actor that names another target needs nothing from the engine: the

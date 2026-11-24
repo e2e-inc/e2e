@@ -12,6 +12,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ArtifactStore, StoredArtifact } from '@e2e-dev/core/lib/types';
 import type { RunOutcome } from '../../src/run/runner.ts';
+import { sendButton as scene, sessionSetups } from '../helpers/actor-project.ts';
 import { createFakeEngine, FAKE_APP, FAKE_APP_URL, type FakeEngineHandle } from '../helpers/fake-engine.ts';
 import { assertValidReport } from '../helpers/report-schema.ts';
 import { resultByTitle, runProject, type FixtureProject } from '../helpers/run-project.ts';
@@ -35,15 +36,7 @@ export const test = base.extend({
 });
 `;
 
-const SETUP = `import { test } from 'e2e';
-
-for (const name of ['editor-account', 'review-account', 'visitor-account']) {
-  test.setup('sign in as ' + name, { sessions: [name] }, async ({ app, session }) => {
-    await app.open('/login');
-    await session.save(name);
-  });
-}
-`;
+const SETUP = sessionSetups(['editor-account', 'review-account', 'visitor-account']);
 
 const SUITE = `import { test } from './fixtures.ts';
 
@@ -80,20 +73,6 @@ test('fails on a value no session checked', async ({ author }) => {
   expect(1).toBe(2);
 });
 
-test('fails on a step of its actor beside its own', async ({ app, reviewer }) => {
-  await app.open('/own');
-  await reviewer.app.open('/theirs');
-  await reviewer.screen.getByRole('button', 'Never there').tap();
-});
-
-test('times out while its actor waits', { timeout: 1_500 }, async ({ app, reviewer }) => {
-  await app.open('/own');
-  await reviewer.app.open('/theirs');
-  // The wait is capped by the test's deadline, where it and the test's timer end in the same tick: the body waits on neither.
-  globalThis.ownSessionCutWait = reviewer.screen.getByRole('button', 'Never there').waitFor({ timeout: 60_000 }).catch(() => undefined);
-  await new Promise(() => undefined);
-});
-
 test('sets a session', { session: 'editor-account' }, async ({ reviewer }) => {
   await reviewer.app.open('/b');
 });
@@ -120,8 +99,6 @@ test.describe('with a hook on the own session', () => {
   });
 });
 `;
-
-const scene = () => [{ id: 'send', role: 'button', name: 'Send' }];
 
 describe('a test that asks only for a fixture built on two actors', { timeout: 120_000 }, () => {
   let outcome: RunOutcome;
@@ -210,7 +187,7 @@ describe("the test's own session beside its actors", { timeout: 120_000 }, () =>
     engine = createFakeEngine({ state: true, actors: true, video: true, scene });
     ({ outcome, project } = await runProject(
       { 'tests/fixtures.ts': FIXTURES, 'tests/auth.setup.e2e.ts': SETUP, 'tests/own.e2e.ts': OWN },
-      { config: { targets: [{ name: 'fake', platform: 'fake', engine: engine.engine, app: FAKE_APP }], video: 'on', actionTimeout: 300, assertionTimeout: 300, cleanupTimeout: 2_000, artifacts: { store } } },
+      { config: { targets: [{ name: 'fake', platform: 'fake', engine: engine.engine, app: FAKE_APP }], video: 'on', artifacts: { store } } },
     ));
   });
 
@@ -220,21 +197,9 @@ describe("the test's own session beside its actors", { timeout: 120_000 }, () =>
   /** Whether the engine ran anything on the test's own attempt: its session opened. */
   const openedOwn = (title: string): boolean => engine.operations.some((operation) => operation.attemptId === attemptOf(title).id);
 
-  it('passes but for the tests that fail on purpose, with a valid report', () => {
+  it('passes but for the test that fails on purpose, with a valid report', () => {
     assertValidReport(outcome.report);
-    expect(outcome.results.filter((result) => result.status !== 'passed').map((result) => result.test.title)).toEqual([
-      'fails on a value no session checked', 'fails on a step of its actor beside its own', 'times out while its actor waits',
-    ]);
-  });
-
-  it("shows the actor's screen for a step of the actor that failed, though the test's own is open", () => {
-    expect(attemptOf('fails on a step of its actor beside its own').failure?.url).toBe(`${FAKE_APP_URL}/theirs`);
-  });
-
-  it("shows the actor's screen for a timeout that cut a step of the actor", () => {
-    const attempt = attemptOf('times out while its actor waits');
-    expect(attempt.status).toBe('timed-out');
-    expect(attempt.failure?.url).toBe(`${FAKE_APP_URL}/theirs`);
+    expect(outcome.results.filter((result) => result.status !== 'passed').map((result) => result.test.title)).toEqual(['fails on a value no session checked']);
   });
 
   it('hands the artifact store what the report lists, each one time, and nothing else of an actor', () => {

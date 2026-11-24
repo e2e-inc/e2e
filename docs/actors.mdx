@@ -4,8 +4,9 @@ description: Put more than one user in one test, such as a second signed-in user
 ---
 
 An actor is one user's session in a test. It has its own `app`, `screen`,
-`agent`, and `browser` or `device`. Use actors when two users must have
-the app open at the same time: one edits, and the other's screen updates.
+`agent`, `request`, and `browser` or `device`. Use actors when two users
+must have the app open at the same time: one edits, and the other's screen
+updates.
 
 You declare an actor as a fixture with `actor()`. The runner opens it only
 for a test that names it.
@@ -49,7 +50,7 @@ test('a note shows up live', async ({ author, reviewer }) => {
 </Tabs>
 
 On a `web()` target each actor is a browser context of its own in one
-browser. Cookies and storage are not shared. This test opens two contexts.
+browser. Cookies and storage are not shared.
 
 ## Add a user to a test you have
 
@@ -91,16 +92,17 @@ the test's own `session`.
 
 ## Share actors across a suite
 
-Declare every role one time. A test opens only the actors it names, and
-runs only their setups:
+Declare every role one time. Each test pays for the actors it names, and
+for no other:
 
 ```ts
 test('an admin removes a member', async ({ admin, member }) => { /* two actors, two setups */ });
 test('the landing page loads', async ({ app }) => { /* no actor, no setup */ });
 ```
 
-A fixture or a hook names an actor like a test does. A fixture that names
-one needs the `Actor` type in its `extend` call:
+A test fixture, a `beforeEach`, or an `afterEach` names an actor like a
+test does. `beforeAll`, `afterAll`, and worker fixtures cannot. A fixture
+that names one needs the `Actor` type in its `extend` call:
 
 ```ts title="tests/fixtures.ts"
 import { test as base, actor, type Actor } from '@e2e-dev/web';
@@ -195,7 +197,7 @@ signs in inside the test.
   second session there. A `web()` target can, except with
   `connect.reconnectEndpoint` or a browser provider in `attempt` scope. A
   `mobile()` target cannot: give the second device a target of its own and
-  name it with `target`.
+  name it with `target`. Two actors on one such target need a target each.
 </Note>
 
 ## What the report shows
@@ -207,22 +209,25 @@ signs in inside the test.
 | Agent steps | An actor's `agent` is the agent the test runs as. Its [recordings](/cache) are kept under the fixture's name, so two actors can take the same instruction. Rename the fixture and its steps record again. |
 | Secrets | A value one session types is redacted in every session of the test. |
 | Timeout | The test's timeout cuts an actor's step. The actor stays open for `afterEach`. |
-| Failure | The screen at the failure is the one of the session whose step failed, or was running at a timeout. |
+| Failure | The screen at the failure is the one of the session whose step failed, or was running at a timeout. A failure outside a step shows the test's own screen, when the test has a session of its own. |
 
 ## Limits
 
 - A test in a serial group cannot name an actor.
 - A setup test cannot name an actor that has a `session`.
-- An actor is a test fixture. `beforeAll` and worker fixtures cannot name
-  one.
 - `toHaveScreenshot` is not available on an actor's screen.
-- `npx e2e run --step` holds the steps of the test's own session, not an
-  actor's.
+- `npx e2e run --step` and `screen.pause()` hold the test's own session
+  only. An actor's `pause()` returns at once.
+- The report has no app log for an actor: its console output, page errors,
+  and failed requests are not kept. The trace has no screen for its steps.
 - A screenshot or a download an actor makes stays on disk under the test's
   results. The report does not list it, and an artifact store does not get it.
+- A target that shares one engine instance with another target cannot run
+  an actor of another test. Give it an engine call of its own in the config.
 - `open_session { test }` of [`e2e mcp`](/mcp-server) cannot run a test that
   names an actor. Run it with `npx e2e run`.
-- Name an actor with letters, digits, and `_`.
+- An actor's name starts with a letter, and has letters, digits, and `_`.
+  It cannot be the name of a built-in fixture, such as `app`.
 
 For a number of sessions known only at run time, or an engine the config
 does not have, open a session with

@@ -145,6 +145,45 @@ describe('the steps of a session a test drives beside its own', () => {
   });
 });
 
+describe('what an actor tells the test beside its steps', () => {
+  it('places each of its steps in the test\'s record, and a check that passed there confirms what every session did before it', async () => {
+    const { test, session, mirror } = pair('reviewer');
+    await test.run('agent', 'agent.act', 'post the note', async () => undefined);
+    await session.run('agent', 'agent.act', 'open the board', async () => undefined);
+    await session.run('assertion', 'expect.toBeVisible', 'the note', async () => undefined, { verifies: true });
+    expect([mirror.placed(0), mirror.placed(1), mirror.placed(2)]).toEqual([1, 2, undefined]);
+    expect(test.lastVerifiedStepIndex).toBe(-1);
+    mirror.verified(session.lastVerifiedStepIndex);
+    // Everything before the check's place in the test's record: the test's own act and the actor's.
+    expect(test.lastVerifiedStepIndex).toBe(2);
+    // Told again, as an actor tells it at each step's end, it confirms nothing more.
+    mirror.verified(session.lastVerifiedStepIndex);
+    expect(test.lastVerifiedStepIndex).toBe(2);
+  });
+
+  it('confirms nothing of the test\'s own step a check ran inside', async () => {
+    const { test, session, mirror } = pair('reviewer');
+    await test.run('agent', 'agent.act', 'approve, and check the reviewer sees it', async () => {
+      await session.run('assertion', 'expect.toBeVisible', 'approved', async () => undefined, { verifies: true });
+      mirror.verified(session.lastVerifiedStepIndex);
+    });
+    // The act that holds the check began at index 0: what came before it is confirmed, the act itself is not.
+    expect(test.lastVerifiedStepIndex).toBe(0);
+  });
+
+  it('counts a step still running on the session among the steps that run, until it ends', async () => {
+    const { test, session } = pair('reviewer');
+    let end!: () => void;
+    const waiting = session.run('locator', 'locator.waitFor', 'Never there', () => new Promise<void>((resolve) => { end = resolve; }));
+    expect(test.running().map((step) => [step.actor, step.api])).toEqual([['reviewer', 'locator.waitFor']]);
+    // It is not a step of the test's own session.
+    expect(test.busy).toBe(false);
+    end();
+    await waiting;
+    expect(test.running()).toEqual([]);
+  });
+});
+
 describe('what an attempt offers the hosts and sessions a test opens', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'e2e-guests-'));
   afterAll(() => rmSync(dir, { recursive: true, force: true }));

@@ -114,6 +114,11 @@ function makePair(
   return { test, target, agent: 'default', repeat: 0, options: defaultOptions, disposition: 'run', skip: undefined, actors: [], ...overrides };
 }
 
+/** An actor a pair opens on `target`, another target than the pair's own, restoring `session` when it names one. */
+function makeActor(name: string, target: ResolvedTarget, session?: string): TestTargetPair['actors'][number] {
+  return { name, definition: { name, fn: async () => undefined, names: [], scope: 'test', auto: undefined, layer: 0 }, session, target, own: false };
+}
+
 function makeCollection(files: readonly string[], pairs: readonly TestTargetPair[]): Collection {
   const collected: CollectedFile[] = files.map((file) => ({
     file,
@@ -519,7 +524,7 @@ describe('app command failures', () => {
   it('skips the tests that name an actor on a target whose app exited, and runs the rest of their target', async () => {
     const web = makeTarget('web', 0);
     const phone = makeTarget('phone', 1);
-    const courier = { name: 'courier', definition: { name: 'courier', fn: async () => undefined, names: [], scope: 'test' as const, auto: undefined, layer: 0 }, session: undefined, target: phone, own: false };
+    const courier = makeActor('courier', phone);
     const pairs = [
       makePair(makeTest('tests/a.e2e.ts', 'names the phone'), web, { actors: [courier] }),
       makePair(makeTest('tests/b.e2e.ts', 'names no actor'), web),
@@ -1195,7 +1200,7 @@ describe('scheduler gating and dispatch', () => {
     const web = makeTarget('web', 0);
     const phone = makeTarget('phone', 1);
     const setup = makePair(makeTest('tests/setup.e2e.ts', 'login', { kind: 'setup', sessions: ['courier'], id: 'setup::courier' }), phone);
-    const courier = { name: 'courier', definition: { name: 'courier', fn: async () => undefined, names: [], scope: 'test' as const, auto: undefined, layer: 0 }, session: 'courier', target: phone, own: false };
+    const courier = makeActor('courier', phone, 'courier');
     const ordinary = makePair(makeTest('tests/a.e2e.ts', 'names the courier'), web, { actors: [courier] });
     const selection = makeSelection([{ target: web, pairs: [ordinary] }, { target: phone, pairs: [setup] }]);
     const collection = makeCollection(['tests/setup.e2e.ts', 'tests/a.e2e.ts'], [setup, ordinary]);
