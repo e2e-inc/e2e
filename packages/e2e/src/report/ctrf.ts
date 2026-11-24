@@ -219,6 +219,7 @@ function stepName(step: ReportStep, clean: Clean): string {
   return clean(step.label === '' ? step.api : `${step.api} ${step.label}`);
 }
 
+/** A step as a CTRF step, with e2e's own status, kind, timing, session, error code, cache mode and explanation in `extra`. */
 function renderStep(step: ReportStep, clean: Clean): CtrfStep {
   return {
     name: stepName(step, clean),
@@ -257,6 +258,7 @@ function attemptFields(view: AttemptView, clean: Clean): { attemptId?: string; s
   };
 }
 
+/** An attempt before the represented one as a `retryAttempts` entry; its error shows only when the attempt itself ended on it. */
 function renderRetryAttempt(view: AttemptView, number: number, options: CtrfReportOptions, clean: Clean): CtrfRetryAttempt {
   const files = attachments(view, options, clean);
   const error = endedOnError(view.status) ? view.error : undefined;
@@ -291,6 +293,7 @@ function representedAttempts(views: readonly AttemptView[], verdict: AttemptView
   };
 }
 
+/** A result as one CTRF test standing for its verdict attempt, with the attempts it ran before that as `retryAttempts`. */
 function renderResult(result: ReportResult, groups: ReadonlyMap<string, ReportSerialGroup>, options: CtrfReportOptions, clean: Clean): CtrfTest {
   const view = outcome(result, groups);
   const { before, represented, after } = representedAttempts(view.attempts, view.verdict);
@@ -382,6 +385,7 @@ export function renderCtrfReport(report: Report1Document, options: CtrfReportOpt
     reportFormat: 'CTRF',
     specVersion: SPEC_VERSION,
     reportId: run.id,
+    // No top-level runId: CTRF shares it across a run's shards, and run.id is minted per process, so each shard would read as its own run.
     timestamp: run.finishedAt,
     generatedBy: 'e2e',
     results: {
