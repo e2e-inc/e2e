@@ -88,6 +88,8 @@ describe('URL globs', () => {
   it('resolves a relative string whose query or fragment holds a URL against the base', () => {
     expect(matches('classes?next=http://127.0.0.1/orders', 'http://localhost:3000/classes?next=http://127.0.0.1/orders')).toBe(true);
     expect(matches('login#next=https://x.test/a', 'http://localhost:3000/login#next=https://x.test/a')).toBe(true);
+    expect(matches('x*?next=http://x.test/a', 'http://localhost:3000/x1?next=http://x.test/a')).toBe(true);
+    expect(matches('login{,2}#next=https://x.test/*', 'http://localhost:3000/login2#next=https://x.test/a')).toBe(true);
     expect(matches('login?next=https://x.test/*', 'http://localhost:3000/login?next=https://x.test/a')).toBe(true);
     expect(matches('classes?next=http://127.0.0.1/orders', 'http://x.test/classes?next=http://127.0.0.1/orders')).toBe(false);
   });

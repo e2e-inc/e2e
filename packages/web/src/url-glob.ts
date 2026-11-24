@@ -57,6 +57,15 @@ export function describeExpectedUrl(expected: string | RegExp, baseHref: string)
   }
 }
 
+/**
+ * Whether a glob's first segment is in a scheme's place: it ends in `:` and
+ * holds no `?` or `#`, so `login?next=https:` is a relative path whose query
+ * holds a URL.
+ */
+function inSchemePlace(segment: string): boolean {
+  return segment.endsWith(':') && !/[?#]/.test(segment);
+}
+
 /** Whether a scheme segment is a pattern rather than a scheme: it holds a `*` or a `{`, as Playwright reads it. */
 function isSchemePattern(segment: string): boolean {
   return segment.includes('*') || segment.includes('{');
@@ -109,7 +118,7 @@ function baseFor(glob: string, base: () => string): string | undefined {
     }
   }
   const first = glob.split('/', 1)[0]!;
-  const scheme = first.endsWith(':') && (/^[a-z][a-z0-9+.-]*:$/i.test(first) || (isSchemePattern(first) && !/[?#]/.test(first)));
+  const scheme = inSchemePlace(first) && (/^[a-z][a-z0-9+.-]*:$/i.test(first) || isSchemePattern(first));
   return scheme || URL.canParse(glob) ? undefined : base();
 }
 
@@ -141,7 +150,7 @@ function resolveUrlGlob(glob: string, base: () => string): string {
   };
   const relative = glob.split('/').map((segment, index) => {
     if (segment === '.' || segment === '..' || segment === '') return segment;
-    if (index === 0 && segment.endsWith(':')) return isSchemePattern(segment) ? hold(segment, 'http:') : segment;
+    if (index === 0 && inSchemePlace(segment)) return isSchemePattern(segment) ? hold(segment, 'http:') : segment;
     if (!/[*?{}\\]/.test(segment)) return segment;
     // The query or fragment is held behind its own `?` or `#`, so the URL parser still sees where the path ends
     // and a later `..` stays in the query or fragment instead of eating a path segment.
