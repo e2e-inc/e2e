@@ -147,6 +147,31 @@ test.describe('ordered', { parallel: false }, () => {
   );
 
   it(
+    'keeps one serial group whose title path is declared twice, in a parallel scope and outside one',
+    async () => {
+      const { outcome } = await runFile(
+        `test.describe('outer', () => {
+  test.describe('checkout', { serial: true }, () => {
+    test('first', async () => { throw new Error('expected'); });
+  });
+});
+test.describe('outer', { parallel: true }, () => {
+  test.describe('checkout', { serial: true }, () => {
+    test('second', async () => { await mark('second'); });
+  });
+});`,
+        { workers: 2 },
+      );
+      expect(resultByTitle(outcome, 'first').status).toBe('failed');
+      // The group stops at its failed member.
+      expect(resultByTitle(outcome, 'second').status).toBe('skipped');
+      expect(outcome.report.run.serialGroups.map((group) => [group.status, group.memberTestIds.length])).toEqual([['failed', 2]]);
+      assertValidReport(outcome.report);
+    },
+    120_000,
+  );
+
+  it(
     'runs tests with suite hooks in one batch per worker, each batch running the hooks once and sharing its module state',
     async () => {
       const { outcome, marks, named } = await runFile(

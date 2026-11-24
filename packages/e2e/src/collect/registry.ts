@@ -19,6 +19,7 @@ import { unknownKeyMessage } from '@e2e-dev/core/lib/internal/options';
 import type { SourceLocation } from '@e2e-dev/core/lib/internal/source';
 import { fixtureNames, type FixtureUserFn } from './fixture-names.ts';
 import { checkDeclaredFixtures, describeFixture, describeUser } from './fixture-plan.ts';
+import { evaluatingModule } from './evaluating-module.ts';
 import { checkParallel, checkParallelNesting, configuredParallel } from './parallel.ts';
 import type {
   DescribeAPI,
@@ -302,7 +303,7 @@ class Collector {
     const parallel = configuredParallel(options, scope === undefined ? this.fileParallel : scope.parallel, scope?.serial === true);
     if (parallel === undefined) return;
     // A module the file imports may configure it: that makes it a registrar.
-    captureSource(this.moduleFile);
+    reportRegistrar(this.moduleFile);
     if (scope === undefined) this.fileParallel = parallel;
     else scope.parallel = parallel;
   }
@@ -651,10 +652,7 @@ function realPath(file: string): string {
  * after `async` for an awaiting caller. JavaScriptCore (Bun) can leave the
  * column out of a module's top-level frame.
  */
-const STACK_FRAME = /^at (async )?(?:[^(]*? \()?(.+?):(\d+)(?::(\d+))?\)?$/;
-
-/** One stack frame; `awaited` from the first frame of an awaiting caller on: the frames before it are the call running now. */
-type StackFrame = SourceLocation & { readonly awaited: boolean };
+const STACK_FRAME = /^at (?:async )?(?:[^(]*? \()?(.+?):(\d+)(?::(\d+))?\)?$/;
 
 /**
  * Every frame of the current stack as a source location, the async frames
@@ -664,7 +662,7 @@ type StackFrame = SourceLocation & { readonly awaited: boolean };
  * and with source maps on Node.js does not hand `Error.prepareStackTrace`
  * the call sites at all.
  */
-function stackLocations(): StackFrame[] {
+function stackLocations(): SourceLocation[] {
   // The default limit of 10 frames cuts the test file's frame off a stack
   // that reaches the runner through a helper, a describe, and `test.each`.
   const limit = Error.stackTraceLimit;
@@ -675,17 +673,15 @@ function stackLocations(): StackFrame[] {
   } finally {
     Error.stackTraceLimit = limit;
   }
-  let awaited = false;
   return stack.split('\n').slice(1).flatMap((line) => {
     const text = line.trim();
-    awaited ||= text.startsWith('at async ');
     const match = STACK_FRAME.exec(text);
     if (match === null) return [];
     // An ES module names itself by URL, the loader's cache-busting query included; a mapped frame or CommonJS by path.
-    const file = match[2]!.startsWith('file:') ? fileURLToPath(match[2]!) : match[2]!;
+    const file = match[1]!.startsWith('file:') ? fileURLToPath(match[1]!) : match[1]!;
     // A runtime's own code is no file: Bun names its builtins `native`.
     if (!path.isAbsolute(file)) return [];
-    return [{ file, line: Number(match[3]), column: Number(match[4] ?? 1), awaited }];
+    return [{ file, line: Number(match[2]), column: Number(match[3] ?? 1) }];
   });
 }
 
@@ -698,27 +694,32 @@ function stackLocations(): StackFrame[] {
  * the runner and outside `node_modules` stands. The runner's own frames,
  * whether source maps relocate them to `src/` or not, and an installed
  * package's frames are never a test's location.
- *
- * The outermost frame of the call running now is the module evaluating.
- * When that is a module the collected one imports, it is reported as a
- * registrar (`registrar-modules.ts`): the next import of a test file finds
- * it evaluated already, and would get none of what it registers.
  */
 function captureSource(moduleFile: string | undefined): SourceLocation | undefined {
+  reportRegistrar(moduleFile);
   let inModule: SourceLocation | undefined;
   let outsideModule: SourceLocation | undefined;
-  let evaluating: string | undefined;
-  for (const { awaited, ...location } of stackLocations()) {
+  for (const location of stackLocations()) {
     const { file } = location;
     if (RUNNER_ROOTS.some((root) => file.startsWith(root)) || file.startsWith('node:')) continue;
     const own = moduleFile !== undefined && (file === moduleFile || realPath(file) === moduleFile);
     if (own) inModule ??= location;
     else if (!NODE_MODULES_SEGMENT.test(file)) outsideModule ??= location;
-    if (!awaited) evaluating = NODE_MODULES_SEGMENT.test(file) ? undefined : file;
   }
-  // A frame of the collected module, awaiting or not, is that module registering through a function it called.
-  if (moduleFile !== undefined && inModule === undefined && evaluating !== undefined) registrarModuleSlot.get(globalThis)?.(evaluating);
   return inModule ?? outsideModule;
+}
+
+/**
+ * Reports the module evaluating now as a registrar (`registrar-modules.ts`)
+ * when it is one the collected module imports: the next import of a test
+ * file finds it evaluated already, and would get none of what it registers.
+ */
+function reportRegistrar(moduleFile: string | undefined): void {
+  const report = registrarModuleSlot.get(globalThis);
+  if (moduleFile === undefined || report === undefined) return;
+  const file = evaluatingModule();
+  if (file === undefined || file === moduleFile || realPath(file) === moduleFile) return;
+  if (!NODE_MODULES_SEGMENT.test(file) && !RUNNER_ROOTS.some((root) => file.startsWith(root))) report(file);
 }
 
 function normalizeArgs<Fn extends TestBody | EachFn<unknown[]>>(

@@ -108,6 +108,20 @@ describe('parallel scopes', () => {
     expect(placed['three']!.ordered).not.toBe(placed['one']!.ordered);
   });
 
+  it('keeps a serial group id in the file\u2019s own unit when one of its groups is in no parallel scope', async () => {
+    const placed = await placements(() => {
+      test.describe('outer', () => test.describe('checkout', { serial: true }, () => test('first', noop)));
+      test.describe('outer', { parallel: true }, () => {
+        test.describe('checkout', { serial: true }, () => test('second', noop));
+        test.describe('other', { serial: true }, () => test('third', noop));
+      });
+    });
+    expect(placed['second']!.ordered).toBe(placed['first']!.ordered);
+    expect(placed['first']!.declared).toBe(false);
+    expect(placed['second']!.declared).toBe(false);
+    expect(placed['third']!.declared).toBe(true);
+  });
+
   it('marks the tests with a beforeAll or afterAll in a scope around them', async () => {
     const placed = await placements(() => {
       test('plain', noop);

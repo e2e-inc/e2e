@@ -61,7 +61,12 @@ export function checkParallelNesting(groups: readonly GroupNode[], fileParallel:
 
 /** Where a test sits among its file's parallel scopes. */
 export interface ParallelPlacement {
-  /** Whether a scope around the test, a group or the file, has `parallel: true`. */
+  /**
+   * Whether a scope around the test, a group or the file, has `parallel: true`.
+   * For a test in an `ordered` scope, whether that holds for every test of
+   * the scope: the scope runs as one unit, in the file's own when one of its
+   * tests is in no parallel scope.
+   */
   readonly declared: boolean;
   /**
    * The outermost scope around the test that runs in order on one worker, a
@@ -105,9 +110,17 @@ export function parallelPlacements(registration: ModuleRegistration): (groups: r
     const next = merged.get(scope);
     return next === undefined ? scope : unitOf(next);
   };
+  const declaredIn = (groups: readonly GroupNode[]): boolean => registration.parallel === true || groups.some((group) => group.parallel === true);
+  const inOrder = new Set<GroupNode | string>();
   for (const test of registration.tests) {
-    const [first, ...rest] = orderedScopes(groupsAround(test.group)).map(unitOf);
-    for (const scope of rest) if (scope !== first) merged.set(scope, first!);
+    const groups = groupsAround(test.group);
+    const [first, ...rest] = orderedScopes(groups).map(unitOf);
+    for (const scope of rest) {
+      if (scope === first) continue;
+      merged.set(scope, first!);
+      if (inOrder.has(scope)) inOrder.add(first!);
+    }
+    if (first !== undefined && !declaredIn(groups)) inOrder.add(first);
   }
   const names = new Map<GroupNode | string, string>();
   const nameOf = (scope: GroupNode | string): string => {
@@ -120,9 +133,10 @@ export function parallelPlacements(registration: ModuleRegistration): (groups: r
   };
   return (groups) => {
     const [scope] = orderedScopes(groups);
+    const unit = scope === undefined ? undefined : unitOf(scope);
     return {
-      declared: registration.parallel === true || groups.some((group) => group.parallel === true),
-      ordered: registration.parallel === false ? 'file' : scope === undefined ? undefined : nameOf(unitOf(scope)),
+      declared: unit === undefined ? declaredIn(groups) : !inOrder.has(unit),
+      ordered: registration.parallel === false ? 'file' : unit === undefined ? undefined : nameOf(unit),
       suiteHooks: hooked.has(undefined) || groups.some((group) => hooked.has(group)),
     };
   };

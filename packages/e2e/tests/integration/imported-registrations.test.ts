@@ -6,12 +6,12 @@ const HELPER = `import { test } from 'e2e';
 import { state } from './state.ts';
 
 state.helperLoads += 1;
-test.beforeEach(() => { state.hookRuns += 1; });
+test.beforeEach(() => { state.hookRan = true; });
 test('from the helper', async () => {});
 `;
 
 /** A module that registers nothing: one instance for the worker, so it sees every count. */
-const STATE = `export const state = { helperLoads: 0, hookRuns: 0, libraryLoads: 0 };
+const STATE = `export const state = { helperLoads: 0, hookRan: false, libraryLoads: 0 };
 `;
 
 /** A module whose function registers a test when a test file calls it; it registers nothing by itself. */
@@ -41,12 +41,11 @@ import { declareLater, declareTest } from './library.ts';
 import { state } from './state.ts';
 
 test.describe.configure({ parallel: true });
-let hookRunsBefore = -1;
-test.beforeEach(() => { hookRunsBefore = state.hookRuns; });
+// Each test has to get the helper's beforeEach itself: the mark of the test before it is gone.
+test.afterEach(() => { state.hookRan = false; });
 for (const title of ['one', 'two', 'three']) {
   test(title, async () => {
-    // The helper's beforeEach ran for this test: it is declared first, so it ran before this file's.
-    expect(hookRunsBefore).toBeGreaterThan(0);
+    expect(state.hookRan).toBe(true);
     expect(state.libraryLoads).toBe(1);
   });
 }
@@ -81,11 +80,11 @@ test('counts the imports', async () => {
 import './helper.ts';
 import { state } from './state.ts';
 
-let hookRunsBefore = -1;
-test.beforeEach(() => { hookRunsBefore = state.hookRuns; });
+// Each test has to get the helper's beforeEach itself: the mark of the test before it is gone.
+test.afterEach(() => { state.hookRan = false; });
 test('${name} fails', async () => { throw new Error('expected'); });
 test('${name} runs after the failure', async () => {
-  expect(hookRunsBefore).toBeGreaterThan(0);
+  expect(state.hookRan).toBe(true);
 });`;
       const { outcome, project } = await runProjectWithConfigFile(
         { ...SUPPORT, 'tests/a.e2e.ts': file('a'), 'tests/b.e2e.ts': file('b') },
@@ -190,6 +189,86 @@ test('${name}', async () => {});`;
         ['tests/a.e2e.ts', 'from the helper', 'passed'],
         ['tests/a.e2e.ts', 'a', 'passed'],
         ['tests/b.e2e.ts', 'from the helper', 'passed'],
+        ['tests/b.e2e.ts', 'b', 'passed'],
+      ]);
+    },
+    120_000,
+  );
+
+  it(
+    'reach every import of a file whose one import of the module is a dynamic one',
+    async () => {
+      const { outcome, project } = await runProjectWithConfigFile(
+        {
+          ...SUPPORT,
+          'tests/file.e2e.ts': `import { expect, test } from 'e2e';
+import { state } from './state.ts';
+
+await import('./helper.ts');
+test.describe.configure({ parallel: true });
+test.afterEach(() => { state.hookRan = false; });
+for (const title of ['one', 'two']) test(title, async () => { expect(state.hookRan).toBe(true); });`,
+        },
+        { configSource: workerFakeConfigSource(1) },
+      );
+      project.cleanup();
+      expect(outcome.report.run.errors).toEqual([]);
+      expect(outcome.results.map((result) => [result.test.title, result.status])).toEqual([
+        ['from the helper', 'passed'],
+        ['one', 'passed'],
+        ['two', 'passed'],
+      ]);
+    },
+    120_000,
+  );
+
+  it(
+    'reach every import of a file from a compiled module whose source map names another file',
+    async () => {
+      // Every line of the compiled helper maps to the same line of `helper-source.ts`, which is not on disk.
+      const map = { version: 3, sources: ['helper-source.ts'], names: [], mappings: 'AAAA;AACA;AACA;AACA' };
+      const compiled = `import { test } from 'e2e';
+test('first from the helper', async () => {});
+test('second from the helper', async () => {});
+//# ${'sourceMappingURL'}=data:application/json;base64,${Buffer.from(JSON.stringify(map)).toString('base64')}
+`;
+      const { outcome, project } = await runProjectWithConfigFile(
+        { 'tests/helper.mjs': compiled, 'tests/file.e2e.ts': `import './helper.mjs';\n` },
+        { configSource: workerFakeConfigSource(1, '\n  fullyParallel: true,') },
+      );
+      project.cleanup();
+      expect(outcome.report.run.errors).toEqual([]);
+      expect(outcome.results.map((result) => [result.test.title, result.status])).toEqual([
+        ['first from the helper', 'passed'],
+        ['second from the helper', 'passed'],
+      ]);
+    },
+    120_000,
+  );
+
+  it(
+    'leave a library one instance when the module awaits a function of it that declares a test',
+    async () => {
+      const file = (name: string): string => `import { expect, test } from 'e2e';
+import './later.ts';
+import { state } from './state.ts';
+
+test('${name}', async () => { expect(state.libraryLoads).toBe(1); });`;
+      const { outcome, project } = await runProjectWithConfigFile(
+        {
+          ...SUPPORT,
+          'tests/later.ts': `import { declareLater } from './library.ts';\nawait declareLater('from the library, later');\n`,
+          'tests/a.e2e.ts': file('a'),
+          'tests/b.e2e.ts': file('b'),
+        },
+        { configSource: workerFakeConfigSource(1) },
+      );
+      project.cleanup();
+      expect(outcome.report.run.errors).toEqual([]);
+      expect(outcome.results.map((result) => [result.test.file, result.test.title, result.status])).toEqual([
+        ['tests/a.e2e.ts', 'from the library, later', 'passed'],
+        ['tests/a.e2e.ts', 'a', 'passed'],
+        ['tests/b.e2e.ts', 'from the library, later', 'passed'],
         ['tests/b.e2e.ts', 'b', 'passed'],
       ]);
     },

@@ -883,7 +883,12 @@ describe('reports', { parallel: true }, () => {
 - Tests that run apart share no state in the test file: each test, each
   batch of tests with suite hooks, and each ordered group imports the file
   again. A module the file imports stays one instance for the worker,
-  unless it declares tests or hooks itself: then it is imported again too.
+  unless it declares tests or hooks itself or imports a module that does:
+  then it is imported again too.
+- Declare shared tests and hooks in ES modules of your project. A module
+  loaded with `require()`, a package from `node_modules`, and every imported
+  module on Bun stays one instance, so the tests and hooks it declares
+  reach the first import of a file only.
 - A [serial](#serial) group inside a parallel scope still runs as one unit
   on one worker.
 - `false` keeps a group inside a parallel scope in order on one worker.
@@ -1081,7 +1086,7 @@ export const test = base.extend<{}, { database: Database }>({
   fixture the file declares gets a new instance each time, and the old one
   stays set up until the worker ends.
   Declare worker fixtures in a module the file imports, one that declares
-  no tests or hooks of its own.
+  no tests or hooks and imports no module that does.
 - `extend({ ... })` without type arguments infers test fixtures only.
 
 #### Extending a fixture
