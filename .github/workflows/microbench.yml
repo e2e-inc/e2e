@@ -4,10 +4,11 @@ name: microbench
 # (scripts/microbench.ts). Not a gate: no ruleset requires it, so the
 # workflow-level `paths:` filter is safe here, unlike in the gated workflows.
 #
-# `repeatability` measures one build against itself in JIT and jitless mode
-# and fails when a case reports a direction anyway: it is the evidence that
-# a count is stable enough to compare. `compare` measures the pull request's
-# base against its head (or a dispatched base ref against the branch).
+# `repeatability` measures two builds of the same commit against each other
+# in JIT and jitless mode and fails when any case's trial ranges separate: it
+# is the evidence that a count is stable enough to compare. `compare`
+# measures the pull request's base against its head (or a dispatched base ref
+# against the branch).
 #
 # A pull request runs it when it changes the harness, the code the cases
 # measure (`scripts/microbench/cases.mjs` loads it from packages/core and
@@ -49,6 +50,10 @@ env:
   # from one exact Node. Bumping it steps every case; say so in the PR.
   MICROBENCH_NODE: 26.13.1
 
+# Both jobs measure two worktrees at paths of the same length under
+# $RUNNER_TEMP/mb: a root's path is read at startup, and a longer one moves
+# where the collector runs inside the measured loop, which showed up as a
+# fixed offset between the workspace and a worktree of the same code.
 jobs:
   repeatability:
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -61,17 +66,23 @@ jobs:
           node-version: ${{ env.MICROBENCH_NODE }}
           cache: pnpm
       - run: sudo apt-get update && sudo apt-get install -y valgrind
-      - run: pnpm install --frozen-lockfile
-      - name: Build the measured packages
+      - name: Check out and build the same commit twice
         run: |
-          pnpm --filter @e2e-dev/core run build
-          pnpm --filter e2e run build
-          pnpm --filter @e2e-dev/mobile run build
-      - name: Measure one build against itself
+          for side in a b; do
+            git worktree add --detach "$RUNNER_TEMP/mb/$side" HEAD
+            (
+              cd "$RUNNER_TEMP/mb/$side"
+              pnpm install --frozen-lockfile
+              pnpm --filter @e2e-dev/core run build
+              pnpm --filter e2e run build
+              pnpm --filter @e2e-dev/mobile run build
+            )
+          done
+      - name: Measure one build against the other
         env:
           TRIALS: ${{ inputs.trials || '10' }}
           MODE: ${{ inputs.mode || 'both' }}
-        run: node scripts/microbench.ts --base-root . --mode "$MODE" --trials "$TRIALS" --out "$RUNNER_TEMP/microbench"
+        run: node scripts/microbench.ts --root "$RUNNER_TEMP/mb/b" --base-root "$RUNNER_TEMP/mb/a" --expect-same --mode "$MODE" --trials "$TRIALS" --out "$RUNNER_TEMP/microbench"
       - if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -98,10 +109,11 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.sha || inputs.base }}
         run: |
           base="$(git merge-base "$(git rev-parse --verify "$BASE_REF^{commit}")" HEAD)"
-          git worktree add --detach "$RUNNER_TEMP/base" "$base"
-          for root in "$GITHUB_WORKSPACE" "$RUNNER_TEMP/base"; do
+          git worktree add --detach "$RUNNER_TEMP/mb/base" "$base"
+          git worktree add --detach "$RUNNER_TEMP/mb/head" HEAD
+          for side in base head; do
             (
-              cd "$root"
+              cd "$RUNNER_TEMP/mb/$side"
               pnpm install --frozen-lockfile
               pnpm --filter @e2e-dev/core run build
               pnpm --filter e2e run build
@@ -112,7 +124,7 @@ jobs:
         env:
           TRIALS: ${{ inputs.trials || '5' }}
           MODE: ${{ inputs.mode || 'both' }}
-        run: node scripts/microbench.ts --base-root "$RUNNER_TEMP/base" --mode "$MODE" --trials "$TRIALS" --out "$RUNNER_TEMP/microbench"
+        run: node scripts/microbench.ts --root "$RUNNER_TEMP/mb/head" --base-root "$RUNNER_TEMP/mb/base" --mode "$MODE" --trials "$TRIALS" --out "$RUNNER_TEMP/microbench"
       - if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
