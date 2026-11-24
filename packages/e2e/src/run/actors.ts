@@ -12,7 +12,7 @@
 
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
-import { createAgentCacheContext, settleStagedTraces, type AgentCacheContext, type AttemptSettlement } from '@e2e-dev/core/lib/cache/context';
+import { createAgentCacheContext, settleStagedTraces, type AgentCacheContext, type AttemptSettlement, type CacheWrite } from '@e2e-dev/core/lib/cache/context';
 import type { StoredRecordings } from '@e2e-dev/core/lib/cache/rekeyed';
 import type { ResolvedConfig, ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
 import { classifyError, E2EError, InfrastructureError, serializeError } from '@e2e-dev/core/lib/internal/errors';
@@ -151,14 +151,7 @@ export interface AttemptActorsOptions {
   readonly models: WorkerModels;
 }
 
-/** Opens the actors an attempt's fixture plan lists, or nothing when it lists none. */
-export async function openActors(actors: readonly PlannedActor[], options: AttemptActorsOptions): Promise<AttemptActors | undefined> {
-  if (actors.length === 0) return undefined;
-  const opened = new AttemptActors(options);
-  await opened.open(actors);
-  return opened;
-}
-
+/** The actors of one attempt: the ones its fixture plan lists, which is none for most tests. */
 export class AttemptActors {
   private readonly opened = new Map<FixtureDefinition, OpenActor>();
 
@@ -231,17 +224,20 @@ export class AttemptActors {
    * ended, as the test's own recordings settle. `settlement` is the test's
    * own, in the indexes of the test's record, where every session's steps
    * stand in the order they began: a check that passed on any session
-   * confirms what an actor did before it. Call it once the actors are
-   * closed; undefined for an interrupted attempt.
+   * confirms what an actor did before it. Returns what became of each
+   * recording, by its step's index in the test's record. Call it once the
+   * actors are closed; undefined for an interrupted attempt.
    */
-  async settleRecordings(settlement: AttemptSettlement | undefined): Promise<void> {
+  async settleRecordings(settlement: AttemptSettlement | undefined): Promise<ReadonlyMap<number, CacheWrite>> {
+    const writes = new Map<number, CacheWrite>();
     for (const { cache, steps } of this.opened.values()) {
       if (cache === undefined) continue;
-      // The actor's first step the test's checks did not reach, in the indexes of its own record, which its cache staged
-      // by. The lowest such index: steps that ran at once are staged in the order they ended.
-      const unverified = settlement === undefined ? [] : cache.staged.map((entry) => entry.stepIndex).filter((index) => (steps.placed(index) ?? Infinity) >= settlement.lastVerifiedStepIndex);
-      steps.wrote(await settleStagedTraces(cache, settlement === undefined ? undefined : { ...settlement, lastVerifiedStepIndex: Math.min(...unverified, Infinity) }));
+      // An actor's cache staged its entries by the indexes of the actor's own record: each is settled by where its step
+      // stands in the test's. A step the test's record never took was confirmed by nothing.
+      cache.staged.push(...cache.staged.splice(0).map((entry) => ({ ...entry, stepIndex: steps.placed(entry.stepIndex) ?? Infinity })));
+      for (const [index, write] of await settleStagedTraces(cache, settlement)) writes.set(index, write);
     }
+    return writes;
   }
 
   private async openOne(actor: PlannedActor): Promise<OpenActor> {

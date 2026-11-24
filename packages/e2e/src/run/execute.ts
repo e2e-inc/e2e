@@ -40,13 +40,13 @@ import { traceScreen } from '@e2e-dev/core/lib/run/step-screens';
 import { runWithRetries } from './retry.ts';
 import { AttemptGuestSessions } from './guests.ts';
 import { plannedActors } from '../collect/actors.ts';
-import { ActorHosts, openActors, type AttemptActors } from './actors.ts';
+import { ActorHosts, AttemptActors } from './actors.ts';
 import { holdSecrets, ownSession, type DrivenSession } from './driven-sessions.ts';
 import { runSerialUnit, type SerialAttemptStart, type SerialHost, type SharedSerialSession } from './serial.ts';
 import { interruptedInPhase, interruptedSkip, pairKey, unitResult, unstartedResult } from './units.ts';
 import { carriedSecrets, processSecrets, redactForSession, sessionLedger, staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
 import { SessionStaging } from '@e2e-dev/core/lib/run/sessions';
-import { isOwnStep, StepRecorder, type StepHoldRequest, type StepProgress } from '@e2e-dev/core/lib/run/steps';
+import { StepRecorder, type StepHoldRequest, type StepProgress } from '@e2e-dev/core/lib/run/steps';
 import { holdAttemptSteps, readHeldScreen, type AttemptHolds, type HoldReads, type StepHold } from './step-hold.ts';
 import { HeldTestTools } from './worker/held-test-tools.ts';
 import { WorkerModels } from '@e2e-dev/core/lib/run/worker-models';
@@ -639,7 +639,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
     // not asked again, so a hung app costs the budget once.
     let evidenceTried = false;
     /** The sessions the attempt drives now: its own once it is open, then each actor's. */
-    const driven = (): readonly DrivenSession[] => [...(openSession === null ? [] : [ownSession(this, openSession, this.config)]), ...(actors?.sessions() ?? [])];
+    const driven = (): readonly DrivenSession[] => [...(openSession === null ? [] : [ownSession(this, openSession, this.config)]), ...actors.sessions()];
     /** Takes the evidence `from` the session a failure came from, or from the one its step ran on. */
     const captureEvidence = async (from?: DrivenSession): Promise<void> => {
       if (failure === undefined || evidenceTried || this.interruptSignal.aborted) return;
@@ -669,6 +669,12 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
             recordings: this.storedRecordings,
           })
         : undefined;
+    /** The actors the test names, open from before its clock starts until the attempt ends; none for a test that names none. */
+    const actors = new AttemptActors({
+      config: this.config, runId: this.options.runId, own: this, hosts: this.actorHosts, guests, cut: () => attemptAbort.abort(), dir: artifacts.dir,
+      test: pair.test, attemptIndex, agent: pair.agent, agentContext: pair.options.agentContext, video: video !== undefined,
+      caches: cache !== undefined, recordings: this.storedRecordings, models: this.models,
+    });
 
     // A rejection nobody caught, handed in by the process while this attempt
     // is in flight. Set while the body's race is pending, so the rejection
@@ -676,8 +682,6 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
     // the phase it landed in, beside a failure already there.
     let cutBody: ((cause: unknown) => void) | undefined;
     let leaveWorkerFixtures: (() => void) | undefined;
-    /** The actors the test names, open from before its clock starts until the attempt ends. */
-    let actors: AttemptActors | undefined;
     /** Stops the sessions sharing what each learned of secrets (`holdSecrets`); nothing for a single session. */
     let releaseSecrets = (): void => undefined;
     this.strayFailure = (cause) => {
@@ -726,11 +730,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         );
       });
 
-      actors = await openActors(planned, {
-        config: this.config, runId: this.options.runId, own: this, hosts: this.actorHosts, guests, cut: () => attemptAbort.abort(), dir: artifacts.dir,
-        test: pair.test, attemptIndex, agent: pair.agent, agentContext: pair.options.agentContext, video: video !== undefined,
-        caches: cache !== undefined, recordings: this.storedRecordings, models: this.models,
-      });
+      await actors.open(planned);
       // The runner's watchdog keeps the test deadline too: it hears each move and what is left.
       const announce = (remainingMs?: number): void =>
         this.options.events?.onAttemptDeadline?.(pair, { index: attemptIndex, id: attemptId, startedAt, timeoutMs: timeout.timeoutMs, ...(remainingMs === undefined ? {} : { remainingMs }) });
@@ -846,10 +846,9 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         attemptEnd.signal,
       );
 
-      const opened = actors;
       const fixtures = fixturePlan.open({
         builtIns: own?.fixtures, pool: this.workerFixtures, signal: attemptAbort.signal,
-        ...(opened === undefined ? {} : { actors: (definition) => opened.fixtures(definition, budget) }),
+        actors: (definition) => actors.fixtures(definition, budget),
       });
       // Worker fixtures read their built-ins off this attempt until it ends.
       leaveWorkerFixtures = fixtures.enter();
@@ -1043,8 +1042,9 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         secondaryErrors.push(serializeError(classifyError(cause), { phase: 'cleanup', projectRoot: this.config.projectRoot, redact }));
       }
 
-      // One session has nobody to share with; an actor's close would otherwise end its part of the sharing.
-      if (actors !== undefined) releaseSecrets = holdSecrets(driven(), this.config);
+      // Closing a session ends its part in the sharing; one session has nobody to share with.
+      const closing = driven();
+      if (closing.length > 1) releaseSecrets = holdSecrets(closing, this.config);
       // A serial member's recording ends with the member, not the group.
       if (openSession !== null && shared !== undefined) {
         await this.stopRunningRecording(openSession, record, artifacts.sink, secondaryErrors);
@@ -1088,15 +1088,12 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
             lastVerifiedStepIndex: failure === undefined ? steps.lastVerifiedStepIndex : lastVerifiedAtFailure,
             implicatesUnconfirmed: failure === undefined || implicatesUnconfirmed,
           };
-    if (cache !== undefined) {
-      const writes = await settleStagedTraces(cache, settlement);
-      for (const step of record.steps) {
-        const write = writes.get(step.index);
-        // An actor's step has an index of the same number in the actor's own record: its outcome is the actor's to tell.
-        if (isOwnStep(step) && step.cache !== undefined && write !== undefined) step.cache.write = write;
-      }
+    // What became of each recording, the test's own and its actors', by the step's index in this record.
+    const writes = new Map([...(cache === undefined ? [] : await settleStagedTraces(cache, settlement)), ...(await actors.settleRecordings(settlement))]);
+    for (const step of record.steps) {
+      const write = writes.get(step.index);
+      if (step.cache !== undefined && write !== undefined) step.cache.write = write;
     }
-    await actors?.settleRecordings(settlement);
     return record;
   }
 }

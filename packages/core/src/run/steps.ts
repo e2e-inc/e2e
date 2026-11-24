@@ -1145,9 +1145,6 @@ export class StepRecorder {
         if (cache !== undefined) record.cache = this.cacheForReport(cache);
         this.publishEnd(record);
       },
-      wrote: (write) => {
-        if (record.cache !== undefined) record.cache.write = write;
-      },
     };
   }
 

@@ -9,7 +9,7 @@ import type { ResolvedConfig, ResolvedTarget } from '@e2e-dev/core/lib/config/re
 import { attemptKeep, attemptVideo, pairRecording, type AttemptRecordings } from '@e2e-dev/core/lib/internal/recording-modes';
 import type { Capability, RecordingMode, TestOptions } from '@e2e-dev/core/lib/types';
 import { excludingEntry, type Collection, type CollectedTest, type UncollectedFile } from './collect.ts';
-import { ActorPlans, actorSessions, type ActorSession, type PlannedActor } from './actors.ts';
+import { actorSessions, actorSessionsOf, actorsOf, type ActorSession, type PlannedActor } from './actors.ts';
 import { assertFixtureUse, AttemptPlans } from './fixture-use.ts';
 import { groupChain } from './registry.ts';
 import type { SkipInfo } from '@e2e-dev/core/lib/run/records';
@@ -360,12 +360,11 @@ export function select(
 
   assertSerialAgentsAgree(collection.tests, optionsByTest);
   const sessionProducers = collectSessionProducers(collection.tests);
-  const attemptPlans = new AttemptPlans(collection, config.projectRoot);
-  const actorPlans = new ActorPlans(attemptPlans, config.targets);
+  const attemptPlans = new AttemptPlans(collection, config.targets, config.projectRoot);
   const pairFilters =
     filters.lastFailed === undefined
       ? filters
-      : { ...filters, lastFailed: withSetupConsumers(filters.lastFailed, collection.tests, targets, optionsByTest, sessionProducers, actorPlans) };
+      : { ...filters, lastFailed: withSetupConsumers(filters.lastFailed, collection.tests, targets, optionsByTest, sessionProducers, attemptPlans) };
 
   // One pair per target, test, and agent the test runs as, in that order,
   // so a persona sweep reports its variants side by side.
@@ -387,9 +386,10 @@ export function select(
   // shard machines agree on the cut whatever a filter answers.
   const withExclusions =
     filters.excluded === undefined ? withShard : applySerialClosure(applyExclusions(withShard, filters.excluded));
-  const planActors = (planned: readonly TestTargetPair[], kind: CollectedTest['kind']): TestTargetPair[] =>
-    planned.map((pair) => (pair.disposition === 'run' && pair.test.kind === kind ? { ...pair, actors: actorPlans.of(pair.test, pair.target) } : pair));
-  const withActors = planActors(withExclusions, 'test');
+  /** Each pair that runs, with the actors it opens. */
+  const planActors = (planned: readonly TestTargetPair[]): TestTargetPair[] =>
+    planned.map((pair) => (pair.disposition === 'run' ? { ...pair, actors: actorsOf(attemptPlans, pair.test, pair.target) } : pair));
+  const withActors = planActors(withExclusions);
   /** The targets the actors of `planned` run on beside each pair's own, in config order. */
   const actorTargetsOf = (planned: readonly TestTargetPair[]): ResolvedTarget[] =>
     config.targets.filter((target) => planned.some((pair) => pair.actors.some((actor) => !actor.own && actor.target.name === target.name)));
@@ -404,7 +404,8 @@ export function select(
   );
   const promoted = applySessionSelection([...withActors, ...actorSetups], sessionProducers, collection.uncollected);
   // A target nothing selected is in the run for the setups an actor needs there, and for nothing else of it.
-  const withSessions = planActors(promoted.filter((pair) => targets.includes(pair.target) || pair.disposition === 'run'), 'setup');
+  // The setup tests that run now name actors too.
+  const withSessions = planActors(promoted.filter((pair) => targets.includes(pair.target) || pair.disposition === 'run'));
   assertFixtureUse(withSessions, attemptPlans);
 
   const runnableOrdinary = withSessions.filter(
@@ -644,14 +645,14 @@ function withSetupConsumers(
   targets: readonly ResolvedTarget[],
   optionsByTest: ReadonlyMap<string, ResolvedTestOptions>,
   sessionProducers: ReadonlyMap<string, CollectedTest>,
-  actorPlans: ActorPlans,
+  plans: AttemptPlans,
 ): ReadonlySet<string> {
   const widened = new Set(lastFailed);
   for (const target of targets) {
     for (const test of tests) {
       const options = optionsByTest.get(test.id)!;
       // Its own session's setup, on this target, and each of its actors', on the actor's.
-      const needed = pairSessions({ target, options, actors: [] }).concat(test.kind === 'test' ? actorPlans.sessions(test, target) : []);
+      const needed = pairSessions({ target, options, actors: [] }).concat(test.kind === 'test' ? actorSessionsOf(plans, test, target) : []);
       const rerun = needed.some(({ session, target: on }) => {
         const producer = sessionProducers.get(session);
         return producer !== undefined && optionsByTest.get(producer.id)!.agents.some((agent) => lastFailed.has(resultId(producer.id, on.name, agent)));

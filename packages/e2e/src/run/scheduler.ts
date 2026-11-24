@@ -23,7 +23,7 @@ import {
 } from '@e2e-dev/core/lib/internal/errors';
 import { timestamp, uuidv7 } from '@e2e-dev/core/lib/internal/ids';
 import { MAX_TIMER_MS } from '@e2e-dev/core/lib/internal/time';
-import type { AttemptRecord, ResultRecord, RunError, SerialGroupRecord } from '@e2e-dev/core/lib/run/records';
+import type { AttemptRecord, ResultRecord, RunError, SerialGroupRecord, TestIdentity } from '@e2e-dev/core/lib/run/records';
 import { retryVerdict } from './retry.ts';
 import { SerialGroupProgress, serialGroupId } from './serial.ts';
 import type { HeldStep, HoldReads, StepHold, StepHoldContext } from './step-hold.ts';
@@ -442,10 +442,15 @@ class Scheduler {
   /**
    * Every result leaves through here, so the failure count is one number
    * however the result came about: a worker's verdict, a synthesized crash,
-   * or a skip. Reaching the limit stops the run at once. Returns whether the
-   * result was a counted failure the run goes on after.
+   * or a skip. A setup that did not pass saved no session, however it came to
+   * that: whatever starts from one skips, on its target and on any whose
+   * actors restore it. Reaching the limit stops the run at once. Returns
+   * whether the result was a counted failure the run goes on after.
    */
   private report(result: ResultRecord): boolean {
+    if (result.selected && result.test.kind === 'setup' && result.status !== 'passed' && result.status !== 'flaky') {
+      this.markSessionsFailed(result.target, result.test);
+    }
     this.options.events.onResult(result);
     if (!countsTowardFailureLimit(result.status)) return false;
     this.failures += 1;
@@ -492,11 +497,7 @@ class Scheduler {
     state.setupQueue.length = 0;
     state.fileQueue.length = 0;
     for (const unit of units) {
-      for (const pair of unit.pairs) {
-        // A setup that never ran saved no session: a test on another target whose actor restores one is skipped, not run without it.
-        if (pair.test.kind === 'setup') for (const session of pair.test.sessions) state.failedSessions.set(session, pair.test.id);
-        this.report(unstartedResult(pair, skip));
-      }
+      for (const pair of unit.pairs) this.report(unstartedResult(pair, skip));
     }
   }
 
@@ -869,8 +870,6 @@ class Scheduler {
       const runnable = unit.pairs.filter((pair) => {
         const skip = this.dependencySkip(state, pair);
         if (skip === undefined) return true;
-        // A setup that is skipped saves no session: the tests that start from it skip in turn.
-        if (pair.test.kind === 'setup') for (const session of pair.test.sessions) state.failedSessions.set(session, pair.test.id);
         this.report(pairResult(pair, { status: 'skipped', selected: true, skip, attempts: [] }));
         return false;
       });
@@ -904,7 +903,7 @@ class Scheduler {
     }
     for (const { session, target } of pairSessions(pair)) {
       // An actor's session is saved on the actor's target, which may not be this one.
-      const failedSetup = (target.name === state.target.name ? state : this.targets.get(target.name))?.failedSessions.get(session);
+      const failedSetup = this.targets.get(target.name)?.failedSessions.get(session);
       if (failedSetup !== undefined) return setupFailedSkip(session, failedSetup);
     }
     return undefined;
@@ -1102,7 +1101,6 @@ class Scheduler {
         if (result.status !== 'passed' && result.status !== 'flaky' && result.status !== 'skipped') {
           worker.sawFailure = true;
         }
-        if (result.test.kind === 'setup') this.recordSetupOutcome(state, result);
         if (this.report(result) && this.answersFailures) worker.runner.send({ type: 'continue' });
         break;
       }
@@ -1172,13 +1170,6 @@ class Scheduler {
         this.options.events.onRunAbort({ error: message.error });
         break;
       }
-    }
-  }
-
-  private recordSetupOutcome(state: TargetState, result: ResultRecord): void {
-    if (result.status === 'passed' || result.status === 'flaky') return;
-    for (const session of result.test.sessions) {
-      state.failedSessions.set(session, result.test.id);
     }
   }
 
@@ -1298,7 +1289,6 @@ class Scheduler {
       }
       const { finished, running } = worker.attempts.get(key) ?? { finished: [], running: undefined };
       if (hung !== undefined && key === hung.pair) {
-        this.markSessionsFailed(state, pair);
         this.report(finishedResult(pair, [...finished, hungAttempt(hung)]));
         continue;
       }
@@ -1318,7 +1308,8 @@ class Scheduler {
         rescheduled.push(pair);
         continue;
       }
-      this.markSessionsFailed(state, pair);
+      // A setup whose worker exited never persisted its sessions, even when its last attempt had finished as passed.
+      this.markSessionsFailed(state.target, pair.test);
       if (key !== worker.inFlightPair) {
         this.report(
           unstartedResult(pair, {
@@ -1363,12 +1354,11 @@ class Scheduler {
     if (rescheduled.length > 0) this.returnUnit(state, { ...unit, pairs: rescheduled });
   }
 
-  /** A crashed setup never persisted its sessions; dependents must skip. */
-  private markSessionsFailed(state: TargetState, pair: TestTargetPair): void {
-    if (pair.test.kind !== 'setup') return;
-    for (const session of pair.test.sessions) {
-      state.failedSessions.set(session, pair.test.id);
-    }
+  /** Records that the setup `test` saved none of its sessions on `target`; nothing for any other test. */
+  private markSessionsFailed(target: ResolvedTarget, test: Pick<TestIdentity, 'kind' | 'sessions' | 'id'>): void {
+    if (test.kind !== 'setup') return;
+    const failed = this.targets.get(target.name)?.failedSessions;
+    for (const session of test.sessions) failed?.set(session, test.id);
   }
 
   /**

@@ -38,9 +38,13 @@ export interface AttemptGuestOptions {
 /** A session the attempt closes: one the test opened, or an actor the attempt opened for it. */
 interface KeptSession {
   readonly session: GuestSession;
+  /** What an error calls it: `actor "reviewer"`, or the `launch()` session it is. */
+  readonly called: string;
   /** Stops what the body left running on it. */
   stop(): Promise<void>;
 }
+
+const LAUNCHED_SESSION = 'a session the test opened with launch()';
 
 /** How an actor the attempt opens itself joins it; see `AttemptGuestSessions.actor`. */
 export interface ActorSeat {
@@ -91,10 +95,12 @@ export class AttemptGuestSessions {
       steps,
       video: (recording) => this.hold(name, recording, 'in place'),
       open: (session, cut) => {
+        const called = `actor "${name}"`;
         this.sessions.push({
           session,
+          called,
           stop: async () => {
-            if (!(await cut())) await this.close(session);
+            if (!(await cut())) await this.close(session, called);
           },
         });
       },
@@ -111,7 +117,7 @@ export class AttemptGuestSessions {
       session: () => {
         const actor = this.name();
         return this.seat('host.newSession()', (session: GuestSession) => {
-          this.sessions.push({ session, stop: () => this.close(session) });
+          this.sessions.push({ session, called: LAUNCHED_SESSION, stop: () => this.close(session, LAUNCHED_SESSION) });
           return this.mirror(actor, session.root);
         });
       },
@@ -161,9 +167,9 @@ export class AttemptGuestSessions {
   async settle(status: AttemptRecord['status']): Promise<readonly E2EError[]> {
     this.taking = false;
     this.cancelOpenings();
-    await Promise.all(this.sessions.map(({ session }) => this.close(session)));
+    await Promise.all(this.sessions.map(({ session, called }) => this.close(session, called)));
     // A host closes its open session first, so that session's video is handed over before the copies are waited for.
-    await Promise.all(this.hosts.map((host) => this.close(host)));
+    await Promise.all(this.hosts.map((host) => this.close(host, 'a host the test opened with launch()')));
     this.holding = false;
     await Promise.all(this.copying);
     for (const mirror of this.mirrors) mirror.cut();
@@ -218,11 +224,11 @@ export class AttemptGuestSessions {
     return { progress: mirror.progress, video: (recording) => this.hold(actor, recording, 'copied') };
   }
 
-  /** Closes a host or session within the cleanup budget, once; a failure is the attempt's cleanup failure, not a throw. */
-  private close(what: GuestHost | GuestSession): Promise<void> {
+  /** Closes a host or session within the cleanup budget, once; a failure is the attempt's cleanup failure, not a throw. `called` names it in the timeout's error. */
+  private close(what: GuestHost | GuestSession, called: string): Promise<void> {
     let closing = this.closing.get(what);
     if (closing === undefined) {
-      closing = withTimeout(what.close(), this.options.cleanupTimeout, () => new InfrastructureError('CLEANUP_TIMEOUT', 'a host or session the test opened with launch() did not close')).catch(
+      closing = withTimeout(what.close(), this.options.cleanupTimeout, () => new InfrastructureError('CLEANUP_TIMEOUT', `${called} did not close`)).catch(
         (cause: unknown) => {
           this.failures.push(classifyError(cause));
         },

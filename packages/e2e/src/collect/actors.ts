@@ -7,7 +7,6 @@
  */
 
 import type { ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
-import type { CollectionError } from '@e2e-dev/core/lib/internal/errors';
 import { didYouMean } from '@e2e-dev/core/lib/internal/suggest';
 import type { CollectedTest } from './collect.ts';
 import { FixtureUseError } from './fixture-errors.ts';
@@ -98,71 +97,54 @@ function resolvedActors(plan: FixturePlan, own: ResolvedTarget, targets: readonl
 }
 
 /**
- * The actors of each collected test on each target, planned once per test
- * and target however many agents and repeats it runs as.
+ * The actors a collected `test` opens on `own` by its attempt `plan`:
+ * `plannedActors`, and what a test cannot have yet. A test in a serial group
+ * names none, since the group's tests share a single session, and a setup
+ * test names none that restores a session, which would need another setup
+ * first. Throws a `FixtureUseError` for either.
  */
-export class ActorPlans {
-  private readonly planned = new Map<string, { readonly actors: readonly PlannedActor[] } | { readonly error: CollectionError }>();
-
-  constructor(
-    private readonly plans: AttemptPlans,
-    private readonly targets: readonly ResolvedTarget[],
-  ) {}
-
-  /**
-   * The actors `test` opens on `target`. A fixture rule the test breaks
-   * there, an actor's among them, is a `COLLECTION_ERROR` that opens with
-   * where the code was declared. So is an actor a test cannot have yet: one
-   * in a serial group, whose tests share a single session, and one that
-   * restores a session in a setup test, which would need another setup first.
-   */
-  of(test: CollectedTest, target: ResolvedTarget): readonly PlannedActor[] {
-    const planned = this.plan(test, target);
-    if ('error' in planned) throw planned.error;
-    return planned.actors;
+export function collectedActors(plan: FixturePlan, test: CollectedTest, own: ResolvedTarget, targets: readonly ResolvedTarget[]): readonly PlannedActor[] {
+  const actors = plannedActors(plan, own, targets);
+  const [first] = actors;
+  if (first !== undefined && test.serialId !== undefined) {
+    throw new FixtureUseError(
+      `test ${JSON.stringify(test.titlePath.join(' > '))} is in a serial group and names actor "${first.name}": the group's tests share one session, and an actor is opened for one test`,
+      test.source,
+    );
   }
-
-  /**
-   * The saved sessions the actors of `test` restore on `target`, each with
-   * the target it is restored on. Empty for a test that cannot be planned
-   * there: it does not run there, or `of` reports why.
-   */
-  sessions(test: CollectedTest, target: ResolvedTarget): readonly ActorSession[] {
-    const planned = this.plan(test, target);
-    return 'error' in planned ? [] : actorSessions(planned.actors);
+  const restoring = test.kind === 'setup' ? actors.find((actor) => actor.session !== undefined) : undefined;
+  if (restoring !== undefined) {
+    throw new FixtureUseError(
+      `setup test ${JSON.stringify(test.titlePath.join(' > '))} names actor "${restoring.name}", which restores session "${restoring.session}": a setup test cannot start from a session another one saves`,
+      test.source,
+    );
   }
+  return actors;
+}
 
-  private plan(test: CollectedTest, target: ResolvedTarget): { readonly actors: readonly PlannedActor[] } | { readonly error: CollectionError } {
-    // No chain fixture, no actor: most tests, which need no plan here.
-    if (!test.fixtures.some((definition) => definition.actor !== undefined)) return { actors: [] };
-    const key = `${target.name}::${test.id}`;
-    let planned = this.planned.get(key);
-    if (planned === undefined) {
-      const attempt = this.plans.plan(test, target);
-      planned = 'error' in attempt ? attempt : this.plans.checked(test, () => ({ actors: this.resolve(test, target, attempt.plan) }));
-      this.planned.set(key, planned);
-    }
-    return planned;
-  }
+/** Whether the chain `test` was registered through declares an actor at all: most do not, and need no plan to say they open none. */
+const declaresActors = (test: CollectedTest): boolean => test.fixtures.some((definition) => definition.actor !== undefined);
 
-  private resolve(test: CollectedTest, target: ResolvedTarget, plan: FixturePlan): readonly PlannedActor[] {
-    const actors = plannedActors(plan, target, this.targets);
-    const [first] = actors;
-    if (first !== undefined && test.serialId !== undefined) {
-      throw new FixtureUseError(
-        `test ${JSON.stringify(test.titlePath.join(' > '))} is in a serial group and names actor "${first.name}": the group's tests share one session, and an actor is opened for one test`,
-        test.source,
-      );
-    }
-    const restoring = test.kind === 'setup' ? actors.find((actor) => actor.session !== undefined) : undefined;
-    if (restoring !== undefined) {
-      throw new FixtureUseError(
-        `setup test ${JSON.stringify(test.titlePath.join(' > '))} names actor "${restoring.name}", which restores session "${restoring.session}": a setup test cannot start from a session another one saves`,
-        test.source,
-      );
-    }
-    return actors;
-  }
+/**
+ * The actors `test` opens on `target`. A fixture rule the test breaks
+ * there, an actor's among them, is thrown as the `COLLECTION_ERROR` it is.
+ */
+export function actorsOf(plans: AttemptPlans, test: CollectedTest, target: ResolvedTarget): readonly PlannedActor[] {
+  if (!declaresActors(test)) return [];
+  const planned = plans.plan(test, target);
+  if ('error' in planned) throw planned.error;
+  return planned.actors;
+}
+
+/**
+ * The saved sessions the actors of `test` restore on `target`, each with
+ * the target it is restored on. Empty for a test that cannot be planned
+ * there: it does not run there, or `actorsOf` reports why.
+ */
+export function actorSessionsOf(plans: AttemptPlans, test: CollectedTest, target: ResolvedTarget): readonly ActorSession[] {
+  if (!declaresActors(test)) return [];
+  const planned = plans.plan(test, target);
+  return 'error' in planned ? [] : actorSessions(planned.actors);
 }
 
 /** A saved session an actor restores, and the target it is restored on. */

@@ -10,7 +10,6 @@
  */
 
 import path from 'node:path';
-import type { CacheWrite } from '../cache/context.ts';
 import { redactSerializedError } from '../internal/errors.ts';
 import { projectRelativePath, type SourceLocation } from '../internal/source.ts';
 import type { SessionVideo } from './records.ts';
@@ -122,8 +121,6 @@ export interface GuestRecord {
   tell(progress: Exclude<StepProgressFact, { readonly phase: 'start' | 'end' }>): void;
   /** Ends the step with how it went. */
   end(result: GuestResult): void;
-  /** Says what became of the step's recording, once the session's replay cache settled. */
-  wrote(write: CacheWrite): void;
 }
 
 /**
@@ -133,12 +130,6 @@ export interface GuestRecord {
  */
 export interface GuestMirror {
   progress: GuestSteps['progress'];
-  /**
-   * Takes what became of the recordings of the session's steps once its
-   * replay cache settled, by each step's index in the session's own record,
-   * so the test's record of a step says it too.
-   */
-  wrote(writes: ReadonlyMap<number, CacheWrite>): void;
   /**
    * Says a check passed on the session that confirms its steps before
    * `index` of its own record: the check's own index, or its enclosing
@@ -215,9 +206,6 @@ export function mirrorGuestSteps(steps: StepRecorder, actor: string, root: strin
       }
       running.delete(record.id);
       step.filed.end(resultOf(record));
-    },
-    wrote: (writes) => {
-      for (const [index, write] of writes) filedAt.get(index)?.wrote(write);
     },
     verified: (index) => filedAt.get(index)?.verified(),
     placed: (index) => filedAt.get(index)?.index,
