@@ -133,6 +133,40 @@ describe('e2e explore', () => {
     expect(paths.map((entry) => entry!.split('/').at(-1)).toSorted()).toEqual(['finding-1.png', 'finding-2.png']);
   });
 
+  it('gets past a native confirm with web({ dialogs }), and without it fails the tap naming the option', async () => {
+    /** One charter that taps Ask, which opens `confirm('Proceed?')`, then reports what the page answered. */
+    const charter = (results: string[]) =>
+      installExploreModel({
+        plan: (call) =>
+          call.instruction.includes('(none yet')
+            ? { decision: 'step', title: 'Delete', instruction: 'Tap Ask and confirm' }
+            : { decision: 'finish', summary: 'Done.' },
+        loop: (call) => {
+          if (call.turn === 1) return [{ toolName: 'tap', input: { target: nodeIdFor(call.prompt, /button "Ask"/) } }];
+          results.push(call.lastToolResult);
+          return [{ toolName: 'complete_step', input: { status: 'passed', summary: 'Asked' } }];
+        },
+      });
+    const configWith = (engine: ReturnType<typeof web>, model: ModelInstance) => ({
+      targets: [{ name: 'web', engine, app: { url: `${app.url}/dialog` } }] as never,
+      agents: { default: { model } },
+      actionTimeout: 10_000,
+    });
+
+    const accepted: string[] = [];
+    const acceptingModel = charter(accepted);
+    const withPolicy = await runExplore(project, app, acceptingModel, { rawConfig: configWith(web({ dialogs: 'accept' }), acceptingModel), maxSteps: 1 });
+    expect(withPolicy.report.run.explore!.steps[0]).toMatchObject({ title: 'Delete', status: 'passed' });
+    expect(accepted.at(-1)).toMatch(/status "Answer" text="accepted"/);
+
+    // Without the option the tap comes back to the explorer as an action failure it cannot act on, naming the option.
+    const refused: string[] = [];
+    const unansweredModel = charter(refused);
+    await runExplore(project, app, unansweredModel, { rawConfig: configWith(web(), unansweredModel), maxSteps: 1 });
+    expect(refused.at(-1)).toContain('Action failed: unhandled confirm dialog: Proceed?');
+    expect(refused.at(-1)).toContain("web({ dialogs: 'accept' })");
+  }, 120_000);
+
   it('keeps its own timeout and ignores the config\'s maxDuration', async () => {
     const model = installExploreModel({
       plan: () => ({ decision: 'finish', summary: 'Nothing to report.' }),

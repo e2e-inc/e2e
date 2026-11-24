@@ -64,6 +64,7 @@ web({ viewport: { width: 390, height: 844 }, locale: 'de-DE' });
 | [`reducedMotion`](#media-emulation) | `'reduce' \| 'no-preference'` | the browser's own |
 | [`initScripts`](#init-scripts) | `WebInitScript[]` | - |
 | [`webmcp`](#webmcp) | `boolean` | `false` |
+| [`dialogs`](#dialogs) | `'accept' \| 'dismiss'` | fail the next step |
 
 - A `web()` target needs `app.url` and refuses the device keys (`bundleId`,
   `appPath`, `launchArguments`). Its `app.permissions` takes `'grant'` only,
@@ -474,6 +475,28 @@ await app.open('/raffle');
 /** JavaScript source, a file relative to the project root, or a function. */
 export type WebInitScript = string | { readonly path: string } | (() => unknown);
 ```
+
+#### `dialogs`
+
+How a native dialog that no [`onDialog`](#ondialog) handler takes is
+answered, in every test of the target. Use it where no test can register a
+handler: `e2e explore`, a bug bash, or an `agent.act` step that confirms a
+deletion.
+
+```ts
+web({ dialogs: 'accept' }); // default: unset
+```
+
+- `'accept'` clicks OK. A `prompt` gets its default text.
+- `'dismiss'` clicks Cancel.
+- It covers `alert`, `confirm`, `prompt`, and `beforeunload`.
+- A handler a test registers with `onDialog` comes first.
+- Unset, an unhandled dialog is dismissed and fails the next step with
+  `APP_NOT_OPEN`. An agent reads that failure as the result of its action.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_CONFIG` | A value other than `'accept'` or `'dismiss'`. A function handler belongs in `onDialog`. |
 
 ### The browser fixture
 
@@ -997,8 +1020,11 @@ await off();
 
 - The handler is `'accept'`, `'dismiss'`, or a function that receives the
   `Dialog`.
+- With no handler registered, [`web({ dialogs })`](#dialogs) answers the
+  dialog. Without that option either, the dialog fails the next step.
 - A function handler must call `accept` or `dismiss`. One that does neither
-  has the dialog dismissed, as an unhandled dialog does.
+  has the dialog dismissed and fails the next step, whatever
+  `web({ dialogs })` says.
 - A handler that throws fails the next step with its error, or the attempt
   at its end when no step follows. One that throws before answering has its
   dialog dismissed.
@@ -1007,7 +1033,7 @@ The errors surface on the next step, not on `onDialog`:
 
 | Throws | When |
 | --- | --- |
-| `APP_NOT_OPEN` | A function handler answered neither way, or no handler took the dialog. |
+| `APP_NOT_OPEN` | A function handler answered neither way, or no handler took the dialog and `web({ dialogs })` is unset. |
 | `ASSERTION_FAILED` | The handler's `expect` failed. |
 | `ENGINE_FAILURE` | The handler threw an unclassified error. |
 
@@ -1025,6 +1051,9 @@ export interface Dialog {
 }
 
 export type DialogHandler = 'accept' | 'dismiss' | ((dialog: Dialog) => void | Promise<void>);
+
+/** How `web({ dialogs })` answers a dialog no `browser.onDialog` handler takes. */
+export type DialogPolicy = 'accept' | 'dismiss';
 ```
 
 #### Tabs
@@ -1322,7 +1351,7 @@ The package exports these types for typing config helpers and fixtures:
 `BrowserDownloadContext`, `PlaywrightLiveSurface`, `Browser`, `FrameScreen`,
 `BrowserExpectation`, `WebRoute`, `RouteFulfillResponse`,
 `RouteContinueOverrides`, `RouteMatcher`, `WebResponse`, `Cookie`, `CookieFields`,
-`CookieFilter`, `Dialog`, and `DialogHandler`.
+`CookieFilter`, `Dialog`, `DialogHandler`, and `DialogPolicy`.
 
 The runtime exports are `web`, [`surfaceOf`](#surfaceof), and `test`,
 `describe`, `beforeEach`, `afterEach`, `beforeAll`, and `afterAll`, typed
@@ -1431,6 +1460,12 @@ export interface WebOptions {
   readonly initScripts?: readonly WebInitScript[];
   /** Launches Chromium or Firefox with WebMCP, for `browser.webmcp`. See [WebMCP](#webmcp). */
   readonly webmcp?: boolean;
+  /**
+   * How a native dialog that no `browser.onDialog` handler takes is answered:
+   * `'accept'` or `'dismiss'`. Unset, it is dismissed and fails the next step.
+   * See [`dialogs`](#dialogs).
+   */
+  readonly dialogs?: DialogPolicy;
 }
 ```
 

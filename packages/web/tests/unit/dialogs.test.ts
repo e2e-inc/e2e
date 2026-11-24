@@ -97,6 +97,56 @@ describe('DialogRouter', () => {
     expect(() => router.throwPending()).not.toThrow();
   });
 
+  it('names browser.onDialog and web({ dialogs }) in the unhandled-dialog error', async () => {
+    const router = new DialogRouter();
+    await router.dispatch(fakeDialog('Delete item?').dialog);
+    expect(() => router.throwPending()).toThrowError(
+      expect.objectContaining({
+        message: expect.stringMatching(/unhandled confirm dialog: Delete item\?; register a handler with browser\.onDialog, or .*web\(\{ dialogs: 'accept' \}\)/),
+      }),
+    );
+  });
+
+  it('answers a dialog no handler takes with the configured policy, and latches nothing', async () => {
+    const accepting = new DialogRouter(new ErrorLatch(), 'accept');
+    const accepted = fakeDialog('Delete item?');
+    await accepting.dispatch(accepted.dialog);
+    expect(accepted.accept).toHaveBeenCalledTimes(1);
+    expect(accepted.dismiss).not.toHaveBeenCalled();
+    expect(() => accepting.throwPending()).not.toThrow();
+
+    const dismissing = new DialogRouter(new ErrorLatch(), 'dismiss');
+    const dismissed = fakeDialog('Leave page?');
+    await dismissing.dispatch(dismissed.dialog);
+    expect(dismissed.dismiss).toHaveBeenCalledTimes(1);
+    expect(dismissed.accept).not.toHaveBeenCalled();
+    expect(() => dismissing.throwPending()).not.toThrow();
+  });
+
+  it('lets a registered handler answer ahead of the policy, and returns to the policy once it unsubscribes', async () => {
+    const router = new DialogRouter(new ErrorLatch(), 'accept');
+    const unsubscribe = router.add('dismiss');
+    const first = fakeDialog();
+    await router.dispatch(first.dialog);
+    expect(first.dismiss).toHaveBeenCalledTimes(1);
+    expect(first.accept).not.toHaveBeenCalled();
+
+    unsubscribe();
+    const second = fakeDialog();
+    await router.dispatch(second.dialog);
+    expect(second.accept).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an undecided function handler a failure under a policy: the handler took the dialog', async () => {
+    const router = new DialogRouter(new ErrorLatch(), 'accept');
+    router.add(() => undefined);
+    const { dialog, accept, dismiss } = fakeDialog();
+    await router.dispatch(dialog);
+    expect(accept).not.toHaveBeenCalled();
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    expect(() => router.throwPending()).toThrowError(expect.objectContaining({ code: 'INVALID_STATE' }));
+  });
+
   it('latches a failing handler as ENGINE_FAILURE, thrown once', async () => {
     const router = new DialogRouter();
     router.add(() => {

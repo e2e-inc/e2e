@@ -54,7 +54,7 @@ import { webmcpLaunch } from './webmcp.ts';
 import { LeasedBrowsers, type BrowserProvider, type LeaseDownloads } from './provider.ts';
 import { installAppLog } from './app-log.ts';
 import { TraceFeed } from './trace-feed.ts';
-import { DialogRouter } from './dialogs.ts';
+import { DialogRouter, type DialogPolicy } from './dialogs.ts';
 import { missingLibrariesMessage } from './host-libraries.ts';
 import { browserCheck, ensureBrowsersInstalled, missingBrowserLibraries } from './install.ts';
 import { applyPostSteps, frameSelectors, projectExpression } from './locators.ts';
@@ -312,6 +312,16 @@ export interface WebOptions {
    * itself.
    */
   readonly webmcp?: boolean;
+  /**
+   * How a native dialog (`alert`, `confirm`, `prompt`, `beforeunload`) that
+   * no `browser.onDialog` handler takes is answered: `'accept'` clicks OK
+   * (a `prompt` keeps its default text), `'dismiss'` clicks Cancel. A handler
+   * a test registers still comes first. Without it, such a dialog is
+   * dismissed and fails the next step, since nothing asked for that answer.
+   * Set it where no test can register a handler: `e2e explore`, an agent
+   * step that deletes something, a bug bash.
+   */
+  readonly dialogs?: DialogPolicy;
 }
 
 /** The test-id attribute when the options name none. */
@@ -323,7 +333,7 @@ export class PlaywrightSurface {
    * wait here and fail the next step that enters the surface.
    */
   latch = new ErrorLatch();
-  dialogs = new DialogRouter(this.latch);
+  dialogs: DialogRouter;
 
   private readonly browserName: BrowserName;
   private readonly connection = new BrowserConnection();
@@ -351,6 +361,8 @@ export class PlaywrightSurface {
   /** The configured media features, which every attempt starts from. */
   private readonly media: WebMedia;
   private readonly configuredInitScripts: ConfiguredInitScripts;
+  /** How a dialog no handler takes is answered; undefined fails the next step. */
+  private readonly dialogPolicy: DialogPolicy | undefined;
   /** The attempt's init scripts, configured then added, applied to each context the attempt opens. */
   private initScripts: string[] = [];
   private app: EngineAppInfo = {};
@@ -390,6 +402,8 @@ export class PlaywrightSurface {
     this.timezoneId = options.timezoneId;
     this.media = obj({ colorScheme: options.colorScheme, reducedMotion: options.reducedMotion });
     this.configuredInitScripts = new ConfiguredInitScripts(options.initScripts ?? []);
+    this.dialogPolicy = options.dialogs;
+    this.dialogs = new DialogRouter(this.latch, this.dialogPolicy);
   }
 
   // --- lifecycle ---
@@ -578,7 +592,7 @@ export class PlaywrightSurface {
     // `validateApp` admitted only grants.
     const granted = Object.keys(this.app.permissions ?? {});
     this.latch = new ErrorLatch();
-    const dialogs = new DialogRouter(this.latch);
+    const dialogs = new DialogRouter(this.latch, this.dialogPolicy);
     this.routes = routes;
     this.initScripts = initScripts;
     this.dialogs = dialogs;

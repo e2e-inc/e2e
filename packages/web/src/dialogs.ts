@@ -22,6 +22,12 @@ export interface Dialog {
 
 export type DialogHandler = 'accept' | 'dismiss' | ((dialog: Dialog) => void | Promise<void>);
 
+/** How `web({ dialogs })` answers a dialog no `browser.onDialog` handler takes. */
+export type DialogPolicy = 'accept' | 'dismiss';
+
+/** The values `web({ dialogs })` takes. */
+export const DIALOG_POLICIES: readonly DialogPolicy[] = ['accept', 'dismiss'];
+
 interface Registration {
   readonly handler: DialogHandler;
 }
@@ -31,9 +37,14 @@ export class DialogRouter {
 
   /**
    * `latch` is shared with the surface: a dialog failure and a route-handler
-   * failure surface through one check at the next step.
+   * failure surface through one check at the next step. `policy` answers a
+   * dialog no handler takes; without one, such a dialog is dismissed and
+   * fails the next step.
    */
-  constructor(private readonly latch: ErrorLatch = new ErrorLatch()) {}
+  constructor(
+    private readonly latch: ErrorLatch = new ErrorLatch(),
+    private readonly policy?: DialogPolicy,
+  ) {}
 
   /**
    * Registers a handler (the newest wins) and returns its idempotent
@@ -53,7 +64,7 @@ export class DialogRouter {
     this.latch.throwPending();
   }
 
-  /** Routes one native dialog to the newest registered handler; the attempt end waits for it. */
+  /** Routes one native dialog to the newest registered handler, else the policy; the attempt end waits for it. */
   dispatch(dialog: PwDialog): Promise<void> {
     const work = this.route(dialog);
     this.latch.track('dialog', work);
@@ -61,12 +72,15 @@ export class DialogRouter {
   }
 
   private async route(dialog: PwDialog): Promise<void> {
-    const handler = this.registrations.at(-1)?.handler;
+    // A test's own handler comes first; the configured policy only answers
+    // what no handler takes, so an explorer or an agent step, which cannot
+    // register one, still gets past a confirmation.
+    const handler = this.registrations.at(-1)?.handler ?? this.policy;
     if (handler === undefined) {
       this.latch.latch(
         new EngineError(
           'INVALID_STATE',
-          `unhandled ${dialog.type()} dialog: ${dialog.message()}`,
+          `unhandled ${dialog.type()} dialog: ${dialog.message()}; register a handler with browser.onDialog, or answer every dialog with web({ dialogs: 'accept' }) or web({ dialogs: 'dismiss' })`,
           { retryable: false },
         ),
       );

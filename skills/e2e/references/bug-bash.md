@@ -83,8 +83,8 @@ export default {
     ...[shared.tests ?? 'tests/**/*.e2e.ts'].flat().filter((glob) => !glob.startsWith('!tests/bugbash/')),
     'tests/bugbash/**/*.e2e.ts',
   ],
-  // The app already runs: no command.
-  targets: [{ name: 'web', engine: web(), app: { url: 'http://127.0.0.1:3000' } }],
+  // The app already runs: no command. Explorers can't register browser.onDialog, so accept every native confirm.
+  targets: [{ name: 'web', engine: web({ dialogs: 'accept' }), app: { url: 'http://127.0.0.1:3000' } }],
   retries: 0,
   reporters: ['list'],
   credentials: {
@@ -264,7 +264,8 @@ verify one area after another.
    config, pass its session id to every call, walk the reproduction, and
    `locate` each locator before writing it (topic `mcp`). Close your session
    when done. A scripted step that opens a native dialog needs
-   `browser.onDialog` first.
+   `browser.onDialog` first: the project's own config may not set
+   `web({ dialogs })` as the bug-bash config does.
 
 ## 7. Report
 

@@ -680,7 +680,9 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
   gets `{ type, message, accept(text?), dismiss() }`, where `type` is
   `alert`, `confirm`, `prompt`, or `beforeunload`, `accept` taking the prompt
   text; no handler, or one that neither accepts nor dismisses, fails the
-  next step with `INVALID_STATE`. A throwing handler's unanswered dialog is
+  next step with `INVALID_STATE`. `web({ dialogs: 'accept' | 'dismiss' })`
+  answers every dialog no handler takes, for `agent.act` steps and
+  `e2e explore`. A throwing handler's unanswered dialog is
   dismissed too, and its error fails the next step.
 - `waitForDownload(() => trigger, { timeout? })`: returns
   `{ path, absolutePath, suggestedFilename }`; `absolutePath` names the saved
