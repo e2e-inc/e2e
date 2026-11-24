@@ -9,8 +9,10 @@
  * rerun's reporters as `FinishedRun.lastRun`.
  */
 
+import { E2EError, serializeError } from '@e2e-dev/core/lib/internal/errors';
 import { UNDELIVERED_SKIPS } from '../run/last-run.ts';
-import type { Report1Document as Report } from './build.ts';
+import type { Report1Document as Report, ReportError } from './build.ts';
+import { outcome } from './outcome.ts';
 import { summarizeResults } from './summary.ts';
 
 type ReportRun = Report['run'];
@@ -132,9 +134,9 @@ function runDuration(run: ReportRun): number {
  * first pass interrupted reached no verdict: it leaves the outcome alone, and
  * the fold does not read as a pass. The first run's start time and shard
  * (or that it had none) are kept, and so is each row that run gave another
- * shard, whatever the rerun ran; the duration and usage are both runs'
- * added up. The rerun takes the
- * run before's filter records and the change they judged, since the rows
+ * shard. A failure of one of those tests appears as a run error. The duration
+ * and usage add up both runs. The rerun takes the previous filter records
+ * and the change they judged, since the rows
  * those filters left out are the run before's too. `lastRun` may itself be a
  * fold, which is how the runner chains reruns: its rows then hold every
  * attempt so far, and they win over the rows the rerun carries. An
@@ -147,7 +149,10 @@ export function foldLastRun(current: Report, lastRun: Report): Report {
   const carriedById = new Map((carried?.results ?? []).map((result) => [result.id, result]));
   const currentIds = new Set(current.run.results.map((result) => result.id));
   // The run before's own carried rows stand for the tests it left out, over their filtered rows.
-  const beforeById = rowsById(lastRun.run.results, lastRun.run.carried?.results ?? []);
+  // Sharding happens before --repeat-each, so ownership is independent of a repeat's result id.
+  const otherShardKeys = new Set(lastRun.run.results.filter((row) => row.skip?.otherShard === true).map(testKey));
+  const belongsToOtherShard = (row: ReportResult) => otherShardKeys.has(testKey(row));
+  const beforeById = rowsById(lastRun.run.results, (lastRun.run.carried?.results ?? []).filter((row) => !belongsToOtherShard(row)));
   const leftovers = new Map<string, ReportResult[]>();
   for (const result of beforeById.values()) {
     if (currentIds.has(result.id)) continue;
@@ -160,13 +165,23 @@ export function foldLastRun(current: Report, lastRun: Report): Report {
   }
 
   const results: ReportResult[] = [];
+  const otherShardFailures: ReportError[] = [];
+  const otherShardGroupIds = new Set(
+    [...(lastRun.run.carried?.results ?? []), ...carriedById.values()]
+      .filter(belongsToOtherShard)
+      .map((row) => row.serialGroupId),
+  );
+  const currentGroups = new Map(current.run.serialGroups.map((group) => [group.id, group]));
   // The groups of further repeats a serial member folds in, by the group its rerun result names.
   const absorbed = new Map<string, Set<string>>();
   for (const result of current.run.results) {
     const previous = beforeById.get(result.id);
-    // The run that chose the tests gave this one to another shard; that shard's report has its result.
-    if (previous?.skip?.otherShard === true) {
-      results.push(previous);
+    if (belongsToOtherShard(result)) {
+      if (result.serialGroupId !== undefined) otherShardGroupIds.add(result.serialGroupId);
+      if (previous?.skip?.otherShard === true) results.push(previous);
+      if (result.selected !== false && FAILED_STATUSES.has(result.status)) {
+        otherShardFailures.push(otherShardFailure(result, currentGroups));
+      }
       continue;
     }
     if (result.selected === false) {
@@ -187,12 +202,12 @@ export function foldLastRun(current: Report, lastRun: Report): Report {
   }
   for (const extra of leftovers.values()) results.push(...extra);
 
+  const referencedGroups = new Set(results.map((result) => result.serialGroupId));
   const beforeGroups = rowsById(lastRun.run.serialGroups, lastRun.run.carried?.serialGroups ?? []);
-  const currentGroupIds = new Set(current.run.serialGroups.map((group) => group.id));
   const absorbedIds = new Set([...absorbed.values()].flatMap((ids) => [...ids]));
-  const carriedGroups = (carried?.serialGroups ?? []).filter((group) => !currentGroupIds.has(group.id) && !beforeGroups.has(group.id));
+  const carriedGroups = (carried?.serialGroups ?? []).filter((group) => !currentGroups.has(group.id) && !beforeGroups.has(group.id));
   const serialGroups = [
-    ...[...beforeGroups.values()].filter((group) => !currentGroupIds.has(group.id) && !absorbedIds.has(group.id)),
+    ...[...beforeGroups.values()].filter((group) => !currentGroups.has(group.id) && !absorbedIds.has(group.id)),
     ...carriedGroups,
     ...current.run.serialGroups.map((group) =>
       foldGroup(group, [
@@ -200,8 +215,15 @@ export function foldLastRun(current: Report, lastRun: Report): Report {
         ...[...(absorbed.get(group.id) ?? [])].flatMap((id) => (beforeGroups.has(id) ? [beforeGroups.get(id)!] : [])).toSorted((a, b) => a.repeat - b.repeat),
       ]),
     ),
-  ];
+  ].filter((group) => !otherShardGroupIds.has(group.id) || referencedGroups.has(group.id));
 
+  // A later rerun can leave a previously widened consumer owed through a filter.
+  const carriedGroupMap = new Map((carried?.serialGroups ?? []).map((group) => [group.id, group]));
+  for (const row of carriedById.values()) {
+    if (belongsToOtherShard(row) && FAILED_STATUSES.has(row.status)) {
+      otherShardFailures.push(otherShardFailure(row, carriedGroupMap));
+    }
+  }
   const carriedErrors = carried?.errors ?? [];
   const carriedFailure =
     carriedErrors.length > 0 ||
@@ -219,7 +241,7 @@ export function foldLastRun(current: Report, lastRun: Report): Report {
       durationMs: runDuration(lastRun.run) + runDuration(current.run),
       serialGroups,
       results,
-      errors: [...current.run.errors, ...carriedErrors],
+      errors: [...current.run.errors, ...carriedErrors, ...otherShardFailures],
       summary: summarizeResults(results, serialGroups),
       usage: addUsage(lastRun.run.usage, current.run.usage, results.length),
       filters: lastRun.run.filters,
@@ -227,4 +249,16 @@ export function foldLastRun(current: Report, lastRun: Report): Report {
       ...(lastRun.run.shard === undefined ? {} : { shard: lastRun.run.shard }),
     },
   };
+}
+
+/** Show a failure that affected the rerun without adding the test to this shard's totals. */
+function otherShardFailure(result: ReportResult, groups: ReadonlyMap<string, ReportSerialGroup>): ReportError {
+  const error = outcome(result, groups).verdict.error;
+  const detail = error === undefined ? result.status : error.message;
+  const name = result.titlePath.join(' › ');
+  const fields = serializeError(
+    new E2EError(error?.category ?? 'test', error?.code ?? 'ERROR', `Rerun test assigned to another shard (${name}, repeat ${result.repeat + 1}): ${detail}`),
+    { phase: 'report' },
+  );
+  return { category: fields.category, code: fields.code, message: fields.message, retryable: fields.retryable, phase: fields.phase, source: error?.source };
 }

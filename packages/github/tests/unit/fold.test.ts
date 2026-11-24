@@ -458,12 +458,13 @@ describe('foldLastRun', () => {
     expect(foldLastRun(passes, unreached).run.results.map((entry) => entry.status)).toEqual(['flaky']);
   });
 
-  it('keeps the attempts of a test that became a serial member on its group, never on the result', () => {
+  it('keeps the flaky verdict when a standalone test becomes serial and its earlier attempt cannot be folded', () => {
     const standalone = report({ status: 'failed', results: [result({ title: ['wizard', 'step one'], status: 'failed', attempts: [failedAttempt] })] });
     const nowSerial = result({ title: ['wizard', 'step one'], status: 'passed', serialGroupId: 'g1' });
     const again = report({ results: [nowSerial], serialGroups: [serialGroup('g1', nowSerial.testId, 'passed')] });
     const folded = foldLastRun(again, standalone);
     expect(folded.run.results.map((entry) => [entry.status, entry.attempts.length, entry.serialGroupId])).toEqual([['flaky', 0, 'g1']]);
+    expect(folded.run.serialGroups[0]?.attempts).toHaveLength(1);
   });
 
   it('counts a row an older report wrote without selected as selected, the way the page reads it', () => {
@@ -525,5 +526,26 @@ describe('foldLastRun', () => {
       ['ours', true, 'flaky', undefined],
     ]);
     expect(folded.run.summary).toMatchObject({ selected: 1, flaky: 1, passed: 0 });
+  });
+
+  it('explains a foreign serial failure after a later rerun filters it out', () => {
+    const foreign = result({ title: 'foreign', status: 'failed', serialGroupId: 'outside' });
+    const group = serialGroup('outside', foreign.testId, 'failed');
+    const initial = report({
+      results: [result({ title: 'foreign', status: 'skipped', selected: false, skip: { ...leftOut, otherShard: true } })],
+    });
+    const widened = report({ status: 'failed', results: [foreign], serialGroups: [group] });
+    const firstFold = foldLastRun(widened, initial);
+    expect(firstFold.run.errors.map((error) => error.message)).toEqual([expect.stringContaining('step one broke')]);
+    expect(firstFold.run.serialGroups).toEqual([]);
+
+    const filtered = report({ results: [result({ title: 'foreign', status: 'skipped', selected: false, skip: leftOut })] });
+    const folded = foldLastRun({ ...filtered, run: { ...filtered.run, carried: { results: [foreign], serialGroups: [group], errors: [] } } }, firstFold);
+    expect(folded.run).toMatchObject({ status: 'failed', results: [{ selected: false, skip: { otherShard: true } }], serialGroups: [] });
+    expect(folded.run.errors.map((error) => error.message)).toEqual([expect.stringContaining('step one broke')]);
+
+    const again = foldLastRun(widened, folded);
+    expect(again.run.results).toEqual(folded.run.results);
+    expect(again.run.serialGroups).toEqual([]);
   });
 });

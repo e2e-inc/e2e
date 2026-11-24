@@ -280,8 +280,10 @@ The rerun keeps the first run's artifacts and writes its own under
 `report.json`, it writes `report-with-reruns.json`: both runs as one report. The
 [CLI reference](/reference/cli#flags) lists what counts as not passed.
 
-A separate job has no report on its runner. Download it into the output
-directory first, or rerun the failed job.
+For a rerun in a separate job, download the previous job's `report.json`
+into the output directory. If the previous job was a rerun, also download
+its matching `report-with-reruns.json` to keep the earlier results and
+attempts. Download `results/` as well if you need the attempt files.
 
 ## Next
 

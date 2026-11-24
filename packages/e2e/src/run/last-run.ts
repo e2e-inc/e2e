@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { ConfigurationError, errorMessage } from '@e2e-dev/core/lib/internal/errors';
 import { resultId } from '@e2e-dev/core/lib/internal/ids';
 import type { Report1Document } from '../report/build.ts';
+import { summarizeResults } from '../report/summary.ts';
 
 type ReportResult = Report1Document['run']['results'][number];
 type ReportError = Report1Document['run']['errors'][number];
@@ -209,6 +210,40 @@ export interface RerunCollection {
   readonly uncollectedFiles: ReadonlySet<string>;
 }
 
+function stillCollected(result: ReportResult, collection: RerunCollection): boolean {
+  return collection.testIds.has(result.testId) || collection.uncollectedFiles.has(result.file);
+}
+
+/** Retire deleted tests from history before the next fold can carry their old verdicts. */
+export function retainCollectedHistory(report: Report1Document, collection: RerunCollection): Report1Document {
+  const { results, serialGroups, carried, ...run } = report.run;
+  const retained = results.filter((result) => stillCollected(result, collection));
+  const retainedCarried = carried?.results.filter((result) => stillCollected(result, collection));
+  if (retained.length === results.length && retainedCarried?.length === carried?.results.length) return report;
+
+  const groups = new Set([...retained, ...(retainedCarried ?? [])].map((result) => result.serialGroupId));
+  const retainedGroups = serialGroups.filter((group) => groups.has(group.id));
+  return {
+    ...report,
+    run: {
+      ...run,
+      results: retained,
+      serialGroups: retainedGroups,
+      summary: summarizeResults(retained, retainedGroups),
+      usage: { ...run.usage, discoveredResults: retained.length },
+      ...(carried === undefined || retainedCarried === undefined || retainedCarried.length === 0
+        ? {}
+        : {
+            carried: {
+              results: retainedCarried,
+              serialGroups: carried.serialGroups.filter((group) => groups.has(group.id)),
+              errors: carried.errors.filter((error) => retainedCarried.some((result) => inHookScope(result, error))),
+            },
+          }),
+    },
+  };
+}
+
 /**
  * What a `--last-failed` rerun carries forward from the report it selected
  * from: every result that report owed a rerun and this run did not run, as
@@ -231,9 +266,7 @@ export interface RerunCollection {
 export function carryForward(lastRun: Report1Document, current: Report1Document, collected: RerunCollection): ReportCarried | undefined {
   const selected = new Set(current.run.results.filter((result) => result.selected !== false).map(rerunId));
   const targets = new Set(current.run.targets.map((target) => target.id));
-  const stillThere = (result: ReportResult): boolean =>
-    collected.testIds.has(result.testId) || collected.uncollectedFiles.has(result.file);
-  const notRun = (result: ReportResult): boolean => !selected.has(rerunId(result)) && stillThere(result) && targets.has(result.targetId);
+  const notRun = (result: ReportResult): boolean => !selected.has(rerunId(result)) && stillCollected(result, collected) && targets.has(result.targetId);
 
   const failedAgain = current.run.errors.filter(isSuiteHookFailure);
   const hooks = [...lastRun.run.errors.filter(isSuiteHookFailure), ...(lastRun.run.carried?.errors ?? [])];

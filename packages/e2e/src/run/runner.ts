@@ -58,7 +58,7 @@ import { refuseBun } from './public-ownership.ts';
 import { processSecrets, registerProviderKeys, registerStaticSecrets, staticOutputLedger } from '@e2e-dev/core/lib/run/secrecy';
 import { warnOfNodeDebug } from './node-debug.ts';
 import { nextRerunDir, pruneArtifacts } from '@e2e-dev/core/lib/run/artifacts';
-import { carryForward, fileDurationKey, lastFailedIds, readLastRun, readWithReruns, reportArtifactPaths, type RerunCollection } from './last-run.ts';
+import { carryForward, fileDurationKey, lastFailedIds, readLastRun, readWithReruns, reportArtifactPaths, retainCollectedHistory, type RerunCollection } from './last-run.ts';
 import { loadTimings, writeTimings } from './timings.ts';
 import { childProcessSpawner } from './worker/handle.ts';
 import { setSecretRegistry } from '@e2e-dev/core/lib/secrets';
@@ -970,11 +970,14 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
                 );
           const inputs = await selectionInputs(options, config);
           lastRun = inputs.lastRun;
-          lastRuns = lastRun === undefined ? undefined : ((await readWithReruns(outputLayout(config.output).withReruns, lastRun)) ?? lastRun);
           rerunCollection = {
             testIds: new Set(collection.tests.map((test) => test.id)),
             uncollectedFiles: new Set(collection.uncollected.map((skipped) => skipped.file)),
           };
+          if (lastRun !== undefined) {
+            const history = (await readWithReruns(outputLayout(config.output).withReruns, lastRun)) ?? lastRun;
+            lastRuns = retainCollectedHistory(history, rerunCollection);
+          }
           const flags = options.passWithNoTests !== undefined ? { passWithNoTests: options.passWithNoTests } : {};
           // Pass 1, what any test filter judges. The run's own flag still
           // decides an empty one, so a mistyped --tag fails before any

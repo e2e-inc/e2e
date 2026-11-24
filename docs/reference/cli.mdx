@@ -737,7 +737,13 @@ else the config's [`output`](/reference/config#output)):
   run and every rerun since as one report-1 document, with the same run id
   as `report.json`. It keeps the first run's passes, and each test's
   attempts across the runs, so a test that failed and then passed is
-  `flaky`. A run without `--last-failed` removes it.
+  `flaky`. If a test becomes a member of a serial group, an earlier
+  standalone failure still makes a later pass `flaky`. The history omits
+  that standalone attempt. The history drops tests that collection confirms
+  were removed. If a rerun of a sharded run reaches a test assigned to
+  another shard and the test fails, the history shows a run error and keeps
+  the test outside the shard's totals. A run without `--last-failed` removes
+  the history file.
 - A test is named per target and agent.
 - No report is `NO_LAST_RUN`. When nothing failed in the previous run, it
   selects nothing: `NO_TESTS` unless `--pass-with-no-tests`.

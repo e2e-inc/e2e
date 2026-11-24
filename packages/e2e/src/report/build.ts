@@ -449,8 +449,8 @@ export interface Report1Document {
     vcs?: VcsInfo;
     /**
      * Which shard of the selection this run was (`--shard 2/3`); absent when
-     * it was not sharded. Each shard's report lists the whole selection, and
-     * marks the tests another shard runs or reports with `skip.otherShard`.
+     * it was not sharded. The report marks rows this invocation's cut gave
+     * to another shard with `skip.otherShard`.
      */
     shard?: ReportShard;
     targets: readonly ReportTarget[];

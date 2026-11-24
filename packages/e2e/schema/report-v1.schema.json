@@ -442,7 +442,7 @@
         "reason": { "type": "string", "maxLength": 8192 },
         "relatedId": { "type": "string", "minLength": 1 },
         "filter": { "description": "The name of the test filter that left the test out; only with cause filtered.", "type": "string", "minLength": 1, "maxLength": 256 },
-        "otherShard": { "description": "Set on an unselected result of a sharded run (run.shard) when the run's own --shard cut gave the test to another shard, which runs or reports it, whatever the cause and reason say. A --last-failed run cuts the tests the last run did not pass. Absent otherwise.", "const": true }
+        "otherShard": { "description": "Set on an unselected result of a sharded run (run.shard) when this invocation's --shard cut gave the test to another shard, whatever the cause and reason say. Shards using --last-failed can cut different sets of tests, so the marker does not establish that another invocation ran the test. Absent otherwise.", "const": true }
       },
       "allOf": [
         { "if": { "required": ["filter"] }, "then": { "properties": { "cause": { "const": "filtered" } } } }
@@ -756,7 +756,7 @@
           }
         },
         "shard": {
-          "description": "Which shard of the selection the run was (--shard index/total); absent when it was not sharded. Each shard's report lists the whole selection and marks the tests another shard runs or reports with skip.otherShard.",
+          "description": "Which shard of the selection the run was (--shard index/total); absent when it was not sharded. The report marks rows this invocation's cut gave to another shard with skip.otherShard.",
           "type": "object",
           "additionalProperties": false,
           "required": ["index", "total"],

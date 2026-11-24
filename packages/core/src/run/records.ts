@@ -64,7 +64,8 @@ interface SkipDetail {
   readonly relatedId?: string;
   /**
    * Set on an unselected test of a sharded run (`--shard`) that this run's
-   * cut gave another shard, which runs or reports it, whatever the reason says.
+   * cut gave another shard, whatever the reason says. This marks the cut of
+   * this invocation. Shards rerunning their own failures may cut different sets.
    */
   readonly otherShard?: true;
 }
