@@ -30,6 +30,7 @@ const KNOWN_KEYS = [
   'tapModifiers',
   'selectsDevice',
   'grantsAllPermissions',
+  'launchArgumentValues',
   'keyboard',
   'fixtures',
   'isolation',
@@ -286,6 +287,7 @@ export function defineEngine<Fixtures extends object = {}>(declared: EngineSpec<
   if (spec.grantsAllPermissions !== undefined && typeof spec.grantsAllPermissions !== 'boolean') {
     throw invalid(name, 'grantsAllPermissions must be a boolean');
   }
+  if (spec.launchArgumentValues !== undefined && typeof spec.launchArgumentValues !== 'boolean') throw invalid(name, 'launchArgumentValues must be a boolean');
   if (spec.isolation !== undefined && spec.isolation !== 'attempt' && spec.isolation !== 'worker') {
     throw invalid(name, `isolation must be 'attempt' or 'worker', got ${JSON.stringify(spec.isolation)}`);
   }
@@ -308,6 +310,7 @@ export function defineEngine<Fixtures extends object = {}>(declared: EngineSpec<
   if (spec.tapModifiers === true) handle['tapModifiers'] = true;
   if (spec.selectsDevice === true) handle['selectsDevice'] = true;
   if (spec.grantsAllPermissions === true) handle['grantsAllPermissions'] = true;
+  if (spec.launchArgumentValues === true) handle['launchArgumentValues'] = true;
   if (spec.isolation === 'worker') handle['isolation'] = 'worker';
   if (spec.pointerActions !== undefined) {
     handle['pointerActions'] = declaredKinds(name, 'pointerActions', spec.pointerActions, POINTER_ACTION_KINDS);

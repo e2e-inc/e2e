@@ -28,5 +28,6 @@
   "pointerActions": ["tap", "doubleTap", "longPress", "dragTo", "swipe", "swipeTo"],
   "selectsDevice": true,
   "grantsAllPermissions": true,
+  "launchArgumentValues": true,
   "isolation": "worker"
 }
