@@ -119,9 +119,9 @@ function markdownFiles(root: URL, dir: string): string[] {
   return readdirSync(new URL(dir, root), { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
     // `docs/ja/`, `docs/zh/`, `docs/cs/`, `docs/es/`, `docs/pt/`, `docs/hi/`,
-    // `docs/fr/`, `docs/pl/`, and `docs/id/` translate the docs; the wording
-    // these tests hold is the English pages'.
-    if (entry.isDirectory()) return ['node_modules', 'ja', 'zh', 'cs', 'es', 'pt', 'hi', 'fr', 'pl', 'id'].includes(entry.name) ? [] : markdownFiles(root, `${path}/`);
+    // `docs/fr/`, `docs/pl/`, `docs/id/`, and `docs/uk/` translate the docs;
+    // the wording these tests hold is the English pages'.
+    if (entry.isDirectory()) return ['node_modules', 'ja', 'zh', 'cs', 'es', 'pt', 'hi', 'fr', 'pl', 'id', 'uk'].includes(entry.name) ? [] : markdownFiles(root, `${path}/`);
     return /\.mdx?$/.test(entry.name) ? [path] : [];
   });
 }
