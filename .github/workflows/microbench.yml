@@ -10,18 +10,27 @@ name: microbench
 # measures the pull request's base against its head (or a dispatched base ref
 # against the branch).
 #
-# A pull request runs it when it changes the harness, the code the cases
-# measure (`scripts/microbench/cases.mjs` loads it from packages/core and
-# packages/mobile), or the captured snapshots the cases read as input.
+# A pull request runs it when it changes the harness (with the statistics
+# it shares with bench-ab), the code the cases measure
+# (`scripts/microbench/cases.mjs` loads it from packages/core and
+# packages/mobile), what those packages build with, or the captured
+# snapshots the cases read as input.
 on:
   pull_request:
     paths:
       - scripts/microbench.ts
       - scripts/microbench/**
+      - scripts/bench-ab/stats.ts
       - .github/workflows/microbench.yml
       - packages/core/src/**
+      - packages/core/package.json
+      - packages/core/tsconfig*.json
       - packages/mobile/src/**
+      - packages/mobile/package.json
+      - packages/mobile/tsconfig*.json
       - packages/mobile/tests/fixtures/snapshots/**
+      - tsconfig.base.json
+      - pnpm-lock.yaml
   workflow_dispatch:
     inputs:
       base:
