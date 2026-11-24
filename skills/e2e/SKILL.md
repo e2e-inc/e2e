@@ -198,8 +198,8 @@ lines you changed:
   New, changed, and failed goals run live, and so does a replay the trace
   page shows as handed off. `agent.assert`, `agent.waitFor`, and
   `agent.extract` always call the model. Leave `--no-cache` off: it sends every goal to the model
-  again. Only a `read-write` cache records: the local default, but not with
-  `CI` set and no cache mode in the config, nor in strict mode. A stopped
+  again. Only a `read-write` cache records: the local default, but not on CI
+  unless the config names that mode, nor in strict mode. A stopped
   run (Ctrl-C, a command your tool's timeout kills, `--max-duration`) saves
   nothing, so give the command a timeout longer than the test.
 - Don't rename the test, its `describe`, or its file, and don't reword a
@@ -207,8 +207,8 @@ lines you changed:
   `agentContext` once a goal passes. Each is part of a recording's key, so
   every goal it touches records again live. Fixing a locator or an
   expectation keeps the recordings.
-- Add `--retries 0` when retries are on (`retries` in the config, or `CI`
-  set, where the default is 1); a `retries` option on the test or its
+- Add `--retries 0` when retries are on (`retries` in the config, or on
+  CI, where the default is 1); a `retries` option on the test or its
   `describe` wins over the flag. Outside strict mode (`--strict-cache`, `cache.strict`), a
   retry never replays: it runs every goal live and waits out the failure
   again.
