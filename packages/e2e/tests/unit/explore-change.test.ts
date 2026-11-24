@@ -184,6 +184,28 @@ describe('readExploreChange', () => {
     expect(shown).toBeLessThan(30);
   });
 
+  it('leaves a patch its counts only when its share would hold leading context and none of its changes', async () => {
+    const context = Array.from({ length: 3 }, (_, line) => `${String(line).repeat(140)}`).join('\n');
+    const file = (index: number, word: string): string => `${context}\n${word} ${index}\n${context}\n`;
+    const count = 20;
+    const name = (index: number): string => `f${String(index).padStart(2, '0')}.txt`;
+    const { dir } = branchWith(
+      Object.fromEntries(Array.from({ length: count }, (_, index) => [name(index), file(index, 'old')])),
+      Object.fromEntries(Array.from({ length: count }, (_, index) => [name(index), file(index, 'new')])),
+    );
+    const brief = await briefOf(dir);
+    const shown = Array.from({ length: count }, (_, index) => index).filter((index) => brief.includes(`${name(index)} (+1 -1; patch cut`));
+    expect(shown.length).toBeGreaterThan(5);
+    for (const index of shown) expect(brief.slice(brief.indexOf(`${name(index)} (+1 -1`)).split(/\nf\d\d\.txt /u)[0]).toContain(`\n-old ${index}`);
+  });
+
+  it('orders a patch with a long line by the size the brief shows of it', async () => {
+    const long = (word: string): string => `export const icon = "${word.repeat(2_000)}";\n`;
+    const files = Object.fromEntries(Array.from({ length: 24 }, (_, index) => [`src/n${String(index).padStart(2, '0')}.ts`, Array.from({ length: 60 }, (_line, line) => `line ${line} of ${index}\n`).join('')]));
+    const { dir } = branchWith({ 'src/icon.ts': long('M0 0') }, { ...files, 'src/icon.ts': long('M1 1') });
+    expect(await briefOf(dir)).toMatch(/src\/icon\.ts \(\+1 -1; patch cut, 1 more line\)\n@@ -1 \+1 @@\n-export const icon/u);
+  });
+
   it('says a patch with a line cut at its length is not the full patch', async () => {
     const { dir } = branchWith({ 'a.txt': 'a\n' }, { 'bundle.js': `${'x'.repeat(400)}\n` });
     const { text: brief, complete } = await changeOf(dir);

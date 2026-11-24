@@ -96,7 +96,12 @@ interface ChangedFile {
   readonly dirty: boolean;
 }
 
-/** A file's patch as read: its leading lines within `FILE_PATCH_BYTES`, the most any share gives, and the whole patch's size, which orders the sharing. */
+/**
+ * A file's patch as read: its leading lines within `FILE_PATCH_BYTES`, the
+ * most any share gives, and the size that orders the sharing: those lines'
+ * when they are the whole patch, long lines capped as the brief shows them,
+ * else the whole patch's, which is larger.
+ */
 interface ReadPatch {
   readonly head: Patch;
   readonly bytes: number;
@@ -226,7 +231,11 @@ class GitReader {
     for (let start = 0; start < readable.length; start += PATCH_CONCURRENCY) {
       const batch = readable.slice(start, start + PATCH_CONCURRENCY);
       const texts = await Promise.all(batch.map(async (file) => [file.file, await this.patch(base, file.file)] as const));
-      for (const [file, text] of texts) if (text !== undefined) read.set(file, { head: cutLines(text, FILE_PATCH_BYTES), bytes: Buffer.byteLength(text) });
+      for (const [file, text] of texts) {
+        if (text === undefined) continue;
+        const head = cutLines(text, FILE_PATCH_BYTES);
+        read.set(file, { head, bytes: Buffer.byteLength(head.cutLines === 0 ? head.text : text) });
+      }
     }
     return sharePatches(read);
   }
@@ -279,7 +288,9 @@ function listedFiles(files: readonly ChangedFile[]): ChangedFile[] {
  * stay whole, and what they leave goes to the longer ones, none past
  * `FILE_PATCH_BYTES`. When too many long patches are left for each to get
  * `MIN_PATCH_BYTES`, the shortest of them get that much while it lasts and
- * the rest get none. Ties go by path, so the cut is the same on every run.
+ * the rest get none, and so does a patch whose share holds its leading
+ * context and none of its changes. Ties go by path, so the cut is the same
+ * on every run.
  */
 function sharePatches(read: ReadonlyMap<string, ReadPatch>): Map<string, Patch> {
   const order = [...read]
@@ -290,12 +301,16 @@ function sharePatches(read: ReadonlyMap<string, ReadPatch>): Map<string, Patch> 
   order.forEach(({ file, head }, index) => {
     const share = Math.min(FILE_PATCH_BYTES, left, Math.max(MIN_PATCH_BYTES, Math.floor(left / (order.length - index))));
     const cut = cutLines(head.text, share);
-    if (cut.text === '' || (head.cutLines + cut.cutLines > 0 && share < MIN_PATCH_BYTES)) return;
+    const partial = head.cutLines + cut.cutLines > 0;
+    if (cut.text === '' || (partial && (share < MIN_PATCH_BYTES || !CHANGE_LINE.test(cut.text)))) return;
     patches.set(file, { text: cut.text, cutLines: head.cutLines + cut.cutLines, cappedLines: head.cappedLines || cut.cappedLines });
     left -= Buffer.byteLength(cut.text) + 1;
   });
   return patches;
 }
+
+/** A patch line that changes something: one added or removed, or a mode change. */
+const CHANGE_LINE = /^(?:[+-]|(?:old|new) mode )/mu;
 
 /** The lines a commit adds and removes in `file`, which orders the patch reads. */
 function changedLines(file: ChangedFile): number {
