@@ -8,12 +8,19 @@ name: microbench
 # and fails when a case reports a direction anyway: it is the evidence that
 # a count is stable enough to compare. `compare` measures the pull request's
 # base against its head (or a dispatched base ref against the branch).
+#
+# A pull request runs it when it changes the harness, the code the cases
+# measure (`scripts/microbench/cases.mjs` loads it from packages/core and
+# packages/mobile), or the captured snapshots the cases read as input.
 on:
   pull_request:
     paths:
       - scripts/microbench.ts
       - scripts/microbench/**
       - .github/workflows/microbench.yml
+      - packages/core/src/**
+      - packages/mobile/src/**
+      - packages/mobile/tests/fixtures/snapshots/**
   workflow_dispatch:
     inputs:
       base:
