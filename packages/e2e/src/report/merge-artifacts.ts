@@ -1,6 +1,5 @@
 import { copyFile, lstat, mkdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { resultSegment } from '@e2e-dev/core/lib/run/artifacts';
 import { outputLayout } from '@e2e-dev/core/lib/run/output';
 import type { Report1Document, ReportAttempt, ReportSerialAttempt } from './build.ts';
 import type { ShardInput } from './merge-input.ts';
@@ -62,12 +61,7 @@ export async function copyMergedArtifacts(report: Report1Document, inputs: reado
   for (const result of report.run.results) {
     for (const attempt of result.attempts) await copy(attempt);
     const attempts = result.serialGroupId === undefined ? result.attempts : groups.get(result.serialGroupId)?.attempts ?? [];
-    for (const shard of new Set(attempts.map((attempt) => attempt.shard!))) {
-      if (await exists(path.join(roots.get(shard)!, resultSegment(result), 'trace.md'))) {
-        traced.add(result.id);
-        break;
-      }
-    }
+    if (attempts.length > 0) traced.add(result.id);
   }
   return traced;
 }

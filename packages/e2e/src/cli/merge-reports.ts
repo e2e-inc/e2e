@@ -12,7 +12,7 @@ import { copyMergedArtifacts, exists, inside } from '../report/merge-artifacts.t
 import { readShard } from '../report/merge-input.ts';
 import { mergeShardReports } from '../report/merge.ts';
 import { writeTracePages } from '../report/traces.ts';
-import { writeJsonReport } from '../report/write.ts';
+import { posixRelative, writeJsonReport } from '../report/write.ts';
 import { hostReporters } from '../run/reporter-host.ts';
 import type { BuiltinReporter } from '../run-types.ts';
 import { claimRunnerOutput } from './run-output.ts';
@@ -65,7 +65,7 @@ export async function mergeReports(directories: readonly string[], options: Merg
         projectRoot: staging,
         resultsRoot: pending.results,
       });
-      traces = new Map([...stagedTraces].map(([id, file]) => [id, path.relative(discovered.projectRoot, path.join(output, file))]));
+      traces = new Map([...stagedTraces].map(([id, file]) => [id, posixRelative(discovered.projectRoot, path.join(output, file))]));
       await writeJsonReport(pending.report, report);
       if (await exists(output)) throw new Error('--output must be a new directory');
       await rename(staging, output);

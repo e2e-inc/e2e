@@ -1,7 +1,7 @@
 import { combineExitCodes } from '@e2e-dev/core/lib/internal/errors';
 import { uuidv7 } from '@e2e-dev/core/lib/internal/ids';
 import { compareTests, type Report1Document, type ReportResult, type ReportSerialGroup } from './build.ts';
-import { addUsage, runDuration } from './fold.ts';
+import { combineReportUsage, runDuration } from './fold.ts';
 import type { ShardInput } from './merge-input.ts';
 import { summarizeResults } from './summary.ts';
 
@@ -41,10 +41,11 @@ function mergeSetup(owners: readonly ShardRows[]): ReportResult {
 /** Select the owning shard even when a test filter left its result unselected. */
 function owner(candidates: readonly ShardRows[], key: string): ShardRows {
   const owners = candidates.filter(({ rows }) => rows.some((row) => row.skip?.otherShard !== true));
-  if (owners.length === 1) return owners[0]!;
-  if (owners.length === candidates.length && owners.every(({ rows }) =>
-    rows.every((row) => row.selected === false && row.skip?.otherShard !== true && row.skip?.filter === undefined),
-  )) return owners[0]!;
+  const globallyLeftOut = ({ rows }: ShardRows): boolean =>
+    rows.every((row) => row.selected === false && row.skip?.otherShard !== true && row.skip?.filter === undefined);
+  if (owners.length === candidates.length && owners.every(globallyLeftOut)) return owners[0]!;
+  const [soleOwner] = owners;
+  if (soleOwner !== undefined && owners.length === 1 && !globallyLeftOut(soleOwner)) return soleOwner;
   throw new Error(`incompatible shard selection for ${key}: expected one owning shard`);
 }
 
@@ -153,7 +154,7 @@ export function mergeShardReports(shards: readonly ShardInput[]): Merge {
   const nonPassing = runs.filter((run) => run.exitCode !== 0);
   const blocked = nonPassing.length > 0 && nonPassing.every((run) => run.status === 'blocked') && errors.length === 0;
   const status = exitCode === 0 ? 'passed' : exitCode === 130 ? 'interrupted' : blocked ? 'blocked' : exitCode === 1 ? 'failed' : 'error';
-  const usage = runs.slice(1).reduce((total, run) => addUsage(total, run.usage, results.length), { ...first.usage, discoveredResults: results.length });
+  const usage = runs.slice(1).reduce((total, run) => combineReportUsage(total, run.usage, results.length), { ...first.usage, discoveredResults: results.length });
   const times = runs.map((run) => [run.startedAt, run.finishedAt] as const);
   const startedAt = times.map(([start]) => start).toSorted()[0]!;
   const finishedAt = times.map(([, finish]) => finish).toSorted().at(-1)!;

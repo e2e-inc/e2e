@@ -127,13 +127,22 @@ it('keeps both shared setup executions and links each shard’s local evidence',
 it('prefers a shard’s folded rerun and preserves results owned by the other shard', () => {
   const fixture = project();
   expect(shard(fixture, 1).status).toBe(0);
-  expect(shard(fixture, 2, { FAIL_CHECKOUT: '1' }).status).toBe(1);
+  expect(cli(fixture, ['run', '--shard', '2/2', '--output', 'shard-2', '--repeat-each', '2'], { FAIL_CHECKOUT: '1' }).status).toBe(1);
+  const failedResult = report(fixture, 'shard-2').results.find((row) => row.selected && row.titlePath.at(-1) === 'checkout')!;
+  const inputTrace = path.join(fixture.dir, 'shard-2/results', resultSegment(failedResult), 'trace.md');
+  expect(existsSync(inputTrace)).toBe(true);
   expect(cli(fixture, ['run', '--last-failed', '--output', 'shard-2']).status).toBe(0);
+  expect(existsSync(inputTrace)).toBe(false);
   const merged = cli(fixture, ['merge-reports', 'shard-1', 'shard-2', '--output', 'merged']);
   expect(merged.status, merged.stderr).toBe(0);
-  expect(report(fixture, 'merged').results.filter((row) => row.selected && row.kind === 'test').map((row) => [
+  const run = report(fixture, 'merged');
+  expect(run.results.filter((row) => row.selected && row.kind === 'test').map((row) => [
     row.titlePath.at(-1), row.repeat, row.status, row.attempts.length,
   ])).toEqual([['cart', 0, 'passed', 1], ['cart', 1, 'passed', 1], ['checkout', 0, 'flaky', 3]]);
+  const checkout = run.results.find((row) => row.titlePath.at(-1) === 'checkout')!;
+  const trace = path.join(fixture.dir, 'merged/results', resultSegment(checkout), 'trace.md');
+  expect(existsSync(trace)).toBe(true);
+  expect(readFileSync(trace, 'utf8')).toContain('checkout failed');
 }, 60_000);
 
 it('refuses a live-only reporter and refuses artifacts that resolve outside a shard', () => {
@@ -174,11 +183,63 @@ export default { secrets: { publishing: value }, reporters: [{
     MERGE_FIXTURE_SECRET: value,
   });
   expect(merged.status).toBe(0);
-  expect(merged.stderr).toContain('reporter "publisher" failed: <secret:publishing>');
+  expect(merged.stderr.includes('reporter "publisher" failed: <secret:publishing>')).toBe(true);
   for (const representation of [value, encodeURIComponent(value), Buffer.from(value).toString('base64')]) {
     expect((merged.stdout + merged.stderr).includes(representation)).toBe(false);
     expect(readFileSync(path.join(fixture.dir, 'merged/report.json'), 'utf8').includes(representation)).toBe(false);
   }
+}, 60_000);
+
+it('rejects different pre-shard selections and invalid result identities', () => {
+  const fixture = project();
+  const testFile = path.join(fixture.dir, 'tests/shop.e2e.ts');
+  writeFileSync(testFile, `import { test } from 'e2e';
+for (const title of ['alpha', 'beta', 'gamma', 'delta']) test(title, async () => {});
+`);
+  expect(shard(fixture, 1).status).toBe(0);
+  expect(cli(fixture, ['run', '--shard', '2/2', '--output', 'shard-2', '--grep', 'alpha|beta|delta']).status).toBe(0);
+  const args = ['merge-reports', 'shard-1', 'shard-2', '--output', 'merged'];
+  const incompatible = cli(fixture, args);
+  expect(incompatible.status).toBe(2);
+  expect(incompatible.stderr).toContain('incompatible shard selection');
+  expect(shard(fixture, 2).status).toBe(0);
+  const malformed = report(fixture, 'shard-2');
+  malformed.results[0]!.id = 'not-a-report-result-id';
+  writeFileSync(path.join(fixture.dir, 'shard-2/report.json'), JSON.stringify({ schemaVersion: 'report-1', run: malformed }));
+  const invalid = cli(fixture, args);
+  expect(invalid.status).toBe(2);
+  expect(invalid.stderr).toContain('report-1 document');
+  expect(existsSync(path.join(fixture.dir, 'merged'))).toBe(false);
+}, 60_000);
+
+it('keeps serial group results and shard failure limits in the final verdict', () => {
+  const fixture = project();
+  writeFileSync(path.join(fixture.dir, 'tests/shop.e2e.ts'), `import { test } from 'e2e';
+test.describe('order', { serial: true }, () => {
+  test('alpha', async () => { if (process.env.FAIL_CHECKOUT) throw new Error('alpha failed'); });
+  test('beta', async () => {});
+});
+test('gamma', async () => {});
+test('delta', async () => {});
+`);
+  for (const index of [1, 2]) {
+    const result = cli(fixture, ['run', '--shard', `${index}/2`, '--max-failures', '1', '--output', `shard-${index}`], index === 1 ? { FAIL_CHECKOUT: '1' } : {});
+    expect(result.status).toBe(index === 1 ? 1 : 0);
+  }
+  const before = report(fixture, 'shard-1');
+  const after = report(fixture, 'shard-2');
+  const merged = cli(fixture, ['merge-reports', 'shard-1', 'shard-2', '--output', 'merged']);
+  expect(merged.status, merged.stderr).toBe(1);
+  const run = report(fixture, 'merged');
+  expect(run.results.map((row) => [row.titlePath.at(-1), row.status, row.skip?.cause])).toEqual([
+    ['alpha', 'failed', undefined],
+    ['beta', 'skipped', 'serial-predecessor-failed'],
+    ['gamma', 'skipped', 'failure-limit'],
+    ['delta', 'passed', undefined],
+  ]);
+  expect(run.serialGroups).toHaveLength(1);
+  expect(run.serialGroups[0]?.attempts[0]?.shard).toBe(1);
+  expect(run.usage.artifactBytes).toBe(before.usage.artifactBytes + after.usage.artifactBytes);
 }, 60_000);
 
 it('identifies missing and duplicate shards before writing any report', () => {

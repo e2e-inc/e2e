@@ -81,7 +81,7 @@ function foldGroup(current: ReportSerialGroup, before: readonly ReportSerialGrou
  * The usage of two runs as one: their totals added, their per-step maxima
  * the larger of the two, and the results counted again.
  */
-export function addUsage(a: ReportRun['usage'], b: ReportRun['usage'], discoveredResults: number): ReportRun['usage'] {
+export function combineReportUsage(a: ReportRun['usage'], b: ReportRun['usage'], discoveredResults: number): ReportRun['usage'] {
   const optional = (x: number | undefined, y: number | undefined): number | undefined => (x === undefined && y === undefined ? undefined : (x ?? 0) + (y ?? 0));
   const cachedTokens = optional(a.modelCachedTokens, b.modelCachedTokens);
   const cost = optional(a.estimatedCostUsd, b.estimatedCostUsd);
@@ -243,7 +243,7 @@ export function foldLastRun(current: Report, lastRun: Report): Report {
       results,
       errors: [...current.run.errors, ...carriedErrors, ...otherShardFailures],
       summary: summarizeResults(results, serialGroups),
-      usage: addUsage(lastRun.run.usage, current.run.usage, results.length),
+      usage: combineReportUsage(lastRun.run.usage, current.run.usage, results.length),
       filters: lastRun.run.filters,
       changes: lastRun.run.changes,
       ...(lastRun.run.shard === undefined ? {} : { shard: lastRun.run.shard }),

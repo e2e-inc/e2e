@@ -1473,7 +1473,9 @@ Reporters must implement a finished-run hook. The command reads finished
 reports and does not replay live events. Its terminal verdict goes to
 stderr, so the JSON reporter can write the document alone to stdout.
 
-The merged run counts each setup once, keeps its attempts by shard, and
+The merge regenerates trace pages from recorded attempts, including attempts
+from earlier shard reruns. The merged run counts each setup once, keeps its
+attempts by shard, and
 takes the worst setup verdict. It preserves the shard exit statuses, so a
 per-shard `--max-failures` stop is never treated as a pass. The recorded
 duration spans the earliest shard start to the latest shard finish. The

@@ -45,6 +45,7 @@ const document = z.object({
     targets: z.array(z.object({ id: z.string(), platform: z.string() })),
     results: z.array(z.object({
       ...pair,
+      id: z.string().regex(/^[a-f0-9]{64}$/u),
       kind: z.enum(['setup', 'test']),
       testId: z.string(),
       file: z.string(),
@@ -58,6 +59,8 @@ const document = z.object({
     })),
     serialGroups: z.array(z.object({
       ...pair,
+      agent: pair.agent.optional(),
+      repeat: pair.repeat.optional(),
       attempts: z.array(attempt.extend({ members: z.array(z.object({
         testId: z.string(),
         steps: z.array(step),
