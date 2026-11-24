@@ -12,6 +12,7 @@
  * | target_still_moving with `details.dispatched: no`            | NODE_STALE (retryable)        |
  * | a covered or keyboard-occluded target, `dispatched: no`      | NOT_ACTIONABLE, with the hint |
  * | a target with no screen origin to aim at, `dispatched: no`   | NOT_ACTIONABLE, with the hint |
+ * | a point swipe off agent-device's viewport, nothing sent      | NOT_ACTIONABLE, with the hint |
  * | the iOS runner busy, wedged, or past its watchdog           | ENGINE_FAILURE, naming the   |
  * | a snapshot the iOS runner acquired but could not present    |   runner and the recovery    |
  * | anything else, agent-device's own timeouts included         | ENGINE_FAILURE with the text |
@@ -28,7 +29,7 @@
 
 import { isAgentDeviceError, normalizeAgentDeviceError } from 'agent-device';
 import { defaultHintForCode } from 'agent-device/contracts';
-import { EngineError, ConfigurationError, InfrastructureError, TestError, raceAbort } from '@e2e-dev/core/engine';
+import { EngineError, ConfigurationError, InfrastructureError, TestError, raceAbort, type ViewportSize } from '@e2e-dev/core/engine';
 import { cancelled } from './support.ts';
 
 /**
@@ -363,6 +364,34 @@ export async function runCommand<T>(label: string, work: () => Promise<T>, signa
   } catch (cause) {
     throw translateError(cause, label, where);
   }
+}
+
+/**
+ * The `details.reason` agent-device refuses a gesture with, before anything is
+ * sent, when a point of its path leaves the viewport it checks against, a
+ * rect in `details.viewport`. On iOS that rect stops at the open soft
+ * keyboard's top edge for a swipe, while since agent-device 0.21.42 a timed
+ * pan's rect keeps the keyboard in it.
+ */
+const OUT_OF_BOUNDS_REASON = 'GESTURE_TRAJECTORY_OUT_OF_BOUNDS';
+
+/**
+ * A `swipeTo` agent-device refused for a path outside its viewport:
+ * `NOT_ACTIONABLE`, since nothing was sent and the device is fine. When an
+ * untimed swipe was checked against a viewport shorter than `screen`, the
+ * keyboard cut it, so the hint names `duration`, which sends the path as a
+ * timed pan that may cross the keyboard. Otherwise agent-device's own hint
+ * stays. Anything else is returned unchanged.
+ */
+export function refusedSwipePath(cause: unknown, operation: string, timed: boolean, screen: ViewportSize | undefined): unknown {
+  const { reason, viewport } = details(cause);
+  if (reason !== OUT_OF_BOUNDS_REASON) return cause;
+  const checked = typeof viewport === 'object' && viewport !== null && 'height' in viewport ? viewport.height : undefined;
+  const keyboardCut = !timed && screen !== undefined && typeof checked === 'number' && checked < screen.height;
+  const text = keyboardCut
+    ? `${message(cause)} Hint: Nothing was sent. The open soft keyboard cuts the ${screen.height}-point screen to that viewport for a swipe with no duration; pass duration to send the path as given, across the keyboard.`
+    : withHint(cause, message(cause));
+  return new EngineError('NOT_ACTIONABLE', `${operation} failed: ${text}`, { retryable: false, cause });
 }
 
 /**

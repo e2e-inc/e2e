@@ -4781,6 +4781,33 @@ describe('deterministic actions', () => {
     expect(h.fake.methods()).not.toContain('interactions.swipe');
   });
 
+  it('fails a point swipe agent-device refuses as off its viewport as NOT_ACTIONABLE, naming duration only when the keyboard cut an untimed swipe', async () => {
+    const h = harness({ settle: false, transition: 0 });
+    await openAttempt(h);
+    await observed(h, 'About');
+    let height = 500;
+    const offViewport = (): never => {
+      throw new AppError('INVALID_ARGS', `Gesture point (201, 610) is outside the usable area of the 390x${height} viewport`, {
+        reason: 'GESTURE_TRAJECTORY_OUT_OF_BOUNDS',
+        viewport: { x: 0, y: 0, width: 390, height },
+        hint: 'Use the coordinate units snapshot reports: points on Apple platforms, not screenshot pixels.',
+      });
+    };
+    h.fake.respond('interactions.swipe', offViewport);
+    h.fake.respond('interactions.pan', offViewport);
+    const swipe = (durationMs?: number) =>
+      h.engine.performAt!({ x: 201, y: 261 }, { kind: 'swipeTo', target: { x: 201, y: 610 }, ...(durationMs === undefined ? {} : { durationMs }) }, test());
+    const refused = { code: 'NOT_ACTIONABLE', retryable: false };
+
+    await expect(swipe()).rejects.toMatchObject(refused);
+    await expect(swipe()).rejects.toThrow(/390x500 viewport Hint: Nothing was sent\. The open soft keyboard cuts the 844-point screen .*pass duration to send the path as given, across the keyboard\.$/);
+    await expect(swipe(100)).rejects.toMatchObject(refused);
+    await expect(swipe(100)).rejects.toThrow(/390x500 viewport Hint: Use the coordinate units/);
+    height = 844;
+    await expect(swipe()).rejects.toMatchObject(refused);
+    await expect(swipe()).rejects.toThrow(/390x844 viewport Hint: Use the coordinate units/);
+  });
+
   it('refuses the agent node swipe on a capture without the window origin', async () => {
     const h = harness({ settle: false, transition: 0 });
     await openAttempt(h);
