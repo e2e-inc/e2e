@@ -193,6 +193,7 @@ translation moves or goes with it in the same change.
 | command | कमांड | f |
 | call (noun) | कॉल | f |
 | lease | लीज़ | f |
+| release (a lease, a device) | रिलीज़ करना | |
 | request | रिक्वेस्ट | f |
 | reference (docs) | रेफ़रेंस | m |
 | action | एक्शन | m |

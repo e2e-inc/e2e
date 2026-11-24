@@ -26,7 +26,7 @@ Android एम्युलेटर, iOS सिम्युलेटर और �
 ## मोबाइल टारगेट डिवाइस पर चलाएँ
 
 रन शुरू होने पर हर वर्कर स्लॉट एक डिवाइस लीज़ पर लेता है, और रन ख़त्म होने पर
-उसे छोड़ देता है।
+उसे रिलीज़ कर देता है।
 
 <Tip>
 होस्टेड डिवाइस के साथ e2e चलाने के लिए Mac, Xcode या Android SDK की ज़रूरत नहीं है।
@@ -88,7 +88,7 @@ export default {
 ```
 
 `device` और `osVersion` हूबहू TestMu AI के कैटलॉग से मेल खाने चाहिए, ठीक वैसे
-जैसे [capabilities generator](https://www.lambdatest.com/capabilities-generator)
+जैसे [capabilities जनरेटर](https://www.lambdatest.com/capabilities-generator)
 उन्हें दिखाता है: वर्चुअल iOS डिवाइस के लिए `18.0`, असली iOS डिवाइस के लिए
 `18`, और Android के लिए `14`। असली और वर्चुअल डिवाइस के कैटलॉग अलग-अलग हैं।
 
@@ -225,7 +225,7 @@ testmuBrowsers({
   उसे छोड़ता नहीं, उसका बिल बनता रहता है, उस पर कोई टेस्ट न चले तब भी।
 - **डिवाइस पर रुका हुआ रनर।** अगर रनर डिवाइस छोड़ने से पहले ही किल हो जाए, तो
   सेशन को कोई अगली कमांड नहीं भेजता। TestMu AI का
-  [idle timeout](https://www.lambdatest.com/support/docs/desired-capabilities-in-appium/)
+  [आइडल टाइमआउट](https://www.lambdatest.com/support/docs/desired-capabilities-in-appium/)
   (डिफ़ॉल्ट 120 सेकंड) उसे ख़त्म करता है, आख़िरी कमांड के करीब तीन मिनट बाद।
 - **कन्फ़र्म न हुआ रिलीज़ रन को फ़ेल करता है।** अगर agent-device पक्का नहीं कर
   पाता कि उसने डिवाइस सेशन ख़त्म कर दिया, तो रिलीज़ रन को फ़ेल कर देता है, चाहे

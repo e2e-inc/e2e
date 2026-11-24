@@ -10,7 +10,7 @@ description: "@e2e-dev/browserstack के browserstack() डिवाइस प
 [BrowserStack App Automate](https://www.browserstack.com/app-automate) के असली
 Android और iOS डिवाइस के लिए एक [डिवाइस प्रोवाइडर](/mobile#hosted-devices) है।
 रन शुरू होने पर हर वर्कर स्लॉट एक डिवाइस लीज़ पर लेता है, और रन ख़त्म होने पर
-उसे छोड़ देता है।
+उसे रिलीज़ कर देता है।
 
 <Tip>
 होस्टेड डिवाइस के साथ e2e चलाने के लिए Mac, Xcode या Android SDK की ज़रूरत नहीं है।
@@ -57,7 +57,7 @@ export default {
 ```
 
 `device` और `osVersion` हूबहू BrowserStack के App Automate कैटलॉग से मेल खाने
-चाहिए, ठीक वैसे जैसे [device list](https://www.browserstack.com/list-of-browsers-and-platforms/app_automate)
+चाहिए, ठीक वैसे जैसे [डिवाइस लिस्ट](https://www.browserstack.com/list-of-browsers-and-platforms/app_automate)
 उन्हें दिखाती है: Android पर `13.0`, iOS पर `18`।
 
 `app` वह बिल्ड है जो BrowserStack हर सेशन पर इंस्टॉल करता है। यह इनमें से एक
