@@ -43,13 +43,14 @@ import {
   type ProviderRecording,
   type VideoSegment,
   type SemanticNode,
+  type ViewportIntersection,
   type ViewportPoint,
   type ViewportSize,
   ConfigurationError,
   TestError,
 } from '@e2e-dev/core/engine';
 import { isAppNotRunning, isSnapshotPresentationFailure, isUnreadableCapture, ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING, refusedSwipePath, runCommand, staleOr } from './errors.ts';
-import { pointerInteraction, DEFAULT_LONG_PRESS_MS } from './actions.ts';
+import { pointerInteraction, DEFAULT_LONG_PRESS_MS, MAX_TAP_COUNT } from './actions.ts';
 import { resolveExpression } from './locate.ts';
 import { launchArgumentList, launchArgumentsForOpen } from './launch-arguments.ts';
 import {
@@ -228,6 +229,8 @@ interface NodeBinding {
   readonly keyboardVisible: boolean;
   /** Whether the capture `node.rect` came from could not place its window on the screen. */
   readonly originUnknown: boolean;
+  /** The size that capture read off its own tree, which `viewportFor` checks against the screen. */
+  readonly captureViewport: ViewportSize | undefined;
   /** Whether `fill` and `clear` may type into the node, judged with the children `node` leaves out. */
   readonly takesText: boolean;
 }
@@ -1224,8 +1227,7 @@ export class AgentDeviceSurface {
    * measures every rect and point against the viewport, so an invented one
    * would misplace every tap.
    */
-  private async viewportFor(projected: ProjectedSnapshot, signal: AbortSignal, budget: InputBudget): Promise<ViewportSize> {
-    const read = projected.viewport;
+  private async viewportFor(read: ViewportSize | undefined, signal: AbortSignal, budget: InputBudget): Promise<ViewportSize> {
     const known = this.knownViewport;
     if (known !== undefined) {
       if (read === undefined) return known;
@@ -1258,7 +1260,7 @@ export class AgentDeviceSurface {
   async viewport(operation: OperationContext, budget: InputBudget): Promise<ViewportSize> {
     const raw = await this.snapshotOrEmpty(operation, this.interactiveSnapshots, budget);
     const projected = this.project(raw);
-    const { width, height } = await this.viewportFor(projected, operation.signal, budget);
+    const { width, height } = await this.viewportFor(projected.viewport, operation.signal, budget);
     return { width, height };
   }
 
@@ -1266,7 +1268,7 @@ export class AgentDeviceSurface {
     const raw = await this.snapshotOrEmpty(operation, this.interactiveSnapshots, budget);
     const projected = this.project(raw);
     this.generation = new Map(projected.index.map((entry) => [entry.id, this.bind(entry, projected)]));
-    const viewport = await this.viewportFor(projected, operation.signal, budget);
+    const viewport = await this.viewportFor(projected.viewport, operation.signal, budget);
     const location = screenLocation(raw.appBundleId ?? raw.appName ?? this.appIdentity, screenTitle(projected));
     const capture = options?.pixels === true ? await this.capturePixels(operation, projected, viewport, { normalizeStatusBar: options.comparable === true }, budget) : undefined;
     const keyboardVisible = measuredKeyboard(raw);
@@ -1314,6 +1316,37 @@ export class AgentDeviceSurface {
         ...(location === undefined ? {} : { location }),
       }),
     );
+  }
+
+  /**
+   * Whether a positive area of a node is on the screen, read off the capture
+   * that located it. agent-device clips each rect to the window and to its
+   * scrolling ancestors, and leaves out a node with nothing on screen, so a
+   * rect is only the visible part of a box: the share of the whole is
+   * unknown, and the answer carries no `ratio`. The screen is the one
+   * `viewportFor` confirms, as `observe` does: a capture whose size is not
+   * the known screen's asks the device, since an app drawn smaller than the
+   * screen shrinks it and a resized screen (a foldable, Split View) grows it.
+   * A rect whose window could not be placed on the screen is refused rather
+   * than guessed at.
+   */
+  async viewportIntersection(ref: NodeRef, operation: OperationContext, budget: InputBudget): Promise<ViewportIntersection> {
+    const entry = this.resolveRef(ref);
+    const rect = entry.node.rect;
+    if (entry.originUnknown) {
+      throw new EngineError('UNSUPPORTED_CAPABILITY', `whether node ${ref.id} is in the viewport is unknown: the ${ORIGIN_UNKNOWN_BOUNDS}`, {
+        retryable: false,
+      });
+    }
+    if (rect === undefined) {
+      throw new EngineError('UNSUPPORTED_CAPABILITY', `node ${ref.id} has no bounds on the screen, so whether it is in the viewport is unknown`, {
+        retryable: false,
+      });
+    }
+    const screen = await this.viewportFor(entry.captureViewport, operation.signal, budget);
+    const width = Math.min(rect.x + rect.width, screen.width) - Math.max(rect.x, 0);
+    const height = Math.min(rect.y + rect.height, screen.height) - Math.max(rect.y, 0);
+    return { intersects: width > 0 && height > 0 };
   }
 
   private resolveRef(ref: NodeRef): NodeBinding {
@@ -1364,6 +1397,7 @@ export class AgentDeviceSurface {
       controlRef: control.ref,
       keyboardVisible: snapshot.keyboardVisible,
       originUnknown: snapshot.originUnknown,
+      captureViewport: snapshot.viewport,
       takesText: mayTakeText(entry.node),
       refsGeneration: snapshot.refsGeneration,
     };
@@ -1549,6 +1583,9 @@ export class AgentDeviceSurface {
     const refuseFill = (binding: NodeBinding): EngineError =>
       unsupported(`agent-device can only ${action.kind} editable fields; node ${binding.id} is ${binding.node.role ?? 'unknown'}`);
     if (filling && !entry.takesText) throw refuseFill(entry);
+    if (action.kind === 'multiTap' && action.count > MAX_TAP_COUNT) {
+      throw unsupported(`agent-device presses at most ${MAX_TAP_COUNT} times in a row; got a count of ${action.count}`);
+    }
     const label = `perform ${action.kind}`;
     const client = this.requireClient();
     // A toggle already in the wanted state sends nothing, so it neither waits
@@ -1582,6 +1619,8 @@ export class AgentDeviceSurface {
           return input.press(client, { ...this.actionTarget(target), ...settle });
         case 'doubleTap':
           return input.press(client, { ...this.actionTarget(target), count: 2, ...settle });
+        case 'multiTap':
+          return input.press(client, { ...this.actionTarget(target), count: action.count, ...settle });
         case 'longPress':
           return input.send(
             () => client.interactions.longPress({ ...this.actionTarget(target), ...settle, durationMs: action.durationMs ?? DEFAULT_LONG_PRESS_MS }),
@@ -1824,7 +1863,7 @@ export class AgentDeviceSurface {
     for (const axis of ['horizontal', 'vertical'] as const) {
       const { raw } = reading;
       const projected = projectSnapshot(raw.nodes ?? [], { mintId: () => 'keyboard', viewport: raw.viewport });
-      const viewport = await this.viewportFor(projected, signal, input);
+      const viewport = await this.viewportFor(projected.viewport, signal, input);
       const top = keyboardTop(raw, viewport);
       if (top === undefined) {
         throw new EngineError(

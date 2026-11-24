@@ -262,6 +262,11 @@ declare const tokenFromEnv: string | undefined;
 declare const engineApp: EngineAppInfo;
 [...(engineApp.launchArguments ?? [])] satisfies string[];
 engineApp.launchArgumentValues?.['AppleLanguages'] satisfies string | number | boolean | readonly string[] | undefined;
+// An engine says it opens a file app, and is told at the check when the target's app is one.
+({ fileApps: true }) satisfies Pick<import('../../src/engine/index.ts').Engine, 'fileApps'>;
+({ targetName: 'web', fileApp: true }) satisfies import('../../src/engine/index.ts').EngineAppCheckInfo;
+// @ts-expect-error the declaration is a boolean, not a list of schemes
+({ fileApps: ['file:'] }) satisfies Pick<import('../../src/engine/index.ts').Engine, 'fileApps'>;
 
 // @ts-expect-error the app URL is the target's app.url, not a key of the target itself
 ({ targets: [{ engine, url: 'http://localhost:3000' }] }) satisfies E2EConfig;
@@ -550,10 +555,16 @@ void screen.getByRole('button').waitFor({ state: 'gone' });
 // Playwright's state flags and ignoreCase are taken where Playwright takes them, and nowhere else.
 void asyncExpectation.toBeChecked({ checked: false });
 void asyncExpectation.toBeVisible({ visible: false, timeout: 1000 });
+void asyncExpectation.toBeInViewport({ ratio: 0 });
+void asyncExpectation.toBeInViewport({ ratio: 0.5, timeout: 1000 });
 void asyncExpectation.toContainText('error', { ignoreCase: true });
 void asyncExpectation.toHaveAttribute('data-kind', 'error', { ignoreCase: true });
 // @ts-expect-error toBeChecked has no indeterminate state
 void asyncExpectation.toBeChecked({ indeterminate: true });
+// @ts-expect-error toBeInViewport takes a numeric ratio
+void asyncExpectation.toBeInViewport({ ratio: 'half' });
+// @ts-expect-error toBeInViewport has no threshold option
+void asyncExpectation.toBeInViewport({ threshold: 0.5 });
 // @ts-expect-error a value is compared as it is, case included
 void asyncExpectation.toHaveValue('a', { ignoreCase: true });
 // @ts-expect-error presence has no case to ignore
@@ -841,6 +852,15 @@ void screen.getByRole('row').dblclick({ modifiers: ['Shift'], timeout: 1_000 });
 // @ts-expect-error modifiers are the key grammar's modifier names
 void screen.getByRole('row').doubleTap({ modifiers: ['Hyper'] });
 void screen.getByRole('image').click({ position: point });
+void screen.getByRole('button').tap({ count: 3, timeout: 1_000 });
+void screen.getByRole('button').click({ count: 3, modifiers: ['Shift'] });
+// @ts-expect-error a tap count is a number
+void screen.getByRole('button').tap({ count: '3' });
+// @ts-expect-error a double tap is two taps already; count rides tap and click only
+void screen.getByRole('button').doubleTap({ count: 3 });
+declare const multiTapAction: Extract<import('../../src/engine/index.ts').LocatorAction, { kind: 'multiTap' }>;
+void (multiTapAction.count satisfies number);
+void (multiTapAction.modifiers satisfies readonly KeyModifier[] | undefined);
 // @ts-expect-error a point has both coordinates.
 void screen.tapAt({ x: 1 });
 // @ts-expect-error a path swipe names both ends.

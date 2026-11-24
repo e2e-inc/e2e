@@ -120,7 +120,7 @@ run only in a browser, so a test that uses it declares
 | --- | --- |
 | `click()`, `dblclick()` | `tap()`, `doubleTap()`; `click()` and `dblclick()` are aliases |
 | `click({ button: 'right' })`, `click({ delay })` | `secondaryTap()`, `longPress({ duration })` |
-| `click({ position })`, `click({ modifiers })` | `tap({ position })`, `tap({ modifiers })` |
+| `click({ position })`, `click({ modifiers })`, `click({ clickCount: 3 })` | `tap({ position })`, `tap({ modifiers })`, `tap({ count: 3 })` |
 | `fill()`, `pressSequentially()`, `clear()`, `focus()`, `blur()`, `hover()`, `check()`, `uncheck()`, `dragTo()`, `setInputFiles(path)`, `selectOption({ label })` or `{ value }` | the same, without `force`, `trial`, or `position` |
 | `setInputFiles({ name, mimeType, buffer })` | Web only. Pass a plain object with only `name`, `mimeType`, and `buffer`. |
 | `press(key)` | the same for one character or a [named key](/reference/engine#keys); `browser.keyboard.press` after `focus()` for a key code |
@@ -134,7 +134,7 @@ run only in a browser, so a test that uses it declares
 
 | Playwright | e2e |
 | --- | --- |
-| `toBeVisible()`, `toBeHidden()`, `toBeEnabled()`, `toBeDisabled()`, `toBeChecked()`, `toBeFocused()`, `toBeAttached()`, `toHaveText()`, `toContainText()`, `toHaveValue()`, `toHaveAttribute()`, `toHaveCount()`, `toHaveAccessibleName()`, `toHaveRole()`, `toBeEditable()` | the same, with `{ visible }`, `{ enabled }`, `{ editable }`, `{ checked }`, `{ attached }`, and `{ ignoreCase }` |
+| `toBeVisible()`, `toBeHidden()`, `toBeEnabled()`, `toBeDisabled()`, `toBeChecked()`, `toBeFocused()`, `toBeAttached()`, `toBeInViewport()`, `toHaveText()`, `toContainText()`, `toHaveValue()`, `toHaveAttribute()`, `toHaveCount()`, `toHaveAccessibleName()`, `toHaveRole()`, `toBeEditable()` | the same, with `{ visible }`, `{ enabled }`, `{ editable }`, `{ checked }`, `{ attached }`, `{ ratio }`, and `{ ignoreCase }`; `toBeInViewport` reads a zero-size element as outside and [differs on a device](/reference/expect#tobeinviewport) |
 | `toHaveId(id)`, `toContainClass(name)` | `toHaveAttribute('id', id)`, `toHaveAttribute('class', RegExp)` |
 | `expect(page).toHaveURL()`, `toHaveTitle()` | `expect(browser).toHaveURL()`, `toHaveTitle()` |
 | `expect(page).toHaveScreenshot()`, `expect(locator).toHaveScreenshot()` | `expect(screen).toHaveScreenshot()` and the locator form, see [Visual comparison](/visual-testing) |
@@ -151,7 +151,7 @@ run only in a browser, so a test that uses it declares
 | --- | --- |
 | `page.goto(path)` | `app.open(path)`; `browser.goto(url, { waitUntil, timeout })` for the options |
 | `page.goBack()`, `goForward()`, `reload()`, `url()`, `title()`, `setViewportSize()` | `browser.back()`, `forward()`, `reload()`, `url()`, `title()`, `setViewport()` |
-| `page.waitForURL(url)` | `browser.waitForURL(url)` with a `RegExp` or an exact URL, not a glob |
+| `page.waitForURL(url)` | `browser.waitForURL(url)` with a glob, a `RegExp`, or an exact URL |
 | `page.screenshot()` | `app.screenshot(label)`, the viewport, attached to the report |
 | `locator.screenshot()` | `locator.screenshot(label)`, the part of the match inside the viewport, attached to the report |
 | A fresh `context` for each test | the same for each attempt; `app.restart()` recreates it, `app.clearState()` also clears storage |
@@ -161,9 +161,9 @@ run only in a browser, so a test that uses it declares
 
 | Playwright | e2e |
 | --- | --- |
-| `page.route(pattern, handler)`, `unroute()`, `unrouteAll()` | the same on `browser`; a pattern is a `RegExp`, a glob on the full URL, or `{ method, url }` for one HTTP method |
+| `page.route(pattern, handler)`, `unroute()`, `unrouteAll()` | the same on `browser`; a pattern is a `RegExp`, a URL glob resolved against the app URL, or `{ method, url }` for one HTTP method |
 | `route.fulfill()`, `continue()`, `fallback()`, `abort()`, `fetch()` | the same, see [`route`](/reference/web#route) for the options each takes |
-| `page.waitForResponse(pattern)` | `browser.waitForResponse(pattern)`; `'**/api/orders'`, not `'/api/orders'` |
+| `page.waitForResponse(pattern)` | `browser.waitForResponse(pattern)` with the same URL globs |
 | `page.on('dialog')`, `page.waitForEvent('download')` | `browser.onDialog('accept')` or a handler; `browser.waitForDownload(() => trigger)` |
 | `page.waitForEvent('popup')` | `browser.waitForPopup(() => trigger)`, which makes the new tab active, see [Tabs](/reference/web#tabs) |
 | `context.pages()`, `context.newPage()`, `page.bringToFront()` | `browser.tabs()`, `browser.newTab()`, `tab.activate()`; no `context.on('page')` event |
@@ -263,14 +263,14 @@ purpose. Use the workaround, or keep the test in Playwright.
 | --- | --- |
 | `locator.locator(selector)`, `locator.and()`, `filter({ visible })` | One `browser.locator` selector, such as `'.card >> .close'`, or a `screen` query inside the scope |
 | `locator.evaluate()`, `expect(locator).toHaveClass()`, `toHaveCSS()`, `dispatchEvent()` | `browser.evaluate(fn, selector)`; `expect(browser).toHaveClass(locator, cls)` |
-| `selectOption([...])`, `click({ clickCount })`, `hover({ position })` | `browser.evaluate` for a multi-select; `browser.mouse` with `boundingBox()` |
+| `selectOption([...])`, `hover({ position })` | `browser.evaluate` for a multi-select; `browser.mouse` with `boundingBox()` |
 
 </Accordion>
 <Accordion title="Assertions">
 
 | Playwright | Use today |
 | --- | --- |
-| `toBeEmpty()`, `toBeInViewport()` | `toHaveValue('')` on a form control, `toHaveText('')` on other elements; `expect.poll` over `boundingBox()` |
+| `toBeEmpty()` | `toHaveValue('')` on a form control, `toHaveText('')` on other elements |
 | `{ fullPage, clip }`, `snapshotPathTemplate`, `ignoreSnapshots` | The viewport or one locator in `toHaveScreenshot`; a tag and `--exclude-tag` to skip visual tests |
 | `expect.configure()` | `{ timeout }` on each call |
 | `@axe-core/playwright` | axe-core through `browser.addInitScript({ path: 'node_modules/axe-core/axe.min.js' })`, then `axe.run()` in `browser.evaluate` |
@@ -284,7 +284,7 @@ purpose. Use the workaround, or keep the test in Playwright.
 | Playwright | Use today |
 | --- | --- |
 | `devices['iPhone 15']`, `isMobile`, `hasTouch` | `web({ viewport, userAgent, deviceScaleFactor })`; a mobile target for real touch |
-| `waitForURL(glob)`, `waitForFunction()` | A `RegExp`; `expect.poll` over `browser.evaluate` |
+| `waitForFunction()` | `expect.poll` over `browser.evaluate` |
 | `waitForResponse(predicate)`, `waitForRequest()`, `page.on('request')`, `response.ok()` | `browser.waitForResponse(pattern)`, or `{ method, url }` to filter on the request's method, then check the response in the test, `status` for `ok()`. For requests, a `browser.route` handler that records `route.request`, then calls `route.fallback()` |
 | `route.fulfill({ response })`, `route.abort(code)`, `route.fetch(options)`, `request.postDataJSON()` | `status`, `headers`, and `body` from `route.fetch()`; `JSON.parse(route.request.postData)` |
 | `page.addLocatorHandler()` | Dismiss the overlay in `beforeEach`, or set its consent cookie with `browser.setCookies` |
@@ -339,7 +339,6 @@ purpose. Use the workaround, or keep the test in Playwright.
 | `selectOption('pro')` by value | `selectOption({ value: 'pro' })`. A bare string matches the label only |
 | `use.storageState: 'file.json'`, `context.storageState({ path })` | `test.setup` and `{ session }`. [Sessions last one run](#what-differs-on-purpose), so there is no file |
 | `page.waitForTimeout(ms)`, `page.waitForNavigation()` | A locator assertion on the state you wait for; `browser.waitForURL(url)` |
-| `?` as a literal and `{a,b}` in a route glob | A `RegExp`. In a glob, `?` is a wildcard and `{a,b}` is literal |
 | `--only-changed` | `--changed-since <ref>` with a [test filter](/filters) in `filters` |
 | `page.$()`, `$eval()`, `elementHandle()`, non-JSON `evaluate` values, `locator.page()` | Locators, and `browser.evaluate` with JSON in and out, which the report records and redacts. Pass `browser` to a page object |
 | A dialog with no handler, dismissed silently | `browser.onDialog('dismiss')`. An unhandled dialog fails the next step |
