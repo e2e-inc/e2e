@@ -610,6 +610,12 @@ describe('lifecycle', () => {
     await flag.prepare(info('1A2B3C4D'));
     expect(flag.fake.lastArgs('devices.boot')).toEqual({ platform: 'android', serial: '1A2B3C4D' });
 
+    // agent-device lists a shut-down AVD under its AVD name, which is no serial: it boots by name.
+    const avd = harness({ device: 'Pixel_8_Pro', platform: 'android' });
+    avd.fake.respond('devices.list', () => [...listed, { platform: 'android', id: 'Pixel_8_Pro', name: 'Pixel_8_Pro', kind: 'emulator', booted: false }]);
+    await avd.prepare(info());
+    expect(avd.fake.lastArgs('devices.boot')).toEqual({ platform: 'android', device: 'Pixel_8_Pro' });
+
     // An emulator serial needs no listing; a failed listing leaves names as they were.
     const emulator = harness({ device: 'emulator-5556', platform: 'android' });
     await emulator.prepare(info());

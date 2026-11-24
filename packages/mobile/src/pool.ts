@@ -85,16 +85,58 @@ export interface SessionOwner {
 /** The agent-device session slot `slot` of a target drives; see `DevicePool.session`. */
 type SessionNamer = (owner: SessionOwner, slot: number) => string;
 
+/** A device as agent-device's inventory lists it, with the agent-device session that holds it, when one does. */
+interface ListedDevice {
+  readonly id: string;
+  readonly name: string;
+  readonly booted: boolean;
+  readonly claimedBy?: string | undefined;
+}
+
+/** Lists the platform's devices, booted or not, in agent-device's inventory order. */
+type DeviceInventory = (owner: SessionOwner, signal: AbortSignal) => Promise<ListedDevice[]>;
+
+/**
+ * The inventory of one platform, read through the slot 0 session of the
+ * owner. A device's `id` is a simulator UDID, a physical device's UDID, or an
+ * adb serial while it is booted; agent-device lists a shut-down Android AVD
+ * under its AVD name, which is no serial.
+ */
+function deviceInventory(platform: MobilePlatform, createClient: ClientFactory, session: SessionNamer): DeviceInventory {
+  return async (owner, signal) => {
+    const client = createClient(session(owner, 0));
+    const inventory: unknown = await runCommand('devices', () => client.devices.list({ platform }), signal);
+    if (!Array.isArray(inventory)) return [];
+    return inventory
+      .filter(
+        (device): device is { id: string; name?: unknown; booted?: unknown; claimedBy?: { session?: unknown } } =>
+          typeof device === 'object' &&
+          device !== null &&
+          (device as { platform?: unknown }).platform === platform &&
+          typeof (device as { id?: unknown }).id === 'string',
+      )
+      .map((device) => {
+        const claimedBy = device.claimedBy?.session;
+        return obj({
+          id: device.id,
+          name: typeof device.name === 'string' ? device.name : device.id,
+          booted: device.booted === true,
+          claimedBy: typeof claimedBy === 'string' ? claimedBy : undefined,
+        });
+      });
+  };
+}
+
 /** Whether the `device` option names a pool of devices rather than one device or a provider. */
 export function isDeviceList(device: unknown): device is readonly string[] {
   return Array.isArray(device);
 }
 
 /** The source the `device` option names: a configured pool, the booted devices, or a provider's leases. */
-function sourceFor(options: MobileOptions, createClient: ClientFactory, session: SessionNamer): DeviceSource {
+function sourceFor(options: MobileOptions, inventory: DeviceInventory, session: SessionNamer): DeviceSource {
   const { device } = options;
-  if (device === undefined) return new BootedDevices(options.platform, createClient, session);
-  if (typeof device === 'string') return new ConfiguredDevices([namedDevice(device)], options.platform, createClient, session);
+  if (device === undefined) return new BootedDevices(options.platform, inventory, session);
+  if (typeof device === 'string') return new ConfiguredDevices([namedDevice(device)], options.platform, inventory);
   if (isDeviceList(device)) {
     if (device.length === 0) {
       throw new ConfigurationError(
@@ -102,7 +144,7 @@ function sourceFor(options: MobileOptions, createClient: ClientFactory, session:
         'mobile: `device` is an empty pool; name at least one simulator or emulator, or omit it to use every booted one',
       );
     }
-    return new ConfiguredDevices(device.map(namedDevice), options.platform, createClient, session);
+    return new ConfiguredDevices(device.map(namedDevice), options.platform, inventory);
   }
   return new LeasedDevices(asDeviceProvider(device), options);
 }
@@ -118,9 +160,10 @@ function namedDevice(device: unknown): string {
 /**
  * The devices named in the config, bound in order, as many as the run has
  * slots. agent-device matches a `device` name against device names only, so
- * on Android a name that is a connected device's adb serial binds as that
+ * on Android a name that is a booted device's adb serial binds as that
  * serial: a physical phone has no name of its own to tell it apart from
- * another of the same model. An emulator serial needs no lookup.
+ * another of the same model. An emulator serial needs no lookup, and a
+ * shut-down AVD's name stays a name, so agent-device boots it.
  */
 class ConfiguredDevices implements DeviceSource {
   readonly size: number;
@@ -129,8 +172,7 @@ class ConfiguredDevices implements DeviceSource {
   constructor(
     private readonly devices: readonly string[],
     private readonly platform: MobilePlatform,
-    private readonly createClient: ClientFactory,
-    private readonly session: SessionNamer,
+    private readonly inventory: DeviceInventory,
   ) {
     this.size = devices.length;
     this.fallback = devices.map((device) => ({ device }));
@@ -144,34 +186,19 @@ class ConfiguredDevices implements DeviceSource {
   }
 
   /**
-   * The ids agent-device lists Android devices under, their adb serials. A
-   * failed listing is logged and leaves every entry a name, as it was before
-   * serials were looked up; a cancelled one ends `prepare`.
+   * The adb serials of the booted Android devices. A failed listing is
+   * logged and every entry stays a name; a cancelled one ends `prepare`.
    */
   private async serials(info: EnginePrepareInfo): Promise<ReadonlySet<string>> {
-    const client = this.createClient(this.session(info, 0));
     try {
-      const inventory: unknown = await runCommand('devices', () => client.devices.list({ platform: this.platform }), info.signal);
-      if (!Array.isArray(inventory)) return new Set();
-      return new Set(
-        inventory.flatMap((device: unknown) => {
-          const { id, platform } = (typeof device === 'object' && device !== null ? device : {}) as { id?: unknown; platform?: unknown };
-          return platform === this.platform && typeof id === 'string' ? [id] : [];
-        }),
-      );
+      const listed = await this.inventory(info, info.signal);
+      return new Set(listed.filter((device) => device.booted).map((device) => device.id));
     } catch (cause) {
       if (info.signal.aborted) throw cause;
       info.log(`could not list ${this.platform} devices to match a configured \`device\` by adb serial (${message(cause)}); selecting by name`);
       return new Set();
     }
   }
-}
-
-/** A booted device as the inventory lists it, with the agent-device session that holds it, when one does. */
-interface BootedDevice {
-  readonly id: string;
-  readonly name: string;
-  readonly claimedBy?: string | undefined;
 }
 
 /**
@@ -183,12 +210,12 @@ interface BootedDevice {
 class BootedDevices implements DeviceSource {
   constructor(
     private readonly platform: MobilePlatform,
-    private readonly createClient: ClientFactory,
+    private readonly inventory: DeviceInventory,
     private readonly session: SessionNamer,
   ) {}
 
   async bind(info: EnginePrepareInfo): Promise<readonly SlotBinding[]> {
-    const booted = await this.inventory(info, info.signal);
+    const booted = (await this.inventory(info, info.signal)).filter((device) => device.booted);
     const own = new Set(Array.from({ length: info.slots }, (_, slot) => this.session(info, slot)));
     const held = booted.filter((device) => device.claimedBy !== undefined && !own.has(device.claimedBy));
     const chosen = booted.filter((device) => !held.includes(device)).slice(0, info.slots);
@@ -208,34 +235,11 @@ class BootedDevices implements DeviceSource {
     info.log(`${booted.length} booted ${this.platform} device(s)${skipped}; driving ${chosen.length}: ${chosen.map((device) => device.name).join(', ')}`);
     return chosen.map((device) => ({ deviceId: device.id }));
   }
-
-  /** Every booted device of the platform, by stable id and name, with the session holding it, in agent-device's inventory order. */
-  private async inventory(owner: SessionOwner, signal: AbortSignal): Promise<BootedDevice[]> {
-    const client = this.createClient(this.session(owner, 0));
-    const inventory: unknown = await runCommand('devices', () => client.devices.list({ platform: this.platform }), signal);
-    if (!Array.isArray(inventory)) return [];
-    return inventory
-      .filter(
-        (device): device is { id: string; name?: unknown; claimedBy?: { session?: unknown } } =>
-          typeof device === 'object' &&
-          device !== null &&
-          (device as { booted?: unknown }).booted === true &&
-          (device as { platform?: unknown }).platform === this.platform &&
-          typeof (device as { id?: unknown }).id === 'string',
-      )
-      .map((device) => {
-        const session = device.claimedBy?.session;
-        return obj({
-          id: device.id,
-          name: typeof device.name === 'string' ? device.name : device.id,
-          claimedBy: typeof session === 'string' ? session : undefined,
-        });
-      });
-  }
 }
 
 export class DevicePool {
   private readonly source: DeviceSource;
+  private readonly inventory: DeviceInventory;
   /** What this process's `prepare` bound, per target: a handle may serve several targets and runs. */
   private readonly bound = new Map<string, readonly SlotBinding[]>();
   /** The clients `warm` opened sessions with, per target, held for `finish` to close whatever `warm` got to. */
@@ -245,7 +249,9 @@ export class DevicePool {
     private readonly options: MobileOptions,
     private readonly createClient: ClientFactory,
   ) {
-    this.source = sourceFor(options, createClient, (owner, slot) => this.session(owner, slot));
+    const session: SessionNamer = (owner, slot) => this.session(owner, slot);
+    this.inventory = deviceInventory(options.platform, createClient, session);
+    this.source = sourceFor(options, this.inventory, session);
   }
 
   /**
@@ -317,7 +323,7 @@ export class DevicePool {
    */
   async prepare(info: EnginePrepareInfo): Promise<EnginePrepareResult> {
     if (info.slots === 0) return {};
-    const source = info.device === undefined ? this.source : new ConfiguredDevices([namedDevice(info.device)], this.options.platform, this.createClient, (owner, slot) => this.session(owner, slot));
+    const source = info.device === undefined ? this.source : new ConfiguredDevices([namedDevice(info.device)], this.options.platform, this.inventory);
     const bindings = await source.bind(info);
     await this.warm(bindings, info);
     this.bound.set(info.targetName, bindings);
