@@ -76,8 +76,9 @@ const runnerExtracts = new WeakMap<Agent, Agent['extract']>();
 /**
  * `agent.extract` for an instruction the runner writes itself, such as the
  * explore planner's: the checks and the byte cap are for what a test passes,
- * and a planner prompt that carries the run so far grows past the cap. An
- * agent that is not a built-in fixture runs its own `extract`.
+ * and a planner prompt that carries the run so far grows past the cap. Only
+ * the fixture object itself is looked up, so a wrapper or proxy of it runs
+ * its public `extract`, cap included: a runner caller passes the fixture.
  */
 export function extractForRunner<Schema extends StandardSchemaV1>(
   agent: Agent,

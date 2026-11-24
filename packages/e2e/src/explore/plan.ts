@@ -109,7 +109,11 @@ export interface PlanRequest {
   readonly timeoutMs: number;
 }
 
-/** Asks the model for the next charter or the closing assessment. */
+/**
+ * Asks the model for the next charter or the closing assessment. `agent` is
+ * the test's fixture itself, since a wrapper of it would put the planner
+ * prompt back under the byte cap.
+ */
 export async function planNext(agent: Agent, state: ExploreState, request: PlanRequest): Promise<PlanDecision> {
   const schema = request.change?.skippable === true ? SKIPPABLE_PLAN_SCHEMA : PLAN_SCHEMA;
   return repairPlan(await extractForRunner(agent, planInstruction(state, request), { schema, timeout: request.timeoutMs }));
