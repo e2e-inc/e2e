@@ -461,8 +461,10 @@ export class PlaywrightSurface {
       );
     } catch (cause) {
       if (cause instanceof EngineError) throw cause;
-      const missing = verb === 'launch' ? await missingBrowserLibraries(this.browserName, process.env, this.headed) : [];
-      const reason = missing.length > 0 ? missingLibrariesMessage(this.browserName, missing) : message(cause);
+      // The probe is the one await after the launch settled, so it stops with the init signal too.
+      const missing = verb === 'launch' ? await missingBrowserLibraries(this.browserName, process.env, this.headed, { signal }) : [];
+      // The launch's own reason follows the advice: it can name a second fault the libraries do not explain.
+      const reason = missing.length > 0 ? `${missingLibrariesMessage(this.browserName, missing)}\nlaunch error: ${message(cause)}` : message(cause);
       throw new EngineError('ENGINE_FAILURE', `browser ${verb} failed: ${reason}`, {
         retryable: false,
         cause,

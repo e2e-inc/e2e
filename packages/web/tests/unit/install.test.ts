@@ -14,13 +14,13 @@ describe('browserCheck', () => {
   ];
 
   it('passes an installed browser, warns of a first-run download, and reports nothing it cannot tell', async () => {
-    expect(await browserCheck('chromium', {}, false, () => true)).toEqual([{ id: 'browser', status: 'pass', message: 'chromium is installed' }]);
+    expect(await browserCheck('chromium', {}, false, () => true, () => [])).toEqual([{ id: 'browser', status: 'pass', message: 'chromium is installed' }]);
     expect(await browserCheck('firefox', {}, false, () => false)).toEqual(firstRun);
     expect(await browserCheck('chromium', {}, false, () => undefined)).toEqual([]);
   });
 
   it('reads the verdict of a detection that answers later, not the promise', async () => {
-    expect(await browserCheck('chromium', {}, false, async () => true)).toEqual([{ id: 'browser', status: 'pass', message: 'chromium is installed' }]);
+    expect(await browserCheck('chromium', {}, false, async () => true, () => [])).toEqual([{ id: 'browser', status: 'pass', message: 'chromium is installed' }]);
     expect(await browserCheck('firefox', {}, false, async () => false)).toEqual(firstRun);
     expect(await browserCheck('chromium', {}, false, async () => undefined)).toEqual([]);
   });
