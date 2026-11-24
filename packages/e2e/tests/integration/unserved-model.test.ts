@@ -1,12 +1,10 @@
-/** A model the provider refuses stops the run once, naming the model, from whichever tier met it first, and once only across two workers; so does a call with no key to send. */
+/** A model the provider refuses stops the run once, naming the model, from whichever tier met it first, and once only across two workers. */
 
-import { LoadAPIKeyError } from '@ai-sdk/provider';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { StepExecutor } from '@e2e-dev/core/lib/agent/executor';
 import { explore } from '../../src/explore/index.ts';
 import { startFixtureApp, type FixtureApp } from '../helpers/fixture-app.ts';
 import { createProject, runExisting, runProjectWithConfigFile, type FixtureProject } from '../helpers/run-project.ts';
-import { createScriptedInstance } from '../helpers/scripted-model.ts';
 import { REFUSAL_EXPLANATION, refusedCopilotFailure, refusedCopilotModel } from '../helpers/unserved-copilot-model.ts';
 import { web } from '@e2e-dev/web';
 
@@ -65,10 +63,6 @@ describe('a model the provider does not serve', () => {
     await app.close();
   });
 
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
   it.each([
     { tier: 'a judgment', files: suite(JUDGE, ACT), agents: { default: { model: refusedCopilotModel() } } },
     { tier: 'an act step', files: suite(ACT, JUDGE), agents: { default: { model: refusedCopilotModel() } } },
@@ -82,27 +76,6 @@ describe('a model the provider does not serve', () => {
       });
       expect(outcome.exitCode).toBe(2);
       expect(outcome.report.run.errors).toEqual(ONE_RUN_ERROR);
-      expect(outcome.report.run.results.map((result) => [result.status, result.attempts.length, result.attempts[0]?.error?.code])).toEqual(CUT_SHORT);
-    } finally {
-      project.cleanup();
-    }
-  }, 60_000);
-
-  it('stops the run the same way when the provider package found no key, naming the variable to set', async () => {
-    vi.stubEnv('OPENAI_API_KEY', undefined);
-    const keyless = createScriptedInstance('openai.responses', 'gpt-6-luna', async () => {
-      throw new LoadAPIKeyError({ message: "OpenAI API key is missing. Pass it using the 'apiKey' parameter or the OPENAI_API_KEY environment variable." });
-    });
-    const project: FixtureProject = createProject({ 'tests/keyless.e2e.ts': suite(ACT, JUDGE) });
-    try {
-      const outcome = await runExisting(project, {
-        appUrl: app.url,
-        config: { tests: 'tests/**/*.e2e.ts', cache: 'off', agents: { default: { model: keyless } } },
-      });
-      expect(outcome.exitCode).toBe(2);
-      expect(outcome.report.run.errors).toEqual([
-        expect.objectContaining({ code: 'MODEL_UNAVAILABLE', message: expect.stringMatching(/^the model has no credential: OPENAI_API_KEY is not set/) }),
-      ]);
       expect(outcome.report.run.results.map((result) => [result.status, result.attempts.length, result.attempts[0]?.error?.code])).toEqual(CUT_SHORT);
     } finally {
       project.cleanup();

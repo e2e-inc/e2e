@@ -67,9 +67,8 @@ install `@e2e-dev/acp` and its adapter, and put
 - `model` drives `agent.act`. Judgments use `judge` when set, else `model`.
 - A missing model for the built-in agent raises one run-level
   `MODEL_UNAVAILABLE` when the first test acquires `agent`, exit 2, and so
-  does a model GitHub Copilot does not serve to the account, and a model
-  whose key variable is unset (the message names it), at the first model
-  call; a rejected key surfaces on the first model call as
+  does a model GitHub Copilot does not serve to the account, at the first
+  call; auth failures surface on the first model call as
   `MODEL_PROVIDER_FAILED`, or as `CONFIG_LOAD_FAILED` for a provider that
   reads its key when the config loads.
 - `context` is what the app calls things, sent to every model call, judges

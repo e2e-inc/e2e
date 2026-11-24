@@ -27,6 +27,8 @@ export interface GatewayPreset {
   readonly keys?: readonly string[];
   /** The `provider` a model instance of this gateway reports, by which `e2e doctor` finds the `keys` it reads. */
   readonly provider?: string;
+  /** True when the provider package sends an empty variable as the key, where the others read an empty one as unset. */
+  readonly sendsEmptyKey?: true;
   /** The model expression, with the endpoint the user typed for an OpenAI-compatible one. */
   model(endpoint: string | undefined): string;
 }
@@ -52,6 +54,7 @@ export const GATEWAYS: readonly GatewayPreset[] = [
     comment: 'OpenRouter serves the model id and reads OPENROUTER_API_KEY.',
     keys: ['OPENROUTER_API_KEY'],
     provider: 'openrouter',
+    sendsEmptyKey: true,
     model: () => "openrouter('openai/gpt-6-luna-fast')",
   },
   {

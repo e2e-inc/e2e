@@ -72,7 +72,7 @@ export const MODEL_UNREACHABLE_CODES: ReadonlySet<string> = new Set(
 
 /**
  * True when a failure means no model answered: none was configured, the
- * provider had no key to send or returned an error (a rejected key, a rate limit, a
+ * provider returned an error (a rejected or missing key, a rate limit, a
  * 5xx), or the stall guard cut off a request that got no response. Such a
  * failure is a verdict on the model's reachability, never on the app, so it
  * implicates no recorded flow. A model that answered with something unusable

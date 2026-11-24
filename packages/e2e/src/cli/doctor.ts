@@ -55,7 +55,7 @@ const RESERVED_IDS: ReadonlySet<string> = new Set(['node', 'config', 'engine', '
 
 const ENGINE_STATUSES: ReadonlySet<string> = new Set<EngineDoctorCheck['status']>(['pass', 'warn', 'fail', 'skip']);
 
-/** `pass`; `warn` for what a run handles on its own, or what may stop one that doctor cannot prove; `fail` for what stops a run; `skip` for a check that does not apply; `unknown` for what doctor cannot tell. */
+/** `pass`; `warn` for what a run handles on its own or goes on past; `fail` for what stops a run; `skip` for a check that does not apply; `unknown` for what doctor cannot tell. */
 export type DoctorStatus = 'pass' | 'warn' | 'fail' | 'skip' | 'unknown';
 
 /** A model as the AI SDK instance names itself. */
@@ -350,23 +350,24 @@ async function modelCheck(
   const unset = [...new Set(roles.flatMap((entry) => unsetGatewayKey(entry.model) ?? []))];
   if (unset.length > 0) {
     return result('warn', {
-      message: `${unset.join('; ')}: the first agent step that calls the model stops the run with MODEL_UNAVAILABLE, unless the model signs in another way; --check-model calls it`,
+      message: `${unset.join('; ')}: agent steps that call the model fail with MODEL_PROVIDER_FAILED, unless the model signs in another way; --check-model calls it`,
     });
   }
   return result('unknown', { message: 'the model reads its own credential; --check-model calls it' });
 }
 
 /**
- * For a model of a gateway `e2e init` writes, when none of the variables that
- * gateway reads is set: which one to set. Undefined for any other model, whose
- * variable only its provider package knows. A warning and not a failure: a key
- * passed at construction, or the token the Vercel AI Gateway fetches for a
- * linked project, is invisible from here.
+ * For a model of a gateway `e2e init` writes, when that gateway would find
+ * none of the variables it reads: which one to set. Undefined for any other
+ * model, whose variable only its provider package knows. A warning and not a
+ * failure: a key passed at construction, or the token the Vercel AI Gateway
+ * fetches for a linked project, is invisible from here.
  */
 function unsetGatewayKey(model: ResolvedModel, env: Readonly<Record<string, string | undefined>> = process.env): string | undefined {
-  const keys = GATEWAYS.find((gateway) => gateway.provider === model.provider)?.keys;
-  if (keys === undefined || keys.some((name) => (env[name] ?? '').trim() !== '')) return undefined;
-  return `${keys[0]!} is not set`;
+  const gateway = GATEWAYS.find((preset) => preset.provider === model.provider);
+  if (gateway?.keys === undefined) return undefined;
+  const found = gateway.keys.some((name) => (gateway.sendsEmptyKey === true ? env[name] !== undefined : Boolean(env[name])));
+  return found ? undefined : `${gateway.keys[0]!} is not set`;
 }
 
 function doctorModel(model: ResolvedModel): DoctorModel {
@@ -430,7 +431,9 @@ export function formatDoctorReport(report: DoctorReport): string {
   const width = Math.max(...report.checks.map((check) => check.id.length));
   const lines = report.checks.map((check) => `${MARKS[check.status]} ${check.id.padEnd(width)}  ${bounded(describe(check).replaceAll(/\s+/g, ' ').trim())}`);
   const failures = report.checks.filter((check) => check.status === 'fail').length;
-  const verdict = failures === 0 ? picocolors.green('e2e run can start here') : picocolors.red(`${String(failures)} ${failures === 1 ? 'check' : 'checks'} failed`);
+  const warnings = report.checks.filter((check) => check.status === 'warn').length;
+  const started = `e2e run can start here${warnings === 0 ? '' : `, with ${String(warnings)} ${warnings === 1 ? 'warning' : 'warnings'}`}`;
+  const verdict = failures === 0 ? picocolors.green(started) : picocolors.red(`${String(failures)} ${failures === 1 ? 'check' : 'checks'} failed`);
   return `${lines.join('\n')}\n\n${verdict}\n`;
 }
 

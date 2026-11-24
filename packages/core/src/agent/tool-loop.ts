@@ -27,7 +27,7 @@ import {
   isForcedToolChoiceDowngraded,
   isForcedToolChoiceRejected,
 } from './model/tool-choice.ts';
-import { withMissingCredentialNamed } from './model/missing-credential.ts';
+import { missingCredentialError, withMissingCredentialNamed } from './model/missing-credential.ts';
 import { withStallGuard } from './model/stall.ts';
 import { providerHints, type ProviderHints, type ProviderModelRef } from './model/provider-hints.ts';
 import { isScreenOutput, reportsNoEffect, toolResultTexts } from './screen-update.ts';
@@ -430,8 +430,8 @@ class LoopRun {
             { cause },
           );
         }
-        const unserved = unservedModelError(cause);
-        if (unserved !== undefined) throw unserved;
+        const named = unservedModelError(cause) ?? missingCredentialError(cause);
+        if (named !== undefined) throw named;
         throw new AgentError(
           'MODEL_PROVIDER_FAILED',
           withHint(`the model provider failed: ${message}`, failureHint(cause)),

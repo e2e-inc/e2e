@@ -1,49 +1,69 @@
-/**
- * A provider request that had no key to send, told apart from a key the
- * provider refused. Read from the provider package's own error as the model
- * instance throws it: `ai` rewrites a gateway authentication failure into one
- * text for both cases before a caller of `generateText` sees it.
- */
+/** A model call that failed before any request left because no credential was configured, named for what it is. */
 
-import { markUnservedModel } from '../../internal/unserved-model.ts';
 import type { AiSdk, SdkLanguageModel } from '../ai-sdk.ts';
 import { AgentError } from '../error.ts';
+
+type Environment = Readonly<Record<string, string | undefined>>;
 
 /** A name shaped like an environment variable, as a provider's message spells it. */
 const VARIABLE_NAME = /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/;
 
 /**
- * True for the two errors raised before any request left: the AI SDK's own
- * for a provider package that found no key, and the Vercel AI Gateway's when
- * it resolved neither a key nor an OIDC token. A key the gateway sent and
- * the server refused reads "Invalid API key or token" instead.
+ * The variable to set when `failure` was raised because nothing was
+ * configured for the model to send; undefined when a configured credential
+ * failed to load, was malformed, or was refused, which the provider's own
+ * error describes better.
+ *
+ * The AI SDK's `loadApiKey` raises one error class for a missing key and for
+ * a key that is not a string, and names the variable only in its text. So the
+ * name is read there and held against the environment: the key is missing
+ * only when that variable is undefined, since `loadApiKey` sends an empty one.
+ *
+ * The Vercel AI Gateway raises "No authentication provided" for every failure
+ * to resolve a token, the real one in `cause`. Nothing was configured only
+ * when resolution fell through to the OIDC token (the cause is its error) and
+ * neither variable holds a value, an empty one counting as unset there. A
+ * throwing `apiKey` callback, or a token that is set but expired or
+ * malformed, is not this.
  */
-function foundNoCredential(failure: Error): boolean {
-  if (failure.name === 'AI_LoadAPIKeyError') return true;
-  return failure.name === 'GatewayAuthenticationError' && failure.message.includes('No authentication provided');
+export function unsetKeyVariable(failure: unknown, env: Environment = process.env): string | undefined {
+  if (!(failure instanceof Error)) return undefined;
+  if (failure.name === 'AI_LoadAPIKeyError') {
+    const named = VARIABLE_NAME.exec(failure.message)?.[0];
+    return named !== undefined && env[named] === undefined ? named : undefined;
+  }
+  if (failure.name !== 'GatewayAuthenticationError') return undefined;
+  const fellThroughToOidc = failure.cause instanceof Error && failure.cause.name === 'VercelOidcTokenError';
+  if (!fellThroughToOidc || env.AI_GATEWAY_API_KEY || env.VERCEL_OIDC_TOKEN) return undefined;
+  return 'AI_GATEWAY_API_KEY';
+}
+
+/** The provider error of a call that had no credential configured, as the middleware below rethrows it. */
+class NoCredentialConfigured extends Error {
+  constructor(variable: string, cause: unknown) {
+    super(`the model has no credential: ${variable} is not set, so no request was sent. Set ${variable}, or pass the key where the model is constructed`, { cause });
+    this.name = 'NoCredentialConfigured';
+  }
 }
 
 /**
- * The run-stopping `MODEL_UNAVAILABLE` for a provider error raised because
- * no credential was there to send, naming the variable the provider's text
- * names when it is unset here; undefined for any other failure, a refused
- * key included. Carries no cause and never a value.
+ * `MODEL_PROVIDER_FAILED` naming the unset variable, for a call
+ * `withMissingCredentialNamed` found had no credential configured; undefined
+ * for any other failure. The step that needed the model fails with it, as
+ * with any provider failure. Built where the step catches the failure: the
+ * stack of one built inside the SDK's call no longer reaches the test's line.
  */
-export function missingCredentialError(
-  failure: unknown,
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): AgentError | undefined {
-  if (!(failure instanceof Error) || !foundNoCredential(failure)) return undefined;
-  const named = VARIABLE_NAME.exec(failure.message)?.[0];
-  const unset = named !== undefined && (env[named] ?? '').trim() === '';
-  const explanation =
-    `the model has no credential: ${unset ? `${named} is not set` : 'its provider package found no API key'}, so no agent step can call the model. ` +
-    `${unset ? `Set ${named}` : 'Set the variable the provider package reads'}, or pass the key where the model is constructed. ` +
-    'Tests with no agent call, and agent.act steps that replay a recording, need no model: pass those test files to e2e run';
-  return markUnservedModel(new AgentError('MODEL_UNAVAILABLE', explanation), explanation);
+export function missingCredentialError(failure: unknown): AgentError | undefined {
+  if (!(failure instanceof NoCredentialConfigured)) return undefined;
+  return new AgentError('MODEL_PROVIDER_FAILED', failure.message, { cause: failure.cause });
 }
 
-/** `model` with a request that had no credential to send failing as `missingCredentialError`, which no transport retry repeats. */
+/**
+ * `model` with a call that had no credential configured failing as an error
+ * `missingCredentialError` reads. It sits under the SDK's own handling
+ * because `ai` replaces every gateway authentication error with one text and
+ * drops the cause, and no transport retry repeats an error raised here.
+ */
 export function withMissingCredentialNamed(ai: AiSdk, model: SdkLanguageModel): SdkLanguageModel {
   return ai.wrapLanguageModel({
     model,
@@ -52,7 +72,8 @@ export function withMissingCredentialNamed(ai: AiSdk, model: SdkLanguageModel): 
         try {
           return await doGenerate();
         } catch (cause) {
-          throw missingCredentialError(cause) ?? cause;
+          const variable = unsetKeyVariable(cause);
+          throw variable === undefined ? cause : new NoCredentialConfigured(variable, cause);
         }
       },
     },
