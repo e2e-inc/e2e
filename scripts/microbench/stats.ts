@@ -31,6 +31,14 @@ export interface Assessment {
   readonly verdict: Direction;
   /** Why the verdict is what it is, for the summary. */
   readonly reason: string;
+  /**
+   * The trials separate the sides whatever the size of the change: the
+   * ranges do not overlap (instruction counts), or every round agrees on the
+   * direction (wall time). A repeatability check fails on this, not on the
+   * verdict, so the noise floor cannot hide an offset between two builds of
+   * the same code.
+   */
+  readonly separated: boolean;
 }
 
 /**
@@ -68,36 +76,38 @@ export function spreadOf(values: readonly number[]): TrialSpread {
 }
 
 /**
- * Judges head against base from one value per trial on each side.
+ * Judges head against base from one value per trial on each side. A
+ * direction needs the trials to separate the sides and the change to reach
+ * `thresholdPercent`, the noise floor; a separated change under it is
+ * `same`, and anything else is inconclusive.
  *
- * Instruction counts: a direction only when the two sides' trial ranges do
- * not overlap, else inconclusive. Repeatable counts make this strict rule
- * cheap, and it never reports a change the trials themselves contradict.
- *
- * Wall time: the trials are paired by round (each round ran base and head
- * back to back, in alternating order), and a direction needs every round to
- * agree on it and the median paired change to reach `thresholdPercent`;
- * otherwise `same` when it stays under the threshold, else inconclusive.
+ * Instruction counts separate when the two sides' trial ranges do not
+ * overlap. Wall time pairs the trials by round (each round ran base and head
+ * back to back, in alternating order) and separates when every round agrees
+ * on the direction; its change is the median paired change.
  */
 export function assess(tool: Tool, base: readonly number[], head: readonly number[], thresholdPercent: number): Assessment {
   if (base.length === 0 || base.length !== head.length) throw new Error('base and head need the same number of trials');
-  const changePercent = (median(head) / median(base) - 1) * 100;
+  let changePercent: number;
+  let separated: boolean;
+  let how: string;
   if (tool === 'cachegrind') {
     const b = spreadOf(base);
     const h = spreadOf(head);
-    if (b.min <= h.max && h.min <= b.max) return { changePercent, verdict: 'inconclusive', reason: 'ranges overlap' };
-    return { changePercent, verdict: h.median < b.median ? 'lower' : 'higher', reason: 'ranges do not overlap' };
+    changePercent = (h.median / b.median - 1) * 100;
+    separated = b.max < h.min || h.max < b.min;
+    how = separated ? 'ranges do not overlap' : 'ranges overlap';
+  } else {
+    const paired = base.map((value, round) => ((head[round] as number) / value - 1) * 100);
+    changePercent = median(paired);
+    separated = paired.every((value) => value < 0) || paired.every((value) => value > 0);
+    how = separated ? 'every round agrees' : 'rounds disagree';
   }
-  const paired = base.map((value, round) => ((head[round] as number) / value - 1) * 100);
-  const change = median(paired);
-  const agree = paired.every((value) => value < 0) || paired.every((value) => value > 0);
-  if (agree && Math.abs(change) >= thresholdPercent) {
-    return { changePercent: change, verdict: change < 0 ? 'lower' : 'higher', reason: `every round agrees, median ${format(change)}` };
+  if (Math.abs(changePercent) < thresholdPercent) {
+    return { changePercent, verdict: 'same', reason: `${how}, change under ${thresholdPercent}%`, separated };
   }
-  if (Math.abs(change) < thresholdPercent) {
-    return { changePercent: change, verdict: 'same', reason: `median paired change under ${thresholdPercent}%` };
-  }
-  return { changePercent: change, verdict: 'inconclusive', reason: 'rounds disagree on direction' };
+  if (!separated) return { changePercent, verdict: 'inconclusive', reason: how, separated };
+  return { changePercent, verdict: changePercent < 0 ? 'lower' : 'higher', reason: how, separated };
 }
 
 /** A signed percentage with at most three decimals. */

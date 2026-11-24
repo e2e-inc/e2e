@@ -11,13 +11,16 @@
  *
  *   --root <dir>        the checkout to measure, packages built (this one)
  *   --base-root <dir>   also measure this checkout and compare --root against
- *                       it; the same directory twice is a repeatability check
+ *                       it; give both roots paths of the same length
+ *   --expect-same       base and head hold the same code: a repeatability
+ *                       check (implied when both roots are one directory)
  *   --mode <mode>       jit, jitless, or both (jit)
  *   --tool <tool>       cachegrind (instructions; Linux with valgrind on PATH)
  *                       or time (wall time; noisy, for local smoke runs)
  *   --trials <n>        trials per case, mode, and checkout (3)
  *   --multiplier <n>    the high run's iterations over the low run's (3)
- *   --threshold <pct>   the wall-time change that counts (2)
+ *   --threshold <pct>   the noise floor: the smallest change reported as a
+ *                       direction (0.5 for cachegrind, 2 for time)
  *   --case <text>       only cases whose name contains this
  *   --jobs <n>          processes at once under cachegrind (available cores);
  *                       always 1 for time
@@ -34,10 +37,17 @@
  * compiles on the main thread and runs GC single-threaded, and the seeds,
  * `--single-threaded`, and `--predictable-gc-schedule` remove the rest.
  * `jitless` counts the interpreter only, which also interprets regexps.
- * Either way, counts are not wall time.
+ * Either way, counts are not wall time. `--v8-pool-size=0` leaves Node no
+ * platform worker threads, and on Linux `setarch -R` turns off address space
+ * randomization, so neither moves a count between processes.
  *
- * Exits 1 when a repeatability check finds a direction, 2 on a usage or
- * measurement error.
+ * A root's path is read at startup, and how much it allocates there moves
+ * where the collector runs inside the measured loop, so two roots with
+ * paths of different lengths can land apart by a fixed offset. The harness
+ * warns when they differ.
+ *
+ * Exits 1 when a repeatability check fails, 2 on a usage or measurement
+ * error.
  */
 
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
@@ -59,6 +69,7 @@ const COMMON_FLAGS = [
   '--random-seed=42',
   '--hash-seed=42',
   '--expose-gc',
+  '--v8-pool-size=0',
   // Valgrind does not emulate the PKU instructions V8 guards code pages with.
   '--no-memory-protection-keys',
 ];
@@ -72,7 +83,8 @@ const { values: options } = parseArgs({
     tool: { type: 'string' },
     trials: { type: 'string', default: '3' },
     multiplier: { type: 'string', default: '3' },
-    threshold: { type: 'string', default: '2' },
+    'expect-same': { type: 'boolean', default: false },
+    threshold: { type: 'string' },
     case: { type: 'string', default: '' },
     jobs: { type: 'string', default: String(os.availableParallelism()) },
     out: { type: 'string' },
@@ -99,6 +111,10 @@ function hasValgrind(): boolean {
   return spawnSync('valgrind', ['--version'], { stdio: 'ignore' }).status === 0;
 }
 
+/** `setarch <machine> -R` on Linux when it is installed: the prefix that turns off address space randomization. */
+const NO_ASLR: readonly string[] =
+  process.platform === 'linux' && spawnSync('setarch', ['--version'], { stdio: 'ignore' }).status === 0 ? ['setarch', os.machine(), '-R'] : [];
+
 function shaOf(root: string): string {
   try {
     return execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
@@ -110,7 +126,8 @@ function shaOf(root: string): string {
 function machine(tool: Tool): string {
   const cpu = os.cpus()[0]?.model.trim() ?? 'unknown CPU';
   const valgrind = tool === 'cachegrind' ? `, ${execFileSync('valgrind', ['--version'], { encoding: 'utf8' }).trim()}` : '';
-  return `${os.platform()} ${os.arch()}, ${cpu}, Node ${process.version}${valgrind}`;
+  const aslr = NO_ASLR.length > 0 ? ', ASLR off' : '';
+  return `${os.platform()} ${os.arch()}, ${cpu}, Node ${process.version}${valgrind}${aslr}`;
 }
 
 interface CaseInfo {
@@ -142,10 +159,13 @@ const CHILD_ENV: NodeJS.ProcessEnv = {
 /** One process of one case, `iterations` times: its instruction count, or the loop's nanoseconds. */
 async function measureOnce(tool: Tool, root: string, name: string, mode: Mode, iterations: number, rawFile: string): Promise<Measurement> {
   const node = [process.execPath, ...FLAGS[mode], CHILD, root, name, String(iterations)];
-  const [command, ...args] =
-    tool === 'cachegrind'
-      ? ['valgrind', '-q', '--tool=cachegrind', '--cache-sim=no', '--smc-check=all-non-file', `--cachegrind-out-file=${rawFile}`, ...node]
-      : node;
+  const [command, ...args] = [
+    ...NO_ASLR,
+    ...(tool === 'cachegrind'
+      ? ['valgrind', '-q', '--tool=cachegrind', '--cache-sim=no', '--smc-check=all-non-file', `--cachegrind-out-file=${rawFile}`]
+      : []),
+    ...node,
+  ];
   let stdout: string;
   try {
     ({ stdout } = await run(command as string, args, { env: CHILD_ENV, maxBuffer: 16 * 1024 * 1024 }));
@@ -184,13 +204,18 @@ async function main(): Promise<void> {
   const trials = integer('trials', 1);
   const multiplier = integer('multiplier', 2);
   const jobs = tool === 'time' ? 1 : integer('jobs', 1);
-  const thresholdPercent = Number(options.threshold);
+  const thresholdPercent = Number(options.threshold ?? (tool === 'cachegrind' ? '0.5' : '2'));
   if (!(thresholdPercent >= 0)) fail('--threshold must be a non-negative number');
 
   const headRoot = realpathSync(options.root);
   const baseRoot = options['base-root'] === undefined ? undefined : realpathSync(options['base-root']);
   const sides = baseRoot === undefined ? (['head'] as const) : (['base', 'head'] as const);
   const roots = { base: baseRoot ?? headRoot, head: headRoot };
+  if (options['expect-same'] && baseRoot === undefined) fail('--expect-same needs --base-root');
+  const expectSame = options['expect-same'] || baseRoot === headRoot;
+  if (roots.base.length !== roots.head.length) {
+    log(`warning: the roots' paths differ in length (${roots.base.length} and ${roots.head.length}); a fixed offset between them can show up as a change`);
+  }
   const cases = listCases(options.case);
   const out = path.resolve(options.out ?? path.join(os.tmpdir(), 'e2e-microbench', new Date().toISOString().replaceAll(':', '-')));
   mkdirSync(out, { recursive: true });
@@ -240,7 +265,7 @@ async function main(): Promise<void> {
     trials,
     multiplier,
     thresholdPercent,
-    sameCheckout: baseRoot === headRoot,
+    expectSame,
     flags: FLAGS,
     machine: machine(tool),
     rows,

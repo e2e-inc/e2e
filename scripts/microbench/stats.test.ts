@@ -34,15 +34,23 @@ describe('spreadOf', () => {
 });
 
 describe('assess', () => {
-  it('gives instruction counts a direction only when the ranges do not overlap', () => {
-    assert.equal(assess('cachegrind', [1000, 1001, 1002], [990, 991, 992], 2).verdict, 'lower');
-    assert.equal(assess('cachegrind', [1000, 1001, 1002], [1003, 1004, 1005], 2).verdict, 'higher');
-    const overlap = assess('cachegrind', [1000, 1001, 1010], [990, 995, 1000], 2);
+  it('gives instruction counts a direction only when the ranges separate and the change clears the floor', () => {
+    assert.equal(assess('cachegrind', [1000, 1001, 1002], [990, 991, 992], 0.5).verdict, 'lower');
+    assert.equal(assess('cachegrind', [1000, 1001, 1002], [1010, 1011, 1012], 0.5).verdict, 'higher');
+    const overlap = assess('cachegrind', [1000, 1001, 1020], [980, 990, 1000], 0.5);
     assert.equal(overlap.verdict, 'inconclusive');
+    assert.equal(overlap.separated, false);
     assert.ok(overlap.changePercent < 0);
   });
 
-  it('gives wall time a direction only when every round agrees and the median clears the threshold', () => {
+  it('calls a separated change under the floor the same, and still marks it separated', () => {
+    const offset = assess('cachegrind', [1000, 1000.2, 1000.4], [1001, 1001.2, 1001.4], 0.5);
+    assert.equal(offset.verdict, 'same');
+    assert.equal(offset.separated, true);
+    assert.match(offset.reason, /ranges do not overlap, change under 0\.5%/);
+  });
+
+  it('gives wall time a direction only when every round agrees and the median clears the floor', () => {
     assert.equal(assess('time', [100, 100, 100], [90, 92, 95], 2).verdict, 'lower');
     assert.equal(assess('time', [100, 100, 100], [90, 92, 101], 2).verdict, 'inconclusive');
     assert.equal(assess('time', [100, 100, 100], [99, 99.5, 99], 2).verdict, 'same');
@@ -50,7 +58,7 @@ describe('assess', () => {
   });
 
   it('needs the same number of trials on both sides', () => {
-    assert.throws(() => assess('cachegrind', [1, 2], [1], 2), /same number of trials/);
+    assert.throws(() => assess('cachegrind', [1, 2], [1], 0.5), /same number of trials/);
   });
 });
 
@@ -64,35 +72,30 @@ describe('format', () => {
 
 describe('renderSummary', () => {
   const side = (values: number[]) => ({ sha: 'a'.repeat(40), perIteration: values, spread: spreadOf(values) });
-  const result = (sameCheckout: boolean, head: number[]): Result => ({
+  const base = [1000, 1001, 1002];
+  const result = (expectSame: boolean, head: number[]): Result => ({
     tool: 'cachegrind',
     trials: 3,
     multiplier: 3,
-    thresholdPercent: 2,
-    sameCheckout,
+    thresholdPercent: 0.5,
+    expectSame,
     flags: { jit: ['--predictable'], jitless: ['--jitless', '--predictable'] },
     machine: 'linux x64',
-    rows: [
-      {
-        case: 'redact/screen-text',
-        mode: 'jit',
-        base: side([1000, 1001, 1002]),
-        head: side(head),
-        assessment: assess('cachegrind', [1000, 1001, 1002], head, 2),
-      },
-    ],
+    rows: [{ case: 'redact/screen-text', mode: 'jit', base: side(base), head: side(head), assessment: assess('cachegrind', base, head, 0.5) }],
   });
 
   it('renders a comparison row with its verdict and both spreads', () => {
     const text = renderSummary(result(false, [900, 901, 902]));
     assert.match(text, /\| `redact\/screen-text` \| jit \| 1,001 \| 901 \| -9\.99% \| 🟢 lower \(ranges do not overlap\) \| 0\.200% \| 0\.222% \|/);
+    assert.match(text, /and the change is at least 0\.5%/);
     assert.match(text, /`jit`: `node --predictable`/);
     assert.doesNotMatch(text, /jitless/);
   });
 
-  it('fails a repeatability check that finds a direction, and passes one that does not', () => {
+  it('fails a repeatability check on any separation, under the floor too', () => {
     assert.equal(repeatabilityFailures(result(true, [900, 901, 902])).length, 1);
-    assert.equal(repeatabilityFailures(result(true, [1000, 1001, 1002])).length, 0);
+    assert.equal(repeatabilityFailures(result(true, [1003, 1003.5, 1004])).length, 1);
+    assert.equal(repeatabilityFailures(result(true, [1000.5, 1001, 1003])).length, 0);
     assert.equal(repeatabilityFailures(result(false, [900, 901, 902])).length, 0);
   });
 

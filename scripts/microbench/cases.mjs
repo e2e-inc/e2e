@@ -130,7 +130,7 @@ export const CASES = [
     name: 'redact/fragments',
     description: 'SecretLedger.redactFragments over the same text',
     warmup: 3,
-    iterations: 3,
+    iterations: 6,
     async load(root) {
       const { SecretLedger } = await load(root, 'packages/core/dist/internal/redact.js');
       const ledger = new SecretLedger(SECRETS);
@@ -170,7 +170,7 @@ export const CASES = [
     name: 'mobile/project-snapshot',
     description: 'projectSnapshot of every captured Android and iOS screen of the mobile benchmark',
     warmup: 4,
-    iterations: 4,
+    iterations: 8,
     async load(root) {
       const { keyboardBand, projectSnapshot } = await load(root, 'packages/mobile/dist/nodes.js');
       const captures = ['android', 'ios'].flatMap((platform) =>

@@ -686,13 +686,19 @@ pnpm microbench --tool time --case redact                      # local smoke run
 - Each trial runs a case in two fresh processes, N and 3N iterations, and
   keeps the difference: startup, loading, warmup, and compilation cancel.
   Cases and inputs come from this checkout, the code under test from each
-  `--root`/`--base-root`, which must be built.
+  `--root`/`--base-root`, which must be built. Give both roots paths of the
+  same length: a different length moved one case by a fixed 0.075% between
+  builds of the same code, and the harness warns about it.
 - `jit` keeps V8's compilers and makes them deterministic (`--predictable`,
   `--single-threaded`, `--predictable-gc-schedule`, fixed seeds); `jitless`
-  counts the interpreter only, regexps included. Counts are not wall time.
+  counts the interpreter only, regexps included. Both run with
+  `--v8-pool-size=0`, and with ASLR off (`setarch -R`) on Linux. Counts are
+  not wall time.
 - A direction is reported only when the base and head trial ranges do not
-  overlap. The same directory as both roots is a repeatability check, which
-  exits 1 when any case reports a direction.
+  overlap and the change reaches the noise floor (`--threshold`, 0.5% for
+  instruction counts). `--expect-same` (implied by one directory twice)
+  makes the run a repeatability check, which exits 1 when any case's ranges
+  separate, under the floor too.
 - `.github/workflows/microbench.yml` runs both checks on a Blacksmith runner
   with one pinned Node version; dispatch it with a `base` ref to compare.
 - A case's `child.mjs` and `cases.mjs` are plain JavaScript: `--jitless`

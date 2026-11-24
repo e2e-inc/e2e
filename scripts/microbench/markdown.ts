@@ -25,8 +25,8 @@ export interface Result {
   readonly trials: number;
   readonly multiplier: number;
   readonly thresholdPercent: number;
-  /** Base and head are the same checkout: the run is a repeatability check. */
-  readonly sameCheckout: boolean;
+  /** Base and head hold the same code (`--expect-same`, or one directory twice): the run is a repeatability check. */
+  readonly expectSame: boolean;
   readonly flags: Readonly<Record<Mode, readonly string[]>>;
   readonly machine: string;
   readonly rows: readonly BenchRow[];
@@ -47,10 +47,19 @@ function spreadText(spread: TrialSpread): string {
   return `${spread.spreadPercent.toFixed(3)}%`;
 }
 
-/** Rows that fail a repeatability check: a same-checkout comparison that still found a direction. */
+/**
+ * Rows that fail a repeatability check. Instruction counts fail on any
+ * separation, below the noise floor too: two builds of the same code must
+ * not land apart at all. Wall time fails only on a direction, since a few
+ * rounds agree by chance.
+ */
 export function repeatabilityFailures(result: Result): BenchRow[] {
-  if (!result.sameCheckout) return [];
-  return result.rows.filter((row) => row.assessment?.verdict === 'lower' || row.assessment?.verdict === 'higher');
+  if (!result.expectSame) return [];
+  return result.rows.filter((row) =>
+    result.tool === 'cachegrind'
+      ? row.assessment?.separated === true
+      : row.assessment?.verdict === 'lower' || row.assessment?.verdict === 'higher',
+  );
 }
 
 export function renderSummary(result: Result): string {
@@ -84,13 +93,11 @@ export function renderSummary(result: Result): string {
   }
   const first = result.rows[0];
   lines.push(
-    result.sameCheckout
-      ? 'Base and head are the same checkout: a repeatability check. Any 🟢 or 🔴 is a failure.'
+    result.expectSame
+      ? `Base and head hold the same code: a repeatability check. It fails when ${tool === 'cachegrind' ? 'the trial ranges of any case do not overlap, whatever the change' : 'any case reports a direction'}.`
       : `Base \`${first?.base?.sha.slice(0, 12) ?? 'unknown'}\`, head \`${first?.head.sha.slice(0, 12) ?? 'unknown'}\`.`,
     '',
-    tool === 'cachegrind'
-      ? 'A direction is reported only when the trial ranges of base and head do not overlap.'
-      : `A direction is reported only when every round agrees on it and the median paired change is at least ${result.thresholdPercent}%.`,
+    `A direction is reported only when ${tool === 'cachegrind' ? 'the trial ranges of base and head do not overlap' : 'every round agrees on it'} and the change is at least ${result.thresholdPercent}%.`,
     '',
     '| Case | Mode | Base | Head | Change | Direction | Base spread | Head spread |',
     '| --- | --- | ---: | ---: | ---: | --- | ---: | ---: |',
