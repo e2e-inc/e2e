@@ -47,7 +47,7 @@ e2e Appium सर्वर, उसके ड्राइवर और क्ल�
 | --- | --- |
 | `platformName`, `appium:automationName` | `mobile({ platform: 'ios' })` या `'android'` |
 | `appium:deviceName`, `appium:udid` | `mobile({ device: 'iPhone 17' })`: कोई नाम, सिम्युलेटर UDID, या `emulator-5554` सीरियल। फ़ोन उसके नाम से चुना जाता है |
-| `appium:app` | `app: { appPath }`। बिल्ड खुद इंस्टॉल करें, [अपने ऐप की तरफ़ पॉइंट करें](/mobile#point-at-your-app) देखें |
+| `appium:app` | `app: { appPath }`। बिल्ड खुद इंस्टॉल करें, [अपने ऐप को टारगेट करें](/mobile#point-at-your-app) देखें |
 | `appium:bundleId`, `appium:appPackage` | `app: { bundleId }`, वह ऐप जिसे `app.open()` लॉन्च करता है |
 | `appium:processArguments`, `appium:optionalIntentArguments` | `app.launchArguments`, स्ट्रिंग की लिस्ट या आर्ग्युमेंट नाम से वैल्यू का ऑब्जेक्ट |
 | `appium:permissions` | `app.permissions: { camera: 'grant' }`। हर [`DevicePermission`](/reference/mobile#device-fixture) नाम `grant`, `deny` या `reset` लेता है |
@@ -302,7 +302,7 @@ bunx e2e run --target ios --reporter list,junit
 | `bstack:options.local`, `lt:options.tunnel` | ऐप को ऐसे बैकएंड पर पॉइंट करें जहाँ होस्टेड डिवाइस पहुँच सके |
 | `appium:appActivity`, `appWaitActivity`, `startActivity()` | `device.openLink(url)`, या [`unstable_raw`](/reference/mobile#unstable_raw) के ज़रिए `client.apps.open` |
 | `appium:processArguments.env` | लॉन्च आर्ग्युमेंट पास करें और उसे ऐप में पढ़ें |
-| लोकल डिवाइस पर `appium:language`, `appium:locale` | iOS पर `app.launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR' }`, [ऐप को किसी और भाषा में चलाएँ](/mobile#run-the-app-in-another-language) देखें। Android पर रन से पहले डिवाइस की भाषा सेट करें |
+| लोकल डिवाइस पर `appium:language`, `appium:locale` | iOS पर `app.launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR' }`, [ऐप को दूसरी भाषा में चलाएँ](/mobile#run-the-app-in-another-language) देखें। Android पर रन से पहले डिवाइस की भाषा सेट करें |
 | `appium:disableWindowAnimation`, `reduceMotion` | Android पर [`unstable_raw`](/reference/mobile#unstable_raw) के ज़रिए `client.settings.update` |
 
 </Accordion>

@@ -175,7 +175,7 @@ test('shows the home screen', async ({ agent, app, screen }) => {
 | फ़ॉर्म कंट्रोल के बाहर `.toHaveValue(v)` | `expect(device.locator('id=x value="v"')).toBeVisible()` |
 | `health`, `homekit`, `speech`, `faceid`, `userTracking` के लिए `permissions`; वैल्यू `always`, `inuse`, `limited` | प्रॉम्प्ट का बटन टैप करें, या `device.alert('accept')` |
 | `device.sendUserNotification()`, `.pinch()` | [`unstable_raw`](/reference/mobile#unstable_raw) पर `client.apps.push()`, `client.interactions.pinch()` |
-| `launchApp({ languageAndLocale })` | iOS पर `app.launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR' }`, [ऐप को किसी और भाषा में चलाएँ](/mobile#run-the-app-in-another-language) देखें |
+| `launchApp({ languageAndLocale })` | iOS पर `app.launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR' }`, [ऐप को दूसरी भाषा में चलाएँ](/mobile#run-the-app-in-another-language) देखें |
 | Jest `globalSetup`, `globalTeardown` | रन से पहले डिपेंडेंसी शुरू करें |
 | `device.reverseTcpPort()` | CI स्टेप में `adb reverse` चलाएँ |
 | `.getAttributes()` | `.textContent()`, `.inputValue()`, `.isEnabled()`, `.isVisible()`, `.isChecked()`, `.boundingBox()` |

@@ -75,9 +75,9 @@ bunx add-mcp --global --name testerarmy https://tester.army/mcp
 | PR प्रीव्यू एनवायरनमेंट | ऐसा CI जॉब जो `app.url` को प्रीव्यू URL पर सेट करे, [प्रोटेक्टेड प्रीव्यू](/web#protected-previews) देखें |
 | `login` क्रेडेंशियल | एक `credentials` एंट्री। TesterArmy पासवर्ड या TOTP सीक्रेट कभी नहीं लौटाता, इसलिए उसे एनवायरनमेंट वेरिएबल से पढ़ें, [ऑथेंटिकेशन](/authentication#credentials) देखें |
 | क्रेडेंशियल `totpSecret` | एक `secrets` एंट्री जिसकी वैल्यू कोड निकालने वाला फ़ंक्शन हो। e2e में TOTP जनरेटर नहीं आता, इसलिए कोई TOTP लाइब्रेरी जोड़ें |
-| क्रेडेंशियल एनवायरनमेंट ओवरराइड | एक `credentials` एंट्री, जिसमें हर एनवायरनमेंट के लिए `E2E_USER_<NAME>_PASSWORD` सेट हो, [हर रन के लिए वैल्यू ओवरराइड करें](/authentication#override-a-value-per-run) देखें |
+| क्रेडेंशियल एनवायरनमेंट ओवरराइड | एक `credentials` एंट्री, जिसमें हर एनवायरनमेंट के लिए `E2E_USER_<NAME>_PASSWORD` सेट हो, [किसी एक रन के लिए वैल्यू ओवरराइड करें](/authentication#override-a-value-per-run) देखें |
 | `agentInstructions` | एजेंट पर `system`, [निर्देश और शब्दावली](/agents#instructions-and-vocabulary) देखें |
-| memories | एजेंट पर `context` |
+| मेमोरी | एजेंट पर `context` |
 | प्रोजेक्ट फ़ाइलें | रिपॉज़िटरी में फ़ाइलें, जैसे `tests/fixtures/receipt.jpg` |
 | टेस्ट `viewport` सेटिंग | `web({ viewport: { width, height } })`, हर साइज़ के लिए एक टारगेट |
 | PR टेस्टिंग | हर पुल रिक्वेस्ट पर e2e जॉब, कमेंट के लिए [GitHub रिपोर्टर](/github) के साथ |

@@ -179,7 +179,7 @@ test('asks for the email', async ({ app, agent, screen }) => {
 | `scrollUntilVisible: { centerElement, visibilityPercentage }` | सटीक बराबर कुछ नहीं। इसके पूरा होने के बाद `boundingBox()` पढ़ें, और अगर नोड बीच में नहीं है तो `screen.swipe({ direction, momentum: 'slow' })` चलाएँ |
 | फ़ेलियर के बगल में डिवाइस लॉग और क्रैश रिपोर्ट | फ़िक्स्चर में इकट्ठा किया गया `adb logcat` या `xcrun simctl spawn <udid> log stream` |
 | टर्मिनल कमांड के रूप में `maestro hierarchy` | एक लाइन का टेस्ट जो `screen.debug()` कॉल करे |
-| `--device-locale` | iOS पर `app.launchArguments: { AppleLanguages: ['de'], AppleLocale: 'de_DE' }`, [ऐप को किसी और भाषा में चलाएँ](/mobile#run-the-app-in-another-language) देखें; Android पर रन से पहले डिवाइस की भाषा सेट करें |
+| `--device-locale` | iOS पर `app.launchArguments: { AppleLanguages: ['de'], AppleLocale: 'de_DE' }`, [ऐप को दूसरी भाषा में चलाएँ](/mobile#run-the-app-in-another-language) देखें; Android पर रन से पहले डिवाइस की भाषा सेट करें |
 | Maestro Cloud | [होस्टेड डिवाइस प्रोवाइडर](/mobile#hosted-devices) के साथ आपका [CI](/ci) |
 | `pressKey: lock`, `power`, `volume up`, `volume down` | [`unstable_raw`](/reference/mobile#unstable_raw) पर `client.command.hardwareButton`: Android पर पावर और वॉल्यूम, असली iPhone पर वॉल्यूम |
 | JUnit `properties`, `--output` के साथ JUnit पाथ | टैग या टाइटल में id; रन के बाद `.e2e/junit.xml` कॉपी करें |
@@ -205,7 +205,7 @@ test('asks for the email', async ({ app, agent, screen }) => {
 | `toggleAirplaneMode`, `toggleDarkMode` | सीधे वह स्टेट सेट करें जो आपको चाहिए: `device.setAirplaneMode(true)`, `device.setAppearance('dark')` |
 | Maestro Studio | [`npx e2e mcp`](/mcp-server) पर कोडिंग एजेंट, या `npx e2e run --watch` या `--step` के साथ `screen.debug()` |
 | `waitForAnimationToEnd` | एनिमेशन जिस चीज़ पर ख़त्म होता है उस पर `await expect(locator).toBeVisible()` |
-| `below`, `above`, `leftOf`, `rightOf` | `getByLabel`, एक टेस्ट id, साझा कंटेनर पर `filter({ has })`, या एक `agent.act` लक्ष्य |
+| `below`, `above`, `leftOf`, `rightOf` | `getByLabel`, एक टेस्ट id, शेयर किए हुए कंटेनर पर `filter({ has })`, या एक `agent.act` लक्ष्य |
 
 ## जानबूझकर रखे गए फ़र्क
 
