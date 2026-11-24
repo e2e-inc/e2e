@@ -19,7 +19,7 @@ import { truncateUtf8, type E2EError } from '@e2e-dev/core/lib/internal/errors';
 import type { SecretLedger } from '@e2e-dev/core/lib/internal/redact';
 import { isTypoOf } from '@e2e-dev/core/lib/internal/suggest';
 import { withAbort } from '@e2e-dev/core/lib/internal/time';
-import { leftFileApp, type NormalizedBaseUrl } from '@e2e-dev/core/lib/internal/urls';
+import { isFileBase, leftFileApp, type NormalizedBaseUrl } from '@e2e-dev/core/lib/internal/urls';
 import type { ArtifactSink } from '@e2e-dev/core/lib/run/fixtures';
 import type { FailureEvidence } from '@e2e-dev/core/lib/run/records';
 
@@ -109,7 +109,9 @@ export async function captureFailureEvidence(options: FailureEvidenceOptions): P
     if (candidates.length > 0) evidence.candidates = candidates;
   }
 
-  if (!signal.aborted) {
+  // The screenshot is a second capture nothing places, so a file app gets none: its page can leave the directory in between.
+  const fileApp = options.appBase !== undefined && isFileBase(options.appBase);
+  if (!signal.aborted && !fileApp) {
     try {
       const relative = await bounded(() => options.session.artifacts.screenshot('failure', operation));
       evidence.screenshot = options.artifacts.register('screenshot', relative);

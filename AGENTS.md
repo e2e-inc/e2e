@@ -845,8 +845,11 @@ trees, on both platforms, without a device.
     failure evidence (`run/failure-evidence.ts`). Out of the directory, the
     screen is withheld and only the location kept. A model is sent no
     pixels of a file app at all (`isFileApp` where `pixelsAllowed` is
-    set), since pixels can show a frame of another local file that no tree
-    lists. A test's own reads are trusted and not gated. An engine opens a
+    set and where `Invocation.observe` asks for pixels), since pixels can
+    show a frame of another local file that no tree lists. For the same
+    reason no automatic screenshot of a file app is kept: the two
+    `captureEvidence` of `agent.assert` and the failure screenshot are
+    second captures nothing places. A video the user turns on is not gated. A test's own reads are trusted and not gated. An engine opens a
     file app only when it declares `fileApps`, and the harness tells its
     `validateApp` with `fileApp: true`; the scheme is read once, in core
     (`namesFile`). The web engine refuses a provider and `connect` there,

@@ -692,7 +692,9 @@ app: { url: pathToFileURL('dist/index.html').href },
 - A file has no site and no origin. Frames that load another document stay
   out of observations, and the `environment` defaults to `'test'`.
 - The agent works from the tree alone: it is sent no screenshot, since one
-  could show a frame of another local file.
+  could show a frame of another local file. `agent.assert` with
+  `vision: true` judges from the tree, `vision: 'only'` is `POLICY_DENIED`,
+  and neither `agent.assert` nor a failure keeps a screenshot.
 - A `command` beside it needs a `readyUrl`, since a file answers no poll.
 - The browser reads the file from its own machine's disk, so a `web()`
   target with a browser provider or `connect` refuses it. An engine opens a

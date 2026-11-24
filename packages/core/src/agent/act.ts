@@ -401,7 +401,7 @@ class ActDispatch {
    * the artifact's report-relative path.
    */
   async captureEvidence(): Promise<string | undefined> {
-    if (this.spec.kind !== 'assert' || this.spec.screenshot === false) return undefined;
+    if (this.spec.kind !== 'assert' || this.spec.screenshot === false || isFileApp(this.runtime.app)) return undefined;
     const { signal } = this.accounting;
     if (signal.aborted) return undefined;
     try {

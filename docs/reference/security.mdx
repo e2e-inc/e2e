@@ -103,7 +103,6 @@ These calls fail with `POLICY_DENIED`.
 
 | Entry point | Accepts | Refuses |
 | --- | --- | --- |
-| `app.open`, `browser.goto`, the agent's `navigate` verb | `http:`, `https:`, and the exact `about:blank`. On a target whose [`app.url` is a file](/reference/config#a-file-as-the-app), a `file:` URL of a file in that file's directory or below it | Every other scheme; on a file target, a file outside the directory and any directory |
 | `app.open`, `browser.goto`, the agent's `navigate` verb | `http:`, `https:`, and the exact `about:blank` | Every other scheme |
 | The [`request`](/reference/request) fixture | `http:` and `https:`, with no credentials in the URL | Every other scheme, `about:blank` included |
 | `app.open(path)` on a device target with `app.linkBase` | The joined link, or an absolute link: an app's custom scheme, or `http:` and `https:` | `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, `filesystem:` |
@@ -114,13 +113,16 @@ These calls fail with `POLICY_DENIED`.
 - The runner doesn't re-check redirects or attach to popup pages. Register
   `browser.onDialog` to handle browser dialogs.
 - On a file target, a link or a script in the page can still take the
-  browser to any file it can read. Nothing keeps or sends that screen on its
-  own: no model observation, no trace screen, no failure screenshot or
-  screen text. Your test's own reads (`textContent()`, `screen.tree()`,
-  `app.screenshot()`) still work, as test code is trusted.
-- The model is sent no screenshot of a file app at all. A local page can
-  embed another file in a frame, which the tree leaves out and pixels
-  would show.
+  browser to any file it can read. No model observation, trace screen, or
+  failure screen text is taken there. Your test's own reads
+  (`textContent()`, `screen.tree()`, `app.screenshot()`) still work, as test
+  code is trusted.
+- No screenshot of a file app is sent to a model or kept on its own.
+  `agent.assert` and a failure keep none, and `vision: 'only'` is
+  `POLICY_DENIED`. A local page can embed another file in a frame, which
+  the tree leaves out and pixels would show.
+- A [`video`](/reference/config#video) you turn on records the browser
+  wherever it goes, a file outside the directory included.
 - The directory of the app's file is the whole readable scope. In a project
   root that includes `.env` and `.git`.
 

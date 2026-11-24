@@ -232,9 +232,17 @@ export class Invocation {
     const observation = await this.instrument(
       { kind: 'observation', phase: 'agent.observe' },
       async () => {
-        const pixelsAllowed = this.options.vision !== false && !isFileApp(this.runtime.app);
+        // A file app's pixels can show a frame of another local file, which no tree lists and no rule can place.
+        const fileApp = isFileApp(this.runtime.app);
+        if (fileApp && this.options.vision === 'only') {
+          throw new AgentError(
+            'POLICY_DENIED',
+            `${this.options.api} was called with vision: 'only', but no screenshot of an app opened from a file is sent to a model`,
+          );
+        }
+        const pixelsAllowed = this.options.vision !== false && !fileApp;
         const raw = await retryingObserve({
-          capture: () => this.session.observe(this.operation(), { pixels: this.pixelTier, pixelFallback: pixelsAllowed }),
+          capture: () => this.session.observe(this.operation(), { pixels: this.pixelTier && !fileApp, pixelFallback: pixelsAllowed }),
           guard: (cause) => this.checkDeadline(cause),
           signal: this.runtime.engine.signal,
         });
