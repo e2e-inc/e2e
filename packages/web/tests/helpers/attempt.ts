@@ -109,7 +109,6 @@ export async function openEngine(setup: WorkerSetup = {}): Promise<WebEngine> {
 
 /** One attempt on a `web()` engine. */
 export interface OpenAttempt {
-  readonly engine: WebEngine;
   /** The engine's `browser` fixture for the attempt. */
   readonly browser: Browser;
   /** The attempt's page, open at `about:blank`. */
@@ -135,7 +134,7 @@ export async function openAttempt(setup: AttemptSetup & { readonly engine?: WebE
     await engine.session!.open!('about:blank', operation());
     // A fixture factory returns `object` to the harness, which knows no engine's fixture types.
     const browser = engine.fixtures!['browser']!(fixture) as Browser;
-    return { engine, browser, page: surfaceOf(engine, attempt.attemptId)!.page(), operation, close };
+    return { browser, page: surfaceOf(engine, attempt.attemptId)!.page(), operation, close };
   } catch (cause) {
     await close().catch(() => undefined);
     throw cause;

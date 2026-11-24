@@ -59,7 +59,7 @@ import type { WebInitScript } from './init-scripts.ts';
 import type { WebMedia } from './media.ts';
 import { SECURE_FIELD_SELECTOR, type RawNodeData } from './read-node.ts';
 import { readSelector, takeReadsFunction } from './read-selector.ts';
-import { httpCredentials, installConfiguredHeaders, lowercaseNames, configuredHeadersFor } from './protected-app.ts';
+import { httpCredentials, installConfiguredHeaders, configuredHeadersFor } from './protected-app.ts';
 import { RefRegistry } from './refs.ts';
 import type { WorkerBrowser } from './worker-browser.ts';
 import {
@@ -301,9 +301,6 @@ export interface WebOptions {
   readonly webmcp?: boolean;
 }
 
-/** The test-id attribute when the options name none. */
-const DEFAULT_TEST_ID_ATTRIBUTE = 'data-testid';
-
 export class PlaywrightSurface {
   /**
    * Errors raised where nobody awaits them (dialog routing, route handlers)
@@ -313,21 +310,8 @@ export class PlaywrightSurface {
   readonly dialogs = new DialogRouter(this.latch);
 
   private session: AttemptSession | undefined;
-  private readonly viewport: ViewportSize | null;
-  private readonly deviceScaleFactor: number | undefined;
-  private readonly screencast: WebScreencastOptions;
-  /** Injected request headers, names lowercased so they replace the browser's own of the same name. */
-  private readonly headers: Readonly<Record<string, string>> | undefined;
-  private readonly basicAuth: WebBasicAuth | undefined;
-  private readonly testIdAttribute: string;
-  private readonly userAgent: string | undefined;
-  private readonly locale: string | undefined;
-  private readonly timezoneId: string | undefined;
-  /** The configured media features, which the attempt starts from. */
-  private readonly media: WebMedia;
   /** The attempt's init scripts, configured then added, applied to each context the attempt opens. */
   private readonly initScripts: string[];
-  private readonly artifactsDir: string;
   /** Navigations the engine has in flight, which the app log leaves to the step that started them. */
   private ownNavigations = 0;
   /** One entry per navigation in flight, set to the URL of a document request a test route aborted during it. */
@@ -343,37 +327,28 @@ export class PlaywrightSurface {
    */
   private readonly routes: StoredRoute[] = [];
 
-  /** `context` is what the attempt's `startAttempt` got; the options are the worker's. */
-  constructor(private readonly worker: WorkerBrowser, private readonly context: EngineAttemptContext) {
-    const { options } = worker;
-    this.viewport = options.viewport === undefined ? DEFAULT_VIEWPORT : options.viewport;
-    this.deviceScaleFactor = options.deviceScaleFactor;
-    this.screencast = options.screencast ?? {};
-    this.headers = options.headers === undefined ? undefined : lowercaseNames(options.headers);
-    this.basicAuth = options.basicAuth;
-    this.testIdAttribute = options.testIdAttribute ?? DEFAULT_TEST_ID_ATTRIBUTE;
-    this.userAgent = options.userAgent;
-    this.locale = options.locale;
-    this.timezoneId = options.timezoneId;
-    this.media = obj({ colorScheme: options.colorScheme, reducedMotion: options.reducedMotion });
+  /** `attempt` is what the attempt's `startAttempt` got; the options are the worker's. */
+  constructor(private readonly worker: WorkerBrowser, private readonly attempt: EngineAttemptContext) {
     this.initScripts = worker.configuredInitScripts.forAttempt();
-    this.artifactsDir = context.artifactsDir;
-    this.trace = new TraceFeed(context, () => this.openPage(), () => this.session?.refs, { testIdAttribute: this.testIdAttribute, site: worker.app.site });
+    this.trace = new TraceFeed(attempt, () => this.openPage(), () => this.session?.refs, { testIdAttribute: worker.testIdAttribute, site: worker.app.site });
   }
 
   /** The id the attempt's `startAttempt` got, which its calls name it by. */
   get attemptId(): string {
-    return this.context.attemptId;
+    return this.attempt.attemptId;
   }
 
   // --- lifecycle ---
 
   /** Opens the attempt's session, once what it waits on has resolved; `end` cancels an attachment still pending. */
   async start(): Promise<void> {
-    const { context } = this;
+    const { attempt: context } = this;
+    const { options } = this.worker;
+    const viewport = options.viewport === undefined ? DEFAULT_VIEWPORT : options.viewport;
+    const media = obj({ colorScheme: options.colorScheme, reducedMotion: options.reducedMotion });
     // Raced with the launch budget: a provider still resolving when the
     // runner gives up must not open a session after the runner ended it.
-    const basicAuth = this.basicAuth;
+    const { basicAuth } = options;
     const credentials =
       basicAuth === undefined
         ? undefined
@@ -387,21 +362,21 @@ export class PlaywrightSurface {
     const granted = Object.keys(this.worker.app.permissions ?? {});
     const session = new AttemptSession({
       artifactsDir: context.artifactsDir,
-      viewport: this.viewport,
-      screencast: this.screencast,
-      media: this.media,
+      viewport,
+      screencast: options.screencast ?? {},
+      media,
       acquire: (signal) => this.worker.acquireBrowser(signal),
       contextOptions: {
-        viewport: this.viewport,
-        ...(this.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: this.deviceScaleFactor }),
+        viewport,
+        ...(options.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: options.deviceScaleFactor }),
         acceptDownloads: true,
         ...(credentials === undefined ? {} : { httpCredentials: credentials }),
-        ...(this.userAgent === undefined ? {} : { userAgent: this.userAgent }),
-        ...(this.locale === undefined ? {} : { locale: this.locale }),
-        ...(this.timezoneId === undefined ? {} : { timezoneId: this.timezoneId }),
+        ...(options.userAgent === undefined ? {} : { userAgent: options.userAgent }),
+        ...(options.locale === undefined ? {} : { locale: options.locale }),
+        ...(options.timezoneId === undefined ? {} : { timezoneId: options.timezoneId }),
         // On the context too, so a tab the app opens itself paints with the configured values before the session reaches it.
-        ...this.media,
-        ...(this.headers === undefined ? {} : { serviceWorkers: 'block' as const }),
+        ...media,
+        ...(this.worker.headers === undefined ? {} : { serviceWorkers: 'block' as const }),
       },
       configure: async (target) => {
         await target.addInitScript(CLOSED_SHADOW_ROOTS_INIT_SCRIPT);
@@ -414,7 +389,7 @@ export class PlaywrightSurface {
           ownNavigation: () => this.ownNavigations > 0,
           testPage: () => this.openPage(),
         });
-        await installConfiguredHeaders(target, this.worker.credentialScope, this.headers);
+        await installConfiguredHeaders(target, this.worker.credentialScope, this.worker.headers);
         if (granted.length > 0) await target.grantPermissions(granted);
         for (const stored of this.routes) await target.route(stored.predicate, stored.handler);
       },
@@ -473,7 +448,7 @@ export class PlaywrightSurface {
 
   /** The configured headers a request to `url` carries, lowercased; `undefined` off the app's origin and `credentialOrigins`. */
   configuredHeaders(url: string): Readonly<Record<string, string>> | undefined {
-    return configuredHeadersFor(url, this.worker.credentialScope, this.headers);
+    return configuredHeadersFor(url, this.worker.credentialScope, this.worker.headers);
   }
 
   /** Resolves a file a test names against the project root, as config paths do, never `process.cwd()`. */
@@ -837,7 +812,7 @@ export class PlaywrightSurface {
     const refs = session.refs;
     const page = this.requirePage();
     const frame = await this.frameOf(expression);
-    const projected = projectExpression(page, expression, { testIdAttribute: this.testIdAttribute, frameHidden: frame.hidden });
+    const projected = projectExpression(page, expression, { testIdAttribute: this.worker.testIdAttribute, frameHidden: frame.hidden });
     const { displayValue, name, steps } = projected;
     // Every match is read by the `e2e-read` selector engine in the task that finds it, so a
     // page that replaces it a frame later cannot detach it before the read. A
@@ -847,7 +822,7 @@ export class PlaywrightSurface {
     // between, so such matches are pinned to the handles of the elements the query returned,
     // and their reads are taken back from those very handles: what was read and what is
     // acted on are one set of elements by construction.
-    const read = readSelector({ testIdAttribute: this.testIdAttribute, secureFieldSelector: SECURE_FIELD_SELECTOR });
+    const read = readSelector({ testIdAttribute: this.worker.testIdAttribute, secureFieldSelector: SECURE_FIELD_SELECTOR });
     const reading = projected.locator.locator(read.selector);
     const handles =
       displayValue !== null || name !== null
@@ -1111,7 +1086,7 @@ export class PlaywrightSurface {
       label === undefined ? '' : `-${sanitizeFilename(label)}`
     }${extension}`;
     const relative = path.posix.join(folder, name);
-    const absolute = path.join(this.artifactsDir, relative);
+    const absolute = path.join(this.attempt.artifactsDir, relative);
     mkdirSync(path.dirname(absolute), { recursive: true });
     return { relative, absolute };
   }
@@ -1243,7 +1218,7 @@ export class PlaywrightSurface {
     const page = this.requirePage();
     const capture = refs.beginCapture();
     const captured = await captureObservation(page, refs, {
-      testIdAttribute: this.testIdAttribute, site: this.worker.app.site,
+      testIdAttribute: this.worker.testIdAttribute, site: this.worker.app.site,
     }, operation, options);
     const { snapshot, generation } = captured;
     try {

@@ -2542,7 +2542,11 @@ context:
 ```ts
 const open = new Map<string, Surface>();     // each attempt, by the id its startAttempt got
 
-observe: (operation) => of(operation.attemptId).observe(operation),
+observe: async (operation) => {
+  const surface = open.get(operation.attemptId);
+  if (surface === undefined) throw new EngineError('INVALID_STATE', 'the attempt this call belongs to is not running', { retryable: false });
+  return surface.observe(operation);
+},
 endAttempt: async ({ attemptId }) => { /* end that attempt, and leave the others open */ },
 ```
 

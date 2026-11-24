@@ -867,7 +867,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       const abandonNotAwaited = async (): Promise<TestError[]> => {
         if (attemptEnd.signal.aborted) return [];
         const pollsNotAwaited = bodyPolls.close();
-        // Both fail their steps now; the sessions' close is waited for below, after the test's own steps are cut.
+        // Both fail their steps now; the other sessions' stop is waited for below, after the test's own steps are cut.
         const guestsAbandoned = guests.abandonRunning();
         const stepsNotAwaited = steps.abandonRunning();
         steps.holdable = false;

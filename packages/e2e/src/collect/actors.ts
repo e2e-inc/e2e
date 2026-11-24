@@ -141,20 +141,20 @@ export function actorsOf(plans: AttemptPlans, test: CollectedTest, target: Resol
  * the target it is restored on. Empty for a test that cannot be planned
  * there: it does not run there, or `actorsOf` reports why.
  */
-export function actorSessionsOf(plans: AttemptPlans, test: CollectedTest, target: ResolvedTarget): readonly ActorSession[] {
+export function actorSessionsOf(plans: AttemptPlans, test: CollectedTest, target: ResolvedTarget): readonly NeededSession[] {
   if (!declaresActors(test)) return [];
   const planned = plans.plan(test, target);
   return 'error' in planned ? [] : actorSessions(planned.actors);
 }
 
-/** A saved session an actor restores, and the target it is restored on. */
-export interface ActorSession {
+/** A saved session a pair starts from, its own or an actor's, and the target it is restored on. */
+export interface NeededSession {
   readonly session: string;
   readonly target: ResolvedTarget;
 }
 
 /** The saved sessions `actors` restore, each once per target. */
-export function actorSessions(actors: readonly PlannedActor[]): readonly ActorSession[] {
+export function actorSessions(actors: readonly PlannedActor[]): readonly NeededSession[] {
   const seen = new Set<string>();
   return actors.flatMap((actor) => {
     if (actor.session === undefined) return [];

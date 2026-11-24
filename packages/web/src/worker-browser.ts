@@ -28,7 +28,7 @@ import type { CdpEndpointResolver } from './cdp-recovery.ts';
 import { missingLibrariesMessage } from './host-libraries.ts';
 import { ConfiguredInitScripts } from './init-scripts.ts';
 import { browserCheck, ensureBrowsersInstalled, missingBrowserLibraries } from './install.ts';
-import { credentialOrigins } from './protected-app.ts';
+import { credentialOrigins, lowercaseNames } from './protected-app.ts';
 import { LeasedBrowsers } from './provider.ts';
 import { cancelled, invalidState, message, translatePwError } from './support.ts';
 import { PlaywrightSurface, type WebConnectOptions, type WebOptions } from './surface.ts';
@@ -41,6 +41,9 @@ const BROWSER_LAUNCH_TIMEOUT_MS = 60_000;
 export interface AttemptName {
   readonly attemptId?: string | undefined;
 }
+
+/** The test-id attribute when the options name none. */
+const DEFAULT_TEST_ID_ATTRIBUTE = 'data-testid';
 
 export class WorkerBrowser {
   readonly browserName: BrowserName;
@@ -55,6 +58,9 @@ export class WorkerBrowser {
   /** The default contexts earlier attempts rode on a `connect` resolver's browsers, kept for the worker's life so a later attempt is refused one of them. */
   private readonly usedContexts = new Set<string>();
   readonly configuredInitScripts: ConfiguredInitScripts;
+  readonly testIdAttribute: string;
+  /** Injected request headers, names lowercased so they replace the browser's own of the same name. */
+  readonly headers: Readonly<Record<string, string>> | undefined;
   /** Where `headers` and `basicAuth` go: the app's origin and each of `credentialOrigins`, set at `init`. */
   credentialScope: ReadonlySet<string> = new Set();
   app: EngineAppInfo = {};
@@ -70,6 +76,8 @@ export class WorkerBrowser {
     this.connect = options.connect;
     this.launch = options.webmcp === true ? webmcpLaunch(this.browserName) : {};
     this.configuredInitScripts = new ConfiguredInitScripts(options.initScripts ?? []);
+    this.testIdAttribute = options.testIdAttribute ?? DEFAULT_TEST_ID_ATTRIBUTE;
+    this.headers = options.headers === undefined ? undefined : lowercaseNames(options.headers);
   }
 
   // --- lifecycle ---
@@ -256,7 +264,7 @@ export class WorkerBrowser {
    * open, a call that names none could reach the wrong one's page, and is
    * refused.
    */
-  private openAttempt({ attemptId }: AttemptName): PlaywrightSurface | undefined {
+  private find({ attemptId }: AttemptName): PlaywrightSurface | undefined {
     if (attemptId !== undefined) return this.attempts.get(attemptId);
     const [only, ...rest] = this.attempts.values();
     if (rest.length === 0) return only;
@@ -269,48 +277,45 @@ export class WorkerBrowser {
    * that one's page.
    */
   attempt(name: AttemptName): PlaywrightSurface {
-    const surface = this.openAttempt(name);
+    const surface = this.find(name);
     if (surface !== undefined) return surface;
     throw invalidState(this.attempts.size === 0 ? 'no attempt is running' : 'the attempt this call belongs to is not running: it ended, or never started here');
   }
 
   /** Settles the attempt a cleanup is for; one that is not open has no handler left to wait for. */
   async settleAttempt(context: EngineCleanupContext): Promise<void> {
-    await this.openAttempt(context)?.settle(context);
+    await this.find(context)?.settle(context);
   }
 
   /** Ends the attempt a cleanup is for. One that is not open already ended: nothing of it is left to end. */
   async endAttempt(context: EngineCleanupContext): Promise<void> {
-    const surface = this.openAttempt(context);
+    const surface = this.find(context);
     if (surface === undefined) return;
     this.attempts.delete(surface.attemptId);
     await surface.end(context);
   }
 
   /**
-   * Ends the attempts still open, then releases the worker's shared browser
-   * process and a lease the worker acquired for itself: independent tasks,
-   * in that order, every one attempted whatever the earlier ones did, and
-   * the first failure reported once all ran. Each open context closes
-   * before the browser goes down, so its video is finalized, and a billed
-   * browser outlives a failed recording flush otherwise.
+   * Ends the attempts still open, together, then releases the worker's
+   * shared browser process, then a lease the worker acquired for itself:
+   * every one attempted whatever the earlier ones did, and the first failure
+   * reported once all ran. Each open context closes before the browser goes
+   * down, so its video is finalized, and a billed browser outlives a failed
+   * recording flush otherwise.
    */
   async dispose(context: EngineCleanupContext): Promise<void> {
     const open = [...this.attempts.values()];
     this.attempts.clear();
-    const tasks = [
-      ...open.map((surface) => () => surface.end(context)),
-      () => withinCleanupBudget(this.connection.dispose(), context),
-      async () => this.leases?.dispose(context),
-    ];
-    let failure: { cause: unknown } | undefined;
-    for (const task of tasks) {
+    // Each has the cleanup budget from its own start: one context that hangs on close must not spend another's.
+    const ended = await Promise.allSettled(open.map((surface) => surface.end(context)));
+    const failures: unknown[] = ended.flatMap((outcome) => (outcome.status === 'rejected' ? [outcome.reason] : []));
+    for (const release of [() => withinCleanupBudget(this.connection.dispose(), context), async () => this.leases?.dispose(context)]) {
       try {
-        await task();
+        await release();
       } catch (cause) {
-        failure ??= { cause };
+        failures.push(cause);
       }
     }
-    if (failure !== undefined) throw translatePwError(failure.cause, 'dispose');
+    if (failures.length > 0) throw translatePwError(failures[0], 'dispose');
   }
 }

@@ -9,7 +9,7 @@ import type { ResolvedConfig, ResolvedTarget } from '@e2e-dev/core/lib/config/re
 import { attemptKeep, attemptVideo, pairRecording, type AttemptRecordings } from '@e2e-dev/core/lib/internal/recording-modes';
 import type { Capability, RecordingMode, TestOptions } from '@e2e-dev/core/lib/types';
 import { excludingEntry, type Collection, type CollectedTest, type UncollectedFile } from './collect.ts';
-import { actorSessions, actorSessionsOf, actorsOf, type ActorSession, type PlannedActor } from './actors.ts';
+import { actorSessions, actorSessionsOf, actorsOf, type NeededSession, type PlannedActor } from './actors.ts';
 import { assertFixtureUse, AttemptPlans } from './fixture-use.ts';
 import { groupChain } from './registry.ts';
 import type { SkipInfo } from '@e2e-dev/core/lib/run/records';
@@ -62,7 +62,7 @@ export interface TestTargetPair {
 }
 
 /** Every saved session a pair starts from, with the target each is restored on: its own, then its actors'. */
-export function pairSessions(pair: Pick<TestTargetPair, 'target' | 'options' | 'actors'>): readonly ActorSession[] {
+export function pairSessions(pair: Pick<TestTargetPair, 'target' | 'options' | 'actors'>): readonly NeededSession[] {
   const own = pair.options.session === undefined ? [] : [{ session: pair.options.session, target: pair.target }];
   return [...own, ...actorSessions(pair.actors).filter((needed) => !own.some((mine) => mine.session === needed.session && mine.target.name === needed.target.name))];
 }

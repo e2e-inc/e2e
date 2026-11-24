@@ -1,9 +1,11 @@
 /**
- * The hosts and sessions a test opened beside its own with `launch()` from
- * `@e2e-dev/core`, as one attempt keeps them: their steps in its record, each
- * under the session's name, the videos they recorded among its artifacts,
- * and their end. What the test opened and left open is closed with it; a
- * session opened outside every test only has its steps recorded.
+ * The sessions of an attempt beside the test's own, as the attempt keeps
+ * them: the hosts and sessions the test opened with `launch()` from
+ * `@e2e-dev/core`, and the actors the attempt opened for it (`actors.ts`).
+ * Their steps are in its record, each under the session's name, the videos
+ * they recorded among its artifacts, and their end is the attempt's. What
+ * the test opened and left open is closed with it; a session opened outside
+ * every test only has its steps recorded.
  */
 
 import { copyFile, mkdir, rm } from 'node:fs/promises';
@@ -119,10 +121,9 @@ export class AttemptGuestSessions {
   }
 
   /**
-   * Fails the steps the body left running on the sessions it opened and
-   * closes those sessions, which cancels the steps: teardown starts with
-   * none of them running, as it does for the test's own. Returns the errors
-   * naming them.
+   * Fails the steps the body left running on these sessions and stops them
+   * (`quiesce`): teardown starts with none of them running, as it does for
+   * the test's own. Returns the errors naming them.
    */
   async abandonRunning(): Promise<E2EError[]> {
     const errors: E2EError[] = this.sessions.flatMap(({ session }) => {
