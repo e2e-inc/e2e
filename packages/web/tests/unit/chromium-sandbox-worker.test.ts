@@ -3,7 +3,8 @@ import type { Browser } from 'playwright-core';
 import { afterEach, expect, it, vi } from 'vitest';
 import { defaultChromiumSandbox } from '../../src/browser-connection.ts';
 import type { WebOptions } from '../../src/surface.ts';
-import { WorkerBrowser } from '../../src/worker-browser.ts';
+import type { WorkerBrowser } from '../../src/worker-browser.ts';
+import { cleanupContext, openWorker } from '../helpers/attempt.ts';
 
 const acquire = vi.hoisted(() => vi.fn());
 vi.mock('../../src/browser-connection.ts', async (importOriginal) => ({
@@ -19,27 +20,13 @@ let workers: WorkerBrowser[] = [];
 async function launchedSandbox(options: WebOptions): Promise<unknown> {
   acquire.mockReset();
   acquire.mockResolvedValue({} as unknown as Browser);
-  const worker = new WorkerBrowser(options);
-  workers.push(worker);
-  await worker.init({
-    runId: 'run',
-    targetName: 'web',
-    projectRoot: process.cwd(),
-    app: {},
-    env: {},
-    headed: false,
-    workerSlot: 0,
-    signal: new AbortController().signal,
-    log: () => undefined,
-  });
+  workers.push(await openWorker({ options }));
   expect(acquire).toHaveBeenCalledOnce();
   return (acquire.mock.calls[0]![0] as { chromiumSandbox: unknown }).chromiumSandbox;
 }
 
 afterEach(async () => {
-  for (const worker of workers) {
-    await worker.dispose({ timeoutMs: 1_000, signal: new AbortController().signal });
-  }
+  for (const worker of workers) await worker.dispose(cleanupContext());
   workers = [];
 });
 

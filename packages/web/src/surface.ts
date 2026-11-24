@@ -1,11 +1,11 @@
 /**
  * The Playwright surface of one attempt: its browser context on the worker's
  * browser (`worker-browser.ts`), and the page every engine member delegates
- * to. `web()` opens one per attempt; the engine hooks in `engine.ts` and the
- * `browser` fixture in `browser.ts` are thin delegates onto it. Action
- * dispatch lives in `actions.ts` and tree capture in `observation.ts`.
- * `AttemptSession` owns the attempt's live binding, recovery, references,
- * and recordings.
+ * to. The worker's browser builds one for each attempt it starts; the engine
+ * hooks in `engine.ts` and the `browser` fixture in `browser.ts` are thin
+ * delegates onto it. Action dispatch lives in `actions.ts` and tree capture
+ * in `observation.ts`. `AttemptSession` owns the attempt's live binding,
+ * recovery, references, and recordings.
  */
 
 import { mkdirSync } from 'node:fs';
@@ -309,8 +309,8 @@ export class PlaywrightSurface {
    * Errors raised where nobody awaits them (dialog routing, route handlers)
    * wait here and fail the next step that enters the surface.
    */
-  latch = new ErrorLatch();
-  dialogs = new DialogRouter(this.latch);
+  readonly latch = new ErrorLatch();
+  readonly dialogs = new DialogRouter(this.latch);
 
   private session: AttemptSession | undefined;
   private readonly viewport: ViewportSize | null;
@@ -323,17 +323,17 @@ export class PlaywrightSurface {
   private readonly userAgent: string | undefined;
   private readonly locale: string | undefined;
   private readonly timezoneId: string | undefined;
-  /** The configured media features, which every attempt starts from. */
+  /** The configured media features, which the attempt starts from. */
   private readonly media: WebMedia;
   /** The attempt's init scripts, configured then added, applied to each context the attempt opens. */
-  private initScripts: string[] = [];
-  private artifactsDir = '';
+  private readonly initScripts: string[];
+  private readonly artifactsDir: string;
   /** Navigations the engine has in flight, which the app log leaves to the step that started them. */
   private ownNavigations = 0;
   /** One entry per navigation in flight, set to the URL of a document request a test route aborted during it. */
   private readonly navigationAborts = new Set<{ url?: string }>();
-  /** What the attempt tells its trace beside the app log; absent between attempts. */
-  private trace: TraceFeed | undefined;
+  /** What the attempt tells its trace beside the app log. */
+  private readonly trace: TraceFeed;
   private artifactCounter = 0;
   /**
    * Attempt-scoped network routes. Registered on the
@@ -341,9 +341,11 @@ export class PlaywrightSurface {
    * first navigation included - and re-applied to each context the attempt
    * replaces on `reset` or session restore.
    */
-  private routes: StoredRoute[] = [];
+  private readonly routes: StoredRoute[] = [];
 
-  constructor(options: WebOptions, private readonly worker: WorkerBrowser) {
+  /** `context` is what the attempt's `startAttempt` got; the options are the worker's. */
+  constructor(private readonly worker: WorkerBrowser, private readonly context: EngineAttemptContext) {
+    const { options } = worker;
     this.viewport = options.viewport === undefined ? DEFAULT_VIEWPORT : options.viewport;
     this.deviceScaleFactor = options.deviceScaleFactor;
     this.screencast = options.screencast ?? {};
@@ -354,13 +356,21 @@ export class PlaywrightSurface {
     this.locale = options.locale;
     this.timezoneId = options.timezoneId;
     this.media = obj({ colorScheme: options.colorScheme, reducedMotion: options.reducedMotion });
+    this.initScripts = worker.configuredInitScripts.forAttempt();
+    this.artifactsDir = context.artifactsDir;
+    this.trace = new TraceFeed(context, () => this.openPage(), () => this.session?.refs, { testIdAttribute: this.testIdAttribute, site: worker.app.site });
+  }
+
+  /** The id the attempt's `startAttempt` got, which its calls name it by. */
+  get attemptId(): string {
+    return this.context.attemptId;
   }
 
   // --- lifecycle ---
 
-  /** Opens one attempt owner before setup starts, so cleanup can cancel pending attachment. */
-  async startAttempt(context: EngineAttemptContext): Promise<void> {
-    if (this.session !== undefined) throw invalidState('an attempt is already running');
+  /** Opens the attempt's session, once what it waits on has resolved; `end` cancels an attachment still pending. */
+  async start(): Promise<void> {
+    const { context } = this;
     // Raced with the launch budget: a provider still resolving when the
     // runner gives up must not open a session after the runner ended it.
     const basicAuth = this.basicAuth;
@@ -373,18 +383,8 @@ export class PlaywrightSurface {
             'resolving the basic-auth password',
           );
     const persistent = await this.worker.persistentBinding(context);
-    this.artifactsDir = context.artifactsDir;
-    this.artifactCounter = 0;
-    this.trace = new TraceFeed(context, () => this.openPage(), () => this.session?.refs, { testIdAttribute: this.testIdAttribute, site: this.worker.app.site });
-    const routes: StoredRoute[] = [];
-    const initScripts = this.worker.configuredInitScripts.forAttempt();
     // `validateApp` admitted only grants.
     const granted = Object.keys(this.worker.app.permissions ?? {});
-    this.latch = new ErrorLatch();
-    const dialogs = new DialogRouter(this.latch);
-    this.routes = routes;
-    this.initScripts = initScripts;
-    this.dialogs = dialogs;
     const session = new AttemptSession({
       artifactsDir: context.artifactsDir,
       viewport: this.viewport,
@@ -406,9 +406,9 @@ export class PlaywrightSurface {
       configure: async (target) => {
         await target.addInitScript(CLOSED_SHADOW_ROOTS_INIT_SCRIPT);
         await target.addInitScript(MODAL_ORDER_INIT_SCRIPT);
-        for (const script of initScripts) await target.addInitScript(script);
+        for (const script of this.initScripts) await target.addInitScript(script);
         target.setDefaultTimeout(CONTEXT_DEFAULT_TIMEOUT_MS);
-        target.on('dialog', (dialog) => { void dialogs.dispatch(dialog); });
+        target.on('dialog', (dialog) => { void this.dialogs.dispatch(dialog); });
         installAppLog(target, context.appLog, {
           navigated: context.navigation,
           ownNavigation: () => this.ownNavigations > 0,
@@ -416,7 +416,7 @@ export class PlaywrightSurface {
         });
         await installConfiguredHeaders(target, this.worker.credentialScope, this.headers);
         if (granted.length > 0) await target.grantPermissions(granted);
-        for (const stored of routes) await target.route(stored.predicate, stored.handler);
+        for (const stored of this.routes) await target.route(stored.predicate, stored.handler);
       },
       ...(persistent === undefined ? {} : { persistent }),
       record: this.worker.leases?.recorder(context.attemptId),
@@ -427,20 +427,19 @@ export class PlaywrightSurface {
 
   /**
    * Waits for a route or dialog handler still running, then rethrows the
-   * error one of them latched after the last step, so it fails this attempt
-   * instead of the next one's first operation. The latch itself is replaced
-   * by `startAttempt`, after this ran.
+   * error one of them latched after the last step: no later step of the
+   * attempt is left to fail with it.
    */
-  settleAttempt(context: EngineCleanupContext): Promise<void> {
+  settle(context: EngineCleanupContext): Promise<void> {
     return this.latch.settle(context);
   }
 
   /**
-   * Retires the owner before awaiting cleanup; late work cannot reach the
-   * next attempt. A browser leased for the attempt is released after its
-   * connection closes, whether or not the close succeeded.
+   * Retires the session before awaiting cleanup, so late work finds no
+   * attempt to run on. A browser leased for the attempt is released after
+   * its connection closes, whether or not the close succeeded.
    */
-  async endAttempt(context: EngineCleanupContext): Promise<void> {
+  async end(context: EngineCleanupContext): Promise<void> {
     const session = this.session;
     this.session = undefined;
     try {
@@ -450,7 +449,7 @@ export class PlaywrightSurface {
     }
   }
 
-  /** Returns the active attempt, including its connection generation and references. */
+  /** Returns the attempt's session, including its connection generation and references. */
   private requireSession(): AttemptSession {
     if (this.session === undefined) throw invalidState('no attempt is running');
     return this.session;
@@ -660,7 +659,7 @@ export class PlaywrightSurface {
     this.navigationAborts.add(watch);
     try {
       const result = await work();
-      this.trace?.tellEnvironment();
+      this.trace.tellEnvironment();
       return result;
     } catch (cause) {
       if (watch.url === undefined || isClassified(cause) || isPwTimeout(cause)) throw cause;
@@ -710,7 +709,7 @@ export class PlaywrightSurface {
   /** Resolves with what an action resolved with once the trace has the screen it left (`TraceFeed.screenAfterAction`); an action that failed leaves none. */
   private async acted<T>(operation: OperationContext, work: Promise<T>): Promise<T> {
     const result = await work;
-    await this.trace?.screenAfterAction(operation);
+    await this.trace.screenAfterAction(operation);
     return result;
   }
 

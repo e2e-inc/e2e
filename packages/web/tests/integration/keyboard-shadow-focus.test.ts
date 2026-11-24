@@ -4,22 +4,18 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Page } from 'playwright-core';
-import { PlaywrightSurface } from '../../src/surface.ts';
-import { WorkerBrowser } from '../../src/worker-browser.ts';
-import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
+import type { PlaywrightSurface } from '../../src/surface.ts';
+import { openSurface, type Operation } from '../helpers/attempt.ts';
 
-const worker = new WorkerBrowser({});
-const surface = new PlaywrightSurface({}, worker);
-const signal = new AbortController().signal;
-const operation = () => ({ runId: 'focus', attemptId: 'focus-1', origin: 'test' as const, signal, timeoutMs: 5_000 });
-const cleanup = () => ({ signal, timeoutMs: 30_000 });
+let surface: PlaywrightSurface;
+let operation: Operation;
+let close: () => Promise<void>;
 let artifactsDir: string;
 let page: Page;
 
 beforeAll(async () => {
   artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-keyboard-shadow-'));
-  await worker.init({ runId: 'focus', targetName: 'web', projectRoot: process.cwd(), app: {}, env: {}, headed: false, workerSlot: 0, signal, log: () => undefined });
-  await surface.startAttempt({ attemptId: 'focus-1', artifactsDir, signal, resolveSecret: noSecrets, ...ignoreTrace });
+  ({ surface, operation, close } = await openSurface({ attempt: { artifactsDir } }));
   await surface.open('about:blank', operation());
   page = surface.requirePage();
 });
@@ -27,8 +23,7 @@ beforeAll(async () => {
 beforeEach(async () => { await page.goto('about:blank'); });
 
 afterAll(async () => {
-  await surface.endAttempt(cleanup());
-  await worker.dispose(cleanup());
+  await close();
   rmSync(artifactsDir, { recursive: true, force: true });
 });
 

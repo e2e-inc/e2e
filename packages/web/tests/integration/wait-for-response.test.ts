@@ -5,11 +5,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Page } from 'playwright-core';
-import { withTimeout, type EngineFixtureContext } from '@e2e-dev/core/engine';
-import { PlaywrightSurface } from '../../src/surface.ts';
-import { WorkerBrowser } from '../../src/worker-browser.ts';
-import { createBrowserFixture, type Browser } from '../../src/browser.ts';
-import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
+import { withTimeout } from '@e2e-dev/core/engine';
+import type { PlaywrightSurface } from '../../src/surface.ts';
+import type { WorkerBrowser } from '../../src/worker-browser.ts';
+import type { Browser } from '../../src/browser.ts';
+import { cleanupContext, openSurface, openWorker } from '../helpers/attempt.ts';
 
 /**
  * One origin with a body for every outcome `waitForResponse` reports: a full
@@ -72,8 +72,9 @@ function startBodyServer(): Promise<{ server: Server; url: string }> {
 }
 
 describe('browser.waitForResponse bodies', () => {
-  const worker = new WorkerBrowser({});
+  let worker: WorkerBrowser;
   let surface: PlaywrightSurface;
+  let close: () => Promise<void>;
   const artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-wait-for-response-'));
   const signal = new AbortController().signal;
   let server: Server;
@@ -84,29 +85,26 @@ describe('browser.waitForResponse bodies', () => {
 
   beforeAll(async () => {
     ({ server, url: origin } = await startBodyServer());
-    await worker.init({ runId: 'responses', targetName: 'web', projectRoot: process.cwd(),
-      app: {}, env: {}, headed: false, workerSlot: 0, signal, log: () => undefined });
+    worker = await openWorker();
   });
 
   beforeEach(async () => {
-    surface = new PlaywrightSurface({}, worker);
-    await surface.startAttempt({ attemptId: 'responses', artifactsDir, signal, resolveSecret: noSecrets, ...ignoreTrace });
     operationBudgetMs = 2_000;
-    browser = createBrowserFixture(surface, {
-      app: { resolveUrl: (url: string) => new URL(url, `${origin}/`).href },
-      timeouts: { test: 5_000 },
-      operation: (timeoutMs = operationBudgetMs) => ({ signal, timeoutMs, runId: 'responses', attemptId: 'responses', origin: 'test' }),
-      expectable: (target: object) => target,
-      fixture: (_name: string, target: object) => target,
-    } as unknown as EngineFixtureContext);
+    ({ surface, browser, close } = await openSurface({
+      worker,
+      attempt: { artifactsDir },
+      baseUrl: `${origin}/`,
+      fixture: {
+        timeouts: { test: 5_000, action: 5_000, assertion: 5_000 },
+        operation: (timeoutMs = operationBudgetMs) => ({ signal, timeoutMs, runId: 'responses', attemptId: 'responses', origin: 'test' }),
+      },
+    }));
   });
 
-  afterEach(async () => {
-    await surface.endAttempt({ signal, timeoutMs: 5_000 });
-  });
+  afterEach(() => close());
 
   afterAll(async () => {
-    await worker.dispose({ signal, timeoutMs: 5_000 });
+    await worker.dispose(cleanupContext());
     await new Promise<void>((resolve) => server.close(() => resolve()));
     rmSync(artifactsDir, { recursive: true, force: true });
   });

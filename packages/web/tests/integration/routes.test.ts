@@ -19,11 +19,11 @@ import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EventEmitter } from 'node:events';
 import type { Download, Page } from 'playwright-core';
-import { TestError, type EngineFixtureContext } from '@e2e-dev/core/engine';
-import { PlaywrightSurface, type WebOptions } from '../../src/surface.ts';
-import { WorkerBrowser } from '../../src/worker-browser.ts';
+import { TestError } from '@e2e-dev/core/engine';
+import type { PlaywrightSurface } from '../../src/surface.ts';
+import type { WorkerBrowser } from '../../src/worker-browser.ts';
 import { createBrowserFixture, type Browser, type WebRoute } from '../../src/browser.ts';
-import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
+import { cleanupContext, fixtureContext, openSurface, openWorker, type Operation } from '../helpers/attempt.ts';
 
 interface Echo {
   readonly path: string;
@@ -85,11 +85,11 @@ function startCountingServer(hits: Map<string, number>): Promise<{ server: Serve
 }
 
 describe('browser route and waitForResponse decisions', () => {
-  let webOptions: WebOptions;
   let worker: WorkerBrowser;
   let surface: PlaywrightSurface;
+  let operation: Operation;
+  let close: () => Promise<void>;
   const projectRoot = mkdtempSync(path.join(tmpdir(), 'e2e-routes-'));
-  const signal = new AbortController().signal;
   const hits = new Map<string, number>();
   const attached: string[] = [];
   /** The fixture operations the browser was built with, for step-label checks. */
@@ -124,40 +124,38 @@ describe('browser route and waitForResponse decisions', () => {
     otherOrigin = `http://localhost:${started.port}`;
     unlistedOrigin = `http://127.0.0.1:${unlisted.port}`;
     listedOrigin = `http://127.0.0.1:${listed.port}`;
-    webOptions = { headers: { 'X-Gate': 'open-sesame' }, credentialOrigins: [listedOrigin] };
-    worker = new WorkerBrowser(webOptions);
     writeFileSync(path.join(projectRoot, 'quote.json'), '{"cents":4200}\n');
-    await worker.init({ runId: 'routes', targetName: 'web', projectRoot, app: { origin, site: '127.0.0.1' },
-      env: {}, headed: false, workerSlot: 0, signal, log: () => undefined });
+    worker = await openWorker({
+      options: { headers: { 'X-Gate': 'open-sesame' }, credentialOrigins: [listedOrigin] },
+      init: { projectRoot, app: { origin, site: '127.0.0.1' } },
+    });
   });
 
   beforeEach(async () => {
     hits.clear();
     attached.length = 0;
     operations.clear();
-    surface = new PlaywrightSurface(webOptions, worker);
-    await surface.startAttempt({ attemptId: 'routes', artifactsDir: projectRoot, signal, resolveSecret: noSecrets, ...ignoreTrace });
+    ({ surface, browser, operation, close } = await openSurface({
+      worker,
+      attempt: { artifactsDir: projectRoot },
+      fixture: {
+        app: { origin, site: '127.0.0.1', resolveUrl },
+        timeouts: { test: 5_000, action: 5_000, assertion: 5_000 },
+        fixture: (name, target, definitions) => {
+          operations.set(name, definitions);
+          return target;
+        },
+        attachArtifact: (_kind, relative) => attached.push(relative),
+      },
+    }));
     page = await surface.ensurePage();
     await page.goto(`${origin}/`);
-    browser = createBrowserFixture(surface, {
-      app: { origin, site: '127.0.0.1', resolveUrl },
-      operation: (timeoutMs = 5_000) => ({ signal, timeoutMs, runId: 'routes', attemptId: 'routes', origin: 'test' }),
-      timeouts: { test: 5_000, assertion: 5_000 },
-      expectable: (target: object) => target,
-      fixture: (name: string, target: object, definitions: unknown) => {
-        operations.set(name, definitions);
-        return target;
-      },
-      attachArtifact: (_kind: string, relative: string) => attached.push(relative),
-    } as unknown as EngineFixtureContext);
   });
 
-  afterEach(async () => {
-    await surface.endAttempt({ signal, timeoutMs: 5_000 });
-  });
+  afterEach(() => close());
 
   afterAll(async () => {
-    await worker.dispose({ signal, timeoutMs: 5_000 });
+    await worker.dispose(cleanupContext());
     await Promise.all(servers.map((each) => new Promise<void>((resolve) => each.close(() => resolve()))));
     rmSync(projectRoot, { recursive: true, force: true });
   });
@@ -248,17 +246,14 @@ describe('browser route and waitForResponse decisions', () => {
 
   it('hands timeout 0 to the operation as a budget only the test deadline caps, and refuses a negative one', async () => {
     const asked: (number | undefined)[] = [];
-    const recording = createBrowserFixture(surface, {
+    const recording = createBrowserFixture(surface, fixtureContext({
       app: { site: '127.0.0.1', resolveUrl },
       operation: (timeoutMs?: number) => {
         asked.push(timeoutMs);
-        return { signal, timeoutMs: Math.min(timeoutMs ?? 5_000, 5_000), runId: 'routes', attemptId: 'routes', origin: 'test' };
+        return operation(Math.min(timeoutMs ?? 5_000, 5_000));
       },
       timeouts: { test: 5_000, action: 5_000, assertion: 5_000 },
-      expectable: (target: object) => target,
-      fixture: (_name: string, target: object) => target,
-      attachArtifact: () => undefined,
-    } as unknown as EngineFixtureContext);
+    }));
     await recording.goto(`${origin}/`, { timeout: 0 });
     await recording.waitForURL(`${origin}/`, { timeout: 0 });
     expect(asked.slice(0, 2)).toEqual([Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY]);
@@ -443,14 +438,11 @@ describe('browser route and waitForResponse decisions', () => {
   });
 
   /** The `browser` fixture on a target with no `app.url`, whose base URL throws as the harness's does. */
-  const noAppUrlBrowser = () => createBrowserFixture(surface, {
+  const noAppUrlBrowser = () => createBrowserFixture(surface, fixtureContext({
     app: { site: '127.0.0.1', resolveUrl: () => { throw new TestError('APP_URL_REQUIRED', 'this target has no app.url'); } },
-    operation: (timeoutMs?: number) => ({ signal, timeoutMs: Math.min(timeoutMs ?? 5_000, 5_000), runId: 'routes', attemptId: 'routes-no-app' }),
+    operation: (timeoutMs?: number) => operation(Math.min(timeoutMs ?? 5_000, 5_000)),
     timeouts: { test: 5_000, action: 5_000, assertion: 5_000 },
-    expectable: (target: object) => target,
-    fixture: (_fixture: string, target: object) => target,
-    attachArtifact: () => undefined,
-  } as unknown as EngineFixtureContext);
+  }));
 
   it.each([
     ['an absolute URL', (): string | RegExp => `${origin}/api/quote`],
@@ -545,7 +537,7 @@ describe('browser route and waitForResponse decisions', () => {
 
   it('keeps a method-narrowed route across a restart', async () => {
     await browser.route({ method: 'POST', url: '**/api/orders' }, (route) => route.fulfill({ body: 'post' }));
-    await surface.restart({ signal, timeoutMs: 5_000, runId: 'routes', attemptId: 'routes', origin: 'test' });
+    await surface.restart(operation());
     page = await surface.ensurePage();
     await page.goto(`${origin}/`);
     const posted = await page.evaluate(async (url) => (await fetch(url, { method: 'POST' })).text(), `${origin}/api/orders`);

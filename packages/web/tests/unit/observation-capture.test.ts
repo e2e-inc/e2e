@@ -1,15 +1,12 @@
-import { tmpdir } from 'node:os';
 import type { Browser, Page } from 'playwright-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OperationContext } from '@e2e-dev/core/engine';
 import type { RawObservedNode } from '../../src/read-node.ts';
-import { PlaywrightSurface } from '../../src/surface.ts';
-import { WorkerBrowser } from '../../src/worker-browser.ts';
 import { BrowserConnection } from '../../src/browser-connection.ts';
-import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
+import { openSurface, type OpenSurface } from '../helpers/attempt.ts';
 
 type ReadStage = 'evaluation' | 'metadata' | 'elements' | 'element' | 'frame';
-const opened = new Set<{ readonly worker: WorkerBrowser; readonly surface: PlaywrightSurface }>();
+const opened = new Set<OpenSurface>();
 
 /** One externally completed protocol reply. */
 function deferred() {
@@ -87,24 +84,16 @@ async function setup(stalled?: ReadStage) {
   const operation: OperationContext = {
     signal: controller.signal, timeoutMs: 80, runId: 'run', attemptId: 'attempt', origin: 'agent',
   };
-  const worker = new WorkerBrowser({});
-  const surface = new PlaywrightSurface({}, worker);
-  opened.add({ worker, surface });
-  await worker.init({
-    runId: 'run', targetName: 'fixture', projectRoot: process.cwd(), app: {}, env: {},
-    headed: false, workerSlot: 0, signal: controller.signal, log: () => undefined,
-  });
-  await surface.startAttempt({ attemptId: 'attempt', artifactsDir: tmpdir(), signal: controller.signal, resolveSecret: noSecrets, ...ignoreTrace });
+  const attempt = await openSurface({ init: { signal: controller.signal }, attempt: { signal: controller.signal } });
+  opened.add(attempt);
+  const { surface } = attempt;
   await surface.ensurePage();
   return { ...doc, surface, page, context, screenshot, count, operation, controller };
 }
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(async () => {
-  await Promise.all([...opened].map(async ({ worker, surface }) => {
-    await surface.endAttempt({ signal: new AbortController().signal, timeoutMs: 1_000 });
-    await worker.dispose({ signal: new AbortController().signal, timeoutMs: 1_000 });
-  }));
+  await Promise.all([...opened].map((attempt) => attempt.close()));
   opened.clear();
   vi.useRealTimers();
   vi.restoreAllMocks();

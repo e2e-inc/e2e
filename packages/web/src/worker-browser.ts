@@ -1,10 +1,10 @@
 /**
  * The worker's browser: what every attempt a worker runs shares, and what
  * lives as long as the worker does. The browser connection, a provider's
- * leases, the configured init scripts, and what `init` learned are here,
- * beside the run and worker lifecycle and how a browser is acquired. What one
- * attempt owns (its context, pages, routes, dialogs, video) is a
- * `PlaywrightSurface` on this.
+ * leases, the configured init scripts, what `init` learned, and the attempts
+ * that are open are here, beside the run and worker lifecycle and how a
+ * browser is acquired. What one attempt owns (its context, pages, routes,
+ * dialogs, video) is a `PlaywrightSurface` on this.
  */
 
 import type { Browser } from 'playwright-core';
@@ -31,11 +31,16 @@ import { browserCheck, ensureBrowsersInstalled, missingBrowserLibraries } from '
 import { credentialOrigins } from './protected-app.ts';
 import { LeasedBrowsers } from './provider.ts';
 import { cancelled, invalidState, message, translatePwError } from './support.ts';
-import type { WebConnectOptions, WebOptions } from './surface.ts';
+import { PlaywrightSurface, type WebConnectOptions, type WebOptions } from './surface.ts';
 import { webmcpLaunch } from './webmcp.ts';
 
 /** Browser launch budget when the harness init budget is not otherwise expressed. */
 const BROWSER_LAUNCH_TIMEOUT_MS = 60_000;
+
+/** What names an attempt on a call: the id its `startAttempt` got, absent from a harness that predates actors. */
+export interface AttemptName {
+  readonly attemptId?: string | undefined;
+}
 
 export class WorkerBrowser {
   readonly browserName: BrowserName;
@@ -55,8 +60,10 @@ export class WorkerBrowser {
   app: EngineAppInfo = {};
   projectRoot = '';
   private headed = false;
+  /** The surface of each open attempt: a context of its own on the worker's browser. Set before its `start` awaits anything. */
+  private readonly attempts = new Map<string, PlaywrightSurface>();
 
-  constructor(private readonly options: WebOptions) {
+  constructor(readonly options: WebOptions) {
     this.browserName = typeof options.browser === 'string' ? options.browser : 'chromium';
     this.chromiumSandbox = options.chromiumSandbox ?? defaultChromiumSandbox();
     this.leases = typeof options.browser === 'object' && options.browser !== null ? new LeasedBrowsers(options.browser) : undefined;
@@ -120,8 +127,12 @@ export class WorkerBrowser {
     for (const outcome of settled) if (outcome.status === 'rejected') throw outcome.reason;
   }
 
-  /** Whether attempts ride a persistent remote context, provisioned per attempt, instead of contexts on one shared browser. */
-  private get persistent(): boolean {
+  /**
+   * Whether attempts ride a persistent remote context, provisioned per
+   * attempt, instead of contexts on one shared browser: `reconnectEndpoint`,
+   * or a per-attempt lease, which has the same limits.
+   */
+  get persistent(): boolean {
     return this.connect?.reconnectEndpoint !== undefined || this.leases?.scope === 'attempt';
   }
 
@@ -228,14 +239,67 @@ export class WorkerBrowser {
     };
   }
 
+  /** Builds the surface of one attempt and opens its session. The attempt is open from here until `endAttempt`, whether or not the session opens. */
+  async startAttempt(context: EngineAttemptContext): Promise<void> {
+    // A persistent context is the one a remote browser has: a second attempt has none to run in, and is refused there.
+    // So is a second start under an id that is open, anywhere: its calls would have two attempts to reach.
+    if (this.attempts.has(context.attemptId) || (this.persistent && this.attempts.size > 0)) throw invalidState('an attempt is already running');
+    const surface = new PlaywrightSurface(this, context);
+    this.attempts.set(context.attemptId, surface);
+    await surface.start();
+  }
+
   /**
-   * Releases the worker's shared browser process and a lease the worker
-   * acquired for itself: two independent tasks, in that order, the second
-   * attempted whatever the first did, and the first failure reported once
-   * both ran. The attempts still open are ended before it, by `web()`.
+   * The surface of the open attempt a call is for, or undefined when that
+   * attempt is not open: the one the call names, or the one open attempt
+   * for a harness that names none, which runs one at a time. With several
+   * open, a call that names none could reach the wrong one's page, and is
+   * refused.
+   */
+  private openAttempt({ attemptId }: AttemptName): PlaywrightSurface | undefined {
+    if (attemptId !== undefined) return this.attempts.get(attemptId);
+    const [only, ...rest] = this.attempts.values();
+    if (rest.length === 0) return only;
+    throw invalidState(`${this.attempts.size} attempts are running and this call names none: pass the attempt id, as in surfaceOf(engine, attemptId)`);
+  }
+
+  /**
+   * The surface of the attempt a call names. A call for an attempt that is
+   * not open is refused, while another is open too: it must never reach
+   * that one's page.
+   */
+  attempt(name: AttemptName): PlaywrightSurface {
+    const surface = this.openAttempt(name);
+    if (surface !== undefined) return surface;
+    throw invalidState(this.attempts.size === 0 ? 'no attempt is running' : 'the attempt this call belongs to is not running: it ended, or never started here');
+  }
+
+  /** Settles the attempt a cleanup is for; one that is not open has no handler left to wait for. */
+  async settleAttempt(context: EngineCleanupContext): Promise<void> {
+    await this.openAttempt(context)?.settle(context);
+  }
+
+  /** Ends the attempt a cleanup is for. One that is not open already ended: nothing of it is left to end. */
+  async endAttempt(context: EngineCleanupContext): Promise<void> {
+    const surface = this.openAttempt(context);
+    if (surface === undefined) return;
+    this.attempts.delete(surface.attemptId);
+    await surface.end(context);
+  }
+
+  /**
+   * Ends the attempts still open, then releases the worker's shared browser
+   * process and a lease the worker acquired for itself: independent tasks,
+   * in that order, every one attempted whatever the earlier ones did, and
+   * the first failure reported once all ran. Each open context closes
+   * before the browser goes down, so its video is finalized, and a billed
+   * browser outlives a failed recording flush otherwise.
    */
   async dispose(context: EngineCleanupContext): Promise<void> {
+    const open = [...this.attempts.values()];
+    this.attempts.clear();
     const tasks = [
+      ...open.map((surface) => () => surface.end(context)),
       () => withinCleanupBudget(this.connection.dispose(), context),
       async () => this.leases?.dispose(context),
     ];

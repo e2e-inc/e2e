@@ -8,10 +8,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { PlaywrightSurface } from '../../src/surface.ts';
-import { WorkerBrowser } from '../../src/worker-browser.ts';
 import { sanitizeFilename } from '../../src/support.ts';
-import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
+import { openSurface } from '../helpers/attempt.ts';
 
 const HOSTILE_NAMES = [
   '../../etc/passwd',
@@ -47,8 +45,7 @@ describe('sanitizeFilename', () => {
 describe('artifact paths', () => {
   it('writes a server-chosen download name as one counted file inside the attempt downloads folder', async () => {
     directory = mkdtempSync(path.join(tmpdir(), 'e2e-artifact-path-'));
-    const surface = new PlaywrightSurface({}, new WorkerBrowser({}));
-    await surface.startAttempt({ attemptId: 'a1', artifactsDir: directory, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
+    const { surface, close } = await openSurface({ attempt: { artifactsDir: directory } });
     const folder = path.join(directory, 'downloads');
     try {
       for (const [index, name] of HOSTILE_NAMES.entries()) {
@@ -59,7 +56,7 @@ describe('artifact paths', () => {
         expect(file, name).toMatch(new RegExp(`^${String(index + 1).padStart(3, '0')}-[A-Za-z0-9._-]{1,64}$`));
       }
     } finally {
-      await surface.endAttempt({ signal: new AbortController().signal, timeoutMs: 1_000 });
+      await close();
     }
   });
 });

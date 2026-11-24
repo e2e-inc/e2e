@@ -5,23 +5,8 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import type { EngineInitInfo } from '@e2e-dev/core/engine';
 import { web, type WebConnectOptions } from '../../src/index.ts';
-import { WorkerBrowser } from '../../src/worker-browser.ts';
-
-function initInfo(signal = new AbortController().signal): EngineInitInfo {
-  return {
-    runId: 'run-cdp',
-    targetName: 'web',
-    projectRoot: '/project',
-    app: { site: 'localhost' },
-    env: {},
-    headed: false,
-    workerSlot: 0,
-    signal,
-    log: () => undefined,
-  };
-}
+import { openWorker } from '../helpers/attempt.ts';
 
 describe('web({ connect })', () => {
   it('declares persistent recovery without context replacement capabilities, and names why a reset is refused', async () => {
@@ -73,20 +58,19 @@ describe('web({ connect })', () => {
 
 describe('WorkerBrowser CDP attach', () => {
   it('fails init with ENGINE_FAILURE when the endpoint resolves empty or the resolver throws, without touching a browser', async () => {
-    const empty = new WorkerBrowser({ connect: { cdpEndpoint: () => '   ' } });
-    await expect(empty.init(initInfo())).rejects.toMatchObject({
+    await expect(openWorker({ options: { connect: { cdpEndpoint: () => '   ' } } })).rejects.toMatchObject({
       code: 'ENGINE_FAILURE',
       retryable: false,
       message: expect.stringContaining('connect.cdpEndpoint resolved to an empty CDP endpoint'),
     });
-    const throwing = new WorkerBrowser({
+    const throwing = {
       connect: {
         cdpEndpoint: () => {
           throw new Error('vault down');
         },
       },
-    });
-    await expect(throwing.init(initInfo())).rejects.toMatchObject({
+    };
+    await expect(openWorker({ options: throwing })).rejects.toMatchObject({
       code: 'ENGINE_FAILURE',
       message: expect.stringContaining('vault down'),
     });
@@ -95,15 +79,13 @@ describe('WorkerBrowser CDP attach', () => {
   it('hands the init signal to the resolver and cancels promptly while it is still pending', async () => {
     const controller = new AbortController();
     let seen: AbortSignal | undefined;
-    const worker = new WorkerBrowser({
-      connect: {
-        cdpEndpoint: (signal) => {
-          seen = signal;
-          return new Promise<string>(() => undefined);
-        },
+    const connect: WebConnectOptions = {
+      cdpEndpoint: (signal) => {
+        seen = signal;
+        return new Promise<string>(() => undefined);
       },
-    });
-    const pending = worker.init(initInfo(controller.signal));
+    };
+    const pending = openWorker({ options: { connect }, init: { signal: controller.signal } });
     await vi.waitFor(() => expect(seen).toBeDefined());
     expect(seen!.aborted).toBe(false);
     controller.abort();
@@ -115,15 +97,13 @@ describe('WorkerBrowser CDP attach', () => {
     const controller = new AbortController();
     controller.abort();
     let resolved = 0;
-    const worker = new WorkerBrowser({
-      connect: {
-        cdpEndpoint: () => {
-          resolved += 1;
-          return 'ws://localhost:0';
-        },
+    const connect = {
+      cdpEndpoint: () => {
+        resolved += 1;
+        return 'ws://localhost:0';
       },
-    });
-    await expect(worker.init(initInfo(controller.signal))).rejects.toMatchObject({ code: 'CANCELLED' });
+    };
+    await expect(openWorker({ options: { connect }, init: { signal: controller.signal } })).rejects.toMatchObject({ code: 'CANCELLED' });
     expect(resolved).toBe(0);
   });
 });

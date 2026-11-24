@@ -3,6 +3,7 @@ import { EngineError } from '@e2e-dev/core/engine';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { WebOptions } from '../../src/surface.ts';
 import { WorkerBrowser } from '../../src/worker-browser.ts';
+import { cleanupContext, workerInfo } from '../helpers/attempt.ts';
 
 const acquire = vi.hoisted(() => vi.fn());
 const missingBrowserLibraries = vi.hoisted(() => vi.fn());
@@ -27,7 +28,7 @@ async function initFailure(options: WebOptions, signal: AbortSignal = new AbortC
   const worker = new WorkerBrowser(options);
   workers.push(worker);
   const failure: unknown = await worker
-    .init({ runId: 'run', targetName: 'web', projectRoot: process.cwd(), app: {}, env: {}, headed, workerSlot: 0, signal, log: () => undefined })
+    .init(workerInfo({ headed, signal }))
     .then(
       () => undefined,
       (cause: unknown) => cause,
@@ -44,7 +45,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  for (const worker of workers) await worker.dispose({ timeoutMs: 1_000, signal: new AbortController().signal });
+  for (const worker of workers) await worker.dispose(cleanupContext());
   workers = [];
 });
 
