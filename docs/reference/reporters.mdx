@@ -208,7 +208,12 @@ reporters: ['list', 'ctrf'],
   the previous `ctrf.json` in place, as it leaves `junit.xml`.
 - One CTRF test per `<testcase>` of `junit.xml`, leaving out its `run`
   suite. Its `name` starts with the test file, and `testId` is the result
-  id, the same in every run.
+  id, the same in every run. `name` joins the file and titles with ` > `,
+  so a title that holds ` > ` can read the same as another test's; `testId`
+  always tells them apart.
+- `filePath` and `line` point at where the test is declared, which is a
+  module the test file imports when that module declares it. `suite`
+  starts with the test file, and `summary.suites` counts test files.
 - A test stands for one attempt: the last one that reached its verdict.
   The attempts before it are `retryAttempts`, and a retry the run cut after
   it is only counted, in `extra`. A test that failed and then passed has

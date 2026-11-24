@@ -112,6 +112,12 @@ describe('renderCtrfReport', () => {
     expect(document.results.summary).toMatchObject({ tests: 2, suites: 2 });
   });
 
+  it('counts one suite for a file whose tests sit in two describe blocks', () => {
+    const checkout = reportResult({ id: 'result-1', titlePath: ['checkout', 'pays'] });
+    const account = reportResult({ id: 'result-2', titlePath: ['account', 'logs in'] });
+    expect(render(doc({ results: [checkout, account] })).results.summary).toMatchObject({ tests: 2, suites: 1 });
+  });
+
   it('leaves a result the selection did not choose out, and keeps one a filter left out as skipped with the filter named', () => {
     const unselected = reportResult({ id: 'result-2', selected: false, status: 'skipped', skip: { cause: 'filtered', reason: 'file not selected' }, attempts: [] });
     const filtered = reportResult({ id: 'result-3', selected: false, status: 'skipped', skip: { cause: 'filtered', reason: '4% likely affected', filter: 'jev' }, attempts: [] });
