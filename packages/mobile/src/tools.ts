@@ -210,7 +210,9 @@ const FOLDED: Readonly<Record<FoldPose, string>> = {
  * The hinge as an agent tool, for engines that drive a foldable: the iPhone
  * Duo simulator or a foldable Android emulator. Spread it beside
  * `mobileTools`. It is a pack of its own, so a config with no foldable offers
- * no hinge: a device without one answers `UNSUPPORTED_CAPABILITY`.
+ * no hinge. Tools are offered by platform: when a device without a hinge
+ * shares the foldable's platform, put the pack on a named agent that the
+ * foldable tests select, since that device answers `UNSUPPORTED_CAPABILITY`.
  */
 export function foldTools(
   ...engines: readonly [EngineHandle, ...EngineHandle[]]
