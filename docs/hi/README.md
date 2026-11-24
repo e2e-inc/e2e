@@ -122,6 +122,8 @@ translation moves or goes with it in the same change.
 | tunnel | टनल | m |
 | plan (vendor pricing) | प्लान | m |
 | limit (vendor quota, in prose) | लिमिट | f |
+| per-attempt lease | हर अटेम्प्ट वाली लीज़ | f |
+| idle (in prose) | आइडल | |
 | device | डिवाइस | m |
 | app, apps | ऐप, ऐप्स | m |
 | worker | वर्कर | m |
