@@ -114,6 +114,14 @@ translation moves or goes with it in the same change.
 | executor | एक्ज़ीक्यूटर | m |
 | provider | प्रोवाइडर | m |
 | hosted browser | होस्टेड ब्राउज़र | m |
+| sandbox | सैंडबॉक्स | m |
+| browser context | ब्राउज़र कॉन्टेक्स्ट | m |
+| slot (worker slot) | स्लॉट | m |
+| queue | क्यू | f |
+| image (container or VM) | इमेज | f |
+| tunnel | टनल | m |
+| plan (vendor pricing) | प्लान | m |
+| limit (vendor quota, in prose) | लिमिट | f |
 | device | डिवाइस | m |
 | app, apps | ऐप, ऐप्स | m |
 | worker | वर्कर | m |
