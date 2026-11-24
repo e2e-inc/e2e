@@ -174,7 +174,7 @@ test('asks for the email', async ({ app, agent, screen }) => {
 | --- | --- |
 | `permissions: { all }`, सबको परमिशन देने वाला डिफ़ॉल्ट, `bluetooth` और `storage` जैसे नाम | हर परमिशन का नाम `app.permissions` में लिखें, या `device.alert('accept')` से प्रॉम्प्ट स्वीकार करें |
 | बिना फ़ील्ड के `inputText` और `pressKey: Enter`, `eraseText: N`, `pressKey: backspace`, `tab` | फ़ील्ड के लोकेटर पर `fill` या `press`; मिटाने के लिए छोटा किया हुआ `inputValue()` `fill` करें; Tab के लिए अगला फ़ील्ड टैप करें |
-| `addMedia` | iOS सिम्युलेटर पर `app.open()` से पहले `xcrun simctl addmedia`; Android की जाँच नहीं हुई है। [device फ़िक्स्चर](/mobile#the-device-fixture) के नीचे "Photos for a picker test" देखें |
+| `addMedia` | iOS सिम्युलेटर पर `app.open()` से पहले `xcrun simctl addmedia`; Android की जाँच नहीं हुई है। [device फ़िक्स्चर](/mobile#the-device-fixture) के नीचे "पिकर टेस्ट के लिए फ़ोटो" देखें |
 | कमांड पर `label` | `-`। हर स्टेप का नाम उसकी कॉल से आता है |
 | `scrollUntilVisible: { centerElement, visibilityPercentage }` | सटीक बराबर कुछ नहीं। इसके पूरा होने के बाद `boundingBox()` पढ़ें, और अगर नोड बीच में नहीं है तो `screen.swipe({ direction, momentum: 'slow' })` चलाएँ |
 | फ़ेलियर के बगल में डिवाइस लॉग और क्रैश रिपोर्ट | फ़िक्स्चर में इकट्ठा किया गया `adb logcat` या `xcrun simctl spawn <udid> log stream` |

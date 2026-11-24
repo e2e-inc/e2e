@@ -183,7 +183,7 @@ test('checkout', async ({ app, agent, screen }) => {
 | --- | --- |
 | `import { test, expect } from '@playwright/test'` | `import { test } from '@e2e-dev/web'` और `import { expect } from 'e2e'` |
 | टेस्ट में `{ page }` | `{ screen, app, browser }` |
-| `test()`, `test.describe()`, `test.only`, `test.fail()`, `test.skip(title, fn)`, `test.skip(condition, reason)`, `test.fixme(title, fn)`, `test.fixme(condition, reason)` | वही, लेकिन सीरियल ग्रुप पर इसके बजाय `skip` ग्रुप पर दिया जाता है; शर्त वाले रूप टेस्ट बॉडी या `beforeEach` के अंदर काम करते हैं |
+| `test()`, `test.describe()`, `test.only`, `test.fail()`, `test.skip(title, fn)`, `test.skip(condition, reason)`, `test.fixme(title, fn)`, `test.fixme(condition, reason)` | वही, लेकिन सीरियल ग्रुप में `skip` ग्रुप पर ही दिया जाता है; शर्त वाले रूप टेस्ट बॉडी या `beforeEach` के अंदर काम करते हैं |
 | `test.setTimeout()` | टेस्ट बॉडी, `beforeEach` या `beforeAll` (उस हुक का अपना टाइमआउट) के अंदर वही; `afterEach` और `afterAll` इसे कॉल नहीं कर सकते। `describe` कॉलबैक में इसकी जगह `test.describe` को `{ timeout }` पास करें। बिना टाइमआउट के लिए `0` नहीं है: कोई बड़ी वैल्यू पास करें |
 | `test.slow()`, `test.slow(condition, description)` | टेस्ट बॉडी या `beforeEach` के अंदर वही: लागू टाइमआउट को तीन गुना करता है; `beforeAll` में उस हुक का अपना टाइमआउट। Playwright की तरह हर अटेम्प्ट में एक बार। describe लेवल पर (किसी भी रूप में) यह `COLLECTION_ERROR` देता है: इसे `beforeEach` में कॉल करें |
 | `beforeEach`, `afterEach`, `beforeAll`, `afterAll` | वही, बिना टाइटल के; `beforeAll` और `afterAll` को वर्कर फ़िक्स्चर मिलते हैं, `browser`, `app` या `screen` नहीं |
