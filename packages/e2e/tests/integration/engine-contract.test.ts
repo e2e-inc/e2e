@@ -717,12 +717,16 @@ withStandIn('an override runs where the target has no gadget', async ({ platform
     60_000,
   );
 
-  it(
-    'a fixture that only other targets have is a test fixture if any of them has it as one, so a suite hook can\'t name it',
-    async () => {
+  it.each(['attempt', 'worker'] as const)(
+    'a fixture that only other targets have is a test fixture if any of them has it as one, so a suite hook can\'t name it (%s-isolated engine listed first)',
+    async (first) => {
       const plain = createFakeEngine();
       const gadgets = createFakeEngine({ fixtures: true });
       const workerGadgets = createFakeEngine({ fixtures: true, isolation: 'worker' });
+      const gadgetTargets = [
+        { name: 'gadgets', platform: 'gadgets', engine: gadgets.engine, app: FAKE_APP },
+        { name: 'worker-gadgets', platform: 'worker-gadgets', engine: workerGadgets.engine, app: FAKE_APP },
+      ];
       const file = `import { test } from 'e2e';
 
 test.beforeAll(async ({ gadget }) => {
@@ -738,8 +742,7 @@ test('runs', async () => {});
           config: {
             targets: [
               { name: 'plain', platform: 'plain', engine: plain.engine, app: FAKE_APP },
-              { name: 'gadgets', platform: 'gadgets', engine: gadgets.engine, app: FAKE_APP },
-              { name: 'worker-gadgets', platform: 'worker-gadgets', engine: workerGadgets.engine, app: FAKE_APP },
+              ...(first === 'attempt' ? gadgetTargets : gadgetTargets.toReversed()),
             ],
           },
         },

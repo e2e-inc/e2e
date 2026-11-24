@@ -1088,7 +1088,7 @@ deviceTest.beforeAll(async ({ device, app, screen: deviceScreen }) => {
   void deviceScreen;
 });
 
-// A fixture named like a built-in extends it: its own name is the built-in, and it keeps the built-in's type and scope.
+// A fixture named like a built-in extends it: its own name is the built-in, and it keeps the built-in's type. Its scope is the one it declares, else test.
 test.extend({ app: async ({ app, screen: s }, use) => { void s; await app.open('/'); await use(app); } })('opens first', async ({ app }) => {
   await app.open('/next');
 });
@@ -1097,19 +1097,20 @@ test.extend({ screen: [async ({ screen: s }, use) => { await use(s); }, { scope:
 test.extend({ app: async ({}, use) => { await use('not an app'); } });
 // @ts-expect-error app is a test fixture on this test: its override cannot be a worker fixture
 test.extend({ app: [async ({ app }, use) => { await use(app); }, { scope: 'worker' }] });
-// platform is a worker fixture everywhere, so its override sees worker fixtures only.
-test.extend({ platform: async ({ platform }, use) => { await use(platform.toUpperCase()); } });
-// @ts-expect-error a worker fixture's override does not see test fixtures
-test.extend({ platform: async ({ platform, app }, use) => { void app; await use(platform); } });
-// On an engine whose state outlives a test, device, app, and screen are worker fixtures, and so are their overrides.
-deviceTest.extend({ device: async ({ device }, use) => { await device.reset(); await use(device); } }).beforeAll(async ({ device }) => {
+// The override of a worker fixture is a test fixture unless it declares scope 'worker', so it sees test fixtures.
+test.extend({ platform: async ({ platform, app }, use) => { void app; await use(platform.toUpperCase()); } });
+// @ts-expect-error a worker-scoped override does not see test fixtures
+test.extend({ platform: [async ({ platform, app }, use) => { void app; await use(platform); }, { scope: 'worker' }] });
+// On an engine whose state outlives a test, device, app, and screen are worker fixtures. A worker-scoped override reaches the suite hooks.
+deviceTest.extend({ device: [async ({ device }, use) => { await device.reset(); await use(device); }, { scope: 'worker' }] }).beforeAll(async ({ device }) => {
   await device.reset();
 });
 deviceTest.extend({ app: [async ({ app }, use) => { await use(app); }, { scope: 'worker' }] });
-// @ts-expect-error a worker fixture's override cannot be a test fixture
-deviceTest.extend({ device: [async ({ device }, use) => { await use(device); }, { scope: 'test' }] });
-// @ts-expect-error a worker fixture's override does not see test fixtures
-deviceTest.extend({ device: async ({ device, agent: testAgent }, use) => { void testAgent; await use(device); } });
+const testScopedDevice = deviceTest.extend({ device: async ({ device, agent: testAgent }, use) => { void testAgent; await use(device); } });
+testScopedDevice('resets the device', async ({ device }) => { await device.reset(); });
+// @ts-expect-error a test-scoped override doesn't reach the suite hooks
+testScopedDevice.beforeAll(async ({ device }) => { await device.reset(); });
+testScopedDevice.beforeAll(async ({ app }) => { await app.open(); });
 // With type arguments for new fixtures, an override sits beside them and sees them.
 test.extend<{ draft: string }>({
   draft: async ({ app }, use) => { void app; await use('draft'); },
@@ -1194,9 +1195,40 @@ configTest('takes options', options, async ({ handset }) => { await handset.clos
 // @ts-expect-error a fixture in the first type argument still needs a definition
 test.extend<{ start: () => Promise<void> }, {}, typeof mixedConfig>({});
 // The original fixture value passed to an override is undefined on targets without the fixture.
-configTest.extend({ handset: async ({ handset }, use) => { await use(handset); } });
+configTest.extend({ handset: async ({ handset }, use) => { await use(handset); } })('narrows the override', async ({ platform, handset }) => {
+  if (platform === 'ios') await handset.closeApp();
+});
 // @ts-expect-error handset has type Handset | undefined, so a string can't be passed to use
 configTest.extend({ handset: async ({}, use) => { await use('not a handset'); } });
+// With a string platform, as on a target without an engine, every target still has app and screen.
+const plainEngine = defineEngine({ name: 'plain', version: '1.0.0', spiVersion: 1 });
+const plainConfig = { targets: [{ engine: plainEngine, platform: 'plain' }, { engine: handsetEngine }] } satisfies E2EConfig;
+test.extend<{}, {}, typeof plainConfig>()('opens on a string platform', async ({ app, screen: view }) => {
+  await app.open('/');
+  void view;
+});
+const enginelessConfig = { targets: [{ name: 'api', platform: 'api' }, { engine: handsetEngine }] } satisfies E2EConfig;
+const enginelessTest = test.extend<{}, {}, typeof enginelessConfig>();
+enginelessTest('opens beside a target without an engine', async ({ app, screen: view, handset }) => {
+  await app.open('/');
+  void view;
+  if (handset !== undefined) await handset.closeApp();
+});
+// @ts-expect-error app has test scope on the target without an engine
+enginelessTest.beforeAll(async ({ app }) => { void app; });
+// With as const, a target's own platform is a literal, so a platform check narrows the fixtures again.
+const constConfig = {
+  targets: [
+    { name: 'api', platform: 'api', app: { url: 'http://localhost:3000' } },
+    { engine: plainEngine, platform: 'plain', app: { url: 'http://localhost:3000', command: { executable: 'pnpm', args: ['dev'] } } },
+    { engine: handsetEngine, app: { bundleId: 'dev.shop.app', launchArguments: ['-reset'], permissions: { camera: 'grant' } } },
+  ],
+} as const satisfies E2EConfig;
+test.extend<{}, {}, typeof constConfig>()('narrows a target platform', async ({ app, platform, handset }) => {
+  await app.open('/');
+  if (platform === 'ios') await handset.closeApp();
+  platform satisfies 'api' | 'plain' | 'ios';
+});
 // With an E2EConfig type annotation, the inferred engine types are lost, so engine fixtures aren't typed.
 const annotatedConfig: E2EConfig = mixedConfig;
 // @ts-expect-error handset is absent from the annotated config type

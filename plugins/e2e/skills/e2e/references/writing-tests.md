@@ -203,8 +203,8 @@ with `device` set to `undefined`.
 
 To type fixtures across targets:
 
-1. Use `satisfies E2EConfig` on the config object, not a type annotation, to
-   keep the inferred engine types.
+1. Use `as const satisfies E2EConfig` on the config object, not a type
+   annotation, to keep the inferred engine types.
 2. Import the config type with `import type config from '../e2e.config.ts'`.
 3. Pass `typeof config` as the third type argument of `test.extend`:
    `base.extend<{}, {}, typeof config>()`.
@@ -217,8 +217,10 @@ named like one the `test` already has, built-in ones included, extends it
 (`app: async ({ app }, use) => { await app.open('/x');
 await use(app); }`, no type argument): inside it the name is the previous
 value, everyone else gets what it passes to `use`, and it keeps that
-fixture's type, scope, and `auto` (`device` on mobile: once per worker,
-`beforeAll` gets it; a different `scope` or `auto` is `COLLECTION_ERROR`). A worker
+fixture's type. Its scope and `auto` are the ones its options set, else a
+test fixture set up on demand, even when it extends a worker fixture (for a
+`device` override that runs once per worker and reaches `beforeAll`, pass
+`{ scope: 'worker' }`). A worker
 fixture (`[fn, { scope: 'worker' }]`, second type argument of `extend`) is
 set up once per worker and target by the first test or suite hook that names
 it, torn down when the worker ends, and sees worker fixtures only. Declare it in a module the test files import: a test
