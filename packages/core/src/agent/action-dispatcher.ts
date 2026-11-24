@@ -789,8 +789,10 @@ export class ActionDispatcher {
     }
     // Scrolling to text reads its last page after its last swipe, unless the
     // engine then scrolled the node into view (`armAfter`): that page is a
-    // fresh look, not one the scroll acted from.
-    this.actedFrom = action.name === 'scrollUntil' && !this.verbs.has('scrollTo') ? undefined : this.feed.latest;
+    // fresh look, not one the scroll acted from. A scroll that found its
+    // text on the look in hand took no page and no look, and leaves the mark.
+    if (action.name !== 'scrollUntil' || this.verbs.has('scrollTo')) this.actedFrom = this.feed.latest;
+    else if (action.screens > 0) this.actedFrom = undefined;
     this.armAfter(action.name);
     this.recordTrace(action);
     await this.notify(action.name, (fields) => actionEvent(action, { ...fields, summary: describeAction(action, redaction).summary }));

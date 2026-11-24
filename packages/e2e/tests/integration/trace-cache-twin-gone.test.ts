@@ -345,4 +345,56 @@ test('scrolls and sets up', async ({ app, agent, screen }) => {
       project.cleanup();
     }
   }, 240_000);
+
+  it('keeps the earlier-look mark when the text is already in view and the scroll takes no page', async () => {
+    const fake = createFakeEngine({
+      actions: ['tap', 'swipe'],
+      scene: () => {
+        const status: ScriptedNode = { id: 'status', role: 'status', name: 'Setup', text: 'Not started' };
+        const press = (action: { kind: string }) => { if (action.kind === 'tap') status.text = 'Setup opened'; };
+        return [
+          status,
+          { id: 'first', role: 'button', name: 'Set up', rect: { x: 0, y: 20, width: 100, height: 40 }, on: press },
+          { id: 'second', role: 'button', name: 'Set up', rect: { x: 0, y: 80, width: 100, height: 40 }, on: press },
+        ];
+      },
+    });
+    // Both presses are addressed from the one look taken before the scroll, which finds its text on that look.
+    const executor: StepExecutor = {
+      name: 'press-scroll-press',
+      version: 'test',
+      async runStep(context: StepExecutorContext) {
+        await context.observe();
+        await context.actions.tap({ id: 'first' });
+        await context.actions.scrollUntil('Set up', 'down');
+        await context.actions.tap({ id: 'second' });
+        return { status: 'passed' as const, summary: 'pressed Set up twice' };
+      },
+    };
+    const project = createProject({
+      'tests/scroll.e2e.ts': `import { test, expect } from 'e2e';
+test('sets up twice', async ({ app, agent, screen }) => {
+  await app.open();
+  await agent.act('press Set up, scroll to Set up, press the other one');
+  await expect(screen.getByRole('status', { name: 'Setup' })).toHaveText('Setup opened');
+});`,
+    });
+    try {
+      const run = await runExisting(project, {
+        appUrl: FAKE_APP_URL,
+        config: {
+          tests: 'tests/**/*.e2e.ts',
+          targets: [{ name: 'device', platform: 'ios' as const, engine: fake.engine, app: FAKE_APP }],
+          agents: { default: { executor } },
+          cache: 'read-write' as const,
+        },
+      });
+      expect(run.exitCode, JSON.stringify(run.report.run.errors)).toBe(0);
+      const [entry] = readEntries(project);
+      const last = entry!.entry.payload.actions.findLast((action) => action.name === 'tap');
+      expect(last?.name === 'tap' ? last.target : undefined).toMatchObject({ position: { index: 1, of: 2 }, countedOnEarlierLook: true });
+    } finally {
+      project.cleanup();
+    }
+  }, 240_000);
 });
