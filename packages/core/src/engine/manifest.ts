@@ -29,6 +29,7 @@ const KNOWN_KEYS = [
   'pointerActions',
   'tapModifiers',
   'selectsDevice',
+  'launchArgumentValues',
   'keyboard',
   'fixtures',
   'isolation',
@@ -82,7 +83,7 @@ const FUNCTION_MEMBERS = [
 ] as const;
 
 /** Universal fixture names a contribution may never shadow. */
-const RESERVED_FIXTURES = new Set(['agent', 'app', 'screen', 'platform', 'session']);
+const RESERVED_FIXTURES = new Set(['agent', 'app', 'screen', 'platform', 'request', 'session']);
 
 /**
  * The methods an `@e2e-dev/core` session holds beside its fixtures. A session
@@ -282,6 +283,7 @@ export function defineEngine<Fixtures extends object = {}>(declared: EngineSpec<
     if (typeof spec.selectsDevice !== 'boolean') throw invalid(name, 'selectsDevice must be a boolean');
     if (spec.selectsDevice && spec.prepare === undefined) throw invalid(name, 'declares selectsDevice without prepare: prepare binds the device --device names');
   }
+  if (spec.launchArgumentValues !== undefined && typeof spec.launchArgumentValues !== 'boolean') throw invalid(name, 'launchArgumentValues must be a boolean');
   if (spec.isolation !== undefined && spec.isolation !== 'attempt' && spec.isolation !== 'worker') {
     throw invalid(name, `isolation must be 'attempt' or 'worker', got ${JSON.stringify(spec.isolation)}`);
   }
@@ -303,6 +305,7 @@ export function defineEngine<Fixtures extends object = {}>(declared: EngineSpec<
   if (spec.actions !== undefined) handle['actions'] = declaredKinds(name, 'actions', spec.actions, KNOWN_LOCATOR_ACTION_KINDS);
   if (spec.tapModifiers === true) handle['tapModifiers'] = true;
   if (spec.selectsDevice === true) handle['selectsDevice'] = true;
+  if (spec.launchArgumentValues === true) handle['launchArgumentValues'] = true;
   if (spec.isolation === 'worker') handle['isolation'] = 'worker';
   if (spec.pointerActions !== undefined) {
     handle['pointerActions'] = declaredKinds(name, 'pointerActions', spec.pointerActions, POINTER_ACTION_KINDS);

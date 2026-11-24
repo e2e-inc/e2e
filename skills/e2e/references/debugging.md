@@ -109,6 +109,7 @@ jq '.run.results[] | select(.selected and .status != "passed") | .attempts[-1]
 | `HOOK_FAILED` | `beforeAll` or `afterAll` threw; its scope's tests skip | Fix the hook; the report carries its error |
 | `UNSUPPORTED_ARTIFACT` | A test's or target's `video` on an engine that cannot record | Drop it there, or set it at the config root or CLI (such targets skip with a notice) |
 | `BROWSER_INSTALL_FAILED`, `LAUNCH_TIMEOUT` | Browser download failed; engine init or attempt start exceeded `launchTimeout` | Run the quoted `npx @e2e-dev/web install <names>` or `pnpm exec e2e-web install <names>` (`--with-deps` on bare Linux); raise the root `launchTimeout` (60 s default) |
+| `ENGINE_FAILURE` `browser launch failed: <name> cannot launch: ... missing` | Linux without the browser's system libraries (a sandbox, a bare CI image); `e2e doctor` fails `browser` the same way | Run the quoted `npx @e2e-dev/web install <name> --with-deps` or `pnpm exec e2e-web install <name> --with-deps` |
 | `APP_UNREACHABLE` | The app failed readiness or its command exited. An exit after readiness stops only dependent targets with unfinished work. On a device, the message can identify a failed iOS automation runner | Read the exit details and any log excerpt. Set `app.command.log` if requested. Check `app.url`, the port, and the command settings. Runner: rerun, else `npx agent-device daemon stop` and reboot the simulator |
 | `APP_ALREADY_RUNNING` | Something already serves `url` when `command` should start, such as the app an open `e2e mcp` session started | A session's app: `close_session` before the run (topic `mcp`). Otherwise stop it if you started it, else offer the user `reuseExisting: true` (CI ignores it) |
 | `APP_URL_REQUIRED`, `APP_NOT_OPEN` | A navigation on a target without `app.url`; a `screen` call before `app.open()` | Add `app.url` to the target; open the app first |
@@ -151,7 +152,7 @@ jq '.run.results[] | select(.selected and .status != "passed") | .attempts[-1]
 | `--ai-trace`, then `npx unbox-ai runs .e2e/ai-trace.json` | What the model saw and called |
 | `--video`, `--video=retain-on-failure` | Watch the failed attempt; `step.startedAt` minus the segment's `startedAt` is the step's offset into it |
 | `command.log: '.e2e/logs/app.log'` | The app's output when it never gets ready or errors mid-test |
-| `await app.screenshot('before-submit')` | Evidence at a point you choose; it masks secure fields only |
+| `await app.screenshot('before-submit')`, `await locator.screenshot('total')` | Evidence at a point you choose, the screen or one element; it masks secure fields only |
 | `app.startRecording()`, then `await app.stopRecording()` | One transition as a video; fails while the test's `video` records |
 | `CI=1 npx e2e run` | Reproduce CI-only behaviour (defaults: topic running) |
 

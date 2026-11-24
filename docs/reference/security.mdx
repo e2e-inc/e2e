@@ -83,6 +83,7 @@ These calls fail with `POLICY_DENIED`.
 | Denied | Why |
 | --- | --- |
 | Navigation to any scheme but `http:` and `https:`, other than `about:blank` | `file:`, `data:`, `javascript:`, and wrappers such as `view-source:file:` would load local or inline content. |
+| A `request` call to any scheme but `http:` and `https:`, `about:blank` included | It sends an HTTP request; nothing else has an answer to read. |
 | A malformed URL | Nothing is repaired. |
 | A `Secret` reaching a JSON sink | Handles carry no value, and no value may be serialized. |
 | Reading a value, text, or attribute from a secure field, with a getter or a `toHaveValue`, `toHaveText`, `toContainText`, or `toHaveAttribute` matcher | Assert the outcome, not the secret. A withheld value is redacted, not empty or absent. |
@@ -101,6 +102,7 @@ These calls fail with `POLICY_DENIED`.
 | Entry point | Accepts | Refuses |
 | --- | --- | --- |
 | `app.open`, `browser.goto`, the agent's `navigate` verb | `http:`, `https:`, and the exact `about:blank` | Every other scheme |
+| The [`request`](/reference/request) fixture | `http:` and `https:`, with no credentials in the URL | Every other scheme, `about:blank` included |
 | `app.open(path)` on a device target with `app.linkBase` | The joined link, or an absolute link: an app's custom scheme, or `http:` and `https:` | `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, `filesystem:` |
 | `device.openLink` | Any absolute URL: an app's custom scheme, or `http:` and `https:` | `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, `filesystem:` |
 | `device.openApp`, the `open_app` tool | An app id | A link |
@@ -454,4 +456,4 @@ plugins, and app can make more connections.
 | --- | --- |
 | `e2e mcp` | Uses stdio and the same action authorization as a test run. Four open sessions by default ([`--max-sessions`](/reference/mcp), 1 through 16). Closes idle sessions. `open_session {engine}` loads the installed packages the agent names and calls the exports it names. That code runs with the server's full authority, like a config's imports. `engine` names packages only, never a path or a URL, and the server installs nothing. |
 | `e2e explore` | Offers every configured credential to every step. The explorer sees account names and usernames. Passwords stay handles and need an engine that supports sensitive fills; without one, the explorer skips them. With no credentials, it may sign in with made-up test credentials, typed as plain text. |
-| `e2e explore --changed-since` | Sends the commit messages, the changed files' names, and the committed patches since the base to the model, cut to fit its context. A file no commit changed, such as one CI wrote, and a committed file's later local edits go by name only, never read. Secret values the config gives as strings, and runs of 8 or more of their characters, are redacted. A secret provider's value, and a secret committed to the repository that the config doesn't name, reach the model. |
+| `e2e explore --changed-since` | Sends the commit messages, the changed files' names, and the committed patches since the base to the model, cut to fit its context. In a GitHub Actions `pull_request` or `pull_request_target` job, or a GitLab merge request pipeline, it also sends the pull request's title and description. A file no commit changed, such as one CI wrote, and a committed file's later local edits go by name only, never read. Secret values the config gives as strings, and runs of 8 or more of their characters, are redacted from all of it. A secret provider's value, and a secret committed to the repository that the config doesn't name, reach the model. |
