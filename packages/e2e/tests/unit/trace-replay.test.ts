@@ -690,6 +690,31 @@ describe('replayTrace: bare-point drags', () => {
     expect(await replayTrace(gone, trace([{ ...moved, to: { point: { x: 300, y: 150 }, within: tray } }]))).toMatchObject({ completed: false, executed: 0, stopReason: 'target-not-found' });
     expect(gone.calls).not.toContain('dragAt');
   });
+
+  it('places both ends of a bare-point drag on the same look when one end waits and the other moves', async () => {
+    const card = (y: number): SemanticNode => ({ ref: { id: 'c', revision: 'r1' }, role: 'button', name: 'Card', rect: { x: 0, y, width: 200, height: 100 } });
+    const lane: SemanticNode = { ref: { id: 'l', revision: 'r1' }, role: 'region', name: 'Done', rect: { x: 400, y: 0, width: 200, height: 400 } };
+    const drag: RecordedAction = {
+      name: 'dragAt',
+      summary: 'drag from the point (100, 50) on button "Card" to the point (500, 200) on region "Done"',
+      from: { point: { x: 100, y: 50 }, within: { target: { role: 'button', name: 'Card' }, fx: 0.5, fy: 0.5 } },
+      to: { point: { x: 500, y: 200 }, within: { target: { role: 'region', name: 'Done' }, fx: 0.5, fy: 0.5 } },
+      viewport: VIEWPORT,
+    };
+    for (const waits of ['destination', 'source'] as const) {
+      const drags: unknown[] = [];
+      const host = makeHost({ onAction: (name, detail) => void (name === 'dragAt' && drags.push(detail)) });
+      let captures = 0;
+      host.capture = async () => {
+        captures += 1;
+        // On the first look one end has not rendered and the other sits at the top; by the next look it moved down.
+        if (captures < 2) return screen(waits === 'destination' ? [card(0)] : [lane]);
+        return screen([card(300), lane]);
+      };
+      expect(await replayTrace(host, trace([drag])), waits).toMatchObject({ completed: true, executed: 1 });
+      expect(drags, waits).toEqual([{ from: { x: 100, y: 350 }, to: { x: 500, y: 200 } }]);
+    }
+  });
 });
 
 describe('replayTrace: the recorded control is gone and a twin is left', () => {
@@ -750,18 +775,37 @@ describe('replayTrace: the recorded control is gone and a twin is left', () => {
     expect(targets).toEqual([{ direction: 'down', t: undefined }]);
   });
 
-  it('hands off at once when one of two recorded twins without test ids is left, rather than waiting for the count and picking by order', async () => {
-    const host = makeHost({});
+  it('waits for the count when one of two recorded twins without test ids is left, as for two of three, and acts on the recorded place', async () => {
+    for (const index of [0, 1]) {
+      const taps: unknown[] = [];
+      const host = makeHost({ onAction: (name, detail) => void (name === 'tap' && taps.push(detail)) });
+      let captures = 0;
+      host.capture = async () => {
+        captures += 1;
+        // A form rendering in steps: the first button shows alone, its twin renders after it.
+        return screen(captures < 2 ? [setUp('a')] : [setUp('a'), setUp('b')]);
+      };
+      const outcome = await replayTrace(host, trace([{ name: 'tap', summary: 'tap button "Set up"', target: { ...placed, position: { index, of: 2 } } }]));
+      expect(outcome, `index ${index}`).toMatchObject({ completed: true, executed: 1 });
+      expect(taps, `index ${index}`).toEqual([{ id: index === 0 ? 'a' : 'b' }]);
+    }
+  });
+
+  it('hands off after the wait when one of two recorded twins stays alone, and picks by order when a twin renders ahead', async () => {
+    const alone = makeHost({ nodes: [setUp('a')] });
+    expect(await replayTrace(alone, trace([{ name: 'tap', summary: 'tap button "Set up"', target: placed }]))).toMatchObject({ completed: false, executed: 0, stopReason: 'target-ambiguous' });
+    expect(alone.calls).toEqual([]);
+    expect(alone.observations).toBe(9);
+    // The price of waiting: a twin that renders ahead of the recorded button takes its place, as for two of three.
+    const taps: unknown[] = [];
+    const ahead = makeHost({ onAction: (name, detail) => void (name === 'tap' && taps.push(detail)) });
     let captures = 0;
-    host.capture = async () => {
+    ahead.capture = async () => {
       captures += 1;
-      // The recorded button shows alone first; its twin then renders ahead of it, so the recorded place now names the twin.
       return screen(captures < 2 ? [setUp('a')] : [setUp('b'), setUp('a')]);
     };
-    const outcome = await replayTrace(host, trace([{ name: 'tap', summary: 'tap button "Set up" (1 of 2)', target: placed }]));
-    expect(outcome).toMatchObject({ completed: false, executed: 0, stopReason: 'target-ambiguous' });
-    expect(host.calls).toEqual([]);
-    expect(captures).toBeLessThan(3);
+    expect(await replayTrace(ahead, trace([{ name: 'tap', summary: 'tap button "Set up"', target: placed }]))).toMatchObject({ completed: true, executed: 1 });
+    expect(taps).toEqual([{ id: 'b' }]);
   });
 
   it('looks again for a drag source recorded by test id while one twin of it is on screen', async () => {
@@ -798,7 +842,7 @@ describe('replayTrace: the recorded control is gone and a twin is left', () => {
     }
   });
 
-  it('judges both ends of a drag on every look: a source still loading does not hide a destination twin left alone', async () => {
+  it('waits for a drag source still loading, whatever the destination shows on that look', async () => {
     const done = (id: string): SemanticNode => ({ ref: { id, revision: 'r1' }, role: 'button', name: 'Done' });
     const handle: SemanticNode = { ref: { id: 'h', revision: 'r1' }, role: 'button', name: 'Handle' };
     const drops: unknown[] = [];
@@ -806,18 +850,39 @@ describe('replayTrace: the recorded control is gone and a twin is left', () => {
     let captures = 0;
     host.capture = async () => {
       captures += 1;
-      // The recorded destination A shows alone while the handle loads; then its twin B renders ahead of it.
-      return screen(captures < 2 ? [done('a')] : [handle, done('b'), done('a')]);
+      // A transition shows the old and the new "Done" together for one look, before the handle renders.
+      return screen(captures < 2 ? [done('old'), done('new')] : [handle, done('new')]);
     };
-    const drag: RecordedAction = {
-      name: 'drag',
-      summary: 'drag',
-      target: { role: 'button', name: 'Handle' },
-      destination: { role: 'button', name: 'Done', position: { index: 0, of: 2 } },
-    };
-    const outcome = await replayTrace(host, trace([drag]));
-    expect(outcome).toMatchObject({ completed: false, executed: 0, stopReason: 'target-ambiguous' });
-    expect(drops).toEqual([]);
+    const drag: RecordedAction = { name: 'drag', summary: 'drag', target: { role: 'button', name: 'Handle' }, destination: { role: 'button', name: 'Done' } };
+    expect(await replayTrace(host, trace([drag]))).toMatchObject({ completed: true, executed: 1 });
+    expect(drops).toEqual([{ source: { id: 'h' }, destination: { id: 'new' } }]);
+  });
+
+  it('stops a drag with target-ambiguous while an end refused as a twin is still missing, and with target-not-found once it is back', async () => {
+    const other = { role: 'textbox', name: 'Email' };
+    for (const end of ['source', 'destination'] as const) {
+      const drag: RecordedAction = end === 'source'
+        ? { name: 'drag', summary: 'drag', target: flagged, destination: other }
+        : { name: 'drag', summary: 'drag', target: other, destination: flagged };
+      // The twin shows beside the other end, then neither end shows again.
+      const empty = makeHost({});
+      let captures = 0;
+      empty.capture = async () => {
+        captures += 1;
+        return screen(captures < 2 ? [setUp('b', undefined, 'setup-secondary'), email] : []);
+      };
+      expect(await replayTrace(empty, trace([drag])), end).toMatchObject({ completed: false, executed: 0, stopReason: 'target-ambiguous' });
+      expect(empty.calls, end).toEqual([]);
+      // The recorded test id comes back, and only the other end is missing.
+      const back = makeHost({});
+      let looks = 0;
+      back.capture = async () => {
+        looks += 1;
+        return screen(looks < 2 ? [setUp('b', undefined, 'setup-secondary'), email] : [setUp('a', undefined, 'setup-primary')]);
+      };
+      expect(await replayTrace(back, trace([drag])), end).toMatchObject({ completed: false, executed: 0, stopReason: 'target-not-found' });
+      expect(back.calls, end).toEqual([]);
+    }
   });
 
   it('still hands off at once when two twins of a target recorded by test id are on screen', async () => {
@@ -843,29 +908,27 @@ describe('replayTrace: the recorded control is gone and a twin is left', () => {
     expect(taps).toEqual([{ id: 'a' }]);
   });
 
-  it('hands off at once when one is left of two controls that shared the recorded test id, rather than waiting and picking by order', async () => {
+  it('waits for the count when one is left of two controls that shared the recorded test id, for a tap and a drag', async () => {
     // Recorded as the first of two "Set up" buttons sharing one test id: the test id never named it alone.
     const shared = { role: 'button', name: 'Set up', testId: 'setup', position: { index: 0, of: 2 }, twinsWithoutTestId: true as const };
     const sequence = (host: ReturnType<typeof makeHost>) => {
       let captures = 0;
       host.capture = async () => {
         captures += 1;
-        // One button shows alone first; a second renders ahead of it with the same test id.
-        return screen(captures < 2 ? [setUp('a', undefined, 'setup'), email] : [setUp('b', undefined, 'setup'), setUp('a', undefined, 'setup'), email]);
+        // One button shows alone first; the second renders after it with the same test id.
+        return screen(captures < 2 ? [setUp('a', undefined, 'setup'), email] : [setUp('a', undefined, 'setup'), setUp('b', undefined, 'setup'), email]);
       };
-      return () => captures;
     };
-    const tapHost = makeHost({});
-    const tapCaptures = sequence(tapHost);
-    const tapped = await replayTrace(tapHost, trace([{ name: 'tap', summary: 'tap button "Set up" (1 of 2)', target: shared }]));
-    expect(tapped).toMatchObject({ completed: false, executed: 0, stopReason: 'target-ambiguous' });
-    expect(tapHost.calls).toEqual([]);
-    expect(tapCaptures()).toBeLessThan(3);
-    const dragHost = makeHost({});
+    const taps: unknown[] = [];
+    const tapHost = makeHost({ onAction: (name, detail) => void (name === 'tap' && taps.push(detail)) });
+    sequence(tapHost);
+    expect(await replayTrace(tapHost, trace([{ name: 'tap', summary: 'tap button "Set up" (1 of 2)', target: shared }]))).toMatchObject({ completed: true, executed: 1 });
+    expect(taps).toEqual([{ id: 'a' }]);
+    const drops: unknown[] = [];
+    const dragHost = makeHost({ onAction: (name, detail) => void (name === 'drag' && drops.push(detail)) });
     sequence(dragHost);
-    const dragged = await replayTrace(dragHost, trace([{ name: 'drag', summary: 'drag', target: shared, destination: { role: 'textbox', name: 'Email' } }]));
-    expect(dragged).toMatchObject({ completed: false, executed: 0, stopReason: 'target-ambiguous' });
-    expect(dragHost.calls).toEqual([]);
+    expect(await replayTrace(dragHost, trace([{ name: 'drag', summary: 'drag', target: shared, destination: { role: 'textbox', name: 'Email' } }]))).toMatchObject({ completed: true, executed: 1 });
+    expect(drops).toEqual([{ source: { id: 'a' }, destination: { id: 'n2' } }]);
   });
 
   it('keeps a twin refused while it looks again for the test id: a second look-alike under the recorded point is not tapped', async () => {

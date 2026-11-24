@@ -360,9 +360,10 @@ export async function replayTrace(
           break;
         }
         case 'drag': {
-          const pair = await relocatePair(host, planned.source, planned.destination, look);
-          if (pair.kind === 'failed') return stop(pair.failure);
-          await host.actions.drag({ id: pair.source }, { id: pair.destination });
+          const ends = await relocateEnds(host, planned.source, planned.destination, look);
+          const [from, to] = ends?.ends ?? [];
+          if (from?.kind !== 'found' || to?.kind !== 'found') return stop(endsFailure(ends));
+          await host.actions.drag({ id: from.id }, { id: to.id });
           break;
         }
         case 'point': {
@@ -372,13 +373,9 @@ export async function replayTrace(
           break;
         }
         case 'pointDrag': {
-          // Points, not ids, reach the drag, so each end may take its own look:
-          // nothing acts between the two, and a renumbered tree moves no box.
-          const from = await placePoint(host, planned.from, planned.viewport, look);
-          if (from.kind === 'failed') return stop(from.failure, undefined, from.why);
-          const to = await placePoint(host, planned.to, planned.viewport, look);
-          if (to.kind === 'failed') return stop(to.failure, undefined, to.why);
-          await host.actions.dragAt(from.point, to.point);
+          const placed = await placePoints(host, planned.from, planned.to, planned.viewport, look);
+          if (placed.kind === 'failed') return stop(placed.failure, undefined, placed.why);
+          await host.actions.dragAt(placed.from, placed.to);
           break;
         }
       }
@@ -468,55 +465,76 @@ async function relocate(
   return settled ?? last;
 }
 
+/** Both ends of a drag as one look found them, and whether an end refused as a twin is still not found on it. */
+interface Ends {
+  readonly screen: SemanticScreen;
+  readonly ends: readonly [Relocated | undefined, Relocated | undefined];
+  readonly refused: boolean;
+}
+
 /**
- * Re-finds a drag's two nodes on one screen, so the ids the drag joins name
- * the same look at the app: an engine that renumbers its tree per
- * observation would otherwise hand the drag a source from one screen and a
- * destination from the next. Waits like `relocate` does, and gives up the
- * same way (`retryable`).
+ * Re-finds a drag's two ends on one screen, so the drag joins ids, or
+ * points in boxes, from the same look at the app: an engine that renumbers
+ * its tree per observation, or a box that moves while the other end loads,
+ * would otherwise hand the drag one end from one screen and the other from
+ * the next. An end with no descriptor (a bare point) needs no finding. Waits
+ * like `relocate` does, judging the source first as main did, so a source
+ * still loading is waited for whatever the destination shows. Each end keeps
+ * its twin refusal on later looks, as `relocate` does. Returns the last look
+ * judged; nothing when no look could be read.
  */
-async function relocatePair(
+async function relocateEnds(
   host: ReplayHost,
-  source: TraceTargetDescriptor,
-  destination: TraceTargetDescriptor,
+  source: TraceTargetDescriptor | undefined,
+  destination: TraceTargetDescriptor | undefined,
   look: Look,
-): Promise<{ readonly kind: 'found'; readonly source: string; readonly destination: string } | { readonly kind: 'failed'; readonly failure: RelocationFailure }> {
-  let last: RelocationFailure = 'target-not-found';
-  // Each end keeps its refusal on later looks, as `relocate` does.
+): Promise<Ends | undefined> {
   const refused = new Set<TraceTargetDescriptor>();
-  const failed = (descriptor: TraceTargetDescriptor, result: Extract<RelocationResult, { kind: 'failed' }>) => {
+  let latest: Ends | undefined;
+  const judge = (descriptor: TraceTargetDescriptor, screen: SemanticScreen): { readonly relocated: Relocated; readonly wait: boolean } => {
+    const result = relocateDescriptor(descriptor, screen.nodes);
+    if (result.kind === 'found') {
+      const node = screen.nodes.get(result.id);
+      return node === undefined ? { relocated: { kind: 'failed', failure: 'target-not-found' }, wait: true } : { relocated: { ...result, node }, wait: false };
+    }
     if (result.failure === 'target-ambiguous' && result.twinLeft === true) refused.add(descriptor);
-    const kept = refused.has(descriptor);
-    const marked = kept && result.failure === 'target-ambiguous' ? { ...result, twinLeft: true as const } : result;
-    if (!kept || marked.failure === 'target-ambiguous') last = marked.failure;
-    return retryable(marked, descriptor) ? undefined : { kind: 'failed' as const, failure: marked.failure };
+    const marked = refused.has(descriptor) && result.failure === 'target-ambiguous' ? { ...result, twinLeft: true as const } : result;
+    return { relocated: marked.failure === 'target-ambiguous' ? { ...marked, screen } : marked, wait: retryable(marked, descriptor) };
   };
   const settled = await pollSettled(host, (screen) => {
-    // Both ends are judged on every look: one still loading must not hide a
-    // refusal at the other, which a later look could settle by order.
-    const from = relocateDescriptor(source, screen.nodes);
-    const to = relocateDescriptor(destination, screen.nodes);
-    if (from.kind === 'found' && to.kind === 'found') return { kind: 'found' as const, source: from.id, destination: to.id };
-    return (from.kind === 'failed' ? failed(source, from) : undefined) ?? (to.kind === 'failed' ? failed(destination, to) : undefined);
+    const from = source === undefined ? undefined : judge(source, screen);
+    const to = destination === undefined ? undefined : judge(destination, screen);
+    const unresolved = (descriptor: TraceTargetDescriptor | undefined, judged: typeof from) =>
+      descriptor !== undefined && refused.has(descriptor) && judged?.relocated.kind === 'failed';
+    latest = { screen, ends: [from?.relocated, to?.relocated], refused: unresolved(source, from) || unresolved(destination, to) };
+    const first = [from, to].find((judged) => judged?.relocated.kind === 'failed');
+    return first?.wait === true ? undefined : latest;
   }, look);
-  return settled ?? { kind: 'failed', failure: last };
+  return settled ?? latest;
+}
+
+/** Why a drag's ends could not both be found: a twin refusal while its end is still missing, else the first end that failed. */
+function endsFailure(ends: Ends | undefined): RelocationFailure {
+  if (ends?.refused === true) return 'target-ambiguous';
+  const failed = ends?.ends.find((end) => end?.kind === 'failed');
+  return failed?.kind === 'failed' ? failed.failure : 'target-not-found';
 }
 
 /**
  * Whether a failed relocation is worth another look. A missing target is: the
  * screen may still be settling. So is ambiguity for a descriptor that recorded
  * its position among twins: a form still rendering shows fewer of them than
- * the recording counted, and the count catches up. A named match refused as
- * a twin of the recorded node (`twinLeft`) is only when the recorded test id
- * named the node by itself (no position counted beside it) and can come
- * back: a count that catches up would pick by order, and a twin that
- * rendered ahead of the recorded node takes its place. Other ambiguity never
- * is: two matching nodes will not become one by waiting, and acting on either
- * would be a guess.
+ * the recording counted, and the count catches up. So is a named match
+ * refused as a twin of the recorded node (`twinLeft`): the recorded test id
+ * may come back, or the count catch up, as for two of three. A count that
+ * catches up picks by order, so a twin that rendered ahead of the recorded
+ * node takes its place; that is the price of not failing a form that renders
+ * in steps. Other ambiguity never is: two matching nodes will not become one
+ * by waiting, and acting on either would be a guess.
  */
 function retryable(result: Extract<RelocationResult, { kind: 'failed' }>, descriptor: TraceTargetDescriptor): boolean {
-  if (result.failure === 'target-ambiguous' && result.twinLeft === true) return descriptor.twinsWithoutTestId === true && descriptor.position === undefined;
-  return result.failure === 'target-not-found' || descriptor.position !== undefined;
+  if (result.failure === 'target-not-found') return true;
+  return result.twinLeft === true || descriptor.position !== undefined;
 }
 
 /** A relocation with the node it found, or with the screen its look-alikes are on, for a replay that needs boxes. */
@@ -555,6 +573,42 @@ async function placePoint(
   const at = placeWithin(relocated, { ...end.within, point: end.point, viewport });
   if (at === undefined) return { kind: 'failed', failure: relocated.kind === 'failed' ? relocated.failure : 'target-not-found' };
   return { kind: 'placed', point: at };
+}
+
+/**
+ * Where both recorded points of a bare-point drag land, placed on one look
+ * (`relocateEnds`), so a box that moved while the other end loaded is read
+ * where it is now. A failure names the hand-off.
+ */
+async function placePoints(
+  host: ReplayHost,
+  from: PointEnd,
+  to: PointEnd,
+  viewport: TraceViewport,
+  look: Look,
+): Promise<
+  | { readonly kind: 'placed'; readonly from: ViewportPoint; readonly to: ViewportPoint }
+  | { readonly kind: 'failed'; readonly failure: ReplayHandOffReason; readonly why?: string }
+> {
+  const ends = await relocateEnds(host, from.within?.descriptor, to.within?.descriptor, look);
+  if (ends === undefined) return { kind: 'failed', failure: from.within === undefined ? 'action-failed' : 'target-not-found' };
+  const { width, height } = ends.screen.viewport;
+  const points: ViewportPoint[] = [];
+  for (const [index, end] of [from, to].entries()) {
+    if (end.within === undefined) {
+      if (width !== viewport.width || height !== viewport.height) {
+        return { kind: 'failed', failure: 'viewport-changed', why: `recorded at ${viewport.width}x${viewport.height}, the screen is ${width}x${height}` };
+      }
+      points.push(end.point);
+      continue;
+    }
+    const relocated = ends.ends[index];
+    const at = relocated === undefined ? undefined : placeWithin(relocated, { ...end.within, point: end.point, viewport });
+    if (at === undefined) return { kind: 'failed', failure: ends.refused ? 'target-ambiguous' : relocated?.kind === 'failed' ? relocated.failure : 'target-not-found' };
+    points.push(at);
+  }
+  const [start, finish] = points;
+  return start === undefined || finish === undefined ? { kind: 'failed', failure: 'action-failed' } : { kind: 'placed', from: start, to: finish };
 }
 
 /**
