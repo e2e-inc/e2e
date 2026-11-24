@@ -82,7 +82,8 @@ function upgradeCommand(cwd: string, env: NodeJS.ProcessEnv): string {
     if (readPackageManifest(dir) !== undefined) nearest = dir;
     if (path.dirname(dir) === dir) break;
   }
-  return execCommand(detectWorkspacePackageManager(declaringPackage(cwd, RUNNER)?.dir ?? nearest ?? cwd, env).manager, 'e2e upgrade');
+  const manager = declaringPackage(cwd, RUNNER, env)?.manager ?? detectWorkspacePackageManager(nearest ?? cwd, env).manager;
+  return execCommand(manager, 'e2e upgrade');
 }
 
 export class UpdateCheck {

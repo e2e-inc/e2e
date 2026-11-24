@@ -1,7 +1,7 @@
 /** `e2e guide`: prints the bundled agent skill for agents and people who do not have it installed. */
 
 import path from 'node:path';
-import { detectWorkspacePackageManager, execCommand } from '../internal/package-manager.ts';
+import { execCommand } from '../internal/package-manager.ts';
 import { declaringPackage, installedPackage, RUNNER } from '../internal/project-package.ts';
 import { parseVersion, specAccepts } from '../internal/semver.ts';
 import { MISSING_SKILL_MESSAGE, packagedSkillDirectory, readGuide, skillTopics } from './skill.ts';
@@ -28,29 +28,33 @@ interface GuideSource {
  * always the version the tests will run on. An installed copy of another
  * version is read instead of this one, unless package.json has moved past
  * it to a range this CLI is in; a declared version with no installed copy
- * can only be named.
+ * can only be named, and a spec that is no range (a tag, a workspace link)
+ * says nothing about either.
  */
 function guideSource({ version, cwd = process.cwd(), env = process.env }: GuideOptions): GuideSource {
-  const declared = declaringPackage(cwd, RUNNER);
+  const declared = declaringPackage(cwd, RUNNER, env);
   const installed = installedPackage(path.resolve(cwd), RUNNER);
-  const accepts = (candidate: string): boolean | undefined => {
-    const parsed = parseVersion(candidate);
-    return declared === undefined || parsed === undefined ? undefined : specAccepts(declared.spec, parsed);
-  };
   const own = { from: undefined, notice: `Guide for e2e ${version}` };
-  if (declared === undefined) {
+  // Nothing to hold a version against: no package.json lists e2e, or its sections disagree and the manager's pick is not known.
+  if (declared?.spec === undefined) {
     if (installed === undefined || installed.version === version) return own;
     return installedGuide(installed, version, '');
   }
-  const spec = declared.spec.trim();
+  const { spec, manager } = declared;
+  const accepts = (candidate: string): boolean | undefined => {
+    const parsed = parseVersion(candidate);
+    return parsed === undefined ? undefined : specAccepts(spec, parsed);
+  };
   const manifest = path.relative(cwd, path.join(declared.dir, 'package.json'));
-  const manager = detectWorkspacePackageManager(declared.dir, env).manager;
   if (installed === undefined) {
     if (accepts(version) !== false) return own;
-    const pinned = parseVersion(spec) === undefined ? `"e2e@${spec}"` : `e2e@${spec}`;
+    const missing = `${own.notice}, but ${manifest} declares e2e ${spec} and no installed copy was found.`;
+    const install = `run \`${manager} install\` and then \`${execCommand(manager, 'e2e guide')}\``;
+    if (parseVersion(spec) !== undefined) return { from: undefined, notice: `${missing} For the matching guide, ${install}, or run \`npx e2e@${spec} guide\`.` };
+    // A range names many releases, each with its own guide; only an install says which one the project runs.
     return {
       from: undefined,
-      notice: `${own.notice}, but ${manifest} declares e2e ${spec} and no installed copy was found. For the matching guide, run \`${manager} install\` and then \`${execCommand(manager, 'e2e guide')}\`, or run \`npx ${pinned} guide\`.`,
+      notice: `${missing} For the guide of the version the project installs, ${install}; \`npx "e2e@${spec}" guide\` prints the newest release in that range, which may not be the one the lockfile pins.`,
     };
   }
   const stale = accepts(installed.version) === false;
@@ -65,6 +69,11 @@ function installedGuide(installed: { dir: string; version: string }, version: st
   return from === undefined
     ? { from, notice: `Guide for e2e ${version}; the project's installed e2e ${installed.version} ships no guide${suffix}` }
     : { from, notice: `Guide for e2e ${installed.version}, the version installed in this project (this CLI is e2e ${version})${suffix}` };
+}
+
+/** The topics of the guide `guide` prints for the project, which an installed copy of another version may name differently. */
+export function guideTopics(options: GuideOptions): readonly string[] {
+  return skillTopics(guideSource(options).from);
 }
 
 /**
