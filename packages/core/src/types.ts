@@ -753,6 +753,69 @@ export interface RecordedVideoLink {
   readonly startedAt: string;
 }
 
+/**
+ * The `request` fixture: HTTP calls from a test. A path resolves against the
+ * app URL; an absolute http(s) URL goes where it names. Each call is a step,
+ * bounded by the action timeout and the running test's or hook's budget, and
+ * returns once the whole body is read. It does not send the browser's
+ * cookies or keep cookies between calls.
+ */
+export interface APIRequest {
+  /** Sends a request with `options.method`, GET by default. */
+  fetch(url: string, options?: APIRequestFetchOptions): Promise<WebResponse>;
+  /** Sends a GET request. */
+  get(url: string, options?: APIRequestOptions): Promise<WebResponse>;
+  /** Sends a POST request. */
+  post(url: string, options?: APIRequestOptions): Promise<WebResponse>;
+  /** Sends a PUT request. */
+  put(url: string, options?: APIRequestOptions): Promise<WebResponse>;
+  /** Sends a PATCH request. */
+  patch(url: string, options?: APIRequestOptions): Promise<WebResponse>;
+  /** Sends a DELETE request. */
+  delete(url: string, options?: APIRequestOptions): Promise<WebResponse>;
+  /** Sends a HEAD request. */
+  head(url: string, options?: APIRequestOptions): Promise<WebResponse>;
+}
+
+/** What one `request` call sends beside its URL. */
+export interface APIRequestOptions {
+  /** Request headers. */
+  readonly headers?: Readonly<Record<string, string>>;
+  /** A body sent as JSON, with `content-type: application/json` unless `headers` sets one. Not with `body`. */
+  readonly json?: unknown;
+  /** A body sent as is. Not with `json`. */
+  readonly body?: string;
+  /** Timeout in milliseconds; defaults to `actionTimeout`. 0 sets none of its own, so only the running test's or hook's budget bounds the call. */
+  readonly timeout?: number;
+  /** How redirects are handled; `'follow'` by default. `'manual'` returns the 3xx response as is; `'error'` fails the call with `ACTION_FAILED`. */
+  readonly redirect?: 'follow' | 'manual' | 'error';
+}
+
+/** `request.fetch` options: the method beside the rest. */
+export interface APIRequestFetchOptions extends APIRequestOptions {
+  /** The HTTP method; GET by default. */
+  readonly method?: string;
+}
+
+/**
+ * An HTTP response: what `request` calls, the web engine's
+ * `browser.waitForResponse`, and `route.fetch()` return.
+ */
+export interface WebResponse {
+  /** Response URL. */
+  readonly url: string;
+  /** HTTP status. */
+  readonly status: number;
+  /** Response headers, lower-cased names; `request` and `route.fetch()` join several `set-cookie` values with `\n`, `waitForResponse` leaves cookie headers out. */
+  readonly headers: Readonly<Record<string, string>>;
+  /** Waits for the body and returns its bytes; rejects with `ACTION_FAILED` when the body could not be read. */
+  body(): Promise<Buffer>;
+  /** Waits for the body and parses it as JSON; rejects with `ACTION_FAILED` when the body could not be read. */
+  json<T = unknown>(): Promise<T>;
+  /** Waits for the body and reads it as text; rejects with `ACTION_FAILED` when the body could not be read. */
+  text(): Promise<string>;
+}
+
 export interface SetupSession {
   /** Saves state under a setup-declared name. */
   save(name: string): Promise<void>;
@@ -767,6 +830,8 @@ export interface TestFixtures {
   readonly screen: Screen;
   /** The target's platform label: `web`, `ios`, `android`, or an engine's own string. */
   readonly platform: string;
+  /** HTTP calls, each one a step; a path resolves against the app URL. */
+  readonly request: APIRequest;
 }
 
 export interface SetupFixtures extends TestFixtures {
@@ -1109,6 +1174,12 @@ export interface AsyncExpectation {
   toBeVisible(options?: { visible?: boolean; timeout?: number }): Promise<void>;
   /** Waits for hidden or absent state. */
   toBeHidden(options?: { timeout?: number }): Promise<void>;
+  /**
+   * Waits for part of the match to be inside the viewport, after clipping by
+   * scrolling and overflow ancestors; `ratio` (0 to 1) sets the share of its
+   * box that must be. No match is outside the viewport. It never scrolls.
+   */
+  toBeInViewport(options?: { ratio?: number; timeout?: number }): Promise<void>;
   /** Waits for one match to exist, visible or not; `attached: false` waits for none. */
   toBeAttached(options?: { attached?: boolean; timeout?: number }): Promise<void>;
   /** Waits for enabled state; `enabled: false` waits for disabled state. */
@@ -1557,7 +1628,8 @@ export interface TargetApp {
 /**
  * One target: a named surface on one platform, served by an engine.
  * What the target can do is graded from the engine's declared capabilities;
- * with no `engine` the target is agent-tools-only and everything runs opaque.
+ * with no `engine` the target runs agent tools and `request` calls to
+ * absolute URLs, and everything runs opaque.
  * The app under test is the target's `app`; the engine only drives it.
  */
 export interface Target {
@@ -1868,7 +1940,7 @@ export interface ProjectConfig {
   video?: RecordingMode;
   /**
    * The directory a run writes its results to, relative to the project root;
-   * default `.e2e`. It holds `report.json`, `junit.xml`, `summary.md`,
+   * default `.e2e`. It holds `report.json`, `junit.xml`, `summary.md`, `ctrf.json`,
    * `ai-trace.json`, `results/` (cleared once the run's tests start, except on a `--last-failed` rerun),
    * `sessions/`, and the `e2e mcp` session videos under `videos/`.
    * `--output <dir>` overrides it for one run. It must be inside the project

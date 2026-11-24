@@ -5,7 +5,7 @@
  */
 
 import { z } from 'zod';
-import { json, junit, line, list as listReporter, markdown } from '../../src/reporters.ts';
+import { ctrf, json, junit, line, list as listReporter, markdown } from '../../src/reporters.ts';
 import {
   credentials,
   expect,
@@ -17,6 +17,8 @@ import {
   type ActionEvent,
   type ActionName,
   type Agent,
+  type APIRequest,
+  type WebResponse,
   type App,
   type ArtifactStore,
   type AsyncExpectation,
@@ -399,6 +401,9 @@ if (runEvent.type === 'step') {
 ({ targets, reporters: [listReporter(), json(), junit({ outputFile: 'reports/junit.xml' }), markdown(), 'junit', reporter] }) satisfies E2EConfig;
 // @ts-expect-error the junit reporter takes an outputFile, nothing else
 junit({ output: 'reports' });
+({ targets, reporters: ['ctrf', ctrf(), ctrf({ outputFile: 'reports/ctrf.json' })] }) satisfies E2EConfig;
+// @ts-expect-error the ctrf reporter takes an outputFile, nothing else
+ctrf({ output: 'reports' });
 ({
   name: 'dots',
   interactive: true,
@@ -545,10 +550,16 @@ void screen.getByRole('button').waitFor({ state: 'gone' });
 // Playwright's state flags and ignoreCase are taken where Playwright takes them, and nowhere else.
 void asyncExpectation.toBeChecked({ checked: false });
 void asyncExpectation.toBeVisible({ visible: false, timeout: 1000 });
+void asyncExpectation.toBeInViewport({ ratio: 0 });
+void asyncExpectation.toBeInViewport({ ratio: 0.5, timeout: 1000 });
 void asyncExpectation.toContainText('error', { ignoreCase: true });
 void asyncExpectation.toHaveAttribute('data-kind', 'error', { ignoreCase: true });
 // @ts-expect-error toBeChecked has no indeterminate state
 void asyncExpectation.toBeChecked({ indeterminate: true });
+// @ts-expect-error toBeInViewport takes a numeric ratio
+void asyncExpectation.toBeInViewport({ ratio: 'half' });
+// @ts-expect-error toBeInViewport has no threshold option
+void asyncExpectation.toBeInViewport({ threshold: 0.5 });
 // @ts-expect-error a value is compared as it is, case included
 void asyncExpectation.toHaveValue('a', { ignoreCase: true });
 // @ts-expect-error presence has no case to ignore
@@ -1247,6 +1258,37 @@ void (expect(await readBody()).toMatchSchema(userSchema) satisfies { id: number 
 void (expect.soft(await readBody()).toMatchSchema(userSchema) satisfies { id: number } | undefined);
 void (expect(JSON.parse('{}')).toMatchSchema(userSchema) satisfies { id: number });
 void (expect.soft(JSON.parse('{}')).toMatchSchema(userSchema) satisfies { id: number } | undefined);
+
+// request: each call returns the WebResponse waitForResponse and route.fetch() return.
+test('request', async ({ request }) => {
+  void (request satisfies APIRequest);
+  const created = await request.post('/api/orders', { json: { sku: 'A1' }, headers: { authorization: 'Bearer t' } });
+  void (created satisfies WebResponse);
+  void (created.status satisfies number);
+  void ((await created.body()) satisfies Buffer);
+  // @ts-expect-error json() is unknown unless the caller names a type
+  void (await created.json()).id;
+  void ((await created.json<{ id: number }>()).id satisfies number);
+  void (expect(await created.json()).toMatchSchema(userSchema) satisfies { id: number });
+  expect(created.status).toBe(201);
+  await request.fetch('/api/orders', { method: 'PUT', body: 'raw' });
+  await request.get('/api/export', { timeout: 0 });
+  await request.get('/api/login', { redirect: 'manual' });
+  await request.get('/api/login', { redirect: 'follow' });
+  await request.get('/api/login', { redirect: 'error' });
+  // @ts-expect-error redirect accepts only follow, manual, or error
+  await request.get('/api/login', { redirect: 'none' });
+  // @ts-expect-error a timeout is milliseconds, not a string
+  await request.get('/api/export', { timeout: '45s' });
+  // @ts-expect-error the method goes in request.fetch's options, not a shorthand's
+  await request.get('/api/orders', { method: 'POST' });
+  // @ts-expect-error a body is a string; an object goes in json
+  await request.post('/api/orders', { body: { sku: 'A1' } });
+});
+// @ts-expect-error a project fixture typed as its own `request` conflicts with the built-in one
+test.extend<{ request: { hello(): string } }>({ request: async ({}, use) => { await use({ hello: () => 'mine' }); } });
+// @ts-expect-error request is a test fixture, so a worker fixture cannot name it
+test.extend<{}, { seeded: number }>({ seeded: [async ({ request }, use) => { void request; await use(1); }, { scope: 'worker' }] });
 // @ts-expect-error A function isn't inferred from a return-only generic.
 void expect(await readBody()).toPass();
 
