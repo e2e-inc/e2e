@@ -698,7 +698,7 @@ await screen.getByText('Shipping address').tap({ count: 3 });
 
 The options are [`TapOptions`](#types):
 
-- `count`: how many taps in a row, a positive integer, default 1. In a
+- `count`: how many taps in a row, a positive safe integer, default 1. In a
   browser the clicks arrive as one multi-click, so a triple click selects a
   paragraph. On a device they are `count` presses at the `doubleTap` cadence.
   `count: 2` is the same action as [`doubleTap()`](#doubletap). Three or more
@@ -713,7 +713,7 @@ The options are [`TapOptions`](#types):
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | An unknown or repeated modifier, `modifiers` beside `position`, a `count` that is not a positive integer, or a `count` above 1 beside `position`. |
+| `INVALID_ARGUMENT` | An unknown or repeated modifier, `modifiers` beside `position`, a `count` that is not a positive safe integer, or a `count` above 1 beside `position`. |
 | `UNSUPPORTED_CAPABILITY` | `modifiers` on an engine that does not declare `tapModifiers`, the mobile engine among them; thrown before it acts. |
 | `UNSUPPORTED_CAPABILITY` | A `count` of 3 or more on an engine without the `multiTap` action, or above the engine's limit (200 on the mobile engine); thrown before it acts. |
 | `UNSUPPORTED_CAPABILITY` | `position` on an engine without the `tap` pointer action. |
@@ -1471,10 +1471,11 @@ export interface TapOptions extends ClickOptions {
    */
   position?: Point;
   /**
-   * How many taps in a row, a positive integer, default 1. `2` is the same
-   * as `doubleTap()`; 3 or more needs an engine that declares the `multiTap`
-   * action, `UNSUPPORTED_CAPABILITY` otherwise. A count above 1 is not
-   * combined with `position`.
+   * How many taps in a row, a positive safe integer, default 1. `2` is the
+   * same as `doubleTap()`; 3 or more needs an engine that declares the
+   * `multiTap` action, `UNSUPPORTED_CAPABILITY` otherwise. A count above the
+   * engine's own limit (200 on the mobile engine) is also
+   * `UNSUPPORTED_CAPABILITY`. A count above 1 is not combined with `position`.
    */
   count?: number;
 }
