@@ -2,7 +2,7 @@
 
 import * as clack from '@clack/prompts';
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { redactError } from '@e2e-dev/core/lib/run/secrecy';
@@ -67,7 +67,7 @@ import {
 import { DEFAULT_ENDPOINT, GATEWAYS, getGatewayPreset, validateEndpoint, type GatewayId } from './init/gateways.ts';
 import { isCiMode } from '@e2e-dev/core/lib/config/resolve';
 import { isLoopbackHost } from '@e2e-dev/core/lib/internal/urls';
-import { planAgentInstructions } from './init/agent-instructions.ts';
+import { planAgentInstructions, writeAgentInstructions } from './init/agent-instructions.ts';
 import { findRegisteredMcpFiles, linkOnPath, planMcpRegistration } from './init/mcp-config.ts';
 import { addDependencies, addScripts, declaresDependency, describeManifestError, readPackage, serializePackage } from './init/package.ts';
 import { createScaffold, type ScaffoldModel } from './init/scaffold.ts';
@@ -524,14 +524,9 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
   if (skillDirs.length === 0) {
     clack.log.info(`Skipped the agent skill; agents can still print it with ${execCommand(manager, 'e2e guide')}`);
   }
-  for (const write of instructions.writes) {
-    try {
-      appendFileSync(write.absolute, write.appended, 'utf8');
-      clack.log.success(`${write.existing ? 'Updated' : 'Created'} ${write.relative} (e2e skill pointer)`);
-    } catch (cause) {
-      // A read-only instructions file is no reason to stop a scaffold that is half written.
-      clack.log.warn(`Could not update ${write.relative} (${cause instanceof Error ? cause.message : String(cause)}); add the line: ${write.appended.trim()}`);
-    }
+  for (const { write, error } of writeAgentInstructions(instructions)) {
+    if (error === undefined) clack.log.success(`${write.existing ? 'Updated' : 'Created'} ${write.relative} (e2e skill pointer)`);
+    else clack.log.warn(`Could not update ${write.relative} (${error}); add the line: ${write.line}`);
   }
   for (const registration of mcpRegistrations) {
     mkdirSync(path.dirname(registration.absolute), { recursive: true });

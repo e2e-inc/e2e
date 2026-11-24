@@ -1,6 +1,7 @@
 import { stripVTControlCharacters } from 'node:util';
 import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -846,21 +847,51 @@ describe('e2e init', () => {
   it('adds the pointer on a re-run of a project whose skill is current', async () => {
     writeCopy('.claude/skills');
     expect((await init(dir, { yes: true, mcp: [] })).exitCode).toBe(0);
+    expect(existsSync(path.join(dir, 'CLAUDE.md'))).toBe(true);
     rmSync(path.join(dir, 'CLAUDE.md'));
     stdoutSpy.mockClear();
     expect((await init(dir, { yes: true, mcp: [] })).exitCode).toBe(0);
+    expect(existsSync(path.join(dir, 'CLAUDE.md'))).toBe(true);
     expect(read('CLAUDE.md')).toContain('.claude/skills/e2e/SKILL.md');
     expect(existsSync(path.join(dir, 'AGENTS.md'))).toBe(false);
     expect(output()).not.toContain('Nothing to create');
   });
 
-  it('leaves a symlinked instructions file alone and names it', async () => {
+  it.skipIf(!symlinks)('leaves a symlinked instructions file alone and names it', async () => {
     writeFileSync(path.join(dir, 'shared.md'), '# Shared\n');
     symlinkSync('shared.md', path.join(dir, 'AGENTS.md'));
     expect((await init(dir, { yes: true, skills: ['.agents/skills'], mcp: [] })).exitCode).toBe(0);
     expect(output()).toMatch(/Symlink, not touching: AGENTS\.md -> .*shared\.md \(e2e skill pointer\)/);
     expect(read('shared.md')).toBe('# Shared\n');
     expect(existsSync(path.join(dir, 'CLAUDE.md'))).toBe(false);
+  });
+
+  it('names a directory where an instructions file goes and writes the other file', async () => {
+    mkdirSync(path.join(dir, 'AGENTS.md'));
+    expect((await init(dir, { yes: true, mcp: [] })).exitCode).toBe(0);
+    expect(output()).toContain('Broken, not touching: AGENTS.md (not a file)');
+    expect(lstatSync(path.join(dir, 'AGENTS.md')).isDirectory()).toBe(true);
+    expect(read('CLAUDE.md')).toContain('.claude/skills/e2e/SKILL.md');
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('prints the line for a read-only file and gives it to the file that imports it', async () => {
+    writeFileSync(path.join(dir, 'AGENTS.md'), '# Project\n');
+    writeFileSync(path.join(dir, 'CLAUDE.md'), '@AGENTS.md\n');
+    chmodSync(path.join(dir, 'AGENTS.md'), 0o444);
+    expect((await init(dir, { yes: true, mcp: [] })).exitCode).toBe(0);
+    expect(output()).toMatch(/Could not update AGENTS\.md \(EACCES.*\); add the line: End-to-end tests use e2e; read \.agents\/skills\/e2e\/SKILL\.md before writing or running one\.\n/);
+    expect(output()).toContain('Updated CLAUDE.md (e2e skill pointer)');
+    expect(read('AGENTS.md')).toBe('# Project\n');
+    expect(read('CLAUDE.md')).toBe('@AGENTS.md\n\nEnd-to-end tests use e2e; read .claude/skills/e2e/SKILL.md before writing or running one.\n');
+  });
+
+  it.skipIf(!symlinks)('points CLAUDE.md at a committed skill link on the run that installs its copy', async () => {
+    mkdirSync(path.join(dir, '.claude/skills'), { recursive: true });
+    symlinkSync('../../.agents/skills/e2e', path.join(dir, '.claude/skills/e2e'));
+    expect((await init(dir, { yes: true, mcp: [] })).exitCode).toBe(0);
+    expect(existsSync(path.join(dir, 'CLAUDE.md'))).toBe(true);
+    expect(read('CLAUDE.md')).toContain('.claude/skills/e2e/SKILL.md');
+    expect(read('AGENTS.md')).toContain('.agents/skills/e2e/SKILL.md');
   });
 
   it('repairs a damaged copy without asking and leaves other locations alone', async () => {
@@ -1016,6 +1047,8 @@ describe('e2e init', () => {
     expect(lstatSync(path.join(dir, '.agents/skills/e2e/SKILL.md')).isDirectory()).toBe(true);
     expect(read('.agents/skills/e2e/references')).toBe('not a directory\n');
     expect(existsSync(path.join(dir, '.claude'))).toBe(false);
+    expect(existsSync(path.join(dir, 'AGENTS.md'))).toBe(false);
+    expect(existsSync(path.join(dir, 'CLAUDE.md'))).toBe(false);
     expect(read('e2e.config.ts')).toContain('targets:');
     expect(JSON.parse(read('.mcp.json'))).toHaveProperty('mcpServers.e2e');
     expect(clack.confirm).not.toHaveBeenCalled();
