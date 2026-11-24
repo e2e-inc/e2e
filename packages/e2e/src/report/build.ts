@@ -2,6 +2,7 @@
 
 import os from 'node:os';
 import path from 'node:path';
+import { isFileApp } from '@e2e-dev/core/lib/config/app';
 import { BLOCKABLE_CODES } from '@e2e-dev/core/lib/agent/executor';
 import { DEFAULT_LIMITS } from '@e2e-dev/core/lib/config/agent';
 import type { ResolvedConfig, ResolvedLimits, ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
@@ -506,10 +507,24 @@ export function projectSource(
 /** A step that named no line in the project: a fixture's own call, or a step minted outside one. */
 const UNKNOWN_STEP_SOURCE: ReportSource = { file: 'unknown', line: 1, column: 1 };
 
+/** Code points of a step label report-v1 admits (its `maxLength`, which counts code points). */
+const MAX_STEP_LABEL_CODE_POINTS = 8192;
+
+/**
+ * A label cut to what report-v1 admits. It is cut here, at the report, after
+ * the recorder redacted it whole: a guest session's step reaches its owner
+ * uncut, so the owner's ledger can still match a value it alone knows.
+ */
+function reportLabel(label: string): string {
+  const points = [...label];
+  return points.length <= MAX_STEP_LABEL_CODE_POINTS ? label : `${points.slice(0, MAX_STEP_LABEL_CODE_POINTS - 1).join('')}…`;
+}
+
 function serializeStep(step: StepRecord): ReportStep {
   const { error, source, ...rest } = step;
   return {
     ...rest,
+    label: reportLabel(step.label),
     source: source ?? UNKNOWN_STEP_SOURCE,
     error: error === undefined ? undefined : serializeErrorRecord(error),
   };
@@ -642,7 +657,8 @@ function serializeTarget(
       id: target.name,
       index: target.index,
       platform: target.platform,
-      baseOrigin: target.app.base?.origin,
+      // A file has no origin: the field is left out, as for a target with no URL.
+      baseOrigin: isFileApp(target.app) ? undefined : target.app.base?.origin,
       environment: target.app.environment,
     }),
     ...(provenance ?? describeTarget(target)),

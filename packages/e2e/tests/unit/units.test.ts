@@ -94,7 +94,6 @@ const defaultOptions: ResolvedTestOptions = {
   timeout: 30_000,
   retries: 0,
   platforms: undefined,
-  requires: [],
   session: undefined,
   agents: ['default'],
   agentContext: undefined,
