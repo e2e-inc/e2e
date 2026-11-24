@@ -1205,6 +1205,20 @@ the TV tests.
 | --- | --- | --- |
 | `tv_remote` | gap | Press a [remote button](#pressremote) by `key`, up to 20 `times` in one call. |
 
+`foldTools(...engines)` adds the hinge for engines that drive a foldable: the
+iPhone Duo simulator or a foldable Android emulator. It is a pack of its own,
+so a config with no foldable offers no `fold`. With it in the agent's
+`tools`, `agent.act`, `e2e explore`, and the MCP server's `call` can fold the
+device.
+
+```ts
+tools: { ...mobileTools(iphoneDuo), ...foldTools(iphoneDuo) },
+```
+
+| Tool | Replay | Purpose |
+| --- | --- | --- |
+| `fold` | gap | Put the device in a hinge [`pose`](#fold): `closed`, `half-open`, or `open`. A device without a hinge fails with `UNSUPPORTED_CAPABILITY`. |
+
 | Throws | When |
 | --- | --- |
 | `INVALID_STATE` | An engine that `mobile()` did not return. In the config this fails the load as `CONFIG_LOAD_FAILED`, whose message includes this one. |

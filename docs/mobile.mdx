@@ -416,6 +416,14 @@ test('the list and the detail split across the fold', async ({ agent, app, devic
   await agent.assert('the list and the detail sit on either side of the fold', { vision: true });
 });
 ```
+
+An agent folds the device with the `fold` tool from `foldTools`. Add it to
+the agent's tools so `agent.act`, `e2e explore`, and the MCP server can fold
+and unfold the device:
+
+```ts
+tools: { ...mobileTools(iphoneDuo), ...foldTools(iphoneDuo) },
+```
 </Accordion>
 
 ### Record a transition
