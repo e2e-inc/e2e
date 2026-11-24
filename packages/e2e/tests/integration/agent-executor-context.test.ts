@@ -25,6 +25,20 @@ test('second test starts fresh', async ({ app, agent }) => {
 });
 `;
 
+const SERIAL_SUITE = `import { test } from 'e2e';
+
+test.describe('wizard', { serial: true }, () => {
+  test('first member', async ({ app, agent }) => {
+    await app.open();
+    await agent.act('step one');
+  });
+
+  test('second member', async ({ agent }) => {
+    await agent.act('step two');
+  });
+});
+`;
+
 const ONE_STEP_SUITE = `import { test } from 'e2e';
 
 test('one act step', async ({ app, agent }) => {
@@ -108,6 +122,32 @@ describe('the executor context: attempt and memory', () => {
   it('ends the attempt signal once the attempt is over', () => {
     for (const probe of probes) expect(probe.signal.aborted).toBe(true);
   });
+});
+
+describe('the executor context in a serial group', () => {
+  it('names the attempt the group\'s one session runs on the engine, the same for every member', async () => {
+    const app = await startFixtureApp();
+    const seen: string[] = [];
+    const probing: StepExecutor = {
+      name: 'attempt-probe',
+      async runStep(context: StepExecutorContext) {
+        seen.push(context.attempt.attemptId);
+        return { status: 'passed', summary: 'done' };
+      },
+    };
+    const { outcome, project } = await runProject(
+      { 'tests/wizard.e2e.ts': SERIAL_SUITE },
+      { appUrl: app.url, config: { tests: 'tests/**/*.e2e.ts', agents: { default: { executor: probing } } } },
+    );
+    try {
+      expect(outcome.exitCode).toBe(0);
+      // What an engine routes a call by, so `surfaceOf(engine, attemptId)` reads the group's page for each member.
+      expect(seen).toEqual(Array.from({ length: 2 }, () => outcome.report.run.serialGroups[0]!.attempts[0]!.id));
+    } finally {
+      project.cleanup();
+      await app.close();
+    }
+  }, 120_000);
 });
 
 describe('observe() with the tree and pixels', () => {

@@ -240,7 +240,7 @@ export class SuiteAttempt implements SuiteHookSession {
       steps,
       budget,
       runId: host.runId,
-      attempt: { testId: SUITE_HOOKS_DIR, attemptId, titlePath: [], index: 0, signal: attemptEnd.signal, memory: new Map<string, unknown>() },
+      attempt: { testId: SUITE_HOOKS_DIR, attemptId: launched.attemptId, titlePath: [], index: 0, signal: attemptEnd.signal, memory: new Map<string, unknown>() },
       artifacts: artifacts.sink,
       priorSteps: () => [],
       agentContext: undefined,

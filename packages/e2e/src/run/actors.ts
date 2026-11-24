@@ -224,10 +224,8 @@ export class AttemptActors {
     const writes = new Map<number, CacheWrite>();
     for (const { cache, steps } of this.opened.values()) {
       if (cache === undefined) continue;
-      // An actor's cache staged its entries by the indexes of the actor's own record: each is settled by where its step
-      // stands in the test's. A step the test's record never took was confirmed by nothing.
-      cache.staged.push(...cache.staged.splice(0).map((entry) => ({ ...entry, stepIndex: steps.placed(entry.stepIndex) ?? Infinity })));
-      for (const [index, write] of await settleStagedTraces(cache, settlement)) writes.set(index, write);
+      // An actor's cache staged its entries by the indexes of the actor's own record: each settles by where its step stands in the test's.
+      for (const [index, write] of await settleStagedTraces(cache, settlement, steps.placed)) writes.set(index, write);
     }
     return writes;
   }

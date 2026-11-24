@@ -550,7 +550,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
     const attemptEnd = new AbortController();
     const attempt: ExecutorAttempt = {
       testId: pair.test.id,
-      attemptId,
+      attemptId: shared?.attemptId ?? attemptId,
       titlePath: pair.test.titlePath,
       index: attemptIndex,
       signal: attemptEnd.signal,

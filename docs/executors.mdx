@@ -233,10 +233,11 @@ executor keeps its entries.
 
 ## Driving the page yourself
 
-On the web engine, `surfaceOf(handle)` from `@e2e-dev/web` gives you the
-current attempt's `Page` and `BrowserContext`. Both accessors throw
-`INVALID_STATE` outside an active attempt, and `page()` also when no page is
-open.
+On the web engine, `surfaceOf(handle, attemptId)` from `@e2e-dev/web` gives
+you the `Page` and `BrowserContext` of the session the step runs on. Pass
+`ctx.attempt.attemptId`: a test with [actors](/actors) has more than one
+session open. Both accessors throw `INVALID_STATE` outside an active
+attempt, and `page()` also when no page is open.
 
 ```ts
 import type { E2EConfig, StepExecutor } from 'e2e';
@@ -248,7 +249,7 @@ const own: StepExecutor = {
   version: '1',
   cache: 'off',
   async runStep(ctx) {
-    const page = surfaceOf(engine)!.page();   // the page app.open() navigated
+    const page = surfaceOf(engine, ctx.attempt.attemptId)!.page();   // the page app.open() navigated
     await ctx.budgets.runTool({ name: 'click', mutates: true }, () =>
       page.getByRole('button', { name: 'Save' }).click(),
     );

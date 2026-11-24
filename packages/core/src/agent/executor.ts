@@ -67,6 +67,12 @@ export interface ExecutorStep {
  */
 export interface ExecutorAttempt {
   readonly testId: string;
+  /**
+   * The attempt the step's session runs on the engine, as the report names
+   * it: a serial group's tests share the group's. What an engine routes a
+   * call by, so `surfaceOf(engine, attemptId)` of `@e2e-dev/web` reads the
+   * page of the session the step runs on.
+   */
   readonly attemptId: string;
   /**
    * The test's title path, outermost `describe` first, redacted; empty

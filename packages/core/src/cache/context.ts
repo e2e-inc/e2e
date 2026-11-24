@@ -205,41 +205,55 @@ export interface SurvivedFailure {
  * so the same rule evicts it when nothing confirmed it; when something did,
  * it is left exactly as it was found, but for what `completeProvenance`
  * writes in.
+ *
+ * `place` says where a staged step stands in the record `settlement` counts
+ * by, for a context that staged by the indexes of another record (an
+ * actor's, whose steps are told in the test's): the outcomes are keyed by
+ * that place. A step with none there was confirmed by nothing, and has no
+ * outcome to tell.
  */
-export async function settleStagedTraces(context: AgentCacheContext, settlement: AttemptSettlement | undefined): Promise<ReadonlyMap<number, CacheWrite>> {
+export async function settleStagedTraces(
+  context: AgentCacheContext,
+  settlement: AttemptSettlement | undefined,
+  place: (stepIndex: number) => number | undefined = (stepIndex) => stepIndex,
+): Promise<ReadonlyMap<number, CacheWrite>> {
   const outcomes = new Map<number, CacheWrite>();
   const staged = context.staged.splice(0);
   for (const entry of staged) {
+    const at = place(entry.stepIndex);
+    const tell = (write: CacheWrite): void => {
+      if (at !== undefined) outcomes.set(at, write);
+    };
     if (entry.kind === 'decided') {
-      outcomes.set(entry.stepIndex, entry.outcome);
+      tell(entry.outcome);
       continue;
     }
     if (settlement === undefined || context.mode !== 'read-write') continue;
-    const failure = settlement.survived?.find((survived) => entry.stepIndex >= survived.from && entry.stepIndex <= survived.through);
-    const confirmed = failure === undefined && entry.stepIndex < settlement.lastVerifiedStepIndex;
+    const failure = at === undefined ? undefined : settlement.survived?.find((survived) => at >= survived.from && at <= survived.through);
+    const confirmed = at !== undefined && failure === undefined && at < settlement.lastVerifiedStepIndex;
     try {
       if (!confirmed) {
         // A kept entry existed for certain, so deleting it is an eviction; a
         // new recording's delete only clears what an earlier run may have left.
         const deletes = (failure?.implicates ?? settlement.implicatesUnconfirmed) && context.store.delete !== undefined;
         const deleted = deletes && await context.store.delete!(entry.keyHash).then(() => true, () => false);
-        outcomes.set(entry.stepIndex, entry.kind === 'keep' && deleted ? 'evicted' : 'unconfirmed');
+        tell(entry.kind === 'keep' && deleted ? 'evicted' : 'unconfirmed');
         continue;
       }
       if (entry.kind === 'keep') {
-        outcomes.set(entry.stepIndex, 'kept');
+        tell('kept');
         await completeProvenance(context.store, entry.keyHash, entry.recordedFor);
         continue;
       }
       if (await holdsSameFlow(context.store, entry.keyHash, entry.trace)) {
-        outcomes.set(entry.stepIndex, 'kept');
+        tell('kept');
         continue;
       }
       const written = await context.store.write(entry.keyHash, entry.trace);
-      outcomes.set(entry.stepIndex, written === undefined ? 'not-written' : 'saved');
+      tell(written === undefined ? 'not-written' : 'saved');
     } catch {
       // The cache is disposable; a failed flush is a slower next run only.
-      if (entry.kind === 'write' && confirmed) outcomes.set(entry.stepIndex, 'not-written');
+      if (entry.kind === 'write' && confirmed) tell('not-written');
     }
   }
   return outcomes;
