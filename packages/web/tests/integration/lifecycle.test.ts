@@ -861,18 +861,15 @@ describe('web engine lifecycle', () => {
     }
   });
 
-  it('runs a second startAttempt as an attempt of its own, an actor\'s, and keeps the first intact', async () => {
+  it('refuses a second startAttempt under an id that is running, and keeps the first intact', async () => {
     const engine = web();
     await withAttempt(engine, app, artifactsDir, 'e1', async () => {
       await engine.session!.open!(`${app.url}/`, operation('e1'));
-      await engine.startAttempt!(attempt('e2', artifactsDir));
-      try {
-        await engine.session!.open!(`${app.url}/form`, operation('e2'));
-        expect((await engine.observe!(operation('e2'))).location).toBe(`${app.url}/form`);
-        expect((await engine.observe!(operation('e1'))).location).toBe(`${app.url}/`);
-      } finally {
-        await engine.endAttempt!({ ...cleanup(), attemptId: 'e2' });
-      }
+      // Under another id it is an attempt of its own, an actor's: `actors.test.ts` has that.
+      await expect(engine.startAttempt!(attempt('e1', artifactsDir))).rejects.toMatchObject({
+        code: 'INVALID_STATE',
+        retryable: false,
+      });
       expect((await engine.observe!(operation('e1'))).location).toBe(`${app.url}/`);
     });
   });
