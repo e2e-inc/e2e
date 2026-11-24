@@ -506,6 +506,9 @@ function describeNoTests(
       case 'fixme':
         count('marked fixme', pair.test);
         break;
+      case 'todo':
+        count('marked todo', pair.test);
+        break;
       case 'platform-unavailable':
         count(`declare platforms other than ${pair.target.platform}`, pair.test);
         break;
@@ -695,7 +698,10 @@ function classifyPair(
     return {
       ...base,
       disposition: 'skip',
-      skip: { cause: test.mode === 'fixme' ? 'fixme' : 'explicit', reason: options.skipReason },
+      skip: {
+        cause: test.mode === 'fixme' ? 'fixme' : test.mode === 'todo' ? 'todo' : 'explicit',
+        reason: options.skipReason,
+      },
     };
   }
 
