@@ -65,7 +65,8 @@ A device target needs `bundleId`, `appPath`, or both. The engine installs
 nothing on its own. Call `device.installApp()` once per device, in a
 [worker fixture](/fixtures#share-a-fixture-across-a-worker) with
 [`auto: true`](/fixtures#run-a-fixture-for-every-test). With no path, it
-installs `app.appPath`.
+installs `app.appPath`. On a [hosted device](#hosted-devices) that already
+has the build, the call installs nothing.
 Without `bundleId`, `app.open()` launches the app the build installed.
 
 To run the suite in CI, see [Mobile jobs](/ci#mobile-jobs).
@@ -678,6 +679,8 @@ an interrupt `signal`, and a `log` that reaches the reporter.
 - A target with nothing to run leases nothing.
 - Set `installedApp` only when the request has an `appPath`. Otherwise the
   run fails.
+- To install the request's `appPath` through the lease's daemon, return
+  `installLeasedApp(request, lease)` from `@e2e-dev/mobile/lease`.
 
 **`release`** runs after the last worker exits, within `cleanupTimeout`, on
 every exit path: a failure, an interrupt, or a `prepare` that threw. It gets

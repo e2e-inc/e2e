@@ -73,8 +73,7 @@ the target. For Android, `bundleId` is the app's package name.
 
 Without `app`, each device starts with no app, and the device provider uploads
 the target's `app.appPath` to it and installs it there: a zipped iOS
-simulator `.app` or an Android `.apk`. Do not also call `device.installApp()`
-for that build, because that uploads it a second time.
+simulator `.app` or an Android `.apk`.
 
 ```ts title="e2e.config.ts"
 {

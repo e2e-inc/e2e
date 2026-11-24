@@ -243,6 +243,33 @@ describe('device provider', () => {
     expect(h.fake.lastArgs('apps.open')).toMatchObject({ app: 'com.example.app', device: 'sim-0', relaunch: true });
   });
 
+  it("skips device.installApp() for the target's build the provider installed, until it is uninstalled or a reinstall is asked for", async () => {
+    const cloud = provider({ installedApp: 'com.example.app' });
+    const h = harness({ device: cloud.impl, appPath: 'build/App.app' }, false);
+    h.fake.respond('apps.install', () => ({ bundleId: 'com.example.app' }));
+    h.fake.respond('apps.reinstall', () => ({ bundleId: 'com.example.app' }));
+    h.fake.respond('apps.uninstall', () => ({ appId: 'com.example.app', wasInstalled: true }));
+    await h.prepare(prepareInfo({}, 1));
+    await boot(h, 'ios', 0);
+    const signal = new AbortController().signal;
+    const installs = () => h.fake.methods().filter((method) => method === 'apps.install' || method === 'apps.reinstall');
+
+    // The same fixture a local simulator needs uploads nothing here.
+    expect(await h.surface.installApp(undefined, {}, signal)).toEqual({ app: 'com.example.app' });
+    expect(await h.surface.installApp('build/App.app', {}, signal)).toEqual({ app: 'com.example.app' });
+    expect(installs()).toEqual([]);
+
+    // Another build, and a reinstall of this one, still go to the device.
+    await h.surface.installApp('other/Other.app', {}, signal);
+    await h.surface.installApp(undefined, { reinstall: true, app: 'com.example.app' }, signal);
+    expect(installs()).toEqual(['apps.install', 'apps.reinstall']);
+
+    // Once the app is gone, the suite's install puts it back.
+    await h.surface.uninstallApp('com.example.app', signal);
+    await h.surface.installApp(undefined, {}, signal);
+    expect(installs()).toEqual(['apps.install', 'apps.reinstall', 'apps.install']);
+  });
+
   it('rejects a lease that reports an installed app for a request without appPath', async () => {
     const cloud = provider({ installedApp: 'com.example.app' });
     const h = harness({ device: cloud.impl });

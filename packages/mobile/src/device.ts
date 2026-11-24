@@ -132,8 +132,10 @@ export interface Device {
    * against the project root) on the device; without a path, the target's
    * `app.appPath`. The engine installs nothing on its own, so a suite that runs
    * against a build calls this once per device, in a fixture or a test.
-   * `reinstall: true` removes the app first so it starts with no data; a
-   * plain install replaces the binary and keeps its data. Resolves to the
+   * A plain install of the target's build is skipped on a device whose
+   * provider already installed it. `reinstall: true` removes the app first
+   * so it starts with no data; a plain install replaces the binary and
+   * keeps its data. Resolves to the
    * identity to `openApp` it by, which becomes the app `app.open()` launches
    * when the target's build is installed and no `app.bundleId` is pinned.
    */

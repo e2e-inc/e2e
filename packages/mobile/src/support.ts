@@ -237,7 +237,7 @@ export function installedIdentity(result: InstallIdentity, app: string | undefin
   if (opensBy === undefined) {
     throw new EngineError(
       'ENGINE_FAILURE',
-      `installed ${build}, but agent-device reported no bundle id or package for it, so nothing can open it: name the app with the target's \`app.bundleId\` or installApp's \`app\` option`,
+      `installed ${build}, but agent-device reported no bundle id or package for it, so nothing can open it: name the app with the target's \`app.bundleId\``,
       { retryable: false },
     );
   }

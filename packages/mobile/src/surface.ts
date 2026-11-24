@@ -512,6 +512,8 @@ export class AgentDeviceSurface {
   private launching = false;
   /** The app the build `appPath` installed, once `init` has, itself or through a lease. */
   private installedApp: string | undefined;
+  /** The app the device provider installed from the target's `app.appPath`, until an uninstall removes it. */
+  private leaseInstalledApp: string | undefined;
   /** The target's app, as `init` received it. */
   private app: EngineAppInfo = {};
   /** Where relative build paths resolve; the run's project root once init has told us. */
@@ -689,6 +691,7 @@ export class AgentDeviceSurface {
     // from `appPath` says so on the binding, and otherwise the suite installs
     // it where it wants to, with `device.installApp()`.
     this.installedApp = binding?.installedApp;
+    this.leaseInstalledApp = binding?.installedApp;
   }
 
   async startAttempt(context: EngineAttemptContext): Promise<void> {
@@ -863,6 +866,7 @@ export class AgentDeviceSurface {
     this.located.clear();
     this.appIdentity = undefined;
     this.installedApp = undefined;
+    this.leaseInstalledApp = undefined;
     this.knownViewport = undefined;
     let closing: Promise<void> | undefined;
     const close = (): void => {
@@ -1043,6 +1047,8 @@ export class AgentDeviceSurface {
     if (options.reinstall === true && app === undefined) {
       throw invalidState("reinstall needs an app: pass `app`, or pin one with the target's app.bundleId or app.appPath");
     }
+    // The device provider already put this build on the device: the same suite runs on a device that starts without it.
+    if (engineBuild && options.reinstall !== true && this.leaseInstalledApp !== undefined) return { app: this.leaseInstalledApp };
     const result: InstallIdentity = await this.command(
       `install ${resolved}`,
       (client) =>
@@ -1075,6 +1081,7 @@ export class AgentDeviceSurface {
     this.launching = false;
     this.screenReplaced();
     if (target === this.installedApp || removed === this.installedApp) this.installedApp = undefined;
+    if (target === this.leaseInstalledApp || removed === this.leaseInstalledApp) this.leaseInstalledApp = undefined;
     return result['wasInstalled'] === true;
   }
 
