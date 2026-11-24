@@ -20,10 +20,11 @@
  * replace the filesystem without the harness noticing.
  */
 
+import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { access, mkdir, open, readdir, readFile, stat, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
-import { writeFilesAtomic } from '../internal/atomic-write.ts';
+import { basename, join } from 'node:path';
+import { writeFileAtomic, writeFilesAtomic } from '../internal/atomic-write.ts';
 import { errorMessage } from '../internal/errors.ts';
 import { canonicalJson, timestamp } from '../internal/ids.ts';
 import { bound } from '../internal/text.ts';
@@ -316,7 +317,51 @@ export class FileCacheStore implements CacheStore {
   private async locked<T>(base: string, operation: () => Promise<T>, creates = false): Promise<T> {
     if (creates) await mkdir(this.directory, { recursive: true });
     else if (!(await access(this.directory, constants.W_OK).then(() => true, () => false))) return operation();
-    return withFileLock(join(this.directory, `.${base}.writing`), operation);
+    return withFileLock(join(this.directory, `.${base}.writing`), async () => {
+      if (this.writable) await this.recover(base);
+      return operation();
+    });
+  }
+
+  /** Where a writer records the lock it is about to publish, so a crash between its two renames can be finished. */
+  private pendingPath(base: string): string {
+    return join(this.directory, `.${base.replace(COLLISION_SUFFIX, '')}.pending`);
+  }
+
+  /**
+   * Settles a pair a writer was cut off halfway through replacing. The
+   * reviewed file is renamed first and the lock second, so a crash between
+   * the two leaves the new YAML beside the old lock, which reads as an edit
+   * and blocks every later write. The writer records the lock it meant to
+   * publish, with the digest of the YAML, before the first rename: a YAML
+   * that is the new one means the lock is all that is left, so it is
+   * published; any other means no rename happened, the old pair is whole,
+   * and the record is dropped. Runs under the test's lock, before anything
+   * reads the pair.
+   */
+  private async recover(base: string): Promise<void> {
+    const path = this.pendingPath(base);
+    let text: string;
+    try {
+      text = await readFile(path, 'utf8');
+    } catch {
+      return;
+    }
+    try {
+      const pending: unknown = JSON.parse(text);
+      const { name, yamlDigest, lock } = (typeof pending === 'object' && pending !== null ? pending : {}) as Record<string, unknown>;
+      if (typeof name === 'string' && typeof yamlDigest === 'string' && typeof lock === 'string' && basename(name) === name) {
+        const yaml = await this.readCapped(this.path(name, RECORDING_EXTENSION));
+        if (yaml?.text !== undefined && digest(yaml.text) === yamlDigest) {
+          await writeFileAtomic(this.path(name, LOCK_EXTENSION), lock, { mode: 0o600 });
+        }
+      }
+    } catch {
+      // A record that does not parse, or a lock that cannot be put in place, leaves the pair as it is:
+      // the store never guesses at a repair, and a person's fix of the pair is still the way out.
+      return;
+    }
+    await unlink(path).catch(() => undefined);
   }
 
   /** The lock file a pair's writers take: its test's base name's. */
@@ -442,17 +487,32 @@ export class FileCacheStore implements CacheStore {
     // cannot carry as written would replay changed without a word: such a pair is not written.
     if (!(await readsBack(yaml, lock, kept))) return undefined;
     await mkdir(this.directory, { recursive: true });
-    const replaced = await writeFilesAtomic(
-      [
-        { path: this.path(name, RECORDING_EXTENSION), content: yaml },
-        { path: this.path(name, LOCK_EXTENSION), content: lock },
-      ],
-      // Rendered from what was read under the lock: published only while the lock is still this writer's,
-      // checked as late as can be, once the files are written and only the renames are left.
-      { mode: 0o600, beforeReplace: () => holdsFileLock(this.lockPath(name)) },
-    );
-    if (!replaced) return undefined;
-    return { bytes: yamlBytes + lockBytes };
+    const pending = this.pendingPath(name);
+    let recorded = false;
+    try {
+      const replaced = await writeFilesAtomic(
+        [
+          { path: this.path(name, RECORDING_EXTENSION), content: yaml },
+          { path: this.path(name, LOCK_EXTENSION), content: lock },
+        ],
+        {
+          mode: 0o600,
+          // Rendered from what was read under the lock: published only while the lock is still this writer's,
+          // checked as late as can be, once the files are written and only the renames are left. The lock
+          // is recorded then too, for `recover`, which finishes a pair a crash cut between its renames.
+          beforeReplace: async () => {
+            if (!(await holdsFileLock(this.lockPath(name)))) return false;
+            await writeFileAtomic(pending, JSON.stringify({ name, yamlDigest: digest(yaml), lock }), { mode: 0o600 });
+            recorded = true;
+            return true;
+          },
+        },
+      );
+      if (!replaced) return undefined;
+      return { bytes: yamlBytes + lockBytes };
+    } finally {
+      if (recorded) await unlink(pending).catch(() => undefined);
+    }
   }
 
   private async remove(name: string): Promise<void> {
@@ -566,6 +626,11 @@ function replayed(trace: ActionTrace): unknown {
     goneAnchors: trace.goneAnchors,
     truncated: trace.truncated,
   };
+}
+
+/** The digest a pending record names the YAML it was written beside by. */
+function digest(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
 }
 
 /** A pair's readable recordings, the ones a rewrite keeps. */

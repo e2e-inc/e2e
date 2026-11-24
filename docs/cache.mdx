@@ -338,7 +338,8 @@ steps:
 - Review the YAML, but don't edit it. An edited recording reads as
   `invalid-entry`, and the test records nothing until the edit is undone.
   A run rewrites the file when it records, so comments are lost. Moving
-  steps around is fine.
+  steps around is fine. A run killed while it writes leaves the pair for the
+  next run, which finishes or drops that write before it reads.
 - To record a step again, or drop one whose instruction or params changed,
   delete it from the YAML; the next run that records drops its lock entry.
   To drop a test's recordings, delete both files: a YAML without its lock

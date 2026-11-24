@@ -565,6 +565,70 @@ describe('FileCacheStore', () => {
     expect(JSON.parse(await readFile(lockPath(directory), 'utf8')).entries).toHaveLength(1);
   });
 
+  describe('a writer killed between the two renames of a pair', () => {
+    /** Records a second recording in a child process that kills itself as it renames onto a file ending `dies`. */
+    async function killedWriter(directory: string, dies: string): Promise<void> {
+      const script = `
+        import fsp from 'node:fs/promises';
+        import { syncBuiltinESMExports } from 'node:module';
+        const rename = fsp.rename;
+        fsp.rename = (from, to) => {
+          if (String(to).endsWith(${JSON.stringify(dies)})) {
+            process.kill(process.pid, 'SIGKILL');
+            return new Promise(() => undefined);
+          }
+          return rename(from, to);
+        };
+        syncBuiltinESMExports();
+        const { FileCacheStore } = await import('@e2e-dev/core/lib/cache/store');
+        const store = new FileCacheStore({ directory: ${JSON.stringify(directory)}, maxBytes: ${String(MAX_CACHE_WIRE_BYTES)}, writable: true });
+        await store.write(${JSON.stringify(OTHER_KEY)}, ${JSON.stringify(payload('ios'))});
+      `;
+      const signal = await new Promise<NodeJS.Signals | null>((resolve) => {
+        spawn(process.execPath, ['--input-type=module', '-e', script], { cwd: process.cwd(), stdio: 'ignore' }).on('exit', (_code, killedBy) => resolve(killedBy));
+      });
+      expect(signal).toBe('SIGKILL');
+      // The dead writer's lock goes stale like any other.
+      const stale = path.join(directory, `.${NAME}.writing`);
+      const old = new Date(Date.now() - 60_000);
+      await utimes(stale, old, old);
+    }
+
+    it('finishes publishing the new pair when the next run opens it', async () => {
+      const { directory, store } = await makeStore();
+      await store.write(KEY, payload());
+      await killedWriter(directory, '.lock.json');
+      // The new YAML sits beside the old lock: what a reader would take for an edit.
+      expect(await readFile(yamlPath(directory), 'utf8')).toContain('ios:');
+      expect(JSON.parse(await readFile(lockPath(directory), 'utf8')).entries).toHaveLength(1);
+      expect((await store.read(OTHER_KEY, step('ios'))).status).toBe('hit');
+      expect((await store.read(KEY, step())).status).toBe('hit');
+      expect(JSON.parse(await readFile(lockPath(directory), 'utf8')).entries).toHaveLength(2);
+      expect((await readdir(directory)).filter((name) => name.endsWith('.pending'))).toEqual([]);
+    });
+
+    it('keeps the last complete pair when it died before replacing either file', async () => {
+      const { directory, store } = await makeStore();
+      await store.write(KEY, payload());
+      await killedWriter(directory, '.yml');
+      expect((await store.read(KEY, step())).status).toBe('hit');
+      expect((await store.read(OTHER_KEY, step('ios'))).status).toBe('miss');
+      expect(JSON.parse(await readFile(lockPath(directory), 'utf8')).entries).toHaveLength(1);
+      expect((await readdir(directory)).filter((name) => name.endsWith('.pending'))).toEqual([]);
+      expect(await store.write(OTHER_KEY, payload('ios'))).toBeDefined();
+    });
+
+    it('settles nothing when not writable, and reads the pair as it is', async () => {
+      const { directory, store } = await makeStore();
+      await store.write(KEY, payload());
+      await killedWriter(directory, '.lock.json');
+      const reader = new FileCacheStore({ directory, maxBytes: MAX_CACHE_WIRE_BYTES, writable: false });
+      expect((await reader.read(OTHER_KEY, step('ios'))).status).toBe('miss');
+      expect(JSON.parse(await readFile(lockPath(directory), 'utf8')).entries).toHaveLength(1);
+      expect((await readdir(directory)).filter((name) => name.endsWith('.pending'))).toHaveLength(1);
+    });
+  });
+
   it('keeps a recording it cannot read when another is written or evicted beside it', async () => {
     const { directory, store } = await makeStore();
     const second = step('web', { callIndex: 1 });
