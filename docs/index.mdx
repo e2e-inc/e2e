@@ -31,16 +31,18 @@ test('a member upgrades to Pro', async ({ app, agent, screen }) => {
 
 ## A release gate in CI
 
-A suite that gates a release must give the same result on every commit. e2e
-can run that suite with no model call:
+A suite that gates a release must give the same result every time it runs
+on a commit. e2e can run that suite with no model call:
 
 - **Exact tests.** Your [coding agent](/coding-agents) writes tests with
   locators and assertions. They need no model and no key. On the web, they
   run in browsers that the [web engine](/web) drives through Playwright.
-- **Recorded goals.** CI [replays](/cache) a recorded `agent.act` with no
-  model call. With
+- **Recorded goals.** [Commit the recordings](/cache#commit-the-replay-cache)
+  and CI [replays](/cache) a recorded `agent.act` with no model call. With
   [`--strict-cache`](/cache#fail-on-a-stale-recording), a recording that no
-  longer matches the app fails the step, and no model takes over.
+  longer matches the app fails the step, and no model takes over. A step
+  that was never recorded, or whose recording has a gap, still
+  [runs live](/cache#fail-on-a-stale-recording).
 - **Locator checks.** `expect(locator)` calls no model. With the built-in
   agent, `agent.assert`, `agent.waitFor`, and `agent.extract` call the
   model on every run.
