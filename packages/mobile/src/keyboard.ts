@@ -2,7 +2,7 @@
 
 import type { CaptureSnapshotResult } from 'agent-device';
 import type { ViewportSize } from '@e2e-dev/core/engine';
-import { keyboardOnScreen, SCREEN_KINDS, type ProjectedSnapshot } from './nodes.ts';
+import { keyboardOnScreen, SCREEN_KINDS, type ProjectedNode, type ProjectedSnapshot } from './nodes.ts';
 import type { Point, Rect } from './support.ts';
 
 /**
@@ -67,21 +67,27 @@ const GRID_STEPS = 40;
  * `Pressable` with no role is an unnamed leaf like any other. A `Text` with
  * its own `onPress` reads as plain text and is one this misses; a control
  * inside a flattened tree, which shows as one leaf over most of the screen,
- * is the other.
+ * is the other. A covered leaf (`ProjectedNode.covered`) is an obstacle
+ * too, whatever its role, when it is no larger than half the screen: a drag
+ * from it presses the cover. Being covered makes no container an obstacle
+ * (its role still can), since agent-device tests only a node's centre. The
+ * drag starts in a scroll view that is not covered, away from every one that
+ * is, when such a point exists, and else anywhere in a scroll view, covered
+ * or not. A node the keyboard hides still counts: its centre is under the
+ * keyboard, but it can stick out above it.
  * Undefined when no point qualifies: a drag there would press a control or
  * do nothing.
  */
 export function keyboardDragStart(projected: ProjectedSnapshot, viewport: ViewportSize, keyboardTop: number): Point | undefined {
   const controls: Rect[] = [];
   const scrollViews: Rect[] = [];
+  const coveredScrollViews: Rect[] = [];
   const merged = viewport.width * viewport.height * MERGED_SHARE;
   for (const entry of projected.index) {
-    const { rect, role, children, states } = entry.node;
-    if (rect === undefined || states?.hidden === true || SCREEN_KINDS.has(entry.kind)) continue;
-    if (SCROLL_KINDS.has(entry.kind)) scrollViews.push(rect);
-    else if ((role !== undefined && CONTROL_ROLES.has(role)) || (children === undefined && !STATIC_ROLES.has(role ?? '') && rect.width * rect.height <= merged)) {
-      controls.push(grow(rect, CONTROL_CLEARANCE));
-    }
+    const { rect } = entry.node;
+    if (rect === undefined || entry.raw.visibleToUser === false || SCREEN_KINDS.has(entry.kind)) continue;
+    if (SCROLL_KINDS.has(entry.kind)) (entry.covered ? coveredScrollViews : scrollViews).push(rect);
+    else if (isObstacle(entry, rect, merged)) controls.push(grow(rect, CONTROL_CLEARANCE));
   }
   const left = viewport.width * EDGE_SHARE;
   const right = viewport.width * (1 - EDGE_SHARE);
@@ -90,17 +96,35 @@ export function keyboardDragStart(projected: ProjectedSnapshot, viewport: Viewpo
   const centre = { x: viewport.width / 2, y: viewport.height / 2 };
   // The grid is anchored on the centre, so a screen with nothing there starts where a user's thumb would.
   const step = Math.min(viewport.width, viewport.height) / GRID_STEPS;
-  let best: { point: Point; distance: number } | undefined;
-  for (let y = centre.y - Math.floor((centre.y - top) / step) * step; y <= bottom; y += step) {
-    for (let x = centre.x - Math.floor((centre.x - left) / step) * step; x <= right; x += step) {
-      const point = { x, y };
-      if (scrollViews.length > 0 && !scrollViews.some((view) => contains(view, point))) continue;
-      if (controls.some((control) => contains(control, point))) continue;
-      const distance = Math.hypot(x - centre.x, y - centre.y);
-      if (best === undefined || distance < best.distance) best = { point, distance };
+  /** The grid point nearest the centre that `inside` accepts and no control covers. */
+  const nearest = (inside: (point: Point) => boolean): Point | undefined => {
+    let best: { point: Point; distance: number } | undefined;
+    for (let y = centre.y - Math.floor((centre.y - top) / step) * step; y <= bottom; y += step) {
+      for (let x = centre.x - Math.floor((centre.x - left) / step) * step; x <= right; x += step) {
+        const point = { x, y };
+        if (!inside(point) || controls.some((control) => contains(control, point))) continue;
+        const distance = Math.hypot(x - centre.x, y - centre.y);
+        if (best === undefined || distance < best.distance) best = { point, distance };
+      }
     }
-  }
-  return best?.point;
+    return best?.point;
+  };
+  const within = (views: readonly Rect[], point: Point): boolean => views.some((view) => contains(view, point));
+  const views = [...scrollViews, ...coveredScrollViews];
+  const clear = scrollViews.length > 0 ? nearest((point) => within(scrollViews, point) && !within(coveredScrollViews, point)) : undefined;
+  return clear ?? nearest((point) => views.length === 0 || within(views, point));
+}
+
+/**
+ * Whether a drag must not start on a node that does not scroll: it has a
+ * control role, or it is a leaf no larger than `merged` that a touch acts on,
+ * being covered or not plain content. See `keyboardDragStart`.
+ */
+function isObstacle(entry: ProjectedNode, rect: Rect, merged: number): boolean {
+  const { role, children } = entry.node;
+  if (role !== undefined && CONTROL_ROLES.has(role)) return true;
+  if (children !== undefined || rect.width * rect.height > merged) return false;
+  return entry.covered || !STATIC_ROLES.has(role ?? '');
 }
 
 /** A rect grown by `margin` on every side. */

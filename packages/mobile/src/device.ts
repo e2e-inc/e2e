@@ -219,7 +219,10 @@ export interface Device {
    * first and vertical second, stopping as soon as the keyboard is gone. Each
    * drag starts at the point nearest the centre of the screen that no control
    * in the captured accessibility tree covers, inside a scroll view when the
-   * screen has one, to avoid pressing a button or toggling a checkbox. A
+   * screen has one, to avoid pressing a button or toggling a checkbox. It
+   * also keeps off an element agent-device marks covered (one with no
+   * children, no larger than half the screen), where the touch would land on
+   * the cover, and prefers a scroll view that is not covered. A
    * control the tree leaves out, such as pressable text, can still be hit. The
    * simulator's "Speed up your typing" tip goes through its Continue button
    * first. A screen with no clear point above the keyboard, a keyboard reported

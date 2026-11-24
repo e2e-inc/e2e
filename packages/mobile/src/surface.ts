@@ -53,6 +53,7 @@ import {
   isWithin,
   keyboardElementsTop,
   keyboardBand,
+  keyboardUnplaced,
   mayTakeText,
   projectSnapshot,
   ROOT_ID,
@@ -226,6 +227,12 @@ interface NodeBinding {
   readonly originUnknown: boolean;
   /** Whether `fill` and `clear` may type into the node, judged with the children `node` leaves out. */
   readonly takesText: boolean;
+  /**
+   * Whether the platform or the keyboard hides the node (`ProjectedNode.platformHidden`):
+   * the hidden state a fill compares before it types. A cover agent-device
+   * marks in between is its own to refuse.
+   */
+  readonly platformHidden: boolean;
 }
 
 
@@ -1195,7 +1202,7 @@ export class AgentDeviceSurface {
         },
         viewport: raw.viewport,
         refsGeneration: raw.refsGeneration,
-        keyboard: keyboardBand(raw.nodes ?? [], raw.keyboard, raw.viewport),
+        ...this.keyboardPlacement(raw),
       }),
       keyboardVisible: keyboardShowing(raw),
       originUnknown: raw.warnings?.includes(ORIGIN_WARNING) === true,
@@ -1204,6 +1211,15 @@ export class AgentDeviceSurface {
     const read = projected.viewport;
     if (read !== undefined && (this.knownViewport === undefined || sameScreen(read, this.knownViewport))) this.knownViewport = read;
     return projected;
+  }
+
+  /**
+   * Where a capture's soft keyboard is, as `projectSnapshot` reads it: the
+   * band it covers, and whether an Android keyboard may be up with none.
+   */
+  private keyboardPlacement(raw: RawSnapshot): { readonly keyboard: Rect | undefined; readonly keyboardUnplaced: boolean } {
+    const keyboard = keyboardBand(raw.nodes ?? [], raw.keyboard, raw.viewport);
+    return { keyboard, keyboardUnplaced: keyboardUnplaced(raw.keyboard, keyboard, this.options.platform) };
   }
 
   /**
@@ -1360,6 +1376,7 @@ export class AgentDeviceSurface {
       keyboardVisible: snapshot.keyboardVisible,
       originUnknown: snapshot.originUnknown,
       takesText: mayTakeText(entry.node),
+      platformHidden: entry.platformHidden,
       refsGeneration: snapshot.refsGeneration,
     };
   }
@@ -1491,7 +1508,7 @@ export class AgentDeviceSurface {
       entry.node.inputPurpose !== found.node.inputPurpose ||
       entry.node.states?.disabled !== found.node.states?.disabled ||
       entry.node.states?.secure !== found.node.states?.secure ||
-      entry.node.states?.hidden !== found.node.states?.hidden)) {
+      entry.platformHidden !== found.platformHidden)) {
       throw new EngineError('NODE_STALE', `input node ${entry.id} changed before mutation; observe and authorize it again`, { retryable: true });
     }
     if (found === undefined) {
@@ -1815,7 +1832,8 @@ export class AgentDeviceSurface {
     if (reading.shown !== true) return;
     for (const axis of ['horizontal', 'vertical'] as const) {
       const { raw } = reading;
-      const projected = projectSnapshot(raw.nodes ?? [], { mintId: () => 'keyboard', viewport: raw.viewport });
+      // The keyboard is placed as in an observation, so a covered mark counts where it does there.
+      const projected = projectSnapshot(raw.nodes ?? [], { mintId: () => 'keyboard', viewport: raw.viewport, ...this.keyboardPlacement(raw) });
       const viewport = await this.viewportFor(projected, signal, input);
       const top = keyboardTop(raw, viewport);
       if (top === undefined) {
