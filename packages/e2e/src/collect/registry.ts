@@ -301,6 +301,8 @@ class Collector {
     const scope = this.currentGroup;
     const parallel = configuredParallel(options, scope === undefined ? this.fileParallel : scope.parallel, scope?.serial === true);
     if (parallel === undefined) return;
+    // A module the file imports may configure it: that makes it a registrar.
+    captureSource(this.moduleFile);
     if (scope === undefined) this.fileParallel = parallel;
     else scope.parallel = parallel;
   }
@@ -712,9 +714,10 @@ function captureSource(moduleFile: string | undefined): SourceLocation | undefin
     const own = moduleFile !== undefined && (file === moduleFile || realPath(file) === moduleFile);
     if (own) inModule ??= location;
     else if (!NODE_MODULES_SEGMENT.test(file)) outsideModule ??= location;
-    if (!awaited) evaluating = own || NODE_MODULES_SEGMENT.test(file) ? undefined : file;
+    if (!awaited) evaluating = NODE_MODULES_SEGMENT.test(file) ? undefined : file;
   }
-  if (moduleFile !== undefined && evaluating !== undefined) registrarModuleSlot.get(globalThis)?.(evaluating);
+  // A frame of the collected module, awaiting or not, is that module registering through a function it called.
+  if (moduleFile !== undefined && inModule === undefined && evaluating !== undefined) registrarModuleSlot.get(globalThis)?.(evaluating);
   return inModule ?? outsideModule;
 }
 

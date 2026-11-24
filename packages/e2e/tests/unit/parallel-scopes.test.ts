@@ -92,6 +92,22 @@ describe('parallel scopes', () => {
     expect(placed['third']!.ordered).not.toBe(placed['first']!.ordered);
   });
 
+  it('keeps one serial group id in one unit when parallel: false groups around it differ', async () => {
+    const placed = await placements(() => {
+      test.describe('outer', { parallel: false }, () => {
+        test('one', noop);
+        test.describe('steps', { serial: true }, () => test('first', noop));
+      });
+      test.describe('outer', { parallel: false }, () => {
+        test('two', noop);
+        test.describe('steps', { serial: true }, () => test('second', noop));
+      });
+      test.describe('apart', { parallel: false }, () => test('three', noop));
+    });
+    expect(new Set(['one', 'two', 'first', 'second'].map((title) => placed[title]!.ordered)).size).toBe(1);
+    expect(placed['three']!.ordered).not.toBe(placed['one']!.ordered);
+  });
+
   it('marks the tests with a beforeAll or afterAll in a scope around them', async () => {
     const placed = await placements(() => {
       test('plain', noop);

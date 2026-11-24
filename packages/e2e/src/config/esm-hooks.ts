@@ -37,7 +37,8 @@
  * it, evaluates again with each fresh load that reaches it, by taking the
  * importer's `e2e` query. A test file imported again then gets the tests and
  * hooks of the helper it imports again, where one shared instance of the
- * helper would register them for its first importer alone. `require()` has
+ * helper would register them for its first importer alone. The load that
+ * first reached a file keeps the one instance it evaluated. `require()` has
  * no query, so a CommonJS registrar stays one instance.
  *
  * Bun runs none of this: it compiles TypeScript and resolves the project's
@@ -75,6 +76,12 @@ const FRESH_PARAM = 'e2e';
 const importers = new Map<string, Set<string>>();
 /** The registrars and the files that import them, by path; see "Registrars" above. */
 const registrars = new Set<string>();
+/**
+ * The fresh load that first reached each project file, by path. That load
+ * evaluated the file without a query, so it keeps that instance when the
+ * file turns out to be a registrar while the load is still importing.
+ */
+const firstLoads = new Map<string, string>();
 
 /** Makes `file`, and every project file that reaches it by import, a registrar. */
 function addRegistrar(file: string): void {
@@ -98,8 +105,10 @@ function inFreshLoad(parentURL: string | undefined, resolution: Resolution): Res
   if (known === undefined) importers.set(childFile, (known = new Set()));
   known.add(parentFile);
   if (registrars.has(childFile)) addRegistrar(parentFile);
-  const key = parent.searchParams.get(FRESH_PARAM);
-  if (key === null || !registrars.has(childFile) || child.searchParams.has(FRESH_PARAM)) return resolution;
+  const key = parent.searchParams.get(FRESH_PARAM) ?? firstLoads.get(parentFile);
+  if (key === undefined) return resolution;
+  if (!firstLoads.has(childFile)) firstLoads.set(childFile, key);
+  if (!registrars.has(childFile) || firstLoads.get(childFile) === key || child.searchParams.has(FRESH_PARAM)) return resolution;
   child.searchParams.set(FRESH_PARAM, key);
   return { ...resolution, url: child.href };
 }
