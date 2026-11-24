@@ -835,10 +835,10 @@ function applySessionSelection(
     const key = `${pair.target.name}::${pair.test.id}`;
     const sessions = neededSetups.get(key);
     if (sessions === undefined) return pair;
-    // A producer the target cannot run - skipped, or filtered out by its own
-    // platform list - cannot be promoted; a consumer that needs it is a
-    // configuration error, not a silent run elsewhere.
-    if (pair.disposition === 'skip' || pair.skip?.cause === 'platform-unavailable') {
+    // A producer its own platform list filters out of the target cannot be
+    // promoted; a consumer that needs it is a configuration error, not a
+    // silent run elsewhere.
+    if (pair.skip?.cause === 'platform-unavailable') {
       throw new CollectionError(
         `setup test ${pair.test.id} is required by a session consumer but cannot run on target "${pair.target.name}": ${pair.skip?.reason ?? ''}`,
       );
