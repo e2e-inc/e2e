@@ -1194,7 +1194,12 @@ export interface AsyncExpectation {
   toBeExpanded(options?: { timeout?: number }): Promise<void>;
   /** Waits for focused state. */
   toBeFocused(options?: { timeout?: number }): Promise<void>;
-  /** Waits for an empty form control value, or no text on any other node. */
+  /**
+   * Waits for a node the engine reports empty: on the web an input or
+   * textarea with no value, or any other element whose text content trims to
+   * nothing; on a device a text field with no value, or a node with no text
+   * or value in its subtree. Denied on a secure field.
+   */
   toBeEmpty(options?: { timeout?: number }): Promise<void>;
   /** Waits for exact normalized text; a list waits for exactly that many matches, each with its entry's text, in order. */
   toHaveText(expected: TextMatch, options?: TextMatcherOptions): Promise<void>;

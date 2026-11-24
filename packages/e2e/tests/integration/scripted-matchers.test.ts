@@ -220,7 +220,7 @@ const FAILURES: [string, ...string[]][] = [
   ['toContainText fails on absent text', 'expected: text containing "footer"', 'observed: text "Card body"'],
   ['toHaveValue fails on a node without a value', 'expected: value "Dashboard"', 'observed: no value (not a form control)'],
   ['toHaveValue never normalizes the value', 'observed: value "line1\\n\\nline2  "'],
-  ['toBeEmpty fails on a node with text', 'expect.toBeEmpty failed', 'expected: empty', 'observed: text "Dashboard"'],
+  ['toBeEmpty fails on a node with text', 'expect.toBeEmpty failed', 'expected: empty', 'observed: not empty'],
   ['toHaveAttribute fails on an absent attribute', 'expected: attribute "hidden"', 'observed: attribute "hidden" absent'],
   ['toHaveAttribute fails on another value', 'expected: attribute "data-state" "closed"', 'observed: attribute "data-state" "open"'],
   ['toHaveAccessibleName fails on another name', 'expected: accessible name "Done"', 'observed: name "Todos"'],

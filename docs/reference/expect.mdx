@@ -83,7 +83,7 @@ await expect(screen.getByTestId('cart-empty'), 'the cart is empty').toBeVisible(
 | [`toBeSelected`](#tobechecked-tobeselected-and-tobeexpanded) | Waits for selected state |
 | [`toBeExpanded`](#tobechecked-tobeselected-and-tobeexpanded) | Waits for expanded state |
 | [`toBeFocused`](#tobefocused) | Waits for focused state |
-| [`toBeEmpty`](#tobeempty) | Waits for an empty value or no text |
+| [`toBeEmpty`](#tobeempty) | Waits for an empty field or a node with no text |
 | [`toHaveText`](#tohavetext-and-tocontaintext) | Waits for exact normalized text |
 | [`toContainText`](#tohavetext-and-tocontaintext) | Waits for contained normalized text |
 | [`toHaveValue`](#tohavevalue) | Waits for a form control's value |
@@ -223,16 +223,25 @@ await expect(screen.getByLabel('Email')).toBeFocused();
 
 #### `toBeEmpty`
 
-Waits for the one match to be empty: a form control with an empty value, or
-any other node with no text. A value is read as it is, so a field holding a
-space is not empty; text is normalized, so whitespace alone is. An option is
-read by its text. On mobile a node's text is its own label, so a container
-whose children carry the text can read as empty.
+Waits for the one match to be empty.
 
 ```ts
 await expect(screen.getByLabel('Search')).toBeEmpty();
 await expect(screen.getByTestId('cart')).not.toBeEmpty();
 ```
+
+- Empty is the state the engine reports. The web engine follows Playwright:
+  an `input` or `textarea` is empty when its value is `''`, read as it is, so
+  a space is not empty. Any other element is empty when its text content,
+  trimmed, is `''`. Hidden text counts, unlike
+  [`toHaveText`](#tohavetext-and-tocontaintext), so a `select` with options
+  is never empty, and neither is a `<div>` whose only text is hidden.
+- The mobile engine reads a text field by its value, so a label or hint is
+  not content, and any other node by the text and values in its subtree.
+- The desktop engine reports no empty state yet. There, and on an engine
+  release from before this matcher, it fails either way, and the failure
+  message says so.
+- A secure field is `POLICY_DENIED`; see [Secure fields](#secure-fields).
 
 #### `toHaveText` and `toContainText`
 
@@ -1037,7 +1046,12 @@ export interface AsyncExpectation {
   toBeExpanded(options?: { timeout?: number }): Promise<void>;
   /** Waits for focused state. */
   toBeFocused(options?: { timeout?: number }): Promise<void>;
-  /** Waits for an empty form control value, or no text on any other node. */
+  /**
+   * Waits for a node the engine reports empty: on the web an input or
+   * textarea with no value, or any other element whose text content trims to
+   * nothing; on a device a text field with no value, or a node with no text
+   * or value in its subtree. Denied on a secure field.
+   */
   toBeEmpty(options?: { timeout?: number }): Promise<void>;
   /** Waits for exact normalized text; a list waits for exactly that many matches, each with its entry's text, in order. */
   toHaveText(expected: TextMatch, options?: TextMatcherOptions): Promise<void>;

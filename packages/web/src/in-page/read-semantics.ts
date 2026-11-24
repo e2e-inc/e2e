@@ -68,7 +68,8 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * text (`lineTextOf`), a bounded attribute projection, hrefs reduced to
    * origin+path, the root document named by its title, and no value on a
    * checkbox or radio, whose value attribute is an app token its checked
-   * state already says more than. Node mode is the full locator-read surface.
+   * state already says more than. Node mode is the full locator-read surface,
+   * and the only one that reports `empty`, which only `toBeEmpty` reads.
    */
   const projection: {
     attributes: readonly string[] | null;
@@ -78,6 +79,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     lineText: boolean;
     documentRoot: boolean;
     checkableValue: boolean;
+    emptyState: boolean;
   } =
     options.mode.kind === 'tree'
       ? {
@@ -88,6 +90,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
           lineText: true,
           documentRoot: true,
           checkableValue: false,
+          emptyState: false,
         }
       : {
           attributes: null,
@@ -97,6 +100,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
           lineText: false,
           documentRoot: false,
           checkableValue: true,
+          emptyState: true,
         };
 
   /**
@@ -1683,6 +1687,18 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     return null;
   };
 
+  /**
+   * Whether the element holds nothing, as Playwright's `toBeEmpty` reads it:
+   * an input or textarea by its value, as it is, so a space is not empty; any
+   * other element by its text content trimmed, hidden text included. Null on a
+   * secure field, whose value is withheld.
+   */
+  const emptyOf = (el: Element, secure: boolean): boolean | null => {
+    if (secure) return null;
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return el.value === '';
+    return (el.textContent ?? '').trim() === '';
+  };
+
   const describe = (el: Element, style = styleOf(el)): RawNodeData => {
     const tag = el.tagName.toLowerCase();
     const autocomplete = (el.getAttribute('autocomplete') ?? '').toLowerCase();
@@ -1817,6 +1833,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
         hidden: isHidden(el, style),
         secure,
         readonly: readOnlyOf(el, tag, role),
+        empty: projection.emptyState ? emptyOf(el, secure) : null,
       },
       level,
       attributes,

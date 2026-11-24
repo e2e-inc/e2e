@@ -61,7 +61,7 @@ await expect(screen.getByTestId('cart-empty'), 'the cart is empty').toBeVisible(
 | [`toBeSelected`](#tobechecked-tobeselected-and-tobeexpanded) | 等待选中状态 |
 | [`toBeExpanded`](#tobechecked-tobeselected-and-tobeexpanded) | 等待展开状态 |
 | [`toBeFocused`](#tobefocused) | 等待获得焦点 |
-| [`toBeEmpty`](#tobeempty) | 等待值为空或没有文本 |
+| [`toBeEmpty`](#tobeempty) | 等待字段为空，或节点没有文本 |
 | [`toHaveText`](#tohavetext-and-tocontaintext) | 等待规范化后的文本完全匹配 |
 | [`toContainText`](#tohavetext-and-tocontaintext) | 等待规范化后的文本包含指定内容 |
 | [`toHaveValue`](#tohavevalue) | 等待表单控件的值 |
@@ -142,12 +142,17 @@ await expect(screen.getByLabel('Email')).toBeFocused();
 
 #### `toBeEmpty`
 
-等待唯一匹配的元素为空：表单控件的值为空，或其他节点没有文本。值按原样读取，因此只含一个空格的字段不为空；文本会被规范化，因此只有空白时视为空。选项（`option`）按其文本判断。在移动端，节点的文本是它自己的标签，因此文本由子元素承载的容器可能被视为空。
+等待唯一匹配的元素为空。
 
 ```ts
 await expect(screen.getByLabel('Search')).toBeEmpty();
 await expect(screen.getByTestId('cart')).not.toBeEmpty();
 ```
+
+- 是否为空由引擎报告的状态决定。Web 引擎遵循 Playwright 的规则：`input` 或 `textarea` 的值为 `''` 时为空，值按原样读取，因此含空格的字段不为空。其他元素的文本内容去掉首尾空白后为 `''` 时为空。与 [`toHaveText`](#tohavetext-and-tocontaintext) 不同，隐藏文本也算在内，因此带选项的 `select` 从不为空，只含隐藏文本的 `<div>` 也不为空。
+- 移动端引擎按值判断文本字段，因此标签或提示不算内容；其他节点按其子树中的文本和值判断。
+- 桌面引擎目前不报告空状态。在桌面引擎上，以及在早于此匹配器的引擎版本上，无论是否取反都会失败，失败消息会说明原因。
+- 安全字段会触发 `POLICY_DENIED`，参见[安全字段](#secure-fields)。
 
 #### `toHaveText` 和 `toContainText`
 
@@ -731,7 +736,12 @@ export interface AsyncExpectation {
   toBeExpanded(options?: { timeout?: number }): Promise<void>;
   /** Waits for focused state. */
   toBeFocused(options?: { timeout?: number }): Promise<void>;
-  /** Waits for an empty form control value, or no text on any other node. */
+  /**
+   * Waits for a node the engine reports empty: on the web an input or
+   * textarea with no value, or any other element whose text content trims to
+   * nothing; on a device a text field with no value, or a node with no text
+   * or value in its subtree. Denied on a secure field.
+   */
   toBeEmpty(options?: { timeout?: number }): Promise<void>;
   /** Waits for exact normalized text; a list waits for exactly that many matches, each with its entry's text, in order. */
   toHaveText(expected: TextMatch, options?: TextMatcherOptions): Promise<void>;

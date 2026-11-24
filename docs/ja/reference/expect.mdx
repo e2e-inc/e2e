@@ -61,7 +61,7 @@ await expect(screen.getByTestId('cart-empty'), 'the cart is empty').toBeVisible(
 | [`toBeSelected`](#tobechecked-tobeselected-and-tobeexpanded) | 選択されるまで待機 |
 | [`toBeExpanded`](#tobechecked-tobeselected-and-tobeexpanded) | 展開されるまで待機 |
 | [`toBeFocused`](#tobefocused) | フォーカスされるまで待機 |
-| [`toBeEmpty`](#tobeempty) | 値が空、またはテキストがなくなるまで待機 |
+| [`toBeEmpty`](#tobeempty) | フィールドが空、またはノードのテキストがなくなるまで待機 |
 | [`toHaveText`](#tohavetext-and-tocontaintext) | 正規化後のテキストが完全一致するまで待機 |
 | [`toContainText`](#tohavetext-and-tocontaintext) | 正規化後のテキストが含まれるまで待機 |
 | [`toHaveValue`](#tohavevalue) | フォームコントロールが指定の値になるまで待機 |
@@ -142,12 +142,17 @@ await expect(screen.getByLabel('Email')).toBeFocused();
 
 #### `toBeEmpty`
 
-一致した 1 つの要素が空になるまで待ちます。フォームコントロールなら値が空、それ以外のノードならテキストがない状態です。値はそのまま読むため、スペースだけが入ったフィールドは空ではありません。テキストは正規化するため、空白だけなら空です。オプション（`option`）はテキストで判定します。モバイルではノードのテキストはそのノード自身のラベルなので、子要素がテキストを持つコンテナは空と判定されることがあります。
+一致した 1 つの要素が空になるまで待ちます。
 
 ```ts
 await expect(screen.getByLabel('Search')).toBeEmpty();
 await expect(screen.getByTestId('cart')).not.toBeEmpty();
 ```
+
+- 空かどうかはエンジンが報告する状態です。Web エンジンは Playwright と同じ規則で判定します。`input` と `textarea` は値が `''` のとき空です。値はそのまま読むため、スペースが入っていれば空ではありません。それ以外の要素は、テキストコンテンツの前後の空白を除いて `''` のとき空です。[`toHaveText`](#tohavetext-and-tocontaintext) と違い非表示のテキストも数えるため、オプションを持つ `select` や、非表示のテキストだけを持つ `<div>` は空になりません。
+- モバイルエンジンはテキストフィールドを値で判定するため、ラベルやヒントは中身に数えません。それ以外のノードは、サブツリー内のテキストと値で判定します。
+- デスクトップエンジンはまだ空の状態を報告しません。その場合や、このマッチャーより前のエンジンでは、否定してもしなくても失敗し、失敗メッセージにその旨が出ます。
+- 機密フィールドでは `POLICY_DENIED` になります。[機密フィールド](#secure-fields)を参照してください。
 
 #### `toHaveText` と `toContainText`
 
@@ -731,7 +736,12 @@ export interface AsyncExpectation {
   toBeExpanded(options?: { timeout?: number }): Promise<void>;
   /** Waits for focused state. */
   toBeFocused(options?: { timeout?: number }): Promise<void>;
-  /** Waits for an empty form control value, or no text on any other node. */
+  /**
+   * Waits for a node the engine reports empty: on the web an input or
+   * textarea with no value, or any other element whose text content trims to
+   * nothing; on a device a text field with no value, or a node with no text
+   * or value in its subtree. Denied on a secure field.
+   */
   toBeEmpty(options?: { timeout?: number }): Promise<void>;
   /** Waits for exact normalized text; a list waits for exactly that many matches, each with its entry's text, in order. */
   toHaveText(expected: TextMatch, options?: TextMatcherOptions): Promise<void>;

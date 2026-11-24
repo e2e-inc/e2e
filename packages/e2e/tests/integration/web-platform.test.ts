@@ -121,49 +121,25 @@ test('toHaveRole fails on a secure field without its value', async ({ app, scree
   await expect(screen.getByLabel('Secret')).toHaveRole('searchbox', { timeout: 300 });
 });
 
-test('toBeEmpty passes on empty fields and blank text', async ({ app, screen }) => {
+test('toBeEmpty reads an input or textarea by value and anything else by text content', async ({ app, screen }) => {
   await app.open('/empty-matcher');
   await expect(screen.getByTestId('blank-input')).toBeEmpty();
   await expect(screen.getByTestId('blank-textarea')).toBeEmpty();
   await expect(screen.getByTestId('blank-div')).toBeEmpty();
-  await expect(screen.getByTestId('filled-input')).not.toBeEmpty({ timeout: 300 });
-  await expect(screen.getByTestId('space-input')).not.toBeEmpty({ timeout: 300 });
-  await expect(screen.getByTestId('text')).not.toBeEmpty({ timeout: 300 });
+  await expect(screen.getByTestId('blank-editor')).toBeEmpty();
+  for (const testId of [
+    'filled-input', 'space-input', 'text', 'hidden-text', 'combobox', 'listbox', 'textbox', 'aria-textbox', 'select',
+    'submit', 'checkbox',
+  ]) {
+    await expect(screen.getByTestId(testId), testId).not.toBeEmpty();
+  }
+  await screen.getByTestId('blank-input').fill('typed');
+  await expect(screen.getByTestId('blank-input')).not.toBeEmpty();
 });
 
-test('toBeEmpty is not empty on an ARIA combobox with text', async ({ app, screen }) => {
+test('toBeEmpty is denied on a secure field', async ({ app, screen }) => {
   await app.open('/empty-matcher');
-  await expect(screen.getByTestId('combobox')).not.toBeEmpty({ timeout: 300 });
-});
-
-test('toBeEmpty is not empty on an ARIA listbox with options', async ({ app, screen }) => {
-  await app.open('/empty-matcher');
-  await expect(screen.getByTestId('listbox')).not.toBeEmpty({ timeout: 300 });
-});
-
-test('toBeEmpty is not empty on a contenteditable textbox with text', async ({ app, screen }) => {
-  await app.open('/empty-matcher');
-  await expect(screen.getByTestId('textbox')).not.toBeEmpty({ timeout: 300 });
-});
-
-test('toBeEmpty is not empty on a non-editable ARIA textbox with text', async ({ app, screen }) => {
-  await app.open('/empty-matcher');
-  await expect(screen.getByTestId('aria-textbox')).not.toBeEmpty({ timeout: 300 });
-});
-
-test('toBeEmpty is not empty on a native select with options', async ({ app, screen }) => {
-  await app.open('/empty-matcher');
-  await expect(screen.getByTestId('select')).not.toBeEmpty({ timeout: 300 });
-});
-
-test('toBeEmpty is not empty on a submit input with a value', async ({ app, screen }) => {
-  await app.open('/empty-matcher');
-  await expect(screen.getByTestId('submit')).not.toBeEmpty({ timeout: 300 });
-});
-
-test('toBeEmpty is not empty on a checkbox input', async ({ app, screen }) => {
-  await app.open('/empty-matcher');
-  await expect(screen.getByTestId('checkbox')).not.toBeEmpty({ timeout: 300 });
+  await expect(screen.getByLabel('Secret')).not.toBeEmpty();
 });
 
 test('toBeEditable reads readonly, aria-readonly, and the disabled state', async ({ app, screen }) => {
@@ -583,34 +559,11 @@ describe('web platform integration', () => {
     'toHaveURL ignoreCase folds the comparison',
     'string and RegExp URL patterns match what they name',
     'toHaveRole compares the role the tree reads',
-    'toBeEmpty passes on empty fields and blank text',
+    'toBeEmpty reads an input or textarea by value and anything else by text content',
     'toBeEditable reads readonly, aria-readonly, and the disabled state',
   ])('passes %s', (title) => {
     const result = resultByTitle(outcome, title);
     expect(result.status, JSON.stringify(result.attempts[0]?.error)).toBe('passed');
-  });
-
-  it('matches Playwright: toBeEmpty is not empty on a contenteditable textbox with text', () => {
-    const result = resultByTitle(outcome, 'toBeEmpty is not empty on a contenteditable textbox with text');
-    expect(result.status, JSON.stringify(result.attempts[0]?.error)).toBe('passed');
-  });
-
-  // Playwright decides emptiness by tag (input and textarea by value, anything
-  // else by trimmed text). The semantic tree has no tag, so these read empty
-  // here until emptiness is read engine-side; see the review on #1869. Each
-  // asserts today's assertion failure, so a renamed case or a broken fixture
-  // still fails; move a case to the passes list once it matches.
-  it.each([
-    'toBeEmpty is not empty on an ARIA combobox with text',
-    'toBeEmpty is not empty on an ARIA listbox with options',
-    'toBeEmpty is not empty on a non-editable ARIA textbox with text',
-    'toBeEmpty is not empty on a native select with options',
-    'toBeEmpty is not empty on a submit input with a value',
-    'toBeEmpty is not empty on a checkbox input',
-  ])('differs from Playwright: %s', (title) => {
-    const result = resultByTitle(outcome, title);
-    expect(result.status, JSON.stringify(result.attempts[0]?.error)).toBe('failed');
-    expect(result.attempts[0]?.error?.code).toBe('ASSERTION_FAILED');
   });
 
   it('decides absence under an absent frame without waiting out the deadline', () => {
@@ -692,6 +645,13 @@ describe('web platform integration', () => {
     expect(result.attempts[0]!.error?.code).toBe('ASSERTION_FAILED');
     expect(result.attempts[0]!.error?.message).toContain('expected: role "searchbox"\nobserved: role "textbox"');
     expect(JSON.stringify(result)).not.toContain('marker-7c1f');
+  });
+
+  it('denies toBeEmpty on a password field and keeps its value out of the result', () => {
+    const result = resultByTitle(outcome, 'toBeEmpty is denied on a secure field');
+    expect(result.status).toBe('failed');
+    expect(result.attempts[0]!.error?.code).toBe('POLICY_DENIED');
+    expect(JSON.stringify(result)).not.toContain('marker-9d2a');
   });
 
   it('fails toBeEditable on a read-only textarea, naming why', () => {

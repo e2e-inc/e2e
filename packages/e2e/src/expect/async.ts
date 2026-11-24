@@ -485,12 +485,14 @@ class AsyncExpectationImpl implements AsyncExpectation {
       {
         name: 'toBeEmpty',
         readsWithheld: true,
-        predicate: (sample) => sample.node !== null && readContent(sample.node).content === '',
+        evaluableNode: (node) => node.states?.empty !== undefined,
+        predicate: (sample) => sample.node?.states?.empty === true,
         describeExpected: 'empty',
         observed: (sample) => {
           if (sample.node === null) return 'no node';
-          const { field, content } = readContent(sample.node);
-          return `${field} ${JSON.stringify(content)}`;
+          const empty = sample.node.states?.empty;
+          if (empty === undefined) return 'no empty state, which this engine does not report';
+          return empty ? 'empty' : 'not empty';
         },
       },
       options?.timeout,
@@ -656,18 +658,6 @@ function readField(def: TextMatcherDef, node: SemanticNode): string | undefined 
   return isValueControl(node) ? '' : undefined;
 }
 
-/**
- * What `toBeEmpty` reads: a form control's raw value,
- * empty when the platform reports none, and any other node's normalized text,
- * so whitespace alone is empty there. An option carries a value but is not a
- * control the user fills in, so it reads by its text: one with a label and no
- * reported value is not empty.
- */
-function readContent(node: SemanticNode): { field: 'value' | 'text'; content: string } {
-  if (node.role !== 'option' && isValueControl(node)) return { field: 'value', content: node.value ?? '' };
-  return { field: 'text', content: normalizeText(node.text ?? '') };
-}
-
 /** A pattern as a failure message prints it, marking a string compared ignoring case. */
 function describeText(pattern: TextPattern, ignoreCase: boolean | undefined): string {
   const described = describePattern(pattern);
@@ -691,11 +681,12 @@ function editState(node: SemanticNode): 'disabled' | 'read-only' | 'editable' | 
   return readonly ? 'read-only' : 'editable';
 }
 
+/** The node's true states for a state matcher's failure; `empty` is `toBeEmpty`'s alone and says nothing about the others. */
 function observedState(sample: Sample): string {
   if (sample.node === null) return 'no node';
   const states = sample.node.states ?? {};
   const active = Object.entries(states)
-    .filter(([, value]) => value === true)
+    .filter(([key, value]) => value === true && key !== 'empty')
     .map(([key]) => key);
   return active.length === 0 ? 'default states' : `states: ${active.join(', ')}`;
 }
