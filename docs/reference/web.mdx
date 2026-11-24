@@ -1325,18 +1325,21 @@ import { web, surfaceOf } from '@e2e-dev/web';
 
 const engine = web();
 const live = surfaceOf(engine);   // PlaywrightLiveSurface | undefined
-live!.page();                     // the Page of the test's own attempt, never an actor's
+live!.page();                     // the Page of the one open attempt
 live!.context();                  // its BrowserContext
+surfaceOf(engine, ctx.attempt.attemptId);   // in an executor: the attempt the step runs in
 ```
 
 - It returns `undefined` for a handle from another package.
+- With [actors](#actor), several attempts are open at one time. Pass the
+  attempt id to read one of them.
 - Direct Playwright calls are not recorded as steps.
 - After [CDP recovery](#recovering-a-cdp-transport), read the accessors
   again.
 
 | Throws | When |
 | --- | --- |
-| `INVALID_STATE` | An accessor called outside an active attempt. |
+| `INVALID_STATE` | An accessor called outside an active attempt, for an attempt that is not open, or without an id while several attempts are open. |
 
 ## Types
 

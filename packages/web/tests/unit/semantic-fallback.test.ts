@@ -5,6 +5,7 @@ import { EngineError, TestError, type OperationContext } from '@e2e-dev/core/eng
 import { ElementList } from '../../src/element-list.ts';
 import { captureDocument, ROOT_NODE_ID } from '../../src/observation.ts';
 import { PlaywrightSurface } from '../../src/surface.ts';
+import { WorkerBrowser } from '../../src/worker-browser.ts';
 import { BrowserConnection } from '../../src/browser-connection.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
@@ -14,7 +15,7 @@ vi.mock('../../src/observation.ts', async (original) => ({
 }));
 
 const TIMEOUT = new EngineError('OPERATION_TIMEOUT', 'semantic reader timed out', { retryable: false });
-const surfaces = new Set<PlaywrightSurface>();
+const opened = new Set<{ readonly worker: WorkerBrowser; readonly surface: PlaywrightSurface }>();
 const operation = (signal = new AbortController().signal): OperationContext => ({
   signal, timeoutMs: 1_000, runId: 'run', attemptId: 'attempt', origin: 'agent',
 });
@@ -54,10 +55,11 @@ async function setup() {
     }),
   } as unknown as Browser;
   vi.spyOn(BrowserConnection.prototype, 'acquire').mockResolvedValue(browser);
-  const surface = new PlaywrightSurface({});
-  surfaces.add(surface);
+  const worker = new WorkerBrowser({});
+  const surface = new PlaywrightSurface({}, worker);
+  opened.add({ worker, surface });
   const signal = new AbortController().signal;
-  await surface.init({
+  await worker.init({
     runId: 'run', targetName: 'fixture', projectRoot: process.cwd(), app: {}, env: {},
     headed: false, workerSlot: 0, signal, log: () => undefined,
   });
@@ -69,8 +71,11 @@ async function setup() {
 
 afterEach(async () => {
   vi.useRealTimers();
-  await Promise.all([...surfaces].map((surface) => surface.dispose({ signal: new AbortController().signal, timeoutMs: 1_000 })));
-  surfaces.clear();
+  await Promise.all([...opened].map(async ({ worker, surface }) => {
+    await surface.endAttempt({ signal: new AbortController().signal, timeoutMs: 1_000 });
+    await worker.dispose({ signal: new AbortController().signal, timeoutMs: 1_000 });
+  }));
+  opened.clear();
   vi.restoreAllMocks();
 });
 

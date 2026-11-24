@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import type { OperationContext } from '@e2e-dev/core/engine';
 import { TestError } from '@e2e-dev/core/engine';
 import { PlaywrightSurface } from '../../src/surface.ts';
+import { WorkerBrowser } from '../../src/worker-browser.ts';
 
 function operation(signal = new AbortController().signal): OperationContext {
   return { signal, timeoutMs: 1_000, runId: 'run', attemptId: 'a1', origin: 'test' };
@@ -15,7 +16,7 @@ function operation(signal = new AbortController().signal): OperationContext {
 
 describe('PlaywrightSurface.guard', () => {
   it('rethrows a latched error once, with its own classification, before running anything', async () => {
-    const surface = new PlaywrightSurface({});
+    const surface = new PlaywrightSurface({}, new WorkerBrowser({}));
     const violation = new TestError('ACTION_FAILED', 'route handler returned without deciding');
     surface.latch.latch(violation);
     let ran = 0;
@@ -30,7 +31,7 @@ describe('PlaywrightSurface.guard', () => {
   });
 
   it('fails an operation with the error a handler latched while it ran, which caused it', async () => {
-    const surface = new PlaywrightSurface({});
+    const surface = new PlaywrightSurface({}, new WorkerBrowser({}));
     const refused = new TestError('INVALID_ARGUMENT', 'route.fulfill has an invalid header name: "bad name"');
     const step = surface.guard(operation(), 'navigation', async () => {
       surface.latch.latch(refused);
@@ -41,7 +42,7 @@ describe('PlaywrightSurface.guard', () => {
   });
 
   it('refuses an already-cancelled operation as CANCELLED', async () => {
-    const surface = new PlaywrightSurface({});
+    const surface = new PlaywrightSurface({}, new WorkerBrowser({}));
     const controller = new AbortController();
     controller.abort();
     await expect(surface.guard(operation(controller.signal), 'step', async () => 1)).rejects.toMatchObject({
@@ -51,7 +52,7 @@ describe('PlaywrightSurface.guard', () => {
   });
 
   it('stops waiting on a call once the operation aborts mid-flight', async () => {
-    const surface = new PlaywrightSurface({});
+    const surface = new PlaywrightSurface({}, new WorkerBrowser({}));
     const controller = new AbortController();
     const pending = surface.guard(
       operation(controller.signal),

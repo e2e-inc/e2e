@@ -5,17 +5,20 @@ import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { EngineFixtureContext } from '@e2e-dev/core/engine';
 import { PlaywrightSurface } from '../../src/surface.ts';
+import { WorkerBrowser } from '../../src/worker-browser.ts';
 import { createBrowserFixture, type Browser } from '../../src/browser.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 describe('held keyboard input', () => {
-  const surface = new PlaywrightSurface({});
+  const worker = new WorkerBrowser({});
+  let surface: PlaywrightSurface;
   const projectRoot = mkdtempSync(path.join(tmpdir(), 'e2e-held-keys-'));
   const signal = new AbortController().signal;
   let browser: Browser;
   beforeAll(async () => {
-    await surface.init({ runId: 'held', targetName: 'web', projectRoot, app: {}, env: {}, headed: false, workerSlot: 0, signal, log: () => undefined });
+    await worker.init({ runId: 'held', targetName: 'web', projectRoot, app: {}, env: {}, headed: false, workerSlot: 0, signal, log: () => undefined });
   });
   beforeEach(async () => {
+    surface = new PlaywrightSurface({}, worker);
     await surface.startAttempt({ attemptId: 'held', artifactsDir: projectRoot, signal, resolveSecret: noSecrets, ...ignoreTrace });
     const page = await surface.ensurePage();
     await page.setContent('<h1 id="events"></h1>');
@@ -36,7 +39,7 @@ describe('held keyboard input', () => {
   });
   afterEach(async () => { await surface.endAttempt({ signal, timeoutMs: 5000 }); });
   afterAll(async () => {
-    await surface.dispose({ signal, timeoutMs: 5000 });
+    await worker.dispose({ signal, timeoutMs: 5000 });
     rmSync(projectRoot, { recursive: true, force: true });
   });
   it('keeps a modifier held across another key and releases it for later input', async () => {

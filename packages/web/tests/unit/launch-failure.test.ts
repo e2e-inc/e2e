@@ -1,7 +1,8 @@
-/** What the surface reports when the browser does not come up: the missing system libraries on a launch, and the failure's own reason. */
+/** What the worker's browser reports when the browser does not come up: the missing system libraries on a launch, and the failure's own reason. */
 import { EngineError } from '@e2e-dev/core/engine';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { PlaywrightSurface, type WebOptions } from '../../src/surface.ts';
+import type { WebOptions } from '../../src/surface.ts';
+import { WorkerBrowser } from '../../src/worker-browser.ts';
 
 const acquire = vi.hoisted(() => vi.fn());
 const missingBrowserLibraries = vi.hoisted(() => vi.fn());
@@ -19,13 +20,13 @@ vi.mock('../../src/install.ts', async (importOriginal) => ({
 
 const LAUNCH_ERROR = 'browserType.launch: Cannot launch Firefox with relative home directory. Did you set HOME to a relative path?\nCall log:\n  - <launching> firefox';
 
-let surfaces: PlaywrightSurface[] = [];
+let workers: WorkerBrowser[] = [];
 
 /** The error `init` rejects with when the browser never comes up. */
 async function initFailure(options: WebOptions, signal: AbortSignal = new AbortController().signal, headed = false): Promise<EngineError> {
-  const surface = new PlaywrightSurface(options);
-  surfaces.push(surface);
-  const failure: unknown = await surface
+  const worker = new WorkerBrowser(options);
+  workers.push(worker);
+  const failure: unknown = await worker
     .init({ runId: 'run', targetName: 'web', projectRoot: process.cwd(), app: {}, env: {}, headed, workerSlot: 0, signal, log: () => undefined })
     .then(
       () => undefined,
@@ -43,8 +44,8 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  for (const surface of surfaces) await surface.dispose({ timeoutMs: 1_000, signal: new AbortController().signal });
-  surfaces = [];
+  for (const worker of workers) await worker.dispose({ timeoutMs: 1_000, signal: new AbortController().signal });
+  workers = [];
 });
 
 it('names the missing libraries and the install that adds them, then the reason the launch gave', async () => {

@@ -1,33 +1,25 @@
 /**
- * The Playwright surface: one browser per worker, one browser context per
- * attempt, and the page every engine member delegates to. This is the closure
- * state behind `web()`; the engine hooks in `engine.ts` and the `browser`
- * fixture in `browser.ts` are thin delegates onto it. Action dispatch lives in
- * `actions.ts` and tree capture in `observation.ts`. `AttemptSession` owns
- * the attempt's live binding, recovery, references, and recordings.
+ * The Playwright surface of one attempt: its browser context on the worker's
+ * browser (`worker-browser.ts`), and the page every engine member delegates
+ * to. `web()` opens one per attempt; the engine hooks in `engine.ts` and the
+ * `browser` fixture in `browser.ts` are thin delegates onto it. Action
+ * dispatch lives in `actions.ts` and tree capture in `observation.ts`.
+ * `AttemptSession` owns the attempt's live binding, recovery, references,
+ * and recordings.
  */
 
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import type { Browser, BrowserContext, ElementHandle, Frame, FrameLocator, Locator, Page, Request, Route } from 'playwright-core';
+import type { BrowserContext, ElementHandle, Frame, FrameLocator, Locator, Page, Request, Route } from 'playwright-core';
 import {
-  ConfigurationError,
   Deadline,
   EngineError,
   obj,
   raceAbort,
   TestError,
-  withinCleanupBudget,
-  type EngineAppInfo,
   type EngineAttemptContext,
   type EngineCleanupContext,
-  type EngineDoctorCheck,
-  type EngineDoctorInfo,
-  type EngineInitInfo,
   type EngineObserveOptions,
-  type EnginePrepareInfo,
-  type EnginePrepareResult,
-  type EngineFinishInfo,
   type EngineSnapshot,
   type EngineState,
   type LocatorAction,
@@ -47,16 +39,13 @@ import {
 } from '@e2e-dev/core/engine';
 import { matchesText } from '@e2e-dev/core/engine';
 import { classifyActionError, classifyInputError, dispatchLocatorAction, dispatchPointerAction } from './actions.ts';
-import { BrowserConnection, connectCdp, defaultChromiumSandbox, type BrowserLaunchOptions, type BrowserName } from './browser-connection.ts';
+import type { BrowserName } from './browser-connection.ts';
 import { AttemptSession, type AttemptTab, type StorageState } from './attempt-session.ts';
 import type { CdpEndpointResolver } from './cdp-recovery.ts';
-import { webmcpLaunch } from './webmcp.ts';
-import { LeasedBrowsers, type BrowserProvider, type LeaseDownloads } from './provider.ts';
+import type { BrowserProvider, LeaseDownloads } from './provider.ts';
 import { installAppLog } from './app-log.ts';
 import { TraceFeed } from './trace-feed.ts';
 import { DialogRouter } from './dialogs.ts';
-import { missingLibrariesMessage } from './host-libraries.ts';
-import { browserCheck, ensureBrowsersInstalled, missingBrowserLibraries } from './install.ts';
 import { applyPostSteps, frameSelectors, projectExpression } from './locators.ts';
 import { contentBox, frameContentInset, placeBoxInFrame, ROOT_NODE_ID, toSemanticNode } from './observation.ts';
 import { captureObservation } from './observation-capture.ts';
@@ -66,12 +55,13 @@ import { withHiddenCaret } from './screenshot-caret.ts';
 import { connectionAbort, withOperationDeadline, type OperationBound } from './operation-budget.ts';
 import { CLOSED_SHADOW_ROOTS_INIT_SCRIPT, CLOSED_SHADOW_ROOTS_KEY } from './closed-shadow.ts';
 import { MODAL_ORDER_INIT_SCRIPT } from './modal-dialogs.ts';
-import { ConfiguredInitScripts, type WebInitScript } from './init-scripts.ts';
+import type { WebInitScript } from './init-scripts.ts';
 import type { WebMedia } from './media.ts';
 import { SECURE_FIELD_SELECTOR, type RawNodeData } from './read-node.ts';
 import { readSelector, takeReadsFunction } from './read-selector.ts';
-import { credentialOrigins, httpCredentials, installConfiguredHeaders, lowercaseNames, configuredHeadersFor } from './protected-app.ts';
+import { httpCredentials, installConfiguredHeaders, lowercaseNames, configuredHeadersFor } from './protected-app.ts';
 import { RefRegistry } from './refs.ts';
+import type { WorkerBrowser } from './worker-browser.ts';
 import {
   cancelled,
   DEFAULT_VIEWPORT,
@@ -89,9 +79,6 @@ import {
   staleOr,
   translatePwError,
 } from './support.ts';
-
-/** Browser launch budget when the harness init budget is not otherwise expressed. */
-const BROWSER_LAUNCH_TIMEOUT_MS = 60_000;
 
 const STATE_FORMAT = 'playwright-storage-state';
 
@@ -325,27 +312,12 @@ export class PlaywrightSurface {
   latch = new ErrorLatch();
   dialogs = new DialogRouter(this.latch);
 
-  private readonly browserName: BrowserName;
-  /** The worker's browser, which the surface of each actor shares; see `fork`. */
-  private readonly connection: BrowserConnection;
-  /** Whether this surface is an actor's, on a browser another surface owns. */
-  private readonly forked: boolean;
-  private readonly chromiumSandbox: boolean;
-  /** What the options add to the launch of the browser the engine launches. */
-  private readonly launch: BrowserLaunchOptions;
-  private readonly connect: WebConnectOptions | undefined;
-  /** The provider's browsers, when `browser` names one; the runner and worker halves of the lease bookkeeping. */
-  private readonly leases: LeasedBrowsers | undefined;
   private session: AttemptSession | undefined;
-  private readonly usedContexts = new Set<string>();
   private readonly viewport: ViewportSize | null;
   private readonly deviceScaleFactor: number | undefined;
   private readonly screencast: WebScreencastOptions;
   /** Injected request headers, names lowercased so they replace the browser's own of the same name. */
   private readonly headers: Readonly<Record<string, string>> | undefined;
-  private readonly credentialOrigins: readonly string[] | undefined;
-  /** Where `headers` and `basicAuth` go: the app's origin and each of `credentialOrigins`, set at `init`. */
-  private credentialScope: ReadonlySet<string> = new Set();
   private readonly basicAuth: WebBasicAuth | undefined;
   private readonly testIdAttribute: string;
   private readonly userAgent: string | undefined;
@@ -353,12 +325,8 @@ export class PlaywrightSurface {
   private readonly timezoneId: string | undefined;
   /** The configured media features, which every attempt starts from. */
   private readonly media: WebMedia;
-  private readonly configuredInitScripts: ConfiguredInitScripts;
   /** The attempt's init scripts, configured then added, applied to each context the attempt opens. */
   private initScripts: string[] = [];
-  private app: EngineAppInfo = {};
-  private projectRoot = '';
-  private headed = false;
   private artifactsDir = '';
   /** Navigations the engine has in flight, which the app log leaves to the step that started them. */
   private ownNavigations = 0;
@@ -375,206 +343,20 @@ export class PlaywrightSurface {
    */
   private routes: StoredRoute[] = [];
 
-  constructor(private readonly options: WebOptions, owner?: PlaywrightSurface) {
-    this.browserName = typeof options.browser === 'string' ? options.browser : 'chromium';
-    this.chromiumSandbox = options.chromiumSandbox ?? defaultChromiumSandbox();
-    this.forked = owner !== undefined;
-    this.connection = owner?.connection ?? new BrowserConnection();
-    this.leases = owner !== undefined ? owner.leases : typeof options.browser === 'object' && options.browser !== null ? new LeasedBrowsers(options.browser) : undefined;
-    this.connect = options.connect;
-    this.launch = options.webmcp === true ? webmcpLaunch(this.browserName) : {};
+  constructor(options: WebOptions, private readonly worker: WorkerBrowser) {
     this.viewport = options.viewport === undefined ? DEFAULT_VIEWPORT : options.viewport;
     this.deviceScaleFactor = options.deviceScaleFactor;
     this.screencast = options.screencast ?? {};
     this.headers = options.headers === undefined ? undefined : lowercaseNames(options.headers);
-    this.credentialOrigins = options.credentialOrigins;
     this.basicAuth = options.basicAuth;
     this.testIdAttribute = options.testIdAttribute ?? DEFAULT_TEST_ID_ATTRIBUTE;
     this.userAgent = options.userAgent;
     this.locale = options.locale;
     this.timezoneId = options.timezoneId;
     this.media = obj({ colorScheme: options.colorScheme, reducedMotion: options.reducedMotion });
-    this.configuredInitScripts = owner?.configuredInitScripts ?? new ConfiguredInitScripts(options.initScripts ?? []);
-    if (owner !== undefined) {
-      this.app = owner.app;
-      this.credentialScope = owner.credentialScope;
-      this.projectRoot = owner.projectRoot;
-      this.headed = owner.headed;
-    }
-  }
-
-  /**
-   * A surface for one more attempt on this worker's browser while this one's
-   * runs: an actor's. It shares the browser, the provider's lease, and what
-   * `init` learned, and owns everything an attempt owns: its context, pages,
-   * routes, dialogs, and video. Ending its attempt is all that releases it.
-   */
-  fork(): PlaywrightSurface {
-    return new PlaywrightSurface(this.options, this);
   }
 
   // --- lifecycle ---
-
-  /**
-   * Installs the browser on first run, once per run before any worker, or
-   * leases the run's browsers from a provider. A CDP attach uses the
-   * remote's browser, so only a local launch needs the browser here. The
-   * download narrates through `info.log` and is bounded by the run's
-   * interrupt alone, never by a launch budget. Init scripts are read first
-   * so a missing file fails the run before any worker starts.
-   */
-  async prepare(info: EnginePrepareInfo): Promise<EnginePrepareResult | void> {
-    await this.configuredInitScripts.load(info.projectRoot);
-    if (this.leases !== undefined) return this.leases.prepare(info);
-    if (this.connect !== undefined) return;
-    await ensureBrowsersInstalled([this.browserName], { env: info.env, signal: info.signal, log: info.log, headed: info.headed });
-  }
-
-  /**
-   * The checks of `e2e doctor`: the init scripts `prepare` reads, and the
-   * browser, which only a local launch needs on this machine.
-   */
-  async doctor(info: EngineDoctorInfo): Promise<readonly EngineDoctorCheck[]> {
-    const scripts = await this.configuredInitScripts.doctor(info.projectRoot);
-    if (this.leases !== undefined) return [...scripts, { id: 'browser', status: 'skip', message: `browsers come from the "${this.leases.name}" provider` }];
-    if (this.connect !== undefined) return [...scripts, { id: 'browser', status: 'skip', message: 'the browser is attached over CDP' }];
-    return [...scripts, ...(await browserCheck(this.browserName, info.env, info.headed))];
-  }
-
-  /** Releases the browsers `prepare` leased; a local launch or a `connect` has nothing to release. */
-  async finish(info: EngineFinishInfo): Promise<void> {
-    await this.leases?.finish(info);
-  }
-
-  /** Provisions the shared browser once per worker: a local launch, or a CDP attach. */
-  async init(info: EngineInitInfo): Promise<void> {
-    // A runner older than the peer floor passes no origin; fail rather than send the credentials nowhere.
-    if (info.app.origin === undefined && (this.headers !== undefined || this.basicAuth !== undefined)) {
-      throw new ConfigurationError('INVALID_CONFIG', 'web({ headers, basicAuth }) needs an e2e runner that tells the engine the app\'s origin; update e2e to the release beside this @e2e-dev/web');
-    }
-    this.app = info.app;
-    this.credentialScope = credentialOrigins(info.app.origin, this.credentialOrigins);
-    this.projectRoot = info.projectRoot;
-    this.headed = info.headed;
-    this.leases?.init(info);
-    // The browser was installed in `prepare`; a launch or attach is the one
-    // boot step left that can outlive a launch budget, and it honours the
-    // init signal. A failed init-script read throws only after the launch
-    // settles, so `dispose` owns the browser.
-    const settled = await Promise.allSettled([
-      this.configuredInitScripts.load(info.projectRoot),
-      this.persistent ? undefined : this.acquireBrowser(info.signal),
-    ]);
-    for (const outcome of settled) if (outcome.status === 'rejected') throw outcome.reason;
-  }
-
-  /** Whether attempts ride a persistent remote context, provisioned per attempt, instead of contexts on one shared browser. */
-  private get persistent(): boolean {
-    return this.connect?.reconnectEndpoint !== undefined || this.leases?.scope === 'attempt';
-  }
-
-  /**
-   * Provisions the shared browser through the shared connection — a launch, or a CDP attach
-   * via the connector — bounded by `signal`. Checked before the endpoint is
-   * resolved: a cancelled caller must never provision a remote session it will
-   * not use.
-   */
-  private async acquireBrowser(signal: AbortSignal): Promise<Browser> {
-    const verb = this.connect === undefined && this.leases === undefined ? 'launch' : 'connect';
-    if (signal.aborted) throw cancelled(`browser ${verb} cancelled`);
-    try {
-      return await raceAbort(
-        this.connection.acquire({
-          name: this.browserName,
-          headed: this.headed,
-          timeoutMs: BROWSER_LAUNCH_TIMEOUT_MS,
-          chromiumSandbox: this.chromiumSandbox,
-          launch: this.launch,
-          connect: this.connector(signal),
-        }),
-        signal,
-        `browser ${verb}`,
-      );
-    } catch (cause) {
-      if (cause instanceof EngineError) throw cause;
-      // The probe is the one await after the launch settled, so it stops with the init signal too.
-      const missing = verb === 'launch' ? await missingBrowserLibraries(this.browserName, process.env, this.headed, { signal }) : [];
-      // The launch's own reason follows the advice: it can name a second fault the libraries do not explain.
-      const reason = missing.length > 0 ? `${missingLibrariesMessage(this.browserName, missing)}\nlaunch error: ${message(cause)}` : message(cause);
-      throw new EngineError('ENGINE_FAILURE', `browser ${verb} failed: ${reason}`, {
-        retryable: false,
-        cause,
-      });
-    }
-  }
-
-  /**
-   * Builds the connection's connector when attaching over CDP; undefined for a local
-   * launch. The connector honours `signal` at every await: the resolver
-   * receives it, the endpoint is not used once aborted, and a browser that
-   * connects after cancellation is detached at once rather than cached — the
-   * host's session is never held by an init or attempt that already gave up.
-   */
-  private connector(signal: AbortSignal): (() => Promise<Browser>) | undefined {
-    const source = this.endpointSource();
-    if (source === undefined) return undefined;
-    return async () => {
-      const resolved = await source.resolve(signal);
-      const target = typeof resolved === 'string' ? { endpoint: resolved } : resolved;
-      if (signal.aborted) throw cancelled('browser connect cancelled');
-      if (typeof target?.endpoint !== 'string' || target.endpoint.trim() === '') {
-        throw new EngineError('ENGINE_FAILURE', `${source.name} resolved to an empty CDP endpoint`, {
-          retryable: false,
-        });
-      }
-      const browser = await connectCdp(target, BROWSER_LAUNCH_TIMEOUT_MS);
-      if (signal.aborted) {
-        await browser.close().catch(() => undefined);
-        throw cancelled('browser connect cancelled');
-      }
-      return browser;
-    };
-  }
-
-  /**
-   * Where the shared browser's CDP endpoint comes from: the `connect`
-   * resolver, or the lease the worker holds from a provider; undefined for a
-   * local launch.
-   */
-  private endpointSource(): { readonly name: string; readonly resolve: CdpEndpointResolver } | undefined {
-    if (this.connect !== undefined) return { name: 'connect.cdpEndpoint', resolve: this.connect.cdpEndpoint };
-    if (this.leases === undefined) return undefined;
-    return { name: 'the browser provider', resolve: (signal) => this.leaseEndpoint(signal) };
-  }
-
-  /** The endpoint of the lease the worker holds; only reached with a provider. */
-  private leaseEndpoint(signal: AbortSignal): ReturnType<LeasedBrowsers['endpoint']> {
-    if (this.leases === undefined) throw invalidState('no browser provider is configured');
-    return this.leases.endpoint(signal);
-  }
-
-  /**
-   * The persistent remote context this attempt rides, when it does: the
-   * `connect` resolvers, or a browser leased for this attempt alone, which
-   * reconnects through the lease's own endpoint and is fresh by the
-   * provider's contract, so no earlier attempt's context is checked against
-   * it. Undefined for isolated contexts on the shared browser.
-   */
-  private async persistentBinding(
-    context: EngineAttemptContext,
-  ): Promise<{ provision: CdpEndpointResolver; reconnect: CdpEndpointResolver; usedContexts?: Set<string> } | undefined> {
-    const { connect, usedContexts } = this;
-    if (connect?.reconnectEndpoint !== undefined) {
-      return { provision: connect.cdpEndpoint, reconnect: connect.reconnectEndpoint, usedContexts };
-    }
-    if (this.leases?.scope !== 'attempt') return undefined;
-    const leases = this.leases;
-    const lease = await leases.startAttempt(context);
-    return {
-      provision: (signal) => leases.cdpTarget(lease, signal),
-      reconnect: (signal) => leases.cdpTarget(lease, signal, lease.reconnectEndpoint ?? lease.cdpEndpoint),
-    };
-  }
 
   /** Opens one attempt owner before setup starts, so cleanup can cancel pending attachment. */
   async startAttempt(context: EngineAttemptContext): Promise<void> {
@@ -586,18 +368,18 @@ export class PlaywrightSurface {
       basicAuth === undefined
         ? undefined
         : await raceAbort(
-            () => httpCredentials(basicAuth, this.credentialScope, this.browserName, context.resolveSecret),
+            () => httpCredentials(basicAuth, this.worker.credentialScope, this.worker.browserName, context.resolveSecret),
             context.signal,
             'resolving the basic-auth password',
           );
-    const persistent = await this.persistentBinding(context);
+    const persistent = await this.worker.persistentBinding(context);
     this.artifactsDir = context.artifactsDir;
     this.artifactCounter = 0;
-    this.trace = new TraceFeed(context, () => this.openPage(), () => this.session?.refs, { testIdAttribute: this.testIdAttribute, site: this.app.site });
+    this.trace = new TraceFeed(context, () => this.openPage(), () => this.session?.refs, { testIdAttribute: this.testIdAttribute, site: this.worker.app.site });
     const routes: StoredRoute[] = [];
-    const initScripts = this.configuredInitScripts.forAttempt();
+    const initScripts = this.worker.configuredInitScripts.forAttempt();
     // `validateApp` admitted only grants.
-    const granted = Object.keys(this.app.permissions ?? {});
+    const granted = Object.keys(this.worker.app.permissions ?? {});
     this.latch = new ErrorLatch();
     const dialogs = new DialogRouter(this.latch);
     this.routes = routes;
@@ -608,7 +390,7 @@ export class PlaywrightSurface {
       viewport: this.viewport,
       screencast: this.screencast,
       media: this.media,
-      acquire: (signal) => this.acquireBrowser(signal),
+      acquire: (signal) => this.worker.acquireBrowser(signal),
       contextOptions: {
         viewport: this.viewport,
         ...(this.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: this.deviceScaleFactor }),
@@ -632,13 +414,12 @@ export class PlaywrightSurface {
           ownNavigation: () => this.ownNavigations > 0,
           testPage: () => this.openPage(),
         });
-        await installConfiguredHeaders(target, this.credentialScope, this.headers);
+        await installConfiguredHeaders(target, this.worker.credentialScope, this.headers);
         if (granted.length > 0) await target.grantPermissions(granted);
         for (const stored of routes) await target.route(stored.predicate, stored.handler);
       },
       ...(persistent === undefined ? {} : { persistent }),
-      // A provider records a browser, which the worker's own attempt already does: an actor on it records its pages itself.
-      record: this.forked ? undefined : this.leases?.recorder(context.attemptId),
+      record: this.worker.leases?.recorder(context.attemptId),
     });
     this.session = session;
     await session.start(context.signal);
@@ -665,33 +446,8 @@ export class PlaywrightSurface {
     try {
       if (session !== undefined) await session.close(context);
     } finally {
-      // An attempt's lease is the owning surface's; an actor's surface holds none.
-      if (!this.forked) await this.leases?.endAttempt(context);
+      await this.worker.leases?.endAttempt(context);
     }
-  }
-
-  /**
-   * Releases attempt resources, the worker's shared browser process, and a
-   * lease the worker acquired for itself: three independent tasks, in that
-   * order, every one attempted whatever the earlier ones did, and the first
-   * failure reported once all ran. A billed browser outlives a failed
-   * recording flush otherwise.
-   */
-  async dispose(context: EngineCleanupContext): Promise<void> {
-    const tasks = [
-      () => this.endAttempt(context),
-      () => withinCleanupBudget(this.connection.dispose(), context),
-      async () => this.leases?.dispose(context),
-    ];
-    let failure: { cause: unknown } | undefined;
-    for (const task of tasks) {
-      try {
-        await task();
-      } catch (cause) {
-        failure ??= { cause };
-      }
-    }
-    if (failure !== undefined) throw translatePwError(failure.cause, 'dispose');
   }
 
   /** Returns the active attempt, including its connection generation and references. */
@@ -718,12 +474,12 @@ export class PlaywrightSurface {
 
   /** The configured headers a request to `url` carries, lowercased; `undefined` off the app's origin and `credentialOrigins`. */
   configuredHeaders(url: string): Readonly<Record<string, string>> | undefined {
-    return configuredHeadersFor(url, this.credentialScope, this.headers);
+    return configuredHeadersFor(url, this.worker.credentialScope, this.headers);
   }
 
   /** Resolves a file a test names against the project root, as config paths do, never `process.cwd()`. */
   projectPath(file: string): string {
-    return path.resolve(this.projectRoot, file);
+    return path.resolve(this.worker.projectRoot, file);
   }
 
   /** Removes one registered route from the attempt and the current context. */
@@ -770,13 +526,13 @@ export class PlaywrightSurface {
    * provider that does not, whose downloads Playwright saves as usual.
    */
   remoteDownloads(): LeaseDownloads | undefined {
-    return this.leases?.downloads();
+    return this.worker.leases?.downloads();
   }
 
   /** Why a download from a leased browser may never reach the runner, when its provider serves none. */
   unservedDownloads(): string | undefined {
-    if (this.leases === undefined || this.leases.downloads() !== undefined) return undefined;
-    return `browser provider "${this.leases.name}" serves no downloads, so a browser on another machine keeps the file on its own disk (BrowserProvider.downloads)`;
+    if (this.worker.leases === undefined || this.worker.leases.downloads() !== undefined) return undefined;
+    return `browser provider "${this.worker.leases.name}" serves no downloads, so a browser on another machine keeps the file on its own disk (BrowserProvider.downloads)`;
   }
 
   /** Creates the active page through the attempt's sole binding owner. */
@@ -1488,7 +1244,7 @@ export class PlaywrightSurface {
     const page = this.requirePage();
     const capture = refs.beginCapture();
     const captured = await captureObservation(page, refs, {
-      testIdAttribute: this.testIdAttribute, site: this.app.site,
+      testIdAttribute: this.testIdAttribute, site: this.worker.app.site,
     }, operation, options);
     const { snapshot, generation } = captured;
     try {

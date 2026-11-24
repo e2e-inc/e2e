@@ -7,7 +7,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { EngineInitInfo } from '@e2e-dev/core/engine';
 import { web, type WebConnectOptions } from '../../src/index.ts';
-import { PlaywrightSurface } from '../../src/surface.ts';
+import { WorkerBrowser } from '../../src/worker-browser.ts';
 
 function initInfo(signal = new AbortController().signal): EngineInitInfo {
   return {
@@ -71,15 +71,15 @@ describe('web({ connect })', () => {
   });
 });
 
-describe('PlaywrightSurface CDP attach', () => {
+describe('WorkerBrowser CDP attach', () => {
   it('fails init with ENGINE_FAILURE when the endpoint resolves empty or the resolver throws, without touching a browser', async () => {
-    const empty = new PlaywrightSurface({ connect: { cdpEndpoint: () => '   ' } });
+    const empty = new WorkerBrowser({ connect: { cdpEndpoint: () => '   ' } });
     await expect(empty.init(initInfo())).rejects.toMatchObject({
       code: 'ENGINE_FAILURE',
       retryable: false,
       message: expect.stringContaining('connect.cdpEndpoint resolved to an empty CDP endpoint'),
     });
-    const throwing = new PlaywrightSurface({
+    const throwing = new WorkerBrowser({
       connect: {
         cdpEndpoint: () => {
           throw new Error('vault down');
@@ -95,7 +95,7 @@ describe('PlaywrightSurface CDP attach', () => {
   it('hands the init signal to the resolver and cancels promptly while it is still pending', async () => {
     const controller = new AbortController();
     let seen: AbortSignal | undefined;
-    const surface = new PlaywrightSurface({
+    const worker = new WorkerBrowser({
       connect: {
         cdpEndpoint: (signal) => {
           seen = signal;
@@ -103,7 +103,7 @@ describe('PlaywrightSurface CDP attach', () => {
         },
       },
     });
-    const pending = surface.init(initInfo(controller.signal));
+    const pending = worker.init(initInfo(controller.signal));
     await vi.waitFor(() => expect(seen).toBeDefined());
     expect(seen!.aborted).toBe(false);
     controller.abort();
@@ -115,7 +115,7 @@ describe('PlaywrightSurface CDP attach', () => {
     const controller = new AbortController();
     controller.abort();
     let resolved = 0;
-    const surface = new PlaywrightSurface({
+    const worker = new WorkerBrowser({
       connect: {
         cdpEndpoint: () => {
           resolved += 1;
@@ -123,7 +123,7 @@ describe('PlaywrightSurface CDP attach', () => {
         },
       },
     });
-    await expect(surface.init(initInfo(controller.signal))).rejects.toMatchObject({ code: 'CANCELLED' });
+    await expect(worker.init(initInfo(controller.signal))).rejects.toMatchObject({ code: 'CANCELLED' });
     expect(resolved).toBe(0);
   });
 });

@@ -15,6 +15,7 @@ import { secrets } from 'e2e';
 import type { EngineCleanupContext, EngineFixtureContext, OperationContext } from '@e2e-dev/core/engine';
 import { createBrowserFixture, type Browser } from '../../src/browser.ts';
 import { PlaywrightSurface, type WebOptions } from '../../src/surface.ts';
+import { WorkerBrowser } from '../../src/worker-browser.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
 declare global {
@@ -57,10 +58,11 @@ describe('init scripts', () => {
 
   /** Boots one worker of a surface with `options` and runs `body` in one attempt with its `browser` fixture. */
   async function attempt(options: WebOptions, body: (browser: Browser, surface: PlaywrightSurface) => Promise<void>): Promise<void> {
-    const surface = new PlaywrightSurface(options);
+    const worker = new WorkerBrowser(options);
+    const surface = new PlaywrightSurface(options, worker);
     const artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-init-scripts-artifacts-'));
     try {
-      await surface.init({ runId: 'init-scripts', targetName: 'web', projectRoot, app: { site: '127.0.0.1' },
+      await worker.init({ runId: 'init-scripts', targetName: 'web', projectRoot, app: { site: '127.0.0.1' },
         env: {}, headed: false, workerSlot: 0, signal, log: () => undefined });
       await surface.startAttempt({ attemptId: 'a', artifactsDir, signal, resolveSecret: noSecrets, ...ignoreTrace });
       const browser = createBrowserFixture(surface, {
@@ -73,7 +75,7 @@ describe('init scripts', () => {
       await body(browser, surface);
     } finally {
       await surface.endAttempt(cleanup()).catch(() => undefined);
-      await surface.dispose(cleanup());
+      await worker.dispose(cleanup());
       rmSync(artifactsDir, { recursive: true, force: true });
     }
   }
@@ -142,14 +144,14 @@ describe('init scripts', () => {
   });
 
   it('fails the run, and a worker, with INVALID_CONFIG when a configured file cannot be read', async () => {
-    const surface = new PlaywrightSurface({ initScripts: [{ path: 'nope.js' }] });
-    await expect(surface.prepare({ runId: 'init-scripts', targetName: 'web', projectRoot, app: {}, slots: 1, env: {},
+    const worker = new WorkerBrowser({ initScripts: [{ path: 'nope.js' }] });
+    await expect(worker.prepare({ runId: 'init-scripts', targetName: 'web', projectRoot, app: {}, slots: 1, env: {},
       signal, headed: false, log: () => undefined })).rejects.toMatchObject({ code: 'INVALID_CONFIG', message: expect.stringMatching(/nope\.js \(ENOENT\)/) });
-    await expect(surface.init({ runId: 'init-scripts', targetName: 'web', projectRoot, app: {}, env: {}, headed: false,
+    await expect(worker.init({ runId: 'init-scripts', targetName: 'web', projectRoot, app: {}, env: {}, headed: false,
       workerSlot: 0, signal, log: () => undefined })).rejects.toMatchObject({
       code: 'INVALID_CONFIG',
       message: expect.stringMatching(/web\(\{ initScripts \}\)\[0\] path cannot be read: .*nope\.js \(ENOENT\)/),
     });
-    await surface.dispose(cleanup());
+    await worker.dispose(cleanup());
   });
 });

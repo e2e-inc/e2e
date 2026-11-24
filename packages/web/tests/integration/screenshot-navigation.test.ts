@@ -14,6 +14,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { Page } from 'playwright-core';
 import type { OperationContext } from '@e2e-dev/core/engine';
 import { PlaywrightSurface } from '../../src/surface.ts';
+import { WorkerBrowser } from '../../src/worker-browser.ts';
 import { decodePng } from '../helpers/png.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
@@ -43,7 +44,9 @@ function startHoppingServer(): Promise<{ server: Server; origin: string }> {
 }
 
 describe('surface.screenshot while navigating', () => {
-  const surface = new PlaywrightSurface({ viewport: { width: 320, height: 200 } });
+  const options = { viewport: { width: 320, height: 200 } };
+  const worker = new WorkerBrowser(options);
+  let surface: PlaywrightSurface;
   const projectRoot = mkdtempSync(path.join(tmpdir(), 'e2e-screenshot-navigation-'));
   const signal = new AbortController().signal;
   const operation = (timeoutMs = 10_000): OperationContext => ({ signal, timeoutMs, runId: 'shots', attemptId: 'shots', origin: 'test' });
@@ -61,11 +64,12 @@ describe('surface.screenshot while navigating', () => {
 
   beforeAll(async () => {
     ({ server, origin } = await startHoppingServer());
-    await surface.init({ runId: 'shots', targetName: 'web', projectRoot, app: { site: '127.0.0.1' },
+    await worker.init({ runId: 'shots', targetName: 'web', projectRoot, app: { site: '127.0.0.1' },
       env: {}, headed: false, workerSlot: 0, signal, log: () => undefined });
   });
 
   beforeEach(async () => {
+    surface = new PlaywrightSurface(options, worker);
     await surface.startAttempt({ attemptId: 'shots', artifactsDir: projectRoot, signal, resolveSecret: noSecrets, ...ignoreTrace });
     page = await surface.ensurePage();
   });
@@ -76,7 +80,7 @@ describe('surface.screenshot while navigating', () => {
   });
 
   afterAll(async () => {
-    await surface.dispose({ signal, timeoutMs: 5_000 });
+    await worker.dispose({ signal, timeoutMs: 5_000 });
     await new Promise<void>((resolve) => server.close(() => resolve()));
     rmSync(projectRoot, { recursive: true, force: true });
   });

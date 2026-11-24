@@ -23,6 +23,8 @@ import { createRequire } from 'node:module';
 import type { WebFixtures } from './fixtures.ts';
 import { asBrowserProvider, type BrowserProvider } from './provider.ts';
 import { PlaywrightSurface, type WebOptions } from './surface.ts';
+import { invalidState, translatePwError } from './support.ts';
+import { WorkerBrowser } from './worker-browser.ts';
 import { createBrowserFixture } from './browser.ts';
 import { validateInitScripts } from './init-scripts.ts';
 import { MEDIA_KEYS, mediaProblem } from './media.ts';
@@ -33,27 +35,38 @@ import { BROWSER_NAMES, isBrowserName } from './browser-connection.ts';
 /** App fields only a device target reads. */
 const NATIVE_APP_KEYS = ['bundleId', 'appPath', 'launchArguments'] as const;
 
-/** Creates one Playwright engine: one browser per worker, one context per attempt. */
-const surfaces = new WeakMap<EngineHandle, PlaywrightSurface>();
+/** What names an attempt on a call: the id its `startAttempt` got, absent from a harness that predates actors. */
+interface AttemptName {
+  readonly attemptId?: string | undefined;
+}
+
+/** How each `web()` handle finds the surface of the attempt a call names. */
+const surfaces = new WeakMap<EngineHandle, (attempt: AttemptName) => PlaywrightSurface>();
 
 /**
  * The live browser objects behind a `web()` handle, for agent-side code
  * that replaces the toolset wholesale (spec chapter 16) and drives the page with
- * its own Playwright tooling. Both accessors read the current attempt: the
- * context exists from `startAttempt`, the page from the first `app.open()` or
- * `browser.goto()`, and either throws `INVALID_STATE` before that. The harness
- * remains the notary for what it witnesses; a caller here acts out of band.
+ * its own Playwright tooling. Both accessors read the attempt `surfaceOf` was
+ * given, or the one open attempt: the context exists from `startAttempt`,
+ * the page from the first `app.open()` or `browser.goto()`, and either
+ * throws `INVALID_STATE` before that. The harness remains the notary for
+ * what it witnesses; a caller here acts out of band.
  */
 export interface PlaywrightLiveSurface {
   readonly page: () => Page;
   readonly context: () => BrowserContext;
 }
 
-/** The live surface of a handle this module created, or undefined for any other engine. */
-export function surfaceOf(engine: EngineHandle): PlaywrightLiveSurface | undefined {
-  const surface = surfaces.get(engine);
-  if (surface === undefined) return undefined;
-  return { page: () => surface.requirePage(), context: () => surface.requireContext() };
+/**
+ * The live surface of a handle this module created, or undefined for any
+ * other engine. `attemptId` names the attempt it reads, which an executor
+ * has as `ExecutorAttempt.attemptId`; without it the accessors read the one
+ * open attempt, and throw `INVALID_STATE` while several are open.
+ */
+export function surfaceOf(engine: EngineHandle, attemptId?: string): PlaywrightLiveSurface | undefined {
+  const of = surfaces.get(engine);
+  if (of === undefined) return undefined;
+  return { page: () => of({ attemptId }).requirePage(), context: () => of({ attemptId }).requireContext() };
 }
 
 /**
@@ -63,6 +76,7 @@ export function surfaceOf(engine: EngineHandle): PlaywrightLiveSurface | undefin
  */
 export interface WebEngine extends EngineHandle<WebFixtures> {}
 
+/** Creates one Playwright engine: one browser per worker, one context per attempt. */
 export function web(options: WebOptions = {}): WebEngine {
   if ('allowedOrigins' in options) {
     throw new ConfigurationError(
@@ -116,22 +130,33 @@ export function web(options: WebOptions = {}): WebEngine {
       `${mode} uses a persistent context; ${creationOptions.join(', ')} ${creationOptions.length === 1 ? 'requires' : 'require'} a newly created context`,
     );
   }
-  const surface = new PlaywrightSurface(options);
-  /** The attempt on `surface`: the first one open. Set before its `startAttempt` awaits anything. */
-  let first: string | undefined;
-  /** The surface of each attempt opened while another ran: a context of its own on the same browser. */
-  const others = new Map<string, PlaywrightSurface>();
+  const worker = new WorkerBrowser(options);
+  /** The surface of each open attempt: a context of its own on the worker's browser. Set before its `startAttempt` awaits anything. */
+  const attempts = new Map<string, PlaywrightSurface>();
+  /** Answers a call that arrives while no attempt is open: a surface nothing runs on says so itself. */
+  const idle = new PlaywrightSurface(options, worker);
+  /**
+   * The id of the open attempt a call is for: the one it names, or the one
+   * open attempt for a harness that names none, which runs one at a time.
+   * With several open, a call that names none could reach the wrong one's
+   * page, and is refused.
+   */
+  const idOf = ({ attemptId }: AttemptName): string | undefined => {
+    if (attemptId !== undefined) return attemptId;
+    const [only, ...rest] = attempts.keys();
+    if (rest.length === 0) return only;
+    throw new EngineError('INVALID_STATE', `${attempts.size} attempts are running and this call names none: pass the attempt id, as in surfaceOf(engine, attemptId)`, { retryable: false });
+  };
   /**
    * The surface of the attempt a call names. A call for an attempt that is
    * not open is refused while another is: it must never reach that one's
-   * page. `surface` answers a harness that names no attempt, which runs one
-   * at a time, and says so itself when none is open.
+   * page.
    */
-  const of = (attempt: { readonly attemptId?: string | undefined }): PlaywrightSurface => {
-    const { attemptId } = attempt;
-    if (attemptId === undefined || attemptId === first || (first === undefined && others.size === 0)) return surface;
-    const other = others.get(attemptId);
-    if (other !== undefined) return other;
+  const of = (attempt: AttemptName): PlaywrightSurface => {
+    const attemptId = idOf(attempt);
+    const surface = attemptId === undefined ? undefined : attempts.get(attemptId);
+    if (surface !== undefined) return surface;
+    if (attempts.size === 0) return idle;
     throw new EngineError('INVALID_STATE', 'the attempt this call belongs to is not running: it ended, or never started here', { retryable: false });
   };
   const handle = defineEngine<WebFixtures>({
@@ -140,40 +165,35 @@ export function web(options: WebOptions = {}): WebEngine {
     spiVersion: 1,
     platform: 'web',
     fileApps: true,
-    prepare: (info) => surface.prepare(info),
-    finish: (info) => surface.finish(info),
-    doctor: (info) => surface.doctor(info),
-    init: (info) => surface.init(info),
-    startAttempt: (context) => {
+    prepare: (info) => worker.prepare(info),
+    finish: (info) => worker.finish(info),
+    doctor: (info) => worker.doctor(info),
+    init: (info) => worker.init(info),
+    startAttempt: async (context) => {
       // A persistent context is the one a remote browser has: a second attempt has none to run in, and is refused there.
-      if (first === undefined || recoverable) {
-        first = context.attemptId;
-        return surface.startAttempt(context);
-      }
-      const other = surface.fork();
-      others.set(context.attemptId, other);
-      return other.startAttempt(context);
+      // So is a second start under an id that is open, anywhere: its calls would have two attempts to reach.
+      if (attempts.has(context.attemptId) || (recoverable && attempts.size > 0)) throw invalidState('an attempt is already running');
+      const surface = new PlaywrightSurface(options, worker);
+      attempts.set(context.attemptId, surface);
+      return surface.startAttempt(context);
     },
     settleAttempt: (context) => of(context).settleAttempt(context),
     endAttempt: async (context) => {
-      const { attemptId } = context;
-      const other = attemptId === undefined ? undefined : others.get(attemptId);
-      if (other !== undefined) {
-        others.delete(attemptId!);
-        return other.endAttempt(context);
-      }
-      // An id that is neither is an attempt already ended: nothing of it is left to end.
-      if (attemptId !== undefined && attemptId !== first) return;
-      first = undefined;
+      const attemptId = idOf(context);
+      const surface = attemptId === undefined ? undefined : attempts.get(attemptId);
+      // An id that is not open is an attempt already ended: nothing of it is left to end.
+      if (attemptId === undefined || surface === undefined) return;
+      attempts.delete(attemptId);
       return surface.endAttempt(context);
     },
     dispose: async (context) => {
-      const open = [...others.values()];
-      others.clear();
-      first = undefined;
-      // The browser goes down with `surface`; every other context is closed first, so its video is finalized.
-      await Promise.allSettled(open.map((other) => other.endAttempt(context)));
-      await surface.dispose(context);
+      const open = [...attempts.values()];
+      attempts.clear();
+      // The browser goes down with the worker; every open context is closed first, so its video is finalized.
+      const ended = await Promise.allSettled(open.map((surface) => surface.endAttempt(context)));
+      // Attempted whatever those did, and the first failure reported once all ran: a billed browser outlives a failed recording flush otherwise.
+      const closed = await Promise.allSettled([worker.dispose(context)]);
+      for (const outcome of [...ended, ...closed]) if (outcome.status === 'rejected') throw translatePwError(outcome.reason, 'dispose');
     },
     observe: (operation, observeOptions) => of(operation).observe(operation, observeOptions),
     readStyle: (ref, properties, operation) => of(operation).readStyle(ref, properties, operation),
@@ -222,7 +242,7 @@ export function web(options: WebOptions = {}): WebEngine {
       browser: (context) => createBrowserFixture(of(context), context),
     },
   });
-  surfaces.set(handle, surface);
+  surfaces.set(handle, of);
   return handle;
 }
 

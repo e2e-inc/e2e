@@ -7,6 +7,7 @@ import { secrets } from 'e2e';
 import type { EngineFixtureContext, OperationContext } from '@e2e-dev/core/engine';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { PlaywrightSurface } from '../../src/surface.ts';
+import { WorkerBrowser } from '../../src/worker-browser.ts';
 import { createBrowserFixture } from '../../src/browser.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
@@ -20,6 +21,7 @@ vi.mock('../../src/browser-connection.ts', async (importOriginal) => ({
 const operation = (): OperationContext => ({ timeoutMs: 1_000, signal: new AbortController().signal, runId: 'run', attemptId: 'a1', origin: 'test' });
 const cleanup = () => ({ timeoutMs: 1_000, signal: new AbortController().signal });
 let artifactsDir: string;
+let worker: WorkerBrowser;
 let surface: PlaywrightSurface;
 let registered: ((route: Route) => Promise<void>) | undefined;
 let browser: Browser;
@@ -61,13 +63,15 @@ beforeEach(async () => {
     })),
   } as unknown as Browser;
   acquire.mockResolvedValue(browser);
-  surface = new PlaywrightSurface({});
-  await surface.init({ runId: 'run', targetName: 'web', projectRoot: process.cwd(), app: {}, env: {}, headed: false, workerSlot: 0, signal: new AbortController().signal, log: () => undefined });
+  worker = new WorkerBrowser({});
+  surface = new PlaywrightSurface({}, worker);
+  await worker.init({ runId: 'run', targetName: 'web', projectRoot: process.cwd(), app: {}, env: {}, headed: false, workerSlot: 0, signal: new AbortController().signal, log: () => undefined });
   await surface.startAttempt({ attemptId: 'a1', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
 });
 
 afterEach(async () => {
-  await surface.dispose(cleanup());
+  await surface.endAttempt(cleanup());
+  await worker.dispose(cleanup());
   rmSync(artifactsDir, { recursive: true, force: true });
 });
 
@@ -93,6 +97,7 @@ it.each(['dialog', 'route'] as const)('keeps a late %s failure on the attempt th
     } as unknown as Route);
   }
   await surface.endAttempt(cleanup());
+  surface = new PlaywrightSurface({}, worker);
   await surface.startAttempt({ attemptId: 'a2', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
   release();
   await pending;
@@ -162,7 +167,7 @@ it('rejects a focus read from a context replaced before typing dispatches', asyn
 
 it('refuses headers or basicAuth from a runner that passes no app origin', async () => {
   for (const options of [{ headers: { 'x-gate': 'on' } }, { basicAuth: { username: 'ada', password: 'pw' } }]) {
-    const unscoped = new PlaywrightSurface(options);
+    const unscoped = new WorkerBrowser(options);
     await expect(
       unscoped.init({ runId: 'run', targetName: 'web', projectRoot: process.cwd(), app: {}, env: {}, headed: false, workerSlot: 0, signal: new AbortController().signal, log: () => undefined }),
     ).rejects.toMatchObject({ code: 'INVALID_CONFIG' });
@@ -170,21 +175,27 @@ it('refuses headers or basicAuth from a runner that passes no app origin', async
 });
 
 it('opens no session for an attempt the runner gave up on while its basic-auth password resolved', async () => {
-  const protectedSurface = new PlaywrightSurface({ basicAuth: { username: 'ada', password: secrets.get('stagingPassword') } });
-  await protectedSurface.init({ runId: 'run', targetName: 'web', projectRoot: process.cwd(), app: { origin: 'http://127.0.0.1:3000' }, env: {}, headed: false, workerSlot: 0, signal: new AbortController().signal, log: () => undefined });
+  const options = { basicAuth: { username: 'ada', password: secrets.get('stagingPassword') } };
+  const protectedWorker = new WorkerBrowser(options);
+  const gaveUp = new PlaywrightSurface(options, protectedWorker);
+  const next = new PlaywrightSurface(options, protectedWorker);
+  await protectedWorker.init({ runId: 'run', targetName: 'web', projectRoot: process.cwd(), app: { origin: 'http://127.0.0.1:3000' }, env: {}, headed: false, workerSlot: 0, signal: new AbortController().signal, log: () => undefined });
   try {
     let resolvePassword!: (value: string) => void;
     const slow = new Promise<string>((resolve) => { resolvePassword = resolve; });
     const controller = new AbortController();
-    const starting = protectedSurface.startAttempt({ attemptId: 'slow', artifactsDir, signal: controller.signal, resolveSecret: () => slow, ...ignoreTrace });
+    const starting = gaveUp.startAttempt({ attemptId: 'slow', artifactsDir, signal: controller.signal, resolveSecret: () => slow, ...ignoreTrace });
     controller.abort();
     await expect(starting).rejects.toMatchObject({ code: 'CANCELLED' });
-    await protectedSurface.endAttempt(cleanup());
+    await gaveUp.endAttempt(cleanup());
     resolvePassword('late-password');
     await new Promise<void>((resolve) => setImmediate(resolve));
-    await protectedSurface.startAttempt({ attemptId: 'next', artifactsDir, signal: new AbortController().signal, resolveSecret: async () => 'next-password', ...ignoreTrace });
+    // The attempt the runner gave up on opened no context: the one call is `beforeEach`'s.
+    expect(browser.newContext).toHaveBeenCalledTimes(1);
+    await next.startAttempt({ attemptId: 'next', artifactsDir, signal: new AbortController().signal, resolveSecret: async () => 'next-password', ...ignoreTrace });
     expect(vi.mocked(browser.newContext).mock.lastCall?.[0]).toMatchObject({ httpCredentials: [{ username: 'ada', password: 'next-password', origin: 'http://127.0.0.1:3000' }] });
   } finally {
-    await protectedSurface.dispose(cleanup());
+    await next.endAttempt(cleanup());
+    await protectedWorker.dispose(cleanup());
   }
 });

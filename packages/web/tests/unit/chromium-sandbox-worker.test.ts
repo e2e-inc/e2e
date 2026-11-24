@@ -1,8 +1,9 @@
-/** The surface hands its launch the `chromiumSandbox` option, or the platform default without one. */
+/** The worker's browser hands its launch the `chromiumSandbox` option, or the platform default without one. */
 import type { Browser } from 'playwright-core';
 import { afterEach, expect, it, vi } from 'vitest';
 import { defaultChromiumSandbox } from '../../src/browser-connection.ts';
-import { PlaywrightSurface, type WebOptions } from '../../src/surface.ts';
+import type { WebOptions } from '../../src/surface.ts';
+import { WorkerBrowser } from '../../src/worker-browser.ts';
 
 const acquire = vi.hoisted(() => vi.fn());
 vi.mock('../../src/browser-connection.ts', async (importOriginal) => ({
@@ -13,14 +14,14 @@ vi.mock('../../src/browser-connection.ts', async (importOriginal) => ({
   },
 }));
 
-let surfaces: PlaywrightSurface[] = [];
+let workers: WorkerBrowser[] = [];
 
 async function launchedSandbox(options: WebOptions): Promise<unknown> {
   acquire.mockReset();
   acquire.mockResolvedValue({} as unknown as Browser);
-  const surface = new PlaywrightSurface(options);
-  surfaces.push(surface);
-  await surface.init({
+  const worker = new WorkerBrowser(options);
+  workers.push(worker);
+  await worker.init({
     runId: 'run',
     targetName: 'web',
     projectRoot: process.cwd(),
@@ -36,10 +37,10 @@ async function launchedSandbox(options: WebOptions): Promise<unknown> {
 }
 
 afterEach(async () => {
-  for (const surface of surfaces) {
-    await surface.dispose({ timeoutMs: 1_000, signal: new AbortController().signal });
+  for (const worker of workers) {
+    await worker.dispose({ timeoutMs: 1_000, signal: new AbortController().signal });
   }
-  surfaces = [];
+  workers = [];
 });
 
 it('launches with the platform default when the option is omitted', async () => {

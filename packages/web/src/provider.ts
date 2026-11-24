@@ -350,6 +350,8 @@ export class LeasedBrowsers {
   private attempt: BrowserLease | undefined;
   /** The attempt whose lease is being acquired or held; a lease that arrives for any other attempt is released, not committed. */
   private opened: object | undefined;
+  /** The attempt the provider records, while it is open: `recorder` gives the browser's one recording to no other. */
+  private recorded: string | undefined;
   /** This worker's tenure, replaced by `init` and `dispose`; a replacement lease that arrives for an earlier one is released, not committed. */
   private tenure: object = {};
 
@@ -549,8 +551,14 @@ export class LeasedBrowsers {
     return lease;
   }
 
-  /** Releases the attempt's lease, when one was granted; idempotent, and safe after a failed `startAttempt`. */
+  /**
+   * Releases the attempt's lease, when one was granted; idempotent, and safe
+   * after a failed `startAttempt`. When the attempt the provider records
+   * ends, the recording is the next attempt's to ask for; a cleanup that
+   * names no attempt ends the only one, or every one.
+   */
   async endAttempt(context: EngineCleanupContext): Promise<void> {
+    if (context.attemptId === undefined || context.attemptId === this.recorded) this.recorded = undefined;
     const lease = this.attempt;
     this.attempt = undefined;
     this.opened = undefined;
@@ -572,14 +580,19 @@ export class LeasedBrowsers {
    * How the attempt records its browser when the provider records: starts
    * the provider's recording of the browser the attempt rides, the
    * attempt's lease in `attempt` scope and the worker's current one in
-   * `worker` scope. Undefined when the provider does not record. A start
-   * that fails is named after the provider, or is the cancellation when the
-   * attempt gave up first; `stopProviderRecording` checks the stop.
+   * `worker` scope. Undefined when the provider does not record, and while
+   * it records for another attempt: a provider records a browser, so an
+   * attempt that starts beside the one it records, an actor's, records its
+   * pages itself. A start that fails is named after the provider, or is the
+   * cancellation when the attempt gave up first; `stopProviderRecording`
+   * checks the stop.
    */
   recorder(attemptId: string): ((signal: AbortSignal) => Promise<LeaseRecording>) | undefined {
     const { provider } = this;
     const record = provider.record?.bind(provider);
     if (record === undefined) return undefined;
+    if (this.recorded !== undefined && this.recorded !== attemptId) return undefined;
+    this.recorded = attemptId;
     const label = `browser provider "${provider.name}"`;
     return async (signal) => {
       const run = this.requireRun();

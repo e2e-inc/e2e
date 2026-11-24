@@ -17,6 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AppLogEntry, EngineCleanupContext, EngineFixtureContext, EngineSnapshot, OperationContext } from '@e2e-dev/core/engine';
 import { createBrowserFixture } from '../../src/browser.ts';
 import { PlaywrightSurface } from '../../src/surface.ts';
+import { WorkerBrowser } from '../../src/worker-browser.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
 const PAGE = `<!doctype html><html><body><h1>Todos</h1><script>
@@ -83,11 +84,12 @@ describe('app log', () => {
   });
 
   it('reports console output, uncaught exceptions, and error responses, one line each', async () => {
-    const surface = new PlaywrightSurface({});
+    const worker = new WorkerBrowser({});
+    const surface = new PlaywrightSurface({}, worker);
     const artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-app-log-'));
     const entries: AppLogEntry[] = [];
     try {
-      await surface.init({ runId: 'app-log', targetName: 'web', projectRoot: artifactsDir, app: { site: '127.0.0.1' },
+      await worker.init({ runId: 'app-log', targetName: 'web', projectRoot: artifactsDir, app: { site: '127.0.0.1' },
         env: {}, headed: false, workerSlot: 0, signal, log: () => undefined });
       await surface.startAttempt({ attemptId: 'a', artifactsDir, signal, resolveSecret: noSecrets, ...ignoreTrace, appLog: (entry) => entries.push(entry) });
       const browser = createBrowserFixture(surface, {
@@ -112,20 +114,21 @@ describe('app log', () => {
       expect(entries.some((entry) => entry.text.startsWith('Failed to load resource'))).toBe(false);
     } finally {
       await surface.endAttempt(cleanup()).catch(() => undefined);
-      await surface.dispose(cleanup());
+      await worker.dispose(cleanup());
       rmSync(artifactsDir, { recursive: true, force: true });
     }
   });
 
   it('tells where the page went, apart from its own navigations, the screen each action left, and the browser', async () => {
-    const surface = new PlaywrightSurface({});
+    const worker = new WorkerBrowser({});
+    const surface = new PlaywrightSurface({}, worker);
     const artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-app-log-'));
     const entries: AppLogEntry[] = [];
     const went: string[] = [];
     const screens: EngineSnapshot[] = [];
     const facts: Record<string, string>[] = [];
     try {
-      await surface.init({ runId: 'app-log', targetName: 'web', projectRoot: artifactsDir, app: { site: '127.0.0.1' },
+      await worker.init({ runId: 'app-log', targetName: 'web', projectRoot: artifactsDir, app: { site: '127.0.0.1' },
         env: {}, headed: false, workerSlot: 0, signal, log: () => undefined });
       await surface.startAttempt({
         attemptId: 'a', artifactsDir, signal, resolveSecret: noSecrets,
@@ -156,7 +159,7 @@ describe('app log', () => {
       expect(facts[0]).toEqual({ browser: expect.stringMatching(/^chromium \d+\./), 'user agent': expect.stringContaining('Chrome/') });
     } finally {
       await surface.endAttempt(cleanup()).catch(() => undefined);
-      await surface.dispose(cleanup());
+      await worker.dispose(cleanup());
       rmSync(artifactsDir, { recursive: true, force: true });
     }
   });

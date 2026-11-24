@@ -5,22 +5,25 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { Page } from 'playwright-core';
 import type { EngineFixtureContext } from '@e2e-dev/core/engine';
 import { PlaywrightSurface } from '../../src/surface.ts';
+import { WorkerBrowser } from '../../src/worker-browser.ts';
 import { createBrowserFixture, type Browser } from '../../src/browser.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
 describe('browser.evaluate error boundaries', () => {
-  const surface = new PlaywrightSurface({});
+  const worker = new WorkerBrowser({});
+  let surface: PlaywrightSurface;
   const artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-evaluate-'));
   const signal = new AbortController().signal;
   let page: Page;
   let browser: Browser;
 
   beforeAll(async () => {
-    await surface.init({ runId: 'evaluate', targetName: 'web', projectRoot: process.cwd(),
+    await worker.init({ runId: 'evaluate', targetName: 'web', projectRoot: process.cwd(),
       app: {}, env: {}, headed: false, workerSlot: 0, signal, log: () => undefined });
   });
 
   beforeEach(async () => {
+    surface = new PlaywrightSurface({}, worker);
     await surface.startAttempt({ attemptId: 'evaluate', artifactsDir, signal, resolveSecret: noSecrets, ...ignoreTrace });
     page = await surface.ensurePage();
     browser = createBrowserFixture(surface, {
@@ -37,7 +40,7 @@ describe('browser.evaluate error boundaries', () => {
   });
 
   afterAll(async () => {
-    await surface.dispose({ signal, timeoutMs: 5_000 });
+    await worker.dispose({ signal, timeoutMs: 5_000 });
     rmSync(artifactsDir, { recursive: true, force: true });
   });
 

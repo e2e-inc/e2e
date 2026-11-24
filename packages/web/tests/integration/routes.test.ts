@@ -20,7 +20,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { EventEmitter } from 'node:events';
 import type { Download, Page } from 'playwright-core';
 import { TestError, type EngineFixtureContext } from '@e2e-dev/core/engine';
-import { PlaywrightSurface } from '../../src/surface.ts';
+import { PlaywrightSurface, type WebOptions } from '../../src/surface.ts';
+import { WorkerBrowser } from '../../src/worker-browser.ts';
 import { createBrowserFixture, type Browser, type WebRoute } from '../../src/browser.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
@@ -84,6 +85,8 @@ function startCountingServer(hits: Map<string, number>): Promise<{ server: Serve
 }
 
 describe('browser route and waitForResponse decisions', () => {
+  let webOptions: WebOptions;
+  let worker: WorkerBrowser;
   let surface: PlaywrightSurface;
   const projectRoot = mkdtempSync(path.join(tmpdir(), 'e2e-routes-'));
   const signal = new AbortController().signal;
@@ -121,9 +124,10 @@ describe('browser route and waitForResponse decisions', () => {
     otherOrigin = `http://localhost:${started.port}`;
     unlistedOrigin = `http://127.0.0.1:${unlisted.port}`;
     listedOrigin = `http://127.0.0.1:${listed.port}`;
-    surface = new PlaywrightSurface({ headers: { 'X-Gate': 'open-sesame' }, credentialOrigins: [listedOrigin] });
+    webOptions = { headers: { 'X-Gate': 'open-sesame' }, credentialOrigins: [listedOrigin] };
+    worker = new WorkerBrowser(webOptions);
     writeFileSync(path.join(projectRoot, 'quote.json'), '{"cents":4200}\n');
-    await surface.init({ runId: 'routes', targetName: 'web', projectRoot, app: { origin, site: '127.0.0.1' },
+    await worker.init({ runId: 'routes', targetName: 'web', projectRoot, app: { origin, site: '127.0.0.1' },
       env: {}, headed: false, workerSlot: 0, signal, log: () => undefined });
   });
 
@@ -131,6 +135,7 @@ describe('browser route and waitForResponse decisions', () => {
     hits.clear();
     attached.length = 0;
     operations.clear();
+    surface = new PlaywrightSurface(webOptions, worker);
     await surface.startAttempt({ attemptId: 'routes', artifactsDir: projectRoot, signal, resolveSecret: noSecrets, ...ignoreTrace });
     page = await surface.ensurePage();
     await page.goto(`${origin}/`);
@@ -152,7 +157,7 @@ describe('browser route and waitForResponse decisions', () => {
   });
 
   afterAll(async () => {
-    await surface.dispose({ signal, timeoutMs: 5_000 });
+    await worker.dispose({ signal, timeoutMs: 5_000 });
     await Promise.all(servers.map((each) => new Promise<void>((resolve) => each.close(() => resolve()))));
     rmSync(projectRoot, { recursive: true, force: true });
   });

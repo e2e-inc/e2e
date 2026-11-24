@@ -13,6 +13,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import type { Page } from 'playwright-core';
 import type { EngineFixtureContext } from '@e2e-dev/core/engine';
 import { PlaywrightSurface } from '../../src/surface.ts';
+import { WorkerBrowser } from '../../src/worker-browser.ts';
 import { createBrowserFixture, type Browser, type CookieFilter } from '../../src/browser.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
@@ -28,7 +29,8 @@ function startServer(): Promise<{ server: Server; port: number }> {
 }
 
 describe('browser.clearCookies', () => {
-  const surface = new PlaywrightSurface({});
+  const worker = new WorkerBrowser({});
+  let surface: PlaywrightSurface;
   const projectRoot = mkdtempSync(path.join(tmpdir(), 'e2e-clear-cookies-'));
   const signal = new AbortController().signal;
   let server: Server;
@@ -40,11 +42,12 @@ describe('browser.clearCookies', () => {
     const started = await startServer();
     server = started.server;
     origin = `http://127.0.0.1:${started.port}`;
-    await surface.init({ runId: 'cookies', targetName: 'web', projectRoot, app: { site: '127.0.0.1' },
+    await worker.init({ runId: 'cookies', targetName: 'web', projectRoot, app: { site: '127.0.0.1' },
       env: {}, headed: false, workerSlot: 0, signal, log: () => undefined });
   });
 
   beforeEach(async () => {
+    surface = new PlaywrightSurface({}, worker);
     await surface.startAttempt({ attemptId: 'cookies', artifactsDir: projectRoot, signal, resolveSecret: noSecrets, ...ignoreTrace });
     page = await surface.ensurePage();
     await page.goto(`${origin}/`);
@@ -67,7 +70,7 @@ describe('browser.clearCookies', () => {
   });
 
   afterAll(async () => {
-    await surface.dispose({ signal, timeoutMs: 5_000 });
+    await worker.dispose({ signal, timeoutMs: 5_000 });
     await new Promise<void>((resolve) => server.close(() => resolve()));
     rmSync(projectRoot, { recursive: true, force: true });
   });

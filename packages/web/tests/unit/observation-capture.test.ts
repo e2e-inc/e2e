@@ -4,11 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OperationContext } from '@e2e-dev/core/engine';
 import type { RawObservedNode } from '../../src/read-node.ts';
 import { PlaywrightSurface } from '../../src/surface.ts';
+import { WorkerBrowser } from '../../src/worker-browser.ts';
 import { BrowserConnection } from '../../src/browser-connection.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
 type ReadStage = 'evaluation' | 'metadata' | 'elements' | 'element' | 'frame';
-const surfaces = new Set<PlaywrightSurface>();
+const opened = new Set<{ readonly worker: WorkerBrowser; readonly surface: PlaywrightSurface }>();
 
 /** One externally completed protocol reply. */
 function deferred() {
@@ -86,9 +87,10 @@ async function setup(stalled?: ReadStage) {
   const operation: OperationContext = {
     signal: controller.signal, timeoutMs: 80, runId: 'run', attemptId: 'attempt', origin: 'agent',
   };
-  const surface = new PlaywrightSurface({});
-  surfaces.add(surface);
-  await surface.init({
+  const worker = new WorkerBrowser({});
+  const surface = new PlaywrightSurface({}, worker);
+  opened.add({ worker, surface });
+  await worker.init({
     runId: 'run', targetName: 'fixture', projectRoot: process.cwd(), app: {}, env: {},
     headed: false, workerSlot: 0, signal: controller.signal, log: () => undefined,
   });
@@ -99,8 +101,11 @@ async function setup(stalled?: ReadStage) {
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(async () => {
-  await Promise.all([...surfaces].map((surface) => surface.dispose({ signal: new AbortController().signal, timeoutMs: 1_000 })));
-  surfaces.clear();
+  await Promise.all([...opened].map(async ({ worker, surface }) => {
+    await surface.endAttempt({ signal: new AbortController().signal, timeoutMs: 1_000 });
+    await worker.dispose({ signal: new AbortController().signal, timeoutMs: 1_000 });
+  }));
+  opened.clear();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
