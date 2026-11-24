@@ -620,8 +620,14 @@ const TAIL_SECRET_SUITE = `import { test } from 'e2e';
 test('executor reads a secret before a combining mark', async ({ app, agent }) => {
   await app.open();
   await agent.act('look for synthetic-probe-tail\\u0301');
-  process.env['OPENAI_API_KEY'] = 'sk-proj-synthetic-act-key-0123456789abcdefghijklmnl';
-  await agent.act('see sk-proj-synthetic-act-key-0123456789abcdefghijklmnl\\u0301');
+  const previousKey = process.env['OPENAI_API_KEY'];
+  try {
+    process.env['OPENAI_API_KEY'] = 'sk-proj-synthetic-act-key-0123456789abcdefghijklmnl';
+    await agent.act('see sk-proj-synthetic-act-key-0123456789abcdefghijklmnl\\u0301');
+  } finally {
+    if (previousKey === undefined) delete process.env['OPENAI_API_KEY'];
+    else process.env['OPENAI_API_KEY'] = previousKey;
+  }
 });
 `;
 

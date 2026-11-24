@@ -61,10 +61,16 @@ ${[...CASES, ...SECRET_CASES].map(
 
 test('a provider key set during the test stays out of the model input', async ({ app, agent }) => {
   await app.open();
-  process.env['OPENAI_API_KEY'] = ${JSON.stringify('sk-proj-synthetic-late-key-0123456789abcdefghijklmnl')};
-  await agent.assert('see sk-proj-synthetic-late-key-0123456789abcdefghijklmnl\\u0301');
-  await agent.waitFor('see sk-proj-synthetic-late-key-0123456789abcdefghijklmnl\\u0301', { interval: 100 });
-  await agent.extract('see sk-proj-synthetic-late-key-0123456789abcdefghijklmnl\\u0301', { schema: ${SCHEMA} });
+  const previousKey = process.env['OPENAI_API_KEY'];
+  try {
+    process.env['OPENAI_API_KEY'] = ${JSON.stringify(LATE_KEY)};
+    await agent.assert('see ' + process.env['OPENAI_API_KEY'] + '\\u0301');
+    await agent.waitFor('see ' + process.env['OPENAI_API_KEY'] + '\\u0301', { interval: 100 });
+    await agent.extract('see ' + process.env['OPENAI_API_KEY'] + '\\u0301', { schema: ${SCHEMA} });
+  } finally {
+    if (previousKey === undefined) delete process.env['OPENAI_API_KEY'];
+    else process.env['OPENAI_API_KEY'] = previousKey;
+  }
 });
 
 test('assert hands the judge its instruction in NFC', async ({ app, agent }) => {
