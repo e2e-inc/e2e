@@ -46,7 +46,10 @@ export async function copyMergedArtifacts(report: Report1Document, inputs: reado
       const merged = `shard-${attempt.shard}/${relative}`;
       let bytes = copied.get(merged);
       if (bytes === undefined) {
-        const from = await realpath(path.join(root, relative));
+        const from = await realpath(path.join(root, relative)).catch((cause: NodeJS.ErrnoException) => {
+          if (cause.code !== 'ENOENT') throw cause;
+          throw new Error(`artifact "${relative}" is missing from shard ${attempt.shard}; download the entire shard output`, { cause });
+        });
         if (!inside(root, from) || !(await stat(from)).isFile()) {
           throw new Error(`artifact in shard ${attempt.shard} must be a file inside its results directory`);
         }

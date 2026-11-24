@@ -56,8 +56,8 @@ function cli(fixture: FixtureProject, args: string[], env: NodeJS.ProcessEnv = {
   return result;
 }
 
-function report(fixture: FixtureProject, output: string) {
-  const document: unknown = JSON.parse(readFileSync(path.join(fixture.dir, output, 'report.json'), 'utf8'));
+function report(fixture: FixtureProject, output: string, file = 'report.json') {
+  const document: unknown = JSON.parse(readFileSync(path.join(fixture.dir, output, file), 'utf8'));
   assertValidReport(document);
   return (document as Report1Document).run;
 }
@@ -82,6 +82,9 @@ it('merges real shard runs and uses the merged report for a whole-run rerun', ()
   const rerun = cli(fixture, ['run', '--last-failed', '--output', 'merged']);
   expect(rerun.status, rerun.stderr).toBe(0);
   expect(report(fixture, 'merged').results.filter((row) => row.selected).map((row) => row.titlePath.at(-1)).toSorted()).toEqual(['checkout', 'sign in']);
+  const history = report(fixture, 'merged', 'report-with-reruns.json');
+  expect(run.extensions?.['e2e.merge']).toBeDefined();
+  expect(history.extensions?.['e2e.merge']).toEqual(run.extensions?.['e2e.merge']);
 }, 60_000);
 
 it('keeps both shared setup executions and links each shard’s local evidence', () => {
@@ -128,6 +131,11 @@ it('keeps both shared setup executions and links each shard’s local evidence',
   expect(stale.status).toBe(2);
   expect(stale.stderr).toContain('does not match its recorded size or digest');
   expect(existsSync(path.join(fixture.dir, 'stale'))).toBe(false);
+  rmSync(path.join(fixture.dir, 'shard-1/results', artifactPath));
+  const missing = cli(fixture, ['merge-reports', 'shard-1', 'shard-2', '--output', 'missing']);
+  expect(missing.status).toBe(2);
+  expect(missing.stderr).toContain('artifact "shared/setup.log" is missing from shard 1');
+  expect(existsSync(path.join(fixture.dir, 'missing'))).toBe(false);
   // A rerun plus the merged directory alone must keep the old evidence.
   expect(cli(fixture, ['run', '--last-failed', '--output', 'merged']).status).toBe(0);
   for (const index of [1, 2]) expect(existsSync(path.join(root, `shard-${index}`, artifactPath))).toBe(true);
@@ -187,7 +195,8 @@ it('redacts a merge config secret in config output and reporter errors', () => {
   expect(shard(fixture, 1).status).toBe(0);
   expect(shard(fixture, 2).status).toBe(0);
   const value = 'fake-merge-secret-89617+case';
-  writeFileSync(path.join(fixture.dir, 'publish.config.mjs'), `
+  mkdirSync(path.join(fixture.dir, 'ci'));
+  writeFileSync(path.join(fixture.dir, 'ci/publish.config.mjs'), `
 const value = process.env.MERGE_FIXTURE_SECRET;
 const login = process.env.MERGE_FIXTURE_PASSWORD;
 console.log(value, login);
@@ -195,7 +204,7 @@ export default { credentials: { account: { password: login } }, secrets: { publi
   name: 'publisher', onRunFinished() { throw new Error(value); },
 }] };
 `);
-  const merged = cli(fixture, ['merge-reports', 'shard-1', 'shard-2', '--output', 'merged', '--config', 'publish.config.mjs'], {
+  const merged = cli(fixture, ['merge-reports', 'shard-1', 'shard-2', '--output', path.join(fixture.dir, 'merged'), '--config', 'ci/publish.config.mjs'], {
     MERGE_FIXTURE_SECRET: value,
     MERGE_FIXTURE_PASSWORD: 'fixture-password-31272',
     E2E_USER_ACCOUNT_USERNAME: undefined, E2E_USER_ACCOUNT_PASSWORD: undefined,

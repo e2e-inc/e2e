@@ -7,6 +7,9 @@
     "durationMs": -1,
     "shard": { "index": 0, "total": 3 },
     "targets": [],
+    "serialGroups": [
+      { "attempts": [{ "shard": 0 }] }
+    ],
     "results": [
       {
         "shard": 0,

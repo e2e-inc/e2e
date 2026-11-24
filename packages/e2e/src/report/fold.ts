@@ -246,6 +246,9 @@ export function foldLastRun(current: Report, lastRun: Report): Report {
       usage: combineReportUsage(lastRun.run.usage, current.run.usage, results.length),
       filters: lastRun.run.filters,
       changes: lastRun.run.changes,
+      ...(lastRun.run.extensions === undefined ? {} : {
+        extensions: { ...lastRun.run.extensions, ...current.run.extensions },
+      }),
       ...(lastRun.run.shard === undefined ? {} : { shard: lastRun.run.shard }),
     },
   };

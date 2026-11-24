@@ -54,6 +54,9 @@
         "stateCapability": true
       }
     ],
+    "extensions": {
+      "example.runMetadata": { "source": "ci" }
+    },
     "serialGroups": [
       {
         "id": "serial-example",
