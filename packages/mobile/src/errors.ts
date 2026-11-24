@@ -13,6 +13,8 @@
  * | a covered or keyboard-occluded target, `dispatched: no`      | NOT_ACTIONABLE, with the hint |
  * | a target with no screen origin to aim at, `dispatched: no`   | NOT_ACTIONABLE, with the hint |
  * | screen.swipe({ from, to }) off agent-device's viewport       | NOT_ACTIONABLE, with the hint |
+ * | an Android "isn't responding" dialog the guard refused under | NOT_ACTIONABLE, naming the    |
+ * |                                                             |   dialog's "Close app"        |
  * | the iOS runner busy, wedged, or past its watchdog           | ENGINE_FAILURE, naming the   |
  * | a snapshot the iOS runner acquired but could not present    |   runner and the recovery    |
  * | anything else, agent-device's own timeouts included         | ENGINE_FAILURE with the text |
@@ -203,6 +205,30 @@ const UNREADABLE_CAPTURE_REASONS: ReadonlySet<string> = new Set([
   'content-poor-app-window',
 ]);
 
+/**
+ * How agent-device words the refusal its Android blocking-dialog guard raises
+ * when an "isn't responding" dialog has focus: one of System UI or another
+ * app (`system dialog is blocking`), or one of the session's own app it
+ * could not close and relaunch (`app ANR blocked`). The guard runs before
+ * and after every tap, swipe, key, and type, so no input reaches the
+ * dialog's own buttons; its `alert` command is not guarded (0.21.42). The
+ * refusal carries the focused window in `details.focusedWindow`.
+ */
+const BLOCKING_DIALOG = /^Android (?:system dialog is blocking|app ANR blocked) /;
+
+/**
+ * The way past a blocking dialog, in place of agent-device's own hint, which
+ * suggests waiting or a reboot: neither closes it, while the dialog's own
+ * "Close app" does.
+ */
+const BLOCKING_DIALOG_HINT =
+  'An Android "isn\'t responding" dialog has focus and every other input is refused until it closes. Tap its "Close app" button, or dismiss it with device.alert(\'dismiss\'), then retry.';
+
+/** True for the refusal agent-device's Android guard raises while an "isn't responding" dialog has focus. */
+export function isBlockingDialog(cause: unknown): boolean {
+  return typeof details(cause).focusedWindow === 'string' && BLOCKING_DIALOG.test(message(cause));
+}
+
 const RUNNER_RECOVERY =
   'If the next run meets it again, stop the daemon (`npx agent-device daemon stop`) and reboot the simulator (`xcrun simctl shutdown <udid>`, then `boot`).';
 
@@ -258,6 +284,9 @@ export function translateError(cause: unknown, operation: string, where?: string
   }
   if (UNSUPPORTED_CODES.has(normalized.code) || UNSUPPORTED_PATTERN.test(normalized.message)) {
     return new EngineError('UNSUPPORTED_CAPABILITY', text, options);
+  }
+  if (isBlockingDialog(cause)) {
+    return new EngineError('NOT_ACTIONABLE', `${operation} failed: ${normalized.message} Hint: ${BLOCKING_DIALOG_HINT}`, options);
   }
   const state = runnerState(cause);
   if (state !== undefined) return new EngineError('ENGINE_FAILURE', runnerMessage(operation, where, state, cause), options);

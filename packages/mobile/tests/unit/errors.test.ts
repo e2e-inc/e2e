@@ -121,6 +121,30 @@ describe('error translation', () => {
     });
   });
 
+  // Each refusal as agent-device 0.21.42's Android guard raises it while an "isn't responding" dialog has focus.
+  it.each([
+    ['System UI', 'Android system dialog is blocking press: Application Not Responding: com.android.systemui (package com.android.systemui).', 'com.android.systemui'],
+    ["the session app, when it could not close and relaunch it", 'Android app ANR blocked swipe: Application Not Responding: dev.example.app (package dev.example.app). Automatic recovery failed.', 'dev.example.app'],
+  ] as const)('fails an input the blocking-dialog guard refused for %s with NOT_ACTIONABLE, naming the dialog\'s Close app', (_owner, text, focusedPackage) => {
+    const refused = new AppError('COMMAND_FAILED', text, {
+      command: 'press',
+      expectedPackage: 'dev.example.app',
+      focusedPackage,
+      focusedWindow: `Application Not Responding: ${focusedPackage}`,
+      rawFocus: `mCurrentFocus=Window{1 u0 Application Not Responding: ${focusedPackage}}`,
+      hint: 'Wait for Android to recover, close the dialog, restart the app, or reboot the emulator, then retry.',
+    });
+    for (const failure of [translateError(refused, 'perform tap'), staleOr(refused, 'perform tap')]) {
+      expect(failure).toMatchObject({ code: 'NOT_ACTIONABLE', retryable: false, cause: refused });
+      // agent-device's hint (wait, reboot) never closes the dialog; its own button does.
+      expect(failure.message).toBe(
+        `perform tap failed: ${text} Hint: An Android "isn't responding" dialog has focus and every other input is refused until it closes. Tap its "Close app" button, or dismiss it with device.alert('dismiss'), then retry.`,
+      );
+    }
+    // The same text without the focused window agent-device attaches is not that refusal.
+    expect(translateError(new AppError('COMMAND_FAILED', text), 'perform tap')).toMatchObject({ code: 'ENGINE_FAILURE' });
+  });
+
   // As agent-device 0.21.37 sends it for a ref aimed from a capture without the window's screen origin.
   it('fails an action agent-device refused as window-origin-unknown with NOT_ACTIONABLE, the offset bounds, and the tapAt move', () => {
     const text = 'Ref @e2 has no established screen-coordinate origin';

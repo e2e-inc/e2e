@@ -49,7 +49,7 @@ import {
   ConfigurationError,
   TestError,
 } from '@e2e-dev/core/engine';
-import { isAppNotRunning, isSnapshotPresentationFailure, isUnreadableCapture, ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING, refusedSwipePath, runCommand, staleOr } from './errors.ts';
+import { isAppNotRunning, isBlockingDialog, isSnapshotPresentationFailure, isUnreadableCapture, ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING, refusedSwipePath, runCommand, staleOr } from './errors.ts';
 import { pointerInteraction, DEFAULT_LONG_PRESS_MS, MAX_TAP_COUNT } from './actions.ts';
 import { resolveExpression } from './locate.ts';
 import { launchArgumentList, launchArgumentsForOpen } from './launch-arguments.ts';
@@ -89,6 +89,14 @@ import {
   InputBudget,
   type InstallIdentity,
 } from './support.ts';
+
+/**
+ * The label of an Android "isn't responding" dialog's close button, the one
+ * agent-device's `alert dismiss` picks on that dialog. Matched in English
+ * only, as agent-device matches it: on another locale `alert dismiss` could
+ * pick a different button, so the tap keeps the guard's refusal.
+ */
+const CLOSE_APP = /^close app$/i;
 
 /** Hinge poses `device.fold` accepts: `closed` lights the outer display, `half-open` and `open` the inner one. */
 export type FoldPose = 'closed' | 'half-open' | 'open';
@@ -1596,7 +1604,7 @@ export class AgentDeviceSurface {
       }
       switch (action.kind) {
         case 'tap':
-          return input.press(client, { ...this.actionTarget(target, true), ...settle });
+          return this.pressOrCloseDialog(client, target, input, () => input.press(client, { ...this.actionTarget(target, true), ...settle }));
         case 'focus':
           // A touch surface focuses by tapping, and a tap on anything but an
           // editable field activates it; focus is offered for fields only.
@@ -1676,6 +1684,25 @@ export class AgentDeviceSurface {
       throw staleOr(cause, label, this.where);
     }
     this.markAction(before);
+  }
+
+  /**
+   * Taps a node through `press`, unless agent-device's Android guard refuses
+   * it because an "isn't responding" dialog has focus and the node is that
+   * dialog's own "Close app" button. The guard refuses every tap while the
+   * dialog is up, its buttons included, so the button is pressed through
+   * `alert dismiss` instead, which the guard leaves alone and which picks
+   * "Close app" on that dialog by the same label. On a System UI dialog that
+   * restarts System UI; on an app's, it stops that app. Any other node, "Wait"
+   * included, has no unguarded path and keeps the refusal.
+   */
+  private async pressOrCloseDialog(client: AgentDeviceClient, target: NodeBinding, input: InputBudget, press: () => Promise<unknown>): Promise<unknown> {
+    try {
+      return await press();
+    } catch (cause) {
+      if (!isBlockingDialog(cause) || !CLOSE_APP.test(target.node.name?.trim() ?? '')) throw cause;
+      return input.send((signal) => client.command.alert({ ...this.selection(), action: 'dismiss', signal }));
+    }
   }
 
   /**

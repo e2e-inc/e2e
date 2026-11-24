@@ -2143,6 +2143,49 @@ describe('perform', () => {
       retryable: false,
     });
   });
+
+  it('presses an Android "isn\'t responding" dialog\'s Close app through alert dismiss when the blocking-dialog guard refuses the tap, and no other button', async () => {
+    const h = harness({ platform: 'android' });
+    await openAttempt(h);
+    const button = (index: number, id: string, label: string, y: number): RawNode => ({
+      ref: `@e${index + 1}`, index, parentIndex: 0, depth: 1, type: 'android.widget.Button', identifier: `android:id/${id}`, label, rect: { x: 40, y, width: 310, height: 48 },
+    });
+    // The System UI ANR dialog as the Android snapshot helper reads it, drawn by the `android` package.
+    h.fake.respond('capture.snapshot', () => ({
+      nodes: [
+        { ref: '@e1', index: 0, depth: 0, type: 'android.widget.FrameLayout', identifier: 'android:id/content', rect: { x: 0, y: 0, width: 390, height: 844 } },
+        button(1, 'aerr_close', 'Close app', 400),
+        button(2, 'aerr_wait', 'Wait', 460),
+      ],
+      appBundleId: 'android',
+    }));
+    // As agent-device 0.21.42's guard refuses every tap while the dialog has focus, the dialog's own buttons included.
+    h.fake.respond('interactions.press', () => {
+      throw new AppError('COMMAND_FAILED', 'Android system dialog is blocking press: Application Not Responding: com.android.systemui (package com.android.systemui).', {
+        command: 'press',
+        focusedPackage: 'com.android.systemui',
+        focusedWindow: 'Application Not Responding: com.android.systemui',
+        rawFocus: 'mCurrentFocus=Window{1 u0 Application Not Responding: com.android.systemui}',
+      });
+    });
+    h.fake.respond('command.alert', () => ({ kind: 'alertHandled', action: 'dismiss', handled: true, button: 'Close app' }));
+    await h.engine.perform!((await observed(h, 'Close app')).ref, { kind: 'tap' }, operation());
+    expect(h.fake.lastArgs('command.alert')).toEqual({ platform: 'android', action: 'dismiss' });
+    expect(h.fake.calls.find((call) => call.method === 'command.alert')?.signal).toBeInstanceOf(AbortSignal);
+    // "Wait" has no unguarded path: alert dismiss would press Close app, so the refusal stands, with the way past it.
+    const alerts = h.fake.methods().filter((method) => method === 'command.alert').length;
+    await expect(h.engine.perform!((await observed(h, 'Wait')).ref, { kind: 'tap' }, operation())).rejects.toMatchObject({
+      code: 'NOT_ACTIONABLE',
+      message: expect.stringContaining('Tap its "Close app" button'),
+    });
+    expect(h.fake.methods().filter((method) => method === 'command.alert')).toHaveLength(alerts);
+    // A Close app tap refused for any other reason keeps that refusal.
+    h.fake.respond('interactions.press', () => {
+      throw new AppError('COMMAND_FAILED', 'Ref @e2 not found', { reason: 'ref_not_found', dispatched: 'no' });
+    });
+    await expect(h.engine.perform!((await observed(h, 'Close app')).ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NODE_STALE' });
+    expect(h.fake.methods().filter((method) => method === 'command.alert')).toHaveLength(alerts);
+  });
 });
 
 describe('session hooks, viewport swipe, location, artifacts', () => {
