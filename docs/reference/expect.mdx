@@ -83,6 +83,7 @@ await expect(screen.getByTestId('cart-empty'), 'the cart is empty').toBeVisible(
 | [`toBeSelected`](#tobechecked-tobeselected-and-tobeexpanded) | Waits for selected state |
 | [`toBeExpanded`](#tobechecked-tobeselected-and-tobeexpanded) | Waits for expanded state |
 | [`toBeFocused`](#tobefocused) | Waits for focused state |
+| [`toBeEmpty`](#tobeempty) | Waits for an empty value or no text |
 | [`toHaveText`](#tohavetext-and-tocontaintext) | Waits for exact normalized text |
 | [`toContainText`](#tohavetext-and-tocontaintext) | Waits for contained normalized text |
 | [`toHaveValue`](#tohavevalue) | Waits for a form control's value |
@@ -218,6 +219,19 @@ Waits for focused state.
 
 ```ts
 await expect(screen.getByLabel('Email')).toBeFocused();
+```
+
+#### `toBeEmpty`
+
+Waits for the one match to be empty: a form control with an empty value, or
+any other node with no text. A value is read as it is, so a field holding a
+space is not empty; text is normalized, so whitespace alone is. An option is
+read by its text. On mobile a node's text is its own label, so a container
+whose children carry the text can read as empty.
+
+```ts
+await expect(screen.getByLabel('Search')).toBeEmpty();
+await expect(screen.getByTestId('cart')).not.toBeEmpty();
 ```
 
 #### `toHaveText` and `toContainText`
@@ -925,7 +939,7 @@ withholds its value and text.
 
 | Matcher | On a secure field |
 | --- | --- |
-| `toHaveValue`, `toHaveText`, `toContainText` | `POLICY_DENIED`, like `inputValue()` and `textContent()`, negated or in list form too |
+| `toHaveValue`, `toHaveText`, `toContainText`, `toBeEmpty` | `POLICY_DENIED`, like `inputValue()` and `textContent()`, negated or in list form too |
 | `toHaveAttribute` | `POLICY_DENIED`, like `getAttribute()`, for every attribute name and negated too |
 | `toHaveAccessibleName`, `toHaveRole`, and the state matchers | Answer as usual |
 
@@ -1023,6 +1037,8 @@ export interface AsyncExpectation {
   toBeExpanded(options?: { timeout?: number }): Promise<void>;
   /** Waits for focused state. */
   toBeFocused(options?: { timeout?: number }): Promise<void>;
+  /** Waits for an empty form control value, or no text on any other node. */
+  toBeEmpty(options?: { timeout?: number }): Promise<void>;
   /** Waits for exact normalized text; a list waits for exactly that many matches, each with its entry's text, in order. */
   toHaveText(expected: TextMatch, options?: TextMatcherOptions): Promise<void>;
   toHaveText(expected: readonly TextMatch[], options?: TextMatcherOptions): Promise<void>;
