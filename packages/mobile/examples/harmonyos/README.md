@@ -21,11 +21,15 @@ pnpm install --frozen-lockfile
 pnpm --filter @e2e-dev/core run build
 pnpm --filter e2e run build
 pnpm --filter @e2e-dev/mobile run build
-(cd packages/mobile/examples/harmonyos && node ../../../e2e/dist/cli/bin.js run)
+cd packages/mobile/examples/harmonyos
+node ../../../e2e/dist/cli/bin.js doctor
+node ../../../e2e/dist/cli/bin.js run
 ```
 
 [The test](./tests/counter.e2e.ts) launches the app, expects “计数：0”, taps the “加一” button, and expects “计数：1”. It needs no model or credentials. The runner writes its report to `.e2e/report.json` in the example directory.
 
 ## Verification
 
-On November 24, 2026, the test passed on a physical Huawei Mate 70 Air running HarmonyOS 7 (API 26), with agent-device 0.21.41. This covers the local device and installed-app path. Cloud devices, HAP deployment, agent replay, emulator provisioning, and other HarmonyOS versions are outside this prototype's tested scope.
+On November 24, 2026, [commit 7107dd86](https://github.com/fryandev/e2e/commit/7107dd8672cc6cc1dc325ac28b947ce827f80d89) passed the counter test on a physical Huawei Mate 70 Air running HarmonyOS 7 (API 26) with agent-device 0.21.42. The runner recorded four passing steps in 4.74 seconds: app launch, the initial text assertion, a button tap and the updated text assertion.
+
+On this setup, `e2e doctor` detected one connected phone and HDC 3.2.0f. A locked phone can still pass these checks. If launching the app reports that the screen is locked, unlock the phone and rerun the test.
