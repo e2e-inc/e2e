@@ -735,8 +735,15 @@ Accepted values:
   `location`, `pointer`, `keyboard`, `computed-style`, `state`, `artifacts`.
 - One per built-in fixture an engine contributes: `browser`, `device`. See
   [the engine contract](/reference/engine#engine).
-- The kind of app the target declares: `browser` for an `app.url`,
+- The kind of app the target declares: `web-app` for an `app.url`,
   `native-app` for an `app.bundleId` or `app.appPath`.
+
+<Note>
+  Deprecated: `browser` for an `app.url`. Use `web-app`. When only a target's
+  `app.url` meets `requires: ['browser']`, a warning is printed. It will be
+  removed no earlier than April 1, 2027. Then `browser` means only the
+  `browser` fixture.
+</Note>
 
 #### `session`
 

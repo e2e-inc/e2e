@@ -882,10 +882,27 @@ function applySessionSelection(
 
 /**
  * The kinds of app a target declares, which `requires` filters on beside
- * the engine's capabilities: `browser` for an app at a URL, `native-app` for
- * an installed app or a build a device launches.
+ * the engine's capabilities: `web-app` for an app at a URL, `native-app` for
+ * an installed app or a build a device launches. An app at a URL is also
+ * `browser`, deprecated since it's the name of the web engine's fixture too.
  */
 function appKinds(target: ResolvedTarget): readonly string[] {
   const { base, bundleId, appPath } = target.app;
-  return [...(base === undefined ? [] : ['browser']), ...(bundleId === undefined && appPath === undefined ? [] : ['native-app'])];
+  return [...(base === undefined ? [] : ['web-app', 'browser']), ...(bundleId === undefined && appPath === undefined ? [] : ['native-app'])];
+}
+
+/**
+ * The deprecation notice for the targets where a test runs only because the
+ * target's `app.url` meets `requires: ['browser']`: the engine doesn't have
+ * the `browser` fixture. Undefined when there are none.
+ */
+export function browserAppKindNotice(selection: Selection): string | undefined {
+  const names = selection.perTarget
+    .filter(({ target, pairs }) => target.engine?.capabilities.has('browser') !== true && pairs.some((pair) => pair.disposition === 'run' && pair.options.requires.includes('browser')))
+    .map(({ target }) => `"${target.name}"`);
+  if (names.length === 0) {
+    return undefined;
+  }
+
+  return `requires: ['browser'] matched ${names.length === 1 ? 'target' : 'targets'} ${names.join(', ')} by app.url, which is deprecated and stops matching no earlier than April 1, 2027. Use requires: ['web-app']`;
 }

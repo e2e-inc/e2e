@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { collectFromRegistration, type Collection } from '../../src/collect/collect.ts';
 import { collectModule, test } from '../../src/collect/registry.ts';
-import { pairRecordings, repeatEach, resolveOptions, select, type SelectionFilters } from '../../src/collect/select.ts';
+import { browserAppKindNotice, pairRecordings, repeatEach, resolveOptions, select, type SelectionFilters } from '../../src/collect/select.ts';
 import { pairRecording } from '@e2e-dev/core/lib/internal/recording-modes';
 import { resolveConfig } from '../../src/config/resolve-run.ts';
 import { defineEngine } from '@e2e-dev/core/lib/engine/index';
@@ -614,6 +614,42 @@ describe('select', () => {
     expect(device.disposition).toBe('skip');
     expect(device.skip?.cause).toBe('capability-unavailable');
     expect(selection.pairs.find((pair) => pair.test.title === 'needs web')!.disposition).toBe('run');
+  });
+
+  it('runs a test that requires web-app only on a target with an app URL', async () => {
+    const col = await collection(() => {
+      test('needs a web app', { requires: ['web-app'] }, noop);
+    });
+    const engine = defineEngine({ name: 'toy', version: '1.0.0', spiVersion: 1 });
+    const selection = select(col, config({
+      targets: [
+        { name: 'site', platform: 'web', engine, app: { url: 'http://localhost:3000' } },
+        { name: 'phone', platform: 'ios', engine, app: { bundleId: 'com.example.app' } },
+      ],
+    }));
+    expect(selection.pairs.map((pair) => [pair.target.name, pair.disposition])).toEqual([
+      ['site', 'run'],
+      ['phone', 'skip'],
+    ]);
+  });
+
+  it('names the targets where only an app URL meets requires browser', async () => {
+    const col = await collection(() => {
+      test('needs a browser', { requires: ['browser'] }, noop);
+    });
+    const browserEngine = defineEngine({ name: 'toy', version: '1.0.0', spiVersion: 1, fixtures: { browser: () => ({}) } });
+    const kioskEngine = defineEngine({ name: 'kiosk', version: '1.0.0', spiVersion: 1 });
+    const selection = select(col, config({
+      targets: [
+        { name: 'site', platform: 'web', engine: browserEngine, app: { url: 'http://localhost:3000' } },
+        { name: 'kiosk', platform: 'kiosk', engine: kioskEngine, app: { url: 'http://localhost:3000' } },
+      ],
+    }));
+    expect(running(selection)).toEqual(['needs a browser', 'needs a browser']);
+    expect(browserAppKindNotice(selection)).toBe(
+      `requires: ['browser'] matched target "kiosk" by app.url, which is deprecated and stops matching no earlier than April 1, 2027. Use requires: ['web-app']`,
+    );
+    expect(browserAppKindNotice(select(col, config({ targets: [{ name: 'site', platform: 'web', engine: browserEngine, app: { url: 'http://localhost:3000' } }] })))).toBeUndefined();
   });
 
   it('selects the session producer for consumers regardless of filters', async () => {

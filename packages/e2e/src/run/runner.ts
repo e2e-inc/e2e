@@ -8,6 +8,7 @@ import { resolveConfig, type ResolvedRunConfig, type RunCliOverrides } from '../
 import { collect, collectInMemory, collectSetups, type Collection } from '../collect/collect.ts';
 import type { ModuleRegistration } from '../collect/registry.ts';
 import {
+  browserAppKindNotice,
   repeatEach,
   select,
   selectTargets,
@@ -437,6 +438,10 @@ export async function listSelection(options: ListOptions, notice: (message: stri
     changedSince === undefined
       ? first
       : (await filterSelection(first, { config, collection, selectionFilters: inputs.filters, changedSince, signal: new AbortController().signal, notice })).selection;
+  const browserAppKind = browserAppKindNotice(selection);
+  if (browserAppKind !== undefined) {
+    notice(browserAppKind);
+  }
   return {
     pairs: selection.pairs.map((pair) => toListedPair(config.projectRoot, pair)),
     unmatched: collection.unmatchedPositionals,
@@ -1039,6 +1044,10 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     }
     for (const message of options.tests?.notices ?? []) notice('run', message);
     for (const message of recordingNotices(selection.perTarget, grades, { explore: options.tests?.explore !== undefined })) notice('run', message);
+    const browserAppKind = browserAppKindNotice(selection);
+    if (browserAppKind !== undefined) {
+      notice('run', browserAppKind);
+    }
 
     // The work units, built once: the same plans tell each engine's `prepare`
     // how many worker slots to provision and the scheduler what to dispatch.

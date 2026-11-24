@@ -522,8 +522,10 @@ engine.capabilities.has('location'); // true: the engine implements locate
 ```
 
 Selection also grades a target by the kind of app it declares, not by its
-engine. A target with `app.url` has `browser`, and one with `app.bundleId` or
-`app.appPath` has `native-app`, so a test can `requires: ['native-app']`.
+engine. A target with `app.url` has `web-app`, and one with `app.bundleId` or
+`app.appPath` has `native-app`, so a test can `requires: ['native-app']`. A
+target with `app.url` also has `browser`, which is deprecated: see
+[`requires`](/reference/test#requires).
 
 ```ts
 /**

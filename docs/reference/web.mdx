@@ -69,8 +69,9 @@ web({ viewport: { width: 390, height: 844 }, locale: 'de-DE' });
   `appPath`, `launchArguments`). Its `app.permissions` takes `'grant'` only,
   for names its browser grants; see
   [`permissions`](/reference/config#permissions).
-- A target with `app.url` is a `browser` target, so `requires: ['browser']`
-  selects web targets.
+- With `requires: ['browser']`, a test runs on `web()` targets, since the
+  engine has the `browser` fixture. With `requires: ['web-app']`, it runs on
+  any target with `app.url`.
 - The full declaration with its JSDoc is [`WebOptions`](#weboptions) under
   Types.
 
