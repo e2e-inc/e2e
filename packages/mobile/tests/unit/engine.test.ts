@@ -185,7 +185,8 @@ describe('manifest', () => {
       expect.objectContaining({ code: 'INVALID_CONFIG', message: 'target "ios" app.permissions must be \'all\' or a plain object of permission names to grant, deny, reset' }),
     );
     expect(() => validateApp!(app({ camera: 'grant', 'media-library': 'deny', photos: undefined }), info)).not.toThrow();
-    expect(() => validateApp!(app('all'), info)).not.toThrow();
+    // Config load hands an engine 'all' as allPermissions, never as the string.
+    expect(() => validateApp!({ bundleId: 'com.example.app', allPermissions: true }, info)).not.toThrow();
   });
 });
 
