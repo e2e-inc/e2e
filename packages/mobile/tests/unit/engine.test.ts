@@ -2196,6 +2196,31 @@ describe('perform', () => {
     await expect(h.engine.perform!((await observed(h, 'Close app')).ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NODE_STALE' });
     expect(h.fake.methods().filter((method) => method === 'command.alert')).toHaveLength(failedAlerts);
   });
+
+  it('keeps the blocking-dialog refusal for an app\'s own Close app control, and after agent-device\'s recovery of the session app\'s dialog failed', async () => {
+    const h = harness({ platform: 'android' });
+    await openAttempt(h);
+    const button = (identifier: string): RawNode => ({
+      ref: '@e2', index: 1, parentIndex: 0, depth: 1, type: 'android.widget.Button', identifier, label: 'Close app', rect: { x: 40, y: 400, width: 310, height: 48 },
+    });
+    const screen = (closeButton: RawNode) => ({
+      nodes: [{ ref: '@e1', index: 0, depth: 0, type: 'android.widget.FrameLayout', identifier: 'android:id/content', rect: { x: 0, y: 0, width: 390, height: 844 } }, closeButton],
+      appBundleId: 'dev.example.app',
+    });
+    const refusal = (text: string, focusedPackage: string) => () => {
+      throw new AppError('COMMAND_FAILED', text, { command: 'press', focusedPackage, focusedWindow: `Application Not Responding: ${focusedPackage}` });
+    };
+    h.fake.respond('command.alert', () => ({ kind: 'alertHandled', action: 'dismiss', handled: true, button: 'Close app' }));
+    // The app's own control named like the dialog's button, refused because a System UI dialog took focus after the observation.
+    h.fake.respond('capture.snapshot', () => screen(button('dev.example.app:id/quit')));
+    h.fake.respond('interactions.press', refusal('Android system dialog is blocking press: Application Not Responding: com.android.systemui (package com.android.systemui).', 'com.android.systemui'));
+    await expect(h.engine.perform!((await observed(h, 'Close app')).ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+    // The session app's dialog: agent-device already pressed its Close app and could not bring the app back, so focus is on something else now.
+    h.fake.respond('capture.snapshot', () => screen(button('android:id/aerr_close')));
+    h.fake.respond('interactions.press', refusal('Android app ANR blocked press: Application Not Responding: dev.example.app (package dev.example.app). Automatic recovery failed.', 'dev.example.app'));
+    await expect(h.engine.perform!((await observed(h, 'Close app')).ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+    expect(h.fake.methods()).not.toContain('command.alert');
+  });
 });
 
 describe('session hooks, viewport swipe, location, artifacts', () => {

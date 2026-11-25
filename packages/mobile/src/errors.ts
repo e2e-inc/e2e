@@ -232,10 +232,21 @@ const BLOCKING_DIALOG_HINT =
  * after input went out stays `ENGINE_FAILURE`: the action may have landed, so
  * a retry could repeat it.
  */
-export function isBlockingDialog(cause: unknown): boolean {
+function isBlockingDialog(cause: unknown): boolean {
   const { focusedWindow, dispatchedSteps } = details(cause);
   if (typeof dispatchedSteps === 'number' && dispatchedSteps > 0) return false;
   return typeof focusedWindow === 'string' && BLOCKING_DIALOG.test(message(cause));
+}
+
+/**
+ * True for a blocking-dialog refusal over the dialog of System UI or of an app
+ * other than the session's. agent-device leaves that dialog up. Over the
+ * session app's own dialog it has already pressed "Close app" and relaunched
+ * the app before it refuses, so the dialog is gone and whatever has focus now
+ * is something else.
+ */
+export function isForeignBlockingDialog(cause: unknown): boolean {
+  return isBlockingDialog(cause) && message(cause).startsWith('Android system dialog is blocking ');
 }
 
 const RUNNER_RECOVERY =

@@ -49,7 +49,7 @@ import {
   ConfigurationError,
   TestError,
 } from '@e2e-dev/core/engine';
-import { isAppNotRunning, isBlockingDialog, isSnapshotPresentationFailure, isUnreadableCapture, ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING, refusedSwipePath, runCommand, staleOr } from './errors.ts';
+import { isAppNotRunning, isForeignBlockingDialog, isSnapshotPresentationFailure, isUnreadableCapture, ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING, refusedSwipePath, runCommand, staleOr } from './errors.ts';
 import { pointerInteraction, DEFAULT_LONG_PRESS_MS, MAX_TAP_COUNT } from './actions.ts';
 import { resolveExpression } from './locate.ts';
 import { launchArgumentList, launchArgumentsForOpen } from './launch-arguments.ts';
@@ -97,6 +97,9 @@ import {
  * pick a different button, so the tap keeps the guard's refusal.
  */
 const CLOSE_APP = /^close app$/i;
+
+/** The Android framework's resource id of that button, which no app's own control carries. */
+const ANR_CLOSE_BUTTON = 'android:id/aerr_close';
 
 /** Hinge poses `device.fold` accepts: `closed` lights the outer display, `half-open` and `open` the inner one. */
 export type FoldPose = 'closed' | 'half-open' | 'open';
@@ -1688,13 +1691,15 @@ export class AgentDeviceSurface {
 
   /**
    * Taps a node through `press`, unless agent-device's Android guard refuses
-   * it because an "isn't responding" dialog has focus and the node is that
-   * dialog's own "Close app" button. The guard refuses every tap while the
-   * dialog is up, its buttons included, so the button is pressed through
+   * it because the "isn't responding" dialog of System UI or another app has
+   * focus and the node is that dialog's own "Close app" button, by its
+   * framework id and its label. The guard refuses every tap while the dialog
+   * is up, its buttons included, so the button is pressed through
    * `alert dismiss` instead, which the guard leaves alone and which picks
    * "Close app" on that dialog by the same label. On a System UI dialog that
    * restarts System UI; on an app's, it stops that app. Any other node, "Wait"
-   * included, has no unguarded path and keeps the refusal. When agent-device
+   * and an app's own control with that label included, has no unguarded path
+   * and keeps the refusal. When agent-device
    * fails the dismissal (the guard's own recovery may already have closed the
    * dialog), the refusal is what the test sees, not the missing alert.
    */
@@ -1702,7 +1707,8 @@ export class AgentDeviceSurface {
     try {
       return await press();
     } catch (cause) {
-      if (!isBlockingDialog(cause) || !CLOSE_APP.test(target.node.name?.trim() ?? '')) throw cause;
+      const closeButton = target.node.testId === ANR_CLOSE_BUTTON && CLOSE_APP.test(target.node.name?.trim() ?? '');
+      if (!closeButton || !isForeignBlockingDialog(cause)) throw cause;
       try {
         return await input.send((signal) => client.command.alert({ ...this.selection(), action: 'dismiss', signal }));
       } catch (dismissal) {
