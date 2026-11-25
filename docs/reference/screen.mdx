@@ -1078,18 +1078,25 @@ getAttribute(name: string): Promise<string | null>;
 const href = await screen.getByRole('link', 'Docs').getAttribute('href');
 ```
 
-On a device, a node carries `label` (the accessibility label: the iOS label, the
-Android content description, or its text when it has none; a hint-only field with no `text` key has neither; the iOS label is
-the device's own, so a field folded into a placeholder keeps its full label),
-`resource-id` (its test id; on iOS the accessibility identifier, which Appium
-reads as `name`), `class` (the Android class, or the iOS element type without
-its prefix, such as `TextField`, which Appium reads as `type`), `content-desc`
-on Android (missing when the description equals the text, because agent-device
-reports it only when it differs), and `placeholder` when the platform reports
-one. On an iOS device cloud that serves an Appium page source, agent-device
-reads the identifier and the label from Appium's `name`, which is the label
-when an element has no identifier, so `resource-id` and `label` can each return
-the other's value there. For the text a field holds, use `inputValue()`.
+On a device, a node carries up to five attributes:
+
+- `label`: the accessibility label. On iOS, that is the device's own label, so
+  an empty field whose placeholder was folded out keeps its full label. On
+  Android, it is the content description, or the node's text when there is no
+  description. An empty Android field showing only its hint has no `label`, and
+  neither does an empty Android field whose content description equals its hint.
+- `resource-id`: the node's test id, which is the Android resource id or the
+  iOS accessibility identifier (what Appium reads as `name`).
+- `class`: the Android class name, or the iOS element type without the
+  `XCUIElementType` prefix, such as `TextField` (what Appium reads as `type`).
+- `content-desc`: Android only. Missing when the content description equals the
+  visible text or hint, because agent-device reports it only when it differs.
+- `placeholder`: present when the platform reports a hint or placeholder.
+
+On an iOS device cloud that serves an Appium page source, agent-device reads
+both the identifier and the label from Appium's `name`, which falls back to the
+label when an element has no identifier. `resource-id` and `label` can each
+return the other's value there. For the text a field holds, use `inputValue()`.
 
 #### `isVisible`
 
