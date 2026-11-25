@@ -503,6 +503,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
           await executor.realms.leave(started.realm, env.session).catch((cause: unknown) => errors.push(serialize(cause, 'afterAll')));
         } finally {
           leaveWorkerFixtures?.();
+          budget.end();
           steps.phase = undefined;
           publication.abort();
           strayInTurn = undefined;

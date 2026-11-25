@@ -243,4 +243,62 @@ test('next test', async ({ app }) => {
       project.cleanup();
     }
   }, 120_000);
+
+  it('aborts the engine calls of a body that resumes while its own teardown runs', async () => {
+    const file = `import { test } from 'e2e';
+
+test.afterEach(async () => {
+  const finished = new Promise<void>((resolve) => process.once('e2e-own-teardown-finished', resolve));
+  process.emit('e2e-own-teardown-release');
+  await finished;
+});
+test('times out', { timeout: 300 }, async ({ app }) => {
+  await new Promise<void>((resolve) => process.once('e2e-own-teardown-release', resolve));
+  await app.open('/late').catch(() => undefined);
+  process.emit('e2e-own-teardown-finished');
+});
+`;
+    const fake = createFakeEngine();
+    const { outcome, project } = await runProject({ 'tests/own-teardown.e2e.ts': file }, { config: engineConfig(fake.engine) });
+    try {
+      expect(resultByTitle(outcome, 'times out').status).toBe('timed-out');
+      // The hook's budget is live while the body resumes; the body's own phase is over.
+      const late = fake.operations.filter((operation) => operation.method.endsWith('/late)'));
+      expect(late.map((operation) => operation.abortedAtCall)).toEqual([true]);
+    } finally {
+      project.cleanup();
+    }
+  }, 120_000);
+
+  it('aborts the engine calls an abandoned body makes through a worker fixture during the next test', async () => {
+    const file = `import { test as base } from 'e2e';
+
+const test = base.extend<{}, { nav: { late(): Promise<void> } }>({
+  nav: [async ({ app }, use) => { await use({ late: () => app.open('/late') }); }, { scope: 'worker' }],
+});
+
+test('times out', { timeout: 300 }, async ({ nav }) => {
+  await new Promise<void>((resolve) => process.once('e2e-late-worker-release', resolve));
+  await nav.late().catch(() => undefined);
+  process.emit('e2e-late-worker-finished');
+});
+test('next test', async ({ app, nav }) => {
+  await app.open('/next');
+  const finished = new Promise<void>((resolve) => process.once('e2e-late-worker-finished', resolve));
+  process.emit('e2e-late-worker-release');
+  await finished;
+});
+`;
+    const fake = createFakeEngine({ isolation: 'worker' });
+    const { outcome, project } = await runProject({ 'tests/late-worker.e2e.ts': file }, { config: engineConfig(fake.engine) });
+    try {
+      expect(resultByTitle(outcome, 'times out').status).toBe('timed-out');
+      expect(resultByTitle(outcome, 'next test').status).toBe('passed');
+      // The worker fixture's `app` is the running test's, whoever calls it.
+      const late = fake.operations.filter((operation) => operation.method.endsWith('/late)'));
+      expect(late.map((operation) => operation.abortedAtCall)).toEqual([true]);
+    } finally {
+      project.cleanup();
+    }
+  }, 120_000);
 });
