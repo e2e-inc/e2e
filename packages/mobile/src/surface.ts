@@ -101,6 +101,9 @@ const CLOSE_APP = /^close app$/i;
 /** The Android framework's resource id of that button, which no app's own control carries. */
 const ANR_CLOSE_BUTTON = 'android:id/aerr_close';
 
+/** The title of an "isn't responding" dialog, as agent-device matches it. */
+const NOT_RESPONDING = /\bis(?:n't| not)\s+responding\b/i;
+
 /** Hinge poses `device.fold` accepts: `closed` lights the outer display, `half-open` and `open` the inner one. */
 export type FoldPose = 'closed' | 'half-open' | 'open';
 
@@ -1702,7 +1705,9 @@ export class AgentDeviceSurface {
    * and keeps the refusal. When agent-device
    * fails the dismissal without pressing anything (the dialog closed in the
    * meantime), the refusal is what the test sees, not the missing alert; a
-   * failure after its press is the dismissal's own.
+   * failure after its press is the dismissal's own. `alert dismiss` cannot
+   * name its button, so when another alert took the dialog's place it presses
+   * that one; the tap then fails, naming what was pressed, instead of passing.
    */
   private async pressOrCloseDialog(client: AgentDeviceClient, target: NodeBinding, input: InputBudget, press: () => Promise<unknown>): Promise<unknown> {
     try {
@@ -1711,11 +1716,20 @@ export class AgentDeviceSurface {
       const closeButton = target.node.testId === ANR_CLOSE_BUTTON && CLOSE_APP.test(target.node.name?.trim() ?? '');
       // A refusal can come back after the budget ran out; nothing was sent, so it stays the answer.
       if (!closeButton || !isForeignBlockingDialog(cause) || input.remainingMs() <= 0) throw cause;
+      let dismissed: Record<string, unknown>;
       try {
-        return await input.send((signal) => client.command.alert({ ...this.selection(), action: 'dismiss', signal }));
+        dismissed = await input.send((signal) => client.command.alert({ ...this.selection(), action: 'dismiss', signal }));
       } catch (dismissal) {
         throw pressedNoAlertButton(dismissal) ? cause : dismissal;
       }
+      const { button, alert } = dismissed;
+      const title = typeof alert === 'object' && alert !== null && 'title' in alert && typeof alert.title === 'string' ? alert.title : undefined;
+      if (typeof button === 'string' && CLOSE_APP.test(button.trim()) && title !== undefined && NOT_RESPONDING.test(title)) return dismissed;
+      throw new EngineError(
+        'ENGINE_FAILURE',
+        `perform tap failed: the "isn't responding" dialog closed before agent-device's alert dismiss reached it, and that pressed ${JSON.stringify(button ?? null)} on the alert ${JSON.stringify(title ?? null)} instead of the dialog's "Close app"`,
+        { retryable: false },
+      );
     }
   }
 

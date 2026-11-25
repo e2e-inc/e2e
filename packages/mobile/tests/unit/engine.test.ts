@@ -2168,10 +2168,21 @@ describe('perform', () => {
         rawFocus: 'mCurrentFocus=Window{1 u0 Application Not Responding: com.android.systemui}',
       });
     });
-    h.fake.respond('command.alert', () => ({ kind: 'alertHandled', action: 'dismiss', handled: true, button: 'Close app' }));
+    // As agent-device 0.21.42 answers alert dismiss on that dialog.
+    const handled = (title: string, pressed: string) => () => ({
+      kind: 'alertHandled', platform: 'android', action: 'dismiss', handled: true, button: pressed,
+      alert: { title, buttons: [pressed], platform: 'android', source: 'system-dialog', packageName: 'android' },
+    });
+    h.fake.respond('command.alert', handled("System UI isn't responding", 'Close app'));
     await h.engine.perform!((await observed(h, 'Close app')).ref, { kind: 'tap' }, operation());
     expect(h.fake.lastArgs('command.alert')).toEqual({ platform: 'android', action: 'dismiss' });
     expect(h.fake.calls.find((call) => call.method === 'command.alert')?.signal).toBeInstanceOf(AbortSignal);
+    // The dialog closed and a permission prompt took its place: alert dismiss pressed that one, so the tap fails, naming it.
+    h.fake.respond('command.alert', handled('Allow Settings to access your location?', "Don't allow"));
+    await expect(h.engine.perform!((await observed(h, 'Close app')).ref, { kind: 'tap' }, operation())).rejects.toMatchObject({
+      code: 'ENGINE_FAILURE',
+      message: expect.stringContaining('pressed "Don\'t allow" on the alert "Allow Settings to access your location?"'),
+    });
     // "Wait" has no unguarded path: alert dismiss would press Close app, so the refusal stands, with the way past it.
     const alerts = h.fake.methods().filter((method) => method === 'command.alert').length;
     await expect(h.engine.perform!((await observed(h, 'Wait')).ref, { kind: 'tap' }, operation())).rejects.toMatchObject({
