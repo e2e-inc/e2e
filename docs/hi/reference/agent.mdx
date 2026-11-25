@@ -138,7 +138,7 @@ await agent.act('open settings and turn on dark mode', {
 
 रनर खुद कब रुकता है, और कॉल पर होने वाली जाँचें:
 
-| कब थ्रो होता है | कारण |
+| क्या थ्रो होता है | कब |
 | --- | --- |
 | `STEP_BUDGET_EXHAUSTED`, `STEP_TIMEOUT` | बजट या डेडलाइन खत्म हो गई। |
 | `CANCELLED` | रनर ने स्टेप कैंसल कर दिया। |
@@ -189,7 +189,7 @@ await agent.assert('the table lists {name}', { params: { name } });
 पहुँचता है, उसकी वैल्यू कभी नहीं जाती। स्क्रीन पर किसी सीक्रेट की वैल्यू जाँचने
 के लिए लोकेटर असर्शन इस्तेमाल करें।
 
-| कब थ्रो होता है | कारण |
+| क्या थ्रो होता है | कब |
 | --- | --- |
 | `ASSERTION_FAILED` | परख का नतीजा गलत निकला। |
 | `ASSERTION_INCONCLUSIVE` | स्क्रीन पर फ़ैसला करने के लिए पर्याप्त जानकारी नहीं थी। |
@@ -279,7 +279,7 @@ await agent.waitFor('the upload progress reports completion', { interval: 500 })
 60000 ms के बीच होता है। `params` [`agent.assert`](#agent-assert) की तरह काम
 करते हैं।
 
-| कब थ्रो होता है | कारण |
+| क्या थ्रो होता है | कब |
 | --- | --- |
 | `STEP_TIMEOUT` | डेडलाइन खत्म हो गई। |
 | `STEP_BUDGET_EXHAUSTED` | बजट खत्म हो गया। |
@@ -318,7 +318,7 @@ const summary = await agent.extract('the workspace name and plan', {
 | `vision` | [`VisionMode`](#vision) | `false` |
 | `agent` | `string` | टेस्ट का एजेंट |
 
-| कब थ्रो होता है | कारण |
+| क्या थ्रो होता है | कब |
 | --- | --- |
 | `INVALID_ARGUMENT` | स्कीमा Standard Schema v1 नहीं है। |
 | `ASSERTION_INCONCLUSIVE` | स्क्रीन पर वह डेटा नहीं दिख रहा। |
@@ -821,7 +821,7 @@ export interface Unique {
 export function unique(value: string): Unique;
 ```
 
-| कब थ्रो होता है | कारण |
+| क्या थ्रो होता है | कब |
 | --- | --- |
 | `INVALID_ARGUMENT` | वैल्यू स्ट्रिंग नहीं है, खाली या सिर्फ़ व्हाइटस्पेस है, या उसमें `{{param:` प्लेसहोल्डर टेक्स्ट है। |
 

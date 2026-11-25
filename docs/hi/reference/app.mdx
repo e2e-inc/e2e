@@ -71,7 +71,7 @@ await app.open('https://example.com/login'); // any http(s) URL
 है। लिंक बेस के साथ कोई एब्सोल्यूट लिंक जैसा दिया गया है वैसा ही खुलता है,
 कस्टम ऐप स्कीम समेत।
 
-| कब थ्रो होता है | कारण |
+| क्या थ्रो होता है | कब |
 | --- | --- |
 | `APP_URL_REQUIRED` | पाथ दिया गया हो, लेकिन टारगेट में `app.url` (या डिवाइस पर `app.linkBase`) डिक्लेयर न हो। |
 | `POLICY_DENIED` | ऐसा URL जिसकी स्कीम `http:` या `https:` न हो। `about:blank` की इजाज़त है। जिस टारगेट में [`app.url` एक फ़ाइल हो](/reference/config#a-file-as-the-app), वहाँ उस फ़ाइल की डायरेक्टरी के बाहर का `file:` URL या किसी डायरेक्टरी का URL। `app.linkBase` वाले डिवाइस पर ऐसा लिंक जिसकी स्कीम `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, या `filesystem:` हो। |
@@ -88,7 +88,7 @@ await app.open('https://example.com/login'); // any http(s) URL
 await app.restart();
 ```
 
-| कब थ्रो होता है | कारण |
+| क्या थ्रो होता है | कब |
 | --- | --- |
 | `ACTION_FAILED`, `ENGINE_FAILURE` | ऑपरेशन या इंजन फ़ेल हो गया। |
 | `UNSUPPORTED_CAPABILITY` | `session.restart` न हो, या बिना `app.bundleId` वाले डिवाइस पर बिल्ड अभी इंस्टॉल न हुआ हो। |
@@ -105,7 +105,7 @@ test.beforeEach(async ({ app }) => {
 });
 ```
 
-| कब थ्रो होता है | कारण |
+| क्या थ्रो होता है | कब |
 | --- | --- |
 | `ACTION_FAILED`, `ENGINE_FAILURE` | ऑपरेशन या इंजन फ़ेल हो गया। |
 | `UNSUPPORTED_CAPABILITY` | `session.reset` न हो, या बिना `app.bundleId` वाले डिवाइस पर बिल्ड अभी इंस्टॉल न हुआ हो। |
@@ -124,7 +124,7 @@ test.beforeEach(async ({ app }) => {
 await app.back();
 ```
 
-| कब थ्रो होता है | कारण |
+| क्या थ्रो होता है | कब |
 | --- | --- |
 | `APP_NOT_OPEN` | `app.open()` अभी नहीं चला है, या इंजन ने अमान्य स्टेट रिपोर्ट किया। |
 | `ACTION_FAILED` | ऑपरेशन फ़ेल हो गया या टाइमआउट हो गया। |
@@ -149,7 +149,7 @@ const shot = await app.screenshot('after-checkout');
 - पेज नेविगेट होते समय लिया गया स्क्रीनशॉट उस वक्त दिख रहे डॉक्यूमेंट को कैप्चर
   करता है।
 
-| कब थ्रो होता है | कारण |
+| क्या थ्रो होता है | कब |
 | --- | --- |
 | `UNSUPPORTED_CAPABILITY` | इंजन स्क्रीनशॉट नहीं लेता। |
 | `POLICY_DENIED` | iOS और Android पर स्क्रीन पर मौजूद किसी सिक्योर फ़ील्ड के मास्क करने लायक बाउंड्स नहीं मिले। |
@@ -184,7 +184,7 @@ test('the dialog slides in', { video: 'off' }, async ({ app, screen }) => {
 - टेस्ट खत्म होने पर भी चल रही रिकॉर्डिंग रोककर सेव कर ली जाती है।
 - टेस्ट के वीडियो की तरह यह रिकॉर्डिंग भी कुछ मास्क नहीं करती।
 
-| कब थ्रो होता है | कारण |
+| क्या थ्रो होता है | कब |
 | --- | --- |
 | `UNSUPPORTED_CAPABILITY` | टेस्ट का वीडियो रिकॉर्ड हो रहा है, या इंजन वीडियो रिकॉर्ड नहीं करता। |
 | `INVALID_ARGUMENT` | कोई दूसरी रिकॉर्डिंग पहले से चल रही है। |
@@ -205,7 +205,7 @@ if ('path' in video) console.log(video.path);
   जाए (`app.restart()`, `app.clearState()`): तब हर पेज के लिए एक वीडियो बनता है।
 - स्टेप हर वीडियो को ट्रेस में लिंक करता है।
 
-| कब थ्रो होता है | कारण |
+| क्या थ्रो होता है | कब |
 | --- | --- |
 | `INVALID_ARGUMENT` | कोई रिकॉर्डिंग नहीं चल रही। |
 | `ENGINE_FAILURE` | इंजन ने कोई वीडियो नहीं लिखा। |

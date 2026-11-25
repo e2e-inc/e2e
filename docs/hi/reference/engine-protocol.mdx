@@ -94,7 +94,7 @@ export interface ConnectEngineOptions {
 कनेक्ट करें जिस पर आप भरोसा करते हैं: `socketTransport` एन्क्रिप्ट नहीं करता।
 </Warning>
 
-| कब थ्रो होता है | कारण |
+| क्या थ्रो होता है | कब |
 | --- | --- |
 | `INVALID_CONFIG` | मैनिफ़ेस्ट गलत है: अनजान मेथड, कोई मेथड दो बार लिस्टेड, या ऐसे मेंबर जिन्हें `defineEngine` मना करता है, जैसे `keyboard/press` के बिना `keyboard/type`, `actions` के बिना `engine/perform`, या `engine/observe` के बिना `engine/perform`। |
 | `ENGINE_FAILURE` | सर्वर का मैनिफ़ेस्ट अलग है, या कॉल के बीच कनेक्शन बंद हो गया। मैसेज में ट्रांसपोर्ट के डायग्नोस्टिक्स होते हैं, जैसे सर्वर की आखिरी stderr लाइनें। |

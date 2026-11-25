@@ -364,7 +364,7 @@ await expect(screen).toHaveScreenshot('feed.png', { mask: [screen.getByTestId('t
 | `.not` | स्क्रीन अलग होते ही पास होता है; कुछ सेव न होने पर `ASSERTION_FAILED` |
 | टॉलरेंस | `maxDiffPixels` और `maxDiffPixelRatio` दोनों सेट हों: छोटा वाला लागू होता है |
 
-| कब थ्रो होता है | कारण |
+| क्या थ्रो होता है | कब |
 | --- | --- |
 | `INVALID_ARGUMENT` | स्क्रीन पढ़ने से पहले: पाथ सेपरेटर वाला नाम, ऐसा ऑप्शन जिसे मैचर नहीं लेता (Playwright के `fullPage`, `animations`, `clip`), रेंज से बाहर वैल्यू, या फ़्रेम तक सीमित स्क्रीन पर `expect`। इसकी जगह फ़्रेम के अंदर के लोकेटर की तुलना करें |
 | `ASSERTION_FAILED` | ऊपर की टेबल के अनुसार गायब, अलग, या उसी रन में सेव स्क्रीनशॉट |
@@ -782,7 +782,7 @@ the batch never finished
 last: expected "running" not to be "running"
 ```
 
-| कब थ्रो होता है | कारण |
+| क्या थ्रो होता है | कब |
 | --- | --- |
 | `ASSERTION_FAILED` | बिना पास सैंपल के डेडलाइन बीत गई |
 | `INVALID_CONFIG` | पहले रीड से पहले: ऑप्शन प्लेन ऑब्जेक्ट न हों, अनजान ऑप्शन, `timeout`, `interval`, या `intervals` रेंज से बाहर हों, या `interval` और `intervals` दोनों सेट हों |
@@ -871,7 +871,7 @@ last: expected 202 to be 200
 `secondaryErrors` में दर्ज होता है। सूट हुक या वर्कर फ़िक्स्चर टियरडाउन के लिए
 आखिरी एरर टाइमआउट मैसेज में शामिल होता है।
 
-| कब थ्रो होता है | कारण |
+| क्या थ्रो होता है | कब |
 | --- | --- |
 | `ASSERTION_FAILED` | बिना पास कोशिश के डेडलाइन बीत गई |
 | `INVALID_ARGUMENT` | `expect` को दी गई वैल्यू फ़ंक्शन नहीं है |
