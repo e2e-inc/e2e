@@ -168,7 +168,7 @@ or a blocked agent verdict still fails the test.
 
 Serial members cannot set `retries`, `trace`, `video`, `session`,
 `platforms`, `skip`, `fail`, or `only`, nor can a nested `describe` set
-`trace` or `video`; nesting serial groups is a `COLLECTION_ERROR`.
+`trace`, `video`, `fail`, or `only`; nesting serial groups is a `COLLECTION_ERROR`.
 
 Hooks nest: outer `beforeEach` first, inner `afterEach` first. `beforeAll`
 reruns per retry and per serial group (each a fresh module realm) on the

@@ -356,6 +356,7 @@ describe('select', () => {
         test.describe('nested', () => test('refunds', noop));
         test.skip('skipped inside', noop);
         test.fixme('fixme inside', noop);
+        test.todo('todo inside');
       });
       test.describe('profile', { only: true }, () => test('renames', noop));
       test.describe('settings', { only: false }, () => {
@@ -371,6 +372,7 @@ describe('select', () => {
       // A skipped test in a focused group is focused, so it reports its own skip.
       ['skipped inside', 'skip', 'explicit'],
       ['fixme inside', 'skip', 'fixme'],
+      ['todo inside', 'skip', 'todo'],
       ['renames', 'run', undefined],
       ['sibling', 'filtered', 'filtered'],
       ['focused elsewhere', 'run', undefined],
@@ -388,9 +390,20 @@ describe('select', () => {
           test.describe('deeper', () => test('kept deeper', noop));
         });
       });
-      test.describe.only('untouched', () => test('kept beside', noop));
+      test.describe.only('through a plain group', () => {
+        test('dropped as well', noop);
+        test.describe('mid', () => {
+          test('dropped in mid', noop);
+          test.only('kept in mid', noop);
+        });
+      });
+      test.describe.only('untouched', () => {
+        test('kept beside', noop);
+        // only: false opts nothing out; it is the same as no only.
+        test.describe('opted out?', { only: false }, () => test('kept anyway', noop));
+      });
     });
-    expect(running(select(col, config()))).toEqual(['kept', 'kept too', 'kept deeper', 'kept beside']);
+    expect(running(select(col, config()))).toEqual(['kept', 'kept too', 'kept deeper', 'kept in mid', 'kept beside', 'kept anyway']);
   });
 
   it('keeps a focused group that holds only skipped tests focused, so CI and the empty run still see it', async () => {

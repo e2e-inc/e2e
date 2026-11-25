@@ -551,8 +551,8 @@ describe('checkout', { only: true }, () => {}); // the same, by option
 
 - Focused groups and `test.only` combine: every focused test runs, and the
   rest are reported as `filtered`.
-- A `test.only` or `describe.only` inside a focused group narrows it, as in
-  Playwright: only the inner focused tests run.
+- A `test.only` or `describe.only` inside a focused group narrows that
+  group, as in Playwright: of its tests, only the inner focused ones run.
 - A skipped test in a focused group stays focused and is reported with its
   own skip cause, `explicit`, `fixme`, or `todo`.
 - A CI run with a focused group fails with `ONLY_IN_CI`.
