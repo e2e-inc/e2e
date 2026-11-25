@@ -455,7 +455,8 @@ async function collectDownloads(
       const remote = surface.remoteDownloads();
       if (remote !== undefined) await saveDownloadsTo(page, remote.dir, currentOperation.signal);
       requireOpen();
-      const before = remote === undefined ? undefined : await remote.before(currentOperation.signal);
+      // Raced so a hook that settles quietly on cancellation cannot let a cancelled wait run its trigger.
+      const before = remote === undefined ? undefined : await raceAbort(() => remote.before(currentOperation.signal), currentOperation.signal, 'download');
       requireOpen();
       let allStarted!: () => void;
       const received = new Promise<void>((resolve) => { allStarted = resolve; });

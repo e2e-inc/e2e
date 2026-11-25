@@ -221,4 +221,42 @@ describe.each<BrowserProviderScope>(['worker', 'attempt'])('downloads through a 
     expect(error).toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('browser provider "failing-before" could not prepare a download wait on browser before-lease: file listing unavailable') });
     expect(triggers).toBe(0);
   });
+
+  it('fails a wait cancelled while its before hook runs with CANCELLED, without running the trigger, when the hook resolves on the abort', async () => {
+    artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-provider-cancel-'));
+    remoteDisk = mkdtempSync(path.join(tmpdir(), 'e2e-browser-cancel-'));
+    chrome = await launchRemoteChrome();
+    const cancel = new AbortController();
+    const provider: BrowserProvider = {
+      name: 'deaf-before', scope,
+      acquire: async () => ({ id: 'cancel-lease', cdpEndpoint: chrome!.endpoint }),
+      release: async () => undefined,
+      downloads: {
+        dir: path.join(remoteDisk, 'downloads'),
+        read: async (_lease, file) => readFile(file),
+        // A hook that settles quietly when cancelled, as one that catches its listing's abort would.
+        before: async (_lease, { signal: hookSignal }) => {
+          const settled = new Promise<unknown>((resolve) => { hookSignal.addEventListener('abort', () => resolve([]), { once: true }); });
+          cancel.abort();
+          return settled;
+        },
+      },
+    };
+    engine = webEngine({ browser: provider });
+    const prepared = await engine.prepare!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, slots: 1, env: {}, signal: signal(), headed: false, log: () => undefined });
+    await engine.init!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, env: { ...prepared?.env }, headed: false, workerSlot: 0, signal: signal(), log: () => undefined });
+    await engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal: signal(), resolveSecret: noSecrets, ...ignoreTrace });
+    await engine.session!.open!(app.url, operation());
+    const browser = engine.fixtures!['browser']!({
+      operation: () => ({ ...operation(), signal: cancel.signal }),
+      app: { resolveUrl: (url: string) => new URL(url, app.url).href },
+      expectable: (target: object) => target, fixture: (_name: string, target: object) => target,
+      attachArtifact: () => undefined,
+    } as unknown as EngineFixtureContext) as Browser;
+    let triggers = 0;
+    const error = await browser.waitForDownload(async () => { triggers += 1; }).then(() => undefined, (cause: { code: string }) => cause);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(error).toMatchObject({ code: 'CANCELLED' });
+    expect(triggers).toBe(0);
+  });
 });
