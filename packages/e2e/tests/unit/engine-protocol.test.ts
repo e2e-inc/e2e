@@ -702,6 +702,40 @@ describe('engine protocol', () => {
     });
   });
 
+  describe("permissions 'all'", () => {
+    it('carries allPermissions into prepare on an engine that declares grantsAllPermissions', async () => {
+      const seen: unknown[] = [];
+      const { remote } = overLoopback(
+        toy({
+          grantsAllPermissions: true,
+          async prepare(info) {
+            seen.push(info.app);
+          },
+        }),
+        {
+          validateApp(app) {
+            seen.push(app);
+          },
+        },
+      );
+      const target = resolveConfig(
+        { targets: [{ name: 'phone', platform: 'toy', engine: remote, app: { bundleId: 'dev.shop.app', permissions: 'all' } }] },
+        { projectRoot: process.cwd(), env: {} as NodeJS.ProcessEnv },
+      ).targets[0]!;
+      await target.engine!.prepare!({ runId: 'run', targetName: target.name, projectRoot: process.cwd(), app: engineAppInfo(target.app), slots: 1, env: {}, headed: false, signal: new AbortController().signal, log: () => {} });
+      expect(seen).toEqual([
+        { bundleId: 'dev.shop.app', allPermissions: true },
+        { bundleId: 'dev.shop.app', allPermissions: true },
+      ]);
+    });
+
+    it('refuses a server that does not declare the grantsAllPermissions its manifest promised', async () => {
+      const local = defineEngine(toy({}));
+      const remote = connectEngine({ manifest: { ...describeEngine(local), grantsAllPermissions: true }, transport: loopbackTransport(local) });
+      await expect(remote.init!(initInfo())).rejects.toThrow(/grantsAllPermissions is false, declared true/);
+    });
+  });
+
   it('serves every in-process target through one protocol client and leaves a connected engine as declared', () => {
     const engine = defineEngine(toy());
     const { remote } = overLoopback(toy());
