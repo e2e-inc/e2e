@@ -697,7 +697,8 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
 - A wait predicate gets each response (or request) and matches on a truthy
   or resolved truthy value, as Playwright's does:
   `(response) => response.request.method === 'POST' && response.status === 201`.
-  What it throws fails the step as is (`expect` keeps `ASSERTION_FAILED`).
+  What it throws fails the step as is: an e2e error keeps its code
+  (`expect` keeps `ASSERTION_FAILED`), any other throw is `ERROR`.
 - `cookies(urls?)`: every cookie, or only those a request to one URL or a
   list would carry; a relative URL resolves against the app URL.
 - `setCookies([...])`: a target is an http(s) URL or a domain.
@@ -738,7 +739,7 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
   have run).
   Both cover the page's main frame only, not its iframes.
 
-A `route`, `unroute`, `waitForResponse`, or `waitForURL` pattern is a glob
+A `route`, `unroute`, `waitForResponse`, `waitForRequest`, or `waitForURL` pattern is a glob
 string or `RegExp`, in Playwright's grammar (`*` stays within one path
 segment, `**` crosses `/`, `{a,b}` is either, `?` is literal); a relative
 one resolves against the base URL. `route`, `unroute`, `waitForResponse`, and

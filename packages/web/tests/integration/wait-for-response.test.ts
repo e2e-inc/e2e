@@ -3,11 +3,11 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Page } from 'playwright-core';
 import { withTimeout, type EngineFixtureContext } from '@e2e-dev/core/engine';
 import { PlaywrightSurface } from '../../src/surface.ts';
-import { createBrowserFixture, type Browser, type PageResponse } from '../../src/browser.ts';
+import { createBrowserFixture, type Browser, type PageResponse, type WebRequest } from '../../src/browser.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
 /**
@@ -83,6 +83,8 @@ describe('browser.waitForResponse and waitForRequest', () => {
   let page: Page;
   let browser: Browser;
   let operationBudgetMs: number;
+  /** The signal each `browser` call's operation carries: the step's, which a test can abort. */
+  let stepSignal: AbortSignal;
 
   beforeAll(async () => {
     ({ server, url: origin } = await startBodyServer());
@@ -93,10 +95,11 @@ describe('browser.waitForResponse and waitForRequest', () => {
   beforeEach(async () => {
     await surface.startAttempt({ attemptId: 'responses', artifactsDir, signal, resolveSecret: noSecrets, ...ignoreTrace });
     operationBudgetMs = 2_000;
+    stepSignal = signal;
     browser = createBrowserFixture(surface, {
       app: { resolveUrl: (url: string) => new URL(url, `${origin}/`).href },
       timeouts: { test: 5_000 },
-      operation: (timeoutMs = operationBudgetMs) => ({ signal, timeoutMs, runId: 'responses', attemptId: 'responses', origin: 'test' }),
+      operation: (timeoutMs = operationBudgetMs) => ({ signal: stepSignal, timeoutMs, runId: 'responses', attemptId: 'responses', origin: 'test' }),
       expectable: (target: object) => target,
       fixture: (_name: string, target: object) => target,
     } as unknown as EngineFixtureContext);
@@ -238,6 +241,79 @@ describe('browser.waitForResponse and waitForRequest', () => {
       fire(`await fetch('/api/full');`),
     ]);
     expect(value).toBe('a string');
+  });
+
+  it('cancels the body read of a response the wait passed over once it settles', async () => {
+    page = await surface.ensurePage();
+    await page.goto(`${origin}/`);
+    let passedOver: unknown;
+    const [response] = await Promise.all([
+      browser.waitForResponse(async (candidate) => {
+        if (candidate.url.endsWith('/api/endless')) {
+          try {
+            await candidate.text();
+          } catch (cause) {
+            passedOver = cause;
+          }
+          return false;
+        }
+        return candidate.url.endsWith('/api/full');
+      }),
+      fire(`void fetch('/api/endless').then((r) => r.text()); await new Promise((r) => setTimeout(r, 100)); await fetch('/api/full');`),
+    ]);
+    expect(response.url).toBe(`${origin}/api/full`);
+    await vi.waitFor(() => expect(passedOver).toMatchObject({ code: 'CANCELLED' }));
+  });
+
+  it('keeps the timeout when a predicate throws after it', async () => {
+    page = await surface.ensurePage();
+    await page.goto(`${origin}/`);
+    const [failure] = await Promise.all([
+      browser.waitForResponse(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        throw new Error('too late');
+      }, { timeout: 200 }).catch((caught: unknown) => caught),
+      fire(`await fetch('/api/full');`),
+    ]);
+    expect(failure).toMatchObject({ code: 'OPERATION_TIMEOUT' });
+    // The late throw lands after the wait settled and must not surface anywhere.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+
+  it('stops listening once the step is aborted', async () => {
+    page = await surface.ensurePage();
+    await page.goto(`${origin}/`);
+    // Playwright's client `Page` is an event emitter at runtime; its types leave `listenerCount` out.
+    const emitter = page as unknown as { listenerCount(event: string): number };
+    const listening = () => emitter.listenerCount('response') + emitter.listenerCount('request');
+    const before = listening();
+    const step = new AbortController();
+    stepSignal = step.signal;
+    let calls = 0;
+    const waits = [
+      browser.waitForResponse(() => ++calls < 0).catch((caught: unknown) => caught),
+      browser.waitForRequest(() => ++calls < 0).catch((caught: unknown) => caught),
+    ];
+    await vi.waitFor(() => expect(listening()).toBe(before + 2));
+    step.abort();
+    for (const failure of await Promise.all(waits)) expect(failure).toMatchObject({ code: 'CANCELLED' });
+    await vi.waitFor(() => expect(listening()).toBe(before));
+    await page.evaluate(() => fetch('/api/full').then((reply) => reply.text()));
+    expect(calls).toBe(0);
+  });
+
+  it('waits for a request before any page is open and returns the object its predicate saw', async () => {
+    let seen: WebRequest | undefined;
+    const [request] = await Promise.all([
+      browser.waitForRequest((candidate) => {
+        seen = candidate;
+        // Truthy is enough, as in Playwright.
+        return candidate.url as unknown as boolean;
+      }),
+      browser.goto('/'),
+    ]);
+    expect(request).toBe(seen);
+    expect(request).toMatchObject({ url: `${origin}/`, method: 'GET' });
   });
 
   it('refuses an option it does not take', async () => {

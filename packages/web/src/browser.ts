@@ -724,9 +724,9 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
 
   /**
    * The `PageResponse` over one response a wait saw. Its body is read once,
-   * when first asked for. Inside the wait a read is bounded by the wait's
-   * signal only, since the wait's own timeout already bounds a predicate that
-   * reads it. `settle` starts reading the response the wait returns at once,
+   * when first asked for. Inside the wait a read is bounded by `waitSignal`
+   * only, which ends with the wait, since the wait's own timeout already
+   * bounds a predicate that reads it. `settle` starts reading the response the wait returns at once,
    * while the browser still holds the body, and its readers then wait on a
    * budget of their own: the timeout bounds the match, never a body still
    * streaming in behind headers that already arrived.
@@ -953,12 +953,20 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
       const operation = context.operation(stepTimeout(options?.timeout, 'browser.waitForResponse'));
       return surface.guard(operation, 'waitForResponse', async (currentOperation) => {
         const page = await surface.ensurePage();
-        const view = viewOnce((response: Response) => responseView(response, currentOperation.signal));
-        const response = await page.waitForResponse(
-          match((candidate) => view(candidate).response),
-          { timeout: currentOperation.timeoutMs, signal: currentOperation.signal },
-        );
-        return view(response).settle();
+        // Ends the body reads of the responses the wait passed over once it settles,
+        // so a predicate still reading one stops instead of holding it for the attempt.
+        const waited = new AbortController();
+        const reads = AbortSignal.any([currentOperation.signal, waited.signal]);
+        try {
+          const view = viewOnce((response: Response) => responseView(response, reads));
+          const response = await page.waitForResponse(
+            match((candidate) => view(candidate).response),
+            { timeout: currentOperation.timeoutMs, signal: currentOperation.signal },
+          );
+          return view(response).settle();
+        } finally {
+          waited.abort();
+        }
       }, failures.translate);
     },
     waitForRequest(pattern, options) {

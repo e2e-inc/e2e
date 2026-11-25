@@ -878,7 +878,8 @@ expect((await created).status).toBe(201);
 
 ```ts
 const ready = browser.waitForResponse(
-  async (response) => response.url.endsWith('/api/jobs/42') && (await response.json()).state === 'done',
+  async (response) =>
+    response.url.endsWith('/api/jobs/42') && (await response.json<{ state: string }>()).state === 'done',
 );
 await screen.getByRole('button', 'Run job').tap();
 expect((await ready).request.method).toBe('GET');
@@ -890,8 +891,9 @@ expect((await ready).request.method).toBe('GET');
   returns, with the request it answers as `request`. A truthy return or
   resolved value matches. An async predicate can run for several responses
   at once; the first to resolve truthy wins, as in Playwright.
-- A predicate that throws or rejects fails the step with its own error: an
-  `expect` keeps `ASSERTION_FAILED`, any other throw is `ERROR`.
+- A predicate that throws or rejects fails the step with its own error. An
+  e2e error keeps its code: a failed `expect` is `ASSERTION_FAILED`, a body
+  that could not be read `ACTION_FAILED`. Any other throw is `ERROR`.
 - The deadline bounds the match: the response resolves as soon as its headers
   arrive. Inside a predicate, `body()`, `text()`, and `json()` wait as long
   as the match may. A body the page never reads may never finish, so a
