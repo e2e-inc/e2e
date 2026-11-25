@@ -82,7 +82,10 @@ describe('registration', () => {
       'test options has unknown key "timout"; did you mean "timeout"?',
     );
     await expect(register(() => test('x', { retry: 2 } as never, noop))).rejects.toThrow(
-      'test options has unknown key "retry"; expected one of timeout, retries, tags, skip, fail, only, platforms, requires, session, agentContext, agent, trace, video',
+      'test options has unknown key "retry"; expected one of timeout, retries, tags, skip, fail, only, platforms, session, agentContext, agent, trace, video',
+    );
+    await expect(register(() => test('x', { requires: ['browser'] } as never, noop))).rejects.toThrow(
+      "test options: requires was removed; scope the test to targets with platforms, e.g. platforms: ['web']",
     );
     await expect(register(() => test.describe('group', { searial: true } as never, () => {}))).rejects.toThrow(
       'describe options has unknown key "searial"; did you mean "serial"?',
@@ -458,6 +461,26 @@ describe('registration', () => {
       }),
     ).rejects.toThrow('test.fixme() cannot be used inside a serial group, which skips as one unit; set skip on the serial describe instead');
     expect(() => test.fixme('outside', noop)).toThrow(/^test\.fixme\(\) can only be called while a test module is being collected/);
+  });
+
+  it('registers test.todo(title) as a todo skip and rejects a body or serial registration', async () => {
+    const registration = await collectModule(async () => {
+      test.todo('not yet');
+    });
+    expect(registration.tests.map((item) => [item.title, item.mode, item.options])).toEqual([
+      ['not yet', 'todo', { skip: 'todo' }],
+    ]);
+    await expect(
+      collectModule(async () => {
+        test.describe('unit', { serial: true }, () => test.todo('member'));
+      }),
+    ).rejects.toThrow('test.todo() cannot be used inside a serial group');
+    await expect(
+      collectModule(async () => {
+        Reflect.apply(test.todo, test, ['has a body', noop]);
+      }),
+    ).rejects.toThrow('test.todo() takes a title only; register a test with a body through test.skip(title, fn) or test.fixme(title, fn)');
+    expect(() => test.todo('outside')).toThrow(/^test\.todo\(\) can only be called while a test module is being collected/);
   });
 
   it('rejects test.skip(title, fn) in a serial group, naming test.skip()', async () => {

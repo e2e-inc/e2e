@@ -132,6 +132,7 @@ test.for([['standard', '5.00']])('ships %s for %s', async ([speed, price], { app
 test('conditional', async () => { test.skip(await onlyOneOrg(), 'nothing to switch to'); }); // throws: the body stops here, reported skipped; call it before the first step
 test('later', async () => { test.skip('waiting on the API'); }); // bare skip from the body
 test.fixme('not yet', async () => {}); // test.skip's three forms; reported skipped with cause "fixme" and reason "fixme", or "fixme: <reason>" from test.fixme(reason) or test.fixme(cond, reason) in a body
+test.todo('add checkout coverage'); // no body; reported skipped with cause and reason "todo", without running
 test('big import', async () => { test.setTimeout(180_000); }); // body or beforeEach: the attempt's timeout, counted from its start; in beforeAll: that hook's own
 test('slow sync', async () => { test.slow(); }); // triples the timeout in force, once per attempt; test.slow(condition, reason) only when true
 test.fail('known gap', async () => {}); // expected to fail: a test failure passes it, a pass fails it with UNEXPECTED_PASS
@@ -157,7 +158,6 @@ or a blocked agent verdict still fails the test.
 | `skip` | unset | `true` or a reason string. |
 | `fail` | unset | `true` or a reason string: expected to fail, as `test.fail`. On a group, marks every test in it; not on setup tests or on, inside, or around a serial group. |
 | `platforms` | unset | Only targets with these platforms, e.g. `['ios']`. |
-| `requires` | `[]` | Engine capabilities, e.g. `['browser']`; missing ones skip the test at selection rather than failing it with `UNSUPPORTED_CAPABILITY`. |
 | `session` | unset | Restore state saved by a setup test. |
 | `agentContext` | unset | Extra context for `agent.*` calls in this test or group. |
 | `agent` | the run's agent | A configured name (`agents.<name>`) or a list run once per agent; `--agent` narrows the list, a setup test takes one name. Innermost wins; `agent.act(..., { agent })` names another for one call. |
@@ -165,7 +165,7 @@ or a blocked agent verdict still fails the test.
 | `serial` | `false` | Groups only. Members share app state, run in order on one worker, retry as a whole, and take the group's `trace` and `video`. |
 
 Serial members cannot set `retries`, `trace`, `video`, `session`,
-`platforms`, `requires`, `skip`, `fail`, or `only`, nor can a nested `describe` set
+`platforms`, `skip`, `fail`, or `only`, nor can a nested `describe` set
 `trace` or `video`; nesting serial groups is a `COLLECTION_ERROR`.
 
 Hooks nest: outer `beforeEach` first, inner `afterEach` first. `beforeAll`
@@ -195,7 +195,7 @@ takes `({}, use)`. A test sets up the `test.extend` fixtures its body and its
 for its side effect takes `[fn, { auto: true }]`, set up for every test, or
 `[fn, { scope: 'worker', auto: true }]`, once per worker. A name the target
 has no fixture for fails the run at collection with the file and line; a test
-skipped on that target (`platforms`, `requires`, `test.skipIf`) is not
+skipped on that target (`platforms`, `test.skipIf`) is not
 checked there. An `afterEach` that names a fixture whose setup failed is
 skipped. A fixture named like one the `test` already has, built-in ones
 included, extends it (`app: async ({ app }, use) => { await app.open('/x');
@@ -282,7 +282,7 @@ substring; a `RegExp` matches as written.
   `LOCATOR_AMBIGUOUS`; at zero, actions and reads poll until the action
   timeout then `LOCATOR_NOT_FOUND`, assertions until the assertion timeout
   then `ASSERTION_FAILED`. Exceptions:
-  `toHaveCount`, `toBeVisible`, `toBeHidden`, `toBeAttached`, list-form
+  `toHaveCount`, `toBeVisible`, `toBeHidden`, `toBeAttached`, `toBeInViewport`, list-form
   `toHaveText` and `toContainText`, `isVisible()` (false at zero),
   `isHidden()` (true), `count()`, `all()`, `allTextContents()`.
 - Narrow with `filter({ hasText })` (a case-insensitive substring, unlike a
@@ -312,8 +312,13 @@ substring; a `RegExp` matches as written.
 
 Each action resolves one node, waits up to `config.actionTimeout` (30 s, or
 `{ timeout }`) for it to be actionable, and does one thing: `tap()` (alias
-`click()`), `doubleTap()` (alias `dblclick()`), `secondaryTap()` (each takes
-`{ modifiers: ['Shift'] }`), `longPress({ duration? })`
+`click()`; `{ count: 3 }` taps three times in a row, a triple click in a
+browser; `count` is a positive safe integer, `2` is `doubleTap()`, 3 or more
+need the engine's `multiTap` (browser and mobile have it; mobile refuses more
+than 200), and a count above 1 doesn't combine with `position`),
+`doubleTap()` (alias `dblclick()`),
+`secondaryTap()` (each takes `{ modifiers: ['Shift'] }`),
+`longPress({ duration? })`
 (100 to 10000 ms; default 500 on the web, 1000 on a device),
 `fill(value | Secret)`, `pressSequentially(text, { delay? })`, `clear()`,
 `press(key)`, `check()`, `uncheck()`,
@@ -333,7 +338,9 @@ Coordinates are CSS pixels, for what the tree does not list: `tap({ position:
 { x, y } })` offsets from the node's top-left corner inside its border (with `modifiers` it is
 `INVALID_ARGUMENT`), `screen.tapAt({ x, y })` taps a viewport point,
 `screen.doubleTapAt({ x, y })` double-taps a viewport point,
-`screen.swipe({ from, to, duration? })` swipes along a path,
+`screen.swipe({ from, to, duration? })` swipes along a path (on iOS an
+untimed one must stay above the open soft keyboard; pass `duration` to drag
+across it),
 `screen.swipe({ direction, momentum? })` swipes the viewport. Viewport
 points also take percentages from `'0%'` through `'100%'`, rounded to the
 nearest pixel: `{ x: '50%', y: '50%' }`. Prefer a locator; a point moves with
@@ -424,18 +431,25 @@ typed; prefer it when the app already has a schema for the response.
 
 | Locator matchers | Browser matchers | Value matchers |
 | --- | --- | --- |
-| `toBeVisible`, `toBeHidden`, `toBeAttached`, `toBeEnabled`, `toBeDisabled`, `toBeEditable`, `toBeChecked`, `toBeSelected`, `toBeExpanded`, `toBeFocused`, `toHaveText`, `toContainText`, `toHaveValue`, `toHaveAttribute`, `toHaveCount`, `toHaveAccessibleName`, `toHaveRole`, `toHaveScreenshot` (also on `screen`) | `toHaveURL`, `toHaveTitle`, `toHaveClass(locator, expected)` | `toBe`, `toEqual`, `toMatchObject`, `toBeTruthy`, `toBeFalsy`, `toBeNull`, `toBeUndefined`, `toBeDefined`, `toHaveLength`, `toHaveProperty`, `toContain`, `toMatch`, `toBeGreaterThan`, `toBeGreaterThanOrEqual`, `toBeLessThan`, `toBeLessThanOrEqual`, `toBeCloseTo`, `toMatchSchema`, `toBeOK` |
+| `toBeVisible`, `toBeHidden`, `toBeInViewport`, `toBeAttached`, `toBeEnabled`, `toBeDisabled`, `toBeEditable`, `toBeChecked`, `toBeSelected`, `toBeExpanded`, `toBeFocused`, `toBeEmpty`, `toHaveText`, `toContainText`, `toHaveValue`, `toHaveAttribute`, `toHaveCount`, `toHaveAccessibleName`, `toHaveRole`, `toHaveScreenshot` (also on `screen`) | `toHaveURL`, `toHaveTitle`, `toHaveClass(locator, expected)` | `toBe`, `toEqual`, `toMatchObject`, `toBeTruthy`, `toBeFalsy`, `toBeNull`, `toBeUndefined`, `toBeDefined`, `toHaveLength`, `toHaveProperty`, `toContain`, `toMatch`, `toBeGreaterThan`, `toBeGreaterThanOrEqual`, `toBeLessThan`, `toBeLessThanOrEqual`, `toBeCloseTo`, `toMatchSchema`, `toBeOK` |
 
 `toHaveText` compares the whole normalized text, `toContainText` a substring
 or RegExp, `toHaveValue` a form control's value as is, whitespace included
-(it fails on a node with none); on a secure field all three are
+(it fails on a node with none). `toBeEmpty` passes on a field whose value
+is `''` (read as is, so a space is not empty) and on any other node with no
+text, where hidden text counts on the web, as in Playwright; it takes only
+`timeout` and works with `.not`. On a secure field all four are
 `POLICY_DENIED`, never a comparison against `''`. List forms:
 `toHaveText(['Alpha', /^Beta/])` needs exactly two matches with those texts
 in order; `toContainText(['Alpha', 'Beta'])` needs each entry in a distinct
 match, in order, extra matches allowed. `toHaveAttribute(name)` checks
 presence, `toHaveAttribute(name, value)` the value; `toBeAttached` waits for
 a match, hidden or not; `toHaveClass` compares the whole normalized class
-list or tests a RegExp. A failed matcher is `ASSERTION_FAILED`, exit code 1.
+list or tests a RegExp; `toBeInViewport({ ratio })` waits for part of a match
+(or that share of its box) inside the viewport without scrolling, reads no
+match as outside, and on a device fails with `UNSUPPORTED_CAPABILITY` for
+`ratio > 0` once the node is on screen. A failed matcher is `ASSERTION_FAILED`,
+exit code 1.
 
 Playwright's `{ checked: false }`, `{ enabled: false }`, `{ editable: false }`,
 `{ visible: false }`, and `{ attached: false }` flip their matchers, and `{ ignoreCase: true }`
@@ -612,7 +626,7 @@ params. A fixture's run-unique value in a goal's params goes in as
 ## The browser fixture (browser only)
 
 Prefer `app` and `screen`; `browser` is for what only a browser has, and a
-portable suite declares `requires: ['browser']`. Page methods act on the one
+portable suite declares `platforms: ['web']`. Page methods act on the one
 active tab; cookies, routes, and `onDialog` cover the whole browser. A tab
 the app opens (`target="_blank"`, `window.open`) opens in the background:
 the active tab stays where it was. `waitForPopup(() => trigger)` makes the
@@ -625,7 +639,8 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
   `back({ timeout? })`, `forward({ timeout? })`: navigation on the test
   timeout by default; `goto` takes a base-relative path.
 - `url()`, `title()`, `waitForURL(url | RegExp, { timeout? })`: reads and a
-  URL wait; `waitForURL` matches like `toHaveURL`.
+  URL wait; `waitForURL` takes a URL glob such as `'**/checkout'` or a
+  `RegExp`, and `toHaveURL` compares a string exactly.
 - `locator(css)`: raw CSS or XPath; not portable, a last resort.
 - `frameLocator(css)`: a `Screen` scoped to one iframe
   (`browser.frameLocator('#payment').getByLabel('Card number')`); keeps
@@ -690,13 +705,14 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
   have run).
   Both cover the page's main frame only, not its iframes.
 
-A `route`, `unroute`, or `waitForResponse` pattern is a glob string or
-`RegExp` matched against the full URL (`*` stays within one path segment,
-`**` crosses `/`, `?` is one character), or `{ method, url }` to match one
-HTTP method too, case-insensitively. A method matches exactly that method:
-`GET` does not answer `HEAD`. `unroute` removes routes
-registered with the same pattern, method included, rather than URL-matching
-them. A predicate function is `INVALID_ARGUMENT`.
+A `route`, `unroute`, `waitForResponse`, or `waitForURL` pattern is a glob
+string or `RegExp`, in Playwright's grammar (`*` stays within one path
+segment, `**` crosses `/`, `{a,b}` is either, `?` is literal); a relative
+one resolves against the base URL. `route`, `unroute`, and `waitForResponse`
+also take `{ method, url }` to match one HTTP method too, case-insensitively.
+A method matches exactly that method: `GET` does not answer `HEAD`. `unroute`
+removes routes registered with the same pattern, method included, rather than
+URL-matching them. A predicate function is `INVALID_ARGUMENT`.
 
 ## Habits
 

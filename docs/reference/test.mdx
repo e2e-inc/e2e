@@ -32,6 +32,7 @@ describe('checkout', { tags: ['billing'] }, () => {
 | --- | --- |
 | [`test`](#test) | `TestCase` |
 | [`test.skip`](#test-skip) | `TestCase \| void` |
+| [`test.todo`](#test-todo) | `TestCase` |
 | [`test.fixme`](#test-fixme) | `TestCase \| void` |
 | [`test.skipIf`](#test-skipif) | `TestRegistrar` |
 | [`test.runIf`](#test-runif) | `TestRegistrar` |
@@ -133,6 +134,25 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 | `INVALID_ARGUMENT` | Called in a setup test with a true condition, or none. A setup test cannot skip because other tests depend on its sessions. |
 | `COLLECTION_ERROR` | The conditional form, outside a test body. |
 | `COLLECTION_ERROR` | The registration form, inside a serial group. Set [`skip`](#skip) on the serial `describe` instead. |
+
+#### `test.todo`
+
+Registers an unfinished test without a body:
+
+```ts
+test.todo('add checkout coverage');
+```
+
+- The test never runs and has no attempts. It is reported `skipped`, with
+  `skip.cause` and `skip.reason` both `todo`.
+- A selection of only TODO tests fails with `NO_TESTS`, like any selection
+  with nothing to run, unless `--pass-with-no-tests` is set.
+- It takes no test options and returns a `TestCase`.
+
+| Throws | When |
+| --- | --- |
+| `COLLECTION_ERROR` | Called with a body or any argument after the title. Use [`test.skip`](#test-skip) or [`test.fixme`](#test-fixme) for a test with a body. |
+| `COLLECTION_ERROR` | Called inside a serial group. Set [`skip`](#skip) on the serial `describe` instead. |
 
 #### `test.fixme`
 
@@ -628,7 +648,6 @@ blocked event loop hangs it.
 | [`fail`](#fail) | `boolean \| string` | - |
 | [`only`](#only) | `boolean` | - |
 | [`platforms`](#platforms) | `readonly string[]` | - |
-| [`requires`](#requires) | `readonly Capability[]` | - |
 | [`session`](#session) | `string` | - |
 | [`agentContext`](#agentcontext) | `string` | - |
 | [`agent`](#agent) | `string \| readonly string[]` | the run's agents |
@@ -716,27 +735,6 @@ Platforms the test runs on. Other targets skip it. Innermost wins.
 ```ts
 test('uses Face ID', { platforms: ['ios'] }, async ({ app }) => {});
 ```
-
-#### `requires`
-
-Capabilities the target must have. A target that lacks one skips the test at
-selection. Innermost wins.
-
-```ts
-test('onboarding asks for the camera', { requires: ['native-app'] }, async ({ app, agent }) => {
-  await app.open();
-  await agent.assert('The app asks for camera access');
-});
-```
-
-Accepted values:
-
-- The harness capabilities of the target's engine: `observation`, `actions`,
-  `location`, `pointer`, `keyboard`, `computed-style`, `state`, `artifacts`.
-- One per built-in fixture an engine contributes: `browser`, `device`. See
-  [the engine contract](/reference/engine#engine).
-- The kind of app the target declares: `browser` for an `app.url`,
-  `native-app` for an `app.bundleId` or `app.appPath`.
 
 #### `session`
 
@@ -835,8 +833,8 @@ describe('checkout', { serial: true }, () => {
 
 | Throws | When |
 | --- | --- |
-| `COLLECTION_ERROR` | A member sets `retries`, `trace`, `video`, `session`, `platforms`, `requires`, `skip`, `only`, or a nested `serial`. |
-| `COLLECTION_ERROR` | A member registers through `test.skip(title, fn)`, `test.skipIf`, `test.runIf`, or `test.fixme(title, fn)`. |
+| `COLLECTION_ERROR` | A member sets `retries`, `trace`, `video`, `session`, `platforms`, `skip`, `only`, or a nested `serial`. |
+| `COLLECTION_ERROR` | A member registers through `test.skip(title, fn)`, `test.todo(title)`, `test.skipIf`, `test.runIf`, or `test.fixme(title, fn)`. |
 
 #### `sessions`
 
@@ -889,7 +887,7 @@ reads the names from the function's source. A [`test.each`](#test-each) or
 
 | Throws | When |
 | --- | --- |
-| `COLLECTION_ERROR` | A test that runs on a target, or one of its hooks, names a fixture the target does not have. No test runs. Declare `requires: ['browser']`, `platforms`, or `test.skipIf` to skip such tests on that target instead. |
+| `COLLECTION_ERROR` | A test that runs on a target, or one of its hooks, names a fixture the target does not have. No test runs. Declare `platforms` or `test.skipIf` to skip such tests on that target instead. |
 | `COLLECTION_ERROR` | A test body, a hook, or a fixture function takes the whole object (`async (fixtures) => {}`), a rest property (`{ app, ...rest }`), or a computed property, or is a bound function (`fn.bind()`), whose parameters cannot be read. |
 
 <Note>
@@ -1102,6 +1100,8 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    */
   skip(condition: boolean, reason?: string): void;
   skip(reason?: string): void;
+  /** Registers an unfinished test, reported as skipped with cause and reason `todo`. */
+  todo(title: string): TestCase;
   /** Registers one skipped test marked fixme, reported with the skip cause and reason `fixme`. */
   fixme(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
@@ -1277,8 +1277,6 @@ export interface TestOptions {
   only?: boolean;
   /** Platforms the test runs on; other targets skip it. Innermost wins. */
   platforms?: readonly string[];
-  /** Capabilities the target must have; otherwise the test is skipped at selection. Innermost wins. */
-  requires?: readonly Capability[];
   /** Session a setup test saved, restored before the body runs. */
   session?: string;
   /** Extra context for agent steps; layers are concatenated outermost first. */
