@@ -124,8 +124,9 @@ export interface BrowserProviderDownloads {
   /** The bytes of one finished download, `file` an absolute path under `dir`, read off the leased browser's disk. */
   read(lease: BrowserLease, file: string, context: BrowserDownloadContext): Promise<Uint8Array>;
   /**
-   * Runs once per `waitForDownload` before its trigger; its result reaches
-   * every `read` of that wait as `context.before`.
+   * Runs once per `waitForDownload` or `waitForDownloads` before its
+   * trigger; its result reaches every `read` of that wait as
+   * `context.before`.
    */
   before?(lease: BrowserLease, context: Omit<BrowserDownloadContext, 'suggestedFilename' | 'before'>): Promise<unknown>;
 }
