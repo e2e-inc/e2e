@@ -82,7 +82,7 @@ export function renderSummary(result: Result): string {
     lines.push(
       `Checkout \`${result.rows[0]?.head.sha.slice(0, 12) ?? 'unknown'}\`.`,
       '',
-      '| Case | Mode | Median | Min – max | TrialSpread |',
+      '| Case | Mode | Median | Min – max | Spread |',
       '| --- | --- | ---: | ---: | ---: |',
       ...result.rows.map(
         (row) => `| \`${row.case}\` | ${row.mode} | ${cost(tool, row.head.spread.median)} | ${range(tool, row.head.spread)} | ${spreadText(row.head.spread)} |`,
