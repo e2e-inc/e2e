@@ -686,19 +686,31 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
   none or two fails the next step with `ACTION_FAILED`, an unsupported
   option with `INVALID_ARGUMENT`.
 - `unrouteAll()` removes every route; configured headers stay.
-- `waitForResponse(pattern | predicate, { timeout? })`: resolves once the
-  headers arrive, with `{ url, status, headers, request, body(), json(),
-  text() }`; the body readers wait for the body (up to the action timeout)
-  and reject with `ACTION_FAILED` when it could not be read. Start the wait
-  before the request, including the first `browser.goto` or `app.open`.
+- `waitForResponse(pattern | predicate, { timeout? })`: returns a
+  `PageResponse` with `{ url, status, headers, request, body(), json(),
+  text() }`. Only the body readers are methods; `headers` has lower-cased names
+  without cookies. Resolves on headers unless a predicate reads the body. On
+  the returned response, body readers get `config.actionTimeout` capped by the
+  test deadline and reject with `ACTION_FAILED` if the body cannot be read. An
+  empty body gives an empty `Buffer` from `body()`, `''` from `text()`, and a
+  rejection from `json()`.
 - `waitForRequest(pattern | predicate, { timeout? })`: resolves when the page
-  sends the request, with `{ url, method, headers, postData? }`, the
-  `route.request` shape.
-- A wait predicate gets each response (or request) and matches on a truthy
-  or resolved truthy value, as Playwright's does:
-  `(response) => response.request.method === 'POST' && response.status === 201`.
-  What it throws fails the step as is: an e2e error keeps its code
-  (`expect` keeps `ASSERTION_FAILED`), any other throw is `ERROR`.
+  sends the request, before any response, with a `WebRequest` shaped as
+  `{ url, method, headers, postData? }`, the same type as `route.request`.
+- Start either wait before the triggering action, usually in `Promise.all`.
+  Both work before the first `browser.goto` or `app.open`. `timeout` is the
+  only option; any other key is `INVALID_ARGUMENT`. Nothing matching in time is
+  `ACTION_FAILED`, and a relative pattern with no `app.url` is
+  `APP_URL_REQUIRED`. Traces label a function predicate as `predicate`.
+- A wait predicate runs per event and returns `boolean | Promise<boolean>`, as
+  in `(response) => response.request.method === 'POST' && response.status === 201`.
+  Any truthy value matches at runtime, async predicates can run concurrently,
+  and the first match wins. Inside a `waitForResponse` predicate, body reads
+  share the wait's timeout, so reading a streaming or unclosed body can wait
+  until timeout; reads still pending on passed-over responses cancel when the
+  wait settles. A thrown error fails the step unchanged: an e2e error keeps its
+  code, such as `ASSERTION_FAILED` from `expect` or `ACTION_FAILED` from an
+  unreadable body, and any other throw becomes `ERROR`.
 - `cookies(urls?)`: every cookie, or only those a request to one URL or a
   list would carry; a relative URL resolves against the app URL.
 - `setCookies([...])`: a target is an http(s) URL or a domain.

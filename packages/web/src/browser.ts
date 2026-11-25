@@ -379,19 +379,20 @@ export interface Browser extends Expectable<BrowserExpectation> {
   /** Removes all routes registered by this browser fixture, preserving the configured headers. */
   unrouteAll(): Promise<void>;
   /**
-   * Waits for a response of the active tab that matches a URL pattern,
-   * optionally narrowed to one HTTP method, or that a predicate accepts. The
-   * predicate is called with each response until it returns or resolves to a
-   * truthy value; a predicate that throws fails the wait with its error.
+   * Waits for a response on the active tab matching a URL pattern, a
+   * `{ method, url }` matcher, or a predicate. The predicate runs per response
+   * until one returns or resolves to a truthy value; throwing fails the wait
+   * with the predicate's own error.
    */
   waitForResponse(
     pattern: string | RegExp | RouteMatcher | ((response: PageResponse) => boolean | Promise<boolean>),
     options?: { timeout?: number },
   ): Promise<PageResponse>;
   /**
-   * Waits for a request of the active tab that matches a URL pattern,
-   * optionally narrowed to one HTTP method, or that a predicate accepts,
-   * called the way `waitForResponse` calls its own.
+   * Waits for a request on the active tab matching a URL pattern, a
+   * `{ method, url }` matcher, or a predicate, and resolves when the page sends
+   * it before any response arrives. Predicate matching and errors work the
+   * same way as in `waitForResponse`.
    */
   waitForRequest(
     pattern: string | RegExp | RouteMatcher | ((request: WebRequest) => boolean | Promise<boolean>),

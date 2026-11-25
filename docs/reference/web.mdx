@@ -862,56 +862,62 @@ await browser.unrouteAll();
 
 #### `waitForResponse`
 
-Waits for a response of the active tab that matches a pattern, in the
-[`route`](#route) pattern syntax, or that a predicate accepts.
+Waits for a response on the active tab matching a [`route`](#route) pattern or
+a predicate.
 
 ```ts
-const response = await browser.waitForResponse('**/api/orders');
-expect(response.status).toBe(201);
+const [created] = await Promise.all([
+  browser.waitForResponse({ method: 'POST', url: '**/api/orders' }),
+  screen.getByRole('button', 'Place order').tap(),
+]);
+expect(created.status).toBe(201);
+
+const [ready] = await Promise.all([
+  browser.waitForResponse(
+    async (response) =>
+      response.url.endsWith('/api/jobs/42') &&
+      response.status === 200 &&
+      (await response.json<{ state: string }>()).state === 'done',
+    { timeout: 15_000 }, // default: actionTimeout
+  ),
+  screen.getByRole('button', 'Run job').tap(),
+]);
+expect(ready.request.method).toBe('GET');
 ```
 
-```ts
-const created = browser.waitForResponse({ method: 'POST', url: '**/api/orders' });
-await screen.getByRole('button', 'Place order').tap();
-expect((await created).status).toBe(201);
-```
-
-```ts
-const ready = browser.waitForResponse(
-  async (response) =>
-    response.url.endsWith('/api/jobs/42') && (await response.json<{ state: string }>()).state === 'done',
-);
-await screen.getByRole('button', 'Run job').tap();
-expect((await ready).request.method).toBe('GET');
-```
-
-- A `{ method, url }` pattern matches only a response to that method;
-  responses to another method pass it by.
-- A predicate gets each response as a `PageResponse`, the type the call
-  returns, with the request it answers as `request`. A truthy return or
-  resolved value matches. An async predicate can run for several responses
-  at once; the first to resolve truthy wins, as in Playwright.
-- A predicate that throws or rejects fails the step with its own error. An
-  e2e error keeps its code: a failed `expect` is `ASSERTION_FAILED`, a body
-  that could not be read `ACTION_FAILED`. Any other throw is `ERROR`.
-- The deadline bounds the match: the response resolves as soon as its headers
-  arrive. Inside a predicate, `body()`, `text()`, and `json()` wait as long
-  as the match may. A body the page never reads may never finish, so a
-  predicate that reads one waits until the deadline, as in Playwright.
-- On the returned response, `body()`, `text()`, and `json()` wait for the
-  body on a budget of their own, `config.actionTimeout` capped by the test
-  deadline.
-- `url`, `status`, `headers`, and `request` are always readable.
-- A genuinely empty body reads as an empty `Buffer` from `body()` and `''`
-  from `text()`; `json()` rejects it.
-- The step's label is the pattern, or `predicate` for a function.
+- Start the wait before the action that triggers the request, usually in
+  `Promise.all`. It also works before the first `browser.goto` or `app.open`.
+- Pass a URL glob string, a `RegExp`, `{ method, url }`, or a predicate
+  function. Patterns use the same rules as [`route`](#route).
+- A predicate runs once per response with a `PageResponse` and returns
+  `boolean | Promise<boolean>`. At runtime, any truthy value matches. Async
+  predicates can run at the same time on several responses, and the first to
+  match wins, as in Playwright.
+- If a predicate throws or rejects, the step fails with that error unchanged.
+  An e2e error keeps its code, so a failed `expect` throws `ASSERTION_FAILED`
+  and an unreadable body throws `ACTION_FAILED`. Any other throw fails with
+  `ERROR`.
+- With a pattern, or a predicate that does not read the body, the wait resolves
+  as soon as response headers arrive.
+- Inside a predicate, `body()`, `text()`, and `json()` share the wait's
+  timeout. A body the page never finishes reading, such as a stream or an
+  unclosed response, can hold the predicate until the timeout, as in
+  Playwright. When the wait settles, e2e cancels body reads still pending on
+  passed-over responses.
+- On the returned `PageResponse`, `body()`, `text()`, and `json()` each use
+  `config.actionTimeout`, capped by the test deadline.
+- `url`, `status`, `headers`, and `request` are properties, not methods, and
+  are always readable without waiting for the body. Only `body()`, `text()`,
+  and `json()` are methods.
+- On an empty body, `body()` returns an empty `Buffer`, `text()` returns `''`,
+  and `json()` rejects.
+- Traces label the step with the pattern, or `predicate` for a function.
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | A pattern that is not a string, `RegExp`, `{ method, url }`, or function; a glob that nests a `{` or leaves a `{` or `}` unmatched; a `{ method, url }` pattern with a missing or extra key, a method that is not an HTTP method, or a `url` that is not a string or `RegExp`; an option other than `timeout`. |
+| `INVALID_ARGUMENT` | A pattern that is not a string, `RegExp`, `{ method, url }`, or function; a glob that nests a `{` or leaves a `{` or `}` unmatched; a `{ method, url }` pattern with a missing or extra key, a method that is not an HTTP method, or a `url` that is not a string or `RegExp`; an option other than `timeout`, such as Playwright's `signal`. |
 | `APP_URL_REQUIRED` | A relative pattern on a target with no `app.url`. |
-| `ACTION_FAILED` | Nothing matches inside the deadline. From `body()`, `text()`, and `json()`: a body still streaming when their budget runs out, or a body the browser could not read (a connection reset short of the declared `Content-Length`, a request the page aborted, or a redirect, whose body the browser never keeps), instead of an empty string. |
-| What the predicate throws | The predicate throws or rejects. |
+| `ACTION_FAILED` | No response matches before the timeout. From `body()`, `text()`, or `json()`: a body that does not finish within their budget, or a body the browser cannot read, such as a connection cut short of `Content-Length`, an aborted request, or a redirect whose body the browser never keeps, instead of returning an empty string. |
 
 ```ts
 /**
@@ -942,9 +948,9 @@ export interface PageResponse extends WebResponse {
 
 #### `waitForRequest`
 
-Waits for a request of the active tab that matches a pattern, in the
-[`route`](#route) pattern syntax, or that a predicate accepts. It resolves
-when the page sends the request, before any response.
+Waits for a request on the active tab matching a [`route`](#route) pattern or
+a predicate. It resolves when the page sends the request, before any response
+arrives.
 
 ```ts
 const [order] = await Promise.all([
@@ -952,27 +958,31 @@ const [order] = await Promise.all([
   screen.getByRole('button', 'Place order').tap(),
 ]);
 expect(JSON.parse(order.postData ?? '{}')).toEqual({ sku: 'A-1', quantity: 2 });
+
+const [search] = await Promise.all([
+  browser.waitForRequest(
+    (request) => new URL(request.url).searchParams.get('q') === 'shoes',
+    { timeout: 10_000 }, // default: actionTimeout
+  ),
+  screen.getByRole('searchbox').fill('shoes'),
+]);
+expect(search.method).toBe('GET');
 ```
 
-```ts
-const search = browser.waitForRequest((request) => new URL(request.url).searchParams.get('q') === 'shoes');
-await screen.getByRole('searchbox').fill('shoes');
-await search;
-```
-
-- It returns a [`WebRequest`](#route), the type a route handler reads as
-  `route.request`: `url`, `method`, `headers`, and `postData`.
-- A predicate gets each request as a `WebRequest` and matches, fails, and
-  is labeled as a [`waitForResponse`](#waitforresponse) predicate does.
-- `headers` has lower-cased names and leaves out cookie headers, as
-  `route.request.headers` does.
+- Start the wait before the action that triggers the request, usually in
+  `Promise.all`. It also works before the first `browser.goto` or `app.open`.
+- Returns a [`WebRequest`](#route), the same type as `route.request`: `url`,
+  `method`, `headers`, and optional `postData`. Every field is a property.
+  `headers` has lower-cased names and leaves out cookie headers.
+- A predicate runs once per request with a `WebRequest`. Truthy matching,
+  concurrent async predicates, thrown errors, and the `predicate` trace label
+  work the same way as in [`waitForResponse`](#waitforresponse).
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | A pattern or option `waitForResponse` refuses. |
+| `INVALID_ARGUMENT` | Any pattern shape or option [`waitForResponse`](#waitforresponse) refuses, including any option other than `timeout`. |
 | `APP_URL_REQUIRED` | A relative pattern on a target with no `app.url`. |
-| `ACTION_FAILED` | Nothing matches inside the deadline. |
-| What the predicate throws | The predicate throws or rejects. |
+| `ACTION_FAILED` | No request matches before the timeout. |
 
 #### `cookies`
 
@@ -1625,19 +1635,20 @@ export interface Browser extends Expectable<BrowserExpectation> {
   /** Removes all routes registered by this browser fixture, preserving the configured headers. */
   unrouteAll(): Promise<void>;
   /**
-   * Waits for a response of the active tab that matches a URL pattern,
-   * optionally narrowed to one HTTP method, or that a predicate accepts. The
-   * predicate is called with each response until it returns or resolves to a
-   * truthy value; a predicate that throws fails the wait with its error.
+   * Waits for a response on the active tab matching a URL pattern, a
+   * `{ method, url }` matcher, or a predicate. The predicate runs per response
+   * until one returns or resolves to a truthy value; throwing fails the wait
+   * with the predicate's own error.
    */
   waitForResponse(
     pattern: string | RegExp | RouteMatcher | ((response: PageResponse) => boolean | Promise<boolean>),
     options?: { timeout?: number },
   ): Promise<PageResponse>;
   /**
-   * Waits for a request of the active tab that matches a URL pattern,
-   * optionally narrowed to one HTTP method, or that a predicate accepts,
-   * called the way `waitForResponse` calls its own.
+   * Waits for a request on the active tab matching a URL pattern, a
+   * `{ method, url }` matcher, or a predicate, and resolves when the page sends
+   * it before any response arrives. Predicate matching and errors work the
+   * same way as in `waitForResponse`.
    */
   waitForRequest(
     pattern: string | RegExp | RouteMatcher | ((request: WebRequest) => boolean | Promise<boolean>),
