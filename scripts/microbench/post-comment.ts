@@ -21,9 +21,13 @@ import { COMMENT_MARKER, renderComment } from './comment.ts';
 import type { Result } from './markdown.ts';
 
 const { GITHUB_EVENT_PATH: eventPath, GITHUB_SERVER_URL: server, GITHUB_REPOSITORY: repo, GITHUB_RUN_ID: runId } = process.env;
-const dir = process.argv[2];
-if (dir === undefined || !eventPath || !server || !repo || !runId) {
-  process.stderr.write('usage: post-comment.ts <dir> [--dry-run], with GITHUB_EVENT_PATH, GITHUB_SERVER_URL, GITHUB_REPOSITORY, and GITHUB_RUN_ID set\n');
+const args = process.argv.slice(2);
+const dryRun = args.includes('--dry-run');
+const dir = args.find((arg) => arg !== '--dry-run');
+if (dir === undefined || !server || !repo || !runId || (!dryRun && !eventPath)) {
+  process.stderr.write(
+    'usage: post-comment.ts <dir> [--dry-run], with GITHUB_SERVER_URL, GITHUB_REPOSITORY, and GITHUB_RUN_ID set, and GITHUB_EVENT_PATH unless --dry-run\n',
+  );
   process.exit(2);
 }
 
@@ -38,7 +42,7 @@ const body = renderComment({
   repeatability: read(dir, 'microbench-repeatability'),
   runUrl: `${server}/${repo}/actions/runs/${runId}`,
 });
-if (process.argv.includes('--dry-run')) {
+if (dryRun || eventPath === undefined) {
   process.stdout.write(body);
 } else {
   const { number, head } = (JSON.parse(readFileSync(eventPath, 'utf8')) as { pull_request: { number: number; head: { sha: string } } })
