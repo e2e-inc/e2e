@@ -1730,8 +1730,9 @@ export class AgentDeviceSurface {
     const settle = operation.origin === 'test' ? {} : this.settleOptions;
     const before = this.latestScreen;
     const label = `${action.kind} at point`;
-    await this.command(label, (client) => pointerInteraction(client, point, action, settle, gestureStabilization(operation), input).catch((cause: unknown) => {
-      throw action.kind === 'swipeTo' ? refusedSwipePath(cause, label, action.durationMs !== undefined, this.knownViewport) : cause;
+    await this.command(label, (client) => pointerInteraction(client, point, action, settle, gestureStabilization(operation), input).catch(async (cause: unknown) => {
+      if (action.kind !== 'swipeTo') throw cause;
+      throw await refusedSwipePath(cause, label, action.durationMs !== undefined, () => this.viewport(operation, input));
     }), operation.signal);
     if (action.kind === 'swipeTo') this.noteGesture(operation);
     this.markAction(before);
