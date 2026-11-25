@@ -265,6 +265,21 @@ describe('browser.waitForResponse and waitForRequest', () => {
     await vi.waitFor(() => expect(passedOver).toMatchObject({ code: 'CANCELLED' }));
   });
 
+  it('reads the body of a response the wait passed over after it settles', async () => {
+    page = await surface.ensurePage();
+    await page.goto(`${origin}/`);
+    const seen: PageResponse[] = [];
+    await Promise.all([
+      browser.waitForResponse(async (candidate) => {
+        seen.push(candidate);
+        return candidate.url.includes('/api/') && (await candidate.json<{ method?: string }>()).method === 'POST';
+      }),
+      fire(`await fetch('/api/full').then((r) => r.text()); await fetch('/api/orders', { method: 'POST' }).then((r) => r.text());`),
+    ]);
+    const passedOver = seen.find((candidate) => candidate.url.endsWith('/api/full'));
+    await expect(passedOver?.json()).resolves.toEqual({ ok: true });
+  });
+
   it('keeps the timeout when a predicate throws after it', async () => {
     page = await surface.ensurePage();
     await page.goto(`${origin}/`);

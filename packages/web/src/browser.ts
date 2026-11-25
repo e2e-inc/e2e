@@ -725,12 +725,13 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
 
   /**
    * The `PageResponse` over one response a wait saw. Its body is read once,
-   * when first asked for. Inside the wait a read is bounded by `waitSignal`
-   * only, which ends with the wait, since the wait's own timeout already
-   * bounds a predicate that reads it. `settle` starts reading the response the wait returns at once,
-   * while the browser still holds the body, and its readers then wait on a
-   * budget of their own: the timeout bounds the match, never a body still
-   * streaming in behind headers that already arrived.
+   * when first asked for. While the wait runs, a read is bounded by
+   * `waitSignal` only, since the wait's own timeout already bounds a predicate
+   * that reads it; a read still pending when the wait ends is cancelled with
+   * it. `settle` starts reading the response the wait returns at once, while
+   * the browser still holds the body. A read that starts after the wait, on
+   * any response it saw, waits on a budget of its own: the timeout bounds the
+   * match, never a body still streaming in behind headers that already arrived.
    */
   const responseView = (response: Response, waitSignal: AbortSignal) => {
     let started: Promise<() => Promise<Buffer>> | undefined;
@@ -738,7 +739,7 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     const start = () =>
       (started ??= readResponseBody('waitForResponse', () => response.body(), () => response.request().failure()?.errorText));
     const read = async (): Promise<Buffer> => {
-      if (!settled) return (await raceAbort(start(), waitSignal, 'waitForResponse body'))();
+      if (!settled && !waitSignal.aborted) return (await raceAbort(start(), waitSignal, 'waitForResponse body'))();
       const { signal, timeoutMs } = context.operation();
       const bytes = await raceAbort(
         withTimeout(start(), timeoutMs, () =>
