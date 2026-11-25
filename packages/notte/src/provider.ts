@@ -61,8 +61,8 @@ export function notte(options: NotteOptions = {}): BrowserProvider {
       seen = new Set();
       claimed.set(lease.id, seen);
     }
+    const earlier = Array.isArray(context.before) ? new Set<unknown>(context.before) : undefined;
     for (;;) {
-      const earlier = Array.isArray(context.before) ? new Set<unknown>(context.before) : undefined;
       const next = (await client.downloads(lease.id, context.signal)).find(
         (download) => !seen.has(download.id) && earlier?.has(download.id) !== true && download.filename === context.suggestedFilename,
       );
