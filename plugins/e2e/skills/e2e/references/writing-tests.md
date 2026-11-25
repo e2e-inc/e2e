@@ -679,10 +679,11 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
   unsubscribe. Register it before the tap that opens the dialog. A handler
   gets `{ type, message, accept(text?), dismiss() }`, where `type` is
   `alert`, `confirm`, `prompt`, or `beforeunload`, `accept` taking the prompt
-  text; no handler, or one that neither accepts nor dismisses, fails the
-  next step with `INVALID_STATE`. `web({ dialogs: 'accept' | 'dismiss' })`
-  answers every dialog no handler takes, for `agent.act` steps and
-  `e2e explore`. A throwing handler's unanswered dialog is
+  text. A dialog no handler takes is answered by the target's
+  `web({ dialogs: 'accept' | 'dismiss' })`, for `agent.act` steps and
+  `e2e explore`; with that unset, it fails the next step with
+  `APP_NOT_OPEN`. A handler that neither accepts nor dismisses fails the
+  next step with `APP_NOT_OPEN` either way. A throwing handler's unanswered dialog is
   dismissed too, and its error fails the next step.
 - `waitForDownload(() => trigger, { timeout? })`: returns
   `{ path, absolutePath, suggestedFilename }`; `absolutePath` names the saved
