@@ -690,7 +690,9 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
   readers wait for the body (up to the action timeout) and reject with
   `ACTION_FAILED` when it could not be read. Start the wait before the
   request, including the first `browser.goto` or `app.open`.
-- `cookies()`, `setCookies([...])`: a target is an http(s) URL or a domain.
+- `cookies(urls?)`: every cookie, or only those a request to one URL or a
+  list would carry; a relative URL resolves against the app URL.
+- `setCookies([...])`: a target is an http(s) URL or a domain.
 - `clearCookies({ name?, domain?, path? })`: remove cookies matching every
   string or RegExp filter; no options removes all cookies, other storage stays.
 - `setViewport({ width, height })`: resize.
