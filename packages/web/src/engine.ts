@@ -501,10 +501,10 @@ function validateTestIdAttribute(attribute: unknown): void {
  */
 function validateDialogs(dialogs: unknown): void {
   if (typeof dialogs === 'string' && (DIALOG_POLICIES as readonly string[]).includes(dialogs)) return;
-  const got = typeof dialogs === 'string' ? JSON.stringify(dialogs) : kindOf(dialogs);
+  // The value is not echoed: a config can pass any string here, a credential included.
   throw new ConfigurationError(
     'INVALID_CONFIG',
-    `web({ dialogs }) must be 'accept' or 'dismiss', got ${got}; a function handler goes to browser.onDialog in the test`,
+    `web({ dialogs }) must be 'accept' or 'dismiss', got ${typeof dialogs === 'string' ? 'another string' : kindOf(dialogs)}; a function handler goes to browser.onDialog in the test`,
   );
 }
 

@@ -116,7 +116,10 @@ describe('web({ dialogs })', () => {
   });
 
   it('rejects any other value as INVALID_CONFIG, pointing a function at browser.onDialog', () => {
-    for (const dialogs of ['ok', '', null, true, () => undefined]) {
+    for (const dialogs of ['ok', '', 'synthetic-password-3141', null, true, () => undefined]) {
+      expect(() => web({ dialogs } as unknown as WebOptions)).toThrowError(
+        expect.objectContaining({ message: expect.not.stringContaining('synthetic-password-3141') }),
+      );
       expect(() => web({ dialogs } as unknown as WebOptions)).toThrowError(
         expect.objectContaining({
           code: 'INVALID_CONFIG',
