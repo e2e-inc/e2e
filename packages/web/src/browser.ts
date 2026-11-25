@@ -454,6 +454,7 @@ async function collectDownloads(
       const page = surface.requirePage();
       const remote = surface.remoteDownloads();
       if (remote !== undefined) await saveDownloadsTo(page, remote.dir, currentOperation.signal);
+      requireOpen();
       const before = remote === undefined ? undefined : await remote.before(currentOperation.signal);
       requireOpen();
       let allStarted!: () => void;
