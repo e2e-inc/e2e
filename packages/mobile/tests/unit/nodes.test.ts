@@ -372,6 +372,9 @@ describe('snapshot projection', () => {
       { ref: 'e13', index: 12, parentIndex: 11, depth: 3, type: 'android.view.View', label: 'Docs', roleDescription: 'Link' },
       { ref: 'e14', index: 13, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Help', roleDescription: 'Link' },
       { ref: 'e15', index: 14, parentIndex: 13, depth: 2, type: 'android.view.View', label: 'Help', roleDescription: 'Link' },
+      // A plain Button under a same-named link isn't a link span, so it echoes nothing.
+      { ref: 'e16', index: 15, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Share', roleDescription: 'Link' },
+      { ref: 'e17', index: 16, parentIndex: 15, depth: 2, type: 'android.widget.Button', label: 'Share' },
     ]);
     const nodes = projected.index.slice(1).map((entry) => `${entry.node.role} ${entry.node.name ?? ''}`.trim());
     expect(nodes).toEqual([
@@ -389,6 +392,8 @@ describe('snapshot projection', () => {
       'link Docs',
       'link Help',
       'link Help',
+      'link Share',
+      'button Share',
     ]);
   });
 
