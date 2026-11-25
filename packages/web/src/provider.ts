@@ -221,6 +221,9 @@ export function asBrowserProvider(browser: object): BrowserProvider {
   ) {
     throw new ConfigurationError('INVALID_CONFIG', `web: browser provider "${candidate.name}" has downloads that are not { dir, read() }`);
   }
+  if (downloads !== undefined && downloads.before !== undefined && typeof downloads.before !== 'function') {
+    throw new ConfigurationError('INVALID_CONFIG', `web: browser provider "${candidate.name}" has a downloads.before that is not a function`);
+  }
   // The browser's own machine may be POSIX or Windows, whatever the runner's is.
   if (downloads !== undefined && !path.posix.isAbsolute(downloads.dir as string) && !path.win32.isAbsolute(downloads.dir as string)) {
     throw new ConfigurationError('INVALID_CONFIG', `web: browser provider "${candidate.name}" has downloads.dir ${JSON.stringify(downloads.dir)}; name an absolute path on the browser's machine`);
