@@ -2179,12 +2179,22 @@ describe('perform', () => {
       message: expect.stringContaining('Tap its "Close app" button'),
     });
     expect(h.fake.methods().filter((method) => method === 'command.alert')).toHaveLength(alerts);
+    // A dismissal agent-device fails (the guard's own recovery closed the dialog) leaves the refusal as the failure.
+    h.fake.respond('command.alert', () => {
+      throw new AppError('COMMAND_FAILED', 'No alert visible');
+    });
+    await expect(h.engine.perform!((await observed(h, 'Close app')).ref, { kind: 'tap' }, operation())).rejects.toMatchObject({
+      code: 'NOT_ACTIONABLE',
+      message: expect.stringContaining('Android system dialog is blocking press'),
+    });
+    const failedAlerts = h.fake.methods().filter((method) => method === 'command.alert').length;
+    expect(failedAlerts).toBe(alerts + 1);
     // A Close app tap refused for any other reason keeps that refusal.
     h.fake.respond('interactions.press', () => {
       throw new AppError('COMMAND_FAILED', 'Ref @e2 not found', { reason: 'ref_not_found', dispatched: 'no' });
     });
     await expect(h.engine.perform!((await observed(h, 'Close app')).ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NODE_STALE' });
-    expect(h.fake.methods().filter((method) => method === 'command.alert')).toHaveLength(alerts);
+    expect(h.fake.methods().filter((method) => method === 'command.alert')).toHaveLength(failedAlerts);
   });
 });
 

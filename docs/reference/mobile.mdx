@@ -524,7 +524,7 @@ declaration; the types they use are under [Types](#device-fixture).
 | Throws | When |
 | --- | --- |
 | `APP_NOT_OPEN` | The session is lost. |
-| `ACTION_FAILED` | `actionTimeout` expires. |
+| `ACTION_FAILED` | `actionTimeout` expires. On Android, also when an "isn't responding" dialog has focus: agent-device refuses `back`, `home`, `pressRemote`, `shake`, `dismissKeyboard`, `setOrientation`, and `fold` until it closes, and the hint names [`alert('dismiss')`](#alert). |
 | `UNSUPPORTED_CAPABILITY` | The platform cannot run the command. |
 | `ENGINE_FAILURE` | Anything else, with agent-device's message. A timeout the device itself reports (a boot, the runner connecting) keeps its text and hint there. A busy or wedged iOS automation runner names itself and the recovery (see [Troubleshooting](/mobile#troubleshooting)). |
 

@@ -14,7 +14,7 @@
  * | a target with no screen origin to aim at, `dispatched: no`   | NOT_ACTIONABLE, with the hint |
  * | screen.swipe({ from, to }) off agent-device's viewport       | NOT_ACTIONABLE, with the hint |
  * | an Android "isn't responding" dialog the guard refused under | NOT_ACTIONABLE, naming the    |
- * |                                                             |   dialog's "Close app"        |
+ * |   before any input went out (no `details.dispatchedSteps`)  |   dialog's "Close app"        |
  * | the iOS runner busy, wedged, or past its watchdog           | ENGINE_FAILURE, naming the   |
  * | a snapshot the iOS runner acquired but could not present    |   runner and the recovery    |
  * | anything else, agent-device's own timeouts included         | ENGINE_FAILURE with the text |
@@ -212,7 +212,9 @@ const UNREADABLE_CAPTURE_REASONS: ReadonlySet<string> = new Set([
  * could not close and relaunch (`app ANR blocked`). The guard runs before
  * and after every tap, swipe, key, and type, so no input reaches the
  * dialog's own buttons; its `alert` command is not guarded (0.21.42). The
- * refusal carries the focused window in `details.focusedWindow`.
+ * refusal carries the focused window in `details.focusedWindow`. The check
+ * after a command words its refusal the same way, but agent-device then adds
+ * the inputs it sent as `details.dispatchedSteps`.
  */
 const BLOCKING_DIALOG = /^Android (?:system dialog is blocking|app ANR blocked) /;
 
@@ -224,9 +226,16 @@ const BLOCKING_DIALOG = /^Android (?:system dialog is blocking|app ANR blocked) 
 const BLOCKING_DIALOG_HINT =
   'An Android "isn\'t responding" dialog has focus and every other input is refused until it closes. Tap its "Close app" button, or dismiss it with device.alert(\'dismiss\'), then retry.';
 
-/** True for the refusal agent-device's Android guard raises while an "isn't responding" dialog has focus. */
+/**
+ * True for the refusal agent-device's Android guard raises while an "isn't
+ * responding" dialog has focus, before the command sent any input. A refusal
+ * after input went out stays `ENGINE_FAILURE`: the action may have landed, so
+ * a retry could repeat it.
+ */
 export function isBlockingDialog(cause: unknown): boolean {
-  return typeof details(cause).focusedWindow === 'string' && BLOCKING_DIALOG.test(message(cause));
+  const { focusedWindow, dispatchedSteps } = details(cause);
+  if (typeof dispatchedSteps === 'number' && dispatchedSteps > 0) return false;
+  return typeof focusedWindow === 'string' && BLOCKING_DIALOG.test(message(cause));
 }
 
 const RUNNER_RECOVERY =

@@ -15,7 +15,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { CaptureSnapshotResult } from 'agent-device';
+import { isAgentDeviceError, type CaptureSnapshotResult } from 'agent-device';
 import {
   EngineError,
   KEY_NAMES,
@@ -1694,14 +1694,20 @@ export class AgentDeviceSurface {
    * `alert dismiss` instead, which the guard leaves alone and which picks
    * "Close app" on that dialog by the same label. On a System UI dialog that
    * restarts System UI; on an app's, it stops that app. Any other node, "Wait"
-   * included, has no unguarded path and keeps the refusal.
+   * included, has no unguarded path and keeps the refusal. When agent-device
+   * fails the dismissal (the guard's own recovery may already have closed the
+   * dialog), the refusal is what the test sees, not the missing alert.
    */
   private async pressOrCloseDialog(client: AgentDeviceClient, target: NodeBinding, input: InputBudget, press: () => Promise<unknown>): Promise<unknown> {
     try {
       return await press();
     } catch (cause) {
       if (!isBlockingDialog(cause) || !CLOSE_APP.test(target.node.name?.trim() ?? '')) throw cause;
-      return input.send((signal) => client.command.alert({ ...this.selection(), action: 'dismiss', signal }));
+      try {
+        return await input.send((signal) => client.command.alert({ ...this.selection(), action: 'dismiss', signal }));
+      } catch (dismissal) {
+        throw isAgentDeviceError(dismissal) ? cause : dismissal;
+      }
     }
   }
 

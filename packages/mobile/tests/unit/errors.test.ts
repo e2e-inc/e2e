@@ -143,6 +143,9 @@ describe('error translation', () => {
     }
     // The same text without the focused window agent-device attaches is not that refusal.
     expect(translateError(new AppError('COMMAND_FAILED', text), 'perform tap')).toMatchObject({ code: 'ENGINE_FAILURE' });
+    // The guard's check after the command words it the same, with the inputs already sent: the tap may have landed.
+    const afterInput = new AppError('COMMAND_FAILED', text, { focusedPackage, focusedWindow: `Application Not Responding: ${focusedPackage}`, dispatchedSteps: 1, dispatched: 'unknown' });
+    expect(staleOr(afterInput, 'perform tap')).toMatchObject({ code: 'ENGINE_FAILURE' });
   });
 
   // As agent-device 0.21.37 sends it for a ref aimed from a capture without the window's screen origin.
