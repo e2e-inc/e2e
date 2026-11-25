@@ -400,11 +400,45 @@ function roleOf(kind: string, android: boolean, parentKind: string | undefined):
  * description React Native writes for the roles Android has no class for
  * (`Tab`, `Tab List`, `Radio Group`), read through the words it spells into
  * an iOS value. Undefined when neither names a contract role.
+ *
+ * `Link` is not among those words: iOS reports a link as a `Link` element,
+ * which is a `link` already. On Android a `Link`-described node is a `link`
+ * unless it only echoes one below it ({@link echoedLinks}).
  */
-function describedRole(source: RawNode): string | undefined {
+function describedRole(source: RawNode, echoesLink: boolean): string | undefined {
   if (source.heading === true) return 'heading';
   if (source.roleDescription === undefined) return undefined;
+  if (describesLink(source)) return echoesLink ? undefined : 'link';
   return REACT_NATIVE_ROLE_DESCRIPTIONS[source.roleDescription.toLowerCase()];
+}
+
+function describesLink(node: RawNode): boolean {
+  return node.roleDescription?.toLowerCase() === 'link';
+}
+
+/**
+ * The positions of the `Link`-described nodes with one of the same name
+ * below them. Before React Native 0.84, a `Text` with `role="link"`
+ * (expo-router's `Link`) holds a `Button` for its link span, described as a
+ * `Link` under the text's name. A tap on the text lands on that button, so
+ * the button is the link and the text keeps its class role.
+ */
+function echoedLinks(raw: readonly RawNode[], parents: readonly (number | undefined)[]): ReadonlySet<number> {
+  const echoed = new Set<number>();
+  raw.forEach((node, position) => {
+    if (!describesLink(node)) return;
+    const name = rawName(node);
+    for (let up = parents[position]; up !== undefined; up = parents[up]) {
+      const above = raw[up] as RawNode;
+      if (describesLink(above) && rawName(above) === name) echoed.add(up);
+    }
+  });
+  return echoed;
+}
+
+/** The name an Android node goes by: its content description, else its label. */
+function rawName(node: RawNode): string | undefined {
+  return nonEmpty(node.contentDescription) ?? nonEmpty(node.label);
 }
 
 /**
@@ -599,6 +633,7 @@ export function projectSnapshot(
 ): ProjectedSnapshot {
   const viewport = options.viewport ?? viewportOf(raw);
   const parents = parentPositions(raw);
+  const echoed = echoedLinks(raw, parents);
   const children = new Map<number, number[]>();
   const roots: number[] = [];
   parents.forEach((parent, position) => {
@@ -624,7 +659,7 @@ export function projectSnapshot(
     // `Other`: it is the role the app declared, and iOS had no trait for it.
     // Only an `Other` carries that encoding; a native control's value is its own.
     const spelled = android || kind !== 'other' ? undefined : reactNativeValue(source.value);
-    const role = editableRole(spelled?.role ?? describedRole(source) ?? roleOf(kind, android, parent?.kind), source.editable);
+    const role = editableRole(spelled?.role ?? describedRole(source, echoed.has(position)) ?? roleOf(kind, android, parent?.kind), source.editable);
     const editable = source.editable === true || (role !== undefined && TEXT_INPUT_ROLES.has(role));
     const value = showsHint(source, android, editable) ? '' : spelled === undefined ? source.value : spelled.value;
     // iOS names a secure field by class; UIAutomator flags a password

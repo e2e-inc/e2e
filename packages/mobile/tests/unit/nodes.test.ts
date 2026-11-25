@@ -331,7 +331,7 @@ describe('snapshot projection', () => {
       { ref: 'e6', index: 5, parentIndex: 0, depth: 1, type: 'android.widget.EditText', label: 'Type your name', value: 'Type your name', contentDescription: 'Name field', placeholder: 'Type your name', hintShowing: true, editable: true },
       { ref: 'e7', index: 6, parentIndex: 0, depth: 1, type: 'android.widget.Switch', label: 'Wi-Fi switch', checked: false },
       { ref: 'e8', index: 7, parentIndex: 0, depth: 1, type: 'android.widget.RadioButton', label: 'Medium', checked: true },
-      { ref: 'e9', index: 8, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Plain', roleDescription: 'Link' },
+      { ref: 'e9', index: 8, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Plain', roleDescription: 'Summary' },
       { ref: 'e10', index: 9, parentIndex: 0, depth: 1, type: 'android.widget.TextView', label: 'Total', contentDescription: '' },
     ]);
     const [, header, tablist, tab, filled, empty, toggle, radio, plain, total] = projected.index.map((entry) => entry.node);
@@ -348,6 +348,32 @@ describe('snapshot projection', () => {
     expect(plain).toMatchObject({ role: 'group', name: 'Plain' });
     expect(total).toMatchObject({ role: 'text', name: 'Total', text: 'Total' });
     expect(total?.attributes).toBeUndefined();
+  });
+
+  it('reads an Android node described as a Link as a link, once per name', () => {
+    const projected = project([
+      { ref: 'e1', index: 0, depth: 0, type: 'android.widget.FrameLayout' },
+      // React Native's role="link" (expo-router's Link) on a Pressable, and on a Text from React Native 0.84.
+      { ref: 'e2', index: 1, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Add note', roleDescription: 'Link' },
+      // Before 0.84 a Text link holds a Button for its link span under the same name.
+      { ref: 'e3', index: 2, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Go to home screen', roleDescription: 'Link' },
+      { ref: 'e4', index: 3, parentIndex: 2, depth: 2, type: 'android.widget.Button', label: 'Go to home screen', roleDescription: 'Link' },
+      // A link inside plain text, and a link card holding another link.
+      { ref: 'e5', index: 4, parentIndex: 0, depth: 1, type: 'android.widget.TextView', label: 'Read the terms' },
+      { ref: 'e6', index: 5, parentIndex: 4, depth: 2, type: 'android.widget.Button', label: 'terms', roleDescription: 'Link' },
+      { ref: 'e7', index: 6, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Order 42', roleDescription: 'Link' },
+      { ref: 'e8', index: 7, parentIndex: 6, depth: 2, type: 'android.widget.Button', label: 'Track parcel', roleDescription: 'Link' },
+    ]);
+    const nodes = projected.index.slice(1).map((entry) => `${entry.node.role} ${entry.node.name ?? ''}`.trim());
+    expect(nodes).toEqual([
+      'link Add note',
+      'group Go to home screen',
+      'link Go to home screen',
+      'text Read the terms',
+      'link terms',
+      'link Order 42',
+      'link Track parcel',
+    ]);
   });
 
   it('reads the role and state React Native spells into an iOS accessibility value, and reports the rest as the value', () => {
