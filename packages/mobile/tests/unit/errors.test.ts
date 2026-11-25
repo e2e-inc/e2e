@@ -123,9 +123,20 @@ describe('error translation', () => {
 
   // Each refusal as agent-device 0.21.42's Android guard raises it while an "isn't responding" dialog has focus.
   it.each([
-    ['System UI', 'Android system dialog is blocking press: Application Not Responding: com.android.systemui (package com.android.systemui).', 'com.android.systemui'],
-    ["the session app, when it could not close and relaunch it", 'Android app ANR blocked swipe: Application Not Responding: dev.example.app (package dev.example.app). Automatic recovery failed.', 'dev.example.app'],
-  ] as const)('fails an input the blocking-dialog guard refused for %s with NOT_ACTIONABLE, naming the dialog\'s Close app', (_owner, text, focusedPackage) => {
+    [
+      'System UI',
+      'Android system dialog is blocking press: Application Not Responding: com.android.systemui (package com.android.systemui).',
+      'com.android.systemui',
+      'An Android "isn\'t responding" dialog has focus and every other input is refused until it closes. Tap its "Close app" button, or dismiss it with device.alert(\'dismiss\'), then retry. Both need the device language to be English.',
+    ],
+    // agent-device may already have pressed the dialog's Close app before its relaunch failed, so the hint does not say the dialog is up.
+    [
+      'the session app, when it could not close and relaunch it',
+      'Android app ANR blocked swipe: Application Not Responding: dev.example.app (package dev.example.app). Automatic recovery failed.',
+      'dev.example.app',
+      'The app under test stopped responding, and agent-device could not close its "isn\'t responding" dialog and open the app again. Look at the screen: if the dialog is still up, dismiss it with device.alert(\'dismiss\'); then open the app again with app.open() and retry.',
+    ],
+  ] as const)('fails an input the blocking-dialog guard refused for %s with NOT_ACTIONABLE and the way past it', (_owner, text, focusedPackage, hint) => {
     const refused = new AppError('COMMAND_FAILED', text, {
       command: 'press',
       expectedPackage: 'dev.example.app',
@@ -137,9 +148,7 @@ describe('error translation', () => {
     for (const failure of [translateError(refused, 'perform tap'), staleOr(refused, 'perform tap')]) {
       expect(failure).toMatchObject({ code: 'NOT_ACTIONABLE', retryable: false, cause: refused });
       // agent-device's hint (wait, reboot) never closes the dialog; its own button does.
-      expect(failure.message).toBe(
-        `perform tap failed: ${text} Hint: An Android "isn't responding" dialog has focus and every other input is refused until it closes. Tap its "Close app" button, or dismiss it with device.alert('dismiss'), then retry. Both need the device language to be English.`,
-      );
+      expect(failure.message).toBe(`perform tap failed: ${text} Hint: ${hint}`);
     }
     // The same text without the focused window agent-device attaches is not that refusal.
     expect(translateError(new AppError('COMMAND_FAILED', text), 'perform tap')).toMatchObject({ code: 'ENGINE_FAILURE' });

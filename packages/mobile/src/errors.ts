@@ -227,6 +227,14 @@ const BLOCKING_DIALOG_HINT =
   'An Android "isn\'t responding" dialog has focus and every other input is refused until it closes. Tap its "Close app" button, or dismiss it with device.alert(\'dismiss\'), then retry. Both need the device language to be English.';
 
 /**
+ * The way past the session app's own dialog, which agent-device tried to close
+ * and relaunch the app from before it refused. It may have closed the dialog
+ * already, so this hint does not say the dialog has focus.
+ */
+const APP_ANR_HINT =
+  'The app under test stopped responding, and agent-device could not close its "isn\'t responding" dialog and open the app again. Look at the screen: if the dialog is still up, dismiss it with device.alert(\'dismiss\'); then open the app again with app.open() and retry.';
+
+/**
  * True for the refusal agent-device's Android guard raises while an "isn't
  * responding" dialog has focus, before the command sent any input. A refusal
  * after input went out stays `ENGINE_FAILURE`: the action may have landed, so
@@ -316,7 +324,8 @@ export function translateError(cause: unknown, operation: string, where?: string
     return new EngineError('UNSUPPORTED_CAPABILITY', text, options);
   }
   if (isBlockingDialog(cause)) {
-    return new EngineError('NOT_ACTIONABLE', `${operation} failed: ${normalized.message} Hint: ${BLOCKING_DIALOG_HINT}`, options);
+    const hint = isForeignBlockingDialog(cause) ? BLOCKING_DIALOG_HINT : APP_ANR_HINT;
+    return new EngineError('NOT_ACTIONABLE', `${operation} failed: ${normalized.message} Hint: ${hint}`, options);
   }
   const state = runnerState(cause);
   if (state !== undefined) return new EngineError('ENGINE_FAILURE', runnerMessage(operation, where, state, cause), options);
