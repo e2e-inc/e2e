@@ -16,7 +16,10 @@ import { engineConfig } from '../helpers/fixture-config.ts';
 import { assertValidReport } from '../helpers/report-schema.ts';
 import { resultByTitle, runProject, type FixtureProject } from '../helpers/run-project.ts';
 
-const SUITE = `import { test, describe } from 'e2e';
+const SUITE = `import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { test, describe } from 'e2e';
 import { launch } from '@e2e-dev/core';
 import { createFakeEngine, FAKE_APP } from '../../../helpers/fake-engine.ts';
 
@@ -142,18 +145,38 @@ test('catches a launch whose working directory cannot be resolved', async ({ app
   globalThis.launchReportRefused.cwd = await refusal(open({}, { cwd: 42 }));
 });
 
+/** Calls launch with the temporary directory at root: launch names its output directory before its first await, so the variables are back at once. */
+const launchUnder = (root, launching) => {
+  const saved = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP };
+  Object.assign(process.env, { TMPDIR: root, TMP: root, TEMP: root });
+  try {
+    return launching();
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+};
+
 test('catches a launch that cannot make its output directory', async ({ app }) => {
   await app.open();
-  const saved = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP };
-  const missing = '/nonexistent-e2e-launch-tmp';
-  Object.assign(process.env, { TMPDIR: missing, TMP: missing, TEMP: missing });
-  // The directory is named when launch is called, before its first await.
-  const launching = open();
-  for (const [name, value] of Object.entries(saved)) {
-    if (value === undefined) delete process.env[name];
-    else process.env[name] = value;
+  globalThis.launchReportRefused.mkdtemp = await refusal(launchUnder('/nonexistent-e2e-launch-tmp', () => open()));
+});
+
+test('catches a launch that fails to start and then to remove its output directory', async ({ app }) => {
+  await app.open();
+  const root = mkdtempSync(path.join(os.tmpdir(), 'e2e-launch-root-'));
+  try {
+    // Read-only once the output directory is in it, so removing that directory fails with EACCES.
+    globalThis.launchReportRefused.cleanup = await refusal(launchUnder(root, () => open({ onInit: () => {
+      chmodSync(root, 0o500);
+      throw Object.assign(new Error('no device left'), { code: 'NO_DEVICE' });
+    } })));
+  } finally {
+    chmodSync(root, 0o700);
+    rmSync(root, { recursive: true, force: true });
   }
-  globalThis.launchReportRefused.mkdtemp = await refusal(launching);
 });
 
 test('catches a session refused for its state', async ({ app }) => {
@@ -391,6 +414,7 @@ describe('a launch() session opened inside a test, in the test\'s report', { tim
       'catches a launch whose engine fails to start',
       'catches a launch whose working directory cannot be resolved',
       'catches a launch that cannot make its output directory',
+      'catches a launch that fails to start and then to remove its output directory',
       'catches a session refused for its state',
       'catches a session whose engine fails to start it',
     ];
@@ -398,7 +422,9 @@ describe('a launch() session opened inside a test, in the test\'s report', { tim
     expect(titles.flatMap((title) => attemptOf(title).secondaryErrors)).toEqual([]);
     // Each opening did fail, and the test caught what it failed with.
     const refused = (globalThis as { launchReportRefused?: Record<string, string> }).launchReportRefused;
-    expect(refused).toEqual({ options: 'INVALID_ARGUMENT', init: expect.any(String), cwd: 'ERR_INVALID_ARG_TYPE', mkdtemp: 'ENOENT', state: 'INVALID_ARGUMENT', start: expect.any(String) });
+    expect(refused).toEqual({ options: 'INVALID_ARGUMENT', init: expect.any(String), cwd: 'ERR_INVALID_ARG_TYPE', mkdtemp: 'ENOENT', cleanup: expect.any(String), state: 'INVALID_ARGUMENT', start: expect.any(String) });
+    // The engine's failure, not the cleanup's that came after it.
+    expect(refused!.cleanup).toBe(refused!.init);
     expect(Object.values(refused!)).not.toContain('opened');
   });
 

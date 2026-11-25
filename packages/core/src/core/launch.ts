@@ -198,7 +198,8 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
     });
   } catch (cause) {
     withdrawSecrets();
-    await removeOutput();
+    // The opening's failure is what the caller meets, not a cleanup's after it, and the seat is settled either way.
+    await removeOutput().catch(() => undefined);
     if (seat?.signal.aborted === true) owner?.gaveUp(cause);
     // The caller meets this rejection, so nothing of the opening is left running in the test.
     else seat?.release?.();
