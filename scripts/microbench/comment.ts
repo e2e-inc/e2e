@@ -5,6 +5,7 @@
  */
 
 import { comparisonLines, methodLines, repeatabilityFailures, type Result } from './markdown.ts';
+import type { Direction } from './stats.ts';
 
 /** The first line of the workflow's comment; the run edits the comment that carries it. */
 export const COMMENT_MARKER = '<!-- microbench -->';
@@ -24,14 +25,18 @@ function plural(count: number, one: string, many: string): string {
 /** What the comparison says, in one line. */
 function headline(compare: Result | undefined, runUrl: string): string {
   if (compare === undefined) return `⚠️ The comparison did not finish. See the [workflow run](${runUrl}).`;
-  const verdicts = compare.rows.map((row) => row.assessment?.verdict);
-  const higher = verdicts.filter((verdict) => verdict === 'higher').length;
-  const lower = verdicts.filter((verdict) => verdict === 'lower').length;
-  if (higher === 0 && lower === 0) return `⚪ No case changed by ${compare.thresholdPercent}% or more.`;
-  return [
+  const count = (verdict: Direction) => compare.rows.filter((row) => row.assessment?.verdict === verdict).length;
+  const higher = count('higher');
+  const lower = count('lower');
+  const inconclusive = count('inconclusive');
+  const parts = [
     ...(higher > 0 ? [`🔴 ${plural(higher, 'case costs', 'cases cost')} more`] : []),
     ...(lower > 0 ? [`🟢 ${plural(lower, 'case costs', 'cases cost')} less`] : []),
-  ].join(', ').concat('.');
+    ...(inconclusive > 0
+      ? [`⚪ ${plural(inconclusive, 'case', 'cases')} moved by ${compare.thresholdPercent}% or more, but the trials do not confirm a direction`]
+      : []),
+  ];
+  return parts.length === 0 ? `⚪ No case changed by ${compare.thresholdPercent}% or more.` : `${parts.join(', ')}.`;
 }
 
 /** Whether two builds of the head agreed, which is what makes the comparison worth reading. */

@@ -49,6 +49,12 @@ describe('renderComment', () => {
     assert.match(text, /🔴 2 cases cost more, 🟢 1 case costs less\./);
   });
 
+  it('does not call a case unchanged when it moved past the floor with overlapping trials', () => {
+    const text = renderComment({ compare: result(false, [990, 1010, 1030]), repeatability: STABLE, runUrl: RUN });
+    assert.match(text, /⚪ 1 case moved by 0\.5% or more, but the trials do not confirm a direction\./);
+    assert.doesNotMatch(text, /No case changed/);
+  });
+
   it('warns that a direction can be noise when two builds of the head landed apart', () => {
     const text = renderComment({ compare: result(false, [1100, 1101, 1102]), repeatability: result(true, [1003, 1003.5, 1004]), runUrl: RUN });
     assert.match(text, /⚠️ Repeatability check failed: two builds of the head landed apart in `case-0` \(jitless\)\./);
