@@ -13,6 +13,7 @@
  * | a covered or keyboard-occluded target, `dispatched: no`      | NOT_ACTIONABLE, with the hint |
  * | a target with no screen origin to aim at, `dispatched: no`   | NOT_ACTIONABLE, with the hint |
  * | screen.swipe({ from, to }) off agent-device's viewport       | NOT_ACTIONABLE, with the hint |
+ * | APP_NOT_INSTALLED on an open, clear-state, or app-targeted permission | TEST_SETUP_FAILED, naming the app |
  * | the iOS runner busy, wedged, or past its watchdog           | ENGINE_FAILURE, naming the   |
  * | a snapshot the iOS runner acquired but could not present    |   runner and the recovery    |
  * | anything else, agent-device's own timeouts included         | ENGINE_FAILURE with the text |
@@ -349,21 +350,9 @@ export function isShortLivedClaim(error: unknown): boolean {
   return typeof session === 'string' && session.startsWith(TRANSIENT_HOLDER);
 }
 
-/**
- * The start of the hint agent-device sets on an iOS simulator launch that
- * failed because the bundle is not installed. It checks the install after
- * `simctl launch` fails, but reports the failure as `COMMAND_FAILED`, so the
- * hint is the only place the reason shows.
- */
-const IOS_NOT_INSTALLED_HINT = 'The app bundle is not installed on this simulator.';
-
-/** Whether agent-device refused an `open` because no installed app matches: `APP_NOT_INSTALLED`, or an iOS simulator launch with the not-installed hint. */
+/** Whether agent-device refused an `open` because no installed app matches: `APP_NOT_INSTALLED`. */
 function notInstalledCause(cause: unknown): boolean {
-  if (!isAgentDeviceError(cause)) return false;
-  const { code } = normalizeAgentDeviceError(cause);
-  if (code === 'APP_NOT_INSTALLED') return true;
-  const hint = details(cause).hint;
-  return code === 'COMMAND_FAILED' && typeof hint === 'string' && hint.startsWith(IOS_NOT_INSTALLED_HINT);
+  return isAgentDeviceError(cause) && normalizeAgentDeviceError(cause).code === 'APP_NOT_INSTALLED';
 }
 
 /** True for a translated `open` agent-device refused because no installed app matches the name. */

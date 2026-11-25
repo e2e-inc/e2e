@@ -3389,34 +3389,30 @@ describe('device fixture', () => {
     expect((await h.engine.observe!(operation())).location).toBe('dev.e2e.benchmark / General');
   });
 
-  it('fails an open of an app the device does not have as a setup error in e2e words, on iOS and Android alike', async () => {
+  it('fails an open, a clear-state, and a permission change of an app the device does not have as a setup error in e2e words', async () => {
     const h = harness();
     await openAttempt(h);
     const device = fixture(h);
-    const notInstalled = expect.objectContaining({
-      code: 'TEST_SETUP_FAILED',
-      message: expect.stringMatching(/^open Settings failed: Settings is not installed on the device .*Install it with device\.installApp\(\) first/),
-    });
-    h.fake.respond('apps.open', () => {
-      throw new AppError('COMMAND_FAILED', 'Simulator device failed to launch Settings.', {
-        exitCode: 4,
-        hint: 'The app bundle is not installed on this simulator. Run install before open.',
-      });
-    });
-    const restart = await h.engine.session!.restart!(operation()).then(() => undefined, (error: unknown) => error as Error);
-    expect(restart).toEqual(notInstalled);
-    expect(restart?.message).not.toContain('Run install');
-    await expect(device.openApp('Settings', { relaunch: true })).rejects.toEqual(notInstalled);
-    await expect(h.engine.session!.openLink!('e2e-benchmark://orders/42', operation())).rejects.toEqual(notInstalled);
-    h.fake.respond('apps.open', () => {
+    const missing = () => {
       throw new AppError('APP_NOT_INSTALLED', 'No app found matching "Settings"');
-    });
-    await expect(device.openApp('Settings')).rejects.toEqual(notInstalled);
+    };
+    const notInstalled = (verb: string) =>
+      expect.objectContaining({
+        code: 'TEST_SETUP_FAILED',
+        message: expect.stringMatching(new RegExp(`^${verb} Settings failed: Settings is not installed on the device .*Install it with device\\.installApp\\(\\) first`)),
+      });
+    h.fake.respond('apps.open', missing);
+    const restart = await h.engine.session!.restart!(operation()).then(() => undefined, (error: unknown) => error as Error);
+    expect(restart).toEqual(notInstalled('open'));
+    expect(restart?.message).not.toContain('Run install');
+    await expect(device.openApp('Settings', { relaunch: true })).rejects.toEqual(notInstalled('open'));
+    await expect(h.engine.session!.openLink!('e2e-benchmark://orders/42', operation())).rejects.toEqual(notInstalled('open'));
+    h.fake.respond('settings.update', missing);
+    await expect(device.setPermission('camera', 'grant')).rejects.toEqual(notInstalled('permission camera grant for'));
+    await expect(h.engine.session!.reset!(operation())).rejects.toEqual(notInstalled('clear app state of'));
     // Any other launch failure is still the device's.
     h.fake.respond('apps.open', () => {
-      throw new AppError('COMMAND_FAILED', 'Simulator device failed to launch Settings.', {
-        hint: 'The simulator repeatedly refused to launch the app. Inspect crash logs in Console.app or ~/Library/Logs/DiagnosticReports/ and consider reinstalling the app.',
-      });
+      throw new AppError('COMMAND_FAILED', 'Simulator device failed to launch Settings.');
     });
     await expect(device.openApp('Settings')).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
   });

@@ -176,12 +176,6 @@ describe('error translation', () => {
     expect(translated.message).toBe('open e2eBenchmark failed: No app found matching "e2eBenchmark"');
     expect(isAppNotInstalled(translated)).toBe(true);
     expect(isAppNotInstalled(translateError(new AppError('COMMAND_FAILED', 'plain'), 'open x'))).toBe(false);
-    // agent-device reports an iOS simulator launch of a missing bundle as COMMAND_FAILED; only the hint says why.
-    const simulator = new AppError('COMMAND_FAILED', 'Simulator device failed to launch dev.e2e.missing.', {
-      exitCode: 4,
-      hint: 'The app bundle is not installed on this simulator. Run install before open.',
-    });
-    expect(isAppNotInstalled(translateError(simulator, 'open dev.e2e.missing'))).toBe(true);
   });
 
   it('turns an AbortError into CANCELLED', () => {

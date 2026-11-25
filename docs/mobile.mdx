@@ -875,10 +875,12 @@ the first move, usually a rerun. If the next run meets it again, stop the
 daemon and reboot the simulator with the commands below.
 
 **`app.open()` fails with `TEST_SETUP_FAILED`: the app is not installed.**
-The device has no installed app matching the one the target opens. The engine installs
-nothing on its own: call `device.installApp()` (with no path, it installs
+The device has no installed app matching the one the target opens. The engine
+installs nothing on its own: call `device.installApp()` (with no path, it installs
 `app.appPath`) in an `auto: true` worker fixture before `app.open()`, use a
-device provider that installs the build, or fix the bundle id.
+device provider that installs the build, or fix the bundle id. An iOS simulator
+launch of a missing bundle still fails as `ENGINE_FAILURE`, with agent-device's
+`The app bundle is not installed on this simulator` hint.
 
 **`device.installApp()` on Android reports no bundle id or package.**
 agent-device couldn't tell which package the build is, so `app.open()` has
