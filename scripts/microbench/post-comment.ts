@@ -37,16 +37,20 @@ function read(root: string, artifact: string): Result | undefined {
   return existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as Result) : undefined;
 }
 
+const pullRequest =
+  eventPath === undefined
+    ? undefined
+    : (JSON.parse(readFileSync(eventPath, 'utf8')) as { pull_request: { number: number; head: { sha: string } } }).pull_request;
 const body = renderComment({
   compare: read(dir, 'microbench-compare'),
   repeatability: read(dir, 'microbench-repeatability'),
   runUrl: `${server}/${repo}/actions/runs/${runId}`,
+  head: pullRequest?.head.sha,
 });
-if (dryRun || eventPath === undefined) {
+if (dryRun || pullRequest === undefined) {
   process.stdout.write(body);
 } else {
-  const { number, head } = (JSON.parse(readFileSync(eventPath, 'utf8')) as { pull_request: { number: number; head: { sha: string } } })
-    .pull_request;
+  const { number, head } = pullRequest;
   const { repository } = await graphql<{ repository: { pullRequest: { headRefOid: string } } }>(
     'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { headRefOid } } }',
     { number },

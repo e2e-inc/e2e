@@ -16,6 +16,12 @@ export interface CommentInput {
   /** The `repeatability` job's `result.json`, or undefined when the job or its download left none. */
   readonly repeatability: Result | undefined;
   readonly runUrl: string;
+  /**
+   * The pull request's head commit. The jobs measure GitHub's merge of it
+   * into the base, so the table's head is that merge commit, which the pull
+   * request does not list.
+   */
+  readonly head: string | undefined;
 }
 
 function plural(count: number, one: string, many: string): string {
@@ -53,11 +59,12 @@ function repeatabilityLine(repeatability: Result | undefined): string {
 }
 
 /** The whole comment body, opening with {@link COMMENT_MARKER}. */
-export function renderComment({ compare, repeatability, runUrl }: CommentInput): string {
+export function renderComment({ compare, repeatability, runUrl, head }: CommentInput): string {
   return [
     COMMENT_MARKER,
     '### Microbenchmarks',
     '',
+    ...(head === undefined ? [] : [`For \`${head.slice(0, 12)}\`, the pull request's head, measured merged into its base.`, '']),
     headline(compare, runUrl),
     '',
     repeatabilityLine(repeatability),
