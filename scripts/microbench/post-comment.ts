@@ -8,13 +8,15 @@
  * `<dir>` holds the downloaded artifacts, `microbench-compare/result.json`
  * and `microbench-repeatability/result.json`; a job that did not finish
  * leaves its file out, and the comment says so. Reads the pull request number
- * from the event at `GITHUB_EVENT_PATH` and posts with `GITHUB_TOKEN` against
- * `GITHUB_REPOSITORY`. `--dry-run` prints the comment and posts nothing.
+ * and head from the event at `GITHUB_EVENT_PATH` and posts with
+ * `GITHUB_TOKEN` against `GITHUB_REPOSITORY`. A rerun of a run whose head the
+ * pull request has moved past posts nothing, so it cannot replace the current
+ * head's results. `--dry-run` prints the comment and posts nothing.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { setMarkerComment } from '../review-label/github.ts';
+import { graphql, setMarkerComment } from '../review-label/github.ts';
 import { COMMENT_MARKER, renderComment } from './comment.ts';
 import type { Result } from './markdown.ts';
 
@@ -39,6 +41,15 @@ const body = renderComment({
 if (process.argv.includes('--dry-run')) {
   process.stdout.write(body);
 } else {
-  const { number } = (JSON.parse(readFileSync(eventPath, 'utf8')) as { pull_request: { number: number } }).pull_request;
-  await setMarkerComment(number, COMMENT_MARKER, body);
+  const { number, head } = (JSON.parse(readFileSync(eventPath, 'utf8')) as { pull_request: { number: number; head: { sha: string } } })
+    .pull_request;
+  const { repository } = await graphql<{ repository: { pullRequest: { headRefOid: string } } }>(
+    'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { headRefOid } } }',
+    { number },
+  );
+  if (repository.pullRequest.headRefOid === head.sha) {
+    await setMarkerComment(number, COMMENT_MARKER, body);
+  } else {
+    process.stdout.write(`#${number} moved from ${head.sha} to ${repository.pullRequest.headRefOid}; leaving the comment to the newer run\n`);
+  }
 }
