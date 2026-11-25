@@ -364,6 +364,8 @@ await expect(browser).toHaveURL('/dashboard');   // relative to the base URL, or
 expect(order).toMatchObject({ id: expect.any(Number), lines: [{ sku: 'a' }] });
 expect(response).toBeOK();                                  // status 200-299
 const users = expect(await response.json()).toMatchSchema(z.array(User)); // any Standard Schema; typed output
+expect(() => parsePrice('abc')).toThrow(/not a price/);     // a string, RegExp, class, or error; none = any throw
+await expect(loadOrder(-1)).rejects.toThrow(NotFoundError); // resolves/rejects: every value matcher, awaited
 ```
 
 - `expect.poll(read)` re-reads a computed value until a value matcher
