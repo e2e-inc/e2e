@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 const projectTest = test.extend<{ project: { id: string } }>({
   project: async ({ app, browser, request }, use) => {
-    // The domain the app sets the cookie on: its host, or `.example.com` for `Domain=example.com`.
+    // Host-only cookie uses hostname; for a parent-domain cookie (`Domain=example.com`), match `.example.com`.
     const domain = new URL(app.baseUrl).hostname;
     const session = (await browser.cookies()).find((c) => c.name === 'session' && c.domain === domain);
     if (session === undefined) throw new Error('not signed in: no session cookie for the app');

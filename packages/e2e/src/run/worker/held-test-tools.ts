@@ -459,7 +459,7 @@ export class HeldTestTools {
       attemptDir: runtime.artifacts.dir,
       recorder: attachment.recorder,
       fills: sessionFills(config),
-      hasAgent: agent.model !== undefined || agent.executor !== undefined,
+      attached: true,
       onActionFailed: (cause) => {
         const call = heldTestToolCallScope.getStore();
 

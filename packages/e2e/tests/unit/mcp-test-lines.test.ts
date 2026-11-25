@@ -73,6 +73,7 @@ async function harness(options: {
   readonly actions?: Partial<ExecutorActions>;
   readonly tree?: boolean;
   readonly testRan?: string;
+  readonly attached?: boolean;
   readonly hasAgent?: boolean;
 }): Promise<Harness> {
   const root: Fake = { id: 'root', role: 'document', name: 'Page', y: 0, children: options.screen };
@@ -113,6 +114,7 @@ async function harness(options: {
     appBase: { href: 'http://127.0.0.1:4100/', origin: 'http://127.0.0.1:4100' },
     fills: { credentials: [{ name: 'admin', username: 'ada@example.test', password: 'admin.password' }], secrets: ['apiKey'] },
     testRan: options.testRan,
+    attached: options.attached,
     hasAgent: options.hasAgent,
   });
   const watched = lines.watch(context);
@@ -449,10 +451,28 @@ describe('SessionTestLines', () => {
         'await screen.getByRole("button", "Save").tap();',
         '// scroll: no test line: a test action brings its node into view itself, and a row deep in a windowed list takes screen.scrollUntilVisible(locator)',
         '',
-        'Split these lines into tests, one behavior each: its arrange lines, the act under test, then its checks together at the end. Each test body is async ({ app, screen }) => { ... }. Every test needs a check of its outcome; add one where none is here. A check of a screen the flow later leaves belongs to its own test. Name a locator a test uses twice. Use agent.act for a long path that can vary, with agent among the test fixtures. Give the agent the steps for one test goal, and split the path into calls only when a later step needs an intermediate screen state. Wait for that state before continuing. See topic writing-tests, Structure.',
+        'Split these lines into tests, one behavior each: its arrange lines, the act under test, then its checks together at the end. Each test body is async ({ app, screen }) => { ... }. Every test needs a check of its outcome; add one where none is here. A check of a screen the flow later leaves belongs to its own test. Name a locator a test uses twice. Use agent.act for a long path that can vary, with agent among the test fixtures. Give the agent the steps for one test goal, and split into calls when a later step needs a known screen state, risks maxSteps or maxModelCalls budgets, or needs a middle step boundary. Wait for that state before continuing. See topic writing-tests, Structure.',
       ].join('\n'),
     );
     expect(session.tools.test_lines?.description).toContain('Split the draft into tests, one behavior each');
+    expect(session.tools.test_lines?.description).not.toContain('continue the existing test');
+    expect(session.tools.test_lines?.description).not.toContain('pause point');
+  });
+
+  it('drafts the lines while attached to a held test for its pause point', async () => {
+    const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] }, attached: true });
+    await session.run('tap', { target: 'n2' });
+    expect(session.lines.draft()).toBe(
+      [
+        "Test lines from this session's actions while the test was held, in order (1 lines):",
+        '',
+        'await screen.getByRole("button", "Save").tap();',
+        '',
+        "Put them in the held test at the pause point. Keep the test's checks together at its end, with one that checks its outcome. See topic writing-tests, Structure.",
+      ].join('\n'),
+    );
+    expect(session.tools.test_lines?.description).toContain('Use these lines at the pause point of the held test');
+    expect(session.tools.test_lines?.description).not.toMatch(/split the draft into tests/i);
     expect(session.tools.test_lines?.description).not.toContain('continue the existing test');
   });
 

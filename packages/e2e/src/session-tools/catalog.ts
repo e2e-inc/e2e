@@ -77,6 +77,8 @@ export interface CatalogOptions {
   readonly fills?: TestLineFills | undefined;
   /** The test the session ran first, as `file:line`, which its test lines carry on from. */
   readonly testRan?: string | undefined;
+  /** Whether the session is attached to a held running test (`screen.pause()` or `--step`). */
+  readonly attached?: boolean | undefined;
   /** Whether the session's agent has a model or custom executor configured. */
   readonly hasAgent?: boolean | undefined;
   readonly warn: (message: string) => void;
@@ -100,6 +102,7 @@ export function createSessionCatalog(options: CatalogOptions): SessionCatalog {
     fills: options.fills,
     engineFixtures: options.runCode?.engineFixtures,
     testRan: options.testRan,
+    attached: options.attached,
     hasAgent: options.hasAgent,
   });
   const context = lines.watch(options.context);

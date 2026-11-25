@@ -498,6 +498,23 @@ describe('open_session {test}', { timeout: 120_000 }, () => {
       expect(drafted.isError, draftText).toBeUndefined();
       expect(draftText).toContain('Split these lines into tests, one behavior each');
       expect(draftText).toContain('Use agent.act for a long path that can vary');
+
+      // A custom executor without a model also enables agent.act guidance in test_lines.
+      const executorSessions = inProcessHost(project, {
+        agents: {
+          default: {
+            executor: { name: 'stub', runStep: async () => ({ status: 'passed', summary: 'ok' }) },
+          },
+        },
+      });
+      const executorOpened = await executorSessions.open({});
+      const executorSessionId = /^Session (\S+) open/.exec(executorOpened)?.[1];
+      expect(executorSessionId, executorOpened).toBeDefined();
+      const executorDraft = await executorSessions.call(executorSessionId!, 'test_lines', {}, { signal: new AbortController().signal });
+      await executorSessions.close('done');
+      const executorDraftText = executorDraft.content.find((part) => part.type === 'text')?.text ?? '';
+      expect(executorDraft.isError, executorDraftText).toBeUndefined();
+      expect(executorDraftText).toContain('Use agent.act for a long path that can vary');
     });
   });
 

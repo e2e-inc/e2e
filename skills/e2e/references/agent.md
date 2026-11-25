@@ -445,7 +445,7 @@ matches. Misses and hand-offs use the model; `agent.assert`,
   (`MODEL_PROVIDER_FAILED`, `MODEL_UNAVAILABLE`) implicate nothing and evict
   nothing.
 - While you fix a test, keep the cache on: each rerun replays the goals
-  whose check passed instead of calling the model for them (SKILL.md,
+  whose check passed instead of calling the model for them (topic debugging,
   "Rerunning a test while you fix it"). `--no-cache` is for ruling out a
   stale replay (topic debugging, "Tools"), and for one live run once the
   test passes.

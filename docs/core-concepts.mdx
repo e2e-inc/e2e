@@ -59,10 +59,12 @@ checkout can mean filling a shipping form, choosing a delivery option,
 and placing the order.
 
 Start with one call for the behavior under test. Split at a meaningful
-transition when the next step needs a known state, such as the payment
-page of a long checkout. Explain why the split is needed and wait for that
-state before continuing. Each call has its own
-[budgets](/reference/agent#budgets) and can replay from its own recording.
+transition when the next step needs a known state (such as the payment
+page of a long checkout), when a long flow risks `maxSteps` or
+`maxModelCalls` budgets, or when a middle failure needs its own step
+boundary. Explain why the split is needed and wait for that state before
+continuing. Each call has its own [budgets](/reference/agent#budgets) and
+can replay from its own recording.
 
 ```ts title="Complete one checkout across two screens"
 test('places an order with a saved card', async ({ app, agent, screen }) => {

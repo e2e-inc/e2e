@@ -1,336 +1,95 @@
 ---
 name: e2e
-description: Writes, runs, and debugs end-to-end tests for web and mobile apps with e2e, the agentic test runner, which mixes agent.act goals with exact locator assertions on a Playwright browser or an iOS or Android device. Also drives a project's running app live over the e2e MCP server to look at a screen, check a UI change, take a screenshot or record a video, and try a locator; and runs bug bashes, parallel e2e explore runs with each bug proven by a repro test. Use when a project depends on e2e or has an e2e.config.ts, when asked for end-to-end, browser, mobile, or agentic UI tests, to check a change in the running app, to QA or bug bash an app or branch, or when an e2e run fails.
+description: Writes, runs, and debugs web, mobile, and desktop end-to-end tests with e2e (mixing agent.act goals with locator assertions), drives apps live over e2e mcp, and runs e2e explore bug bashes. Use when a project uses e2e or asks for end-to-end, browser, mobile, or agentic UI tests, live app checks, or QA bug bashes.
 ---
 
 # e2e: agentic end-to-end tests
 
-e2e runs UI tests that mix agent instructions with exact steps. `agent.act`
-takes actions toward a goal. Use `agent.assert`, `agent.waitFor`, and
-`agent.extract` to judge or read the screen. Use `screen`, `app`, `browser`,
-and `expect` for exact actions and checks. UI targets use `@e2e-dev/web` for
-browsers, `@e2e-dev/mobile` for iOS simulators, Android emulators, and
-connected phones, or `@e2e-dev/desktop` (a prototype) for native apps on macOS.
+e2e runs UI and API tests that mix agent instructions (`agent.act`,
+`agent.assert`, `agent.waitFor`, `agent.extract`) with exact actions and
+checks (`screen`, `app`, `browser`, `device`, `request`, `expect`). Engines:
+`@e2e-dev/web` (browsers), `@e2e-dev/mobile` (iOS/Android), and
+`@e2e-dev/desktop` (macOS prototype).
 
 ## Start here: pick the reference for the job
 
-Read the one reference that matches the request before doing anything else.
-Each stands on its own; a reference names another topic only for a side
-trip. `npx e2e guide <topic>` prints the installed package's version of a
-reference; prefer it when it differs from this copy.
-The Rules and Feedback sections below still apply.
+Load only the one reference that matches the current task before acting. Each
+stands on its own; inside a long reference, read its `## Contents` list and
+jump to the sections you need instead of reading everything upfront.
+`npx e2e guide <topic>` prints the installed package's copy; prefer it when
+versions differ.
 
 | When you are | Topic | Read |
 | --- | --- | --- |
-| Adding e2e to a project, writing `e2e.config.ts`, starting the app from the config, signing in to a model, setting up mobile targets | `setup` | [references/setup.md](references/setup.md) |
-| Looking at the running app, checking a UI change, taking a screenshot or video, trying a locator, running a test line, or walking a flow while you write its test, over `e2e mcp` | `mcp` | [references/mcp.md](references/mcp.md) |
-| Writing or fixing a test: fixtures, locators, actions, matchers, sign-in sessions, the `browser` fixture, API-only tests | `writing-tests` | [references/writing-tests.md](references/writing-tests.md) |
-| Adding `agent.*` steps, picking a model, cutting cost, budgets, the replay cache | `agent` | [references/agent.md](references/agent.md) |
-| Running tests: CLI flags, CI, reporters, trace pages, `report.json` for scripts, exit codes | `running` | [references/running.md](references/running.md) |
-| Handling a failed run: error codes and their fixes, `--headed`, `--debug`, `--ai-trace` | `debugging` | [references/debugging.md](references/debugging.md) |
-| Exploring an app toward a goal without a test file: `e2e explore`, its budgets and verdict | `explore` | [references/explore.md](references/explore.md) |
-| Asked to bug bash, QA, or hunt for bugs across an app or a branch | `bug-bash` | [references/bug-bash.md](references/bug-bash.md) |
+| Adding e2e, writing `e2e.config.ts`, starting the app, configuring models or mobile targets | `setup` | [references/setup.md](references/setup.md) |
+| Driving the running app live, checking UI changes, taking screenshots or videos, trying locators, recording lines over `e2e mcp` | `mcp` | [references/mcp.md](references/mcp.md) |
+| Writing or fixing a test (structure, fixtures, locators, matchers, sessions, `browser`, API tests) | `writing-tests` | [references/writing-tests.md](references/writing-tests.md) |
+| Adding `agent.*` steps, picking models, tuning cost/budgets, replay cache | `agent` | [references/agent.md](references/agent.md) |
+| Running tests, CLI flags, CI, reporters, `report.json`, exit codes | `running` | [references/running.md](references/running.md) |
+| Fixing a failed run, error codes, rerunning fast, `--headed`, `--debug`, `--ai-trace`, reporting e2e bugs | `debugging` | [references/debugging.md](references/debugging.md) |
+| Running goal-driven exploration without a test file (`e2e explore`) | `explore` | [references/explore.md](references/explore.md) |
+| Running a bug bash or QA pass across an app or branch | `bug-bash` | [references/bug-bash.md](references/bug-bash.md) |
 
-For anything the references do not cover, the full documentation ships in
-the `docs/` directory of the installed `e2e` package
-(`node_modules/e2e/docs` in a single-package project); a link such as
-`/reference/cli` is `docs/reference/cli.mdx`. Complete projects for Vite,
-Next.js, Astro, Angular, Expo, SwiftUI, Jetpack Compose, Kotlin Multiplatform,
-Flutter, and .NET MAUI are in https://github.com/e2e-inc/e2e/tree/main/examples.
+Full docs ship in `node_modules/e2e/docs/` (e.g. `/reference/cli` is
+`docs/reference/cli.mdx`). Complete examples live at
+https://github.com/e2e-inc/e2e/tree/main/examples.
 
-## Quick start
+## Workflow
 
-A config with one web target and a model, and a test that drives one goal
-and pins the outcome:
-
-```ts
-// e2e.config.ts
-import type { E2EConfig } from 'e2e';
-import { web } from '@e2e-dev/web';
-import { gateway } from 'ai';
-
-export default {
-  targets: [
-    {
-      engine: web(),
-      app: {
-        url: 'http://127.0.0.1:3000',
-        command: { executable: 'pnpm', args: ['dev'], log: '.e2e/logs/app.log' },
-      },
-    },
-  ],
-  // The model behind every agent.* step: an AI SDK instance; gateway() from 'ai' reads AI_GATEWAY_API_KEY or a Vercel OIDC token.
-  agents: {
-    default: {
-      model: gateway('openai/gpt-6-luna-fast'),
-      system: 'You are a thorough QA agent. Verify every outcome on screen.',
-    },
-  },
-} satisfies E2EConfig;
-```
-
-```ts
-// tests/billing.e2e.ts
-import { describe, test } from '@e2e-dev/web';
-import { expect } from 'e2e';
-
-describe('billing', () => {
-  test('a member upgrades to Pro', async ({ app, agent, screen }) => {
-    await app.open('/settings/billing');
-
-    await agent.act('upgrade the workspace to the Pro plan');
-
-    await expect(screen.getByRole('status', 'Current plan')).toHaveText('Pro');
-  });
-});
-```
-
-## Workflow: writing a test
-
-1. Look at what exists: `e2e.config.ts`, `.mts`, `.js`, or `.mjs`, the `tests` glob
-   (default `tests/**/*.e2e.ts`), `e2e` in `package.json`. Nothing there:
-   follow `setup` when the user has requested e2e (see Rules).
-2. With a connected `e2e mcp` server (topic `mcp`), write the test while
-   you walk the flow, not from memory after the walk. A test written
-   afterwards fails on each name or step you got wrong, one run at a time.
-   Before `open_session`, create `tests/<feature>.e2e.ts`, opening on the
-   screen it covers (step 3). Then add each step to the file as you take it
-   in the session. An `act` goal goes in before you walk its path, and the
-   path's actions stay out of the test. A `screen` line is the `Test line:`
-   its action printed, copied as is. When the outcome shows, run its
-   `expect` with `run_code` and add it once it passes; a passing line
-   also joins `test_lines`; checks go in the test's assert block at the end.
-   `run_code` runs JavaScript on the test API, so use it for most of a
-   session's work, a loop or a read and a check in one call, over many
-   single actions.
-   The walk ends with the test written. Before choosing a role locator,
-   check the role and full accessible name in the state where the step runs.
-   Use the live accessibility tree, the component, or a recorded test screen.
-   If the requirement gives only visible message text, use a scoped
-   `getByText`. A requirement can call a heading a status message.
-   Without a server, inspect the component or run the test with `--headed`.
-3. Shape the file before the steps (topic `writing-tests`, "Structure"):
-   one top-level `describe` per feature, and one behavior and one goal
-   per test. Name the outcome in the title. Put shared arrange hooks
-   directly inside `describe`, before constants and tests. Use `beforeAll`
-   for shared worker setup and `beforeEach` for per-test starting state.
-   Keep the act and assertions in the test. Describe
-   the specific steps the agent needs in `agent.act`.
-   Split that path into calls only when a later step needs a specific
-   intermediate state. Explain the split and wait for that state.
-   Start the test on the screen it covers, since every rerun pays
-   for the steps before: in a browser use `app.open` on that screen's
-   path and restore a named session when the test needs one. On a device use
-   `device.openLink`, and data from the app's API (topic `writing-tests`).
-   A value a goal needs goes in its `params`; `screen` lines are for a
-   short, stable flow, an interaction that is itself the point, and a
-   sign-in form in a setup test. Use `expect` for exact values, counts, or
-   field states. Use `agent.assert` alone when it can judge the full
-   semantic or visual outcome from the screen, and pair a deterministic
-   `expect` beside it when exact phrasing or state must also hold. Scope
-   collection checks to the named list or table. For a complete collection
-   check, compare all records and their counts, sorting copies only when
-   order can vary.
-   Put the selectors, fixed values, and prompt
-   text the tests repeat inside the shared `describe`, above its tests,
-   and keep a single-use one inline. As the spec
-   grows, move those definitions to a feature-local TypeScript file and
-   import them. Keep selectors that need test data close to the data.
-   Use fixtures for data and cleanup (topic `writing-tests`). Check an end value
-   the start cannot already show, inside the record the test changed, so a
-   step that did nothing fails. No check sits in arrange or act: a state
-   the test needs mid-way is a wait on a locator narrowed to it. In a browser
-   each test starts from its session's saved state, not from an earlier
-   test; on a device the app keeps the data the last test stored, so reset it
-   with `app.clearState()` and seed what the test needs. Server
-   data a test changes is created and deleted in a fixture, and a test
-   never skips or branches on what the app shows.
-4. Check every test that removes, edits, or toggles one item of a list:
-   its arrange block adds two items, it acts on the second item shown
-   (in a newest-first list, the item added first), never the first, and it checks that the first item is unchanged. An
-   app that always changes the first row passes a test that acts on the
-   first row.
-5. Run only the test you are working on:
-   `npx e2e run tests/<feature>.e2e.ts:<line>`, the line its `test(` opens on,
-   with the flags in "Rerunning a test while you fix it" below. Agent
-   steps need a model in the config and that provider's authentication (a
-   saved subscription login, an API key); a local endpoint may need none.
-   Tests without agent steps need no model.
-6. When it fails, fix it from what the run recorded (next section).
-
-## Workflow: fixing a failed test
-
-The run already saw every screen up to the failure. Fix from what it
-recorded; never walk the flow again from the start over MCP just to see a
-screen.
-
-1. Read the failure block in the terminal: the failing line with its code
-   frame, the message (an assertion's `expected` and `observed`), where the
-   screen was (`❯ at`: a URL on the web, the app and screen title on a
-   device), and the nodes nearest a failed locator (`❯ on screen`). Then
-   read the trace page it names (`❯ trace .e2e/results/<test>/trace.md`):
-   every step with what it did, what the app logged, the agent's turns, and
-   `## Screen at failure`, the screen one node per line (topic `debugging`).
-2. Fix every line that evidence covers, not only the one that failed: the
-   screen at failure shows the names the rest of that screen's lines need.
-   Fix the locator, the expectation, or the app. Never add a sleep or a
-   fixed delay (`setTimeout`, `waitForTimeout`): wait for the state you
-   need with `agent.waitFor('<that state>')` instead (topic `agent`; it
-   needs a model).
-3. A test stops at its first failed step (an `expect.soft` lets it go on),
-   and every wrong line after it costs another run. Before rerunning, check
-   the lines after it as far as you can: against the screen at failure, the
-   app source, or a live session.
-4. For a screen the evidence and the source leave out, look live (topic
-   `mcp`). `open_session {test: "tests/<feature>.e2e.ts"}` (with `:<line>`
-   of its `test(` call when the file holds several) runs the test and stops
-   on the live screen where it failed. Act out the lines after it there and
-   put the `Test line:` each action prints in place of a wrong one, so the
-   next rerun catches every mistake. Otherwise open or reuse a session, go
-   straight to that screen, then `observe` and `locate`, or `run_code` for
-   the fixed line and the ones after it. On the web, `navigate` to the path
-   of the `❯ at` URL or the screen's route, and tap only to reach a state no
-   URL opens. A device session starts on the app's launch screen: take the
-   shortest path from there.
-5. Rerun only that test, the way the next section says, or in a new
-   session with `open_session {test}` (topic `mcp` says when a session
-   must close first). Repeat with the next failure.
-
-## Rerunning a test while you fix it
-
-Every run of a failing test waits out its failure, and every `agent.act`
-that runs live spends model calls. Keep each rerun to the one test and the
-lines you changed:
-
-- Run by `file:line`, not the file or the suite. After an edit above the
-  test, look its `test(` line up again: a stale line runs another test, or
-  fails with `NO_TESTS` listing the lines tests start at.
-- Add `--action-timeout 5000`: a locator that matches nothing fails in 5 s
-  instead of the default 30 s. It also bounds each action inside an agent
-  step, so keep it longer than the slowest screen takes to load. A `screen`
-  call's own `{ timeout }` still wins. An `expect` already gives up after
-  5 s by default (`assertionTimeout`).
-- Keep the replay cache on. A failed run keeps the recording of every goal
-  a later check or wait confirmed (the wait closing the arrange block, topic
-  `writing-tests`), and the next run replays those with no model call.
-  New, changed, and failed goals run live, and so does a replay the trace
-  page shows as handed off. `agent.assert`, `agent.waitFor`, and
-  `agent.extract` always call the model. Leave `--no-cache` off: it sends every goal to the model
-  again. Only a `read-write` cache records: the local default, but not on CI
-  unless the config names that mode, nor in strict mode. A stopped
-  run (Ctrl-C, a command your tool's timeout kills, `--max-duration`) saves
-  nothing, so give the command a timeout longer than the test.
-- Don't rename the test, its `describe`, or its file, and don't reword a
-  goal, change its params, or change the agent's `context` or the test's
-  `agentContext` once a goal passes. Each is part of a recording's key, so
-  every goal it touches records again live. Fixing a locator or an
-  expectation keeps the recordings.
-- Add `--retries 0` when retries are on (`retries` in the config, or on
-  CI, where the default is 1); a `retries` option on the test or its
-  `describe` wins over the flag. Outside strict mode (`--strict-cache`, `cache.strict`), a
-  retry never replays: it runs every goal live and waits out the failure
-  again.
-- Once the test passes, drop `--action-timeout` and run it one time with
-  `--no-cache`: every goal runs live at the config's timeouts, which shows
-  the agent still reaches it without its recordings.
+1. Inspect `e2e.config.ts` (or `.mts`/`.js`/`.mjs`) and `package.json`. If e2e
+   is not installed and the user asked for it, read `setup`.
+2. Read the one matching reference (`writing-tests` for tests; `mcp` when
+   driving live, writing steps as you walk and preferring `run_code` over many
+   single actions; `agent` when adding `agent.*` steps).
+3. Shape each file per `writing-tests` ("Structure"): one top-level `describe`
+   per feature, one behavior and one goal per test, arrange -> act -> assert
+   with every `expect` and `agent.assert` at the end. Use `.waitFor()` on a
+   narrowed locator for mid-way states, name repeated locators/values, and
+   create/delete server records in `test.extend` fixtures (`try`/`finally`).
+4. **Check every test that removes, edits, or toggles one item of a list:**
+   its arrange block adds two items, it acts on the second item shown (in a
+   newest-first list, the item added first), never the first, and it checks
+   that the first item is unchanged. An app that always changes the first row
+   passes a test that acts on the first row.
+5. Run only the test you edit:
+   `npx e2e run tests/<feature>.e2e.ts:<line> --action-timeout 5000 --retries 0`,
+   keeping the replay cache on until green. Once it passes, drop
+   `--action-timeout` and verify once with `--no-cache` if it uses `agent.*`.
+6. On failure, fix from the terminal failure block and
+   `.e2e/results/<test>/trace.md` first (topic `debugging`); never re-walk
+   from scratch over MCP just to inspect a screen.
 
 ## Rules
 
-- In a project without e2e, set it up when the user requests it. Otherwise
-  ask before adding a test framework, and name any existing framework.
-- Live MCP tools need an `e2e mcp` server in the client: the e2e plugin's
-  (Codex and Cursor), or one registered in the project (topic `mcp`). In a directory with no e2e config, a live look still
-  works: `open_session {engine: "@e2e-dev/web", app: {url: "http://localhost:3000"}}` opens a session
-  on the engine's defaults. Tests need a config and run with the CLI.
-  Keep a session open across runs while you write or fix a web test; topic
-  `mcp` says when a run can go beside it, and what to do on
-  `APP_ALREADY_RUNNING`.
-- Run the CLI as `npx e2e ...` (or `pnpm exec e2e ...`).
-- The config is `export default { ... } satisfies E2EConfig` with
-  `import type { E2EConfig } from 'e2e'`. `targets` is required; a UI target
-  names an engine and declares the app beside it: `{ engine: web(), app: { url, command } }`.
-  A tools-only target can omit the engine and set `platform`.
-- Import `test`, `describe`, the hooks, `expect`, `credentials`, and
-  `secrets` from `e2e`. A test that uses the `browser` fixture imports `test`,
-  `describe`, and the hooks from `@e2e-dev/web`: the same runtime functions,
-  typed with `browser`.
-- Config and tests are ES modules whatever `package.json` sets as `type`.
-- Locators resolve when used. Actions wait for readiness and `expect` retries
-  assertions. Reads such as `textContent()` wait for one match until the
-  action timeout, then answer the current value; `count()` and `isVisible()`
-  answer from the current screen. Nothing waits for a value to change, so use
-  a matcher when a value has to settle.
-- A locator that matches two nodes fails with `LOCATOR_AMBIGUOUS`; narrow it
-  (topic `writing-tests`).
-- Secrets never appear in test code. Declare accounts under `credentials` and
-  every other sensitive value under `secrets` in the config; resolve with
-  `credentials.user(name).password` or `secrets.get(name)` (separate
-  namespaces: `secrets.get` never returns a password), and hand the opaque
-  `Secret` only to `fill()` or `agent.act` params.
-- Tests: one top-level `describe` per feature, one behavior per test,
-  arrange, act, assert with every assertion last (topic `writing-tests`).
-  Bad: one test that adds a todo, checks it, marks it done, and checks
-  again. Good: `'adds a todo to the list'` and `'marks a todo as done'`,
-  the second adding its todo in its arrange block. A message the test
-  moves past, such as `Saved` before it reopens the record or a
-  confirmation before it opens another page, is a wait in the act block,
-  `screen.getByRole('status').filter({ hasText: /^Saved$/ }).waitFor()`,
-  not an `expect`. Every check reads the screen the test ends on.
-- A test that acts on one item of a list acts on the second item shown,
-  never the first, after adding two, and checks the first item is
-  unchanged (topic `writing-tests`, "Act on the second item shown").
-- Agent instructions: describe the steps toward one outcome using the
-  wording on screen. Pass values in `params` (topic `agent`). Add a
-  separate test for a second behavior. For text a model produces,
-  check the required meaning with a matcher like `toContain('Pro')`.
-- End every test that runs an agent goal with a verifying check: a
-  locator matcher (`expect(locator)`), an engine matcher
-  (`expect(browser).toHaveURL`), or `agent.assert`. A passing one confirms
-  every `act` before it, so they can be cached and replayed without model
-  calls, and so do `locator.waitFor`, `browser.waitForURL`, and
-  `agent.waitFor`. Reads, `expect.poll`, and plain-value `expect` confirm
-  nothing (topic `agent`, "The replay cache").
-- Shape the agent for this app: `context` for vocabulary the screens use,
-  `system` for how it works, tools for a test API, named personas under
-  `agents`. When a step fails, tighten the goal first, then the context, then
-  the agent.
-- `.e2e/` is output (`report.json`, `results/`, `cache/`, `logs/`; the
-  config's `output` moves the report and artifacts, never `cache/` or the
-  app's log). Read it, never edit it.
-
-## Feedback
-
-When e2e itself gets in your way, offer to tell the e2e team: a command or
-API that broke (`bug`), docs or this skill that misled you (`docs`), or a
-capability you needed and did not find (`feature`). Once per problem, after
-you worked around it or gave up. Never report:
-
-- failures of the app under test, or its own behavior;
-- a problem you saw once and could not see again;
-- anything on an outdated e2e: the command refuses it, so upgrade
-  (`npx e2e@latest upgrade`) and check the problem still happens first.
-
-Search [existing issues](https://github.com/e2e-inc/e2e/issues) first
-(`gh issue list -R e2e-inc/e2e --search "<words>"`); comment on a match
-instead of sending a new report.
-
-A `bug` needs `--repro`, steps that reproduce it every time without app
-content. Without such steps, or when the bug needs your app to show, omit
-`--repro`: the command then prints a prefilled GitHub issue and sends
-nothing; show the user the link and tell them to add a minimal reproduction
-and submit it. Never file the issue yourself.
-
-Run it with `--dry-run` first, show the user what would be sent, and send
-it only when they agree.
-
-```bash
-npx e2e feedback --type bug -m "<one or two sentences>" \
-  --repro "<steps that reproduce it every time>" --error-code LOCATOR_AMBIGUOUS \
-  --task "<what you were doing>" --expected "<...>" --actual "<error message>" \
-  --approach "<what you tried>" --command "<e2e command>" --agent "<agent / model>"
-```
-
-Describe e2e's behavior only, briefly: never paste app content, page text,
-test files, URLs of private apps, or credentials. Secret-named environment
-variables and common token shapes are redacted, but do not rely on it. After
-sending, give the user the reference id it prints.
+- **No unsolicited setup:** ask before adding e2e if not requested, naming any
+  existing framework.
+- **CLI and config:** run `npx e2e ...` (or `pnpm exec e2e ...`). Config and
+  test files are ESM (`export default { ... } satisfies E2EConfig`); `targets`
+  is required.
+- **Imports:** import `test`, `describe`, hooks, `expect`, `credentials`, and
+  `secrets` from `e2e`; import `test`, `describe`, and hooks from
+  `@e2e-dev/web`, `@e2e-dev/mobile`, or `@e2e-dev/desktop` when using their
+  engine fixture.
+- **Secrets:** never put secrets in test code. Declare them under
+  `credentials` or `secrets` and pass `credentials.user(name).password` or
+  `secrets.get(name)` only to `fill()` or `agent.act` `params`.
+- **Locators and waits:** locators resolve lazily; actions and `expect` wait;
+  `count()` and `isVisible()` read immediately; two matches fail with
+  `LOCATOR_AMBIGUOUS`. Never sleep; wait for state.
+- **Test shape:** one behavior per test, arrange -> act -> assert with every
+  check at the end. Mid-way states (e.g. `Saved` before reopening) use
+  `.waitFor()`, not `expect`.
+- **List mutations:** add two items, act on the second item shown (never the
+  first), and check the first is unchanged (topic `writing-tests`, "Act on the
+  second item shown").
+- **Agent goals and replay:** give `agent.act` the steps toward one goal with
+  values in `params`; split when a later step needs a known screen state,
+  risks `maxSteps`/`maxModelCalls` budgets, or needs a middle step boundary.
+  End with a verifying matcher or `agent.assert` so the replay cache keeps the
+  recording (reads, `expect.poll`, and plain-value `expect` confirm nothing).
+- **MCP sessions:** in a directory without a config, `open_session {engine:
+  "@e2e-dev/web", app: {url: "http://localhost:3000"}}` still works (topic
+  `mcp`).
+- **Runner output:** `.e2e/` is generated output: read it, never edit it.
+- **e2e bugs or gaps:** when e2e itself breaks or misleads you, read
+  `debugging` ("Feedback") for `npx e2e feedback`.
