@@ -31,6 +31,7 @@ export function describeEngine(engine: EngineHandle): EngineManifest {
     selectsDevice: engine.selectsDevice === true ? true : undefined,
     grantsAllPermissions: engine.grantsAllPermissions === true ? true : undefined,
     launchArgumentValues: engine.launchArgumentValues === true ? true : undefined,
+    fileApps: engine.fileApps === true ? true : undefined,
     isolation: engine.isolation === 'worker' ? ('worker' as const) : undefined,
   });
 }
@@ -85,6 +86,7 @@ function comparable(manifest: EngineManifest) {
     selectsDevice: manifest.selectsDevice === true,
     grantsAllPermissions: manifest.grantsAllPermissions === true,
     launchArgumentValues: manifest.launchArgumentValues === true,
+    fileApps: manifest.fileApps === true,
     isolation: manifest.isolation === 'worker' ? 'worker' : 'attempt',
   };
 }

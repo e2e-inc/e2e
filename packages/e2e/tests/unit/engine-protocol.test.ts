@@ -134,6 +134,17 @@ describe('engine protocol', () => {
     expect(legacy.remote.actions).not.toContain('setInputFilePayloads');
   });
 
+  it('advertises multiTap and carries its count and modifiers over JSON-RPC unchanged', async () => {
+    const perform = vi.fn<NonNullable<Engine['perform']>>(async () => undefined);
+    const { remote } = overLoopback(toy({ actions: ['tap', 'multiTap'], perform }));
+    expect(remote.actions).toContain('multiTap');
+    await remote.init!(initInfo());
+    const action = { kind: 'multiTap', count: 3, modifiers: ['Shift'] } as const;
+    await remote.perform!({ id: 'root', revision: '1' }, action, operation());
+    expect(perform).toHaveBeenCalledWith(expect.anything(), action, expect.anything());
+    await remote.dispose!(cleanup);
+  });
+
   it('carries a snapshot with its pixels byte for byte', async () => {
     const data = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 255, 7]);
     const { remote } = overLoopback(
@@ -576,6 +587,8 @@ describe('engine protocol', () => {
       { ...base, methods: ['engine/observe', 'engine/teleport'] },
       { ...base, methods: ['engine/readStyle'] },
       { ...base, methods: ['engine/observe'], actions: ['tap'] },
+      { ...base, methods: ['engine/observe'], actions: ['blur'] },
+      { ...base, methods: ['engine/viewportIntersection'] },
       { ...base, methods: ['engine/observe'], tapModifiers: true },
       { ...base, methods: ['engine/observe'], selectsDevice: true },
       // The client serves prepare for finish alone, which would drop the device it never forwards.
@@ -590,6 +603,8 @@ describe('engine protocol', () => {
       expect(validate(refused), JSON.stringify(refused)).toBe(false);
       expect(() => connectEngine({ manifest: refused as never, transport: loopbackTransport(local) }), JSON.stringify(refused)).toThrow(ConfigurationError);
     }
+    // Only a worker-isolated engine names its isolation; `attempt` is the default, left out.
+    expect(validate({ ...base, methods: ['engine/observe'], isolation: 'attempt' })).toBe(false);
   });
 
   describe('launch arguments', () => {
@@ -628,6 +643,25 @@ describe('engine protocol', () => {
         }),
       );
       expect(spread).toHaveLength(2);
+    });
+
+    it('carries fileApps in the manifest, so a served engine opens a file app and one that does not declare it is refused', () => {
+      const { local, remote } = overLoopback(toy({ fileApps: true }));
+      expect(describeEngine(local).fileApps).toBe(true);
+      expect(remote.fileApps).toBe(true);
+      const plain = overLoopback(toy({}));
+      expect(describeEngine(plain.local).fileApps).toBeUndefined();
+      expect(plain.remote.fileApps).not.toBe(true);
+    });
+
+    it('refuses a server that does not declare the fileApps its manifest promised', async () => {
+      const local = defineEngine(toy({}));
+      const remote = connectEngine({ manifest: { ...describeEngine(local), fileApps: true }, transport: loopbackTransport(local) });
+      await expect(remote.init!(initInfo())).rejects.toThrow(/fileApps is false, declared true/);
+    });
+
+    it('refuses a fileApps flag that is not a boolean', () => {
+      expect(() => defineEngine(toy({ fileApps: 'yes' as never }))).toThrow(/fileApps must be a boolean/);
     });
 
     it('carries the object form to an engine that declares launchArgumentValues', async () => {
@@ -690,6 +724,10 @@ describe('engine protocol', () => {
     expect(() => connectEngine({ manifest: { name: 'x', version: '1', spiVersion: 1, methods: ['engine/perform'] }, transport })).toThrow(/perform without observe/);
     expect(() => connectEngine({ manifest: { name: 'x', version: '1', spiVersion: 1, methods: ['engine/observe', 'engine/perform'] }, transport })).toThrow(/perform without actions/);
     expect(() => connectEngine({ manifest: { name: 'x', version: '1', spiVersion: 1, methods: ['engine/observe', 'engine/observe'] }, transport })).toThrow(/twice/);
+    // The schema cannot require engine/locate beside it: resolveLocators builds locate on the client.
+    const measuring = { name: 'x', version: '1', spiVersion: 1 as const, methods: ['engine/observe', 'engine/viewportIntersection'] as const };
+    expect(() => connectEngine({ manifest: measuring, transport })).toThrow(/viewportIntersection without locate/);
+    expect(connectEngine({ manifest: measuring, transport, resolveLocators: true }).capabilities.has('viewport-intersection')).toBe(true);
   });
 });
 
