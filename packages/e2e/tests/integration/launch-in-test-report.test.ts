@@ -120,6 +120,11 @@ test('never awaits the session it opens', async ({ app }) => {
   host.newSession();
 });
 
+test('never awaits the host it launches', async ({ app }) => {
+  await app.open();
+  open({ onInit: () => new Promise((resolve) => setTimeout(resolve, 300)) });
+});
+
 // Each opening below is awaited and its rejection caught: the test meets the failure, so it has nothing of it left in flight.
 const refusal = async (opening) => {
   try {
@@ -426,6 +431,14 @@ describe('a launch() session opened inside a test, in the test\'s report', { tim
     // The engine's failure, not the cleanup's that came after it.
     expect(refused!.cleanup).toBe(refused!.init);
     expect(Object.values(refused!)).not.toContain('opened');
+  });
+
+  it('fails the test for a launch the body left in flight, and cancels it without a stray rejection', () => {
+    const attempt = attemptOf('never awaits the host it launches');
+    expect(attempt.error).toMatchObject({ code: 'STEP_NOT_AWAITED', message: expect.stringContaining('launch()') });
+    expect(attempt.secondaryErrors).toEqual([]);
+    expect(outcome.report.run.errors).toEqual([]);
+    expect(outcome.report.run.results.flatMap((result) => result.attempts).filter((each) => each.error?.code === 'UNHANDLED_REJECTION')).toEqual([]);
   });
 
   it('shows the test\'s own screen for a failure on the second session, without matching that session\'s locator against it', () => {
