@@ -56,7 +56,8 @@ describe.each<BrowserProviderScope>(['worker', 'attempt'])('downloads through a 
     artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-provider-downloads-'));
     remoteDisk = mkdtempSync(path.join(tmpdir(), 'e2e-browser-disk-'));
     chrome = await launchRemoteChrome();
-    const reads: { lease: string; file: string; suggestedFilename: string | undefined }[] = [];
+    const reads: { lease: string; file: string; suggestedFilename: string | undefined; before: unknown }[] = [];
+    const events: string[] = [];
     const provider: BrowserProvider = {
       name: 'toy-remote',
       scope,
@@ -64,9 +65,13 @@ describe.each<BrowserProviderScope>(['worker', 'attempt'])('downloads through a 
       release: async () => undefined,
       downloads: {
         dir: path.join(remoteDisk, 'downloads'),
-        async read(lease, file, { suggestedFilename }) {
-          reads.push({ lease: lease.id, file, suggestedFilename });
+        async read(lease, file, { suggestedFilename, before }) {
+          reads.push({ lease: lease.id, file, suggestedFilename, before });
           return readFile(file);
+        },
+        async before(lease) {
+          events.push(`before ${lease.id}`);
+          return ['token'];
         },
       },
     };
@@ -102,12 +107,15 @@ describe.each<BrowserProviderScope>(['worker', 'attempt'])('downloads through a 
     let triggers = 0;
     const trigger = async (): Promise<void> => {
       triggers += 1;
+      events.push('trigger');
       for (let index = 0; index < count; index += 1) await page.locator(`#download-${index}`).click();
     };
     const files = count === 1
       ? [await browser.waitForDownload(trigger)]
       : await browser.waitForDownloads(trigger, { count });
     expect(triggers).toBe(1);
+    expect(events).toEqual(['before lease-1', 'trigger']);
+    expect(reads.every(read => JSON.stringify(read.before) === '["token"]')).toBe(true);
     expect(files).toHaveLength(count);
     for (const [index, file] of files.entries()) {
       expect(file.suggestedFilename).toBe(`report-${index}.txt`);
@@ -181,5 +189,36 @@ describe.each<BrowserProviderScope>(['worker', 'attempt'])('downloads through a 
       expect(readSignal?.aborted).toBe(true);
       expect(attached).toEqual([]);
     } finally { clearTimeout(watchdog); }
+  });
+
+  it('fails the wait with ENGINE_FAILURE naming the provider when its before hook throws, without running the trigger', async () => {
+    artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-provider-before-'));
+    remoteDisk = mkdtempSync(path.join(tmpdir(), 'e2e-browser-before-'));
+    chrome = await launchRemoteChrome();
+    const provider: BrowserProvider = {
+      name: 'failing-before', scope,
+      acquire: async () => ({ id: 'before-lease', cdpEndpoint: chrome!.endpoint }),
+      release: async () => undefined,
+      downloads: {
+        dir: path.join(remoteDisk, 'downloads'),
+        read: async (_lease, file) => readFile(file),
+        before: async () => { throw new Error('file listing unavailable'); },
+      },
+    };
+    engine = webEngine({ browser: provider });
+    const prepared = await engine.prepare!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, slots: 1, env: {}, signal: signal(), headed: false, log: () => undefined });
+    await engine.init!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, env: { ...prepared?.env }, headed: false, workerSlot: 0, signal: signal(), log: () => undefined });
+    await engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal: signal(), resolveSecret: noSecrets, ...ignoreTrace });
+    await engine.session!.open!(app.url, operation());
+    const browser = engine.fixtures!['browser']!({
+      operation: (timeout?: number) => ({ ...operation(), timeoutMs: timeout ?? 15000 }),
+      app: { resolveUrl: (url: string) => new URL(url, app.url).href },
+      expectable: (target: object) => target, fixture: (_name: string, target: object) => target,
+      attachArtifact: () => undefined,
+    } as unknown as EngineFixtureContext) as Browser;
+    let triggers = 0;
+    const error = await browser.waitForDownload(async () => { triggers += 1; }).then(() => undefined, (cause: { code: string; message: string }) => cause);
+    expect(error).toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('browser provider "failing-before" could not prepare a download wait on browser before-lease: file listing unavailable') });
+    expect(triggers).toBe(0);
   });
 });

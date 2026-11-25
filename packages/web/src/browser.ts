@@ -454,6 +454,7 @@ async function collectDownloads(
       const page = surface.requirePage();
       const remote = surface.remoteDownloads();
       if (remote !== undefined) await saveDownloadsTo(page, remote.dir, currentOperation.signal);
+      const before = remote === undefined ? undefined : await remote.before(currentOperation.signal);
       requireOpen();
       let allStarted!: () => void;
       const received = new Promise<void>((resolve) => { allStarted = resolve; });
@@ -478,7 +479,7 @@ async function collectDownloads(
         const suggestedFilename = download.suggestedFilename();
         const { relative, absolute } = surface.artifactPath('downloads', suggestedFilename, '');
         if (remote === undefined) await saveLocally(download, absolute, surface.unservedDownloads());
-        else await saveFromBrowser(download, remote, absolute, currentOperation.signal);
+        else await saveFromBrowser(download, remote, absolute, currentOperation.signal, before);
         if (currentOperation.signal.aborted) throw timedOut();
         context.attachArtifact('download', relative);
         files.push({ path: relative, absolutePath: absolute, suggestedFilename });
