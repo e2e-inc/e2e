@@ -13,7 +13,7 @@ import type { StepCacheInfo } from './run/steps.ts';
 import type { EngineHandle } from './engine/index.ts';
 import type { KeyModifier, Momentum, ScrollDirection, SelectOption, ViewportPoint } from './engine/contract.ts';
 import type { CacheStore } from './cache/store.ts';
-import type { FixtureDefinitions, FixtureOverrides, WorkerFixtures } from './types/fixtures.ts';
+import type { ConfigBase, ConfigFixtures, FixtureDefinitions, FixtureOverrides, OmitEach, PickEach, SelectedFixtures, TestOverrides, WorkerFixtures } from './types/fixtures.ts';
 
 export type { KeyModifier, Momentum, ScrollDirection, SelectOption } from './engine/contract.ts';
 export type { CacheReadResult, CacheStore } from './cache/store.ts';
@@ -62,8 +62,6 @@ export interface FilePayload {
   readonly mimeType: string;
   readonly buffer: Buffer;
 }
-
-export type Capability = string;
 
 export interface StandardSchemaV1<Input = unknown, Output = Input> {
   readonly '~standard': StandardSchemaV1.Props<Input, Output>;
@@ -497,6 +495,14 @@ export interface TapOptions extends ClickOptions {
    * a box, which needs the engine's `tap` pointer action.
    */
   position?: Point;
+  /**
+   * How many taps in a row, a positive safe integer, default 1. `2` is the
+   * same as `doubleTap()`; 3 or more needs an engine that declares the
+   * `multiTap` action, `UNSUPPORTED_CAPABILITY` otherwise. A count above the
+   * engine's own limit (200 on the mobile engine) is also
+   * `UNSUPPORTED_CAPABILITY`. A count above 1 is not combined with `position`.
+   */
+  count?: number;
 }
 
 /** `longPress` options: the hold time in milliseconds, 100 through 10000, default the engine's own. */
@@ -585,7 +591,7 @@ export interface Screen {
 }
 
 export interface Locator extends Omit<Screen, 'tree' | 'debug' | 'pause'> {
-  /** Taps exactly one matching actionable node; with `position`, taps that point of its box once it is in view, with no other actionability check. */
+  /** Taps exactly one matching actionable node, `count` times in a row; with `position`, taps that point of its box once it is in view, with no other actionability check. */
   tap(options?: TapOptions): Promise<void>;
   /** Alias of tap. */
   click(options?: TapOptions): Promise<void>;
@@ -647,6 +653,12 @@ export interface Locator extends Omit<Screen, 'tree' | 'debug' | 'pause'> {
   isChecked(): Promise<boolean>;
   /** Reads the current viewport-relative rectangle. */
   boundingBox(): Promise<{ x: number; y: number; width: number; height: number } | null>;
+  /**
+   * Captures a redacted screenshot of the one match and returns its absolute
+   * path. The match is scrolled into view first; one larger than the viewport
+   * keeps the part inside it.
+   */
+  screenshot(label?: string): Promise<string>;
   /** Counts current matches without auto-waiting. */
   count(): Promise<number>;
   /** One `nth(i)` locator per current match, without auto-waiting; empty when nothing matches. */
@@ -739,6 +751,69 @@ export interface RecordedVideoLink {
   readonly startedAt: string;
 }
 
+/**
+ * The `request` fixture: HTTP calls from a test. A path resolves against the
+ * app URL; an absolute http(s) URL goes where it names. Each call is a step,
+ * bounded by the action timeout and the running test's or hook's budget, and
+ * returns once the whole body is read. It does not send the browser's
+ * cookies or keep cookies between calls.
+ */
+export interface APIRequest {
+  /** Sends a request with `options.method`, GET by default. */
+  fetch(url: string, options?: APIRequestFetchOptions): Promise<WebResponse>;
+  /** Sends a GET request. */
+  get(url: string, options?: APIRequestOptions): Promise<WebResponse>;
+  /** Sends a POST request. */
+  post(url: string, options?: APIRequestOptions): Promise<WebResponse>;
+  /** Sends a PUT request. */
+  put(url: string, options?: APIRequestOptions): Promise<WebResponse>;
+  /** Sends a PATCH request. */
+  patch(url: string, options?: APIRequestOptions): Promise<WebResponse>;
+  /** Sends a DELETE request. */
+  delete(url: string, options?: APIRequestOptions): Promise<WebResponse>;
+  /** Sends a HEAD request. */
+  head(url: string, options?: APIRequestOptions): Promise<WebResponse>;
+}
+
+/** What one `request` call sends beside its URL. */
+export interface APIRequestOptions {
+  /** Request headers. */
+  readonly headers?: Readonly<Record<string, string>>;
+  /** A body sent as JSON, with `content-type: application/json` unless `headers` sets one. Not with `body`. */
+  readonly json?: unknown;
+  /** A body sent as is. Not with `json`. */
+  readonly body?: string;
+  /** Timeout in milliseconds; defaults to `actionTimeout`. 0 sets none of its own, so only the running test's or hook's budget bounds the call. */
+  readonly timeout?: number;
+  /** How redirects are handled; `'follow'` by default. `'manual'` returns the 3xx response as is; `'error'` fails the call with `ACTION_FAILED`. */
+  readonly redirect?: 'follow' | 'manual' | 'error';
+}
+
+/** `request.fetch` options: the method beside the rest. */
+export interface APIRequestFetchOptions extends APIRequestOptions {
+  /** The HTTP method; GET by default. */
+  readonly method?: string;
+}
+
+/**
+ * An HTTP response: what `request` calls, the web engine's
+ * `browser.waitForResponse`, and `route.fetch()` return.
+ */
+export interface WebResponse {
+  /** Response URL. */
+  readonly url: string;
+  /** HTTP status. */
+  readonly status: number;
+  /** Response headers, lower-cased names; `request` and `route.fetch()` join several `set-cookie` values with `\n`, `waitForResponse` leaves cookie headers out. */
+  readonly headers: Readonly<Record<string, string>>;
+  /** Waits for the body and returns its bytes; rejects with `ACTION_FAILED` when the body could not be read. */
+  body(): Promise<Buffer>;
+  /** Waits for the body and parses it as JSON; rejects with `ACTION_FAILED` when the body could not be read. */
+  json<T = unknown>(): Promise<T>;
+  /** Waits for the body and reads it as text; rejects with `ACTION_FAILED` when the body could not be read. */
+  text(): Promise<string>;
+}
+
 export interface SetupSession {
   /** Saves state under a setup-declared name. */
   save(name: string): Promise<void>;
@@ -753,6 +828,8 @@ export interface TestFixtures {
   readonly screen: Screen;
   /** The target's platform label: `web`, `ios`, `android`, or an engine's own string. */
   readonly platform: string;
+  /** HTTP calls, each one a step; a path resolves against the app URL. */
+  readonly request: APIRequest;
 }
 
 export interface SetupFixtures extends TestFixtures {
@@ -780,8 +857,6 @@ export interface TestOptions {
   only?: boolean;
   /** Platforms the test runs on; other targets skip it. Innermost wins. */
   platforms?: readonly string[];
-  /** Capabilities the target must have; otherwise the test is skipped at selection. Innermost wins. */
-  requires?: readonly Capability[];
   /** Session a setup test saved, restored before the body runs. */
   session?: string;
   /** Extra context for agent steps; layers are concatenated outermost first. */
@@ -870,8 +945,15 @@ export interface DescribeAPI extends DescribeRegistrar {
 export interface TestRegistrar<Fixtures = TestFixtures & WorkerFixtures> {
   /** Registers one test synchronously during module evaluation. */
   (title: string, fn: TestFn<Fixtures>): TestCase;
-  /** Registers one configured test synchronously during module evaluation. */
-  (title: string, options: TestOptions, fn: TestFn<Fixtures>): TestCase;
+  /**
+   * Registers one configured test synchronously during module evaluation.
+   * Its fixtures are typed for the targets its `platforms` option keeps.
+   */
+  <const Platform extends string = string>(
+    title: string,
+    options: TestOptions & { readonly platforms?: readonly Platform[] },
+    fn: TestFn<SelectedFixtures<Fixtures, Platform>>,
+  ): TestCase;
 }
 
 /**
@@ -919,6 +1001,8 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    */
   skip(condition: boolean, reason?: string): void;
   skip(reason?: string): void;
+  /** Registers an unfinished test, reported as skipped with cause and reason `todo`. */
+  todo(title: string): TestCase;
   /** Registers one skipped test marked fixme, reported with the skip cause and reason `fixme`. */
   fixme(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
@@ -1019,13 +1103,16 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    *
    *   export const test = base.extend<{ device: Device }>();
    */
-  extend<Extra = {}, ExtraWorker = {}>(): TestAPI<Fixtures & Extra, Worker & ExtraWorker>;
+  extend<Extra = {}, ExtraWorker = {}, Config = unknown>(): TestAPI<
+    ConfigBase<Fixtures, Config> & Extra & ConfigFixtures<Config, 'test'>,
+    ConfigBase<Worker, Config> & ExtraWorker & ConfigFixtures<Config, 'worker'>
+  >;
   /**
    * Returns a new `test` whose registrations extend fixtures it already
    * has, built-in ones included. Inside the function the fixture's own name
    * is the fixture it extends; the value it hands to `use` is what tests,
-   * hooks, and other fixtures receive under that name. It keeps the type and
-   * the scope of the fixture it extends:
+   * hooks, and other fixtures receive under that name. It keeps the type of
+   * the fixture it extends. Its scope is the one it declares, else `test`:
    *
    *   export const test = base.extend({
    *     app: async ({ app }, use) => {
@@ -1034,7 +1121,9 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    *     },
    *   });
    */
-  extend(overrides: FixtureOverrides<Fixtures & Worker, Worker>): TestAPI<Fixtures, Worker>;
+  extend<const Overrides extends FixtureOverrides<Fixtures & Worker, Worker>>(
+    overrides: Overrides,
+  ): TestAPI<Fixtures & PickEach<Worker, TestOverrides<Overrides>>, OmitEach<Worker, TestOverrides<Overrides>>>;
   /**
    * Returns a new `test` whose registrations carry these fixture
    * definitions on top of the ones it already had. Each attempt sets up the
@@ -1069,9 +1158,17 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    * (`[fn, { scope: 'worker', auto: true }]`). A suite hook sets up the auto
    * worker fixtures of its chain, never a test fixture.
    */
-  extend<Extra = {}, ExtraWorker = {}>(
-    fixtures: FixtureDefinitions<Fixtures & Worker, Extra, Worker, ExtraWorker>,
-  ): TestAPI<Fixtures & Extra, Worker & ExtraWorker>;
+  extend<Extra = {}, ExtraWorker = {}, Config = unknown>(
+    fixtures: FixtureDefinitions<
+      ConfigBase<Fixtures, Config> & ConfigBase<Worker, Config> & ConfigFixtures<Config, 'test'> & ConfigFixtures<Config, 'worker'>,
+      Extra,
+      ConfigBase<Worker, Config> & ConfigFixtures<Config, 'worker'>,
+      ExtraWorker
+    >,
+  ): TestAPI<
+    ConfigBase<Fixtures, Config> & Extra & ConfigFixtures<Config, 'test'>,
+    ConfigBase<Worker, Config> & ExtraWorker & ConfigFixtures<Config, 'worker'>
+  >;
   /** Declares a group synchronously; `describe.fail` declares one whose tests are expected to fail. */
   describe: DescribeAPI;
   /** Registers a test-attempt setup hook: it runs after the test's fixtures are set up. */
@@ -1095,6 +1192,12 @@ export interface AsyncExpectation {
   toBeVisible(options?: { visible?: boolean; timeout?: number }): Promise<void>;
   /** Waits for hidden or absent state. */
   toBeHidden(options?: { timeout?: number }): Promise<void>;
+  /**
+   * Waits for part of the match to be inside the viewport, after clipping by
+   * scrolling and overflow ancestors; `ratio` (0 to 1) sets the share of its
+   * box that must be. No match is outside the viewport. It never scrolls.
+   */
+  toBeInViewport(options?: { ratio?: number; timeout?: number }): Promise<void>;
   /** Waits for one match to exist, visible or not; `attached: false` waits for none. */
   toBeAttached(options?: { attached?: boolean; timeout?: number }): Promise<void>;
   /** Waits for enabled state; `enabled: false` waits for disabled state. */
@@ -1117,6 +1220,13 @@ export interface AsyncExpectation {
   toBeExpanded(options?: { timeout?: number }): Promise<void>;
   /** Waits for focused state. */
   toBeFocused(options?: { timeout?: number }): Promise<void>;
+  /**
+   * Waits for a node the engine reports empty: on the web an input or
+   * textarea with no value, or any other element whose text content trims to
+   * nothing; on a device a text field with no value, or a node with no text
+   * or value in its subtree. Denied on a secure field.
+   */
+  toBeEmpty(options?: { timeout?: number }): Promise<void>;
   /** Waits for exact normalized text; a list waits for exactly that many matches, each with its entry's text, in order. */
   toHaveText(expected: TextMatch, options?: TextMatcherOptions): Promise<void>;
   toHaveText(expected: readonly TextMatch[], options?: TextMatcherOptions): Promise<void>;
@@ -1253,6 +1363,12 @@ export interface ValueExpectation<T> {
    * A schema that validates asynchronously is `INVALID_ARGUMENT`.
    */
   toMatchSchema<Schema extends StandardSchemaV1>(schema: Schema): StandardSchemaV1.InferOutput<Schema>;
+  /**
+   * Requires a `WebResponse` whose status is 2xx (200 to 299), as `request`,
+   * `waitForResponse`, and `route.fetch()` return it. The failure names the
+   * status and the URL's origin and path; the body is never read.
+   */
+  toBeOK(...valueIsNotAResponse: [T] extends [WebResponse] ? [] : [never]): void;
 }
 
 /** The names of the value matchers, every key of `ValueExpectation` but `not`. */
@@ -1428,6 +1544,31 @@ export interface CommandConfig {
 export type AppPermissionState = 'grant' | 'deny' | 'reset';
 
 /**
+ * One value in the object form of `launchArguments`. On iOS
+ * `{ AppleLocale: 'fr_FR' }` is `-AppleLocale fr_FR`, `{ e2e: true }` is
+ * `-e2e YES`, and `{ AppleLanguages: ['fr', 'de'] }` is
+ * `-AppleLanguages (fr, de)`. On Android each value is an `am start` extra
+ * of its type: `{ e2e: true }` is `--ez e2e true`, `{ retries: 3 }` is
+ * `--ei retries 3`, `{ locale: 'fr_FR' }` is `--es locale fr_FR`, and a list
+ * is `--esa tags a,b`.
+ */
+export type LaunchArgumentValue = string | number | boolean | readonly string[];
+
+/**
+ * A target's launch arguments: a list of strings, the arguments themselves
+ * (`['-e2e', 'YES']`), or an object of argument name to value
+ * (`{ AppleLanguages: ['fr'], AppleLocale: 'fr_FR' }`). An `undefined`
+ * value, read from the environment, is the entry left out.
+ */
+export type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue | undefined>>;
+
+/** The object form of launch arguments after the shape check: argument name to value, the `undefined` entries gone. */
+export type LaunchArgumentValues = Readonly<Record<string, LaunchArgumentValue>>;
+
+/** Launch arguments after the shape check: a list of strings, or the object form. */
+export type ResolvedLaunchArguments = readonly string[] | LaunchArgumentValues;
+
+/**
  * The app one target tests, declared on the target and nowhere else: engines
  * only drive it. Every field also accepts `undefined`, so values read straight
  * from `process.env` need no conditional spread. A browser target names the
@@ -1441,7 +1582,9 @@ export interface TargetApp {
    * Base URL of an addressable app: `app.open()` opens it and relative
    * navigation resolves against it. WHATWG-normalized; no userinfo, query, or
    * fragment; a missing scheme becomes `https://`, or `http://` for a
-   * loopback host. Plain HTTP is accepted for loopback hosts only. A URL on
+   * loopback host. Plain HTTP is accepted for loopback hosts only. A `file:`
+   * URL names one file on this machine, with no host, that a locally
+   * launched browser opens; navigation then stays in its directory. A URL on
    * `127.0.0.1` or `[::1]` with port 0 asks the run for a free port for
    * `command`, handed to it as `{port}`; without a command nothing would
    * serve it, so that is `INVALID_CONFIG`.
@@ -1489,15 +1632,16 @@ export interface TargetApp {
    * select a build mode change what the app is: give each mode its own
    * `identity` so their recordings stay apart.
    */
-  launchArguments?: readonly string[] | undefined;
+  launchArguments?: LaunchArguments | undefined;
   /**
    * Permissions the app holds, by name. A device app has each granted,
    * denied, or reset before every fresh launch. A browser target takes
    * `grant` only and holds it on every page of the attempt; what it leaves
    * out is the browser's default, which headless Chromium refuses. The
-   * engine checks the names its platform knows.
+   * engine checks the names its platform knows. `'all'` grants every
+   * permission the engine can grant on its platform.
    */
-  permissions?: Readonly<Record<string, AppPermissionState>> | undefined;
+  permissions?: Readonly<Record<string, AppPermissionState>> | 'all' | undefined;
   /**
    * Process the runner starts before the first test and stops at the end of
    * the run (a dev server, Metro for a debug build). Structured, never
@@ -1518,7 +1662,8 @@ export interface TargetApp {
 /**
  * One target: a named surface on one platform, served by an engine.
  * What the target can do is graded from the engine's declared capabilities;
- * with no `engine` the target is agent-tools-only and everything runs opaque.
+ * with no `engine` the target runs agent tools and `request` calls to
+ * absolute URLs, and everything runs opaque.
  * The app under test is the target's `app`; the engine only drives it.
  */
 export interface Target {
@@ -1829,7 +1974,7 @@ export interface ProjectConfig {
   video?: RecordingMode;
   /**
    * The directory a run writes its results to, relative to the project root;
-   * default `.e2e`. It holds `report.json`, `junit.xml`, `summary.md`,
+   * default `.e2e`. It holds `report.json`, `junit.xml`, `summary.md`, `ctrf.json`,
    * `ai-trace.json`, `results/` (cleared once the run's tests start, except on a `--last-failed` rerun),
    * `sessions/`, and the `e2e mcp` session videos under `videos/`.
    * `--output <dir>` overrides it for one run. It must be inside the project

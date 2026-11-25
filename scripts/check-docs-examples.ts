@@ -62,6 +62,8 @@ const EXAMPLES: Record<string, string> = {
   'docs/examples/appium/tests/order-link.e2e.ts': 'docs/migrate/appium.mdx',
   'docs/examples/fixtures/tests/fixtures.ts': 'docs/fixtures.mdx',
   'docs/examples/fixtures/tests/tasks.e2e.ts': 'docs/fixtures.mdx',
+  'docs/examples/fixtures/platforms/e2e.config.ts': 'docs/fixtures.mdx',
+  'docs/examples/fixtures/platforms/tests/fixtures.ts': 'docs/fixtures.mdx',
   'docs/examples/models/e2e.decision.config.ts': 'docs/decision-models.mdx',
   'docs/examples/models/tests/decision.e2e.ts': 'docs/decision-models.mdx',
   'docs/examples/page-objects/tests/pages/sign-in-page.ts': 'docs/page-object-model.mdx',
@@ -71,6 +73,8 @@ const EXAMPLES: Record<string, string> = {
   'docs/examples/filters/areas-filter.ts': 'docs/filters.mdx',
   'docs/examples/filters/e2e.areas.config.ts': 'docs/filters.mdx',
   'docs/examples/filters/tuned-filter.ts': 'docs/filters.mdx',
+  'docs/examples/api-testing/tests/users-api.e2e.ts': 'docs/api-testing.mdx',
+  'docs/examples/api-testing/tests/orders-api.e2e.ts': 'docs/api-testing.mdx',
   'docs/examples/skill/e2e.config.ts': 'skills/e2e/SKILL.md',
   'docs/examples/skill/e2e.setup.config.ts': 'skills/e2e/references/setup.md',
 };

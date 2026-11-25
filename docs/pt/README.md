@@ -61,7 +61,7 @@ translation moves or goes with it in the same change.
   UI labels keep their own formatting.
 - Keep product, package, and API names in English: e2e, Playwright,
   `@e2e-dev/web`, MCP, CI, GitHub Actions. Keep literal CLI option labels
-  such as **None** unchanged so readers can find them in the terminal.
+  such as **Skip for now** unchanged so readers can find them in the terminal.
 - Keep a term in English where Brazilian developers use the English word
   (*runner*, *fixture*, *worker*, *engine*, *pull request*, *prompt*).
   Don't italicize these loanwords. The glossary says which terms stay in
@@ -122,7 +122,7 @@ translation moves or goes with it in the same change.
 | artifact | artefato |
 | matcher | matcher (keep in English, o matcher) |
 | timeout | tempo limite (`timeout` in code) |
-| headless, headed | headless, headed (keep in English) |
+| headless, headed | headless, headed (keep in English; in a screen-reader `aria-label`, write "com interface visível" for headed) |
 | sign in, sign out | entrar (fazer login), sair (fazer logout) |
 | subscription | assinatura |
 | prompt | prompt (keep in English, o prompt) |
@@ -162,3 +162,47 @@ translation moves or goes with it in the same change.
 | CLI | CLI (keep in English) |
 | API | API (keep in English) |
 | UI | UI (keep in English, a UI) |
+| finding (from `explore` or a bug bash) | achado |
+| explore session, explorer, planner | sessão de explore, explorador, planejador |
+| repro test | teste de reprodução |
+| persona | persona (a persona) |
+| pin (an agent) | fixar (agentes fixados) |
+| custom executor | executor personalizado |
+| budget (steps, model calls) | orçamento |
+| seeded data | dados pré-carregados (pré-carregar) |
+| signed in, start signed in | autenticado, com o login feito |
+| handle (a `Secret`) | referência |
+| one-time code | código de uso único |
+| fill (noun) | preenchimento |
+| override (a value per run) | substituição |
+| vault | cofre de segredos |
+| collection error | erro de coleta |
+| stored screenshot | captura de tela armazenada |
+| the agent takes over | o agente assume |
+| cache miss | cache miss (keep in English, o cache miss) |
+| evict (a cache entry) | remover |
+| store (`cache.store`) | armazenamento |
+| stale | desatualizado |
+| gap (an action the cache can't replay) | lacuna (`gap` in code) |
+| label (text on a control) | rótulo |
+| edge case | caso de borda |
+| checkout (a git working copy) | checkout (keep in English, o checkout) |
+| working tree | árvore de trabalho |
+| serve (a model a plan or key offers) | disponibilizar |
+| built-in agent | agente embutido |
+| judgment (`assert`, `waitFor`, `extract`) | julgamento |
+| gate (`minProbability`, `minConfidence`) | limiar |
+| gate (a merge or a release in CI) | bloquear; liberar ou bloquear (a release, feminine) |
+| decide call, text call | chamada de decisão, chamada de texto |
+| completion check | verificação de conclusão |
+| tool call, forced tool choice | chamada de ferramenta, escolha de ferramenta forçada |
+| system prompt | prompt de sistema |
+| thinking (a model's reasoning) | raciocínio |
+| fallback (model) | fallback (keep in English, o fallback) |
+| self-hosted | auto-hospedado |
+| zero data retention | retenção zero de dados |
+| device code | código de dispositivo |
+| token refresh, refresh token | renovação do token, refresh token (keep in English) |
+| vendor | fornecedor |
+| on-screen keyboard | teclado virtual |
+| drawn (content the tree doesn't show) | desenhado |

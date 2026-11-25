@@ -30,6 +30,7 @@
     "packages/web/tests/types/engine.ts",
     "packages/mobile/tests/types/options.ts",
     "packages/mobile/tests/types/engine.ts",
+    "packages/desktop/tests/types/engine.ts",
     "packages/browser-run/tests/types/options.ts",
     "packages/moli/tests/types/options.ts",
     "packages/decision/tests/types/options.ts",
@@ -37,7 +38,8 @@
     "packages/desktop/tests/helpers/fake-agent-desktop.mjs",
     "packages/acp/tests/live/*.ts",
     "packages/e2e/tests/live/*.ts",
-    "packages/e2e/src/config/register.ts"
+    "packages/e2e/src/config/register.ts",
+    "scripts/microbench/child.mjs"
   ],
   "ignorePatterns": [
     "docs/**",
@@ -55,7 +57,7 @@
     "@expo/repack-app",
     "@oxc-project/runtime"
   ],
-  "ignoreBinaries": ["eas", "vhs"],
+  "ignoreBinaries": ["eas", "vhs", "valgrind"],
   "ignoreExports": [
     {
       "file": "packages/core/src/types.ts",

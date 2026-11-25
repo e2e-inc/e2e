@@ -27,7 +27,6 @@ const defaultOptions: ResolvedTestOptions = {
   timeout: 30_000,
   retries: 0,
   platforms: undefined,
-  requires: [],
   session: undefined,
   agents: ['default'],
   agentContext: undefined,
@@ -74,6 +73,7 @@ function makeTarget(name: string, index: number, engine?: EngineHandle): Resolve
     declaredApp: EMPTY_DECLARED,
     trace: { mode: 'off', source: 'default' },
     video: { mode: 'off', source: 'default' },
+    fixtureScopes: new Map(),
   };
 }
 
