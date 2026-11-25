@@ -1,6 +1,6 @@
 /** Suite realm lifecycle: module re-import, beforeAll/afterAll scope tracking. */
 
-import { importModule } from '../config/load.ts';
+import { collectFile, inLoadOf } from '../collect/collect-file.ts';
 import { PollScope, runInPollScope } from '@e2e-dev/core/lib/expect/poll-scope';
 import {
   classifyError,
@@ -15,7 +15,6 @@ import { withTimeout } from '@e2e-dev/core/lib/internal/time';
 import type { AttemptTimeout } from '@e2e-dev/core/lib/run/budget';
 import type { CollectedFile, CollectedTest } from '../collect/collect.ts';
 import {
-  collectModule,
   groupTitles,
   hooksFor,
   scopeChain,
@@ -112,14 +111,12 @@ export class RealmManager {
   private realmCounter = 0;
   private readonly debug: DebugTrace;
   /**
-   * By file, the module instance the last unit to run the file ended in with
-   * nothing failed. The file's next unit on this worker runs in it, so tests
-   * of one file that run apart import the file once per worker, and whatever
-   * the file's imports registered on that import stays registered.
+   * By file, the module instance `keep` was handed. The file's next unit on
+   * this worker runs in it, so tests of one file that run apart import the
+   * file once per worker, and whatever the file's imports registered on that
+   * import stays registered.
    */
   private readonly reusable = new Map<string, ModuleRegistration>();
-  /** The realms a suite hook failed in. */
-  private readonly hookFailures = new WeakSet<Realm>();
 
   constructor(private readonly options: RealmManagerOptions) {
     this.debug = options.debug ?? new DebugTrace(false);
@@ -129,11 +126,7 @@ export class RealmManager {
   async create(file: FileRef): Promise<Realm> {
     this.realmCounter += 1;
     const registration = await this.debug.time('realm.import', () =>
-      collectModule(
-        () => importModule(file.absolutePath, `${this.options.targetName}-${this.realmCounter}`),
-        file.absolutePath,
-        this.options.redactTitle,
-      ),
+      collectFile(file.absolutePath, `${this.options.targetName}-${this.realmCounter}`, this.options.redactTitle),
     );
     return this.adopt(registration, file);
   }
@@ -150,20 +143,16 @@ export class RealmManager {
     return { file: file.file, registration, testsByKey, entered: new Map() };
   }
 
-  /** Hands over the instance `retire` kept for a file, which the caller's unit then runs in. */
+  /** Hands over the instance `keep` was handed for a file, which the caller's unit then runs in. */
   takeReusable(file: string): ModuleRegistration | undefined {
     const registration = this.reusable.get(file);
     this.reusable.delete(file);
     return registration;
   }
 
-  /**
-   * Leaves a realm in which no test failed, and keeps its instance for the
-   * file's next unit unless a `beforeAll` or an `afterAll` failed in it.
-   */
-  async retire(realm: Realm): Promise<void> {
-    await this.leave(realm);
-    if (!this.hookFailures.has(realm)) this.reusable.set(realm.file, realm.registration);
+  /** Keeps the instance of a realm that was left, in a unit where nothing failed, for the file's next unit. */
+  keep(realm: Realm): void {
+    this.reusable.set(realm.file, realm.registration);
   }
 
   /**
@@ -184,7 +173,7 @@ export class RealmManager {
    * test's), which the hooks run on.
    */
   async enterScopes(realm: Realm, test: RegisteredTest, shared?: TargetSession): Promise<SerializedError | undefined> {
-    return this.withSuiteHooks(shared, async (hooks) => {
+    return this.withSuiteHooks(realm, shared, async (hooks) => {
       for (const scope of scopeChain(test)) {
         const entered = realm.entered.get(scope);
         if (entered !== undefined) {
@@ -229,7 +218,7 @@ export class RealmManager {
       const registered = findRegistered(realm, pair.test);
       if (registered !== undefined) for (const scope of scopeChain(registered)) needed.add(scope);
     }
-    return this.withSuiteHooks(shared, async (hooks) => {
+    return this.withSuiteHooks(realm, shared, async (hooks) => {
       let failure: SerializedError | undefined;
       for (const scope of [...realm.entered.keys()].toReversed()) {
         if (needed.has(scope)) continue;
@@ -253,10 +242,10 @@ export class RealmManager {
   }
 
   /** Runs `work` with a pass of suite hooks, closed after it. Opening one costs nothing until a hook needs the engine. */
-  private async withSuiteHooks<T>(shared: TargetSession | undefined, work: (hooks: SuiteHookSession) => Promise<T>): Promise<T> {
+  private async withSuiteHooks<T>(realm: Realm, shared: TargetSession | undefined, work: (hooks: SuiteHookSession) => Promise<T>): Promise<T> {
     const hooks = this.options.openSuiteHooks(shared);
     try {
-      return await work(hooks);
+      return await inLoadOf(realm.registration, () => work(hooks));
     } finally {
       await hooks.close();
     }
@@ -277,7 +266,6 @@ export class RealmManager {
       },
     );
     this.options.runErrors.push({ error: failed });
-    this.hookFailures.add(realm);
     return failed;
   }
 

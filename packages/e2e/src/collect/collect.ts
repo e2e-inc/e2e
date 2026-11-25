@@ -6,12 +6,12 @@ import { compileGlob, compileGlobList, discoverFiles, GLOB_SYNTAX, literalPrefix
 import { CollectionError, isE2EError } from '@e2e-dev/core/lib/internal/errors';
 import { setupTestId, testId } from '@e2e-dev/core/lib/internal/ids';
 import { explainModuleError } from '../config/diagnose.ts';
-import { importModule } from '../config/load.ts';
+import { collectFile } from './collect-file.ts';
+import { realPath } from './real-path.ts';
 import type { ResolvedConfig } from '@e2e-dev/core/lib/config/resolve';
 import { staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
 import { declarationSite } from './fixture-errors.ts';
 import {
-  collectModule,
   groupChain,
   groupTitles,
   outermostSerialGroup,
@@ -163,15 +163,7 @@ function serialSourceId(file: string, group: GroupNode): string {
  */
 function declaredIn(absolutePath: string, source: SourceLocation | undefined): boolean {
   if (source === undefined) return false;
-  return source.file === absolutePath || realPathOf(source.file) === realPathOf(absolutePath);
-}
-
-function realPathOf(file: string): string {
-  try {
-    return realpathSync.native(file);
-  } catch {
-    return file;
-  }
+  return source.file === absolutePath || realPath(source.file) === realPath(absolutePath);
 }
 
 function toCollectedTests(
@@ -509,7 +501,7 @@ async function collectFiles(
     const skippable = narrowed && !isSelected(file);
     let registration: ModuleRegistration;
     try {
-      registration = await collectModule(() => importModule(absolutePath, 'collect', graph), absolutePath, redact);
+      registration = await collectFile(absolutePath, 'collect', redact, graph);
     } catch (cause) {
       if (skippable) {
         uncollected.push({ file, reason: isCollectionError(cause) ? cause.message : explainModuleError(cause, absolutePath) });

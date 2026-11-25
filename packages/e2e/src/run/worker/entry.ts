@@ -5,10 +5,11 @@
  * actual execution to `TargetWorker`.
  */
 
-import { collectFromRegistration } from '../../collect/collect.ts';
-import { collectModule, type ModuleRegistration } from '../../collect/registry.ts';
+import { collectFromRegistration, type CollectedTest } from '../../collect/collect.ts';
+import { collectFile } from '../../collect/collect-file.ts';
+import type { ModuleRegistration } from '../../collect/registry.ts';
 import type { TestTargetPair } from '../../collect/select.ts';
-import { importModule, loadConfigModule } from '../../config/load.ts';
+import { loadConfigModule } from '../../config/load.ts';
 import { assignPorts } from '@e2e-dev/core/lib/config/resolve';
 import { resolveConfig } from '../../config/resolve-run.ts';
 import { setSecretRegistry } from '@e2e-dev/core/lib/secrets';
@@ -193,16 +194,17 @@ async function bootstrap(
   let collectCounter = 0;
   const importUnit = (unit: RunUnitMessage): Promise<ModuleRegistration> => {
     collectCounter += 1;
-    return collectModule(
-      () => importModule(unit.absolutePath, `worker-collect-${collectCounter}`),
-      unit.absolutePath,
-      staticSecretLedger(config.allSecrets).redact,
-    );
+    return collectFile(unit.absolutePath, `worker-collect-${collectCounter}`, staticSecretLedger(config.allSecrets).redact);
   };
+  // A registration serves every unit of its file this worker runs, so its tests are collected one time.
+  const testsById = new WeakMap<ModuleRegistration, ReadonlyMap<string, CollectedTest>>();
   const resolvePairs: ResolveUnitPairs = async (unit, reusable) => {
     const registration = reusable ?? (await importUnit(unit));
-    const collected = collectFromRegistration(config.projectRoot, unit.absolutePath, registration);
-    const byId = new Map(collected.tests.map((test) => [test.id, test]));
+    let byId = testsById.get(registration);
+    if (byId === undefined) {
+      const collected = collectFromRegistration(config.projectRoot, unit.absolutePath, registration);
+      testsById.set(registration, (byId = new Map(collected.tests.map((test) => [test.id, test]))));
+    }
     const pairs: TestTargetPair[] = [];
     const missing: WirePair[] = [];
     for (const wire of unit.pairs) {

@@ -428,6 +428,7 @@ export class TargetWorker {
         { file: message.file, absolutePath: message.absolutePath },
         pairs,
         registration,
+        message.split === true,
       );
     }
     this.inFlight = undefined;

@@ -32,6 +32,8 @@ export interface WorkUnit {
   readonly pairs: readonly TestTargetPair[];
   /** The part of its file's runnable pairs a file unit holds, from above 0 through 1; 1 for a setup unit. */
   readonly share: number;
+  /** Whether the unit is one of several its file was cut into: a worker keeps its import of the file for the next of them, and holds none for a file with one unit. */
+  readonly split: boolean;
 }
 
 /** Per-target schedule: setup units gate file units. */
@@ -79,6 +81,7 @@ export function buildWorkPlans(
           absolutePath: path.resolve(projectRoot, pair.test.file),
           pairs: [pair],
           share: 1,
+          split: false,
         });
       } else if (pair.disposition !== 'run') {
         immediate.push(pair);
@@ -93,7 +96,8 @@ export function buildWorkPlans(
     for (const file of collection.files) {
       const filePairs = runnableByFile.get(file.file);
       if (filePairs === undefined) continue;
-      fileUnits.push(...unitsOfFile(target, file, filePairs, parallelism, file.file === inMemoryFile));
+      // Not spread into `push`: a file can be cut into more units than a call takes arguments.
+      for (const unit of unitsOfFile(target, file, filePairs, parallelism, file.file === inMemoryFile)) fileUnits.push(unit);
     }
 
     return { target, setupUnits, fileUnits, immediate };
@@ -110,7 +114,8 @@ function unitsOfFile(
 ): WorkUnit[] {
   const ordered = pairs.toSorted((a, b) => a.test.declarationIndex - b.test.declarationIndex);
   const id = `file::${target.name}::${file.file}`;
-  return (whole ? [ordered] : splitFile(ordered, target.fullyParallel, parallelism)).map((unitPairs, index) => ({
+  const cut = whole ? [ordered] : splitFile(ordered, target.fullyParallel, parallelism);
+  return cut.map((unitPairs, index) => ({
     // A file that is one unit keeps the id it always had.
     id: index === 0 ? id : `${id}::${index}`,
     kind: 'file',
@@ -119,6 +124,7 @@ function unitsOfFile(
     absolutePath: file.absolutePath,
     pairs: unitPairs,
     share: unitPairs.length / ordered.length,
+    split: cut.length > 1,
   }));
 }
 
@@ -149,44 +155,68 @@ export function withWorkerCap(plan: TargetWorkPlan, workers: number): TargetWork
  * parallel scope:
  *
  * - a serial group, or a scope with `parallel: false`, is one unit for each
- *   agent and repeat it runs as;
- * - a pair with no `beforeAll` or `afterAll` around it is a unit of its own;
- * - the pairs with such hooks share as few units as keep `parallelism`
- *   workers busy, since each unit runs the hooks again; an agent's or a
- *   repeat's pairs never share a unit with another's.
+ *   agent it runs as;
+ * - a test with no `beforeAll` or `afterAll` around it is a unit of its own
+ *   for each agent;
+ * - the tests with such hooks share as few units as keep `parallelism`
+ *   workers busy, since each unit runs the hooks again; an agent's tests
+ *   never share a unit with another's.
+ *
+ * A unit holds every repeat of its tests, in order: the first repeat records
+ * the replay cache and the rest replay it, which repeats that ran at the
+ * same time could not.
  *
  * The cut is the same whatever `parallelism` is, but for how many units the
- * pairs with hooks share: a test that runs apart from another does so on
+ * tests with hooks share: a test that runs apart from another does so on
  * one worker too. Units of a file that one worker runs share its import of
- * the file (`RealmManager.retire`), so they share the file's state there.
+ * the file (`RealmManager.keep`), so they share the file's state there.
  */
 function splitFile(pairs: readonly TestTargetPair[], fullyParallel: boolean, parallelism: number): TestTargetPair[][] {
   const inOrder: TestTargetPair[] = [];
   const scopes = new Map<string, TestTargetPair[]>();
-  const alone: TestTargetPair[][] = [];
-  const hooked = new Map<string, TestTargetPair[]>();
+  const alone = new Map<string, TestTargetPair[]>();
+  const hooked = new Map<string, Map<string, TestTargetPair[]>>();
   for (const pair of pairs) {
     const { declared, ordered, suiteHooks } = pair.test.parallel;
     if (!(declared || fullyParallel) || ordered === 'file') inOrder.push(pair);
-    else if (ordered !== undefined) {
-      const key = pairKey(ordered, pair.agent, pair.repeat);
-      const scope = scopes.get(key);
-      if (scope === undefined) scopes.set(key, [pair]);
-      else scope.push(pair);
-    } else if (suiteHooks) {
-      const key = pairKey('', pair.agent, pair.repeat);
-      const run = hooked.get(key);
-      if (run === undefined) hooked.set(key, [pair]);
-      else run.push(pair);
-    } else alone.push([pair]);
+    else if (ordered !== undefined) gather(scopes, agentKey(ordered, pair.agent), pair);
+    else if (suiteHooks) {
+      let tests = hooked.get(pair.agent);
+      if (tests === undefined) hooked.set(pair.agent, (tests = new Map()));
+      gather(tests, pair.test.id, pair);
+    } else gather(alone, agentKey(pair.test.id, pair.agent), pair);
   }
   const sharing: TestTargetPair[][] = [];
-  for (const run of hooked.values()) {
-    const size = Math.ceil(run.length / parallelism);
-    for (let start = 0; start < run.length; start += size) sharing.push(run.slice(start, start + size));
+  for (const tests of hooked.values()) {
+    for (const batch of evenBatches([...tests.values()], parallelism)) sharing.push(batch.flat());
   }
-  const split = [...scopes.values(), ...alone, ...sharing].toSorted((a, b) => a[0]!.test.declarationIndex - b[0]!.test.declarationIndex);
+  const split = [...scopes.values(), ...alone.values(), ...sharing].toSorted((a, b) => a[0]!.test.declarationIndex - b[0]!.test.declarationIndex);
   return inOrder.length === 0 ? split : [inOrder, ...split];
+}
+
+/** The key of what one agent runs of `id`, a test or a scope. */
+function agentKey(id: string, agent: string): string {
+  return `${id}\u0000${agent}`;
+}
+
+/** Adds `pair` to the pairs `groups` holds under `key`. */
+function gather(groups: Map<string, TestTargetPair[]>, key: string, pair: TestTargetPair): void {
+  const group = groups.get(key);
+  if (group === undefined) groups.set(key, [pair]);
+  else group.push(pair);
+}
+
+/** `items` in order, cut into `count` runs (fewer when there are fewer items) whose lengths differ by one at most. */
+function evenBatches<Item>(items: readonly Item[], count: number): Item[][] {
+  const batches: Item[][] = [];
+  const total = Math.min(items.length, Math.max(1, count));
+  let start = 0;
+  for (let index = 0; index < total; index += 1) {
+    const size = Math.ceil((items.length - start) / (total - index));
+    batches.push(items.slice(start, start + size));
+    start += size;
+  }
+  return batches;
 }
 
 /** What `orderWorkPlans` ranks the work by. */

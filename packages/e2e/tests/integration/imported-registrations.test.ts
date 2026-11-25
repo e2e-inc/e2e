@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { resultByTitle, runProjectWithConfigFile, workerFakeConfigSource } from '../helpers/run-project.ts';
 
@@ -107,6 +110,147 @@ for (const title of ['one', 'two', 'three']) {
         ['one', 'passed'],
         ['two', 'passed'],
         ['three', 'passed'],
+      ]);
+    },
+    120_000,
+  );
+
+  /**
+   * Runs two test files on one worker that take the worker fixture `database`
+   * from a module that also registers a `beforeEach`, and returns what the
+   * fixture, the hook, and the tests (`log(line)` in `tests`) wrote down.
+   */
+  async function runWithFixtureModule(tests: (name: string) => string) {
+    const dir = mkdtempSync(path.join(tmpdir(), 'e2e-fixture-log-'));
+    const logger = `import { appendFileSync } from 'node:fs';
+const log = (line: string): void => appendFileSync(${JSON.stringify(path.join(dir, 'log'))}, line + '\\n');`;
+    const file = (name: string): string => `${logger}
+import { test } from './fixtures.ts';
+
+${tests(name)}`;
+    const { outcome, project } = await runProjectWithConfigFile(
+      {
+        'tests/fixtures.ts': `${logger}
+import { test as base } from 'e2e';
+
+let setups = 0;
+export const test = base.extend<object, { database: number }>({
+  database: [async ({ platform }, use) => {
+    setups += 1;
+    log('setup ' + platform);
+    await use(setups);
+    log('teardown');
+  }, { scope: 'worker' }],
+});
+test.beforeEach(() => { log('hook'); });
+`,
+        'tests/a.e2e.ts': file('a'),
+        'tests/b.e2e.ts': file('b'),
+      },
+      { configSource: workerFakeConfigSource(1) },
+    );
+    project.cleanup();
+    const lines = readFileSync(path.join(dir, 'log'), 'utf8').trim().split('\n');
+    rmSync(dir, { recursive: true, force: true });
+    return { outcome, lines };
+  }
+
+  it(
+    'leave a worker fixture one instance for two files of one worker when its module registers a hook',
+    async () => {
+      const { outcome, lines } = await runWithFixtureModule((name) => `test('${name}', async ({ database }) => { log('body ${name} ' + database); });`);
+      expect(outcome.report.run.errors).toEqual([]);
+      expect(outcome.exitCode).toBe(0);
+      expect(lines).toEqual(['setup fake', 'hook', 'body a 1', 'hook', 'body b 1', 'teardown']);
+    },
+    120_000,
+  );
+
+  it(
+    'leave a worker fixture one instance for the tests after a failed one, which import its module again',
+    async () => {
+      const { outcome, lines } = await runWithFixtureModule((name) => `test('${name}', async ({ database }) => { log('body ${name} ' + database); });
+test('${name} fails', async ({ database }) => { throw new Error('expected ' + database); });
+test('${name} after the failure', async ({ database }) => { log('body ${name} again ' + database); });`);
+      expect(outcome.report.run.errors).toEqual([]);
+      // A failed test ends its worker once the file is done, so each file has a worker and one setup.
+      expect(lines).toEqual(['a', 'b'].flatMap((name) => ['setup fake', 'hook', `body ${name} 1`, 'hook', 'hook', `body ${name} again 1`, 'teardown']));
+    },
+    120_000,
+  );
+
+  it(
+    'give each call of a helper function its own worker fixture, in one test file and in two',
+    async () => {
+      const file = (name: string): string => `import { expect } from 'e2e';
+import { withAccount } from './accounts.ts';
+
+const test = withAccount('${name}');
+// The helper's one test.extend() call defines a fixture each time it is called.
+const other = withAccount('${name} too');
+test('${name} gets its account', async ({ account }) => { expect(account).toBe('${name}'); });
+other('${name} gets its other account', async ({ account }) => { expect(account).toBe('${name} too'); });`;
+      const { outcome, project } = await runProjectWithConfigFile(
+        {
+          'tests/accounts.ts': `import { test } from 'e2e';
+
+export function withAccount(name: string) {
+  return test.extend<object, { account: string }>({
+    account: [async ({ platform }, use) => { await use(platform === 'fake' ? name : platform); }, { scope: 'worker' }],
+  });
+}
+`,
+          'tests/a.e2e.ts': file('a'),
+          'tests/b.e2e.ts': file('b'),
+        },
+        { configSource: workerFakeConfigSource(1) },
+      );
+      project.cleanup();
+      expect(outcome.report.run.errors).toEqual([]);
+      expect(outcome.results.map((result) => [result.test.title, result.status])).toEqual([
+        ['a gets its account', 'passed'],
+        ['a gets its other account', 'passed'],
+        ['b gets its account', 'passed'],
+        ['b gets its other account', 'passed'],
+      ]);
+    },
+    120_000,
+  );
+
+  it(
+    'are one instance for a file and for a shared module that imports the module from a test of that file',
+    async () => {
+      // Only the second file runs the import, so the shared module is not known to import the helper before then.
+      const file = (name: string): string => `import { expect, test } from 'e2e';
+import { marker } from './helper.ts';
+import { loadHelper } from './shared.ts';
+
+test('${name} gets the instance it imported', async () => {
+  expect(${name === 'a' ? 'typeof loadHelper' : '(await loadHelper()).marker'}).toBe(${name === 'a' ? "'function'" : 'marker'});
+  expect(marker).toEqual({});
+});`;
+      const { outcome, project } = await runProjectWithConfigFile(
+        {
+          'tests/helper.ts': `import { test } from 'e2e';
+
+export const marker = {};
+test.beforeEach(() => {});
+`,
+          // Registers nothing, so it is one instance for both files.
+          'tests/shared.ts': `export function loadHelper(): Promise<typeof import('./helper.ts')> {
+  return import('./helper.ts');
+}
+`,
+          'tests/a.e2e.ts': file('a'),
+          'tests/b.e2e.ts': file('b'),
+        },
+        { configSource: workerFakeConfigSource(1) },
+      );
+      project.cleanup();
+      expect(outcome.report.run.errors).toEqual([]);
+      expect(outcome.results.map((result) => [result.test.title, result.status])).toEqual([
+        ['a gets the instance it imported', 'passed'],
+        ['b gets the instance it imported', 'passed'],
       ]);
     },
     120_000,

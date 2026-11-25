@@ -408,4 +408,74 @@ test('after', async () => { ran += 1; await mark('after-ran-' + ran); });`,
     },
     120_000,
   );
+  it(
+    'imports the file again for the unit after one in which a test failed as expected, whatever an earlier realm of it kept',
+    async () => {
+      const { outcome, named, one } = await runFile(
+        `void mark('imported', async () => {});
+let ran = 0;
+test('before the group', async () => { ran += 1; await mark('before-ran-' + ran); });
+test.describe('group', { serial: true }, () => {
+  test('member', async () => { await mark('member'); });
+});
+test.fail('fails as expected', async () => { ran += 1; throw new Error('expected'); });
+test.describe('apart', { parallel: true }, () => {
+  test('after the failure', async () => { ran += 1; await mark('after-ran-' + ran); });
+});`,
+        { workers: 1 },
+      );
+      expect(outcome.exitCode).toBe(0);
+      const worker = one('before-ran-1').pid;
+      expect(one('after-ran-1').pid).toBe(worker);
+      // The tests before the group, the group, the expected failure, and the test apart.
+      expect(named('imported').filter((mark) => mark.pid === worker)).toHaveLength(4);
+    },
+    120_000,
+  );
+
+  it(
+    'runs the repeats of a parallel test one after another on one worker, while the tests run at the same time',
+    async () => {
+      const { outcome, named } = await runFile(
+        `test.describe.configure({ parallel: true });
+${[1, 2].map((n) => `test('t${n}', async () => { await together('t${n}', 2); await mark('t${n}-ran'); });`).join('\n')}`,
+        { workers: 4, runOptions: { repeatEach: 2 } },
+      );
+      expect(outcome.exitCode).toBe(0);
+      for (const title of ['t1-ran', 't2-ran']) {
+        const [first, second] = named(title).toSorted((a, b) => a.start - b.start);
+        expect(named(title)).toHaveLength(2);
+        expect(first!.pid).toBe(second!.pid);
+        expect(first!.end).toBeLessThanOrEqual(second!.start);
+      }
+    },
+    120_000,
+  );
+
+  it(
+    'keeps no import of a file that was not cut',
+    async () => {
+      const { outcome, project } = await runProjectWithConfigFile(
+        {
+          // The second file passes only if the worker let go of what the first one held.
+          'tests/a.e2e.ts': `import { test } from 'e2e';
+const held = new FinalizationRegistry<string>(() => { (globalThis as { released?: boolean }).released = true; });
+test.describe('holds', () => {
+  const big = new Uint8Array(8 * 1024 * 1024);
+  held.register(big, 'big');
+  test('a', async () => { big[0] = 1; });
+});`,
+          'tests/b.e2e.ts': `import { expect, test } from 'e2e';
+test('b', async () => {
+  await expect.poll(() => { (globalThis as { gc?: () => void }).gc?.(); return (globalThis as { released?: boolean }).released; }, { timeout: 20_000 }).toBe(true);
+});`,
+        },
+        { configSource: workerFakeConfigSource(1), runOptions: { env: { NODE_OPTIONS: '--expose-gc' } } },
+      );
+      project.cleanup();
+      expect(outcome.report.run.errors).toEqual([]);
+      expect(outcome.exitCode).toBe(0);
+    },
+    120_000,
+  );
 });

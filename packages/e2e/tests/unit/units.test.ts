@@ -196,6 +196,13 @@ describe('buildWorkPlans with parallel scopes', () => {
     return plan!.fileUnits.map((unit) => unit.pairs.map((pair) => pair.test.title));
   }
 
+  /** The plan of one file holding `tests`, each run one time. */
+  function planOf(tests: CollectedTest[]): TargetWorkPlan {
+    const pairs = tests.map((test) => makePair(test));
+    const collection: Collection = { files: [makeFile(FILE, tests)], tests, nearMisses: [], unmatchedPositionals: [], uncollected: [] };
+    return buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 4)[0]!;
+  }
+
   it('gives each test of a parallel scope its own unit and keeps the rest of the file in one', () => {
     const tests = [
       makeTest(FILE, 'plain 1', 0),
@@ -243,22 +250,47 @@ describe('buildWorkPlans with parallel scopes', () => {
     expect(unitsOf(tests)).toEqual([['step 1', 'step 2'], ['alone'], ['ordered 1', 'ordered 2']]);
   });
 
-  it('runs an ordered scope once per agent and repeat, each in a unit of its own', () => {
+  it('keeps every repeat of an ordered scope in the scope\'s one unit, a test\'s repeats one after another', () => {
     const serial = { declared: true, ordered: 'group-0', suiteHooks: false };
     const tests = [makeTest(FILE, 'step 1', 0, { parallel: serial }), makeTest(FILE, 'step 2', 1, { parallel: serial })];
     const pairs = [0, 1].flatMap((repeat) => tests.map((test) => makePair(test, { repeat })));
     const collection: Collection = { files: [makeFile(FILE, tests)], tests, nearMisses: [], unmatchedPositionals: [], uncollected: [] };
     const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 4);
     expect(plan!.fileUnits.map((unit) => unit.pairs.map((pair) => `${pair.test.title}@${pair.repeat}`))).toEqual([
-      ['step 1@0', 'step 2@0'],
-      ['step 1@1', 'step 2@1'],
+      ['step 1@0', 'step 1@1', 'step 2@0', 'step 2@1'],
     ]);
+  });
+
+  it('keeps the repeats of a parallel test in one unit, so the first can record what the rest replay', () => {
+    const tests = [makeTest(FILE, 'one', 0, { parallel: inParallel }), makeTest(FILE, 'two', 1, { parallel: inParallel })];
+    const pairs = tests.flatMap((test) => ['fast', 'smart'].flatMap((agent) => [0, 1].map((repeat) => makePair(test, { agent, repeat }))));
+    const collection: Collection = { files: [makeFile(FILE, tests)], tests, nearMisses: [], unmatchedPositionals: [], uncollected: [] };
+    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 4);
+    expect(plan!.fileUnits.map((unit) => unit.pairs.map((pair) => `${pair.test.title}@${pair.agent}@${pair.repeat}`))).toEqual([
+      ['one@fast@0', 'one@fast@1'],
+      ['one@smart@0', 'one@smart@1'],
+      ['two@fast@0', 'two@fast@1'],
+      ['two@smart@0', 'two@smart@1'],
+    ]);
+  });
+
+  it('marks the units of a file that was cut, and not the unit of a whole file', () => {
+    const cut = planOf([makeTest(FILE, 'one', 0, { parallel: inParallel }), makeTest(FILE, 'two', 1, { parallel: inParallel })]);
+    expect(cut.fileUnits.map((unit) => unit.split)).toEqual([true, true]);
+    const whole = planOf([makeTest(FILE, 'one', 0), makeTest(FILE, 'two', 1)]);
+    expect(whole.fileUnits.map((unit) => unit.split)).toEqual([false]);
+  });
+
+  it('cuts a file into more units than a function call takes arguments', () => {
+    const tests = Array.from({ length: 200_000 }, (_, index) => makeTest(FILE, `test ${index}`, index, { parallel: inParallel }));
+    expect(planOf(tests).fileUnits).toHaveLength(200_000);
   });
 
   it('shares units between parallel tests with suite hooks, one unit for each worker', () => {
     const hooked = { declared: true, ordered: undefined, suiteHooks: true };
     const tests = Array.from({ length: 5 }, (_, index) => makeTest(FILE, `hooked ${index}`, index, { parallel: hooked }));
     expect(unitsOf(tests, { workers: 2 })).toEqual([['hooked 0', 'hooked 1', 'hooked 2'], ['hooked 3', 'hooked 4']]);
+    expect(unitsOf(tests, { workers: 4 })).toEqual([['hooked 0', 'hooked 1'], ['hooked 2'], ['hooked 3'], ['hooked 4']]);
     expect(unitsOf(tests, { workers: 8 })).toEqual(tests.map((test) => [test.title]));
   });
 
@@ -284,15 +316,15 @@ describe('buildWorkPlans with parallel scopes', () => {
     ]);
   });
 
-  it('never shares a unit between the repeats of tests with suite hooks', () => {
+  it('cuts the tests with suite hooks into units by test, every repeat of a test in the unit of its test', () => {
     const hooked = { declared: true, ordered: undefined, suiteHooks: true };
     const tests = [makeTest(FILE, 'a', 0, { parallel: hooked }), makeTest(FILE, 'b', 1, { parallel: hooked })];
     const pairs = tests.flatMap((test) => [0, 1].map((repeat) => makePair(test, { repeat })));
     const collection: Collection = { files: [makeFile(FILE, tests)], tests, nearMisses: [], unmatchedPositionals: [], uncollected: [] };
     const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 2);
-    expect(plan!.fileUnits.map((unit) => unit.pairs.map((pair) => `${pair.test.title}@${pair.repeat}`))).toEqual([['a@0'], ['a@1'], ['b@0'], ['b@1']]);
+    expect(plan!.fileUnits.map((unit) => unit.pairs.map((pair) => `${pair.test.title}@${pair.repeat}`))).toEqual([['a@0', 'a@1'], ['b@0', 'b@1']]);
     const [single] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 1);
-    expect(single!.fileUnits.map((unit) => unit.pairs.map((pair) => `${pair.test.title}@${pair.repeat}`))).toEqual([['a@0', 'b@0'], ['a@1', 'b@1']]);
+    expect(single!.fileUnits.map((unit) => unit.pairs.map((pair) => `${pair.test.title}@${pair.repeat}`))).toEqual([['a@0', 'a@1', 'b@0', 'b@1']]);
   });
 
   it('cuts the files again when prepare reports fewer workers', () => {

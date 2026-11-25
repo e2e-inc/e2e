@@ -1,6 +1,6 @@
 /** Synchronous registration during module evaluation. */
 
-import { realpathSync } from 'node:fs';
+import { realPath } from './real-path.ts';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { testCaseBrand } from '@e2e-dev/core/lib/internal/brands';
@@ -20,6 +20,7 @@ import type { SourceLocation } from '@e2e-dev/core/lib/internal/source';
 import { fixtureNames, type FixtureUserFn } from './fixture-names.ts';
 import { checkDeclaredFixtures, describeFixture, describeUser } from './fixture-plan.ts';
 import { evaluatingModule } from './evaluating-module.ts';
+import { fixtureIdentities } from './fixture-identity.ts';
 import { checkParallel, checkParallelNesting, configuredParallel } from './parallel.ts';
 import type {
   DescribeAPI,
@@ -87,6 +88,8 @@ export interface FixtureDefinition {
   readonly layer: number;
   /** Where its `test.extend()` call is. */
   readonly source?: SourceLocation | undefined;
+  /** What every evaluation of its module calls it (`fixture-identity.ts`); a worker keeps one instance per identity. */
+  readonly identity?: string | undefined;
 }
 
 export interface RegisteredTest {
@@ -637,15 +640,6 @@ const PACKAGE_ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import
 const RUNNER_ROOTS = ['src', 'dist'].map((dir) => `${path.join(PACKAGE_ROOT, dir)}${path.sep}`);
 const NODE_MODULES_SEGMENT = /[\\/]node_modules[\\/]/;
 
-/** The path with symlinks resolved, or the path itself when it cannot be resolved. */
-function realPath(file: string): string {
-  try {
-    return realpathSync.native(file);
-  } catch {
-    return file;
-  }
-}
-
 /**
  * `at name (location:line:column)` or `at location:line:column`, either one
  * after `async` for an awaiting caller. JavaScriptCore (Bun) can leave the
@@ -759,11 +753,12 @@ function validateFixtureDefinitions(
   const layer = (chain.at(-1)?.layer ?? -1) + 1;
   // The innermost frame outside the runner: the `test.extend()` call itself, wherever a test file imports it from.
   const source = captureSource(undefined);
+  const identify = fixtureIdentities(collectorSlot.get(globalThis), source);
   for (const [name, fn] of Object.entries(definitions)) {
     if (name === '') throw new CollectionError('test.extend(): a fixture name must not be empty');
     const definition = fixtureDefinition(name, fn);
     const names = fixtureNames(definition.fn, describeFixture(name, definition.scope), source);
-    added.push({ name, ...definition, names, layer, source });
+    added.push({ name, ...definition, names, layer, source, identity: identify(name) });
   }
   checkDeclaredFixtures([...chain, ...added], added);
   return added;
