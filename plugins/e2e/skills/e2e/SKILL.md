@@ -48,6 +48,11 @@ https://github.com/e2e-inc/e2e/tree/main/examples.
    (use `.waitFor()` on a narrowed locator); name repeated locators/values;
    own server data and cleanup in `test.extend` fixtures (`try`/`finally`).
 4. **Audit every test before running:**
+   - **One behavior per test (no undone actions or unchecked screens):** split
+     any test whose title combines two behaviors with "and". Never undo an
+     action before asserting its effect (an end state equal to the start hides
+     a no-op), and never navigate past a screen before checking what that test
+     promised on it.
    - **Second item shown, never the first:** in every test that removes,
      edits, or toggles one item of a list, verify arrange adds two items (`A`,
      then `B`), act targets the **second item shown** (`B` in append order,

@@ -108,10 +108,12 @@ Write every test so a failing title names what broke.
     confirms prior `agent.act` steps). On zero-match timeout, waits report
     `LOCATOR_NOT_FOUND` and checks `ASSERTION_FAILED`; two matches throw
     `LOCATOR_AMBIGUOUS` on either.
-- **One behavior and one goal per test.** Title names the outcome
+- **One behavior and one goal per test.** Title names one outcome
   (`'marks a todo as done'`, not `'adds and completes a todo'`). Multiple
   assertions checking that one outcome are fine; a second behavior is a second
-  test that arranges its own starting state.
+  test that arranges its own starting state. Never undo an action before
+  asserting its effect (returning to the starting value hides a no-op), and
+  never leave a screen before checking what the test promised on it.
 - **Prove the change on the changed record.** Ask what wrong behavior would
   still pass (no-op, deleted row, wrong row, unsaved reload). Pick an end value
   the start cannot show, write expected values as literals, and scope checks to
