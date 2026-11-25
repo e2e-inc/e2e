@@ -906,11 +906,24 @@ export interface WebResponse {
 
 #### `cookies`
 
-Returns the cookies visible to the current context.
+Returns every cookie of the browser, or only the cookies a request to a URL
+would carry.
 
 ```ts
-const cookies = await browser.cookies();
+const all = await browser.cookies();
+const sent = await browser.cookies('/api/orders');
+const either = await browser.cookies(['/api/orders', 'https://auth.example.com']);
 ```
+
+- A cookie matches a URL by its domain, its path, and `Secure`: a `Secure`
+  cookie matches `https` URLs, and `http` ones on `localhost`.
+- A relative URL resolves against the base URL, as `goto` resolves it.
+- An empty list returns no cookies.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_ARGUMENT` | A value that is not a string or an array of strings. |
+| `POLICY_DENIED` | An unparseable URL or one that is not `http(s)`. |
 
 #### `setCookies`
 
