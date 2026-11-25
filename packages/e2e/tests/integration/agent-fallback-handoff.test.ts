@@ -65,6 +65,41 @@ describe('semantic fallback handoff', () => {
     }
   });
 
+  it('settles the first look after a read-only miss, whose start-path probe is raw', async () => {
+    let captures = 0;
+    const engine = defineEngine({
+      name: 'loading-fixture', version: '1', spiVersion: 1, platform: 'fixture',
+      observe: async () => {
+        captures += 1;
+        // The previous step's page is still loading on the first capture.
+        const name = captures === 1 ? 'Loading' : 'Save';
+        return { root: { ref: { id: 'root', revision: '' }, children: [{ ref: { id: 'n', revision: '' }, role: 'button', name }] }, viewport: VIEWPORT };
+      },
+    });
+    const executor: StepExecutor = {
+      name: 'first-look-executor',
+      async runStep(context) {
+        expect(captures).toBe(1);
+        const observation = await context.observe();
+        expect(observation.text).toContain('Save');
+        expect(observation.text).not.toContain('Loading');
+        return { status: 'passed', summary: 'read the settled screen' };
+      },
+    };
+    const { project, outcome } = await runProject({ 'tests/fallback.e2e.ts': SUITE }, {
+      appUrl: 'https://fixture.test',
+      config: { tests: 'tests/**/*.e2e.ts', cache: 'read-only', targets: [{ name: 'fixture', engine }], agents: { default: { executor } } },
+    });
+    try {
+      expect(outcome.report.run.errors).toEqual([]);
+      expect(outcome.report.run.results[0]?.attempts[0]?.error).toBeUndefined();
+      expect(outcome.report.run.results[0]?.status).toBe('passed');
+      expect(outcome.report.run.results[0]?.attempts[0]?.steps.find((step) => step.api === 'agent.act')?.cache).toMatchObject({ mode: 'missed' });
+    } finally {
+      project.cleanup();
+    }
+  });
+
   it('types at a point from the opening fallback screenshot', async () => {
     let captures = 0;
     const dispatched: unknown[] = [];

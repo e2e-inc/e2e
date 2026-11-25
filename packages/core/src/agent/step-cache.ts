@@ -46,6 +46,12 @@ import { bound } from '../internal/text.ts';
  */
 export interface StepCacheHost extends ReplayHost {
   /**
+   * `ReplayHost.observe`. A capture before any action serves the executor's
+   * first look unless `firstLook` is false: the raw start-path read of a miss
+   * is no look the executor would have taken.
+   */
+  observe(mode: SettleMode, firstLook?: boolean): Promise<ObservedScreen>;
+  /**
    * Tells the step's live progress the cache has the step (`true`) or has
    * handed it to the model (`false`), so a reporter can show the cache at
    * work instead of a model turn.
@@ -408,7 +414,7 @@ export class StepTraceSession {
    * when this step may write. Settled as far as the capture's purpose asks.
    */
   private async captureStart(purpose: StartPurpose): Promise<ObservedScreen | undefined> {
-    const observation = await probeScreen(this.host, purpose === 'path-only' ? 'raw' : 'held-still', true);
+    const observation = await probeScreen(this.host, purpose === 'path-only' ? 'raw' : 'held-still', { firstLook: purpose !== 'path-only' });
     this.startPath = observation?.path;
     if (this.recorder !== undefined && observation?.kind === 'semantic') this.startNodes = observation.nodes;
     return observation;
@@ -781,11 +787,11 @@ function baselineScreen(screens: readonly ObservedScreen[], endPath: string | un
  * first look reads the same screen under the same policy, and would spend
  * another operation budget to be denied again.
  */
-async function probeScreen(host: StepCacheHost, mode: SettleMode, opening = false): Promise<ObservedScreen | undefined> {
+async function probeScreen(host: StepCacheHost, mode: SettleMode, opening?: { readonly firstLook: boolean }): Promise<ObservedScreen | undefined> {
   try {
-    return await host.observe(mode);
+    return await host.observe(mode, opening?.firstLook);
   } catch (cause) {
-    if (isRuntimeHardStop(cause) || (opening && isAgentError(cause) && cause.code === 'POLICY_DENIED')) throw cause;
+    if (isRuntimeHardStop(cause) || (opening !== undefined && isAgentError(cause) && cause.code === 'POLICY_DENIED')) throw cause;
     return undefined;
   }
 }
