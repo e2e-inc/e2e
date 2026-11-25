@@ -1094,9 +1094,9 @@ On a device, a node carries up to five attributes:
 - `placeholder`: present when the platform reports a hint or placeholder.
 
 On an iOS device cloud that serves an Appium page source, agent-device reads
-both the identifier and the label from Appium's `name`, which falls back to the
-label when an element has no identifier. `resource-id` and `label` can each
-return the other's value there. For the text a field holds, use `inputValue()`.
+the identifier from Appium's `name`, which falls back to the label when an
+element has no identifier, so `resource-id` can return the label there. For the
+text a field holds, use `inputValue()`.
 
 #### `isVisible`
 

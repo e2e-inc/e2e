@@ -173,7 +173,12 @@ declares `platforms: ['ios', 'android']` on those tests.
 | `driver.keys('Enter')`, `pressKeyCode(66)` | `.press('Enter')` on the field |
 | `.getText()`, `.getValue()`, `.getAttribute('value')` | `.textContent()`, `.inputValue()` |
 | `.isDisplayed()`, `.isEnabled()`, `.getAttribute('checked')` | `.isVisible()`, `.isEnabled()`, `.isChecked()` |
-| `.getAttribute('label')`, `.getAttribute('name')`, `.getAttribute('resource-id')`, `.getAttribute('type')`, `.getAttribute('class')`, `.getAttribute('content-desc')`, `.getAttribute('hint')`, `.getTagName()` | `.getAttribute('label')`, `.getAttribute('resource-id')` (also for iOS `name` on an element with an identifier; on iOS without an identifier read `label`, and on Android `name` reads visible text via `.textContent()`), `.getAttribute('class')` (also for iOS `type` and the tag name), `.getAttribute('content-desc')` (Android only), `.getAttribute('placeholder')` (for Android `hint`). [`getAttribute`](/reference/screen#getattribute) lists what each reads. For Android's `text`, use `.textContent()` (on a node with only a content description, it reads the description) |
+| `.getAttribute('label')` | `.getAttribute('label')`. [`getAttribute`](/reference/screen#getattribute) lists what each attribute reads |
+| `.getAttribute('resource-id')`, iOS `.getAttribute('name')` | `.getAttribute('resource-id')`. An iOS element with no identifier has none; read `label` instead |
+| Android `.getAttribute('name')`, `.getAttribute('text')` | `.textContent()`. On a node with only a content description, it reads the description |
+| `.getAttribute('class')`, iOS `.getAttribute('type')`, `.getTagName()` | `.getAttribute('class')`. On iOS it drops the `XCUIElementType` prefix: `Button`, not `XCUIElementTypeButton` |
+| `.getAttribute('content-desc')` | `.getAttribute('content-desc')`, Android only |
+| `.getAttribute('hint')` | `.getAttribute('placeholder')` |
 | `.isExisting()` | `(await locator.count()) > 0` |
 | `.getLocation()`, `.getSize()` | `.boundingBox()` |
 | `.waitForDisplayed({ timeout })` | `await expect(locator).toBeVisible({ timeout })`, or `locator.waitFor()` |

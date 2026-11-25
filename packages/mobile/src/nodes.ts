@@ -459,15 +459,18 @@ function nonEmpty(value: string | undefined): string | undefined {
 
 /**
  * What `getAttribute` reads on a device node, under the names an Appium
- * suite asks for: `label` (the accessibility label: the iOS label, the Android
- * content description or, when it has none, its text, as Detox defines it;
- * a hint-only field with no `text` key reads neither, while a described
- * empty field with `text: ""` keeps both `label` and `content-desc`),
- * `resource-id` (the Android resource id or the iOS accessibility
- * identifier, the test id), `class` (the Android class or the iOS element
- * type without its `XCUIElementType` prefix, also the tag name),
- * `content-desc` (Android only), and `placeholder`. Undefined when the node
- * carries none of them.
+ * suite asks for:
+ * - `label`: the accessibility label, as Detox defines it. On iOS the label;
+ *   on Android the content description, else the node's text. An Android
+ *   field showing only its hint has no `text` key and gets no `label`. An
+ *   empty described field has `text: ""` and keeps `label` and `content-desc`.
+ * - `resource-id`: the test id (Android resource id, iOS accessibility identifier).
+ * - `class`: the Android class, or the iOS element type without its
+ *   `XCUIElementType` prefix. Also the tag name.
+ * - `content-desc`: Android only.
+ * - `placeholder`.
+ *
+ * Undefined when the node carries none of them.
  */
 function nodeAttributes(
   source: RawNode,
