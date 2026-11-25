@@ -229,7 +229,7 @@ export class SessionTestLines {
     const { testRan, attached, hasAgent } = this.options;
     const agentGuidance =
       hasAgent === true
-        ? ' Prefer agent.act for user flows, with agent among the test fixtures (keep screen lines for an exact interaction under test or a sign-in setup). Give the agent the steps for one test goal, and split into calls when a later step needs a known screen state, risks maxSteps or maxModelCalls budgets, or needs a middle step boundary. Wait for that state before continuing.'
+        ? ' Prefer agent.act for user flows, with agent among the test fixtures (keep screen lines for low-level mechanics under test or a sign-in setup). Give the agent the steps for one test goal, and split into calls when a later step needs a known screen state, risks maxSteps or maxModelCalls budgets, or needs a middle step boundary. Wait for the intermediate screen state before continuing.'
         : '';
     // A session that ran a test, or attached to a held one, holds only lines from that point onward.
     const [lead, place] =

@@ -1,6 +1,5 @@
 // tests/todos.e2e.ts
-import { test } from '@e2e-dev/web';
-import { expect } from 'e2e';
+import { test, expect } from 'e2e';
 
 test.describe('todos', { tags: ['todos'] }, () => {
   test.beforeEach(async ({ app }) => {

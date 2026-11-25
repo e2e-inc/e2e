@@ -2,4 +2,4 @@
 'e2e': patch
 ---
 
-The e2e skill and the MCP server's `test_lines` now steer coding agents to test one behavior per test with every check at the end, name a locator the test repeats, keep test data on the app's server in fixtures, and, when a test acts on one item of a list, add two, act on the second item shown, never the first, and check the first is unchanged.
+Trim `skills/e2e/SKILL.md` for progressive disclosure, default user flows to `agent.act` (one goal per test, with data in `params`) when an agent is configured, steer coding agents to one behavior per test with checks at the end, named repeated locators, `test.extend` fixture cleanup in `try`/`finally`, and acting on the second item shown in list mutations, and harden `migrate-to-e2e` parity, target-routing, and per-test `stays` rules. Update `e2e mcp`'s `test_lines` to adapt its guidance across fresh drafts, `open_session { test }` continuations, and `open_session { attach }` pause points, gating `agent.act` advice on a configured model or custom executor.

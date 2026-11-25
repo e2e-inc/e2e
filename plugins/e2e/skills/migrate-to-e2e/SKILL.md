@@ -271,7 +271,7 @@ Then each test, one at a time:
   `stays`, and give a file with mixed statuses one row per test. Offer to send
   `npx e2e feedback --type feature -m "<the gap>"` once per genuine gap:
   preview it with `--dry-run` and send it only when the user agrees (the e2e
-  skill, Feedback).
+  skill, topic `debugging`, "Feedback").
 - Do not change app code. A test that needs a test id the app lacks gets
   `agent.act` or a different locator; propose the app change to the user
   instead of making it. A defect check's planted bug (step 6) is

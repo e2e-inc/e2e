@@ -98,7 +98,7 @@ jq '.run.results[] | select(.selected and .status != "passed") | .attempts[-1]
 
 - Run by `file:line`, not the whole file; re-check the `test(` line after edits above it.
 - Pass `--action-timeout 5000` so missing locators fail in 5 s instead of 30 s (keep it above the slowest screen load; per-call `{ timeout }` wins; `expect` defaults to 5 s).
-- Keep the replay cache on (`read-write` locally; never pass `--no-cache` on every edit). A failed run keeps every `agent.act` confirmed by an earlier wait or check, and reruns only new, changed, failed, or handed-off goals. Give the command a timeout longer than the test (a killed run saves nothing).
+- Keep the replay cache on (`read-write` locally; never pass `--no-cache` on every edit). A failed run keeps every `agent.act` confirmed by a wait or check that passed after it, and reruns only new, changed, failed, or handed-off goals. Give the command a timeout longer than the test (a killed run saves nothing).
 - Do not rename the test, `describe`, file, goal instruction, `params`, or agent context once a goal passes: each is part of the cache key. Fixing locators or assertions keeps recordings.
 - Pass `--retries 0` when retries are enabled (default 1 in CI): outside strict mode, retries never replay.
 - Once green, drop `--action-timeout` and run once with `--no-cache` for agent tests to confirm live execution.
@@ -209,7 +209,8 @@ capability (`feature`), offer to report it once after working around it or
 giving up. Never report app failures, one-off issues, or outdated e2e versions
 (upgrade with `npx e2e@latest upgrade` first). Search
 [existing issues](https://github.com/e2e-inc/e2e/issues) first
-(`gh issue list -R e2e-inc/e2e --search "<words>"`).
+(`gh issue list -R e2e-inc/e2e --search "<words>"`), and comment on a match
+instead of sending a new report. Never file the issue yourself.
 
 A `bug` needs `--repro` (deterministic steps without app content); without it,
 omit `--repro` so the command prints a prefilled GitHub issue URL for the user

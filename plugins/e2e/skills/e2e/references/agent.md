@@ -316,7 +316,7 @@ elsewhere on the current screen.
   transition when the next step needs a known state, when a long flow
   would risk the `maxSteps` or `maxModelCalls` budget, or when a failure
   in the middle needs its own step boundary. Explain why, then wait for
-  that state. Each call has its own recording and budgets within the
+  the intermediate screen state. Each call has its own recording and budgets within the
   test timeout. Verify the complete path together.
 
 ```ts

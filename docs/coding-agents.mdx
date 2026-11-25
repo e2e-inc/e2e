@@ -157,9 +157,9 @@ test('filters the shop to items under $20', { session: 'customer' }, async ({ ap
   `agent.act` the specific steps it needs to reach that goal. Split the
   path into calls when a later step needs a known screen state, when a
   long flow risks `maxSteps` or `maxModelCalls` budgets, or when a middle
-  failure needs its own step boundary. Explain the split and wait for that
-  state before continuing. Check the outcome at the end to verify the
-  behavior and confirm the
+  failure needs its own step boundary. Explain the split and wait for the
+  intermediate screen state before continuing. Check the outcome at the end
+  to verify the behavior and confirm the
   [recording](/cache#when-a-recording-is-written).
 - **Named locators.** A locator the test uses twice, like `results`, is a
   `const`, so a renamed control is one edit.

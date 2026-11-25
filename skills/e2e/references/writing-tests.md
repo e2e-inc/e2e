@@ -22,8 +22,7 @@ Always read "A complete file" and "Structure" first. Load later API sections
 
 ```ts
 // tests/todos.e2e.ts
-import { test } from '@e2e-dev/web';
-import { expect } from 'e2e';
+import { test, expect } from 'e2e';
 
 test.describe('todos', { tags: ['todos'] }, () => {
   test.beforeEach(async ({ app }) => {
@@ -68,8 +67,9 @@ test.describe('todos', { tags: ['todos'] }, () => {
 
 The agent drives the flow. A passing `agent.assert` or locator matcher
 checks the outcome and confirms the preceding actions for replay. `screen`
-actions are for exact interactions and short, stable flows; a goal takes
-its values in `params`. Files match the config
+actions are for low-level mechanics under test (like `ignores an empty
+submission` above), `test.setup` sign-in, or configs with no model; a goal
+takes its values in `params`. Files match the config
 `tests` glob, default `tests/**/*.e2e.ts`. In a browser every test starts
 from a fresh context with no page open, so it calls `app.open()` first; on a
 device a test that skips `app.open()` starts where the previous test left
@@ -93,30 +93,33 @@ Write every test so a failing title names what broke.
   - **Act:** pursue the test's one goal. Start with one `agent.act` call
     spelling out required fields, choices, buttons, and order; split when a
     later step needs a known screen state, risks `maxSteps`/`maxModelCalls`
-    budgets, or needs a middle step boundary (explain why and wait for that
-    state). Before leaving a screen or calling `agent.assert`, wait for the
-    required state.
-  - **Assert:** hold every `expect`, `expect.poll`, and `agent.assert`, and
-    nothing after them (exception: `session.save()` in a setup test). Never
-    assert mid-way: wait on a narrowed locator instead, such as
-    `balance.filter({ hasText: /^\$10\.00$/ }).waitFor()` (use anchored
-    `hasText` on leaf status/value nodes since it checks subtree text on web
-    and individual nodes on core/mobile; use `filter({ has: screen.getByText(name) })`
-    for exact row matching), `screen.getByRole('switch', 'Lock card', { checked: true }).waitFor()`,
-    or `heading.waitFor({ state: 'hidden' })` after an earlier positive wait
-    (`hidden` passes immediately on zero matches, including typos, and still
-    confirms prior `agent.act` steps). Never move a pre-reload or
-    pre-navigation assertion past a reload or navigation (split the earlier
-    phase into its own test instead), never stash one-shot reads
-    (`isVisible()`, `isEnabled()`, `count()`, `inputValue()`, `textContent()`,
-    `getAttribute()`, `browser.evaluate()`) mid-flow into local variables just
-    to assert them at the end (leave a precondition as `.waitFor()` alone with
-    no extra `expect`, split earlier phases into their own tests so retrying
-    matchers run directly on the live screen, or use `expect.poll(...)` for
-    computed CSS/DOM checks), and `throw` directly in arrange when a computed
-    precondition is missing instead of inventing a fallback value. On
-    zero-match timeout, waits report `LOCATOR_NOT_FOUND` and checks
-    `ASSERTION_FAILED`; two matches throw `LOCATOR_AMBIGUOUS` on either.
+    budgets, or needs a middle step boundary (explain why and wait for the
+    intermediate screen state). Before leaving a screen or calling
+    `agent.assert`, wait for the required state.
+  - **Assert:**
+    - Put every `expect`, `expect.poll`, and `agent.assert` here, with nothing
+      after them (exception: `session.save()` in a setup test).
+    - Never assert mid-way: wait on a narrowed locator instead, such as
+      `balance.filter({ hasText: /^\$10\.00$/ }).waitFor()` (use anchored
+      `hasText` on leaf status/value nodes since it checks subtree text on web
+      and individual nodes on core/mobile; use
+      `filter({ has: screen.getByText(name) })` for exact row matching),
+      `screen.getByRole('switch', 'Lock card', { checked: true }).waitFor()`,
+      or `heading.waitFor({ state: 'hidden' })` after an earlier positive wait
+      (`hidden` passes immediately on zero matches, including typos, and still
+      confirms prior `agent.act` steps).
+    - Never move a pre-reload or pre-navigation assertion past a reload or
+      navigation (split the earlier phase into its own test instead). Never
+      stash one-shot reads (`isVisible()`, `isEnabled()`, `count()`,
+      `inputValue()`, `textContent()`, `getAttribute()`, `browser.evaluate()`)
+      mid-flow into local variables just to assert them at the end: leave a
+      precondition as `.waitFor()` alone with no extra `expect`, split earlier
+      phases so retrying matchers run on the live screen, or use
+      `expect.poll(...)` for computed CSS/DOM checks. When a computed arrange
+      precondition is missing, `throw` directly instead of inventing a
+      fallback value.
+    - On zero-match timeout, waits report `LOCATOR_NOT_FOUND` and checks
+      `ASSERTION_FAILED`; two matches throw `LOCATOR_AMBIGUOUS` on either.
 - **One behavior and one goal per test.** Title names one outcome
   (`'marks a todo as done'`, not `'adds and completes a todo'`). Multiple
   assertions checking that one outcome are fine; a second behavior is a second
@@ -163,8 +166,9 @@ Write every test so a failing title names what broke.
   item shown. Read-only lists can target an existing non-first item; tests
   explicitly about position 1 can act on the first item.
 - **Refusals and multi-user delivery.** When a refusal promises no persisted
-  write, verify the refusal message, reopen after an independent readiness wait,
-  and assert records stayed unchanged; put a follow-up retry in its own test.
+  write, wait for the refusal message (or assert it in its own test), reopen
+  after an independent readiness wait, and assert records stayed unchanged;
+  put a follow-up retry in its own test.
   For recipient delivery, keep a separate recipient session open and scope
   checks to the run-unique message (and history after reopen if promised).
 - **Each test owns its starting state and passes alone.**
@@ -173,37 +177,43 @@ Write every test so a failing title names what broke.
     reset with `app.clearState()` (plus `device.clearKeychain()` on iOS
     simulator when sign-in uses keychain).
   - **Fixture-owned server data:** create shared server records with a
-    run-unique `randomUUID()` name in a `test.extend` fixture and delete them
-    in `finally` (`try`/`finally` around creation and `use()` cleans up partial
-    setup before `use()` as well as failed tests). Even when a test deletes its
-    record, keep fixture teardown and accept `404` so an earlier failure never
-    leaks. Without a test API, seed and delete through the UI in the fixture;
-    never clean up at the end of a test body.
+    run-unique `randomUUID()` name in a `test.extend` fixture, capture the
+    returned id before asserting the create status, and delete it in `finally`
+    (`try`/`finally` around creation and `use()` cleans up partial setup once
+    the fixture obtains a usable id, as well as failed tests). Even when a
+    test deletes its record, keep fixture teardown and accept `404` so an
+    earlier failure never leaks. Without a test API, seed and delete through
+    the UI in the fixture; never clean up at the end of a test body.
   - **No coupling or unwaited branching:** never chain tests across shared
     state, never use `serial: true` to hide coupling, and never branch or skip
     on `isVisible()`/`count()` (they do not wait). Every test must pass when
     run alone by `file:line`, twice in a row.
 - **Name and reuse what the tests repeat.** Check existing `tests/`, fixtures,
   helpers, and [page objects](https://e2e.com/docs/page-object-model) first
-  and reuse or extend them instead of duplicating setup. Define repeated
+  and reuse or extend them (including existing screen helpers or page objects
+  the project already uses) instead of duplicating setup. Define repeated
   selector inputs, values, or prompts once inside `describe` (or a
   feature-local module as specs grow) and keep single-use ones inline; bind
   repeated locators to local `const`s. Pass variables to prompts in `params`
   (`unique()` for run-unique values so the replay cache hits).
 - **Prefer `agent.act` when a model is configured.** When `e2e.config.ts`
-  configures a model or custom executor under `agents`, default to `agent.act`
-  for user flows (forms, buttons, list/CRUD mutations, navigation, auth, with
-  values in `params`), even if an existing setup or login test uses `screen.*`,
-  paired with verifying checks at the end so the replay cache records every
-  step and reruns cost no model calls. Reserve `screen.*` actions for low-level
-  mechanics that are themselves under test (such as `ignores an empty
-  submission` above, a keyboard shortcut, or a drag offset), a `test.setup`
-  sign-in form, or a project with no model configured. Use `expect` for exact
-  values, counts, or field states; use `agent.assert` alone when the screen
-  shows the full semantic or visual outcome, pairing a deterministic `expect`
-  when exact phrasing or state must also hold (topic `debugging`, "Flaky
-  tests"). A passing locator/engine matcher, `locator.waitFor`, `agent.assert`,
-  or `agent.waitFor` confirms preceding `agent.act` steps for the replay cache
+  configures a model or custom executor on `agents.default` (or on a named
+  `agents.<name>`, selected with `{ agent: '<name>' }` on the test or
+  `--agent <name>` on the CLI), default to `agent.act` for user flows (forms,
+  buttons, list/CRUD mutations, navigation, auth, with values in `params`),
+  and do not avoid `agent.act` on new user flows merely because a `test.setup`
+  or login file uses `screen.*`. Pair `agent.act` with verifying checks at the
+  end so eligible confirmed `act` steps record and replay without new `act`
+  model calls (model-backed judgments such as `agent.assert` still call the
+  model on reruns). Reserve `screen.*` actions for low-level mechanics that
+  are themselves under test (such as `ignores an empty submission` above, a
+  keyboard shortcut, or a drag offset), a `test.setup` sign-in form, or a
+  project with no model configured. Use `expect` for exact values, counts, or
+  field states; use `agent.assert` alone when the screen shows the full
+  semantic or visual outcome, pairing a deterministic `expect` when exact
+  phrasing or state must also hold (topic `debugging`, "Flaky tests"). A
+  passing locator/engine matcher, `locator.waitFor`, `agent.assert`, or
+  `agent.waitFor` confirms preceding `agent.act` steps for the replay cache
   (`expect.poll` and plain-value `expect` confirm nothing).
 
 ## Registration
@@ -729,15 +739,17 @@ const projectTest = test.extend<{ project: { id: string } }>({
     const cookies = await browser.cookies(`${app.baseUrl}/api/projects`);
     if (cookies.length === 0) throw new Error('not signed in: the app has no cookies');
     const headers = { cookie: cookies.map((c) => `${c.name}=${c.value}`).join('; ') };
-    let project: { id: string } | undefined;
+    let projectId: string | undefined;
     try {
       const created = await request.post(`${app.baseUrl}/api/projects`, { json: { name: `Project ${randomUUID()}` }, headers });
+      const parsed = z.object({ id: z.string() }).safeParse(await created.json().catch(() => undefined));
+      if (parsed.success) projectId = parsed.data.id;
       expect(created.status).toBe(201);
-      project = expect(await created.json()).toMatchSchema(z.object({ id: z.string() }));
-      await use(project);
+      if (!parsed.success) throw parsed.error;
+      await use(parsed.data);
     } finally {
-      if (project !== undefined) {
-        const deleted = await request.delete(`${app.baseUrl}/api/projects/${project.id}`, { headers });
+      if (projectId !== undefined) {
+        const deleted = await request.delete(`${app.baseUrl}/api/projects/${projectId}`, { headers });
         expect([200, 204, 404]).toContain(deleted.status);
       }
     }
@@ -745,16 +757,14 @@ const projectTest = test.extend<{ project: { id: string } }>({
 });
 
 describe('project settings', { session: 'admin' }, () => {
-  projectTest('renames a project', async ({ app, screen, project }) => {
-    const name = screen.getByLabel('Name');
+  projectTest('renames a project', async ({ agent, app, screen, project }) => {
     await app.open(`/projects/${project.id}/settings`); // straight to the screen under test
 
-    await name.fill('Atlas');
-    await screen.getByRole('button', 'Save').tap();
+    await agent.act('Rename the project to {name} and save', { params: { name: 'Atlas' } });
     await screen.getByRole('status').filter({ hasText: /^Saved$/ }).waitFor();
     await app.open(`/projects/${project.id}/settings`); // reopened: the promise is that it is saved
 
-    await expect(name).toHaveValue('Atlas');
+    await expect(screen.getByLabel('Name')).toHaveValue('Atlas');
   });
 });
 ```
@@ -865,4 +875,4 @@ URL-matching them. A predicate function is `INVALID_ARGUMENT`.
 - APIs live in the same suite: `request.get('/api/users')` (relative to `app.baseUrl`; pass `browser.cookies(url)` in `headers` when the API needs the session) plus value matchers on `response.status` and `await response.json()`.
 - No sleeps or polling loops: wait for state via locators, `expect` `{ timeout }`, or `agent.waitFor(...)`.
 - `await` every step, `expect.poll`, and `toPass`, else `STEP_NOT_AWAITED`.
-- Assert model-generated text by meaning (`toContain`), not exact phrasing.
+- Assert required literal fragments with `toContain`, and semantic outcomes (where negation or phrasing can flip meaning) with `agent.assert`.
