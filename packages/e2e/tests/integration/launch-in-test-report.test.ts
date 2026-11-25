@@ -164,6 +164,13 @@ const launchUnder = (root, launching) => {
   }
 };
 
+test('catches a launch whose options throw when read', async ({ app }) => {
+  await app.open();
+  // Handed to launch as is: spreading the options would call the getter before launch runs.
+  const options = { app: FAKE_APP, handleSignals: false, get artifactsDir() { throw Object.assign(new Error('the artifact mount is missing'), { code: 'NO_MOUNT' }); } };
+  globalThis.launchReportRefused.getter = await refusal(launch(second(), options));
+});
+
 test('catches a launch that cannot make its output directory', async ({ app }) => {
   await app.open();
   globalThis.launchReportRefused.mkdtemp = await refusal(launchUnder('/nonexistent-e2e-launch-tmp', () => open()));
@@ -418,6 +425,7 @@ describe('a launch() session opened inside a test, in the test\'s report', { tim
       'catches a launch refused for its options',
       'catches a launch whose engine fails to start',
       'catches a launch whose working directory cannot be resolved',
+      'catches a launch whose options throw when read',
       'catches a launch that cannot make its output directory',
       'catches a launch that fails to start and then to remove its output directory',
       'catches a session refused for its state',
@@ -427,7 +435,7 @@ describe('a launch() session opened inside a test, in the test\'s report', { tim
     expect(titles.flatMap((title) => attemptOf(title).secondaryErrors)).toEqual([]);
     // Each opening did fail, and the test caught what it failed with.
     const refused = (globalThis as { launchReportRefused?: Record<string, string> }).launchReportRefused;
-    expect(refused).toEqual({ options: 'INVALID_ARGUMENT', init: expect.any(String), cwd: 'ERR_INVALID_ARG_TYPE', mkdtemp: 'ENOENT', cleanup: expect.any(String), state: 'INVALID_ARGUMENT', start: expect.any(String) });
+    expect(refused).toEqual({ options: 'INVALID_ARGUMENT', init: expect.any(String), cwd: 'ERR_INVALID_ARG_TYPE', getter: 'NO_MOUNT', mkdtemp: 'ENOENT', cleanup: expect.any(String), state: 'INVALID_ARGUMENT', start: expect.any(String) });
     // The engine's failure, not the cleanup's that came after it.
     expect(refused!.cleanup).toBe(refused!.init);
     expect(Object.values(refused!)).not.toContain('opened');

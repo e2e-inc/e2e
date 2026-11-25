@@ -146,10 +146,8 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
   }
   // Resolved before the seat too: it throws for a `cwd` that is no path, or a working directory deleted under the process.
   const projectRoot = path.resolve(options.cwd ?? process.cwd());
-  /** What the test launching the host offers, when one is, and the host's seat in it: reserved before anything is awaited, so the host is that test's and no later one's. */
-  const owner = currentGuests();
-  const seat = owner?.host();
-  const ownsArtifacts = options.artifactsDir === undefined;
+  const artifactsDir = options.artifactsDir;
+  const ownsArtifacts = artifactsDir === undefined;
   /** The host's output directory, once there is one: a temporary one is made inside the opening, so a failure to make it gives the seat back too. */
   let output: string | undefined;
   const removeOutput = (): Promise<void> => ownsArtifacts && output !== undefined ? rm(output, { recursive: true, force: true }) : Promise.resolve();
@@ -162,8 +160,14 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
   let opened: { readonly config: ResolvedConfig; readonly target: ResolvedTarget; readonly host: StandaloneHost };
   /** Stops sharing the host's secrets with the sessions beside it; set once they are shared. */
   let withdrawSecrets = (): void => undefined;
+  /**
+   * What the test launching the host offers, when one is, and the host's seat in it: reserved before anything is awaited, so the host is that test's and no later one's.
+   * Reserved last, right before the opening: everything that can throw before it throws with no seat to give back.
+   */
+  const owner = currentGuests();
+  const seat = owner?.host();
   try {
-    const dir = options.artifactsDir === undefined ? await mkdtemp(path.join(os.tmpdir(), 'e2e-core-')) : path.resolve(projectRoot, options.artifactsDir);
+    const dir = artifactsDir === undefined ? await mkdtemp(path.join(os.tmpdir(), 'e2e-core-')) : path.resolve(projectRoot, artifactsDir);
     output = dir;
     opened = await opening(async () => {
       const env = options.env ?? process.env;
