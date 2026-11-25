@@ -104,3 +104,31 @@ for (let index = 1; index <= 40; index += 1) {
   item.textContent = `Item ${index}`;
   items.append(item);
 }
+
+// A checkbox widget that sets its state in a later task, as a framework batching updates does.
+const lateCheck = document.querySelector('[data-testid="late-check"]');
+lateCheck.addEventListener('click', () => {
+  setTimeout(() => lateCheck.setAttribute('aria-checked', String(lateCheck.getAttribute('aria-checked') !== 'true')), 150);
+});
+
+// A key sent to a node that cannot take focus reaches the document, as on the web.
+document.addEventListener('keydown', (event) => {
+  document.querySelector('[data-testid="key-result"]').textContent = `Key ${event.key}`;
+});
+
+// A web component that renders a button around a slotted label: the click lands on the slotted child.
+customElements.define('word-button', class extends HTMLElement {
+  constructor() {
+    super();
+    const root = this.attachShadow({ mode: 'open' });
+    root.innerHTML = '<button type="button"><slot></slot></button>';
+    root.querySelector('button').addEventListener('click', () => {
+      document.querySelector('[data-testid="word-result"]').textContent = 'Word button clicked';
+    });
+  }
+});
+
+// A native dialog the app opens: nothing answers it, so it is dismissed and the app reads `false`.
+document.getElementById('ask').addEventListener('click', () => {
+  document.querySelector('[data-testid="ask-result"]').textContent = `confirm returned ${confirm('Sure?')}`;
+});

@@ -95,6 +95,22 @@
         <div style="position: absolute; inset: 0; background: white"></div>
       </div>
     </section>
+    <section aria-labelledby="markup-heading">
+      <h2 id="markup-heading">Markup</h2>
+      <span data-testid="inline">inline text</span>
+      <p data-testid="sentence">Signed in as <b>ada</b>.</p>
+      <p data-testid="amount"><span>€</span><span>20</span></p>
+      <div role="img" aria-label="Company logo" style="width: 16px; height: 16px"></div>
+      <div style="display: contents" data-testid="contents"><span>wrapped</span></div>
+      <label>Pick <select data-testid="tier"><option label="Basic">Pro</option><option>Pro</option></select></label>
+      <div role="checkbox" tabindex="0" aria-checked="false" aria-label="Late check" data-testid="late-check">Late check</div>
+      <div tabindex="-1" data-testid="key-target">Key target</div>
+      <output data-testid="key-result"></output>
+      <word-button><span>Save</span></word-button>
+      <output data-testid="word-result"></output>
+      <button type="button" id="ask">Ask</button>
+      <output data-testid="ask-result"></output>
+    </section>
     <script src="index.js"></script>
   </body>
 </html>

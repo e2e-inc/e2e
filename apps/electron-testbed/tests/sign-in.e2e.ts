@@ -221,6 +221,37 @@ test.describe('sign-in window', () => {
     expect(await Promise.all([electron.locator('#increment').count(), electron.locator('#items li').count()])).toEqual([1, 40]);
   });
 
+  test('reads inline markup, images, and a label the way the web does', async ({ screen }) => {
+    // An inline element Chromium leaves out of the tree is visible, and its text is read once.
+    await expect(screen.getByTestId('inline')).toBeVisible();
+    await expect(screen.getByTestId('inline')).not.toBeHidden();
+    await expect(screen.getByText('inline text')).toHaveCount(1);
+    // A wrapper with no box of its own shows what it holds.
+    await expect(screen.getByTestId('contents')).toBeVisible();
+    // Text keeps the white space of its source, and none between inline markup.
+    await expect(screen.getByTestId('sentence')).toHaveText('Signed in as ada.');
+    await expect(screen.getByText('€20')).toHaveCount(1);
+    await expect(screen.getByRole('img', 'Company logo')).toHaveCount(1);
+    await expect(screen.getByRole('image', 'Company logo')).toHaveCount(1);
+  });
+
+  test('chooses an option by label before text, and waits for a late state', async ({ screen, electron }) => {
+    await screen.getByTestId('tier').selectOption('Pro');
+    // The second option's label is Pro; the first only has that text, under another label.
+    await expect(electron.locator('[data-testid="tier"] option:checked')).not.toHaveAttribute('label', 'Basic');
+    await screen.getByTestId('late-check').check();
+    await expect(screen.getByTestId('late-check')).toBeChecked();
+  });
+
+  test('presses a key on a node that cannot take focus, taps a slotted label, and dismisses a dialog', async ({ screen }) => {
+    await screen.getByTestId('key-target').press('Enter');
+    await expect(screen.getByTestId('key-result')).toHaveText('Key Enter');
+    await screen.getByText('Save', { exact: true }).tap();
+    await expect(screen.getByTestId('word-result')).toHaveText('Word button clicked');
+    await screen.getByRole('button', 'Ask').tap();
+    await expect(screen.getByTestId('ask-result')).toHaveText('confirm returned false');
+  });
+
   test('scrolls a list to an item below its edge', async ({ screen }) => {
     const last = screen.getByText('Item 40', { exact: true });
     await last.scrollIntoView();

@@ -41,7 +41,7 @@ import {
 } from '@e2e-dev/core/engine';
 import { describeExecutable, ensureElectronBinary, resolveExecutable } from './executable.ts';
 import type { ResolvedElectronOptions } from './options.ts';
-import { projectTree, unmaskableCount, type AXNode, type ProjectionMode, type SnapshotDocument, type WindowGeometry } from './tree.ts';
+import { MASKED_TAGS, projectTree, unmaskableCount, type AXNode, type ProjectionMode, type SnapshotDocument, type WindowGeometry } from './tree.ts';
 
 /** The observation root's id: one surface, one root, whichever window it reads. */
 const ROOT_ID = 'window';
@@ -58,7 +58,13 @@ function objectGroup(): string {
 }
 
 /** Everything that can hold a secure value or show another document in a screenshot: masked, or the capture is not taken. */
-const MASKED_SELECTOR = 'input[type=password i], iframe, frame, webview';
+const MASKED_SELECTOR = ['input[type=password i]', ...MASKED_TAGS.map((tag) => tag.toLowerCase())].join(', ');
+
+/** How long the app gets to close itself when its data is thrown away anyway: a `beforeunload` handler would otherwise hold every test end for the full budget. */
+const DISCARD_CLOSE_MS = 1_000;
+
+/** How long it gets when `app.restart()` keeps its data: time to flush it. */
+const RESTART_CLOSE_MS = 5_000;
 
 /** How long a long press holds by default. */
 const LONG_PRESS_MS = 800;
@@ -121,13 +127,17 @@ function stale(message: string, cause?: unknown): EngineError {
  * operation's budget is spent or it was cancelled, its caller stopped
  * waiting, and nothing more may reach the app.
  */
-function inputGate(operation: OperationContext, label: string): () => void {
+function inputGate(operation: OperationContext, label: string): InputGate {
   const ends = Date.now() + operation.timeoutMs;
-  return () => {
+  const gate = () => {
     if (operation.signal.aborted) throw new EngineError('CANCELLED', `${label} was cancelled`, { retryable: false });
     if (Date.now() >= ends) throw new EngineError('OPERATION_TIMEOUT', `${label} timed out after ${operation.timeoutMs}ms`, { retryable: false });
   };
+  return Object.assign(gate, { remainingMs: () => Math.max(0, ends - Date.now()) });
 }
+
+/** An operation's input gate: throws once the operation ended, and says how much of its budget is left. */
+type InputGate = (() => void) & { readonly remainingMs: () => number };
 
 function notActionable(message: string): EngineError {
   return new EngineError('NOT_ACTIONABLE', message, { retryable: false });
@@ -151,13 +161,17 @@ function translate(cause: unknown, label: string, committed: boolean): Error {
   // A refusal by policy (a screenshot it cannot mask) or of the test's own input is the harness's to report as it is.
   if (cause instanceof ConfigurationError || cause instanceof TestError) return cause;
   if (cause instanceof EngineError) {
-    if (committed && (cause.code === 'OPERATION_TIMEOUT' || cause.retryable)) {
+    if (committed && (cause.code === 'OPERATION_TIMEOUT' || cause.code === 'CANCELLED' || cause.retryable)) {
       return new EngineError('ACTION_MAY_HAVE_COMMITTED', `${label}: ${cause.message}; its input may have reached the app`, { retryable: false, cause });
     }
     return cause;
   }
   const message = cause instanceof Error ? cause.message : String(cause);
-  if (CLOSED.test(message)) return new EngineError('INVALID_STATE', `${label}: the window closed (${message.split('\n')[0]})`, { retryable: false, cause });
+  if (CLOSED.test(message)) {
+    // A window that closes because of the input (a "Close" or "Sign out" button) is a committed action, as a node that goes away is.
+    if (committed) return new EngineError('ACTION_MAY_HAVE_COMMITTED', `${label}: the window closed while the input was sent`, { retryable: false, cause });
+    return new EngineError('INVALID_STATE', `${label}: the window closed (${message.split('\n')[0]})`, { retryable: false, cause });
+  }
   if (GONE.test(message)) {
     if (committed) return new EngineError('ACTION_MAY_HAVE_COMMITTED', `${label}: the node went away while the input was sent`, { retryable: false, cause });
     return stale(`${label}: the node is no longer in the window`, cause);
@@ -214,6 +228,7 @@ export class ElectronSurface {
   private readonly windowsByPage = new Map<Page, AppWindow>();
   private shown: AppWindow | undefined;
   private nextSerial = 1;
+  private queue: Promise<void> = Promise.resolve();
   private artifactCounter = 0;
   private readonly sessions = new WeakMap<Page, Promise<CDPSession>>();
   private readonly worlds = new WeakMap<Page, Promise<number>>();
@@ -247,7 +262,7 @@ export class ElectronSurface {
   }
 
   async endAttempt(context: EngineCleanupContext): Promise<void> {
-    await this.quit(context);
+    await this.lifecycle(() => this.quit(context, DISCARD_CLOSE_MS));
     if (this.userDataDir !== undefined) rmSync(this.userDataDir, { recursive: true, force: true });
     this.userDataDir = undefined;
     this.attempt = undefined;
@@ -259,8 +274,19 @@ export class ElectronSurface {
 
   // --- the app ---
 
-  /** Quits the running app, if any: a graceful close within the budget, then the process killed. */
-  private async quit(budget: { readonly timeoutMs: number }): Promise<void> {
+  /**
+   * Runs a launch or a quit after the ones before it: `app.open()` and
+   * `app.restart()` that overlap would each start a main process, and only
+   * one is tracked.
+   */
+  private lifecycle<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(work, work);
+    this.queue = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  /** Quits the running app, if any: a graceful close within `graceMs` and the budget, then the process killed. */
+  private async quit(budget: { readonly timeoutMs: number }, graceMs: number): Promise<void> {
     const app = this.app;
     this.app = undefined;
     this.windowsByPage.clear();
@@ -269,7 +295,7 @@ export class ElectronSurface {
     let timer: NodeJS.Timeout | undefined;
     const closed = app.close().then(() => true, () => false);
     const timedOut = new Promise<false>((resolve) => {
-      timer = setTimeout(() => resolve(false), Math.max(1, Math.min(budget.timeoutMs, 10_000)));
+      timer = setTimeout(() => resolve(false), Math.max(1, Math.min(budget.timeoutMs, graceMs)));
     });
     try {
       // The process is read only for the kill: Playwright refuses it for an app that has already quit.
@@ -280,19 +306,23 @@ export class ElectronSurface {
   }
 
   /** `app.open()` and `app.restart()`: quits the app if it runs and launches it again on the attempt's app data. */
-  async restart(operation: OperationContext): Promise<void> {
-    await this.quit({ timeoutMs: Math.min(operation.timeoutMs, 10_000) });
-    await this.launch(operation);
+  restart(operation: OperationContext): Promise<void> {
+    return this.lifecycle(async () => {
+      await this.quit(operation, RESTART_CLOSE_MS);
+      await this.launch(operation);
+    });
   }
 
   /** `app.clearState()`: quits the app, empties its data, and launches it again. */
-  async reset(operation: OperationContext): Promise<void> {
-    await this.quit({ timeoutMs: Math.min(operation.timeoutMs, 10_000) });
-    if (this.userDataDir !== undefined) {
-      rmSync(this.userDataDir, { recursive: true, force: true });
-      mkdirSync(this.userDataDir, { recursive: true });
-    }
-    await this.launch(operation);
+  reset(operation: OperationContext): Promise<void> {
+    return this.lifecycle(async () => {
+      await this.quit(operation, DISCARD_CLOSE_MS);
+      if (this.userDataDir !== undefined) {
+        rmSync(this.userDataDir, { recursive: true, force: true });
+        mkdirSync(this.userDataDir, { recursive: true });
+      }
+      await this.launch(operation);
+    });
   }
 
   private launchEnv(): Record<string, string> {
@@ -348,7 +378,7 @@ export class ElectronSurface {
       this.track(app, first);
       await raceAbort(() => first.waitForLoadState('domcontentloaded', { timeout: left() }), operation.signal, 'waiting for the first window to load');
     } catch (cause) {
-      await this.quit({ timeoutMs: 5_000 });
+      await this.quit({ timeoutMs: 5_000 }, DISCARD_CLOSE_MS);
       if (cause instanceof EngineError) throw cause;
       throw new EngineError('OPERATION_TIMEOUT', `the app opened no window within ${timeout}ms`, { retryable: false, cause });
     }
@@ -376,6 +406,11 @@ export class ElectronSurface {
     this.shown ??= window;
     page.on('console', (message) => this.attempt?.appLog({ source: 'console', level: levelOf(message.type()), text: message.text() }));
     page.on('pageerror', (error) => this.attempt?.appLog({ source: 'error', level: 'error', text: error.message }));
+    // A page with a dialog listener is not auto-dismissed: the dialog is dismissed here, and the log says the app asked.
+    page.on('dialog', (dialog) => {
+      this.attempt?.appLog({ source: 'error', level: 'error', text: `unhandled ${dialog.type()} dialog dismissed: ${dialog.message()}` });
+      void dialog.dismiss().catch(() => undefined);
+    });
     page.on('framenavigated', (frame) => {
       if (frame === page.mainFrame()) {
         this.worlds.delete(page);
@@ -388,14 +423,19 @@ export class ElectronSurface {
     });
   }
 
-  /** The open windows, in the order they opened. */
-  private openWindows(): AppWindow[] {
-    return [...this.windowsByPage.values()].filter((window) => !window.page.isClosed()).toSorted((a, b) => a.serial - b.serial);
+  /** Whether a window is one the app shows its user: open, and not an inspector the app's own DevTools opened. */
+  private isOpen(window: AppWindow): boolean {
+    return !window.page.isClosed() && !window.page.url().startsWith('devtools://');
   }
 
-  /** The window `screen` and the agent read: the one chosen, else the newest still open. */
+  /** The open windows, in the order they opened. A `WebContentsView` is a page of its own and counts as a window. */
+  private openWindows(): AppWindow[] {
+    return [...this.windowsByPage.values()].filter((window) => this.isOpen(window)).toSorted((a, b) => a.serial - b.serial);
+  }
+
+  /** The window `screen` and the agent read: the one chosen, else the first the app opened; once that one closes, the newest still open. */
   private current(): AppWindow | undefined {
-    if (this.shown !== undefined && !this.shown.page.isClosed()) return this.shown;
+    if (this.shown !== undefined && this.isOpen(this.shown)) return this.shown;
     this.shown = this.openWindows().at(-1);
     return this.shown;
   }
@@ -769,8 +809,7 @@ export class ElectronSurface {
           const point = await this.actionablePoint(window, backendNodeId, operation, true, deadline);
           await commit(() => mouse.move(point.x, point.y));
           await commit(() => mouse.down());
-          await sleep(action.durationMs ?? LONG_PRESS_MS, operation.signal);
-          await mouse.up();
+          await this.hold(window, action.durationMs ?? LONG_PRESS_MS, operation, open);
           return;
         }
         case 'focus':
@@ -810,8 +849,10 @@ export class ElectronSurface {
           if (now === want) return;
           const point = await this.actionablePoint(window, backendNodeId, operation, true, deadline);
           await commit(() => mouse.click(point.x, point.y));
-          if ((await this.callOn<boolean | null>(window, backendNodeId, READ_CHECKED)) !== want) {
-            throw notActionable(`clicking node ${backendNodeId} did not ${action.kind} it`);
+          // A custom widget can set its state in a later task: the state is polled until the deadline, as the checks before the click are.
+          while ((await this.callOn<boolean | null>(window, backendNodeId, READ_CHECKED)) !== want) {
+            if (Date.now() >= deadline) throw notActionable(`clicking node ${backendNodeId} did not ${action.kind} it`);
+            await sleep(Math.min(50, Math.max(0, deadline - Date.now())), operation.signal);
           }
           return;
         }
@@ -819,7 +860,8 @@ export class ElectronSurface {
           // A key the keyboard cannot send is refused before focus moves.
           const key = playwrightKey(action.key);
           await this.waitReady(window, backendNodeId, operation, CHECK_CONNECTED, deadline);
-          if (!(await commit(() => this.callOn<boolean>(window, backendNodeId, FOCUS)))) throw lostFocus(backendNodeId);
+          // The key goes to what holds focus after the node is focused, as on the web: a node that cannot take focus (a plain div) leaves it where it was.
+          await commit(() => this.callOn<boolean>(window, backendNodeId, FOCUS));
           await commit(() => keyboard.press(key));
           return;
         }
@@ -880,6 +922,21 @@ export class ElectronSurface {
       }
     });
     await this.settle(operation);
+  }
+
+  /**
+   * Holds a pressed button for `durationMs`, never past the operation's end,
+   * and releases it whatever happens: a release that waited for a press
+   * longer than its operation would land on whatever control the next action
+   * leaves the pointer over.
+   */
+  private async hold(window: AppWindow, durationMs: number, operation: OperationContext, open: InputGate): Promise<void> {
+    try {
+      await sleep(Math.min(durationMs, open.remainingMs()), operation.signal);
+    } finally {
+      await window.page.mouse.up();
+    }
+    open();
   }
 
   /** Waits until a page-side check passes, for actions that need no point. */
@@ -949,8 +1006,7 @@ export class ElectronSurface {
         case 'longPress':
           await mouse.move(at.x, at.y);
           await mouse.down();
-          await sleep(action.durationMs ?? LONG_PRESS_MS, operation.signal);
-          await mouse.up();
+          await this.hold(window, action.durationMs ?? LONG_PRESS_MS, operation, open);
           return;
         case 'dragTo':
           await this.drag(window, at, whole(action.target), open);
@@ -1211,7 +1267,8 @@ const HIT_TEST = `function (x, y) { ${ELEMENT}
   const root = element.getRootNode();
   let hit = (typeof root.elementFromPoint === 'function' ? root : document).elementFromPoint(x, y);
   if (!hit) return { ok: false, reason: 'its centre is outside the window' };
-  if (hit === element || element.contains(hit)) return { ok: true };
+  // Walk up from the hit through slots, parents, and shadow hosts: Node.contains stops at a slot and a shadow root.
+  for (let at = hit; at; at = at.assignedSlot || at.parentNode || at.host) if (at === element) return { ok: true };
   if (hit.tagName === 'LABEL' && (hit.control === element || hit.contains(element))) return { ok: true };
   const what = hit.tagName.toLowerCase() + (hit.id ? '#' + hit.id : '');
   return { ok: false, reason: 'another element (' + what + ') would receive the click' };
@@ -1303,10 +1360,14 @@ const READ_CHECKED = `function () { ${ELEMENT}
   return null;
 }`;
 
-/** The index of the option `wanted` names, or a reason it cannot be chosen: absent, or disabled (:disabled covers one a disabled group holds). */
+/** The index of the option `wanted` names (a label over every option first, then the text), or a reason it cannot be chosen: absent, or disabled (:disabled covers one a disabled group holds). */
 const FIND_OPTION = `const options = Array.from(element.options);
-  const index = options.findIndex((option, at) =>
-    wanted.index !== undefined ? at === wanted.index : wanted.value !== undefined ? option.value === wanted.value : option.label === wanted.label || option.text.trim() === wanted.label);
+  const byLabel = options.findIndex((option) => option.label === wanted.label);
+  const index = wanted.index !== undefined
+    ? (wanted.index >= 0 && wanted.index < options.length ? wanted.index : -1)
+    : wanted.value !== undefined
+      ? options.findIndex((option) => option.value === wanted.value)
+      : byLabel >= 0 ? byLabel : options.findIndex((option) => option.text.trim() === wanted.label);
   if (index < 0) return { ok: false, reason: 'no option matches ' + JSON.stringify(wanted) + '; the options are ' + options.map((option) => JSON.stringify(option.label)).join(', ') };
   if (options[index].matches(':disabled')) return { ok: false, reason: 'option ' + JSON.stringify(options[index].label) + ' is disabled' };`;
 

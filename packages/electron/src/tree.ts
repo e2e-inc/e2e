@@ -106,18 +106,19 @@ export interface Projection {
 const TREE_ATTRIBUTES = new Set(['type', 'autocomplete', 'href', 'role', 'placeholder']);
 
 /**
- * Chromium's own role names mapped to the ARIA roles `getByRole` takes, as
- * Playwright names them. A role missing here and spelled with a capital is
- * Chromium-internal and reads as a generic container.
+ * Chromium's own role names mapped to the roles of the engine contract's
+ * vocabulary, where an image is `image` (`getByRole('img')` is that role's
+ * alias, resolved before it reaches the tree). A role missing here and spelled
+ * with a capital is Chromium-internal and reads as a generic container.
  */
 const CHROMIUM_ROLES: Readonly<Record<string, string>> = {
-  image: 'img',
+  image: 'image',
   MenuListPopup: 'listbox',
   MenuListOption: 'option',
   Iframe: 'iframe',
   IframePresentational: 'iframe',
   DisclosureTriangle: 'button',
-  Canvas: 'img',
+  Canvas: 'image',
   Video: 'generic',
   Audio: 'generic',
 };
@@ -250,6 +251,9 @@ interface Draft {
   children: Draft[];
   /** A text run: its text folds into the parent when it is the parent's only content. */
   isText: boolean;
+  /** A run's source had white space before or after its text, which joining the runs keeps. */
+  spaceBefore?: boolean;
+  spaceAfter?: boolean;
   /** The node's position in the DOM snapshot, its document order. */
   order: number;
 }
@@ -296,20 +300,38 @@ function collapse(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
-/** The text a node reads as: its text runs, and in node mode its descendants' too. */
-function textOf(draft: Draft, deep: boolean): string {
-  const parts: string[] = [];
+/** Whether `next` starts below `previous`, which with no white space between them means a block boundary, not inline markup. */
+function startsNewLine(previous: Draft, next: Draft): boolean {
+  const { rect: above } = previous;
+  const { rect: below } = next;
+  return above !== undefined && below !== undefined && below.y >= above.y + above.height - 0.5;
+}
+
+/**
+ * The text a node reads as: its text runs, and in node mode its descendants'
+ * too. Runs join as the source has them: with white space where the source had
+ * some or where a block boundary falls, and with none between inline markup
+ * (`<span>$</span><span>10</span>` reads `$10`).
+ */
+function textOf(draft: Draft, deep: boolean, gap: (from: number, to: number) => boolean): string {
+  const parts: Draft[] = [];
   const walk = (node: Draft): void => {
     for (const child of node.children) {
-      if (child.isText) parts.push(child.text ?? '');
+      if (child.isText) parts.push(child);
       else if (deep) {
-        if (child.children.length === 0 && child.text !== undefined) parts.push(child.text);
+        if (child.children.length === 0 && child.text !== undefined) parts.push(child);
         else walk(child);
       }
     }
   };
   walk(draft);
-  return collapse(parts.join(' '));
+  let joined = '';
+  parts.forEach((part, at) => {
+    const previous = parts[at - 1];
+    if (previous !== undefined && (previous.spaceAfter === true || part.spaceBefore === true || gap(previous.order, part.order) || startsNewLine(previous, part))) joined += ' ';
+    joined += part.text ?? '';
+  });
+  return collapse(joined);
 }
 
 /**
@@ -327,6 +349,13 @@ export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocume
   let truncated = false;
   const drafted = new Map<number, Draft>();
   const domIndex = new Map((document.nodes.backendNodeId ?? []).map((id, index) => [id, index]));
+  const nodeTypes = document.nodes.nodeType ?? [];
+  const nodeValues = document.nodes.nodeValue ?? [];
+  const domValue = (index: number | undefined): string | undefined => (index !== undefined && nodeTypes[index] === 3 ? strings[nodeValues[index]!] : undefined);
+  // Source white space between two runs (a text node of nothing else) reads as a space between them, as it renders.
+  const blanks: number[] = [];
+  nodeTypes.forEach((type, index) => blanks.push((blanks[index - 1] ?? 0) + (type === 3 && /^\s+$/.test(strings[nodeValues[index]!] ?? '') ? 1 : 0)));
+  const gap = (from: number, to: number): boolean => from >= 0 && to > from && (blanks[to - 1] ?? 0) - (blanks[from] ?? 0) > 0;
 
   const rectOf = (facts: DomFacts | undefined): Draft['rect'] => {
     const box = facts?.bounds;
@@ -354,7 +383,9 @@ export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocume
       }
       kept += 1;
       const rect = rectOf(facts);
-      const run: Draft = { id: options.idOf(backend), text: bound(text, OBSERVED_TEXT_LIMIT, mode), states: rect === undefined || rect.width === 0 || rect.height === 0 ? { hidden: true } : {}, ...(rect === undefined ? {} : { rect }), children: [], isText: true, order: domIndex.get(backend) ?? -1 };
+      // The white space comes from the text node's own source: Chromium's name for a run trims what the next element's run follows.
+      const source = domValue(domIndex.get(backend)) ?? stringOf(node.name) ?? '';
+      const run: Draft = { id: options.idOf(backend), text: bound(text, OBSERVED_TEXT_LIMIT, mode), states: rect === undefined || rect.width === 0 || rect.height === 0 ? { hidden: true } : {}, ...(rect === undefined ? {} : { rect }), children: [], isText: true, spaceBefore: /^\s/.test(source), spaceAfter: /\s$/.test(source), order: domIndex.get(backend) ?? -1 };
       drafted.set(backend, run);
       return [run];
     }
@@ -440,7 +471,7 @@ export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocume
     // children they stay nodes, and an observation does not repeat them on the node; a locator reads all of it.
     const onlyText = draft.children.length > 0 && draft.children.every((child) => child.isText);
     if (!secure && (mode === 'node' || onlyText)) {
-      const text = textOf(draft, mode === 'node');
+      const text = textOf(draft, mode === 'node', gap);
       if (text !== '') draft.text = bound(text, OBSERVED_TEXT_LIMIT, mode);
     }
     // A locator keeps several runs as nodes, so an exact text query finds each one (`<span>Price</span> <span>$10</span>`).
@@ -465,6 +496,7 @@ export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocume
   const absentIds = new Set(options.keep ?? []);
   if (mode === 'node') for (const [backend, facts] of dom) if (facts.attributes[testIdAttribute.toLowerCase()] !== undefined) absentIds.add(backend);
   const absent = [...absentIds].filter((backend) => !drafted.has(backend) && dom.has(backend) && domIndex.has(backend)).toSorted((a, b) => domIndex.get(a)! - domIndex.get(b)!);
+  const rendered = new Set(document.layout.nodeIndex);
   for (const backend of absent) {
     const facts = dom.get(backend)!;
     const order = domIndex.get(backend)!;
@@ -473,22 +505,43 @@ export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocume
     const field = facts.nodeName === 'INPUT' || facts.nodeName === 'TEXTAREA';
     if (secure) delete attributes['value'];
     const testId = attributes[testIdAttribute.toLowerCase()];
-    const text = secure || field ? '' : domText(document, strings, order);
     const value = secure || !field ? undefined : ((facts.nodeName === 'INPUT' ? facts.inputValue : facts.textValue) ?? '');
+    const inside = subtree(document, order);
+    // Hidden as the main path reads it, from the layout box: an inline element Chromium leaves out of the tree has one,
+    // and so does what a `display: contents` wrapper holds, though the wrapper has none of its own.
+    const box = facts.bounds;
+    const hidden = (box === undefined || box.length < 4 || box[2] === 0 || box[3] === 0) && ![...inside].some((at) => at !== order && rendered.has(at));
+    const siblings = ancestorOf(order, drafted, document)?.children ?? children;
     const node: Draft = {
       id: options.idOf(backend),
       role: 'generic',
-      states: { hidden: true, ...(secure ? { secure: true } : mode === 'node' ? { empty: field ? value === '' : !facts.hasText } : {}) },
+      states: { ...(hidden ? { hidden: true } : {}), ...(secure ? { secure: true } : {}) },
       children: [],
       isText: false,
       order,
       ...(secure ? { inputPurpose: 'password' as const } : {}),
       ...(testId === undefined ? {} : { testId }),
-      ...(text === '' ? {} : { text: bound(text, OBSERVED_TEXT_LIMIT, mode) }),
       ...(value === undefined ? {} : { value: bound(value, OBSERVED_TEXT_LIMIT, mode) }),
       ...(Object.keys(attributes).length === 0 ? {} : { attributes }),
     };
-    const siblings = ancestorOf(order, drafted, document)?.children ?? children;
+    const rect = rectOf(facts);
+    if (rect !== undefined) node.rect = rect;
+    // The text runs the tree already holds for this element move under it, so its text is not read twice; with none
+    // (nothing rendered), the text comes from the DOM.
+    if (!secure && !field) {
+      const runs = siblings.filter((sibling) => sibling.isText && inside.has(sibling.order));
+      if (runs.length > 0) {
+        for (const run of runs) siblings.splice(siblings.indexOf(run), 1);
+        node.children = runs;
+        const text = textOf(node, false, gap);
+        if (text !== '') node.text = bound(text, OBSERVED_TEXT_LIMIT, mode);
+        if (mode === 'tree' || runs.length === 1) node.children = [];
+      } else {
+        const text = domText(document, strings, order);
+        if (text !== '') node.text = bound(text, OBSERVED_TEXT_LIMIT, mode);
+      }
+    }
+    if (mode === 'node' && !secure) node.states['empty'] = field ? value === '' : !facts.hasText;
     const at = siblings.findIndex((sibling) => sibling.order > order);
     siblings.splice(at < 0 ? siblings.length : at, 0, node);
     drafted.set(backend, node);
@@ -504,8 +557,8 @@ export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocume
   return { root, truncated };
 }
 
-/** Elements a screenshot paints over: a secure field's value, or a nested document the engine does not read. */
-const MASKED_TAGS = new Set(['IFRAME', 'FRAME', 'WEBVIEW']);
+/** Elements a screenshot paints over besides a secure field's value: the nested documents the engine does not read. */
+export const MASKED_TAGS: readonly string[] = ['IFRAME', 'FRAME', 'WEBVIEW', 'EMBED', 'OBJECT'];
 
 /**
  * How many rendered elements a screenshot must paint over and a selector
@@ -535,7 +588,7 @@ export function unmaskableCount(document: SnapshotDocument, strings: readonly st
     for (let at = 0; at + 1 < pairs.length; at += 2) {
       if ((strings[pairs[at]!] ?? '').toLowerCase() === 'type' && (strings[pairs[at + 1]!] ?? '').toLowerCase() === 'password') password = true;
     }
-    if (!(name === 'INPUT' && password) && !MASKED_TAGS.has(name)) return;
+    if (!(name === 'INPUT' && password) && !MASKED_TAGS.includes(name)) return;
     for (let at: number | undefined = node; at !== undefined && at >= 0; at = parents[at]) {
       if (closed.has(at)) {
         count += 1;
@@ -557,17 +610,20 @@ function ancestorOf(index: number, drafted: ReadonlyMap<number, Draft>, document
   return undefined;
 }
 
-/** The text content of the node at `index`, white space collapsed: its descendant text nodes, which follow it in the snapshot's document order. */
-function domText(document: SnapshotDocument, strings: readonly string[], index: number): string {
+/** The snapshot indices inside the node at `index`, itself included: its descendants follow it in the snapshot's document order. */
+function subtree(document: SnapshotDocument, index: number): Set<number> {
   const parents = document.nodes.parentIndex ?? [];
+  const inside = new Set([index]);
+  for (let at = index + 1; at < parents.length && inside.has(parents[at] ?? -1); at += 1) inside.add(at);
+  return inside;
+}
+
+/** The text content of the node at `index`, white space collapsed: its descendant text nodes. */
+function domText(document: SnapshotDocument, strings: readonly string[], index: number): string {
   const types = document.nodes.nodeType ?? [];
   const values = document.nodes.nodeValue ?? [];
-  const inside = new Set([index]);
   const parts: string[] = [];
-  for (let at = index + 1; at < parents.length && inside.has(parents[at] ?? -1); at += 1) {
-    inside.add(at);
-    if (types[at] === 3) parts.push(strings[values[at]!] ?? '');
-  }
+  for (const at of subtree(document, index)) if (types[at] === 3) parts.push(strings[values[at]!] ?? '');
   return collapse(parts.join(''));
 }
 
