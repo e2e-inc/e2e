@@ -37,6 +37,17 @@ test.describe('permission prompt', () => {
   });
 });
 
+// `permissions: 'all'` grants the microphone before the launch, so the
+// request resolves without a system dialog: a dialog left up would keep the
+// scenario on its prompt and fail the check.
+test('permissions all grants the microphone without a system dialog', async ({ app, device, screen }) => {
+  await device.setPermission('microphone', 'reset');
+  await device.openApp('dev.e2e.benchmark', { relaunch: true, permissions: 'all' });
+  await openScenario({ app, device, screen }, 'Permission Prompt');
+  await screen.getByTestId('request-permission').tap();
+  await expect(screen.getByTestId('success-message')).toHaveText('Microphone enabled');
+});
+
 // Every step auto-focuses its field and keeps the keyboard up on Return
 // (`submitBehavior="submit"`), so the keyboard covers Continue from the start
 // and `device.dismissKeyboard()` is the way past it: Android hides the
@@ -74,6 +85,16 @@ test('isKeyboardShown follows the keyboard up and through a dismissal', { platfo
   await expect.poll(() => device.isKeyboardShown()).toBe(true);
   await device.dismissKeyboard();
   await expect.poll(() => device.isKeyboardShown()).toBe(false);
+});
+
+// The benchmark is a release build with no shake handler, so nothing on screen
+// answers a shake. This checks only that the simulator and the emulator take
+// the command without an error and that the screen reads afterwards; that a
+// shake reaches an app is proven outside this suite, on an app that counts them.
+test('a shake is sent without an error and leaves the screen readable', async ({ app, device, screen }) => {
+  await openScenario({ app, device, screen }, 'Sequential Onboarding');
+  await device.shake();
+  await expect(screen.getByTestId('email-input')).toBeVisible();
 });
 
 test('onboarding rejects a malformed email before advancing', async ({ app, device, screen }) => {

@@ -82,7 +82,10 @@ describe('registration', () => {
       'test options has unknown key "timout"; did you mean "timeout"?',
     );
     await expect(register(() => test('x', { retry: 2 } as never, noop))).rejects.toThrow(
-      'test options has unknown key "retry"; expected one of timeout, retries, tags, skip, fail, only, platforms, requires, session, agentContext, agent, trace, video',
+      'test options has unknown key "retry"; expected one of timeout, retries, tags, skip, fail, only, platforms, session, agentContext, agent, trace, video',
+    );
+    await expect(register(() => test('x', { requires: ['browser'] } as never, noop))).rejects.toThrow(
+      "test options: requires was removed; scope the test to targets with platforms, e.g. platforms: ['web']",
     );
     await expect(register(() => test.describe('group', { searial: true } as never, () => {}))).rejects.toThrow(
       'describe options has unknown key "searial"; did you mean "serial"?',
@@ -460,6 +463,26 @@ describe('registration', () => {
     expect(() => test.fixme('outside', noop)).toThrow(/^test\.fixme\(\) can only be called while a test module is being collected/);
   });
 
+  it('registers test.todo(title) as a todo skip and rejects a body or serial registration', async () => {
+    const registration = await collectModule(async () => {
+      test.todo('not yet');
+    });
+    expect(registration.tests.map((item) => [item.title, item.mode, item.options])).toEqual([
+      ['not yet', 'todo', { skip: 'todo' }],
+    ]);
+    await expect(
+      collectModule(async () => {
+        test.describe('unit', { serial: true }, () => test.todo('member'));
+      }),
+    ).rejects.toThrow('test.todo() cannot be used inside a serial group');
+    await expect(
+      collectModule(async () => {
+        Reflect.apply(test.todo, test, ['has a body', noop]);
+      }),
+    ).rejects.toThrow('test.todo() takes a title only; register a test with a body through test.skip(title, fn) or test.fixme(title, fn)');
+    expect(() => test.todo('outside')).toThrow(/^test\.todo\(\) can only be called while a test module is being collected/);
+  });
+
   it('rejects test.skip(title, fn) in a serial group, naming test.skip()', async () => {
     await expect(
       collectModule(async () => {
@@ -824,8 +847,8 @@ describe('test.extend', () => {
     expect(() => test.extend({ a: needs('a') } as never)).not.toThrow();
     const withPage = test.extend<{ page: string }>({ page: [fixture, { scope: 'test' }] });
     expect(() => withPage.extend({ cache: [needs('page'), { scope: 'worker' }] } as never)).toThrow(/worker fixture "cache" names "page", a test fixture/);
-    // A plain function may extend an engine's worker fixture of its name, so its scope waits for the target.
-    expect(() => test.extend({ page: fixture }).extend({ cache: [needs('page'), { scope: 'worker' }] } as never)).not.toThrow();
+    // A plain function is a test fixture, even if it extends an engine's worker fixture of its name.
+    expect(() => test.extend({ page: fixture }).extend({ cache: [needs('page'), { scope: 'worker' }] } as never)).toThrow(/worker fixture "cache" names "page", a test fixture/);
     expect(() => test.extend({ cache: [needs('session'), { scope: 'worker' }] } as never)).toThrow(/worker fixture "cache" names "session", a test fixture/);
     // A name the chain lacks may be an engine's: left for the target to decide.
     expect(() => test.extend({ cache: [needs('device'), { scope: 'worker' }] } as never)).not.toThrow();
@@ -873,17 +896,14 @@ describe('test.extend', () => {
       extended('extends', noop);
     });
     expect(registration.tests[0]!.fixtures.map(({ name, layer }) => [name, layer])).toEqual([['app', 0], ['platform', 0], ['app', 1]]);
-    // `app` follows the engine, extended or not: a worker fixture that names it waits for the target.
-    expect(() => extended.extend({ seeded: [needs('app'), { scope: 'worker' }] } as never)).not.toThrow();
-    // A core fixture whose scope is the same on every engine keeps it.
-    expect(() => test.extend({ agent: [needs('agent'), { scope: 'worker' }] } as never)).toThrow(
-      /fixture "agent" is declared with scope 'worker', but it extends the built-in "agent", a test fixture: a fixture that extends another keeps its scope/,
-    );
-    expect(() => test.extend({ platform: [needs('platform'), { scope: 'test' }] } as never)).toThrow(/extends the built-in "platform", a worker fixture/);
+    // An override without a scope is a test fixture, so a worker fixture can't name it.
+    expect(() => extended.extend({ seeded: [needs('app'), { scope: 'worker' }] } as never)).toThrow(/worker fixture "seeded" names "app", a test fixture/);
+    // A worker-scoped override can't name a built-in that is a test fixture on every engine, itself included.
+    expect(() => test.extend({ agent: [needs('agent'), { scope: 'worker' }] } as never)).toThrow(/worker fixture "agent" names "agent", a test fixture/);
+    // A test-scoped override of a worker fixture is fine: a test fixture sees worker fixtures.
+    expect(() => test.extend({ platform: [needs('platform'), { scope: 'test' }] } as never)).not.toThrow();
     const withWorkspace = test.extend({ workspace: [fixture, { scope: 'worker' }] } as never);
-    expect(() => withWorkspace.extend({ workspace: [needs('workspace'), { scope: 'test' }] } as never)).toThrow(
-      /extends the fixture "workspace" of an earlier test\.extend\(\), a worker fixture/,
-    );
+    expect(() => withWorkspace.extend({ workspace: [needs('workspace'), { scope: 'test' }] } as never)).not.toThrow();
   });
 });
 

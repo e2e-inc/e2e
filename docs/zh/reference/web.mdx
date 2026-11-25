@@ -57,9 +57,9 @@ web({ viewport: { width: 390, height: 844 }, locale: 'de-DE' });
 | [`colorScheme`](#media-emulation) | `'light' \| 'dark' \| 'no-preference'` | 浏览器自身的值 |
 | [`reducedMotion`](#media-emulation) | `'reduce' \| 'no-preference'` | 浏览器自身的值 |
 | [`initScripts`](#init-scripts) | `WebInitScript[]` | - |
+| [`webmcp`](#webmcp) | `boolean` | `false` |
 
 - `web()` 测试目标需要 `app.url`，且拒绝设备配置键（`bundleId`、`appPath`、`launchArguments`）。它的 `app.permissions` 只接受 `'grant'`，且权限名称必须受浏览器支持；参阅 [`permissions`](/reference/config#permissions)。
-- 带有 `app.url` 的测试目标是 `browser` 测试目标，因此 `requires: ['browser']` 会选中网页端测试目标。
 - 带 JSDoc 的完整声明见类型章节下的 [`WebOptions`](#weboptions)。
 
 | 抛出错误 | 触发条件 |
@@ -367,7 +367,7 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 - 应用通过 `target="_blank"` 链接或 `window.open` 打开的标签页会在后台打开：活动标签页保持不变，直到 `waitForPopup` 或 `activate` 将其他标签页设为活动。参阅[标签页](#tabs)。
 - 除 `locator` 和 `frameLocator` 外，每个 `browser` 调用都会记录为 `browser.<method>` 步骤。这两个方法只构造定位器，不访问页面；对定位器执行的操作或断言才是步骤。
 - 相对 URL 基于测试目标的 `app.url` 解析，否则触发 `APP_URL_REQUIRED`。
-- 在也会运行于其他平台的测试套件中声明 `requires: ['browser']`。
+- 在也会运行于其他平台的测试套件中声明 `platforms: ['web']`。
 - `expect(browser)` 返回引擎附加的 `BrowserExpectation`：`toHaveURL`、`toHaveTitle` 和 `toHaveClass`。参阅[浏览器匹配器](/reference/expect#browser-matchers)。
 
 | 成员 | 返回值 |
@@ -400,6 +400,7 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 | [`waitForDownloads`](#waitfordownloads) | `Promise<{ path, absolutePath, … }[]>` |
 | [`keyboard`](#keyboard) | `{ press, down, up, type }` |
 | [`mouse`](#mouse) | `{ move, wheel, down, up }` |
+| [`webmcp`](#webmcp) | `{ tools, callTool }` |
 
 [配置](/reference/config)设置各成员的预算：
 
@@ -407,7 +408,7 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 - `waitForURL`：[`assertionTimeout`](/reference/config#assertiontimeout)。
 - 其他所有成员：[`actionTimeout`](/reference/config#actiontimeout)。`locator` 和 `frameLocator` 不访问页面，也不占用预算。
 
-`{ timeout }` 选项可覆盖 `goto`、`reload`、`back`、`forward`、`waitForResponse`、`waitForPopup`、`waitForDownload` 和 `waitForDownloads` 的预算，但受测试截止时间限制（`afterEach` 中为 `cleanupTimeout`）；`0` 表示等待到该截止时间。`url`、`title`、`evaluate`、`addInitScript`、`route`、`unroute`、`unrouteAll`、`cookies`、`setCookies`、`clearCookies`、`setViewport`、`emulateMedia`、`onDialog`、`newTab`、`BrowserTab` 方法、`keyboard.*` 和 `mouse.*` 不接受覆盖值。
+`{ timeout }` 选项可覆盖 `goto`、`reload`、`back`、`forward`、`waitForResponse`、`waitForPopup`、`waitForDownload` 和 `waitForDownloads` 的预算，但受测试截止时间限制（`afterEach` 中为 `cleanupTimeout`）；`0` 表示等待到该截止时间。`url`、`title`、`evaluate`、`addInitScript`、`route`、`unroute`、`unrouteAll`、`cookies`、`setCookies`、`clearCookies`、`setViewport`、`emulateMedia`、`onDialog`、`newTab`、`BrowserTab` 方法、`keyboard.*` 和 `mouse.*`、`webmcp.*` 不接受覆盖值。
 
 #### `goto`
 
@@ -452,16 +453,19 @@ const title = await browser.title();
 等待当前 URL 匹配。它在开始后的 0、20 和 50 毫秒读取 URL，此后从开始时间起每 100 毫秒读取一次，与 `expect(browser).toHaveURL` 的轮询方式相同。
 
 ```ts
+await browser.waitForURL('**/checkout');
 await browser.waitForURL(/\/orders\/\d+$/, { timeout: 15_000 });
 ```
 
-- 相对字符串基于基础 URL 解析，并在规范化后精确匹配。
+- 字符串是 glob，按 Playwright 读取 URL glob 的方式解读：`*` 在单个路径段内匹配，`**` 可跨越 `/` 匹配，`{a,b}` 匹配其中任意一项，`\` 转义下一个字符。`?` 按字面匹配，因此查询字符串按原样读取，不含通配符的字符串与该 URL 精确匹配。除了以 `*` 或 `about:` 等协议开头的 glob 外，glob 都基于基础 URL 解析，且解析后的 glob 的协议和主机部分不区分大小写。glob 中的非 ASCII 字符和空格按浏览器编码后的 URL 匹配。空字符串匹配任意 URL。
+- 与 Playwright 一样，`expect(browser).toHaveURL` 将 `*` 和 `{` 按字面读取；[`route`](#route)、`unroute` 和 `waitForResponse` 读取与此等待相同的 glob。
 - `RegExp` 匹配完整 URL。
 
 | 抛出错误 | 触发条件 |
 | --- | --- |
-| `INVALID_ARGUMENT` | 模式不是字符串或 `RegExp`（例如谓词函数），或使用了 `timeout` 之外的选项，例如 Playwright 的 `waitUntil`。 |
+| `INVALID_ARGUMENT` | 模式不是字符串或 `RegExp`（例如谓词函数），glob 中的 `{` 嵌套，或 `{`、`}` 未成对，或使用了 `timeout` 之外的选项，例如 Playwright 的 `waitUntil`。 |
 | `ASSERTION_FAILED` | URL 在超时前未匹配。 |
+| `APP_URL_REQUIRED` | 在没有 `app.url` 的目标上使用相对模式。 |
 
 #### `locator`
 
@@ -552,7 +556,7 @@ await browser.route({ method: 'POST', url: '**/api/orders' }, async (route) => {
 
 `route.fetch()` 在操作超时范围内返回上游的 `{ url, status, headers, body(), text(), json() }`，如果其源应接收配置的请求头，也会携带这些请求头，但不会决定路由的处理方式。它不会跟随重定向，因为重定向可能绕过导航规则。
 
-- 模式为字符串或 `RegExp`，均针对完整 URL 匹配。在字符串中，`*` 匹配路径段内的内容，`**` 可跨越 `/`，`?` 匹配任意单个字符，`\` 转义下一个字符。`unroute` 和 `waitForResponse` 接受相同模式。
+- 模式为字符串或 `RegExp`，读取方式与 [`waitForURL`](#waitforurl) 相同：字符串是 Playwright 语法的 glob（`?` 按字面匹配，`{a,b}` 匹配其中任意一项），基于基础 URL 解析，因此不含通配符的字符串是精确 URL。`unroute` 和 `waitForResponse` 接受相同模式。
 - `{ method, url }` 也可以将模式限定为一个 HTTP 方法。`method` 不区分大小写，`url` 保持上述字符串或 `RegExp` 语法，`unroute` 和 `waitForResponse` 接受相同形式。
 - 方法不匹配的路由会让位给更早注册的路由，然后交给网络，就像 URL 未匹配一样。
 - 方法模式只匹配该方法：`GET` 路由不会响应 `HEAD`。
@@ -566,7 +570,8 @@ await browser.route({ method: 'POST', url: '**/api/orders' }, async (route) => {
 
 | 抛出错误 | 触发条件 |
 | --- | --- |
-| `INVALID_ARGUMENT` | 模式不是字符串、`RegExp` 或 `{ method, url }`；`{ method, url }` 模式缺少某个键或包含多余的键，`method` 不是 HTTP 方法，或 `url` 不是字符串或 `RegExp`。另外，决定操作不接受的选项（Playwright 的 `abort(errorCode)`、像 `bodyy` 这样拼错的键）会中止请求，并让下一个步骤失败。 |
+| `INVALID_ARGUMENT` | 模式不是字符串、`RegExp` 或 `{ method, url }`；glob 中的 `{` 嵌套，或 `{`、`}` 未成对；`{ method, url }` 模式缺少某个键或包含多余的键，`method` 不是 HTTP 方法，或 `url` 不是字符串或 `RegExp`。另外，决定操作不接受的选项（Playwright 的 `abort(errorCode)`、像 `bodyy` 这样拼错的键）会中止请求，并让下一个步骤失败。 |
+| `APP_URL_REQUIRED` | 在没有 `app.url` 的目标上使用相对模式。 |
 | `ACTION_FAILED` | 处理函数作出两次决定或未作决定。 |
 | `POLICY_DENIED` | `continue` URL 使用被禁止的协议。 |
 | `CLEANUP_TIMEOUT` | 处理函数运行时间超过清理预算，导致尝试失败。 |
@@ -679,7 +684,8 @@ expect((await created).status).toBe(201);
 
 | 抛出错误 | 触发条件 |
 | --- | --- |
-| `INVALID_ARGUMENT` | 模式不是字符串、`RegExp` 或 `{ method, url }`；`{ method, url }` 模式缺少某个键或包含多余的键，`method` 不是 HTTP 方法，或 `url` 不是字符串或 `RegExp`。 |
+| `INVALID_ARGUMENT` | 模式不是字符串、`RegExp` 或 `{ method, url }`；glob 中的 `{` 嵌套，或 `{`、`}` 未成对；`{ method, url }` 模式缺少某个键或包含多余的键，`method` 不是 HTTP 方法，或 `url` 不是字符串或 `RegExp`。 |
+| `APP_URL_REQUIRED` | 在没有 `app.url` 的目标上使用相对模式。 |
 | `ACTION_FAILED` | 截止时间内没有匹配项。对于 `body()`、`text()` 和 `json()`：预算耗尽时响应体仍在传输，或浏览器无法读取响应体（未达到声明的 `Content-Length` 就连接重置、请求被页面中止，或浏览器从不保留响应体的重定向），此时抛出错误，而不是返回空字符串。 |
 
 ```ts
@@ -902,6 +908,61 @@ await browser.mouse.up();
 
 各方法说明见 [`Browser`](#browser-interface)，包括 `wheel`。
 
+#### WebMCP
+
+[WebMCP](https://github.com/webmachinelearning/webmcp) 是一个实验性的浏览器 API，页面通过 `document.modelContext`（Firefox 中为 `navigator.modelContext`）注册工具。`browser.webmcp` 列出活动标签页中的页面注册的工具，并在测试代码中直接调用，不经过模型。
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+
+export default {
+  targets: [{ engine: web({ webmcp: true }), app: { url: 'http://localhost:3000' } }],
+} satisfies E2EConfig;
+```
+
+```ts
+const tools = await browser.webmcp.tools();
+expect(tools.map((tool) => tool.name)).toContain('add');
+
+const result = await browser.webmcp.callTool('add', { a: 2, b: 40 });
+expect(result).toEqual({ content: [{ type: 'text', text: '42' }] });
+```
+
+- `web({ webmcp: true })` 会以 `--enable-features=WebMCP` 启动 Chromium，或以 `dom.modelcontext` 首选项启动 Firefox。它默认关闭，因为开启后每个页面都会看到大多数浏览器尚不具备的 API。WebKit 不支持 WebMCP。该选项只适用于引擎自己启动的浏览器：通过 [`connect`](#connect) 或提供方连接的浏览器，需要你自己带上该参数启动。
+- 页面必须是安全上下文，即 `https:` 或 `localhost`，否则没有 `document.modelContext`，两个调用都会以 `UNSUPPORTED_CAPABILITY` 失败。引擎直接询问页面本身，因此通过 `connect` 或提供方连接的浏览器如果启动时未开启 WebMCP，也会以同样的方式失败。
+- `tools()` 返回当前已注册的工具，每个工具包含 `name`、`description`，以及页面提供时的 `inputSchema` 和 `annotations`。没有注册工具的页面返回空列表。顺序由浏览器决定，Chromium 与 Firefox 不同。
+- `callTool(name, input)` 的结果是工具的 `execute` 解析出的值，通常是带有 `content` 数组的对象。`input` 是 JSON 对象；省略或传入 `null` 时，工具收到空对象。带有 `isError: true` 的结果原样返回，工具不返回任何值时结果为 `null`。结果是 JSON，因此工具留为 `undefined` 的属性不会出现在结果中。Chromium 以 JSON 文本传递结果，因此在 Chromium 中，以 JSON 字符串（例如 `'42'`）解析的工具，其结果会是解析后的值。
+- 把页面导航到另一个 URL 的工具会在应答之前结束调用。调用会在新页面加载完成后以 `ACTION_FAILED` 失败，消息会说明工具可能已经执行。超时时仍在运行的工具也会以同样的方式失败。
+- 两者都只覆盖活动标签页的主框架，不包括其中的框架。
+- 名称、描述、schema 和结果都来自页面，应视为不可信输入。
+
+```ts
+/** A tool a page registered through WebMCP, as the page describes it. */
+export interface WebMcpTool {
+  readonly name: string;
+  readonly description: string;
+  /** JSON Schema of the tool's input, when the page gave one. */
+  readonly inputSchema?: JsonValue;
+  /** Hints the page gives about the tool. */
+  readonly annotations?: {
+    /** The tool changes no state. */
+    readonly readOnly?: boolean;
+    /** The tool's output may carry third-party content. */
+    readonly untrustedContent?: boolean;
+    /** The tool takes a consequential action, such as placing an order. */
+    readonly consequential?: boolean;
+  };
+}
+```
+
+| 抛出错误 | 触发条件 |
+| --- | --- |
+| `UNSUPPORTED_CAPABILITY` | 页面没有 WebMCP：浏览器运行时未启用 WebMCP，或页面不是安全上下文。错误消息会说明是哪一种，以及如何解决。 |
+| `ACTION_FAILED` | `callTool`：页面没有注册该名称的工具（消息会列出已注册的工具），工具抛出了错误，或因页面导航或超时，调用在工具应答之前结束。 |
+| `INVALID_ARGUMENT` | `callTool`：`name` 不是非空字符串，`input` 不是 JSON 对象，或工具已运行但返回了 JSON 无法表示的值（`Date`、`BigInt`、`NaN`）。 |
+| `INVALID_CONFIG` | `web({ webmcp: true })` 与 `connect`、浏览器提供方或 WebKit 一起使用。 |
+
 ## 安装浏览器
 
 该包将 `playwright-core` 固定到精确版本，因此引擎始终运行经过测试的 Playwright。应用自身依赖 Playwright 时，会保留自己的副本。只有版本匹配时，两者才共享浏览器缓存。
@@ -1055,6 +1116,8 @@ export interface WebOptions {
   readonly reducedMotion?: WebMedia['reducedMotion'];
   /** Scripts every document runs before the page's own. See [Init scripts](#init-scripts). */
   readonly initScripts?: readonly WebInitScript[];
+  /** Launches Chromium or Firefox with WebMCP, for `browser.webmcp`. See [WebMCP](#webmcp). */
+  readonly webmcp?: boolean;
 }
 ```
 
@@ -1185,6 +1248,13 @@ export interface Browser extends Expectable<BrowserExpectation> {
     down(): Promise<void>;
     /** Releases the primary pointer button. */
     up(): Promise<void>;
+  };
+  /** The tools the active tab's page registers through WebMCP. See [WebMCP](#webmcp). */
+  readonly webmcp: {
+    /** Returns the tools the page has registered now. */
+    tools(): Promise<readonly WebMcpTool[]>;
+    /** Calls one tool and resolves with what its `execute` resolved to. */
+    callTool(name: string, input?: { readonly [key: string]: JsonValue } | null): Promise<JsonValue>;
   };
 }
 ```

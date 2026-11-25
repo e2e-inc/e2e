@@ -11,7 +11,7 @@ import { MAX_TIMER_MS } from '@e2e-dev/core/lib/internal/time';
 import { validateTitle } from '@e2e-dev/core/lib/internal/ids';
 import { realmSlot } from '@e2e-dev/core/lib/internal/realm-slot';
 import { expectedFailureOption, markRunningTestExpectedToFail } from '@e2e-dev/core/lib/internal/expected-failure';
-import { setRunningTestTimeout } from '@e2e-dev/core/lib/internal/test-timeout';
+import { setRunningTestTimeout, slowRunningTest } from '@e2e-dev/core/lib/internal/test-timeout';
 import { fixmeReason, parseModifierCall, skipRunningTest } from '../internal/skip.ts';
 import { formatEachTitle, readRows } from './each.ts';
 import { unknownKeyMessage } from '@e2e-dev/core/lib/internal/options';
@@ -41,8 +41,8 @@ export interface GroupNode {
   readonly serial: boolean;
 }
 
-/** How a test was registered; `fixme` is a skip from `test.fixme(title, fn)`, reported with its own cause. */
-export type TestMode = 'normal' | 'skip' | 'fixme' | 'only';
+/** How a test was registered; `fixme` and `todo` carry their own skip causes. */
+export type TestMode = 'normal' | 'skip' | 'fixme' | 'todo' | 'only';
 
 /**
  * A registered test or hook body. `TestAPI` types what each receives; at run
@@ -373,7 +373,6 @@ const TEST_OPTION_KEYS: readonly string[] = Object.keys({
   fail: true,
   only: true,
   platforms: true,
-  requires: true,
   session: true,
   agentContext: true,
   agent: true,
@@ -387,7 +386,6 @@ const SETUP_OPTION_KEYS: readonly string[] = Object.keys({
   retries: true,
   tags: true,
   platforms: true,
-  requires: true,
   agentContext: true,
   agent: true,
   trace: true,
@@ -402,7 +400,6 @@ const DESCRIBE_OPTION_KEYS: readonly string[] = Object.keys({
   skip: true,
   fail: true,
   platforms: true,
-  requires: true,
   session: true,
   agentContext: true,
   agent: true,
@@ -417,6 +414,9 @@ const DESCRIBE_OPTION_KEYS: readonly string[] = Object.keys({
  * and each known option's value.
  */
 function validateCommonOptions(options: TestOptions | DescribeOptions, label: string, keys: readonly string[]): void {
+  if (Object.hasOwn(options, 'requires')) {
+    throw new CollectionError(`${label}: requires was removed; scope the test to targets with platforms, e.g. platforms: ['web']`);
+  }
   const unknown = unknownKeyMessage(label, options, keys);
   if (unknown !== undefined) throw new CollectionError(unknown);
   if (options.timeout !== undefined) {
@@ -516,7 +516,6 @@ function validateTestOptions(options: TestOptions, group: GroupNode | undefined,
       'video',
       'session',
       'platforms',
-      'requires',
       'skip',
       'fail',
       'only',
@@ -756,14 +755,14 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
   /**
    * Registers one `test()` call. `api` names the caller in errors. A `skip`
    * condition comes from `skipIf`, `runIf`, or `skip`: when true, the test is
-   * skipped, keeping any reason its `skip` option gives. `fixme` skips it as
-   * fixme, with the reason `fixme`. Either way a serial group rejects it, so
-   * a file collects the same on every platform. `namedBy` is passed on to
-   * `registerTest`.
+   * skipped, keeping any reason its `skip` option gives. `fixme` and `todo`
+   * use their own skip cause and reason. Any registered skip rejects a test
+   * in a serial group, so a file collects the same on every platform.
+   * `namedBy` is passed on to `registerTest`.
    */
   const registerOne = (
     api: string,
-    skip: boolean | 'fixme' | undefined,
+    skip: boolean | 'fixme' | 'todo' | undefined,
     title: string,
     given: TestOptions,
     fn: TestBody,
@@ -776,15 +775,15 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
           'set skip on the serial describe instead',
       );
     }
-    const options = skip === 'fixme'
-      ? { ...given, skip: fixmeReason() }
+    const options = typeof skip === 'string'
+      ? { ...given, skip: skip === 'fixme' ? fixmeReason() : 'todo' }
       : skip === true
         ? { ...given, skip: typeof given.skip === 'string' ? given.skip : true }
         : given;
     const mode: TestMode = options.only === true
       ? 'only'
-      : skip === 'fixme'
-        ? 'fixme'
+      : typeof skip === 'string'
+        ? skip
         : options.skip !== undefined && options.skip !== false ? 'skip' : 'normal';
     return collector.registerTest('test', mode, title, options, [], fn, chain, namedBy);
   };
@@ -860,6 +859,12 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
       skipRunningTest('test.skip', call.condition, call.reason);
       return undefined;
     },
+    todo(title: string, ...args: unknown[]): TestCase {
+      if (args.length > 0) {
+        throw new CollectionError('test.todo() takes a title only; register a test with a body through test.skip(title, fn) or test.fixme(title, fn)');
+      }
+      return registerOne('test.todo()', 'todo', title, {}, () => {});
+    },
     fixme(first?: string | boolean, second?: TestBody | string): TestCase | undefined {
       const call = parseModifierCall(first, second);
       if (call.kind === 'register') {
@@ -878,6 +883,15 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
     },
     setTimeout(timeout: number): void {
       setRunningTestTimeout(timeout);
+    },
+    slow(first?: string | boolean, second?: TestBody | string): void {
+      const call = parseModifierCall(first, second);
+      if (call.kind === 'register') {
+        throw new CollectionError(
+          'test.slow() takes no test: call test.slow() inside the test body to triple its timeout, or pass { timeout } as the test option',
+        );
+      }
+      slowRunningTest(call.condition);
     },
     skipIf(condition: unknown): TestRegistrar<object> {
       return registrar('test.skipIf()', readCondition('test.skipIf()', condition));

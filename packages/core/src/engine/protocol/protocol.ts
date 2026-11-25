@@ -14,7 +14,7 @@
  */
 
 import { E2EError, ConfigurationError, ERROR_CATEGORIES, InfrastructureError, TestError, asEngineError, isE2EError } from '../../internal/errors.ts';
-import { ENGINE_ERROR_CODES, EngineError, type EngineErrorCode, type EngineSpiVersion, type LocatorActionKind, type PointerActionKind } from '../contract.ts';
+import { ENGINE_ERROR_CODES, EngineError, type EngineErrorCode, type EngineSpiVersion, type LocatorAction, type LocatorActionKind, type PointerActionKind } from '../contract.ts';
 import type { Engine, EngineSnapshot } from '../index.ts';
 import { RPC_ERRORS, isRpcErrorObject, type RpcErrorObject } from './connection.ts';
 
@@ -50,6 +50,7 @@ const lifecycle = (member: LifecycleMethod['member']): LifecycleMethod => ({ kin
 export const METHODS = {
   'engine/observe': operation('observe', ['operation', 'options'], 'snapshot'),
   'engine/readStyle': operation('readStyle', ['ref', 'properties', 'operation']),
+  'engine/viewportIntersection': operation('viewportIntersection', ['ref', 'operation']),
   'engine/locate': operation('locate', ['expression', 'operation']),
   'engine/perform': operation('perform', ['ref', 'action', 'operation']),
   'engine/performAt': operation('performAt', ['point', 'action', 'operation']),
@@ -118,6 +119,12 @@ export interface EngineManifest {
   readonly tapModifiers?: boolean;
   /** See `Engine.selectsDevice`. */
   readonly selectsDevice?: boolean;
+  /** See `Engine.grantsAllPermissions`. */
+  readonly grantsAllPermissions?: boolean;
+  /** See `Engine.launchArgumentValues`. */
+  readonly launchArgumentValues?: boolean;
+  /** See `Engine.fileApps`. */
+  readonly fileApps?: boolean;
   /** See `Engine.isolation`; left out for `attempt`. */
   readonly isolation?: 'worker';
 }
@@ -185,6 +192,26 @@ export interface WirePixels {
 
 /** `EngineSnapshot` on the wire. */
 export type WireSnapshot = Omit<EngineSnapshot, 'pixels'> & { readonly pixels?: WirePixels };
+
+type FilePayloadAction = Extract<LocatorAction, { kind: 'setInputFilePayloads' }>;
+
+/** Locator actions on the wire: file bytes, like snapshot pixels, cross as base64. */
+export type WireLocatorAction = Exclude<LocatorAction, FilePayloadAction> | {
+  readonly kind: 'setInputFilePayloads';
+  readonly files: readonly (Omit<FilePayloadAction['files'][number], 'buffer'> & { readonly buffer: string })[];
+};
+
+/** Encodes file payload bytes without changing other locator actions. */
+export function encodeLocatorAction(action: LocatorAction): WireLocatorAction {
+  if (action.kind !== 'setInputFilePayloads') return action;
+  return { ...action, files: action.files.map((file) => ({ ...file, buffer: Buffer.from(file.buffer.buffer, file.buffer.byteOffset, file.buffer.byteLength).toString('base64') })) };
+}
+
+/** Restores file payload bytes at the engine protocol boundary. */
+export function decodeLocatorAction(action: WireLocatorAction): LocatorAction {
+  if (action.kind !== 'setInputFilePayloads') return action;
+  return { ...action, files: action.files.map((file) => ({ ...file, buffer: new Uint8Array(Buffer.from(file.buffer, 'base64')) })) };
+}
 
 /** Params of `attempt/deriveSecret`: the value the client resolved, for the forms the engine derives from it. */
 export interface DeriveSecretParams {

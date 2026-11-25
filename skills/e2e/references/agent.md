@@ -55,7 +55,8 @@ gates, and limits.
 A coding agent the user already signs in to runs agent steps over the Agent Client Protocol:
 install `@e2e-dev/acp` and its adapter, and put
 `claudeCode({ model: 'sonnet' })` or `codex()` under
-`executor`; no model provider is needed. See the shipped `docs/subscriptions.mdx` or
+`executor`; no model provider is needed. Codex signs in with
+`codex login`, or with `OPENAI_API_KEY` set, which it then saves as its login. See the shipped `docs/subscriptions.mdx` or
 [the online guide](https://e2e.com/docs/subscriptions#use-your-coding-agent).
 
 - Pass a model instance, not a string (`INVALID_CONFIG`).
@@ -420,7 +421,8 @@ matches. Misses and hand-offs use the model; `agent.assert`,
   re-finds each control by role, name, test id, placeholder, input purpose,
   and its named row (an unnamed control with twins and no named container
   hands off, and so does one known only by a generated test id once that id
-  is gone), and passes alone only when the recorded end route is back,
+  is gone, or one of same-named twins left after the recorded one went
+  away), and passes alone only when the recorded end route is back,
   every control that appeared (with its checked or selected state) is
   there, every one that went away is gone, at least one of those changed
   during the replay, and no new alert showed; otherwise the agent takes
@@ -499,8 +501,8 @@ before writing the AI trace.
 - A `mutates: false` tool can call `getToolContext(options).read({ id },
   { style: ['color', 'font-weight'] })` for a node in its newest observation.
   Web reads return redacted `{ style }` under the step deadline, use no action
-  slot, and never relocate stale IDs. Use `requires: ['computed-style']` to
-  skip engines without support. Allowed properties and errors:
+  slot, and never relocate stale IDs. Use `platforms` to skip targets
+  without support. Allowed properties and errors:
   https://e2e.com/docs/tools#read-a-nodes-computed-style.
 - `createToolLoopExecutor` keeps the loop and replaces prompt and tool
   vocabulary; spread `createGrammarTools(ctx, { guard })` into its tools and
@@ -511,6 +513,12 @@ before writing the AI trace.
 - Any `StepExecutor` (`{ name, version?, cache?, runStep(ctx) }`) goes under
   `executor`; the runner still owns observations, actions, budgets, and the
   report, and `system` or `tools` beside `executor` is `INVALID_CONFIG`.
+- The run redacts the model provider keys in its environment from reports,
+  traces, and output. For a key it cannot see (one passed in code, one an
+  agent reads from its own login file), call
+  `registerProviderKey(name, value)` from `e2e/agent`; an executor that cuts
+  text itself calls `redactSecrets(text)` first, and one that sends its agent
+  text of its own calls `redactStepText(ctx, text)`.
 
 Reference: https://e2e.com/docs/agents
 

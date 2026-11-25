@@ -10,8 +10,10 @@
  * ```
  */
 
+export { ctrf, type CtrfReporterOptions } from './report/ctrf.ts';
 export { dot, type DotReporterOptions } from './report/dot.ts';
 export { json } from './report/json.ts';
 export { junit, type JunitReporterOptions } from './report/junit.ts';
+export { line, type LineReporterOptions } from './report/line.ts';
 export { list, type ListReporterOptions } from './report/list.ts';
 export { markdown, type MarkdownReporterOptions } from './report/markdown.ts';

@@ -7,7 +7,7 @@
  */
 
 import { createRequire } from 'node:module';
-import { ConfigurationError, defineEngine, type EngineAppCheckInfo, type EngineAppDeclaration, type EngineHandle, type LocatorActionKind, type PointerActionKind } from '@e2e-dev/core/engine';
+import { ConfigurationError, defineEngine, type EngineAppCheckInfo, type EngineAppDeclaration, type EngineHandle, type EngineIsolation, type LocatorActionKind, type PointerActionKind } from '@e2e-dev/core/engine';
 import { createDesktopFixture } from './desktop.ts';
 import type { DesktopFixtures } from './fixtures.ts';
 import { requireMacOS, resolveOptions, type DesktopOptions } from './options.ts';
@@ -29,26 +29,28 @@ const HEADED_POINTER_ACTIONS: readonly PointerActionKind[] = ['tap', 'doubleTap'
  * names this package: a project sees `@e2e-dev/core` only through its
  * dependencies, and TypeScript cannot write that path in a declaration.
  */
-export interface DesktopEngine extends EngineHandle<DesktopFixtures> {}
+export interface DesktopEngine<Platform extends string = string, Isolation extends EngineIsolation = EngineIsolation>
+  extends EngineHandle<DesktopFixtures, Platform, Isolation> {}
 
 /**
  * Creates one desktop engine: it drives the target's macOS app on this
  * machine, one worker at a time. A test launches the app with `app.open()`;
  * every test ends with the app quit. A config that names it loads on any OS,
- * so its other targets still run elsewhere; the target itself fails to start
- * on any OS but macOS.
+ * and its other targets run elsewhere when `--target` picks them; a run that
+ * includes this target stops before any test starts on any OS but macOS.
  */
-export function desktop(options: DesktopOptions = {}): DesktopEngine {
+export function desktop(options: DesktopOptions = {}): DesktopEngine<'macos', 'attempt'> {
   const resolved = resolveOptions(options);
   const platform = 'macos';
   const surface = new DesktopSurface(resolved, platform);
   const headed = resolved.headed;
-  return defineEngine<DesktopFixtures>({
+  return defineEngine<DesktopFixtures, 'macos', 'attempt'>({
     name: 'desktop',
     version: ownVersion(),
     spiVersion: 1,
     platform,
     workers: 1,
+    launchArgumentValues: true,
     prepare: (info) => {
       requireMacOS();
       return surface.prepare(info);

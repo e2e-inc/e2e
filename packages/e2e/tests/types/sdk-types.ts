@@ -5,7 +5,7 @@
  */
 
 import { z } from 'zod';
-import { json, junit, list as listReporter, markdown } from '../../src/reporters.ts';
+import { ctrf, json, junit, line, list as listReporter, markdown } from '../../src/reporters.ts';
 import {
   credentials,
   expect,
@@ -17,6 +17,8 @@ import {
   type ActionEvent,
   type ActionName,
   type Agent,
+  type APIRequest,
+  type WebResponse,
   type App,
   type ArtifactStore,
   type AsyncExpectation,
@@ -48,6 +50,7 @@ import {
   type TestFilter,
   type TestFilterCandidate,
   type TestFilterContext,
+  type TestOptions,
   type TestRegistrar,
   type EachRegistrar,
   type Unique,
@@ -60,8 +63,9 @@ import {
   beforeAll,
   beforeEach,
   describe,
+  foldLastRun,
 } from '../../src/index.ts';
-import type { Engine, EngineAttemptContext, EngineCleanupContext, EngineDisposeContext, EngineFixtureContext, EngineHandle, EngineObserveOptions, EngineSnapshot } from '../../src/engine/index.ts';
+import type { AppPermissionState, Engine, EngineAppInfo, EngineAttemptContext, EngineCleanupContext, EngineDisposeContext, EngineFixtureContext, EngineHandle, EngineObserveOptions, EngineSnapshot } from '../../src/engine/index.ts';
 import {
   BASE_RULES,
   createGrammarTools,
@@ -70,6 +74,10 @@ import {
   defineTool,
   getToolContext,
   isRuntimeHardStop,
+  redactSecrets,
+  redactStepText,
+  registerProviderKey,
+  registerProviderKeys,
   VERDICT_RULES,
   type ScreenOutput,
 } from '../../src/agent/public.ts';
@@ -238,15 +246,42 @@ customExecutorObservation.keyboardVisible satisfies boolean | undefined;
 ({
   targets: [{ engine, app: { bundleId: 'dev.shop.app', appPath: './build/Shop.app', launchArguments: ['-e2e'], permissions: { camera: 'grant' } } }],
 }) satisfies E2EConfig;
+({ targets: [{ engine, app: { bundleId: 'dev.shop.app', permissions: 'all' } }] }) satisfies E2EConfig;
 // @ts-expect-error a permission is granted, denied, or reset; there is no `allow`
 ({ targets: [{ engine, app: { bundleId: 'dev.shop.app', permissions: { camera: 'allow' } } }] }) satisfies E2EConfig;
+// @ts-expect-error `'all'` is the one shorthand; anything else names each permission
+({ targets: [{ engine, app: { bundleId: 'dev.shop.app', permissions: 'every' } }] }) satisfies E2EConfig;
 // @ts-expect-error launch arguments are the strings the launch command takes
 ({ targets: [{ engine, app: { bundleId: 'dev.shop.app', launchArguments: [1] } }] }) satisfies E2EConfig;
+// An object value is a string, number, boolean, or list of strings, or undefined straight from the environment.
+declare const tokenFromEnv: string | undefined;
+({
+  targets: [{ engine, app: { bundleId: 'dev.shop.app', launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', e2e: true, retries: 3, token: tokenFromEnv } } }],
+}) satisfies E2EConfig;
+// @ts-expect-error an object value is flat: no nested object
+({ targets: [{ engine, app: { bundleId: 'dev.shop.app', launchArguments: { locale: { language: 'fr' } } } }] }) satisfies E2EConfig;
+// @ts-expect-error a list value holds strings only
+({ targets: [{ engine, app: { bundleId: 'dev.shop.app', launchArguments: { languages: [1] } } }] }) satisfies E2EConfig;
+// An engine that predates the object form spreads `launchArguments`; the object arrives in `launchArgumentValues` only.
+declare const engineApp: EngineAppInfo;
+[...(engineApp.launchArguments ?? [])] satisfies string[];
+engineApp.launchArgumentValues?.['AppleLanguages'] satisfies string | number | boolean | readonly string[] | undefined;
+// An engine says it opens a file app, and is told at the check when the target's app is one.
+({ fileApps: true }) satisfies Pick<import('../../src/engine/index.ts').Engine, 'fileApps'>;
+({ targetName: 'web', fileApp: true }) satisfies import('../../src/engine/index.ts').EngineAppCheckInfo;
+// @ts-expect-error the declaration is a boolean, not a list of schemes
+({ fileApps: ['file:'] }) satisfies Pick<import('../../src/engine/index.ts').Engine, 'fileApps'>;
+
 // @ts-expect-error the app URL is the target's app.url, not a key of the target itself
 ({ targets: [{ engine, url: 'http://localhost:3000' }] }) satisfies E2EConfig;
 // @ts-expect-error an engine only drives the app: the target declares it
 ({ name: 'toy', version: '1.0.0', spiVersion: 1, app: { url: 'http://localhost:3000' } }) satisfies Engine;
 ({ name: 'toy', version: '1.0.0', spiVersion: 1, validateApp: (app, { targetName }) => void [app.bundleId, targetName] }) satisfies Engine;
+// An engine reads `app.permissions` as a map; `'all'` reaches only one that declares `grantsAllPermissions`, as `allPermissions`.
+({
+  name: 'toy', version: '1.0.0', spiVersion: 1, grantsAllPermissions: true,
+  validateApp: (app) => void [app.permissions?.['camera'] satisfies AppPermissionState | undefined, app.allPermissions satisfies true | undefined],
+}) satisfies Engine;
 // `e2e run --device`: an engine that selects devices reads the name `prepare` hands it.
 ({ name: 'toy', version: '1.0.0', spiVersion: 1, selectsDevice: true, prepare: async ({ device }) => void (device satisfies string | undefined) }) satisfies Engine;
 // @ts-expect-error a target declares its app; there is no services list in this version
@@ -351,6 +386,8 @@ unique(7);
 declare const reporter: Reporter;
 ({ targets, reporters: ['list', reporter] }) satisfies E2EConfig;
 ({ targets, reporters: ['dot'] }) satisfies E2EConfig;
+({ targets, reporters: ['line'] }) satisfies E2EConfig;
+({ targets, reporters: [line({ stream: 'stderr' })] }) satisfies E2EConfig;
 ({ targets, reporters: [reporter] }) satisfies E2EConfig;
 ({
   name: 'upload',
@@ -378,24 +415,50 @@ if (runEvent.type === 'step') {
 ({ targets, reporters: [listReporter(), json(), junit({ outputFile: 'reports/junit.xml' }), markdown(), 'junit', reporter] }) satisfies E2EConfig;
 // @ts-expect-error the junit reporter takes an outputFile, nothing else
 junit({ output: 'reports' });
+({ targets, reporters: ['ctrf', ctrf(), ctrf({ outputFile: 'reports/ctrf.json' })] }) satisfies E2EConfig;
+// @ts-expect-error the ctrf reporter takes an outputFile, nothing else
+ctrf({ output: 'reports' });
 ({
   name: 'dots',
-  printsTo: 'stdout',
-  onOutput: ({ stream, text, target, pair }) => void process[stream].write(`${target ?? 'runner'} ${pair?.testId ?? ''} ${text}`),
-  onStepPrompt: (prompt) => {
-    prompt?.steps[0].step.label satisfies string | undefined;
-    prompt?.steps[0].step.attachId satisfies string | undefined;
-    // @ts-expect-error reporters receive prompt data without the runner's attach hook
-    prompt?.attach;
+  interactive: true,
+  onEvent: (event) => {
+    if (event.type === 'output') {
+      void process[event.stream].write(`${event.target ?? 'runner'} ${event.pair?.testId ?? ''} ${event.text}`);
+      // The runner's own output names no test.
+      if (event.target === undefined) event.pair satisfies undefined;
+    }
+    if (event.type === 'collected') {
+      event.repeatEach satisfies number;
+      event.tests[0]?.titlePath satisfies readonly string[] | undefined;
+      event.tests[0]?.source?.line satisfies number | undefined;
+      event.tests[0]?.disposition satisfies 'run' | 'skip' | 'filtered' | undefined;
+      event.tests[0]?.kind satisfies 'test' | 'setup' | undefined;
+    }
+    if (event.type === 'step' && event.progress.phase === 'start') {
+      event.progress.source?.file satisfies string | undefined;
+    }
+    if (event.type === 'paused') {
+      event.reason satisfies 'step' | 'pause';
+      event.steps[0].label satisfies string;
+      event.steps[0].source?.line satisfies number | undefined;
+      event.attachId satisfies string;
+      event.titlePath satisfies readonly string[];
+      event.keys[0]?.does satisfies string | undefined;
+      // @ts-expect-error reporters only observe a pause: the event has no way to answer it
+      event.attach;
+    }
+    if (event.type === 'resumed') event.testId satisfies string;
   },
-  onSummary: (rows) => void rows.map((row) => row.label),
+  onSummary: (rows, finished) => void process.stdout.write(`${rows.length} ${finished.report.run.status}\n`),
 }) satisfies Reporter;
+// @ts-expect-error output is an event, not a hook of its own
+({ name: 'logs', onOutput: () => undefined }) satisfies Reporter;
 ({
   name: 'pages',
   reportFiles: async (finished) => [{ path: 'reports/run.txt', content: finished.report.run.status, label: 'Run' }],
 }) satisfies Reporter;
-// @ts-expect-error printsTo names a terminal stream
-({ name: 'logs', printsTo: 'console', onEvent: () => undefined }) satisfies Reporter;
+// @ts-expect-error interactive is a flag
+({ name: 'logs', interactive: 'stdout', onEvent: () => undefined }) satisfies Reporter;
 // @ts-expect-error a report file holds text
 ({ name: 'pages', reportFiles: () => [{ path: 'run.bin', content: new Uint8Array() }] }) satisfies Reporter;
 
@@ -448,6 +511,11 @@ declare const finishedRun: FinishedRun;
 finishedRun.status satisfies RunStatus;
 finishedRun.exitCode satisfies RunExitCode;
 finishedRun.lastRun satisfies FinishedRun['report'] | undefined;
+// A reporter folds a --last-failed rerun into the runs before it the way the runner does.
+foldLastRun(finishedRun.report, finishedRun.lastRun ?? finishedRun.report) satisfies Report;
+finishedRun.report.run.shard?.index satisfies number | undefined;
+// @ts-expect-error the shard marker is set or absent, never false
+({ cause: 'filtered', reason: 'outside the shard', otherShard: false }) satisfies NonNullable<Report['run']['results'][number]['skip']>;
 // @ts-expect-error the run status is a closed union
 'skipped' satisfies RunStatus;
 // @ts-expect-error the exit codes are the closed set a run ends with
@@ -483,6 +551,9 @@ void (screen.getByTestId('todo').allTextContents() satisfies Promise<string[]>);
 void (screen.getByTestId('todo').isHidden() satisfies Promise<boolean>);
 void (screen.getByTestId('todo').isDisabled() satisfies Promise<boolean>);
 void asyncExpectation.toBeAttached({ timeout: 1000 });
+void asyncExpectation.not.toBeEmpty({ timeout: 1000 });
+// @ts-expect-error toBeEmpty compares nothing, so it has no case to ignore
+void asyncExpectation.toBeEmpty({ ignoreCase: true });
 void asyncExpectation.toHaveText(['a', /b/], { timeout: 1000 });
 void asyncExpectation.toContainText(['a', /b/]);
 // @ts-expect-error a text list holds strings and RegExps only
@@ -496,10 +567,16 @@ void screen.getByRole('button').waitFor({ state: 'gone' });
 // Playwright's state flags and ignoreCase are taken where Playwright takes them, and nowhere else.
 void asyncExpectation.toBeChecked({ checked: false });
 void asyncExpectation.toBeVisible({ visible: false, timeout: 1000 });
+void asyncExpectation.toBeInViewport({ ratio: 0 });
+void asyncExpectation.toBeInViewport({ ratio: 0.5, timeout: 1000 });
 void asyncExpectation.toContainText('error', { ignoreCase: true });
 void asyncExpectation.toHaveAttribute('data-kind', 'error', { ignoreCase: true });
 // @ts-expect-error toBeChecked has no indeterminate state
 void asyncExpectation.toBeChecked({ indeterminate: true });
+// @ts-expect-error toBeInViewport takes a numeric ratio
+void asyncExpectation.toBeInViewport({ ratio: 'half' });
+// @ts-expect-error toBeInViewport has no threshold option
+void asyncExpectation.toBeInViewport({ threshold: 0.5 });
 // @ts-expect-error a value is compared as it is, case included
 void asyncExpectation.toHaveValue('a', { ignoreCase: true });
 // @ts-expect-error presence has no case to ignore
@@ -650,6 +727,9 @@ test.extend<{ x: number }>().runIf(true)('uses x', async ({ x }) => { x satisfie
 test.skipIf(true)('no body');
 // @ts-expect-error the registrar takes test options, not describe options
 test.runIf(true)('serial', { serial: true }, async () => {});
+// @ts-expect-error requires was removed; platforms scopes a test to targets
+test('scoped', { requires: ['browser'] }, async () => {});
+test('scoped', { platforms: ['web'] }, async () => {});
 // @ts-expect-error the registrar registers a test, it is not test.skip
 test.skipIf(true)(true, 'reason');
 // A condition of any non-Promise type passes, an unknown one included; a Promise must be awaited first.
@@ -665,6 +745,9 @@ void test.runIf(Promise.resolve(true));
 void test.runIf(isFeatureOn() as Promise<boolean> | boolean);
 // fixme takes exactly skip's shapes: a registration returns a TestCase, a call inside a body returns nothing.
 test.fixme('not yet', async () => {}) satisfies ReturnType<typeof test>;
+test.todo('not yet') satisfies ReturnType<typeof test>;
+// @ts-expect-error todo takes a title only, with no body
+test.todo('not yet', async () => {});
 void (test.fixme(true, 'flaky on webkit') satisfies void);
 void (test.fixme('flaky on webkit') satisfies void);
 void (test.fixme() satisfies void);
@@ -716,6 +799,14 @@ test.fail('known gap');
 test.setTimeout(60_000);
 // @ts-expect-error the timeout is a number of milliseconds
 test.setTimeout('60s');
+// slow takes the runtime shapes of skip and fail, and no registration form.
+void (test.slow() satisfies void);
+test.slow(true, 'imports a large file');
+test.slow('imports a large file');
+// @ts-expect-error there is no test.slow(title, fn); call test.slow() in the body
+test.slow('slow', async () => {});
+// @ts-expect-error the condition is a boolean
+test.slow(1);
 test.fail('gap', async () => {}) satisfies ReturnType<typeof test>;
 void (test.fail(false) satisfies void);
 test('gap', { fail: 'known gap' }, async () => {});
@@ -728,11 +819,32 @@ describe.fail('gaps', { fail: 'legacy checkout' }, () => {});
 test.describe.fail('asynchronous', async () => {});
 // @ts-expect-error a group cannot be focused; describe options take no only
 test.describe.fail('gaps', { only: true }, () => {});
+
+declare const payloadUploadAction: Extract<import('../../src/engine/index.ts').LocatorAction, { kind: 'setInputFilePayloads' }>;
+payloadUploadAction.files[0]!.buffer satisfies Uint8Array;
+// Existing engines can keep reading paths after narrowing the original action kind.
+declare const pathUploadAction: Extract<import('../../src/engine/index.ts').LocatorAction, { kind: 'setInputFiles' }>;
+pathUploadAction.paths satisfies readonly string[];
+void screen.getByLabel('Receipt').setInputFiles({ name: 'receipt.txt', mimeType: 'text/plain', buffer: Buffer.from('receipt') });
+void screen.getByLabel('Receipt').setInputFiles([{ name: 'empty.txt', mimeType: 'text/plain', buffer: Buffer.alloc(0) }]);
+void screen.getByLabel('Receipt').setInputFiles(['fixtures/receipt.txt']);
+void screen.getByLabel('Receipt').setInputFiles([]);
+// @ts-expect-error file payloads require bytes, not an encoded string
+void screen.getByLabel('Receipt').setInputFiles({ name: 'a.txt', mimeType: 'text/plain', buffer: 'data' });
+// @ts-expect-error a payload requires its MIME type
+void screen.getByLabel('Receipt').setInputFiles({ name: 'a.txt', buffer: Buffer.alloc(0) });
+// @ts-expect-error paths and payloads cannot be mixed in one array
+void screen.getByLabel('Receipt').setInputFiles(['a.txt', { name: 'a.txt', mimeType: 'text/plain', buffer: Buffer.alloc(0) }]);
 void screen.getByLabel('Plan').selectOption({ value: 'pro' });
 // @ts-expect-error one of label, value, or index, never two
 void screen.getByLabel('Plan').selectOption({ value: 'pro', index: 1 });
 // @ts-expect-error role queries never match hidden nodes; visible is the one visibility knob
 screen.getByRole('button', { hidden: true });
+
+// A locator's screenshot is a file path under a label, as app.screenshot's is.
+void (screen.getByTestId('summary').screenshot('summary') satisfies Promise<string>);
+// @ts-expect-error the file goes with the attempt's artifacts; there is no path option.
+void screen.getByTestId('summary').screenshot({ path: 'summary.png' });
 
 // Coordinate input: a viewport point on screen, a node-relative one on a locator.
 declare const point: import('../../src/index.ts').Point;
@@ -758,6 +870,15 @@ void screen.getByRole('row').dblclick({ modifiers: ['Shift'], timeout: 1_000 });
 // @ts-expect-error modifiers are the key grammar's modifier names
 void screen.getByRole('row').doubleTap({ modifiers: ['Hyper'] });
 void screen.getByRole('image').click({ position: point });
+void screen.getByRole('button').tap({ count: 3, timeout: 1_000 });
+void screen.getByRole('button').click({ count: 3, modifiers: ['Shift'] });
+// @ts-expect-error a tap count is a number
+void screen.getByRole('button').tap({ count: '3' });
+// @ts-expect-error a double tap is two taps already; count rides tap and click only
+void screen.getByRole('button').doubleTap({ count: 3 });
+declare const multiTapAction: Extract<import('../../src/engine/index.ts').LocatorAction, { kind: 'multiTap' }>;
+void (multiTapAction.count satisfies number);
+void (multiTapAction.modifiers satisfies readonly KeyModifier[] | undefined);
 // @ts-expect-error a point has both coordinates.
 void screen.tapAt({ x: 1 });
 // @ts-expect-error a path swipe names both ends.
@@ -978,7 +1099,7 @@ deviceTest.beforeAll(async ({ device, app, screen: deviceScreen }) => {
   void deviceScreen;
 });
 
-// A fixture named like a built-in extends it: its own name is the built-in, and it keeps the built-in's type and scope.
+// A fixture named like a built-in extends it: its own name is the built-in, and it keeps the built-in's type. Its scope is the one it declares, else test.
 test.extend({ app: async ({ app, screen: s }, use) => { void s; await app.open('/'); await use(app); } })('opens first', async ({ app }) => {
   await app.open('/next');
 });
@@ -987,19 +1108,20 @@ test.extend({ screen: [async ({ screen: s }, use) => { await use(s); }, { scope:
 test.extend({ app: async ({}, use) => { await use('not an app'); } });
 // @ts-expect-error app is a test fixture on this test: its override cannot be a worker fixture
 test.extend({ app: [async ({ app }, use) => { await use(app); }, { scope: 'worker' }] });
-// platform is a worker fixture everywhere, so its override sees worker fixtures only.
-test.extend({ platform: async ({ platform }, use) => { await use(platform.toUpperCase()); } });
-// @ts-expect-error a worker fixture's override does not see test fixtures
-test.extend({ platform: async ({ platform, app }, use) => { void app; await use(platform); } });
-// On an engine whose state outlives a test, device, app, and screen are worker fixtures, and so are their overrides.
-deviceTest.extend({ device: async ({ device }, use) => { await device.reset(); await use(device); } }).beforeAll(async ({ device }) => {
+// The override of a worker fixture is a test fixture unless it declares scope 'worker', so it sees test fixtures.
+test.extend({ platform: async ({ platform, app }, use) => { void app; await use(platform.toUpperCase()); } });
+// @ts-expect-error a worker-scoped override does not see test fixtures
+test.extend({ platform: [async ({ platform, app }, use) => { void app; await use(platform); }, { scope: 'worker' }] });
+// On an engine whose state outlives a test, device, app, and screen are worker fixtures. A worker-scoped override reaches the suite hooks.
+deviceTest.extend({ device: [async ({ device }, use) => { await device.reset(); await use(device); }, { scope: 'worker' }] }).beforeAll(async ({ device }) => {
   await device.reset();
 });
 deviceTest.extend({ app: [async ({ app }, use) => { await use(app); }, { scope: 'worker' }] });
-// @ts-expect-error a worker fixture's override cannot be a test fixture
-deviceTest.extend({ device: [async ({ device }, use) => { await use(device); }, { scope: 'test' }] });
-// @ts-expect-error a worker fixture's override does not see test fixtures
-deviceTest.extend({ device: async ({ device, agent: testAgent }, use) => { void testAgent; await use(device); } });
+const testScopedDevice = deviceTest.extend({ device: async ({ device, agent: testAgent }, use) => { void testAgent; await use(device); } });
+testScopedDevice('resets the device', async ({ device }) => { await device.reset(); });
+// @ts-expect-error a test-scoped override doesn't reach the suite hooks
+testScopedDevice.beforeAll(async ({ device }) => { await device.reset(); });
+testScopedDevice.beforeAll(async ({ app }) => { await app.open(); });
 // With type arguments for new fixtures, an override sits beside them and sees them.
 test.extend<{ draft: string }>({
   draft: async ({ app }, use) => { void app; await use('draft'); },
@@ -1007,6 +1129,126 @@ test.extend<{ draft: string }>({
 });
 // A fixture of an earlier extend is extended the same way.
 withWorkspace.extend({ workspace: async ({ workspace }, use) => { await use(workspace); } });
+
+// With the config type as the third argument, each target has the fixture
+// types of its engine. A fixture that only other targets have is possibly
+// undefined until a platform check.
+interface Pane { goto(url: string): Promise<void> }
+interface Handset { closeApp(): Promise<void> }
+// app has a narrower type on pane, like WebApp on the web engine. Every target still has app.
+const paneEngine = defineEngine<{ readonly pane: Pane; readonly app: App }, 'web', 'attempt'>({ name: 'pane', version: '1.0.0', spiVersion: 1, platform: 'web', fixtures: { pane: () => ({ goto: async () => {} }) } });
+const handsetEngine = defineEngine<{ readonly handset: Handset }, 'ios', 'worker'>({ name: 'handset', version: '1.0.0', spiVersion: 1, platform: 'ios', isolation: 'worker', fixtures: { handset: () => ({ closeApp: async () => {} }) } });
+const mixedConfig = { targets: [{ engine: paneEngine }, { engine: handsetEngine }] } satisfies E2EConfig;
+const configTest = test.extend<{}, {}, typeof mixedConfig>();
+configTest('narrows on the platform', async ({ app, platform, pane, handset }) => {
+  await app.open('/');
+  if (platform === 'web') {
+    await pane.goto('/');
+    return;
+  }
+  await handset.closeApp();
+});
+configTest('narrows on the fixture', async ({ handset }) => {
+  if (handset !== undefined) await handset.closeApp();
+});
+// @ts-expect-error handset is undefined on the web target
+configTest('reads a fixture without a check', async ({ handset }) => { await handset.closeApp(); });
+// @ts-expect-error the config has no Android target
+configTest('compares a platform no target has', async ({ platform }) => { void (platform === 'android'); });
+configTest.beforeAll(async ({ platform, handset }) => {
+  if (platform === 'ios') await handset.closeApp();
+});
+// @ts-expect-error pane has test scope on web and is unavailable in suite hooks
+configTest.beforeAll(async ({ pane }) => { void pane; });
+// Fixture types are narrowed by a platform check inside a definition in the same extend call.
+test.extend<{ start: () => Promise<void> }, {}, typeof mixedConfig>({
+  start: async ({ platform, pane, handset }, use) => {
+    await use(async () => {
+      if (platform === 'web') await pane.goto('/');
+      else await handset.closeApp();
+    });
+  },
+})('starts', async ({ start, handset }) => {
+  await start();
+  if (handset !== undefined) await handset.closeApp();
+});
+test.extend<{}, { warmed: boolean }, typeof mixedConfig>({
+  warmed: [async ({ platform, handset }, use) => {
+    if (platform === 'ios') await handset.closeApp();
+    await use(true);
+  }, { scope: 'worker' }],
+}).beforeAll(async ({ warmed }) => { warmed satisfies boolean; });
+// A fixture typed on the base `test`, as in an engine package's `test`, is still undefined on targets without it.
+const handsetBase = test.extend<{ pane: Pane }, { handset: Handset }>().extend<{}, {}, typeof mixedConfig>();
+// @ts-expect-error handset is undefined on the web target
+handsetBase('reads handset without a check', async ({ handset }) => { await handset.closeApp(); });
+// @ts-expect-error pane is undefined on the ios target
+handsetBase('reads pane without a check', async ({ pane }) => { await pane.goto('/'); });
+handsetBase('narrows the base fixtures on the platform', async ({ platform, pane, handset }) => {
+  if (platform === 'web') await pane.goto('/');
+  else await handset.closeApp();
+});
+// A test's platforms option narrows the fixtures to the targets it keeps.
+configTest('runs on web', { platforms: ['web'] }, async ({ platform, pane }) => {
+  platform satisfies 'web';
+  await pane.goto('/');
+});
+configTest('runs on ios', { platforms: ['ios'] }, async ({ handset }) => { await handset.closeApp(); });
+configTest.skipIf(false)('runs on ios after skipIf', { platforms: ['ios'] }, async ({ app, handset }) => {
+  await app.open('/');
+  await handset.closeApp();
+});
+const options: TestOptions = { platforms: ['ios'] };
+// @ts-expect-error options typed as TestOptions keep every target
+configTest('takes options', options, async ({ handset }) => { await handset.closeApp(); });
+// @ts-expect-error a fixture in the first type argument still needs a definition
+test.extend<{ start: () => Promise<void> }, {}, typeof mixedConfig>({});
+// The original fixture value passed to an override is undefined on targets without the fixture.
+configTest.extend({ handset: async ({ handset }, use) => { await use(handset); } })('narrows the override', async ({ platform, handset }) => {
+  if (platform === 'ios') await handset.closeApp();
+});
+// @ts-expect-error handset has type Handset | undefined, so a string can't be passed to use
+configTest.extend({ handset: async ({}, use) => { await use('not a handset'); } });
+// With a string platform, as on a target without an engine, every target still has app and screen.
+const plainEngine = defineEngine({ name: 'plain', version: '1.0.0', spiVersion: 1 });
+const plainConfig = { targets: [{ engine: plainEngine, platform: 'plain' }, { engine: handsetEngine }] } satisfies E2EConfig;
+test.extend<{}, {}, typeof plainConfig>()('opens on a string platform', async ({ app, screen: view }) => {
+  await app.open('/');
+  void view;
+});
+const enginelessConfig = { targets: [{ name: 'api', platform: 'api' }, { engine: handsetEngine }] } satisfies E2EConfig;
+const enginelessTest = test.extend<{}, {}, typeof enginelessConfig>();
+enginelessTest('opens beside a target without an engine', async ({ app, screen: view, handset }) => {
+  await app.open('/');
+  void view;
+  if (handset !== undefined) await handset.closeApp();
+});
+// @ts-expect-error app has test scope on the target without an engine
+enginelessTest.beforeAll(async ({ app }) => { void app; });
+// With as const, a target's own platform is a literal, so a platform check narrows the fixtures again.
+const constConfig = {
+  targets: [
+    { name: 'api', platform: 'api', app: { url: 'http://localhost:3000' } },
+    { engine: plainEngine, platform: 'plain', app: { url: 'http://localhost:3000', command: { executable: 'pnpm', args: ['dev'] } } },
+    { engine: handsetEngine, app: { bundleId: 'dev.shop.app', launchArguments: ['-reset'], permissions: { camera: 'grant' } } },
+  ],
+} as const satisfies E2EConfig;
+test.extend<{}, {}, typeof constConfig>()('narrows a target platform', async ({ app, platform, handset }) => {
+  await app.open('/');
+  if (platform === 'ios') await handset.closeApp();
+  platform satisfies 'api' | 'plain' | 'ios';
+});
+// With an E2EConfig type annotation, the inferred engine types are lost, so engine fixtures aren't typed.
+const annotatedConfig: E2EConfig = mixedConfig;
+// @ts-expect-error handset is absent from the annotated config type
+test.extend<{}, {}, typeof annotatedConfig>()('names handset', async ({ handset }) => { void handset; });
+const inferredEngine = defineEngine({ name: 'tv', version: '1.0.0', spiVersion: 1, platform: 'tv', isolation: 'worker' });
+void (inferredEngine.platform satisfies 'tv' | undefined);
+void (inferredEngine.isolation satisfies 'worker' | undefined);
+// @ts-expect-error the literal 'ios' requires platform: 'ios' in the spec
+defineEngine<{}, 'ios'>({ name: 'tv', version: '1.0.0', spiVersion: 1 });
+// @ts-expect-error the literal 'worker' requires isolation: 'worker' in the spec
+defineEngine<{}, string, 'worker'>({ name: 'tv', version: '1.0.0', spiVersion: 1 });
 
 // A test, a group, and a call each pin a configured agent by name.
 test('as the buyer', { agent: 'buyer' }, async () => {});
@@ -1051,6 +1293,19 @@ VERDICT_RULES satisfies string;
 // A runtime hard stop narrows to the AgentError the step rethrows untouched.
 declare const thrown: unknown;
 if (isRuntimeHardStop(thrown)) thrown.code satisfies string;
+// An executor registers a key by name and value, or an environment's, and redacts text it cuts itself.
+registerProviderKey('agent.key', 'value') satisfies void;
+registerProviderKeys({ OPENAI_API_KEY: 'value', UNSET: undefined }) satisfies void;
+registerProviderKeys(process.env) satisfies void;
+redactSecrets('text') satisfies string;
+declare const stepContext: StepExecutorContext;
+redactStepText(stepContext, 'text') satisfies string;
+// @ts-expect-error a key is registered under a name: the marker shows it
+registerProviderKey('value');
+// @ts-expect-error only text is redacted: an object's strings are the caller's to walk
+redactSecrets({ text: 'text' });
+// @ts-expect-error text is redacted for a step: the step's context comes first
+redactStepText('text');
 // A grammar tool's result is a rendered screen: text, or text with its screenshot.
 declare const rendered: ScreenOutput;
 if (typeof rendered !== 'string') rendered.pixels.mediaType satisfies string;
@@ -1081,6 +1336,7 @@ report.run.results[0]!.expectedFailure?.reason satisfies string | undefined;
 report.run.results[0]!.attempts[0]!.expectedFailure?.error?.code satisfies string | undefined;
 report.run.filters?.[0]?.outcome satisfies 'failed' | 'timed-out' | undefined;
 ({ cause: 'fixme', reason: 'fixme: crashes on Android' }) satisfies NonNullable<Report['run']['results'][number]['skip']>;
+({ cause: 'todo', reason: 'todo' }) satisfies NonNullable<Report['run']['results'][number]['skip']>;
 // @ts-expect-error only a filtered skip names the test filter that left the test out
 ({ cause: 'explicit', reason: 'not on CI', filter: 'jev' }) satisfies NonNullable<Report['run']['results'][number]['skip']>;
 // The change the filters judged is counts only, never a file list: base and files together once git measured it, else why no filter ran.
@@ -1147,6 +1403,59 @@ void (expect(await readBody()).toMatchSchema(userSchema) satisfies { id: number 
 void (expect.soft(await readBody()).toMatchSchema(userSchema) satisfies { id: number } | undefined);
 void (expect(JSON.parse('{}')).toMatchSchema(userSchema) satisfies { id: number });
 void (expect.soft(JSON.parse('{}')).toMatchSchema(userSchema) satisfies { id: number } | undefined);
+
+// request: each call returns the WebResponse waitForResponse and route.fetch() return.
+test('request', async ({ request }) => {
+  void (request satisfies APIRequest);
+  const created = await request.post('/api/orders', { json: { sku: 'A1' }, headers: { authorization: 'Bearer t' } });
+  void (created satisfies WebResponse);
+  void (created.status satisfies number);
+  void ((await created.body()) satisfies Buffer);
+  // @ts-expect-error json() is unknown unless the caller names a type
+  void (await created.json()).id;
+  void ((await created.json<{ id: number }>()).id satisfies number);
+  void (expect(await created.json()).toMatchSchema(userSchema) satisfies { id: number });
+  expect(created.status).toBe(201);
+  await request.fetch('/api/orders', { method: 'PUT', body: 'raw' });
+  await request.get('/api/export', { timeout: 0 });
+  await request.get('/api/login', { redirect: 'manual' });
+  await request.get('/api/login', { redirect: 'follow' });
+  await request.get('/api/login', { redirect: 'error' });
+  // @ts-expect-error redirect accepts only follow, manual, or error
+  await request.get('/api/login', { redirect: 'none' });
+  // @ts-expect-error a timeout is milliseconds, not a string
+  await request.get('/api/export', { timeout: '45s' });
+  // @ts-expect-error the method goes in request.fetch's options, not a shorthand's
+  await request.get('/api/orders', { method: 'POST' });
+  // @ts-expect-error a body is a string; an object goes in json
+  await request.post('/api/orders', { body: { sku: 'A1' } });
+  // toBeOK takes a response, on every expect form, and not a union that may hold something else.
+  const maybe = created as WebResponse | undefined;
+  // @ts-expect-error a response or undefined is not a response
+  expect(maybe).toBeOK();
+  // @ts-expect-error a response or undefined is not a response, negated too
+  expect(maybe).not.toBeOK();
+  // @ts-expect-error a response or undefined is not a response, soft too
+  expect.soft(maybe).toBeOK();
+  // @ts-expect-error a response or undefined is not a response, polled too
+  void expect.poll(() => maybe).toBeOK();
+  void (expect(created).toBeOK() satisfies void);
+  void (expect(created).not.toBeOK() satisfies void);
+  void (expect.soft(created).toBeOK() satisfies void);
+  void (expect.poll(() => request.get('/api/orders')).toBeOK() satisfies Promise<void>);
+  // @ts-expect-error toBeOK takes a response, not its status
+  expect(created.status).toBeOK();
+  // @ts-expect-error toBeOK takes a response, negated too
+  expect(created.status).not.toBeOK();
+  // @ts-expect-error toBeOK takes a response, soft too
+  expect.soft(created.status).toBeOK();
+  // @ts-expect-error toBeOK takes a response, polled too
+  void expect.poll(() => 1).toBeOK();
+});
+// @ts-expect-error a project fixture typed as its own `request` conflicts with the built-in one
+test.extend<{ request: { hello(): string } }>({ request: async ({}, use) => { await use({ hello: () => 'mine' }); } });
+// @ts-expect-error request is a test fixture, so a worker fixture cannot name it
+test.extend<{}, { seeded: number }>({ seeded: [async ({ request }, use) => { void request; await use(1); }, { scope: 'worker' }] });
 // @ts-expect-error A function isn't inferred from a return-only generic.
 void expect(await readBody()).toPass();
 

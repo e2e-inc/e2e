@@ -8,6 +8,7 @@ import {
   type OperationContext,
   type PointerAction,
   type SemanticNode,
+  type ViewportIntersection,
   type ViewportPoint,
   type ViewportSize,
 } from '../engine/surface.ts';
@@ -23,7 +24,7 @@ import {
 import { requireKey } from '../internal/keys.ts';
 import { isPixelPoint, resolveScreenPoint } from '../internal/geometry.ts';
 import { describeExpression, expressionHints, filterSpine } from './expression.ts';
-import { abortError, cancelledError, Deadline, POLL_INTERVAL_MS, pollDelay, ReadWindow, sleep, StepDeadline, stepTimeout } from '../internal/time.ts';
+import { abortError, cancelledError, Deadline, POLL_INTERVAL_MS, pollDelay, pollReads, ReadWindow, sleep, StepDeadline, stepTimeout } from '../internal/time.ts';
 import { timestamp } from '../internal/ids.ts';
 import { obj } from '../internal/objects.ts';
 import { targetLabel } from '../cache/trace.ts';
@@ -212,6 +213,14 @@ export class LocatorEngine {
    */
   private checkAction(action: LocatorAction): void {
     if (!this.session.actions.has(action.kind)) {
+      if (action.kind === 'setInputFilePayloads') {
+        throw new ConfigurationError(
+          'UNSUPPORTED_CAPABILITY',
+          `in-memory files for setInputFiles are not available on this target; update its engine${
+            this.session.actions.has('setInputFiles') ? ' or pass a file path' : ''
+          }`,
+        );
+      }
       throw new ConfigurationError(
         'UNSUPPORTED_CAPABILITY',
         `the "${action.kind}" action is not available on this target: its engine declares ${
@@ -266,7 +275,8 @@ export class LocatorEngine {
           if (missingFrame === 'empty' && engineError.code === 'FRAME_NOT_FOUND') return [];
           if (!reads.deadline.expired()) {
             retried = cause;
-            await sleep(pollDelay(Date.now() - startedMs), this.signal);
+            const now = Date.now();
+            await sleep(Math.min(pollDelay(now - startedMs), reads.deadline.remaining(now)), this.signal);
             continue;
           }
         }
@@ -435,7 +445,41 @@ if (sampled && reads.cutOff(cause)) throw await notFound(cause);
     reads: ReadWindow,
     missingFrame: MissingFrame = 'wait',
   ): Promise<{ node: SemanticNode | null; count: number }> {
-    return this.readOne(expression, reads, missingFrame);
+    const { node, count } = await this.readOne(expression, reads, missingFrame);
+    return { node, count };
+  }
+
+  /**
+   * Reads the one current match and measures how much of it is inside the
+   * viewport, for `toBeInViewport`: one resolve, one read from it, and one
+   * measure of the same ref, all inside `reads`, never a second observation.
+   * Zero matches or a missing frame read as no node. A ref that went stale
+   * before it was read or measured is `stale`, so the poll samples again
+   * instead of reading the node as gone. An engine that cannot measure is
+   * refused before the resolve, so a missing match never hides it.
+   */
+  async readViewport(
+    expression: LocatorExpression,
+    reads: ReadWindow,
+  ): Promise<{ node: SemanticNode | null; count: number; stale: boolean; intersection?: ViewportIntersection }> {
+    if (!this.session.measuresViewport) {
+      throw new ConfigurationError(
+        'UNSUPPORTED_CAPABILITY',
+        'toBeInViewport is not available on this target: its engine does not implement viewportIntersection',
+      );
+    }
+    const { node, count, stale } = await this.readOne(expression, reads, 'empty');
+    if (stale) return { node: null, count: 1, stale };
+    if (node === null) return { node, count, stale };
+    try {
+      const intersection = await reads.read((timeoutMs) =>
+        this.session.viewportIntersection(node.ref, this.readOperation(timeoutMs)),
+      );
+      return { node, count, stale, intersection };
+    } catch (cause) {
+      if (asEngineError(cause)?.code === 'NODE_STALE') return { node, count, stale: true };
+      throw translateLocatorError(cause, expression);
+    }
   }
 
   /**
@@ -448,19 +492,24 @@ if (sampled && reads.cutOff(cause)) throw await notFound(cause);
     return node;
   }
 
+  /**
+   * Resolves and reads the one current match. A ref superseded between the
+   * resolve and the read is no node with `stale` set: most callers read it as
+   * gone, and `readViewport` samples again.
+   */
   private async readOne(
     expression: LocatorExpression,
     reads: ReadWindow,
     missingFrame: MissingFrame,
-  ): Promise<{ node: SemanticNode | null; count: number }> {
+  ): Promise<{ node: SemanticNode | null; count: number; stale: boolean }> {
 const ref = await this.singleOf(await this.resolveOnce(expression, reads, missingFrame), expression);
-    if (ref === null) return { node: null, count: 0 };
+    if (ref === null) return { node: null, count: 0, stale: false };
     try {
       const node = await reads.read((timeoutMs) => this.session.read(ref, this.readOperation(timeoutMs)));
-      return { node, count: 1 };
+      return { node, count: 1, stale: false };
     } catch (cause) {
       if (asEngineError(cause)?.code === 'NODE_STALE') {
-        return { node: null, count: 0 };
+        return { node: null, count: 0, stale: true };
       }
       throw translateLocatorError(cause, expression);
     }
@@ -478,6 +527,11 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
     timeoutMs?: number,
   ): Promise<void> {
     await this.performUntil(expression, action, this.deadline(timeoutMs));
+  }
+
+  /** Reports whether the target engine declares this locator action. */
+  supports(kind: LocatorAction['kind']): boolean {
+    return this.session.actions.has(kind);
   }
 
   /**
@@ -552,31 +606,29 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
     if (this.session.actions.has('scrollIntoView')) {
       await this.performUntil(expression, { kind: 'scrollIntoView' }, deadline);
     }
-    const notVisible = (cause?: unknown) =>
-      new TestError('LOCATOR_NOT_FOUND', `locator did not become visible with a box to act within: ${describeExpression(expression)}`, {
-        details: locatorDetails(expression, deadline.elapsed()),
-        ...(cause === undefined ? {} : { cause }),
-      });
-    const reads = this.reads(deadline);
-    const pollStartedMs = Date.now();
-    let sampled = false;
-    for (;;) {
-      let node: SemanticNode | null;
-      try {
-        ({ node } = await this.tryRead(expression, reads));
-      } catch (cause) {
-        if (sampled && reads.cutOff(cause)) throw notVisible(cause);
-        throw cause;
-      }
-      sampled = true;
-      if (isNodeVisible(node) && node.rect !== undefined) {
-        const origin = node.origin ?? node.rect;
-        await this.dispatchAt({ x: origin.x + offset.x, y: origin.y + offset.y }, action, deadline);
-        return;
-      }
-      if (deadline.expired()) throw notVisible();
-      await sleep(pollDelay(Date.now() - pollStartedMs), this.signal);
-    }
+    let origin: ViewportPoint | undefined;
+    await pollReads({
+      deadline,
+      signal: this.signal,
+      negated: false,
+      reads: this.reads(deadline),
+      evaluate: async (reads) => {
+        // A box read at the deadline could never be tapped: skip the read so the wait ends as LOCATOR_NOT_FOUND.
+        if (deadline.expired()) return false;
+        const { node } = await this.tryRead(expression, reads);
+        if (!isNodeVisible(node) || node.rect === undefined) return false;
+        origin = node.origin ?? node.rect;
+        return true;
+      },
+      onTimeout: (cause) =>
+        new TestError('LOCATOR_NOT_FOUND', `locator did not become visible with a box to act within: ${describeExpression(expression)}`, {
+          details: locatorDetails(expression, deadline.elapsed()),
+          ...(cause === undefined ? {} : { cause }),
+        }),
+    });
+    // pollReads returns only once `evaluate` answered true, which set `origin`.
+    const at = origin!;
+    await this.dispatchAt({ x: at.x + offset.x, y: at.y + offset.y }, action, deadline);
   }
 
   /** One pointer dispatch within a deadline, its engine error translated to the public taxonomy. */

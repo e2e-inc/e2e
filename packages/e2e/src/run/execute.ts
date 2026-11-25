@@ -6,7 +6,6 @@ import { isCiMode, type ResolvedConfig } from '@e2e-dev/core/lib/config/resolve'
 import { classifyError, ConfigurationError, E2EError, serializeError, sanitizeRecordedText, truncateUtf8, TestError, TestTimeoutError, withHint, type SerializedError } from '@e2e-dev/core/lib/internal/errors';
 import { isRuntimeSkip, runtimeSkipCause, type CaughtRuntimeSkip } from '../internal/skip.ts';
 import { lateExpectedFailureError } from '@e2e-dev/core/lib/internal/expected-failure';
-import { lateTimeoutError } from '@e2e-dev/core/lib/internal/test-timeout';
 import { settleExpectedFailure } from './expected-failure.ts';
 import type { ExecutorAttempt } from '@e2e-dev/core/lib/agent/executor';
 import { isModelUnreachable } from '@e2e-dev/core/lib/agent/error';
@@ -642,6 +641,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         ledger: sessionLedger(openSession, this.config.allSecrets),
         config: this.config,
         appOrigin: this.target.app.base?.origin,
+        appBase: this.target.app.base,
         artifacts: artifacts.sink,
         operation: (signal, timeoutMs) => this.op(attemptId, timeoutMs, signal),
         interrupt: this.interruptSignal,
@@ -706,6 +706,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
             ledger: sessionLedger(session, this.config.allSecrets),
             maxBytes: this.config.limits.maxObservationBytes,
             appOrigin: this.target.app.base?.origin,
+            appBase: this.target.app.base,
           }),
         );
       });
@@ -768,6 +769,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
           ledger: sessionLedger(session, this.config.allSecrets),
           maxBytes: this.config.limits.maxObservationBytes,
           appOrigin: this.target.app.base?.origin,
+          appBase: this.target.app.base,
         };
 
         holds = holdAttemptSteps({
@@ -816,9 +818,9 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
                 },
               }
             : {}),
-          setTimeout: (timeoutMs: number) => {
-            if (phase !== 'beforeEach' && phase !== 'body') throw lateTimeoutError();
-            return timeout.set(timeoutMs);
+          setTimeout: (update) => {
+            if (phase !== 'beforeEach' && phase !== 'body') return 'teardown';
+            return timeout.set(update(timeout.timeoutMs)) ? 'set' : 'ended';
           },
         },
         attemptEnd.signal,

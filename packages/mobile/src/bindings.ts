@@ -9,6 +9,7 @@
 import { createHash } from 'node:crypto';
 import type { createAgentDeviceClient } from 'agent-device';
 import { EngineError, obj, type EngineAppInfo, type EngineFinishInfo, type EnginePrepareInfo } from '@e2e-dev/core/engine';
+import type { MobilePlatform } from './options.ts';
 
 type AgentDeviceClientConfig = NonNullable<Parameters<typeof createAgentDeviceClient>[0]>;
 
@@ -51,6 +52,12 @@ export interface SlotBinding {
    * sessions across worker replacement and to find the lease for `record`.
    */
   readonly leaseId?: string | undefined;
+  /**
+   * The agent-device session the slot warmed under, when it is not the
+   * slot's own name: after `prepare` drops a slot, each later slot keeps the
+   * session it was bound under, so its worker resumes that session.
+   */
+  readonly session?: string | undefined;
 }
 
 /**
@@ -70,6 +77,40 @@ export interface DeviceSource {
 /** What a binding calls its device in progress and error lines: the name, else the id, else nothing. */
 export function deviceLabel(binding: Pick<SlotBinding, 'device' | 'deviceId'> | undefined): string | undefined {
   return binding?.device ?? binding?.deviceId;
+}
+
+/** An Apple simulator UDID. */
+const UDID = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
+/** An Android emulator's adb serial. */
+const EMULATOR_SERIAL = /^emulator-\d+$/;
+
+/** The fields agent-device commands select a device by: the platform, then one of a name, a simulator UDID, or an Android serial. */
+export interface DeviceSelection {
+  readonly platform: MobilePlatform;
+  readonly device?: string;
+  readonly udid?: string;
+  readonly serial?: string;
+}
+
+/** Whether a configured device string already reads as an id agent-device selects by: a simulator UDID or an emulator serial. */
+export function readsAsDeviceId(device: string): boolean {
+  return UDID.test(device) || EMULATOR_SERIAL.test(device);
+}
+
+/**
+ * The selection agent-device commands take for a binding: an id the pool
+ * discovered goes under the platform's id field (`udid` for a simulator,
+ * `serial` for an Android device), a configured string too when it reads as
+ * a UDID or an emulator serial, and any other string is a device name.
+ */
+export function deviceSelection(
+  platform: MobilePlatform,
+  binding: Pick<SlotBinding, 'device' | 'deviceId'> | undefined,
+): DeviceSelection {
+  const { device, deviceId } = binding ?? {};
+  const id = deviceId ?? (device !== undefined && readsAsDeviceId(device) ? device : undefined);
+  if (id === undefined) return obj({ platform, device });
+  return platform === 'android' ? { platform, serial: id } : { platform, udid: id };
 }
 
 /**
@@ -113,6 +154,7 @@ export function encodeBindings(bindings: readonly SlotBinding[]): string {
         client: binding.client,
         installedApp: binding.installedApp,
         leaseId: binding.leaseId,
+        session: binding.session,
       }),
     ),
   );
@@ -146,12 +188,13 @@ function isOptionalString(value: unknown): value is string | undefined {
 /** A binding as JSON parses it back, or as a provider returned it: nothing the engine did not write is trusted. */
 export function isSlotBinding(value: unknown): value is SlotBinding {
   if (typeof value !== 'object' || value === null) return false;
-  const { device, deviceId, daemon, client, installedApp, leaseId } = value as Record<keyof SlotBinding, unknown>;
+  const { device, deviceId, daemon, client, installedApp, leaseId, session } = value as Record<keyof SlotBinding, unknown>;
   return (
     isOptionalString(device) &&
     isOptionalString(deviceId) &&
     isOptionalString(installedApp) &&
     isOptionalString(leaseId) &&
+    isOptionalString(session) &&
     (daemon === undefined || isDaemon(daemon)) &&
     (client === undefined || isClientConfig(client))
   );

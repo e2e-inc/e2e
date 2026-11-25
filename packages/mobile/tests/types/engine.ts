@@ -1,13 +1,17 @@
 /** Compile-time assertions for the handle `mobile()` returns: named by this package, accepted wherever an engine handle is. */
 import type { EngineHandle, ViewportSize as CoreViewportSize } from '@e2e-dev/core/engine';
 import { mobile, type Device, type MobileEngine, type MobileFixtures, type ViewportSize } from '../../src/index.ts';
-import type { Device as EntryDevice, MobileEngine as EntryMobileEngine, ViewportSize as EntryViewportSize } from '../../src/engine-entry.ts';
+import type { Device as EntryDevice, MobileEngine as EntryMobileEngine, RemoteKey, ViewportSize as EntryViewportSize } from '../../src/engine-entry.ts';
 
 void (mobile({ platform: 'ios' }) satisfies MobileEngine);
 void (mobile({ platform: 'ios' }) satisfies EngineHandle<MobileFixtures>);
 declare const handle: EngineHandle<MobileFixtures>;
 void (handle satisfies MobileEngine);
 void (handle satisfies EntryMobileEngine);
+void (mobile({ platform: 'ios' }).platform satisfies 'ios' | undefined);
+void (mobile({ platform: 'android' }).isolation satisfies 'worker' | undefined);
+// @ts-expect-error an iOS handle isn't an Android one
+void (mobile({ platform: 'ios' }).platform satisfies 'android' | undefined);
 
 declare const device: Device;
 declare const entryDevice: EntryDevice;
@@ -29,3 +33,8 @@ device.viewport({ width: 390, height: 844 });
 viewport.width = 400;
 // @ts-expect-error viewport dimensions are readonly.
 viewport.height = 800;
+
+void device.pressRemote('menu');
+// @ts-expect-error pressRemote takes the lowercase remote keys, not the keyboard's capitalised names
+void device.pressRemote('Menu');
+void ('play-pause' satisfies RemoteKey);

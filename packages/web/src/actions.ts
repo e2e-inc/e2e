@@ -7,6 +7,7 @@ import {
   isClassified,
   isNavigationRace,
   isPwTimeout,
+  isSelectorParseError,
   message,
   nearestPixel,
   performElementSwipe,
@@ -25,7 +26,7 @@ import type { ConnectionBudget } from './operation-budget.ts';
 const DEFAULT_LONG_PRESS_MS = 500;
 
 /** The keys a click holds, as Playwright's `modifiers` takes them; the contract spells them the same. */
-function heldKeys(action: Extract<LocatorAction, { kind: 'tap' | 'doubleTap' | 'secondaryTap' }>): { modifiers?: KeyModifier[] } {
+function heldKeys(action: Extract<LocatorAction, { kind: 'tap' | 'doubleTap' | 'secondaryTap' | 'multiTap' }>): { modifiers?: KeyModifier[] } {
   return action.modifiers === undefined ? {} : { modifiers: [...action.modifiers] };
 }
 
@@ -236,11 +237,7 @@ function radioKind(element: ElementHandle<Element>): Promise<'native' | 'aria' |
  * exist or sits under a directory the runner cannot search fails before
  * anything is clicked.
  */
-async function uploadFiles(target: ActionTarget, paths: readonly string[], operation: ConnectionBudget): Promise<void> {
-  for (const file of paths) {
-    const stats = statPath(file);
-    if (stats instanceof Error) throw new TestError('INVALID_ARGUMENT', `setInputFiles path does not exist or is under a directory the runner cannot search: ${stats.message}`);
-  }
+async function uploadFiles(target: ActionTarget, files: Parameters<ElementHandle['setInputFiles']>[0], operation: ConnectionBudget): Promise<void> {
   const deadline = new Deadline(operation.timeoutMs);
   const remaining = (): number => Math.max(1, deadline.remaining());
   const element =
@@ -248,7 +245,7 @@ async function uploadFiles(target: ActionTarget, paths: readonly string[], opera
   try {
     if (await isFileInput(element)) {
       operation.signal.throwIfAborted();
-      await element.setInputFiles([...paths], { timeout: remaining() });
+      await element.setInputFiles(files, { timeout: remaining() });
       return;
     }
     const page = await targetPage(target);
@@ -264,7 +261,7 @@ async function uploadFiles(target: ActionTarget, paths: readonly string[], opera
       });
     });
     operation.signal.throwIfAborted();
-    await chooser.setFiles([...paths], { timeout: remaining() });
+    await chooser.setFiles(files, { timeout: remaining() });
   } finally {
     if (target.kind === 'locator') void element.dispose().catch(() => undefined);
   }
@@ -297,6 +294,10 @@ export async function dispatchLocatorAction(
       return;
     case 'doubleTap':
       await locator.dblclick({ timeout, ...heldKeys(action) });
+      return;
+    case 'multiTap':
+      // One click sequence with a rising `detail`, as a person's triple click is.
+      await locator.click({ clickCount: action.count, timeout, ...heldKeys(action) });
       return;
     case 'secondaryTap':
       await locator.click({ button: 'right', timeout, ...heldKeys(action) });
@@ -361,8 +362,19 @@ export async function dispatchLocatorAction(
       return;
     }
     case 'setInputFiles':
-      await uploadFiles(target, action.paths, operation);
+      for (const file of action.paths) {
+        const stats = statPath(file);
+        if (stats instanceof Error) throw new TestError('INVALID_ARGUMENT', `setInputFiles path does not exist or is under a directory the runner cannot search: ${stats.message}`);
+      }
+      await uploadFiles(target, [...action.paths], operation);
       return;
+    case 'setInputFilePayloads': {
+      const files = action.files.map((file) => ({
+        ...file, buffer: Buffer.from(file.buffer.buffer, file.buffer.byteOffset, file.buffer.byteLength),
+      }));
+      await uploadFiles(target, files, operation);
+      return;
+    }
     case 'dragTo': {
       const other = await lookup(action.target);
       operation.signal.throwIfAborted();
@@ -496,6 +508,10 @@ export function classifyActionError(rawCause: unknown, action: LocatorAction): E
   if (isClassified(rawCause)) return rawCause;
   const text = redactSensitive(message(rawCause), action);
   const cause = isSensitive(action) ? undefined : rawCause;
+  // A selector the engine cannot parse says nothing about the element, so it is decided before every message-shaped branch: a selector that happens to contain "not found" or "not editable" is not read as stale or unactionable.
+  if (isSelectorParseError(rawCause)) {
+    return new TestError('INVALID_LOCATOR', `${action.kind} failed: ${text}`, cause === undefined ? {} : { cause });
+  }
   if (/strict mode violation/i.test(text)) {
     if (POST_DISPATCH_PATTERN.test(text)) {
       return new EngineError(

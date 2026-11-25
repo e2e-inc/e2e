@@ -16,6 +16,7 @@ import { isTextMatch, normalizeText } from '../internal/text.ts';
 import type {
   ActionOptions,
   ClickOptions,
+  FilePayload,
   LongPressOptions,
   Locator,
   Momentum,
@@ -48,7 +49,9 @@ import {
 } from './expression.ts';
 import { type Deadline, isOperationTimeout, POLL_INTERVAL_MS, pollReads } from '../internal/time.ts';
 import { SampleHistory } from '../expect/samples.ts';
+import type { ArtifactSink } from '../run/fixtures.ts';
 import type { ScreenshotContext } from '../run/screenshots.ts';
+import { captureMatch } from './element-screenshot.ts';
 
 export interface SecretResolver {
   /**
@@ -62,6 +65,8 @@ export interface ScreenContext {
   readonly engine: LocatorEngine;
   readonly steps: StepRecorder;
   readonly secrets: SecretResolver;
+  /** Where `locator.screenshot()` keeps its file, and how it joins the report. */
+  readonly artifacts: ArtifactSink;
   /** Base directory for resolving relative file paths, e.g. uploads. */
   readonly projectRoot?: string;
   /** Where `toHaveScreenshot` keeps screenshots; absent outside a test. */
@@ -140,6 +145,8 @@ const WAIT_FOR_STATES: readonly string[] = ['attached', 'detached', 'visible', '
 const ABSENCE_STATES: ReadonlySet<string> = new Set(['detached', 'hidden']);
 
 type WaitForState = NonNullable<NonNullable<Parameters<Locator['waitFor']>[0]>['state']>;
+/** The actions a tap, click, double tap, or secondary tap sends. */
+type TapAction = Extract<LocatorAction, { kind: 'tap' | 'doubleTap' | 'secondaryTap' | 'multiTap' }>;
 
 /**
  * Whether the one match, or its absence, is in `state`: `attached` is any
@@ -410,13 +417,23 @@ class LocatorImpl extends ScreenImpl implements Locator {
   }
 
   /**
-   * One tap of the node: the platform's own, or, with a position, the pointer
-   * dispatched at that offset of the node's box.
+   * `count` taps of the node: the platform's own, or, with a position, the
+   * pointer dispatched at that offset of the node's box. Two taps are the
+   * `doubleTap` kind, so `tap({ count: 2 })` is `doubleTap()` on every
+   * engine; three or more are `multiTap`.
    */
   private tapWith(api: 'tap' | 'click', options: TapOptions | undefined): Promise<void> {
-    rejectUnknownOptions(api, options, ['timeout', 'position', 'modifiers']);
+    rejectUnknownOptions(api, options, ['timeout', 'position', 'modifiers', 'count']);
     const modifiers = requireModifiers(options?.modifiers, api);
-    if (options?.position === undefined) return this.dispatchTap(api, 'tap', modifiers, options?.timeout);
+    const count = requireTapCount(options?.count, api);
+    if (options?.position === undefined) {
+      if (count === 1) return this.dispatchTap(api, { kind: 'tap', ...modifiers }, options?.timeout);
+      if (count === 2) return this.dispatchTap(api, { kind: 'doubleTap', ...modifiers }, options?.timeout, count);
+      return this.dispatchTap(api, { kind: 'multiTap', count, ...modifiers }, options?.timeout, count);
+    }
+    if (count !== 1) {
+      throw new TestError('INVALID_ARGUMENT', `${api}() does not take count with a position yet; drop one of them`);
+    }
     if (modifiers.modifiers !== undefined) {
       throw new TestError('INVALID_ARGUMENT', `${api}() does not take modifiers with a position yet; drop one of them`);
     }
@@ -448,19 +465,18 @@ class LocatorImpl extends ScreenImpl implements Locator {
     options: ClickOptions | undefined,
   ): Promise<void> {
     rejectUnknownOptions(api, options, ['timeout', 'modifiers']);
-    return this.dispatchTap(api, kind, requireModifiers(options?.modifiers, api), options?.timeout);
+    return this.dispatchTap(api, { kind, ...requireModifiers(options?.modifiers, api) }, options?.timeout);
   }
 
-  /** One tap kind with the keys it holds, named after the node in the step label. */
-  private dispatchTap(
-    api: string,
-    kind: 'tap' | 'doubleTap' | 'secondaryTap',
-    held: { modifiers?: readonly KeyModifier[] },
-    timeout: number | undefined,
-  ): Promise<void> {
-    const label = held.modifiers === undefined ? this.label : `${this.label} with ${held.modifiers.join('+')}`;
-    return this.context.steps.run('locator', `locator.${api}`, label, () =>
-      this.context.engine.perform(this.expression, { kind, ...held }, timeout),
+  /**
+   * One tap-family action as a step labelled after the node, then the
+   * `count` the caller asked for when it names one, then the keys held.
+   */
+  private dispatchTap(api: string, action: TapAction, timeout: number | undefined, count?: number): Promise<void> {
+    const times = count === undefined ? '' : ` ${count} times`;
+    const held = action.modifiers === undefined ? '' : ` with ${action.modifiers.join('+')}`;
+    return this.context.steps.run('locator', `locator.${api}`, `${this.label}${times}${held}`, () =>
+      this.context.engine.perform(this.expression, action, timeout),
     );
   }
 
@@ -541,14 +557,38 @@ class LocatorImpl extends ScreenImpl implements Locator {
     return this.perform('hover', { kind: 'hover' }, options);
   }
 
-  setInputFiles(paths: string | readonly string[], options?: ActionOptions): Promise<void> {
-    const list = typeof paths === 'string' ? [paths] : [...paths];
-    if (list.some((entry) => typeof entry !== 'string' || entry.trim() === '')) {
-      throw new TestError('INVALID_ARGUMENT', 'setInputFiles paths must be non-empty strings');
+  setInputFiles(files: string | readonly string[] | FilePayload | readonly FilePayload[], options?: ActionOptions): Promise<void> {
+    const list: readonly unknown[] = Array.isArray(files) ? [...files] : [files];
+    if (list.some((entry) => typeof entry === 'string') && list.some(isPlainObject)) {
+      throw new TestError('INVALID_ARGUMENT', 'File paths cannot be mixed with buffers');
     }
-    const base = this.context.projectRoot;
-    const resolved = list.map((entry) => (base === undefined ? entry : nodePath.resolve(base, entry)));
-    return this.perform('setInputFiles', { kind: 'setInputFiles', paths: resolved }, options);
+    if (list.length === 0 && !this.context.engine.supports('setInputFiles') &&
+        this.context.engine.supports('setInputFilePayloads')) {
+      return this.perform('setInputFiles', { kind: 'setInputFilePayloads', files: [] }, options);
+    }
+    if (list.length === 0 || typeof list[0] === 'string') {
+      const base = this.context.projectRoot;
+      const paths = list.map((entry) => {
+        if (typeof entry !== 'string' || entry.trim() === '') {
+          throw new TestError('INVALID_ARGUMENT', 'setInputFiles paths must be non-empty strings');
+        }
+        return base === undefined ? entry : nodePath.resolve(base, entry);
+      });
+      return this.perform('setInputFiles', { kind: 'setInputFiles', paths }, options);
+    }
+    const payloads = list.map((entry) => {
+      if (!isPlainObject(entry) || typeof entry['name'] !== 'string' || entry['name'].trim() === '' ||
+          typeof entry['mimeType'] !== 'string' || !Buffer.isBuffer(entry['buffer'])) {
+        throw new TestError('INVALID_ARGUMENT', 'setInputFiles payloads require a non-empty name, a mimeType string, and a Buffer');
+      }
+      rejectUnknownOptions('setInputFiles payload', entry, ['name', 'mimeType', 'buffer']);
+      return { name: entry['name'], mimeType: entry['mimeType'], buffer: entry['buffer'] };
+    });
+    if (payloads.reduce((size, file) => size + file.buffer.byteLength, 0) >= 50 * 1024 * 1024) {
+      throw new TestError('INVALID_ARGUMENT', 'Cannot set buffer larger than 50Mb, please write it to a file and pass its path instead.');
+    }
+    const snapshots = payloads.map((file) => ({ ...file, buffer: new Uint8Array(file.buffer) }));
+    return this.perform('setInputFiles', { kind: 'setInputFilePayloads', files: snapshots }, options);
   }
 
   dragTo(target: Locator, options?: ActionOptions): Promise<void> {
@@ -624,6 +664,18 @@ class LocatorImpl extends ScreenImpl implements Locator {
   async boundingBox(): Promise<{ x: number; y: number; width: number; height: number } | null> {
     const node = await this.readGuarded(false);
     return node.rect ?? null;
+  }
+
+  screenshot(label?: string): Promise<string> {
+    if (label !== undefined && typeof label !== 'string') {
+      throw new TestError('INVALID_ARGUMENT', `locator.screenshot() takes a label for the file's name, got ${describeValue(label)}; the file is saved with the attempt's artifacts and its path is returned`);
+    }
+    const { artifacts, engine, steps } = this.context;
+    return steps.run('locator', 'locator.screenshot', label === undefined ? this.label : `${this.label} → ${label}`, async () => {
+      const relative = await captureMatch(engine, artifacts.dir, this.expression, label);
+      steps.attachArtifact(artifacts.register('screenshot', relative));
+      return nodePath.join(artifacts.dir, relative);
+    });
   }
 
   async count(): Promise<number> {
@@ -813,6 +865,15 @@ function validateSwipeDuration(duration: number | undefined): number | undefined
     );
   }
   return duration;
+}
+
+/** A tap `count`: a positive safe integer, 1 when unset. Each engine keeps its own upper limit. */
+function requireTapCount(value: unknown, api: string): number {
+  if (value === undefined) return 1;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+    throw new TestError('INVALID_ARGUMENT', `${api}() count must be a positive safe integer, got ${describeValue(value)}`);
+  }
+  return value;
 }
 
 /**
