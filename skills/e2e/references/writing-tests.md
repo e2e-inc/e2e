@@ -686,11 +686,18 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
   none or two fails the next step with `ACTION_FAILED`, an unsupported
   option with `INVALID_ARGUMENT`.
 - `unrouteAll()` removes every route; configured headers stay.
-- `waitForResponse(pattern, { timeout? })`: resolves once the headers
-  arrive, with `{ url, status, headers, body(), json(), text() }`; the body
-  readers wait for the body (up to the action timeout) and reject with
-  `ACTION_FAILED` when it could not be read. Start the wait before the
-  request, including the first `browser.goto` or `app.open`.
+- `waitForResponse(pattern | predicate, { timeout? })`: resolves once the
+  headers arrive, with `{ url, status, headers, request, body(), json(),
+  text() }`; the body readers wait for the body (up to the action timeout)
+  and reject with `ACTION_FAILED` when it could not be read. Start the wait
+  before the request, including the first `browser.goto` or `app.open`.
+- `waitForRequest(pattern | predicate, { timeout? })`: resolves when the page
+  sends the request, with `{ url, method, headers, postData? }`, the
+  `route.request` shape.
+- A wait predicate gets each response (or request) and matches on a truthy
+  or resolved truthy value, as Playwright's does:
+  `(response) => response.request.method === 'POST' && response.status === 201`.
+  What it throws fails the step as is (`expect` keeps `ASSERTION_FAILED`).
 - `cookies(urls?)`: every cookie, or only those a request to one URL or a
   list would carry; a relative URL resolves against the app URL.
 - `setCookies([...])`: a target is an http(s) URL or a domain.
@@ -734,11 +741,13 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
 A `route`, `unroute`, `waitForResponse`, or `waitForURL` pattern is a glob
 string or `RegExp`, in Playwright's grammar (`*` stays within one path
 segment, `**` crosses `/`, `{a,b}` is either, `?` is literal); a relative
-one resolves against the base URL. `route`, `unroute`, and `waitForResponse`
-also take `{ method, url }` to match one HTTP method too, case-insensitively.
+one resolves against the base URL. `route`, `unroute`, `waitForResponse`, and
+`waitForRequest` also take `{ method, url }` to match one HTTP method too,
+case-insensitively.
 A method matches exactly that method: `GET` does not answer `HEAD`. `unroute`
 removes routes registered with the same pattern, method included, rather than
-URL-matching them. A predicate function is `INVALID_ARGUMENT`.
+URL-matching them. A predicate function is `INVALID_ARGUMENT` for `route`,
+`unroute`, and `waitForURL`.
 
 ## Habits
 

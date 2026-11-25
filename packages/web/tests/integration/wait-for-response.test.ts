@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import type { Page } from 'playwright-core';
 import { withTimeout, type EngineFixtureContext } from '@e2e-dev/core/engine';
 import { PlaywrightSurface } from '../../src/surface.ts';
-import { createBrowserFixture, type Browser } from '../../src/browser.ts';
+import { createBrowserFixture, type Browser, type PageResponse } from '../../src/browser.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
 /**
@@ -29,6 +29,10 @@ function startBodyServer(): Promise<{ server: Server; url: string }> {
       case '/api/full':
         response.writeHead(200, { 'content-type': 'application/json' });
         response.end(JSON.stringify({ ok: true }));
+        return;
+      case '/api/orders':
+        response.writeHead(request.method === 'POST' ? 201 : 200, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ method: request.method }));
         return;
       case '/api/empty':
         response.writeHead(200, { 'content-type': 'text/plain', 'content-length': '0' });
@@ -70,7 +74,7 @@ function startBodyServer(): Promise<{ server: Server; url: string }> {
   });
 }
 
-describe('browser.waitForResponse bodies', () => {
+describe('browser.waitForResponse and waitForRequest', () => {
   const surface = new PlaywrightSurface({});
   const artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-wait-for-response-'));
   const signal = new AbortController().signal;
@@ -181,6 +185,81 @@ describe('browser.waitForResponse bodies', () => {
       code: 'ACTION_FAILED',
       message: 'waitForResponse: response body did not finish within 300ms',
     });
+  });
+
+  /** Opens the page, then runs `requests` in it without waiting on them, as an app's own fetches. */
+  async function fire(requests: string): Promise<void> {
+    await page.evaluate(`void (async () => { ${requests} })().catch(() => undefined)`);
+  }
+
+  it('returns the response a predicate accepts, the same object it saw, with its request', async () => {
+    page = await surface.ensurePage();
+    await page.goto(`${origin}/`);
+    let seen: PageResponse | undefined;
+    const [response] = await Promise.all([
+      browser.waitForResponse((candidate) => {
+        if (candidate.request.method !== 'POST') return false;
+        seen = candidate;
+        return true;
+      }),
+      fire(`await fetch('/api/orders'); await fetch('/api/orders', { method: 'POST', body: '{"sku":1}' });`),
+    ]);
+    expect(response).toBe(seen);
+    expect(response.status).toBe(201);
+    expect(response.request).toMatchObject({ url: `${origin}/api/orders`, method: 'POST', postData: '{"sku":1}' });
+    await expect(response.json()).resolves.toEqual({ method: 'POST' });
+  });
+
+  it('takes an async predicate that reads bodies, bounded by the wait and not the action budget', async () => {
+    page = await surface.ensurePage();
+    await page.goto(`${origin}/`);
+    operationBudgetMs = 300;
+    const [response] = await Promise.all([
+      browser.waitForResponse(async (candidate) => (await candidate.text()) === 'slow-body', { timeout: 2_000 }),
+      fire(`await fetch('/api/full').then((r) => r.text()); await fetch('/api/slow').then((r) => r.text());`),
+    ]);
+    expect(response.url).toBe(`${origin}/api/slow`);
+    await expect(response.text()).resolves.toBe('slow-body');
+  });
+
+  it('fails the wait with what a predicate throws, untouched', async () => {
+    page = await surface.ensurePage();
+    await page.goto(`${origin}/`);
+    const thrown = new Error('not this one');
+    const [failure] = await Promise.all([
+      browser.waitForResponse(() => { throw thrown; }).catch((caught: unknown) => caught),
+      fire(`await fetch('/api/full');`),
+    ]);
+    expect(failure).toBe(thrown);
+    expect(thrown.message).toBe('not this one');
+    const [value] = await Promise.all([
+      // oxlint-disable-next-line no-throw-literal -- a thrown non-Error is what the test checks
+      browser.waitForRequest(async () => { throw 'a string'; }).catch((caught: unknown) => caught),
+      fire(`await fetch('/api/full');`),
+    ]);
+    expect(value).toBe('a string');
+  });
+
+  it('refuses an option it does not take', async () => {
+    const options = { signal: new AbortController().signal } as unknown as { timeout: number };
+    expect(() => browser.waitForResponse('**/api/full', options)).toThrow('browser.waitForResponse options has no key "signal"');
+    expect(() => browser.waitForRequest('**/api/full', options)).toThrow('browser.waitForRequest options has no key "signal"');
+  });
+
+  it('waits for a request by glob, method, and predicate, before its response arrives', async () => {
+    page = await surface.ensurePage();
+    await page.goto(`${origin}/`);
+    const [byGlob, byMethod, byPredicate] = await Promise.all([
+      browser.waitForRequest('**/api/endless'),
+      browser.waitForRequest({ method: 'post', url: '**/api/orders' }),
+      browser.waitForRequest((request) => request.postData === '{"sku":2}'),
+      fire(`void fetch('/api/endless'); await fetch('/api/orders'); await fetch('/api/orders', { method: 'POST', body: '{"sku":2}' });`),
+    ]);
+    expect(byGlob).toMatchObject({ url: `${origin}/api/endless`, method: 'GET' });
+    expect(byGlob.postData).toBeUndefined();
+    expect(byMethod).toMatchObject({ method: 'POST', postData: '{"sku":2}' });
+    expect(byPredicate).toMatchObject({ url: `${origin}/api/orders`, method: 'POST' });
+    expect(byPredicate.headers['content-type']).toBe('text/plain;charset=UTF-8');
   });
 
   it('keeps the status of a redirect and rejects reading its body', async () => {

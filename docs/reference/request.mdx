@@ -85,8 +85,9 @@ A `GET` or `HEAD` request takes no body.
 ### `WebResponse`
 
 The response, with its body already read. It is the same type the web
-engine's [`browser.waitForResponse`](/reference/web#waitforresponse) and
-`route.fetch()` return.
+engine's `route.fetch()` returns.
+[`browser.waitForResponse`](/reference/web#waitforresponse) returns it with
+the request it answers as `request`.
 
 | Member | Type |
 | --- | --- |
