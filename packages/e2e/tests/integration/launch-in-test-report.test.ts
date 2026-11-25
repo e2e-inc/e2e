@@ -173,7 +173,12 @@ test('catches a launch whose options throw when read', async ({ app }) => {
 
 test('catches a launch that cannot make its output directory', async ({ app }) => {
   await app.open();
-  globalThis.launchReportRefused.mkdtemp = await refusal(launchUnder('/nonexistent-e2e-launch-tmp', () => open()));
+  const scratch = mkdtempSync(path.join(os.tmpdir(), 'e2e-launch-root-'));
+  try {
+    globalThis.launchReportRefused.mkdtemp = await refusal(launchUnder(path.join(scratch, 'missing'), () => open()));
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 });
 
 test('catches a launch that fails to start and then to remove its output directory', async ({ app }) => {
