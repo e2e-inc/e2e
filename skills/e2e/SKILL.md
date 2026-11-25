@@ -47,18 +47,30 @@ https://github.com/e2e-inc/e2e/tree/main/examples.
 
 ## Workflow
 
-1. Inspect `e2e.config.ts` (or `.mts`/`.js`/`.mjs`) and `package.json`. If e2e
-   is not installed and the user asked for it, read `setup`.
+1. Inspect `e2e.config.ts` (or `.mts`/`.js`/`.mjs`), `package.json`, and
+   existing tests, fixtures, helpers, and page objects under `tests/`. Reuse
+   existing fixtures, helpers, and locators instead of duplicating setup. If
+   e2e is not installed and the user asked for it, read `setup`.
 2. Read the one matching reference (`writing-tests`: always read "A complete
    file" and "Structure" first, then only the API sections you need; `mcp`
    when driving live, writing steps as you walk and preferring `run_code`;
    `agent` when adding `agent.*` steps).
 3. Shape each file per `writing-tests` ("Structure"): one top-level `describe`
    per feature, one behavior and one goal per test, arrange -> act -> assert
-   with every `expect` and `agent.assert` at the end. Never assert mid-way
-   (use `.waitFor()` on a narrowed locator); name repeated locators/values;
-   own server data and cleanup in `test.extend` fixtures (`try`/`finally`).
+   with every `expect` and `agent.assert` at the end. When `e2e.config.ts`
+   configures a model or executor under `agents`, write user flows (forms,
+   buttons, cart/CRUD mutations, navigation, auth) with `agent.act` (values in
+   `params`), even if an existing setup or login file uses `screen.*`. Never
+   assert mid-way (use `.waitFor()` on a narrowed locator); name repeated
+   locators/values; own server data and cleanup in `test.extend` fixtures
+   (`try`/`finally`).
 4. **Audit every test before running:**
+   - **Prefer `agent.act` when an agent is configured:** normal UI flows
+     (submitting forms, editing/deleting items, navigating, signing out) use
+     `agent.act` with `params` and end with a verifying matcher or
+     `agent.assert` for replay-cache confirmation (reserve `screen.*` actions
+     for low-level mechanics like keyboard shortcuts, drag offsets, or empty
+     submits, `test.setup` sign-in, or model-less configs).
    - **One behavior per test (no undone actions or unchecked screens):** split
      any test whose title combines two behaviors with "and". Never undo an
      action before asserting its effect (an end state equal to the start hides
@@ -111,11 +123,17 @@ https://github.com/e2e-inc/e2e/tree/main/examples.
 - **List mutations:** add two items, act on the second item shown (never the
   first), and check the first is unchanged (topic `writing-tests`, "Act on the
   second item shown").
-- **Agent goals and replay:** give `agent.act` the steps toward one goal with
-  values in `params`; split when a later step needs a known screen state,
-  risks `maxSteps`/`maxModelCalls` budgets, or needs a middle step boundary.
-  End with a verifying matcher or `agent.assert` so the replay cache keeps the
-  recording (reads, `expect.poll`, and plain-value `expect` confirm nothing).
+- **Agent flows and replay:** when `agents` configures a model or executor,
+  default to `agent.act` for UI actions (data in `params`, `unique()` for
+  run-unique values) and end with a verifying matcher or `agent.assert` so
+  replay caching records it (reads, `expect.poll`, and plain-value `expect`
+  confirm nothing). Reserve `screen.*` actions for low-level mechanics
+  (keyboard shortcuts, drag offsets, empty submits), `test.setup`, or
+  model-less configs; split `agent.act` when a later step needs a known
+  screen state, risks `maxSteps`/`maxModelCalls` budgets, or needs a middle
+  step boundary (topic `agent`).
+- **Reuse existing code:** extend or import existing `tests/`, fixtures,
+  helpers, and page objects instead of duplicating setup or locators.
 - **MCP sessions:** in a directory without a config, `open_session {engine:
   "@e2e-dev/web", app: {url: "http://localhost:3000"}}` still works (topic
   `mcp`).

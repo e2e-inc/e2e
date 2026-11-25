@@ -184,18 +184,19 @@ looks: `run_code` reads the accessibility tree, not pixels.
 2. Walk the flow one screen at a time, and write each screen's steps into
    the file before you leave it. Do not walk the whole flow first and write
    the test from memory afterwards. Each step is one of two kinds:
-   - An `agent.act` goal, the default for a path that varies: write the goal
-     with the words on screen and its values in `params`, then walk its
-     path in the session. Those actions stay out of the test, and so do the
-     test lines they print.
-   - A `screen` line, for a short, stable flow, a sign-in form in a setup
-     test, or an interaction that is the point of the test. A value alone
-     is not a reason. A goal takes it in `params`. Act on the control by node
-     id, then copy the `Test line:` the action printed into the file. Its
-     locator matched that control alone on the live screen. When the action
-     prints `No test line:` instead, the reason says why; for a control no
-     locator found alone, try one with `locate`, or write the line and run
-     it with `run_code`.
+   - An `agent.act` goal, the default for user flows whenever `e2e.config.ts`
+     configures a model or custom executor: write the goal with the words on
+     screen and its values in `params`, then walk its path in the session.
+     Those actions stay out of the test, and so do the test lines they print.
+   - A `screen` line only for low-level mechanics that are themselves under
+     test (such as an empty submit, keyboard shortcut, or drag offset), a
+     sign-in form in a setup test, or a project with no model configured. A
+     value alone is not a reason: a goal takes it in `params`. Act on the
+     control by node id, then copy the `Test line:` the action printed into
+     the file. Its locator matched that control alone on the live screen. When
+     the action prints `No test line:` instead, the reason says why; for a
+     control no locator found alone, try one with `locate`, or write the line
+     and run it with `run_code`.
 
    With several `screen` steps on one screen, take their actions, then add
    the lines they printed in one edit. A `Test line:` repeats one action;

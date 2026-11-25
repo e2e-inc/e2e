@@ -497,7 +497,7 @@ describe('open_session {test}', { timeout: 120_000 }, () => {
       const draftText = drafted.content.find((part) => part.type === 'text')?.text ?? '';
       expect(drafted.isError, draftText).toBeUndefined();
       expect(draftText).toContain('Split these lines into tests, one behavior each');
-      expect(draftText).toContain('Use agent.act for a long path that can vary');
+      expect(draftText).toContain('Prefer agent.act for user flows');
 
       // A custom executor without a model also enables agent.act guidance in test_lines.
       const executorSessions = inProcessHost(project, {
@@ -514,7 +514,7 @@ describe('open_session {test}', { timeout: 120_000 }, () => {
       await executorSessions.close('done');
       const executorDraftText = executorDraft.content.find((part) => part.type === 'text')?.text ?? '';
       expect(executorDraft.isError, executorDraftText).toBeUndefined();
-      expect(executorDraftText).toContain('Use agent.act for a long path that can vary');
+      expect(executorDraftText).toContain('Prefer agent.act for user flows');
     });
   });
 

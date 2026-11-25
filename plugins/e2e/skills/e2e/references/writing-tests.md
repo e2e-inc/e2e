@@ -105,9 +105,18 @@ Write every test so a failing title names what broke.
     for exact row matching), `screen.getByRole('switch', 'Lock card', { checked: true }).waitFor()`,
     or `heading.waitFor({ state: 'hidden' })` after an earlier positive wait
     (`hidden` passes immediately on zero matches, including typos, and still
-    confirms prior `agent.act` steps). On zero-match timeout, waits report
-    `LOCATOR_NOT_FOUND` and checks `ASSERTION_FAILED`; two matches throw
-    `LOCATOR_AMBIGUOUS` on either.
+    confirms prior `agent.act` steps). Never move a pre-reload or
+    pre-navigation assertion past a reload or navigation (split the earlier
+    phase into its own test instead), never stash one-shot reads
+    (`isVisible()`, `isEnabled()`, `count()`, `inputValue()`, `textContent()`,
+    `getAttribute()`, `browser.evaluate()`) mid-flow into local variables just
+    to assert them at the end (leave a precondition as `.waitFor()` alone with
+    no extra `expect`, split earlier phases into their own tests so retrying
+    matchers run directly on the live screen, or use `expect.poll(...)` for
+    computed CSS/DOM checks), and `throw` directly in arrange when a computed
+    precondition is missing instead of inventing a fallback value. On
+    zero-match timeout, waits report `LOCATOR_NOT_FOUND` and checks
+    `ASSERTION_FAILED`; two matches throw `LOCATOR_AMBIGUOUS` on either.
 - **One behavior and one goal per test.** Title names one outcome
   (`'marks a todo as done'`, not `'adds and completes a todo'`). Multiple
   assertions checking that one outcome are fine; a second behavior is a second
@@ -133,7 +142,7 @@ Write every test so a failing title names what broke.
   // Bad: deletes the first todo, so an app that always deletes row 1 passes.
   await agent.act(addTodo, { params: { title: other } });
   await agent.act(addTodo, { params: { title } });
-  await screen.getByRole('button', `Delete ${other}`).tap();
+  await agent.act('Delete {title}', { params: { title: other } });
 
   // Good: deletes the second todo (this list adds new todos at the end),
   // then checks the first one is still there and unchanged.
@@ -143,7 +152,7 @@ Write every test so a failing title names what broke.
   await agent.act(addTodo, { params: { title } });
   await todo.waitFor();
 
-  await screen.getByRole('button', `Delete ${title}`).tap();
+  await agent.act('Delete {title}', { params: { title } });
 
   await expect(todo).toHaveCount(0);
   await expect(otherTodo).toBeVisible();
@@ -174,20 +183,27 @@ Write every test so a failing title names what broke.
     state, never use `serial: true` to hide coupling, and never branch or skip
     on `isVisible()`/`count()` (they do not wait). Every test must pass when
     run alone by `file:line`, twice in a row.
-- **Name what the tests repeat.** Define repeated selector inputs, values, or
-  prompts once inside `describe` (or a feature-local module as specs grow) and
-  keep single-use ones inline; bind repeated locators to local `const`s and use
-  helpers or [page objects](https://e2e.com/docs/page-object-model) for shared
-  screens. Pass variables to prompts in `params` (`unique()` for run-unique
-  values so the replay cache hits).
-- **Mix agent and deterministic steps by what they prove.** Use `agent.act` for
-  long or changing flows, `screen` for short/stable interactions, sign-in
-  setups, or projects with no model. Use `expect` for exact values, counts, or
-  field states; use `agent.assert` alone when the screen shows the full
-  semantic or visual outcome, pairing a deterministic `expect` when exact
-  phrasing or state must also hold (topic `debugging`, "Flaky tests"). A
-  passing locator/engine matcher, `locator.waitFor`, `agent.assert`, or
-  `agent.waitFor` confirms preceding `agent.act` steps for the replay cache
+- **Name and reuse what the tests repeat.** Check existing `tests/`, fixtures,
+  helpers, and [page objects](https://e2e.com/docs/page-object-model) first
+  and reuse or extend them instead of duplicating setup. Define repeated
+  selector inputs, values, or prompts once inside `describe` (or a
+  feature-local module as specs grow) and keep single-use ones inline; bind
+  repeated locators to local `const`s. Pass variables to prompts in `params`
+  (`unique()` for run-unique values so the replay cache hits).
+- **Prefer `agent.act` when a model is configured.** When `e2e.config.ts`
+  configures a model or custom executor under `agents`, default to `agent.act`
+  for user flows (forms, buttons, list/CRUD mutations, navigation, auth, with
+  values in `params`), even if an existing setup or login test uses `screen.*`,
+  paired with verifying checks at the end so the replay cache records every
+  step and reruns cost no model calls. Reserve `screen.*` actions for low-level
+  mechanics that are themselves under test (such as `ignores an empty
+  submission` above, a keyboard shortcut, or a drag offset), a `test.setup`
+  sign-in form, or a project with no model configured. Use `expect` for exact
+  values, counts, or field states; use `agent.assert` alone when the screen
+  shows the full semantic or visual outcome, pairing a deterministic `expect`
+  when exact phrasing or state must also hold (topic `debugging`, "Flaky
+  tests"). A passing locator/engine matcher, `locator.waitFor`, `agent.assert`,
+  or `agent.waitFor` confirms preceding `agent.act` steps for the replay cache
   (`expect.poll` and plain-value `expect` confirm nothing).
 
 ## Registration
@@ -287,6 +303,16 @@ takes `({}, use)`. A test sets up the `test.extend` fixtures its body and its
 `COLLECTION_ERROR`). A fixture nothing names does not run: one that exists
 for its side effect takes `[fn, { auto: true }]`, set up for every test, or
 `[fn, { scope: 'worker', auto: true }]`, once per worker.
+
+`test.extend` fixtures initialize before `beforeEach` and still run their
+`finally` teardown when `beforeEach` calls `test.skip(...)`. Guard teardown
+with a `created` or `mutated` flag (or clean up only what this attempt wrote)
+so skipped or failed-before-mutation attempts never touch shared state. To
+route tests across same-platform targets (such as desktop vs. mobile
+viewports), tag tests (`{ tags: [...] }`) and run each target with
+`--target <name> --tag <tag>` rather than sniffing `window.innerWidth` or
+`timeZone` in `beforeEach` (which boots every test on every target and turns
+a misconfigured target into a green skip).
 
 If you name a fixture that isn't on any target in the config, the run fails
 at collection.
