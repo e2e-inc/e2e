@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { createToolLoopExecutor } from '@e2e-dev/core/lib/agent/tool-loop';
+import { createGrammarTools } from '@e2e-dev/core/lib/agent/primitives';
 import { projectTools } from '@e2e-dev/core/lib/agent/default-agent';
 import { defineTool } from '@e2e-dev/core/lib/agent/tool';
 import { resolveConfig } from '../../src/config/resolve-run.ts';
@@ -103,6 +104,31 @@ describe('tool loop context overflow', () => {
     expect(step.status).toBe('passed');
     // The refused request never answered, so it is not a model call the step paid for.
     expect(step.metrics?.modelCalls).toBe(2);
+  });
+
+  it.each(['built-in', 'custom'] as const)('lists the whole screen on the first look after the shrink clipped it, %s loop', async (loop) => {
+    // A custom loop's opening prompt is not the presenter's, so its first look is what the shrink clips.
+    const opening = loop === 'custom' ? [{ toolName: 'observe', input: {} }] : [{ toolName: 'peek', input: {} }];
+    const model = installFakeLoopModel(({ turn }) => {
+      if (turn === 1) return opening;
+      if (turn === 2) throw new Error(OVERFLOW);
+      if (turn === 3) return [{ toolName: 'observe', input: {} }];
+      return [{ toolName: 'complete_step', input: { status: 'passed', summary: 'read the rows' } }];
+    });
+    const executor = loop === 'custom'
+      ? createToolLoopExecutor({ name: 'custom-loop', tools: (context, { guard }) => createGrammarTools(context, { guard }), buildPrompt: () => 'read the big output' })
+      : undefined;
+    const { fixtures } = runtime(bigScreen(), { agents: { default: executor === undefined ? { tools: { peek }, model } : { executor, model } } });
+
+    await fixtures.agent.act('read the big output');
+
+    expect(loopCalls).toHaveLength(4);
+    // The screen went out clipped, its last rows cut off.
+    expect(JSON.stringify(loopCalls[2])).not.toContain('row 599 ');
+    // The screen did not change, but the model no longer holds all of it:
+    // the look lists it whole under the unchanged report.
+    expect(loopCalls[3]!.lastToolResult).toContain('Screen unchanged');
+    expect(loopCalls[3]!.lastToolResult).toContain('row 599 ');
   });
 
   it('shrinks a pixel-mode history, where every screen rides a result with its screenshot, and retries', async () => {

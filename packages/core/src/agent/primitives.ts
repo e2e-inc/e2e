@@ -350,6 +350,14 @@ const POINT_TOOLS: readonly {
  */
 export const createGrammarTools: (context: StepExecutorContext, options?: GrammarToolOptions) => ToolSet = grammarTools;
 
+/** The presenters each step's grammar tools render through, for `markScreensClipped`. */
+const stepScreens = new WeakMap<StepExecutorContext, Set<ScreenPresenter>>();
+
+/** Tells the step's presenters the history was shrunk, so the screens the model holds may be cut short. */
+export function markScreensClipped(context: StepExecutorContext): void {
+  for (const screen of stepScreens.get(context) ?? []) screen.markClipped();
+}
+
 /** `createGrammarTools` for the package's own callers, which may share a screen presenter and hear of failed actions. */
 export function grammarTools(
   context: StepExecutorContext,
@@ -933,6 +941,8 @@ function createPointTools(
 function verbKit(context: StepExecutorContext, options: GrammarToolSetup) {
   const guard = options.guard ?? (<T>(body: () => Promise<T>) => body());
   const screen: ScreenPresenter = options.screen ?? new ScreenPresenter();
+  const screens = stepScreens.get(context) ?? new Set<ScreenPresenter>();
+  stepScreens.set(context, screens.add(screen));
   const queue = new OperationQueue();
   const inOrder = <T>(body: () => Promise<T>): Promise<T> => queue.run(body);
   /** The screen after an action: the changes since the one the model holds and, once the step shows pixels, a fresh screenshot. */

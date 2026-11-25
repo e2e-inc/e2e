@@ -142,6 +142,8 @@ export function reportsScreenChange(text: string): boolean {
 /** Renders one step's screens for the model and remembers what it has seen. */
 export class ScreenPresenter {
   private shown: ShownScreen | undefined;
+  /** The history the model reads was shrunk since `shown` went out, so its copy of that screen may be cut short. */
+  private clipped = false;
   private screenshot: ShownScreenshot | undefined;
   private screenshotDigest: string | undefined;
   /** True once the engine said it captures no screenshots at all. */
@@ -180,8 +182,19 @@ export class ScreenPresenter {
     return path !== undefined && this.seen?.path !== undefined && path !== this.seen.path;
   }
 
+  /**
+   * The model's copy of the screen may have been cut short. The next update
+   * still reports what changed against the whole screen, so an action with no
+   * effect is still called one, and also lists the screen whole, so what was
+   * cut comes back.
+   */
+  markClipped(): void {
+    this.clipped = true;
+  }
+
   /** The step's first screen, whole. */
   initial(observation: ExecutorObservation): string {
+    this.clipped = false;
     this.shown = observation.treeUnavailable === true ? undefined : indexScreen(observation);
     this.seen = { tabs: observation.tabs, path: observation.path ?? this.seen?.path };
     return renderFull(observation);
@@ -204,6 +217,8 @@ export class ScreenPresenter {
     }
     const previous = this.shown;
     const next = indexScreen(observation);
+    const clipped = this.clipped;
+    this.clipped = false;
     if (previous === undefined) {
       const notes = this.movedSinceSeen(observation);
       this.shown = next;
@@ -225,9 +240,13 @@ export class ScreenPresenter {
     const expectChange = options.expectChange === true && tabs === undefined && !moved;
     if (tabs !== undefined) lead = `${lead}${tabs.note} `;
     if (moved) lead = `${lead}${LOCATION_CHANGED}${next.path ?? 'none'}. `;
+    // A copy the model holds cut short is no base for a diff: what changed
+    // goes out whole, and an unchanged screen is listed whole under its report.
+    if (clipped && changes > 0) return `${lead}${renderFull(observation)}${closed}`;
+    const whole = clipped ? `\n\n${renderFull(observation)}` : '';
     // A truncated screen is never called unchanged: what it left out is unknown.
     if (changes === 0 && !observation.truncated) {
-      return `${lead}${renderUnchanged(previous.revision, observation, expectChange, pixels)}${closed}`;
+      return `${lead}${renderUnchanged(previous.revision, observation, expectChange, pixels)}${whole}${closed}`;
     }
     if (changes >= MAX_DIFF_LINES || changes > MAX_DIFF_SHARE * next.order.length) {
       return `${lead}${CHANGED_SUBSTANTIALLY}${previous.revision}. ${renderFull(observation)}${closed}`;
@@ -238,7 +257,7 @@ export class ScreenPresenter {
     return [
       `${lead}${CHANGES_SINCE}${previous.revision} (now revision ${observation.revision}${describeLocation(observation)}, ${String(next.nodes)} nodes): ${describeCounts(diff)}. ${assurance}`,
       ...diff,
-    ].join('\n') + closed;
+    ].join('\n') + whole + closed;
   }
 
   /** The step's first screen, whole, with its screenshot when the observation carries one. */

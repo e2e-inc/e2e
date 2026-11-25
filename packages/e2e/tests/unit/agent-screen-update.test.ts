@@ -329,6 +329,25 @@ describe('ScreenPresenter', () => {
     expect(text).toContain('no listed node changed. The screen listing is truncated');
   });
 
+  it('lists the screen whole once after its copy was clipped, still reporting what changed against it', () => {
+    const presenter = new ScreenPresenter();
+    presenter.initial(screen('b1', HOME));
+    presenter.markClipped();
+    // An action with no effect is still called one, and the cut rows come back under the report.
+    const tapped = presenter.update(screen('b2', HOME), { lead: 'Tapped #n3.', expectChange: true });
+    expect(reportsNoEffect(tapped)).toBe(true);
+    expect(tapped).toContain('Current screen (revision b2');
+    expect(tapped).toContain('#n6 textbox "Email"');
+    // Once is enough: the next look is a plain difference again.
+    expect(presenter.update(screen('b3', HOME))).not.toContain('Current screen');
+    // A change after the clip is no diff against a copy the model lacks: the screen goes out whole.
+    presenter.markClipped();
+    const changed = presenter.update(screen('b4', HOME.map((line) => line.replace('text="0"', 'text="1"'))), { lead: 'Observed.' });
+    expect(changed).toContain('Current screen (revision b4');
+    expect(changed).not.toContain('Screen changes since');
+    expect(reportsScreenChange(changed)).toBe(true);
+  });
+
   it('does not call a node changed when only its depth moved', () => {
     const presenter = new ScreenPresenter();
     presenter.initial(screen('b1', HOME));

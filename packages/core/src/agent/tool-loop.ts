@@ -40,7 +40,7 @@ import {
   type StepExecutorContext,
   type StepVerdict,
 } from './executor.ts';
-import { createVerdictTool, trackModelCalls, VERDICT_RULES, type ModelCallTracker } from './primitives.ts';
+import { createVerdictTool, markScreensClipped, trackModelCalls, VERDICT_RULES, type ModelCallTracker } from './primitives.ts';
 import {
   checkFailureStreak,
   checkLoopGuards,
@@ -697,6 +697,7 @@ class LoopRun {
     }
     this.overflowNote = ' again after the history was shrunk once';
     this.turnOffset = this.turnsUsed;
+    markScreensClipped(this.context);
     this.note(`context overflow before turn ${String(this.turnsUsed + 1)}: history shrunk from ${String(before)} to ${String(after)} chars, retrying once`);
     return shrunk;
   }
