@@ -84,7 +84,7 @@ export interface EngineHandle<Fixtures extends object = {}> extends Engine {
 ऑब्जेक्ट लिटरल जितना ही वैध है।
 
 `Fixtures` उन फ़िक्सचर्स का टाइप बताता है जो इंजन के [`fixtures`](#contributed-fixtures)
-देते हैं, जैसे `{ browser: Browser }`। कंपाइलर को इसमें नामित हर फ़िक्सचर के लिए
+देते हैं, जैसे `{ browser: Browser }`। कंपाइलर को इसमें बताए गए हर फ़िक्सचर के लिए
 `fixtures` में एक फ़ैक्ट्री चाहिए होती है जो वही फ़िक्सचर लौटाए; `screen`, `app`, और
 `platform` के लिए किसी फ़ैक्ट्री की ज़रूरत नहीं, क्योंकि हर सेशन में ये होते हैं। रनटाइम
 पर कुछ भी इसे चेक नहीं करता। इसके साथ [`@e2e-dev/core`](/core) से `launch` बिना हाथ से
@@ -104,7 +104,7 @@ export interface EngineHandle<Fixtures extends object = {}> extends Engine {
 | `version` | गायब या खाली हो। |
 | `spiVersion` | `1` के अलावा कुछ भी। |
 | `platform` | खाली हो। |
-| `workers` | धनात्मक सुरक्षित पूर्णांक न हो। |
+| `workers` | धनात्मक सुरक्षित इंटीजर न हो। |
 | `observe`, `readStyle`, `viewportIntersection`, `locate`, `perform`, `performAt`, `prepare`, `finish`, `doctor`, `init`, `startAttempt`, `settleAttempt`, `endAttempt`, `dispose`, `validateApp` | फ़ंक्शन न हो। |
 | कोई और टॉप-लेवल की | ऑब्जेक्ट लिटरल पर, `app` समेत: ऐप को टारगेट पर डिक्लेयर करें और `validateApp` में चेक करें। क्लास इंस्टेंस के अपने फ़ील्ड चेक नहीं होते। |
 | `readStyle`, `perform`, `locate`, `performAt`, `keyboard` | `observe` के बिना डिक्लेयर किए गए हों। |
@@ -116,7 +116,7 @@ export interface EngineHandle<Fixtures extends object = {}> extends Engine {
 | `launchArgumentValues` | बूलियन न हो। |
 | `fileApps` | बूलियन न हो। |
 | `isolation` | `'attempt'` या `'worker'` के अलावा कुछ भी। |
-| `keyboard`, `state`, `artifacts`, `session` | अनजान की या नॉन-फ़ंक्शन मेंबर। `type` और `press` के बिना `keyboard`; `capture` और `restore` दोनों के बिना `state`; `screenshot` के बिना `artifacts`; `stopVideo` के बिना `startVideo`, या इसका उल्टा। |
+| `keyboard`, `state`, `artifacts`, `session` | अनजान key या नॉन-फ़ंक्शन मेंबर। `type` और `press` के बिना `keyboard`; `capture` और `restore` दोनों के बिना `state`; `screenshot` के बिना `artifacts`; `stopVideo` के बिना `startVideo`, या इसका उल्टा। |
 | `secrets` | `secrets.get()` हैंडल्स का ऐरे न हो। |
 | `fixtures` | ऑब्जेक्ट न हो, ऐसा फ़िक्सचर जो फ़ैक्ट्री फ़ंक्शन न हो, या ऐसा फ़िक्सचर नाम जो लोअर-कैमल आइडेंटिफ़ायर न हो या `agent`, `app`, `screen`, `platform`, `request`, या `session` को शैडो करे। |
 
@@ -1466,7 +1466,7 @@ validateApp(app, { targetName }) {
 },
 ```
 
-- यह इंजन द्वारा चलाए जाने वाले हर टारगेट के लिए चलता है, और जो टारगेट `app` डिक्लेयर
+- यह इंजन से चलाए जाने वाले हर टारगेट के लिए चलता है, और जो टारगेट `app` डिक्लेयर
   न करे उसके लिए `{}` के साथ।
 - `@e2e-dev/web` को `url` चाहिए होता है; `@e2e-dev/mobile` को `bundleId` या `appPath`
   चाहिए होता है और वह `url` को मना कर देता है।
@@ -1725,7 +1725,7 @@ export const RETRYABLE_ENGINE_ERROR_CODES: ReadonlySet<EngineErrorCode> = new Se
 
 #### रनर एरर क्लासेज़
 
-कंट्रीब्यूट किए गए फ़िक्सचर मेथड द्वारा थ्रो किया गया `EngineError` ऊपर की टेबल से मैप
+कंट्रीब्यूट किए गए फ़िक्सचर मेथड से थ्रो किया गया `EngineError` ऊपर की टेबल से मैप
 होता है, इसलिए बंद हो चुके सेशन पर फ़िक्सचर ठीक ऑब्ज़र्वेशन की तरह `APP_NOT_OPEN`
 रिपोर्ट करता है। मेथड उसी एंट्री से एक्सपोर्ट होने वाली रनर की अपनी एरर क्लासेज़ से भी
 स्टेप को फ़ेल कर सकता है।
@@ -1945,9 +1945,9 @@ rejectUnknownKeys('web()', options, ['browser', 'viewport']);
 // web() has unknown key "viewprt"; did you mean "viewport"?
 ```
 
-- जब कोई टाइपिंग की गलती लगे तो मैसेज सबसे क़रीबी जानी-पहचानी की का नाम बताता है, वरना
+- जब कोई टाइपिंग की गलती लगे तो मैसेज सबसे क़रीबी जानी-पहचानी key का नाम बताता है, वरना
   सारी जानी-पहचानी keys।
-- टेस्ट द्वारा किसी फ़िक्सचर मेथड को पास किए गए ऑब्जेक्ट के लिए `code` में
+- टेस्ट से किसी फ़िक्सचर मेथड को पास किए गए ऑब्जेक्ट के लिए `code` में
   `'INVALID_ARGUMENT'` पास करें।
 
 #### `checkLaunchArguments`
@@ -2213,7 +2213,7 @@ export interface VideoLink {
 
 रनर उस अटेम्प्ट के लिए `startVideo` कॉल करता है जिसका [वीडियो मोड](/reference/config#video)
 रिकॉर्ड करता है, और हर [`app.startRecording()`](/reference/app#startrecording) के लिए,
-इसलिए एक अटेम्प्ट कई बार शुरू और बंद कर सकता है। अगले स्टार्ट से पहले यह स्टॉप द्वारा
+इसलिए एक अटेम्प्ट कई बार शुरू और बंद कर सकता है। अगले स्टार्ट से पहले यह स्टॉप से
 लौटाई गई फ़ाइलों को मूव कर देता है, और जब रिकॉर्डिंग चल रही हो तो कभी नई शुरू नहीं करता।
 
 - `startVideo` `startAttempt` और किसी भी सेशन रिस्टोर के बाद, लॉन्च बजट के अंदर चलता है।
@@ -2316,7 +2316,7 @@ export function stopProviderRecording(
 
 ### कंट्रीब्यूटेड फ़िक्सचर्स
 
-इंजन `fixtures` के ज़रिए टेस्ट फ़िक्सचर्स में नाम वाले सरफ़ेस जोड़ता है। हर की एक
+इंजन `fixtures` के ज़रिए टेस्ट फ़िक्सचर्स में नाम वाले सरफ़ेस जोड़ता है। हर key एक
 फ़िक्सचर और कैपेबिलिटी नाम बनती है। टेस्ट के लिए यह `app` और `screen` के साथ एक
 [बिल्ट-इन फ़िक्सचर](/reference/test#fixtures) होता है।
 
@@ -2356,7 +2356,7 @@ test('prints a receipt', { platforms: ['kiosk'] }, async ({ printer }) => {
 | `signal` | चल रहे फ़ेज़ का सिग्नल। इसे हर कॉल पर पढ़ें। |
 | `operation(timeoutMs?)` | पर-कॉल `OperationContext`। |
 | `attachArtifact(kind, relativePath)` | मौजूदा स्टेप की बनाई फ़ाइल रजिस्टर करता है। |
-| `attachViewport(viewport)` | मौजूदा स्टेप द्वारा सेट किया गया व्यूपोर्ट दर्ज करता है। |
+| `attachViewport(viewport)` | मौजूदा स्टेप से सेट किया गया व्यूपोर्ट दर्ज करता है। |
 | `locator(expression)` | रॉ एक्सप्रेशन से पब्लिक लोकेटर बनाता है। |
 | `screen(scope)` | स्क्रीन स्कोप बनाता है। |
 | [`expectable(target, factory)`](#expectations) | `expect(fixture)` को मैचर्स लौटाने लायक बनाता है। |
@@ -2446,7 +2446,7 @@ defineEngine({ name: 'device', /* ... */ isolation: 'worker' });
 - सूट हुक्स का हर पास अपने छोटे अटेम्प्ट (`startAttempt`, फिर `endAttempt`) में चलता है।
   वर्कर खत्म होने पर वर्कर फ़िक्सचर्स के टियरडाउन भी ऐसे ही चलते हैं। `startAttempt` को
   ऐसा बनाएँ कि वह कुछ लॉन्च न करे।
-- सीरियल ग्रुप में, या `e2e mcp` सेशन द्वारा चलाए जाने वाले टेस्ट में, हुक पहले से खुले
+- सीरियल ग्रुप में, या `e2e mcp` सेशन से चलाए जाने वाले टेस्ट में, हुक पहले से खुले
   अटेम्प्ट पर चलते हैं। इंजन एक बार में एक अटेम्प्ट चलाता है।
 - जब अटेम्प्ट न खुल पाए, या रन इंटरप्ट हो गया हो, तो हुक उन बिल्ट-इन फ़िक्सचर्स के बिना
   चलते हैं। [`beforeAll`](/reference/test#beforeall) देखें।

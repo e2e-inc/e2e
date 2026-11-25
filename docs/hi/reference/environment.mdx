@@ -119,7 +119,7 @@ CI मोड चालू करता है:
 | `FORCE_COLOR` | `FORCE_COLOR=1` | set | पाइप होने पर भी रंगीन CLI आउटपुट |
 | `TERM` | `TERM=dumb` | value | `dumb` पर `e2e init` का लोगो बिना एनीमेशन स्थिर दिखता है, CI की तरह |
 | `GITHUB_SHA`, `GITHUB_HEAD_REF`, `GITHUB_REF_NAME` | `GITHUB_REF_NAME=main` | value | जब `git` प्रोजेक्ट रूट न पढ़ सके, तब रिपोर्ट `run.vcs` में यही कमिट और ब्रांच दर्ज करती है। `GITHUB_HEAD_REF`, `GITHUB_REF_NAME` पर भारी पड़ता है |
-| `NODE_DEBUG` | `NODE_DEBUG=child_process` | value | Node का अपना डीबग आउटपुट। `child_process` चालू होने पर Node रन द्वारा शुरू हर प्रोसेस का एनवायरनमेंट प्रिंट करता है, और `net` पर `node:http` रिक्वेस्ट के हेडर, API key समेत। e2e जो आउटपुट लिखता है उसमें उसके सीक्रेट और [प्रोवाइडर key](/reference/security#provider-keys) वहीं छिपाए जाते हैं और कुछ नहीं; `openHost` कॉल करने वाला प्रोग्राम अपना stderr खुद रखता है। `e2e run`, `e2e mcp`, और `openHost` stderr पर एक बार चेतावनी देकर आगे बढ़ जाते हैं। `acp()` से शुरू होने वाले एजेंट को यह वेरिएबल कभी नहीं मिलता |
+| `NODE_DEBUG` | `NODE_DEBUG=child_process` | value | Node का अपना डीबग आउटपुट। `child_process` चालू होने पर Node रन से शुरू हर प्रोसेस का एनवायरनमेंट प्रिंट करता है, और `net` पर `node:http` रिक्वेस्ट के हेडर, API key समेत। e2e जो आउटपुट लिखता है उसमें उसके सीक्रेट और [प्रोवाइडर key](/reference/security#provider-keys) वहीं छिपाए जाते हैं और कुछ नहीं; `openHost` कॉल करने वाला प्रोग्राम अपना stderr खुद रखता है। `e2e run`, `e2e mcp`, और `openHost` stderr पर एक बार चेतावनी देकर आगे बढ़ जाते हैं। `acp()` से शुरू होने वाले एजेंट को यह वेरिएबल कभी नहीं मिलता |
 
 `--debug` और `--ai-trace` फ़्लैग हैं, वेरिएबल नहीं; [CLI](/reference/cli#e2e-run)
 देखें।
