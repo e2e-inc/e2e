@@ -159,7 +159,7 @@ export function checkTargetApp(targetName: string, engine: EngineHandle | undefi
   if (permissions === 'all' && engine !== undefined && engine.grantsAllPermissions !== true) {
     throw new ConfigurationError(
       'INVALID_CONFIG',
-      `${where}.permissions is 'all', which engine "${engine.name}" does not take (it declares no grantsAllPermissions); name each permission instead, or upgrade an engine released before 'all'`,
+      `${where}.permissions is 'all', which engine "${engine.name}" does not take (it declares no grantsAllPermissions)`,
     );
   }
   const checked: TargetAppDeclaration = {

@@ -580,7 +580,7 @@ describe('resolveConfig', () => {
     expect(() => resolveApp({ bundleId: 'dev.shop.app', permissions: 'all' })).toThrow(
       new ConfigurationError(
         'INVALID_CONFIG',
-        `target "web" app.permissions is 'all', which engine "fake" does not take (it declares no grantsAllPermissions); name each permission instead, or upgrade an engine released before 'all'`,
+        `target "web" app.permissions is 'all', which engine "fake" does not take (it declares no grantsAllPermissions)`,
       ),
     );
     const seen: unknown[] = [];
