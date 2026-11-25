@@ -14,7 +14,7 @@
  * | a target with no screen origin to aim at, `dispatched: no`   | NOT_ACTIONABLE, with the hint |
  * | screen.swipe({ from, to }) off agent-device's viewport       | NOT_ACTIONABLE, with the hint |
  * | an Android "isn't responding" dialog the guard refused under | NOT_ACTIONABLE, naming the    |
- * |   before any input went out (no `details.dispatchedSteps`)  |   dialog's "Close app"        |
+ * |   before the command sent input (no `dispatchedSteps`)      |   dialog's "Close app"        |
  * | the iOS runner busy, wedged, or past its watchdog           | ENGINE_FAILURE, naming the   |
  * | a snapshot the iOS runner acquired but could not present    |   runner and the recovery    |
  * | anything else, agent-device's own timeouts included         | ENGINE_FAILURE with the text |
@@ -237,8 +237,10 @@ const APP_ANR_HINT =
 /**
  * True for the refusal agent-device's Android guard raises while an "isn't
  * responding" dialog has focus, before the command sent any input. A refusal
- * after input went out stays `ENGINE_FAILURE`: the action may have landed, so
- * a retry could repeat it.
+ * after the command's input went out stays `ENGINE_FAILURE`: that input may
+ * have landed, so a retry could repeat it. agent-device counts per command,
+ * so an earlier command of the same action (the focus tap before a key) may
+ * have landed; repeating it is harmless, as with a covered target.
  */
 function isBlockingDialog(cause: unknown): boolean {
   const { focusedWindow, dispatchedSteps } = details(cause);
