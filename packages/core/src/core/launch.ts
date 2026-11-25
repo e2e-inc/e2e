@@ -144,11 +144,12 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
   if (timeout !== undefined && (!Number.isInteger(timeout) || timeout <= 0)) {
     throw new TestError('INVALID_ARGUMENT', 'launch timeout must be a positive integer number of milliseconds');
   }
+  // Resolved before the seat too: it throws for a `cwd` that is no path, or a working directory deleted under the process.
+  const projectRoot = path.resolve(options.cwd ?? process.cwd());
   /** What the test launching the host offers, when one is, and the host's seat in it: reserved before anything is awaited, so the host is that test's and no later one's. */
   const owner = currentGuests();
   const seat = owner?.host();
   const ownsArtifacts = options.artifactsDir === undefined;
-  const projectRoot = path.resolve(options.cwd ?? process.cwd());
   /** The host's output directory, once there is one: a temporary one is made inside the opening, so a failure to make it gives the seat back too. */
   let output: string | undefined;
   const removeOutput = (): Promise<void> => ownsArtifacts && output !== undefined ? rm(output, { recursive: true, force: true }) : Promise.resolve();

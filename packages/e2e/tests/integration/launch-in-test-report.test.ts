@@ -22,7 +22,7 @@ import { createFakeEngine, FAKE_APP } from '../../../helpers/fake-engine.ts';
 
 const scene = () => [{ id: 'confirm', role: 'button', name: 'Confirm' }];
 const second = (extra = {}) => createFakeEngine({ video: true, scene, ...extra }).engine;
-const open = (extra) => launch(second(extra), { app: FAKE_APP, handleSignals: false, timeout: 5_000 });
+const open = (extra, options = {}) => launch(second(extra), { app: FAKE_APP, handleSignals: false, timeout: 5_000, ...options });
 
 // Opened while no test runs; each test opens its own session on it.
 const shared = await open();
@@ -135,6 +135,11 @@ test('catches a launch refused for its options', async ({ app }) => {
 test('catches a launch whose engine fails to start', async ({ app }) => {
   await app.open();
   globalThis.launchReportRefused.init = await refusal(open({ onInit: () => { throw new Error('no device left'); } }));
+});
+
+test('catches a launch whose working directory cannot be resolved', async ({ app }) => {
+  await app.open();
+  globalThis.launchReportRefused.cwd = await refusal(open({}, { cwd: 42 }));
 });
 
 test('catches a launch that cannot make its output directory', async ({ app }) => {
@@ -384,6 +389,7 @@ describe('a launch() session opened inside a test, in the test\'s report', { tim
     const titles = [
       'catches a launch refused for its options',
       'catches a launch whose engine fails to start',
+      'catches a launch whose working directory cannot be resolved',
       'catches a launch that cannot make its output directory',
       'catches a session refused for its state',
       'catches a session whose engine fails to start it',
@@ -392,7 +398,7 @@ describe('a launch() session opened inside a test, in the test\'s report', { tim
     expect(titles.flatMap((title) => attemptOf(title).secondaryErrors)).toEqual([]);
     // Each opening did fail, and the test caught what it failed with.
     const refused = (globalThis as { launchReportRefused?: Record<string, string> }).launchReportRefused;
-    expect(refused).toEqual({ options: 'INVALID_ARGUMENT', init: expect.any(String), mkdtemp: 'ENOENT', state: 'INVALID_ARGUMENT', start: expect.any(String) });
+    expect(refused).toEqual({ options: 'INVALID_ARGUMENT', init: expect.any(String), cwd: 'ERR_INVALID_ARG_TYPE', mkdtemp: 'ENOENT', state: 'INVALID_ARGUMENT', start: expect.any(String) });
     expect(Object.values(refused!)).not.toContain('opened');
   });
 
