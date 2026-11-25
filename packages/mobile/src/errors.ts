@@ -349,9 +349,42 @@ export function isShortLivedClaim(error: unknown): boolean {
   return typeof session === 'string' && session.startsWith(TRANSIENT_HOLDER);
 }
 
+/**
+ * The start of the hint agent-device sets on an iOS simulator launch that
+ * failed because the bundle is not installed. It checks the install after
+ * `simctl launch` fails, but reports the failure as `COMMAND_FAILED`, so the
+ * hint is the only place the reason shows.
+ */
+const IOS_NOT_INSTALLED_HINT = 'The app bundle is not installed on this simulator.';
+
+/** Whether agent-device refused an `open` because no installed app matches: `APP_NOT_INSTALLED`, or an iOS simulator launch with the not-installed hint. */
+function notInstalledCause(cause: unknown): boolean {
+  if (!isAgentDeviceError(cause)) return false;
+  const { code } = normalizeAgentDeviceError(cause);
+  if (code === 'APP_NOT_INSTALLED') return true;
+  const hint = details(cause).hint;
+  return code === 'COMMAND_FAILED' && typeof hint === 'string' && hint.startsWith(IOS_NOT_INSTALLED_HINT);
+}
+
 /** True for a translated `open` agent-device refused because no installed app matches the name. */
 export function isAppNotInstalled(error: unknown): boolean {
-  return error instanceof Error && isAgentDeviceError(error.cause) && normalizeAgentDeviceError(error.cause).code === 'APP_NOT_INSTALLED';
+  return error instanceof Error && notInstalledCause(error.cause);
+}
+
+/**
+ * An `open` of `app` that failed because the device has no such app, as a
+ * setup failure in e2e's words: agent-device's own advice names its CLI
+ * (`Run install before open`). Any other failure is returned as it came.
+ * `where` names the session and device.
+ */
+export function appNotInstalled(error: unknown, app: string, where: string | undefined): unknown {
+  if (!isAppNotInstalled(error)) return error;
+  const location = where === undefined ? '' : ` (${where})`;
+  return new ConfigurationError(
+    'TEST_SETUP_FAILED',
+    `open ${app} failed: ${app} is not installed on the device${location}. Install it before opening it, with the target's app.appPath or device.installApp(), or check the bundle id or package name.`,
+    { cause: (error as Error).cause },
+  );
 }
 
 /**

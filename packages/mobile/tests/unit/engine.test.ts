@@ -3389,6 +3389,38 @@ describe('device fixture', () => {
     expect((await h.engine.observe!(operation())).location).toBe('dev.e2e.benchmark / General');
   });
 
+  it('fails an open of an app the device does not have as a setup error in e2e words, on iOS and Android alike', async () => {
+    const h = harness();
+    await openAttempt(h);
+    const device = fixture(h);
+    const notInstalled = expect.objectContaining({
+      code: 'TEST_SETUP_FAILED',
+      message: expect.stringMatching(/^open Settings failed: Settings is not installed on the device .*app\.appPath or device\.installApp\(\)/),
+    });
+    h.fake.respond('apps.open', () => {
+      throw new AppError('COMMAND_FAILED', 'Simulator device failed to launch Settings.', {
+        exitCode: 4,
+        hint: 'The app bundle is not installed on this simulator. Run install before open.',
+      });
+    });
+    const restart = await h.engine.session!.restart!(operation()).then(() => undefined, (error: unknown) => error as Error);
+    expect(restart).toEqual(notInstalled);
+    expect(restart?.message).not.toContain('Run install');
+    await expect(device.openApp('Settings', { relaunch: true })).rejects.toEqual(notInstalled);
+    await expect(h.engine.session!.openLink!('e2e-benchmark://orders/42', operation())).rejects.toEqual(notInstalled);
+    h.fake.respond('apps.open', () => {
+      throw new AppError('APP_NOT_INSTALLED', 'No app found matching "Settings"');
+    });
+    await expect(device.openApp('Settings')).rejects.toEqual(notInstalled);
+    // Any other launch failure is still the device's.
+    h.fake.respond('apps.open', () => {
+      throw new AppError('COMMAND_FAILED', 'Simulator device failed to launch Settings.', {
+        hint: 'The simulator repeatedly refused to launch the app. Inspect crash logs in Console.app or ~/Library/Logs/DiagnosticReports/ and consider reinstalling the app.',
+      });
+    });
+    await expect(device.openApp('Settings')).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
+  });
+
   it('opens app.open(path) links on a target with app.linkBase in the pinned app, through session.openLink', async () => {
     const h = harness();
     await openAttempt(h);

@@ -273,7 +273,7 @@ describe('agent tool pack', () => {
     expect(failure?.message).not.toContain('Run apps');
   });
 
-  it('keeps the device error when the app under test is not installed', async () => {
+  it('fails the step as a setup error when the app under test is not installed', async () => {
     const fake = createFakeClient({
       'apps.open': () => {
         throw new AppError('APP_NOT_INSTALLED', 'No app found matching "dev.e2e.benchmark"');
@@ -282,9 +282,36 @@ describe('agent tool pack', () => {
     const open = await attemptTools(fake, { bundleId: 'dev.e2e.benchmark' });
     const failure = await open({}).then(
       () => undefined,
-      (error: unknown) => error as Error,
+      (error: unknown) => error as Error & { code: string },
     );
-    expect(failure?.message).toContain('No app found matching "dev.e2e.benchmark"');
+    expect(failure?.code).toBe('TEST_SETUP_FAILED');
+    expect(failure?.message).toContain('dev.e2e.benchmark is not installed on the device');
     expect(failure?.message).not.toContain('Omit app');
   });
+
+  it('points a bundle id the iOS simulator does not have at the app under test too', async () => {
+    const fake = createFakeClient({
+      'apps.open': () => {
+        throw iosNotInstalled('com.example.missing');
+      },
+    });
+    const open = await attemptTools(fake, { bundleId: 'dev.e2e.benchmark' });
+    const failure = await open({ app: 'com.example.missing' }).then(
+      () => undefined,
+      (error: unknown) => error as Error & { code: string },
+    );
+    expect(failure?.code).toBe('INVALID_ARGUMENT');
+    expect(failure?.message).toContain('Omit app to return to the app under test');
+    expect(failure?.message).not.toContain('Run install');
+  });
 });
+
+/** agent-device's failed `simctl launch` of a bundle the simulator does not have, as 0.21.42 reports it: `COMMAND_FAILED`, the reason only in the hint. */
+function iosNotInstalled(app: string): AppError {
+  return new AppError('COMMAND_FAILED', `Simulator device failed to launch ${app}.`, {
+    exitCode: 4,
+    cmd: 'xcrun',
+    args: ['simctl', 'launch', 'B53FA6FE-AB13-4F70-B3E5-98EF49E1B539', app],
+    hint: 'The app bundle is not installed on this simulator. Run install before open.',
+  });
+}

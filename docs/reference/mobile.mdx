@@ -884,6 +884,7 @@ await device.openApp('com.example.app', { relaunch: true, launchArguments: { App
 | --- | --- |
 | `POLICY_DENIED` | A `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, or `filesystem:` link. |
 | `INVALID_ARGUMENT` | Any other link, with a message pointing at `openLink`; an invalid permission name or state; or `launchArguments` outside the declared shape, or one Android cannot carry (see [Launch arguments and permissions](#launch-arguments-and-permissions)). |
+| `TEST_SETUP_FAILED` | The device has no app with that bundle id or package. The message names the app and the device. |
 
 #### `openLink`
 
@@ -922,6 +923,7 @@ await expect(screen.getByText('Order #42')).toBeVisible();
 | `POLICY_DENIED` | A `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, or `filesystem:` link. |
 | `INVALID_ARGUMENT` | No app on iOS: an open bound to none leaves no app session to observe. |
 | `INVALID_ARGUMENT` | A string that does not parse as an absolute URL. The message names no part of the input, which may carry a magic-link token in its query, path, or userinfo. |
+| `TEST_SETUP_FAILED` | The app the link opens into is not on the device. |
 
 #### `closeApp`
 

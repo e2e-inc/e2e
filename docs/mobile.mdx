@@ -874,6 +874,11 @@ stopped with Ctrl-C can leave it busy. The message names the runner and
 the first move, usually a rerun. If the next run meets it again, stop the
 daemon and reboot the simulator with the commands below.
 
+**`app.open()` fails with `TEST_SETUP_FAILED`: the app is not installed.**
+The device has no app with the target's `app.bundleId`. Set `app.appPath` so
+the run installs the build, call `device.installApp()` before `app.open()`,
+or fix the bundle id.
+
 **`device.installApp()` on Android reports no bundle id or package.**
 agent-device couldn't tell which package the build is, so `app.open()` has
 nothing to launch. When it can't read the APK's manifest, it falls back to
