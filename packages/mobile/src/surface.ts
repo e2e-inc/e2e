@@ -1709,7 +1709,8 @@ export class AgentDeviceSurface {
       return await press();
     } catch (cause) {
       const closeButton = target.node.testId === ANR_CLOSE_BUTTON && CLOSE_APP.test(target.node.name?.trim() ?? '');
-      if (!closeButton || !isForeignBlockingDialog(cause)) throw cause;
+      // A refusal can come back after the budget ran out; nothing was sent, so it stays the answer.
+      if (!closeButton || !isForeignBlockingDialog(cause) || input.remainingMs() <= 0) throw cause;
       try {
         return await input.send((signal) => client.command.alert({ ...this.selection(), action: 'dismiss', signal }));
       } catch (dismissal) {

@@ -2229,6 +2229,30 @@ describe('perform', () => {
     await expect(h.engine.perform!((await observed(h, 'Close app')).ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
     expect(h.fake.methods()).not.toContain('command.alert');
   });
+
+  it('keeps the blocking-dialog refusal of a Close app tap when it arrives after the budget ran out', async () => {
+    const h = harness({ platform: 'android' });
+    await openAttempt(h);
+    h.fake.respond('capture.snapshot', () => ({
+      nodes: [
+        { ref: '@e1', index: 0, depth: 0, type: 'android.widget.FrameLayout', identifier: 'android:id/content', rect: { x: 0, y: 0, width: 390, height: 844 } },
+        { ref: '@e2', index: 1, parentIndex: 0, depth: 1, type: 'android.widget.Button', identifier: 'android:id/aerr_close', label: 'Close app', rect: { x: 40, y: 400, width: 310, height: 48 } },
+      ],
+      appBundleId: 'android',
+    }));
+    const { ref } = await observed(h, 'Close app');
+    // The guard answers inside the press's acknowledgement allowance, past the 25 ms budget.
+    h.fake.respond('interactions.press', async () => {
+      await sleep(60);
+      throw new AppError('COMMAND_FAILED', 'Android system dialog is blocking press: Application Not Responding: com.android.systemui (package com.android.systemui).', {
+        command: 'press',
+        focusedPackage: 'com.android.systemui',
+        focusedWindow: 'Application Not Responding: com.android.systemui',
+      });
+    });
+    await expect(h.engine.perform!(ref, { kind: 'tap' }, { ...operation(), timeoutMs: 25 })).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+    expect(h.fake.methods()).not.toContain('command.alert');
+  });
 });
 
 describe('session hooks, viewport swipe, location, artifacts', () => {
