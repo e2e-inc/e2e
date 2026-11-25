@@ -1028,6 +1028,25 @@ describe('positional file selection', () => {
     expect(selection.pairs[0]!.skip?.reason).toBe('not declared at a line a positional named');
   });
 
+  it('decides focus after the lines, so a test.only they leave out does not narrow its group', async () => {
+    const col = await collectionAtLines(
+      () => {
+        test.describe.only('group', () => {
+          test('a', noop);
+          test.only('b', noop);
+        });
+        test('c', noop);
+      },
+      (declared) => [declared[0]!, declared[2]!],
+    );
+    expect(select(col, config()).pairs.map((pair) => [pair.test.title, pair.disposition, pair.skip?.cause])).toEqual([
+      ['a', 'run', undefined],
+      ['b', 'filtered', 'filtered'],
+      ['c', 'filtered', 'filtered'],
+    ]);
+    expect(() => select(col, config({}, { ...ENV, CI: '1' } as NodeJS.ProcessEnv))).toThrow(/\.only is rejected in CI/);
+  });
+
   it('names the file:line that found no test and the lines the file declares tests at', async () => {
     const col = await collectionAtLines(
       () => {

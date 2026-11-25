@@ -177,7 +177,12 @@ function toCollectedTests(
 ): CollectedTest[] {
   const seenTitlePaths = new Set<string>();
   const placementOf = parallelPlacements(registration);
-  const focused = focusedTests(registration.tests);
+  const isSelected = registration.tests.map(
+    (registered) =>
+      selected &&
+      (lines === undefined || (declaredIn(absolutePath, registered.source) && lines.includes(registered.source!.line))),
+  );
+  const focused = focusedTests(registration.tests, isSelected);
   return registration.tests.map((registered, index) => {
     const encoded = testId(file, registered.titlePath);
     if (seenTitlePaths.has(encoded)) {
@@ -194,9 +199,7 @@ function toCollectedTests(
       serialRoot,
       parallel: placementOf(groupChain(registered.group)),
       serialId: serialRoot === undefined ? undefined : serialSourceId(file, serialRoot),
-      selected:
-        selected &&
-        (lines === undefined || (declaredIn(absolutePath, registered.source) && lines.includes(registered.source!.line))),
+      selected: isSelected[index]!,
       focused: focused[index]!,
     };
   });
@@ -207,13 +210,15 @@ function toCollectedTests(
  * marked `only` is focused, and so is a test inside a focused group unless
  * something inside that group (its innermost focused one) is marked `only`
  * too, which narrows the focus to it. A skipped test stays focused, so it
- * reports its own skip and CI still rejects the `.only`.
+ * reports its own skip and CI still rejects the `.only`. Like Playwright,
+ * focus is decided after line selection: a test the lines left out neither
+ * is focused nor narrows a group around it.
  */
-function focusedTests(tests: readonly RegisteredTest[]): boolean[] {
-  const markers = tests.map((test) => [
+function focusedTests(tests: readonly RegisteredTest[], isSelected: readonly boolean[]): boolean[] {
+  const markers = tests.map((test, index) => isSelected[index] ? [
     ...groupChain(test.group).filter((group) => group.options.only === true),
     ...(test.options.only === true ? [test] : []),
-  ]);
+  ] : []);
   // A focused group with a marker below it on some test's path keeps only that marker's tests.
   const narrowed = new Set(markers.flatMap((onPath) => onPath.slice(0, -1)));
   return tests.map((test, index) => {
