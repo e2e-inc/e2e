@@ -224,7 +224,7 @@ const BLOCKING_DIALOG = /^Android (?:system dialog is blocking|app ANR blocked) 
  * "Close app" does.
  */
 const BLOCKING_DIALOG_HINT =
-  'An Android "isn\'t responding" dialog has focus and every other input is refused until it closes. Tap its "Close app" button, or dismiss it with device.alert(\'dismiss\'), then retry.';
+  'An Android "isn\'t responding" dialog has focus and every other input is refused until it closes. Tap its "Close app" button, or dismiss it with device.alert(\'dismiss\'), then retry. Both need the device language to be English.';
 
 /**
  * True for the refusal agent-device's Android guard raises while an "isn't

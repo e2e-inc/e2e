@@ -138,7 +138,7 @@ describe('error translation', () => {
       expect(failure).toMatchObject({ code: 'NOT_ACTIONABLE', retryable: false, cause: refused });
       // agent-device's hint (wait, reboot) never closes the dialog; its own button does.
       expect(failure.message).toBe(
-        `perform tap failed: ${text} Hint: An Android "isn't responding" dialog has focus and every other input is refused until it closes. Tap its "Close app" button, or dismiss it with device.alert('dismiss'), then retry.`,
+        `perform tap failed: ${text} Hint: An Android "isn't responding" dialog has focus and every other input is refused until it closes. Tap its "Close app" button, or dismiss it with device.alert('dismiss'), then retry. Both need the device language to be English.`,
       );
     }
     // The same text without the focused window agent-device attaches is not that refusal.
