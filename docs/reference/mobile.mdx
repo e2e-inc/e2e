@@ -1316,7 +1316,7 @@ to `combobox`.
 | Role | iOS | Android |
 | --- | --- | --- |
 | `button` | `Button` | `Button`, `ImageButton`, `MaterialButton` |
-| `link` | `Link` | A node whose role description is `Link`, see below |
+| `link` | `Link` | React Native's `role="link"`, see below |
 | `textbox` | `TextField`, `SearchField`, `TextView`, `SecureTextField` | `EditText`, `AutoCompleteTextView`, `TextInputEditText`, `SearchView` |
 | `combobox` | | `Spinner` |
 | `switch` | `Switch`, `Toggle` | `Switch`, `SwitchCompat`, `SwitchMaterial`, `ToggleButton` |
@@ -1354,12 +1354,8 @@ and `timer` give are not `getByRole` roles.
 On iOS only an `Other` carries one, and the state words after the role set
 `checked` and `expanded`; only what follows them is the node's value.
 
-Android has no type for a link either: React Native describes a node with
-`role="link"`, which expo-router's `Link` sets, as a `Link`, and a node
-described as a `Link` is a `link`. Before React Native 0.84, a `Text` link
-also holds a `Button` described as a `Link` under the same name, which is
-where a tap on the text lands. That `Button` is the `link` and the `Text`
-keeps its own role, so the name matches once.
+On Android, React Native's `role="link"`, which expo-router's `Link` sets, is
+a `link`, and a `Text` link matches its name once.
 
 `StaticText` and `Text` on iOS and `TextView` on Android are `text`, and an
 Android `WebView` is `document`. Neither is a `getByRole` role: find text

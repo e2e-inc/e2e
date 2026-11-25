@@ -403,7 +403,7 @@ function roleOf(kind: string, android: boolean, parentKind: string | undefined):
  *
  * `Link` is not among those words: iOS reports a link as a `Link` element,
  * which is a `link` already. On Android a `Link`-described node is a `link`
- * unless it only echoes one below it ({@link echoedLinks}).
+ * unless it only echoes its link span ({@link echoedLinks}).
  */
 function describedRole(source: RawNode, echoesLink: boolean): string | undefined {
   if (source.heading === true) return 'heading';
@@ -417,22 +417,19 @@ function describesLink(node: RawNode): boolean {
 }
 
 /**
- * The positions of the `Link`-described nodes with one of the same name
- * below them. Before React Native 0.84, a `Text` with `role="link"`
- * (expo-router's `Link`) holds a `Button` for its link span, described as a
- * `Link` under the text's name. A tap on the text lands on that button, so
- * the button is the link and the text keeps its class role.
+ * The positions of the nodes that a `Link`-described `Button` child echoes
+ * under the same name. Before React Native 0.84, a `Text` with `role="link"`
+ * (expo-router's `Link`) holds a virtual `Button` child for its link span,
+ * described as a `Link` under the text's name. A tap on the text lands on
+ * that button, so the button is the link and the text keeps its class role.
  */
 function echoedLinks(raw: readonly RawNode[], parents: readonly (number | undefined)[]): ReadonlySet<number> {
   const echoed = new Set<number>();
   raw.forEach((node, position) => {
-    if (!describesLink(node)) return;
+    const parent = parents[position];
+    if (parent === undefined || kindOf(node) !== 'button' || !describesLink(node)) return;
     const name = rawName(node);
-    if (name === undefined) return;
-    for (let up = parents[position]; up !== undefined; up = parents[up]) {
-      const above = raw[up] as RawNode;
-      if (describesLink(above) && rawName(above) === name) echoed.add(up);
-    }
+    if (name !== undefined && rawName(raw[parent] as RawNode) === name) echoed.add(parent);
   });
   return echoed;
 }

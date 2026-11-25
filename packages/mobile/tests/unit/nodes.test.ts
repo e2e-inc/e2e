@@ -365,7 +365,13 @@ describe('snapshot projection', () => {
       { ref: 'e8', index: 7, parentIndex: 6, depth: 2, type: 'android.widget.Button', label: 'Track parcel', roleDescription: 'Link' },
       // Unnamed links share no name, so neither echoes the other.
       { ref: 'e9', index: 8, parentIndex: 0, depth: 1, type: 'android.view.View', roleDescription: 'Link' },
-      { ref: 'e10', index: 9, parentIndex: 8, depth: 2, type: 'android.view.View', roleDescription: 'Link' },
+      { ref: 'e10', index: 9, parentIndex: 8, depth: 2, type: 'android.widget.Button', roleDescription: 'Link' },
+      // Only a direct Button child echoes, so a link card keeps a same-named link two levels down, or one directly inside that isn't a Button.
+      { ref: 'e11', index: 10, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Docs', roleDescription: 'Link' },
+      { ref: 'e12', index: 11, parentIndex: 10, depth: 2, type: 'android.view.ViewGroup' },
+      { ref: 'e13', index: 12, parentIndex: 11, depth: 3, type: 'android.view.View', label: 'Docs', roleDescription: 'Link' },
+      { ref: 'e14', index: 13, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Help', roleDescription: 'Link' },
+      { ref: 'e15', index: 14, parentIndex: 13, depth: 2, type: 'android.view.View', label: 'Help', roleDescription: 'Link' },
     ]);
     const nodes = projected.index.slice(1).map((entry) => `${entry.node.role} ${entry.node.name ?? ''}`.trim());
     expect(nodes).toEqual([
@@ -378,6 +384,11 @@ describe('snapshot projection', () => {
       'link Track parcel',
       'link',
       'link',
+      'link Docs',
+      'group',
+      'link Docs',
+      'link Help',
+      'link Help',
     ]);
   });
 
