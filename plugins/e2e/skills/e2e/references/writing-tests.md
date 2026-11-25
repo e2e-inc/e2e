@@ -13,9 +13,10 @@
 - The browser fixture (browser only)
 - Habits
 
-Read only the sections you need; skip "The browser fixture" for mobile or
-plain locator tests, and check `node_modules/e2e/docs/reference/` for full
-option tables.
+Always read "A complete file" and "Structure" first. Load later API sections
+(`Registration`, `Fixtures`, `Locators`, `expect`, `Sign-in sessions`,
+`The browser fixture`) only as needed, and check
+`node_modules/e2e/docs/reference/` for full option tables.
 
 ## A complete file
 
@@ -155,19 +156,22 @@ Write every test so a failing title names what broke.
   and assert records stayed unchanged; put a follow-up retry in its own test.
   For recipient delivery, keep a separate recipient session open and scope
   checks to the run-unique message (and history after reopen if promised).
-- **Each test owns its starting state.** Browsers isolate contexts per test
-  (restoring `session` state without leaking earlier tests' client changes); on
-  devices, reset with `app.clearState()` (plus `device.clearKeychain()` on iOS
-  simulator when sign-in uses keychain). Shared server data must be created
-  with a run-unique `randomUUID()` name in a `test.extend` fixture and deleted
-  in `finally`: teardown after `use()` already runs on assertion failure, and
-  `try`/`finally` around creation and `use()` also cleans up partial setup if a
-  later seed call throws before `use()`. Even when a test deletes its record,
-  keep fixture teardown and accept `404` so an earlier failure never leaks.
-  Without an API, seed and delete through the UI in the fixture; never clean up
-  at the end of a test body, never branch or skip on `isVisible()`/`count()`
-  (they do not wait), and never use `serial: true` to hide state coupling.
-  Every test must pass alone by `file:line` twice in a row.
+- **Each test owns its starting state and passes alone.**
+  - **Client vs. server state:** browsers isolate contexts per test (restoring
+    `session` state without leaking earlier tests' client changes); on devices,
+    reset with `app.clearState()` (plus `device.clearKeychain()` on iOS
+    simulator when sign-in uses keychain).
+  - **Fixture-owned server data:** create shared server records with a
+    run-unique `randomUUID()` name in a `test.extend` fixture and delete them
+    in `finally` (`try`/`finally` around creation and `use()` cleans up partial
+    setup before `use()` as well as failed tests). Even when a test deletes its
+    record, keep fixture teardown and accept `404` so an earlier failure never
+    leaks. Without a test API, seed and delete through the UI in the fixture;
+    never clean up at the end of a test body.
+  - **No coupling or unwaited branching:** never chain tests across shared
+    state, never use `serial: true` to hide coupling, and never branch or skip
+    on `isVisible()`/`count()` (they do not wait). Every test must pass when
+    run alone by `file:line`, twice in a row.
 - **Name what the tests repeat.** Define repeated selector inputs, values, or
   prompts once inside `describe` (or a feature-local module as specs grow) and
   keep single-use ones inline; bind repeated locators to local `const`s and use
