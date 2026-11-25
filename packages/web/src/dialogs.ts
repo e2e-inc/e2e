@@ -71,11 +71,29 @@ export class DialogRouter {
     return work;
   }
 
+  /**
+   * Answers with the configured policy, as a person clicking OK or Cancel
+   * would: an accepted `prompt` returns its default text.
+   */
+  private async answer(dialog: PwDialog, policy: DialogPolicy): Promise<void> {
+    try {
+      if (policy === 'accept') await dialog.accept(dialog.defaultValue());
+      else await dialog.dismiss();
+    } catch (cause) {
+      this.latch.latch(new EngineError('ENGINE_FAILURE', `answering a ${dialog.type()} dialog failed: ${message(cause)}`, { retryable: false, cause }));
+      await dialog.dismiss().catch(() => undefined);
+    }
+  }
+
   private async route(dialog: PwDialog): Promise<void> {
     // A test's own handler comes first; the configured policy only answers
     // what no handler takes, so an explorer or an agent step, which cannot
     // register one, still gets past a confirmation.
-    const handler = this.registrations.at(-1)?.handler ?? this.policy;
+    const handler = this.registrations.at(-1)?.handler;
+    if (handler === undefined && this.policy !== undefined) {
+      await this.answer(dialog, this.policy);
+      return;
+    }
     if (handler === undefined) {
       this.latch.latch(
         new EngineError(

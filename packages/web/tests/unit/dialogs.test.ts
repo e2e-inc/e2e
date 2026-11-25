@@ -9,10 +9,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { DialogRouter } from '../../src/dialogs.ts';
 import { ErrorLatch } from '../../src/support.ts';
 
-function fakeDialog(text = 'are you sure?') {
+function fakeDialog(text = 'are you sure?', defaultValue = '') {
   const accept = vi.fn(async (_text?: string) => undefined);
   const dismiss = vi.fn(async () => undefined);
-  const dialog = { type: () => 'confirm', message: () => text, accept, dismiss } as unknown as PwDialog;
+  const dialog = { type: () => 'confirm', message: () => text, defaultValue: () => defaultValue, accept, dismiss } as unknown as PwDialog;
   return { dialog, accept, dismiss };
 }
 
@@ -109,9 +109,10 @@ describe('DialogRouter', () => {
 
   it('answers a dialog no handler takes with the configured policy, and latches nothing', async () => {
     const accepting = new DialogRouter(new ErrorLatch(), 'accept');
-    const accepted = fakeDialog('Delete item?');
+    const accepted = fakeDialog('Name?', 'keep me');
     await accepting.dispatch(accepted.dialog);
-    expect(accepted.accept).toHaveBeenCalledTimes(1);
+    // As a person clicking OK: a prompt returns its default text.
+    expect(accepted.accept).toHaveBeenCalledExactlyOnceWith('keep me');
     expect(accepted.dismiss).not.toHaveBeenCalled();
     expect(() => accepting.throwPending()).not.toThrow();
 
@@ -121,6 +122,17 @@ describe('DialogRouter', () => {
     expect(dismissed.dismiss).toHaveBeenCalledTimes(1);
     expect(dismissed.accept).not.toHaveBeenCalled();
     expect(() => dismissing.throwPending()).not.toThrow();
+  });
+
+  it('latches ENGINE_FAILURE and dismisses when answering with the policy rejects', async () => {
+    const router = new DialogRouter(new ErrorLatch(), 'accept');
+    const { dialog, accept, dismiss } = fakeDialog();
+    accept.mockRejectedValueOnce(new Error('Target closed'));
+    await router.dispatch(dialog);
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    expect(() => router.throwPending()).toThrowError(
+      expect.objectContaining({ code: 'ENGINE_FAILURE', message: expect.stringContaining('answering a confirm dialog failed: Target closed') }),
+    );
   });
 
   it('lets a registered handler answer ahead of the policy, and returns to the policy once it unsubscribes', async () => {
