@@ -551,10 +551,10 @@ describe('checkout', { only: true }, () => {}); // the same, by option
 
 - Focused groups and `test.only` combine: every focused test runs, and the
   rest are reported as `filtered`.
-- A skipped test, by `test.skip`, `test.fixme`, or a skipped inner group, is
-  not focused, so it is `filtered` too, as beside `test.only`.
-- The innermost `only` wins: `only: false` on an inner group or a test opts
-  it out of the focus.
+- A `test.only` or `describe.only` inside a focused group narrows it, as in
+  Playwright: only the inner focused tests run.
+- A skipped test in a focused group stays focused and is reported with its
+  own skip cause, `explicit`, `fixme`, or `todo`.
 - A CI run with a focused group fails with `ONLY_IN_CI`.
 - A serial group can be focused whole. `only` inside a serial group is
   refused, since the group runs as one unit.
@@ -1416,7 +1416,7 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
     ConfigBase<Fixtures, Config> & Extra & ConfigFixtures<Config, 'test'>,
     ConfigBase<Worker, Config> & ExtraWorker & ConfigFixtures<Config, 'worker'>
   >;
-  /** Declares a group synchronously; `describe.fail` declares one whose tests are expected to fail. */
+  /** Declares a group synchronously; `describe.fail` declares one whose tests are expected to fail, `describe.only` a focused one. */
   describe: DescribeAPI;
   /** Registers a test-attempt setup hook: it runs after the test's fixtures are set up. */
   beforeEach(fn: TestHookFn<Fixtures & Worker>): void;
@@ -1456,10 +1456,10 @@ export interface TestOptions {
    */
   fail?: boolean | string;
   /**
-   * Focuses the test locally; on a group, focuses every test in it that is
-   * not skipped. The innermost `only` wins, so `false` on an inner group or
-   * a test opts it out. CI rejects it with `ONLY_IN_CI`. Not allowed inside a
-   * serial group; a serial group itself can be focused.
+   * Focuses the test locally; on a group, focuses every test in it, skipped
+   * ones included, unless a test or group inside it is focused too, which
+   * narrows the focus to that one. CI rejects it with `ONLY_IN_CI`. Not
+   * allowed inside a serial group; a serial group itself can be focused.
    */
   only?: boolean;
   /** Platforms the test runs on; other targets skip it. Innermost wins. */

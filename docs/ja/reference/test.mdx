@@ -430,8 +430,8 @@ describe('checkout', { only: true }, () => {}); // the same, by option
 ```
 
 - 対象を絞ったグループと `test.only` は併用できます。対象のテストはすべて実行し、ほかのテストは `filtered` と報告します。
-- `test.skip`、`test.fixme`、またはスキップした内側のグループによるスキップ対象のテストは対象にならず、`test.only` と並べた場合と同じく `filtered` になります。
-- いちばん内側の `only` が優先されます。内側のグループやテストに `only: false` を指定すると、そのグループやテストは対象から外れます。
+- 対象を絞ったグループの内側に `test.only` や `describe.only` があると、Playwright と同じく対象がそこまで狭まり、内側で対象にしたテストだけを実行します。
+- 対象を絞ったグループ内のスキップしたテストも対象のままで、`explicit`、`fixme`、`todo` のうち自身のスキップ原因で報告します。
 - 対象を絞ったグループがあると、CI では `ONLY_IN_CI` で実行が失敗します。
 - serial グループはグループ全体を対象にできます。serial グループは 1 単位として実行するため、その内側の `only` は拒否します。
 
@@ -1043,7 +1043,7 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   extend<Extra = {}, ExtraWorker = {}>(
     fixtures: FixtureDefinitions<Fixtures & Worker, Extra, Worker, ExtraWorker>,
   ): TestAPI<Fixtures & Extra, Worker & ExtraWorker>;
-  /** Declares a group synchronously; `describe.fail` declares one whose tests are expected to fail. */
+  /** Declares a group synchronously; `describe.fail` declares one whose tests are expected to fail, `describe.only` a focused one. */
   describe: DescribeAPI;
   /** Registers a test-attempt setup hook: it runs after the test's fixtures are set up. */
   beforeEach(fn: TestHookFn<Fixtures & Worker>): void;
@@ -1083,10 +1083,10 @@ export interface TestOptions {
    */
   fail?: boolean | string;
   /**
-   * Focuses the test locally; on a group, focuses every test in it that is
-   * not skipped. The innermost `only` wins, so `false` on an inner group or
-   * a test opts it out. CI rejects it with `ONLY_IN_CI`. Not allowed inside a
-   * serial group; a serial group itself can be focused.
+   * Focuses the test locally; on a group, focuses every test in it, skipped
+   * ones included, unless a test or group inside it is focused too, which
+   * narrows the focus to that one. CI rejects it with `ONLY_IN_CI`. Not
+   * allowed inside a serial group; a serial group itself can be focused.
    */
   only?: boolean;
   /** Platforms the test runs on; other targets skip it. Innermost wins. */

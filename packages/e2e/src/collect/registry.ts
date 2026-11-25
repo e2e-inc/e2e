@@ -48,8 +48,11 @@ export interface GroupNode {
   parallel: boolean | undefined;
 }
 
-/** How a test was registered; `fixme` and `todo` carry their own skip causes. */
-export type TestMode = 'normal' | 'skip' | 'fixme' | 'todo' | 'only';
+/**
+ * How a test was registered; `fixme` and `todo` carry their own skip causes.
+ * Focus is separate: `only` in its options or its groups' (`focusedTests`).
+ */
+export type TestMode = 'normal' | 'skip' | 'fixme' | 'todo';
 
 /**
  * A registered test or hook body. `TestAPI` types what each receives; at run
@@ -261,7 +264,7 @@ class Collector {
       names: fixtureNames(namedBy?.fn ?? fn, describeUser({ kind, titlePath }), source, namedBy?.position),
       fixtures,
       group: this.currentGroup,
-      mode: mode === 'normal' && options.only !== false && focusedByGroup(this.currentGroup) ? 'only' : mode,
+      mode,
       source,
     };
     this.declarationCounter += 1;
@@ -439,18 +442,6 @@ const DESCRIBE_OPTION_KEYS: readonly string[] = Object.keys({
   only: true,
 } satisfies Record<keyof DescribeOptions, true>);
 
-/**
- * Whether a test in `group` is focused by a group, the way `test.only`
- * focuses one: the innermost group that sets `only` decides, so an inner
- * `only: false` opts out, and a skipped group focuses nothing, which leaves
- * its tests filtered like a `test.skip` beside a focused one.
- */
-function focusedByGroup(group: GroupNode | undefined): boolean {
-  const chain = groupChain(group);
-  if (chain.some((node) => node.options.skip !== undefined && node.options.skip !== false)) return false;
-  return chain.findLast((node) => node.options.only !== undefined)?.options.only === true;
-}
-
 /** The option a `describe` variant sets on its group: `describe.fail` sets `fail`, `describe.only` sets `only`. */
 type GroupMark = 'fail' | 'only';
 
@@ -465,6 +456,9 @@ function validateCommonOptions(options: TestOptions | DescribeOptions, label: st
   }
   const unknown = unknownKeyMessage(label, options, keys);
   if (unknown !== undefined) throw new CollectionError(unknown);
+  if (options.only !== undefined && typeof options.only !== 'boolean') {
+    throw new CollectionError(`${label}: only must be true or false, got ${describeValue(options.only)}`);
+  }
   if (options.timeout !== undefined) {
     if (!Number.isSafeInteger(options.timeout) || options.timeout <= 0) {
       throw new CollectionError(`${label}: timeout must be a positive safe integer`);
@@ -585,9 +579,6 @@ function validateFailOption(fail: unknown, label: string): void {
 function validateDescribeOptions(options: DescribeOptions, parent: GroupNode | undefined, mark: GroupMark | undefined): void {
   validateCommonOptions(options, 'describe options', DESCRIBE_OPTION_KEYS);
   validateFailOption(options.fail, 'describe options');
-  if (options.only !== undefined && typeof options.only !== 'boolean') {
-    throw new CollectionError(`describe options: only must be true or false, got ${describeValue(options.only)}`);
-  }
   if (options.serial === true && insideSerial(parent)) {
     throw new CollectionError('nested serial groups are collection errors');
   }
@@ -840,11 +831,9 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
       : skip === true
         ? { ...given, skip: typeof given.skip === 'string' ? given.skip : true }
         : given;
-    const mode: TestMode = options.only === true
-      ? 'only'
-      : typeof skip === 'string'
-        ? skip
-        : options.skip !== undefined && options.skip !== false ? 'skip' : 'normal';
+    const mode: TestMode = typeof skip === 'string'
+      ? skip
+      : options.skip !== undefined && options.skip !== false ? 'skip' : 'normal';
     return collector.registerTest('test', mode, title, options, [], fn, chain, namedBy);
   };
   /** The `test()` call forms. */
@@ -975,7 +964,7 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
       return eachRegistrar('test.for()', readRows('test.for()', rows), false);
     },
     only(title: string, fn: TestBody): TestCase {
-      return requireCollector('test.only()').registerTest('test', 'only', title, { only: true }, [], fn, chain);
+      return requireCollector('test.only()').registerTest('test', 'normal', title, { only: true }, [], fn, chain);
     },
     setup(title: string, options: SetupOptions, fn: TestBody): TestCase {
       if (options === undefined || !Array.isArray(options.sessions)) {

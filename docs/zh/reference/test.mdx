@@ -429,8 +429,8 @@ describe('checkout', { only: true }, () => {}); // the same, by option
 ```
 
 - 单独运行的分组可以与 `test.only` 一起使用：所有单独运行的测试都会运行，其余测试报告为 `filtered`。
-- 通过 `test.skip`、`test.fixme` 或被跳过的内层分组跳过的测试不会单独运行，因此与在 `test.only` 旁边一样报告为 `filtered`。
-- 最内层的 `only` 生效：在内层分组或测试上设置 `only: false` 可以将其排除在外。
+- 单独运行的分组内部若还有 `test.only` 或 `describe.only`，范围会像 Playwright 一样收窄到它：只运行内部单独运行的测试。
+- 单独运行的分组中被跳过的测试仍属于单独运行的范围，并以自身的跳过原因（`explicit`、`fixme` 或 `todo`）报告。
 - CI 运行中包含单独运行的分组时会以 `ONLY_IN_CI` 失败。
 - serial 分组可以整体单独运行。serial 分组作为一个单元运行，因此其内部的 `only` 会被拒绝。
 
@@ -1042,7 +1042,7 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   extend<Extra = {}, ExtraWorker = {}>(
     fixtures: FixtureDefinitions<Fixtures & Worker, Extra, Worker, ExtraWorker>,
   ): TestAPI<Fixtures & Extra, Worker & ExtraWorker>;
-  /** Declares a group synchronously; `describe.fail` declares one whose tests are expected to fail. */
+  /** Declares a group synchronously; `describe.fail` declares one whose tests are expected to fail, `describe.only` a focused one. */
   describe: DescribeAPI;
   /** Registers a test-attempt setup hook: it runs after the test's fixtures are set up. */
   beforeEach(fn: TestHookFn<Fixtures & Worker>): void;
@@ -1082,10 +1082,10 @@ export interface TestOptions {
    */
   fail?: boolean | string;
   /**
-   * Focuses the test locally; on a group, focuses every test in it that is
-   * not skipped. The innermost `only` wins, so `false` on an inner group or
-   * a test opts it out. CI rejects it with `ONLY_IN_CI`. Not allowed inside a
-   * serial group; a serial group itself can be focused.
+   * Focuses the test locally; on a group, focuses every test in it, skipped
+   * ones included, unless a test or group inside it is focused too, which
+   * narrows the focus to that one. CI rejects it with `ONLY_IN_CI`. Not
+   * allowed inside a serial group; a serial group itself can be focused.
    */
   only?: boolean;
   /** Platforms the test runs on; other targets skip it. Innermost wins. */

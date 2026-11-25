@@ -150,13 +150,13 @@ describe('registration', () => {
     ).rejects.toThrow(/synchronously/);
   });
 
-  it('records skip and only modes', async () => {
+  it('records skip modes, and test.only as the only option', async () => {
     const registration = await collectModule(async () => {
       test.skip('skipped', noop);
       test.only('focused', noop);
       test('opt-skip', { skip: 'flaky upstream' }, noop);
     });
-    expect(registration.tests.map((item) => item.mode)).toEqual(['skip', 'only', 'skip']);
+    expect(registration.tests.map((item) => [item.mode, item.options.only])).toEqual([['skip', undefined], ['normal', true], ['skip', undefined]]);
     expect(registration.tests[2]!.options.skip).toBe('flaky upstream');
   });
 
@@ -223,7 +223,7 @@ describe('registration', () => {
       ['skip', { skip: 'no inotify on macOS' }, []],
       ['skip', { skip: '' }, []],
       ['skip', { skip: true }, []],
-      ['only', { only: true, skip: true }, []],
+      ['skip', { only: true, skip: true }, []],
       ['normal', { tags: ['@fs'] }, ['@fs']],
       ['skip', { skip: 'tracked in #42' }, []],
       ['skip', { skip: 'tracked in #42' }, []],
@@ -370,7 +370,7 @@ describe('registration', () => {
     ).toEqual([
       ['skipped 1', 'skip', { skip: 'not yet', tags: ['@each'] }, ['@each'], []],
       ['skipped 2', 'skip', { skip: 'not yet', tags: ['@each'] }, ['@each'], []],
-      ['focused 1', 'only', { only: true }, [], []],
+      ['focused 1', 'normal', { only: true }, [], []],
       ['extended 1', 'normal', {}, [], ['workspace']],
     ]);
   });
@@ -541,40 +541,25 @@ describe('registration', () => {
     }
   });
 
-  it('focuses the tests of a group marked by describe.only(title, fn) or the only option, and checks both', async () => {
+  it('marks a group focused by describe.only(title, fn) or the only option, and checks both', async () => {
     const registration = await collectModule(async () => {
-      test.describe.only('shortcut', () => {
-        test('a', noop);
-        test.describe('nested', () => test('b', noop));
-        test.skip('skipped inside', noop);
-        test.fixme('fixme inside', noop);
-        test.describe('skipped group', { skip: 'broken' }, () => test('in a skipped group', noop));
-        test.describe('opted out', { only: false }, () => test('in an opted-out group', noop));
-        test('opted out itself', { only: false }, noop);
-      });
-      test.describe.only('shortcut with options', { tags: ['smoke'] }, () => test('c', noop));
-      test.describe('by option', { only: true }, () => test('d', noop));
-      test.describe('not focused', { only: false }, () => test('e', noop));
-      registry.describe.only('top-level import', () => test('f', noop));
-      test('outside', noop);
+      test.describe.only('shortcut', () => test('a', noop));
+      test.describe.only('shortcut with options', { tags: ['smoke'] }, () => test('b', noop));
+      test.describe('by option', { only: true }, () => test('c', noop));
+      registry.describe.only('top-level import', () => test('d', noop));
     });
-    expect(registration.tests.map((item) => [item.title, item.mode])).toEqual([
-      ['a', 'only'],
-      ['b', 'only'],
-      ['skipped inside', 'skip'],
-      ['fixme inside', 'fixme'],
-      ['in a skipped group', 'normal'],
-      ['in an opted-out group', 'normal'],
-      ['opted out itself', 'normal'],
-      ['c', 'only'],
-      ['d', 'only'],
-      ['e', 'normal'],
-      ['f', 'only'],
-      ['outside', 'normal'],
+    expect(registration.tests.map((item) => [item.title, item.group?.options.only, item.mode])).toEqual([
+      ['a', true, 'normal'],
+      ['b', true, 'normal'],
+      ['c', true, 'normal'],
+      ['d', true, 'normal'],
     ]);
-    expect(registration.tests.find((item) => item.title === 'c')!.tags).toEqual(['smoke']);
+    expect(registration.tests[1]!.tags).toEqual(['smoke']);
     await expect(collectModule(async () => test.describe('group', { only: 'yes' } as never, () => {}))).rejects.toThrow(
       'describe options: only must be true or false, got "yes"',
+    );
+    await expect(collectModule(async () => test('x', { only: 'yes' } as never, noop))).rejects.toThrow(
+      'test options: only must be true or false, got "yes"',
     );
     // describe.only rejects what describe() rejects, including keys a spread would drop.
     const hidden = Object.defineProperty({}, 'bogus', { value: 1, enumerable: false });
@@ -586,14 +571,7 @@ describe('registration', () => {
     }
   });
 
-  it('focuses a serial group whole but refuses only inside one', async () => {
-    const registration = await collectModule(async () => {
-      test.describe.only('unit', { serial: true }, () => {
-        test('first', noop);
-        test('second', noop);
-      });
-    });
-    expect(registration.tests.map((item) => item.mode)).toEqual(['only', 'only']);
+  it('refuses only inside a serial group', async () => {
     const insideRule = 'describe option "only" cannot be set inside a serial group, which runs as one unit; focus the serial group instead';
     await expect(
       collectModule(async () => test.describe('unit', { serial: true }, () => test.describe.only('inner', () => {}))),
