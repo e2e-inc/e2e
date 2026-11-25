@@ -2,6 +2,9 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { EngineSessions } from '@e2e-dev/core/lib/run/engine-sessions';
+import { openWorker } from '@e2e-dev/core/lib/run/standalone';
+import { resolveConfig } from '../../src/config/resolve-run.ts';
 import type { StepProgress } from '../../src/runner.ts';
 import { createFakeEngine, FAKE_APP } from '../helpers/fake-engine.ts';
 import { freePort } from '../helpers/free-port.ts';
@@ -263,6 +266,55 @@ describe('openHost: lifecycle', { timeout: 60_000 }, () => {
     expect(await opened.close()).toEqual([]);
     expect(failed.stats().disposes).toBe(1);
     expect(pool.finishes).toHaveLength(1);
+  });
+
+  it('retires the host when a failed launch cannot end its attempt either', async () => {
+    const fake = createFakeEngine({
+      onStartAttempt: (_context, index) => { if (index === 0) throw new Error('launch broke'); },
+      onEndAttempt: () => { throw new Error('isolation did not close'); },
+    });
+    const pool = provisioned(fake);
+    const opened = await host(pool.engine);
+    await expect(opened.openSession({ name: 'broken start and cleanup' })).rejects.toThrow('launch broke');
+    expect(fake.stats()).toMatchObject({ attemptsStarted: 1, attemptsEnded: 1 });
+    const reuse = await opened.openSession({ name: 'unsafe reuse after failed launch' }).then(() => 'opened', (cause: unknown) => cause);
+    expect(reuse).toMatchObject({ code: 'WORKER_PROTOCOL' });
+    expect(fake.stats()).toMatchObject({ attemptsStarted: 1, disposes: 1 });
+    expect(pool.finishes).toHaveLength(1);
+    expect((await opened.close()).map((error) => error.message).join('\n')).toContain('isolation did not close');
+    expect(fake.stats().disposes).toBe(1);
+  });
+
+  it('retires the host when a launch cancelled after it opened cannot end its attempt', async () => {
+    const controller = new AbortController();
+    const fake = createFakeEngine({
+      onStartAttempt: () => { controller.abort(); },
+      onEndAttempt: () => { throw new Error('isolation did not close'); },
+    });
+    const opened = await host(fake.engine);
+    await expect(opened.openSession({ name: 'cancelled after launch', signal: controller.signal })).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(fake.stats()).toMatchObject({ attemptsStarted: 1, attemptsEnded: 1 });
+    const reuse = await opened.openSession({ name: 'unsafe reuse after cancelled launch' }).then(() => 'opened', (cause: unknown) => cause);
+    expect(reuse).toMatchObject({ code: 'WORKER_PROTOCOL' });
+    expect(fake.stats()).toMatchObject({ attemptsStarted: 1, disposes: 1 });
+    expect((await opened.close()).map((error) => error.message).join('\n')).toContain('isolation did not close');
+  });
+
+  it('retires the worker when a launch whose fixtures failed cannot end its attempt', async () => {
+    const fake = createFakeEngine({ onEndAttempt: () => { throw new Error('isolation did not close'); } });
+    const resolved = resolveConfig({ targets: [{ name: 'kiosk', platform: 'kiosk', engine: fake.engine, app: FAKE_APP }] }, { projectRoot: dir(), env: {} });
+    const worker = await openWorker({ config: resolved, target: resolved.targets[0]!, headed: false, env: {}, signal: new AbortController().signal }, {
+      claimsEngine: true,
+      holdsRegistry: false,
+      sessions: (options) => new EngineSessions(options),
+      identity: (_worker, attemptId) => ({ testId: `core:${attemptId}`, segments: ['core', attemptId] }),
+      launched: () => { throw new Error('fixtures broke'); },
+    });
+    await expect(worker.openAttempt({ name: 'broken fixtures', signal: new AbortController().signal, timeoutMs: 5_000 })).rejects.toThrow('fixtures broke');
+    const reuse = await worker.openAttempt({ name: 'unsafe reuse', signal: new AbortController().signal, timeoutMs: 5_000 }).then(() => 'opened', (cause: unknown) => cause);
+    expect(reuse).toMatchObject({ code: 'WORKER_PROTOCOL' });
+    expect(fake.stats()).toMatchObject({ attemptsStarted: 1, attemptsEnded: 1, disposes: 1 });
+    expect((await worker.close()).map((error) => error.message).join('\n')).toContain('isolation did not close');
   });
 
   it('keeps the host usable after a session signal cancels its launch', async () => {
