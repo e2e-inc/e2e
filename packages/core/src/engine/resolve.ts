@@ -83,6 +83,9 @@ export function expressionSelectors(expression: LocatorExpression): readonly str
         walk(node.left);
         walk(node.right);
         return;
+      default:
+        // A new expression kind must say whether it holds selectors: silence would answer from an empty set.
+        node satisfies never;
     }
   };
   walk(expression);
