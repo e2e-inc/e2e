@@ -966,7 +966,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
       (client) => client.settings.update({ setting: 'permission', permission, state, ...this.selection(), ...(app === undefined ? {} : { app }) }),
       signal,
     ).catch((error: unknown) => {
-      throw app === undefined ? error : appNotInstalled(error, app, this.where);
+      throw app === undefined ? error : appNotInstalled(error, app, this.where, `permission ${permission} ${state} for`);
     });
   }
 
@@ -1937,7 +1937,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
       (client) => client.settings.update({ ...this.selection(), setting: 'clear-app-state', state: 'clear', app }),
       operation.signal,
     ).catch((error: unknown) => {
-      throw appNotInstalled(error, app, this.where);
+      throw appNotInstalled(error, app, this.where, 'clear app state of');
     });
     await this.openApp(app, { relaunch: true }, operation.signal);
   }

@@ -3395,7 +3395,7 @@ describe('device fixture', () => {
     const device = fixture(h);
     const notInstalled = expect.objectContaining({
       code: 'TEST_SETUP_FAILED',
-      message: expect.stringMatching(/^open Settings failed: Settings is not installed on the device .*Install it with device\.installApp\(\) before opening it/),
+      message: expect.stringMatching(/^open Settings failed: Settings is not installed on the device .*Install it with device\.installApp\(\) first/),
     });
     h.fake.respond('apps.open', () => {
       throw new AppError('COMMAND_FAILED', 'Simulator device failed to launch Settings.', {

@@ -372,17 +372,17 @@ export function isAppNotInstalled(error: unknown): boolean {
 }
 
 /**
- * An `open` of `app` that failed because the device has no such app, as a
+ * An `operation` (an `open` by default) on `app` that failed because the device has no such app, as a
  * setup failure in e2e's words: agent-device's own advice names its CLI
  * (`Run install before open`). Any other failure is returned as it came.
  * `where` names the session and device.
  */
-export function appNotInstalled(error: unknown, app: string, where: string | undefined): unknown {
+export function appNotInstalled(error: unknown, app: string, where: string | undefined, operation = 'open'): unknown {
   if (!isAppNotInstalled(error)) return error;
   const location = where === undefined ? '' : ` (${where})`;
   return new ConfigurationError(
     'TEST_SETUP_FAILED',
-    `open ${app} failed: ${app} is not installed on the device${location}. Install it with device.installApp() before opening it (with no path, it installs the target's app.appPath), or check the bundle id or package name.`,
+    `${operation} ${app} failed: ${app} is not installed on the device${location}. Install it with device.installApp() first (with no path, it installs the target's app.appPath), or check the bundle id or package name.`,
     { cause: (error as Error).cause },
   );
 }
