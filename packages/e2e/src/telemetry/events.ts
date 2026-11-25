@@ -12,15 +12,16 @@
  * hold the payload to that promise.
  */
 
-import { GRAMMAR_ACTION_NAMES, GRAMMAR_TOOL_NAMES, HARNESS_TOOL_NAMES, MCP_SESSION_SURFACE, PROJECT_TOOL_EVENT_PREFIX } from '../agent/action-names.ts';
-import { modelLabel } from '../config/agent.ts';
-import type { ResolvedConfig } from '../config/resolve.ts';
+import { GRAMMAR_ACTION_NAMES, GRAMMAR_TOOL_NAMES, HARNESS_TOOL_NAMES, MCP_SESSION_SURFACE, PROJECT_TOOL_EVENT_PREFIX } from '@e2e-dev/core/lib/agent/action-names';
+import { modelLabel } from '@e2e-dev/core/lib/config/agent';
+import type { ResolvedRunConfig } from '../config/resolve-run.ts';
 import type { McpClient } from '../mcp/server.ts';
 import type { McpSessionSummary } from '../mcp/usage.ts';
+import { builtinId } from '../report/builtin-id.ts';
 import type { Report1Document, ReportError, ReportExplore, ReportStep, ReportUsage } from '../report/build.ts';
-import { memberRan } from '../run/records.ts';
-import { STEP_KINDS } from '../run/steps.ts';
-import type { JsonValue } from '../types.ts';
+import { memberRan } from '@e2e-dev/core/lib/run/records';
+import { STEP_KINDS } from '@e2e-dev/core/lib/run/steps';
+import type { JsonValue } from '@e2e-dev/core/lib/types';
 import { failureKind } from './failure-kind.ts';
 import { errorCodeToken, plainToken } from './token.ts';
 
@@ -82,6 +83,8 @@ export interface InitOutcome {
   /** Whether the agent skill, the MCP registration, and the install were chosen. */
   readonly skill: boolean;
   readonly mcp: boolean;
+  /** The CI pipeline chosen (`github-actions`, `gitlab`, `none`), null when not asked. */
+  readonly ci: string | null;
   readonly install: boolean;
 }
 
@@ -159,6 +162,7 @@ export function initCompletedEvent(outcome: InitOutcome): TelemetryEvent {
       gateway: outcome.gateway,
       skill: outcome.skill,
       mcp: outcome.mcp,
+      ci: outcome.ci,
       install: outcome.install,
     },
   };
@@ -357,11 +361,6 @@ function costSource(usage: ReportUsage, modelCalls: number): 'provider' | 'none'
   return modelCalls > 0 ? 'none' : null;
 }
 
-function durationMs(startedAt: string, finishedAt: string): number | null {
-  const duration = Date.parse(finishedAt) - Date.parse(startedAt);
-  return Number.isFinite(duration) ? Math.max(0, duration) : null;
-}
-
 /** What the CLI knows of a run beyond its report. */
 export interface RunContext {
   /** `run` or `explore`. */
@@ -369,14 +368,14 @@ export interface RunContext {
   /** The flag names given, never their values. */
   readonly flags: readonly string[];
   /** The config the run resolved; undefined when it failed to load. */
-  readonly config: ResolvedConfig | undefined;
+  readonly config: ResolvedRunConfig | undefined;
 }
 
 /**
  * Which config features a run used: counts, booleans, and the runner's own
  * option ids, never a name, a path, or a value the project wrote.
  */
-function configFeatures(config: ResolvedConfig): Record<string, JsonValue> {
+function configFeatures(config: ResolvedRunConfig): Record<string, JsonValue> {
   const agents = [...config.agents.values()];
   return {
     config_workers: config.workers,
@@ -392,8 +391,8 @@ function configFeatures(config: ResolvedConfig): Record<string, JsonValue> {
     config_cache_mode: config.cache.mode,
     config_cache_store: config.cache.store === undefined ? 'file' : 'custom',
     config_cache_strict: config.cache.strict !== false,
-    config_reporters: unique(config.reporters),
-    config_custom_reporters: config.customReporters.length,
+    config_reporters: unique(config.reporters.flatMap((reporter) => builtinId(reporter) ?? [])),
+    config_custom_reporters: config.reporters.filter((reporter) => builtinId(reporter) === undefined).length,
     config_filters: config.filters.length,
     config_artifact_store: config.artifactStore !== undefined,
     config_trace_modes: unique(config.targets.map((target) => target.trace.mode)),
@@ -445,7 +444,7 @@ export function runCompletedEvent(report: Report1Document, context: RunContext):
       command: context.command,
       status: run.status,
       exit_code: run.exitCode,
-      duration_ms: durationMs(run.startedAt, run.finishedAt),
+      duration_ms: run.durationMs ?? null,
       flags: [...context.flags],
       tests_discovered: run.summary.discovered,
       tests_selected: run.summary.selected,
@@ -539,6 +538,7 @@ export function mcpSessionEvent(summary: McpSessionSummary, client: McpClient | 
       platform: summary.platform === undefined ? null : plainToken(summary.platform),
       engine: summary.engine === undefined ? null : engineLabel(summary.engine),
       headed: summary.headed,
+      attached: summary.attached,
       duration_ms: Math.max(0, Math.round(summary.durationMs)),
       sessions_open: summary.concurrent,
       calls_total: [...calls.values()].reduce((total, count) => total + count, 0),

@@ -12,11 +12,16 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppError } from 'agent-device';
 import { decodePng, encodePng } from '../helpers/png.ts';
-import type { EngineFixtureContext, EngineSnapshot, FixtureOperations, LocatorExpression, OperationContext, SemanticNode } from 'e2e/engine';
+import type { EngineFixtureContext, EngineSnapshot, FixtureOperations, LocatorExpression, OperationContext, SemanticNode } from '@e2e-dev/core/engine';
+import { describeEngine } from '@e2e-dev/core/engine';
 import type { Device } from '../../src/device.ts';
 import type { RawNode } from '../../src/nodes.ts';
-import { mobile } from '../../src/engine.ts';
-import { ANDROID_APP_PACKAGE, ANDROID_ID_SNAPSHOT, SETTINGS_NODES, SETTINGS_SNAPSHOT } from '../helpers/fake-client.ts';
+import { buildEngine, mobile } from '../../src/engine.ts';
+import { ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING } from '../../src/errors.ts';
+import { AgentDeviceSurface } from '../../src/surface.ts';
+import { swipeWithin } from '../../src/support.ts';
+import { tvTools } from '../../src/tools.ts';
+import { ANDROID_APP_PACKAGE, ANDROID_ID_SNAPSHOT, createFakeClient, SETTINGS_NODES, SETTINGS_SNAPSHOT, type FakeClient } from '../helpers/fake-client.ts';
 import { boot, harness, poolVariableIn, PROJECT_ROOT, type Harness } from '../helpers/harness.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
@@ -56,6 +61,12 @@ async function openAttempt(h: Harness, attemptId = 'a1'): Promise<void> {
   if (app.bundleId !== undefined || app.appPath !== undefined) await h.engine.session!.restart!(operation());
 }
 
+/** One `tv_remote` call, as the agent makes it. */
+function remoteTool(h: Harness, key: string): Promise<unknown> {
+  const execute = tvTools(h.engine).tv_remote!.tool.execute as (input: unknown, options: object) => Promise<unknown>;
+  return execute({ key }, { toolCallId: 'c1', messages: [] });
+}
+
 /** The observed node with this name, from a fresh observation. */
 async function observed(h: Harness, name: string): Promise<SemanticNode> {
   const snapshot = await h.engine.observe!(operation());
@@ -89,13 +100,14 @@ async function screenRootOf(h: Harness): Promise<SemanticNode> {
 describe('manifest', () => {
   it('declares observation, actions, location, artifacts, the device fixture, and session hooks', () => {
     const pinned = harness().engine;
-    expect([...pinned.capabilities].toSorted()).toEqual(['actions', 'artifacts', 'device', 'keyboard', 'location', 'observation', 'pointer']);
+    expect([...pinned.capabilities].toSorted()).toEqual(['actions', 'artifacts', 'device', 'keyboard', 'location', 'observation', 'pointer', 'viewport-intersection']);
     expect(pinned.name).toBe('mobile');
+    expect(describeEngine(pinned).launchArgumentValues).toBe(true);
     expect(pinned.version).not.toBe('unknown');
-    expect(Object.keys(pinned.session!).toSorted()).toEqual(['back', 'reset', 'restart']);
+    expect(Object.keys(pinned.session!).toSorted()).toEqual(['back', 'openLink', 'reset', 'restart']);
     // No `open`: a device app has no URL. No select verb either: the touch surface has no option lists to pick from.
     expect(pinned.session!.open).toBeUndefined();
-    expect(pinned.actions).toEqual(['tap', 'doubleTap', 'longPress', 'fill', 'clear', 'press', 'check', 'uncheck', 'focus', 'hover', 'dragTo', 'swipe']);
+    expect(pinned.actions).toEqual(['tap', 'doubleTap', 'multiTap', 'longPress', 'fill', 'clear', 'press', 'check', 'uncheck', 'focus', 'hover', 'dragTo', 'swipe']);
     expect(pinned.state).toBeUndefined();
   });
 
@@ -109,7 +121,7 @@ describe('manifest', () => {
       expect.objectContaining({ code: 'INVALID_CONFIG', message: 'mobile() has unknown key "sesion"; did you mean "session"?' }),
     );
     // What `e2e mcp` passes when an agent names the package alone, or leaves the platform out.
-    for (const options of [undefined, {}, { platform: 'tvos' }]) {
+    for (const options of [undefined, {}, { platform: 'tvos' }, { platform: 'iOS' }, { platform: 'Android' }]) {
       expect(() => mobile(options as never)).toThrowError(expect.objectContaining({ code: 'INVALID_CONFIG', message: expect.stringContaining("mobile() needs platform: 'ios' or 'android'") }));
     }
     expect(() => mobile({ platform: 'ios', app: 'x' } as never)).toThrowError(
@@ -134,6 +146,25 @@ describe('manifest', () => {
     expect(() => validateApp!({ url: 'http://127.0.0.1:3000' }, info)).toThrowError(expect.objectContaining({ message: expect.not.stringContaining('10.0.2.2') }));
   });
 
+  it('refuses an iOS launch argument in an object on an Android target, and passes a list through', () => {
+    const info = { targetName: 'pixel' };
+    const android = harness({ platform: 'android' }).engine.validateApp!;
+    const ios = harness().engine.validateApp!;
+    const app = (launchArguments: unknown) => ({ bundleId: 'com.example.app', ...(Array.isArray(launchArguments) ? { launchArguments } : { launchArgumentValues: launchArguments }) }) as never;
+
+    expect(() => android(app({ AppleLocale: 'fr_FR' }), info)).toThrowError(
+      expect.objectContaining({
+        code: 'INVALID_CONFIG',
+        message: `target "pixel" app.launchArguments.AppleLocale is an iOS launch argument, and Android reads none of Apple's; set the device's language before the run, or language and locale on a hosted device provider`,
+      }),
+    );
+
+    expect(() => android(app({ AppleLanguages: ['fr'] }), info)).toThrowError(expect.objectContaining({ code: 'INVALID_CONFIG' }));
+    expect(() => android(app({ e2e: true, locale: 'fr_FR' }), info)).not.toThrow();
+    expect(() => android(app(['-AppleLocale', 'fr_FR']), info)).not.toThrow();
+    expect(() => ios(app({ AppleLocale: 'fr_FR', AppleLanguages: ['fr'] }), { targetName: 'ios' })).not.toThrow();
+  });
+
   it('rejects a permission name or state it does not know on the target, naming the nearest name', () => {
     const { validateApp } = harness().engine;
     const info = { targetName: 'ios' };
@@ -148,9 +179,14 @@ describe('manifest', () => {
       expect.objectContaining({ code: 'INVALID_CONFIG', message: 'target "ios" app.permissions.camera must be one of grant, deny, reset, got "granted"' }),
     );
     expect(() => validateApp!(app(new Map([['camera', 'grant']])), info)).toThrowError(
-      expect.objectContaining({ code: 'INVALID_CONFIG', message: 'target "ios" app.permissions must be a plain object of permission names to grant, deny, reset' }),
+      expect.objectContaining({ code: 'INVALID_CONFIG', message: 'target "ios" app.permissions must be \'all\' or a plain object of permission names to grant, deny, reset' }),
+    );
+    expect(() => validateApp!(app('every'), info)).toThrowError(
+      expect.objectContaining({ code: 'INVALID_CONFIG', message: 'target "ios" app.permissions must be \'all\' or a plain object of permission names to grant, deny, reset' }),
     );
     expect(() => validateApp!(app({ camera: 'grant', 'media-library': 'deny', photos: undefined }), info)).not.toThrow();
+    // Config load hands an engine 'all' as allPermissions, never as the string.
+    expect(() => validateApp!({ bundleId: 'com.example.app', allPermissions: true }, info)).not.toThrow();
   });
 });
 
@@ -273,6 +309,22 @@ describe('lifecycle', () => {
     expect(single.fake.lastArgs('devices.boot')).toEqual({ platform: 'ios', device: 'iPhone 16e' });
   });
 
+  it('binds the device --device names in prepare, over a configured pool or the booted devices, and declares that it selects one', async () => {
+    const info = (device: string) => ({ runId: 'run-1', targetName: 'ios', projectRoot: PROJECT_ROOT, slots: 2, env: {}, signal: new AbortController().signal, headed: false, device, log: () => undefined });
+    for (const configured of [['iPhone 16e', 'iPad Pro 11-inch'], undefined]) {
+      const h = harness(configured === undefined ? {} : { device: configured });
+      expect(h.engine.selectsDevice).toBe(true);
+      expect(h.engine.grantsAllPermissions).toBe(true);
+      const result = await h.prepare(info('iPhone 17 Pro'));
+      // One named device is one worker, whatever the run planned.
+      expect(result?.workers).toBe(1);
+      expect(h.fake.lastArgs('devices.boot')).toEqual({ platform: 'ios', device: 'iPhone 17 Pro' });
+      expect(h.fake.methods()).not.toContain('devices.list');
+      const handed = result?.env ?? {};
+      expect(handed[poolVariableIn(handed, 'IOS')]).toBe(JSON.stringify([{ device: 'iPhone 17 Pro' }]));
+    }
+  });
+
   it('warms each device with a plain open and no launch arguments', async () => {
     const h = harness({ device: 'iPhone 16e', launchArguments: ['-e2e', 'YES'], permissions: { camera: 'grant' } });
     const result = await h.prepare({ runId: 'run-1', targetName: 'ios', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: () => undefined });
@@ -338,6 +390,8 @@ describe('lifecycle', () => {
       { platform: 'ios', id: '2BBF3F07-AF66-4F95-82AB-BF442506FC89', name: 'iPhone 16e', booted: true },
       { platform: 'ios', id: '8A2DC8D6-7B20-44FA-ADBB-47D3EAE6E8F3', name: 'iPhone 17', booted: true },
       { platform: 'ios', id: 'CAB49ABB-4A25-48B3-99C9-949153F95902', name: 'iPhone 17 Pro Max', booted: false },
+      // A paired phone whose CoreDevice tunnel is unavailable, as agent-device 0.21.37 lists it (#1528).
+      { platform: 'ios', id: '00008110-001A2B3C4D5E6F70', name: 'iPhone 15', kind: 'device', booted: false },
     ];
     const h = harness({ device: undefined });
     h.fake.respond('devices.list', () => inventory);
@@ -356,7 +410,7 @@ describe('lifecycle', () => {
     });
     expect(result).toMatchObject({ workers: 2 });
     expect(h.fake.lastArgs('devices.list')).toEqual({ platform: 'ios' });
-    // Both booted iPhones, by UDID, under slot sessions; the Android device and the shut-down iPhone are not the pool's.
+    // Both booted iPhones, by UDID, under slot sessions; the Android device, the shut-down iPhone, and the unreachable phone are not the pool's.
     expect(h.fake.calls.filter((call) => call.method === 'devices.boot').map((call) => call.args)).toEqual([
       { platform: 'ios', udid: '2BBF3F07-AF66-4F95-82AB-BF442506FC89' },
       { platform: 'ios', udid: '8A2DC8D6-7B20-44FA-ADBB-47D3EAE6E8F3' },
@@ -451,6 +505,476 @@ describe('lifecycle', () => {
     expect(held.fake.methods()).not.toContain('devices.boot');
   });
 
+  it('names a launch() host\'s session after its host id, so it leaves the device a worker of the same target holds and keeps the one it holds itself', async () => {
+    const h = harness({ device: undefined });
+    h.fake.respond('devices.list', () => [
+      { platform: 'ios', id: 'A', name: 'A', booted: true, claimedBy: { session: 'e2e-ios-0', workspace: '/project' } },
+      { platform: 'ios', id: 'B', name: 'B', booted: true, claimedBy: { session: 'e2e-ios-abc123-0', workspace: '/project' } },
+    ]);
+    const info = { runId: 'run-1', targetName: 'ios', hostId: 'abc123', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: () => undefined };
+    const prepared = await h.prepare(info);
+    expect(prepared).toMatchObject({ workers: 1 });
+    expect(h.fake.calls.filter((call) => call.method === 'devices.boot').map((call) => call.args)).toEqual([{ platform: 'ios', udid: 'B' }]);
+    // The worker's init resumes the session prepare warmed, not the target's plain one.
+    await h.engine.init!({ runId: 'run-1', targetName: 'ios', hostId: 'abc123', projectRoot: PROJECT_ROOT, app: h.app, env: prepared?.env ?? {}, headed: false, workerSlot: 0, log: () => undefined, signal: new AbortController().signal });
+    expect(new Set(h.sessions)).toEqual(new Set(['e2e-ios-abc123-0']));
+
+    // The `session` option names the session whole, as it documents.
+    const optioned = harness({ device: undefined, session: 'mine' });
+    optioned.fake.respond('devices.list', () => [{ platform: 'ios', id: 'B', name: 'B', booted: true }]);
+    await optioned.prepare(info);
+    expect(new Set(optioned.sessions)).toEqual(new Set(['mine-0']));
+  });
+
+  it('hands a launch() host\'s bindings to its worker under a variable of its own, so a host inside a run never reads the run\'s', async () => {
+    const h = harness({ device: undefined });
+    h.fake.respond('devices.list', () => [{ platform: 'ios', id: 'B', name: 'B', booted: true }]);
+    const info = { runId: 'run-1', targetName: 'ios', hostId: 'abc123', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: () => undefined };
+    const handed = (await h.prepare(info))?.env ?? {};
+    // The run's own worker holds device A under the target's plain variable, in the environment the host inherits.
+    const run = harness({ device: undefined });
+    run.fake.respond('devices.list', () => [{ platform: 'ios', id: 'A', name: 'A', booted: true }]);
+    const inherited = (await run.prepare({ ...info, hostId: undefined }))?.env ?? {};
+    expect(Object.keys(handed)).not.toEqual(Object.keys(inherited));
+    // A worker in another process has no bindings in memory: it reads the host's variable, not the run's.
+    const worker = harness({ device: undefined });
+    await worker.engine.init!({ runId: 'run-1', targetName: 'ios', hostId: 'abc123', projectRoot: PROJECT_ROOT, app: worker.app, env: { ...inherited, ...handed }, headed: false, workerSlot: 0, log: () => undefined, signal: new AbortController().signal });
+    expect(worker.fake.lastArgs('devices.boot')).toEqual({ platform: 'ios', udid: 'B' });
+  });
+
+  it('fails a launch() host\'s finish when its session will not close, since no later host shares the name to take the device back', async () => {
+    const info = { runId: 'run-1', targetName: 'ios', hostId: 'abc123', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: () => undefined };
+    const finish = { ...info, timeoutMs: 5_000 };
+    const booted = () => [{ platform: 'ios', id: 'B', name: 'B', booted: true }];
+    const refusing = (options: Parameters<typeof harness>[0]) => {
+      const h = harness(options);
+      h.fake.respond('devices.list', booted);
+      h.fake.respond('sessions.close', () => { throw new AppError('COMMAND_FAILED', 'daemon refused'); });
+      return h;
+    };
+    const host = refusing({ device: undefined });
+    await host.prepare(info);
+    await expect(host.engine.finish!(finish)).rejects.toMatchObject({
+      code: 'ENGINE_FAILURE',
+      message: expect.stringMatching(/session "e2e-ios-abc123-0" \(daemon refused\) did not close, so its device stays held/),
+    });
+
+    // A session its worker already closed is closed.
+    const gone = harness({ device: undefined });
+    gone.fake.respond('devices.list', booted);
+    gone.fake.respond('sessions.close', () => { throw new AppError('SESSION_NOT_FOUND', 'no such session'); });
+    await gone.prepare(info);
+    await gone.engine.finish!(finish);
+
+    // A run's worker and a `session` option keep their names, so the next one takes the device back.
+    const worker = refusing({ device: undefined });
+    await worker.prepare({ ...info, hostId: undefined });
+    await worker.engine.finish!({ ...finish, hostId: undefined });
+    const optioned = refusing({ device: undefined, session: 'mine' });
+    await optioned.prepare(info);
+    await optioned.engine.finish!(finish);
+  });
+
+  it('moves a device a short-lived agent-device command refused to the next free one, and keeps it when none is free', async () => {
+    // agent-device 0.21.41 claims a device for the length of one command (boot, prepare, install, push) as
+    // `transient:<command>`, refused like a live owner. Another host's runner start holds such a claim while this one
+    // starts its own, so the slot moves when another device is free. That claim ends with the command, so with none
+    // free the slot keeps its device and the worker's start finds it free.
+    const transient = (command: string): AppError =>
+      new AppError('DEVICE_IN_USE', `ios device A is owned by session "transient:${command}" in workspace "/elsewhere".`, {
+        reason: 'DEVICE_CLAIM_LIVE_OWNER',
+        owner: { session: `transient:${command}`, workspace: '/elsewhere', stateDir: '/elsewhere/.agent-device' },
+        dispatched: 'no',
+      });
+    // A rejection is read as a value, so a device that is moved or refused fails an assertion that names the case.
+    const settle = (prepared: ReturnType<Harness['prepare']>) =>
+      prepared.then(
+        (result) => ({ env: (result?.env ?? {}) as Record<string, string>, rejected: undefined as string | undefined }),
+        (error: unknown) => ({ env: {} as Record<string, string>, rejected: error instanceof Error ? error.message : String(error) }),
+      );
+    for (const [method, command] of [['command.prepare', 'install'], ['apps.open', 'install'], ['command.prepare', 'prepare']] as const) {
+      const h = harness({ device: undefined });
+      h.fake.respond('devices.list', () => [{ platform: 'ios', id: 'A', name: 'A', booted: true }]);
+      let refused = 0;
+      h.fake.respond(method, () => {
+        if (refused++ === 0) throw transient(command);
+        return method === 'apps.open' ? { session: 's', appName: 'Settings', appBundleId: 'com.apple.Preferences', identifiers: {} } : {};
+      });
+      const lines: string[] = [];
+      const info = { runId: 'run-1', targetName: 'ios', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: (line: string) => void lines.push(line) };
+      const { env, rejected } = await settle(h.prepare(info));
+      expect(rejected, `${method} refused by transient:${command}`).toBeUndefined();
+      expect(env[poolVariableIn(env, 'IOS')], `${method} refused by transient:${command}`).toBe(JSON.stringify([{ deviceId: 'A' }]));
+      expect(lines, lines.join(' | ')).toContain(`slot 0 keeps A: no other booted device is free, and the claim ends with its command, so the worker's start tries it again`);
+      await expect(boot(h, 'ios', 0, env)).resolves.toBeUndefined();
+    }
+    // Another device free: the runner start or the open refused on A by another host's `transient:prepare` moves to B.
+    for (const method of ['command.prepare', 'apps.open'] as const) {
+      const h = harness({ device: undefined });
+      h.fake.respond('devices.list', () => [{ platform: 'ios', id: 'A', name: 'A', booted: true }, { platform: 'ios', id: 'B', name: 'B', booted: true }]);
+      h.fake.respond(method, (args) => {
+        if ((args as { udid?: string }).udid === 'A') throw transient('prepare');
+        return method === 'apps.open' ? { session: 's', appName: 'Settings', appBundleId: 'com.apple.Preferences', identifiers: {} } : {};
+      });
+      const info = { runId: 'run-1', targetName: 'ios', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: () => undefined };
+      const { env, rejected } = await settle(h.prepare(info));
+      expect(rejected, `${method} refused by transient:prepare, B free`).toBeUndefined();
+      expect(env[poolVariableIn(env, 'IOS')], `${method} refused by transient:prepare, B free`).toBe(JSON.stringify([{ deviceId: 'B' }]));
+      // The worker starts from the bindings prepare handed back, so it boots B, not A.
+      await expect(boot(h, 'ios', 0, env), method).resolves.toBeUndefined();
+      expect(h.fake.lastArgs('devices.boot'), method).toMatchObject({ udid: 'B' });
+    }
+    // A boot it refused still moves the slot: another free device costs nothing, and a boot failure ends the run on main.
+    const busy = harness({ device: undefined });
+    busy.fake.respond('devices.list', () => [{ platform: 'ios', id: 'A', name: 'A', booted: true }, { platform: 'ios', id: 'B', name: 'B', booted: true }]);
+    let bootRefused = 0;
+    busy.fake.respond('devices.boot', () => {
+      if (bootRefused++ === 0) throw transient('prepare');
+      return {};
+    });
+    const info = { runId: 'run-1', targetName: 'ios', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: () => undefined };
+    const moved = await settle(busy.prepare(info));
+    expect(moved.rejected, 'devices.boot refused by transient:prepare').toBeUndefined();
+    expect(moved.env[poolVariableIn(moved.env, 'IOS')]).toBe(JSON.stringify([{ deviceId: 'B' }]));
+    // With no other device free, a refused boot ends the run as on main: the slot never booted, so nothing waits for it.
+    const alone = harness({ device: undefined });
+    alone.fake.respond('devices.list', () => [{ platform: 'ios', id: 'A', name: 'A', booted: true }]);
+    alone.fake.respond('devices.boot', () => {
+      throw transient('prepare');
+    });
+    const failed = await settle(alone.prepare(info));
+    expect(failed.rejected, 'devices.boot refused by transient:prepare, nothing else free').toMatch(/^boot failed: ios device A is owned by session "transient:prepare" in workspace "\/elsewhere"; no other booted ios device is free for worker slot 0: boot another one$/);
+
+    // With two slots and nothing else free, a short-lived refusal after the boot keeps the slot's device rather than
+    // dropping the slot; a refused boot loses it, so that slot is dropped and the run goes on on B.
+    const two = { ...info, slots: 2 };
+    for (const [method, kept] of [
+      ['command.prepare', [{ deviceId: 'A' }, { deviceId: 'B' }]],
+      ['apps.open', [{ deviceId: 'A' }, { deviceId: 'B' }]],
+      ['devices.boot', [{ deviceId: 'B', session: 'e2e-ios-1' }]],
+    ] as const) {
+      const pair = harness({ device: undefined });
+      pair.fake.respond('devices.list', () => [{ platform: 'ios', id: 'A', name: 'A', booted: true }, { platform: 'ios', id: 'B', name: 'B', booted: true }]);
+      pair.fake.respond(method, (args) => {
+        if ((args as { udid?: string }).udid === 'A') throw transient('prepare');
+        return method === 'apps.open' ? { session: 's', appName: 'Settings', appBundleId: 'com.apple.Preferences', identifiers: {} } : {};
+      });
+      const { env, rejected } = await settle(pair.prepare(two));
+      expect(rejected, `${method} refused by transient:prepare, two slots`).toBeUndefined();
+      expect(env[poolVariableIn(env, 'IOS')], `${method} refused by transient:prepare, two slots`).toBe(JSON.stringify(kept));
+    }
+  });
+
+  it('moves a discovered slot to the next free device when another session takes its device between the inventory and the warm-up', async () => {
+    // agent-device 0.21.41 refuses a device another live session holds in three shapes: a claim names the holder in
+    // `owner.session`, a session of the same daemon in `session` with no reason, and a workspace session in `session`.
+    // Past 50 refusals it reports a loop instead, so a retry that never ends fails an assertion rather than the run.
+    let refusals = 0;
+    const looped = (): AppError | undefined => (++refusals > 50 ? new AppError('COMMAND_FAILED', 'looped on a refused device') : undefined);
+    const claimed = (id: string, session = 'e2e-ios-host-other-0'): AppError =>
+      looped() ??
+      new AppError('DEVICE_IN_USE', `ios device ${id} is owned by session "${session}" in workspace "/w".`, {
+        reason: 'DEVICE_CLAIM_LIVE_OWNER',
+        owner: { session, workspace: '/w' },
+        hint: `Inspect the owner with: agent-device device status --platform ios --udid ${id}`,
+        dispatched: 'no',
+      });
+    const inSession = (id: string): AppError =>
+      looped() ??
+      new AppError('DEVICE_IN_USE', 'Device is already in use by session "e2e-ios-host-other-0".', { session: 'e2e-ios-host-other-0', deviceId: id, dispatched: 'no' });
+    const inWorkspace = (id: string): AppError =>
+      looped() ??
+      new AppError('DEVICE_IN_USE', 'Device is already in use by workspace session "e2e-ios-host-other-0".', {
+        reason: 'WORKSPACE_SESSION_SCOPE_CONFLICT',
+        session: 'e2e-ios-host-other-0',
+        deviceId: id,
+        dispatched: 'no',
+      });
+    const refuse = (refusal: (id: string) => AppError, ids: readonly string[]) => (args: unknown) => {
+      const id = (args as { udid?: string }).udid ?? '?';
+      if (ids.includes(id)) throw refusal(id);
+      return {};
+    };
+    const device = (id: string) => ({ platform: 'ios', id, name: id, booted: true });
+    const free = [device('A'), device('B'), device('C')];
+    const info = { runId: 'run-1', targetName: 'ios', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: (_line: string) => undefined };
+    // A rejection is read as a value, so a slot that is not moved fails an assertion rather than the test's await.
+    const bound = async (prepared: ReturnType<Harness['prepare']>): Promise<string | undefined> =>
+      prepared.then(
+        (result) => {
+          const handed = result?.env ?? {};
+          return handed[poolVariableIn(handed, 'IOS')];
+        },
+        (error: unknown) => `rejected: ${(error as Error).message}`,
+      );
+    // One scripted client per session, as agent-device gives each its own, so `finish` is read by the sessions it closed.
+    const { app } = harness();
+    const pool = (script: (fake: FakeClient, session: string) => void) => {
+      const clients: [string, FakeClient][] = [];
+      const engine = buildEngine(
+        new AgentDeviceSurface({ platform: 'ios' }, (session) => {
+          const fake = createFakeClient({ 'apps.open': () => ({ session, appName: 'Settings', appBundleId: 'com.apple.Preferences', identifiers: {} }) });
+          script(fake, session);
+          clients.push([session, fake]);
+          return fake.client;
+        }),
+      );
+      return {
+        clients,
+        prepare: (slots: number, log: (line: string) => void = () => undefined) => bound(engine.prepare!({ ...info, slots, log, app })),
+        closed: async (): Promise<string[]> => {
+          await engine.finish!({ runId: info.runId, targetName: info.targetName, env: {}, signal: new AbortController().signal, timeoutMs: 1000, log: () => undefined });
+          return clients.flatMap(([session, fake]) => fake.methods().filter((method) => method === 'sessions.close').map(() => session)).toSorted();
+        },
+        calls: (method: string) => clients.flatMap(([, fake]) => fake.calls.filter((call) => call.method === method).map((call) => (call.args as { udid?: string }).udid)),
+      };
+    };
+
+    // Refused at boot under a claim, at the runner start and at the open by a session of the same daemon or workspace.
+    for (const [method, refusal] of [['devices.boot', claimed], ['command.prepare', inSession], ['apps.open', inSession], ['apps.open', inWorkspace]] as const) {
+      const h = pool((fake) => {
+        fake.respond('devices.list', () => free);
+        fake.respond(method, refuse(refusal, ['A']));
+      });
+      const lines: string[] = [];
+      expect(await h.prepare(1, (line) => lines.push(line)), method).toBe(JSON.stringify([{ deviceId: 'B' }]));
+      expect(lines, method).toContain('A is held by agent-device session "e2e-ios-host-other-0"; trying the next free device');
+      expect(lines, method).toContain('slot 0 drives B (B) instead');
+      // The refused client is not closed besides the slot's next one: one session, one close.
+      expect(await h.closed(), method).toEqual(['e2e-ios-0']);
+    }
+
+    // Two slots, the second refused: the first keeps the device it opened, and the next inventory, which lists the
+    // first slot's device first, gives the second one a device no slot drives.
+    let inventories = 0;
+    const second = pool((fake) => {
+      fake.respond('devices.list', () => (++inventories === 1 ? free : [free[0], free[2], free[1]]));
+      fake.respond('devices.boot', refuse(claimed, ['B']));
+    });
+    expect(await second.prepare(2)).toBe(JSON.stringify([{ deviceId: 'A' }, { deviceId: 'C' }]));
+    expect(second.calls('apps.open')).toEqual(['A', 'C']);
+    expect(await second.closed()).toEqual(['e2e-ios-0', 'e2e-ios-1']);
+
+    // Two slots, the first refused: it skips the device the second slot was bound to.
+    const first = pool((fake) => {
+      fake.respond('devices.list', () => free);
+      fake.respond('devices.boot', refuse(claimed, ['A']));
+    });
+    expect(await first.prepare(2)).toBe(JSON.stringify([{ deviceId: 'C' }, { deviceId: 'B' }]));
+
+    // The next inventory lists a device another session holds ahead of a free one: the slot takes the free one.
+    let foreignLists = 0;
+    const foreign = harness({ device: undefined });
+    foreign.fake.respond('devices.list', () => (++foreignLists === 1 ? free : [device('A'), { ...device('B'), claimedBy: { session: 't3-holder', workspace: '/elsewhere' } }, device('C')]));
+    foreign.fake.respond('devices.boot', refuse(claimed, ['A']));
+    expect(await bound(foreign.prepare(info))).toBe(JSON.stringify([{ deviceId: 'C' }]));
+
+    // A launch() host's own session name carries its host id: a device held under that name stays the host's own when
+    // its slot moves.
+    const host = harness({ device: undefined });
+    host.fake.respond('devices.list', () => [device('A'), { ...device('B'), claimedBy: { session: 'e2e-ios-abc123-0', workspace: '/project' } }]);
+    host.fake.respond('devices.boot', refuse(claimed, ['A']));
+    expect(await bound(host.prepare({ ...info, hostId: 'abc123' }))).toBe(JSON.stringify([{ deviceId: 'B' }]));
+
+    // A device the config names and a provider's lease are never moved: refused at boot they fail, refused at the
+    // open or the runner start they are left to the first attempt, as before. So is a slot no device was found for.
+    const lease = {
+      name: 'toy-cloud',
+      acquire: async (request: { slot: number }) => ({ id: `lease-${request.slot}`, daemon: { baseUrl: 'https://0.example' }, deviceId: 'A' }),
+      release: async () => undefined,
+    };
+    for (const configured of ['A', lease] as const) {
+      const atBoot = harness({ device: configured });
+      atBoot.fake.respond('devices.boot', () => {
+        throw claimed('A');
+      });
+      expect(await bound(atBoot.prepare(info))).toMatch(/^rejected: boot failed: ios device A is owned by session/);
+      expect(atBoot.fake.methods()).not.toContain('devices.list');
+    }
+    // So is the device `e2e run --device` names over a target that names none, even with another one free: refused at
+    // the open or the runner start, it is left to the first attempt.
+    for (const method of ['apps.open', 'command.prepare'] as const) {
+      const pinned = harness({ device: undefined });
+      pinned.fake.respond('devices.list', () => free);
+      pinned.fake.respond(method, () => {
+        throw inSession('A');
+      });
+      expect(await bound(pinned.prepare({ ...info, device: 'A' })), method).toBe(JSON.stringify([{ device: 'A' }]));
+      expect(pinned.fake.methods(), method).not.toContain('devices.list');
+    }
+    for (const configured of ['A', lease, undefined] as const) {
+      for (const [method, left] of [['apps.open', /did not open \(open Settings failed: Device is already in use/], ['command.prepare', /automation runner not prepared \(.*Device is already in use/]] as const) {
+        const h = harness({ device: configured });
+        h.fake.respond('devices.list', () => []);
+        h.fake.respond(method, () => {
+          throw inSession('A');
+        });
+        const lines: string[] = [];
+        expect(await bound(h.prepare({ ...info, log: (line) => lines.push(line) })), method).not.toMatch(/^rejected/);
+        expect(lines.some((line) => left.test(line)), `${method}: ${lines.join(' | ')}`).toBe(true);
+      }
+    }
+
+    // A claim whose owner is dead and awaits recovery, or one agent-device cannot verify, is not a race, even when it
+    // names its owner: its own error and advice stand.
+    for (const reason of ['DEVICE_CLAIM_RECOVERY_PENDING', 'DEVICE_CLAIM_OWNER_UNCERTAIN']) {
+      const stale = harness({ device: undefined });
+      stale.fake.respond('devices.list', () => free);
+      stale.fake.respond('devices.boot', () => {
+        throw new AppError('DEVICE_IN_USE', 'ios device A is owned by session "e2e-ios-host-gone-0" in workspace "/w".', {
+          reason,
+          owner: { session: 'e2e-ios-host-gone-0', workspace: '/w' },
+          dispatched: 'no',
+        });
+      });
+      expect(await bound(stale.prepare(info)), reason).toBe('rejected: boot failed: ios device A is owned by session "e2e-ios-host-gone-0" in workspace "/w".');
+    }
+
+    // A session of the same daemon is a live holder whatever its name: one named like a short-lived claim moves too,
+    // and with nothing else free it fails like any other holder.
+    const oddlyNamed = (id: string): AppError => new AppError('DEVICE_IN_USE', 'Device is already in use by session "transient:smoke-0".', { session: 'transient:smoke-0', deviceId: id, dispatched: 'no' });
+    const smoke = harness({ device: undefined });
+    smoke.fake.respond('devices.list', () => free);
+    smoke.fake.respond('apps.open', refuse(oddlyNamed, ['A']));
+    expect(await bound(smoke.prepare(info))).toBe(JSON.stringify([{ deviceId: 'B' }]));
+    const smokeAlone = harness({ device: undefined });
+    smokeAlone.fake.respond('devices.list', () => [device('A')]);
+    smokeAlone.fake.respond('apps.open', refuse(oddlyNamed, ['A']));
+    expect(await bound(smokeAlone.prepare(info))).toMatch(/^rejected: open Settings failed: Device is already in use by session "transient:smoke-0"; no other booted ios device is free for worker slot 0: boot another one$/);
+
+    // Two slots on the only two devices, a live session takes the first one's at the open: the other slot's device is
+    // not free for it, so the slot is dropped and the run goes on with one worker, which boots B as slot 0 under the
+    // session B warmed with.
+    const pair = harness({ device: undefined });
+    pair.fake.respond('devices.list', () => [device('A'), device('B')]);
+    pair.fake.respond('apps.open', refuse(inSession, ['A']));
+    const pairLines: string[] = [];
+    const paired = await pair.prepare({ ...info, slots: 2, log: (line) => pairLines.push(line) });
+    expect(paired?.workers).toBe(1);
+    const pairEnv = paired?.env ?? {};
+    expect(pairEnv[poolVariableIn(pairEnv, 'IOS')]).toBe(JSON.stringify([{ deviceId: 'B', session: 'e2e-ios-1' }]));
+    expect(pairLines).toContain('no other booted device is free for slot 0; the run goes on with 1 worker(s)');
+    await expect(boot(pair, 'ios', 0, pairEnv)).resolves.toBeUndefined();
+    expect(pair.fake.lastArgs('devices.boot')).toMatchObject({ udid: 'B' });
+    expect(pair.sessions.at(-1)).toBe('e2e-ios-1');
+
+    // The slots after a dropped one take the numbers below and keep the sessions they were bound under, so each worker
+    // resumes the session its device warmed with, and every session the warm-up opened is closed once.
+    for (const [lost, kept, warmedAs] of [
+      [['A'], [{ deviceId: 'B', session: 'e2e-ios-1' }, { deviceId: 'C', session: 'e2e-ios-2' }], [['e2e-ios-0', 'A'], ['e2e-ios-1', 'B'], ['e2e-ios-2', 'C']]],
+      [['B'], [{ deviceId: 'A' }, { deviceId: 'C', session: 'e2e-ios-2' }], [['e2e-ios-0', 'A'], ['e2e-ios-1', 'B'], ['e2e-ios-2', 'C']]],
+      [['C'], [{ deviceId: 'A' }, { deviceId: 'B' }], [['e2e-ios-0', 'A'], ['e2e-ios-1', 'B'], ['e2e-ios-2', 'C']]],
+    ] as const) {
+      const h = pool((fake) => {
+        fake.respond('devices.list', () => free);
+        fake.respond('apps.open', refuse(inSession, lost));
+      });
+      expect(await h.prepare(3), `lost ${lost.join()}`).toBe(JSON.stringify(kept));
+      const opened = h.clients.flatMap(([session, fake]) => fake.calls.filter((call) => call.method === 'apps.open').map((call) => [session, (call.args as { udid?: string }).udid]));
+      expect(opened, `lost ${lost.join()}`).toEqual(warmedAs);
+      expect(await h.closed(), `lost ${lost.join()}`).toEqual(['e2e-ios-0', 'e2e-ios-1', 'e2e-ios-2']);
+    }
+
+    // B still holds this target's own `e2e-ios-1` from an earlier run, which the inventory reads as the run's own and
+    // agent-device lets only that session use. When A is taken and slot 0 dropped, B keeps warming under `e2e-ios-1`.
+    const resumed = pool((fake, session) => {
+      fake.respond('devices.list', () => [device('A'), { ...device('B'), claimedBy: { session: 'e2e-ios-1' } }]);
+      fake.respond('apps.open', (args) => {
+        const id = (args as { udid?: string }).udid;
+        if (id === 'A') throw inSession('A');
+        if (id === 'B' && session !== 'e2e-ios-1') throw claimed('B', 'e2e-ios-1');
+        return { session, appName: 'Settings', appBundleId: 'com.apple.Preferences', identifiers: {} };
+      });
+    });
+    expect(await resumed.prepare(2)).toBe(JSON.stringify([{ deviceId: 'B', session: 'e2e-ios-1' }]));
+
+    // A renumbered slot that then moves keeps its session: A is taken with nothing free, so slot 0 is dropped; B, now
+    // slot 0 under `e2e-ios-1`, is taken too, and C, free by the next inventory, takes over under `e2e-ios-1`.
+    let listed = 0;
+    const shifted = pool((fake) => {
+      fake.respond('devices.list', () => (++listed <= 2 ? [device('A'), device('B')] : [device('A'), device('B'), device('C')]));
+      fake.respond('apps.open', refuse(inSession, ['A', 'B']));
+    });
+    expect(await shifted.prepare(2)).toBe(JSON.stringify([{ deviceId: 'C', session: 'e2e-ios-1' }]));
+
+    // An inventory that fails after a refusal is the error: it never reads as "nothing free", which would drop a slot.
+    let inventories2 = 0;
+    const blind = pool((fake) => {
+      fake.respond('devices.list', () => {
+        if (++inventories2 > 1) throw new AppError('COMMAND_FAILED', 'simctl list failed');
+        return [device('A'), device('B')];
+      });
+      fake.respond('apps.open', refuse(inSession, ['A']));
+    });
+    expect(await blind.prepare(2)).toMatch(/^rejected: .*simctl list failed/);
+
+    // With no slot left, the run fails with the holder rather than starting a worker on a device another session holds.
+    const none = harness({ device: undefined });
+    none.fake.respond('devices.list', () => [device('A'), device('B')]);
+    none.fake.respond('apps.open', refuse(inSession, ['A', 'B']));
+    expect(await bound(none.prepare({ ...info, slots: 2 }))).toBe(
+      'rejected: open Settings failed: Device is already in use by session "e2e-ios-host-other-0"; no other booted ios device is free for worker slot 0: boot another one',
+    );
+
+    // A refusal that names a session but is not DEVICE_IN_USE (a session bound to another device) names no holder:
+    // the open is logged and left to the first attempt, and the slot keeps its device.
+    const rebound = harness({ device: undefined });
+    rebound.fake.respond('devices.list', () => free);
+    rebound.fake.respond('apps.open', () => {
+      throw new AppError('INVALID_ARGS', 'Session "e2e-ios-host-other-0" is already bound to A, but this request selected B.', { session: 'e2e-ios-host-other-0' });
+    });
+    const reboundLines: string[] = [];
+    expect(await bound(rebound.prepare({ ...info, log: (line) => reboundLines.push(line) }))).toBe(JSON.stringify([{ deviceId: 'A' }]));
+    expect(reboundLines.some((line) => line.includes('did not open')), reboundLines.join(' | ')).toBe(true);
+
+    // Another project's run holds A under this target's own session name, which the inventory reads as this run's:
+    // once refused, A counts as held, and with nothing else free agent-device's refusal is the error.
+    const elsewhere = harness({ device: undefined });
+    elsewhere.fake.respond('devices.list', () => [{ ...device('A'), claimedBy: { session: 'e2e-ios-0', workspace: '/other' } }]);
+    elsewhere.fake.respond('devices.boot', () => {
+      throw claimed('A', 'e2e-ios-0');
+    });
+    await expect(elsewhere.prepare(info)).rejects.toMatchObject({
+      code: 'ENGINE_FAILURE',
+      message: expect.stringMatching(/^boot failed: ios device A is owned by session "e2e-ios-0" in workspace "\/w"\..*; no other booted ios device is free for worker slot 0: /),
+      cause: expect.objectContaining({ message: expect.stringMatching(/^boot failed: ios device A is owned by session "e2e-ios-0"/) }),
+    });
+    expect(elsewhere.fake.methods().filter((method) => method === 'devices.boot')).toHaveLength(1);
+
+    // Every free device taken in turn, or every device gone from the next inventory: the last refusal is the error,
+    // with its holder, workspace and advice, and is its cause.
+    for (const after of [free, []]) {
+      let lists = 0;
+      const taken = harness({ device: undefined });
+      taken.fake.respond('devices.list', () => (++lists === 1 ? free : after));
+      taken.fake.respond('devices.boot', (args) => {
+        throw claimed((args as { udid?: string }).udid ?? '?');
+      });
+      const last = after.length === 0 ? 'A' : 'C';
+      await expect(taken.prepare(info)).rejects.toMatchObject({
+        code: 'ENGINE_FAILURE',
+        message: expect.stringMatching(
+          new RegExp(`^boot failed: ios device ${last} is owned by session "e2e-ios-host-other-0" in workspace "/w"\\. Hint: Inspect the owner with: agent-device device status --platform ios --udid ${last}; no other booted ios device is free for worker slot 0: `),
+        ),
+        cause: expect.objectContaining({ message: expect.stringMatching(new RegExp(`^boot failed: ios device ${last} is owned by`)) }),
+      });
+    }
+
+    // Any other boot failure is not a reason to move: it fails as before, after one inventory.
+    // Past 50 inventories it fails there, outside the retry, so a retry that never ends fails an assertion.
+    const broken = harness({ device: undefined });
+    let brokenInventories = 0;
+    broken.fake.respond('devices.list', () => {
+      if (++brokenInventories > 50) throw new AppError('COMMAND_FAILED', 'looped on a failed boot');
+      return free;
+    });
+    broken.fake.respond('devices.boot', () => {
+      throw new AppError('COMMAND_FAILED', 'simctl boot failed');
+    });
+    expect(await bound(broken.prepare(info))).toBe('rejected: boot failed: simctl boot failed');
+    expect(brokenInventories).toBe(1);
+  });
+
   it('drives a discovered Android emulator by its serial, and reads a configured serial, UDID, or name as agent-device does', async () => {
     const h = harness({ device: undefined, platform: 'android' });
     h.fake.respond('devices.list', () => [{ platform: 'android', id: 'emulator-5554', name: 'test', booted: true }]);
@@ -521,6 +1045,23 @@ describe('lifecycle', () => {
     expect(() => harness({ device: ['iPhone 17', ' '] })).toThrow(/must not be blank/);
   });
 
+  it('refuses a snapshot or videoTouches value it would read as the default, and keeps the valid ones', () => {
+    for (const [snapshot, shown] of [['Interactive', '"Interactive"'], ['interactiv', '"interactiv"'], ['none', '"none"'], [true, 'true']] as const) {
+      expect(() => harness({ snapshot } as never)).toThrowError(
+        expect.objectContaining({ code: 'INVALID_CONFIG', message: `mobile: \`snapshot\` must be 'full' or 'interactive', got ${shown}` }),
+      );
+    }
+    for (const [videoTouches, shown] of [['false', '"false"'], [0, '0'], [1, '1'], [null, 'null']] as const) {
+      expect(() => harness({ videoTouches } as never)).toThrowError(
+        expect.objectContaining({ code: 'INVALID_CONFIG', message: `mobile: \`videoTouches\` must be true or false, got ${shown}` }),
+      );
+    }
+    for (const options of [{ snapshot: 'full' }, { snapshot: 'interactive' }, { snapshot: undefined }, { videoTouches: true }, { videoTouches: false }, { videoTouches: undefined }] as const) {
+      expect(() => harness(options)).not.toThrow();
+    }
+    expect(() => harness({ snapshot: 'Full' } as never)).toThrow('got "Full"');
+  });
+
   it('rejects an empty pool at config time', () => {
     expect(() => harness({ device: [] })).toThrow(/empty pool/);
   });
@@ -561,7 +1102,7 @@ describe('lifecycle', () => {
       bundleId: 'com.example.app',
       identifiers: {},
     }));
-    expect(Object.keys(h.engine.session!).toSorted()).toEqual(['back', 'reset', 'restart']);
+    expect(Object.keys(h.engine.session!).toSorted()).toEqual(['back', 'openLink', 'reset', 'restart']);
     await boot(h);
     await h.engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
     expect(h.fake.methods()).toEqual(['devices.boot']);
@@ -582,6 +1123,59 @@ describe('lifecycle', () => {
     await h.surface.installApp('other/Other.app', {}, signal);
     expect(h.fake.lastArgs('apps.install')).toEqual({ platform: 'ios', appPath: '/project/other/Other.app' });
     expect(h.surface.pinnedApp).toBe('com.example.app');
+  });
+
+  it('unpins the build installApp pinned once uninstallApp removes it', async () => {
+    const signal = new AbortController().signal;
+    const h = harness({ appPath: './build/App.app' }, false);
+    h.fake.respond('apps.install', () => ({ app: './build/App.app', appPath: '/project/build/App.app', platform: 'ios', bundleId: 'com.example.app', identifiers: {} }));
+    h.fake.respond('apps.uninstall', () => ({ app: 'com.example.app', wasInstalled: true }));
+    await boot(h);
+    await h.engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal, resolveSecret: noSecrets, ...ignoreTrace });
+    await h.surface.installApp(undefined, {}, signal);
+    expect(h.surface.pinnedApp).toBe('com.example.app');
+    expect(await h.surface.uninstallApp(undefined, signal)).toBe(true);
+    expect(h.fake.lastArgs('apps.uninstall')).toEqual({ platform: 'ios', app: 'com.example.app' });
+    expect(h.surface.pinnedApp).toBeUndefined();
+    await expect(h.engine.session!.restart!(operation())).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('device.installApp()'),
+    });
+    expect(h.fake.methods()).not.toContain('apps.open');
+  });
+
+  it('unpins by the id agent-device removed when uninstallApp is given a display name', async () => {
+    const signal = new AbortController().signal;
+    const h = harness({ appPath: './build/App.app' }, false);
+    h.fake.respond('apps.install', () => ({ app: './build/App.app', appPath: '/project/build/App.app', platform: 'ios', bundleId: 'com.example.app', identifiers: {} }));
+    h.fake.respond('apps.uninstall', () => ({ app: 'Example', appId: 'com.example.app', wasInstalled: true }));
+    await boot(h);
+    await h.engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal, resolveSecret: noSecrets, ...ignoreTrace });
+    await h.surface.installApp(undefined, {}, signal);
+    expect(await h.surface.uninstallApp('Example', signal)).toBe(true);
+    expect(h.surface.pinnedApp).toBeUndefined();
+  });
+
+  it('drops a handle located before uninstallApp', async () => {
+    const h = harness();
+    await openAttempt(h);
+    h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, appBundleId: 'com.example.app' }));
+    h.fake.respond('apps.uninstall', () => ({ app: 'Example', appId: 'com.example.app', wasInstalled: true }));
+    const about = await observed(h, 'About');
+    await h.surface.uninstallApp('Example', new AbortController().signal);
+    await expect(h.engine.perform!(about.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NODE_STALE' });
+  });
+
+  it('drops a handle when the session knows the app by display name and uninstallApp gets its id', async () => {
+    const h = harness();
+    await openAttempt(h);
+    h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, appBundleId: undefined, appName: 'Example' }));
+    h.fake.respond('apps.uninstall', () => ({ app: 'com.example.app', appId: 'com.example.app', wasInstalled: true }));
+    const about = await observed(h, 'About');
+    await h.surface.uninstallApp('com.example.app', new AbortController().signal);
+    await expect(h.engine.perform!(about.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NODE_STALE' });
+    await h.surface.closeApp(operation().signal);
+    expect(h.fake.lastArgs('apps.close')).not.toMatchObject({ app: 'Example' });
   });
 
   it('pins the package an Android install reports, and refuses the build path as an app id', async () => {
@@ -867,12 +1461,13 @@ describe('observation', () => {
     expect(androidAt(100, 290 / 2)).toEqual([0, 0, 0]);
     expect(androidAt(100, 240 / 2)).toEqual([255, 255, 255]);
 
-    // A secure node without bounds cannot be masked: the tree ships, the image does not.
+    // A secure node without bounds cannot be masked: the tree ships, the image does not, and no region counts as masked.
     h.fake.respond('capture.snapshot', () => ({
       nodes: [{ ref: 'e1', type: 'SecureTextField', label: 'PIN', value: '1234' }],
     }));
     const unmaskable = await h.engine.observe!(operation(), { pixels: true });
     expect(unmaskable.pixels).toBeUndefined();
+    expect(unmaskable.maskedRegionCount).toBe(0);
     expect(unmaskable.root.children).toHaveLength(1);
     // A snapshot without geometry keeps the viewport the session last learned.
     expect(unmaskable.viewport).toEqual({ width: 390, height: 844 });
@@ -883,6 +1478,8 @@ describe('observation', () => {
     });
     const treeOnly = await h.engine.observe!(operation(), { pixels: true });
     expect(treeOnly.pixels).toBeUndefined();
+    // No screenshot was taken, so none was withheld.
+    expect(treeOnly.maskedRegionCount).toBeUndefined();
     expect(treeOnly.root.children).toHaveLength(1);
   });
 
@@ -915,9 +1512,27 @@ describe('observation', () => {
       shot = bytes;
       const observation = await h.engine.observe!(operation(), { pixels: true });
       expect(observation.pixels).toBeUndefined();
+      // No usable image was taken, so none was withheld, and the matcher waits for the next one.
+      expect(observation.maskedRegionCount).toBeUndefined();
       expect(observation.root.children).toHaveLength(1);
       await expect(h.engine.artifacts!.screenshot('password', operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
     }
+    // A secure field without bounds is unmaskable whatever the device would capture, so no screenshot is taken.
+    h.fake.respond('capture.screenshot', () => {
+      throw new Error('screenshot failed');
+    });
+    h.fake.respond('capture.snapshot', () => ({
+      nodes: [
+        { ref: 'e1', index: 0, depth: 0, type: 'application', label: 'Bank', rect: { x: 0, y: 0, width: 390, height: 844 } },
+        { ref: 'e2', index: 1, parentIndex: 0, depth: 1, type: 'SecureTextField', label: 'PIN' },
+      ],
+    }));
+    const screenshots = h.fake.methods().filter((method) => method === 'capture.screenshot').length;
+    const unbounded = await h.engine.observe!(operation(), { pixels: true });
+    expect(unbounded.pixels).toBeUndefined();
+    expect(unbounded.maskedRegionCount).toBe(0);
+    await expect(h.engine.artifacts!.screenshot('password', operation())).rejects.toMatchObject({ category: 'configuration', code: 'POLICY_DENIED' });
+    expect(h.fake.methods().filter((method) => method === 'capture.screenshot')).toHaveLength(screenshots);
     expect(existsSync(path.join(artifactsDir, 'screenshots'))).toBe(false);
   });
 
@@ -930,6 +1545,7 @@ describe('observation', () => {
     ['press', 'command.keyboard', (h, op) => h.engine.keyboard!.press('Enter', op)],
     ['keyboard dismiss', 'command.keyboard', (h, op) => h.engine.keyboard!.dismiss!(op)],
     ['back', 'command.back', (h, op) => h.engine.session!.back!(op)],
+    ['open link', 'apps.open', (h, op) => h.engine.session!.openLink!('e2e-benchmark://orders/42', op)],
   ];
 
   it.each(INPUTS)('ends %s, hung on %s, at its budget as possibly committed', async (_entry, method, call) => {
@@ -1181,6 +1797,70 @@ describe('location', () => {
     ]);
   });
 
+  it('answers whether a located node is on the screen, never the share agent-device clipped away', async () => {
+    const h = harness();
+    h.fake.respond('capture.snapshot', () => ({
+      ...SETTINGS_SNAPSHOT,
+      nodes: [
+        ...SETTINGS_NODES,
+        { ref: '@e11', index: 11, parentIndex: 0, depth: 1, type: 'button', label: 'Unplaced' },
+        { ref: '@e12', index: 12, parentIndex: 0, depth: 1, type: 'button', label: 'Lower', rect: { x: 10, y: 600, width: 100, height: 40 } },
+      ],
+    }));
+    await openAttempt(h);
+    const measure = async (label: string) => {
+      const [node] = await h.engine.locate!({ kind: 'query', query: { kind: 'text', value: { kind: 'string', value: label, exact: true } } }, operation());
+      const issued = h.fake.calls.length;
+      // Read off the capture the locate took: no second snapshot, no device command.
+      return h.engine.viewportIntersection!(node!.ref, operation()).finally(() => expect(h.fake.calls).toHaveLength(issued));
+    };
+    expect(await measure('About')).toEqual({ intersects: true });
+    // Below y 390 on the 390x844 screen: the height is measured against the height, not the width.
+    expect(await measure('Lower')).toEqual({ intersects: true });
+    expect(await measure('Password')).toEqual({ intersects: true });
+    // Below the 844-point screen.
+    expect(await measure('Hidden')).toEqual({ intersects: false });
+    await expect(measure('Unplaced')).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+  });
+
+  it('measures against a resized screen once the device confirms it, without waiting for an observe', async () => {
+    const h = harness();
+    await openAttempt(h);
+    const below = { ref: '@e11', index: 11, parentIndex: 0, depth: 1, type: 'button', label: 'Below', rect: { x: 10, y: 850, width: 100, height: 20 } };
+    const locateBelow = async () => {
+      const [node] = await h.engine.locate!({ kind: 'query', query: { kind: 'text', value: { kind: 'string', value: 'Below', exact: true } } }, operation());
+      return h.engine.viewportIntersection!(node!.ref, operation());
+    };
+    h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, below] }));
+    expect(await locateBelow()).toEqual({ intersects: false });
+
+    // A foldable unfolds: the tree grows to 402x874, and the device's screen agrees.
+    h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, below], viewport: { width: 402, height: 874 } }));
+    h.fake.respond('capture.screenshot', () => ({ logicalWidth: 402, logicalHeight: 874 }));
+    expect(await locateBelow()).toEqual({ intersects: true });
+  });
+
+  it('refuses to say whether a node is in the viewport when its window has no known place on the screen', async () => {
+    const h = harness();
+    h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, warnings: [ORIGIN_WARNING] }));
+    await openAttempt(h);
+    const [hidden] = await h.engine.locate!({ kind: 'query', query: { kind: 'text', value: { kind: 'string', value: 'Hidden', exact: true } } }, operation());
+    await expect(h.engine.viewportIntersection!(hidden!.ref, operation())).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining(ORIGIN_UNKNOWN_BOUNDS),
+    });
+  });
+
+  it('reports a located field empty while its hint shows, and a container by the text below it', async () => {
+    const h = harness({ platform: 'android' });
+    await openAttempt(h);
+    h.fake.respond('capture.snapshot', () => ANDROID_ID_SNAPSHOT);
+    const [name] = await h.engine.locate!(testIdQuery('name'), operation());
+    const [form] = await h.engine.locate!(testIdQuery('form'), operation());
+    expect(name?.states?.empty).toBe(true);
+    expect(form?.states?.empty).toBe(false);
+  });
+
   it('finds an Android view by its id without its package', async () => {
     const h = harness({ platform: 'android' });
     await openAttempt(h);
@@ -1252,6 +1932,17 @@ describe('a screen agent-device cannot read yet', () => {
     await expect(h.engine.locate!(ABOUT, operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
   });
 
+  it('fails a locate on an app not running after uninstallApp right after a launch', async () => {
+    const h = harness();
+    await openAttempt(h);
+    h.fake.respond('apps.uninstall', () => ({ app: 'com.example.app', appId: 'com.example.app', wasInstalled: true }));
+    await h.surface.uninstallApp('com.example.app', new AbortController().signal);
+    h.fake.respond('capture.snapshot', () => {
+      throw new AppError('COMMAND_FAILED', "app 'com.example.app' is not running", { runnerErrorCode: 'APP_NOT_RUNNING' });
+    });
+    await expect(h.engine.locate!(ABOUT, operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
+  });
+
   it('still fails an observation on it', async () => {
     const h = harness({ platform: 'android' });
     await openAttempt(h);
@@ -1303,6 +1994,7 @@ describe('perform', () => {
     const before = h.fake.calls.length;
     await h.engine.perform!(about!.ref, { kind: 'tap' }, op);
     await h.engine.perform!(about!.ref, { kind: 'doubleTap' }, op);
+    await h.engine.perform!(about!.ref, { kind: 'multiTap', count: 3 }, op);
     await h.engine.perform!(about!.ref, { kind: 'longPress', durationMs: 900 }, op);
     await h.engine.perform!(about!.ref, { kind: 'longPress' }, op);
     await h.engine.perform!(search!.ref, { kind: 'focus' }, op);
@@ -1320,6 +2012,7 @@ describe('perform', () => {
     expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
       ['interactions.press', { ref: '@e4', settle: true, settleQuietMs: 150 }],
       ['interactions.press', { ref: '@e4', count: 2, settle: true, settleQuietMs: 150 }],
+      ['interactions.press', { ref: '@e4', count: 3, settle: true, settleQuietMs: 150 }],
       ['interactions.longPress', { ref: '@e4', settle: true, settleQuietMs: 150, durationMs: 900 }],
       // No duration named: the engine's one-second hold, past a Pressable's delayLongPress.
       ['interactions.longPress', { ref: '@e4', settle: true, settleQuietMs: 150, durationMs: 1000 }],
@@ -1346,6 +2039,24 @@ describe('perform', () => {
     const presses = h.fake.calls.filter((call) => call.method === 'interactions.press');
     expect(presses).not.toHaveLength(0);
     expect(presses.every((call) => call.signal instanceof AbortSignal)).toBe(true);
+  });
+
+  it('refuses a multiTap above agent-device\'s 200 presses before any wait or device call, and sends 200', async () => {
+    const h = harness();
+    await openAttempt(h);
+    const about = await observed(h, 'About');
+    const before = h.fake.calls.length;
+    // A test step waits for the node to settle and steady before it presses;
+    // the refusal comes before those waits, so no snapshot and no press.
+    await expect(h.engine.perform!(about.ref, { kind: 'multiTap', count: 201 }, { ...operation(), origin: 'test' })).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('at most 200'),
+    });
+    expect(h.fake.calls.slice(before)).toEqual([]);
+    await h.engine.perform!(about.ref, { kind: 'multiTap', count: 200 }, operation());
+    expect(h.fake.calls.slice(before).filter((call) => call.method === 'interactions.press').map((call) => call.args)).toEqual([
+      { ref: '@e4', count: 200, settle: true, settleQuietMs: 150 },
+    ]);
   });
 
   it.each(['Enter', 'a'])('sends %s to a focused field without tapping it first', async (key) => {
@@ -1402,6 +2113,7 @@ describe('perform', () => {
     for (const action of [
       { kind: 'selectOption', value: 'x' },
       { kind: 'setInputFiles', paths: ['/tmp/x'] },
+      { kind: 'setInputFilePayloads', files: [{ name: 'x', mimeType: 'text/plain', buffer: new Uint8Array([120]) }] },
       { kind: 'scrollIntoView' },
       // Named keys other than Enter and Space, and every modifier, have no soft-keyboard equivalent.
       { kind: 'press', key: 'Escape' },
@@ -1483,7 +2195,7 @@ describe('session hooks, viewport swipe, location, artifacts', () => {
     h.fake.respond('capture.snapshot', () => ({
       nodes: [{ ref: 'e1', type: 'SecureTextField', label: 'PIN', value: '1234' }],
     }));
-    await expect(h.engine.artifacts!.screenshot('leak', operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
+    await expect(h.engine.artifacts!.screenshot('leak', operation())).rejects.toMatchObject({ category: 'configuration', code: 'POLICY_DENIED' });
     expect(existsSync(path.join(artifactsDir, 'screenshots', '002-leak.png'))).toBe(false);
     expect(new Set(temporaryFiles).size).toBe(temporaryFiles.length);
     for (const file of temporaryFiles) {
@@ -1611,7 +2323,7 @@ describe('device fixture', () => {
   const minted: unknown[] = [];
   /** What the fixture declared to the harness recorder last, for the step labels. */
   let declared: FixtureOperations<Device> | undefined;
-  function fixture(h: Harness): Device {
+  function fixture(h: Harness, operationForCall: () => OperationContext = () => ({ ...operation(), timeoutMs: 5_000, origin: 'test' })): Device {
     const context = {
       targetName: 'ios-simulator',
       fixture: (_name: string, value: object, operations: FixtureOperations<Device>) => {
@@ -1621,6 +2333,7 @@ describe('device fixture', () => {
       signal: new AbortController().signal,
       headed: false,
       timeouts: { test: 30_000, action: 5_000, assertion: 5_000 },
+      operation: operationForCall,
       locator: (expression: unknown) => {
         minted.push(expression);
         return { minted: true };
@@ -1628,6 +2341,177 @@ describe('device fixture', () => {
     } as unknown as EngineFixtureContext;
     return h.engine.fixtures!['device']!(context) as Device;
   }
+
+  it.each([
+    ['up', 'up'],
+    ['down', 'down'],
+    ['left', 'left'],
+    ['right', 'right'],
+    ['select', 'select'],
+    ['back', 'back'],
+    ['menu', 'menu'],
+    ['home', 'home'],
+    ['play', 'media-play'],
+    ['pause', 'media-pause'],
+    ['play-pause', 'media-play-pause'],
+    ['stop', 'media-stop'],
+    ['rewind', 'media-rewind'],
+    ['fast-forward', 'media-fast-forward'],
+    ['next', 'media-next'],
+    ['previous', 'media-previous'],
+  ] as const)('device.pressRemote(%j) presses the agent-device tv-remote button %s', async (key, button) => {
+    const h = harness();
+    await openAttempt(h);
+    const before = h.fake.calls.length;
+    await fixture(h).pressRemote(key);
+    expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([['command.tvRemote', { platform: 'ios', button }]]);
+  });
+
+  it.each(['Menu', 'Home', 'toString', '', 3])('device.pressRemote refuses %j, a name outside the list, before any device call', async (key) => {
+    const h = harness();
+    await openAttempt(h);
+    const before = h.fake.calls.length;
+    await expect(fixture(h).pressRemote(key as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('not a remote key; press one of up, down, left, right, select, back, menu, home, play') });
+    expect(h.fake.calls).toHaveLength(before);
+  });
+
+  it('fails a remote key the device has no button for with UNSUPPORTED_CAPABILITY', async () => {
+    const h = harness();
+    await openAttempt(h);
+    h.fake.respond('command.tvRemote', () => {
+      throw new AppError('UNSUPPORTED_OPERATION', 'tv-remote is not supported on this device');
+    });
+    await expect(fixture(h).pressRemote('menu')).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+    expect(h.fake.methods()).toContain('command.tvRemote');
+  });
+
+  describe('viewport', () => {
+    it.each(['ios', 'android'] as const)('reads the %s viewport as a recorded resource without capturing pixels', async (platform) => {
+      const h = harness({ platform });
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, viewport: { width: 402, height: 874 } }));
+      await openAttempt(h);
+      const device = fixture(h);
+      const before = h.fake.calls.length;
+
+      expect(await device.viewport()).toEqual({ width: 402, height: 874 });
+      expect(declared?.viewport).toEqual({ kind: 'resource' });
+      expect(h.fake.methods().slice(before)).toEqual(['capture.snapshot']);
+    });
+
+    it('keeps its learned size isolated from the returned object and reads a new orientation', async () => {
+      const h = harness();
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, viewport: { width: 390, height: 844 } }));
+      await openAttempt(h);
+      const device = fixture(h);
+      const portrait = await device.viewport();
+      expect(portrait).toEqual({ width: 390, height: 844 });
+      Object.assign(portrait, { width: 1, height: 1 });
+      const screenshotsBeforeRotation = h.fake.methods().filter((method) => method === 'capture.screenshot').length;
+      await device.setOrientation('landscape-left');
+      h.fake.respond('capture.snapshot', () => ({ nodes: [] }));
+      expect(await device.viewport()).toEqual({ width: 390, height: 844 });
+
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, viewport: { width: 844, height: 390 } }));
+      expect(await device.viewport()).toEqual({ width: 844, height: 390 });
+      expect(h.fake.methods().filter((method) => method === 'capture.screenshot')).toHaveLength(screenshotsBeforeRotation);
+    });
+
+    it.each([
+      { logicalWidth: 390, logicalHeight: 844, width: 1170, height: 2532, pixelDensity: 3 },
+      { width: 1170, height: 2532, pixelDensity: 3 },
+    ])('reuses logical screenshot dimensions when landscape snapshots have no bounds: %j', async (screenshot) => {
+      const h = harness({}, false);
+      h.fake.respond('capture.snapshot', () => ({ nodes: [] }));
+      h.fake.respond('capture.screenshot', () => screenshot);
+      await openAttempt(h);
+      const device = fixture(h);
+      await device.setOrientation('landscape-left');
+
+      expect(await device.viewport()).toEqual({ width: 390, height: 844 });
+      expect(await device.viewport()).toEqual({ width: 390, height: 844 });
+      expect(h.fake.methods().filter((method) => method === 'capture.screenshot')).toHaveLength(1);
+    });
+
+    it('preserves the existing failure when neither the snapshot nor screenshot establishes the viewport', async () => {
+      const h = harness({}, false);
+      h.fake.respond('capture.snapshot', () => ({ nodes: [] }));
+      h.fake.respond('capture.screenshot', () => ({ width: 1170, height: 2532 }));
+      await openAttempt(h);
+
+      await expect(fixture(h).viewport()).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('viewport is unknown') });
+    });
+
+    it('shares one action budget between snapshot and screenshot, reading the current budget per call', async () => {
+      vi.useFakeTimers();
+      const h = harness({}, false);
+      await openAttempt(h);
+      h.fake.respond('capture.snapshot', async () => {
+        await sleep(60);
+        return { nodes: [] };
+      });
+      h.fake.respond('capture.screenshot', async () => {
+        await sleep(60);
+        return { logicalWidth: 390, logicalHeight: 844 };
+      });
+      let timeoutMs = 100;
+      const device = fixture(h, () => ({ ...operation(), timeoutMs, origin: 'test' }));
+      const timedOut = expect(device.viewport()).rejects.toMatchObject({ code: 'OPERATION_TIMEOUT', message: expect.stringContaining('device.viewport') });
+      await vi.advanceTimersByTimeAsync(100);
+      await timedOut;
+      await vi.advanceTimersByTimeAsync(20);
+
+      timeoutMs = 200;
+      const next = device.viewport();
+      await vi.advanceTimersByTimeAsync(120);
+      expect(await next).toEqual({ width: 390, height: 844 });
+    });
+
+    it('cancels a pending read and follows the same fixture into a fresh teardown signal', async () => {
+      const h = harness();
+      await openAttempt(h);
+      let controller = new AbortController();
+      let release!: () => void;
+      let captured!: () => void;
+      const pendingCapture = new Promise<void>((resolve) => { release = resolve; });
+      const started = new Promise<void>((resolve) => { captured = resolve; });
+      h.fake.respond('capture.snapshot', async () => {
+        captured();
+        await pendingCapture;
+        return SETTINGS_SNAPSHOT;
+      });
+      const device = fixture(h, () => ({ ...operation(controller.signal), timeoutMs: 5_000, origin: 'test' }));
+      const cancelled = expect(device.viewport()).rejects.toMatchObject({ code: 'CANCELLED' });
+      await started;
+      controller.abort();
+      await cancelled;
+      release();
+      const before = h.fake.calls.length;
+      await expect(device.viewport()).rejects.toMatchObject({ code: 'CANCELLED' });
+      expect(h.fake.calls).toHaveLength(before);
+
+      controller = new AbortController();
+      h.fake.respond('capture.snapshot', () => SETTINGS_SNAPSHOT);
+      expect(await device.viewport()).toEqual({ width: 390, height: 844 });
+    });
+
+    it('does not start a new transition wait for controls that appear after the read', async () => {
+      autoAdvanceTimers();
+      const h = harness({ transition: 120 });
+      await openAttempt(h);
+      await observed(h, 'Back');
+      await sleep(150);
+      const startedAt = Date.now();
+      await fixture(h).viewport();
+      h.fake.respond('capture.snapshot', () => ({
+        ...SETTINGS_SNAPSHOT,
+        nodes: [...SETTINGS_NODES, { ref: '@e11', index: 10, parentIndex: 0, depth: 1, type: 'button', label: 'Submit', rect: { x: 0, y: 600, width: 390, height: 44 } }],
+      }));
+      const submit = await observed(h, 'Submit');
+      await h.engine.perform!(submit.ref, { kind: 'tap' }, { ...operation(), origin: 'test' });
+
+      expect(Date.now() - startedAt).toBeLessThan(120);
+    });
+  });
 
   describe('unstable_raw', () => {
     const BOOTED = { platform: 'ios', id: '5A1C0DE5-0000-4000-8000-000000000001', device: 'iPhone 17 Pro', booted: true };
@@ -1673,11 +2557,11 @@ describe('device fixture', () => {
     });
   });
 
-  describe('dismissing a keyboard that has no dismiss key', () => {
+  describe('dismissing a keyboard agent-device refuses', () => {
     const NO_DISMISS_KEY = () => {
       throw new AppError(
         'UNSUPPORTED_OPERATION',
-        'Unable to dismiss the iOS keyboard: the keyboard exposes no dismiss key, and background taps are never attempted',
+        'The Apple runner cannot dismiss this keyboard automatically',
       );
     };
     const KEYBOARD_FRAME = { x: 0, y: 583, width: 390, height: 261 };
@@ -1705,9 +2589,9 @@ describe('device fixture', () => {
       h.fake.respond('capture.snapshot', () => ({ ...KEYBOARD_UP, nodes: below }));
       // A role query never matches a hidden node; a text query still finds it, hidden.
       expect(await h.engine.locate!(brand, operation())).toEqual([]);
-      expect((await h.engine.locate!(brandByText, operation()))[0]?.states).toEqual({ hidden: true });
+      expect((await h.engine.locate!(brandByText, operation()))[0]?.states?.hidden).toBe(true);
       h.fake.respond('capture.snapshot', () => ({ ...KEYBOARD_GONE, nodes: below }));
-      expect((await h.engine.locate!(brand, operation()))[0]?.states).toBeUndefined();
+      expect((await h.engine.locate!(brand, operation()))[0]?.states?.hidden).toBeUndefined();
     });
 
     it('reads the keyboard band off the keyboard element when the capture measured no frame, and not once the producer saw it gone', async () => {
@@ -1718,9 +2602,9 @@ describe('device fixture', () => {
       const brand = { kind: 'query', query: { kind: 'text', value: { kind: 'string', value: 'Brand', exact: true } } } as const;
       // Brand's centre is under the dock below the keys, which the band reaches down to the bottom of the screen.
       h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, viewport: { width: 390, height: 844 }, nodes: below }));
-      expect((await h.engine.locate!(brand, operation()))[0]?.states).toEqual({ hidden: true });
+      expect((await h.engine.locate!(brand, operation()))[0]?.states?.hidden).toBe(true);
       h.fake.respond('capture.snapshot', () => ({ ...KEYBOARD_GONE, viewport: { width: 390, height: 844 }, nodes: below }));
-      expect((await h.engine.locate!(brand, operation()))[0]?.states).toBeUndefined();
+      expect((await h.engine.locate!(brand, operation()))[0]?.states?.hidden).toBeUndefined();
     });
 
     it('counts the suggestion strip XCTest lists beside the keyboard as the keyboard, and keeps its own buttons', async () => {
@@ -1735,8 +2619,8 @@ describe('device fixture', () => {
       ];
       const byText = (value: string) => ({ kind: 'query', query: { kind: 'text', value: { kind: 'string', value, exact: true } } }) as const;
       h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, viewport: { width: 390, height: 844 }, nodes }));
-      expect((await h.engine.locate!(byText('Phone'), operation()))[0]?.states).toEqual({ hidden: true });
-      expect((await h.engine.locate!(byText('Suggestion'), operation()))[0]?.states).toBeUndefined();
+      expect((await h.engine.locate!(byText('Phone'), operation()))[0]?.states?.hidden).toBe(true);
+      expect((await h.engine.locate!(byText('Suggestion'), operation()))[0]?.states?.hidden).toBeUndefined();
     });
 
     it('drags from the point nearest the centre that no control covers, and stops once the keyboard is gone', async () => {
@@ -1761,6 +2645,68 @@ describe('device fixture', () => {
       });
     });
 
+    // A pad of controls covers the centre down to the strip, so the only point clear of controls and above
+    // the strip is above the pad. Under the strip's top but over the keys' top would be on the strip.
+    const PAD = { ref: '@e5', index: 4, parentIndex: 1, depth: 2, type: 'other', label: 'Pad', rect: { x: 0, y: 200, width: 390, height: 250 } };
+    const STRIP = { ref: '@e6', index: 5, parentIndex: 0, depth: 1, type: 'other', identifier: 'SystemInputAssistantView', rect: { x: 0, y: 460, width: 390, height: 44 } };
+    // A strip holding only text is no control, so nothing but the keyboard's top keeps the drag off it.
+    const STRIP_WORDS = { ref: '@e7', index: 6, parentIndex: 5, depth: 2, type: 'StaticText', label: 'Hello', rect: { x: 0, y: 460, width: 130, height: 44 } };
+
+    it('starts the drag above the suggestion strip, over the keys or over a frame derived from them', async () => {
+      const keys = { ref: '@e8', index: 7, parentIndex: 0, depth: 1, type: 'Keyboard', rect: { x: 0, y: 504, width: 390, height: 216 } };
+      const derived = { kind: 'derived', derivation: 'docked-tree', frame: keys.rect };
+      const layouts = [
+        { name: 'keys in the tree', nodes: [STRIP, STRIP_WORDS, keys] },
+        { name: 'a frame from the keys', nodes: [STRIP, STRIP_WORDS], keyboard: derived },
+      ];
+      for (const layout of layouts) {
+        const h = harness();
+        await openAttempt(h);
+        await observed(h, 'Back');
+        const device = fixture(h);
+        h.fake.respond('command.keyboard', NO_DISMISS_KEY);
+        const up = { ...SETTINGS_SNAPSHOT, viewport: { width: 390, height: 844 }, nodes: [...FORM_NODES, PAD, ...layout.nodes], ...(layout.keyboard === undefined ? {} : { keyboard: layout.keyboard }) };
+        captures(h, [up, KEYBOARD_GONE]);
+        await device.dismissKeyboard();
+        const { from } = h.fake.lastArgs('interactions.swipe') as { from: { y: number } };
+        expect(from.y, layout.name).toBeLessThan(200);
+      }
+    });
+
+    it('does not take the suggestion strip alone for the soft keyboard', async () => {
+      // With a hardware keyboard, XCTest lists the strip and no keys.
+      const h = harness();
+      await openAttempt(h);
+      await observed(h, 'Back');
+      const device = fixture(h);
+      h.fake.respond('command.keyboard', NO_DISMISS_KEY);
+      captures(h, [{ ...SETTINGS_SNAPSHOT, viewport: { width: 390, height: 844 }, nodes: [...FORM_NODES, PAD, STRIP, STRIP_WORDS] }]);
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+      await device.dismissKeyboard();
+      expect(h.fake.calls.filter((call) => call.method === 'interactions.swipe')).toHaveLength(0);
+    });
+
+    it('keeps each look at the keyboard inside the budget when captures are slow', async () => {
+      autoAdvanceTimers();
+      const h = harness();
+      await openAttempt(h);
+      await observed(h, 'Back');
+      const device = fixture(h);
+      h.fake.respond('command.keyboard', NO_DISMISS_KEY);
+      const moving = { ...SETTINGS_SNAPSHOT, nodes: FORM_NODES, keyboard: { kind: 'tree-rejected', derivation: 'docked-tree' } };
+      const slow = (snapshots: readonly unknown[], ms: number) => {
+        let taken = 0;
+        h.fake.respond('capture.snapshot', () => new Promise((resolve) => setTimeout(() => resolve(snapshots[Math.min(taken++, snapshots.length - 1)]), ms)));
+      };
+      // After the drag the keyboard slides out: a rejected frame and no key, while each capture takes 800 ms of the 5 s budget.
+      slow([KEYBOARD_UP, moving], 800);
+      await device.dismissKeyboard();
+      expect(h.fake.calls.filter((call) => call.method === 'interactions.swipe')).toHaveLength(1);
+      // A read that never settles fails as still moving, not as a timeout.
+      slow([moving], 1_000);
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('Read it again') });
+    });
+
     it('drags at the centre of a screen rotated since the last observation', async () => {
       const h = harness();
       await openAttempt(h);
@@ -1781,6 +2727,27 @@ describe('device fixture', () => {
         from: { x: 422, y: 195 },
         to: { x: expect.closeTo(396.68, 2), y: 195 },
       });
+    });
+
+    it('refuses to drag a keyboard that is up but has no bounds, rather than guess where it is', async () => {
+      const h = harness();
+      await openAttempt(h);
+      await observed(h, 'Back');
+      const device = fixture(h);
+      h.fake.respond('command.keyboard', NO_DISMISS_KEY);
+      // A probe that says visible, with no frame and no keyboard element in the tree: the bottom of the
+      // screen is no bound, and the centre of this landscape screen may be on the keyboard.
+      const landscape = [
+        { ref: '@e1', index: 0, depth: 0, type: 'application', label: 'Order', rect: { x: 0, y: 0, width: 844, height: 390 } },
+        { ref: '@e2', index: 1, parentIndex: 0, depth: 1, type: 'scroll-view', rect: { x: 0, y: 60, width: 844, height: 330 } },
+        { ref: '@e3', index: 2, parentIndex: 1, depth: 2, type: 'text-field', label: 'Notes', rect: { x: 20, y: 80, width: 804, height: 44 } },
+      ];
+      captures(h, [{ ...SETTINGS_SNAPSHOT, viewport: { width: 844, height: 390 }, nodes: landscape, keyboard: { kind: 'visibility-only', visible: true } }]);
+      await expect(device.dismissKeyboard()).rejects.toMatchObject({
+        code: 'UNSUPPORTED_CAPABILITY',
+        message: expect.stringContaining('without a frame or any keyboard element on screen'),
+      });
+      expect(h.fake.calls.filter((call) => call.method === 'interactions.swipe')).toHaveLength(0);
     });
 
     it('tries a vertical drag when the horizontal one left the keyboard up', async () => {
@@ -1854,6 +2821,19 @@ describe('device fixture', () => {
       expect(h.fake.lastArgs('interactions.swipe')).toMatchObject({ from: { x: 195, y: 422 } });
     });
 
+    it('waits for a keyboard still sliding in before it decides there is nothing to drag', async () => {
+      autoAdvanceTimers();
+      const h = harness();
+      await openAttempt(h);
+      await observed(h, 'Back');
+      const device = fixture(h);
+      h.fake.respond('command.keyboard', NO_DISMISS_KEY);
+      const moving = { ...SETTINGS_SNAPSHOT, nodes: FORM_NODES, keyboard: { kind: 'tree-rejected', derivation: 'docked-tree' } };
+      captures(h, [moving, KEYBOARD_UP, KEYBOARD_GONE]);
+      await device.dismissKeyboard();
+      expect(h.fake.calls.filter((call) => call.method === 'interactions.swipe')).toHaveLength(1);
+    });
+
     it('refuses to drag when every point above the keyboard is on a control', async () => {
       const h = harness();
       await openAttempt(h);
@@ -1870,7 +2850,7 @@ describe('device fixture', () => {
       captures(h, [covered]);
       await expect(device.dismissKeyboard()).rejects.toMatchObject({
         code: 'UNSUPPORTED_CAPABILITY',
-        message: expect.stringMatching(/every point above it .*is on a control.*Done or close control/s),
+        message: expect.stringMatching(/every point above the keyboard .*is on a control.*Done or close control/s),
       });
       expect(h.fake.calls.filter((call) => call.method === 'interactions.swipe')).toHaveLength(0);
     });
@@ -1986,6 +2966,149 @@ describe('device fixture', () => {
     });
   });
 
+  describe('isKeyboardShown', () => {
+    const KEYBOARD_NODE = { ref: '@e20', index: 10, parentIndex: 0, depth: 1, type: 'XCUIElementTypeKeyboard', rect: { x: 0, y: 583, width: 390, height: 261 } };
+
+    it('answers from the keyboard agent-device measured, with one capture and nothing sent to the device', async () => {
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      const before = h.fake.calls.length;
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, keyboard: { kind: 'visible', frame: KEYBOARD_NODE.rect } }));
+      expect(await device.isKeyboardShown()).toBe(true);
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, KEYBOARD_NODE], keyboard: { kind: 'absent' } }));
+      // The measurement wins over a keyboard element the tree still lists.
+      expect(await device.isKeyboardShown()).toBe(false);
+      expect(h.fake.methods().slice(before)).toEqual(['capture.snapshot', 'capture.snapshot']);
+    });
+
+    it('trusts a keyboard element in the tree when the capture measured nothing, and never reads its absence as no keyboard', async () => {
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, KEYBOARD_NODE] }));
+      expect(await device.isKeyboardShown()).toBe(true);
+      // An older agent-device that reports no keyboard reading: no keys in the tree proves nothing.
+      h.fake.respond('capture.snapshot', () => SETTINGS_SNAPSHOT);
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY', retryable: false, message: expect.stringContaining('no keyboard reading') });
+    });
+
+    it('reads every keyboard fact agent-device reports the way the keyboard band does, whatever the tree still lists', async () => {
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      const frame = KEYBOARD_NODE.rect;
+      const cases: ReadonlyArray<readonly [unknown, readonly unknown[], boolean]> = [
+        [{ kind: 'derived', derivation: 'docked-tree', frame }, SETTINGS_NODES, true],
+        [{ kind: 'visibility-only', visible: true }, SETTINGS_NODES, true],
+        [{ kind: 'visibility-only', visible: false }, [...SETTINGS_NODES, KEYBOARD_NODE], false],
+        [{ kind: 'tree-rejected', derivation: 'docked-tree', visible: false }, [...SETTINGS_NODES, KEYBOARD_NODE], false],
+        [{ kind: 'tree-rejected', derivation: 'docked-tree', visible: true }, SETTINGS_NODES, true],
+        // A keyboard still sliding in: agent-device lists its keys but rejects the frame.
+        [{ kind: 'tree-rejected', derivation: 'docked-tree' }, [...SETTINGS_NODES, KEYBOARD_NODE], true],
+        [{ kind: 'unmeasurable', reason: 'window-list-unavailable' }, [...SETTINGS_NODES, KEYBOARD_NODE], true],
+      ];
+      for (const [keyboard, nodes, shown] of cases) {
+        h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes, keyboard }));
+        expect([keyboard, await device.isKeyboardShown()]).toEqual([keyboard, shown]);
+      }
+    });
+
+    it('drags the keyboard away only when isKeyboardShown would say it is up', async () => {
+      const h = harness();
+      await openAttempt(h);
+      await observed(h, 'Back');
+      const device = fixture(h);
+      h.fake.respond('command.keyboard', () => {
+        throw new AppError('UNSUPPORTED_OPERATION', 'Unable to dismiss the iOS keyboard: the keyboard exposes no dismiss key');
+      });
+      // A probe that says hidden outranks keys the tree still lists, for both.
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, KEYBOARD_NODE], keyboard: { kind: 'visibility-only', visible: false } }));
+      expect(await device.isKeyboardShown()).toBe(false);
+      await device.dismissKeyboard();
+      expect(h.fake.calls.filter((call) => call.method === 'interactions.swipe')).toHaveLength(0);
+    });
+
+    it('fails rather than answer false from a tree that stays sparse', async () => {
+      autoAdvanceTimers();
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      h.fake.respond('capture.snapshot', () => ({ nodes: [{ ref: '@e1', type: 'application' }], snapshotQuality: { state: 'sparse' } }));
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'ENGINE_FAILURE', retryable: false });
+      // A sparse capture that still carries the producer's reading answers from it.
+      h.fake.respond('capture.snapshot', () => ({ nodes: [{ ref: '@e1', type: 'application' }], snapshotQuality: { state: 'sparse' }, keyboard: { kind: 'absent' } }));
+      expect(await device.isKeyboardShown()).toBe(false);
+    });
+
+    it('trusts the keys a cut tree lists, and fails only when a cut tree lists none', async () => {
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, truncated: true, nodes: [...SETTINGS_NODES, KEYBOARD_NODE] }));
+      expect(await device.isKeyboardShown()).toBe(true);
+      h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, truncated: true }));
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'ENGINE_FAILURE', retryable: false, message: expect.stringContaining('incomplete') });
+    });
+
+    it('captures again while a rejected frame says nothing and no key is drawn on screen, and fails if that lasts', async () => {
+      autoAdvanceTimers();
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      const moving = { ...SETTINGS_SNAPSHOT, nodes: SETTINGS_NODES, keyboard: { kind: 'tree-rejected', derivation: 'docked-tree' } };
+      let taken = 0;
+      // A number pad sliding in lists no key until it lands.
+      h.fake.respond('capture.snapshot', () => (taken++ < 2 ? moving : { ...SETTINGS_SNAPSHOT, keyboard: { kind: 'derived', derivation: 'docked-tree', frame: KEYBOARD_NODE.rect } }));
+      expect(await device.isKeyboardShown()).toBe(true);
+      expect(taken).toBe(3);
+
+      const offScreen = { ...KEYBOARD_NODE, rect: { ...KEYBOARD_NODE.rect, y: 900 } };
+      // No key at all, and a keyboard left below the screen after it was dismissed.
+      for (const nodes of [SETTINGS_NODES, [...SETTINGS_NODES, offScreen]]) {
+        taken = 0;
+        h.fake.respond('capture.snapshot', () => {
+          taken += 1;
+          return { ...moving, nodes };
+        });
+        await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'ENGINE_FAILURE', retryable: false, message: expect.stringContaining('Read it again') });
+        expect(taken).toBe(4);
+      }
+    });
+
+    it('fails when agent-device did not prove the keyboard absent and the tree lists none', async () => {
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      const offScreen = { ...KEYBOARD_NODE, rect: { ...KEYBOARD_NODE.rect, y: 900 } };
+      // A keyboard left below the screen after it was dismissed is no keyboard shown, with no reading or an unmeasurable one.
+      for (const keyboard of [undefined, { kind: 'unmeasurable', reason: 'keyboard-not-observed' }]) {
+        h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, offScreen], ...(keyboard === undefined ? {} : { keyboard }) }));
+        await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+      }
+      // With no viewport and no window, nothing bounds the screen, so the keyboard cannot be placed on it.
+      h.fake.respond('capture.snapshot', () => ({ nodes: [offScreen], keyboard: { kind: 'unmeasurable', reason: 'keyboard-viewport-unavailable' } }));
+      await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+      const reasons = ['window-root-unavailable', 'window-list-unavailable', 'keyboard-window-probe-failed', 'keyboard-not-observed', 'keyboard-visibility-probe-unsupported'];
+      for (const reason of reasons) {
+        h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, keyboard: { kind: 'unmeasurable', reason } }));
+        await expect(device.isKeyboardShown()).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY', retryable: false, message: expect.stringContaining(reason) });
+      }
+    });
+
+    it('captures a sparse tree again instead of reading it as no keyboard', async () => {
+      autoAdvanceTimers();
+      const h = harness();
+      await openAttempt(h);
+      const device = fixture(h);
+      const sparse = { nodes: [{ ref: '@e1', type: 'application' }], snapshotQuality: { state: 'sparse' } };
+      let taken = 0;
+      h.fake.respond('capture.snapshot', () => (taken++ === 0 ? sparse : { ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, KEYBOARD_NODE] }));
+      expect(await device.isKeyboardShown()).toBe(true);
+      expect(taken).toBe(2);
+    });
+  });
+
   it('gives a screen swipe the remaining transition budget after an alert is dismissed', async () => {
     autoAdvanceTimers();
     const h = harness({ transition: 120 });
@@ -2003,7 +3126,7 @@ describe('device fixture', () => {
     expect(h.fake.lastArgs('interactions.scroll')).toEqual({ direction: 'down', postGestureStabilization: false });
   });
 
-  it('counts a back, home, alert, keyboard, rotation, or fold as an action, so a control that arrives with it waits out the transition budget', async () => {
+  it('counts a back, home, remote press, shake, alert, keyboard, rotation, or fold as an action, so a control that arrives with it waits out the transition budget', async () => {
     autoAdvanceTimers();
     const h = harness({ transition: 120 });
     await openAttempt(h);
@@ -2012,6 +3135,9 @@ describe('device fixture', () => {
     for (const change of [
       () => device.back(),
       () => device.home(),
+      () => device.pressRemote('menu'),
+      () => remoteTool(h, 'select'),
+      () => device.shake(),
       () => device.alert('accept'),
       () => device.dismissKeyboard(),
       () => device.setOrientation('landscape-left'),
@@ -2086,6 +3212,37 @@ describe('device fixture', () => {
     expect(free.fake.methods()).toEqual(['devices.boot']);
   });
 
+  it('uninstalls and looks up apps by id or listed name, the pinned app by default', async () => {
+    const h = harness();
+    await openAttempt(h);
+    h.fake.respond('apps.uninstall', (args) => ({ app: (args as { app: string }).app, wasInstalled: (args as { app: string }).app !== 'dev.gone' }));
+    h.fake.respond('apps.list', () => ['Settings (com.apple.Preferences)', 'e2e Benchmark (dev.e2e.benchmark)', 'dev.bare.package']);
+    const device = fixture(h);
+    const before = h.fake.calls.length;
+    expect(await device.isAppInstalled('dev.e2e.benchmark')).toBe(true);
+    expect(await device.isAppInstalled('e2e Benchmark')).toBe(true);
+    expect(await device.isAppInstalled('dev.bare.package')).toBe(true);
+    expect(await device.isAppInstalled('dev.e2e')).toBe(false);
+    expect(await device.isAppInstalled()).toBe(true);
+    expect(await device.uninstallApp('dev.e2e.benchmark')).toBe(true);
+    expect(await device.uninstallApp('dev.gone')).toBe(false);
+    expect(await device.uninstallApp()).toBe(true);
+    expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
+      ...Array.from({ length: 5 }, () => ['apps.list', { platform: 'ios', appsFilter: 'all' }]),
+      ['apps.uninstall', { platform: 'ios', app: 'dev.e2e.benchmark' }],
+      ['apps.uninstall', { platform: 'ios', app: 'dev.gone' }],
+      ['apps.uninstall', { platform: 'ios', app: 'Settings' }],
+    ]);
+    expect(declared!.uninstallApp).toMatchObject({ kind: 'resource' });
+    expect((declared!.isAppInstalled as { label: (app?: string) => string }).label()).toBe('Settings');
+
+    const free = harness({}, false);
+    await openAttempt(free);
+    await expect(fixture(free).uninstallApp()).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    await expect(fixture(free).isAppInstalled()).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    expect(free.fake.methods()).toEqual(['devices.boot']);
+  });
+
   it('issues one settings or system command per method', async () => {
     const h = harness();
     await openAttempt(h);
@@ -2109,6 +3266,7 @@ describe('device fixture', () => {
     expect(await device.foregroundApp()).toEqual({ name: 'Settings', bundleId: 'com.apple.Preferences' });
     await device.home();
     await device.back();
+    await device.shake();
     await device.alert('accept');
     await device.dismissKeyboard();
     expect(await device.clipboard()).toBe('pasted');
@@ -2129,6 +3287,7 @@ describe('device fixture', () => {
       ['command.appState', {}],
       ['command.home', { platform: 'ios' }],
       ['command.back', { settle: true, settleQuietMs: 150 }],
+      ['command.shake', { platform: 'ios' }],
       ['command.alert', { platform: 'ios', action: 'accept' }],
       ['command.keyboard', { action: 'dismiss' }],
       ['command.clipboard', { platform: 'ios', action: 'read' }],
@@ -2230,6 +3389,18 @@ describe('device fixture', () => {
     expect((await h.engine.observe!(operation())).location).toBe('dev.e2e.benchmark / General');
   });
 
+  it('opens app.open(path) links on a target with app.linkBase in the pinned app, through session.openLink', async () => {
+    const h = harness();
+    await openAttempt(h);
+    h.fake.respond('apps.open', () => ({ session: 's', appName: 'Benchmark', appBundleId: 'dev.e2e.benchmark', identifiers: {} }));
+    const before = h.fake.calls.length;
+    await h.engine.session!.openLink!('e2e-benchmark://orders/42', operation());
+    expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
+      ['apps.open', { platform: 'ios', app: 'Settings', url: 'e2e-benchmark://orders/42' }],
+    ]);
+    await expect(h.engine.session!.openLink!('javascript:alert(1)', operation())).rejects.toMatchObject({ code: 'POLICY_DENIED' });
+  });
+
   it('lets Android route a link without an app, and needs one on iOS, where an unbound open leaves no session', async () => {
     const android = harness({ platform: 'android' }, false);
     await openAttempt(android);
@@ -2304,6 +3475,9 @@ describe('device fixture', () => {
       () => selected.clipboard(),
       () => selected.setClipboard('x'),
       () => selected.setPermission('camera', 'grant'),
+      // A remote reaches the launcher, so a test presses it with no app open.
+      () => selected.pressRemote('home'),
+      () => remoteTool(h, 'home'),
       // iOS refuses going offline before any command, so the radios are Android's.
       ...(platform === 'ios' ? [
         () => selected.enrollBiometrics('touchid', true),
@@ -2376,22 +3550,103 @@ describe('device fixture', () => {
     ]);
   });
 
-  it('launches any app with its own arguments and permissions, set on that app by name', async () => {
+  it('grants every permission before each fresh launch with \'all\', in one agent-device all on either platform, and for one openApp', async () => {
+    for (const platform of ['ios', 'android'] as const) {
+      const h = harness({ platform, bundleId: 'com.example.app', allPermissions: true });
+      h.fake.respond('apps.open', () => ({ session: 's', appName: 'Example', appBundleId: 'com.example.app', identifiers: {} }));
+      await boot(h, platform);
+      await h.engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
+      const device = fixture(h);
+      const before = h.fake.calls.length;
+      await h.engine.session!.restart!(operation());
+      await h.engine.session!.reset!(operation());
+      await device.openApp('com.other', { relaunch: true, permissions: 'all' });
+      // agent-device expands `all` itself: the app's declared permissions on Android, each privacy service on iOS.
+      const all = (app: string): [string, unknown][] => [['settings.update', { setting: 'permission', permission: 'all', state: 'grant', platform, app }]];
+      const fresh: [string, unknown] = ['apps.open', { platform, app: 'com.example.app', relaunch: true }];
+      expect(h.fake.calls.slice(before).map((call) => [call.method, call.args]), platform).toEqual([
+        ...all('com.example.app'),
+        fresh,
+        ['settings.update', { platform, setting: 'clear-app-state', state: 'clear', app: 'com.example.app' }],
+        ...all('com.example.app'),
+        fresh,
+        ...all('com.other'),
+        ['apps.open', { platform, app: 'com.other', relaunch: true }],
+      ]);
+    }
+  });
+
+  it('spells a launch-argument object for the platform on every fresh launch of the pinned app, and sends nothing for an empty object', async () => {
+    const launchArguments = { AppleLanguages: ['fr', 'en-GB'], AppleLocale: 'fr_FR', e2e: true, retries: 3 };
+    const ios = harness({ bundleId: 'com.example.app', launchArgumentValues: launchArguments });
+    await openAttempt(ios);
+    await ios.engine.session!.restart!(operation());
+
+    expect(ios.fake.lastArgs('apps.open')).toEqual({
+      platform: 'ios',
+      app: 'com.example.app',
+      relaunch: true,
+      launchArgs: ['-AppleLanguages', '(fr, en-GB)', '-AppleLocale', 'fr_FR', '-e2e', 'YES', '-retries', '3'],
+    });
+
+    const android = harness({ platform: 'android', bundleId: ANDROID_APP_PACKAGE, launchArgumentValues: { e2e: true, locale: 'fr_FR', retries: 3, tags: ['a', 'b'] } });
+
+    await openAttempt(android);
+    await android.engine.session!.restart!(operation());
+    expect(android.fake.lastArgs('apps.open')).toEqual({
+      platform: 'android',
+      app: ANDROID_APP_PACKAGE,
+      relaunch: true,
+      launchArgs: ['--ez', 'e2e', 'true', '--es', 'locale', 'fr_FR', '--ei', 'retries', '3', '--esa', 'tags', 'a,b'],
+    });
+
+    const empty = harness({ bundleId: 'com.example.app', launchArgumentValues: {} });
+    await openAttempt(empty);
+    await empty.engine.session!.restart!(operation());
+    expect(empty.fake.lastArgs('apps.open')).toEqual({ platform: 'ios', app: 'com.example.app', relaunch: true });
+  });
+
+  it('launches any app with its own arguments, a list or an object spelled for the platform, and permissions set on that app by name', async () => {
     const h = harness();
     await openAttempt(h);
     const device = fixture(h);
     const before = h.fake.calls.length;
     await device.openApp('com.other', { relaunch: true, launchArguments: ['--reset-onboarding'], permissions: { photos: 'reset' } });
+    await device.openApp('com.other', { relaunch: true, launchArguments: { AppleLocale: 'fr_FR', resetOnboarding: true } });
     // No arguments and an empty map send nothing.
     await device.openApp('com.other', { launchArguments: [], permissions: { photos: 'reset' } });
     await device.openApp('com.other', { permissions: {} });
     expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
       ['settings.update', { setting: 'permission', permission: 'photos', state: 'reset', platform: 'ios', app: 'com.other' }],
       ['apps.open', { platform: 'ios', app: 'com.other', relaunch: true, launchArgs: ['--reset-onboarding'] }],
+      ['apps.open', { platform: 'ios', app: 'com.other', relaunch: true, launchArgs: ['-AppleLocale', 'fr_FR', '-resetOnboarding', 'YES'] }],
       ['settings.update', { setting: 'permission', permission: 'photos', state: 'reset', platform: 'ios', app: 'com.other' }],
       ['apps.open', { platform: 'ios', app: 'com.other' }],
       ['apps.open', { platform: 'ios', app: 'com.other' }],
     ]);
+  });
+
+  it('refuses openApp launch arguments of the wrong shape, or ones Android cannot carry, before any device command', async () => {
+    const ios = harness();
+    await openAttempt(ios);
+    const device = fixture(ios);
+    const before = ios.fake.calls.length;
+    await expect(device.openApp('com.other', { relaunch: true, launchArguments: { env: null } } as never)).rejects.toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      message: 'device.openApp({ launchArguments }).env must be a string, number, boolean, or array of strings, got null',
+    });
+    expect(ios.fake.calls.length).toBe(before);
+
+    const android = harness({ platform: 'android', bundleId: ANDROID_APP_PACKAGE });
+    await openAttempt(android);
+    const pixel = fixture(android);
+    const sent = android.fake.calls.length;
+    await expect(pixel.openApp('com.other', { relaunch: true, launchArguments: { AppleLocale: 'fr_FR' } })).rejects.toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      message: expect.stringContaining('device.openApp({ launchArguments }).AppleLocale is an iOS launch argument'),
+    });
+    await expect(pixel.openApp('com.other', { relaunch: true, launchArguments: { tags: ['a,b'] } })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(android.fake.calls.length).toBe(sent);
   });
 
   it('refuses an openApp permission name it does not know before any device command', async () => {
@@ -2476,6 +3731,39 @@ describe('device fixture', () => {
     expect(android.fake.calls.length).toBe(count);
   });
 
+  it('shakes the selected simulator or emulator, and maps agent-device\'s refusal of a physical device to UNSUPPORTED_CAPABILITY with its hint', async () => {
+    const android = harness({ platform: 'android', device: 'emulator-5554', bundleId: 'com.example.app' });
+    await openAttempt(android);
+    await expect(fixture(android).shake()).resolves.toBeUndefined();
+    expect(android.fake.lastArgs('command.shake')).toEqual({ platform: 'android', serial: 'emulator-5554' });
+
+    const phone = harness({ platform: 'android', device: 'R58M123ABC', bundleId: 'com.example.app' });
+    await openAttempt(phone);
+    // agent-device 0.21.42's own refusal: the message names no reason, the details do.
+    const hint = 'shake overrides the accelerometer through the Android emulator console; a physical device has no console, so shake it by hand.';
+    phone.fake.respond('command.shake', () => {
+      throw new AppError('UNSUPPORTED_OPERATION', 'Runtime operation shake is unavailable', { reason: 'unsupported-device-kind', hint });
+    });
+    await expect(fixture(phone).shake()).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining(hint),
+    });
+  });
+
+  it('measures toBeInViewport against the unfolded screen after fold', async () => {
+    const h = harness({ platform: 'android', bundleId: 'com.example.app' });
+    // A real device's screenshot reports no logical size, so the tree's size stands once it changes.
+    h.fake.respond('capture.screenshot', () => ({ width: 1236, height: 2745 }));
+    h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, viewport: { width: 412, height: 915 } }));
+    await openAttempt(h);
+    await h.engine.observe!(operation());
+    await fixture(h).fold('open');
+    const inner = { ref: '@e11', index: 11, parentIndex: 0, depth: 1, type: 'button', label: 'Inner pane', rect: { x: 600, y: 100, width: 120, height: 40 } };
+    h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: [...SETTINGS_NODES, inner], viewport: { width: 841, height: 701 } }));
+    const [node] = await h.engine.locate!({ kind: 'query', query: { kind: 'text', value: { kind: 'string', value: 'Inner pane', exact: true } } }, operation());
+    expect(await h.engine.viewportIntersection!(node!.ref, operation())).toEqual({ intersects: true });
+  });
+
   it('folds an iOS simulator or an Android emulator through the one device command, and maps a hingeless device to UNSUPPORTED_CAPABILITY', async () => {
     const ios = harness();
     await openAttempt(ios);
@@ -2498,10 +3786,11 @@ describe('device fixture', () => {
 
   it('labels openApp and openLink steps without the link query and setClipboard by length, so a token never enters the report', () => {
     fixture(harness());
-    expect(declared?.openApp?.label?.('https://app.example.com/magic?token=s3cret#frag')).toBe('https://app.example.com/magic');
+    expect(declared?.openApp?.label?.('https://user:pw@app.example.com/magic?token=s3cret#frag')).toBe('<link>');
     expect(declared?.openApp?.label?.('com.apple.Preferences')).toBe('com.apple.Preferences');
     expect(declared?.openLink?.label?.('myapp://orders/42?ref=mail')).toBe('myapp://orders/42');
-    expect(declared?.openLink?.label?.('verify?token=s3cret')).toBe('verify');
+    expect(declared?.openLink?.label?.('https://user:pw@app.example.com/magic?token=s3cret#frag')).toBe('https://app.example.com/magic');
+    expect(declared?.openLink?.label?.('verify?token=s3cret')).toBe('<link>');
     // Clipboard text is often a code or token the test copied, never a configured secret the ledger would redact.
     expect(declared?.setClipboard?.label?.('482913')).toBe('6 chars');
   });
@@ -2562,6 +3851,7 @@ describe('snapshot generations', () => {
       }
     };
     h.fake.respond('interactions.press', (args) => admit((args as { ref: string }).ref));
+    h.fake.respond('interactions.fill', (args) => admit((args as { ref: string }).ref));
     h.fake.respond('interactions.drag', (args) => {
       const { source, destination } = args as { source: string; destination: string };
       admit(source);
@@ -3603,6 +4893,123 @@ describe('deterministic actions', () => {
     // The control moved from y 320 to 350 after the gesture, then rested.
     expect(reads).toBe(2);
     expect(h.fake.lastArgs('interactions.swipe')).toMatchObject({ from: { y: expect.any(Number) } });
+  });
+
+  const ORIGIN_UNKNOWN_SNAPSHOT = { ...SETTINGS_SNAPSHOT, warnings: [ORIGIN_WARNING] };
+  const ORIGIN_UNKNOWN_SWIPE = `perform swipe failed: the ${ORIGIN_UNKNOWN_BOUNDS} Nothing was sent. Swipe the screen with screen.swipe({ direction }), or between screen points with screen.swipe({ from, to }) not taken from those bounds.`;
+
+  it('refuses a node swipe aimed from a capture that could not place its window on the screen, and sends nothing', async () => {
+    const h = harness({ settle: false, transition: 0 });
+    await openAttempt(h);
+    h.fake.respond('capture.snapshot', () => ORIGIN_UNKNOWN_SNAPSHOT);
+    const scroller = await observed(h, 'Scroller');
+
+    const refused = { code: 'NOT_ACTIONABLE', retryable: false, message: ORIGIN_UNKNOWN_SWIPE };
+    await expect(h.engine.perform!(scroller.ref, { kind: 'swipe', direction: 'down' }, test())).rejects.toMatchObject(refused);
+    // The swipe shape a locator-scoped scrollUntilVisible sends (momentum: 'slow').
+    await expect(h.engine.perform!(scroller.ref, { kind: 'swipe', direction: 'down', momentum: 'slow' }, test())).rejects.toMatchObject(refused);
+    expect(h.fake.methods()).not.toContain('interactions.swipe');
+  });
+
+  it('fails a point swipe agent-device refuses as off its viewport as NOT_ACTIONABLE, naming duration only when the keyboard cut an untimed swipe', async () => {
+    const h = harness({ settle: false, transition: 0 });
+    await openAttempt(h);
+    const refuse = (viewport: { width: number; height: number }, point: { x: number; y: number }) => (): never => {
+      throw new AppError('INVALID_ARGS', `Gesture point (${point.x}, ${point.y}) is outside the usable area of the ${viewport.width}x${viewport.height} viewport`, {
+        reason: 'GESTURE_TRAJECTORY_OUT_OF_BOUNDS',
+        viewport: { x: 0, y: 0, ...viewport },
+        sample: { offsetMs: 100, point },
+        hint: 'Use the coordinate units snapshot reports: points on Apple platforms, not screenshot pixels.',
+      });
+    };
+    const swipe = (durationMs?: number) =>
+      h.engine.performAt!({ x: 201, y: 261 }, { kind: 'swipeTo', target: { x: 201, y: 610 }, ...(durationMs === undefined ? {} : { durationMs }) }, test());
+    const refusedWith = async (respond: () => never, durationMs: number | undefined, hint: RegExp) => {
+      h.fake.respond('interactions.swipe', respond);
+      h.fake.respond('interactions.pan', respond);
+      const failure = swipe(durationMs);
+      await expect(failure).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', retryable: false });
+      await expect(failure).rejects.toThrow(hint);
+    };
+    const keyboardHint = /Hint: Nothing was sent\. The open soft keyboard cuts the 844-point screen .*pass duration to send the path as given, across the keyboard\.$/;
+    const ownHint = /viewport Hint: Use the coordinate units/;
+
+    // No observation before the swipe: the screen is read when the refusal needs it.
+    await refusedWith(refuse({ width: 390, height: 500 }, { x: 201, y: 610 }), undefined, keyboardHint);
+    await refusedWith(refuse({ width: 390, height: 500 }, { x: 201, y: 610 }), 100, ownHint);
+    await refusedWith(refuse({ width: 390, height: 500 }, { x: 0, y: 400 }), undefined, ownHint);
+    await refusedWith(refuse({ width: 390, height: 500 }, { x: 603, y: 1800 }), undefined, ownHint);
+    await refusedWith(refuse({ width: 390, height: 844 }, { x: 201, y: 5000 }), undefined, ownHint);
+    await refusedWith(refuse({ width: 844, height: 390 }, { x: 201, y: 610 }), undefined, ownHint);
+  });
+
+  it('refuses the agent node swipe on a capture without the window origin', async () => {
+    const h = harness({ settle: false, transition: 0 });
+    await openAttempt(h);
+    h.fake.respond('capture.snapshot', () => ORIGIN_UNKNOWN_SNAPSHOT);
+    const scroller = await observed(h, 'Scroller');
+
+    await expect(h.engine.perform!(scroller.ref, { kind: 'swipe', direction: 'down' }, operation())).rejects.toMatchObject({
+      code: 'NOT_ACTIONABLE',
+      retryable: false,
+    });
+    expect(h.fake.methods()).not.toContain('interactions.swipe');
+  });
+
+  it('sends the same node swipe when the capture carries only part of the origin warning', async () => {
+    const h = harness({ settle: false, transition: 0 });
+    await openAttempt(h);
+    h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, warnings: ['This snapshot cannot establish the window origin on screen.'] }));
+    const scroller = await observed(h, 'Scroller');
+
+    await h.engine.perform!(scroller.ref, { kind: 'swipe', direction: 'down' }, test());
+    expect(h.fake.lastArgs('interactions.swipe')).toMatchObject(swipeWithin(scroller.rect!, 'down', undefined));
+  });
+
+  it('refuses a node swipe when only the re-read that supplied its bounds lost the window origin', async () => {
+    const h = harness({ settle: false, transition: 0 });
+    await openAttempt(h);
+    await sleep(0);
+    const root = await screenRootOf(h);
+    const scroller = await observed(h, 'Scroller');
+    h.fake.respond('capture.snapshot', () => ORIGIN_UNKNOWN_SNAPSHOT);
+
+    await h.engine.perform!(root.ref, { kind: 'swipe', direction: 'down' }, test());
+    await expect(h.engine.perform!(scroller.ref, { kind: 'swipe', direction: 'down' }, test())).rejects.toMatchObject({
+      code: 'NOT_ACTIONABLE',
+      message: ORIGIN_UNKNOWN_SWIPE,
+    });
+    expect(h.fake.methods()).not.toContain('interactions.swipe');
+  });
+
+  it('swipes a node again once a later capture places the window', async () => {
+    const h = harness({ settle: false, transition: 0 });
+    await openAttempt(h);
+    await sleep(0);
+    const root = await screenRootOf(h);
+    const scroller = await observed(h, 'Scroller');
+    h.fake.respond('capture.snapshot', () => ORIGIN_UNKNOWN_SNAPSHOT);
+    await h.engine.perform!(root.ref, { kind: 'swipe', direction: 'down' }, test());
+    await expect(h.engine.perform!(scroller.ref, { kind: 'swipe', direction: 'down' }, test())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+
+    h.fake.respond('capture.snapshot', () => SETTINGS_SNAPSHOT);
+    const placed = await observed(h, 'Scroller');
+    await h.engine.perform!(placed.ref, { kind: 'swipe', direction: 'down' }, test());
+    expect(h.fake.lastArgs('interactions.swipe')).toMatchObject(swipeWithin(placed.rect!, 'down', undefined));
+  });
+
+  it('leaves a screen swipe and a ref tap on a capture without the window origin to agent-device', async () => {
+    const h = harness({ settle: false, transition: 0 });
+    await openAttempt(h);
+    h.fake.respond('capture.snapshot', () => ORIGIN_UNKNOWN_SNAPSHOT);
+    const root = await screenRootOf(h);
+    const about = await observed(h, 'About');
+
+    await h.engine.perform!(root.ref, { kind: 'swipe', direction: 'down' }, operation());
+    expect(h.fake.lastArgs('interactions.scroll')).toMatchObject({ direction: 'down' });
+    await h.engine.perform!(about.ref, { kind: 'tap' }, operation());
+    expect(h.fake.lastArgs('interactions.press')).toMatchObject({ ref: '@e4' });
+    expect(h.fake.methods()).not.toContain('interactions.swipe');
   });
 
   it('does not re-read a control after a gesture when the agent made it', async () => {

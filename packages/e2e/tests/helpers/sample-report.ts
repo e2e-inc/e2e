@@ -9,7 +9,7 @@
  * engine name and the platform are declared names and reach it as they are.
  */
 
-import { ENGINE_SPI_VERSION } from '../../src/engine/contract.ts';
+import { ENGINE_SPI_VERSION } from '@e2e-dev/core/lib/engine/contract';
 import type { Report1Document, ReportStep } from '../../src/report/build.ts';
 import { reportAttempt, reportDocument, reportError, reportResult, reportStep, reportTarget } from './report.ts';
 
@@ -41,6 +41,7 @@ export function sampleReport(): Report1Document {
     exitCode: 1,
     startedAt: STARTED_AT,
     finishedAt: '2026-09-08T10:00:05.000Z',
+    durationMs: 4500,
     project: { id: '@acme/secret-app', configDigest: 'a'.repeat(64) },
     environment: { ci: false, trustNoticeShown: false, os: 'darwin 25.6.0', arch: 'arm64', runtime: 'node v26.4.0' },
     targets: [

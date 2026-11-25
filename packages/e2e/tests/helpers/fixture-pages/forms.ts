@@ -1,5 +1,6 @@
 /** Controls the tree cannot name or tell apart: unnamed fields, repeated buttons, moving twins. */
 
+import { randomInt } from 'node:crypto';
 import { constant, type PageRenderer } from './page.ts';
 
 /**
@@ -73,6 +74,40 @@ ${widget ? `    setTimeout(() => {
       widget.textContent = 'Chat with us';
       document.body.prepend(widget);
     }, 150);` : ''}
+  </script>
+</body>
+</html>`;
+}
+
+/**
+ * Six one-digit boxes (or `parts` boxes that split the code evenly, named
+ * "Part n"), marked as a one-time code unless `marked` is false, and the
+ * code the app issued for this load, under an "Enter the 6-digit code" line
+ * when `lengthHint` is set. The status reads the verdict
+ * once every box holds a digit, so a replay that typed another load's code
+ * shows as it would to a user.
+ */
+function renderOneTimeCode(code: string, marked = true, parts = 6, lengthHint = false): string {
+  const purpose = marked ? ' autocomplete="one-time-code"' : '';
+  const label = parts === 6 ? 'Digit' : 'Part';
+  const boxes = Array.from({ length: parts }, (_, index) => index + 1)
+    .map((n) => `<input aria-label="${label} ${String(n)}" inputmode="numeric" maxlength="${String(6 / parts)}"${purpose} oninput="check()" />`)
+    .join('\n    ');
+  return `<!doctype html>
+<html>
+<head><title>Confirm</title></head>
+<body>
+  <p>Your code is ${code}</p>
+${lengthHint ? '  <p>Enter the 6-digit code</p>\n' : ''}  <div role="group" aria-label="Code">
+    ${boxes}
+  </div>
+  <output role="status" aria-label="Verdict">waiting</output>
+  <script>
+    function check() {
+      const typed = [...document.querySelectorAll('input')].map((input) => input.value).join('');
+      if (typed.length < 6) return;
+      document.querySelector('output').textContent = typed === '${code}' ? 'Code verified' : 'Incorrect code';
+    }
   </script>
 </body>
 </html>`;
@@ -320,6 +355,19 @@ export const FORM_PAGES: Record<string, PageRenderer> = {
   </script>
 </body>
 </html>`),
+  // A one-time code split over one box per digit, as sign-in and checkout
+  // pages ask for it: the page issues a new code on every load, so a run
+  // that typed the last load's code reads "Incorrect code".
+  '/one-time-code': () => renderOneTimeCode(String(randomInt(1_000_000)).padStart(6, '0')),
+  // The same boxes with no declared purpose: nothing marks the code they take.
+  // `?parts=2` splits the code three and three; `?code=` fixes it, as a test
+  // environment that issues a known code does; `?label=1` adds a "6-digit"
+  // label, a digit of its own that a code may share.
+  '/one-time-code-plain': (_state, url) => {
+    const fixed = url.searchParams.get('code');
+    const code = fixed !== null && /^\d{6}$/.test(fixed) ? fixed : String(randomInt(1_000_000)).padStart(6, '0');
+    return renderOneTimeCode(code, false, url.searchParams.get('parts') === '2' ? 2 : 6, url.searchParams.get('label') === '1');
+  },
   '/unanchored': constant(UNANCHORED_PAGE),
   '/repeats': (_state, url) =>
     renderRepeats(url.searchParams.get('reverse') === '1' || url.searchParams.get('variant') === 'b', url.searchParams.get('still') !== '1'),

@@ -209,6 +209,17 @@ export const FIXTURE_PAGES: readonly FixturePage[] = [
     `,
   },
   {
+    name: 'layout tables and lists',
+    html: `
+      <table role="presentation"><tbody><tr><td>Billing address</td><td><button>Edit</button></td></tr></tbody></table>
+      <table role="none"><tr><th>Shipping</th><td>Free</td></tr></table>
+      <table role="presentation"><tr role="row"><td>Explicit row</td></tr></table>
+      <ul role="none"><li>Home</li><li><a href="/docs">Docs</a></li></ul>
+      <ol role="presentation"><li>Step</li><li role="listitem">Explicit item</li></ol>
+      <ul role="presentation"><li><ul><li>Nested real item</li></ul></li></ul>
+    `,
+  },
+  {
     name: 'names',
     html: `
       <span id="l1">Billing</span><span id="l2">address</span>
@@ -229,6 +240,24 @@ export const FIXTURE_PAGES: readonly FixturePage[] = [
       <svg role="presentation" aria-label="Painted chart" width="10" height="10"></svg>
       <div role="presentation" aria-checked="true">Decorative state</div>
       <figure><img alt="Cat" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAAAAAAALAAAAAABAAEAAAIBRAA7"><figcaption>A cat</figcaption></figure>
+    `,
+  },
+  {
+    name: 'descendants in a name from content',
+    html: `
+      <ul role="tree" aria-label="Files">
+        <li role="treeitem" aria-expanded="true"><span>src</span>
+          <ul role="group">
+            <li role="treeitem" aria-expanded="true"><span>lib</span><ul role="group"><li role="treeitem">a.ts</li></ul></li>
+            <li role="treeitem">index.ts</li>
+          </ul>
+        </li>
+      </ul>
+      <div role="tablist"><button role="tab" aria-selected="true">Inbox <span role="status">3</span></button></div>
+      <button><span role="img">*</span> Party</button>
+      <h2>Title <span role="note">Note text</span></h2>
+      <a href="/quote" title="Quote"><blockquote>Quote text</blockquote></a>
+      <a href="/contact"><address>1 Main St</address></a>
     `,
   },
   {
@@ -277,6 +306,158 @@ export const FIXTURE_PAGES: readonly FixturePage[] = [
       <div role="button" tabindex="0"><span>Nested</span> <b>content</b></div>
       <div contenteditable="true" aria-label="Editor">Hello</div>
       <div contenteditable="true" aria-label="Decorated editor"><h2 role="presentation">Editor title</h2><img alt="" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAAAAAAALAAAAAABAAEAAAIBRAA7"></div>
+    `,
+  },
+  {
+    name: 'modal dialog over the page',
+    html: `
+      <main><h1>Store</h1><button>Behind the modal</button><a href="/cart">Cart</a><input aria-label="Search"></main>
+      <iframe title="Offers" srcdoc="<button>Inside the frame</button>"></iframe>
+      <div id="late-popover" popover><button>Popover opened after</button></div>
+      <dialog id="consent" aria-label="Cookie consent"><p>We use cookies.</p><button>Accept</button></dialog>
+      <script>
+        document.getElementById('consent').showModal();
+        document.getElementById('late-popover').showPopover();
+      </script>
+    `,
+  },
+  {
+    name: 'stacked modal dialogs shown in reverse order',
+    html: `
+      <main><button>Page button</button></main>
+      <dialog id="first" aria-label="First in the document"><button>First dialog button</button></dialog>
+      <dialog id="second" aria-label="Second in the document"><button>Second dialog button</button></dialog>
+      <script>
+        document.getElementById('second').showModal();
+        document.getElementById('first').showModal();
+        // On a dialog already modal, showModal() changes nothing, so the first stays on top.
+        document.getElementById('second').showModal();
+        // Focus no longer names the dialog on top, so the recorded show order must.
+        document.activeElement.blur();
+      </script>
+    `,
+  },
+  {
+    name: 'modal dialog the show order never saw',
+    html: `
+      <main><button>Page button</button></main>
+      <dialog id="first" aria-label="Shown by script"><button id="next" commandfor="second" command="show-modal">Next step</button></dialog>
+      <dialog id="second" aria-label="Shown by a command"><button>Command dialog button</button></dialog>
+      <script>
+        document.getElementById('first').showModal();
+        // A show-modal command opens the second without calling showModal(), so the record never sees it.
+        document.getElementById('next').click();
+        document.activeElement.blur();
+      </script>
+    `,
+  },
+  {
+    name: 'modal dialog a command reopens',
+    html: `
+      <main><button>Page button</button></main>
+      <dialog id="reopened" aria-label="Reopened by a command"><button>Reopened dialog button</button></dialog>
+      <dialog id="between" aria-label="Shown while it was closed"><button id="again" commandfor="reopened" command="show-modal">Back</button></dialog>
+      <script>
+        document.getElementById('reopened').showModal();
+        document.getElementById('reopened').close();
+        document.getElementById('between').showModal();
+        // A show-modal command opens the first dialog again, on top, without calling showModal().
+        document.getElementById('again').click();
+        document.activeElement.blur();
+      </script>
+    `,
+  },
+  {
+    name: 'modal dialog nested in a modal dialog',
+    html: `
+      <dialog id="outer" aria-label="Edit order"><button>Save order</button>
+        <dialog id="inner" aria-label="Discard changes"><button>Discard</button></dialog>
+      </dialog>
+      <script>
+        document.getElementById('outer').showModal();
+        // Focus lands in the inner dialog, which the outer one also holds.
+        document.getElementById('inner').showModal();
+      </script>
+    `,
+  },
+  {
+    name: 'modal dialog in a closed shadow root',
+    html: `
+      <main><button>Page button</button></main>
+      <consent-banner><button>Slotted accept</button></consent-banner>
+      <script>
+        customElements.define('consent-banner', class extends HTMLElement {
+          connectedCallback() {
+            const root = this.attachShadow({ mode: 'closed' });
+            root.innerHTML = '<p>Behind the banner</p><dialog aria-label="Shadow consent"><slot></slot><button>Shadow decline</button></dialog>';
+            root.querySelector('dialog').showModal();
+          }
+        });
+      </script>
+    `,
+  },
+  {
+    name: 'modal dialog slotted into a shadow root',
+    html: `
+      <dialog-frame><dialog aria-label="Slotted dialog"><button>Slotted dialog button</button></dialog></dialog-frame>
+      <button>Outside button</button>
+      <script>
+        customElements.define('dialog-frame', class extends HTMLElement {
+          connectedCallback() {
+            this.attachShadow({ mode: 'open' }).innerHTML = '<div><button>Frame chrome</button><slot></slot></div>';
+            this.querySelector('dialog').showModal();
+          }
+        });
+      </script>
+    `,
+  },
+  {
+    name: 'closed details and skipped content across shadow boundaries',
+    html: `
+      <details><summary>Shadow details</summary><shadow-body></shadow-body></details>
+      <slot-details><button>Slotted in open root</button></slot-details>
+      <closed-slot-details><button>Slotted in closed root</button></closed-slot-details>
+      <summary-slot><button slot="s">Slotted in summary</button><button>Slotted in body</button></summary-slot>
+      <closed-skip><button>Skipped in closed root</button></closed-skip>
+      <script>
+        const define = (name, mode, html) => customElements.define(name, class extends HTMLElement {
+          constructor() { super(); this.attachShadow({ mode }).innerHTML = html; }
+        });
+        define('shadow-body', 'open', '<button>Shadow under closed details</button>');
+        define('slot-details', 'open', '<details><summary>Open root details</summary><slot></slot></details>');
+        define('closed-slot-details', 'closed', '<details><summary>Closed root details</summary><slot></slot></details>');
+        define('summary-slot', 'open', '<details><summary><slot name="s"></slot></summary><slot></slot></details>');
+        define('closed-skip', 'closed', '<div style="content-visibility:hidden;width:200px;height:40px"><slot></slot></div>');
+      </script>
+    `,
+  },
+  {
+    name: 'content-visibility on boxes that skip nothing and boxes of their own',
+    html: `
+      <style>.laid-out::details-content { display: contents; }</style>
+      <details class="laid-out"><summary>Laid out</summary><button>Laid out light</button><laid-out-body></laid-out-body></details>
+      <table style="content-visibility:hidden"><tr><th>Column</th></tr><tr><td><button>Table button</button></td></tr></table>
+      <closed-table><button>Slotted in closed table</button></closed-table>
+      <div style="display:inline-table;content-visibility:hidden"><button>Inline table button</button></div>
+      <ruby style="content-visibility:hidden"><button>Ruby button</button></ruby>
+      <ul><li style="display:inline list-item;content-visibility:hidden"><button>Inline item button</button></li></ul>
+      <fieldset style="display:inline;content-visibility:hidden"><button>Inline fieldset button</button></fieldset>
+      <fieldset style="display:contents;content-visibility:hidden"><button>Contents fieldset button</button></fieldset>
+      <ns-slot><button>Namespaced slot attribute</button></ns-slot>
+      <script>
+        const define = (name, mode, html) => customElements.define(name, class extends HTMLElement {
+          constructor() { super(); this.attachShadow({ mode }).innerHTML = html; }
+        });
+        define('laid-out-body', 'open', '<button>Laid out shadow</button>');
+        define('closed-table', 'closed', '<table style="content-visibility:hidden"><tr><td><slot></slot></td></tr></table>');
+        customElements.define('ns-slot', class extends HTMLElement {
+          constructor() {
+            super();
+            this.attachShadow({ mode: 'closed' }).innerHTML = '<details><summary>Namespaced</summary><slot name="x"></slot></details><slot></slot>';
+            this.querySelector('button').setAttributeNS('urn:e2e:not-html', 'slot', 'x');
+          }
+        });
+      </script>
     `,
   },
   {

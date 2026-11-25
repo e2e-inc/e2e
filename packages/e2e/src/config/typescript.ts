@@ -14,9 +14,9 @@ import { pathToFileURL } from 'node:url';
 import type * as OxcParser from 'oxc-parser';
 import type { JsxOptions, OxcError, TransformOptions } from 'oxc-transform';
 import type * as OxcTransform from 'oxc-transform';
-import { InfrastructureError } from '../internal/errors.ts';
-import { obj } from '../internal/objects.ts';
-import { isPlainObject } from '../internal/options.ts';
+import { InfrastructureError } from '@e2e-dev/core/lib/internal/errors';
+import { obj } from '@e2e-dev/core/lib/internal/objects';
+import { isPlainObject } from '@e2e-dev/core/lib/internal/options';
 import { HOOKED_REQUIRE_KEY, type CompiledExtension } from './compiled-files.ts';
 import type { CompilerOptions } from './tsconfig.ts';
 
@@ -32,7 +32,7 @@ let compiler: { transform: typeof OxcTransform; parser: typeof OxcParser } | und
  * `--omit=optional`, and from a lockfile written on another platform
  * (npm/cli#4828); the error names it and the way back.
  */
-function oxc(): { transform: typeof OxcTransform; parser: typeof OxcParser } {
+export function oxc(): { transform: typeof OxcTransform; parser: typeof OxcParser } {
   if (compiler !== undefined) return compiler;
   try {
     compiler = { transform: ownRequire('oxc-transform') as typeof OxcTransform, parser: ownRequire('oxc-parser') as typeof OxcParser };
@@ -47,11 +47,6 @@ function oxc(): { transform: typeof OxcTransform; parser: typeof OxcParser } {
     throw new InfrastructureError('TYPESCRIPT_COMPILER_UNAVAILABLE', `e2e compiles TypeScript with oxc, and ${fix}`, { cause });
   }
   return compiler;
-}
-
-/** oxc's parser, loaded on first use as the compiler is; `e2e mcp`'s `run_code` reads its statements with it. */
-export function oxcParser(): typeof OxcParser {
-  return oxc().parser;
 }
 
 /** The first ECMAScript edition that defines class fields rather than assigning them. */

@@ -22,13 +22,16 @@ describe('the built declarations', () => {
   it('export nothing outside the runner consumed from e2e', () => {
     const index = declaration('index.d.ts');
     expect(mentions(index, 'renderMarkdownReport')).toBe(true);
+    expect(mentions(index, 'foldLastRun')).toBe(true);
     for (const name of ['BLOCKABLE_CODES', 'RUNTIME_CODES', 'buildTraceEntry', 'readTraceEntry']) {
       expect(mentions(index, name), name).toBe(false);
     }
   });
 
   it('export nothing outside the runner consumed from e2e/agent', () => {
-    const agent = declaration('agent/public.d.ts');
+    // `e2e/agent` re-exports the module `@e2e-dev/core` builds it in, so that module is what ships.
+    expect(declaration('agent/public.d.ts')).toMatch(/export \* from '@e2e-dev\/core\/lib\/agent\/public';/u);
+    const agent = readFileSync(new URL(import.meta.resolve('@e2e-dev/core/lib/agent/public').replace(/\.js$/u, '.d.ts')), 'utf8');
     expect(mentions(agent, 'defineTool')).toBe(true);
     for (const name of ['isDefinedTool', 'toolAppliesTo', 'createAgent', 'CreateAgentOptions', 'DefaultAgent']) {
       expect(mentions(agent, name), name).toBe(false);
@@ -50,6 +53,18 @@ describe('the built declarations', () => {
     expect(sdk).not.toHaveProperty('run');
     expect(sdk).not.toHaveProperty('explore');
     expect(sdk).not.toHaveProperty('list');
+  });
+
+  it('declares the built-in reporter factories and their options from e2e/reporters', async () => {
+    const reporters = declaration('reporters.d.ts');
+    for (const name of ['list', 'dot', 'line', 'json', 'junit', 'markdown', 'ctrf', 'ListReporterOptions', 'DotReporterOptions', 'LineReporterOptions', 'JunitReporterOptions', 'MarkdownReporterOptions', 'CtrfReporterOptions']) {
+      expect(mentions(reporters, name), name).toBe(true);
+    }
+    for (const name of ['ListReporter', 'runView', 'builtinReporter', 'builtin']) {
+      expect(mentions(reporters, name), name).toBe(false);
+    }
+    const api = await import(new URL('../../dist/reporters.js', import.meta.url).href);
+    expect(Object.keys(api).toSorted()).toEqual(['ctrf', 'dot', 'json', 'junit', 'line', 'list', 'markdown']);
   });
 
   it.each([

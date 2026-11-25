@@ -1,15 +1,16 @@
 /** JUnit XML reporter: the report-1 document as `.e2e/junit.xml`. */
 
 import path from 'node:path';
-import { envValue } from '../internal/env.ts';
-import { sanitizeText } from '../internal/errors.ts';
-import { realpathOfExisting, relativeToProjectRoot } from '../internal/paths.ts';
-import type { FinishedRun } from '../types.ts';
+import { envValue } from '@e2e-dev/core/lib/internal/env';
+import { sanitizeRecordedText } from '@e2e-dev/core/lib/internal/errors';
+import { realpathOfExisting, relativeToProjectRoot } from '@e2e-dev/core/lib/internal/paths';
+import { builtin } from './builtin-id.ts';
+import type { FinishedRun, Reporter } from '../run-types.ts';
 import type { Report1Document, ReportError, ReportResult, ReportSerialGroup } from './build.ts';
 import { repeatSuffix } from './format.ts';
-import { failureScreenshot, toldAttempt } from './failure-text.ts';
-import { outcome, type AttemptView } from './outcome.ts';
-import { fileReporter, toPosixPath } from './write.ts';
+import { failedStepOf, failureScreenshot, toldAttempt } from './failure-text.ts';
+import { listedInCi, outcome, type AttemptView } from './outcome.ts';
+import { toPosixPath } from './write.ts';
 
 interface SuiteCounts {
   tests: number;
@@ -26,25 +27,30 @@ interface RenderedCase {
 }
 
 /**
- * Code units XML 1.0 forbids beyond the control range `sanitizeText` already
- * replaces: the two noncharacters U+FFFE and U+FFFF, and a surrogate half
- * without its partner. One of them makes a parser reject the whole document.
+ * Code units XML 1.0 forbids beyond the control range `sanitizeRecordedText`
+ * already replaces: the two noncharacters U+FFFE and U+FFFF, and a surrogate
+ * half without its partner. One of them makes a parser reject the whole
+ * document.
  */
 const XML_FORBIDDEN = /[\ufffe\uffff]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
 
-/** Escapes text content; every character XML 1.0 forbids becomes U+FFFD. */
+/**
+ * Escapes text content; every character XML 1.0 forbids becomes U+FFFD. A
+ * carriage return is a reference, since a parser reads a raw one as a newline.
+ */
 function text(value: string): string {
-  return sanitizeText(value)
+  return sanitizeRecordedText(value)
     .replace(XML_FORBIDDEN, '\uFFFD')
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
+    .replaceAll('"', '&quot;')
+    .replaceAll('\r', '&#13;');
 }
 
 /** Escapes an attribute value; whitespace is entity-encoded so parsers keep it verbatim. */
 function attribute(value: string): string {
-  return text(value).replaceAll('\n', '&#10;').replaceAll('\r', '&#13;').replaceAll('\t', '&#9;');
+  return text(value).replaceAll('\n', '&#10;').replaceAll('\t', '&#9;');
 }
 
 /** JUnit durations are seconds; three decimals keep millisecond precision. */
@@ -93,13 +99,14 @@ function verdictElement(error: ReportError | undefined): 'failure' | 'error' {
   return error === undefined || error.category === 'test' ? 'failure' : 'error';
 }
 
-function errorBody(error: ReportError): string {
+/** `CODE (phase): message`; a failure on a step of a session beside the test's own names it, `CODE (phase) on launch-1: message`. */
+export function errorBody(error: ReportError, actor?: string): string {
   const phase = error.phase === undefined ? '' : ` (${error.phase})`;
-  return `${error.code}${phase}: ${error.message}`;
+  return `${error.code}${phase}${actor === undefined ? '' : ` on ${actor}`}: ${error.message}`;
 }
 
 /** Why a result was skipped: its reason, after the test filter's name when one left it out. */
-function skippedMessage(result: ReportResult): string {
+export function skippedMessage(result: ReportResult): string {
   const reason = result.skip?.reason ?? 'skipped';
   return result.skip?.filter === undefined ? reason : `left out by filter ${result.skip.filter}: ${reason}`;
 }
@@ -184,7 +191,7 @@ function renderResult(result: ReportResult, groups: ReadonlyMap<string, ReportSe
       const element = verdictElement(error);
       const message = error?.message ?? result.status;
       const type = error?.code ?? result.status;
-      const body = error === undefined ? result.status : errorBody(error);
+      const body = error === undefined ? result.status : errorBody(error, failedStepOf(told)?.step.actor);
       const attachment = screenshotAttachment(told, options);
       const lines = attachment === undefined ? [] : [`[[ATTACHMENT|${attachment}]]`];
       return {
@@ -242,8 +249,7 @@ export function renderJunitReport(report: Report1Document, options?: JunitReport
   const groups = new Map(report.run.serialGroups.map((group) => [group.id, group]));
   const byFile = new Map<string, RenderedCase[]>();
   for (const result of report.run.results) {
-    // Other unselected results are report-only; a CI viewer counts what the run selected.
-    if (result.selected === false && result.skip?.filter === undefined) continue;
+    if (!listedInCi(result)) continue;
     const cases = byFile.get(result.file) ?? [];
     cases.push(renderResult(result, groups, options));
     byFile.set(result.file, cases);
@@ -272,17 +278,36 @@ export function renderJunitReport(report: Report1Document, options?: JunitReport
  * root. Undefined when the artifacts are outside it, since GitLab cannot
  * serve those.
  */
-function attachmentBase(run: FinishedRun): string | undefined {
+export function attachmentBase(run: FinishedRun): string | undefined {
   const base = envValue(process.env, 'CI_PROJECT_DIR') ?? run.projectRoot;
   if (realpathOfExisting(base) === realpathOfExisting(run.artifactsRoot)) return '.';
   const relative = relativeToProjectRoot(base, run.artifactsRoot);
   return relative === undefined ? undefined : toPosixPath(relative);
 }
 
+/** Options of the built-in `junit` reporter. */
+export interface JunitReporterOptions {
+  /** Where the XML goes, from the project root; `junit.xml` in the output directory by default. */
+  readonly outputFile?: string;
+}
+
 /**
  * The built-in `junit` reporter: the report as JUnit XML in `junit.xml`
- * beside `report.json`, for CI test summaries.
+ * beside `report.json`, for CI test summaries. Writes nothing when the
+ * report itself was not written.
  */
-export const junitReporter = fileReporter('junit', 'JUnit', 'junit.xml', (run) =>
-  renderJunitReport(run.report, { artifactsDir: attachmentBase(run) }),
-);
+export function junit(options: JunitReporterOptions = {}): Reporter {
+  return builtin('junit', {
+    name: 'junit',
+    reportFiles: (run) =>
+      run.reportPath === undefined
+        ? []
+        : [
+            {
+              path: options.outputFile ?? path.join(run.outputDir, 'junit.xml'),
+              content: renderJunitReport(run.report, { artifactsDir: attachmentBase(run) }),
+              label: 'JUnit',
+            },
+          ],
+  });
+}

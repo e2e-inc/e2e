@@ -32,12 +32,55 @@ describe.each(schemas)('%s schema', (name) => {
 
   it('rejects the invalid fixture', () => {
     expect(validate(readJson('fixtures', `${name}.invalid.json`))).toBe(false);
+    if (name === 'report-v1') {
+      expect(validate.errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ instancePath: '/run/durationMs', keyword: 'minimum' }),
+          expect.objectContaining({ instancePath: '/run/shard/index', keyword: 'minimum' }),
+          expect.objectContaining({ instancePath: '/run/results/0/skip/otherShard', keyword: 'const' }),
+        ]),
+      );
+    }
   });
 
   if (name === 'engine-manifest-v1') {
+    it('accepts a web manifest declaring payload uploads', () => {
+      expect(validate({
+        name: 'web', version: '0.1.0', spiVersion: 1, platform: 'web',
+        methods: ['engine/observe', 'engine/perform'],
+        actions: ['setInputFiles', 'setInputFilePayloads'],
+      })).toBe(true);
+    });
+
+    it('rejects the duplicate payload action specifically', () => {
+      expect(validate({
+        name: 'web', version: '0.1.0', spiVersion: 1,
+        methods: ['engine/observe', 'engine/perform'],
+        actions: ['setInputFiles', 'setInputFilePayloads', 'setInputFilePayloads'],
+      })).toBe(false);
+      expect(validate.errors).toEqual([expect.objectContaining({ instancePath: '/actions', keyword: 'uniqueItems' })]);
+    });
+
+    it('rejects the invalid fixture for viewportIntersection without engine/observe and for a non-boolean fileApps', () => {
+      expect(validate(readJson('fixtures', 'engine-manifest-v1.invalid.json'))).toBe(false);
+      expect(validate.errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ instancePath: '/methods', keyword: 'contains' }),
+          expect.objectContaining({ instancePath: '/fileApps', keyword: 'type' }),
+        ]),
+      );
+    });
+
     it('rejects a method listed twice', () => {
       const manifest = readJson('fixtures', 'engine-manifest-v1.valid.json') as { methods: string[] };
       manifest.methods.push('lifecycle/doctor');
+      expect(validate(manifest)).toBe(false);
+    });
+
+    it('rejects selectsDevice without lifecycle/prepare', () => {
+      const manifest = readJson('fixtures', 'engine-manifest-v1.valid.json') as { methods: string[]; selectsDevice: boolean };
+      expect(manifest.selectsDevice).toBe(true);
+      manifest.methods = manifest.methods.filter((method) => method !== 'lifecycle/prepare');
       expect(validate(manifest)).toBe(false);
     });
   }
@@ -211,12 +254,72 @@ describe.each(schemas)('%s schema', (name) => {
       expect(validate.errors).toEqual(expect.arrayContaining([expect.objectContaining({ keyword: 'required', params: { missingProperty: 'interrupted' } })]));
     });
 
+    it('takes fixme and explicit as skip causes, and no unknown cause', () => {
+      const report = readJson('fixtures', 'report-v1.valid.json') as {
+        run: { results: { skip?: { cause: string }; attempts: { skip?: { cause: string } }[] }[] };
+      };
+      const result = report.run.results[1]!;
+      expect([result.skip?.cause, result.attempts[0]?.skip?.cause]).toEqual(['fixme', 'fixme']);
+      const skip = result.attempts[0]!.skip!;
+      skip.cause = 'explicit';
+      expect(validate(report)).toBe(true);
+      skip.cause = 'broken';
+      expect(validate(report)).toBe(false);
+    });
+
+    it('takes todo as a skip cause only on a plain test result with no attempts', () => {
+      const report = readJson('fixtures', 'report-v1.valid.json') as {
+        run: { results: Record<string, unknown>[] };
+      };
+      const results = report.run.results;
+      const todo = results.find((result) => (result['skip'] as { cause?: string } | undefined)?.cause === 'todo')!;
+      expect(todo).toMatchObject({ kind: 'test', status: 'skipped', attempts: [], skip: { cause: 'todo', reason: 'todo' } });
+      expect(validate(report)).toBe(true);
+      const invalid = (change: Record<string, unknown>) => {
+        const changed = structuredClone(report);
+        Object.assign(changed.run.results[results.indexOf(todo)]!, change);
+        return !validate(changed);
+      };
+      expect(invalid({ skip: { cause: 'todo', reason: 'later' } })).toBe(true);
+      expect(invalid({ skip: { cause: 'todo', reason: 'todo', filter: 'areas' } })).toBe(true);
+      expect(invalid({ kind: 'setup' })).toBe(true);
+      expect(invalid({ serialGroupId: 'group-1' })).toBe(true);
+      expect(invalid({ attempts: [(results[1]!['attempts'] as unknown[])[0]] })).toBe(true);
+      expect(invalid({ selected: false, skip: { cause: 'todo', reason: 'todo', otherShard: true } })).toBe(false);
+    });
+
+    it('rejects todo as the skip cause of an attempt', () => {
+      const report = readJson('fixtures', 'report-v1.valid.json') as {
+        run: { results: { attempts: { skip?: { cause: string } }[] }[] };
+      };
+      report.run.results[1]!.attempts[0]!.skip!.cause = 'todo';
+      expect(validate(report)).toBe(false);
+    });
+
+    it('rejects a fixme skip that names a filter, which only a filtered skip does', () => {
+      const report = readJson('fixtures', 'report-v1.invalid.json') as {
+        run: { results: { skip?: Record<string, unknown> }[] };
+      };
+      const index = report.run.results.findIndex((result) => result.skip?.['filter'] !== undefined);
+      const skip = report.run.results[index]!.skip!;
+      expect(skip).toMatchObject({ cause: 'fixme', filter: 'areas' });
+      // The rules the skip's cause breaks; Ajv can report one rule more than once.
+      const causeRules = (): string[] => {
+        validate(report);
+        const errors = (validate.errors ?? []).filter((error) => error.instancePath === `/run/results/${index}/skip/cause`);
+        return [...new Set(errors.map((error) => error.schemaPath))];
+      };
+      expect(causeRules()).toEqual(['#/$defs/skip/allOf/0/then/properties/cause/const']);
+      delete skip['filter'];
+      expect(causeRules()).toEqual([]);
+    });
+
     it('keeps a skip reason on a skipped or failed attempt, never on a passed one', () => {
       const report = readJson('fixtures', 'report-v1.valid.json') as {
         run: { results: { attempts: { status: string; skip?: unknown; error?: unknown }[] }[] };
       };
       const attempt = report.run.results[1]!.attempts[0]!;
-      expect(attempt).toMatchObject({ status: 'skipped', skip: { cause: 'explicit' } });
+      expect(attempt).toMatchObject({ status: 'skipped', skip: { cause: 'fixme' } });
       const { skip } = attempt;
       delete attempt.skip;
       expect(validate(report)).toBe(false);

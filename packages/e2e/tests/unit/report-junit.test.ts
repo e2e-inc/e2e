@@ -2,10 +2,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { FinishedRun } from '../../src/types.ts';
+import { serializeError, TestError } from '@e2e-dev/core/lib/internal/errors';
+import type { FinishedRun } from '../../src/run-types.ts';
 import type { Report1Document, ReportSerialGroup } from '../../src/report/build.ts';
-import { junitReporter, renderJunitReport, type JunitReportOptions } from '../../src/report/junit.ts';
-import { REPORT_AT as AT, reportAttempt, reportDocument, reportError, reportResult } from '../helpers/report.ts';
+import { junit, renderJunitReport, type JunitReportOptions } from '../../src/report/junit.ts';
+import { REPORT_AT as AT, reportAttempt, reportDocument, reportError, reportResult, reportStep } from '../helpers/report.ts';
 
 /** XML 1.0 `Char`, over code points: a lone surrogate is a code point of its own and falls outside every range. */
 // oxlint-disable-next-line no-control-regex -- the allowed range is the point
@@ -210,6 +211,15 @@ describe('renderJunitReport', () => {
     expect(rootAttributes(xml)).toMatchObject({ failures: '1', errors: '0' });
   });
 
+  it('names the session the failed step ran on when it is not the test\'s own', () => {
+    const error = reportError({ code: 'LOCATOR_NOT_FOUND', message: 'locator matched no nodes' });
+    const attempt = (actor?: string) =>
+      reportAttempt({ status: 'failed', error, steps: [reportStep({ status: 'failed', error, ...(actor === undefined ? {} : { actor }) })] });
+    const failure = (actor?: string) => render(reportDocument({ results: [reportResult({ status: 'failed', attempts: [attempt(actor)] })] }));
+    expect(failure('launch-1')).toContain('>LOCATOR_NOT_FOUND on launch-1: locator matched no nodes</failure>');
+    expect(failure()).toContain('>LOCATOR_NOT_FOUND: locator matched no nodes</failure>');
+  });
+
   it('renders infrastructure and configuration errors as <error>', () => {
     const infrastructure = reportError({
       category: 'infrastructure',
@@ -355,6 +365,25 @@ describe('renderJunitReport', () => {
     expect(xml).toContain('message="line one&#10;line &lt;two&gt;� &amp; done"');
     expect(xml).toContain('>ASSERTION_FAILED: line one\nline &lt;two&gt;� &amp; done</failure>');
     expect(xml).not.toContain('');
+  });
+
+  it('keeps a carriage return in the failure message and body as a character reference', () => {
+    const error = serializeError(new TestError('ERROR', 'line one\r\nline two'));
+    const xml = render(
+      reportDocument({
+        results: [
+          reportResult({
+            status: 'failed',
+            attempts: [reportAttempt({ status: 'failed', error })],
+          }),
+        ],
+      }),
+    );
+    assertWellFormed(xml);
+    expect(xml).toContain('message="line one&#13;&#10;line two"');
+    expect(xml).toContain('>ERROR: line one&#13;\nline two</failure>');
+    expect(xml).not.toContain('\uFFFD');
+    expect(xml).not.toContain('\r');
   });
 
   it('replaces XML-forbidden noncharacters and lone surrogates in text and attributes', () => {
@@ -680,7 +709,7 @@ function failedWithShot(
   });
 }
 
-describe('junitReporter', () => {
+describe('junit', () => {
   const tmpDirs: string[] = [];
 
   /** A fresh directory removed after each test. */
@@ -703,13 +732,15 @@ describe('junitReporter', () => {
       projectRoot,
       artifactsRoot,
       reportPath: path.join(artifactsRoot, 'report.json'),
+      outputDir: artifactsRoot,
       aiTracePath: undefined,
       report: failedWithShot(),
       traces: new Map(),
       redact: (text) => text,
     };
-    await junitReporter.onRunFinished!(run, new AbortController().signal);
-    const xml = fs.readFileSync(path.join(artifactsRoot, 'junit.xml'), 'utf8');
+    const files = await junit().reportFiles!(run, new AbortController().signal);
+    expect(files).toMatchObject([{ path: path.join(artifactsRoot, 'junit.xml'), label: 'JUnit' }]);
+    const xml = files[0]!.content;
     assertWellFormed(xml);
     return /\[\[ATTACHMENT\|([^\]]*)\]\]/.exec(xml)?.[1];
   }

@@ -1,44 +1,95 @@
 /** Synchronous registration during module evaluation. */
 
-import { realpathSync } from 'node:fs';
+import { realPath } from './real-path.ts';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { testCaseBrand } from '../internal/brands.ts';
-import { describeValue } from '../config/validate.ts';
-import { isRecordingMode, legacyTraceSpelling, RECORDING_MODES } from '../internal/recording-modes.ts';
-import { CollectionError } from '../internal/errors.ts';
-import { validateTitle } from '../internal/ids.ts';
-import { realmSlot } from '../internal/realm-slot.ts';
-import { markRunningTestExpectedToFail } from '../internal/expected-failure.ts';
-import { parseModifierCall, skipRunningTest } from '../internal/skip.ts';
-import { unknownKeyMessage } from '../internal/options.ts';
-import type { SourceLocation } from '../internal/source.ts';
+import { testCaseBrand } from '@e2e-dev/core/lib/internal/brands';
+import { describeValue } from '@e2e-dev/core/lib/config/validate';
+import { isRecordingMode, legacyTraceSpelling, RECORDING_MODES } from '@e2e-dev/core/lib/internal/recording-modes';
+import { CollectionError } from '@e2e-dev/core/lib/internal/errors';
+import { MAX_TIMER_MS } from '@e2e-dev/core/lib/internal/time';
+import { validateTitle } from '@e2e-dev/core/lib/internal/ids';
+import { realmSlot } from '@e2e-dev/core/lib/internal/realm-slot';
+import { registrarModuleSlot } from '../internal/registrar-modules.ts';
+import { expectedFailureOption, markRunningTestExpectedToFail } from '@e2e-dev/core/lib/internal/expected-failure';
+import { setRunningTestTimeout, slowRunningTest } from '@e2e-dev/core/lib/internal/test-timeout';
+import { fixmeReason, parseModifierCall, skipRunningTest } from '../internal/skip.ts';
+import { formatEachTitle, readRows } from './each.ts';
+import { unknownKeyMessage } from '@e2e-dev/core/lib/internal/options';
+import type { SourceLocation } from '@e2e-dev/core/lib/internal/source';
+import { fixtureNames, type FixtureUserFn } from './fixture-names.ts';
+import { checkDeclaredFixtures, describeFixture, describeUser } from './fixture-plan.ts';
+import { evaluatingModule } from './evaluating-module.ts';
+import { fixtureIdentities } from './fixture-identity.ts';
+import { checkParallel, checkParallelNesting, configuredParallel } from './parallel.ts';
 import type {
+  DescribeAPI,
+  DescribeConfigureOptions,
   DescribeOptions,
+  DescribeRegistrar,
+  EachFn,
+  EachRegistrar,
   FixtureFn,
-  SetupFn,
+  FixtureScope,
   SetupOptions,
-  SuiteHookFn,
   TestAPI,
   TestCase,
-  TestFn,
   TestHookFn,
   TestOptions,
-} from '../types.ts';
+  TestRegistrar,
+} from '@e2e-dev/core/lib/types';
 
 export interface GroupNode {
   readonly title: string;
   readonly options: DescribeOptions;
   readonly parent: GroupNode | undefined;
   readonly serial: boolean;
+  /** The group's `parallel`, from its options or a `describe.configure()` call in its body. */
+  parallel: boolean | undefined;
 }
 
-export type TestMode = 'normal' | 'skip' | 'only';
+/** How a test was registered; `fixme` and `todo` carry their own skip causes. */
+export type TestMode = 'normal' | 'skip' | 'fixme' | 'todo' | 'only';
 
-/** One fixture a `test.extend()` call defined: its name and its setup/teardown function. */
+/**
+ * A registered test or hook body. `TestAPI` types what each receives; at run
+ * time it gets the object its attempt or suite hook binds (`bindFixtures`).
+ */
+export type TestBody = TestHookFn<object>;
+
+/**
+ * One fixture a `test.extend()` call defined: its name, its setup/teardown
+ * function, and how long one instance lives. The object is the fixture's
+ * identity: a worker keeps one instance per definition. The fixtures it
+ * depends on are the ones its function names (`fixtureNames`). One named
+ * like a built-in fixture, or like an earlier fixture of its chain, extends
+ * it: inside its function its own name is the fixture it extends.
+ */
 export interface FixtureDefinition {
   readonly name: string;
   readonly fn: FixtureFn<object, unknown>;
+  /** The fixtures `fn` names in its first parameter: what it depends on. */
+  readonly names: readonly string[];
+  /**
+   * The scope it declares. A plain function declares none: it has the scope
+   * of the fixture it extends, and is a test fixture when it extends none.
+   */
+  readonly scope: FixtureScope | undefined;
+  /**
+   * Whether it declares itself set up for every test (or once per worker)
+   * whether or not anything names it. One that does not say has the `auto`
+   * of the fixture it extends, and is set up on demand when it extends none.
+   */
+  readonly auto: boolean | undefined;
+  /**
+   * Which `test.extend()` call of its chain defined it, counted from 0. A
+   * fixture sees the fixtures of its own call and of the ones before it.
+   */
+  readonly layer: number;
+  /** Where its `test.extend()` call is. */
+  readonly source?: SourceLocation | undefined;
+  /** What every evaluation of its module calls it (`fixture-identity.ts`); a worker keeps one instance per identity. */
+  readonly identity?: string | undefined;
 }
 
 export interface RegisteredTest {
@@ -50,7 +101,10 @@ export interface RegisteredTest {
   readonly sessions: readonly string[];
   /** The tags the test declares: its describe chain's, outermost first, then its own, each once. */
   readonly tags: readonly string[];
-  readonly fn: TestFn | SetupFn;
+  /** The body, called with the fixtures it names; its `test` typed what those are. */
+  readonly fn: TestBody;
+  /** The fixtures `fn` names in its first parameter: the ones its attempt sets up for it. */
+  readonly names: readonly string[];
   /** The `test.extend()` chain the test was registered through, outermost definition first. */
   readonly fixtures: readonly FixtureDefinition[];
   readonly group: GroupNode | undefined;
@@ -61,31 +115,39 @@ export interface RegisteredTest {
 interface HookBase {
   readonly group: GroupNode | undefined;
   readonly declarationIndex: number;
+  readonly fn: TestBody;
+  /** The fixtures `fn` names in its first parameter. */
+  readonly names: readonly string[];
+  /** The `test.extend()` chain the hook was registered through. */
+  readonly fixtures: readonly FixtureDefinition[];
+  /** Where the hook was registered. */
+  readonly source?: SourceLocation | undefined;
 }
 
 /**
- * A per-test hook: runs with the attempt's fixtures. The chain it was
- * registered through is recorded; at run time the hook receives the test's
- * fixture object, which the test's own chain shapes.
+ * A per-test hook: runs with the attempt's fixtures. At run time the hook
+ * receives the test's fixture object, which the test's own chain shapes.
  */
 export interface TestHook extends HookBase {
   readonly kind: 'beforeEach' | 'afterEach';
-  readonly fn: TestHookFn;
-  readonly fixtures: readonly FixtureDefinition[];
 }
 
-/** A suite hook: runs once per scope instance with suite fixtures only. */
+/**
+ * A suite hook: runs once per scope instance with worker fixtures only, the
+ * built-in ones and the worker fixtures of the chain it was registered through.
+ */
 export interface SuiteHook extends HookBase {
   readonly kind: 'beforeAll' | 'afterAll';
-  readonly fn: SuiteHookFn;
 }
 
 export type RegisteredHook = TestHook | SuiteHook;
-type HookDeclaration = Pick<TestHook, 'kind' | 'fn' | 'fixtures'> | Pick<SuiteHook, 'kind' | 'fn'>;
+type HookDeclaration = Pick<RegisteredHook, 'kind' | 'fn' | 'fixtures'>;
 
 export interface ModuleRegistration {
   readonly tests: readonly RegisteredTest[];
   readonly hooks: readonly RegisteredHook[];
+  /** The file scope's `parallel`, set by a top-level `describe.configure()`. */
+  readonly parallel?: boolean | undefined;
 }
 
 const SESSION_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,128}$/;
@@ -96,6 +158,8 @@ class Collector {
   private currentGroup: GroupNode | undefined = undefined;
   private declarationCounter = 0;
   private closed = false;
+  private fileParallel: boolean | undefined = undefined;
+  private readonly groups: GroupNode[] = [];
   /** Real path of the module being collected, the file a test's source prefers. */
   private readonly moduleFile: string | undefined;
 
@@ -109,7 +173,8 @@ class Collector {
 
   close(): ModuleRegistration {
     this.closed = true;
-    return { tests: this.tests, hooks: this.hooks };
+    checkParallelNesting(this.groups, this.fileParallel);
+    return { tests: this.tests, hooks: this.hooks, parallel: this.fileParallel };
   }
 
   /**
@@ -134,14 +199,26 @@ class Collector {
     }
   }
 
+  /** Whether registration is inside a serial group, at any depth. */
+  get inSerialGroup(): boolean {
+    return insideSerial(this.currentGroup);
+  }
+
+  /**
+   * Registers one test. Its fixtures are the ones `fn` names in its first
+   * parameter, unless `namedBy` says which function and parameter name them:
+   * a `test.each` row runs a wrapper, and the body it wraps takes the
+   * fixtures after the row.
+   */
   registerTest(
     kind: 'test' | 'setup',
     mode: TestMode,
     title: string,
     options: TestOptions,
     sessions: readonly string[],
-    fn: TestFn | SetupFn,
+    fn: TestBody,
     fixtures: readonly FixtureDefinition[],
+    namedBy?: { readonly fn: FixtureUserFn; readonly position: number },
   ): TestCase {
     this.assertOpen(kind === 'setup' ? 'test.setup()' : 'test()');
     const normalizedTitle = this.title(title);
@@ -171,6 +248,7 @@ class Collector {
     }
     validateTestOptions(options, this.currentGroup, kind);
     const titlePath = [...groupTitles(this.currentGroup), normalizedTitle];
+    const source = captureSource(this.moduleFile);
     const registered: RegisteredTest = {
       kind,
       title: normalizedTitle,
@@ -180,27 +258,33 @@ class Collector {
       sessions,
       tags: declaredTags(this.currentGroup, options),
       fn,
+      names: fixtureNames(namedBy?.fn ?? fn, describeUser({ kind, titlePath }), source, namedBy?.position),
       fixtures,
       group: this.currentGroup,
       mode,
-      source: captureSource(this.moduleFile),
+      source,
     };
     this.declarationCounter += 1;
     this.tests.push(registered);
     return Object.freeze({ [testCaseBrand]: true as const });
   }
 
-  registerDescribe(title: string, options: DescribeOptions, body: () => unknown): void {
-    this.assertOpen('describe()');
+  registerDescribe(title: string, given: DescribeOptions, body: () => unknown, api: string, markFail: boolean): void {
+    this.assertOpen(api);
     const normalizedTitle = this.title(title);
     if (typeof body !== 'function') throw new CollectionError('describe body must be a function');
-    validateDescribeOptions(options, this.currentGroup);
+    // The caller's own options are checked, not the copy that adds the mark, which keeps only enumerable keys.
+    validateDescribeOptions(given, this.currentGroup, markFail);
+    checkParallel('describe options', given.parallel, given.serial === true);
+    const options = markFail ? { ...given, fail: true } : given;
     const group: GroupNode = {
       title: normalizedTitle,
       options,
       parent: this.currentGroup,
       serial: options.serial === true,
+      parallel: options.parallel,
     };
+    this.groups.push(group);
     const previous = this.currentGroup;
     this.currentGroup = group;
     try {
@@ -215,18 +299,44 @@ class Collector {
     }
   }
 
+  /** Sets `parallel` on the scope being registered: the enclosing group, or the file. */
+  configure(options: DescribeConfigureOptions): void {
+    this.assertOpen('describe.configure()');
+    const scope = this.currentGroup;
+    const parallel = configuredParallel(options, scope === undefined ? this.fileParallel : scope.parallel, scope?.serial === true);
+    if (parallel === undefined) return;
+    // A module the file imports may configure it: that makes it a registrar.
+    reportRegistrar(this.moduleFile);
+    if (scope === undefined) this.fileParallel = parallel;
+    else scope.parallel = parallel;
+  }
+
   registerHook(hook: HookDeclaration): void {
     this.assertOpen(`${hook.kind}()`);
     if (typeof hook.fn !== 'function') {
       throw new CollectionError(`${hook.kind} hook must be a function`);
     }
+    const source = captureSource(this.moduleFile);
     this.hooks.push({
       ...hook,
+      names: fixtureNames(hook.fn, describeUser(hook), source),
+      source,
       group: this.currentGroup,
       declarationIndex: this.declarationCounter,
     });
     this.declarationCounter += 1;
   }
+}
+
+/**
+ * The truthiness of a `skipIf` or `runIf` condition. A Promise is always
+ * truthy, so an unawaited async check would decide nothing; it throws.
+ */
+function readCondition(api: string, condition: unknown): boolean {
+  if (isPromiseLike(condition)) {
+    throw new CollectionError(`${api} got a Promise as its condition; await it before the call`);
+  }
+  return Boolean(condition);
 }
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
@@ -257,6 +367,27 @@ function declaredTags(group: GroupNode | undefined, options: TestOptions): strin
   return [...new Set(layers.flatMap((layer) => layer.tags ?? []))];
 }
 
+/**
+ * A suite scope: a describe group, or `undefined` for the file scope. Scopes
+ * are the registration's own group nodes, so two sibling groups that happen
+ * to share a title stay two scopes with their own hooks.
+ */
+export type Scope = GroupNode | undefined;
+
+/** The suite scopes `test` is in, outermost first: the file scope, then each describe group around it. */
+export function scopeChain(test: Pick<RegisteredTest, 'group'>): Scope[] {
+  return [undefined, ...groupChain(test.group)];
+}
+
+/**
+ * The hooks that apply to `test`, of every kind: those of each scope it is
+ * in, outermost scope first, each scope's in declaration order, wherever in
+ * the file a scope's hooks were declared relative to the test.
+ */
+export function hooksFor(registration: Pick<ModuleRegistration, 'hooks'>, test: Pick<RegisteredTest, 'group'>): RegisteredHook[] {
+  return scopeChain(test).flatMap((scope) => registration.hooks.filter((hook) => hook.group === scope));
+}
+
 /** Finds the outermost serial group enclosing a node, if any. */
 export function outermostSerialGroup(group: GroupNode | undefined): GroupNode | undefined {
   return groupChain(group).find((node) => node.serial);
@@ -271,7 +402,6 @@ const TEST_OPTION_KEYS: readonly string[] = Object.keys({
   fail: true,
   only: true,
   platforms: true,
-  requires: true,
   session: true,
   agentContext: true,
   agent: true,
@@ -285,7 +415,6 @@ const SETUP_OPTION_KEYS: readonly string[] = Object.keys({
   retries: true,
   tags: true,
   platforms: true,
-  requires: true,
   agentContext: true,
   agent: true,
   trace: true,
@@ -298,14 +427,15 @@ const DESCRIBE_OPTION_KEYS: readonly string[] = Object.keys({
   retries: true,
   tags: true,
   skip: true,
+  fail: true,
   platforms: true,
-  requires: true,
   session: true,
   agentContext: true,
   agent: true,
   trace: true,
   video: true,
   serial: true,
+  parallel: true,
 } satisfies Record<keyof DescribeOptions, true>);
 
 /**
@@ -314,11 +444,17 @@ const DESCRIBE_OPTION_KEYS: readonly string[] = Object.keys({
  * and each known option's value.
  */
 function validateCommonOptions(options: TestOptions | DescribeOptions, label: string, keys: readonly string[]): void {
+  if (Object.hasOwn(options, 'requires')) {
+    throw new CollectionError(`${label}: requires was removed; scope the test to targets with platforms, e.g. platforms: ['web']`);
+  }
   const unknown = unknownKeyMessage(label, options, keys);
   if (unknown !== undefined) throw new CollectionError(unknown);
   if (options.timeout !== undefined) {
     if (!Number.isSafeInteger(options.timeout) || options.timeout <= 0) {
       throw new CollectionError(`${label}: timeout must be a positive safe integer`);
+    }
+    if (options.timeout > MAX_TIMER_MS) {
+      throw new CollectionError(`${label}: timeout must be at most ${MAX_TIMER_MS} milliseconds, got ${options.timeout}`);
     }
   }
   if (options.retries !== undefined) {
@@ -402,10 +538,7 @@ function insideSerial(group: GroupNode | undefined): boolean {
 function validateTestOptions(options: TestOptions, group: GroupNode | undefined, kind: 'test' | 'setup'): void {
   if (kind === 'setup') validateCommonOptions(options, 'setup options', SETUP_OPTION_KEYS);
   else validateCommonOptions(options, 'test options', TEST_OPTION_KEYS);
-  const fail: unknown = options.fail;
-  if (fail !== undefined && typeof fail !== 'boolean' && typeof fail !== 'string') {
-    throw new CollectionError(`test options: fail must be true, false, or a reason string, got ${describeValue(fail)}`);
-  }
+  validateFailOption(options.fail, 'test options');
   if (insideSerial(group)) {
     const forbidden: (keyof TestOptions)[] = [
       'retries',
@@ -413,7 +546,6 @@ function validateTestOptions(options: TestOptions, group: GroupNode | undefined,
       'video',
       'session',
       'platforms',
-      'requires',
       'skip',
       'fail',
       'only',
@@ -428,10 +560,24 @@ function validateTestOptions(options: TestOptions, group: GroupNode | undefined,
   }
 }
 
-function validateDescribeOptions(options: DescribeOptions, parent: GroupNode | undefined): void {
+function validateFailOption(fail: unknown, label: string): void {
+  if (fail !== undefined && typeof fail !== 'boolean' && typeof fail !== 'string') {
+    throw new CollectionError(`${label}: fail must be true, false, or a reason string, got ${describeValue(fail)}`);
+  }
+}
+
+function validateDescribeOptions(options: DescribeOptions, parent: GroupNode | undefined, markFail: boolean): void {
   validateCommonOptions(options, 'describe options', DESCRIBE_OPTION_KEYS);
+  validateFailOption(options.fail, 'describe options');
   if (options.serial === true && insideSerial(parent)) {
     throw new CollectionError('nested serial groups are collection errors');
+  }
+  // A serial group's members cannot be marked expected to fail, so neither can the group.
+  if ((markFail || options.fail !== undefined) && (options.serial === true || insideSerial(parent))) {
+    throw new CollectionError('describe option "fail" cannot be set on or inside a serial group, which runs as one unit');
+  }
+  if (options.serial === true && groupChain(parent).some((group) => expectedFailureOption(group.options.fail) !== undefined)) {
+    throw new CollectionError('a serial group cannot sit inside a group marked fail; its members cannot be expected to fail');
   }
   // The serial group records as one unit, so a describe inside it cannot choose its own recordings.
   for (const kind of ['trace', 'video'] as const) {
@@ -494,15 +640,6 @@ const PACKAGE_ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import
 const RUNNER_ROOTS = ['src', 'dist'].map((dir) => `${path.join(PACKAGE_ROOT, dir)}${path.sep}`);
 const NODE_MODULES_SEGMENT = /[\\/]node_modules[\\/]/;
 
-/** The path with symlinks resolved, or the path itself when it cannot be resolved. */
-function realPath(file: string): string {
-  try {
-    return realpathSync.native(file);
-  } catch {
-    return file;
-  }
-}
-
 /**
  * `at name (location:line:column)` or `at location:line:column`, either one
  * after `async` for an awaiting caller. JavaScriptCore (Bun) can leave the
@@ -519,8 +656,19 @@ const STACK_FRAME = /^at (?:async )?(?:[^(]*? \()?(.+?):(\d+)(?::(\d+))?\)?$/;
  * the call sites at all.
  */
 function stackLocations(): SourceLocation[] {
-  return (new Error().stack ?? '').split('\n').slice(1).flatMap((line) => {
-    const match = STACK_FRAME.exec(line.trim());
+  // The default limit of 10 frames cuts the test file's frame off a stack
+  // that reaches the runner through a helper, a describe, and `test.each`.
+  const limit = Error.stackTraceLimit;
+  Error.stackTraceLimit = Infinity;
+  let stack: string;
+  try {
+    stack = new Error().stack ?? '';
+  } finally {
+    Error.stackTraceLimit = limit;
+  }
+  return stack.split('\n').slice(1).flatMap((line) => {
+    const text = line.trim();
+    const match = STACK_FRAME.exec(text);
     if (match === null) return [];
     // An ES module names itself by URL, the loader's cache-busting query included; a mapped frame or CommonJS by path.
     const file = match[1]!.startsWith('file:') ? fileURLToPath(match[1]!) : match[1]!;
@@ -541,22 +689,36 @@ function stackLocations(): SourceLocation[] {
  * package's frames are never a test's location.
  */
 function captureSource(moduleFile: string | undefined): SourceLocation | undefined {
+  reportRegistrar(moduleFile);
+  let inModule: SourceLocation | undefined;
   let outsideModule: SourceLocation | undefined;
   for (const location of stackLocations()) {
     const { file } = location;
     if (RUNNER_ROOTS.some((root) => file.startsWith(root)) || file.startsWith('node:')) continue;
-    if (moduleFile !== undefined && (file === moduleFile || realPath(file) === moduleFile)) {
-      return location;
-    }
-    if (outsideModule === undefined && !NODE_MODULES_SEGMENT.test(file)) outsideModule = location;
+    const own = moduleFile !== undefined && (file === moduleFile || realPath(file) === moduleFile);
+    if (own) inModule ??= location;
+    else if (!NODE_MODULES_SEGMENT.test(file)) outsideModule ??= location;
   }
-  return outsideModule;
+  return inModule ?? outsideModule;
 }
 
-function normalizeArgs(
-  optionsOrFn: TestOptions | TestFn,
-  maybeFn: TestFn | undefined,
-): { options: TestOptions; fn: TestFn } {
+/**
+ * Reports the module evaluating now as a registrar (`registrar-modules.ts`)
+ * when it is one the collected module imports: the next import of a test
+ * file finds it evaluated already, and would get none of what it registers.
+ */
+function reportRegistrar(moduleFile: string | undefined): void {
+  const report = registrarModuleSlot.get(globalThis);
+  if (moduleFile === undefined || report === undefined) return;
+  const file = evaluatingModule();
+  if (file === undefined || file === moduleFile || realPath(file) === moduleFile) return;
+  if (!NODE_MODULES_SEGMENT.test(file) && !RUNNER_ROOTS.some((root) => file.startsWith(root))) report(file);
+}
+
+function normalizeArgs<Fn extends TestBody | EachFn<unknown[]>>(
+  optionsOrFn: TestOptions | Fn,
+  maybeFn: Fn | undefined,
+): { options: TestOptions; fn: Fn } {
   if (typeof optionsOrFn === 'function') {
     return { options: {}, fn: optionsOrFn };
   }
@@ -564,14 +726,13 @@ function normalizeArgs(
   return { options: optionsOrFn, fn: maybeFn };
 }
 
-/** Fixtures every attempt has without any engine or `test.extend()` defining them. */
-const CORE_FIXTURE_NAMES: ReadonlySet<string> = new Set(['agent', 'app', 'screen', 'platform', 'session']);
-
 /**
- * Checks one `test.extend()` argument against the chain it extends. Names
- * are validated here, at import time, so a typo or a clash fails the file
- * before any attempt runs; the engine's own fixtures are only known per
- * target and are checked when the attempt builds its fixtures.
+ * Checks one `test.extend()` argument against the chain it extends. What
+ * each function names is validated here, at import time, so a cycle or a
+ * scope that cannot be fails the file before any attempt runs; the engine's
+ * own fixtures are only known per target and are checked when a test that
+ * runs there is selected (`assertFixtureUse`). A name the chain or the
+ * target already has extends that fixture.
  */
 function validateFixtureDefinitions(
   definitions: unknown,
@@ -588,95 +749,222 @@ function validateFixtureDefinitions(
       'test.extend() takes a plain object of fixture definitions, one function per fixture name',
     );
   }
-  const taken = new Set(chain.map((definition) => definition.name));
   const added: FixtureDefinition[] = [];
+  const layer = (chain.at(-1)?.layer ?? -1) + 1;
+  // The innermost frame outside the runner: the `test.extend()` call itself, wherever a test file imports it from.
+  const source = captureSource(undefined);
+  const identify = fixtureIdentities(collectorSlot.get(globalThis), source);
   for (const [name, fn] of Object.entries(definitions)) {
     if (name === '') throw new CollectionError('test.extend(): a fixture name must not be empty');
-    if (CORE_FIXTURE_NAMES.has(name)) {
-      throw new CollectionError(
-        `test.extend(): "${name}" is a core fixture and cannot be redefined`,
-      );
-    }
-    if (taken.has(name)) {
-      throw new CollectionError(
-        `test.extend(): fixture "${name}" is already defined by an earlier test.extend()`,
-      );
-    }
-    if (typeof fn !== 'function') {
-      throw new CollectionError(
-        `test.extend(): fixture "${name}" must be a function (fixtures, use) => Promise<void>`,
-      );
-    }
-    taken.add(name);
-    added.push({ name, fn: fn as FixtureFn<object, unknown> });
+    const definition = fixtureDefinition(name, fn);
+    const names = fixtureNames(definition.fn, describeFixture(name, definition.scope), source);
+    added.push({ name, ...definition, names, layer, source, identity: identify(name) });
   }
+  checkDeclaredFixtures([...chain, ...added], added);
   return added;
+}
+
+/** The function, scope, and `auto` of one `test.extend()` entry: `fn`, or `[fn, { scope, auto }]`. */
+function fixtureDefinition(name: string, entry: unknown): Pick<FixtureDefinition, 'fn' | 'scope' | 'auto'> {
+  const shape = `test.extend(): fixture "${name}" must be a function ({ ...fixtures }, use) => Promise<void>, or [fn, { scope: 'test' | 'worker', auto: boolean }]`;
+  if (typeof entry === 'function') return { fn: entry as FixtureFn<object, unknown>, scope: undefined, auto: undefined };
+  if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'function') throw new CollectionError(shape);
+  const options: unknown = entry[1];
+  if (typeof options !== 'object' || options === null || Array.isArray(options)) throw new CollectionError(shape);
+  const unknown = unknownKeyMessage(`test.extend(): fixture "${name}" options`, options, ['scope', 'auto']);
+  if (unknown !== undefined) throw new CollectionError(unknown);
+  const { scope, auto } = options as { scope?: unknown; auto?: unknown };
+  if (scope !== undefined && scope !== 'test' && scope !== 'worker') {
+    throw new CollectionError(`test.extend(): fixture "${name}" scope must be 'test' or 'worker', got ${describeValue(scope)}`);
+  }
+  if (auto !== undefined && typeof auto !== 'boolean') {
+    throw new CollectionError(`test.extend(): fixture "${name}" auto must be true or false, got ${describeValue(auto)}`);
+  }
+  return { fn: entry[0] as FixtureFn<object, unknown>, scope: scope as FixtureScope | undefined, auto };
 }
 
 /**
  * One `test` object per fixture chain. Every registration made through it
- * records the chain, so an attempt knows which fixtures to set up; the
+ * records the chain, so an attempt knows which fixtures it can set up; the
  * shared `test` is the empty chain.
  */
 function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
-  const testFunction = (
+  /**
+   * Registers one `test()` call. `api` names the caller in errors. A `skip`
+   * condition comes from `skipIf`, `runIf`, or `skip`: when true, the test is
+   * skipped, keeping any reason its `skip` option gives. `fixme` and `todo`
+   * use their own skip cause and reason. Any registered skip rejects a test
+   * in a serial group, so a file collects the same on every platform.
+   * `namedBy` is passed on to `registerTest`.
+   */
+  const registerOne = (
+    api: string,
+    skip: boolean | 'fixme' | 'todo' | undefined,
     title: string,
-    optionsOrFn: TestOptions | TestFn,
-    maybeFn?: TestFn,
+    given: TestOptions,
+    fn: TestBody,
+    namedBy?: { readonly fn: FixtureUserFn; readonly position: number },
   ): TestCase => {
+    const collector = requireCollector(api);
+    if (skip !== undefined && collector.inSerialGroup) {
+      throw new CollectionError(
+        `${api} cannot be used inside a serial group, which skips as one unit; ` +
+          'set skip on the serial describe instead',
+      );
+    }
+    const options = typeof skip === 'string'
+      ? { ...given, skip: skip === 'fixme' ? fixmeReason() : 'todo' }
+      : skip === true
+        ? { ...given, skip: typeof given.skip === 'string' ? given.skip : true }
+        : given;
+    const mode: TestMode = options.only === true
+      ? 'only'
+      : typeof skip === 'string'
+        ? skip
+        : options.skip !== undefined && options.skip !== false ? 'skip' : 'normal';
+    return collector.registerTest('test', mode, title, options, [], fn, chain, namedBy);
+  };
+  /** The `test()` call forms. */
+  const registrar = (api: string, skip?: boolean | 'fixme'): TestRegistrar<object> => (
+    title: string,
+    optionsOrFn: TestOptions | TestBody,
+    maybeFn?: TestBody,
+  ): TestCase => {
+    requireCollector(api);
     const { options, fn } = normalizeArgs(optionsOrFn, maybeFn);
-    const mode: TestMode = options.only === true ? 'only' : options.skip !== undefined && options.skip !== false ? 'skip' : 'normal';
-    return requireCollector('test()').registerTest('test', mode, title, options, [], fn, chain);
+    return registerOne(api, skip, title, options, fn);
+  };
+  const testFunction = registrar('test()');
+
+  /**
+   * The `test.each` and `test.for` call forms: one `test()` per row, in row
+   * order, titled from the row. `spread` passes each array row's items as
+   * the body's first arguments; it is decided once for the table, like
+   * Vitest and Jest, so it only applies when every row is an array.
+   * Otherwise the row is the first argument. The fixtures always come last.
+   */
+  const eachRegistrar = (api: string, rows: readonly unknown[], spread: boolean): EachRegistrar<unknown[]> => {
+    // Array.from, not every: a hole in the rows is a row too, `undefined`.
+    const spreadRows = spread && Array.from(rows).every((row) => Array.isArray(row));
+    return (
+      title: string,
+      optionsOrFn: TestOptions | EachFn<unknown[]>,
+      maybeFn?: EachFn<unknown[]>,
+    ): readonly TestCase[] => {
+      requireCollector(api);
+      const { options, fn: body } = normalizeArgs(optionsOrFn, maybeFn);
+      if (typeof body !== 'function') throw new CollectionError('test body must be a function');
+      return Array.from(rows, (row, index) => {
+        const args: unknown[] = spreadRows ? [...(row as unknown[])] : [row];
+        const rowTitle = typeof title === 'string' ? formatEachTitle(title, row, index) : title;
+        // The row comes first, so the body names its fixtures in the parameter after it.
+        return registerOne(api, undefined, rowTitle, options, (fixtures) => body(...args, fixtures), {
+          fn: body,
+          position: args.length,
+        });
+      });
+    };
   };
 
+  /** The `describe()` call forms; `describe.fail` marks the group as if it had `fail: true`, so it takes no `fail` of its own. */
+  const groupRegistrar = (api: string, fail: boolean): DescribeRegistrar => <Result>(
+    title: string,
+    optionsOrBody: DescribeOptions | (() => Result),
+    maybeBody?: () => Result,
+  ): void => {
+    const given = typeof optionsOrBody === 'function' ? {} : optionsOrBody;
+    const body = typeof optionsOrBody === 'function' ? optionsOrBody : maybeBody;
+    if (body === undefined) throw new CollectionError('describe body function is required');
+    const collector = requireCollector(api);
+    // Non-object options reach validation untouched, exactly as describe() passes them.
+    const marks = fail && typeof given === 'object' && given !== null;
+    if (marks && given.fail !== undefined) {
+      throw new CollectionError(`${api} takes no fail option; give a reason with describe(title, { fail: 'reason' }, fn)`);
+    }
+    collector.registerDescribe(title, given, body, api, marks);
+  };
+  const describe: DescribeAPI = Object.assign(groupRegistrar('describe()', false), {
+    fail: groupRegistrar('describe.fail()', true),
+    configure: (options: DescribeConfigureOptions): void => requireCollector('describe.configure()').configure(options),
+  });
+
   const api: TestAPI = Object.assign(testFunction, {
-    skip(first?: string | boolean, second?: TestFn | string): TestCase | undefined {
+    skip(first?: string | boolean, second?: TestBody | string): TestCase | undefined {
       const call = parseModifierCall(first, second);
       if (call.kind === 'register') {
-        return requireCollector('test.skip()').registerTest('test', 'skip', call.title, { skip: true }, [], call.fn as TestFn, chain);
+        return registrar('test.skip()', true)(call.title, call.fn as TestBody);
       }
-      skipRunningTest(call.condition, call.reason);
+      skipRunningTest('test.skip', call.condition, call.reason);
       return undefined;
     },
-    fail(first?: string | boolean, second?: TestFn | string): TestCase | undefined {
+    todo(title: string, ...args: unknown[]): TestCase {
+      if (args.length > 0) {
+        throw new CollectionError('test.todo() takes a title only; register a test with a body through test.skip(title, fn) or test.fixme(title, fn)');
+      }
+      return registerOne('test.todo()', 'todo', title, {}, () => {});
+    },
+    fixme(first?: string | boolean, second?: TestBody | string): TestCase | undefined {
       const call = parseModifierCall(first, second);
       if (call.kind === 'register') {
-        return requireCollector('test.fail()').registerTest('test', 'normal', call.title, { fail: true }, [], call.fn as TestFn, chain);
+        return registrar('test.fixme()', 'fixme')(call.title, call.fn as TestBody);
+      }
+      skipRunningTest('test.fixme', call.condition, fixmeReason(call.reason));
+      return undefined;
+    },
+    fail(first?: string | boolean, second?: TestBody | string): TestCase | undefined {
+      const call = parseModifierCall(first, second);
+      if (call.kind === 'register') {
+        return requireCollector('test.fail()').registerTest('test', 'normal', call.title, { fail: true }, [], call.fn as TestBody, chain);
       }
       markRunningTestExpectedToFail(call.condition, call.reason);
       return undefined;
     },
-    only(title: string, fn: TestFn): TestCase {
+    setTimeout(timeout: number): void {
+      setRunningTestTimeout(timeout);
+    },
+    slow(first?: string | boolean, second?: TestBody | string): void {
+      const call = parseModifierCall(first, second);
+      if (call.kind === 'register') {
+        throw new CollectionError(
+          'test.slow() takes no test: call test.slow() inside the test body to triple its timeout, or pass { timeout } as the test option',
+        );
+      }
+      slowRunningTest(call.condition);
+    },
+    skipIf(condition: unknown): TestRegistrar<object> {
+      return registrar('test.skipIf()', readCondition('test.skipIf()', condition));
+    },
+    runIf(condition: unknown): TestRegistrar<object> {
+      return registrar('test.runIf()', !readCondition('test.runIf()', condition));
+    },
+    each(rows: unknown): EachRegistrar<unknown[]> {
+      return eachRegistrar('test.each()', readRows('test.each()', rows), true);
+    },
+    for(rows: unknown): EachRegistrar<unknown[]> {
+      return eachRegistrar('test.for()', readRows('test.for()', rows), false);
+    },
+    only(title: string, fn: TestBody): TestCase {
       return requireCollector('test.only()').registerTest('test', 'only', title, { only: true }, [], fn, chain);
     },
-    setup(title: string, options: SetupOptions, fn: SetupFn): TestCase {
+    setup(title: string, options: SetupOptions, fn: TestBody): TestCase {
       if (options === undefined || !Array.isArray(options.sessions)) {
         throw new CollectionError('test.setup() requires a static sessions list');
       }
       const { sessions, ...rest } = options;
       return requireCollector('test.setup()').registerTest('setup', 'normal', title, rest, sessions, fn, chain);
     },
-    describe<Result>(
-      title: string,
-      optionsOrBody: DescribeOptions | (() => Result),
-      maybeBody?: () => Result,
-    ): void {
-      const options = typeof optionsOrBody === 'function' ? {} : optionsOrBody;
-      const body = typeof optionsOrBody === 'function' ? optionsOrBody : maybeBody;
-      if (body === undefined) throw new CollectionError('describe body function is required');
-      requireCollector('describe()').registerDescribe(title, options, body);
-    },
-    beforeEach(fn: TestHookFn): void {
+    describe,
+    beforeEach(fn: TestBody): void {
       requireCollector('beforeEach()').registerHook({ kind: 'beforeEach', fn, fixtures: chain });
     },
-    afterEach(fn: TestHookFn): void {
+    afterEach(fn: TestBody): void {
       requireCollector('afterEach()').registerHook({ kind: 'afterEach', fn, fixtures: chain });
     },
-    beforeAll(fn: SuiteHookFn): void {
-      requireCollector('beforeAll()').registerHook({ kind: 'beforeAll', fn });
+    beforeAll(fn: TestBody): void {
+      requireCollector('beforeAll()').registerHook({ kind: 'beforeAll', fn, fixtures: chain });
     },
-    afterAll(fn: SuiteHookFn): void {
-      requireCollector('afterAll()').registerHook({ kind: 'afterAll', fn });
+    afterAll(fn: TestBody): void {
+      requireCollector('afterAll()').registerHook({ kind: 'afterAll', fn, fixtures: chain });
     },
     // Without definitions this is a type-only refinement: contributed
     // fixtures resolve from the engine at runtime, so the same object serves.

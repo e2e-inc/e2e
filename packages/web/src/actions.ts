@@ -1,12 +1,13 @@
 /** Locator action dispatch for the Playwright engine. */
 
 import type { ElementHandle, Page } from 'playwright-core';
-import { Deadline, EngineError, pollCondition, type KeyModifier, type LocatorAction, type NodeRef, type PointerAction, type ViewportPoint } from 'e2e/engine';
+import { Deadline, EngineError, pollCondition, TestError, type KeyModifier, type LocatorAction, type NodeRef, type PointerAction, type ViewportPoint } from '@e2e-dev/core/engine';
 import {
   asActionable,
   isClassified,
   isNavigationRace,
   isPwTimeout,
+  isSelectorParseError,
   message,
   nearestPixel,
   performElementSwipe,
@@ -14,6 +15,7 @@ import {
   performPointerDrag,
   performViewportSwipe,
   POST_DISPATCH_PATTERN,
+  statPath,
   translatePwError,
   targetPage,
   type ActionTarget,
@@ -24,7 +26,7 @@ import type { ConnectionBudget } from './operation-budget.ts';
 const DEFAULT_LONG_PRESS_MS = 500;
 
 /** The keys a click holds, as Playwright's `modifiers` takes them; the contract spells them the same. */
-function heldKeys(action: Extract<LocatorAction, { kind: 'tap' | 'doubleTap' | 'secondaryTap' }>): { modifiers?: KeyModifier[] } {
+function heldKeys(action: Extract<LocatorAction, { kind: 'tap' | 'doubleTap' | 'secondaryTap' | 'multiTap' }>): { modifiers?: KeyModifier[] } {
   return action.modifiers === undefined ? {} : { modifiers: [...action.modifiers] };
 }
 
@@ -231,9 +233,11 @@ function radioKind(element: ElementHandle<Element>): Promise<'native' | 'aria' |
  * Playwright retargets a label to its control. Anything else is clicked
  * with the chooser already awaited, and fails if no chooser opens. Every
  * step shares the operation's deadline, and a cancelled operation sets no
- * files, even when its chooser opens after the cancel.
+ * files, even when its chooser opens after the cancel. A path that does not
+ * exist or sits under a directory the runner cannot search fails before
+ * anything is clicked.
  */
-async function uploadFiles(target: ActionTarget, paths: readonly string[], operation: ConnectionBudget): Promise<void> {
+async function uploadFiles(target: ActionTarget, files: Parameters<ElementHandle['setInputFiles']>[0], operation: ConnectionBudget): Promise<void> {
   const deadline = new Deadline(operation.timeoutMs);
   const remaining = (): number => Math.max(1, deadline.remaining());
   const element =
@@ -241,7 +245,7 @@ async function uploadFiles(target: ActionTarget, paths: readonly string[], opera
   try {
     if (await isFileInput(element)) {
       operation.signal.throwIfAborted();
-      await element.setInputFiles([...paths], { timeout: remaining() });
+      await element.setInputFiles(files, { timeout: remaining() });
       return;
     }
     const page = await targetPage(target);
@@ -257,7 +261,7 @@ async function uploadFiles(target: ActionTarget, paths: readonly string[], opera
       });
     });
     operation.signal.throwIfAborted();
-    await chooser.setFiles([...paths], { timeout: remaining() });
+    await chooser.setFiles(files, { timeout: remaining() });
   } finally {
     if (target.kind === 'locator') void element.dispose().catch(() => undefined);
   }
@@ -291,6 +295,10 @@ export async function dispatchLocatorAction(
     case 'doubleTap':
       await locator.dblclick({ timeout, ...heldKeys(action) });
       return;
+    case 'multiTap':
+      // One click sequence with a rising `detail`, as a person's triple click is.
+      await locator.click({ clickCount: action.count, timeout, ...heldKeys(action) });
+      return;
     case 'secondaryTap':
       await locator.click({ button: 'right', timeout, ...heldKeys(action) });
       return;
@@ -317,6 +325,23 @@ export async function dispatchLocatorAction(
       if (target.kind === 'locator') await target.locator.focus({ timeout });
       else await target.element.focus();
       return;
+    case 'blur':
+      if (target.kind === 'locator') await target.locator.blur({ timeout });
+      else {
+        const attached = await target.element.evaluate((node) => {
+          const view = node.ownerDocument.defaultView;
+          if (!node.isConnected || view === null) return false;
+          // Bypass instance overrides. Prototype overrides still apply in the page world.
+          if (node instanceof view.HTMLElement) view.HTMLElement.prototype.blur.call(node);
+          else if (node instanceof view.SVGElement) view.SVGElement.prototype.blur.call(node);
+          else if (typeof view.MathMLElement === 'function' && node instanceof view.MathMLElement) {
+            view.MathMLElement.prototype.blur.call(node);
+          }
+          return true;
+        });
+        if (!attached) throw new EngineError('NODE_STALE', 'element is detached', { retryable: true });
+      }
+      return;
     case 'hover':
       await locator.hover({ timeout });
       return;
@@ -337,8 +362,19 @@ export async function dispatchLocatorAction(
       return;
     }
     case 'setInputFiles':
-      await uploadFiles(target, action.paths, operation);
+      for (const file of action.paths) {
+        const stats = statPath(file);
+        if (stats instanceof Error) throw new TestError('INVALID_ARGUMENT', `setInputFiles path does not exist or is under a directory the runner cannot search: ${stats.message}`);
+      }
+      await uploadFiles(target, [...action.paths], operation);
       return;
+    case 'setInputFilePayloads': {
+      const files = action.files.map((file) => ({
+        ...file, buffer: Buffer.from(file.buffer.buffer, file.buffer.byteOffset, file.buffer.byteLength),
+      }));
+      await uploadFiles(target, files, operation);
+      return;
+    }
     case 'dragTo': {
       const other = await lookup(action.target);
       operation.signal.throwIfAborted();
@@ -472,6 +508,10 @@ export function classifyActionError(rawCause: unknown, action: LocatorAction): E
   if (isClassified(rawCause)) return rawCause;
   const text = redactSensitive(message(rawCause), action);
   const cause = isSensitive(action) ? undefined : rawCause;
+  // A selector the engine cannot parse says nothing about the element, so it is decided before every message-shaped branch: a selector that happens to contain "not found" or "not editable" is not read as stale or unactionable.
+  if (isSelectorParseError(rawCause)) {
+    return new TestError('INVALID_LOCATOR', `${action.kind} failed: ${text}`, cause === undefined ? {} : { cause });
+  }
   if (/strict mode violation/i.test(text)) {
     if (POST_DISPATCH_PATTERN.test(text)) {
       return new EngineError(

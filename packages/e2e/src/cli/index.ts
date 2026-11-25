@@ -10,20 +10,21 @@ import { dirname, isAbsolute, normalize, resolve as resolvePath, sep } from 'nod
 import { Argument, Command, CommanderError, Help, InvalidArgumentError, Option } from 'commander';
 import picocolors from 'picocolors';
 import { detectPackageManager, execCommand, runScriptCommand } from '../internal/package-manager.ts';
-import { packageVersion } from '../internal/package-version.ts';
-import { MAX_TIMER_MS } from '../internal/time.ts';
-import { classifyError, exitCodeForCategory } from '../internal/errors.ts';
+import { packageVersion } from '@e2e-dev/core/lib/internal/package-version';
+import { MAX_TIMER_MS } from '@e2e-dev/core/lib/internal/time';
+import { classifyError, codedMessage, exitCodeForCategory } from '@e2e-dev/core/lib/internal/errors';
 import type { Shard, TagMode } from '../collect/select.ts';
-import { listSelection, run, type ListedPair, type RunOptions, type RunOutcome } from '../run/runner.ts';
+import { listSelection, type ListedPair, type RunOptions, type RunOutcome } from '../run/runner.ts';
 import { claimRunnerOutput } from './run-output.ts';
 import { writeTerminal } from '../run/process-output.ts';
 import { STEP_BOUNDS, TIMEOUT_BOUNDS } from '../explore/bounds.ts';
-import { BUILTIN_REPORTERS, isBuiltinReporter } from '../report/builtin.ts';
+import { BUILTIN_REPORTERS, isBuiltinReporter } from '../report/builtin-id.ts';
 import { bounded, failureLine } from '../report/format.ts';
-import type { BuiltinReporter, RecordingMode } from '../types.ts';
-import { isRecordingMode, legacyTraceSpelling, RECORDING_MODES } from '../internal/recording-modes.ts';
+import type { RecordingMode } from '@e2e-dev/core/lib/types';
+import type { BuiltinReporter } from '../run-types.ts';
+import { isRecordingMode, legacyTraceSpelling, RECORDING_MODES } from '@e2e-dev/core/lib/internal/recording-modes';
 import { discoverConfig } from '../config/load.ts';
-import { isCiMode } from '../config/resolve.ts';
+import { isCiMode } from '@e2e-dev/core/lib/config/resolve';
 import { runsFromCheckout } from '../telemetry/checkout.ts';
 import { initCompletedEvent, runCompletedEvent, upgradeCompletedEvent, USAGE_ERROR_CODE } from '../telemetry/events.ts';
 import { Telemetry } from '../telemetry/telemetry.ts';
@@ -32,16 +33,15 @@ import { docsLine, examples, helpSection, pc } from './help.ts';
 import { EXIT_CODES } from './exit-codes.ts';
 import type { DoctorReport } from './doctor.ts';
 import { ERROR_CODE_LIMIT, feedback, FEEDBACK_LIMITS, FEEDBACK_TYPES, type FeedbackReport } from './feedback.ts';
-import { guide } from './guide.ts';
+import { guide, guideTopics } from './guide.ts';
 import { addInitOptions, checkInitFlags, type InitFlagValues } from './init/flags.ts';
 import { parseList, parseNames } from './parse-names.ts';
-import { SESSION_BOUNDS } from '../mcp/bounds.ts';
-import { PROVIDER_IDS } from '../oauth/provider-ids.ts';
+import { SESSION_BOUNDS } from '../session-tools/bounds.ts';
+import { PROVIDER_NAMES } from '../oauth/provider-ids.ts';
 import type { LoginFlags } from '../oauth/cli.ts';
-import { Keyboard } from './keyboard.ts';
 import { SignalLadder } from './signals.ts';
-import { StepGate, stepKeyOf } from './step.ts';
-import { skillTopics } from './skill.ts';
+import { isStepAction } from './step.ts';
+import { stepAddress } from '../run/step-socket.ts';
 import { UpdateCheck } from './update-check.ts';
 import { telemetry as telemetryCommand, TELEMETRY_ACTIONS, type TelemetryAction } from './telemetry.ts';
 import { parseUpgradeTarget, type UpgradeTarget } from './upgrade-target.ts';
@@ -52,6 +52,13 @@ function parsePositiveInt(value: string): number {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1) throw new InvalidArgumentError('must be a positive integer');
   return parsed;
+}
+
+/** A device name or id for `--device`, trimmed; a blank one would name no device. */
+function parseDevice(value: string): string {
+  const device = value.trim();
+  if (device === '') throw new InvalidArgumentError('must name a simulator, emulator, or phone');
+  return device;
 }
 
 /** Shape check only; the config resolver applies each flag's bounds. */
@@ -343,35 +350,38 @@ function rejectWatchIn(command: Command, reporters: readonly Reporter[] | undefi
 }
 
 /**
- * Where `--step` cannot work: it reads keys, so it needs a terminal on both
- * ends and no CI; its prompt is one at a time, so one worker; and it cannot
- * share the keyboard with `--watch` or stdout with the json reporter.
+ * Where `--step` cannot work: it waits at every step, so not in CI; its
+ * prompt is one at a time, so one worker; and it cannot share the keyboard
+ * with `--watch`. Beside the json reporter it needs a terminal, on stderr
+ * too, where the prompt is: commands that step the run would print the
+ * report among the steps. The runner
+ * refuses the same for a json reporter the config sets.
  */
 function rejectStepIn(command: Command, options: { watch?: boolean; workers?: number; reporter?: readonly Reporter[] }): void {
   const refuse = (why: string): never => command.error(`error: --step ${why}`, { exitCode: 2 });
-  if (isCiMode(process.env)) refuse('waits for a key at every step, so it is refused in CI (CI is set)');
-  if (process.stdin.isTTY !== true || process.stdout.isTTY !== true) refuse('reads keys from the terminal, so stdin and stdout must both be one');
+  if (isCiMode(process.env)) refuse('waits at every step, so it is refused in CI (CI is set)');
   if (options.watch === true) refuse('cannot be combined with --watch: both read the keyboard');
   if (options.workers !== undefined && options.workers > 1) refuse('runs one test at a time, so it cannot be combined with --workers above 1');
-  if (options.reporter?.includes('json') === true) refuse('cannot be combined with --reporter json: the prompt would land in its stdout document');
+  if (options.reporter?.includes('json') === true && !(hasTerminal() && process.stderr.isTTY === true)) {
+    refuse('cannot be combined with --reporter json without a terminal on stdin, stdout, and stderr: the prompt is on stderr, and the commands that step the run would print the report among the steps');
+  }
+}
+
+/** Whether `--step` can read keys: stdin and stdout are both a terminal. Without one, the run steps from later commands (`step-control.ts`). */
+function hasTerminal(): boolean {
+  return process.stdin.isTTY === true && process.stdout.isTTY === true;
 }
 
 /**
- * One run stepped through from the keyboard: raw-mode keys for the run's
- * whole length, so Ctrl-C (a keypress then, not a signal) still climbs the
- * ladder while a step runs, and `q` is the ladder's first rung.
+ * Runs one `--step` command that drives the background run (`e2e run --step
+ * next`, or the command that starts it), with the exit code it answers;
+ * what it throws is a usage error.
  */
-async function stepped(options: RunOptions, signals: SignalLadder): Promise<RunOutcome> {
-  const gate = new StepGate(() => signals.escalate());
-  const keyboard = new Keyboard(process.stdin, stepKeyOf);
-  keyboard.listen((key) => {
-    if (key === 'suspend') keyboard.suspend();
-    else gate.press(key);
-  });
+async function driveStepped(command: Command, drive: () => Promise<number>): Promise<void> {
   try {
-    return await run({ ...options, beforeStep: gate.beforeStep });
-  } finally {
-    keyboard.close();
+    process.exitCode = await drive();
+  } catch (cause) {
+    command.error(`error: ${codedMessage(cause)}`, { exitCode: 2 });
   }
 }
 
@@ -517,7 +527,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
     .command('init')
     .summary('scaffold an ESM package, e2e.config.ts, an example test, .gitignore entries, and the agent skill')
     .description(
-      'Scaffold a project: an ESM package.json, e2e.config.ts, an example test per engine, .gitignore entries, and the e2e skill for coding agents. An existing config and test files stay as they are; an existing package.json gets only the missing dependencies and scripts, and .gitignore only the missing entries. Prompts for the engines, for AI support, and for the skill directories, then offers to install the dependencies; --yes takes the defaults, with the skill in .agents/skills and .claude/skills linked to it.',
+      'Scaffold a project: an ESM package.json, e2e.config.ts, an example test per engine, .gitignore entries, the e2e skill for coding agents, and a line in AGENTS.md and CLAUDE.md that points agents at the skill. An existing config and test files stay as they are, and no example test is written beside an existing config; an existing package.json gets only the missing dependencies, those of the packages the config imports included, and scripts, .gitignore only the missing entries, and AGENTS.md and CLAUDE.md only the missing line. Prompts for the engines, for AI support, and for the skill directories, then offers to install the dependencies; --yes takes the defaults, with the skill in .agents/skills and .claude/skills linked to it.',
     )
     .argument('[directory]', 'project directory, created when missing (default: the current directory)')
     .option('-y, --yes', 'skip the prompts; each answer not given as a flag takes its default: web, vercel, every skill and MCP location, no installation');
@@ -530,8 +540,10 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
           'e2e init',
           'e2e init my-app',
           'e2e init my-app --example with-expo',
+          'e2e init my-app --example',
           'e2e init --yes',
           'e2e init --yes --gateway openrouter --skills .agents/skills --mcp none --install',
+          'e2e init --yes --ci github-actions',
         ]),
         '',
         docsLine('/reference/cli'),
@@ -554,16 +566,16 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
     .command('login')
     .summary('sign in to a ChatGPT, GitHub Copilot, OpenCode Console, or SuperGrok subscription for agent steps')
     .description(
-      'Sign in once to a personal subscription and store the login for the e2e/oauth models: openai (ChatGPT Plus/Pro, the Codex sign-in), github-copilot (GitHub Copilot; reuses the GitHub CLI login or runs a device flow for your OAuth App), opencode-console (OpenCode Console, device code), spacexai (SuperGrok or X Premium+, device code). The config then constructs the model with chatgpt(), copilot(), opencodeConsole(), or grok() from e2e/oauth/<provider>.',
+      'Sign in once to a personal subscription and store the login for the e2e/oauth models: openai (ChatGPT Plus/Pro, the Codex sign-in), github-copilot (GitHub Copilot; reuses the GitHub CLI login or runs a device flow for your OAuth App), opencode-console (OpenCode Console, device code), spacexsi (SuperGrok or X Premium+, device code). The config then constructs the model with chatgpt(), copilot(), opencodeConsole(), or grok() from e2e/oauth/<provider>.',
     )
-    .addArgument(new Argument('[provider]', 'openai, github-copilot, opencode-console, or spacexai; omitted, a picker').choices(PROVIDER_IDS))
+    .addArgument(new Argument('[provider]', 'openai, github-copilot, opencode-console, or spacexsi; omitted, a picker').choices(PROVIDER_NAMES))
     .option('--device', 'ChatGPT: show a code to enter on another device instead of opening a browser')
     .option('--client-id <id>', 'GitHub Copilot: the client id of your GitHub OAuth App with the device flow enabled')
     .option('--from-gh', 'GitHub Copilot: reuse the token of the signed-in GitHub CLI')
     .option('--enterprise-url <host>', 'GitHub Copilot: the GitHub Enterprise host')
     .addHelpText(
       'after',
-      ['', examples(['e2e login openai', 'e2e login github-copilot --from-gh', 'e2e login opencode-console', 'e2e login spacexai', 'e2e login']), '', docsLine('/subscriptions')].join('\n'),
+      ['', examples(['e2e login openai', 'e2e login github-copilot --from-gh', 'e2e login opencode-console', 'e2e login spacexsi', 'e2e login']), '', docsLine('/subscriptions')].join('\n'),
     )
     .action(async (provider: string | undefined, options: LoginFlags) => {
       const { runLogin } = await import('../oauth/cli.ts');
@@ -573,8 +585,8 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
   program
     .command('logout')
     .summary('forget a stored subscription login')
-    .description('Remove the stored login of one provider (openai, github-copilot, opencode-console, spacexai). Without a provider, a picker over the stored logins.')
-    .addArgument(new Argument('[provider]', 'openai, github-copilot, opencode-console, or spacexai; omitted, a picker').choices(PROVIDER_IDS))
+    .description('Remove the stored login of one provider (openai, github-copilot, opencode-console, spacexsi). Without a provider, a picker over the stored logins.')
+    .addArgument(new Argument('[provider]', 'openai, github-copilot, opencode-console, or spacexsi; omitted, a picker').choices(PROVIDER_NAMES))
     .addHelpText('after', ['', examples(['e2e logout', 'e2e logout openai']), '', docsLine('/subscriptions')].join('\n'))
     .action(async (provider: string | undefined) => {
       const { runLogout } = await import('../oauth/cli.ts');
@@ -587,7 +599,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
     .description(
       'Ask the vendor which models the stored login, or OPENCODE_API_KEY for opencode-console, serves and print their ids, the ones chatgpt(), copilot(), opencodeConsole(), and grok() take. Without a provider, every stored login and set key in turn.',
     )
-    .addArgument(new Argument('[provider]', 'openai, github-copilot, opencode-console, or spacexai; omitted, every stored login').choices(PROVIDER_IDS))
+    .addArgument(new Argument('[provider]', 'openai, github-copilot, opencode-console, or spacexsi; omitted, every stored login').choices(PROVIDER_NAMES))
     .addHelpText('after', ['', examples(['e2e models', 'e2e models openai']), '', docsLine('/subscriptions#pick-a-model')].join('\n'))
     .action(async (provider: string | undefined) => {
       const { runModels } = await import('../oauth/cli.ts');
@@ -600,10 +612,13 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
     .description(
       'Print the skill that init installs: how to set up e2e, write tests, use agent steps, run the CLI, and read a failing run. Without a topic, prints the overview and the topic list.',
     )
-    .argument('[topic]', `one of ${skillTopics().join(', ')}`)
-    .addHelpText('after', ['', examples(['e2e guide', 'e2e guide writing-tests']), '', docsLine('/reference/cli#e2e-guide')].join('\n'))
+    .argument('[topic]', 'one topic of the guide; the overview when omitted')
+    // Read when help prints: the topics are those of the guide this project gets, which may be an installed copy's.
+    .addHelpText('after', () =>
+      ['', `Topics: ${guideTopics({ version }).join(', ')}`, '', examples(['e2e guide', 'e2e guide writing-tests']), '', docsLine('/reference/cli#e2e-guide')].join('\n'),
+    )
     .action((topic: string | undefined) => {
-      process.exitCode = guide(topic);
+      process.exitCode = guide(topic, { version });
     });
 
   program
@@ -633,7 +648,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
       ].join('\n'),
     )
     .action(async (options: { config?: string; target?: string; headed?: boolean; maxSessions?: number }) => {
-      const { mcp } = await import('./mcp.ts');
+      const { mcp } = await import('../mcp-command.ts');
       process.exitCode = await mcp(version, options, telemetry);
     });
 
@@ -650,12 +665,14 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
   selectionOptions(runCommand)
     .optionsGroup('Execution:')
     .option('--headed', 'show the UI while tests run, when the engine supports it')
+    .option('--device <name>', "the simulator, emulator, or phone the selected mobile target runs on, by name or id, over its configured device", parseDevice)
     .option(
       '--agent <names>',
       'the configured agent unpinned tests run with (default: agents.default); comma-separated or repeated names run each such test once per agent',
       parseNames('agent'),
     )
     .option('--workers <n>', 'parallel workers (default: from the config)', parseNonNegativeInt)
+    .option('--fully-parallel', 'run the tests of one file in parallel too, on every target (default: fullyParallel in the config)')
     .option('--retries <n>', 'retries per failing test (default: from the config)', parseNonNegativeInt)
     .option('--action-timeout <ms>', 'budget of every engine operation, such as a locator waiting for its element; a call\'s own timeout still wins (default: actionTimeout in the config, else 30000)', parseBoundedInt({ min: 1, max: MAX_TIMER_MS }))
     .option('--assertion-timeout <ms>', 'default expect deadline; a matcher\'s own timeout still wins (default: assertionTimeout in the config, else 5000)', parseBoundedInt({ min: 1, max: MAX_TIMER_MS }))
@@ -666,7 +683,11 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
     .option('--strict-cache', 'fail a step whose recording no longer replays (REPLAY_STALE) instead of handing it to the agent; never writes the cache')
     .option('-u, --update-snapshots', 'write the stored screenshots toHaveScreenshot finds missing or different, and pass')
     .option('-w, --watch', 'run, then run again whenever a test or source file or the config changes or a key asks: a (all), r (current), f (failed), u, p, t, q; not in CI')
-    .option('--step', 'run the first step, then hold each later one until a key: enter runs it, n runs to the next test, a runs all, h lists the keys, q stops; one worker, a terminal, not in CI')
+    .option(
+      '--step',
+      'run the first step, then hold each later one until a key: enter runs it, s shows the screen, l shows the app log, n runs to the next test, a runs all (a test is still paused at screen.pause()), h lists the keys, q stops with exit 130. Without a terminal the run goes on in the background and returns at each held step with its screen; e2e run --step next runs that step, rest runs the rest, stop ends the run. One worker, not in CI',
+    )
+    .addOption(new Option('--step-serve <log>').hideHelp())
     .optionsGroup('Output:')
     .option('--reporter <ids>', `comma-separated reporters: ${BUILTIN_REPORTERS.join(', ')}`, parseReporters)
     .option('--output <dir>', 'results directory: report, artifacts, sessions (default: output in the config, else .e2e)')
@@ -684,7 +705,9 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
         examples([
           'e2e run',
           'e2e run tests/signup.e2e.ts --headed',
+          'e2e run --target ios --device "iPhone 17 Pro"',
           'e2e run tests/checkout.e2e.ts --step --headed',
+          'e2e run tests/checkout.e2e.ts --step   # no terminal: then e2e run --step next',
           'e2e run --watch',
           "e2e run 'tests/**/*.smoke.e2e.ts' --target web --tag smoke",
           'e2e run --tag smoke,billing --tag-mode all',
@@ -719,9 +742,11 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
           config?: string;
           target?: string[];
           headed?: boolean;
+          device?: string;
           agent?: string[];
           retries?: number;
           workers?: number;
+          fullyParallel?: boolean;
           actionTimeout?: number;
           assertionTimeout?: number;
           maxFailures?: number;
@@ -737,6 +762,8 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
           updateSnapshots?: boolean;
           watch?: boolean;
           step?: boolean;
+          /** The background run `--step` starts without a terminal, with the log its output goes to; internal. */
+          stepServe?: string;
           debug?: boolean;
           aiTrace?: boolean;
           trace?: RecordingMode | true;
@@ -745,16 +772,31 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
         command: Command,
       ) => {
         rejectForwardedFlags(command, files);
+        // `e2e run --step next`, `rest`, or `stop`: commander reads the word as a file.
+        const stepAction = options.step === true ? files.find(isStepAction) : undefined;
+        if (stepAction !== undefined) {
+          const others = command.options.filter((option) => option.attributeName() !== 'step' && command.getOptionValueSource(option.attributeName()) === 'cli');
+          if (files.length > 1 || others.length > 0) {
+            command.error(`error: --step ${stepAction} takes no files or other flags: it drives the run e2e run --step started`, { exitCode: 2 });
+          }
+          await driveStepped(command, async () => {
+            const { sendStep } = await import('./step-control.ts');
+            return sendStep(stepAddress(process.cwd()), stepAction);
+          });
+          return;
+        }
         const runOptions: RunOptions = {
           files,
           configPath: options.config,
           targetIds: options.target,
           ...selectionRunOptions(options),
           headed: options.headed,
+          device: options.device,
           agent: options.agent,
           retries: options.retries,
           // A stepped run is one test at a time, so there is one prompt at a time.
           workers: options.step === true ? 1 : options.workers,
+          fullyParallel: options.fullyParallel,
           actionTimeout: options.actionTimeout,
           assertionTimeout: options.assertionTimeout,
           maxFailures: options.maxFailures,
@@ -774,24 +816,41 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
         };
         if (options.watch === true) rejectWatchIn(command, options.reporter);
         if (options.step === true) rejectStepIn(command, options);
+        const serveLog = options.step === true ? options.stepServe : undefined;
+        if (options.step === true && serveLog === undefined && !hasTerminal()) {
+          await driveStepped(command, async () => {
+            const { startStepped } = await import('./step-control.ts');
+            return startStepped(stepAddress(process.cwd()), process.argv.slice(2));
+          });
+          return;
+        }
         const output = claimRunnerOutput();
         try {
           if (options.watch === true) {
             await watchToOutcome(telemetry, command, async (signals, record) => {
               const { watchSession } = await import('./watch.ts');
+              const { servePauses } = await import('./step-control.ts');
+              const stdin = process.stdin.isTTY === true ? process.stdin : undefined;
               return watchSession({
                 base: runOptions,
                 cwd: process.cwd(),
                 signals,
-                run: (iteration, cancel) =>
-                  run({
-                    ...iteration,
-                    interruptSignal: AbortSignal.any([signals.interruptSignal, cancel.interruptSignal]),
-                    forceSignal: AbortSignal.any([signals.forceSignal, cancel.forceSignal]),
-                    processOutput: output,
-                  }).then(record),
-                stdin: process.stdin.isTTY === true ? process.stdin : undefined,
-                write: output.listOutput.raw,
+                run: (iteration, cancel, keys) =>
+                  servePauses(
+                    {
+                      ...iteration,
+                      interruptSignal: AbortSignal.any([signals.interruptSignal, cancel.interruptSignal]),
+                      forceSignal: AbortSignal.any([signals.forceSignal, cancel.forceSignal]),
+                      processOutput: output,
+                    },
+                    version,
+                    cancel.stop,
+                    stdin,
+                    keys,
+                    { interrupt: () => signals.escalate() },
+                  ).then(record),
+                stdin,
+                write: (text) => writeTerminal('stdout', text),
                 writeError: (text) => void process.stderr.write(text),
                 pc: picocolors.createColors(process.stdout.isTTY === true),
                 clear: process.stdout.isTTY === true,
@@ -799,9 +858,21 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
             });
             return;
           }
-          await runToOutcome(telemetry, command, (signals) => {
+          await runToOutcome(telemetry, command, async (signals) => {
             const base = { ...runOptions, interruptSignal: signals.interruptSignal, forceSignal: signals.forceSignal, processOutput: output };
-            return options.step === true ? stepped(base, signals) : run(base);
+            if (serveLog !== undefined) {
+              const { serveSteps } = await import('./step-control.ts');
+              return serveSteps(base, version, signals, { ...stepAddress(process.cwd()), log: serveLog });
+            }
+            const { servePauses } = await import('./step-control.ts');
+            return servePauses(
+              base,
+              version,
+              () => signals.escalate(),
+              hasTerminal() ? process.stdin : undefined,
+              undefined,
+              { holdSteps: options.step === true },
+            );
           });
         } finally {
           output.end();
@@ -957,7 +1028,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
         rejectForwardedFlags(command, files);
         // The config and its test filters run in this process and may print a secret, as under `run`.
         const output = claimRunnerOutput();
-        if (options.reporter === 'json') output.keepStdoutForReport();
+        if (options.reporter === 'json') output.leaveStdout();
         let pairs: readonly ListedPair[];
         try {
           ({ pairs } = await listSelection(
@@ -988,7 +1059,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
     .command('doctor')
     .summary('check that e2e run can start here, without starting anything')
     .description(
-      'Check the runtime, load and resolve the config, ask each target\'s engine what it needs on this machine, and name the model each agent resolved to. Starts no app and no worker, only the server of an engine that runs in its own process, and calls no model unless --check-model is given. Ctrl-C stops the checks and reports what ran. A model on an e2e login passes when the login is stored; any other model reads its own credential, which doctor reports as unknown. Exits 0 when no check failed, 2 otherwise, and 130 when interrupted.',
+      'Check the runtime, load and resolve the config, ask each target\'s engine what it needs on this machine, and name the model each agent resolved to. Starts no app and no worker, only the server of an engine that runs in its own process, and calls no model unless --check-model is given. Ctrl-C stops the checks and reports what ran. A model on an e2e login passes when the login is stored; a Vercel AI Gateway or OpenRouter model with no key variable set is a warning; any other model reads its own credential, which doctor reports as unknown. Exits 0 when no check failed, 2 otherwise, and 130 when interrupted.',
     )
     .option('--config <path>', 'config file (default: the nearest e2e.config.ts, .mts, .js, or .mjs)')
     .option('--target <ids>', 'target names, comma-separated or repeated (default: all targets)', parseNames('target'))
@@ -1002,7 +1073,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
     .action(async (options: { config?: string; target?: string[]; headed?: boolean; checkModel?: boolean; json?: boolean }) => {
       const { doctor, formatDoctorReport } = await import('./doctor.ts');
       const output = claimRunnerOutput();
-      if (options.json === true) output.keepStdoutForReport();
+      if (options.json === true) output.leaveStdout();
       // Ctrl-C stops the checks, which then report: an engine server is
       // shut down before the process exits instead of left running.
       const signals = new SignalLadder();
@@ -1031,6 +1102,28 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
     });
 
   registerCacheCommand(program);
+
+  program
+    .command('report')
+    .summary('open the HTML report in a browser')
+    .description(
+      'Open the HTML report written by @e2e-dev/html-reporter in the default browser (default: <output>/report.html, or .e2e/report.html). Pass [path] to open another HTML file or directory (such as a custom htmlReporter({ outputFile }) path), or --output to override the configured output directory. Exits 2 when the file is missing or cannot be resolved.',
+    )
+    .argument('[path]', 'HTML report file or directory containing report.html')
+    .option('--config <path>', 'config file (default: the nearest e2e.config.ts, .mts, .js, or .mjs)')
+    .option('--output <dir>', 'results directory containing report.html (default: output in the config, else .e2e)')
+    .addHelpText(
+      'after',
+      ['', examples(['e2e report', 'e2e report .e2e/report.html', 'e2e report --output out']), '', docsLine('/reference/cli#e2e-report')].join('\n'),
+    )
+    .action(async (reportPath: string | undefined, options: { config?: string; output?: string }) => {
+      const { report } = await import('./report.ts');
+      process.exitCode = await report({
+        ...(reportPath === undefined ? {} : { path: reportPath }),
+        ...(options.config === undefined ? {} : { config: options.config }),
+        ...(options.output === undefined ? {} : { output: options.output }),
+      });
+    });
 
   program
     .command('upgrade')
@@ -1142,7 +1235,7 @@ export async function main(argv: readonly string[]): Promise<void> {
   const updateCheck = new UpdateCheck({ version, checkout });
   const program = createProgram(version, telemetry, updateCheck);
   try {
-    await program.parseAsync([...argv]);
+    await program.parseAsync(argv);
   } catch (cause) {
     if (cause instanceof CommanderError) {
       // Commander has already written its diagnostic. `--help` and

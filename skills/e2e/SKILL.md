@@ -19,8 +19,9 @@ metadata:
 e2e runs UI tests that mix agent goals with exact steps. `agent.act` drives
 one goal; `agent.assert`, `agent.waitFor`, and `agent.extract` judge the
 screen; `screen`, `app`, `browser`, and `expect` act and check exactly. UI
-targets use `@e2e-dev/web` for browsers or `@e2e-dev/mobile` for iOS
-simulators, Android emulators, and connected phones.
+targets use `@e2e-dev/web` for browsers, `@e2e-dev/mobile` for iOS
+simulators, Android emulators, and connected phones, or `@e2e-dev/desktop`
+(a prototype) for native apps on macOS.
 
 ## Start here: pick the reference for the job
 
@@ -109,8 +110,11 @@ describe('billing', () => {
    in the session. An `act` goal goes in before you walk its path, and the
    path's actions stay out of the test. A `screen` line is the `Test line:`
    its action printed, copied as is. When the outcome shows, run its
-   `expect` with `run_code` and add it once it passes; a passing statement
+   `expect` with `run_code` and add it once it passes; a passing line
    also joins `test_lines`; checks go in the test's assert block at the end.
+   `run_code` runs JavaScript on the test API, so use it for most of a
+   session's work, a loop or a read and a check in one call, over many
+   single actions.
    The walk ends with the test written. Without a
    server, learn the accessible names the app renders from the components or
    a `--headed` run.
@@ -129,9 +133,7 @@ describe('billing', () => {
    Exact values go through `screen`: a sign-in form in a setup test, a field
    that must receive one specific string, a count that must be one number.
 4. Run only the test you are working on:
-   `npx e2e run tests/<feature>.e2e.ts:<line>` (over MCP,
-   `run_tests {files: ["tests/<feature>.e2e.ts:<line>"]}`, the flags as
-   camelCase fields such as `retries: 0`), the line its `test(` opens on,
+   `npx e2e run tests/<feature>.e2e.ts:<line>`, the line its `test(` opens on,
    with the flags in "Rerunning a test while you fix it" below. Agent
    steps need a model in the config and that provider's authentication (a
    saved subscription login, an API key); a local endpoint may need none.
@@ -196,8 +198,8 @@ lines you changed:
   New, changed, and failed goals run live, and so does a replay the trace
   page shows as handed off. `agent.assert`, `agent.waitFor`, and
   `agent.extract` always call the model. Leave `--no-cache` off: it sends every goal to the model
-  again. Only a `read-write` cache records: the local default, but not with
-  `CI` set and no cache mode in the config, nor in strict mode. A stopped
+  again. Only a `read-write` cache records: the local default, but not on CI
+  unless the config names that mode, nor in strict mode. A stopped
   run (Ctrl-C, a command your tool's timeout kills, `--max-duration`) saves
   nothing, so give the command a timeout longer than the test.
 - Don't rename the test, its `describe`, or its file, and don't reword a
@@ -205,8 +207,8 @@ lines you changed:
   `agentContext` once a goal passes. Each is part of a recording's key, so
   every goal it touches records again live. Fixing a locator or an
   expectation keeps the recordings.
-- Add `--retries 0` when retries are on (`retries` in the config, or `CI`
-  set, where the default is 1); a `retries` option on the test or its
+- Add `--retries 0` when retries are on (`retries` in the config, or on
+  CI, where the default is 1); a `retries` option on the test or its
   `describe` wins over the flag. Outside strict mode (`--strict-cache`, `cache.strict`), a
   retry never replays: it runs every goal live and waits out the failure
   again.
@@ -218,11 +220,10 @@ lines you changed:
 
 - In a project without e2e, set it up when the user requests it. Otherwise
   ask before adding a test framework, and name any existing framework.
-- Live MCP tools need an `e2e mcp` server in the client: the e2e plugin's, or
-  one registered in the project (topic `mcp`). In a directory with no e2e config, a live look still
+- Live MCP tools need an `e2e mcp` server in the client: the e2e plugin's
+  (Codex and Cursor), or one registered in the project (topic `mcp`). In a directory with no e2e config, a live look still
   works: `open_session {engine: "@e2e-dev/web", app: {url: "http://localhost:3000"}}` opens a session
-  on the engine's defaults. Tests need a config. Tests run with the CLI, or with the server's
-  `run_tests`, the same run without a shell.
+  on the engine's defaults. Tests need a config and run with the CLI.
   Keep a session open across runs while you write or fix a web test; topic
   `mcp` says when a run can go beside it, and what to do on
   `APP_ALREADY_RUNNING`.

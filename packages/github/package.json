@@ -1,6 +1,6 @@
 {
   "name": "@e2e-dev/github",
-  "version": "0.4.4",
+  "version": "0.4.6",
   "description": "GitHub reporter for e2e: one pull request comment per run, from GitHub Actions",
   "keywords": [
     "e2e",
@@ -14,8 +14,8 @@
   ],
   "license": "Apache-2.0",
   "contributors": [
-    "Oskar Kwaśniewski <oskar@tester.army>",
-    "Szymon Rybczak <szymon@tester.army>"
+    "Oskar Kwaśniewski <oskar@e2e.com>",
+    "Szymon Rybczak <szymon@e2e.com>"
   ],
   "repository": {
     "type": "git",
@@ -51,13 +51,13 @@
     "test:unit": "vitest run tests/unit"
   },
   "peerDependencies": {
-    "e2e": ">=0.15.0 <1"
+    "e2e": ">=0.25.0 <1"
   },
   "devDependencies": {
     "@types/node": "26.6.6",
     "e2e": "workspace:*",
     "typescript": "7.0.2",
-    "vitest": "5.1.0"
+    "vitest": "5.1.1"
   },
   "engines": {
     "node": "^22.22.3 || >=24.8.0"

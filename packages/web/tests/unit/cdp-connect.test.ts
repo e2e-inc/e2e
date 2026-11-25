@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import type { EngineInitInfo } from 'e2e/engine';
+import type { EngineInitInfo } from '@e2e-dev/core/engine';
 import { web, type WebConnectOptions } from '../../src/index.ts';
 import { PlaywrightSurface } from '../../src/surface.ts';
 
@@ -41,6 +41,7 @@ describe('web({ connect })', () => {
     expect(() => web({ connect, userAgent: 'synthetic playwright' })).toThrow(/persistent context/);
     expect(() => web({ connect, locale: 'de-DE' })).toThrow(/persistent context; locale requires/);
     expect(() => web({ connect, timezoneId: 'Europe/Berlin' })).toThrow(/persistent context; timezoneId requires/);
+    expect(() => web({ connect, deviceScaleFactor: 2 })).toThrow(/persistent context; deviceScaleFactor requires/);
   });
 
   it('rejects connect with a non-chromium browser as INVALID_CONFIG', () => {

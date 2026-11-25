@@ -17,7 +17,7 @@ import { assertValidReport } from '../helpers/report-schema.ts';
 import { freePort } from '../helpers/free-port.ts';
 import { resultByTitle, runProject } from '../helpers/run-project.ts';
 import type { E2EConfig } from '../../src/index.ts';
-import { TestError } from '../../src/engine/index.ts';
+import { TestError } from '@e2e-dev/core/lib/engine/index';
 
 const APP_URL = FAKE_APP_URL;
 
@@ -645,11 +645,111 @@ test('needs browser', async ({ app, browser }) => {
         { 'tests/no-browser.e2e.ts': file },
         { appUrl: APP_URL, config: engineConfig(fake.engine) },
       );
-      const result = resultByTitle(outcome, 'needs browser');
-      expect(result.status).toBe('failed');
-      expect(result.attempts[0]!.error?.code).toBe('UNSUPPORTED_CAPABILITY');
-      expect(result.attempts[0]!.error?.category).toBe('configuration');
-      expect(result.attempts[0]!.error?.message).toContain('has no "browser" fixture');
+      // Named in the test's parameter, so it is refused at collection, before the engine starts.
+      expect(outcome.report.run.errors.map(({ code, category, message }) => ({ code, category, message }))).toEqual([
+        {
+          code: 'COLLECTION_ERROR',
+          category: 'configuration',
+          message: expect.stringContaining('test "needs browser" names "browser": target "fake" has no "browser" fixture'),
+        },
+      ]);
+      expect(outcome.results).toEqual([]);
+      expect(fake.events).toEqual([]);
+      project.cleanup();
+    },
+    60_000,
+  );
+
+  it(
+    'a fixture that only another target has is undefined, so one test runs on every target',
+    async () => {
+      const plain = createFakeEngine();
+      const gadgets = createFakeEngine({ fixtures: true, isolation: 'worker' });
+      const file = `import { test } from 'e2e';
+
+test.beforeAll(async ({ platform, gadget }) => {
+  if ((platform === 'plain') !== (gadget === undefined)) throw new Error(\`beforeAll got the wrong gadget on \${platform}\`);
+});
+
+test('pokes the gadget where there is one', async ({ app, platform, gadget }) => {
+  await app.open('/');
+  if (platform === 'plain') {
+    if (gadget !== undefined) throw new Error('expected no gadget on the plain target');
+    return;
+  }
+  await gadget.poke('once');
+});
+
+const withStandIn = test.extend({
+  gadget: async ({ gadget }, use) => {
+    await use(gadget ?? 'stand-in');
+  },
+});
+
+withStandIn('an override runs where the target has no gadget', async ({ platform, gadget }) => {
+  if (platform === 'plain' && gadget !== 'stand-in') throw new Error('expected the stand-in on the plain target');
+  if (platform === 'gadgets' && gadget === 'stand-in') throw new Error('expected the engine gadget');
+});
+`;
+      const { outcome, project } = await runProject(
+        { 'tests/across.e2e.ts': file },
+        {
+          appUrl: APP_URL,
+          config: {
+            targets: [
+              { name: 'plain', platform: 'plain', engine: plain.engine, app: FAKE_APP },
+              { name: 'gadgets', platform: 'gadgets', engine: gadgets.engine, app: FAKE_APP },
+            ],
+          },
+        },
+      );
+      expect(outcome.report.run.errors).toEqual([]);
+      expect(outcome.results.map((result) => `${result.target.name}: ${result.test.title}: ${result.status}`).toSorted()).toEqual([
+        'gadgets: an override runs where the target has no gadget: passed',
+        'gadgets: pokes the gadget where there is one: passed',
+        'plain: an override runs where the target has no gadget: passed',
+        'plain: pokes the gadget where there is one: passed',
+      ]);
+      expect(gadgets.fixtureCalls).toEqual(['poke:once']);
+      assertValidReport(outcome.report);
+      project.cleanup();
+    },
+    60_000,
+  );
+
+  it.each(['attempt', 'worker'] as const)(
+    'a fixture that only other targets have is a test fixture if any of them has it as one, so a suite hook can\'t name it (%s-isolated engine listed first)',
+    async (first) => {
+      const plain = createFakeEngine();
+      const gadgets = createFakeEngine({ fixtures: true });
+      const workerGadgets = createFakeEngine({ fixtures: true, isolation: 'worker' });
+      const gadgetTargets = [
+        { name: 'gadgets', platform: 'gadgets', engine: gadgets.engine, app: FAKE_APP },
+        { name: 'worker-gadgets', platform: 'worker-gadgets', engine: workerGadgets.engine, app: FAKE_APP },
+      ];
+      const file = `import { test } from 'e2e';
+
+test.beforeAll(async ({ gadget }) => {
+  void gadget;
+});
+
+test('runs', async () => {});
+`;
+      const { outcome, project } = await runProject(
+        { 'tests/hook.e2e.ts': file },
+        {
+          appUrl: APP_URL,
+          config: {
+            targets: [
+              { name: 'plain', platform: 'plain', engine: plain.engine, app: FAKE_APP },
+              ...(first === 'attempt' ? gadgetTargets : gadgetTargets.toReversed()),
+            ],
+          },
+        },
+      );
+      expect(outcome.report.run.errors.map(({ code }) => code)).toEqual(['COLLECTION_ERROR']);
+      expect(outcome.report.run.errors[0]?.message).toContain('beforeAll hook names "gadget", a test fixture on target "plain"');
+      expect(outcome.results).toEqual([]);
       project.cleanup();
     },
     60_000,
@@ -920,8 +1020,7 @@ test('consumes session', { session: 'acct' }, async ({ app }) => {
       const fake = createFakeEngine({ fixtures: true });
       const file = `import { test, expect } from 'e2e';
 
-test('drives the gadget', async (fixtures) => {
-  const gadget = (fixtures as any).gadget;
+test('drives the gadget', async ({ gadget }) => {
   await gadget.poke('once');
   await gadget.knobs.turn('volume');
   if (gadget.describe() !== 'gadget on fake') throw new Error('accessor was wrapped');
@@ -939,16 +1038,16 @@ test('drives the gadget', async (fixtures) => {
   await expect(gadget).toBePoked(1);
 });
 
-test('bounds a hanging fixture call', async (fixtures) => {
-  await (fixtures as any).gadget.hang({ timeout: 200 });
+test('bounds a hanging fixture call', async ({ gadget }) => {
+  await gadget.hang({ timeout: 200 });
 });
 
-test('waits for the test deadline with timeout 0', { timeout: 3_000 }, async (fixtures) => {
-  await (fixtures as any).gadget.hang({ timeout: 0 });
+test('waits for the test deadline with timeout 0', { timeout: 3_000 }, async ({ gadget }) => {
+  await gadget.hang({ timeout: 0 });
 });
 
-test('refuses a negative timeout', async (fixtures) => {
-  await (fixtures as any).gadget.hang({ timeout: -1 });
+test('refuses a negative timeout', async ({ gadget }) => {
+  await gadget.hang({ timeout: -1 });
 });
 `;
       const { outcome, project } = await runProject(
@@ -982,28 +1081,6 @@ test('refuses a negative timeout', async (fixtures) => {
       const negative = resultByTitle(outcome, 'refuses a negative timeout');
       expect(negative.attempts[0]!.error?.code).toBe('INVALID_ARGUMENT');
       assertValidReport(outcome.report);
-      project.cleanup();
-    },
-    60_000,
-  );
-
-  it(
-    'gates requires against the declared capability set at selection',
-    async () => {
-      const fake = createFakeEngine({ fixtures: true });
-      const file = `import { test } from 'e2e';
-
-test('needs gadget', { requires: ['gadget'] }, async () => {});
-test('needs web', { requires: ['web'] }, async () => {});
-`;
-      const { outcome, project } = await runProject(
-        { 'tests/requires.e2e.ts': file },
-        { appUrl: APP_URL, config: engineConfig(fake.engine) },
-      );
-      expect(resultByTitle(outcome, 'needs gadget').status).toBe('passed');
-      const web = resultByTitle(outcome, 'needs web');
-      expect(web.status).toBe('skipped');
-      expect(web.skip?.cause).toBe('capability-unavailable');
       project.cleanup();
     },
     60_000,

@@ -11,6 +11,7 @@
     "exitCode": 1,
     "startedAt": "2026-07-24T12:00:00.000Z",
     "finishedAt": "2026-07-24T12:00:01.000Z",
+    "durationMs": 1000,
     "project": {
       "id": "dev.testerarmy.example",
       "configDigest": "0000000000000000000000000000000000000000000000000000000000000000"
@@ -21,6 +22,10 @@
       "os": "darwin",
       "arch": "arm64",
       "runtime": "node-26.4.0"
+    },
+    "shard": {
+      "index": 2,
+      "total": 3
     },
     "targets": [
       {
@@ -251,6 +256,7 @@
                 "kind": "agent",
                 "api": "agent.assert",
                 "label": "the result is visible",
+                "actor": "launch-1",
                 "source": {
                   "file": "tests/example.e2e.ts",
                   "line": 3,
@@ -306,6 +312,7 @@
                 "mediaType": "video/mp4",
                 "url": "https://recordings.example.com/sessions/abc/replay.mp4",
                 "startedAt": "2026-07-24T12:00:00.000Z",
+                "actor": "launch-1",
                 "redaction": "incomplete",
                 "producer": {
                   "kind": "attempt"
@@ -463,14 +470,14 @@
             "secondaryErrors": [],
             "cleanup": "complete",
             "skip": {
-              "cause": "explicit",
-              "reason": "the demo tenant has a single organization"
+              "cause": "fixme",
+              "reason": "fixme: the demo tenant has a single organization"
             }
           }
         ],
         "skip": {
-          "cause": "explicit",
-          "reason": "the demo tenant has a single organization"
+          "cause": "fixme",
+          "reason": "fixme: the demo tenant has a single organization"
         }
       },
       {
@@ -525,6 +532,61 @@
           "reason": "the diff reaches none of its tags",
           "filter": "areas"
         }
+      },
+      {
+        "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "testId": "tests/example.e2e.ts::exports%20a%20report",
+        "kind": "test",
+        "tags": [],
+        "declarationIndex": 4,
+        "titlePath": [
+          "exports a report"
+        ],
+        "file": "tests/example.e2e.ts",
+        "source": {
+          "file": "tests/example.e2e.ts",
+          "line": 20,
+          "column": 1
+        },
+        "targetId": "web",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "selected": false,
+        "status": "skipped",
+        "attempts": [],
+        "skip": {
+          "cause": "filtered",
+          "reason": "outside the shard",
+          "otherShard": true
+        }
+      },
+      {
+        "id": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "testId": "tests/example.e2e.ts::todo%20coverage",
+        "kind": "test",
+        "tags": [],
+        "declarationIndex": 5,
+        "titlePath": [
+          "todo coverage"
+        ],
+        "file": "tests/example.e2e.ts",
+        "source": {
+          "file": "tests/example.e2e.ts",
+          "line": 25,
+          "column": 1
+        },
+        "targetId": "web",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "selected": true,
+        "status": "skipped",
+        "attempts": [],
+        "skip": {
+          "cause": "todo",
+          "reason": "todo"
+        }
       }
     ],
     "errors": [
@@ -543,14 +605,14 @@
       }
     ],
     "summary": {
-      "discovered": 4,
-      "selected": 3,
+      "discovered": 6,
+      "selected": 4,
       "executed": 3,
       "passed": 1,
       "failed": 1,
       "interrupted": 0,
       "flaky": 0,
-      "skipped": 1
+      "skipped": 2
     },
     "limits": {
       "maxAgentContextBytes": 16384,

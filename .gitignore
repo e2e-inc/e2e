@@ -10,6 +10,7 @@ dist/
 **/.e2e/ai-trace.json
 **/.e2e/timings.json
 **/.e2e/junit.xml
+**/.e2e/ctrf.json
 **/.e2e/summary.md
 **/.e2e/logs/
 **/.e2e/videos/
@@ -28,3 +29,6 @@ packages/e2e/docs/
 .env*
 # `pnpm run canary` writes this changeset and consumes it in the same run.
 .changeset/canary.md
+
+# scripts/check-docs-translations-deepl.ts --report
+/deepl-report.json

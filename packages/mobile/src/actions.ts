@@ -1,6 +1,6 @@
 /** The action kinds a device surface declares, and the pointer dispatch that agrees with them. */
 
-import type { LocatorActionKind, PointerAction, PointerActionKind, ViewportPoint } from 'e2e/engine';
+import type { LocatorActionKind, PointerAction, PointerActionKind, ViewportPoint } from '@e2e-dev/core/engine';
 import type { AgentDeviceClient } from './options.ts';
 import { unsupported, type InputBudget } from './support.ts';
 
@@ -21,9 +21,13 @@ import { unsupported, type InputBudget } from './support.ts';
  */
 export const DEFAULT_LONG_PRESS_MS = 1_000;
 
+/** The most presses agent-device's `press` sends in one `count`; it refuses more. */
+export const MAX_TAP_COUNT = 200;
+
 export const DEVICE_ACTIONS: readonly LocatorActionKind[] = [
   'tap',
   'doubleTap',
+  'multiTap',
   'longPress',
   'fill',
   'clear',
@@ -52,7 +56,7 @@ export const DEVICE_POINTER_ACTIONS: readonly PointerActionKind[] = ['tap', 'dou
  * actions do; `stabilization` is the post-gesture option a swipe carries.
  * A double tap is two presses (`count: 2`), as it is on a node:
  * agent-device's own double-tap gesture reaches a React Native `Pressable`
- * on iOS as one press, while two presses in a row land about 285 ms apart.
+ * on iOS as one press, while two presses in a row land about 285 to 335 ms apart.
  * The kinds outside `DEVICE_POINTER_ACTIONS` never arrive: the harness
  * routes only declared kinds. They are refused here so the switch stays
  * exhaustive against the contract.

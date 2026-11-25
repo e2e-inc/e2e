@@ -23,7 +23,7 @@
  * Bun runs an imported module's top level outside its importer's async
  * context, so on Bun nothing that keeps two runs apart by that context runs
  * in one process: `e2e/runner` refuses Bun (`public-ownership.ts`), and
- * `e2e mcp` holds one session (`cli/mcp.ts`).
+ * `e2e mcp` holds one session (`mcp-command.ts`).
  */
 
 import { Console } from 'node:console';
@@ -78,7 +78,7 @@ function bun(): BunApi {
 }
 
 /**
- * Loads `absolutePath` afresh on Bun, as `load.ts`'s `importModule` asks:
+ * Loads `absolutePath` afresh on Bun, as `load.ts`'s `loadModule` asks:
  * in the fresh graph `graphName` names, or with the files it imports shared
  * when `graphName` is undefined.
  */

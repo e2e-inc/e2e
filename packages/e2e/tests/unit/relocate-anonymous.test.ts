@@ -1,11 +1,11 @@
 /** Anonymous targets: a control with only a role relocates by its place among the unnamed controls of its kind. */
 
 import { describe, expect, it } from 'vitest';
-import { describePosition, relocateDescriptor } from '../../src/cache/relocate.ts';
-import { buildTraceEntry } from '../../src/cache/trace.ts';
-import { readTraceEntry } from '../../src/cache/trace-read.ts';
-import type { SemanticNode } from '../../src/engine/surface.ts';
-import type { RedactedNode } from '../../src/agent/observation.ts';
+import { describePosition, relocateDescriptor } from '@e2e-dev/core/lib/cache/relocate';
+import { buildTraceEntry } from '@e2e-dev/core/lib/cache/trace';
+import { readTraceEntry } from '@e2e-dev/core/lib/cache/trace-read';
+import type { SemanticNode } from '@e2e-dev/core/lib/engine/surface';
+import type { RedactedNode } from '@e2e-dev/core/lib/agent/observation';
 import { redactedNodes } from '../helpers/redacted.ts';
 
 function textbox(id: string, name?: string): SemanticNode {
@@ -45,6 +45,13 @@ describe('an anonymous target', () => {
     expect(relocateDescriptor(recorded, screen(textbox('a', 'Email')))).toEqual({ kind: 'failed', failure: 'target-not-found' });
     // Counted among two with no container, even one survivor is never taken for it.
     expect(relocateDescriptor({ role: 'textbox', position: { index: 1, of: 2 } }, screen(textbox('a', 'Email'), textbox('b')))).toEqual({ kind: 'failed', failure: 'target-not-found' });
+  });
+
+  it('still diverges when one of two unnamed twins in a named group is left, rather than taking it', () => {
+    const group = (...fields: SemanticNode[]): SemanticNode[] => [{ ref: { id: 'g', revision: 'r' }, role: 'group', name: 'Billing', children: fields }, ...fields];
+    const recorded = { role: 'textbox', within: 'Billing', position: { index: 0, of: 2 } };
+    expect(relocateDescriptor(recorded, screen(...group(textbox('a'), textbox('b'))))).toEqual({ kind: 'found', id: 'a' });
+    expect(relocateDescriptor(recorded, screen(...group(textbox('b'))))).toEqual({ kind: 'failed', failure: 'target-ambiguous', candidates: ['b'] });
   });
 
   it('never lets a churned test id fall back to an anonymous position', () => {

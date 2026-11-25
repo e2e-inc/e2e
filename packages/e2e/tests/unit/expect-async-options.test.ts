@@ -1,7 +1,7 @@
 import { describe, expect as vexpect, it } from 'vitest';
-import type { SemanticNode } from '../../src/engine/surface.ts';
+import type { SemanticNode } from '@e2e-dev/core/lib/engine/surface';
 import { expect as expectFixture } from '../../src/expect/index.ts';
-import type { AsyncExpectation } from '../../src/types.ts';
+import type { AsyncExpectation } from '@e2e-dev/core/lib/types';
 import { createScreenFixture } from '../helpers/screen-fixture.ts';
 import { useFakeTime } from '../helpers/fake-time.ts';
 
@@ -151,6 +151,7 @@ describe('options a matcher does not take', () => {
     ['toBeHidden visible', () => at('tucked').toBeHidden(computed({ visible: true }))],
     ['toBeFocused focused', () => at('agree').toBeFocused(computed({ focused: false }))],
     ['toHaveValue ignoreCase', () => at('agree').toHaveValue('x', computed({ ignoreCase: true }))],
+    ['toBeEmpty ignoreCase', () => at('banner').toBeEmpty(computed({ ignoreCase: true }))],
     ['toHaveText useInnerText', () => at('banner').toHaveText('Save Error', computed({ useInnerText: true }))],
     ['toHaveCount ignoreCase', () => at('banner').toHaveCount(1, computed({ ignoreCase: true }))],
     ['toHaveAttribute presence ignoreCase', () => at('banner').toHaveAttribute('data-kind', computed({ ignoreCase: true }))],

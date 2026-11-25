@@ -1,12 +1,12 @@
 /** Positional recording: twins the description cannot tell apart resolve by place, at the same count only. */
 
 import { describe, expect, it } from 'vitest';
-import { describeAction } from '../../src/agent/actions.ts';
-import { describePosition, relocateDescriptor } from '../../src/cache/relocate.ts';
-import { buildTraceEntry, type ActionTrace } from '../../src/cache/trace.ts';
-import { readTraceEntry } from '../../src/cache/trace-read.ts';
-import type { SemanticNode } from '../../src/engine/surface.ts';
-import type { RedactedNode } from '../../src/agent/observation.ts';
+import { describeAction } from '@e2e-dev/core/lib/agent/actions';
+import { describePosition, relocateDescriptor } from '@e2e-dev/core/lib/cache/relocate';
+import { buildTraceEntry, type ActionTrace } from '@e2e-dev/core/lib/cache/trace';
+import { readTraceEntry } from '@e2e-dev/core/lib/cache/trace-read';
+import type { SemanticNode } from '@e2e-dev/core/lib/engine/surface';
+import type { RedactedNode } from '@e2e-dev/core/lib/agent/observation';
 import { redactedNodes } from '../helpers/redacted.ts';
 
 function button(id: string, name = 'Set up'): SemanticNode {
@@ -60,6 +60,31 @@ describe('relocation with a recorded position', () => {
     expect(
       relocateDescriptor(descriptor, screen(button('p'), button('q'), button('r'), button('s'))),
     ).toEqual({ kind: 'failed', failure: 'target-ambiguous', candidates: ['p', 'q', 'r', 's'] });
+  });
+
+  it('diverges as ambiguous when one of two recorded twins is left, rather than taking it', () => {
+    expect(relocateDescriptor({ role: 'button', name: 'Set up', position: { index: 0, of: 2 } }, screen(button('q')))).toEqual({
+      kind: 'failed',
+      failure: 'target-ambiguous',
+      candidates: ['q'],
+      twinLeft: true,
+    });
+  });
+
+  it('diverges when one of two nameless controls showing the same text is left, with no test id to set the text apart', () => {
+    const preview = (id: string): SemanticNode => ({ ref: { id, revision: 'r' }, role: 'button', text: 'Preview' });
+    const both = screen(preview('p'), preview('q'));
+    expect(describePosition(both.get('p')!, undefined, both)).toEqual({ index: 0, of: 2 });
+    expect(relocateDescriptor({ role: 'button', text: 'Preview', position: { index: 0, of: 2 } }, screen(preview('q')))).toEqual({
+      kind: 'failed',
+      failure: 'target-ambiguous',
+      candidates: ['q'],
+      twinLeft: true,
+    });
+  });
+
+  it('still relocates a lone match the recording saw alone', () => {
+    expect(relocateDescriptor({ role: 'button', name: 'Set up' }, screen(button('q')))).toEqual({ kind: 'found', id: 'q' });
   });
 
   it('still diverges without a recorded position', () => {

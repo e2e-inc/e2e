@@ -10,12 +10,12 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { defineTool } from '../../src/agent/public.ts';
-import type { StepExecutor } from '../../src/agent/executor.ts';
+import { defineTool } from '@e2e-dev/core/lib/agent/public';
+import type { StepExecutor } from '@e2e-dev/core/lib/agent/executor';
 import { explore, type ExploreOptions, type ExploreOutcome } from '../../src/explore/index.ts';
 import { FINDING_TOOL_NAME } from '../../src/explore/executor.ts';
 import type { RunEvent } from '../../src/index.ts';
-import type { ModelInstance } from '../../src/types.ts';
+import type { ModelInstance } from '@e2e-dev/core/lib/types';
 import { installFakeLoopModel, loopCalls, nodeIdFor, type LoopCall, type LoopToolCall } from '../helpers/fake-loop-model.ts';
 import { extracted, fakeCalls, installFakeModel, type FakeCall } from '../helpers/fake-model.ts';
 import { startFixtureApp, type FixtureApp } from '../helpers/fixture-app.ts';
@@ -233,7 +233,11 @@ describe('e2e explore', () => {
         },
         loop: () => [{ toolName: 'complete_step', input: { status: 'passed', summary: 'Looked' } }],
       });
-      const outcome = await runExplore(changed, app, model, { goal: undefined, changedSince: 'base' });
+      // A merge request pipeline: the brief opens with the merge request. Set whole, so a GitHub Actions run's own event is not read.
+      const env = { ...process.env, GITHUB_ACTIONS: undefined, GITLAB_CI: 'true', CI_MERGE_REQUEST_IID: '5', CI_MERGE_REQUEST_TITLE: 'Show the counter', CI_MERGE_REQUEST_DESCRIPTION: 'The home page shows the count.' };
+      const outcome = await runExplore(changed, app, model, { goal: undefined, changedSince: 'base', env });
+      expect(planCalls[0]!.system).toContain('<change>\nChanged since');
+      expect(planCalls[0]!.system).toContain('files.\n\nPull request !5: Show the counter\n  The home page shows the count.\n\nCommit messages, newest first:\n- Show the counter value');
       expect(planCalls[0]!.instruction).toContain('Goal: Explore what this change affects and find bugs in it');
       expect(planCalls[0]!.instruction).toContain('Plan from the code change between <change> and </change> in the context.');
       expect(planCalls[0]!.instruction).not.toContain('<output>{count}</output>');

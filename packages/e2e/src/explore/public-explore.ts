@@ -9,7 +9,7 @@ import type { ReportExplore } from '../report/build.ts';
 import type { RunEventSink } from '../run/events.ts';
 import { ownedRun, runResult, type RunResult } from '../run/public-run.ts';
 import { toSelectionRunOptions } from '../run/runner.ts';
-import type { E2EConfig } from '../types.ts';
+import type { E2EConfig } from '../run-types.ts';
 
 /** Options for one exploration through the public runner API. Recording and output settings come from the config. */
 export interface ExplorationOptions {
@@ -52,7 +52,8 @@ export interface ExplorationResult extends RunResult {
  * cleanup before starting another run. A goal or budget out of range, a
  * config that does not load or resolve, an unknown target or agent, or an
  * agent with no model rejects before anything starts, as the CLI's flags
- * do; once the run starts, failures and interruption resolve with their
+ * do (the public `explore` on `e2e/runner` redacts that error and drops its
+ * cause); once the run starts, failures and interruption resolve with their
  * status in the report.
  */
 export async function runExploration(options: ExplorationOptions = {}): Promise<ExplorationResult> {

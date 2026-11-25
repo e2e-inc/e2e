@@ -3,13 +3,18 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resultId } from '../../src/internal/ids.ts';
+import picocolors from 'picocolors';
+import { resultId } from '@e2e-dev/core/lib/internal/ids';
 import { visibleWidth } from '../../src/report/format.ts';
+import { DotProgress } from '../../src/report/dot.ts';
+import { LineProgress } from '../../src/report/line.ts';
 import { ListReporter } from '../../src/report/list.ts';
 import { userFrame } from '../../src/report/code-frame.ts';
-import type { CacheWrite } from '../../src/cache/context.ts';
+import type { CacheWrite } from '@e2e-dev/core/lib/cache/context';
 import type { RunEventFact, RunEventOf, RunEventResult } from '../../src/run/events.ts';
-import type { ResultStatus, AttemptRecord, SerialGroupRecord, SerialMemberRecord } from '../../src/run/records.ts';
+import { stepPromptKeys } from '../../src/cli/step.ts';
+import { pauseEvents, type HeldStep, type NumberedStep, type StepPrompt } from '../../src/run/step-hold.ts';
+import type { ResultStatus, AttemptRecord, SerialGroupRecord, SerialMemberRecord } from '@e2e-dev/core/lib/run/records';
 
 // eslint-disable-next-line no-control-regex
 const ANSI_PATTERN = /\u001b\[[0-9;?]*[a-zA-Z]/g;
@@ -130,7 +135,7 @@ function serialGroup(
 }
 
 function runStarted(
-  overrides: { ci?: boolean; targets?: string[]; projectRoot?: string; model?: string; judge?: string } = {},
+  overrides: { ci?: boolean; targets?: string[]; projectRoot?: string; model?: string; judge?: string; stepping?: true } = {},
 ): RunEventFact {
   const projectRoot = overrides.projectRoot ?? '/project';
   return {
@@ -143,7 +148,22 @@ function runStarted(
     targets: overrides.targets ?? ['chromium'],
     ...(overrides.model === undefined ? {} : { model: overrides.model }),
     ...(overrides.judge === undefined ? {} : { judge: overrides.judge }),
+    ...(overrides.stepping === undefined ? {} : { stepping: overrides.stepping }),
   };
+}
+
+/** Tells `reporter` of `shown` as the runner does: a `paused` event, or `resumed` for the test of the last one. */
+type ShownPrompt = Pick<StepPrompt, 'steps' | 'holdSteps'> & { help: boolean; viewer?: boolean; keyboard?: false };
+const pausesOf = new WeakMap<ListReporter, ReturnType<typeof pauseEvents>>();
+function showStepPrompt(reporter: ListReporter, shown: ShownPrompt | undefined): void {
+  const pauses = pausesOf.get(reporter) ?? pauseEvents(reporter.handle, () => undefined);
+  pausesOf.set(reporter, pauses);
+  if (shown === undefined) return pauses.show(undefined);
+  const keys =
+    shown.keyboard === false
+      ? []
+      : stepPromptKeys({ pause: shown.steps[0].step.kind === 'pause', steps: shown.steps.length, help: shown.help, holdSteps: shown.holdSteps, viewer: shown.viewer === true });
+  pauses.show({ steps: shown.steps, holdSteps: shown.holdSteps, keys });
 }
 
 function plan(files: { file: string; target?: string; tests: number }[]): RunEventFact {
@@ -153,9 +173,11 @@ function plan(files: { file: string; target?: string; tests: number }[]): RunEve
     tests: entry.tests,
   }));
   return {
-    type: 'plan',
+    type: 'collected',
     total: planned.reduce((sum, entry) => sum + entry.tests, 0),
     files: planned,
+    repeatEach: 1,
+    tests: [],
   };
 }
 
@@ -424,7 +446,7 @@ describe('ListReporter', () => {
   });
 
   describe('failed tests section', () => {
-    it('lists a retry that skipped with the failed attempt’s error and evidence', () => {
+    it.each(['explicit', 'fixme'] as const)('lists a retry that skipped (cause %s) with the failed attempt’s error and evidence', (cause) => {
       const { lines, output } = capture();
       const reporter = plainReporter(output);
       reporter.handle(runStarted());
@@ -444,7 +466,7 @@ describe('ListReporter', () => {
       const skipped = attempt({ id: 'attempt-2', index: 1, status: 'skipped' });
       reporter.handle(finished({
         ...result({ status: 'skipped', id: 'a', file: 'tests/a.e2e.ts', title: ['first'], attempts: [failed, skipped] }),
-        skip: { cause: 'explicit', reason: 'feature disabled' },
+        skip: { cause, reason: 'feature disabled' },
       } as RunEventResult));
       reporter.handle(runFinished({ status: 'passed', exitCode: 0, reportPath: '/project/.e2e/report.json' }));
       expect(lines.join('\n')).toContain(' Skipped After Failure 1 ');
@@ -1124,6 +1146,21 @@ describe('ListReporter', () => {
       expect(window).not.toContain('step 1');
       expect(window).not.toContain('app.open');
     });
+    it.each([
+      ['repeat', { agent: 'default', repeat: 1 }],
+      ['agent', { agent: 'second', repeat: 0 }],
+    ])('keeps a serial member in the live window while another %s of its group starts', (_what, other) => {
+      const chunks: string[] = [];
+      const output = { write: (line: string) => chunks.push(`${line}\n`), raw: (text: string) => chunks.push(text) };
+      const reporter = plainReporter(output, true);
+      reporter.handle(runStarted());
+      reporter.handle(plan([{ file: 'tests/case.e2e.ts', tests: 2 }]));
+      reporter.handle(testStarted('m1', 'step 1', 'chromium', 'tests/case.e2e.ts', 'wizard'));
+      reporter.handle({ type: 'test-started', testId: 'm1', ...other, title: 'step 1 again', file: 'tests/case.e2e.ts', serialId: 'wizard', target: 'chromium' });
+      const window = chunks.at(-1)!;
+      expect(window).toContain('step 1 again');
+      expect(window.replaceAll('step 1 again', '')).toContain('step 1');
+    });
   });
 
   describe('step streaming', () => {
@@ -1290,44 +1327,95 @@ describe('ListReporter', () => {
       const restore = withTerminalSize({ columns: 120, rows: 40 });
       try {
         const { chunks, lines, output } = liveCapture();
-        const reporter = new ListReporter(output, { live: true, colors: false, stepping: true });
-        reporter.handle(runStarted());
+        const reporter = new ListReporter(output, { live: true, colors: false });
+        reporter.handle(runStarted({ stepping: true }));
         reporter.handle(plan([{ file: 'tests/coffee.e2e.ts', tests: 1 }]));
         reporter.handle(testStarted('t1', 'orders a drink', 'chromium', 'tests/coffee.e2e.ts'));
         const step = (progress: object) => reporter.handle({ type: 'step', testId: 't1', agent: 'default', repeat: 0, target: 'chromium', progress } as never);
         step({ phase: 'start', kind: 'locator', api: 'app.open', label: '/' });
         step({ phase: 'end', kind: 'locator', api: 'app.open', label: '/', status: 'passed', durationMs: 85, modelCalls: 0 });
-        const held = { target: 'chromium', testId: 't1', agent: 'default', repeat: 0, title: 'orders a drink', api: 'locator.click', label: 'getByRole("radio", name: "Latte")', source: { file: 'tests/coffee.e2e.ts', line: 7, column: 3 } };
-        const shown = () => {
-          const window = chunks.at(-1)!.replace(ANSI_PATTERN, '').split('\n').filter((line) => line.trim() !== '');
-          const row = window.findIndex((line) => line.includes('orders a drink'));
-          return window.slice(row, window.findIndex((line) => line.includes('Test Files')));
+        const held: HeldStep = {
+          kind: 'step',
+          attachId: 'k3f9',
+          target: 'chromium',
+          testId: 't1',
+          agent: 'default',
+          repeat: 0,
+          title: 'orders a drink',
+          api: 'locator.click',
+          label: 'getByRole("radio", name: "Latte")',
+          source: { file: 'tests/coffee.e2e.ts', line: 7, column: 3 },
         };
-        reporter.showStepPrompt({ steps: [{ step: held, number: 2 }], help: false });
-        expect(shown()).toEqual([
-          '   └── orders a drink paused',
+        const shown = () => chunks.at(-1)!.replace(ANSI_PATTERN, '').split('\n').filter((line) => line.trim() !== '');
+        showStepPrompt(reporter, { steps: [{ step: held, number: 2 }], help: false, holdSteps: true, viewer: true });
+        expect(shown().slice(1, 4)).toEqual([
+          '   └── orders a drink (k3f9)',
           '       ✓ app.open "/" 85ms',
-          '       ▶ step 2  locator.click "getByRole("radio", name: "Latte")"  tests/coffee.e2e.ts:7',
-          '         press enter to run this step, press h to show help, press q to quit',
+          '       ⏸ step 2  locator.click "getByRole("radio", name: "Latte")"  tests/coffee.e2e.ts:7',
         ]);
-        reporter.showStepPrompt({ steps: [{ step: held, number: 2 }], help: true });
-        expect(shown().slice(3)).toEqual([
-          '         press enter to run this step',
-          '         press n to run to the next test',
-          '         press a to run all without stopping',
-          '         press q to quit',
-          '         press h to hide help',
+        expect(shown().at(-3)).toContain('Duration');
+        expect(shown().slice(-2)).toEqual([
+          'Paused (k3f9) at step 2',
+          '  press enter to run this step, press h to show help, press q to quit',
+        ]);
+        expect(visibleWidth('⏸')).toBe(1);
+        showStepPrompt(reporter, { steps: [{ step: held, number: 2 }], help: true, holdSteps: true, viewer: true });
+        expect(shown().slice(-7)).toEqual([
+          'Paused (k3f9) at step 2',
+          '  press enter to run this step',
+          '  press s to show the screen',
+          '  press l to show the app log',
+          '  press n to run this test without holding steps',
+          '  press a to run all without holding steps',
+          '  press q to quit',
         ]);
         const pay = { ...held, api: 'locator.click', label: 'getByRole("button", name: "Pay")', source: { file: 'tests/coffee.e2e.ts', line: 8, column: 3 } };
-        reporter.showStepPrompt({ steps: [{ step: held, number: 2 }, { step: pay, number: 3 }], help: false });
-        expect(shown().slice(2)).toEqual([
-          '       ▶ step 2  locator.click "getByRole("radio", name: "Latte")"  tests/coffee.e2e.ts:7',
-          '       ▶ step 3  locator.click "getByRole("button", name: "Pay")"  tests/coffee.e2e.ts:8',
-          '         press enter to run these 2 steps, press h to show help, press q to quit',
+        showStepPrompt(reporter, { steps: [{ step: held, number: 2 }, { step: pay, number: 3 }], help: false, holdSteps: true });
+        expect(shown().slice(3, 5)).toEqual([
+          '       ⏸ step 2  locator.click "getByRole("radio", name: "Latte")"  tests/coffee.e2e.ts:7',
+          '       ⏸ step 3  locator.click "getByRole("button", name: "Pay")"  tests/coffee.e2e.ts:8',
         ]);
-        reporter.showStepPrompt(undefined);
+        expect(shown().slice(-2)).toEqual([
+          'Paused (k3f9) at steps 2, 3',
+          '  press enter to run these 2 steps, press h to show help, press q to quit',
+        ]);
+        showStepPrompt(reporter, undefined);
         expect(chunks.at(-1)).not.toContain('step 2');
         expect(lines.join('\n')).not.toContain('step 2');
+      } finally {
+        restore();
+      }
+    });
+
+    it('clips a long paused test title and keeps the attachment id visible', () => {
+      const restore = withTerminalSize({ columns: 80, rows: 40 });
+
+      try {
+        const { chunks, output } = liveCapture();
+        const reporter = new ListReporter(output, { live: true, colors: false });
+        const title = 'orders a drink '.repeat(12);
+        reporter.handle(runStarted({ stepping: true }));
+        reporter.handle(plan([{ file: 'tests/case.e2e.ts', tests: 1 }]));
+        reporter.handle(testStarted('t1', title, 'chromium'));
+        const held: HeldStep = {
+          kind: 'pause',
+          attachId: 'k3f9',
+          target: 'chromium',
+          testId: 't1',
+          agent: 'default',
+          repeat: 0,
+          title,
+          api: 'screen.pause',
+          label: 'pause',
+        };
+        showStepPrompt(reporter, {
+          steps: [{ step: held, number: 0 }],
+          help: false,
+          holdSteps: true,
+        });
+
+        expect(chunks.at(-1)?.replace(ANSI_PATTERN, '')).toMatch(/└── orders a drink[^\n]*… \(k3f9\)\n/);
+        showStepPrompt(reporter, undefined);
       } finally {
         restore();
       }
@@ -1337,16 +1425,32 @@ describe('ListReporter', () => {
       const restore = withTerminalSize({ columns: 120, rows: 18 });
       try {
         const { chunks, output } = liveCapture();
-        const reporter = new ListReporter(output, { live: true, colors: false, stepping: true });
-        reporter.handle(runStarted());
+        const reporter = new ListReporter(output, { live: true, colors: false });
+        reporter.handle(runStarted({ stepping: true }));
         reporter.handle(plan([{ file: 'tests/coffee.e2e.ts', tests: 1 }]));
         reporter.handle(testStarted('t1', 'orders a drink', 'chromium', 'tests/coffee.e2e.ts'));
-        const held = (n: number) => ({ step: { target: 'chromium', testId: 't1', agent: 'default', repeat: 0, title: 'orders a drink', api: 'locator.click', label: `button ${n}` }, number: n });
-        reporter.showStepPrompt({ steps: [held(2), held(3), held(4), held(5), held(6), held(7), held(8), held(9)], help: false });
+        const held = (n: number): NumberedStep => ({
+          step: {
+            kind: 'step',
+            attachId: 'k3f9',
+            target: 'chromium',
+            testId: 't1',
+            agent: 'default',
+            repeat: 0,
+            title: 'orders a drink',
+            api: 'locator.click',
+            label: `button ${n}`,
+          },
+          number: n,
+        });
+        showStepPrompt(reporter, { steps: [held(2), held(3), held(4), held(5), held(6), held(7), held(8), held(9)], help: false, holdSteps: true });
+
         const window = chunks.at(-1)!.replace(ANSI_PATTERN, '');
         expect(window).toContain('press enter to run these 8 steps');
-        expect(window).toContain('▶ step 2');
-        expect(window).not.toContain('▶ step 9');
+        expect(window).toContain('⏸ step 2');
+        expect(window).not.toContain('⏸ step 9');
+        expect(window.trimEnd().split('\n').at(-1)).toBe('  press enter to run these 8 steps, press h to show help, press q to quit');
+        expect(window.split('\n').length).toBeLessThanOrEqual(18);
       } finally {
         restore();
       }
@@ -1354,16 +1458,103 @@ describe('ListReporter', () => {
 
     it('prints the --step prompt as one line without a live window', () => {
       const lines: string[] = [];
-      const reporter = new ListReporter({ write: (line) => lines.push(line) }, { live: false, colors: false, stepping: true });
-      const held = { target: 'chromium', testId: 't1', agent: 'default', repeat: 0, title: 'orders a drink', api: 'app.open', label: '/cart' };
-      reporter.showStepPrompt({ steps: [{ step: held, number: 3 }], help: false });
-      // `h` adds nothing to a plain line, so it prints nothing.
-      reporter.showStepPrompt({ steps: [{ step: held, number: 3 }], help: true });
-      reporter.showStepPrompt({ steps: [{ step: held, number: 3 }, { step: { ...held, api: 'locator.click', label: 'Pay' }, number: 4 }], help: true });
-      reporter.showStepPrompt(undefined);
+      const reporter = new ListReporter({ write: (line) => lines.push(line) }, { live: false, colors: false });
+      const held: HeldStep = {
+        kind: 'step',
+        attachId: 'k3f9',
+        target: 'chromium',
+        testId: 't1',
+        agent: 'default',
+        repeat: 0,
+        title: 'orders a drink',
+        api: 'app.open',
+        label: '/cart',
+      };
+      reporter.handle(testStarted('t1', 'orders a drink', 'chromium'));
+      showStepPrompt(reporter, { steps: [{ step: held, number: 3 }], help: false, holdSteps: true, viewer: true });
+      // The same wait told again prints nothing.
+      showStepPrompt(reporter, { steps: [{ step: held, number: 3 }], help: false, holdSteps: true, viewer: true });
+      // `h` lists every key on a line of its own.
+      showStepPrompt(reporter, { steps: [{ step: held, number: 3 }], help: true, holdSteps: true, viewer: true });
+      showStepPrompt(reporter, { steps: [{ step: held, number: 3 }, { step: { ...held, api: 'locator.click', label: 'Pay' }, number: 4 }], help: true, holdSteps: true });
+      showStepPrompt(reporter, undefined);
       expect(lines).toEqual([
-        'paused at step 3 of orders a drink [chromium]: app.open "/cart" · press enter to run this step, n to run to the next test, a to run all without stopping, q to quit',
-        'paused at steps 3, 4 of orders a drink [chromium]: app.open "/cart"; locator.click "Pay" · press enter to run these 2 steps, n to run to the next test, a to run all without stopping, q to quit',
+        'paused (k3f9) at step 3 of orders a drink [chromium]: app.open "/cart" · press enter to run this step, h to show help, q to quit',
+        'paused (k3f9) at step 3 of orders a drink [chromium]: app.open "/cart" · press enter to run this step, ' +
+          's to show the screen, l to show the app log, n to run this test without holding steps, a to run all without holding steps, q to quit',
+        'paused (k3f9) at steps 3, 4 of orders a drink [chromium]: app.open "/cart"; locator.click "Pay" · press enter to run these 2 steps, ' +
+          'n to run this test without holding steps, a to run all without holding steps, q to quit',
+      ]);
+    });
+
+    it('shows a pause under its test in a run without --step, with enter to resume', () => {
+      const restore = withTerminalSize({ columns: 120, rows: 40 });
+      try {
+        const { chunks, output } = liveCapture();
+        const reporter = new ListReporter(output, { live: true, colors: false });
+        reporter.handle(runStarted());
+        reporter.handle(plan([{ file: 'tests/coffee.e2e.ts', tests: 1 }]));
+        reporter.handle(testStarted('t1', 'orders a drink', 'chromium', 'tests/coffee.e2e.ts'));
+        const held: HeldStep = {
+          kind: 'pause',
+          attachId: 'k3f9',
+          target: 'chromium',
+          testId: 't1',
+          agent: 'default',
+          repeat: 0,
+          title: 'orders a drink',
+          api: 'screen.pause',
+          label: '',
+          source: { file: 'tests/coffee.e2e.ts', line: 9, column: 3 },
+        };
+
+        showStepPrompt(reporter, { steps: [{ step: held, number: 0 }], help: false, holdSteps: false });
+        const window = chunks.at(-1)!.replace(ANSI_PATTERN, '').split('\n').filter((line) => line.trim() !== '');
+        const row = window.findIndex((line) => line.includes('orders a drink'));
+        expect(window.slice(row, row + 2)).toEqual([
+          '   └── orders a drink (k3f9)',
+          '       ⏸ paused  screen.pause()  tests/coffee.e2e.ts:9',
+        ]);
+        expect(window.slice(-2)).toEqual([
+          'Paused (k3f9) at screen.pause()',
+          '  press enter to resume, press h to show help, press q to quit',
+        ]);
+        showStepPrompt(reporter, { steps: [{ step: held, number: 0 }], help: true, holdSteps: false, viewer: true });
+        const help = chunks.at(-1)!.replace(ANSI_PATTERN, '').split('\n').filter((line) => line.trim() !== '');
+        // More than three keys get a row each.
+        expect(help.slice(-5)).toEqual([
+          'Paused (k3f9) at screen.pause()',
+          '  press enter to resume',
+          '  press s to show the screen',
+          '  press l to show the app log',
+          '  press q to quit',
+        ]);
+      } finally {
+        restore();
+      }
+    });
+
+    it('prints a pause as one line without a live window', () => {
+      const lines: string[] = [];
+      const reporter = new ListReporter({ write: (line) => lines.push(line) }, { live: false, colors: false });
+      const held: HeldStep = {
+        kind: 'pause',
+        attachId: 'k3f9',
+        target: 'chromium',
+        testId: 't1',
+        agent: 'default',
+        repeat: 0,
+        title: 'orders a drink',
+        api: 'screen.pause',
+        label: '',
+        source: { file: 'tests/coffee.e2e.ts', line: 9, column: 3 },
+      };
+
+      // A wait no keyboard answers prints nothing.
+      showStepPrompt(reporter, { steps: [{ step: held, number: 0 }], help: false, holdSteps: false, keyboard: false });
+      showStepPrompt(reporter, { steps: [{ step: held, number: 0 }], help: false, holdSteps: false });
+      expect(lines).toEqual([
+        'paused (k3f9) in orders a drink [chromium]: screen.pause() (tests/coffee.e2e.ts:9) · press enter to resume, h to show help, q to quit',
       ]);
     });
 
@@ -1554,11 +1745,11 @@ describe('ListReporter', () => {
       const { lines, output } = liveCapture();
       const reporter = plainReporter(output, true);
       reporter.handle(runStarted());
-      reporter.processOutput('stdout', 'from the ');
-      reporter.processOutput('stdout', 'config\n');
-      reporter.processOutput('stderr', 'a warning\n');
+      reporter.handle({ type: 'output', pair: undefined, stream: 'stdout', text: 'from the ' });
+      reporter.handle({ type: 'output', pair: undefined, stream: 'stdout', text: 'config\n' });
+      reporter.handle({ type: 'output', pair: undefined, stream: 'stderr', text: 'a warning\n' });
       reporter.handle({ type: 'output', target: 'chromium', pair: undefined, stream: 'stdout', text: 'from a worker\n' });
-      reporter.processOutput('stdout', 'unfinished');
+      reporter.handle({ type: 'output', pair: undefined, stream: 'stdout', text: 'unfinished' });
       reporter.handle(runFinished({ reportPath: 'r.json' }));
       expect(lines.slice(lines.indexOf('stdout | runner'), lines.indexOf('stdout | runner') + 8)).toEqual([
         'stdout | runner',
@@ -1666,6 +1857,39 @@ describe('ListReporter', () => {
         const rowsErased = chunks.map((chunk) => Number(/\u001b\[(\d+)A/.exec(chunk)?.[1] ?? 0));
         expect(Math.max(...rowsErased)).toBeLessThanOrEqual(7);
         expect(chunks.at(-1)).toContain('more running');
+      } finally {
+        restore();
+      }
+    });
+
+    it('keeps a paused test and its prompt in the window while many other tests run', () => {
+      const restore = withTerminalSize({ rows: 24, columns: 120 });
+      try {
+        const { chunks, output } = liveCapture();
+        const reporter = new ListReporter(output, { live: true, colors: false });
+        reporter.handle(runStarted());
+        reporter.handle(plan([{ file: 'tests/a.e2e.ts', tests: 8 }]));
+        for (const id of ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']) {
+          reporter.handle(testStarted(id, `test ${id}`, 'chromium', 'tests/a.e2e.ts'));
+        }
+        const held: HeldStep = {
+          kind: 'pause',
+          attachId: 'k3f9',
+          target: 'chromium',
+          testId: 'h',
+          agent: 'default',
+          repeat: 0,
+          title: 'test h',
+          api: 'screen.pause',
+          label: '',
+          source: { file: 'tests/a.e2e.ts', line: 9, column: 3 },
+        };
+
+        showStepPrompt(reporter, { steps: [{ step: held, number: 0 }], help: false, holdSteps: false });
+        const window = chunks.at(-1)!.replace(ANSI_PATTERN, '');
+        expect(window).toContain('test h (k3f9)');
+        expect(window).toContain('⏸ paused  screen.pause()  tests/a.e2e.ts:9');
+        expect(window).toContain('press enter to resume');
       } finally {
         restore();
       }
@@ -2240,7 +2464,7 @@ describe('screenshots row', () => {
   const shot = (id: string, file: string): AttemptRecord['artifacts'][number] =>
     ({ id, kind: 'screenshot', mediaType: 'image/png', path: file, redaction: 'complete', producer: { kind: 'step', stepId: 'app.screenshot' } });
 
-  it('names each app.screenshot file, ordinary and serial, and leaves out assertion and failure screenshots', () => {
+  it('names each app.screenshot and locator.screenshot file, ordinary and serial, and leaves out assertion and failure screenshots', () => {
     const { lines, output } = capture();
     const reporter = plainReporter(output);
     reporter.handle(runStarted());
@@ -2250,14 +2474,15 @@ describe('screenshots row', () => {
     reporter.handle(group);
     reporter.handle(finished(result({ status: 'passed', id: 'm1', title: ['wizard', 'step 1'], serialGroupId: 'g1' })));
     const taken = attempt({
-      steps: [step('app.screenshot', ['a:0']), step('agent.assert', ['a:1'])],
-      artifacts: [shot('a:0', 'case/attempt-1/screenshots/001-plan.png'), shot('a:1', 'case/attempt-1/screenshots/002-assert.png'), shot('a:2', 'case/attempt-1/failure.png')],
+      steps: [step('app.screenshot', ['a:0']), step('agent.assert', ['a:1']), step('locator.screenshot', ['a:3'])],
+      artifacts: [shot('a:0', 'case/attempt-1/screenshots/001-plan.png'), shot('a:1', 'case/attempt-1/screenshots/002-assert.png'), shot('a:2', 'case/attempt-1/failure.png'), shot('a:3', 'case/attempt-1/screenshots/003-total.png')],
     });
     reporter.handle(finished(result({ status: 'passed', declarationIndex: 1, attempts: [taken] })));
     reporter.handle(runFinished());
     expect(lines.filter((line) => line.includes('.png'))).toEqual([
       'Screenshots  .e2e/artifacts/wizard/attempt-1/screenshots/001-wizard.png',
       '             .e2e/artifacts/case/attempt-1/screenshots/001-plan.png',
+      '             .e2e/artifacts/case/attempt-1/screenshots/003-total.png',
     ]);
   });
 
@@ -2278,5 +2503,145 @@ describe('screenshots row', () => {
       ...Array.from({ length: 9 }, (_, index) => `             .e2e/artifacts/s/${index + 1}.png`),
       '             and 2 more (the report lists every artifact)',
     ]);
+  });
+});
+
+describe('line progress', () => {
+  const failed = () => finished(result({ status: 'failed', id: 'b', title: ['beta'], declarationIndex: 1, attempts: [failedAttempt('wrong value')] }));
+
+  it('without a terminal, prints a counted row per result and brings the output heading back after it', () => {
+    const { lines, output } = capture();
+    const reporter = new ListReporter(output, { live: false, colors: false, progress: new LineProgress() });
+    reporter.handle(runStarted());
+    reporter.handle(plan([{ file: 'tests/case.e2e.ts', tests: 2 }]));
+    reporter.handle(testStarted('a', 'alpha', 'chromium'));
+    reporter.handle(testStarted('b', 'beta', 'chromium'));
+    const log = (text: string) => reporter.handle({ type: 'output', target: 'chromium', pair: { testId: 'a', agent: 'default', repeat: 0 }, stream: 'stdout', text });
+    const start = lines.length;
+    log('first\n');
+    reporter.handle(finished(result({ status: 'passed', id: 'b', title: ['beta'], declarationIndex: 1 })));
+    log('second\n');
+    reporter.handle(finished(result({ status: 'timed-out', id: 'a', title: ['alpha'], attempts: [failedAttempt('too slow')] })));
+    const heading = 'stdout | |chromium| tests/case.e2e.ts > alpha';
+    expect(lines.slice(start, start + 6)).toEqual([
+      heading,
+      'first',
+      '[1/2] |chromium| tests/case.e2e.ts > beta (passed)',
+      heading,
+      'second',
+      '[2/2] |chromium| tests/case.e2e.ts > alpha (timed out)',
+    ]);
+  });
+
+  it('prints a failure when its result arrives and not again under Failed Tests, and still closes with its Failed row', () => {
+    const { lines, output } = capture();
+    const reporter = new ListReporter(output, { live: false, colors: false, progress: new LineProgress() });
+    reporter.handle(runStarted());
+    reporter.handle(plan([{ file: 'tests/case.e2e.ts', tests: 2 }]));
+    reporter.handle(failed());
+    expect(lines.slice(-5)).toEqual([
+      '[1/2] |chromium| tests/case.e2e.ts > beta (failed)',
+      '',
+      ' FAIL  |chromium| tests/case.e2e.ts > beta',
+      'ASSERTION_FAILED: wrong value',
+      '',
+    ]);
+    reporter.handle(finished(result({ status: 'passed' })));
+    const page = '.e2e/results/beta/trace.md';
+    reporter.handle({ ...runFinished({ status: 'failed', exitCode: 1 }), traces: { [resultId('b', 'chromium', 'default', 0)]: page } } as RunEventFact);
+    reporter.rows([]);
+    expect(lines.filter((line) => line === 'ASSERTION_FAILED: wrong value')).toHaveLength(1);
+    expect(lines.some((line) => line.includes('Failed Tests'))).toBe(false);
+    expect(lines.slice(-4)).toEqual([
+      '     Failed  × |chromium| tests/case.e2e.ts > beta',
+      '               ASSERTION_FAILED: wrong value',
+      `               trace ${page}`,
+      '',
+    ]);
+  });
+
+  it('leaves the failure for Failed Tests when the progress waits for the end, as dot does', () => {
+    const { lines, output } = capture();
+    const reporter = new ListReporter(output, { live: false, colors: false, progress: new DotProgress('stdout', () => undefined, false) });
+    reporter.handle(runStarted());
+    reporter.handle(plan([{ file: 'tests/case.e2e.ts', tests: 1 }]));
+    reporter.handle(failed());
+    expect(lines).not.toContain('ASSERTION_FAILED: wrong value');
+    reporter.handle(runFinished({ status: 'failed', exitCode: 1 }));
+    expect(lines.filter((line) => line === 'ASSERTION_FAILED: wrong value')).toHaveLength(1);
+    expect(lines.some((line) => line.includes('Failed Tests 1'))).toBe(true);
+  });
+
+  it('on a terminal, keeps one row painted under the log: the test that started or finished last', () => {
+    const restore = withTerminalSize({ columns: 60, rows: 40 });
+    try {
+      const chunks: string[] = [];
+      const lines: string[] = [];
+      const output = { write: (line: string) => lines.push(line), raw: (text: string) => chunks.push(text) };
+      const reporter = new ListReporter(output, { live: true, colors: false, progress: new LineProgress() });
+      /** The rows the last paint left under the log. */
+      const painted = () => chunks.at(-1)!.replace(ANSI_PATTERN, '').split('\n').filter((row) => row !== '');
+      reporter.handle(runStarted());
+      expect(painted()).toEqual([]);
+      reporter.handle(plan([{ file: 'tests/case.e2e.ts', tests: 3 }]));
+      reporter.handle(testStarted('a', 'alpha', 'chromium'));
+      expect(painted()).toEqual(['[0/3] |chromium| tests/case.e2e.ts > alpha (running)']);
+      reporter.handle(testStarted('b', 'beta', 'chromium'));
+      expect(painted()).toEqual(['[0/3] |chromium| tests/case.e2e.ts > beta (running)']);
+      const logged = lines.length;
+      reporter.handle(finished(result({ status: 'passed', id: 'a', title: ['alpha'] })));
+      expect(painted()).toEqual(['[1/3] |chromium| tests/case.e2e.ts > alpha (passed)']);
+      expect(lines.slice(logged)).toEqual([]);
+
+      // A permanent line erases the row and paints it back underneath.
+      reporter.handle({ type: 'output', stream: 'stdout', text: 'runner says hi\n' });
+      expect(lines.slice(logged)).toEqual(['stdout | runner', 'runner says hi']);
+      expect(chunks.at(-2)).toBe('\u001b[1A\u001b[0J');
+      expect(painted()).toEqual(['[1/3] |chromium| tests/case.e2e.ts > alpha (passed)']);
+
+      reporter.handle(failed());
+      expect(lines.slice(-3)).toEqual([' FAIL  |chromium| tests/case.e2e.ts > beta', 'ASSERTION_FAILED: wrong value', '']);
+      expect(painted()).toEqual(['[2/3] |chromium| tests/case.e2e.ts > beta (failed)']);
+
+      // A row wider than the terminal is one row that clips the test and keeps its state, so the erase stays exact.
+      reporter.handle(testStarted('c', `gamma\n${'wide 漢字 '.repeat(12)}`, 'chromium'));
+      expect(painted()).toEqual(['[2/3] |chromium| tests/case.e2e.ts > gamma wide… (running)']);
+      reporter.handle(finished(result({ status: 'timed-out', id: 'c', title: [`gamma ${'wide '.repeat(12)}`], declarationIndex: 2, attempts: [failedAttempt('too slow')] })));
+      expect(painted()).toEqual(['[3/3] |chromium| tests/case.e2e.ts > gamma wi… (timed out)']);
+      expect(visibleWidth(painted()[0]!)).toBe(58);
+
+      const before = chunks.length;
+      reporter.handle(runFinished({ status: 'failed', exitCode: 1 }));
+      expect(chunks.slice(before)).toEqual(['\u001b[1A\u001b[0J']);
+      expect(lines.some((line) => /^\[\d\/3\]/u.test(line))).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe('colors of a view that paints', () => {
+  // picocolors decides at import, from stdout and `CI`: a view on stderr beside a piped stdout gets false.
+  const supported = picocolors.isColorSupported;
+  beforeEach(() => {
+    picocolors.isColorSupported = false;
+  });
+  afterEach(() => {
+    picocolors.isColorSupported = supported;
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    { env: '', colored: true },
+    { env: '1', colored: false },
+  ])('NO_COLOR=$env on a terminal picocolors sees none on: colored $colored, for list and line', ({ env, colored }) => {
+    vi.stubEnv('NO_COLOR', env);
+    for (const progress of [undefined, new LineProgress()]) {
+      const lines: string[] = [];
+      const reporter = new ListReporter({ write: (line) => lines.push(line), raw: () => undefined }, { live: true, ...(progress === undefined ? {} : { progress }) });
+      reporter.handle(runStarted());
+      reporter.handle(runFinished());
+      expect(lines.some((line) => line.includes('\u001b['))).toBe(colored);
+    }
   });
 });

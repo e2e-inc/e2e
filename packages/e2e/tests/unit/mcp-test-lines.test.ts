@@ -7,15 +7,15 @@
 
 import type { ToolSet } from 'ai';
 import { describe, expect, it } from 'vitest';
-import type { ExecutorActions, ExecutorNode, ExecutorObservation, ExecutorObserveOptions, StepExecutorContext } from '../../src/agent/executor.ts';
-import { GRAMMAR_TOOL_NAMES } from '../../src/agent/action-names.ts';
-import { createGrammarTools } from '../../src/agent/primitives.ts';
-import type { LocatorExpression, NodeRef, SemanticNode } from '../../src/engine/surface.ts';
-import { TestError } from '../../src/internal/errors.ts';
-import { describeExpression } from '../../src/locator/expression.ts';
-import { locateQuery } from '../../src/mcp/catalog.ts';
-import { navigationLine, nodeQueries, SessionTestLines } from '../../src/mcp/test-lines.ts';
-import { invokeTool } from '../../src/mcp/tools.ts';
+import type { ExecutorActions, ExecutorNode, ExecutorObservation, ExecutorObserveOptions, StepExecutorContext } from '@e2e-dev/core/lib/agent/executor';
+import { GRAMMAR_TOOL_NAMES } from '@e2e-dev/core/lib/agent/action-names';
+import { createGrammarTools } from '@e2e-dev/core/lib/agent/primitives';
+import type { LocatorExpression, NodeRef, SemanticNode } from '@e2e-dev/core/lib/engine/surface';
+import { TestError } from '@e2e-dev/core/lib/internal/errors';
+import { describeExpression } from '@e2e-dev/core/lib/locator/expression';
+import { locateQuery } from '../../src/session-tools/catalog.ts';
+import { navigationLine, nodeQueries, SessionTestLines } from '../../src/session-tools/test-lines.ts';
+import { invokeTool } from '../../src/session-tools/tools.ts';
 import { fakeExecutorContext } from '../helpers/fake-executor-context.ts';
 
 const extra = { signal: new AbortController().signal };
@@ -192,6 +192,35 @@ describe('SessionTestLines', () => {
     const star: Fake = { id: 'n4', role: 'button', testId: 'star', y: 80 };
     const session = await harness({ screen: [save, star], matches: { 'getByRole("button")': [save, star], 'getByTestId("star")': [star] } });
     expect(noteOf(await session.run('tap', { target: 'n4' }))).toBe('Test line: await screen.getByTestId("star").tap();');
+  });
+
+  it('finds a control nothing names by its role: alone, under its row, or by position', async () => {
+    const quantity: Fake = { id: 'n40', role: 'spinbutton', y: 80 };
+    const only = await harness({ screen: [quantity, save], matches: { 'getByRole("spinbutton")': [quantity] } });
+    expect(noteOf(await only.run('type', { target: 'n40', value: '10' }))).toBe(
+      'Test line: await screen.getByRole("spinbutton").fill("10"); // the only spinbutton on the screen, found by its role alone; a name or test id holds up better',
+    );
+
+    const other: Fake = { id: 'n41', role: 'spinbutton', y: 120 };
+    const rows: Fake[] = [
+      { id: 'n42', role: 'row', y: 80, children: [{ id: 'n43', text: 'Boxes', y: 80 }, quantity] },
+      { id: 'n44', role: 'row', y: 120, children: [{ id: 'n45', text: 'Crates', y: 120 }, other] },
+    ];
+    const scoped = await harness({
+      screen: rows,
+      matches: { 'getByRole("spinbutton")': [quantity, other], 'getByRole("row").filter({ hasText: "Crates" }) >> getByRole("spinbutton")': [other] },
+    });
+    expect(noteOf(await scoped.run('type', { target: 'n41', value: '3' }))).toBe(
+      'Test line: await screen.getByRole("row").filter({ hasText: "Crates" }).getByRole("spinbutton").fill("3");',
+    );
+
+    const placed = await harness({ screen: [quantity, other], matches: { 'getByRole("spinbutton")': [quantity, other] } });
+    expect(noteOf(await placed.run('type', { target: 'n41', value: '3' }))).toBe(
+      'Test line: await screen.getByRole("spinbutton").nth(1).fill("3"); // 2 of 2 matches, by position; a unique name or test id holds up better',
+    );
+    // A node with no role getByRole takes still has nothing to find it by.
+    const bare = await harness({ screen: [{ id: 'n46', y: 200 }], matches: {} });
+    expect(noteOf(await bare.run('tap', { target: 'n46' }))).toBe('No test line: the node has no name, text, placeholder, or test id to find it by.');
   });
 
   it('never prints a locator whose one match is another node', async () => {
@@ -443,10 +472,10 @@ describe('SessionTestLines', () => {
     );
   });
 
-  it('drafts the statements run_code passed among the action lines, each awaited and ended', async () => {
+  it('drafts the lines run_code passed among the action lines', async () => {
     const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] } });
     session.lines.opened();
-    session.lines.ran(["await screen.getByLabel('Email').fill(credentials.user('admin').password);", "expect(screen.getByRole('status')).toHaveText('Saved')"]);
+    session.lines.ran(["await screen.getByLabel('Email').fill(credentials.user('admin').password);", "await expect(screen.getByRole('status')).toHaveText('Saved');"]);
     await session.run('tap', { target: 'n2' });
     const draft = session.lines.draft();
     expect(draft.split('\n').slice(0, 6)).toEqual([
@@ -458,6 +487,19 @@ describe('SessionTestLines', () => {
       'await screen.getByRole("button", "Save").tap();',
     ]);
     expect(draft).toContain("Import credentials from 'e2e'.");
+  });
+
+  it("asks the draft's test body for an engine fixture a line only passes along", () => {
+    const drafted = (line: string): string => {
+      const lines = new SessionTestLines({ query: locateQuery, resolve: async () => [], read: async () => ({ ref: { id: 'x', revision: 'x' } }), redact: (text) => text, engineFixtures: ['browser'] });
+      lines.ran([line]);
+      return /async \(\{ ([^}]*) \}\)/.exec(lines.draft())?.[1] ?? '';
+    };
+    expect(drafted('await expect(browser).toHaveURL(/done/);')).toBe('app, screen, browser');
+    expect(drafted('await screen.getByRole("row").dragTo(browser.locator("#bin"));')).toBe('app, screen, browser');
+    // The word in a string, or as another object's member, is not the fixture.
+    expect(drafted("await screen.getByText('browser, then').tap();")).toBe('app, screen');
+    expect(drafted('await app.browser.open();')).toBe('app, screen');
   });
 
   it('hands the caller the observation it asked for, tree or not, and keeps the context live', async () => {

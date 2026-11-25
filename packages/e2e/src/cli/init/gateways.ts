@@ -5,10 +5,13 @@
  * entry here.
  */
 
-import { isLoopbackHost } from '../../internal/urls.ts';
+import { isLoopbackHost } from '@e2e-dev/core/lib/internal/urls';
 
 /** The local server an OpenAI-compatible gateway points at unless an endpoint is given. */
 export const DEFAULT_ENDPOINT = 'http://127.0.0.1:11434/v1';
+
+/** What every gateway needs. zod is a peer of `ai` and every provider; npm and pnpm install peers, Yarn does not. */
+export const AI_DEPENDENCIES: Readonly<Record<string, string>> = { ai: '^7.0.0', zod: '^4.1.8' };
 
 export type GatewayId = 'vercel' | 'openrouter' | 'openai-compatible' | 'chatgpt' | 'copilot' | 'opencode-console' | 'grok';
 
@@ -25,6 +28,10 @@ export interface GatewayPreset {
   readonly login?: string;
   /** The environment variables the provider authenticates with, any one of them enough; the first is the one to set. */
   readonly keys?: readonly string[];
+  /** The `provider` a model instance of this gateway reports, by which `e2e doctor` finds the `keys` it reads. */
+  readonly provider?: string;
+  /** True when the provider package sends an empty variable as the key, where the others read an empty one as unset. */
+  readonly sendsEmptyKey?: true;
   /** The model expression, with the endpoint the user typed for an OpenAI-compatible one. */
   model(endpoint: string | undefined): string;
 }
@@ -33,26 +40,29 @@ export const GATEWAYS: readonly GatewayPreset[] = [
   {
     id: 'vercel',
     label: 'Vercel AI Gateway',
-    hint: 'one key for every provider; reads AI_GATEWAY_API_KEY',
+    hint: 'uses AI_GATEWAY_API_KEY from your env',
     dependencies: {},
     import: "import { gateway } from 'ai';",
     comment: 'The Vercel AI Gateway serves the model id and reads AI_GATEWAY_API_KEY, or the OIDC token of a linked Vercel project.',
     keys: ['AI_GATEWAY_API_KEY', 'VERCEL_OIDC_TOKEN'],
+    provider: 'gateway',
     model: () => "gateway('openai/gpt-6-luna-fast')",
   },
   {
     id: 'openrouter',
     label: 'OpenRouter',
-    hint: 'one key for every provider; reads OPENROUTER_API_KEY',
+    hint: 'uses OPENROUTER_API_KEY from your env',
     dependencies: { '@openrouter/ai-sdk-provider': '^3.0.0' },
     import: "import { openrouter } from '@openrouter/ai-sdk-provider';",
     comment: 'OpenRouter serves the model id and reads OPENROUTER_API_KEY.',
     keys: ['OPENROUTER_API_KEY'],
+    provider: 'openrouter',
+    sendsEmptyKey: true,
     model: () => "openrouter('openai/gpt-6-luna-fast')",
   },
   {
     id: 'openai-compatible',
-    label: 'OpenAI-compatible endpoint',
+    label: 'OpenAI-compatible / local endpoint',
     hint: 'any /v1 chat endpoint: Ollama, vLLM, LiteLLM, a vendor API',
     dependencies: { '@ai-sdk/openai-compatible': '^3.0.0' },
     import: "import { createOpenAICompatible } from '@ai-sdk/openai-compatible';",
@@ -77,7 +87,7 @@ export const GATEWAYS: readonly GatewayPreset[] = [
   {
     id: 'copilot',
     label: 'GitHub Copilot subscription',
-    hint: 'your Copilot plan: OpenAI, Anthropic, Google, and SpaceXAI models',
+    hint: 'your Copilot plan: OpenAI, Anthropic, Google, and SpaceXSI models',
     dependencies: { '@ai-sdk/openai-compatible': '^3.0.0', '@ai-sdk/openai': '^4.0.0' },
     import: "import { copilot } from 'e2e/oauth/copilot';",
     comment: 'Your GitHub Copilot subscription serves the model; sign in once with `e2e login github-copilot`, `e2e models github-copilot` lists the ids.',
@@ -100,8 +110,8 @@ export const GATEWAYS: readonly GatewayPreset[] = [
     hint: 'your SuperGrok or X Premium+ plan',
     dependencies: { '@ai-sdk/xai': '^5.0.0' },
     import: "import { grok } from 'e2e/oauth/grok';",
-    comment: 'Your SuperGrok subscription serves the model; sign in once with `e2e login spacexai`, `e2e models spacexai` lists the ids.',
-    login: 'spacexai',
+    comment: 'Your SuperGrok subscription serves the model; sign in once with `e2e login spacexsi`, `e2e models spacexsi` lists the ids.',
+    login: 'spacexsi',
     model: () => "grok('grok-4')",
   },
 ];

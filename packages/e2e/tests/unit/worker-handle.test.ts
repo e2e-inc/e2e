@@ -9,9 +9,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { resolveConfig } from '../../src/config/resolve.ts';
-import { defineEngine, type EngineCleanupContext, type EngineHandle } from '../../src/engine/index.ts';
-import { SessionStore } from '../../src/run/sessions.ts';
+import { resolveConfig } from '../../src/config/resolve-run.ts';
+import { defineEngine, type EngineCleanupContext, type EngineHandle } from '@e2e-dev/core/lib/engine/index';
+import { SessionStore } from '@e2e-dev/core/lib/run/sessions';
 import { TargetWorker } from '../../src/run/worker/session.ts';
 import { childProcessSpawner } from '../../src/run/worker/handle.ts';
 
@@ -81,7 +81,7 @@ describe('ChildProcessRunner', () => {
         sessionKeyBase64: '',
         debug: false,
         aiTrace: false,
-        step: false,
+        holdSteps: false,
         envFor: () => ({ ...process.env, NODE_OPTIONS: `--import ${pathToFileURL(preload).href}` }),
       });
       let exit: string | undefined;
@@ -142,7 +142,7 @@ describe('TargetWorker disposal', () => {
     }, async () => ({
       config, target: config.targets[0]!, sessionStore: SessionStore.create('run', tmpdir()),
       runId: 'run', artifactsRoot: tmpdir(), rerunDir: undefined, headed: false,
-      workerSlot: 0, env: {}, isolated: true, resolvePairs: async () => ({ pairs: [], missing: [] }),
+      workerSlot: 0, env: {}, isolated: true, holdSteps: false, resolvePairs: async () => ({ pairs: [], missing: [] }),
     }));
     worker.start();
     await ready.promise;
@@ -182,7 +182,7 @@ describe('TargetWorker disposal', () => {
     }, async () => ({
       config, target: config.targets[0]!, sessionStore: SessionStore.create('run', tmpdir()),
       runId: 'run', artifactsRoot: tmpdir(), rerunDir: undefined, headed: false,
-      workerSlot: 0, env: {}, isolated: true, resolvePairs: async () => ({ pairs: [], missing: [] }),
+      workerSlot: 0, env: {}, isolated: true, holdSteps: false, resolvePairs: async () => ({ pairs: [], missing: [] }),
     }));
     worker.start();
     await ready.promise;

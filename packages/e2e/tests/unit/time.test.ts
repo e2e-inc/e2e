@@ -11,10 +11,11 @@ import {
   pollReads,
   ReadWindow,
   sleep,
+  StepDeadline,
   withTimeout,
-} from '../../src/internal/time.ts';
-import { E2EError } from '../../src/internal/errors.ts';
-import { EngineError } from '../../src/engine/contract.ts';
+} from '@e2e-dev/core/lib/internal/time';
+import { E2EError } from '@e2e-dev/core/lib/internal/errors';
+import { EngineError } from '@e2e-dev/core/lib/engine/contract';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -57,6 +58,21 @@ describe('Deadline', () => {
     expect(deadline.remaining(7000)).toBe(0);
     expect(deadline.expired(5999)).toBe(false);
     expect(deadline.expired(6000)).toBe(true);
+  });
+});
+
+describe('StepDeadline', () => {
+  it('ends at its timeout or its cap, whichever is sooner, and counts elapsed time from its start either way', () => {
+    const own = new StepDeadline(1000, new Deadline(9000, 0), 5000);
+    expect(own.endsAt).toBe(6000);
+    expect(own.elapsed(6000)).toBe(1000);
+    const capped = new StepDeadline(1000, new Deadline(5400, 0), 5000);
+    expect(capped.endsAt).toBe(5400);
+    expect(capped.elapsed(5400)).toBe(400);
+    const unbounded = new StepDeadline(Number.POSITIVE_INFINITY, new Deadline(5400, 0), 5000);
+    expect(unbounded.endsAt).toBe(5400);
+    const spent = new StepDeadline(1000, new Deadline(4000, 0), 5000);
+    expect(spent.expired(5000)).toBe(true);
   });
 });
 
@@ -142,6 +158,41 @@ describe('pollCondition', () => {
     expect(calls).toBe(3);
   });
 
+  it('sees a state that arrives between poll ticks no later than a poll every tick would', async () => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    const readsAt: number[] = [];
+    const promise = pollCondition(
+      makeOptions({
+        evaluate: async () => {
+          readsAt.push(Date.now() - startedAt);
+          return Date.now() - startedAt >= 290;
+        },
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(1000);
+    await promise;
+    expect(readsAt).toEqual([0, 20, 50, 100, 200, 300]);
+  });
+
+  it('reads a poll tick apart when every read outlasts the early reads', async () => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    const readsAt: number[] = [];
+    const promise = pollCondition(
+      makeOptions({
+        evaluate: async () => {
+          readsAt.push(Date.now() - startedAt);
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          return readsAt.length === 3;
+        },
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(2000);
+    await promise;
+    expect(readsAt).toEqual([0, 400, 800]);
+  });
+
   it('throws the caller error at the deadline', async () => {
     vi.useFakeTimers();
     const promise = pollCondition(
@@ -168,7 +219,8 @@ describe('pollCondition', () => {
     const assertion = expect(promise).rejects.toThrow('poll timed out');
     await vi.advanceTimersByTimeAsync(1000);
     await assertion;
-    expect(readsAt).toEqual([0, 100, 200, 300, 350]);
+    // Early reads at 20 and 50 ms, then every poll tick from the start.
+    expect(readsAt).toEqual([0, 20, 50, 100, 200, 300, 350]);
   });
 
   it('negated: a budget shorter than the grace window is still satisfiable', async () => {
@@ -339,8 +391,8 @@ describe('pollCondition', () => {
     const assertion = expect(promise).rejects.toThrow('poll timed out');
     await vi.advanceTimersByTimeAsync(1000);
     await assertion;
-    // It decided at the deadline instead of reading past it.
-    expect(calls).toBe(5);
+    // It decided at the deadline instead of reading past it: reads at 0, 20, 50, 100, 200, 300, and 400 ms.
+    expect(calls).toBe(7);
   });
 
   it('stops polling when the signal aborts between evaluations', async () => {

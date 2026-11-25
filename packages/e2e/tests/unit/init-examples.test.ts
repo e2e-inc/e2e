@@ -57,7 +57,7 @@ async function* chunks(buffer: Buffer, size = 700): AsyncGenerator<Buffer> {
 }
 
 /** A GitHub tarball of the `with-vite` example as the codeload service serves it. */
-function viteTarball(root = 'e2e-e2e-1.0.0'): Buffer {
+function viteTarball(root = 'e2e-e2e-1.0.0', config = 'export default {};\n'): Buffer {
   return gzipSync(
     tar([
       { name: 'pax_global_header', type: 'g', content: '52 comment=0123456789abcdef0123456789abcdef01234567\n' },
@@ -66,7 +66,7 @@ function viteTarball(root = 'e2e-e2e-1.0.0'): Buffer {
       { name: `${root}/examples/`, type: '5' },
       { name: `${root}/examples/with-vite/`, type: '5' },
       { name: `${root}/examples/with-vite/package.json`, content: '{\n  "name": "e2e-example-with-vite",\n  "private": true,\n  "scripts": { "test:e2e": "e2e run" },\n  "devDependencies": { "e2e": "^0.15.2", "@e2e-dev/web": "^0.11.1", "vite": "^8.3.2" }\n}\n' },
-      { name: `${root}/examples/with-vite/e2e.config.ts`, content: 'export default {};\n' },
+      { name: `${root}/examples/with-vite/e2e.config.ts`, content: config },
       { name: `${root}/examples/with-vite/.gitignore`, content: 'node_modules/\n' },
       { name: `${root}/examples/with-vite/tests/`, type: '5' },
       { name: `${root}/examples/with-vite/tests/deterministic.e2e.ts`, content: '// tests\n' },
@@ -178,6 +178,18 @@ describe('e2e init --example', () => {
     expect(output()).toContain('Next: cd my-app, then npm install, then npm run test:e2e');
   });
 
+  it('writes a CI pipeline for the example before its dependencies are installed', async () => {
+    // Its engine is not installed yet, so the config cannot load. (@e2e-dev/web would resolve beside this CLI here.)
+    const config = "import { web } from 'engine-not-installed-yet';\nexport default { targets: [{ engine: web() }] };\n";
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array(viteTarball(undefined, config)))));
+    const target = path.join(dir, 'my-app');
+    expect(await init(target, { yes: true, example: 'with-vite', ci: 'github-actions' })).toMatchObject({ exitCode: 0, ci: 'github-actions' });
+    const workflow = readFileSync(path.join(target, '.github/workflows/e2e.yml'), 'utf8');
+    expect(workflow).toContain('run: npx e2e run --reporter list,junit');
+    // clack wraps the long warning to the terminal's width.
+    expect(output()).toContain('The pipeline runs every target in one');
+  });
+
   it('falls back to main when the tag is missing and says so', async () => {
     const fetchMock = vi.fn(async (url: string) => (url.includes('refs/tags/') ? new Response('', { status: 404 }) : new Response(new Uint8Array(viteTarball('e2e-main')))));
     vi.stubGlobal('fetch', fetchMock);
@@ -228,11 +240,39 @@ describe('e2e init --example', () => {
     expect(existsSync(target)).toBe(false);
   });
 
+  it('asks which example when the flag has no name, and copies the one picked', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array(viteTarball()))));
+    vi.mocked(clack.select).mockImplementationOnce(async (prompt) => {
+      expect(prompt.options.map((option) => option.label)).toEqual(EXAMPLES.map((example) => example.label));
+      return findExample('with-vite');
+    });
+    vi.mocked(clack.confirm).mockResolvedValue(true);
+    const target = path.join(dir, 'my-app');
+    const outcome = await init(target, { interactive: true, example: true, skills: [], mcp: [], ci: 'none', install: false });
+    expect(outcome).toMatchObject({ exitCode: 0, result: 'scaffolded', example: 'with-vite' });
+    expect(existsSync(path.join(target, 'e2e.config.ts'))).toBe(true);
+  });
+
+  it('downloads nothing when the example picker is cancelled', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.mocked(clack.select).mockResolvedValueOnce(Symbol.for('clack:cancel'));
+    expect(await init(path.join(dir, 'my-app'), { interactive: true, example: true })).toMatchObject({ exitCode: 0, result: 'cancelled', example: null });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(existsSync(path.join(dir, 'my-app'))).toBe(false);
+  });
+
+  it('names the examples when nobody can answer the picker', async () => {
+    expect(await init(dir, { interactive: false, example: true })).toMatchObject({ exitCode: 2, result: 'not-interactive' });
+    expect(clack.select).not.toHaveBeenCalled();
+    expect(output()).toContain('with-vite');
+  });
+
   it('removes the copied example when the wizard is cancelled, keeping what was there', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array(viteTarball()))));
     mkdirSync(path.join(dir, '.git'));
     vi.mocked(clack.confirm).mockResolvedValue(false);
-    expect(await init(dir, { interactive: true, example: 'with-vite', skills: [], mcp: [] })).toMatchObject({ exitCode: 0, result: 'cancelled' });
+    expect(await init(dir, { interactive: true, example: 'with-vite', skills: [], mcp: [], ci: 'none' })).toMatchObject({ exitCode: 0, result: 'cancelled' });
     expect(readdirSync(dir)).toEqual(['.git']);
   });
 });

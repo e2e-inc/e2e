@@ -1,73 +1,56 @@
 /** Test-target execution engine. */
 
-import { rm } from 'node:fs/promises';
 import path from 'node:path';
-import type { EngineDisposeContext, EngineSnapshot, ResolveSecretOptions } from '../engine/index.ts';
-import type { TargetSession, OperationContext, VideoSegment } from '../engine/surface.ts';
-import type { ResolvedConfig, ResolvedTarget } from '../config/resolve.ts';
-import {
-  classifyError,
-  ConfigurationError,
-  E2EError,
-  InfrastructureError,
-  serializeError,
-  sanitizeText,
-  truncateUtf8,
-  TestError,
-  TestTimeoutError,
-  translateEngineError,
-  type SerializedError,
-} from '../internal/errors.ts';
-import { isRuntimeSkip, type RuntimeSkip } from '../internal/skip.ts';
-import { lateExpectedFailureError } from '../internal/expected-failure.ts';
+import type { TargetSession } from '@e2e-dev/core/lib/engine/surface';
+import { isCiMode, type ResolvedConfig } from '@e2e-dev/core/lib/config/resolve';
+import { classifyError, ConfigurationError, E2EError, serializeError, sanitizeRecordedText, truncateUtf8, TestError, TestTimeoutError, withHint, type SerializedError } from '@e2e-dev/core/lib/internal/errors';
+import { isRuntimeSkip, runtimeSkipCause, type CaughtRuntimeSkip } from '../internal/skip.ts';
+import { lateExpectedFailureError } from '@e2e-dev/core/lib/internal/expected-failure';
 import { settleExpectedFailure } from './expected-failure.ts';
-import type { ExecutorAttempt } from '../agent/executor.ts';
-import { isModelUnreachable } from '../agent/error.ts';
-import { withAiTraceScope } from '../internal/ai-trace.ts';
-import { DebugTrace } from '../internal/debug.ts';
-import { resultId, timestamp, uuidv7 } from '../internal/ids.ts';
-import { engineAppInfo } from '../config/app.ts';
-import { Deadline, NEVER_ABORTS, withAbort, withScopedBudget, withTimeout } from '../internal/time.ts';
-import { createAgentCacheContext, settleStagedTraces } from '../cache/context.ts';
-import { storedRecordingsFor, type StoredRecordings } from '../cache/rekeyed.ts';
+import type { ExecutorAttempt } from '@e2e-dev/core/lib/agent/executor';
+import { isModelUnreachable } from '@e2e-dev/core/lib/agent/error';
+import { withAiTraceScope } from '@e2e-dev/core/lib/internal/ai-trace';
+import { resultId, timestamp, uuidv7 } from '@e2e-dev/core/lib/internal/ids';
+import { abortError, cancelledError, Deadline, withAbort, withTimeout } from '@e2e-dev/core/lib/internal/time';
+import { createAgentCacheContext, settleStagedTraces } from '@e2e-dev/core/lib/cache/context';
+import { storedRecordingsFor, type StoredRecordings } from '@e2e-dev/core/lib/cache/rekeyed';
+import { inLoadOf } from '../collect/collect-file.ts';
 import type { ModuleRegistration, RegisteredTest } from '../collect/registry.ts';
 import { pairRecordings, type TestTargetPair } from '../collect/select.ts';
-import { keeps, type AttemptRecordings, type VideoRecording } from '../internal/recording-modes.ts';
-import type { ArtifactStore, Secret } from '../types.ts';
-import { attemptSegments, createAttemptArtifacts, resultSegment } from './artifacts.ts';
-import { AttemptBudget } from './budget.ts';
-import { createEngineSession } from '../engine/session.ts';
-import { createExtendedFixtures } from './extended-fixtures.ts';
+import type { ArtifactStore } from '@e2e-dev/core/lib/types';
+import { attemptSegments, createAttemptArtifacts, resultSegment } from '@e2e-dev/core/lib/run/artifacts';
+import { AttemptBudget, AttemptTimeout } from '@e2e-dev/core/lib/run/budget';
+import { planAttemptFixtures, WorkerFixturePool } from './fixture-pool.ts';
 import { captureFailureEvidence } from './failure-evidence.ts';
-import { createFixtures, type ArtifactSink } from './fixtures.ts';
-import { WrittenScreenshots } from './screenshots.ts';
-import { publishAttempt } from '../expect/attempt.ts';
-import { PollScope, runInPollScope } from '../expect/poll-scope.ts';
-import { SoftFailures } from '../expect/soft.ts';
+import { createFixtures } from '@e2e-dev/core/lib/run/fixtures';
+import { WrittenScreenshots } from '@e2e-dev/core/lib/run/screenshots';
+import { publishAttempt } from '@e2e-dev/core/lib/expect/attempt';
+import { PollScope, runInPollScope } from '@e2e-dev/core/lib/expect/poll-scope';
+import { SoftFailures } from '@e2e-dev/core/lib/expect/soft';
 import { findRegistered, RealmManager, runHook, type FileRef, type Realm } from './realm.ts';
+import { SuiteAttempt, tearDownWorkerFixtures, type SuiteAttemptContext } from './suite-attempt.ts';
 import type {
   AttemptRecord,
   ResultRecord,
-  ResultStatus,
   RunError,
   SerialGroupRecord,
   SerialMemberRecord,
-} from './records.ts';
-import { isFailedStatus, type SerialAttemptRecord } from './records.ts';
-import { traceScreen } from './step-screens.ts';
+} from '@e2e-dev/core/lib/run/records';
+import { isFailedStatus, type SerialAttemptRecord } from '@e2e-dev/core/lib/run/records';
+import { traceScreen } from '@e2e-dev/core/lib/run/step-screens';
 import { runWithRetries } from './retry.ts';
+import { AttemptGuestSessions } from './guests.ts';
 import { runSerialUnit, type SerialAttemptStart, type SerialHost, type SharedSerialSession } from './serial.ts';
-import { interruptedInPhase, interruptedSkip, pairKey, pairResult, unstartedResult } from './units.ts';
-import { adoptSecrets, carriedSecrets, processSecrets, registerDerivedSecrets, redactForSession, resolveSecretValue, sessionLedger, staticSecretLedger } from './secrecy.ts';
-import { isSecret } from '../secrets.ts';
-import { SessionStaging, SessionStore, targetIdentity, type SessionIdentity } from './sessions.ts';
-import { StepRecorder, type StepHoldRequest, type StepProgress } from './steps.ts';
-import { AttemptHolds, type HeldStep } from './step-hold.ts';
-import { EngineError } from '../engine/contract.ts';
-import { hostedVideoUrl } from '../engine/recording.ts';
-import { sessionRecordings } from './recordings.ts';
-import { WorkerModels } from './worker-models.ts';
-import type { SetupFn } from '../types.ts';
+import { interruptedInPhase, interruptedSkip, pairKey, unitResult, unstartedResult } from './units.ts';
+import { carriedSecrets, processSecrets, redactForSession, sessionLedger, staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
+import { SessionStaging } from '@e2e-dev/core/lib/run/sessions';
+import { isOwnStep, StepRecorder, type StepHoldRequest, type StepProgress } from '@e2e-dev/core/lib/run/steps';
+import { holdAttemptSteps, readHeldScreen, type AttemptHolds, type HoldReads, type StepHold } from './step-hold.ts';
+import { HeldTestTools } from './worker/held-test-tools.ts';
+import { WorkerModels } from '@e2e-dev/core/lib/run/worker-models';
+import { classifyAttemptStatus, EngineSessions, type EngineSessionsOptions } from '@e2e-dev/core/lib/run/engine-sessions';
+import type { EngineDisposeContext } from '@e2e-dev/core/lib/engine/index';
+import { numberedAppLogLines } from '../report/failure-text.ts';
 
 export interface ExecutionEvents {
   onResult?(result: ResultRecord): void;
@@ -85,17 +68,18 @@ export interface ExecutionEvents {
   /** Live step progress of one running attempt, for reporters. */
   onProgress?(pair: TestTargetPair, progress: StepProgress): void;
   /**
-   * An attempt's test timeout started, as its `beforeEach` hooks and body
-   * begin; again with `remainingMs` each time its test clock runs again
-   * after `e2e run --step` held a step.
+   * An attempt's test timeout (`timeoutMs`, the test's own or what
+   * `test.setTimeout` changed it to) started, as its `beforeEach` hooks and
+   * body begin; again with `remainingMs` each time its test clock runs again
+   * after `e2e run --step` held a step, and each time `test.setTimeout` moves it.
    */
   onAttemptDeadline?(
     pair: TestTargetPair,
-    attempt: { readonly index: number; readonly id: string; readonly startedAt: string; readonly remainingMs?: number },
+    attempt: { readonly index: number; readonly id: string; readonly startedAt: string; readonly timeoutMs: number; readonly remainingMs?: number },
   ): void;
   /** The attempt `onAttemptDeadline` announced has ended, or one that never got that far has. */
   onAttemptEnd?(): void;
-  /** One line of progress the engine's `init` reported, already naming the target and worker slot. */
+  /** A message from the worker about engine setup or an attached recording. */
   onNotice?(message: string): void;
   /**
    * A run-level configuration failure met mid-run, such as an unusable model
@@ -105,10 +89,27 @@ export interface ExecutionEvents {
   onRunAbort?(error: RunError): void;
 }
 
-export interface TargetExecutorOptions {
-  readonly config: ResolvedConfig;
-  readonly target: ResolvedTarget;
-  readonly runId: string;
+/** Options for holding an attempt at steps and pauses. */
+type ExecutorHold = {
+  /**
+   * Asks the runner at each pause, and before each step when `steps` is set.
+   * The runner can call `readScreen` to read the screen during the wait.
+   * The attempt's app log is available through `readLogs` during the wait.
+   */
+  readonly ask: (
+    step: StepHold,
+    signal: AbortSignal,
+    reads: HoldReads,
+    tools: HeldTestTools,
+  ) => Promise<void>;
+  /**
+   * Set `steps` to wait at `ask` before each top-level step of a test's
+   * first attempt (`e2e run --step`). Setup tests and retries aren't held.
+   */
+  readonly steps: boolean;
+};
+
+export interface TargetExecutorOptions extends EngineSessionsOptions {
   readonly artifactsRoot: string;
   /**
    * The directory under `artifactsRoot` a `--last-failed` rerun's attempts
@@ -116,12 +117,6 @@ export interface TargetExecutorOptions {
    * undefined when the attempts fill the root themselves.
    */
   readonly rerunDir?: string | undefined;
-  readonly sessionStore: SessionStore;
-  readonly headed: boolean;
-  /** This worker's slot among the target's workers; see `EngineInitInfo.workerSlot`. */
-  readonly workerSlot: number;
-  /** This worker's environment; see `EngineInitInfo.env`. */
-  readonly env: Readonly<Record<string, string | undefined>>;
   /**
    * Whether this executor runs in a process of its own that ends with its
    * work. Only then can an interrupted test body be abandoned mid-flight:
@@ -130,14 +125,13 @@ export interface TargetExecutorOptions {
    * interrupt waits for it to reach a harness call or its timeout.
    */
   readonly isolated: boolean;
-  readonly interruptSignal: AbortSignal;
   /**
-   * Holds each top-level step of a test's first attempt until the runner
-   * lets it run (`e2e run --step`); it resolves to run the step. Setup tests
-   * and retries never wait.
+   * Set `hold` to wait at held steps and pauses. Without it, a pause returns
+   * right away.
    */
-  readonly holdStep?: ((step: HeldStep, signal: AbortSignal) => Promise<void>) | undefined;
-  readonly debug?: DebugTrace;
+  readonly hold?: ExecutorHold | undefined;
+  /** Awaited before each pair starts, before the interrupt check. */
+  readonly beforePair?: (() => Promise<void>) | undefined;
   readonly events?: ExecutionEvents;
   /** The virtual file of tests registered in memory, and the agents they run as; see `InMemoryAttempts`. */
   readonly inMemory?: InMemoryAttempts | undefined;
@@ -156,32 +150,6 @@ export interface InMemoryAttempts {
 
 type AttemptPhase = 'launch' | 'beforeEach' | 'body' | 'afterEach';
 
-/**
- * The slice of an attempt record a session close reads and writes: the
- * verdict the caller has already reached, and the cleanup outcome the close
- * reports.
- */
-export interface ClosingRecord {
-  readonly status: AttemptRecord['status'];
-  cleanup: AttemptRecord['cleanup'];
-}
-
-/**
- * What one attempt's session opens with: the saved session to restore, and
- * what the attempt captures (`pairRecordings`): the video it records, and
- * whether it keeps a trace, which decides whether screens are taken at all.
- */
-export interface SessionPlan {
-  readonly session: string | undefined;
-  readonly recordings: AttemptRecordings;
-}
-
-/** What closing an attempt's session needs besides its verdict: the video it started. */
-export interface SessionClose {
-  readonly attemptId: string;
-  readonly video: VideoRecording | undefined;
-}
-
 /** How one attempt acquires its session and session-staging hooks. */
 export type AttemptContext =
   | { readonly kind: 'ordinary' }
@@ -189,59 +157,54 @@ export type AttemptContext =
   | { readonly kind: 'serial'; readonly shared: SharedSerialSession };
 
 /** Executes every selected pair for one target sequentially. */
-export class TargetExecutor implements SerialHost {
-  readonly target: ResolvedTarget;
-  get runId(): string {
-    return this.options.runId;
-  }
+export class TargetExecutor extends EngineSessions implements SerialHost {
   get artifactStore(): ArtifactStore | undefined {
     return this.config.artifactStore;
   }
   readonly artifactsRoot: string;
   readonly rerunDir: string | undefined;
-  readonly interruptSignal: AbortSignal;
   readonly realms: RealmManager;
-  readonly debug: DebugTrace;
+  /** The worker-scoped `test.extend()` fixtures, torn down before the engine is disposed. */
+  readonly workerFixtures: WorkerFixturePool;
+  /** What suite hooks and worker fixture teardowns run on; see `SuiteAttempt`. */
+  private readonly suiteAttempts: SuiteAttemptContext;
 
-  private readonly runErrors: RunError[] = [];
   /** Fails the attempt in flight from outside it, while one is; see `strayRejection`. */
   private strayFailure: ((cause: unknown) => void) | undefined;
   /** The last test whose attempt ended here: the likely source of a rejection that surfaces between attempts. */
   private lastAttemptTestId: string | undefined;
   private readonly models: WorkerModels;
-  private readonly sessionIdentity: SessionIdentity;
   /** The file store's listing under `cache.strict`, read once for every attempt here. */
   private readonly storedRecordings: StoredRecordings | undefined;
-  /** Resolves once the engine's init hook completed for this worker. */
-  private engineReady: Promise<void> | undefined;
   /** The stored screenshots the run wrote, so no comparison passes against one nobody reviewed. */
   private readonly writtenScreenshots: WrittenScreenshots;
 
-  constructor(private readonly options: TargetExecutorOptions) {
-    this.target = options.target;
+  constructor(protected override readonly options: TargetExecutorOptions) {
+    super(options);
     this.artifactsRoot = options.artifactsRoot;
     this.writtenScreenshots = new WrittenScreenshots(options.artifactsRoot);
     this.rerunDir = options.rerunDir;
-    this.interruptSignal = options.interruptSignal;
-    this.debug = options.debug ?? new DebugTrace(false);
     this.models = new WorkerModels((error) => {
       options.events?.onRunAbort?.({ error: serializeError(error) });
     });
+    this.workerFixtures = new WorkerFixturePool(options.target);
+    this.suiteAttempts = { host: this, config: options.config, models: this.models, runErrors: this.runErrors };
     this.realms = new RealmManager({
       targetName: options.target.name,
-      platform: options.target.platform,
+      openSuiteHooks: (shared) => new SuiteAttempt(this.suiteAttempts, shared),
       timeout: options.config.timeout,
       cleanupTimeout: options.config.cleanupTimeout,
       runErrors: this.runErrors,
       redactTitle: staticSecretLedger(options.config.allSecrets).redact,
       debug: this.debug,
     });
-    this.sessionIdentity = targetIdentity(options.target);
     this.storedRecordings = storedRecordingsFor(options.config.cache);
   }
 
-  private get config(): ResolvedConfig {
-    return this.options.config;
+  /** Tears the worker fixtures down, then disposes the engine: a teardown may still drive it. */
+  override async dispose(options: Pick<EngineDisposeContext, 'reuseSignal'> = {}): Promise<void> {
+    await tearDownWorkerFixtures(this.suiteAttempts);
+    await super.dispose(options);
   }
 
   /** Emits one final result record (SerialHost). Records are not retained. */
@@ -267,16 +230,6 @@ export class TargetExecutor implements SerialHost {
   /** Streams one finished serial group attempt (SerialHost). */
   serialAttemptFinished(groupId: string, attempt: SerialAttemptRecord): void {
     this.options.events?.onSerialAttempt?.(groupId, attempt);
-  }
-
-  /** Builds one engine operation context. */
-  private op(attemptId: string, timeoutMs: number, signal: AbortSignal): OperationContext {
-    return { signal, timeoutMs, runId: this.options.runId, attemptId, origin: 'test' };
-  }
-
-  /** Run-level errors recorded so far, in order. */
-  collectedRunErrors(): readonly RunError[] {
-    return this.runErrors;
   }
 
   /**
@@ -308,85 +261,6 @@ export class TargetExecutor implements SerialHost {
     return true;
   }
 
-  /**
-   * Runs the engine's init hook once per worker, before the first session.
-   * Boot work (simulators, device leases) is bounded by the launch timeout
-   * but never charged against a step budget.
-   */
-  initEngineOnce(): Promise<void> {
-    const engine = this.target.engine;
-    const init = engine?.init?.bind(engine);
-    if (init === undefined) return Promise.resolve();
-    // Memoized for the worker's lifetime, failure included: an engine that
-    // could not boot fails every attempt on this worker with the same cause
-    // instead of re-running a broken boot per test. Init outlives any single
-    // attempt, so it aborts on worker interrupt, not on one test's deadline.
-    this.engineReady ??= this.debug.time('engine.init', () =>
-      this.lifecycle(
-        `initializing engine ${engine?.name ?? 'none'}`,
-        this.config.launchTimeout,
-        'LAUNCH_TIMEOUT',
-        this.interruptSignal,
-        (signal) =>
-          init({
-            runId: this.options.runId,
-            targetName: this.target.name,
-            projectRoot: this.config.projectRoot,
-            app: engineAppInfo(this.target.app),
-            env: this.options.env,
-            headed: this.options.headed,
-            workerSlot: this.options.workerSlot,
-            signal,
-            log: (line) => this.options.events?.onNotice?.(`${this.target.name} worker ${String(this.options.workerSlot)}: ${line}`),
-          }),
-      ),
-    );
-    return this.engineReady;
-  }
-
-  /**
-   * Runs one lifecycle call on the engine seam within the given budget. The
-   * signal handed to `run` follows `parent` and is aborted the moment the call
-   * fails, timeout included, so a hook that outlived its budget is told to
-   * stop instead of running on into the retry. Synchronous throws are caught,
-   * and every failure is translated onto the runner taxonomy: an engine
-   * failing outside its contract is infrastructure, never a test error.
-   */
-  private async lifecycle<T>(
-    label: string,
-    timeoutMs: number,
-    code: 'LAUNCH_TIMEOUT' | 'CLEANUP_TIMEOUT',
-    parent: AbortSignal,
-    run: (signal: AbortSignal) => Promise<T>,
-  ): Promise<T> {
-    try {
-      return await withScopedBudget(timeoutMs, parent, () => new InfrastructureError(code, `${label} timed out`), run);
-    } catch (cause) {
-      throw translateEngineError(cause, ` while ${label}`);
-    }
-  }
-
-  /**
-   * Disposes the engine at worker end of life, bounded by the cleanup budget.
-   * Every engine runs over the protocol, whose client forwards `dispose` only
-   * once `init` was called: a worker that never initialized opened no
-   * connection, so the engine has nothing of it to release.
-   */
-  async dispose(options: Pick<EngineDisposeContext, 'reuseSignal'> = {}): Promise<void> {
-    const disposeEngine = this.target.engine?.dispose?.bind(this.target.engine);
-    if (disposeEngine === undefined) return;
-    try {
-      await this.lifecycle(
-        'disposing the engine',
-        this.config.cleanupTimeout,
-        'CLEANUP_TIMEOUT',
-        NEVER_ABORTS,
-        (signal) => disposeEngine({ signal, timeoutMs: this.config.cleanupTimeout, ...options }),
-      );
-    } catch (cause) {
-      this.runErrors.push({ error: serializeError(classifyError(cause), { phase: 'cleanup' }) });
-    }
-  }
 
   /**
    * Runs one file-target unit: runnable pairs of a single file, in declaration
@@ -397,12 +271,17 @@ export class TargetExecutor implements SerialHost {
   async runFileUnit(
     file: FileRef,
     filePairs: readonly TestTargetPair[],
-    freshRegistration?: ModuleRegistration,
+    freshRegistration: ModuleRegistration | undefined,
+    keepRealm: boolean,
   ): Promise<void> {
     const executedSerialUnits = new Set<string>();
     const ordered = filePairs.toSorted((a, b) => a.test.declarationIndex - b.test.declarationIndex);
     let realm: Realm | null =
       freshRegistration === undefined ? null : this.realms.adopt(freshRegistration, file);
+    // What the file's next unit on this worker may run in: the last realm ordinary tests shared, while nothing failed.
+    let reusable = realm;
+    let failed = false;
+    const runErrorsBefore = this.runErrors.length;
     for (const [index, pair] of ordered.entries()) {
       // One serial unit per agent the group runs as: its members are the
       // group's pairs under that agent, in declaration order. The unit
@@ -412,6 +291,7 @@ export class TargetExecutor implements SerialHost {
       const serialUnitKey =
         pair.test.serialId === undefined ? undefined : pairKey(pair.test.serialId, pair.agent, pair.repeat);
       if (serialUnitKey !== undefined && executedSerialUnits.has(serialUnitKey)) continue;
+      await this.options.beforePair?.();
       if (this.interruptSignal.aborted) {
         this.emit(unstartedResult(pair, interruptedSkip(this.interruptSignal)));
         continue;
@@ -425,11 +305,15 @@ export class TargetExecutor implements SerialHost {
         // sharing ends here, afterAll included.
         if (realm !== null) await this.realms.leave(realm);
         realm = null;
-        await runSerialUnit(this, members, file);
+        const group = await runSerialUnit(this, members, file);
+        if (group.status !== 'passed') failed = true;
         continue;
       }
       this.pairStarted(pair);
       realm = await this.runOrdinaryPair(pair, file, realm);
+      // A pair leaves no realm when an attempt of it failed.
+      if (realm === null) failed = true;
+      else reusable = realm;
       // A scope's afterAll runs as soon as its last test in this realm is
       // done, so a describe's teardown never lands after a sibling's tests.
       if (realm !== null) {
@@ -445,6 +329,8 @@ export class TargetExecutor implements SerialHost {
       }
     }
     if (realm !== null) await this.realms.leave(realm);
+    // A suite hook that failed is a run error.
+    if (keepRealm && !failed && reusable !== null && this.runErrors.length === runErrorsBefore) this.realms.keep(reusable);
   }
 
   /** Records a deterministic-registration violation as a run-level error. */
@@ -499,44 +385,8 @@ export class TargetExecutor implements SerialHost {
       },
     );
 
-    this.emitUnitResult(pair, finalStatus, attempts, hookFailure);
+    this.emit(unitResult(pair, finalStatus, attempts, hookFailure));
     return realm;
-  }
-
-  /**
-   * The result of a test or setup unit. A beforeAll failure before any
-   * attempt ran skips the unit; on a retry the recorded attempts stand, since
-   * the hook failure is already a run error and a failing test must not be
-   * reported as skipped. A unit whose body skipped itself ends on its first
-   * skipped attempt (`runWithRetries`), so that attempt's reason is the
-   * result's.
-   */
-  private emitUnitResult(
-    pair: TestTargetPair,
-    finalStatus: ResultStatus,
-    attempts: AttemptRecord[],
-    hookFailure: SerializedError | undefined,
-  ): void {
-    if (hookFailure !== undefined && attempts.length === 0) {
-      this.emit(
-        pairResult(pair, {
-          status: 'skipped',
-          selected: true,
-          skip: { cause: 'hook-failed', reason: hookFailure.message },
-          attempts: [],
-        }),
-      );
-      return;
-    }
-    const last = attempts.at(-1);
-    this.emit(
-      pairResult(pair, {
-        status: finalStatus,
-        selected: true,
-        attempts,
-        ...(last?.status === 'skipped' ? { skip: last.skip } : {}),
-      }),
-    );
   }
 
   // --- setup tests ---
@@ -598,224 +448,9 @@ export class TargetExecutor implements SerialHost {
       },
     );
 
-    this.emitUnitResult(pair, finalStatus, attempts, hookFailure);
+    this.emit(unitResult(pair, finalStatus, attempts, hookFailure));
   }
 
-  // --- attempt core ---
-
-  /** Starts one attempt on the engine, restores the planned session, and starts the planned video. */
-  async launchSession(
-    plan: SessionPlan,
-    attemptId: string,
-    artifactsDir: string,
-    signal: AbortSignal,
-  ): Promise<TargetSession> {
-    // The engine booted in init() once per worker; the adapter is per-attempt
-    // so refs never cross attempts.
-    await this.initEngineOnce();
-    const engine = this.target.engine;
-    // Session restore rides the engine's neutral state capability. Checked
-    // before any per-attempt isolation opens, so a misconfigured session never
-    // orphans a started attempt.
-    const sessionName = plan.session;
-    if (sessionName !== undefined && engine?.state === undefined) {
-      throw new ConfigurationError(
-        'UNSUPPORTED_CAPABILITY',
-        `target "${this.target.name}" has no engine state capability for session restore`,
-      );
-    }
-    const { video } = plan.recordings;
-    const session = createEngineSession({ engine, targetName: this.target.name, traced: plan.recordings.trace !== undefined });
-    const launch = <T>(label: string, run: (launchSignal: AbortSignal) => Promise<T>) =>
-      this.lifecycle(label, this.config.launchTimeout, 'LAUNCH_TIMEOUT', signal, run);
-    const launchOp = (launchSignal: AbortSignal) =>
-      this.op(attemptId, this.config.launchTimeout, launchSignal);
-    try {
-      const startAttempt = engine?.startAttempt?.bind(engine);
-      if (startAttempt !== undefined) {
-        await this.debug.time('session.launch', () =>
-          launch(`starting an attempt on engine ${engine?.name ?? 'none'}`, (launchSignal) =>
-            startAttempt({
-              attemptId,
-              artifactsDir,
-              signal: launchSignal,
-              resolveSecret: (secret, options) => this.resolveEngineSecret(session, secret, options),
-              appLog: (entry) => session.appLog.push(entry),
-              navigation: (line) => session.appLog.navigated(line),
-              ...(session.screens.traced ? { screen: (snapshot: EngineSnapshot) => session.screens.push(snapshot) } : {}),
-              environment: (facts) => session.environment.push(facts),
-            }),
-          ),
-        );
-      }
-      if (sessionName !== undefined) {
-        const saved = await this.options.sessionStore.load(sessionName, this.sessionIdentity);
-        // The values the saving session learned come back with its state, so
-        // a stored value the app echoes is redacted here too.
-        adoptSecrets(sessionLedger(session, this.config.allSecrets), saved.secrets);
-        await launch('restoring the session', (launchSignal) =>
-          session.restoreState!(saved.state, launchOp(launchSignal)),
-        );
-      }
-      // A video the attempt asks for starts here, when the engine has it: an
-      // engine without it was either refused before the run (a mode a target
-      // or test set) or skipped with a notice (a run-wide mode). A required
-      // video's failure fails the launch; a default one's is swallowed.
-      if (video !== undefined && session.artifacts.startVideo !== undefined) {
-        const recordings = sessionRecordings(session, this.target.name);
-        const starting = launch('starting the video', (launchSignal) => recordings.startAttemptVideo(launchOp(launchSignal)));
-        if (video.policy === 'required') await starting;
-        else await starting.catch(() => undefined);
-      }
-    } catch (cause) {
-      // The attempt's isolation is open, or a timed-out startAttempt may still
-      // open it: end it within the cleanup budget, or the retry opens a second
-      // one. An engine without startAttempt makes this a no-op.
-      await this.endAttempt(session, attemptId).catch(() => undefined);
-      throw cause;
-    }
-    return session;
-  }
-
-  /**
-   * The plaintext of a secret the target's engine declared, for an option it
-   * hands the app (basic-auth credentials). Registered for the session's and
-   * the process's redaction by `resolveSecretValue`, with every value the
-   * engine derives from it (the base64 credential an `Authorization` header
-   * carries) under the same name, so its text and text downloads are
-   * redacted of them. Its pixels stay as they are, since nothing was typed.
-   */
-  private async resolveEngineSecret(session: TargetSession, secret: Secret, options?: ResolveSecretOptions): Promise<string> {
-    const engine = this.target.engine;
-    if (!isSecret(secret) || !(engine?.secrets ?? []).some((declared) => declared.name === secret.name)) {
-      const name = isSecret(secret) ? `"${secret.name}"` : 'a value that is not a secrets.get() handle';
-      throw new ConfigurationError(
-        'SECRET_UNAVAILABLE',
-        `engine ${engine?.name ?? 'none'} asked for secret ${name}, which it did not declare in its secrets`,
-      );
-    }
-    const ledger = sessionLedger(session, this.config.allSecrets);
-    const plaintext = await resolveSecretValue(secret, this.config.allSecrets, ledger);
-    registerDerivedSecrets(secret.name, (await options?.derived?.(plaintext)) ?? [], ledger);
-    return plaintext;
-  }
-
-  /**
-   * Collects a failure the engine holds from a path no step awaited, within
-   * the cleanup budget; the interrupt is the one thing that cuts it short.
-   * The error is the test's, thrown as it was so `classifyError` keeps its
-   * code: `lifecycle` would name every non-engine error an engine failure.
-   */
-  settleAttempt(session: TargetSession, attemptId: string): Promise<void> {
-    return withScopedBudget(
-      this.config.cleanupTimeout,
-      this.interruptSignal,
-      () => new InfrastructureError('CLEANUP_TIMEOUT', 'settling the attempt timed out'),
-      (signal) => session.settle(this.op(attemptId, this.config.cleanupTimeout, signal)),
-    );
-  }
-
-  /** Ends one attempt's isolation within the cleanup budget. */
-  private endAttempt(session: TargetSession, attemptId: string): Promise<void> {
-    return this.lifecycle(
-      'ending the attempt',
-      this.config.cleanupTimeout,
-      'CLEANUP_TIMEOUT',
-      NEVER_ABORTS,
-      (signal) => session.close(this.op(attemptId, this.config.cleanupTimeout, signal)),
-    );
-  }
-
-  /**
-   * Finalizes the video, then ends the attempt with a fresh cleanup
-   * budget. The caller has classified the attempt by now: `record.status`
-   * decides whether an `on-failure` recording is kept.
-   */
-  async closeSession(
-    session: TargetSession,
-    close: SessionClose,
-    record: ClosingRecord,
-    artifactSink: ArtifactSink,
-    secondaryErrors: SerializedError[],
-  ): Promise<void> {
-    const { attemptId, video } = close;
-    await this.stopRunningRecording(session, attemptId, record, artifactSink, secondaryErrors);
-    if (session.artifacts.stopVideo !== undefined && video !== undefined) {
-      const recordings = sessionRecordings(session, this.target.name);
-      await this.stopVideo(video, attemptId, record, secondaryErrors, async (operation) => {
-        const segments = await recordings.stopAttemptVideo(operation);
-        // Recorded so a failure could be looked at; a pass has nothing to show.
-        if (!keeps(video.keep, record.status)) {
-          await Promise.all(
-            segments.flatMap((segment) => ('path' in segment ? [rm(path.join(artifactSink.dir, segment.path), { force: true })] : [])),
-          );
-          return;
-        }
-        registerVideos(artifactSink, segments);
-      });
-    }
-    try {
-      await this.debug.time('session.close', () => this.endAttempt(session, attemptId));
-    } catch (cause) {
-      record.cleanup = 'failed';
-      secondaryErrors.push(serializeError(classifyError(cause), { phase: 'cleanup' }));
-    }
-  }
-
-  /**
-   * Stops a recording the test started with `app.startRecording` and left
-   * running, within the cleanup budget, and keeps it as the attempt's
-   * artifact. One that cannot be finalized is a cleanup failure.
-   */
-  private async stopRunningRecording(
-    session: TargetSession,
-    attemptId: string,
-    record: ClosingRecord,
-    artifactSink: ArtifactSink,
-    secondaryErrors: SerializedError[],
-  ): Promise<void> {
-    const recordings = sessionRecordings(session, this.target.name);
-    if (!recordings.spanRunning) return;
-    try {
-      await this.lifecycle(
-        'stopping the recording',
-        this.config.cleanupTimeout,
-        'CLEANUP_TIMEOUT',
-        NEVER_ABORTS,
-        (signal) => recordings.stopSpan(this.op(attemptId, this.config.cleanupTimeout, signal), artifactSink),
-      );
-    } catch (cause) {
-      record.cleanup = 'failed';
-      secondaryErrors.push(serializeError(classifyError(cause), { phase: 'cleanup' }));
-    }
-  }
-
-  /**
-   * Stops the video the attempt started, within the cleanup budget. A
-   * required video that cannot be finalized is a cleanup failure the report
-   * must show; a best-effort one fails quietly.
-   */
-  private async stopVideo(
-    recording: VideoRecording,
-    attemptId: string,
-    record: ClosingRecord,
-    secondaryErrors: SerializedError[],
-    stop: (operation: OperationContext) => Promise<void>,
-  ): Promise<void> {
-    try {
-      await this.lifecycle(
-        'stopping the video',
-        this.config.cleanupTimeout,
-        'CLEANUP_TIMEOUT',
-        NEVER_ABORTS,
-        (signal) => stop(this.op(attemptId, this.config.cleanupTimeout, signal)),
-      );
-    } catch (cause) {
-      if (recording.policy !== 'required') return;
-      record.cleanup = 'failed';
-      secondaryErrors.push(serializeError(classifyError(cause), { phase: 'cleanup' }));
-    }
-  }
 
   /** Runs one attempt to completion (SerialHost). */
   /**
@@ -839,7 +474,7 @@ export class TargetExecutor implements SerialHost {
       },
       async () => {
         try {
-          return await this.executeAttempt(pair, registered, realm, attemptIndex, context);
+          return await inLoadOf(realm.registration, () => this.executeAttempt(pair, registered, realm, attemptIndex, context));
         } finally {
           this.options.events?.onAttemptEnd?.();
         }
@@ -870,9 +505,29 @@ export class TargetExecutor implements SerialHost {
     const redact = (text: string): string => redactForSession(openSession ?? undefined, this.config.allSecrets, text);
     // Set once the test clock exists, before the first step that could wait.
     let holds: AttemptHolds | undefined;
-    const holdStep = context.kind === 'setup' || attemptIndex > 0 ? undefined : this.options.holdStep;
+    let heldTools: HeldTestTools | undefined;
+    const hold = this.options.hold;
     const steps = new StepRecorder(attemptId, {
-      ...(holdStep === undefined ? {} : { hold: (step: StepHoldRequest, signal: AbortSignal) => holds?.hold(step, signal) ?? Promise.resolve() }),
+      ...(hold === undefined
+        ? {}
+        : {
+            hold: {
+              ask: (request: StepHoldRequest, signal: AbortSignal) => {
+                if (request.kind === 'pause' && isCiMode(this.options.env)) {
+                  throw new TestError(
+                    'PAUSE_UNAVAILABLE',
+                    withHint(
+                      "a test can't be paused while CI is set, since there isn't anyone to resume it",
+                      'remove the screen.pause() call before you commit',
+                    ),
+                  );
+                }
+
+                return holds?.hold(request, signal) ?? Promise.resolve();
+              },
+              steps: hold.steps && context.kind !== 'setup' && attemptIndex === 0,
+            },
+          }),
       attempt: { id: shared?.attemptId ?? attemptId, index: attemptIndex },
       maxEventsPerStep: this.config.limits.maxEventsPerStep,
       projectRoot: this.config.projectRoot,
@@ -927,6 +582,9 @@ export class TargetExecutor implements SerialHost {
       identity: { runId: this.options.runId, testId: pair.test.id, attemptId: shared?.attemptId ?? attemptId },
     });
 
+    /** The sessions the test opens beside its own with `launch()`. */
+    const guests = new AttemptGuestSessions(steps, artifacts.sink, { keep: video?.keep, videoPrefix: shared === undefined ? '' : `${attemptId}-`, cleanupTimeout: this.config.cleanupTimeout });
+
     const record: AttemptRecord = {
       id: attemptId,
       index: attemptIndex,
@@ -942,8 +600,8 @@ export class TargetExecutor implements SerialHost {
 
     let failure: E2EError | undefined;
     let failurePhase: AttemptPhase | undefined;
-    /** Set when the body (or a beforeEach) skipped the test with `test.skip(...)`. */
-    let skipped: RuntimeSkip | undefined;
+    /** Set when the body (or a beforeEach) skipped the test with `test.skip(...)` or `test.fixme(...)`. */
+    let skipped: CaughtRuntimeSkip | undefined;
     /** Why the attempt is expected to fail: the `fail` option, else the first `test.fail(...)` that marked it. */
     let expectedFailure = pair.options.expectedFailure;
     let phase: AttemptPhase = 'launch';
@@ -991,9 +649,11 @@ export class TargetExecutor implements SerialHost {
       const evidence = await captureFailureEvidence({
         session: openSession,
         error: failure,
+        ownStep: isOwnStep(steps.all().findLast((step) => step.status !== 'passed') ?? {}),
         ledger: sessionLedger(openSession, this.config.allSecrets),
         config: this.config,
         appOrigin: this.target.app.base?.origin,
+        appBase: this.target.app.base,
         artifacts: artifacts.sink,
         operation: (signal, timeoutMs) => this.op(attemptId, timeoutMs, signal),
         interrupt: this.interruptSignal,
@@ -1019,6 +679,8 @@ export class TargetExecutor implements SerialHost {
     // ends the body like a timeout; at any other point it is recorded against
     // the phase it landed in, beside a failure already there.
     let cutBody: ((cause: unknown) => void) | undefined;
+    let leaveWorkerFixtures: (() => void) | undefined;
+    let endBudget: (() => void) | undefined;
     this.strayFailure = (cause) => {
       if (cutBody !== undefined) {
         attemptAbort.abort();
@@ -1029,41 +691,46 @@ export class TargetExecutor implements SerialHost {
     };
 
     try {
+      // Before the session launches: a fixture rule the test breaks fails the
+      // attempt with nothing set up. What the body and these hooks name
+      // decides which fixtures of the test's own chain the attempt sets up.
+      const fixturePlan = planAttemptFixtures(this.target, registered, {
+        beforeEach: this.realms.hooksFor(realm, registered, 'beforeEach'),
+        afterEach: this.realms.hooksFor(realm, registered, 'afterEach'),
+      });
       const session =
         shared?.session ??
         (await this.launchSession({ session: pair.options.session, recordings }, attemptId, artifacts.dir, attemptAbort.signal));
       openSession = session;
       // A serial group's session serves one member at a time; what the app
       // logs from here is this attempt's.
-      session.appLog.route((event, at) => steps.recordAppEvent(event, at));
-      session.screens.route((observation) =>
+      session.appLog.route((event, at) => {
+        if (heldTools?.runningCall !== true) {
+          steps.recordAppEvent(event, at);
+        }
+      });
+      session.screens.route((observation) => {
+        if (heldTools?.runningCall === true) {
+          return;
+        }
+
         steps.recordScreen(() =>
           traceScreen(observation, {
             ledger: sessionLedger(session, this.config.allSecrets),
             maxBytes: this.config.limits.maxObservationBytes,
             appOrigin: this.target.app.base?.origin,
+            appBase: this.target.app.base,
           }),
-        ),
-      );
+        );
+      });
 
-      const testDeadline = new Deadline(pair.options.timeout);
-      this.options.events?.onAttemptDeadline?.(pair, { index: attemptIndex, id: attemptId, startedAt });
-      const budget = new AttemptBudget(attemptAbort.signal, testDeadline);
-      if (holdStep !== undefined) {
-        const title = pair.test.titlePath.join(' › ');
-        holds = new AttemptHolds({
-          budget,
-          signal: attemptAbort.signal,
-          ask: (step, signal) =>
-            holdStep(
-              { target: this.target.name, testId: pair.test.id, agent: pair.agent, repeat: pair.repeat, title, api: step.api, label: step.label, ...(step.source === undefined ? {} : { source: step.source }) },
-              signal,
-            ),
-          // The runner's watchdog keeps the test deadline too; it gets what is left.
-          onResume: (remainingMs) =>
-            this.options.events?.onAttemptDeadline?.(pair, { index: attemptIndex, id: attemptId, startedAt, remainingMs }),
-        });
-      }
+      // The runner's watchdog keeps the test deadline too: it hears each move and what is left.
+      const announce = (remainingMs?: number): void =>
+        this.options.events?.onAttemptDeadline?.(pair, { index: attemptIndex, id: attemptId, startedAt, timeoutMs: timeout.timeoutMs, ...(remainingMs === undefined ? {} : { remainingMs }) });
+      const budget = new AttemptBudget(attemptAbort.signal, new Deadline(pair.options.timeout));
+      endBudget = () => budget.end();
+      const timeout = new AttemptTimeout(budget, pair.options.timeout, announce);
+      announce();
       const saveSession =
         context.kind !== 'setup'
           ? undefined
@@ -1074,16 +741,16 @@ export class TargetExecutor implements SerialHost {
                   `target "${this.target.name}" has no engine state capability for session.save()`,
                 );
               }
-              const state = await session.captureState(
-                this.op(attemptId, this.config.actionTimeout, attemptAbort.signal),
-              );
+              const signal = budget.signal;
+              const state = await session.captureState(this.op(attemptId, this.config.actionTimeout, signal));
+              if (signal.aborted) throw abortError(signal, cancelledError);
               context.staging.stage(
                 name,
                 state,
                 carriedSecrets(sessionLedger(session, this.config.allSecrets), this.config.allSecrets),
               );
             };
-      const { fixtures } = createFixtures({
+      const { fixtures: builtIns, agentRuntime } = createFixtures({
         config: inMemory?.agents === undefined ? this.config : { ...this.config, agents: inMemory.agents },
         target: this.target,
         session,
@@ -1102,15 +769,59 @@ export class TargetExecutor implements SerialHost {
         models: this.models,
         test: { file: pair.test.file, titlePath: pair.test.titlePath, writtenScreenshots: this.writtenScreenshots },
       });
+      if (hold !== undefined) {
+        const tools = new HeldTestTools(
+          agentRuntime,
+          this.options.runId,
+          this.target,
+          this.options.headed,
+          video !== undefined,
+          this.options.events?.onNotice,
+        );
+        heldTools = tools;
+        const screens = {
+          ledger: sessionLedger(session, this.config.allSecrets),
+          maxBytes: this.config.limits.maxObservationBytes,
+          appOrigin: this.target.app.base?.origin,
+          appBase: this.target.app.base,
+        };
+
+        holds = holdAttemptSteps({
+          timeout,
+          signal: attemptAbort.signal,
+          attempt: {
+            target: this.target.name,
+            testId: pair.test.id,
+            agent: pair.agent,
+            repeat: pair.repeat,
+            title: pair.test.titlePath.join(' › '),
+          },
+          ask: (step, signal, readScreen) => hold.ask(
+            step,
+            signal,
+            {
+              readScreen,
+              readLogs: () => Promise.resolve(numberedAppLogLines(steps.all(), steps.appLog(), 'text').map(({ line }) => line)),
+            },
+            tools,
+          ),
+          readScreen: (signal: AbortSignal) => readHeldScreen(session, this.op(attemptId, this.config.actionTimeout, signal), screens),
+        });
+      }
       // `expect.poll` and `expect.soft` take no fixture, so the attempt they
       // run on is published here and cleared when `attemptEnd` fires in `finally`.
       const soft = new SoftFailures();
       publishAttempt(
         {
           attemptId,
+          guests: guests.offer,
           owner: 'suite',
           testKind: pair.test.kind,
           assertionTimeout: this.config.assertionTimeout,
+          toPass: this.config.toPass,
+          recordSecondaryError: (error) => {
+            secondaryErrors.push(serializeError(error, { phase, projectRoot: this.config.projectRoot, redact }));
+          },
           budget,
           soft,
           ...(context.kind === 'ordinary'
@@ -1121,20 +832,17 @@ export class TargetExecutor implements SerialHost {
                 },
               }
             : {}),
+          setTimeout: (update) => {
+            if (phase !== 'beforeEach' && phase !== 'body') return 'teardown';
+            return timeout.set(update(timeout.timeoutMs)) ? 'set' : 'ended';
+          },
         },
         attemptEnd.signal,
       );
 
-      const beforeEachHooks = this.realms.hooksFor(realm, registered, 'beforeEach');
-      const afterEachHooks = this.realms.hooksFor(realm, registered, 'afterEach');
-      // The test's own chain decides the fixture set; hooks get the same
-      // object, whichever `test` they were registered through.
-      const extended = createExtendedFixtures(
-        registered.fixtures,
-        fixtures,
-        this.target.engine?.name ?? 'none',
-        attemptAbort.signal,
-      );
+      const fixtures = fixturePlan.open({ builtIns, pool: this.workerFixtures, signal: attemptAbort.signal });
+      // Worker fixtures read their built-ins off this attempt until it ends.
+      leaveWorkerFixtures = fixtures.enter();
 
       /**
        * Steps and polls the body left running when it settled were not
@@ -1143,13 +851,18 @@ export class TargetExecutor implements SerialHost {
        * within one cleanup budget, so teardown starts on a quiet session.
        * Left alone, such a step would fail once the session closed with
        * nobody to catch it and take the worker down. A poll is cancelled
-       * alone; left alone, its timeout would fail whatever ran then.
+       * alone; left alone, its timeout would fail whatever ran then. Pauses
+       * are refused after this point, so a later call from code the test
+       * didn't await fails the attempt right away.
        * Returns their errors, steps first.
        */
       const abandonNotAwaited = async (): Promise<TestError[]> => {
         if (attemptEnd.signal.aborted) return [];
         const pollsNotAwaited = bodyPolls.close();
+        // Both fail their steps now; the sessions' close is waited for below, after the test's own steps are cut.
+        const guestsAbandoned = guests.abandonRunning();
         const stepsNotAwaited = steps.abandonRunning();
+        steps.holdable = false;
         if (stepsNotAwaited !== undefined) {
           attemptAbort.abort();
           await withTimeout(
@@ -1158,19 +871,14 @@ export class TargetExecutor implements SerialHost {
             () => new Error('abandoned steps did not settle'),
           ).catch(() => undefined);
         }
-        return [stepsNotAwaited, pollsNotAwaited].filter((error) => error !== undefined);
+        return [stepsNotAwaited, ...(await guestsAbandoned), pollsNotAwaited].filter((error) => error !== undefined);
       };
       const mainWork = async (): Promise<void> => {
         try {
-          enter('beforeEach');
-          await extended.setUp();
-          attemptAbort.signal.throwIfAborted();
-          for (const hook of beforeEachHooks) {
-            await hook.fn(fixtures);
-            attemptAbort.signal.throwIfAborted();
-          }
-          enter('body');
-          await (registered.fn as SetupFn)(fixtures);
+          await fixtures.run((next, owner) => {
+            enter(next);
+            steps.owner = owner;
+          }, attemptAbort.signal);
         } catch (cause) {
           // The body's own failure stays the verdict; the step it abandoned
           // and the soft failures it kept are noted beside it. A skip leaves
@@ -1219,11 +927,16 @@ export class TargetExecutor implements SerialHost {
         const onTimeout = (): Error => {
           timedOut = true;
           attemptAbort.abort();
-          return new TestTimeoutError(`test timed out after ${pair.options.timeout} ms in phase ${phase}`);
+          return new TestTimeoutError(`test timed out after ${timeout.timeoutMs} ms in phase ${phase}`);
         };
-        await this.debug.time('test.body', () =>
-          holds === undefined ? withTimeout(body, Math.max(1, testDeadline.remaining()), onTimeout) : holds.race(body, onTimeout),
-        );
+        const bodyWork = this.debug.time('test.body', () => timeout.race(body, onTimeout));
+
+        await bodyWork.finally(() => {
+          heldTools?.end(new ConfigurationError(
+            'NO_SESSION',
+            this.interruptSignal.aborted ? 'the run was interrupted' : 'the test attempt ended',
+          ));
+        });
       } catch (cause) {
         // The race has settled: a rejection surfacing while the evidence is
         // captured is recorded, not aimed at it.
@@ -1238,6 +951,7 @@ export class TargetExecutor implements SerialHost {
         }
       }
       cutBody = undefined;
+      await guests.quiesce();
       // A promise the body rejected and never awaited reaches the process
       // once the microtasks drain, which is after the body settled but before
       // the next turn of the event loop; waiting that turn out lands it on
@@ -1271,14 +985,7 @@ export class TargetExecutor implements SerialHost {
       // that overruns has its own operations cancelled, not the next hook's.
       // Only a run interrupt still cuts cleanup short. Fixture teardowns
       // follow the hooks, last set up first, and fail the attempt like them.
-      const teardowns = [
-        ...afterEachHooks.map((hook) => ({ label: `${hook.kind} hook`, run: () => hook.fn(fixtures) })),
-        ...extended.teardowns().map((teardown) => ({
-          label: `fixture "${teardown.name}" teardown`,
-          run: teardown.run,
-        })),
-      ];
-      for (const teardown of teardowns) {
+      for (const teardown of fixtures.cleanup()) {
         const hookAbort = budget.enter(this.interruptSignal, this.config.cleanupTimeout);
         try {
           await runHook(teardown.label, teardown.run, this.config.cleanupTimeout, () =>
@@ -1292,24 +999,26 @@ export class TargetExecutor implements SerialHost {
     } catch (cause) {
       recordFailure(cause, phase);
     } finally {
+      leaveWorkerFixtures?.();
       bodyPolls.close();
       this.strayFailure = undefined;
       this.lastAttemptTestId = pair.test.id;
       attemptEnd.abort();
+      endBudget?.();
       this.interruptSignal.removeEventListener('abort', onInterrupt);
       // The verdict is reached before the session closes: nothing after this
       // point changes it, and the close reads it to decide what the attempt's
       // recording is worth.
       if (failure === undefined && skipped !== undefined) {
         record.status = 'skipped';
-        record.skip = { cause: 'explicit', reason: truncateUtf8(sanitizeText(redact(skipped.reason)), 8192) };
+        record.skip = { cause: runtimeSkipCause(skipped), reason: truncateUtf8(sanitizeRecordedText(redact(skipped.reason)), 8192) };
       } else if (failure === undefined) {
         record.status = 'passed';
       } else {
         record.status = classifyAttemptStatus(failure, timedOut, this.interruptSignal.aborted);
         record.error = serializeError(failure, { phase: failurePhase ?? phase, projectRoot: this.config.projectRoot, redact });
         // A failure outranks the skip; the reason stays beside it.
-        if (skipped !== undefined) record.skip = { cause: 'explicit', reason: truncateUtf8(sanitizeText(redact(skipped.reason)), 8192) };
+        if (skipped !== undefined) record.skip = { cause: runtimeSkipCause(skipped), reason: truncateUtf8(sanitizeRecordedText(redact(skipped.reason)), 8192) };
         // A failure that first landed in teardown has had no look yet.
         await captureEvidence();
       }
@@ -1318,6 +1027,11 @@ export class TargetExecutor implements SerialHost {
         serialize: (error) => serializeError(error, { phase: 'body', projectRoot: this.config.projectRoot, redact }),
         redact,
       });
+      for (const cause of await heldTools?.settleRecordings() ?? []) {
+        record.cleanup = 'failed';
+        secondaryErrors.push(serializeError(classifyError(cause), { phase: 'cleanup', projectRoot: this.config.projectRoot, redact }));
+      }
+
       // A serial member's recording ends with the member, not the group.
       if (openSession !== null && shared !== undefined) {
         await this.stopRunningRecording(openSession, attemptId, record, artifacts.sink, secondaryErrors);
@@ -1329,6 +1043,10 @@ export class TargetExecutor implements SerialHost {
         const environment = openSession.environment.read(redact);
         if (environment !== undefined) record.environment = environment;
       }
+      for (const cause of await guests.settle(record.status)) {
+        record.cleanup = 'failed';
+        secondaryErrors.push(serializeError(cause, { phase: 'cleanup', projectRoot: this.config.projectRoot, redact }));
+      }
       // What a shared session's app logs from here waits for the next member.
       openSession?.appLog.route(undefined);
       openSession?.screens.route(undefined);
@@ -1336,6 +1054,7 @@ export class TargetExecutor implements SerialHost {
 
     // Size and digest land asynchronously; the record is read right after.
     await artifacts.settle();
+    guests.release();
     record.durationMs = Date.now() - startedMs;
     record.steps = [...steps.all()];
     const appLog = steps.appLog();
@@ -1364,44 +1083,5 @@ export class TargetExecutor implements SerialHost {
       }
     }
     return record;
-  }
-}
-
-/**
- * The status of a failed attempt. An interrupt outranks everything except a
- * timeout that had already fired: the attempt then timed out, whatever
- * arrived after.
- */
-export function classifyAttemptStatus(
-  failure: { readonly code: string },
-  timedOut: boolean,
-  interrupted: boolean,
-): 'failed' | 'timed-out' | 'interrupted' {
-  if (interrupted && !timedOut) return 'interrupted';
-  if (timedOut || failure.code === 'TEST_TIMEOUT') {
-    return 'timed-out';
-  }
-  return 'failed';
-}
-
-/**
- * Registers an attempt's kept recordings, in order: a file under its path, a
- * link by URL. An engine's own link is held to what a provider's is, an
- * http(s) URL; one that is not fails the cleanup once every other recording
- * is registered, so it costs no other video.
- */
-function registerVideos(sink: ArtifactSink, segments: readonly VideoSegment[]): void {
-  const rejected: string[] = [];
-  for (const segment of segments) {
-    if ('path' in segment) {
-      sink.register('video', segment.path, { startedAt: segment.startedAt });
-      continue;
-    }
-    const url = hostedVideoUrl(segment.url);
-    if (url === undefined) rejected.push(JSON.stringify(segment.url));
-    else sink.link(url, { mediaType: segment.mediaType, startedAt: segment.startedAt });
-  }
-  if (rejected.length > 0) {
-    throw new EngineError('ENGINE_FAILURE', `the engine returned a video link that is not an http(s) URL: ${rejected.join(', ')}`, { retryable: false });
   }
 }

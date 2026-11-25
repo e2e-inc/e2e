@@ -50,7 +50,7 @@ test.describe('chain', () => {
 });
 
 const leaky = base.extend<{ leaky: string }>({
-  leaky: async (_fixtures, use) => {
+  leaky: async ({}, use) => {
     await use('leaky');
     throw new Error('teardown boom');
   },
@@ -66,15 +66,6 @@ const silent = base.extend<{ silent: string }>({
 });
 silent('never calls use', async ({ silent }) => {
   log('unreachable:' + silent);
-});
-
-const clash = base.extend<{ gadget: string }>({
-  gadget: async (_fixtures, use) => {
-    await use('not the gadget');
-  },
-});
-clash('redefines an engine fixture', async ({ gadget }) => {
-  log('unreachable:' + String(gadget));
 });
 `;
       const logPath = path.join('/tmp', `e2e-extend-${Date.now()}.log`);
@@ -104,12 +95,6 @@ clash('redefines an engine fixture', async ({ gadget }) => {
       expect(silent.attempts[0]!.error?.phase).toBe('beforeEach');
       expect(silent.attempts[0]!.error?.code).toBe('TEST_SETUP_FAILED');
       expect(silent.attempts[0]!.error?.message).toContain('fixture "silent" returned without calling use()');
-
-      const clash = resultByTitle(outcome, 'redefines an engine fixture');
-      expect(clash.status).toBe('failed');
-      expect(clash.attempts[0]!.error?.phase).toBe('beforeEach');
-      expect(clash.attempts[0]!.error?.code).toBe('TEST_SETUP_FAILED');
-      expect(clash.attempts[0]!.error?.message).toContain('fixture "gadget" is contributed by engine fake');
 
       expect(readFileSync(logPath, 'utf8').trim().split('\n')).toEqual([
         'setup:first:fake',
@@ -143,22 +128,22 @@ import { test as base } from 'e2e';
 const log = (entry: string) => appendFileSync(process.env.HOOK_LOG!, entry + '\\n');
 
 const test = base.extend<{ slow: string }>({
-  slow: async (_fixtures, use) => {
+  slow: async ({}, use) => {
     log('setup:slow');
     await new Promise((resolve) => setTimeout(resolve, 1000));
     await use('slow');
     log('teardown:slow');
   },
 }).extend<{ later: string }>({
-  later: async (_fixtures, use) => {
+  later: async ({}, use) => {
     log('unreachable:later');
     await use('later');
   },
 });
 
 test.beforeEach(() => log('unreachable:beforeEach'));
-test('times out in setup', { timeout: 500 }, async () => {
-  log('unreachable:body');
+test('times out in setup', { timeout: 500 }, async ({ slow, later }) => {
+  log('unreachable:body:' + slow + later);
 });
 `;
       const logPath = path.join('/tmp', `e2e-extend-late-${Date.now()}.log`);
@@ -226,4 +211,94 @@ test('times out in hook', { timeout: 100 }, async () => {
       process.off('e2e-late-hook-finished', finishHook);
     }
   });
+  it('aborts the engine calls of a body that resumes after its timeout, with a fixture teardown in between', async () => {
+    const file = `import { test as base } from 'e2e';
+
+const test = base.extend<{ guard: void }>({
+  guard: [async ({}, use) => { await use(); }, { auto: true }],
+});
+
+test('times out', { timeout: 300 }, async ({ app }) => {
+  await new Promise<void>((resolve) => process.once('e2e-late-body-release', resolve));
+  await app.open('/late').catch(() => undefined);
+  process.emit('e2e-late-body-finished');
+});
+test('next test', async ({ app }) => {
+  await app.open('/next');
+  const finished = new Promise<void>((resolve) => process.once('e2e-late-body-finished', resolve));
+  process.emit('e2e-late-body-release');
+  await finished;
+});
+`;
+    const fake = createFakeEngine();
+    const { outcome, project } = await runProject({ 'tests/late-body.e2e.ts': file }, { config: engineConfig(fake.engine) });
+    try {
+      const abandoned = resultByTitle(outcome, 'times out');
+      expect(abandoned.status).toBe('timed-out');
+      expect(resultByTitle(outcome, 'next test').status).toBe('passed');
+      // The teardown's budget was the last one the attempt entered, and it never aborted.
+      const late = fake.operations.filter((operation) => operation.attemptId === abandoned.attempts[0]!.id && operation.method.endsWith('/late)'));
+      expect(late.map((operation) => operation.abortedAtCall)).toEqual([true]);
+    } finally {
+      project.cleanup();
+    }
+  }, 120_000);
+
+  it('aborts the engine calls of a body that resumes while its own teardown runs', async () => {
+    const file = `import { test } from 'e2e';
+
+test.afterEach(async () => {
+  const finished = new Promise<void>((resolve) => process.once('e2e-own-teardown-finished', resolve));
+  process.emit('e2e-own-teardown-release');
+  await finished;
+});
+test('times out', { timeout: 300 }, async ({ app }) => {
+  await new Promise<void>((resolve) => process.once('e2e-own-teardown-release', resolve));
+  await app.open('/late').catch(() => undefined);
+  process.emit('e2e-own-teardown-finished');
+});
+`;
+    const fake = createFakeEngine();
+    const { outcome, project } = await runProject({ 'tests/own-teardown.e2e.ts': file }, { config: engineConfig(fake.engine) });
+    try {
+      expect(resultByTitle(outcome, 'times out').status).toBe('timed-out');
+      // The hook's budget is live while the body resumes; the body's own phase is over.
+      const late = fake.operations.filter((operation) => operation.method.endsWith('/late)'));
+      expect(late.map((operation) => operation.abortedAtCall)).toEqual([true]);
+    } finally {
+      project.cleanup();
+    }
+  }, 120_000);
+
+  it('aborts the engine calls an abandoned body makes through a worker fixture during the next test', async () => {
+    const file = `import { test as base } from 'e2e';
+
+const test = base.extend<{}, { nav: { late(): Promise<void> } }>({
+  nav: [async ({ app }, use) => { await use({ late: () => app.open('/late') }); }, { scope: 'worker' }],
+});
+
+test('times out', { timeout: 300 }, async ({ nav }) => {
+  await new Promise<void>((resolve) => process.once('e2e-late-worker-release', resolve));
+  await nav.late().catch(() => undefined);
+  process.emit('e2e-late-worker-finished');
+});
+test('next test', async ({ app, nav }) => {
+  await app.open('/next');
+  const finished = new Promise<void>((resolve) => process.once('e2e-late-worker-finished', resolve));
+  process.emit('e2e-late-worker-release');
+  await finished;
+});
+`;
+    const fake = createFakeEngine({ isolation: 'worker' });
+    const { outcome, project } = await runProject({ 'tests/late-worker.e2e.ts': file }, { config: engineConfig(fake.engine) });
+    try {
+      expect(resultByTitle(outcome, 'times out').status).toBe('timed-out');
+      expect(resultByTitle(outcome, 'next test').status).toBe('passed');
+      // The worker fixture's `app` is the running test's, whoever calls it.
+      const late = fake.operations.filter((operation) => operation.method.endsWith('/late)'));
+      expect(late.map((operation) => operation.abortedAtCall)).toEqual([true]);
+    } finally {
+      project.cleanup();
+    }
+  }, 120_000);
 });

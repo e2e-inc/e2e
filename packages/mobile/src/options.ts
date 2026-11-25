@@ -40,8 +40,14 @@ export type DevicePermission = (typeof DEVICE_PERMISSIONS)[number];
 /** A permission's state: held, refused, or not asked for yet, so the OS asks again. */
 export type PermissionState = 'grant' | 'deny' | 'reset';
 
-/** Permissions an app holds when it launches, by name. */
-export type LaunchPermissions = Readonly<Partial<Record<DevicePermission, PermissionState>>>;
+/**
+ * Permissions an app holds when it launches, by name, or `'all'` to grant
+ * every one the platform can. On Android that is each runtime permission the
+ * app declares; the rest are skipped. On an iOS simulator it is each privacy
+ * service the runtime can set, location `always` included. The simulator
+ * refuses to set notifications.
+ */
+export type LaunchPermissions = Readonly<Partial<Record<DevicePermission, PermissionState>>> | 'all';
 
 /**
  * Options of the device engine: which devices it drives and how. The app
@@ -50,9 +56,9 @@ export type LaunchPermissions = Readonly<Partial<Record<DevicePermission, Permis
  * `undefined`, so values read straight from `process.env` need no
  * conditional spread.
  */
-export interface MobileOptions {
+export interface MobileOptions<Platform extends MobilePlatform = MobilePlatform> {
   /** Platform the target's device runs. */
-  readonly platform: MobilePlatform;
+  readonly platform: Platform;
   /**
    * Device to use: a simulator or emulator by name, simulator UDID, or
    * emulator serial (`emulator-5554`), or a connected phone by name. A list
@@ -60,10 +66,12 @@ export interface MobileOptions {
    * drives the `n`th, so `workers` at or above the pool size runs the target's
    * files across every device at once. Omitted, the pool is every booted device
    * of the platform at `prepare` that no other agent-device session holds, as
-   * many as the run has slots; with none booted, agent-device boots a shut-down
-   * one: a phone or tablet over a TV, then the newest OS, then name order (a
-   * stopped Android emulator reports no OS version, so the name decides). With
-   * every booted one held, `prepare` fails. A `DeviceProvider` leases hosted devices
+   * many as the run has slots. A paired iPhone or iPad that is reachable (USB or network) counts as booted and
+   * joins the pool. With none booted, agent-device boots a shut-down one: on
+   * iOS an iPhone over an iPad over an Apple TV, on Android a phone or tablet
+   * over a TV, then the newest OS, then name order (a stopped Android emulator
+   * reports no OS version, so the name decides). With every booted one held,
+   * `prepare` fails. A `DeviceProvider` leases hosted devices
    * instead: one per worker slot at `prepare`, each driven through the daemon
    * and client configuration the lease names. A replacement worker resumes a
    * healthy agent-device session on the same lease. Forced worker shutdown
@@ -79,7 +87,8 @@ export interface MobileOptions {
    * agent-device session name, before the worker slot: slot `n` drives its
    * device under `<session>-<n>`, `e2e-<target name>-<n>` by default. One run
    * per session at a time: concurrent runs on the same session interleave
-   * taps.
+   * taps. Without this option a `launch()` host
+   * drives `e2e-<target name>-<host token>-<n>`, a session of its own.
    */
   readonly session?: string | undefined;
   /**

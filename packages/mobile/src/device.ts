@@ -6,10 +6,11 @@
  */
 
 import type { AgentDeviceClient as DeviceSessionClient } from 'agent-device';
-import type { EngineFixtureContext, Locator } from 'e2e/engine';
-import { linkLabel, linkTarget } from './links.ts';
+import type { EngineFixtureContext, Locator, ViewportSize } from '@e2e-dev/core/engine';
+import { appLabel, linkLabel, linkTarget } from './links.ts';
+import { pressRemote, requireRemoteKey, type RemoteKey } from './remote.ts';
 import type { DevicePermission, MobilePlatform, PermissionState } from './options.ts';
-import type { DeviceSelection } from './pool.ts';
+import type { DeviceSelection } from './bindings.ts';
 import { unsupported } from './support.ts';
 import type { AgentDeviceSurface, FoldPose, InstallAppOptions, InstalledApp, OpenAppOptions } from './surface.ts';
 
@@ -40,7 +41,7 @@ export type { DeviceSessionClient };
 /** The raw driver session behind `device`; see `Device.unstable_raw`. */
 export interface DeviceSession {
   readonly platform: MobilePlatform;
-  /** The raw driver session name: `e2e-<target>-<worker slot>`, or `<session>-<worker slot>` with the `session` option. */
+  /** The raw driver session name: `e2e-<target>-<worker slot>` (`e2e-<target>-<hostId>-<worker slot>` for a `launch()` host), or `<session>-<worker slot>` with the `session` option. */
   readonly session: string;
   /** The device id: a simulator UDID or an Android serial. */
   readonly deviceId: string;
@@ -97,6 +98,8 @@ export interface Device {
   setAppearance(mode: 'light' | 'dark'): Promise<void>;
   /** Rotates the device. */
   setOrientation(orientation: DeviceOrientation): Promise<void>;
+  /** Reads the screen size in the coordinate space of screen taps. */
+  viewport(): Promise<ViewportSize>;
   /**
    * Puts a foldable simulator or emulator in a hinge pose. On the iPhone Duo
    * it resolves once agent-device reads the angle back from CoreDevice at
@@ -135,6 +138,19 @@ export interface Device {
    * when the target's build is installed and no `app.bundleId` is pinned.
    */
   installApp(appPath?: string, options?: InstallAppOptions): Promise<InstalledApp>;
+  /**
+   * Removes an app, by bundle id or package, from the device; without one,
+   * the pinned app. Resolves to whether it was installed, so removing an app
+   * id that is not there passes. Without `app.bundleId` on the target,
+   * removing the build `installApp` pinned unpins it: `app.open()` then
+   * needs another install.
+   */
+  uninstallApp(app?: string): Promise<boolean>;
+  /**
+   * Whether an app, by bundle id or package, is on the device, system apps
+   * included (Android: launchable apps only); without one, the pinned app.
+   */
+  isAppInstalled(app?: string): Promise<boolean>;
   /**
    * Brings an app to the foreground; `relaunch` restarts it fresh.
    * `launchArguments` and `permissions` apply to this launch alone; the
@@ -177,24 +193,61 @@ export interface Device {
   home(): Promise<void>;
   /** Navigates back once (in-app back). */
   back(): Promise<void>;
+  /**
+   * Presses one TV remote button: the D-pad's `'up'`, `'down'`, `'left'`,
+   * `'right'`, and `'select'`, `'back'`, `'menu'`, `'home'`, and the media
+   * keys such as `'play-pause'`. Android TV takes every button and an Apple
+   * TV the D-pad, `back`, `menu`, and `home`, where `back` and `menu` are the
+   * same Siri Remote button; any other button or device is
+   * `UNSUPPORTED_CAPABILITY`. A name outside the list is `INVALID_ARGUMENT`.
+   */
+  pressRemote(key: RemoteKey): Promise<void>;
+  /**
+   * Shakes the device once: the simulator's shake gesture on an iPhone or
+   * iPad simulator, a swing of the accelerometer on an Android phone or
+   * tablet emulator. `UNSUPPORTED_CAPABILITY` on a physical device and on a
+   * device a provider drives through its own backend. It resolves once the
+   * shake is sent, so assert on what the app shows next.
+   */
+  shake(): Promise<void>;
   /** Accepts or dismisses the visible system alert. */
   alert(action: 'accept' | 'dismiss'): Promise<void>;
   /**
-   * Dismisses the soft keyboard: the keyboard's own dismiss key where it has
-   * one (Android, iPad), else the way a user does it on an iPhone, a short
-   * drag that a scroll view turns into a dismissal, horizontal first and
-   * vertical second, stopping as soon as the keyboard is gone. Each drag
-   * starts at the point nearest the centre of the screen that no control in
-   * the captured accessibility tree covers, inside a scroll view when the
+   * Dismisses the soft keyboard. Android hides it directly. iOS has no such
+   * call, on an iPhone or an iPad, so there it goes the way a user sends it
+   * away: a short drag that a scroll view turns into a dismissal, horizontal
+   * first and vertical second, stopping as soon as the keyboard is gone. Each
+   * drag starts at the point nearest the centre of the screen that no control
+   * in the captured accessibility tree covers, inside a scroll view when the
    * screen has one, to avoid pressing a button or toggling a checkbox. A
-   * control the tree leaves out, such as pressable text, can still be hit.
-   * The simulator's "Speed up your typing" tip goes through its Continue
-   * button first. A screen with no clear point
-   * above the keyboard, or a keyboard that outlives both drags, fails with
+   * control the tree leaves out, such as pressable text, can still be hit. The
+   * simulator's "Speed up your typing" tip goes through its Continue button
+   * first. A screen with no clear point above the keyboard, a keyboard reported
+   * up with no frame and no keyboard element on screen (so no point is known
+   * to be above it), or a keyboard that outlives both drags, fails with
    * `UNSUPPORTED_CAPABILITY`; the message names the alternatives (the app's
    * own Done or close control, or pressing Enter on the field).
    */
   dismissKeyboard(): Promise<void>;
+  /**
+   * Whether the soft keyboard is on screen, from a capture (taken again,
+   * within the action timeout, while the keyboard is still moving): what
+   * agent-device reported for it (a visibility probe, a measured or derived
+   * keyboard frame, or proof that there is none), else the keyboard or a key
+   * drawn on screen in the accessibility tree (the suggestion strip alone,
+   * as with a hardware keyboard, is not one). Only agent-device's proof
+   * answers `false`. Fails when the capture cannot answer: `ENGINE_FAILURE`
+   * while the keyboard is moving or the tree is still incomplete,
+   * `UNSUPPORTED_CAPABILITY` when agent-device did not prove the keyboard
+   * absent and the tree lists none. It reads the screen as it is now, so
+   * right after an action that opens or closes the keyboard, poll it with
+   * `expect.poll`. A poll reads again after any error: an `ENGINE_FAILURE`
+   * clears once the keyboard settles, while an `UNSUPPORTED_CAPABILITY`
+   * that lasts (a provider that cannot read the keyboard at all) makes the
+   * poll wait out its whole timeout before it fails.
+   * Changes nothing on the device.
+   */
+  isKeyboardShown(): Promise<boolean>;
   /** Reads the clipboard. */
   clipboard(): Promise<string>;
   /** Writes the clipboard. */
@@ -282,6 +335,10 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     async setOrientation(orientation) {
       await surface.screenCommand('device.setOrientation', (client) => client.command.orientation({ ...surface.selection(), orientation }), context.signal);
     },
+    async viewport() {
+      const operation = context.operation();
+      return surface.viewport(operation, surface.inputBudget('device.viewport', operation));
+    },
     async fold(pose) {
       await surface.fold(pose, context.signal);
     },
@@ -304,6 +361,12 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     },
     async installApp(appPath, options) {
       return surface.installApp(appPath, options ?? {}, context.signal);
+    },
+    async uninstallApp(app) {
+      return surface.uninstallApp(app, context.signal);
+    },
+    async isAppInstalled(app) {
+      return surface.isAppInstalled(app, context.signal);
     },
     async openApp(app, options) {
       await surface.openApp(app, options ?? {}, context.signal);
@@ -331,11 +394,22 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     async back() {
       await surface.screenCommand('device.back', (client) => client.command.back({ ...surface.settleOptions }), context.signal);
     },
+    async pressRemote(key) {
+      requireRemoteKey(key);
+      const input = surface.inputBudget('device.pressRemote', { timeoutMs: context.timeouts.action, signal: context.signal });
+      await surface.screenCommand('device.pressRemote', (client) => input.send(() => pressRemote(client, key, surface.selection())), context.signal);
+    },
+    async shake() {
+      await surface.screenCommand('device.shake', (client) => client.command.shake(surface.selection()), context.signal);
+    },
     async alert(action) {
       await surface.screenCommand('device.alert', (client) => client.command.alert({ ...surface.selection(), action }), context.signal);
     },
     async dismissKeyboard() {
       await surface.dismissKeyboard(context.signal, surface.inputBudget('device.dismissKeyboard', { timeoutMs: context.timeouts.action, signal: context.signal }));
+    },
+    async isKeyboardShown() {
+      return surface.keyboardShown(context.signal, surface.inputBudget('device.isKeyboardShown', { timeoutMs: context.timeouts.action, signal: context.signal }));
     },
     async clipboard() {
       const result = await surface.command(
@@ -358,19 +432,25 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     clearLocation: action,
     setAppearance: { ...action, label: (mode) => mode },
     setOrientation: { ...action, label: (orientation) => orientation },
+    viewport: action,
     fold: { ...action, label: (pose) => pose },
     setBiometrics: action,
     enrollBiometrics: action,
     installApp: { ...action, label: (appPath) => appPath ?? surface.appPath ?? 'appPath' },
-    openApp: { ...action, label: (app) => linkLabel(app) },
+    uninstallApp: { ...action, label: (app) => appLabel(app ?? surface.pinnedApp ?? 'app') },
+    isAppInstalled: { ...action, label: (app) => appLabel(app ?? surface.pinnedApp ?? 'app') },
+    openApp: { ...action, label: (app) => appLabel(app) },
     openLink: { ...action, label: (url) => linkLabel(url) },
     closeApp: action,
     clearKeychain: action,
     foregroundApp: action,
     home: action,
     back: action,
+    pressRemote: { ...action, label: (key) => key },
+    shake: action,
     alert: { ...action, label: (value) => value },
     dismissKeyboard: action,
+    isKeyboardShown: action,
     clipboard: action,
     setClipboard: { ...action, label: (text) => `${text.length} chars` },
   });

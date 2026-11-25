@@ -3,7 +3,7 @@
  * complete EngineError -> runner taxonomy mapping.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   EngineError,
   type EngineErrorCode,
@@ -12,14 +12,15 @@ import {
   type NodeRef,
   type SemanticNode,
   type OperationContext,
-} from '../../src/engine/surface.ts';
-import { LocatorEngine, isNodeVisible, translateLocatorError } from '../../src/locator/engine.ts';
-import { E2EError } from '../../src/internal/errors.ts';
-import { Deadline, sleep, withTimeout } from '../../src/internal/time.ts';
-import { AttemptBudget } from '../../src/run/budget.ts';
-import { defineEngine, LOCATOR_ACTION_KINDS } from '../../src/engine/index.ts';
-import { createEngineSession } from '../../src/engine/session.ts';
-import { describeExpression, filterExpression, indexExpression, roleQuery, testIdQuery, textQuery } from '../../src/locator/expression.ts';
+} from '@e2e-dev/core/lib/engine/surface';
+import { LocatorEngine, isNodeVisible, translateLocatorError } from '@e2e-dev/core/lib/locator/engine';
+import { E2EError } from '@e2e-dev/core/lib/internal/errors';
+import { Deadline, sleep, withTimeout } from '@e2e-dev/core/lib/internal/time';
+import { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
+import { defineEngine, LOCATOR_ACTION_KINDS } from '@e2e-dev/core/lib/engine/index';
+import { createEngineSession } from '@e2e-dev/core/lib/engine/session';
+import { describeExpression, filterExpression, indexExpression, roleQuery, testIdQuery, textQuery } from '@e2e-dev/core/lib/locator/expression';
+import { screenOver } from '../helpers/screen-over.ts';
 import { snapshot } from '../helpers/snapshot.ts';
 import { useFakeTime } from '../helpers/fake-time.ts';
 
@@ -111,6 +112,10 @@ function makeEngine(script: ScreenScript, options: { actionTimeout?: number; bud
       },
       actions: new Set(LOCATOR_ACTION_KINDS),
       pointerActions: new Set(['tap']),
+      measuresViewport: true,
+      async viewportIntersection() {
+        return { intersects: true, ratio: 1 };
+      },
   } as unknown as TargetSession;
   const engine = new LocatorEngine({
     session,
@@ -122,6 +127,43 @@ function makeEngine(script: ScreenScript, options: { actionTimeout?: number; bud
   });
   return { engine, calls, origins, resolveTimeouts, performed };
 }
+
+describe('readViewport', () => {
+  it('reads a ref superseded between the resolve and the read as stale, not as gone', async () => {
+    const { engine } = makeEngine({ read: ['stale'] });
+    const reads = engine.reads(engine.deadline(1_000));
+    expect(await engine.readViewport(EXPRESSION, reads)).toEqual({ node: null, count: 1, stale: true });
+    expect(await engine.readViewport(EXPRESSION, reads)).toEqual({
+      node: NODE,
+      count: 1,
+      stale: false,
+      intersection: { intersects: true, ratio: 1 },
+    });
+  });
+});
+
+describe('locator.blur', () => {
+  it.each([true, false])('honors the declared capability (supported: %s)', async (supported) => {
+    const locate = vi.fn(async () => [NODE]);
+    const perform = vi.fn(async () => undefined);
+    const { screen } = screenOver({
+      actions: supported ? ['blur'] : ['tap'],
+      locate,
+      perform,
+      observe: () => snapshot([NODE]),
+      timeoutMs: 1_000,
+    });
+    const blur = screen.getByRole('button', 'Submit').blur();
+    if (supported) {
+      await blur;
+      expect(perform).toHaveBeenCalledWith(expect.anything(), { kind: 'blur' }, expect.anything());
+    } else {
+      await expect(blur).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+      expect(locate).not.toHaveBeenCalled();
+      expect(perform).not.toHaveBeenCalled();
+    }
+  });
+});
 
 describe('LocatorEngine read retry contract', () => {
   it('shares the original deadline with a resolution after a stale read', async () => {
@@ -154,6 +196,12 @@ describe('LocatorEngine read retry contract', () => {
     expect(calls).toMatchObject({ resolve: 3, read: 1 });
   });
 
+  it('reads zero matches again at 20 and 50 ms, then every poll tick from the start', async () => {
+    const { engine, resolveTimeouts } = makeEngine({ resolve: [() => [], () => [], () => [], () => [], () => [REF]] });
+    await engine.resolveExactlyOne(EXPRESSION, engine.deadline());
+    expect(resolveTimeouts).toEqual([1_000, 980, 950, 900, 800]);
+  });
+
   it('gives zero matches the action timeout, then LOCATOR_NOT_FOUND', async () => {
     const { engine, calls } = makeEngine(
       { resolve: Array.from({ length: 50 }, () => () => []) },
@@ -167,6 +215,17 @@ describe('LocatorEngine read retry contract', () => {
 });
 
 describe('LocatorEngine resolve retry contract', () => {
+  it('reports a wait that ran out as no shorter than its timeout when the resolve starts after the deadline does', async () => {
+    const { engine } = makeEngine({ resolve: Array.from({ length: 50 }, () => () => []) });
+    const deadline = engine.deadline(101);
+    // The resolve polls 100 ms after its own start, which is the deadline's 101st.
+    vi.advanceTimersByTime(1);
+    await expect(engine.resolveExactlyOne(EXPRESSION, deadline)).rejects.toMatchObject({
+      code: 'LOCATOR_NOT_FOUND',
+      details: { waitedMs: 101 },
+    });
+  });
+
   it('retries retryable frame misses until the engine recovers', async () => {
     const { engine, calls } = makeEngine({ resolve: ['frame', 'stale', () => [REF]] });
     expect(await engine.resolveExactlyOne(EXPRESSION, engine.deadline())).toEqual(REF);
@@ -256,7 +315,8 @@ describe('LocatorEngine resolve retry contract', () => {
   it('gives each retry of a resolve what is left of its budget, not the whole budget again', async () => {
     const { engine, resolveTimeouts } = makeEngine({ resolve: ['stale', 'stale', () => [REF]] }, { actionTimeout: 1_000 });
     await engine.resolveNow(EXPRESSION, engine.reads(engine.deadline()));
-    expect(resolveTimeouts).toEqual([1_000, 900, 800]);
+    // Retries read at 20 and 50 ms.
+    expect(resolveTimeouts).toEqual([1_000, 980, 950]);
   });
 
   it('ends a frame wait the deadline cut off on the missing frame, as LOCATOR_NOT_FOUND', async () => {
@@ -268,6 +328,13 @@ describe('LocatorEngine resolve retry contract', () => {
       }),
     });
     await expect(engine.resolveExactlyOne(EXPRESSION, deadline)).rejects.toMatchObject({ code: 'LOCATOR_NOT_FOUND', message: expect.stringContaining('frame missing') });
+  });
+
+  it('ends a wait on a frame that stays missing at its deadline, not the next poll tick', async () => {
+    const { engine } = makeEngine({ resolve: Array.from({ length: 50 }, () => 'frame' as const) });
+    const started = Date.now();
+    await expect(engine.resolveExactlyOne(EXPRESSION, new Deadline(350))).rejects.toMatchObject({ code: 'LOCATOR_NOT_FOUND' });
+    expect(Date.now() - started).toBe(350);
   });
 
   it('keeps a first resolve the deadline cut off a timeout: nothing was ever seen missing', async () => {
@@ -336,6 +403,43 @@ describe('LocatorEngine perform contract', () => {
     ]);
   });
 
+  it('polls a positioned tap until its node is visible with a box', async () => {
+    const boxed: SemanticNode = { ...NODE, rect: { x: 10, y: 20, width: 100, height: 40 } };
+    const hidden: SemanticNode = { ...boxed, states: { hidden: true } };
+    const { engine, performed, calls } = makeEngine({ read: [() => NODE, () => hidden, () => boxed] });
+    await engine.performWithin(EXPRESSION, { x: 1, y: 2 }, { kind: 'tap' });
+    expect(calls.read).toBe(3);
+    expect(performed.at(-1)).toEqual({ point: { x: 11, y: 22 }, action: { kind: 'tap' } });
+  });
+
+  it('fails a positioned tap whose node never gets a box with LOCATOR_NOT_FOUND, no later than the deadline', async () => {
+    const { engine, performed } = makeEngine({ read: Array.from({ length: 50 }, () => () => NODE) }, { actionTimeout: 350 });
+    const started = Date.now();
+    await expect(engine.performWithin(EXPRESSION, { x: 1, y: 2 }, { kind: 'tap' })).rejects.toMatchObject({
+      code: 'LOCATOR_NOT_FOUND',
+      message: expect.stringContaining('did not become visible with a box to act within'),
+    });
+    // The old loop slept past the deadline and read again at 400 ms.
+    expect(Date.now() - started).toBe(350);
+    expect(performed).toEqual([{ kind: 'scrollIntoView' }]);
+  });
+
+  it('fails a positioned tap with LOCATOR_NOT_FOUND, not ACTION_FAILED, when its box would appear during a read started at the deadline', async () => {
+    const boxed: SemanticNode = { ...NODE, rect: { x: 10, y: 20, width: 100, height: 40 } };
+    const started = Date.now();
+    const { engine, performed } = makeEngine(
+      {
+        // Polls start at 0 (60 ms), 100, 200, and 300 ms (40 ms each), then at the 350 ms deadline with 60 ms to finish.
+        resolve: [() => [REF], slowResolve(60, [REF]), ...Array.from({ length: 50 }, () => slowResolve(40, [REF]))] as unknown as Array<() => readonly NodeRef[]>,
+        read: Array.from({ length: 50 }, () => () => (Date.now() - started >= 375 ? boxed : NODE)),
+      },
+      { actionTimeout: 350 },
+    );
+    await expect(engine.performWithin(EXPRESSION, { x: 1, y: 2 }, { kind: 'tap' })).rejects.toMatchObject({ code: 'LOCATOR_NOT_FOUND' });
+    expect(Date.now() - started).toBe(350);
+    expect(performed).toEqual([{ kind: 'scrollIntoView' }]);
+  });
+
   it('marks every action it performs with the test origin, so an engine can act without settling', async () => {
     const { engine, origins } = makeEngine({});
     await engine.perform(EXPRESSION, { kind: 'tap' });
@@ -386,7 +490,7 @@ describe('LocatorEngine step deadline', () => {
   it('waits past the action timeout with timeout 0, until the phase deadline', async () => {
     const budget = new AttemptBudget(new AbortController().signal, new Deadline(600));
     const { engine } = makeEngine({ resolve: Array.from({ length: 50 }, () => () => [] as readonly NodeRef[]) }, { actionTimeout: 100, budget });
-    expect(engine.deadline(0)).toBe(budget.deadline);
+    expect(engine.deadline(0).endsAt).toBe(budget.deadline.endsAt);
     const started = Date.now();
     await expect(engine.perform(EXPRESSION, { kind: 'tap' }, 0)).rejects.toMatchObject({ code: 'LOCATOR_NOT_FOUND' });
     expect(Date.now() - started).toBeGreaterThanOrEqual(550);

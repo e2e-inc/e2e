@@ -1,13 +1,15 @@
+import { ToolChoiceViolationError } from 'ai';
 import { describe, expect, it } from 'vitest';
-import { createModelAdapter } from '../../src/agent/model/sdk.ts';
-import { defineEngine } from '../../src/engine/index.ts';
-import { createEngineSession } from '../../src/engine/session.ts';
-import { resolveConfig } from '../../src/config/resolve.ts';
-import { Deadline } from '../../src/internal/time.ts';
-import { AttemptBudget } from '../../src/run/budget.ts';
-import { createFixtures } from '../../src/run/fixtures.ts';
-import { StepRecorder } from '../../src/run/steps.ts';
-import { WorkerModels } from '../../src/run/worker-models.ts';
+import { loadAiSdk } from '@e2e-dev/core/lib/agent/ai-sdk';
+import { createModelAdapter, isModelRefusal } from '@e2e-dev/core/lib/agent/model/sdk';
+import { defineEngine } from '@e2e-dev/core/lib/engine/index';
+import { createEngineSession } from '@e2e-dev/core/lib/engine/session';
+import { resolveConfig } from '../../src/config/resolve-run.ts';
+import { Deadline } from '@e2e-dev/core/lib/internal/time';
+import { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
+import { createFixtures } from '@e2e-dev/core/lib/run/fixtures';
+import { StepRecorder } from '@e2e-dev/core/lib/run/steps';
+import { WorkerModels } from '@e2e-dev/core/lib/run/worker-models';
 import { snapshot } from '../helpers/snapshot.ts';
 
 function contentFilterModel(text = '') {
@@ -63,6 +65,21 @@ describe('model refusal', () => {
       message: 'the model anthropic/claude-sonnet-5.5 refused the request (refusal)',
     });
     expect(refusal.attempts()).toBe(1);
+  });
+
+  it('reads a content-filtered ToolChoiceViolationError as a refusal', async () => {
+    await loadAiSdk();
+    const violation = (finishReason: 'content-filter' | 'stop') =>
+      new ToolChoiceViolationError({
+        toolChoice: { type: 'required' },
+        finishReason,
+        provider: 'anthropic',
+        modelId: 'claude-sonnet-5.5',
+        content: [],
+      });
+
+    expect(isModelRefusal(violation('content-filter'))).toBe(true);
+    expect(isModelRefusal(violation('stop'))).toBe(false);
   });
 
   it('keeps a usable answer that finished with content-filter', async () => {

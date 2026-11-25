@@ -4,9 +4,9 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { uuidv7 } from '../../src/internal/ids.ts';
-import type { SavedSecrets } from '../../src/run/secrecy.ts';
-import { SessionStore, type SavedSession, type SessionIdentity } from '../../src/run/sessions.ts';
+import { uuidv7 } from '@e2e-dev/core/lib/internal/ids';
+import type { SavedSecrets } from '@e2e-dev/core/lib/run/secrecy';
+import { SessionStore, type SavedSession, type SessionIdentity } from '@e2e-dev/core/lib/run/sessions';
 import { assertValidSessionEnvelope } from '../helpers/session-schema.ts';
 
 const identity: SessionIdentity = {
@@ -168,6 +168,35 @@ describe('session load', () => {
       await expect(store.load('member', identity)).rejects.toMatchObject({ code: 'SESSION_INVALID' });
     } finally {
       store.cleanup();
+    }
+  });
+
+  it('refuses a truncated tag, a tag that is not a string, or a missing IV', async () => {
+    type Sealed = { state: { iv?: string; tag: string | number[] } };
+    const edits: ((envelope: Sealed) => void)[] = [
+      // A prefix of the real tag: GCM checks only as many bytes as it is given unless the length is pinned.
+      (envelope) => {
+        envelope.state.tag = Buffer.from(envelope.state.tag as string, 'base64').subarray(0, 4).toString('base64');
+      },
+      // The same tag bytes as a JSON array: not what `save` writes.
+      (envelope) => {
+        envelope.state.tag = [...Buffer.from(envelope.state.tag as string, 'base64')];
+      },
+      (envelope) => {
+        delete envelope.state.iv;
+      },
+    ];
+    for (const edit of edits) {
+      const { store, file } = await saveEnvelope([['token', SECRET_VALUE]]);
+      try {
+        const envelope = JSON.parse(await readFile(file, 'utf8')) as Sealed;
+        edit(envelope);
+        await writeFile(file, JSON.stringify(envelope));
+        const error: unknown = await store.load('member', identity).catch((thrown: unknown) => thrown);
+        expect(error).toMatchObject({ code: 'SESSION_INVALID', message: 'session "member" failed authentication' });
+      } finally {
+        store.cleanup();
+      }
     }
   });
 });

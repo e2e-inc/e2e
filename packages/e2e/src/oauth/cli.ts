@@ -4,15 +4,15 @@
  * the flags commander parsed.
  */
 
-import { spawn } from 'node:child_process';
 import * as clack from '@clack/prompts';
 import pc from 'picocolors';
-import { sanitizeText } from '../internal/errors.ts';
+import { sanitizeText } from '@e2e-dev/core/lib/internal/errors';
+import { spawnBrowserCommand } from '../internal/open-browser.ts';
 import { browserCommand } from './browser.ts';
 import { OAuthError } from './errors.ts';
 import { login, logout } from './login.ts';
 import { listModels } from './models.ts';
-import { PROVIDER_IDS } from './provider-ids.ts';
+import { PROVIDER_IDS, canonicalProviderId } from './provider-ids.ts';
 import { apiKeyFor, getProvider, isProviderId, type LoginOptionsById, type ProviderId } from './providers.ts';
 import { defaultCredentialStore } from './store.ts';
 import type { OAuthLoginCallbacks, SubscriptionModel } from './types.ts';
@@ -145,9 +145,9 @@ async function signedIn(): Promise<Map<ProviderId, string>> {
 
 const PROVIDER_HINTS: Record<ProviderId, string> = {
   openai: 'ChatGPT Plus/Pro, the Codex sign-in',
-  'github-copilot': 'GitHub Copilot: OpenAI, Anthropic, Google, and SpaceXAI models',
+  'github-copilot': 'GitHub Copilot: OpenAI, Anthropic, Google, and SpaceXSI models',
   'opencode-console': 'your OpenCode Console workspace',
-  spacexai: 'SuperGrok or X Premium+',
+  spacexsi: 'SuperGrok or X Premium+',
 };
 
 /** A terminal picker over providers; without a terminal the provider has to be named. */
@@ -187,8 +187,9 @@ async function report(io: CliIo, run: () => Promise<number | undefined>): Promis
 }
 
 function requireProvider(id: string): ProviderId {
-  if (!isProviderId(id)) throw new OAuthError('MISCONFIGURED', `name a provider: ${PROVIDER_IDS.join(', ')}`);
-  return id;
+  const canonical = canonicalProviderId(id);
+  if (!isProviderId(canonical)) throw new OAuthError('MISCONFIGURED', `name a provider: ${PROVIDER_IDS.join(', ')}`);
+  return canonical;
 }
 
 /** The provider's own login options from the shared flags; flags meant for another provider are ignored. */
@@ -266,12 +267,5 @@ function defaultIo(): CliIo {
 /** Best effort: the URL is printed regardless, so a failure to open a browser is not an error. */
 function openInBrowser(url: string): void {
   const command = browserCommand(process.platform, url);
-  if (command === undefined) return;
-  try {
-    const child = spawn(command.command, [...command.args], { stdio: 'ignore', detached: true });
-    child.on('error', () => {});
-    child.unref();
-  } catch {
-    // The printed URL is the fallback.
-  }
+  if (command !== undefined) spawnBrowserCommand(command);
 }

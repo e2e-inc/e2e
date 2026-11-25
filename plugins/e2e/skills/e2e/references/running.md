@@ -21,7 +21,7 @@ npx e2e guide [topic]              # print this skill; topics: setup, writing-te
                                    # running, explore, debugging, mcp, bug-bash
 npx e2e cache ls|clear|stats       # inspect or empty the replay cache
 npx e2e login|logout|models [provider]  # e2e/oauth subscription logins: openai,
-                                   # github-copilot, opencode-console, spacexai
+                                   # github-copilot, opencode-console, spacexsi
 npx e2e mcp [--target <name>]      # MCP server for a coding agent (topic mcp)
 npx e2e upgrade [version|tag]      # e2e and its @e2e-dev packages to latest or a version;
                                    # alias update, --dry-run shows the plan; updates
@@ -42,23 +42,25 @@ npx e2e telemetry [disable|enable] # anonymous usage telemetry: status or switch
 | `--exclude-tag <tags>` | Drop tests carrying any of these tags, however selected. |
 | `--grep <pattern>`, `--grep-invert <pattern>` | Keep, or drop, tests whose title (describe titles and test title joined by spaces, `checkout pays`; not file or tags) matches a regular expression. Bare pattern or `'/pattern/i'`; repeat for alternatives. |
 | `--changed-since <ref>` | Run the configured `filters` on the change since the ref: every file that differs from the merge base of the ref and HEAD, uncommitted and untracked included (`--changed-since origin/main`). Each target starts the files of the tests the filters score likeliest first (`relevance`, see topic `setup`). Without it no filter runs. A ref git can't measure from is `INVALID_CHANGED_SINCE`, exit 2. |
-| `--last-failed` | The tests the previous run (`<output>/report.json`) did not pass or never ran (`--max-failures` and `--max-duration` included), plus every test in a failed `beforeAll` or `afterAll` scope. A test another filter leaves out stays owed (`run.carried` in the report) until a rerun runs it. No report is `NO_LAST_RUN`, exit 2. |
-| `--shard <index/total>` | One contiguous slice of the selected tests (`--shard 2/3`), cut after every other flag; serial groups stay whole, each shard brings its own setup tests. |
-| `--headed` | Visible browser or simulator when the engine supports it. |
+| `--last-failed` | The tests the previous run (`<output>/report.json`) did not pass or never ran (`--max-failures` and `--max-duration` included), plus every test in a failed `beforeAll` or `afterAll` scope. A test another filter leaves out stays owed (`run.carried` in the report) until a rerun runs it. The rerun also writes `report-with-reruns.json`, every run as one report. No report is `NO_LAST_RUN`, exit 2. |
+| `--shard <index/total>` | One contiguous slice of the selected tests (`--shard 2/3`), cut after every other flag; serial groups stay whole, each shard brings its own setup tests. The report records `run.shard`, and `skip.otherShard` on tests this invocation's cut gave to another shard. Shards rerunning their own failures can cut different sets. |
+| `--headed` | Visible browser or simulator when the engine supports it; a desktop target launches its app in the foreground (physical input still needs `desktop({ headed: true })`). |
+| `--device <name>` | The simulator, emulator, or phone the selected mobile target runs on, over its `device` option: a device name, a simulator UDID, or an emulator serial (`emulator-5554`). It applies to the one selected target that can take a device; the others (`web()`, a provider's devices) still run as configured. With several that can, pick one with `--target` (else `TARGET_REQUIRED`); with none, it is `UNSUPPORTED_CAPABILITY`. |
 | `--agent <names>` | Run unpinned tests as these `agents.<name>` entries (default `agents.default`), comma-separated or repeated; several names run each such test once per agent. |
 | `--workers <n>`, `--retries <n>` | Override the resolved values; retries 0-10, workers 1-1024. A retry replays the cache only in strict mode (`--strict-cache`, `cache.strict`); otherwise it runs every agent step live. |
+| `--fully-parallel` | Run the tests of one file in parallel too, on every target, over `fullyParallel` in the config. |
 | `--action-timeout <ms>`, `--assertion-timeout <ms>` | Override config `actionTimeout` (default 30000) and `assertionTimeout` (default 5000) for this run; a call's own `{ timeout }` still wins. |
 | `--max-failures <n>` | Stop after n failures: the rest skip (cause `failure-limit`), running tests end `interrupted`; exit 1. |
 | `--max-duration <ms>` | Stop after ms of running tests, over config `maxDuration`: the rest skip (cause `time-limit`), running tests end `interrupted`, `RUN_TIMEOUT`; exit 1. |
 | `--repeat-each <n>` | Run every selected test n times, each run its own result (`repeat` 0 through n-1); add `--no-cache` or later runs replay the first's recording. The `Repeats` summary row names each unstable test's failed runs. |
-| `--reporter <ids>` | `list`, `json`, `junit`, `markdown`, comma-separated; `json` cannot combine with `list`. An empty value is a usage error, exit 2. |
+| `--reporter <ids>` | `list`, `dot`, `line`, `json`, `junit`, `markdown`, `ctrf`, comma-separated; two of `list`, `dot`, and `line` together are `INVALID_CONFIG`, and beside `json` each prints to stderr. An empty value is a usage error, exit 2. |
 | `--output <dir>` | Results directory, over the config's `output` (default `.e2e`). Must be inside the project root, not the root itself (`INVALID_CONFIG`); to keep reports elsewhere, copy them after the run. |
 | `--no-cache` | Replay cache off for this run. |
 | `--strict-cache` | Fail a step whose committed recording no longer replays (`REPLAY_STALE`, exit 2) instead of handing it to the agent; retries replay too, and the run never writes the cache. |
 | `-u`, `--update-snapshots` | Write the stored screenshots `toHaveScreenshot` finds missing or different, and pass. |
 | `-w`, `--watch` | Run, then run again when a test file, a source file beside the tests, or the config is saved, or a key asks: `a` or enter all, `r` the current filters, `f` failed, `u` update snapshots, `p` and `t` filter by file and title, `q` quit; a key during a run cancels it. Refused in CI and with `--reporter json`. |
 | `--pass-with-no-tests` | Exit 0, not `NO_TESTS`, when nothing matches; a run with nothing to run starts no engine or app. |
-| `--step` | Run the first step, then hold each later one until a key at its prompt: Enter runs it, `n` the rest of the test, `a` the rest of the run, `h` lists the keys, `q` stops (exit 130). For a person at a terminal, not an agent: refused in CI, with `--watch`, `--workers` above 1, and the json reporter. |
+| `--step` | Run the first step, then hold each later one until a key at its prompt: Enter runs it, `s` shows the screen, `l` the app log, `n` the rest of the test, `a` the rest of the run, `h` lists the keys, `q` stops (exit 130). Without a terminal (an agent's shell) the run goes on in the background and each command returns at the next held step with the screen it waits on: then `e2e run --step next` runs that step, `rest` the rest, `stop` ends the run; run them from the same directory. A shell with a terminal gets the key prompt instead: redirect stdin from the null device (`< /dev/null`, or `< NUL` in Windows `cmd`). Refused in CI, with `--watch`, and `--workers` above 1; with the json reporter it needs a terminal. |
 | `--debug` | Phase timings and an agent step table on stderr; transcripts as artifacts. |
 | `--ai-trace` | Every model call except a test filter's, to `<output>/ai-trace.json`. |
 | `--timings <file>` | The timings history to update, over `<output>/timings.json`. With more than one worker, files with no recorded time start first, then the rest longest first. |
@@ -135,12 +137,12 @@ its own tools.
 ## Output
 
 `<output>` (`.e2e` by default) holds `report.json`, `junit.xml`,
-`summary.md`, `ai-trace.json`, `timings.json` (how long each file took; with more than one worker the next run starts the longest known files first, after any with no time), `sessions/`, and `results/`, one directory
+`summary.md`, `ctrf.json`, `ai-trace.json`, `timings.json` (how long each file took; with more than one worker the next run starts the longest known files first, after any with no time), `sessions/`, and `results/`, one directory
 per test with its `trace.md` and an `attempt-<n>/` per attempt
 (screenshots, videos, `--debug` transcripts, downloads).
 `results/` is cleared once a run's tests start; a run stopping before
 leaves the last run's files, and a `--last-failed` rerun keeps the files
-the report it reruns names and writes its own under each test's `rerun-<n>/`. The report records every artifact path, a
+the runs before it name and writes its own under each test's `rerun-<n>/`. The report records every artifact path, a
 hosted service's video by URL.
 
 - `list` (default): setup steps, one line per file and target (when stdout
@@ -158,6 +160,7 @@ hosted service's video by URL.
   takes the terminal and the trace pages), the one record of every result,
   passing ones included, written whatever the reporters, holds `run.status`,
   `run.exitCode`, `run.errors[]` (run-level, such as `APP_UNREACHABLE`),
+  `run.durationMs` (milliseconds excluding held time),
   and `run.results[]`, one per test and target: `titlePath`, `file`,
   `source`, `tags` (`[]` when none), `agent`, `repeat` (0 unless
   `--repeat-each`), `selected`, `status`, `attempts[]` of `steps[]`,
@@ -165,6 +168,8 @@ hosted service's video by URL.
   `passed`, `failed` (timed out included), `interrupted` (stopped by the
   run: a signal, `--max-failures`, `--max-duration`, a run-level error; not a failure), `flaky`, and `skipped` add up
   to `selected`; `discovered - selected` were left out.
+- `dot`: one ASCII mark per selected test's final result after retries, wrapped at 80 marks; colors follow terminal settings and `NO_COLOR`. It shares `list`'s header, failure details, summary, run errors, and step prompts. Use `--reporter dot,json` (or `list,json`) for all terminal output on stderr and the JSON report on stdout.
+- `line`: one progress row, `[3/12] |web| tests/cart.e2e.ts > adds an item (passed)`, replaced in place on a TTY and printed once per selected test's final result elsewhere. A failed or timed-out test prints its failure details when the result arrives, not under `Failed Tests`; the closing `Failed` rows name the trace pages. The rest is `list`'s.
 - `junit`: `junit.xml` for CI summaries; `--reporter list,junit` keeps the
   terminal output. A case with a failure screenshot links it as
   `<system-out>[[ATTACHMENT|<path>]]</system-out>`, relative to
@@ -180,6 +185,9 @@ hosted service's video by URL.
   spend, a block per failed test linked to its page, the flaky tests folded
   alike, and every test as one folded table (or an exploration's findings
   and assessment). Paste it into a pull request or handoff.
+- `ctrf` (`--reporter list,ctrf`): `ctrf.json` in the Common Test Report
+  Format, for CTRF tools (test report actions, notifiers, dashboards). Run
+  errors are in `results.errors`, not tests: gate CI on the exit code.
 - `json`: the report on stdout.
 - Custom reporters get step progress with `identity` (`attemptId`,
   `attemptIndex`, `stepId`, `stepIndex`: report IDs, zero-based indexes;
@@ -214,7 +222,7 @@ deterministic, never retry it; only exit 3 is worth a job-level retry.
 
 The first SIGINT or SIGTERM interrupts and writes the report if any test
 had started; the second forces engine teardown and still writes the
-report, plus `junit.xml` and `summary.md` when those reporters are on; the
+report, plus `junit.xml`, `summary.md`, and `ctrf.json` when those reporters are on; the
 third kills the app process groups and exits 130 at once.
 
 ## Continuous integration
@@ -223,6 +231,15 @@ CI mode is on when `CI` is set (not `0` or `false`): `retries` 1,
 `workers` 1, `test.only` rejected with
 `ONLY_IN_CI`, the replay cache `read-only` unless the config sets a mode explicitly
 (`cache: 'read-write'` or `cache.mode`), `reuseExisting` ignored.
+
+`npx e2e init --yes --ci github-actions` writes a workflow like this one with
+a job per platform the config's targets run on (web, iOS, Android), for the
+project's package manager and model key; `--ci gitlab` writes the same jobs as
+`.gitlab-ci.yml` (or `.gitlab/e2e.gitlab-ci.yml` to include beside an existing
+one), its mobile jobs on self-managed runners. The mobile jobs build an Expo or
+bare React Native app; for any other app, replace the failing build step. It
+leaves existing pipeline files alone. Set `app.command` in the config so the
+runner starts the app.
 
 ```yaml
 # .github/workflows/e2e.yml
@@ -241,7 +258,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@9fd676a19091d4595eefd76e4bd31c97133911f1 # v4.2.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26 # Node >= 24.8, or >= 22.22.3 on 22
           cache: pnpm
@@ -257,7 +274,7 @@ jobs:
           E2E_USER_ADMIN_USERNAME: ${{ secrets.E2E_USER_ADMIN_USERNAME }}
           E2E_USER_ADMIN_PASSWORD: ${{ secrets.E2E_USER_ADMIN_PASSWORD }}
       - if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-report
           path: |
@@ -265,7 +282,7 @@ jobs:
             .e2e/junit.xml
           if-no-files-found: warn
       - if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-artifacts
           path: .e2e/results

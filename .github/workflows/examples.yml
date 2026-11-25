@@ -90,6 +90,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Pack
         run: |
+          pnpm --filter @e2e-dev/core pack --out "$RUNNER_TEMP/packed/core.tgz"
           pnpm --filter e2e pack --out "$RUNNER_TEMP/packed/e2e.tgz"
           pnpm --filter @e2e-dev/web pack --out "$RUNNER_TEMP/packed/web.tgz"
           pnpm --filter @e2e-dev/mobile pack --out "$RUNNER_TEMP/packed/mobile.tgz"
@@ -231,7 +232,7 @@ jobs:
             app: android/app/build/outputs/apk/release/app-release.apk
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: 17
@@ -239,6 +240,7 @@ jobs:
         if: ${{ matrix.toolchain == 'flutter' }}
         with:
           channel: stable
+          flutter-version: '3.50.0'
           cache: true
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         if: ${{ matrix.toolchain == 'dotnet' }}
@@ -429,7 +431,7 @@ jobs:
           echo "booting ${PICK#* } ($UDID)"
           xcrun simctl boot "$UDID"
           echo "SIMULATOR_UDID=$UDID" >> "$GITHUB_ENV"
-      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         if: ${{ matrix.toolchain == 'java' }}
         with:
           distribution: temurin
@@ -438,6 +440,7 @@ jobs:
         if: ${{ matrix.toolchain == 'flutter' }}
         with:
           channel: stable
+          flutter-version: '3.50.0'
           cache: true
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         if: ${{ matrix.toolchain == 'dotnet' }}

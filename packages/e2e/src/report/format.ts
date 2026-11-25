@@ -6,10 +6,11 @@
 
 import { stripVTControlCharacters } from 'node:util';
 import picocolors from 'picocolors';
-import type { CacheWrite } from '../cache/context.ts';
-import { sanitizeText, truncateUtf8 } from '../internal/errors.ts';
-import type { ResultStatus } from '../run/records.ts';
-import type { StepModelInfo, StepRecord } from '../run/steps.ts';
+import type { CacheWrite } from '@e2e-dev/core/lib/cache/context';
+import { sanitizeText, truncateUtf8 } from '@e2e-dev/core/lib/internal/errors';
+import { redactError } from '@e2e-dev/core/lib/run/secrecy';
+import type { ResultStatus } from '@e2e-dev/core/lib/run/records';
+import type { StepModelInfo, StepRecord } from '@e2e-dev/core/lib/run/steps';
 
 /** A picocolors instance; the reporter decides whether it emits color. */
 export type Colors = ReturnType<typeof picocolors.createColors>;
@@ -18,6 +19,15 @@ export type Colors = ReturnType<typeof picocolors.createColors>;
 export const F_POINTER = '❯';
 export const F_CHECK = '✓';
 export const F_CROSS = '×';
+
+/**
+ * A step's call under the session it ran on when that is not the test's
+ * own, `launch-1 › locator.tap`: how the terminal and the trace page list
+ * such a step. `actor` and `call` come already escaped for the format.
+ */
+export function withActor(actor: string | undefined, call: string): string {
+  return actor === undefined ? call : `${actor} › ${call}`;
+}
 
 /** Every untrusted field is capped here before it reaches the terminal. */
 const MAX_FIELD_BYTES = 8192;
@@ -40,7 +50,7 @@ export function bounded(text: string): string {
  * when no list reporter shows it.
  */
 export function failureLine(error: { readonly code: string; readonly message: string }): string {
-  return `${bounded(error.code)}: ${bounded(error.message)}\n`;
+  return `${bounded(error.code)}: ${bounded(redactError(error.message))}\n`;
 }
 
 /**
@@ -55,12 +65,13 @@ export function ellipsize(text: string, max: number): string {
 
 /** The terminal width; a pty without a size reports 0, which counts as unknown. */
 export function terminalColumns(): number {
-  return process.stdout.columns || 80;
+  // stderr's when stdout is not a terminal: `list` beside `json` paints there.
+  return process.stdout.columns || process.stderr.columns || 80;
 }
 
 /** The terminal height; a pty without a size reports 0, which counts as unknown. */
 export function terminalRows(): number {
-  return process.stdout.rows || 40;
+  return process.stdout.rows || process.stderr.rows || 40;
 }
 
 /** vitest's duration format: whole milliseconds under a second, two decimals above. */
@@ -95,7 +106,8 @@ export function formatClock(date: Date): string {
 /** Compact token count: plain under a thousand, `12.4k`, then `4.2M`. */
 export function formatTokens(count: number): string {
   if (count < 1_000) return `${count}`;
-  if (count < 1_000_000) return `${(count / 1_000).toFixed(1)}k`;
+  const hundreds = Math.round(count / 100);
+  if (hundreds < 10_000) return `${(hundreds / 10).toFixed(1)}k`;
   return `${(count / 1_000_000).toFixed(1)}M`;
 }
 

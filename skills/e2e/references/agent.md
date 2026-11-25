@@ -55,7 +55,8 @@ gates, and limits.
 A coding agent the user already signs in to runs agent steps over the Agent Client Protocol:
 install `@e2e-dev/acp` and its adapter, and put
 `claudeCode({ model: 'sonnet' })` or `codex()` under
-`executor`; no model provider is needed. See the shipped `docs/subscriptions.mdx` or
+`executor`; no model provider is needed. Codex signs in with
+`codex login`, or with `OPENAI_API_KEY` set, which it then saves as its login. See the shipped `docs/subscriptions.mdx` or
 [the online guide](https://e2e.com/docs/subscriptions#use-your-coding-agent).
 
 - Pass a model instance, not a string (`INVALID_CONFIG`).
@@ -73,7 +74,7 @@ install `@e2e-dev/acp` and its adapter, and put
 - `context` is what the app calls things, sent to every model call, judges
   included; `system` is how the acting agent works, read only by the act
   loop. Both live on the agents entry; `agentContext` on a test or group
-  adds more. Under `e2e run`, every prompt opens with the test's title path
+  adds more. Under `e2e run`, every prompt carries the test's title path
   (`Test: billing > upgrades the tier`), judges included, so name a test
   for what it covers, not for the verdict it expects.
 
@@ -135,7 +136,8 @@ Options:
 The tools, one per engine action. Name the target as the screen names it
 (files in `params`); the agent picks the verb:
 
-- `observe`: re-read the screen after waiting on work in progress.
+- `observe`: re-read the screen after waiting on work in progress, or to
+  check whether a press that commits something went through.
 - `tap`: button, link, menu item, tab, checkbox, row, field.
 - `double_tap`/`long_press`/`right_click`: second-click item, long-press
   menu, context menu only.
@@ -165,7 +167,8 @@ The tools, one per engine action. Name the target as the screen names it
   recently when the opener is closed too. The last open tab stays open.
   Engines with `session.closeTab`, such as web.
 - `type_secret`: a declared secret by name; plaintext never reaches the model.
-  Offered only when the step declares secrets and the engine can fill them.
+  Offered whenever the engine can fill secrets; the step's opening message
+  lists the ones it declares, and an undeclared name fills nothing.
 - `screenshot`: attach viewport pixels; every later result then carries one.
 - `tap_at`/`hover_at`/`press_at`/`select_at`/`type_at`: a screenshot point.
 - `drag_at`: from one screenshot point to another (`to_x`, `to_y`).
@@ -183,7 +186,12 @@ nothing to tap by id opens with a screenshot attached. A device has no
 `right_click`, `select`, `upload`, or `scroll_to` by node id. Pixels mask
 secure fields only (topic writing-tests). A result says when an action
 closed an on-screen keyboard; on a touch screen that tap was often spent
-closing it, so act again.
+closing it, so act again. A control that commits something (save, submit,
+delete) is pressed once for each commit the step asks for. When the tap
+only closed the keyboard, the agent presses again at once. Otherwise it
+checks the screen before a second press, and presses again only when the
+screen shows the first press did not commit (a validation error that
+blocked the save and that the agent then corrected).
 
 ## assert, waitFor, extract: one question
 
@@ -219,8 +227,10 @@ expect(data.titles).toContain('Buy milk');
 - A value shown in more than one place (a total in the summary and on the
   pay button) must agree everywhere, or the judgment fails. Name the one
   you mean (`'the order summary total is $42.00'`) when only it matters.
-- `waitFor` observes every `interval` (default 3 s), judges only when the
-  screen or its location changed, and is `STEP_TIMEOUT` after `timeout` (default 30 s).
+- `waitFor` observes every 500 ms, judges only when the screen or its
+  location changed, and is `STEP_TIMEOUT` after `timeout` (default 30 s). A
+  change after a still screen is judged at once; while the screen keeps
+  changing, at most once per `interval` (default 3 s).
 - Never sleep for a fixed time to let the app settle. A sleep is too short
   on a slow run and wasted time on a fast one; `waitFor` returns as soon as
   the state appears:
@@ -352,10 +362,11 @@ of sleeping.
 
 A redacted snapshot of the screen (roles, names, text, states), prior-step
 summaries, and your context; never raw HTML, cookies, headers, environment
-values, or a `Secret`'s value; password fields masked. The first
-screen of a step arrives whole; later action results report what changed,
-keyed by node ids stable while an element exists, or the whole screen when
-most changed. Pixels arrive through `vision` on a judgment or the act loop's
+values, or a `Secret`'s value; password fields masked, unless a page
+script hides one from e2e. The first screen of a step arrives whole; later
+action results report what changed, keyed by node ids stable while an
+element exists, or the whole screen when most changed.
+Pixels arrive through `vision` on a judgment or the act loop's
 `screenshot` and point tools, with secure fields masked. When
 the browser engine's tree capture times out, the model gets a screenshot and
 a warning, a judgment needs `vision: true`, and no control may be inferred
@@ -410,7 +421,8 @@ matches. Misses and hand-offs use the model; `agent.assert`,
   re-finds each control by role, name, test id, placeholder, input purpose,
   and its named row (an unnamed control with twins and no named container
   hands off, and so does one known only by a generated test id once that id
-  is gone), and passes alone only when the recorded end route is back,
+  is gone, or one of same-named twins left after the recorded one went
+  away), and passes alone only when the recorded end route is back,
   every control that appeared (with its checked or selected state) is
   there, every one that went away is gone, at least one of those changed
   during the replay, and no new alert showed; otherwise the agent takes
@@ -486,12 +498,27 @@ before writing the AI trace.
 - `tools: { seedCart }` on an agents entry adds AI SDK tools wrapped with
   `defineTool(tool({ ... }), { mutates: true })` from `e2e/agent` for a
   test API a flow calls mid-step.
+- A `mutates: false` tool can call `getToolContext(options).read({ id },
+  { style: ['color', 'font-weight'] })` for a node in its newest observation.
+  Web reads return redacted `{ style }` under the step deadline, use no action
+  slot, and never relocate stale IDs. Use `platforms` to skip targets
+  without support. Allowed properties and errors:
+  https://e2e.com/docs/tools#read-a-nodes-computed-style.
 - `createToolLoopExecutor` keeps the loop and replaces prompt and tool
   vocabulary; spread `createGrammarTools(ctx, { guard })` into its tools and
-  start its `system` with `BASE_RULES` to keep the built-in actions.
+  start its `system` with `BASE_RULES` to keep the built-in actions. A
+  `complete_step` sent in the same turn as other calls waits for the calls
+  before it, and is refused when one failed or the last one changed
+  nothing; calls after it don't run.
 - Any `StepExecutor` (`{ name, version?, cache?, runStep(ctx) }`) goes under
   `executor`; the runner still owns observations, actions, budgets, and the
   report, and `system` or `tools` beside `executor` is `INVALID_CONFIG`.
+- The run redacts the model provider keys in its environment from reports,
+  traces, and output. For a key it cannot see (one passed in code, one an
+  agent reads from its own login file), call
+  `registerProviderKey(name, value)` from `e2e/agent`; an executor that cuts
+  text itself calls `redactSecrets(text)` first, and one that sends its agent
+  text of its own calls `redactStepText(ctx, text)`.
 
 Reference: https://e2e.com/docs/agents
 

@@ -9,7 +9,7 @@
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Browser, CDPSession, Download, Page } from 'playwright-core';
-import { EngineError } from 'e2e/engine';
+import { EngineError } from '@e2e-dev/core/engine';
 import type { LeaseDownloads } from './provider.ts';
 import { invalidState, message } from './support.ts';
 
@@ -59,7 +59,7 @@ export async function saveFromBrowser(download: Download, downloads: LeaseDownlo
   if (failure !== null) throw new EngineError('ENGINE_FAILURE', `download failed: ${failure}`, { retryable: false });
   // Playwright names its own record of the file by the same download id.
   const saved = path.posix.join(downloads.dir, path.basename(await download.path()));
-  await writeFile(file, await downloads.read(saved, signal));
+  await writeFile(file, await downloads.read(saved, signal, download.suggestedFilename()));
 }
 
 /**

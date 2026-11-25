@@ -1,8 +1,8 @@
 /**
  * `expect(locator)` through the real runner against the scripted engine:
  * every matcher and a few negations pass on the reference screen, every failure
- * names the observed state, a matcher honors its timeout, and an ambiguous
- * locator fails at once.
+ * names the observed state and opens with the caller's message when there is
+ * one, a matcher honors its timeout, and an ambiguous locator fails at once.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -19,6 +19,7 @@ test('every matcher passes on the scripted screen', async ({ app, screen }) => {
   await expect(screen.getByText('Never rendered')).toBeHidden();
   await expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled();
   await expect(screen.getByRole('button', { name: 'Disabled action' })).toBeDisabled();
+  await expect(screen.getByLabel('Notes')).toBeEditable();
   await expect(screen.getByRole('switch', { name: 'Dark mode' })).toBeChecked();
   await expect(screen.getByRole('tab', { name: 'All' })).toBeSelected();
   await screen.getByRole('button', { name: 'Menu' }).tap();
@@ -30,12 +31,14 @@ test('every matcher passes on the scripted screen', async ({ app, screen }) => {
   await expect(screen.getByTestId('card')).toContainText('body');
   await expect(screen.getByLabel('Search')).toHaveValue('hello-value');
   await expect(screen.getByLabel('Email')).toHaveValue('');
+  await expect(screen.getByLabel('Email')).toBeEmpty();
   await expect(screen.getByLabel('Notes')).toHaveValue('line1\\n\\nline2  ');
   await expect(screen.getByLabel('Notes')).toHaveValue(/^line1\\n\\nline2 {2}$/);
   await expect(screen.getByTestId('card')).toHaveAttribute('data-state');
   await expect(screen.getByTestId('card')).toHaveAttribute('data-state', 'open');
   await expect(screen.getByTestId('card')).toHaveAttribute('class', /active/);
   await expect(screen.getByRole('list', { name: 'Todos' })).toHaveAccessibleName('Todos');
+  await expect(screen.getByRole('switch', { name: 'Dark mode' })).toHaveRole('switch');
   await expect(screen.getByTestId('todo')).toHaveCount(3);
   await expect(screen.getByTestId('todo')).toHaveText(['Write spec', /^Ship/, 'Release']);
   await expect(screen.getByTestId('todo')).toContainText(['spec', 'runner', 'Release']);
@@ -134,6 +137,11 @@ test('the list form of toHaveText over a secure field is denied', async ({ app, 
   await expect(screen.getByRole('textbox')).toHaveText(['', '', '', '']);
 });
 
+test('toBeEmpty fails on a node with text', async ({ app, screen }) => {
+  await app.open('/');
+  await expect(screen.getByRole('heading', { level: 1 })).toBeEmpty(fast);
+});
+
 test('toHaveAttribute fails on an absent attribute', async ({ app, screen }) => {
   await app.open('/');
   await expect(screen.getByTestId('card')).toHaveAttribute('hidden', fast);
@@ -169,6 +177,16 @@ test('a negated matcher fails while the condition holds', async ({ app, screen }
   await expect(screen.getByRole('button', { name: 'Submit' })).not.toBeVisible(fast);
 });
 
+test('a message opens a locator failure', async ({ app, screen }) => {
+  await app.open('/');
+  await expect(screen.getByText('Hidden content'), 'the hidden note shows').toBeVisible(fast);
+});
+
+test('a message opens a negated locator failure', async ({ app, screen }) => {
+  await app.open('/');
+  await expect(screen.getByRole('button', { name: 'Submit' }), 'the form submitted').not.toBeVisible(fast);
+});
+
 test('a matcher honors its timeout', async ({ app, screen }) => {
   await app.open('/');
   await expect(screen.getByText('Never rendered')).toBeVisible({ timeout: 250 });
@@ -177,6 +195,16 @@ test('a matcher honors its timeout', async ({ app, screen }) => {
 test('an ambiguous locator fails an assertion at once', async ({ app, screen }) => {
   await app.open('/');
   await expect(screen.getByText('Duplicated')).toBeVisible({ timeout: 3000 });
+});
+
+test('a message opens an ambiguous locator failure', async ({ app, screen }) => {
+  await app.open('/');
+  await expect(screen.getByText('Duplicated'), 'the banner shows').toBeVisible({ timeout: 3000 });
+});
+
+test('a message opens an ambiguous locator screenshot failure', async ({ app, screen }) => {
+  await app.open('/');
+  await expect(screen.getByText('Duplicated'), 'the banner shows').toHaveScreenshot('duplicated', { timeout: 3000 });
 });
 `;
 
@@ -192,6 +220,7 @@ const FAILURES: [string, ...string[]][] = [
   ['toContainText fails on absent text', 'expected: text containing "footer"', 'observed: text "Card body"'],
   ['toHaveValue fails on a node without a value', 'expected: value "Dashboard"', 'observed: no value (not a form control)'],
   ['toHaveValue never normalizes the value', 'observed: value "line1\\n\\nline2  "'],
+  ['toBeEmpty fails on a node with text', 'expect.toBeEmpty failed', 'expected: empty', 'observed: not empty'],
   ['toHaveAttribute fails on an absent attribute', 'expected: attribute "hidden"', 'observed: attribute "hidden" absent'],
   ['toHaveAttribute fails on another value', 'expected: attribute "data-state" "closed"', 'observed: attribute "data-state" "open"'],
   ['toHaveAccessibleName fails on another name', 'expected: accessible name "Done"', 'observed: name "Todos"'],
@@ -199,6 +228,8 @@ const FAILURES: [string, ...string[]][] = [
   ['the list form of toHaveText fails on a shorter list', 'expected: text ["Write spec", "Ship runner"]', 'observed: text ["Write spec", "Ship runner", "Release"] (match count 3)'],
   ['the negated list form of toContainText fails when one match contains the entry', 'expect.not.toContainText failed', 'expected: not text containing ["runner"]'],
   ['a negated matcher fails while the condition holds', 'expect.not.toBeVisible failed', 'expected: not visible', 'observed: default states (match count 1)'],
+  ['a message opens a locator failure', 'the hidden note shows: expect.toBeVisible failed\nlocator: getByText("Hidden content")', 'expected: visible'],
+  ['a message opens a negated locator failure', 'the form submitted: expect.not.toBeVisible failed', 'expected: not visible'],
 ];
 
 /** The value and text matchers a secure field refuses, negated and in list form too. */
@@ -216,6 +247,8 @@ const TITLES = [
   ...FAILURES.map(([title]) => title),
   'a matcher honors its timeout',
   'an ambiguous locator fails an assertion at once',
+  'a message opens an ambiguous locator failure',
+  'a message opens an ambiguous locator screenshot failure',
   ...SECURE_DENIALS,
 ];
 
@@ -228,9 +261,9 @@ describe('scripted engine: expect(locator) matchers', () => {
     const attempt = passed(run.outcome, 'every matcher passes on the scripted screen');
     const apis = new Set(attempt.steps.map((entry) => entry.api));
     for (const matcher of [
-      'toBeVisible', 'toBeHidden', 'toBeAttached', 'toBeEnabled', 'toBeDisabled', 'toBeChecked', 'toBeSelected',
-      'toBeExpanded', 'toBeFocused', 'toHaveText', 'toContainText', 'toHaveValue', 'toHaveAttribute',
-      'toHaveAccessibleName', 'toHaveCount',
+      'toBeVisible', 'toBeHidden', 'toBeAttached', 'toBeEnabled', 'toBeDisabled', 'toBeEditable', 'toBeChecked', 'toBeSelected',
+      'toBeExpanded', 'toBeFocused', 'toBeEmpty', 'toHaveText', 'toContainText', 'toHaveValue', 'toHaveAttribute',
+      'toHaveAccessibleName', 'toHaveCount', 'toHaveRole',
     ]) {
       expect(apis, matcher).toContain(`expect.${matcher}`);
     }
@@ -247,6 +280,14 @@ describe('scripted engine: expect(locator) matchers', () => {
     }
   });
 
+  it('opens a failure with the caller\'s message and keeps the step named by its matcher and locator', () => {
+    const attempt = failed(run.outcome, 'a message opens a locator failure', 'ASSERTION_FAILED');
+    expect(attempt.error?.message.startsWith('the hidden note shows: expect.toBeVisible failed\n')).toBe(true);
+    expect(step(attempt, 'expect.toBeVisible')).toMatchObject({ status: 'failed', label: 'getByText("Hidden content")' });
+    const unlabelled = failed(run.outcome, 'toBeVisible fails on a hidden node', 'ASSERTION_FAILED');
+    expect(unlabelled.error?.message.startsWith('expect.toBeVisible failed\n')).toBe(true);
+  });
+
   it('refuses to judge a secure field with POLICY_DENIED, negated and in list form too', () => {
     for (const title of SECURE_DENIALS) {
       const attempt = failed(run.outcome, title, 'POLICY_DENIED', 'reading values from a secure field is denied');
@@ -255,7 +296,7 @@ describe('scripted engine: expect(locator) matchers', () => {
     }
   });
 
-  it('honors an explicit timeout and fails an ambiguous locator at once', () => {
+  it('honors an explicit timeout and fails an ambiguous locator at once, after the caller\'s message, in toHaveScreenshot too', () => {
     const timed = failed(run.outcome, 'a matcher honors its timeout', 'ASSERTION_FAILED', 'observed: no node (match count 0)');
     const timedStep = step(timed, 'expect.toBeVisible');
     expect(timedStep.status).toBe('failed');
@@ -264,5 +305,14 @@ describe('scripted engine: expect(locator) matchers', () => {
     // At once: well inside the 3000 ms the test allowed the matcher.
     expect(step(ambiguous, 'expect.toBeVisible').durationMs).toBeLessThan(3_000);
     expect(ambiguous.error?.details).toMatchObject({ matches: 2, locator: 'getByText("Duplicated")' });
+    expect(ambiguous.error?.message.startsWith('locator matched 2 nodes')).toBe(true);
+    const labelled = failed(run.outcome, 'a message opens an ambiguous locator failure', 'LOCATOR_AMBIGUOUS');
+    expect(labelled.error?.message.startsWith('the banner shows: locator matched 2 nodes, expected exactly one: getByText("Duplicated")')).toBe(true);
+    expect(labelled.error?.details).toEqual(ambiguous.error?.details);
+    // The engine's error is the cause, so the stack still starts where the locator was resolved.
+    expect(labelled.error?.stack?.split('\n')[1]).toBe(ambiguous.error?.stack?.split('\n')[1]);
+    const screenshot = failed(run.outcome, 'a message opens an ambiguous locator screenshot failure', 'LOCATOR_AMBIGUOUS');
+    expect(screenshot.error?.message.startsWith('the banner shows: locator matched 2 nodes, expected exactly one: getByText("Duplicated")')).toBe(true);
+    expect(step(screenshot, 'expect.toHaveScreenshot').durationMs).toBeLessThan(3_000);
   });
 });

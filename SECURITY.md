@@ -40,12 +40,29 @@ will not protect you from your own dependencies.
 Text, accessibility trees, and pixels from the app under test are quoted to
 the model as untrusted; the runner, not the model, decides what a tool call
 may do. Every model tool call is parsed into a closed schema and authorized
-right before dispatch. Unknown tools or undeclared fields never run; the
-model reads the refusal as the call's result and can try again. A node id
-that cannot be resolved on the current screen fails with
-`LOCATOR_NOT_FOUND`. Policy refusals, such as a denied destination or a
-forbidden secret fill, fail with `POLICY_DENIED`. Model text is never
-evaluated as code, selectors, shell, or config.
+right before dispatch. An unknown tool never runs, and neither does an
+undeclared field on a built-in tool that declares fields. A built-in tool
+with no fields drops extra keys and runs. A project tool keeps the schema
+given to `defineTool`. The model reads a refusal as the call's result
+and can try again. A node id that cannot be resolved on the current
+screen fails with `LOCATOR_NOT_FOUND`. Policy refusals, such as a denied
+destination or a forbidden secret fill, fail with `POLICY_DENIED`. Model
+text is never evaluated as code, selectors, shell, or config. The one place
+code from an agent runs is `e2e mcp`'s `run_code`, and that code is
+code-trust: a coding agent's JavaScript runs in the server's Node process,
+unconfined, on the objects a test body gets. A coding agent that can write a
+test file and run it has that authority already, so `run_code` adds none.
+That holds for an agent with a shell of its own; a client that confines the
+agent's shell and runs MCP servers outside it gives the agent, through
+`run_code`, what the shell withheld. The code can read every configured
+secret and credential, from the config file, the environment, or the app.
+What it returns has the exact value of each one redacted, which prevents
+accidents and is not a boundary: the code can return a secret in a changed
+form. This is the one exception to the rule below, and to the rule that a
+password goes only into a password field. `run_code` is on by default, by
+design: every `e2e mcp` server offers it and no flag turns it off, and a
+client that approves the server's `call` tool approves `run_code` with it.
+Don't connect an agent you don't trust with the project.
 
 Secrets follow from that split. A `Secret` value never reaches model input,
 digests, logs, reports, or artifacts as text. A secret fill is authorized by the runner from
@@ -63,7 +80,11 @@ with a memory-only key, and deleted at cleanup.
 
 On the web a test or the agent may open any http(s) URL, and `about:blank`;
 every other scheme (`file:`, `data:`, `javascript:`, `view-source:`, `blob:`)
-is denied. A device link may use an app's custom scheme, so
+is denied. One exception: a target whose `app.url` is itself a file may open
+files in that file's directory, and no directory. Once its page goes
+anywhere else on disk, no model, trace, or failure report is given the
+screen, and no screenshot of a file app is sent to a model or kept on its
+own. A video the user turns on records wherever the browser goes. A device link may use an app's custom scheme, so
 `device.openLink` refuses a list instead: `file:`, `data:`, `javascript:`,
 `view-source:`, `blob:`, and `filesystem:`. There is no origin allowlist, on navigation or on
 secret fills. A click, a redirect, or a popup reaches another origin just as
@@ -75,6 +96,11 @@ leaves the app's domain. Treat a target whose app can send the agent
 elsewhere as one the agent may follow there, with the secrets the step was
 given. If a threat model ever calls for an origin allowlist again, it comes
 back as an opt-in.
+
+On macOS and Windows a locally launched Chromium runs with its OS sandbox on,
+which helps contain a renderer exploit on a page the agent reaches. On Linux,
+where root and most containers cannot start it, `web({ chromiumSandbox: true })`
+turns it on.
 
 Child frames off the site of the target's `url`, its registrable domain, are
 dropped from observations. The browser engine's `headers` and `basicAuth`

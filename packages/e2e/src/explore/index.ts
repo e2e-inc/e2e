@@ -8,24 +8,28 @@
  * rides along as `run.explore`.
  */
 
-import { MAX_PARAMS_BYTES } from '../agent/act-validation.ts';
-import type { ModuleRegistration, RegisteredTest } from '../collect/registry.ts';
+import { MAX_PARAMS_BYTES } from '@e2e-dev/core/lib/agent/act-validation';
+import { fixtureNames } from '../collect/fixture-names.ts';
+import type { ModuleRegistration, RegisteredTest, TestBody } from '../collect/registry.ts';
 import { selectTargets } from '../collect/select.ts';
 import { discoverConfig, loadConfigModule, missingConfigError } from '../config/load.ts';
-import { missingModelError, resolveAgentConfig } from '../config/agent.ts';
-import { resolveConfig, type ResolvedConfig, type ResolvedCredential, type ResolvedTarget } from '../config/resolve.ts';
-import { launchesPinnedApp } from '../config/targets.ts';
-import { ConfigurationError } from '../internal/errors.ts';
+import { missingModelError, resolveAgentConfig } from '@e2e-dev/core/lib/config/agent';
+import { type ResolvedConfig, type ResolvedCredential, type ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
+import { resolveConfig } from '../config/resolve-run.ts';
+import { launchesPinnedApp } from '@e2e-dev/core/lib/config/targets';
+import { ConfigurationError } from '@e2e-dev/core/lib/internal/errors';
 import type { ReportExplore } from '../report/build.ts';
 import { validateChangedSince } from '../run/changes.ts';
 import type { RunEventSink } from '../run/events.ts';
 import type { RunnerOutput } from '../run/process-output.ts';
 import { run, type RunOutcome } from '../run/runner.ts';
-import { registerStaticSecrets, staticSecretLedger } from '../run/secrecy.ts';
-import type { AgentConfig, BuiltinReporter, E2EConfig, RecordingMode } from '../types.ts';
+import { registerStaticSecrets, staticOutputLedger, staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
+import type { AgentConfig, RecordingMode } from '@e2e-dev/core/lib/types';
+import type { BuiltinReporter, E2EConfig } from '../run-types.ts';
 import { createExploreBody } from './body.ts';
 import { STEP_BOUNDS, TIMEOUT_BOUNDS } from './bounds.ts';
 import { changeContext, readExploreChange, type ChangeBrief, type ExploreChange } from './change.ts';
+import { readPullRequest } from './pull-request.ts';
 import { explorerAgent, withFindingTool } from './executor.ts';
 import { signedInContext, type PlanAccount } from './plan.ts';
 import { ExploreState } from './state.ts';
@@ -145,7 +149,7 @@ export async function explore(options: ExploreOptions = {}): Promise<ExploreOutc
     ? loadConfig()
     : options.processOutput.withholdDuring(loadConfig));
   const target = pickTarget(resolved.targets, options.target, notice);
-  const change = await exploreChange(options.changedSince, projectRoot, resolved.allSecrets, options.interruptSignal, notice);
+  const change = await exploreChange(options.changedSince, projectRoot, env, resolved.allSecrets, options.interruptSignal, notice);
   const goal = givenGoal ?? (change === undefined ? DEFAULT_GOAL : DEFAULT_CHANGE_GOAL);
   const accounts = credentialAccounts(resolved.credentials);
   // An exploration runs as exactly one agent: the one named, else `default`.
@@ -212,20 +216,24 @@ async function loadRawConfig(options: ExploreOptions, cwd: string): Promise<{ ra
 
 /**
  * The change `changedSince` names, read before anything starts, so a ref git
- * cannot measure from fails as a bad flag does. Every text git gives is
+ * cannot measure from fails as a bad flag does, with the pull request the CI
+ * job in `env` runs for. Every text git and the pull request give is
  * redacted of the config's static secrets, fragments included, before the
  * brief cuts it. No change since the base is a notice; the brief says so.
  */
 async function exploreChange(
   changedSince: string | undefined,
   projectRoot: string,
+  env: NodeJS.ProcessEnv,
   secrets: ResolvedConfig['allSecrets'],
   signal: AbortSignal | undefined,
   notice: (message: string) => void,
 ): Promise<ExploreChange | undefined> {
   if (changedSince === undefined) return undefined;
-  const { redactFragments } = staticSecretLedger(secrets);
-  const change = await readExploreChange({ cwd: projectRoot, changedSince, signal: signal ?? new AbortController().signal, redact: redactFragments });
+  const { redactFragments } = staticOutputLedger(secrets);
+  const interrupt = signal ?? new AbortController().signal;
+  const pullRequest = await readPullRequest(env, interrupt);
+  const change = await readExploreChange({ cwd: projectRoot, changedSince, signal: interrupt, redact: redactFragments, pullRequest });
   if (change.report.files === 0) notice(`no files changed since ${changedSince}`);
   return change;
 }
@@ -344,6 +352,8 @@ function exploreRegistration(
   // planner reads it, the explorer judges against it, and the report and
   // the trace page never copy it; only the opt-in AI trace records prompts.
   const context = [...(session === undefined ? [] : [signedInContext(session)]), ...(brief === undefined ? [] : [changeContext(brief.text)])];
+  // Registered by hand, so typed here the way `test()` types a body: it receives the attempt's fixtures.
+  const body = createExploreBody({ state, stepTimeoutMs: STEP_TIMEOUT_MS, openApp, accounts, session, change: brief === undefined ? undefined : { skippable } }) as TestBody;
   const test: RegisteredTest = {
     kind: 'test',
     title,
@@ -358,7 +368,9 @@ function exploreRegistration(
     },
     sessions: [],
     tags: [],
-    fn: createExploreBody({ state, stepTimeoutMs: STEP_TIMEOUT_MS, openApp, accounts, session, change: brief === undefined ? undefined : { skippable } }),
+    fn: body,
+    // Registered by hand, so parsed here the way `test()` parses a body.
+    names: fixtureNames(body, 'the explore test'),
     fixtures: [],
     group: undefined,
     mode: 'normal',

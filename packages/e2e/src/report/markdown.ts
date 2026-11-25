@@ -20,7 +20,8 @@
  */
 
 import path from 'node:path';
-import { collapseText } from '../internal/text.ts';
+import { collapseText } from '@e2e-dev/core/lib/internal/text';
+import { builtin } from './builtin-id.ts';
 import type { Report1Document, ReportChanges, ReportError, ReportExplore, ReportExploreFinding, ReportFilter, ReportResult, ReportStep, ReportTarget } from './build.ts';
 import { ENDED_TEXT, orderFindings, SEVERITY_WORDS, stepCountParts } from './explore-text.ts';
 import { filterDecision, formatCost, formatTokens, repeatSuffix, shortCommit, statusBucket, tally, type Counters } from './format.ts';
@@ -44,8 +45,8 @@ import {
 import { cell, code, formatDuration, link, MAX_ID_CHARS, MAX_PATH_CHARS, MAX_TITLE_CHARS, plural } from './markdown-text.ts';
 import { outcome, type Outcome } from './outcome.ts';
 import { isExploreVerdict } from './traces.ts';
-import { posixRelative, writeTextReport } from './write.ts';
-import type { Reporter, ReporterSummary } from '../types.ts';
+import { posixRelative } from './write.ts';
+import type { Reporter } from '../run-types.ts';
 
 type ReportRun = Report1Document['run'];
 type ReportArtifact = ReportResult['attempts'][number]['artifacts'][number];
@@ -277,7 +278,9 @@ function stepClause(steps: readonly ReportStep[], at: { index: number; step: Fai
   const calls = modelCalls(at.step);
   const spent = calls === 0 ? '' : ` and ${plural(calls, 'model call')}`;
   const call = at.step.kind === 'agent' ? `${code(at.step.api, MAX_ID_CHARS)} ${stepLabel(at.step, MAX_PATH_CHARS)}` : code(`${at.step.api} ${at.step.label}`, MAX_PATH_CHARS);
-  return `at step ${at.index + 1} of ${steps.length}: ${call}, after ${formatDuration(at.step.durationMs)}${spent}`;
+  // A step of a session the test opened beside its own says whose it is.
+  const on = at.step.actor === undefined ? '' : ` on ${cell(at.step.actor, MAX_ID_CHARS)}`;
+  return `at step ${at.index + 1} of ${steps.length}${on}: ${call}, after ${formatDuration(at.step.durationMs)}${spent}`;
 }
 
 /** `**CODE** (phase)`: how the error names itself. */
@@ -415,7 +418,9 @@ function fileGroups(entries: readonly Entry[]): FileGroup[] {
   const groups = new Map<string, Map<string, Entry[]>>();
   for (const entry of entries) {
     const byFile = groups.get(entry.result.targetId) ?? new Map<string, Entry[]>();
-    byFile.set(entry.result.file, [...(byFile.get(entry.result.file) ?? []), entry]);
+    const grouped = byFile.get(entry.result.file);
+    if (grouped) grouped.push(entry);
+    else byFile.set(entry.result.file, [entry]);
     groups.set(entry.result.targetId, byFile);
   }
   const rows = [...groups].flatMap(([target, byFile]) => [...byFile].map(([file, grouped]) => ({ file, target, entries: grouped })));
@@ -498,10 +503,10 @@ function ranTargets(run: ReportRun, selected: readonly ReportResult[]): readonly
 
 /** `<sub>Tested by e2e 0.13.0 · 2m 15s · web · run artifacts</sub>`: one line of small print. */
 function footer(run: ReportRun, targets: readonly ReportTarget[], options: MarkdownReportOptions): string[] {
-  const duration = formatDuration(Date.parse(run.finishedAt) - Date.parse(run.startedAt));
+  const duration = run.durationMs ?? Date.parse(run.finishedAt) - Date.parse(run.startedAt);
   const shown = targets.slice(0, MAX_FOOTER_TARGETS).map((target) => cell(target.id, MAX_ID_CHARS));
   if (targets.length > shown.length) shown.push(`and ${targets.length - shown.length} more`);
-  const parts = [`Tested by ${link('e2e', SITE_URL)} ${cell(run.runner.version, MAX_ID_CHARS)}`, duration];
+  const parts = [`Tested by ${link('e2e', SITE_URL)} ${cell(run.runner.version, MAX_ID_CHARS)}`, formatDuration(duration)];
   if (targets.length === 1) parts.push(shown[0] ?? '');
   else if (targets.length > 1) parts.push(`${plural(targets.length, 'target')} (${shown.join(', ')})`);
   if (options.artifactsUrl !== undefined) parts.push(link('run artifacts', options.artifactsUrl));
@@ -638,22 +643,33 @@ export function renderMarkdownReport(report: Report1Document, options: MarkdownR
   return fit(head, body.length === 0 ? [] : [...body, ''], footer(run, targets, options));
 }
 
+/** Options of the built-in `markdown` reporter. */
+export interface MarkdownReporterOptions {
+  /** Where the page goes, from the project root; `summary.md` in the output directory by default. */
+  readonly outputFile?: string;
+}
+
 /**
  * The built-in `markdown` reporter: the report as one markdown page in
  * `summary.md` beside `report.json`, with evidence listed as paths from the
  * project root, for a reader with the checkout in front of it: a pull
  * request description, a coding agent's handoff, a wiki page. Each failure
  * block links to the trace page the runner wrote for it in the test's
- * directory under `results/`.
+ * directory under `results/`. Writes nothing when the report itself was not
+ * written.
  */
-export const markdownReporter: Reporter = {
-  name: 'markdown',
-  async onRunFinished(run) {
-    if (run.reportPath === undefined) return;
-    const artifactsDir = posixRelative(run.projectRoot, run.artifactsRoot);
-    const summary = path.join(path.dirname(run.reportPath), 'summary.md');
-    await writeTextReport(summary, renderMarkdownReport(run.report, { artifactsDir, traces: run.traces }));
-    const rows: ReporterSummary = [{ label: 'Markdown', text: path.relative(run.projectRoot, summary) || summary }];
-    return rows;
-  },
-};
+export function markdown(options: MarkdownReporterOptions = {}): Reporter {
+  return builtin('markdown', {
+    name: 'markdown',
+    reportFiles: (run) =>
+      run.reportPath === undefined
+        ? []
+        : [
+            {
+              path: options.outputFile ?? path.join(run.outputDir, 'summary.md'),
+              content: renderMarkdownReport(run.report, { artifactsDir: posixRelative(run.projectRoot, run.artifactsRoot), traces: run.traces }),
+              label: 'Markdown',
+            },
+          ],
+  });
+}

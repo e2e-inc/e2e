@@ -12,15 +12,16 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { formatNode, prepareObservation, type AgentObservation, type RedactedNode } from '../agent/observation.ts';
-import type { ResolvedConfig } from '../config/resolve.ts';
-import type { OperationContext, TargetSession } from '../engine/surface.ts';
-import { truncateUtf8, type E2EError } from '../internal/errors.ts';
-import type { SecretLedger } from '../internal/redact.ts';
-import { isTypoOf } from '../internal/suggest.ts';
-import { withAbort } from '../internal/time.ts';
-import type { ArtifactSink } from './fixtures.ts';
-import type { FailureEvidence } from './records.ts';
+import { formatNode, prepareObservation, type AgentObservation, type RedactedNode } from '@e2e-dev/core/lib/agent/observation';
+import type { ResolvedConfig } from '@e2e-dev/core/lib/config/resolve';
+import type { OperationContext, TargetSession } from '@e2e-dev/core/lib/engine/surface';
+import { truncateUtf8, type E2EError } from '@e2e-dev/core/lib/internal/errors';
+import type { SecretLedger } from '@e2e-dev/core/lib/internal/redact';
+import { isTypoOf } from '@e2e-dev/core/lib/internal/suggest';
+import { withAbort } from '@e2e-dev/core/lib/internal/time';
+import { isFileBase, leftFileApp, type NormalizedBaseUrl } from '@e2e-dev/core/lib/internal/urls';
+import type { ArtifactSink } from '@e2e-dev/core/lib/run/fixtures';
+import type { FailureEvidence } from '@e2e-dev/core/lib/run/records';
 
 /** The whole capture, observation and screenshot together, gets this long. */
 const EVIDENCE_TIMEOUT_MS = 5_000;
@@ -36,10 +37,18 @@ const SCREEN_FILE = 'screen-at-failure.txt';
 export interface FailureEvidenceOptions {
   readonly session: TargetSession;
   readonly error: E2EError;
+  /**
+   * Whether the step that failed ran on `session`. False for a step of a
+   * session the test drives beside it (`launch()`): the screen is still the
+   * test's own to show, but the failed locator was never asked of it.
+   */
+  readonly ownStep: boolean;
   readonly ledger: SecretLedger;
   readonly config: ResolvedConfig;
   /** The app base URL's origin, whose link targets the screen lists as paths. */
   readonly appOrigin: string | undefined;
+  /** The app's base URL: a file app that left the directory of its file keeps its location and nothing of the screen. */
+  readonly appBase: NormalizedBaseUrl | undefined;
   readonly artifacts: ArtifactSink;
   readonly operation: (signal: AbortSignal, timeoutMs: number) => OperationContext;
   /** Aborts the capture: a run interrupt has no time for evidence. */
@@ -66,6 +75,10 @@ export async function captureFailureEvidence(options: FailureEvidenceOptions): P
   let observation: AgentObservation | undefined;
   try {
     const raw = await bounded(() => options.session.observe(operation));
+    // The screen withheld from a model is not written beside the report either: only where it was.
+    if (leftFileApp(raw.location, options.appBase) !== undefined) {
+      return finish(raw.location === undefined ? evidence : { url: truncateUtf8(options.ledger.redact(raw.location), MAX_URL_BYTES) });
+    }
     observation = prepareObservation(raw, {
       redact,
       redactCut,
@@ -92,11 +105,13 @@ export async function captureFailureEvidence(options: FailureEvidenceOptions): P
     } catch {
       // An unwritable directory: the tree stays unrecorded.
     }
-    const candidates = locatorCandidates(options.error, observation, redact, options.appOrigin);
+    const candidates = options.ownStep ? locatorCandidates(options.error, observation, redact, options.appOrigin) : [];
     if (candidates.length > 0) evidence.candidates = candidates;
   }
 
-  if (!signal.aborted) {
+  // The screenshot is a second capture nothing places, so a file app gets none: its page can leave the directory in between.
+  const fileApp = options.appBase !== undefined && isFileBase(options.appBase);
+  if (!signal.aborted && !fileApp) {
     try {
       const relative = await bounded(() => options.session.artifacts.screenshot('failure', operation));
       evidence.screenshot = options.artifacts.register('screenshot', relative);

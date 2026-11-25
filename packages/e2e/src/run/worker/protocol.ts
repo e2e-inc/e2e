@@ -7,16 +7,18 @@
  * each identity with a locally resolved test function.
  */
 
-import type { TestIdentity } from '../../collect/collect.ts';
-import type { ResolvedTestOptions, SkipInfo } from '../../collect/select.ts';
-import type { CliOverrides, PortAssignments, ResolvedTarget } from '../../config/resolve.ts';
-import type { AiTraceSnapshot } from '../../internal/ai-trace.ts';
-import type { DebugSnapshot } from '../../internal/debug.ts';
-import type { SerializedError } from '../../internal/errors.ts';
-import type { AttemptRecord, ResultRecord, RunError, SerialAttemptRecord, SerialGroupRecord, SerialMemberRecord, WireResultRecord } from '../records.ts';
+import type { ResolvedTestOptions } from '../../collect/select.ts';
+import type { SkipInfo, TestIdentity } from '@e2e-dev/core/lib/run/records';
+import type { CliOverrides, PortAssignments, ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
+import type { AiTraceSnapshot } from '@e2e-dev/core/lib/internal/ai-trace';
+import type { DebugSnapshot } from '@e2e-dev/core/lib/internal/debug';
+import type { SerializedError } from '@e2e-dev/core/lib/internal/errors';
+import type { AttemptRecord, ResultRecord, RunError, SerialAttemptRecord, SerialGroupRecord, SerialMemberRecord, WireResultRecord } from '@e2e-dev/core/lib/run/records';
 import type { SerialAttemptStart } from '../serial.ts';
-import type { HeldStep } from '../step-hold.ts';
-import type { StepProgress } from '../steps.ts';
+import type { McpToolResult } from '../../session-tools/tools.ts';
+import type { HeldTestOpening } from '../step-attachment-wire.ts';
+import type { StepHold } from '../step-hold.ts';
+import type { StepProgress } from '@e2e-dev/core/lib/run/steps';
 
 /** One runnable pair on the wire; the worker resolves the test function. */
 export interface WirePair {
@@ -74,7 +76,7 @@ export interface WorkerBootstrap {
   /** Whether the worker should record model calls for `--ai-trace`. */
   readonly aiTrace: boolean;
   /** Whether each top-level step waits for the runner's `step-release` (`e2e run --step`). */
-  readonly step: boolean;
+  readonly holdSteps: boolean;
 }
 
 export interface RunUnitMessage {
@@ -84,19 +86,17 @@ export interface RunUnitMessage {
   readonly file: string;
   readonly absolutePath: string;
   readonly pairs: readonly WirePair[];
+  /** Set when the unit is one of several its file was cut into; see `WorkUnit.split`. */
+  readonly split?: true;
   /**
-   * The run's `--max-failures` and the failures it had counted when the unit
-   * was dispatched. The worker stops starting the unit's tests once its own
-   * failures reach the limit, without waiting for the runner's interrupt to
-   * arrive: by then it could have started the next test in the file.
+   * Set when the run has a `--max-failures` limit. Only the runner counts
+   * failures toward it, so after each result that counts the worker starts
+   * no further test until the runner answers: `continue` while the run is
+   * below the limit, `interrupt` once a failure reached it. One round-trip
+   * per failure: with several workers, two failures can land faster than any
+   * count the runner could send ahead.
    */
-  readonly failureLimit?: FailureLimit;
-}
-
-/** A run's failure limit and the failures counted toward it so far. */
-export interface FailureLimit {
-  readonly limit: number;
-  readonly failures: number;
+  readonly answersFailures?: true;
 }
 
 export interface InterruptMessage {
@@ -133,13 +133,75 @@ export interface PingMessage {
   readonly type: 'ping';
 }
 
-/** The held step `holdId` names may run. Handled at once, like `ping`; an id the worker no longer holds is ignored. */
+/**
+ * The runner counted a failure the worker reported, and the run is still
+ * below its failure limit. Handled at once, like `ping`; see
+ * `RunUnitMessage.answersFailures`.
+ */
+export interface ContinueMessage {
+  readonly type: 'continue';
+}
+
+/** The held step or pause `holdId` names may continue; with `error`, the pause fails. Handled at once, like `ping`; an id the worker no longer holds is ignored. */
 export interface StepReleaseMessage {
   readonly type: 'step-release';
   readonly holdId: string;
+  readonly error?: SerializedError;
 }
 
-export type MainToWorker = RunUnitMessage | InterruptMessage | ShutdownMessage | TerminateMessage | PingMessage | StepReleaseMessage;
+/**
+ * A request to read the screen or app log at the held step or pause named by
+ * `holdId`. The worker handles it right away, like `step-release`, then sends
+ * a `screen-reply` or `logs-reply`.
+ */
+export type HoldRequestMessage = {
+  readonly type: 'screen-request' | 'logs-request';
+  readonly holdId: string;
+  readonly requestId: string;
+};
+
+/**
+ * Requests for a held test attachment. The attach request names a hold.
+ * Later requests use the ID of the attach request.
+ */
+export type StepAttachmentRequest =
+  | {
+      readonly kind: 'attach';
+      readonly holdId: string;
+      readonly attachId: string;
+      readonly sessionId: string;
+    }
+  | { readonly kind: 'detail'; readonly attachmentId: string; readonly name: string }
+  | {
+      readonly kind: 'call';
+      readonly attachmentId: string;
+      readonly name: string;
+      readonly args: Record<string, unknown>;
+    }
+  | { readonly kind: 'detach'; readonly attachmentId: string };
+
+type StepAttachmentRequestMessage = {
+  readonly type: 'step-attachment-request';
+  readonly requestId: string;
+  readonly request: StepAttachmentRequest;
+};
+
+type StepAttachmentCancelMessage = {
+  readonly type: 'step-attachment-cancel';
+  readonly requestId: string;
+};
+
+export type MainToWorker =
+  | RunUnitMessage
+  | InterruptMessage
+  | ShutdownMessage
+  | TerminateMessage
+  | PingMessage
+  | StepReleaseMessage
+  | HoldRequestMessage
+  | StepAttachmentRequestMessage
+  | StepAttachmentCancelMessage
+  | ContinueMessage;
 
 export interface ReadyMessage {
   readonly type: 'ready';
@@ -217,11 +279,12 @@ export interface AttemptDeadlineMessage {
   /** The attempt's record id and start, which a watchdog kill reports it with. */
   readonly attemptId: string;
   readonly startedAt: string;
-  /** The test's resolved `timeout`. */
+  /** The test's resolved `timeout`, or what `test.setTimeout` changed it to. */
   readonly timeoutMs: number;
   /**
    * What is left of it, when the test clock runs again after `e2e run --step`
-   * held a step; absent when the attempt starts, with all of it left.
+   * held a step or `test.setTimeout` moved it; absent when the attempt
+   * starts, with all of it left.
    */
   readonly remainingMs?: number;
   /** How long past the timeout the worker may go without answering a `ping`: the cleanup budget. */
@@ -238,12 +301,49 @@ export interface PongMessage {
   readonly type: 'pong';
 }
 
-/** A step waits for `step-release` before it runs (`e2e run --step`). */
+/** A step waits for `step-release` before it runs (`e2e run --step`), or a paused test waits for it to resume. */
 export interface StepHoldMessage {
   readonly type: 'step-hold';
   readonly holdId: string;
-  readonly step: HeldStep;
+  readonly attemptId: string;
+  readonly step: StepHold;
+  /** Labels to quote in attachment errors, redacted in the worker. */
+  readonly attachmentLabels: Pick<StepHold, 'title' | 'target'>;
 }
+
+/**
+ * The reply to `screen-request`. The `screen` field is absent if it couldn't
+ * be read or the wait had ended.
+ */
+export interface ScreenReplyMessage {
+  readonly type: 'screen-reply';
+  readonly requestId: string;
+  readonly screen?: string;
+}
+
+/** The reply to `logs-request`. The logs are absent if the wait has ended. */
+type LogsReplyMessage = {
+  readonly type: 'logs-reply';
+  readonly requestId: string;
+  readonly logs?: readonly string[];
+};
+
+/**
+ * Replies to attachment requests. The worker redacts each result with the
+ * attempt's secret ledger before sending it.
+ */
+export type StepAttachmentResponse =
+  | { readonly kind: 'attach'; readonly opening: HeldTestOpening }
+  | { readonly kind: 'detail'; readonly text: string }
+  | { readonly kind: 'call'; readonly result: McpToolResult; readonly errorCode: string | undefined }
+  | { readonly kind: 'detach'; readonly recording?: string }
+  | { readonly kind: 'error'; readonly error: Pick<SerializedError, 'category' | 'code' | 'message'> };
+
+type StepAttachmentReplyMessage = {
+  readonly type: 'step-attachment-reply';
+  readonly requestId: string;
+  readonly response: StepAttachmentResponse;
+};
 
 /** The hold `holdId` names ended without a release: its step was abandoned, or its attempt ended. */
 export interface StepCancelMessage {
@@ -354,6 +454,9 @@ export type WorkerToMain =
   | PongMessage
   | StepHoldMessage
   | StepCancelMessage
+  | ScreenReplyMessage
+  | LogsReplyMessage
+  | StepAttachmentReplyMessage
   | OutputMessage
   | NoticeMessage
   | ResultMessage

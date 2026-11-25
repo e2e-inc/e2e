@@ -2,9 +2,10 @@
 
 import path from 'node:path';
 import { discoverConfig, loadConfigModule, missingConfigError } from '../config/load.ts';
-import { resolveConfig, type ResolvedConfig } from '../config/resolve.ts';
-import { ConfigurationError } from '../internal/errors.ts';
-import type { TargetApp } from '../types.ts';
+import { type ResolvedConfig } from '@e2e-dev/core/lib/config/resolve';
+import { resolveConfig } from '../config/resolve-run.ts';
+import { ConfigurationError } from '@e2e-dev/core/lib/internal/errors';
+import type { TargetApp } from '@e2e-dev/core/lib/types';
 import { loadEngine, type EngineLookup, type FactoryRef } from './default-engine.ts';
 
 export interface ProjectOptions {
@@ -48,7 +49,7 @@ export async function loadEngineConfig(
   if (configPath !== undefined) {
     throw new ConfigurationError(
       'INVALID_ARGUMENT',
-      `open_session: engine opens a session where there is no config file, and ${configPath} exists; leave engine out to open one of its targets`,
+      `open_session: engine opens a session where there is no config file, and ${configPath} exists; leave engine out to open one of its targets, and pass path to open on one page of its app`,
     );
   }
   const engine = await loadEngine(session, { cwd: options.cwd, enginesDir: options.enginesDir });

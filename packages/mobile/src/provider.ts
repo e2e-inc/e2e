@@ -20,7 +20,7 @@ import {
   type EnginePrepareInfo,
   type ProviderRecordContext,
   type ProviderRecording,
-} from 'e2e/engine';
+} from '@e2e-dev/core/engine';
 import { isSlotBinding, type DeviceClientConfig, type DeviceDaemon, type DeviceSource, type SlotBinding } from './bindings.ts';
 import { message } from './errors.ts';
 import { isLink } from './links.ts';
@@ -69,7 +69,7 @@ export interface DeviceRequest {
  * JSON data only: a lease travels from the runner process to the worker that
  * drives it through the environment.
  */
-export interface DeviceLease extends Omit<SlotBinding, 'leaseId'> {
+export interface DeviceLease extends Omit<SlotBinding, 'leaseId' | 'session'> {
   /**
    * The provider's handle on the lease (a session id); named in progress
    * lines and handed back to `release`. A provider may keep further fields on
@@ -136,7 +136,7 @@ export interface DeviceProvider {
    * records with agent-device. `lease` is the lease as it traveled to the
    * worker: its `id` and the other fields declared on `DeviceLease`, never
    * what else the provider kept on the object `acquire` returned.
-   * `ProviderRecording` comes from `e2e/engine`: its `stop` writes a file
+   * `ProviderRecording` comes from `@e2e-dev/core/engine`: its `stop` writes a file
    * into the directory it is given, or names a recording the service keeps
    * by URL.
    */
@@ -206,8 +206,9 @@ function isGrantedLease(value: unknown): value is Pick<DeviceLease, 'id'> {
 
 /** A granted lease checked field by field: the engine trusts nothing it did not write. */
 function isDeviceLease(lease: Pick<DeviceLease, 'id'>): lease is DeviceLease {
-  // `leaseId` is the engine's own field on a binding; a provider may keep a field of that name on its lease.
-  const declared: unknown = { ...lease, leaseId: undefined };
+  // `leaseId` and `session` are the engine's own fields on a binding; a provider may keep fields of those names on its
+  // lease, and the binding built from it never copies them.
+  const declared: unknown = { ...lease, leaseId: undefined, session: undefined };
   return isSlotBinding(declared) && (declared.daemon !== undefined || declared.client !== undefined);
 }
 

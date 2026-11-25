@@ -11,9 +11,7 @@
  * (`view-source:file:...`, `blob:`, `filesystem:`) that carry one inside.
  */
 
-import { ConfigurationError, TestError } from 'e2e/engine';
-
-const FORBIDDEN_PROTOCOLS = new Set(['file:', 'data:', 'javascript:', 'view-source:', 'blob:', 'filesystem:']);
+import { ConfigurationError, isRefusedLinkScheme, TestError } from '@e2e-dev/core/engine';
 
 /**
  * What agent-device opens as a URL instead of resolving as an app: a
@@ -29,7 +27,7 @@ export function isLink(value: string): boolean {
 }
 
 function denyForbiddenScheme(protocol: string): void {
-  if (FORBIDDEN_PROTOCOLS.has(protocol)) {
+  if (isRefusedLinkScheme(protocol)) {
     throw new ConfigurationError('POLICY_DENIED', `forbidden URL scheme: ${protocol}`);
   }
 }
@@ -74,11 +72,36 @@ export function assertAppId(app: string): void {
   );
 }
 
+/** What the report shows for a link that did not parse, or an app id that looks like a link. */
+const LINK_PLACEHOLDER = '<link>';
+
 /**
- * The link as the report shows it, cut before its query and fragment. A
- * magic link carries its one-time token there, and a step label is kept for
- * as long as the report is.
+ * The link as the report shows it: parsed with the parser `openLink` opens
+ * it with, then without its userinfo, query, or fragment, any of which may
+ * carry a credential (a magic link's one-time token, a `user:password@`
+ * login), as `printableUrl` does on the web. A step label is kept for as long
+ * as the report is. A string that fails to parse is never echoed, as
+ * `linkTarget` never echoes it, and the label is a placeholder.
  */
 export function linkLabel(input: string): string {
-  return input.replace(/[?#][\s\S]*$/, '');
+  let url: URL;
+  try {
+    url = new URL(input);
+  } catch {
+    return LINK_PLACEHOLDER;
+  }
+  url.username = '';
+  url.password = '';
+  url.search = '';
+  url.hash = '';
+  return url.href;
+}
+
+/**
+ * The label of an `openApp` step: the app id as it is. `assertAppId` refuses
+ * a link, but the step is labeled before it runs, so a string shaped like a
+ * link gets the placeholder instead of whatever userinfo it carries.
+ */
+export function appLabel(app: string): string {
+  return isLink(app) ? LINK_PLACEHOLDER : app;
 }

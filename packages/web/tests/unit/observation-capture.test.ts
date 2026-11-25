@@ -1,7 +1,7 @@
 import { tmpdir } from 'node:os';
 import type { Browser, Page } from 'playwright-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OperationContext } from 'e2e/engine';
+import type { OperationContext } from '@e2e-dev/core/engine';
 import type { RawObservedNode } from '../../src/read-node.ts';
 import { PlaywrightSurface } from '../../src/surface.ts';
 import { BrowserConnection } from '../../src/browser-connection.ts';
@@ -24,7 +24,7 @@ function document(stalled?: ReadStage) {
   const raw: RawObservedNode = {
     role: 'button', name: 'Button', labels: null, text: null, value: null, selection: null,
     inputPurpose: 'none', attributes: {}, testId: 'button', parent: -1, level: null,
-    states: { checked: null, disabled: false, selected: null, expanded: null, pressed: null, focused: false, hidden: false, secure: false },
+    states: { checked: null, disabled: false, selected: null, expanded: null, pressed: null, focused: false, hidden: false, secure: false, readonly: null, empty: null },
     rect: { x: 0, y: 0, width: 100, height: 80 },
     origin: null,
   };

@@ -11,6 +11,7 @@ import {
   defineEngine,
   describeEngine,
   ENGINE_METHODS,
+  KNOWN_LOCATOR_ACTION_KINDS,
   LOCATOR_ACTION_KINDS,
   POINTER_ACTION_KINDS,
   EngineError,
@@ -23,13 +24,16 @@ import {
   type EngineInitInfo,
   type OperationContext,
   type SemanticNode,
-} from '../../src/engine/index.ts';
-import { resolveConfig } from '../../src/config/resolve.ts';
-import { ConfigurationError, TestTimeoutError } from '../../src/internal/errors.ts';
-import { protocolEngine } from '../../src/engine/protocol/client.ts';
-import { Connection } from '../../src/engine/protocol/connection.ts';
-import type { EngineTransport } from '../../src/engine/protocol/transport.ts';
-import { secretHandle } from '../../src/secrets.ts';
+} from '@e2e-dev/core/lib/engine/index';
+import { resolveConfig } from '../../src/config/resolve-run.ts';
+import { engineAppInfo } from '@e2e-dev/core/lib/config/app';
+import { ConfigurationError, TestTimeoutError } from '@e2e-dev/core/lib/internal/errors';
+import { encodeLocatorAction, decodeLocatorAction } from '@e2e-dev/core/lib/engine/protocol/protocol';
+import { protocolEngine } from '@e2e-dev/core/lib/engine/protocol/client';
+import { Connection } from '@e2e-dev/core/lib/engine/protocol/connection';
+import type { EngineTransport } from '@e2e-dev/core/lib/engine/protocol/transport';
+import { secretHandle } from '@e2e-dev/core/lib/secrets';
+import type { CrashMode } from '../fixtures/protocol-server.ts';
 
 const node = (id: string, name: string, role = 'button'): SemanticNode => ({ ref: { id, revision: '' }, role, name });
 
@@ -72,6 +76,17 @@ const toy = (extra: Partial<Engine> = {}): Engine => ({
 });
 
 describe('engine protocol', () => {
+  it('carries a read request and computed values through JSON-RPC', async () => {
+    const read = vi.fn(async () => ({ color: 'rgb(255, 0, 0)' }));
+    const { remote } = overLoopback(toy({ readStyle: read }));
+    expect(remote.capabilities.has('computed-style')).toBe(true);
+    await remote.init!(initInfo());
+    const ref = { id: 'n1', revision: '1' };
+    await expect(remote.readStyle!(ref, ['color'], operation())).resolves.toEqual({ color: 'rgb(255, 0, 0)' });
+    expect(read).toHaveBeenCalledExactlyOnceWith(ref, ['color'], expect.objectContaining({ origin: 'test' }));
+    await remote.dispose!(cleanup);
+    expect(() => defineEngine({ name: 'bad', version: '1', spiVersion: 1, readStyle: read })).toThrow(/readStyle without observe/);
+  });
   it('declares the same capabilities over the protocol as the engine itself', () => {
     const { local, remote } = overLoopback(
       toy({
@@ -84,6 +99,50 @@ describe('engine protocol', () => {
     expect([...remote.capabilities].toSorted()).toEqual([...local.capabilities].toSorted());
     expect(remote.actions).toEqual(['tap', 'fill']);
     expect(Object.keys(remote.session ?? {}).toSorted()).toEqual(['open', 'reset']);
+  });
+
+  it('encodes only wire payload bytes and keeps ordinary path actions unchanged', () => {
+    const bytes = new Uint8Array([17, 0, 128, 255, 18]).subarray(1, 4);
+    const action = { kind: 'setInputFilePayloads', files: [
+      { name: 'a.bin', mimeType: 'application/octet-stream', buffer: bytes },
+      { name: 'empty.bin', mimeType: 'application/octet-stream', buffer: new Uint8Array() },
+    ] } as const;
+    const wire = encodeLocatorAction(action);
+    expect(wire).toEqual({ kind: 'setInputFilePayloads', files: [
+      { name: 'a.bin', mimeType: 'application/octet-stream', buffer: 'AID/' },
+      { name: 'empty.bin', mimeType: 'application/octet-stream', buffer: '' },
+    ] });
+    expect(decodeLocatorAction(JSON.parse(JSON.stringify(wire)))).toEqual(action);
+    const paths = { kind: 'setInputFiles', paths: ['a.bin'] } as const;
+    expect(encodeLocatorAction(paths)).toBe(paths);
+    expect(decodeLocatorAction(paths)).toBe(paths);
+  });
+
+  it('negotiates payload uploads and preserves their bytes over JSON-RPC', async () => {
+    const perform = vi.fn<NonNullable<Engine['perform']>>(async () => undefined);
+    const { local, remote } = overLoopback(toy({ actions: KNOWN_LOCATOR_ACTION_KINDS, perform }));
+    expect(remote.actions).toContain('setInputFilePayloads');
+    await remote.init!(initInfo());
+    const action = { kind: 'setInputFilePayloads', files: [{ name: 'binary.bin', mimeType: 'application/octet-stream', buffer: new Uint8Array([0, 128, 255]) }] } as const;
+    await local.perform!({ id: 'root', revision: '1' }, action, operation());
+    expect(perform.mock.calls[0]?.[1]).toBe(action);
+    perform.mockClear();
+    await remote.perform!({ id: 'root', revision: '1' }, action, operation());
+    expect(perform).toHaveBeenCalledWith(expect.anything(), action, expect.anything());
+    await remote.dispose!(cleanup);
+    const legacy = overLoopback(toy({ actions: LOCATOR_ACTION_KINDS, perform }));
+    expect(legacy.remote.actions).not.toContain('setInputFilePayloads');
+  });
+
+  it('advertises multiTap and carries its count and modifiers over JSON-RPC unchanged', async () => {
+    const perform = vi.fn<NonNullable<Engine['perform']>>(async () => undefined);
+    const { remote } = overLoopback(toy({ actions: ['tap', 'multiTap'], perform }));
+    expect(remote.actions).toContain('multiTap');
+    await remote.init!(initInfo());
+    const action = { kind: 'multiTap', count: 3, modifiers: ['Shift'] } as const;
+    await remote.perform!({ id: 'root', revision: '1' }, action, operation());
+    expect(perform).toHaveBeenCalledWith(expect.anything(), action, expect.anything());
+    await remote.dispose!(cleanup);
   });
 
   it('carries a snapshot with its pixels byte for byte', async () => {
@@ -506,25 +565,36 @@ describe('engine protocol', () => {
       properties: Record<string, { items?: { enum: string[] } }>;
     };
     expect(schema.properties['methods']?.items?.enum).toEqual([...ENGINE_METHODS]);
-    expect(schema.properties['actions']?.items?.enum).toEqual([...LOCATOR_ACTION_KINDS]);
+    expect(schema.properties['actions']?.items?.enum).toEqual([...KNOWN_LOCATOR_ACTION_KINDS]);
     expect(schema.properties['pointerActions']?.items?.enum).toEqual([...POINTER_ACTION_KINDS]);
     const validate = new Ajv2020({ strict: false }).compile(schema);
     const { local } = overLoopback(
       toy({
-        actions: ['tap'],
+        actions: ['tap', 'blur'],
         perform: async () => {},
         pointerActions: ['tap'],
         performAt: async () => {},
         keyboard: { type: async () => {}, press: async () => {} },
+        grantsAllPermissions: true,
         init: async () => {},
       }),
     );
     expect(validate(describeEngine(local))).toBe(true);
+    expect(describeEngine(local).grantsAllPermissions).toBe(true);
+    expect(connectEngine({ manifest: describeEngine(local), transport: loopbackTransport(local) }).grantsAllPermissions).toBe(true);
     const base = { name: 'x', version: '1', spiVersion: 1 };
     for (const refused of [
+      { ...base, methods: ['engine/observe', 'engine/teleport'] },
+      { ...base, methods: ['engine/readStyle'] },
       { ...base, methods: ['engine/observe'], actions: ['tap'] },
+      { ...base, methods: ['engine/observe'], actions: ['blur'] },
+      { ...base, methods: ['engine/viewportIntersection'] },
       { ...base, methods: ['engine/observe'], tapModifiers: true },
+      { ...base, methods: ['engine/observe'], selectsDevice: true },
+      // The client serves prepare for finish alone, which would drop the device it never forwards.
+      { ...base, methods: ['lifecycle/finish'], selectsDevice: true },
       { ...base, methods: ['engine/observe'], pointerActions: ['tap'] },
+      { ...base, methods: ['engine/observe'], grantsAllPermissions: 'yes' },
       { ...base, methods: ['engine/locate'] },
       { ...base, methods: ['engine/observe', 'keyboard/type'] },
       { ...base, methods: ['state/capture'] },
@@ -533,6 +603,137 @@ describe('engine protocol', () => {
       expect(validate(refused), JSON.stringify(refused)).toBe(false);
       expect(() => connectEngine({ manifest: refused as never, transport: loopbackTransport(local) }), JSON.stringify(refused)).toThrow(ConfigurationError);
     }
+    // Only a worker-isolated engine names its isolation; `attempt` is the default, left out.
+    expect(validate({ ...base, methods: ['engine/observe'], isolation: 'attempt' })).toBe(false);
+  });
+
+  describe('launch arguments', () => {
+    const resolveTarget = (engine: EngineHandle, launchArguments: unknown) =>
+      resolveConfig(
+        { targets: [{ name: 'phone', platform: 'toy', engine, app: { bundleId: 'dev.shop.app', launchArguments: launchArguments as never } }] },
+        { projectRoot: process.cwd(), env: {} as NodeJS.ProcessEnv },
+      ).targets[0]!;
+
+    const prepare = (target: ReturnType<typeof resolveTarget>) =>
+      target.engine!.prepare!({ runId: 'run', targetName: target.name, projectRoot: process.cwd(), app: engineAppInfo(target.app), slots: 1, env: {}, headed: false, signal: new AbortController().signal, log: () => {} });
+
+    it('hands an engine that predates the object form a list it can spread, and refuses an object at config load', async () => {
+      const spread: string[][] = [];
+      const legacy = defineEngine(
+        toy({
+          validateApp(app) {
+            spread.push([...(app.launchArguments ?? [])]);
+          },
+          async prepare(info) {
+            spread.push([...(info.app.launchArguments ?? [])]);
+          },
+        }),
+      );
+      await prepare(resolveTarget(legacy, ['-AppleLocale', 'fr_FR']));
+      expect(spread).toEqual([
+        ['-AppleLocale', 'fr_FR'],
+        ['-AppleLocale', 'fr_FR'],
+      ]);
+
+      expect(() => resolveTarget(legacy, { AppleLocale: 'fr_FR', AppleLanguages: ['fr'] })).toThrowError(
+        expect.objectContaining({
+          code: 'INVALID_CONFIG',
+          message:
+            'target "phone" app.launchArguments is an object, and engine "toy" takes only a list of strings: write the arguments as a list, or use an engine version that supports the object syntax',
+        }),
+      );
+      expect(spread).toHaveLength(2);
+    });
+
+    it('carries fileApps in the manifest, so a served engine opens a file app and one that does not declare it is refused', () => {
+      const { local, remote } = overLoopback(toy({ fileApps: true }));
+      expect(describeEngine(local).fileApps).toBe(true);
+      expect(remote.fileApps).toBe(true);
+      const plain = overLoopback(toy({}));
+      expect(describeEngine(plain.local).fileApps).toBeUndefined();
+      expect(plain.remote.fileApps).not.toBe(true);
+    });
+
+    it('refuses a server that does not declare the fileApps its manifest promised', async () => {
+      const local = defineEngine(toy({}));
+      const remote = connectEngine({ manifest: { ...describeEngine(local), fileApps: true }, transport: loopbackTransport(local) });
+      await expect(remote.init!(initInfo())).rejects.toThrow(/fileApps is false, declared true/);
+    });
+
+    it('refuses a fileApps flag that is not a boolean', () => {
+      expect(() => defineEngine(toy({ fileApps: 'yes' as never }))).toThrow(/fileApps must be a boolean/);
+    });
+
+    it('carries the object form to an engine that declares launchArgumentValues', async () => {
+      const seen: unknown[] = [];
+      const { local, remote } = overLoopback(
+        toy({
+          launchArgumentValues: true,
+          async prepare(info) {
+            seen.push(info.app);
+          },
+        }),
+        {
+          validateApp(app) {
+            seen.push(app);
+          },
+        },
+      );
+      expect(describeEngine(local).launchArgumentValues).toBe(true);
+      expect(remote.launchArgumentValues).toBe(true);
+
+      const launchArgumentValues = { AppleLocale: 'fr_FR', AppleLanguages: ['fr'], e2e: true, retries: 3 };
+      await prepare(resolveTarget(remote, { ...launchArgumentValues, token: undefined }));
+      expect(seen).toEqual([
+        { bundleId: 'dev.shop.app', launchArgumentValues },
+        { bundleId: 'dev.shop.app', launchArgumentValues },
+      ]);
+
+      seen.length = 0;
+      await prepare(resolveTarget(remote, ['-e2e', 'YES']));
+      expect(seen).toEqual([
+        { bundleId: 'dev.shop.app', launchArguments: ['-e2e', 'YES'] },
+        { bundleId: 'dev.shop.app', launchArguments: ['-e2e', 'YES'] },
+      ]);
+    });
+
+    it('refuses a launchArgumentValues flag that is not a boolean', () => {
+      expect(() => defineEngine(toy({ launchArgumentValues: 'yes' as never }))).toThrow(/launchArgumentValues must be a boolean/);
+    });
+  });
+
+  describe("permissions 'all'", () => {
+    it('carries allPermissions into prepare on an engine that declares grantsAllPermissions', async () => {
+      const seen: unknown[] = [];
+      const { remote } = overLoopback(
+        toy({
+          grantsAllPermissions: true,
+          async prepare(info) {
+            seen.push(info.app);
+          },
+        }),
+        {
+          validateApp(app) {
+            seen.push(app);
+          },
+        },
+      );
+      const target = resolveConfig(
+        { targets: [{ name: 'phone', platform: 'toy', engine: remote, app: { bundleId: 'dev.shop.app', permissions: 'all' } }] },
+        { projectRoot: process.cwd(), env: {} as NodeJS.ProcessEnv },
+      ).targets[0]!;
+      await target.engine!.prepare!({ runId: 'run', targetName: target.name, projectRoot: process.cwd(), app: engineAppInfo(target.app), slots: 1, env: {}, headed: false, signal: new AbortController().signal, log: () => {} });
+      expect(seen).toEqual([
+        { bundleId: 'dev.shop.app', allPermissions: true },
+        { bundleId: 'dev.shop.app', allPermissions: true },
+      ]);
+    });
+
+    it('refuses a server that does not declare the grantsAllPermissions its manifest promised', async () => {
+      const local = defineEngine(toy({}));
+      const remote = connectEngine({ manifest: { ...describeEngine(local), grantsAllPermissions: true }, transport: loopbackTransport(local) });
+      await expect(remote.init!(initInfo())).rejects.toThrow(/grantsAllPermissions is false, declared true/);
+    });
   });
 
   it('serves every in-process target through one protocol client and leaves a connected engine as declared', () => {
@@ -557,6 +758,10 @@ describe('engine protocol', () => {
     expect(() => connectEngine({ manifest: { name: 'x', version: '1', spiVersion: 1, methods: ['engine/perform'] }, transport })).toThrow(/perform without observe/);
     expect(() => connectEngine({ manifest: { name: 'x', version: '1', spiVersion: 1, methods: ['engine/observe', 'engine/perform'] }, transport })).toThrow(/perform without actions/);
     expect(() => connectEngine({ manifest: { name: 'x', version: '1', spiVersion: 1, methods: ['engine/observe', 'engine/observe'] }, transport })).toThrow(/twice/);
+    // The schema cannot require engine/locate beside it: resolveLocators builds locate on the client.
+    const measuring = { name: 'x', version: '1', spiVersion: 1 as const, methods: ['engine/observe', 'engine/viewportIntersection'] as const };
+    expect(() => connectEngine({ manifest: measuring, transport })).toThrow(/viewportIntersection without locate/);
+    expect(connectEngine({ manifest: measuring, transport, resolveLocators: true }).capabilities.has('viewport-intersection')).toBe(true);
   });
 });
 
@@ -612,6 +817,48 @@ describe('engine protocol over a child process', () => {
     });
     await remote.init!(initInfo());
     await expect(remote.observe!(operation())).rejects.toThrow(/closed the connection[\s\S]*crashing on purpose/);
+    await remote.dispose!(cleanup);
+  });
+
+  /** A client of the toy server in `crashMode`, initialized. */
+  async function crashing(crashMode: CrashMode) {
+    const remote = connectEngine({
+      manifest: { ...manifest, methods: [...manifest.methods], actions: [...manifest.actions] },
+      transport: spawnTransport({ command: process.execPath, args: [server] }),
+      initializationOptions: { crashOnObserve: true, crashMode },
+    });
+    await remote.init!(initInfo());
+    return remote;
+  }
+
+  it('waits for the exit code and stderr of a server whose stdout closed before it exited', async () => {
+    const remote = await crashing('stdout-first');
+    const start = Date.now();
+    await expect(remote.observe!(operation())).rejects.toThrow(/closed the connection[\s\S]*exited with code 7[\s\S]*crashing on purpose/);
+    // Well under the 2 s a transport waits at most: the exit ends the wait.
+    expect(Date.now() - start).toBeLessThan(1_500);
+    await remote.dispose!(cleanup);
+  });
+
+  it('waits for stderr a child of the server writes after the server exited', async () => {
+    const remote = await crashing('late-child');
+    await expect(remote.observe!(operation())).rejects.toThrow(/exited with code 7[\s\S]*toy server child: late line/);
+    await remote.dispose!(cleanup);
+  });
+
+  it('fails a request of a server that closed its stdout and keeps running', async () => {
+    const remote = await crashing('stays-up');
+    const start = Date.now();
+    await expect(remote.observe!(operation())).rejects.toThrow(/closed the connection[\s\S]*stdout closed, staying/);
+    // The 2 s cap, not the test timeout, ends the wait.
+    expect(Date.now() - start).toBeGreaterThanOrEqual(1_900);
+    expect(Date.now() - start).toBeLessThan(3_000);
+    await remote.dispose!(cleanup);
+  }, 10_000);
+
+  it('names the signal that stopped a server mid-request, and its stderr', async () => {
+    const remote = await crashing('signal');
+    await expect(remote.observe!(operation())).rejects.toThrow(/killed by SIGKILL[\s\S]*crashing on purpose/);
     await remote.dispose!(cleanup);
   });
 });
@@ -688,6 +935,21 @@ describe('engine protocol against a server written from the messages alone', () 
     const body = JSON.stringify({ jsonrpc: '2.0', id: 1, error: null });
     input.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
     await expect(pending).rejects.toMatchObject({ code: -32603, message: expect.stringContaining('malformed error') });
+  });
+
+  it('reads a message that arrives a byte at a time, and two that arrive in one chunk', async () => {
+    const input = new PassThrough();
+    const seen: unknown[] = [];
+    const connection = new Connection({ input, output: new PassThrough() }, { notifications: { note: (params) => void seen.push(params) } });
+    const frame = (params: unknown): Buffer => {
+      const body = JSON.stringify({ jsonrpc: '2.0', method: 'note', params });
+      return Buffer.from(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+    };
+    for (const byte of frame('één')) input.write(Buffer.from([byte]));
+    input.write(Buffer.concat([frame(2), frame(3)]));
+    input.write(frame(4));
+    await vi.waitFor(() => expect(seen).toEqual(['één', 2, 3, 4]));
+    expect(connection.closed).toBeUndefined();
   });
 
   it('reports a malformed notification instead of crashing', async () => {

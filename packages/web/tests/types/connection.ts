@@ -1,6 +1,6 @@
 /** Compile-time assertions for endpoint provisioning, transport recovery, and the browser provider seam. */
 import { secrets } from 'e2e';
-import type { BrowserLease, BrowserProvider, WebConnectOptions, WebInitScript, WebOptions } from '../../src/index.ts';
+import type { BrowserLease, BrowserProvider, CdpTarget, WebConnectOptions, WebInitScript, WebOptions } from '../../src/index.ts';
 
 ({ cdpEndpoint: () => 'ws://localhost:9222', reconnectEndpoint: async (signal) => {
   signal.throwIfAborted();
@@ -14,6 +14,13 @@ import type { BrowserLease, BrowserProvider, WebConnectOptions, WebInitScript, W
 
 ({ name: 'hosted', scope: 'attempt', acquire: async () => ({ id: 's', cdpEndpoint: 'ws://localhost:9222' }), release: async () => undefined }) satisfies BrowserProvider;
 ({ id: 's', cdpEndpoint: 'ws://localhost:9222', reconnectEndpoint: undefined }) satisfies BrowserLease;
+
+({ name: 'hosted', acquire: async () => ({ id: 's', cdpEndpoint: 'ws://localhost:9222' }), release: async () => undefined, cdpHeaders: async (_lease, context) => ({ Authorization: context.env.TOKEN ?? '' }) }) satisfies BrowserProvider;
+// @ts-expect-error CDP headers do not travel in lease JSON.
+({ id: 's', cdpEndpoint: 'ws://localhost:9222', cdpHeaders: {} }) satisfies BrowserLease;
+// @ts-expect-error CDP handshake headers carry string values.
+({ name: 'hosted', acquire: async () => ({ id: 's', cdpEndpoint: 'ws://localhost:9222' }), release: async () => undefined, cdpHeaders: async () => ({ Authorization: 42 }) }) satisfies BrowserProvider;
+
 ({ browser: { name: 'hosted', acquire: async () => ({ id: 's', cdpEndpoint: 'ws://localhost:9222' }), release: async () => undefined } }) satisfies WebOptions;
 
 // @ts-expect-error a lease names its endpoint; a browser object or a page is not one.
@@ -38,7 +45,9 @@ import type { BrowserLease, BrowserProvider, WebConnectOptions, WebInitScript, W
 ({ name: 'hosted', acquire: async () => ({ id: 's', cdpEndpoint: 'ws://x' }), release: async () => undefined, sweep: async () => 2 }) satisfies BrowserProvider;
 
 // Gates on the way to a protected app, the page size, the attribute that carries a test id, and the user agent.
-({ headers: { 'x-vercel-protection-bypass': 'token' }, basicAuth: { username: 'preview', password: 'secret' }, viewport: { width: 390, height: 844 }, testIdAttribute: 'data-qa', userAgent: 'Mozilla/5.0 playwright' }) satisfies WebOptions;
+({ headers: { 'x-vercel-protection-bypass': 'token' }, basicAuth: { username: 'preview', password: 'secret' }, viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, testIdAttribute: 'data-qa', userAgent: 'Mozilla/5.0 playwright' }) satisfies WebOptions;
+// @ts-expect-error the device scale factor is a number.
+({ deviceScaleFactor: '2' }) satisfies WebOptions;
 // @ts-expect-error basic auth is a username and a password; one without the other is no credential.
 ({ basicAuth: { username: 'preview' } }) satisfies WebOptions;
 // A configured secret keeps the password out of the config file.
@@ -70,3 +79,13 @@ import type { BrowserLease, BrowserProvider, WebConnectOptions, WebInitScript, W
 ({ screencast: { size: { width: 1280, height: 720 }, quality: 80 } }) satisfies WebOptions;
 // @ts-expect-error web({ video }) was renamed web({ screencast }).
 ({ video: { quality: 80 } }) satisfies WebOptions;
+
+({ endpoint: 'wss://browser.example', headers: { Authorization: 'token' } }) satisfies CdpTarget;
+({ cdpEndpoint: () => ({ endpoint: 'wss://browser.example', headers: { Authorization: 'token' } }), reconnectEndpoint: async () => ({ endpoint: 'wss://browser.example' }) }) satisfies WebConnectOptions;
+// @ts-expect-error CDP headers must contain strings.
+({ endpoint: 'wss://browser.example', headers: { Authorization: 42 } }) satisfies CdpTarget;
+// @ts-expect-error a CDP target must name its endpoint.
+({ cdpEndpoint: () => ({ headers: {} }) }) satisfies WebConnectOptions;
+({ chromiumSandbox: false }) satisfies WebOptions;
+// @ts-expect-error chromiumSandbox is a boolean.
+({ chromiumSandbox: 'yes' }) satisfies WebOptions;

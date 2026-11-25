@@ -1,6 +1,6 @@
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
-import { bound, compareText, matchesText, normalizeRegexpFlags, normalizeText, toTextPattern } from '../../src/internal/text.ts';
+import { bound, boundIsAmbiguous, compareText, matchesText, normalizeRegexpFlags, normalizeText, toTextPattern } from '@e2e-dev/core/lib/internal/text';
 
 describe('normalizeText', () => {
   it('trims and collapses unicode whitespace runs to one ASCII space', () => {
@@ -36,6 +36,14 @@ describe('compareText', () => {
   it('contains mode uses a case-sensitive substring for an exact string', () => {
     expect(compareText('Hello World', { kind: 'string', value: 'World', exact: true }, contains)).toBe(true);
     expect(compareText('Hello World', { kind: 'string', value: 'world', exact: true }, contains)).toBe(false);
+  });
+
+  it('folds case for an exact string under ignoreCase, and always for a non-exact one', () => {
+    const folded = { mode: 'equals', normalize: true, ignoreCase: true } as const;
+    expect(compareText('  HELLO   world ', { kind: 'string', value: 'hello world', exact: true }, folded)).toBe(true);
+    expect(compareText('Hello World!', { kind: 'string', value: 'hello world', exact: true }, folded)).toBe(false);
+    expect(compareText('Hello World!', { kind: 'string', value: 'WORLD', exact: true }, { ...folded, mode: 'contains' })).toBe(true);
+    expect(compareText('Hello World!', { kind: 'string', value: 'WORLD', exact: false }, raw)).toBe(true);
   });
 
   it('normalize: false compares the raw strings, newlines and trailing spaces included', () => {
@@ -84,5 +92,16 @@ describe('bound', () => {
     // The cut lands between the halves of 😀; it steps back rather than leave half a character.
     expect(bound(`abc😀def`, 5)).toBe('abc…');
     expect(bound(`ab😀def`, 5)).toBe('ab😀…');
+  });
+});
+
+describe('boundIsAmbiguous', () => {
+  it('holds for text bound cuts and for text that ends like one of its cuts, and for nothing else', () => {
+    expect(boundIsAmbiguous('abcdef', 5)).toBe(true);
+    expect(boundIsAmbiguous('abcd…', 5)).toBe(true);
+    expect(boundIsAmbiguous('abc…', 5)).toBe(true);
+    expect(boundIsAmbiguous('abcde', 5)).toBe(false);
+    expect(boundIsAmbiguous('ab…', 5)).toBe(false);
+    expect(boundIsAmbiguous('loading…', 300)).toBe(false);
   });
 });

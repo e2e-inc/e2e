@@ -124,6 +124,7 @@
         "sha256": { "$ref": "#/$defs/sha256" },
         "ref": { "type": "string", "minLength": 1 },
         "startedAt": { "$ref": "#/$defs/timestamp" },
+        "actor": { "type": "string", "minLength": 1, "maxLength": 256 },
         "redaction": { "enum": ["complete", "incomplete"] },
         "producer": {
           "oneOf": [
@@ -319,6 +320,7 @@
         "kind": { "enum": ["agent", "locator", "assertion", "screen", "app", "session", "resource"] },
         "api": { "type": "string", "minLength": 1 },
         "label": { "type": "string", "maxLength": 8192 },
+        "actor": { "type": "string", "minLength": 1, "maxLength": 256 },
         "source": { "$ref": "#/$defs/source" },
         "status": { "enum": ["passed", "failed", "blocked", "timed-out", "cancelled"] },
         "startedAt": { "$ref": "#/$defs/timestamp" },
@@ -435,15 +437,31 @@
       "required": ["cause", "reason"],
       "properties": {
         "cause": {
-          "enum": ["explicit", "filtered", "platform-unavailable", "capability-unavailable", "setup-failed", "serial-predecessor-failed", "hook-failed", "infrastructure-unavailable", "failure-limit", "time-limit"]
+          "enum": ["explicit", "fixme", "filtered", "platform-unavailable", "setup-failed", "serial-predecessor-failed", "hook-failed", "infrastructure-unavailable", "failure-limit", "time-limit"]
         },
         "reason": { "type": "string", "maxLength": 8192 },
         "relatedId": { "type": "string", "minLength": 1 },
-        "filter": { "description": "The name of the test filter that left the test out; only with cause filtered.", "type": "string", "minLength": 1, "maxLength": 256 }
+        "filter": { "description": "The name of the test filter that left the test out; only with cause filtered.", "type": "string", "minLength": 1, "maxLength": 256 },
+        "otherShard": { "description": "Set on an unselected result of a sharded run (run.shard) when this invocation's --shard cut gave the test to another shard, whatever the cause and reason say. Shards using --last-failed can cut different sets of tests, so the marker does not establish that another invocation ran the test. Absent otherwise.", "const": true }
       },
       "allOf": [
         { "if": { "required": ["filter"] }, "then": { "properties": { "cause": { "const": "filtered" } } } }
       ]
+    },
+    "resultSkip": {
+      "description": "A result's skip: any skip an attempt can carry, or todo, which only a test.todo result carries.",
+      "if": { "required": ["cause"], "properties": { "cause": { "const": "todo" } } },
+      "then": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["cause", "reason"],
+        "properties": {
+          "cause": { "const": "todo" },
+          "reason": { "const": "todo" },
+          "otherShard": { "const": true }
+        }
+      },
+      "else": { "$ref": "#/$defs/skip" }
     },
     "serialMember": {
       "type": "object",
@@ -560,7 +578,7 @@
         "selected": { "type": "boolean" },
         "serialGroupId": { "type": "string", "minLength": 1 },
         "status": { "enum": ["passed", "flaky", "failed", "timed-out", "interrupted", "skipped"] },
-        "skip": { "$ref": "#/$defs/skip" },
+        "skip": { "$ref": "#/$defs/resultSkip" },
         "expectedFailure": {
           "description": "Why the test was expected to fail, when its last attempt was marked test.fail. Absent in older reports.",
           "type": "object",
@@ -591,7 +609,7 @@
             "then": {
               "required": ["skip"],
               "properties": {
-                "skip": { "$ref": "#/$defs/skip" },
+                "skip": { "$ref": "#/$defs/resultSkip" },
                 "attempts": {
                   "type": "array",
                   "items": { "$ref": "#/$defs/attempt" }
@@ -621,6 +639,10 @@
         {
           "if": { "required": ["serialGroupId"] },
           "then": { "properties": { "expectedFailure": false } }
+        },
+        {
+          "if": { "required": ["skip"], "properties": { "skip": { "required": ["cause"], "properties": { "cause": { "const": "todo" } } } } },
+          "then": { "properties": { "kind": { "const": "test" }, "serialGroupId": false, "attempts": { "maxItems": 0 } } }
         }
       ]
     },
@@ -720,6 +742,7 @@
         "exitCode": { "enum": [0, 1, 2, 3, 4, 130] },
         "startedAt": { "$ref": "#/$defs/timestamp" },
         "finishedAt": { "$ref": "#/$defs/timestamp" },
+        "durationMs": { "type": "integer", "minimum": 0 },
         "project": {
           "type": "object",
           "additionalProperties": false,
@@ -749,6 +772,16 @@
             "commit": { "type": "string", "pattern": "^[a-f0-9]{40,64}$" },
             "branch": { "type": "string", "minLength": 1, "maxLength": 512 },
             "dirty": { "type": "boolean" }
+          }
+        },
+        "shard": {
+          "description": "Which shard of the selection the run was (--shard index/total); absent when it was not sharded. The report marks rows this invocation's cut gave to another shard with skip.otherShard.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["index", "total"],
+          "properties": {
+            "index": { "type": "integer", "minimum": 1 },
+            "total": { "type": "integer", "minimum": 1 }
           }
         },
         "targets": { "type": "array", "items": { "$ref": "#/$defs/target" } },

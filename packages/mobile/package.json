@@ -1,6 +1,6 @@
 {
   "name": "@e2e-dev/mobile",
-  "version": "0.12.6",
+  "version": "0.12.8",
   "description": "Mobile engine (iOS and Android) for e2e agentic end-to-end testing, built on agent-device",
   "keywords": [
     "e2e",
@@ -18,8 +18,8 @@
   ],
   "license": "Apache-2.0",
   "contributors": [
-    "Oskar Kwa\u015bniewski <oskar@tester.army>",
-    "Szymon Rybczak <szymon@tester.army>"
+    "Oskar Kwa\u015bniewski <oskar@e2e.com>",
+    "Szymon Rybczak <szymon@e2e.com>"
   ],
   "repository": {
     "type": "git",
@@ -29,7 +29,7 @@
   "bugs": {
     "url": "https://github.com/e2e-inc/e2e/issues"
   },
-  "homepage": "https://github.com/e2e-inc/e2e/tree/main/packages/mobile#readme",
+  "homepage": "https://e2e.com/docs/mobile",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public",
@@ -40,6 +40,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./engine": {
+      "types": "./dist/engine-entry.d.ts",
+      "default": "./dist/engine-entry.js"
     },
     "./tools": {
       "types": "./dist/tools.d.ts",
@@ -64,24 +68,29 @@
   },
   "dependencies": {
     "@napi-rs/image": "1.16.0",
-    "agent-device": "0.21.36",
+    "agent-device": "0.21.42",
     "zod": "4.6.7"
   },
   "peerDependencies": {
+    "@e2e-dev/core": ">=0.25.0 <1",
     "ai": "^7.0.0",
-    "e2e": ">=0.22.1 <1"
+    "e2e": ">=0.25.0 <1"
   },
   "peerDependenciesMeta": {
     "ai": {
       "optional": true
+    },
+    "e2e": {
+      "optional": true
     }
   },
   "devDependencies": {
+    "@e2e-dev/core": "workspace:*",
     "@types/node": "26.6.6",
-    "ai": "7.0.170",
+    "ai": "7.0.181",
     "e2e": "workspace:*",
     "typescript": "7.0.2",
-    "vitest": "5.1.0"
+    "vitest": "5.1.1"
   },
   "engines": {
     "node": "^22.22.3 || >=24.8.0"

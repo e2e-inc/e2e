@@ -2,15 +2,18 @@
 
 export { afterAll, afterEach, beforeAll, beforeEach, describe, test } from './collect/registry.ts';
 export { expect } from './expect/index.ts';
-export { credentials, secrets } from './secrets.ts';
-export { unique } from './params.ts';
-export { AgentError, isAgentError } from './agent/error.ts';
+export { credentials, secrets } from '@e2e-dev/core/lib/secrets';
+export { unique } from '@e2e-dev/core/lib/params';
+export { AgentError, isAgentError } from '@e2e-dev/core/lib/agent/error';
 // The markdown page the `markdown` reporter writes, for a reporter that posts
-// it elsewhere: @e2e-dev/github renders the pull request comment from it.
+// it elsewhere: @e2e-dev/github renders the pull request comment from it,
+// folding a --last-failed rerun into the runs before it first.
 export { renderMarkdownReport } from './report/markdown.ts';
+export { foldLastRun } from './report/fold.ts';
 export type { MarkdownReportOptions } from './report/markdown.ts';
 
-export type * from './types.ts';
+export type * from '@e2e-dev/core/lib/types';
+export type * from './run-types.ts';
 export type {
   ExecutorActions,
   ExecutorAttempt,
@@ -20,6 +23,8 @@ export type {
   ExecutorObservation,
   ExecutorObserveOptions,
   ExecutorPixels,
+  ExecutorReadOptions,
+  ExecutorReadResult,
   ExecutorStep,
   ExecutorTarget,
   ExecutorVerb,
@@ -32,7 +37,7 @@ export type {
   StepExecutorContext,
   StepVerdict,
   StepVerdictStatus,
-} from './agent/executor.ts';
-export type { StepTurn, VisionDegradation } from './run/steps.ts';
-export type { RunEvent, RunEventOf, RunExitCode, RunStatus } from './run/events.ts';
-export type { EngineAppDeclaration } from './engine/index.ts';
+} from '@e2e-dev/core/lib/agent/executor';
+export type { StepTurn, VisionDegradation } from '@e2e-dev/core/lib/run/steps';
+export type { CollectedTestInfo, PausedKey, PausedStep, RunEvent, RunEventOf, RunExitCode, RunStatus } from './run/events.ts';
+export type { EngineAppDeclaration } from '@e2e-dev/core/lib/engine/index';

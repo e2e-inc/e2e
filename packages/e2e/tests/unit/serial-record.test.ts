@@ -9,20 +9,20 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { CollectedTest } from '../../src/collect/collect.ts';
 import type { ResolvedTestOptions, TestTargetPair } from '../../src/collect/select.ts';
-import type { ResolvedTarget } from '../../src/config/resolve.ts';
-import { createEngineSession } from '../../src/engine/session.ts';
-import { classifyError, serializeError } from '../../src/internal/errors.ts';
+import type { ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
+import { createEngineSession } from '@e2e-dev/core/lib/engine/session';
+import { classifyError, serializeError } from '@e2e-dev/core/lib/internal/errors';
 import { buildReport } from '../../src/report/build.ts';
 import { outcome } from '../../src/report/outcome.ts';
 import { RealmManager } from '../../src/run/realm.ts';
-import type { AttemptRecord, ResultRecord, SerialAttemptRecord, SerialGroupRecord } from '../../src/run/records.ts';
+import type { AttemptRecord, ResultRecord, SerialAttemptRecord, SerialGroupRecord } from '@e2e-dev/core/lib/run/records';
 import { runSerialUnit, type SerialHost } from '../../src/run/serial.ts';
+import { plainSuiteHooks } from '../helpers/suite-hooks.ts';
 
 const OPTIONS: ResolvedTestOptions = {
   timeout: 30_000,
   retries: 0,
   platforms: undefined,
-  requires: [],
   session: undefined,
   agents: ['default'],
   agentContext: undefined,
@@ -60,6 +60,7 @@ function makeTarget(name: string, index: number): ResolvedTarget {
       identity: undefined,
       bundleId: undefined,
       appPath: undefined,
+      linkBase: undefined,
       launchArguments: undefined,
       permissions: undefined,
       command: undefined,
@@ -69,6 +70,7 @@ function makeTarget(name: string, index: number): ResolvedTarget {
       url: undefined,
       bundleId: undefined,
       appPath: undefined,
+      linkBase: undefined,
       identity: undefined,
       environment: undefined,
       launchArguments: undefined,
@@ -78,6 +80,8 @@ function makeTarget(name: string, index: number): ResolvedTarget {
     },
     trace: { mode: 'off', source: 'default' },
     video: { mode: 'off', source: 'default' },
+    fullyParallel: false,
+    fixtureScopes: new Map(),
   };
 }
 
@@ -89,6 +93,7 @@ function serialPairs(target: ResolvedTarget): TestTargetPair[] {
       kind: 'test',
       title,
       titlePath: [title],
+      names: [],
       declarationIndex,
       options: {},
       sessions: [],
@@ -101,6 +106,7 @@ function serialPairs(target: ResolvedTarget): TestTargetPair[] {
       file,
       id: `${file}::${title}`,
       serialRoot: undefined,
+      parallel: { declared: false, ordered: undefined, suiteHooks: false },
       serialId: `${file}::wizard`,
       selected: true,
     };
@@ -113,7 +119,7 @@ describe('serial attempt record provenance', () => {
     const target = makeTarget('web', 0);
     const pairs = serialPairs(target).slice(0, 1).map((pair) => ({ ...pair, options: { ...pair.options, retries: 1 } }));
     const file = { file: pairs[0]!.test.file, absolutePath: `/project/${pairs[0]!.test.file}` };
-    const realms = new RealmManager({ targetName: target.name, platform: target.platform, timeout: 1000, cleanupTimeout: 1000, runErrors: [], redactTitle: (title) => title });
+    const realms = new RealmManager({ targetName: target.name, openSuiteHooks: plainSuiteHooks(target.platform), timeout: 1000, cleanupTimeout: 1000, runErrors: [], redactTitle: (title) => title });
     const controller = new AbortController();
     let created = 0;
     vi.spyOn(realms, 'create').mockImplementation(async () => {

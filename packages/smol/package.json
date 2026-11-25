@@ -1,6 +1,6 @@
 {
   "name": "@e2e-dev/smol",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "smol machines browsers for e2e: every test attempt branches a warm Chromium microVM",
   "keywords": [
     "e2e",
@@ -15,8 +15,8 @@
   ],
   "license": "Apache-2.0",
   "contributors": [
-    "Oskar Kwaśniewski <oskar@tester.army>",
-    "Szymon Rybczak <szymon@tester.army>"
+    "Oskar Kwaśniewski <oskar@e2e.com>",
+    "Szymon Rybczak <szymon@e2e.com>"
   ],
   "repository": {
     "type": "git",
@@ -60,9 +60,9 @@
     "@e2e-dev/web": "workspace:*",
     "@types/node": "26.6.6",
     "e2e": "workspace:*",
-    "smolmachines": "1.32.4",
+    "smolmachines": "1.36.1",
     "typescript": "7.0.2",
-    "vitest": "5.1.0"
+    "vitest": "5.1.1"
   },
   "engines": {
     "node": "^22.22.3 || >=24.8.0"

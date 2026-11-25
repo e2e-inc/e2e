@@ -7,12 +7,12 @@ import {
   type Engine,
   type EngineCleanupContext,
   type EngineSnapshot,
-} from '../../src/engine/index.ts';
-import { createEngineSession } from '../../src/engine/session.ts';
-import { resolveConfig } from '../../src/config/resolve.ts';
-import { secrets } from '../../src/secrets.ts';
+} from '@e2e-dev/core/lib/engine/index';
+import { createEngineSession } from '@e2e-dev/core/lib/engine/session';
+import { resolveConfig } from '../../src/config/resolve-run.ts';
+import { secrets } from '@e2e-dev/core/lib/secrets';
 import { snapshot } from '../helpers/snapshot.ts';
-import type { OperationContext, SemanticNode } from '../../src/engine/surface.ts';
+import type { OperationContext, SemanticNode } from '@e2e-dev/core/lib/engine/surface';
 
 const OP: OperationContext = {
   signal: new AbortController().signal,
@@ -54,6 +54,13 @@ describe('defineEngine', () => {
     expect(() => defineEngine({ ...bare, pointerActions: ['tap'], performAt: async () => undefined })).toThrow(/performAt without observe/);
   });
 
+  it('rejects viewportIntersection without locate: it measures located nodes', () => {
+    const viewportIntersection = async () => ({ intersects: true });
+    expect(() => defineEngine(observingEngine({ viewportIntersection }))).toThrow(/viewportIntersection without locate/);
+    const handle = defineEngine(observingEngine({ locate: async () => [], viewportIntersection }));
+    expect(handle.capabilities.has('viewport-intersection')).toBe(true);
+  });
+
   it('requires the action list with perform, and perform with the action list', () => {
     expect(() => defineEngine(observingEngine({ perform: async () => undefined }))).toThrow(
       /perform without actions: list the action kinds/,
@@ -69,6 +76,20 @@ describe('defineEngine', () => {
     expect(() => defineEngine(observingEngine({ actions: ['tap'], perform, tapModifiers: 'yes' as never }))).toThrow(
       /tapModifiers must be a boolean/,
     );
+  });
+
+  it('keeps the SPI v1 list stable and accepts an explicitly declared upload action', () => {
+    const perform = async () => undefined;
+    const legacy = defineEngine(observingEngine({ actions: LOCATOR_ACTION_KINDS, perform }));
+    expect(legacy.actions).not.toContain('setInputFilePayloads');
+    const enabled = defineEngine(observingEngine({ actions: ['setInputFilePayloads'], perform }));
+    expect(enabled.actions).toEqual(['setInputFilePayloads']);
+  });
+
+  it.each([null, {}, 42, 'setInputFilePayloads'])('reports malformed action lists as INVALID_CONFIG: %j', (actions) => {
+    expect(() => defineEngine(observingEngine({
+      actions: actions as never, perform: async () => undefined,
+    }))).toThrow(expect.objectContaining({ code: 'INVALID_CONFIG' }));
   });
 
   it('closes the action list: known kinds, each once, at least one', () => {
@@ -87,7 +108,7 @@ describe('defineEngine', () => {
     );
     expect(() =>
       defineEngine(observingEngine({ session: { navigate: async () => undefined } as never })),
-    ).toThrow(/session has unknown key "navigate"; expected one of open, back, resize, switchTab, closeTab, restart, reset/);
+    ).toThrow(/session has unknown key "navigate"; expected one of open, openLink, back, resize, switchTab, closeTab, restart, reset/);
     expect(() =>
       defineEngine(observingEngine({ session: { open: 'https://example.test/' } as never })),
     ).toThrow(/session.open must be a function/);
@@ -163,6 +184,13 @@ describe('defineEngine', () => {
     expect(() =>
       defineEngine(observingEngine({ state: { capture: async () => ({}) } as never })),
     ).toThrow(/state.restore must be a function/);
+  });
+
+  it('refuses a fixture named like a method of an @e2e-dev/core session', () => {
+    for (const fixture of ['close', 'saveState', 'setDefaultTimeout']) {
+      expect(() => defineEngine(observingEngine({ fixtures: { [fixture]: () => ({}) } as never })), fixture)
+        .toThrow(expect.objectContaining({ code: 'INVALID_CONFIG', message: expect.stringContaining('is a method of every @e2e-dev/core session') }));
+    }
   });
 
   it('binds validateApp, prepare, finish, and fixture factories to the spec', async () => {
@@ -470,6 +498,25 @@ describe('createEngineSession', () => {
     expect(performed).toEqual([observed.revision]);
   });
 
+  it('reads back every ref of a locate with more matches than the located-ref bound', async () => {
+    const many = (prefix: string, count: number) => Array.from({ length: count }, (_, i) => node(`${prefix}${i}`, `Row ${i}`));
+    let nodes = many('a', 2100);
+    const session = createEngineSession({
+      engine: defineEngine(observingEngine({ locate: async () => nodes })),
+      targetName: 'toy-target',
+    });
+    const refs = await session.locate({ kind: 'selector', selector: 'row' }, OP);
+    expect(refs).toHaveLength(2100);
+    const read = await Promise.all(refs.map((ref) => session.read(ref, OP)));
+    expect(read.map((n) => n.name)).toEqual(nodes.map((n) => n.name));
+    // A later, smaller locate still prunes the older refs back to the bound.
+    nodes = many('b', 10);
+    const later = await session.locate({ kind: 'selector', selector: 'row' }, OP);
+    await expect(Promise.all(later.map((ref) => session.read(ref, OP)))).resolves.toHaveLength(10);
+    await expect(session.read(refs[0]!, OP)).rejects.toMatchObject({ code: 'NODE_STALE' });
+    await expect(session.read(refs.at(-1)!, OP)).resolves.toMatchObject({ name: 'Row 2099' });
+  });
+
   it('ends the attempt exactly once, handing endAttempt the cleanup budget', async () => {
     const contexts: EngineCleanupContext[] = [];
     const session = createEngineSession({
@@ -538,6 +585,36 @@ describe('createEngineSession pixels-only observation', () => {
     expect(observation.tree.children ?? []).toHaveLength(0);
     expect(observation.pixels).toBe(pixels);
     expect(observation.redaction).toEqual({ secureNodeCount: 0, maskedRegionCount: 0 });
+  });
+
+  it('keeps pixels only when the masked regions cover every secure node, and marks a screenshot it cannot keep as withheld', async () => {
+    const pixels = { data: new Uint8Array(8), mediaType: 'image/png' as const, width: 4, height: 2, scale: 1 };
+    const pin: SemanticNode = { ref: { id: 'pin', revision: '' }, role: 'textbox', name: 'PIN', states: { secure: true } };
+    const label: SemanticNode = { ref: { id: 'label', revision: '' }, role: 'text', text: 'Sign in' };
+    let raw = snapshot([pin, label]);
+    const session = createEngineSession({
+      engine: defineEngine(observingEngine({ observe: async () => raw })),
+      targetName: 'toy',
+    });
+    const look = async (next: EngineSnapshot) => {
+      raw = next;
+      const observation = await session.observe(OP, { pixels: true });
+      assert(observation.kind === 'semantic');
+      return { pixels: observation.pixels, withheld: observation.pixelsWithheld };
+    };
+    expect(await look(snapshot([pin, label], { pixels, maskedRegionCount: 1 }))).toEqual({ pixels, withheld: undefined });
+    // Sent without proof, or withheld by the engine: either way the session keeps no image.
+    expect(await look(snapshot([pin, label], { pixels }))).toEqual({ pixels: undefined, withheld: 'MASKING_UNPROVEN' });
+    expect(await look(snapshot([pin, label], { maskedRegionCount: 0 }))).toEqual({ pixels: undefined, withheld: 'MASKING_UNPROVEN' });
+    // No screenshot taken withholds nothing.
+    expect(await look(snapshot([pin, label]))).toEqual({ pixels: undefined, withheld: undefined });
+    // One the engine withheld is withheld even where the tree shows nothing to mask: a tree read in part can leave a secure field out.
+    expect(await look(snapshot([label], { maskedRegionCount: 0, truncated: true }))).toEqual({ pixels: undefined, withheld: 'MASKING_UNPROVEN' });
+    // A count no pixels request asked for withholds nothing either.
+    raw = snapshot([pin, label], { maskedRegionCount: 0 });
+    const unasked = await session.observe(OP);
+    assert(unasked.kind === 'semantic');
+    expect(unasked.pixelsWithheld).toBeUndefined();
   });
 });
 

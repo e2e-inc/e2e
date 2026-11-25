@@ -4,19 +4,19 @@
  * without spawning processes or browsers.
  */
 
-import { protocolEngine } from '../../src/engine/protocol/client.ts';
+import { protocolEngine } from '@e2e-dev/core/lib/engine/protocol/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CollectedFile, CollectedTest, Collection } from '../../src/collect/collect.ts';
 import type {
   ResolvedTestOptions,
   Selection,
-  SkipInfo,
   TestTargetPair,
 } from '../../src/collect/select.ts';
-import type { ResolvedTarget } from '../../src/config/resolve.ts';
-import { defineEngine, type EngineHandle } from '../../src/engine/index.ts';
-import { classifyError, serializeError } from '../../src/internal/errors.ts';
-import type { AttemptRecord, ResultRecord, RunError, SerialAttemptRecord, SerialGroupRecord, SerialMemberRecord } from '../../src/run/records.ts';
+import type { SkipInfo } from '@e2e-dev/core/lib/run/records';
+import type { ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
+import { defineEngine, type EngineHandle } from '@e2e-dev/core/lib/engine/index';
+import { classifyError, serializeError } from '@e2e-dev/core/lib/internal/errors';
+import type { AttemptRecord, ResultRecord, RunError, SerialAttemptRecord, SerialGroupRecord, SerialMemberRecord } from '@e2e-dev/core/lib/run/records';
 import { runUnits, type RunUnitsOptions, type TargetFailure } from '../../src/run/scheduler.ts';
 import { serialGroupId } from '../../src/run/serial.ts';
 import { buildWorkPlans, type TargetWorkPlan, type TimeLimit } from '../../src/run/units.ts';
@@ -27,7 +27,6 @@ const defaultOptions: ResolvedTestOptions = {
   timeout: 30_000,
   retries: 0,
   platforms: undefined,
-  requires: [],
   session: undefined,
   agents: ['default'],
   agentContext: undefined,
@@ -46,6 +45,7 @@ const EMPTY_APP: ResolvedTarget['app'] = {
   identity: undefined,
   bundleId: undefined,
   appPath: undefined,
+  linkBase: undefined,
   launchArguments: undefined,
   permissions: undefined,
   command: undefined,
@@ -55,6 +55,7 @@ const EMPTY_DECLARED: ResolvedTarget['declaredApp'] = {
   url: undefined,
   bundleId: undefined,
   appPath: undefined,
+  linkBase: undefined,
   identity: undefined,
   environment: undefined,
   launchArguments: undefined,
@@ -72,6 +73,8 @@ function makeTarget(name: string, index: number, engine?: EngineHandle): Resolve
     declaredApp: EMPTY_DECLARED,
     trace: { mode: 'off', source: 'default' },
     video: { mode: 'off', source: 'default' },
+    fullyParallel: false,
+    fixtureScopes: new Map(),
   };
 }
 
@@ -85,6 +88,7 @@ function makeTest(file: string, title: string, overrides: Partial<CollectedTest>
     kind: 'test',
     title,
     titlePath: [title],
+    names: [],
     declarationIndex: 0,
     options: {},
     sessions: [],
@@ -97,6 +101,7 @@ function makeTest(file: string, title: string, overrides: Partial<CollectedTest>
     file,
     id: `${file}::${title}`,
     serialRoot: undefined,
+    parallel: { declared: false, ordered: undefined, suiteHooks: false },
     serialId: undefined,
     selected: true,
     ...overrides,
@@ -459,7 +464,7 @@ async function run(
     ...(overrides.maxFailures === undefined ? {} : { maxFailures: overrides.maxFailures }),
     ...(overrides.timeLimit === undefined ? {} : { timeLimit: overrides.timeLimit }),
     ...(overrides.subscribeTargetFailures === undefined ? {} : { subscribeTargetFailures: overrides.subscribeTargetFailures }),
-    plans: buildWorkPlans(selection, collection, '/project').map((plan): TargetWorkPlan => {
+    plans: buildWorkPlans(selection, collection, '/project', overrides.workers ?? 2).map((plan): TargetWorkPlan => {
       const workers = overrides.preparedWorkers?.[plan.target.name];
       return workers === undefined ? plan : { ...plan, workers };
     }),
@@ -761,6 +766,23 @@ describe('failure limit', () => {
     expect(collected.failureLimits).toEqual([]);
     expect(fleet.interruptSkips).toEqual([]);
   });
+
+  it('answers each counted failure with continue below the limit, and with nothing at the limit or without one', async () => {
+    const target = makeTarget('web', 0);
+    const pairs = ['a', 'b', 'c'].map((name) => makePair(makeTest(`tests/${name}.e2e.ts`, name), target));
+    const status = { [pairs[0]!.test.id]: 'timed-out' as const, [pairs[1]!.test.id]: 'failed' as const };
+    const controlsWith = async (maxFailures: number | undefined): Promise<MainToWorker['type'][]> => {
+      const fleet = new FakeFleet({ status });
+      await run(makeSelection([{ target, pairs }]), makeCollection(pairs.map((pair) => pair.test.file), pairs), fleet, {
+        workers: 1,
+        ...(maxFailures === undefined ? {} : { maxFailures }),
+      });
+      return fleet.controlMessages.filter((type) => type === 'continue' || type === 'interrupt');
+    };
+    expect(await controlsWith(3)).toEqual(['continue', 'continue']);
+    expect(await controlsWith(2)).toEqual(['continue', 'interrupt']);
+    expect(await controlsWith(undefined)).toEqual([]);
+  });
 });
 
 describe('time limit', () => {
@@ -876,6 +898,23 @@ describe('scheduler disposal', () => {
     expect(collected.results.map((result) => result.status)).toEqual(['passed']);
     expect(fleet.killed).toEqual([]);
     expect(fleet.completedDisposals).toEqual([0]);
+  });
+
+  it('lets a retired worker finish disposal when the force grace is longer than a timer can wait', async () => {
+    const target = makeTarget('web', 0);
+    const pair = makePair(makeTest('tests/a.e2e.ts', 'a'), target);
+    const fleet = new FakeFleet({ disposal: { delayMs: 12_000 } });
+
+    vi.useFakeTimers();
+    const running = run(makeSelection([{ target, pairs: [pair] }]), makeCollection([pair.test.file], [pair]), fleet, {
+      workers: 1, forceGraceMs: 2 ** 31,
+    });
+    await vi.advanceTimersByTimeAsync(13_000);
+    const collected = await running;
+
+    expect(fleet.killed).toEqual([]);
+    expect(fleet.completedDisposals).toEqual([0]);
+    expect(collected.results.map((result) => result.status)).toEqual(['passed']);
   });
 
   it('kills a worker whose disposal outlasts its configured shutdown budget', async () => {

@@ -24,7 +24,8 @@ from the directory it runs in.
   `description`, and optional `platform` / `screenOptions`. One component
   per scenario in `src/Examples/`; the home list renders one row per
   scenario, its test id the scenario name, and pushes each as its own stack
-  screen.
+  screen. The deep link `e2e-benchmark://<name lowercased, spaces replaced by hyphens>`
+  (`e2e-benchmark://login-form`) opens a scenario directly.
 - `modules/apple-pay-lab`: the local Expo module (PassKit, iOS only) behind
   the two Apple Pay scenarios.
 - `e2e.config.ts` + `tests/`: the deterministic suite, locators only.
@@ -63,9 +64,8 @@ on the CI simulator only, and strict mode waits on them.
 - Login Form (CI only): the CI simulator reads the screen's route as its
   title, `Login Form`, where a Mac reads the back button's `Benchmark
   Examples`, so the recorded start route does not match.
-- Photo Picker (CI only): the recorded tap names the photo by the time it
-  was seeded, `Photo, October 03, 22:50`, which is another time on another
-  simulator.
+- Photo Picker (CI only, until a CI run shows otherwise): the recorded tap
+  names the photo by its capture time, `Photo, October 15, 10:27 AM`.
 - Permission Prompt (CI only): every recorded action replays, but the
   recorded end state, `Microphone enabled`, does not show.
 Each job posts its first pass to the pull request as one comment (`e2e ios:
@@ -77,6 +77,14 @@ job whose comment lists failures is one that pass recovered.
 
 Native projects are generated with CNG (`ios/` and `android/` are ignored);
 `expo run:*` prebuilds them on first use.
+
+Built with Xcode 27, an app without UIKit scenes crashes at launch on iOS 27
+(#1894). The SDK 57 template has none, so `app.json` turns them on with
+`expo-build-properties`' `ios.enableSceneSupport`. An `ios/` generated
+before that still crashes: regenerate it with
+`pnpm --filter @e2e-dev/mobile-benchmark exec expo prebuild --platform ios --clean`.
+On SDK 58, whose template has scenes, remove the `expo-build-properties`
+plugin entry and dependency.
 
 ```bash
 pnpm build                                              # from the repo root, once

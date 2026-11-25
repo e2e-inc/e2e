@@ -8,16 +8,18 @@
 import inspector from 'node:inspector';
 import type { ModuleRegistration } from '../../collect/registry.ts';
 import type { TestTargetPair } from '../../collect/select.ts';
-import type { ResolvedConfig, ResolvedTarget } from '../../config/resolve.ts';
-import { DebugTrace } from '../../internal/debug.ts';
-import { uuidv7 } from '../../internal/ids.ts';
-import { abortError, cancelledError } from '../../internal/time.ts';
+import type { ResolvedConfig, ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
+import { DebugTrace } from '@e2e-dev/core/lib/internal/debug';
+import { ConfigurationError, E2EError, type SerializedError } from '@e2e-dev/core/lib/internal/errors';
+import { uuidv7 } from '@e2e-dev/core/lib/internal/ids';
+import { abortError, cancelledError } from '@e2e-dev/core/lib/internal/time';
 import { TargetExecutor, type InMemoryAttempts } from '../execute.ts';
-import { encodeResult, type RunError } from '../records.ts';
-import type { SessionStore } from '../sessions.ts';
-import type { HeldStep } from '../step-hold.ts';
-import { countsTowardFailureLimit, disappearedResult, failureLimitSkip } from '../units.ts';
-import type { FailureLimit, MainToWorker, RunUnitMessage, WirePair, WorkerToMain } from './protocol.ts';
+import { encodeResult, type RunError } from '@e2e-dev/core/lib/run/records';
+import type { SessionStore } from '@e2e-dev/core/lib/run/sessions';
+import type { HoldReads, StepHold } from '../step-hold.ts';
+import type { HeldTestTools } from './held-test-tools.ts';
+import { countsTowardFailureLimit, disappearedResult } from '../units.ts';
+import type { MainToWorker, RunUnitMessage, WirePair, WorkerToMain } from './protocol.ts';
 
 /** Pairs resolved locally for one unit, plus identities that vanished. */
 export interface ResolvedUnitPairs {
@@ -25,19 +27,21 @@ export interface ResolvedUnitPairs {
   /** Planned pairs whose test is absent from this worker's view of the file. */
   readonly missing: readonly WirePair[];
   /**
-   * The module registration the resolver imported to resolve the pairs, when
-   * it imported one. Nothing has run in it, so the executor adopts it as the
-   * unit's first realm instead of importing the same file a second time.
+   * The module registration the pairs were resolved against, when there is
+   * one: `reusable`, or the resolver's own import, in which nothing has run.
+   * The executor adopts it as the unit's first realm instead of importing the
+   * file again.
    */
   readonly registration?: ModuleRegistration;
 }
 
 /**
  * Turns a unit's wire pairs into executable pairs. A child-process worker
- * re-imports the file; an in-process worker looks the pairs up in the
- * selection the runner already collected.
+ * imports the file, unless an earlier unit of the file left `reusable`; an
+ * in-process worker looks the pairs up in the selection the runner already
+ * collected.
  */
-export type ResolveUnitPairs = (unit: RunUnitMessage) => Promise<ResolvedUnitPairs>;
+export type ResolveUnitPairs = (unit: RunUnitMessage, reusable: ModuleRegistration | undefined) => Promise<ResolvedUnitPairs>;
 
 export interface TargetWorkerDeps {
   readonly config: ResolvedConfig;
@@ -58,8 +62,8 @@ export interface TargetWorkerDeps {
   readonly debug?: DebugTrace;
   /** See `TargetExecutorOptions.inMemory`; only an in-process worker has tests registered in memory. */
   readonly inMemory?: InMemoryAttempts | undefined;
-  /** Whether steps wait for the runner's `step-release` (`e2e run --step`). */
-  readonly step?: boolean | undefined;
+  /** Whether steps wait for the runner's `step-release` (`e2e run --step`). Pauses always wait. */
+  readonly holdSteps: boolean;
 }
 
 /** Transport callbacks a target worker needs. */
@@ -70,6 +74,11 @@ export interface TargetWorkerHost {
   /** Graceful end of life, after engine disposal. */
   finished(): void;
 }
+
+type WorkerHold = HoldReads & {
+  readonly release: (error: SerializedError | undefined) => void;
+  readonly tools: HeldTestTools;
+};
 
 export class TargetWorker {
   private readonly interruptController = new AbortController();
@@ -89,14 +98,24 @@ export class TargetWorker {
   get pairInFlight(): { readonly testId: string; readonly agent: string; readonly repeat: number } | undefined {
     return this.inFlight;
   }
-  /** The failure limit of the unit running now, counting this worker's own failures since its dispatch. */
-  private failureLimit: FailureLimit | undefined;
+  /** Whether the run has a failure limit, so each failure this worker reports waits for the runner's answer. */
+  private answersFailures = false;
+  /** Failures this worker reported that the runner has not answered yet. */
+  private unanswered = 0;
+  /** Wakes the wait in `failuresAnswered` once the last of them is answered. */
+  private answered: (() => void) | undefined;
   /** Serializes message handling so units never overlap on one worker. */
   private queue: Promise<void> = Promise.resolve();
   /** Disposal happens once, whichever of shutdown or terminate asks first. */
   private shutdownOnce: Promise<void> | undefined;
-  /** Each step waiting for `step-release`, by hold id: what lets it run. */
-  private readonly holds = new Map<string, () => void>();
+  /** Steps and pauses waiting for `step-release`, by hold ID. */
+  private readonly holds = new Map<string, WorkerHold>();
+
+  /** Gets any pending hold for a request that names the attachment rather than the hold. */
+  private get firstHold(): WorkerHold | undefined {
+    // A worker runs one attempt at a time, so all its holds share that attempt's tools.
+    return this.holds.values().next().value;
+  }
 
   constructor(
     private readonly host: TargetWorkerHost,
@@ -120,17 +139,22 @@ export class TargetWorker {
         env: deps.env,
         isolated: deps.isolated,
         interruptSignal: this.interruptController.signal,
-        ...(deps.step === true ? { holdStep: (step: HeldStep, signal: AbortSignal) => this.holdStep(step, signal) } : {}),
+        hold: {
+          ask: (step, signal, reads, tools) => this.holdStep(step, signal, reads, tools),
+          steps: deps.holdSteps,
+        },
         ...(deps.debug !== undefined ? { debug: deps.debug } : {}),
         inMemory: deps.inMemory,
+        beforePair: () => this.failuresAnswered(),
         events: {
           onResult: (result) => {
             // Teardown after the result (an afterAll) belongs to no pair.
             if (this.inFlight?.testId === result.test.id && this.inFlight.agent === result.agent && this.inFlight.repeat === result.repeat) {
               this.inFlight = undefined;
             }
+            // Counted before it is sent: an in-process runner answers inside `emit`.
+            if (this.answersFailures && countsTowardFailureLimit(result.status)) this.unanswered += 1;
             this.host.emit({ type: 'result', result: encodeResult(result) });
-            if (countsTowardFailureLimit(result.status)) this.countFailure();
           },
           onSerialGroup: (group) => this.host.emit({ type: 'serial-group', group }),
           onAttemptStart: (pair, index) =>
@@ -162,7 +186,7 @@ export class TargetWorker {
               attempt: attempt.index,
               attemptId: attempt.id,
               startedAt: attempt.startedAt,
-              timeoutMs: pair.options.timeout,
+              timeoutMs: attempt.timeoutMs,
               ...(attempt.remainingMs === undefined ? {} : { remainingMs: attempt.remainingMs }),
               graceMs: deps.config.cleanupTimeout,
             });
@@ -213,52 +237,143 @@ export class TargetWorker {
         return;
       case 'step-release':
         // Now too: the unit it releases is the one running.
-        this.holds.get(message.holdId)?.();
+        this.holds.get(message.holdId)?.release(message.error);
         return;
+      case 'continue':
+        // Now too: the running unit is what waits for it.
+        this.unanswered -= 1;
+        if (this.unanswered === 0) this.answered?.();
+        return;
+      case 'step-attachment-request': {
+        const { requestId, request } = message;
+
+        const hold = request.kind === 'attach' ? this.holds.get(request.holdId) : this.firstHold;
+
+        if (hold === undefined) {
+          this.host.emit({
+            type: 'step-attachment-reply',
+            requestId,
+            response: request.kind === 'detach'
+              ? { kind: 'detach' }
+              : {
+                  kind: 'error',
+                  error: {
+                    category: 'configuration',
+                    code: 'NO_SESSION',
+                    message: 'the test resumed',
+                  },
+                },
+          });
+        } else {
+          void hold.tools.request(requestId, request).then((response) => {
+            this.host.emit({ type: 'step-attachment-reply', requestId, response });
+          });
+        }
+        return;
+      }
+      case 'step-attachment-cancel':
+        this.firstHold?.tools.cancel(message.requestId);
+        return;
+      case 'screen-request':
+      case 'logs-request': {
+        // Handle this right away because the waiting unit is still running.
+        const { requestId, holdId } = message;
+        const hold = this.holds.get(holdId);
+
+        if (message.type === 'screen-request') {
+          void Promise.resolve(hold?.readScreen()).then((screen) => {
+            this.host.emit({ type: 'screen-reply', requestId, ...(screen === undefined ? {} : { screen }) });
+          });
+        } else {
+          void Promise.resolve(hold?.readLogs()).then((logs) => {
+            this.host.emit({ type: 'logs-reply', requestId, ...(logs === undefined ? {} : { logs }) });
+          });
+        }
+        return;
+      }
       default:
         message satisfies never;
     }
   }
 
   /**
-   * Holds one step until the runner releases it. A hold that ends first
-   * (the step was abandoned, its attempt ended) tells the runner, so its
-   * prompt goes away, and rejects with the signal's reason.
+   * Holds one step or pause until the runner releases it, and rejects with
+   * the release's error if it has one. A hold that ends first (the step was
+   * abandoned, its attempt ended) tells the runner, so its prompt goes away,
+   * and rejects with the signal's reason. During the hold, the screen is
+   * available through `readScreen` and the app log through `readLogs`.
    */
-  private holdStep(step: HeldStep, signal: AbortSignal): Promise<void> {
+  private holdStep(
+    step: StepHold,
+    signal: AbortSignal,
+    reads: HoldReads,
+    tools: HeldTestTools,
+  ): Promise<void> {
     const holdId = uuidv7();
     return new Promise<void>((resolve, reject) => {
-      const settle = (): void => {
+      // The wait was abandoned before it started. Don't send it to the runner.
+      if (signal.aborted) {
+        reject(abortError(signal, cancelledError));
+        return;
+      }
+
+      const settle = (reason: Error): void => {
         this.holds.delete(holdId);
         signal.removeEventListener('abort', cancel);
+        tools.end(reason);
       };
+
       const cancel = (): void => {
-        settle();
+        const reason = this.interruptController.signal.aborted ? 'the run was interrupted' : 'the test hold ended';
+        settle(abortError(signal, () => new ConfigurationError('NO_SESSION', reason)));
         this.host.emit({ type: 'step-cancel', holdId });
         reject(abortError(signal, cancelledError));
       };
-      this.holds.set(holdId, () => {
-        settle();
-        resolve();
+
+      this.holds.set(holdId, {
+        release: (error) => {
+          settle(new ConfigurationError('NO_SESSION', error === undefined ? 'the test resumed' : 'the test hold failed'));
+
+          if (error === undefined) {
+            resolve();
+          } else {
+            reject(new E2EError(error.category, error.code, error.message));
+          }
+        },
+        ...reads,
+        tools,
       });
       signal.addEventListener('abort', cancel, { once: true });
-      this.host.emit({ type: 'step-hold', holdId, step });
+
+      this.host.emit({
+        type: 'step-hold',
+        holdId,
+        attemptId: tools.attemptId,
+        step,
+        attachmentLabels: tools.attachmentLabels,
+      });
     });
   }
 
   /**
-   * Counts a failure toward the unit's failure limit. Reaching it stops the
-   * unit the way the runner's interrupt would, at once: the tests the worker
-   * has not started are skipped with the limit's reason, however long the
-   * runner's interrupt takes to arrive. Other workers' failures only add to
-   * the run's count, so a limit reached here is reached for the run too.
+   * Resolves once the runner has answered every failure this worker reported,
+   * or the interrupt arrived. The runner alone counts failures toward the
+   * run's limit, so a worker whose failure reached it never starts another
+   * test: the interrupt answering that failure skips the rest with the
+   * limit's reason.
    */
-  private countFailure(): void {
-    const current = this.failureLimit;
-    if (current === undefined) return;
-    const counted = { limit: current.limit, failures: current.failures + 1 };
-    this.failureLimit = counted;
-    if (counted.failures >= counted.limit) this.interruptController.abort(failureLimitSkip(counted.failures, counted.limit));
+  private failuresAnswered(): Promise<void> {
+    const signal = this.interruptController.signal;
+    if (this.unanswered === 0 || signal.aborted) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const done = (): void => {
+        this.answered = undefined;
+        signal.removeEventListener('abort', done);
+        resolve();
+      };
+      this.answered = done;
+      signal.addEventListener('abort', done, { once: true });
+    });
   }
 
   /**
@@ -292,8 +407,10 @@ export class TargetWorker {
     // fatal for the worker; the scheduler still holds the unit and synthesizes
     // failed results for every pair it never heard about. Reporting the unit
     // done first would clear that bookkeeping and drop those tests silently.
-    this.failureLimit = message.failureLimit;
-    const { pairs, missing, registration } = await deps.resolvePairs(message);
+    this.answersFailures = message.answersFailures === true;
+    // A setup test owns its realm, so only a file unit runs in an instance an earlier one left.
+    const reusable = message.kind === 'file' ? executor.realms.takeReusable(message.file) : undefined;
+    const { pairs, missing, registration } = await deps.resolvePairs(message, reusable);
     for (const wire of missing) {
       executor.recordDisappeared(
         `test ${wire.test.id} disappeared before execution; registration must be deterministic`,
@@ -311,6 +428,7 @@ export class TargetWorker {
         { file: message.file, absolutePath: message.absolutePath },
         pairs,
         registration,
+        message.split === true,
       );
     }
     this.inFlight = undefined;

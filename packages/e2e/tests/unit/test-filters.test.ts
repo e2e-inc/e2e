@@ -11,13 +11,15 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import { AgentError } from '../../src/agent/error.ts';
+import { AgentError } from '@e2e-dev/core/lib/agent/error';
 import { collectFromRegistration, type Collection } from '../../src/collect/collect.ts';
 import { collectModule, test } from '../../src/collect/registry.ts';
 import { select } from '../../src/collect/select.ts';
-import { resolveConfig, type ResolvedConfig } from '../../src/config/resolve.ts';
-import { defineEngine } from '../../src/engine/index.ts';
-import { ConfigurationError, type E2EError } from '../../src/internal/errors.ts';
+import type { ResolvedRunConfig as ResolvedConfig } from '../../src/config/resolve-run.ts';
+import { resolveConfig } from '../../src/config/resolve-run.ts';
+import { defineEngine } from '@e2e-dev/core/lib/engine/index';
+import { ConfigurationError, type E2EError } from '@e2e-dev/core/lib/internal/errors';
+import { registerProviderKey } from '@e2e-dev/core/lib/run/secrecy';
 import {
   applyTestFilters,
   FILTER_TIMEOUT_MS,
@@ -29,13 +31,13 @@ import {
   type FilterSelectionOptions,
   type TestFilterScope,
 } from '../../src/run/test-filters.ts';
-import type { E2EConfig, TestFilter, TestFilterCandidate, TestFilterContext, TestFilterResult } from '../../src/types.ts';
+import type { E2EConfig, TestFilter, TestFilterCandidate, TestFilterContext, TestFilterResult } from '../../src/run-types.ts';
 import { invalid } from '../helpers/invalid.ts';
 
 /** What `leaveWorkBehind` was told: a timeout records the work it left behind, for the CLI to exit on. */
 const leaveWorkBehind = vi.hoisted(() => vi.fn());
-vi.mock('../../src/internal/abandoned.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../src/internal/abandoned.ts')>()),
+vi.mock('@e2e-dev/core/lib/internal/abandoned', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@e2e-dev/core/lib/internal/abandoned')>()),
   leaveWorkBehind,
 }));
 
@@ -193,7 +195,6 @@ describe('filterCandidates', () => {
       });
       test.skip('later', noop);
       test('on ios only', { platforms: ['ios'] }, noop);
-      test('needs a device', { requires: ['device'] }, noop);
       test('slow', { tags: ['slow'] }, noop);
     });
     const cfg = resolveConfig(
@@ -362,6 +363,29 @@ describe('applyTestFilters', () => {
     expect(redacted).toMatch(/^password <secret:[^>]+>$/);
     expect(applied.excluded.get(idOf(candidates, 'a'))!.reason).toMatch(/^the key <secret:[^>]+> says so$/);
     expect(applied.decisions[0]!.note).toMatch(/^signed in with <secret:[^>]+>$/);
+  });
+
+  it('redacts a provider key in a filter\'s reasons, notes, log lines, and what redact returns, whole and never in part', async () => {
+    const key = 'sk-proj-filter-9e2b7d4a1c6f8035';
+    registerProviderKey('filter.model-key', key);
+    const candidates = await candidatesOf('a', 'b');
+    let redacted = '';
+    const { scope: value, notices } = scope();
+    const applied = await applyTestFilters(
+      [
+        filterOf('jev', (_tests, { log, redact }) => {
+          log(`the provider rejected ${key}`);
+          redacted = redact(`a diff line naming sk-proj-another-key and ${key}`);
+          return { exclude: { [idOf(candidates, 'a')]: `rejected ${key}` }, note: `asked with ${key}` };
+        }),
+      ],
+      candidates,
+      value,
+    );
+    expect(notices).toEqual(['jev: the provider rejected <secret:filter.model-key>']);
+    expect(redacted).toBe('a diff line naming sk-proj-another-key and <secret:filter.model-key>');
+    expect(applied.excluded.get(idOf(candidates, 'a'))!.reason).toBe('rejected <secret:filter.model-key>');
+    expect(applied.decisions[0]!.note).toBe('asked with <secret:filter.model-key>');
   });
 
   it('hands a filter a redact that also masks every run of 8 or more characters of a value, so no part of a key survives a diff that shows its lines only in part', async () => {

@@ -27,7 +27,7 @@ bunx e2e init
 
 | Path | Used by |
 | --- | --- |
-| `.agents/skills/e2e/` | Agents that read `.agents/skills` |
+| `.agents/skills/e2e/` | Codex, Cursor, OpenCode, and other agents that read `.agents/skills` |
 | `.claude/skills/e2e/` | Claude Code. A symlink to `.agents/skills/e2e/` when both are installed. |
 
 The copy holds `SKILL.md` and topic references.
@@ -37,8 +37,10 @@ installs the skill, and `npx e2e guide [topic]` prints it from the
 installed package. The plugin below installs all three e2e skills for
 every project.
 
-`init` leaves your project instructions unchanged. For agents that need a
-pointer, add this line:
+`init` also appends this line to `AGENTS.md`, so a prompt such as "add a
+test for checkout" reaches the skill. `CLAUDE.md` gets it with the
+`.claude/skills` path, and a missing file is created. Add the line yourself
+when you install the skill another way:
 
 ```md title="AGENTS.md"
 End-to-end tests use e2e; read .agents/skills/e2e/SKILL.md before writing or running one.
@@ -78,8 +80,9 @@ Start a new session. In Cursor, run **Developer: Reload Window**. On Cursor
 Teams and Enterprise, local plugins need the admin setting **Allow Local
 Plugin Imports**, or an admin imports `e2e-inc/e2e` as a team
 marketplace. The plugin adds the
-`e2e`, `create-verification-skill`, and `migrate-to-e2e` skills and the
-[MCP server](/mcp-server), not the npm package. Invoke the other two under the plugin's
+`e2e`, `create-verification-skill`, and `migrate-to-e2e` skills, not the npm
+package. In Codex and Cursor it also adds the [MCP server](/mcp-server); in
+Claude Code and Grok Build, register it in the project. Invoke the other two under the plugin's
 name, `/e2e:<skill>` in Claude Code and `$e2e:<skill>` in Codex, and as
 `/<skill>` in Cursor.
 

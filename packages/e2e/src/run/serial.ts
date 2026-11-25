@@ -1,25 +1,27 @@
 /** Serial-group execution: one shared session per group attempt. */
 
-import type { TargetSession } from '../engine/surface.ts';
+import type { TargetSession } from '@e2e-dev/core/lib/engine/surface';
 import {
   classifyError,
   ConfigurationError,
   serializeError,
   type SerializedError,
-} from '../internal/errors.ts';
-import { canonicalDigest, timestamp, uuidv7 } from '../internal/ids.ts';
+} from '@e2e-dev/core/lib/internal/errors';
+import { canonicalDigest, timestamp, uuidv7 } from '@e2e-dev/core/lib/internal/ids';
 import type { CollectedTest } from '../collect/collect.ts';
 import { groupTitles, type RegisteredTest } from '../collect/registry.ts';
-import { pairRecordings, type SkipInfo, type TestTargetPair } from '../collect/select.ts';
-import type { ResolvedTarget } from '../config/resolve.ts';
-import type { ArtifactStore } from '../types.ts';
-import { attemptSegments, createAttemptArtifacts, resultSegment } from './artifacts.ts';
-import type { AttemptContext, ClosingRecord, SessionClose, SessionPlan } from './execute.ts';
-import type { ArtifactSink } from './fixtures.ts';
-import type { StepRecord } from './steps.ts';
+import { pairRecordings, type TestTargetPair } from '../collect/select.ts';
+import type { SkipInfo } from '@e2e-dev/core/lib/run/records';
+import type { ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
+import type { ArtifactStore } from '@e2e-dev/core/lib/types';
+import { attemptSegments, createAttemptArtifacts, resultSegment } from '@e2e-dev/core/lib/run/artifacts';
+import type { AttemptContext } from './execute.ts';
+import type { ClosingRecord, SessionClose, SessionPlan } from '@e2e-dev/core/lib/run/engine-sessions';
+import type { ArtifactSink } from '@e2e-dev/core/lib/run/fixtures';
+import { isOwnStep, type StepRecord } from '@e2e-dev/core/lib/run/steps';
 import { findRegistered, type FileRef, type Realm, RealmManager } from './realm.ts';
-import type { AttemptRecord, ResultRecord, ResultStatus, SerialAttemptRecord, SerialGroupRecord, SerialMemberRecord, FailedStatus } from './records.ts';
-import { isFailedStatus } from './records.ts';
+import type { AttemptRecord, ResultRecord, ResultStatus, SerialAttemptRecord, SerialGroupRecord, SerialMemberRecord, FailedStatus } from '@e2e-dev/core/lib/run/records';
+import { isFailedStatus } from '@e2e-dev/core/lib/run/records';
 import { isCutSerialRetry, isRetryEligible, retryVerdict, runWithRetries } from './retry.ts';
 import { interruptedSkip, pairResult } from './units.ts';
 
@@ -458,7 +460,7 @@ async function runSerialAttempt(
     // Suite scopes enter per member, exactly as for ordinary tests: a
     // beforeAll failure skips this member and, since later members build on
     // its screen, every member after it.
-    hookFailure = await host.realms.enterScopes(realm, registered);
+    hookFailure = await host.realms.enterScopes(realm, registered, shared.session);
     if (hookFailure !== undefined) {
       skipRemaining = { cause: 'hook-failed', reason: hookFailure.message };
       finishMember(skippedMember(attemptId, memberIndex, member.test.id, skipRemaining));
@@ -469,7 +471,8 @@ async function runSerialAttempt(
       kind: 'serial',
       shared,
     });
-    shared.priorSteps.push(...memberAttempt.steps);
+    // What a later member's agent reads as the steps before its own is the shared session's alone.
+    shared.priorSteps.push(...memberAttempt.steps.filter(isOwnStep));
     finishMember({
       id: memberId,
       index: memberIndex,
@@ -492,13 +495,14 @@ async function runSerialAttempt(
     // tests. A failed afterAll discards the suite instance, and the group
     // attempt is that instance: remaining members skip, as after a failed
     // beforeAll, and the attempt fails without a retry.
-    const teardownFailure = await host.realms.leaveFinished(realm, members.slice(memberIndex + 1));
+    const teardownFailure = await host.realms.leaveFinished(realm, members.slice(memberIndex + 1), shared.session);
     if (teardownFailure !== undefined && skipRemaining === undefined) {
       hookFailure = teardownFailure;
       skipRemaining = { cause: 'hook-failed', reason: teardownFailure.message };
     }
   }
-  await host.realms.leave(realm);
+  // Suite hooks run on the group's session while it is open: an engine runs one attempt at a time.
+  await host.realms.leave(realm, shared.session);
   // The group's verdict is reached before its session closes: the close reads
   // it to decide what the shared recording is worth.
   const failedMember = memberRecords.find(isFailedMember);

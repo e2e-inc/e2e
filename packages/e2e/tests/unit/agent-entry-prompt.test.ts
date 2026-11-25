@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { resolveConfig } from '../../src/config/resolve.ts';
-import { defineEngine } from '../../src/engine/index.ts';
-import { createEngineSession } from '../../src/engine/session.ts';
-import { Deadline } from '../../src/internal/time.ts';
-import { AttemptBudget } from '../../src/run/budget.ts';
-import { createFixtures } from '../../src/run/fixtures.ts';
-import { StepRecorder } from '../../src/run/steps.ts';
-import { WorkerModels } from '../../src/run/worker-models.ts';
-import type { E2EConfig } from '../../src/types.ts';
+import { resolveConfig } from '../../src/config/resolve-run.ts';
+import { defineEngine } from '@e2e-dev/core/lib/engine/index';
+import { createEngineSession } from '@e2e-dev/core/lib/engine/session';
+import { Deadline } from '@e2e-dev/core/lib/internal/time';
+import { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
+import { createFixtures } from '@e2e-dev/core/lib/run/fixtures';
+import { StepRecorder } from '@e2e-dev/core/lib/run/steps';
+import { WorkerModels } from '@e2e-dev/core/lib/run/worker-models';
+import type { E2EConfig } from '../../src/run-types.ts';
 import { runAgentStepsOnFakeTime } from '../helpers/agent-fake-time.ts';
 import { installFakeLoopModel, loopCalls } from '../helpers/fake-loop-model.ts';
 import { fakeCalls, installFakeModel, judgment } from '../helpers/fake-model.ts';
@@ -54,6 +54,23 @@ describe('the built-in agent from its agents entry', () => {
     expect(system).toContain('Project context:\nPlans are called tiers.');
   });
 
+  it('tells the act loop to check a commit before it presses the control again', async () => {
+    const model = installFakeLoopModel(() => conclude);
+    const fixtures = runtime({ agents: { default: { model } } });
+    await fixtures.agent.act('save the product');
+    const system = loopCalls[0]!.system;
+    expect(system).toContain('Never repeat a commit, by any route (the same control, Enter in a field, another submit button), before you check whether the first press committed.');
+    expect(system).toContain('Press it again only when the check shows that the first press did not commit, such as an error you corrected,');
+    expect(system).toContain('or when the result reports only the keyboard closing: then the tap was spent closing the keyboard, so press again without that check.');
+    expect(system).toContain('A step that asks for several commits (add two items, send two messages) presses once for each.');
+    expect(system).toContain('while the check still shows the commit in progress, observe again instead of pressing.');
+    expect(system).toContain('When the check shows neither and nothing in progress, do not press it again: do any check the step itself asks for, then conclude.');
+    expect(system).toContain('Do not leave the screen (navigate, go back, open another page) to confirm a commit unless the step asks for that.');
+    expect(system).toContain('or to check whether a press that commits something went through (see below).');
+    expect(system).toContain('or when a press that commits something (a save, a submit, a delete) showed no confirmation.');
+    expect(system).not.toContain('means the decisive action did not land: act again');
+  });
+
   it('joins the context with the test-level agentContext', async () => {
     const model = installFakeLoopModel(() => conclude);
     const fixtures = runtime(
@@ -84,11 +101,16 @@ describe('the built-in agent from its agents entry', () => {
     expect(JSON.stringify(loopCalls)).not.toContain('hunter2-probe-value');
   });
 
-  it('opens a judgment prompt with the title too, outside its system message', async () => {
+  it('puts the title in a judgment prompt after its fixed request, outside its system message', async () => {
     const judge = installFakeModel(() => judgment(true, 'shown'));
-    const fixtures = runtime({ agents: { default: { model: judge } } }, undefined, ['billing', 'upgrades the plan']);
-    await fixtures.agent.assert('the plan is upgraded');
-    expect(fakeCalls[0]!.prompt).toMatch(/^Test: billing > upgrades the plan\n\n/u);
+    const config = { agents: { default: { model: judge } } };
+    await runtime(config, undefined, ['billing', 'upgrades the plan']).agent.assert('the plan is upgraded');
+    await runtime(config, undefined, ['billing', 'downgrades the plan']).agent.assert('the plan is downgraded');
+    const [first, second] = [fakeCalls[0]!.prompt, fakeCalls[1]!.prompt];
+    expect(first).toMatch(/\n\nTest: billing > upgrades the plan\n\n<instruction>\n/u);
+    // Two tests share every line before their titles, so a provider can cache them.
+    expect(first.slice(0, first.indexOf('Test:'))).toBe(second.slice(0, second.indexOf('Test:')));
+    expect(first.indexOf('Test:')).toBeGreaterThan(1000);
     expect(fakeCalls[0]!.system).not.toContain('Test:');
   });
 

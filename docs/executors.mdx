@@ -77,7 +77,10 @@ history and retries once if that makes the request smaller, else fails with
 `CONTEXT_OVERFLOW`; `inconclusiveOnOverflow: true` fails the step with
 `ASSERTION_INCONCLUSIVE` instead, for an assertion loop whose earlier screens
 are evidence. `guard()` stops new tool calls when the step is
-concluding and returns a failure to the model as text. `ctx.actions`
+concluding and returns a failure to the model as text. A `complete_step`
+sent in the same turn as other calls waits for the calls before it, and is
+refused when one of them failed or the last one reported no change; calls
+after it don't run. `ctx.actions`
 authorizes, counts, and records each action, so these steps replay from the
 [cache](/cache) and run on any engine that supports `tap`.
 
@@ -150,6 +153,7 @@ export default {
 | --- | --- |
 | `ctx.step` | The `kind`, instruction, params, and `index` in the attempt's timeline. A configured secret's value in the instruction or a param reads `<secret:name>`. A `secrets.get()` handle arrives as a name-only placeholder that `typeSecret` fills |
 | `ctx.observe({ tree, pixels })` | Redacted screen text, with an optional node tree and masked screenshot |
+| `ctx.read({ id }, { style })` | Secret-redacted computed styles of a currently listed node. See [Project tools](/tools#read-a-nodes-computed-style) |
 | `ctx.actions` | Checked and recorded actions: `tap`, `doubleTap`, `longPress`, `secondaryTap`, `hover`, `type`, `typeSecret`, `press`, `select`, `check`, `drag`, `scrollTo`, `scrollUntil`, `upload`, `scroll`, `navigate`, `back`, `resize`, `switchTab`, `closeTab`, and the point and keyboard actions below |
 | `ctx.target` | The target's `name`, `platform`, and `verbs`, the actions its engine supports. Offer only these to the model. `tapModifiers` is true when `tap`, `doubleTap`, and `secondaryTap` take `{ modifiers }` |
 | `ctx.signal` | Aborts on cancellation, at the step deadline, or on any other hard stop. The deadline can't stop work that ignores it |
@@ -231,8 +235,8 @@ executor keeps its entries.
 
 On the web engine, `surfaceOf(handle)` from `@e2e-dev/web` gives you the
 current attempt's `Page` and `BrowserContext`. Both accessors throw
-`INVALID_STATE` outside an active attempt, and `page()` also when no page is
-open.
+`INVALID_STATE` outside an active attempt or on a handle no target runs on,
+and `page()` also when no page is open.
 
 ```ts
 import type { E2EConfig, StepExecutor } from 'e2e';
@@ -261,6 +265,27 @@ export default {
 Direct Playwright calls skip action authorization and the replay cache,
 and leave no artifacts. The step deadline and the verdict record still
 apply.
+
+## Provider keys
+
+The run redacts the [provider keys](/reference/security#provider-keys) it
+finds in the environment from whatever an executor returns. Four functions
+from `e2e/agent` cover the rest:
+
+| Function | Use |
+| --- | --- |
+| `registerProviderKey(name, value)` | A key your agent signs in with that no listed variable holds, such as one it reads from its own login file. Shows as `<secret:name>` from then on. `name` takes letters, digits, `_`, `.`, and `-`; a value shorter than 20 characters, longer than 8,192, or not a string is left alone. |
+| `registerProviderKeys(env)` | The listed variables of an environment you start an agent with, when it isn't the run's own. |
+| `redactSecrets(text)` | Text you cut short or keep before returning it. Redact first: half a key is no longer a match. |
+| `redactStepText(ctx, text)` | Text you send your agent that the run did not build, such as a prompt with your own `system`: the step's secrets and the provider keys known now, and no value an earlier test learned. Call it right before the text leaves. |
+
+A model built with a key in code can register it in `e2e.config.ts` too:
+
+```ts
+import { registerProviderKey } from 'e2e/agent';
+
+registerProviderKey('llm-key', apiKey);
+```
 
 ## Next
 

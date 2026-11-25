@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { publishAttempt } from '../../src/expect/attempt.ts';
-import { SoftFailures } from '../../src/expect/soft.ts';
-import { serializeError, TestError, type SerializedError } from '../../src/internal/errors.ts';
-import { expectedFailureOption, markRunningTestExpectedToFail, type ExpectedFailureInfo } from '../../src/internal/expected-failure.ts';
+import { publishAttempt } from '@e2e-dev/core/lib/expect/attempt';
+import { SoftFailures } from '@e2e-dev/core/lib/expect/soft';
+import { serializeError, TestError, type SerializedError } from '@e2e-dev/core/lib/internal/errors';
+import { expectedFailureOption, markRunningTestExpectedToFail, type ExpectedFailureInfo } from '@e2e-dev/core/lib/internal/expected-failure';
 import { settleExpectedFailure } from '../../src/run/expected-failure.ts';
-import { AttemptBudget } from '../../src/run/budget.ts';
-import { Deadline } from '../../src/internal/time.ts';
+import { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
+import { Deadline } from '@e2e-dev/core/lib/internal/time';
 
 type Attempt = {
   status: 'passed' | 'failed' | 'timed-out' | 'interrupted' | 'skipped';
@@ -79,6 +79,10 @@ describe('settleExpectedFailure', () => {
     const unexpected = settle({ status: 'passed', secondaryErrors: [] }, 'hunter2', (text) => text.replaceAll('hunter2', '[REDACTED]'));
     expect(unexpected.error?.message).not.toContain('hunter2');
     expect(Buffer.byteLength(settle({ status: 'passed', secondaryErrors: [] }, 'x'.repeat(9000)).expectedFailure!.reason)).toBe(8192);
+  });
+
+  it('keeps a \\r\\n line break in the reason and replaces a lone carriage return', () => {
+    expect(settle({ status: 'failed', error: failure('test'), secondaryErrors: [] }, 'known\r\ngap\rhere').expectedFailure?.reason).toBe('known\r\ngap\uFFFDhere');
   });
 
   it('lets a skip win, also beside a failure', () => {

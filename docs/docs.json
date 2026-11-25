@@ -74,7 +74,15 @@
             "pages": [
               "web",
               "mobile",
-              "api-testing"
+              "desktop",
+              "api-testing",
+              "core"
+            ]
+          },
+          {
+            "group": "Frameworks",
+            "pages": [
+              "frameworks/nextjs"
             ]
           },
           {
@@ -100,6 +108,7 @@
             "group": "Run in CI",
             "pages": [
               "ci/github-actions",
+              "ci/vercel-previews",
               "ci/gitlab",
               "ci/eas-workflows",
               "ci/bitrise",
@@ -113,13 +122,17 @@
             "pages": [
               "integrations/index",
               "integrations/kernel",
+              "integrations/browser-run",
+              "integrations/notte",
               "integrations/lightpanda",
+              "integrations/moli",
               "integrations/eas",
               "integrations/smol",
               "integrations/limrun",
               "integrations/testmu",
               "integrations/browserstack",
-              "integrations/e2b"
+              "integrations/e2b",
+              "integrations/revyl"
             ]
           },
           {
@@ -178,7 +191,9 @@
               "reference/expect",
               "reference/screen",
               "reference/app",
-              "reference/agent"
+              "reference/request",
+              "reference/agent",
+              "reference/core"
             ]
           },
           {

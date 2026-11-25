@@ -1,6 +1,6 @@
 {
   "name": "e2e",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "description": "SDK, runner, and CLI for agentic end-to-end testing",
   "mcpName": "io.github.e2e-inc/e2e",
   "keywords": [
@@ -21,8 +21,8 @@
   ],
   "license": "Apache-2.0",
   "contributors": [
-    "Oskar Kwaśniewski <oskar@tester.army>",
-    "Szymon Rybczak <szymon@tester.army>"
+    "Oskar Kwaśniewski <oskar@e2e.com>",
+    "Szymon Rybczak <szymon@e2e.com>"
   ],
   "repository": {
     "type": "git",
@@ -32,7 +32,7 @@
   "bugs": {
     "url": "https://github.com/e2e-inc/e2e/issues"
   },
-  "homepage": "https://github.com/e2e-inc/e2e#readme",
+  "homepage": "https://e2e.com",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public",
@@ -56,6 +56,10 @@
       "types": "./dist/runner.d.ts",
       "default": "./dist/runner.js"
     },
+    "./reporters": {
+      "types": "./dist/reporters.d.ts",
+      "default": "./dist/reporters.js"
+    },
     "./oauth/chatgpt": {
       "types": "./dist/oauth/chatgpt.d.ts",
       "default": "./dist/oauth/chatgpt.js"
@@ -73,6 +77,12 @@
       "default": "./dist/oauth/opencode-console.js"
     }
   },
+  "imports": {
+    "#e2e-node-addons": {
+      "node-addons": "fs",
+      "default": "path"
+    }
+  },
   "bin": {
     "e2e": "./dist/cli/bin.js"
   },
@@ -80,6 +90,7 @@
     "dist",
     "docs",
     "schema/*.schema.json",
+    "templates",
     "skills",
     "NOTICE"
   ],
@@ -92,20 +103,21 @@
     "test:unit": "vitest run tests/unit"
   },
   "dependencies": {
-    "@ai-sdk/provider": "4.0.37",
+    "@ai-sdk/provider": "4.0.39",
     "@clack/prompts": "1.9.0",
+    "@e2e-dev/core": "workspace:*",
     "@jridgewell/remapping": "2.3.5",
     "@modelcontextprotocol/server": "2.4.0",
-    "@napi-rs/image": "1.16.0",
-    "@oxc-project/runtime": "0.158.0",
-    "@vitest/expect": "5.1.0",
+    "@oxc-project/runtime": "0.160.0",
+    "@vitest/expect": "5.1.1",
     "commander": "15.1.0",
+    "exsolve": "1.2.0",
     "get-tsconfig": "4.14.3",
-    "oxc-parser": "0.158.0",
-    "oxc-transform": "0.158.0",
+    "oxc-parser": "0.160.0",
+    "oxc-transform": "0.160.0",
     "picocolors": "1.1.1",
-    "pixelmatch": "8.0.0",
     "toml-eslint-parser": "1.0.3",
+    "yaml": "2.9.1",
     "zod": "4.6.7"
   },
   "peerDependencies": {
@@ -137,20 +149,21 @@
     }
   },
   "devDependencies": {
-    "@ai-sdk/anthropic": "4.0.102",
-    "@ai-sdk/google": "4.0.118",
-    "@ai-sdk/openai": "4.0.115",
-    "@ai-sdk/openai-compatible": "3.0.90",
-    "@ai-sdk/xai": "5.0.43",
+    "@ai-sdk/anthropic": "4.0.107",
+    "@ai-sdk/google": "4.0.125",
+    "@ai-sdk/openai": "4.0.122",
+    "@ai-sdk/openai-compatible": "3.0.94",
+    "@ai-sdk/xai": "5.0.49",
     "@e2e-dev/web": "workspace:*",
     "@modelcontextprotocol/client": "2.4.0",
+    "@napi-rs/image": "1.16.0",
     "@openrouter/ai-sdk-provider": "3.1.0",
     "@types/node": "26.6.6",
-    "ai": "7.0.170",
+    "ai": "7.0.181",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "typescript": "7.0.2",
-    "vitest": "5.1.0"
+    "vitest": "5.1.1"
   },
   "engines": {
     "node": "^22.22.3 || >=24.8.0"

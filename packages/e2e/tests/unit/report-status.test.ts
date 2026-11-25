@@ -5,12 +5,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { resolveConfig, type ResolvedConfig, type ResolvedTarget } from '../../src/config/resolve.ts';
-import type { SerializedError } from '../../src/internal/errors.ts';
-import { uuidv7 } from '../../src/internal/ids.ts';
+import { type ResolvedConfig, type ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
+import { resolveConfig } from '../../src/config/resolve-run.ts';
+import type { SerializedError } from '@e2e-dev/core/lib/internal/errors';
+import { uuidv7 } from '@e2e-dev/core/lib/internal/ids';
 import { buildReport, type BuildReportOptions } from '../../src/report/build.ts';
-import type { AttemptRecord, ResultRecord, SerialAttemptRecord, SerialGroupRecord } from '../../src/run/records.ts';
-import type { StepRecord } from '../../src/run/steps.ts';
+import type { AttemptRecord, ResultRecord, SerialAttemptRecord, SerialGroupRecord } from '@e2e-dev/core/lib/run/records';
+import type { StepRecord } from '@e2e-dev/core/lib/run/steps';
 import { assertValidReport } from '../helpers/report-schema.ts';
 
 const AT = '2026-01-01T00:00:00.000Z';
@@ -100,6 +101,27 @@ function build(overrides: Partial<BuildReportOptions>): ReturnType<typeof buildR
   assertValidReport(document);
   return document;
 }
+
+describe('step labels', () => {
+  const withLabel = (label: string): ResultRecord => {
+    const result = failedResult(productFailure);
+    const step: StepRecord = { id: uuidv7(), index: 0, kind: 'resource', api: 'request.get', label, status: 'passed', startedAt: AT, durationMs: 1, events: [], artifacts: [] };
+    return { ...result, attempts: [{ ...result.attempts[0]!, steps: [step] }] };
+  };
+  const reportedLabel = (label: string): string => build({ results: [withLabel(label)] }).run.results[0]!.attempts[0]!.steps[0]!.label;
+
+  it('keeps a label of 8192 code points whole, though a character outside the BMP takes two UTF-16 units', () => {
+    const label = `${'x'.repeat(8191)}😀`;
+    expect(label).toHaveLength(8193);
+    expect(reportedLabel(label)).toBe(label);
+  });
+
+  it('cuts a longer label to 8192 code points, the last an ellipsis', () => {
+    const cut = reportedLabel(`${'😀'.repeat(8193)}`);
+    expect([...cut]).toHaveLength(8192);
+    expect(cut.endsWith('😀…')).toBe(true);
+  });
+});
 
 describe('result tags', () => {
   it('carries the tags a test declares, an empty list when it declares none', () => {

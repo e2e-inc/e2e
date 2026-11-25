@@ -5,7 +5,7 @@ import { stripVTControlCharacters } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ListOptions, ListedPair } from '../../src/runner.ts';
 import type { RunOptions } from '../../src/run/runner.ts';
-import { ConfigurationError } from '../../src/internal/errors.ts';
+import { ConfigurationError } from '@e2e-dev/core/lib/internal/errors';
 import { SAMPLE_REPORT_SECRETS, sampleReport } from '../helpers/sample-report.ts';
 
 const runMock = vi.hoisted(() => vi.fn());
@@ -348,7 +348,8 @@ describe('e2e run argument parsing', () => {
       await invoke('run', '--step');
       const options = lastRunOptions();
       expect(options.workers).toBe(1);
-      expect(options.beforeStep).toBeTypeOf('function');
+      expect(options.hold?.ask).toBeTypeOf('function');
+      expect(options.hold?.steps).toBe(true);
     } finally {
       process.stdin.isTTY = tty.stdin;
       process.stdout.isTTY = tty.stdout;
@@ -357,20 +358,15 @@ describe('e2e run argument parsing', () => {
     }
   });
 
-  it('refuses --step in CI and without a terminal, exit code 2, without running', async () => {
+  it('refuses --step in CI, beside --workers and --watch, and beside the json reporter without a terminal, exit code 2, without running', async () => {
     const ci = process.env.CI;
-    const tty = { stdin: process.stdin.isTTY, stdout: process.stdout.isTTY };
+    const tty = { stdin: process.stdin.isTTY, stdout: process.stdout.isTTY, stderr: process.stderr.isTTY };
     try {
       process.env.CI = '1';
       await invoke('run', '--step');
       expect(process.exitCode).toBe(2);
-      expect(written(stderrSpy)).toContain('--step waits for a key at every step, so it is refused in CI');
+      expect(written(stderrSpy)).toContain('--step waits at every step, so it is refused in CI');
       delete process.env.CI;
-      process.exitCode = undefined;
-      process.stdin.isTTY = false;
-      await invoke('run', '--step');
-      expect(process.exitCode).toBe(2);
-      expect(written(stderrSpy)).toContain('stdin and stdout must both be one');
       process.exitCode = undefined;
       process.stdin.isTTY = true;
       process.stdout.isTTY = true;
@@ -381,13 +377,17 @@ describe('e2e run argument parsing', () => {
       await invoke('run', '--step', '--watch');
       expect(process.exitCode).toBe(2);
       expect(written(stderrSpy)).toContain('cannot be combined with --watch');
+      // Beside the json reporter it needs a terminal, on stderr too, where the prompt is.
       process.exitCode = undefined;
+      process.stderr.isTTY = false;
       await invoke('run', '--step', '--reporter', 'json');
       expect(process.exitCode).toBe(2);
-      expect(written(stderrSpy)).toContain('--step cannot be combined with --reporter json');
+      expect(written(stderrSpy)).toContain('--step cannot be combined with --reporter json without a terminal on stdin, stdout, and stderr');
+      process.exitCode = undefined;
     } finally {
       process.stdin.isTTY = tty.stdin;
       process.stdout.isTTY = tty.stdout;
+      process.stderr.isTTY = tty.stderr;
       if (ci === undefined) delete process.env.CI;
       else process.env.CI = ci;
     }
@@ -438,6 +438,25 @@ describe('e2e run argument parsing', () => {
     expect(runMock).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(2);
     expect(written(stderrSpy)).toBe("error: unknown command 'frobnicate'\n(add --help for usage)\n");
+  });
+
+  it('passes --device to the run trimmed, and refuses a blank one with exit code 2', async () => {
+    await invoke('run', '--target', 'ios', '--device', '  iPad Pro 13-inch (M5) ');
+    expect(lastRunOptions().device).toBe('iPad Pro 13-inch (M5)');
+    runMock.mockClear();
+    stderrSpy.mockClear();
+    await invoke('run', '--device', '   ');
+    expect(runMock).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(2);
+    expect(written(stderrSpy)).toContain("option '--device <name>' argument '   ' is invalid. must name a simulator, emulator, or phone");
+  });
+
+  it('passes --fully-parallel on, and leaves it unset without the flag', async () => {
+    await invoke('run', '--fully-parallel');
+    expect(lastRunOptions().fullyParallel).toBe(true);
+    runMock.mockClear();
+    await invoke('run');
+    expect(lastRunOptions().fullyParallel).toBeUndefined();
   });
 
   it('parses numeric --retries and --workers', async () => {
@@ -722,6 +741,13 @@ describe('e2e init argument parsing', () => {
     );
   });
 
+  it('reads --example without a name as a request to pick one, and a name as that example', async () => {
+    await invoke('init', 'my-app', '--example');
+    expect(initMock).toHaveBeenLastCalledWith(path.resolve(process.cwd(), 'my-app'), expect.objectContaining({ example: true }));
+    await invoke('init', 'my-app', '--example', 'expo');
+    expect(initMock).toHaveBeenLastCalledWith(path.resolve(process.cwd(), 'my-app'), expect.objectContaining({ example: 'with-expo' }));
+  });
+
   it('reads none as no location, and --no-install as declining the install', async () => {
     await invoke('init', '--engine', 'none', '--gateway', 'none', '--skills', 'none', '--mcp', 'none', '--no-install');
     expect(initMock).toHaveBeenCalledExactlyOnceWith(
@@ -734,6 +760,10 @@ describe('e2e init argument parsing', () => {
     [['--engine', 'playwright'], 'error: --engine: unknown engine "playwright"; expected web, mobile, none'],
     [['--engine', 'web,none'], 'error: --engine: none cannot be combined with other values'],
     [['--gateway', 'anthropic'], 'Allowed choices are vercel, openrouter, openai-compatible, chatgpt, copilot, opencode-console, grok, none.'],
+    [['--example'], 'error: --example without a name asks which example, and --yes skips the prompts; name one of with-vite'],
+    [['--example', 'my-app'], 'unknown example "my-app"; expected with-vite'],
+    [['--example', 'my-app'], 'A directory goes before --example'],
+    [['--example', 'vite', '--engine', 'web'], 'error: an example brings its own e2e.config.ts; drop --engine'],
     [['--skills', '.cursor/skills'], 'error: --skills: unknown skill directory ".cursor/skills"; expected .agents/skills, .claude/skills, none'],
     [['--skills', ''], 'must name at least one skill directory'],
     [['--mcp', 'claude'], 'error: --mcp: unknown MCP config file "claude"; expected .mcp.json, .cursor/mcp.json, .codex/config.toml, none'],
@@ -888,8 +918,10 @@ describe('e2e --version and --help', () => {
       '--shard',
       '--pass-with-no-tests',
       '--headed',
+      '--device',
       '--agent',
       '--workers',
+      '--fully-parallel',
       '--retries',
       '--action-timeout',
       '--assertion-timeout',
@@ -1152,6 +1184,25 @@ describe('e2e upgrade argument parsing', () => {
     expect(upgradeMock).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(2);
     expect(written(stderrSpy)).toContain("error: command-argument value '^0.22.0' is invalid for argument 'version'. must be a version such as 0.22.0 or a dist-tag");
+  });
+});
+
+describe('e2e logout argument parsing', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each(['spacexsi', 'spacexai', 'grok'])('takes %s for the SpaceXSI login', async (provider) => {
+    vi.stubEnv('E2E_OAUTH_CREDENTIALS', '{}');
+    await invoke('logout', provider);
+    expect(process.exitCode).toBe(0);
+    expect(written(stdoutSpy)).toContain('No SpaceXSI login was stored.');
+  });
+
+  it('rejects an unknown provider with exit code 2, naming the ids and their aliases', async () => {
+    await invoke('logout', 'xai');
+    expect(process.exitCode).toBe(2);
+    expect(written(stderrSpy)).toContain('Allowed choices are openai, github-copilot, opencode-console, spacexsi, spacexai, grok.');
   });
 });
 

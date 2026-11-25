@@ -1,5 +1,7 @@
+import { stripVTControlCharacters } from 'node:util';
 import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -16,6 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import * as clack from '@clack/prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parse as parseYaml } from 'yaml';
 import { init } from '../../src/cli/init.ts';
 import { planSkillInstall } from '../../src/cli/init/agent-skill.ts';
 import { dependencyRange } from '../../src/cli/init/versions.ts';
@@ -24,6 +27,10 @@ import { readSkillFiles } from '../../src/cli/skill.ts';
 vi.mock('@clack/prompts', { spy: true });
 vi.mock('../../src/cli/skill.ts', { spy: true });
 vi.mock('node:child_process', () => ({ spawnSync: vi.fn() }));
+
+/** The spec `init` writes for the runner the tests run, which an existing project on this release declares. */
+const RUNNER_VERSION = (JSON.parse(readFileSync(path.resolve(import.meta.dirname, '../../package.json'), 'utf8')) as { version: string }).version;
+const RUNNER_RANGE = dependencyRange(RUNNER_VERSION);
 
 let dir: string;
 let stdoutSpy: ReturnType<typeof vi.spyOn>;
@@ -47,6 +54,14 @@ const symlinks = ((): boolean => {
 /** Captures user-facing output without ANSI formatting. */
 function output(): string {
   return stdoutSpy.mock.calls.map((call: readonly unknown[]) => String(call[0])).join('');
+}
+
+/** Installs a stand-in for package `name` in the throwaway project, whose ESM entry is `source`. */
+function stubPackage(name: string, source: string): void {
+  const root = path.join(dir, 'node_modules', ...name.split('/'));
+  mkdirSync(root, { recursive: true });
+  writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name, type: 'module', exports: './index.js' }));
+  writeFileSync(path.join(root, 'index.js'), source);
 }
 
 /** Reads one file from the throwaway project. */
@@ -96,11 +111,10 @@ describe('e2e init', () => {
   it('adds the runner, Playwright, and AI with --yes and does not install or prompt', async () => {
     expect((await init(dir, { yes: true })).exitCode).toBe(0);
     // The runner pins itself the way it pins engines: a caret on a stable version, exact on a canary.
-    const runnerVersion = (JSON.parse(readFileSync(path.resolve(import.meta.dirname, '../../package.json'), 'utf8')) as { version: string }).version;
     expect(JSON.parse(read('package.json'))).toEqual({
       private: true,
       type: 'module',
-      devDependencies: { 'e2e': dependencyRange(runnerVersion), '@e2e-dev/web': '0.x', ai: '^7.0.0', zod: '^4.1.8' },
+      devDependencies: { 'e2e': RUNNER_RANGE, '@e2e-dev/web': '0.x', '@e2e-dev/core': '0.x', ai: '^7.0.0', zod: '^4.1.8' },
       scripts: { 'test:e2e': 'e2e run' },
     });
     expect(read('e2e.config.ts')).toContain('agents: {\n    default: {\n      model: ');
@@ -136,6 +150,8 @@ describe('e2e init', () => {
     expect(output()).toContain('Add scripts: test:e2e (e2e run)');
     expect(output()).toContain('No tsconfig.json');
     expect(output()).toContain('Next: npm install, then APP_URL=http://localhost:3000 npm run test:e2e');
+    // Off a terminal, as when an agent runs init, there is no star strip.
+    expect(output()).not.toContain('Star e2e on GitHub');
   });
 
   it('registers the MCP server through bunx in a Bun project', async () => {
@@ -157,6 +173,7 @@ describe('e2e init', () => {
       gateway: 'vercel',
       skill: true,
       mcp: true,
+      ci: 'none',
       install: false,
     });
     expect(await init(dir, { yes: true })).toMatchObject({
@@ -185,6 +202,7 @@ describe('e2e init', () => {
       gateway: 'none',
       skill: true,
       mcp: false,
+      ci: null,
       install: false,
     });
 
@@ -223,6 +241,7 @@ describe('e2e init', () => {
       'e2e',
       ...(engine === 'web' ? ['@e2e-dev/web'] : []),
       ...(device ? ['@e2e-dev/mobile'] : []),
+      ...(engine === 'web' || device ? ['@e2e-dev/core'] : []),
       ...(ai ? ['ai', 'zod', '@openrouter/ai-sdk-provider'] : []),
     ]);
     expect(manifest.devDependencies.ai).toBe(ai ? '^7.0.0' : undefined);
@@ -251,7 +270,7 @@ describe('e2e init', () => {
     vi.mocked(clack.select).mockResolvedValueOnce('none');
     vi.mocked(clack.confirm).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
 
-    expect((await init(dir)).exitCode).toBe(0);
+    expect((await init(dir, { ci: 'none' })).exitCode).toBe(0);
     expect(clack.select).toHaveBeenCalledTimes(1);
     expect(clack.multiselect).toHaveBeenCalledWith(expect.objectContaining({
       message: expect.stringContaining('Which engines?'),
@@ -273,7 +292,7 @@ describe('e2e init', () => {
     vi.mocked(clack.confirm).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
 
     expect(await init(dir)).toMatchObject({ exitCode: 0, engine: 'web,mobile' });
-    expect(Object.keys(JSON.parse(read('package.json')).devDependencies)).toEqual(['e2e', '@e2e-dev/web', '@e2e-dev/mobile', 'ai', 'zod']);
+    expect(Object.keys(JSON.parse(read('package.json')).devDependencies)).toEqual(['e2e', '@e2e-dev/web', '@e2e-dev/mobile', '@e2e-dev/core', 'ai', 'zod']);
     expect(read('e2e.config.ts')).toContain("import { web } from '@e2e-dev/web';\nimport { mobile } from '@e2e-dev/mobile';\n");
     expect(read('e2e.config.ts')).toContain(`  targets: [
     {
@@ -290,10 +309,10 @@ describe('e2e init', () => {
   workers: 1,
 }`);
     expect(existsSync(path.join(dir, 'tests/example.e2e.ts'))).toBe(false);
-    expect(read('tests/web.e2e.ts')).toContain("test('app opens', { requires: ['browser'] }, async ({ app, browser }) => {");
-    expect(read('tests/web.e2e.ts')).toContain("// test('the agent drives a flow', { requires: ['browser'] }, async ({ app, agent }) => {");
-    expect(read('tests/mobile.e2e.ts')).toContain("test('Settings opens', { requires: ['device'] }, async ({ app, screen }) => {");
-    expect(read('tests/mobile.e2e.ts')).toContain("// test('the agent opens General', { requires: ['device'] }, async ({ agent, app, device }) => {");
+    expect(read('tests/web.e2e.ts')).toContain("test('app opens', { platforms: ['web'] }, async ({ app, browser }) => {");
+    expect(read('tests/web.e2e.ts')).toContain("// test('the agent drives a flow', { platforms: ['web'] }, async ({ app, agent }) => {");
+    expect(read('tests/mobile.e2e.ts')).toContain("test('Settings opens', { platforms: ['ios'] }, async ({ app, screen }) => {");
+    expect(read('tests/mobile.e2e.ts')).toContain("// test('the agent opens General', { platforms: ['ios'] }, async ({ agent, app, device }) => {");
     expect(output()).toContain('  - Create tests/web.e2e.ts\n');
     expect(output()).toContain('  - Create tests/mobile.e2e.ts\n');
     expect(output()).toContain('Next: npm install, then APP_URL=http://localhost:3000 npm run test:e2e');
@@ -305,19 +324,19 @@ describe('e2e init', () => {
     vi.mocked(clack.text).mockResolvedValueOnce(' http://127.0.0.1:11434/v1 ');
     vi.mocked(clack.confirm).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
 
-    expect((await init(dir)).exitCode).toBe(0);
+    expect((await init(dir, { ci: 'none' })).exitCode).toBe(0);
     expect(clack.select).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      message: expect.stringContaining('Which model gateway'),
+      message: expect.stringContaining('Which model for agent steps?'),
       initialValue: 'vercel',
       options: [
         expect.objectContaining({ value: 'vercel', label: 'Vercel AI Gateway' }),
         expect.objectContaining({ value: 'openrouter' }),
-        expect.objectContaining({ value: 'openai-compatible' }),
+        expect.objectContaining({ value: 'openai-compatible', label: 'OpenAI-compatible / local endpoint' }),
         expect.objectContaining({ value: 'chatgpt' }),
         expect.objectContaining({ value: 'copilot' }),
         expect.objectContaining({ value: 'opencode-console' }),
         expect.objectContaining({ value: 'grok' }),
-        expect.objectContaining({ value: 'none' }),
+        expect.objectContaining({ value: 'none', label: 'Skip for now' }),
       ],
     }));
     expect(clack.text).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ placeholder: 'http://127.0.0.1:11434/v1' }));
@@ -340,7 +359,7 @@ describe('e2e init', () => {
       model: "model: opencodeConsole('deepseek-v4.1-flash'),",
       sdk: ['@ai-sdk/openai-compatible', '@ai-sdk/openai', '@ai-sdk/anthropic', '@ai-sdk/google'],
     },
-    { gateway: 'grok', provider: 'spacexai', line: "import { grok } from 'e2e/oauth/grok';", model: "model: grok('grok-4'),", sdk: ['@ai-sdk/xai'] },
+    { gateway: 'grok', provider: 'spacexsi', line: "import { grok } from 'e2e/oauth/grok';", model: "model: grok('grok-4'),", sdk: ['@ai-sdk/xai'] },
   ] as const)('writes a $gateway subscription model and names the sign-in as the next step', async ({ gateway, provider, line, model, sdk }) => {
     answers.engines = ['web'];
     vi.mocked(clack.select).mockResolvedValueOnce(gateway);
@@ -377,6 +396,7 @@ describe('e2e init', () => {
       gateway: 'openrouter',
       skill: true,
       mcp: true,
+      ci: 'none',
       install: true,
     });
     expect(clack.select).not.toHaveBeenCalled();
@@ -419,13 +439,13 @@ describe('e2e init', () => {
   it('asks only the questions no flag answered', async () => {
     vi.mocked(clack.select).mockResolvedValueOnce('none');
     vi.mocked(clack.confirm).mockResolvedValueOnce(true);
-    expect(await init(dir, { engines: ['web'], skills: ['.claude/skills'], mcp: [], install: false })).toMatchObject({
+    expect(await init(dir, { engines: ['web'], skills: ['.claude/skills'], mcp: [], ci: 'none', install: false })).toMatchObject({
       exitCode: 0,
       engine: 'web',
       gateway: 'none',
       install: false,
     });
-    expect(clack.select).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: expect.stringContaining('Which model gateway') }));
+    expect(clack.select).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: expect.stringContaining('Which model for agent steps?') }));
     expect(clack.multiselect).not.toHaveBeenCalled();
     expect(clack.confirm).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: 'Apply these changes?' }));
     expect(existsSync(path.join(dir, '.claude/skills/e2e/SKILL.md'))).toBe(true);
@@ -451,6 +471,153 @@ describe('e2e init', () => {
       scripts: { 'test:e2e': 'e2e run' },
     });
     expect(read('e2e.config.ts')).toBe('export default {};\n');
+  });
+
+  it('adds the packages an existing config imports and package.json lacks, at the ranges a new scaffold writes', async () => {
+    writeFileSync(path.join(dir, 'e2e.config.ts'), [
+      "import type { E2EConfig } from 'e2e';",
+      "import { web } from '@e2e-dev/web';",
+      "import { chatgpt } from 'e2e/oauth/chatgpt';",
+      "import 'dotenv/config';",
+      "import { readFileSync } from 'node:fs';",
+      "import { helper } from './helper.ts';",
+      "import { alias } from '@/lib/alias';",
+      "// import { mobile } from '@e2e-dev/mobile';",
+      "const note = \"import { openrouter } from '@openrouter/ai-sdk-provider';\";",
+      'export default { targets: [{ engine: web() }] } satisfies E2EConfig;',
+      '',
+    ].join('\n'));
+    writeFileSync(path.join(dir, 'package.json'), `${JSON.stringify({ name: 'existing-app', type: 'module', devDependencies: { e2e: RUNNER_RANGE, zod: '^3.0.0' } }, null, 2)}\n`);
+    expect((await init(dir, { yes: true })).exitCode).toBe(0);
+    expect(JSON.parse(read('package.json')).devDependencies).toEqual({
+      e2e: RUNNER_RANGE,
+      zod: '^3.0.0',
+      '@e2e-dev/web': '0.x',
+      '@e2e-dev/core': '0.x',
+      '@ai-sdk/openai': '^4.0.0',
+      ai: '^7.0.0',
+    });
+    expect(output()).toContain('Add dev dependencies: @e2e-dev/web@0.x, @e2e-dev/core@0.x, @ai-sdk/openai@^4.0.0, ai@^7.0.0');
+    expect(output()).not.toContain('dotenv');
+    stdoutSpy.mockClear();
+    expect(await init(dir, { yes: true })).toMatchObject({ exitCode: 0, result: 'already-initialized' });
+  });
+
+  it('reads re-exports and literal dynamic imports of an existing JavaScript config', async () => {
+    writeFileSync(path.join(dir, 'e2e.config.mjs'), [
+      "export { mobile } from '@e2e-dev/mobile/engine';",
+      "const { openrouter } = await import('@openrouter/ai-sdk-provider');",
+      "await import('dotenv/config');",
+      "await import(`@e2e-dev/${'web'}`);",
+      'export default {};',
+      '',
+    ].join('\n'));
+    writeFileSync(path.join(dir, 'package.json'), `${JSON.stringify({ type: 'module', dependencies: { dotenv: '^17.0.0' } })}\n`);
+    expect((await init(dir, { yes: true })).exitCode).toBe(0);
+    expect(JSON.parse(read('package.json')).devDependencies).toEqual({
+      e2e: expect.any(String),
+      '@e2e-dev/mobile': '0.x',
+      '@openrouter/ai-sdk-provider': '^3.0.0',
+      '@e2e-dev/core': '0.x',
+      ai: '^7.0.0',
+      zod: '^4.1.8',
+    });
+  });
+
+  it('adds nothing for an existing config that imports zod alone, the schema library of the project', async () => {
+    writeFileSync(path.join(dir, 'e2e.config.ts'), "import { z } from 'zod';\nexport default {};\n");
+    expect((await init(dir, { yes: true })).exitCode).toBe(0);
+    expect(Object.keys(JSON.parse(read('package.json')).devDependencies)).toEqual(['e2e']);
+  });
+
+  it.each([
+    ['an ai subpath', "import { MockLanguageModelV3 } from 'ai/test';", { ai: '^7.0.0', zod: '^4.1.8' }],
+    ['a provider no gateway preset imports', "import { anthropic } from '@ai-sdk/anthropic';", { '@ai-sdk/anthropic': '^4.0.0', ai: '^7.0.0', zod: '^4.1.8' }],
+  ])('adds ai and zod for an existing config that imports %s', async (_name, line, added) => {
+    writeFileSync(path.join(dir, 'e2e.config.ts'), `${line}\nexport default {};\n`);
+    expect((await init(dir, { yes: true })).exitCode).toBe(0);
+    expect(JSON.parse(read('package.json')).devDependencies).toEqual({ e2e: RUNNER_RANGE, ...added });
+  });
+
+  it('reads a range for a package it knows only, not for a name Object.prototype has', async () => {
+    writeFileSync(path.join(dir, 'e2e.config.ts'), "import x from 'constructor';\nimport y from 'toString/sub';\nexport default { x, y };\n");
+    expect((await init(dir, { yes: true })).exitCode).toBe(0);
+    expect(output()).toContain(`Add dev dependencies: e2e@${RUNNER_RANGE}\n`);
+    expect(Object.keys(JSON.parse(read('package.json')).devDependencies)).toEqual(['e2e']);
+  });
+
+  it('warns that the packages were not checked when the existing config does not parse', async () => {
+    writeFileSync(path.join(dir, 'e2e.config.ts'), "<<<<<<< HEAD\nimport { web } from '@e2e-dev/web';\nexport default { targets: [{ engine: web() }] };\n");
+    expect((await init(dir, { yes: true })).exitCode).toBe(0);
+    expect(output()).toContain('Could not read the imports of e2e.config.ts, so its packages were not checked against package.json: syntax error: ');
+    expect(Object.keys(JSON.parse(read('package.json')).devDependencies)).toEqual(['e2e']);
+  });
+
+  it('takes a specifier tsconfig.json maps to a project file for that file, not for a package', async () => {
+    writeFileSync(path.join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { paths: { 'ai/*': ['./ai/*'], '@e2e-dev/*': ['./engines/*'] } } }));
+    mkdirSync(path.join(dir, 'ai'));
+    writeFileSync(path.join(dir, 'ai/targets.ts'), 'export const targets = [];\n');
+    writeFileSync(path.join(dir, 'e2e.config.ts'), "import { targets } from 'ai/targets';\nimport { web } from '@e2e-dev/web';\nexport default { targets, web };\n");
+    expect((await init(dir, { yes: true })).exitCode).toBe(0);
+    // `@e2e-dev/web` matches a pattern too, but no file is behind it, so the loader leaves it to the package.
+    expect(JSON.parse(read('package.json')).devDependencies).toEqual({ e2e: RUNNER_RANGE, '@e2e-dev/web': '0.x', '@e2e-dev/core': '0.x' });
+  });
+
+  it('leaves the specifiers of a JavaScript config to their packages, whatever tsconfig.json maps', async () => {
+    writeFileSync(path.join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { paths: { 'ai/*': ['./ai/*'] } } }));
+    mkdirSync(path.join(dir, 'ai'));
+    writeFileSync(path.join(dir, 'ai/test.ts'), 'export {};\n');
+    writeFileSync(path.join(dir, 'e2e.config.mjs'), "import 'ai/test';\nexport default {};\n");
+    expect((await init(dir, { yes: true })).exitCode).toBe(0);
+    expect(JSON.parse(read('package.json')).devDependencies).toEqual({ e2e: RUNNER_RANGE, ai: '^7.0.0', zod: '^4.1.8' });
+  });
+
+  it('names the packages an existing config imports, and adds none, when package.json pins another e2e than this one', async () => {
+    writeFileSync(path.join(dir, 'e2e.config.ts'), "import { web } from '@e2e-dev/web';\nimport { gateway } from 'ai';\nexport default { targets: [{ engine: web() }], gateway };\n");
+    const manifest = { type: 'module', scripts: { 'test:e2e': 'e2e run' }, devDependencies: { e2e: '0.0.1' } };
+    writeFileSync(path.join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+    expect((await init(dir, { yes: true, ci: 'github-actions' })).exitCode).toBe(0);
+    expect(JSON.parse(read('package.json'))).toEqual(manifest);
+    expect(output()).toContain(
+      `e2e.config.ts imports @e2e-dev/web, @e2e-dev/core, ai, zod, which package.json lacks. Not added: package.json has e2e@0.0.1 and this is e2e ${RUNNER_VERSION}, whose ranges for them may not fit it. Run npm install, then npm exec -- e2e init, for the project's own e2e to add them, or add them at versions that fit it.`,
+    );
+    // No engine is declared, so there is still no pipeline to write.
+    expect(output()).toContain('Ignoring --ci');
+  });
+
+  it('answers a spec it cannot compare, such as a workspace link, by the e2e under node_modules', async () => {
+    writeFileSync(path.join(dir, 'e2e.config.ts'), "import { web } from '@e2e-dev/web';\nexport default { targets: [{ engine: web() }] };\n");
+    writeFileSync(path.join(dir, 'package.json'), `${JSON.stringify({ type: 'module', devDependencies: { e2e: 'workspace:*' } })}\n`);
+    expect((await init(dir, { yes: true })).exitCode).toBe(0);
+    expect(output()).toContain('Not added: package.json has e2e@workspace:* and this is e2e');
+    expect(Object.keys(JSON.parse(read('package.json')).devDependencies)).toEqual(['e2e']);
+
+    mkdirSync(path.join(dir, 'node_modules/e2e'), { recursive: true });
+    writeFileSync(path.join(dir, 'node_modules/e2e/package.json'), JSON.stringify({ name: 'e2e', version: RUNNER_VERSION }));
+    stdoutSpy.mockClear();
+    expect((await init(dir, { yes: true })).exitCode).toBe(0);
+    expect(output()).not.toContain('Not added');
+    expect(JSON.parse(read('package.json')).devDependencies).toEqual({ e2e: 'workspace:*', '@e2e-dev/web': '0.x', '@e2e-dev/core': '0.x' });
+  });
+
+  it('ends a re-run without the APP_URL of a new scaffold, which an existing config may never read', async () => {
+    expect((await init(dir, { yes: true, engines: ['mobile'] })).exitCode).toBe(0);
+    const manifest = JSON.parse(read('package.json')) as { devDependencies: Record<string, string> };
+    delete manifest.devDependencies['@e2e-dev/mobile'];
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify(manifest));
+    stdoutSpy.mockClear();
+    expect((await init(dir, { yes: true })).exitCode).toBe(0);
+    expect(output()).toContain('Add dev dependencies: @e2e-dev/mobile@0.x');
+    expect(output()).toContain('Next: npm install, then npm run test:e2e');
+    expect(output()).not.toContain('APP_URL');
+  });
+
+  it('writes no example test beside an existing config, so a deleted one stays deleted', async () => {
+    expect((await init(dir, { yes: true })).exitCode).toBe(0);
+    rmSync(path.join(dir, 'tests'), { recursive: true });
+    stdoutSpy.mockClear();
+    expect(await init(dir, { yes: true })).toMatchObject({ exitCode: 0, result: 'already-initialized' });
+    expect(existsSync(path.join(dir, 'tests'))).toBe(false);
   });
 
   it('installs the skill exactly where --skills says on a re-run, leaving earlier locations untouched', async () => {
@@ -495,7 +662,7 @@ describe('e2e init', () => {
     });
 
     expect((await init(dir)).exitCode).toBe(0);
-    expect(clack.select).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('AI SDK v7'), initialValue: 'vercel' }));
+    expect(clack.select).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('No API key needed during setup'), initialValue: 'vercel' }));
     expect(clack.confirm).toHaveBeenCalledWith(expect.objectContaining({ message: 'Install dependencies with npm?' }));
     expect(spawnSync).toHaveBeenCalledExactlyOnceWith('npm', ['install'], {
       cwd: dir, stdio: 'inherit', shell: process.platform === 'win32',
@@ -555,14 +722,55 @@ describe('e2e init', () => {
     });
   });
 
-  it.each(['engine', 'gateway', 'endpoint', 'skill', 'mcp', 'files', 'install'])('leaves the directory untouched when cancelling at %s', async (stage) => {
+  describe('on a terminal', () => {
+    let tty: PropertyDescriptor | undefined;
+
+    beforeEach(() => {
+      tty = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
+      Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+      vi.stubEnv('CI', undefined);
+    });
+
+    afterEach(() => {
+      if (tty === undefined) delete (process.stdout as { isTTY?: boolean }).isTTY;
+      else Object.defineProperty(process.stdout, 'isTTY', tty);
+    });
+
+    it('ends with the star strip, and not in CI', async () => {
+      await init(dir, { yes: true });
+      expect(stripVTControlCharacters(output())).toMatch(/Next: [^\n]*\n[\s\S]*★ {2}You're all set! {2}Star e2e on GitHub → github\.com\/e2e-inc\/e2e/u);
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(dir);
+      stdoutSpy.mockClear();
+      vi.stubEnv('CI', 'true');
+      await init(dir, { yes: true });
+      expect(output()).toContain('Next: ');
+      expect(output()).not.toContain('Star e2e on GitHub');
+    });
+
+    it.skipIf(process.platform === 'win32')('leaves the strip out when the command init was started for begins right away', async () => {
+      vi.stubEnv('AI_GATEWAY_API_KEY', 'key');
+      vi.stubEnv('APP_URL', undefined);
+      answers.engines = ['web'];
+      vi.mocked(clack.select).mockResolvedValueOnce('vercel');
+      vi.mocked(clack.confirm).mockResolvedValueOnce(true).mockResolvedValueOnce(true);
+      vi.mocked(spawnSync).mockReturnValueOnce(spawnResult(0));
+      expect(await init(dir, { continueWith: ['e2e', 'explore', 'Check out'] })).toMatchObject({ ready: true });
+      expect(output()).toContain('Starting ');
+      expect(output()).not.toContain('Star e2e on GitHub');
+    });
+  });
+
+  it.each(['engine', 'gateway', 'endpoint', 'skill', 'mcp', 'ci', 'files', 'install'])('leaves the directory untouched when cancelling at %s', async (stage) => {
     const cancel: typeof clack.CANCEL_SYMBOL = clack.CANCEL_SYMBOL;
     answers = {
       engines: stage === 'engine' ? cancel : ['web', 'mobile'],
       skills: stage === 'skill' ? cancel : ['.agents/skills'],
       mcp: stage === 'mcp' ? cancel : ['.mcp.json'],
     };
-    vi.mocked(clack.select).mockResolvedValueOnce(stage === 'gateway' ? cancel : 'openai-compatible');
+    vi.mocked(clack.select)
+      .mockResolvedValueOnce(stage === 'gateway' ? cancel : 'openai-compatible')
+      .mockResolvedValueOnce(stage === 'ci' ? cancel : 'github-actions');
     vi.mocked(clack.text).mockResolvedValueOnce(stage === 'endpoint' ? cancel : 'http://127.0.0.1:11434/v1');
     vi.mocked(clack.confirm)
       .mockResolvedValueOnce(stage !== 'files')
@@ -578,7 +786,7 @@ describe('e2e init', () => {
     async (type) => {
       const manifest = `${JSON.stringify({
         name: 'existing-app', type, scripts: { 'test:e2e': 'e2e run --workers 1' },
-        dependencies: { 'e2e': 'workspace:*', '@e2e-dev/web': 'workspace:*', ai: '^7.0.12', zod: '^4.0.0' },
+        dependencies: { 'e2e': 'workspace:*', '@e2e-dev/web': 'workspace:*', '@e2e-dev/core': 'workspace:*', ai: '^7.0.12', zod: '^4.0.0' },
       }, null, 4)}\n`;
       writeFileSync(path.join(dir, 'package.json'), manifest);
       for (let run = 0; run < 2; run += 1) {
@@ -618,12 +826,12 @@ describe('e2e init', () => {
     expect(JSON.parse(read('package.json'))).toEqual({
       ...manifest,
       scripts: { dev: 'vite', 'test:e2e': 'e2e run' },
-      devDependencies: { ...manifest.devDependencies, 'e2e': expect.any(String), zod: '^4.1.8' },
+      devDependencies: { ...manifest.devDependencies, 'e2e': expect.any(String), '@e2e-dev/core': '0.x', zod: '^4.1.8' },
     });
     expect(read('package.json')).toContain('\r\n    "name"');
     const written = JSON.parse(read('package.json'));
     expect(Object.keys(written)).toEqual(Object.keys(manifest));
-    expect(Object.keys(written.devDependencies)).toEqual(['@e2e-dev/web', 'e2e', 'vite', 'zod']);
+    expect(Object.keys(written.devDependencies)).toEqual(['@e2e-dev/core', '@e2e-dev/web', 'e2e', 'vite', 'zod']);
     expect(Object.keys(written.scripts)).toEqual(['dev', 'test:e2e']);
   });
 
@@ -717,10 +925,8 @@ describe('e2e init', () => {
     expect(Object.keys(JSON.parse(read('package.json')).devDependencies)).toEqual(['e2e']);
     expect(JSON.parse(read('package.json')).scripts).toEqual({ 'test:e2e': 'e2e run' });
     if (config !== 'e2e.config.ts') expect(existsSync(path.join(dir, 'e2e.config.ts'))).toBe(false);
-    const javascript = config.endsWith('js');
-    expect(existsSync(path.join(dir, 'tests/example.e2e.js'))).toBe(javascript);
-    expect(existsSync(path.join(dir, 'tests/example.e2e.ts'))).toBe(!javascript);
-    expect(output().includes('No tsconfig.json')).toBe(!javascript);
+    expect(existsSync(path.join(dir, 'tests'))).toBe(false);
+    expect(output().includes('No tsconfig.json')).toBe(!config.endsWith('js'));
   });
 
   it('reconciles new .gitignore entries without replacing existing source files', async () => {
@@ -732,7 +938,7 @@ describe('e2e init', () => {
     await init(dir, { yes: true });
     expect(read('e2e.config.ts')).toBe('// custom config\n');
     expect(read('tests/example.e2e.ts')).toBe('// custom test\n');
-    expect(read('.gitignore')).toBe(`${older}.e2e/results/\n.e2e/ai-trace.json\n.e2e/timings.json\n.e2e/junit.xml\n.e2e/summary.md\n.e2e/logs/\n.e2e/videos/\n`);
+    expect(read('.gitignore')).toBe(`${older}.e2e/results/\n.e2e/ai-trace.json\n.e2e/timings.json\n.e2e/junit.xml\n.e2e/summary.md\n.e2e/ctrf.json\n.e2e/logs/\n.e2e/videos/\n`);
     expect(output()).not.toContain('commit-the-replay-cache');
   });
 
@@ -766,6 +972,74 @@ describe('e2e init', () => {
     expect(existsSync(path.join(dir, '.agents/skills'))).toBe(false);
     expect(clack.multiselect).toHaveBeenCalledTimes(3);
     expect(output()).toContain('Updated .claude/skills/e2e/');
+  });
+
+  it('points AGENTS.md and CLAUDE.md at the installed skill, once', async () => {
+    writeFileSync(path.join(dir, 'AGENTS.md'), '# Project\n');
+    vi.mocked(clack.confirm).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    expect((await init(dir)).exitCode).toBe(0);
+    expect(output()).toContain('  - Update AGENTS.md');
+    expect(output()).toContain('  - Create CLAUDE.md');
+    expect(output()).toContain('Updated AGENTS.md (e2e skill pointer)');
+    expect(output()).toContain('Created CLAUDE.md (e2e skill pointer)');
+    const agents = '# Project\n\nEnd-to-end tests use e2e; read .agents/skills/e2e/SKILL.md before writing or running one.\n';
+    expect(read('AGENTS.md')).toBe(agents);
+    expect(read('CLAUDE.md')).toBe('End-to-end tests use e2e; read .claude/skills/e2e/SKILL.md before writing or running one.\n');
+
+    stdoutSpy.mockClear();
+    expect((await init(dir, { yes: true })).exitCode).toBe(0);
+    expect(output()).toContain('Nothing to create; project already initialized');
+    expect(read('AGENTS.md')).toBe(agents);
+  });
+
+  it('adds the pointer on a re-run of a project whose skill is current', async () => {
+    writeCopy('.claude/skills');
+    expect((await init(dir, { yes: true, mcp: [] })).exitCode).toBe(0);
+    expect(existsSync(path.join(dir, 'CLAUDE.md'))).toBe(true);
+    rmSync(path.join(dir, 'CLAUDE.md'));
+    stdoutSpy.mockClear();
+    expect((await init(dir, { yes: true, mcp: [] })).exitCode).toBe(0);
+    expect(existsSync(path.join(dir, 'CLAUDE.md'))).toBe(true);
+    expect(read('CLAUDE.md')).toContain('.claude/skills/e2e/SKILL.md');
+    expect(existsSync(path.join(dir, 'AGENTS.md'))).toBe(false);
+    expect(output()).not.toContain('Nothing to create');
+  });
+
+  it.skipIf(!symlinks)('leaves a symlinked instructions file alone and names it', async () => {
+    writeFileSync(path.join(dir, 'shared.md'), '# Shared\n');
+    symlinkSync('shared.md', path.join(dir, 'AGENTS.md'));
+    expect((await init(dir, { yes: true, skills: ['.agents/skills'], mcp: [] })).exitCode).toBe(0);
+    expect(output()).toMatch(/Symlink, not touching: AGENTS\.md -> .*shared\.md \(e2e skill pointer\)/);
+    expect(read('shared.md')).toBe('# Shared\n');
+    expect(existsSync(path.join(dir, 'CLAUDE.md'))).toBe(false);
+  });
+
+  it('names a directory where an instructions file goes and writes the other file', async () => {
+    mkdirSync(path.join(dir, 'AGENTS.md'));
+    expect((await init(dir, { yes: true, mcp: [] })).exitCode).toBe(0);
+    expect(output()).toContain('Broken, not touching: AGENTS.md (not a file)');
+    expect(lstatSync(path.join(dir, 'AGENTS.md')).isDirectory()).toBe(true);
+    expect(read('CLAUDE.md')).toContain('.claude/skills/e2e/SKILL.md');
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('prints the line for a read-only file and gives it to the file that imports it', async () => {
+    writeFileSync(path.join(dir, 'AGENTS.md'), '# Project\n');
+    writeFileSync(path.join(dir, 'CLAUDE.md'), '@AGENTS.md\n');
+    chmodSync(path.join(dir, 'AGENTS.md'), 0o444);
+    expect((await init(dir, { yes: true, mcp: [] })).exitCode).toBe(0);
+    expect(output()).toMatch(/Could not update AGENTS\.md \(EACCES.*\); add the line: End-to-end tests use e2e; read \.agents\/skills\/e2e\/SKILL\.md before writing or running one\.\n/);
+    expect(output()).toContain('Updated CLAUDE.md (e2e skill pointer)');
+    expect(read('AGENTS.md')).toBe('# Project\n');
+    expect(read('CLAUDE.md')).toBe('@AGENTS.md\n\nEnd-to-end tests use e2e; read .claude/skills/e2e/SKILL.md before writing or running one.\n');
+  });
+
+  it.skipIf(!symlinks)('points CLAUDE.md at a committed skill link on the run that installs its copy', async () => {
+    mkdirSync(path.join(dir, '.claude/skills'), { recursive: true });
+    symlinkSync('../../.agents/skills/e2e', path.join(dir, '.claude/skills/e2e'));
+    expect((await init(dir, { yes: true, mcp: [] })).exitCode).toBe(0);
+    expect(existsSync(path.join(dir, 'CLAUDE.md'))).toBe(true);
+    expect(read('CLAUDE.md')).toContain('.claude/skills/e2e/SKILL.md');
+    expect(read('AGENTS.md')).toContain('.agents/skills/e2e/SKILL.md');
   });
 
   it('repairs a damaged copy without asking and leaves other locations alone', async () => {
@@ -921,6 +1195,8 @@ describe('e2e init', () => {
     expect(lstatSync(path.join(dir, '.agents/skills/e2e/SKILL.md')).isDirectory()).toBe(true);
     expect(read('.agents/skills/e2e/references')).toBe('not a directory\n');
     expect(existsSync(path.join(dir, '.claude'))).toBe(false);
+    expect(existsSync(path.join(dir, 'AGENTS.md'))).toBe(false);
+    expect(existsSync(path.join(dir, 'CLAUDE.md'))).toBe(false);
     expect(read('e2e.config.ts')).toContain('targets:');
     expect(JSON.parse(read('.mcp.json'))).toHaveProperty('mcpServers.e2e');
     expect(clack.confirm).not.toHaveBeenCalled();
@@ -1169,6 +1445,440 @@ describe('e2e init', () => {
       } finally {
         rmSync(elsewhere, { recursive: true, force: true });
       }
+    });
+  });
+
+  describe('in a Next.js app', () => {
+    /** Writes the package.json `create-next-app` writes, with `scripts` in place of its own. */
+    function nextApp(scripts: Record<string, string> = { dev: 'next dev', build: 'next build', start: 'next start' }, extra: object = {}): void {
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
+        name: 'my-app',
+        private: true,
+        scripts,
+        dependencies: { next: '16.4.6', react: '19.3.0', 'react-dom': '19.3.0' },
+        ...extra,
+      }, null, 2));
+    }
+
+    it('starts next dev locally and the production build in CI, and asks for no APP_URL', async () => {
+      nextApp();
+      expect((await init(dir, { yes: true })).exitCode).toBe(0);
+      expect(read('e2e.config.ts')).toContain(`// e2e reads CI the same way: unset, '', '0', and 'false' mean a local run.
+const ci = !['', '0', 'false'].includes(process.env.CI?.trim().toLowerCase() ?? '');
+
+export default {`);
+      expect(read('e2e.config.ts')).toContain(`  targets: [{
+    engine: web(),
+    app: {
+      url: 'http://localhost:3000',
+      // Next.js: the dev server here, or one you already started on that port.
+      // CI serves the production build: run \`npm run build\` before \`e2e run\`.
+      command: ci
+        ? { executable: 'npm', args: ['run', 'start'] }
+        : { executable: 'npm', args: ['run', 'dev'], reuseExisting: true },
+    },
+  }],`);
+      expect(read('e2e.config.ts')).not.toContain('APP_URL');
+      expect(output()).toContain('Found Next.js: the web target starts npm run dev on http://localhost:3000, and npm run start in CI after npm run build');
+      expect(output()).toContain('Next: npm install, then npm run test:e2e');
+      expect(output()).not.toContain('APP_URL=');
+    });
+
+    it('runs the scripts with pnpm on the port the dev script sets', async () => {
+      nextApp({ dev: 'next dev --turbopack -p 3100', build: 'next build', start: 'next start --port 3100' }, { packageManager: 'pnpm@10.0.0' });
+      expect((await init(dir, { yes: true })).exitCode).toBe(0);
+      expect(read('e2e.config.ts')).toContain("url: 'http://localhost:3100',");
+      expect(read('e2e.config.ts')).toContain("? { executable: 'pnpm', args: ['run', 'start'] }");
+      expect(read('e2e.config.ts')).toContain(": { executable: 'pnpm', args: ['run', 'dev'], reuseExisting: true },");
+      expect(output()).toContain('Found Next.js: the web target starts pnpm dev on http://localhost:3100, and pnpm start in CI after pnpm build');
+      expect(output()).toContain('Next: pnpm install, then pnpm test:e2e');
+    });
+
+    it('starts next dev in CI too when start serves on another port', async () => {
+      nextApp({ dev: 'next dev -p 3100', build: 'next build', start: 'next start' });
+      expect((await init(dir, { yes: true })).exitCode).toBe(0);
+      expect(read('e2e.config.ts')).toContain(`      url: 'http://localhost:3100',
+      // The runner starts the Next.js dev server, or uses one you already started on that port.
+      command: { executable: 'npm', args: ['run', 'dev'], reuseExisting: true },`);
+      expect(read('e2e.config.ts')).not.toContain('const ci');
+      expect(output()).toContain('Found Next.js: the web target starts npm run dev on http://localhost:3100\n');
+    });
+
+    it('keeps the placeholder target and says why when it cannot start the app', async () => {
+      nextApp({ build: 'next build', start: 'next start' });
+      expect((await init(dir, { yes: true })).exitCode).toBe(0);
+      expect(read('e2e.config.ts')).toContain("url: process.env.APP_URL ?? 'http://localhost:3000',");
+      expect(output()).toContain('Found Next.js, but package.json has no dev script; set app.url and app.command in e2e.config.ts, see https://e2e.com/docs/frameworks/nextjs');
+      expect(output()).toContain('APP_URL=http://localhost:3000 npm run test:e2e');
+    });
+
+    it('leaves a config with no web engine alone', async () => {
+      vi.spyOn(os, 'platform').mockReturnValue('linux');
+      nextApp();
+      expect((await init(dir, { yes: true, engines: ['mobile'] })).exitCode).toBe(0);
+      expect(read('e2e.config.ts')).not.toContain('localhost');
+      expect(output()).not.toContain('Found Next.js');
+    });
+
+    it('builds the app in the CI pipeline before the tests, and says nothing is missing to start it', async () => {
+      nextApp();
+      expect((await init(dir, { yes: true, ci: 'github-actions' })).exitCode).toBe(0);
+      const steps = (parseYaml(read('.github/workflows/e2e.yml')) as { jobs: { web: { steps: { name?: string; run?: string }[] } } }).jobs.web.steps;
+      const names = steps.map((step) => step.name);
+      expect(steps.find((step) => step.name === 'Build the app')?.run).toBe('npm run build');
+      expect(names.indexOf('Build the app')).toBe(names.indexOf('Run e2e') - 1);
+      expect(output()).not.toContain('Nothing starts the app in CI');
+    });
+
+    it('builds the app in a pipeline added later, when the existing config serves the start script', async () => {
+      nextApp(undefined, { devDependencies: { '@e2e-dev/web': '*' } });
+      writeFileSync(path.join(dir, 'e2e.config.ts'), `const ci = process.env.CI === 'true';
+export default {
+  targets: [{
+    platform: 'web',
+    app: {
+      url: 'http://localhost:3000',
+      command: ci
+        ? { executable: 'npm', args: ['run', 'start'] }
+        : { executable: 'npm', args: ['run', 'dev'], reuseExisting: true },
+    },
+  }],
+};
+`);
+      expect((await init(dir, { yes: true, ci: 'gitlab' })).exitCode).toBe(0);
+      expect((parseYaml(read('.gitlab-ci.yml')) as Record<string, { script: string[] }>)['e2e-web']!.script).toContain('npm run build');
+      expect(output()).not.toContain('Found Next.js');
+    });
+
+    it('builds the app for an existing config that serves start on another port than dev', async () => {
+      nextApp({ dev: 'next dev -p 3100', build: 'next build', start: 'next start' }, { devDependencies: { '@e2e-dev/web': '*' } });
+      writeFileSync(path.join(dir, 'e2e.config.ts'), `const ci = process.env.CI === 'true';
+export default {
+  targets: [{
+    platform: 'web',
+    app: {
+      url: ci ? 'http://localhost:3000' : 'http://localhost:3100',
+      command: ci ? { executable: 'npm', args: ['run', 'start'] } : { executable: 'npm', args: ['run', 'dev'] },
+    },
+  }],
+};
+`);
+      expect((await init(dir, { yes: true, ci: 'github-actions' })).exitCode).toBe(0);
+      const steps = (parseYaml(read('.github/workflows/e2e.yml')) as { jobs: { web: { steps: { name?: string; run?: string }[] } } }).jobs.web.steps;
+      expect(steps.find((step) => step.name === 'Build the app')?.run).toBe('npm run build');
+    });
+
+    it('builds nothing for an existing config that runs only next dev', async () => {
+      nextApp(undefined, { devDependencies: { '@e2e-dev/web': '*' } });
+      writeFileSync(path.join(dir, 'e2e.config.ts'), `export default {
+  targets: [{ platform: 'web', app: { url: 'http://localhost:3000', command: { executable: 'npm', args: ['run', 'dev'] } } }],
+};
+`);
+      expect((await init(dir, { yes: true, ci: 'github-actions' })).exitCode).toBe(0);
+      expect(read('.github/workflows/e2e.yml')).not.toContain('Build the app');
+    });
+  });
+
+  describe('with a CI workflow', () => {
+    const workflow = '.github/workflows/e2e.yml';
+
+    it('writes the GitHub Actions workflow with --ci and says what CI still needs', async () => {
+      expect(await init(dir, { yes: true, ci: 'github-actions' })).toMatchObject({ exitCode: 0, result: 'scaffolded', ci: 'github-actions' });
+      expect(read(workflow)).toContain('run: npx e2e run --reporter list,junit');
+      expect(read(workflow)).toContain('AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}');
+      expect(output()).toContain(`Created ${workflow} (GitHub Actions)`);
+      expect(output()).toContain('add it with gh secret set AI_GATEWAY_API_KEY');
+      // The new config leaves app.command commented out, so nothing would start the app on the runner.
+      expect(output()).toContain('Nothing starts the app in CI: set app.command in e2e.config.ts');
+    });
+
+    it('writes none under --yes alone, and none over an existing workflow', async () => {
+      expect(await init(dir, { yes: true })).toMatchObject({ ci: 'none' });
+      expect(existsSync(path.join(dir, workflow))).toBe(false);
+
+      mkdirSync(path.join(dir, '.github', 'workflows'), { recursive: true });
+      writeFileSync(path.join(dir, workflow), 'name: mine\n');
+      expect(await init(dir, { yes: true, ci: 'github-actions' })).toMatchObject({ result: 'already-initialized' });
+      expect(read(workflow)).toBe('name: mine\n');
+      expect(output()).toContain(`Exists, not touching: ${workflow}`);
+    });
+
+    it('asks with GitHub Actions preselected in a GitHub repository, and not again once the workflow exists', async () => {
+      answers.engines = ['web'];
+      mkdirSync(path.join(dir, '.github'));
+      vi.mocked(clack.select).mockResolvedValueOnce('none').mockResolvedValueOnce('github-actions');
+      vi.mocked(clack.confirm).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+      expect(await init(dir)).toMatchObject({ exitCode: 0, ci: 'github-actions' });
+      expect(clack.select).toHaveBeenLastCalledWith(expect.objectContaining({
+        message: 'Add a CI pipeline that runs the tests?',
+        initialValue: 'github-actions',
+        options: [
+          expect.objectContaining({ value: 'github-actions' }),
+          expect.objectContaining({ value: 'gitlab' }),
+          expect.objectContaining({ value: 'none' }),
+        ],
+      }));
+      expect(output()).toContain(`Create ${workflow}`);
+      // No model was chosen, so the workflow reads no key.
+      expect(read(workflow)).not.toContain('env:');
+
+      vi.mocked(clack.select).mockClear();
+      expect(await init(dir)).toMatchObject({ result: 'already-initialized', ci: null });
+      expect(clack.select).not.toHaveBeenCalled();
+    });
+
+    it('preselects none outside a GitHub repository', async () => {
+      answers.engines = ['web'];
+      vi.mocked(clack.confirm).mockResolvedValueOnce(false);
+      await init(dir);
+      expect(clack.select).toHaveBeenLastCalledWith(expect.objectContaining({ initialValue: 'none' }));
+    });
+
+    it.each([
+      { host: 'darwin', platform: 'ios', label: 'iOS' },
+      { host: 'linux', platform: 'android', label: 'Android' },
+    ] as const)('writes the $platform job alone for a mobile-only project on $host', async ({ host, platform, label }) => {
+      vi.spyOn(os, 'platform').mockReturnValue(host);
+      expect(await init(dir, { yes: true, engines: ['mobile'], ci: 'github-actions' })).toMatchObject({ exitCode: 0, ci: 'github-actions' });
+      const jobs = (parseYaml(read(workflow)) as { jobs: Record<string, unknown> }).jobs;
+      expect(Object.keys(jobs)).toEqual([platform]);
+      expect(read(workflow)).toContain(`npx e2e run --target ${platform} --workers 1 --reporter list,junit`);
+      // Not an Expo or React Native project, so the build is the user's to write.
+      expect(output()).toContain(`The ${label} job's build step is a placeholder that fails`);
+      // app.command starts a web app; a phone job installs its build.
+      expect(output()).not.toContain('Nothing starts the app in CI');
+    });
+
+    it('runs the web and phone targets in their own jobs when the config has both', async () => {
+      vi.spyOn(os, 'platform').mockReturnValue('darwin');
+      await init(dir, { yes: true, engines: ['web', 'mobile'], ci: 'github-actions' });
+      expect(Object.keys((parseYaml(read(workflow)) as { jobs: object }).jobs)).toEqual(['web', 'ios']);
+      expect(read(workflow)).toContain('run: npx e2e run --target web --reporter list,junit');
+      expect(read(workflow)).toContain('run: npx e2e run --target ios --workers 1 --reporter list,junit');
+    });
+
+    it('builds an Expo app in the phone jobs', async () => {
+      vi.spyOn(os, 'platform').mockReturnValue('linux');
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ dependencies: { expo: '*' } }));
+      await init(dir, { yes: true, engines: ['mobile'], ci: 'github-actions' });
+      expect(read(workflow)).toContain('npx expo prebuild --platform android --no-install');
+      expect(output()).not.toContain('placeholder');
+    });
+
+    it('tells GitLab users the phone jobs need self-managed runners and a device from E2E_DEVICE', async () => {
+      vi.spyOn(os, 'platform').mockReturnValue('darwin');
+      await init(dir, { yes: true, engines: ['mobile'], ci: 'gitlab' });
+      expect(Object.keys(parseYaml(read('.gitlab-ci.yml')) as object)).toEqual(['.e2e-mobile', 'e2e-ios']);
+      expect(output()).toContain("GitLab's hosted runners can't run a simulator or an emulator");
+      expect(output()).toContain('set device: process.env.E2E_DEVICE in each mobile() target');
+    });
+
+    it('asks nothing for a new config with no engine, whatever package.json still lists', async () => {
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ devDependencies: { '@e2e-dev/web': '*' } }));
+      answers.engines = [];
+      vi.mocked(clack.confirm).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+      expect(await init(dir, { gateway: 'none', skills: [], mcp: [] })).toMatchObject({ exitCode: 0, ci: null });
+      expect(clack.select).not.toHaveBeenCalledWith(expect.objectContaining({ message: 'Add a CI pipeline that runs the tests?' }));
+    });
+
+    it('counts an engine an existing project declares as a peer', async () => {
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ peerDependencies: { '@e2e-dev/web': '*' } }));
+      writeFileSync(path.join(dir, 'e2e.config.ts'), "export default { targets: [{ platform: 'web' }] };\n");
+      await init(dir, { yes: true, ci: 'github-actions' });
+      expect(read(workflow)).toContain('run: npx e2e run --reporter list,junit');
+    });
+
+    it('writes no pipeline for a project with neither engine', async () => {
+      expect(await init(dir, { yes: true, engines: [], ci: 'github-actions' })).toMatchObject({ exitCode: 0, ci: null });
+      expect(existsSync(path.join(dir, '.github'))).toBe(false);
+      expect(output()).toContain('Ignoring --ci: init writes a pipeline for web, iOS, and Android targets, and the project has none');
+    });
+
+    it('writes the workflow at the repository root for a project in a subfolder', async () => {
+      const project = path.join(dir, 'e2e');
+      mkdirSync(path.join(dir, '.git'), { recursive: true });
+      mkdirSync(project);
+      writeFileSync(path.join(dir, '.nvmrc'), '24\n');
+      expect((await init(project, { yes: true, ci: 'github-actions' })).exitCode).toBe(0);
+      expect(existsSync(path.join(project, '.github'))).toBe(false);
+      expect(read(workflow)).toContain('        working-directory: e2e\n');
+      expect(read(workflow)).toContain('          node-version-file: .nvmrc\n');
+      expect(read(workflow)).toContain("hashFiles('e2e/package-lock.json')");
+      expect(output()).toContain('Created ../.github/workflows/e2e.yml (GitHub Actions)');
+    });
+
+    it('reads the key and the start command from an existing config', async () => {
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ devDependencies: { e2e: '*', '@e2e-dev/web': '*' } }));
+      stubPackage('@openrouter/ai-sdk-provider', 'export const openrouter = () => undefined;');
+      writeFileSync(path.join(dir, 'e2e.config.ts'), [
+        "import { openrouter } from '@openrouter/ai-sdk-provider';",
+        "export default { model: openrouter, targets: [{ platform: 'web', app: { url: 'http://localhost:3100', command: { executable: 'npm', args: ['run', 'dev'] } } }] };",
+        '',
+      ].join('\n'));
+      expect((await init(dir, { yes: true, ci: 'github-actions' })).exitCode).toBe(0);
+      expect(read(workflow)).toContain('OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}');
+      expect(output()).not.toContain('Nothing starts the app in CI');
+    });
+
+    it('writes .gitlab-ci.yml with --ci gitlab and names the CI/CD variable to add', async () => {
+      expect(await init(dir, { yes: true, ci: 'gitlab' })).toMatchObject({ exitCode: 0, ci: 'gitlab' });
+      expect(read('.gitlab-ci.yml')).toContain('    - npx e2e run --reporter list,junit\n');
+      expect(output()).toContain('Created .gitlab-ci.yml (GitLab CI/CD)');
+      expect(output()).toContain('glab variable set AI_GATEWAY_API_KEY --masked --hidden --raw');
+      // A second run finds the job in the pipeline and asks nothing more.
+      expect(await init(dir, { yes: true, ci: 'gitlab' })).toMatchObject({ result: 'already-initialized' });
+      expect(output()).toContain('Exists, not touching: .gitlab-ci.yml');
+    });
+
+    it('leaves an existing .gitlab-ci.yml alone and writes a file for it to include', async () => {
+      writeFileSync(path.join(dir, '.gitlab-ci.yml'), 'build:\n  script: [make]\n');
+      await init(dir, { yes: true, ci: 'gitlab' });
+      expect(read('.gitlab-ci.yml')).toBe('build:\n  script: [make]\n');
+      expect(read('.gitlab/e2e.gitlab-ci.yml')).toMatch(/^e2e-web:\n/mu);
+      expect(output()).toContain('.gitlab-ci.yml exists, not touching it; add this to it to run the e2e jobs:');
+      expect(output()).toMatch(/include:\n\S*\s+- local: \.gitlab\/e2e\.gitlab-ci\.yml/u);
+    });
+
+    it('preselects GitLab in a repository with a GitLab remote', async () => {
+      answers.engines = ['web'];
+      mkdirSync(path.join(dir, '.git'));
+      writeFileSync(path.join(dir, '.git', 'config'), '[remote "origin"]\n\turl = https://gitlab.com/acme/app.git\n');
+      vi.mocked(clack.confirm).mockResolvedValueOnce(false);
+      await init(dir);
+      expect(clack.select).toHaveBeenLastCalledWith(expect.objectContaining({ initialValue: 'gitlab' }));
+    });
+
+    it('installs a workspace member at the workspace root with the workspace manager', async () => {
+      vi.stubEnv('npm_config_user_agent', 'npm/11.0.0');
+      mkdirSync(path.join(dir, '.git'));
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ private: true, packageManager: 'pnpm@10.0.0' }));
+      writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), "packages:\n  - 'apps/*'\n");
+      writeFileSync(path.join(dir, 'pnpm-lock.yaml'), '');
+      const project = path.join(dir, 'apps', 'web');
+      mkdirSync(project, { recursive: true });
+      expect((await init(project, { yes: true, ci: 'github-actions' })).exitCode).toBe(0);
+      expect(read(workflow)).toContain('      - name: Install dependencies\n        run: pnpm install --frozen-lockfile\n        working-directory: .\n');
+      expect(read(workflow)).toContain("hashFiles('pnpm-lock.yaml')");
+      expect(read(workflow)).toContain('        run: pnpm exec e2e run --reporter list,junit\n');
+    });
+
+    it('reads the target names and platforms from an existing config', async () => {
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ devDependencies: { e2e: '*', '@e2e-dev/web': '*', '@e2e-dev/mobile': '*' } }));
+      writeFileSync(path.join(dir, 'e2e.config.ts'), [
+        'const engine = (platform: string) => ({ platform });',
+        "export default { targets: [{ name: 'chromium', engine: engine('web') }, { name: 'iphone', engine: engine('ios') }, { name: 'pixel', engine: engine('android') }] };",
+        '',
+      ].join('\n'));
+      await init(dir, { yes: true, ci: 'github-actions' });
+      expect(read(workflow)).toContain('run: npx e2e run --target chromium --reporter list,junit');
+      expect(read(workflow)).toContain('run: npx e2e run --target iphone --workers 1 --reporter list,junit');
+      expect(read(workflow)).toContain('npx e2e run --target pixel --workers 1 --reporter list,junit');
+    });
+
+    it('runs every target in one web job when an existing web config does not load, and says why', async () => {
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ devDependencies: { e2e: '*', '@e2e-dev/web': '*' } }));
+      writeFileSync(path.join(dir, 'e2e.config.ts'), "import { web } from 'not-installed-engine';\nexport default { targets: [{ engine: web() }] };\n");
+      await init(dir, { yes: true, ci: 'github-actions' });
+      expect(Object.keys((parseYaml(read(workflow)) as { jobs: object }).jobs)).toEqual(['web']);
+      expect(read(workflow)).toContain('run: npx e2e run --reporter list,junit');
+      expect(output()).toContain('Could not read the targets of e2e.config.ts');
+      expect(output()).toContain('The pipeline runs every target in one web job');
+      expect(output()).not.toContain('No web, iOS, or Android target');
+    });
+
+    it('names a key the existing config loaded by its marker when it does not load', async () => {
+      const key = `gsk-init-${'7c2e9a4f'.repeat(4)}`;
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ devDependencies: { e2e: '*', '@e2e-dev/web': '*' } }));
+      writeFileSync(path.join(dir, '.env.init'), `GROQ_API_KEY=${key}\n`);
+      writeFileSync(path.join(dir, 'e2e.config.ts'), `process.loadEnvFile(${JSON.stringify(path.join(dir, '.env.init'))});\nthrow new Error('config failed with ' + process.env.GROQ_API_KEY);\n`);
+      vi.stubEnv('GROQ_API_KEY', undefined);
+      try {
+        await init(dir, { yes: true, ci: 'github-actions' });
+        expect(output()).toContain('config failed with <secret:GROQ_API_KEY>');
+        expect(output()).not.toContain(key.slice(-16));
+      } finally {
+        delete process.env['GROQ_API_KEY'];
+      }
+    });
+
+    it('writes the pipeline on a re-run that restores the web engine the config imports', async () => {
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ devDependencies: { e2e: RUNNER_RANGE } }));
+      writeFileSync(path.join(dir, 'e2e.config.ts'), "import { web } from '@e2e-dev/web';\nexport default { targets: [{ engine: web() }] };\n");
+      await init(dir, { yes: true, ci: 'github-actions' });
+      expect(JSON.parse(read('package.json')).devDependencies).toMatchObject({ '@e2e-dev/web': '0.x' });
+      expect(output()).not.toContain('Ignoring --ci');
+      expect(read(workflow)).toContain('run: npx e2e run --reporter list,junit');
+    });
+
+    it('writes no pipeline when an existing mobile config does not load', async () => {
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ devDependencies: { e2e: '*', '@e2e-dev/mobile': '*' } }));
+      writeFileSync(path.join(dir, 'e2e.config.ts'), "import { mobile } from 'not-installed-engine';\nexport default { targets: [{ engine: mobile() }] };\n");
+      await init(dir, { yes: true, ci: 'github-actions' });
+      expect(existsSync(path.join(dir, workflow))).toBe(false);
+      expect(output()).toContain('No pipeline: the mobile jobs need the config\'s targets');
+    });
+
+    it('loads an existing config only after the changes are confirmed and the dependencies installed', async () => {
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ devDependencies: { e2e: '*', '@e2e-dev/web': '*' } }));
+      writeFileSync(path.join(dir, 'e2e.config.ts'), "import { engine } from 'late-engine';\nexport default { targets: [{ name: 'chromium', engine }] };\n");
+      // The install puts the engine in place; before it, the config could not load.
+      vi.mocked(spawnSync).mockImplementationOnce(() => {
+        stubPackage('late-engine', "export const engine = { platform: 'web' };");
+        return spawnResult(0);
+      });
+      await init(dir, { yes: true, ci: 'github-actions', install: true });
+      expect(read(workflow)).toContain('run: npx e2e run --reporter list,junit');
+      expect(output()).not.toContain('Could not read the targets');
+
+      // Cancelled at the confirmation, the config never runs.
+      rmSync(path.join(dir, workflow));
+      writeFileSync(path.join(dir, 'e2e.config.ts'), "globalThis.configRan = true;\nexport default { targets: [{ platform: 'web' }] };\n");
+      vi.mocked(clack.confirm).mockResolvedValueOnce(false);
+      await init(dir, { ci: 'github-actions', skills: [], mcp: [] });
+      expect((globalThis as { configRan?: boolean }).configRan).toBeUndefined();
+    });
+
+    it('warns that a model served on this machine is out of the runner\'s reach', async () => {
+      await init(dir, { yes: true, gateway: 'openai-compatible', ci: 'gitlab' });
+      expect(output()).toContain('The model endpoint is on this machine, so agent steps fail in CI');
+      rmSync(path.join(dir, 'e2e.config.ts'));
+      rmSync(path.join(dir, '.gitlab-ci.yml'));
+      await init(dir, { yes: true, gateway: 'openai-compatible', endpoint: 'https://llm.example/v1', ci: 'gitlab' });
+      expect(output().match(/The model endpoint is on this machine/gu)).toHaveLength(1);
+    });
+
+    it('reads a loopback endpoint from an existing config too', async () => {
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ devDependencies: { e2e: '*', '@e2e-dev/web': '*' } }));
+      stubPackage('@ai-sdk/openai-compatible', 'export const createOpenAICompatible = (options) => options;');
+      writeFileSync(path.join(dir, 'e2e.config.ts'), [
+        "import { createOpenAICompatible } from '@ai-sdk/openai-compatible';",
+        "const model = createOpenAICompatible({ name: 'local',",
+        "  baseURL: 'http://127.0.0.1:11434/v1',",
+        '});',
+        "export default { model, targets: [{ platform: 'web' }] };",
+        '',
+      ].join('\n'));
+      await init(dir, { yes: true, ci: 'gitlab' });
+      expect(output()).toContain('The model endpoint is on this machine, so agent steps fail in CI');
+    });
+
+    // A junction needs no symlink privilege on Windows.
+    it.skipIf(!symlinks && process.platform !== 'win32')('writes nothing through a symlinked .github folder', async () => {
+      const elsewhere = mkdtempSync(path.join(os.tmpdir(), 'e2e-init-elsewhere-'));
+      try {
+        symlinkSync(elsewhere, path.join(dir, '.github'), process.platform === 'win32' ? 'junction' : 'dir');
+        expect(await init(dir, { yes: true, ci: 'github-actions' })).toMatchObject({ exitCode: 0 });
+        expect(readdirSync(elsewhere)).toEqual([]);
+        expect(output()).toContain(`Symlink, not touching: .github -> ${realpathSync(elsewhere)} (.github/workflows/e2e.yml)`);
+      } finally {
+        rmSync(elsewhere, { recursive: true, force: true });
+      }
+    });
+
+    it('warns that a subscription gateway has no key to give CI', async () => {
+      await init(dir, { yes: true, gateway: 'chatgpt', ci: 'github-actions' });
+      expect(read(workflow)).not.toContain('env:');
+      expect(output()).toContain('ChatGPT Plus/Pro subscription signs in on this machine only, so agent steps fail in CI');
     });
   });
 });

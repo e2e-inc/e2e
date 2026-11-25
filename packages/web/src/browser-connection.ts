@@ -1,7 +1,9 @@
 /** Shares one browser process connection across a worker's attempts. */
 
-import type { Browser, BrowserType } from 'playwright-core';
+import type { Browser, BrowserType, ConnectOverCDPOptions } from 'playwright-core';
+import { EngineError } from '@e2e-dev/core/engine';
 import { SELECTOR_ENGINES } from './selector-engines.ts';
+import { message } from './support.ts';
 
 /**
  * Playwright, imported the first time a browser is looked up, launched, or
@@ -14,6 +16,20 @@ const loadPlaywright = () => import('playwright-core');
 export const BROWSER_NAMES = ['chromium', 'firefox', 'webkit'] as const;
 
 export type BrowserName = (typeof BROWSER_NAMES)[number];
+
+/** A CDP connection endpoint and its handshake headers, resolved together. */
+export interface CdpTarget {
+  readonly endpoint: string;
+  readonly headers?: Readonly<Record<string, string>> | undefined;
+}
+
+/** What a feature adds to the launch of a browser. */
+export interface BrowserLaunchOptions {
+  /** Command-line arguments, after the browser's own. */
+  readonly args?: readonly string[];
+  /** Firefox preferences, as `about:config` names them. */
+  readonly preferences?: Readonly<Record<string, string | number | boolean>>;
+}
 
 /** Whether `name` is a browser the engine launches. */
 export function isBrowserName(name: string): name is BrowserName {
@@ -33,6 +49,31 @@ export function isBrowserName(name: string): name is BrowserName {
 const RUNNER_OWNS_SIGNALS = { handleSIGINT: false, handleSIGTERM: false } as const;
 
 /**
+ * Chromium's sandbox is on where it starts out of the box. On Linux it needs
+ * unprivileged user namespaces, which root, most containers, and Ubuntu
+ * 23.10+ refuse, so there it is opt-in.
+ */
+export function defaultChromiumSandbox(platform: NodeJS.Platform = process.platform): boolean {
+  return platform !== 'linux';
+}
+
+/** What `BrowserConnection.acquire` launches or attaches to. */
+export interface BrowserAcquireOptions {
+  /** Which browser to launch. */
+  readonly name: BrowserName;
+  /** Whether the browser opens headed. */
+  readonly headed: boolean;
+  /** How long a launch or attach may take. */
+  readonly timeoutMs: number;
+  /** Whether a Chromium launch keeps its OS sandbox on; other browsers ignore it. */
+  readonly chromiumSandbox: boolean;
+  /** What the engine's options add to a launch; a browser `connect` attaches to was started elsewhere and takes none. */
+  readonly launch?: BrowserLaunchOptions | undefined;
+  /** Attaches to a remote browser instead of launching one, when given. */
+  readonly connect?: (() => Promise<Browser>) | undefined;
+}
+
+/**
  * Launching a browser process costs hundreds of milliseconds; per-attempt
  * isolation lives in browser contexts, so every attempt a worker runs can
  * share the process. The connection relaunches a browser that crashed or
@@ -49,32 +90,56 @@ export class BrowserConnection {
    * so a caller that resolves a fresh per-run endpoint reconnects cleanly
    * after a dropped session.
    */
-  async acquire(
-    name: BrowserName,
-    headed: boolean,
-    timeoutMs: number,
-    connect?: () => Promise<Browser>,
-  ): Promise<Browser> {
+  async acquire(options: BrowserAcquireOptions): Promise<Browser> {
+    const { connect } = options;
     const cached = this.pending;
     if (cached !== undefined) {
       const browser = await cached.catch(() => null);
       if (browser !== null && browser.isConnected()) return browser;
-      if (this.pending !== cached) return this.acquire(name, headed, timeoutMs, connect);
+      if (this.pending !== cached) return this.acquire(options);
       this.pending = undefined;
     }
     // Set before anything awaits: the first call loads Playwright, and a `dispose`
     // that arrives meanwhile must close the browser this launch produces, while a
     // second caller waits for it instead of launching another.
     const launching = registerSelectorEngines().then(() =>
-      connect !== undefined
-        ? connect()
-        : browserType(name).then((type) => type.launch({ headless: !headed, timeout: timeoutMs, ...RUNNER_OWNS_SIGNALS })),
+      connect !== undefined ? connect() : this.launchLocal(options),
     );
     this.pending = launching;
     try {
       return await launching;
     } catch (cause) {
       if (this.pending === launching) this.pending = undefined;
+      throw cause;
+    }
+  }
+
+  /**
+   * A sandbox that cannot start fails with Playwright's whole launch call
+   * log; the engine error names the option instead.
+   */
+  private async launchLocal(options: BrowserAcquireOptions): Promise<Browser> {
+    const { name, headed, timeoutMs, chromiumSandbox, launch } = options;
+    const type = await browserType(name);
+    try {
+      return await type.launch({
+        headless: !headed,
+        timeout: timeoutMs,
+        ...(launch?.args === undefined ? {} : { args: [...launch.args] }),
+        ...(launch?.preferences === undefined ? {} : { firefoxUserPrefs: { ...launch.preferences } }),
+        ...RUNNER_OWNS_SIGNALS,
+        ...(name === 'chromium' ? { chromiumSandbox } : {}),
+      });
+    } catch (cause) {
+      if (name === 'chromium' && chromiumSandbox && message(cause).includes('Chromium sandboxing failed!')) {
+        // No `cause`: the runner follows the chain into the surfaced
+        // message, which would put the call log back.
+        throw new EngineError(
+          'ENGINE_FAILURE',
+          'Chromium failed to launch because its sandbox cannot start on this host. Pass web({ chromiumSandbox: false }) to launch without the sandbox.',
+          { retryable: false },
+        );
+      }
       throw cause;
     }
   }
@@ -105,10 +170,21 @@ export async function browserType(name: BrowserName): Promise<BrowserType> {
  * the endpoint itself and hands it here. `browser.close()` on the result
  * detaches the CDP session without killing the remote process the host owns.
  */
-export async function connectCdp(endpoint: string, timeoutMs: number): Promise<Browser> {
+export async function connectCdp({ endpoint, headers }: CdpTarget, timeoutMs: number): Promise<Browser> {
   await registerSelectorEngines();
   const { chromium } = await loadPlaywright();
-  return chromium.connectOverCDP(endpoint, { timeout: timeoutMs });
+  const options: ConnectOverCDPOptions = { timeout: timeoutMs };
+  if (headers !== undefined) options.headers = { ...headers };
+  try {
+    return await chromium.connectOverCDP(endpoint, options);
+  } catch (cause) {
+    if (headers === undefined) throw cause;
+    // Connection errors can echo credentials in altered forms, so retain only their type.
+    // oxlint-disable-next-line preserve-caught-error -- the original message, stack, and cause may contain CDP credentials
+    const error = new Error('CDP connection failed; check the endpoint, handshake headers, and connection timeout');
+    if (cause instanceof Error) error.name = cause.name;
+    throw error;
+  }
 }
 
 /** Registration is process-wide and rejected twice; one shared promise serves every connection. */

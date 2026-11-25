@@ -2,46 +2,32 @@
 
 import { realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { compileGlob, compileGlobList, discoverFiles, GLOB_SYNTAX, literalPrefix, matchesGlob } from '../internal/globs.ts';
-import { CollectionError, isE2EError } from '../internal/errors.ts';
-import { setupTestId, testId } from '../internal/ids.ts';
+import { compileGlob, compileGlobList, discoverFiles, GLOB_SYNTAX, literalPrefix, matchesGlob } from '@e2e-dev/core/lib/internal/globs';
+import { CollectionError, isE2EError } from '@e2e-dev/core/lib/internal/errors';
+import { setupTestId, testId } from '@e2e-dev/core/lib/internal/ids';
 import { explainModuleError } from '../config/diagnose.ts';
-import { importModule } from '../config/load.ts';
-import type { ResolvedConfig } from '../config/resolve.ts';
-import { staticSecretLedger } from '../run/secrecy.ts';
+import { collectFile } from './collect-file.ts';
+import { realPath } from './real-path.ts';
+import type { ResolvedConfig } from '@e2e-dev/core/lib/config/resolve';
+import { staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
+import { declarationSite } from './fixture-errors.ts';
 import {
-  collectModule,
+  groupChain,
   groupTitles,
   outermostSerialGroup,
   type GroupNode,
   type ModuleRegistration,
   type RegisteredTest,
 } from './registry.ts';
-import type { SourceLocation } from '../internal/source.ts';
-
-/**
- * Everything needed to name and report a test, with no executable or realm
- * state attached. Fully JSON-serializable, so it is what result records carry
- * and what crosses the runner<->worker IPC channel.
- */
-export interface TestIdentity {
-  readonly kind: 'test' | 'setup';
-  readonly title: string;
-  readonly titlePath: readonly string[];
-  readonly declarationIndex: number;
-  readonly sessions: readonly string[];
-  /** The tags the test declares, outermost describe first, each once; what `--tag` selects on. */
-  readonly tags: readonly string[];
-  readonly source: SourceLocation | undefined;
-  /** Normalized project-root-relative file path with `/` separators. */
-  readonly file: string;
-  readonly id: string;
-  readonly serialId: string | undefined;
-}
+import { parallelPlacements, type ParallelPlacement } from './parallel.ts';
+import type { SourceLocation } from '@e2e-dev/core/lib/internal/source';
+import type { TestIdentity } from '@e2e-dev/core/lib/run/records';
 
 export interface CollectedTest extends RegisteredTest, TestIdentity {
   /** Outermost serial group, when the test is a serial-group member. */
   readonly serialRoot: GroupNode | undefined;
+  /** Where the test sits among its file's parallel scopes; the planner reads it and no record carries it. */
+  readonly parallel: ParallelPlacement;
   /**
    * Whether the positionals selected this test (always, with none): its
    * file, and its declaration line when the file was named as `file:line`.
@@ -177,15 +163,7 @@ function serialSourceId(file: string, group: GroupNode): string {
  */
 function declaredIn(absolutePath: string, source: SourceLocation | undefined): boolean {
   if (source === undefined) return false;
-  return source.file === absolutePath || realPathOf(source.file) === realPathOf(absolutePath);
-}
-
-function realPathOf(file: string): string {
-  try {
-    return realpathSync.native(file);
-  } catch {
-    return file;
-  }
+  return source.file === absolutePath || realPath(source.file) === realPath(absolutePath);
 }
 
 function toCollectedTests(
@@ -196,6 +174,7 @@ function toCollectedTests(
   lines: readonly number[] | undefined,
 ): CollectedTest[] {
   const seenTitlePaths = new Set<string>();
+  const placementOf = parallelPlacements(registration);
   return registration.tests.map((registered) => {
     const encoded = testId(file, registered.titlePath);
     if (seenTitlePaths.has(encoded)) {
@@ -210,6 +189,7 @@ function toCollectedTests(
       file,
       id: registered.kind === 'setup' ? setupTestId(file, registered.titlePath) : encoded,
       serialRoot,
+      parallel: placementOf(groupChain(registered.group)),
       serialId: serialRoot === undefined ? undefined : serialSourceId(file, serialRoot),
       selected:
         selected &&
@@ -521,14 +501,14 @@ async function collectFiles(
     const skippable = narrowed && !isSelected(file);
     let registration: ModuleRegistration;
     try {
-      registration = await collectModule(() => importModule(absolutePath, 'collect', graph), absolutePath, redact);
+      registration = await collectFile(absolutePath, 'collect', redact, graph);
     } catch (cause) {
       if (skippable) {
         uncollected.push({ file, reason: isCollectionError(cause) ? cause.message : explainModuleError(cause, absolutePath) });
         continue;
       }
       // A registration error names the option but not the module it came from.
-      if (isCollectionError(cause)) throw new CollectionError(`${file}: ${cause.message}`, { cause });
+      if (isCollectionError(cause)) throw new CollectionError(`${declarationSite(cause, config.projectRoot, file)}: ${cause.message}`, { cause });
       throw new CollectionError(
         `failed to collect ${file}: ${explainModuleError(cause, absolutePath)}`,
         { cause },

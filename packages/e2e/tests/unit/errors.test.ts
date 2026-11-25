@@ -7,6 +7,9 @@ import {
   exitCodeForCategory,
   InfrastructureError,
   messageWithCauses,
+  redactErrorDetails,
+  redactSerializedError,
+  sanitizeRecordedText,
   sanitizeText,
   setErrorRedactor,
   withHint,
@@ -15,8 +18,8 @@ import {
   translateEngineError,
   translateProvisioningError,
   truncateUtf8,
-} from '../../src/internal/errors.ts';
-import { EngineError } from '../../src/engine/surface.ts';
+} from '@e2e-dev/core/lib/internal/errors';
+import { EngineError } from '@e2e-dev/core/lib/engine/surface';
 
 describe('translateProvisioningError', () => {
   it('never yields a test error: an engine error of any code is infrastructure', () => {
@@ -147,6 +150,15 @@ describe('serializeError', () => {
     const colored = serializeError(new ConfigurationError('X', '\u001b[1m\u001b[31mUnauthenticated\u001b[0m request'));
     expect(colored.message).toBe('Unauthenticated request');
   });
+
+  it('keeps carriage returns in the message, the stack, and the details', () => {
+    const error = new TestError('ASSERTION_FAILED', 'line one\r\nline two', { details: { observed: 'a\r\nb' } });
+    error.stack = 'TestError: line one\r\nline two\r\n    at test (tests/a.e2e.ts:1:1)';
+    const serialized = serializeError(error);
+    expect(serialized.message).toBe('line one\r\nline two');
+    expect(serialized.stack).toBe('TestError: line one\r\nline two\r\n    at test (tests/a.e2e.ts:1:1)');
+    expect(serialized.details).toEqual({ observed: 'a\r\nb' });
+  });
 });
 
 describe('sanitizeText', () => {
@@ -155,6 +167,12 @@ describe('sanitizeText', () => {
     expect(sanitizeText('\u0001\u0001')).toBe('\uFFFD\uFFFD');
     expect(sanitizeText('a\tb\nc')).toBe('a\tb\nc');
     expect(sanitizeText('ok 😀 fine')).toBe('ok 😀 fine');
+  });
+
+  it('replaces carriage returns; sanitizeRecordedText keeps the one in a \\r\\n', () => {
+    expect(sanitizeText('a\r\nb')).toBe('a\uFFFD\nb');
+    expect(sanitizeRecordedText('a\r\nb\u0007\u000c\u000e\u001b[31mc')).toBe('a\r\nb\uFFFD\uFFFD\uFFFDc');
+    expect(sanitizeRecordedText('failed\rpassed\r\r\nend\r')).toBe('failed\uFFFDpassed\uFFFD\r\nend\uFFFD');
   });
 });
 
@@ -234,5 +252,32 @@ describe('serializeError default redactor', () => {
 
   it('is identity when no redactor is installed', () => {
     expect(serializeError(new TestError('ASSERTION_FAILED', 'expected hunter2')).message).toBe('expected hunter2');
+  });
+});
+
+describe('redacting an error a program catches itself', () => {
+  const redact = (text: string): string => text.replaceAll('hunter2-secret', '<secret:pw>');
+
+  it('rewrites the text fields of its details and keeps the counts', () => {
+    const error = new TestError('LOCATOR_NOT_FOUND', 'nothing matched', { details: { locator: 'getByText("hunter2-secret")', name: 'hunter2-secret', matches: 0 } });
+    redactErrorDetails(error, redact);
+    expect(error.details).toEqual({ locator: 'getByText("<secret:pw>")', name: '<secret:pw>', matches: 0 });
+  });
+
+  it('drops details of a shape it cannot read, which it cannot redact either', () => {
+    const foreign = Object.assign(new Error('from another copy'), { details: { screenText: 'hunter2-secret' } });
+    redactErrorDetails(foreign, redact);
+    expect('details' in foreign).toBe(false);
+    const plain = new Error('no details');
+    redactErrorDetails(plain, redact);
+    expect('details' in plain).toBe(false);
+  });
+
+  it('rewrites the message, details, and stack of a serialized error taken from another session\'s record', () => {
+    const serialized = redactSerializedError(
+      { category: 'test', code: 'ASSERTION_FAILED', message: 'saw hunter2-secret', retryable: false, details: { observed: 'hunter2-secret', matches: 1 }, stack: 'Error: saw hunter2-secret\n    at test' },
+      redact,
+    );
+    expect(serialized).toEqual({ category: 'test', code: 'ASSERTION_FAILED', message: 'saw <secret:pw>', retryable: false, details: { observed: '<secret:pw>', matches: 1 }, stack: 'Error: saw <secret:pw>\n    at test' });
   });
 });

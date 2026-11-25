@@ -46,6 +46,10 @@ export interface RawNodeData {
     focused: boolean;
     hidden: boolean;
     secure: boolean;
+    /** Read-only, as Playwright's `getReadonly` decides; null on a node that cannot be read-only. */
+    readonly: boolean | null;
+    /** Whether the element holds nothing, as Playwright's `toBeEmpty` reads it; null in a tree read and on a secure field. */
+    empty: boolean | null;
   };
   /** Heading level of a heading: `aria-level`, else the digit of `h1` through `h6`; null for anything else. */
   level: number | null;

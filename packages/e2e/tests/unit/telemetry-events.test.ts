@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { resolveConfig } from '../../src/config/resolve.ts';
-import { defineEngine } from '../../src/engine/index.ts';
+import { resolveConfig } from '../../src/config/resolve-run.ts';
+import { defineEngine } from '@e2e-dev/core/lib/engine/index';
 import type { McpSessionSummary } from '../../src/mcp/usage.ts';
 import type { ReportExplore } from '../../src/report/build.ts';
 import {
@@ -16,7 +16,7 @@ import {
   upgradeCompletedEvent,
   type RunContext,
 } from '../../src/telemetry/events.ts';
-import type { StepEvent } from '../../src/run/steps.ts';
+import type { StepEvent } from '@e2e-dev/core/lib/run/steps';
 import { REPORT_AT, reportAttempt, reportDocument, reportError, reportResult, reportStep } from '../helpers/report.ts';
 import { SAMPLE_REPORT_SECRETS, sampleReport } from '../helpers/sample-report.ts';
 import { snapshot } from '../helpers/snapshot.ts';
@@ -69,6 +69,7 @@ describe('telemetry events', () => {
         gateway: 'openai-compatible',
         skill: true,
         mcp: false,
+        ci: 'github-actions',
         install: true,
       }),
     ).toEqual({
@@ -82,6 +83,7 @@ describe('telemetry events', () => {
         gateway: 'openai-compatible',
         skill: true,
         mcp: false,
+        ci: 'github-actions',
         install: true,
       },
     });
@@ -131,7 +133,7 @@ describe('telemetry events', () => {
       command: 'run',
       status: 'failed',
       exit_code: 1,
-      duration_ms: 5000,
+      duration_ms: 4500,
       flags: ['--headed', '--workers'],
       tests_discovered: 3,
       tests_selected: 2,
@@ -411,9 +413,9 @@ describe('telemetry events', () => {
     expect(runCompletedEvent(unpriced, RUN).properties['cost_source']).toBe('none');
   });
 
-  it('reports a missing duration as null rather than a negative or NaN number', () => {
+  it('reports a missing duration as null even when both timestamps are present', () => {
     const report = sampleReport();
-    (report.run as { finishedAt: string }).finishedAt = 'not a date';
+    delete report.run.durationMs;
     expect(runCompletedEvent(report, RUN).properties['duration_ms']).toBeNull();
   });
 
@@ -547,6 +549,7 @@ describe('the MCP session event', () => {
     platform: 'web',
     engine: { name: 'web', version: '0.11.1' },
     headed: true,
+    attached: true,
     durationMs: 1234.4,
     concurrent: 1,
     toolCalls: new Map([['tap', 3], ['observe', 2], ['acme_reset', 1]]),
@@ -568,6 +571,7 @@ describe('the MCP session event', () => {
         platform: 'web',
         engine: 'web@0.11.1',
         headed: true,
+        attached: true,
         duration_ms: 1234,
         sessions_open: 1,
         calls_total: 8,

@@ -5,8 +5,10 @@
  * not another port on the same host), `fallback` hands the request to the
  * route before it, the overrides each decision implements reach the wire,
  * and an option it does not implement fails the next step instead of being
- * dropped. Also the one call beside routing that takes a URL the same way: a
- * relative cookie URL.
+ * dropped. Method-narrowed patterns (`{ method, url }`) match one method and
+ * step aside for older routes otherwise, on `route` and `waitForResponse`.
+ * Also the one call beside routing that takes a URL the same way: a relative
+ * cookie URL.
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -17,7 +19,7 @@ import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EventEmitter } from 'node:events';
 import type { Download, Page } from 'playwright-core';
-import { TestError, type EngineFixtureContext } from 'e2e/engine';
+import { TestError, type EngineFixtureContext } from '@e2e-dev/core/engine';
 import { PlaywrightSurface } from '../../src/surface.ts';
 import { createBrowserFixture, type Browser, type WebRoute } from '../../src/browser.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
@@ -81,12 +83,14 @@ function startCountingServer(hits: Map<string, number>): Promise<{ server: Serve
   });
 }
 
-describe('browser.route decisions', () => {
+describe('browser route and waitForResponse decisions', () => {
   let surface: PlaywrightSurface;
   const projectRoot = mkdtempSync(path.join(tmpdir(), 'e2e-routes-'));
   const signal = new AbortController().signal;
   const hits = new Map<string, number>();
   const attached: string[] = [];
+  /** The fixture operations the browser was built with, for step-label checks. */
+  const operations = new Map<string, unknown>();
   /** The app's server, then the unlisted and listed ports. */
   let server: Server;
   let servers: Server[];
@@ -126,6 +130,7 @@ describe('browser.route decisions', () => {
   beforeEach(async () => {
     hits.clear();
     attached.length = 0;
+    operations.clear();
     await surface.startAttempt({ attemptId: 'routes', artifactsDir: projectRoot, signal, resolveSecret: noSecrets, ...ignoreTrace });
     page = await surface.ensurePage();
     await page.goto(`${origin}/`);
@@ -134,7 +139,10 @@ describe('browser.route decisions', () => {
       operation: (timeoutMs = 5_000) => ({ signal, timeoutMs, runId: 'routes', attemptId: 'routes', origin: 'test' }),
       timeouts: { test: 5_000, assertion: 5_000 },
       expectable: (target: object) => target,
-      fixture: (_name: string, target: object) => target,
+      fixture: (name: string, target: object, definitions: unknown) => {
+        operations.set(name, definitions);
+        return target;
+      },
       attachArtifact: (_kind: string, relative: string) => attached.push(relative),
     } as unknown as EngineFixtureContext);
   });
@@ -171,8 +179,8 @@ describe('browser.route decisions', () => {
     ) as Echo;
 
   /** Calls a decision the way a JavaScript caller can: any argument, typed or not. */
-  const untyped = (decide: (...args: never[]) => Promise<void>, ...args: unknown[]): Promise<void> =>
-    (decide as (...rest: unknown[]) => Promise<void>)(...args);
+  const untyped = <T,>(decide: (...args: never[]) => Promise<T>, ...args: unknown[]): Promise<T> =>
+    (decide as (...rest: unknown[]) => Promise<T>)(...args);
 
   /** Waits for the latched route failure the next step reports. */
   const nextStepFailure = (): Promise<unknown> => browser.url().then(() => undefined, (error: unknown) => error);
@@ -387,6 +395,229 @@ describe('browser.route decisions', () => {
     await browser.route('**/api/quote', (route) => route.fulfill({ body: 'later' }));
     expect(await fetchText(`${origin}/api/quote`)).toBe('later');
     expect(hits.get('/api/quote')).toBeUndefined();
+  });
+
+  /**
+   * One grammar: each row answers the same through `route` (a fetch from the
+   * page reaches the handler) and `waitForURL` (the page at that URL
+   * satisfies the wait), relative patterns resolved against the app's URL.
+   */
+  const SHARED_PATTERNS: readonly (readonly [pattern: string, pathname: string, matches: boolean])[] = [
+    ['**/api/quote', '/api/quote', true],
+    ['/api/quote', '/api/quote', true],
+    ['/api/*', '/api/quote', true],
+    ['/api/*', '/api/a/b', false],
+    ['/api/**', '/api/a/b', true],
+    ['**/api/{quote,flags}', '/api/flags', true],
+    ['**/api/{quote,flags}', '/api/other', false],
+    ['**/api/quote?id=*', '/api/quote?id=7', true],
+    ['**/api/quote?id=?', '/api/quote?id=7', false],
+    ['**/api/q?ote', '/api/quote', false],
+    ['**/api/my file*', '/api/my%20file.txt', true],
+    ['/api/quote#a*/../flags', '/api/flags', false],
+  ];
+
+  /** A miss is that call's timeout; any other rejection fails the row instead of reading as `false`. */
+  const missed = (timeoutCode: string) => (error: { readonly code?: string }): false => {
+    if (error.code !== timeoutCode) throw error;
+    return false;
+  };
+
+  it.each(SHARED_PATTERNS)('reads %s against %s the same through route, waitForURL, and waitForResponse', async (pattern, pathname, expected) => {
+    await browser.route(pattern, (route) => route.fulfill({ body: 'routed' }));
+    expect((await fetchText(`${origin}${pathname}`)) === 'routed', 'route').toBe(expected);
+    await browser.unrouteAll();
+    await page.goto(`${origin}${pathname}`);
+    const waited = await browser.waitForURL(pattern, { timeout: 200 }).then(() => true, missed('ASSERTION_FAILED'));
+    expect(waited, 'waitForURL').toBe(expected);
+    const [responded] = await Promise.all([
+      browser.waitForResponse(pattern, { timeout: 300 }).then(() => true, missed('OPERATION_TIMEOUT')),
+      page.evaluate((url) => { void fetch(url).then((reply) => reply.text()).catch(() => undefined); }, `${origin}${pathname}`),
+    ]);
+    expect(responded, 'waitForResponse').toBe(expected);
+  });
+
+  /** The `browser` fixture on a target with no `app.url`, whose base URL throws as the harness's does. */
+  const noAppUrlBrowser = () => createBrowserFixture(surface, {
+    app: { site: '127.0.0.1', resolveUrl: () => { throw new TestError('APP_URL_REQUIRED', 'this target has no app.url'); } },
+    operation: (timeoutMs?: number) => ({ signal, timeoutMs: Math.min(timeoutMs ?? 5_000, 5_000), runId: 'routes', attemptId: 'routes-no-app' }),
+    timeouts: { test: 5_000, action: 5_000, assertion: 5_000 },
+    expectable: (target: object) => target,
+    fixture: (_fixture: string, target: object) => target,
+    attachArtifact: () => undefined,
+  } as unknown as EngineFixtureContext);
+
+  it.each([
+    ['an absolute URL', (): string | RegExp => `${origin}/api/quote`],
+    ['a ** glob', (): string | RegExp => '**/api/quote'],
+    ['a RegExp', (): string | RegExp => /\/api\/quote$/],
+  ])('routes and waits on %s on a target with no app URL', async (_name, patternFor) => {
+    const noAppUrl = noAppUrlBrowser();
+    const pattern = patternFor();
+    await noAppUrl.route(pattern, (route) => route.fulfill({ body: 'routed' }));
+    const [response, body] = await Promise.all([noAppUrl.waitForResponse(pattern), fetchText(`${origin}/api/quote`)]);
+    expect(body).toBe('routed');
+    expect(response.url).toBe(`${origin}/api/quote`);
+    await noAppUrl.unrouteAll();
+    await page.goto(`${origin}/api/quote`);
+    await noAppUrl.waitForURL(pattern, { timeout: 1_000 });
+  });
+
+  it('refuses a bad { that resolving would drop, and registers no route', async () => {
+    expect(() => browser.route('/{bad/../api/quote', (route) => route.fulfill({ body: 'routed' }))).toThrow(expect.objectContaining({ code: 'INVALID_ARGUMENT' }));
+    expect(await fetchText(`${origin}/api/quote`)).toBe('network:/api/quote');
+  });
+
+  it('refuses a relative pattern on a target with no app URL', async () => {
+    const noAppUrl = noAppUrlBrowser();
+    expect(() => noAppUrl.route('/api/quote', (route) => route.continue())).toThrow(expect.objectContaining({ code: 'APP_URL_REQUIRED' }));
+    await expect((async () => noAppUrl.waitForURL('/api/quote', { timeout: 200 }))()).rejects.toMatchObject({ code: 'APP_URL_REQUIRED' });
+  });
+
+  it('matches one method and lets another reach the network', async () => {
+    await browser.route({ method: 'post', url: '**/api/orders' }, (route) => route.fulfill({ status: 201, json: { ok: true } }));
+    const posted = await page.evaluate(async (url) => {
+      const reply = await fetch(url, { method: 'POST', body: 'payload' });
+      return { status: reply.status, body: await reply.text() };
+    }, `${origin}/api/orders`);
+    expect(posted).toEqual({ status: 201, body: '{"ok":true}' });
+    expect(await fetchText(`${origin}/api/orders`)).toBe('network:/api/orders');
+    expect(hits.get('/api/orders')).toBe(1);
+  });
+
+  it('matches a method-narrowed RegExp url', async () => {
+    await browser.route({ method: 'POST', url: /\/api\/orders$/ }, (route) => route.fulfill({ body: 'post' }));
+    const posted = await page.evaluate(async (url) => (await fetch(url, { method: 'POST' })).text(), `${origin}/api/orders`);
+    expect(posted).toBe('post');
+    expect(await fetchText(`${origin}/api/orders`)).toBe('network:/api/orders');
+  });
+
+  it('matches a lowercase custom method', async () => {
+    await browser.route({ method: 'PATCH', url: '**/api/orders' }, (route) => route.fulfill({ body: 'patched' }));
+    const patched = await page.evaluate(async (url) => (await fetch(url, { method: 'patch' })).text(), `${origin}/api/orders`);
+    expect(patched).toBe('patched');
+  });
+
+  it('a method-narrowed route steps aside for an older route', async () => {
+    await browser.route('**/api/orders', (route) => route.fulfill({ body: 'any method' }));
+    await browser.route({ method: 'POST', url: '**/api/orders' }, (route) => route.fulfill({ body: 'post' }));
+    expect(await fetchText(`${origin}/api/orders`)).toBe('any method');
+    const posted = await page.evaluate(async (url) => (await fetch(url, { method: 'POST' })).text(), `${origin}/api/orders`);
+    expect(posted).toBe('post');
+  });
+
+  it('a method-narrowed route steps aside for an older method-narrowed route', async () => {
+    await browser.route({ method: 'GET', url: '**/api/orders' }, (route) => route.fulfill({ body: 'get' }));
+    await browser.route({ method: 'POST', url: '**/api/orders' }, (route) => route.fulfill({ body: 'post' }));
+    expect(await fetchText(`${origin}/api/orders`)).toBe('get');
+    const posted = await page.evaluate(async (url) => (await fetch(url, { method: 'POST' })).text(), `${origin}/api/orders`);
+    expect(posted).toBe('post');
+    const deleted = await page.evaluate(async (url) => (await fetch(url, { method: 'DELETE' })).text(), `${origin}/api/orders`);
+    expect(deleted).toBe('network:/api/orders');
+  });
+
+  it('a method fallback reaches an older route that continues', async () => {
+    await browser.route('**/echo', (route) => route.continue());
+    await browser.route({ method: 'POST', url: '**/echo' }, (route) => route.fulfill({ body: 'post' }));
+    const echo = await fetchEcho(`${origin}/echo`);
+    expect(echo.method).toBe('GET');
+    expect(echo.headers['x-gate']).toBe('open-sesame');
+  });
+
+  it('a method fallback reaches an older route that aborts', async () => {
+    await browser.route('**/api/quote', (route) => route.abort());
+    await browser.route({ method: 'POST', url: '**/api/quote' }, (route) => route.fulfill({ body: 'post' }));
+    expect(await fetchText(`${origin}/api/quote`)).toBe('failed');
+    expect(hits.get('/api/quote')).toBeUndefined();
+  });
+
+  it('a method mismatch lets the configured headers reach the network', async () => {
+    await browser.route({ method: 'POST', url: '**/echo' }, (route) => route.fulfill({ body: 'post' }));
+    const echo = await fetchEcho(`${origin}/echo`);
+    expect(echo.method).toBe('GET');
+    expect(echo.headers['x-gate']).toBe('open-sesame');
+  });
+
+  it('keeps a method-narrowed route across a restart', async () => {
+    await browser.route({ method: 'POST', url: '**/api/orders' }, (route) => route.fulfill({ body: 'post' }));
+    await surface.restart({ signal, timeoutMs: 5_000, runId: 'routes', attemptId: 'routes', origin: 'test' });
+    page = await surface.ensurePage();
+    await page.goto(`${origin}/`);
+    const posted = await page.evaluate(async (url) => (await fetch(url, { method: 'POST' })).text(), `${origin}/api/orders`);
+    expect(posted).toBe('post');
+  });
+
+  it('unroutes a method-narrowed route without touching a URL-only one', async () => {
+    await browser.route('**/api/orders', (route) => route.fulfill({ body: 'any method' }));
+    await browser.route({ method: 'POST', url: '**/api/orders' }, (route) => route.fulfill({ body: 'post' }));
+    await browser.unroute({ method: 'post', url: '**/api/orders' });
+    const posted = await page.evaluate(async (url) => (await fetch(url, { method: 'POST' })).text(), `${origin}/api/orders`);
+    expect(posted).toBe('any method');
+  });
+
+  it('unrouting a URL only leaves a method-narrowed route', async () => {
+    await browser.route({ method: 'POST', url: '**/api/orders' }, (route) => route.fulfill({ body: 'post' }));
+    await browser.unroute('**/api/orders');
+    const posted = await page.evaluate(async (url) => (await fetch(url, { method: 'POST' })).text(), `${origin}/api/orders`);
+    expect(posted).toBe('post');
+  });
+
+  it('waits for a response of one method, ignoring another', async () => {
+    const pending = browser.waitForResponse({ method: 'POST', url: '**/echo' });
+    await fetchText(`${origin}/echo`);
+    await page.evaluate(async (url) => {
+      await fetch(url, { method: 'POST', body: 'other' });
+    }, `${origin}/api/other`);
+    const posted = page.evaluate(async (url) => {
+      await fetch(url, { method: 'POST', body: 'payload' });
+    }, `${origin}/echo`);
+    const response = await pending;
+    expect(response.url).toBe(`${origin}/echo`);
+    expect(await response.json()).toMatchObject({ path: '/echo', method: 'POST', body: 'payload' });
+    await posted;
+  });
+
+  it('labels a method-narrowed pattern with its method and URL', () => {
+    const definitions = operations.get('browser') as
+      | Record<string, { label?: (...args: unknown[]) => string }>
+      | undefined;
+    const label = definitions?.['route']?.label;
+    expect(label).toBeTypeOf('function');
+    expect(label?.({ method: 'post', url: '**/api/orders' })).toBe('POST "**/api/orders"');
+    expect(label?.({ method: 'POST', url: /orders$/ })).toBe('POST /orders$/');
+    expect(label?.({ method: 'POST', url: Object.create(null) })).toBe('POST an object');
+    const cyclic: { method: string; url?: unknown } = { method: 'POST' };
+    cyclic.url = cyclic;
+    expect(label?.(cyclic)).toBe('POST an object');
+  });
+
+  const members = [
+    ['browser.route', (pattern: unknown) => untyped(browser.route, pattern, () => undefined)],
+    ['browser.unroute', (pattern: unknown) => untyped(browser.unroute, pattern)],
+    ['browser.waitForResponse', (pattern: unknown) => untyped(browser.waitForResponse, pattern)],
+  ] as const;
+
+  it.each(members)('%s rejects invalid method-narrowed patterns', (api, call) => {
+    const cases = [
+      [{}, 'must be a string, RegExp, or { method, url }; got an object'],
+      [{ method: 'POST' }, 'requires url'],
+      [{ url: '**/api/orders' }, 'requires method'],
+      [{ method: '', url: '**/api/orders' }, 'got ""'],
+      [{ method: 'PO ST', url: '**/api/orders' }, 'got "PO ST"'],
+      [{ method: 'POST', url: '**/api/orders', times: 1 }, 'has unknown key "times"'],
+      [{ method: 'POST', url: 42 }, 'url must be a string or RegExp, got 42'],
+    ] as const;
+    for (const [pattern, message] of cases) {
+      let caught: unknown;
+      try {
+        call(pattern);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toMatchObject({ code: 'INVALID_ARGUMENT' });
+      expect((caught as Error).message).toContain(`${api} pattern`);
+      expect((caught as Error).message).toContain(message);
+    }
   });
 
   it('continue goes to the network past an earlier route', async () => {

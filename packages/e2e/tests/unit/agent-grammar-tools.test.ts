@@ -1,19 +1,24 @@
 /**
- * The vocabulary the model calls is closed: a field a tool's schema does not
- * declare fails validation instead of being stripped, so a call the model
- * decorated with `force` or `selector` is refused rather than run without it.
+ * The vocabulary the model calls is closed. On a tool that declares fields,
+ * a field the schema does not declare fails validation instead of being
+ * stripped, so a call the model decorated with `force` or `selector` is
+ * refused rather than run without it. A tool with no fields drops those
+ * keys and runs on `{}`.
  */
 
-import type { ToolSet } from 'ai';
+import type { ModelMessage, ToolSet } from 'ai';
 import { z } from 'zod';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { aiSdk, loadAiSdk } from '../../src/agent/ai-sdk.ts';
-import { GRAMMAR_TOOL_NAMES } from '../../src/agent/action-names.ts';
-import { createGrammarTools, createVerdictTool } from '../../src/agent/primitives.ts';
-import { createBuiltInAgent, projectTools } from '../../src/agent/default-agent.ts';
-import { defineTool } from '../../src/agent/tool.ts';
+import { aiSdk, loadAiSdk } from '@e2e-dev/core/lib/agent/ai-sdk';
+import { AgentError } from '@e2e-dev/core/lib/agent/error';
+import { isFailedResult, waitingToolNames } from '@e2e-dev/core/lib/agent/loop-guards';
+import { GRAMMAR_TOOL_NAMES } from '@e2e-dev/core/lib/agent/action-names';
+import { createGrammarTools, createVerdictTool, grammarTools } from '@e2e-dev/core/lib/agent/primitives';
+import { createBuiltInAgent, projectTools } from '@e2e-dev/core/lib/agent/default-agent';
+import { createToolLoopExecutor } from '@e2e-dev/core/lib/agent/tool-loop';
+import { defineTool } from '@e2e-dev/core/lib/agent/tool';
 import { fakeExecutorContext } from '../helpers/fake-executor-context.ts';
-import { installFakeLoopModel } from '../helpers/fake-loop-model.ts';
+import { installFakeLoopModel, loopCalls } from '../helpers/fake-loop-model.ts';
 
 it('does not repeat a static assertion opening to request pixels it cannot use', async () => {
   const { context } = fakeExecutorContext({ verbs: [], secrets: [] });
@@ -60,6 +65,9 @@ const ACCEPTED: Readonly<Record<string, Record<string, unknown>>> = {
   dismiss_keyboard: {},
 };
 
+/** Tools whose schema declares no fields. A padded call is read as `{}`; every other tool stays closed. */
+const NO_INPUT = new Set(['observe', 'back', 'dismiss_keyboard', 'screenshot']);
+
 function schemaOf(tools: ToolSet, name: string): z.ZodType {
   const tool = tools[name];
   if (tool?.inputSchema === undefined) throw new Error(`no schema on ${name}`);
@@ -77,12 +85,39 @@ function expectClosed(schema: z.ZodType, accepted: Record<string, unknown>, name
 }
 
 describe('the grammar tools have closed schemas', () => {
-  it('offers the whole vocabulary over the full grammar, and every tool refuses a field it does not declare', () => {
+  it('offers the whole vocabulary over the full grammar; a tool with fields refuses one it does not declare, and a tool with none drops it', () => {
     const tools = createGrammarTools(fakeExecutorContext().context);
     expect(Object.keys(tools).toSorted()).toEqual([...GRAMMAR_TOOL_NAMES].toSorted());
     for (const name of Object.keys(tools)) {
-      expectClosed(schemaOf(tools, name), ACCEPTED[name]!, name);
+      const schema = schemaOf(tools, name);
+      const accepted = ACCEPTED[name]!;
+      if (!NO_INPUT.has(name)) {
+        expectClosed(schema, accepted, name);
+        continue;
+      }
+      expect(schema.safeParse(accepted).success, `${name} accepts ${JSON.stringify(accepted)}`).toBe(true);
+      const padded = schema.safeParse({ force: true, selector: '#x' });
+      expect(padded.success, `${name} drops undeclared fields`).toBe(true);
+      if (padded.success) expect(padded.data).toEqual({});
+      for (const value of ['nope', null, []]) {
+        const rejected = schema.safeParse(value);
+        expect(rejected.success, `${name} rejects ${JSON.stringify(value)}`).toBe(false);
+        if (!rejected.success) expect(rejected.error.issues.map((issue) => issue.code)).toEqual(['invalid_type']);
+      }
     }
+    const described = schemaOf(tools, 'screenshot').safeParse({ description: 'check the home screen' });
+    expect(described.success).toBe(true);
+    if (described.success) expect(described.data).toEqual({});
+  });
+
+  it('keeps screenshot strict once saveScreenshot adds a path field', () => {
+    const schema = schemaOf(grammarTools(fakeExecutorContext().context, { saveScreenshot: async (file) => file }), 'screenshot');
+    expect(schema.safeParse({}).success).toBe(true);
+    expect(schema.safeParse({ path: 'screenshots/home.png' }).success).toBe(true);
+    const padded = schema.safeParse({ path: 'screenshots/home.png', description: 'check' });
+    expect(padded.success).toBe(false);
+    if (padded.success) return;
+    expect(padded.error.issues.map((issue) => issue.code)).toEqual(['unrecognized_keys']);
   });
 
   it('scroll_to takes a listed node, a text to reach, or a text with the list to page, never nothing; a device gets the text form alone', () => {
@@ -233,4 +268,273 @@ it('drops an inconclusive code from an act verdict and keeps it on an assertion'
   const assertion = createVerdictTool('assert');
   expect(await assertion.tool.execute!(input, options)).toBe('Step concluded.');
   expect(assertion.verdict()).toEqual(input);
+});
+
+describe('type_secret leaves the act tool set the same across steps', () => {
+  it('describes it the same with the secrets listed by the caller, and fails a call on a step that declares none', async () => {
+    const bare = fakeExecutorContext({ secrets: [] });
+    const declared = fakeExecutorContext();
+    const without = grammarTools(bare.context, { secretsListedByCaller: true })['type_secret'];
+    const listed = grammarTools(declared.context, { secretsListedByCaller: true })['type_secret'];
+    expect(without?.description).toBe(listed?.description);
+    expect(listed?.description).not.toContain('admin');
+    // The public grammar keeps naming the secrets, and offers none to a step without them.
+    expect(createGrammarTools(bare.context)).not.toHaveProperty('type_secret');
+    expect(createGrammarTools(declared.context)['type_secret']?.description).toContain('"admin" (password)');
+  });
+
+  it('sends a call on a step that declares no secrets to the dispatcher, whose refusal reads as a failed action', async () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    const typeSecret = vi.fn(async () => {
+      throw new AgentError('POLICY_DENIED', 'secret "admin" was not declared in this step\'s params; only declared secrets can be filled');
+    });
+    const observe = async () => ({ revision: '1', text: '#n1 textbox "Password"', truncated: false, viewport: { width: 800, height: 600 } });
+    const tool = grammarTools({ ...context, observe, actions: { ...context.actions, typeSecret } }, { secretsListedByCaller: true })['type_secret'];
+    const result = await tool!.execute!({ target: 'n1', name: 'admin' }, { toolCallId: 'fill', messages: [], context: undefined });
+    const text = typeof result === 'string' ? result : result.text;
+    expect(typeSecret).toHaveBeenCalledExactlyOnceWith({ id: 'n1' }, 'admin');
+    expect(text).toMatch(/^type_secret "admin" into #n1 failed: POLICY_DENIED: secret "admin" was not declared/u);
+    expect(isFailedResult('type_secret', text)).toBe(true);
+  });
+
+  it('offers the built-in act loop the same tools with and without a secret, and lists the secret in the opening message', async () => {
+    const observe = async () => ({
+      revision: '1', text: '#n1 textbox "Password"', truncated: false,
+      viewport: { width: 800, height: 600 },
+    });
+    const model = installFakeLoopModel(() => [{ toolName: 'complete_step', input: { status: 'passed', summary: 'done' } }]);
+    for (const secrets of [[], [{ name: 'admin', purpose: 'password' }]] as const) {
+      const { context } = fakeExecutorContext({ secrets });
+      await expect(createBuiltInAgent().runStep({ ...context, model, observe })).resolves.toMatchObject({ status: 'passed' });
+    }
+    expect(loopCalls).toHaveLength(2);
+    expect(loopCalls[0]!.toolNames).toContain('type_secret');
+    expect(loopCalls[1]!.toolNames).toEqual(loopCalls[0]!.toolNames);
+    expect(loopCalls[0]!.prompt).not.toContain('Secrets to fill');
+    expect(loopCalls[1]!.prompt).toContain('Secrets to fill with type_secret, by name: "admin" (password).');
+  });
+});
+
+describe('observe matches the act rules on checking a commit', () => {
+  it('allows observe to check any press that commits something, not only a save or submit', () => {
+    const { context } = fakeExecutorContext();
+    const description = grammarTools(context, { secretsListedByCaller: true })['observe']?.description;
+    expect(description).toContain('or to check whether a press that commits something (a save, a submit, a delete) went through');
+    expect(description).toContain("never to re-read another action's result");
+  });
+});
+
+describe('the loop guard waits longer on the built-in observe only', () => {
+  beforeAll(() => loadAiSdk());
+
+  /** A model that observes until the loop forces a verdict, and how many times it observed. */
+  const observeUntilForced = () => {
+    let observed = 0;
+    const model = installFakeLoopModel((call) => {
+      if (call.toolNames.length === 1 && call.toolNames[0] === 'complete_step') {
+        return [{ toolName: 'complete_step', input: { status: 'failed', summary: 'still saving' } }];
+      }
+      observed += 1;
+      return [{ toolName: 'observe', input: {} }];
+    });
+    return { model, observed: () => observed };
+  };
+
+  it('marks observe and the plain screenshot as waiting tools, and not the screenshot that saves a file', () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    expect([...waitingToolNames(grammarTools(context, {}))].toSorted()).toEqual(['observe', 'screenshot']);
+    expect([...waitingToolNames(createGrammarTools(context))].toSorted()).toEqual(['observe', 'screenshot']);
+    expect([...waitingToolNames(grammarTools(context, { saveScreenshot: async (file) => file }))]).toEqual(['observe']);
+  });
+
+  it('lets the built-in act loop observe ten times while a save stays in progress', async () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    const observe = async () => ({ revision: '1', text: '#n1 button "Saving" [disabled]', truncated: false, viewport: { width: 800, height: 600 } });
+    const { model, observed } = observeUntilForced();
+    await expect(createBuiltInAgent().runStep({ ...context, model, observe })).resolves.toMatchObject({ status: 'failed' });
+    expect(observed()).toBe(10);
+    const warned = loopCalls.find((call) => call.lastPrompt.includes('the screen was looked at several times in a row with no change'));
+    expect(warned?.lastPrompt).toContain('Observe again only while the screen still shows the work in progress');
+    expect(warned?.lastPrompt).toContain('once it is done, do what the step still asks for, then call complete_step');
+    expect(warned?.lastPrompt).not.toContain('going in circles');
+  });
+
+  it('gives each notice of a wait once, however the wait alternates between ticking and standing still', async () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    let looks = 0;
+    const observe = async () => {
+      looks += 1;
+      // Observes 1-12 tick, 13-18 stand still on the last tick, 19 on tick again until the guard ends the wait at twenty.
+      const call = looks - 1;
+      const second = call <= 12 || call >= 19 ? call : 12;
+      return { revision: String(looks), text: `#n1 text "Saving ${String(second)}s"`, truncated: false, viewport: { width: 800, height: 600 } };
+    };
+    const model = installFakeLoopModel((call) => {
+      if (call.toolNames.length === 1) return [{ toolName: 'complete_step', input: { status: 'failed', summary: 'forced' } }];
+      return [{ toolName: 'observe', input: {} }];
+    });
+    await createBuiltInAgent().runStep({ ...context, model, observe });
+    const added = (notice: string) =>
+      loopCalls.filter((call, index) => index > 0 && call.userMessages > loopCalls[index - 1]!.userMessages && call.lastPrompt.includes(notice)).length;
+    expect(added('looked at many times in a row while it kept changing')).toBe(1);
+    expect(added('looked at several times in a row with no change')).toBe(1);
+  });
+
+  it('keeps a recovered listing as progress after compaction elides it from the history the model reads', async () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    const big = Array.from({ length: 900 }, (_, index) => `#n${String(index + 10)} text "row ${String(index)} ${'x'.repeat(40)}"`).join('\n');
+    let looks = 0;
+    const observe = async () => {
+      looks += 1;
+      // Opening look, then: no tree, no tree, the listing back (large) on the third observe, no tree after it.
+      if (looks === 4) return { revision: String(looks), text: big, truncated: false, viewport: { width: 800, height: 600 } };
+      if (looks === 1) return { revision: '1', text: '#n1 button "Saving" [disabled]', truncated: false, viewport: { width: 800, height: 600 } };
+      return { revision: String(looks), text: '[semantic capture unavailable]', truncated: true, treeUnavailable: true as const, viewport: { width: 800, height: 600 } };
+    };
+    let observed = 0;
+    const model = installFakeLoopModel((call) => {
+      if (call.toolNames.length === 1) return [{ toolName: 'complete_step', input: { status: 'failed', summary: 'forced' } }];
+      observed += 1;
+      return [{ toolName: 'observe', input: {} }];
+    });
+    await createBuiltInAgent().runStep({ ...context, model, observe });
+    // The third observe saw the listing come back, so ten unchanged looks are counted from the fourth: thirteen in all.
+    expect(observed).toBe(13);
+  });
+
+  it('warns each wait in a step, not only the first', async () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    let looks = 0;
+    const observe = async () => {
+      looks += 1;
+      // The opening look and six observes show the first save in progress; then it is done, and the second save never ends.
+      const text = looks <= 7 ? '#n1 button "Saving" [disabled]' : looks === 8 ? '#n1 button "Saved"\n#n2 button "Send"' : '#n2 button "Sending" [disabled]';
+      return { revision: String(looks), text, truncated: false, viewport: { width: 800, height: 600 } };
+    };
+    let sent = false;
+    const model = installFakeLoopModel((call) => {
+      if (call.toolNames.length === 1) return [{ toolName: 'complete_step', input: { status: 'failed', summary: 'forced' } }];
+      if (!sent && call.lastToolResult.includes('"Send"')) {
+        sent = true;
+        return [{ toolName: 'tap', input: { target: 'n2' } }];
+      }
+      return [{ toolName: 'observe', input: {} }];
+    });
+    await createBuiltInAgent().runStep({ ...context, model, observe });
+    const notice = 'the screen was looked at several times in a row with no change';
+    // A notice joins the history as a new user message, so count the turns that added one.
+    const warned = loopCalls.filter((call, index) => index > 0 && call.userMessages > loopCalls[index - 1]!.userMessages && call.lastPrompt.includes(notice));
+    // One warning per wait: the second wait, after the tap, is warned again.
+    expect(sent).toBe(true);
+    expect(warned).toHaveLength(2);
+  });
+
+  it('lets the act loop go on to the step\'s next action when the tenth observe shows the save finished', async () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    let looks = 0;
+    const observe = async () => {
+      looks += 1;
+      // The opening look and nine observes show the save in progress; the tenth observe shows it done.
+      const done = looks > 10;
+      return { revision: String(looks), text: done ? '#n1 button "Saved"\n#n2 link "Product list"' : '#n1 button "Saving" [disabled]', truncated: false, viewport: { width: 800, height: 600 } };
+    };
+    const tools: string[] = [];
+    const model = installFakeLoopModel((call) => {
+      if (call.toolNames.length === 1) return [{ toolName: 'complete_step', input: { status: 'failed', summary: 'forced' } }];
+      // The loop let the tap through: that is all this test asks, whatever the fake engine does with it.
+      if (tools.at(-1) === 'tap') return [{ toolName: 'complete_step', input: { status: 'passed', summary: 'saved, then opened the list' } }];
+      if (call.lastToolResult.includes('"Product list"')) {
+        tools.push('tap');
+        return [{ toolName: 'tap', input: { target: 'n2' } }];
+      }
+      tools.push('observe');
+      return [{ toolName: 'observe', input: {} }];
+    });
+    await expect(createBuiltInAgent().runStep({ ...context, model, observe })).resolves.toMatchObject({ status: 'passed' });
+    expect(tools).toEqual([...Array.from({ length: 10 }, () => 'observe'), 'tap']);
+  });
+
+  it('keeps the ordinary limit for a caller\'s own tool named observe, which may write', async () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    const writes: string[] = [];
+    const executor = createToolLoopExecutor({
+      name: 'custom',
+      system: 'Record observations.',
+      buildPrompt: () => 'go',
+      tools: () => ({
+        observe: { description: 'Records an observation.', inputSchema: aiSdk().zodSchema(z.object({})), execute: async () => { writes.push('row'); return 'recorded'; } },
+      }) as ToolSet,
+    });
+    const { model, observed } = observeUntilForced();
+    await expect(executor.runStep({ ...context, model })).resolves.toMatchObject({ status: 'failed' });
+    expect(observed()).toBe(5);
+    expect(writes).toHaveLength(5);
+  });
+
+  it('counts only the calls an executor keeps in the history it sends, not the ones its prepareMessages summarized away', async () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    let rows = 5;
+    // The executor carries the five rows read in earlier steps into its prompt, then summarizes them away before the model reads it.
+    const carried = Array.from({ length: 5 }, (_, index): ModelMessage[] => [
+      { role: 'assistant', content: [{ type: 'tool-call', toolCallId: `old${String(index)}`, toolName: 'read_row', input: {} }] },
+      { role: 'tool', content: [{ type: 'tool-result', toolCallId: `old${String(index)}`, toolName: 'read_row', output: { type: 'text', value: `row ${String(index + 1)}` } }] },
+    ]).flat();
+    const executor = createToolLoopExecutor({
+      name: 'custom',
+      system: 'Read the next row.',
+      buildPrompt: () => [{ role: 'user', content: 'Rows so far:' }, ...carried, { role: 'user', content: 'Read the next row.' }],
+      tools: () => ({
+        read_row: { description: 'Reads the next row.', inputSchema: aiSdk().zodSchema(z.object({})), execute: async () => `row ${String((rows += 1))}` },
+      }) as ToolSet,
+      prepareMessages: (messages) => messages.filter((message) => message.role === 'user' || !carried.includes(message)),
+    });
+    const model = installFakeLoopModel((call) => {
+      if (call.toolNames.length === 1 || rows >= 6) return [{ toolName: 'complete_step', input: { status: 'passed', summary: `read ${String(rows)} rows` } }];
+      return [{ toolName: 'read_row', input: {} }];
+    });
+    await expect(executor.runStep({ ...context, model })).resolves.toMatchObject({ status: 'passed' });
+    // The step read its row: the summarized calls did not force a verdict before its first turn.
+    expect(rows).toBe(6);
+  });
+
+  it('keeps the ordinary limit when the caller replaces the built-in handler after the tools are built', async () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    const writes: string[] = [];
+    let offered: ToolSet | undefined;
+    const executor = createToolLoopExecutor({
+      name: 'custom',
+      system: 'Record observations.',
+      tools: (ctx) => {
+        offered = { observe: createGrammarTools(ctx)['observe']! };
+        return offered;
+      },
+      buildPrompt: () => {
+        offered!['observe']!.execute = async () => { writes.push('row'); return 'recorded'; };
+        return 'go';
+      },
+    });
+    const { model, observed } = observeUntilForced();
+    await expect(executor.runStep({ ...context, model })).resolves.toMatchObject({ status: 'failed' });
+    expect(observed()).toBe(5);
+    expect(writes).toHaveLength(5);
+  });
+
+  it('keeps the ordinary limit when a caller reuses the built-in observe with a handler of its own', async () => {
+    const { context } = fakeExecutorContext({ secrets: [] });
+    const writes: string[] = [];
+    const executor = createToolLoopExecutor({
+      name: 'custom',
+      system: 'Record observations.',
+      buildPrompt: () => 'go',
+      tools: (ctx) => {
+        const builtIn = createGrammarTools(ctx)['observe']!;
+        builtIn.execute = async () => { writes.push('row'); return 'recorded'; };
+        return { observe: builtIn };
+      },
+    });
+    const { model, observed } = observeUntilForced();
+    await expect(executor.runStep({ ...context, model })).resolves.toMatchObject({ status: 'failed' });
+    expect(observed()).toBe(5);
+    expect(writes).toHaveLength(5);
+  });
 });

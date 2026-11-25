@@ -55,7 +55,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
       - name: Upload artifacts
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-artifacts
           path: .e2e/results
@@ -152,7 +152,8 @@ covering the whole suite:
 | interrupted | passed | passed |
 | any other result | not run | the first-pass result |
 
-The comment keeps the first pass's filter lines and left-out tests.
+The comment keeps the first pass's filter lines and left-out tests. A second
+rerun folds in the same way, so the first pass's results stay on the comment.
 
 The comment stays red while the rerun left out something it owed: a failed
 test, a test that `--max-failures` or `--max-duration` stopped before it ran, or a failed

@@ -39,6 +39,19 @@ test('screen.swipe({ from, to }) moves the pointer along the path', async ({ app
   await expect(screen.getByLabel('Pad state')).toHaveText('swiped from 10,20 to 250,20');
 });
 
+test('screen.tapAt and screen.swipe take percentages of the viewport', { platforms: ['web'] }, async ({ app, browser, screen }) => {
+  await browser.setViewport({ width: 1000, height: 800 });
+  await app.open('/pointer');
+  const box = await boxOf(screen.getByRole('image', 'Pointer pad'));
+  const onPad = (x: number, y: number) => `${Math.round(x - box.x)},${Math.round(y - box.y)}`;
+
+  await screen.tapAt({ x: '10%', y: '25%' });
+  await expect(screen.getByLabel('Pad state')).toHaveText(`tapped at ${onPad(100, 200)}`);
+
+  await screen.swipe({ from: { x: '10%', y: '25%' }, to: { x: '30%', y: 200 } });
+  await expect(screen.getByLabel('Pad state')).toHaveText(`swiped from ${onPad(100, 200)} to ${onPad(300, 200)}`);
+});
+
 test('a path swipe drags and drops on the board', async ({ app, screen }) => {
   await app.open('/board');
 
@@ -49,7 +62,7 @@ test('a path swipe drags and drops on the board', async ({ app, screen }) => {
   await expect(screen.getByLabel('Board state')).toHaveText('Design review is done');
 });
 
-test.describe('raw pointer input', { requires: ['browser'] }, () => {
+test.describe('raw pointer input', { platforms: ['web'] }, () => {
   test('raw mouse input drags along the pad', async ({ app, screen, browser }) => {
     await app.open('/pointer');
     const box = await boxOf(screen.getByRole('image', 'Pointer pad'));
@@ -62,7 +75,7 @@ test.describe('raw pointer input', { requires: ['browser'] }, () => {
   });
 });
 
-test('screen.doubleTapAt edits a label beneath a sibling SVG', { requires: ['browser'] }, async ({ app, browser, screen }) => {
+test('screen.doubleTapAt edits a label beneath a sibling SVG', { platforms: ['web'] }, async ({ app, browser, screen }) => {
   await app.open('/pointer');
   const label = screen.getByRole('textbox', 'Edit label');
   const point = centerOf(await boxOf(label));

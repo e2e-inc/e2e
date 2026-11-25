@@ -5,8 +5,9 @@ description: Move a Playwright, Cypress, Selenium, Appium, Detox, Maestro, or Te
 ---
 
 A migration guide maps one test runner's config, API, and commands to e2e.
-It also marks what e2e doesn't have yet, with a workaround where there is
-one. A test with no workaround stays in the old runner. Keep the old
+It also lists what e2e doesn't have yet: what is planned, what has no date,
+and what e2e leaves out on purpose, with a workaround where there is one. A
+test with no workaround stays in the old runner. Keep the old
 suite installed while you move one test at a time, so both suites stay green.
 
 ## Pick your runner
@@ -39,9 +40,10 @@ suite installed while you move one test at a time, so both suites stay green.
 
 <Note>Install e2e with the [quickstart](/quickstart) first. Only agent steps need a model.</Note>
 
-e2e tests run in Node, in TypeScript by default or in
-[JavaScript](/reference/config#javascript). For a Java, Python, or native suite, install e2e
-in an `e2e/` folder with its own `package.json`.
+e2e tests run in Node, in TypeScript by default. For
+[JavaScript](/reference/config#javascript) tests, set `tests` to match them.
+For a Java, Python, or native suite, install e2e in an `e2e/` folder with its
+own `package.json`.
 
 Each guide follows the same steps:
 

@@ -5,13 +5,21 @@ The browser engine for [`e2e`](https://www.npmjs.com/package/e2e), built on
 
 `e2e` ships no engine of its own: every target names the engine that drives
 it, and this package is the one for browsers. It implements the public
-`e2e/engine` contract, so a device or desktop engine plugs into the same
-seam with no privilege either way.
+`@e2e-dev/core/engine` contract (`e2e/engine` to the runner), so a device or
+desktop engine plugs into the same seam with no privilege either way.
 
 ## Install
 
 ```bash
 npm install --save-dev e2e @e2e-dev/web
+```
+
+To drive a browser from a program without the test runner, install
+[`@e2e-dev/core`](https://www.npmjs.com/package/@e2e-dev/core) instead of `e2e`, and
+import `web` from `@e2e-dev/web/engine`:
+
+```bash
+npm install @e2e-dev/core @e2e-dev/web
 ```
 
 This package depends on `playwright-core` pinned to an exact version, so the
@@ -34,8 +42,7 @@ takes `url` (the base URL `app.open()` opens; required on a `web()` target),
 with `readyUrl` to poll, default `url`), `environment` (`test`, `staging`,
 `production`; inferred from the host), and `identity` (a stable cache and
 session key when the origin is ephemeral). `web({ url })` and the other old
-app options are `INVALID_CONFIG`. A target with `app.url` is a `browser`
-target, so a test can `requires: ['browser']`. Browser options:
+app options are `INVALID_CONFIG`. Browser options:
 `browser` (`chromium`, `firefox`, `webkit`; default `chromium`; or a
 `BrowserProvider` that leases hosted browsers, see below), `viewport`
 (`{ width, height }`; default 1280x720), `testIdAttribute` (the attribute
@@ -45,7 +52,8 @@ target, so a test can `requires: ['browser']`. Browser options:
 such as `de-DE` and `Europe/Berlin`), `colorScheme` and `reducedMotion` (the
 `prefers-color-scheme` and `prefers-reduced-motion` every page reports, from
 first paint; `browser.emulateMedia` changes them in a test), `initScripts` (scripts every document
-runs before the page's own), and
+runs before the page's own), `webmcp` (`true` launches Chromium or Firefox with
+WebMCP on, for `browser.webmcp`), and
 `connect` — attach to a remote browser over CDP instead of launching a local
 one.
 
@@ -75,7 +83,7 @@ engine verifies the default context ID and active page target ID, clears stale
 references, and never repeats a dispatched operation. A missing target fails
 the attempt. The host owns deleting the remote browser after cleanup.
 
-This mode does not support `headers`, `basicAuth`, `userAgent`, `locale`, `timezoneId`, context reset, or session
+This mode does not support `headers`, `basicAuth`, `userAgent`, `locale`, `timezoneId`, `deviceScaleFactor`, context reset, or session
 state capture and restore. Recording resumes after reconnect, but a segment
 lost during the disconnect remains unavailable. See the
 [Playwright reference](../../docs/reference/web.mdx#recovering-a-cdp-transport)

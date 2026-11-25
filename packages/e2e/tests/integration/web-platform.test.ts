@@ -97,6 +97,88 @@ test('a negated toHaveAttribute fails on a plain field that holds the same marke
   await expect(screen.getByLabel('Plain')).not.toHaveAttribute('value', { timeout: 500 });
 });
 
+test('toHaveRole compares the role the tree reads', async ({ app, screen }) => {
+  await app.open('/role-matcher');
+  await expect(screen.getByLabel('Name')).toHaveRole('textbox');
+  await expect(screen.getByLabel('Secret')).toHaveRole('textbox');
+  await expect(screen.getByTestId('logo')).toHaveRole('img');
+  await expect(screen.getByTestId('logo')).toHaveRole('image');
+  await expect(screen.getByTestId('title')).toHaveRole('heading');
+  await expect(screen.getByText('Wi-Fi')).toHaveRole('switch');
+  await expect(screen.getByText('Wi-Fi')).not.toHaveRole('checkbox', { timeout: 200 });
+  await expect(screen.getByTestId('plain')).not.toHaveRole('button', { timeout: 200 });
+  // An editing host reads as a textbox in the tree, though getByRole finds it by its tag's role.
+  await expect(screen.getByRole('heading', { name: 'Untitled' })).toHaveRole('textbox');
+});
+
+test('toHaveRole fails on another role', async ({ app, screen }) => {
+  await app.open('/role-matcher');
+  await expect(screen.getByText('Wi-Fi')).toHaveRole('checkbox', { timeout: 500 });
+});
+
+test('toHaveRole fails on a secure field without its value', async ({ app, screen }) => {
+  await app.open('/role-matcher');
+  await expect(screen.getByLabel('Secret')).toHaveRole('searchbox', { timeout: 300 });
+});
+
+test('toBeEmpty reads an input or textarea by value and anything else by text content', async ({ app, screen }) => {
+  await app.open('/empty-matcher');
+  await expect(screen.getByTestId('blank-input')).toBeEmpty();
+  await expect(screen.getByTestId('blank-textarea')).toBeEmpty();
+  await expect(screen.getByTestId('blank-div')).toBeEmpty();
+  await expect(screen.getByTestId('blank-editor')).toBeEmpty();
+  for (const testId of [
+    'filled-input', 'space-input', 'adopted-input', 'text', 'hidden-text', 'combobox', 'listbox', 'textbox',
+    'aria-textbox', 'select', 'submit', 'checkbox',
+  ]) {
+    await expect(screen.getByTestId(testId), testId).not.toBeEmpty();
+  }
+  await screen.getByTestId('blank-input').fill('typed');
+  await expect(screen.getByTestId('blank-input')).not.toBeEmpty();
+});
+
+test('toBeEmpty is denied on a secure field', async ({ app, screen }) => {
+  await app.open('/empty-matcher');
+  await expect(screen.getByLabel('Secret')).not.toBeEmpty();
+});
+
+test('toBeEditable reads readonly, aria-readonly, and the disabled state', async ({ app, screen }) => {
+  await app.open('/editable-matcher');
+  await expect(screen.getByLabel('Name')).toBeEditable();
+  await expect(screen.getByLabel('Size')).toBeEditable();
+  // A native select reads readonly and ignores aria-readonly.
+  await expect(screen.getByLabel('Size locked')).not.toBeEditable();
+  await expect(screen.getByLabel('Size aria')).toBeEditable();
+  await expect(screen.getByTestId('editor')).toBeEditable();
+  await expect(screen.getByLabel('Notes')).not.toBeEditable();
+  await expect(screen.getByLabel('Total')).toBeEditable({ editable: false });
+  // A fieldset disables the control inside it, though the control has no attribute.
+  await expect(screen.getByLabel('Locked')).not.toBeEditable();
+  await expect(screen.getByLabel('Secret')).not.toBeEditable();
+  // Playwright parity: a native tag ignores aria-readonly, an ARIA role ignores
+  // readonly and folds case, an element inside an editing host is editable.
+  await expect(screen.getByLabel('Aria on input')).toBeEditable();
+  await expect(screen.getByLabel('Upper case')).not.toBeEditable();
+  await expect(screen.getByTestId('editor-line')).toBeEditable();
+  await expect(screen.getByLabel('Pick')).not.toBeEditable();
+  await expect(screen.getByLabel('Attribute on div')).toBeEditable();
+  // An editing host with an aria-readonly role reads that attribute first.
+  await expect(screen.getByLabel('Locked editor')).not.toBeEditable();
+  // An editing host with no ARIA role ignores aria-readonly; a grid cell reads it.
+  await expect(screen.getByTestId('plain-host')).toBeEditable();
+  await expect(screen.getByTestId('grid-cell')).not.toBeEditable();
+});
+
+test('toBeEditable fails on a read-only field', async ({ app, screen }) => {
+  await app.open('/editable-matcher');
+  await expect(screen.getByLabel('Notes')).toBeEditable({ timeout: 500 });
+});
+
+test('toBeEditable fails on a button, negated too', async ({ app, screen }) => {
+  await app.open('/editable-matcher');
+  await expect(screen.getByRole('button', { name: 'Save' })).not.toBeEditable({ timeout: 300 });
+});
+
 test('secure fields refuse value reads', async ({ app, screen }) => {
   await app.open();
   await screen.getByLabel('Password').fill('hunter2');
@@ -374,6 +456,22 @@ test('a relative toHaveURL prints the expected URL resolved', async ({ app, brow
   await app.open('/classes');
   await expect(browser).toHaveURL('/about', { timeout: 300 });
 });
+
+test('waitForURL reads URL globs, and toHaveURL compares exactly, as in Playwright', async ({ app, browser }) => {
+  await app.open('/classes?tab=a');
+  await browser.waitForURL('**/classes?tab=a');
+  await browser.waitForURL('/class*?tab=*');
+  await browser.waitForURL('**/{about,classes}?tab=a');
+  // toHaveURL reads \`*\` and \`{\` as themselves, so a URL with braces in its query compares exactly.
+  await expect(browser).not.toHaveURL('**/classes?tab=a', { timeout: 300 });
+  await app.open('/classes?filter={"a":1}');
+  await expect(browser).toHaveURL('/classes?filter={"a":1}');
+});
+
+test('a URL glob prints as written', async ({ app, browser }) => {
+  await app.open('/classes');
+  await browser.waitForURL('**/checkout', { timeout: 300 });
+});
 `;
 
 // A predicate, which Playwright accepts and a migrated test may still pass, is
@@ -475,7 +573,11 @@ describe('web platform integration', () => {
     'an empty class attribute is an empty class list',
     'reads wait for a node that arrives late',
     'toHaveURL ignoreCase folds the comparison',
+    'waitForURL reads URL globs, and toHaveURL compares exactly, as in Playwright',
     'string and RegExp URL patterns match what they name',
+    'toHaveRole compares the role the tree reads',
+    'toBeEmpty reads an input or textarea by value and anything else by text content',
+    'toBeEditable reads readonly, aria-readonly, and the disabled state',
   ])('passes %s', (title) => {
     const result = resultByTitle(outcome, title);
     expect(result.status, JSON.stringify(result.attempts[0]?.error)).toBe('passed');
@@ -545,6 +647,44 @@ describe('web platform integration', () => {
     expect(control.status).toBe('failed');
     expect(control.attempts[0]!.error?.code).toBe('ASSERTION_FAILED');
     expect(control.attempts[0]!.error?.message).toContain('observed: attribute "value" "marker-5e0c"');
+  });
+
+  it('fails toHaveRole on a switch asked for a checkbox, naming both roles', () => {
+    const result = resultByTitle(outcome, 'toHaveRole fails on another role');
+    expect(result.status).toBe('failed');
+    expect(result.attempts[0]!.error?.code).toBe('ASSERTION_FAILED');
+    expect(result.attempts[0]!.error?.message).toContain('expected: role "checkbox"\nobserved: role "switch"');
+  });
+
+  it('fails toHaveRole on a password field and keeps its value out of the result', () => {
+    const result = resultByTitle(outcome, 'toHaveRole fails on a secure field without its value');
+    expect(result.status).toBe('failed');
+    expect(result.attempts[0]!.error?.code).toBe('ASSERTION_FAILED');
+    expect(result.attempts[0]!.error?.message).toContain('expected: role "searchbox"\nobserved: role "textbox"');
+    expect(JSON.stringify(result)).not.toContain('marker-7c1f');
+  });
+
+  it('denies toBeEmpty on a password field and keeps its value out of the result', () => {
+    const result = resultByTitle(outcome, 'toBeEmpty is denied on a secure field');
+    expect(result.status).toBe('failed');
+    expect(result.attempts[0]!.error?.code).toBe('POLICY_DENIED');
+    expect(JSON.stringify(result)).not.toContain('marker-9d2a');
+  });
+
+  it('fails toBeEditable on a read-only textarea, naming why', () => {
+    const result = resultByTitle(outcome, 'toBeEditable fails on a read-only field');
+    expect(result.status).toBe('failed');
+    expect(result.attempts[0]!.error?.code).toBe('ASSERTION_FAILED');
+    expect(result.attempts[0]!.error?.message).toContain('expected: editable\nobserved: read-only');
+  });
+
+  it('fails a negated toBeEditable on a button, naming its role', () => {
+    const result = resultByTitle(outcome, 'toBeEditable fails on a button, negated too');
+    expect(result.status).toBe('failed');
+    expect(result.attempts[0]!.error?.code).toBe('ASSERTION_FAILED');
+    expect(result.attempts[0]!.error?.message).toContain(
+      'expected: not editable\nobserved: role "button", no read-only state',
+    );
   });
 
   it('denies secure value reads with POLICY_DENIED', () => {
@@ -653,8 +793,7 @@ describe('web platform integration', () => {
     expect(tapStep?.artifacts ?? []).toHaveLength(0);
     const download = attempt.artifacts.find((artifact) => artifact.kind === 'download');
     expect(download?.path).toContain('downloads/');
-    // Bytes the app served, not rewritten by the runner: the record says so.
-    expect(download).toMatchObject({ redaction: 'incomplete', mediaType: 'text/csv' });
+    expect(download).toMatchObject({ mediaType: 'text/csv', redaction: 'incomplete' });
   });
 
   it('keeps a class assertion polling while the node is missing and passes once it arrives', () => {
@@ -703,6 +842,15 @@ describe('web platform integration', () => {
     expect(negated.attempts[0]!.error?.message).toContain(`expected: not URL ${new URL('/CLASSES', app.url).href} (ignoring case)`);
   });
 
+  it('prints a URL glob as written, not resolved into a URL nothing matches', () => {
+    const result = resultByTitle(outcome, 'a URL glob prints as written');
+    expect(result.status).toBe('failed');
+    expect(result.attempts[0]!.error?.code).toBe('ASSERTION_FAILED');
+    expect(result.attempts[0]!.error?.message).toContain(
+      `browser.waitForURL failed\nexpected: URL **/checkout\nobserved: URL ${new URL('/classes', app.url).href}`,
+    );
+  });
+
   it('prints a relative toHaveURL expectation resolved against the app URL, like the observed one', () => {
     const result = resultByTitle(outcome, 'a relative toHaveURL prints the expected URL resolved');
     expect(result.attempts[0]!.error?.code).toBe('ASSERTION_FAILED');
@@ -720,7 +868,7 @@ describe('web platform integration', () => {
     expect(result.status).toBe('failed');
     const attempt = result.attempts[0]!;
     expect(attempt.error?.code).toBe('INVALID_ARGUMENT');
-    expect(attempt.error?.message).toContain('string or RegExp');
+    expect(attempt.error?.message).toContain('string, RegExp, or { method, url }');
     expect(attempt.steps.find((step) => step.status === 'failed')?.api).toBe(api);
   });
 

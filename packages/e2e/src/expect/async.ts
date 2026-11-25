@@ -1,8 +1,8 @@
 /** Runner-owned polling locator assertions. */
 
-import type { SemanticNode } from '../engine/surface.ts';
-import { TestError } from '../internal/errors.ts';
-import { rejectUnknownOptions } from '../internal/options.ts';
+import type { SemanticNode, ViewportIntersection } from '@e2e-dev/core/lib/engine/surface';
+import { ConfigurationError, TestError } from '@e2e-dev/core/lib/internal/errors';
+import { rejectUnknownOptions } from '@e2e-dev/core/lib/internal/options';
 import {
   isTextMatch,
   normalizeText,
@@ -12,25 +12,45 @@ import {
   withIgnoreCase,
   type TextComparison,
   type TextPattern,
-} from '../internal/text.ts';
-import { isValueControl } from '../internal/roles.ts';
-import { pollReads, type ReadWindow } from '../internal/time.ts';
-import { SampleHistory } from './samples.ts';
-import { attributeOf, denySecureRead, isNodeVisible } from '../locator/engine.ts';
-import { describeExpression } from '../locator/expression.ts';
-import type { LocatorInternals } from '../locator/screen.ts';
-import type { AsyncExpectation, ScreenshotOptions, TextMatch, TextMatcherOptions } from '../types.ts';
+} from '@e2e-dev/core/lib/internal/text';
+import { isValueControl } from '@e2e-dev/core/lib/internal/roles';
+import { pollReads, type ReadWindow } from '@e2e-dev/core/lib/internal/time';
+import { SampleHistory } from '@e2e-dev/core/lib/expect/samples';
+import { attributeOf, denySecureRead, isNodeVisible } from '@e2e-dev/core/lib/locator/engine';
+import { canonicalRole, describeExpression } from '@e2e-dev/core/lib/locator/expression';
+import type { LocatorInternals } from '@e2e-dev/core/lib/locator/screen';
+import type {
+  AsyncExpectation,
+  Role,
+  RoleAlias,
+  ScreenshotOptions,
+  TextMatch,
+  TextMatcherOptions,
+} from '@e2e-dev/core/lib/types';
+import { labelAmbiguous, withMessage } from './heading.ts';
 import { expectScreenshot } from './screenshot.ts';
+
+/** Slack on a measured share, so `ratio: 0.5` passes on a box measured at 0.4999999999. */
+const RATIO_TOLERANCE = 1e-9;
 
 interface Sample {
   readonly count: number;
   readonly node: SemanticNode | null;
   /** Every current match, read; only a `wholeSet: 'read'` matcher asks for them. */
   readonly nodes: readonly SemanticNode[];
+  /** How much of `node` is inside the viewport, for a `measuresViewport` matcher. */
+  readonly intersection?: ViewportIntersection;
+  /**
+   * The ref went stale before it was read or measured. Such a sample is never
+   * evaluated, negated or not: a node a race superseded is not a gone one.
+   */
+  readonly stale?: boolean;
 }
 
 interface MatcherSpec {
   readonly name: string;
+  /** Also measures how much of the one match is inside the viewport (`Sample.intersection`). */
+  readonly measuresViewport?: boolean;
   /**
    * Evaluates the whole sample instead of requiring one node: `true` counts
    * the matches, `'read'` also reads each of them.
@@ -136,10 +156,12 @@ class AsyncExpectationImpl implements AsyncExpectation {
   constructor(
     private readonly internals: LocatorInternals,
     private readonly negated: boolean,
+    /** The caller's label for this check, opening every failure message. */
+    private readonly message: string | undefined,
   ) {}
 
   get not(): AsyncExpectation {
-    return new AsyncExpectationImpl(this.internals, !this.negated);
+    return new AsyncExpectationImpl(this.internals, !this.negated, this.message);
   }
 
   private get label(): string {
@@ -179,7 +201,9 @@ class AsyncExpectationImpl implements AsyncExpectation {
           signal: engine.signal,
           negated: this.negated,
           evaluate: async (reads) => {
-            const sample = await this.sample(spec, reads);
+            const sample = await this.sample(spec, reads).catch((error: unknown) => {
+              throw labelAmbiguous(error, this.message);
+            });
             lastSample = sample;
             if (spec.readsWithheld === true) {
               denySecureRead(sample.node === null ? sample.nodes : [sample.node], this.label);
@@ -194,7 +218,7 @@ class AsyncExpectationImpl implements AsyncExpectation {
             return new TestError(
               'ASSERTION_FAILED',
               [
-                `${api} failed`,
+                withMessage(this.message, `${api} failed`),
                 `locator: ${this.label}`,
                 `expected: ${expected}`,
                 `observed: ${observed} (match count ${lastSample.count})`,
@@ -217,6 +241,7 @@ class AsyncExpectationImpl implements AsyncExpectation {
    * visibility matchers also accept zero matches.
    */
   private conditionEvaluable(spec: MatcherSpec, sample: Sample): boolean {
+    if (sample.stale === true) return false;
     if (spec.wholeSet !== undefined) return true;
     if (sample.node === null) return spec.evaluableWithoutNode === true;
     return spec.evaluableNode?.(sample.node) ?? true;
@@ -224,6 +249,10 @@ class AsyncExpectationImpl implements AsyncExpectation {
 
   private async sample(spec: MatcherSpec, reads: ReadWindow): Promise<Sample> {
     const { engine } = this.internals.context;
+    if (spec.measuresViewport === true) {
+      const { node, count, stale, intersection } = await engine.readViewport(this.internals.expression, reads);
+      return { count, node, nodes: [], stale, ...(intersection === undefined ? {} : { intersection }) };
+    }
     if (spec.wholeSet === 'read') {
       const nodes = await engine.readAllNow(this.internals.expression, reads);
       return { count: nodes.length, node: null, nodes };
@@ -352,6 +381,47 @@ class AsyncExpectationImpl implements AsyncExpectation {
     return this.visibilityMatcher('toBeHidden', false, options?.timeout);
   }
 
+  toBeInViewport(options?: { ratio?: number; timeout?: number }): Promise<void> {
+    const api = this.api('toBeInViewport');
+    rejectUnknownOptions(api, options, ['ratio', 'timeout']);
+    const ratio: unknown = options?.ratio;
+    if (ratio !== undefined && !(typeof ratio === 'number' && ratio >= 0 && ratio <= 1)) {
+      throw new TestError('INVALID_ARGUMENT', `${api} option ratio must be a number from 0 to 1`);
+    }
+    // 0 asks for any area inside, as the default does.
+    const minimum = ratio === 0 ? undefined : ratio;
+    return this.poll(
+      {
+        name: 'toBeInViewport',
+        measuresViewport: true,
+        // No match is outside the viewport: a device leaves offscreen nodes out of its tree.
+        evaluableWithoutNode: true,
+        predicate: ({ node, intersection }) => {
+          if (node === null || intersection === undefined || !intersection.intersects) return false;
+          if (minimum === undefined) return true;
+          if (intersection.ratio === undefined) {
+            throw new ConfigurationError(
+              'UNSUPPORTED_CAPABILITY',
+              `${api} option ratio needs the share of the box inside the viewport, and this target's engine reports only the part of a box that is visible; drop ratio to check that any of it is`,
+            );
+          }
+          return intersection.ratio > minimum - RATIO_TOLERANCE;
+        },
+        describeExpected:
+          minimum === undefined ? 'inside the viewport' : `at least ${minimum} of its box inside the viewport`,
+        observed: ({ node, stale, intersection }) => {
+          if (stale === true) return 'a node that went stale before it was measured';
+          if (node === null || intersection === undefined) return 'no node';
+          if (!intersection.intersects) return 'outside the viewport';
+          return intersection.ratio === undefined
+            ? 'inside the viewport'
+            : `${describeRatio(intersection.ratio, minimum)} of its box inside the viewport`;
+        },
+      },
+      options?.timeout,
+    );
+  }
+
   toBeAttached(options?: { attached?: boolean; timeout?: number }): Promise<void> {
     const attached = this.readOptions('toBeAttached', options, 'attached') ?? true;
     return this.poll(
@@ -374,6 +444,25 @@ class AsyncExpectationImpl implements AsyncExpectation {
     return this.stateMatcher('toBeDisabled', options);
   }
 
+  toBeEditable(options?: { editable?: boolean; timeout?: number }): Promise<void> {
+    const holds = this.readOptions('toBeEditable', options, 'editable') ?? true;
+    return this.poll(
+      {
+        name: 'toBeEditable',
+        evaluableNode: (node) => editState(node) !== undefined,
+        predicate: (sample) => sample.node !== null && (editState(sample.node) === 'editable') === holds,
+        describeExpected: holds ? 'editable' : 'read-only or disabled',
+        observed: (sample) => {
+          if (sample.node === null) return 'no node';
+          const { node } = sample;
+          const role = node.role === undefined ? 'no role' : `role ${JSON.stringify(node.role)}`;
+          return editState(node) ?? `${role}, no read-only state`;
+        },
+      },
+      options?.timeout,
+    );
+  }
+
   toBeChecked(options?: { checked?: boolean; timeout?: number }): Promise<void> {
     return this.stateMatcher('toBeChecked', options);
   }
@@ -388,6 +477,26 @@ class AsyncExpectationImpl implements AsyncExpectation {
 
   toBeFocused(options?: { timeout?: number }): Promise<void> {
     return this.stateMatcher('toBeFocused', options);
+  }
+
+  toBeEmpty(options?: { timeout?: number }): Promise<void> {
+    this.readOptions('toBeEmpty', options);
+    return this.poll(
+      {
+        name: 'toBeEmpty',
+        readsWithheld: true,
+        evaluableNode: (node) => node.states?.empty !== undefined,
+        predicate: (sample) => sample.node?.states?.empty === true,
+        describeExpected: 'empty',
+        observed: (sample) => {
+          if (sample.node === null) return 'no node';
+          const empty = sample.node.states?.empty;
+          if (empty === undefined) return 'no empty state, which this engine does not report';
+          return empty ? 'empty' : 'not empty';
+        },
+      },
+      options?.timeout,
+    );
   }
 
   toHaveText(expected: TextMatch | readonly TextMatch[], options?: TextMatcherOptions): Promise<void> {
@@ -442,8 +551,36 @@ class AsyncExpectationImpl implements AsyncExpectation {
     return this.textMatcher('toHaveAccessibleName', expected, options);
   }
 
+  toHaveRole(role: Role | RoleAlias, options?: { timeout?: number }): Promise<void> {
+    this.readOptions('toHaveRole', options);
+    const given: unknown = role;
+    if (typeof given !== 'string' || given === '') {
+      throw new TestError('INVALID_ARGUMENT', `${this.api('toHaveRole')} role must be a non-empty string`);
+    }
+    const expected = canonicalRole(role);
+    return this.poll(
+      {
+        name: 'toHaveRole',
+        predicate: (sample) => sample.node?.role === expected,
+        describeExpected: `role ${JSON.stringify(expected)}`,
+        observed: (sample) => {
+          if (sample.node === null) return 'no node';
+          return sample.node.role === undefined ? 'no role' : `role ${JSON.stringify(sample.node.role)}`;
+        },
+      },
+      options?.timeout,
+    );
+  }
+
   toHaveScreenshot(nameOrOptions?: string | ScreenshotOptions, options?: ScreenshotOptions): Promise<void> {
-    return expectScreenshot(this.internals.context, this.internals.expression, this.negated, nameOrOptions, options);
+    return expectScreenshot(
+      this.internals.context,
+      this.internals.expression,
+      this.negated,
+      this.message,
+      nameOrOptions,
+      options,
+    );
   }
 
   toHaveCount(expected: number, options?: { timeout?: number }): Promise<void> {
@@ -459,6 +596,18 @@ class AsyncExpectationImpl implements AsyncExpectation {
       options?.timeout,
     );
   }
+}
+
+/**
+ * A measured share as a failure message prints it: three decimals, unless
+ * rounding would put it on the other side of `minimum` than the comparison
+ * did (0.99975 against 1 would print as 1), then in full.
+ */
+function describeRatio(ratio: number, minimum: number | undefined): string {
+  const rounded = Number(ratio.toFixed(3));
+  if (minimum === undefined) return String(rounded);
+  const met = ratio > minimum - RATIO_TOLERANCE;
+  return rounded >= minimum === met ? String(rounded) : String(ratio);
 }
 
 /** A list of text matches, as opposed to one string or RegExp. */
@@ -520,15 +669,28 @@ function printField(def: TextMatcherDef, actual: string): string {
   return JSON.stringify(def.normalize ? normalizeText(actual) : actual);
 }
 
+/**
+ * What `toBeEditable` reads: undefined for a node the engine reports no
+ * read-only state for, which the matcher cannot judge; else disabled first,
+ * as Playwright reads it, then read-only.
+ */
+function editState(node: SemanticNode): 'disabled' | 'read-only' | 'editable' | undefined {
+  const readonly = node.states?.readonly;
+  if (readonly === undefined) return undefined;
+  if (node.states?.disabled === true) return 'disabled';
+  return readonly ? 'read-only' : 'editable';
+}
+
+/** The node's true states for a state matcher's failure; `empty` is `toBeEmpty`'s alone and says nothing about the others. */
 function observedState(sample: Sample): string {
   if (sample.node === null) return 'no node';
   const states = sample.node.states ?? {};
   const active = Object.entries(states)
-    .filter(([, value]) => value === true)
+    .filter(([key, value]) => value === true && key !== 'empty')
     .map(([key]) => key);
   return active.length === 0 ? 'default states' : `states: ${active.join(', ')}`;
 }
 
-export function createAsyncExpectation(internals: LocatorInternals): AsyncExpectation {
-  return new AsyncExpectationImpl(internals, false);
+export function createAsyncExpectation(internals: LocatorInternals, message?: string): AsyncExpectation {
+  return new AsyncExpectationImpl(internals, false, message);
 }

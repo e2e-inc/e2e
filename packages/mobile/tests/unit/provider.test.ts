@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { OperationContext, ProviderRecordContext, ProviderRecording, ProviderRecordingResult, ProviderRecordingStopContext } from 'e2e/engine';
+import type { OperationContext, ProviderRecordContext, ProviderRecording, ProviderRecordingResult, ProviderRecordingStopContext } from '@e2e-dev/core/engine';
 import type { DeviceLease, DeviceProvider, DeviceRequest } from '../../src/provider.ts';
 import { boot, harness, poolVariableIn, PROJECT_ROOT, type Harness } from '../helpers/harness.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
@@ -75,6 +75,10 @@ describe('device provider', () => {
     );
   });
 
+  it('declares no device to select, so the runner refuses --device before any lease', () => {
+    expect(harness({ device: provider().impl }).engine.selectsDevice).toBeUndefined();
+  });
+
   it('leases one device per slot at prepare, warms each through its own daemon, and hands the bindings to the workers', async () => {
     const cloud = provider();
     const h = harness({ device: cloud.impl });
@@ -130,9 +134,10 @@ describe('device provider', () => {
     await h.engine.finish!(finishInfo((line) => finished.push(line)));
     expect(cloud.released.map((lease) => lease.id)).toEqual(['lease-0', 'lease-1']);
     expect(finished).toEqual(['toy-cloud: released 2 device(s)']);
-    // Nothing left: a second finish releases nothing.
+    // Nothing left: a second finish releases nothing, and no released lease's daemon is handed out again.
     await h.engine.finish!(finishInfo());
     expect(cloud.released).toHaveLength(2);
+    expect(h.surface.pool.binding({ targetName: 'ios' }, 0, {})).toBeUndefined();
   });
 
   it('releases the provider lease while a retained session close is pending', async () => {

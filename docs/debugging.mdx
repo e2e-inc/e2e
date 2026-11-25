@@ -144,12 +144,12 @@ one `attempt-<n>` per attempt. A serial group's tests share one directory:
 ```
 
 Each run that reaches its tests empties `results/` first. A `--last-failed`
-rerun keeps the files that the report it reruns names, and writes its own
+rerun keeps the files that the runs before it name, and writes its own
 attempts under each test's `rerun-<n>/`.
 
 | Artifact | When |
 | --- | --- |
-| Screenshots | A failed attempt captures one when the engine can. The built-in `agent.assert` captures one after either verdict, unless `screenshot: false`. `app.screenshot('label')` captures one on request. They mask secure fields only. See [screenshots after a secret fill](/reference/security#screenshots-after-a-secret-fill). |
+| Screenshots | A failed attempt captures one when the engine can. The built-in `agent.assert` captures one after either verdict, unless `screenshot: false`. `app.screenshot('label')` captures one on request, and `locator.screenshot('label')` one element. They mask secure fields only. See [screenshots after a secret fill](/reference/security#screenshots-after-a-secret-fill). |
 | Downloads | Files saved through `browser.waitForDownload`, kind `download`, as the app served them. [Downloads](/reference/security#downloads) says when the runner masks secrets in them. |
 | Videos | When you [record them](#watch-it-happen). Videos mask nothing. See [where redaction stops](/reference/security#where-redaction-stops). |
 | Agent transcripts | With [`--debug`](#agent-steps). |
@@ -256,10 +256,15 @@ The held step shows under its test, below the steps that already ran:
 
 ```text
  ❯ |web| tests/checkout.e2e.ts 0/1
-   └── pays with a card paused
+   └── pays with a card (k3f9)
        ✓ app.open "/checkout" 412ms
-       ▶ step 2  locator.fill "getByLabel("Email")"  tests/checkout.e2e.ts:9
-         press enter to run this step, press h to show help, press q to quit
+       ⏸ step 2  locator.fill "getByLabel("Email")"  tests/checkout.e2e.ts:9
+
+ Test Files  0 passed (1)
+      Tests  0 passed (1)
+
+Paused (k3f9) at step 2
+  press enter to run this step, press h to show help, press q to quit
 ```
 
 The keys follow [`--watch`](/reference/cli#watch-mode). These work at a prompt:
@@ -267,20 +272,33 @@ The keys follow [`--watch`](/reference/cli#watch-mode). These work at a prompt:
 | Key | Does |
 | --- | --- |
 | Enter | runs the held step and holds the next one |
+| `s` | shows the screen's accessibility tree |
+| `l` | shows the current attempt's app log, starting at the newest lines |
 | `n` | runs the rest of this test, retries included, and holds at the next test |
-| `a` | runs the rest of the run without stopping |
+| `a` | runs the rest of the run without holding steps |
 | `h` | shows every key under the prompt, or hides them |
 | `q`, Esc | stops the run as Ctrl-C does: the test ends `interrupted`, the rest are skipped, exit 130 |
 
+You can scroll through the screen or app log while the test stays paused.
+
+| Viewer key | Does |
+| --- | --- |
+| Up, Down, `k`, `j` | Scroll one line |
+| Page Up, Page Down, `b`, Space | Scroll one page |
+| `g`, `G` | Go to the top or bottom |
+| `s`, `l` | Switch to the screen or log |
+| `p` | Close the viewer and print its text above the live summary |
+| `q`, Esc | Return to the prompt |
+
 - A key pressed within 150 ms of a prompt is ignored, so a key meant for the
   last step never runs this one. Ctrl-C works at any time, also while a step
-  runs.
+  runs. The same guard applies when you close the viewer.
 - The time a step is held counts toward nothing: not its duration, not the
-  test's `timeout`, not `maxDuration`. A test that hangs after a step still
+  test's `timeout`, not `maxDuration`, and not the run's `Duration`. A test that hangs after a step still
   times out on the time it had left. The test's own duration in the report
   includes the holds.
 - Setup tests, retries, `afterEach` hooks, fixture teardowns, and steps inside
-  an `expect.poll` read run without stopping. An `agent.act` is one step.
+  an `expect.poll` read or a `toPass` block run without stopping. An `agent.act` is one step.
 - Steps started together, as in `Promise.all`, share one prompt and run on one
   Enter, so a `waitForResponse` beside the click that triggers it never waits
   for a key. A step already running when another is held keeps running on its
@@ -288,8 +306,169 @@ The keys follow [`--watch`](/reference/cli#watch-mode). These work at a prompt:
 - A hosted browser or device can end a session that sits idle too long while
   a step is held.
 
-`--step` runs one test at a time. It needs a terminal, and it is refused in
-CI, with `--watch`, with `--workers` above 1, and with the json reporter.
+`--step` runs one test at a time. It is refused in CI, with `--watch`, and
+with `--workers` above 1. With the json reporter it needs stdin and stdout
+to be a terminal: the prompt prints on stderr and the report on stdout at
+the end.
+
+## Step through a test without a terminal
+
+When stdin or stdout is not a terminal, as in a coding agent's shell,
+`--step` runs the test in the background. The command returns at the first
+held step, with the screen that step waits on. Run each later command from
+the same directory. A shell that gives commands a terminal gets the key
+prompt instead; redirect stdin from the null device (`< /dev/null`, or
+`< NUL` in Windows `cmd`).
+
+<CodeGroup>
+```bash npm
+npx e2e run tests/checkout.e2e.ts --step
+npx e2e run --step next
+```
+
+```bash pnpm
+pnpm exec e2e run tests/checkout.e2e.ts --step
+pnpm exec e2e run --step next
+```
+
+```bash bun
+bunx e2e run tests/checkout.e2e.ts --step
+bunx e2e run --step next
+```
+</CodeGroup>
+
+```text
+✓ app.open "/checkout" 124ms
+Paused (k3f9) before step 2 of pays with a card [web]:
+  locator.fill "getByLabel("Email")" (tests/checkout.e2e.ts:9)
+Screen:
+  http://localhost:3000/checkout
+  heading "Checkout"
+  textbox "Email"
+  button "Pay"
+Next: e2e run --step next to run it, e2e run --step rest to run the rest, or e2e run --step stop to end the run.
+```
+
+| Command | Does |
+| --- | --- |
+| `e2e run --step next` | runs the held step and returns at the next one |
+| `e2e run --step rest` | runs the rest of the run without holding steps |
+| `e2e run --step stop` | stops the run as `q` does, exit 130, even while another command waits |
+
+- Each answer starts with what the run printed since the last command: a
+  line per step that ran, as the first line above, with the error under a
+  failed one. The last answer ends with the run summary and
+  `The stepped run has ended.`, and the command exits with the run's exit
+  code.
+- The screen lists the app's nodes as a trace page does, with secrets
+  redacted.
+- One directory has one stepped run. A second `--step` there exits 2 until
+  the first ends.
+- `next` and `rest` only act on a step a command has printed. When a
+  command is killed while it waits, the next one prints what it missed: the
+  step, without running it, or the end of the run. A `next` or `rest` sent while a step runs waits for
+  the next held step without acting. Either way, the answer opens with a line
+  saying the action was not applied.
+- A step held for 30 minutes with no command stops the run.
+- With `--step`, a file or directory named `next`, `rest`, or `stop` needs
+  a path, such as `./next`.
+
+## Pause a test
+
+With [`screen.pause()`](/reference/screen#screen-pause), you can pause the
+test at a line, with the app open, until you resume it. You can use it in
+any `e2e run`, with or without [`--step`](#step-through-a-test). The test
+is paused each time the line runs, such as on every pass of a loop.
+
+```ts title="tests/checkout.e2e.ts"
+import { test } from '@e2e-dev/web';
+
+test('pays with a card', async ({ app, screen }) => {
+  await app.open('/checkout');
+  await screen.pause();
+});
+```
+
+Add `--headed` to look at the browser while the test is paused:
+
+<CodeGroup>
+```bash npm
+npx e2e run tests/checkout.e2e.ts --headed
+```
+
+```bash pnpm
+pnpm exec e2e run tests/checkout.e2e.ts --headed
+```
+
+```bash bun
+bunx e2e run tests/checkout.e2e.ts --headed
+```
+</CodeGroup>
+
+In a terminal, the pause is shown under its test:
+
+```text
+ ❯ |web| tests/checkout.e2e.ts 0/1
+   └── pays with a card (k3f9)
+       ⏸ paused  screen.pause()  tests/checkout.e2e.ts:5
+
+ Test Files  0 passed (1)
+      Tests  0 passed (1)
+
+Paused (k3f9) at screen.pause()
+  press enter to resume, press h to show help, press q to quit
+```
+
+Press Enter to resume the test, `h` to list the keys, or `q` to stop the run
+with exit 130, as at a [`--step` prompt](#step-through-a-test).
+Press `s` for the screen or `l` for the app log, then use the [viewer keys](#step-through-a-test).
+
+Without a terminal, as in a coding agent's shell, the pause is printed with
+the screen it waits on:
+
+```text
+Paused (k3f9) in pays with a card [web]:
+  screen.pause() (tests/checkout.e2e.ts:5)
+Screen:
+  http://localhost:3000/checkout
+  heading "Checkout"
+Next: e2e run --step next to resume the test, or e2e run --step stop to end the run.
+```
+
+To resume the test, run `e2e run --step next` from another shell in the
+same directory. To end the run with exit 130, run `e2e run --step stop`. You
+can use these commands with or without a terminal. At this pause, you can
+send `rest` in place of `next`.
+
+To [attach over MCP](/reference/mcp#attaching-to-a-held-test) from the same
+directory, pass the ID from the pause header, as in
+`open_session {attach: "k3f9"}`.
+
+You get an answer once the test is paused again or the run ends. At the
+end, you get `The run has ended.` and the run's exit code. See
+[Step through a test without a terminal](#step-through-a-test-without-a-terminal)
+for what each answer holds.
+
+- Paused time doesn't count toward any timeout. But without a terminal, the
+  run is stopped after 30 minutes at a pause without a command.
+- The test is paused on every attempt, retries and setup tests included.
+- With several workers, pauses are shown one at a time, oldest first, while
+  the other workers keep running.
+- Call `screen.pause()` with `await` in a
+  [`beforeEach`](/reference/test#beforeeach) hook,
+  [fixture](/fixtures) setup, or the test body. See
+  [`screen.pause()`](/reference/screen#screen-pause) for what happens
+  anywhere else.
+- You can control one run per directory at a time with `e2e run --step`
+  commands. A `--step` run started without a terminal is controlled from its
+  start. A run without `--step` is controlled from its first pause. If
+  another run in the directory is already controlled this way:
+  - Without a terminal, the test fails at the pause with `RUNNER_BUSY`. End
+    the other run with `e2e run --step stop`, or run this one in a terminal.
+  - In a terminal, you can still use the keys. A line is printed to say
+    that the commands go to the other run.
+- With `CI` set, the test fails at the pause with `PAUSE_UNAVAILABLE`.
+  Remove the call before you commit.
 
 ## Console output
 
@@ -302,11 +481,11 @@ hello from the test
 ```
 
 Output from outside a test, such as a file's top level or a reporter,
-prints under `stdout | runner` or `stderr | runner`. Both streams print on
-stdout. Without the `list` reporter, output goes to its own stream as
-written, except with the `json` reporter (`--reporter json` or in
-`reporters`), which keeps stdout for the report and prints output on
-stderr. Output from the config load prints before the
+prints under `stdout | runner` or `stderr | runner`. Both streams print
+where `list` does: stdout, or stderr beside `json`. Without `list`, `dot`, `line`,
+or another [interactive](/reference/reporters#interactive) reporter, output
+prints on stderr as written, so stdout holds only what a reporter prints
+there. Output from the config load prints on stderr before the
 run header, or a warning replaces it if the load fails.
 
 The runner [redacts](/reference/security#redaction) secret values. The
@@ -387,7 +566,7 @@ to trace the whole flow or rule out a stale [recording](/cache).
 | `ACTION_FAILED` | Element covered, disabled, or detached, or an operation timed out | Wait on the right condition with `expect` first; close overlays |
 | `STEP_BUDGET_EXHAUSTED`, `STEP_TIMEOUT` | The agent ran out of actions, model calls, or time | Scope the goal to one step. Raise the agent entry's `maxSteps` or `maxModelCalls` for the budget, the config `timeout` for an `act` step, or the agent's `judgmentTimeout` for `assert`, `waitFor`, and `extract` |
 | `MODEL_UNAVAILABLE` | No model constructed in the config, or GitHub Copilot doesn't serve the configured model to your account | See [Models](/models); for Copilot, [Pick a model](/subscriptions#pick-a-model) |
-| `MODEL_PROVIDER_FAILED` | Bad key, rate limit, no credits, or every try of one request went 120 s without an answer | Check the key the provider reads and the quota; for a slow local model, a smaller screen (`agents.<name>.maxObservationBytes`) or a faster model |
+| `MODEL_PROVIDER_FAILED` | Missing or bad key, rate limit, no credits, or every try of one request went 120 s without an answer | Check the key the provider reads and the quota; for a slow local model, a smaller screen (`agents.<name>.maxObservationBytes`) or a faster model |
 | `MODEL_REFUSED` | The model refused the prompt (finish reason `content-filter`). Exit 1 | Rephrase the instruction, or switch to another model |
 
 The [errors reference](/reference/errors) lists every code, its class, and

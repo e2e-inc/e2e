@@ -11,24 +11,29 @@
 import { mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import picocolors from 'picocolors';
-import { isCiMode } from '../config/resolve.ts';
-import { writeFileAtomicSync } from '../internal/atomic-write.ts';
-import { envFlag } from '../internal/env.ts';
+import { isCiMode } from '@e2e-dev/core/lib/config/resolve';
+import { writeFileAtomicSync } from '@e2e-dev/core/lib/internal/atomic-write';
+import { envFlag } from '@e2e-dev/core/lib/internal/env';
 import { detectWorkspacePackageManager, execCommand, readPackageManifest } from '../internal/package-manager.ts';
-import { isPlainObject } from '../internal/options.ts';
+import { isPlainObject } from '@e2e-dev/core/lib/internal/options';
+import { declaringPackage, RUNNER } from '../internal/project-package.ts';
 import { isRelease, latestRelease, olderThan } from '../internal/release.ts';
 import { telemetryConfigDir } from '../telemetry/store.ts';
+import { REPOSITORY_URL } from './docs-url.ts';
+import { updateStarLine } from './star.ts';
 
 const FILE_NAME = 'update-check.json';
 const CHECK_INTERVAL_MS = 86_400_000;
 /** The longest the check may hold the process after the command, once a day at most. */
 const FETCH_TIMEOUT_MS = 1_500;
-const CHANGELOG_URL = 'https://github.com/e2e-inc/e2e/blob/main/packages/e2e/CHANGELOG.md';
+const CHANGELOG_URL = `${REPOSITORY_URL}/blob/main/packages/e2e/CHANGELOG.md`;
 /**
  * `mcp` speaks JSON-RPC on stdio to a client, not to a person. `upgrade` is
  * the step the notice asks for; the version running it is the old one.
  */
 const SILENT_COMMANDS: ReadonlySet<string> = new Set(['mcp', 'upgrade']);
+/** Commands that end with a star ask of their own, so the notice leaves its out. */
+const STARRING_COMMANDS: ReadonlySet<string> = new Set(['init']);
 
 interface CheckRecord {
   readonly checkedAt: number;
@@ -73,29 +78,27 @@ function readRecord(filePath: string): CheckRecord | undefined {
  */
 function upgradeCommand(cwd: string, env: NodeJS.ProcessEnv): string {
   let nearest: string | undefined;
-  let project: string | undefined;
-  for (let dir = cwd; project === undefined; dir = path.dirname(dir)) {
-    const manifest = readPackageManifest(dir);
-    if (manifest !== undefined) nearest ??= dir;
-    if (manifest !== undefined && DEPENDENCY_SECTIONS.some((section) => isPlainObject(manifest[section]) && manifest[section]['e2e'] !== undefined)) project = dir;
+  for (let dir = cwd; nearest === undefined; dir = path.dirname(dir)) {
+    if (readPackageManifest(dir) !== undefined) nearest = dir;
     if (path.dirname(dir) === dir) break;
   }
-  return execCommand(detectWorkspacePackageManager(project ?? nearest ?? cwd, env).manager, 'e2e upgrade');
+  const manager = declaringPackage(cwd, RUNNER, env)?.manager ?? detectWorkspacePackageManager(nearest ?? cwd, env).manager;
+  return execCommand(manager, 'e2e upgrade');
 }
-
-const DEPENDENCY_SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies'] as const;
-
 
 export class UpdateCheck {
   private readonly options: UpdateCheckOptions;
+  private readonly env: NodeJS.ProcessEnv;
   private readonly enabled: boolean;
   private started = false;
+  private command: string | undefined;
   private latest: string | undefined;
   private pending: Promise<void> | undefined;
 
   constructor(options: UpdateCheckOptions) {
     this.options = options;
-    const env = options.env ?? process.env;
+    this.env = options.env ?? process.env;
+    const env = this.env;
     this.enabled =
       options.checkout !== true &&
       (options.interactive ?? process.stderr.isTTY === true) &&
@@ -106,7 +109,7 @@ export class UpdateCheck {
   }
 
   private get filePath(): string {
-    return path.join(this.options.configDir ?? telemetryConfigDir(this.options.env), FILE_NAME);
+    return path.join(this.options.configDir ?? telemetryConfigDir(this.env), FILE_NAME);
   }
 
   private now(): number {
@@ -120,6 +123,7 @@ export class UpdateCheck {
   start(command: string): void {
     if (!this.enabled || this.started || SILENT_COMMANDS.has(command)) return;
     this.started = true;
+    this.command = command;
     const record = readRecord(this.filePath);
     this.latest = record?.latest;
     if (record === undefined || this.now() - record.checkedAt >= CHECK_INTERVAL_MS) this.pending = this.refresh();
@@ -147,7 +151,7 @@ export class UpdateCheck {
     await this.pending;
     const latest = this.latest;
     if (latest === undefined || !olderThan(this.options.version, latest)) return;
-    const install = upgradeCommand(this.options.cwd ?? process.cwd(), this.options.env ?? process.env);
+    const install = upgradeCommand(this.options.cwd ?? process.cwd(), this.env);
     const write = this.options.write ?? ((text: string) => void process.stderr.write(text));
     write(
       [
@@ -155,7 +159,7 @@ export class UpdateCheck {
         `${picocolors.yellow('Update available')} ${picocolors.dim(this.options.version)} → ${picocolors.green(latest)}`,
         `Run ${picocolors.cyan(install)} to update. Changelog: ${picocolors.underline(CHANGELOG_URL)}`,
         '',
-      ].join('\n'),
+      ].join('\n') + (STARRING_COMMANDS.has(this.command ?? '') ? '\n' : updateStarLine(this.env)),
     );
   }
 }

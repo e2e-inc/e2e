@@ -2,7 +2,7 @@
  * The Playwright engine for e2e: a browser body built with the
  * public `defineEngine`, validated by the same rules and graded by the same
  * capabilities as any other engine. Core imports nothing from here; this
- * package imports the contract from `e2e/engine` and contributes the `browser`
+ * package imports the contract from `@e2e-dev/core/engine` and contributes the `browser`
  * fixture the way a device engine contributes `device`.
  */
 
@@ -17,16 +17,18 @@ import {
   type EngineAppCheckInfo,
   type EngineAppDeclaration,
   type EngineHandle,
-} from 'e2e/engine';
+  type EngineIsolation,
+} from '@e2e-dev/core/engine';
 import { createRequire } from 'node:module';
-import { asBrowserProvider } from './provider.ts';
+import type { WebFixtures } from './fixtures.ts';
+import { asBrowserProvider, type BrowserProvider } from './provider.ts';
 import { PlaywrightSurface, type WebOptions } from './surface.ts';
 import { createBrowserFixture } from './browser.ts';
 import { validateInitScripts } from './init-scripts.ts';
 import { MEDIA_KEYS, mediaProblem } from './media.ts';
 import { FIELD_VALUE_CONTROL, headerProblem, originProblem } from './protected-app.ts';
 import { validatePermissions } from './permissions.ts';
-import type { BrowserName } from './browser-connection.ts';
+import { BROWSER_NAMES, isBrowserName } from './browser-connection.ts';
 
 /** App fields only a device target reads. */
 const NATIVE_APP_KEYS = ['bundleId', 'appPath', 'launchArguments'] as const;
@@ -54,7 +56,15 @@ export function surfaceOf(engine: EngineHandle): PlaywrightLiveSurface | undefin
   return { page: () => surface.requirePage(), context: () => surface.requireContext() };
 }
 
-export function web(options: WebOptions = {}): EngineHandle {
+/**
+ * The handle `web()` returns. Declared here so a config's inferred type
+ * names this package: a project sees `@e2e-dev/core` only through its
+ * dependencies, and TypeScript cannot write that path in a declaration.
+ */
+export interface WebEngine<Platform extends string = string, Isolation extends EngineIsolation = EngineIsolation>
+  extends EngineHandle<WebFixtures, Platform, Isolation> {}
+
+export function web(options: WebOptions = {}): WebEngine<'web', 'attempt'> {
   if ('allowedOrigins' in options) {
     throw new ConfigurationError(
       'INVALID_CONFIG',
@@ -68,7 +78,7 @@ export function web(options: WebOptions = {}): EngineHandle {
     );
   }
   rejectUnknownKeys('web()', options, WEB_OPTION_KEYS);
-  const provider = typeof options.browser === 'object' && options.browser !== null ? asBrowserProvider(options.browser) : undefined;
+  const provider = resolveBrowser(options.browser);
   if (provider !== undefined && options.connect !== undefined) {
     throw new ConfigurationError(
       'INVALID_CONFIG',
@@ -86,12 +96,16 @@ export function web(options: WebOptions = {}): EngineHandle {
   if (options.basicAuth !== undefined) validateBasicAuth(options.basicAuth);
   if (options.credentialOrigins !== undefined) validateCredentialOrigins(options);
   if (options.testIdAttribute !== undefined) validateTestIdAttribute(options.testIdAttribute);
+  if (options.chromiumSandbox !== undefined) validateChromiumSandbox(options.chromiumSandbox);
   if (options.userAgent !== undefined) validateUserAgent(options.userAgent, options.headers);
   if (options.locale !== undefined) validateLocale(options.locale, options.headers);
   if (options.timezoneId !== undefined) validateTimezoneId(options.timezoneId);
   validateMedia(options);
   if (options.initScripts !== undefined) validateInitScripts(options.initScripts);
+  if (options.viewport !== undefined && options.viewport !== null) validatePixelSize('web({ viewport })', options.viewport);
+  if (options.deviceScaleFactor !== undefined) validateDeviceScaleFactor(options);
   if (options.screencast !== undefined) validateScreencast(options.screencast);
+  if (options.webmcp !== undefined) validateWebmcp(options, provider);
   const reconnecting = options.connect?.reconnectEndpoint !== undefined;
   // A per-attempt lease rides the same persistent context as `reconnectEndpoint`, with the same limits.
   const recoverable = reconnecting || provider?.scope === 'attempt';
@@ -104,11 +118,12 @@ export function web(options: WebOptions = {}): EngineHandle {
     );
   }
   const surface = new PlaywrightSurface(options);
-  const handle = defineEngine({
+  const handle = defineEngine<WebFixtures, 'web', 'attempt'>({
     name: 'web',
     version: ownVersion(),
     spiVersion: 1,
     platform: 'web',
+    fileApps: true,
     prepare: (info) => surface.prepare(info),
     finish: (info) => surface.finish(info),
     doctor: (info) => surface.doctor(info),
@@ -118,10 +133,12 @@ export function web(options: WebOptions = {}): EngineHandle {
     endAttempt: (context) => surface.endAttempt(context),
     dispose: (context) => surface.dispose(context),
     observe: (operation, observeOptions) => surface.observe(operation, observeOptions),
+    readStyle: (ref, properties, operation) => surface.readStyle(ref, properties, operation),
+    viewportIntersection: (ref, operation) => surface.viewportIntersection(ref, operation),
     locate: (expression, operation) => surface.locate(expression, operation),
     perform: (ref, action, operation) => surface.perform(ref, action, operation),
-    // A browser honors every action kind of the contract; `actions.ts` dispatches each.
-    actions: LOCATOR_ACTION_KINDS,
+    // A browser honors the SPI v1 actions plus blur, in-memory uploads, and multi-taps; `actions.ts` dispatches each.
+    actions: [...LOCATOR_ACTION_KINDS, 'blur', 'setInputFilePayloads', 'multiTap'],
     // Playwright holds each modifier for the click.
     tapModifiers: true,
     // A page takes every pointer action of the contract at a bare point too.
@@ -131,8 +148,10 @@ export function web(options: WebOptions = {}): EngineHandle {
       type: (text, keyboardOptions, operation) => surface.typeText(text, keyboardOptions, operation),
       press: (key, operation) => surface.pressKey(key, operation),
     },
+    // `app.permissions: 'all'` grants every name the browser takes; see grantPermissions.
+    grantsAllPermissions: true,
     // A provider or a CDP attach speaks CDP, so it takes Chromium's names.
-    validateApp: (app, info) => validateApp(app, info, typeof options.browser === 'string' ? options.browser : 'chromium'),
+    validateApp: (app, info) => validateApp(app, info, options),
     ...(isSecret(options.basicAuth?.password) ? { secrets: [options.basicAuth.password] } : {}),
     session: {
       open: (url, operation) => surface.open(url, operation),
@@ -167,7 +186,9 @@ export function web(options: WebOptions = {}): EngineHandle {
 /** Every option `web()` takes, kept equal to `WebOptions` by the compiler. */
 const WEB_OPTION_KEYS: readonly string[] = Object.keys({
   browser: true,
+  chromiumSandbox: true,
   viewport: true,
+  deviceScaleFactor: true,
   screencast: true,
   connect: true,
   headers: true,
@@ -180,10 +201,11 @@ const WEB_OPTION_KEYS: readonly string[] = Object.keys({
   colorScheme: true,
   reducedMotion: true,
   initScripts: true,
+  webmcp: true,
 } satisfies Record<keyof WebOptions, true>);
 
 /** The options applied when the engine creates a browser context, which a persistent context never is. */
-const CREATION_OPTION_KEYS = ['headers', 'basicAuth', 'userAgent', 'locale', 'timezoneId'] as const satisfies readonly (keyof WebOptions)[];
+const CREATION_OPTION_KEYS = ['headers', 'basicAuth', 'userAgent', 'locale', 'timezoneId', 'deviceScaleFactor'] as const satisfies readonly (keyof WebOptions)[];
 
 /**
  * What a persistent context rules out, named with its cause: `what` replaces
@@ -350,6 +372,27 @@ function validateTimezoneId(timezoneId: unknown): void {
 }
 
 /**
+ * `webmcp` changes how the browser is launched, so it needs a browser the
+ * engine launches, and one that has WebMCP: WebKit does not.
+ */
+function validateWebmcp(options: WebOptions, provider: BrowserProvider | undefined): void {
+  if (typeof options.webmcp !== 'boolean') {
+    throw new ConfigurationError('INVALID_CONFIG', `web({ webmcp }) must be true or false, got ${JSON.stringify(options.webmcp)}`);
+  }
+  if (!options.webmcp) return;
+  const elsewhere = provider !== undefined ? `browser provider "${provider.name}"` : options.connect !== undefined ? 'connect' : undefined;
+  if (elsewhere !== undefined) {
+    throw new ConfigurationError(
+      'INVALID_CONFIG',
+      `web({ webmcp }) is a launch setting, and with ${elsewhere} the engine does not launch the browser; start that browser with --enable-features=WebMCP and remove webmcp`,
+    );
+  }
+  if (options.browser === 'webkit') {
+    throw new ConfigurationError('INVALID_CONFIG', 'web({ webmcp }) requires the chromium or firefox browser; WebKit does not implement WebMCP');
+  }
+}
+
+/**
  * Refuses a media feature value the browser does not emulate, at config load
  * rather than at the first page. A persistent context takes these too: they
  * are set on each page, not only on a context the engine creates.
@@ -384,6 +427,40 @@ function isTimeZone(timeZone: string): boolean {
  */
 const ATTRIBUTE_NAME = /^[A-Za-z_:][A-Za-z0-9_:.-]*$/;
 
+/** `web({ browser })`: undefined for a name the engine launches or no browser, the checked provider for an object, and a refusal for anything else. `browserType` reads any other string as Chromium. */
+function resolveBrowser(browser: unknown): BrowserProvider | undefined {
+  if (browser === undefined || (typeof browser === 'string' && isBrowserName(browser))) return undefined;
+  if (isRecord(browser)) return asBrowserProvider(browser);
+  throw new ConfigurationError(
+    'INVALID_CONFIG',
+    `web({ browser }) must be one of ${BROWSER_NAMES.join(', ')}, or a browser provider, got ${typeof browser === 'string' ? JSON.stringify(browser) : kindOf(browser)}`,
+  );
+}
+
+/** A `{ width, height }` size in whole pixels, each at least 1, with no other key; `option` names it in the message. */
+function validatePixelSize(option: string, size: unknown): void {
+  const fields = isPlainObject(size) ? size : {};
+  const { width, height } = fields as { width?: unknown; height?: unknown };
+  const unknownKey = Object.keys(fields).find((key) => key !== 'width' && key !== 'height');
+  if (unknownKey !== undefined) {
+    throw new ConfigurationError('INVALID_CONFIG', `${option} has unknown key "${unknownKey}"; it is { width, height }`);
+  }
+  if (!Number.isInteger(width) || !Number.isInteger(height) || (width as number) < 1 || (height as number) < 1) {
+    throw new ConfigurationError('INVALID_CONFIG', `${option} must be { width, height } in whole pixels, each at least 1`);
+  }
+}
+
+/** `web({ deviceScaleFactor })`: a number above 0, beside a viewport size the browser can scale. */
+function validateDeviceScaleFactor(options: WebOptions): void {
+  const factor: unknown = options.deviceScaleFactor;
+  if (typeof factor !== 'number' || !Number.isFinite(factor) || factor <= 0) {
+    throw new ConfigurationError('INVALID_CONFIG', 'web({ deviceScaleFactor }) must be a number above 0');
+  }
+  if (options.viewport === null) {
+    throw new ConfigurationError('INVALID_CONFIG', 'web({ deviceScaleFactor }) needs a viewport size; viewport: null leaves the window at its own scale');
+  }
+}
+
 /** `web({ screencast })`: a whole-pixel frame size and a 0-100 JPEG quality, each optional. */
 function validateScreencast(screencast: unknown): void {
   if (!isPlainObject(screencast)) {
@@ -395,17 +472,7 @@ function validateScreencast(screencast: unknown): void {
     }
   }
   const { size, quality } = screencast as { size?: unknown; quality?: unknown };
-  if (size !== undefined) {
-    const fields = isPlainObject(size) ? size : {};
-    const { width, height } = fields as { width?: unknown; height?: unknown };
-    const unknownKey = Object.keys(fields).find((key) => key !== 'width' && key !== 'height');
-    if (unknownKey !== undefined) {
-      throw new ConfigurationError('INVALID_CONFIG', `web({ screencast: { size } }) has unknown key "${unknownKey}"; it is { width, height }`);
-    }
-    if (!Number.isInteger(width) || !Number.isInteger(height) || (width as number) < 1 || (height as number) < 1) {
-      throw new ConfigurationError('INVALID_CONFIG', 'web({ screencast: { size } }) must be { width, height } in whole pixels, each at least 1');
-    }
-  }
+  if (size !== undefined) validatePixelSize('web({ screencast: { size } })', size);
   if (quality !== undefined && (!Number.isInteger(quality) || (quality as number) < 0 || (quality as number) > 100)) {
     throw new ConfigurationError('INVALID_CONFIG', 'web({ screencast: { quality } }) must be an integer from 0 through 100');
   }
@@ -428,12 +495,22 @@ function validateTestIdAttribute(attribute: unknown): void {
   }
 }
 
+/** Refuses a sandbox opt-out that is not a boolean, at config load. */
+function validateChromiumSandbox(chromiumSandbox: unknown): void {
+  if (typeof chromiumSandbox !== 'boolean') {
+    throw new ConfigurationError(
+      'INVALID_CONFIG',
+      `web({ chromiumSandbox }) must be a boolean, got ${JSON.stringify(chromiumSandbox)}`,
+    );
+  }
+}
+
 /**
  * A browser target opens a URL: without `app.url` there is nothing for
  * `app.open()` to open, and the fields that describe an installed device app
  * have nothing to act on here. `permissions` must be ones `browser` grants.
  */
-function validateApp(app: EngineAppDeclaration, { targetName }: EngineAppCheckInfo, browser: BrowserName): void {
+function validateApp(app: EngineAppDeclaration, { targetName, fileApp }: EngineAppCheckInfo, options: WebOptions): void {
   for (const key of NATIVE_APP_KEYS) {
     if (app[key] !== undefined) {
       throw new ConfigurationError(
@@ -445,10 +522,41 @@ function validateApp(app: EngineAppDeclaration, { targetName }: EngineAppCheckIn
   if (app.url === undefined) {
     throw new ConfigurationError(
       'INVALID_CONFIG',
-      `target "${targetName}" needs app.url: a web() target opens the app at a URL, targets: [{ engine: web(), app: { url: 'http://localhost:3000' } }]`,
+      `target "${targetName}" needs app.url: web() opens the app at a URL, such as app: { url: 'http://localhost:3000' }`,
     );
   }
-  if (app.permissions !== undefined) validatePermissions(targetName, browser, app.permissions);
+  if (fileApp === true) validateFileApp(targetName, options);
+  if (app.permissions !== undefined) validatePermissions(targetName, typeof options.browser === 'string' ? options.browser : 'chromium', app.permissions);
+}
+
+/**
+ * A file app is read by the browser, off the disk of the machine it runs on,
+ * and the harness checks every file navigation against its own disk. So the
+ * browser has to be one this engine launches here: a provider's runs
+ * elsewhere, and `connect` attaches to one that may. A file has no origin
+ * either, and `headers` and `basicAuth` always go to the app's.
+ */
+function validateFileApp(targetName: string, options: WebOptions): void {
+  const where = `target "${targetName}" opens a file app.url`;
+  if (typeof options.browser === 'object') {
+    throw new ConfigurationError(
+      'INVALID_CONFIG',
+      `${where}, which browser provider "${options.browser.name}" cannot read: its browsers run on another machine; serve the app over http(s), or launch the browser locally`,
+    );
+  }
+  if (options.connect !== undefined) {
+    throw new ConfigurationError(
+      'INVALID_CONFIG',
+      `${where}, and web({ connect }) attaches to a browser that may run on another machine, with another disk; serve the app over http(s), or let the engine launch the browser`,
+    );
+  }
+  const credential = options.headers !== undefined ? 'headers' : options.basicAuth !== undefined ? 'basicAuth' : undefined;
+  if (credential !== undefined) {
+    throw new ConfigurationError(
+      'INVALID_CONFIG',
+      `${where}, and web({ ${credential} }) always goes to the app's origin, which a file does not have; remove the option, or serve the app over http(s)`,
+    );
+  }
 }
 
 /** This package's published version, read through require resolution. */

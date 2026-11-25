@@ -1,24 +1,26 @@
 /**
  * Worker process glue. Owns nothing but the process: it loads the config
  * itself (config modules may hold live engine handles that cannot cross
- * IPC), resolves each unit's pairs by re-importing the file, and hands all
+ * IPC), resolves each unit's pairs against its own import of the file, and hands all
  * actual execution to `TargetWorker`.
  */
 
-import { collectFromRegistration } from '../../collect/collect.ts';
-import { collectModule } from '../../collect/registry.ts';
+import { collectFromRegistration, type CollectedTest } from '../../collect/collect.ts';
+import { collectFile } from '../../collect/collect-file.ts';
+import type { ModuleRegistration } from '../../collect/registry.ts';
 import type { TestTargetPair } from '../../collect/select.ts';
-import { importModule, loadConfigModule } from '../../config/load.ts';
-import { assignPorts, resolveConfig } from '../../config/resolve.ts';
-import { setSecretRegistry } from '../../secrets.ts';
-import { loadAiSdk } from '../../agent/ai-sdk.ts';
-import { AiTraceRecorder, registerAiTraceRecorder } from '../../internal/ai-trace.ts';
-import { DebugTrace } from '../../internal/debug.ts';
-import { classifyError, ConfigurationError, serializeError } from '../../internal/errors.ts';
-import { StreamRedactor } from '../../internal/redact.ts';
+import { loadConfigModule } from '../../config/load.ts';
+import { assignPorts } from '@e2e-dev/core/lib/config/resolve';
+import { resolveConfig } from '../../config/resolve-run.ts';
+import { setSecretRegistry } from '@e2e-dev/core/lib/secrets';
+import { loadAiSdk } from '@e2e-dev/core/lib/agent/ai-sdk';
+import { AiTraceRecorder, registerAiTraceRecorder } from '@e2e-dev/core/lib/internal/ai-trace';
+import { DebugTrace } from '@e2e-dev/core/lib/internal/debug';
+import { classifyError, ConfigurationError, serializeError } from '@e2e-dev/core/lib/internal/errors';
+import { StreamRedactor } from '@e2e-dev/core/lib/internal/redact';
 import { ConfigLoadHold, writtenChunk } from '../process-output.ts';
-import { processSecrets, registerStaticSecrets, staticSecretLedger } from '../secrecy.ts';
-import { SessionStore } from '../sessions.ts';
+import { processSecrets, registerStaticSecrets, staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
+import { SessionStore } from '@e2e-dev/core/lib/run/sessions';
 import type {
   ChildProcessInbound,
   OutputMessage,
@@ -27,8 +29,10 @@ import type {
   WorkerBootstrap,
   WorkerToMain,
 } from './protocol.ts';
-import { TargetWorker, type ResolvedUnitPairs, type TargetWorkerDeps } from './session.ts';
-import { isAbandonedRejection } from '../../internal/abandoned.ts';
+import { inHeldTestToolCall } from './held-test-tool-scope.ts';
+import { TargetWorker, type ResolveUnitPairs, type TargetWorkerDeps } from './session.ts';
+import { isAbandonedRejection } from '@e2e-dev/core/lib/internal/abandoned';
+import { claimRunCodeStray } from '../../session-tools/code-strays.ts';
 
 /**
  * Outbound messages in flight. `process.send` is asynchronous and a
@@ -106,6 +110,15 @@ function captureOutput(pairInFlight: () => OutputMessage['pair']): () => void {
     flushes.push(() => void output(redactor.flush(), heldFor));
     const write = (written: string | Uint8Array, encoding?: BufferEncoding | Done, callback?: Done): boolean => {
       const done = typeof encoding === 'function' ? encoding : callback;
+
+      if (inHeldTestToolCall()) {
+        if (done !== undefined) {
+          process.nextTick(done);
+        }
+
+        return true;
+      }
+
       const chunk = writtenChunk(written, encoding);
       if (configLoad.hold(name, chunk)) {
         if (done !== undefined) process.nextTick(done);
@@ -179,15 +192,19 @@ async function bootstrap(
   );
 
   let collectCounter = 0;
-  const resolvePairs = async (unit: RunUnitMessage): Promise<ResolvedUnitPairs> => {
+  const importUnit = (unit: RunUnitMessage): Promise<ModuleRegistration> => {
     collectCounter += 1;
-    const registration = await collectModule(
-      () => importModule(unit.absolutePath, `worker-collect-${collectCounter}`),
-      unit.absolutePath,
-      staticSecretLedger(config.allSecrets).redact,
-    );
-    const collected = collectFromRegistration(config.projectRoot, unit.absolutePath, registration);
-    const byId = new Map(collected.tests.map((test) => [test.id, test]));
+    return collectFile(unit.absolutePath, `worker-collect-${collectCounter}`, staticSecretLedger(config.allSecrets).redact);
+  };
+  // A registration serves every unit of its file this worker runs, so its tests are collected one time.
+  const testsById = new WeakMap<ModuleRegistration, ReadonlyMap<string, CollectedTest>>();
+  const resolvePairs: ResolveUnitPairs = async (unit, reusable) => {
+    const registration = reusable ?? (await importUnit(unit));
+    let byId = testsById.get(registration);
+    if (byId === undefined) {
+      const collected = collectFromRegistration(config.projectRoot, unit.absolutePath, registration);
+      testsById.set(registration, (byId = new Map(collected.tests.map((test) => [test.id, test]))));
+    }
     const pairs: TestTargetPair[] = [];
     const missing: WirePair[] = [];
     for (const wire of unit.pairs) {
@@ -218,7 +235,7 @@ async function bootstrap(
     isolated: true,
     resolvePairs,
     debug,
-    step: message.step,
+    holdSteps: message.holdSteps,
   };
 }
 
@@ -230,7 +247,12 @@ function main(): void {
   // Interrupts arrive over IPC; terminal signals target the runner process.
   process.on('SIGINT', () => undefined);
   process.on('SIGTERM', () => undefined);
-  process.on('uncaughtException', (cause) => fatal(cause));
+  // Code an attached session runs on a held test is not the test: what it throws outside its call fails that call, not the attempt.
+  // After its call ended there is nobody to fail: it is said on stderr, which is redacted like the test's output, and the test goes on.
+  const fromRunCode = (cause: unknown): boolean => claimRunCodeStray(cause, (message) => void process.stderr.write(`e2e: [warning] ${message}\n`));
+  process.on('uncaughtException', (cause) => {
+    if (!fromRunCode(cause)) fatal(cause);
+  });
   // A step or poll the test did not await rejects on a promise nobody holds
   // once it is cancelled; the attempt has already recorded it as STEP_NOT_AWAITED.
   // Any other rejection nobody caught is charged to the attempt in flight,
@@ -238,6 +260,7 @@ function main(): void {
   // has finished is it the worker's.
   process.on('unhandledRejection', (cause) => {
     if (isAbandonedRejection(cause)) return;
+    if (fromRunCode(cause)) return;
     if (worker?.strayRejection(cause) !== true) fatal(cause);
   });
 

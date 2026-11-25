@@ -145,6 +145,28 @@ describe.runIf(bun !== undefined && (supported || Boolean(process.env['E2E_BUN']
     expect(report.run.environment.runtime).toBe(`bun v${bun!.version}`);
   });
 
+  it('gives every test of a parallel file the hook a module it imports declares', async () => {
+    createTypeScriptProject(dir, { type: 'module' }, {
+      ...BUN_FILES,
+      'tests/state.ts': 'export const state = { hookRan: false };\n',
+      'tests/hooks.ts': "import { test } from 'e2e';\nimport { state } from './state.ts';\n\ntest.beforeEach(() => {\n  state.hookRan = true;\n});\n",
+      'tests/parallel.e2e.ts': `import { expect, test } from 'e2e';
+import './hooks.ts';
+import { state } from './state.ts';
+
+test.describe.configure({ parallel: true });
+// Each test has to get the hook itself: the mark of the test before it is gone.
+test.afterEach(() => { state.hookRan = false; });
+for (const title of ['one', 'two', 'three']) {
+  test(title, () => { expect(state.hookRan).toBe(true); });
+}
+`,
+    });
+    const { code, stdout } = await runBun([CLI, 'run', '--no-cache', 'tests/parallel.e2e.ts', '--workers', '1']);
+    expect(stdout).toContain('3 passed');
+    expect(code).toBe(0);
+  });
+
   it('redacts a secret console.log prints from the config, a test file, and a test', async () => {
     const value = 'bun-console-sentinel-4521';
     createTypeScriptProject(dir, { type: 'module' }, {
@@ -252,7 +274,7 @@ process.stdout.write(JSON.stringify(outcomes));
     expect(JSON.parse(stdout)).toEqual(Array.from({ length: 4 }, () => 'NODE_UNSUPPORTED: e2e/runner needs Node.js: on Bun, run tests with the e2e CLI'));
   });
 
-  it('serves e2e mcp, one session at a time, whose run_tests runs the CLI on Bun', async () => {
+  it('serves e2e mcp, one session at a time', async () => {
     createTypeScriptProject(dir, { type: 'module' }, {
       ...BUN_FILES,
       // A target with an engine, which a session needs.
@@ -266,12 +288,6 @@ process.stdout.write(JSON.stringify(outcomes));
     const client = new Client({ name: 'e2e-bun-runtime', version: '0.0.0' });
     await client.connect(transport);
     try {
-      const { tools } = await client.listTools();
-      expect(tools.map((tool) => tool.name)).toContain('run_tests');
-      const result = (await client.callTool({ name: 'run_tests', arguments: { files: ['tests/runtime.e2e.ts'] } }, { timeout: 60_000 })) as { content: { text?: string }[]; isError?: boolean };
-      const text = result.content.map((part) => part.text ?? '').join('\n');
-      expect(text).toContain('1 passed');
-      expect(result.isError).not.toBe(true);
       // Sessions would share Bun's one instance of each project module.
       expect(stderr).toContain('--max-sessions 3 ignored: on Bun, one session is open at a time');
       const open = async (): Promise<{ content: { text?: string }[]; isError?: boolean }> =>

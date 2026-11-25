@@ -2,20 +2,23 @@
 
 import os from 'node:os';
 import path from 'node:path';
-import { ENGINE_SPI_VERSION, type EngineSpiVersion } from '../engine/contract.ts';
-import { BLOCKABLE_CODES } from '../agent/executor.ts';
-import { DEFAULT_LIMITS } from '../config/agent.ts';
-import type { ResolvedConfig, ResolvedLimits, ResolvedTarget } from '../config/resolve.ts';
-import type { AgentErrorCode } from '../types.ts';
-import type { ErrorCategory, ErrorDetails, ErrorPhase, HookScope, SerializedError } from '../internal/errors.ts';
-import { resultId, timestamp } from '../internal/ids.ts';
-import { obj } from '../internal/objects.ts';
-import { packageVersion } from '../internal/package-version.ts';
+import { isFileApp } from '@e2e-dev/core/lib/config/app';
+import { BLOCKABLE_CODES } from '@e2e-dev/core/lib/agent/executor';
+import { DEFAULT_LIMITS } from '@e2e-dev/core/lib/config/agent';
+import type { ResolvedConfig, ResolvedLimits, ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
+import type { AgentErrorCode } from '@e2e-dev/core/lib/types';
+import type { ErrorCategory, ErrorDetails, ErrorPhase, HookScope, SerializedError } from '@e2e-dev/core/lib/internal/errors';
+import { resultId, timestamp } from '@e2e-dev/core/lib/internal/ids';
+import { obj } from '@e2e-dev/core/lib/internal/objects';
+import { packageVersion } from '@e2e-dev/core/lib/internal/package-version';
 import { onBun } from '../internal/runtime.ts';
-import { projectRelativePath } from '../internal/source.ts';
+import { projectRelativePath } from '@e2e-dev/core/lib/internal/source';
 import type { VcsInfo } from '../internal/vcs.ts';
-import type { SkipInfo } from '../collect/select.ts';
-import { expectedFailureOf, memberRan, someSkippedAfterFailure } from '../run/records.ts';
+import { summarizeResults } from './summary.ts';
+import type { SkipInfo } from '@e2e-dev/core/lib/run/records';
+import { expectedFailureOf, someSkippedAfterFailure } from '@e2e-dev/core/lib/run/records';
+import { describeTarget, type TargetProvenance } from '@e2e-dev/core/lib/run/provision';
+import type { EngineSpiVersion } from '@e2e-dev/core/lib/engine/contract';
 import type {
   ArtifactRecord,
   AttemptRecord,
@@ -25,7 +28,7 @@ import type {
   SerialAttemptRecord,
   SerialGroupRecord,
   SerialMemberRecord,
-} from '../run/records.ts';
+} from '@e2e-dev/core/lib/run/records';
 import type {
   AppLogRecord,
   StepCacheRecord,
@@ -35,7 +38,7 @@ import type {
   StepRecord,
   StepTurn,
   VisionDegradation,
-} from '../run/steps.ts';
+} from '@e2e-dev/core/lib/run/steps';
 
 export interface ReportSource {
   file: string;
@@ -43,42 +46,12 @@ export interface ReportSource {
   column: number;
 }
 
-export interface TargetProvenance {
-  engine: { name: string; version: string; spiVersion: EngineSpiVersion };
-  capabilities: string[];
-  /** What the engine can capture: screenshots (a failure's among them), a video. */
-  artifactCapabilities: ('screenshot' | 'video')[];
-  stateCapability: boolean;
-}
-
-/**
- * What a target's engine declaration says about it: the one description the
- * runner grades against and the report records. A target without an engine is
- * agent-tools-only and honestly reports no capabilities.
- */
-export function describeTarget(target: ResolvedTarget): TargetProvenance {
-  const engine = target.engine;
-  const artifactCapabilities: TargetProvenance['artifactCapabilities'] = [];
-  if (engine?.artifacts !== undefined) {
-    artifactCapabilities.push('screenshot');
-    if (engine.artifacts.startVideo !== undefined) artifactCapabilities.push('video');
-  }
-  return {
-    engine: {
-      name: engine?.name ?? 'none',
-      version: engine?.version ?? 'unversioned',
-      spiVersion: engine?.spiVersion ?? ENGINE_SPI_VERSION,
-    },
-    capabilities: [...(engine?.capabilities ?? [])].toSorted(),
-    artifactCapabilities,
-    stateCapability: engine?.state !== undefined,
-  };
-}
-
 export interface BuildReportOptions {
   runId: string;
   config: ResolvedConfig | undefined;
   startedAt: string;
+  /** Time in completed hold intervals. Overlapping time is counted once. */
+  heldMs?: number;
   status: 'passed' | 'failed' | 'error' | 'interrupted';
   exitCode: 0 | 1 | 2 | 3 | 4 | 130;
   results: readonly ResultRecord[];
@@ -93,6 +66,14 @@ export interface BuildReportOptions {
   changes?: ReportChanges | undefined;
   /** The test filters the run applied, in order; written only when there is one. */
   filters?: readonly ReportFilter[] | undefined;
+  /** The one shard of the selection the run ran (`--shard 2/3`); absent when the run was not sharded. */
+  shard?: ReportShard | undefined;
+}
+
+/** One shard of a run split `total` ways, `index` counted from 1. */
+export interface ReportShard {
+  index: number;
+  total: number;
 }
 
 /**
@@ -226,6 +207,8 @@ export interface ReportStep {
   kind: StepRecord['kind'];
   api: string;
   label: string;
+  /** The session the step ran on when it is not the test's own: one the test opened with `launch()`. */
+  actor?: string | undefined;
   source: ReportSource;
   status: StepRecord['status'];
   startedAt: string;
@@ -450,6 +433,8 @@ export interface Report1Document {
     exitCode: BuildReportOptions['exitCode'];
     startedAt: string;
     finishedAt: string;
+    /** Elapsed run time in milliseconds, excluding intervals when all running workers were held. The field may be absent in older reports. */
+    durationMs?: number;
     project: { id: string; configDigest: string };
     environment: {
       ci: boolean;
@@ -463,6 +448,12 @@ export interface Report1Document {
      * What joins a verdict to the pull request that produced the code.
      */
     vcs?: VcsInfo;
+    /**
+     * Which shard of the selection this run was (`--shard 2/3`); absent when
+     * it was not sharded. The report marks rows this invocation's cut gave
+     * to another shard with `skip.otherShard`.
+     */
+    shard?: ReportShard;
     targets: readonly ReportTarget[];
     serialGroups: readonly ReportSerialGroup[];
     results: readonly ReportResult[];
@@ -516,10 +507,24 @@ export function projectSource(
 /** A step that named no line in the project: a fixture's own call, or a step minted outside one. */
 const UNKNOWN_STEP_SOURCE: ReportSource = { file: 'unknown', line: 1, column: 1 };
 
+/** Code points of a step label report-v1 admits (its `maxLength`, which counts code points). */
+const MAX_STEP_LABEL_CODE_POINTS = 8192;
+
+/**
+ * A label cut to what report-v1 admits. It is cut here, at the report, after
+ * the recorder redacted it whole: a guest session's step reaches its owner
+ * uncut, so the owner's ledger can still match a value it alone knows.
+ */
+function reportLabel(label: string): string {
+  const points = [...label];
+  return points.length <= MAX_STEP_LABEL_CODE_POINTS ? label : `${points.slice(0, MAX_STEP_LABEL_CODE_POINTS - 1).join('')}…`;
+}
+
 function serializeStep(step: StepRecord): ReportStep {
   const { error, source, ...rest } = step;
   return {
     ...rest,
+    label: reportLabel(step.label),
     source: source ?? UNKNOWN_STEP_SOURCE,
     error: error === undefined ? undefined : serializeErrorRecord(error),
   };
@@ -652,57 +657,12 @@ function serializeTarget(
       id: target.name,
       index: target.index,
       platform: target.platform,
-      baseOrigin: target.app.base?.origin,
+      // A file has no origin: the field is left out, as for a target with no URL.
+      baseOrigin: isFileApp(target.app) ? undefined : target.app.base?.origin,
       environment: target.app.environment,
     }),
     ...(provenance ?? describeTarget(target)),
   };
-}
-
-/**
- * Computes report-1 summary counts from results; the status counts are over
- * the selected ones. A result executed when it made an attempt; a serial
- * member's attempts are its records in its group's attempts.
- */
-function computeSummary(results: readonly ResultRecord[], serialGroups: readonly SerialGroupRecord[]): ReportSummary {
-  const ranMembers = new Set(
-    serialGroups.flatMap((group) =>
-      group.attempts.flatMap((attempt) => attempt.members.filter(memberRan).map((member) => `${group.id}\u0000${member.testId}`)),
-    ),
-  );
-  let selected = 0;
-  let executed = 0;
-  let passed = 0;
-  let failed = 0;
-  let interrupted = 0;
-  let flaky = 0;
-  let skipped = 0;
-  for (const result of results) {
-    if (result.attempts.length > 0 || (result.serialGroupId !== undefined && ranMembers.has(`${result.serialGroupId}\u0000${result.test.id}`))) {
-      executed += 1;
-    }
-    if (!result.selected) continue;
-    selected += 1;
-    switch (result.status) {
-      case 'passed':
-        passed += 1;
-        break;
-      case 'flaky':
-        flaky += 1;
-        break;
-      case 'failed':
-      case 'timed-out':
-        failed += 1;
-        break;
-      case 'interrupted':
-        interrupted += 1;
-        break;
-      case 'skipped':
-        skipped += 1;
-        break;
-    }
-  }
-  return { discovered: results.length, selected, executed, passed, failed, interrupted, flaky, skipped };
 }
 
 /**
@@ -849,7 +809,9 @@ export function buildReport(options: BuildReportOptions): Report1Document {
     .toSorted((a, b) => compareSerialGroups(a, b, targetIndex))
     .map(serializeSerialGroup);
 
-  const summary = computeSummary(options.results, options.serialGroups);
+  const summary = summarizeResults(results, serialGroups);
+  const finishedAt = timestamp();
+  const durationMs = Math.max(0, Date.parse(finishedAt) - Date.parse(options.startedAt) - (options.heldMs ?? 0));
 
   return {
     schemaVersion: 'report-1',
@@ -863,7 +825,8 @@ export function buildReport(options: BuildReportOptions): Report1Document {
       status: deriveRunStatus(options.status, options.results, options.serialGroups, options.runErrors, config?.failOnSkippedFailure === true),
       exitCode: options.exitCode,
       startedAt: options.startedAt,
-      finishedAt: timestamp(),
+      finishedAt,
+      durationMs,
       project: {
         id: config?.projectId ?? 'unknown',
         configDigest: config?.configDigest ?? '0'.repeat(64),
@@ -877,6 +840,7 @@ export function buildReport(options: BuildReportOptions): Report1Document {
         runtime: onBun ? `bun v${process.versions['bun']}` : `node ${process.version}`,
       },
       ...(options.vcs === undefined ? {} : { vcs: options.vcs }),
+      ...(options.shard === undefined ? {} : { shard: { index: options.shard.index, total: options.shard.total } }),
       targets,
       serialGroups,
       results,

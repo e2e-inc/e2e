@@ -1,0 +1,359 @@
+/**
+ * Per-target app resolution: the `app` a target declares, checked field by
+ * field and by the target's engine where an error can name the target, then
+ * resolved on the port the run assigned when `app.url` asked for a free one.
+ */
+
+import type { EngineAppDeclaration, EngineAppInfo, EngineHandle } from '../engine/index.ts';
+import { ConfigurationError } from '../internal/errors.ts';
+import { obj } from '../internal/objects.ts';
+import { checkLaunchArguments, engineLaunchArguments } from '../internal/launch-arguments.ts';
+import { rejectUnknownKeys } from '../internal/options.ts';
+import { didYouMean } from '../internal/suggest.ts';
+import { isFileBase, isImplicitTestHost, namesFile, isRefusedLinkScheme, normalizeBaseUrl, portOf, requestsFreePort, siteOf, withPort, type NormalizedBaseUrl } from '../internal/urls.ts';
+import type { AppPermissionState, CommandConfig, ResolvedLaunchArguments, TargetApp } from '../types.ts';
+import { checkLog, digestCommand, isRecord, normalizeCommand } from './command.ts';
+import { httpUrl } from './validate.ts';
+
+/** A target's `app` as checked: every field's shape, nothing resolved yet. */
+export interface TargetAppDeclaration {
+  readonly url: string | undefined;
+  readonly bundleId: string | undefined;
+  readonly linkBase: string | undefined;
+  readonly appPath: string | undefined;
+  readonly identity: string | undefined;
+  readonly environment: 'test' | 'staging' | 'production' | undefined;
+  readonly launchArguments: ResolvedLaunchArguments | undefined;
+  readonly permissions: Readonly<Record<string, AppPermissionState>> | 'all' | undefined;
+  readonly command: CommandConfig | undefined;
+  readonly readyUrl: string | undefined;
+}
+
+/**
+ * A declared URL with port 0 asks the run for a free port on its loopback
+ * host. `port` is the one the run assigned, undefined until it did: a config
+ * resolved outside a run (`e2e list`, the cache CLI) keeps the `:0` URL.
+ */
+export interface PortRequest {
+  /** The hostname to bind, as the URL spelled it. */
+  readonly host: string;
+  readonly port: number | undefined;
+}
+
+/**
+ * The app one target drives, as the harness resolved the target's `app`
+ * declaration. Navigation policy, cache and session identity, the report's
+ * target record, the engine's app info, and the app process all read from
+ * here; a target that declares nothing gets the empty resolution.
+ */
+export interface ResolvedApp {
+  /** Normalized base URL on the run's port; undefined for a surface without addressable locations. */
+  readonly base: NormalizedBaseUrl | undefined;
+  /** The free-port request the declared URL made; undefined when it names a port or there is no URL. */
+  readonly portRequest: PortRequest | undefined;
+  /**
+   * The site of the base URL, as `siteOf` reads it: whose child frames
+   * observations read. Undefined without a URL, which is no policy at all.
+   */
+  readonly site: string | undefined;
+  readonly environment: 'test' | 'staging' | 'production';
+  /**
+   * Stable identity keying cache and session entries: the declared identity,
+   * else the base URL's origin and path as declared (a free port still 0),
+   * else the bundle id, else the build path. Undefined when the target
+   * declares none of them, so entries key on the target and environment
+   * alone.
+   */
+  readonly identity: string | undefined;
+  readonly bundleId: string | undefined;
+  readonly appPath: string | undefined;
+  /** The link base `app.open(path)` joins on a device target; see `TargetApp.linkBase`. */
+  readonly linkBase: string | undefined;
+  readonly launchArguments: ResolvedLaunchArguments | undefined;
+  readonly permissions: Readonly<Record<string, AppPermissionState>> | 'all' | undefined;
+  /** `app.command` with `{port}` expanded to the port the app is served on. */
+  readonly command: CommandConfig | undefined;
+  /** Readiness probe for `command`; defined whenever `command` is. */
+  readonly readyUrl: string | undefined;
+}
+
+const ENVIRONMENTS: ReadonlySet<unknown> = new Set(['test', 'staging', 'production']);
+
+const PERMISSION_STATES: ReadonlySet<unknown> = new Set(['grant', 'deny', 'reset']);
+
+/** Every key a target's `app` takes, kept equal to `TargetApp` by the compiler. */
+const TARGET_APP_KEYS: readonly string[] = Object.keys({
+  url: true,
+  bundleId: true,
+  appPath: true,
+  linkBase: true,
+  identity: true,
+  environment: true,
+  launchArguments: true,
+  permissions: true,
+  command: true,
+  readyUrl: true,
+} satisfies Record<keyof TargetApp, true>);
+
+/** Keys a target itself takes; anything else is refused, naming where it belongs. */
+export const TARGET_KEYS: ReadonlySet<string> = new Set(['name', 'platform', 'engine', 'app', 'trace', 'video', 'fullyParallel']);
+
+/** Why a key is not a target's, with the nearest one when it reads like a typo. */
+export function unknownTargetKey(where: string, key: string): ConfigurationError {
+  return new ConfigurationError(
+    'INVALID_CONFIG',
+    `${where} has unknown key "${key}"; a target is { name?, platform?, engine?, app?, trace?, video?, fullyParallel? }${didYouMean(key, [...TARGET_KEYS])}`,
+  );
+}
+
+/** A present value that is not a non-empty string is a config error naming the field. */
+function nonEmptyString(value: unknown, label: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new ConfigurationError('INVALID_CONFIG', `${label} must be a non-empty string`);
+  }
+  return value;
+}
+
+/**
+ * Checks the shape of a target's `app` and hands what the engine reads of it
+ * to the engine's `validateApp`. A target without an engine has nothing to
+ * drive an app, so any `app` there is a mistake. Every field is checked
+ * here, where the error can name the target; what each platform needs is the
+ * engine's to say.
+ */
+export function checkTargetApp(targetName: string, engine: EngineHandle | undefined, declared: unknown): TargetAppDeclaration {
+  const where = `target "${targetName}" app`;
+  if (declared !== undefined && !isRecord(declared)) throw new ConfigurationError('INVALID_CONFIG', `${where} must be an object`);
+  // The shape is checked field by field below; until then the declaration is what the types say it is.
+  const app = (declared ?? {}) as TargetApp;
+  rejectUnknownKeys(where, app, TARGET_APP_KEYS);
+  if (declared !== undefined && engine === undefined) {
+    throw new ConfigurationError(
+      'INVALID_CONFIG',
+      `target "${targetName}" declares app without an engine; only an engine can drive an app, so name one: engine: web() or mobile({ platform })`,
+    );
+  }
+  const { environment, permissions } = app;
+  if (environment !== undefined && !ENVIRONMENTS.has(environment)) {
+    throw new ConfigurationError('INVALID_CONFIG', `${where}.environment must be one of test, staging, production, got ${JSON.stringify(environment)}`);
+  }
+  const launchArguments = checkLaunchArguments(`${where}.launchArguments`, app.launchArguments);
+  if (launchArguments !== undefined && !Array.isArray(launchArguments) && engine !== undefined && engine.launchArgumentValues !== true) {
+    throw new ConfigurationError(
+      'INVALID_CONFIG',
+      `${where}.launchArguments is an object, and engine "${engine.name}" takes only a list of strings: write the arguments as a list, or use an engine version that supports the object syntax`,
+    );
+  }
+  if (permissions !== undefined && permissions !== 'all') {
+    if (!isRecord(permissions)) {
+      throw new ConfigurationError('INVALID_CONFIG', `${where}.permissions must be 'all' or an object of permission name to grant, deny, or reset`);
+    }
+    for (const [permission, state] of Object.entries(permissions)) {
+      if (!PERMISSION_STATES.has(state)) {
+        throw new ConfigurationError('INVALID_CONFIG', `${where}.permissions.${permission} must be grant, deny, or reset, got ${JSON.stringify(state)}`);
+      }
+    }
+  }
+  // An engine that predates 'all' would read the string as a map of names.
+  if (permissions === 'all' && engine !== undefined && engine.grantsAllPermissions !== true) {
+    throw new ConfigurationError(
+      'INVALID_CONFIG',
+      `${where}.permissions is 'all', which engine "${engine.name}" does not take (it declares no grantsAllPermissions)`,
+    );
+  }
+  const checked: TargetAppDeclaration = {
+    url: nonEmptyString(app.url, `${where}.url`),
+    bundleId: nonEmptyString(app.bundleId, `${where}.bundleId`),
+    linkBase: checkLinkBase(app.linkBase, engine, where),
+    appPath: nonEmptyString(app.appPath, `${where}.appPath`),
+    identity: nonEmptyString(app.identity, `${where}.identity`),
+    environment,
+    launchArguments,
+    permissions,
+    command: app.command === undefined ? undefined : normalizeCommand(app.command, `${where}.command`),
+    readyUrl: nonEmptyString(app.readyUrl, `${where}.readyUrl`),
+  };
+  const { url, bundleId, appPath } = checked;
+  const file = url !== undefined && namesFile(url);
+  if (file && engine !== undefined && engine.fileApps !== true) {
+    throw new ConfigurationError(
+      'INVALID_CONFIG',
+      `${where}.url is a file, and engine "${engine.name}" does not declare that it opens one from this machine's disk: use an engine version that does, or serve the app over http(s)`,
+    );
+  }
+  engine?.validateApp?.(obj({ url, bundleId, appPath, ...engineLaunchArguments(launchArguments), ...enginePermissions(permissions) }) satisfies EngineAppDeclaration, { targetName, ...(file ? { fileApp: true } : {}) });
+  return checked;
+}
+
+/**
+ * A link base: an absolute URL, or a bare custom scheme (`shopapp://`), with
+ * no query or fragment for a path to land after, on an engine that opens
+ * links. The message never echoes the value: it may carry a token.
+ */
+function checkLinkBase(value: unknown, engine: EngineHandle | undefined, where: string): string | undefined {
+  const linkBase = nonEmptyString(value, `${where}.linkBase`);
+  if (linkBase === undefined) return undefined;
+  if (engine?.session?.openLink === undefined) {
+    throw new ConfigurationError(
+      'INVALID_CONFIG',
+      `${where}.linkBase opens links in a device app, and engine ${engine?.name ?? 'none'} opens none; a browser target opens paths against app.url`,
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(linkBase);
+  } catch {
+    throw new ConfigurationError('INVALID_CONFIG', `${where}.linkBase must be an absolute URL such as https://shop.example.com or a scheme such as shopapp://`);
+  }
+  if (refusesLink(linkBase)) throw new ConfigurationError('INVALID_CONFIG', `${where}.linkBase names a refused scheme, ${url.protocol}`);
+  // Checked on the raw string, which a path joins as written: the URL parser trims whitespace and drops an empty `?` or `#`.
+  if (/[?#]/.test(linkBase)) throw new ConfigurationError('INVALID_CONFIG', `${where}.linkBase must have no query or fragment: a path joins its end`);
+  if (linkBase.trim() !== linkBase) throw new ConfigurationError('INVALID_CONFIG', `${where}.linkBase must have no surrounding whitespace`);
+  return linkBase;
+}
+
+/** Whether a link names a refused scheme; one that does not parse is refused too. */
+export function refusesLink(link: string): boolean {
+  try {
+    return isRefusedLinkScheme(new URL(link).protocol);
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * The link `app.open(path)` opens on a target with a link base: an absolute
+ * link as given, else the path joined to the base with one slash, none after
+ * a bare scheme (`shopapp://` and `/orders/42` join to `shopapp://orders/42`).
+ */
+export function joinLink(linkBase: string, path: string): string {
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(path)) return path;
+  const tail = path.replace(/^\/+/, '');
+  if (linkBase.endsWith('://')) return `${linkBase}${tail}`;
+  return `${linkBase.replace(/\/+$/, '')}/${tail}`;
+}
+
+/** The token a command or a readiness URL writes where the app's port goes. */
+const PORT_TOKEN = '{port}';
+
+/**
+ * Substitutes `{port}` in one configured string. A target without a URL has
+ * no port to offer, so the token there is a config error naming the field.
+ */
+function expandPort(value: string, port: number | undefined, label: string): string {
+  if (!value.includes(PORT_TOKEN)) return value;
+  if (port === undefined) {
+    throw new ConfigurationError('INVALID_CONFIG', `${label} uses ${PORT_TOKEN}, but the target declares no url to take the port from`);
+  }
+  return value.replaceAll(PORT_TOKEN, String(port));
+}
+
+/** The command with `{port}` expanded in every `args` entry and `env` value. */
+function expandCommandPort(command: CommandConfig, label: string, port: number | undefined): CommandConfig {
+  const { args, env } = command;
+  return obj({
+    ...command,
+    args: args?.map((arg) => expandPort(arg, port, `${label}.args`)),
+    env: env === undefined ? undefined : Object.fromEntries(Object.entries(env).map(([key, value]) => [key, expandPort(value, port, `${label}.env.${key}`)])),
+  });
+}
+
+/**
+ * Resolves one target's app from its checked declaration. `port` is the free
+ * port the run assigned to a URL declared with port 0: it replaces the 0 in
+ * the base URL and the default readiness probe. The default identity keeps
+ * the declared `:0`, so cache and session entries survive the port changing
+ * every run. `{port}` in the command and its readiness URL expands to the
+ * port the app is served on, assigned or fixed; while a requested port is
+ * unassigned that is 0, so the config resolves the same way before and
+ * after assignment. A free port nothing starts on, and `reuseExisting` on a
+ * free port, are refused: what already answers cannot serve a port the run
+ * assigns.
+ */
+export function resolveTargetApp(targetName: string, app: TargetAppDeclaration, projectRoot: string, port?: number): ResolvedApp {
+  const where = `target "${targetName}"`;
+  const declaredBase = app.url === undefined ? undefined : normalizeBaseUrl(app.url);
+  const portRequest =
+    declaredBase === undefined || !requestsFreePort(declaredBase) ? undefined : { host: new URL(declaredBase.href).hostname, port };
+  const base = declaredBase !== undefined && portRequest?.port !== undefined ? withPort(declaredBase, portRequest.port) : declaredBase;
+  const appPort = base === undefined ? undefined : portOf(base);
+  // A file has no host: no site to read frames on, no origin, and nothing to poll.
+  const file = isFileApp({ base });
+  const hostname = base === undefined || file ? undefined : new URL(base.href).hostname;
+
+  if (app.command === undefined && portRequest !== undefined) {
+    throw new ConfigurationError(
+      'INVALID_CONFIG',
+      `${where} app.url asks for a free port (port 0), but nothing starts on it: add app.command to start the app there on {port}`,
+    );
+  }
+  const command = app.command === undefined ? undefined : expandCommandPort(app.command, `${where} app.command`, appPort);
+  if (command !== undefined) checkLog(command, `${where} app.command`, projectRoot);
+  if (command?.reuseExisting === true && portRequest !== undefined) {
+    throw new ConfigurationError(
+      'INVALID_CONFIG',
+      `${where} app.command.reuseExisting cannot find an app already running on a free port: port 0 is a new port every run; give the app a fixed port, or drop reuseExisting`,
+    );
+  }
+  const readyUrl =
+    httpUrl(app.readyUrl === undefined ? undefined : expandPort(app.readyUrl, appPort, `${where} app.readyUrl`), `${where} app.readyUrl`) ?? (file ? undefined : base?.href);
+  if (command !== undefined && readyUrl === undefined) {
+    throw new ConfigurationError(
+      'APP_URL_REQUIRED',
+      file
+        ? `${where} declares app.command beside a file app.url, and a file answers no readiness poll: declare app.readyUrl, the http(s) URL the command serves once it is ready`
+        : `${where} declares app.command without a URL to poll: declare app.url or app.readyUrl beside it`,
+    );
+  }
+
+  return {
+    base,
+    portRequest,
+    site: hostname === undefined ? undefined : siteOf(hostname),
+    environment: app.environment ?? (hostname !== undefined && !isImplicitTestHost(hostname) ? 'production' : 'test'),
+    identity: app.identity ?? (declaredBase === undefined ? undefined : file ? declaredBase.href : `${declaredBase.origin}${declaredBase.basePath}`) ?? app.bundleId ?? app.appPath,
+    bundleId: app.bundleId,
+    appPath: app.appPath,
+    linkBase: app.linkBase,
+    launchArguments: app.launchArguments,
+    permissions: app.permissions,
+    command,
+    readyUrl: command === undefined ? undefined : readyUrl,
+  };
+}
+
+/** Whether the target's app is a file the browser opens from disk. */
+export function isFileApp(app: Pick<ResolvedApp, 'base'>): boolean {
+  return app.base !== undefined && isFileBase(app.base);
+}
+
+/**
+ * What `prepare` and `init` receive about the target's app: its origin and
+ * site policy, and what a device launches. A free port the run has not
+ * assigned yet (`e2e doctor` assigns none) leaves the origin out rather than
+ * report it on port `0`.
+ */
+export function engineAppInfo(app: ResolvedApp): EngineAppInfo {
+  const { base, portRequest, site, bundleId, appPath, launchArguments, permissions } = app;
+  const unassigned = portRequest !== undefined && portRequest.port === undefined;
+  // A file has no origin to scope a credential to.
+  const origin = unassigned || base === undefined || isFileBase(base) ? undefined : base.origin;
+  return obj({ origin, site, bundleId, appPath, ...engineLaunchArguments(launchArguments), ...enginePermissions(permissions) });
+}
+
+/** `app.permissions` as an engine receives it: a map under `permissions`, or `'all'` as `allPermissions`. */
+function enginePermissions(permissions: ResolvedApp['permissions']): Pick<EngineAppInfo, 'permissions' | 'allPermissions'> {
+  if (permissions === 'all') return { allPermissions: true };
+  return permissions === undefined ? {} : { permissions };
+}
+
+/**
+ * A target's app as it enters the config digest: the declaration, with the
+ * command's env values reduced to their names. The run's port never enters
+ * it, so a worker handed the port reads the same digest.
+ */
+export function digestTargetApp(app: TargetAppDeclaration) {
+  const { command, ...facts } = app;
+  return obj({ ...facts, command: command === undefined ? undefined : digestCommand(command) });
+}

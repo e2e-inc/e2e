@@ -1,0 +1,305 @@
+---
+title: ऑथेंटिकेशन
+description: एक बार साइन इन करें, वही सेशन कई टेस्ट में इस्तेमाल करें, और सीक्रेट मॉडल को दिखाए बिना पास करें।
+"og:image": "https://e2e.com/docs/images/og/authentication.png?v=6e061842b8"
+"twitter:image": "https://e2e.com/docs/images/og/authentication.png?v=6e061842b8"
+---
+
+सेटअप टेस्ट एक बार साइन इन करता है और सेशन को एक नाम से सेव कर लेता है। बाकी
+टेस्ट वही सेशन रिस्टोर करते हैं और साइन इन होकर शुरू होते हैं। पासवर्ड
+और बाकी सीक्रेट हैंडल होते हैं: रनर वैल्यू टाइप करता है, और मॉडल इनपुट और
+रिपोर्ट में उसकी जगह `<secret:name>` दिखाता है। इसकी
+[कुछ सीमाएँ हैं](/reference/security#where-redaction-stops)।
+
+<a id="sign-in-once-in-a-setup-test" />
+
+## ऑथेंटिकेटेड सेशन दोबारा इस्तेमाल करें
+
+सेशन को `test.setup` की बॉडी में सेव करें। फिर `session` ऑप्शन से उसे रिस्टोर
+करें। किसी टेस्ट को जिस सेटअप की ज़रूरत है, रनर उसे चला देता है, तब भी जब आपने
+सिर्फ़ वही टेस्ट चुना हो:
+
+<Tabs>
+  <Tab title="tests/auth.setup.e2e.ts">
+
+```ts
+import { test } from '@e2e-dev/web';
+import { expect, credentials } from 'e2e';
+
+test.setup('authenticate as admin', { sessions: ['admin'] }, async ({ app, screen, session, browser }) => {
+  const admin = credentials.user('admin');
+
+  await app.open('/login');
+  await screen.getByLabel('Username').fill(admin.username);
+  await screen.getByLabel('Password').fill(admin.password);
+  await screen.getByRole('button', 'Sign in').tap();
+
+  await expect(browser).toHaveURL('/dashboard');
+  await expect(screen.getByRole('status', 'Greeting')).toContainText('admin');
+
+  await session.save('admin');
+});
+```
+
+  </Tab>
+  <Tab title="tests/dashboard.e2e.ts">
+
+```ts
+import { test } from '@e2e-dev/web';
+import { expect } from 'e2e';
+
+test('the dashboard opens directly', { session: 'admin' }, async ({ app, screen, browser }) => {
+  await app.open('/dashboard');
+
+  await expect(browser).toHaveURL('/dashboard');
+  await expect(screen.getByRole('status', 'Greeting')).toHaveText(
+    'Welcome back, admin!',
+  );
+});
+```
+
+  </Tab>
+</Tabs>
+
+<Note>
+`session.save()` यह चेक नहीं करता कि साइन इन सच में हुआ या नहीं। सेव करने से
+पहले URL पर, या साइन इन के बाद दिखने वाले किसी एलिमेंट पर असर्शन लगाएँ।
+</Note>
+
+## सेशन के नियम
+
+| नियम | तोड़ने पर |
+| --- | --- |
+| सेटअप टेस्ट टॉप-लेवल पर होते हैं, `describe` के अंदर कभी नहीं | कलेक्शन एरर |
+| हर सेशन नाम को ठीक एक ही सेटअप डिक्लेयर करता है | कलेक्शन एरर |
+| `sessions` में दिया हर नाम बॉडी में सेव होता है | `SESSION_CONTRACT` फ़ेलियर |
+| सिर्फ़ डिक्लेयर किए गए नाम ही सेव होते हैं | `SESSION_CONTRACT` फ़ेलियर |
+| टारगेट का इंजन स्टेट सेव और रिस्टोर करता है | कलेक्शन एरर, किसी भी टेस्ट के चलने से पहले। हर अटेम्प्ट के लिए लीज़ पर लिए गए होस्टेड ब्राउज़र में स्टेट सेव और रिस्टोर की सुविधा नहीं होती। |
+
+कोई सेटअप फ़ेल हो, तो रनर उस पर निर्भर टेस्ट `setup-failed` कारण के साथ स्किप
+कर देता है। बाकी टेस्ट चलते रहते हैं।
+
+ब्राउज़र टारगेट पर सेशन में कुकी, लोकल स्टोरेज और IndexedDB रहते हैं। सर्वर या
+डेटाबेस का स्टेट इसमें नहीं आता। रिस्टोर के बाद कोई पेज खुला नहीं रहता, इसलिए
+हर टेस्ट सबसे पहले `app.open()` कॉल करता है।
+
+सेशन एक रन तक चलता है। रनर उसे ऐसी key से एन्क्रिप्ट करता है जो सिर्फ़
+मेमोरी में रहती है। क्लीनअप पर रनर सेशन डिलीट कर देता है।
+[सेशन](/reference/security#sessions) देखें।
+
+## क्रेडेंशियल
+
+हर अकाउंट को कॉन्फ़िग में डिक्लेयर करें, और पासवर्ड एनवायरनमेंट से पढ़ें:
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+
+export default {
+  targets: [{ engine: web(), app: { url: 'http://127.0.0.1:3000' } }],
+  credentials: {
+    admin: {
+      username: 'admin@example.test',
+      password: process.env.ADMIN_PASSWORD ?? '',
+    },
+  },
+} satisfies E2EConfig;
+```
+
+कॉन्फ़िग लोड होते समय हर पासवर्ड चेक होता है। जब तक `ADMIN_PASSWORD` सेट नहीं
+है या 6 कैरेक्टर से छोटा है, तब तक हर कमांड `INVALID_CONFIG` के साथ फ़ेल होगी,
+`e2e list` भी। कोई वैलिड [ओवरराइड](#override-a-value-per-run) दें, तो वह इस
+पासवर्ड की जगह ले लेता है।
+
+<Accordion title="वैल्यू को एनवायरनमेंट से बाहर रखें">
+
+`process.env` की स्ट्रिंग वह हर प्रोसेस पढ़ सकता है जिसे रनर शुरू करता है।
+`password` में आप फ़ंक्शन भी दे सकते हैं, `username` में नहीं। रनर यह फ़ंक्शन
+सिर्फ़ किसी ऑथराइज़्ड फ़िल के लिए कॉल करता है, और वह भी रनर प्रोसेस के अंदर।
+तो वैल्यू किसी वॉल्ट से आ सकती है, या एक नया वन-टाइम कोड हो सकती है:
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { vault } from './support/vault.ts';
+
+export default {
+  targets: [{ engine: web(), app: { url: 'http://127.0.0.1:3000' } }],
+  credentials: {
+    admin: {
+      username: 'admin@example.test',
+      password: () => vault.read('e2e/admin-password'),
+    },
+  },
+} satisfies E2EConfig;
+```
+
+वैल्यू पहली बार भरे जाने के बाद से ही छिपाई जाती है, उससे पहले नहीं। अगर ऐप
+टेस्ट के टाइप करने से पहले ही वैल्यू दिखा सकता है, तो स्ट्रिंग इस्तेमाल करें।
+`secrets` एंट्री पर भी यही बात लागू होती है।
+
+</Accordion>
+
+## पासवर्ड एक हैंडल है
+
+`credentials.user(name)` यूज़रनेम आपको प्लेन स्ट्रिंग में देता है। पासवर्ड एक
+`Secret` के रूप में आता है, जिसका नाम `<name>.password` होता है। `Secret` में
+कोई `.value` नहीं होता। इसे किसी `fill` में, या एजेंट स्टेप के `params` में
+पास करें:
+
+```ts
+await agent.act('Sign in', {
+  params: { username: admin.username, password: admin.password },
+});
+```
+
+मॉडल को सिर्फ़ सीक्रेट का नाम और मकसद दिखता है। जब मॉडल पासवर्ड भरता है, तो
+रनर सिर्फ़ पासवर्ड फ़ील्ड में ही भरने देता है, और वैल्यू खुद टाइप करता है।
+[सीक्रेट भरने के नियम](/reference/security#secret-fills) देखें। एजेंट किसी
+सिक्योर फ़ील्ड को पढ़ नहीं सकता। इसलिए फ़ील्ड की जगह इस बात पर असर्शन करें कि
+साइन इन हो गया।
+
+स्क्रीनशॉट में पासवर्ड फ़ील्ड मास्क रहता है। लेकिन ऐप जो वैल्यू कहीं और दिखाता
+है, वह मॉडल तक पहुँच जाती है।
+[सीक्रेट भरने के बाद स्क्रीनशॉट](/reference/security#screenshots-after-a-secret-fill)
+देखें।
+
+<Warning>
+रेडैक्शन स्ट्रिंग मैच करके काम करता है। बदली हुई वैल्यू फिर भी दिख सकती है,
+जैसे किसी key के आख़िरी चार कैरेक्टर। सीक्रेट डालने का काम सेटअप टेस्ट में
+रखें, और सबमिट के नतीजे पर असर्शन करें।
+[रेडैक्शन कहाँ रुकता है](/reference/security#where-redaction-stops) देखें।
+</Warning>
+
+## पासवर्ड के अलावा दूसरे सीक्रेट
+
+API key, वेबहुक टोकन, या कोई भी और वैल्यू जो टेस्ट टाइप करता है, उसके लिए
+`secrets` इस्तेमाल करें:
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+
+export default {
+  targets: [{ engine: web(), app: { url: 'http://127.0.0.1:3000' } }],
+  secrets: {
+    'stripe-key': process.env.STRIPE_TEST_KEY ?? '',
+    'webhook-token': process.env.WEBHOOK_TOKEN ?? '',
+  },
+} satisfies E2EConfig;
+```
+
+`secrets.get()` एक हैंडल देता है। इसे पासवर्ड की तरह इस्तेमाल करें:
+
+```ts
+import { secrets } from 'e2e';
+
+await screen.getByLabel('Secret key').fill(secrets.get('stripe-key'));
+await agent.act('Connect Stripe with the given key', {
+  params: { apiKey: secrets.get('stripe-key') },
+});
+```
+
+`secrets` एंट्री किसी भी एडिट होने वाले इनपुट में भरी जा सकती है। कॉन्फ़िग में न
+दिया गया नाम `SECRET_UNAVAILABLE` थ्रो करता है। सादा इनपुट मास्क नहीं होता। तो
+जब तक वैल्यू इनपुट में है, स्क्रीनशॉट उसे दिखाते हैं, मॉडल को भेजे जाने वाले
+स्क्रीनशॉट भी। `secrets.get()` सिर्फ़ `secrets` एंट्री देता है, इसलिए
+`credentials.admin` और `secrets.admin` दोनों साथ में रह सकते हैं।
+
+`e2e.config.ts` में `secrets.get()` से आप सीक्रेट किसी ऐसे इंजन ऑप्शन को दे सकते
+हैं जो डिक्लेयर करता है कि वह सीक्रेट लेता है, जैसे
+[`basicAuth`](/web#protected-previews)। कॉन्फ़िग लोड होते समय नाम चेक होता है।
+स्क्रीनशॉट चालू रहते हैं, तो ऐप के पिक्सल मास्क नहीं होते।
+[इंजन ऑप्शन में सीक्रेट](/reference/security#secrets-in-engine-options) देखें।
+
+## किसी एक रन के लिए वैल्यू ओवरराइड करें
+
+एनवायरनमेंट वेरिएबल से आप किसी एक रन के लिए कॉन्फ़िग की वैल्यू बदल सकते हैं:
+
+| एंट्री | वेरिएबल |
+| --- | --- |
+| `credentials.admin.username` | `E2E_USER_ADMIN_USERNAME` |
+| `credentials.admin.password` | `E2E_USER_ADMIN_PASSWORD` |
+| `secrets['stripe-key']` | `E2E_SECRET_STRIPE_KEY` |
+
+वेरिएबल में एंट्री का नाम अपरकेस में होता है, और `A-Z` और `0-9` के अलावा हर
+कैरेक्टर `_` बन जाता है। अगर दो एंट्री एक ही वेरिएबल पर मैप हों, जैसे
+`stripe-key` और `stripe_key`, तो कॉन्फ़िग लोड `INVALID_CONFIG` के साथ फ़ेल हो
+जाता है।
+
+<CodeGroup>
+```bash npm
+E2E_USER_ADMIN_PASSWORD=... E2E_SECRET_STRIPE_KEY=sk_test_... npx e2e run
+```
+
+```bash pnpm
+E2E_USER_ADMIN_PASSWORD=... E2E_SECRET_STRIPE_KEY=sk_test_... pnpm exec e2e run
+```
+
+```bash bun
+E2E_USER_ADMIN_PASSWORD=... E2E_SECRET_STRIPE_KEY=sk_test_... bunx e2e run
+```
+</CodeGroup>
+
+## कई साइन इन किए हुए यूज़र
+
+हर यूज़र का एक सेशन सेव करें। फिर वही टेस्ट हर सेशन और [एजेंट](/agents) के साथ
+चलाएँ:
+
+<Tabs>
+  <Tab title="tests/personas.setup.e2e.ts">
+
+```ts
+import { test } from '@e2e-dev/web';
+import { expect, credentials } from 'e2e';
+
+const PERSONAS = ['buyer', 'admin'] as const;
+
+test.setup('sign in each persona', { sessions: [...PERSONAS] }, async ({ app, screen, session, browser }) => {
+  for (const name of PERSONAS) {
+    const user = credentials.user(name);
+    await app.open('/login');
+    await screen.getByLabel('Username').fill(user.username);
+    await screen.getByLabel('Password').fill(user.password);
+    await screen.getByRole('button', 'Sign in').tap();
+    await expect(browser).toHaveURL('/dashboard');
+    await session.save(name);
+    await app.open('/logout');
+  }
+});
+```
+
+  </Tab>
+  <Tab title="tests/checkout.e2e.ts">
+
+```ts
+import { describe, test } from '@e2e-dev/web';
+
+for (const persona of ['buyer', 'admin'] as const) {
+  describe(`checkout as ${persona}`, { agent: persona, session: persona, tags: [persona] }, () => {
+    test('pays for one item', async ({ app, agent }) => {
+      await app.open('/cart');
+      await agent.act('pay for the item in the cart');
+      await agent.assert('the order confirmation is shown');
+    });
+  });
+}
+```
+
+  </Tab>
+</Tabs>
+
+हर नाम तीन चीज़ों से जुड़ा है: एक `agents` एंट्री, एक `credentials` एंट्री, और
+एक सेव किया हुआ सेशन। अगर पर्सोना को अलग-अलग सेशन नहीं चाहिए, तो इसकी जगह
+[एक फ़्लो को कई एजेंटों के रूप में चलाएँ](/agents#one-flow-several-personas)।
+
+## आगे
+
+<CardGroup cols={2}>
+  <Card title="test रेफ़रेंस" icon="flask" href="/reference/test">
+    `test.setup`, `sessions`, और `session` ऑप्शन।
+  </Card>
+  <Card title="कॉन्फ़िग रेफ़रेंस" icon="sliders" href="/reference/config#credentials">
+    `credentials` और `secrets` ब्लॉक।
+  </Card>
+</CardGroup>

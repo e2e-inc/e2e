@@ -2,7 +2,7 @@ import { test } from '@e2e-dev/web';
 import { expect } from 'e2e';
 import { failure } from './helpers.ts';
 
-test.describe('controls', { requires: ['browser'], tags: ['controls'] }, () => {
+test.describe('controls', { platforms: ['web'], tags: ['controls'] }, () => {
   test.beforeEach(async ({ app }) => {
     await app.open('/controls');
   });
@@ -58,6 +58,15 @@ test.describe('controls', { requires: ['browser'], tags: ['controls'] }, () => {
     await expect.poll(() => publish.isEnabled()).toBe(true);
     expect(await publish.isDisabled()).toBe(false);
     await expect(screen.getByRole('button', { name: 'Publish', disabled: false })).toHaveCount(1);
+  });
+
+  test('retries a block until Publish is enabled and matches the enabled query', async ({ screen }) => {
+    await screen.getByRole('button', 'Prepare').tap();
+
+    await expect(async () => {
+      await expect(screen.getByRole('button', 'Publish')).toBeEnabled({ timeout: 25 });
+      await expect(screen.getByRole('button', { name: 'Publish', disabled: false })).toHaveCount(1, { timeout: 25 });
+    }).toPass({ timeout: 3000, intervals: [25, 50, 100] });
   });
 
   test('check and uncheck move checked state, and one radio checks at a time', async ({ screen }) => {
@@ -117,6 +126,41 @@ test.describe('controls', { requires: ['browser'], tags: ['controls'] }, () => {
 
     await second.press('Shift+Tab');
     await expect(first).toBeFocused();
+  });
+
+  test('blur removes focus only from the matched node', async ({ browser }) => {
+    const first = browser.locator('#first');
+    const second = browser.locator('#second');
+
+    await first.focus();
+    await expect(first).toBeFocused();
+    await second.blur();
+    await expect(first).toBeFocused();
+
+    await first.blur({ timeout: 1_000 });
+    await expect(first).not.toBeFocused();
+  });
+
+  test('blur works on an input matched by its current value', async ({ browser, screen }) => {
+    const first = screen.getByLabel('First');
+    await first.fill('Find by value');
+    await browser.evaluate("() => { document.querySelector('#first').blur = () => {}; }");
+    await first.focus();
+    await expect(first).toBeFocused();
+
+    await screen.getByDisplayValue('Find by value').blur();
+    await expect(first).not.toBeFocused();
+  });
+
+  test('blur removes focus from MathML matched by label', async ({ browser, screen }) => {
+    await browser.evaluate(`() => {
+      document.body.insertAdjacentHTML('beforeend', '<math><mi tabindex="0" aria-label="Formula" id="term">x</mi></math>');
+      document.querySelector('#term').focus();
+    }`);
+    const term = screen.getByLabel('Formula');
+    await expect(term).toBeFocused();
+    await term.blur();
+    await expect(term).not.toBeFocused();
   });
 
   test('press spells modifiers the way the app sees them', async ({ screen }) => {
@@ -211,6 +255,19 @@ test.describe('controls', { requires: ['browser'], tags: ['controls'] }, () => {
     const error = await failure(() => screen.getByRole('button', 'Close A').setInputFiles('fixtures/attachment.txt', { timeout: 500 }));
     expect(error).toHaveProperty('code', 'ACTION_FAILED');
     expect(error).toHaveProperty('message', expect.stringContaining('opened no file chooser'));
+  });
+
+  test('toBeInViewport follows the scroll position, and no match is outside the viewport', async ({ screen }) => {
+    const footnote = screen.getByText('Footnote', { exact: true });
+    await expect(footnote).not.toBeInViewport();
+    const error = await failure(() => expect(footnote).toBeInViewport({ timeout: 500 }));
+    expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
+    expect(error).toHaveProperty('message', expect.stringContaining('observed: outside the viewport'));
+
+    await footnote.scrollIntoView();
+    await expect(screen.getByLabel('Footnote state')).toHaveText('in view');
+    await expect(footnote).toBeInViewport({ ratio: 1 });
+    await expect(screen.getByText('No such footnote')).not.toBeInViewport();
   });
 
   test('a missing locator fails as LOCATOR_NOT_FOUND after its timeout', async ({ screen }) => {

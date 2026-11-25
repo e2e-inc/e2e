@@ -9,6 +9,7 @@
     "test": "tsc --noEmit && node node_modules/e2e/dist/cli/bin.js run",
     "test:scroll": "node node_modules/e2e/dist/cli/bin.js run --config e2e.scroll.config.ts",
     "test:headed": "node node_modules/e2e/dist/cli/bin.js run --headed",
+    "test:moli": "node node_modules/e2e/dist/cli/bin.js run --config e2e.moli.config.ts",
     "test:lightpanda": "node node_modules/e2e/dist/cli/bin.js run --config e2e.lightpanda.config.ts --exclude-tag playwright",
     "test:lightpanda:agent": "node node_modules/e2e/dist/cli/bin.js run --config e2e.lightpanda-agent.config.ts",
     "app": "node app/server.mjs",
@@ -17,19 +18,23 @@
     "test:stress": "node node_modules/e2e/dist/cli/bin.js run --config e2e.stress.config.ts",
     "explore": "node node_modules/e2e/dist/cli/bin.js explore --config e2e.agent.config.ts",
     "explore:garden": "node node_modules/e2e/dist/cli/bin.js explore --config e2e.explore.config.ts",
-    "explore:bench": "node scripts/explore-bench.mjs"
+    "explore:bench": "node scripts/explore-bench.mjs",
+    "test:notte": "node node_modules/e2e/dist/cli/bin.js run --config e2e.notte.config.ts"
   },
   "dependencies": {
+    "@e2e-dev/browser-run": "workspace:*",
     "@e2e-dev/decision": "workspace:*",
     "@e2e-dev/lightpanda": "workspace:*",
+    "@e2e-dev/moli": "workspace:*",
+    "@e2e-dev/notte": "workspace:*",
     "@e2e-dev/web": "workspace:*",
     "e2e": "workspace:*"
   },
   "devDependencies": {
-    "@ai-sdk/devtools": "1.0.73",
+    "@ai-sdk/devtools": "1.0.84",
     "@napi-rs/image": "1.16.0",
     "@types/node": "26.6.6",
-    "ai": "7.0.170",
+    "ai": "7.0.181",
     "typescript": "7.0.2",
     "zod": "4.6.7"
   }

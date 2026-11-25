@@ -108,8 +108,8 @@ act or the assertions.
 
 `test` registers everything, and `describe`, `beforeEach`, `afterEach`,
 `beforeAll`, and `afterAll` are also top-level imports of the same functions
-(`import { describe, beforeEach } from 'e2e'`; `@e2e-dev/web` and
-`@e2e-dev/mobile` export `test`, `describe`, and the hooks typed with their fixture; a
+(`import { describe, beforeEach } from 'e2e'`; `@e2e-dev/web`,
+`@e2e-dev/mobile`, and `@e2e-dev/desktop` export `test`, `describe`, and the hooks typed with their fixture; a
 `test.extend()` chain registers hooks that see its fixtures through
 `test.beforeEach`). Everything registers at import, so a `describe` body is
 synchronous (`async` is a `COLLECTION_ERROR`).
@@ -121,17 +121,28 @@ describe('group', { tags: ['billing'] }, () => { /* tests and hooks */ });
 describe('checkout flow', { serial: true }, () => { /* ordered, shared app state */ });
 beforeEach(async ({ app }) => {});     // per attempt, with test fixtures
 afterEach(async ({ screen }) => {});   // runs after failures too, with its own cleanup budget
-beforeAll(async ({ platform }) => {}); // per suite realm, no app fixtures
+beforeAll(async ({ platform }) => {}); // per suite realm, worker fixtures only (device, app, screen on mobile)
 afterAll(async () => {});
 test.skip('later', async () => {});
 test.only('focus', async () => {});         // local only: CI fails with ONLY_IN_CI
+test.skipIf(process.platform === 'win32')('watcher', async () => {}); // condition read at collection: truthy registers it skipped, as { skip: true }
+test.runIf(process.env.CI)('ci only', { tags: ['ci'] }, async () => {}); // test.skipIf(!condition)
+test.each([{ user: 'Ada' }, { user: 'Grace' }])('signs in as $user', async ({ user }, { app }) => {}); // one test per row; rows that are all arrays are spread: (a, b, { app }), any other table passes each row whole; the fixtures are destructured after the row; titles take $key, %s, %i, %#
+test.for([['standard', '5.00']])('ships %s for %s', async ([speed, price], { app }) => {}); // test.each without the spread: (row, { app })
 test('conditional', async () => { test.skip(await onlyOneOrg(), 'nothing to switch to'); }); // throws: the body stops here, reported skipped; call it before the first step
 test('later', async () => { test.skip('waiting on the API'); }); // bare skip from the body
+test.fixme('not yet', async () => {}); // test.skip's three forms; reported skipped with cause "fixme" and reason "fixme", or "fixme: <reason>" from test.fixme(reason) or test.fixme(cond, reason) in a body
+test.todo('add checkout coverage'); // no body; reported skipped with cause and reason "todo", without running
+test('big import', async () => { test.setTimeout(180_000); }); // body or beforeEach: the attempt's timeout, counted from its start; in beforeAll: that hook's own
+test('slow sync', async () => { test.slow(); }); // triples the timeout in force, once per attempt; test.slow(condition, reason) only when true
 test.fail('known gap', async () => {}); // expected to fail: a test failure passes it, a pass fails it with UNEXPECTED_PASS
 test('gap on web', async ({ platform }) => { test.fail(platform === 'web', 'known gap'); }); // marks, does not throw; the body runs on
+describe.fail('legacy', () => {}); // every test inside expected to fail; a reason: describe('legacy', { fail: 'reason' }, fn)
 test.setup('sign in', { sessions: ['admin'] }, async ({ app, screen, session }) => {}); // see Sign-in sessions
 const wsTest = test.extend<{ ws: Ws }>({ ws: async ({ browser }, use) => { await use(await seed()); await drop(); } });
 wsTest('uses the workspace', async ({ ws }) => {}); // code after use() is teardown, runs after failures too
+const dbTest = test.extend<{}, { db: Db }>({ db: [async ({}, use) => { await use(await startDb()); }, { scope: 'worker' }] });
+dbTest.beforeAll(async ({ db }) => { await db.seed(); }); // one db per worker, torn down when the worker ends
 ```
 
 A setup test cannot skip from its body (`INVALID_ARGUMENT`), and neither a
@@ -145,35 +156,86 @@ or a blocked agent verdict still fails the test.
 | `retries` | `config.retries` | 0 to 10; a serial group's value applies to its members. |
 | `tags` | `[]` | Distinct, non-blank, no comma or edge whitespace (`'Login Form'` is fine); union across layers. `--tag smoke` selects, `--tag-mode all` requires every tag. |
 | `skip` | unset | `true` or a reason string. |
-| `fail` | unset | `true` or a reason string: expected to fail, as `test.fail`. Tests only, not groups or setup tests. |
+| `fail` | unset | `true` or a reason string: expected to fail, as `test.fail`. On a group, marks every test in it; not on setup tests or on, inside, or around a serial group. |
 | `platforms` | unset | Only targets with these platforms, e.g. `['ios']`. |
-| `requires` | `[]` | Engine capabilities, e.g. `['browser']`; missing ones skip the test at selection rather than failing it with `UNSUPPORTED_CAPABILITY`. |
 | `session` | unset | Restore state saved by a setup test. |
 | `agentContext` | unset | Extra context for `agent.*` calls in this test or group. |
 | `agent` | the run's agent | A configured name (`agents.<name>`) or a list run once per agent; `--agent` narrows the list, a setup test takes one name. Innermost wins; `agent.act(..., { agent })` names another for one call. |
 | `trace`, `video` | the target's | `'off'`, `'on'`, `'retain-on-failure'`, `'on-first-retry'`, `'on-all-retries'`: whether the test keeps a trace page, which attempts record video. Innermost wins over `--trace` / `--video`, the target, and the config; video where the engine cannot record is `UNSUPPORTED_ARTIFACT` for the run. |
 | `serial` | `false` | Groups only. Members share app state, run in order on one worker, retry as a whole, and take the group's `trace` and `video`. |
+| `parallel` | unset | Groups only. `true` runs the group's tests at the same time on separate workers (a file's tests otherwise run in order on one); `false` keeps a group in order inside a parallel scope. `describe.configure({ parallel: true })` at the top of a file sets it for the file, `fullyParallel: true` in the config for every file. A worker imports the file one time for the tests it runs apart, so they share the file's state on that worker and not across workers: keep no state in the file that one test leaves for another. Tests with `beforeAll` or `afterAll` hooks around them run in batches, at most as many as the target has workers, and each batch runs the hooks one time. |
 
 Serial members cannot set `retries`, `trace`, `video`, `session`,
-`platforms`, `requires`, `skip`, `fail`, or `only`, nor can a nested `describe` set
+`platforms`, `skip`, `fail`, or `only`, nor can a nested `describe` set
 `trace` or `video`; nesting serial groups is a `COLLECTION_ERROR`.
 
 Hooks nest: outer `beforeEach` first, inner `afterEach` first. `beforeAll`
 reruns per retry and per serial group (each a fresh module realm) on the
 test timeout; `afterAll` runs on `config.cleanupTimeout`. A failing
 `beforeAll` is a `HOOK_FAILED` run error skipping every test in its scope.
+`beforeAll` and `afterAll` get worker fixtures only: `platform`, worker
+fixtures from `test.extend`, and on mobile `device`, `app`, and `screen`
+(a device keeps its state between tests). On web, `browser`, `app`, and
+`screen` are test fixtures, so UI setup goes in `beforeEach`. Naming a test
+fixture in a suite hook is a `COLLECTION_ERROR` naming it. On mobile a suite
+hook that names none of `device`, `app`, `screen` opens no device attempt; when no device
+attempt can open for the hooks or the run was interrupted, they still run and
+reading `device`, `app`, or `screen` throws the reason.
 
 ## Fixtures
 
-Built-in fixtures are lazy; destructure them. Your own `test.extend`
-fixtures set up for every test registered through that `test`, destructured
-or not, so a state-changing fixture belongs on its own `test`.
+Fixtures are set up on demand. A test body, a hook, and a fixture function
+name what they use by destructuring their first parameter
+(`async ({ app, screen }) => {}`), a `test.each` or `test.for` body the one
+after its row; `async (fixtures) => {}`, `async (_, use)`,
+a rest property, and a bound function (`fn.bind()`) are `COLLECTION_ERROR`, and a fixture that needs nothing
+takes `({}, use)`. A test sets up the `test.extend` fixtures its body and its
+`beforeEach` and `afterEach` hooks name, and the ones those fixtures name
+(same `extend` call or an earlier one, any order; a cycle is
+`COLLECTION_ERROR`). A fixture nothing names does not run: one that exists
+for its side effect takes `[fn, { auto: true }]`, set up for every test, or
+`[fn, { scope: 'worker', auto: true }]`, once per worker.
+
+If you name a fixture that isn't on any target in the config, the run fails
+at collection.
+
+You can use `device` in the same test on web and iOS. On web, `device` is
+`undefined`. If you override `device`, your override is called on web too,
+with `device` set to `undefined`.
+
+To type fixtures across targets:
+
+1. Use `as const satisfies E2EConfig` on the config object, not a type
+   annotation, to keep the inferred engine types.
+2. Import the config type with `import type config from '../e2e.config.ts'`.
+3. Pass `typeof config` as the third type argument of `test.extend`:
+   `base.extend<{}, {}, typeof config>()`.
+
+Check `platform` or the fixture value to narrow the fixture type. With
+`platforms` on a test, it's narrowed too. On a `describe`, it isn't.
+
+An `afterEach` that names a fixture whose setup failed is skipped. A fixture
+named like one the `test` already has, built-in ones included, extends it
+(`app: async ({ app }, use) => { await app.open('/x');
+await use(app); }`, no type argument): inside it the name is the previous
+value, everyone else gets what it passes to `use`, and it keeps that
+fixture's type. Its scope and `auto` are the ones its options set, else a
+test fixture set up on demand, even when it extends a worker fixture (for a
+`device` override that runs once per worker and reaches `beforeAll`, pass
+`{ scope: 'worker' }`). A worker
+fixture (`[fn, { scope: 'worker' }]`, second type argument of `extend`) is
+set up once per worker and target by the first test or suite hook that names
+it, torn down when the worker ends, and sees worker fixtures only. Declare it in a module the test files import: a test
+file reloads after a failure and for each serial group and setup test, and a
+worker fixture it declares gets a new
+instance while the old one stays set up until the worker ends.
 
 `app` (`App`) and `screen` (`Screen`): always. `agent` (`Agent`): needs a
 configured model, else `MODEL_UNAVAILABLE` (topic `agent`). `platform`
 (`string`): always, hooks included; `web`, `ios`, `android`, or an engine's
 label. `browser` (`Browser`): browser targets, import `test` from `@e2e-dev/web`.
 `device` (`Device`): device targets, import `test` from `@e2e-dev/mobile`.
+`desktop` (`Desktop`): desktop targets, import `test` from `@e2e-dev/desktop`.
 `session` (`SetupSession`): only in `test.setup`.
 
 ### app
@@ -182,7 +244,8 @@ label. `browser` (`Browser`): browser targets, import `test` from `@e2e-dev/web`
   port and no trailing slash (`${app.baseUrl}/api/users`); `undefined` when
   the target declares no `app.url`. `string` with `test` from `@e2e-dev/web`.
 - `open(path?)`: opens the target's `app.url`, a relative path, or an absolute
-  http(s) URL. On a device it takes no path and relaunches the pinned app.
+  http(s) URL. On a device it relaunches the pinned app, and a path opens as
+  a link in it only when the target declares `app.linkBase`.
 - `back()`: one history step back.
 - `restart()`: recreates the context keeping persisted state (a restored
   session included), then reopens the base URL.
@@ -239,7 +302,7 @@ substring; a `RegExp` matches as written.
   `LOCATOR_AMBIGUOUS`; at zero, actions and reads poll until the action
   timeout then `LOCATOR_NOT_FOUND`, assertions until the assertion timeout
   then `ASSERTION_FAILED`. Exceptions:
-  `toHaveCount`, `toBeVisible`, `toBeHidden`, `toBeAttached`, list-form
+  `toHaveCount`, `toBeVisible`, `toBeHidden`, `toBeAttached`, `toBeInViewport`, list-form
   `toHaveText` and `toContainText`, `isVisible()` (false at zero),
   `isHidden()` (true), `count()`, `all()`, `allTextContents()`.
 - Narrow with `filter({ hasText })` (a case-insensitive substring, unlike a
@@ -254,7 +317,9 @@ substring; a `RegExp` matches as written.
 - `visible: true` drops nodes the page hides (a closed drawer) before the
   exactly-one rule. Visibility is what renders, as `toBeVisible()` reads it:
   an `aria-hidden` spinner that paints is visible, so `toBeHidden()` waits
-  for it to go.
+  for it to go. A closed `<details>` body and content under
+  `content-visibility: hidden` are hidden through shadow roots and slots too,
+  unless the page's CSS still shows them.
 - On the web, queries reach open shadow roots and closed roots attached with
   `attachShadow`, not declarative closed roots. `browser.locator(css)`,
   `frameLocator`, and `filter({ hasText })` stop at a closed root; query the
@@ -267,16 +332,21 @@ substring; a `RegExp` matches as written.
 
 Each action resolves one node, waits up to `config.actionTimeout` (30 s, or
 `{ timeout }`) for it to be actionable, and does one thing: `tap()` (alias
-`click()`), `doubleTap()` (alias `dblclick()`), `secondaryTap()` (each takes
-`{ modifiers: ['Shift'] }`), `longPress({ duration? })`
+`click()`; `{ count: 3 }` taps three times in a row, a triple click in a
+browser; `count` is a positive safe integer, `2` is `doubleTap()`, 3 or more
+need the engine's `multiTap` (browser and mobile have it; mobile refuses more
+than 200), and a count above 1 doesn't combine with `position`),
+`doubleTap()` (alias `dblclick()`),
+`secondaryTap()` (each takes `{ modifiers: ['Shift'] }`),
+`longPress({ duration? })`
 (100 to 10000 ms; default 500 on the web, 1000 on a device),
 `fill(value | Secret)`, `pressSequentially(text, { delay? })`, `clear()`,
 `press(key)`, `check()`, `uncheck()`,
 `selectOption(label | { label } | { value } | { index })` (one option; an
-array is `INVALID_ARGUMENT`), `focus()`, `hover()`, `setInputFiles(paths)`
-(relative to the project root; `[]` clears), `dragTo(locator)`, `scrollIntoView()`,
+array is `INVALID_ARGUMENT`), `focus()`, `blur()`, `hover()`, `setInputFiles(files)`
+(paths relative to the project root, or `{ name, mimeType, buffer: Buffer }` payloads, singly or as an array; `[]` clears; a missing path, or one under a directory the runner cannot search, is `INVALID_ARGUMENT`), `dragTo(locator)`, `scrollIntoView()`,
 `swipe({ direction, momentum? })`. Web only, `UNSUPPORTED_CAPABILITY` on a
-device: `secondaryTap`, `selectOption`, `setInputFiles`, `scrollIntoView`,
+device: `blur`, `secondaryTap`, `selectOption`, `setInputFiles`, `scrollIntoView`,
 and `modifiers`.
 
 `fill` sets the value with no key events; when the app reacts to keystrokes
@@ -288,9 +358,13 @@ Coordinates are CSS pixels, for what the tree does not list: `tap({ position:
 { x, y } })` offsets from the node's top-left corner inside its border (with `modifiers` it is
 `INVALID_ARGUMENT`), `screen.tapAt({ x, y })` taps a viewport point,
 `screen.doubleTapAt({ x, y })` double-taps a viewport point,
-`screen.swipe({ from, to, duration? })` swipes along a path,
-`screen.swipe({ direction, momentum? })` swipes the viewport. Prefer a
-locator; a point moves with the layout.
+`screen.swipe({ from, to, duration? })` swipes along a path (on iOS an
+untimed one must stay above the open soft keyboard; pass `duration` to drag
+across it),
+`screen.swipe({ direction, momentum? })` swipes the viewport. Viewport
+points also take percentages from `'0%'` through `'100%'`, rounded to the
+nearest pixel: `{ x: '50%', y: '50%' }`. Prefer a locator; a point moves with
+the layout.
 
 ### Reads
 
@@ -305,7 +379,7 @@ drops out, `<br>` is a space); `toHaveText` reads the same. `isChecked()` on a
 node that cannot be checked (a button), and `inputValue()` on one that holds
 no value (a heading), throw `ACTION_FAILED`. `waitFor({ state?: 'attached' | 'detached' | 'visible' | 'hidden', timeout? })` waits
 within `actionTimeout`, else `LOCATOR_NOT_FOUND`. For a value that has to
-settle use `expect`, not a read. Reading a password field's value or
+settle use `expect`, not a read. Reading a secure field's value or
 attributes is `POLICY_DENIED`, as is `toHaveAttribute` on one, negated too.
 
 `screen.tree()` returns the whole screen as the agent reads it (one node
@@ -318,19 +392,39 @@ a frame throws `INVALID_ARGUMENT`.
 `expect(locator)` polls up to `config.assertionTimeout` (5 s) or
 `{ timeout }`; `.not` inverts and passes once the negation has held 1 s
 continuously, or for the whole `timeout` when that is shorter, so it never
-returns sooner. `expect(value,
-message?)` is synchronous.
-`expect.poll(read, { timeout?, interval?, message? })` re-reads until a value
-matcher passes (`assertionTimeout` and 100 ms by default, stopping with the
+returns sooner. `expect(locator, message?)`, `expect(screen, message?)`, and
+their `expect.soft` forms open each assertion failure with the message.
+`expect(value, message?)` is synchronous.
+`expect.poll(read, { timeout?, interval?, intervals?, message? })` re-reads until a value
+matcher passes (`assertionTimeout` and `[100, 250, 500, 1000]` ms by default, stopping with the
 attempt); a throwing read keeps polling, and it is not a report step. A
 poll that the body or a hook returns without awaiting is cancelled and fails
 that phase with `STEP_NOT_AWAITED`.
+Use `intervals: [<ms>]` in place of the deprecated `interval` option.
 `timeout: 0` on a locator or fixture action, `waitFor`, a matcher, or
 `expect.poll` sets no deadline of its own: the test timeout
 (`cleanupTimeout` in `afterEach`) still bounds it, and `expect.poll` with 0
-outside a test is `INVALID_CONFIG`. A negative or non-finite `timeout` is
+outside a test, hook, or hosted session is `INVALID_CONFIG`. A negative or non-finite `timeout` is
 `INVALID_ARGUMENT` (`INVALID_CONFIG` from `expect.poll`); `agent.*` calls
 take a positive `timeout` only.
+
+Use `await expect(fn, message?).toPass({ timeout?, intervals? })` when
+several assertions must pass together. The block is retried until it
+completes without throwing. Use hard assertions inside the block. Keep
+inner locator timeouts short. With `.not.toPass()`, the assertion
+passes on the first throw or rejection. With `expect.soft(fn).toPass()`,
+you can keep a timeout failure and continue the test body.
+
+Set call options to override the corresponding fields in `config.toPass`.
+The defaults are the phase deadline and pauses of `[100, 250, 500, 1000]` ms.
+Pass a positive `timeout` outside an attempt or hook. In the report, you
+can see the steps from each try, including failed steps. At the cutoff,
+running steps in a `toPass` try or poll read are cancelled.
+
+The config defaults and hook deadline apply to both `expect.poll` and
+`toPass` in `beforeAll`, `afterAll`, and worker fixture teardown. A call
+`timeout` above 2147483647 ms is `INVALID_CONFIG`.
+
 `expect.soft(x)` keeps a failure instead of throwing; the attempt fails
 after the body with every soft failure listed. If the body then calls
 `test.skip`, the attempt still fails, with the skip reason in its `skip`.
@@ -347,6 +441,7 @@ await expect(screen.getByRole('dialog')).not.toBeVisible({ timeout: 10_000 });
 await expect(browser).toHaveURL('/dashboard');   // relative to the base URL, or a RegExp
 expect(order).toMatchObject({ id: expect.any(Number), lines: [{ sku: 'a' }] });
 expect.soft(await screen.getByTestId('tax').textContent()).toBe('$8.00');  // kept, body runs on
+expect(response).toBeOK();                                  // a request, waitForResponse, or route.fetch() response; status 200-299
 const users = expect(await response.json()).toMatchSchema(z.array(User)); // any Standard Schema; typed output
 ```
 
@@ -356,21 +451,28 @@ typed; prefer it when the app already has a schema for the response.
 
 | Locator matchers | Browser matchers | Value matchers |
 | --- | --- | --- |
-| `toBeVisible`, `toBeHidden`, `toBeAttached`, `toBeEnabled`, `toBeDisabled`, `toBeChecked`, `toBeSelected`, `toBeExpanded`, `toBeFocused`, `toHaveText`, `toContainText`, `toHaveValue`, `toHaveAttribute`, `toHaveCount`, `toHaveAccessibleName`, `toHaveScreenshot` (also on `screen`) | `toHaveURL`, `toHaveTitle`, `toHaveClass(locator, expected)` | `toBe`, `toEqual`, `toMatchObject`, `toBeTruthy`, `toBeFalsy`, `toBeNull`, `toBeUndefined`, `toBeDefined`, `toHaveLength`, `toHaveProperty`, `toContain`, `toMatch`, `toBeGreaterThan`, `toBeGreaterThanOrEqual`, `toBeLessThan`, `toBeLessThanOrEqual`, `toBeCloseTo`, `toMatchSchema` |
+| `toBeVisible`, `toBeHidden`, `toBeInViewport`, `toBeAttached`, `toBeEnabled`, `toBeDisabled`, `toBeEditable`, `toBeChecked`, `toBeSelected`, `toBeExpanded`, `toBeFocused`, `toBeEmpty`, `toHaveText`, `toContainText`, `toHaveValue`, `toHaveAttribute`, `toHaveCount`, `toHaveAccessibleName`, `toHaveRole`, `toHaveScreenshot` (also on `screen`) | `toHaveURL`, `toHaveTitle`, `toHaveClass(locator, expected)` | `toBe`, `toEqual`, `toMatchObject`, `toBeTruthy`, `toBeFalsy`, `toBeNull`, `toBeUndefined`, `toBeDefined`, `toHaveLength`, `toHaveProperty`, `toContain`, `toMatch`, `toBeGreaterThan`, `toBeGreaterThanOrEqual`, `toBeLessThan`, `toBeLessThanOrEqual`, `toBeCloseTo`, `toMatchSchema`, `toBeOK` |
 
 `toHaveText` compares the whole normalized text, `toContainText` a substring
-or RegExp, `toHaveValue` a form control's value as is, whitespace included
-(it fails on a node with none); on a password field all three are
+or RegExp, `toHaveValue` a control's value as is, whitespace included
+(it fails on a node with none). `toBeEmpty` passes on a field whose value
+is `''` (read as is, so a space is not empty) and on any other node with no
+text, where hidden text counts on the web, as in Playwright; it takes only
+`timeout` and works with `.not`. On a secure field all four are
 `POLICY_DENIED`, never a comparison against `''`. List forms:
 `toHaveText(['Alpha', /^Beta/])` needs exactly two matches with those texts
 in order; `toContainText(['Alpha', 'Beta'])` needs each entry in a distinct
 match, in order, extra matches allowed. `toHaveAttribute(name)` checks
 presence, `toHaveAttribute(name, value)` the value; `toBeAttached` waits for
 a match, hidden or not; `toHaveClass` compares the whole normalized class
-list or tests a RegExp. A failed matcher is `ASSERTION_FAILED`, exit code 1.
+list or tests a RegExp; `toBeInViewport({ ratio })` waits for part of a match
+(or that share of its box) inside the viewport without scrolling, reads no
+match as outside, and on a device fails with `UNSUPPORTED_CAPABILITY` for
+`ratio > 0` once the node is on screen. A failed matcher is `ASSERTION_FAILED`,
+exit code 1.
 
-Playwright's `{ checked: false }`, `{ enabled: false }`, `{ visible: false }`,
-and `{ attached: false }` flip their matchers, and `{ ignoreCase: true }`
+Playwright's `{ checked: false }`, `{ enabled: false }`, `{ editable: false }`,
+`{ visible: false }`, and `{ attached: false }` flip their matchers, and `{ ignoreCase: true }`
 works on `toHaveText`, `toContainText`, `toHaveAccessibleName`,
 `toHaveAttribute(name, value)`, and `expect(browser).toHaveURL`. Any other option, `indeterminate` or
 `useInnerText` included, is `INVALID_ARGUMENT`, in JavaScript too.
@@ -481,7 +583,8 @@ test as close to its screen as the app allows:
 - Create the data the screen needs through the app's API in a `test.extend`
   fixture. Click through a creation flow only in the test that covers it.
   A declared session is restored before fixtures run, so when the app signs
-  in with a cookie, `browser.cookies()` signs the fixture's requests in.
+  in with a cookie, its session cookie from `browser.cookies()` signs the
+  fixture's requests in. Send only that cookie: the list holds every site's.
   Check the response in the fixture: a
   failed seed then fails there, not 30 s later on a locator. While exploring
   over MCP, a project tool that seeds data (topic `agent`) gets there in one
@@ -493,14 +596,17 @@ import { expect } from 'e2e';
 import { z } from 'zod';
 
 const projectTest = test.extend<{ project: { id: string } }>({
-  project: async ({ app, browser }, use) => {
-    const cookie = (await browser.cookies()).map((c) => `${c.name}=${c.value}`).join('; ');
-    const api = (path: string, init: RequestInit = {}) =>
-      fetch(`${app.baseUrl}${path}`, { ...init, headers: { cookie, 'content-type': 'application/json' } });
-    const created = await api('/api/projects', { method: 'POST', body: JSON.stringify({ name: `Project ${Date.now()}` }) });
+  project: async ({ app, browser, request }, use) => {
+    // The domain the app sets the cookie on: its host, or `.example.com` for `Domain=example.com`.
+    const domain = new URL(app.baseUrl).hostname;
+    const session = (await browser.cookies()).find((c) => c.name === 'session' && c.domain === domain);
+    if (session === undefined) throw new Error('not signed in: no session cookie for the app');
+    const headers = { cookie: `session=${session.value}` };
+    const created = await request.post(`${app.baseUrl}/api/projects`, { json: { name: `Project ${Date.now()}` }, headers });
+    expect(created.status).toBe(201);
     const project = expect(await created.json()).toMatchSchema(z.object({ id: z.string() }));
     await use(project);
-    await api(`/api/projects/${project.id}`, { method: 'DELETE' }); // runs after a failure too
+    await request.delete(`${app.baseUrl}/api/projects/${project.id}`, { headers }); // runs after a failure too
   },
 });
 
@@ -516,9 +622,10 @@ describe('project settings', { session: 'admin' }, () => {
 });
 ```
 
-On a device there are no sessions and `app.open()` takes no path:
-`device.openLink('myapp://projects/42')` opens a route, or a sign-in link,
-in the app.
+On a device there are no sessions. `app.open()` takes a path only on a target
+with `app.linkBase` (`linkBase: 'myapp://'` makes `app.open('/projects/42')`
+open `myapp://projects/42`); otherwise `device.openLink('myapp://projects/42')`
+opens a route, or a sign-in link, in the app.
 
 Grow a test that spans several screens one screen at a time when you have
 not checked its steps live: write up to the next screen you have not seen
@@ -539,7 +646,7 @@ params. A fixture's run-unique value in a goal's params goes in as
 ## The browser fixture (browser only)
 
 Prefer `app` and `screen`; `browser` is for what only a browser has, and a
-portable suite declares `requires: ['browser']`. Page methods act on the one
+portable suite declares `platforms: ['web']`. Page methods act on the one
 active tab; cookies, routes, and `onDialog` cover the whole browser. A tab
 the app opens (`target="_blank"`, `window.open`) opens in the background:
 the active tab stays where it was. `waitForPopup(() => trigger)` makes the
@@ -552,7 +659,8 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
   `back({ timeout? })`, `forward({ timeout? })`: navigation on the test
   timeout by default; `goto` takes a base-relative path.
 - `url()`, `title()`, `waitForURL(url | RegExp, { timeout? })`: reads and a
-  URL wait; `waitForURL` matches like `toHaveURL`.
+  URL wait; `waitForURL` takes a URL glob such as `'**/checkout'` or a
+  `RegExp`, and `toHaveURL` compares a string exactly.
 - `locator(css)`: raw CSS or XPath; not portable, a last resort.
 - `frameLocator(css)`: a `Screen` scoped to one iframe
   (`browser.frameLocator('#payment').getByLabel('Card number')`); keeps
@@ -564,7 +672,8 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
 - `addInitScript(source | { path } | fn)`, `addInitScript(fn, arg)`: runs
   before the page's own scripts; call it before `app.open`. `arg` is JSON.
 - `route(pattern, handler)`, `unroute(pattern)`: intercept requests, newest
-  route first; `route.request` has `url`, `method`, `headers`, `postData`.
+  route first; `pattern` is a URL pattern or `{ method, url }` for one method.
+  `route.request` has `url`, `method`, `headers`, `postData`.
   `route.fetch()` reads upstream without deciding the route and returns
   `{ url, status, headers, body(), text(), json() }`; redirects are not followed.
   Hand binary bodies on with `body()`, never `text()`.
@@ -590,6 +699,11 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
 - `emulateMedia({ colorScheme?, reducedMotion? })`: what the page's `@media`
   rules and `matchMedia` read, for the rest of the test. Call it before
   `app.open` to load the page with it; a feature left out keeps its value.
+- `setNetwork('offline' | 'online')`: cuts or restores the network of every
+  tab and service worker for the rest of the test. A request that reaches
+  the network fails, and a navigation to a page no cache holds is
+  `ACTION_FAILED`; a page its service worker cached still loads. Every test
+  starts online.
 - `onDialog('accept' | 'dismiss' | handler)`: awaited; resolves to an async
   unsubscribe. Register it before the tap that opens the dialog. A handler
   gets `{ type, message, accept(text?), dismiss() }`, where `type` is
@@ -606,11 +720,24 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
   `keyboard.up(key)`, `mouse.*`: unfocused input. Only `down(key)` holds a
   key or modifier until `up(key)`. `press(key)` presses and releases within
   the call. Prefer `locator.press` and `locator.fill`.
+- `webmcp.tools()`, `webmcp.callTool(name, input?)`: the tools the page
+  registers through WebMCP (`document.modelContext`), listed and called
+  with no model. Needs `web({ webmcp: true })`, Chromium or Firefox, and a page on
+  `https:` or `localhost`; on a page without WebMCP both fail with
+  `UNSUPPORTED_CAPABILITY`. `callTool` returns the tool's result and fails
+  with `ACTION_FAILED` when the page has no such tool, the tool throws, or
+  the tool navigates the page or runs out of time before it answers (it may
+  have run).
+  Both cover the page's main frame only, not its iframes.
 
-A `route`, `unroute`, or `waitForResponse` pattern is a glob string or
-`RegExp` matched against the full URL (`*` stays within one path segment,
-`**` crosses `/`, `?` is one character); a predicate function is
-`INVALID_ARGUMENT`.
+A `route`, `unroute`, `waitForResponse`, or `waitForURL` pattern is a glob
+string or `RegExp`, in Playwright's grammar (`*` stays within one path
+segment, `**` crosses `/`, `{a,b}` is either, `?` is literal); a relative
+one resolves against the base URL. `route`, `unroute`, and `waitForResponse`
+also take `{ method, url }` to match one HTTP method too, case-insensitively.
+A method matches exactly that method: `GET` does not answer `HEAD`. `unroute`
+removes routes registered with the same pattern, method included, rather than
+URL-matching them. A predicate function is `INVALID_ARGUMENT`.
 
 ## Habits
 
@@ -619,13 +746,15 @@ A `route`, `unroute`, or `waitForResponse` pattern is a glob string or
   `browser.locator('.btn-primary')`.
 - Test data gets a run-unique name (`Invoice ${Date.now()}`) and `afterEach`
   cleanup, so replays and retries never trip over leftovers.
-- APIs live in the same suite: ``fetch(`${app.baseUrl}/api/users`)``
-  plus value matchers, in a `test.extend` fixture that reads `browser.cookies()`
-  when the API needs the session.
+- APIs live in the same suite: `request.get('/api/users')` (each call a
+  step, a path against the app URL) and the value matchers on
+  `response.status` and `await response.json()`. `request` sends no browser cookies: pass the app's
+  session cookie from `browser.cookies()` in a `cookie` header when the API
+  needs the session.
 - No sleeps, fixed delays, or polling loops. Wait for the state, not a
   duration: `agent.waitFor('the import finished')` with a `timeout` long
   enough for the slowest case (topic `agent` lists its model and budget
   limits), or a matcher with a longer `timeout` when a locator names the
   state exactly.
-- `await` every step call and `expect.poll`, else `STEP_NOT_AWAITED` at the line of the call.
+- `await` every step call, `expect.poll`, and `toPass`, else `STEP_NOT_AWAITED` at the line of the call.
 - Assert the fact a model produced with `toContain`, not its exact sentence.

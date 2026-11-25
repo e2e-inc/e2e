@@ -20,7 +20,7 @@ import { web } from '@e2e-dev/web';
 import { lightpanda } from '@e2e-dev/lightpanda';
 
 export default {
-  targets: [{ engine: web({ browser: lightpanda({ loadResources: ['iframe'] }) }), app: { url: 'http://localhost:3000' } }],
+  targets: [{ engine: web({ browser: lightpanda({ loadResources: ['stylesheet', 'iframe'] }) }), app: { url: 'http://localhost:3000' } }],
   workers: 4,
 } satisfies E2EConfig;
 ```
@@ -28,12 +28,13 @@ export default {
 The binary comes from `binary`, `LIGHTPANDA_PATH` in the run's environment,
 or `lightpanda` on `PATH`, `~/.lightpanda`, or `~/.local/bin`.
 `loadResources` passes `--load-resources` for `iframe`, `image`, and
-`stylesheet`; `args` adds any other `serve` flag. A server already running,
+`stylesheet`, and defaults to `['stylesheet']`; `args` adds any other
+`serve` flag. A server already running,
 such as the Docker image in CI, is a `web({ connect })` target instead.
 
 Lightpanda has no layout engine: locators, assertions, and agent steps on
-the accessibility tree work, while drags, dialogs, downloads, scrolling,
-and session restore do not. The full list lives at
+the accessibility tree work, while drag and drop, dialogs, and
+scrolling do not. The full list lives at
 [e2e.com/docs/integrations/lightpanda](https://e2e.com/docs/integrations/lightpanda).
 
 ## License

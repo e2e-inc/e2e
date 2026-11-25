@@ -17,13 +17,13 @@ export interface EnginePreset {
   readonly settings: readonly string[];
   /** The test file name beside other engines' examples: `tests/<file>.e2e.ts`. */
   readonly file: string;
-  /** The contributed fixture a test names in `requires` when other engines' targets share the config. */
-  readonly fixture: string;
   /** The example test; `options` is the test options argument with its trailing `, `, or empty. */
   readonly example: (options: string) => string;
   readonly aiExample: (options: string) => string;
   /** Whether the run hint sets APP_URL, for engines that drive a URL. */
   readonly needsAppUrl: boolean;
+  /** The platform the target drives, which is also its name in the config, for the CI job that runs it. */
+  readonly platform: 'web' | 'ios' | 'android';
 }
 
 /** Builds prompt choices and scaffolds with defaults for the machine running init. */
@@ -46,7 +46,6 @@ export function getEnginePresets() {
 }`,
       settings: [],
       file: 'web',
-      fixture: 'browser',
       example: (options: string) => `import { test } from '@e2e-dev/web';
 import { expect } from 'e2e';
 
@@ -64,6 +63,7 @@ test('app opens', ${options}async ({ app, browser }) => {
 // });
 `,
       needsAppUrl: true,
+      platform: 'web',
     },
     {
       id: 'mobile',
@@ -77,7 +77,6 @@ test('app opens', ${options}async ({ app, browser }) => {
         : "{ name: 'android', engine: mobile({ platform: 'android' }), app: { bundleId: 'com.android.settings' } }",
       settings: ['  workers: 1,'],
       file: 'mobile',
-      fixture: 'device',
       example: (options: string) => `import { test } from '@e2e-dev/mobile';
 import { expect } from 'e2e';
 
@@ -104,6 +103,7 @@ test('Settings opens', ${options}async ({ app, screen }) => {
 // });
 `,
       needsAppUrl: false,
+      platform: ios ? 'ios' : 'android',
     },
   ] as const satisfies readonly EnginePreset[];
 }

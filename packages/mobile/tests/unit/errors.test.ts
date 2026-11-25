@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AppError } from 'agent-device';
-import { EngineError, TestError, type OperationContext, type SemanticNode } from 'e2e/engine';
+import { EngineError, TestError, type OperationContext, type SemanticNode } from '@e2e-dev/core/engine';
 import { isAppNotInstalled, isRunnerFailure, isSnapshotPresentationFailure, staleOr, translateError } from '../../src/errors.ts';
 import { SETTINGS_SNAPSHOT } from '../helpers/fake-client.ts';
 import { boot, harness, PROJECT_ROOT, type Harness } from '../helpers/harness.ts';
@@ -119,6 +119,22 @@ describe('error translation', () => {
     expect(staleOr(new AppError('COMMAND_FAILED', text, { reason, hint, dispatched: 'unknown' }), 'perform tap')).toMatchObject({
       code: 'ENGINE_FAILURE',
     });
+  });
+
+  // As agent-device 0.21.37 sends it for a ref aimed from a capture without the window's screen origin.
+  it('fails an action agent-device refused as window-origin-unknown with NOT_ACTIONABLE, the offset bounds, and the tapAt move', () => {
+    const text = 'Ref @e2 has no established screen-coordinate origin';
+    const hint = 'Take a fresh snapshot after the accessibility channel recovers, or use screenshot to choose screen coordinates.';
+    const refused = new AppError('COMMAND_FAILED', text, { reason: 'window-origin-unknown', hint, dispatched: 'no' });
+    const failure = staleOr(refused, 'perform tap');
+    expect(failure).toMatchObject({ code: 'NOT_ACTIONABLE', retryable: false, cause: refused });
+    // agent-device's hint names its CLI; the failure names the test's move instead.
+    expect(failure.message).toBe(
+      `perform tap failed: ${text} Hint: Nothing was sent. The app's window has no known position on the screen, so node bounds, boundingBox() included, may be offset from screen coordinates. For a tap, tap a screen point with screen.tapAt(), not one taken from those bounds.`,
+    );
+    expect(
+      staleOr(new AppError('COMMAND_FAILED', text, { reason: 'window-origin-unknown', hint, dispatched: 'unknown' }), 'perform tap'),
+    ).toMatchObject({ code: 'ENGINE_FAILURE' });
   });
 
   it('maps the rest to ENGINE_FAILURE with the text, a ref named in a message without a stale reason included', () => {

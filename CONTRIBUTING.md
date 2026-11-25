@@ -50,7 +50,7 @@ A bot checks every community PR:
 - `fix`, `chore`, `test`, `perf`, `ci`, `build`, and `revert` PRs link an
   existing issue: `Fixes #123` under `## Issue`. `feat`, `docs`, and
   `refactor` PRs are exempt.
-- The description says what changes and why, and `## Verified` from the
+- The description is filled in, and `## Verified` from the
   [PR template](./.github/PULL_REQUEST_TEMPLATE.md) says how you checked it.
 
 A PR that fails the check gets the `needs:compliance` label and a comment
@@ -59,9 +59,64 @@ Once a day, community PRs open for more than a month with fewer than 2
 positive reactions (👍 ❤️ 🎉 🚀) and no maintainer approval are closed too.
 If one was closed by mistake, say so on the PR.
 
+### Maintainer takeover
+
+A maintainer may finish a community PR themselves, for example when it is
+close to done and landing it is faster than another review round. They add the
+`maintainer takeover` label, and a comment on the PR names who took it over.
+From then on:
+
+- The maintainer owns the PR: review comments, failing checks, conflicts, and
+  the merge. You do not need to do anything else.
+- Do not push more commits to the branch. If you have something to add,
+  comment on the PR.
+- You keep the credit for the change.
+- The bot above no longer flags or closes the PR.
+
+If you would rather finish it yourself, say so on the PR and the maintainer
+removes the label.
+
+The PR description is the source of truth for the change. Reviewers read it
+before the diff, so it follows the template:
+
+- `## What`: the change as a user or caller meets it.
+- `## Why`: the problem that led to it.
+- `## How it works`: numbered steps a reviewer can follow through the diff.
+- `## Verified`: evidence that it works. The command you ran and what you
+  saw; `main` beside your branch for a fix; the `pnpm bench:ab` table for a
+  speedup; a `pnpm record:terminal` recording when the terminal output or UI
+  changes.
+
+Keep it true to the latest commit: when a push changes the behavior, the
+scope, or a number, edit the description too.
+
 Keep PRs small, and write the description yourself, briefly. Long
 AI-generated descriptions may be ignored. If you can't explain the change in
-a few lines, the PR is probably too big.
+a few lines per section, the PR is probably too big.
+
+### Ready for Human Review
+
+Maintainers review PRs that carry the `Ready for Human Review` label. It says
+that everything a machine can check is done, so a person only spends time on
+judgment. Whether you or a coding agent drives the PR, the steps are the same.
+
+Contributors cannot add labels. When the PR is ready, its author comments
+exactly `/ready`, alone in the comment. A workflow adds the label, or replies
+with what is missing, when all of these hold:
+
+- No merge conflict, not a draft, and no `needs:compliance` label.
+- Checks have reported on the latest commit, and none is failing or still
+  running. On your first PR here a maintainer has to approve the CI run
+  before it starts.
+- No maintainer's latest review requests changes.
+- Every review thread, from a maintainer or a review bot, is resolved. Fix it
+  or reply with why it does not apply, then resolve it. A thread someone else
+  opened does not count if you resolved it without replying.
+
+The label vouches for one commit. A push, a merge conflict, a maintainer's
+review that requests changes, or a move back to draft removes it; comment `/ready` again
+once the PR is back in shape. Do not ask for the label while review feedback
+is still open.
 
 ## The contract
 
@@ -88,7 +143,8 @@ Fix the prose when you find it stale.
 This project is a pnpm monorepo. `packages/` holds what publishes to npm,
 `apps/` the private apps and suites that consume the built packages:
 
-- `packages/e2e`: the published `e2e` package (SDK, runner, CLI, engine contract)
+- `packages/core`: the published `@e2e-dev/core` package: engines, locators, agent, and replay cache without the test runner, and the engine contract
+- `packages/e2e`: the published `e2e` package (SDK, runner, CLI), built on `@e2e-dev/core`
 - `packages/web`: the published `@e2e-dev/web` browser engine
 - `packages/mobile`: the published `@e2e-dev/mobile` mobile engine
 - `packages/decision`: the decision-model executor and test filter on the public `StepExecutor` and `TestFilter` contracts
@@ -100,7 +156,7 @@ This project is a pnpm monorepo. `packages/` holds what publishes to npm,
 - `skills/e2e/`: the agent skill shipped with the package and installed by `e2e init`
 - `skills/create-verification-skill/`: the generator of a project-local `verify-<app>` skill, installed with `npx skills add e2e-inc/e2e --skill create-verification-skill`
 - `skills/migrate-to-e2e/`: ports an existing Playwright, Cypress, Selenium, Appium, Detox, Maestro, or TesterArmy suite one slice at a time, installed with `npx skills add e2e-inc/e2e --skill migrate-to-e2e`
-- `plugins/e2e/`: the Claude Code, Codex, and Cursor plugin of the three skills, installed from this repository as a marketplace with `claude plugin marketplace add e2e-inc/e2e` or `codex plugin marketplace add e2e-inc/e2e`, or copied into `~/.cursor/plugins/local/` for Cursor
+- `plugins/e2e/`: the Claude Code, Codex, Cursor, and Devin plugin of the three skills, installed from this repository as a marketplace with `claude plugin marketplace add e2e-inc/e2e` or `codex plugin marketplace add e2e-inc/e2e`, or copied into `~/.cursor/plugins/local/` for Cursor, or added in Devin from this repository with the subdirectory `plugins/e2e`
 - `.dev/skills/`: the skills coding agents use to work on this repo, symlinked from `.claude/skills/` so `npx skills add e2e-inc/e2e` offers only `skills/*`
 
 On Windows, enable Developer Mode and clone with
@@ -166,7 +222,8 @@ squash-merged, so the PR title is the commit; the
 [`writing-pr`](./.dev/skills/writing-pr/SKILL.md) skill describes the body,
 including the `## Verified` section every PR carries. Coding agents open PRs
 through the [`ship-pr`](./.dev/skills/ship-pr/SKILL.md) skill and babysit
-them until the `Ready for Human Review` label is on; a later push removes it.
+them until the [`Ready for Human Review`](#ready-for-human-review) label is
+on.
 
 ### Changesets
 
@@ -174,8 +231,8 @@ We use [changesets](https://github.com/changesets/changesets) to publish new
 versions. It handles bumping the version based on semver, writing the
 changelog, and creating tags and GitHub releases.
 
-If your change affects `e2e`, `@e2e-dev/web`, `@e2e-dev/mobile`,
-`@e2e-dev/decision`, or `@e2e-dev/acp`, add a changeset:
+If your change affects `e2e`, `@e2e-dev/core`, `@e2e-dev/web`,
+`@e2e-dev/mobile`, `@e2e-dev/decision`, or `@e2e-dev/acp`, add a changeset:
 
 ```sh
 pnpm changeset
@@ -289,8 +346,10 @@ committed.
 The following are the public contract. A change that breaks any of them is a
 breaking change and follows the rules below:
 
-- Public types exported from `e2e` and `e2e/engine`, as
-  emitted in `dist/index.d.ts` and `dist/engine/index.d.ts`. Removing an
+- Public types exported from `e2e`, `e2e/engine`, `@e2e-dev/core`,
+  `@e2e-dev/core/agent`, and `@e2e-dev/core/engine`, as emitted in `dist/index.d.ts`
+  and `dist/engine/index.d.ts` of `e2e`, and `dist/core/*.d.ts` and
+  `dist/engine/index.d.ts` of `@e2e-dev/core`. Removing an
   export, narrowing an accepted input, widening a returned type, or changing a
   fixture's runtime behavior all count.
 - Config keys in `e2e.config.ts`, their types, and their defaults.
@@ -300,7 +359,8 @@ breaking change and follows the rules below:
   Adding an optional field is compatible; renaming, removing, or changing the
   meaning of one is not.
 
-Not covered: anything under `internal`, the testbed, the exact text of error
+Not covered: anything under `internal`, `@e2e-dev/core/lib/*` (the modules `e2e`
+reaches at the exact `@e2e-dev/core` version it depends on), the testbed, the exact text of error
 messages and reporter output (error *codes* are covered), and the agent's
 prompts and tool descriptions.
 
@@ -326,12 +386,15 @@ prompts and tool descriptions.
 
 ### Engine contract
 
-`e2e/engine` is what `@e2e-dev/web` and `@e2e-dev/mobile`
-build against, and what a third-party engine builds against too. A change to
-that contract bumps all three packages together in one release, with a
-changeset for each, so an engine and a runner from the same release always
-match. Engines declare a peer range on `e2e` that points one way only
-(engine to runner, `>=x <1`), and each integration (`@e2e-dev/kernel`, `@e2e-dev/lightpanda`, `@e2e-dev/eas`, `@e2e-dev/smol`, `@e2e-dev/testmu`, `@e2e-dev/browserstack`, `@e2e-dev/e2b`) does
+`@e2e-dev/core/engine` (re-exported as `e2e/engine`) is what `@e2e-dev/web`,
+`@e2e-dev/mobile`, and `@e2e-dev/desktop` build against, and what a third-party
+engine builds against too. A change to that contract bumps `@e2e-dev/core`,
+`e2e`, and every engine together in one release, with a changeset for each,
+so an engine and a runner from the same release always match. `e2e` and `@e2e-dev/core` are a changesets
+`fixed` group: they always share a version, and `e2e` depends on that exact
+`@e2e-dev/core`. Engines declare a peer range on `@e2e-dev/core` that points one way
+only (engine to core, `>=x <1`), plus an optional one on `e2e` for the main
+entry that adds the engine's fixture to `test`, and each integration (`@e2e-dev/kernel`, `@e2e-dev/notte`, `@e2e-dev/lightpanda`, `@e2e-dev/eas`, `@e2e-dev/smol`, `@e2e-dev/testmu`, `@e2e-dev/browserstack`, `@e2e-dev/e2b`, `@e2e-dev/revyl`) does
 the same on the engines it plugs into; do not make it mutual or narrow it.
 
 ### Driver nightly compatibility

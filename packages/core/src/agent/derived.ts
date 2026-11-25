@@ -1,0 +1,210 @@
+/**
+ * Whether a value the executor typed was derived at run time, and by which
+ * rule, so the trace must not replay it.
+ *
+ * A value the instruction or the params spell out — "Nimbus Paper Co", 4.25,
+ * a param's string — is the step's literal input and replays verbatim. A
+ * value the step read off the screen (a code, a reference the app minted),
+ * or reckoned from the calendar, belongs to THIS run: the next run's app may
+ * issue another, and a replay that typed the old one would act out a stale
+ * flow and self-finalize on the wrong state. Such an action is recorded as a
+ * gap instead: replay performs everything before it and hands the step over,
+ * so the executor derives the value afresh from what it sees and remembers.
+ * A value the model composed itself (a plausible name, an email, a note)
+ * is the flow's data as much as a literal would be, and replays.
+ *
+ * Each rule answers with its own `DerivedReason`, so the report can say which
+ * one fired and each is pinned on its own:
+ *
+ * - `pixels`: the model was shown a screenshot this step, whose text the
+ *   tree does not list, so any value that is not literal may have been read
+ *   off the image.
+ * - `whole-node`: the value is the whole of what some node said (its name or
+ *   its text, whitespace-normalized).
+ * - `minted-token`: the value is data-shaped (one token, with a digit: a
+ *   code, a count, a reference) and some node showed it as a word of its own.
+ *   The digit is a glyph test standing in for provenance: "1" typed beside a
+ *   "Row 1" label is flagged too, and the executor runs that part live. Also
+ *   any value typed into a field the app marks as a one-time code: the app
+ *   issues that code per run, and a code split over one box per digit puts a
+ *   single digit in each fill, which no screen shows as a word of its own.
+ *   Typing into the focused field names no field, so in a step whose screens
+ *   listed a one-time-code field its value is judged as if it went into one.
+ * - `date`: a date or a clock time, which the model reckons from today.
+ *
+ * Values typed in a row into several fields are also judged joined
+ * (`derivedJoinReason`), after each piece is judged on its own above: a code
+ * the screen showed and the model typed three and three, or one digit per
+ * box, is the whole code once its pieces join, even where no one piece is a
+ * word of the screen. The recording becomes a gap from the first piece on.
+ *
+ * A bare word inside a sentence is none of these: "one" typed on a page that
+ * lists "Row one" is the model's own choice, and the recording replays it.
+ * So is a name inside a greeting ("Jane" under "Welcome back, Jane"); when
+ * that name was in fact read off the screen, the replay types last run's
+ * value and self-finalizes, backstopped only when the value resurfaces in the
+ * end anchors.
+ */
+
+import type { DerivedReason } from '../cache/trace.ts';
+import type { SemanticNode } from '../engine/surface.ts';
+import { CLOCK_TIME, DAY_MONTH_DATE, ISO_DATE, MONTH_DAY_DATE } from '../internal/dates.ts';
+import type { JsonValue } from '../types.ts';
+
+/** What the step showed the model, which a typed value may have been read off. */
+export interface StepEvidence {
+  /**
+   * What the screens displayed, one string per node
+   * (`ObservationFeed.shownText`): the fields that echo a typed value are
+   * already left out of it.
+   */
+  readonly shown?: Iterable<string>;
+  /**
+   * Whether the model received a screenshot in this step. Text drawn in
+   * pixels is not in `shown`, so a value that is not literal may have been
+   * read off the image and counts as derived.
+   */
+  readonly pixels?: boolean;
+  /**
+   * The purpose of the field the value went into: the one the engine reported
+   * for it (`SemanticNode.inputPurpose`), or, for typing into the focused
+   * field, which names none, `one-time-code` once a screen of the step listed
+   * such a field (`ObservationFeed.oneTimeCodeShown`).
+   */
+  readonly inputPurpose?: SemanticNode['inputPurpose'] | undefined;
+}
+
+/**
+ * The rule that makes a typed value this run's data, or undefined for a
+ * value that replays: one the instruction or the params spell out, or one
+ * the model composed itself.
+ */
+export function derivedReason(
+  value: string,
+  instruction: string,
+  params: Readonly<Record<string, JsonValue>> | undefined,
+  evidence: StepEvidence = {},
+): DerivedReason | undefined {
+  const needle = normalize(value);
+  if (needle === '') return undefined;
+  if (evidence.inputPurpose === 'one-time-code') {
+    // One box per digit puts a single character in each fill, and "the
+    // 6-digit code" spells no code: only a longer value the step spells out
+    // whole replays, so neither a lone digit nor a chunk of some other
+    // number ever replays as last run's code.
+    return [...needle].length > 1 && spellsOutWhole(needle, instruction, params) ? undefined : 'minted-token';
+  }
+  if (isLiteral(needle, instruction, params)) return undefined;
+  if (evidence.pixels === true) return 'pixels';
+  return shownReason(needle, evidence.shown ?? []) ?? (DATE_OR_TIME.test(value) ? 'date' : undefined);
+}
+
+/**
+ * The rule that makes values typed in a row into several fields this run's
+ * data once joined, or undefined when the join replays. `joined` is the
+ * values with no separator, as a code split one digit per box (or three and
+ * three) reads whole. No piece of such a code is a word the screen showed,
+ * so every piece passes `derivedReason`, which already applied the date,
+ * pixel, and field-purpose rules to each. The join meets only the screen
+ * rules, and a join the instruction or the params spell out is literal.
+ */
+export function derivedJoinReason(
+  joined: string,
+  instruction: string,
+  params: Readonly<Record<string, JsonValue>> | undefined,
+  shown: Iterable<string>,
+): 'whole-node' | 'minted-token' | undefined {
+  const needle = normalize(joined);
+  if (needle === '' || isLiteral(needle, instruction, params)) return undefined;
+  return shownReason(needle, shown);
+}
+
+/**
+ * Whether a screen of the step showed the value: as the whole of a node, or,
+ * for a data-shaped value, as a word of its own inside one. A node that says
+ * exactly the value wins over one that holds it as a word.
+ */
+function shownReason(needle: string, shown: Iterable<string>): 'whole-node' | 'minted-token' | undefined {
+  const dataShaped = isDataShaped(needle);
+  let mintedToken = false;
+  for (const text of shown) {
+    const normalized = normalize(text);
+    if (normalized === needle) return 'whole-node';
+    if (dataShaped && hasWord(normalized, needle)) mintedToken = true;
+  }
+  return mintedToken ? 'minted-token' : undefined;
+}
+
+/** Whether the instruction or a param spells the value out: the step's literal input, which replays verbatim. */
+function isLiteral(needle: string, instruction: string, params: Readonly<Record<string, JsonValue>> | undefined): boolean {
+  return normalize(instruction).includes(needle) || paramStrings(params).some((text) => normalize(text).includes(needle));
+}
+
+/**
+ * Whether the instruction carries the value as a word of its own, or a param
+ * is that value: the stricter reading of a literal a one-time-code field
+ * gets, where a chunk of a longer number is no spelling of the code.
+ */
+function spellsOutWhole(needle: string, instruction: string, params: Readonly<Record<string, JsonValue>> | undefined): boolean {
+  return hasWord(normalize(instruction), needle) || paramStrings(params).some((text) => normalize(text) === needle);
+}
+
+/**
+ * Whether a value looks like data rather than words: one token, no
+ * whitespace, with a digit in it. `TK-4972`, `123`, `n20123` qualify; `Jane`
+ * and `one` do not, so those count as read off the screen only when a node
+ * says exactly that and nothing more.
+ */
+function isDataShaped(needle: string): boolean {
+  return !/\s/u.test(needle) && /\p{N}/u.test(needle);
+}
+
+/**
+ * Whether the text carries the value as a whole token: "123" inside
+ * "n20123" is not the screen showing it.
+ */
+function hasWord(text: string, needle: string): boolean {
+  let from = 0;
+  for (;;) {
+    const at = text.indexOf(needle, from);
+    if (at === -1) return false;
+    const before = at === 0 ? ' ' : text[at - 1]!;
+    const after = at + needle.length >= text.length ? ' ' : text[at + needle.length]!;
+    if (!WORD_CHAR.test(before) && !WORD_CHAR.test(after)) return true;
+    from = at + 1;
+  }
+}
+
+const WORD_CHAR = /[\p{L}\p{N}]/u;
+
+/**
+ * A date in ISO, numeric, or month-name form, or a clock time: the model
+ * reckons these from today, which moves.
+ */
+const DATE_OR_TIME = new RegExp(
+  [
+    ISO_DATE.source,
+    String.raw`\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\b`,
+    CLOCK_TIME.source,
+    MONTH_DAY_DATE.source,
+    DAY_MONTH_DATE.source,
+  ].join('|'),
+  'i',
+);
+
+/** Every string and number a params object carries, at any depth. */
+function paramStrings(params: Readonly<Record<string, JsonValue>> | undefined): string[] {
+  const out: string[] = [];
+  const visit = (value: JsonValue): void => {
+    if (typeof value === 'string') out.push(value);
+    else if (typeof value === 'number' || typeof value === 'boolean') out.push(String(value));
+    else if (Array.isArray(value)) for (const item of value) visit(item);
+    else if (value !== null && typeof value === 'object') for (const item of Object.values(value)) visit(item);
+  };
+  if (params !== undefined) visit(params);
+  return out;
+}
+
+function normalize(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, ' ').trim();
+}

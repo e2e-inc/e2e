@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { keyboardBand, projectSnapshot, screenTitle, viewportOf, type RawNode } from '../../src/nodes.ts';
+import { keyboardBand, projectSnapshot, screenTitle, viewportOf, withEmptyState, type RawNode } from '../../src/nodes.ts';
 import { SETTINGS_NODES } from '../helpers/fake-client.ts';
 
 function project(nodes: readonly RawNode[]) {
@@ -542,7 +542,7 @@ describe('snapshot projection', () => {
     ]);
     const [, email, password, pin, note] = projected.index.map((entry) => entry.node);
     expect(email).toMatchObject({ role: 'textbox', name: 'Email', value: 'oskar@example.com' });
-    expect(email!.states).toBeUndefined();
+    expect(email!.states).toEqual({ readonly: false });
     expect(email!.inputPurpose).toBeUndefined();
     expect(password).toMatchObject({ role: 'textbox', name: 'Password', inputPurpose: 'password', states: { secure: true }, testId: 'com.example:id/password' });
     expect(password!.value).toBeUndefined();
@@ -551,6 +551,69 @@ describe('snapshot projection', () => {
     expect(pin).toMatchObject({ role: 'textbox', inputPurpose: 'password', states: { secure: true } });
     expect(pin!.value).toBeUndefined();
     expect(note!.role).toBe('text');
+  });
+
+  it('reports a text field read-only only where the platform says whether it takes text', () => {
+    const projected = project([
+      { ref: 'e1', type: 'android.widget.EditText', label: 'Name', editable: true },
+      { ref: 'e2', type: 'android.widget.EditText', label: 'Order id', editable: false },
+      { ref: 'e3', type: 'TextField', label: 'City' },
+      { ref: 'e4', type: 'android.widget.Spinner', label: 'Country', editable: false },
+      { ref: 'e5', type: 'android.widget.TextView', label: 'Hint', editable: false },
+      { ref: 'e6', type: 'android.widget.Spinner', label: 'Search city', editable: true },
+      // agent-device 0.21.40 fills in `editable: true` for every iOS text field
+      // and text view from the element type, so the flag says nothing there.
+      { ref: 'e7', type: 'TextView', label: 'Terms', editable: true },
+      { ref: 'e8', type: 'TextField', label: 'Street', editable: true },
+      { ref: 'e9', type: 'android.widget.EditText', label: 'Zip' },
+    ]);
+    const [name, orderId, city, country, hint, searchCity, terms, street, zip] = projected.index.map((entry) => entry.node);
+    expect(name).toMatchObject({ role: 'textbox', states: { readonly: false } });
+    expect(orderId).toMatchObject({ role: 'textbox', states: { readonly: true } });
+    // No flag: unknown, so no state, rather than an editable guess.
+    expect(city!.role).toBe('textbox');
+    expect(city!.states?.readonly).toBeUndefined();
+    // A picker takes no typed text, yet is not read-only.
+    expect(country!.states?.readonly).toBeUndefined();
+    expect(hint!.states?.readonly).toBeUndefined();
+    // A combobox the platform says takes text is editable.
+    expect(searchCity).toMatchObject({ role: 'combobox', states: { readonly: false } });
+    // An iOS flag is a guess from the element type: no state, so a read-only text view does not pass as editable.
+    expect(terms!.role).toBe('textbox');
+    expect(terms!.states?.readonly).toBeUndefined();
+    expect(street!.role).toBe('textbox');
+    expect(street!.states?.readonly).toBeUndefined();
+    // An Android field with no flag is unknown too, not read-only.
+    expect(zip!.role).toBe('textbox');
+    expect(zip!.states?.readonly).toBeUndefined();
+  });
+
+  it('reads a field empty by its value and any other node by the text or value below it, on a located node only', () => {
+    const projected = project([
+      { ref: 'e1', index: 0, depth: 0, type: 'other', rect: { x: 0, y: 0, width: 390, height: 844 } },
+      { ref: 'e2', index: 1, parentIndex: 0, depth: 1, type: 'text-field', label: 'Email' },
+      { ref: 'e3', index: 2, parentIndex: 0, depth: 1, type: 'text-field', label: 'Name', value: 'Ada' },
+      { ref: 'e4', index: 3, parentIndex: 0, depth: 1, type: 'secure-text-field', label: 'Password' },
+      { ref: 'e5', index: 4, parentIndex: 0, depth: 1, type: 'other', identifier: 'cart' },
+      { ref: 'e6', index: 5, parentIndex: 4, depth: 2, type: 'static-text', label: '1 item' },
+      { ref: 'e7', index: 6, parentIndex: 0, depth: 1, type: 'other', identifier: 'toolbar' },
+      { ref: 'e8', index: 7, parentIndex: 6, depth: 2, type: 'image' },
+      { ref: 'e9', index: 8, parentIndex: 0, depth: 1, type: 'other', identifier: 'sign-in' },
+      { ref: 'e10', index: 9, parentIndex: 8, depth: 2, type: 'text-field', label: 'Username' },
+      { ref: 'e11', index: 10, parentIndex: 8, depth: 2, type: 'secure-text-field', label: 'Password', value: 'hunter2' },
+    ]);
+    const [, email, name, password, cart, , toolbar, , signIn] = projected.index.map((entry) => entry.node);
+    // A field's label is not what it holds.
+    expect(withEmptyState(email!).states?.empty).toBe(true);
+    expect(withEmptyState(name!).states?.empty).toBe(false);
+    expect(withEmptyState(password!).states?.empty).toBeUndefined();
+    // A container shows what its children show.
+    expect(withEmptyState(cart!).states?.empty).toBe(false);
+    expect(withEmptyState(toolbar!).states?.empty).toBe(true);
+    // A field below counts by its value alone, and a secure one not at all.
+    expect(withEmptyState(signIn!).states?.empty).toBe(true);
+    // The observation tree carries no empty state.
+    expect(projected.index.some((entry) => entry.node.states?.empty !== undefined)).toBe(false);
   });
 
   it('keeps a role that already takes text when the platform reports it editable, and trusts the flag on a control role', () => {

@@ -4,11 +4,12 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { collectFromRegistration, type Collection } from '../../src/collect/collect.ts';
 import { collectModule, test } from '../../src/collect/registry.ts';
-import { pairRecording, pairRecordings, repeatEach, resolveOptions, select, type SelectionFilters } from '../../src/collect/select.ts';
-import { resolveConfig } from '../../src/config/resolve.ts';
-import { defineEngine } from '../../src/engine/index.ts';
-import { resultId } from '../../src/internal/ids.ts';
-import type { E2EConfig } from '../../src/types.ts';
+import { pairRecordings, repeatEach, resolveOptions, select, type SelectionFilters } from '../../src/collect/select.ts';
+import { pairRecording } from '@e2e-dev/core/lib/internal/recording-modes';
+import { resolveConfig } from '../../src/config/resolve-run.ts';
+import { defineEngine } from '@e2e-dev/core/lib/engine/index';
+import { resultId } from '@e2e-dev/core/lib/internal/ids';
+import type { E2EConfig } from '../../src/run-types.ts';
 
 const noop = async () => {};
 /** A project root that does not exist, so the diagnostics that stat a positional find nothing, on every host. */
@@ -245,16 +246,44 @@ describe('resolveOptions', () => {
     expect(resolveOptions(col.tests[0]!, config()).agentContext).toBe('outer ctx\nleaf ctx');
   });
 
-  it('replaces platforms, requires, and session', async () => {
+  it('replaces platforms and session', async () => {
     const col = await collection(() => {
-      test.describe('outer', { platforms: ['web'], requires: ['web'], session: 'a' }, () => {
+      test.describe('outer', { platforms: ['web'], session: 'a' }, () => {
         test('leaf', { session: 'b' }, noop);
       });
     });
     const options = resolveOptions(col.tests[0]!, config());
     expect(options.platforms).toEqual(['web']);
-    expect(options.requires).toEqual(['web']);
     expect(options.session).toBe('b');
+  });
+
+  it('expects a test to fail when it or any group marks it, the innermost reason first', async () => {
+    const col = await collection(() => {
+      test.describe('legacy', { fail: 'legacy checkout' }, () => {
+        test('inherits', noop);
+        test('own reason', { fail: 'card form' }, noop);
+        test('bare mark keeps the group reason', { fail: true }, noop);
+        test('false does not unmark', { fail: false }, noop);
+        test('blank reason keeps the group reason', { fail: ' ' }, noop);
+        test.describe.fail('inner bare', () => test('nested', noop));
+        test.describe('inner false', { fail: false }, () => test('still marked', noop));
+        test.describe('inner reason', { fail: 'coupon API' }, () => test('nested reason', noop));
+      });
+      test.describe.fail('no reason', () => test('default', noop));
+      test.describe('plain', () => test('unmarked', noop));
+    });
+    expect(col.tests.map((entry) => resolveOptions(entry, config()).expectedFailure)).toEqual([
+      'legacy checkout',
+      'card form',
+      'legacy checkout',
+      'legacy checkout',
+      'legacy checkout',
+      'legacy checkout',
+      'legacy checkout',
+      'coupon API',
+      'expected to fail',
+      undefined,
+    ]);
   });
 });
 
@@ -268,6 +297,43 @@ describe('select', () => {
     const skipped = selection.pairs.find((pair) => pair.test.title === 'skipped')!;
     expect(skipped.disposition).toBe('skip');
     expect(skipped.skip?.cause).toBe('explicit');
+  });
+
+  it('gives a test.fixme registration the cause fixme, and a skip option reading fixme the cause explicit', async () => {
+    const col = await collection(() => {
+      test('runs', noop);
+      test.fixme('registered', noop);
+      test('by option', { skip: 'fixme' }, noop);
+      test.describe('skipped group', { skip: 'tracked in #42' }, () => {
+        test.fixme('inside a skipped group', noop);
+        test('plain member', noop);
+      });
+    });
+    const skips = select(col, config()).pairs.map((pair) => [pair.test.title, pair.disposition, pair.skip]);
+    expect(skips).toEqual([
+      ['runs', 'run', undefined],
+      ['registered', 'skip', { cause: 'fixme', reason: 'fixme' }],
+      ['by option', 'skip', { cause: 'explicit', reason: 'fixme' }],
+      ['inside a skipped group', 'skip', { cause: 'fixme', reason: 'fixme' }],
+      ['plain member', 'skip', { cause: 'explicit', reason: 'tracked in #42' }],
+    ]);
+  });
+
+  it('gives a test.todo registration the cause and reason todo', async () => {
+    const col = await collection(() => {
+      test('runs', noop);
+      test.todo('not yet');
+    });
+    const todo = select(col, config()).pairs.find((pair) => pair.test.title === 'not yet')!;
+    expect(todo.disposition).toBe('skip');
+    expect(todo.skip).toEqual({ cause: 'todo', reason: 'todo' });
+
+    const todoOnly = await collection(() => {
+      test.todo('not yet');
+    });
+    expect(() => select(todoOnly, config())).toThrow(
+      '1 tests were collected but none is runnable: 1 marked todo; pass --pass-with-no-tests to allow this',
+    );
   });
 
   it('focuses .only tests and filters the rest', async () => {
@@ -551,21 +617,6 @@ describe('select', () => {
     expect(selection.pairs.find((pair) => pair.test.title === 'web too')!.disposition).toBe('run');
   });
 
-  it('skips tests whose required capability is unavailable', async () => {
-    const col = await collection(() => {
-      test('needs device', { requires: ['device'] }, noop);
-      test('needs web', { requires: ['web'] }, noop);
-    });
-    // Capabilities are the engine's declared set: harness tiers plus one name
-    // per contributed fixture. This engine contributes `web`, not `device`.
-    const engine = defineEngine({ name: 'toy', version: '1.0.0', spiVersion: 1, fixtures: { web: () => ({}) } });
-    const selection = select(col, config({ targets: [{ name: 'web', platform: 'web', engine }] }));
-    const device = selection.pairs.find((pair) => pair.test.title === 'needs device')!;
-    expect(device.disposition).toBe('skip');
-    expect(device.skip?.cause).toBe('capability-unavailable');
-    expect(selection.pairs.find((pair) => pair.test.title === 'needs web')!.disposition).toBe('run');
-  });
-
   it('selects the session producer for consumers regardless of filters', async () => {
     const col = await collection(() => {
       test.setup('auth', { sessions: ['member'] }, noop);
@@ -648,9 +699,15 @@ describe('select', () => {
       test.skip('skipped', noop);
     });
     expect(() => select(col, config())).toThrow(
-      '1 tests were collected but none is runnable: 1 skipped with test.skip; pass --pass-with-no-tests to allow this',
+      '1 tests were collected but none is runnable: 1 skipped explicitly; pass --pass-with-no-tests to allow this',
     );
     expect(() => select(col, config(), {}, { passWithNoTests: true })).not.toThrow();
+    const fixme = await collection(() => {
+      test.fixme('not yet', noop);
+    });
+    expect(() => select(fixme, config())).toThrow(
+      '1 tests were collected but none is runnable: 1 marked fixme; pass --pass-with-no-tests to allow this',
+    );
   });
 
   it('names the positionals that matched no file in the NO_TESTS message, with the nearest discovered file', async () => {
@@ -670,7 +727,7 @@ describe('select', () => {
 
   it('explains empty discovery with the globs, the root, and any look-alike files', () => {
     expect(() => select(emptyCollection(), config())).toThrow(
-      `no test file matched "tests/**/*.e2e.ts" under ${ROOT}; create tests/example.e2e.ts (e2e init writes one), or set tests in the config; pass --pass-with-no-tests to allow this`,
+      `no test file matched "tests/**/*.e2e.ts" under ${ROOT}; create a test file such as tests/example.e2e.ts, or set tests in the config; pass --pass-with-no-tests to allow this`,
     );
     expect(() =>
       select(emptyCollection(['tests/login.test.ts', 'tests/a.spec.ts', 'tests/b.spec.ts', 'tests/c.spec.ts']), config()),
@@ -698,7 +755,7 @@ describe('select', () => {
       test.setup('login', { sessions: ['user'] }, noop);
     });
     expect(() => select(col, config())).toThrow(
-      '3 tests were collected but none is runnable: 1 declare platforms other than web, 1 skipped with test.skip, 1 setup tests, which run only for the sessions selected tests need; pass --pass-with-no-tests to allow this',
+      '3 tests were collected but none is runnable: 1 declare platforms other than web, 1 skipped explicitly, 1 setup tests, which run only for the sessions selected tests need; pass --pass-with-no-tests to allow this',
     );
     // The tag filter is applied first, so under --tag it is the one reason.
     const tagged = await collection(() => {
@@ -782,7 +839,7 @@ describe('select with what the test filters left out', () => {
     });
     /** The pair of the test titled `title` in `selection`. */
     const pair = (selection: ReturnType<typeof select>, title: string) => selection.pairs.find((entry) => entry.test.title === title)!;
-    const outside = { cause: 'filtered', reason: 'outside the shard' };
+    const outside = { cause: 'filtered', reason: 'outside the shard', otherShard: true };
     const unaffected = { cause: 'filtered', reason: 'unaffected', filter: 'areas' };
     // Leaving b out does not move the cut: shard 1 is still a and b, shard 2 still c and d.
     const excluded = leftOut(col, [['b', 'areas', 'unaffected']]);
@@ -797,20 +854,18 @@ describe('select with what the test filters left out', () => {
     expect(pair(second, 'b').skip).toEqual(outside);
   });
 
-  it('leaves out only what would run: platform and capability verdicts on another target stand', async () => {
+  it('leaves out only what would run: a platform verdict on another target stands', async () => {
     const col = await collection(() => {
       test('web only', { platforms: ['web'] }, noop);
-      test('needs device', { requires: ['device'] }, noop);
       test('kept', noop);
     });
     const engine = defineEngine({ name: 'toy', version: '1.0.0', spiVersion: 1, fixtures: { web: () => ({}) } });
     const cfg = config({ targets: [{ name: 'web', platform: 'web', engine }, { name: 'ios', platform: 'ios' }] });
-    const filtered = select(col, cfg, { excluded: leftOut(col, [['web only', 'areas', 'unaffected'], ['needs device', 'areas', 'unaffected']]) });
+    const filtered = select(col, cfg, { excluded: leftOut(col, [['web only', 'areas', 'unaffected']]) });
     /** The pair of the test titled `title` on `target`. */
     const pair = (title: string, target: string) => filtered.pairs.find((entry) => entry.test.title === title && entry.target.name === target)!;
     expect(pair('web only', 'web').skip).toEqual({ cause: 'filtered', reason: 'unaffected', filter: 'areas' });
     expect(pair('web only', 'ios').skip?.cause).toBe('platform-unavailable');
-    expect(pair('needs device', 'web').skip?.cause).toBe('capability-unavailable');
   });
 });
 
@@ -964,6 +1019,6 @@ describe('positional file selection', () => {
       ],
       ['tests/b.e2e.ts'],
     );
-    expect(() => select(col, config())).toThrow(/none is runnable: 1 file not selected by a positional argument, 1 skipped with test.skip/);
+    expect(() => select(col, config())).toThrow(/none is runnable: 1 file not selected by a positional argument, 1 skipped explicitly/);
   });
 });

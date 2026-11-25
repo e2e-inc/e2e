@@ -1,0 +1,2047 @@
+/**
+ * Public SDK types. The emitted `dist/index.d.ts` is the contract;
+ * `tests/types/sdk-types.ts` pins the parts that are easy to loosen by accident.
+ */
+
+import type { expectationBrand, testCaseBrand } from './internal/brands.ts';
+import type { CredentialConfig, Secret, SecretConfig } from './config/secrets.ts';
+import type { Unique } from './params.ts';
+import type { StepExecutor } from './agent/executor.ts';
+import type { RecordedAction } from './cache/trace.ts';
+import type { PROJECT_TOOL_EVENT_PREFIX } from './agent/action-names.ts';
+import type { StepCacheInfo } from './run/steps.ts';
+import type { EngineHandle } from './engine/index.ts';
+import type { KeyModifier, Momentum, ScrollDirection, SelectOption, ViewportPoint } from './engine/contract.ts';
+import type { CacheStore } from './cache/store.ts';
+import type { ConfigBase, ConfigFixtures, FixtureDefinitions, FixtureOverrides, OmitEach, PickEach, SelectedFixtures, TestOverrides, WorkerFixtures } from './types/fixtures.ts';
+
+export type { KeyModifier, Momentum, ScrollDirection, SelectOption } from './engine/contract.ts';
+export type { CacheReadResult, CacheStore } from './cache/store.ts';
+export type { DerivedReason } from './cache/trace.ts';
+export type { StepCacheInfo } from './run/steps.ts';
+export type {
+  FixtureDefinitions,
+  FixtureFn,
+  FixtureOverride,
+  FixtureOverrides,
+  FixtureScope,
+  SuiteFixtures,
+  TestFixtureDefinition,
+  WorkerFixtureDefinition,
+  WorkerFixtures,
+} from './types/fixtures.ts';
+export type {
+  Credential,
+  CredentialConfig,
+  Credentials,
+  Secret,
+  SecretConfig,
+  SecretProvider,
+  SecretPurpose,
+  Secrets,
+} from './config/secrets.ts';
+export type { Unique } from './params.ts';
+export type {
+  ActionTrace,
+  RecordedAction,
+  TraceEntry,
+  TraceTargetDescriptor,
+} from './cache/trace.ts';
+
+/** A JSON scalar. */
+export type JsonPrimitive = string | number | boolean | null;
+/** Data that survives JSON serialization. */
+export type JsonValue =
+  | JsonPrimitive
+  | { readonly [key: string]: JsonValue }
+  | readonly JsonValue[];
+
+/** An in-memory file to attach without writing it to disk. */
+export interface FilePayload {
+  readonly name: string;
+  readonly mimeType: string;
+  readonly buffer: Buffer;
+}
+
+export interface StandardSchemaV1<Input = unknown, Output = Input> {
+  readonly '~standard': StandardSchemaV1.Props<Input, Output>;
+}
+
+export namespace StandardSchemaV1 {
+  export interface Props<Input = unknown, Output = Input> {
+    readonly version: 1;
+    readonly vendor: string;
+    readonly validate: (
+      value: unknown,
+      options?: Options | undefined,
+    ) => Result<Output> | Promise<Result<Output>>;
+    readonly types?: Types<Input, Output> | undefined;
+  }
+
+  export interface Options {
+    readonly libraryOptions?: Record<string, unknown> | undefined;
+  }
+
+  export interface Types<Input = unknown, Output = Input> {
+    readonly input: Input;
+    readonly output: Output;
+  }
+
+  export type Result<Output> = SuccessResult<Output> | FailureResult;
+
+  export interface SuccessResult<Output> {
+    readonly value: Output;
+    readonly issues?: undefined;
+  }
+
+  export interface FailureResult {
+    readonly issues: readonly Issue[];
+  }
+
+  export interface Issue {
+    readonly message: string;
+    readonly path?: readonly (PropertyKey | PathSegment)[] | undefined;
+  }
+
+  export interface PathSegment {
+    readonly key: PropertyKey;
+  }
+
+  export type InferOutput<Schema extends StandardSchemaV1> = NonNullable<
+    Schema['~standard']['types']
+  >['output'];
+}
+
+/** A JSON-safe value, a `Secret`, or a `Unique` string. */
+export type AgentParam =
+  | JsonPrimitive
+  | Secret
+  | Unique
+  | readonly AgentParam[]
+  | { readonly [key: string]: AgentParam };
+/** Values an `act` instruction refers to. */
+export type AgentParams = Readonly<Record<string, AgentParam>>;
+
+/**
+ * What evidence a judgment (`assert`, `waitFor`, `extract`) is given: the
+ * semantic tree, a masked screenshot of the current observation, or both.
+ *
+ * - `false`: the tree.
+ * - `true`: the tree and a screenshot, on every call.
+ * - `'only'`: the screenshot, and not the tree.
+ *
+ * `'only'` exists because a tree sent alongside pixels is a cheaper path to an
+ * answer, and a model will take it: asked whether a form is covered by an
+ * overlay, it can read from the tree that the form is present and named and
+ * answer yes, while the pixels show the overlay. For a judgment that is about
+ * what the screen presents, the tree is a distractor, so the mode that means it
+ * removes it. It also costs fewer input tokens than `true`, not more.
+ *
+ * In every mode that sends pixels but also the tree, pixel evidence degrades
+ * away rather than failing the call when it cannot be proven redacted. `'only'`
+ * has nothing to degrade to, so it fails with `POLICY_DENIED` instead of
+ * answering the wrong question from the tree.
+ *
+ * `act` takes no `vision`: the act model works from the tree and pulls
+ * pixels itself with `screenshot` when the tree lacks what it needs, then
+ * acts at points in that screenshot where the tree lists nothing.
+ */
+export type VisionMode = boolean | 'only';
+
+export interface VisionOption {
+  /**
+   * What the judge is shown; `false` by default. The tree, the tree with a
+   * masked screenshot, or the screenshot alone. A custom `StepExecutor`
+   * receives it as `step.vision` only when it declares `vision: true`;
+   * otherwise the call fails with `UNSUPPORTED_CAPABILITY`, since the
+   * executor decides what its model sees.
+   */
+  vision?: VisionMode;
+}
+
+/** The configured agent (`agents.<name>`) one call runs with, in place of the test's. */
+export interface AgentOption {
+  agent?: string;
+}
+
+/** `assert` options: one judgment, or opt-in bounded viewport exploration. */
+export interface AssertOptions extends VisionOption, AgentOption {
+  /** Look around by scrolling before judging; defaults to false. */
+  explore?: boolean;
+  /** Scroll budget; requires explore, defaults to min(10, configured maxSteps). */
+  maxSteps?: number;
+  /** Model-call budget; requires explore, defaults to min(6, configured maxModelCalls). */
+  maxModelCalls?: number;
+  /**
+   * Values the assertion refers to as `{name}`, with the same rules as `act`
+   * params. A `Secret` reaches the judge by name only, never its value.
+   */
+  params?: AgentParams;
+  /** Deadline in milliseconds; defaults to the agent's `judgmentTimeout`, 30000. */
+  timeout?: number;
+  /** Attach a redacted screenshot to the step; on by default. */
+  screenshot?: boolean;
+}
+
+/** `waitFor` options: a judgment on each screen change, at most once per `interval` while it keeps changing, until `timeout`. */
+export interface WaitForOptions extends VisionOption, AgentOption {
+  /**
+   * Values the condition refers to as `{name}`, with the same rules as `act`
+   * params. A `Secret` reaches the judge by name only, never its value.
+   */
+  params?: AgentParams;
+  /** Deadline in milliseconds; defaults to the agent's `judgmentTimeout`, 30000. */
+  timeout?: number;
+  /** Least time between two judgments of a screen that keeps changing, in milliseconds; 100 through 60000, default 3000. */
+  interval?: number;
+  /** Judgment budget; defaults to `agents.<name>.maxModelCalls` and can only lower it. */
+  maxModelCalls?: number;
+}
+
+/** `extract` options: one extraction plus one repair round, validated against `schema`. */
+export interface ExtractOptions<Schema extends StandardSchemaV1> extends VisionOption, AgentOption {
+  /** Any Standard Schema v1 validator; the output is validated against it, with one repair round. */
+  schema: Schema;
+  /** Deadline in milliseconds; defaults to the agent's `judgmentTimeout`, 30000. */
+  timeout?: number;
+}
+
+/**
+ * One `act` call: the values the instruction refers to and the step's
+ * budgets. Structured output is a judgment-tier option: `extract` takes
+ * `schema`. Pixels are the model's to ask for, not an option.
+ */
+export interface ActOptions extends AgentOption {
+  /**
+   * JSON-safe values the instruction refers to, at most 64 KiB and 32 levels
+   * deep. A `Secret` reaches the model by name only; the runner fills it. A
+   * value wrapped in `unique()` is different on every run, and the replay
+   * cache records a slot for it instead of the value.
+   */
+  params?: AgentParams;
+  /** Step deadline in milliseconds; defaults to `config.timeout`. */
+  timeout?: number;
+  /** Action budget; defaults to `agents.<name>.maxSteps` and can only lower it. */
+  maxSteps?: number;
+  /** Model-call budget; defaults to `agents.<name>.maxModelCalls` and can only lower it. */
+  maxModelCalls?: number;
+  /**
+   * Runs after each action the step completes, once the screen settles, and
+   * before the next one. Awaited, and its time counts toward `timeout`.
+   * Observe only: drive nothing from it. A throw fails the step.
+   */
+  onAction?: ActionHook;
+  /**
+   * Runs before each action, replayed ones included, and the step waits for
+   * it. Observe only: drive nothing from it. A throw fails the step before
+   * the action runs.
+   */
+  onBeforeAction?: BeforeActionHook;
+}
+
+/** The `onBeforeAction` hook of an `act` call. */
+export type BeforeActionHook = (event: BeforeActionEvent) => void | Promise<void>;
+
+/** The `onAction` hook of an `act` call. */
+export type ActionHook = (event: ActionEvent) => void | Promise<void>;
+
+/** The name `onAction` reports a committed grammar action under, e.g. `tap`, `navigate`, or `dragAt`. */
+export type ActionName = Exclude<RecordedAction['name'], 'tool'>;
+
+/**
+ * The fields `onAction` adds for an action, by action name; other actions add
+ * none. Points are in the same space as `screen.tapAt` and `boundingBox()`,
+ * rounded and clamped to the viewport.
+ */
+export interface ActionDetails {
+  /** The dispatched point. */
+  readonly tapAt: { readonly point: Point };
+  /** The dispatched point. Mobile engines have no `hoverAt`. */
+  readonly hoverAt: { readonly point: Point };
+  /** The dispatched start and end. Mobile engines have no `dragAt`. */
+  readonly dragAt: { readonly from: Point; readonly to: Point };
+}
+
+/** What every `onAction` event carries. */
+interface ActionEventBase {
+  /** 1-based position in the step's action budget; a failed attempt uses a number too. */
+  readonly index: number;
+  /** What the action did, secrets redacted. */
+  readonly summary: string;
+  /** `model` when the executor chose the action, `replay` when the cache replayed it. */
+  readonly source: 'model' | 'replay';
+}
+
+/**
+ * One completed action of an `act` step, as `onAction` receives it. Narrow on
+ * `action` to read its {@link ActionDetails}; a mutating project tool reads
+ * `tool:<name>`.
+ */
+export type ActionEvent =
+  | {
+      readonly [A in ActionName]: ActionEventBase & { readonly action: A } & (A extends keyof ActionDetails ? ActionDetails[A] : unknown);
+    }[ActionName]
+  | (ActionEventBase & { readonly action: `${typeof PROJECT_TOOL_EVENT_PREFIX}${string}` });
+
+/** One action of an `act` step about to run, as `onBeforeAction` receives it. */
+export interface BeforeActionEvent {
+  /** The same `index` the action's `onAction` event carries. */
+  readonly index: number;
+  /** `model` when the executor chose the action, `replay` when the cache replays it. */
+  readonly source: 'model' | 'replay';
+}
+
+/** What one passing `act` step did, as the report records it. */
+export interface ActResult {
+  /** The executor's one-line account of the step, or the replay's when the cache finished it. */
+  readonly summary: string;
+  /** How the replay cache took part; absent when caching is off for the step. */
+  readonly cache?: StepCacheInfo;
+  /** Model calls the step spent; 0 when a cached replay finished it. */
+  readonly modelCalls: number;
+  /** Grammar actions and mutating tool calls the step performed. */
+  readonly actions: number;
+}
+
+export type AgentErrorCode =
+  | 'AUTH_CREDENTIAL_UNAVAILABLE'
+  | 'AUTH_CREDENTIAL_INVALID'
+  | 'SECRET_UNAVAILABLE'
+  | 'AUTHENTICATION_FAILED'
+  | 'ENVIRONMENT_UNAVAILABLE'
+  | 'SEED_DATA_MISSING'
+  | 'TEST_SETUP_FAILED'
+  | 'MODEL_UNAVAILABLE'
+  | 'MODEL_REFUSED'
+  | 'MODEL_PROVIDER_FAILED'
+  | 'CONTEXT_OVERFLOW'
+  | 'MODEL_OUTPUT_INVALID'
+  | 'APP_UNREACHABLE'
+  | 'APP_ALREADY_RUNNING'
+  | 'APP_NOT_OPEN'
+  | 'LOCATOR_NOT_FOUND'
+  | 'LOCATOR_AMBIGUOUS'
+  | 'ACTION_FAILED'
+  | 'AUTOMATION_UNSUPPORTED'
+  | 'POLICY_DENIED'
+  | 'STEP_BUDGET_EXHAUSTED'
+  | 'STEP_TIMEOUT'
+  | 'STEP_NO_CONCLUSION'
+  | 'ASSERTION_FAILED'
+  | 'ASSERTION_INCONCLUSIVE'
+  | 'REPLAY_STALE'
+  | 'CANCELLED';
+
+export interface Agent {
+  /** Plans and executes a bounded multi-action flow; resolves with what the step did. */
+  act(instruction: string, options?: ActOptions): Promise<ActResult>;
+  /** Polls a natural-language condition until true or timed out. */
+  waitFor(condition: string, options?: WaitForOptions): Promise<void>;
+  /** Extracts and validates structured screen data. */
+  extract<Schema extends StandardSchemaV1>(
+    instruction: string,
+    options: ExtractOptions<Schema>,
+  ): Promise<StandardSchemaV1.InferOutput<Schema>>;
+  /** Judges a natural-language assertion against a fresh observation. */
+  assert(assertion: string, options?: AssertOptions): Promise<void>;
+}
+
+/**
+ * The closed role vocabulary; an unsupported role is a type error. Every
+ * engine maps its platform's element types onto these names, so a role query
+ * reads the same against a browser and a device. A role the platform has no
+ * widget for matches nothing there; it is never a type error.
+ */
+export type Role =
+  | 'button'
+  | 'link'
+  | 'textbox'
+  | 'searchbox'
+  | 'combobox'
+  | 'listbox'
+  | 'option'
+  | 'checkbox'
+  | 'radio'
+  | 'radiogroup'
+  | 'switch'
+  | 'slider'
+  | 'spinbutton'
+  | 'progressbar'
+  | 'meter'
+  | 'image'
+  | 'heading'
+  | 'tab'
+  | 'tablist'
+  | 'tabpanel'
+  | 'menu'
+  | 'menubar'
+  | 'menuitem'
+  | 'menuitemcheckbox'
+  | 'menuitemradio'
+  | 'toolbar'
+  | 'tooltip'
+  | 'tree'
+  | 'treeitem'
+  | 'list'
+  | 'listitem'
+  | 'table'
+  | 'grid'
+  | 'row'
+  | 'rowgroup'
+  | 'rowheader'
+  | 'cell'
+  | 'gridcell'
+  | 'columnheader'
+  | 'separator'
+  | 'group'
+  | 'article'
+  | 'figure'
+  | 'form'
+  | 'status'
+  | 'alert'
+  | 'dialog'
+  | 'alertdialog'
+  | 'main'
+  | 'navigation'
+  | 'banner'
+  | 'contentinfo'
+  | 'complementary'
+  | 'region';
+
+/**
+ * Spellings `getByRole` accepts beside the vocabulary and rewrites to a `Role`
+ * before the query is built: `img` is the ARIA name of `image`. An alias never
+ * reaches an engine, the replay cache, or a report; a `Role` is what they see.
+ */
+export type RoleAlias = 'img';
+
+/** A string matches exactly; a RegExp uses its own source and flags. */
+export type TextMatch = string | RegExp;
+
+export interface TextMatchOptions {
+  /** Exact match, the default. `false` is case-insensitive substring matching; a RegExp ignores it. */
+  exact?: boolean;
+  /**
+   * When true, nodes the platform reports as hidden are excluded before the
+   * exactly-one rule is applied, so a visible node with a hidden twin (a
+   * prerendered copy kept after navigation, a closed drawer) still resolves.
+   * Omitted or false keeps every match, hidden ones included.
+   */
+  visible?: boolean;
+}
+
+/**
+ * Role query options. A role query never matches a node hidden from the
+ * accessibility tree, on every engine; `visible` (inherited) is the one knob
+ * that narrows the other query kinds, to the nodes `toBeVisible()` accepts.
+ */
+export interface RoleOptions extends TextMatchOptions {
+  /** Accessible name filter. */
+  name?: TextMatch;
+  /** Requires the checked state. */
+  checked?: boolean;
+  /** Requires the disabled state. */
+  disabled?: boolean;
+  /** Requires the selected state. */
+  selected?: boolean;
+  /** Requires the expanded state. */
+  expanded?: boolean;
+  /** Requires the pressed state of a toggle button. */
+  pressed?: boolean;
+  /** Requires a heading level, 1 through 6. */
+  level?: number;
+}
+
+export interface ActionOptions {
+  /** Deadline in milliseconds; defaults to `config.actionTimeout`. */
+  timeout?: number;
+}
+
+/**
+ * A point in CSS pixels. For `tap({ position })` the origin is the node's own
+ * top-left corner, inside its border on a document platform. A `Point` is
+ * also a `ScreenPoint`, whose origin is the viewport's top-left corner, the
+ * space `boundingBox()` reports in.
+ */
+export type Point = ViewportPoint;
+
+/** CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`), `'0%'` through `'100%'`. */
+export type ScreenCoordinate = number | `${number}%`;
+
+/** A viewport point in pixels, percentages, or both: `{ x: '50%', y: 120 }`. */
+export interface ScreenPoint {
+  readonly x: ScreenCoordinate;
+  readonly y: ScreenCoordinate;
+}
+
+/** `tap`, `click`, `doubleTap`, `dblclick`, and `secondaryTap` options: the action timeout and the keys held for the click. */
+export interface ClickOptions extends ActionOptions {
+  /**
+   * Keys held while the pointer clicks, as a Shift-click extends a selection:
+   * `Shift`, `Control`, `Alt`, `Meta`, or `ControlOrMeta` (Control on Windows
+   * and Linux, Meta on macOS). Needs an engine that declares `tapModifiers`,
+   * `UNSUPPORTED_CAPABILITY` otherwise.
+   */
+  modifiers?: readonly KeyModifier[];
+}
+
+/** `tap` and `click` options. */
+export interface TapOptions extends ClickOptions {
+  /**
+   * Where to tap, relative to the node's top-left corner, inside its border
+   * on a document platform. Without it the platform picks a point of the
+   * node, usually its center, behind its own actionability checks; with it
+   * the pointer is dispatched at that point once the node is in view and has
+   * a box, which needs the engine's `tap` pointer action.
+   */
+  position?: Point;
+  /**
+   * How many taps in a row, a positive safe integer, default 1. `2` is the
+   * same as `doubleTap()`; 3 or more needs an engine that declares the
+   * `multiTap` action, `UNSUPPORTED_CAPABILITY` otherwise. A count above the
+   * engine's own limit (200 on the mobile engine) is also
+   * `UNSUPPORTED_CAPABILITY`. A count above 1 is not combined with `position`.
+   */
+  count?: number;
+}
+
+/** `longPress` options: the hold time in milliseconds, 100 through 10000, default the engine's own. */
+export interface LongPressOptions extends ActionOptions {
+  /** Hold time in milliseconds, 100 through 10000; unset, the engine's default. */
+  duration?: number;
+}
+
+/** `pressSequentially` options: an optional pause between characters. */
+export interface PressSequentiallyOptions extends ActionOptions {
+  /** Milliseconds to wait between characters; omitted types the whole text in one call. */
+  delay?: number;
+}
+
+/** A swipe in a direction. */
+export interface SwipeOptions {
+  /** Swipe direction. */
+  direction: ScrollDirection;
+  /** Fling strength; default `none`. */
+  momentum?: Momentum;
+  from?: never;
+  to?: never;
+  duration?: never;
+}
+
+/** A swipe along a path between two viewport points: a touch swipe on a device, a pointer drag on a document platform. */
+export interface SwipePathOptions {
+  /** Where the finger goes down. */
+  from: ScreenPoint;
+  /** Where it lifts. */
+  to: ScreenPoint;
+  /** Gesture duration in milliseconds; omitted = the engine's default. */
+  duration?: number;
+  direction?: never;
+  momentum?: never;
+}
+
+export interface Screen {
+  /** Creates a lazy role query. An alias such as `img` is rewritten to its role. */
+  getByRole(role: Role | RoleAlias, options?: RoleOptions): Locator;
+  /** Creates a lazy role query narrowed to an accessible name: `getByRole('button', 'Sign in')`. */
+  getByRole(role: Role | RoleAlias, name: TextMatch, options?: Omit<RoleOptions, 'name'>): Locator;
+  /** Creates a lazy accessible-label query. */
+  getByLabel(text: TextMatch, options?: TextMatchOptions): Locator;
+  /** Creates a lazy placeholder query. */
+  getByPlaceholder(text: TextMatch, options?: TextMatchOptions): Locator;
+  /** Creates a lazy visible-text query. */
+  getByText(text: TextMatch, options?: TextMatchOptions): Locator;
+  /** Creates a lazy displayed-value query. */
+  getByDisplayValue(value: TextMatch, options?: TextMatchOptions): Locator;
+  /** Creates a lazy test-id query: a string matches the whole id, case-sensitive; a RegExp tests it. An engine may also match an id without its platform's namespacing. */
+  getByTestId(id: TextMatch, options?: { visible?: boolean }): Locator;
+  /** Taps a viewport point, in pixels or percentages, with no node behind it. */
+  tapAt(point: ScreenPoint, options?: ActionOptions): Promise<void>;
+  /** Double-taps a viewport point, in pixels or percentages, with no node behind it. */
+  doubleTapAt(point: ScreenPoint, options?: ActionOptions): Promise<void>;
+  /** Performs a viewport-level swipe: in a direction, or along a path from one point to another. */
+  swipe(options: SwipeOptions | SwipePathOptions): Promise<void>;
+  /**
+   * Scrolls until a locator resolves visibly or times out: the viewport on
+   * `screen`, the node itself on a locator. `momentum` is the stride of each
+   * step, `slow` unless told otherwise.
+   */
+  scrollUntilVisible(
+    target: Locator,
+    options?: { direction?: ScrollDirection; momentum?: Momentum; timeout?: number },
+  ): Promise<void>;
+  /**
+   * Reads the whole screen once, without waiting, as the agent reads it: one
+   * node per line, `#id role "name" text="…" [states]`, children indented,
+   * secrets redacted.
+   */
+  tree(options?: ActionOptions): Promise<string>;
+  /** Prints `tree()` to the test's output. */
+  debug(options?: ActionOptions): Promise<void>;
+  /**
+   * Pauses the test at this line, with the app open, until it is resumed with
+   * Enter in the terminal or with `e2e run --step next` from another shell in
+   * the same directory. In `e2e run`, the test is paused each time the line
+   * runs. Paused time doesn't count toward the test's timeout. Call it with
+   * `await` on `screen`, between steps in fixture setup, a `beforeEach` hook,
+   * or the test body. Anywhere else, or with `CI` set, the test isn't paused
+   * and the call fails.
+   */
+  pause(): Promise<void>;
+}
+
+export interface Locator extends Omit<Screen, 'tree' | 'debug' | 'pause'> {
+  /** Taps exactly one matching actionable node, `count` times in a row; with `position`, taps that point of its box once it is in view, with no other actionability check. */
+  tap(options?: TapOptions): Promise<void>;
+  /** Alias of tap. */
+  click(options?: TapOptions): Promise<void>;
+  /** Double-taps exactly one matching actionable node. */
+  doubleTap(options?: ClickOptions): Promise<void>;
+  /** Alias of doubleTap. */
+  dblclick(options?: ClickOptions): Promise<void>;
+  /** Secondary-taps exactly one matching actionable node: a right click, a two-finger tap. */
+  secondaryTap(options?: ClickOptions): Promise<void>;
+  /** Long-presses exactly one matching actionable node. */
+  longPress(options?: LongPressOptions): Promise<void>;
+  /** Fills exactly one input. Secret values are never logged. */
+  fill(value: string | Secret, options?: ActionOptions): Promise<void>;
+  /**
+   * Focuses exactly one input and types `text` through the keyboard, one
+   * character at a time, so the app receives key events. A `Secret` is
+   * refused; it goes through `fill`.
+   */
+  pressSequentially(text: string, options?: PressSequentiallyOptions): Promise<void>;
+  /** Clears exactly one input. */
+  clear(options?: ActionOptions): Promise<void>;
+  /** Sends one key to exactly one node. */
+  press(key: string, options?: ActionOptions): Promise<void>;
+  /** Checks exactly one node. */
+  check(options?: ActionOptions): Promise<void>;
+  /** Unchecks exactly one node. */
+  uncheck(options?: ActionOptions): Promise<void>;
+  /** Selects one option from exactly one control. */
+  selectOption(value: SelectOption, options?: ActionOptions): Promise<void>;
+  /** Focuses exactly one node. */
+  focus(options?: ActionOptions): Promise<void>;
+  /** Removes focus from exactly one node if it is focused. */
+  blur(options?: ActionOptions): Promise<void>;
+  /** Hovers over exactly one matching actionable node. */
+  hover(options?: ActionOptions): Promise<void>;
+  /** Sets the files of exactly one file input, or of a control that opens a file chooser; paths resolve from the project root, payloads supply bytes in memory, and an empty array clears the input. */
+  setInputFiles(files: string | readonly string[] | FilePayload | readonly FilePayload[], options?: ActionOptions): Promise<void>;
+  /** Drags exactly one node to exactly one target. */
+  dragTo(target: Locator, options?: ActionOptions): Promise<void>;
+  /** Scrolls exactly one node into view. */
+  scrollIntoView(options?: ActionOptions): Promise<void>;
+  /** Performs a swipe scoped to exactly one node. */
+  swipe(options: SwipeOptions & ActionOptions): Promise<void>;
+  /** Reads normalized text once a match exists, without retrying for a particular value. */
+  textContent(): Promise<string | null>;
+  /** Reads the current input value; throws `ACTION_FAILED` on a node with no value, such as a heading. */
+  inputValue(): Promise<string>;
+  /** Reads one attribute. */
+  getAttribute(name: string): Promise<string | null>;
+  /** Reads current visibility. */
+  isVisible(): Promise<boolean>;
+  /** Reads current hidden or absent state, the negation of `isVisible`. */
+  isHidden(): Promise<boolean>;
+  /** Reads current enabled state. */
+  isEnabled(): Promise<boolean>;
+  /** Reads current disabled state, the negation of `isEnabled`. */
+  isDisabled(): Promise<boolean>;
+  /** Reads current checked state; throws `ACTION_FAILED` on a node with no checked state, such as a button. */
+  isChecked(): Promise<boolean>;
+  /** Reads the current viewport-relative rectangle. */
+  boundingBox(): Promise<{ x: number; y: number; width: number; height: number } | null>;
+  /**
+   * Captures a redacted screenshot of the one match and returns its absolute
+   * path. The match is scrolled into view first; one larger than the viewport
+   * keeps the part inside it.
+   */
+  screenshot(label?: string): Promise<string>;
+  /** Counts current matches without auto-waiting. */
+  count(): Promise<number>;
+  /** One `nth(i)` locator per current match, without auto-waiting; empty when nothing matches. */
+  all(): Promise<Locator[]>;
+  /** Reads the normalized text of every current match, without auto-waiting; empty when nothing matches. */
+  allTextContents(): Promise<string[]>;
+  /**
+   * Waits for the requested locator state, `visible` by default: `attached`
+   * for one match, visible or not; `detached` for none; `hidden` for none or
+   * a hidden one.
+   */
+  waitFor(options?: { state?: 'attached' | 'detached' | 'visible' | 'hidden'; timeout?: number }): Promise<void>;
+  /** Adds deterministic locator filters. */
+  filter(options: { hasText?: TextMatch; hasNotText?: TextMatch; has?: Locator; hasNot?: Locator }): Locator;
+  /** Matches either locator, deduplicated in traversal order; both must belong to this screen. */
+  or(other: Locator): Locator;
+  /** Selects the first current match. */
+  first(): Locator;
+  /** Selects the last current match. */
+  last(): Locator;
+  /** Selects one zero-based current match. */
+  nth(index: number): Locator;
+}
+
+export interface App {
+  /**
+   * The resolved base URL of the target's app, with the port the run
+   * allocated when `app.url` declared port 0 and no trailing slash, so
+   * `${app.baseUrl}/api/users` joins with one slash; undefined for a target
+   * that declares no `app.url`.
+   */
+  readonly baseUrl: string | undefined;
+  /**
+   * Opens the app: the declared URL, a path relative to it, or any absolute
+   * http(s) URL. On a device target, which has no URL, it launches the pinned
+   * app fresh and takes no path.
+   */
+  open(path?: string): Promise<void>;
+  /**
+   * Recreates the execution context while preserving persisted state, then
+   * reopens the app at its base URL when the target declares one.
+   */
+  restart(): Promise<void>;
+  /**
+   * Clears persisted client state, recreates the execution context, then
+   * reopens the app at its base URL when the target declares one.
+   */
+  clearState(): Promise<void>;
+  /** Navigates back once. */
+  back(): Promise<void>;
+  /** Captures a redacted evidence screenshot and returns its absolute path. */
+  screenshot(label?: string): Promise<string>;
+  /**
+   * Starts recording the screen, until `stopRecording`. One recording at a
+   * time, and none while the test's `video` records: set `{ video: 'off' }`
+   * on the test.
+   */
+  startRecording(options?: RecordingOptions): Promise<void>;
+  /**
+   * Stops the recording and returns its videos in play order: one, or on the
+   * web one per page it showed: a tab switch or a replaced page starts another.
+   */
+  stopRecording(): Promise<readonly [RecordedVideo, ...RecordedVideo[]]>;
+}
+
+/** How `app.startRecording` names its file. */
+export interface RecordingOptions {
+  /** File name stem, `recordings/001-<name>.<ext>`; defaults to `recording`. */
+  readonly name?: string;
+}
+
+/** One video `app.stopRecording` returns: a file, or a link to a recording a hosted service keeps. */
+export type RecordedVideo = RecordedVideoFile | RecordedVideoLink;
+
+/** A video file under the attempt's `recordings/` directory. */
+export interface RecordedVideoFile {
+  /** Absolute path of the file. */
+  readonly path: string;
+  /** When it started recording, as an ISO timestamp. */
+  readonly startedAt: string;
+}
+
+/** A recording a hosted browser or device service keeps, by URL. */
+export interface RecordedVideoLink {
+  /** `http(s)` URL of the recording. */
+  readonly url: string;
+  /** Media type of what the URL serves: `video/mp4`, or `text/html` for a player page. */
+  readonly mediaType: string;
+  /** When it started recording, as an ISO timestamp. */
+  readonly startedAt: string;
+}
+
+/**
+ * The `request` fixture: HTTP calls from a test. A path resolves against the
+ * app URL; an absolute http(s) URL goes where it names. Each call is a step,
+ * bounded by the action timeout and the running test's or hook's budget, and
+ * returns once the whole body is read. It does not send the browser's
+ * cookies or keep cookies between calls.
+ */
+export interface APIRequest {
+  /** Sends a request with `options.method`, GET by default. */
+  fetch(url: string, options?: APIRequestFetchOptions): Promise<WebResponse>;
+  /** Sends a GET request. */
+  get(url: string, options?: APIRequestOptions): Promise<WebResponse>;
+  /** Sends a POST request. */
+  post(url: string, options?: APIRequestOptions): Promise<WebResponse>;
+  /** Sends a PUT request. */
+  put(url: string, options?: APIRequestOptions): Promise<WebResponse>;
+  /** Sends a PATCH request. */
+  patch(url: string, options?: APIRequestOptions): Promise<WebResponse>;
+  /** Sends a DELETE request. */
+  delete(url: string, options?: APIRequestOptions): Promise<WebResponse>;
+  /** Sends a HEAD request. */
+  head(url: string, options?: APIRequestOptions): Promise<WebResponse>;
+}
+
+/** What one `request` call sends beside its URL. */
+export interface APIRequestOptions {
+  /** Request headers. */
+  readonly headers?: Readonly<Record<string, string>>;
+  /** A body sent as JSON, with `content-type: application/json` unless `headers` sets one. Not with `body`. */
+  readonly json?: unknown;
+  /** A body sent as is. Not with `json`. */
+  readonly body?: string;
+  /** Timeout in milliseconds; defaults to `actionTimeout`. 0 sets none of its own, so only the running test's or hook's budget bounds the call. */
+  readonly timeout?: number;
+  /** How redirects are handled; `'follow'` by default. `'manual'` returns the 3xx response as is; `'error'` fails the call with `ACTION_FAILED`. */
+  readonly redirect?: 'follow' | 'manual' | 'error';
+}
+
+/** `request.fetch` options: the method beside the rest. */
+export interface APIRequestFetchOptions extends APIRequestOptions {
+  /** The HTTP method; GET by default. */
+  readonly method?: string;
+}
+
+/**
+ * An HTTP response: what `request` calls, the web engine's
+ * `browser.waitForResponse`, and `route.fetch()` return.
+ */
+export interface WebResponse {
+  /** Response URL. */
+  readonly url: string;
+  /** HTTP status. */
+  readonly status: number;
+  /** Response headers, lower-cased names; `request` and `route.fetch()` join several `set-cookie` values with `\n`, `waitForResponse` leaves cookie headers out. */
+  readonly headers: Readonly<Record<string, string>>;
+  /** Waits for the body and returns its bytes; rejects with `ACTION_FAILED` when the body could not be read. */
+  body(): Promise<Buffer>;
+  /** Waits for the body and parses it as JSON; rejects with `ACTION_FAILED` when the body could not be read. */
+  json<T = unknown>(): Promise<T>;
+  /** Waits for the body and reads it as text; rejects with `ACTION_FAILED` when the body could not be read. */
+  text(): Promise<string>;
+}
+
+export interface SetupSession {
+  /** Saves state under a setup-declared name. */
+  save(name: string): Promise<void>;
+}
+
+export interface TestFixtures {
+  /** Agent steps. Acquiring the built-in agent without a configured model is `MODEL_UNAVAILABLE`. */
+  readonly agent: Agent;
+  /** App lifecycle: open, restart, clear state, back, screenshot, recording. */
+  readonly app: App;
+  /** Semantic queries and the actions on their matches. */
+  readonly screen: Screen;
+  /** The target's platform label: `web`, `ios`, `android`, or an engine's own string. */
+  readonly platform: string;
+  /** HTTP calls, each one a step; a path resolves against the app URL. */
+  readonly request: APIRequest;
+}
+
+export interface SetupFixtures extends TestFixtures {
+  /** Saves the sessions the setup test declared. */
+  readonly session: SetupSession;
+}
+
+export interface TestOptions {
+  /** Attempt deadline in milliseconds; defaults to `config.timeout`. Innermost wins. */
+  timeout?: number;
+  /** Retries, 0 through 10; defaults to `config.retries`. Inside a serial group the group's value applies. */
+  retries?: number;
+  /** Tags for `--tag`: distinct names, none blank, with no comma and no leading or trailing whitespace; every layer's tags are unioned. */
+  tags?: readonly string[];
+  /** Skips the test; a string is the reason. Any truthy layer skips. */
+  skip?: boolean | string;
+  /**
+   * Expects the test to fail; a string is the reason. A test failure then
+   * passes it, and a pass fails it with `UNEXPECTED_PASS`. A layer with `true`
+   * or any string marks; the innermost reason wins. Not allowed on, inside, or
+   * around a serial group.
+   */
+  fail?: boolean | string;
+  /** Focuses the test locally. CI rejects it with `ONLY_IN_CI`. */
+  only?: boolean;
+  /** Platforms the test runs on; other targets skip it. Innermost wins. */
+  platforms?: readonly string[];
+  /** Session a setup test saved, restored before the body runs. */
+  session?: string;
+  /** Extra context for agent steps; layers are concatenated outermost first. */
+  agentContext?: string;
+  /**
+   * The configured agent (`agents.<name>`) this test or group runs with, in
+   * place of the run's agents. A list runs the test once per agent named, as
+   * one result each. Innermost wins; a call's own `agent` option wins over
+   * it. `--agent` narrows a list to the names both name and never overrides
+   * a pin the flag does not name.
+   */
+  agent?: string | readonly string[];
+  /**
+   * Which of the test's attempts keep a trace, in place of the run's: the
+   * same modes as the config's `trace`. Innermost wins, over `--trace` too;
+   * inside a serial group the group's value applies, since the group runs as
+   * one unit.
+   */
+  trace?: RecordingMode;
+  /**
+   * Which of the test's attempts record a video, in place of the run's:
+   * the same modes as the config's `video`. Innermost wins, over `--video`
+   * too; inside a serial group the group's value applies, since the group
+   * records as one unit. A mode set here is required of the target's engine.
+   */
+  video?: RecordingMode;
+}
+
+export interface DescribeOptions extends Omit<TestOptions, 'only'> {
+  /** Runs the group as one ordered retry unit with shared app state. Nesting one serial group in another is a `COLLECTION_ERROR`. */
+  serial?: boolean;
+  /**
+   * `true` lets the group's tests run at the same time on separate workers
+   * instead of in order on one. `false` keeps a group inside a parallel
+   * scope in order on one worker. Unset, the group runs as the scope around
+   * it does. A `COLLECTION_ERROR` on a serial group, and for `true` inside
+   * a serial group or inside a group or file with `parallel: false`.
+   */
+  parallel?: boolean;
+}
+
+/** What `test.describe.configure()` sets on the scope it is called in. */
+export interface DescribeConfigureOptions {
+  /** The scope's `parallel`, as the `describe` option of that name; at the top of a file it applies to the whole file. */
+  parallel?: boolean;
+}
+
+export interface SetupOptions extends Omit<TestOptions, 'session' | 'only' | 'skip' | 'fail' | 'agent'> {
+  /** Session names this setup test MUST save. */
+  sessions: readonly string[];
+  /** A setup test runs once per target, so it pins at most one agent. */
+  agent?: string;
+}
+
+/**
+ * A test body. It names the fixtures it uses by destructuring its first
+ * parameter (`async ({ app, screen }) => {}`), and the runner sets up only
+ * those; a body that takes the whole object (`async (fixtures) => {}`) or a
+ * rest property is a `COLLECTION_ERROR`. The same holds for a hook and for
+ * the first parameter of a `test.extend()` fixture.
+ */
+export type TestFn<Fixtures = TestFixtures> = (fixtures: Fixtures) => void | Promise<void>;
+/** A setup test body; `session.save` is the extra fixture. */
+export type SetupFn<Fixtures = TestFixtures> = (
+  fixtures: Fixtures & SetupFixtures,
+) => void | Promise<void>;
+/** A hook body: `beforeEach` and `afterEach` get the test's fixtures, `beforeAll` and `afterAll` its worker fixtures. */
+export type TestHookFn<Fixtures = TestFixtures> = (fixtures: Fixtures) => void | Promise<void>;
+/** @deprecated use `TestHookFn<WorkerFixtures>`. */
+export type SuiteHookFn = TestHookFn<WorkerFixtures>;
+/** A `describe` body. An async body is a type error. */
+export type SynchronousBody<Result> = Extract<Result, PromiseLike<unknown>> extends never
+  ? () => Result
+  : never;
+
+/** A `test.skipIf` or `test.runIf` condition. A Promise is a type error. */
+export type SynchronousCondition<Condition> = Extract<Condition, PromiseLike<unknown>> extends never
+  ? Condition
+  : never;
+
+/** Opaque handle of a registered test. */
+export interface TestCase {
+  readonly [testCaseBrand]: true;
+}
+
+/** The two call forms of `describe`. */
+export interface DescribeRegistrar<Options = DescribeOptions> {
+  /** Declares a group synchronously. */
+  <Result>(title: string, body: SynchronousBody<Result>): void;
+  /** Declares a configured group synchronously. */
+  <Result>(title: string, options: Options, body: SynchronousBody<Result>): void;
+}
+
+export interface DescribeAPI extends DescribeRegistrar {
+  /** Declares a group whose tests are expected to fail, as if it had `fail: true`; a reason goes in the `fail` option of `describe`. */
+  fail: DescribeRegistrar<Omit<DescribeOptions, 'fail'>>;
+  /**
+   * Configures the scope it is called in: the enclosing `describe`, or the
+   * whole file at the top level. `{ parallel: true }` lets the scope's tests
+   * run at the same time on separate workers.
+   */
+  configure(options: DescribeConfigureOptions): void;
+}
+
+/** The two call forms of `test`, shared with what `test.skipIf` and `test.runIf` return. */
+export interface TestRegistrar<Fixtures = TestFixtures & WorkerFixtures> {
+  /** Registers one test synchronously during module evaluation. */
+  (title: string, fn: TestFn<Fixtures>): TestCase;
+  /**
+   * Registers one configured test synchronously during module evaluation.
+   * Its fixtures are typed for the targets its `platforms` option keeps.
+   */
+  <const Platform extends string = string>(
+    title: string,
+    options: TestOptions & { readonly platforms?: readonly Platform[] },
+    fn: TestFn<SelectedFixtures<Fixtures, Platform>>,
+  ): TestCase;
+}
+
+/**
+ * The `test.each` body arguments for the rows' type: array rows spread, then
+ * the fixtures. Rows that are not all arrays are passed whole. Not
+ * distributive, so a mixed table is decided once, as at run time. An
+ * `unknown` row may be either at run time, so only the fixtures, last, are known.
+ */
+export type EachArgs<Row, Fixtures> = [Row] extends [readonly unknown[]]
+  ? [...Row, Fixtures]
+  : unknown extends Row
+    ? [...unknown[], Fixtures]
+    : [Row, Fixtures];
+
+/** A `test.each` or `test.for` body: the row's arguments, then the fixtures. */
+export type EachFn<Args extends readonly unknown[]> = (...args: Args) => void | Promise<void>;
+
+/**
+ * The two call forms of `test` for `test.each` and `test.for`: one test per
+ * row, each titled from the row. `Args` are the body's arguments.
+ */
+export interface EachRegistrar<Args extends readonly unknown[]> {
+  /** Registers one test per row synchronously during module evaluation. */
+  (title: string, fn: EachFn<Args>): readonly TestCase[];
+  /** Registers one configured test per row synchronously during module evaluation. */
+  (title: string, options: TestOptions, fn: EachFn<Args>): readonly TestCase[];
+}
+
+/**
+ * The `test` function and its members. `Fixtures` are what a test attempt
+ * sets up for itself; `Worker` the fixtures that outlive a test, which the
+ * test, its hooks, and the suite hooks all see.
+ */
+export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> extends TestRegistrar<Fixtures & Worker> {
+  /** Registers one skipped test. */
+  skip(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
+  /**
+   * Inside a running test: skips it when `condition` is true (or always,
+   * with no condition) by throwing, so nothing after the call runs. The
+   * attempt is reported `skipped` with `reason`; steps that already ran stay
+   * in the report without deciding the status, and teardown still runs. A
+   * setup test cannot skip: its sessions are owed.
+   * Outside a test body this form is `COLLECTION_ERROR`; use the `skip`
+   * option to skip at collection.
+   */
+  skip(condition: boolean, reason?: string): void;
+  skip(reason?: string): void;
+  /** Registers an unfinished test, reported as skipped with cause and reason `todo`. */
+  todo(title: string): TestCase;
+  /** Registers one skipped test marked fixme, reported with the skip cause and reason `fixme`. */
+  fixme(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
+  /**
+   * Inside a running test: skips it as fixme when `condition` is true (or
+   * always, with no condition), as `test.skip` does. The skip cause is
+   * `fixme`, and the reason `fixme`, or `fixme: <reason>` when `reason` is not
+   * blank. A setup test cannot skip. Outside a test body this form is
+   * `COLLECTION_ERROR`; use `test.fixme(title, fn)` to mark a test fixme at
+   * collection.
+   */
+  fixme(condition: boolean, reason?: string): void;
+  fixme(reason?: string): void;
+  /**
+   * Returns a function that registers one test, like `test(title, fn)`:
+   * skipped when `condition` is truthy, as if it had the `skip` option. The
+   * condition is read once, at this call, so it can only depend on what is
+   * known while the file is collected (`process.platform`, `process.env.CI`):
+   *
+   *   test.skipIf(process.platform === 'win32')('file watcher', async () => {});
+   *
+   * A `skip` option skips the test whatever the condition. A serial group
+   * rejects the call: set `skip` on the serial `describe` instead. A Promise
+   * condition also fails the call: await it first.
+   */
+  skipIf<Condition>(condition: SynchronousCondition<Condition>): TestRegistrar<Fixtures & Worker>;
+  /**
+   * Returns a function that registers one test, like `test(title, fn)`:
+   * skipped when `condition` is falsy, `test.skipIf(!condition)`.
+   */
+  runIf<Condition>(condition: SynchronousCondition<Condition>): TestRegistrar<Fixtures & Worker>;
+  /**
+   * Returns a function that registers one test per row, like `test(title,
+   * fn)`, in row order. The title is formatted from the row: `$name` and
+   * `$name.path` read an object row, and `%s`, `%d`, `%i`, `%f`, `%j`, `%o`
+   * take an array row's items in order (any other row is the one item). `%#`
+   * is the row index, `%$` the row number, `%%` a percent sign. When every
+   * row is an array, each row is spread into the body's arguments; otherwise
+   * every row is the first one. The fixtures come last:
+   *
+   *   test.each([{ user: 'Ada' }, { user: 'Grace' }])('signs in as $user', async ({ user }, { app }) => {});
+   *   test.each([[1, 2, 3]])('%i + %i = %i', async (a, b, sum, { app }) => {});
+   *
+   * Rows must be a non-empty array. Two rows that format to the same title
+   * fail as duplicate titles. As in a test body, destructure the fixtures
+   * (`{ app }`): e2e sets up only the ones named there.
+   */
+  each<Row extends readonly unknown[] | [unknown]>(rows: readonly Row[]): EachRegistrar<[...Row, Fixtures & Worker]>;
+  each<Row>(rows: readonly Row[]): EachRegistrar<EachArgs<Row, Fixtures & Worker>>;
+  /**
+   * `test.each` that never spreads: the body takes `(row, fixtures)` for
+   * every row, an array row included. Titles format as in `test.each`.
+   */
+  for<Row extends readonly unknown[] | [unknown]>(rows: readonly Row[]): EachRegistrar<[Row, Fixtures & Worker]>;
+  for<Row>(rows: readonly Row[]): EachRegistrar<[Row, Fixtures & Worker]>;
+  /** Registers one test that is expected to fail. */
+  fail(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
+  /**
+   * Inside a running test: marks it expected to fail when `condition` is
+   * true (or always, with no condition). The body keeps running. A test
+   * failure then passes the test, keeping the error and `reason` in the
+   * report; a pass fails it with `UNEXPECTED_PASS`. Infrastructure failures
+   * and interrupts are not covered. A setup test or a serial group member
+   * cannot be marked. Outside a test body this form is `COLLECTION_ERROR`;
+   * use `test.fail(title, fn)` or the `fail` option to mark at collection.
+   */
+  fail(condition: boolean, reason?: string): void;
+  fail(reason?: string): void;
+  /**
+   * Triples the running test's timeout in force when `condition` is true (or
+   * always), as Playwright's `test.slow()` does: once per attempt, so a
+   * second call does nothing. In a `beforeAll` hook it triples that hook's
+   * timeout. Otherwise it follows `setTimeout`'s rules; `reason` is not
+   * reported.
+   */
+  slow(condition: boolean, reason?: string): void;
+  slow(reason?: string): void;
+  /**
+   * Inside a running test or a `beforeEach` hook: gives the test a timeout
+   * of `timeout` ms, counted from the start of the attempt like the
+   * `timeout` option, which it replaces for this attempt. A timeout shorter
+   * than the time already spent times the test out at once. Inside a
+   * `beforeAll` hook: gives that hook a timeout of `timeout` ms, counted from
+   * its start. `afterEach` and `afterAll` hooks run on `cleanupTimeout` and
+   * cannot change it. A timeout that is not a positive integer is
+   * `INVALID_ARGUMENT`; outside a running test or hook the call is
+   * `COLLECTION_ERROR`, so use the `timeout` option there.
+   */
+  setTimeout(timeout: number): void;
+  /** Registers one focused local test. CI rejects focused tests. */
+  only(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
+  /** Registers one setup test with statically declared session outputs. */
+  setup(title: string, options: SetupOptions, fn: SetupFn<Fixtures & Worker>): TestCase;
+  /**
+   * Returns the same runtime `test`, typed with an engine's contributed
+   * fixtures. A pure type refinement, the fixtures still resolve from the
+   * target's engine at runtime, so a project types its device/desktop/web
+   * surface without a global `declare module` augmentation:
+   *
+   *   export const test = base.extend<{ device: Device }>();
+   */
+  extend<Extra = {}, ExtraWorker = {}, Config = unknown>(): TestAPI<
+    ConfigBase<Fixtures, Config> & Extra & ConfigFixtures<Config, 'test'>,
+    ConfigBase<Worker, Config> & ExtraWorker & ConfigFixtures<Config, 'worker'>
+  >;
+  /**
+   * Returns a new `test` whose registrations extend fixtures it already
+   * has, built-in ones included. Inside the function the fixture's own name
+   * is the fixture it extends; the value it hands to `use` is what tests,
+   * hooks, and other fixtures receive under that name. It keeps the type of
+   * the fixture it extends. Its scope is the one it declares, else `test`:
+   *
+   *   export const test = base.extend({
+   *     app: async ({ app }, use) => {
+   *       await app.open('/dashboard');
+   *       await use(app);
+   *     },
+   *   });
+   */
+  extend<const Overrides extends FixtureOverrides<Fixtures & Worker, Worker>>(
+    overrides: Overrides,
+  ): TestAPI<Fixtures & PickEach<Worker, TestOverrides<Overrides>>, OmitEach<Worker, TestOverrides<Overrides>>>;
+  /**
+   * Returns a new `test` whose registrations carry these fixture
+   * definitions on top of the ones it already had. Each attempt sets up the
+   * ones its body and its `beforeEach` and `afterEach` hooks name, and the
+   * ones those fixtures name, in declaration order with each after the
+   * fixtures it names; it runs the hooks and the body with them, and tears
+   * them down in reverse order after `afterEach`. A fixture nothing names is
+   * not set up:
+   *
+   *   export const test = base.extend<{ workspace: Workspace }>({
+   *     workspace: async ({ browser }, use) => {
+   *       const workspace = await createWorkspace();
+   *       await use(workspace);
+   *       await workspace.cleanup();
+   *     },
+   *   });
+   *
+   * A worker fixture (the second type argument, `[fn, { scope: 'worker' }]`)
+   * is set up once per worker and target, the first time a test or suite
+   * hook of the chain names it, and torn down when the worker ends:
+   *
+   *   export const test = base.extend<{}, { database: Database }>({
+   *     database: [async ({}, use) => {
+   *       const database = await startDatabase();
+   *       await use(database);
+   *       await database.stop();
+   *     }, { scope: 'worker' }],
+   *   });
+   *
+   * `auto: true` sets a fixture up whether or not anything names it: for
+   * every test (`[fn, { auto: true }]`), or once per worker
+   * (`[fn, { scope: 'worker', auto: true }]`). A suite hook sets up the auto
+   * worker fixtures of its chain, never a test fixture.
+   */
+  extend<Extra = {}, ExtraWorker = {}, Config = unknown>(
+    fixtures: FixtureDefinitions<
+      ConfigBase<Fixtures, Config> & ConfigBase<Worker, Config> & ConfigFixtures<Config, 'test'> & ConfigFixtures<Config, 'worker'>,
+      Extra,
+      ConfigBase<Worker, Config> & ConfigFixtures<Config, 'worker'>,
+      ExtraWorker
+    >,
+  ): TestAPI<
+    ConfigBase<Fixtures, Config> & Extra & ConfigFixtures<Config, 'test'>,
+    ConfigBase<Worker, Config> & ExtraWorker & ConfigFixtures<Config, 'worker'>
+  >;
+  /** Declares a group synchronously; `describe.fail` declares one whose tests are expected to fail. */
+  describe: DescribeAPI;
+  /** Registers a test-attempt setup hook: it runs after the test's fixtures are set up. */
+  beforeEach(fn: TestHookFn<Fixtures & Worker>): void;
+  /** Registers a test-attempt teardown hook: it runs before the test's fixtures are torn down. */
+  afterEach(fn: TestHookFn<Fixtures & Worker>): void;
+  /** Registers a suite setup hook, run once per describe between attempts, with the worker fixtures. */
+  beforeAll(fn: TestHookFn<Worker>): void;
+  /** Registers a suite teardown hook, run once per describe between attempts, with the worker fixtures. */
+  afterAll(fn: TestHookFn<Worker>): void;
+}
+
+/**
+ * The locator matchers. An option a matcher does not take, or a flag that is
+ * not a boolean, is `INVALID_ARGUMENT` before the first read.
+ */
+export interface AsyncExpectation {
+  /** Inverts the matcher. A negated matcher passes after 1000 ms of continuous truth. */
+  readonly not: AsyncExpectation;
+  /** Waits for visibility; `visible: false` waits for hidden or absent state, as `toBeHidden`. */
+  toBeVisible(options?: { visible?: boolean; timeout?: number }): Promise<void>;
+  /** Waits for hidden or absent state. */
+  toBeHidden(options?: { timeout?: number }): Promise<void>;
+  /**
+   * Waits for part of the match to be inside the viewport, after clipping by
+   * scrolling and overflow ancestors; `ratio` (0 to 1) sets the share of its
+   * box that must be. No match is outside the viewport. It never scrolls.
+   */
+  toBeInViewport(options?: { ratio?: number; timeout?: number }): Promise<void>;
+  /** Waits for one match to exist, visible or not; `attached: false` waits for none. */
+  toBeAttached(options?: { attached?: boolean; timeout?: number }): Promise<void>;
+  /** Waits for enabled state; `enabled: false` waits for disabled state. */
+  toBeEnabled(options?: { enabled?: boolean; timeout?: number }): Promise<void>;
+  /** Waits for disabled state. */
+  toBeDisabled(options?: { timeout?: number }): Promise<void>;
+  /**
+   * Waits for an enabled control that is not read-only; `editable: false`
+   * waits for a disabled or read-only one. Only a node the engine reports a
+   * read-only state for is read (on the web, an input, textarea, select,
+   * editing host, or a role that takes `aria-readonly`); any other node fails
+   * either way.
+   */
+  toBeEditable(options?: { editable?: boolean; timeout?: number }): Promise<void>;
+  /** Waits for checked state; `checked: false` waits for unchecked state. */
+  toBeChecked(options?: { checked?: boolean; timeout?: number }): Promise<void>;
+  /** Waits for selected state. */
+  toBeSelected(options?: { timeout?: number }): Promise<void>;
+  /** Waits for expanded state. */
+  toBeExpanded(options?: { timeout?: number }): Promise<void>;
+  /** Waits for focused state. */
+  toBeFocused(options?: { timeout?: number }): Promise<void>;
+  /**
+   * Waits for a node the engine reports empty: on the web an input or
+   * textarea with no value, or any other element whose text content trims to
+   * nothing; on a device a text field with no value, or a node with no text
+   * or value in its subtree. Denied on a secure field.
+   */
+  toBeEmpty(options?: { timeout?: number }): Promise<void>;
+  /** Waits for exact normalized text; a list waits for exactly that many matches, each with its entry's text, in order. */
+  toHaveText(expected: TextMatch, options?: TextMatcherOptions): Promise<void>;
+  toHaveText(expected: readonly TextMatch[], options?: TextMatcherOptions): Promise<void>;
+  /** Waits for contained normalized text; a list waits for each entry to be contained by a distinct match, in order, extra matches allowed. */
+  toContainText(expected: TextMatch, options?: TextMatcherOptions): Promise<void>;
+  toContainText(expected: readonly TextMatch[], options?: TextMatcherOptions): Promise<void>;
+  /** Waits for a control's value, compared as it is. */
+  toHaveValue(expected: TextMatch, options?: { timeout?: number }): Promise<void>;
+  /** Waits for the attribute to be present; with `value`, for it to match. */
+  toHaveAttribute(name: string, options?: { timeout?: number }): Promise<void>;
+  toHaveAttribute(name: string, value: TextMatch, options?: TextMatcherOptions): Promise<void>;
+  /** Waits for an exact match count. */
+  toHaveCount(expected: number, options?: { timeout?: number }): Promise<void>;
+  /** Waits for an accessible name. */
+  toHaveAccessibleName(expected: TextMatch, options?: TextMatcherOptions): Promise<void>;
+  /** Waits for the role; `img` is read as `image`, as `getByRole` reads it. */
+  toHaveRole(role: Role | RoleAlias, options?: { timeout?: number }): Promise<void>;
+  /**
+   * Waits for the one match to look like its stored screenshot, `name` or
+   * one named after the test. A missing one is written and the matcher fails;
+   * `--update-snapshots` rewrites one that differs.
+   */
+  toHaveScreenshot(name: string, options?: ScreenshotOptions): Promise<void>;
+  toHaveScreenshot(options?: ScreenshotOptions): Promise<void>;
+}
+
+/** The `expect(screen)` matchers. */
+export interface ScreenExpectation {
+  /** Inverts the matcher: waits for the screen to differ from its stored screenshot. */
+  readonly not: ScreenExpectation;
+  /**
+   * Waits for the screen to look like its stored screenshot, `name` or one
+   * named after the test. A missing one is written and the matcher fails;
+   * `--update-snapshots` rewrites one that differs.
+   */
+  toHaveScreenshot(name: string, options?: ScreenshotOptions): Promise<void>;
+  toHaveScreenshot(options?: ScreenshotOptions): Promise<void>;
+}
+
+/** Options of `toHaveScreenshot`. */
+export interface ScreenshotOptions {
+  /** How far one pixel's color may drift and still count as the same, from 0 (exact) to 1. Default `0.2`. */
+  threshold?: number;
+  /** How many pixels may differ. Default `0`. */
+  maxDiffPixels?: number;
+  /** What share of the pixels may differ, from 0 to 1. Default `0`. */
+  maxDiffPixelRatio?: number;
+  /** Locators painted over before comparing, for content that changes from run to run. */
+  mask?: readonly Locator[];
+  /** Color of the `mask` boxes, `#rrggbb`. Default `#ff00ff`. */
+  maskColor?: string;
+  /** Assertion budget in milliseconds. */
+  timeout?: number;
+}
+
+/** Options of a locator matcher that compares text. */
+export interface TextMatcherOptions {
+  /** Compares a string case-insensitively; on a RegExp, `true` adds the `i` flag and `false` removes it. */
+  ignoreCase?: boolean;
+  /** Assertion budget in milliseconds. */
+  timeout?: number;
+}
+
+/**
+ * An object that carries its own expectation surface, so `expect(object)`
+ * returns `E`. Engine-contributed fixtures attach one through
+ * `EngineFixtureContext.expectable`; core never declares a platform's
+ * matchers, it only routes to them.
+ */
+export interface Expectable<E> {
+  readonly [expectationBrand]: E;
+}
+
+/** A class, abstract or not: what `expect.any` takes. */
+export type Class = abstract new (...args: never[]) => unknown;
+
+/** A property path for `toHaveProperty`: dotted (`'user.address.city'`) or one key per element (`['user', 'address', 'city']`). */
+export type PropertyPath = string | readonly (string | number)[];
+
+/**
+ * A stand-in for a value inside `toEqual`, `toMatchObject`, `toContain`, and
+ * `toHaveProperty`: `expect.any(Number)` in place of a number,
+ * `expect.objectContaining({ id: 1 })` in place of a record. The structural
+ * matchers ask it whether a value matches instead of comparing.
+ */
+export interface AsymmetricMatcher {
+  /** Whether `other` satisfies the matcher. */
+  asymmetricMatch(other: unknown): boolean;
+  /** The matcher's name, `ObjectContaining`; a failure message adds the sample. */
+  toString(): string;
+}
+
+export interface ValueExpectation<T> {
+  /** Inverts the matcher. */
+  readonly not: NegatedValueExpectation<T>;
+  /** Compares with Object.is. */
+  toBe(expected: T): void;
+  /** Performs recursive structural equality; `undefined` properties are ignored and class types are not compared. */
+  toEqual(expected: unknown): void;
+  /** Requires every property of `expected` to match recursively; extra properties on the value are fine, arrays must match element-wise with equal length. */
+  toMatchObject(expected: object): void;
+  /** Requires a truthy value. */
+  toBeTruthy(): void;
+  /** Requires a falsy value. */
+  toBeFalsy(): void;
+  /** Requires null. */
+  toBeNull(): void;
+  /** Requires undefined. */
+  toBeUndefined(): void;
+  /** Requires any value but undefined; null passes. */
+  toBeDefined(): void;
+  /** Requires a `length` property equal to `expected`: a string, an array, or anything array-like. */
+  toHaveLength(expected: number): void;
+  /** Requires the property at `path` to exist; with `expected`, to equal it by `toEqual` rules. */
+  toHaveProperty(path: PropertyPath, ...expected: [] | [expected: unknown]): void;
+  /** Requires string or collection containment. */
+  toContain(expected: unknown): void;
+  /** Requires a string or regexp match. */
+  toMatch(expected: string | RegExp): void;
+  /** Requires a numeric lower bound. */
+  toBeGreaterThan(expected: number): void;
+  /** Requires a numeric lower bound, inclusive. */
+  toBeGreaterThanOrEqual(expected: number): void;
+  /** Requires a numeric upper bound. */
+  toBeLessThan(expected: number): void;
+  /** Requires a numeric upper bound, inclusive. */
+  toBeLessThanOrEqual(expected: number): void;
+  /** Requires a number within `10 ** -digits / 2` of `expected`; `digits` defaults to 2. */
+  toBeCloseTo(expected: number, digits?: number): void;
+  /**
+   * Requires the value to pass a synchronous Standard Schema (Zod, Valibot,
+   * ArkType, ...) and returns the schema's output, typed:
+   * `const users = expect(await response.json()).toMatchSchema(Users)`.
+   * A schema that validates asynchronously is `INVALID_ARGUMENT`.
+   */
+  toMatchSchema<Schema extends StandardSchemaV1>(schema: Schema): StandardSchemaV1.InferOutput<Schema>;
+  /**
+   * Requires a `WebResponse` whose status is 2xx (200 to 299), as `request`,
+   * `waitForResponse`, and `route.fetch()` return it. The failure names the
+   * status and the URL's origin and path; the body is never read.
+   */
+  toBeOK(...valueIsNotAResponse: [T] extends [WebResponse] ? [] : [never]): void;
+}
+
+/** The names of the value matchers, every key of `ValueExpectation` but `not`. */
+export type ValueMatcherName = Exclude<keyof ValueExpectation<unknown>, 'not'>;
+
+/** `expect(value).not`: every value matcher inverted, none returning a value; `Back` is what `.not` returns to. */
+export type NegatedValueExpectation<T, Back = ValueExpectation<T>> = {
+  /** Inverts the matcher back. */
+  readonly not: Back;
+} & {
+  readonly [K in ValueMatcherName]: (...args: Parameters<ValueExpectation<T>[K]>) => void;
+};
+
+/**
+ * `expect.soft(value)`: the value matchers, with `toMatchSchema` returning
+ * `undefined` when the value failed and the failure was kept for the end of
+ * the body.
+ */
+export type SoftValueExpectation<T> = Omit<ValueExpectation<T>, 'toMatchSchema' | 'not'> & {
+  /** Inverts the matcher; still soft, so a double negation's `toMatchSchema` may return `undefined` too. */
+  readonly not: NegatedValueExpectation<T, SoftValueExpectation<T>>;
+  /** Requires the value to pass the schema; returns its output, or `undefined` after a kept failure. */
+  toMatchSchema<Schema extends StandardSchemaV1>(schema: Schema): StandardSchemaV1.InferOutput<Schema> | undefined;
+};
+
+export interface PollOptions {
+  /** Deadline in milliseconds. Default 5000. */
+  timeout?: number;
+  /**
+   * Pause between reads in milliseconds.
+   * @deprecated Pass `intervals: [<ms>]`.
+   */
+  interval?: number;
+  /** Pauses between reads in milliseconds. Default [100, 250, 500, 1000]. The last pause is repeated. */
+  intervals?: readonly number[];
+  /** Extra line in the timeout error, after the matcher line. */
+  message?: string;
+}
+
+export type PassOptions = {
+  /** Timeout in milliseconds. By default, only the phase deadline applies. */
+  timeout?: number;
+  /** Pauses between tries in milliseconds. Default [100, 250, 500, 1000]. The last pause is repeated. */
+  intervals?: readonly number[];
+};
+
+type PassMatcher = {
+  /** Retries the block until the assertion passes or the deadline is reached. */
+  toPass(options?: PassOptions): Promise<void>;
+};
+
+/** Value matchers for a function, with retries for positive and negated assertions. */
+export type PassExpectation<T, Value = ValueExpectation<T>> = Omit<Value, 'not'> & PassMatcher & {
+  readonly not: NegatedValueExpectation<T, PassExpectation<T, Value>> & PassMatcher;
+};
+
+/**
+ * The asynchronous form of every `ValueExpectation<T>` matcher: the same
+ * names and parameters, each resolving once the re-read value passes.
+ * Derived from `ValueExpectation<T>` so the two cannot drift; the one
+ * matcher that returns a value, `toMatchSchema`, is spelled out to resolve
+ * to the schema's output for the passing read.
+ */
+export type PollExpectation<T> = {
+  readonly not: NegatedPollExpectation<T>;
+} & {
+  readonly [K in Exclude<ValueMatcherName, 'toMatchSchema'>]: (
+    ...args: Parameters<ValueExpectation<T>[K]>
+  ) => Promise<void>;
+} & {
+  /** Resolves to the schema's output once a read passes it. */
+  toMatchSchema<Schema extends StandardSchemaV1>(schema: Schema): Promise<StandardSchemaV1.InferOutput<Schema>>;
+};
+
+/** `expect.poll(read).not`: every poll matcher inverted, none resolving to a value. */
+export type NegatedPollExpectation<T> = {
+  /** Inverts the matcher back. */
+  readonly not: PollExpectation<T>;
+} & {
+  readonly [K in ValueMatcherName]: (...args: Parameters<ValueExpectation<T>[K]>) => Promise<void>;
+};
+
+/** `T`, or `never` when `T` is `any`, so an `any` argument skips an overload. */
+type NotAny<T> = 0 extends 1 & T ? never : T;
+
+/**
+ * The `expect(actual)` call: a locator, `screen`, an engine fixture, or a
+ * value, told apart by the argument. The locator and screen overloads are
+ * generic so a return-only generic such as `response.json<T>()` infers
+ * nothing from them, and refuse `any` (a DOM `Response.json()`), so both
+ * land on the value overload.
+ */
+export interface ExpectCall {
+  /** `message` opens each assertion failure and an ambiguous locator's error, before the matcher and the locator it names. */
+  <L extends Locator>(actual: NotAny<L>, message?: string): AsyncExpectation;
+  /** `message` opens each assertion failure, before the matcher. */
+  <S extends Screen>(actual: NotAny<S>, message?: string): ScreenExpectation;
+  <E extends object>(actual: Expectable<E>): E;
+  <F extends () => unknown>(actual: NotAny<F>, message?: string): PassExpectation<F>;
+  /** `message` opens the failure text, so a bare `expected false to be true` says which check it was. */
+  <T>(actual: T, message?: string): ValueExpectation<T>;
+}
+
+/** The `expect.soft(actual)` call: `expect(actual)` whose failures are kept instead of thrown. */
+export interface SoftExpectCall {
+  /** `message` opens each assertion failure and an ambiguous locator's error, before the matcher and the locator it names. */
+  <L extends Locator>(actual: NotAny<L>, message?: string): AsyncExpectation;
+  /** `message` opens each assertion failure, before the matcher. */
+  <S extends Screen>(actual: NotAny<S>, message?: string): ScreenExpectation;
+  <E extends object>(actual: Expectable<E>): E;
+  <F extends () => unknown>(actual: NotAny<F>, message?: string): PassExpectation<F, SoftValueExpectation<F>>;
+  /** `message` opens the failure text, so a bare `expected false to be true` says which check it was. */
+  <T>(actual: T, message?: string): SoftValueExpectation<T>;
+}
+
+/** The `expect` entry: the call, `expect.poll`, `expect.soft`, and the asymmetric matchers. */
+export interface Expect extends ExpectCall {
+  /** Re-reads a value until the chosen matcher holds or `timeout` passes. */
+  poll<T>(read: () => T | Promise<T>, options?: PollOptions): PollExpectation<T>;
+  /**
+   * The same matchers, but a failure is kept on the running attempt instead
+   * of thrown, and the body runs on. Once the body has settled the attempt
+   * fails with `ASSERTION_FAILED` listing every kept failure. Outside a test
+   * body (a standalone script, an `afterEach` hook) a failure throws at once.
+   */
+  readonly soft: SoftExpectCall;
+  /** Matches an instance of the class; for `String`, `Number`, `Boolean`, `BigInt`, `Symbol`, and `Function`, the primitive too; for `Object`, anything `typeof` calls an object, `null` included. */
+  any(sample: Class | typeof BigInt | typeof Symbol): AsymmetricMatcher;
+  /** Matches anything but `null` and `undefined`. */
+  anything(): AsymmetricMatcher;
+  /** Matches an object whose properties include every property of `sample`, each compared with `toEqual` rules. */
+  objectContaining(sample: object): AsymmetricMatcher;
+  /** Matches an array holding every element of `sample`, each compared with `toEqual` rules, in any order. */
+  arrayContaining(sample: readonly unknown[]): AsymmetricMatcher;
+  /** Matches a string with `sample` as a substring. */
+  stringContaining(sample: string): AsymmetricMatcher;
+  /** Matches a string the RegExp tests true on; a string sample is compiled to a RegExp. */
+  stringMatching(sample: string | RegExp): AsymmetricMatcher;
+}
+
+export interface CommandConfig {
+  /** Resolved with `PATH`; never shell-interpreted. */
+  executable: string;
+  /** Passed verbatim; `{port}` expands to the app's port. */
+  args?: readonly string[];
+  /** Working directory, resolved from the project root. */
+  cwd?: string;
+  /** Added to the inherited set; `{port}` expands in values. */
+  env?: Readonly<Record<string, string>>;
+  /**
+   * Variables copied from the runner's environment when set: exact names, or
+   * prefixes ending in `*` (`'STRIPE_*'`). `env` wins over an inherited value.
+   * A bare `'*'` is `INVALID_CONFIG`.
+   */
+  inheritEnv?: readonly string[];
+  /** Ready-probe budget in milliseconds; default 60000. Expiry is `APP_UNREACHABLE`. */
+  startupTimeout?: number;
+  /** Grace period before force-kill in milliseconds; default 10000. */
+  shutdownTimeout?: number;
+  /** File that receives the process's stdout and stderr, appended, resolved from the project root. Omitted discards output. */
+  log?: string;
+  /**
+   * When the readiness URL already answers before the command starts, use that
+   * process instead of spawning: nothing is started and nothing is stopped.
+   * Off by default; CI ignores it and always starts the command. A URL on a
+   * free port (port 0) can never already answer, so the two together are
+   * `INVALID_CONFIG`.
+   */
+  reuseExisting?: boolean;
+}
+
+/** A permission's state when the app launches: held, refused, or not asked for yet, so the OS asks again. */
+export type AppPermissionState = 'grant' | 'deny' | 'reset';
+
+/**
+ * One value in the object form of `launchArguments`. On iOS
+ * `{ AppleLocale: 'fr_FR' }` is `-AppleLocale fr_FR`, `{ e2e: true }` is
+ * `-e2e YES`, and `{ AppleLanguages: ['fr', 'de'] }` is
+ * `-AppleLanguages (fr, de)`. On Android each value is an `am start` extra
+ * of its type: `{ e2e: true }` is `--ez e2e true`, `{ retries: 3 }` is
+ * `--ei retries 3`, `{ locale: 'fr_FR' }` is `--es locale fr_FR`, and a list
+ * is `--esa tags a,b`.
+ */
+export type LaunchArgumentValue = string | number | boolean | readonly string[];
+
+/**
+ * A target's launch arguments: a list of strings, the arguments themselves
+ * (`['-e2e', 'YES']`), or an object of argument name to value
+ * (`{ AppleLanguages: ['fr'], AppleLocale: 'fr_FR' }`). An `undefined`
+ * value, read from the environment, is the entry left out.
+ */
+export type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue | undefined>>;
+
+/** The object form of launch arguments after the shape check: argument name to value, the `undefined` entries gone. */
+export type LaunchArgumentValues = Readonly<Record<string, LaunchArgumentValue>>;
+
+/** Launch arguments after the shape check: a list of strings, or the object form. */
+export type ResolvedLaunchArguments = readonly string[] | LaunchArgumentValues;
+
+/**
+ * The app one target tests, declared on the target and nowhere else: engines
+ * only drive it. Every field also accepts `undefined`, so values read straight
+ * from `process.env` need no conditional spread. A browser target names the
+ * `url` it opens; a device target names the installed app (`bundleId`) or
+ * the build (`appPath`) it launches. Each engine checks the fields its
+ * platform needs at config load. `command` and `readyUrl` start the app for
+ * this target alone.
+ */
+export interface TargetApp {
+  /**
+   * Base URL of an addressable app: `app.open()` opens it and relative
+   * navigation resolves against it. WHATWG-normalized; no userinfo, query, or
+   * fragment; a missing scheme becomes `https://`, or `http://` for a
+   * loopback host. Plain HTTP is accepted for loopback hosts only. A `file:`
+   * URL names one file on this machine, with no host, that a locally
+   * launched browser opens; navigation then stays in its directory. A URL on
+   * `127.0.0.1` or `[::1]` with port 0 asks the run for a free port for
+   * `command`, handed to it as `{port}`; without a command nothing would
+   * serve it, so that is `INVALID_CONFIG`.
+   */
+  url?: string | undefined;
+  /**
+   * The installed app a device target launches: a bundle id, an Android
+   * package name, or a display name the device resolves (`Settings`).
+   */
+  bundleId?: string | undefined;
+  /**
+   * Where `app.open(path)` opens on a device target: the link base a path
+   * joins, so `app.open('/orders/42')` opens `https://shop.example.com/orders/42`
+   * (a universal or App Link) or, with `shopapp://`, `shopapp://orders/42`
+   * (a custom scheme), in the pinned app. Only a target whose engine opens
+   * links takes it; `file:`, `data:`, `javascript:`, `view-source:`, `blob:`,
+   * and `filesystem:` are refused.
+   */
+  linkBase?: string | undefined;
+  /**
+   * The build a device target runs against, an iOS `.app` bundle or an
+   * Android `.apk`, resolved against the project root. Without `bundleId`,
+   * the app it installs is the one launched.
+   */
+  appPath?: string | undefined;
+  /**
+   * Stable logical identity of the app under test, keying replay cache and
+   * session entries. Defaults to the URL's origin and base path, else
+   * `bundleId`, else `appPath`, so an ephemeral per-deploy origin (a PR
+   * preview) cold-starts every entry; an explicit identity keys them by what
+   * the app *is* instead of where it is served this run. Never share one
+   * identity across genuinely different apps: recorded traces would replay
+   * across them.
+   */
+  identity?: string | undefined;
+  /**
+   * Labels the target in the report and joins the cache and session identity
+   * digest; never gates a run. Defaults to `test` for loopback, `.localhost`,
+   * and `.test` hosts and for an app without a URL, `production` otherwise.
+   */
+  environment?: 'test' | 'staging' | 'production' | undefined;
+  /**
+   * Arguments a device app is launched with on every fresh launch
+   * (`app.open()`, `app.restart()`, `app.clearState()`). Arguments that
+   * select a build mode change what the app is: give each mode its own
+   * `identity` so their recordings stay apart.
+   */
+  launchArguments?: LaunchArguments | undefined;
+  /**
+   * Permissions the app holds, by name. A device app has each granted,
+   * denied, or reset before every fresh launch. A browser target takes
+   * `grant` only and holds it on every page of the attempt; what it leaves
+   * out is the browser's default, which headless Chromium refuses. The
+   * engine checks the names its platform knows. `'all'` grants every
+   * permission the engine can grant on its platform.
+   */
+  permissions?: Readonly<Record<string, AppPermissionState>> | 'all' | undefined;
+  /**
+   * Process the runner starts before the first test and stops at the end of
+   * the run (a dev server, Metro for a debug build). Structured, never
+   * shell-interpreted; the child inherits only `PATH`, `HOME`, the
+   * temp-directory variables, `command.inheritEnv`, and `command.env`.
+   * `{port}` in it is the port of `url`, fixed or free. Targets declaring the
+   * same command share one process, probed at the first declaring target's
+   * `readyUrl`. A release build has no command.
+   */
+  command?: CommandConfig | undefined;
+  /**
+   * URL polled until `command` is ready (a 200-499 status); defaults to
+   * `url`, and is required without one. `{port}` in it is the port of `url`.
+   */
+  readyUrl?: string | undefined;
+}
+
+/**
+ * One target: a named surface on one platform, served by an engine.
+ * What the target can do is graded from the engine's declared capabilities;
+ * with no `engine` the target runs agent tools and `request` calls to
+ * absolute URLs, and everything runs opaque.
+ * The app under test is the target's `app`; the engine only drives it.
+ */
+export interface Target {
+  /** Label in reports and for `--target`; defaults to the platform. */
+  name?: string;
+  /**
+   * Platform label, inherited from the engine when omitted. Required for a
+   * target without an engine; when both name one, they must agree.
+   */
+  platform?: string;
+  /** The engine driving the surface: `web(...)`, `mobile(...)`, or any `defineEngine` handle. */
+  engine?: EngineHandle;
+  /** The app under test: what it is, where it is served, and the command that starts it. */
+  app?: TargetApp;
+  /**
+   * Which attempts on this target keep a trace, in place of the config's
+   * `trace`; `--trace` and a test's own `trace` win over it.
+   */
+  trace?: RecordingMode;
+  /**
+   * Which attempts on this target record a video, in place of the config's
+   * `video`; `--video` and a test's own `video` win over it. A mode set here
+   * is required of the engine: one that cannot record fails the run with
+   * `UNSUPPORTED_ARTIFACT`.
+   */
+  video?: RecordingMode;
+  /** Whether this target runs the tests of one file in parallel, in place of the config's `fullyParallel`; `--fully-parallel` wins over it. */
+  fullyParallel?: boolean;
+}
+
+/**
+ * Which attempts keep a trace or record a video, and which are kept.
+ * `off`: none. `on`: every attempt, every recording kept.
+ * `retain-on-failure`: every attempt records, only the recordings of attempts
+ * that did not pass are kept. `on-first-retry`: only the first retry records,
+ * so a test that passes first time costs nothing and a flaky one leaves a
+ * recording of the retry. `on-all-retries`: every attempt after the first.
+ */
+export type RecordingMode = 'off' | 'on' | 'retain-on-failure' | 'on-first-retry' | 'on-all-retries';
+
+/**
+ * A live AI SDK language model instance: `gateway('openai/gpt-6-luna-fast')`
+ * from `ai`, `openrouter(...)` from `@openrouter/ai-sdk-provider`,
+ * `openai('gpt-6-luna-fast')` from `@ai-sdk/openai`, or any other provider
+ * implementing the AI SDK `LanguageModelV2+` specification. The instance owns
+ * its own transport and credentials; the runner knows no gateway or provider
+ * of its own. Detection is structural, so any AI SDK provider package works
+ * without this runner depending on it.
+ */
+export interface ModelInstance {
+  /** The AI SDK specification the instance implements. */
+  readonly specificationVersion: string;
+  /** Provider id, recorded per step in the report. */
+  readonly provider: string;
+  /** Model id, recorded per step in the report. */
+  readonly modelId: string;
+  /** The generate call every AI SDK language model implements; what tells a live instance from its three id strings. */
+  readonly doGenerate: (...args: never[]) => unknown;
+}
+
+/** Replay cache posture. In CI an unset mode is `read-only`, unless `cache.store` is set. */
+export type CacheMode = 'off' | 'read-only' | 'read-write';
+
+/**
+ * Replay cache configuration. The store abstraction is the cloud seam: the
+ * default file store keeps entries under `.e2e/cache/`, and a custom
+ * `CacheStore` (Redis, an API, anything implementing read/write over
+ * key digests) replaces it wholesale. Like agents and model instances, a
+ * store never crosses a process boundary: workers re-resolve the config
+ * module and construct their own.
+ */
+export interface CacheConfig {
+  /** Default `read-write`; `read-only` in CI when unset. */
+  mode?: CacheMode;
+  /** Custom entry store; omit it to use the file store at `dir`. */
+  store?: CacheStore;
+  /** File store directory, resolved against the project root. `--cache-dir` and `E2E_CACHE_DIR` replace it. */
+  dir?: string;
+  /**
+   * Fails a step whose recording exists but no longer replays (a control
+   * not found or ambiguous, a rejected action, an end state that did not
+   * come back, the app on another screen, an unreadable entry) with
+   * `REPLAY_STALE`, instead of handing it to the agent. A step with no
+   * recording and a value read off the screen still run live. Retries
+   * replay too, and the run never writes or deletes an entry, whatever
+   * the mode. `--strict-cache` sets it for one run. Default `false`.
+   */
+  strict?: boolean;
+}
+
+/**
+ * One produced artifact as handed to an `ArtifactStore`, the moment it is
+ * complete on disk: its bytes, digest, and report identity. `path` is the
+ * report-relative path the record carries, stable across runs of the same
+ * test, so a host may use it as its own key.
+ */
+export interface StoredArtifact {
+  readonly kind: 'screenshot' | 'video' | 'download' | 'log';
+  readonly mediaType: string;
+  readonly bytes: Uint8Array;
+  readonly size: number;
+  readonly sha256: string;
+  /** Report-relative path with `/` separators. */
+  readonly path: string;
+  /**
+   * How much of the file the runner masked, as the report records it. A
+   * `download` is `incomplete` unless the runner ran it as text through the
+   * session's secret values; a store that exports only what the runner
+   * vouches for reads this rather than the kind.
+   */
+  readonly redaction: 'complete' | 'incomplete';
+  readonly runId: string;
+  readonly testId: string;
+  readonly attemptId: string;
+  /** The step that produced it, when one was running. */
+  readonly stepId?: string;
+  /**
+   * When a time-based artifact began recording (a video segment), so a host
+   * can align step timestamps with it without reading the report.
+   */
+  readonly startedAt?: string;
+}
+
+/**
+ * Where artifacts go. The default keeps them under the artifacts directory,
+ * and the report records their paths. A host-supplied store (object storage,
+ * an API) receives every artifact as it is produced — not after the run — and
+ * returns its own reference, which the report records as the artifact's
+ * `ref` beside the local path. The cloud seam for evidence, the way
+ * `CacheStore` is for the replay cache. A failed `put` never fails the run: the
+ * record simply carries no `ref`. Like every live value, a store never
+ * crosses a process boundary.
+ */
+export interface ArtifactStore {
+  put(artifact: StoredArtifact): Promise<{ readonly ref: string }>;
+  /**
+   * Receives a video a hosted service keeps (a browser or device provider's
+   * own recording): a link with no bytes, so `put` never sees it. Returns a
+   * reference the report records as the artifact's `ref` beside its `url`.
+   * Optional: without it a link is only recorded. A passed attempt's link
+   * under `retain-on-failure` is never handed over, since the report leaves
+   * it out. A failed `putLink` never fails the run, like `put`.
+   */
+  putLink?(link: StoredArtifactLink): Promise<{ readonly ref: string }>;
+}
+
+/** One provider-hosted recording, handed to `store.putLink` once the attempt stopped it. */
+export interface StoredArtifactLink {
+  readonly kind: 'video';
+  /** The `http(s)` URL the service serves the recording from. */
+  readonly url: string;
+  readonly mediaType: string;
+  /** A recording masks nothing, so a link is always `incomplete`. */
+  readonly redaction: 'incomplete';
+  readonly runId: string;
+  readonly testId: string;
+  readonly attemptId: string;
+  /** When the recording started, as an ISO timestamp. */
+  readonly startedAt: string;
+  /** The step that was running when the recording was registered, if any. */
+  readonly stepId?: string;
+}
+
+/**
+ * Where artifacts go. What is recorded is not configured here: `trace` and
+ * `video` choose what is kept, and a failure's screenshot and screen text
+ * are captured whenever the engine can.
+ */
+export interface ArtifactsConfig {
+  /** Host store every produced artifact is handed to; omit it to keep files local only. */
+  store?: ArtifactStore;
+}
+
+/**
+ * AI SDK provider options, keyed by provider then option name, e.g.
+ * `{ openai: { reasoningEffort: 'low' } }`. Sent with every model call of
+ * both the act tier and the judgment tier.
+ */
+export type ProviderOptions = Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+
+/**
+ * A project tool as `defineTool` from `e2e/agent` returns it. Typed
+ * structurally so this entrypoint names nothing from the optional `ai` peer;
+ * config resolution accepts only values `defineTool` built.
+ */
+export interface AgentTool {
+  readonly tool: object;
+  readonly annotations: { readonly mutates: boolean; readonly platforms?: readonly string[] };
+}
+
+/** The options every agent takes, whichever brain runs its `act` steps. */
+export interface AgentOptions {
+  /** An AI SDK model instance; no implicit default. */
+  model?: ModelInstance;
+  /**
+   * The model for non-exploring `assert`, `waitFor`, and `extract`; defaults
+   * to `model`. Built-in exploring assertions use `model` even when `judge`
+   * is configured.
+   */
+  judge?: ModelInstance;
+  /**
+   * What the app calls things, told to every model call this agent makes,
+   * act turns and judgments alike: the names of screens and menus, where a
+   * feature lives, which button submits a form. At most 16384 bytes.
+   */
+  context?: string;
+  /** Committed actions per agent call, 1 through 100; default 25. */
+  maxSteps?: number;
+  /** Model requests per agent call, 1 through 100; default 25. */
+  maxModelCalls?: number;
+  /** Deadline of one `assert`, `waitFor`, or `extract` call in milliseconds; default 30000. Raise it for a slow judge; engine operations keep `actionTimeout`. */
+  judgmentTimeout?: number;
+  /** Observation payload ceiling for act turns and judgments, 1024 through 16777216; default 262144. */
+  maxObservationBytes?: number;
+  /** Input tokens per model request, 1 through 1000000; default 64000. A dense screen is cut to fit under it. */
+  maxInputTokens?: number;
+  /**
+   * Provider options every model call carries, e.g. a reasoning effort.
+   * OpenAI and Azure OpenAI Responses calls also carry `store: false` and a
+   * prompt cache key unless set here.
+   */
+  providerOptions?: ProviderOptions;
+  /** Never set: an entry is not itself a `StepExecutor`; a custom brain goes under `executor`. */
+  runStep?: never;
+}
+
+/**
+ * One entry of `agents`: the built-in agent with its options, or a custom
+ * brain under `executor`. Each entry starts from the built-in defaults; no
+ * agent inherits another's values, `default`'s included.
+ */
+export type AgentConfig = AgentOptions &
+  (
+    | {
+        executor?: never;
+        /**
+         * How the acting agent should work, appended to the built-in execution
+         * rules: its persona, its caution, what it verifies before it finishes.
+         * Only the act loop reads it. The judges behind `assert`, `waitFor`,
+         * and `extract` never see it, so nothing here can talk a judge into a
+         * verdict.
+         */
+        system?: string;
+        /** Project tools from `defineTool`, offered beside the built-in toolset. */
+        tools?: Readonly<Record<string, AgentTool>>;
+      }
+    | {
+        /**
+         * A custom brain `agent.act()` dispatches to instead of the built-in
+         * agent. The model, judge, budgets, and context still apply; `system`
+         * and `tools` belong to the built-in agent and are rejected here.
+         */
+        executor: StepExecutor;
+        system?: never;
+        tools?: never;
+      }
+  );
+
+/**
+ * The project half of `E2EConfig`: targets, agents, the replay cache,
+ * secrets, budgets, and output. The test runner and `@e2e-dev/core` both resolve
+ * it; `E2EConfig` adds the runner's reporters and test filters.
+ */
+export interface ProjectConfig {
+  /** Stable project id, 1 through 256 characters; defaults to the root `package.json` name. */
+  projectId?: string;
+  /** The surfaces tests run on; required, at least one, each naming its engine. */
+  targets: readonly Target[];
+  /** Test file globs relative to the project root (`*`, `?`, and a whole `**` segment; a leading `!` excludes); default every `*.e2e.ts` under `tests/`. */
+  tests?: string | readonly string[];
+  /** Test attempt deadline in milliseconds; default 120000. */
+  timeout?: number;
+  /** Engine init and attempt start budget in milliseconds; default 60000. */
+  launchTimeout?: number;
+  /** Budget of every engine operation in milliseconds; default 30000. */
+  actionTimeout?: number;
+  /** Default `expect` deadline in milliseconds; default 5000. */
+  assertionTimeout?: number;
+  /** Default timeout and pauses for `expect(fn).toPass()`. */
+  toPass?: PassOptions;
+  /** Budget of each `afterEach` hook, fixture teardown, and engine cleanup in milliseconds; default 30000. */
+  cleanupTimeout?: number;
+  /** Retries per test, 0 through 10; default 1 in CI, else 0. */
+  retries?: number;
+  /** Fail the run when a test skips a retry after an earlier failed attempt; default false. */
+  failOnSkippedFailure?: boolean;
+  /**
+   * Wall-clock budget for running the tests, in milliseconds; default none.
+   * Once spent, the running tests end as `interrupted`, the rest are skipped,
+   * and the run fails with `RUN_TIMEOUT`. `--max-duration` overrides it;
+   * `e2e explore` keeps its own `--timeout`.
+   */
+  maxDuration?: number;
+  /** Parallel workers, 1 through 1024; default 1 in CI, else half the cores. An engine may cap it lower. */
+  workers?: number;
+  /**
+   * Runs the tests of one file at the same time on separate workers, as if
+   * every file had `parallel: true`; default false, where files run in
+   * parallel and a file's tests in order. A target's `fullyParallel` wins
+   * over it, and `--fully-parallel` over both. A serial group still runs as
+   * one unit, and `parallel: false` keeps a group or a file in order.
+   */
+  fullyParallel?: boolean;
+  /** `{ store }` hands every artifact to a host store as it is produced. */
+  artifacts?: ArtifactsConfig;
+  /**
+   * Which attempts keep a trace, a `trace.md` page in the test's directory
+   * under `<output>/results/` telling every step, the cache's decisions, what
+   * the app logged, and the screen at failure; default `retain-on-failure`. A target's `trace` wins
+   * over it, `--trace [mode]` over both, and a test's own `trace` over all.
+   */
+  trace?: RecordingMode;
+  /**
+   * Which attempts record a video; default `off`. A target's `video` wins
+   * over it, `--video [mode]` over both, and a test's own `video` over all.
+   * Applies to the targets whose engine can record.
+   */
+  video?: RecordingMode;
+  /**
+   * The directory a run writes its results to, relative to the project root;
+   * default `.e2e`. It holds `report.json`, `junit.xml`, `summary.md`, `ctrf.json`,
+   * `ai-trace.json`, `results/` (cleared once the run's tests start, except on a `--last-failed` rerun),
+   * `sessions/`, and the `e2e mcp` session videos under `videos/`.
+   * `--output <dir>` overrides it for one run. It must be inside the project
+   * root and not the root itself, may not hold a test glob's directory, and
+   * is independent of `cache.dir`, which may sit inside it but not under a
+   * directory the run clears.
+   */
+  output?: string;
+  /**
+   * The agents by name, each one plain object: the built-in agent's options,
+   * or `{ executor }` for a custom brain. `default` is the one tests run
+   * with; `e2e run --agent <name>` runs them with another. Every agent starts
+   * from the built-in defaults: none inherits another's values. Agents never
+   * cross a process boundary: workers re-resolve the config module and
+   * construct their own, exactly like model instances.
+   */
+  agents?: Readonly<Record<string, AgentConfig>>;
+  /**
+   * The adaptive replay cache. Opt-out: unset means
+   * `read-write`, and `'off'` disables it, as does the `--no-cache` flag,
+   * which wins over the config. A string is shorthand for `{ mode }`. In CI an
+   * unset mode is demoted to `read-only`: a committed cache is untrusted
+   * input. An explicit `read-write` is honored as the project's own statement
+   * of trust in the cache it restores.
+   */
+  cache?: CacheMode | CacheConfig;
+  /**
+   * Named accounts. `credentials.user(name).password` is the handle of a
+   * credential's password, a secret named `<name>.password`; `secrets.get()`
+   * never returns it, so a credential and a secret may share a name.
+   */
+  credentials?: Readonly<Record<string, CredentialConfig>>;
+  /**
+   * Named values the model must never see: API keys, tokens, anything sourced
+   * from the environment. `secrets.get(name)` hands a test the opaque handle;
+   * the value is filled by the runner, masked in every observation, and
+   * redacted from logs and the report.
+   */
+  secrets?: Readonly<Record<string, SecretConfig>>;
+}

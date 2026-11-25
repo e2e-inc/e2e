@@ -9,7 +9,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { JsColorType, Transformer } from '@napi-rs/image';
 import { describe, expect, it } from 'vitest';
-import type { EngineObserveOptions, ObservationPixels, SemanticNode } from '../../src/engine/index.ts';
+import type { EngineObserveOptions, ObservationPixels, SemanticNode } from '@e2e-dev/core/lib/engine/index';
 import type { E2EConfig } from '../../src/index.ts';
 import { engineFailure } from '../helpers/engine-runtime.ts';
 import { createFakeEngine, FAKE_APP, FAKE_APP_URL, type FakeEngineHandle } from '../helpers/fake-engine.ts';
@@ -51,6 +51,12 @@ function screenPng(background: Rgb, button: Rgb, scale = 1): ObservationPixels {
   }
   return { data: new Uint8Array(Transformer.fromRgbaPixels(rgba, width, height).pngSync()), mediaType: 'image/png', width, height, scale };
 }
+
+/** The tree with a secure field on screen. */
+const SECURE_TREE: SemanticNode = {
+  ...TREE,
+  children: [...TREE.children!, { ref: { id: 'password', revision: '' }, role: 'textbox', name: 'Password', states: { secure: true, hidden: false } }],
+};
 
 const WHITE: Rgb = [255, 255, 255];
 const BLUE: Rgb = [0, 0, 255];
@@ -249,11 +255,7 @@ test('tolerant', async ({ app, screen }) => {
   it(
     'keeps no screenshot when a secure field on screen went unmasked, and keeps one after a secret fill',
     async () => {
-      const secureTree: SemanticNode = {
-        ...TREE,
-        children: [...TREE.children!, { ref: { id: 'password', revision: '' }, role: 'textbox', name: 'Password', states: { secure: true, hidden: false } }],
-      };
-      const { fake } = screenEngine(() => screenPng(WHITE, BLUE), { tree: secureTree });
+      const { fake } = screenEngine(() => screenPng(WHITE, BLUE), { tree: SECURE_TREE });
       const unmasked = await runProject({ 'tests/home.e2e.ts': SCREEN_TEST }, { appUrl: FAKE_APP_URL, config: fakeConfig(fake) });
       try {
         expect(attemptOf(unmasked.outcome, 'home').error).toMatchObject({ category: 'configuration', code: 'POLICY_DENIED' });
@@ -280,6 +282,56 @@ test('after a fill', async ({ app, screen }) => {
         expect(existsSync(path.join(afterFill.project.dir, 'tests', 'fill.e2e.ts-snapshots', `home${SUFFIX}.png`))).toBe(true);
       } finally {
         afterFill.project.cleanup();
+      }
+    },
+    60_000,
+  );
+
+  it(
+    'fails at once with POLICY_DENIED when the engine withholds a screenshot it could not mask',
+    async () => {
+      let captures = 0;
+      const withheld = createFakeEngine({
+        tree: SECURE_TREE,
+        fixtures: true,
+        pixels: () => {
+          captures += 1;
+          return { maskedRegionCount: 0 };
+        },
+      });
+      const { outcome, project } = await runProject({ 'tests/home.e2e.ts': SCREEN_TEST }, { appUrl: FAKE_APP_URL, config: fakeConfig(withheld) });
+      try {
+        expect(attemptOf(outcome, 'home').error).toMatchObject({ category: 'configuration', code: 'POLICY_DENIED' });
+        expect(captures).toBe(1);
+        expect(existsSync(path.join(project.dir, 'tests', 'home.e2e.ts-snapshots'))).toBe(false);
+      } finally {
+        project.cleanup();
+      }
+    },
+    60_000,
+  );
+
+  it(
+    'keeps waiting for a screenshot the engine did not take on a screen with a secure field',
+    async () => {
+      let captures = 0;
+      const fake = createFakeEngine({
+        tree: SECURE_TREE,
+        fixtures: true,
+        pixels: () => {
+          captures += 1;
+          return undefined;
+        },
+      });
+      const { outcome, project } = await runProject({ 'tests/home.e2e.ts': SCREEN_TEST }, { appUrl: FAKE_APP_URL, config: fakeConfig(fake) });
+      try {
+        expect(attemptOf(outcome, 'home').error).toMatchObject({
+          code: 'ASSERTION_FAILED',
+          message: expect.stringContaining('the engine returned no screenshot'),
+        });
+        expect(captures).toBeGreaterThan(1);
+      } finally {
+        project.cleanup();
       }
     },
     60_000,
@@ -619,6 +671,84 @@ test('negated', async ({ app, screen }) => {
         const error = attemptOf(outcome, 'negated').error;
         expect(error?.code).toBe('ASSERTION_FAILED');
         expect(error?.message).toContain('no stored screenshot');
+      } finally {
+        project.cleanup();
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'opens a locator and a screen screenshot failure with the caller\'s message, when none is stored, in CI too, and on a mismatch',
+    async () => {
+      let shown = screenPng(WHITE, BLUE);
+      const { fake } = screenEngine(() => shown);
+      const test = `import { test, expect } from 'e2e';
+
+test('button', async ({ app, screen }) => {
+  await app.open('/');
+  await expect(screen.getByRole('button', { name: 'Submit' }), 'the button kept its style').toHaveScreenshot('button', { timeout: 1000 });
+});
+
+test('page', async ({ app, screen }) => {
+  await app.open('/');
+  await expect(screen, 'the page kept its look').toHaveScreenshot('page', { timeout: 1000 });
+});
+`;
+      const options = { appUrl: FAKE_APP_URL, config: fakeConfig(fake) };
+      const { outcome: ci, project } = await runProject(
+        { 'tests/labelled.e2e.ts': test },
+        { ...options, runOptions: { env: { ...process.env, CI: '1' } } },
+      );
+      try {
+        for (const [title, message] of [['button', 'the button kept its style'], ['page', 'the page kept its look']] as const) {
+          const error = attemptOf(ci, title).error;
+          expect(error?.message.startsWith(`${message}: expect.toHaveScreenshot failed\nno stored screenshot at `), title).toBe(true);
+          expect(error?.message, title).toContain('CI writes none');
+        }
+        const outcome = await runExisting(project, options);
+        for (const [title, message] of [['button', 'the button kept its style'], ['page', 'the page kept its look']] as const) {
+          expect(attemptOf(outcome, title).error?.message.startsWith(`${message}: expect.toHaveScreenshot failed\nno stored screenshot at `), title).toBe(true);
+        }
+        shown = screenPng(WHITE, RED);
+        const changed = await runExisting(project, options);
+        for (const [title, message] of [['button', 'the button kept its style'], ['page', 'the page kept its look']] as const) {
+          const error = attemptOf(changed, title).error;
+          expect(error?.code, title).toBe('ASSERTION_FAILED');
+          expect(error?.message.startsWith(`${message}: expect.toHaveScreenshot failed\n`), title).toBe(true);
+          expect(error?.message, title).toContain('pixels');
+        }
+      } finally {
+        project.cleanup();
+      }
+    },
+    60_000,
+  );
+
+  it(
+    'opens a negated locator and screen screenshot failure with the caller\'s message',
+    async () => {
+      const { fake } = screenEngine(() => screenPng(WHITE, BLUE));
+      const test = `import { test, expect } from 'e2e';
+
+test('labelled', async ({ app, screen }) => {
+  await app.open('/');
+  await expect(screen.getByRole('button', { name: 'Submit' }), 'the button restyled').not.toHaveScreenshot('button');
+});
+
+test('labelled screen', async ({ app, screen }) => {
+  await app.open('/');
+  await expect(screen, 'the page changed').not.toHaveScreenshot('page');
+});
+`;
+      const { outcome, project } = await runProject({ 'tests/labelled.e2e.ts': test }, { appUrl: FAKE_APP_URL, config: fakeConfig(fake) });
+      try {
+        const error = attemptOf(outcome, 'labelled').error;
+        expect(error?.code).toBe('ASSERTION_FAILED');
+        expect(error?.message.startsWith('the button restyled: expect.not.toHaveScreenshot failed\nno stored screenshot')).toBe(true);
+        const screenError = attemptOf(outcome, 'labelled screen').error;
+        expect(screenError?.code).toBe('ASSERTION_FAILED');
+        expect(screenError?.message.startsWith('the page changed: expect.not.toHaveScreenshot failed\nno stored screenshot')).toBe(true);
       } finally {
         project.cleanup();
       }

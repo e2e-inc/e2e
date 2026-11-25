@@ -62,8 +62,10 @@ Android:
 ```
 
 A device target needs `bundleId`, `appPath`, or both. The engine installs
-nothing on its own. Call `device.installApp()` once per device, for example
-in a fixture every test takes. With no path, it installs `app.appPath`.
+nothing on its own. Call `device.installApp()` once per device, in a
+[worker fixture](/fixtures#share-a-fixture-across-a-worker) with
+[`auto: true`](/fixtures#run-a-fixture-for-every-test). With no path, it
+installs `app.appPath`.
 Without `bundleId`, `app.open()` launches the app the build installed.
 
 To run the suite in CI, see [Mobile jobs](/ci#mobile-jobs).
@@ -81,11 +83,19 @@ app: {
 ```
 
 - Launch arguments are the process arguments on iOS and `am start`
-  arguments on Android.
+  arguments on Android. An object names each argument, so `{ e2e: true }` is
+  `-e2e YES` on iOS and `--ez e2e true` on Android. See
+  [the reference](/reference/mobile#launch-arguments-and-permissions).
 - Permissions are set before the launch, so no system prompt appears.
   `app.clearState()` resets them with the data, then sets them again.
 - `deny` on iOS tells the app no without a prompt. On Android it revokes
   the permission, so the OS asks again.
+- `permissions: 'all'` grants every permission the platform can set: each
+  runtime permission the app declares on Android, and each privacy service
+  the runtime can set on an iOS simulator, with location `always`. Android
+  skips permissions it grants at install, such as `INTERNET`. The simulator
+  refuses to set notifications, so accept that prompt with
+  `device.alert('accept')`.
 - The warm-up before the run passes neither, so start each test with
   `app.open()`.
 - Arguments that select a build mode change what the app is. Give each mode
@@ -111,16 +121,19 @@ The device keeps its own language. Add one target per language:
   engine: mobile({ platform: 'ios' }),
   app: {
     bundleId: 'com.example.app',
-    launchArguments: ['-AppleLanguages', '(fr)', '-AppleLocale', 'fr_FR'],
+    launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR' },
   },
 }
 ```
 
+- As a list, the same launch is
+  `['-AppleLanguages', '(fr)', '-AppleLocale', 'fr_FR']`.
 - The app must ship the language. If it doesn't, iOS shows its development
   language.
-- Android has no launch argument for the language. On a hosted device, set
-  `language` and `locale` on `browserstack()` or `testmu()`. On a local
-  device, set the device's language before the run.
+- Android has no launch argument for the language. `AppleLanguages` or
+  `AppleLocale` in an object on an Android target fails at config load. On
+  a hosted device, set `language` and `locale` on `browserstack()` or
+  `testmu()`. On a local device, set the device's language before the run.
 
 ### Expo development builds
 
@@ -239,6 +252,9 @@ controls that `screen` queries can't name.
 const { app } = await device.installApp('./build/MyApp.app', { reinstall: true });
 await device.openApp(app);
 ```
+
+`device.uninstallApp(id)` removes an app and `device.isAppInstalled(id)`
+checks for one; without an id, both use the pinned app.
 
 `device.openApp` takes a bundle id, package, or display name, never a link.
 `device.openLink` opens a deep link or a web link into the pinned app, or
@@ -406,6 +422,17 @@ test('the list and the detail split across the fold', async ({ agent, app, devic
   await agent.assert('the list and the detail sit on either side of the fold', { vision: true });
 });
 ```
+
+An agent folds the device with the `fold` tool from `foldTools`. Add it to
+the agent's tools so `agent.act`, `e2e explore`, and the MCP server can fold
+and unfold the device. A pose the agent leaves carries over too, so keep the
+`afterEach` fold-back:
+
+```ts
+import { foldTools, mobileTools } from '@e2e-dev/mobile/tools';
+
+tools: { ...mobileTools(iphoneDuo), ...foldTools(iphoneDuo) },
+```
 </Accordion>
 
 ### Record a transition
@@ -465,8 +492,16 @@ mobile({ platform: 'ios', device: ['iPhone 17', 'iPhone 17 Pro'] })
 ```
 
 Without `device`, the engine uses booted devices, up to the worker limit.
-If none are booted, it boots a shut-down one: newest OS first, then name
-order. Two workers never drive the same device.
+A paired iPhone or iPad that is reachable (USB or network) counts as booted.
+If none are booted, it boots a shut-down one: on iOS an iPhone before an iPad
+before an Apple TV, on Android a phone or tablet before a TV, then the newest
+OS, then name order. Two workers never drive the same device.
+
+To run a target on another device for one run, pass the device's name, a
+simulator UDID, or an emulator serial with `--device`, and the target with
+`--target` when several selected targets can take a device:
+`e2e run --target iphone --device 'iPad Pro 13-inch (M5)'`.
+The run drives that one device, in place of the target's `device`.
 
 ## Agent tools
 
@@ -527,8 +562,8 @@ mobile({ platform: 'ios', device: 'QA iPhone' })
 Use the name, not the id. The engine reads a `device` string as an id only
 for a simulator UDID or an `emulator-<port>` serial. The first device with
 a matching name wins, so give each phone a unique name. Without `device`, a
-connected phone counts as booted and joins the pool beside booted
-simulators.
+paired iPhone or iPad that is reachable (USB or network), or a connected
+Android phone, counts as booted and joins the pool beside booted simulators.
 
 Set the phone up one time:
 
@@ -595,7 +630,8 @@ For [Expo Simulators](/integrations/eas), use `expoSimulators()` from
 `@e2e-dev/eas`. For [TestMu AI](/integrations/testmu), use `testmu()` from
 `@e2e-dev/testmu`. For [BrowserStack](/integrations/browserstack), use
 `browserstack()` from `@e2e-dev/browserstack`. For Android on [E2B](/integrations/e2b), use `e2b()` from
-`@e2e-dev/e2b`. For another service, write a provider of a few dozen lines,
+`@e2e-dev/e2b`. For [Revyl](/integrations/revyl), use `revyl()` from
+`@e2e-dev/revyl`. For another service, write a provider of a few dozen lines,
 such as `hostedDevices` in the example below:
 
 ```ts
@@ -648,6 +684,8 @@ an interrupt `signal`, and a `log` that reaches the reporter.
 - A target with nothing to run leases nothing.
 - Set `installedApp` only when the request has an `appPath`. Otherwise the
   run fails.
+- To install the request's `appPath` through the lease's daemon, return
+  `installLeasedApp(request, lease)` from `@e2e-dev/mobile/lease`.
 
 **`release`** runs after the last worker exits, within `cleanupTimeout`, on
 every exit path: a failure, an interrupt, or a `prepare` that threw. It gets
@@ -740,8 +778,14 @@ agent-device daemon per worker slot with the credentials in `env`, allocates
 a lease with the `selectors`, keeps it alive while the run holds it, and on
 release fails unless agent-device confirms the session ended. `testmu()`
 from `@e2e-dev/testmu` works this way for [TestMu AI](/integrations/testmu),
-and `browserstack()` from `@e2e-dev/browserstack` for
-[BrowserStack](/integrations/browserstack).
+`browserstack()` from `@e2e-dev/browserstack` for
+[BrowserStack](/integrations/browserstack), and `revyl()` from
+`@e2e-dev/revyl` for [Revyl](/integrations/revyl).
+
+When the cloud needs an agent-device provider plugin, depend on it and pass
+`agentDevicePlugin(import.meta.resolve('@agent-device/<plugin>'))`: call its
+`assertVersion(request.agentDeviceVersion)` in `acquire`, and pass its
+`prepareHome` with the lease, which registers the plugin in the daemon's home.
 
 ```ts title="device-cloud-provider.ts" expandable
 import type { DeviceProvider } from '@e2e-dev/mobile';
@@ -777,7 +821,7 @@ export function cloudDevices(options: { provider: string; device: string; osVers
 
 | On the web | On a device |
 | --- | --- |
-| `app.open('/path')` and the agent's `navigate` verb | No app URL and no `navigate`. `app.open()` launches `app.bundleId` fresh, and `device.openLink(url)` opens a link into it |
+| `app.open('/path')` and the agent's `navigate` verb | No app URL and no `navigate`. `app.open()` launches `app.bundleId` fresh, and `device.openLink(url)` opens a link into it. With [`app.linkBase`](/reference/config#linkbase), `app.open('/path')` opens the path as a link |
 | `test.setup` saves a session, `session:` restores it | Not available. A simulator has no portable session snapshot; sign in per test or seed the app |
 | Secret input | `type_secret` and `screen.getByLabel(...).fill(secret)` fill declared secrets into secure fields |
 | `--video` writes a WebM screencast | `--video` writes an MP4 of the device screen with taps shown (`videoTouches: false` hides them), or keeps a device provider's own recording |
@@ -806,8 +850,8 @@ export function cloudDevices(options: { provider: string; device: string; osVers
   nodes, and a tap on one fails with `ACTION_FAILED`. Call
   `device.dismissKeyboard()` or scroll the node clear first. See
   [Visibility](/reference/mobile#visibility).
-- `doubleTap()` on iOS is two taps about 285 ms apart. Give a double-tap
-  detector a window of 350 ms or more.
+- `doubleTap()` and `screen.doubleTapAt()` on iOS are two taps about 285 to
+  335 ms apart. Give a double-tap detector a window of 350 ms or more.
 - On iOS, `device.foregroundApp()` still names the session's app after
   `device.home()`. Check the screen instead.
 - On an Android build with no shell command for the clipboard service (the

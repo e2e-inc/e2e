@@ -12,7 +12,7 @@ import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeAll, afterAll, describe, expect, it } from 'vitest';
-import type { EngineFixtureContext, EngineHandle, OperationContext } from 'e2e/engine';
+import type { EngineFixtureContext, EngineHandle, OperationContext } from '@e2e-dev/core/engine';
 import { web as webEngine, surfaceOf, type BrowserProvider, type BrowserProviderScope, type Browser } from '../../src/index.ts';
 import { closeRemoteChrome, launchRemoteChrome, type RemoteChrome } from '../helpers/cdp-host.ts';
 import { startFixtureApp, type FixtureApp } from '../helpers/fixture-app.ts';
@@ -56,7 +56,7 @@ describe.each<BrowserProviderScope>(['worker', 'attempt'])('downloads through a 
     artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-provider-downloads-'));
     remoteDisk = mkdtempSync(path.join(tmpdir(), 'e2e-browser-disk-'));
     chrome = await launchRemoteChrome();
-    const reads: { lease: string; file: string }[] = [];
+    const reads: { lease: string; file: string; suggestedFilename: string | undefined }[] = [];
     const provider: BrowserProvider = {
       name: 'toy-remote',
       scope,
@@ -64,8 +64,8 @@ describe.each<BrowserProviderScope>(['worker', 'attempt'])('downloads through a 
       release: async () => undefined,
       downloads: {
         dir: path.join(remoteDisk, 'downloads'),
-        async read(lease, file) {
-          reads.push({ lease: lease.id, file });
+        async read(lease, file, { suggestedFilename }) {
+          reads.push({ lease: lease.id, file, suggestedFilename });
           return readFile(file);
         },
       },
@@ -118,6 +118,7 @@ describe.each<BrowserProviderScope>(['worker', 'attempt'])('downloads through a 
     }
     expect(attached).toEqual(files.map(file => file.path));
     expect(reads).toHaveLength(count);
+    expect(reads.map(read => read.suggestedFilename).toSorted()).toEqual(Array.from({ length: count }, (_, index) => `report-${index}.txt`).toSorted());
     expect(reads.every(read => read.lease === 'lease-1')).toBe(true);
     expect(reads.every(read => path.dirname(read.file) === path.join(remoteDisk!, 'downloads'))).toBe(true);
     expect(readdirSync(path.join(remoteDisk, 'downloads')).toSorted()).toEqual(reads.map(read => path.basename(read.file)).toSorted());

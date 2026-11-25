@@ -3,26 +3,26 @@
 import path from 'node:path';
 import type { Collection } from '../collect/collect.ts';
 import { select, type Selection, type SelectionFilters, type TestExclusion, type TestTargetPair } from '../collect/select.ts';
-import type { ResolvedConfig } from '../config/resolve.ts';
-import { describeValue } from '../config/validate.ts';
-import { leaveWorkBehind } from '../internal/abandoned.ts';
-import { E2EError, errorMessage } from '../internal/errors.ts';
-import { isPlainObject } from '../internal/options.ts';
-import { onDiskPath } from '../internal/paths.ts';
-import { collapseText } from '../internal/text.ts';
-import { budgetText, withAbort } from '../internal/time.ts';
+import type { ResolvedRunConfig } from '../config/resolve-run.ts';
+import { describeValue } from '@e2e-dev/core/lib/config/validate';
+import { leaveWorkBehind } from '@e2e-dev/core/lib/internal/abandoned';
+import { E2EError, errorMessage } from '@e2e-dev/core/lib/internal/errors';
+import { isPlainObject } from '@e2e-dev/core/lib/internal/options';
+import { onDiskPath } from '@e2e-dev/core/lib/internal/paths';
+import { collapseText } from '@e2e-dev/core/lib/internal/text';
+import { budgetText, withAbort } from '@e2e-dev/core/lib/internal/time';
 import { compareTests, type FilterOutcome, type ReportChanges, type ReportFilter } from '../report/build.ts';
 import { ellipsize, filterDecision, shortCommit } from '../report/format.ts';
 import { plural } from '../report/markdown-text.ts';
 import { leftOutTests } from '../report/left-out.ts';
-import type { TestFilter, TestFilterCandidate, TestFilterChanges, TestFilterContext } from '../types.ts';
+import type { TestFilter, TestFilterCandidate, TestFilterChanges, TestFilterContext } from '../run-types.ts';
 import { findChanges } from './changes.ts';
-import { staticSecretLedger } from './secrecy.ts';
+import { staticOutputLedger } from '@e2e-dev/core/lib/run/secrecy';
 import { relevanceBand } from './units.ts';
 
 /** What `filterSelection` judges a selection with, and where each line about what the gate and the filters decided goes. */
 export interface FilterSelectionOptions {
-  readonly config: ResolvedConfig;
+  readonly config: ResolvedRunConfig;
   /** The base ref `--changed-since` named. */
   readonly changedSince: string;
   readonly signal: AbortSignal;
@@ -60,7 +60,7 @@ export interface TestFilterScope {
   readonly changes: TestFilterChanges;
   /** The loaded config file relative to `changes.root`, POSIX; none for a config object. */
   readonly configFile: string | undefined;
-  readonly secrets: ResolvedConfig['allSecrets'];
+  readonly secrets: ResolvedRunConfig['allSecrets'];
   /** The id of every collected test, setup tests included: an `exclude` naming one a filter was not given is ignored, since that test's fate is settled. */
   readonly collectedIds: ReadonlySet<string>;
   /** How long each filter call may take before the run stops waiting for it. */
@@ -205,8 +205,7 @@ export function rankingNotice(selection: Selection, relevance: ReadonlyMap<strin
  * The tests a filter may leave out: one frozen candidate per ordinary test
  * with at least one pair the selection runs, in report order, with the file
  * of the setup test that saves its session when it uses one. Setup tests,
- * explicit and capability skips, and tests filtered on every target are
- * never candidates.
+ * explicit skips, and tests filtered on every target are never candidates.
  */
 export function filterCandidates(selection: Selection): readonly TestFilterCandidate[] {
   const producers = new Map<string, string>();
@@ -287,7 +286,7 @@ export async function applyTestFilters(
  */
 async function callFilter(filter: TestFilter, input: readonly TestFilterCandidate[], scope: TestFilterScope): Promise<FilterCall> {
   const { name } = filter;
-  const { redact, redactFragments } = staticSecretLedger(scope.secrets);
+  const { redact, redactFragments } = staticOutputLedger(scope.secrets);
   const interrupted = new E2EError('interrupted', 'INTERRUPTED', `interrupted while filter ${JSON.stringify(name)} ran`);
   if (scope.signal.aborted) throw interrupted;
   const budget = budgetText(scope.timeoutMs);

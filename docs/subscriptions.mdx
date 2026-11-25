@@ -13,7 +13,7 @@ the plan's model in `e2e.config.ts`.
 | ChatGPT Plus or Pro | `npx e2e login openai` |
 | GitHub Copilot | `npx e2e login github-copilot` |
 | OpenCode Console (OpenCode Zen and OpenCode Go) | `npx e2e login opencode-console` |
-| SuperGrok or X Premium+ | `npx e2e login spacexai` |
+| SuperGrok or X Premium+ | `npx e2e login spacexsi` |
 | Claude Max or Team (Claude Code) | API key, paid from the plan's monthly API credits, not its usage limits |
 | Claude Code or Codex login | [Run steps on your coding agent](#use-your-coding-agent) |
 
@@ -109,17 +109,17 @@ limits the request to 4096 tokens and only warns.
 <CodeGroup>
 ```bash npm
 npm install -D ai @ai-sdk/xai
-npx e2e login spacexai
+npx e2e login spacexsi
 ```
 
 ```bash pnpm
 pnpm add -D ai @ai-sdk/xai
-pnpm exec e2e login spacexai
+pnpm exec e2e login spacexsi
 ```
 
 ```bash bun
 bun add -d ai @ai-sdk/xai
-bunx e2e login spacexai
+bunx e2e login spacexsi
 ```
 </CodeGroup>
 
@@ -132,7 +132,7 @@ const agent = { model: grok('grok-4') };
   <Tab title="Claude Max or Team">
 Claude plans have no sign-in for other apps. To run agent steps on Claude
 Code itself, with its own login, see [your coding agent](#use-your-coding-agent). To use the
-plan's API credits in a new project, select `None` for the model gateway in
+plan's API credits in a new project, select **Skip for now** for the model in
 `e2e init`. Then:
 
 1. In claude.ai, link a Claude Console organization. On Max, go to
@@ -227,6 +227,11 @@ the `npx e2e login <provider>` command to run. See the
 
 Model-call cancellation also applies while waiting for a token refresh.
 
+When a login saved with `npx e2e login` expires, parallel workers refresh it
+once between them. A worker waits up to 30 seconds for another worker's
+refresh. After that its step fails with `MODEL_PROVIDER_FAILED`, unless the
+step's own timeout ends it first, as `STEP_TIMEOUT`.
+
 ## CI
 
 Use API keys in CI. Claude Max or Team already uses one. For OpenCode
@@ -281,7 +286,19 @@ export default {
 ```
   </Tab>
   <Tab title="Codex">
-Install the package and the Codex adapter. Sign in with `codex login`.
+Install the package and the Codex adapter. Sign in with `codex login`, or
+set `OPENAI_API_KEY`: when Codex has no login, `codex()` signs it in with the
+first nonblank of `CODEX_API_KEY` and `OPENAI_API_KEY`, unless you set a
+nonblank `DEFAULT_AUTH_REQUEST`. Codex saves the key as its login, like
+`codex login --with-api-key` (in `CODEX_HOME/auth.json` with the default
+credential store, nowhere with `ephemeral`), and keeps it until
+`codex logout`. While `APP_SERVER_LOGS` is set, `codex()` passes no sign-in
+request, yours included, since the adapter's log would write credentials in
+plain text; a saved login still works. A variable in `codex({ env })`
+replaces the environment's, so `env: { OPENAI_API_KEY: '' }` keeps a key you
+set for the app under test away from Codex. Start the first sessions on a new
+`CODEX_HOME` one at a time: several at once often fail with
+`failed to initialize sqlite state runtime`.
 
 <CodeGroup>
 ```bash npm
@@ -342,7 +359,8 @@ Each preset also turns off the agent's own tools that run without asking:
   no MCP servers but the step tools, no saved session, and no bypass of
   permission prompts.
 - **Codex**: read-only mode, no shell, web search, apps, plugins, browser,
-  or computer use. Every MCP server from your Codex config is off for these
+  or computer use, and no shell snapshots, which would copy your environment,
+  keys included, to disk. Every MCP server from your Codex config is off for these
   sessions only. Codex can still start a subagent, which fails the step like
   any tool of its own.
 

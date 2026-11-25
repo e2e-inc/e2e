@@ -15,10 +15,12 @@
  * Exits 1 listing every broken link.
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import slugify, { slugifyWithCounter } from '@sindresorhus/slugify';
+import { DOCS_LANGUAGES } from './docs-languages.ts';
+import { pages } from './docs-pages.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DOCS = join(ROOT, 'docs');
@@ -34,15 +36,6 @@ const FILE = /\.[a-z0-9]+$/i;
 interface DocsJson {
   navigation: { tabs: { pages?: string[]; groups?: { pages: string[] }[] }[] };
   redirects?: { source: string; destination: string }[];
-}
-
-/** Every `.mdx` page under `dir`, skipping `node_modules`. */
-function pages(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) return entry.name === 'node_modules' ? [] : pages(path);
-    return entry.name.endsWith('.mdx') ? [path] : [];
-  });
 }
 
 /**
@@ -131,6 +124,19 @@ function pageFor(path: string): string | undefined {
   return [`${base}.mdx`, join(base, 'index.mdx')].find((candidate) => existsSync(candidate));
 }
 
+/**
+ * The English page a translation (`docs/ja/quickstart.mdx`) translates, or
+ * the page itself. The site gives a translation the English page's ids, so
+ * a translation's same-page anchors are checked against the English page.
+ */
+function englishPage(page: string): string {
+  const [language, ...rest] = relative(DOCS, page).split(sep);
+  if (language === undefined || !DOCS_LANGUAGES.includes(language)) return page;
+  // A translation whose English page is gone: check-docs-translations.ts reports it.
+  const english = join(DOCS, ...rest);
+  return existsSync(english) ? english : page;
+}
+
 const all = pages(DOCS);
 const cache = new Map<string, Set<string>>();
 /** Anchors of one page, read once. */
@@ -153,7 +159,7 @@ for (const page of all) {
     for (const match of text.matchAll(LINK)) {
       const path = match[1] ?? match[3] ?? '';
       const anchor = decode(match[2] ?? match[4] ?? '');
-      const target = path === '' ? page : pageFor(path);
+      const target = path === '' ? englishPage(page) : pageFor(path);
       if (!target) continue;
       checked++;
       if (!anchorsOf(target).has(anchor)) {

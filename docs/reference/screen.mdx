@@ -124,7 +124,10 @@ Names follow the same rules:
   item, option, checkbox, radio, switch, cell, row or column header, row, tree
   item, tooltip) takes its name from its descendants, a custom element's
   shadow tree included. So `getByRole('checkbox', { name })` and
-  `toHaveAccessibleName(name)` agree on a `<div role="checkbox">`.
+  `toHaveAccessibleName(name)` agree on a `<div role="checkbox">`. A
+  descendant with a role of its own that is not text or structure (a `status`
+  badge, a tree item's child `group`, an `img`) adds only its label or
+  `title`: a tab holding `Inbox <span role="status">3</span>` is `Inbox`.
 - An `<input type="submit">` or `type="reset"` with no `value` reads `Submit`
   or `Reset`.
 
@@ -264,7 +267,13 @@ await screen.getByTestId('memory-list', { visible: true }).getByRole('listitem')
 and `waitFor()`: what renders, as Playwright reads it.
 
 - Hidden: `display: none`, `visibility: hidden`, a box with no size, a closed
-  `<details>` body, and content under `content-visibility: hidden`.
+  `<details>` body, shadow and slotted content included, and content under
+  `content-visibility: hidden`.
+- Not hidden: a closed `<details>` body the page's CSS shows through
+  `::details-content`, and content under `content-visibility: hidden` set on an
+  element whose box does not skip it (`display: contents`, an inline element,
+  a table, a table row, ruby). An inline `<svg>`, `<button>`, or `<fieldset>`
+  makes a box of its own, so content under one still reads hidden.
 - Not hidden: `aria-hidden`, since a decorative spinner marked with it still
   paints, so `toBeHidden()` on one waits until it leaves.
 - A child that sets `visibility: visible` under a hidden parent is visible.
@@ -387,16 +396,21 @@ await screen.getByRole('row').nth(2).getByRole('checkbox').check();
 Use it for a pin on a canvas or a control the tree does not list.
 
 ```ts
-/** Taps a viewport point, with no node behind it. */
-tapAt(point: Point, options?: ActionOptions): Promise<void>;
+/** Taps a viewport point, in pixels or percentages, with no node behind it. */
+tapAt(point: ScreenPoint, options?: ActionOptions): Promise<void>;
 ```
 
 ```ts
 const map = (await screen.getByRole('image', 'Map').boundingBox())!;
 await screen.tapAt({ x: map.x + 360, y: map.y + 70 });
+
+await screen.tapAt({ x: '50%', y: '50%' });
 ```
 
-- The point is in CSS pixels, the space `boundingBox()` reports in.
+- Each coordinate is CSS pixels, the space `boundingBox()` reports in, or a
+  percentage of the viewport from `'0%'` through `'100%'`, rounded to the
+  nearest pixel (`'100%'` is the last one). They may mix: `{ x: '50%', y: 120 }`.
+- A percentage reads the screen once for its size.
 - Nothing is resolved or waited for; the page decides what the tap lands on.
 - Uses `config.actionTimeout`.
 - Prefer a locator when the tree lists the control, since a point moves with
@@ -405,7 +419,7 @@ await screen.tapAt({ x: map.x + 360, y: map.y + 70 });
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | A negative or non-finite coordinate. |
+| `INVALID_ARGUMENT` | A negative or non-finite coordinate, or a string that is not a percentage from `'0%'` through `'100%'`. |
 | `UNSUPPORTED_CAPABILITY` | The engine does not list `tap` in its pointer actions. |
 
 <Note>
@@ -417,21 +431,22 @@ await screen.tapAt({ x: map.x + 360, y: map.y + 70 });
 Use it to double-tap a viewport point when the tree does not list the target.
 
 ```ts
-/** Double-taps a viewport point, with no node behind it. */
-doubleTapAt(point: Point, options?: ActionOptions): Promise<void>;
+/** Double-taps a viewport point, in pixels or percentages, with no node behind it. */
+doubleTapAt(point: ScreenPoint, options?: ActionOptions): Promise<void>;
 ```
 
 ```ts
 await screen.doubleTapAt({ x: 120, y: 240 }, { timeout: 1_000 });
 ```
 
-- Use viewport coordinates in the same units as `boundingBox()`.
+- Takes a `ScreenPoint`, pixels or percentages, as [`tapAt`](#screen-tapat) does.
 - The page or device decides what receives the gesture. On web, this sends a primary-button double-click.
+- On a device, this sends two presses at the point, as `doubleTap()` does on a node. See [Known device limitations](/mobile#known-device-limitations) for their timing on iOS.
 - Defaults to `config.actionTimeout`.
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | A negative or non-finite coordinate, or an unknown option. |
+| `INVALID_ARGUMENT` | A negative or non-finite coordinate, a string that is not a percentage from `'0%'` through `'100%'`, or an unknown option. |
 | `UNSUPPORTED_CAPABILITY` | The engine does not list `doubleTap` in its pointer actions. |
 
 <Note>
@@ -454,6 +469,8 @@ await screen.swipe({
   to: { x: row.x + 10, y: row.y + row.height / 2 },
   duration: 300,
 });
+
+await screen.swipe({ from: { x: '50%', y: '80%' }, to: { x: '50%', y: '20%' } });
 ```
 
 `{ direction, momentum? }` is a scroll gesture on the screen:
@@ -469,6 +486,8 @@ points: a touch swipe on a device, a pointer drag on a document platform.
 Use it to reveal a row action, dismiss a sheet, or drag a card between
 columns.
 
+- `from` and `to` are `ScreenPoint`s, pixels or percentages, as
+  [`tapAt`](#screen-tapat) takes.
 - `duration` is how long the gesture takes, an integer from 16 through
   10000 ms. Omitted, it is the engine's default.
 
@@ -477,7 +496,7 @@ Uses `config.actionTimeout` and takes no `timeout` option.
 | Throws | When |
 | --- | --- |
 | `ACTION_FAILED` | The gesture is rejected. |
-| `INVALID_ARGUMENT` | A mix of the two shapes, an out-of-range duration, a coordinate off the plane, or a `timeout` key. |
+| `INVALID_ARGUMENT` | A mix of the two shapes, an out-of-range duration, a coordinate off the plane or not a percentage from `'0%'` through `'100%'`, or a `timeout` key. |
 | `UNSUPPORTED_CAPABILITY` | The engine does not list `swipe` in its actions (a direction) or `swipeTo` in its pointer actions (a path). |
 
 #### `screen.scrollUntilVisible`
@@ -529,10 +548,11 @@ await screen.getByTestId('feed').scrollUntilVisible(row);
 | --- | --- |
 | [`screen.tree`](#screen-tree) | `Promise<string>` |
 | [`screen.debug`](#screen-debug) | `Promise<void>` |
+| [`screen.pause`](#screen-pause) | `Promise<void>` |
 
-Both read the whole screen once, without waiting, and work on every engine.
-They run as a step. A locator does not have them, and a frame throws
-`INVALID_ARGUMENT`.
+`tree` and `debug` read the whole screen once, without waiting, and work on
+every engine. They run as a step. A locator does not have them, and a frame
+throws `INVALID_ARGUMENT`.
 
 #### `screen.tree`
 
@@ -576,6 +596,50 @@ debug(options?: ActionOptions): Promise<void>;
 await screen.debug();
 ```
 
+#### `screen.pause`
+
+The test is paused at this line, with the app open, until it is resumed.
+See [Pause a test](/debugging#pause-a-test) for the keys and commands.
+Use the pause ID to [attach over MCP](/reference/mcp#attaching-to-a-held-test).
+
+```ts
+/**
+ * Pauses the test at this line, with the app open, until it is resumed with
+ * Enter in the terminal or with `e2e run --step next` from another shell in
+ * the same directory. In `e2e run`, the test is paused each time the line
+ * runs. Paused time doesn't count toward the test's timeout. Call it with
+ * `await` on `screen`, between steps in fixture setup, a `beforeEach` hook,
+ * or the test body. Anywhere else, or with `CI` set, the test isn't paused
+ * and the call fails.
+ */
+pause(): Promise<void>;
+```
+
+```ts
+await screen.pause();
+```
+
+- The test is paused on every attempt, retries and setup tests included.
+- In a `--step` run, the test is still paused at `screen.pause()` after
+  `n`, `a`, or `e2e run --step rest`.
+- Paused time doesn't count toward any timeout.
+- A test isn't paused in a session that an [MCP](/mcp-server)
+  `open_session {test}` opens, in a program on `@e2e-dev/core` or
+  `openHost`, or in `run()` from `e2e/runner`. With `CI` set, the test still
+  fails with `PAUSE_UNAVAILABLE` in `run()`, as in `e2e run`.
+- In `e2e run --watch`, only the current run is cancelled when `q` is pressed
+  at a pause or `e2e run --step stop` is run.
+- A locator doesn't have it.
+
+| Throws | When |
+| --- | --- |
+| `PAUSE_UNAVAILABLE` | `CI` is set. Remove the call before you commit, or run the test with `e2e run` in a terminal. A call where a pause isn't allowed fails with its error below instead. |
+| `INVALID_ARGUMENT` | It is called on a locator or a frame, in an [`afterEach`](/reference/test#aftereach) hook, a fixture teardown, or unawaited code that runs after the body returned. Call it on `screen`, between steps in fixture setup, a `beforeEach` hook, or the test body. |
+| `ACTION_FAILED` | It is called inside an agent step, such as an [`onAction`](/reference/agent#agent-act) hook or a [custom executor](/executors). The step fails with the pause's message, and the test isn't paused. In a [project tool](/tools) on the built-in agent, the refusal goes back to the model as a failed tool result and the step continues. Call it between steps instead. |
+| `ASSERTION_FAILED` | It is called inside an [`expect.poll`](/reference/expect#polling-a-value) read. The read is retried until the poll times out. Call it outside the read. |
+| `STEP_NOT_AWAITED` | The test body returns while a `screen.pause()` it did not await is still waiting. The test fails at the pause's line. Put `await` in front of the call. |
+| `RUNNER_BUSY` | The run doesn't have a terminal, and another run in the directory is already controlled with `e2e run --step`. End that run with `e2e run --step stop`, or run this test in a terminal. Once the other run has ended, a test is paused at the next `screen.pause()` in this run. |
+
 ### Locator actions
 
 | Method | Returns |
@@ -594,6 +658,7 @@ await screen.debug();
 | [`uncheck`](#uncheck) | `Promise<void>` |
 | [`selectOption`](#selectoption) | `Promise<void>` |
 | [`focus`](#focus) | `Promise<void>` |
+| [`blur`](#blur) | `Promise<void>` |
 | [`hover`](#hover) | `Promise<void>` |
 | [`setInputFiles`](#setinputfiles) | `Promise<void>` |
 | [`dragTo`](#dragto) | `Promise<void>` |
@@ -618,7 +683,7 @@ action takes only the options its signature names.
 #### `tap`
 
 ```ts
-/** Taps exactly one matching actionable node; with `position`, taps that point of its box once it is in view, with no other actionability check. */
+/** Taps exactly one matching actionable node, `count` times in a row; with `position`, taps that point of its box once it is in view, with no other actionability check. */
 tap(options?: TapOptions): Promise<void>;
 /** Alias of tap. */
 click(options?: TapOptions): Promise<void>;
@@ -628,10 +693,17 @@ click(options?: TapOptions): Promise<void>;
 await screen.getByRole('button', 'Save').tap({ timeout: 10_000 });
 await screen.getByRole('image', 'Seat map').tap({ position: { x: 120, y: 48 } });
 await row.click({ modifiers: ['Shift'] });
+await screen.getByText('Shipping address').tap({ count: 3 });
 ```
 
 The options are [`TapOptions`](#types):
 
+- `count`: how many taps in a row, a positive safe integer, default 1. In a
+  browser the clicks arrive as one multi-click, so a triple click selects a
+  paragraph. On a device they are `count` presses at the `doubleTap` cadence.
+  `count: 2` is the same action as [`doubleTap()`](#doubletap). Three or more
+  need an engine that lists the `multiTap` action; the browser and mobile
+  engines both do.
 - `modifiers`: the browser engine holds them.
 - `position`: an offset from the node's top-left corner, inside its border,
   in CSS pixels. The engine scrolls the node into view when it lists
@@ -641,8 +713,9 @@ The options are [`TapOptions`](#types):
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | An unknown or repeated modifier, or `modifiers` beside `position`. |
+| `INVALID_ARGUMENT` | An unknown or repeated modifier, `modifiers` beside `position`, a `count` that is not a positive safe integer, or a `count` above 1 beside `position`. |
 | `UNSUPPORTED_CAPABILITY` | `modifiers` on an engine that does not declare `tapModifiers`, the mobile engine among them; thrown before it acts. |
+| `UNSUPPORTED_CAPABILITY` | A `count` of 3 or more on an engine without the `multiTap` action, or above the engine's limit (200 on the mobile engine); thrown before it acts. |
 | `UNSUPPORTED_CAPABILITY` | `position` on an engine without the `tap` pointer action. |
 | `ACTION_FAILED` | `position` on a node the browser engine cannot bring into view; its scroll waits for visibility. Other engines fail as they report it. |
 | `LOCATOR_NOT_FOUND` | `position` on a node that resolves but never shows a visible box within the timeout. |
@@ -840,6 +913,19 @@ focus(options?: ActionOptions): Promise<void>;
 await screen.getByLabel('Email').focus();
 ```
 
+#### `blur`
+
+```ts
+/** Removes focus from exactly one node if it is focused. */
+blur(options?: ActionOptions): Promise<void>;
+```
+
+Web only. If the matched node already lacks focus, this has no effect.
+
+```ts
+await screen.getByLabel('Email').blur();
+```
+
 #### `hover`
 
 ```ts
@@ -854,21 +940,24 @@ await screen.getByRole('button', 'Account').hover();
 #### `setInputFiles`
 
 ```ts
-/** Sets the files of exactly one file input, or of a control that opens a file chooser; paths resolve from the project root, and an empty array clears the input. */
-setInputFiles(paths: string | readonly string[], options?: ActionOptions): Promise<void>;
+/** Sets the files of exactly one file input, or of a control that opens a file chooser; paths resolve from the project root, payloads supply bytes in memory, and an empty array clears the input. */
+setInputFiles(files: string | readonly string[] | FilePayload | readonly FilePayload[], options?: ActionOptions): Promise<void>;
 ```
 
 ```ts
 await screen.getByLabel('Receipt').setInputFiles('fixtures/receipt.pdf');
+await screen.getByLabel('Receipt').setInputFiles({
+  name: 'receipt.txt', mimeType: 'text/plain', buffer: Buffer.from('Receipt total: 12.00'),
+});
 await screen.getByLabel('Receipt').setInputFiles([]);
 ```
 
-Web only. An empty array clears the input and fires `input` and `change`. It also takes a button that opens a file chooser.
+Web only. Pass a plain object with only the fields of `FilePayload`: `name: string`, `mimeType: string`, and `buffer: Buffer`. Pass one payload or an array of payloads; do not mix paths and payloads in an array. The combined payload size must be less than 50 MiB. For larger files, use a path if the target supports transferring files of that size. An empty array clears the input and fires `input` and `change`. A button that opens a file chooser accepts the same inputs.
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | A blank path. |
-| `UNSUPPORTED_CAPABILITY` | On a device, which has no file input. |
+| `INVALID_ARGUMENT` | A blank or missing path, a path under a directory the runner cannot search, an invalid payload, mixed paths and payloads, or payloads totaling 50 MiB or more. |
+| `UNSUPPORTED_CAPABILITY` | On a device, or for payloads on an engine that does not declare `setInputFilePayloads`. |
 | `ACTION_FAILED` | A button that opens no file chooser. |
 
 #### `dragTo`
@@ -925,6 +1014,7 @@ defines them, plus `timeout`, which `screen.swipe` refuses. It has no
 | [`isDisabled`](#isdisabled) | `Promise<boolean>` |
 | [`isChecked`](#ischecked) | `Promise<boolean>` |
 | [`boundingBox`](#boundingbox) | `Promise<{ x, y, width, height } \| null>` |
+| [`screenshot`](#screenshot) | `Promise<string>` |
 | [`count`](#count) | `Promise<number>` |
 | [`all`](#all) | `Promise<Locator[]>` |
 | [`allTextContents`](#alltextcontents) | `Promise<string[]>` |
@@ -936,7 +1026,8 @@ Reads follow the [Match rules](#match-rules). `count`, `all`, and
 On a secure field, `textContent`, `inputValue`, `getAttribute`, and
 `allTextContents` throw `POLICY_DENIED`, as the matching
 [`expect` matchers](/reference/expect#secure-fields) do. `isEnabled`,
-`isDisabled`, `isChecked`, and `boundingBox` are allowed there.
+`isDisabled`, `isChecked`, and `boundingBox` are allowed there, and
+`screenshot` masks the field.
 
 #### `textContent`
 
@@ -971,6 +1062,10 @@ const email = await screen.getByLabel('Email').inputValue();
 On a checkbox or radio, `inputValue()` and `toHaveValue` read its value
 attribute, `on` when it has none, whatever its checked state. `isChecked()`
 reads the state.
+
+`inputValue()` reads a range widget as
+[`toHaveValue`](/reference/expect#tohavevalue) does. Playwright's
+`inputValue()` throws on an ARIA widget.
 
 | Throws | When |
 | --- | --- |
@@ -1086,6 +1181,41 @@ The box is in CSS pixels, and on a device in points (physical pixels on
 Android). It is `null` for a node that lays out no box
 (`display: none` on it or an ancestor). A `visibility: hidden` node keeps
 its box.
+
+#### `screenshot`
+
+```ts
+/**
+ * Captures a redacted screenshot of the one match and returns its absolute
+ * path. The match is scrolled into view first; one larger than the viewport
+ * keeps the part inside it.
+ */
+screenshot(label?: string): Promise<string>;
+```
+
+```ts
+const card = await screen.getByTestId('order-summary').screenshot('summary');
+```
+
+- The file is what [`app.screenshot`](/reference/app#screenshot) saves, cut
+  to the match's box: an attempt artifact under `screenshots/`, with the
+  same masking and the same pixel density.
+- `label` joins the step's name and the file name.
+- It waits until the match is visible, and its box and the viewport hold
+  still across the capture. A match the page moves out of the viewport is
+  scrolled back.
+- The engine's screenshot has to be a PNG of the viewport, as the web,
+  mobile, and desktop engines' are.
+- The `list` reporter names the file in its `Screenshots` row.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_ARGUMENT` | A `label` that is not a string. |
+| `LOCATOR_NOT_FOUND` | No visible match within the action timeout, one that kept moving, or one outside the viewport on an engine that cannot scroll to it. |
+| `LOCATOR_AMBIGUOUS` | More than one match. |
+| `ACTION_FAILED`, `ENGINE_FAILURE` | The scroll or the capture failed or timed out, as on a web match that never stops animating. |
+| `UNSUPPORTED_CAPABILITY` | The engine takes no screenshots, or writes one that is not a PNG. |
+| `POLICY_DENIED` | On iOS and Android, a secure field on screen has no bounds to mask. |
 
 #### `count`
 
@@ -1331,9 +1461,9 @@ export interface SwipeOptions {
 /** A swipe along a path between two viewport points: a touch swipe on a device, a pointer drag on a document platform. */
 export interface SwipePathOptions {
   /** Where the finger goes down. */
-  from: Point;
+  from: ScreenPoint;
   /** Where it lifts. */
-  to: Point;
+  to: ScreenPoint;
   /** Gesture duration, an integer from 16 through 10000 ms; omitted = the engine's default. */
   duration?: number;
   direction?: never;
@@ -1341,12 +1471,21 @@ export interface SwipePathOptions {
 }
 
 /**
- * A point in CSS pixels. For `screen.tapAt`, `screen.doubleTapAt`, and `screen.swipe` the origin is
- * the viewport's top-left corner, the space `boundingBox()` reports in; for
- * `tap({ position })` it is the node's own top-left corner, inside its
- * border on a document platform.
+ * A point in CSS pixels. For `tap({ position })` the origin is the node's own
+ * top-left corner, inside its border on a document platform. A `Point` is
+ * also a `ScreenPoint`, whose origin is the viewport's top-left corner, the
+ * space `boundingBox()` reports in.
  */
 export type Point = ViewportPoint; // { x: number; y: number }
+
+/** CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`), `'0%'` through `'100%'`. */
+export type ScreenCoordinate = number | `${number}%`;
+
+/** A viewport point in pixels, percentages, or both: `{ x: '50%', y: 120 }`. */
+export interface ScreenPoint {
+  readonly x: ScreenCoordinate;
+  readonly y: ScreenCoordinate;
+}
 
 /** `tap`, `click`, `doubleTap`, `dblclick`, and `secondaryTap` options: the action timeout and the keys held for the click. */
 export interface ClickOptions extends ActionOptions {
@@ -1372,6 +1511,14 @@ export interface TapOptions extends ClickOptions {
    * a box, which needs the engine's `tap` pointer action.
    */
   position?: Point;
+  /**
+   * How many taps in a row, a positive safe integer, default 1. `2` is the
+   * same as `doubleTap()`; 3 or more needs an engine that declares the
+   * `multiTap` action, `UNSUPPORTED_CAPABILITY` otherwise. A count above the
+   * engine's own limit (200 on the mobile engine) is also
+   * `UNSUPPORTED_CAPABILITY`. A count above 1 is not combined with `position`.
+   */
+  count?: number;
 }
 
 /** One option of a select: its label (a bare string too), its `value` attribute, or its zero-based index. */

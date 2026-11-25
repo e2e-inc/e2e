@@ -1,0 +1,332 @@
+---
+title: क्विकस्टार्ट
+description: अपने कोडिंग एजेंट को एक प्रॉम्प्ट देकर e2e सेट अप करें, या खुद स्टेप-बाय-स्टेप।
+"og:image": "https://e2e.com/docs/images/og/quickstart.png?v=4a3569d569"
+"twitter:image": "https://e2e.com/docs/images/og/quickstart.png?v=4a3569d569"
+---
+
+import { ModelProvider } from '../snippets/model-provider.jsx';
+import { SetupPrompt } from '../snippets/setup-prompt-card.jsx';
+import { Video } from '../snippets/video.jsx';
+import { VideoCard } from '../snippets/video-card.jsx';
+
+export const setupPrompt = `इस प्रोजेक्ट में e2e एंड-टू-एंड टेस्ट सेट अप करें। डॉक्स: \`https://e2e.com/docs/quickstart.md\`
+
+1. \`npx e2e init --yes\` चलाएँ (या इस प्रोजेक्ट के हिसाब से pnpm या bun वाली कमांड)। यह एक वेब कॉन्फ़िग लिखता है, जो Vercel AI Gateway इस्तेमाल करता है। साथ में एक उदाहरण टेस्ट, e2e स्किल और MCP कॉन्फ़िग भी लिखता है। अभी यह कुछ इंस्टॉल नहीं करता।
+2. e2e स्किल पढ़ें (\`npx e2e guide\` स्किल प्रिंट करता है, \`npx e2e guide <topic>\` एक टॉपिक प्रिंट करता है)। नीचे के हर स्टेप में स्किल के हिसाब से चलें।
+3. टारगेट को इस ऐप पर सेट करें। वेब ऐप है तो उसका URL और डेव सर्वर शुरू करने वाली कमांड सेट करें। iOS या Android ऐप है तो @e2e-dev/web की जगह @e2e-dev/mobile लगाएँ, और उदाहरण टेस्ट मोबाइल इंजन के लिए फिर से लिखें।
+4. मुझसे पूछें कि एजेंट स्टेप के लिए कौन-सा मॉडल चाहिए: ChatGPT, GitHub Copilot, OpenCode Console या SuperGrok सब्सक्रिप्शन, API key, या लोकल मॉडल। उसके प्रोवाइडर पैकेज से उसे कॉन्फ़िगर करें। अगर साइन इन करना पड़े, तो मुझे \`npx e2e login\` कमांड दें और जब तक मैं कन्फ़र्म न करूँ, रुके रहें।
+5. डिपेंडेंसी इंस्टॉल करें और उदाहरण टेस्ट चलाएँ। जब तक वह पास न हो, सेटअप के एरर ठीक करते रहें।
+6. इस ऐप के सबसे ज़रूरी यूज़र फ़्लो के लिए एक टेस्ट लिखें और चलाएँ। पास होने तक उसे ठीक करते रहें।`;
+
+<VideoCard
+  id="4_9z6QWShLc"
+  title="4 मिनट में एजेंटिक e2e शुरू करें"
+  subtitle="इस वीडियो में Kacper एक सिंपल Next.js ऐप लेते हैं और ज़ीरो से एक चलता हुआ एजेंटिक टेस्ट सूट बनाते हैं।"
+/>
+
+## अपने कोडिंग एजेंट से सेट अप करें
+
+अपने ऐप की डायरेक्टरी में Claude Code, Codex, Cursor या कोई भी कोडिंग एजेंट
+खोलें और यह प्रॉम्प्ट पेस्ट कर दें:
+
+<SetupPrompt>
+
+<Prompt description={setupPrompt} children={setupPrompt} actions={["copy", "cursor"]} />
+
+</SetupPrompt>
+
+एजेंट [e2e स्किल](/coding-agents) इंस्टॉल कर देता है। इसके बाद "चेकआउट के
+लिए एक टेस्ट जोड़ें" जैसे प्रॉम्प्ट के लिए कोई और सेटअप नहीं करना पड़ता।
+
+<Note>
+Node.js 24.8 या उससे नया इस्तेमाल करें (Node.js 22 पर 22.22.3 या उससे नया)। वेब
+टेस्ट के लिए Node.js की जगह [Bun](/reference/cli#bun) 1.4.3 या उससे नया भी
+चलेगा। Windows पर WSL के अंदर चलाएँ। मोबाइल टेस्ट के लिए साथ में iOS
+सिम्युलेटर रनटाइम वाला Xcode, या एम्युलेटर वाला Android SDK भी चाहिए।
+</Note>
+
+## खुद सेट अप करें
+
+### अपना पहला टेस्ट चलाएँ
+
+<Steps>
+  <Step title="टेस्ट प्रोजेक्ट बनाएँ">
+  अपने ऐप की डायरेक्टरी में चलाएँ:
+
+  <CodeGroup>
+  ```bash npm
+  npx e2e init
+  ```
+
+  ```bash pnpm
+  pnpm dlx e2e init
+  ```
+
+  ```bash bun
+  bunx e2e init
+  ```
+  </CodeGroup>
+
+  **Web (Playwright)** या **Mobile (iOS/Android)** चुनें। फिर कोई सब्सक्रिप्शन
+  या मॉडल प्रोवाइडर चुनें। AI के बिना टेस्ट चाहिए तो **None** चुनें। विज़ार्ड
+  एक कॉन्फ़िग और एक उदाहरण टेस्ट लिखता है, डिपेंडेंसी जोड़ता है, और पूछता है
+  कि आपके कोडिंग एजेंट को भी सेट अप कर दे या नहीं। पहले से मौजूद फ़ाइलें यह
+  बनाए रखता है।
+
+  <Tabs>
+    <Tab title="वेब">
+    अपने ऐप का डेव सर्वर `http://localhost:3000` पर चालू करें, या
+    `e2e.config.ts` में उसका पता सेट कर दें। चाहें तो
+    [ऐप शुरू करने का काम e2e को दे सकते हैं](/web#starting-your-app)।
+
+    <Accordion title="वेब कॉन्फ़िग और टेस्ट का उदाहरण">
+    यह कॉन्फ़िग Vercel AI Gateway इस्तेमाल करता है। विज़ार्ड वही प्रोवाइडर सेट करता है जो आपने चुना।
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { gateway } from 'ai';
+
+export default {
+  agents: { default: { model: gateway('openai/gpt-6-luna-fast') } },
+  targets: [{ engine: web(), app: { url: 'http://localhost:3000' } }],
+} satisfies E2EConfig;
+```
+
+```ts title="tests/example.e2e.ts"
+import { test } from '@e2e-dev/web';
+import { expect } from 'e2e';
+
+test('app opens', async ({ app, browser }) => {
+  await app.open('/');
+  await expect(browser.locator('body')).toBeVisible();
+});
+```
+    </Accordion>
+    </Tab>
+    <Tab title="मोबाइल">
+    अपना सेटअप चेक करने के लिए `npx e2e doctor` चलाएँ। macOS पर विज़ार्ड iOS
+    चुनता है, बाकी जगह Android। उदाहरण टेस्ट Settings ऐप खोलता है।
+
+    <Accordion title="iOS कॉन्फ़िग और टेस्ट का उदाहरण">
+    यह कॉन्फ़िग Vercel AI Gateway इस्तेमाल करता है। Android पर विज़ार्ड
+    `platform: 'android'` और `app: { bundleId: 'com.android.settings' }` सेट करता है।
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { mobile } from '@e2e-dev/mobile';
+import { gateway } from 'ai';
+
+export default {
+  agents: { default: { model: gateway('openai/gpt-6-luna-fast') } },
+  targets: [{ name: 'ios', engine: mobile({ platform: 'ios' }), app: { bundleId: 'Settings' } }],
+  workers: 1,
+} satisfies E2EConfig;
+```
+
+```ts title="tests/example.e2e.ts"
+import { test } from '@e2e-dev/mobile';
+import { expect } from 'e2e';
+
+test('Settings opens', async ({ app, screen }) => {
+  await app.open();
+  await expect(screen.getByRole('button', 'General')).toBeVisible();
+});
+```
+    </Accordion>
+
+    अपना ऐप लगाने के लिए [मोबाइल](/mobile) देखें।
+    </Tab>
+  </Tabs>
+  </Step>
+  <Step title="उदाहरण चलाएँ">
+  <CodeGroup>
+  ```bash npm
+  npx e2e run
+  ```
+
+  ```bash pnpm
+  pnpm exec e2e run
+  ```
+
+  ```bash bun
+  bunx e2e run
+  ```
+  </CodeGroup>
+
+  e2e एक ब्राउज़र डाउनलोड करता है, या सिम्युलेटर या एम्युलेटर बूट करता है।
+  फिर चेक करता है कि ऐप खुलता है, और नतीजा प्रिंट कर देता है। उदाहरण में
+  कोई मॉडल कॉल नहीं होती, इसलिए न साइन इन चाहिए, न API key।
+  </Step>
+</Steps>
+
+<Video>
+  <video src="/images/init.mp4" aria-label="npx e2e init इंजन, मॉडल गेटवे और कोडिंग एजेंट सेटअप के बारे में पूछता है, फिर बताता है कि कौन-सी फ़ाइलें लिखेगा।" muted loop playsInline controls />
+
+  `npx e2e init` कुछ सवाल पूछता है। फिर कुछ भी लिखने से पहले यह हर बदलाव दिखा देता है।
+</Video>
+
+### सब्सक्रिप्शन या API key इस्तेमाल करें
+
+<Tabs>
+  <Tab title="सब्सक्रिप्शन">
+  | प्लान | कनेक्ट कैसे करें |
+  | --- | --- |
+  | ChatGPT Plus या Pro | `npx e2e login openai` |
+  | GitHub Copilot | `npx e2e login github-copilot` |
+  | OpenCode Console (OpenCode Zen और OpenCode Go) | `npx e2e login opencode-console` |
+  | SuperGrok या X Premium+ | `npx e2e login spacexsi` |
+  | Claude Max या Team (Claude Code) | प्लान के हर महीने के API क्रेडिट वाली API key। [Claude Max या Team](/subscriptions#claude-max-or-team) देखें। |
+
+  अगर आप GitHub CLI में लॉग इन हैं, तो Copilot वही लॉगिन ले लेता है।
+  [सब्सक्रिप्शन](/subscriptions) देखें।
+  </Tab>
+  <Tab title="API key">
+  अपना प्रोवाइडर चुनें और उसका पैकेज इंस्टॉल करें। अगर वह कुछ वेरिएबल पढ़ता
+  है, तो उन्हें उसी टर्मिनल में सेट करें जहाँ आप e2e चलाते हैं।
+
+  <ModelProvider show="select" />
+
+  <ModelProvider show="install" />
+
+  <ModelProvider show="env" />
+
+  Vercel AI Gateway, OpenRouter और OpenAI-compatible एंडपॉइंट के लिए विज़ार्ड
+  खुद कॉन्फ़िग लिख देता है। किसी और प्रोवाइडर के लिए `e2e.config.ts` में मॉडल
+  का इंपोर्ट और `model` की वैल्यू बदलें, और `agents.default` के तौर पर `agent` इस्तेमाल करें:
+
+  <ModelProvider show="model" />
+
+  लोकल मॉडल और बाकी ऑप्शन के लिए [मॉडल](/models) देखें।
+  </Tab>
+</Tabs>
+
+### एजेंट स्टेप जोड़ें
+
+`agent.act` की हर कॉल में एक ही [एटॉमिक लक्ष्य](/core-concepts#goals) दें,
+फिर नतीजा चेक करें। इस उदाहरण को अपने ऐप के किसी फ़्लो पर ढाल लें:
+
+<Tabs>
+  <Tab title="वेब">
+```ts title="tests/agent.e2e.ts"
+import { test } from '@e2e-dev/web';
+import { expect } from 'e2e';
+
+test('a visitor signs up for a trial', async ({ app, agent, screen }) => {
+  await app.open('/');
+
+  await agent.act('sign up for a free trial as {name} with email {email}', {
+    params: { name: 'Ada Lovelace', email: 'ada@example.test' },
+  });
+
+  await agent.assert('the welcome screen greets Ada by name');
+  await expect(screen.getByRole('status')).toContainText('trial');
+});
+```
+  </Tab>
+  <Tab title="मोबाइल (iOS)">
+```ts title="tests/agent.e2e.ts"
+import { test } from '@e2e-dev/mobile';
+import { expect } from 'e2e';
+
+test('the agent opens General', async ({ agent, app, device }) => {
+  await app.open();
+  await agent.act('open {section} settings', { params: { section: 'General' } });
+
+  await agent.assert('the General settings screen is showing');
+  await expect(device.locator('role=navigation-bar id=General')).toBeVisible();
+});
+```
+
+  `app.open()` ऐप को नए सिरे से लॉन्च करता है। यह न हो, तो टेस्ट वहीं से
+  शुरू होता है जहाँ पिछला टेस्ट डिवाइस को छोड़कर गया था। `device.locator`
+  [agent-device सेलेक्टर](/mobile#the-device-fixture) लेता है।
+  </Tab>
+</Tabs>
+
+`params` लक्ष्य के प्लेसहोल्डर भरते हैं। `agent.assert` स्क्रीन को परखता है।
+`expect` एक सटीक वैल्यू चेक करता है।
+
+<CodeGroup>
+```bash npm
+npx e2e run tests/agent.e2e.ts
+```
+
+```bash pnpm
+pnpm exec e2e run tests/agent.e2e.ts
+```
+
+```bash bun
+bunx e2e run tests/agent.e2e.ts
+```
+</CodeGroup>
+
+अगर विज़ार्ड में आपने **None** चुना था, तो पहले [एक मॉडल जोड़ें](/models)।
+वेब टेस्ट चलते हुए देखना है तो `--headed` लगाएँ। कैश किए हुए एक्शन रीप्ले
+करने की जगह मॉडल को कॉल करवाना है तो `--no-cache` लगाएँ।
+
+### प्रोजेक्ट कॉन्फ़िगर करें
+
+ऑप्शन `e2e.config.ts` में होते हैं। `init` के बाद ज़्यादातर प्रोजेक्ट ये
+ऑप्शन बदलते हैं:
+
+| क्या करना है | क्या सेट करें | देखें |
+| --- | --- | --- |
+| टेस्ट को अपने ऐप पर लगाना | `app.url`, मोबाइल पर `app.bundleId` | [टेस्ट होने वाला ऐप](/reference/config#the-app-under-test) |
+| रन के साथ ऐप भी शुरू करना | `app.command` | [अपना ऐप शुरू करना](/web#starting-your-app) |
+| मॉडल इस्तेमाल करना | `agents.default.model` | [मॉडल](/models) |
+| कई ब्राउज़र या डिवाइस पर टेस्ट करना | हर एक के लिए `targets` में एक एंट्री, `name` के साथ | [targets](/reference/config#targets) |
+| टेस्ट को ज़्यादा समय देना | `timeout`, `actionTimeout`, `assertionTimeout` | [timeout](/reference/config#timeout) |
+| फ़ेल हुए टेस्ट रीट्राई करना | `retries`, CI में `1` | [retries](/reference/config#retries) |
+| टेस्ट पैरेलल में चलाना | `workers`, CI में `1` | [workers](/reference/config#workers) |
+| कौन-सी टेस्ट फ़ाइलें चलें, यह चुनना | `tests` | [tests](/reference/config#tests) |
+| ट्रेस और वीडियो सेव रखना | `trace`, `video` | [रिकॉर्डिंग](/reference/config#recording) |
+| JUnit रिपोर्ट लिखना | `reporters: ['list', 'junit']` | [reporters](/reference/config#reporters) |
+| साइन इन करना और API keys देना | `credentials`, `secrets` | [ऑथेंटिकेशन](/authentication) |
+| CI में रीप्ले कैश लिखना | `cache: 'read-write'` | [कैशिंग](/cache) |
+
+<Accordion title="आम ऑप्शन वाले कॉन्फ़िग का उदाहरण">
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { gateway } from 'ai';
+
+const app = {
+  url: process.env.APP_URL ?? 'http://localhost:3000',
+  command: { executable: 'npm', args: ['run', 'dev'], reuseExisting: true },
+};
+
+export default {
+  agents: { default: { model: gateway('openai/gpt-6-luna-fast') } },
+  targets: [
+    { name: 'chromium', engine: web({ viewport: { width: 1440, height: 900 } }), app },
+    { name: 'firefox', engine: web({ browser: 'firefox' }), app },
+  ],
+  timeout: 180_000,
+  workers: 4,
+  reporters: ['list', 'junit'],
+  video: 'retain-on-failure',
+} satisfies E2EConfig;
+```
+
+`--target firefox` सिर्फ़ एक टारगेट चलाता है। जिन टारगेट का `command` एक ही
+है, वे एक ही सर्वर प्रोसेस शेयर करते हैं।
+</Accordion>
+
+## आगे
+
+<CardGroup cols={2}>
+  <Card title="बुनियादी कॉन्सेप्ट" icon="pen-to-square" href="/core-concepts">
+    लक्ष्य, असर्शन और लोकेटर।
+  </Card>
+  <Card title="ऑथेंटिकेशन" icon="key" href="/authentication">
+    ऐप का लॉगिन दोबारा इस्तेमाल करें, और पासवर्ड मॉडल के इनपुट तक न पहुँचने दें।
+  </Card>
+  <Card title="डीबगिंग" icon="bug" href="/debugging">
+    फ़ेलियर, स्क्रीनशॉट और ट्रेस पढ़ें।
+  </Card>
+  <Card title="कंटीन्यूअस इंटीग्रेशन" icon="code-branch" href="/ci">
+    अपने टेस्ट GitHub Actions, Expo Workflows, Bitrise या Codemagic पर चलाएँ।
+  </Card>
+</CardGroup>
