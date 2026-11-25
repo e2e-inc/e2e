@@ -102,7 +102,10 @@ that runs longer.
 `browser.waitForDownload` works as it does locally. Notte keeps each file
 the browser downloads in the session's file storage, under the name the site
 suggested, and the provider copies the file of that name into the attempt's
-artifacts.
+artifacts. A file of that name that was already stored when the wait began,
+such as a download the app started with no wait, is skipped. A file that
+Notte has not listed yet when the wait begins can still be taken for the new
+one, since Notte's file storage records no download id.
 
 ## Differences from a local browser
 

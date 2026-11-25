@@ -51,7 +51,8 @@ export function notte(options: NotteOptions = {}): BrowserProvider {
    * The bytes of one download of the lease's session, read once. Notte stores
    * a download under the name the site suggested, not the download id the
    * engine knows, so the file is found by `context.suggestedFilename`: the
-   * oldest unread file of that name.
+   * oldest unread file of that name that was not already stored when the
+   * wait began (`context.before`, from an engine that passes it).
    */
   const readDownload = async (lease: BrowserLease, file: string, context: BrowserDownloadContext): Promise<Uint8Array> => {
     const client = clientFor(context.env);
@@ -61,7 +62,10 @@ export function notte(options: NotteOptions = {}): BrowserProvider {
       claimed.set(lease.id, seen);
     }
     for (;;) {
-      const next = (await client.downloads(lease.id, context.signal)).find((download) => !seen.has(download.id) && download.filename === context.suggestedFilename);
+      const earlier = Array.isArray(context.before) ? new Set<unknown>(context.before) : undefined;
+      const next = (await client.downloads(lease.id, context.signal)).find(
+        (download) => !seen.has(download.id) && earlier?.has(download.id) !== true && download.filename === context.suggestedFilename,
+      );
       if (next !== undefined) {
         seen.add(next.id);
         return client.readFile(lease.id, next.id, context.signal);
@@ -141,6 +145,11 @@ export function notte(options: NotteOptions = {}): BrowserProvider {
       }
       return released;
     },
-    downloads: { dir: DOWNLOADS_DIR, read: readDownload },
+    downloads: {
+      dir: DOWNLOADS_DIR,
+      read: readDownload,
+      // The files already stored when a wait begins: a same-name file among them is not this wait's.
+      before: async (lease, context) => (await clientFor(context.env).downloads(lease.id, context.signal)).map((download) => download.id),
+    },
   };
 }
