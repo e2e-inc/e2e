@@ -109,7 +109,7 @@ export class Recorder {
     if (known !== undefined) return known as T;
     // Not `real` itself: a frozen fixture's members could not be answered with their wrappers.
     const proxy = new Proxy(typeof real === 'function' ? () => undefined : {}, {
-      get: (_, key) => (typeof key === 'symbol' ? own(real, key) : this.member(real, key, /^\d+$/.test(key) ? `${text}[${key}]` : `${text}.${key}`)),
+      get: (_, key) => (typeof key === 'symbol' ? own(real, key) : this.member(real, key, /^\d+$/.test(key) ? `${text}[${key}]` : IDENTIFIER.test(key) ? `${text}.${key}` : `${text}[${JSON.stringify(key)}]`)),
       apply: (_, __, args: unknown[]) => this.call(real, undefined, text, args),
       set: (_, key, value) => Reflect.set(real, key, value, real),
       has: (_, key) => Reflect.has(real, key),
