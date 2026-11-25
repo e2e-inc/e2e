@@ -349,8 +349,8 @@ docs/reference/screen.mdx.
 ## expect
 
 `expect(locator)` polls up to `assertionTimeout` (5 s) or `{ timeout }`;
-`.not` passes once the negation has held for 1 s. `expect(value)` is
-synchronous. `toHaveText` compares the whole normalized text,
+`.not` passes on the first read that satisfies the negation. `expect(value)`
+is synchronous. `toHaveText` compares the whole normalized text,
 `toContainText` a substring or RegExp. List forms:
 `toHaveText(['Alpha', 'Beta'])` needs exactly those matches in order;
 `toContainText(['Alpha', 'Beta'])` needs each entry in a distinct match, in
