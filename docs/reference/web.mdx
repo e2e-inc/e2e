@@ -1023,6 +1023,9 @@ await off();
 
 - The handler is `'accept'`, `'dismiss'`, or a function that receives the
   `Dialog`.
+- `'accept'` answers a `prompt` with empty text, where
+  `web({ dialogs: 'accept' })` keeps its default text. To answer with text,
+  use a function: `(dialog) => dialog.accept('Ada')`.
 - With no handler registered, [`web({ dialogs })`](#dialogs) answers the
   dialog. Without that option either, the dialog fails the next step.
 - A function handler must call `accept` or `dismiss`. One that does neither
