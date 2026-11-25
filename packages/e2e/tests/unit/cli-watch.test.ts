@@ -540,6 +540,56 @@ describe('watchSession', () => {
     expect(runs).toHaveLength(2);
   });
 
+  it('a signal from outside the terminal while a prompt is open closes it and ends the session; an answered prompt keeps nothing on the signal', async () => {
+    const stdin = fakeStdin();
+    const runs: RunOptions[] = [];
+    const run = async (options: RunOptions): Promise<RunOutcome> => {
+      runs.push(options);
+      return passed(0);
+    };
+    const signals = new SignalLadder();
+    const session = watchSession({
+      base: { files: [], configPath: undefined },
+      cwd: root,
+      signals,
+      run,
+      stdin,
+      write: () => undefined,
+      writeError: () => undefined,
+      pc,
+      clear: false,
+      watch: fakeWatch(new Map()),
+    });
+    await settle();
+    // Like clack, a prompt answers when the user does or when its signal aborts.
+    const prompts: { signal: AbortSignal | undefined; answer: (value: unknown) => void }[] = [];
+    textMock.mockImplementation(
+      ({ signal }: { signal?: AbortSignal }) =>
+        new Promise((resolve) => {
+          prompts.push({ signal, answer: resolve });
+          signal?.addEventListener('abort', () => resolve(CANCEL), { once: true });
+        }),
+    );
+    let ended = false;
+    void session.then(() => (ended = true));
+    stdin.write('t');
+    await settle();
+    prompts[0]!.answer('signs in');
+    await settle();
+    expect(runs).toHaveLength(2);
+    stdin.write('p');
+    await settle();
+    expect(prompts).toHaveLength(2);
+    // SIGTERM from a process manager: the ladder's first rung, no keypress.
+    signals.escalate(() => undefined);
+    await settle();
+    expect(ended).toBe(true);
+    await expect(session).resolves.toBe(0);
+    expect(prompts[1]!.signal?.aborted).toBe(true);
+    expect(prompts[0]!.signal?.aborted).toBe(false);
+    expect(runs).toHaveLength(2);
+  });
+
   it('cancels the run a key lands on, keeps the exit code of the last finished run, and quits on q', async () => {
     const stdin = fakeStdin();
     const signals = new SignalLadder();

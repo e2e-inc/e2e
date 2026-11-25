@@ -624,7 +624,15 @@ export async function watchSession(options: WatchSessionOptions): Promise<number
         }
         // The prompt owns the terminal: keys wait, and so does a change, in `pending`.
         keyboard?.pause();
-        const answer = await (value === 'p' ? promptFile(filters, terminal) : promptTitle(filters, terminal));
+        // A signal closes the prompt, so a SIGTERM from outside the terminal ends the session as Ctrl-C in it does.
+        // The prompt gets its own signal: clack never removes its abort listener from a signal that did not abort.
+        const closer = new AbortController();
+        const close = (): void => closer.abort();
+        signals.interruptSignal.addEventListener('abort', close, { once: true });
+        const prompt = value === 'p' ? promptFile : promptTitle;
+        const answer = await prompt(filters, terminal, closer.signal).finally(() =>
+          signals.interruptSignal.removeEventListener('abort', close),
+        );
         keyboard?.resume();
         if (answer !== undefined && !signals.interruptSignal.aborted) {
           filters = answer;
@@ -652,9 +660,10 @@ function sameScope(a: WatchScope, b: WatchScope): boolean {
 }
 
 /** `p`: the positional the next runs select with; empty clears it. Answers nothing when cancelled or an invalid glob. */
-async function promptFile(filters: WatchFilters, output: Writable): Promise<WatchFilters | undefined> {
+async function promptFile(filters: WatchFilters, output: Writable, signal: AbortSignal): Promise<WatchFilters | undefined> {
   const answer = await clack.text({
     output,
+    signal,
     message: 'Filter by a file name, path, or glob (empty clears the filter)',
     placeholder: 'signup',
     defaultValue: '',
@@ -667,9 +676,10 @@ async function promptFile(filters: WatchFilters, output: Writable): Promise<Watc
 }
 
 /** `t`: the title pattern the next runs select with; empty clears it. Answers nothing when cancelled or invalid. */
-async function promptTitle(filters: WatchFilters, output: Writable): Promise<WatchFilters | undefined> {
+async function promptTitle(filters: WatchFilters, output: Writable, signal: AbortSignal): Promise<WatchFilters | undefined> {
   const answer = await clack.text({
     output,
+    signal,
     message: 'Filter by a test name regex pattern (empty clears the filter)',
     placeholder: 'checkout',
     defaultValue: '',
