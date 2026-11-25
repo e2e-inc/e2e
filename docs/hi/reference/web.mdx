@@ -322,8 +322,8 @@ web({ basicAuth: { username: 'staging', password: secrets.get('staging-password'
 ```
 
 `secrets.get(name)` वाला पासवर्ड हर अटेम्प्ट शुरू होने पर रिज़ॉल्व होता है और किसी भी
-कॉन्फ़िगर किए गए सीक्रेट की तरह रिडैक्ट रहता है। इससे बनने वाला `Authorization` हेडर का
-base64 क्रेडेंशियल भी रिडैक्ट रहता है।
+कॉन्फ़िगर किए गए सीक्रेट की तरह छिपाया जाता है। इससे बनने वाला `Authorization` हेडर का
+base64 क्रेडेंशियल भी छिपाया जाता है।
 
 ```ts
 /** HTTP basic authentication the browser answers a `401` challenge from the app's origin with. */

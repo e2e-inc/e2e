@@ -98,8 +98,8 @@ const found = await request.get('/api/orders?reference=r1');
 | `text()` | `Promise<string>` |
 | `json<T>()` | `Promise<T>` |
 
-- जब `redirect` `'follow'` हो तो `url` रीडायरेक्ट के बाद का URL होता है, और जब
-  `'manual'` हो तो रिक्वेस्ट किया गया URL।
+- जब `redirect` की वैल्यू `'follow'` हो तो `url` रीडायरेक्ट के बाद का URL होता है,
+  और जब `redirect` की वैल्यू `'manual'` हो तो रिक्वेस्ट किया गया URL।
 - `headers` में नाम लोअर-केस में होते हैं। कई `set-cookie` वैल्यू `\n` से जुड़ी
   होती हैं।
 - `text()` बॉडी को UTF-8 की तरह डिकोड करता है। `json()` इसे पार्स करता है, और

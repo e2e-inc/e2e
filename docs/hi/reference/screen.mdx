@@ -39,8 +39,8 @@ test('void an invoice', async ({ app, screen }) => {
 
 `getByRole` के नाम के रूप में, या `getByLabel`, `getByPlaceholder`, `getByText`,
 या `getByDisplayValue` में पास की गई स्ट्रिंग व्हाइटस्पेस नॉर्मलाइज़ेशन के बाद
-पूरे टेक्स्ट से केस-सेंसिटिव मैच करती है: `getByRole('button', 'Save')` `Save
-changes` से मैच नहीं होता। `{ exact: false }` इसे केस-इनसेंसिटिव सबस्ट्रिंग मैच
+पूरे टेक्स्ट से केस-सेंसिटिव मैच करती है: `getByRole('button', 'Save')`
+`Save changes` से मैच नहीं होता। `{ exact: false }` इसे केस-इनसेंसिटिव सबस्ट्रिंग मैच
 बना देता है, और `RegExp` जैसा लिखा है वैसा मैच करता है।
 
 हर क्वेरी `visible: true` स्वीकार करती है; [छिपे डुप्लिकेट](#hidden-duplicates)
