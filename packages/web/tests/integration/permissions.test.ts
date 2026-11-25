@@ -8,7 +8,8 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { BrowserContext } from 'playwright-core';
 import type { AppPermissionState, EngineCleanupContext, EngineHandle, OperationContext } from '@e2e-dev/core/engine';
 import { web, surfaceOf } from '../../src/index.ts';
 import { startFixtureApp, type FixtureApp } from '../helpers/fixture-app.ts';
@@ -84,6 +85,27 @@ describe('app permissions', () => {
     try {
       expect(await copy(engine, 'everything')).toBe('everything');
     } finally {
+      await shutdown(engine);
+    }
+  });
+
+  it("starts an attempt under 'all' on a browser that refuses one name as unknown, granting the rest", async () => {
+    const engine = await boot('all');
+    // Every context of every attempt from here on answers like an older Chrome over CDP that does not know localNetworkAccess.
+    const prototype = Object.getPrototypeOf(surfaceOf(engine)!.context()) as BrowserContext;
+    const grant = prototype.grantPermissions;
+    const spy = vi.spyOn(prototype, 'grantPermissions').mockImplementation(async function (this: BrowserContext, names, options) {
+      if (names.includes('local-network-access')) throw new Error('browserContext.grantPermissions: Unknown permission type: localNetworkAccess');
+      return grant.call(this, names, options);
+    });
+    try {
+      await engine.endAttempt!(cleanup());
+      await engine.startAttempt!({ attemptId: 'p2', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
+      // Refused with the whole list, then granted without the unknown name.
+      expect(spy.mock.calls.map(([names]) => names.includes('local-network-access'))).toEqual([true, false]);
+      expect(await copy(engine, 'the rest')).toBe('the rest');
+    } finally {
+      spy.mockRestore();
       await shutdown(engine);
     }
   });
