@@ -53,7 +53,8 @@ such as `de-DE` and `Europe/Berlin`), `colorScheme` and `reducedMotion` (the
 `prefers-color-scheme` and `prefers-reduced-motion` every page reports, from
 first paint; `browser.emulateMedia` changes them in a test), `initScripts` (scripts every document
 runs before the page's own), `webmcp` (`true` launches Chromium or Firefox with
-WebMCP on, for `browser.webmcp`), and
+WebMCP on, for `browser.webmcp`), `dialogs` (`'accept'` or `'dismiss'`, the
+answer to a native dialog no `browser.onDialog` handler takes), and
 `connect` — attach to a remote browser over CDP instead of launching a local
 one.
 
