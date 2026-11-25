@@ -5,6 +5,7 @@ import { EngineError, type LocatorExpression, type SemanticQuery, type TextPatte
 import { SEARCH_ROOTS_SELECTOR_ENGINE } from './closed-shadow.ts';
 import { exactLabelSelector } from './label-selector.ts';
 import { SECURE_FIELD_SELECTOR } from './read-node.ts';
+import { readsAsSelector } from './reads-as-selector.ts';
 import { SHOWN_SELECTOR } from './shown-selector.ts';
 
 type PwScope = Page | FrameLocator | PwLocator;
@@ -110,6 +111,9 @@ function glyphTolerantName(name: string, exact: boolean): RegExp {
   return selectorSafeRegExp(exact ? new RegExp(`^${GLYPH_OR_SPACE}*${body}${GLYPH_OR_SPACE}*$`, 'u') : new RegExp(body, 'iu'));
 }
 
+/** Landmarks whose scope Chrome and Playwright read differently; the reader, which follows Chrome, decides them. */
+const READER_SCOPED_ROLES: ReadonlySet<string> = new Set(['banner', 'contentinfo']);
+
 /**
  * The one table of query kinds: each declares its Playwright getter or its
  * CSS candidate set. An exact label query is the one kind whose candidates
@@ -127,16 +131,22 @@ function candidatesOf(query: SemanticQuery, testIdAttribute: string): Candidates
       const options: Parameters<Page['getByRole']>[1] = {};
       const states = query.states ?? {};
       if (states.checked !== undefined) options.checked = states.checked;
-      if (states.disabled !== undefined) options.disabled = states.disabled;
       if (states.selected !== undefined) options.selected = states.selected;
       if (states.expanded !== undefined) options.expanded = states.expanded;
       if (states.pressed !== undefined) options.pressed = states.pressed;
       if (query.level !== undefined) options.level = query.level;
       const role = (ARIA_ROLE_BY_CONTRACT_ROLE[query.value.value] ?? query.value.value) as Parameters<Page['getByRole']>[0];
       const name = query.name;
-      if (name === undefined) return { kind: 'playwright', locate: (roots) => roots.getByRole(role, options) };
-      if (name.kind === 'regexp') return { kind: 'playwright', locate: (roots) => roots.getByRole(role, { ...options, name: patternToPw(name) }) };
-      return { kind: 'playwright', locate: (roots) => roots.getByRole(role, { ...options, name: glyphTolerantName(name.value, name.exact) }) };
+      const named = name === undefined
+        ? options
+        : { ...options, name: name.kind === 'regexp' ? patternToPw(name) : glyphTolerantName(name.value, name.exact) };
+      const readsAs = {
+        ...(READER_SCOPED_ROLES.has(query.value.value) ? { role: query.value.value } : {}),
+        ...(states.disabled === undefined ? {} : { disabled: states.disabled }),
+      };
+      if (Object.keys(readsAs).length === 0) return { kind: 'playwright', locate: (roots) => roots.getByRole(role, named) };
+      const agrees = readsAsSelector({ ...readsAs, testIdAttribute, secureFieldSelector: SECURE_FIELD_SELECTOR });
+      return { kind: 'playwright', locate: (roots) => roots.getByRole(role, named).locator(agrees) };
     }
     case 'label':
       return query.value.kind === 'string' && query.value.exact

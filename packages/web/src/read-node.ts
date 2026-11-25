@@ -92,6 +92,10 @@ export type SemanticMode =
   | { kind: 'node' }
   /** The element's `states.hidden` alone, for the `visible` narrowing a selector engine applies. */
   | { kind: 'hidden' }
+  /** The element's `states.disabled` alone, for a role query's filter. */
+  | { kind: 'disabled' }
+  /** The element's role by tag, without the editor-host textbox, for a role query's scope check. */
+  | { kind: 'ariaRole' }
   | {
       kind: 'tree';
       maxNodes: number;
@@ -110,9 +114,11 @@ export type SemanticMode =
 /** Result of one read, selected by the mode discriminant. */
 export type SemanticResult<Mode extends SemanticMode> = Mode extends { kind: 'node' }
   ? RawNodeData
-  : Mode extends { kind: 'hidden' }
+  : Mode extends { kind: 'hidden' } | { kind: 'disabled' }
     ? boolean
-    : RawObservation;
+    : Mode extends { kind: 'ariaRole' }
+      ? string | null
+      : RawObservation;
 
 /** Options for one document's tree walk. */
 interface TreeReadOptions {

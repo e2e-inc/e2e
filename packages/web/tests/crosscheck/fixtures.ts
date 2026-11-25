@@ -68,6 +68,23 @@ export const FIXTURE_PAGES: readonly FixturePage[] = [
       <button aria-labelledby="upper-reference">Fallback</button>
       <div aria-hidden="TRUE"><span id="upper-reference">Label <i style="display:none">whole</i></span></div>
       <div role="button">Pick <div role="listbox"><div role="option" aria-selected="true">Chosen</div><div role="option" aria-selected="false">Other</div></div></div>
+      <div role="checkbox" aria-checked="True" tabindex="0">Remember me</div>
+      <div role="Switch" aria-checked="TRUE" tabindex="0">Wi-Fi</div>
+      <button aria-expanded="True">Menu</button>
+      <button aria-pressed="TRUE">Bold</button>
+      <button aria-disabled="TrUe">Delete</button>
+      <div aria-disabled="TrUe"><button>Archive</button></div>
+      <div role="Button" tabindex="0">Save</div>
+      <div role="Link" tabindex="0">Docs</div>
+      <div role="Article" aria-label="Post"><header aria-label="Post header">Heading</header></div>
+      <div role="group ARTICLE" aria-label="Upper fallback"><header aria-label="Upper fallback header">Site header</header></div>
+      <div role="group article" aria-label="Lower fallback"><header aria-label="Lower fallback header">Site header</header></div>
+      <nav role="none" aria-label="Kept nav"><header aria-label="Kept nav header">Section header</header></nav>
+      <aside role="none" tabindex="0"><footer aria-label="Kept aside footer">Section footer</footer></aside>
+      <div role="region group" aria-label="Region first"><header aria-label="Region first header">Site header</header></div>
+      <div role="region " aria-label="Region spaced"><header aria-label="Region spaced header">Site header</header></div>
+      <div role="doc-chapter article" aria-label="Chapter"><footer aria-label="Chapter footer">Site footer</footer></div>
+      <div role="button">Choose <div role="listbox"><div role="option" aria-selected="TRUE">Picked</div><div role="option" aria-selected="false">Skipped</div></div></div>
     `,
   },
   {

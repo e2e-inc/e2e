@@ -16,6 +16,9 @@ import type { RawNodeData, RawObservedNode, SemanticMode, SemanticResult } from 
  * the selector engine's task that found it (`read-selector.ts`,
  * `label-selector.ts`), so the element is always in its document.
  * `mode.kind === 'hidden'` answers that one element's `states.hidden` alone.
+ * `mode.kind === 'disabled'` answers its `states.disabled` alone, and
+ * `mode.kind === 'ariaRole'` its role by tag, as a role query reads an editing
+ * host.
  * `mode.kind === 'tree'` walks the subtree for one agent observation and
  * returns live element handles aligned with the flattened node list. The two
  * modes also project nodes differently; those differences are data (see
@@ -133,9 +136,64 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     'tablist', 'tabpanel', 'term', 'textbox', 'time', 'timer', 'toolbar', 'tooltip',
     'tree', 'treegrid', 'treeitem',
   ];
+  /** An ARIA token attribute (`role` or a state) lowercased, as Chrome reads it; null when absent. */
+  const ariaToken = (el: Element, name: string): string | null =>
+    attrOf(el, name)?.replace(/[A-Z]+/g, (upper) => upper.toLowerCase()) ?? null;
+  /**
+   * The DOM members the reader calls, as the element's prototype chain defines
+   * them, so a form's field named `matches`, `parentElement`, `tagName`,
+   * `getAttribute`, or `hasAttribute` cannot replace them. Read from the chain,
+   * not from `Element` or `Node`, which a page can delete; resolved once per
+   * prototype.
+   */
+  interface DomMembers {
+    readonly getAttribute: Element['getAttribute'] | undefined;
+    readonly hasAttribute: Element['hasAttribute'] | undefined;
+    readonly matches: Element['matches'] | undefined;
+    readonly tagName: (() => string) | undefined;
+    readonly parentElement: (() => Element | null) | undefined;
+  }
+  const membersByPrototype = new Map<object, DomMembers>();
+  // From `({}).constructor`, since a page can delete or replace `window.Object`.
+  const { getPrototypeOf, getOwnPropertyDescriptor } = ({}).constructor as ObjectConstructor;
+  const membersOf = (el: Element): DomMembers | undefined => {
+    const first: object | null = getPrototypeOf(el);
+    if (first === null) return undefined;
+    const cached = membersByPrototype.get(first);
+    if (cached !== undefined) return cached;
+    const find = (name: string): PropertyDescriptor | undefined => {
+      for (let proto: object | null = first; proto !== null; proto = getPrototypeOf(proto)) {
+        const descriptor = getOwnPropertyDescriptor(proto, name);
+        if (descriptor !== undefined) return descriptor;
+      }
+      return undefined;
+    };
+    const members: DomMembers = {
+      getAttribute: find('getAttribute')?.value as Element['getAttribute'] | undefined,
+      hasAttribute: find('hasAttribute')?.value as Element['hasAttribute'] | undefined,
+      matches: find('matches')?.value as Element['matches'] | undefined,
+      tagName: find('tagName')?.get as (() => string) | undefined,
+      parentElement: find('parentElement')?.get as (() => Element | null) | undefined,
+    };
+    membersByPrototype.set(first, members);
+    return members;
+  };
+  const attrOf = (el: Element, name: string): string | null => (membersOf(el)?.getAttribute ?? el.getAttribute).call(el, name);
+  const hasAttrOf = (el: Element, name: string): boolean => (membersOf(el)?.hasAttribute ?? el.hasAttribute).call(el, name);
+  const elementMatches = (el: Element, selector: string): boolean => (membersOf(el)?.matches ?? el.matches).call(el, selector);
+  const rawTagOf = (el: Element): string => {
+    const get = membersOf(el)?.tagName;
+    return get === undefined ? el.tagName : get.call(el);
+  };
+  const tagOf = (el: Element): string => rawTagOf(el).toLowerCase();
+  const parentOf = (el: Element): Element | null => {
+    const get = membersOf(el)?.parentElement;
+    return get === undefined ? el.parentElement : get.call(el);
+  };
+
   /** ARIA uses the first recognized token, then native semantics if none is recognized. */
   const explicitRole = memoized((el: Element): string | null =>
-    (el.getAttribute('role') ?? '').split(/[ \t\n\f\r]+/).find((role) => ARIA_ROLES.indexOf(role) !== -1) ?? null);
+    (ariaToken(el, 'role') ?? '').split(/[ \t\n\f\r]+/).find((role) => ARIA_ROLES.indexOf(role) !== -1) ?? null);
 
   /**
    * True when an element carries a name of its own (HTML-AAM: `aria-label`,
@@ -143,12 +201,85 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * only when named; unnamed, it is a plain container.
    */
   const hasOwnName = (el: Element): boolean =>
-    ['aria-label', 'aria-labelledby', 'title'].some((attribute) => (el.getAttribute(attribute) ?? '').trim() !== '');
+    ['aria-label', 'aria-labelledby', 'title'].some((attribute) => (attrOf(el, attribute) ?? '').trim() !== '');
 
-  const SECTIONING_SCOPE = [
-    'article', 'aside', 'main', 'nav', 'section',
-    ...['article', 'complementary', 'main', 'navigation', 'region'].map((role) => `[role~="${role}"]`),
-  ].join(', ');
+  const SECTIONING_TAGS = ['article', 'aside', 'main', 'nav', 'section'];
+  const SECTIONING_ROLES = ['article', 'complementary', 'main', 'navigation'];
+  /**
+   * Roles Chrome recognizes that `ARIA_ROLES` leaves out. The reader reports
+   * none of them, but the first recognized token decides what scopes a header,
+   * so `role="doc-chapter article"` is a chapter and scopes nothing.
+   */
+  const CHROME_ONLY_ROLES = [
+    ...('abstract acknowledgments afterword appendix backlink biblioentry bibliography biblioref chapter colophon ' +
+      'conclusion cover credit credits dedication endnote endnotes epigraph epilogue errata example footnote foreword ' +
+      'glossary glossref index introduction noteref notice pagebreak pagefooter pageheader pagelist part preface ' +
+      'prologue pullquote qna subtitle tip toc').split(' ').map((role) => `doc-${role}`),
+    'graphics-document', 'graphics-object', 'graphics-symbol',
+    'comment', 'image', 'sectionfooter', 'sectionheader', 'suggestion',
+  ];
+  /** The ancestors a role needs for Chrome to keep it, by tag or by role; outside them it gives way to the next token. */
+  const REQUIRED_CONTEXT: Readonly<Record<string, { readonly tags: readonly string[]; readonly roles: readonly string[] }>> = {
+    listitem: { tags: ['ul', 'ol', 'menu'], roles: ['list', 'directory', 'group'] },
+    option: { tags: ['select'], roles: ['listbox', 'group'] },
+    treeitem: { tags: [], roles: ['tree', 'group', 'treeitem'] },
+  };
+  /** The global ARIA attributes that do not make Chrome ignore a `none` or `presentation` role. */
+  const NOT_PRESENTATION_CONFLICTS = ['aria-dropeffect', 'aria-grabbed', 'aria-hidden'];
+  /** The first role token Chrome accepts on the element; memoized, since each token that needs context walks the ancestors. */
+  const chromeRole = memoized((el: Element): string | null =>
+    (ariaToken(el, 'role') ?? '').split(/[ \t\n\f\r]+/).find((token) => chromeKeepsRole(el, token)) ?? null);
+  /**
+   * Whether an ancestor gives the element its required context, as Chrome
+   * walks them: a `none`, or a `div`, `span`, `slot`, or custom element with no
+   * `role` token, is passed through, and anything else ends the walk, a role it
+   * refused or does not know included. Shadow roots do not end it.
+   */
+  const inRequiredContext = (el: Element, context: { readonly tags: readonly string[]; readonly roles: readonly string[] }): boolean => {
+    for (let node = composedParent(el); node !== null; node = composedParent(node)) {
+      const tag = tagOf(node);
+      if (context.tags.indexOf(tag) !== -1) return true;
+      const explicit = chromeRole(node);
+      if (explicit !== null && context.roles.indexOf(explicit) !== -1) return true;
+      if (explicit === 'none' || explicit === 'presentation') continue;
+      const tokens = (ariaToken(node, 'role') ?? '').split(/[ \t\n\f\r]+/);
+      if (tokens.some((token) => token !== '')) return false;
+      if (['div', 'span', 'slot'].indexOf(tag) === -1 && tag.indexOf('-') === -1) return false;
+    }
+    return false;
+  };
+  /** The element's parent, or its shadow host at a shadow root. */
+  const composedParent = (el: Element): Element | null => {
+    const parent = parentOf(el);
+    if (parent !== null) return parent;
+    const root = el.getRootNode();
+    return root instanceof ShadowRoot ? root.host : null;
+  };
+  /** Whether Chrome accepts a role token on the element; a refused one gives way to the next token. */
+  const chromeKeepsRole = (el: Element, role: string): boolean => {
+    if (ARIA_ROLES.indexOf(role) === -1 && CHROME_ONLY_ROLES.indexOf(role) === -1) return false;
+    if (role === 'region' || role === 'form') return hasOwnName(el);
+    const context = REQUIRED_CONTEXT[role];
+    return context === undefined || inRequiredContext(el, context);
+  };
+  /**
+   * An element that keeps a header or footer inside it from being the page's,
+   * as Chrome reads it: a sectioning tag whose role does not replace it, or a
+   * first accepted role that scopes. An exact `role="region"` scopes too, as
+   * Playwright's `[role=region]` does, though Chrome never scopes by region.
+   */
+  const isSectioning = memoized((el: Element): boolean => {
+    if (attrOf(el, 'role') === 'region') return true;
+    const tokens = (ariaToken(el, 'role') ?? '').split(/[ \t\n\f\r]+/);
+    const role = chromeRole(el);
+    // A `none` behind a refused `region` or `form` stays `none`, conflict or not.
+    const behindLandmark = tokens.slice(0, role === null ? 0 : tokens.indexOf(role)).some((token) => token === 'region' || token === 'form');
+    // Chrome's conflict rule, which skips three attributes `hasPresentationConflict` counts as Playwright does.
+    const presentationIgnored = !behindLandmark && (role === 'none' || role === 'presentation') && (isFocusable(el) || isEditingHost(el) ||
+      GLOBAL_ARIA_ATTRIBUTES.some(([name]) => NOT_PRESENTATION_CONFLICTS.indexOf(name) === -1 && hasAttrOf(el, name)));
+    if (role === null || presentationIgnored) return SECTIONING_TAGS.indexOf(tagOf(el)) !== -1;
+    return SECTIONING_ROLES.indexOf(role) !== -1;
+  });
 
   /**
    * True when a `<header>` or `<footer>` is the page's, not an article's or a
@@ -158,7 +289,9 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    */
   const isPageLevel = (el: Element): boolean => {
     for (let candidate: Element | null = el; candidate !== null;) {
-      if (candidate.closest(SECTIONING_SCOPE) !== null) return false;
+      for (let ancestor: Element | null = candidate; ancestor !== null; ancestor = parentOf(ancestor)) {
+        if (isSectioning(ancestor)) return false;
+      }
       const root = candidate.getRootNode();
       candidate = root instanceof ShadowRoot ? root.host : null;
     }
@@ -177,8 +310,8 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   const isEditingHost = (el: Element): boolean =>
     el instanceof HTMLElement &&
     el.isContentEditable &&
-    NON_HOST_TAGS.indexOf(el.tagName.toLowerCase()) === -1 &&
-    !(el.parentElement instanceof HTMLElement && el.parentElement.isContentEditable);
+    NON_HOST_TAGS.indexOf(tagOf(el)) === -1 &&
+    !((parent) => parent instanceof HTMLElement && parent.isContentEditable)(parentOf(el));
 
   const NAME_PROHIBITED_ROLES = [
     'caption', 'code', 'deletion', 'emphasis', 'generic', 'insertion', 'paragraph', 'presentation', 'strong',
@@ -214,19 +347,19 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   /** True when the element carries a global ARIA attribute that counts on `role`. */
   const hasGlobalAriaAttribute = (el: Element, role: string | null): boolean =>
     GLOBAL_ARIA_ATTRIBUTES.some(([name, prohibited]) =>
-      (role === null || prohibited.indexOf(role) === -1) && el.hasAttribute(name));
+      (role === null || prohibited.indexOf(role) === -1) && hasAttrOf(el, name));
 
   /** True when `tabindex` parses as a number, as Playwright reads it. */
-  const hasTabIndex = (el: Element): boolean => !Number.isNaN(Number(String(el.getAttribute('tabindex'))));
+  const hasTabIndex = (el: Element): boolean => !Number.isNaN(Number(String(attrOf(el, 'tabindex'))));
 
   /** Whether a person can focus the element, as Playwright decides presentational-role conflicts. */
   const isFocusable = (el: Element): boolean => {
-    const tag = el.tagName.toLowerCase();
-    if (['button', 'input', 'select', 'textarea', 'option', 'optgroup'].indexOf(tag) !== -1 && el.matches(':disabled')) {
+    const tag = tagOf(el);
+    if (['button', 'input', 'select', 'textarea', 'option', 'optgroup'].indexOf(tag) !== -1 && elementMatches(el, ':disabled')) {
       return false;
     }
     if (hasTabIndex(el) || ['button', 'details', 'select', 'textarea'].indexOf(tag) !== -1) return true;
-    if (tag === 'a' || tag === 'area') return el.hasAttribute('href');
+    if (tag === 'a' || tag === 'area') return hasAttrOf(el, 'href');
     return tag === 'input' && !(el as HTMLInputElement).hidden;
   };
 
@@ -258,9 +391,9 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    */
   const inheritedPresentationRole = (el: Element): string | null => {
     for (let current = el; ; ) {
-      const parent = current.parentElement;
-      const parents = PRESENTATION_INHERITANCE_PARENTS.get(current.tagName.toLowerCase());
-      if (parent === null || parents === undefined || parents.indexOf(parent.tagName.toLowerCase()) === -1) return null;
+      const parent = parentOf(current);
+      const parents = PRESENTATION_INHERITANCE_PARENTS.get(tagOf(current));
+      if (parent === null || parents === undefined || parents.indexOf(tagOf(parent)) === -1) return null;
       const role = explicitRole(parent);
       if ((role === 'presentation' || role === 'none') && !hasPresentationConflict(parent, role)) return role;
       current = parent;
@@ -268,21 +401,21 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   };
 
   const tagRole = (el: Element): string | null => {
-    const tag = el.tagName.toLowerCase();
-    const type = (el.getAttribute('type') ?? '').toLowerCase();
+    const tag = tagOf(el);
+    const type = (attrOf(el, 'type') ?? '').toLowerCase();
     switch (tag) {
       case 'a':
-        return el.hasAttribute('href') ? 'link' : null;
+        return hasAttrOf(el, 'href') ? 'link' : null;
       case 'button':
         return 'button';
       // HTML-AAM: a select that shows several rows is a listbox; only a
       // one-row drop-down is a combobox.
       case 'select':
-        return el.hasAttribute('multiple') || (el as HTMLSelectElement).size > 1 ? 'listbox' : 'combobox';
+        return hasAttrOf(el, 'multiple') || (el as HTMLSelectElement).size > 1 ? 'listbox' : 'combobox';
       case 'textarea':
         return 'textbox';
       case 'img':
-        return el.getAttribute('alt') === '' && !el.getAttribute('title') && !hasGlobalAriaAttribute(el, null) && !hasTabIndex(el)
+        return attrOf(el, 'alt') === '' && !attrOf(el, 'title') && !hasGlobalAriaAttribute(el, null) && !hasTabIndex(el)
           ? 'presentation'
           : 'image';
       // An inline icon is a picture whether or not anything names it, as
@@ -352,19 +485,19 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
         return tableRole === 'grid' || tableRole === 'treegrid' ? 'gridcell' : 'cell';
       }
       case 'th': {
-        const scope = (el.getAttribute('scope') ?? '').toLowerCase();
+        const scope = (attrOf(el, 'scope') ?? '').toLowerCase();
         if (scope === 'row' || scope === 'rowgroup') return 'rowheader';
         if (scope === 'col' || scope === 'colgroup') return 'columnheader';
         const previous = el.previousElementSibling;
         const next = el.nextElementSibling;
         if (previous === null && next === null) {
-          const row = el.parentElement;
-          const table = row?.tagName.toLowerCase() === 'tr' ? row.closest('table') : null;
+          const row = parentOf(el);
+          const table = row !== null && tagOf(row) === 'tr' ? row.closest('table') : null;
           return table !== null && (table as HTMLTableElement).rows.length <= 1 ? null : 'columnheader';
         }
-        if (previous?.tagName.toLowerCase() === 'th' && next?.tagName.toLowerCase() === 'th') return 'columnheader';
+        if ((previous == null ? undefined : tagOf(previous)) === 'th' && (next == null ? undefined : tagOf(next)) === 'th') return 'columnheader';
         const hasDataNeighbor = [previous, next].some((cell) =>
-          cell?.tagName.toLowerCase() === 'td' && ((cell.textContent ?? '').trim() !== '' || cell.children.length > 0));
+          cell != null && tagOf(cell) === 'td' && ((cell.textContent ?? '').trim() !== '' || cell.children.length > 0));
         return hasDataNeighbor ? 'rowheader' : 'columnheader';
       }
       case 'dialog':
@@ -406,7 +539,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
 
   const computeRole = (el: Element, editorHostIsTextbox: boolean): string | null => {
     const explicit = explicitRole(el);
-    const tag = el.tagName.toLowerCase();
+    const tag = tagOf(el);
     if (
       explicit !== null &&
       !((explicit === 'presentation' || explicit === 'none') && hasPresentationConflict(el, NAME_PROHIBITED_TAG_ROLES[tag] ?? null))
@@ -473,7 +606,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   const skipsContents = (el: Element, style: CSSStyleDeclaration | undefined): boolean => {
     if (style?.getPropertyValue('content-visibility') !== 'hidden') return false;
     const svg = 'http://www.w3.org/2000/svg';
-    if (el.namespaceURI === svg) return el.localName === 'svg' && (el.parentElement?.namespaceURI !== svg || el.parentElement.localName === 'foreignObject');
+    if (el.namespaceURI === svg) return el.localName === 'svg' && ((parent) => parent?.namespaceURI !== svg || parent?.localName === 'foreignObject')(parentOf(el));
     if (!BOXES_THAT_SKIP_NOTHING.has(style.display)) return true;
     return (el.localName === 'button' || el.localName === 'fieldset') && el.namespaceURI === 'http://www.w3.org/1999/xhtml' && style.display !== 'contents';
   };
@@ -513,7 +646,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     if (name === null) return null;
     const shown = withoutGlyphs(name);
     if (shown !== '' || shown === name) return shown;
-    const title = (el.getAttribute('title') ?? '').trim();
+    const title = (attrOf(el, 'title') ?? '').trim();
     return title === '' ? null : title;
   };
 
@@ -536,7 +669,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     let text = '';
     for (const part of tokens.slice(tokens.lastIndexOf('/') + 1)) {
       const attribute = /^attr\(\s*([-\w]+)\s*\)$/.exec(part);
-      if (attribute !== null) text += el.getAttribute(attribute[1]!) ?? '';
+      if (attribute !== null) text += attrOf(el, attribute[1]!) ?? '';
       else if (part.startsWith('"') || part.startsWith("'")) {
         text += part.slice(1, -1).replace(/\\([0-9a-fA-F]{1,6})\s?|\\(.)/g, (_all, hex: string | undefined, char: string | undefined) =>
           hex === undefined ? char! : String.fromCodePoint(Number.parseInt(hex, 16)));
@@ -567,13 +700,13 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
 
   /** True for a subtree the name computation drops: aria-hidden, or hidden by style as innerText leaves it out. */
   const isNameHidden = (el: Element, style: CSSStyleDeclaration | undefined): boolean =>
-    (el.getAttribute('aria-hidden') ?? '').toLowerCase() === 'true' ||
+    ariaToken(el, 'aria-hidden') === 'true' ||
     (style !== undefined && (style.display === 'none' || style.visibility === 'hidden'));
 
   /** `alt` of an element HTML-AAM names by it: an `<img>` or an `<input type="image">`. */
   const altOf = (el: Element): string | null => {
     const named = el instanceof HTMLImageElement || (el instanceof HTMLInputElement && el.type === 'image');
-    const alt = named ? el.getAttribute('alt') : null;
+    const alt = named ? attrOf(el, 'alt') : null;
     return alt !== null && alt.trim() !== '' ? alt.trim() : null;
   };
 
@@ -625,7 +758,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    */
   const referencedNamesOf = (el: Element, walk: NameWalk): string[] | null => {
     if (walk.inReference) return null;
-    const ids = (el.getAttribute('aria-labelledby') ?? '').trim();
+    const ids = (attrOf(el, 'aria-labelledby') ?? '').trim();
     if (ids === '') return null;
     const contributions: string[] = [];
     for (const id of ids.split(/\s+/)) {
@@ -661,8 +794,8 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   const embeddedControlNameOf = (el: Element, walk: NameWalk): string | null => {
     const role = implicitRole(el);
     if (role === null) return null;
-    if (el.id !== '' && (el.getAttribute('aria-labelledby') ?? '').trim().split(/\s+/).indexOf(el.id) !== -1) return null;
-    if (el.matches(options.secureFieldSelector)) return '';
+    if (el.id !== '' && (attrOf(el, 'aria-labelledby') ?? '').trim().split(/\s+/).indexOf(el.id) !== -1) return null;
+    if (elementMatches(el, options.secureFieldSelector)) return '';
     if (role === 'textbox' || role === 'searchbox') {
       return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el.value : el.textContent ?? '';
     }
@@ -675,15 +808,15 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
         const listbox = role === 'combobox' ? ariaOwnedOf(el).find((owned) => implicitRole(owned) === 'listbox') : el;
         selected = listbox === undefined
           ? []
-          : ariaOwnedOf(listbox).filter((owned) => owned.getAttribute('aria-selected') === 'true' && implicitRole(owned) === 'option');
+          : ariaOwnedOf(listbox).filter((owned) => ariaToken(owned, 'aria-selected') === 'true' && implicitRole(owned) === 'option');
       }
       if (selected.length === 0 && el instanceof HTMLInputElement) return el.value;
       return selected.map((option) => contentNameOf(option, styleOf(option), walk)).join(' ');
     }
     if (role === 'progressbar' || role === 'scrollbar' || role === 'slider' || role === 'spinbutton' || role === 'meter') {
-      if (el.hasAttribute('aria-valuetext')) return el.getAttribute('aria-valuetext') ?? '';
-      if (el.hasAttribute('aria-valuenow')) return el.getAttribute('aria-valuenow') ?? '';
-      return el.getAttribute('value') ?? '';
+      if (hasAttrOf(el, 'aria-valuetext')) return attrOf(el, 'aria-valuetext') ?? '';
+      if (hasAttrOf(el, 'aria-valuenow')) return attrOf(el, 'aria-valuenow') ?? '';
+      return attrOf(el, 'value') ?? '';
     }
     return role === 'menu' ? '' : null;
   };
@@ -695,7 +828,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    */
   const ariaOwnedOf = (el: Element): Element[] => {
     const owned = Array.from(el.querySelectorAll('*'));
-    for (const id of (el.getAttribute('aria-owns') ?? '').trim().split(/\s+/)) {
+    for (const id of (attrOf(el, 'aria-owns') ?? '').trim().split(/\s+/)) {
       const target = id === '' ? null : referencedElementOf(el, id);
       if (target !== null) owned.push(target, ...Array.from(target.querySelectorAll('*')));
     }
@@ -725,15 +858,15 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     if (referenced !== null) return referenced.join(' ');
     const embedded = walk.accessible ? embeddedControlNameOf(el, walk) : null;
     if (embedded !== null) return embedded;
-    const ariaLabel = el.getAttribute('aria-label');
+    const ariaLabel = attrOf(el, 'aria-label');
     if (ariaLabel !== null && ariaLabel.trim() !== '') return ariaLabel.trim();
     const alternative = altOf(el) ?? svgTitleOf(el);
     if (alternative !== null) return alternative;
-    if (NAME_OPAQUE_TAGS.has(el.tagName)) return '';
+    if (NAME_OPAQUE_TAGS.has(rawTagOf(el))) return '';
     if (walk.fromContent && !addsContentToName(el)) return excludedDescendantNameOf(el, walk);
     const content = childrenNameOf(el, walk);
     if (content !== '') return content;
-    const title = el.getAttribute('title');
+    const title = attrOf(el, 'title');
     return title === null ? '' : title.trim();
   };
 
@@ -745,7 +878,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * `status` badge.
    */
   const addsContentToName = (el: Element): boolean => {
-    const tag = el.tagName.toLowerCase();
+    const tag = tagOf(el);
     const role = explicitRole(el) === null && tag in PLAYWRIGHT_TAG_ROLES ? PLAYWRIGHT_TAG_ROLES[tag] ?? null : implicitRole(el);
     return role === null || ACCNAME_CONTENT_ROLES.has(role) || CONTENT_DESCENDANT_ROLES.has(role);
   };
@@ -771,7 +904,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   const excludedDescendantNameOf = (el: Element, walk: NameWalk): string => {
     const caption = namingChildOf(el);
     if (caption !== undefined) return contentNameOf(caption, styleOf(caption), { ...walk, fromContent: false });
-    return el.getAttribute('title')?.trim() ?? '';
+    return attrOf(el, 'title')?.trim() ?? '';
   };
 
   /**
@@ -793,7 +926,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
       if (!(child instanceof Element)) continue;
       const style = styleOf(child);
       const token = contentNameOf(child, style, walk);
-      const block = child.tagName === 'BR' || (style?.display ?? 'inline') !== 'inline';
+      const block = rawTagOf(child) === 'BR' || (style?.display ?? 'inline') !== 'inline';
       out += block ? ` ${token} ` : token;
     }
     return walk.accessible ? out + afterContentOf(el) : out;
@@ -838,7 +971,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    */
   const nameTextOf = (el: Element, accessible: boolean, named: Element = el, fromContent = false): string => {
     if (isNameHidden(el, styleOf(el))) return '';
-    if (NAME_OPAQUE_TAGS.has(el.tagName)) return '';
+    if (NAME_OPAQUE_TAGS.has(rawTagOf(el))) return '';
     return childrenNameOf(el, nameWalk([el, named], accessible, fromContent)).replace(/\s+/g, ' ').trim();
   };
 
@@ -889,8 +1022,8 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
 
   /** The `<legend>`, `<figcaption>`, or `<caption>` child that names a fieldset, figure, or table (`NAMING_CHILD_TAGS`). */
   const namingChildOf = (el: Element): Element | undefined => {
-    const captionTag = NAMING_CHILD_TAGS[el.tagName.toLowerCase()];
-    return captionTag === undefined ? undefined : Array.from(el.children).find((child) => child.tagName.toLowerCase() === captionTag);
+    const captionTag = NAMING_CHILD_TAGS[tagOf(el)];
+    return captionTag === undefined ? undefined : Array.from(el.children).find((child) => tagOf(child) === captionTag);
   };
 
   /** The `<label>` elements associated with a labelable element (button, input, meter, output, progress, select, textarea). */
@@ -902,7 +1035,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   /** The label sources an exact label query may match; see `RawNodeData.labels`. */
   const labelsOf = (el: Element): string[] | null => {
     const labels: string[] = [];
-    const ariaLabel = el.getAttribute('aria-label');
+    const ariaLabel = attrOf(el, 'aria-label');
     if (ariaLabel !== null && ariaLabel.trim() !== '') labels.push(ariaLabel.trim());
     for (const name of referencedNamesOf(el, nameWalk([], false)) ?? []) labels.push(name);
     for (const label of associatedLabels(el)) {
@@ -944,7 +1077,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * that shows itself again is listed on its own.
    */
   const flowsInLine = memoized((el: Element): boolean => {
-    if (LINE_BREAKING_TAGS.indexOf(el.tagName.toLowerCase()) !== -1 || isEditingHost(el)) return false;
+    if (LINE_BREAKING_TAGS.indexOf(tagOf(el)) !== -1 || isEditingHost(el)) return false;
     const style = styleOf(el);
     if (style === undefined || hidesSubtree(el, style)) return false;
     if (el instanceof HTMLSlotElement ? style.visibility !== 'visible' : isHidden(el, style)) return false;
@@ -987,7 +1120,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
       }
       const style = styleOf(inner);
       if (style === undefined || hidesSubtree(inner, style)) continue;
-      const breaking = LINE_BREAKING_TAGS.indexOf(inner.tagName.toLowerCase()) !== -1;
+      const breaking = LINE_BREAKING_TAGS.indexOf(tagOf(inner)) !== -1;
       if (breaking || !isInlineLevel(style) || !isHidden(inner, style)) out += ' ';
     }
     return out;
@@ -1020,9 +1153,9 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * nothing the page can read.
    */
   const offersAction = memoized((el: Element): boolean => {
-    const tabindex = el.getAttribute('tabindex');
+    const tabindex = attrOf(el, 'tabindex');
     if (tabindex !== null && /^\s*[-+]?\d/.test(tabindex)) return true;
-    if (el.tagName.toLowerCase() === 'a' || el.hasAttribute('onclick')) return true;
+    if (tagOf(el) === 'a' || hasAttrOf(el, 'onclick')) return true;
     return el instanceof HTMLElement && el.onclick !== null;
   });
 
@@ -1044,7 +1177,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     // accname reads a labelledby reference (2B) before the element's own aria-label (2C).
     const referenced = referencedNamesOf(el, nameWalk([], true));
     if (referenced !== null) return referenced.join(' ');
-    const ariaLabel = el.getAttribute('aria-label');
+    const ariaLabel = attrOf(el, 'aria-label');
     if (ariaLabel !== null && ariaLabel.trim() !== '') return ariaLabel.trim();
     const labels = associatedLabels(el);
     if (labels.length > 0) {
@@ -1070,14 +1203,14 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
       const text = nameTextOf(el, true, el, ACCNAME_CONTENT_ROLES.has(role));
       if (text !== '') return text;
     }
-    const title = el.getAttribute('title');
+    const title = attrOf(el, 'title');
     if (title !== null && title.trim() !== '') return title.trim();
     // HTML-AAM names an unlabeled text control by its placeholder, after the
     // title: a bare search box is `textbox "Search…"`, not an anonymous field.
     if (isPlaceholderNamed(el)) {
-      const placeholder = el.getAttribute('placeholder');
+      const placeholder = attrOf(el, 'placeholder');
       if (placeholder !== null && placeholder.trim() !== '') return placeholder.trim();
-      const ariaPlaceholder = el.getAttribute('aria-placeholder');
+      const ariaPlaceholder = attrOf(el, 'aria-placeholder');
       if (ariaPlaceholder !== null && ariaPlaceholder.trim() !== '') return ariaPlaceholder.trim();
       if (isEditingHost(el)) return editorPlaceholderOf(el);
     }
@@ -1103,11 +1236,11 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * has content, as the painted hint goes.
    */
   const editorPlaceholderOf = (host: Element): string | null => {
-    const own = host.getAttribute('data-placeholder');
+    const own = attrOf(host, 'data-placeholder');
     if (own !== null && own.trim() !== '') return own.trim();
     for (const block of Array.from(host.querySelectorAll('[data-placeholder]'))) {
       if ((block.textContent ?? '').trim() !== '') continue;
-      const placeholder = block.getAttribute('data-placeholder');
+      const placeholder = attrOf(block, 'data-placeholder');
       if (placeholder !== null && placeholder.trim() !== '') return placeholder.trim();
     }
     return null;
@@ -1187,7 +1320,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   const foldsBody = memoized((details: Element): boolean => {
     const style = details.ownerDocument.defaultView?.getComputedStyle(details, '::details-content');
     const skip = style?.getPropertyValue('content-visibility') ?? '';
-    return skip === '' ? !details.hasAttribute('open') : skipsContents(details, style);
+    return skip === '' ? !hasAttrOf(details, 'open') : skipsContents(details, style);
   });
 
   /**
@@ -1257,12 +1390,12 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   const isDrawnByLabel = (el: Element, style: CSSStyleDeclaration | undefined): boolean => {
     if (!(el instanceof HTMLInputElement) || (el.type !== 'checkbox' && el.type !== 'radio')) return false;
     if (style?.visibility !== 'visible' || isSkippedContent(el)) return false;
-    const INTERACTIVE = 'a,button,input,select,textarea,summary,[contenteditable],[role="button"],[role="link"]';
+    const INTERACTIVE = 'a,button,input,select,textarea,summary,[contenteditable],[role="button" i],[role="link" i]';
     return associatedLabels(el).some(
       (label) =>
         styleOf(label)?.display !== 'contents' &&
         !isHidden(label) &&
-        !label.matches(INTERACTIVE) &&
+        !elementMatches(label, INTERACTIVE) &&
         !Array.from(label.querySelectorAll(INTERACTIVE)).some((inner) => inner !== el),
     );
   };
@@ -1279,7 +1412,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * unlisted.
    */
   const hidesSubtree = (el: Element, style: CSSStyleDeclaration | undefined): boolean =>
-    (el.getAttribute('aria-hidden') ?? '').toLowerCase() === 'true' ||
+    ariaToken(el, 'aria-hidden') === 'true' ||
     isInert(el, style) ||
     style === undefined ||
     style.display === 'none' ||
@@ -1296,7 +1429,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * (`modalScopeOf`).
    */
   const isInert = (el: Element, style: CSSStyleDeclaration | undefined): boolean =>
-    el.hasAttribute('inert') || style?.getPropertyValue('interactivity') === 'inert';
+    hasAttrOf(el, 'inert') || style?.getPropertyValue('interactivity') === 'inert';
 
   /**
    * The order the context's init script saw each modal dialog shown in, when
@@ -1315,7 +1448,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   const isOpenModalDialog = (el: Element): boolean => {
     if (el.localName !== 'dialog') return false;
     try {
-      return el.matches('dialog:modal');
+      return elementMatches(el, 'dialog:modal');
     } catch {
       return false;
     }
@@ -1350,7 +1483,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   /** The slot an element is assigned to: `assignedSlot`, which a closed root hides from the outside, else the tracked closed root's slot for it. */
   const slotOf = (el: Element): Element | null => {
     if (el.assignedSlot !== null) return el.assignedSlot;
-    const host = el.parentElement;
+    const host = parentOf(el);
     const shadow = host === null ? undefined : closedShadowRoots?.get(host);
     if (shadow === undefined) return null;
     const manual = shadow.slotAssignment === 'manual';
@@ -1445,7 +1578,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   /** A closed select has no option boxes; explicit exclusions still remove choices it does not offer. */
   const isOfferedOption = (option: HTMLOptionElement): boolean => {
     if (isSkippedContent(option)) return false;
-    for (let current: Element | null = option; current !== null && current.tagName.toLowerCase() !== 'select'; current = parentOrHostOf(current)) {
+    for (let current: Element | null = option; current !== null && tagOf(current) !== 'select'; current = parentOrHostOf(current)) {
       if (hidesSubtree(current, styleOf(current))) return false;
     }
     return true;
@@ -1491,7 +1624,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     const style = styleOf(el);
     if (style === undefined) return false;
     if (el.children.length > 0) return false;
-    const explicit = (el.getAttribute('role') ?? '').trim();
+    const explicit = (attrOf(el, 'role') ?? '').trim();
     if (explicit !== '') return false;
     if (directTextOf(el) !== '') return false;
     const rect = el.getBoundingClientRect();
@@ -1544,7 +1677,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    */
   const namedSelectorOf = (el: Element): string | null => {
     for (const attribute of NAMING_ATTRIBUTES) {
-      const value = el.getAttribute(attribute);
+      const value = attrOf(el, attribute);
       if (value === null || value === '') continue;
       const selector = `[${attribute}="${value.replace(/["\\]/g, '\\$&')}"]`;
       let unique: boolean;
@@ -1576,11 +1709,11 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     if (named !== null) return { selector: named, anchored: true };
     const parts: string[] = [];
     let current: Element | null = el;
-    while (current !== null && current.tagName.toLowerCase() !== 'html') {
-      const parent: Element | null = current.parentElement;
+    while (current !== null && tagOf(current) !== 'html') {
+      const parent: Element | null = parentOf(current);
       if (parent === null) break;
       const index = Array.prototype.indexOf.call(parent.children, current) + 1;
-      parts.unshift(`${current.tagName.toLowerCase()}:nth-child(${index})`);
+      parts.unshift(`${tagOf(current)}:nth-child(${index})`);
       const anchor = namedSelectorOf(parent);
       if (anchor !== null) return { selector: `${anchor} > ${parts.join(' > ')}`, anchored: true };
       current = parent;
@@ -1627,7 +1760,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
 
   /** The parent `aria-disabled` inherits across: the tree parent, or the host at a shadow root. */
   const parentOrHostOf = (el: Element): Element | null => {
-    if (el.parentElement !== null) return el.parentElement;
+    if (parentOf(el) !== null) return parentOf(el);
     const root = el.getRootNode();
     return root instanceof ShadowRoot ? root.host : null;
   };
@@ -1639,7 +1772,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * disabled ancestor costs one walk, not one per node.
    */
   const ariaDisabledInChain = memoized((el: Element): boolean => {
-    const attribute = (el.getAttribute('aria-disabled') ?? '').toLowerCase();
+    const attribute = ariaToken(el, 'aria-disabled');
     if (attribute === 'true') return true;
     if (attribute === 'false') return false;
     const parent = parentOrHostOf(el);
@@ -1655,8 +1788,8 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * applies to, as Playwright reads it.
    */
   const isDisabled = (el: Element): boolean => {
-    if (el.matches(':disabled')) return true;
-    if (el.getAttribute('aria-disabled') === 'true') return true;
+    if (elementMatches(el, ':disabled')) return true;
+    if (ariaToken(el, 'aria-disabled') === 'true') return true;
     const role = implicitRole(el);
     return role !== null && ARIA_DISABLED_ROLES.indexOf(role) !== -1 && ariaDisabledInChain(el);
   };
@@ -1676,12 +1809,12 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * read-only state: Playwright's `toBeEditable` throws on it.
    */
   const readOnlyOf = (el: Element, tag: string, role: string | null): boolean | null => {
-    if (tag === 'input' || tag === 'textarea' || tag === 'select') return el.hasAttribute('readonly');
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return hasAttrOf(el, 'readonly');
     // Playwright reads `aria-readonly` by the element's ARIA role, and an
     // editing host with no ARIA role is editable whatever that attribute says.
     const ariaRole = isEditingHost(el) ? ariaRoleOf(el) : role;
     if (ariaRole !== null && ARIA_READONLY_ROLES.indexOf(ariaRole) !== -1) {
-      return (el.getAttribute('aria-readonly') ?? '').toLowerCase() === 'true';
+      return ariaToken(el, 'aria-readonly') === 'true';
     }
     if (el instanceof HTMLElement && el.isContentEditable) return false;
     return null;
@@ -1705,8 +1838,8 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   };
 
   const describe = (el: Element, style = styleOf(el)): RawNodeData => {
-    const tag = el.tagName.toLowerCase();
-    const autocomplete = (el.getAttribute('autocomplete') ?? '').toLowerCase();
+    const tag = tagOf(el);
+    const autocomplete = (attrOf(el, 'autocomplete') ?? '').toLowerCase();
 
     let value: string | null = null;
     let checked: boolean | null = null;
@@ -1744,22 +1877,22 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     // nothing about what the browser will submit. ARIA fills in only where the
     // element has no native state.
     if (checked === null) {
-      const ariaChecked = el.getAttribute('aria-checked');
+      const ariaChecked = ariaToken(el, 'aria-checked');
       if (ariaChecked !== null) checked = ariaChecked === 'true';
     }
     if (selectedState === null) {
-      const ariaSelected = el.getAttribute('aria-selected');
-      if (ariaSelected !== null) selectedState = ariaSelected.toLowerCase() === 'true';
+      const ariaSelected = ariaToken(el, 'aria-selected');
+      if (ariaSelected !== null) selectedState = ariaSelected === 'true';
     }
 
     const disabled = isDisabled(el);
 
-    const ariaExpanded = el.getAttribute('aria-expanded');
-    const ariaPressed = el.getAttribute('aria-pressed');
+    const ariaExpanded = ariaToken(el, 'aria-expanded');
+    const ariaPressed = ariaToken(el, 'aria-pressed');
     // Matched against the shared selector rather than re-derived from tag and
     // type, so this node's `secure` flag and the screenshot mask agree by
     // construction.
-    const secure = el.matches(options.secureFieldSelector);
+    const secure = elementMatches(el, options.secureFieldSelector);
     let selection: string | null = null;
     if (focusedElement === el && !secure) {
       selection = selectedTextOf(el);
@@ -1813,7 +1946,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     const role = isDocumentRoot ? 'document' : roleOf(el, tag);
     let level: number | null = null;
     if (role === 'heading') {
-      const ariaLevel = Number.parseInt(el.getAttribute('aria-level') ?? '', 10);
+      const ariaLevel = Number.parseInt(attrOf(el, 'aria-level') ?? '', 10);
       if (Number.isInteger(ariaLevel) && ariaLevel > 0) level = ariaLevel;
       else if (/^h[1-6]$/.test(tag)) level = Number(tag.slice(1));
       // HTML-AAM: a role="heading" element with no aria-level is level 2.
@@ -1842,7 +1975,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
       },
       level,
       attributes,
-      testId: el.getAttribute(options.testIdAttribute),
+      testId: attrOf(el, options.testIdAttribute),
       rect: rect === null ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
       origin: rect === null || (borderLeft === 0 && borderTop === 0) ? null : { x: rect.x + borderLeft, y: rect.y + borderTop },
     };
@@ -1851,6 +1984,8 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   // The conditional return type resolves per call site; inside the body the
   // discriminant narrows the value but not the generic, hence the casts.
   if (options.mode.kind === 'hidden') return isHidden(element) as SemanticResult<Mode>;
+  if (options.mode.kind === 'disabled') return isDisabled(element) as SemanticResult<Mode>;
+  if (options.mode.kind === 'ariaRole') return ariaRoleOf(element) as SemanticResult<Mode>;
   if (options.mode.kind === 'node') {
     return describe(element) as SemanticResult<Mode>;
   }
@@ -1887,7 +2022,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
 
   /** True when a node carries semantics worth sending to a model. */
   const isInteresting = (el: Element): boolean => {
-    if (el.hasAttribute(options.testIdAttribute)) return true;
+    if (hasAttrOf(el, options.testIdAttribute)) return true;
     if (implicitRole(el) !== null && !isPresentational(el)) return true;
     if (accessibleName(el) !== null) return true;
     if (offersAction(el) && isReadInLine(el)) return lineTextOf(el) !== '';
@@ -1896,7 +2031,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
 
   const walk = (el: Element, parent: number): void => {
     if (truncated) return;
-    const tag = el.tagName.toLowerCase();
+    const tag = tagOf(el);
     if (SKIP_TAGS.indexOf(tag) !== -1) return;
     // Read once and share: `isHidden` and the empty-box test both need it, and
     // this walk already pays one `getComputedStyle` per node.
@@ -1924,7 +2059,7 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
       const node = nodes[index]!;
       node.frameSelector = frameSelectorOf(el);
       if (node.name === null) {
-        const title = el.getAttribute('title');
+        const title = attrOf(el, 'title');
         if (title !== null && title.trim() !== '') node.name = title.trim();
       }
       return;

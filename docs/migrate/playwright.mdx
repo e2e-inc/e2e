@@ -367,6 +367,10 @@ purpose. Use the workaround, or keep the test in Playwright.
   screen.getByRole('button', 'save changes');          // no match, case differs
   screen.getByLabel('Email');                                    // no match
   ```
+- `getByRole` follows the matchers where Playwright's role engine differs, so
+  a locator finds what `toHaveRole` and `toBeDisabled` then read: a `<header>`
+  or `<footer>` is the page's `banner` or `contentinfo` by Chrome's scope rule,
+  and the `disabled` filter counts an element's own `aria-disabled` on any role.
 - Text reads are rendered text. `textContent()`, `toHaveText`, and
   `toContainText` read what `innerText` returns, so hidden text is left out
   and `text-transform` applies. See [locator reads](/reference/screen#locator-reads).

@@ -45,6 +45,71 @@ async function captureByTestId(): Promise<Map<string | undefined, SemanticNode>>
   return new Map(nodes.map((node) => [node.testId, node]));
 }
 
+describe('header scope', () => {
+  it('does not re-walk the ancestors for each role token that needs context', async () => {
+    await page.setContent('<!doctype html><body></body>');
+    await page.evaluate(() => {
+      let parent: Element = document.body;
+      for (let depth = 0; depth < 16; depth += 1) {
+        const wrapper = document.createElement('div');
+        wrapper.setAttribute('role', 'treeitem listitem');
+        parent.append(wrapper);
+        parent = wrapper;
+      }
+      parent.insertAdjacentHTML('beforeend', '<header data-testid="deep">x</header>');
+      const original = Element.prototype.getAttribute;
+      const counted = globalThis as unknown as { attributeReads: number; originalGetAttribute: typeof original };
+      counted.attributeReads = 0;
+      counted.originalGetAttribute = original;
+      Element.prototype.getAttribute = function getAttribute(this: Element, name: string) {
+        counted.attributeReads += 1;
+        return original.call(this, name);
+      };
+    });
+    const options = { testIdAttribute: 'data-testid', secureFieldSelector: SECURE_FIELD_SELECTOR, mode: { kind: 'ariaRole' as const } };
+    let role: string | null;
+    let reads: number;
+    try {
+      role = await page.getByTestId('deep').evaluate(readSemanticsFunction<typeof options.mode>, options);
+      reads = await page.evaluate(() => (globalThis as unknown as { attributeReads: number }).attributeReads);
+    } finally {
+      await page.evaluate(() => {
+        Element.prototype.getAttribute = (globalThis as unknown as { originalGetAttribute: typeof Element.prototype.getAttribute }).originalGetAttribute;
+      });
+    }
+    expect(role).toBe('banner');
+    expect(reads).toBeLessThan(5_000);
+  });
+});
+
+describe('header scope with a shadowing form field', () => {
+  it('reads a header in a form whose field is named parentElement without looping', async () => {
+    await page.setContent('<form aria-label="Looped"><input name="parentElement"><header data-testid="looped">Site</header></form>');
+    const options = { testIdAttribute: 'data-testid', secureFieldSelector: SECURE_FIELD_SELECTOR, mode: { kind: 'ariaRole' as const } };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const role = await Promise.race([
+      page.getByTestId('looped').evaluate(readSemanticsFunction<typeof options.mode>, options),
+      new Promise<string>((resolve) => { timer = setTimeout(() => resolve('timed out'), 3_000); }),
+    ]).finally(() => clearTimeout(timer));
+    expect(role).toBe('banner');
+  });
+});
+
+describe('exact region scope', () => {
+  it('keeps a header under an exact role="region" from being the banner', async () => {
+    await page.setContent('<div role="region"><header data-testid="r">Top</header></div><div role="Region"><header data-testid="R">Top</header></div>');
+    const options = { testIdAttribute: 'data-testid', secureFieldSelector: SECURE_FIELD_SELECTOR, mode: { kind: 'ariaRole' as const } };
+    expect(await page.getByTestId('r').evaluate(readSemanticsFunction<typeof options.mode>, options)).not.toBe('banner');
+    expect(await page.getByTestId('R').evaluate(readSemanticsFunction<typeof options.mode>, options)).toBe('banner');
+  });
+  it('folds ARIA tokens in ASCII only, as Chrome does', async () => {
+    await page.setContent('<div role="lin\u212A" data-testid="k">Kelvin</div><div role="LINK" data-testid="l">Upper</div>');
+    const options = { testIdAttribute: 'data-testid', secureFieldSelector: SECURE_FIELD_SELECTOR, mode: { kind: 'ariaRole' as const } };
+    expect(await page.getByTestId('k').evaluate(readSemanticsFunction<typeof options.mode>, options)).not.toBe('link');
+    expect(await page.getByTestId('l').evaluate(readSemanticsFunction<typeof options.mode>, options)).toBe('link');
+  });
+});
+
 describe('checked and selected', () => {
   it('lists closed-select choices but excludes explicitly hidden options and optgroups', async () => {
     await page.setContent(`
@@ -95,6 +160,8 @@ describe('checked and selected', () => {
       <label><input class="shrunk" type="checkbox" data-testid="link">Accept <a href="#terms">the terms</a></label>
       <label role="button"><input class="shrunk" type="checkbox" data-testid="button-label">Button</label>
       <label role="link"><input class="shrunk" type="checkbox" data-testid="link-label">Link</label>
+      <label role="Button"><input class="shrunk" type="checkbox" data-testid="button-label-upper">Button upper</label>
+      <label role="LINK"><input class="shrunk" type="checkbox" data-testid="link-label-upper">Link upper</label>
       <label contenteditable><input class="shrunk" type="checkbox" data-testid="editable-label">Editable</label>
       <script>
         customElements.define('skip-slot', class extends HTMLElement {
@@ -105,7 +172,7 @@ describe('checked and selected', () => {
       </script>
     `);
     const nodes = await captureByTestId();
-    for (const id of ['invisible', 'text', 'skipped', 'contents', 'link', 'button-label', 'link-label', 'editable-label']) {
+    for (const id of ['invisible', 'text', 'skipped', 'contents', 'link', 'button-label', 'link-label', 'button-label-upper', 'link-label-upper', 'editable-label']) {
       expect(nodes.has(id), id).toBe(false);
     }
   });
@@ -142,6 +209,42 @@ describe('checked and selected', () => {
     expect(nodes.get('embedded')?.name).toBe('Pick Chosen');
     expect(await page.getByRole('tab', { selected: true }).allTextContents()).toEqual(['All', 'Recent']);
     expect(await page.getByRole('button', { name: 'Pick Chosen', exact: true }).count()).toBe(1);
+  });
+
+  it('reads roles and checked, expanded, pressed, and disabled values without case sensitivity, as Chrome does', async () => {
+    await page.setContent(`
+      <div role="checkbox" aria-checked="True" tabindex="0" data-testid="checked">Remember me</div>
+      <div role="Switch" aria-checked="TRUE" tabindex="0" data-testid="switch">Wi-Fi</div>
+      <button aria-expanded="True" data-testid="expanded">Menu</button>
+      <button aria-pressed="TRUE" data-testid="pressed">Bold</button>
+      <h3 aria-disabled="TrUe" data-testid="disabled">Archived</h3>
+      <div role="Button" tabindex="0" data-testid="role">Save</div>
+      <header data-testid="page-header">Site</header>
+      <div role="Article" aria-label="Post"><header data-testid="article-header">Post header</header></div>
+      <div role="group ARTICLE"><header data-testid="upper-fallback-header">Site header</header></div>
+      <div role="group article"><header data-testid="lower-fallback-header">Site header</header></div>
+      <div role="Region" aria-label="R1"><header data-testid="mixed-region-header">Region header</header></div>
+      <div role="REGION"><header data-testid="upper-region-header">Region header</header></div>
+      <div role="button" data-testid="embedded">Pick <div role="listbox"><div role="option" aria-selected="TRUE">Chosen</div><div role="option" aria-selected="false">Other</div></div></div>
+    `);
+    const nodes = await captureByTestId();
+    expect(nodes.get('checked')?.states?.checked).toBe(true);
+    expect(nodes.get('switch')).toMatchObject({ role: 'switch', states: { checked: true } });
+    expect(nodes.get('expanded')?.states?.expanded).toBe(true);
+    expect(nodes.get('pressed')?.states?.pressed).toBe(true);
+    // A heading is outside the roles an inherited aria-disabled reaches, so only the element's own read counts.
+    expect(nodes.get('disabled')).toMatchObject({ role: 'heading', states: { disabled: true } });
+    expect(nodes.get('role')).toMatchObject({ role: 'button', name: 'Save' });
+    // A header is the page banner unless a sectioning role scopes it, in any case.
+    expect(nodes.get('page-header')?.role).toBe('banner');
+    expect(nodes.get('article-header')?.role).not.toBe('banner');
+    // Only an ancestor's first recognized role token scopes a header, as Chrome reads it.
+    expect(nodes.get('upper-fallback-header')?.role).toBe('banner');
+    expect(nodes.get('lower-fallback-header')?.role).toBe('banner');
+    // Chrome never scopes a header by region; only the lowercase token Playwright's [role=region] matches does.
+    expect(nodes.get('mixed-region-header')?.role).toBe('banner');
+    expect(nodes.get('upper-region-header')?.role).toBe('banner');
+    expect(nodes.get('embedded')?.name).toBe('Pick Chosen');
   });
 
   it('excludes uppercase hidden subtrees from observations and names but reads hidden references whole', async () => {

@@ -8,6 +8,8 @@ import type { Locator as PwLocator, Page } from 'playwright-core';
 import { describe, expect, it } from 'vitest';
 import type { LocatorExpression, TextPattern } from '@e2e-dev/core/engine';
 import { applyPostSteps, frameSelectors, projectExpression as projectWith, type PostStep } from '../../src/locators.ts';
+import { SECURE_FIELD_SELECTOR } from '../../src/read-node.ts';
+import { readsAsSelector } from '../../src/reads-as-selector.ts';
 
 /** A chain-recording stand-in for a Playwright locator. */
 interface FakeLocator {
@@ -198,7 +200,11 @@ describe('projectExpression', () => {
       kind: 'query',
       query: { kind: 'role', value: { kind: 'string', value: 'checkbox', exact: true }, states: { checked: true, disabled: false } },
     };
-    expect(chainOf(projectExpression(page, checkbox).locator)).toEqual([ROOTS, 'role(checkbox,{"checked":true,"disabled":false})']);
+    expect(chainOf(projectExpression(page, checkbox).locator)).toEqual([
+      ROOTS,
+      'role(checkbox,{"checked":true})',
+      `locator(${readsAsSelector({ disabled: false, testIdAttribute: 'data-testid', secureFieldSelector: SECURE_FIELD_SELECTOR })})`,
+    ]);
   });
 
   it('spells the contract image role as the img role the selector knows', () => {

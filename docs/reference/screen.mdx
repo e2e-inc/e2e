@@ -106,8 +106,12 @@ The web engine derives the roles from HTML the way HTML-AAM does:
   `columnheader`.
 - `<figure>` is `figure`, `<article>` is `article`.
 - `<header>` and `<footer>` are `banner` and `contentinfo` only outside
-  sectioning content or an element with a sectioning role (`article`,
-  `complementary`, `main`, `navigation`, `region`).
+  sectioning content and outside an element with a sectioning role. As in
+  Chrome, a sectioning tag scopes unless a `role` Chrome accepts replaces it,
+  and a sectioning role is a first accepted token of `article`,
+  `complementary`, `main`, or `navigation` in any letter case. A `role` of
+  exactly `region` scopes too, as Playwright's `[role=region]` does, though
+  Chrome does not. `getByRole` finds them by the same rule.
 - `<form>` and `<section>` are `form` and `region` only when they carry an
   `aria-label`, `aria-labelledby`, or `title`.
 - `<menu>` is a `list`; only `role="menu"` is a `menu`.

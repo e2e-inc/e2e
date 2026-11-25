@@ -21,6 +21,8 @@ import {
   type ActionTarget,
 } from './support.ts';
 import type { ConnectionBudget } from './operation-budget.ts';
+import { readSemanticsFunction } from './in-page/read-semantics.ts';
+import { SECURE_FIELD_SELECTOR } from './read-node.ts';
 
 /** How long a long press holds the button when the action names no duration. */
 const DEFAULT_LONG_PRESS_MS = 500;
@@ -117,7 +119,7 @@ function pickStandIn(node: Element, unrendered: string): HTMLLabelElement | null
   const labels = [...(node.labels ?? [])];
   const root = node.getRootNode();
   if (labels.length === 0 || (!(root instanceof Document) && !(root instanceof ShadowRoot))) return null;
-  const INTERACTIVE = 'a,button,input,select,textarea,summary,[contenteditable],[role="button"],[role="link"]';
+  const INTERACTIVE = 'a,button,input,select,textarea,summary,[contenteditable],[role="button" i],[role="link" i]';
   const hasBox = ({ width, height }: DOMRect): boolean => width > 0 && height > 0;
   const centre = ({ left, top, width, height }: DOMRect): [number, number] => [left + width / 2, top + height / 2];
   const topmost = (x: number, y: number): Element | undefined =>
@@ -214,16 +216,27 @@ async function clickControl(
   }
 }
 
+/** Reads one node's semantics; the role is all `radioKind` takes from it, so the test id attribute is moot. */
+const NODE_READ = { testIdAttribute: 'data-testid', secureFieldSelector: SECURE_FIELD_SELECTOR, mode: { kind: 'node' } } as const;
+
 /**
  * Which kind of radio a checkable element is, if any. A native radio can be
  * selected but never cleared by a click. An ARIA radio is clicked like any
- * control, as Playwright does: its script decides what a click does.
+ * control, as Playwright does: its script decides what a click does. Its role
+ * is the one the tree reads, the first recognized token in any letter case.
  */
-function radioKind(element: ElementHandle<Element>): Promise<'native' | 'aria' | undefined> {
-  return element.evaluate((node) => {
+async function radioKind(element: ElementHandle<Element>): Promise<'native' | 'aria' | undefined> {
+  const kind = await element.evaluate((node) => {
     if (node instanceof HTMLInputElement && node.type === 'radio') return 'native';
-    return node.getAttribute('role') === 'radio' ? 'aria' : undefined;
+    const tokens = (node.getAttribute('role') ?? '').toLowerCase().split(/[ \t\n\f\r]+/).filter((token) => token !== '');
+    // A first token of radio is the role. Only a later one needs the reader's verdict; menuitemradio and radiogroup do not.
+    if (tokens[0] === 'radio') return 'aria';
+    return tokens.indexOf('radio') !== -1 ? 'maybe' : undefined;
   });
+  if (kind !== 'maybe') return kind;
+  // The role only adds a hint to a failure message, so a reader that cannot read this node must not stop the click.
+  const node = await element.evaluate(readSemanticsFunction<typeof NODE_READ.mode>, NODE_READ).catch(() => undefined);
+  return node?.role === 'radio' ? 'aria' : undefined;
 }
 
 /**
