@@ -350,6 +350,7 @@ The test's report covers the session:
 | Secrets | The host redacts the config's secrets, and the report redacts the host's until the test ends. |
 | A host or session the test opened | Closed when the test ends, if still open. One a worker fixture or a `beforeAll` hook opened is left open, and records no video. |
 | A step left running | Fails the test with `STEP_NOT_AWAITED`, and its session is closed. |
+| A `launch` or `newSession` left running | Fails the test with `STEP_NOT_AWAITED`, and the opening is cancelled. One that failed and whose error the test caught does not fail the test. |
 
 ## Next
 

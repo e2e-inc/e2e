@@ -117,6 +117,54 @@ test('never awaits the session it opens', async ({ app }) => {
   host.newSession();
 });
 
+// Each opening below is awaited and its rejection caught: the test meets the failure, so it has nothing of it left in flight.
+const refusal = async (opening) => {
+  try {
+    await opening;
+  } catch (cause) {
+    return cause.code;
+  }
+  return 'opened';
+};
+
+test('catches a launch refused for its options', async ({ app }) => {
+  await app.open();
+  globalThis.launchReportRefused = { options: await refusal(launch(second(), { app: FAKE_APP, handleSignals: false, bogus: true })) };
+});
+
+test('catches a launch whose engine fails to start', async ({ app }) => {
+  await app.open();
+  globalThis.launchReportRefused.init = await refusal(open({ onInit: () => { throw new Error('no device left'); } }));
+});
+
+test('catches a launch that cannot make its output directory', async ({ app }) => {
+  await app.open();
+  const saved = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP };
+  const missing = '/nonexistent-e2e-launch-tmp';
+  Object.assign(process.env, { TMPDIR: missing, TMP: missing, TEMP: missing });
+  // The directory is named when launch is called, before its first await.
+  const launching = open();
+  for (const [name, value] of Object.entries(saved)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+  globalThis.launchReportRefused.mkdtemp = await refusal(launching);
+});
+
+test('catches a session refused for its state', async ({ app }) => {
+  await app.open();
+  const host = await open();
+  globalThis.launchReportRefused.state = await refusal(host.newSession({ state: 'not a state' }));
+  await host.close();
+});
+
+test('catches a session whose engine fails to start it', async ({ app }) => {
+  await app.open();
+  const host = await open({ onStartAttempt: () => { throw new Error('the app crashed on launch'); } });
+  globalThis.launchReportRefused.start = await refusal(host.newSession());
+  await host.close();
+});
+
 test('fails a locator on the second session', async ({ app }) => {
   await app.open();
   const host = await launch(second(), { app: FAKE_APP, handleSignals: false, timeout: 200 });
@@ -330,6 +378,22 @@ describe('a launch() session opened inside a test, in the test\'s report', { tim
     expect(attempt.secondaryErrors).toEqual([]);
     expect(outcome.report.run.errors).toEqual([]);
     expect(outcome.report.run.results.flatMap((result) => result.attempts).filter((each) => each.error?.code === 'UNHANDLED_REJECTION')).toEqual([]);
+  });
+
+  it('passes a test that awaited a launch or newSession and caught its rejection', () => {
+    const titles = [
+      'catches a launch refused for its options',
+      'catches a launch whose engine fails to start',
+      'catches a launch that cannot make its output directory',
+      'catches a session refused for its state',
+      'catches a session whose engine fails to start it',
+    ];
+    expect(Object.fromEntries(titles.map((title) => [title, attemptOf(title).error?.code ?? attemptOf(title).status]))).toEqual(Object.fromEntries(titles.map((title) => [title, 'passed'])));
+    expect(titles.flatMap((title) => attemptOf(title).secondaryErrors)).toEqual([]);
+    // Each opening did fail, and the test caught what it failed with.
+    const refused = (globalThis as { launchReportRefused?: Record<string, string> }).launchReportRefused;
+    expect(refused).toEqual({ options: 'INVALID_ARGUMENT', init: expect.any(String), mkdtemp: 'ENOENT', state: 'INVALID_ARGUMENT', start: expect.any(String) });
+    expect(Object.values(refused!)).not.toContain('opened');
   });
 
   it('shows the test\'s own screen for a failure on the second session, without matching that session\'s locator against it', () => {

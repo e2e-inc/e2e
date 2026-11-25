@@ -137,19 +137,21 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
     const got = typeof engine === 'function' ? 'a function' : engine === null ? 'null' : typeof engine;
     throw new TestError('INVALID_ARGUMENT', `launch takes an engine as its first argument and got ${got}: call the engine's factory, such as launch(web()) with web from @e2e-dev/web/engine`);
   }
-  /** What the test launching the host offers, when one is, and the host's seat in it: reserved before anything is awaited, so the host is that test's and no later one's. */
-  const owner = currentGuests();
-  const seat = owner?.host();
+  // Checked before the seat is reserved: a launch these refuse opens nothing the test must answer for.
   rejectUnknownOptions('launch', options, LAUNCH_OPTION_KEYS);
   if (options.app !== undefined) rejectUnknownKeys('launch app', options.app, LAUNCH_APP_KEYS, 'INVALID_ARGUMENT');
   const timeout = options.timeout;
   if (timeout !== undefined && (!Number.isInteger(timeout) || timeout <= 0)) {
     throw new TestError('INVALID_ARGUMENT', 'launch timeout must be a positive integer number of milliseconds');
   }
+  /** What the test launching the host offers, when one is, and the host's seat in it: reserved before anything is awaited, so the host is that test's and no later one's. */
+  const owner = currentGuests();
+  const seat = owner?.host();
   const ownsArtifacts = options.artifactsDir === undefined;
   const projectRoot = path.resolve(options.cwd ?? process.cwd());
-  const output = options.artifactsDir === undefined ? await mkdtemp(path.join(os.tmpdir(), 'e2e-core-')) : path.resolve(projectRoot, options.artifactsDir);
-  const removeOutput = (): Promise<void> => ownsArtifacts ? rm(output, { recursive: true, force: true }) : Promise.resolve();
+  /** The host's output directory, once there is one: a temporary one is made inside the opening, so a failure to make it gives the seat back too. */
+  let output: string | undefined;
+  const removeOutput = (): Promise<void> => ownsArtifacts && output !== undefined ? rm(output, { recursive: true, force: true }) : Promise.resolve();
   const handlesSignals = options.handleSignals !== false;
   /** Runs an opening, with the signal listeners the engine registers in it marked as the engine's. */
   const opening = async <T>(open: () => Promise<T>): Promise<T> => {
@@ -160,6 +162,8 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
   /** Stops sharing the host's secrets with the sessions beside it; set once they are shared. */
   let withdrawSecrets = (): void => undefined;
   try {
+    const dir = options.artifactsDir === undefined ? await mkdtemp(path.join(os.tmpdir(), 'e2e-core-')) : path.resolve(projectRoot, options.artifactsDir);
+    output = dir;
     opened = await opening(async () => {
       const env = options.env ?? process.env;
       // Before the engine prepares with it: a failure there can quote a key only this environment holds.
@@ -177,7 +181,7 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
         { projectRoot, env },
       );
       // Set past resolution, which keeps a run's output inside its project: a host's lives where the program says.
-      const config: ResolvedConfig = { ...resolved, output };
+      const config: ResolvedConfig = { ...resolved, output: dir };
       withdrawSecrets = shareStaticSecrets(config.allSecrets);
       const target = config.targets[0]!;
       const notice = options.onNotice;
@@ -195,6 +199,8 @@ export async function launch<Fixtures extends object = {}>(engine: EngineHandle<
     withdrawSecrets();
     await removeOutput();
     if (seat?.signal.aborted === true) owner?.gaveUp(cause);
+    // The caller meets this rejection, so nothing of the opening is left running in the test.
+    else seat?.release?.();
     throw cause;
   }
   const { config, target, host } = opened;
