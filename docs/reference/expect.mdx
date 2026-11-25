@@ -289,10 +289,10 @@ await expect(screen.getByLabel('Search')).toHaveValue('');
   that is not a native form control or an editor reads its `aria-valuetext`,
   else its `aria-valuenow`, skipping a blank one. Without either, a native
   `<progress>` or `<meter>` with a `value` attribute reads the browser's
-  built-in `.value`, clamped to its range, even when the page overrides that
-  getter. A `slider` or `spinbutton` with none reads as `''`, and any other
-  widget with none, such as an indeterminate `<progress>`, has no value and is
-  refused.
+  built-in `.value`, clamped to its range, even when a customized built-in
+  (`<progress is="...">`) overrides that getter. A `slider` or `spinbutton`
+  with none reads as `''`, and any other widget with none, such as an
+  indeterminate `<progress>`, has no value and is refused.
 - On a device, a node reads the accessibility value the platform reports.
   Android drops the value of a non-editable node when it repeats the node's
   label.
