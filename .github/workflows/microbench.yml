@@ -145,12 +145,14 @@ jobs:
           if-no-files-found: ignore
 
   # Posts both jobs' results to the pull request as one comment and edits it
-  # on every run (scripts/microbench/post-comment.ts). A fork's or
-  # Dependabot's pull request gets a read-only token, so it gets no comment;
-  # the job summaries still hold the tables.
+  # on every run (scripts/microbench/post-comment.ts). A fork's pull request
+  # and a run Dependabot triggers get a read-only token, so they get no
+  # comment. A Dependabot pull request gets none either, even when a
+  # maintainer's push triggers the run; the job summaries still hold the
+  # tables.
   comment:
     needs: [repeatability, compare]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
