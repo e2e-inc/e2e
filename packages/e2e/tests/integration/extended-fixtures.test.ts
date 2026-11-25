@@ -211,4 +211,36 @@ test('times out in hook', { timeout: 100 }, async () => {
       process.off('e2e-late-hook-finished', finishHook);
     }
   });
+  it('aborts the engine calls of a body that resumes after its timeout, with a fixture teardown in between', async () => {
+    const file = `import { test as base } from 'e2e';
+
+const test = base.extend<{ guard: void }>({
+  guard: [async ({}, use) => { await use(); }, { auto: true }],
+});
+
+test('times out', { timeout: 300 }, async ({ app }) => {
+  await new Promise<void>((resolve) => process.once('e2e-late-body-release', resolve));
+  await app.open('/late').catch(() => undefined);
+  process.emit('e2e-late-body-finished');
+});
+test('next test', async ({ app }) => {
+  await app.open('/next');
+  const finished = new Promise<void>((resolve) => process.once('e2e-late-body-finished', resolve));
+  process.emit('e2e-late-body-release');
+  await finished;
+});
+`;
+    const fake = createFakeEngine();
+    const { outcome, project } = await runProject({ 'tests/late-body.e2e.ts': file }, { config: engineConfig(fake.engine) });
+    try {
+      const abandoned = resultByTitle(outcome, 'times out');
+      expect(abandoned.status).toBe('timed-out');
+      expect(resultByTitle(outcome, 'next test').status).toBe('passed');
+      // The teardown's budget was the last one the attempt entered, and it never aborted.
+      const late = fake.operations.filter((operation) => operation.attemptId === abandoned.attempts[0]!.id && operation.method.endsWith('/late)'));
+      expect(late.map((operation) => operation.abortedAtCall)).toEqual([true]);
+    } finally {
+      project.cleanup();
+    }
+  }, 120_000);
 });

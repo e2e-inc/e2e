@@ -50,6 +50,16 @@ export class AttemptBudget {
   }
 
   /**
+   * Ends the running phase: every operation that reads the budget is
+   * cancelled until a later phase enters. A body or hook abandoned at its
+   * timeout reads it when it resumes, by then while the next test runs on
+   * the same engine.
+   */
+  end(): void {
+    this.current = { signal: AbortSignal.abort(), deadline: new Deadline(0) };
+  }
+
+  /**
    * Gives the running phase a deadline `remainingMs` from now, keeping its
    * signal: the test clock running again after `e2e run --step` held a step.
    */

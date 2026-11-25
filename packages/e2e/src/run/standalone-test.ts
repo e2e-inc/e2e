@@ -428,7 +428,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       );
     }
     // Parked until teardown: a body that outlived its turn finds every harness call refused.
-    budget.enter(env.signal, 1).abort();
+    budget.end();
     const verdict: { status: StandaloneTestOutcome['status']; error?: SerializedError; skip?: string; secondaryErrors: SerializedError[]; expectedFailure?: ExpectedFailureInfo } = {
       status,
       ...(failure === undefined ? {} : { error: serialize(failure, failurePhase) }),
