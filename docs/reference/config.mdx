@@ -7,8 +7,8 @@ description: Every configuration key, its default, its valid range, and the envi
 
 `e2e.config.ts` configures the runner: the targets tests run on, the app each
 one tests, the agents, and the replay cache. Export an object with
-`satisfies E2EConfig`, which checks its shape and keeps its inferred types.
-The runner validates the config again at load, including ranges and rules
+`satisfies E2EConfig` to check its shape and keep its inferred types, or
+pass it to [`defineConfig`](#defineconfig). The runner validates the config again at load, including ranges and rules
 TypeScript cannot check.
 For the options most projects change, see [Configure the project](/quickstart#configure-the-project).
 
@@ -29,6 +29,32 @@ export default {
 
 ## Reference
 
+### `defineConfig`
+
+Returns the config it's given. Use it in place of `satisfies E2EConfig`.
+
+```ts title="e2e.config.ts"
+import { defineConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+
+export default defineConfig({
+  targets: [{ engine: web(), app: { url: 'http://localhost:3000' } }],
+});
+```
+
+- As with `satisfies E2EConfig`, the editor completes every key, and an
+  unknown top-level key is a type error.
+- The config keeps its inferred type, so `typeof config` still works as a
+  type argument of [`test.extend`](/reference/test#test-extend).
+- Every rule below is enforced when the runner resolves the config, not when
+  `defineConfig` is called.
+
+```ts
+export function defineConfig<const Config extends E2EConfig>(
+  config: Config & { readonly [Key in Exclude<keyof Config, keyof E2EConfig>]: never },
+): Config;
+```
+
 ### Top level
 
 | Option | Type | Default |
@@ -46,6 +72,7 @@ export default {
 | [`failOnSkippedFailure`](#failonskippedfailure) | `boolean` | `false` |
 | [`maxDuration`](#maxduration) | `number` | - |
 | [`workers`](#workers) | `number` | half the cores, `1` in CI |
+| [`fullyParallel`](#fullyparallel) | `boolean` | `false` |
 | [`reporters`](#reporters) | `(BuiltinReporter \| Reporter)[]` | `['list']` |
 | [`output`](#output) | `string` | `'.e2e'` |
 | [`artifacts`](#artifacts) | `ArtifactsConfig` | local only |
@@ -262,6 +289,24 @@ workers: 4, // default: 1 in CI, else half the cores
   before that, as
   [Start the likeliest first](/filters#start-the-likeliest-first) says.
 
+#### `fullyParallel`
+
+Runs the tests of one file at the same time on separate workers, in every
+file.
+
+```ts
+fullyParallel: true, // default: false
+```
+
+- By default, files run in parallel and a file's tests run in order on one
+  worker.
+- It works as [`parallel: true`](/reference/test#parallel) on every file.
+  That entry has the rules for hooks, serial groups, and `parallel: false`.
+- A target's `fullyParallel` wins over it. `--fully-parallel` wins over
+  both.
+- With one worker, the default in CI, tests still run one at a time. Set
+  [`workers`](#workers) above 1.
+
 #### `reporters`
 
 The reporters of the run: built-in ids, and reporter objects such as the
@@ -278,6 +323,7 @@ reporters: ['list', 'junit'], // default: ['list']
 | `'line'`, `line()` | One row of terminal progress, each failure as it happens, and a run summary. |
 | `'junit'`, `junit()` | Writes `<output>/junit.xml`, or `outputFile`. |
 | `'markdown'`, `markdown()` | Writes `<output>/summary.md`, or `outputFile`. |
+| `'ctrf'`, `ctrf()` | Writes `<output>/ctrf.json`, or `outputFile`, in the CTRF format. |
 | `'json'`, `json()` | Prints the report on stdout. Beside it, `list`, `dot`, or `line` prints to stderr unless given a `stream`. |
 | another `Reporter` object | Runs beside the built-in ones. `--reporter` never removes it. |
 
@@ -305,9 +351,10 @@ targets: [
 | [`app`](#the-app-under-test) | `TargetApp` | - |
 | [`trace`](#trace) | `RecordingMode` | the config's `trace` |
 | [`video`](#video) | `RecordingMode` | the config's `video` |
+| [`fullyParallel`](#fullyparallel) | `boolean` | the config's |
 
 - `{ engine: web(), app: { url } }` is a complete target.
-- A test whose `requires` names a capability the target lacks is skipped for
+- A test whose `platforms` leaves out the target's platform is skipped for
   it. A `test.setup` that a selected test depends on must be runnable there,
   or selection fails with `COLLECTION_ERROR`.
 
@@ -345,7 +392,8 @@ The engine driving the surface: `web(...)`, `mobile(...)`, or any
 engine: web({ browser: 'firefox' }),
 ```
 
-A target without an engine runs through agent tools only. A target with `app`
+A target without an engine runs through agent tools and
+[`request`](/reference/request) calls to absolute URLs. A target with `app`
 and no engine is `INVALID_CONFIG`.
 
 ### The app under test
@@ -386,8 +434,8 @@ targets: [
 | [`linkBase`](#linkbase) | `string` | - |
 | [`identity`](#identity) | `string` | derived from the app |
 | [`environment`](#environment) | `'test' \| 'staging' \| 'production'` | `'test'` or `'production'` |
-| [`launchArguments`](#launcharguments) | `string[]` | - |
-| [`permissions`](#permissions) | `Record<string, AppPermissionState>` | - |
+| [`launchArguments`](#launcharguments) | `string[] \| Record<string, LaunchArgumentValue>` | - |
+| [`permissions`](#permissions) | `Record<string, AppPermissionState> \| 'all'` | - |
 | [`command`](#command) | `CommandConfig` | - |
 | [`readyUrl`](#readyurl) | `string` | `url` |
 
@@ -423,6 +471,8 @@ url: 'http://localhost:3000',
 - WHATWG-normalized; no userinfo, query, or fragment.
 - A missing scheme becomes `https://`, or `http://` for a loopback host.
 - Plain HTTP is accepted for loopback hosts only.
+- A `file:` URL opens one file on this machine in a locally launched
+  browser: see [a file as the app](#a-file-as-the-app).
 - Port `0` on `127.0.0.1` or `[::1]` asks for a [free port](#free-ports).
 - Its origin scopes engine request credentials, and its site scopes observed
   frames: see [the app's site](#the-apps-site).
@@ -430,7 +480,9 @@ url: 'http://localhost:3000',
 | Throws | When |
 | --- | --- |
 | `INVALID_APP_URL` | Port `0` on any host other than `127.0.0.1` or `[::1]`, `localhost` included. |
+| `INVALID_APP_URL` | A `file:` URL with a host, or one that names a directory. |
 | `INVALID_CONFIG` | A port-0 `url` with nothing to start on it (no `app.command`). |
+| `INVALID_CONFIG` | A `file:` URL on a `web()` target with a browser provider, `connect`, `headers`, or `basicAuth`, or on an engine that does not declare `fileApps`. |
 
 #### `bundleId`
 
@@ -512,14 +564,39 @@ environment: 'staging', // default: 'test' for a local host or no URL, else 'pro
 #### `launchArguments`
 
 Arguments every fresh launch passes the app: `app.open()`, `app.restart()`,
-and `app.clearState()`.
+and `app.clearState()`. Give a list of strings, the arguments themselves, or
+an object of argument name to value. On iOS and macOS an entry becomes
+`-name value`.
+On Android it becomes an `am start` extra of the value's type: `--es` for a
+string, `--ez` for a boolean, `--ei` for a whole number (`--el` beyond Java's
+`int`), `--ef` for a fraction, `--esa` for a list.
 
 ```ts
 launchArguments: ['-e2e', 'YES'],
 ```
 
-Arguments that select a build mode change what the app is: give each mode its
-own `identity`.
+```ts
+launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', e2e: true },
+```
+
+```ts
+type LaunchArgumentValue = string | number | boolean | readonly string[];
+type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue | undefined>>;
+```
+
+- An object value is a string, a finite number below 2^53 in magnitude, a
+  boolean, or a list of strings. A name has no leading dash, whitespace, or
+  control characters, and nothing holds a NUL character. A value read from the
+  environment may be `undefined`: that entry is left out.
+- The table under
+  [Launch arguments and permissions](/reference/mobile#launch-arguments-and-permissions)
+  shows each value type on iOS and Android.
+- Arguments that select a build mode change what the app is. Give each mode
+  its own `identity`.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_CONFIG` | A list item that is not a string. An object with an empty name, a name with whitespace or a control character, a value of another kind, a number beyond 2^53 - 1 in magnitude, or a NUL character anywhere. The engine adds its own rules: see [the mobile reference](/reference/mobile#launch-arguments-and-permissions). |
 
 #### `permissions`
 
@@ -529,13 +606,15 @@ Permissions the app holds, by name.
 permissions: { camera: 'grant' },
 ```
 
-Each is `'grant'`, `'deny'`, or `'reset'`.
+Each is `'grant'`, `'deny'`, or `'reset'`. `permissions: 'all'` grants
+every permission the target's engine can grant.
 
 - A `mobile()` target sets each one before every fresh launch. See
   [permissions](/reference/mobile#engine).
 - A `web()` target takes `'grant'` only and grants it to every page of the
   attempt, on any origin. Headless Chromium refuses a permission left out. See
-  [Granting browser permissions](/web#granting-browser-permissions).
+  [Granting browser permissions](/web#granting-browser-permissions). `'all'`
+  grants each name in the table below for its browser.
 
 | Browser | Names |
 | --- | --- |
@@ -642,6 +721,35 @@ scheme (`file:`, `data:`, `javascript:`, `view-source:`, `blob:`) is
 `app.example.com` and `auth.example.com` are one site. Child frames off the
 site stay out of observations.
 
+#### A file as the app
+
+```ts
+import { pathToFileURL } from 'node:url';
+
+app: { url: pathToFileURL('dist/index.html').href },
+```
+
+- The URL names one file, with no host. A directory is refused.
+- Navigation takes a `file:` URL only for a file in that file's directory or
+  below it: `app.open('pages/about.html')`. A file outside it and any
+  directory are `POLICY_DENIED`, with symbolic links resolved. A path that
+  starts with `/` is the disk's root, so write it relative.
+- That directory is what the agent may read. Keep the file in a folder
+  that holds only the app, not in a project root beside `.env`. See
+  [Navigation](/reference/security#navigation).
+- A file has no site and no origin. Frames that load another document stay
+  out of observations, and the `environment` defaults to `'test'`.
+- The agent works from the tree alone: it is sent no screenshot, since one
+  could show a frame of another local file. `agent.assert` with
+  `vision: true` judges from the tree, `vision: 'only'` is `POLICY_DENIED`,
+  and neither `agent.assert` nor a failure keeps a screenshot.
+- A `command` beside it needs a `readyUrl`, since a file answers no poll.
+- The browser reads the file from its own machine's disk, so a `web()`
+  target with a browser provider or `connect` refuses it. An engine opens a
+  file app only when it [declares it](/reference/engine#capabilities).
+- An `agent.act` recording is keyed by the file's absolute path, so it
+  replays only where the file sits at that path.
+
 The browser engine's [`headers`](/reference/web#headers) and
 [`basicAuth`](/reference/web#basicauth) are scoped tighter, to the origin of
 `url` (scheme, host, and port, the run's free port included) plus the
@@ -696,10 +804,11 @@ overrides it for one run.
 | Path under the output | What |
 | --- | --- |
 | `report.json` | The canonical report; `--last-failed` reads the one here |
-| `junit.xml`, `summary.md` | The `junit` and `markdown` reporters' files |
+| `junit.xml`, `summary.md`, `ctrf.json` | The `junit`, `markdown`, and `ctrf` reporters' files |
 | `ai-trace.json` | `--ai-trace` |
 | `timings.json` | How long each file took, smoothed over recent runs. A run with more than one worker starts the longest files first by it; see [Cache the timings history](/ci#cache-the-timings-history) |
-| `results/` | One directory per test: its [trace page](/debugging#traces), `trace.md`, when the [`trace`](#trace) mode keeps one, and its screenshots, videos, downloads, and logs, one `attempt-<n>/` per attempt. Cleared once a run's tests start, so it holds the latest run's evidence and nothing its report no longer names. A `--last-failed` rerun keeps the files the report it reruns names and writes its own attempts under each test's `rerun-<n>/` |
+| `report-with-reruns.json` | Written by a `--last-failed` rerun: the first run and every rerun since as one report, with the same run id as `report.json`. A run without `--last-failed` removes it |
+| `results/` | One directory per test: its [trace page](/debugging#traces), `trace.md`, when the [`trace`](#trace) mode keeps one, and its screenshots, videos, downloads, and logs, one `attempt-<n>/` per attempt. Cleared once a run's tests start, so it holds the latest run's evidence and nothing its report no longer names. A `--last-failed` rerun keeps the files the runs before it name and writes its own attempts under each test's `rerun-<n>/` |
 | `sessions/` | The run's encrypted `test.setup` sessions, deleted when it ends |
 | `videos/<session>/` | [`e2e mcp`](/reference/mcp#recording) session recordings |
 
@@ -1466,7 +1575,7 @@ CI mode is on unless `CI` is unset, blank, `0`, or `false`.
 | `retries` | `0` | `1` |
 | `workers` | `max(1, floor(availableParallelism() / 2))` | `1` |
 | `cache` | `read-write` | `read-only` when unset |
-| `test.only` | allowed | `ONLY_IN_CI`, exit code 2 |
+| `test.only`, `describe.only` | allowed | `ONLY_IN_CI`, exit code 2 |
 | `command.reuseExisting` | honored | ignored, with a notice |
 
 ## Loading
@@ -1629,6 +1738,8 @@ export interface E2EConfig {
   maxDuration?: number;
   /** Parallel workers, 1 through 1024; default 1 in CI, else half the cores. An engine may cap it lower. */
   workers?: number;
+  /** Runs the tests of one file at the same time on separate workers; default false. */
+  fullyParallel?: boolean;
   /** `{ store }` hands every artifact to a host store as it is produced. */
   artifacts?: ArtifactsConfig;
   /** Which tests keep a trace page; default `retain-on-failure`. */
@@ -1657,7 +1768,7 @@ export interface E2EConfig {
 ```ts
 /**
  * One named test target: the app under test and the engine that drives it.
- * Without an engine, the target supports agent tools only.
+ * Without an engine, the target supports agent tools and `request` calls to absolute URLs.
  */
 export interface Target {
   /** Label in reports and for `--target`; defaults to the platform. */
@@ -1672,6 +1783,8 @@ export interface Target {
   trace?: RecordingMode;
   /** Which attempts on this target record a video, in place of the config's `video`. */
   video?: RecordingMode;
+  /** Whether this target runs the tests of one file in parallel, in place of the config's `fullyParallel`. */
+  fullyParallel?: boolean;
 }
 ```
 

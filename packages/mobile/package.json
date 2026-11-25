@@ -1,6 +1,6 @@
 {
   "name": "@e2e-dev/mobile",
-  "version": "0.12.8",
+  "version": "0.12.9",
   "description": "Mobile engine (iOS and Android) for e2e agentic end-to-end testing, built on agent-device",
   "keywords": [
     "e2e",
@@ -29,7 +29,7 @@
   "bugs": {
     "url": "https://github.com/e2e-inc/e2e/issues"
   },
-  "homepage": "https://github.com/e2e-inc/e2e/tree/main/packages/mobile#readme",
+  "homepage": "https://e2e.com/docs/mobile",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public",
@@ -87,7 +87,7 @@
   "devDependencies": {
     "@e2e-dev/core": "workspace:*",
     "@types/node": "26.6.6",
-    "ai": "7.0.179",
+    "ai": "7.0.181",
     "e2e": "workspace:*",
     "typescript": "7.0.2",
     "vitest": "5.1.1"

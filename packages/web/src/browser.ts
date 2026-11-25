@@ -13,9 +13,8 @@
  */
 
 import type { Download, Route } from 'playwright-core';
-import type { ActionOptions, Expectable, JsonValue, Locator, Screen, TextMatch } from '@e2e-dev/core';
+import type { ActionOptions, Expectable, JsonValue, Locator, Screen, TextMatch, WebResponse } from '@e2e-dev/core';
 import {
-  ConfigurationError,
   Deadline,
   describePattern,
   EngineError,
@@ -37,6 +36,7 @@ import {
   type OperationContext,
 } from '@e2e-dev/core/engine';
 import { classifyInputError } from './actions.ts';
+import { cookieUrlsLabel, resolveCookieUrl, resolveCookieUrls, validateCookies } from './cookies.ts';
 import type { AttemptTab } from './attempt-session.ts';
 import type { DialogHandler } from './dialogs.ts';
 import { saveDownloadsTo, saveFromBrowser, saveLocally } from './downloads.ts';
@@ -50,10 +50,10 @@ import {
   patternLabel,
   routeMethodMatches,
   routePatternsEqual,
-  routeUrlMatches,
   toRoutePattern,
   type NormalizedRoutePattern,
 } from './route-pattern.ts';
+import { describeExpectedUrl, urlPattern } from './url-glob.ts';
 import type { PlaywrightSurface } from './surface.ts';
 import { createWebMcp, type WebMcp } from './webmcp.ts';
 
@@ -119,20 +119,8 @@ export interface RouteMatcher {
   readonly url: string | RegExp;
 }
 
-export interface WebResponse {
-  /** Response URL. */
-  readonly url: string;
-  /** HTTP status. */
-  readonly status: number;
-  /** Response headers, lower-cased names; `route.fetch()` joins several `set-cookie` values with `\n`, `waitForResponse` leaves cookie headers out. */
-  readonly headers: Readonly<Record<string, string>>;
-  /** Waits for the body and returns its bytes; rejects with `ACTION_FAILED` when the body could not be read. */
-  body(): Promise<Buffer>;
-  /** Waits for the body and parses it as JSON; rejects with `ACTION_FAILED` when the body could not be read. */
-  json<T = unknown>(): Promise<T>;
-  /** Waits for the body and reads it as text; rejects with `ACTION_FAILED` when the body could not be read. */
-  text(): Promise<string>;
-}
+/** The response type `request` returns too, defined in core so the shapes cannot drift. */
+export type { WebResponse } from '@e2e-dev/core';
 
 /**
  * Reads the body once the response is known and keeps the outcome: a body
@@ -325,8 +313,12 @@ export interface Browser extends Expectable<BrowserExpectation> {
     pattern: string | RegExp | RouteMatcher,
     options?: { timeout?: number },
   ): Promise<WebResponse>;
-  /** Returns cookies visible to the current context. */
-  cookies(): Promise<Cookie[]>;
+  /**
+   * Returns every cookie of the browser, or only those a request to `urls`
+   * (one URL or several) would carry. A relative URL resolves against the
+   * base URL.
+   */
+  cookies(urls?: string | readonly string[]): Promise<Cookie[]>;
   /** Sets cookies after URL validation. */
   setCookies(cookies: readonly Cookie[]): Promise<void>;
   /** Removes matching cookies only; without filters removes every cookie, preserving other storage. */
@@ -341,6 +333,14 @@ export interface Browser extends Expectable<BrowserExpectation> {
    * navigation, so the page loads with them.
    */
   emulateMedia(media: WebMedia): Promise<void>;
+  /**
+   * Takes the browser offline or back online for the rest of the attempt:
+   * every tab, every tab opened after, and the page's service workers.
+   * Offline, a request that reaches the network fails as it does with no
+   * connection, and `navigator.onLine` is `false`. A service worker can
+   * still answer from its cache. Every attempt starts online.
+   */
+  setNetwork(state: 'online' | 'offline'): Promise<void>;
   /** Registers an attempt-scoped dialog handler and returns an unsubscribe function. */
   onDialog(handler: DialogHandler): Promise<() => Promise<void>>;
   /** Returns the open tabs, in the order they opened. */
@@ -619,7 +619,8 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
   /** The page title, read within the action timeout or, for a matcher poll, within the poll's deadline. */
   const currentTitle = (deadline?: Deadline) =>
     surface.guard(context.operation(deadline?.remaining()), 'title', () => surface.requirePage().title());
-  const expectation = createBrowserExpectation({ currentUrl, currentTitle, baseHref, deadlineFor, context });
+  const expectationDeps: ExpectationDeps = { currentUrl, currentTitle, baseHref, deadlineFor, context };
+  const expectation = createBrowserExpectation(expectationDeps);
 
   const browser: Omit<Browser, keyof Expectable<BrowserExpectation>> = {
     goto(url, options) {
@@ -646,10 +647,9 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
       })),
     url: () => currentUrl(),
     title: () => currentTitle(),
-    // The same poll as `expect(browser).toHaveURL`, exposed as a wait.
     waitForURL: (url, options) => {
       rejectUnknownOptions('browser.waitForURL', options, ['timeout']);
-      return expectation.toHaveURL(url, options);
+      return waitForUrl(expectationDeps, url, options?.timeout);
     },
     locator: (selector) => context.locator({ kind: 'selector', selector: requireSelector('browser.locator', selector) }),
     frameLocator: (selector) => frameScreen(context, [requireSelector('browser.frameLocator', selector)]),
@@ -681,7 +681,8 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     },
     route(pattern, handler) {
       const wirePattern = toRoutePattern('browser.route', pattern);
-      const predicate = (url: URL) => routeUrlMatches(wirePattern, url.href);
+      const { matches } = urlPattern(wirePattern.url, baseHref);
+      const predicate = (url: URL) => matches(url.href);
       // Playwright never surfaces a throwing route handler to the test, so a
       // contract violation (no decision, two decisions) or a failing handler
       // is latched on the surface and fails the next step with its real cause.
@@ -813,13 +814,12 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     },
     waitForResponse(pattern, options) {
       const wirePattern = toRoutePattern('browser.waitForResponse', pattern);
+      const { matches } = urlPattern(wirePattern.url, baseHref);
       const operation = context.operation(stepTimeout(options?.timeout, 'browser.waitForResponse'));
       return surface.guard(operation, 'waitForResponse', async (currentOperation) => {
         const page = await surface.ensurePage();
         const response = await page.waitForResponse(
-          (candidate) =>
-            routeUrlMatches(wirePattern, candidate.url())
-            && routeMethodMatches(wirePattern, candidate.request().method()),
+          (candidate) => matches(candidate.url()) && routeMethodMatches(wirePattern, candidate.request().method()),
           { timeout: currentOperation.timeoutMs },
         );
         // Started now, while the browser still holds the body, and awaited
@@ -840,9 +840,12 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
         return webResponse(response, read);
       });
     },
-    cookies: () =>
-      surface.guard(context.operation(), 'cookies', async () => {
-        const cookies = await surface.requireContext().cookies();
+    cookies(urls) {
+      const targets = resolveCookieUrls(urls, context.app.resolveUrl);
+      return surface.guard(context.operation(), 'cookies', async () => {
+        // The driver reads an empty list as no filter; a list that came out
+        // empty must not widen to every site's cookies.
+        const cookies = targets?.length === 0 ? [] : await surface.requireContext().cookies(targets);
         return cookies.map(
           (cookie): Cookie => ({
             name: cookie.name,
@@ -855,8 +858,10 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
             ...(cookie.sameSite !== undefined ? { sameSite: cookie.sameSite } : {}),
           }),
         );
-      }),
+      });
+    },
     setCookies(cookies) {
+      validateCookies(cookies);
       const scheme = new URL(baseHref()).protocol === 'https:' ? 'https' : 'http';
       // The harness's URL rule decides which cookie targets are admitted; a
       // domain cookie is checked as the origin it would be sent to. The rule
@@ -864,12 +869,10 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
       // cookie is set on the URL the rule resolved, so a relative one lands
       // on the base URL the way `goto` would.
       const targets = cookies.map((cookie) => {
-        const target = context.app.resolveUrl(
+        const target = resolveCookieUrl(
           cookie.url === undefined ? `${scheme}://${cookie.domain.replace(/^\./, '')}` : cookie.url,
+          context.app.resolveUrl,
         );
-        if (!/^https?:/.test(target)) {
-          throw new ConfigurationError('POLICY_DENIED', `cookie URL must be http(s): ${target}`);
-        }
         return cookie.url === undefined
           ? { domain: cookie.domain, path: cookie.path ?? '/' }
           : { url: target };
@@ -915,6 +918,12 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
       // Read once, so a test that changes its object later changes nothing here.
       const requested = obj({ colorScheme: media.colorScheme, reducedMotion: media.reducedMotion });
       await surface.guard(context.operation(), 'emulateMedia', () => surface.emulateMedia(requested));
+    },
+    async setNetwork(state) {
+      if (state !== 'online' && state !== 'offline') {
+        throw new TestError('INVALID_ARGUMENT', `browser.setNetwork takes "online" or "offline", got ${JSON.stringify(state)}`);
+      }
+      await surface.guard(context.operation(), 'setNetwork', () => surface.setOffline(state === 'offline'));
     },
     // Async so the harness records the registration as a `browser.onDialog` step.
     async onDialog(handler: DialogHandler) {
@@ -982,11 +991,12 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     unroute: { ...action, label: patternLabel },
     unrouteAll: action,
     waitForResponse: { ...action, timeout: (_pattern, options) => options?.timeout, label: patternLabel },
-    cookies: action,
+    cookies: { ...action, label: cookieUrlsLabel },
     setCookies: action,
     clearCookies: action,
     setViewport: action,
     emulateMedia: { ...action, label: (media) => mediaLabel(media) },
+    setNetwork: { ...action, label: (state) => String(state) },
     onDialog: action,
     waitForPopup: { ...action, timeout: false },
     newTab: action,
@@ -1006,24 +1016,58 @@ interface ExpectationDeps {
   readonly context: EngineFixtureContext;
 }
 
-/**
- * The expected URL as `toHaveURL` compares it: a string resolved against the
- * base, the way `urlMatches` resolves it, so it reads beside the absolute
- * observed URL. A string that does not parse, and a RegExp, print as written.
- */
-function describeExpectedUrl(expected: string | RegExp, baseHref: string): string {
-  if (typeof expected !== 'string') return String(expected);
-  try {
-    return new URL(expected, baseHref).href;
-  } catch {
-    return expected;
-  }
-}
-
 /** One read of a browser matcher poll: whether the condition holds (undefined: not evaluable yet), and what was seen. */
 interface BrowserSample {
   readonly matches: boolean | undefined;
   readonly observed: string;
+}
+
+/**
+ * Polls one browser condition against the assertion budget and fails with the
+ * last read when it times out: the loop behind `expect(browser)` and
+ * `browser.waitForURL`. `api` names the call to its timeout, and `name`
+ * heads the failure (`expect.not.toHaveURL`, `browser.waitForURL`).
+ */
+async function pollBrowser(
+  deps: ExpectationDeps,
+  call: { readonly api: string; readonly name: string; readonly negated: boolean },
+  label: string,
+  read: (deadline: Deadline) => Promise<BrowserSample>,
+  timeout: number | undefined,
+): Promise<void> {
+  const deadline = deps.deadlineFor(timeout, call.api);
+  // pollCondition calls onTimeout only after a read completed, so a sample is always there.
+  let last: BrowserSample | undefined;
+  await pollCondition({
+    deadline,
+    signal: deps.context.signal,
+    negated: call.negated,
+    evaluate: async () => {
+      last = await read(deadline);
+      return last.matches;
+    },
+    onTimeout: (cause) =>
+      new TestError(
+        'ASSERTION_FAILED',
+        `${call.name} failed\nexpected: ${call.negated ? 'not ' : ''}${label}\nobserved: ${last?.observed ?? 'nothing'}`,
+        cause === undefined ? undefined : { cause },
+      ),
+  });
+}
+
+/**
+ * `browser.waitForURL`: the poll `expect(browser).toHaveURL` runs, except
+ * that a string is a URL glob (`url-glob.ts`), printed resolved against the
+ * base URL when the wait fails. Playwright's `toHaveURL` never reads a glob,
+ * so the matcher keeps its exact comparison.
+ */
+function waitForUrl(deps: ExpectationDeps, expected: string | RegExp, timeout: number | undefined): Promise<void> {
+  const { matches, label } = urlPattern(toTextPattern(expected), () => deps.baseHref());
+  const call = { api: 'browser.waitForURL', name: 'browser.waitForURL', negated: false };
+  return pollBrowser(deps, call, `URL ${label}`, async (deadline) => {
+    const url = await deps.currentUrl(deadline);
+    return { matches: matches(url), observed: `URL ${url}` };
+  }, timeout);
 }
 
 /**
@@ -1033,31 +1077,12 @@ interface BrowserSample {
  * failure reports the last read instead of reading a hung page again.
  */
 function createBrowserExpectation(deps: ExpectationDeps, negated = false): BrowserExpectation {
-  const poll = async (
+  const poll = (
     api: string,
     label: string,
     read: (deadline: Deadline) => Promise<BrowserSample>,
     timeout: number | undefined,
-  ): Promise<void> => {
-    const deadline = deps.deadlineFor(timeout, api);
-    // pollCondition calls onTimeout only after a read completed, so a sample is always there.
-    let last: BrowserSample | undefined;
-    await pollCondition({
-      deadline,
-      signal: deps.context.signal,
-      negated,
-      evaluate: async () => {
-        last = await read(deadline);
-        return last.matches;
-      },
-      onTimeout: (cause) =>
-        new TestError(
-          'ASSERTION_FAILED',
-          `expect.${negated ? 'not.' : ''}${api} failed\nexpected: ${negated ? 'not ' : ''}${label}\nobserved: ${last?.observed ?? 'nothing'}`,
-          cause === undefined ? undefined : { cause },
-        ),
-    });
-  };
+  ): Promise<void> => pollBrowser(deps, { api, name: `expect.${negated ? 'not.' : ''}${api}`, negated }, label, read, timeout);
   const validate = (api: string, options: object | undefined, keys: readonly string[] = ['timeout']): void =>
     rejectUnknownOptions(`expect.${negated ? 'not.' : ''}${api}`, options, keys);
   return {

@@ -210,11 +210,11 @@ function videoPaths(attempts: readonly { readonly artifacts: readonly ArtifactRe
   return paths;
 }
 
-/** Report-relative paths of the screenshots the `app.screenshot` steps among `steps` attached, in step order. */
+/** Report-relative paths of the screenshots the `app.screenshot` and `locator.screenshot` steps among `steps` attached, in step order. */
 function requestedScreenshots(steps: readonly StepRecord[], artifacts: readonly ArtifactRecord[]): string[] {
   const paths: string[] = [];
   for (const step of steps) {
-    if (step.api !== 'app.screenshot') continue;
+    if (step.api !== 'app.screenshot' && step.api !== 'locator.screenshot') continue;
     for (const id of step.artifacts) {
       const where = artifacts.find((artifact) => artifact.id === id && artifact.kind === 'screenshot')?.path;
       if (where !== undefined) paths.push(where);
@@ -762,7 +762,8 @@ export class ListReporter {
   private testStarted(event: RunEventOf<'test-started'>): void {
     if (event.serialId !== undefined) {
       for (const test of this.pairs.values()) {
-        if (test.serialId === event.serialId && test.group.target === event.target) test.executing = false;
+        const sameRun = test.group.target === event.target && test.agent === event.agent && test.repeat === event.repeat;
+        if (test.serialId === event.serialId && sameRun) test.executing = false;
       }
     }
     const key = pairKey(event.testId, event.agent, event.target, event.repeat);
@@ -772,6 +773,8 @@ export class ListReporter {
     this.pairs.set(key, {
       group,
       serialId: event.serialId,
+      agent: event.agent,
+      repeat: event.repeat,
       title,
       startedMs: Date.now(),
       executing: true,

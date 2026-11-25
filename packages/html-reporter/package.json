@@ -1,6 +1,6 @@
 {
   "name": "@e2e-dev/html-reporter",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "HTML reporter for e2e: one self-contained page per run, steps, screenshots, and video",
   "keywords": [
     "e2e",
@@ -60,7 +60,7 @@
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.3.0",
     "e2e": "workspace:*",
-    "lucide-react": "1.77.0",
+    "lucide-react": "1.79.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "tailwindcss": "4.3.5",

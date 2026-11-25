@@ -15,7 +15,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { AppDeployResult, CaptureSnapshotResult } from 'agent-device';
+import type { CaptureSnapshotResult } from 'agent-device';
 import {
   EngineError,
   KEY_NAMES,
@@ -32,6 +32,8 @@ import {
   type EngineObserveOptions,
   type EngineSnapshot,
   type EngineAppInfo,
+  type LaunchArguments,
+  type ResolvedLaunchArguments,
   type LocatorAction,
   type LocatorExpression,
   type NodeRef,
@@ -41,14 +43,16 @@ import {
   type ProviderRecording,
   type VideoSegment,
   type SemanticNode,
+  type ViewportIntersection,
   type ViewportPoint,
   type ViewportSize,
   ConfigurationError,
   TestError,
 } from '@e2e-dev/core/engine';
-import { isAppNotRunning, isSnapshotPresentationFailure, isUnreadableCapture, ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING, runCommand, staleOr } from './errors.ts';
-import { pointerInteraction, DEFAULT_LONG_PRESS_MS } from './actions.ts';
+import { isAppNotRunning, isSnapshotPresentationFailure, isUnreadableCapture, ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING, refusedSwipePath, runCommand, staleOr } from './errors.ts';
+import { pointerInteraction, DEFAULT_LONG_PRESS_MS, MAX_TAP_COUNT } from './actions.ts';
 import { resolveExpression } from './locate.ts';
+import { launchArgumentList, launchArgumentsForOpen } from './launch-arguments.ts';
 import {
   isWithin,
   keyboardElementsTop,
@@ -58,18 +62,20 @@ import {
   ROOT_ID,
   screenRoot,
   screenTitle,
+  withEmptyState,
   type ProjectedNode,
   type ProjectedSnapshot,
 } from './nodes.ts';
 import { keyboardDragStart, keyboardShownIn, type KeyboardUnknown } from './keyboard.ts';
-import { DEVICE_PERMISSIONS, type AgentDeviceClient, type ClientFactory, type DevicePermission, type LaunchPermissions, type MobileOptions, type PermissionState } from './options.ts';
+import { DEVICE_PERMISSIONS, type AgentDeviceClient, type ClientFactory, type DevicePermission, type LaunchPermissions, type MobileOptions, type MobilePlatform, type PermissionState } from './options.ts';
 import { maskPng } from './png.ts';
 import { mobileDoctor } from './doctor.ts';
-import { deviceLabel, pinnedApp, type SlotBinding } from './bindings.ts';
+import { deviceLabel, deviceSelection, pinnedApp, type DeviceSelection, type SlotBinding } from './bindings.ts';
 import { assertAppId } from './links.ts';
-import { bootRequest, DevicePool, deviceSelection, type DeviceSelection } from './pool.ts';
+import { bootRequest, DevicePool } from './pool.ts';
 import { recordLease, travelledLease, type DeviceLease, type RecordingDeviceProvider } from './provider.ts';
 import {
+  installedIdentity,
   invalidState,
   notActionable,
   logicalScreenSize,
@@ -81,6 +87,7 @@ import {
   unsupported,
   type Rect,
   InputBudget,
+  type InstallIdentity,
 } from './support.ts';
 
 /** Hinge poses `device.fold` accepts: `closed` lights the outer display, `half-open` and `open` the inner one. */
@@ -107,27 +114,21 @@ export interface InstalledApp {
 /** Why nothing is pinned with `appPath` alone: the install is the suite's. */
 const UNINSTALLED_BUILD = "the build the target's `app.appPath` names installed first with `device.installApp()`";
 
-/**
- * The install fields this engine reads off agent-device's response. Its
- * `app` is left out: it echoes the `app` passed in, else the identity, else
- * the build's path, so it cannot tell an id from a file.
- */
-type InstallIdentity = Pick<AppDeployResult, 'appId' | 'bundleId' | 'package'>;
-
 /** How `device.openApp` launches an app. */
 export interface OpenAppOptions {
   /** Terminate the app first, so it starts fresh; without it a running app is brought forward as it is. */
   readonly relaunch?: boolean;
   /**
-   * Arguments this launch hands the app: its process arguments on iOS,
-   * `am start` arguments on Android. Replaces the target's
-   * `app.launchArguments` for a relaunch of the pinned app.
+   * Arguments this launch hands the app, a list or an object like
+   * `app.launchArguments`: its process arguments on iOS, `am start`
+   * arguments on Android. Replaces the target's `app.launchArguments` for a
+   * relaunch of the pinned app.
    */
-  readonly launchArguments?: readonly string[];
+  readonly launchArguments?: LaunchArguments;
   /**
    * Permissions the app holds before this launch, each granted, denied, or
-   * reset. Replaces the target's `app.permissions` for a relaunch of the
-   * pinned app.
+   * reset, or `'all'` to grant every one the platform can. Replaces the
+   * target's `app.permissions` for a relaunch of the pinned app.
    */
   readonly permissions?: LaunchPermissions;
 }
@@ -224,6 +225,8 @@ interface NodeBinding {
   readonly keyboardVisible: boolean;
   /** Whether the capture `node.rect` came from could not place its window on the screen. */
   readonly originUnknown: boolean;
+  /** The size that capture read off its own tree, which `viewportFor` checks against the screen. */
+  readonly captureViewport: ViewportSize | undefined;
   /** Whether `fill` and `clear` may type into the node, judged with the children `node` leaves out. */
   readonly takesText: boolean;
 }
@@ -387,19 +390,25 @@ const SNAPSHOT_MODES: readonly string[] = Object.keys({ full: true, interactive:
 /** Every state a permission takes, kept equal to `PermissionState` by the compiler. */
 const PERMISSION_STATES: readonly string[] = Object.keys({ grant: true, deny: true, reset: true } satisfies Record<PermissionState, true>);
 
+/** The target's `app.permissions` as a launch takes them: `'all'` arrives from the harness as `allPermissions`. */
+function configuredPermissions(app: EngineAppInfo): LaunchPermissions | undefined {
+  return app.allPermissions === true ? 'all' : app.permissions;
+}
+
 /**
- * Refuses a permissions map before any device command: anything but a plain
- * object, a name agent-device
+ * Refuses a permissions map before any device command: anything but `'all'`
+ * or a plain object, a name agent-device
  * does not set, naming the nearest, or a state other than grant, deny, or
  * reset. `INVALID_CONFIG` for a target's `app.permissions`, `INVALID_ARGUMENT`
  * for a test's `device.openApp`. An `undefined` state is skipped, as the preset
  * skips it.
  */
 export function assertPermissions(label: string, permissions: unknown, code: 'INVALID_CONFIG' | 'INVALID_ARGUMENT'): void {
+  if (permissions === 'all') return;
   // A Map or class instance carries no own keys to check, and the preset would apply none of it.
   const prototype: unknown = typeof permissions === 'object' && permissions !== null ? Object.getPrototypeOf(permissions) : undefined;
   if (prototype !== Object.prototype && prototype !== null) {
-    permissionError(code, `${label} must be a plain object of permission names to ${PERMISSION_STATES.join(', ')}`);
+    permissionError(code, `${label} must be 'all' or a plain object of permission names to ${PERMISSION_STATES.join(', ')}`);
   }
   rejectUnknownKeys(label, permissions as object, DEVICE_PERMISSIONS, code);
   for (const [name, state] of Object.entries(permissions as Record<string, unknown>)) {
@@ -496,7 +505,7 @@ export interface BoundDevice {
   readonly deviceName: string;
 }
 
-export class AgentDeviceSurface {
+export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform> {
   private client: AgentDeviceClient | undefined;
   private attempt: Attempt | undefined;
   /** Retained across attempt cleanup until a stop or native session reset is confirmed. */
@@ -559,7 +568,7 @@ export class AgentDeviceSurface {
   private knownViewport: ViewportSize | undefined;
 
   constructor(
-    readonly options: MobileOptions,
+    readonly options: MobileOptions<Platform>,
     private readonly createClient: ClientFactory,
   ) {
     rejectUnknownKeys('mobile()', options, MOBILE_OPTION_KEYS);
@@ -901,14 +910,15 @@ export class AgentDeviceSurface {
     // app. A foreground-only open of a running app takes no arguments, and a
     // permission change there would terminate the app it means to keep.
     const configured = relaunch && app === this.pinnedApp;
-    const launchArguments = options.launchArguments ?? (configured ? this.app.launchArguments : undefined);
-    const permissions = options.permissions ?? (configured ? this.app.permissions : undefined);
+    const launchArguments = launchArgumentsForOpen(this.options.platform, options.launchArguments) ?? (configured ? (this.app.launchArgumentValues ?? this.app.launchArguments) : undefined);
+    const permissions = options.permissions ?? (configured ? configuredPermissions(this.app) : undefined);
     if (permissions !== undefined) await this.presetPermissions(app, permissions, signal);
     await this.open(app, relaunch, launchArguments, signal);
   }
 
   /** One `open` of an app, remembered as the session's app and as the screen's replacement. */
-  private async open(app: string, relaunch: boolean, launchArguments: readonly string[] | undefined, signal: AbortSignal): Promise<void> {
+  private async open(app: string, relaunch: boolean, launchArguments: ResolvedLaunchArguments | undefined, signal: AbortSignal): Promise<void> {
+    const launchArgs = launchArgumentList(this.options.platform, launchArguments);
     const result = await this.command(
       `open ${app}`,
       (client) =>
@@ -916,7 +926,7 @@ export class AgentDeviceSurface {
           app,
           ...this.selection(),
           ...(relaunch ? { relaunch: true } : {}),
-          ...(launchArguments === undefined || launchArguments.length === 0 ? {} : { launchArgs: [...launchArguments] }),
+          ...(launchArgs === undefined ? {} : { launchArgs: [...launchArgs] }),
         }),
       signal,
     );
@@ -927,9 +937,14 @@ export class AgentDeviceSurface {
    * Puts an app's permissions in place before it launches, never after: iOS
    * terminates a running app whose permission changed, and Android one whose
    * permission was revoked, so a change after the launch would leave the
-   * test on no screen.
+   * test on no screen. `'all'` is one agent-device `all` grant on either
+   * platform; `LaunchPermissions` says what it grants on each.
    */
   private async presetPermissions(app: string, permissions: LaunchPermissions, signal: AbortSignal): Promise<void> {
+    if (permissions === 'all') {
+      await this.permission('all', 'grant', app, signal);
+      return;
+    }
     const entries = Object.entries(permissions).filter(
       (entry): entry is [DevicePermission, PermissionState] => entry[1] !== undefined,
     );
@@ -947,7 +962,7 @@ export class AgentDeviceSurface {
   }
 
   /** One permission change on `app`, which needs no running app and no open in the session. */
-  private async permission(permission: DevicePermission, state: PermissionState, app: string | undefined, signal: AbortSignal): Promise<void> {
+  private async permission(permission: DevicePermission | 'all', state: PermissionState, app: string | undefined, signal: AbortSignal): Promise<void> {
     await this.command(
       `permission ${permission} ${state}`,
       (client) => client.settings.update({ setting: 'permission', permission, state, ...this.selection(), ...(app === undefined ? {} : { app }) }),
@@ -1051,16 +1066,7 @@ export class AgentDeviceSurface {
           : client.apps.install({ ...selection, ...(app === undefined ? {} : { app }), appPath: resolved }),
       signal,
     );
-    const identity = result.bundleId ?? result.package ?? result.appId;
-    const opensBy = identity ?? app;
-    if (opensBy === undefined) {
-      throw new EngineError(
-        'ENGINE_FAILURE',
-        `installed ${resolved}, but agent-device reported no bundle id or package for it, so nothing can open it: name the app with the target's \`app.bundleId\` or installApp's \`app\` option`,
-        { retryable: false },
-      );
-    }
-    const installed: InstalledApp = { app: opensBy, ...(identity === undefined ? {} : { bundleId: identity }) };
+    const installed: InstalledApp = installedIdentity(result, app, resolved, "the target's `app.bundleId` or installApp's `app` option");
     // The engine's own build, installed: without `app`, this is what `app.open()` launches from here on.
     if (engineBuild) this.installedApp = installed.app;
     return installed;
@@ -1223,8 +1229,7 @@ export class AgentDeviceSurface {
    * measures every rect and point against the viewport, so an invented one
    * would misplace every tap.
    */
-  private async viewportFor(projected: ProjectedSnapshot, signal: AbortSignal, budget: InputBudget): Promise<ViewportSize> {
-    const read = projected.viewport;
+  private async viewportFor(read: ViewportSize | undefined, signal: AbortSignal, budget: InputBudget): Promise<ViewportSize> {
     const known = this.knownViewport;
     if (known !== undefined) {
       if (read === undefined) return known;
@@ -1257,7 +1262,7 @@ export class AgentDeviceSurface {
   async viewport(operation: OperationContext, budget: InputBudget): Promise<ViewportSize> {
     const raw = await this.snapshotOrEmpty(operation, this.interactiveSnapshots, budget);
     const projected = this.project(raw);
-    const { width, height } = await this.viewportFor(projected, operation.signal, budget);
+    const { width, height } = await this.viewportFor(projected.viewport, operation.signal, budget);
     return { width, height };
   }
 
@@ -1265,7 +1270,7 @@ export class AgentDeviceSurface {
     const raw = await this.snapshotOrEmpty(operation, this.interactiveSnapshots, budget);
     const projected = this.project(raw);
     this.generation = new Map(projected.index.map((entry) => [entry.id, this.bind(entry, projected)]));
-    const viewport = await this.viewportFor(projected, operation.signal, budget);
+    const viewport = await this.viewportFor(projected.viewport, operation.signal, budget);
     const location = screenLocation(raw.appBundleId ?? raw.appName ?? this.appIdentity, screenTitle(projected));
     const capture = options?.pixels === true ? await this.capturePixels(operation, projected, viewport, { normalizeStatusBar: options.comparable === true }, budget) : undefined;
     const keyboardVisible = measuredKeyboard(raw);
@@ -1292,7 +1297,7 @@ export class AgentDeviceSurface {
       if (this.located.size <= MAX_LOCATED_REFS) break;
       this.located.delete(oldest);
     }
-    return matches.map((entry) => entry.node);
+    return matches.map((entry) => withEmptyState(entry.node));
   }
 
   /**
@@ -1313,6 +1318,37 @@ export class AgentDeviceSurface {
         ...(location === undefined ? {} : { location }),
       }),
     );
+  }
+
+  /**
+   * Whether a positive area of a node is on the screen, read off the capture
+   * that located it. agent-device clips each rect to the window and to its
+   * scrolling ancestors, and leaves out a node with nothing on screen, so a
+   * rect is only the visible part of a box: the share of the whole is
+   * unknown, and the answer carries no `ratio`. The screen is the one
+   * `viewportFor` confirms, as `observe` does: a capture whose size is not
+   * the known screen's asks the device, since an app drawn smaller than the
+   * screen shrinks it and a resized screen (a foldable, Split View) grows it.
+   * A rect whose window could not be placed on the screen is refused rather
+   * than guessed at.
+   */
+  async viewportIntersection(ref: NodeRef, operation: OperationContext, budget: InputBudget): Promise<ViewportIntersection> {
+    const entry = this.resolveRef(ref);
+    const rect = entry.node.rect;
+    if (entry.originUnknown) {
+      throw new EngineError('UNSUPPORTED_CAPABILITY', `whether node ${ref.id} is in the viewport is unknown: the ${ORIGIN_UNKNOWN_BOUNDS}`, {
+        retryable: false,
+      });
+    }
+    if (rect === undefined) {
+      throw new EngineError('UNSUPPORTED_CAPABILITY', `node ${ref.id} has no bounds on the screen, so whether it is in the viewport is unknown`, {
+        retryable: false,
+      });
+    }
+    const screen = await this.viewportFor(entry.captureViewport, operation.signal, budget);
+    const width = Math.min(rect.x + rect.width, screen.width) - Math.max(rect.x, 0);
+    const height = Math.min(rect.y + rect.height, screen.height) - Math.max(rect.y, 0);
+    return { intersects: width > 0 && height > 0 };
   }
 
   private resolveRef(ref: NodeRef): NodeBinding {
@@ -1363,6 +1399,7 @@ export class AgentDeviceSurface {
       controlRef: control.ref,
       keyboardVisible: snapshot.keyboardVisible,
       originUnknown: snapshot.originUnknown,
+      captureViewport: snapshot.viewport,
       takesText: mayTakeText(entry.node),
       refsGeneration: snapshot.refsGeneration,
     };
@@ -1548,6 +1585,9 @@ export class AgentDeviceSurface {
     const refuseFill = (binding: NodeBinding): EngineError =>
       unsupported(`agent-device can only ${action.kind} editable fields; node ${binding.id} is ${binding.node.role ?? 'unknown'}`);
     if (filling && !entry.takesText) throw refuseFill(entry);
+    if (action.kind === 'multiTap' && action.count > MAX_TAP_COUNT) {
+      throw unsupported(`agent-device presses at most ${MAX_TAP_COUNT} times in a row; got a count of ${action.count}`);
+    }
     const label = `perform ${action.kind}`;
     const client = this.requireClient();
     // A toggle already in the wanted state sends nothing, so it neither waits
@@ -1581,6 +1621,8 @@ export class AgentDeviceSurface {
           return input.press(client, { ...this.actionTarget(target), ...settle });
         case 'doubleTap':
           return input.press(client, { ...this.actionTarget(target), count: 2, ...settle });
+        case 'multiTap':
+          return input.press(client, { ...this.actionTarget(target), count: action.count, ...settle });
         case 'longPress':
           return input.send(
             () => client.interactions.longPress({ ...this.actionTarget(target), ...settle, durationMs: action.durationMs ?? DEFAULT_LONG_PRESS_MS }),
@@ -1758,7 +1800,11 @@ export class AgentDeviceSurface {
   async performAt(point: ViewportPoint, action: PointerAction, operation: OperationContext, input: InputBudget): Promise<void> {
     const settle = operation.origin === 'test' ? {} : this.settleOptions;
     const before = this.latestScreen;
-    await this.command(`${action.kind} at point`, (client) => pointerInteraction(client, point, action, settle, gestureStabilization(operation), input), operation.signal);
+    const label = `${action.kind} at point`;
+    await this.command(label, (client) => pointerInteraction(client, point, action, settle, gestureStabilization(operation), input).catch(async (cause: unknown) => {
+      if (action.kind !== 'swipeTo') throw cause;
+      throw await refusedSwipePath(cause, label, action.durationMs !== undefined, () => this.viewport(operation, input));
+    }), operation.signal);
     if (action.kind === 'swipeTo') this.noteGesture(operation);
     this.markAction(before);
   }
@@ -1889,7 +1935,7 @@ export class AgentDeviceSurface {
     for (const axis of ['horizontal', 'vertical'] as const) {
       const { raw } = reading;
       const projected = projectSnapshot(raw.nodes ?? [], { mintId: () => 'keyboard', viewport: raw.viewport });
-      const viewport = await this.viewportFor(projected, signal, input);
+      const viewport = await this.viewportFor(projected.viewport, signal, input);
       const top = keyboardTop(raw, viewport);
       if (top === undefined) {
         throw new EngineError(
