@@ -363,6 +363,9 @@ describe('snapshot projection', () => {
       { ref: 'e6', index: 5, parentIndex: 4, depth: 2, type: 'android.widget.Button', label: 'terms', roleDescription: 'Link' },
       { ref: 'e7', index: 6, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Order 42', roleDescription: 'Link' },
       { ref: 'e8', index: 7, parentIndex: 6, depth: 2, type: 'android.widget.Button', label: 'Track parcel', roleDescription: 'Link' },
+      // Unnamed links share no name, so neither echoes the other.
+      { ref: 'e9', index: 8, parentIndex: 0, depth: 1, type: 'android.view.View', roleDescription: 'Link' },
+      { ref: 'e10', index: 9, parentIndex: 8, depth: 2, type: 'android.view.View', roleDescription: 'Link' },
     ]);
     const nodes = projected.index.slice(1).map((entry) => `${entry.node.role} ${entry.node.name ?? ''}`.trim());
     expect(nodes).toEqual([
@@ -373,6 +376,8 @@ describe('snapshot projection', () => {
       'link terms',
       'link Order 42',
       'link Track parcel',
+      'link',
+      'link',
     ]);
   });
 

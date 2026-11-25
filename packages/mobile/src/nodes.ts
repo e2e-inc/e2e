@@ -428,6 +428,7 @@ function echoedLinks(raw: readonly RawNode[], parents: readonly (number | undefi
   raw.forEach((node, position) => {
     if (!describesLink(node)) return;
     const name = rawName(node);
+    if (name === undefined) return;
     for (let up = parents[position]; up !== undefined; up = parents[up]) {
       const above = raw[up] as RawNode;
       if (describesLink(above) && rawName(above) === name) echoed.add(up);
