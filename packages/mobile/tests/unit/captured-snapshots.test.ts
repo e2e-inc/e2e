@@ -11,7 +11,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { CaptureSnapshotResult } from 'agent-device';
-import type { SemanticNode } from '@e2e-dev/core/engine';
+import type { LocatorExpression, SemanticNode } from '@e2e-dev/core/engine';
 import { resolveExpression } from '../../src/locate.ts';
 import { keyboardBand, projectSnapshot, screenRoot, screenTitle } from '../../src/nodes.ts';
 import type { MobilePlatform } from '../../src/options.ts';
@@ -135,13 +135,23 @@ describe('captured device snapshots', () => {
 });
 
 describe('text queries on a merged iOS label', () => {
+  const matches = (platform: MobilePlatform, value: string) => {
+    const { projected } = project(path.join(ROOT, platform, 'product-catalog.json'));
+    const expression: LocatorExpression = { kind: 'query', query: { kind: 'text', value: { kind: 'string', value, exact: true } } };
+
+    return resolveExpression(expression, projected.index, platform, true).map((entry) => [entry.node.role, entry.node.testId ?? entry.parent?.node.testId]);
+  };
+
   it('finds a product card on iOS by the text Android lists inside it', () => {
-    const matches = (platform: MobilePlatform) => {
-      const { projected } = project(path.join(ROOT, platform, 'product-catalog.json'));
-      const expression = { kind: 'query', query: { kind: 'text', value: { kind: 'string', value: '500 g · $6.99', exact: true } } } as const;
-      return resolveExpression(expression, projected.index, platform).map((entry) => [entry.node.role, entry.node.testId ?? entry.parent?.node.testId]);
-    };
-    expect(matches('ios')).toEqual([['other', 'product-trail-mix-500']]);
-    expect(matches('android')).toEqual([['text', 'product-trail-mix-500']]);
+    expect(matches('ios', '500 g · $6.99')).toEqual([['other', 'product-trail-mix-500']]);
+    expect(matches('android', '500 g · $6.99')).toEqual([['text', 'product-trail-mix-500']]);
+  });
+
+  it('finds every product card on iOS whose merged label has the part', () => {
+    expect(matches('ios', 'Trail Mix')).toEqual([
+      ['other', 'product-trail-mix-250'],
+      ['other', 'product-trail-mix-500'],
+      ['other', 'product-trail-mix-1000'],
+    ]);
   });
 });

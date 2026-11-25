@@ -209,9 +209,10 @@ do not contain each other remain `LOCATOR_AMBIGUOUS`.
 
 ##### Merged labels on iOS
 
-On iOS, a control's texts are merged into its label (`Trail Mix, 250 g`).
-When no label matches whole, one part of such a label is matched by
-`getByText`. See [Merged labels on iOS](/reference/mobile#merged-labels-on-ios).
+On iOS, the texts inside a control can be merged into its label
+(`Trail Mix, 250 g`). When a query matches no node, `getByText` matches the
+control by one part of that label. See
+[Merged labels on iOS](/reference/mobile#merged-labels-on-ios).
 
 #### `getByDisplayValue`
 

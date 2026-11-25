@@ -10,44 +10,48 @@ import { isWithin, mayTakeText, type ProjectedNode } from './nodes.ts';
 import type { MobilePlatform } from './options.ts';
 import { compileSelector } from './selector.ts';
 
-/** Resolves one expression to the nodes it currently matches; `platform` is the one agent-device selectors match for. */
+/**
+ * Resolves one expression to the nodes it currently matches; `platform` is the one agent-device selectors match for.
+ * `complete` is false for a capture that leaves out nodes on screen. A merged iOS label isn't split then, since
+ * the missing nodes could hold the texts it was merged from.
+ */
 export function resolveExpression(
   expression: LocatorExpression,
   index: readonly ProjectedNode[],
   platform: MobilePlatform,
+  complete: boolean,
 ): ProjectedNode[] {
   switch (expression.kind) {
     case 'union': {
       const matches = new Set([
-        ...resolveExpression(expression.left, index, platform),
-        ...resolveExpression(expression.right, index, platform),
+        ...resolveExpression(expression.left, index, platform, complete),
+        ...resolveExpression(expression.right, index, platform, complete),
       ]);
       return index.filter((entry) => matches.has(entry));
     }
     case 'query': {
       const candidates =
-        expression.scope === undefined ? index : descendantsOf(resolveExpression(expression.scope, index, platform), index);
+        expression.scope === undefined ? index : descendantsOf(resolveExpression(expression.scope, index, platform, complete), index);
       const full = candidates.filter((entry) => matchesQuery(entry, expression.query, false));
-      const fallback =
-        (platform === 'android' && expression.query.kind === 'testId') || (platform === 'ios' && expression.query.kind === 'text');
+      const fallback = expression.query.kind === FALLBACK_QUERY_KIND[platform] && (expression.query.kind !== 'text' || complete);
       const matches = full.length === 0 && fallback ? candidates.filter((entry) => matchesQuery(entry, expression.query, true)) : full;
       return ECHOED_QUERY_KINDS.has(expression.query.kind) ? innermostOnly(matches) : matches;
     }
     case 'filter': {
-      const source = resolveExpression(expression.source, index, platform);
+      const source = resolveExpression(expression.source, index, platform, complete);
       return source.filter((entry) => {
         if (expression.hasText !== undefined && !subtreeHasText(entry, index, expression.hasText)) return false;
         if (expression.hasNotText !== undefined && subtreeHasText(entry, index, expression.hasNotText)) return false;
         if (expression.has !== undefined || expression.hasNot !== undefined) {
           const within = descendantsOf([entry], index);
-          if (expression.has !== undefined && resolveExpression(expression.has, within, platform).length === 0) return false;
-          if (expression.hasNot !== undefined && resolveExpression(expression.hasNot, within, platform).length > 0) return false;
+          if (expression.has !== undefined && resolveExpression(expression.has, within, platform, complete).length === 0) return false;
+          if (expression.hasNot !== undefined && resolveExpression(expression.hasNot, within, platform, complete).length > 0) return false;
         }
         return true;
       });
     }
     case 'index': {
-      const source = resolveExpression(expression.source, index, platform);
+      const source = resolveExpression(expression.source, index, platform, complete);
       const position =
         expression.index === 'first' ? 0 : expression.index === 'last' ? source.length - 1 : expression.index;
       const picked = source[position];
@@ -116,15 +120,19 @@ function subtreeHasText(
   );
 }
 
+/** The query kind each platform matches again when nothing matched: an Android test id by its short form, an iOS text by one part of a merged label. */
+const FALLBACK_QUERY_KIND: Readonly<Record<MobilePlatform, SemanticQuery['kind']>> = { android: 'testId', ios: 'text' };
+
 /**
- * React Native joins child labels with a comma and a space. XCTest exposes
- * the same string when the app sets the label itself.
+ * The separator between the child labels merged into a control's label on
+ * iOS (React Native's new architecture). The tree doesn't say whether the app
+ * set a label, so an app's label with `, ` in it is split the same way.
  */
 const MERGED_LABEL_SEPARATOR = ', ';
 
-/** Checks whether any node below `node` has a name or a text. */
+/** Checks whether any node below `node` has a name. A projected node with a text always has a name. */
 function hasTextBelow(node: SemanticNode): boolean {
-  return (node.children ?? []).some((child) => child.name !== undefined || child.text !== undefined || hasTextBelow(child));
+  return (node.children ?? []).some((child) => child.name !== undefined || hasTextBelow(child));
 }
 
 const STATE_KEYS = ['checked', 'disabled', 'selected', 'expanded', 'pressed'] as const;
@@ -134,9 +142,15 @@ const STATE_KEYS = ['checked', 'disabled', 'selected', 'expanded', 'pressed'] as
  * browser's role query does; the other kinds
  * answer with every node and leave visibility to the action or assertion,
  * unless the query says `visible`, which drops hidden nodes for every kind.
- * `fallback` is set on the second pass, which runs when nothing matched.
- * Then a test id is matched by its short form (`ANDROID_RESOURCE_ID`), and a
- * text by one part of a merged iOS label (`MERGED_LABEL_SEPARATOR`).
+ *
+ * `fallback` is set on the second pass, which runs when the first one matched
+ * nothing. On that pass a test id is matched by its short form
+ * (`ANDROID_RESOURCE_ID`), and a text by one part of a merged iOS label
+ * (`MERGED_LABEL_SEPARATOR`).
+ *
+ * A label is split only where it stands for texts the tree doesn't list. A
+ * text, an image, and a field hold their own content, where `, ` is
+ * punctuation, and a node with a labelled node below it has its texts listed.
  */
 function matchesQuery(entry: ProjectedNode, query: SemanticQuery, fallback: boolean): boolean {
   const node = entry.node;
@@ -166,7 +180,8 @@ function matchesQuery(entry: ProjectedNode, query: SemanticQuery, fallback: bool
     }
     case 'text':
       if (fallback) {
-        if (node.text === undefined || node.role === 'text' || node.role === 'image' || mayTakeText(node) || hasTextBelow(node)) return false;
+        if (!node.text?.includes(MERGED_LABEL_SEPARATOR) || node.role === 'text' || node.role === 'image' || node.states?.secure === true) return false;
+        if (mayTakeText(node) || hasTextBelow(node)) return false;
         return node.text.split(MERGED_LABEL_SEPARATOR).some((part) => part.trim() !== '' && matchesText(part, query.value));
       }
       return (

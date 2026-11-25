@@ -469,7 +469,7 @@ them to finish.
 | `perform` | `tap`, `doubleTap`, `multiTap`, `longPress`, `fill`, `clear`, `hover`, `check`, `uncheck`, `press` (`Enter`, `Space`, or one character), `swipe`, `dragTo`, and `focus` on editable fields. A tap on a `switch` or `checkbox` lands on its innermost control, since UIKit reports a settings row as one labelled switch with the real toggle as a child. `check` and `uncheck` need a `checked` state. Switches report one on both platforms, and so does a native Android `CheckBox`; a React Native checkbox or radio reports one only when the app sets `accessibilityState.checked`. A control with no state is `UNSUPPORTED_CAPABILITY`, so tap it instead. `doubleTap` is two presses, 284 to 285 ms apart on iOS (the cadence of agent-device's XCTest tap): agent-device's own double-tap gesture reaches a React Native `Pressable` as one press. A detector with a window of 300 ms or less can read the pair as two single taps. `multiTap` is `count` presses at the same cadence as `doubleTap`, so the same short-window caveat applies; a `count` above agent-device's 200 is `UNSUPPORTED_CAPABILITY` before any press. At about 285 ms a press on iOS, 200 presses take about a minute, past the default action timeout of 30 s, so pass a longer `timeout` for a large `count`. `longPress` holds for one second unless the test passes `duration`, past a React Native `Pressable`'s `delayLongPress` of 500 ms and the longer thresholds apps set; agent-device's own default hold is shorter and registers as a tap on those. `blur`, `selectOption`, `setInputFiles`, `scrollIntoView`, and `secondaryTap` are not declared, and neither is `tapModifiers`, so `tap`, `doubleTap`, or `multiTap` with `modifiers` is `UNSUPPORTED_CAPABILITY`. An action on a node that a newer snapshot replaced finds the node again instead of acting on a different element. |
 | `performAt` | `tap`, `doubleTap`, `longPress`, and `swipeTo` at a bare screen point, so `screen.tapAt`, `screen.doubleTapAt`, `tap({ position })`, `screen.swipe({ from, to })`, and the agent's `tap_at` reach a control the tree does not list. On iOS, while the soft keyboard is open, a `screen.swipe({ from, to })` with no `duration` has to stay above it, and fails with `ACTION_FAILED` before anything is sent when it doesn't. With `duration` the path goes out as given, across the keyboard, as a test of interactive keyboard dismissal needs. No `hover`, `secondaryTap`, or `dragTo` at a point: touch has none without a node, so `hover_at` needs a listed control. |
 | `keyboard` | `type` and `press` into the focused field, the agent's `type` and `press` without a target and the fallback of `type_at` and `press_at`, and `dismiss`, the agent's `dismiss_keyboard`. |
-| `locate` | Every `screen` query. Text and label queries answer with the innermost match, since a device echoes both up the tree (a React Native input is a host view and the field inside it, both labelled). On iOS, a text query that matches no label whole is tested against each part of a merged label (see [Merged labels on iOS](#merged-labels-on-ios)). On Android a test id query, a string or a RegExp, also matches a resource id without its `<package>:id/` prefix, for any package but the framework's `android`, when nothing on the screen matches the full id. `screen.locator('id=…')` is agent-device's selector and takes the full id. |
+| `locate` | Every `screen` query. Text and label queries answer with the innermost match, since a device echoes both up the tree (a React Native input is a host view and the field inside it, both labelled). On iOS, a text query that matches no node is tried against each part of a merged label (see [Merged labels on iOS](#merged-labels-on-ios)). On Android a test id query, a string or a RegExp, also matches a resource id without its `<package>:id/` prefix, for any package but the framework's `android`, when nothing on the screen matches the full id. `screen.locator('id=…')` is agent-device's selector and takes the full id. |
 | `validateApp` | Requires `app.bundleId` or `app.appPath` and refuses `app.url` for now, with a note on reaching this machine from the platform's device. |
 | `session` | `back`, `restart`, `reset`, and `openLink`, behind `app.open(path)` on a target with `app.linkBase`. No `open`: `app.open()` with no path is served with `restart`, the fresh launch of the pinned app; the agent's `navigate` verb is unavailable, and `device.openLink(url)` opens a deep link or web link. |
 | `artifacts` | Redacted screenshots under `screenshots/NNN-<label>.png`; a screenshot that cannot be redacted fails instead of being written. Video, when the attempt's [video mode](/reference/config#video) records, as `video/video.mp4`, or a device provider's own recording. |
@@ -1368,29 +1368,37 @@ with `getByText`.
 
 ## Merged labels on iOS
 
-On iOS, the texts inside a control are joined into its label with `, `, and
-they aren't listed in the tree. So the label of a React Native card over
-`Trail Mix` and `250 g` is `Trail Mix, 250 g`. When no label matches a
-`getByText` query whole, each part of a merged label is tested, and the card
-is matched by `getByText('Trail Mix')`. On Android, the text inside the card
-is matched instead.
+On iOS, the texts inside a React Native control can be merged into the
+control's label, joined with `, `. The tree then doesn't list those texts. A
+card that holds `Trail Mix` and `250 g` has the label `Trail Mix, 250 g`.
+
+When a `getByText` query matches no node, each part of a merged label is
+tried, so `getByText('Trail Mix')` matches the card. On Android, the same query
+matches the text inside the card.
 
 ```ts
 // iOS tree: a card labelled "Trail Mix, 250 g"
 await screen.getByText('Trail Mix').tap();
 ```
 
-- `exact` and a `RegExp` are applied to each part.
-- The match is the whole control. An action on it acts on the control's
-  centre, and its text is the whole label.
-- A scoped query or `filter({ has })` doesn't split the label of the scope
-  node.
-- A text with `, ` in it (`Hello, Ada` in `Hello, Ada, Sign out`) isn't
-  matched as a part.
-- These nodes are never split: a text, an image, a field, an `Other` with a
-  value, and a node with a named or texted node below it.
-- The tree doesn't say whether the app set the label, so a label the app set
-  with `, ` in it is split the same way.
+- Each part is matched the way a whole label is. A string must equal the part
+  unless `exact: false` is set, so `getByText('Trail')` doesn't match. A
+  `RegExp` is tested against the part.
+- The whole control is matched, and `textContent()` returns the whole label.
+- A query scoped to the control only looks below it, and so does
+  `filter({ has })`. So `card.getByText('Trail Mix')` doesn't match anything on
+  iOS. Narrow the cards with `filter({ hasText: 'Trail Mix' })` instead.
+- With `visible: true`, a hidden label doesn't count as a match, so the parts
+  of the visible labels are tried.
+- A label is split at every `, `, including one the app set, since the tree
+  doesn't say where a label came from. The parts of `Hello, Ada, Sign out` are
+  `Hello`, `Ada`, and `Sign out`, so `getByText('Hello, Ada')` doesn't match.
+- These labels are never split:
+  - the label of a text, an image, or a field (a secure field, and an `Other`
+    with a value or with only text nodes as children, count as fields)
+  - the label of a node that has a labelled node below it
+  - any label on a capture that leaves out nodes on screen, since the missing
+    nodes could hold the texts
 - On React Native's old architecture, the texts are joined with a space, so
   those labels aren't split.
 

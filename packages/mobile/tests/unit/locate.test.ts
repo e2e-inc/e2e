@@ -16,7 +16,7 @@ function query(kind: 'role' | 'label' | 'placeholder' | 'text' | 'displayValue' 
 function names(expression: LocatorExpression): string[] {
   let counter = 0;
   const { index } = projectSnapshot(SETTINGS_NODES, { mintId: () => `n${++counter}` });
-  return resolveExpression(expression, index, 'ios').map((entry) => entry.node.name ?? '');
+  return resolveExpression(expression, index, 'ios', true).map((entry) => entry.node.name ?? '');
 }
 
 describe('locator expressions over a device snapshot', () => {
@@ -51,9 +51,9 @@ describe('locator expressions over a device snapshot', () => {
   it('answers text and label queries with the innermost match when an ancestor echoes the text', () => {
     let counter = 0;
     const { index } = projectSnapshot(SETTINGS_NODES, { mintId: () => `n${++counter}` });
-    const matches = resolveExpression(query('text', 'About'), index, 'ios');
+    const matches = resolveExpression(query('text', 'About'), index, 'ios', true);
     expect(matches.map((entry) => entry.node.role)).toEqual(['text']);
-    expect(resolveExpression(query('label', 'About'), index, 'ios').map((entry) => entry.node.role)).toEqual(['text']);
+    expect(resolveExpression(query('label', 'About'), index, 'ios', true).map((entry) => entry.node.role)).toEqual(['text']);
     // The echoing cell still answers role queries, and filters by its subtree text.
     expect(names(query('role', 'listitem', { name: exact('About') }))).toEqual(['About']);
     expect(names({ kind: 'filter', source: query('role', 'listitem'), hasText: exact('About') })).toEqual(['About']);
@@ -71,15 +71,15 @@ describe('locator expressions over a device snapshot', () => {
       ],
       { mintId: () => `n${++counter}` },
     );
-    const field = resolveExpression(query('label', 'Name field'), index, 'ios');
+    const field = resolveExpression(query('label', 'Name field'), index, 'ios', true);
     expect(field.map((entry) => [entry.node.role, entry.node.testId])).toEqual([['textbox', 'name-input']]);
     const pattern: LocatorExpression = { kind: 'query', query: { kind: 'label', value: { kind: 'regexp', source: 'field$', flags: '' } } };
-    expect(resolveExpression(pattern, index, 'ios').map((entry) => entry.node.role)).toEqual(['textbox', 'textbox']);
+    expect(resolveExpression(pattern, index, 'ios', true).map((entry) => entry.node.role)).toEqual(['textbox', 'textbox']);
     // A role query keeps both, since the host view answers to no vocabulary role of its own.
-    expect(resolveExpression(query('role', 'textbox'), index, 'ios')).toHaveLength(2);
+    expect(resolveExpression(query('role', 'textbox'), index, 'ios', true)).toHaveLength(2);
   });
 
-  it('finds an iOS control by one part of its merged label, but doesn\'t split the label of a text, image, or field', () => {
+  it('finds an iOS control by one part of its merged label, and leaves the label of a text, an image, a field, a secure field, or an Other with a value whole', () => {
     const nodes: readonly RawNode[] = [
       { ref: '@e1', index: 0, depth: 0, type: 'Application', label: 'Fixture' },
       { ref: '@e2', index: 1, parentIndex: 0, depth: 1, type: 'Button', label: 'Dismiss, Close', identifier: 'merged' },
@@ -90,6 +90,7 @@ describe('locator expressions over a device snapshot', () => {
       { ref: '@e7', index: 6, parentIndex: 0, depth: 1, type: 'TextField', label: 'Doe, Jane', value: 'Doe, Jane', identifier: 'field' },
       { ref: '@e8', index: 7, parentIndex: 0, depth: 1, type: 'Other', label: 'Size, Large', value: 'Large', identifier: 'valued' },
       { ref: '@e9', index: 8, parentIndex: 0, depth: 1, type: 'Button', label: 'Save, ', identifier: 'trailing' },
+      { ref: '@e10', index: 9, parentIndex: 0, depth: 1, type: 'PasswordField', label: 'Account, Password', identifier: 'secure' },
     ];
     const ids = (expression: LocatorExpression) => testIds(expression, { platform: 'ios', nodes });
     const pattern = (value: TextPattern): LocatorExpression => ({ kind: 'query', query: { kind: 'text', value } });
@@ -98,13 +99,14 @@ describe('locator expressions over a device snapshot', () => {
     expect(ids(query('text', 'Forgot password'))).toEqual(['flattened']);
     expect(ids(query('text', 'Save'))).toEqual(['trailing']);
     expect(ids(query('text', 'Dis'))).toEqual([]);
-    expect(ids(pattern({ kind: 'string', value: 'dis', exact: false }))).toEqual(['merged']);
+    expect(ids(pattern({ kind: 'regexp', source: '^dismiss$', flags: 'i' }))).toEqual(['merged']);
     expect(ids(pattern({ kind: 'regexp', source: '^Close$', flags: '' }))).toEqual(['merged']);
     expect(ids(pattern({ kind: 'regexp', source: '^$', flags: '' }))).toEqual([]);
     expect(ids(query('text', 'Hello'))).toEqual([]);
     expect(ids(query('text', 'Italy'))).toEqual([]);
     expect(ids(query('text', 'Jane'))).toEqual([]);
     expect(ids(query('text', 'Size'))).toEqual([]);
+    expect(ids(query('text', 'Account'))).toEqual([]);
   });
 
   it('prefers a whole iOS label over one part of a merged label', () => {
@@ -117,7 +119,7 @@ describe('locator expressions over a device snapshot', () => {
     expect(testIds(query('text', 'tab'), { platform: 'ios', nodes })).toEqual(['tab']);
   });
 
-  it('leaves the label of an iOS container whole when its texts are listed below it', () => {
+  it('leaves an iOS container\'s label whole when one node below it has a label', () => {
     const nodes: readonly RawNode[] = [
       { ref: '@e1', index: 0, depth: 0, type: 'Application', label: 'Fixture' },
       { ref: '@e2', index: 1, parentIndex: 0, depth: 1, type: 'Other', label: 'Save, Cancel', identifier: 'container' },
@@ -125,6 +127,40 @@ describe('locator expressions over a device snapshot', () => {
     ];
     expect(testIds(query('text', 'Save'), { platform: 'ios', nodes })).toEqual(['save']);
     expect(testIds(query('text', 'Cancel'), { platform: 'ios', nodes })).toEqual([]);
+  });
+
+  it('leaves every iOS label whole on a capture that leaves out nodes', () => {
+    const nodes: readonly RawNode[] = [
+      { ref: '@e1', index: 0, depth: 0, type: 'Application', label: 'Fixture' },
+      { ref: '@e2', index: 1, parentIndex: 0, depth: 1, type: 'Other', label: 'Save, Cancel', identifier: 'container' },
+    ];
+    expect(testIds(query('text', 'Save'), { platform: 'ios', nodes, complete: false })).toEqual([]);
+    expect(testIds(query('text', 'Save, Cancel'), { platform: 'ios', nodes, complete: false })).toEqual(['container']);
+    expect(testIds(query('text', 'Save'), { platform: 'ios', nodes })).toEqual(['container']);
+  });
+
+  it('doesn\'t split the label of a scope node, or match a text that holds the separator', () => {
+    const nodes: readonly RawNode[] = [
+      { ref: '@e1', index: 0, depth: 0, type: 'Application', label: 'Fixture' },
+      { ref: '@e2', index: 1, parentIndex: 0, depth: 1, type: 'Other', identifier: 'list' },
+      { ref: '@e3', index: 2, parentIndex: 1, depth: 2, type: 'Other', label: 'Hello, Ada, Sign out', identifier: 'card' },
+    ];
+    const ids = (expression: LocatorExpression) => testIds(expression, { platform: 'ios', nodes });
+    const signOut = query('text', 'Sign out');
+    expect(ids({ kind: 'query', scope: query('testId', 'card'), query: { kind: 'text', value: exact('Sign out') } })).toEqual([]);
+    expect(ids({ kind: 'filter', source: query('testId', 'card'), has: signOut })).toEqual([]);
+    expect(ids({ kind: 'filter', source: query('testId', 'list'), has: signOut })).toEqual(['list']);
+    expect(ids(query('text', 'Hello, Ada'))).toEqual([]);
+  });
+
+  it('splits the visible iOS labels when a visible query skips a hidden whole match', () => {
+    const nodes: readonly RawNode[] = [
+      { ref: '@e1', index: 0, depth: 0, type: 'Application', label: 'Fixture' },
+      { ref: '@e2', index: 1, parentIndex: 0, depth: 1, type: 'StaticText', label: 'Trail Mix', visibleToUser: false, identifier: 'hidden-title' },
+      { ref: '@e3', index: 2, parentIndex: 0, depth: 1, type: 'Other', label: 'Trail Mix, 250 g', identifier: 'card' },
+    ];
+    expect(testIds(query('text', 'Trail Mix'), { platform: 'ios', nodes })).toEqual(['hidden-title']);
+    expect(testIds(query('text', 'Trail Mix', { visible: true }), { platform: 'ios', nodes })).toEqual(['card']);
   });
 
   it('leaves an Android label whole', () => {
@@ -174,9 +210,9 @@ describe('locator expressions over a device snapshot', () => {
       { mintId: () => `n${++counter}` },
     );
     const source = query('role', 'listitem');
-    expect(resolveExpression(source, index, 'ios').map((entry) => entry.node.name ?? '')).toEqual(['', '', '']);
+    expect(resolveExpression(source, index, 'ios', true).map((entry) => entry.node.name ?? '')).toEqual(['', '', '']);
     const ids = (pattern: TextPattern) =>
-      resolveExpression({ kind: 'filter', source, hasNotText: pattern }, index, 'ios').map((entry) => entry.node.testId);
+      resolveExpression({ kind: 'filter', source, hasNotText: pattern }, index, 'ios', true).map((entry) => entry.node.testId);
     expect(ids(exact('About'))).toEqual(['child-other', 'empty']);
     expect(ids({ kind: 'regexp', source: '^about$', flags: 'i' })).toEqual(['child-other', 'empty']);
     expect(ids(exact('Missing'))).toEqual(['child-match', 'child-other', 'empty']);
@@ -202,11 +238,11 @@ describe('locator expressions over a device snapshot', () => {
 
 function testIds(
   expression: LocatorExpression,
-  options: { readonly platform?: MobilePlatform; readonly nodes?: readonly RawNode[] } = {},
+  options: { readonly platform?: MobilePlatform; readonly nodes?: readonly RawNode[]; readonly complete?: boolean } = {},
 ): string[] {
   let counter = 0;
   const { index } = projectSnapshot(options.nodes ?? ANDROID_ID_NODES, { mintId: () => `n${++counter}` });
-  return resolveExpression(expression, index, options.platform ?? 'android').map((entry) => entry.node.testId ?? '');
+  return resolveExpression(expression, index, options.platform ?? 'android', options.complete ?? true).map((entry) => entry.node.testId ?? '');
 }
 
 describe('Android resource ids without their package', () => {

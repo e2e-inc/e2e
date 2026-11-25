@@ -2,4 +2,4 @@
 '@e2e-dev/mobile': patch
 ---
 
-On iOS, `getByText` matches a control by one part of its merged label when no label matches whole, so `getByText('Trail Mix')` finds a card labelled `Trail Mix, 250 g`.
+On iOS, a `getByText` query that matches no node is tried against each part of a control's merged label, so `getByText('Trail Mix')` finds a card labelled `Trail Mix, 250 g`.

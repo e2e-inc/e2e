@@ -1287,7 +1287,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     if (raw === undefined) return [];
     const projected = this.project(raw);
     this.traceScreen(raw, projected);
-    const matches = resolveExpression(expression, projected.index, this.options.platform);
+    const matches = resolveExpression(expression, projected.index, this.options.platform, !isTruncated(raw));
     for (const entry of matches) this.located.set(entry.id, this.bind(entry, projected));
     for (const oldest of this.located.keys()) {
       if (this.located.size <= MAX_LOCATED_REFS) break;
