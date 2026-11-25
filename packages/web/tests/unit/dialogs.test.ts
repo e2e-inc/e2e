@@ -9,10 +9,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { DialogRouter } from '../../src/dialogs.ts';
 import { ErrorLatch } from '../../src/support.ts';
 
-function fakeDialog(text = 'are you sure?', defaultValue = '') {
+function fakeDialog(text = 'are you sure?', defaultValue = '', type: 'alert' | 'confirm' | 'prompt' | 'beforeunload' = 'confirm') {
   const accept = vi.fn(async (_text?: string) => undefined);
   const dismiss = vi.fn(async () => undefined);
-  const dialog = { type: () => 'confirm', message: () => text, defaultValue: () => defaultValue, accept, dismiss } as unknown as PwDialog;
+  const dialog = { type: () => type, message: () => text, defaultValue: () => defaultValue, accept, dismiss } as unknown as PwDialog;
   return { dialog, accept, dismiss };
 }
 
@@ -109,7 +109,7 @@ describe('DialogRouter', () => {
 
   it('answers a dialog no handler takes with the configured policy, and latches nothing', async () => {
     const accepting = new DialogRouter(new ErrorLatch(), 'accept');
-    const accepted = fakeDialog('Name?', 'keep me');
+    const accepted = fakeDialog('Name?', 'keep me', 'prompt');
     await accepting.dispatch(accepted.dialog);
     // As a person clicking OK: a prompt returns its default text.
     expect(accepted.accept).toHaveBeenCalledExactlyOnceWith('keep me');
