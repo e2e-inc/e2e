@@ -174,7 +174,7 @@ declares `platforms: ['ios', 'android']` on those tests.
 | `.getText()`, `.getValue()`, `.getAttribute('value')` | `.textContent()`, `.inputValue()` |
 | `.isDisplayed()`, `.isEnabled()`, `.getAttribute('checked')` | `.isVisible()`, `.isEnabled()`, `.isChecked()` |
 | `.getAttribute('label')` | `.getAttribute('label')`. [`getAttribute`](/reference/screen#getattribute) lists what each attribute reads |
-| `.getAttribute('resource-id')`, iOS `.getAttribute('name')` | `.getAttribute('resource-id')`. An iOS element with no identifier has none; read `label` instead |
+| `.getAttribute('resource-id')`, iOS `.getAttribute('name')` | `.getAttribute('resource-id')`. For an iOS element with no identifier, read `label`: `resource-id` is missing there, and on an iOS device cloud it returns the label |
 | Android `.getAttribute('name')`, `.getAttribute('text')` | `.textContent()`. On a node with only a content description, it reads the description |
 | `.getAttribute('class')`, iOS `.getAttribute('type')`, `.getTagName()` | `.getAttribute('class')`. On iOS it drops the `XCUIElementType` prefix: `Button`, not `XCUIElementTypeButton` |
 | `.getAttribute('content-desc')` | `.getAttribute('content-desc')`, Android only |
