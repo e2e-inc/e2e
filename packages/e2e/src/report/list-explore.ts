@@ -118,10 +118,18 @@ export class ExploreView {
         this.steps.push({ step: progress.step, actions: open?.actions ?? 0, findings: open?.findings.length ?? 0 });
         break;
       }
-      case 'finding':
-        this.findings.push(progress.finding);
-        this.open?.findings.push(progress.finding);
+      case 'finding': {
+        const { finding } = progress;
+        this.findings.push(finding);
+        if (this.open !== undefined && this.open.step.index === finding.step) {
+          this.open.findings.push(finding);
+          break;
+        }
+        // A finding whose screenshot was still saving when its step ended at the deadline.
+        const at = this.steps.findIndex((entry) => entry.step.index === finding.step);
+        if (at !== -1) this.steps[at] = { ...this.steps[at]!, findings: this.steps[at]!.findings + 1 };
         break;
+      }
       case 'finished':
         this.planning = undefined;
         this.ended = progress.ended;

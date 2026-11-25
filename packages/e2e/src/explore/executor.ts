@@ -120,6 +120,8 @@ function createFindingTool(state: ExploreState): DefinedTool {
       inputSchema: FINDING_SCHEMA,
       execute: async (input: FindingReport, executionOptions: ToolExecutionOptions<unknown>) => {
         const { observe, attachScreenshot } = getToolContext(executionOptions);
+        // Read before the awaits: the step can end at its deadline while the evidence is saved.
+        const reportedIn = { step: state.openStep };
         reported += 1;
         const label = `finding-${reported}`;
         const observation = await observe({ pixels: true }).catch(() => undefined);
@@ -129,7 +131,7 @@ function createFindingTool(state: ExploreState): DefinedTool {
           observation?.pixels === undefined
             ? undefined
             : await attachScreenshot(observation.pixels, label).catch(() => undefined);
-        const finding = state.addFinding({ ...input, path: observation?.path, observationRevision: observation?.revision, artifactId });
+        const finding = state.addFinding({ ...input, path: observation?.path, observationRevision: observation?.revision, artifactId }, reportedIn);
         return `Finding ${finding.index + 1} recorded (${finding.kind}, severity ${finding.severity}): ${finding.title}. Do not report it again; continue the charter or conclude the step.`;
       },
     },
