@@ -16,7 +16,7 @@ import { engineConfig } from '../helpers/fixture-config.ts';
 import { assertValidReport } from '../helpers/report-schema.ts';
 import { resultByTitle, runProject, type FixtureProject } from '../helpers/run-project.ts';
 
-const SUITE = `import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
+const SUITE = `import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test, describe } from 'e2e';
@@ -178,16 +178,18 @@ test('catches a launch that cannot make its output directory', async ({ app }) =
 
 test('catches a launch that fails to start and then to remove its output directory', async ({ app }) => {
   await app.open();
-  const root = mkdtempSync(path.join(os.tmpdir(), 'e2e-launch-root-'));
+  const scratch = mkdtempSync(path.join(os.tmpdir(), 'e2e-launch-root-'));
+  const root = path.join(scratch, 'temp');
+  mkdirSync(root);
   try {
-    // Read-only once the output directory is in it, so removing that directory fails with EACCES.
+    // A file in place of the output directory's parent once the directory is made, so removing it fails with ENOTDIR, for root too.
     globalThis.launchReportRefused.cleanup = await refusal(launchUnder(root, () => open({ onInit: () => {
-      chmodSync(root, 0o500);
+      renameSync(root, path.join(scratch, 'moved'));
+      writeFileSync(root, '');
       throw Object.assign(new Error('no device left'), { code: 'NO_DEVICE' });
     } })));
   } finally {
-    chmodSync(root, 0o700);
-    rmSync(root, { recursive: true, force: true });
+    rmSync(scratch, { recursive: true, force: true });
   }
 });
 
