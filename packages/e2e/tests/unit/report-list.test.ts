@@ -1323,6 +1323,65 @@ describe('ListReporter', () => {
       expect(chunks.at(-1)).not.toContain('└──');
     });
 
+    it('keeps an agent step running after a step nested in it ends, and routes each step its own progress', () => {
+      const { chunks, output } = liveCapture();
+      const reporter = plainReporter(output, true);
+      reporter.handle(runStarted());
+      reporter.handle(plan([{ file: 'tests/case.e2e.ts', tests: 1 }]));
+      reporter.handle(testStarted('t1', 'pays', 'chromium'));
+      const step = (stepId: string, progress: object) =>
+        reporter.handle({
+          type: 'step',
+          testId: 't1',
+          agent: 'default',
+          repeat: 0,
+          target: 'chromium',
+          progress: { ...progress, identity: { attemptId: 'a1', attemptIndex: 0, stepId, stepIndex: Number(stepId.slice(1)) } },
+        } as never);
+      const shown = () => chunks.at(-1)!.replace(ANSI_PATTERN, '');
+      step('s0', { phase: 'start', kind: 'agent', api: 'agent.act', label: 'pay' });
+      // An onAction hook takes a screenshot while the act runs.
+      step('s1', { phase: 'start', kind: 'locator', api: 'screen.screenshot', label: 'after tap' });
+      expect(shown()).toContain('screen.screenshot "after tap"');
+      step('s0', { phase: 'activity', api: 'agent.act', activity: 'observe' });
+      step('s1', { phase: 'end', kind: 'locator', api: 'screen.screenshot', label: 'after tap', status: 'passed', durationMs: 5, modelCalls: 0 });
+      expect(shown()).toContain('agent.act "pay"');
+      expect(shown()).toContain('Observing');
+      step('s0', { phase: 'activity', api: 'agent.act', activity: 'action' });
+      step('s0', { phase: 'event', api: 'agent.act', event: { kind: 'engine', name: 'tool:tap', detail: 'tap button "Pay"', startedAt: new Date(0).toISOString(), durationMs: 27, status: 'passed' } });
+      step('s0', { phase: 'activity', api: 'agent.act', activity: 'action' });
+      expect(shown()).toContain('agent.act "pay"');
+      expect(shown()).toContain('tap button "Pay"');
+      expect(shown()).toContain('Acting');
+      expect(shown()).not.toContain('screen.screenshot');
+      step('s0', { phase: 'end', kind: 'agent', api: 'agent.act', label: 'pay', status: 'passed', durationMs: 900, modelCalls: 1 });
+      expect(shown()).not.toContain('Acting');
+    });
+
+    it('drops a step an earlier attempt left open once a retry starts its own', () => {
+      const { chunks, output } = liveCapture();
+      const reporter = plainReporter(output, true);
+      reporter.handle(runStarted());
+      reporter.handle(plan([{ file: 'tests/case.e2e.ts', tests: 1 }]));
+      reporter.handle(testStarted('t1', 'pays', 'chromium'));
+      const step = (attemptId: string, stepIndex: number, progress: object) =>
+        reporter.handle({
+          type: 'step',
+          testId: 't1',
+          agent: 'default',
+          repeat: 0,
+          target: 'chromium',
+          progress: { ...progress, identity: { attemptId, attemptIndex: Number(attemptId.slice(1)), stepId: `${attemptId}:${stepIndex}`, stepIndex } },
+        } as never);
+      const shown = () => chunks.at(-1)!.replace(ANSI_PATTERN, '');
+      // The first attempt times out with its act still running: no end ever comes.
+      step('a0', 0, { phase: 'start', kind: 'agent', api: 'agent.act', label: 'pay' });
+      step('a1', 0, { phase: 'start', kind: 'locator', api: 'locator.tap', label: 'Pay' });
+      step('a1', 0, { phase: 'end', kind: 'locator', api: 'locator.tap', label: 'Pay', status: 'passed', durationMs: 5, modelCalls: 0 });
+      expect(shown()).toContain('└── pays');
+      expect(shown()).not.toContain('agent.act');
+    });
+
     it('shows the --step prompt under its paused test, after every step that ran, and takes it down', () => {
       const restore = withTerminalSize({ columns: 120, rows: 40 });
       try {
