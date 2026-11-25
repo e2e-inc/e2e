@@ -1936,7 +1936,9 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
       'clear app state',
       (client) => client.settings.update({ ...this.selection(), setting: 'clear-app-state', state: 'clear', app }),
       operation.signal,
-    );
+    ).catch((error: unknown) => {
+      throw appNotInstalled(error, app, this.where);
+    });
     await this.openApp(app, { relaunch: true }, operation.signal);
   }
 
