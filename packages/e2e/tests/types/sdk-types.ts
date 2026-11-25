@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { ctrf, json, junit, line, list as listReporter, markdown } from '../../src/reporters.ts';
 import {
   credentials,
+  defineConfig,
   expect,
   secrets,
   unique,
@@ -231,6 +232,7 @@ customExecutorObservation.keyboardVisible satisfies boolean | undefined;
 ({ targets, cache: 'read-write' }) satisfies E2EConfig;
 ({ targets, failOnSkippedFailure: true }) satisfies E2EConfig;
 ({ targets, maxDuration: 900_000 }) satisfies E2EConfig;
+({ targets: [{ ...targets[0], fullyParallel: false }], fullyParallel: true }) satisfies E2EConfig;
 ({ targets, toPass: { timeout: 200, intervals: [10, 20] } }) satisfies E2EConfig;
 // @ts-expect-error Only timeout and intervals are valid in toPass config.
 ({ targets, toPass: { timeout: 200, interval: 10 } }) satisfies E2EConfig;
@@ -727,6 +729,13 @@ test.extend<{ x: number }>().runIf(true)('uses x', async ({ x }) => { x satisfie
 test.skipIf(true)('no body');
 // @ts-expect-error the registrar takes test options, not describe options
 test.runIf(true)('serial', { serial: true }, async () => {});
+// @ts-expect-error parallel is a describe option, not a test option
+test('parallel', { parallel: true }, async () => {});
+test.describe('parallel', { parallel: true }, () => {});
+test.describe.configure({ parallel: true });
+test.extend<{ x: number }>().describe.configure({ parallel: false });
+// @ts-expect-error configure takes parallel, not the mode other runners take
+test.describe.configure({ mode: 'parallel' });
 // @ts-expect-error requires was removed; platforms scopes a test to targets
 test('scoped', { requires: ['browser'] }, async () => {});
 test('scoped', { platforms: ['web'] }, async () => {});
@@ -817,8 +826,16 @@ describe.fail('gaps', { tags: ['legacy'] }, () => {});
 describe.fail('gaps', { fail: 'legacy checkout' }, () => {});
 // @ts-expect-error describe.fail registration must be synchronous
 test.describe.fail('asynchronous', async () => {});
-// @ts-expect-error a group cannot be focused; describe options take no only
-test.describe.fail('gaps', { only: true }, () => {});
+// A group is focused by describe.only or the only option; describe.only takes no only of its own.
+void (test.describe.only('checkout', () => {}) satisfies void);
+describe.only('checkout', { tags: ['smoke'] }, () => {});
+test.describe('checkout', { only: true }, () => {});
+// @ts-expect-error describe.only is already focused
+describe.only('checkout', { only: true }, () => {});
+// @ts-expect-error describe.only registration must be synchronous
+test.describe.only('asynchronous', async () => {});
+// @ts-expect-error only is true or false, never a reason
+test.describe('checkout', { only: 'debugging' }, () => {});
 
 declare const payloadUploadAction: Extract<import('../../src/engine/index.ts').LocatorAction, { kind: 'setInputFilePayloads' }>;
 payloadUploadAction.files[0]!.buffer satisfies Uint8Array;
@@ -1249,6 +1266,23 @@ void (inferredEngine.isolation satisfies 'worker' | undefined);
 defineEngine<{}, 'ios'>({ name: 'tv', version: '1.0.0', spiVersion: 1 });
 // @ts-expect-error the literal 'worker' requires isolation: 'worker' in the spec
 defineEngine<{}, string, 'worker'>({ name: 'tv', version: '1.0.0', spiVersion: 1 });
+
+// defineConfig keeps the config's own type, so the config type passed to
+// test.extend types the engine's fixtures.
+const definedConfig = defineConfig({ targets: [{ engine: paneEngine, app: { url: 'http://127.0.0.1:0' } }] });
+test.extend<{}, {}, typeof definedConfig>()('reads an engine fixture', async ({ pane }) => {
+  await pane.goto('/');
+});
+// A config from defineConfig is still an E2EConfig.
+void (definedConfig satisfies E2EConfig);
+// defineConfig refuses a key E2EConfig doesn't have, as satisfies E2EConfig does.
+defineConfig({
+  targets: [{ engine: paneEngine }],
+  // @ts-expect-error E2EConfig has no key called bogus
+  bogus: true,
+});
+// @ts-expect-error E2EConfig has no key called reporter
+defineConfig({ reporter: ['list'], targets: [{ engine: paneEngine }] });
 
 // A test, a group, and a call each pin a configured agent by name.
 test('as the buyer', { agent: 'buyer' }, async () => {});

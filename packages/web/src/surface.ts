@@ -335,6 +335,8 @@ export class PlaywrightSurface {
   /** The provider's browsers, when `browser` names one; the runner and worker halves of the lease bookkeeping. */
   private readonly leases: LeasedBrowsers | undefined;
   private session: AttemptSession | undefined;
+  /** Set by `init`: a handle no target runs on never gets there. */
+  private started = false;
   private readonly usedContexts = new Set<string>();
   private readonly viewport: ViewportSize | null;
   private readonly deviceScaleFactor: number | undefined;
@@ -428,6 +430,7 @@ export class PlaywrightSurface {
 
   /** Provisions the shared browser once per worker: a local launch, or a CDP attach. */
   async init(info: EngineInitInfo): Promise<void> {
+    this.started = true;
     // A runner older than the peer floor passes no origin; fail rather than send the credentials nowhere.
     if (info.app.origin === undefined && (this.headers !== undefined || this.basicAuth !== undefined)) {
       throw new ConfigurationError('INVALID_CONFIG', 'web({ headers, basicAuth }) needs an e2e runner that tells the engine the app\'s origin; update e2e to the release beside this @e2e-dev/web');
@@ -674,7 +677,9 @@ export class PlaywrightSurface {
 
   /** Returns the active attempt, including its connection generation and references. */
   private requireSession(): AttemptSession {
-    if (this.session === undefined) throw invalidState('no attempt is running');
+    if (this.session === undefined) {
+      throw invalidState(this.started ? 'no attempt is running' : 'no attempt is running on this engine handle, which has not started in this process: use the handle the target runs on, not a new web(), from code a test runs');
+    }
     return this.session;
   }
 
@@ -770,6 +775,11 @@ export class PlaywrightSurface {
   /** Emulates media features on the open page, or the one the next navigation opens, for the rest of the attempt. */
   emulateMedia(media: WebMedia): Promise<void> {
     return this.requireSession().emulateMedia(media);
+  }
+
+  /** Takes the attempt's browser offline or back online, for the rest of the attempt. */
+  setOffline(offline: boolean): Promise<void> {
+    return this.requireSession().setOffline(offline);
   }
 
   /**
@@ -873,8 +883,9 @@ export class PlaywrightSurface {
   /**
    * Runs one navigation the engine itself makes, so the app log leaves it to
    * the step that asked for it. A navigation that fails after a test route
-   * aborted its document request failed because the test aborted it: an
-   * action failure, not an engine fault.
+   * aborted its document request, or while the test holds the browser
+   * offline, failed because of what the test did: an action failure, not an
+   * engine fault.
    */
   async navigating<T>(work: () => Promise<T>): Promise<T> {
     this.ownNavigations += 1;
@@ -885,8 +896,14 @@ export class PlaywrightSurface {
       this.trace?.tellEnvironment();
       return result;
     } catch (cause) {
-      if (watch.url === undefined || isClassified(cause) || isPwTimeout(cause)) throw cause;
-      throw new TestError('ACTION_FAILED', `navigation failed: a route aborted the request for ${watch.url}: ${message(cause)}`, { cause });
+      if (isClassified(cause) || isPwTimeout(cause)) throw cause;
+      const reason = watch.url !== undefined
+        ? `a route aborted the request for ${watch.url}`
+        : this.session?.navigatedOffline() === true
+          ? "the browser is offline (browser.setNetwork('offline'))"
+          : undefined;
+      if (reason === undefined) throw cause;
+      throw new TestError('ACTION_FAILED', `navigation failed: ${reason}: ${message(cause)}`, { cause });
     } finally {
       this.navigationAborts.delete(watch);
       this.ownNavigations -= 1;
