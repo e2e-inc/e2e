@@ -171,6 +171,7 @@ run only in a browser, so a test that uses it declares
 | `context.pages()`, `context.newPage()`, `page.bringToFront()` | `browser.tabs()`, `browser.newTab()`, `tab.activate()`; no `context.on('page')` event |
 | `page.evaluate(fn, arg)` | `browser.evaluate(fn, arg)`, JSON in and out |
 | `page.webmcp.tools()`, `page.webmcp.callTool(name, input)` | the same on `browser.webmcp`, with `web({ webmcp: true })` in place of the launch argument or preferences; the main frame only, see [WebMCP](/reference/web#webmcp) |
+| `page.consoleMessages()`, `page.pageErrors()`, `page.on('console')`, `page.on('pageerror')` | Read [`browser.consoleMessages()`](/reference/web#consolemessages) or [`browser.pageErrors()`](/reference/web#pageerrors) after the action. Both return everything since the tab opened, like Playwright's `{ filter: 'all' }`. There are no console or page error listeners |
 | `page.addInitScript()`, `page.emulateMedia({ colorScheme, reducedMotion })` | `browser.addInitScript()` or `web({ initScripts })`; `browser.emulateMedia()` |
 | `page.clock.install()`, `pauseAt()`, `runFor()`, `fastForward()`, `resume()`, `setFixedTime()`, `setSystemTime()` | `browser.clock`, the same methods and arguments; it covers every tab, like `context.clock` |
 | `context.addCookies()`, `cookies(urls)`, `clearCookies()` | `browser.setCookies()`, `browser.cookies(urls)`, `browser.clearCookies()` |
@@ -295,7 +296,6 @@ purpose. Use the workaround, or keep the test in Playwright.
 | `page.on('request')`, `response.ok()` | Wait for one request with `browser.waitForRequest` or `browser.waitForResponse`. To observe every request, record `route.request` in a `browser.route` handler and call `route.fallback()`. For `response.ok()`, use `expect(response).toBeOK()` or check `response.status` |
 | `route.fulfill({ response })`, `route.abort(code)`, `route.fetch(options)`, `request.postDataJSON()` | Pass `status`, `headers`, and `body` from `route.fetch()` to `route.fulfill()`. For `postDataJSON()`, read `postData` on the `WebRequest`: `undefined` with no body, where Playwright returns `null`; `JSON.parse` it for JSON, `Object.fromEntries(new URLSearchParams(postData))` for a form |
 | `page.addLocatorHandler()` | Dismiss the overlay in `beforeEach`, or set its consent cookie with `browser.setCookies` |
-| `page.on('console')`, `page.on('pageerror')` | A `browser.addInitScript` that records to a `window` array |
 | `setGeolocation()`, `grantPermissions()` | A `browser.addInitScript` stub; `app.permissions` on the target |
 | `ignoreHTTPSErrors`, `proxy`, `channel`, `launchOptions` | Serve the app over `http`; start the browser yourself and attach with `web({ connect })` |
 
