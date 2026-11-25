@@ -499,6 +499,7 @@ web({ dialogs: 'accept' }); // default: unset
 | Throws | When |
 | --- | --- |
 | `INVALID_CONFIG` | A value other than `'accept'` or `'dismiss'`. A function handler belongs in `onDialog`. |
+| `ENGINE_FAILURE` | Answering a dialog failed, for example because the page closed. It fails the next step, or the attempt at its end when no step follows. |
 
 ### The browser fixture
 
