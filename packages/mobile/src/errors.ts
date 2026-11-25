@@ -249,6 +249,16 @@ export function isForeignBlockingDialog(cause: unknown): boolean {
   return isBlockingDialog(cause) && message(cause).startsWith('Android system dialog is blocking ');
 }
 
+/**
+ * True for an `alert` command agent-device failed without pressing any
+ * button: no alert found, or a refusal it marks `dispatched: no`. A failure
+ * after a press (`alert-window-expired`, the outcome unconfirmed) is not one.
+ */
+export function pressedNoAlertButton(cause: unknown): boolean {
+  const { reason, dispatched } = details(cause);
+  return reason === 'alert-not-found' || dispatched === 'no';
+}
+
 const RUNNER_RECOVERY =
   'If the next run meets it again, stop the daemon (`npx agent-device daemon stop`) and reboot the simulator (`xcrun simctl shutdown <udid>`, then `boot`).';
 

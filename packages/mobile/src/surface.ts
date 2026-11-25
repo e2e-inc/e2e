@@ -15,7 +15,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { isAgentDeviceError, type CaptureSnapshotResult } from 'agent-device';
+import type { CaptureSnapshotResult } from 'agent-device';
 import {
   EngineError,
   KEY_NAMES,
@@ -49,7 +49,7 @@ import {
   ConfigurationError,
   TestError,
 } from '@e2e-dev/core/engine';
-import { isAppNotRunning, isForeignBlockingDialog, isSnapshotPresentationFailure, isUnreadableCapture, ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING, refusedSwipePath, runCommand, staleOr } from './errors.ts';
+import { isAppNotRunning, isForeignBlockingDialog, isSnapshotPresentationFailure, pressedNoAlertButton, isUnreadableCapture, ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING, refusedSwipePath, runCommand, staleOr } from './errors.ts';
 import { pointerInteraction, DEFAULT_LONG_PRESS_MS, MAX_TAP_COUNT } from './actions.ts';
 import { resolveExpression } from './locate.ts';
 import { launchArgumentList, launchArgumentsForOpen } from './launch-arguments.ts';
@@ -1700,8 +1700,9 @@ export class AgentDeviceSurface {
    * restarts System UI; on an app's, it stops that app. Any other node, "Wait"
    * and an app's own control with that label included, has no unguarded path
    * and keeps the refusal. When agent-device
-   * fails the dismissal (the guard's own recovery may already have closed the
-   * dialog), the refusal is what the test sees, not the missing alert.
+   * fails the dismissal without pressing anything (the dialog closed in the
+   * meantime), the refusal is what the test sees, not the missing alert; a
+   * failure after its press is the dismissal's own.
    */
   private async pressOrCloseDialog(client: AgentDeviceClient, target: NodeBinding, input: InputBudget, press: () => Promise<unknown>): Promise<unknown> {
     try {
@@ -1712,7 +1713,7 @@ export class AgentDeviceSurface {
       try {
         return await input.send((signal) => client.command.alert({ ...this.selection(), action: 'dismiss', signal }));
       } catch (dismissal) {
-        throw isAgentDeviceError(dismissal) ? cause : dismissal;
+        throw pressedNoAlertButton(dismissal) ? cause : dismissal;
       }
     }
   }
