@@ -5,11 +5,9 @@ import { z } from 'zod';
 
 const projectTest = test.extend<{ project: { id: string } }>({
   project: async ({ app, browser, request }, use) => {
-    // Host-only cookie uses hostname; for a parent-domain cookie (`Domain=example.com`), match `.example.com`.
-    const domain = new URL(app.baseUrl).hostname;
-    const session = (await browser.cookies()).find((c) => c.name === 'session' && c.domain === domain);
-    if (session === undefined) throw new Error('not signed in: no session cookie for the app');
-    const headers = { cookie: `session=${session.value}` };
+    const cookies = await browser.cookies(`${app.baseUrl}/api/projects`);
+    if (cookies.length === 0) throw new Error('not signed in: the app has no cookies');
+    const headers = { cookie: cookies.map((c) => `${c.name}=${c.value}`).join('; ') };
     let project: { id: string } | undefined;
     try {
       const created = await request.post(`${app.baseUrl}/api/projects`, { json: { name: `Project ${randomUUID()}` }, headers });

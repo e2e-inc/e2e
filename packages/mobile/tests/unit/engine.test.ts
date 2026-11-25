@@ -107,7 +107,7 @@ describe('manifest', () => {
     expect(Object.keys(pinned.session!).toSorted()).toEqual(['back', 'openLink', 'reset', 'restart']);
     // No `open`: a device app has no URL. No select verb either: the touch surface has no option lists to pick from.
     expect(pinned.session!.open).toBeUndefined();
-    expect(pinned.actions).toEqual(['tap', 'doubleTap', 'longPress', 'fill', 'clear', 'press', 'check', 'uncheck', 'focus', 'hover', 'dragTo', 'swipe']);
+    expect(pinned.actions).toEqual(['tap', 'doubleTap', 'multiTap', 'longPress', 'fill', 'clear', 'press', 'check', 'uncheck', 'focus', 'hover', 'dragTo', 'swipe']);
     expect(pinned.state).toBeUndefined();
   });
 
@@ -179,9 +179,14 @@ describe('manifest', () => {
       expect.objectContaining({ code: 'INVALID_CONFIG', message: 'target "ios" app.permissions.camera must be one of grant, deny, reset, got "granted"' }),
     );
     expect(() => validateApp!(app(new Map([['camera', 'grant']])), info)).toThrowError(
-      expect.objectContaining({ code: 'INVALID_CONFIG', message: 'target "ios" app.permissions must be a plain object of permission names to grant, deny, reset' }),
+      expect.objectContaining({ code: 'INVALID_CONFIG', message: 'target "ios" app.permissions must be \'all\' or a plain object of permission names to grant, deny, reset' }),
+    );
+    expect(() => validateApp!(app('every'), info)).toThrowError(
+      expect.objectContaining({ code: 'INVALID_CONFIG', message: 'target "ios" app.permissions must be \'all\' or a plain object of permission names to grant, deny, reset' }),
     );
     expect(() => validateApp!(app({ camera: 'grant', 'media-library': 'deny', photos: undefined }), info)).not.toThrow();
+    // Config load hands an engine 'all' as allPermissions, never as the string.
+    expect(() => validateApp!({ bundleId: 'com.example.app', allPermissions: true }, info)).not.toThrow();
   });
 });
 
@@ -309,6 +314,7 @@ describe('lifecycle', () => {
     for (const configured of [['iPhone 16e', 'iPad Pro 11-inch'], undefined]) {
       const h = harness(configured === undefined ? {} : { device: configured });
       expect(h.engine.selectsDevice).toBe(true);
+      expect(h.engine.grantsAllPermissions).toBe(true);
       const result = await h.prepare(info('iPhone 17 Pro'));
       // One named device is one worker, whatever the run planned.
       expect(result?.workers).toBe(1);
@@ -1845,6 +1851,16 @@ describe('location', () => {
     });
   });
 
+  it('reports a located field empty while its hint shows, and a container by the text below it', async () => {
+    const h = harness({ platform: 'android' });
+    await openAttempt(h);
+    h.fake.respond('capture.snapshot', () => ANDROID_ID_SNAPSHOT);
+    const [name] = await h.engine.locate!(testIdQuery('name'), operation());
+    const [form] = await h.engine.locate!(testIdQuery('form'), operation());
+    expect(name?.states?.empty).toBe(true);
+    expect(form?.states?.empty).toBe(false);
+  });
+
   it('finds an Android view by its id without its package', async () => {
     const h = harness({ platform: 'android' });
     await openAttempt(h);
@@ -1978,6 +1994,7 @@ describe('perform', () => {
     const before = h.fake.calls.length;
     await h.engine.perform!(about!.ref, { kind: 'tap' }, op);
     await h.engine.perform!(about!.ref, { kind: 'doubleTap' }, op);
+    await h.engine.perform!(about!.ref, { kind: 'multiTap', count: 3 }, op);
     await h.engine.perform!(about!.ref, { kind: 'longPress', durationMs: 900 }, op);
     await h.engine.perform!(about!.ref, { kind: 'longPress' }, op);
     await h.engine.perform!(search!.ref, { kind: 'focus' }, op);
@@ -1995,6 +2012,7 @@ describe('perform', () => {
     expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
       ['interactions.press', { ref: '@e4', settle: true, settleQuietMs: 150 }],
       ['interactions.press', { ref: '@e4', count: 2, settle: true, settleQuietMs: 150 }],
+      ['interactions.press', { ref: '@e4', count: 3, settle: true, settleQuietMs: 150 }],
       ['interactions.longPress', { ref: '@e4', settle: true, settleQuietMs: 150, durationMs: 900 }],
       // No duration named: the engine's one-second hold, past a Pressable's delayLongPress.
       ['interactions.longPress', { ref: '@e4', settle: true, settleQuietMs: 150, durationMs: 1000 }],
@@ -2021,6 +2039,24 @@ describe('perform', () => {
     const presses = h.fake.calls.filter((call) => call.method === 'interactions.press');
     expect(presses).not.toHaveLength(0);
     expect(presses.every((call) => call.signal instanceof AbortSignal)).toBe(true);
+  });
+
+  it('refuses a multiTap above agent-device\'s 200 presses before any wait or device call, and sends 200', async () => {
+    const h = harness();
+    await openAttempt(h);
+    const about = await observed(h, 'About');
+    const before = h.fake.calls.length;
+    // A test step waits for the node to settle and steady before it presses;
+    // the refusal comes before those waits, so no snapshot and no press.
+    await expect(h.engine.perform!(about.ref, { kind: 'multiTap', count: 201 }, { ...operation(), origin: 'test' })).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('at most 200'),
+    });
+    expect(h.fake.calls.slice(before)).toEqual([]);
+    await h.engine.perform!(about.ref, { kind: 'multiTap', count: 200 }, operation());
+    expect(h.fake.calls.slice(before).filter((call) => call.method === 'interactions.press').map((call) => call.args)).toEqual([
+      { ref: '@e4', count: 200, settle: true, settleQuietMs: 150 },
+    ]);
   });
 
   it.each(['Enter', 'a'])('sends %s to a focused field without tapping it first', async (key) => {
@@ -2553,9 +2589,9 @@ describe('device fixture', () => {
       h.fake.respond('capture.snapshot', () => ({ ...KEYBOARD_UP, nodes: below }));
       // A role query never matches a hidden node; a text query still finds it, hidden.
       expect(await h.engine.locate!(brand, operation())).toEqual([]);
-      expect((await h.engine.locate!(brandByText, operation()))[0]?.states).toEqual({ hidden: true });
+      expect((await h.engine.locate!(brandByText, operation()))[0]?.states?.hidden).toBe(true);
       h.fake.respond('capture.snapshot', () => ({ ...KEYBOARD_GONE, nodes: below }));
-      expect((await h.engine.locate!(brand, operation()))[0]?.states).toBeUndefined();
+      expect((await h.engine.locate!(brand, operation()))[0]?.states?.hidden).toBeUndefined();
     });
 
     it('reads the keyboard band off the keyboard element when the capture measured no frame, and not once the producer saw it gone', async () => {
@@ -2566,9 +2602,9 @@ describe('device fixture', () => {
       const brand = { kind: 'query', query: { kind: 'text', value: { kind: 'string', value: 'Brand', exact: true } } } as const;
       // Brand's centre is under the dock below the keys, which the band reaches down to the bottom of the screen.
       h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, viewport: { width: 390, height: 844 }, nodes: below }));
-      expect((await h.engine.locate!(brand, operation()))[0]?.states).toEqual({ hidden: true });
+      expect((await h.engine.locate!(brand, operation()))[0]?.states?.hidden).toBe(true);
       h.fake.respond('capture.snapshot', () => ({ ...KEYBOARD_GONE, viewport: { width: 390, height: 844 }, nodes: below }));
-      expect((await h.engine.locate!(brand, operation()))[0]?.states).toBeUndefined();
+      expect((await h.engine.locate!(brand, operation()))[0]?.states?.hidden).toBeUndefined();
     });
 
     it('counts the suggestion strip XCTest lists beside the keyboard as the keyboard, and keeps its own buttons', async () => {
@@ -2583,8 +2619,8 @@ describe('device fixture', () => {
       ];
       const byText = (value: string) => ({ kind: 'query', query: { kind: 'text', value: { kind: 'string', value, exact: true } } }) as const;
       h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, viewport: { width: 390, height: 844 }, nodes }));
-      expect((await h.engine.locate!(byText('Phone'), operation()))[0]?.states).toEqual({ hidden: true });
-      expect((await h.engine.locate!(byText('Suggestion'), operation()))[0]?.states).toBeUndefined();
+      expect((await h.engine.locate!(byText('Phone'), operation()))[0]?.states?.hidden).toBe(true);
+      expect((await h.engine.locate!(byText('Suggestion'), operation()))[0]?.states?.hidden).toBeUndefined();
     });
 
     it('drags from the point nearest the centre that no control covers, and stops once the keyboard is gone', async () => {
@@ -3512,6 +3548,32 @@ describe('device fixture', () => {
       permission('location', 'deny'),
       fresh,
     ]);
+  });
+
+  it('grants every permission before each fresh launch with \'all\', in one agent-device all on either platform, and for one openApp', async () => {
+    for (const platform of ['ios', 'android'] as const) {
+      const h = harness({ platform, bundleId: 'com.example.app', allPermissions: true });
+      h.fake.respond('apps.open', () => ({ session: 's', appName: 'Example', appBundleId: 'com.example.app', identifiers: {} }));
+      await boot(h, platform);
+      await h.engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
+      const device = fixture(h);
+      const before = h.fake.calls.length;
+      await h.engine.session!.restart!(operation());
+      await h.engine.session!.reset!(operation());
+      await device.openApp('com.other', { relaunch: true, permissions: 'all' });
+      // agent-device expands `all` itself: the app's declared permissions on Android, each privacy service on iOS.
+      const all = (app: string): [string, unknown][] => [['settings.update', { setting: 'permission', permission: 'all', state: 'grant', platform, app }]];
+      const fresh: [string, unknown] = ['apps.open', { platform, app: 'com.example.app', relaunch: true }];
+      expect(h.fake.calls.slice(before).map((call) => [call.method, call.args]), platform).toEqual([
+        ...all('com.example.app'),
+        fresh,
+        ['settings.update', { platform, setting: 'clear-app-state', state: 'clear', app: 'com.example.app' }],
+        ...all('com.example.app'),
+        fresh,
+        ...all('com.other'),
+        ['apps.open', { platform, app: 'com.other', relaunch: true }],
+      ]);
+    }
   });
 
   it('spells a launch-argument object for the platform on every fresh launch of the pinned app, and sends nothing for an empty object', async () => {
@@ -4847,6 +4909,38 @@ describe('deterministic actions', () => {
     // The swipe shape a locator-scoped scrollUntilVisible sends (momentum: 'slow').
     await expect(h.engine.perform!(scroller.ref, { kind: 'swipe', direction: 'down', momentum: 'slow' }, test())).rejects.toMatchObject(refused);
     expect(h.fake.methods()).not.toContain('interactions.swipe');
+  });
+
+  it('fails a point swipe agent-device refuses as off its viewport as NOT_ACTIONABLE, naming duration only when the keyboard cut an untimed swipe', async () => {
+    const h = harness({ settle: false, transition: 0 });
+    await openAttempt(h);
+    const refuse = (viewport: { width: number; height: number }, point: { x: number; y: number }) => (): never => {
+      throw new AppError('INVALID_ARGS', `Gesture point (${point.x}, ${point.y}) is outside the usable area of the ${viewport.width}x${viewport.height} viewport`, {
+        reason: 'GESTURE_TRAJECTORY_OUT_OF_BOUNDS',
+        viewport: { x: 0, y: 0, ...viewport },
+        sample: { offsetMs: 100, point },
+        hint: 'Use the coordinate units snapshot reports: points on Apple platforms, not screenshot pixels.',
+      });
+    };
+    const swipe = (durationMs?: number) =>
+      h.engine.performAt!({ x: 201, y: 261 }, { kind: 'swipeTo', target: { x: 201, y: 610 }, ...(durationMs === undefined ? {} : { durationMs }) }, test());
+    const refusedWith = async (respond: () => never, durationMs: number | undefined, hint: RegExp) => {
+      h.fake.respond('interactions.swipe', respond);
+      h.fake.respond('interactions.pan', respond);
+      const failure = swipe(durationMs);
+      await expect(failure).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', retryable: false });
+      await expect(failure).rejects.toThrow(hint);
+    };
+    const keyboardHint = /Hint: Nothing was sent\. The open soft keyboard cuts the 844-point screen .*pass duration to send the path as given, across the keyboard\.$/;
+    const ownHint = /viewport Hint: Use the coordinate units/;
+
+    // No observation before the swipe: the screen is read when the refusal needs it.
+    await refusedWith(refuse({ width: 390, height: 500 }, { x: 201, y: 610 }), undefined, keyboardHint);
+    await refusedWith(refuse({ width: 390, height: 500 }, { x: 201, y: 610 }), 100, ownHint);
+    await refusedWith(refuse({ width: 390, height: 500 }, { x: 0, y: 400 }), undefined, ownHint);
+    await refusedWith(refuse({ width: 390, height: 500 }, { x: 603, y: 1800 }), undefined, ownHint);
+    await refusedWith(refuse({ width: 390, height: 844 }, { x: 201, y: 5000 }), undefined, ownHint);
+    await refusedWith(refuse({ width: 844, height: 390 }, { x: 201, y: 610 }), undefined, ownHint);
   });
 
   it('refuses the agent node swipe on a capture without the window origin', async () => {

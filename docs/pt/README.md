@@ -61,7 +61,7 @@ translation moves or goes with it in the same change.
   UI labels keep their own formatting.
 - Keep product, package, and API names in English: e2e, Playwright,
   `@e2e-dev/web`, MCP, CI, GitHub Actions. Keep literal CLI option labels
-  such as **None** unchanged so readers can find them in the terminal.
+  such as **Skip for now** unchanged so readers can find them in the terminal.
 - Keep a term in English where Brazilian developers use the English word
   (*runner*, *fixture*, *worker*, *engine*, *pull request*, *prompt*).
   Don't italicize these loanwords. The glossary says which terms stay in
@@ -192,6 +192,7 @@ translation moves or goes with it in the same change.
 | built-in agent | agente embutido |
 | judgment (`assert`, `waitFor`, `extract`) | julgamento |
 | gate (`minProbability`, `minConfidence`) | limiar |
+| gate (a merge or a release in CI) | bloquear; liberar ou bloquear (a release, feminine) |
 | decide call, text call | chamada de decisão, chamada de texto |
 | completion check | verificação de conclusão |
 | tool call, forced tool choice | chamada de ferramenta, escolha de ferramenta forçada |
@@ -205,3 +206,21 @@ translation moves or goes with it in the same change.
 | vendor | fornecedor |
 | on-screen keyboard | teclado virtual |
 | drawn (content the tree doesn't show) | desenhado |
+| step (a CI YAML step) | step (keep in English, o step); an e2e test step stays passo |
+| pipeline, merge request | pipeline, merge request (keep in English, o pipeline, o merge request) |
+| runner (a CI machine), self-managed runner, runner image | runner (o runner), runner autogerenciado, imagem do runner |
+| matrix (a CI matrix) | matriz (jobs em matriz) |
+| job summary | resumo do job |
+| rerun | reexecução |
+| first pass (the run a rerun completes) | primeira rodada |
+| preview deployment, production deployment | deploy de preview, deploy de produção |
+| trigger (a build or workflow), fire (an event) | acionar, disparar |
+| action (a GitHub Actions action) | action (keep in English, a action) |
+| lockfile | lockfile (keep in English, o lockfile) |
+| package manager | gerenciador de pacotes |
+| bare React Native | React Native puro |
+| build profile | perfil de build |
+| environment variable, masked | variável de ambiente, mascarada |
+| rate limit | limite de taxa |
+| template | template (keep in English, o template) |
+| warm browser | navegador aquecido |

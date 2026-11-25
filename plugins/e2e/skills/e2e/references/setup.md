@@ -170,6 +170,7 @@ or `E2E_USER_ADMIN_PASSWORD` first, or defer to fill time with
 | `cleanupTimeout` | `30000` | Each `afterEach` hook, fixture teardown, engine cleanup, ms. |
 | `retries` | `0`, `1` in CI | 0 to 10. |
 | `workers` | half the cores, `1` in CI | Parallel test files, capped by the `workers` the engine declares per target. Files in parallel share the app's server data: give each test records of its own (topic `writing-tests`, "Each test owns its starting state"), or set `1` when the app keeps one shared state (one cart, one profile) that no test can own. |
+| `fullyParallel` | `false` | Run the tests of one file in parallel too, on separate workers; also on a target, and `--fully-parallel`. One file or group: topic `writing-tests`, option `parallel`. |
 | `reporters` | `['list']` | `list`, `dot`, `line`, `json`, `junit`, `markdown`, `ctrf` ids, the same as factories from `e2e/reporters` (`junit({ outputFile })`), or `{ name, interactive?, onEvent?, reportFiles?, onRunFinished?, onSummary? }` objects; two of `list`, `dot`, and `line` together are `INVALID_CONFIG`, and beside `json` their ids print to stderr; without one of them or another `interactive` reporter, what the code prints goes to stderr; `--reporter` keeps the other objects. |
 | `cache` | `'read-write'` | `'read-write'`, `'read-only'`, `'off'`, or `{ mode, store, dir, strict }`; CI demotes only a defaulted mode to `'read-only'`. `strict` (`--strict-cache`) fails a step whose recording no longer replays (`REPLAY_STALE`) instead of handing it to the agent; retries replay too, and the run never writes the cache. |
 | `agents` | `{ default: built-in }` | Tests run with `default`, `e2e run --agent <name>` picks another, entries never inherit from `default`. Options: topic `agent`. |
@@ -201,7 +202,7 @@ target's `app`:
 | `bundleId` | Device targets: the bundle id, package name, or display name (`Settings`) `app.open()` launches. |
 | `appPath` | Device targets: the `.app` or `.apk` under test. A device target needs `bundleId` or `appPath`. |
 | `launchArguments` | Device targets: arguments every fresh launch gets, a list of strings, or an object of argument name to string, number, boolean, or list of strings (`-name value` on iOS; on Android an `am start` extra of the value's type: `--es`, `--ez`, `--ei` or `--el` or `--ef`, `--esa`). |
-| `permissions` | Device targets: states (`grant`, `deny`, `reset`) every fresh launch gets. Web targets: `grant` only, held by every page (`{ 'clipboard-write': 'grant' }` lets headless Chromium write the clipboard). |
+| `permissions` | Device targets: states (`grant`, `deny`, `reset`) every fresh launch gets. Web targets: `grant` only, held by every page (`{ 'clipboard-write': 'grant' }` lets headless Chromium write the clipboard). `'all'` grants every permission the engine can. |
 | `command` | The process serving `url`: `{ executable, args, cwd, env, inheritEnv, startupTimeout, shutdownTimeout, log, reuseExisting }`; `{port}` in `args` and `env` expands to `url`'s port. Targets declaring the same command share one process. |
 | `readyUrl` | Readiness probe when it differs from `url`; `{port}` expands too. |
 | `environment` | `'test'`, `'staging'`, `'production'`; inferred from the host, labels the report and cache key. |
@@ -464,7 +465,7 @@ export default {
   `@e2e-dev/mobile` types the `device` fixture (`installApp`, `openLink`,
   `setPermission`, `setNetwork`, `setAppearance`, `clearKeychain`, `fold`
   for a foldable's hinge (iPhone Duo, Android foldable emulators), `locator`, more). Portable suites declare
-  `requires: ['device']`.
+  `platforms: ['ios', 'android']`.
 - `device.viewport()` reads `{ width, height }` fresh on each call, in the coordinate space of `screen.tapAt()`.
 - `device.unstable_raw` gives the session name, device id and name, a
   `selection` to spread into a call, and a

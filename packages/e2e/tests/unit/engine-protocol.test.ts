@@ -134,6 +134,17 @@ describe('engine protocol', () => {
     expect(legacy.remote.actions).not.toContain('setInputFilePayloads');
   });
 
+  it('advertises multiTap and carries its count and modifiers over JSON-RPC unchanged', async () => {
+    const perform = vi.fn<NonNullable<Engine['perform']>>(async () => undefined);
+    const { remote } = overLoopback(toy({ actions: ['tap', 'multiTap'], perform }));
+    expect(remote.actions).toContain('multiTap');
+    await remote.init!(initInfo());
+    const action = { kind: 'multiTap', count: 3, modifiers: ['Shift'] } as const;
+    await remote.perform!({ id: 'root', revision: '1' }, action, operation());
+    expect(perform).toHaveBeenCalledWith(expect.anything(), action, expect.anything());
+    await remote.dispose!(cleanup);
+  });
+
   it('carries a snapshot with its pixels byte for byte', async () => {
     const data = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 255, 7]);
     const { remote } = overLoopback(
@@ -564,10 +575,13 @@ describe('engine protocol', () => {
         pointerActions: ['tap'],
         performAt: async () => {},
         keyboard: { type: async () => {}, press: async () => {} },
+        grantsAllPermissions: true,
         init: async () => {},
       }),
     );
     expect(validate(describeEngine(local))).toBe(true);
+    expect(describeEngine(local).grantsAllPermissions).toBe(true);
+    expect(connectEngine({ manifest: describeEngine(local), transport: loopbackTransport(local) }).grantsAllPermissions).toBe(true);
     const base = { name: 'x', version: '1', spiVersion: 1 };
     for (const refused of [
       { ...base, methods: ['engine/observe', 'engine/teleport'] },
@@ -580,6 +594,7 @@ describe('engine protocol', () => {
       // The client serves prepare for finish alone, which would drop the device it never forwards.
       { ...base, methods: ['lifecycle/finish'], selectsDevice: true },
       { ...base, methods: ['engine/observe'], pointerActions: ['tap'] },
+      { ...base, methods: ['engine/observe'], grantsAllPermissions: 'yes' },
       { ...base, methods: ['engine/locate'] },
       { ...base, methods: ['engine/observe', 'keyboard/type'] },
       { ...base, methods: ['state/capture'] },
@@ -630,6 +645,25 @@ describe('engine protocol', () => {
       expect(spread).toHaveLength(2);
     });
 
+    it('carries fileApps in the manifest, so a served engine opens a file app and one that does not declare it is refused', () => {
+      const { local, remote } = overLoopback(toy({ fileApps: true }));
+      expect(describeEngine(local).fileApps).toBe(true);
+      expect(remote.fileApps).toBe(true);
+      const plain = overLoopback(toy({}));
+      expect(describeEngine(plain.local).fileApps).toBeUndefined();
+      expect(plain.remote.fileApps).not.toBe(true);
+    });
+
+    it('refuses a server that does not declare the fileApps its manifest promised', async () => {
+      const local = defineEngine(toy({}));
+      const remote = connectEngine({ manifest: { ...describeEngine(local), fileApps: true }, transport: loopbackTransport(local) });
+      await expect(remote.init!(initInfo())).rejects.toThrow(/fileApps is false, declared true/);
+    });
+
+    it('refuses a fileApps flag that is not a boolean', () => {
+      expect(() => defineEngine(toy({ fileApps: 'yes' as never }))).toThrow(/fileApps must be a boolean/);
+    });
+
     it('carries the object form to an engine that declares launchArgumentValues', async () => {
       const seen: unknown[] = [];
       const { local, remote } = overLoopback(
@@ -665,6 +699,40 @@ describe('engine protocol', () => {
 
     it('refuses a launchArgumentValues flag that is not a boolean', () => {
       expect(() => defineEngine(toy({ launchArgumentValues: 'yes' as never }))).toThrow(/launchArgumentValues must be a boolean/);
+    });
+  });
+
+  describe("permissions 'all'", () => {
+    it('carries allPermissions into prepare on an engine that declares grantsAllPermissions', async () => {
+      const seen: unknown[] = [];
+      const { remote } = overLoopback(
+        toy({
+          grantsAllPermissions: true,
+          async prepare(info) {
+            seen.push(info.app);
+          },
+        }),
+        {
+          validateApp(app) {
+            seen.push(app);
+          },
+        },
+      );
+      const target = resolveConfig(
+        { targets: [{ name: 'phone', platform: 'toy', engine: remote, app: { bundleId: 'dev.shop.app', permissions: 'all' } }] },
+        { projectRoot: process.cwd(), env: {} as NodeJS.ProcessEnv },
+      ).targets[0]!;
+      await target.engine!.prepare!({ runId: 'run', targetName: target.name, projectRoot: process.cwd(), app: engineAppInfo(target.app), slots: 1, env: {}, headed: false, signal: new AbortController().signal, log: () => {} });
+      expect(seen).toEqual([
+        { bundleId: 'dev.shop.app', allPermissions: true },
+        { bundleId: 'dev.shop.app', allPermissions: true },
+      ]);
+    });
+
+    it('refuses a server that does not declare the grantsAllPermissions its manifest promised', async () => {
+      const local = defineEngine(toy({}));
+      const remote = connectEngine({ manifest: { ...describeEngine(local), grantsAllPermissions: true }, transport: loopbackTransport(local) });
+      await expect(remote.init!(initInfo())).rejects.toThrow(/grantsAllPermissions is false, declared true/);
     });
   });
 

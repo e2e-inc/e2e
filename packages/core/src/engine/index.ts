@@ -147,6 +147,12 @@ export interface EngineKeyboard {
 export interface EngineAppCheckInfo {
   /** The target declaring the app, for the message of a refusal. */
   readonly targetName: string;
+  /**
+   * The app's `url` names a file on the runner's disk, as the harness reads
+   * the URL. Only an engine that declares `fileApps` is handed one. Refuse
+   * here what cannot read that disk, such as a browser on another machine.
+   */
+  readonly fileApp?: boolean;
 }
 
 /**
@@ -161,13 +167,15 @@ export interface EngineAppInfo {
    * The origin of the app's `url` on the run's port (`scheme://host:port`, as
    * `URL.origin` serializes it): where credentials an engine injects into
    * requests (headers, basic auth) go by default. Absent for an app without
-   * a URL, and for a free port the run has not assigned (`e2e doctor`).
+   * a URL, for one whose URL is a file, and for a free port the run has not
+   * assigned (`e2e doctor`).
    */
   readonly origin?: string;
   /**
    * The site of the app's `url`, its registrable domain as `siteOf` reads it:
    * whose child frames an observation reads; `sameSite` applies it. Absent
-   * for an app without a URL, which is no policy at all.
+   * for an app without a URL or with a file for one, which is no policy at
+   * all.
    */
   readonly site?: string;
   /** The installed app to launch, as the target declared it. */
@@ -186,6 +194,12 @@ export interface EngineAppInfo {
   readonly launchArgumentValues?: LaunchArgumentValues;
   /** Permissions the app holds, by name; what each state means is the engine's (a device sets them before every fresh launch). */
   readonly permissions?: Readonly<Record<string, AppPermissionState>>;
+  /**
+   * `app.permissions: 'all'`: grant every permission the engine can grant,
+   * in place of `permissions`. Only an engine that declares
+   * `grantsAllPermissions` receives it; for any other, the config is refused.
+   */
+  readonly allPermissions?: true;
 }
 
 /**
@@ -808,8 +822,8 @@ export interface Engine {
    */
   readonly pointerActions?: readonly PointerActionKind[];
   /**
-   * The surface honors `modifiers` on the `tap`, `doubleTap`, and
-   * `secondaryTap` actions `perform` receives, holding each key for the
+   * The surface honors `modifiers` on the `tap`, `doubleTap`, `multiTap`,
+   * and `secondaryTap` actions `perform` receives, holding each key for the
    * click. Without it the harness fails an action that carries modifiers
    * with `UNSUPPORTED_CAPABILITY` before it reaches the engine, so an engine
    * that predates the field never drops one silently.
@@ -823,18 +837,33 @@ export interface Engine {
    */
   readonly selectsDevice?: boolean;
   /**
+   * The engine grants `app.permissions: 'all'`, which reaches it as
+   * `EngineAppInfo.allPermissions`. Without it the harness refuses `'all'` at
+   * config load, so an engine that predates the value never receives it.
+   */
+  readonly grantsAllPermissions?: boolean;
+  /**
    * The engine reads the object form of `app.launchArguments` from
    * `EngineAppInfo.launchArgumentValues`. Without it the harness refuses an
    * object at config load, so an engine that predates the object form only
    * ever receives a list in `EngineAppInfo.launchArguments`.
    */
   readonly launchArgumentValues?: boolean;
+  /**
+   * The engine opens an app whose `url` is a `file:` URL, reading the file
+   * from the disk of the machine the harness runs on. The harness checks
+   * every file navigation against that disk, so an engine whose surface
+   * may read another one must not declare this, or must refuse such a
+   * target in `validateApp` (`EngineAppCheckInfo.fileApp`). Without it the
+   * harness refuses a file `app.url` at config load.
+   */
+  readonly fileApps?: boolean;
   /** capability: keyboard - requires observation. Input to whatever holds focus; see `EngineKeyboard`. */
   readonly keyboard?: EngineKeyboard;
   /**
    * Named deterministic surfaces this engine contributes to TestFixtures
    * (a device fixture, a document fixture - anything). Keys become fixture and
-   * capability names; `requires: ['<name>']` gates at selection.
+   * capability names.
    */
   readonly fixtures?: Readonly<Record<string, EngineFixtureFactory>>;
   /**
@@ -942,10 +971,16 @@ export type EngineIsolation = 'attempt' | 'worker';
  * `@e2e-dev/core` types a session without a hand-written argument. It is a type
  * only: no handle carries a value under `engineFixtures`.
  */
-export interface EngineHandle<Fixtures extends object = {}> extends Engine {
+export interface EngineHandle<
+  Fixtures extends object = {},
+  Platform extends string = string,
+  Isolation extends EngineIsolation = EngineIsolation,
+> extends Engine {
   readonly [engineBrand]: true;
   readonly capabilities: ReadonlySet<EngineCapability>;
   readonly [engineFixtures]?: Fixtures;
+  readonly platform?: Platform;
+  readonly isolation?: Isolation;
 }
 
 export { defineEngine, isEngineHandle } from './manifest.ts';
