@@ -6,8 +6,8 @@
  *   node scripts/microbench/post-comment.ts <dir> [--dry-run]
  *
  * `<dir>` holds the downloaded artifacts, `microbench-compare/result.json`
- * and `microbench-repeatability/result.json`; a job that did not finish
- * leaves its file out, and the comment says so. Reads the pull request number
+ * and `microbench-repeatability/result.json`; a job that did not finish, or
+ * whose download failed, leaves its file out, and the comment says so. Reads the pull request number
  * and head from the event at `GITHUB_EVENT_PATH` and posts with
  * `GITHUB_TOKEN` against `GITHUB_REPOSITORY`. A rerun of a run whose head the
  * pull request has moved past posts nothing, so it cannot replace the current

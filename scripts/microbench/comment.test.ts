@@ -60,10 +60,10 @@ describe('renderComment', () => {
     assert.match(text, /⚠️ Repeatability check failed: two builds of the head landed apart in `case-0` \(jitless\)\./);
   });
 
-  it('says which job did not finish, with no table when the comparison is missing', () => {
+  it('says which job left no result, with no table when the comparison is missing', () => {
     const text = renderComment({ compare: undefined, repeatability: undefined, runUrl: RUN });
-    assert.match(text, /⚠️ The comparison did not finish\. See the \[workflow run\]\(https:\/\/github\.com\/o\/r\/actions\/runs\/1\)\./);
-    assert.match(text, /⚠️ The repeatability check did not finish/);
+    assert.match(text, /⚠️ No comparison result: the `compare` job did not finish, or its artifact could not be downloaded\. See the \[workflow run\]\(https:\/\/github\.com\/o\/r\/actions\/runs\/1\)\./);
+    assert.match(text, /⚠️ No repeatability result: the `repeatability` job did not finish, or its artifact could not be downloaded/);
     assert.doesNotMatch(text, /\| Case \|/);
   });
 });

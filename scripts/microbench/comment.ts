@@ -11,9 +11,9 @@ import type { Direction } from './stats.ts';
 export const COMMENT_MARKER = '<!-- microbench -->';
 
 export interface CommentInput {
-  /** The `compare` job's `result.json`, or undefined when the job left none. */
+  /** The `compare` job's `result.json`, or undefined when the job or its download left none. */
   readonly compare: Result | undefined;
-  /** The `repeatability` job's `result.json`, or undefined when the job left none. */
+  /** The `repeatability` job's `result.json`, or undefined when the job or its download left none. */
   readonly repeatability: Result | undefined;
   readonly runUrl: string;
 }
@@ -24,7 +24,9 @@ function plural(count: number, one: string, many: string): string {
 
 /** What the comparison says, in one line. */
 function headline(compare: Result | undefined, runUrl: string): string {
-  if (compare === undefined) return `⚠️ The comparison did not finish. See the [workflow run](${runUrl}).`;
+  if (compare === undefined) {
+    return `⚠️ No comparison result: the \`compare\` job did not finish, or its artifact could not be downloaded. See the [workflow run](${runUrl}).`;
+  }
   const count = (verdict: Direction) => compare.rows.filter((row) => row.assessment?.verdict === verdict).length;
   const higher = count('higher');
   const lower = count('lower');
@@ -41,7 +43,9 @@ function headline(compare: Result | undefined, runUrl: string): string {
 
 /** Whether two builds of the head agreed, which is what makes the comparison worth reading. */
 function repeatabilityLine(repeatability: Result | undefined): string {
-  if (repeatability === undefined) return '⚠️ The repeatability check did not finish, so these counts are not known to be stable.';
+  if (repeatability === undefined) {
+    return '⚠️ No repeatability result: the `repeatability` job did not finish, or its artifact could not be downloaded, so the counts are not known to be stable.';
+  }
   const failures = repeatabilityFailures(repeatability);
   if (failures.length === 0) return `Repeatability: two builds of the head agree in every case, ${repeatability.trials} trials each.`;
   const cases = failures.map((row) => `\`${row.case}\` (${row.mode})`).join(', ');
