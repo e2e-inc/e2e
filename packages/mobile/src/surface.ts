@@ -965,7 +965,9 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
       `permission ${permission} ${state}`,
       (client) => client.settings.update({ setting: 'permission', permission, state, ...this.selection(), ...(app === undefined ? {} : { app }) }),
       signal,
-    );
+    ).catch((error: unknown) => {
+      throw app === undefined ? error : appNotInstalled(error, app, this.where);
+    });
   }
 
   /**

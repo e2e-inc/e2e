@@ -318,7 +318,7 @@ export default {
 | --- | --- |
 | `INVALID_CONFIG` | At config load: no `app.bundleId` and no `app.appPath`; an `app.url` (not supported yet); a link in `bundleId` (a test opens one with `device.openLink`); an unknown permission name; an Apple launch argument such as `AppleLocale`, or a list item `am start` cannot carry, in an object on an Android target. |
 | `UNSUPPORTED_CAPABILITY` | `app.open()`, `app.restart()`, or `app.clearState()` on a target with no `app.bundleId` before its build is installed. |
-| `TEST_SETUP_FAILED` | `app.open()`, `app.restart()`, or `app.clearState()` when the device has no app with the target's `app.bundleId`. The message names the app and the device. |
+| `TEST_SETUP_FAILED` | `app.open()`, `app.restart()`, or `app.clearState()` when the device has no installed app to launch: the target's `app.bundleId`, or the build `device.installApp()` installed. The message names the app and the device. |
 
 #### Launch arguments and permissions
 
@@ -885,7 +885,7 @@ await device.openApp('com.example.app', { relaunch: true, launchArguments: { App
 | --- | --- |
 | `POLICY_DENIED` | A `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, or `filesystem:` link. |
 | `INVALID_ARGUMENT` | Any other link, with a message pointing at `openLink`; an invalid permission name or state; or `launchArguments` outside the declared shape, or one Android cannot carry (see [Launch arguments and permissions](#launch-arguments-and-permissions)). |
-| `TEST_SETUP_FAILED` | The device has no app with that bundle id or package. The message names the app and the device. |
+| `TEST_SETUP_FAILED` | The device has no app with that bundle id, package, or display name. The message names the app and the device. |
 
 #### `openLink`
 
