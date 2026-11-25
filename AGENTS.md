@@ -706,8 +706,8 @@ pnpm microbench --tool time --case redact                      # local smoke run
   with one pinned Node version; dispatch it with a `base` ref to compare. On
   a pull request from this repository it posts the comparison and the
   repeatability result as one comment and edits it on every run; a fork's or
-  Dependabot's pull request has the tables in the job summaries only. The
-  comparison never fails the job: read the comment.
+  Dependabot's pull request has the tables in the job summaries only. A
+  measured regression never fails the job: read the comment.
 - A case's `child.mjs` and `cases.mjs` are plain JavaScript: `--jitless`
   turns off WebAssembly, which Node's TypeScript stripping needs.
 
