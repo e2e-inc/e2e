@@ -341,12 +341,12 @@ export default {
   Android इन्हें `am start` में जोड़ता है, इसलिए `['--ez', 'e2e', 'true']` एक बूलियन
   इंटेंट एक्स्ट्रा बनता है।
 - ऑब्जेक्ट हर आर्ग्युमेंट को एक नाम देता है।
-  - iOS पर, हर एंट्री `-name value` बनती है, उस फ़ॉर्मैट में जिसे `NSUserDefaults` पढ़ता
+  - iOS पर, हर एंट्री `-name value` बनती है, उस फ़ॉर्मेट में जिसे `NSUserDefaults` पढ़ता
     है। ऐसी स्ट्रिंग जिसे पार्सर plist या कमेंट समझ सकता है, जैसे `(draft)`, `a b`, या
     `//cdn`, उसे कोट्स में रखा जाता है। जो ऐप `ProcessInfo.processInfo.arguments` पढ़ता
-    है उसे यही फ़ॉर्मैट मिलता है, जिसमें `false` के लिए `NO` और कोट्स भी शामिल होते हैं।
+    है उसे यही फ़ॉर्मेट मिलता है, जिसमें `false` के लिए `NO` और कोट्स भी शामिल होते हैं।
     अगर आपका ऐप `ProcessInfo.processInfo.arguments` पढ़ता है, तो इसकी जगह
-    `launchArguments` का लिस्ट फ़ॉर्मैट इस्तेमाल करें:
+    `launchArguments` का लिस्ट फ़ॉर्मेट इस्तेमाल करें:
 
     ```ts title="e2e.config.ts"
     export default {

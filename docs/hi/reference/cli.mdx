@@ -1,6 +1,6 @@
 ---
 title: CLI
-description: कमांड्स, फ़्लैग्स, आउटपुट फ़ॉर्मैट्स, और एग्ज़िट कोड्स।
+description: कमांड्स, फ़्लैग्स, आउटपुट फ़ॉर्मेट्स, और एग्ज़िट कोड्स।
 "og:image": "https://e2e.com/docs/images/og/reference/cli.png?v=e0e03be674"
 "twitter:image": "https://e2e.com/docs/images/og/reference/cli.png?v=e0e03be674"
 ---
@@ -1155,7 +1155,7 @@ bunx e2e doctor --target web --headed
 | --- | --- |
 | `node` | `pass`: Node.js या Bun वर्ज़न। अनसपोर्टेड रनटाइम पर `--json` फिर भी `node` को `fail` के साथ रिपोर्ट प्रिंट करता है। |
 | `config` | `path` और `targets` (`name`, `platform`, `engine`) के साथ `pass`, या `CONFIG_*` या `UNKNOWN_TARGET` कोड के साथ `fail`। फ़ेल हुआ `config` आखिरी चेक होता है। |
-| `target` के साथ इंजन चेक | टारगेट का इंजन जो रिपोर्ट करे, जैसे वेब इंजन का `browser`: इंस्टॉल होने पर `pass`, पहले रन में डाउनलोड होने वाला हो तो `warn`, Linux पर इंस्टॉल chromium या firefox की सिस्टम लाइब्रेरी न मिलने पर `fail` (मैसेज उनके नाम और [`--with-deps` इंस्टॉल](/reference/web#installing-browsers) बताता है), ब्राउज़र प्रोवाइडर या `connect` के साथ `skip`; या मोबाइल इंजन के agent-device चेक (`agent-device`, `toolchain`, `ios-runner-cache`, हर कॉन्फ़िगर डिवाइस के लिए `device`, `target-app`) और `app-path` (डिवाइस प्रोवाइडर के लिए सिर्फ़ `device`, `skip` के रूप में)। जो इंजन कुछ रिपोर्ट न करे वह कोई चेक नहीं जोड़ता। इंजन में `doctor` हुक न होने पर `engine` `skip` होता है, और हुक थ्रो करे, टाइमआउट हो, या गलत फ़ॉर्मैट का चेक लौटाए तो `fail`। |
+| `target` के साथ इंजन चेक | टारगेट का इंजन जो रिपोर्ट करे, जैसे वेब इंजन का `browser`: इंस्टॉल होने पर `pass`, पहले रन में डाउनलोड होने वाला हो तो `warn`, Linux पर इंस्टॉल chromium या firefox की सिस्टम लाइब्रेरी न मिलने पर `fail` (मैसेज उनके नाम और [`--with-deps` इंस्टॉल](/reference/web#installing-browsers) बताता है), ब्राउज़र प्रोवाइडर या `connect` के साथ `skip`; या मोबाइल इंजन के agent-device चेक (`agent-device`, `toolchain`, `ios-runner-cache`, हर कॉन्फ़िगर डिवाइस के लिए `device`, `target-app`) और `app-path` (डिवाइस प्रोवाइडर के लिए सिर्फ़ `device`, `skip` के रूप में)। जो इंजन कुछ रिपोर्ट न करे वह कोई चेक नहीं जोड़ता। इंजन में `doctor` हुक न होने पर `engine` `skip` होता है, और हुक थ्रो करे, टाइमआउट हो, या गलत फ़ॉर्मेट का चेक लौटाए तो `fail`। |
 | `agent` के साथ `model` | `provider` और `modelId` के रूप में `model` और `judge`, वही नाम जो AI SDK इंस्टेंस रिपोर्ट करता है। [`e2e login`](/subscriptions) वाले मॉडल के लिए सेव किए लॉगिन या प्रोवाइडर के API key वेरिएबल से `pass` या `fail`, और जब एजेंट के मॉडल एक लॉगिन पढ़ें तो `login` सेट रहता है। ऐसे Vercel AI Gateway या OpenRouter मॉडल के लिए `warn` जिसका key वेरिएबल सेट न हो (`AI_GATEWAY_API_KEY` या `VERCEL_OIDC_TOKEN`; `OPENROUTER_API_KEY`): मॉडल कॉल करने वाले एजेंट स्टेप्स `MODEL_PROVIDER_FAILED` से फ़ेल होंगे, जब तक मॉडल को key किसी और तरीके से न मिले (जैसे बनाते समय पास की गई key या लिंक्ड Vercel प्रोजेक्ट)। किसी और मॉडल के लिए `unknown`, क्योंकि मॉडल अपना क्रेडेंशियल खुद पढ़ता है। `--check-model` के साथ हर मॉडल जवाब दे तो `pass`, वरना एरर कोड के साथ `fail`, और एजेंट में दोनों होने पर मैसेज के पहले `model:` या `judge:` लगता है। एजेंट में मॉडल न होने पर `skip`। जब कस्टम एक्ज़ीक्यूटर अपना एजेंट लाए और कोई मॉडल या जज डिक्लेयर न करे तो `executor` के साथ `unknown`; जो भी मॉडल वह डिक्लेयर करे उसे एजेंट के मॉडल की तरह चेक किया जाता है। |
 
 डिफ़ॉल्ट रूप से doctor हर चेक की एक लाइन प्रिंट करता है: निशान, चेक id, ब्रैकेट में टारगेट
