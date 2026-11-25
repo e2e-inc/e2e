@@ -207,18 +207,6 @@ browsers on one app are two targets, as in
 { name: 'webkit', engine: web({ browser: 'webkit' }), app },
 ```
 
-`browser.name` is the engine the test runs in, and `browser.version` the
-version that browser reports. Skip a test on one browser from its body:
-
-```ts
-test('copies the invite link', async ({ app, screen, browser }) => {
-  test.skip(browser.name === 'webkit', 'not supported on WebKit yet');
-  await app.open('/invite');
-});
-```
-
-See [`name`, `version`](/reference/web#name-version).
-
 In CI, install the extra browser with the
 [install command](/reference/web#installing-browsers):
 
@@ -235,6 +223,18 @@ pnpm exec e2e-web install webkit --with-deps
 bunx @e2e-dev/web install webkit --with-deps
 ```
 </CodeGroup>
+
+`browser.name` is the browser the test runs in, and `browser.version` the
+version it reports. Skip a test on one browser from its body:
+
+```ts
+test('copies the invite link', async ({ app, screen, browser }) => {
+  test.skip(browser.name === 'webkit', 'not supported on WebKit yet');
+  await app.open('/invite');
+});
+```
+
+See [`name`, `version`](/reference/web#name-version).
 
 `connect` attaches to a remote Chromium over CDP instead of launching one,
 or to another browser that speaks CDP, such as a running

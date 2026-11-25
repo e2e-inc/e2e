@@ -60,6 +60,7 @@ test('the browser names its engine and the version its own page reports', { plat
 });
 
 test('a test skips on the browsers it does not cover', { platforms: ['web'], tags: ['browser'] }, async ({ app, browser }) => {
+  expect(['chromium', 'firefox', 'webkit']).toContain(browser.name);
   test.skip(browser.name !== 'chromium', 'navigator.userAgentData is Chromium only');
   await app.open('/browser');
   expect(await browser.evaluate(() => 'userAgentData' in navigator)).toBe(true);

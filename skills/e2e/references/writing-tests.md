@@ -695,9 +695,9 @@ the opener is gone. `tabs()`, `newTab()`, `tab.activate()`, and
 - `cookies()`, `setCookies([...])`: a target is an http(s) URL or a domain.
 - `clearCookies({ name?, domain?, path? })`: remove cookies matching every
   string or RegExp filter; no options removes all cookies, other storage stays.
-- `name`, `version`: properties. `name` is the engine, `'chromium'`,
-  `'firefox'`, or `'webkit'` (`'chromium'` for an attached or hosted
-  browser); `version` is what the running browser reports. Skip on a
+- `name`, `version`: properties. `name` is `'chromium'`, `'firefox'`, or
+  `'webkit'`, and always `'chromium'` for a browser attached over CDP
+  (`connect`, a provider); `version` is what the running browser reports. Skip on a
   browser in the body: `test.skip(browser.name === 'firefox', 'reason')`.
 - `setViewport({ width, height })`: resize.
 - `emulateMedia({ colorScheme?, reducedMotion? })`: what the page's `@media`

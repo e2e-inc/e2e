@@ -554,8 +554,7 @@ by the test deadline (`cleanupTimeout` in `afterEach`); `0` waits until it. `url
 
 #### `name`, `version`
 
-The engine of the browser the test runs in, and the version that browser
-reports.
+The browser the test runs in, and the version that browser reports.
 
 ```ts
 test('exports a PDF', async ({ app, browser }) => {
@@ -566,11 +565,14 @@ test('exports a PDF', async ({ app, browser }) => {
 ```
 
 - `name` is `'chromium'`, `'firefox'`, or `'webkit'`, the value of the
-  [`browser`](#browser) option. A browser attached with
-  [`connect`](#connect) or leased from a provider is `'chromium'`, Chrome
-  and Edge included, because the engine drives it over CDP.
-- `version` is read from the running browser, a hosted or attached one too.
-  The [`userAgent`](#useragent) option doesn't change it.
+  [`browser`](#browser) option.
+- A browser attached with [`connect`](#connect) or leased from a provider is
+  always `'chromium'`, because the engine drives it over CDP. That holds for
+  Chrome and Edge, and for a CDP server that isn't Chromium, such as
+  [Lightpanda](/integrations/lightpanda).
+- `version` is read from the running browser. For an attached or hosted one
+  it is what its CDP endpoint reports. The [`userAgent`](#useragent) option
+  doesn't change it.
 - Both are properties, not steps, and can be read before the first
   navigation.
 - For the operating system, use `process.platform` when the browser runs on
@@ -1520,15 +1522,15 @@ export interface WebOptions {
  */
 export interface Browser extends Expectable<BrowserExpectation> {
   /**
-   * The browser engine the attempt drives: the `web({ browser })` value, and
-   * `chromium` for a browser the engine attaches to over CDP (`connect`, a
-   * provider), Chrome and Edge included.
+   * The browser the attempt drives, as the driver names it: the
+   * `web({ browser })` value, and `chromium` for every browser the engine
+   * attaches to over CDP (`connect`, a provider), whatever it is.
    */
   readonly name: BrowserName;
   /**
-   * The version the running browser reports, such as `159.0.8154.6`: the
-   * browser's own, also for a hosted or attached one, whatever `userAgent`
-   * the target sets.
+   * The version the running browser reports, such as `159.0.8154.6`: for
+   * an attached or hosted one, what its CDP endpoint reports. The target's
+   * `userAgent` does not change it.
    */
   readonly version: string;
   /** Navigates to an allowed URL. */

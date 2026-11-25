@@ -259,15 +259,15 @@ export interface BrowserTab {
  */
 export interface Browser extends Expectable<BrowserExpectation> {
   /**
-   * The browser engine the attempt drives: the `web({ browser })` value, and
-   * `chromium` for a browser the engine attaches to over CDP (`connect`, a
-   * provider), Chrome and Edge included.
+   * The browser the attempt drives, as the driver names it: the
+   * `web({ browser })` value, and `chromium` for every browser the engine
+   * attaches to over CDP (`connect`, a provider), whatever it is.
    */
   readonly name: BrowserName;
   /**
-   * The version the running browser reports, such as `159.0.8154.6`: the
-   * browser's own, also for a hosted or attached one, whatever `userAgent`
-   * the target sets.
+   * The version the running browser reports, such as `159.0.8154.6`: for
+   * an attached or hosted one, what its CDP endpoint reports. The target's
+   * `userAgent` does not change it.
    */
   readonly version: string;
   /** Navigates to an allowed URL. */

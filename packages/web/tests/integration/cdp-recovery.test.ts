@@ -136,6 +136,23 @@ describe('CDP session recovery', () => {
     }
   }, 60_000);
 
+  it('identifies the persistent browser by its own endpoint, after reconnect too', async () => {
+    const remote = await host();
+    const { port } = new URL(remote.endpoint);
+    const reported = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json() as { Browser: string };
+    const engine = await start({ cdpEndpoint: () => remote.endpoint, reconnectEndpoint: () => remote.endpoint });
+    const identity = () => ({ name: fixtureOf(engine).name, version: fixtureOf(engine).version });
+    try {
+      expect(identity()).toEqual({ name: 'chromium', version: reported.Browser.split('/')[1] });
+      await surfaceOf(engine)!.context().browser()!.close();
+      expect((await engine.locate!(heading, operation()))[0]?.name).toBe('Login');
+      expect(identity()).toEqual({ name: 'chromium', version: reported.Browser.split('/')[1] });
+    } finally {
+      await engine.dispose!(cleanup());
+      await closeRemoteChrome(remote);
+    }
+  }, 60_000);
+
   it('emulates the configured and requested media on the persistent page, after reconnect too', async () => {
     const remote = await host();
     const engine = await start(
