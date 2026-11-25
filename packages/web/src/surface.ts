@@ -314,10 +314,11 @@ export interface WebOptions {
   readonly webmcp?: boolean;
   /**
    * How a native dialog (`alert`, `confirm`, `prompt`, `beforeunload`) that
-   * no `browser.onDialog` handler takes is answered: `'accept'` clicks OK
-   * (a `prompt` keeps its default text), `'dismiss'` clicks Cancel. A handler
-   * a test registers still comes first. Without it, such a dialog is
-   * dismissed and fails the next step, since nothing asked for that answer.
+   * no `browser.onDialog` handler takes is answered: `'accept'` accepts it
+   * (a `prompt` returns its default text), `'dismiss'` dismisses it, and an
+   * `alert` closes either way. A handler a test registers still comes
+   * first. Without it, such a dialog is dismissed and fails the next step,
+   * since nothing asked for that answer.
    * Set it where no test can register a handler: `e2e explore`, an agent
    * step that deletes something, a bug bash.
    */

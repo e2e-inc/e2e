@@ -72,8 +72,8 @@ export class DialogRouter {
   }
 
   /**
-   * Answers with the configured policy, as a person clicking OK or Cancel
-   * would: an accepted `prompt` returns its default text.
+   * Answers with the configured policy, as a person would: an accepted
+   * `prompt` returns its default text, not an empty string.
    */
   private async answer(dialog: PwDialog, policy: DialogPolicy): Promise<void> {
     try {
