@@ -5,7 +5,7 @@
  */
 
 import type { Dialog as PwDialog } from 'playwright-core';
-import { EngineError } from '@e2e-dev/core/engine';
+import { EngineError, type AppLogEntry } from '@e2e-dev/core/engine';
 import { ErrorLatch, isClassified, message } from './support.ts';
 
 /** A native dialog as a test's handler sees it. */
@@ -39,11 +39,13 @@ export class DialogRouter {
    * `latch` is shared with the surface: a dialog failure and a route-handler
    * failure surface through one check at the next step. `policy` answers a
    * dialog no handler takes; without one, such a dialog is dismissed and
-   * fails the next step.
+   * fails the next step. `appLog` takes a line for each dialog the policy
+   * answers, so an app's `alert('Could not save')` stays in the report.
    */
   constructor(
     private readonly latch: ErrorLatch = new ErrorLatch(),
     private readonly policy?: DialogPolicy,
+    private readonly appLog?: (entry: AppLogEntry) => void,
   ) {}
 
   /**
@@ -76,6 +78,11 @@ export class DialogRouter {
    * `prompt` returns its default text, not an empty string.
    */
   private async answer(dialog: PwDialog, policy: DialogPolicy): Promise<void> {
+    try {
+      this.appLog?.({ source: 'system', level: 'info', text: `${dialog.type()} dialog "${dialog.message()}" answered with web({ dialogs: '${policy}' })` });
+    } catch {
+      // The harness's sink never fails a page event.
+    }
     try {
       if (policy === 'accept') await dialog.accept(dialog.defaultValue());
       else await dialog.dismiss();

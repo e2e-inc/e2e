@@ -124,6 +124,31 @@ describe('DialogRouter', () => {
     expect(() => dismissing.throwPending()).not.toThrow();
   });
 
+  it('writes each dialog the policy answers to the app log, and none a handler answers', async () => {
+    const appLog = vi.fn();
+    const router = new DialogRouter(new ErrorLatch(), 'dismiss', appLog);
+    await router.dispatch(fakeDialog('Could not save', '', 'alert').dialog);
+    expect(appLog).toHaveBeenCalledExactlyOnceWith({
+      source: 'system',
+      level: 'info',
+      text: `alert dialog "Could not save" answered with web({ dialogs: 'dismiss' })`,
+    });
+
+    router.add('accept');
+    await router.dispatch(fakeDialog().dialog);
+    expect(appLog).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers with the policy when the app log throws', async () => {
+    const router = new DialogRouter(new ErrorLatch(), 'accept', () => {
+      throw new Error('sink closed');
+    });
+    const { dialog, accept } = fakeDialog();
+    await router.dispatch(dialog);
+    expect(accept).toHaveBeenCalledTimes(1);
+    expect(() => router.throwPending()).not.toThrow();
+  });
+
   it('latches ENGINE_FAILURE and dismisses when answering with the policy rejects', async () => {
     const router = new DialogRouter(new ErrorLatch(), 'accept');
     const { dialog, accept, dismiss } = fakeDialog();

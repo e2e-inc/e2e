@@ -56,7 +56,7 @@ describe('web({ dialogs })', () => {
     await app?.close();
   });
 
-  it.each(['accept', 'dismiss'] as const)('answers with %s, keeping a prompt\'s default text, and lets a test handler answer first', async (policy) => {
+  it.each(['accept', 'dismiss'] as const)('answers with %s, keeping a prompt\'s default text, logs each answer, and lets a test handler answer first', async (policy) => {
     const { outcome, project }: { outcome: RunOutcome; project: FixtureProject } = await runProjectWithConfigFile(
       { 'tests/dialogs.e2e.ts': DIALOGS },
       { appUrl: app.url, configSource: configSource(policy) },
@@ -66,5 +66,12 @@ describe('web({ dialogs })', () => {
       const result = resultByTitle(outcome, title);
       expect(result.status, `${title}: ${result.attempts[0]?.error?.message ?? ''}`).toBe('passed');
     }
+    // The report keeps what each dialog the policy answered said; a handler's answer is the test's own.
+    const logged = (title: string) => (resultByTitle(outcome, title).attempts[0]?.appLog ?? []).filter((entry) => entry.source === 'system').map((entry) => entry.text);
+    expect(logged('answers dialogs no handler takes')).toEqual([
+      `confirm dialog "Delete?" answered with web({ dialogs: '${policy}' })`,
+      `prompt dialog "Name?" answered with web({ dialogs: '${policy}' })`,
+    ]);
+    expect(logged('a handler the test registers comes first')).toEqual([]);
   }, 120_000);
 });
