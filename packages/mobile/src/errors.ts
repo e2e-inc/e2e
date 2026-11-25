@@ -382,7 +382,7 @@ export function appNotInstalled(error: unknown, app: string, where: string | und
   const location = where === undefined ? '' : ` (${where})`;
   return new ConfigurationError(
     'TEST_SETUP_FAILED',
-    `open ${app} failed: ${app} is not installed on the device${location}. Install it before opening it, with the target's app.appPath or device.installApp(), or check the bundle id or package name.`,
+    `open ${app} failed: ${app} is not installed on the device${location}. Install it with device.installApp() before opening it (with no path, it installs the target's app.appPath), or check the bundle id or package name.`,
     { cause: (error as Error).cause },
   );
 }

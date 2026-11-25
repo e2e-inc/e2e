@@ -273,7 +273,7 @@ describe('agent tool pack', () => {
     expect(failure?.message).not.toContain('Run apps');
   });
 
-  it('fails the step as a setup error when the app under test is not installed', async () => {
+  it('reports a setup error when the app under test is not installed', async () => {
     const fake = createFakeClient({
       'apps.open': () => {
         throw new AppError('APP_NOT_INSTALLED', 'No app found matching "dev.e2e.benchmark"');

@@ -318,6 +318,7 @@ export default {
 | --- | --- |
 | `INVALID_CONFIG` | At config load: no `app.bundleId` and no `app.appPath`; an `app.url` (not supported yet); a link in `bundleId` (a test opens one with `device.openLink`); an unknown permission name; an Apple launch argument such as `AppleLocale`, or a list item `am start` cannot carry, in an object on an Android target. |
 | `UNSUPPORTED_CAPABILITY` | `app.open()`, `app.restart()`, or `app.clearState()` on a target with no `app.bundleId` before its build is installed. |
+| `TEST_SETUP_FAILED` | `app.open()`, `app.restart()`, or `app.clearState()` when the device has no app with the target's `app.bundleId`. The message names the app and the device. |
 
 #### Launch arguments and permissions
 
@@ -1245,8 +1246,9 @@ A tool that fails during a built-in agent step returns
 goes on. `open_app` fails with `INVALID_STATE` when it names no app, the
 target has no `app.bundleId`, and nothing has installed its `app.appPath`
 build yet (no `device.installApp()`, no device provider install); with
-`INVALID_ARGUMENT` when it names an app that is not installed or a link; and
-with `POLICY_DENIED` for a link with a forbidden scheme. Any tool fails with
+`INVALID_ARGUMENT` when it names an app that is not installed or a link;
+with `TEST_SETUP_FAILED` when it names no app and the app under test is not
+installed; and with `POLICY_DENIED` for a link with a forbidden scheme. Any tool fails with
 `INVALID_STATE` when no device attempt is running, or when several device
 attempts are running in one worker.
 
