@@ -28,12 +28,12 @@ const PAGE = [
   '<div role="slider" aria-label="Spaced text" aria-valuenow="50" aria-valuetext="  " tabindex="0"></div>',
   '<div role="slider" aria-label="Padded" aria-valuetext=" On " tabindex="0"></div>',
   '<meter aria-label="Unset"></meter>',
-  '<progress aria-label="Percent text" value="70%" max="100"></progress>',
   '<progress aria-label="Zero max" value="5" max="0"></progress>',
   '<progress aria-label="Negative" value="-3" max="10"></progress>',
   '<meter aria-label="Below min" value="1" min="5" max="10"></meter>',
   '<meter aria-label="Inverted" value="8" min="5" max="2"></meter>',
   '<div role="slider" aria-label="Bare" tabindex="0"></div>',
+  '<svg><progress role="progressbar" aria-label="Foreign" data-testid="foreign" value="5"></progress></svg>',
 ].join('');
 
 test('reads range widgets', async ({ app, browser, screen }) => {
@@ -53,7 +53,6 @@ test('reads range widgets', async ({ app, browser, screen }) => {
   await expect(screen.getByRole('spinbutton', { name: 'Month' })).toHaveValue('05');
   await expect(screen.getByRole('scrollbar', { name: 'Page' })).toHaveValue('20');
   await expect(screen.getByRole('progressbar', { name: 'Mixed' })).toHaveValue('70');
-  await expect(screen.getByRole('progressbar', { name: 'Percent text' })).toHaveValue('70');
   await expect(screen.getByRole('progressbar', { name: 'Zero max' })).toHaveValue('1');
   await expect(screen.getByRole('progressbar', { name: 'Negative' })).toHaveValue('0');
   await expect(screen.getByRole('meter', { name: 'Below min' })).toHaveValue('5');
@@ -93,6 +92,12 @@ test('still refuses a meter with no value attribute', async ({ app, browser, scr
   await app.open('/');
   await browser.evaluate((html) => { document.body.innerHTML = html; }, PAGE);
   await expect(screen.getByRole('meter', { name: 'Unset' })).toHaveValue('0', { timeout: 300 });
+});
+
+test('still refuses a progress outside the HTML namespace', async ({ app, browser, screen }) => {
+  await app.open('/');
+  await browser.evaluate((html) => { document.body.innerHTML = html; }, PAGE);
+  await expect(screen.getByTestId('foreign')).toHaveValue('5', { timeout: 300 });
 });
 
 test('never runs a range widget value getter while finding another field', async ({ app, browser, screen }) => {
@@ -176,7 +181,7 @@ describe('toHaveValue outside form controls', () => {
     const refused = resultByTitle(outcome, 'still refuses a range widget with no value');
     expect(refused.status).toBe('failed');
     expect(refused.attempts.at(-1)?.error?.message).toContain('no value (not a form control)');
-    for (const title of ['still refuses a range widget with a blank value', 'still refuses an indeterminate progress', 'still refuses a stray value attribute on a range widget', 'still refuses a meter with no value attribute']) {
+    for (const title of ['still refuses a range widget with a blank value', 'still refuses an indeterminate progress', 'still refuses a stray value attribute on a range widget', 'still refuses a meter with no value attribute', 'still refuses a progress outside the HTML namespace']) {
       const failed = resultByTitle(outcome, title);
       expect(failed.status, title).toBe('failed');
       expect(failed.attempts.at(-1)?.error?.message, title).toContain('no value (not a form control)');

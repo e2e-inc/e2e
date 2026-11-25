@@ -655,8 +655,11 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
    * A range widget's value as a locator read reports it. An ARIA value reads
    * as the author wrote it, for an assertion to compare, where Chrome clamps it
    * to the range; a blank one is none. Without one, a native `<progress>` or
-   * `<meter>` with a `value` attribute reads the value its range clamps it to,
-   * as Chrome does.
+   * `<meter>` with a `value` attribute reads its `.value`, the value its range
+   * clamps it to, as the browser parses it.
+   *
+   * Separate from the range contribution in `embeddedControlNameOf`, which
+   * follows Playwright's accname rules (a blank ARIA value counts there).
    */
   const rangeValueOf = (el: Element): string | null => {
     const filled = (name: string): string | null => {
@@ -666,25 +669,17 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
     const aria = filled('aria-valuetext') ?? filled('aria-valuenow');
     if (aria !== null) return aria;
     // Only a native range control has a value beyond its ARIA attributes, so a
-    // stray `value` attribute on a generic widget is not read. By tag, since an
-    // element adopted from another frame keeps that frame's prototype.
-    const tag = el.tagName.toLowerCase();
-    if ((tag !== 'meter' && tag !== 'progress') || !el.hasAttribute('value')) return null;
-    // Computed from the attributes as HTML clamps them, never through `.value`,
-    // which a page's own getter (a customized built-in `<progress is>`) can replace.
-    const number = (name: string, fallback: number): number => {
-      const match = /^[\t\n\f\r ]*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)/.exec(el.getAttribute(name) ?? '');
-      const parsed = match === null ? NaN : Number(match[1]);
-      return Number.isFinite(parsed) ? parsed : fallback;
-    };
-    if (tag === 'progress') {
-      const max = number('max', 1);
-      const top = max > 0 ? max : 1;
-      return String(Math.min(Math.max(number('value', 0), 0), top));
+    // stray `value` attribute on a generic widget is not read. By name, since
+    // an element adopted from another frame keeps that frame's prototype.
+    if (!isHtml(el) || (el.localName !== 'meter' && el.localName !== 'progress') || !el.hasAttribute('value')) {
+      return null;
     }
-    const min = number('min', 0);
-    const max = Math.max(number('max', 1), min);
-    return String(Math.min(Math.max(number('value', 0), min), max));
+    // The built-in getter, never `el.value`, which a page's own getter (a
+    // customized built-in `<progress is>`) can replace. It accepts an element
+    // from another frame.
+    const prototype = el.localName === 'progress' ? HTMLProgressElement.prototype : HTMLMeterElement.prototype;
+    const read = Object.getOwnPropertyDescriptor(prototype, 'value')?.get;
+    return read === undefined ? null : String(read.call(el));
   };
 
   /**
