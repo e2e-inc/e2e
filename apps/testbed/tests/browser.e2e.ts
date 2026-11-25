@@ -52,6 +52,19 @@ test.describe('browser fixture', { platforms: ['web'], tags: ['browser'] }, () =
   });
 });
 
+test('the browser names its engine and the version its own page reports', { platforms: ['web'], tags: ['browser'] }, async ({ app, browser }) => {
+  const token = { chromium: 'Chrome/', firefox: 'Firefox/', webkit: 'Version/' }[browser.name];
+  await app.open('/browser');
+  const userAgent = await browser.evaluate(() => navigator.userAgent);
+  expect(userAgent).toContain(`${token}${browser.version.split('.')[0]}.`);
+});
+
+test('a test skips on the browsers it does not cover', { platforms: ['web'], tags: ['browser'] }, async ({ app, browser }) => {
+  test.skip(browser.name !== 'chromium', 'navigator.userAgentData is Chromium only');
+  await app.open('/browser');
+  expect(await browser.evaluate(() => 'userAgentData' in navigator)).toBe(true);
+});
+
 test('offline fails the page\'s requests and navigations until the test goes back online', { platforms: ['web'], tags: ['browser'] }, async ({ app, screen, browser }) => {
   await app.open('/browser');
   await expect(screen.getByLabel('Network')).toHaveText('online');

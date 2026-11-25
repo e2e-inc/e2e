@@ -55,6 +55,7 @@ import {
   type NormalizedRoutePattern,
 } from './route-pattern.ts';
 import { describeExpectedUrl, urlPattern } from './url-glob.ts';
+import type { BrowserName } from './browser-connection.ts';
 import type { PlaywrightSurface } from './surface.ts';
 import { createWebMcp, type WebMcp } from './webmcp.ts';
 
@@ -257,6 +258,18 @@ export interface BrowserTab {
  * again.
  */
 export interface Browser extends Expectable<BrowserExpectation> {
+  /**
+   * The browser engine the attempt drives: the `web({ browser })` value, and
+   * `chromium` for a browser the engine attaches to over CDP (`connect`, a
+   * provider), Chrome and Edge included.
+   */
+  readonly name: BrowserName;
+  /**
+   * The version the running browser reports, such as `159.0.8154.6`: the
+   * browser's own, also for a hosted or attached one, whatever `userAgent`
+   * the target sets.
+   */
+  readonly version: string;
   /** Navigates to an allowed URL. */
   goto(
     url: string,
@@ -620,6 +633,12 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
   const expectation = createBrowserExpectation(expectationDeps);
 
   const browser: Omit<Browser, keyof Expectable<BrowserExpectation>> = {
+    get name() {
+      return surface.browserIdentity().name;
+    },
+    get version() {
+      return surface.browserIdentity().version;
+    },
     goto(url, options) {
       const resolved = context.app.resolveUrl(url);
       return navigation('browser.goto', options, (operation) => surface.navigating(async () => {
