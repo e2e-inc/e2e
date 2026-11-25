@@ -74,6 +74,7 @@ function makeTarget(name: string, index: number, engine?: EngineHandle): Resolve
     trace: { mode: 'off', source: 'default' },
     video: { mode: 'off', source: 'default' },
     fullyParallel: false,
+    fixtureScopes: new Map(),
   };
 }
 

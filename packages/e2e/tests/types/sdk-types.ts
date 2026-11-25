@@ -50,6 +50,7 @@ import {
   type TestFilter,
   type TestFilterCandidate,
   type TestFilterContext,
+  type TestOptions,
   type TestRegistrar,
   type EachRegistrar,
   type Unique,
@@ -64,7 +65,7 @@ import {
   describe,
   foldLastRun,
 } from '../../src/index.ts';
-import type { Engine, EngineAppInfo, EngineAttemptContext, EngineCleanupContext, EngineDisposeContext, EngineFixtureContext, EngineHandle, EngineObserveOptions, EngineSnapshot } from '../../src/engine/index.ts';
+import type { AppPermissionState, Engine, EngineAppInfo, EngineAttemptContext, EngineCleanupContext, EngineDisposeContext, EngineFixtureContext, EngineHandle, EngineObserveOptions, EngineSnapshot } from '../../src/engine/index.ts';
 import {
   BASE_RULES,
   createGrammarTools,
@@ -246,8 +247,11 @@ customExecutorObservation.keyboardVisible satisfies boolean | undefined;
 ({
   targets: [{ engine, app: { bundleId: 'dev.shop.app', appPath: './build/Shop.app', launchArguments: ['-e2e'], permissions: { camera: 'grant' } } }],
 }) satisfies E2EConfig;
+({ targets: [{ engine, app: { bundleId: 'dev.shop.app', permissions: 'all' } }] }) satisfies E2EConfig;
 // @ts-expect-error a permission is granted, denied, or reset; there is no `allow`
 ({ targets: [{ engine, app: { bundleId: 'dev.shop.app', permissions: { camera: 'allow' } } }] }) satisfies E2EConfig;
+// @ts-expect-error `'all'` is the one shorthand; anything else names each permission
+({ targets: [{ engine, app: { bundleId: 'dev.shop.app', permissions: 'every' } }] }) satisfies E2EConfig;
 // @ts-expect-error launch arguments are the strings the launch command takes
 ({ targets: [{ engine, app: { bundleId: 'dev.shop.app', launchArguments: [1] } }] }) satisfies E2EConfig;
 // An object value is a string, number, boolean, or list of strings, or undefined straight from the environment.
@@ -274,6 +278,11 @@ engineApp.launchArgumentValues?.['AppleLanguages'] satisfies string | number | b
 // @ts-expect-error an engine only drives the app: the target declares it
 ({ name: 'toy', version: '1.0.0', spiVersion: 1, app: { url: 'http://localhost:3000' } }) satisfies Engine;
 ({ name: 'toy', version: '1.0.0', spiVersion: 1, validateApp: (app, { targetName }) => void [app.bundleId, targetName] }) satisfies Engine;
+// An engine reads `app.permissions` as a map; `'all'` reaches only one that declares `grantsAllPermissions`, as `allPermissions`.
+({
+  name: 'toy', version: '1.0.0', spiVersion: 1, grantsAllPermissions: true,
+  validateApp: (app) => void [app.permissions?.['camera'] satisfies AppPermissionState | undefined, app.allPermissions satisfies true | undefined],
+}) satisfies Engine;
 // `e2e run --device`: an engine that selects devices reads the name `prepare` hands it.
 ({ name: 'toy', version: '1.0.0', spiVersion: 1, selectsDevice: true, prepare: async ({ device }) => void (device satisfies string | undefined) }) satisfies Engine;
 // @ts-expect-error a target declares its app; there is no services list in this version
@@ -1098,7 +1107,7 @@ deviceTest.beforeAll(async ({ device, app, screen: deviceScreen }) => {
   void deviceScreen;
 });
 
-// A fixture named like a built-in extends it: its own name is the built-in, and it keeps the built-in's type and scope.
+// A fixture named like a built-in extends it: its own name is the built-in, and it keeps the built-in's type. Its scope is the one it declares, else test.
 test.extend({ app: async ({ app, screen: s }, use) => { void s; await app.open('/'); await use(app); } })('opens first', async ({ app }) => {
   await app.open('/next');
 });
@@ -1107,19 +1116,20 @@ test.extend({ screen: [async ({ screen: s }, use) => { await use(s); }, { scope:
 test.extend({ app: async ({}, use) => { await use('not an app'); } });
 // @ts-expect-error app is a test fixture on this test: its override cannot be a worker fixture
 test.extend({ app: [async ({ app }, use) => { await use(app); }, { scope: 'worker' }] });
-// platform is a worker fixture everywhere, so its override sees worker fixtures only.
-test.extend({ platform: async ({ platform }, use) => { await use(platform.toUpperCase()); } });
-// @ts-expect-error a worker fixture's override does not see test fixtures
-test.extend({ platform: async ({ platform, app }, use) => { void app; await use(platform); } });
-// On an engine whose state outlives a test, device, app, and screen are worker fixtures, and so are their overrides.
-deviceTest.extend({ device: async ({ device }, use) => { await device.reset(); await use(device); } }).beforeAll(async ({ device }) => {
+// The override of a worker fixture is a test fixture unless it declares scope 'worker', so it sees test fixtures.
+test.extend({ platform: async ({ platform, app }, use) => { void app; await use(platform.toUpperCase()); } });
+// @ts-expect-error a worker-scoped override does not see test fixtures
+test.extend({ platform: [async ({ platform, app }, use) => { void app; await use(platform); }, { scope: 'worker' }] });
+// On an engine whose state outlives a test, device, app, and screen are worker fixtures. A worker-scoped override reaches the suite hooks.
+deviceTest.extend({ device: [async ({ device }, use) => { await device.reset(); await use(device); }, { scope: 'worker' }] }).beforeAll(async ({ device }) => {
   await device.reset();
 });
 deviceTest.extend({ app: [async ({ app }, use) => { await use(app); }, { scope: 'worker' }] });
-// @ts-expect-error a worker fixture's override cannot be a test fixture
-deviceTest.extend({ device: [async ({ device }, use) => { await use(device); }, { scope: 'test' }] });
-// @ts-expect-error a worker fixture's override does not see test fixtures
-deviceTest.extend({ device: async ({ device, agent: testAgent }, use) => { void testAgent; await use(device); } });
+const testScopedDevice = deviceTest.extend({ device: async ({ device, agent: testAgent }, use) => { void testAgent; await use(device); } });
+testScopedDevice('resets the device', async ({ device }) => { await device.reset(); });
+// @ts-expect-error a test-scoped override doesn't reach the suite hooks
+testScopedDevice.beforeAll(async ({ device }) => { await device.reset(); });
+testScopedDevice.beforeAll(async ({ app }) => { await app.open(); });
 // With type arguments for new fixtures, an override sits beside them and sees them.
 test.extend<{ draft: string }>({
   draft: async ({ app }, use) => { void app; await use('draft'); },
@@ -1127,6 +1137,126 @@ test.extend<{ draft: string }>({
 });
 // A fixture of an earlier extend is extended the same way.
 withWorkspace.extend({ workspace: async ({ workspace }, use) => { await use(workspace); } });
+
+// With the config type as the third argument, each target has the fixture
+// types of its engine. A fixture that only other targets have is possibly
+// undefined until a platform check.
+interface Pane { goto(url: string): Promise<void> }
+interface Handset { closeApp(): Promise<void> }
+// app has a narrower type on pane, like WebApp on the web engine. Every target still has app.
+const paneEngine = defineEngine<{ readonly pane: Pane; readonly app: App }, 'web', 'attempt'>({ name: 'pane', version: '1.0.0', spiVersion: 1, platform: 'web', fixtures: { pane: () => ({ goto: async () => {} }) } });
+const handsetEngine = defineEngine<{ readonly handset: Handset }, 'ios', 'worker'>({ name: 'handset', version: '1.0.0', spiVersion: 1, platform: 'ios', isolation: 'worker', fixtures: { handset: () => ({ closeApp: async () => {} }) } });
+const mixedConfig = { targets: [{ engine: paneEngine }, { engine: handsetEngine }] } satisfies E2EConfig;
+const configTest = test.extend<{}, {}, typeof mixedConfig>();
+configTest('narrows on the platform', async ({ app, platform, pane, handset }) => {
+  await app.open('/');
+  if (platform === 'web') {
+    await pane.goto('/');
+    return;
+  }
+  await handset.closeApp();
+});
+configTest('narrows on the fixture', async ({ handset }) => {
+  if (handset !== undefined) await handset.closeApp();
+});
+// @ts-expect-error handset is undefined on the web target
+configTest('reads a fixture without a check', async ({ handset }) => { await handset.closeApp(); });
+// @ts-expect-error the config has no Android target
+configTest('compares a platform no target has', async ({ platform }) => { void (platform === 'android'); });
+configTest.beforeAll(async ({ platform, handset }) => {
+  if (platform === 'ios') await handset.closeApp();
+});
+// @ts-expect-error pane has test scope on web and is unavailable in suite hooks
+configTest.beforeAll(async ({ pane }) => { void pane; });
+// Fixture types are narrowed by a platform check inside a definition in the same extend call.
+test.extend<{ start: () => Promise<void> }, {}, typeof mixedConfig>({
+  start: async ({ platform, pane, handset }, use) => {
+    await use(async () => {
+      if (platform === 'web') await pane.goto('/');
+      else await handset.closeApp();
+    });
+  },
+})('starts', async ({ start, handset }) => {
+  await start();
+  if (handset !== undefined) await handset.closeApp();
+});
+test.extend<{}, { warmed: boolean }, typeof mixedConfig>({
+  warmed: [async ({ platform, handset }, use) => {
+    if (platform === 'ios') await handset.closeApp();
+    await use(true);
+  }, { scope: 'worker' }],
+}).beforeAll(async ({ warmed }) => { warmed satisfies boolean; });
+// A fixture typed on the base `test`, as in an engine package's `test`, is still undefined on targets without it.
+const handsetBase = test.extend<{ pane: Pane }, { handset: Handset }>().extend<{}, {}, typeof mixedConfig>();
+// @ts-expect-error handset is undefined on the web target
+handsetBase('reads handset without a check', async ({ handset }) => { await handset.closeApp(); });
+// @ts-expect-error pane is undefined on the ios target
+handsetBase('reads pane without a check', async ({ pane }) => { await pane.goto('/'); });
+handsetBase('narrows the base fixtures on the platform', async ({ platform, pane, handset }) => {
+  if (platform === 'web') await pane.goto('/');
+  else await handset.closeApp();
+});
+// A test's platforms option narrows the fixtures to the targets it keeps.
+configTest('runs on web', { platforms: ['web'] }, async ({ platform, pane }) => {
+  platform satisfies 'web';
+  await pane.goto('/');
+});
+configTest('runs on ios', { platforms: ['ios'] }, async ({ handset }) => { await handset.closeApp(); });
+configTest.skipIf(false)('runs on ios after skipIf', { platforms: ['ios'] }, async ({ app, handset }) => {
+  await app.open('/');
+  await handset.closeApp();
+});
+const options: TestOptions = { platforms: ['ios'] };
+// @ts-expect-error options typed as TestOptions keep every target
+configTest('takes options', options, async ({ handset }) => { await handset.closeApp(); });
+// @ts-expect-error a fixture in the first type argument still needs a definition
+test.extend<{ start: () => Promise<void> }, {}, typeof mixedConfig>({});
+// The original fixture value passed to an override is undefined on targets without the fixture.
+configTest.extend({ handset: async ({ handset }, use) => { await use(handset); } })('narrows the override', async ({ platform, handset }) => {
+  if (platform === 'ios') await handset.closeApp();
+});
+// @ts-expect-error handset has type Handset | undefined, so a string can't be passed to use
+configTest.extend({ handset: async ({}, use) => { await use('not a handset'); } });
+// With a string platform, as on a target without an engine, every target still has app and screen.
+const plainEngine = defineEngine({ name: 'plain', version: '1.0.0', spiVersion: 1 });
+const plainConfig = { targets: [{ engine: plainEngine, platform: 'plain' }, { engine: handsetEngine }] } satisfies E2EConfig;
+test.extend<{}, {}, typeof plainConfig>()('opens on a string platform', async ({ app, screen: view }) => {
+  await app.open('/');
+  void view;
+});
+const enginelessConfig = { targets: [{ name: 'api', platform: 'api' }, { engine: handsetEngine }] } satisfies E2EConfig;
+const enginelessTest = test.extend<{}, {}, typeof enginelessConfig>();
+enginelessTest('opens beside a target without an engine', async ({ app, screen: view, handset }) => {
+  await app.open('/');
+  void view;
+  if (handset !== undefined) await handset.closeApp();
+});
+// @ts-expect-error app has test scope on the target without an engine
+enginelessTest.beforeAll(async ({ app }) => { void app; });
+// With as const, a target's own platform is a literal, so a platform check narrows the fixtures again.
+const constConfig = {
+  targets: [
+    { name: 'api', platform: 'api', app: { url: 'http://localhost:3000' } },
+    { engine: plainEngine, platform: 'plain', app: { url: 'http://localhost:3000', command: { executable: 'pnpm', args: ['dev'] } } },
+    { engine: handsetEngine, app: { bundleId: 'dev.shop.app', launchArguments: ['-reset'], permissions: { camera: 'grant' } } },
+  ],
+} as const satisfies E2EConfig;
+test.extend<{}, {}, typeof constConfig>()('narrows a target platform', async ({ app, platform, handset }) => {
+  await app.open('/');
+  if (platform === 'ios') await handset.closeApp();
+  platform satisfies 'api' | 'plain' | 'ios';
+});
+// With an E2EConfig type annotation, the inferred engine types are lost, so engine fixtures aren't typed.
+const annotatedConfig: E2EConfig = mixedConfig;
+// @ts-expect-error handset is absent from the annotated config type
+test.extend<{}, {}, typeof annotatedConfig>()('names handset', async ({ handset }) => { void handset; });
+const inferredEngine = defineEngine({ name: 'tv', version: '1.0.0', spiVersion: 1, platform: 'tv', isolation: 'worker' });
+void (inferredEngine.platform satisfies 'tv' | undefined);
+void (inferredEngine.isolation satisfies 'worker' | undefined);
+// @ts-expect-error the literal 'ios' requires platform: 'ios' in the spec
+defineEngine<{}, 'ios'>({ name: 'tv', version: '1.0.0', spiVersion: 1 });
+// @ts-expect-error the literal 'worker' requires isolation: 'worker' in the spec
+defineEngine<{}, string, 'worker'>({ name: 'tv', version: '1.0.0', spiVersion: 1 });
 
 // A test, a group, and a call each pin a configured agent by name.
 test('as the buyer', { agent: 'buyer' }, async () => {});
@@ -1307,6 +1437,28 @@ test('request', async ({ request }) => {
   await request.get('/api/orders', { method: 'POST' });
   // @ts-expect-error a body is a string; an object goes in json
   await request.post('/api/orders', { body: { sku: 'A1' } });
+  // toBeOK takes a response, on every expect form, and not a union that may hold something else.
+  const maybe = created as WebResponse | undefined;
+  // @ts-expect-error a response or undefined is not a response
+  expect(maybe).toBeOK();
+  // @ts-expect-error a response or undefined is not a response, negated too
+  expect(maybe).not.toBeOK();
+  // @ts-expect-error a response or undefined is not a response, soft too
+  expect.soft(maybe).toBeOK();
+  // @ts-expect-error a response or undefined is not a response, polled too
+  void expect.poll(() => maybe).toBeOK();
+  void (expect(created).toBeOK() satisfies void);
+  void (expect(created).not.toBeOK() satisfies void);
+  void (expect.soft(created).toBeOK() satisfies void);
+  void (expect.poll(() => request.get('/api/orders')).toBeOK() satisfies Promise<void>);
+  // @ts-expect-error toBeOK takes a response, not its status
+  expect(created.status).toBeOK();
+  // @ts-expect-error toBeOK takes a response, negated too
+  expect(created.status).not.toBeOK();
+  // @ts-expect-error toBeOK takes a response, soft too
+  expect.soft(created.status).toBeOK();
+  // @ts-expect-error toBeOK takes a response, polled too
+  void expect.poll(() => 1).toBeOK();
 });
 // @ts-expect-error a project fixture typed as its own `request` conflicts with the built-in one
 test.extend<{ request: { hello(): string } }>({ request: async ({}, use) => { await use({ hello: () => 'mine' }); } });

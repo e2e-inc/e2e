@@ -58,6 +58,7 @@ const target: ResolvedTarget = {
   trace: { mode: 'off', source: 'default' },
   video: { mode: 'off', source: 'default' },
   fullyParallel: false,
+  fixtureScopes: new Map(),
 };
 
 function makeTest(
