@@ -18,6 +18,15 @@ test('answers dialogs no handler takes', async ({ app, browser }) => {
   expect(await browser.title()).toBe('Dialog page');
 });
 
+test('answers beforeunload: accept leaves the page, dismiss keeps it', async ({ app, browser, screen }) => {
+  await app.open('/dialog');
+  await browser.evaluate("() => { addEventListener('beforeunload', (event) => { event.preventDefault(); event.returnValue = ''; }); const link = document.createElement('a'); link.href = '/'; link.textContent = 'Leave'; document.body.append(link); }");
+  // A page may ask before unloading only after the user interacted with it.
+  await screen.getByRole('button', 'Ask').tap();
+  await screen.getByRole('link', 'Leave').tap();
+  await expect(browser).toHaveTitle(process.env.EXPECT_CONFIRM === 'true' ? 'Fixture Home' : 'Dialog page');
+});
+
 test('a handler the test registers comes first', async ({ app, browser }) => {
   await app.open('/dialog');
   await browser.onDialog(async (dialog) => dialog.accept('from the test'));
@@ -62,7 +71,7 @@ describe('web({ dialogs })', () => {
       { appUrl: app.url, configSource: configSource(policy) },
     );
     projects.push(project);
-    for (const title of ['answers dialogs no handler takes', 'a handler the test registers comes first']) {
+    for (const title of ['answers dialogs no handler takes', 'answers beforeunload: accept leaves the page, dismiss keeps it', 'a handler the test registers comes first']) {
       const result = resultByTitle(outcome, title);
       expect(result.status, `${title}: ${result.attempts[0]?.error?.message ?? ''}`).toBe('passed');
     }
