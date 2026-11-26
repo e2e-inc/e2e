@@ -3798,6 +3798,34 @@ describe('device fixture', () => {
     expect(h.fake.calls.length).toBe(before);
   });
 
+  it('reads an Android app\'s own locales once when two launches with a locale overlap, so neither reads the other\'s', async () => {
+    const h = harness({ platform: 'android', bundleId: ANDROID_APP_PACKAGE });
+    h.fake.respond('devices.boot', () => ({ id: 'emulator-5554', device: 'Pixel 9' }));
+    await openAttempt(h);
+    // A device that answers a read with what it holds when the read completes, the second read late.
+    let held = 'de-DE';
+    let reads = 0;
+    h.respondAdb(async (args) => {
+      if (args.includes('set-app-locales')) {
+        held = args.at(-1) === ANDROID_APP_PACKAGE ? '' : args.at(-1)!;
+        return { stdout: '', stderr: '', exitCode: 0 };
+      }
+      if (args.includes('get-app-locales')) {
+        await sleep(++reads === 1 ? 5 : 30);
+        return { stdout: `Locales for ${ANDROID_APP_PACKAGE} for user 0 are [${held}]\n`, stderr: '', exitCode: 0 };
+      }
+      return { stdout: defaultAdbOutput(args), stderr: '', exitCode: 0 };
+    });
+    const device = fixture(h);
+    await Promise.all([
+      device.openApp(ANDROID_APP_PACKAGE, { relaunch: true, locale: 'fr-FR' }),
+      device.openApp(ANDROID_APP_PACKAGE, { relaunch: true, locale: 'ja-JP' }),
+    ]);
+    expect(reads).toBe(1);
+    await h.engine.dispose!(cleanup());
+    expect(held).toBe('de-DE');
+  });
+
   it('closes the session at dispose when the Android locale restore hangs past half the cleanup budget', async () => {
     const h = harness({ platform: 'android', bundleId: ANDROID_APP_PACKAGE, locale: 'fr-FR' });
     h.fake.respond('devices.boot', () => ({ id: 'emulator-5554', device: 'Pixel 9' }));

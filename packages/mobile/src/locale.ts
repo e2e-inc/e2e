@@ -139,8 +139,12 @@ function appleLocaleArguments(locale: string): readonly string[] {
  * left as it was found.
  */
 export class AndroidAppLocales {
-  /** The locales each app this worker changed had before, as `set-app-locales` takes them (`''` for none). */
-  private readonly original = new Map<string, string>();
+  /**
+   * The locales each app this worker changed had before, as `set-app-locales`
+   * takes them (`''` for none). The read itself is kept, so two launches of
+   * one app that overlap share it, and neither reads the other's locale.
+   */
+  private readonly original = new Map<string, Promise<string>>();
   /** The device's API level, read once per device. */
   private sdk: Promise<number> | undefined;
 
@@ -159,15 +163,21 @@ export class AndroidAppLocales {
   async beforeOpen(app: string, locale: string | undefined, relaunch: boolean, signal: AbortSignal): Promise<void> {
     if (locale !== undefined) {
       await this.requireSdk(signal);
-      if (!this.original.has(app)) this.original.set(app, await this.get(app, signal));
+      let original = this.original.get(app);
+      if (original === undefined) {
+        const read = this.get(app, signal);
+        original = read;
+        this.original.set(app, read);
+        // A failed read is not an original: the next launch reads again.
+        read.catch(() => {
+          if (this.original.get(app) === read) this.original.delete(app);
+        });
+      }
+      await original;
       await this.set(app, locale, signal);
       return;
     }
-    const original = this.original.get(app);
-    if (relaunch && original !== undefined) {
-      await this.set(app, original, signal);
-      this.original.delete(app);
-    }
+    if (relaunch) await this.putBack(app, signal);
   }
 
   /**
@@ -175,18 +185,23 @@ export class AndroidAppLocales {
    * next open, which launches it fresh, runs in them.
    */
   async afterClose(app: string, signal: AbortSignal): Promise<void> {
-    const original = this.original.get(app);
-    if (original === undefined) return;
-    await this.set(app, original, signal);
-    this.original.delete(app);
+    await this.putBack(app, signal);
   }
 
   /** Puts back the locales of every app this worker changed; failures are left, as the worker is going away. */
   async restore(signal: AbortSignal): Promise<void> {
-    for (const [app, original] of this.original) {
-      await this.set(app, original, signal).catch(() => undefined);
+    for (const app of this.original.keys()) {
+      await this.putBack(app, signal).catch(() => undefined);
     }
     this.original.clear();
+  }
+
+  /** Sets `app`'s locales back to what it had before this worker changed them, when it did. */
+  private async putBack(app: string, signal: AbortSignal): Promise<void> {
+    const original = this.original.get(app);
+    if (original === undefined) return;
+    await this.set(app, await original, signal);
+    this.original.delete(app);
   }
 
   /** Refuses a device older than Android 13, which has no per-app language to set. */
