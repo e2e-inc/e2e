@@ -61,7 +61,8 @@ async function captureUnderMasks(devtools: DevTools, window: AppWindow, unmaskab
     after = await page.evaluate(removeMasks, MASKED_SELECTOR).catch(() => undefined);
   }
   // A document that navigated or reloaded under the capture took its masks with it: the image may show the new one bare.
-  if (after?.placed !== true) return { masked, withheld: 'the window loaded another document while the screenshot was taken, without its masks, so the screenshot is withheld' };
+  if (!placed.placed) return { masked, withheld: 'a mask did not cover the password field or nested document it was placed over, so the screenshot is withheld' };
+  if (after?.placed !== true) return { masked, withheld: 'the masks did not last through the screenshot (the window loaded another document, or the page removed them), so the screenshot is withheld' };
   const unmaskableAfter = await unmaskable(devtools, window);
   if (unmaskableAfter > 0) return { masked, withheld: outOfReach(unmaskableAfter) };
   if (after.count > masked) {

@@ -4,6 +4,7 @@ import { withModifiers } from '../../src/actions.ts';
 import { Budget } from '../../src/budget.ts';
 import type { Session } from '../../src/cdp/connection.ts';
 import { Keyboard } from '../../src/cdp/input.ts';
+import { PageTarget } from '../../src/page.ts';
 import type { AppWindow } from '../../src/windows.ts';
 
 /** A window whose page answers each key event when the test lets it. */
@@ -44,5 +45,30 @@ describe('withModifiers', () => {
     answer();
     expect(await pressed).toMatchObject({ code: 'CANCELLED' });
     expect(events).toEqual(['rawKeyDown Meta', 'keyUp Meta']);
+  });
+
+  it('starts the next gesture only once a cancelled one has released its modifier', async () => {
+    const events: string[] = [];
+    const waiting: (() => void)[] = [];
+    const session = {
+      send: (_method: string, params: { readonly type: string; readonly key?: string; readonly modifiers: number }) => {
+        events.push(`${params.type} ${params.key ?? ''} ${params.modifiers}`);
+        return new Promise<object>((resolve) => void waiting.push(() => resolve({})));
+      },
+    } as unknown as Session;
+    const page = new PageTarget('target', session, 'about:blank');
+    const window = { page } as unknown as AppWindow;
+    const cancel = new AbortController();
+    const chord = page.exclusive(() => withModifiers(new Budget(operation(cancel.signal), 'press'), window, ['Meta'], () => page.keyboard.press('Enter'))).catch(() => undefined);
+    // The modifier is out, unanswered, when the caller stops waiting.
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    cancel.abort();
+    const tap = page.exclusive(() => page.mouse.move(1, 1));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(events).toEqual(['rawKeyDown Meta 4']);
+    const answering = setInterval(() => waiting.shift()?.(), 1);
+    await Promise.all([chord, tap]);
+    clearInterval(answering);
+    expect(events).toEqual(['rawKeyDown Meta 4', 'keyUp Meta 0', 'mouseMoved  0']);
   });
 });

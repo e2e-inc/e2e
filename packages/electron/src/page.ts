@@ -23,6 +23,8 @@ export class PageTarget implements InputTarget {
   private address: string;
   private closed = false;
   private isolated: Promise<number> | undefined;
+  private documents = 0;
+  private gestures: Promise<unknown> = Promise.resolve();
   private readonly handlers = new Map<PageEvent, Set<() => void>>();
 
   constructor(
@@ -85,9 +87,30 @@ export class PageTarget implements InputTarget {
     await this.session.send('Page.bringToFront');
   }
 
-  /** Drops the isolated world: the document navigated, and the next call makes one in the new document. */
-  forgetWorld(): void {
+  /**
+   * How many documents the page has left behind. A node id carries it: the
+   * renderer a navigation or a crash starts numbers its nodes from the start
+   * again, so a number alone could name another node in the next document.
+   */
+  get generation(): number {
+    return this.documents;
+  }
+
+  /** The page has another document: the isolated world of the last one is dropped, and its nodes are no longer this page's. */
+  documentChanged(): void {
     this.isolated = undefined;
+    this.documents += 1;
+  }
+
+  /**
+   * Runs one gesture after the ones before it have let go. A gesture its
+   * caller stopped waiting for still has keys and buttons to release once
+   * the page answers; the next one starts with none held.
+   */
+  exclusive<T>(gesture: () => Promise<T>): Promise<T> {
+    const run = this.gestures.then(gesture, gesture);
+    this.gestures = run.catch(() => undefined);
+    return run;
   }
 
   /** The execution context of the engine's isolated world in the page's main frame, made once per document. */

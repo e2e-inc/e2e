@@ -7,6 +7,7 @@ import { nodeId, Windows } from '../../src/windows.ts';
 class FakePage extends EventEmitter {
   private closed = false;
   readonly address: string;
+  generation = 0;
 
   constructor(address = 'file:///app/index.html') {
     super();
@@ -81,9 +82,19 @@ describe('Windows', () => {
     const second = open(windows);
     const shown = windows.current()!;
     expect(windows.bind({ id: nodeId(shown, 42), revision: '' })).toEqual({ window: shown, backendNodeId: 42 });
-    expect(() => windows.bind({ id: `${second.serial}.42`, revision: '' })).toThrow(/not shown now/);
+    expect(() => windows.bind({ id: `${second.serial}.0.42`, revision: '' })).toThrow(/not shown now/);
     expect(() => windows.bind({ id: 'window', revision: '' })).toThrow(/not a node of this app/);
     expect(first.serial).not.toBe(second.serial);
+  });
+
+  it('refuses a ref from a document the window has left, whose node numbers the next document reuses', () => {
+    const windows = new Windows();
+    const { page } = open(windows);
+    const shown = windows.current()!;
+    const before = nodeId(shown, 7);
+    page.generation += 1;
+    expect(() => windows.bind({ id: before, revision: '' })).toThrow(/a document the window no longer shows/);
+    expect(windows.bind({ id: nodeId(shown, 7), revision: '' })).toEqual({ window: shown, backendNodeId: 7 });
   });
 
   it('refuses to close the only window, and a window that is not there', () => {

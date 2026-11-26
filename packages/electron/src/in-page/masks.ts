@@ -10,7 +10,7 @@ export interface MaskState {
   readonly count: number;
   /** The masked elements' boxes in the viewport, as one comparable string. */
   readonly boxes: string;
-  /** Whether the masks were in place, whole and on top: false once their document is gone, or the page took one away. */
+  /** Whether the masks were in place, whole, on top, and over every element: false once their document is gone, or the page took one away. */
   readonly placed: boolean;
 }
 
@@ -53,16 +53,22 @@ export function placeMasks(selector: string): MaskState {
   // A popover is in the top layer, above a modal dialog and anything else the app put there before it.
   layer.popover = 'manual';
   layer.style.cssText = 'all: initial; position: fixed; inset: 0; width: 100%; height: 100%; margin: 0; border: 0; padding: 0; background: transparent; overflow: visible; pointer-events: none;';
+  document.documentElement.append(style, layer);
+  layer.showPopover();
+  // A zoom on the root scales the layer's own lengths, which the measured boxes already include.
+  const zoom = layer.currentCSSZoom;
   const boxes: string[] = [];
+  let covered = true;
   for (const element of elements) {
     const { x, y, width, height } = element.getBoundingClientRect();
     boxes.push([x, y, width, height].map(Math.round).join(','));
     const box = document.createElement('div');
-    box.style.cssText = `all: initial; position: fixed; left: ${x}px; top: ${y}px; width: ${width}px; height: ${height}px; background: #000000;`;
+    box.style.cssText = `all: initial; position: fixed; left: ${x / zoom}px; top: ${y / zoom}px; width: ${width / zoom}px; height: ${height / zoom}px; background: #000000;`;
     layer.append(box);
+    // Measured, not assumed: a page can lay the layer out in ways no formula here foresees.
+    const drawn = box.getBoundingClientRect();
+    covered &&= drawn.left <= x + 1 && drawn.top <= y + 1 && drawn.right >= x + width - 1 && drawn.bottom >= y + height - 1;
   }
-  document.documentElement.append(style, layer);
-  layer.showPopover();
   const painted = layer.outerHTML;
   Reflect.set(globalThis, 'e2eRemoveMasks', (): boolean => {
     // A page script can reach the masks through the document: they count only as painted, each one, to the end.
@@ -79,7 +85,7 @@ export function placeMasks(selector: string): MaskState {
     Reflect.deleteProperty(globalThis, 'e2eRemoveMasks');
     return whole;
   });
-  return { count: elements.length, boxes: boxes.join(';'), placed: true };
+  return { count: elements.length, boxes: boxes.join(';'), placed: covered };
 }
 
 /** Takes the masks away, and says what `selector` matches now: an element that appeared or moved since was not under one. */

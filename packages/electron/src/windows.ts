@@ -24,9 +24,9 @@ export interface AppWindow {
 /** Reads the OS window's title of a window's page; undefined for a view with no window of its own. */
 export type WindowTitle = (page: PageTarget) => Promise<string | undefined>;
 
-/** The node id a window's node carries: the window's serial and the node's backend id. */
+/** The node id a window's node carries: the window's serial, which of its documents the node is in, and the node's backend id. */
 export function nodeId(window: AppWindow, backendNodeId: number): string {
-  return `${window.serial}.${backendNodeId}`;
+  return `${window.serial}.${window.page.generation}.${backendNodeId}`;
 }
 
 export class Windows {
@@ -126,11 +126,12 @@ export class Windows {
 
   /** The window and backend node a ref names, or a stale error when it is gone or from another window. */
   bind(ref: NodeRef): { readonly window: AppWindow; readonly backendNodeId: number } {
-    const match = /^(\d+)\.(\d+)$/.exec(ref.id);
+    const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(ref.id);
     if (match === null) throw stale(`node ${ref.id} is not a node of this app`);
     const window = this.current();
     if (window === undefined || window.serial !== Number(match[1])) throw stale(`node ${ref.id} is in a window that is not shown now`);
-    return { window, backendNodeId: Number(match[2]) };
+    if (window.page.generation !== Number(match[2])) throw stale(`node ${ref.id} is in a document the window no longer shows`);
+    return { window, backendNodeId: Number(match[3]) };
   }
 
   /** Shows the open window at `index`. */
@@ -168,8 +169,9 @@ export class Windows {
   async use(which: WindowMatcher, windowTitle: WindowTitle, operation: OperationContext): Promise<ElectronWindow> {
     let listed: Awaited<ReturnType<Windows['list']>> = [];
     let shown: ElectronWindow | undefined;
+    const budget = new Budget(operation, 'electron.useWindow');
     await pollCondition({
-      deadline: new Budget(operation, 'electron.useWindow').waits,
+      deadline: budget.waits,
       signal: operation.signal,
       negated: false,
       evaluate: async () => {
@@ -178,6 +180,8 @@ export class Windows {
         // A match that closed while the list was read is not shown; the next read looks again.
         const index = found === undefined ? -1 : this.open().indexOf(found.window);
         if (found === undefined || index === -1) return false;
+        // The titles took time to read: a caller that stopped waiting meanwhile gets no window switched under it.
+        budget.check();
         this.showWindow(found.window);
         await found.window.page.bringToFront().catch(() => undefined);
         shown = { ...found.entry, index, shown: true };

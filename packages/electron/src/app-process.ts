@@ -141,12 +141,15 @@ export class AppProcess {
     try {
       // Any window counts, not the first one opened: a splash screen may close, or never finish loading, before the app's real window is there.
       const open = (): PageTarget[] => this.windows.open().map((window) => window.page);
-      const first = await raceAbort(() => Promise.race([loaded(open, deadline, operation.signal), quitEarly]), operation.signal, 'waiting for the first window to load');
-      // The window that loaded is the one read, not one still on its way.
-      if (!first.isClosed()) this.windows.show(open().indexOf(first));
+      const window = (): Promise<PageTarget> => raceAbort(() => Promise.race([loaded(open, deadline, operation.signal), quitEarly]), operation.signal, 'waiting for the first window to load');
+      let first = await window();
       opened = true;
       // Still inside the launch: an app that quits here, or a caller that stopped waiting, fails it.
       await raceAbort(() => Promise.race([this.setUp(app, setup, left), quitEarly]), operation.signal, 'setting up the app');
+      // A splash screen can close while the app is set up: the launch ends on a window that is there.
+      while (first.isClosed()) first = await window();
+      // The window that loaded is the one read, not one still on its way.
+      this.windows.show(open().indexOf(first));
     } catch (cause) {
       // Read before the engine's own quit, which ends the process too.
       const exited = app.process.ended;
@@ -288,7 +291,7 @@ export class AppProcess {
     // reload starts answers on it, in a new document.
     session.on('Inspector.targetCrashed', () => {
       this.windows.markCrashed(page);
-      page.forgetWorld();
+      page.documentChanged();
       log({ source: 'error', level: 'error', text: 'a window\'s renderer crashed' });
       page.emit('crash');
     });
@@ -299,7 +302,7 @@ export class AppProcess {
     session.on('Page.frameNavigated', ({ frame }) => {
       if (frame.parentId !== undefined) return;
       mainFrame = frame.id;
-      page.forgetWorld();
+      page.documentChanged();
       navigatedTo(frame.url + (frame.urlFragment ?? ''));
     });
     session.on('Page.navigatedWithinDocument', ({ frameId, url }) => {

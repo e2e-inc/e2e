@@ -245,8 +245,8 @@ export class ElectronSurface {
    * right after; a test's own steps verify with `expect`), then the screen
    * it left for the trace.
    */
-  private async act(operation: OperationContext, label: string, input: (budget: Budget) => Promise<void>): Promise<void> {
-    await withBudget(operation, label, input);
+  private async act(operation: OperationContext, label: string, window: AppWindow, input: (budget: Budget) => Promise<void>): Promise<void> {
+    await withBudget(operation, label, (budget) => window.page.exclusive(() => input(budget)));
     if (operation.origin === 'agent') await sleep(Math.min(this.options.settleMs, operation.timeoutMs), operation.signal);
     await this.traceScreen();
   }
@@ -256,26 +256,26 @@ export class ElectronSurface {
       const window = this.requireWindow();
       if (action.kind === 'scrollIntoView') return;
       if (action.kind !== 'swipe') throw notActionable(`the window takes swipe and scrollIntoView only, not ${action.kind}; act on a node`);
-      await this.act(operation, 'swipe', (budget) => swipeWindow(this.actions(), window, action, budget));
+      await this.act(operation, 'swipe', window, (budget) => swipeWindow(this.actions(), window, action, budget));
       return;
     }
     const { window, backendNodeId } = this.windowList.bind(ref);
-    await this.act(operation, action.kind, (budget) => performOnNode(this.actions(), window, backendNodeId, action, budget));
+    await this.act(operation, action.kind, window, (budget) => performOnNode(this.actions(), window, backendNodeId, action, budget));
   }
 
   async performAt(point: ViewportPoint, action: PointerAction, operation: OperationContext): Promise<void> {
     const window = this.requireWindow();
-    await this.act(operation, action.kind, (budget) => performAtPoint(this.actions(), window, point, action, budget));
+    await this.act(operation, action.kind, window, (budget) => performAtPoint(this.actions(), window, point, action, budget));
   }
 
   async typeText(text: string, options: { readonly replace: boolean }, operation: OperationContext): Promise<void> {
     const window = this.requireWindow();
-    await this.act(operation, 'keyboard.type', (budget) => typeText(this.actions(), window, text, options.replace, budget));
+    await this.act(operation, 'keyboard.type', window, (budget) => typeText(this.actions(), window, text, options.replace, budget));
   }
 
   async pressKey(key: string, operation: OperationContext): Promise<void> {
     const window = this.requireWindow();
-    await this.act(operation, 'keyboard.press', (budget) => pressKey(window, key, budget));
+    await this.act(operation, 'keyboard.press', window, (budget) => pressKey(window, key, budget));
   }
 
   // --- windows as tabs ---

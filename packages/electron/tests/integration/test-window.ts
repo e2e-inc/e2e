@@ -66,7 +66,7 @@ export async function openTestWindow(): Promise<TestWindow> {
     async setContent(html) {
       const { frameTree } = await session.send('Page.getFrameTree');
       await session.send('Page.setDocumentContent', { frameId: frameTree.frame.id, html });
-      page.forgetWorld();
+      page.documentChanged();
     },
     async element(selector) {
       const { result } = await session.send('Runtime.evaluate', { expression: `document.querySelector(${JSON.stringify(selector)})` });

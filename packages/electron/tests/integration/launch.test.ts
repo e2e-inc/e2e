@@ -203,6 +203,11 @@ describe('quit', () => {
     await launch();
     await expect.poll(() => windows.open().length).toBe(2);
     const guarded = windows.open().find((window) => window.page.url().includes('Guarded'))!;
+    // Chromium honours the guard only in a page its user has acted in; then an ordinary close is held back.
+    await guarded.page.mouse.click(10, 10);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'Guarded')?.close(), undefined);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(guarded.page.isClosed()).toBe(false);
     await app.closeWindow(guarded.page);
     expect(guarded.page.isClosed()).toBe(true);
     expect(windows.open()).toHaveLength(1);
@@ -259,6 +264,19 @@ describe('pixels', () => {
     const observed = await withPixels(devtools, await readWindow(devtools, window), { root: { ref: { id: 'window', revision: '' }, role: 'document' }, viewport: { width: 0, height: 0 } });
     expect(observed.pixels).toBeUndefined();
     expect(observed.maskedRegionCount).toBe(1);
+  });
+
+  it('masks a nested document in a page its root zooms', async () => {
+    const page = `<html style="zoom:2"><body style="margin:0"><div style="height:20px"></div><iframe style="border:0;margin-left:30px;width:100px;height:50px" srcdoc="<body style=margin:0;background:red>"></iframe></body></html>`;
+    const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${process.platform === 'linux'}, width: 400, height: 300 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`);
+    await launch();
+    const window = windows.require();
+    const devtools = new DevTools();
+    const { pixels } = await withPixels(devtools, await readWindow(devtools, window), { root: { ref: { id: 'window', revision: '' }, role: 'document' }, viewport: { width: 0, height: 0 } });
+    const rgba = new Transformer(pixels!.data).rawPixelsSync();
+    let red = 0;
+    for (let at = 0; at < rgba.length; at += rgba.length / (pixels!.width * pixels!.height)) if (rgba[at]! > 200 && rgba[at + 1]! < 50) red += 1;
+    expect(red).toBe(0);
   });
 
   it('gives each of two captures taken at once its own masks', async () => {
