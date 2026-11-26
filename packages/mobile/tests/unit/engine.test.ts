@@ -3752,6 +3752,13 @@ describe('device fixture', () => {
     ]);
     // Android reads no Apple arguments: the launch carries none.
     expect(h.fake.calls.filter((call) => call.method === 'apps.open').every((call) => !('launchArgs' in (call.args as object)))).toBe(true);
+    // closeApp terminates the app, so the next open is a fresh launch: its own locales come back first.
+    await device.openApp('com.other', { relaunch: true, locale: 'ja-JP' });
+    h.fake.respond('apps.open', () => ({ session: 's', appName: 'Other', appBundleId: 'com.other', identifiers: {} }));
+    await device.openApp('com.other');
+    h.adbCalls.length = 0;
+    await device.closeApp();
+    expect(h.adbCalls).toEqual([set('com.other', 'de-DE,it-IT')]);
     // The locale goes back before the session closes, which frees the device for another session.
     const order: string[] = [];
     h.respondAdb((args) => {

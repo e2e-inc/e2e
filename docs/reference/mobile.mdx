@@ -423,9 +423,9 @@ launch:
   `adb` is found under `ANDROID_SDK_ROOT`, `ANDROID_HOME`, the SDK's default
   folder, then on `PATH`. It needs Android 13 (API 33) or newer. Before the
   first change the engine reads the app's own locales (`get-app-locales`). A
-  later fresh launch of that app without a locale puts them back, and so does
-  the worker's end, before its session closes. A worker that is killed leaves
-  the locale set.
+  later fresh launch of that package without a locale puts them back, and so
+  do `device.closeApp()` and the worker's end, before its session closes. A
+  worker that is killed leaves the locale set.
 - A provider's Android devices are not on this machine's `adb`, so
   `app.locale` fails at config load there. Set `language` and `locale` on
   `browserstack()` or `testmu()` instead.

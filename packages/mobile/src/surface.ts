@@ -1085,6 +1085,8 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     const app = this.appIdentity ?? this.pinnedApp;
     await this.command('device.closeApp', (client) => client.apps.close({ ...this.selection(), ...(app === undefined ? {} : { app }) }), signal);
     this.screenReplaced();
+    // The next open launches the app fresh: it runs in its own locale again, as an iOS one does.
+    if (app !== undefined) await this.androidLocales?.afterClose(app, signal);
   }
 
   /**

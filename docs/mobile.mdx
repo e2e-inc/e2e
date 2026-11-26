@@ -137,9 +137,10 @@ await device.openApp('com.example.app', { relaunch: true, locale: 'ar-EG' });
   `UNSUPPORTED_CAPABILITY`.
 - On Android the engine sets the app's own language with this machine's
   `adb` before the launch. It needs Android 13 or newer, and the app named by
-  its package, such as `com.example.app`, not its display name. A later fresh launch
-  without a locale, and the end of the run, put back the app's earlier
-  language. A run that is killed leaves the locale set.
+  its package, such as `com.example.app`, not its display name. The app's
+  earlier language comes back on its next fresh launch without a locale (a
+  relaunch, or an open after `device.closeApp()`), and at the end of the
+  run. A run that is killed leaves the locale set.
 - `app.locale` fails at config load on a provider's Android devices, which
   this machine's `adb` doesn't reach. It also fails on TestMu AI and
   BrowserStack iOS devices, which drop launch arguments. Set `language` and

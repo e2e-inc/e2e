@@ -168,6 +168,17 @@ export class AndroidAppLocales {
     }
   }
 
+  /**
+   * Puts back `app`'s own locales once it was terminated (`device.closeApp`),
+   * so the next open, which launches it fresh, runs in them.
+   */
+  async afterClose(app: string, signal: AbortSignal): Promise<void> {
+    const original = this.original.get(app);
+    if (original === undefined) return;
+    await this.set(app, original, signal);
+    this.original.delete(app);
+  }
+
   /** Puts back the locales of every app this worker changed; failures are left, as the worker is going away. */
   async restore(signal: AbortSignal): Promise<void> {
     for (const [app, original] of this.original) {
