@@ -20,6 +20,7 @@ mod windows;
 
 mod process;
 
+use actions::Sheet;
 use failure::{Failure, Outcome, codes, envelope};
 use napi::bindgen_prelude::spawn_blocking;
 use napi_derive::napi;
@@ -280,6 +281,8 @@ pub struct PointerTarget {
     pub window_id: String,
     /// Whether a sheet on the window held its focus when the point was taken.
     pub sheet: bool,
+    /// That sheet's window server id, when it has one: another sheet in its place does not take the click.
+    pub sheet_id: Option<String>,
 }
 
 /// Physical pointer input at a point on screen: `tap`, `doubleTap`, `secondaryTap`, or `hover`. `inputId` names it, so
@@ -291,7 +294,14 @@ pub async fn pointer(x: f64, y: f64, kind: String, input_id: Option<u32>, timeou
     let deadline = deadline(timeout_ms.unwrap_or(60_000.0));
     blocking(move || {
         let target = match target {
-            Some(target) => Some((target.pid, window_id(&target.window_id)?, target.sheet)),
+            Some(target) => {
+                let sheet = match (target.sheet, target.sheet_id) {
+                    (false, _) => Sheet::None,
+                    (true, Some(id)) => Sheet::Known(window_id(&id)?),
+                    (true, None) => Sheet::Unknown,
+                };
+                Some((target.pid, window_id(&target.window_id)?, sheet))
+            }
             None => None,
         };
         actions::pointer_at(x, y, &kind, input_id, deadline, target)?;

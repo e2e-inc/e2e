@@ -48,6 +48,9 @@ pub struct WindowInfo {
     /// Focus is in a sheet or an alert on this window, not the window itself: a click at a point may land on the sheet.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub sheet_focused: bool,
+    /// The window server's id of that sheet or alert, when it has one: a sheet that replaced it has another.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sheet_id: Option<String>,
     /// The app's main window (`AXMain`), which an app in the background still names while none has focus.
     pub is_main: bool,
     pub visible: bool,
@@ -206,6 +209,11 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
             title: title.or_else(|| entry.and_then(|window| window.title.clone())),
             is_focused: focused.as_ref().is_some_and(|focused| holds_focus(focused, element)),
             sheet_focused: focused.as_ref().is_some_and(|focused| focused != element && holds_focus(focused, element)),
+            sheet_id: focused
+                .as_ref()
+                .filter(|focused| *focused != element && holds_focus(focused, element))
+                .and_then(Element::window_id)
+                .map(|id| id.to_string()),
             is_main: values[5].as_ref().and_then(|value| value.boolean()).unwrap_or(false),
             visible: entry.is_some_and(|window| window.onscreen),
             accessible: true,
@@ -229,6 +237,7 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
             title: window.title.clone(),
             is_focused: false,
             sheet_focused: false,
+            sheet_id: None,
             is_main: false,
             visible: window.onscreen,
             accessible: false,
