@@ -331,7 +331,11 @@ fn close_menu(pid: i32, menu: &Element, deadline: Instant) -> bool {
 fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
     let element = &entry.element;
     let (ax_role, role) = raw_role(element);
-    if ax_role == "AXPopUpButton" || ax_role == "AXMenuButton" {
+    // A pull-down keeps its own title, so a choice cannot be read back from it: tap it and the menu item instead.
+    if ax_role == "AXMenuButton" {
+        return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "a pull-down menu shows no selected option; tap it, then tap the menu item"));
+    }
+    if ax_role == "AXPopUpButton" {
         if value_text(element).as_deref() == Some(label) {
             return Ok(());
         }
