@@ -39,10 +39,12 @@ fn deadline(timeout_ms: f64) -> Instant {
     Instant::now() + Duration::from_millis(timeout_ms.max(0.0) as u64)
 }
 
-/// Runs `work` on a blocking thread and answers its envelope.
+/// Runs `work` on a blocking thread and answers its envelope. The work runs in an autorelease pool: a blocking thread
+/// has none, and the AppKit and Foundation calls a launch makes would otherwise leak what they autorelease for as long
+/// as the worker lives.
 async fn blocking(work: impl FnOnce() -> Outcome<Value> + Send + 'static) -> Value {
     init();
-    match spawn_blocking(work).await {
+    match spawn_blocking(move || objc2::rc::autoreleasepool(|_| work())).await {
         Ok(outcome) => envelope(outcome),
         Err(error) => envelope(Err(Failure::unconfirmed(codes::INTERNAL, format!("the native call failed: {error}")))),
     }
