@@ -404,10 +404,11 @@ export async function dispatchLocatorAction(
       // actionability on each and reports better failures than a pointer
       // sequence can. Anything else - an observed reference on either side -
       // is dragged with the pointer.
+      const drag = obj({ sourcePosition: action.sourcePosition, targetPosition: action.targetPosition, steps: action.steps });
       if (target.kind === 'locator' && other.kind === 'locator') {
-        await target.locator.dragTo(other.locator, { timeout });
+        await target.locator.dragTo(other.locator, { timeout, ...drag });
       } else {
-        await performPointerDrag(target, other, timeout);
+        await performPointerDrag(target, other, drag, operation);
       }
       return;
     }

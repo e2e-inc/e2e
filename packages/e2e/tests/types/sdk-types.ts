@@ -898,6 +898,15 @@ void ({ kind: 'multiTap', count: 3, button: 'middle' } satisfies import('e2e/eng
 // @ts-expect-error single right clicks use secondaryTap, so tap only accepts 'middle'
 void ({ kind: 'tap', button: 'right' } satisfies import('e2e/engine').LocatorAction);
 void screen.getByRole('image').click({ position: point });
+const drag: import('../../src/index.ts').DragOptions = { sourcePosition: point, targetPosition: { x: 4, y: 4 }, steps: 5, timeout: 1_000 };
+void (screen.getByRole('listitem').dragTo(screen.getByRole('list'), drag) satisfies Promise<void>);
+// @ts-expect-error drag positions are pixels from the node's corner, not percentages of the viewport
+void screen.getByRole('listitem').dragTo(screen.getByRole('list'), { targetPosition: { x: '50%', y: 4 } });
+// @ts-expect-error dragTo holds no keys
+void screen.getByRole('listitem').dragTo(screen.getByRole('list'), { modifiers: ['Shift'] });
+void ({ kind: 'dragTo', target: { id: 'n1', revision: '' }, sourcePosition: point, targetPosition: point, steps: 3 } satisfies import('e2e/engine').LocatorAction);
+// @ts-expect-error a point drag ends at its target point; positions are for the node drag
+void ({ kind: 'dragTo', target: point, targetPosition: point } satisfies import('e2e/engine').PointerAction);
 void screen.getByRole('button').tap({ count: 3, timeout: 1_000 });
 void screen.getByRole('button').click({ count: 3, modifiers: ['Shift'] });
 // @ts-expect-error a tap count is a number

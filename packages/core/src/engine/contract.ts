@@ -366,7 +366,22 @@ export type LocatorAction =
       /** In-memory files; an empty array clears the input. The protocol encodes bytes only on the wire. */
       readonly files: readonly { readonly name: string; readonly mimeType: string; readonly buffer: Uint8Array }[];
     }
-  | { readonly kind: 'dragTo'; readonly target: NodeRef }
+  | {
+      readonly kind: 'dragTo';
+      readonly target: NodeRef;
+      /**
+       * Where to press, in CSS pixels from the source node's top-left corner,
+       * inside its border on a document platform. Unset, the engine picks a
+       * point of the node. `sourcePosition`, `targetPosition`, and `steps` are
+       * sent only to an engine that declares `dragOptions`; the harness
+       * refuses them for any other before dispatch.
+       */
+      readonly sourcePosition?: ViewportPoint;
+      /** Where to release, measured on the target node as `sourcePosition` is on the source. */
+      readonly targetPosition?: ViewportPoint;
+      /** How many pointer moves carry the drag to the release point, a positive safe integer; unset, the engine's own default. */
+      readonly steps?: number;
+    }
   | {
       readonly kind: 'swipe';
       readonly direction: ScrollDirection;

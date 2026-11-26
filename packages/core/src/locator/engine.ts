@@ -35,6 +35,9 @@ import type { ScreenPoint } from '../types.ts';
 /** A pointer action as a test names it: its `target`, if any, may be a percentage of the viewport. */
 type ScreenPointerAction = WithScreenTarget<PointerAction>;
 
+/** A `dragTo` before its drop target has resolved: the action without its `target` ref. */
+type UnresolvedDrag = Omit<Extract<LocatorAction, { kind: 'dragTo' }>, 'target'>;
+
 /** Each action in the union, with `target` typed as a `ScreenPoint`. */
 type WithScreenTarget<A> = { readonly [K in keyof A]: K extends 'target' ? ScreenPoint : A[K] };
 
@@ -210,9 +213,10 @@ export class LocatorEngine {
    * declare `tapModifiers`, is `UNSUPPORTED_CAPABILITY`, a `press` key
    * outside the grammar is `INVALID_ARGUMENT`. Waiting for a node the engine
    * could never act on would report it as missing instead. Passing `button`
-   * without `tapButtons` fails before lookup.
+   * without `tapButtons`, or drag options without `dragOptions`, fails
+   * before lookup.
    */
-  private checkAction(action: LocatorAction): void {
+  private checkAction(action: LocatorAction | UnresolvedDrag): void {
     if (!this.session.actions.has(action.kind)) {
       if (action.kind === 'setInputFilePayloads') {
         throw new ConfigurationError(
@@ -240,6 +244,15 @@ export class LocatorEngine {
         'UNSUPPORTED_CAPABILITY',
         `the ${action.button} button on the "${action.kind}" action is not available on this target: its engine does not declare tapButtons`,
       );
+    }
+    if (action.kind === 'dragTo' && !this.session.dragOptions) {
+      const given = (['sourcePosition', 'targetPosition', 'steps'] as const).filter((field) => action[field] !== undefined);
+      if (given.length > 0) {
+        throw new ConfigurationError(
+          'UNSUPPORTED_CAPABILITY',
+          `${new Intl.ListFormat('en').format(given)} on the "dragTo" action ${given.length === 1 ? 'is' : 'are'} not available on this target: its engine does not declare dragOptions`,
+        );
+      }
     }
     if (action.kind === 'press') requireKey(action.key);
   }
@@ -534,15 +547,30 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
   /**
    * Performs exactly one action against exactly one match. Stale nodes are
    * re-resolved while the deadline remains; a possibly committed action is
-   * never repeated. An action that itself names other nodes (dragTo) is built
-   * per attempt, so its refs are re-resolved together with the source.
+   * never repeated.
    */
   async perform(
     expression: LocatorExpression,
-    action: LocatorAction | ActionBuilder,
+    action: LocatorAction,
     timeoutMs?: number,
   ): Promise<void> {
     await this.performUntil(expression, action, this.deadline(timeoutMs));
+  }
+
+  /**
+   * Drags exactly one match of `source` onto exactly one match of `target`.
+   * The drag is checked before either side resolves, so a drag the engine
+   * could never do is not reported as a missing node. The drop target
+   * resolves inside the retry, so a superseded target ref is re-resolved
+   * along with the source instead of looping until timeout.
+   */
+  async dragTo(source: LocatorExpression, target: LocatorExpression, drag: UnresolvedDrag, timeoutMs?: number): Promise<void> {
+    this.checkAction(drag);
+    await this.performUntil(
+      source,
+      async (deadline) => ({ ...drag, target: await this.resolveExactlyOne(target, deadline) }),
+      this.deadline(timeoutMs),
+    );
   }
 
   /** Reports whether the target engine declares this locator action. */

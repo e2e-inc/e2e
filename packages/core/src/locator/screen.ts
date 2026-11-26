@@ -16,6 +16,7 @@ import { isTextMatch, normalizeText } from '../internal/text.ts';
 import type {
   ActionOptions,
   ClickOptions,
+  DragOptions,
   FilePayload,
   LongPressOptions,
   Locator,
@@ -401,7 +402,7 @@ class LocatorImpl extends ScreenImpl implements Locator {
    */
   private perform(
     verb: string,
-    action: LocatorAction | ((deadline: Deadline) => Promise<LocatorAction>),
+    action: LocatorAction,
     options: ActionOptions | undefined,
   ): Promise<void> {
     rejectUnknownOptions(verb, options, ['timeout']);
@@ -601,17 +602,23 @@ class LocatorImpl extends ScreenImpl implements Locator {
     return this.perform('setInputFiles', { kind: 'setInputFilePayloads', files: snapshots }, options);
   }
 
-  dragTo(target: Locator, options?: ActionOptions): Promise<void> {
+  dragTo(target: Locator, options?: DragOptions): Promise<void> {
+    rejectUnknownOptions('dragTo', options, ['timeout', 'sourcePosition', 'targetPosition', 'steps']);
     const internals = this.ownLocator(target, 'dragTo');
-    // The drop target resolves inside the retry, so a superseded target ref
-    // is re-resolved along with the source instead of looping until timeout.
-    return this.perform(
-      'dragTo',
-      async (deadline) => ({
-        kind: 'dragTo',
-        target: await this.context.engine.resolveExactlyOne(internals.expression, deadline),
-      }),
-      options,
+    const steps = options?.steps;
+    if (steps !== undefined && (typeof steps !== 'number' || !Number.isSafeInteger(steps) || steps < 1)) {
+      throw new TestError('INVALID_ARGUMENT', `dragTo() steps must be a positive safe integer, got ${describeValue(steps)}`);
+    }
+
+    const drag = obj({
+      kind: 'dragTo' as const,
+      sourcePosition: options?.sourcePosition === undefined ? undefined : requirePoint(options.sourcePosition, 'dragTo sourcePosition'),
+      targetPosition: options?.targetPosition === undefined ? undefined : requirePoint(options.targetPosition, 'dragTo targetPosition'),
+      steps,
+    });
+
+    return this.action('locator.dragTo', () =>
+      this.context.engine.dragTo(this.expression, internals.expression, drag, options?.timeout),
     );
   }
 

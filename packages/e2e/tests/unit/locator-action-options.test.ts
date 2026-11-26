@@ -68,8 +68,8 @@ function boxScreen() {
   return { screen, steps, performed, actions, locate };
 }
 
-/** Creates a screen with the given actions and tap flags, recording lookups and actions. */
-function tapScreen(flags: Pick<ScreenOverOptions, 'actions' | 'tapModifiers' | 'tapButtons'> = {}) {
+/** Creates a screen with the given actions and tap and drag flags, recording lookups and actions. */
+function tapScreen(flags: Pick<ScreenOverOptions, 'actions' | 'tapModifiers' | 'tapButtons' | 'dragOptions'> = {}) {
   const received: LocatorAction[] = [];
   const locate = vi.fn(async (expression: LocatorExpression) => resolveExpression(expression, NODES));
   const { screen, steps } = screenOver({
@@ -423,6 +423,71 @@ describe('locator action options', () => {
       const { screen, at } = pointScreen();
       await screen.getByLabel('Agree').tap({ button: 'right', position: { x: 1, y: 1 } });
       expect(at).toEqual([{ action: { kind: 'secondaryTap' }, point: { x: 11, y: 21 } }]);
+    });
+  });
+
+  describe('drag options', () => {
+    const bin = (screen: Screen) => screen.getByRole('region', { name: 'Bin' });
+
+    it('hands the positions and steps to an engine that declares dragOptions', async () => {
+      const { screen, steps, received } = tapScreen({ dragOptions: true });
+      await screen.getByLabel('Agree').dragTo(bin(screen), { sourcePosition: { x: 1, y: 2 }, targetPosition: { x: 30, y: 0 }, steps: 5 });
+      expect(received).toEqual([
+        { kind: 'dragTo', target: expect.objectContaining({ id: 'bin' }), sourcePosition: { x: 1, y: 2 }, targetPosition: { x: 30, y: 0 }, steps: 5 },
+      ]);
+      expect(steps.all()).toEqual([expect.objectContaining({ api: 'locator.dragTo', label: 'getByLabel("Agree")', status: 'passed' })]);
+    });
+
+    it('sends a drag with no options as a plain dragTo to an engine without dragOptions', async () => {
+      const { screen, received } = tapScreen();
+      await screen.getByLabel('Agree').dragTo(bin(screen), { timeout: 1_000 });
+      expect(received).toEqual([{ kind: 'dragTo', target: expect.objectContaining({ id: 'bin' }) }]);
+    });
+
+    it.each([
+      [{ sourcePosition: { x: 1, y: 2 } }, 'sourcePosition on the "dragTo" action is not available'],
+      [{ targetPosition: { x: 3, y: 4 } }, 'targetPosition on the "dragTo" action is not available'],
+      [{ steps: 1 }, 'steps on the "dragTo" action is not available'],
+      [{ sourcePosition: { x: 1, y: 2 }, steps: 1 }, 'sourcePosition and steps on the "dragTo" action are not available'],
+    ])('refuses %j on an engine without dragOptions before resolving either node, naming only those fields', async (options, refusal) => {
+      const { screen, received, locate } = tapScreen();
+      await expect(screen.getByLabel('Missing').dragTo(bin(screen), options)).rejects.toMatchObject({
+        code: 'UNSUPPORTED_CAPABILITY',
+        message: expect.stringContaining(`${refusal} on this target: its engine does not declare dragOptions`),
+      });
+      expect(locate).not.toHaveBeenCalled();
+      expect(received).toEqual([]);
+    });
+
+    it('refuses a drag on an engine without the dragTo action before resolving either node', async () => {
+      const { screen, received, locate } = tapScreen({ actions: ['tap'] });
+      await expect(screen.getByLabel('Missing').dragTo(bin(screen))).rejects.toMatchObject({
+        code: 'UNSUPPORTED_CAPABILITY',
+        message: expect.stringContaining('the "dragTo" action is not available on this target'),
+      });
+      expect(locate).not.toHaveBeenCalled();
+      expect(received).toEqual([]);
+    });
+
+    it.each([0, -1, 1.5, Number.NaN, 2 ** 53, '2'])('rejects steps %j before any lookup', async (value) => {
+      const { screen, received, locate } = tapScreen({ dragOptions: true });
+      await expect(
+        Promise.resolve().then(() => screen.getByLabel('Agree').dragTo(bin(screen), { steps: invalid<number>(value) })),
+      ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('dragTo() steps must be a positive safe integer') });
+      expect(locate).not.toHaveBeenCalled();
+      expect(received).toEqual([]);
+    });
+
+    it.each([
+      [{ sourcePosition: { x: -1, y: 0 } }, 'dragTo sourcePosition'],
+      [{ targetPosition: invalid<{ x: number; y: number }>({ x: 1 }) }, 'dragTo targetPosition'],
+    ])('rejects %j before any lookup', async (options, what) => {
+      const { screen, received, locate } = tapScreen({ dragOptions: true });
+      await expect(
+        Promise.resolve().then(() => screen.getByLabel('Agree').dragTo(bin(screen), options)),
+      ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining(what) });
+      expect(locate).not.toHaveBeenCalled();
+      expect(received).toEqual([]);
     });
   });
 

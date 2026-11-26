@@ -139,6 +139,8 @@ export interface FakeEngineBehavior {
   tapModifiers?: boolean;
   /** Set to declare `tapButtons`, so a middle or right button on the tap action is passed to `perform`. */
   tapButtons?: boolean;
+  /** Set to declare `dragOptions`, so `sourcePosition`, `targetPosition`, and `steps` on the drag action are passed to `perform`. */
+  dragOptions?: boolean;
   /** Declares `session.back`, `restart`, and `reset` beside `open`; with a scene, the last two close the app. */
   navigation?: boolean;
   /**
@@ -373,6 +375,7 @@ export function createFakeEngine(behavior: FakeEngineBehavior = {}): FakeEngineH
     },
     ...(behavior.tapModifiers === undefined ? {} : { tapModifiers: behavior.tapModifiers }),
     ...(behavior.tapButtons === undefined ? {} : { tapButtons: behavior.tapButtons }),
+    ...(behavior.dragOptions === undefined ? {} : { dragOptions: behavior.dragOptions }),
     ...(behavior.isolation === undefined ? {} : { isolation: behavior.isolation }),
     ...(behavior.pointerActions === undefined
       ? {}

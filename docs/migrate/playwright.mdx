@@ -123,6 +123,7 @@ run only in a browser, so a test that uses it declares
 | `click({ delay })` | `longPress({ duration })` |
 | `click({ position })`, `click({ modifiers })`, `click({ clickCount: 3 })` | `tap({ position })`, `tap({ modifiers })`, `tap({ count: 3 })` |
 | `fill()`, `pressSequentially()`, `clear()`, `focus()`, `blur()`, `hover()`, `check()`, `uncheck()`, `dragTo()`, `setInputFiles(path)`, `selectOption({ label })` or `{ value }` | the same, without `force`, `trial`, or `position` |
+| `dragTo(target, { sourcePosition, targetPosition, steps })` | the same, in pixels |
 | `setInputFiles({ name, mimeType, buffer })` | Web only. Pass a plain object with only `name`, `mimeType`, and `buffer`. |
 | `press(key)` | the same for one character or a [named key](/reference/engine#keys); `browser.keyboard.press` after `focus()` for a key code |
 | `innerText()`, `allInnerTexts()`, `scrollIntoViewIfNeeded()` | `textContent()`, `allTextContents()`, `scrollIntoView()` |

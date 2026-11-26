@@ -305,6 +305,7 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
   const pointerActions: ReadonlySet<PointerActionKind> = new Set(engine?.pointerActions ?? []);
   const tapModifiers = engine?.tapModifiers === true;
   const tapButtons = engine?.tapButtons === true;
+  const dragOptions = engine?.dragOptions === true;
 
   const app: SessionApp = {
     open: guard('navigation', engine?.session?.open),
@@ -347,6 +348,7 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
     pointerActions,
     tapModifiers,
     tapButtons,
+    dragOptions,
     measuresViewport: engine?.viewportIntersection !== undefined,
     app,
     artifacts,
@@ -482,6 +484,10 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
       }
       if ('button' in action && action.button !== undefined && !tapButtons) {
         unsupported(`the ${action.button} button on the "${action.kind}" action`);
+      }
+      if (action.kind === 'dragTo' && !dragOptions) {
+        const given = (['sourcePosition', 'targetPosition', 'steps'] as const).filter((field) => action[field] !== undefined);
+        if (given.length > 0) unsupported(`${new Intl.ListFormat('en').format(given)} on the "dragTo" action`);
       }
       if (action.kind === 'press') requireKey(action.key);
       rejectSupersededLocate(ref);

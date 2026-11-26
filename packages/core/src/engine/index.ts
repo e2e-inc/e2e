@@ -842,6 +842,14 @@ export interface Engine {
    */
   readonly tapButtons?: boolean;
   /**
+   * The surface honors `sourcePosition`, `targetPosition`, and `steps` on
+   * the `dragTo` action `perform` receives. Without it the harness fails a
+   * drag that carries any of them with `UNSUPPORTED_CAPABILITY` before it
+   * resolves either node, so an engine that predates the field never drops
+   * one silently. A plain `dragTo` needs only the `dragTo` action.
+   */
+  readonly dragOptions?: boolean;
+  /**
    * `prepare` binds the target to the device `EnginePrepareInfo.device`
    * names, for `e2e run --device`, over the device the engine was configured
    * with. Without it the runner refuses the flag for the target before
