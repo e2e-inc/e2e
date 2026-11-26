@@ -611,6 +611,12 @@ fn step_to(
     Ok(same(now, target, size))
 }
 
+/// Whether a stepper's target lies outside the range it reports: below `min` or above `max`. A bound it does not report
+/// limits nothing.
+fn outside(target: f64, min: Option<f64>, max: Option<f64>) -> bool {
+    min.is_some_and(|min| target < min) || max.is_some_and(|max| target > max)
+}
+
 /// The number a text names, when it names a finite one: `NaN` or `inf` is no value a control can take.
 fn finite(text: &str) -> Result<f64, ()> {
     text.trim().parse::<f64>().ok().filter(|number| number.is_finite()).ok_or(())
@@ -629,7 +635,7 @@ fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
                 Ok(Value::Number(number)) => Some(number),
                 _ => None,
             };
-            if bound("AXMinValue").is_some_and(|min| target < min) || bound("AXMaxValue").is_some_and(|max| target > max) {
+            if outside(target, bound("AXMinValue"), bound("AXMaxValue")) {
                 return Err(Failure::refused(codes::ACTION_FAILED, format!("{} is outside the range of this {role}", text.trim())));
             }
             let number = || match element.attribute("AXValue") {
@@ -1466,6 +1472,19 @@ mod tests {
             || Some(value.get()),
         );
         assert!(reached.unwrap());
+    }
+
+    #[test]
+    fn refuses_a_stepper_target_outside_the_range_it_reports() {
+        use super::outside;
+        assert!(outside(11.0, Some(0.0), Some(10.0)));
+        assert!(outside(-1.0, Some(0.0), Some(10.0)));
+        // The bounds themselves are in range.
+        assert!(!outside(10.0, Some(0.0), Some(10.0)));
+        assert!(!outside(0.0, Some(0.0), Some(10.0)));
+        // A bound the stepper does not report limits nothing.
+        assert!(!outside(1e9, Some(0.0), None));
+        assert!(!outside(-1e9, None, Some(10.0)));
     }
 
     #[test]
