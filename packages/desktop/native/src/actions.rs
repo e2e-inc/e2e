@@ -915,15 +915,19 @@ fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Instant) -> Ou
     } else {
         Route::Process(entry.pid)
     };
+    // Each key goes only while the window that held the keyboard when typing began still does: a Return that opened another
+    // window, a sheet on this one included, or another app must not take the rest of the text with it. A field in a sheet
+    // that was there from the start keeps its sheet. Read before the field's own check, so a window a focus handler opens
+    // after it shows as a change at the first key, and one it opened before fails that check.
+    let typing_in = Element::application(entry.pid).element("AXFocusedWindow");
+    if typing_in.as_ref().is_some_and(|start| !windows::holds_focus(start, &window)) {
+        return Err(after_focus(Failure::refused(codes::ACTION_FAILED, "another window took the keyboard before typing began, so nothing was typed")));
+    }
     // Focusing the field can run a handler that opens a sheet or another window, and coming forward can too: the keys
     // would then go there. The field itself must hold the app's focus before the first key.
     if Element::application(entry.pid).element("AXFocusedUIElement").as_ref() != Some(&entry.element) {
         return Err(after_focus(Failure::refused(codes::ACTION_FAILED, "the field lost keyboard focus before typing began, so nothing was typed")));
     }
-    // Each key goes only while the window that held the keyboard when typing began still does: a Return that opened another
-    // window, a sheet on this one included, or another app must not take the rest of the text with it. A field in a sheet
-    // that was there from the start keeps its sheet.
-    let typing_in = Element::application(entry.pid).element("AXFocusedWindow");
     let still = || -> Outcome<()> {
         let app = Element::application(entry.pid);
         let focused = app.element("AXFocusedWindow");
