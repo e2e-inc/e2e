@@ -89,8 +89,7 @@ test('isKeyboardShown follows the keyboard up and through a dismissal', { platfo
 
 // With the keyboard up, Continue sits in the keyboard's band, so it reads as
 // hidden, and a tap on it is refused before anything is sent: an action
-// failure (it was ENGINE_FAILURE before #1686), and no key is pressed in its
-// place, so the email stays as typed. Once the keyboard is gone the same
+// failure, and no key is pressed in its place, so the email stays as typed. Once the keyboard is gone the same
 // button reads and taps.
 // iOS only, for the same reason as the test above.
 test('a control under the keyboard reads hidden and refuses a tap until the keyboard is dismissed', { platforms: ['ios'] }, async ({ app, device, screen }) => {
@@ -99,7 +98,7 @@ test('a control under the keyboard reads hidden and refuses a tap until the keyb
   const continueButton = screen.getByTestId('continue-button');
   await expect(continueButton).toBeHidden();
   const error = await continueButton.tap().catch((e: unknown) => e);
-  expect(error).toMatchObject({ code: 'ACTION_FAILED' });
+  expect(error).toMatchObject({ code: 'ACTION_FAILED', message: expect.stringContaining('keyboard') });
   await expect(screen.getByTestId('email-input')).toHaveValue('jane@example.com');
   await expect(screen.getByTestId('onboarding-step-email')).toBeVisible();
 
