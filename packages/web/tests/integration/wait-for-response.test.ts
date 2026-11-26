@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
+import { createServer, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -22,6 +22,10 @@ import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 function startBodyServer(): Promise<{ server: Server; url: string }> {
   const server = createServer((request, response) => {
     switch (request.url) {
+      case '/api/held':
+        // No headers until the test calls `releaseHeld`.
+        held.push(response);
+        return;
       case '/':
         response.writeHead(200, { 'content-type': 'text/html' });
         response.end('<!doctype html><title>Bodies</title><h1>Bodies</h1>');
@@ -74,6 +78,14 @@ function startBodyServer(): Promise<{ server: Server; url: string }> {
   });
 }
 
+/** Requests to `/api/held`, whose response has not started. */
+const held: ServerResponse[] = [];
+
+/** Answers every held request. */
+function releaseHeld(): void {
+  for (const response of held.splice(0)) response.end('released');
+}
+
 describe('browser.waitForResponse and waitForRequest', () => {
   const surface = new PlaywrightSurface({});
   const artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-wait-for-response-'));
@@ -106,6 +118,7 @@ describe('browser.waitForResponse and waitForRequest', () => {
   });
 
   afterEach(async () => {
+    releaseHeld();
     await surface.endAttempt({ signal, timeoutMs: 5_000 });
   });
 
@@ -280,6 +293,22 @@ describe('browser.waitForResponse and waitForRequest', () => {
     await expect(passedOver?.json()).resolves.toEqual({ ok: true });
   });
 
+  it('keeps a read the predicate left pending on the response it returns', async () => {
+    page = await surface.ensurePage();
+    await page.goto(`${origin}/`);
+    let pending: Promise<string> | undefined;
+    const [response] = await Promise.all([
+      browser.waitForResponse((candidate) => {
+        if (!candidate.url.endsWith('/api/slow')) return false;
+        pending = candidate.text();
+        return true;
+      }),
+      fire(`await fetch('/api/slow').then((r) => r.text());`),
+    ]);
+    await expect(pending).resolves.toBe('slow-body');
+    await expect(response.text()).resolves.toBe('slow-body');
+  });
+
   it('keeps the timeout when a predicate throws after it', async () => {
     page = await surface.ensurePage();
     await page.goto(`${origin}/`);
@@ -337,7 +366,20 @@ describe('browser.waitForResponse and waitForRequest', () => {
     expect(() => browser.waitForRequest('**/api/full', options)).toThrow('browser.waitForRequest options has no key "signal"');
   });
 
-  it('waits for a request by glob, method, and predicate, before its response arrives', async () => {
+  it('resolves a request wait before the response starts', async () => {
+    page = await surface.ensurePage();
+    await page.goto(`${origin}/`);
+    const [request] = await Promise.all([
+      browser.waitForRequest('**/api/held', { timeout: 2_000 }),
+      fire(`void fetch('/api/held');`),
+    ]);
+    expect(request.url).toBe(`${origin}/api/held`);
+    // The server still holds the response: a wait that needed it could only have timed out.
+    await vi.waitFor(() => expect(held).toHaveLength(1));
+    expect(held[0]?.headersSent).toBe(false);
+  });
+
+  it('waits for a request by glob, method, and predicate', async () => {
     page = await surface.ensurePage();
     await page.goto(`${origin}/`);
     const [byGlob, byMethod, byPredicate] = await Promise.all([

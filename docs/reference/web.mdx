@@ -813,7 +813,11 @@ export interface WebRequest {
   readonly url: string;
   /** HTTP method, as the page sent it. */
   readonly method: string;
-  /** Request headers, lower-cased names, without the cookie headers the browser adds on its own. */
+  /**
+   * Request headers, lower-cased names. The cookie headers the browser adds
+   * on its own are there only when a route intercepts the request, so always
+   * in `route.request`.
+   */
   readonly headers: Readonly<Record<string, string>>;
   /** Request body as text; absent when the request has none. */
   readonly postData?: string;
@@ -973,7 +977,8 @@ expect(search.method).toBe('GET');
   `Promise.all`. It also works before the first `browser.goto` or `app.open`.
 - Returns a [`WebRequest`](#route), the same type as `route.request`: `url`,
   `method`, `headers`, and optional `postData`. Every field is a property.
-  `headers` has lower-cased names and leaves out cookie headers.
+  `headers` has lower-cased names. The cookie headers the browser adds on its
+  own are there only when a [`route`](#route) intercepts the request.
 - A predicate runs once per request with a `WebRequest`. Truthy matching,
   concurrent async predicates, thrown errors, and the `predicate` trace label
   work the same way as in [`waitForResponse`](#waitforresponse).

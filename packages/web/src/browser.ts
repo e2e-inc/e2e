@@ -94,7 +94,11 @@ export interface WebRequest {
   readonly url: string;
   /** HTTP method, as the page sent it. */
   readonly method: string;
-  /** Request headers, lower-cased names, without the cookie headers the browser adds on its own. */
+  /**
+   * Request headers, lower-cased names. The cookie headers the browser adds
+   * on its own are there only when a route intercepts the request, so always
+   * in `route.request`.
+   */
   readonly headers: Readonly<Record<string, string>>;
   /** Request body as text; absent when the request has none. */
   readonly postData?: string;
@@ -728,10 +732,12 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
    * when first asked for. While the wait runs, a read is bounded by
    * `waitSignal` only, since the wait's own timeout already bounds a predicate
    * that reads it; a read still pending when the wait ends is cancelled with
-   * it. `settle` starts reading the response the wait returns at once, while
-   * the browser still holds the body. A read that starts after the wait, on
-   * any response it saw, waits on a budget of its own: the timeout bounds the
-   * match, never a body still streaming in behind headers that already arrived.
+   * it, unless its response is the one the wait returns. `settle` starts
+   * reading that response at once, while the browser still holds the body. A
+   * read that starts after the wait, on any response it saw, and a read of the
+   * returned response the predicate left pending, wait on a budget of their
+   * own: the timeout bounds the match, never a body still streaming in behind
+   * headers that already arrived.
    */
   const responseView = (response: Response, waitSignal: AbortSignal) => {
     let started: Promise<() => Promise<Buffer>> | undefined;
@@ -739,7 +745,14 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     const start = () =>
       (started ??= readResponseBody('waitForResponse', () => response.body(), () => response.request().failure()?.errorText));
     const read = async (): Promise<Buffer> => {
-      if (!settled && !waitSignal.aborted) return (await raceAbort(start(), waitSignal, 'waitForResponse body'))();
+      if (!settled && !waitSignal.aborted) {
+        const inWait = await raceAbort(start(), waitSignal, 'waitForResponse body').catch((cause: unknown) => {
+          // The wait returned this response while the read was pending: it goes on as a read of that response.
+          if (settled) return undefined;
+          throw cause;
+        });
+        if (inWait) return inWait();
+      }
       const { signal, timeoutMs } = context.operation();
       const bytes = await raceAbort(
         withTimeout(start(), timeoutMs, () =>
