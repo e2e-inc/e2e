@@ -375,6 +375,9 @@ describe('snapshot projection', () => {
       // A plain Button under a same-named link isn't a link span, so it echoes nothing.
       { ref: 'e16', index: 15, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Share', roleDescription: 'Link' },
       { ref: 'e17', index: 16, parentIndex: 15, depth: 2, type: 'android.widget.Button', label: 'Share' },
+      // An accessibilityLabel names the Text apart from its span, which still echoes the text's own words.
+      { ref: 'e18', index: 17, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Home', contentDescription: 'Go to home', roleDescription: 'Link' },
+      { ref: 'e19', index: 18, parentIndex: 17, depth: 2, type: 'android.widget.Button', label: 'Home', roleDescription: 'Link' },
     ]);
     const nodes = projected.index.slice(1).map((entry) => `${entry.node.role} ${entry.node.name ?? ''}`.trim());
     expect(nodes).toEqual([
@@ -394,6 +397,8 @@ describe('snapshot projection', () => {
       'link Help',
       'link Share',
       'button Share',
+      'group Go to home',
+      'link Home',
     ]);
   });
 
