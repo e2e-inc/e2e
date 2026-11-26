@@ -183,35 +183,46 @@ pub fn press(combo: &Combo, route: Route) -> Outcome<()> {
     Ok(())
 }
 
+/// The most UTF-16 units one key event carries: some apps drop the rest of a longer string.
+const CHUNK_UNITS: usize = 16;
+
 /// Types text as keystrokes that carry their characters, whatever the keyboard layout. A newline presses Return and a tab Tab.
 pub fn type_text(text: &str, route: Route) -> Outcome<()> {
     let source = source()?;
-    let mut buffer: Vec<u16> = Vec::new();
-    let flush = |buffer: &mut Vec<u16>| -> Outcome<()> {
-        // A short chunk per event: some apps drop the rest of a long string.
-        for chunk in buffer.chunks(16) {
-            for down in [true, false] {
-                let event =
-                    CGEvent::new_keyboard_event(source.clone(), 0, down).map_err(|_| Failure::unconfirmed(codes::INTERNAL, "could not create a key event"))?;
-                event.set_string_from_utf16_unchecked(chunk);
-                post(&event, route);
-            }
-            sleep(Duration::from_millis(3));
+    let send = |chunk: &[u16]| -> Outcome<()> {
+        for down in [true, false] {
+            let event =
+                CGEvent::new_keyboard_event(source.clone(), 0, down).map_err(|_| Failure::unconfirmed(codes::INTERNAL, "could not create a key event"))?;
+            event.set_string_from_utf16_unchecked(chunk);
+            post(&event, route);
         }
-        buffer.clear();
+        sleep(Duration::from_millis(3));
         Ok(())
     };
+    let mut chunk: Vec<u16> = Vec::with_capacity(CHUNK_UNITS);
     for character in text.chars() {
         if character == '\n' || character == '\r' || character == '\t' {
-            flush(&mut buffer)?;
+            if !chunk.is_empty() {
+                send(&chunk)?;
+                chunk.clear();
+            }
             let combo = Combo { key: Key { code: if character == '\t' { 48 } else { 36 }, character: None }, flags: CGEventFlags::CGEventFlagNull };
             press(&combo, route)?;
             continue;
         }
         let mut units = [0u16; 2];
-        buffer.extend_from_slice(character.encode_utf16(&mut units));
+        let encoded = character.encode_utf16(&mut units);
+        // A character never splits across events: both halves of a surrogate pair go in one.
+        if chunk.len() + encoded.len() > CHUNK_UNITS {
+            send(&chunk)?;
+            chunk.clear();
+        }
+        chunk.extend_from_slice(encoded);
     }
-    flush(&mut buffer)
+    if !chunk.is_empty() {
+        send(&chunk)?;
+    }
+    Ok(())
 }
 
 /// What a pointer does at a point.
