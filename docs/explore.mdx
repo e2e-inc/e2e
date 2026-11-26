@@ -195,6 +195,9 @@ every dialog on a web target with
 targets: [{ name: 'web', engine: web({ dialogs: 'accept' }), app: { url: 'http://localhost:3000' } }],
 ```
 
+The explorer still reads each dialog's message in the result of the action
+that opened it, so an app's error `alert` can become a finding.
+
 ## If the run stops too early
 
 A run stops after 8 steps or 10 minutes. To reach further into the flow,

@@ -42,6 +42,7 @@ larger budget. [How agent steps work](/agent-steps) explains a step in full.
 | The screen | An accessibility tree with node ids, roles, names, text, test ids, link targets, and states, cut at a size limit. No selectors. A link's query and fragment show only as `?…` and `#…`. Secure fields show as `value=<secure>`, unless [a page script hides one](#where-redaction-stops). |
 | The location | The current URL, redacted, without userinfo. A judgment gets it as a path on the app's origin and as the whole URL elsewhere, cut at a size limit. On a device, the app and screen title. |
 | A screenshot | When needed or requested, and only if the engine proves secure fields are masked. |
+| The engine's system log | Under the screen in an action's result: the `system` lines the engine logged since the step's previous look, such as a native dialog [`web({ dialogs })`](/reference/web#dialogs) answered. Redacted, at most five, each cut at 300 characters. |
 | Prior steps | `agent.act` receives bounded records from the same test or serial group. Judgments use only the current screen, its location, the instruction and its params, and the agent's context. |
 
 ### Tool calls

@@ -105,4 +105,19 @@ describe('the session app log route', () => {
     expect(heard.filter((event) => event.kind === 'navigation')).toHaveLength(50);
     expect(heard.at(-1)).toEqual({ kind: 'log', entry: ERROR });
   });
+
+  it('hands an agent step the system lines after its cursor, the newest five, apart from the quota', () => {
+    const session = createEngineSession({ engine: undefined, targetName: 'web' });
+    session.appLog.push({ source: 'system', level: 'info', text: 'before the step' });
+    const start = session.appLog.systemLines();
+    expect(start).toEqual({ lines: [], skipped: 0, cursor: 1 });
+    // A full info quota drops the log's lines, never the ones an agent step reads.
+    for (let index = 0; index < 400; index += 1) session.appLog.push({ source: 'console', level: 'info', text: `tick ${index}` });
+    session.appLog.push({ source: 'system', level: 'info', text: 'alert dialog "Could not save" opened' });
+    const first = session.appLog.systemLines(start.cursor);
+    expect(first).toEqual({ lines: ['alert dialog "Could not save" opened'], skipped: 0, cursor: 2 });
+    expect(session.appLog.systemLines(first.cursor)).toEqual({ lines: [], skipped: 0, cursor: 2 });
+    for (let index = 0; index < 7; index += 1) session.appLog.push({ source: 'system', level: 'info', text: `line ${index}` });
+    expect(session.appLog.systemLines(first.cursor)).toEqual({ lines: ['line 2', 'line 3', 'line 4', 'line 5', 'line 6'], skipped: 2, cursor: 9 });
+  });
 });

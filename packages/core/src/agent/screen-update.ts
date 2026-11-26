@@ -311,12 +311,24 @@ export class ScreenPresenter {
    * the reason the pixels the step asked for did not come, or as is when no
    * pixels were asked for.
    */
-  private withScreenshot(observation: ExecutorObservation, text: string): ScreenOutput {
+  private withScreenshot(observation: ExecutorObservation, screen: string): ScreenOutput {
+    const text = `${screen}${systemLogNote(observation.systemLog)}`;
     const { pixels } = observation;
     if (pixels !== undefined) return { text: `${text}\n\n${screenshotNote(pixels)}`, pixels };
     if (observation.pixelsWithheld === undefined) return text;
     return `${text}\n\nNo screenshot: ${withheldAdvice(observation.pixelsWithheld)}`;
   }
+}
+
+/**
+ * What the engine logged since the previous screen, under the screen: the
+ * effect of an action no listing shows, such as a native dialog the target
+ * answered for the model. After the screen, so the lead and the screen's
+ * first line still open the result for the loop guards that read them.
+ */
+function systemLogNote(lines: ExecutorObservation['systemLog']): string {
+  if (lines === undefined || lines.length === 0) return '';
+  return `\n\nSystem log since the previous screen:\n${lines.map((line) => `- ${line}`).join('\n')}`;
 }
 
 /** The line under a screenshot: its pixel size and the coordinate space the point verbs read. */

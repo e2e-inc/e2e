@@ -347,6 +347,30 @@ describe('ScreenPresenter', () => {
   });
 });
 
+describe('ScreenPresenter and the system log', () => {
+  const textOf = (output: ReturnType<ScreenPresenter['present']>) => (typeof output === 'string' ? output : output.text);
+  const DIALOG = `alert dialog "Could not save" opened; accepting it per web({ dialogs: 'accept' })`;
+
+  it('lists what the engine logged under the screen, so the lead and the headline still open the result', () => {
+    const presenter = new ScreenPresenter();
+    presenter.open(screen('s1', HOME));
+    const tapped = textOf(presenter.present(screen('s2', HOME, { systemLog: [DIALOG] }), { lead: 'Tapped #n3.', expectChange: true }));
+    expect(tapped.split('\n')[0]).toBe('Tapped #n3.');
+    expect(tapped.endsWith(`\n\nSystem log since the previous screen:\n- ${DIALOG}`)).toBe(true);
+    // An observe's look that changed the screen still reads as a change to a wait.
+    const looked = textOf(presenter.present(screen('s3', [...HOME, ' #n7 alert "Saved"'], { systemLog: [DIALOG] }), { lead: 'Observed.' }));
+    expect(reportsScreenChange(looked)).toBe(true);
+    // The step's first screen carries it too.
+    expect(textOf(new ScreenPresenter().open(screen('s4', HOME, { systemLog: [DIALOG] })))).toContain(`- ${DIALOG}`);
+  });
+
+  it('adds nothing when there is no line', () => {
+    const presenter = new ScreenPresenter();
+    presenter.open(screen('s1', HOME));
+    expect(textOf(presenter.present(screen('s2', HOME, { systemLog: [] }), { lead: 'Tapped #n3.' }))).not.toContain('System log');
+  });
+});
+
 describe('ScreenPresenter and the on-screen keyboard', () => {
   const KEYBOARD = [
     ' #n20 keyboard "Padding-Left"',

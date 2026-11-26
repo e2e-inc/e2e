@@ -9,6 +9,7 @@ import { OperationQueue } from '@e2e-dev/core/lib/agent/operation-queue';
 import type { AgentContext } from '@e2e-dev/core/lib/agent/invocation';
 import type { StepAccounting } from '@e2e-dev/core/lib/agent/step-accounting';
 import { StepRecorder } from '@e2e-dev/core/lib/run/steps';
+import { createEngineSession } from '@e2e-dev/core/lib/engine/session';
 
 function node(id: string, extra: Partial<SemanticNode> = {}): SemanticNode {
   return { ref: { id, revision: 'r1' }, ...extra };
@@ -30,13 +31,16 @@ function observation(tree: SemanticNode, pixels?: Observation['pixels']): Extrac
 
 const NO_REDACT = (text: string): string => text;
 
+/** An app log route with nothing in it, for a fake engine session. */
+const appLog = () => createEngineSession({ engine: undefined, targetName: 'web' }).appLog;
+
 it('enforces tree-only observation requests, projection, and unavailable-tree fallback', async () => {
   const pixels = { data: new Uint8Array(4), mediaType: 'image/png' as const, width: 2, height: 2, scale: 1 };
   let raw: Observation = { ...observation(node('root'), pixels), redaction: { secureNodeCount: 0, maskedRegionCount: 0 } };
   const capture = vi.fn(async () => raw);
   const signal = new AbortController().signal;
   const runtime = {
-    engine: { signal, session: { observe: capture } },
+    engine: { signal, session: { observe: capture, appLog: appLog() } },
     app: {}, redact: NO_REDACT, redactCut: NO_REDACT,
     steps: new StepRecorder('attempt'),
   } as unknown as AgentContext;
@@ -67,7 +71,7 @@ it('flags a step whose screens listed a one-time-code field, and keeps the flag 
   const signal = new AbortController().signal;
   const feed = (): ObservationFeed => {
     const runtime = {
-      engine: { signal, session: { observe: async () => observation(screen) } },
+      engine: { signal, session: { observe: async () => observation(screen), appLog: appLog() } },
       app: {}, redact: NO_REDACT, redactCut: NO_REDACT,
       steps: new StepRecorder('attempt'),
     } as unknown as AgentContext;
@@ -90,6 +94,36 @@ it('flags a step whose screens listed a one-time-code field, and keeps the flag 
   const without = feed();
   await without.observe();
   expect(without.oneTimeCodeShown).toBe(false);
+});
+
+it('hands the executor the system lines logged since its previous look, redacted, each once', async () => {
+  const signal = new AbortController().signal;
+  const route = appLog();
+  route.push({ source: 'system', level: 'info', text: 'logged before the step' });
+  const ledger = new SecretLedger([['password', 'hunter2-secret']]);
+  const runtime = {
+    engine: { signal, session: { observe: async () => observation(node('root', { role: 'document' })), appLog: route } },
+    app: {}, redact: (text: string) => ledger.redact(text), redactCut: NO_REDACT,
+    steps: new StepRecorder('attempt'),
+  } as unknown as AgentContext;
+  const accounting = {
+    api: 'agent.act', signal, checkpoint: () => undefined,
+    operation: () => ({ signal, timeoutMs: 1_000 }), remainingMs: () => 1_000,
+    metrics: { actionSteps: 0, contextBytes: 0, ledgerBytes: 0, observationBytes: 0 },
+  } as unknown as StepAccounting;
+  const feed = new ObservationFeed(runtime, accounting, new OperationQueue(), {
+    pixelsAllowed: false, maxObservationBytes: 4_096, maxInputTokens: 10_000, instructionBytes: 0,
+  });
+  // A line from before the step belongs to an earlier step's action.
+  expect((await feed.observe()).systemLog).toBeUndefined();
+  route.push({ source: 'console', level: 'error', text: 'a console line is not a system line' });
+  route.push({ source: 'system', level: 'info', text: 'prompt dialog "Your password is\n hunter2-secret" opened; accepting it' });
+  expect((await feed.observe()).systemLog).toEqual(['prompt dialog "Your password is <secret:password>" opened; accepting it']);
+  expect((await feed.observe()).systemLog).toBeUndefined();
+  for (let index = 0; index < 6; index += 1) route.push({ source: 'system', level: 'info', text: 'x'.repeat(400) });
+  const many = (await feed.observe()).systemLog!;
+  expect(many[0]).toBe('1 earlier line not shown');
+  expect(many.slice(1).map((line) => line.length)).toEqual([300, 300, 300, 300, 300]);
 });
 
 describe('prepareObservation', () => {
