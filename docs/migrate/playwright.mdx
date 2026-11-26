@@ -53,7 +53,7 @@ A Playwright key such as `testDir`, `baseURL`, `use`, `webServer`, or
 | `expect.toPass` | Top-level [`toPass`](/reference/config#topass) |
 | `maxFailures`, `use.headless: false` | `--max-failures <n>` and `--headed` on the CLI |
 | `reporter`, `outputDir` | `reporters: ['list', 'junit', htmlReporter()]`, with `htmlReporter` from `@e2e-dev/html-reporter`; also `dot`, `line`, `json`, `markdown`, and `ctrf`; `output`, default `.e2e` |
-| `use.viewport`, `deviceScaleFactor`, `locale`, `timezoneId`, `colorScheme`, `reducedMotion`, `userAgent`, `testIdAttribute` | the same keys in `web({ ... })` |
+| `use.viewport`, `deviceScaleFactor`, `locale`, `timezoneId`, `colorScheme`, `reducedMotion`, `userAgent`, `hasTouch`, `testIdAttribute` | the same keys in `web({ ... })` |
 | `use.browserName`, `httpCredentials`, `extraHTTPHeaders` | `web({ browser, basicAuth, headers })`; `basicAuth` and `headers` apply to the app's origin only, [`credentialOrigins`](/reference/web#credentialorigins) adds more |
 | `chromium.connectOverCDP(url)` | `web({ connect: { cdpEndpoint: () => url } })`, chromium only |
 | `use.trace`, `use.video` | `trace`, `video`: a mode in the config, on a target, or on a test. `web({ screencast: { size } })` sets the video size |
@@ -290,7 +290,7 @@ purpose. Use the workaround, or keep the test in Playwright.
 
 | Playwright | Use today |
 | --- | --- |
-| `devices['iPhone 15']`, `isMobile`, `hasTouch` | `web({ viewport, userAgent, deviceScaleFactor })`; a mobile target for real touch |
+| `devices['iPhone 15']`, `isMobile` | `web({ viewport, userAgent, deviceScaleFactor, hasTouch })` to emulate a phone in a desktop browser (desktop viewport rules still apply). Use a mobile target for a simulator, emulator, or phone |
 | `waitForFunction()` | `expect.poll` over `browser.evaluate` |
 | `page.on('request')`, `response.ok()` | Wait for one request with `browser.waitForRequest` or `browser.waitForResponse`. To observe every request, record `route.request` in a `browser.route` handler and call `route.fallback()`. For `response.ok()`, use `expect(response).toBeOK()` or check `response.status` |
 | `route.fulfill({ response })`, `route.abort(code)`, `route.fetch(options)`, `request.postDataJSON()` | Pass `status`, `headers`, and `body` from `route.fetch()` to `route.fulfill()`. For `postDataJSON()`, read `postData` on the `WebRequest`: `undefined` with no body, where Playwright returns `null`; `JSON.parse` it for JSON, `Object.fromEntries(new URLSearchParams(postData))` for a form |
