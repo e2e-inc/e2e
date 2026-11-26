@@ -875,21 +875,24 @@ describe('app steering hooks', () => {
 
 describe('coordinate input', () => {
   const box = { x: 100, y: 200, width: 50, height: 20 };
-  function pointer(options: { rect?: false; hidden?: true } = {}) {
+  function pointer(
+    options: { rect?: false | typeof box | (() => typeof box); hidden?: true; origin?: { x: number; y: number } } = {},
+  ) {
     const performed: string[] = [];
     const performedAt: string[] = [];
     const pointTimeouts: number[] = [];
     const locates: number[] = [];
     const observes: number[] = [];
-    const node = {
+    const node = () => ({
       ref: { id: 'pad', revision: '' }, role: 'img', name: 'Pad',
-      ...(options.rect === false ? {} : { rect: box }),
+      ...(options.rect === false ? {} : { rect: typeof options.rect === 'function' ? options.rect() : options.rect ?? box }),
       ...(options.hidden === true ? { states: { hidden: true } } : {}),
-    };
+      ...(options.origin === undefined ? {} : { origin: options.origin }),
+    });
     const engine = defineEngine({
       name: 'fake', version: '1', spiVersion: 1,
-      observe: async () => { observes.push(1); return snapshot([node]); },
-      locate: async () => { locates.push(1); return [node]; },
+      observe: async () => { observes.push(1); return snapshot([node()]); },
+      locate: async () => { locates.push(1); return [node()]; },
       actions: ['tap', 'scrollIntoView'],
       perform: async (_ref, action) => { performed.push(action.kind); },
       pointerActions: ['tap', 'doubleTap', 'swipeTo'],
@@ -1002,6 +1005,9 @@ describe('coordinate input', () => {
     await expect(fixtures.screen.swipe({ from: { x: 1, y: 1 }, to: { x: 1, y: 9 } })).rejects.toMatchObject({
       code: 'UNSUPPORTED_CAPABILITY', message: expect.stringContaining('the "swipeTo" action at a point'),
     });
+    await expect(fixtures.screen.getByLabel('Pad').swipe({ from: { x: 1, y: 1 }, to: { x: 1, y: 9 } })).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY', message: expect.stringContaining('the "swipeTo" action at a point'),
+    });
     expect(locates).toEqual([]);
     await fixtures.screen.getByLabel('Pad').tap();
     expect(locates).toEqual([1]);
@@ -1016,12 +1022,33 @@ describe('coordinate input', () => {
     try {
       const { engine, performedAt } = pointer(options);
       const { fixtures } = runtime(engine);
-      await expect(fixtures.screen.getByLabel('Pad').tap({ position: { x: 1, y: 1 }, timeout: 250 })).rejects.toMatchObject({
+      const noBox = {
         code: 'LOCATOR_NOT_FOUND',
         message: expect.stringContaining('did not become visible with a box'),
         details: expect.objectContaining({ waitedMs: expect.any(Number) }),
-      });
+      };
+      await expect(fixtures.screen.getByLabel('Pad').tap({ position: { x: 1, y: 1 }, timeout: 250 })).rejects.toMatchObject(noBox);
+      await expect(fixtures.screen.getByLabel('Pad').swipe({ from: { x: 1, y: 1 }, to: { x: 9, y: 1 }, timeout: 250 })).rejects.toMatchObject(noBox);
       expect(performedAt).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('locator.swipe waits for a non-zero width and fails with LOCATOR_NOT_FOUND if it stays 0', async () => {
+    vi.useFakeTimers();
+    vi.setTimerTickMode('nextTimerAsync');
+    try {
+      let reads = 0;
+      const growing = pointer({ rect: () => (++reads < 3 ? { ...box, width: 0 } : box) });
+      await runtime(growing.engine).fixtures.screen.getByLabel('Pad').swipe({ from: { x: '10%', y: '50%' }, to: { x: '90%', y: '50%' } });
+      expect(growing.performedAt).toEqual(['swipeTo @ 105,210 -> 145,210']);
+
+      const flat = pointer({ rect: { ...box, width: 0 } });
+      await expect(
+        runtime(flat.engine).fixtures.screen.getByLabel('Pad').swipe({ from: { x: '10%', y: '50%' }, to: { x: '90%', y: '50%' }, timeout: 250 }),
+      ).rejects.toMatchObject({ code: 'LOCATOR_NOT_FOUND', message: expect.stringContaining('did not become visible with a box') });
+      expect(flat.performedAt).toEqual([]);
     } finally {
       vi.useRealTimers();
     }
@@ -1066,6 +1093,60 @@ describe('coordinate input', () => {
       'swipeTo @ 10,20 -> 10,300 for 400ms',
       'swipeTo @ 540,1560 -> 540,840 for 300ms',
     ]);
+  });
+
+  it('locator.swipe({ from, to }) drags between points on the node, in pixels or percentages of its box', async () => {
+    const { engine, performed, performedAt, pointTimeouts } = pointer();
+    const { fixtures, steps } = runtime(engine, { actionTimeout: 5_000 });
+    const pad = fixtures.screen.getByLabel('Pad');
+    await pad.swipe({ from: { x: '90%', y: '50%' }, to: { x: 5, y: '50%' } });
+    expect(steps.all().at(-1)).toMatchObject({
+      kind: 'locator', api: 'locator.swipe', label: 'getByLabel("Pad") from (90%, 50%) to (5, 50%)', status: 'passed',
+    });
+    await pad.swipe({ from: { x: '0%', y: 0 }, to: { x: '100%', y: '100%' }, duration: 300, timeout: 1_000 });
+    expect(performedAt).toEqual(['swipeTo @ 145,210 -> 105,210', 'swipeTo @ 100,200 -> 149,219 for 300ms']);
+    expect(performed).toEqual(['scrollIntoView', 'scrollIntoView']);
+    expect(pointTimeouts[1]).toBeLessThanOrEqual(1_000);
+  });
+
+  it('locator.swipe measures pixels from the corner tap({ position }) uses and percentages on the visible box', async () => {
+    // A border puts the corner inside the box.
+    const bordered = pointer({ origin: { x: 102, y: 203 } });
+    const borderedPad = runtime(bordered.engine).fixtures.screen.getByLabel('Pad');
+    await borderedPad.swipe({ from: { x: 0, y: 0 }, to: { x: 4, y: 4 } });
+    await borderedPad.swipe({ from: { x: '50%', y: '50%' }, to: { x: '100%', y: '100%' } });
+    expect(bordered.performedAt).toEqual(['swipeTo @ 102,203 -> 106,207', 'swipeTo @ 125,210 -> 149,219']);
+
+    // A frame cut off the right 20 pixels, so the box is 30 pixels wide.
+    const clipped = pointer({ rect: { ...box, width: 30 } });
+    await runtime(clipped.engine).fixtures.screen.getByLabel('Pad').swipe({ from: { x: '50%', y: '50%' }, to: { x: '100%', y: '100%' } });
+    expect(clipped.performedAt).toEqual(['swipeTo @ 115,210 -> 129,219']);
+
+    // When a box starts between pixels, '0%' and '100%' clamp to whole pixels inside it.
+    const fractional = pointer({ rect: { ...box, x: 100.25 } });
+    await runtime(fractional.engine).fixtures.screen.getByLabel('Pad').swipe({ from: { x: '0%', y: '0%' }, to: { x: '100%', y: '100%' } });
+    expect(fractional.performedAt).toEqual(['swipeTo @ 101,200 -> 150,219']);
+  });
+
+  it('locator.swipe refuses invalid points, durations, and options before resolving the node', async () => {
+    const { engine, performed, performedAt, locates } = pointer();
+    const { fixtures } = runtime(engine);
+    const pad = fixtures.screen.getByLabel('Pad');
+    const point = { x: 1, y: 1 };
+    const cases: [unknown, string][] = [
+      [{ from: { x: '120%', y: 0 }, to: point }, `swipe from takes a percentage from '0%' through '100%', got "120%"`],
+      [{ from: point, to: point, duration: 15 }, 'swipe duration must be an integer from 16 through 10000, got 15'],
+      [{ from: point, to: point, momentum: 'fast' }, 'swipe options has no key "momentum"'],
+      [{ from: point, to: point, direction: 'left' }, 'swipe options has no key "direction"'],
+    ];
+    for (const [options, message] of cases) {
+      expect(() => pad.swipe(options as never)).toThrow(
+        expect.objectContaining({ code: 'INVALID_ARGUMENT', message: expect.stringContaining(message) }),
+      );
+    }
+    expect(locates).toEqual([]);
+    expect(performed).toEqual([]);
+    expect(performedAt).toEqual([]);
   });
 });
 

@@ -405,6 +405,31 @@ test.describe('control inventory', () => {
       .toBe(true);
   });
 
+  // The path is in percentages, so one test covers iOS and Android. It runs
+  // right to left, because a left-to-right fling pops the screen. The pad
+  // reports points, and its box is 80 points tall on both platforms, so its
+  // width in points is the box's width scaled by that height. The start lands
+  // on the point asked for. A fling's reported end can be up to 24 points off
+  // from `to`, so the check allows 25.
+  test('a locator swipe follows a path relative to the node', async ({ screen }) => {
+    await showSection(screen, 'Gestures');
+    const pad = screen.getByTestId('swipe-pad');
+    const swipeStatus = screen.getByTestId('swipe-status');
+    const box = await pad.boundingBox();
+    if (box === null) throw new Error('swipe pad has no box');
+    const width = (box.width * 80) / box.height;
+
+    await pad.swipe({ from: { x: '80%', y: '50%' }, to: { x: '20%', y: '50%' } });
+
+    await expect(swipeStatus).toContainText(' to ');
+    const path = /^swipe: (\d+),(\d+) to (-?\d+),(\d+)$/.exec((await swipeStatus.textContent()) ?? '');
+    if (path === null) throw new Error('swipe status has no path');
+    expect(Math.abs(Number(path[1]) - 0.8 * width)).toBeLessThanOrEqual(2);
+    expect(Math.abs(Number(path[3]) - 0.2 * width)).toBeLessThanOrEqual(25);
+    expect(Math.abs(Number(path[2]) - 40)).toBeLessThanOrEqual(2);
+    expect(Math.abs(Number(path[4]) - 40)).toBeLessThanOrEqual(2);
+  });
+
   test('an ambiguous locator fails at once', async ({ screen }) => {
     await showSection(screen, 'Gestures');
     const ambiguous = await rejection(screen.getByTestId('fruit-row').tap());

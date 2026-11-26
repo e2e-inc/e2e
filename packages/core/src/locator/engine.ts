@@ -22,7 +22,7 @@ import {
   type ErrorDetails,
 } from '../internal/errors.ts';
 import { requireKey } from '../internal/keys.ts';
-import { isPixelPoint, resolveScreenPoint } from '../internal/geometry.ts';
+import { type Box, isPixelPoint, resolveBoxPoint, resolveScreenPoint } from '../internal/geometry.ts';
 import { describeExpression, expressionHints, filterSpine } from './expression.ts';
 import { abortError, cancelledError, Deadline, POLL_INTERVAL_MS, pollDelay, pollReads, ReadWindow, sleep, StepDeadline, stepTimeout } from '../internal/time.ts';
 import { timestamp } from '../internal/ids.ts';
@@ -32,7 +32,7 @@ import type { AttemptBudget } from '../run/budget.ts';
 import type { StepEvent } from '../run/steps.ts';
 import type { ScreenPoint } from '../types.ts';
 
-/** A pointer action as a test names it: its `target`, if any, may be a percentage of the viewport. */
+/** A pointer action as a test names it: its `target`, if any, may be a percentage of the viewport or of a node's box. */
 type ScreenPointerAction = WithScreenTarget<PointerAction>;
 
 /** Each action in the union, with `target` typed as a `ScreenPoint`. */
@@ -588,17 +588,20 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
   }
 
   /**
-   * Performs one pointer action at an offset from the origin of exactly one
-   * match (`SemanticNode.origin`, else its box's top-left corner): the node
+   * Performs one pointer action at a point on exactly one match. A pixel
+   * coordinate of `point`, or of the action's `target`, is an offset from the
+   * node's origin (`SemanticNode.origin`, else its box's top-left corner). A
+   * percentage is a share of its box. The node
    * is scrolled into view when the engine can, then its box is read and the
    * pointer dispatched at the point, with no node behind the gesture. The node has to be visible with a box within
    * the deadline; one that never is fails as LOCATOR_NOT_FOUND, as `waitFor`
-   * does.
+   * does. For a swipe, the box also needs non-zero width and height, since
+   * percentages collapse to one line on an empty box.
    */
   async performWithin(
     expression: LocatorExpression,
-    offset: ViewportPoint,
-    action: PointerAction,
+    point: ScreenPoint,
+    action: ScreenPointerAction,
     timeoutMs?: number,
   ): Promise<void> {
     this.checkPointerAction(action);
@@ -606,7 +609,7 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
     if (this.session.actions.has('scrollIntoView')) {
       await this.performUntil(expression, { kind: 'scrollIntoView' }, deadline);
     }
-    let origin: ViewportPoint | undefined;
+    let placed: { readonly rect: Box; readonly origin: ViewportPoint } | undefined;
     await pollReads({
       deadline,
       signal: this.signal,
@@ -617,7 +620,8 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
         if (deadline.expired()) return false;
         const { node } = await this.tryRead(expression, reads);
         if (!isNodeVisible(node) || node.rect === undefined) return false;
-        origin = node.origin ?? node.rect;
+        if (action.kind === 'swipeTo' && (node.rect.width <= 0 || node.rect.height <= 0)) return false;
+        placed = { rect: node.rect, origin: node.origin ?? node.rect };
         return true;
       },
       onTimeout: (cause) =>
@@ -626,9 +630,10 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
           ...(cause === undefined ? {} : { cause }),
         }),
     });
-    // pollReads returns only once `evaluate` answered true, which set `origin`.
-    const at = origin!;
-    await this.dispatchAt({ x: at.x + offset.x, y: at.y + offset.y }, action, deadline);
+    // pollReads returns only once `evaluate` answered true, which set `placed`.
+    const { rect, origin } = placed!;
+    const pixelAction = 'target' in action ? { ...action, target: resolveBoxPoint(action.target, rect, origin) } : action;
+    await this.dispatchAt(resolveBoxPoint(point, rect, origin), pixelAction, deadline);
   }
 
   /** The failure of an action that was not sent: its phase was cancelled, or its deadline passed first. */

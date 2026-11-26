@@ -258,7 +258,7 @@ export interface Engine {
    * node behind it: the agent's `tap_at`, `hover_at`, and `drag_at` verbs land
    * here with the point the model named in a screenshot (a shape on a canvas, a pin on
    * a map, a control in a system sheet or one the tree lists), and so do a test's
-   * `screen.tapAt`, `screen.swipe({ from, to })`, and `tap({ position })`.
+   * `screen.tapAt`, `screen.swipe({ from, to })`, `locator.swipe({ from, to })`, and `tap({ position })`.
    * Dispatch the pointer at the point as given; the harness has clamped an
    * agent's point to the viewport and validated a test's. Throw
    * `UNSUPPORTED_CAPABILITY` for a declared kind the surface cannot deliver
@@ -571,7 +571,7 @@ engine.
 | `modifiers` on a tap (`row.click({ modifiers: ['Shift'] })`) | `tapModifiers: true`; the keys are held for the click |
 | `screen.tapAt`, `tap({ position })` | `performAt` with the `tap` pointer kind |
 | `screen.doubleTapAt` | `performAt` with the `doubleTap` pointer kind |
-| `screen.swipe({ from, to })` | `performAt` with the `swipeTo` pointer kind |
+| `screen.swipe({ from, to })`, `locator.swipe({ from, to })` | `performAt` with the `swipeTo` pointer kind |
 | `locator.pressSequentially` | the `focus` action and `keyboard`; the harness composes `focus` then `keyboard.type` |
 | `test.setup` sessions, the `session:` option | `state` |
 | `app.screenshot()`, assertion evidence, the failure screenshot | `artifacts` |

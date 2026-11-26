@@ -460,15 +460,15 @@ export interface ActionOptions {
 /**
  * A point in CSS pixels. For `tap({ position })` the origin is the node's own
  * top-left corner, inside its border on a document platform. A `Point` is
- * also a `ScreenPoint`, whose origin is the viewport's top-left corner, the
- * space `boundingBox()` reports in.
+ * also a `ScreenPoint`. Its origin is the viewport's top-left corner (the
+ * `boundingBox()` space), or the node's corner for `locator.swipe`.
  */
 export type Point = ViewportPoint;
 
-/** CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`), `'0%'` through `'100%'`. */
+/** CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`), `'0%'` through `'100%'`. For `locator.swipe`, both are relative to the node (see `SwipePathOptions`). */
 export type ScreenCoordinate = number | `${number}%`;
 
-/** A viewport point in pixels, percentages, or both: `{ x: '50%', y: 120 }`. */
+/** A point in pixels, percentages, or both: `{ x: '50%', y: 120 }`. It's on the viewport, or on the node for `locator.swipe`. */
 export interface ScreenPoint {
   readonly x: ScreenCoordinate;
   readonly y: ScreenCoordinate;
@@ -528,7 +528,13 @@ export interface SwipeOptions {
   duration?: never;
 }
 
-/** A swipe along a path between two viewport points: a touch swipe on a device, a pointer drag on a document platform. */
+/**
+ * A swipe along a path between two points: a touch swipe on a device, a
+ * pointer drag on a document platform. The points are on the viewport for
+ * `screen.swipe` and relative to the node for `locator.swipe`. On a node,
+ * pixels are offset from its top-left corner (the same corner as
+ * `tap({ position })`), and percentages are relative to its box.
+ */
 export interface SwipePathOptions {
   /** Where the finger goes down. */
   from: ScreenPoint;
@@ -633,8 +639,11 @@ export interface Locator extends Omit<Screen, 'tree' | 'debug' | 'pause'> {
   dragTo(target: Locator, options?: ActionOptions): Promise<void>;
   /** Scrolls exactly one node into view. */
   scrollIntoView(options?: ActionOptions): Promise<void>;
-  /** Performs a swipe scoped to exactly one node. */
-  swipe(options: SwipeOptions & ActionOptions): Promise<void>;
+  /**
+   * Performs a swipe scoped to exactly one node: in a direction, or along a
+   * path relative to the node.
+   */
+  swipe(options: (SwipeOptions | SwipePathOptions) & ActionOptions): Promise<void>;
   /** Reads normalized text once a match exists, without retrying for a particular value. */
   textContent(): Promise<string | null>;
   /** Reads the current input value; throws `ACTION_FAILED` on a node with no value, such as a heading. */

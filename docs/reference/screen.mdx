@@ -465,12 +465,7 @@ swipe(options: SwipeOptions | SwipePathOptions): Promise<void>;
 ```ts
 await screen.swipe({ direction: 'up', momentum: 'fast' });
 
-const row = (await screen.getByText('Design review').boundingBox())!;
-await screen.swipe({
-  from: { x: row.x + row.width - 10, y: row.y + row.height / 2 },
-  to: { x: row.x + 10, y: row.y + row.height / 2 },
-  duration: 300,
-});
+await screen.swipe({ from: { x: 40, y: 600 }, to: { x: 40, y: 200 }, duration: 300 });
 
 await screen.swipe({ from: { x: '50%', y: '80%' }, to: { x: '50%', y: '20%' } });
 ```
@@ -485,8 +480,9 @@ await screen.swipe({ from: { x: '50%', y: '80%' }, to: { x: '50%', y: '20%' } })
 
 `{ from, to, duration? }` is a swipe along a path between two viewport
 points: a touch swipe on a device, a pointer drag on a document platform.
-Use it to reveal a row action, dismiss a sheet, or drag a card between
-columns.
+Use it to dismiss a sheet or drag a card between columns. To swipe inside
+one node, such as a row or a pager, use the locator's [`swipe`](#swipe)
+instead, with points relative to the node.
 
 - `from` and `to` are `ScreenPoint`s, pixels or percentages, as
   [`tapAt`](#screen-tapat) takes.
@@ -991,17 +987,67 @@ await screen.getByRole('contentinfo').scrollIntoView();
 #### `swipe`
 
 ```ts
-/** Performs a swipe scoped to exactly one node. */
-swipe(options: SwipeOptions & ActionOptions): Promise<void>;
+/**
+ * Performs a swipe scoped to exactly one node: in a direction, or along a
+ * path relative to the node.
+ */
+swipe(options: (SwipeOptions | SwipePathOptions) & ActionOptions): Promise<void>;
 ```
 
 ```ts
 await screen.getByTestId('feed').swipe({ direction: 'down', momentum: 'slow' });
+
+await screen.getByRole('region', 'Photos').swipe({
+  from: { x: '90%', y: '50%' },
+  to: { x: '10%', y: '50%' },
+  duration: 300,
+});
 ```
 
-It takes `{ direction, momentum? }` as [`screen.swipe`](#screen-swipe)
-defines them, plus `timeout`, which `screen.swipe` refuses. It has no
-`{ from, to }` form.
+Both [`screen.swipe`](#screen-swipe) forms work here, plus `timeout` (not
+valid on `screen.swipe`).
+
+- `{ direction, momentum? }` is a scroll gesture on the node. On the web
+  it's sent as a wheel event, so a pager built only on pointer events
+  doesn't move.
+- `{ from, to, duration? }` is a swipe along a path relative to the node: a
+  touch swipe on a device, a pointer drag on the web. On the web, pointer
+  and mouse events are sent, but touch events aren't. e2e doesn't check
+  if the node is enabled or covered, so an element over the start point
+  gets the drag.
+
+On the web, the node is scrolled into view first. On a device, scroll to the
+node first with [`scrollUntilVisible`](#screen-scrolluntilvisible) if it's
+off screen.
+
+The two kinds of coordinate in a path:
+
+- A pixel coordinate is an offset from the node's top-left corner, the same
+  corner as [`tap({ position })`](#tap) (inside the border on the web). It
+  can be larger than the node's width or height, so a path can end past the
+  right or bottom edge.
+- A percentage (`'0%'` to `'100%'`) is measured against the width (`x`) or
+  height (`y`) from `boundingBox()`, rounded to a pixel inside the box.
+
+Pixels are in the units `boundingBox()` reports, and those differ between
+platforms. Use percentages in a test that runs on more than one. Off-screen
+points aren't clamped to the screen, so keep both points in the visible part
+of a tall node.
+
+On iOS, a path without `duration` has to stay above the open soft keyboard
+([Capabilities](/reference/mobile#capabilities)). When the app window's
+position on screen isn't known (such as a windowed iPad app), the node's box
+and swipe path may be offset. In that case, a direction swipe fails with
+`ACTION_FAILED`, while a path swipe still runs as-is.
+
+A direction swipe throws standard locator errors. A path can also throw:
+
+| Throws | When |
+| --- | --- |
+| `INVALID_ARGUMENT` | A mix of the two shapes, an unknown option, a `duration` that isn't a whole number from 16 through 10000 ms, a negative or non-finite coordinate, or a string that isn't a percentage from `'0%'` through `'100%'`. |
+| `UNSUPPORTED_CAPABILITY` | The engine doesn't list `swipeTo` in its pointer actions. |
+| `ACTION_FAILED` | The browser engine can't scroll the node into view before the timeout, or the engine rejects the gesture, such as an untimed iOS path into the open keyboard. |
+| `LOCATOR_NOT_FOUND` | The node resolves, but doesn't get a visible box with non-zero width and height in time. |
 
 ### Locator reads
 
@@ -1481,7 +1527,13 @@ export interface SwipeOptions {
   duration?: never;
 }
 
-/** A swipe along a path between two viewport points: a touch swipe on a device, a pointer drag on a document platform. */
+/**
+ * A swipe along a path between two points: a touch swipe on a device, a
+ * pointer drag on a document platform. The points are on the viewport for
+ * `screen.swipe` and relative to the node for `locator.swipe`. On a node,
+ * pixels are offset from its top-left corner (the same corner as
+ * `tap({ position })`), and percentages are relative to its box.
+ */
 export interface SwipePathOptions {
   /** Where the finger goes down. */
   from: ScreenPoint;
@@ -1496,15 +1548,15 @@ export interface SwipePathOptions {
 /**
  * A point in CSS pixels. For `tap({ position })` the origin is the node's own
  * top-left corner, inside its border on a document platform. A `Point` is
- * also a `ScreenPoint`, whose origin is the viewport's top-left corner, the
- * space `boundingBox()` reports in.
+ * also a `ScreenPoint`. Its origin is the viewport's top-left corner (the
+ * `boundingBox()` space), or the node's corner for `locator.swipe`.
  */
 export type Point = ViewportPoint; // { x: number; y: number }
 
-/** CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`), `'0%'` through `'100%'`. */
+/** CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`), `'0%'` through `'100%'`. For `locator.swipe`, both are relative to the node (see `SwipePathOptions`). */
 export type ScreenCoordinate = number | `${number}%`;
 
-/** A viewport point in pixels, percentages, or both: `{ x: '50%', y: 120 }`. */
+/** A point in pixels, percentages, or both: `{ x: '50%', y: 120 }`. It's on the viewport, or on the node for `locator.swipe`. */
 export interface ScreenPoint {
   readonly x: ScreenCoordinate;
   readonly y: ScreenCoordinate;

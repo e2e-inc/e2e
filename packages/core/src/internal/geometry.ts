@@ -80,10 +80,29 @@ export function resolveScreenPoint(point: ScreenPoint, viewport: ViewportSize): 
   return { x: resolveCoordinate(point.x, viewport.width), y: resolveCoordinate(point.y, viewport.height) };
 }
 
-/** One coordinate of `resolveScreenPoint` along a viewport side of `size` CSS pixels. */
-function resolveCoordinate(value: ScreenCoordinate, size: number): number {
+/**
+ * Resolves one coordinate for `resolveScreenPoint` or `resolveBoxPoint` along
+ * a side starting at `start` (`size` CSS pixels). Percentages are rounded once
+ * and clamped to whole pixels in that range, so `'0%'` and `'100%'` stay
+ * inside a box starting between pixels.
+ */
+function resolveCoordinate(value: ScreenCoordinate, size: number, start = 0): number {
   if (typeof value === 'number') return value;
-  return clamp(Math.round((Number.parseFloat(value) / 100) * size), 0, Math.max(0, size - 1));
+  const first = Math.ceil(start);
+  const last = Math.max(first, Math.ceil(start + size) - 1);
+  return clamp(Math.round(start + (Number.parseFloat(value) / 100) * size), first, last);
+}
+
+/**
+ * Resolves a point on a node to viewport pixels. A pixel coordinate is an
+ * offset from `origin`, the corner `tap({ position })` uses. A percentage is
+ * measured from the top-left corner of `box` and rounded to a pixel inside it.
+ */
+export function resolveBoxPoint(point: ScreenPoint, box: Box, origin: ViewportPoint): ViewportPoint {
+  return {
+    x: typeof point.x === 'number' ? origin.x + point.x : resolveCoordinate(point.x, box.width, box.x),
+    y: typeof point.y === 'number' ? origin.y + point.y : resolveCoordinate(point.y, box.height, box.y),
+  };
 }
 
 /** True when the point lies inside the box: on its top and left edges, short of its bottom and right ones. */
