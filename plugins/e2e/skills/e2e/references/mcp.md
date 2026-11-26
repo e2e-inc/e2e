@@ -82,8 +82,8 @@ Everything a session does is a catalog tool run through
   (`tap_at`, `type_at`, ...) after a screenshot, `start_recording` and
   `stop_recording`, and the project's own tools.
 
-Resources: `e2e://guide` and `e2e://guide/<topic>` hold this skill. Full
-reference: docs/reference/mcp.mdx.
+Resources: `e2e://guide` and `e2e://guide/<topic>` hold this skill.
+Full reference: docs/reference/mcp.mdx.
 
 ## Prefer `run_code`
 

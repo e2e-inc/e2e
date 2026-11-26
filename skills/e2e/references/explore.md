@@ -81,8 +81,8 @@ configured secrets are redacted (topic `writing-tests`).
   records nothing: pass `--trace on`.
 
 The replay cache is off and retries are zero for the exploration; per-step
-budgets come from `agents.<name>.maxSteps` and `maxModelCalls`. Full
-reference: docs/explore.mdx, docs/reference/cli.mdx.
+budgets come from `agents.<name>.maxSteps` and `maxModelCalls`.
+Full reference: docs/explore.mdx, docs/reference/cli.mdx.
 
 ## Reading the result
 
