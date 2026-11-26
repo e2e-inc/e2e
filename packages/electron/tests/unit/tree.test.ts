@@ -219,6 +219,24 @@ describe('projectTree', () => {
     expect(root.children?.map((node) => [node.name, node.states?.hidden === true])).toEqual([['Contents', false], ['Collapsed', true], ['Empty', true]]);
   });
 
+  it('shows a checkbox with no box while a label of its own draws it, as the web does', () => {
+    const strings = ['#document', 'BODY', 'LABEL', 'INPUT', 'BUTTON', 'type', 'checkbox', 'for', 'far', 'id'];
+    // Four checkboxes: inside a shown label, inside a label that holds a button too, named by `for`, and with no label.
+    const document: SnapshotDocument = {
+      nodes: {
+        backendNodeId: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        nodeName: [0, 1, 2, 3, 2, 3, 4, 2, 3, 3],
+        parentIndex: [-1, 0, 1, 2, 1, 4, 4, 1, 1, 1],
+        attributes: [[], [], [], [5, 6], [], [5, 6], [], [7, 8], [5, 6, 9, 8], [5, 6]],
+      },
+      layout: { nodeIndex: [2, 3, 4, 5, 6, 7, 8, 9], bounds: [[0, 0, 80, 20], [0, 0, 0, 0], [0, 20, 80, 20], [0, 20, 0, 0], [40, 20, 40, 20], [0, 40, 80, 20], [0, 60, 0, 0], [0, 80, 0, 0]] },
+    };
+    const box = (id: number, name: string): AXNode => ({ nodeId: String(id), ignored: false, role: { value: 'checkbox' }, name: { value: name }, parentId: '1', backendDOMNodeId: id });
+    const ax: AXNode[] = [{ nodeId: '1', ignored: false, role: { value: 'RootWebArea' }, childIds: ['4', '6', '9', '10'], backendDOMNodeId: 1 }, box(4, 'Wrapped'), box(6, 'Beside a button'), box(9, 'Named by for'), box(10, 'Bare')];
+    const { root } = projectTree(ax, new DomSnapshot(document, strings), { scale: 1, scrollX: 0, scrollY: 0, width: 640, height: 480 }, { mode: 'tree', testIdAttribute: 'data-testid', idOf: (id) => `1.${id}`, rootId: 'window' });
+    expect(root.children?.map((node) => [node.name, node.states?.hidden === true])).toEqual([['Wrapped', false], ['Beside a button', true], ['Named by for', false], ['Bare', true]]);
+  });
+
   it('caps an observation and never a locator read', () => {
     const buttons = Array.from({ length: 6000 }, (_, at) => at + 2);
     const ax: AXNode[] = [

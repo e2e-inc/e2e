@@ -64,7 +64,8 @@ export async function actionablePoint(target: WaitTarget, enabled: boolean): Pro
     // After a read where something covered the element, it is scrolled to the window's centre, clear of sticky chrome at an edge.
     if (covered) await devtools.callOn(window.page, backendNodeId, 'scrollIntoView');
     else await session.send('DOM.scrollIntoViewIfNeeded', { backendNodeId }).catch(() => devtools.callOn(window.page, backendNodeId, 'scrollIntoView'));
-    const box = await contentBox(target);
+    // A checkbox or radio a label draws has no box of its own: the click goes to the label, as on the web.
+    const box = (await contentBox(target)) ?? pointBox(await devtools.callOn(window.page, backendNodeId, 'labelPoint'));
     if (box === undefined) return 'it has no box on screen (hidden, or empty)';
     // A node wider or taller than the window is clicked in the middle of the part the window shows.
     const { cssVisualViewport: viewport } = await session.send('Page.getLayoutMetrics');
@@ -102,6 +103,11 @@ export async function contentBox(target: Pick<WaitTarget, 'devtools' | 'window' 
     return { quads: [] as number[][] };
   });
   return quads.map(boxOf).find((box) => box.width * box.height > 0);
+}
+
+/** A point as the one-pixel box around it, so it clips and centres as any box does. */
+function pointBox(point: ViewportPoint | null): Box | undefined {
+  return point === null ? undefined : { x: point.x - 0.5, y: point.y - 0.5, width: 1, height: 1 };
 }
 
 /** Rounds a point to whole CSS pixels: Chromium truncates fractional pointer coordinates. */

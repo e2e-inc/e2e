@@ -24,6 +24,12 @@ export interface NodeOps {
   /** Whether a click at the viewport point lands on the element, a node inside it, or a label for it. */
   hitTest(x: number, y: number): Readiness;
   scrollIntoView(): void;
+  /**
+   * For a checkbox or radio with no box that a label of its own draws: the
+   * viewport point at that label's centre, scrolled into view, which a click
+   * reaches the control through. Null for any other node.
+   */
+  labelPoint(): { readonly x: number; readonly y: number } | null;
   /** Focuses the element: `held` when it holds focus after, `moved` when the app sent focus elsewhere, `none` when it cannot take focus and focus stayed where it was. */
   focus(): 'held' | 'moved' | 'none';
   blur(): void;
@@ -65,6 +71,8 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
   const TYPEAHEAD_ROLES = new Set(['listbox', 'option', 'tree', 'treeitem', 'menu', 'menubar', 'menuitem', 'combobox', 'grid', 'gridcell', 'radiogroup', 'tablist', 'tab']);
   /** Of those, the ones that also take typed text: digits a key at a time. */
   const TYPED_PICKER_TYPES = new Set(['date', 'time', 'datetime-local', 'month', 'week']);
+  /** What a click inside a label presses instead of the label's own control. */
+  const INTERACTIVE = 'a,button,input,select,textarea,summary,[contenteditable],[role="button"],[role="link"]';
   /** The node's element. A node the document dropped fails as one: the harness locates it again, where a reason would only wait out the deadline. */
   const live = (): Element => {
     if (owner?.isConnected !== true) throw new Error('Node is detached: it is no longer in the document');
@@ -135,8 +143,23 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       for (let at: Node | null = hit; at !== null; at = at instanceof Element && at.assignedSlot !== null ? at.assignedSlot : (at.parentNode ?? (at instanceof ShadowRoot ? at.host : null))) {
         if (at === element) return { ok: true };
       }
-      if (hit instanceof HTMLLabelElement && (hit.control === element || hit.contains(element))) return { ok: true };
+      // A click inside a label of the element reaches it, unless it presses another control the label holds.
+      const label = hit.closest('label');
+      if (label !== null && (label.control === element || label.contains(element)) && !label.contains(hit.closest(INTERACTIVE))) return { ok: true };
       return { ok: false, reason: `another element (${hit.tagName.toLowerCase()}${hit.id === '' ? '' : `#${hit.id}`}) would receive the click` };
+    },
+    labelPoint() {
+      const element = live();
+      if (!(element instanceof HTMLInputElement) || (element.type !== 'checkbox' && element.type !== 'radio')) return null;
+      const own = element.getBoundingClientRect();
+      if (own.width > 0 && own.height > 0) return null;
+      for (const label of element.labels ?? []) {
+        if (!label.checkVisibility({ visibilityProperty: true })) continue;
+        label.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        const box = label.getBoundingClientRect();
+        if (box.width > 0 && box.height > 0) return { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) };
+      }
+      return null;
     },
     scrollIntoView() {
       live().scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });

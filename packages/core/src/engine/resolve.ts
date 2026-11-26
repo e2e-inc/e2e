@@ -29,7 +29,9 @@ export interface ResolveExpressionOptions {
    * name as well as its text, for a tree that keeps what a node says in its
    * name (a device's). `'text'` matches the text alone, as a browser's text
    * query does, for a tree that carries every element's text: a field named
-   * by its label is then no second match for the label's words. A `filter`'s
+   * by its label is then no second match for the label's words, and a text
+   * query scoped to an element whose own text matches answers with that
+   * element. A `filter`'s
    * `hasText` reads the name, the text, and the value either way.
    */
   readonly textQuery?: 'nameOrText' | 'text';
@@ -152,18 +154,20 @@ function resolve(
       return tree.all.slice(within.start, within.end).filter((node) => matches.has(node));
     }
     case 'query': {
-      const matches: SemanticNode[] = [];
-      const pool =
-        expression.scope === undefined
-          ? [within]
-          : descendantRanges(resolve(expression.scope, within, tree, options), within, tree);
-      const matchesQuery = compileQueryMatcher(expression.query, options.textQuery ?? 'nameOrText');
+      const textQuery = options.textQuery ?? 'nameOrText';
+      const scope = expression.scope === undefined ? undefined : resolve(expression.scope, within, tree, options);
+      const pool = scope === undefined ? [within] : descendantRanges(scope, within, tree);
+      const matchesQuery = compileQueryMatcher(expression.query, textQuery);
+      const found = new Set<SemanticNode>();
       for (const { start, end } of pool) {
         for (let index = start; index < end; index += 1) {
           const node = tree.all[index]!;
-          if (matchesQuery(node)) matches.push(node);
+          if (matchesQuery(node)) found.add(node);
         }
       }
+      // An element whose text is its own content is what a browser's scoped text query answers with.
+      if (textQuery === 'text' && expression.query.kind === 'text') for (const node of scope ?? []) if (matchesQuery(node)) found.add(node);
+      const matches = found.size === 0 ? [] : tree.all.slice(within.start, within.end).filter((node) => found.has(node));
       return INNERMOST_KINDS.has(expression.query.kind) ? innermostOnly(matches, tree) : matches;
     }
     case 'filter': {

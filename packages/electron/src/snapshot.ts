@@ -42,6 +42,9 @@ export const SNAPSHOT_STYLES: readonly string[] = ['visibility'];
 /** Elements a screenshot paints over besides a secure field's value: the nested documents the engine does not read. */
 export const MASKED_TAGS: readonly string[] = ['IFRAME', 'FRAME', 'WEBVIEW', 'EMBED', 'OBJECT'];
 
+/** Elements a click on a label would press instead of the label's own control. */
+const CONTROL_TAGS = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'SUMMARY']);
+
 /** `Node.TEXT_NODE`. */
 const TEXT_NODE = 3;
 
@@ -86,6 +89,10 @@ export class DomSnapshot {
   private readonly closedShadow: ReadonlySet<number>;
   private readonly rendered: ReadonlySet<number>;
   private readonly facts = new Map<number, DomFacts>();
+  /** Per node with a layout box, its device-pixel bounds. */
+  private readonly boxes = new Map<number, readonly number[]>();
+  /** The label elements that name an id with `for`, by that id. */
+  private readonly labelsFor = new Map<string, number[]>();
   /** Per node, how many white-space-only text nodes precede or are it. */
   private readonly blanks: number[] = [];
   /** Per node, its nearest table cell, or -1. */
@@ -160,6 +167,24 @@ export class DomSnapshot {
   }
 
   /**
+   * Whether a shown label of the element's own draws it: a label around it or
+   * one whose `for` names it, with a box, that is no control itself and holds
+   * no other one. A checkbox or radio with no box under such a label is on
+   * screen as the label, as the web reads it.
+   */
+  drawnByLabel(index: number): boolean {
+    const id = this.attributesAt(index)['id'];
+    const labels = [...this.labelsFor.get(id ?? '') ?? []];
+    for (let at = this.parents[index] ?? -1; at >= 0; at = this.parents[at] ?? -1) if (this.nameAt(at) === 'LABEL') labels.push(at);
+    return labels.some((label) => {
+      const box = this.boxes.get(label);
+      if (box === undefined || (box[2] ?? 0) === 0 || (box[3] ?? 0) === 0) return false;
+      for (const at of this.subtree(label)) if (at !== index && at !== label && this.isControl(at)) return false;
+      return true;
+    });
+  }
+
+  /**
    * How many rendered elements a screenshot must paint over and a selector
    * cannot reach: password inputs and nested documents inside a closed shadow
    * root, at any depth. The snapshot enters every shadow root, so it holds
@@ -184,6 +209,12 @@ export class DomSnapshot {
     return count;
   }
 
+  private isControl(index: number): boolean {
+    if (CONTROL_TAGS.has(this.nameAt(index))) return true;
+    const attributes = this.attributesAt(index);
+    return 'contenteditable' in attributes || attributes['role'] === 'button' || attributes['role'] === 'link';
+  }
+
   private nameAt(index: number): string {
     return this.strings[this.names[index]!] ?? '';
   }
@@ -206,7 +237,7 @@ export class DomSnapshot {
     const textValues = this.rare(nodes.textValue);
     const selectValues = this.selectValues(nodes.optionSelected?.index ?? []);
     const withText = this.nodesWithText();
-    const bounds = new Map<number, readonly number[]>();
+    const bounds = this.boxes;
     const invisible = new Set<number>();
     layout.nodeIndex.forEach((node, at) => {
       if (!bounds.has(node)) bounds.set(node, layout.bounds[at]!);
@@ -214,6 +245,8 @@ export class DomSnapshot {
       if (visibility === 'hidden' || visibility === 'collapse') invisible.add(node);
     });
     this.backendIds.forEach((backendNodeId, index) => {
+      const named = this.nameAt(index) === 'LABEL' ? this.attributesAt(index)['for'] : undefined;
+      if (named !== undefined) this.labelsFor.set(named, [...(this.labelsFor.get(named) ?? []), index]);
       const input = inputValues.get(index);
       const text = textValues.get(index);
       const selected = selectValues.get(index);

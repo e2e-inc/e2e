@@ -6,6 +6,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ConfigurationError, readPngSize, type EngineSnapshot, type ObservationPixels } from '@e2e-dev/core/engine';
+import type { Locator } from 'playwright-core';
 import type { DevTools } from './devtools.ts';
 import { viewportSize } from './in-page/node-ops.ts';
 import type { RawRead } from './locate.ts';
@@ -40,14 +41,31 @@ async function maskedCapture(devtools: DevTools, window: AppWindow, unmaskableBe
   const masks = window.page.locator(MASKED_SELECTOR);
   const masked = await masks.count();
   if (unmaskableBefore > 0) return { masked, withheld: outOfReach(unmaskableBefore) };
-  // Animations stopped, so a moving field stays under the mask measured for it.
+  const placed = await maskBoxes(masks);
+  // Animations stopped, so a field a CSS animation moves stays under the mask measured for it.
   const image = await window.page.screenshot({ scale, mask: [masks], maskColor: '#000000', caret: 'hide', animations: 'disabled' });
   const after = await unmaskable(devtools, window);
   if (after > 0) return { masked, withheld: outOfReach(after) };
   if ((await masks.count()) > masked) {
     return { masked, withheld: 'a password field or nested document appeared while the screenshot was taken, after its masks were placed, so the screenshot is withheld' };
   }
+  // A mask is painted where its element was measured: one a script moved since may show beside its mask.
+  if ((await maskBoxes(masks)) !== placed) {
+    return { masked, withheld: 'a password field or nested document moved while the screenshot was taken, out from under its mask, so the screenshot is withheld' };
+  }
   return { masked, image };
+}
+
+/** Where the masked elements are in the viewport, as one comparable string. */
+async function maskBoxes(masks: Locator): Promise<string> {
+  return await masks.evaluateAll((elements) =>
+    elements
+      .map((element) => {
+        const { x, y, width, height } = element.getBoundingClientRect();
+        return [x, y, width, height].map(Math.round).join(',');
+      })
+      .join(';'),
+  );
 }
 
 /** Adds the pixels to an observation of a read window, or leaves them out when they are withheld. */

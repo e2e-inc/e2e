@@ -148,6 +148,23 @@ describe('nodeOp', () => {
     expect(host).toBe('closed');
   });
 
+  it('points a checkbox with no box at the label that draws it, and takes a click inside that label', async () => {
+    await page.setContent(`<label id="label" style="display:block;margin:40px"><input id="drawn" type="checkbox" style="position:absolute;width:0;height:0;margin:0;border:0;padding:0"> <span id="words">Drawn</span> <a id="link" href="#">terms</a></label><input id="plain" type="checkbox"><button id="other">Other</button>`);
+    const drawn = await element('#drawn');
+    const point = await run(drawn, 'labelPoint');
+    const label = (await page.locator('#label').boundingBox())!;
+    expect(point).toEqual({ x: Math.round(label.x + label.width / 2), y: Math.round(label.y + label.height / 2) });
+    expect(await run(await element('#plain'), 'labelPoint')).toBeNull();
+    expect(await run(await element('#other'), 'labelPoint')).toBeNull();
+    const centre = async (selector: string): Promise<[number, number]> => {
+      const box = (await page.locator(selector).boundingBox())!;
+      return [Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2)];
+    };
+    expect(await run(drawn, 'hitTest', ...(await centre('#words')))).toEqual({ ok: true });
+    // A click on a link inside the label follows the link, not the label.
+    expect(await run(drawn, 'hitTest', ...(await centre('#link')))).toEqual({ ok: false, reason: 'another element (a#link) would receive the click' });
+  });
+
   it('tells focus taken from focus moved away and from focus never taken', async () => {
     await page.setContent(`<input id="field"><div id="plain">Plain</div><input id="hands-off"><input id="elsewhere">`);
     await page.evaluate(() => document.querySelector('#hands-off')!.addEventListener('focus', () => (document.querySelector('#elsewhere') as HTMLInputElement).focus()));

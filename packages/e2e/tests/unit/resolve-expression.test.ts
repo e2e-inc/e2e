@@ -130,6 +130,14 @@ describe('resolveExpression', () => {
     expect(resolveExpression(query('label', 'Email'), nodes, { textQuery: 'text' }).map((found) => found.ref.id)).toEqual(['field', 'button']);
   });
 
+  it('answers a scoped text query with the scope itself when the text is its own, only when the engine asks', () => {
+    const nodes = [node('toast', { testId: 'toast', text: 'Saved' }), node('card', { testId: 'card', text: 'Saved', children: [node('line', { text: 'Saved' })] })];
+    const scoped = (testId: string): LocatorExpression => ({ kind: 'query', query: { kind: 'text', value: { kind: 'string', value: 'Saved', exact: true } }, scope: query('testId', testId) });
+    expect(resolveExpression(scoped('toast'), nodes, { textQuery: 'text' }).map((found) => found.ref.id)).toEqual(['toast']);
+    expect(resolveExpression(scoped('card'), nodes, { textQuery: 'text' }).map((found) => found.ref.id)).toEqual(['line']);
+    expect(resolveExpression(scoped('toast'), nodes)).toEqual([]);
+  });
+
   it('scopes, filters, and indexes', () => {
     const inBar: LocatorExpression = {
       kind: 'query',

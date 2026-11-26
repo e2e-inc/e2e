@@ -105,6 +105,21 @@ test.describe('controls page', () => {
     await expect(screen.getByTestId('under-header-status')).toHaveText('Tapped');
   });
 
+  test('checks a checkbox its label draws, and finds text by text alone, as web() does', async ({ screen }) => {
+    // The input has no box: it reads as shown because its label is, and the click goes to the label.
+    const drawn = screen.getByRole('checkbox', 'Drawn by its label');
+    await expect(drawn).toBeVisible();
+    await drawn.check();
+    await expect(drawn).toBeChecked();
+    // Chromium leaves this label's text out of its tree; a tap on it toggles the checkbox.
+    await screen.getByText('Drawn by its label').tap();
+    await expect(drawn).not.toBeChecked();
+    // The field a label names is no second match for the label's words.
+    await expect(screen.getByText('Tracked')).toHaveCount(1);
+    // A text query scoped to the element that holds the text finds it.
+    await expect(screen.getByTestId('toast').getByText('Saved draft')).toHaveCount(1);
+  });
+
   test('reads ARIA values, read-only states, and levels as written, as web() does', async ({ screen }) => {
     await expect(screen.getByRole('slider', 'Volume')).toHaveValue('Low');
     await expect(screen.getByRole('slider', 'Volume')).not.toBeEditable();

@@ -12,7 +12,7 @@
  */
 
 import { OBSERVED_NAME_LIMIT, OBSERVED_TEXT_LIMIT, type SemanticNode } from '@e2e-dev/core/engine';
-import { elementFields, isButtonInput, isFocusable, isHiddenSubtree, isSecure, isTextField, roleOf, stringOf, type AXNode, type FieldContext, type ProjectionPolicy } from './fields.ts';
+import { elementFields, isButtonInput, isCheckable, isFocusable, isHiddenSubtree, isSecure, isTextField, roleOf, stringOf, type AXNode, type FieldContext, type ProjectionPolicy } from './fields.ts';
 import { collapse, type DomFacts, type DomSnapshot } from './snapshot.ts';
 
 /** How the window's layout maps the snapshot's device pixels to the viewport's CSS pixels. */
@@ -352,12 +352,14 @@ class TreeProjector {
   /**
    * Hidden as the web reads it: by its `visibility`, else by its box. An
    * element with no box of its own (`display: contents`) is shown while
-   * something inside it is rendered.
+   * something inside it is rendered, and a checkbox or radio with none
+   * while its label draws it.
    */
   private isHidden(facts: DomFacts | undefined, rect: Rect | undefined): boolean {
     if (facts === undefined || facts.invisible) return true;
-    if (rect === undefined) return !this.snapshot.rendersContent(facts.index);
-    return rect.width === 0 || rect.height === 0;
+    const sized = rect !== undefined && rect.width > 0 && rect.height > 0;
+    if (sized || (rect === undefined && this.snapshot.rendersContent(facts.index))) return false;
+    return !(isCheckable(facts) && this.snapshot.drawnByLabel(facts.index));
   }
 }
 

@@ -140,7 +140,7 @@ export function isSecure(facts: DomFacts | undefined): boolean {
   return facts !== undefined && isSecureField(facts.nodeName, facts.attributes);
 }
 
-function isCheckable(facts: DomFacts | undefined): boolean {
+export function isCheckable(facts: DomFacts | undefined): boolean {
   return facts?.nodeName === 'INPUT' && ['checkbox', 'radio'].includes(facts.attributes['type']?.toLowerCase() ?? '');
 }
 

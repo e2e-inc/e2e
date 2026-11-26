@@ -1881,7 +1881,8 @@ async locate(expression) {
   a descendant's text.
 - A `text` query matches a node's name or its text. With
   `textQuery: 'text'` it matches the text alone, as a browser does, for a
-  tree that carries every element's text.
+  tree that carries every element's text. A scoped text query then also
+  answers with the scope element when the text is its own.
 - An engine whose tree is the whole truth (a device) calls it; a browser
   engine reproduces it.
 - A `selector` expression needs the `selector` option, which answers
