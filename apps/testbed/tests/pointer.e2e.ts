@@ -128,3 +128,57 @@ test('a positioned dblclick, right tap, and hover land at the point they name', 
   await pad.hover({ position: { x: '100%', y: 20 } });
   await expect(state).toHaveText('mousemove at 319,20 button 0');
 });
+
+test('modifiers hold with a position and on hover, and a key the test holds survives a click that names another', { platforms: ['web'] }, async ({ app, browser, screen }) => {
+  await app.open('/pointer');
+  await browser.evaluate(() => {
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<ul role="listbox" aria-label="Files" aria-multiselectable="true" style="width: 200px">' +
+        ['a', 'b', 'c', 'd', 'e'].map((name) => `<li role="option" aria-selected="false" style="height: 34px">${name}.txt</li>`).join('') +
+        '</ul><output aria-label="Selection">none</output>',
+    );
+    const options = [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+    const selection = document.querySelector('output[aria-label="Selection"]')!;
+    let anchor = 0;
+    for (const [index, option] of options.entries()) {
+      option.addEventListener('click', (event) => {
+        if (!event.shiftKey) anchor = index;
+        const [from, to] = [Math.min(anchor, index), Math.max(anchor, index)];
+        for (const [at, other] of options.entries()) other.setAttribute('aria-selected', String(at >= from && at <= to));
+        const keys = [event.altKey && 'Alt', event.shiftKey && 'Shift'].filter(Boolean).join('+') || 'none';
+        selection.textContent = `${options.filter((other) => other.getAttribute('aria-selected') === 'true').map((other) => other.textContent).join(' ')} keys ${keys}`;
+      });
+    }
+
+    const pad = document.querySelector<HTMLElement>('#pad')!;
+    const state = document.querySelector('output[aria-label="Pad state"]')!;
+    pad.addEventListener('mousemove', (event) => {
+      const box = pad.getBoundingClientRect();
+      const keys = [event.altKey && 'Alt', event.shiftKey && 'Shift'].filter(Boolean).join('+') || 'none';
+      state.textContent = `mousemove at ${Math.round(event.clientX - box.left)},${Math.round(event.clientY - box.top)} keys ${keys}`;
+    });
+    return null;
+  });
+  const files = screen.getByRole('listbox', 'Files');
+  const selection = screen.getByLabel('Selection');
+  const pad = screen.getByRole('image', 'Pointer pad');
+  const state = screen.getByLabel('Pad state');
+
+  await files.getByRole('option', 'a.txt').click({ position: { x: 20, y: '50%' } });
+  await files.getByRole('option', 'd.txt').click({ position: { x: 20, y: '50%' }, modifiers: ['Shift'] });
+  await expect(selection).toHaveText('a.txt b.txt c.txt d.txt keys Shift');
+
+  await pad.hover({ position: { x: '25%', y: 60 }, modifiers: ['Alt'] });
+  await expect(state).toHaveText('mousemove at 80,60 keys Alt');
+  await pad.hover({ modifiers: ['Shift'] });
+  // The node hover aims at the middle of the pad's fractional box, so y rounds to 99 or 100.
+  await expect(state).toHaveText(/^mousemove at 160,(99|100) keys Shift$/);
+
+  await browser.keyboard.down('Shift');
+  await files.getByRole('option', 'b.txt').click({ position: { x: 20, y: '50%' }, modifiers: ['Alt'] });
+  await expect(selection).toHaveText('b.txt keys Alt');
+  await files.getByRole('option', 'e.txt').click({ position: { x: 20, y: '50%' } });
+  await expect(selection).toHaveText('b.txt c.txt d.txt e.txt keys Shift');
+  await browser.keyboard.up('Shift');
+});
