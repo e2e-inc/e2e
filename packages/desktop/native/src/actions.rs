@@ -1145,6 +1145,8 @@ fn key_window(pid: i32, window: &Element) -> Outcome<()> {
 /// window can wait on the app, and the caller may have moved on by then.
 pub fn focus_window(pid: i32, window: u32, input_id: Option<u32>, deadline: Instant) -> Outcome<()> {
     guarded(input_id, deadline, || {
+        // A call given up on before it began reads nothing either.
+        go("bring the window forward")?;
         let element = windows::find(pid, window)?;
         raise(pid, &element)
     })
@@ -1430,6 +1432,16 @@ mod tests {
         // Not cancelled: a menu that ignored AXCancel gets Escape, and is closed by it.
         let menu_open = Cell::new(true);
         assert!(close_menu_with(|| false, || !menu_open.get(), || false, || menu_open.set(false)));
+    }
+
+    #[test]
+    fn brings_no_window_forward_once_the_call_was_cancelled() {
+        crate::input::cancel_input(1_000_039);
+        // No such process: past the guard, the window lookup would answer APP_NOT_FOUND or WINDOW_NOT_FOUND instead.
+        let failure = super::focus_window(-1, 1, Some(1_000_039), later()).expect_err("cancelled first");
+        assert_eq!((failure.code, failure.delivery), (crate::failure::codes::TIMEOUT, crate::failure::Delivery::NotDelivered));
+        let late = super::focus_window(-1, 1, Some(1_000_040), Instant::now()).expect_err("out of time");
+        assert_eq!(late.code, crate::failure::codes::TIMEOUT);
     }
 
     #[test]
