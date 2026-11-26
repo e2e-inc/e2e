@@ -38,7 +38,9 @@ per run, before the first test. To check the setup, run `npx e2e doctor`.
 
 Set the target's `app.appPath` to the app's directory or main script, relative
 to the project root. `app.launchArguments` go after it on every launch, where
-the app reads them in `process.argv`.
+the app reads them in `process.argv`. The engine's own `--inspect=0` and
+`--remote-debugging-port=0` are there too, so an app that parses its
+arguments strictly must allow them.
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
@@ -107,20 +109,28 @@ The `electron` fixture has these methods:
 | `useWindow(which, { timeout }?)` | Makes `screen` read a window: an index, or `{ title, url }` with a string or a RegExp. It waits for the window to open, up to `timeout` or the action timeout |
 | `locator(selector)` | A locator for a CSS selector in the window's document |
 
+`evaluate` returns what survives serialization: a `BrowserWindow` comes back
+as a plain object, and a function or a `Map` as `undefined` or `{}`. Return
+plain data. `require` is not in scope inside `fn`; use the `electron` module
+it receives, or `process.getBuiltinModule('node:fs')`.
+
 ## What differs from the web
 
 | Area | On an Electron target |
 | --- | --- |
-| Windows | `screen` reads one window: the one `useWindow()` picked, else the first. When that window closes, it reads the newest still open. A window the app opens does not take over. The agent sees the windows as tabs and switches between them. A DevTools window is not listed; each `WebContentsView` is a window of its own |
-| Text queries | `getByText` matches a node's accessible name as well as its text, as it does on a device. On `<label>Email <input></label>`, `getByText('Email')` finds the label and the input, where the web finds one. Narrow it with `getByLabel` or `getByRole` |
-| Dialogs | `alert()`, `confirm()`, and `prompt()` are dismissed, so `confirm()` returns `false`. The attempt's log records each one as an error; the test does not fail, as it does on the web without a handler |
+| Windows | `screen` reads one window: the one `useWindow()` picked, else the first. When that window closes, it reads the window shown before it, else the newest still open. A window the app opens does not take over. The agent sees the windows as tabs and switches between them. A DevTools window is not listed; each `WebContentsView` is a window of its own |
+| Text queries | `getByText` matches a node's accessible name as well as its text, as it does on a device. On `<label>Email <input></label>`, `getByText('Email')` finds the label and the input, where the web finds one. Narrow it with `getByLabel` or `getByRole`. `getByLabel` also matches any element's accessible name, such as a heading or a button with the same words, a fieldset by its legend, or an image by its alt text; narrow it with `getByRole('textbox', name)`. Each run of text is a match of its own, so `getByText('Line one Line two')` finds text split by a `<br>`. A query scoped to an element whose only content is the text, such as `getByTestId('toast').getByText('Saved')` on `<div data-testid="toast">Saved</div>`, finds nothing: assert on the element itself |
+| Role states | `getByRole(role, { expanded: false })`, and `checked`, `selected`, or `pressed` set to `false`, also match elements that have no such state |
+| Dialogs | `alert()` and `confirm()` are dismissed, so `confirm()` returns `false`. The attempt's log records each one as an error; the test does not fail, as it does on the web without a handler. Electron does not support `prompt()`: it throws in the page. A `beforeunload` guard does not stop the engine from quitting the app |
+| Keyboard | Keys reach the page over the DevTools protocol. Menu accelerators and the main process's `before-input-event` don't see them; reach a menu item with `electron.evaluate` |
+| Locale | The app runs in the OS locale, so text Chromium supplies, such as an `<input type="submit">` with no value, follows it. Pass `args: ['--lang=en-US']` for the web's English |
 | Long press | Holds for 800 ms by default, where the web holds for 500 ms |
 | Packaged apps | The engine drives the app through Chromium's inspector. A packaged app built with the inspect fuses off cannot launch |
 | Headed | Electron has no headless mode. Windows show unless the app hides them, and `--headed` changes nothing. On Linux CI, run under a virtual display such as `xvfb-run` |
-| Reading | Content under `aria-hidden` or `inert` is not read. Nested documents (`iframe`, `webview`) are not read, and the agent is told its screen is incomplete |
+| Reading | Content under `aria-hidden` or `inert` is not read. Content that is not rendered (`display: none`, `hidden`, a closed `<details>`) is left out, where the web reads it as hidden: a test id or `electron.locator()` still finds such an element. An element with no size reads as hidden, and role queries skip it, so an empty `role="alert"` is not found by role. A `<summary>` reads as a button, and open shadow content is in document order. Nested documents (`iframe`, `webview`) are not read, and the agent is told its screen is incomplete |
 | Selectors | `electron.locator()` matches in the window's document and in each open shadow root, one root at a time: a selector does not cross a shadow boundary. It never enters a frame |
 | Uploads | `setInputFiles` takes file paths. In-memory files are not supported |
-| Not supported | Video recording, `browser`-only APIs (routes, downloads, cookies), session save and restore, `toBeInViewport`, and computed-style checks |
+| Not supported | Video recording, `browser`-only APIs (routes, downloads, cookies), `app.back()`, session save and restore, `toBeInViewport`, and computed-style checks |
 | Workers | No limit. An app that holds a single-instance lock can run one test at a time: set `workers: 1` |
 | Secrets | A password field shows no value. Screenshots paint every password field and nested document (`iframe`, `webview`, `embed`, `object`) black. A password field or nested document inside a closed shadow root is out of every mask's reach: the agent gets no screenshot, and `app.screenshot()` fails with `POLICY_DENIED` |
 
@@ -137,9 +147,9 @@ The `electron` fixture has these methods:
 | Option | Type | Default | What it sets |
 | --- | --- | --- | --- |
 | `executablePath` | `string` | the project's `electron` | The binary to start, such as a packaged app's |
-| `args` | `string[]` | `[]` | Electron and Chromium switches, passed before the app path. Not `--user-data-dir`, which the engine sets |
-| `env` | `Record<string, string>` | `{}` | Variables added to the app's environment: the run's, without `ELECTRON_RUN_AS_NODE` |
-| `launchTimeout` | `number` | `30000` | How long `app.open()` waits for the first window, in milliseconds |
+| `args` | `string[]` | `[]` | Electron and Chromium switches, passed before the app path. Not `--user-data-dir`, `--inspect`, or `--remote-debugging-port`, which the engine sets |
+| `env` | `Record<string, string>` | `{}` | Variables added to the app's environment: the run's, without `ELECTRON_RUN_AS_NODE`, which this option cannot set either |
+| `launchTimeout` | `number` | `30000` | How long `app.open()` waits for the first window, in milliseconds. The config's own `launchTimeout` bounds something else: the engine's start |
 | `testIdAttribute` | `string` | `'data-testid'` | The attribute `getByTestId` reads |
 | `settle` | `number \| false` | `100` | How long the engine waits after an agent action before the agent reads the screen |
 
