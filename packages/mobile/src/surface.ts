@@ -1957,20 +1957,20 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
    * Adds photos or videos, resolved against the project root, to the
    * library of the session's device with the platform's own tool on this
    * machine (see `media.ts`). Refuses a device this machine cannot reach,
-   * and a path that is not a readable file, before anything runs. Each
-   * program is killed once `timeoutMs` has passed since the call, so none
-   * runs on into the next step. Nothing on screen changes, so the screen
-   * this surface read stays.
+   * and a path that is not a readable file, before anything runs. The
+   * `timeoutMs` budget starts with the call: a program still running at it
+   * is killed, and none starts after it, so nothing runs on into the next
+   * step. Nothing on screen changes, so the screen this surface read stays.
    */
   async addMedia(files: unknown, signal: AbortSignal, timeoutMs: number): Promise<void> {
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const stop = AbortSignal.any([signal, timeout]);
     const resolved = mediaFiles(files).map((file) => path.resolve(this.projectRoot, file));
     const { platform } = this.options;
     const refusal = mediaRefusal(platform, this.boundKind, this.device, [this.env, process.env]);
     if (refusal !== undefined) throw unsupported(refusal);
     const { deviceId } = this.boundDevice;
     await assertMediaFiles(platform, resolved);
-    const timeout = AbortSignal.timeout(timeoutMs);
-    const stop = AbortSignal.any([signal, timeout]);
     const adb = platform === 'android' ? await findAdb(this.env) : 'adb';
     for (const command of mediaCommands(platform, deviceId, resolved, adb)) {
       try {

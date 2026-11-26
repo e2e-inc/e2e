@@ -977,7 +977,7 @@ await app.open();
 | --- | --- |
 | `UNSUPPORTED_CAPABILITY` | A physical iPhone, a device a provider leased, or a device behind another agent-device daemon (`AGENT_DEVICE_DAEMON_BASE_URL` in the run's environment or the runner's included), before anything runs. |
 | `INVALID_ARGUMENT` | No paths, an empty path, a path that is not a readable file, or on Android two paths with the same file name. |
-| `OPERATION_TIMEOUT` | `xcrun` or `adb` still runs at `config.actionTimeout`; it is stopped, and nothing after it runs. |
+| `ACTION_FAILED` | `config.actionTimeout` passes, counted from the call; a running `xcrun` or `adb` is stopped, and none starts after it. |
 | `ENGINE_FAILURE` | `xcrun` or `adb` is missing, or fails; the message carries what it wrote to stderr, left out when longer than 2,000 characters. |
 
 #### `clearKeychain`

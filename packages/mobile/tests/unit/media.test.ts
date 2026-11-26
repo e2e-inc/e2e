@@ -209,7 +209,17 @@ describe('device.addMedia', () => {
     await expect(device.addMedia('a.jpg')).rejects.toMatchObject({ code: 'CANCELLED' });
   });
 
-  it('kills a program that outlives the action timeout as OPERATION_TIMEOUT, and runs nothing after it', async () => {
+  it('starts no program once the step is stopped, even when that happened while the files were checked', async () => {
+    photo('a.jpg');
+    const controller = new AbortController();
+    controller.abort();
+    const { device, ran } = await setup({ platform: 'ios', kind: 'simulator', id: 'B7A6E3D8-94CA-41E2-A2A4-47BA79FDABA0' }, undefined, {}, controller.signal);
+    await expect(device.addMedia('a.jpg')).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(ran).toEqual([]);
+  });
+
+  // The engine's OPERATION_TIMEOUT; a test sees the runner's ACTION_FAILED, which wraps every device step.
+  it('kills a program that outlives the action timeout, and runs nothing after it', async () => {
     photo('a.jpg');
     photo('b.jpg');
     const { device, ran } = await setup(
