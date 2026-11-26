@@ -181,7 +181,8 @@ fn read(element: &Element) -> Result<Read, ax::AXError> {
     let placeholder = label(take(12).and_then(|value| value.text().map(str::to_owned)));
     let help = label(take(13).and_then(|value| value.text().map(str::to_owned)));
     let title_element = take(14).and_then(|value| value.element().cloned());
-    let scrollbar = take(15).is_some() || take(16).is_some();
+    // Only an element is a scroll bar: macOS may answer an attribute the area does not support with null.
+    let scrollbar = matches!(take(15), Some(Value::Element(_))) || matches!(take(16), Some(Value::Element(_)));
     let role = roles::role(&ax_role, subrole.as_deref());
     Ok(Read {
         role,
