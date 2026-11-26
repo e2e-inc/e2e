@@ -77,6 +77,13 @@ const TEMPORARY_FILE = /^(?:[a-z0-9-]+(?:\.yml|\.lock\.json)|[a-f0-9]{64}\.json)
  * another tool's.
  */
 const LOCK_FILE = /^\.[a-z0-9-]+\.writing(?:\.takeover)?$/u;
+/**
+ * The record a writer leaves beside a pair just before its two renames, so
+ * the next writer can finish a pair a crash cut in half: a JSON object
+ * naming the pair, its YAML's digest, and the lock to publish. A file of
+ * that name holding anything else is another tool's.
+ */
+const PENDING_FILE = /^\.[a-z0-9-]+\.pending$/u;
 
 /**
  * Age past which a store lock or temporary file was left by a writer that
@@ -87,25 +94,38 @@ const LEFTOVER_MS = 30_000;
 
 /**
  * Whether a file in the store directory is the store's working file (a
- * temporary, or an empty lock), and if so whether a writer that died left
- * it (`stale`) or one is still using it (`live`).
+ * temporary, a lock holding a token, or a pending pair record), and if so
+ * whether a writer that died left it (`stale`) or one is still using it
+ * (`live`).
  */
 function workingFile(directory: string, name: string): 'stale' | 'live' | undefined {
-  const temporary = TEMPORARY_FILE.test(name);
-  if (!temporary && !LOCK_FILE.test(name)) return undefined;
-  let file: ReturnType<typeof statSync>;
+  const owns = TEMPORARY_FILE.test(name) ? () => true : LOCK_FILE.test(name) ? isOwnLock : PENDING_FILE.test(name) ? isOwnPending : undefined;
+  if (owns === undefined) return undefined;
+  const file = path.join(directory, name);
+  let modified: number;
   try {
-    file = statSync(path.join(directory, name));
+    modified = statSync(file).mtimeMs;
   } catch {
     return undefined;
   }
-  if (!temporary && !isOwnLock(path.join(directory, name))) return undefined;
-  return Date.now() - file.mtimeMs > LEFTOVER_MS ? 'stale' : 'live';
+  if (!owns(file)) return undefined;
+  return Date.now() - modified > LEFTOVER_MS ? 'stale' : 'live';
 }
 
 function isOwnLock(file: string): boolean {
   try {
     return isLockToken(readFileSync(file, 'utf8'));
+  } catch {
+    return false;
+  }
+}
+
+function isOwnPending(file: string): boolean {
+  try {
+    const record: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    if (typeof record !== 'object' || record === null) return false;
+    const { name, yamlDigest, lock } = record as Record<string, unknown>;
+    return typeof name === 'string' && typeof yamlDigest === 'string' && typeof lock === 'string';
   } catch {
     return false;
   }

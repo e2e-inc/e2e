@@ -227,6 +227,7 @@ describe('e2e cache clear', () => {
     writeFileSync(path.join(directory, 'a-torn.yml.0123456789abcdef.tmp'), '{}', 'utf8');
     writeFileSync(path.join(directory, '.a-torn.writing'), 'c'.repeat(32), 'utf8');
     writeFileSync(path.join(directory, '.a-torn.writing.takeover'), 'c'.repeat(32), 'utf8');
+    writeFileSync(path.join(directory, '.a-torn.pending'), JSON.stringify({ name: 'a-torn', yamlDigest: 'd'.repeat(64), lock: '{}' }), 'utf8');
     // A crashed writer's: old enough to be stale.
     const old = new Date(Date.now() - 60_000);
     for (const name of readdirSync(directory)) utimesSync(path.join(directory, name), old, old);
@@ -246,10 +247,15 @@ describe('e2e cache clear', () => {
     writeFileSync(path.join(directory, 'tool.lock.json'), '{"version": 1}\n', 'utf8');
     // Named like the store's lock, but with something in it: another tool's.
     writeFileSync(path.join(directory, '.index.writing'), 'pid 42\n', 'utf8');
+    // Named like the store's pending pair record, but not one.
+    writeFileSync(path.join(directory, '.index.pending'), 'queued\n', 'utf8');
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(path.join(directory, '.index.pending'), old, old);
     await invoke('cache', 'clear');
     expect(written(stderrSpy)).toContain('notes.md');
     expect(written(stderrSpy)).toContain('ci.yml');
-    expect(readdirSync(directory).toSorted()).toEqual(['.index.writing', 'ci.yml', 'notes.md', 'tool.lock.json']);
+    expect(written(stderrSpy)).toContain('.index.pending');
+    expect(readdirSync(directory).toSorted()).toEqual(['.index.pending', '.index.writing', 'ci.yml', 'notes.md', 'tool.lock.json']);
   });
 
   it('leaves a YAML another tool wrote over a recording, and deletes the lock beside it', async () => {
@@ -265,8 +271,17 @@ describe('e2e cache clear', () => {
     mkdirSync(directory, { recursive: true });
     writeFileSync(path.join(directory, '.a-live.writing'), 'c'.repeat(32), 'utf8');
     writeFileSync(path.join(directory, 'a-live.yml.0123456789abcdef.tmp'), 'half', 'utf8');
+    writeFileSync(path.join(directory, '.a-live.pending'), JSON.stringify({ name: 'a-live', yamlDigest: 'd'.repeat(64), lock: '{}' }), 'utf8');
     await invoke('cache', 'clear');
-    expect(readdirSync(directory).toSorted()).toEqual(['.a-live.writing', 'a-live.yml.0123456789abcdef.tmp']);
+    expect(readdirSync(directory).toSorted()).toEqual(['.a-live.pending', '.a-live.writing', 'a-live.yml.0123456789abcdef.tmp']);
+  });
+
+  it('does not call a crashed writer\u2019s pending pair record another tool\u2019s file', async () => {
+    await seed([{ keyHash: 'a'.repeat(64), trace: trace(step('tests/a.e2e.ts::settings', 'web'), 1) }]);
+    const directory = path.join(root, CACHE_DIR);
+    writeFileSync(path.join(directory, '.a-settings.pending'), JSON.stringify({ name: 'a-settings', yamlDigest: 'd'.repeat(64), lock: '{}' }), 'utf8');
+    await invoke('cache', 'ls');
+    expect(written(stderrSpy)).not.toContain('not cache files');
   });
 
   it('has nothing to clear when the store was never written', async () => {
