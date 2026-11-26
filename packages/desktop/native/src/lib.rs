@@ -72,12 +72,6 @@ pub fn screen_locked() -> Option<bool> {
     system::screen_locked()
 }
 
-/// How many menus a process has open on screen.
-#[napi]
-pub fn open_menus(pid: i32) -> u32 {
-    windows::open_menus(pid) as u32
-}
-
 /// When a process started, in microseconds since the epoch; `null` when it is not running.
 #[napi]
 pub fn process_started(pid: i32) -> Option<f64> {
