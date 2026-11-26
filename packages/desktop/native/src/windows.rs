@@ -1,0 +1,220 @@
+//! The windows of one process: the window server's list (ids, bounds,
+//! whether on screen, layer) joined with the app's accessibility windows
+//! (title, focus, minimized), matched by the window server id.
+
+use crate::ax::{self, Element};
+use crate::failure::{Failure, Outcome, codes};
+use core_foundation::base::TCFType;
+use core_foundation::boolean::CFBoolean;
+use core_foundation::dictionary::CFDictionary;
+use core_foundation::number::CFNumber;
+use core_foundation::string::CFString;
+use core_foundation_sys::array::{CFArrayGetCount, CFArrayGetValueAtIndex};
+use core_foundation_sys::base::CFTypeRef;
+use core_foundation_sys::dictionary::{CFDictionaryGetValue, CFDictionaryRef};
+use core_graphics::geometry::CGRect;
+use core_graphics::window;
+use serde::Serialize;
+
+/// The window level menus open at (`kCGPopUpMenuWindowLevel`).
+const MENU_LAYER: i64 = 101;
+
+/// A rectangle in screen points, top-left origin.
+#[derive(Clone, Copy, Debug, Serialize, PartialEq)]
+pub struct Rect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// One entry of the window server's list.
+struct ServerWindow {
+    id: u32,
+    pid: i32,
+    layer: i64,
+    bounds: Option<Rect>,
+    onscreen: bool,
+    title: Option<String>,
+}
+
+/// One window of the app, as `listWindows` answers.
+#[derive(Serialize)]
+pub struct WindowInfo {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    pub is_focused: bool,
+    pub visible: bool,
+    pub accessible: bool,
+    pub minimized: bool,
+    pub pid: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<Rect>,
+}
+
+fn dictionary_value(dictionary: CFDictionaryRef, key: CFStringRefStatic) -> CFTypeRef {
+    unsafe { CFDictionaryGetValue(dictionary, key as *const _) }
+}
+
+type CFStringRefStatic = core_foundation_sys::string::CFStringRef;
+
+fn number(dictionary: CFDictionaryRef, key: CFStringRefStatic) -> Option<i64> {
+    let value = dictionary_value(dictionary, key);
+    if value.is_null() {
+        return None;
+    }
+    unsafe { CFNumber::wrap_under_get_rule(value as _) }.to_i64()
+}
+
+fn boolean(dictionary: CFDictionaryRef, key: CFStringRefStatic) -> bool {
+    let value = dictionary_value(dictionary, key);
+    !value.is_null() && unsafe { CFBoolean::wrap_under_get_rule(value as _) }.into()
+}
+
+fn string(dictionary: CFDictionaryRef, key: CFStringRefStatic) -> Option<String> {
+    let value = dictionary_value(dictionary, key);
+    if value.is_null() {
+        return None;
+    }
+    Some(unsafe { CFString::wrap_under_get_rule(value as _) }.to_string())
+}
+
+fn bounds(dictionary: CFDictionaryRef) -> Option<Rect> {
+    let value = dictionary_value(dictionary, unsafe { window::kCGWindowBounds });
+    if value.is_null() {
+        return None;
+    }
+    let description: CFDictionary = unsafe { CFDictionary::wrap_under_get_rule(value as _) };
+    let rect = CGRect::from_dict_representation(&description)?;
+    Some(Rect { x: rect.origin.x, y: rect.origin.y, width: rect.size.width, height: rect.size.height })
+}
+
+/// Every window the window server lists, front to back.
+fn server_windows() -> Vec<ServerWindow> {
+    let Some(list) = window::copy_window_info(window::kCGWindowListOptionAll | window::kCGWindowListExcludeDesktopElements, window::kCGNullWindowID) else {
+        return Vec::new();
+    };
+    let raw = list.as_concrete_TypeRef();
+    let count = unsafe { CFArrayGetCount(raw) };
+    let mut out = Vec::with_capacity(count.max(0) as usize);
+    for index in 0..count {
+        let dictionary = unsafe { CFArrayGetValueAtIndex(raw, index) } as CFDictionaryRef;
+        let (Some(id), Some(pid)) = (number(dictionary, unsafe { window::kCGWindowNumber }), number(dictionary, unsafe { window::kCGWindowOwnerPID })) else {
+            continue;
+        };
+        out.push(ServerWindow {
+            id: id as u32,
+            pid: pid as i32,
+            layer: number(dictionary, unsafe { window::kCGWindowLayer }).unwrap_or(0),
+            bounds: bounds(dictionary),
+            onscreen: boolean(dictionary, unsafe { window::kCGWindowIsOnscreen }),
+            title: string(dictionary, unsafe { window::kCGWindowName }),
+        });
+    }
+    out
+}
+
+/// The app's accessibility windows, front to back, each with its window server id when it has one.
+pub fn ax_windows(app: &Element) -> Outcome<Vec<(Element, Option<u32>)>> {
+    match app.elements("AXWindows", 256) {
+        Ok(windows) => Ok(windows
+            .into_iter()
+            .map(|element| {
+                let id = element.window_id();
+                (element, id)
+            })
+            .collect()),
+        Err(ax::AX_NO_VALUE | ax::AX_ATTRIBUTE_UNSUPPORTED) => Ok(Vec::new()),
+        Err(ax::AX_INVALID_ELEMENT) => Err(Failure::refused(codes::APP_NOT_FOUND, "the app is no longer running")),
+        Err(ax::AX_API_DISABLED) => Err(Failure::refused(codes::PERM_DENIED, "this process has no Accessibility permission")),
+        Err(ax::AX_CANNOT_COMPLETE) => {
+            Err(Failure::refused(codes::APP_UNRESPONSIVE, "the app did not answer its window list in time")
+                .with_details(serde_json::json!({ "retryable": true })))
+        }
+        Err(error) => Err(Failure::refused(codes::APP_UNRESPONSIVE, format!("reading the app's windows failed: {}", ax::describe(error)))
+            .with_details(serde_json::json!({ "retryable": true }))),
+    }
+}
+
+/// The windows of one process: every accessibility window, and every
+/// normal-level window server window accessibility does not list.
+pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
+    if !crate::process::alive(pid) {
+        return Err(Failure::refused(codes::APP_NOT_FOUND, format!("no process {pid} is running")));
+    }
+    let app = Element::application(pid);
+    let accessible = ax_windows(&app)?;
+    let focused = app.element("AXFocusedWindow");
+    let server: Vec<ServerWindow> = server_windows().into_iter().filter(|window| window.pid == pid).collect();
+    let mut out = Vec::new();
+    let mut listed = Vec::new();
+    for (element, id) in &accessible {
+        let Some(id) = *id else { continue };
+        let entry = server.iter().find(|window| window.id == id);
+        let values = element.attributes(&["AXTitle", "AXMinimized", "AXPosition", "AXSize"]).unwrap_or_else(|_| vec![None, None, None, None]);
+        let title = values[0].as_ref().and_then(|value| value.text().map(str::to_owned));
+        let minimized = values[1].as_ref().and_then(|value| value.boolean()).unwrap_or(false);
+        let ax_bounds = match (&values[2], &values[3]) {
+            (Some(ax::Value::Point(x, y)), Some(ax::Value::Size(width, height))) => Some(Rect { x: *x, y: *y, width: *width, height: *height }),
+            _ => None,
+        };
+        listed.push(id);
+        out.push(WindowInfo {
+            id: id.to_string(),
+            title: title.or_else(|| entry.and_then(|window| window.title.clone())),
+            is_focused: focused.as_ref() == Some(element),
+            visible: entry.is_some_and(|window| window.onscreen),
+            accessible: true,
+            minimized,
+            pid,
+            bounds: ax_bounds.or_else(|| entry.and_then(|window| window.bounds)),
+        });
+    }
+    for window in &server {
+        // A window accessibility does not list counts only while it is on screen: AppKit keeps hidden helper windows.
+        if window.layer != 0 || listed.contains(&window.id) || !window.onscreen {
+            continue;
+        }
+        // A window the window server lists with no size is a placeholder, not something on screen.
+        if window.bounds.is_none_or(|bounds| bounds.width < 1.0 || bounds.height < 1.0) {
+            continue;
+        }
+        out.push(WindowInfo {
+            id: window.id.to_string(),
+            title: window.title.clone(),
+            is_focused: false,
+            visible: window.onscreen,
+            accessible: false,
+            minimized: false,
+            pid,
+            bounds: window.bounds,
+        });
+    }
+    Ok(out)
+}
+
+/// The accessibility element of a window of `pid` by its window server id.
+pub fn find(pid: i32, id: u32) -> Outcome<Element> {
+    let app = Element::application(pid);
+    for (element, window) in ax_windows(&app)? {
+        if window == Some(id) {
+            return Ok(element);
+        }
+    }
+    if server_windows().iter().any(|window| window.pid == pid && window.id == id) {
+        return Err(Failure::refused(codes::WINDOW_NOT_FOUND, format!("window {id} has no accessibility element"))
+            .with_details(serde_json::json!({ "kind": "window_without_accessibility_element" })));
+    }
+    Err(Failure::refused(codes::WINDOW_NOT_FOUND, format!("the app has no window {id}")))
+}
+
+/// The window server's bounds of one window.
+pub fn server_bounds(id: u32) -> Option<Rect> {
+    server_windows().into_iter().find(|window| window.id == id).and_then(|window| window.bounds)
+}
+
+/// How many menus `pid` has open on screen: windows at the menu level.
+pub fn open_menus(pid: i32) -> usize {
+    server_windows().into_iter().filter(|window| window.pid == pid && window.layer == MENU_LAYER && window.onscreen).count()
+}
