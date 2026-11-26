@@ -502,6 +502,8 @@ describe('an action cancelled while its stand-in read is in flight', () => {
 const PRESSED_LINK = `<a href="/next" id="next" style="display: inline-block; padding: 20px">Next</a>
 <script>
   window.pressed = [];
+  window.keys = [];
+  for (const type of ['keydown', 'keyup']) window.addEventListener(type, (event) => window.keys.push(type + ' ' + event.key));
   const link = document.getElementById('next');
   for (const type of ['click', 'auxclick', 'contextmenu']) {
     link.addEventListener(type, (event) => {
@@ -517,11 +519,35 @@ function pressed(): Promise<string[]> {
   return page.evaluate(() => (window as unknown as { pressed: string[] }).pressed);
 }
 
+/** The key events the page logged since it loaded. */
+function keys(): Promise<string[]> {
+  return page.evaluate(() => (window as unknown as { keys: string[] }).keys);
+}
+
 describe.each(KINDS)('a mouse button, through the %s target', (kind) => {
   it('fires auxclick with button 1 for a middle tap, holding its modifiers', async () => {
     await page.setContent(PRESSED_LINK);
     expect(await perform(await targetOf(kind, '#next'), { kind: 'tap', button: 'middle', modifiers: ['Shift'] })).toBeUndefined();
     expect(await pressed()).toEqual([expect.stringMatching(/^auxclick b1 d1 x\d+ shift$/)]);
+  });
+
+  it('hovers holding exactly the modifiers it names, and waits for a node an overlay covers', async () => {
+    await page.setContent(`<button id="target">Target</button><p id="moved"></p>
+      <script>
+        document.getElementById('target').addEventListener('mousemove', (event) => {
+          document.getElementById('moved').textContent = [event.altKey && 'alt', event.shiftKey && 'shift'].filter(Boolean).join(' ');
+        });
+      </script>`);
+    await page.keyboard.down('Shift');
+    expect(await perform(await targetOf(kind, '#target'), { kind: 'hover', modifiers: ['Alt'] })).toBeUndefined();
+    await page.keyboard.up('Shift');
+    expect(await page.textContent('#moved')).toBe('alt');
+    await page.evaluate(() => {
+      document.body.insertAdjacentHTML('beforeend', '<div style="position: fixed; inset: 0; background: #0003"></div>');
+    });
+    expect(await perform(await targetOf(kind, '#target'), { kind: 'hover', modifiers: ['Alt'] }, REFUSAL_TIMEOUT_MS)).toMatchObject({
+      code: 'NOT_ACTIONABLE',
+    });
   });
 
   it('fires contextmenu with button 2 for a secondary tap, holding its modifiers', async () => {
@@ -576,19 +602,19 @@ describe('a mouse button at a point', () => {
 
   it('presses the middle button at the point', async () => {
     await page.setContent(PRESSED_LINK);
-    await dispatchPointerAction(page, await into(5), { kind: 'tap', button: 'middle' });
+    await dispatchPointerAction(page, await into(5), { kind: 'tap', button: 'middle' }, new Set());
     expect(await pressed()).toEqual(['auxclick b1 d1 x5']);
   });
 
   it('double-presses the middle button at the point', async () => {
     await page.setContent(PRESSED_LINK);
-    await dispatchPointerAction(page, await into(6), { kind: 'doubleTap', button: 'middle' });
+    await dispatchPointerAction(page, await into(6), { kind: 'doubleTap', button: 'middle' }, new Set());
     expect(await pressed()).toEqual(['auxclick b1 d1 x6', 'auxclick b1 d2 x6']);
   });
 
   it('presses the right button three times at the point', async () => {
     await page.setContent(PRESSED_LINK);
-    await dispatchPointerAction(page, await into(7), { kind: 'multiTap', count: 3, button: 'right' });
+    await dispatchPointerAction(page, await into(7), { kind: 'multiTap', count: 3, button: 'right' }, new Set());
     const events = await pressed();
     expect(events.filter((event) => event.startsWith('contextmenu'))).toEqual(['contextmenu b2 d0 x7', 'contextmenu b2 d0 x7', 'contextmenu b2 d0 x7']);
     expect(events.at(-1)).toBe('auxclick b2 d3 x7');
@@ -596,15 +622,16 @@ describe('a mouse button at a point', () => {
 
   it('clicks three times with the left button for a multi-tap without a button', async () => {
     await page.setContent(PRESSED_LINK);
-    await dispatchPointerAction(page, await into(8), { kind: 'multiTap', count: 3 });
+    await dispatchPointerAction(page, await into(8), { kind: 'multiTap', count: 3 }, new Set());
     expect(await pressed()).toEqual(['click b0 d1 x8', 'click b0 d2 x8', 'click b0 d3 x8']);
   });
 
-  it('refuses a multi-tap above 200 clicks at the point before it sends any input', async () => {
+  it('refuses a multi-tap above 200 clicks at the point before it sends any input, keys included', async () => {
     await page.setContent(PRESSED_LINK);
-    await expect(dispatchPointerAction(page, await into(8), { kind: 'multiTap', count: 201 })).rejects.toMatchObject({
+    await expect(dispatchPointerAction(page, await into(8), { kind: 'multiTap', count: 201, modifiers: ['Shift'] }, new Set())).rejects.toMatchObject({
       code: 'UNSUPPORTED_CAPABILITY',
     });
     expect(await pressed()).toEqual([]);
+    expect(await keys()).toEqual([]);
   });
 });

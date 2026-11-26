@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { EngineCleanupContext, EngineFixtureContext, EngineHandle, EngineSnapshot, OperationContext, SemanticNode } from '@e2e-dev/core/engine';
-import { web, type Browser } from '../../src/index.ts';
+import { surfaceOf, web, type Browser } from '../../src/index.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
 const PAGES: Readonly<Record<string, string>> = {
@@ -29,7 +29,8 @@ const PAGES: Readonly<Record<string, string>> = {
   '/popup': `<!doctype html><title>Popup</title><h1>Popup</h1>
     <button onclick="window.close()">Close me</button>
     <button onclick="window.open('/nested', '_blank')">Open nested</button>
-    <button onclick="window.open('/slow', '_blank'); window.close();">Hand off</button>`,
+    <button onclick="window.open('/slow', '_blank'); window.close();">Hand off</button>
+    <button onmousedown="window.close()">Close on press</button>`,
   '/nested': '<!doctype html><title>Nested</title><h1>Nested</h1><button onclick="window.close()">Close nested</button>',
   '/slow': '<!doctype html><title>Slow</title><h1>Slow</h1>',
 };
@@ -165,6 +166,39 @@ describe('tabs', () => {
       await tap(engine, 'Close me');
       const back = await screenAt(engine, '/opener');
       expect(back.tabs).toBeUndefined();
+    });
+  });
+
+  // A close on press lands while the click is still being sent, so the click
+  // itself fails; a close on click can land before or after the key restore.
+  it.each(['Close on press', 'Close me'])('a modified tap at a point on "%s" that closes its own tab succeeds, with no held keys to restore there', async (name) => {
+    await withAttempt(async (engine) => {
+      await tap(engine, 'Open window');
+      await withTabs(engine, 2);
+      await engine.session!.switchTab!(1, operation());
+      const close = nodesOf(await screenAt(engine, '/popup')).find((candidate) => candidate.name === name);
+      if (close?.rect === undefined) throw new Error(`no box for ${name} on the screen`);
+      const center = { x: close.rect.x + close.rect.width / 2, y: close.rect.y + close.rect.height / 2 };
+      await engine.performAt!(center, { kind: 'tap', modifiers: ['Shift'] }, operation());
+      expect((await screenAt(engine, '/opener')).tabs).toBeUndefined();
+    });
+  });
+
+  it('a modified tap at a point fails when its tab closes before the gesture is sent', async () => {
+    await withAttempt(async (engine) => {
+      await tap(engine, 'Open window');
+      await withTabs(engine, 2);
+      await engine.session!.switchTab!(1, operation());
+      const close = nodesOf(await screenAt(engine, '/popup')).find((candidate) => candidate.name === 'Close me');
+      if (close?.rect === undefined) throw new Error('no box for Close me on the screen');
+      const page = surfaceOf(engine)!.page();
+      const down = page.keyboard.down.bind(page.keyboard);
+      page.keyboard.down = async (key) => {
+        await down(key);
+        await page.close();
+      };
+      const center = { x: close.rect.x + close.rect.width / 2, y: close.rect.y + close.rect.height / 2 };
+      await expect(engine.performAt!(center, { kind: 'tap', modifiers: ['Shift'] }, operation())).rejects.toThrow(/closed/);
     });
   });
 

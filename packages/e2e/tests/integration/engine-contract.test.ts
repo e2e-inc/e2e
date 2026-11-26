@@ -17,7 +17,7 @@ import { assertValidReport } from '../helpers/report-schema.ts';
 import { freePort } from '../helpers/free-port.ts';
 import { resultByTitle, runProject } from '../helpers/run-project.ts';
 import type { E2EConfig } from '../../src/index.ts';
-import { TestError } from '@e2e-dev/core/lib/engine/index';
+import { TestError, type SemanticNode } from '@e2e-dev/core/lib/engine/index';
 
 const APP_URL = FAKE_APP_URL;
 
@@ -1110,11 +1110,22 @@ test('takes evidence', async ({ app }) => {
     60_000,
   );
 
+  /** The fake engine's Submit button with a box, so a tap at a position has a point to land on. */
+  const BOXED_SUBMIT: SemanticNode = {
+    ref: { id: 'node-1', revision: '' },
+    role: 'button',
+    name: 'Submit',
+    states: { hidden: false },
+    rect: { x: 0, y: 0, width: 100, height: 20 },
+  };
+
   it.each([
     {
       flag: 'tapModifiers',
       call: "click({ modifiers: ['Shift'] })",
       behavior: { tapModifiers: true },
+      predating: {},
+      method: 'perform',
       action: { kind: 'tap', modifiers: ['Shift'] },
       refusal: 'modifiers on the "tap" action',
     },
@@ -1122,12 +1133,24 @@ test('takes evidence', async ({ app }) => {
       flag: 'tapButtons',
       call: "tap({ button: 'middle' })",
       behavior: { tapButtons: true },
+      predating: {},
+      method: 'perform',
       action: { kind: 'tap', button: 'middle' },
       refusal: 'the middle button on the "tap" action',
     },
-  ])(
-    'hands $call only to an engine that declares $flag, and refuses it before perform otherwise',
-    async ({ call, behavior, action, refusal }) => {
+    {
+      flag: 'pointerModifiers',
+      call: "click({ position: { x: 1, y: 1 }, modifiers: ['Shift'] })",
+      behavior: { pointerModifiers: true, pointerActions: ['tap'], locate: () => [BOXED_SUBMIT] },
+      // An engine from before the flag that declares tapModifiers, so the keys at a point are not dropped.
+      predating: { tapModifiers: true, pointerActions: ['tap'], locate: () => [BOXED_SUBMIT] },
+      method: 'performAt',
+      action: { kind: 'tap', modifiers: ['Shift'] },
+      refusal: 'modifiers on the "tap" action at a point',
+    },
+  ] as const)(
+    'hands $call only to an engine that declares $flag, and refuses it before dispatch otherwise',
+    async ({ call, behavior, predating, method, action, refusal }) => {
       const file = `import { test } from 'e2e';
 
 test('clicks', async ({ app, screen }) => {
@@ -1142,21 +1165,27 @@ test('clicks', async ({ app, screen }) => {
         );
         project.cleanup();
         const result = resultByTitle(outcome, 'clicks');
-        return { result, performs: fake.callsOf(result.attempts[0]!.id, 'perform').map((record) => record.action) };
+        const attemptId = result.attempts[0]!.id;
+        return {
+          result,
+          dispatched: fake.callsOf(attemptId, method).map((record) => record.action),
+          performs: fake.callsOf(attemptId, 'perform'),
+        };
       };
 
       const declaring = await run(createFakeEngine(behavior));
       expect(declaring.result.status).toBe('passed');
-      expect(declaring.performs).toEqual([action]);
+      expect(declaring.dispatched).toEqual([action]);
 
-      const predating = await run(createFakeEngine());
-      expect(predating.result.status).toBe('failed');
-      expect(predating.result.attempts[0]!.error).toMatchObject({
+      const older = await run(createFakeEngine(predating));
+      expect(older.result.status).toBe('failed');
+      expect(older.result.attempts[0]!.error).toMatchObject({
         code: 'UNSUPPORTED_CAPABILITY',
         category: 'configuration',
         message: expect.stringContaining(refusal),
       });
-      expect(predating.performs).toEqual([]);
+      expect(older.dispatched).toEqual([]);
+      expect(older.performs).toEqual([]);
     },
     60_000,
   );

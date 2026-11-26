@@ -16,7 +16,7 @@ import {
   type PointerAction,
   LOCATOR_ACTION_KINDS,
 } from '@e2e-dev/core/lib/engine/index';
-import type { ActionOptions, ClickOptions, HoverOptions, Locator, Screen, ScreenPoint, TapOptions } from '@e2e-dev/core/lib/types';
+import type { ActionOptions, ClickOptions, Locator, Screen, ScreenPoint, TapOptions } from '@e2e-dev/core/lib/types';
 import { EngineError } from '@e2e-dev/core/lib/engine/contract';
 import { invalid } from '../helpers/invalid.ts';
 import { screenOver, type ScreenOverOptions } from '../helpers/screen-over.ts';
@@ -70,7 +70,7 @@ function boxScreen() {
 }
 
 /** Creates a screen with the given actions and tap flags, recording lookups and actions. */
-function tapScreen(flags: Pick<ScreenOverOptions, 'actions' | 'tapModifiers' | 'tapButtons'> = {}) {
+function tapScreen(flags: Pick<ScreenOverOptions, 'actions' | 'tapModifiers' | 'tapButtons' | 'pointerModifiers'> = {}) {
   const received: LocatorAction[] = [];
   const locate = vi.fn(async (expression: LocatorExpression) => resolveExpression(expression, NODES));
   const { screen, steps } = screenOver({
@@ -87,7 +87,7 @@ function tapScreen(flags: Pick<ScreenOverOptions, 'actions' | 'tapModifiers' | '
 
 /** Creates a screen with a positioned box and all pointer actions, recording lookups and point actions. */
 function pointScreen(
-  flags: Pick<ScreenOverOptions, 'tapButtons' | 'pointerActions'> & {
+  flags: Pick<ScreenOverOptions, 'tapButtons' | 'tapModifiers' | 'pointerModifiers' | 'pointerActions'> & {
     origin?: { x: number; y: number };
     rect?: { x: number; y: number; width: number; height: number };
     observeFailures?: Error[];
@@ -157,6 +157,19 @@ describe('locator action options', () => {
       expect(received).toEqual([{ kind: 'tap' }, { kind: 'doubleTap' }]);
     });
 
+    it('refuses modifiers before the button on the node and at a point alike', async () => {
+      const node = tapScreen();
+      await expect(node.screen.getByLabel('Agree').tap({ button: 'middle', modifiers: ['Shift'] })).rejects.toMatchObject({
+        code: 'UNSUPPORTED_CAPABILITY',
+        message: expect.stringContaining('does not declare tapModifiers'),
+      });
+      const point = pointScreen();
+      await expect(point.screen.getByLabel('Agree').tap({ button: 'middle', modifiers: ['Shift'], position: { x: 1, y: 1 } })).rejects.toMatchObject({
+        code: 'UNSUPPORTED_CAPABILITY',
+        message: expect.stringContaining('does not declare pointerModifiers'),
+      });
+    });
+
     it('refuses modifiers on an engine that does not declare tapModifiers, before it acts', async () => {
       const { screen, received } = tapScreen();
       await expect(screen.getByLabel('Agree').tap({ modifiers: ['Shift'] })).rejects.toMatchObject({
@@ -192,13 +205,6 @@ describe('locator action options', () => {
       await expect(
         Promise.resolve().then(() => screen.getByLabel('Agree').tap({ modifiers: invalid<readonly KeyModifier[]>([1n]) })),
       ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('modifier a bigint is not one of') });
-    });
-
-    it('refuses modifiers with a position, which the pointer path cannot hold yet', async () => {
-      const { screen } = tapScreen({ tapModifiers: true });
-      await expect(
-        Promise.resolve().then(() => screen.getByLabel('Agree').tap({ modifiers: ['Shift'], position: { x: 1, y: 1 } })),
-      ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('modifiers with a position') });
     });
   });
 
@@ -617,20 +623,74 @@ describe('locator action options', () => {
     });
 
     it.each([
-      ['doubleTap', (locator: Locator) => locator.doubleTap({ modifiers: ['Shift'], position: { x: 1, y: 1 } })],
+      ['tap', (locator: Locator) => locator.tap({ modifiers: ['Shift'], position: { x: 1, y: 2 } }), { kind: 'tap', modifiers: ['Shift'] }],
+      ['click', (locator: Locator) => locator.click({ modifiers: ['Shift'], count: 3, position: { x: 1, y: 2 } }), { kind: 'multiTap', count: 3, modifiers: ['Shift'] }],
+      ['doubleTap', (locator: Locator) => locator.doubleTap({ modifiers: ['Shift'], position: { x: 1, y: 2 } }), { kind: 'doubleTap', modifiers: ['Shift'] }],
+      ['dblclick', (locator: Locator) => locator.dblclick({ modifiers: ['Shift'], position: { x: 1, y: 2 } }), { kind: 'doubleTap', modifiers: ['Shift'] }],
+      ['secondaryTap', (locator: Locator) => locator.secondaryTap({ modifiers: ['Shift'], position: { x: 1, y: 2 } }), { kind: 'secondaryTap', modifiers: ['Shift'] }],
+      ['hover', (locator: Locator) => locator.hover({ modifiers: ['Shift'], position: { x: 1, y: 2 } }), { kind: 'hover', modifiers: ['Shift'] }],
+    ] as const)('%s holds modifiers at a position on an engine with pointerModifiers', async (verb, call, action) => {
+      const { screen, steps, at } = pointScreen({ pointerModifiers: true });
+      await call(screen.getByLabel('Agree'));
+      expect(at).toEqual([{ action, point: { x: 11, y: 22 } }]);
+      expect(steps.all()).toEqual([
+        expect.objectContaining({
+          api: `locator.${verb}`,
+          label: `getByLabel("Agree")${verb === 'click' ? ' 3 times' : ''} with Shift at (1, 2)`,
+          status: 'passed',
+        }),
+      ]);
+    });
+
+    it('hovers with modifiers and no position through the node hover action', async () => {
+      const { screen, steps, received } = tapScreen({ pointerModifiers: true });
+      await screen.getByLabel('Agree').hover({ modifiers: ['Alt', 'ControlOrMeta'] });
+      await screen.getByLabel('Agree').hover();
+      expect(received).toEqual([{ kind: 'hover', modifiers: ['Alt', 'ControlOrMeta'] }, { kind: 'hover' }]);
+      expect(steps.all().map((step) => step.label)).toEqual(['getByLabel("Agree") with Alt+ControlOrMeta', 'getByLabel("Agree")']);
+    });
+
+    it('treats an empty modifiers list as none, so an engine without pointerModifiers takes it', async () => {
+      const point = pointScreen();
+      await point.screen.getByLabel('Agree').click({ modifiers: [], position: { x: 1, y: 2 } });
+      expect(point.at).toEqual([{ action: { kind: 'tap' }, point: { x: 11, y: 22 } }]);
+      expect(point.steps.all()).toEqual([expect.objectContaining({ label: 'getByLabel("Agree") at (1, 2)', status: 'passed' })]);
+      const node = tapScreen();
+      await node.screen.getByLabel('Agree').hover({ modifiers: [] });
+      expect(node.received).toEqual([{ kind: 'hover' }]);
+      expect(node.steps.all()).toEqual([expect.objectContaining({ label: 'getByLabel("Agree")', status: 'passed' })]);
+    });
+
+    it.each([
+      ['tap', (locator: Locator) => locator.tap({ modifiers: ['Shift'], position: { x: 1, y: 1 } })],
+      ['dblclick', (locator: Locator) => locator.dblclick({ modifiers: ['Shift'], position: { x: 1, y: 1 } })],
       ['secondaryTap', (locator: Locator) => locator.secondaryTap({ modifiers: ['Alt'], position: { x: 1, y: 1 } })],
-    ] as const)('%s refuses modifiers with a position, as tap does', async (verb, call) => {
-      const { screen } = tapScreen({ tapModifiers: true });
-      await expect(Promise.resolve().then(() => call(screen.getByLabel('Agree')))).rejects.toMatchObject({
-        code: 'INVALID_ARGUMENT',
-        message: `${verb}() does not take modifiers with a position yet; drop one of them`,
+      ['hover', (locator: Locator) => locator.hover({ modifiers: ['Shift'], position: { x: 1, y: 1 } })],
+      ['hover', (locator: Locator) => locator.hover({ modifiers: ['Shift'] })],
+    ] as const)('%s with modifiers refuses an engine without pointerModifiers before the lookup and any input', async (verb, call) => {
+      const { screen, steps, at, locate } = pointScreen({ tapModifiers: true });
+      await expect(call(screen.getByLabel('Missing'))).rejects.toMatchObject({
+        code: 'UNSUPPORTED_CAPABILITY',
+        message: expect.stringMatching(/^modifiers on the "\w+" action (at a point )?are not available on this target: its engine does not declare pointerModifiers$/),
       });
+      expect(locate).not.toHaveBeenCalled();
+      expect(at).toEqual([]);
+      expect(steps.all()).toEqual([expect.objectContaining({ api: `locator.${verb}`, status: 'failed' })]);
+    });
+
+    it('keeps a modified tap without a position on the node, behind tapModifiers', async () => {
+      const { screen, at, locate } = pointScreen({ pointerModifiers: true });
+      await expect(screen.getByLabel('Missing').tap({ modifiers: ['Shift'] })).rejects.toMatchObject({
+        code: 'UNSUPPORTED_CAPABILITY',
+        message: expect.stringContaining('its engine does not declare tapModifiers'),
+      });
+      expect(locate).not.toHaveBeenCalled();
+      expect(at).toEqual([]);
     });
 
     it.each([
       ['doubleTap', (locator: Locator) => locator.doubleTap(invalid<ClickOptions>({ count: 3 }))],
       ['secondaryTap', (locator: Locator) => locator.secondaryTap(invalid<ClickOptions>({ button: 'middle' }))],
-      ['hover', (locator: Locator) => locator.hover(invalid<HoverOptions>({ modifiers: ['Shift'] }))],
     ] as const)('%s still refuses the options only tap and click take', async (verb, call) => {
       const { screen } = tapScreen();
       await expect(Promise.resolve().then(() => call(screen.getByLabel('Agree')))).rejects.toMatchObject({

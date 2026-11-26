@@ -103,6 +103,17 @@ describe('defineEngine', () => {
     );
   });
 
+  it('carries pointerModifiers onto the handle only with perform or performAt, and only as a boolean', () => {
+    const perform = async () => undefined;
+    expect(defineEngine(observingEngine({ pointerActions: ['tap'], performAt: perform, pointerModifiers: true })).pointerModifiers).toBe(true);
+    expect(defineEngine(observingEngine({ actions: ['hover'], perform, pointerModifiers: true })).pointerModifiers).toBe(true);
+    expect(defineEngine(observingEngine({ pointerActions: ['tap'], performAt: perform, pointerModifiers: false })).pointerModifiers).toBeUndefined();
+    expect(() => defineEngine(observingEngine({ pointerModifiers: true }))).toThrow(/pointerModifiers without perform or performAt/);
+    expect(() => defineEngine(observingEngine({ pointerActions: ['tap'], performAt: perform, pointerModifiers: 'yes' as never }))).toThrow(
+      /pointerModifiers must be a boolean/,
+    );
+  });
+
   it('closes the action list: known kinds, each once, at least one', () => {
     const withActions = (actions: unknown) =>
       defineEngine(observingEngine({ actions: actions as never, perform: async () => undefined }));
@@ -429,6 +440,62 @@ describe('createEngineSession', () => {
       message: expect.stringContaining('the middle button on the "doubleTap" action at a point'),
     });
     expect(calls).toEqual([]);
+  });
+
+  it('refuses modifiers at a point before dispatch when pointerModifiers is not declared, even with tapModifiers', async () => {
+    const calls: string[] = [];
+    const session = createEngineSession({
+      engine: defineEngine(
+        observingEngine({
+          actions: ['tap'],
+          perform: async (ref, action) => void calls.push(`${action.kind}:${ref.id}`),
+          tapModifiers: true,
+          pointerActions: ['tap', 'hover'],
+          performAt: async (point, action) => void calls.push(`${action.kind}@${point.x},${point.y}`),
+        }),
+      ),
+      targetName: 'toy-target',
+    });
+    await expect(session.performAt({ x: 1, y: 1 }, { kind: 'hover', modifiers: ['Shift'] }, OP)).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('modifiers on the "hover" action at a point'),
+    });
+    // Without tapButtons either, the modifiers are named first, as on the node.
+    await expect(session.performAt({ x: 1, y: 1 }, { kind: 'tap', button: 'middle', modifiers: ['Shift'] }, OP)).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('modifiers on the "tap" action at a point'),
+    });
+    await session.perform({ id: 'n1', revision: 'b1' }, { kind: 'tap', modifiers: ['Shift'] }, OP);
+    expect(calls).toEqual(['tap:n1']);
+  });
+
+  it('refuses modifiers on a node hover unless pointerModifiers is declared, whatever tapModifiers says', async () => {
+    const calls: string[] = [];
+    const sessionOf = (flags: { tapModifiers?: boolean; pointerModifiers?: boolean }) =>
+      createEngineSession({
+        engine: defineEngine(
+          observingEngine({
+            actions: ['tap', 'hover'],
+            perform: async (ref, action) => void calls.push(`${action.kind}:${ref.id}:${'modifiers' in action ? action.modifiers?.join('+') : ''}`),
+            ...flags,
+          }),
+        ),
+        targetName: 'toy-target',
+      });
+    const tapOnly = sessionOf({ tapModifiers: true });
+    await expect(tapOnly.perform({ id: 'n1', revision: 'b1' }, { kind: 'hover', modifiers: ['Alt'] }, OP)).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('modifiers on the "hover" action'),
+    });
+    await tapOnly.perform({ id: 'n1', revision: 'b1' }, { kind: 'hover' }, OP);
+
+    const pointerOnly = sessionOf({ pointerModifiers: true });
+    await pointerOnly.perform({ id: 'n1', revision: 'b1' }, { kind: 'hover', modifiers: ['Alt'] }, OP);
+    await expect(pointerOnly.perform({ id: 'n1', revision: 'b1' }, { kind: 'tap', modifiers: ['Alt'] }, OP)).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('modifiers on the "tap" action'),
+    });
+    expect(calls).toEqual(['hover:n1:', 'hover:n1:Alt']);
   });
 
   it('swipes the viewport as perform(root, swipe), observing first when nothing named the root yet', async () => {

@@ -61,13 +61,14 @@ describe.each(schemas)('%s schema', (name) => {
       expect(validate.errors).toEqual([expect.objectContaining({ instancePath: '/actions', keyword: 'uniqueItems' })]);
     });
 
-    it('rejects the invalid fixture for viewportIntersection without engine/observe, and for a non-boolean fileApps and tapButtons', () => {
+    it('rejects the invalid fixture for viewportIntersection without engine/observe, and for a non-boolean fileApps, tapButtons, and pointerModifiers', () => {
       expect(validate(readJson('fixtures', 'engine-manifest-v1.invalid.json'))).toBe(false);
       expect(validate.errors).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ instancePath: '/methods', keyword: 'contains' }),
           expect.objectContaining({ instancePath: '/fileApps', keyword: 'type' }),
           expect.objectContaining({ instancePath: '/tapButtons', keyword: 'type' }),
+          expect.objectContaining({ instancePath: '/pointerModifiers', keyword: 'type' }),
         ]),
       );
     });
@@ -91,6 +92,29 @@ describe.each(schemas)('%s schema', (name) => {
         name: 'reader', version: '0.1.0', spiVersion: 1,
         methods: ['engine/observe'],
         tapButtons: true,
+      })).toBe(false);
+      expect(validate.errors).toEqual(
+        expect.arrayContaining([expect.objectContaining({ instancePath: '/methods', keyword: 'anyOf', schemaPath: expect.stringContaining('/then/') })]),
+      );
+    });
+
+    it('accepts pointerModifiers with engine/perform or engine/performAt and rejects it without both', () => {
+      expect(validate({
+        name: 'pointer', version: '0.1.0', spiVersion: 1,
+        methods: ['engine/observe', 'engine/performAt'],
+        pointerActions: ['tap', 'hover'],
+        pointerModifiers: true,
+      })).toBe(true);
+      expect(validate({
+        name: 'nodes', version: '0.1.0', spiVersion: 1,
+        methods: ['engine/observe', 'engine/perform'],
+        actions: ['hover'],
+        pointerModifiers: true,
+      })).toBe(true);
+      expect(validate({
+        name: 'observer', version: '0.1.0', spiVersion: 1,
+        methods: ['engine/observe'],
+        pointerModifiers: true,
       })).toBe(false);
       expect(validate.errors).toEqual(
         expect.arrayContaining([expect.objectContaining({ instancePath: '/methods', keyword: 'anyOf', schemaPath: expect.stringContaining('/then/') })]),

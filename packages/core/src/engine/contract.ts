@@ -298,7 +298,7 @@ export interface ObservationPixels {
   readonly scale: number;
 }
 
-/** Tap kinds shared by `perform` and `performAt`. On `LocatorAction`, each also has `modifiers`. */
+/** Tap kinds shared by `perform` and `performAt`. Each adds `modifiers` on `LocatorAction` and `PointerAction`. */
 type TapActions =
   | {
       readonly kind: 'tap';
@@ -353,8 +353,16 @@ export type LocatorAction =
         | 'clear'
         | 'focus'
         | 'blur'
-        | 'hover'
         | 'scrollIntoView';
+    }
+  | {
+      readonly kind: 'hover';
+      /**
+       * Keys held while the pointer moves over the node, and only those, as
+       * on a pointer `hover`. Only an engine that declares `pointerModifiers`
+       * receives it; the harness refuses it for any other before dispatch.
+       */
+      readonly modifiers?: readonly KeyModifier[];
     }
   | { readonly kind: 'longPress'; readonly durationMs?: number }
   | { readonly kind: 'fill'; readonly value: string; readonly sensitive: boolean }
@@ -413,8 +421,20 @@ export const KNOWN_LOCATOR_ACTION_KINDS = [...LOCATOR_ACTION_KINDS, 'blur', 'set
  * before it drags.
  */
 export type PointerAction =
-  | TapActions
-  | { readonly kind: 'hover' }
+  | (TapActions & {
+      /**
+       * Keys held for the click, and only those: a key the test holds that
+       * is not listed is released for the click. Only an engine that
+       * declares `pointerModifiers` receives it; the harness refuses it for
+       * any other before dispatch.
+       */
+      readonly modifiers?: readonly KeyModifier[];
+    })
+  | {
+      readonly kind: 'hover';
+      /** Keys held while the pointer moves, as `modifiers` on a tap. Needs `pointerModifiers`. */
+      readonly modifiers?: readonly KeyModifier[];
+    }
   | { readonly kind: 'longPress'; readonly durationMs?: number }
   | { readonly kind: 'dragTo'; readonly target: ViewportPoint }
   | {

@@ -122,8 +122,8 @@ const NODE_ACTION_KINDS = {
 
 /**
  * The `modifiers` of a tap-family action, validated: distinct key modifiers,
- * as the test API's `tap({ modifiers })` takes them. An empty list holds
- * nothing and is dropped, so the recorded action stays clean.
+ * as the test API's `tap({ modifiers })` takes them. An empty list is
+ * dropped, as the test API drops it, so the recorded action stays clean.
  */
 function requireClickModifiers(value: readonly KeyModifier[], verb: NodeActionName): readonly KeyModifier[] | undefined {
   if (!Array.isArray(value) || !value.every(isKeyModifier)) {

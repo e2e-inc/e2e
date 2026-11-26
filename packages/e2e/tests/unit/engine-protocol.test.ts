@@ -575,6 +575,7 @@ describe('engine protocol', () => {
         tapButtons: true,
         pointerActions: ['tap'],
         performAt: async () => {},
+        pointerModifiers: true,
         keyboard: { type: async () => {}, press: async () => {} },
         grantsAllPermissions: true,
         init: async () => {},
@@ -583,6 +584,8 @@ describe('engine protocol', () => {
     expect(validate(describeEngine(local))).toBe(true);
     expect(describeEngine(local).grantsAllPermissions).toBe(true);
     expect(connectEngine({ manifest: describeEngine(local), transport: loopbackTransport(local) }).grantsAllPermissions).toBe(true);
+    expect(describeEngine(local).pointerModifiers).toBe(true);
+    expect(connectEngine({ manifest: describeEngine(local), transport: loopbackTransport(local) }).pointerModifiers).toBe(true);
     const base = { name: 'x', version: '1', spiVersion: 1 };
     for (const refused of [
       { ...base, methods: ['engine/observe', 'engine/teleport'] },
@@ -592,6 +595,7 @@ describe('engine protocol', () => {
       { ...base, methods: ['engine/viewportIntersection'] },
       { ...base, methods: ['engine/observe'], tapModifiers: true },
       { ...base, methods: ['engine/observe'], tapButtons: true },
+      { ...base, methods: ['engine/observe'], pointerModifiers: true },
       { ...base, methods: ['engine/observe'], selectsDevice: true },
       // The client serves prepare for finish alone, which would drop the device it never forwards.
       { ...base, methods: ['lifecycle/finish'], selectsDevice: true },

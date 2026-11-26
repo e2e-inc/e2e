@@ -305,6 +305,7 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
   const pointerActions: ReadonlySet<PointerActionKind> = new Set(engine?.pointerActions ?? []);
   const tapModifiers = engine?.tapModifiers === true;
   const tapButtons = engine?.tapButtons === true;
+  const pointerModifiers = engine?.pointerModifiers === true;
 
   const app: SessionApp = {
     open: guard('navigation', engine?.session?.open),
@@ -347,6 +348,7 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
     pointerActions,
     tapModifiers,
     tapButtons,
+    pointerModifiers,
     measuresViewport: engine?.viewportIntersection !== undefined,
     app,
     artifacts,
@@ -477,7 +479,7 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
     },
     async perform(ref, action, operation) {
       if (!actions.has(action.kind)) unsupported(`the "${action.kind}" action`);
-      if ('modifiers' in action && action.modifiers !== undefined && !tapModifiers) {
+      if ('modifiers' in action && action.modifiers !== undefined && !(action.kind === 'hover' ? pointerModifiers : tapModifiers)) {
         unsupported(`modifiers on the "${action.kind}" action`);
       }
       if ('button' in action && action.button !== undefined && !tapButtons) {
@@ -495,6 +497,9 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
     },
     async performAt(point, action, operation) {
       if (!pointerActions.has(action.kind)) unsupported(`the "${action.kind}" action at a point`);
+      if ('modifiers' in action && action.modifiers !== undefined && !pointerModifiers) {
+        unsupported(`modifiers on the "${action.kind}" action at a point`);
+      }
       if ('button' in action && action.button !== undefined && !tapButtons) {
         unsupported(`the ${action.button} button on the "${action.kind}" action at a point`);
       }

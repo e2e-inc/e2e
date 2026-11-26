@@ -30,6 +30,7 @@ const KNOWN_KEYS = [
   'pointerActions',
   'tapModifiers',
   'tapButtons',
+  'pointerModifiers',
   'selectsDevice',
   'grantsAllPermissions',
   'launchArgumentValues',
@@ -308,6 +309,12 @@ export function defineEngine<
       throw invalid(name, 'declares tapButtons without perform or performAt: the button is sent with the tap actions they receive');
     }
   }
+  if (spec.pointerModifiers !== undefined) {
+    if (typeof spec.pointerModifiers !== 'boolean') throw invalid(name, 'pointerModifiers must be a boolean');
+    if (spec.pointerModifiers && !capabilities.has('actions') && !capabilities.has('pointer')) {
+      throw invalid(name, 'declares pointerModifiers without perform or performAt: modifiers ride the hover and pointer actions they receive');
+    }
+  }
   if (spec.selectsDevice !== undefined) {
     if (typeof spec.selectsDevice !== 'boolean') throw invalid(name, 'selectsDevice must be a boolean');
     if (spec.selectsDevice && spec.prepare === undefined) throw invalid(name, 'declares selectsDevice without prepare: prepare binds the device --device names');
@@ -338,6 +345,7 @@ export function defineEngine<
   if (spec.actions !== undefined) handle['actions'] = declaredKinds(name, 'actions', spec.actions, KNOWN_LOCATOR_ACTION_KINDS);
   if (spec.tapModifiers === true) handle['tapModifiers'] = true;
   if (spec.tapButtons === true) handle['tapButtons'] = true;
+  if (spec.pointerModifiers === true) handle['pointerModifiers'] = true;
   if (spec.selectsDevice === true) handle['selectsDevice'] = true;
   if (spec.grantsAllPermissions === true) handle['grantsAllPermissions'] = true;
   if (spec.launchArgumentValues === true) handle['launchArgumentValues'] = true;

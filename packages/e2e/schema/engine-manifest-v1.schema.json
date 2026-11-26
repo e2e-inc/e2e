@@ -124,6 +124,10 @@
     "tapButtons": {
       "type": "boolean"
     },
+    "pointerModifiers": {
+      "description": "performAt honors modifiers on the tap kinds and hover, and perform on hover.",
+      "type": "boolean"
+    },
     "selectsDevice": {
       "description": "prepare binds the device e2e run --device names.",
       "type": "boolean"
@@ -195,6 +199,36 @@
             "contains": {
               "const": "engine/perform"
             }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "pointerModifiers": {
+            "const": true
+          }
+        },
+        "required": [
+          "pointerModifiers"
+        ]
+      },
+      "then": {
+        "properties": {
+          "methods": {
+            "anyOf": [
+              {
+                "contains": {
+                  "const": "engine/perform"
+                }
+              },
+              {
+                "contains": {
+                  "const": "engine/performAt"
+                }
+              }
+            ]
           }
         }
       }

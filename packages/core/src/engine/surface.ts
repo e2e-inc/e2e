@@ -200,6 +200,8 @@ export interface TargetSession {
   readonly tapModifiers: boolean;
   /** Whether the engine declared `tapButtons`, so the `tap`, `doubleTap`, and `multiTap` actions may carry `button`. */
   readonly tapButtons: boolean;
+  /** Whether the engine declared `pointerModifiers`, so the tap and `hover` pointer actions, and the node `hover` action, may carry `modifiers`. */
+  readonly pointerModifiers: boolean;
   /** Whether the engine implements `viewportIntersection`, so `toBeInViewport` can refuse before it waits for a match. */
   readonly measuresViewport: boolean;
   /** Captures one atomic agent observation; the harness redacts it downstream. */

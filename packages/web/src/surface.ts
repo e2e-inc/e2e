@@ -46,7 +46,7 @@ import {
   type ViewportSize,
 } from '@e2e-dev/core/engine';
 import { matchesText } from '@e2e-dev/core/engine';
-import { classifyActionError, classifyInputError, dispatchLocatorAction, dispatchPointerAction } from './actions.ts';
+import { chordKeys, classifyActionError, classifyInputError, dispatchLocatorAction, dispatchPointerAction, modifierKey, type ModifierKey } from './actions.ts';
 import { BrowserConnection, connectCdp, defaultChromiumSandbox, type BrowserLaunchOptions, type BrowserName } from './browser-connection.ts';
 import { grantedPermissions, grantPermissions } from './permissions.ts';
 import { AttemptSession, type AttemptTab, type StorageState } from './attempt-session.ts';
@@ -385,6 +385,13 @@ export class PlaywrightSurface {
    * replaces on `reset` or session restore.
    */
   private routes: StoredRoute[] = [];
+  /**
+   * The modifier keys each page holds down through `browser.keyboard`, so a
+   * pointer action with `modifiers` can hold exactly its own and restore
+   * these after it. A press releases every modifier it names, as it does in
+   * the browser. Keys sent through the raw Playwright page aren't seen.
+   */
+  private readonly heldModifiers = new WeakMap<Page, Set<ModifierKey>>();
 
   constructor(options: WebOptions) {
     this.browserName = typeof options.browser === 'string' ? options.browser : 'chromium';
@@ -1245,6 +1252,7 @@ export class PlaywrightSurface {
           currentOperation.signal.throwIfAborted();
           try {
             await dispatchLocatorAction(target, action, currentOperation, (other) => refs.lookup(other));
+            if (action.kind === 'press') this.releasedBy(page, action.key);
           } catch (cause) {
             // The input went out and its own tab closed: closing was what it did.
             if (dispatchedInput(cause) && session.tabClosed(page)) return;
@@ -1258,10 +1266,63 @@ export class PlaywrightSurface {
 
   /** One pointer action at a viewport point in CSS pixels, with nothing resolved behind it; see `dispatchPointerAction`. */
   performAt(point: ViewportPoint, action: PointerAction, operation: OperationContext): Promise<void> {
-    return this.acted(operation, this.guard(operation, `${action.kind} at point`, (currentOperation) => {
-      this.requireSession().requireObservation();
-      return dispatchPointerAction(this.requirePage(), point, action, currentOperation.signal);
+    return this.acted(operation, this.guard(operation, `${action.kind} at point`, async (currentOperation) => {
+      const session = this.requireSession();
+      session.requireObservation();
+      const page = this.requirePage();
+      let sent = false;
+      try {
+        await dispatchPointerAction(page, point, action, this.heldOn(page), currentOperation.signal, () => {
+          sent = !page.isClosed();
+        });
+      } catch (cause) {
+        // A gesture that closes its own tab can fail on the close, or on the
+        // key restore after it: closing was what it did. A gesture that was
+        // never sent to an open page did nothing, so it fails.
+        if (sent && session.tabClosed(page)) return;
+        throw cause;
+      }
     }, classifyInputError));
+  }
+
+  /**
+   * `browser.keyboard`'s `down`, `up`, or `press` on the current page,
+   * keeping its held modifiers in step. `down` and `up` count a modifier
+   * before it is sent, as Playwright counts it, and a press releases the
+   * modifiers it names once it is sent.
+   */
+  async keyboardKey(method: 'down' | 'up' | 'press', key: string): Promise<void> {
+    const page = this.requirePage();
+    if (method === 'press') {
+      await page.keyboard.press(key);
+      this.releasedBy(page, key);
+      return;
+    }
+
+    const modifier = modifierKey(key);
+    if (modifier !== undefined && method === 'down') this.heldOn(page).add(modifier);
+    if (modifier !== undefined && method === 'up') this.heldOn(page).delete(modifier);
+    await page.keyboard[method](key);
+  }
+
+  /** The modifier keys the page holds down; see `heldModifiers`. */
+  private heldOn(page: Page): Set<ModifierKey> {
+    let held = this.heldModifiers.get(page);
+    if (held === undefined) {
+      held = new Set();
+      this.heldModifiers.set(page, held);
+    }
+    return held;
+  }
+
+  /** Forgets each modifier `key` names, `Shift+Tab` or `Shift`: a press or a release lets go of it. */
+  private releasedBy(page: Page, key: string): void {
+    const held = this.heldModifiers.get(page);
+    if (held === undefined) return;
+    for (const part of chordKeys(key)) {
+      const modifier = modifierKey(part);
+      if (modifier !== undefined) held.delete(modifier);
+    }
   }
 
   /**
@@ -1286,6 +1347,7 @@ export class PlaywrightSurface {
       checkpoint();
       if (options.replace) {
         await page.keyboard.press('ControlOrMeta+A');
+        this.releasedBy(page, 'ControlOrMeta+A');
         checkpoint();
         await page.keyboard.press('Delete');
         checkpoint();
@@ -1296,9 +1358,11 @@ export class PlaywrightSurface {
 
   /** Sends one key to whatever holds focus, in the contract's key grammar Playwright shares. */
   pressKey(key: string, operation: OperationContext): Promise<void> {
-    return this.acted(operation, this.guard(operation, 'keyboard.press', () => {
+    return this.acted(operation, this.guard(operation, 'keyboard.press', async () => {
       this.requireSession().requireObservation();
-      return this.requirePage().keyboard.press(key);
+      const page = this.requirePage();
+      await page.keyboard.press(key);
+      this.releasedBy(page, key);
     }, classifyInputError));
   }
 

@@ -934,8 +934,21 @@ void screen.getByRole('menuitem').hover(hoverOptions);
 void screen.getByRole('image').dblclick({ position: { x: '50', y: 0 } });
 // @ts-expect-error a hover position has both coordinates.
 void screen.getByRole('menuitem').hover({ position: { x: 1 } });
-// @ts-expect-error a hover holds no keys.
+// Modifiers ride every tap verb with a position, and hover with or without one.
+void screen.getByRole('row').click({ position: { x: 4, y: '50%' }, modifiers: ['Shift'] });
+void screen.getByRole('row').dblclick({ position: point, modifiers: ['ControlOrMeta'] });
+void screen.getByRole('row').secondaryTap({ position: point, modifiers: ['Alt', 'Shift'] });
 void screen.getByRole('menuitem').hover({ modifiers: ['Shift'] });
+void screen.getByRole('menuitem').hover({ position: point, modifiers: ['Alt'], timeout: 1_000 });
+// @ts-expect-error a hover holds key modifiers only.
+void screen.getByRole('menuitem').hover({ modifiers: ['a'] });
+declare const pointHover: Extract<import('../../src/engine/index.ts').PointerAction, { kind: 'hover' }>;
+void (pointHover.modifiers satisfies readonly KeyModifier[] | undefined);
+declare const pointTap: Extract<import('../../src/engine/index.ts').PointerAction, { kind: 'multiTap' }>;
+void (pointTap.modifiers satisfies readonly KeyModifier[] | undefined);
+// @ts-expect-error a long press at a point holds no keys.
+void ({ kind: 'longPress', modifiers: ['Shift'] } satisfies import('../../src/engine/index.ts').PointerAction);
+void (engine.pointerModifiers satisfies boolean | undefined);
 // @ts-expect-error a secondary tap is one right click; count and button ride tap and click only.
 void screen.getByRole('row').secondaryTap({ count: 2, position: point });
 // @ts-expect-error the executor's point verbs aim at screenshot pixels, never percentages.

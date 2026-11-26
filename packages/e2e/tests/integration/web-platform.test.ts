@@ -403,6 +403,75 @@ test('a percentage position is of the part of the node its frame and the viewpor
   expect(await tapped(tall, { x: '50%', y: '50%' })).toEqual([expect.stringMatching(/^tall 100 \\d+ shown$/)]);
 });
 
+test('taps and hovers at a position hold exactly the modifiers they name', async ({ app, screen, browser }) => {
+  await app.open();
+  await browser.evaluate(() => {
+    document.body.innerHTML =
+      '<div role="button" aria-label="Pad" style="position: absolute; left: 20px; top: 30px; width: 200px; height: 100px"></div>';
+    const pad = document.querySelector('div')!;
+    const seen = { clicks: [] as string[], moved: '', keys: [] as string[] };
+    (window as unknown as { seen: typeof seen }).seen = seen;
+    const report = (event: MouseEvent) => {
+      const box = pad.getBoundingClientRect();
+      const held = [event.altKey && 'Alt', event.ctrlKey && 'Control', event.metaKey && 'Meta', event.shiftKey && 'Shift'].filter(Boolean);
+      return [event.clientX - box.left, event.clientY - box.top, held.join('+') || 'none'].join(' ');
+    };
+    pad.addEventListener('click', (event) => seen.clicks.push(report(event)));
+    pad.addEventListener('mousemove', (event) => { seen.moved = report(event); });
+    window.addEventListener('keydown', (event) => seen.keys.push('down ' + event.key));
+    window.addEventListener('keyup', (event) => seen.keys.push('up ' + event.key));
+    return null;
+  });
+  const pad = screen.getByRole('button', { name: 'Pad' });
+  const seen = () => browser.evaluate(() => (window as unknown as { seen: { clicks: string[]; moved: string; keys: string[] } }).seen);
+  await pad.click({ position: { x: 10, y: 20 }, modifiers: ['Shift'] });
+  expect(await seen()).toMatchObject({ clicks: ['10 20 Shift'], keys: ['down Shift', 'up Shift'] });
+  await pad.hover({ position: { x: '25%', y: 8 }, modifiers: ['Alt'] });
+  expect((await seen()).moved).toBe('50 8 Alt');
+  await pad.hover({ modifiers: ['Shift'] });
+  expect((await seen()).moved).toBe('100 50 Shift');
+
+  const reset = () =>
+    browser.evaluate(() => {
+      (window as unknown as { seen: { clicks: string[]; keys: string[] } }).seen.clicks = [];
+      (window as unknown as { seen: { clicks: string[]; keys: string[] } }).seen.keys = [];
+      return null;
+    });
+  await reset();
+  await browser.keyboard.down('Shift');
+  await pad.click({ position: { x: 5, y: 6 }, modifiers: ['Alt'] });
+  await pad.dblclick({ position: { x: 7, y: 8 } });
+  await browser.keyboard.up('Shift');
+  await pad.tap({ position: { x: 9, y: 10 } });
+  expect(await seen()).toMatchObject({
+    // Shift, held by the test, is released for the Alt click and pressed again after it.
+    clicks: ['5 6 Alt', '7 8 Shift', '7 8 Shift', '9 10 none'],
+    keys: ['down Shift', 'down Alt', 'up Shift', 'up Alt', 'down Shift', 'up Shift'],
+  });
+
+  // A press that names a held key, or a release by its side's name, lets go of it, so no click restores it.
+  await reset();
+  await browser.keyboard.down('Shift');
+  await browser.keyboard.press('Shift+ArrowDown');
+  await pad.click({ position: { x: 1, y: 2 }, modifiers: ['Alt'] });
+  await browser.keyboard.down('Shift');
+  await browser.keyboard.up('ShiftLeft');
+  await pad.click({ position: { x: 3, y: 4 }, modifiers: ['Alt'] });
+  expect(await seen()).toMatchObject({
+    clicks: ['1 2 Alt', '3 4 Alt'],
+    keys: ['down Shift', 'down Shift', 'down ArrowDown', 'up ArrowDown', 'up Shift', 'down Alt', 'up Alt', 'down Shift', 'up Shift', 'down Alt', 'up Alt'],
+  });
+});
+
+test('a modified hover without a position waits for a node an overlay covers', async ({ app, browser, screen }) => {
+  await app.open();
+  await browser.evaluate(() => {
+    document.body.innerHTML = '<button>Under</button><div style="position: fixed; inset: 0"></div>';
+    return null;
+  });
+  await screen.getByRole('button', { name: 'Under' }).hover({ modifiers: ['Shift'], timeout: 500 });
+});
+
 test('a trigger that starts no download times out saying so', async ({ app, browser }) => {
   await app.open('/downloads');
   await browser.waitForDownload(() => new Promise((resolve) => setTimeout(resolve, 200)), { timeout: 500 });
@@ -720,6 +789,7 @@ describe('web platform integration', () => {
     'taps use the requested mouse button, count, and position',
     'double taps, secondary taps, and hovers land at the position they name',
     'a percentage position is of the part of the node its frame and the viewport show',
+    'taps and hovers at a position hold exactly the modifiers they name',
     'a viewport set before the first navigation holds through app.open',
     'an empty class attribute is an empty class list',
     'reads wait for a node that arrives late',
@@ -739,6 +809,17 @@ describe('web platform integration', () => {
     const steps = result.attempts[0]!.steps.filter((step) => step.api.startsWith('expect.') || step.api === 'locator.waitFor');
     expect(steps).toHaveLength(5);
     for (const step of steps) expect(step.durationMs, step.api).toBeLessThan(3000);
+  });
+
+  it('fails a modified hover on a covered node as Playwright does, naming what covers it', () => {
+    const result = resultByTitle(outcome, 'a modified hover without a position waits for a node an overlay covers');
+    expect(result.status).toBe('failed');
+    expect(result.attempts[0]!.error).toMatchObject({
+      code: 'ACTION_FAILED',
+      message: expect.stringMatching(/^hover did not become actionable in time: .*intercepts pointer events/),
+    });
+    const hover = result.attempts[0]!.steps.find((step) => step.api === 'locator.hover');
+    expect(hover).toMatchObject({ status: 'failed', label: 'getByRole("button", name: "Under") with Shift' });
   });
 
   it('fails an action under an absent frame with LOCATOR_NOT_FOUND once its timeout has run', () => {
