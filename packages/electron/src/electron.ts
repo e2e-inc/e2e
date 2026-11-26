@@ -8,13 +8,11 @@ import { ConfigurationError, stepTimeout, type EngineFixtureContext, type Locato
 import type { ElectronSurface, ElectronWindow, WindowMatcher } from './surface.ts';
 
 /**
- * The main process's `electron` module as a function passed to `evaluate`
- * receives it. Typed loosely: this package does not depend on Electron's
- * types; annotate the parameter with `typeof import('electron')` in a project
- * that has them.
+ * The main process's `electron` module, as a function passed to `evaluate`
+ * receives it: typed by the project's own `electron` package, the optional
+ * peer every Electron project installs.
  */
-// oxlint-disable-next-line typescript/no-explicit-any -- the module's type is the project's Electron version's, which this package cannot name
-export type ElectronMainModule = any;
+export type ElectronMainModule = typeof import('electron');
 
 /** Deterministic Electron app management exposed to tests as `electron`. */
 export interface Electron {

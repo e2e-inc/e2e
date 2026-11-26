@@ -742,6 +742,9 @@ importers:
       e2e:
         specifier: workspace:*
         version: link:../e2e
+      electron:
+        specifier: 45.5.0
+        version: 45.5.0
       typescript:
         specifier: 7.0.2
         version: 7.0.2

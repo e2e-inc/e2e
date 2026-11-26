@@ -30,6 +30,11 @@ test.describe('sign-in window', () => {
     // @ts-expect-error A function that takes an argument must be given one.
     const missingArgument = (): Promise<number> => electron.evaluate((_main, arg: { readonly times: number }) => arg.times);
     expect(typeof missingArgument).toBe('function');
+    // The module is typed by the project's electron package.
+    expect(await electron.evaluate(({ app: main }) => main.isReady())).toBe(true);
+    // @ts-expect-error Electron's app has no such method.
+    const unknownMethod = (): Promise<unknown> => electron.evaluate(({ app: main }) => main.notAnElectronMethod());
+    expect(typeof unknownMethod).toBe('function');
   });
 
   test('reads controls by test id and placeholder, and refuses an empty password', async ({ screen }) => {
