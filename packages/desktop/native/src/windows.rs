@@ -190,8 +190,12 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
     let server: Vec<ServerWindow> = server_windows().into_iter().filter(|window| window.pid == pid).collect();
     let mut out = Vec::new();
     let mut listed = Vec::new();
+    let mut unresolved = 0;
     for (element, id) in &accessible {
-        let Some(id) = *id else { continue };
+        let Some(id) = *id else {
+            unresolved += 1;
+            continue;
+        };
         let entry = server.iter().find(|window| window.id == id);
         let values = element.attributes(&["AXTitle", "AXMinimized", "AXPosition", "AXSize", "AXSubrole", "AXMain"]).unwrap_or_else(|_| vec![None; 6]);
         let title = values[0].as_ref().and_then(|value| value.text().map(str::to_owned));
@@ -247,7 +251,19 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
             system: false,
         });
     }
+    complete(listed.len(), unresolved)?;
     Ok(out)
+}
+
+/// Refuses a window list that holds none of the app's accessibility windows while some had no window server id yet: the
+/// app has a window, and a list without it would read as an app with none, which a negative assertion could take as
+/// proof. A retryable stall: the id is there a moment later.
+fn complete(listed: usize, unresolved: usize) -> Outcome<()> {
+    if listed == 0 && unresolved > 0 {
+        return Err(Failure::refused(codes::APP_UNRESPONSIVE, format!("{unresolved} window(s) of the app have no window server id yet"))
+            .with_details(serde_json::json!({ "retryable": true })));
+    }
+    Ok(())
 }
 
 /// The accessibility element of a window of `pid` by its window server id.
@@ -277,7 +293,16 @@ pub fn open_menus(pid: i32) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::system_dialog;
+    use super::{complete, system_dialog};
+
+    #[test]
+    fn refuses_a_window_list_that_left_out_every_window_it_could_not_name() {
+        assert!(complete(0, 0).is_ok(), "an app with no window");
+        assert!(complete(2, 1).is_ok(), "another window was listed");
+        let stall = complete(0, 1).expect_err("the only window has no id yet");
+        assert_eq!(stall.code, crate::failure::codes::APP_UNRESPONSIVE);
+        assert_eq!(stall.details.and_then(|details| details.get("retryable").cloned()), Some(serde_json::json!(true)));
+    }
 
     #[test]
     fn tells_siri_from_an_app_dialog() {
