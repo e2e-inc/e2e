@@ -1072,8 +1072,9 @@ await expect(screen.getByRole('slider', { name: 'Media' })).toBeVisible();
 On Android a volume press opens the system volume panel over the app, so
 the next read shows its sliders until the panel hides itself a few seconds
 later. `power` turns the screen off, and the screen cannot be read until it
-is on again: a read or an action times out. Two quick `power` presses are
-Android's camera shortcut, so they open the camera instead of waking the app.
+is on again: a read or an action times out. Two quick `power` presses can
+trigger the phone's double-press shortcut, which opens the camera on a stock
+emulator, instead of waking the app.
 
 | Button | Android emulator or phone | Android TV | iOS simulator | Physical iPhone or iPad |
 | --- | --- | --- | --- | --- |
