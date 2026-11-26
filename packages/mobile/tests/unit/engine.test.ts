@@ -3231,6 +3231,7 @@ describe('device fixture', () => {
       });
       await expect(device.installApp(missing, { reinstall: true })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
     }
+    await expect(device.installApp('')).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
     expect(h.fake.calls.slice(before)).toEqual([]);
   });
 

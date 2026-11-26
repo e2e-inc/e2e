@@ -1052,7 +1052,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     const resolved = path.resolve(this.projectRoot, build);
     // A path the test passed is the test's own mistake when nothing is there;
     // agent-device would refuse it as a device failure (exit 3).
-    if (appPath !== undefined && !existsSync(resolved)) {
+    if (appPath !== undefined && (appPath.trim() === '' || !existsSync(resolved))) {
       throw new TestError('INVALID_ARGUMENT', `device.installApp(${JSON.stringify(appPath)}): no build at ${resolved}; the path resolves against the project root`);
     }
     const selection = this.selection();
