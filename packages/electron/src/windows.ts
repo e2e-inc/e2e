@@ -6,7 +6,7 @@
 import type { Page } from 'playwright-core';
 import { pollCondition, type NodeRef, type OperationContext } from '@e2e-dev/core/engine';
 import { invalidState, notActionable, stale } from './errors.ts';
-import { waitDeadline } from './input-gate.ts';
+import { Budget } from './budget.ts';
 
 /** The observation root's id: one surface, one root, whichever window it reads. */
 export const ROOT_ID = 'window';
@@ -124,9 +124,9 @@ export class Windows {
   }
 
   /** The current window, or why there is none. */
-  require(running: boolean): AppWindow {
+  require(): AppWindow {
     const window = this.current();
-    if (window === undefined) throw invalidState(running ? 'the app has no open window' : 'the app is not running: open it with app.open()');
+    if (window === undefined) throw invalidState('the app has no open window');
     return window;
   }
 
@@ -174,7 +174,7 @@ export class Windows {
     let listed: Awaited<ReturnType<Windows['list']>> = [];
     let shown: ElectronWindow | undefined;
     await pollCondition({
-      deadline: waitDeadline(operation),
+      deadline: new Budget(operation, 'electron.useWindow').waits,
       signal: operation.signal,
       negated: false,
       evaluate: async () => {
