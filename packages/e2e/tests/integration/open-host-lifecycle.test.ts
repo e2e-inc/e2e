@@ -285,6 +285,26 @@ describe('openHost: lifecycle', { timeout: 60_000 }, () => {
     expect(fake.stats().disposes).toBe(1);
   });
 
+  it('host close during a failed launch\'s retirement waits for the launch to release publication', async () => {
+    const disposing = gate();
+    const release = heldGate();
+    const fake = createFakeEngine({
+      onStartAttempt: () => { throw new Error('launch broke'); },
+      onEndAttempt: () => { throw new Error('isolation did not close'); },
+      onDispose: async () => { disposing.resolve(); await release.promise; },
+    });
+    const opened = await host(fake.engine);
+    const replacement = await host(createFakeEngine().engine);
+    const opening = opened.openSession({ name: 'retiring launch' }).then(() => 'opened', (cause: unknown) => cause);
+    await disposing.promise;
+    const closing = opened.close();
+    release.resolve();
+    expect((await closing).map((error) => error.message).join('\n')).toContain('isolation did not close');
+    const next = await replacement.openSession({ name: 'after retired host closed' });
+    expect(await next.close()).toEqual([]);
+    expect(await opening).toMatchObject({ message: 'launch broke' });
+  });
+
   it('retires the host when a launch cancelled after it opened cannot end its attempt', async () => {
     const controller = new AbortController();
     const fake = createFakeEngine({
