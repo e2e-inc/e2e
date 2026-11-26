@@ -148,12 +148,28 @@ describe('nodeOp', () => {
     expect(host).toBe('closed');
   });
 
+  it('tells focus taken from focus moved away and from focus never taken', async () => {
+    await page.setContent(`<input id="field"><div id="plain">Plain</div><input id="hands-off"><input id="elsewhere">`);
+    await page.evaluate(() => document.querySelector('#hands-off')!.addEventListener('focus', () => (document.querySelector('#elsewhere') as HTMLInputElement).focus()));
+    expect(await run(await element('#field'), 'focus')).toBe('held');
+    expect(await run(await element('#plain'), 'focus')).toBe('none');
+    expect(await run(await element('#hands-off'), 'focus')).toBe('moved');
+  });
+
+  it('points at the value an option has when a label names none', async () => {
+    await page.setContent(`<select id="kind"><option value="work">Work</option></select>`);
+    expect(await run(await element('#kind'), 'checkSelect', { label: 'work' })).toEqual({ ok: false, reason: 'no option matches {"label":"work"}; the options are "Work"; an option has the value "work": pass { value: "work" }' });
+  });
+
   it('says which focused elements take typed text', async () => {
-    await page.setContent(`<input id="text"><input id="box" type="checkbox"><textarea id="ro" readonly></textarea><div id="host" contenteditable="true"></div>`);
+    await page.setContent(`<input id="text"><input id="box" type="checkbox"><textarea id="ro" readonly></textarea><div id="host" contenteditable="true"></div><ul id="list" role="listbox" tabindex="0"></ul><button id="button">B</button>`);
     expect(await run(await element('#text'), 'takesText')).toBe(true);
     expect(await run(await element('#box'), 'takesText')).toBe(false);
     expect(await run(await element('#ro'), 'takesText')).toBe(false);
     expect(await run(await element('#host'), 'takesText')).toBe(true);
+    // A listbox takes typed keys as typeahead; a button would take a space as a click.
+    expect(await run(await element('#list'), 'takesText')).toBe(true);
+    expect(await run(await element('#button'), 'takesText')).toBe(false);
   });
 });
 

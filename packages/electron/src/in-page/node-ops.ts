@@ -24,8 +24,8 @@ export interface NodeOps {
   /** Whether a click at the viewport point lands on the element, a node inside it, or a label for it. */
   hitTest(x: number, y: number): Readiness;
   scrollIntoView(): void;
-  /** Focuses the element; true when it holds focus after. */
-  focus(): boolean;
+  /** Focuses the element: `held` when it holds focus after, `moved` when the app sent focus elsewhere, `none` when it cannot take focus and focus stayed where it was. */
+  focus(): 'held' | 'moved' | 'none';
   blur(): void;
   /** A text field or editing host that is enabled and not read-only. */
   checkEditable(): Readiness;
@@ -36,7 +36,6 @@ export interface NodeOps {
   setValue(value: string): Readiness | null;
   /** Focuses the element and selects its whole content; false when the app moved focus away. */
   selectContents(): boolean;
-  deleteSelection(): void;
   /** A checkbox's or radio's checked state, or `aria-checked` on a role that has one; null when it has none (a toggle button's `aria-pressed` is not a checked state, as on the web). */
   readChecked(): boolean | null;
   /** A `<select>` that is enabled and holds the option, enabled. */
@@ -108,7 +107,10 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
     else if (wanted.value !== undefined) index = options.findIndex((option) => option.value === wanted.value);
     else index = byLabel >= 0 ? byLabel : options.findIndex((option) => !option.hasAttribute('label') && option.text.trim() === wanted.label);
     const option = options[index];
-    if (option === undefined) return { ok: false, reason: `no option matches ${JSON.stringify(wanted)}; the options are ${options.map((each) => JSON.stringify(each.label)).join(', ')}` };
+    if (option === undefined) {
+      const byValue = wanted.label !== undefined && options.some((each) => each.value === wanted.label) ? `; an option has the value ${JSON.stringify(wanted.label)}: pass { value: ${JSON.stringify(wanted.label)} }` : '';
+      return { ok: false, reason: `no option matches ${JSON.stringify(wanted)}; the options are ${options.map((each) => JSON.stringify(each.label)).join(', ')}${byValue}` };
+    }
     // :disabled covers an option a disabled group holds.
     if (option.matches(':disabled')) return { ok: false, reason: `option ${JSON.stringify(option.label)} is disabled` };
     return { index };
@@ -146,8 +148,16 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
     },
     focus() {
       const target = attached();
+      // Whether the element took focus at all, even for a moment: an app's focus handler can send it on at once.
+      let took = false;
+      const onFocus = (): void => {
+        took = true;
+      };
+      target.addEventListener('focus', onFocus, { once: true });
       if (target instanceof HTMLElement || target instanceof SVGElement) target.focus();
-      return holdsFocus(target);
+      target.removeEventListener('focus', onFocus);
+      if (holdsFocus(target)) return 'held';
+      return took ? 'moved' : 'none';
     },
     blur() {
       const target = attached();
@@ -197,9 +207,6 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       selection?.removeAllRanges();
       selection?.addRange(range);
       return true;
-    },
-    deleteSelection() {
-      attached().ownerDocument.execCommand('delete');
     },
     readChecked() {
       const target = attached();

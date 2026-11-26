@@ -133,8 +133,9 @@ async function longPress(step: Step, action: ActionOf<'longPress'>): Promise<voi
 }
 
 async function focus(step: Step): Promise<void> {
-  // pressSequentially focuses, then types into whatever holds focus: the node must be the one that does.
-  if (!(await step.commit(() => step.devtools.callOn(step.window.page, step.backendNodeId, 'focus')))) throw lostFocus();
+  // pressSequentially focuses, then types into whatever holds focus: the node must be the one that does. An element that
+  // cannot take focus leaves it where it was, as on the web; the typing that follows says nothing takes text.
+  if ((await step.commit(() => step.devtools.callOn(step.window.page, step.backendNodeId, 'focus'))) === 'moved') throw lostFocus();
 }
 
 /** Scrolls the element into view, waiting until it has a box to scroll to: an element that is not rendered cannot be. */
@@ -163,8 +164,9 @@ async function fill(step: Step, value: string): Promise<void> {
   }
   // The app's focus handler can hand focus on; text goes only to the node that still holds it.
   if (!(await step.commit(() => devtools.callOn(window.page, backendNodeId, 'selectContents')))) throw lostFocus();
-  // Both edit the selection as typing would, with input events and no key events, as fill promises.
-  if (value === '') await step.commit(() => devtools.callOn(window.page, backendNodeId, 'deleteSelection'));
+  // Text replaces the selection as typing would, with input events and no key events, as fill promises; an empty value
+  // is a Delete key, as Playwright's fill sends it, so an editor that keeps its own model sees beforeinput.
+  if (value === '') await step.commit(() => window.page.keyboard.press('Delete'));
   else await step.commit(() => window.page.keyboard.insertText(value));
 }
 
@@ -324,7 +326,7 @@ export async function typeText(context: ActionContext, window: AppWindow, text: 
       gate();
       await keyboard.press('Delete');
     }
-    // No key goes out once the caller stopped waiting.
+    // One character at a time, through the gate: no key goes out once the caller stopped waiting.
     for (const character of text) {
       gate();
       await keyboard.type(character);
