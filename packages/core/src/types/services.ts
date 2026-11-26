@@ -103,12 +103,12 @@ type CopyableValue<Value> = Value extends URL | URLSearchParams
 
 /**
  * The type a yielded service value must have. A yielded value is a plain object
- * whose values are `CopyableValue`. An array, a map, a set, or a built-in like
- * `Date` maps to `never` at the top level, because only a plain object is
- * accepted by the runner there. In `defineService`, the yielded type is
- * compared with this type.
+ * whose values are `CopyableValue`. An array, a map, a set, a function, or a
+ * built-in like `Date` maps to `never` at the top level, because only a plain
+ * object is accepted by the runner there. In `defineService`, the yielded type
+ * is compared with this type.
  */
-export type CopyableServiceValue<Value> = Value extends readonly unknown[] | ReadonlyMap<unknown, unknown> | ReadonlySet<unknown> | CopiedLeaf
+export type CopyableServiceValue<Value> = Value extends readonly unknown[] | ReadonlyMap<unknown, unknown> | ReadonlySet<unknown> | CopiedLeaf | ((...args: never) => unknown)
   ? never
   : CopyableValue<Value>;
 

@@ -1449,6 +1449,13 @@ defineService({
   },
 });
 
+defineService({
+  // @ts-expect-error a service yields a plain object, not a function
+  async *start() {
+    yield () => 'http://127.0.0.1:4010';
+  },
+});
+
 declare const server: import('node:http').Server;
 
 defineService({
@@ -1466,8 +1473,22 @@ defineConfig({
   bogus: true,
 });
 
+// @ts-expect-error E2EConfig has no key called reporter
+defineConfig({ reporter: ['list'], targets: [{ engine: paneEngine }] });
 // @ts-expect-error E2EConfig has no key called service
 defineConfig({ service: { mailbox }, targets: [{ engine: paneEngine }] });
+
+// A service configured behind a condition may be missing from the fixture.
+declare const withMailbox: boolean;
+const optionalServicesConfig = {
+  services: withMailbox ? { mailbox } : {},
+  targets: [{ engine: paneEngine }],
+} as const satisfies E2EConfig;
+test.extend<{}, {}, typeof optionalServicesConfig>()('reads an optional service', async ({ services }) => {
+  // @ts-expect-error mailbox is missing when the condition is false
+  void services.mailbox.url;
+  void services.mailbox?.url;
+});
 
 // A test, a group, and a call each pin a configured agent by name.
 test('as the buyer', { agent: 'buyer' }, async () => {});

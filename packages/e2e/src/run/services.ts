@@ -70,13 +70,6 @@ type CopyCheck = {
   readonly onFunction?: (call: ServiceFunction, path: ValuePath) => unknown;
   /** Maps original objects to their copies so shared and circular references stay intact. */
   readonly copies: Map<object, unknown>;
-  /**
-   * Objects whose copy holds a function. A map or a set that reaches one of
-   * them through `copies` refuses it, as it would if it walked the object.
-   */
-  readonly holders: Set<object>;
-  /** Plain objects and arrays being walked, outermost first. A function marks each of them as a holder. */
-  readonly walking: object[];
 };
 
 /** Lifecycle callbacks fired while starting services. */
@@ -126,15 +119,34 @@ export async function startServices(
   const values: Record<string, unknown> = Object.create(null);
   const functions: { readonly path: ValuePath; readonly call: ServiceFunction }[] = [];
   const copies = new Map<object, unknown>();
-  const holders = new Set<object>();
 
   const stop = async (onFailure: (cause: unknown) => void): Promise<void> => {
-    for (const service of started.splice(0).toReversed()) {
-      try {
-        await stopService(service, force);
-      } catch (cause) {
-        onFailure(cause);
+    const stopping = started.splice(0).toReversed();
+
+    // A forced stop aborts every service's signal right away, since one
+    // service's stop code can wait on another that stops after it.
+    const abortAll = (): void => {
+      for (const service of stopping) {
+        service.controller.abort();
       }
+    };
+
+    if (force.aborted) {
+      abortAll();
+    } else {
+      force.addEventListener('abort', abortAll, { once: true });
+    }
+
+    try {
+      for (const service of stopping) {
+        try {
+          await stopService(service, force);
+        } catch (cause) {
+          onFailure(cause);
+        }
+      }
+    } finally {
+      force.removeEventListener('abort', abortAll);
     }
   };
 
@@ -145,6 +157,11 @@ export async function startServices(
       }
 
       hooks.starting(name);
+
+      // A handler of the starting event can cancel the run.
+      if (signal.aborted) {
+        break;
+      }
 
       const startedAt = Date.now();
       const value = await startService(name, service, signal, started);
@@ -166,8 +183,6 @@ export async function startServices(
           return null;
         },
         copies,
-        holders,
-        walking: [],
       });
 
       hooks.ready(name, Date.now() - startedAt);
@@ -197,8 +212,6 @@ export async function startServices(
             to: 'the caller',
             refuse: (problem) => new Error(`it returned ${problem}`),
             copies: new Map(),
-            holders: new Set(),
-            walking: [],
           });
 
           return { result: encode(copy) };
@@ -433,10 +446,6 @@ function copyValue(value: unknown, path: ValuePath, check: CopyCheck, inside?: '
       throw check.refuse(`a function${where}, but only plain objects and arrays can hold functions for tests`);
     }
 
-    for (const holder of check.walking) {
-      check.holders.add(holder);
-    }
-
     return check.onFunction((args) => Reflect.apply(value, undefined, args), path);
   }
 
@@ -444,24 +453,21 @@ function copyValue(value: unknown, path: ValuePath, check: CopyCheck, inside?: '
     const copied = check.copies.get(value);
 
     if (copied !== undefined) {
-      if (inside !== undefined && check.holders.has(value)) {
+      if (inside !== undefined && reachesFunction(value, new Set())) {
         throw check.refuse(`${Array.isArray(value) ? 'an array' : 'an object'} holding a function${where}, but only plain objects and arrays can hold functions for tests`);
       }
 
       return copied;
     }
 
-    if (Array.isArray(value)) {
+    if (Array.isArray(value) && Object.getPrototypeOf(value) === Array.prototype) {
       const copy: unknown[] = [];
 
       check.copies.set(value, copy);
-      check.walking.push(value);
 
       for (const [index, item] of value.entries()) {
         copy.push(copyValue(item, [...path, index], check, inside));
       }
-
-      check.walking.pop();
 
       return copy;
     }
@@ -471,13 +477,10 @@ function copyValue(value: unknown, path: ValuePath, check: CopyCheck, inside?: '
       const copy: Record<string, unknown> = Object.create(null);
 
       check.copies.set(value, copy);
-      check.walking.push(value);
 
       for (const [key, item] of Object.entries(value)) {
         copy[key] = copyValue(item, [...path, key], check, inside);
       }
-
-      check.walking.pop();
 
       return copy;
     }
@@ -532,6 +535,37 @@ function copyValue(value: unknown, path: ValuePath, check: CopyCheck, inside?: '
   return value;
 }
 
+/**
+ * Whether `value` reaches a function through plain objects, arrays, maps, and
+ * sets. A map or a set that reaches an object already copied checks it this
+ * way, so the result doesn't depend on the order the walk visited it in.
+ */
+function reachesFunction(value: unknown, seen: Set<object>): boolean {
+  if (typeof value === 'function') {
+    return true;
+  }
+
+  if (typeof value !== 'object' || value === null || seen.has(value)) {
+    return false;
+  }
+
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.some((item) => reachesFunction(item, seen));
+  }
+
+  if (value instanceof Map) {
+    return [...value].some(([key, item]) => reachesFunction(key, seen) || reachesFunction(item, seen));
+  }
+
+  if (value instanceof Set) {
+    return [...value].some((item) => reachesFunction(item, seen));
+  }
+
+  return isPlainObject(value) && Object.values(value).some((item) => reachesFunction(item, seen));
+}
+
 /** Formats a value path like property access: `email.sent`, `email.inboxes[0].read`. */
 function pathLabel(path: ValuePath): string {
   return path
@@ -551,7 +585,7 @@ function describe(value: unknown): string {
     return String(value);
   }
 
-  if (Array.isArray(value)) {
+  if (Array.isArray(value) && Object.getPrototypeOf(value) === Array.prototype) {
     return 'an array';
   }
 
@@ -639,8 +673,6 @@ function serviceFunction(index: number, label: string, caller: ServiceCaller): (
       to: 'the service',
       refuse: (problem) => new TestError('INVALID_ARGUMENT', `${label} was passed ${problem}`),
       copies: new Map(),
-      holders: new Set(),
-      walking: [],
     });
 
     const reply = await caller(index, encode(copy));

@@ -670,6 +670,54 @@ test('reads each type', async ({ services }) => {
     expect(runErrors(outcome)).toEqual([error]);
   });
 
+  it.each(['the plain object', 'the map'])('refuses a function a map reaches through a shared reference when %s is walked first', async (first) => {
+    const outcome = await runInProcess(
+      { 'tests/a.e2e.ts': PASSING_TEST },
+      {
+        services: {
+          inbox: defineService({
+            async *start() {
+              const shared: { owner?: unknown } = {};
+              const owner = { shared, read: () => 1 };
+
+              shared.owner = owner;
+
+              const map = new Map([[1, shared]]);
+
+              yield first === 'the map' ? { map, owner } : { owner, map };
+            },
+          }),
+        },
+      },
+    );
+
+    expect(runErrors(outcome).map(({ code }) => code)).toEqual(['INVALID_SERVICE_VALUE']);
+  });
+
+  it('refuses an instance of an array subclass', async () => {
+    class Inboxes extends Array<string> {}
+
+    const outcome = await runInProcess(
+      { 'tests/a.e2e.ts': PASSING_TEST },
+      {
+        services: {
+          inbox: defineService({
+            async *start() {
+              yield { inboxes: Inboxes.from(['ada']) };
+            },
+          }),
+        },
+      },
+    );
+
+    expect(runErrors(outcome)).toEqual([
+      {
+        code: 'INVALID_SERVICE_VALUE',
+        message: 'service "inbox" yielded an instance of Inboxes at inboxes, which loses its class when it\'s copied to tests. Put its data in a plain object',
+      },
+    ]);
+  });
+
   it('aborts the signal and fails the run when a service does not yield within the start limit', async () => {
     let reason: unknown;
 
@@ -787,6 +835,73 @@ test('reads each type', async ({ services }) => {
     );
 
     expect(runErrors(outcome)).toEqual(errors);
+  });
+
+  it('starts no service code when a handler of the starting event cancels the run', async () => {
+    const interrupt = new AbortController();
+    let entered = false;
+
+    const outcome = await runInProcess(
+      { 'tests/a.e2e.ts': PASSING_TEST },
+      {
+        services: {
+          inbox: defineService({
+            async *start() {
+              entered = true;
+              yield {};
+            },
+          }),
+        },
+      },
+      {
+        interruptSignal: interrupt.signal,
+        onEvent: (event: RunEvent) => {
+          if (event.type === 'setup' && event.state === 'started' && event.step.kind === 'service') {
+            interrupt.abort();
+          }
+        },
+      },
+    );
+
+    expect(outcome.status).toBe('interrupted');
+    expect(entered).toBe(false);
+  });
+
+  it('aborts the signal of every started service on a second Ctrl+C, so stop code can wait on another service', async () => {
+    const interrupt = new AbortController();
+    const force = new AbortController();
+    let resolveFirstAborted = (): void => undefined;
+    const firstAborted = new Promise<void>((resolve) => {
+      resolveFirstAborted = resolve;
+    });
+    const events: string[] = [];
+
+    const outcome = await runInProcess(
+      { 'tests/a.e2e.ts': PASSING_TEST },
+      {
+        services: {
+          first: defineService({
+            async *start({ signal }) {
+              signal.addEventListener('abort', () => resolveFirstAborted());
+              yield {};
+            },
+          }),
+          second: defineService({
+            shutdownTimeout: 1000,
+            async *start() {
+              yield {};
+              force.abort();
+              await firstAborted;
+              events.push('stop second');
+            },
+          }),
+        },
+      },
+      { interruptSignal: interrupt.signal, forceSignal: force.signal, onEvent: interruptOnceStarted(interrupt, 'second') },
+    );
+
+    expect(runErrors(outcome)).toEqual([]);
+    expect(events).toEqual(['stop second']);
   });
 
   it('runs the stop code with the signal live after a first Ctrl+C', async () => {
