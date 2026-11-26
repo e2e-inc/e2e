@@ -221,6 +221,25 @@ describe('browser.clock', () => {
     });
   });
 
+  it('keeps a failed or refused call\'s effect the same in the page, the next document, and after app.clearState()', async () => {
+    await inAttempt(async (engine, clock) => {
+      await clock.install({ time: T0 });
+      await clock.pauseAt(T0 + HOUR);
+      await open(engine);
+      await surfaceOf(engine)!.page().evaluate(() => { setTimeout(() => { throw new Error('boom'); }, 10); });
+      // Playwright logs a call for the next document before it runs it, so a failed one counts there too.
+      await expect(clock.runFor(100)).rejects.toMatchObject({ code: 'EVALUATE_FAILED' });
+      // A refused one must not reach that log.
+      await expect(clock.pauseAt(T0)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+      expect((await read(engine)).now).toBe(T0 + HOUR + 100);
+      await open(engine);
+      expect((await read(engine)).now).toBe(T0 + HOUR + 100);
+      await engine.session!.reset!(operation());
+      await open(engine);
+      expect((await read(engine)).now).toBe(T0 + HOUR + 100);
+    });
+  });
+
   it('fails a call whose page timer throws as the page\'s, and bounds a timer loop that never ends', async () => {
     await inAttempt(async (engine, clock) => {
       await clock.install({ time: T0 });

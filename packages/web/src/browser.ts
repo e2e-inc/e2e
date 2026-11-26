@@ -42,6 +42,7 @@ import {
   clockTicksLabel,
   clockTime,
   clockTimeLabel,
+  pausedInThePast,
   translateClockError,
   type BrowserClock,
   type ClockCall,
@@ -685,10 +686,18 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
     return handle;
   };
 
-  /** Runs one checked clock call as the step's operation. */
-  const runClock = (call: ClockCall): Promise<void> =>
-    surface.guard(context.operation(), `browser.clock.${call.method}`, () => surface.clock(call), (cause, label) =>
-      translateClockError(cause, label, call.method));
+  /**
+   * Runs one checked clock call as the step's operation. `pauseAt` is
+   * compared with the page clock first: Playwright logs a call for the next
+   * documents before it runs it, so a time it refused would still move them.
+   */
+  const runClock = (call: ClockCall): Promise<void> => {
+    const label = `browser.clock.${call.method}`;
+    return surface.guard(context.operation(), label, async () => {
+      if (call.method === 'pauseAt' && call.ms < ((await surface.clockNow()) ?? -Infinity)) throw pausedInThePast(label);
+      await surface.clock(call);
+    }, (cause) => translateClockError(cause, label, call.method));
+  };
 
   /** Unregisters the stored routes `match` selects, newest first. */
   const removeRoutes = async (match: (stored: StoredRoute) => boolean): Promise<void> => {

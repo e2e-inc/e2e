@@ -69,7 +69,7 @@ import { CLOSED_SHADOW_ROOTS_INIT_SCRIPT, CLOSED_SHADOW_ROOTS_KEY } from './clos
 import { MODAL_ORDER_INIT_SCRIPT } from './modal-dialogs.ts';
 import { ConfiguredInitScripts, type WebInitScript } from './init-scripts.ts';
 import type { WebMedia } from './media.ts';
-import { applyClockCall, type ClockCall, type ClockHost } from './clock.ts';
+import { applyClockCall, readClockNow, type ClockCall, type ClockHost } from './clock.ts';
 import { SECURE_FIELD_SELECTOR, type RawNodeData } from './read-node.ts';
 import { readSelector, takeReadsFunction } from './read-selector.ts';
 import { credentialOrigins, httpCredentials, installConfiguredHeaders, lowercaseNames, configuredHeadersFor } from './protected-app.ts';
@@ -710,18 +710,37 @@ export class PlaywrightSurface {
   }
 
   /**
-   * Runs one clock call on the current context, then logs it for a context
-   * that replaces this one. The attempt counts as using the clock from the
-   * start of the call: Playwright installs the clock before a call can fail.
-   * The log is the one this attempt started with, so a call that resolves
-   * after its step timed out never reaches the next attempt's.
+   * Runs one clock call on the current context and logs it for a context
+   * that replaces this one. Playwright logs the call for the context's next
+   * documents before it runs it, so the call is logged whether it succeeds
+   * or fails, and a replacement context replays what a new document would.
+   * The attempt counts as using the clock from the start of the call:
+   * Playwright installs the clock before a call can fail. The log is the one
+   * this attempt started with, so a call that resolves after its step timed
+   * out never reaches the next attempt's.
    */
   async clock(call: ClockCall): Promise<void> {
     const setup = this.documentSetup;
     const { clock } = this.requireContext();
     this.clockState.used = true;
-    await applyClockCall(clock, call);
-    setup.push({ clock: call });
+    try {
+      await applyClockCall(clock, call);
+    } finally {
+      setup.push({ clock: call });
+    }
+  }
+
+  /**
+   * The latest time a page clock of the current context reads, across every
+   * frame, or undefined when none has one yet. Playwright runs a call in
+   * every frame and fails it when one frame refuses, so the latest decides.
+   */
+  async clockNow(): Promise<number | undefined> {
+    const frames = this.requireContext().pages().flatMap((page) => page.frames());
+    // A frame that detaches or navigates while it is read has no clock to compare with.
+    const times = await Promise.all(frames.map((frame) => frame.evaluate(readClockNow).catch(() => undefined)));
+    const read = times.filter((time) => typeof time === 'number');
+    return read.length === 0 ? undefined : Math.max(...read);
   }
 
   // --- network routes shared with the browser fixture ---

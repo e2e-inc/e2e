@@ -345,11 +345,6 @@ const MEDIA = `<!doctype html>
 </html>`;
 
 /**
- * A form for the screenshot caret test: light-DOM editables, a secure field,
- * an editable inside a closed shadow root whose own stylesheet asks for a red
- * caret, and an iframe holding one more input.
- */
-/**
  * Time as the page reads it: the instant it loaded, a timer due a second
  * after load, and an element far below the fold for scrolling and viewport
  * reads under a paused clock.
@@ -369,6 +364,11 @@ setTimeout(() => { document.getElementById('timer').textContent = 'fired'; }, 10
 </body>
 </html>`;
 
+/**
+ * A form for the screenshot caret test: light-DOM editables, a secure field,
+ * an editable inside a closed shadow root whose own stylesheet asks for a red
+ * caret, and an iframe holding one more input.
+ */
 const CARET = `<!doctype html>
 <html>
 <head><title>Fixture Caret</title></head>

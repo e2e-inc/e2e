@@ -1402,8 +1402,10 @@ await browser.clock.fastForward('30:00'); // jumps 30 minutes, firing each due t
   It holds through navigation, `app.restart()`, and `app.clearState()`, and
   ends with the attempt.
 - `app.clearState()` and session restore replay the clock's calls on the new
-  context. A paused or fixed clock comes back as it was. A running one
-  loses the real time that passed before the clear.
+  context, as a new document does: a call that failed, such as a `runFor`
+  whose timer threw, counts, and a refused `pauseAt` does not. A paused or
+  fixed clock comes back as it was. A running one loses the real time that
+  passed before the clear.
 - Only the page's time moves. The test's timeouts, `expect` polling, and the
   agent's waits keep real time, so a paused clock never holds a step.
 - A [CDP recovery](#recovering-a-cdp-transport) after the attempt used the clock fails the

@@ -51,9 +51,26 @@ export type ClockCall =
   | { readonly method: 'install' | 'pauseAt' | 'setFixedTime' | 'setSystemTime' | 'fastForward' | 'runFor'; readonly ms: number }
   | { readonly method: 'resume' };
 
-/** Playwright's clock as a page sees it: `builtins` keeps the native time functions the fakes replaced. */
+/**
+ * Playwright's clock as a page sees it: `builtins` keeps the native time
+ * functions the fakes replaced, and `controller.now()` reads the clock.
+ */
 export interface ClockHost {
-  readonly __pwClock?: { readonly builtins: Pick<Window, 'requestAnimationFrame' | 'setTimeout'> };
+  readonly __pwClock?: {
+    readonly builtins: Pick<Window, 'requestAnimationFrame' | 'setTimeout'>;
+    readonly controller: { now(): number };
+  };
+}
+
+/** Runs in a frame: the time its page clock reads, or undefined before the clock is installed there. */
+export function readClockNow(): number | undefined {
+  // oxlint-disable-next-line no-underscore-dangle -- Playwright's name for its page clock
+  return (globalThis as ClockHost).__pwClock?.controller.now();
+}
+
+/** `pauseAt` to a time before the clock's current time: the test's argument, refused. */
+export function pausedInThePast(label: string, cause?: unknown): TestError {
+  return new TestError('INVALID_ARGUMENT', `${label}: the time is before the clock's current time`, cause === undefined ? undefined : { cause });
 }
 
 /**
@@ -157,8 +174,6 @@ export function translateClockError(cause: unknown, label: string, method: Clock
     return translatePwError(cause, label);
   }
   // Only pauseAt moves the clock to a time; runFor and fastForward take ticks, refused below zero.
-  if (method === 'pauseAt' && first === 'Error: Cannot fast-forward to the past') {
-    return new TestError('INVALID_ARGUMENT', `${label}: the time is before the clock's current time`, { cause });
-  }
+  if (method === 'pauseAt' && first === 'Error: Cannot fast-forward to the past') return pausedInThePast(label, cause);
   return new TestError('EVALUATE_FAILED', `${label}: a page timer threw: ${first}`, { cause });
 }
