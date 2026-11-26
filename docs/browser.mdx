@@ -450,8 +450,8 @@ file by `context.suggestedFilename`, the name the site suggested, as
 
 Such a service can't tell a new download from an older file of the same
 name. Implement `before` to note what is already stored: the engine calls it
-once per `waitForDownload` or `waitForDownloads`, before the trigger runs,
-and passes its result to each `read` of that wait as `context.before`. A
+once per `waitForDownload` or `waitForDownloads`, before the trigger, and
+passes its result to each `read` of that wait as `context.before`. A
 `before` that throws fails the wait with `ENGINE_FAILURE`, naming the
 provider.
 
