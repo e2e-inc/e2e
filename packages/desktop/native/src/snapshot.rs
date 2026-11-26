@@ -17,9 +17,6 @@ const MAX_NODES: usize = 8_000;
 /// all, so a long list costs only what the node budget already bounds, and a window cut short is one too large to read.
 const MAX_CHILDREN: usize = MAX_NODES;
 
-/// The longest value read, in characters.
-const MAX_VALUE_CHARS: usize = 1_000_000;
-
 /// Every attribute one request reads of a node.
 const ATTRIBUTES: [&str; 17] = [
     "AXRole",
@@ -135,10 +132,6 @@ fn missed(error: ax::AXError) -> bool {
 
 fn label(value: Option<String>) -> Option<String> {
     value.filter(|text| !text.trim().is_empty())
-}
-
-fn cap(text: String) -> String {
-    if text.len() <= MAX_VALUE_CHARS { text } else { text.chars().take(MAX_VALUE_CHARS).collect() }
 }
 
 /// What a node's attributes say, read in one request.
@@ -466,7 +459,7 @@ impl Walk {
             }
             None => None,
         };
-        let text_value = if secure { None } else { read.value.as_ref().and_then(Value::display).map(cap) };
+        let text_value = if secure { None } else { read.value.as_ref().and_then(Value::display) };
         let name = read
             .title
             .clone()
