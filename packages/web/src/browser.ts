@@ -822,7 +822,7 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
   const expectationDeps: ExpectationDeps = { currentUrl, currentTitle, baseHref, deadlineFor, context };
   const expectation = createBrowserExpectation(expectationDeps);
 
-  const identity = surface.browserIdentity();
+  const identity = surface.browserIdentity(() => context.signal);
 
   const browser: Omit<Browser, keyof Expectable<BrowserExpectation>> = {
     get name() {

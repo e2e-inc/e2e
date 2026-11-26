@@ -905,14 +905,16 @@ export class PlaywrightSurface {
    * reads: a fixture kept past its attempt gets no answer from the next
    * attempt's browser, which a provider may have leased anew. The owner is
    * the session, not an attempt id, because the members of a serial group
-   * share one session under ids of their own.
+   * share one session under ids of their own. `ended` is the fixture's own
+   * signal: a fixture first made after its attempt ended would otherwise
+   * take the next attempt's session for its own.
    */
-  browserIdentity(): () => { readonly name: BrowserName; readonly version: string } {
+  browserIdentity(ended: () => AbortSignal): () => { readonly name: BrowserName; readonly version: string } {
     let owner = this.session;
     return () => {
       const session = this.requireSession();
       owner ??= session;
-      if (session !== owner) throw invalidState('the attempt this browser belongs to has ended');
+      if (session !== owner || ended().aborted) throw invalidState('the attempt this browser belongs to has ended');
       const { browser } = session.current();
       const name = browser.browserType().name();
       if (!isBrowserName(name)) {

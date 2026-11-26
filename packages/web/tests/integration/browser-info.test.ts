@@ -50,6 +50,19 @@ afterAll(async () => {
   rmSync(artifactsDir, { recursive: true, force: true });
 });
 
+/** The `browser` fixture of the engine's attempt; `signal` is the one that attempt's harness gives it. */
+function fixtureOf(engine: EngineHandle, signal: AbortSignal): Browser {
+  return engine.fixtures!['browser']!({
+    operation,
+    signal,
+    timeouts: { test: 30_000 },
+    app: { resolveUrl: (url: string) => new URL(url, app.url).href },
+    expectable: (target: object) => target,
+    fixture: (_name: string, target: object) => target,
+    attachArtifact: () => undefined,
+  } as unknown as EngineFixtureContext) as Browser;
+}
+
 /** Runs `body` in one attempt of an engine built from `options`, with the app open, then disposes the engine. */
 async function withBrowser(options: WebOptions, body: (browser: Browser, engine: EngineHandle) => Promise<void>): Promise<void> {
   const engine = web(options);
@@ -60,14 +73,7 @@ async function withBrowser(options: WebOptions, body: (browser: Browser, engine:
   });
   try {
     await engine.startAttempt!({ attemptId: 'info', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
-    const browser = engine.fixtures!['browser']!({
-      operation,
-      timeouts: { test: 30_000 },
-      app: { resolveUrl: (url: string) => new URL(url, app.url).href },
-      expectable: (target: object) => target,
-      fixture: (_name: string, target: object) => target,
-      attachArtifact: () => undefined,
-    } as unknown as EngineFixtureContext) as Browser;
+    const browser = fixtureOf(engine, new AbortController().signal);
     await body(browser, engine);
   } finally {
     await engine.dispose!(cleanup());
@@ -140,6 +146,18 @@ describe('browser identity outside an attempt', () => {
       await engine.startAttempt!({ attemptId: 'next', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
       expect(() => browser.name).toThrow(expect.objectContaining({ code: 'INVALID_STATE' }));
       expect(() => browser.version).toThrow(expect.objectContaining({ code: 'INVALID_STATE' }));
+    });
+  }, 60_000);
+
+  it('is INVALID_STATE on a fixture first made after its attempt ended, while the next one runs', async () => {
+    await withBrowser({}, async (_browser, engine) => {
+      const ended = new AbortController();
+      await engine.endAttempt!(cleanup());
+      ended.abort();
+      await engine.startAttempt!({ attemptId: 'next', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
+      const late = fixtureOf(engine, ended.signal);
+      expect(() => late.name).toThrow(expect.objectContaining({ code: 'INVALID_STATE' }));
+      expect(() => late.version).toThrow(expect.objectContaining({ code: 'INVALID_STATE' }));
     });
   }, 60_000);
 });

@@ -582,7 +582,7 @@ test('exports a PDF', async ({ app, browser }) => {
   the runner's machine. For a hosted browser, read `navigator.platform`
   with [`evaluate`](#evaluate).
 - To tell Chrome from Edge, read `navigator.userAgentData.brands` with
-  [`evaluate`](#evaluate). Chromium exposes it only on HTTPS and loopback pages.
+  [`evaluate`](#evaluate). Chromium exposes it only in a secure context: an HTTPS, loopback, or `file:` page.
 
 #### `goto`
 
