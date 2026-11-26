@@ -468,7 +468,7 @@ test('always fails', { retries: 1 }, async () => {
   );
 
   it(
-    'keeps a passed setup attempt when afterAll crashes the worker, and skips its dependents',
+    'fails a passed setup attempt when afterAll crashes the worker, and skips its dependents',
     async () => {
       const setupFile = `import { test } from 'e2e';
 
@@ -492,11 +492,11 @@ test('starts with the seeded state', { session: 'seeded' }, async ({ app }) => {
         { appUrl: app.url, configSource: workerConfigSource(1) },
       );
       const setup = resultByTitle(outcome, 'seed storage');
-      expect(setup.status).toBe('passed');
-      expect(setup.attempts.map((attempt) => [attempt.index, attempt.status, attempt.cleanup])).toEqual([
-        [0, 'passed', 'forced'],
+      expect(setup.status).toBe('failed');
+      expect(setup.attempts.map((attempt) => [attempt.index, attempt.status, attempt.error?.code, attempt.cleanup])).toEqual([
+        [0, 'failed', 'WORKER_CRASH', 'forced'],
       ]);
-      expect(setup.attempts[0]!.secondaryErrors.map((error) => error.code)).toEqual(['WORKER_CRASH']);
+      expect(setup.attempts[0]!.secondaryErrors).toEqual([]);
       expect(resultByTitle(outcome, 'starts with the seeded state').skip?.cause).toBe('setup-failed');
       assertValidReport(outcome.report);
       project.cleanup();
