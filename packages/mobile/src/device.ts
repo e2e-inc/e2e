@@ -182,7 +182,7 @@ export interface Device {
    * machine: `xcrun simctl addmedia` on an iOS simulator, which adds a copy
    * on every call, and on Android `adb push` to `/sdcard/Pictures` under the
    * file's own name, which replaces an earlier file of that name, then a
-   * media scan; there, two names in a call that differ at most in case, and
+   * media scan, and it returns once the media index lists the file; there, two names in a call that differ at most in case, and
    * a name starting with a dot (hidden from the library), are
    * `INVALID_ARGUMENT`. A physical iPhone, a device a provider leased, and a device
    * behind a remote agent-device daemon are `UNSUPPORTED_CAPABILITY`; a path
