@@ -356,20 +356,26 @@ const BOX_STATES: usize = 3;
 /// Presses a box until it shows `target`, at most once per state it can show: an AppKit box goes mixed, on, off, so
 /// unchecking a mixed box takes two presses. `settle` waits for the state a press led to. It stops early when the state
 /// cannot be read or a press changed nothing, so a box that does not answer is not pressed again and again. A failed
-/// first press sent nothing; a failed later one follows a press that landed.
+/// first press sent nothing; a failed later one follows a press that landed. A press that answered with an error but
+/// may have landed is judged by the state it led to: a SwiftUI control in a sheet answers its first press so.
 fn press_to_state(target: u8, shown: Option<u8>, mut press: impl FnMut() -> Outcome<()>, mut settle: impl FnMut() -> Option<u8>) -> Outcome<bool> {
     if shown == Some(target) {
         return Ok(true);
     }
     let mut before = shown;
     for attempt in 0..BOX_STATES {
-        press().map_err(|failure| if attempt == 0 { failure } else { failure.delivered() })?;
+        let pressed = press().map_err(|failure| if attempt == 0 { failure } else { failure.delivered() });
+        if let Err(failure) = &pressed
+            && failure.delivery == Delivery::NotDelivered
+        {
+            return pressed.map(|()| false);
+        }
         let now = settle();
         if now == Some(target) {
             return Ok(true);
         }
         if now.is_none() || now == before {
-            return Ok(false);
+            return pressed.map(|()| false);
         }
         before = now;
     }
@@ -379,10 +385,16 @@ fn press_to_state(target: u8, shown: Option<u8>, mut press: impl FnMut() -> Outc
 /// The most presses a stepper gets to reach a value.
 const MAX_STEPS: usize = 500;
 
+/// Whether two stepper values are the same number: a step of 0.1 sums to 0.30000000000000004, not 0.3.
+fn same(a: f64, b: f64) -> bool {
+    (a - b).abs() <= 1e-9 * a.abs().max(b.abs()).max(1.0)
+}
+
 /// Steps a value toward `target`, one increment or decrement at a time, until it shows it. It stops when the value
-/// cannot be read, a step changed nothing, or a step went past the target (the step does not divide the distance).
-/// It never steps past `deadline`: the steps sent by then stay sent, delivered but unverified. A failed first step
-/// sent nothing; a failed later one follows steps that landed.
+/// cannot be read or a step changed nothing. A step that went past the target (the step does not divide the distance)
+/// is stepped back, so a value the stepper cannot take leaves it as it was. It never steps past `deadline`: the steps
+/// sent by then stay sent, delivered but unverified. A failed first step sent nothing; a failed later one follows steps
+/// that landed. A step that answered with an error but may have landed is judged by the value it led to.
 fn step_to(
     target: f64,
     shown: Option<f64>,
@@ -392,7 +404,7 @@ fn step_to(
 ) -> Outcome<bool> {
     let Some(mut now) = shown else { return Ok(false) };
     for attempt in 0..MAX_STEPS {
-        if now == target {
+        if same(now, target) {
             return Ok(true);
         }
         if Instant::now() >= deadline {
@@ -400,14 +412,29 @@ fn step_to(
             return Err(if attempt == 0 { failure } else { failure.delivered() });
         }
         let up = now < target;
-        step(up).map_err(|failure| if attempt == 0 { failure } else { failure.delivered() })?;
-        let Some(next) = settle() else { return Ok(false) };
-        if next == now || (up && next > target) || (!up && next < target) {
-            return Ok(next == target);
+        let stepped = step(up).map_err(|failure| if attempt == 0 { failure } else { failure.delivered() });
+        if let Err(failure) = &stepped
+            && failure.delivery == Delivery::NotDelivered
+        {
+            return stepped.map(|()| false);
+        }
+        let Some(next) = settle() else { return stepped.map(|()| false) };
+        if same(next, now) {
+            return stepped.map(|()| false);
+        }
+        if !same(next, target) && ((up && next > target) || (!up && next < target)) {
+            // Put back the value it had: a fill the stepper cannot take must not leave it changed.
+            let back = step(!up).is_ok() && settle().is_some_and(|value| same(value, now));
+            let failure = Failure::unconfirmed(codes::ACTION_FAILED, format!("the stepper steps from {now} to {next}, past {target}"));
+            return Err(if back {
+                Failure { message: format!("{}; it was stepped back to {now}", failure.message), ..failure }
+            } else {
+                Failure { message: format!("{}, and could not be stepped back", failure.message), ..failure }
+            });
         }
         now = next;
     }
-    Ok(now == target)
+    Ok(same(now, target))
 }
 
 /// The number a text names, when it names a finite one: `NaN` or `inf` is no value a control can take.
@@ -821,14 +848,16 @@ mod tests {
             3.0,
             Some(0.0),
             later(),
-            |_| {
-                value.set(value.get() + 2.0);
+            |up| {
+                value.set(value.get() + if up { 2.0 } else { -2.0 });
                 Ok(())
             },
             || Some(value.get()),
         );
-        assert!(!past.unwrap());
-        assert_eq!(value.get(), 4.0);
+        let failure = past.expect_err("2 does not divide 3");
+        assert_eq!(failure.delivery, crate::failure::Delivery::Unknown);
+        assert!(failure.message.contains("stepped back to 2"), "{}", failure.message);
+        assert_eq!(value.get(), 2.0);
         let count = Cell::new(0);
         let stuck = step_to(
             3.0,
@@ -899,6 +928,56 @@ mod tests {
         assert_eq!(open.details.and_then(|details| details.get("menu").cloned()), Some(serde_json::json!("open")));
         let missing = super::unclosed(Failure::refused(codes::ELEMENT_NOT_FOUND, "no option"), false);
         assert_eq!((missing.code, missing.delivery), (codes::ELEMENT_NOT_FOUND, Delivery::Unknown));
+    }
+
+    #[test]
+    fn steps_by_a_fraction_to_a_value_it_reaches_only_up_to_rounding() {
+        let value = Cell::new(0.0);
+        let reached = step_to(
+            0.3,
+            Some(0.0),
+            later(),
+            |up| {
+                value.set(value.get() + if up { 0.1 } else { -0.1 });
+                Ok(())
+            },
+            || Some(value.get()),
+        );
+        assert!(reached.unwrap());
+    }
+
+    /// A failure that answered after the input was sent.
+    fn landed_with_an_error() -> crate::failure::Failure {
+        crate::failure::Failure::unconfirmed(crate::failure::codes::ACTION_FAILED, "the app's accessibility answered with a failure")
+    }
+
+    #[test]
+    fn judges_a_press_that_answered_with_an_error_by_the_state_it_led_to() {
+        let state = Cell::new(0);
+        let toggled = press_to_state(
+            1,
+            Some(0),
+            || {
+                state.set(1);
+                Err(landed_with_an_error())
+            },
+            || Some(state.get()),
+        );
+        assert!(toggled.unwrap());
+        let unchanged = press_to_state(1, Some(0), || Err(landed_with_an_error()), || Some(0));
+        assert_eq!(unchanged.expect_err("nothing changed").delivery, crate::failure::Delivery::Unknown);
+        let value = Cell::new(1.0);
+        let stepped = step_to(
+            3.0,
+            Some(1.0),
+            later(),
+            |_| {
+                value.set(value.get() + 1.0);
+                if value.get() == 2.0 { Err(landed_with_an_error()) } else { Ok(()) }
+            },
+            || Some(value.get()),
+        );
+        assert!(stepped.unwrap());
     }
 
     #[test]
