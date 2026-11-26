@@ -112,9 +112,9 @@ await device.openApp('com.example.app', { relaunch: true, permissions: { camera:
 
 ### Run the app in another language
 
-Set `app.locale` to a BCP 47 tag, such as `fr-FR` or `zh-Hans-CN`. Every
-fresh launch of the target's app runs in that language and region. Add one
-target per language:
+Set `app.locale` to a BCP 47 tag with a language, a script, and a region
+only, such as `fr-FR` or `zh-Hans-CN`. Every fresh launch of the target's
+app runs in that language and region. Add one target per language:
 
 ```ts
 {
@@ -130,32 +130,26 @@ To launch one test in another language, pass `locale` to `device.openApp`:
 await device.openApp('com.example.app', { relaunch: true, locale: 'ar-EG' });
 ```
 
-- On iOS the locale is the launch's `AppleLanguages` and `AppleLocale`
-  arguments. The device keeps its own language. Don't set those two
-  arguments in `launchArguments` as well. A phone that agent-device drives
-  through XCTest refuses launch arguments, so the launch fails with
-  `UNSUPPORTED_CAPABILITY`.
+- On iOS the locale becomes the launch's `AppleLanguages` and `AppleLocale`
+  arguments, so don't set those in `launchArguments` too. The device keeps
+  its own language.
 - On Android the engine sets the app's own language with this machine's
-  `adb` before the launch. It needs Android 13 or newer, and the app named by
-  its package, such as `com.example.app`, not its display name. The app's
-  earlier language comes back on its next fresh launch without a locale (a
-  relaunch, or an open after `device.closeApp()`), and at the end of the
-  run. A run that is killed, or an `adb` that fails or hangs at its end, leaves
-  the locale set.
-- `app.locale` fails at config load on a provider's Android devices, which
-  this machine's `adb` doesn't reach. For the same reason, a launch with a
-  locale fails with `UNSUPPORTED_CAPABILITY` when agent-device drives the
-  device through a remote daemon (`AGENT_DEVICE_DAEMON_BASE_URL`). It also fails on TestMu AI and
-  BrowserStack iOS devices, which drop launch arguments. Set `language` and
-  `locale` on `testmu()` or `browserstack()` instead. An `@e2e-dev/testmu`
-  older than 0.0.8 or an `@e2e-dev/browserstack` older than 0.1.2 does not
-  refuse it, and its iOS devices run the app in their own language.
-- The warm-up before the run opens the app without the locale. Start each
-  test with `app.open()`.
-- The tag takes a language, a script, and a region only, with no extension
-  such as `-u-ca-japanese`.
+  `adb` before the launch. It needs Android 13 or newer and the app's
+  package name, not its display name. The app's earlier language comes back
+  on its next fresh launch without a locale and at the end of the run,
+  unless the run is killed or `adb` fails then.
+- A provider's Android devices aren't on this machine's `adb`, and TestMu AI
+  and BrowserStack iOS devices drop launch arguments, so `app.locale` fails
+  there. Set `language` and `locale` on `testmu()` or `browserstack()`
+  instead. `@e2e-dev/testmu` before 0.0.8 and `@e2e-dev/browserstack` before
+  0.1.2 don't refuse it, and run the app in the device's language.
+- The warm-up opens the app without the locale. Start each test with
+  `app.open()`.
 - The app must ship the language. If it doesn't, the OS shows its
   development language.
+
+[Launch arguments and permissions](/reference/mobile#launch-arguments-and-permissions)
+lists every case that fails.
 
 ### Expo development builds
 
