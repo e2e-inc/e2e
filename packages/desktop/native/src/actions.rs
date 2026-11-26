@@ -504,10 +504,15 @@ fn select_all(element: &Element, deadline: Instant) -> Outcome<()> {
     if !settable(element, "AXSelectedTextRange", "select all")? {
         return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "select all: the field's selection cannot be set"));
     }
-    // A secure field shows no value, but still counts its characters.
+    // A secure field shows no value, but still counts its characters. A field with neither cannot be shown to be
+    // selected whole: a range of 0 would read as done and leave its text in place.
     let length = match element.attribute("AXNumberOfCharacters") {
         Ok(Value::Number(count)) if count >= 0.0 => count as usize,
-        _ => value_text(element).unwrap_or_default().encode_utf16().count(),
+        Err(ax::AX_CANNOT_COMPLETE) => return Err(unread(ax::AX_CANNOT_COMPLETE, "select all")),
+        _ => match value_text(element) {
+            Some(text) => text.encode_utf16().count(),
+            None => return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "select all: the field's length cannot be read")),
+        },
     };
     go("select all")?;
     element.set_range("AXSelectedTextRange", 0, length).map_err(|error| refused(error, "select all"))?;
