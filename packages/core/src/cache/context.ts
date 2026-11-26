@@ -133,7 +133,10 @@ export type CacheWrite = 'saved' | 'kept' | 'unconfirmed' | 'evicted' | 'no-chan
  * provenance too, and a page between the start and the end may carry a
  * fresh id on every run. The detours the run found (`detours`) do count:
  * they compare routes, not addresses, and an entry that kept an old
- * recording's detours would hide a new one from `e2e cache check`.
+ * recording's detours would hide a new one from `e2e cache check`. An entry
+ * recorded before detours were kept has none, which reads as an empty list:
+ * a flow with no detour leaves it as stored, so a committed cache does not
+ * churn once for every step that runs live.
  */
 async function holdsSameFlow(store: CacheStore, keyHash: string, trace: ActionTrace): Promise<boolean> {
   const existing = await store.read(keyHash);
@@ -147,9 +150,10 @@ function redactLocations(trace: ActionTrace, redact: (text: string) => string): 
 
 /** The part of a trace that decides what a replay does, as canonical JSON. */
 function flowOf(trace: ActionTrace): string {
-  const { summary: _summary, endWaitMs: _endWaitMs, keyedBy: _keyedBy, recordedBy: _recordedBy, actions, ...flow } = trace;
+  const { summary: _summary, endWaitMs: _endWaitMs, keyedBy: _keyedBy, recordedBy: _recordedBy, actions, detours, ...flow } = trace;
   return canonicalJson({
     ...flow,
+    ...(detours === undefined || detours.length === 0 ? {} : { detours }),
     actions: actions.map((recorded) => {
       const { at: _at, ...action } = recorded;
       if ('controlRole' in action) {

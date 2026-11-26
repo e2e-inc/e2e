@@ -371,6 +371,18 @@ describe('settleStagedTraces', () => {
     expect(readTraceEntry(JSON.parse(store.entries.get(KEY_A)!))?.payload.detours).toEqual([{ from: 0, to: 1 }]);
   });
 
+  it('keeps an entry recorded before detours were kept when the new recording has none', async () => {
+    const store = memoryStore();
+    const stored = trace('same actions');
+    store.entries.set(KEY_A, JSON.stringify(buildTraceEntry(stored)));
+    const before = store.entries.get(KEY_A);
+    const context = contextWith(store);
+    context.staged.push({ kind: 'write', keyHash: KEY_A, trace: { ...stored, detours: [] }, stepIndex: 1 });
+    const writes = await settleStagedTraces(context, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true });
+    expect(writes.get(1)).toBe('kept');
+    expect(store.entries.get(KEY_A)).toBe(before);
+  });
+
   it('masks a secret resolved while the store read for the same-flow check ran', async () => {
     const store = memoryStore();
     const ledger = new SecretLedger();
