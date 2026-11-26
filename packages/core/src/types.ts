@@ -531,9 +531,7 @@ export interface DragOptions extends ActionOptions {
   targetPosition?: Point;
   /**
    * How many pointer moves carry the drag from the press to the release
-   * point, a positive safe integer. Unset, the engine's own default. A count
-   * above the engine's own limit (1000 on the browser engine) is
-   * `UNSUPPORTED_CAPABILITY`.
+   * point, a positive safe integer. Unset, the engine's own default.
    */
   steps?: number;
 }

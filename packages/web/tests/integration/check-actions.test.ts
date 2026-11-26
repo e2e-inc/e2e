@@ -702,25 +702,6 @@ describe.each(KINDS)('a drag through the %s target', (kind) => {
     await sleep(300);
     expect((await moves()).length).toBe(sent);
   });
-
-  it('scrolls a drop point below the fold of a target taller than the viewport into view', async () => {
-    await page.setViewportSize({ width: 800, height: 600 });
-    await page.setContent(`<div id="card" style="position: absolute; left: 20px; top: 20px; width: 100px; height: 40px"></div>
-<div id="zone" style="position: absolute; left: 300px; top: 100px; width: 200px; height: 3000px"></div>
-${DRAG_LOG}`);
-    await drag(kind, { targetPosition: { x: 10, y: 2500 } });
-    expect((await dragged()).at(-1)).toBe('up zone 10,2500');
-  });
-
-  it('scrolls a drop point at the far end of a wide track into view in its scroller', async () => {
-    await page.setContent(`<div id="card" style="position: absolute; left: 20px; top: 20px; width: 100px; height: 40px"></div>
-<div style="position: absolute; left: 20px; top: 100px; width: 400px; overflow-x: auto">
-  <div id="zone" style="width: 2000px; height: 50px"></div>
-</div>
-${DRAG_LOG}`);
-    await drag(kind, { targetPosition: { x: 1900, y: 10 } });
-    expect((await dragged()).at(-1)).toBe('up zone 1900,10');
-  });
 });
 
 describe('a drag with options left unset', () => {
@@ -756,6 +737,30 @@ describe('a drag between zoomed, bordered nodes', () => {
   });
 });
 
+/** A card that stays on screen and a zone taller than an 800x600 viewport. */
+const TALL_ZONE_PAGE = `<div id="card" style="position: fixed; left: 20px; top: 20px; width: 100px; height: 40px"></div>
+<div id="zone" style="position: absolute; left: 300px; top: 100px; width: 200px; height: 3000px"></div>
+${DRAG_LOG}`;
+
+describe('a drop point below the fold of a target taller than the viewport', () => {
+  it('is scrolled into view by Playwright drag', async () => {
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.setContent(TALL_ZONE_PAGE);
+    await drag('locator', { targetPosition: { x: 10, y: 1500 } });
+    expect((await dragged()).at(-1)).toBe('up zone 10,1500');
+  });
+
+  it('is refused by the pointer drag before the button goes down', async () => {
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.setContent(TALL_ZONE_PAGE);
+    await expect(drag('element', { targetPosition: { x: 10, y: 1500 } })).rejects.toMatchObject({
+      code: 'NOT_ACTIONABLE',
+      message: expect.stringMatching(/^the drag destination position \(10, 1500\) is outside the viewport at \(310, \d+\) of 800x600: /),
+    });
+    expect(await dragged()).toEqual([]);
+  });
+});
+
 describe('a drag with the pointer, through element handles', () => {
   it('releases the button once the operation times out', async () => {
     await page.setContent(DRAG_PAGE);
@@ -763,7 +768,7 @@ describe('a drag with the pointer, through element handles', () => {
     expect((await dragged()).at(-1)).toMatch(/^up /);
   });
 
-  it('refuses a drop position outside the destination that lands on the control beside it', async () => {
+  it('refuses a drop position outside the destination before any input', async () => {
     await page.setContent(`<div id="card" style="position: absolute; left: 20px; top: 20px; width: 100px; height: 40px"></div>
 <div id="zone" style="position: absolute; left: 300px; top: 200px; width: 80px; height: 40px"></div>
 <button id="beside" style="position: absolute; left: 380px; top: 200px; width: 80px; height: 40px">Beside</button>
@@ -772,18 +777,64 @@ ${DRAG_LOG}`);
       code: 'NOT_ACTIONABLE',
       message: 'the drag cannot drop on its destination: its position (100, 5) is outside its 80x40 box',
     });
-    expect(await moves()).toEqual([]);
-    expect(await dragged()).not.toContainEqual(expect.stringMatching(/^up beside/));
+    expect(await dragged()).toEqual([]);
   });
 
-  it('refuses a drop point inside the destination that another element covers', async () => {
+  it('reports a failure after the press as possibly committed, never to be repeated', async () => {
+    await page.exposeFunction('pressed', () => page.close());
     await page.setContent(`${DRAG_PAGE}
-<div id="cover" style="position: absolute; left: 300px; top: 200px; width: 100px; height: 100px"></div>`);
-    await expect(drag('element', { targetPosition: { x: 10, y: 10 } })).rejects.toMatchObject({
-      code: 'NOT_ACTIONABLE',
-      message: 'the drag cannot drop on its destination: the drop point is on <div id="cover">, which is not inside it',
-    });
-    expect(await moves()).toEqual([]);
+<script>document.addEventListener('mousemove', (event) => { if (event.buttons === 1) window.pressed(); });</script>`);
+    const action: LocatorAction = { kind: 'dragTo', target: { id: 'zone', revision: '' }, steps: 1000 };
+    const zone = await targetOf('element', '#zone');
+    const failure = await dispatchLocatorAction(await targetOf('element', '#card'), action, NO_DEADLINE, async () => zone).then(
+      () => undefined,
+      (cause: unknown) => classifyActionError(cause, action),
+    );
+    expect(failure).toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });
+  });
+
+  it('picks up the HTML5 draggable it presses on after scrolling the destination into view', async () => {
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.setContent(`<div style="height: 1400px"></div>
+<div id="above" draggable="true" style="position: absolute; left: 20px; top: 300px; width: 100px; height: 30px">Above</div>
+<div id="card" draggable="true" style="position: absolute; left: 20px; top: 340px; width: 100px; height: 30px">Card</div>
+<div id="below" draggable="true" style="position: absolute; left: 20px; top: 380px; width: 100px; height: 30px">Below</div>
+<div id="zone" style="position: absolute; left: 300px; top: 700px; width: 200px; height: 100px"></div>
+<script>
+  window.dropped = [];
+  for (const node of document.querySelectorAll('[draggable]')) {
+    node.addEventListener('dragstart', (event) => event.dataTransfer.setData('text/plain', node.id));
+  }
+  const zone = document.getElementById('zone');
+  zone.addEventListener('dragover', (event) => event.preventDefault());
+  zone.addEventListener('drop', (event) => {
+    event.preventDefault();
+    window.dropped.push(event.dataTransfer.getData('text/plain'));
+  });
+</script>`);
+    await drag('element', {});
+    expect(await page.evaluate(() => (window as unknown as { dropped: string[] }).dropped)).toEqual(['card']);
+  });
+
+  it('drops at the centre of a destination that takes no pointer events', async () => {
+    await page.setContent(`<div id="card" style="position: absolute; left: 20px; top: 20px; width: 100px; height: 40px"></div>
+<div id="list" style="position: absolute; left: 300px; top: 200px; width: 200px; height: 100px">
+  <div id="zone" style="pointer-events: none; width: 100px; height: 40px"></div>
+</div>
+${DRAG_LOG}`);
+    await drag('element', {});
+    expect((await dragged()).at(-1)).toBe('up list 50,20');
+  });
+
+  it('drops at the centre of a destination inside a scaled frame', async () => {
+    const frame = `<body style="margin: 0"><div id="zone" style="margin: 100px 0 0 200px; width: 100px; height: 40px"></div>
+<script>document.addEventListener('mouseup', (event) => parent.dragged.push('up frame ' + event.target.id + ' ' + event.offsetX + ',' + event.offsetY));</script></body>`;
+    await page.setContent(`<div id="card" style="position: absolute; left: 20px; top: 20px; width: 100px; height: 40px"></div>
+<iframe style="position: absolute; left: 300px; top: 100px; width: 400px; height: 200px; border: 0; transform: scale(0.5); transform-origin: 0 0" srcdoc="${frame.replaceAll('"', '&quot;')}"></iframe>
+<script>window.dragged = [];</script>`);
+    const zone = await page.frameLocator('iframe').locator('#zone').elementHandle();
+    await drag('element', {}, NO_DEADLINE, { kind: 'element', element: zone });
+    expect(await page.evaluate(() => (window as unknown as { dragged: string[] }).dragged)).toEqual(['up frame zone 50,20']);
   });
 
   it('drops on a destination inside a closed shadow root', async () => {
@@ -800,18 +851,5 @@ ${DRAG_LOG}`);
     if (zone === null) throw new Error('the zone is not an element');
     await drag('element', { targetPosition: { x: 30, y: 20 } }, NO_DEADLINE, { kind: 'element', element: zone });
     expect(await dragged()).toEqual(['up host 336,226']);
-  });
-
-  it('drops on a destination inside a frame below the fold', async () => {
-    await page.setViewportSize({ width: 800, height: 600 });
-    const frame = `<div id="zone" style="width: 200px; height: 100px; border: 6px solid"></div>
-<script>document.addEventListener('mouseup', (event) => parent.dragged.push('up frame ' + event.target.id + ' ' + event.offsetX + ',' + event.offsetY));</script>`;
-    await page.setContent(`<div id="card" style="position: absolute; left: 20px; top: 20px; width: 100px; height: 40px"></div>
-<iframe style="position: absolute; left: 20px; top: 1500px; border: 0" srcdoc="${frame.replaceAll('"', '&quot;')}"></iframe>
-<script>window.dragged = [];</script>`);
-    const zone = await page.frameLocator('iframe').locator('#zone').elementHandle();
-    if (zone === null) throw new Error('the zone has no element');
-    await drag('element', { targetPosition: { x: 30, y: 20 } }, NO_DEADLINE, { kind: 'element', element: zone });
-    expect(await dragged()).toEqual(['up frame zone 30,20']);
   });
 });

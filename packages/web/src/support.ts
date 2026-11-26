@@ -30,6 +30,10 @@ function centreOf(rect: Rect): Point {
   return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
 }
 
+function withinViewport(point: Point, viewport: { width: number; height: number }): boolean {
+  return point.x >= 0 && point.y >= 0 && point.x <= viewport.width && point.y <= viewport.height;
+}
+
 /**
  * A resolved node is addressed either by a deterministic locator expression or
  * by an element handle made from one agent observation's element list.
@@ -92,6 +96,18 @@ function targetBoundingBox(target: ActionTarget, timeout: number): Promise<Rect 
     : target.element.boundingBox();
 }
 
+/** Minimal scroll that brings one target into view, without centring it. */
+async function scrollIntoViewNearest(target: ActionTarget): Promise<void> {
+  const scroll = (el: Element): void => {
+    el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  };
+  if (target.kind === 'locator') await target.locator.evaluate(scroll);
+  else await target.element.evaluate(scroll);
+}
+
+/** Where a drag presses or releases on one node: its centre, or `position` inside the node's `border`. */
+type DragAim = { readonly position: Point; readonly border: Point } | null;
+
 /**
  * Drags one target onto another with the pointer.
  *
@@ -101,7 +117,9 @@ function targetBoundingBox(target: ActionTarget, timeout: number): Promise<Rect 
  * locator: an unlabelled thumbnail, an empty drop zone. Driving the pointer
  * works for both kinds because a handle has a bounding box like anything else.
  * `drag` picks the press and release points and the number of moves, measured
- * as Playwright's `dragTo` measures them.
+ * as Playwright's `dragTo` measures them. A position is checked against its
+ * node's box, not against what covers it, and a release point the scroll to
+ * the destination node does not reveal is refused.
  */
 export async function performPointerDrag(
   source: ActionTarget,
@@ -112,185 +130,148 @@ export async function performPointerDrag(
   const deadline = new Deadline(operation.timeoutMs);
   const remaining = (): number => Math.max(1, deadline.remaining());
 
-  // Hover the source first: it auto-waits for actionability, scrolls the
-  // pressed point into view, and checks that nothing covers it.
+  // A position outside its node is refused before any input: hovering there
+  // would wait for another element to stop covering the point.
+  const sourceAim = await aimAt(source, drag.sourcePosition, 'the drag cannot press on its source', remaining());
+  const targetAim = await aimAt(destination, drag.targetPosition, 'the drag cannot drop on its destination', remaining());
+
+  // Hover the source first: it auto-waits for actionability and scrolls the
+  // source into view, and the gesture starts there, so its position is the one
+  // that has to hold.
   await asActionable(source).hover({ timeout: remaining(), ...obj({ position: drag.sourcePosition }) });
   const page = await targetPage(source);
-  const start = await dragPoint(source, drag.sourcePosition, 'source', remaining());
+  const viewport = await currentViewport(page);
+  let from = await targetBoundingBox(source, remaining());
+  let to = await targetBoundingBox(destination, remaining());
+
+  // A pointer can only be put at a viewport coordinate, so a destination below
+  // the fold has to be brought into view — `Locator.dragTo` scrolls both sides,
+  // and a pointer sequence that skips it aims where no element is and drops
+  // nothing.
+  //
+  // Neither obvious tool fits. `scrollIntoViewIfNeeded` centres the destination,
+  // which pushes the source out and costs the position hovering just
+  // established. `mouse.wheel` does not wait for the scroll it causes, so the
+  // boxes read after it are a race. `scrollIntoView({ block: 'nearest' })`
+  // scrolls the smallest amount that reveals the element, synchronously, which
+  // keeps both endpoints on screen whenever they can be.
+  if (to !== null && !withinViewport(pointOf(to, targetAim), viewport)) {
+    await scrollIntoViewNearest(destination);
+    from = await targetBoundingBox(source, remaining());
+    to = await targetBoundingBox(destination, remaining());
+  }
+
+  if (from === null || to === null) {
+    throw new EngineError('NOT_ACTIONABLE', 'a drag endpoint has no visible bounding box', {
+      retryable: false,
+    });
+  }
+  const start = pointOf(from, sourceAim);
+  const end = pointOf(to, targetAim);
+  // Endpoints that cannot be on screen together are reported rather than dragged
+  // between: a pointer sequence aimed off-screen looks like a drag that ran and
+  // leaves the page untouched, which surfaces later as a confusing assertion
+  // instead of the drag failure it is.
+  for (const [label, point, option, aim] of [
+    ['source', start, 'sourcePosition', sourceAim],
+    ['destination', end, 'targetPosition', targetAim],
+  ] as const) {
+    if (withinViewport(point, viewport)) continue;
+
+    const at = `(${Math.round(point.x)}, ${Math.round(point.y)}) of ${viewport.width}x${viewport.height}`;
+    if (aim !== null) {
+      throw new EngineError(
+        'NOT_ACTIONABLE',
+        `the drag ${label} position (${aim.position.x}, ${aim.position.y}) is outside the viewport at ${at}: ` +
+          `this drag scrolls only the node into view, so use a smaller ${option}, or locators that take Playwright's dragTo`,
+        { retryable: false },
+      );
+    }
+
+    throw new EngineError(
+      'NOT_ACTIONABLE',
+      `the drag ${label} is outside the viewport at ${at}: the two endpoints cannot be reached in one gesture`,
+      { retryable: false },
+    );
+  }
+
   operation.signal.throwIfAborted();
   await page.mouse.move(start.x, start.y);
+  operation.signal.throwIfAborted();
   await page.mouse.down();
 
   try {
-    // Like Playwright's drag, the drop point is brought into view once the
-    // button is down, so a source the scroll moves off screen still drags.
-    await revealDropPoint(destination, drag.targetPosition, remaining());
-    const end = await dragPoint(destination, drag.targetPosition, 'destination', remaining());
+    try {
+      // The moves are sent one at a time because `mouse.move` takes no timeout
+      // or signal, and a long drag must not keep moving, button held, after the
+      // operation ended. Without `steps`, 2 steps, then one more at the drop
+      // point: HTML5 drag-and-drop commits on `dragover`, and one move into the
+      // destination does not always produce one.
+      const steps = drag.steps ?? 2;
+      for (let step = 1; step <= steps; step += 1) {
+        operation.signal.throwIfAborted();
+        await page.mouse.move(start.x + (end.x - start.x) * (step / steps), start.y + (end.y - start.y) * (step / steps));
+      }
 
-    // The moves are sent one at a time because `mouse.move` takes no timeout
-    // or signal, and a long drag must not keep moving, button held, after the
-    // operation ended. Without `steps`, 2 steps keep the gesture drags were
-    // written against before the option existed.
-    const steps = drag.steps ?? 2;
-    for (let step = 1; step <= steps; step += 1) {
-      operation.signal.throwIfAborted();
-      await page.mouse.move(start.x + ((end.x - start.x) * step) / steps, start.y + ((end.y - start.y) * step) / steps);
+      if (drag.steps === undefined) {
+        operation.signal.throwIfAborted();
+        await page.mouse.move(end.x, end.y);
+      }
+    } finally {
+      await page.mouse.up();
     }
+  } catch (cause) {
+    // The operation's own timeout or cancel keeps its code. Anything else
+    // happened with the button down, so the page may have taken the drag,
+    // and the runner must not repeat it.
+    if (operation.signal.aborted && cause === operation.signal.reason) throw cause;
 
-    // One more move at the drop point without `steps`: HTML5 drag-and-drop
-    // commits on `dragover`, and one move into the destination does not
-    // always produce one.
-    if (drag.steps === undefined) {
-      operation.signal.throwIfAborted();
-      await page.mouse.move(end.x, end.y);
-    }
-  } finally {
-    await page.mouse.up();
+    throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `dragTo failed after it pressed the button: ${message(cause)}`, {
+      retryable: false,
+      cause,
+    });
   }
 }
 
 /**
- * The point a drag presses or releases at on one target: `position` from the
- * top-left corner of its padding box, else the centre of its box. Playwright's
- * `dragTo` reads the border with `parseInt` and truncates the point to
- * hundredths, so both web paths land on the same pixel under a zoom that
- * makes a border fractional.
+ * Reads where a drag aims on one node when `position` is set, and refuses a
+ * position outside the node's box, prefixing the refusal with `refused`.
+ * Playwright's `dragTo` reads the border with `parseInt`, so both web paths
+ * land on the same pixel under a zoom that makes a border fractional.
  */
-async function dragPoint(target: ActionTarget, position: ViewportPoint | undefined, label: 'source' | 'destination', timeout: number): Promise<Point> {
+async function aimAt(target: ActionTarget, position: ViewportPoint | undefined, refused: string, timeout: number): Promise<DragAim> {
+  if (position === undefined) return null;
+
   const box = await targetBoundingBox(target, timeout);
   if (box === null) {
-    throw new EngineError('NOT_ACTIONABLE', `the drag ${label} has no visible bounding box`, { retryable: false });
+    throw new EngineError('NOT_ACTIONABLE', 'a drag endpoint has no visible bounding box', { retryable: false });
   }
-  if (position === undefined) return centreOf(box);
 
-  const border = (el: Element): Point => {
+  const read = (el: Element): Point => {
     const style = getComputedStyle(el);
     return { x: Number.parseInt(style.borderLeftWidth, 10) || 0, y: Number.parseInt(style.borderTopWidth, 10) || 0 };
   };
-  const inset = target.kind === 'locator' ? await target.locator.evaluate(border, undefined, { timeout }) : await target.element.evaluate(border);
+  const border = target.kind === 'locator' ? await target.locator.evaluate(read, undefined, { timeout }) : await target.element.evaluate(read);
+
+  if (border.x + position.x >= box.width || border.y + position.y >= box.height) {
+    throw new EngineError(
+      'NOT_ACTIONABLE',
+      `${refused}: its position (${position.x}, ${position.y}) is outside its ${Math.round(box.width)}x${Math.round(box.height)} box`,
+      { retryable: false },
+    );
+  }
+
+  return { position, border };
+}
+
+/** The viewport point a drag aims at in `box`, truncated to hundredths as Playwright's `dragTo` rounds a position. */
+function pointOf(box: Rect, aim: DragAim): Point {
+  if (aim === null) return centreOf(box);
+
   return {
-    x: Math.trunc((box.x + inset.x + position.x) * 100) / 100,
-    y: Math.trunc((box.y + inset.y + position.y) * 100) / 100,
+    x: Math.trunc((box.x + aim.border.x + aim.position.x) * 100) / 100,
+    y: Math.trunc((box.y + aim.border.y + aim.position.y) * 100) / 100,
   };
-}
-
-/** A point `revealPoint` scrolled into view: where it is in its document's viewport, and why a drop there is refused, if it is. */
-interface RevealedPoint {
-  at: Point;
-  inFrame: boolean;
-  refusal: string | null;
-}
-
-/**
- * Scrolls the drop point into view in the destination's document, then in
- * every frame around it, innermost first, and refuses a point outside the
- * destination or on top of something else: the drop would land there.
- * Playwright's drag makes the same checks before it moves to the drop point.
- */
-async function revealDropPoint(destination: ActionTarget, position: ViewportPoint | undefined, timeout: number): Promise<void> {
-  const aim = { offset: position ?? null, frame: false };
-  let revealed = destination.kind === 'locator'
-    ? await destination.locator.evaluate(revealPoint, aim, { timeout })
-    : await destination.element.evaluate(revealPoint, aim);
-
-  let frame = null;
-  if (revealed.inFrame) {
-    const element = destination.kind === 'locator' ? await destination.locator.elementHandle({ timeout }) : destination.element;
-    frame = await element.ownerFrame();
-  }
-
-  while (revealed.refusal === null && frame !== null) {
-    const parent = frame.parentFrame();
-    if (parent === null) break;
-
-    const element = await frame.frameElement();
-    revealed = await element.evaluate(revealPoint, { offset: revealed.at, frame: true });
-    frame = parent;
-  }
-
-  if (revealed.refusal !== null) {
-    throw new EngineError('NOT_ACTIONABLE', `the drag cannot drop on its destination: ${revealed.refusal}`, { retryable: false });
-  }
-}
-
-/**
- * Runs in the page. Scrolls one point of `node` into view in its own
- * document and hit-tests it. The point is `offset` from the corner of the
- * node's padding box, or its centre without one; for a frame's element it is
- * `offset` from the corner of its content box, where the frame's viewport
- * starts. Each scroll container around the node, then the viewport, centres
- * the point when it is outside, as Playwright scrolls a position into view.
- * The hit test descends the node's own shadow roots from the outside in, so a
- * node in a closed shadow root is found too.
- */
-function revealPoint(node: Element, aim: { offset: Point | null; frame: boolean }): RevealedPoint {
-  const rect = node.getBoundingClientRect();
-  const style = getComputedStyle(node);
-  let x = rect.left + rect.width / 2;
-  let y = rect.top + rect.height / 2;
-  if (aim.offset !== null && aim.frame) {
-    x = rect.left + node.clientLeft + Number.parseFloat(style.paddingLeft) + aim.offset.x;
-    y = rect.top + node.clientTop + Number.parseFloat(style.paddingTop) + aim.offset.y;
-  } else if (aim.offset !== null) {
-    x = rect.left + (Number.parseInt(style.borderLeftWidth, 10) || 0) + aim.offset.x;
-    y = rect.top + (Number.parseInt(style.borderTopWidth, 10) || 0) + aim.offset.y;
-  }
-
-  const inFrame = window !== window.parent;
-  if (aim.offset !== null && !aim.frame && (x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom)) {
-    return {
-      at: { x, y },
-      inFrame,
-      refusal: `its position (${aim.offset.x}, ${aim.offset.y}) is outside its ${Math.round(rect.width)}x${Math.round(rect.height)} box`,
-    };
-  }
-
-  const parentOf = (el: Element): Element | null =>
-    el.assignedSlot ?? el.parentElement ?? (el.parentNode instanceof ShadowRoot ? el.parentNode.host : null);
-  // The scroll that moves a coordinate outside `[start, start + size)` to the middle of it.
-  const shift = (point: number, start: number, size: number): number =>
-    point >= start && point < start + size ? 0 : point - (start + size / 2);
-
-  for (let el = parentOf(node); el !== null && el !== document.scrollingElement; el = parentOf(el)) {
-    if (el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight) continue;
-
-    const box = el.getBoundingClientRect();
-    const { scrollLeft, scrollTop } = el;
-    el.scrollBy({
-      left: shift(x, box.left + el.clientLeft, el.clientWidth),
-      top: shift(y, box.top + el.clientTop, el.clientHeight),
-      behavior: 'instant',
-    });
-    x -= el.scrollLeft - scrollLeft;
-    y -= el.scrollTop - scrollTop;
-  }
-
-  const { scrollX, scrollY } = window;
-  window.scrollBy({ left: shift(x, 0, window.innerWidth), top: shift(y, 0, window.innerHeight), behavior: 'instant' });
-  x -= window.scrollX - scrollX;
-  y -= window.scrollY - scrollY;
-
-  const roots: ShadowRoot[] = [];
-  for (let root = node.getRootNode(); root instanceof ShadowRoot; root = root.host.getRootNode()) {
-    roots.unshift(root);
-  }
-
-  let hit = document.elementFromPoint(x, y);
-  for (const root of roots) {
-    if (hit !== root.host) break;
-    hit = root.elementFromPoint(x, y) ?? hit;
-  }
-
-  let inside = hit;
-  while (inside !== null && inside !== node) {
-    inside = parentOf(inside);
-  }
-
-  if (inside === node) return { at: { x, y }, inFrame, refusal: null };
-  if (hit === null) return { at: { x, y }, inFrame, refusal: 'the drop point is outside the viewport' };
-
-  const name = hit.id === '' ? '' : ` id="${hit.id}"`;
-  return { at: { x, y }, inFrame, refusal: `the drop point is on <${hit.localName}${name}>, which is not inside it` };
 }
 
 /** Playwright colorizes call logs; escape codes are noise in reports. */

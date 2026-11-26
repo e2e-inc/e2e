@@ -1003,13 +1003,17 @@ The browser engine drags in one of two ways:
 | Nodes | Drag | Moves without `steps` |
 | --- | --- | --- |
 | Any other pair of locator matches | Playwright's `dragTo` | 1 |
-| Either one a `getByLabel` match by a string, a `getByDisplayValue` match, or a node the agent observed | The engine drives the mouse | 3: 2 steps, then one more at the release point for HTML5 drag-and-drop |
+| Either one a `getByLabel` match by a string without `{ exact: false }`, a `getByDisplayValue` match, or a node the agent observed | The engine drives the mouse | 3: 2 steps, then one more at the release point for HTML5 drag-and-drop |
 
-Both paths scroll the release point into view, refuse a drop the point
-would land outside the target node, or on something that covers it, and
-stop moving when the step times out. Playwright's `dragTo` waits until the
-point is clear, up to the timeout; the mouse path fails at once and
-releases the button.
+Playwright's `dragTo` scrolls each point into view and waits until nothing
+covers it, up to the timeout.
+
+The mouse path checks a position against its node's box, not against what
+is on top of it. It scrolls the target node into view, not the release
+point. A point still outside the viewport fails before the button goes
+down: use a smaller offset, or locators that take Playwright's `dragTo`.
+When the step times out during the moves, the mouse path releases the
+button wherever the pointer is.
 
 Only the browser engine supports the options. A plain `dragTo` works on
 every engine that lists the `dragTo` action.
@@ -1019,7 +1023,7 @@ every engine that lists the `dragTo` action.
 | `INVALID_ARGUMENT` | A position that is not a point of finite, non-negative numbers, or a `steps` that is not a positive safe integer. |
 | `INVALID_LOCATOR` | `target` is not a runner locator, or was made by another target's screen. |
 | `UNSUPPORTED_CAPABILITY` | `sourcePosition`, `targetPosition`, or `steps` on an engine without `dragOptions` (such as mobile). Thrown before either node is looked up. |
-| `ACTION_FAILED` | On the browser engine, the release point lands outside the target node or on another element. |
+| `ACTION_FAILED` | On the browser engine's mouse path, a position outside its node's box, or a point outside the viewport after the scroll. |
 
 #### `scrollIntoView`
 
@@ -1614,9 +1618,7 @@ export interface DragOptions extends ActionOptions {
   targetPosition?: Point;
   /**
    * How many pointer moves carry the drag from the press to the release
-   * point, a positive safe integer. Unset, the engine's own default. A count
-   * above the engine's own limit (1000 on the browser engine) is
-   * `UNSUPPORTED_CAPABILITY`.
+   * point, a positive safe integer. Unset, the engine's own default.
    */
   steps?: number;
 }
