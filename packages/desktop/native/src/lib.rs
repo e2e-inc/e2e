@@ -107,6 +107,8 @@ pub struct LaunchOptions {
     pub token: String,
     pub activate: bool,
     pub timeout_ms: f64,
+    /// How long the search for the launched process may take once `open` has exited.
+    pub claim_ms: f64,
 }
 
 /// Starts a new instance of an app.
@@ -123,6 +125,7 @@ pub async fn launch(options: LaunchOptions) -> Value {
             token: options.token,
             activate: options.activate,
             timeout: Duration::from_millis(options.timeout_ms.max(0.0) as u64),
+            claim: Duration::from_millis(options.claim_ms.max(0.0) as u64),
         };
         data(launch::launch(request)?)
     })

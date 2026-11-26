@@ -32,7 +32,11 @@ pub struct LaunchRequest {
     /// Marks the process the launch starts.
     pub token: String,
     pub activate: bool,
+    /// The whole launch's budget: `open`, then the search for the process it started.
     pub timeout: Duration,
+    /// How long the search for the process may take once `open` has exited, within `timeout`: a slow `open` (a cold
+    /// start, Gatekeeper checking a new build) does not eat into it.
+    pub claim: Duration,
 }
 
 /// The process a launch started.
@@ -42,6 +46,10 @@ pub struct Launched {
     pub app: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bundle_id: Option<String>,
+    /// When the process started, in microseconds since the epoch, read as it was claimed: it tells the process from a
+    /// later one the OS gives the same id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started: Option<f64>,
 }
 
 /// The folders an app named by its name is looked for in, in order.
@@ -167,6 +175,7 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
     }
 
     let marker = format!("{TOKEN_VARIABLE}={token}");
+    let claim_until = (Instant::now() + request.claim).min(started + request.timeout);
     loop {
         let fresh: Vec<i32> = running_copies(&bundle_id).into_iter().filter(|pid| !before.contains(pid)).collect();
         for pid in &fresh {
@@ -178,7 +187,7 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
                 return Ok(launched(*pid, &bundle, &bundle_id));
             }
         }
-        if started.elapsed() >= request.timeout {
+        if Instant::now() >= claim_until {
             return Err(Failure::unconfirmed(codes::TIMEOUT, format!("{bundle} was opened, but no new process carries this launch's token"))
                 .with_details(serde_json::json!({ "kind": "unclaimed" })));
         }
@@ -189,5 +198,5 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
 fn launched(pid: i32, bundle: &str, bundle_id: &str) -> Launched {
     let name = NSRunningApplication::runningApplicationWithProcessIdentifier(pid).and_then(|app| app.localizedName()).map(|name| name.to_string());
     let app = name.unwrap_or_else(|| Path::new(bundle).file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default());
-    Launched { pid, app, bundle_id: Some(bundle_id.to_owned()) }
+    Launched { pid, app, bundle_id: Some(bundle_id.to_owned()), started: crate::process::started(pid).map(|started| started as f64) }
 }
