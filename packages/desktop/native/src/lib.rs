@@ -166,7 +166,7 @@ pub async fn snapshot(options: SnapshotOptions) -> Value {
 pub struct ActOptions {
     /// The ref a snapshot handed out.
     pub r#ref: String,
-    /// `click`, `doubleClick`, `rightClick`, `focus`, `clear`, `check`, `uncheck`, `scrollTo`, `hover`, `setValue`, `select`, `scroll`, or `type`.
+    /// `click`, `doubleClick`, `rightClick`, `focus`, `clear`, `check`, `uncheck`, `scrollTo`, `hover`, `setValue`, `selectAll`, `select`, `scroll`, or `type`.
     pub action: String,
     pub value: Option<String>,
     pub direction: Option<String>,
@@ -194,6 +194,7 @@ pub async fn act(options: ActOptions) -> Value {
             "scrollTo" => actions::Action::ScrollTo,
             "hover" => actions::Action::Hover,
             "setValue" => actions::Action::SetValue(text()?),
+            "selectAll" => actions::Action::SelectAll,
             "select" => actions::Action::Select(text()?),
             "scroll" => actions::Action::Scroll { direction: options.direction.clone().unwrap_or_else(|| "down".into()), pages: options.pages.unwrap_or(0.5) },
             "type" => actions::Action::Type { text: text()?, physical: options.physical.unwrap_or(false) },

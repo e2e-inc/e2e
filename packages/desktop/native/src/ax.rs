@@ -8,7 +8,7 @@ use core_foundation::boolean::CFBoolean;
 use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
 use core_foundation_sys::array::{CFArrayGetCount, CFArrayGetValueAtIndex, CFArrayRef};
-use core_foundation_sys::base::{Boolean, CFEqual, CFGetTypeID, CFHash, CFIndex, CFRelease, CFRetain, CFTypeID, CFTypeRef};
+use core_foundation_sys::base::{Boolean, CFEqual, CFGetTypeID, CFHash, CFIndex, CFRange, CFRelease, CFRetain, CFTypeID, CFTypeRef};
 use core_foundation_sys::string::{CFStringGetTypeID, CFStringRef};
 use std::ffi::c_void;
 use std::hash::{Hash, Hasher};
@@ -27,6 +27,7 @@ pub const AX_NO_VALUE: AXError = -25212;
 
 const VALUE_CGPOINT: u32 = 1;
 const VALUE_CGSIZE: u32 = 2;
+const VALUE_CFRANGE: u32 = 4;
 const VALUE_AXERROR: u32 = 5;
 
 #[repr(C)]
@@ -61,6 +62,7 @@ unsafe extern "C" {
     fn AXValueGetTypeID() -> CFTypeID;
     fn AXValueGetType(value: CFTypeRef) -> u32;
     fn AXValueGetValue(value: CFTypeRef, kind: u32, out: *mut c_void) -> Boolean;
+    fn AXValueCreate(kind: u32, value: *const c_void) -> CFTypeRef;
     fn AXIsProcessTrusted() -> Boolean;
     /// Private, and stable since macOS 10.6: the window server's id of a window element.
     fn _AXUIElementGetWindow(element: CFTypeRef, id: *mut u32) -> AXError;
@@ -130,6 +132,8 @@ pub enum Value {
     Array(Vec<Value>),
     Point(f64, f64),
     Size(f64, f64),
+    /// A text range: its start and length, in UTF-16 units.
+    Range(usize, usize),
     Other,
 }
 
@@ -231,6 +235,11 @@ fn decode(value: CFTypeRef) -> Result<Value, AXError> {
                     let mut size = CGSize::default();
                     AXValueGetValue(value, VALUE_CGSIZE, &mut size as *mut _ as *mut c_void);
                     return Ok(Value::Size(size.width, size.height));
+                }
+                VALUE_CFRANGE => {
+                    let mut range = CFRange { location: 0, length: 0 };
+                    AXValueGetValue(value, VALUE_CFRANGE, &mut range as *mut _ as *mut c_void);
+                    return Ok(Value::Range(range.location.max(0) as usize, range.length.max(0) as usize));
                 }
                 VALUE_AXERROR => {
                     let mut error: AXError = 0;
@@ -357,6 +366,18 @@ impl Element {
     pub fn set_number(&self, name: &str, value: f64) -> Result<(), AXError> {
         let value = CFNumber::from(value);
         self.set(name, value.as_CFTypeRef())
+    }
+
+    /// Sets a text range attribute, such as `AXSelectedTextRange`, in UTF-16 units.
+    pub fn set_range(&self, name: &str, location: usize, length: usize) -> Result<(), AXError> {
+        let range = CFRange { location: location as CFIndex, length: length as CFIndex };
+        let value = unsafe { AXValueCreate(VALUE_CFRANGE, &range as *const CFRange as *const c_void) };
+        if value.is_null() {
+            return Err(AX_FAILURE);
+        }
+        let result = self.set(name, value);
+        unsafe { CFRelease(value) };
+        result
     }
 
     pub fn set_elements(&self, name: &str, values: &[Element]) -> Result<(), AXError> {

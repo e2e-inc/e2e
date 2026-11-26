@@ -35,6 +35,7 @@ pub enum Action {
     ScrollTo,
     Hover,
     SetValue(String),
+    SelectAll,
     Select(String),
     Scroll { direction: String, pages: f64 },
     Type { text: String, physical: bool },
@@ -498,6 +499,26 @@ fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
     }
 }
 
+/// Selects all the text of a field through accessibility. A select-all key (Cmd+A) sent to an app in the background
+/// goes to its menu bar, not the field, so the delete after it would remove one character.
+fn select_all(element: &Element, deadline: Instant) -> Outcome<()> {
+    if !settable(element, "AXSelectedTextRange", "select all")? {
+        return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "select all: the field's selection cannot be set"));
+    }
+    // A secure field shows no value, but still counts its characters.
+    let length = match element.attribute("AXNumberOfCharacters") {
+        Ok(Value::Number(count)) if count >= 0.0 => count as usize,
+        _ => value_text(element).unwrap_or_default().encode_utf16().count(),
+    };
+    go("select all")?;
+    element.set_range("AXSelectedTextRange", 0, length).map_err(|error| refused(error, "select all"))?;
+    if until(deadline, || matches!(element.attribute("AXSelectedTextRange"), Ok(Value::Range(0, selected)) if selected == length)) {
+        Ok(())
+    } else {
+        Err(Failure::unconfirmed(codes::ACTION_FAILED, "select all: the field's text did not become selected"))
+    }
+}
+
 /// The text an item of a list or menu shows.
 fn item_label(element: &Element) -> Option<String> {
     let values = element.attributes(&["AXTitle", "AXValue", "AXDescription"]).ok()?;
@@ -744,6 +765,7 @@ fn run(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
         Action::Check(wanted) => check(element, wanted, deadline),
         Action::ScrollTo => perform(element, "AXScrollToVisible", "scroll into view"),
         Action::SetValue(text) => set_value(element, &text, deadline),
+        Action::SelectAll => select_all(element, deadline),
         Action::Select(label) => select(&entry, &label, deadline),
         Action::Scroll { direction, pages } => scroll(element, &direction, pages),
         Action::Type { text, physical } => type_text(&entry, &text, physical, deadline),
