@@ -924,7 +924,6 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   async openApp(app: string, options: OpenAppOptions, signal: AbortSignal): Promise<void> {
     assertAppId(app);
     if (options.permissions !== undefined) assertPermissions('device.openApp({ permissions })', options.permissions, 'INVALID_ARGUMENT');
-    if (options.locale !== undefined) assertLocaleReachable('device.openApp({ locale })', this.options, 'INVALID_ARGUMENT');
     const relaunch = options.relaunch === true;
     // The engine's own launch options belong to a fresh launch of the pinned
     // app. A foreground-only open of a running app takes no arguments, and a
@@ -935,6 +934,8 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     const locale = options.locale !== undefined
       ? checkLocale('device.openApp({ locale })', options.locale, 'INVALID_ARGUMENT')
       : configured && this.app.locale !== undefined ? checkLocale('app.locale', this.app.locale, 'INVALID_CONFIG') : undefined;
+    // The configured locale too: an engine served over the protocol may run without the client's validateApp.
+    if (locale !== undefined) assertLocaleReachable(options.locale === undefined ? 'app.locale' : 'device.openApp({ locale })', this.options, 'INVALID_ARGUMENT');
     if (locale !== undefined && this.options.platform === 'ios') {
       const label = options.launchArguments === undefined ? "the target's app.launchArguments" : 'device.openApp({ launchArguments })';
       assertNoAppleLocaleArguments(label, launchArguments, 'INVALID_ARGUMENT');

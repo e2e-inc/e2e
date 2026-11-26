@@ -3773,6 +3773,19 @@ describe('device fixture', () => {
     expect(order).toEqual([set(ANDROID_APP_PACKAGE).join(' '), 'sessions.close']);
   });
 
+  it('refuses the configured app.locale at launch on a provider that drops launch arguments, before any device command', async () => {
+    const provider = { name: 'cloud', launchArguments: false, acquire: async () => ({ id: 'lease-1' }), release: async () => undefined };
+    const h = harness({ bundleId: 'com.example.app', locale: 'fr-FR', device: provider as never });
+    await boot(h);
+    const before = h.fake.calls.length;
+    // A served engine can run without the client's validateApp, so the launch checks the provider itself.
+    await expect(h.engine.session!.restart!(operation())).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('app.locale is set, and device provider "cloud" drops the launch arguments'),
+    });
+    expect(h.fake.calls.length).toBe(before);
+  });
+
   it('closes the session at dispose when the Android locale restore hangs past half the cleanup budget', async () => {
     const h = harness({ platform: 'android', bundleId: ANDROID_APP_PACKAGE, locale: 'fr-FR' });
     h.fake.respond('devices.boot', () => ({ id: 'emulator-5554', device: 'Pixel 9' }));
