@@ -215,7 +215,22 @@ pub fn parse_combo(combo: &str) -> Outcome<Combo> {
                 flags |= CGEventFlags::CGEventFlagShift;
             }
             let lower = character.to_ascii_lowercase();
-            let code = character_key(lower).ok_or_else(|| Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("\"{character}\" has no key of its own")))?;
+            // Checked on the character, before any key code: on another layout the US key for q types something else.
+            if lower == 'q' && flags.contains(CGEventFlags::CGEventFlagCommand) {
+                return Err(Failure::refused(codes::POLICY_DENIED, "Command-Q quits the app; end it with closeApp"));
+            }
+            let us = character_key(lower).ok_or_else(|| Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("\"{character}\" has no key of its own")))?;
+            // A shortcut carries only its key code, and macOS reads its character from the layout: the code must be the
+            // key that types the character on this Mac's layout. Text and Shift keys carry their characters, as typed.
+            let shortcut = flags.intersects(CGEventFlags::CGEventFlagCommand | CGEventFlags::CGEventFlagControl | CGEventFlags::CGEventFlagAlternate);
+            let code = if shortcut {
+                let table = crate::layout::characters()
+                    .ok_or_else(|| Failure::refused(codes::ACTION_FAILED, "the keyboard layout could not be read, so the shortcut's key is unknown"))?;
+                crate::layout::code_for(lower, &table)
+                    .ok_or_else(|| Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("no key types \"{lower}\" on this Mac's keyboard layout")))?
+            } else {
+                us
+            };
             // With Shift the key types its shifted character; one with none on the US layout is left to the app to work out.
             let typed = if flags.contains(CGEventFlags::CGEventFlagShift) { shifted(lower) } else { Some(lower) };
             Key { code, character: typed }
@@ -226,9 +241,6 @@ pub fn parse_combo(combo: &str) -> Outcome<Combo> {
             Key { code, character: if name == "space" { Some(' ') } else { None } }
         }
     };
-    if key.code == 12 && flags.contains(CGEventFlags::CGEventFlagCommand) {
-        return Err(Failure::refused(codes::POLICY_DENIED, "Command-Q quits the app; end it with closeApp"));
-    }
     Ok(Combo { key, flags })
 }
 
@@ -427,6 +439,7 @@ mod tests {
         for combo in ["cmd+q", "command+Q", "meta+q"] {
             assert!(parse_combo(combo).is_err(), "{combo}");
         }
-        assert!(parse_combo("ctrl+q").is_ok());
+        // Control-Q is no quit; whether it resolves depends on the layout this Mac has.
+        assert!(parse_combo("ctrl+q").err().is_none_or(|failure| failure.code != crate::failure::codes::POLICY_DENIED));
     }
 }

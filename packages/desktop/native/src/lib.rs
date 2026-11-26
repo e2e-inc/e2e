@@ -11,6 +11,7 @@ mod ax;
 mod failure;
 mod input;
 mod launch;
+mod layout;
 mod refs;
 mod roles;
 mod snapshot;
