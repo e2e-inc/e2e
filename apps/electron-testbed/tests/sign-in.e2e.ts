@@ -101,15 +101,13 @@ test.describe('sign-in window', () => {
     await expect(screen.getByTestId('username')).toHaveValue('');
   });
 
-  test('fills and clears a field that swallows key presses, since fill sends none', async ({ screen }) => {
+  test('fills a field that swallows key presses, since fill sends none, and clears it with a Delete key, as web() does', async ({ screen }) => {
     const invite = screen.getByTestId('invite');
     await invite.fill('ABC-123');
     await expect(invite).toHaveValue('ABC-123');
-    await invite.fill('');
-    await expect(invite).toHaveValue('');
-    await invite.fill('XYZ');
+    // An empty fill is a Delete key, as Playwright's: a field that swallows keys keeps its text, as on the web.
     await invite.clear();
-    await expect(invite).toHaveValue('');
+    await expect(invite).toHaveValue('ABC-123');
   });
 
   test('sends no text once a fill has run out of time', async ({ screen }) => {

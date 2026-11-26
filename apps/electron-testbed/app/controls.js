@@ -57,3 +57,15 @@ hold.addEventListener('pointerdown', () => {
 hold.addEventListener('pointerup', () => {
   document.querySelector('[data-testid="hold-state"]').textContent = 'up';
 });
+
+// What an editor that keeps its own model sees: the last beforeinput.
+document.querySelector('[data-testid="tracked"]').addEventListener('beforeinput', (event) => {
+  document.querySelector('[data-testid="tracked-event"]').textContent = event.inputType;
+});
+
+const scheme = window.matchMedia('(prefers-color-scheme: dark)');
+const showScheme = () => {
+  document.querySelector('[data-testid="scheme"]').textContent = scheme.matches ? 'dark' : 'light';
+};
+scheme.addEventListener('change', showScheme);
+showScheme();

@@ -31,8 +31,28 @@ test.describe('controls page', () => {
     await expect(screen.getByTestId('birthday')).not.toHaveValue('');
   });
 
-  test('reads an editing host with no role as a text field', async ({ screen }) => {
-    await expect(screen.getByTestId('bare-editor')).toHaveRole('textbox');
+  test('shows the agent an editing host with no role as a text field, which a role query does not find, as on the web', async ({ screen }) => {
+    expect(await screen.tree()).toMatch(/textbox[^\n]*Bare editor text/);
+    await expect(screen.getByTestId('bare-editor')).not.toHaveRole('textbox');
+  });
+
+  test('reads a heading tag\'s level over its aria-level, and a progress element\'s value', async ({ screen }) => {
+    await expect(screen.getByRole('heading', { name: 'Levels', level: 2 })).toHaveCount(1);
+    await expect(screen.getByRole('progressbar', 'Sync')).toHaveValue('70');
+  });
+
+  test('clears a field with a Delete key an editor sees, and focuses nothing on an element that takes no focus', async ({ screen }) => {
+    await screen.getByTestId('tracked').clear();
+    await expect(screen.getByTestId('tracked')).toHaveValue('');
+    await expect(screen.getByTestId('tracked-event')).toHaveText('deleteContentForward');
+    await screen.getByRole('heading', 'Levels').focus();
+  });
+
+  test('leaves prefers-color-scheme to the app\'s nativeTheme', async ({ screen, electron }) => {
+    await electron.evaluate(({ nativeTheme }) => {
+      nativeTheme.themeSource = 'dark';
+    });
+    await expect(screen.getByTestId('scheme')).toHaveText('dark');
   });
 
   test('checks a mixed checkbox and refuses to uncheck a radio at once', async ({ screen }) => {
@@ -60,10 +80,10 @@ test.describe('controls page', () => {
     expect(await failure(screen.getByTestId('folded-select').selectOption('B', { timeout: 1000 }))).toMatchObject({ code: 'ACTION_FAILED' });
   });
 
-  test('reads table cells apart, source text, options of a closed select, and visibility as web() does', async ({ screen, electron }) => {
+  test('reads table cells apart, text as rendered, the label of a closed select\'s option, and visibility as web() does', async ({ screen, electron }) => {
     await expect(screen.getByTestId('ada-row')).toHaveText('Ada 36');
-    await expect(screen.getByText('shouty text')).toHaveCount(1);
-    await expect(screen.getByRole('option', 'Small')).toHaveCount(1);
+    await expect(screen.getByText('SHOUTY TEXT')).toHaveText('SHOUTY TEXT');
+    await expect(electron.locator('[data-testid="size"] option[value="s"]')).toHaveText('Small');
     await expect(screen.getByTestId('invisible')).toBeHidden();
     await expect(electron.locator('[data-testid="invisible"]')).toBeHidden();
   });
@@ -147,6 +167,15 @@ test.describe('a shown window that closes', () => {
       BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'Settings')?.destroy();
     });
     await expect(screen.getByTestId('status')).toHaveText('Not signed in', { timeout: 2000 });
+  });
+});
+
+test.describe('an app that quits on its own', () => {
+  test('says so, rather than that it was never opened', async ({ app, screen, electron }) => {
+    await app.open();
+    await electron.evaluate(({ app: main }) => setTimeout(() => main.quit(), 50));
+    await expect.poll(async () => (await electron.windows()).length).toBe(0);
+    expect(await failure(screen.getByRole('button', 'Sign in').tap({ timeout: 1000 }))).toMatchObject({ code: 'APP_NOT_OPEN', message: expect.stringContaining('quit on its own') });
   });
 });
 
