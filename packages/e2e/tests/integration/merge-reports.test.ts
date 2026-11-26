@@ -516,9 +516,22 @@ it('merges shards when one report could not record the commit and retains the kn
 it('rejects an explicitly selected live-only command-line reporter', () => {
   const fixture = project();
   expect(cli(fixture, ['run', '--shard', '1/1', '--output', 'shard-1']).status).toBe(0);
-  const merged = cli(fixture, ['merge-reports', 'shard-1', '--output', 'merged', '--reporter', 'list']);
-  expect(merged.status).toBe(2);
-  expect(existsSync(path.join(fixture.dir, 'merged'))).toBe(false);
+  for (const id of ['list', 'dot', 'line']) {
+    const merged = cli(fixture, ['merge-reports', 'shard-1', '--output', 'merged', '--reporter', id]);
+    expect(merged.status, id).toBe(2);
+    expect(merged.stderr, id).toContain('expected json, junit, markdown, ctrf');
+    expect(existsSync(path.join(fixture.dir, 'merged')), id).toBe(false);
+  }
+}, 60_000);
+
+it('accepts on the command line every built-in that reports a finished run', () => {
+  const fixture = project();
+  expect(cli(fixture, ['run', '--shard', '1/1', '--output', 'shard-1']).status).toBe(0);
+  const merged = cli(fixture, ['merge-reports', 'shard-1', '--output', 'merged', '--reporter', 'junit,markdown,ctrf']);
+  expect(merged.status, merged.stderr).toBe(0);
+  for (const file of ['junit.xml', 'summary.md', 'ctrf.json']) {
+    expect(existsSync(path.join(fixture.dir, 'merged', file)), file).toBe(true);
+  }
 }, 60_000);
 
 it('merges shards whose app requested a different free port each time, and rejects a different fixed port', () => {

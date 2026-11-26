@@ -1533,7 +1533,7 @@ still owes results after a rerun requires its matching folded report.
 | --- | --- |
 | `--output <dir>` | Required. A new directory for `report.json`, copied local artifacts, trace pages, and reporter output. Relative to the project root. With `--config`, the project root is the directory containing that config. |
 | `--config <path>` | Config to load for finished-run reporters. Defaults to the nearest config, if present. With a config in a subdirectory, reporters use the closest default config at or above that directory as the root for source and trace paths. |
-| `--reporter <ids>` | Comma-separated finished-run reporters (`json`, `junit`, or `markdown`). Overrides built-in choices in the config and keeps configured third-party reporters. |
+| `--reporter <ids>` | Comma-separated finished-run reporters (`json`, `junit`, `markdown`, or `ctrf`). Overrides built-in choices in the config and keeps configured third-party reporters. `list`, `dot`, and `line` print from a run's live events, so the flag refuses them; one named in the config still loads and prints only the lines that say where the other reporters wrote their files. |
 
 Reporters must implement a finished-run hook. The command reads finished
 reports and does not replay live events. Its terminal verdict goes to
