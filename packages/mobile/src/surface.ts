@@ -1092,10 +1092,11 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
    */
   async closeApp(signal: AbortSignal): Promise<void> {
     const app = this.appIdentity ?? this.pinnedApp;
+    // The next open launches the app fresh, in its own locale again, as an iOS one does. Put back
+    // before the close: it ends the agent-device session, which frees the device for another one.
+    if (app !== undefined) await this.androidLocales?.afterClose(app, signal);
     await this.command('device.closeApp', (client) => client.apps.close({ ...this.selection(), ...(app === undefined ? {} : { app }) }), signal);
     this.screenReplaced();
-    // The next open launches the app fresh: it runs in its own locale again, as an iOS one does.
-    if (app !== undefined) await this.androidLocales?.afterClose(app, signal);
   }
 
   /**

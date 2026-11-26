@@ -3757,8 +3757,15 @@ describe('device fixture', () => {
     h.fake.respond('apps.open', () => ({ session: 's', appName: 'Other', appBundleId: 'com.other', identifiers: {} }));
     await device.openApp('com.other');
     h.adbCalls.length = 0;
+    const closing: string[] = [];
+    h.fake.respond('apps.close', () => {
+      closing.push(`apps.close after ${h.adbCalls.length} adb`);
+      return {};
+    });
     await device.closeApp();
     expect(h.adbCalls).toEqual([set('com.other', 'de-DE,it-IT')]);
+    // Before the close, which ends the session and frees the device.
+    expect(closing).toEqual(['apps.close after 1 adb']);
     // The locale goes back before the session closes, which frees the device for another session.
     const order: string[] = [];
     h.respondAdb((args) => {
