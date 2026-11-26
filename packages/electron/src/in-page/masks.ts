@@ -10,7 +10,7 @@ export interface MaskState {
   readonly count: number;
   /** The masked elements' boxes in the viewport, as one comparable string. */
   readonly boxes: string;
-  /** Whether the masks were in place: false once the document they were painted in is gone. */
+  /** Whether the masks were in place, whole and on top: false once their document is gone, or the page took one away. */
   readonly placed: boolean;
 }
 
@@ -63,7 +63,10 @@ export function placeMasks(selector: string): MaskState {
   }
   document.documentElement.append(style, layer);
   layer.showPopover();
-  Reflect.set(globalThis, 'e2eRemoveMasks', () => {
+  const painted = layer.outerHTML;
+  Reflect.set(globalThis, 'e2eRemoveMasks', (): boolean => {
+    // A page script can reach the masks through the document: they count only as painted, each one, to the end.
+    const whole = layer.parentNode === document.documentElement && layer.matches(':popover-open') && layer.outerHTML === painted;
     style.remove();
     layer.remove();
     for (const animation of resume) {
@@ -74,6 +77,7 @@ export function placeMasks(selector: string): MaskState {
       }
     }
     Reflect.deleteProperty(globalThis, 'e2eRemoveMasks');
+    return whole;
   });
   return { count: elements.length, boxes: boxes.join(';'), placed: true };
 }
@@ -81,8 +85,7 @@ export function placeMasks(selector: string): MaskState {
 /** Takes the masks away, and says what `selector` matches now: an element that appeared or moved since was not under one. */
 export function removeMasks(selector: string): MaskState {
   const remove: unknown = Reflect.get(globalThis, 'e2eRemoveMasks');
-  const placed = typeof remove === 'function';
-  if (typeof remove === 'function') remove();
+  const placed = typeof remove === 'function' && remove() === true;
   const boxes: string[] = [];
   const visit = (root: Document | ShadowRoot): void => {
     for (const element of root.querySelectorAll(selector)) {

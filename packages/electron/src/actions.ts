@@ -136,7 +136,7 @@ export async function typeText(context: ActionContext, window: AppWindow, text: 
   const { keyboard } = window.page;
   if (!(await context.devtools.focusedTakesText(window.page))) throw notActionable('nothing that takes text has keyboard focus; tap the field first');
   if (replace) {
-    await budget.send(() => keyboard.press('A', ['ControlOrMeta']));
+    await withModifiers(budget, window, ['ControlOrMeta'], () => keyboard.press('A'));
     await budget.send(() => keyboard.press('Delete'));
   }
   for (const character of text) await budget.send(() => keyboard.type(character));
@@ -145,7 +145,7 @@ export async function typeText(context: ActionContext, window: AppWindow, text: 
 /** Presses a key in the shown window, wherever focus is. */
 export async function pressKey(window: AppWindow, key: string, budget: Budget): Promise<void> {
   const chord = keyChord(key);
-  await budget.send(() => window.page.keyboard.press(chord.key, chord.modifiers));
+  await withModifiers(budget, window, chord.modifiers, () => window.page.keyboard.press(chord.key));
 }
 
 // --- node actions ---
@@ -224,7 +224,7 @@ async function press(step: Step, action: ActionOf<'press'>): Promise<void> {
   await waitReady(step, 'checkConnected');
   // The key goes to what holds focus after the node is focused, as on the web: a node that cannot take focus (a plain div) leaves it where it was.
   await step.budget.send(() => step.devtools.callOn(step.window.page, step.backendNodeId, 'focus'));
-  await step.budget.send(() => step.window.page.keyboard.press(chord.key, chord.modifiers));
+  await withModifiers(step.budget, step.window, chord.modifiers, () => step.window.page.keyboard.press(chord.key));
 }
 
 async function selectOption(step: Step, action: ActionOf<'selectOption'>): Promise<void> {
@@ -277,7 +277,7 @@ async function swipeNode(step: Step, action: ActionOf<'swipe'>): Promise<void> {
 
 async function click(budget: Budget, window: AppWindow, at: ViewportPoint, options: { readonly clickCount?: number; readonly button?: MouseButton; readonly modifiers?: readonly string[] }): Promise<void> {
   const { clickCount = 1, button = 'left', modifiers = [] } = options;
-  await budget.send(() => withModifiers(window, modifiers, () => window.page.mouse.click(at.x, at.y, button, clickCount)));
+  await withModifiers(budget, window, modifiers, () => window.page.mouse.click(at.x, at.y, button, clickCount));
 }
 
 async function hover(budget: Budget, window: AppWindow, at: ViewportPoint): Promise<void> {
@@ -337,13 +337,25 @@ async function swipe(budget: Budget, window: AppWindow, at: ViewportPoint, box: 
   await window.page.evaluate(nextFrame);
 }
 
-async function withModifiers(window: AppWindow, modifiers: readonly string[], work: () => Promise<void>): Promise<void> {
+/**
+ * Sends `input` with `modifiers` held. Each press passes the budget's check
+ * on its own: a modifier the app was slow to take is not followed by the key
+ * once the caller stopped waiting. Every modifier that went down comes up,
+ * whatever happens.
+ */
+export async function withModifiers(budget: Budget, window: AppWindow, modifiers: readonly string[], input: () => Promise<void>): Promise<void> {
   const { keyboard } = window.page;
-  for (const modifier of modifiers) await keyboard.down(modifier);
+  const held: string[] = [];
   try {
-    await work();
+    for (const modifier of modifiers) {
+      await budget.send(() => {
+        held.push(modifier);
+        return keyboard.down(modifier);
+      });
+    }
+    await budget.send(input);
   } finally {
-    for (const modifier of modifiers.toReversed()) await keyboard.up(modifier);
+    for (const modifier of held.toReversed()) await keyboard.up(modifier);
   }
 }
 

@@ -97,6 +97,26 @@ describe('Connection', () => {
   });
 });
 
+describe('a broken stream', () => {
+  it('closes the connection on a frame that is not JSON, failing what is pending', async () => {
+    const write = new PassThrough();
+    const read = new PassThrough();
+    const connection = new Connection(pipeTransport(write, read));
+    const pending = connection.root.send('Browser.getVersion');
+    read.write('{"id":1,"result"\0');
+    await expect(pending).rejects.toThrow(/connection closed/);
+    expect(connection.isClosed).toBe(true);
+  });
+
+  it('closes the connection when the browser can no longer be written to', async () => {
+    const write = new PassThrough();
+    const connection = new Connection(pipeTransport(write, new PassThrough()));
+    const pending = connection.root.send('Browser.getVersion');
+    write.destroy(new Error('write EPIPE'));
+    await expect(pending).rejects.toThrow(/connection closed/);
+  });
+});
+
 describe('pipeTransport', () => {
   it('ends each message with a NUL, and reads messages split or joined across chunks', () => {
     const toBrowser = new PassThrough();

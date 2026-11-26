@@ -36,8 +36,12 @@ describe('Keyboard', () => {
   it('holds the modifiers around the key, and types nothing with Control held', async () => {
     const { target, events } = recorder();
     const keyboard = new Keyboard(target);
-    await keyboard.press('Tab', ['Shift']);
-    await keyboard.press('A', ['Control']);
+    await keyboard.down('Shift');
+    await keyboard.press('Tab');
+    await keyboard.up('Shift');
+    await keyboard.down('Control');
+    await keyboard.press('A');
+    await keyboard.up('Control');
     const downs = events.filter((event) => event['type'] !== 'keyUp');
     expect(downs).toMatchObject([
       { key: 'Shift', code: 'ShiftLeft', modifiers: 8, type: 'rawKeyDown' },
@@ -50,17 +54,17 @@ describe('Keyboard', () => {
 
   it('presses ControlOrMeta as the platform\'s own modifier, with the editing command macOS needs named', async () => {
     const { target, events } = recorder();
-    await new Keyboard(target).press('A', ['ControlOrMeta']);
+    const keyboard = new Keyboard(target);
+    await keyboard.down('ControlOrMeta');
+    await keyboard.press('A');
     expect(events[0]).toMatchObject({ key: IS_MAC ? 'Meta' : 'Control' });
     expect(events[1]).toMatchObject({ code: 'KeyA', modifiers: IS_MAC ? 4 : 2, commands: IS_MAC ? ['selectAll'] : [] });
   });
 
-  it('releases the modifiers when the key cannot be pressed', async () => {
+  it('refuses a key the layout does not have', async () => {
     const { target, events } = recorder();
-    const keyboard = new Keyboard(target);
-    await expect(keyboard.press('é', ['Shift'])).rejects.toThrow(/no key "é"/);
-    expect(events.map((event) => [event['type'], event['key']])).toEqual([['rawKeyDown', 'Shift'], ['keyUp', 'Shift']]);
-    expect(keyboard.modifiers().size).toBe(0);
+    await expect(new Keyboard(target).press('é')).rejects.toThrow(/no key "é"/);
+    expect(events).toEqual([]);
   });
 
   it('types a character the layout has no key for as inserted text', async () => {

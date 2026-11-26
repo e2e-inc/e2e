@@ -119,6 +119,19 @@ describe('launch', () => {
     expect(await windows.require().page.title()).toBe('Loaded');
   });
 
+  it('reads the window that loaded, not a first one still on its way', async () => {
+    const { windows, launch } = appWith(`app.whenReady().then(() => {
+      const server = require('node:http').createServer((_request, response) => { response.writeHead(200, { 'Content-Type': 'text/html' }); response.write('<title>Splash</title><p>partial'); });
+      server.listen(0, '127.0.0.1', () => {
+        new BrowserWindow({ show: false }).loadURL('http://127.0.0.1:' + server.address().port + '/').catch(() => {});
+        setTimeout(() => { ${LOADED}; }, 500);
+      });
+    });`);
+    await launch(5000);
+    expect(windows.open()).toHaveLength(2);
+    expect(await windows.require().page.title()).toBe('Loaded');
+  });
+
   it('quotes a last stderr line that has no newline', async () => {
     const { launch } = appWith(`process.stderr.write('license failure'); process.exit(3);`);
     expect(String(await launch().then(() => undefined, (error: unknown) => error))).toMatch(/license failure/);
@@ -237,6 +250,17 @@ describe('an app with no inspector', () => {
 });
 
 describe('pixels', () => {
+  it('withholds the pixels when the page takes the masks away', async () => {
+    const page = `<body style="margin:0"><iframe style="border:0;width:300px;height:200px" srcdoc="<body style=margin:0;background:red>"></iframe><script>new MutationObserver((records) => { for (const record of records) for (const node of record.addedNodes) if (node.popover) node.remove(); }).observe(document.documentElement, { childList: true });</script></body>`;
+    const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${process.platform === 'linux'}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`);
+    await launch();
+    const window = windows.require();
+    const devtools = new DevTools();
+    const observed = await withPixels(devtools, await readWindow(devtools, window), { root: { ref: { id: 'window', revision: '' }, role: 'document' }, viewport: { width: 0, height: 0 } });
+    expect(observed.pixels).toBeUndefined();
+    expect(observed.maskedRegionCount).toBe(1);
+  });
+
   it('gives each of two captures taken at once its own masks', async () => {
     const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${process.platform === 'linux'}, width: 300, height: 200 }).loadURL('data:text/html,<body style="margin:0"><iframe style="border:0;width:300px;height:200px" srcdoc="<body style=margin:0;background:red>"></iframe></body>'));`);
     await launch();

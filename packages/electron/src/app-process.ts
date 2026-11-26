@@ -125,6 +125,7 @@ export class AppProcess {
     const deadline = new Deadline(timeout);
     const left = (): number => Math.max(1, deadline.remaining());
     let app: RunningApp;
+    let opened = false;
     try {
       app = this.start(setup);
     } catch (cause) {
@@ -139,8 +140,13 @@ export class AppProcess {
     quitEarly.catch(() => undefined);
     try {
       // Any window counts, not the first one opened: a splash screen may close, or never finish loading, before the app's real window is there.
-      const pages = (): PageTarget[] => this.windows.open().map((window) => window.page);
-      await raceAbort(() => Promise.race([loaded(pages, deadline, operation.signal), quitEarly]), operation.signal, 'waiting for the first window to load');
+      const open = (): PageTarget[] => this.windows.open().map((window) => window.page);
+      const first = await raceAbort(() => Promise.race([loaded(open, deadline, operation.signal), quitEarly]), operation.signal, 'waiting for the first window to load');
+      // The window that loaded is the one read, not one still on its way.
+      if (!first.isClosed()) this.windows.show(open().indexOf(first));
+      opened = true;
+      // Still inside the launch: an app that quits here, or a caller that stopped waiting, fails it.
+      await raceAbort(() => Promise.race([this.setUp(app, setup, left), quitEarly]), operation.signal, 'setting up the app');
     } catch (cause) {
       // Read before the engine's own quit, which ends the process too.
       const exited = app.process.ended;
@@ -150,8 +156,12 @@ export class AppProcess {
       const stuck = [...app.pages.values()].filter((page) => !this.windows.has(page)).length;
       await this.quit({ timeoutMs: DISCARD_CLOSE_MS }, DISCARD_CLOSE_MS);
       if (cause instanceof EngineError) throw cause;
-      throw launchError(setup, app.process, { exited, ready, stuck, timeout }, cause);
+      throw launchError(setup, app.process, { exited, ready, stuck, timeout, opened }, cause);
     }
+  }
+
+  /** What a launch does once the app has a window: its main process connected, its downloads placed, its versions reported. */
+  private async setUp(app: RunningApp, setup: LaunchSetup, left: () => number): Promise<void> {
     // Only now is an app with no inspector known to have none: the address is printed before the app's own code runs.
     // One that printed it is being connected to, and that has a bound of its own.
     setTimeout(() => {
@@ -397,15 +407,23 @@ async function stop(app: RunningApp, graceMs: number): Promise<void> {
   await answerWithin(process.exited, EXIT_WAIT_MS);
 }
 
-/** Resolves once one of the app's windows has a parsed document: a window is read from then on. */
-async function loaded(pages: () => PageTarget[], deadline: Deadline, signal: AbortSignal): Promise<void> {
+/** The first of the app's open windows, in the order they opened, to have a parsed document: a window is read from then on. */
+async function loaded(pages: () => PageTarget[], deadline: Deadline, signal: AbortSignal): Promise<PageTarget> {
+  let first: PageTarget | undefined;
   await pollCondition({
     deadline,
     signal,
     negated: false,
-    evaluate: async () => (await Promise.all(pages().map(parsed))).includes(true),
+    evaluate: async () => {
+      const open = pages();
+      const ready = await Promise.all(open.map(parsed));
+      first = open.find((page, index) => ready[index] === true && !page.isClosed());
+      return first !== undefined;
+    },
     onTimeout: () => new Error('no window loaded'),
   });
+  if (first === undefined) throw new Error('no window loaded');
+  return first;
 }
 
 /**
@@ -427,7 +445,7 @@ async function parsed(page: PageTarget): Promise<boolean> {
 function launchError(
   setup: LaunchSetup,
   process: ElectronProcess,
-  seen: { readonly exited: ProcessExit | undefined; readonly ready: boolean | undefined; readonly stuck: number; readonly timeout: number },
+  seen: { readonly exited: ProcessExit | undefined; readonly ready: boolean | undefined; readonly stuck: number; readonly timeout: number; readonly opened: boolean },
   cause: unknown,
 ): EngineError {
   const { appPath } = setup.app;
@@ -437,7 +455,7 @@ function launchError(
   }
   if (seen.exited !== undefined) {
     const how = describeExit(seen.exited);
-    return new EngineError('INVALID_STATE', `the app quit before it opened a window${how === '' ? '' : ` (${how})`}${noDisplayHint(output)}${output}`, { retryable: false, cause });
+    return new EngineError('INVALID_STATE', `the app quit ${seen.opened ? 'right after it opened its first window' : 'before it opened a window'}${how === '' ? '' : ` (${how})`}${noDisplayHint(output)}${output}`, { retryable: false, cause });
   }
   const message =
     seen.ready === false

@@ -91,15 +91,10 @@ export class Keyboard {
     });
   }
 
-  /** Presses a key with modifiers held: the modifiers down in order, the key down and up, the modifiers up in reverse. */
-  async press(key: string, modifiers: readonly string[] = []): Promise<void> {
-    for (const modifier of modifiers) await this.down(modifier);
-    try {
-      await this.down(key);
-      await this.up(key);
-    } finally {
-      for (const modifier of modifiers.toReversed()) await this.up(modifier);
-    }
+  /** Presses a key down and releases it, under whatever modifiers are held. */
+  async press(key: string): Promise<void> {
+    await this.down(key);
+    await this.up(key);
   }
 
   /** Types one character: its key when the layout has one, else the character inserted as text. */

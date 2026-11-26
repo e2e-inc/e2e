@@ -85,12 +85,14 @@ export function pipeTransport(write: Writable, read: Readable): Transport {
     }
     if (start < chunk.length) buffered.push(chunk.subarray(start));
   });
-  read.on('close', () => {
+  // Either half ending or failing ends the connection: a command the browser can no longer read has no answer coming.
+  const closed = (): void => {
     for (const handler of closeHandlers) handler();
-  });
-  // A browser that exits closes its end first: the close handler reports it, not an unhandled stream error.
-  write.on('error', () => undefined);
-  read.on('error', () => undefined);
+  };
+  read.on('close', closed);
+  read.on('error', closed);
+  write.on('close', closed);
+  write.on('error', closed);
   return {
     send: (message) => {
       write.write(`${message}\0`);
@@ -146,7 +148,14 @@ export class Connection {
   constructor(private readonly transport: Transport) {
     this.root = new Session(this, '');
     transport.onMessage((raw) => {
-      const message = readMessage(raw);
+      let message: Message | undefined;
+      try {
+        message = readMessage(raw);
+      } catch {
+        // A frame that is not JSON means the stream is out of step, and no later answer can be trusted.
+        this.close();
+        return;
+      }
       if (message !== undefined) this.dispatch(message);
     });
     transport.onClose(() => this.handleClose());
