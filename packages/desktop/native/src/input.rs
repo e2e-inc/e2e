@@ -227,8 +227,12 @@ pub fn parse_combo(combo: &str) -> Outcome<Combo> {
             let code = if shortcut {
                 let table = crate::layout::characters(flags.contains(CGEventFlags::CGEventFlagCommand))
                     .ok_or_else(|| Failure::refused(codes::ACTION_FAILED, "the keyboard layout could not be read, so the shortcut's key is unknown"))?;
-                crate::layout::code_for(lower, &table)
-                    .ok_or_else(|| Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("no key types \"{lower}\" on this Mac's keyboard layout")))?
+                crate::layout::code_for(lower, &table).ok_or_else(|| {
+                    Failure::refused(
+                        codes::ACTION_NOT_SUPPORTED,
+                        format!("no key types \"{lower}\" without Shift on this Mac's keyboard layout (on AZERTY, the digits need Shift)"),
+                    )
+                })?
             } else {
                 us
             };
