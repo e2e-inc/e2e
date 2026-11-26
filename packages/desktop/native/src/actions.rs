@@ -1239,6 +1239,12 @@ pub fn pointer_at(x: f64, y: f64, kind: &str, input_id: Option<u32>, deadline: I
         other => return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("no pointer action {other}"))),
     };
     guarded(input_id, deadline, || {
+        // A point another window or app already covers is refused before the move, which would reach that window: nothing
+        // is sent. The check after the move is for one that opens meanwhile.
+        if let Some(target) = target {
+            go("pointer")?;
+            window_takes_point(target, x, y)?;
+        }
         input::pointer(x, y, action, &|click| {
             go("pointer")?;
             match target {
