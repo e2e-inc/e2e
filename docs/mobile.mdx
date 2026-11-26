@@ -553,16 +553,18 @@ bunx agent-device devices --platform ios
 ```
 </CodeGroup>
 
-Then name the phone in `device` as it is listed:
+Then name the phone in `device` by its name or its id:
 
 ```ts
 mobile({ platform: 'ios', device: 'QA iPhone' })
+mobile({ platform: 'ios', device: '00008030-001A2B3C0E12802E' })
 ```
 
-Use the name, not the id. The engine reads a `device` string as an id only
-for a simulator UDID or an `emulator-<port>` serial. The first device with
-a matching name wins, so give each phone a unique name. Without `device`, a
-paired iPhone or iPad that is reachable (USB or network), or a connected
+The id is the one that list shows: on iOS the phone's hardware UDID (not the
+Identifier column of `xcrun devicectl list devices`, a different id), on
+Android the serial `adb devices` lists. Use the id to tell two phones of the
+same model apart. By name, the first matching device wins. Without `device`,
+a paired iPhone or iPad that is reachable (USB or network), or a connected
 Android phone, counts as booted and joins the pool beside booted simulators.
 
 Set the phone up one time:

@@ -92,6 +92,11 @@ export interface DeviceSelection {
   readonly serial?: string;
 }
 
+/** Whether a configured device string already reads as an id agent-device selects by: a simulator UDID or an emulator serial. */
+export function readsAsDeviceId(device: string): boolean {
+  return UDID.test(device) || EMULATOR_SERIAL.test(device);
+}
+
 /**
  * The selection agent-device commands take for a binding: an id the pool
  * discovered goes under the platform's id field (`udid` for a simulator,
@@ -103,7 +108,7 @@ export function deviceSelection(
   binding: Pick<SlotBinding, 'device' | 'deviceId'> | undefined,
 ): DeviceSelection {
   const { device, deviceId } = binding ?? {};
-  const id = deviceId ?? (device !== undefined && (UDID.test(device) || EMULATOR_SERIAL.test(device)) ? device : undefined);
+  const id = deviceId ?? (device !== undefined && readsAsDeviceId(device) ? device : undefined);
   if (id === undefined) return obj({ platform, device });
   return platform === 'android' ? { platform, serial: id } : { platform, udid: id };
 }

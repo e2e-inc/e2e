@@ -261,12 +261,13 @@ describe('lifecycle', () => {
       headed: false,
       log: (line) => lines.push(line),
     });
-    expect(h.sessions).toEqual(['e2e-ios-0', 'e2e-ios-1']);
-    expect(h.fake.methods()).toEqual(['devices.boot', 'command.prepare', 'apps.open', 'devices.boot', 'command.prepare', 'apps.open']);
-    expect(h.fake.calls[0]!.args).toEqual({ platform: 'ios', device: 'iPhone 17' });
-    expect(h.fake.calls[1]!.args).toEqual({ action: 'ios-runner', platform: 'ios', device: 'iPhone 17' });
-    expect(h.fake.calls[2]!.args).toEqual({ app: 'Settings', platform: 'ios', device: 'iPhone 17' });
-    expect(h.fake.calls[3]!.args).toEqual({ platform: 'ios', device: 'iPhone 17 Pro' });
+    // The inventory is read once through slot 0's session, to match a configured name against device ids.
+    expect(h.sessions).toEqual(['e2e-ios-0', 'e2e-ios-0', 'e2e-ios-1']);
+    expect(h.fake.methods()).toEqual(['devices.list', 'devices.boot', 'command.prepare', 'apps.open', 'devices.boot', 'command.prepare', 'apps.open']);
+    expect(h.fake.calls[1]!.args).toEqual({ platform: 'ios', device: 'iPhone 17' });
+    expect(h.fake.calls[2]!.args).toEqual({ action: 'ios-runner', platform: 'ios', device: 'iPhone 17' });
+    expect(h.fake.calls[3]!.args).toEqual({ app: 'Settings', platform: 'ios', device: 'iPhone 17' });
+    expect(h.fake.calls[4]!.args).toEqual({ platform: 'ios', device: 'iPhone 17 Pro' });
     // One line of step times per slot, after its `booting` line.
     expect(lines).toEqual([
       'booting iPhone 17 (1 of 2)',
@@ -282,14 +283,14 @@ describe('lifecycle', () => {
     // yet is not opened either, and the log says why.
     const bare = harness({ device: 'iPhone 16e' }, false);
     await bare.prepare({ runId: 'run-1', targetName: 'ios', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: () => undefined });
-    expect(bare.fake.methods()).toEqual(['devices.boot', 'command.prepare']);
+    expect(bare.fake.methods()).toEqual(['devices.list', 'devices.boot', 'command.prepare']);
     const build = harness({ device: 'iPhone 16e', appPath: 'build/App.app' }, false);
     await build.prepare({ runId: 'run-1', targetName: 'ios', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: () => undefined });
-    expect(build.fake.methods()).toEqual(['devices.boot', 'command.prepare']);
+    expect(build.fake.methods()).toEqual(['devices.list', 'devices.boot', 'command.prepare']);
     const pinnedBuild = harness({ device: 'iPhone 16e', appPath: 'build/App.app' });
     const pinnedLines: string[] = [];
     await pinnedBuild.prepare({ runId: 'run-1', targetName: 'ios', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: (line) => pinnedLines.push(line) });
-    expect(pinnedBuild.fake.methods()).toEqual(['devices.boot', 'command.prepare']);
+    expect(pinnedBuild.fake.methods()).toEqual(['devices.list', 'devices.boot', 'command.prepare']);
     expect(pinnedLines[1]).toMatch(/Settings awaits the suite's device.installApp\(\)/);
     expect(pinnedLines[2]).toMatch(/^iPhone 16e: boot \d+\.\ds, iOS runner \d+\.\ds$/);
 
@@ -305,7 +306,7 @@ describe('lifecycle', () => {
       headed: false,
       log: () => undefined,
     });
-    expect(single.sessions).toEqual(['qa-0']);
+    expect(single.sessions).toEqual(['qa-0', 'qa-0']);
     expect(single.fake.lastArgs('devices.boot')).toEqual({ platform: 'ios', device: 'iPhone 16e' });
   });
 
@@ -319,7 +320,8 @@ describe('lifecycle', () => {
       // One named device is one worker, whatever the run planned.
       expect(result?.workers).toBe(1);
       expect(h.fake.lastArgs('devices.boot')).toEqual({ platform: 'ios', device: 'iPhone 17 Pro' });
-      expect(h.fake.methods()).not.toContain('devices.list');
+      // Read once to match the name against device ids, never to discover a pool.
+      expect(h.fake.methods().filter((method) => method === 'devices.list')).toHaveLength(1);
       const handed = result?.env ?? {};
       expect(handed[poolVariableIn(handed, 'IOS')]).toBe(JSON.stringify([{ device: 'iPhone 17 Pro' }]));
     }
@@ -328,7 +330,7 @@ describe('lifecycle', () => {
   it('warms each device with a plain open and no launch arguments', async () => {
     const h = harness({ device: 'iPhone 16e', launchArguments: ['-e2e', 'YES'], permissions: { camera: 'grant' } });
     const result = await h.prepare({ runId: 'run-1', targetName: 'ios', projectRoot: PROJECT_ROOT, slots: 1, env: {}, signal: new AbortController().signal, headed: false, log: () => undefined });
-    expect(h.fake.methods()).toEqual(['devices.boot', 'command.prepare', 'apps.open']);
+    expect(h.fake.methods()).toEqual(['devices.list', 'devices.boot', 'command.prepare', 'apps.open']);
     expect(h.fake.lastArgs('apps.open')).toEqual({ app: 'Settings', platform: 'ios', device: 'iPhone 16e' });
     const handed = result?.env ?? {};
     expect(handed[poolVariableIn(handed, 'IOS')]).toBe(JSON.stringify([{ device: 'iPhone 16e' }]));
@@ -369,7 +371,7 @@ describe('lifecycle', () => {
     await h.prepare(info);
     expect(lines[1]).toMatch(/runner not prepared.*runner still building/);
     // The warm-up open would start the runner again under open's shorter budget, so the slot is left unopened.
-    expect(h.fake.methods()).toEqual(['devices.boot', 'command.prepare']);
+    expect(h.fake.methods()).toEqual(['devices.list', 'devices.boot', 'command.prepare']);
 
     h.fake.respond('command.prepare', () => {
       throw new AppError('RUNNER_BUSY', 'the runner is still finishing a command');
@@ -789,7 +791,8 @@ describe('lifecycle', () => {
         throw claimed('A');
       });
       expect(await bound(atBoot.prepare(info))).toMatch(/^rejected: boot failed: ios device A is owned by session/);
-      expect(atBoot.fake.methods()).not.toContain('devices.list');
+      // A configured name is matched against the inventory once; no second read looks for a replacement.
+      expect(atBoot.fake.methods().filter((method) => method === 'devices.list').length).toBeLessThanOrEqual(1);
     }
     // So is the device `e2e run --device` names over a target that names none, even with another one free: refused at
     // the open or the runner start, it is left to the first attempt.
@@ -799,8 +802,9 @@ describe('lifecycle', () => {
       pinned.fake.respond(method, () => {
         throw inSession('A');
       });
-      expect(await bound(pinned.prepare({ ...info, device: 'A' })), method).toBe(JSON.stringify([{ device: 'A' }]));
-      expect(pinned.fake.methods(), method).not.toContain('devices.list');
+      // `A` is a listed device id, so it binds as that id; the one inventory read matches it and no second one moves it.
+      expect(await bound(pinned.prepare({ ...info, device: 'A' })), method).toBe(JSON.stringify([{ deviceId: 'A' }]));
+      expect(pinned.fake.methods().filter((call) => call === 'devices.list'), method).toHaveLength(1);
     }
     for (const configured of ['A', lease, undefined] as const) {
       for (const [method, left] of [['apps.open', /did not open \(open Settings failed: Device is already in use/], ['command.prepare', /automation runner not prepared \(.*Device is already in use/]] as const) {
@@ -1008,6 +1012,64 @@ describe('lifecycle', () => {
     const byUdid = harness({ device: '2BBF3F07-AF66-4F95-82AB-BF442506FC89' });
     await boot(byUdid);
     expect(byUdid.fake.lastArgs('devices.boot')).toEqual({ platform: 'ios', udid: '2BBF3F07-AF66-4F95-82AB-BF442506FC89' });
+  });
+
+  it('binds a configured name that is a listed device id as that id on both platforms, case aside, and keeps every other entry a name', async () => {
+    const info = (device?: string) => ({ runId: 'run-1', targetName: 'android', projectRoot: PROJECT_ROOT, slots: 3, env: {}, signal: new AbortController().signal, headed: false, ...(device === undefined ? {} : { device }), log: () => undefined });
+    const listed = [
+      { platform: 'android', id: 'R58M12ABCDE', name: 'Pixel 8', booted: true },
+      { platform: 'android', id: '1A2B3C4D', name: 'Pixel 8', booted: true },
+      { platform: 'ios', id: 'Pixel_9', name: 'not android', booted: true },
+    ];
+    const h = harness({ device: ['R58M12ABCDE', '1A2B3C4D', 'Pixel_9'], platform: 'android' });
+    h.fake.respond('devices.list', () => listed);
+    const result = await h.prepare(info());
+    expect(h.fake.lastArgs('devices.list')).toEqual({ platform: 'android' });
+    const handed = result?.env ?? {};
+    expect(handed[poolVariableIn(handed, 'ANDROID')]).toBe(JSON.stringify([{ deviceId: 'R58M12ABCDE' }, { deviceId: '1A2B3C4D' }, { device: 'Pixel_9' }]));
+    const boots = h.fake.calls.filter((call) => call.method === 'devices.boot').map((call) => call.args);
+    expect(boots).toEqual([
+      { platform: 'android', serial: 'R58M12ABCDE' },
+      { platform: 'android', serial: '1A2B3C4D' },
+      { platform: 'android', device: 'Pixel_9' },
+    ]);
+
+    // --device takes a serial the same way.
+    const flag = harness({ platform: 'android' });
+    flag.fake.respond('devices.list', () => listed);
+    await flag.prepare(info('1A2B3C4D'));
+    expect(flag.fake.lastArgs('devices.boot')).toEqual({ platform: 'android', serial: '1A2B3C4D' });
+
+    // agent-device lists a shut-down AVD under its AVD name, which is no serial: it boots by name.
+    const avd = harness({ device: 'Pixel_8_Pro', platform: 'android' });
+    avd.fake.respond('devices.list', () => [...listed, { platform: 'android', id: 'Pixel_8_Pro', name: 'Pixel_8_Pro', kind: 'emulator', booted: false }]);
+    await avd.prepare(info());
+    expect(avd.fake.lastArgs('devices.boot')).toEqual({ platform: 'android', device: 'Pixel_8_Pro' });
+
+    // A physical iPhone is listed under its hardware UDID, in the current or the pre-2018 form, matched case aside.
+    const iphones = [
+      { platform: 'ios', id: '00008030-001A2B3C0E12802E', name: 'iPhone', kind: 'device', booted: true },
+      { platform: 'ios', id: 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678', name: 'iPhone', kind: 'device', booted: true },
+    ];
+    const physical = harness({ device: ['00008030-001a2b3c0e12802e', 'A1B2C3D4E5F60718293A4B5C6D7E8F9012345678', 'iPhone'] });
+    physical.fake.respond('devices.list', () => iphones);
+    await physical.prepare({ ...info(), targetName: 'ios' });
+    expect(physical.fake.calls.filter((call) => call.method === 'devices.boot').map((call) => call.args)).toEqual([
+      { platform: 'ios', udid: '00008030-001A2B3C0E12802E' },
+      { platform: 'ios', udid: 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678' },
+      { platform: 'ios', device: 'iPhone' },
+    ]);
+
+    // A simulator UDID or an emulator serial needs no listing; a failed listing fails prepare, as discovery does.
+    for (const [device, platform] of [['emulator-5556', 'android'], ['2BBF3F07-AF66-4F95-82AB-BF442506FC89', 'ios']] as const) {
+      const direct = harness({ device, platform });
+      await direct.prepare({ ...info(), targetName: platform });
+      expect(direct.fake.methods()).not.toContain('devices.list');
+    }
+    const offline = harness({ device: 'R58M12ABCDE', platform: 'android' });
+    offline.fake.respond('devices.list', () => { throw new AppError('COMMAND_FAILED', 'adb is missing'); });
+    await expect(offline.prepare(info())).rejects.toThrow(/adb is missing/);
+    expect(offline.fake.methods()).not.toContain('devices.boot');
   });
 
   it('carries the configured settle window on actions, and none when settle is false; both budgets are non-negative integers', async () => {
