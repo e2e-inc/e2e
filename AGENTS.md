@@ -159,7 +159,9 @@ suites that consume the built packages the way a user would.
   since Electron 45 has no install script. Reads join
   `Accessibility.getFullAXTree` and one `DOMSnapshot` on backend node ids
   (`src/tree.ts`, pure, tested on a captured read); actions run in an
-  isolated world and send trusted input. Windows are the tabs. Screenshots
+  isolated world and send trusted input; the page-side code is typed
+  functions in `src/in-page/`, sent as source text (`toString()`) and tested
+  in Chromium (`tests/integration/`). Windows are the tabs. Screenshots
   mask password fields and nested documents, and are withheld when the DOM
   snapshot finds one inside a closed shadow root, which no mask reaches
   (`unmaskableCount`, independent of the accessibility tree).

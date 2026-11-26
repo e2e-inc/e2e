@@ -5,217 +5,46 @@
  * driven with trusted input events. Everything here goes through public
  * APIs: Playwright's `_electron` launcher and `CDPSession`, and the engine
  * contract of `@e2e-dev/core/engine`.
+ *
+ * The state has three lifetimes, each in a module of its own: the worker's
+ * (options, executable, `DevTools`), the attempt's (its user-data directory
+ * and artifacts), and the running app's (`AppProcess` and `Windows`).
  */
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { _electron, type CDPSession, type ElectronApplication, type Locator, type Page } from 'playwright-core';
-import {
-  ConfigurationError,
-  EngineError,
-  TestError,
-  expressionSelectors,
-  parseKey,
-  raceAbort,
-  resolveExpression,
-  type EngineAppInfo,
-  type EngineAttemptContext,
-  type EngineCleanupContext,
-  type EngineDoctorCheck,
-  type EngineDoctorInfo,
-  type EngineInitInfo,
-  type EngineObserveOptions,
-  type EnginePrepareInfo,
-  type EngineSnapshot,
-  type LocatorAction,
-  type LocatorExpression,
-  type Momentum,
-  type NodeRef,
-  type ObservationPixels,
-  type OperationContext,
-  type PointerAction,
-  type ScrollDirection,
-  type SemanticNode,
-  type ViewportPoint,
+import type {
+  EngineAppInfo,
+  EngineAttemptContext,
+  EngineCleanupContext,
+  EngineDoctorCheck,
+  EngineDoctorInfo,
+  EngineInitInfo,
+  EngineObserveOptions,
+  EnginePrepareInfo,
+  EngineSnapshot,
+  LocatorAction,
+  LocatorExpression,
+  NodeRef,
+  OperationContext,
+  PointerAction,
+  SemanticNode,
+  ViewportPoint,
 } from '@e2e-dev/core/engine';
+import { performAtPoint, performOnNode, pressKey, swipeWindow, typeText, type ActionContext } from './actions.ts';
+import { AppProcess, DISCARD_CLOSE_MS, RESTART_CLOSE_MS } from './app-process.ts';
+import { screenshotFile, screenshotName, withPixels } from './capture.ts';
+import { DevTools } from './devtools.ts';
+import type { ElectronMainModule } from './electron.ts';
+import { invalidState, notActionable } from './errors.ts';
 import { describeExecutable, ensureElectronBinary, resolveExecutable } from './executable.ts';
+import { bounded } from './input-gate.ts';
+import { locateIn, projectRead, readWindow, type ProjectionContext } from './locate.ts';
 import type { ResolvedElectronOptions } from './options.ts';
-import { MASKED_TAGS, projectTree, unmaskableCount, type AXNode, type ProjectionMode, type SnapshotDocument, type WindowGeometry } from './tree.ts';
+import { ROOT_ID, Windows, type AppWindow, type ElectronWindow, type WindowMatcher } from './windows.ts';
 
-/** The observation root's id: one surface, one root, whichever window it reads. */
-const ROOT_ID = 'window';
-
-/** The isolated world the engine's own page-side reads run in, apart from the app's globals. */
-const WORLD_NAME = '__e2e_electron__';
-
-let objectGroups = 0;
-
-/** A DevTools object group of one call's own: releasing it frees that call's handles and never another's still in use. */
-function objectGroup(): string {
-  objectGroups += 1;
-  return `${WORLD_NAME}${objectGroups}`;
-}
-
-/** Everything that can hold a secure value or show another document in a screenshot: masked, or the capture is not taken. */
-const MASKED_SELECTOR = ['input[type=password i]', ...MASKED_TAGS.map((tag) => tag.toLowerCase())].join(', ');
-
-/** How long the app gets to close itself when its data is thrown away anyway: a `beforeunload` handler would otherwise hold every test end for the full budget. */
-const DISCARD_CLOSE_MS = 1_000;
-
-/** How long it gets when `app.restart()` keeps its data: time to flush it. */
-const RESTART_CLOSE_MS = 5_000;
-
-/** How long a long press holds by default. */
-const LONG_PRESS_MS = 800;
-
-/** One open window of the app: its page and the serial its node ids carry. */
-interface AppWindow {
-  readonly page: Page;
-  readonly serial: number;
-}
-
-/** One window's raw read: the accessibility tree, the DOM snapshot of the same document, and its geometry. */
-interface RawRead {
-  readonly window: AppWindow;
-  readonly ax: readonly AXNode[];
-  readonly document: SnapshotDocument;
-  readonly strings: readonly string[];
-  readonly geometry: WindowGeometry;
-  readonly title: string;
-  readonly url: string;
-}
-
-/** A window of the running app, as the `electron` fixture lists it. */
-export interface ElectronWindow {
-  /** Its position among the open windows, in the order they opened: what `useWindow` and the agent's tab tools take. */
-  readonly index: number;
-  readonly title: string;
-  readonly url: string;
-  /** Whether `screen` and the agent read and act in this window. */
-  readonly shown: boolean;
-}
-
-/** Which window `useWindow` picks: a position, or the first whose title or URL matches. */
-export type WindowMatcher = number | { readonly title?: string | RegExp; readonly url?: string | RegExp };
-
-/** A page-side check's answer: ok, or why the node cannot take the action yet. */
-type Readiness = { readonly ok: true } | { readonly ok: false; readonly reason: string };
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (ms <= 0 || signal?.aborted === true) {
-      resolve();
-      return;
-    }
-    const timer = setTimeout(done, ms);
-    function done(): void {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', done);
-      resolve();
-    }
-    signal?.addEventListener('abort', done, { once: true });
-  });
-}
-
-function stale(message: string, cause?: unknown): EngineError {
-  return new EngineError('NODE_STALE', message, { retryable: true, ...(cause === undefined ? {} : { cause }) });
-}
-
-/**
- * The check every input an operation sends passes first: once the
- * operation's budget is spent or it was cancelled, its caller stopped
- * waiting, and nothing more may reach the app.
- */
-function inputGate(operation: OperationContext, label: string): InputGate {
-  const ends = Date.now() + operation.timeoutMs;
-  const gate = () => {
-    if (operation.signal.aborted) throw new EngineError('CANCELLED', `${label} was cancelled`, { retryable: false });
-    if (Date.now() >= ends) throw new EngineError('OPERATION_TIMEOUT', `${label} timed out after ${operation.timeoutMs}ms`, { retryable: false });
-  };
-  return Object.assign(gate, { remainingMs: () => Math.max(0, ends - Date.now()) });
-}
-
-/** An operation's input gate: throws once the operation ended, and says how much of its budget is left. */
-type InputGate = (() => void) & { readonly remainingMs: () => number };
-
-function notActionable(message: string): EngineError {
-  return new EngineError('NOT_ACTIONABLE', message, { retryable: false });
-}
-
-function lostFocus(backendNodeId: number): EngineError {
-  return notActionable(`node ${backendNodeId} did not keep keyboard focus (the app moved it), so the input would reach another element`);
-}
-
-/** Protocol and Playwright failures that mean the node, or the document it was in, is gone. */
-const GONE = /No node found|Could not find node|Node is detached|No node with given id|Cannot find context with specified id|Execution context was destroyed|Cannot find object with id|Node is not an element|frame was detached/i;
-/** Failures that mean the window, or the whole app, closed. */
-const CLOSED = /Target (page, context or browser )?(has been )?closed|Target closed|has been closed|Session closed|browser has disconnected|Protocol error.*Target/i;
-
-/**
- * Translates a failure into the engine error taxonomy. `committed` says
- * input may already have reached the app: then a timeout or a vanished node
- * is `ACTION_MAY_HAVE_COMMITTED`, never something the harness retries.
- */
-function translate(cause: unknown, label: string, committed: boolean): Error {
-  // A refusal by policy (a screenshot it cannot mask) or of the test's own input is the harness's to report as it is.
-  if (cause instanceof ConfigurationError || cause instanceof TestError) return cause;
-  if (cause instanceof EngineError) {
-    if (committed && (cause.code === 'OPERATION_TIMEOUT' || cause.code === 'CANCELLED' || cause.retryable)) {
-      return new EngineError('ACTION_MAY_HAVE_COMMITTED', `${label}: ${cause.message}; its input may have reached the app`, { retryable: false, cause });
-    }
-    return cause;
-  }
-  const message = cause instanceof Error ? cause.message : String(cause);
-  if (CLOSED.test(message)) {
-    // A window that closes because of the input (a "Close" or "Sign out" button) is a committed action, as a node that goes away is.
-    if (committed) return new EngineError('ACTION_MAY_HAVE_COMMITTED', `${label}: the window closed while the input was sent`, { retryable: false, cause });
-    return new EngineError('INVALID_STATE', `${label}: the window closed (${message.split('\n')[0]})`, { retryable: false, cause });
-  }
-  if (GONE.test(message)) {
-    if (committed) return new EngineError('ACTION_MAY_HAVE_COMMITTED', `${label}: the node went away while the input was sent`, { retryable: false, cause });
-    return stale(`${label}: the node is no longer in the window`, cause);
-  }
-  return new EngineError(committed ? 'ACTION_MAY_HAVE_COMMITTED' : 'ENGINE_FAILURE', `${label} failed: ${message.split('\n')[0]}`, { retryable: false, cause });
-}
-
-/** The PNG's own size, read from its header. */
-function pngSize(data: Uint8Array): { readonly width: number; readonly height: number } {
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  return { width: view.getUint32(16), height: view.getUint32(20) };
-}
-
-/** A file name a label cannot turn into a path: letters, digits, dashes. */
-function fileLabel(label: string): string {
-  return label.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 60);
-}
-
-function wheelDelta(direction: ScrollDirection, distance: number): [number, number] {
-  switch (direction) {
-    case 'down':
-      return [0, distance];
-    case 'up':
-      return [0, -distance];
-    case 'right':
-      return [distance, 0];
-    case 'left':
-      return [-distance, 0];
-  }
-}
-
-function swipeDistance(extent: number, momentum: Momentum): number {
-  const ratio = momentum === 'fast' ? 1.5 : momentum === 'slow' ? 0.75 : 0.5;
-  return Math.max(1, Math.round(extent * ratio));
-}
-
-/** Rounds a point to whole CSS pixels: Chromium truncates fractional pointer coordinates. */
-function whole(point: ViewportPoint): ViewportPoint {
-  return { x: Math.round(point.x), y: Math.round(point.y) };
-}
-
-function modifierKey(modifier: string): string {
-  return modifier === 'ControlOrMeta' ? (process.platform === 'darwin' ? 'Meta' : 'Control') : modifier;
-}
+export type { ElectronWindow, WindowMatcher } from './windows.ts';
 
 export class ElectronSurface {
   private projectRoot = process.cwd();
@@ -224,16 +53,14 @@ export class ElectronSurface {
   private executable: string | undefined;
   private attempt: EngineAttemptContext | undefined;
   private userDataDir: string | undefined;
-  private app: ElectronApplication | undefined;
-  private readonly windowsByPage = new Map<Page, AppWindow>();
-  private shown: AppWindow | undefined;
-  private nextSerial = 1;
-  private queue: Promise<void> = Promise.resolve();
   private artifactCounter = 0;
-  private readonly sessions = new WeakMap<Page, Promise<CDPSession>>();
-  private readonly worlds = new WeakMap<Page, Promise<number>>();
+  private readonly devtools = new DevTools();
+  private readonly windowList = new Windows();
+  private readonly app: AppProcess;
 
-  constructor(private readonly options: ResolvedElectronOptions) {}
+  constructor(private readonly options: ResolvedElectronOptions) {
+    this.app = new AppProcess(options, this.windowList, this.devtools);
+  }
 
   // --- run and worker lifecycle ---
 
@@ -262,7 +89,7 @@ export class ElectronSurface {
   }
 
   async endAttempt(context: EngineCleanupContext): Promise<void> {
-    await this.lifecycle(() => this.quit(context, DISCARD_CLOSE_MS));
+    await this.app.serialized(() => this.app.quit(context, DISCARD_CLOSE_MS));
     if (this.userDataDir !== undefined) rmSync(this.userDataDir, { recursive: true, force: true });
     this.userDataDir = undefined;
     this.attempt = undefined;
@@ -274,49 +101,18 @@ export class ElectronSurface {
 
   // --- the app ---
 
-  /**
-   * Runs a launch or a quit after the ones before it: `app.open()` and
-   * `app.restart()` that overlap would each start a main process, and only
-   * one is tracked.
-   */
-  private lifecycle<T>(work: () => Promise<T>): Promise<T> {
-    const run = this.queue.then(work, work);
-    this.queue = run.then(() => undefined, () => undefined);
-    return run;
-  }
-
-  /** Quits the running app, if any: a graceful close within `graceMs` and the budget, then the process killed. */
-  private async quit(budget: { readonly timeoutMs: number }, graceMs: number): Promise<void> {
-    const app = this.app;
-    this.app = undefined;
-    this.windowsByPage.clear();
-    this.shown = undefined;
-    if (app === undefined) return;
-    let timer: NodeJS.Timeout | undefined;
-    const closed = app.close().then(() => true, () => false);
-    const timedOut = new Promise<false>((resolve) => {
-      timer = setTimeout(() => resolve(false), Math.max(1, Math.min(budget.timeoutMs, graceMs)));
-    });
-    try {
-      // The process is read only for the kill: Playwright refuses it for an app that has already quit.
-      if (!(await Promise.race([closed, timedOut]))) app.process().kill('SIGKILL');
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
   /** `app.open()` and `app.restart()`: quits the app if it runs and launches it again on the attempt's app data. */
   restart(operation: OperationContext): Promise<void> {
-    return this.lifecycle(async () => {
-      await this.quit(operation, RESTART_CLOSE_MS);
+    return this.app.serialized(async () => {
+      await this.app.quit(operation, RESTART_CLOSE_MS);
       await this.launch(operation);
     });
   }
 
   /** `app.clearState()`: quits the app, empties its data, and launches it again. */
   reset(operation: OperationContext): Promise<void> {
-    return this.lifecycle(async () => {
-      await this.quit(operation, DISCARD_CLOSE_MS);
+    return this.app.serialized(async () => {
+      await this.app.quit(operation, DISCARD_CLOSE_MS);
       if (this.userDataDir !== undefined) {
         rmSync(this.userDataDir, { recursive: true, force: true });
         mkdirSync(this.userDataDir, { recursive: true });
@@ -325,437 +121,54 @@ export class ElectronSurface {
     });
   }
 
-  private launchEnv(): Record<string, string> {
-    const env: Record<string, string> = {};
-    for (const [key, value] of Object.entries(this.runEnv)) if (value !== undefined) env[key] = value;
-    // A runner started from an Electron-based editor inherits this, and the binary would run as plain Node.js.
-    delete env['ELECTRON_RUN_AS_NODE'];
-    return { ...env, ...this.options.env };
-  }
-
   private async launch(operation: OperationContext): Promise<void> {
-    const attempt = this.attempt;
-    if (attempt === undefined || this.userDataDir === undefined) throw new EngineError('INVALID_STATE', 'app.open() runs inside a test: no attempt is running', { retryable: false });
-    if (this.executable === undefined) throw new EngineError('INVALID_STATE', 'the electron engine was not initialized', { retryable: false });
-    const { appPath, launchArguments } = this.appInfo;
-    const args = [
-      `--user-data-dir=${this.userDataDir}`,
-      ...this.options.args,
-      ...(appPath === undefined ? [] : [path.resolve(this.projectRoot, appPath)]),
-      ...(launchArguments ?? []),
-    ];
-    const timeout = Math.max(1, Math.min(operation.timeoutMs, this.options.launchTimeoutMs));
-    // One budget for the whole launch: each phase gets what the ones before it left.
-    const ends = Date.now() + timeout;
-    const left = (): number => Math.max(1, ends - Date.now());
-    let app: ElectronApplication;
-    const launching = _electron.launch({ executablePath: this.executable, args, cwd: this.projectRoot, env: this.launchEnv(), timeout });
-    try {
-      app = await raceAbort(launching, operation.signal, 'launching the app');
-    } catch (cause) {
-      // A launch the caller stopped waiting for still finishes: the app it starts is closed, or it would outlive the test.
-      void launching.then((late) => late.close().catch(() => late.process().kill('SIGKILL')), () => undefined);
-      if (cause instanceof EngineError) throw cause;
-      const message = cause instanceof Error ? cause.message.split('\n')[0] : String(cause);
-      throw new EngineError('ENGINE_FAILURE', `could not launch ${this.executable}${appPath === undefined ? '' : ` with ${appPath}`}: ${message}`, { retryable: false, cause });
-    }
-    this.app = app;
-    app.on('window', (page) => this.track(app, page));
-    app.on('console', (message) => {
-      this.attempt?.appLog({ source: 'console', level: levelOf(message.type()), text: `[main] ${message.text()}` });
-    });
-    app.on('close', () => {
-      // The app quit on its own (its last window closed, or it called app.quit()): there is nothing left to close.
-      if (this.app === app) {
-        this.app = undefined;
-        this.windowsByPage.clear();
-        this.shown = undefined;
-      }
-    });
-    for (const page of app.windows()) this.track(app, page);
-    try {
-      const first = await raceAbort(() => app.firstWindow({ timeout: left() }), operation.signal, 'waiting for the first window');
-      this.track(app, first);
-      await raceAbort(() => first.waitForLoadState('domcontentloaded', { timeout: left() }), operation.signal, 'waiting for the first window to load');
-    } catch (cause) {
-      await this.quit({ timeoutMs: 5_000 }, DISCARD_CLOSE_MS);
-      if (cause instanceof EngineError) throw cause;
-      throw new EngineError('OPERATION_TIMEOUT', `the app opened no window within ${timeout}ms`, { retryable: false, cause });
-    }
-    let timer: NodeJS.Timeout | undefined;
-    try {
-      const versions = await Promise.race([
-        app.evaluate(() => ({ electron: process.versions.electron ?? '', chromium: process.versions.chrome ?? '' })),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error('no time left to read the versions')), ends - Date.now());
-        }),
-      ]);
-      attempt.environment({ electron: versions.electron, chromium: versions.chromium });
-    } catch {
-      // A packaged app may disable the inspector's evaluation, or the launch spent its budget; the versions are provenance only.
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  /** Registers a window the app opened: its node ids get a serial of their own, and its log reaches the attempt. */
-  private track(app: ElectronApplication, page: Page): void {
-    if (this.app !== app || this.windowsByPage.has(page) || page.isClosed()) return;
-    const window: AppWindow = { page, serial: this.nextSerial++ };
-    this.windowsByPage.set(page, window);
-    this.shown ??= window;
-    page.on('console', (message) => this.attempt?.appLog({ source: 'console', level: levelOf(message.type()), text: message.text() }));
-    page.on('pageerror', (error) => this.attempt?.appLog({ source: 'error', level: 'error', text: error.message }));
-    // A page with a dialog listener is not auto-dismissed: the dialog is dismissed here, and the log says the app asked.
-    page.on('dialog', (dialog) => {
-      this.attempt?.appLog({ source: 'error', level: 'error', text: `unhandled ${dialog.type()} dialog dismissed: ${dialog.message()}` });
-      void dialog.dismiss().catch(() => undefined);
-    });
-    page.on('framenavigated', (frame) => {
-      if (frame === page.mainFrame()) {
-        this.worlds.delete(page);
-        if (this.shown === window) this.attempt?.navigation(frame.url());
-      }
-    });
-    page.on('close', () => {
-      this.windowsByPage.delete(page);
-      if (this.shown === window) this.shown = [...this.windowsByPage.values()].at(-1);
-    });
-  }
-
-  /** Whether a window is one the app shows its user: open, and not an inspector the app's own DevTools opened. */
-  private isOpen(window: AppWindow): boolean {
-    return !window.page.isClosed() && !window.page.url().startsWith('devtools://');
-  }
-
-  /** The open windows, in the order they opened. A `WebContentsView` is a page of its own and counts as a window. */
-  private openWindows(): AppWindow[] {
-    return [...this.windowsByPage.values()].filter((window) => this.isOpen(window)).toSorted((a, b) => a.serial - b.serial);
-  }
-
-  /** The window `screen` and the agent read: the one chosen, else the first the app opened; once that one closes, the newest still open. */
-  private current(): AppWindow | undefined {
-    if (this.shown !== undefined && this.isOpen(this.shown)) return this.shown;
-    this.shown = this.openWindows().at(-1);
-    return this.shown;
-  }
-
-  private requireWindow(): AppWindow {
-    const window = this.current();
-    if (window === undefined) {
-      throw new EngineError('INVALID_STATE', this.app === undefined ? 'the app is not running: open it with app.open()' : 'the app has no open window', { retryable: false });
-    }
-    return window;
-  }
-
-  // --- the DevTools protocol ---
-
-  private session(page: Page): Promise<CDPSession> {
-    let session = this.sessions.get(page);
-    if (session === undefined) {
-      session = page.context().newCDPSession(page);
-      this.sessions.set(page, session);
-      session.catch(() => this.sessions.delete(page));
-    }
-    return session;
-  }
-
-  /** The execution context of the engine's isolated world in the window's main frame, made once per document. */
-  private world(page: Page): Promise<number> {
-    let world = this.worlds.get(page);
-    if (world === undefined) {
-      world = (async () => {
-        const session = await this.session(page);
-        const { frameTree } = await session.send('Page.getFrameTree');
-        const { executionContextId } = await session.send('Page.createIsolatedWorld', { frameId: frameTree.frame.id, worldName: WORLD_NAME, grantUniveralAccess: false });
-        return executionContextId;
-      })();
-      this.worlds.set(page, world);
-      world.catch(() => this.worlds.delete(page));
-    }
-    return world;
-  }
-
-  /**
-   * Calls `fn` on a node in the isolated world, `this` bound to it. The node
-   * is resolved fresh from its backend id, so a node the document dropped
-   * fails as stale.
-   */
-  private async callOn<T>(window: AppWindow, backendNodeId: number, fn: string, args: readonly unknown[] = []): Promise<T> {
-    const session = await this.session(window.page);
-    const executionContextId = await this.world(window.page);
-    const group = objectGroup();
-    const { object } = await session.send('DOM.resolveNode', { backendNodeId, executionContextId, objectGroup: group });
-    if (object.objectId === undefined) throw stale(`node ${backendNodeId} is no longer in the window`);
-    try {
-      const { result, exceptionDetails } = await session.send('Runtime.callFunctionOn', {
-        objectId: object.objectId,
-        functionDeclaration: fn,
-        arguments: args.map((value) => ({ value })),
-        returnByValue: true,
-        awaitPromise: true,
-      });
-      if (exceptionDetails !== undefined) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
-      return result.value as T;
-    } finally {
-      await session.send('Runtime.releaseObjectGroup', { objectGroup: group }).catch(() => undefined);
-    }
-  }
-
-  /**
-   * Whether the element with keyboard focus takes typed text. Page script
-   * stops at the host of a closed shadow root; the DevTools protocol reaches
-   * into one, so the walk goes on inside until it finds the focused element.
-   */
-  private async focusedTakesText(window: AppWindow): Promise<boolean> {
-    const session = await this.session(window.page);
-    const executionContextId = await this.world(window.page);
-    const group = objectGroup();
-    try {
-      const { result: document } = await session.send('Runtime.evaluate', { expression: 'document', contextId: executionContextId, objectGroup: group });
-      if (document.objectId === undefined) return false;
-      const { result: first } = await session.send('Runtime.callFunctionOn', { objectId: document.objectId, functionDeclaration: ACTIVE_UNDER, objectGroup: group });
-      if (first.objectId === undefined) return false;
-      let active = first.objectId;
-      for (;;) {
-        const { node } = await session.send('DOM.describeNode', { objectId: active, depth: 1, pierce: true });
-        const closed = node.shadowRoots?.find((root) => root.shadowRootType === 'closed');
-        if (closed === undefined) break;
-        const { object: root } = await session.send('DOM.resolveNode', { backendNodeId: closed.backendNodeId, executionContextId, objectGroup: group });
-        if (root.objectId === undefined) break;
-        const { result: inner } = await session.send('Runtime.callFunctionOn', { objectId: root.objectId, functionDeclaration: ACTIVE_UNDER, objectGroup: group });
-        // Nothing focused inside: the host itself has focus.
-        if (inner.objectId === undefined) break;
-        active = inner.objectId;
-      }
-      const { result } = await session.send('Runtime.callFunctionOn', { objectId: active, functionDeclaration: TAKES_TEXT, returnByValue: true });
-      return result.value === true;
-    } finally {
-      await session.send('Runtime.releaseObjectGroup', { objectGroup: group }).catch(() => undefined);
-    }
-  }
-
-  /** Evaluates an expression in the window's isolated world. */
-  private async evaluateIn<T>(window: AppWindow, expression: string): Promise<T> {
-    const session = await this.session(window.page);
-    const contextId = await this.world(window.page);
-    const { result, exceptionDetails } = await session.send('Runtime.evaluate', { expression, contextId, returnByValue: true, awaitPromise: true });
-    if (exceptionDetails !== undefined) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
-    return result.value as T;
-  }
-
-  /** Reads the window: its accessibility tree and a DOM snapshot of the same document, with the geometry joining them. */
-  private async read(window: AppWindow): Promise<RawRead> {
-    const session = await this.session(window.page);
-    const [{ nodes }, snapshot, metrics] = await Promise.all([
-      session.send('Accessibility.getFullAXTree'),
-      session.send('DOMSnapshot.captureSnapshot', { computedStyles: [] }),
-      session.send('Page.getLayoutMetrics'),
-    ]);
-    const css = metrics.cssLayoutViewport;
-    const device = metrics.layoutViewport;
-    const document = snapshot.documents[0];
-    if (document === undefined) throw stale('the window has no document yet');
-    return {
-      window,
-      ax: nodes,
-      document,
-      strings: snapshot.strings,
-      geometry: {
-        scale: css.clientWidth > 0 ? device.clientWidth / css.clientWidth : 1,
-        scrollX: metrics.cssVisualViewport.pageX,
-        scrollY: metrics.cssVisualViewport.pageY,
-        width: metrics.cssVisualViewport.clientWidth,
-        height: metrics.cssVisualViewport.clientHeight,
-      },
-      title: snapshot.strings[document.title] ?? '',
-      url: window.page.url(),
-    };
-  }
-
-  private project(raw: RawRead, mode: ProjectionMode, keep?: ReadonlySet<number>): EngineSnapshot {
-    const { serial } = raw.window;
-    const projection = projectTree(raw.ax, raw.document, raw.strings, raw.geometry, {
-      mode,
-      ...(keep === undefined ? {} : { keep }),
-      testIdAttribute: this.options.testIdAttribute,
-      idOf: (backendNodeId) => `${serial}.${backendNodeId}`,
-      rootId: ROOT_ID,
-      baseUrl: raw.url,
-      ...(raw.title === '' ? {} : { title: raw.title }),
-    });
-    const open = this.openWindows();
-    const active = open.indexOf(raw.window);
-    return {
-      location: raw.url,
-      root: projection.root,
-      viewport: { width: raw.geometry.width, height: raw.geometry.height },
-      ...(projection.truncated ? { truncated: true } : {}),
-      ...(open.length > 1 && active >= 0 ? { tabs: { count: open.length, active } } : {}),
-    };
+    const { attempt, userDataDir, executable } = this;
+    if (attempt === undefined || userDataDir === undefined) throw invalidState('app.open() runs inside a test: no attempt is running');
+    if (executable === undefined) throw invalidState('the electron engine was not initialized');
+    await this.app.launch({ executable, projectRoot: this.projectRoot, app: this.appInfo, env: this.runEnv, userDataDir, attempt }, operation);
   }
 
   // --- reading ---
 
+  private projection(): ProjectionContext {
+    return { testIdAttribute: this.options.testIdAttribute, open: this.windowList.open() };
+  }
+
   async observe(operation: OperationContext, options?: EngineObserveOptions): Promise<EngineSnapshot> {
-    const window = this.current();
+    const window = this.windowList.current();
     if (window === undefined) return { root: { ref: { id: ROOT_ID, revision: '' }, role: 'document' }, viewport: { width: 0, height: 0 } };
-    return await this.bounded(operation, 'observe', false, async () => {
-      const raw = await this.read(window);
-      const snapshot = this.project(raw, 'tree');
-      if (options?.pixels !== true) return snapshot;
-      const masks = window.page.locator(MASKED_SELECTOR);
-      const masked = await masks.count();
-      // A secure field or nested document in a closed shadow root is out of every selector's reach: the pixels are withheld, and the count says so.
-      if (unmaskableCount(raw.document, raw.strings) > 0) return { ...snapshot, maskedRegionCount: masked };
-      const pixels = await this.capture(window, masks);
-      // The app may have rendered such an element while the capture ran: read the document again before the pixels go out.
-      if ((await this.unmaskable(window)) > 0) return { ...snapshot, maskedRegionCount: masked };
-      return { ...snapshot, pixels, maskedRegionCount: masked };
+    return await bounded(operation, 'observe', false, async () => {
+      const raw = await readWindow(this.devtools, window);
+      const snapshot = projectRead(raw, 'tree', this.projection());
+      return options?.pixels === true ? await withPixels(this.devtools, raw, snapshot) : snapshot;
     });
   }
 
   async locate(expression: LocatorExpression, operation: OperationContext): Promise<readonly SemanticNode[]> {
-    const window = this.current();
+    const window = this.windowList.current();
     if (window === undefined) return [];
-    return await this.bounded(operation, 'locate', false, async () => {
-      const raw = await this.read(window);
+    return await bounded(operation, 'locate', false, async () => {
+      const raw = await readWindow(this.devtools, window);
       const sink = this.attempt?.screen;
       if (sink !== undefined) {
         try {
-          sink(this.project(raw, 'tree'));
+          sink(projectRead(raw, 'tree', this.projection()));
         } catch {
           // The trace is evidence; a sink that throws never fails the step.
         }
       }
-      // `resolveExpression` takes the selector answer synchronously, so every selector in the expression is queried first;
-      // the elements they match stay in the tree even where Chromium's tree leaves them out.
-      const selected = new Map<string, ReadonlySet<number>>();
-      for (const selector of expressionSelectors(expression)) selected.set(selector, await this.querySelectorAll(window, selector));
-      const keep = new Set([...selected.values()].flatMap((ids) => [...ids]));
-      const { root } = this.project(raw, 'node', keep);
-      const idOf = (backendNodeId: number): string => `${window.serial}.${backendNodeId}`;
-      // The hook answers in document order, as `querySelectorAll` does; `aria-owns` can put the tree in another one.
-      const domOrder = new Map((raw.document.nodes.backendNodeId ?? []).map((backendNodeId, index) => [idOf(backendNodeId), index]));
-      const position = (node: SemanticNode): number => domOrder.get(node.ref.id) ?? Number.MAX_SAFE_INTEGER;
-      return resolveExpression(expression, [root], {
-        selector: (selector, candidates) => {
-          const ids = new Set([...(selected.get(selector) ?? [])].map(idOf));
-          return candidates.filter((node) => ids.has(node.ref.id)).toSorted((a, b) => position(a) - position(b));
-        },
-      });
+      return await locateIn(this.devtools, raw, expression, this.projection());
     });
-  }
-
-  /**
-   * The backend ids of the elements a CSS selector matches in the window's
-   * document and in each open shadow root, run in the engine's isolated
-   * world. A selector matches within one root at a time, as
-   * `querySelectorAll` does; it never enters a frame.
-   */
-  private async querySelectorAll(window: AppWindow, selector: string): Promise<ReadonlySet<number>> {
-    const session = await this.session(window.page);
-    const contextId = await this.world(window.page);
-    const group = objectGroup();
-    const { result, exceptionDetails } = await session.send('Runtime.evaluate', {
-      expression: `(${QUERY_ALL})(${JSON.stringify(selector)})`,
-      contextId,
-      objectGroup: group,
-    });
-    try {
-      if (exceptionDetails !== undefined) {
-        const reason = (exceptionDetails.exception?.description ?? exceptionDetails.text).split('\n')[0];
-        throw new EngineError('UNSUPPORTED_CAPABILITY', `${JSON.stringify(selector)} is not a CSS selector this window can match: ${reason}`, { retryable: false });
-      }
-      if (result.objectId === undefined) return new Set();
-      const { result: entries } = await session.send('Runtime.getProperties', { objectId: result.objectId, ownProperties: true });
-      // One round trip per match, sent together: a broad selector on a long list is read on every poll of an expect.
-      const described = await Promise.all(
-        entries.flatMap((entry) => (/^\d+$/.test(entry.name) && entry.value?.objectId !== undefined ? [session.send('DOM.describeNode', { objectId: entry.value.objectId })] : [])),
-      );
-      return new Set(described.map(({ node }) => node.backendNodeId));
-    } finally {
-      await session.send('Runtime.releaseObjectGroup', { objectGroup: group }).catch(() => undefined);
-    }
   }
 
   // --- acting ---
 
-  /** The window and backend node a ref names, or a stale error when it is gone or from another window. */
-  private bind(ref: NodeRef): { readonly window: AppWindow; readonly backendNodeId: number } {
-    const match = /^(\d+)\.(\d+)$/.exec(ref.id);
-    if (match === null) throw stale(`node ${ref.id} is not a node of this app`);
-    const serial = Number(match[1]);
-    const window = this.current();
-    if (window === undefined || window.serial !== serial) throw stale(`node ${ref.id} is in a window that is not shown now`);
-    return { window, backendNodeId: Number(match[2]) };
+  private actions(): ActionContext {
+    return { devtools: this.devtools, windows: this.windowList, projectRoot: this.projectRoot, settleMs: this.options.settleMs };
   }
 
-  /**
-   * Runs `work` within the operation's budget and signal, failures translated.
-   * `committed` says whether input may have reached the app, read when the
-   * failure is: an action that sends input part-way passes a getter.
-   */
-  private async bounded<T>(operation: OperationContext, label: string, committed: boolean | (() => boolean), work: () => Promise<T>): Promise<T> {
-    let timer: NodeJS.Timeout | undefined;
-    try {
-      return await raceAbort(
-        () =>
-          Promise.race([
-            work(),
-            new Promise<never>((_, reject) => {
-              timer = setTimeout(() => reject(new EngineError('OPERATION_TIMEOUT', `${label} timed out after ${operation.timeoutMs}ms`, { retryable: false })), Math.max(1, operation.timeoutMs));
-            }),
-          ]),
-        operation.signal,
-        label,
-      );
-    } catch (cause) {
-      throw translate(cause, label, typeof committed === 'boolean' ? committed : committed());
-    } finally {
-      if (timer !== undefined) clearTimeout(timer);
-    }
-  }
-
-  /** The agent reads the screen right after acting, so its actions let the UI settle first; a test's own steps verify with `expect`. */
-  private async settle(operation: OperationContext): Promise<void> {
-    if (operation.origin === 'agent') await sleep(Math.min(this.options.settleMs, operation.timeoutMs), operation.signal);
-  }
-
-  /**
-   * Waits until the node can take a pointer action, then returns the point
-   * to send it to: in the document, laid out with a box, enabled when
-   * `enabled` asks, scrolled into view, and the topmost thing at its centre
-   * (or a label for it). Gives up with the last reason at the deadline.
-   */
-  private async actionablePoint(window: AppWindow, backendNodeId: number, operation: OperationContext, enabled: boolean, deadline: number): Promise<ViewportPoint> {
-    const session = await this.session(window.page);
-    let reason = 'it never became actionable';
-    for (;;) {
-      if (operation.signal.aborted) throw new EngineError('CANCELLED', 'the action was cancelled', { retryable: false });
-      const state = await this.callOn<Readiness>(window, backendNodeId, CHECK_ENABLED, [enabled]);
-      if (state.ok) {
-        await session.send('DOM.scrollIntoViewIfNeeded', { backendNodeId }).catch(() => this.callOn(window, backendNodeId, SCROLL_INTO_VIEW));
-        const { quads } = await session.send('DOM.getContentQuads', { backendNodeId }).catch((cause: unknown) => {
-          if (cause instanceof Error && GONE.test(cause.message)) throw cause;
-          return { quads: [] as number[][] };
-        });
-        const quad = quads.find((candidate) => area(candidate) > 0);
-        // A node wider or taller than the window is clicked in the middle of the part the window shows.
-        const { cssVisualViewport: viewport } = await session.send('Page.getLayoutMetrics');
-        const shown = quad === undefined ? undefined : clip(boxOf(quad), viewport.clientWidth, viewport.clientHeight);
-        if (quad === undefined) reason = 'it has no box on screen (hidden, or empty)';
-        else if (shown === undefined) reason = 'it is outside the window';
-        else {
-          const point = whole({ x: shown.x + shown.width / 2, y: shown.y + shown.height / 2 });
-          const hit = await this.callOn<Readiness>(window, backendNodeId, HIT_TEST, [point.x, point.y]);
-          if (hit.ok) return point;
-          reason = hit.reason;
-        }
-      } else reason = state.reason;
-      if (Date.now() >= deadline) throw notActionable(`node ${backendNodeId} cannot take the action: ${reason}`);
-      await sleep(Math.min(100, Math.max(0, deadline - Date.now())), operation.signal);
-    }
+  private requireWindow(): AppWindow {
+    return this.windowList.require(this.app.running !== undefined);
   }
 
   async perform(ref: NodeRef, action: LocatorAction, operation: OperationContext): Promise<void> {
@@ -763,663 +176,66 @@ export class ElectronSurface {
       const window = this.requireWindow();
       if (action.kind === 'scrollIntoView') return;
       if (action.kind !== 'swipe') throw notActionable(`the window takes swipe and scrollIntoView only, not ${action.kind}; act on a node`);
-      const open = inputGate(operation, 'swipe');
-      let committed = false;
-      await this.bounded(operation, 'swipe', () => committed, async () => {
-        const size = await this.evaluateIn<{ width: number; height: number }>(window, '({ width: innerWidth, height: innerHeight })');
-        open();
-        committed = true;
-        await window.page.mouse.move(Math.round(size.width / 2), Math.round(size.height / 2));
-        open();
-        await this.wheel(window, action.direction, action.momentum ?? 'none', size);
-      });
-      await this.settle(operation);
+      await swipeWindow(this.actions(), window, action, operation);
       return;
     }
-    const { window, backendNodeId } = this.bind(ref);
-    // The wait for actionability ends a little before the operation does, so it reports why the node never became actionable.
-    const deadline = Date.now() + Math.max(0, operation.timeoutMs - Math.min(250, operation.timeoutMs / 10));
-    const { mouse, keyboard } = window.page;
-    const open = inputGate(operation, action.kind);
-    let committed = false;
-    const commit = <T>(send: () => Promise<T>): Promise<T> => {
-      open();
-      committed = true;
-      return send();
-    };
-    const label = action.kind;
-    await this.bounded(operation, label, () => committed, async () => {
-      switch (action.kind) {
-        case 'tap':
-        case 'doubleTap':
-        case 'secondaryTap':
-        case 'multiTap': {
-          const point = await this.actionablePoint(window, backendNodeId, operation, true, deadline);
-          const clickCount = action.kind === 'doubleTap' ? 2 : action.kind === 'multiTap' ? action.count : 1;
-          const modifiers = (action.modifiers ?? []).map(modifierKey);
-          await commit(() => this.withModifiers(window, modifiers, () => mouse.click(point.x, point.y, { clickCount, button: action.kind === 'secondaryTap' ? 'right' : 'left' })));
-          return;
-        }
-        case 'hover': {
-          const point = await this.actionablePoint(window, backendNodeId, operation, false, deadline);
-          await commit(() => mouse.move(point.x, point.y));
-          return;
-        }
-        case 'longPress': {
-          const point = await this.actionablePoint(window, backendNodeId, operation, true, deadline);
-          await commit(() => mouse.move(point.x, point.y));
-          await commit(() => mouse.down());
-          await this.hold(window, action.durationMs ?? LONG_PRESS_MS, operation, open);
-          return;
-        }
-        case 'focus':
-          // pressSequentially focuses, then types into whatever holds focus: the node must be the one that does.
-          if (!(await commit(() => this.callOn<boolean>(window, backendNodeId, FOCUS)))) throw lostFocus(backendNodeId);
-          return;
-        case 'blur':
-          await commit(() => this.callOn(window, backendNodeId, BLUR));
-          return;
-        case 'scrollIntoView': {
-          const session = await this.session(window.page);
-          await session.send('DOM.scrollIntoViewIfNeeded', { backendNodeId }).catch(() => this.callOn(window, backendNodeId, SCROLL_INTO_VIEW));
-          return;
-        }
-        case 'fill':
-        case 'clear': {
-          const value = action.kind === 'fill' ? action.value : '';
-          await this.waitReady(window, backendNodeId, operation, CHECK_EDITABLE, deadline);
-          // A date, time, color, or range input takes no typed text: its value is set, as Playwright's fill does.
-          const set = await commit(() => this.callOn<Readiness | null>(window, backendNodeId, SET_VALUE, [value]));
-          if (set !== null) {
-            if (!set.ok) throw notActionable(set.reason);
-            return;
-          }
-          // The app's focus handler can hand focus on; text goes only to the node that still holds it.
-          if (!(await commit(() => this.callOn<boolean>(window, backendNodeId, SELECT_CONTENTS)))) throw lostFocus(backendNodeId);
-          // Both edit the selection as typing would, with input events and no key events, as fill promises.
-          if (value === '') await commit(() => this.callOn(window, backendNodeId, DELETE_SELECTION));
-          else await commit(() => keyboard.insertText(value));
-          return;
-        }
-        case 'check':
-        case 'uncheck': {
-          const want = action.kind === 'check';
-          const now = await this.callOn<boolean | null>(window, backendNodeId, READ_CHECKED);
-          if (now === null) throw new EngineError('UNSUPPORTED_CAPABILITY', `node ${backendNodeId} has no checked state to ${action.kind}`, { retryable: false });
-          if (now === want) return;
-          const point = await this.actionablePoint(window, backendNodeId, operation, true, deadline);
-          await commit(() => mouse.click(point.x, point.y));
-          // A custom widget can set its state in a later task: the state is polled until the deadline, as the checks before the click are.
-          while ((await this.callOn<boolean | null>(window, backendNodeId, READ_CHECKED)) !== want) {
-            if (Date.now() >= deadline) throw notActionable(`clicking node ${backendNodeId} did not ${action.kind} it`);
-            await sleep(Math.min(50, Math.max(0, deadline - Date.now())), operation.signal);
-          }
-          return;
-        }
-        case 'press': {
-          // A key the keyboard cannot send is refused before focus moves.
-          const key = playwrightKey(action.key);
-          await this.waitReady(window, backendNodeId, operation, CHECK_CONNECTED, deadline);
-          // The key goes to what holds focus after the node is focused, as on the web: a node that cannot take focus (a plain div) leaves it where it was.
-          await commit(() => this.callOn<boolean>(window, backendNodeId, FOCUS));
-          await commit(() => keyboard.press(key));
-          return;
-        }
-        case 'selectOption': {
-          const option = typeof action.value === 'string' ? { label: action.value } : action.value;
-          // An app can fill its options in after a request: the wait lasts until the option is there and enabled.
-          await this.waitReady(window, backendNodeId, operation, CHECK_SELECT, deadline, [option]);
-          const outcome = await commit(() => this.callOn<Readiness>(window, backendNodeId, SELECT_OPTION, [option]));
-          if (!outcome.ok) throw notActionable(outcome.reason);
-          return;
-        }
-        case 'setInputFiles':
-        case 'setInputFilePayloads': {
-          if (action.kind === 'setInputFilePayloads') throw new EngineError('UNSUPPORTED_CAPABILITY', 'in-memory files are not supported; pass file paths', { retryable: false });
-          const files = action.paths.map((file) => path.resolve(this.projectRoot, file));
-          // The DevTools call takes a path that names nothing and attaches nothing, reporting success.
-          const missing = files.find((file) => !existsSync(file));
-          if (missing !== undefined) throw new TestError('INVALID_ARGUMENT', `setInputFiles: no file at ${missing}`);
-          await this.waitReady(window, backendNodeId, operation, CHECK_FILE_INPUT, deadline);
-          const session = await this.session(window.page);
-          await commit(() => session.send('DOM.setFileInputFiles', { files, backendNodeId }));
-          return;
-        }
-        case 'dragTo': {
-          const target = this.bind(action.target);
-          // The source is pressed where it is now; only then does the target scroll into view, under the held pointer.
-          const from = await this.actionablePoint(window, backendNodeId, operation, true, deadline);
-          await commit(() => mouse.move(from.x, from.y));
-          await commit(() => mouse.down());
-          try {
-            // The target is waited for as the source was: in view, and the topmost element at the point the drop lands on.
-            const to = await this.actionablePoint(window, target.backendNodeId, operation, false, deadline).catch((cause: unknown) => {
-              if (cause instanceof EngineError && cause.code === 'NOT_ACTIONABLE') {
-                throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `the drop target ${cause.message.replace(/^node \d+ /, '')}, and the source was already pressed`, { retryable: false, cause });
-              }
-              throw cause;
-            });
-            // An intermediate move, so drag handlers see motion before the drop.
-            await commit(() => mouse.move(Math.round((from.x + to.x) / 2), Math.round((from.y + to.y) / 2)));
-            await commit(() => mouse.move(to.x, to.y));
-          } finally {
-            await mouse.up();
-          }
-          return;
-        }
-        case 'swipe': {
-          const point = await this.actionablePoint(window, backendNodeId, operation, false, deadline);
-          const session = await this.session(window.page);
-          const { quads } = await session.send('DOM.getContentQuads', { backendNodeId });
-          const quad = quads.find((candidate) => area(candidate) > 0);
-          // The layout can change after the wait for actionability read the box.
-          if (quad === undefined) throw notActionable(`node ${backendNodeId} has no box on screen to swipe`);
-          const box = boxOf(quad);
-          await commit(() => mouse.move(point.x, point.y));
-          await commit(() => this.wheel(window, action.direction, action.momentum ?? 'none', box));
-          return;
-        }
-      }
-    });
-    await this.settle(operation);
-  }
-
-  /**
-   * Holds a pressed button for `durationMs`, never past the operation's end,
-   * and releases it whatever happens: a release that waited for a press
-   * longer than its operation would land on whatever control the next action
-   * leaves the pointer over.
-   */
-  private async hold(window: AppWindow, durationMs: number, operation: OperationContext, open: InputGate): Promise<void> {
-    try {
-      await sleep(Math.min(durationMs, open.remainingMs()), operation.signal);
-    } finally {
-      await window.page.mouse.up();
-    }
-    open();
-  }
-
-  /** Waits until a page-side check passes, for actions that need no point. */
-  private async waitReady(window: AppWindow, backendNodeId: number, operation: OperationContext, check: string, deadline: number, args: readonly unknown[] = []): Promise<void> {
-    for (;;) {
-      const state = await this.callOn<Readiness>(window, backendNodeId, check, args);
-      if (state.ok) return;
-      if (Date.now() >= deadline) throw notActionable(`node ${backendNodeId} cannot take the action: ${state.reason}`);
-      await sleep(Math.min(100, Math.max(0, deadline - Date.now())), operation.signal);
-    }
-  }
-
-  private async withModifiers(window: AppWindow, modifiers: readonly string[], work: () => Promise<void>): Promise<void> {
-    const { keyboard } = window.page;
-    for (const modifier of modifiers) await keyboard.down(modifier);
-    try {
-      await work();
-    } finally {
-      for (const modifier of modifiers.toReversed()) await keyboard.up(modifier);
-    }
-  }
-
-  private async wheel(window: AppWindow, direction: ScrollDirection, momentum: Momentum, box: { readonly width: number; readonly height: number }): Promise<void> {
-    const distance = swipeDistance(direction === 'up' || direction === 'down' ? box.height : box.width, momentum);
-    const [deltaX, deltaY] = wheelDelta(direction, distance);
-    await window.page.mouse.wheel(deltaX, deltaY);
-    await this.evaluateIn(window, NEXT_FRAME);
-  }
-
-  /** A pointer drag between two points, paced over `durationMs` when given; every move passes `open`, the operation's input gate. */
-  private async drag(window: AppWindow, from: ViewportPoint, to: ViewportPoint, open: () => void, durationMs?: number, signal?: AbortSignal): Promise<void> {
-    const { mouse } = window.page;
-    open();
-    await mouse.move(from.x, from.y);
-    await mouse.down();
-    try {
-      const steps = durationMs === undefined ? 2 : Math.max(2, Math.round(durationMs / 16));
-      for (let step = 1; step <= steps; step += 1) {
-        open();
-        await mouse.move(Math.round(from.x + ((to.x - from.x) * step) / steps), Math.round(from.y + ((to.y - from.y) * step) / steps));
-        if (durationMs !== undefined) await sleep(durationMs / steps, signal);
-      }
-    } finally {
-      await mouse.up();
-    }
+    const { window, backendNodeId } = this.windowList.bind(ref);
+    await performOnNode(this.actions(), window, backendNodeId, action, operation);
   }
 
   async performAt(point: ViewportPoint, action: PointerAction, operation: OperationContext): Promise<void> {
-    const window = this.requireWindow();
-    const at = whole(point);
-    const { mouse } = window.page;
-    const open = inputGate(operation, action.kind);
-    await this.bounded(operation, action.kind, true, async () => {
-      switch (action.kind) {
-        case 'tap':
-          await mouse.click(at.x, at.y);
-          return;
-        case 'doubleTap':
-          await mouse.click(at.x, at.y, { clickCount: 2 });
-          return;
-        case 'secondaryTap':
-          await mouse.click(at.x, at.y, { button: 'right' });
-          return;
-        case 'hover':
-          await mouse.move(at.x, at.y);
-          return;
-        case 'longPress':
-          await mouse.move(at.x, at.y);
-          await mouse.down();
-          await this.hold(window, action.durationMs ?? LONG_PRESS_MS, operation, open);
-          return;
-        case 'dragTo':
-          await this.drag(window, at, whole(action.target), open);
-          return;
-        case 'swipeTo':
-          await this.drag(window, at, whole(action.target), open, action.durationMs ?? 300, operation.signal);
-          return;
-        case 'swipe': {
-          open();
-          await mouse.move(at.x, at.y);
-          const size = await this.evaluateIn<{ width: number; height: number }>(window, '({ width: innerWidth, height: innerHeight })');
-          open();
-          await this.wheel(window, action.direction, action.momentum ?? 'none', size);
-          return;
-        }
-      }
-    });
-    await this.settle(operation);
+    await performAtPoint(this.actions(), this.requireWindow(), point, action, operation);
   }
 
   async typeText(text: string, options: { readonly replace: boolean }, operation: OperationContext): Promise<void> {
-    const window = this.requireWindow();
-    const { keyboard } = window.page;
-    const open = inputGate(operation, 'keyboard.type');
-    await this.bounded(operation, 'keyboard.type', true, async () => {
-      const editable = await this.focusedTakesText(window);
-      if (!editable) throw notActionable('nothing that takes text has keyboard focus; tap the field first');
-      if (options.replace) {
-        open();
-        await keyboard.press('ControlOrMeta+A');
-        open();
-        await keyboard.press('Delete');
-      }
-      // One character at a time, through the gate: no key goes out once the caller stopped waiting.
-      for (const character of text) {
-        open();
-        await keyboard.type(character);
-      }
-    });
-    await this.settle(operation);
+    await typeText(this.actions(), this.requireWindow(), text, options.replace, operation);
   }
 
   async pressKey(key: string, operation: OperationContext): Promise<void> {
-    const window = this.requireWindow();
-    const sent = playwrightKey(key);
-    await this.bounded(operation, 'keyboard.press', true, () => window.page.keyboard.press(sent));
-    await this.settle(operation);
+    await pressKey(this.actions(), this.requireWindow(), key, operation);
   }
 
   // --- windows as tabs ---
 
   async switchTab(index: number, operation: OperationContext): Promise<void> {
-    const window = this.openWindows()[index];
-    if (window === undefined) throw notActionable(`the app has ${this.openWindows().length} windows; there is no window ${index}`);
-    this.shown = window;
-    await this.bounded(operation, 'switch window', false, () => window.page.bringToFront());
+    const window = this.windowList.show(index);
+    await bounded(operation, 'switch window', false, () => window.page.bringToFront());
   }
 
   async closeTab(index: number, operation: OperationContext): Promise<void> {
-    const open = this.openWindows();
-    const window = open[index];
-    if (window === undefined) throw notActionable(`the app has ${open.length} windows; there is no window ${index}`);
-    // The contract keeps the last tab open; for most apps the last window closing quits the app.
-    if (open.length === 1) throw notActionable('this is the app\'s only window; closing it would end the app');
-    await this.bounded(operation, 'close window', true, () => window.page.close());
+    const window = this.windowList.closable(index);
+    await bounded(operation, 'close window', true, () => window.page.close());
   }
 
   // --- what the fixture asks ---
 
   async windows(): Promise<readonly ElectronWindow[]> {
-    return (await this.listWindows()).map(({ entry }) => entry);
-  }
-
-  /** The open windows as the fixture lists them, each beside its handle, so a window that closes while the titles are read cannot shift a match onto another. */
-  private async listWindows(): Promise<readonly { readonly window: AppWindow; readonly entry: ElectronWindow }[]> {
-    const shown = this.current();
-    return await Promise.all(
-      this.openWindows().map(async (window, index) => ({
-        window,
-        entry: { index, title: await window.page.title().catch(() => ''), url: window.page.url(), shown: window === shown },
-      })),
-    );
+    return (await this.windowList.list()).map(({ entry }) => entry);
   }
 
   /** Makes the first open window `which` matches the one read and acted in, waiting for it to open until the operation's deadline. */
   async useWindow(which: WindowMatcher, operation: OperationContext): Promise<ElectronWindow> {
-    // The wait ends a little before the step does, so the step reports which windows are open rather than a bare timeout.
-    const deadline = Date.now() + Math.max(0, operation.timeoutMs - Math.min(250, operation.timeoutMs / 10));
-    for (;;) {
-      const listed = await this.listWindows();
-      const found = listed.find(({ entry }) => matchesWindow(entry, which));
-      const open = this.openWindows();
-      // A match that closed while the list was read is not shown; the next pass looks again.
-      const index = found === undefined ? -1 : open.indexOf(found.window);
-      if (found !== undefined && index !== -1) {
-        this.shown = found.window;
-        await found.window.page.bringToFront().catch(() => undefined);
-        return { ...found.entry, index, shown: true };
-      }
-      if (Date.now() >= deadline || operation.signal.aborted) {
-        throw notActionable(`no window matches ${describeMatcher(which)}; open: ${listed.map(({ entry }) => JSON.stringify(entry.title)).join(', ') || 'none'}`);
-      }
-      await sleep(100, operation.signal);
-    }
+    return await this.windowList.use(which, operation);
   }
 
   /** Runs a function in the app's main process. */
-  async evaluate<R, A>(fn: (electron: any, arg: A) => R | Promise<R>, arg: A, operation: OperationContext): Promise<R> {
-    const app = this.app;
-    if (app === undefined) throw new EngineError('INVALID_STATE', 'the app is not running: open it with app.open()', { retryable: false });
-    // A failure is the function's own unless the app quit under it: its message is the test's, never read for a pattern.
-    const run = (app.evaluate(fn as never, arg) as Promise<R>).catch((cause: unknown) => {
-      if (this.app !== app) throw new EngineError('INVALID_STATE', 'the app quit while electron.evaluate ran', { retryable: false, cause });
-      throw new TestError('EVALUATE_FAILED', `electron.evaluate: ${cause instanceof Error ? cause.message.split('\n')[0] : String(cause)}`, { cause });
-    });
-    return await this.bounded(operation, 'electron.evaluate', true, () => run);
+  async evaluate<R, A>(fn: (electron: ElectronMainModule, arg: A) => R | Promise<R>, arg: A, operation: OperationContext): Promise<R> {
+    // Started outside the bound, so a failure of the function's own is reported as it is.
+    const run = this.app.evaluate(fn, arg);
+    // A cancelled step never awaits it.
+    run.catch(() => undefined);
+    return await bounded(operation, 'electron.evaluate', true, () => run);
   }
 
   // --- pixels ---
 
-  /** How many password fields and nested documents in the window's document no selector mask reaches; see `unmaskableCount`. */
-  private async unmaskable(window: AppWindow): Promise<number> {
-    const session = await this.session(window.page);
-    const snapshot = await session.send('DOMSnapshot.captureSnapshot', { computedStyles: [] });
-    const document = snapshot.documents[0];
-    return document === undefined ? 0 : unmaskableCount(document, snapshot.strings);
-  }
-
-  /** A CSS-scale screenshot of the window with the masks painted over. */
-  private async capture(window: AppWindow, masks: Locator): Promise<ObservationPixels> {
-    const data = new Uint8Array(await window.page.screenshot({ scale: 'css', mask: [masks], maskColor: '#000000', caret: 'hide' }));
-    const size = pngSize(data);
-    const css = await this.evaluateIn<number>(window, 'innerWidth');
-    return { data, mediaType: 'image/png', width: size.width, height: size.height, scale: css > 0 ? size.width / css : 1 };
-  }
-
   async screenshot(label: string | undefined, operation: OperationContext): Promise<string> {
     const window = this.requireWindow();
     const attempt = this.attempt;
-    if (attempt === undefined) throw new EngineError('INVALID_STATE', 'a screenshot is taken inside a test', { retryable: false });
-    return await this.bounded(operation, 'screenshot', false, async () => {
+    if (attempt === undefined) throw invalidState('a screenshot is taken inside a test');
+    return await bounded(operation, 'screenshot', false, async () => {
       this.artifactCounter += 1;
-      const name = `${String(this.artifactCounter).padStart(3, '0')}${label === undefined || fileLabel(label) === '' ? '' : `-${fileLabel(label)}`}.png`;
-      const relative = path.posix.join('screenshots', name);
-      const absolute = path.join(attempt.artifactsDir, relative);
-      const withheld = (count: number): ConfigurationError =>
-        new ConfigurationError(
-          'POLICY_DENIED',
-          `the window shows ${count} password field${count === 1 ? '' : 's'} or nested document${count === 1 ? '' : 's'} inside a closed shadow root, which no mask reaches, so the screenshot is withheld`,
-        );
-      const before = await this.unmaskable(window);
-      if (before > 0) throw withheld(before);
-      const image = await window.page.screenshot({ mask: [window.page.locator(MASKED_SELECTOR)], maskColor: '#000000', caret: 'hide' });
-      // The app may have rendered such an element while the capture ran: the file is written only once the document still has none.
-      const after = await this.unmaskable(window);
-      if (after > 0) throw withheld(after);
-      mkdirSync(path.dirname(absolute), { recursive: true });
-      writeFileSync(absolute, image);
-      return relative;
+      return await screenshotFile(this.devtools, window, attempt.artifactsDir, screenshotName(this.artifactCounter, label));
     });
   }
 }
-
-function levelOf(type: string): 'error' | 'warning' | 'info' {
-  return type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'info';
-}
-
-function matchesWindow(window: ElectronWindow, which: WindowMatcher): boolean {
-  if (typeof which === 'number') return window.index === which;
-  const test = (pattern: string | RegExp | undefined, value: string): boolean =>
-    pattern === undefined || (typeof pattern === 'string' ? value === pattern : new RegExp(pattern.source, pattern.flags).test(value));
-  return test(which.title, window.title) && test(which.url, window.url);
-}
-
-function describeMatcher(which: WindowMatcher): string {
-  if (typeof which === 'number') return `index ${which}`;
-  return [which.title === undefined ? '' : `title ${String(which.title)}`, which.url === undefined ? '' : `url ${String(which.url)}`].filter(Boolean).join(' and ') || 'any window';
-}
-
-/**
- * A key of the contract grammar in Playwright's spelling: the same names, and
- * `Space` as the space character. Playwright's keyboard knows the named keys
- * and the printable ASCII characters; any other character (`é`, `ß`) is
- * `UNSUPPORTED_CAPABILITY`, as the contract asks of a key a surface cannot
- * deliver.
- */
-function playwrightKey(key: string): string {
-  const parsed = parseKey(key);
-  if (parsed === undefined) throw new EngineError('UNSUPPORTED_CAPABILITY', `${JSON.stringify(key)} is not a key of the contract grammar`, { retryable: false });
-  if (parsed.key.kind === 'char' && !/^[\x20-\x7e]$/.test(parsed.key.char)) {
-    throw new EngineError('UNSUPPORTED_CAPABILITY', `the keyboard cannot press ${JSON.stringify(parsed.key.char)}: only named keys and printable ASCII characters have a key; type other text with fill or pressSequentially`, { retryable: false });
-  }
-  return key === 'Space' ? ' ' : key.replace(/\+Space$/, '+ ');
-}
-
-/** A box in viewport CSS pixels. */
-interface Box {
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
-}
-
-function boxOf(quad: readonly number[]): Box {
-  const xs = [quad[0]!, quad[2]!, quad[4]!, quad[6]!];
-  const ys = [quad[1]!, quad[3]!, quad[5]!, quad[7]!];
-  const x = Math.min(...xs);
-  const y = Math.min(...ys);
-  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
-}
-
-/** The part of a box inside a viewport of the given size, or undefined when none of it is. */
-function clip(box: Box, width: number, height: number): Box | undefined {
-  const left = Math.max(0, box.x);
-  const top = Math.max(0, box.y);
-  const right = Math.min(width, box.x + box.width);
-  const bottom = Math.min(height, box.y + box.height);
-  return right > left && bottom > top ? { x: left, y: top, width: right - left, height: bottom - top } : undefined;
-}
-
-function area(quad: readonly number[]): number {
-  const box = boxOf(quad);
-  return box.width * box.height;
-}
-
-// Page-side functions, run in the engine's isolated world with `this` bound to the node. A text node acts through its element.
-
-const ELEMENT = 'const element = this.nodeType === 1 ? this : this.parentElement;';
-
-/**
- * Whether the element is disabled, as Chromium's tree and Playwright read it:
- * its nearest form control's :disabled (a disabled fieldset disables its
- * controls, not a link in it), or the nearest aria-disabled attribute above it
- * saying true (a nearer aria-disabled="false" enables it again).
- */
-const IS_DISABLED = `(() => {
-  const control = element.closest('button, input, select, textarea, option, optgroup');
-  if (control && control.matches(':disabled')) return true;
-  const marked = element.closest('[aria-disabled]');
-  return !!marked && marked.getAttribute('aria-disabled').toLowerCase() === 'true';
-})()`;
-
-const CHECK_CONNECTED = `function () { ${ELEMENT}
-  if (!element || !element.isConnected) return { ok: false, reason: 'it is no longer in the document' };
-  return { ok: true };
-}`;
-
-const CHECK_ENABLED = `function (enabled) { ${ELEMENT}
-  if (!element || !element.isConnected) return { ok: false, reason: 'it is no longer in the document' };
-  if (enabled && ${IS_DISABLED}) return { ok: false, reason: 'it is disabled' };
-  const style = getComputedStyle(element);
-  if (style.visibility !== 'visible') return { ok: false, reason: 'it is not visible' };
-  return { ok: true };
-}`;
-
-const HIT_TEST = `function (x, y) { ${ELEMENT}
-  if (!element || !element.isConnected) return { ok: false, reason: 'it is no longer in the document' };
-  const root = element.getRootNode();
-  let hit = (typeof root.elementFromPoint === 'function' ? root : document).elementFromPoint(x, y);
-  if (!hit) return { ok: false, reason: 'its centre is outside the window' };
-  // Walk up from the hit through slots, parents, and shadow hosts: Node.contains stops at a slot and a shadow root.
-  for (let at = hit; at; at = at.assignedSlot || at.parentNode || at.host) if (at === element) return { ok: true };
-  if (hit.tagName === 'LABEL' && (hit.control === element || hit.contains(element))) return { ok: true };
-  const what = hit.tagName.toLowerCase() + (hit.id ? '#' + hit.id : '');
-  return { ok: false, reason: 'another element (' + what + ') would receive the click' };
-}`;
-
-const SCROLL_INTO_VIEW = `function () { ${ELEMENT}
-  if (element) element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
-}`;
-
-/** Whether the element holds focus within its own document or shadow root. */
-const HOLDS_FOCUS = 'element.getRootNode().activeElement === element';
-
-const FOCUS = `function () { ${ELEMENT}
-  if (!element) throw new Error('Node is detached');
-  element.focus();
-  return ${HOLDS_FOCUS};
-}`;
-
-const BLUR = `function () { ${ELEMENT}
-  if (!element) throw new Error('Node is detached');
-  element.blur();
-}`;
-
-const TEXT_INPUT_TYPES = "['', 'text', 'password', 'email', 'search', 'tel', 'url', 'number']";
-
-/** Input types whose value is set rather than typed. */
-const SET_VALUE_TYPES = "['date', 'time', 'datetime-local', 'month', 'week', 'color', 'range']";
-
-const CHECK_EDITABLE = `function () { ${ELEMENT}
-  if (!element || !element.isConnected) return { ok: false, reason: 'it is no longer in the document' };
-  const tag = element.tagName;
-  const type = (element.getAttribute('type') || '').toLowerCase();
-  const field = tag === 'TEXTAREA' || (tag === 'INPUT' && (${TEXT_INPUT_TYPES}.includes(type) || ${SET_VALUE_TYPES}.includes(type)));
-  if (!field && !element.isContentEditable) return { ok: false, reason: 'it is not a text field' };
-  if (${IS_DISABLED}) return { ok: false, reason: 'it is disabled' };
-  if (field && element.readOnly) return { ok: false, reason: 'it is read-only' };
-  return { ok: true };
-}`;
-
-/**
- * Sets the value of an input that takes no typed text, with its input and
- * change events, and refuses a value an input does not take before it touches
- * the field, as Playwright's fill does; null when the value is to be typed.
- * A value is tried on a detached input of the same type first, since the
- * field would sanitize a malformed one to "" and lose what it held.
- */
-const SET_VALUE = `function (value) { ${ELEMENT}
-  if (element.tagName !== 'INPUT') return null;
-  const type = (element.getAttribute('type') || '').toLowerCase();
-  const refused = { ok: false, reason: 'the ' + (type || 'text') + ' input does not take ' + JSON.stringify(value) };
-  if (type === 'number' && value.trim() !== '' && Number.isNaN(Number(value))) return refused;
-  if (!${SET_VALUE_TYPES}.includes(type)) return null;
-  const probe = element.ownerDocument.createElement('input');
-  probe.type = type;
-  probe.value = value;
-  if (probe.value !== value) return refused;
-  element.focus();
-  element.value = value;
-  element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-  element.dispatchEvent(new Event('change', { bubbles: true }));
-  return { ok: true };
-}`;
-
-const SELECT_CONTENTS = `function () { ${ELEMENT}
-  element.focus();
-  if (!(${HOLDS_FOCUS})) return false;
-  if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
-    element.select();
-    return true;
-  }
-  const range = document.createRange();
-  range.selectNodeContents(element);
-  const selection = element.ownerDocument.getSelection();
-  selection.removeAllRanges();
-  selection.addRange(range);
-  return true;
-}`;
-
-const DELETE_SELECTION = `function () { ${ELEMENT}
-  element.ownerDocument.execCommand('delete');
-}`;
-
-const READ_CHECKED = `function () { ${ELEMENT}
-  if (!element) throw new Error('Node is detached');
-  if (element.tagName === 'INPUT' && (element.type === 'checkbox' || element.type === 'radio')) return element.checked;
-  const aria = element.getAttribute('aria-checked') ?? element.getAttribute('aria-pressed');
-  if (aria === 'true') return true;
-  if (aria === 'false') return false;
-  return null;
-}`;
-
-/** The index of the option `wanted` names (a label over every option first, then the text), or a reason it cannot be chosen: absent, or disabled (:disabled covers one a disabled group holds). */
-const FIND_OPTION = `const options = Array.from(element.options);
-  const byLabel = options.findIndex((option) => option.label === wanted.label);
-  const index = wanted.index !== undefined
-    ? (wanted.index >= 0 && wanted.index < options.length ? wanted.index : -1)
-    : wanted.value !== undefined
-      ? options.findIndex((option) => option.value === wanted.value)
-      : byLabel >= 0 ? byLabel : options.findIndex((option) => option.text.trim() === wanted.label);
-  if (index < 0) return { ok: false, reason: 'no option matches ' + JSON.stringify(wanted) + '; the options are ' + options.map((option) => JSON.stringify(option.label)).join(', ') };
-  if (options[index].matches(':disabled')) return { ok: false, reason: 'option ' + JSON.stringify(options[index].label) + ' is disabled' };`;
-
-const CHECK_SELECT = `function (wanted) { ${ELEMENT}
-  if (!element || !element.isConnected) return { ok: false, reason: 'it is no longer in the document' };
-  if (element.tagName !== 'SELECT') return { ok: false, reason: 'it is not a <select>' };
-  if (${IS_DISABLED}) return { ok: false, reason: 'it is disabled' };
-  ${FIND_OPTION}
-  return { ok: true };
-}`;
-
-const SELECT_OPTION = `function (wanted) { ${ELEMENT}
-  ${FIND_OPTION}
-  element.focus();
-  element.selectedIndex = index;
-  element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-  element.dispatchEvent(new Event('change', { bubbles: true }));
-  return { ok: true };
-}`;
-
-const CHECK_FILE_INPUT = `function () { ${ELEMENT}
-  if (!element || !element.isConnected) return { ok: false, reason: 'it is no longer in the document' };
-  if (element.tagName !== 'INPUT' || element.type !== 'file') return { ok: false, reason: 'it is not a file input' };
-  if (${IS_DISABLED}) return { ok: false, reason: 'it is disabled' };
-  return { ok: true };
-}`;
-
-/** The focused element under `this`, a document or shadow root, through every open shadow root; it stops at a closed root's host. */
-const ACTIVE_UNDER = `function () {
-  let active = this.activeElement;
-  while (active && active.shadowRoot && active.shadowRoot.activeElement) active = active.shadowRoot.activeElement;
-  return active;
-}`;
-
-/** Whether `this`, the focused element, takes typed text. */
-const TAKES_TEXT = `function () {
-  const active = this;
-  if (active.tagName === 'IFRAME' || active.tagName === 'WEBVIEW') return true;
-  if (active.isContentEditable) return true;
-  if (active.tagName === 'TEXTAREA') return !active.readOnly && !active.disabled;
-  if (active.tagName === 'INPUT') return ${TEXT_INPUT_TYPES}.includes((active.getAttribute('type') || '').toLowerCase()) && !active.readOnly && !active.disabled;
-  return false;
-}`;
-
-const QUERY_ALL = `function (selector) {
-  const found = [];
-  const visit = (root) => {
-    found.push(...root.querySelectorAll(selector));
-    for (const element of root.querySelectorAll('*')) if (element.shadowRoot) visit(element.shadowRoot);
-  };
-  visit(document);
-  return found;
-}`;
-
-const NEXT_FRAME = `document.visibilityState === 'hidden' ? Promise.resolve() : new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)))`;
