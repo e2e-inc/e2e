@@ -14,7 +14,6 @@ import { VideoRecorder, type AttemptVideo } from './video.ts';
 export type StorageState = Exclude<NonNullable<BrowserContextOptions['storageState']>, string>;
 
 interface SessionOptions {
-  readonly attemptId: string;
   readonly artifactsDir: string;
   /** The emulated page size, or `null` to follow the window. */
   readonly viewport: ViewportSize | null;
@@ -102,11 +101,7 @@ export class AttemptSession {
   /** Pages the app opened that are already joining the tabs, from their opener's `popup` or as an orphan. */
   private readonly claimed = new WeakSet<Page>();
 
-  /** The attempt the session serves, so a fixture kept past its attempt is told apart from the next one's. */
-  readonly attemptId: string;
-
   constructor(private readonly options: SessionOptions) {
-    this.attemptId = options.attemptId;
     this.media = options.media;
     this.video = options.record === undefined
       ? new VideoRecorder(options.artifactsDir, options.screencast)
