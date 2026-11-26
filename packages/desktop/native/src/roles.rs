@@ -5,6 +5,8 @@
 /// The raw role of an element, from its AX role and subrole.
 pub fn role(ax_role: &str, subrole: Option<&str>) -> &'static str {
     match subrole {
+        // An NSTabView item is an AXRadioButton that says by its subrole that it is a tab.
+        Some("AXTabButton") => return "tab",
         Some("AXApplicationAlert") => return "alert",
         Some("AXApplicationAlertDialog") => return "alertdialog",
         Some("AXApplicationDialog" | "AXDialog" | "AXSystemDialog") => return "dialog",
@@ -208,4 +210,13 @@ pub fn inert(role: &str) -> bool {
 /// Roles that can hold many children, read a page at a time.
 pub fn large(role: &str) -> bool {
     matches!(role, "table" | "outline" | "list" | "browser" | "grid" | "column")
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn reads_an_appkit_tab_as_a_tab_not_a_radio_button() {
+        assert_eq!(super::role("AXRadioButton", Some("AXTabButton")), "tab");
+        assert_eq!(super::role("AXRadioButton", None), "radiobutton");
+    }
 }
