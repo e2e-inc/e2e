@@ -3509,6 +3509,7 @@ describe('device fixture', () => {
       // A remote reaches the launcher, so a test presses it with no app open.
       () => selected.pressRemote('home'),
       () => remoteTool(h, 'home'),
+      () => selected.pressButton('volume-up'),
       // iOS refuses going offline before any command, so the radios are Android's.
       ...(platform === 'ios' ? [
         () => selected.enrollBiometrics('touchid', true),
