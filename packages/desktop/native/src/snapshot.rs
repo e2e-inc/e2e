@@ -386,24 +386,31 @@ impl Walk {
             }
             // Gone since its parent listed it, or an element that refuses reads: nothing a later read would find.
             Err(_) if !root => return None,
-            Err(_) => Read {
-                role: "window",
-                ax_role: "AXWindow".into(),
-                subrole: None,
-                title: None,
-                description: None,
-                value: None,
-                identifier: None,
-                enabled: None,
-                focused: None,
-                selected: None,
-                expanded: None,
-                bounds: None,
-                placeholder: None,
-                help: None,
-                title_element: None,
-                scrollbar: false,
-            },
+            // The window closed after it was found: no tree, rather than an empty one that reads as complete.
+            Err(ax::AX_INVALID_ELEMENT) => return None,
+            Err(error) => {
+                if missed(error) {
+                    self.lose();
+                }
+                Read {
+                    role: "window",
+                    ax_role: "AXWindow".into(),
+                    subrole: None,
+                    title: None,
+                    description: None,
+                    value: None,
+                    identifier: None,
+                    enabled: None,
+                    focused: None,
+                    selected: None,
+                    expanded: None,
+                    bounds: None,
+                    placeholder: None,
+                    help: None,
+                    title_element: None,
+                    scrollbar: false,
+                }
+            }
         };
         let role = if root && read.role == "unknown" { "window" } else { read.role };
         let secure = read.subrole.as_deref() == Some("AXSecureTextField") || read.ax_role == "AXSecureTextField";
