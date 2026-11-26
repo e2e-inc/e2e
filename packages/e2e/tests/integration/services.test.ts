@@ -559,8 +559,16 @@ test('reads each type', async ({ services }) => {
     projects.push(project);
 
     const seen: unknown[] = [];
+    const notices: string[] = [];
 
     const outcome = await runExisting(project, {
+      runOptions: {
+        onEvent: (event: RunEvent) => {
+          if (event.type === 'notice') {
+            notices.push(event.message);
+          }
+        },
+      },
       config: {
         services: {
           alpha: defineService({
@@ -581,6 +589,8 @@ test('reads each type', async ({ services }) => {
     expect(seen).toEqual([{ alpha: { url: 'http://alpha.test' } }]);
     expect(readFileSync(path.join(project.dir, 'events.log'), 'utf8')).toBe(`app start ${outcome.config?.ports['fake']} http://alpha.test\napp stop\n`);
     expect(runErrors(outcome)).toEqual([]);
+    // The runner started the app itself, so it got the variables and there's nothing to warn about.
+    expect(notices.filter((notice) => notice.includes("didn't get the variables"))).toEqual([]);
   });
 
   it.each([
