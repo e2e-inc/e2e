@@ -262,16 +262,36 @@ impl Walk {
         self.lost += 1;
     }
 
+    /// Whether an attribute can be set. A stall leaves a hole in the read: a field the app did not answer about is not
+    /// read-only.
+    fn settable(&mut self, element: &Element, name: &str) -> bool {
+        element.settable(name).unwrap_or_else(|error| {
+            if missed(error) {
+                self.lose();
+            }
+            false
+        })
+    }
+
     /// The actions a control takes, in the raw vocabulary.
-    fn actions(&self, element: &Element, read: &Read) -> Vec<&'static str> {
+    fn actions(&mut self, element: &Element, read: &Read) -> Vec<&'static str> {
         let mut out = Vec::new();
         let role = read.role;
-        let names = if roles::inert(role) { Vec::new() } else { element.actions().unwrap_or_default() };
+        let names = if roles::inert(role) {
+            Vec::new()
+        } else {
+            element.actions().unwrap_or_else(|error| {
+                if missed(error) {
+                    self.lose();
+                }
+                Vec::new()
+            })
+        };
         let has = |name: &str| names.iter().any(|candidate| candidate == name);
         if has("AXPress")
             || has("AXOpen")
             || has("AXConfirm")
-            || (matches!(role, "row" | "cell" | "treeitem" | "option" | "tab") && element.settable("AXSelected").unwrap_or(false))
+            || (matches!(role, "row" | "cell" | "treeitem" | "option" | "tab") && self.settable(element, "AXSelected"))
         {
             push(&mut out, "Click");
             if roles::toggleable(role) {
@@ -289,7 +309,7 @@ impl Walk {
         {
             push(&mut out, "Scroll");
         }
-        let value_settable = roles::bears_value(role) && element.settable("AXValue").unwrap_or(false);
+        let value_settable = roles::bears_value(role) && self.settable(element, "AXValue");
         // A stepper steps toward a number only when it shows one.
         let steps = (has("AXIncrement") || has("AXDecrement")) && matches!(read.value, Some(Value::Number(_)));
         if steps || value_settable {
@@ -298,13 +318,13 @@ impl Walk {
         if (role == "combobox" && (value_settable || read.ax_role == "AXPopUpButton")) || roles::collection(role) {
             push(&mut out, "Select");
         }
-        if (roles::interactive(role) || roles::collection(role)) && element.settable("AXFocused").unwrap_or(false) {
+        if (roles::interactive(role) || roles::collection(role)) && self.settable(element, "AXFocused") {
             push(&mut out, "SetFocus");
         }
-        if roles::takes_text(role) && element.settable("AXSelectedText").unwrap_or(false) {
+        if roles::takes_text(role) && self.settable(element, "AXSelectedText") {
             push(&mut out, "TypeText");
         }
-        if (roles::expandable(role) && element.settable("AXExpanded").unwrap_or(false)) || (has("AXPress") && roles::expandable(role)) {
+        if (roles::expandable(role) && self.settable(element, "AXExpanded")) || (has("AXPress") && roles::expandable(role)) {
             push(&mut out, "Expand");
             push(&mut out, "Collapse");
         }

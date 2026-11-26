@@ -61,6 +61,38 @@ fn refused(error: AXError, what: &str) -> Failure {
     }
 }
 
+/// The failure for a read that failed before anything was sent: nothing reached the app. A read the app did not answer
+/// in time is a stall, which a retry may get past.
+fn unread(error: AXError, what: &str) -> Failure {
+    match error {
+        ax::AX_CANNOT_COMPLETE => {
+            Failure::refused(codes::APP_UNRESPONSIVE, format!("{what}: the app did not answer in time")).with_details(serde_json::json!({ "retryable": true }))
+        }
+        ax::AX_INVALID_ELEMENT => Failure::refused(codes::STALE_REF, format!("{what}: the element no longer exists")),
+        ax::AX_API_DISABLED => Failure::refused(codes::PERM_DENIED, format!("{what}: {}", ax::describe(error))),
+        _ => Failure::refused(codes::ACTION_FAILED, format!("{what}: {}", ax::describe(error))),
+    }
+}
+
+/// Whether an attribute can be set. A stall fails, so a busy app does not read as one whose control takes no input;
+/// any other failure reads as not settable.
+fn settable(element: &Element, name: &str, what: &str) -> Outcome<bool> {
+    match element.settable(name) {
+        Ok(settable) => Ok(settable),
+        Err(ax::AX_CANNOT_COMPLETE) => Err(unread(ax::AX_CANNOT_COMPLETE, what)),
+        Err(_) => Ok(false),
+    }
+}
+
+/// The actions an element takes. A stall, a gone element, or no permission fails; any other failure reads as none.
+fn action_names(element: &Element, what: &str) -> Outcome<Vec<String>> {
+    match element.actions() {
+        Ok(names) => Ok(names),
+        Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT | ax::AX_API_DISABLED)) => Err(unread(error, what)),
+        Err(_) => Ok(Vec::new()),
+    }
+}
+
 /// The element a ref names, checked to still exist.
 fn resolve(reference: &str) -> Outcome<Entry> {
     let entry = refs::get(reference).ok_or_else(|| Failure::refused(codes::STALE_REF, format!("{reference} names no element of a recent snapshot")))?;
@@ -192,7 +224,7 @@ fn menu_shown(pid: i32, before: usize, deadline: Instant) {
 
 fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
     let element = &entry.element;
-    let names = element.actions().map_err(|error| refused(error, "click"))?;
+    let names = action_names(element, "click")?;
     if let Some(action) = ["AXPress", "AXOpen", "AXConfirm"].into_iter().find(|name| names.iter().any(|candidate| candidate == name)) {
         let (ax_role, _) = raw_role(element);
         let opens_menu = ax_role == "AXPopUpButton" || ax_role == "AXMenuButton";
@@ -204,14 +236,14 @@ fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
         return Ok(());
     }
     let (_, role) = raw_role(element);
-    if matches!(role, "row" | "cell" | "treeitem" | "option" | "tab") && element.settable("AXSelected").unwrap_or(false) {
+    if matches!(role, "row" | "cell" | "treeitem" | "option" | "tab") && settable(element, "AXSelected", "click")? {
         element.set_bool("AXSelected", true).map_err(|error| refused(error, "select"))?;
         if until(deadline, || element.boolean("AXSelected") == Some(true)) {
             return Ok(());
         }
         return Err(Failure::unconfirmed(codes::ACTION_FAILED, "the element did not become selected"));
     }
-    if roles::takes_text(role) && element.settable("AXFocused").unwrap_or(false) {
+    if roles::takes_text(role) && settable(element, "AXFocused", "click")? {
         return focus(element, deadline);
     }
     Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("this {role} takes no click through accessibility")))
@@ -318,9 +350,9 @@ fn step_to(
 fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
     let (ax_role, role) = raw_role(element);
     let secure = ax_role == "AXSecureTextField" || element.text("AXSubrole").as_deref() == Some("AXSecureTextField");
-    if !element.settable("AXValue").unwrap_or(false) {
+    if !settable(element, "AXValue", "set value")? {
         // A stepper whose value cannot be written still steps toward a number.
-        let names = element.actions().unwrap_or_default();
+        let names = action_names(element, "set value")?;
         let steps = names.iter().any(|name| name == "AXIncrement" || name == "AXDecrement");
         if let (true, Ok(Value::Number(_)), Ok(target)) = (steps, element.attribute("AXValue"), text.trim().parse::<f64>()) {
             let number = || match element.attribute("AXValue") {
@@ -347,7 +379,7 @@ fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
     // A field that holds focus commits its text the way typing does; one that cannot take focus still takes the value.
     // Focus moved by this call has reached the app (its handlers may have run), so a later failure is no longer "nothing sent".
     let moved_focus = roles::takes_text(role)
-        && element.settable("AXFocused").unwrap_or(false)
+        && settable(element, "AXFocused", "set value")?
         && element.boolean("AXFocused") != Some(true)
         && element.set_bool("AXFocused", true).is_ok();
     let numeric = matches!(element.attribute("AXValue"), Ok(Value::Number(_)));
@@ -448,7 +480,7 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         if matches!(row_role, "radiobutton" | "tab") {
             return perform(&row, "AXPress", "choose the option");
         }
-        let written = if element.settable("AXSelectedRows").unwrap_or(false) {
+        let written = if settable(element, "AXSelectedRows", "select")? {
             element.set_elements("AXSelectedRows", std::slice::from_ref(&row))
         } else {
             row.set_bool("AXSelected", true)
@@ -482,12 +514,12 @@ fn scroll(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
             .unwrap_or(0.0);
         let step = if content > visible && visible > 0.0 { pages * visible / (content - visible) } else { pages * 0.25 };
         let next = (current + if forward { step } else { -step }).clamp(0.0, 1.0);
-        if bar.settable("AXValue").unwrap_or(false) {
+        if settable(&bar, "AXValue", "scroll")? {
             return bar.set_number("AXValue", next).map_err(|error| refused(error, "scroll"));
         }
         return perform(&bar, if forward { "AXIncrement" } else { "AXDecrement" }, "scroll");
     }
-    let names = element.actions().unwrap_or_default();
+    let names = action_names(element, "scroll")?;
     let action = match direction {
         "down" => "AXScrollDownByPage",
         "up" => "AXScrollUpByPage",
@@ -526,7 +558,7 @@ pub fn act(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
         Action::DoubleClick => physical(&entry, Pointer::Click { right: false, count: 2 }),
         Action::Hover => physical(&entry, Pointer::Move),
         Action::RightClick => {
-            let names = element.actions().map_err(|error| refused(error, "right click"))?;
+            let names = action_names(element, "right click")?;
             if names.iter().any(|name| name == "AXShowMenu") {
                 let before = windows::open_menus(entry.pid);
                 perform(element, "AXShowMenu", "right click")?;
