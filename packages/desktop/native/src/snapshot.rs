@@ -388,7 +388,9 @@ impl Walk {
         if (roles::interactive(role) || roles::collection(role)) && self.settable(element, "AXFocused") {
             push(&mut out, "SetFocus");
         }
-        if roles::takes_text(role) && self.settable(element, "AXSelectedText") {
+        // An AppKit password field takes keystrokes but restricts AXSelectedText: a value it lets be set says it takes text.
+        let secure = read.subrole.as_deref() == Some("AXSecureTextField") || read.ax_role == "AXSecureTextField";
+        if roles::takes_text(role) && ((secure && value_settable) || self.settable(element, "AXSelectedText")) {
             push(&mut out, "TypeText");
         }
         if (roles::expandable(role) && self.settable(element, "AXExpanded")) || (has("AXPress") && roles::expandable(role)) {
