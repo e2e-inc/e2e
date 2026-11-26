@@ -281,12 +281,23 @@ const MAX_STEPS: usize = 500;
 
 /// Steps a value toward `target`, one increment or decrement at a time, until it shows it. It stops when the value
 /// cannot be read, a step changed nothing, or a step went past the target (the step does not divide the distance).
-/// A failed first step sent nothing; a failed later one follows steps that landed.
-fn step_to(target: f64, shown: Option<f64>, mut step: impl FnMut(bool) -> Outcome<()>, mut settle: impl FnMut() -> Option<f64>) -> Outcome<bool> {
+/// It never steps past `deadline`: the steps sent by then stay sent, delivered but unverified. A failed first step
+/// sent nothing; a failed later one follows steps that landed.
+fn step_to(
+    target: f64,
+    shown: Option<f64>,
+    deadline: Instant,
+    mut step: impl FnMut(bool) -> Outcome<()>,
+    mut settle: impl FnMut() -> Option<f64>,
+) -> Outcome<bool> {
     let Some(mut now) = shown else { return Ok(false) };
     for attempt in 0..MAX_STEPS {
         if now == target {
             return Ok(true);
+        }
+        if Instant::now() >= deadline {
+            let failure = Failure::refused(codes::TIMEOUT, "the stepper ran out of time before it reached the value");
+            return Err(if attempt == 0 { failure } else { failure.delivered() });
         }
         let up = now < target;
         step(up).map_err(|failure| if attempt == 0 { failure } else { failure.delivered() })?;
@@ -315,6 +326,7 @@ fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
             let reached = step_to(
                 target,
                 shown,
+                deadline,
                 |up| perform(element, if up { "AXIncrement" } else { "AXDecrement" }, "step the value"),
                 || {
                     let before = shown;
@@ -570,6 +582,7 @@ mod tests {
     use super::{press_to_state, step_to};
     use crate::failure::Outcome;
     use std::cell::Cell;
+    use std::time::{Duration, Instant};
 
     /// An AppKit box with mixed state: each press moves it mixed, on, off, mixed.
     fn appkit_box(start: u8) -> (Cell<u8>, Cell<usize>) {
@@ -617,6 +630,7 @@ mod tests {
             let reached = step_to(
                 target,
                 Some(start),
+                later(),
                 |up| {
                     count.set(count.get() + 1);
                     value.set(value.get() + if up { 1.0 } else { -1.0 });
@@ -635,6 +649,7 @@ mod tests {
         let past = step_to(
             3.0,
             Some(0.0),
+            later(),
             |_| {
                 value.set(value.get() + 2.0);
                 Ok(())
@@ -647,6 +662,7 @@ mod tests {
         let stuck = step_to(
             3.0,
             Some(0.0),
+            later(),
             |_| {
                 count.set(count.get() + 1);
                 Ok(())
@@ -655,6 +671,36 @@ mod tests {
         );
         assert!(!stuck.unwrap());
         assert_eq!(count.get(), 1);
+    }
+
+    /// A deadline the test never reaches.
+    fn later() -> Instant {
+        Instant::now() + Duration::from_secs(60)
+    }
+
+    #[test]
+    fn stops_stepping_at_the_deadline_and_says_the_steps_landed() {
+        let value = Cell::new(0.0);
+        let steps = Cell::new(0);
+        let deadline = Instant::now() + Duration::from_millis(30);
+        let outcome = step_to(
+            400.0,
+            Some(0.0),
+            deadline,
+            |_| {
+                steps.set(steps.get() + 1);
+                std::thread::sleep(Duration::from_millis(10));
+                value.set(value.get() + 1.0);
+                Ok(())
+            },
+            || Some(value.get()),
+        );
+        let failure = outcome.expect_err("it ran out of time");
+        assert_eq!(failure.code, crate::failure::codes::TIMEOUT);
+        assert_eq!(failure.delivery, crate::failure::Delivery::Unknown);
+        assert!(steps.get() < 10, "{} steps", steps.get());
+        let none = step_to(3.0, Some(0.0), Instant::now(), |_| panic!("no step past the deadline"), || Some(0.0));
+        assert_eq!(none.expect_err("out of time").delivery, crate::failure::Delivery::NotDelivered);
     }
 
     #[test]
