@@ -64,7 +64,7 @@ import {
 import { leftOutTests } from './left-out.ts';
 import { ExploreView } from './list-explore.ts';
 import {
-  currentStep, isShownEvent, listStep, listsUnderTest,
+  currentStep, isShownEvent, listStep, listsUnderTest, printsAtEnd, recordedSteps,
   type ConfiguredModel, type FileGroup, type ListedStep, type PausedTest, type ReplayNotice, type RunningTest, type StepCall, type TestLine,
 } from './list-model.ts';
 import { fitLabel, pauseLinePrinter, replayLine, replayNotices, stepLine, stepPromptRows } from './list-steps.ts';
@@ -862,7 +862,7 @@ export class ListReporter {
         };
         const step: ListedStep = { ...call, outcome: { status, durationMs, modelCalls } };
         this.list(running, step);
-        if (this.live || !listsUnderTest(kind)) {
+        if (this.live || !printsAtEnd(kind)) {
           this.window.redraw();
         } else if (this.explore === undefined && this.progress === undefined) {
           // Printed as it ends, away from the `test.step` calls around it, so the line names them.
@@ -912,7 +912,7 @@ export class ListReporter {
     if (!result.selected) return;
     const key = pairKey(result.test.id, result.agent, result.target.name, result.repeat);
     this.flushOutput(key);
-    const steps = this.pairs.get(key)?.steps ?? [];
+    const steps = recordedSteps(this.pairs.get(key)?.steps ?? []);
     this.pairs.delete(key);
     const group = this.group(result.test.file, result.target.name);
     // Read before `detailsOf` releases the result's serial group.
@@ -993,7 +993,7 @@ export class ListReporter {
   /**
    * Prints one file's block: the file line with its counts, then - when the
    * file failed, had a flaky pass, or is the run's only file - one line per
-   * test with its agent steps and `test.step` calls nested, as vitest lists
+   * test with the steps it keeps (`recordedSteps`) nested, as vitest lists
    * tests for a failed module. With a live window the block is also the only
    * permanent record of those steps, so a file that has any lists its tests
    * too. Without one each test already printed as it finished, so the block

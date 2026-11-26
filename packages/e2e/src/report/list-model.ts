@@ -85,9 +85,32 @@ export interface ListedStep extends StepCall {
   readonly outcome: StepOutcome | undefined;
 }
 
-/** Whether a step of this kind is listed under its test in the scrollback: an agent step or a `test.step`. Other steps are fast and many. */
+/** Whether a step of this kind has a row under its running test in the live window: an agent step or a `test.step`. Other steps are fast and many. */
 export function listsUnderTest(kind: StepKind): boolean {
   return kind === 'agent' || kind === 'step';
+}
+
+/**
+ * Whether the end of a step of this kind is a line of its own where no live
+ * window lists it: an agent step, which is slow and costs model calls. A
+ * `test.step` is a name, told on the lines of the agent steps inside it.
+ */
+export function printsAtEnd(kind: StepKind): boolean {
+  return kind === 'agent';
+}
+
+/**
+ * The listed steps that stay under a test once it is done: its agent steps,
+ * a `test.step` that did not pass, and the `test.step` calls around either.
+ * A `test.step` that passed around plain calls would only repeat its title
+ * for every green test.
+ */
+export function recordedSteps(steps: readonly ListedStep[]): ListedStep[] {
+  const own = (step: ListedStep): boolean => step.kind !== 'step' || step.outcome?.status !== 'passed';
+  const kept = steps.filter(own);
+  const around = (group: ListedStep, step: ListedStep): boolean =>
+    group.path !== undefined && step.path !== undefined && group.path.length < step.path.length && group.path.every((index, at) => index === step.path![at]);
+  return steps.filter((step) => own(step) || kept.some((inside) => around(step, inside)));
 }
 
 function comparePaths(a: readonly number[], b: readonly number[]): number {

@@ -1374,10 +1374,10 @@ describe('ListReporter', () => {
 
     describe('test.step', () => {
       /** Feeds step progress of attempt `a1` of test `t1`; `parent` is the index of the `test.step` around the step. */
-      const feed = (reporter: ListReporter) => (stepIndex: number, parent: number | undefined, progress: object) =>
+      const feed = (reporter: ListReporter, testId = 't1') => (stepIndex: number, parent: number | undefined, progress: object) =>
         reporter.handle({
           type: 'step',
-          testId: 't1',
+          testId,
           agent: 'default',
           repeat: 0,
           target: 'chromium',
@@ -1415,9 +1415,9 @@ describe('ListReporter', () => {
 
         reporter.handle(finished(result({ status: 'passed', id: 't1', title: ['pays'] })));
         const block = lines.slice(lines.findIndex((line) => line.includes('pays')) + 1).filter((line) => /[×✓]/.test(line));
+        // The passed `Type the password` had no agent step in it: it is not kept.
         expect(block).toEqual([
           '     × Log in 1.20s failed',
-          '       ✓ Type the password 1.20s',
           '     ✓ Check out 1.20s',
           '       ✓ agent.act "pay" 1.20s · 2 model calls',
         ]);
@@ -1512,7 +1512,7 @@ describe('ListReporter', () => {
         expect(line).toContain('pays > Check');
       });
 
-      it('prints each as it ends, named after its test and the test.step calls around it, without a live window', () => {
+      it('prints an agent step as it ends, named after its test and the test.step calls around it, without a live window', () => {
         const lines: string[] = [];
         const reporter = plainReporter({ write: (line) => lines.push(line) });
         reporter.handle(runStarted());
@@ -1527,8 +1527,25 @@ describe('ListReporter', () => {
         step(0, undefined, { ...ended, ...group('Check out') });
         expect(lines.filter((line) => line.includes('✓'))).toEqual([
           '   ✓ pays > Check out > agent.act "pay" 1.20s · 2 model calls',
-          '   ✓ pays > Check out 1.20s',
         ]);
+      });
+
+      it('keeps a green file of tests that only name plain calls on its one line', () => {
+        const { lines, output } = liveCapture();
+        const reporter = plainReporter(output, true);
+        reporter.handle(runStarted());
+        reporter.handle(plan([{ file: 'tests/a.e2e.ts', tests: 1 }, { file: 'tests/b.e2e.ts', tests: 1 }]));
+        for (const [id, file] of [['t1', 'tests/a.e2e.ts'], ['t2', 'tests/b.e2e.ts']] as const) {
+          reporter.handle(testStarted(id, 'pays', 'chromium', file));
+          const step = feed(reporter, id);
+          step(0, undefined, { phase: 'start', ...group('Log in') });
+          step(1, 0, { phase: 'start', kind: 'locator', api: 'locator.tap', label: 'Pay' });
+          step(1, 0, { ...ended, kind: 'locator', api: 'locator.tap', label: 'Pay' });
+          step(0, undefined, { ...ended, ...group('Log in') });
+          reporter.handle(finished(result({ status: 'passed', id, title: ['pays'], file })));
+        }
+        expect(lines.filter((line) => line.includes('Log in') || line.includes('pays'))).toEqual([]);
+        expect(lines.filter((line) => line.includes('.e2e.ts'))).toHaveLength(2);
       });
     });
 
