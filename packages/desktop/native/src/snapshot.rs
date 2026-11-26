@@ -208,6 +208,17 @@ fn label_of(element: &Element) -> Option<String> {
     values.into_iter().flatten().find_map(|value| label(value.text().map(str::to_owned)))
 }
 
+/// Whether a node shows as expanded. A disclosure triangle shows its state as its value, and has no `AXExpanded`.
+fn expanded(role: &str, expanded: Option<bool>, toggle: Option<u8>) -> bool {
+    expanded == Some(true) || (role == "disclosure" && toggle == Some(1))
+}
+
+/// Whether a node shows as selected. A menu reports its highlighted item as selected: that is where the pointer is, not
+/// a choice.
+fn selected(role: &str, selected: Option<bool>) -> bool {
+    selected == Some(true) && role != "menuitem"
+}
+
 fn parse_toggle(value: Option<&Value>) -> Option<u8> {
     match value? {
         Value::Number(number) => Some(*number as u8),
@@ -443,10 +454,10 @@ impl Walk {
         if secure {
             states.push("secure");
         }
-        if read.expanded == Some(true) {
+        let toggle = parse_toggle(read.value.as_ref());
+        if expanded(role, read.expanded, toggle) {
             states.push("expanded");
         }
-        let toggle = parse_toggle(read.value.as_ref());
         if roles::toggleable(role) {
             match toggle {
                 Some(1) => states.push("checked"),
@@ -454,7 +465,7 @@ impl Walk {
                 _ => {}
             }
         }
-        if read.selected == Some(true) {
+        if selected(role, read.selected) {
             states.push("selected");
         }
         if role == "button" && toggle == Some(1) && read.subrole.as_deref() == Some("AXToggleButton") {
@@ -611,7 +622,7 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
 
 #[cfg(test)]
 mod tests {
-    use super::{missed, outside};
+    use super::{expanded, missed, outside, selected};
     use crate::ax;
     use crate::windows::Rect;
 
@@ -629,6 +640,16 @@ mod tests {
         for error in [ax::AX_INVALID_ELEMENT, ax::AX_NO_VALUE, ax::AX_ATTRIBUTE_UNSUPPORTED, ax::AX_FAILURE, ax::AX_NOT_IMPLEMENTED] {
             assert!(!missed(error), "{error}");
         }
+    }
+
+    #[test]
+    fn reads_a_disclosure_triangle_by_its_value_and_no_menu_item_as_selected() {
+        assert!(expanded("disclosure", None, Some(1)));
+        assert!(!expanded("disclosure", None, Some(0)));
+        assert!(!expanded("checkbox", None, Some(1)));
+        assert!(expanded("treeitem", Some(true), None));
+        assert!(!selected("menuitem", Some(true)));
+        assert!(selected("row", Some(true)));
     }
 
     #[test]
