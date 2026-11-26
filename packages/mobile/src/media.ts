@@ -138,10 +138,13 @@ const SIMULATOR_SET_VARIABLE = 'AGENT_DEVICE_IOS_SIMULATOR_DEVICE_SET';
  * The commands that add `files` to the library of the device with id
  * `deviceId`. iOS takes them in one `simctl addmedia`, which adds a copy on
  * every call, in the device set `AGENT_DEVICE_IOS_SIMULATOR_DEVICE_SET` names,
- * as agent-device's own simctl calls do. Android pushes each file to `ANDROID_MEDIA_DIR` under its own
- * name, replacing a file of that name, then asks the media scanner for it:
- * Android 11 and later index a pushed file on their own, and earlier versions
- * index only what is scanned.
+ * as agent-device's own simctl calls do. Android pushes each file to
+ * `ANDROID_MEDIA_DIR` under its own name, replacing a file of that name,
+ * then asks the media scanner for it. The scan is needed on every version:
+ * Android 10 and earlier index only what is scanned, and Android 11 and later
+ * usually index a pushed file on their own but not always (seen on API 36
+ * with a name that differs only in case from the file it replaced, and with
+ * a name holding `:` or `?`).
  */
 export function mediaCommands(
   platform: MobilePlatform,
