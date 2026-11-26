@@ -19,14 +19,27 @@ export function isShownEvent(event: StepEvent): event is ShownEvent {
   return event.kind === 'model' || event.kind === 'engine';
 }
 
-/** A step a running pair has started and not yet ended. */
-export interface CurrentStep {
+/** A step of a pair as every row of it names it. */
+export interface StepCall {
   readonly api: string;
   readonly label: string;
   /** The session the step runs on when it is not the test's own. */
   readonly actor: string | undefined;
-  /** Only an agent step has model turns to wait on. */
+  /** Only an agent step has model turns to wait on; a `step` is a `test.step`, which its title alone names. */
   readonly kind: StepKind;
+  /**
+   * The attempt index, then the step indexes of the `test.step` calls around
+   * the step, then its own. Steps list in path order, so each follows the
+   * `test.step` it ran in however their ends interleave. Undefined in a
+   * stream without step identity.
+   */
+  readonly path: readonly number[] | undefined;
+  /** The titles of the `test.step` calls the step runs inside, outermost first. */
+  readonly groups: readonly string[];
+}
+
+/** A step a running pair has started and not yet ended. */
+export interface CurrentStep extends StepCall {
   /**
    * Model turns and tool calls in stream order. A tool-using executor
    * reports a turn once its tools ran, so the turn follows them here; its
@@ -46,21 +59,48 @@ export interface CurrentStep {
   activity: StepActivity | undefined;
 }
 
-/** The step the live window shows for a pair: the one it started last of those still open. */
+/** The step the live window shows for a pair: the call it started last of those still open. An open `test.step` has its own row among the listed steps. */
 export function currentStep(test: RunningTest): CurrentStep | undefined {
   let last: CurrentStep | undefined;
-  for (const step of test.open.values()) last = step;
+  for (const step of test.open.values()) {
+    if (step.kind !== 'step') last = step;
+  }
   return last;
 }
 
-/** One finished agent step of a pair, as the `end` progress reported it. */
-export type FinishedStep = Pick<
-  Extract<StepProgress, { phase: 'end' }>,
-  'api' | 'label' | 'status' | 'durationMs' | 'modelCalls'
-> & {
-  /** The session the step ran on when it is not the test's own. */
-  readonly actor?: string | undefined;
-};
+/** How a step ended, as its `end` progress reported it. */
+export type StepOutcome = Pick<Extract<StepProgress, { phase: 'end' }>, 'status' | 'durationMs' | 'modelCalls'>;
+
+/** A step listed under its test. Only a `test.step` is listed before it ends, so the steps inside it follow it: it has no outcome until then. */
+export interface ListedStep extends StepCall {
+  readonly outcome: StepOutcome | undefined;
+}
+
+export type FinishedStep = ListedStep & { readonly outcome: StepOutcome };
+
+export function isFinished(step: ListedStep): step is FinishedStep {
+  return step.outcome !== undefined;
+}
+
+/** Whether a step of this kind is listed under its test in the scrollback: an agent step or a `test.step`. Other steps are fast and many. */
+export function listsUnderTest(kind: StepKind): boolean {
+  return kind === 'agent' || kind === 'step';
+}
+
+function comparePaths(a: readonly number[], b: readonly number[]): number {
+  for (let at = 0; at < a.length && at < b.length; at += 1) {
+    if (a[at] !== b[at]) return a[at]! - b[at]!;
+  }
+  return a.length - b.length;
+}
+
+/** Lists `step` in path order, in place of the running `test.step` it ends. A step without a path goes last. */
+export function listStep(steps: ListedStep[], step: ListedStep): void {
+  const { path } = step;
+  const at = path === undefined ? -1 : steps.findIndex((listed) => listed.path !== undefined && comparePaths(listed.path, path) >= 0);
+  if (at === -1 || path === undefined) steps.push(step);
+  else steps.splice(at, comparePaths(steps[at]!.path ?? [], path) === 0 ? 1 : 0, step);
+}
 
 /** A pair that has started and whose result is still to come. */
 export interface RunningTest {
@@ -95,17 +135,17 @@ export interface RunningTest {
    */
   attemptIndex: number | undefined;
   /**
-   * Finished agent steps across every attempt, oldest first. Shown under the
-   * test in the live window while it runs, nested under its line in the file
-   * block once it is done.
+   * Agent steps and `test.step` calls across every attempt, in the order
+   * they started. Shown under the test in the live window while it runs,
+   * nested under its line in the file block once it is done.
    */
-  readonly steps: FinishedStep[];
+  readonly steps: ListedStep[];
   /**
-   * In an `e2e run --step` run, every finished step, agent or not, oldest
-   * first: the live window lists them above the prompt instead of `steps`.
+   * In an `e2e run --step` run, every step, agent or not, in the order they
+   * started: the live window lists them above the prompt instead of `steps`.
    * Undefined in any other run.
    */
-  readonly ran: FinishedStep[] | undefined;
+  readonly ran: ListedStep[] | undefined;
 }
 
 /** A running test that waits for a person, with its `paused` event. */
