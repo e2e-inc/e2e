@@ -71,6 +71,12 @@ fn go(what: &str) -> Outcome<()> {
     })
 }
 
+/// Whether the caller cancelled the running action. Unlike `go`, a deadline that passed does not count: cleanup such as
+/// closing a menu runs past it, but never past a cancel, after which the caller has moved on.
+fn cancelled() -> bool {
+    CURRENT.with(|current| current.borrow().as_ref().is_some_and(|(run, _)| run.cancelled()))
+}
+
 /// The failure for a read that failed before anything was sent: nothing reached the app. A read the app did not answer
 /// in time is a stall, which a retry may get past.
 fn unread(error: AXError, what: &str) -> Failure {
@@ -746,6 +752,10 @@ fn close_menu(pid: i32, menu: &Element) -> bool {
     if until(Instant::now() + wait, closed) {
         return true;
     }
+    // A cancelled action's caller has moved on: an Escape now could close a menu its next action opened.
+    if cancelled() {
+        return false;
+    }
     let _ = input::parse_combo("escape").and_then(|combo| input::press(&combo, Route::Process(pid)));
     until(Instant::now() + MENU_CLOSE_WAIT, closed)
 }
@@ -1306,6 +1316,15 @@ mod tests {
         set(1_000_033, later());
         assert!(super::go("press").is_ok());
         super::CURRENT.with(|current| current.borrow_mut().take());
+    }
+
+    #[test]
+    fn counts_a_cancel_but_not_a_deadline_as_the_caller_moving_on() {
+        assert!(!super::cancelled(), "no action runs");
+        let during = |id: u32, deadline: Instant| super::guarded(Some(id), deadline, || Ok(super::cancelled())).expect("the check fails nothing");
+        assert!(!during(1_000_037, Instant::now()), "a deadline that passed is no cancel");
+        crate::input::cancel_input(1_000_038);
+        assert!(during(1_000_038, later()));
     }
 
     #[test]
