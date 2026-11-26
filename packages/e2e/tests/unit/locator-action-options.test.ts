@@ -503,13 +503,25 @@ describe('locator action options', () => {
       ]);
     });
 
-    it('takes a percentage of the unrounded part of a box in the viewport along a side that holds no whole pixel', async () => {
+    it('taps the whole coordinate inside a box along a side that holds no whole pixel', async () => {
       const { screen, at } = pointScreen({ rect: { x: 300.5, y: 20, width: 1, height: 40 } });
+      await screen.getByLabel('Agree').tap({ position: { x: '50%', y: '50%' } });
+      await screen.getByLabel('Agree').tap({ position: { x: '0%', y: '100%' } });
+      await screen.getByLabel('Agree').tap({ position: { x: '100%', y: '0%' } });
+      expect(at).toEqual([
+        { action: { kind: 'tap' }, point: { x: 301, y: 40 } },
+        { action: { kind: 'tap' }, point: { x: 301, y: 59 } },
+        { action: { kind: 'tap' }, point: { x: 301, y: 20 } },
+      ]);
+    });
+
+    it('takes a percentage of the unrounded part of a box in the viewport along a side with no whole coordinate inside it', async () => {
+      const { screen, at } = pointScreen({ rect: { x: 300.2, y: 20, width: 0.6, height: 40 } });
       await screen.getByLabel('Agree').tap({ position: { x: '50%', y: '50%' } });
       await screen.getByLabel('Agree').tap({ position: { x: '100%', y: '100%' } });
       expect(at).toEqual([
-        { action: { kind: 'tap' }, point: { x: 300.5, y: 40 } },
-        { action: { kind: 'tap' }, point: { x: 300.5, y: 59 } },
+        { action: { kind: 'tap' }, point: { x: 300.2, y: 40 } },
+        { action: { kind: 'tap' }, point: { x: 300.2, y: 59 } },
       ]);
     });
 
@@ -529,6 +541,18 @@ describe('locator action options', () => {
       await screen.getByLabel('Agree').tap({ position: { x: '50%', y: '50%' } });
       expect(observe).toHaveBeenCalledTimes(2);
       expect(at).toEqual([{ action: { kind: 'tap' }, point: { x: 60, y: 40 } }]);
+    });
+
+    it('fails with LOCATOR_NOT_FOUND naming the viewport read, with its last failure as the cause, when that read keeps failing until the timeout', async () => {
+      const stale = () => new EngineError('NODE_STALE', 'observation page was replaced', { retryable: true });
+      const { screen, at } = pointScreen({ observeFailures: Array.from({ length: 100 }, stale) });
+      const failure = await screen.getByLabel('Agree').tap({ position: { x: '50%', y: '50%' }, timeout: 300 }).catch((error: unknown) => error);
+      expect(failure).toMatchObject({
+        code: 'LOCATOR_NOT_FOUND',
+        message: 'the viewport could not be read to place a percentage position on the locator: getByLabel("Agree")',
+        cause: { code: 'NODE_STALE', message: 'observation page was replaced' },
+      });
+      expect(at).toEqual([]);
     });
 
     it('fails with the public error when the viewport read fails for good, and taps nothing', async () => {

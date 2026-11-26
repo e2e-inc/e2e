@@ -96,7 +96,10 @@ export function containsPoint(box: Box, point: ViewportPoint): boolean {
  * The whole CSS pixels of the box inside the viewport, undefined when no part
  * of it is inside. A pixel the box covers only in part is left out, since a
  * neighbor can own it. Along a side where the part inside holds no whole
- * pixel, as a 1px node at x 300.5 does, that part is kept unrounded.
+ * pixel, as a 1px node at x 300.5 does, the box is the one pixel at the whole
+ * coordinate inside that part, 301 there, since a browser that rounds a point
+ * sends 300.5 to 300, outside the node. Only a part with no whole coordinate
+ * inside is kept unrounded.
  */
 export function pixelsInViewport(box: Box, viewport: ViewportSize): Box | undefined {
   const x = pixelsAlong(box.x, box.width, viewport.width);
@@ -111,7 +114,9 @@ function pixelsAlong(start: number, size: number, limit: number): { start: numbe
   if (to <= from) return undefined;
   const first = Math.ceil(from);
   const last = Math.floor(to);
-  return last > first ? { start: first, size: last - first } : { start: from, size: to - from };
+  if (last > first) return { start: first, size: last - first };
+  if (first < to) return { start: first, size: 1 };
+  return { start: from, size: to - from };
 }
 
 /**
