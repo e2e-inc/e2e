@@ -10,6 +10,7 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import type { Page } from 'playwright-core';
 import path from 'node:path';
 import { afterEach, beforeAll, afterAll, describe, expect, it } from 'vitest';
 import type { EngineFixtureContext, EngineHandle, OperationContext } from '@e2e-dev/core/engine';
@@ -304,5 +305,53 @@ describe.each<BrowserProviderScope>(['worker', 'attempt'])('downloads through a 
       await browser.waitForDownload(async () => { if (controller.signal.aborted) cancelledTriggers.push(delay); }).catch(() => undefined);
     }
     expect(cancelledTriggers).toEqual([]);
+  });
+
+  it('listens on the opener when the active popup closes while the before hook runs', async () => {
+    artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-provider-popup-'));
+    remoteDisk = mkdtempSync(path.join(tmpdir(), 'e2e-browser-popup-'));
+    chrome = await launchRemoteChrome();
+    let popup: Page | undefined;
+    const provider: BrowserProvider = {
+      name: 'popup-closer', scope,
+      acquire: async () => ({ id: 'popup-lease', cdpEndpoint: chrome!.endpoint }),
+      release: async () => undefined,
+      downloads: {
+        dir: path.join(remoteDisk, 'downloads'),
+        read: async (_lease, file) => readFile(file),
+        // Closes the popup, then outlasts the tab switch, as a listing request still in flight would.
+        before: async () => {
+          await popup?.close();
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          return [];
+        },
+      },
+    };
+    engine = webEngine({ browser: provider });
+    const prepared = await engine.prepare!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, slots: 1, env: {}, signal: signal(), headed: false, log: () => undefined });
+    await engine.init!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, env: { ...prepared?.env }, headed: false, workerSlot: 0, signal: signal(), log: () => undefined });
+    await engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal: signal(), resolveSecret: noSecrets, ...ignoreTrace });
+    await engine.session!.open!(app.url, operation());
+    const browser = engine.fixtures!['browser']!({
+      operation,
+      app: { resolveUrl: (url: string) => new URL(url, app.url).href },
+      expectable: (target: object) => target, fixture: (_name: string, target: object) => target,
+      attachArtifact: () => undefined,
+    } as unknown as EngineFixtureContext) as Browser;
+    const surface = surfaceOf(engine)!;
+    const opener = surface.page();
+    await opener.evaluate(() => {
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(new Blob(['from the opener']));
+      link.download = 'opener.txt';
+      link.id = 'download';
+      document.body.append(link);
+    });
+    await browser.waitForPopup(() => opener.evaluate((url) => { window.open(url); }, app.url));
+    popup = surface.page();
+    expect(popup).not.toBe(opener);
+    const file = await browser.waitForDownload(async () => { await browser.evaluate(() => { document.querySelector<HTMLAnchorElement>('#download')!.click(); return null; }); });
+    expect(file.suggestedFilename).toBe('opener.txt');
+    expect(readFileSync(file.absolutePath, 'utf8')).toBe('from the opener');
   });
 });

@@ -451,9 +451,8 @@ async function collectDownloads(
   try {
     return await withTimeout(surface.guard({ ...operation, signal }, 'download', async (currentOperation) => {
       requireOpen();
-      const page = surface.requirePage();
       const remote = surface.remoteDownloads();
-      if (remote !== undefined) await saveDownloadsTo(page, remote.dir, currentOperation.signal);
+      if (remote !== undefined) await saveDownloadsTo(surface.requirePage(), remote.dir, currentOperation.signal);
       requireOpen();
       // Raced so a hook that settles quietly on cancellation cannot let a cancelled wait run its trigger.
       const before = remote === undefined ? undefined : await raceAbort(() => remote.before(currentOperation.signal), currentOperation.signal, 'download');
@@ -463,6 +462,8 @@ async function collectDownloads(
         const reason: unknown = currentOperation.signal.reason;
         throw isClassified(reason) ? reason : cancelled('download cancelled');
       }
+      // Read after the awaits above: a popup that closed meanwhile handed the active tab back to its opener.
+      const page = surface.requirePage();
       let allStarted!: () => void;
       const received = new Promise<void>((resolve) => { allStarted = resolve; });
       const onDownload = (download: Download): void => {
