@@ -427,7 +427,7 @@ launch:
 
 | Throws | When |
 | --- | --- |
-| `INVALID_CONFIG` | In `app.permissions`: a permission name outside `DevicePermission` (naming the nearest one when it is a likely typo), or a state other than `grant`, `deny`, or `reset`. In `app.locale`: a tag with an extension (`-u-ca-japanese`), `AppleLanguages` or `AppleLocale` in the target's `launchArguments` on iOS, or a target whose Android devices a provider leases. Fails before any device command. |
+| `INVALID_CONFIG` | In `app.permissions`: a permission name outside `DevicePermission` (naming the nearest one when it is a likely typo), or a state other than `grant`, `deny`, or `reset`. In `app.locale`: a tag with an extension (`-u-ca-japanese`) or a variant (`-valencia`), `AppleLanguages` or `AppleLocale` in the target's `launchArguments` on iOS, an Android `bundleId` that is not a package name, or a target whose Android devices a provider leases. Fails before any device command. |
 | `INVALID_ARGUMENT` | The same, in `device.openApp`. |
 
 #### Boot and prepare

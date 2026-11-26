@@ -134,7 +134,8 @@ await device.openApp('com.example.app', { relaunch: true, locale: 'ar-EG' });
   arguments, on any simulator, phone, or hosted device. The device keeps its
   own language. Don't set those two arguments in `launchArguments` as well.
 - On Android the engine sets the app's own language with this machine's
-  `adb` before the launch. It needs Android 13 or newer. A later fresh launch
+  `adb` before the launch. It needs Android 13 or newer, and the app named by
+  its package, such as `com.example.app`, not its display name. A later fresh launch
   without a locale, and the end of the run, put back the app's earlier
   language. A run that is killed leaves the locale set.
 - A provider's Android devices are not reachable over this machine's `adb`,

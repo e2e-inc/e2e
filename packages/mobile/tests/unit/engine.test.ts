@@ -223,6 +223,12 @@ describe('manifest', () => {
         message: 'target "phone" app.locale is set, and device provider "cloud" leases this target\'s Android devices, which this machine\'s adb does not reach: set the language and locale with the provider\'s own options instead',
       }),
     );
+    expect(() => android({ bundleId: 'Settings', locale: 'fr-FR' }, info)).toThrowError(
+      expect.objectContaining({
+        code: 'INVALID_CONFIG',
+        message: 'target "phone" app.locale on Android needs the app\'s package name, such as com.example.app, and "Settings" is not one: adb sets the locale of a package',
+      }),
+    );
     // A provider's iOS devices launch with the locale's arguments like any other.
     expect(() => harness({ device: provider as never }).engine.validateApp!({ bundleId: 'com.example.app', locale: 'fr-FR' }, info)).not.toThrow();
   });
@@ -3764,6 +3770,11 @@ describe('device fixture', () => {
     const newer = harness({ platform: 'android', bundleId: ANDROID_APP_PACKAGE });
     newer.fake.respond('devices.boot', () => ({ id: 'emulator-5554', device: 'Pixel 9' }));
     await openAttempt(newer);
+    // A display name is refused before adb, which takes a package only and splits a name with spaces.
+    const opens = newer.fake.calls.length;
+    await expect(fixture(newer).openApp('My App', { relaunch: true, locale: 'fr-FR' })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(newer.fake.calls.length).toBe(opens);
+    expect(newer.adbCalls).toEqual([]);
     newer.respondAdb((args) => ({ stdout: args.includes('getprop') ? '36' : 'Unknown package com.missing for userId 0\n', stderr: '', exitCode: 0 }));
     await expect(fixture(newer).openApp('com.missing', { relaunch: true, locale: 'fr-FR' })).rejects.toMatchObject({
       code: 'ENGINE_FAILURE',

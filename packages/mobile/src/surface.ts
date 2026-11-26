@@ -53,7 +53,7 @@ import { isAppNotRunning, isSnapshotPresentationFailure, isUnreadableCapture, OR
 import { pointerInteraction, DEFAULT_LONG_PRESS_MS, MAX_TAP_COUNT } from './actions.ts';
 import { resolveExpression } from './locate.ts';
 import { launchArgumentList, launchArgumentsForOpen } from './launch-arguments.ts';
-import { AndroidAppLocales, assertLocaleReachable, assertNoAppleLocaleArguments, checkLocale, runAdb as defaultRunAdb, withLocaleArguments, type AdbRunner } from './locale.ts';
+import { AndroidAppLocales, assertAndroidPackage, assertLocaleReachable, assertNoAppleLocaleArguments, checkLocale, runAdb as defaultRunAdb, withLocaleArguments, type AdbRunner } from './locale.ts';
 import {
   isWithin,
   keyboardElementsTop,
@@ -937,6 +937,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
       const label = options.launchArguments === undefined ? "the target's app.launchArguments" : 'device.openApp({ launchArguments })';
       assertNoAppleLocaleArguments(label, launchArguments, 'INVALID_ARGUMENT');
     }
+    if (locale !== undefined && this.options.platform === 'android') assertAndroidPackage('device.openApp({ locale })', app, 'INVALID_ARGUMENT');
     if (permissions !== undefined) await this.presetPermissions(app, permissions, signal);
     if (this.options.platform === 'android') await this.presetAndroidLocale(app, locale, relaunch, signal);
     await this.open(app, relaunch, launchArguments, signal, locale);

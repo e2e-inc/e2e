@@ -100,6 +100,19 @@ function leasingProvider(device: MobileOptions['device']): string | undefined {
   return typeof name === 'string' ? name : 'unnamed';
 }
 
+/** An Android package name: dot-separated segments that each start with a letter. */
+const ANDROID_PACKAGE = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/;
+
+/**
+ * Refuses an Android app named other than by its package (a display name
+ * such as `Settings`): `cmd locale set-app-locales` takes a package only,
+ * and `adb shell` would split a name with spaces into several words.
+ */
+export function assertAndroidPackage(label: string, app: string, code: Code): void {
+  if (ANDROID_PACKAGE.test(app)) return;
+  fail(code, `${label} on Android needs the app's package name, such as com.example.app, and ${JSON.stringify(app)} is not one: adb sets the locale of a package`);
+}
+
 /** The iOS launch arguments that start an app in `locale`: `-AppleLanguages (fr-FR) -AppleLocale fr_FR`. */
 function appleLocaleArguments(locale: string): readonly string[] {
   const { language, script, region } = new Intl.Locale(locale);

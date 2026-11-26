@@ -12,7 +12,7 @@ import { ConfigurationError, defineEngine, obj, type EngineAppCheckInfo, type En
 import { createDeviceFixture } from './device.ts';
 import type { ClientFactory, MobileOptions, MobilePlatform } from './options.ts';
 import { assertLaunchArgumentsFor } from './launch-arguments.ts';
-import { assertLocaleReachable, assertNoAppleLocaleArguments, checkLocale } from './locale.ts';
+import { assertAndroidPackage, assertLocaleReachable, assertNoAppleLocaleArguments, checkLocale } from './locale.ts';
 import { isLink, linkTarget } from './links.ts';
 import { DEVICE_ACTIONS, DEVICE_POINTER_ACTIONS } from './actions.ts';
 import { AgentDeviceSurface, assertPermissions } from './surface.ts';
@@ -155,6 +155,7 @@ function validateApp(app: EngineAppDeclaration, { targetName }: EngineAppCheckIn
     checkLocale(`${where} app.locale`, app.locale, 'INVALID_CONFIG');
     assertLocaleReachable(`${where} app.locale`, options, 'INVALID_CONFIG');
     if (platform === 'ios') assertNoAppleLocaleArguments(`${where} app.launchArguments`, app.launchArgumentValues ?? app.launchArguments, 'INVALID_CONFIG');
+    if (platform === 'android' && app.bundleId !== undefined) assertAndroidPackage(`${where} app.locale`, app.bundleId, 'INVALID_CONFIG');
   }
 }
 
