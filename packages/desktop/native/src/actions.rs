@@ -237,14 +237,16 @@ fn center(element: &Element) -> Outcome<(f64, f64)> {
     Ok((x + width / 2.0, y + height / 2.0))
 }
 
-/// Brings the window forward and the app with it, for physical input.
+/// Brings the window forward and the app with it, for physical input. A sheet or an alert on it may take focus.
 pub fn raise(pid: i32, window: &Element) -> Outcome<()> {
     let app = Element::application(pid);
     let _ = app.set_bool("AXFrontmost", true);
     let _ = window.perform("AXRaise");
     let _ = window.set_bool("AXMain", true);
     let deadline = Instant::now() + Duration::from_millis(1_500);
-    let forward = until(deadline, || app.boolean("AXFrontmost") == Some(true) && app.element("AXFocusedWindow").as_ref() == Some(window));
+    let forward = until(deadline, || {
+        app.boolean("AXFrontmost") == Some(true) && app.element("AXFocusedWindow").is_some_and(|focused| windows::holds_focus(&focused, window))
+    });
     if forward { Ok(()) } else { Err(Failure::refused(codes::ACTION_FAILED, "the window could not be brought forward")) }
 }
 
@@ -771,11 +773,7 @@ pub fn press(pid: i32, window: u32, combo: &str, physical: bool, input_id: Optio
 /// Refuses unless `window` is the app's key window, or holds the focused sheet or alert: a key or text sent to the app
 /// goes to its key window, and would land in another one.
 fn key_window(pid: i32, window: &Element) -> Outcome<()> {
-    let app = Element::application(pid);
-    // A sheet or an alert on the window is the app's focused window then, and keys reach the window through it.
-    let focused = app.element("AXFocusedWindow");
-    let on_window = focused.as_ref() == Some(window) || focused.as_ref().and_then(|focused| focused.element("AXParent")).as_ref() == Some(window);
-    if on_window {
+    if Element::application(pid).element("AXFocusedWindow").is_some_and(|focused| windows::holds_focus(&focused, window)) {
         return Ok(());
     }
     Err(Failure::refused(codes::ACTION_FAILED, "the window is not the app's key window, so a key sent to the app would land elsewhere")

@@ -139,6 +139,12 @@ pub fn ax_windows(app: &Element) -> Outcome<Vec<(Element, Option<u32>)>> {
     }
 }
 
+/// Whether `window` holds the app's focused window: is it, or carries it as a sheet or an alert. The app's focused window
+/// is the sheet then, and keys reach the window through it.
+pub fn holds_focus(focused: &Element, window: &Element) -> bool {
+    focused == window || focused.element("AXParent").as_ref() == Some(window)
+}
+
 /// The windows of one process: every accessibility window, and every
 /// normal-level window server window accessibility does not list.
 pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
@@ -165,7 +171,7 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
         out.push(WindowInfo {
             id: id.to_string(),
             title: title.or_else(|| entry.and_then(|window| window.title.clone())),
-            is_focused: focused.as_ref() == Some(element),
+            is_focused: focused.as_ref().is_some_and(|focused| holds_focus(focused, element)),
             visible: entry.is_some_and(|window| window.onscreen),
             accessible: true,
             minimized,
