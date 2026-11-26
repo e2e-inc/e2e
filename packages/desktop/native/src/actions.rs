@@ -1035,14 +1035,19 @@ fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Instant) -> Ou
     let field_focused = || Element::application(entry.pid).element("AXFocusedUIElement").as_ref() == Some(&entry.element);
     // The field's length when the last key went; unset before the first.
     let sent_at: std::cell::Cell<Option<Option<f64>>> = std::cell::Cell::new(None);
+    // Set once a key showed no change in its whole wait: a field that drops or caps characters would spend the wait on
+    // every key after it, so the rest get the short one.
+    let quiet = std::cell::Cell::new(false);
     let still = || -> Outcome<()> {
         // A key posted to the app is in its queue, not yet handled: wait until the field shows it, or focus moved, so a
         // window the key opened (a handler on the text, a Return) holds the keyboard by the time the check below reads it.
         if let Some(before) = sent_at.get() {
-            let settle = deadline.min(Instant::now() + KEY_SETTLE);
+            let settle = deadline.min(Instant::now() + if quiet.get() { KEY_SETTLE_UNREAD } else { KEY_SETTLE });
             match before {
                 Some(count) => {
-                    until(settle, || length() != Some(count) || !field_focused());
+                    if !until(settle, || length() != Some(count) || !field_focused()) {
+                        quiet.set(true);
+                    }
                 }
                 None => sleep(KEY_SETTLE_UNREAD.min(settle.saturating_duration_since(Instant::now()))),
             }
