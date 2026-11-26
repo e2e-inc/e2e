@@ -790,8 +790,9 @@ function keyboardSide(
  * not their own. When the page holds the focus and none of its elements
  * does, XCTest reports every element of the page as focused, siblings
  * included; once a field takes the keyboard, that field is the only one.
- * Real focus is on one node, so a web view with more than one focused node
- * below it has no focused node.
+ * Real focus is on one node, so a web view with more than one focused
+ * element below it has no focused element. The web view nodes themselves are
+ * not counted: Android marks the host focused beside the field it holds.
  */
 function pageFocusEchoes(
   raw: readonly RawNode[],
@@ -808,8 +809,8 @@ function pageFocusEchoes(
     const focused: number[] = [];
     const pending = [position];
     for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
-      if ((raw[next] as RawNode).focused === true) focused.push(next);
-      pending.push(...(children.get(next) ?? []));
+      if ((raw[next] as RawNode).focused === true && !isWebView(next)) focused.push(next);
+      for (const child of children.get(next) ?? []) pending.push(child);
     }
     if (focused.length > 1) for (const node of focused) echoes.add(node);
   });

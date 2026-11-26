@@ -674,7 +674,7 @@ describe('focus inside a web view', () => {
   const focusedNames = (nodes: readonly RawNode[]) =>
     project(nodes)
       .index.filter((entry) => entry.node.states?.focused === true)
-      .map((entry) => `${entry.node.role} ${entry.node.name}`);
+      .map((entry) => [entry.node.role, entry.node.name].filter((part) => part !== undefined).join(' '));
 
   it('reads no element as focused when every element of the page reports the focus', () => {
     expect(focusedNames(page(false))).toEqual([]);
@@ -687,6 +687,17 @@ describe('focus inside a web view', () => {
   it('keeps a focused native node outside the web view', () => {
     const nodes = [...page(false), { ref: '@e6', index: 6, parentIndex: 0, depth: 1, type: 'SearchField', label: 'Search', focused: true }];
     expect(focusedNames(nodes)).toEqual(['textbox Search']);
+  });
+
+  it('keeps the focused field of an Android web view whose host reports the focus too', () => {
+    const nodes: RawNode[] = [
+      { ref: '@e0', index: 0, depth: 0, type: 'android.widget.FrameLayout' },
+      { ref: '@e1', index: 1, parentIndex: 0, depth: 1, type: 'android.webkit.WebView', focused: true },
+      { ref: '@e2', index: 2, parentIndex: 1, depth: 2, type: 'android.widget.EditText', label: 'Coupon code', focused: true },
+      { ref: '@e3', index: 3, parentIndex: 1, depth: 2, type: 'android.widget.Button', label: 'Apply coupon' },
+    ];
+    expect(focusedNames(nodes)).toEqual(['document', 'textbox Coupon code']);
+    expect(focusedNames(nodes.map((node) => (node.index === 2 ? { ...node, focused: false } : node)))).toEqual(['document']);
   });
 });
 
