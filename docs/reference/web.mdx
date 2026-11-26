@@ -496,8 +496,10 @@ web({ dialogs: 'accept' }); // default: unset
   the app shows only in a dialog stays in the report and `trace.md`. The
   line counts toward the [app log's limits](/debugging#traces), 100
   non-error lines per attempt, so an app that logs more first leaves it
-  out. An agent action that opened the dialog shows the model the same line
-  in its result either way, so an explorer reads an app's error `alert`.
+  out. An agent step shows the model the same line either way, in the
+  result of its next look, which is the result of the action that opened the
+  dialog unless the app opened it later. An explorer reads an app's error
+  `alert`.
 - A handler a test registers with `onDialog` comes first.
 - Unset, an unhandled dialog is dismissed and fails the next step with
   `APP_NOT_OPEN`. An agent reads that failure as the result of its action.

@@ -165,7 +165,9 @@ describe('e2e explore', () => {
     const withPolicy = await runExplore(project, app, acceptingModel, { rawConfig: configWith(web({ dialogs: 'accept' }), acceptingModel), maxSteps: 1 });
     expect(withPolicy.report.run.explore!.steps[0]).toMatchObject({ title: 'Delete', status: 'passed' });
     expect(accepted[0]).toMatch(/^Tapped #\S+\./);
-    expect(accepted[0]).toContain(`System log since the previous screen:\n- alert dialog "Could not save: server error 500" opened; accepting it per web({ dialogs: 'accept' })`);
+    expect(accepted[0]).toContain(`System log (not on the screen):\n- alert dialog "Could not save: server error 500" opened; accepting it per web({ dialogs: 'accept' })`);
+    // The alert changed nothing listed, but it was the tap's effect: the tap is not called one with no effect.
+    expect(accepted[0]).not.toContain('no visible effect');
     expect(accepted[1]).toMatch(/status "Answer" text="accepted"/);
     expect(accepted[1]).toContain(`- confirm dialog "Proceed?" opened; accepting it per web({ dialogs: 'accept' })`);
     // Each line is reported once, with the action it followed.
