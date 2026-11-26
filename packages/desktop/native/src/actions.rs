@@ -207,12 +207,18 @@ fn answered(error: AXError, then: Option<AXError>, what: &str) -> Outcome<()> {
     }
 }
 
-fn raw_role(element: &Element) -> (String, &'static str) {
-    let values = element.attributes(&["AXRole", "AXSubrole"]).unwrap_or_else(|_| vec![None, None]);
+/// The element's AX role and its role in the snapshot's vocabulary. A read the app did not answer in time fails as a
+/// stall, so a busy app is retried rather than read as a control without the role; any other failure reads as none.
+fn role_of(element: &Element, what: &str) -> Outcome<(String, &'static str)> {
+    let values = match element.attributes(&["AXRole", "AXSubrole"]) {
+        Ok(values) => values,
+        Err(ax::AX_CANNOT_COMPLETE) => return Err(unread(ax::AX_CANNOT_COMPLETE, what)),
+        Err(_) => vec![None, None],
+    };
     let ax_role = values[0].as_ref().and_then(|value| value.text().map(str::to_owned)).unwrap_or_default();
     let subrole = values[1].as_ref().and_then(|value| value.text().map(str::to_owned));
     let role = roles::role(&ax_role, subrole.as_deref());
-    (ax_role, role)
+    Ok((ax_role, role))
 }
 
 fn toggle_state(element: &Element) -> Option<u8> {
@@ -289,7 +295,7 @@ fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
     let element = &entry.element;
     let names = action_names(element, "click")?;
     if let Some(action) = ["AXPress", "AXOpen", "AXConfirm"].into_iter().find(|name| names.iter().any(|candidate| candidate == name)) {
-        let (ax_role, _) = raw_role(element);
+        let (ax_role, _) = role_of(element, "click")?;
         let opens_menu = ax_role == "AXPopUpButton" || ax_role == "AXMenuButton";
         let before = windows::open_menus(entry.pid);
         perform(element, action, "click")?;
@@ -298,7 +304,7 @@ fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
         }
         return Ok(());
     }
-    let (_, role) = raw_role(element);
+    let (_, role) = role_of(element, "click")?;
     if matches!(role, "row" | "cell" | "treeitem" | "option" | "tab") && settable(element, "AXSelected", "click")? {
         go("select")?;
         element.set_bool("AXSelected", true).map_err(|error| refused(error, "select"))?;
@@ -328,7 +334,7 @@ fn focus(element: &Element, deadline: Instant) -> Outcome<()> {
 
 fn check(element: &Element, wanted: bool, deadline: Instant) -> Outcome<()> {
     // A press on anything but a box would run its handler (a submit, a delete) before the check could fail.
-    let (_, role) = raw_role(element);
+    let (_, role) = role_of(element, "check")?;
     if !roles::toggleable(role) {
         return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("a {role} has no checked state to set")));
     }
@@ -458,7 +464,7 @@ fn finite(text: &str) -> Result<f64, ()> {
 }
 
 fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
-    let (ax_role, role) = raw_role(element);
+    let (ax_role, role) = role_of(element, "set value")?;
     let secure = ax_role == "AXSecureTextField" || element.text("AXSubrole").as_deref() == Some("AXSecureTextField");
     if !settable(element, "AXValue", "set value")? {
         // A stepper whose value cannot be written still steps toward a number.
@@ -592,7 +598,7 @@ fn unclosed(failure: Failure, closed: bool) -> Failure {
 
 fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
     let element = &entry.element;
-    let (ax_role, role) = raw_role(element);
+    let (ax_role, role) = role_of(element, "select")?;
     // A pull-down keeps its own title, so a choice cannot be read back from it: tap it and the menu item instead.
     if ax_role == "AXMenuButton" {
         return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "a pull-down menu shows no selected option; tap it, then tap the menu item"));
@@ -662,7 +668,7 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
             }
             return Err(Failure::refused(codes::ELEMENT_NOT_FOUND, format!("the list has no option \"{label}\"")));
         };
-        let (_, row_role) = raw_role(&row);
+        let (_, row_role) = role_of(&row, "select")?;
         if matches!(row_role, "radiobutton" | "tab") {
             return perform(&row, "AXPress", "choose the option");
         }
