@@ -515,6 +515,29 @@ export interface TapOptions extends ClickOptions {
   button?: 'left' | 'middle' | 'right';
 }
 
+/**
+ * `dragTo` options: where the drag starts and ends on each node, and how many
+ * pointer moves it takes, as in Playwright's `dragTo`. Any of them needs an
+ * engine that declares `dragOptions`, `UNSUPPORTED_CAPABILITY` otherwise.
+ */
+export interface DragOptions extends ActionOptions {
+  /**
+   * Where to press, relative to the source node's top-left corner, inside
+   * its border on a document platform. Without it the platform picks a point
+   * of the node, usually its center.
+   */
+  sourcePosition?: Point;
+  /** Where to release, relative to the target node's top-left corner, as `sourcePosition`. */
+  targetPosition?: Point;
+  /**
+   * How many pointer moves carry the drag from the press to the release
+   * point, a positive safe integer. Unset, the engine's own default. A count
+   * above the engine's own limit (1000 on the browser engine) is
+   * `UNSUPPORTED_CAPABILITY`.
+   */
+  steps?: number;
+}
+
 /** `longPress` options: the hold time in milliseconds, 100 through 10000, default the engine's own. */
 export interface LongPressOptions extends ActionOptions {
   /** Hold time in milliseconds, 100 through 10000; unset, the engine's default. */
@@ -639,8 +662,8 @@ export interface Locator extends Omit<Screen, 'tree' | 'debug' | 'pause'> {
   hover(options?: ActionOptions): Promise<void>;
   /** Sets the files of exactly one file input, or of a control that opens a file chooser; paths resolve from the project root, payloads supply bytes in memory, and an empty array clears the input. */
   setInputFiles(files: string | readonly string[] | FilePayload | readonly FilePayload[], options?: ActionOptions): Promise<void>;
-  /** Drags exactly one node to exactly one target. */
-  dragTo(target: Locator, options?: ActionOptions): Promise<void>;
+  /** Drags exactly one node to exactly one target; the options pick the press and release points and the number of moves. */
+  dragTo(target: Locator, options?: DragOptions): Promise<void>;
   /** Scrolls exactly one node into view. */
   scrollIntoView(options?: ActionOptions): Promise<void>;
   /** Performs a swipe scoped to exactly one node. */

@@ -14,6 +14,7 @@ export type {
   App,
   AppPermissionState,
   ClickOptions,
+  DragOptions,
   Expectable,
   FilePayload,
   JsonPrimitive,

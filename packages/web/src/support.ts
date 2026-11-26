@@ -3,7 +3,7 @@
 import { statSync, type Stats } from 'node:fs';
 import { setTimeout } from 'node:timers/promises';
 import type { ElementHandle, FrameLocator, Locator as PwLocator, Mouse, Page } from 'playwright-core';
-import { EngineError, withinCleanupBudget, type EngineCleanupContext, type Momentum, type ScrollDirection, type ViewportPoint, type ViewportSize } from '@e2e-dev/core/engine';
+import { EngineError, obj, withinCleanupBudget, type EngineCleanupContext, type LocatorAction, type Momentum, type ScrollDirection, type ViewportPoint, type ViewportSize } from '@e2e-dev/core/engine';
 import { ConfigurationError, InfrastructureError, TestError } from '@e2e-dev/core/engine';
 import type { ClockHost } from './clock.ts';
 
@@ -42,6 +42,9 @@ function withinViewport(point: Point, viewport: { width: number; height: number 
 export type ActionTarget =
   | { readonly kind: 'locator'; readonly locator: PwLocator }
   | { readonly kind: 'element'; readonly element: ElementHandle<Element> };
+
+/** The `dragTo` fields that pick the press and release points and the number of moves. */
+export type DragFields = Pick<Extract<LocatorAction, { kind: 'dragTo' }>, 'sourcePosition' | 'targetPosition' | 'steps'>;
 
 interface Rect {
   x: number;
@@ -109,21 +112,23 @@ async function scrollIntoViewNearest(target: ActionTarget): Promise<void> {
  * to make the whole verb unavailable for exactly the elements that have no
  * locator: an unlabelled thumbnail, an empty drop zone. Driving the pointer
  * works for both kinds because a handle has a bounding box like anything else.
- *
+ * `drag` picks the press and release points and the number of moves, measured
+ * as Playwright's `dragTo` measures them.
  */
 export async function performPointerDrag(
   source: ActionTarget,
   destination: ActionTarget,
+  drag: DragFields,
   timeout: number,
 ): Promise<void> {
   // Hover the source first: it auto-waits for actionability and scrolls the
   // source into view, and the gesture starts there, so its position is the one
   // that has to hold.
-  await asActionable(source).hover({ timeout });
+  await asActionable(source).hover({ timeout, ...obj({ position: drag.sourcePosition }) });
   const page = await targetPage(source);
   const viewport = await currentViewport(page);
-  let from = await targetBoundingBox(source, timeout);
-  let to = await targetBoundingBox(destination, timeout);
+  let start = await dragPoint(source, drag.sourcePosition, timeout);
+  let end = await dragPoint(destination, drag.targetPosition, timeout);
 
   // A pointer can only be put at a viewport coordinate, so a destination below
   // the fold has to be brought into view — `Locator.dragTo` scrolls both sides,
@@ -136,19 +141,17 @@ export async function performPointerDrag(
   // boxes read after it are a race. `scrollIntoView({ block: 'nearest' })`
   // scrolls the smallest amount that reveals the element, synchronously, which
   // keeps both endpoints on screen whenever they can be.
-  if (to !== null && !withinViewport(centreOf(to), viewport)) {
+  if (end !== null && !withinViewport(end, viewport)) {
     await scrollIntoViewNearest(destination);
-    from = await targetBoundingBox(source, timeout);
-    to = await targetBoundingBox(destination, timeout);
+    start = await dragPoint(source, drag.sourcePosition, timeout);
+    end = await dragPoint(destination, drag.targetPosition, timeout);
   }
 
-  if (from === null || to === null) {
+  if (start === null || end === null) {
     throw new EngineError('NOT_ACTIONABLE', 'a drag endpoint has no visible bounding box', {
       retryable: false,
     });
   }
-  const start = centreOf(from);
-  const end = centreOf(to);
   // Endpoints that cannot be on screen together are reported rather than dragged
   // between: a pointer sequence aimed off-screen looks like a drag that ran and
   // leaves the page untouched, which surfaces later as a confusing assertion
@@ -168,11 +171,31 @@ export async function performPointerDrag(
   }
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
-  // Two moves: HTML5 drag-and-drop commits on `dragover`, and one move into the
-  // destination does not always produce one.
-  await page.mouse.move(end.x, end.y, { steps: 2 });
+  // One more move at the destination after the steps: HTML5 drag-and-drop
+  // commits on `dragover`, and one move into the destination does not always
+  // produce one. Without `steps`, 2 steps keep the gesture drags were written
+  // against before the option existed.
+  await page.mouse.move(end.x, end.y, { steps: drag.steps ?? 2 });
   await page.mouse.move(end.x, end.y);
   await page.mouse.up();
+}
+
+/**
+ * The point a drag presses or releases at on one target: `position` from the
+ * top-left corner of its padding box, where Playwright's `dragTo` measures
+ * it, else the centre of its box. Null when the target has no box.
+ */
+async function dragPoint(target: ActionTarget, position: ViewportPoint | undefined, timeout: number): Promise<Point | null> {
+  const box = await targetBoundingBox(target, timeout);
+  if (box === null) return null;
+  if (position === undefined) return centreOf(box);
+
+  const border = (el: Element): Point => {
+    const style = getComputedStyle(el);
+    return { x: Number.parseFloat(style.borderLeftWidth) || 0, y: Number.parseFloat(style.borderTopWidth) || 0 };
+  };
+  const inset = target.kind === 'locator' ? await target.locator.evaluate(border, undefined, { timeout }) : await target.element.evaluate(border);
+  return { x: box.x + inset.x + position.x, y: box.y + inset.y + position.y };
 }
 
 /** Playwright colorizes call logs; escape codes are noise in reports. */

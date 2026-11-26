@@ -977,17 +977,38 @@ Web only. Pass a plain object with only the fields of `FilePayload`: `name: stri
 #### `dragTo`
 
 ```ts
-/** Drags exactly one node to exactly one target. */
-dragTo(target: Locator, options?: ActionOptions): Promise<void>;
+/** Drags exactly one node to exactly one target; the options pick the press and release points and the number of moves. */
+dragTo(target: Locator, options?: DragOptions): Promise<void>;
 ```
 
 ```ts
 await screen.getByText('Design review').dragTo(screen.getByRole('region', 'Done'));
+await screen.getByRole('slider').dragTo(screen.getByTestId('track'), { sourcePosition: { x: 5, y: 5 }, targetPosition: { x: 120, y: 5 }, steps: 10 });
 ```
+
+The options are [`DragOptions`](#types), the same as Playwright's
+`dragTo` options:
+
+- `sourcePosition`: where to press, an offset from the source node's
+  top-left corner, inside its border, in CSS pixels. Without it the engine
+  picks a point of the node, usually its center.
+- `targetPosition`: where to release, measured on the target node the same
+  way.
+- `steps`: how many pointer moves carry the drag to the release point, a
+  positive safe integer. Unset, the browser engine moves in 1 step, as
+  Playwright does. It moves in 2 when it drives the mouse itself, for a node
+  Playwright's `dragTo` can't take. The browser engine takes at most 1000
+  steps.
+
+Only the browser engine supports the options. A plain `dragTo` works on
+every engine that lists the `dragTo` action.
 
 | Throws | When |
 | --- | --- |
+| `INVALID_ARGUMENT` | A position that is not a point of finite, non-negative numbers, or a `steps` that is not a positive safe integer. |
 | `INVALID_LOCATOR` | `target` is not a runner locator, or was made by another target's screen. |
+| `UNSUPPORTED_CAPABILITY` | `sourcePosition`, `targetPosition`, or `steps` on an engine without `dragOptions` (such as mobile). Thrown before either node is looked up. |
+| `UNSUPPORTED_CAPABILITY` | `steps` above 1000 on the browser engine; thrown before it acts. |
 
 #### `scrollIntoView`
 
@@ -1564,6 +1585,29 @@ export interface TapOptions extends ClickOptions {
    * `tapButtons`, and fails with `UNSUPPORTED_CAPABILITY` otherwise.
    */
   button?: 'left' | 'middle' | 'right';
+}
+
+/**
+ * `dragTo` options: where the drag starts and ends on each node, and how many
+ * pointer moves it takes, as in Playwright's `dragTo`. Any of them needs an
+ * engine that declares `dragOptions`, `UNSUPPORTED_CAPABILITY` otherwise.
+ */
+export interface DragOptions extends ActionOptions {
+  /**
+   * Where to press, relative to the source node's top-left corner, inside
+   * its border on a document platform. Without it the platform picks a point
+   * of the node, usually its center.
+   */
+  sourcePosition?: Point;
+  /** Where to release, relative to the target node's top-left corner, as `sourcePosition`. */
+  targetPosition?: Point;
+  /**
+   * How many pointer moves carry the drag from the press to the release
+   * point, a positive safe integer. Unset, the engine's own default. A count
+   * above the engine's own limit (1000 on the browser engine) is
+   * `UNSUPPORTED_CAPABILITY`.
+   */
+  steps?: number;
 }
 
 /** One option of a select: its label (a bare string too), its `value` attribute, or its zero-based index. */

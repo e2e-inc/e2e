@@ -378,6 +378,23 @@ describe('dispatchLocatorAction', () => {
     expect(source.locator.dragTo).toHaveBeenCalledWith(destination.target.locator, { timeout: 7 });
   });
 
+  it('hands the positions and steps to Playwright drag', async () => {
+    const source = stubLocator();
+    const destination = stubLocator();
+    await dispatchLocatorAction(
+      source.target,
+      { kind: 'dragTo', target: { id: 'n2', revision: 'r' }, sourcePosition: { x: 1, y: 2 }, targetPosition: { x: 3, y: 4 }, steps: 5 },
+      OPERATION,
+      () => Promise.resolve(destination.target),
+    );
+    expect(source.locator.dragTo).toHaveBeenCalledWith(destination.target.locator, {
+      timeout: 7,
+      sourcePosition: { x: 1, y: 2 },
+      targetPosition: { x: 3, y: 4 },
+      steps: 5,
+    });
+  });
+
   it('starts no drag when the second side resolves after the operation ended', async () => {
     const source = stubLocator();
     const destination = stubLocator();

@@ -61,14 +61,33 @@ describe.each(schemas)('%s schema', (name) => {
       expect(validate.errors).toEqual([expect.objectContaining({ instancePath: '/actions', keyword: 'uniqueItems' })]);
     });
 
-    it('rejects the invalid fixture for viewportIntersection without engine/observe, and for a non-boolean fileApps and tapButtons', () => {
+    it('rejects the invalid fixture for viewportIntersection without engine/observe, and for a non-boolean fileApps, tapButtons, and dragOptions', () => {
       expect(validate(readJson('fixtures', 'engine-manifest-v1.invalid.json'))).toBe(false);
       expect(validate.errors).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ instancePath: '/methods', keyword: 'contains' }),
           expect.objectContaining({ instancePath: '/fileApps', keyword: 'type' }),
           expect.objectContaining({ instancePath: '/tapButtons', keyword: 'type' }),
+          expect.objectContaining({ instancePath: '/dragOptions', keyword: 'type' }),
         ]),
+      );
+    });
+
+    it('accepts dragOptions with engine/perform and rejects it without', () => {
+      expect(validate({
+        name: 'web', version: '0.1.0', spiVersion: 1,
+        methods: ['engine/observe', 'engine/perform'],
+        actions: ['dragTo'],
+        dragOptions: true,
+      })).toBe(true);
+      expect(validate({
+        name: 'pointer', version: '0.1.0', spiVersion: 1,
+        methods: ['engine/observe', 'engine/performAt'],
+        pointerActions: ['dragTo'],
+        dragOptions: true,
+      })).toBe(false);
+      expect(validate.errors).toEqual(
+        expect.arrayContaining([expect.objectContaining({ instancePath: '/methods', keyword: 'contains', schemaPath: expect.stringContaining('/then/') })]),
       );
     });
 

@@ -5,7 +5,8 @@
  * picked took the click, so the action is done; a control the click never
  * reached stays a stale node, one that commits its state after a timer is
  * waited for, and one the click never changes fails at the deadline. A tap
- * with a mouse button presses that button, on a node and at a point.
+ * with a mouse button presses that button, on a node and at a point. A drag
+ * presses and releases at the positions it names, in the steps it names.
  */
 
 import { createServer, type Server } from 'node:http';
@@ -606,5 +607,72 @@ describe('a mouse button at a point', () => {
       code: 'UNSUPPORTED_CAPABILITY',
     });
     expect(await pressed()).toEqual([]);
+  });
+});
+
+/**
+ * A bordered card and drop zone that log the drag as `down <x>,<y>` on the
+ * card, `move <x>,<y>` in the viewport, and `up <x>,<y>` on the zone, each
+ * offset measured from the node's padding box.
+ */
+const DRAG_PAGE = `<div id="card" style="position: absolute; left: 20px; top: 20px; width: 100px; height: 40px; border: 4px solid"></div>
+<div id="zone" style="position: absolute; left: 300px; top: 200px; width: 200px; height: 100px; border: 6px solid"></div>
+<script>
+  window.dragged = [];
+  const inside = (id, event) => {
+    const node = document.getElementById(id);
+    const box = node.getBoundingClientRect();
+    return Math.round(event.clientX - box.left - node.clientLeft) + ',' + Math.round(event.clientY - box.top - node.clientTop);
+  };
+  let down = false;
+  document.addEventListener('mousedown', (event) => {
+    down = true;
+    window.dragged.push('down ' + inside('card', event));
+  });
+  document.addEventListener('mousemove', (event) => {
+    if (down) window.dragged.push('move ' + event.clientX + ',' + event.clientY);
+  });
+  document.addEventListener('mouseup', (event) => {
+    down = false;
+    window.dragged.push('up ' + inside('zone', event));
+  });
+</script>`;
+
+/** Drags the card onto the zone through the given target kind and returns what the page logged. */
+async function drag(kind: (typeof KINDS)[number], options: Omit<Extract<LocatorAction, { kind: 'dragTo' }>, 'kind' | 'target'>): Promise<string[]> {
+  await page.setContent(DRAG_PAGE);
+  const zone = await targetOf(kind, '#zone');
+  await dispatchLocatorAction(
+    await targetOf(kind, '#card'),
+    { kind: 'dragTo', target: { id: 'zone', revision: '' }, ...options },
+    { timeoutMs: 2000, signal: new AbortController().signal },
+    async () => zone,
+  );
+  return page.evaluate(() => (window as unknown as { dragged: string[] }).dragged);
+}
+
+describe.each(KINDS)('a drag through the %s target', (kind) => {
+  it('presses and releases at the positions from each padding box, moving through the given steps', async () => {
+    const events = await drag(kind, { sourcePosition: { x: 10, y: 5 }, targetPosition: { x: 30, y: 20 }, steps: 4 });
+    expect(events[0]).toBe('down 10,5');
+    expect(events.at(-1)).toBe('up 30,20');
+    // The pointer path adds one more move at the drop point, which carries it nowhere.
+    const moves = new Set(events.filter((event) => event.startsWith('move')));
+    expect(moves.size).toBe(4);
+    expect([...moves].at(-1)).toBe('move 336,226');
+  });
+
+  it('refuses more than 1000 steps before it sends any input', async () => {
+    await expect(drag(kind, { steps: 1001 })).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('the browser engine drags in at most 1000 steps, got 1001'),
+    });
+    expect(await page.evaluate(() => (window as unknown as { dragged: string[] }).dragged)).toEqual([]);
+  });
+
+  it('presses and releases at the centres without options', async () => {
+    const events = await drag(kind, {});
+    expect(events[0]).toBe('down 50,20');
+    expect(events.at(-1)).toBe('up 100,50');
   });
 });

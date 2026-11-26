@@ -138,6 +138,7 @@ rules:
 | `performAt`, `pointerActions` | One without the other. A `pointerActions` list that is empty, repeats a kind, or names one outside `KNOWN_POINTER_ACTION_KINDS`. |
 | `tapModifiers` | Not a boolean, or `true` without `perform`. |
 | `tapButtons` | Not a boolean, or `true` without `perform` or `performAt`. |
+| `dragOptions` | Not a boolean, or `true` without `perform`. |
 | `selectsDevice` | Not a boolean, or `true` without `prepare`. |
 | `grantsAllPermissions` | Not a boolean. |
 | `launchArgumentValues` | Not a boolean. |
@@ -174,6 +175,7 @@ The body of one target. Every member but `name`, `version`, and
 | [`performAt`, `pointerActions`](#pointer-actions) | method, kinds |
 | [`tapModifiers`](#capabilities) | `boolean` |
 | [`tapButtons`](#capabilities) | `boolean` |
+| [`dragOptions`](#capabilities) | `boolean` |
 | [`selectsDevice`](#capabilities) | `boolean` |
 | [`grantsAllPermissions`](#capabilities) | `boolean` |
 | [`launchArgumentValues`](#engineappinfo) | `boolean` |
@@ -289,6 +291,13 @@ export interface Engine {
    * so they don't need `tapButtons`.
    */
   readonly tapButtons?: boolean;
+  /**
+   * The surface honors `sourcePosition`, `targetPosition`, and `steps` on
+   * the `dragTo` action `perform` receives. Without it the harness fails a
+   * drag that carries any of them with `UNSUPPORTED_CAPABILITY` before it
+   * resolves either node. A plain `dragTo` needs only the `dragTo` action.
+   */
+  readonly dragOptions?: boolean;
   /**
    * `prepare` binds the target to the device `EnginePrepareInfo.device`
    * names, for `e2e run --device`. Without it the runner refuses the flag
@@ -465,6 +474,7 @@ member. Two gaps end differently:
 | `viewportIntersection` | `viewport-intersection` | `locate` | `expect(locator).toBeInViewport()`. |
 | `tapModifiers: true` | - | `perform` | `modifiers` on `tap`, `doubleTap`, `multiTap`, and `secondaryTap`. |
 | `tapButtons: true` | - | `perform` or `performAt` | `button` on `tap`, `doubleTap`, and `multiTap`, on a node and at a point. |
+| `dragOptions: true` | - | `perform` | `sourcePosition`, `targetPosition`, and `steps` on the node `dragTo`. |
 | `selectsDevice: true` | - | `prepare` | `e2e run --device`, the device `prepare` binds. |
 | `grantsAllPermissions: true` | - | - | `app.permissions: 'all'`, which the engine receives as `EngineAppInfo.allPermissions`. Without it, config load refuses `'all'`, so an engine released before it never receives the string. |
 | `launchArgumentValues: true` | - | - | The object form of `app.launchArguments`, in `EngineAppInfo.launchArgumentValues`. |
@@ -572,7 +582,8 @@ An undeclared verb is absent from the toolset.
 The test-facing APIs each engine member backs. A `screen` or `Locator`
 method for an undeclared kind, or a call with `modifiers` and no
 `tapModifiers`, fails with `UNSUPPORTED_CAPABILITY` before it reaches the
-engine. Without `tapButtons`, an action with a `button` fails the same way.
+engine. Without `tapButtons`, an action with a `button` fails the same way,
+and without `dragOptions`, a drag with positions or `steps`.
 
 | API | Needs |
 | --- | --- |
@@ -581,6 +592,7 @@ engine. Without `tapButtons`, an action with a `button` fails the same way.
 | `screen.swipe()` | `perform` with `swipe` on the observation root |
 | `modifiers` on a tap (`row.click({ modifiers: ['Shift'] })`) | `tapModifiers: true`; the keys are held for the click |
 | `button` on a tap (`link.click({ button: 'middle' })`) | `tapButtons: true` for a middle tap or a right tap with `count` above 1, and `secondaryTap` for a single right tap. A `left` tap doesn't need either. |
+| `sourcePosition`, `targetPosition`, or `steps` on a drag (`card.dragTo(column, { steps: 5 })`) | `dragOptions: true`; the engine presses and releases at the positions, measured from each node's top-left corner inside its border |
 | `screen.tapAt`, `tap({ position })` | `performAt` with the `tap` pointer kind |
 | `tap({ position })` with a `count` or `button` | `performAt` with the `doubleTap` pointer kind for 2 taps, `multiTap` for 3 or more, or `secondaryTap` for a single right tap |
 | `screen.doubleTapAt` | `performAt` with the `doubleTap` pointer kind |
@@ -1284,7 +1296,7 @@ honors in `actions` and `pointerActions`.
 | `selectOption` | `value` | yes | - |
 | `setInputFiles` | `paths`; empty clears the input | yes | - |
 | `setInputFilePayloads` | `files` with `name`, `mimeType`, and `Uint8Array` `buffer`. An empty `files` array clears the input. The runner uses it to clear when the engine declares this action without `setInputFiles`. | yes | - |
-| `dragTo` | `target`: a `NodeRef` or a `ViewportPoint` | yes | yes |
+| `dragTo` | `target`: a `NodeRef` or a `ViewportPoint`. On a node, `sourcePosition?`, `targetPosition?`, and `steps?` with `dragOptions` | yes | yes |
 | `swipe` | `direction`, `momentum?` | yes | yes |
 | `swipeTo` | `target`, `durationMs?` | - | yes |
 
@@ -1360,7 +1372,22 @@ export type LocatorAction =
       /** In-memory files; an empty array clears the input. The protocol encodes bytes only on the wire. */
       readonly files: readonly { readonly name: string; readonly mimeType: string; readonly buffer: Uint8Array }[];
     }
-  | { readonly kind: 'dragTo'; readonly target: NodeRef }
+  | {
+      readonly kind: 'dragTo';
+      readonly target: NodeRef;
+      /**
+       * Where to press, in CSS pixels from the source node's top-left corner,
+       * inside its border on a document platform. Unset, the engine picks a
+       * point of the node. `sourcePosition`, `targetPosition`, and `steps` are
+       * sent only to an engine that declares `dragOptions`; the harness
+       * refuses them for any other before dispatch.
+       */
+      readonly sourcePosition?: ViewportPoint;
+      /** Where to release, measured on the target node as `sourcePosition` is on the source. */
+      readonly targetPosition?: ViewportPoint;
+      /** How many pointer moves carry the drag to the release point, a positive safe integer; unset, the engine's own default. */
+      readonly steps?: number;
+    }
   | {
       readonly kind: 'swipe';
       readonly direction: ScrollDirection;

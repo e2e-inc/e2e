@@ -211,6 +211,7 @@ export interface EngineManifest {
   readonly pointerActions?: readonly PointerActionKind[];
   readonly tapModifiers?: boolean;
   readonly tapButtons?: boolean;
+  readonly dragOptions?: boolean;
   /** Requires `lifecycle/prepare`: `prepare` binds the device `e2e run --device` names. */
   readonly selectsDevice?: boolean;
   /** See `Engine.grantsAllPermissions`. */

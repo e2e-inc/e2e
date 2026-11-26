@@ -1125,6 +1125,19 @@ test('takes evidence', async ({ app }) => {
       action: { kind: 'tap', button: 'middle' },
       refusal: 'the middle button on the "tap" action',
     },
+    {
+      flag: 'dragOptions',
+      call: "dragTo(screen.getByRole('region', { name: 'Bin' }), { targetPosition: { x: 2, y: 3 }, steps: 4 })",
+      behavior: {
+        dragOptions: true,
+        scene: () => [
+          { id: 'submit', role: 'button', name: 'Submit' },
+          { id: 'bin', role: 'region', name: 'Bin' },
+        ],
+      },
+      action: { kind: 'dragTo', target: expect.objectContaining({ id: 'bin' }), targetPosition: { x: 2, y: 3 }, steps: 4 },
+      refusal: 'sourcePosition, targetPosition, and steps on the "dragTo" action',
+    },
   ])(
     'hands $call only to an engine that declares $flag, and refuses it before perform otherwise',
     async ({ call, behavior, action, refusal }) => {

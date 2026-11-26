@@ -573,6 +573,7 @@ describe('engine protocol', () => {
         actions: ['tap', 'blur'],
         perform: async () => {},
         tapButtons: true,
+        dragOptions: true,
         pointerActions: ['tap'],
         performAt: async () => {},
         keyboard: { type: async () => {}, press: async () => {} },
@@ -592,6 +593,7 @@ describe('engine protocol', () => {
       { ...base, methods: ['engine/viewportIntersection'] },
       { ...base, methods: ['engine/observe'], tapModifiers: true },
       { ...base, methods: ['engine/observe'], tapButtons: true },
+      { ...base, methods: ['engine/observe'], dragOptions: true },
       { ...base, methods: ['engine/observe'], selectsDevice: true },
       // The client serves prepare for finish alone, which would drop the device it never forwards.
       { ...base, methods: ['lifecycle/finish'], selectsDevice: true },

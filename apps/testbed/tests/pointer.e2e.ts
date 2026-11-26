@@ -52,6 +52,15 @@ test('screen.tapAt and screen.swipe take percentages of the viewport', { platfor
   await expect(screen.getByLabel('Pad state')).toHaveText(`swiped from ${onPad(100, 200)} to ${onPad(300, 200)}`);
 });
 
+test('locator.dragTo presses and releases at the positions it names', { platforms: ['web'] }, async ({ app, screen }) => {
+  await app.open('/pointer');
+  const pad = screen.getByRole('image', 'Pointer pad');
+
+  await pad.dragTo(pad, { sourcePosition: { x: 10, y: 20 }, targetPosition: { x: 250, y: 150 }, steps: 10 });
+
+  await expect(screen.getByLabel('Pad state')).toHaveText('swiped from 10,20 to 250,150');
+});
+
 test('a path swipe drags and drops on the board', async ({ app, screen }) => {
   await app.open('/board');
 

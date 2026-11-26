@@ -124,6 +124,10 @@
     "tapButtons": {
       "type": "boolean"
     },
+    "dragOptions": {
+      "description": "perform honors sourcePosition, targetPosition, and steps on the dragTo action; without it the harness refuses them before dispatch.",
+      "type": "boolean"
+    },
     "selectsDevice": {
       "description": "prepare binds the device e2e run --device names.",
       "type": "boolean"
@@ -187,6 +191,27 @@
         },
         "required": [
           "tapModifiers"
+        ]
+      },
+      "then": {
+        "properties": {
+          "methods": {
+            "contains": {
+              "const": "engine/perform"
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "dragOptions": {
+            "const": true
+          }
+        },
+        "required": [
+          "dragOptions"
         ]
       },
       "then": {

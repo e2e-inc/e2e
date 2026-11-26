@@ -103,6 +103,18 @@ describe('defineEngine', () => {
     );
   });
 
+  it('carries dragOptions onto the handle only with perform, and only as a boolean', () => {
+    const perform = async () => undefined;
+    expect(defineEngine(observingEngine({ actions: ['dragTo'], perform, dragOptions: true })).dragOptions).toBe(true);
+    expect(defineEngine(observingEngine({ actions: ['dragTo'], perform, dragOptions: false })).dragOptions).toBeUndefined();
+    expect(() => defineEngine(observingEngine({ pointerActions: ['dragTo'], performAt: perform, dragOptions: true }))).toThrow(
+      /dragOptions without perform/,
+    );
+    expect(() => defineEngine(observingEngine({ actions: ['dragTo'], perform, dragOptions: 'yes' as never }))).toThrow(
+      /dragOptions must be a boolean/,
+    );
+  });
+
   it('closes the action list: known kinds, each once, at least one', () => {
     const withActions = (actions: unknown) =>
       defineEngine(observingEngine({ actions: actions as never, perform: async () => undefined }));
@@ -429,6 +441,30 @@ describe('createEngineSession', () => {
       message: expect.stringContaining('the middle button on the "doubleTap" action at a point'),
     });
     expect(calls).toEqual([]);
+  });
+
+  it('refuses drag options before dispatch when dragOptions is not declared, and sends a plain drag', async () => {
+    const calls: string[] = [];
+    const session = createEngineSession({
+      engine: defineEngine(
+        observingEngine({
+          actions: ['dragTo'],
+          perform: async (ref, action) => void calls.push(`${action.kind}:${ref.id}`),
+        }),
+      ),
+      targetName: 'toy-target',
+    });
+    const source = { id: 'n1', revision: 'b1' };
+    const target = { id: 'n2', revision: 'b1' };
+    for (const options of [{ sourcePosition: { x: 1, y: 2 } }, { targetPosition: { x: 3, y: 4 } }, { steps: 5 }]) {
+      await expect(session.perform(source, { kind: 'dragTo', target, ...options }, OP)).rejects.toMatchObject({
+        code: 'UNSUPPORTED_CAPABILITY',
+        message: expect.stringContaining('no engine capability for sourcePosition, targetPosition, and steps on the "dragTo" action'),
+      });
+    }
+    expect(calls).toEqual([]);
+    await session.perform(source, { kind: 'dragTo', target }, OP);
+    expect(calls).toEqual(['dragTo:n1']);
   });
 
   it('swipes the viewport as perform(root, swipe), observing first when nothing named the root yet', async () => {
