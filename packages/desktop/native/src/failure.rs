@@ -6,9 +6,15 @@
 use serde_json::{Value, json};
 
 /// Whether a failed input may have reached the app.
+///
+/// The line is drawn at the app's content: text typed, a value set, a press,
+/// a selection, an item chosen, or focus moved into a control. Bringing a
+/// window forward, and opening a list's menu that closed again with nothing
+/// chosen, change nothing the app keeps, so a failure after only those is
+/// still `NotDelivered`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Delivery {
-    /// Nothing was sent, so the caller may try another way.
+    /// Nothing reached the app's content, so the caller may try another way.
     NotDelivered,
     /// Something was sent, and its effect could not be confirmed.
     Unknown,
