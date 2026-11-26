@@ -177,6 +177,26 @@ describe('createAttemptArtifacts with an ArtifactStore', () => {
 });
 
 describe('artifact redaction labels', () => {
+  it.each([false, true])('marks a file that never appeared incomplete (store: %s)', async (withStore) => {
+    const store = capturing();
+    const artifacts = createAttemptArtifacts({
+      artifactsRoot: root(),
+      segments: ['web', 'test-1', 'attempt-0'],
+      attemptId: 'att-1',
+      ...(withStore ? { store } : {}),
+    });
+    writeFileSync(path.join(artifacts.dir, 'present.png'), 'x');
+    artifacts.sink.register('screenshot', 'missing.png');
+    artifacts.sink.register('screenshot', 'present.png');
+    await artifacts.settle();
+
+    const [missing, present] = artifacts.records;
+    expect(present).toMatchObject({ redaction: 'complete', size: 1 });
+    expect(missing?.path).toBeUndefined();
+    expect(store.puts).toHaveLength(withStore ? 1 : 0);
+    expect(missing?.redaction).toBe('incomplete');
+  });
+
   it('labels each kind by what the runner masked: a screenshot and a log complete, a video incomplete', async () => {
     const artifacts = createAttemptArtifacts({
       artifactsRoot: root(),

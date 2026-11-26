@@ -118,14 +118,20 @@ export function createAttemptArtifacts(options: {
           // recorded without size or digest either way.
           if (options.store === undefined) {
             const measured = await measure(absolute);
-            if (measured === undefined) return;
+            if (measured === undefined) {
+              record.redaction = 'incomplete';
+              return;
+            }
             record.path = reportPath;
             record.size = measured.size;
             record.sha256 = measured.sha256;
             return;
           }
           const bytes = await readFile(absolute).catch(() => undefined);
-          if (bytes === undefined) return;
+          if (bytes === undefined) {
+            record.redaction = 'incomplete';
+            return;
+          }
           record.path = reportPath;
           record.size = bytes.byteLength;
           record.sha256 = createHash('sha256').update(bytes).digest('hex');
