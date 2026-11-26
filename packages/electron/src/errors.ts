@@ -25,7 +25,12 @@ export function lostFocus(): EngineError {
 /** Protocol and Playwright failures that mean the node, or the document it was in, is gone. */
 export const GONE = /No node found|Could not find node|Node is detached|No node with given id|Cannot find context with specified id|Execution context was destroyed|Cannot find object with id|Node is not an element|frame was detached/i;
 /** Failures that mean the window, or the whole app, closed. */
-const CLOSED = /Target (page, context or browser )?(has been )?closed|Target closed|has been closed|Session closed|browser has disconnected|Protocol error.*Target/i;
+const CLOSED = /Target (page, context or browser )?(has been )?closed|Target closed|has been closed|Session closed|browser has disconnected|No target with given id|Protocol error.*Target/i;
+
+/** Whether a failure means the window, or the whole app, closed. */
+export function closedWindow(cause: unknown): boolean {
+  return CLOSED.test(cause instanceof Error ? cause.message : String(cause));
+}
 
 /**
  * Translates a failure into the engine error taxonomy. `committed` says

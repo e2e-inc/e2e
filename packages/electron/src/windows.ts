@@ -38,6 +38,8 @@ export function nodeId(window: AppWindow, backendNodeId: number): string {
 export class Windows {
   private readonly byPage = new Map<Page, AppWindow>();
   private shown: AppWindow | undefined;
+  /** The windows shown before the current one, oldest first: closing the shown window goes back to the latest still open. */
+  private history: AppWindow[] = [];
   private nextSerial = 1;
 
   /** Registers a page the app opened, once; undefined when it is already known or closed. Its node ids get a serial of their own. */
@@ -46,17 +48,38 @@ export class Windows {
     const window: AppWindow = { page, serial: this.nextSerial++ };
     this.byPage.set(page, window);
     this.shown ??= window;
-    page.on('close', () => {
-      this.byPage.delete(page);
-      if (this.shown === window) this.shown = [...this.byPage.values()].at(-1);
-    });
+    page.on('close', () => this.discard(page));
     return window;
+  }
+
+  /**
+   * Forgets a window that closed. A read can fail on a closed window before
+   * its close event arrives; it discards the window itself and reads again.
+   */
+  discard(page: Page): void {
+    const window = this.byPage.get(page);
+    this.byPage.delete(page);
+    if (window !== undefined && this.shown === window) this.shown = this.fallback();
   }
 
   /** Forgets every window: the app quit. */
   clear(): void {
     this.byPage.clear();
     this.shown = undefined;
+    this.history = [];
+  }
+
+  /** Makes `window` the shown one, remembering the one before it. */
+  private showWindow(window: AppWindow): void {
+    if (this.shown !== undefined && this.shown !== window) this.history = [...this.history.filter((each) => each !== this.shown && each !== window), this.shown];
+    this.shown = window;
+  }
+
+  /** The window shown before the current one that is still open, else the newest open window. */
+  private fallback(): AppWindow | undefined {
+    const open = this.open();
+    this.history = this.history.filter((window) => open.includes(window));
+    return this.history.pop() ?? open.at(-1);
   }
 
   isShown(window: AppWindow): boolean {
@@ -68,10 +91,14 @@ export class Windows {
     return [...this.byPage.values()].filter(isOpen).toSorted((a, b) => a.serial - b.serial);
   }
 
-  /** The window `screen` and the agent read: the one chosen, else the first the app opened; once that one closes, the newest still open. */
+  /**
+   * The window `screen` and the agent read: the one chosen, else the first the
+   * app opened. Once that one closes, the one shown before it that is still
+   * open, else the newest.
+   */
   current(): AppWindow | undefined {
     if (this.shown !== undefined && isOpen(this.shown)) return this.shown;
-    this.shown = this.open().at(-1);
+    this.shown = this.fallback();
     return this.shown;
   }
 
@@ -93,9 +120,10 @@ export class Windows {
 
   /** Shows the open window at `index`. */
   show(index: number): AppWindow {
-    const window = this.open()[index];
-    if (window === undefined) throw notActionable(`the app has ${this.open().length} windows; there is no window ${index}`);
-    this.shown = window;
+    const open = this.open();
+    const window = open[index];
+    if (window === undefined) throw notActionable(`no such window: the app has ${windowCount(open.length)} open`);
+    this.showWindow(window);
     return window;
   }
 
@@ -103,7 +131,7 @@ export class Windows {
   closable(index: number): AppWindow {
     const open = this.open();
     const window = open[index];
-    if (window === undefined) throw notActionable(`the app has ${open.length} windows; there is no window ${index}`);
+    if (window === undefined) throw notActionable(`no such window: the app has ${windowCount(open.length)} open`);
     // The contract keeps the last tab open; for most apps the last window closing quits the app.
     if (open.length === 1) throw notActionable('this is the app\'s only window; closing it would end the app');
     return window;
@@ -134,7 +162,7 @@ export class Windows {
         // A match that closed while the list was read is not shown; the next read looks again.
         const index = found === undefined ? -1 : this.open().indexOf(found.window);
         if (found === undefined || index === -1) return false;
-        this.shown = found.window;
+        this.showWindow(found.window);
         await found.window.page.bringToFront().catch(() => undefined);
         shown = { ...found.entry, index, shown: true };
         return true;
@@ -144,6 +172,10 @@ export class Windows {
     if (shown === undefined) throw notActionable(`no window matches ${describeMatcher(which)}`);
     return shown;
   }
+}
+
+function windowCount(count: number): string {
+  return `${count} window${count === 1 ? '' : 's'}`;
 }
 
 /** Whether a window is one the app shows its user: open, and not an inspector the app's own DevTools opened. */

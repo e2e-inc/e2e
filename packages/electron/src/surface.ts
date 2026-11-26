@@ -38,10 +38,10 @@ import { AppProcess, DISCARD_CLOSE_MS, RESTART_CLOSE_MS } from './app-process.ts
 import { screenshotFile, screenshotName, withPixels } from './capture.ts';
 import { DevTools } from './devtools.ts';
 import type { ElectronMainModule } from './electron.ts';
-import { invalidState, notActionable } from './errors.ts';
+import { closedWindow, invalidState, notActionable } from './errors.ts';
 import { appPathProblem, describeExecutable, ensureElectronBinary, resolveExecutable } from './executable.ts';
 import { bounded } from './input-gate.ts';
-import { locateIn, projectRead, readWindow, type ProjectionContext } from './locate.ts';
+import { locateIn, projectRead, readWindow, type ProjectionContext, type RawRead } from './locate.ts';
 import type { ResolvedElectronOptions } from './options.ts';
 import { ROOT_ID, Windows, type AppWindow, type ElectronWindow, type WindowMatcher } from './windows.ts';
 
@@ -97,7 +97,8 @@ export class ElectronSurface {
 
   async endAttempt(context: EngineCleanupContext): Promise<void> {
     await this.app.serialized(() => this.app.quit(context, DISCARD_CLOSE_MS));
-    if (this.userDataDir !== undefined) rmSync(this.userDataDir, { recursive: true, force: true });
+    // Retried: Chromium's helper processes can still be closing their files in it.
+    if (this.userDataDir !== undefined) rmSync(this.userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     this.userDataDir = undefined;
     this.attempt = undefined;
   }
@@ -121,7 +122,7 @@ export class ElectronSurface {
     return this.app.serialized(async () => {
       await this.app.quit(operation, DISCARD_CLOSE_MS);
       if (this.userDataDir !== undefined) {
-        rmSync(this.userDataDir, { recursive: true, force: true });
+        rmSync(this.userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
         mkdirSync(this.userDataDir, { recursive: true });
       }
       await this.launch(operation);
@@ -141,21 +142,39 @@ export class ElectronSurface {
     return { testIdAttribute: this.options.testIdAttribute, open: this.windowList.open() };
   }
 
+  /**
+   * Reads the shown window. A window can close between being picked and being
+   * read, before its close event arrives: it is discarded and the window shown
+   * in its place is read. Undefined when no window is open.
+   */
+  private async readShown(): Promise<RawRead | undefined> {
+    for (;;) {
+      const window = this.windowList.current();
+      if (window === undefined) return undefined;
+      try {
+        return await readWindow(this.devtools, window);
+      } catch (cause) {
+        if (!window.page.isClosed() && !closedWindow(cause)) throw cause;
+        this.windowList.discard(window.page);
+      }
+    }
+  }
+
   async observe(operation: OperationContext, options?: EngineObserveOptions): Promise<EngineSnapshot> {
-    const window = this.windowList.current();
-    if (window === undefined) return { root: { ref: { id: ROOT_ID, revision: '' }, role: 'document' }, viewport: { width: 0, height: 0 } };
     return await bounded(operation, 'observe', false, async () => {
-      const raw = await readWindow(this.devtools, window);
+      const raw = await this.readShown();
+      if (raw === undefined) return { root: { ref: { id: ROOT_ID, revision: '' }, role: 'document' }, viewport: { width: 0, height: 0 } };
       const snapshot = projectRead(raw, 'tree', this.projection());
       return options?.pixels === true ? await withPixels(this.devtools, raw, snapshot) : snapshot;
     });
   }
 
   async locate(expression: LocatorExpression, operation: OperationContext): Promise<readonly SemanticNode[]> {
-    const window = this.windowList.current();
-    if (window === undefined) return [];
+    // An app that is not running has nothing to find, ever: say so rather than let the locator wait out its timeout.
+    if (this.app.running === undefined) throw invalidState('the app is not running: open it with app.open()');
     return await bounded(operation, 'locate', false, async () => {
-      const raw = await readWindow(this.devtools, window);
+      const raw = await this.readShown();
+      if (raw === undefined) return [];
       const sink = this.attempt?.screen;
       if (sink !== undefined) {
         try {
@@ -231,7 +250,8 @@ export class ElectronSurface {
     const run = this.app.evaluate(fn, arg);
     // A cancelled step never awaits it.
     run.catch(() => undefined);
-    return await bounded(operation, 'electron.evaluate', true, () => run);
+    // Not input: a timeout is the function's, and nothing the engine sent may have committed.
+    return await bounded(operation, 'electron.evaluate', false, () => run);
   }
 
   // --- pixels ---
