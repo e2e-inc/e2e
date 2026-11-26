@@ -93,10 +93,20 @@ fn action_names(element: &Element, what: &str) -> Outcome<Vec<String>> {
     }
 }
 
-/// Every element of an array attribute, however many it holds.
-fn all(element: &Element, name: &str) -> Vec<Element> {
-    let count = element.count(name).unwrap_or(0).max(1);
-    element.elements(name, count).unwrap_or_default()
+/// Every element of an array attribute, however many it holds. A read the app did not answer fails: a list read in
+/// part cannot show an option is missing.
+fn all(element: &Element, name: &str, what: &str) -> Outcome<Vec<Element>> {
+    let count = match element.count(name) {
+        Ok(count) => count.max(1),
+        Err(ax::AX_CANNOT_COMPLETE) => return Err(unread(ax::AX_CANNOT_COMPLETE, what)),
+        // A count the element does not give: read up to a generous cap instead.
+        Err(_) => 4096,
+    };
+    match element.elements(name, count) {
+        Ok(elements) => Ok(elements),
+        Err(ax::AX_CANNOT_COMPLETE) => Err(unread(ax::AX_CANNOT_COMPLETE, what)),
+        Err(_) => Ok(Vec::new()),
+    }
 }
 
 /// The element a ref names, checked to still exist.
@@ -456,7 +466,17 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         let Some(menu) = open_menu(element, deadline) else {
             return Err(Failure::unconfirmed(codes::ACTION_FAILED, "the list's menu did not open"));
         };
-        let items = all(&menu, "AXChildren");
+        let items = match all(&menu, "AXChildren", "read the list's options") {
+            Ok(items) => items,
+            Err(failure) => {
+                // Nothing was chosen: the menu goes again, and the stall is reported as one.
+                return Err(if close_menu(entry.pid, &menu, deadline) {
+                    failure
+                } else {
+                    failure.with_details(serde_json::json!({ "retryable": true, "menu": "open" }))
+                });
+            }
+        };
         let Some(item) = items.into_iter().find(|item| item.text("AXTitle").as_deref() == Some(label) && item.boolean("AXEnabled") != Some(false)) else {
             // Nothing was chosen: the menu opened and closed again, and the list's value is as it was.
             if close_menu(entry.pid, &menu, deadline) {
@@ -477,7 +497,10 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         return set_value(element, label, deadline);
     }
     if roles::collection(role) {
-        let rows = Some(all(element, "AXRows")).filter(|rows| !rows.is_empty()).unwrap_or_else(|| all(element, "AXChildren"));
+        let rows = match all(element, "AXRows", "read the list's rows")? {
+            rows if rows.is_empty() => all(element, "AXChildren", "read the list's rows")?,
+            rows => rows,
+        };
         let Some(row) = rows.into_iter().find(|row| item_label(row).as_deref() == Some(label)) else {
             return Err(Failure::refused(codes::ELEMENT_NOT_FOUND, format!("the list has no option \"{label}\"")));
         };
