@@ -208,11 +208,13 @@ fn answered(error: AXError, then: Option<AXError>, what: &str) -> Outcome<()> {
 }
 
 /// The element's AX role and its role in the snapshot's vocabulary. A read the app did not answer in time fails as a
-/// stall, so a busy app is retried rather than read as a control without the role; any other failure reads as none.
+/// stall, and a gone element as a stale ref, so either is retried rather than read as a control without the role; any
+/// other failure reads as none.
 fn role_of(element: &Element, what: &str) -> Outcome<(String, &'static str)> {
     let values = match element.attributes(&["AXRole", "AXSubrole"]) {
         Ok(values) => values,
-        Err(ax::AX_CANNOT_COMPLETE) => return Err(unread(ax::AX_CANNOT_COMPLETE, what)),
+        // A stall is retried, and so is an element gone since it was resolved: the locator finds its replacement.
+        Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT)) => return Err(unread(error, what)),
         Err(_) => vec![None, None],
     };
     let ax_role = values[0].as_ref().and_then(|value| value.text().map(str::to_owned)).unwrap_or_default();
