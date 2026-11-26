@@ -185,12 +185,12 @@ pub fn text(role: &str) -> bool {
     matches!(role, "statictext" | "heading")
 }
 
-/// Roles that never take an action, so no action names are read for them.
+/// Roles that never take an action, so no action names are read for them. An image is not one: an app can make it a
+/// button of its own (`AXPress`), which needs a ref to be tapped.
 pub fn inert(role: &str) -> bool {
     matches!(
         role,
         "statictext"
-            | "image"
             | "separator"
             | "splitter"
             | "layoutitem"
