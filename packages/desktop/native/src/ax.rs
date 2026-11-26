@@ -58,6 +58,7 @@ unsafe extern "C" {
     fn AXUIElementCopyActionNames(element: CFTypeRef, names: *mut CFArrayRef) -> AXError;
     fn AXUIElementSetMessagingTimeout(element: CFTypeRef, seconds: f32) -> AXError;
     fn AXUIElementCopyElementAtPosition(application: CFTypeRef, x: f32, y: f32, element: *mut CFTypeRef) -> AXError;
+    fn AXUIElementGetPid(element: CFTypeRef, pid: *mut i32) -> AXError;
     fn AXUIElementGetTypeID() -> CFTypeID;
     fn AXValueGetTypeID() -> CFTypeID;
     fn AXValueGetType(value: CFTypeRef) -> u32;
@@ -423,6 +424,13 @@ impl Element {
     /// Sets this element's own messaging timeout, for a request expected to wait (an action that opens a menu).
     pub fn set_timeout(&self, seconds: f32) {
         unsafe { AXUIElementSetMessagingTimeout(self.0, seconds) };
+    }
+
+    /// The id of the process the element belongs to.
+    pub fn pid(&self) -> Option<i32> {
+        let mut pid: i32 = 0;
+        let error = unsafe { AXUIElementGetPid(self.0, &mut pid) };
+        if error == AX_SUCCESS { Some(pid) } else { None }
     }
 
     /// The window server's id of a window element.

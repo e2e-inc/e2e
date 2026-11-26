@@ -430,16 +430,18 @@ fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
 }
 
 fn focus(element: &Element, deadline: Instant) -> Outcome<()> {
-    if element.boolean("AXFocused") == Some(true) {
+    // The app's focused element is the one source, as the snapshot reads it: a table's cell reports the table's focus as
+    // its own `AXFocused`.
+    let holds = || match element.pid() {
+        Some(pid) => Element::application(pid).element("AXFocusedUIElement").as_ref() == Some(element),
+        None => element.boolean("AXFocused") == Some(true),
+    };
+    if holds() {
         return Ok(());
     }
     go("focus")?;
     element.set_bool("AXFocused", true).map_err(|error| refused(error, "focus"))?;
-    if until(deadline, || element.boolean("AXFocused") == Some(true)) {
-        Ok(())
-    } else {
-        Err(Failure::unconfirmed(codes::ACTION_FAILED, "focus: the element did not take keyboard focus"))
-    }
+    if until(deadline, holds) { Ok(()) } else { Err(Failure::unconfirmed(codes::ACTION_FAILED, "focus: the element did not take keyboard focus")) }
 }
 
 fn check(element: &Element, wanted: bool, deadline: Instant) -> Outcome<()> {
