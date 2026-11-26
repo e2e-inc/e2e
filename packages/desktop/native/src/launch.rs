@@ -117,9 +117,11 @@ fn hides_environment(bundle: &str) -> bool {
 
 /// Whether a signature, as `codesign -dvv` prints it, is one whose process
 /// macOS hides the environment of: Apple's own apps (a platform identifier),
-/// Apple's Mac App Store apps (Numbers, Pages, Xcode: signed by Apple Mac OS
+/// Apple's App Store apps (Numbers, Pages, Xcode: signed by Apple Mac OS
 /// Application Signing, with no platform identifier), and builds signed with
-/// the `restrict` flag.
+/// the `restrict` flag. Every Mac App Store app carries that signature, so
+/// each gets the token as arguments too, which the claim reads only when the
+/// environment is hidden.
 fn hidden_by(signature: &str) -> bool {
     signature.lines().any(|line| {
         line.starts_with("Platform identifier=")
