@@ -726,6 +726,18 @@ fn enclosing_scroll_area(element: &Element, vertical: bool) -> Option<Element> {
     None
 }
 
+/// About how many of a scroll bar's increments make a page.
+const LINES_PER_PAGE: f64 = 8.0;
+
+/// Performs a scroll action `count` times. Each goes through the cancel check; a failure after the first follows a
+/// scroll that landed.
+fn repeat(element: &Element, action: &str, count: usize) -> Outcome<()> {
+    for sent in 0..count {
+        perform(element, action, "scroll").map_err(|failure| if sent == 0 { failure } else { failure.delivered() })?;
+    }
+    Ok(())
+}
+
 fn scroll_by(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
     let vertical = matches!(direction, "up" | "down");
     let forward = matches!(direction, "down" | "right");
@@ -752,7 +764,8 @@ fn scroll_by(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
             go("scroll")?;
             return bar.set_number("AXValue", next).map_err(|error| refused(error, "scroll"));
         }
-        return perform(&bar, if forward { "AXIncrement" } else { "AXDecrement" }, "scroll");
+        // A step is about a line: as many as make the pages asked for, so a fast swipe goes further than a slow one.
+        return repeat(&bar, if forward { "AXIncrement" } else { "AXDecrement" }, ((pages * LINES_PER_PAGE).round() as usize).max(1));
     }
     let names = action_names(element, "scroll")?;
     let action = match direction {
@@ -762,7 +775,7 @@ fn scroll_by(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
         _ => "AXScrollLeftByPage",
     };
     if names.iter().any(|name| name == action) {
-        return perform(element, action, "scroll");
+        return repeat(element, action, (pages.round() as usize).max(1));
     }
     Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("nothing here scrolls {direction}")))
 }
