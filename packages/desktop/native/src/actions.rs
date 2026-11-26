@@ -447,6 +447,13 @@ fn step_to(
         if same(next, now) {
             return stepped.map(|()| false);
         }
+        // A step that went the other way wrapped around the stepper's range: stepping on would only cycle through it.
+        if (up && next < now) || (!up && next > now) {
+            return Err(Failure::unconfirmed(
+                codes::ACTION_FAILED,
+                format!("the stepper went from {now} to {next} on a step toward {target}: it wraps, and cannot reach the value"),
+            ));
+        }
         if !same(next, target) && ((up && next > target) || (!up && next < target)) {
             // Put back the value it had before the fill, a step at a time: a fill the stepper cannot take must not leave
             // it changed. As many steps back as went forward, and none more once a step changes nothing.
@@ -485,6 +492,14 @@ fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
         let names = action_names(element, "set value")?;
         let steps = names.iter().any(|name| name == "AXIncrement" || name == "AXDecrement");
         if let (true, Ok(Value::Number(_)), Ok(target)) = (steps, element.attribute("AXValue"), finite(text)) {
+            // A value outside the range the stepper reports is one no step reaches: refused before any press.
+            let bound = |name: &str| match element.attribute(name) {
+                Ok(Value::Number(number)) => Some(number),
+                _ => None,
+            };
+            if bound("AXMinValue").is_some_and(|min| target < min) || bound("AXMaxValue").is_some_and(|max| target > max) {
+                return Err(Failure::refused(codes::ACTION_FAILED, format!("{} is outside the range of this {role}", text.trim())));
+            }
             let number = || match element.attribute("AXValue") {
                 Ok(Value::Number(number)) => Some(number),
                 _ => None,
@@ -1099,6 +1114,26 @@ mod tests {
         assert_eq!(open.details.and_then(|details| details.get("menu").cloned()), Some(serde_json::json!("open")));
         let missing = super::unclosed(Failure::refused(codes::ELEMENT_NOT_FOUND, "no option"), false);
         assert_eq!((missing.code, missing.delivery), (codes::ELEMENT_NOT_FOUND, Delivery::Unknown));
+    }
+
+    #[test]
+    fn stops_a_stepper_that_wraps_around_its_range() {
+        // 0 to 10, and one step up from 10 goes to 0: 11 is never reached.
+        let value = Cell::new(10.0);
+        let presses = Cell::new(0);
+        let wrapped = step_to(
+            11.0,
+            Some(10.0),
+            later(),
+            |up| {
+                presses.set(presses.get() + 1);
+                value.set(if up { if value.get() >= 10.0 { 0.0 } else { value.get() + 1.0 } } else { value.get() - 1.0 });
+                Ok(())
+            },
+            || Some(value.get()),
+        );
+        assert_eq!(wrapped.expect_err("wraps").delivery, crate::failure::Delivery::Unknown);
+        assert_eq!(presses.get(), 1);
     }
 
     #[test]
