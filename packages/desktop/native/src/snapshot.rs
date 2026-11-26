@@ -470,6 +470,8 @@ impl Walk {
         // What a scroll area shows is its own frame: its children outside it are scrolled out of view.
         let inner = match (role, read.bounds) {
             ("scrollarea", Some(bounds)) => clip.map(|clip| intersect(clip, bounds)).or(Some(bounds)),
+            // An open menu floats above the window, so its items are not cut by the window's frame.
+            ("menu", _) => None,
             _ => clip,
         };
         if role == "scrollbar" {
