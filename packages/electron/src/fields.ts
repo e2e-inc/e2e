@@ -144,7 +144,7 @@ function isCheckable(facts: DomFacts | undefined): boolean {
   return facts?.nodeName === 'INPUT' && ['checkbox', 'radio'].includes(facts.attributes['type']?.toLowerCase() ?? '');
 }
 
-export interface Role {
+interface Role {
   /** The contract role the element reads as. */
   readonly role: string;
   /** A container that says nothing on its own: it gives its place to its children unless something makes it addressable. */

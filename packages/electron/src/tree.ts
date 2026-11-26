@@ -239,7 +239,6 @@ class TreeProjector {
     // (contenteditable) keeps its content, which is its text.
     if (!isTextField(facts)) draft.children = this.children(node);
     this.foldText(draft);
-    if (isButtonInput(facts) && draft.value !== undefined && draft.value !== '') draft.text = draft.value;
     // A closed select's option has no text run: its text is its label, which Chromium names it by.
     if (draft.text === undefined && facts?.nodeName === 'OPTION' && name !== '') draft.text = cut(name, this.policy.textLimit);
     return [draft];
@@ -291,6 +290,7 @@ class TreeProjector {
       order: facts?.index ?? -1,
     };
     if (this.isHidden(facts, rect)) draft.states['hidden'] = true;
+    if (isButtonInput(facts) && draft.value !== undefined && draft.value !== '') draft.text = draft.value;
     // What toBeEmpty reads, never on a secure field: a field by its value, anything else by its text content, as the
     // web engine reads it (a select's option text counts, and so does hidden text).
     if (this.policy.emptyState && !isSecure(facts)) draft.states['empty'] = isTextField(facts) ? (value ?? '') === '' : facts?.hasText !== true;

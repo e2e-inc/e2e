@@ -116,7 +116,7 @@ export class DomSnapshot {
     return this.facts.get(backendNodeId);
   }
 
-  /** Every element, by backend DOM node id. */
+  /** Every node of the document, text nodes included, by backend DOM node id. */
   elements(): IterableIterator<[number, DomFacts]> {
     return this.facts.entries();
   }

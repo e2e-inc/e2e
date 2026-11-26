@@ -162,18 +162,19 @@ export class AppProcess {
 
   /**
    * Follows one launched app: its windows registered as they open, its logs
-   * sent to the attempt that launched it, and its own quit noticed. Every
-   * handler stops once another launch or a quit replaced the app, so an app
-   * slow to die never writes into a later attempt.
+   * sent to the attempt that launched it, and its own quit noticed. Its logs
+   * stop once another launch replaced it, so an app slow to die never writes
+   * into a later attempt; what it logs while it quits still arrives.
    */
   private watch(app: ElectronApplication, attempt: EngineAttemptContext): { track(page: Page): void; quit(): boolean } {
     // Read now: Playwright refuses the process of an app that has quit, which is when the close handler needs it.
     const child = app.process();
     let quit = false;
     const current = (): boolean => this.app === app;
+    const replaced = (): boolean => this.app !== undefined && this.app !== app;
     const report: AppReport = {
       log: (entry) => {
-        if (current()) attempt.appLog(entry);
+        if (!replaced()) attempt.appLog(entry);
       },
       navigated: (url) => {
         if (current()) attempt.navigation(url);

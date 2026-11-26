@@ -77,7 +77,7 @@ export function performOnNode(context: ActionContext, window: AppWindow, backend
     case 'focus':
       return focus(step);
     case 'blur':
-      return budget.send(() => step.devtools.callOn(window.page, backendNodeId, 'blur'));
+      return waitReady(step, 'checkConnected').then(() => budget.send(() => step.devtools.callOn(window.page, backendNodeId, 'blur')));
     case 'scrollIntoView':
       return scrollIntoView(step);
     case 'fill':
@@ -159,6 +159,8 @@ async function tap(step: Step, action: ActionOf<'tap' | 'doubleTap' | 'secondary
 }
 
 async function focus(step: Step): Promise<void> {
+  // A node that is gone fails as stale before anything is sent, so the harness locates it again.
+  await waitReady(step, 'checkConnected');
   // pressSequentially focuses, then types into whatever holds focus: the node must be the one that does. An element that
   // cannot take focus leaves it where it was, as on the web; the typing that follows says nothing takes text.
   if ((await step.budget.send(() => step.devtools.callOn(step.window.page, step.backendNodeId, 'focus'))) === 'moved') throw lostFocus();

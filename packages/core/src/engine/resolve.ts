@@ -29,7 +29,8 @@ export interface ResolveExpressionOptions {
    * name as well as its text, for a tree that keeps what a node says in its
    * name (a device's). `'text'` matches the text alone, as a browser's text
    * query does, for a tree that carries every element's text: a field named
-   * by its label is then no second match for the label's words.
+   * by its label is then no second match for the label's words. A `filter`'s
+   * `hasText` reads the name, the text, and the value either way.
    */
   readonly textQuery?: 'nameOrText' | 'text';
 }
@@ -41,7 +42,8 @@ export interface ResolveExpressionOptions {
  *
  * Query kinds: `role` compares the role exactly, then the name, the requested
  * states, and the heading level, and never matches a hidden node; `label`
- * and `text` match the name (`text` the visible text too) and answer with
+ * and `text` match the name (`text` the visible text too, or alone with
+ * `textQuery: 'text'`) and answer with
  * the innermost match, since a container echoing a descendant's text is not
  * a second match; `placeholder`, `displayValue`, and `testId` compare their
  * one field. `visible` drops hidden nodes from any kind. `scope` searches
