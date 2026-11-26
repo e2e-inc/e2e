@@ -23,7 +23,7 @@ export function lostFocus(): EngineError {
 }
 
 /** Protocol and Playwright failures that mean the node, or the document it was in, is gone. */
-export const GONE = /No node found|Could not find node|Node is detached|No node with given id|Cannot find context with specified id|Execution context was destroyed|Cannot find object with id|Node is not an element|frame was detached/i;
+export const GONE = /No node found|Could not find node|Node is detached|No node with given id|Cannot find context with specified id|Execution context was destroyed|Cannot find object with id|Node is not an element|does not belong to the document|frame was detached/i;
 /** Failures that mean the window, or the whole app, closed. */
 const CLOSED = /Target (page, context or browser )?(has been )?closed|Target closed|has been closed|Session closed|browser has disconnected|No target with given id|Protocol error.*Target/i;
 

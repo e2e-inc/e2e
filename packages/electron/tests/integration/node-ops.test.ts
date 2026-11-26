@@ -106,11 +106,12 @@ describe('nodeOp', () => {
     expect(await run(await element('#box'), 'isRadio')).toBe(false);
   });
 
-  it('reads a checked state from the input or the aria attributes, and null for none', async () => {
+  it('reads a checked state from the input or aria-checked on a role that has one, and null for none', async () => {
     await page.setContent(`<input id="box" type="checkbox" checked><div id="switch" role="switch" aria-checked="false"></div><button id="toggle" aria-pressed="true">T</button><div id="none"></div><div id="mixed" role="checkbox" aria-checked="mixed"></div>`);
     expect(await run(await element('#box'), 'readChecked')).toBe(true);
     expect(await run(await element('#switch'), 'readChecked')).toBe(false);
-    expect(await run(await element('#toggle'), 'readChecked')).toBe(true);
+    // A toggle button's aria-pressed is not a checked state, as on the web.
+    expect(await run(await element('#toggle'), 'readChecked')).toBeNull();
     expect(await run(await element('#none'), 'readChecked')).toBeNull();
     // A mixed checkbox is not checked, so check() clicks it.
     expect(await run(await element('#mixed'), 'readChecked')).toBe(false);

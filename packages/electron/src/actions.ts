@@ -28,6 +28,9 @@ import type { AppWindow, Windows } from './windows.ts';
 /** How long a long press holds by default. */
 const LONG_PRESS_MS = 800;
 
+/** How long before its operation ends a held press is released: time for the release to reach the app. */
+const RELEASE_MARGIN_MS = 100;
+
 /** What every action reads beside its window. */
 export interface ActionContext {
   readonly devtools: DevTools;
@@ -169,7 +172,7 @@ async function setChecked(step: Step, want: boolean): Promise<void> {
   const { devtools, window, backendNodeId } = step;
   const kind = want ? 'check' : 'uncheck';
   const now = await devtools.callOn(window.page, backendNodeId, 'readChecked');
-  if (now === null) throw unsupported(`the element has no checked state to ${kind}`);
+  if (now === null) throw notActionable(`the element has no checked state to ${kind}: it is no checkbox, radio, or switch`);
   if (now === want) return;
   // A click on a checked radio leaves it checked: only another radio of its group clears it.
   if (!want && (await devtools.callOn(window.page, backendNodeId, 'isRadio'))) throw notActionable('uncheck cannot clear a radio button; select another radio in its group');
@@ -349,12 +352,15 @@ async function settle(context: ActionContext, operation: OperationContext): Prom
  * leaves the pointer over.
  */
 async function hold(window: AppWindow, durationMs: number, operation: OperationContext, gate: InputGate): Promise<void> {
+  // The release lands before the operation's bound fires, so a press its budget cuts short is up when the step fails.
+  const held = Math.min(durationMs, Math.max(0, gate.deadline.remaining() - RELEASE_MARGIN_MS));
   try {
-    await sleep(Math.min(durationMs, gate.deadline.remaining()), operation.signal);
+    await sleep(held, operation.signal);
   } finally {
     await window.page.mouse.up();
   }
   gate();
+  if (held < durationMs) throw new EngineError('OPERATION_TIMEOUT', `the press was released after ${Math.round(held)}ms of ${durationMs}ms: the step's timeout ran out`, { retryable: false });
 }
 
 /** A pointer drag between two points, paced over `durationMs` when given; every move passes the gate. */

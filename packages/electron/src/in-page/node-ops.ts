@@ -37,7 +37,7 @@ export interface NodeOps {
   /** Focuses the element and selects its whole content; false when the app moved focus away. */
   selectContents(): boolean;
   deleteSelection(): void;
-  /** A checkbox's or radio's checked state, or `aria-checked`/`aria-pressed`; null when it has none. */
+  /** A checkbox's or radio's checked state, or `aria-checked` on a role that has one; null when it has none (a toggle button's `aria-pressed` is not a checked state, as on the web). */
   readChecked(): boolean | null;
   /** A `<select>` that is enabled and holds the option, enabled. */
   checkSelect(wanted: WantedOption): Readiness;
@@ -52,7 +52,7 @@ export interface NodeOps {
   isRadio(): boolean;
   /** The focused element under the node, a document or shadow root, through every open shadow root; it stops at a closed root's host. */
   activeUnder(): Element | null;
-  /** Whether the node, the focused element, takes typed text. */
+  /** Whether the node, the focused element, takes typed text, or typed keys as a widget's typeahead. */
   takesText(): boolean;
 }
 
@@ -62,6 +62,10 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
   const TEXT_INPUT_TYPES = new Set(['', 'text', 'password', 'email', 'search', 'tel', 'url', 'number']);
   /** Input types whose value is set rather than typed. */
   const SET_VALUE_TYPES = new Set(['date', 'time', 'datetime-local', 'month', 'week', 'color', 'range']);
+  /** Roles whose `aria-checked` is a checked state, as the web reads them. */
+  const CHECKED_ROLES = new Set(['checkbox', 'menuitemcheckbox', 'menuitemradio', 'option', 'radio', 'switch', 'treeitem']);
+  /** Widgets that take typed keys as typeahead: a key moves to the item it starts. */
+  const TYPEAHEAD_ROLES = new Set(['listbox', 'option', 'tree', 'treeitem', 'menu', 'menubar', 'menuitem', 'combobox', 'grid', 'gridcell', 'radiogroup', 'tablist', 'tab']);
   /** Of those, the ones that also take typed text: digits a key at a time. */
   const TYPED_PICKER_TYPES = new Set(['date', 'time', 'datetime-local', 'month', 'week']);
   /** A node the document dropped fails as one: the harness locates it again, where a reason would only wait out the deadline. */
@@ -121,6 +125,7 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
     checkEnabled(enabled) {
       if (element?.isConnected !== true) return gone();
       if (enabled && isDisabled(element)) return { ok: false, reason: 'it is disabled' };
+      if (element.closest('[inert]') !== null) return { ok: false, reason: 'it is inert (a modal or the app blocks it)' };
       if (getComputedStyle(element).visibility !== 'visible') return { ok: false, reason: 'it is not visible' };
       return { ok: true };
     },
@@ -154,6 +159,7 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       const field = element instanceof HTMLTextAreaElement || (element instanceof HTMLInputElement && (TEXT_INPUT_TYPES.has(type) || SET_VALUE_TYPES.has(type))) ? element : undefined;
       if (field === undefined && !(element instanceof HTMLElement && element.isContentEditable)) return { ok: false, reason: 'it is not a text field' };
       if (isDisabled(element)) return { ok: false, reason: 'it is disabled' };
+      if (element.closest('[inert]') !== null) return { ok: false, reason: 'it is inert (a modal or the app blocks it)' };
       if (field?.readOnly === true) return { ok: false, reason: 'it is read-only' };
       return { ok: true };
     },
@@ -198,7 +204,8 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
     readChecked() {
       const target = attached();
       if (target instanceof HTMLInputElement && (target.type === 'checkbox' || target.type === 'radio')) return target.checked;
-      const aria = target.getAttribute('aria-checked') ?? target.getAttribute('aria-pressed');
+      if (!CHECKED_ROLES.has(target.getAttribute('role') ?? '')) return null;
+      const aria = target.getAttribute('aria-checked');
       // A mixed checkbox is not checked: check() clicks it.
       return aria === 'true' ? true : aria === 'false' || aria === 'mixed' ? false : null;
     },
@@ -250,6 +257,7 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       if (active.tagName === 'IFRAME' || active.tagName === 'WEBVIEW') return true;
       if (active instanceof HTMLElement && active.isContentEditable) return true;
       if (active instanceof HTMLTextAreaElement) return !active.readOnly && !active.disabled;
+      if (TYPEAHEAD_ROLES.has(active.getAttribute('role') ?? '')) return true;
       // A date or time input takes typed digits; a range or color picker takes none.
       if (active instanceof HTMLInputElement) return (TEXT_INPUT_TYPES.has(typeOf(active)) || TYPED_PICKER_TYPES.has(typeOf(active))) && !active.readOnly && !active.disabled;
       return false;
