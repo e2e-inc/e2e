@@ -221,13 +221,10 @@ fn role_of(element: &Element, what: &str) -> Outcome<(String, &'static str)> {
     Ok((ax_role, role))
 }
 
+/// The state a box shows, read as the snapshot reads it, so a check confirms the state an observation would report:
+/// `1`, `true`, and `on` are checked, `0` and `off` unchecked, `2` and `mixed` mixed.
 fn toggle_state(element: &Element) -> Option<u8> {
-    match element.attribute("AXValue").ok()? {
-        Value::Number(number) => Some(number as u8),
-        Value::Bool(value) => Some(value as u8),
-        Value::Text(text) => text.trim().parse::<u8>().ok(),
-        _ => None,
-    }
+    crate::snapshot::parse_toggle(element.attribute("AXValue").ok().as_ref())
 }
 
 /// The text a value attribute holds now.

@@ -237,7 +237,8 @@ fn selected(role: &str, selected: Option<bool>) -> bool {
     selected == Some(true) && role != "menuitem"
 }
 
-fn parse_toggle(value: Option<&Value>) -> Option<u8> {
+/// The state a box's value shows: off, on, or mixed, from a number, a boolean, or the words toolkits use.
+pub(crate) fn parse_toggle(value: Option<&Value>) -> Option<u8> {
     match value? {
         Value::Number(number) => Some(*number as u8),
         Value::Bool(value) => Some(*value as u8),
@@ -677,6 +678,18 @@ mod tests {
         assert!(outside(above, inner_clip("group", None, Some(WINDOW)).expect("the window's clip")));
         assert_eq!(inner_clip("popover", None, Some(WINDOW)), None);
         assert_eq!(inner_clip("menu", None, Some(WINDOW)), None);
+    }
+
+    #[test]
+    fn reads_a_box_state_from_a_number_a_boolean_or_a_word() {
+        use super::parse_toggle;
+        use crate::ax::Value;
+        assert_eq!(parse_toggle(Some(&Value::Text("on".into()))), Some(1));
+        assert_eq!(parse_toggle(Some(&Value::Text("off".into()))), Some(0));
+        assert_eq!(parse_toggle(Some(&Value::Text("mixed".into()))), Some(2));
+        assert_eq!(parse_toggle(Some(&Value::Number(1.0))), Some(1));
+        assert_eq!(parse_toggle(Some(&Value::Bool(false))), Some(0));
+        assert_eq!(parse_toggle(Some(&Value::Text("maybe".into()))), None);
     }
 
     #[test]
