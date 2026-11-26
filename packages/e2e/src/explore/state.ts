@@ -159,6 +159,11 @@ export class ExploreState {
     this.#notify({ phase: 'finished', ended, summary: this.#summary });
   }
 
+  /** Whether the record takes no more findings. */
+  get closed(): boolean {
+    return this.#closed;
+  }
+
   /** Takes no more findings: the exploration is over, however it ended. */
   close(): void {
     this.#closed = true;

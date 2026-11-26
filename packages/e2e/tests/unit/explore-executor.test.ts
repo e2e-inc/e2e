@@ -25,6 +25,7 @@ describe('the finding tool', () => {
     const { tool } = withFindingTool({ tools: {} } as never, state).tools[FINDING_TOOL_NAME] as DefinedTool;
     let release!: () => void;
     const released = new Promise<void>((resolve) => (release = resolve));
+    const attached: string[] = [];
     const options = withToolContext({ toolCallId: 'call-1', messages: [] } as unknown as ToolExecutionOptions<unknown>, {
       observe: async () => {
         if (pending === 'observe') await released;
@@ -33,13 +34,14 @@ describe('the finding tool', () => {
       read: async () => {
         throw new Error('not read');
       },
-      attachScreenshot: async () => {
+      attachScreenshot: async (_pixels, label) => {
+        attached.push(label);
         if (pending === 'attachScreenshot') await released;
         return 'attempt-1:artifact:0';
       },
     });
     const done = Promise.resolve(tool.execute!(report, options));
-    return { done, release };
+    return { done, release, attached };
   }
 
   for (const pending of ['observe', 'attachScreenshot'] as const) {
@@ -67,5 +69,18 @@ describe('the finding tool', () => {
     release();
     await expect(done).rejects.toThrow(/exploration is over/);
     expect(state.findings).toEqual([]);
+  });
+
+  it('keeps no screenshot for a finding the closed record refuses', async () => {
+    const state = new ExploreState('goal', { maxSteps: 4, timeoutMs: 300_000 });
+    state.beginStep('Cart', 'open the cart');
+    const { done, release, attached } = reporting(state, 'observe');
+    await new Promise((resolve) => setImmediate(resolve));
+    state.endStep('exhausted', 'step timed out', 'STEP_TIMEOUT');
+    state.end('time');
+    state.close();
+    release();
+    await expect(done).rejects.toThrow(/exploration is over/);
+    expect(attached).toEqual([]);
   });
 });

@@ -127,8 +127,9 @@ function createFindingTool(state: ExploreState): DefinedTool {
         const observation = await observe({ pixels: true }).catch(() => undefined);
         // Evidence is worth keeping, never worth failing the finding for. It
         // is saved first, so the finding is announced complete, evidence included.
+        // Not once the record is closed: the finding is refused, and the file would belong to none.
         const artifactId =
-          observation?.pixels === undefined
+          observation?.pixels === undefined || state.closed
             ? undefined
             : await attachScreenshot(observation.pixels, label).catch(() => undefined);
         const finding = state.addFinding({ ...input, path: observation?.path, observationRevision: observation?.revision, artifactId }, reportedIn);
