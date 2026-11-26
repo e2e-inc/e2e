@@ -51,6 +51,9 @@ pub struct WindowInfo {
     pub pid: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bounds: Option<Rect>,
+    /// A dialog macOS itself adds to the app's windows (Siri's, on macOS 27), which a test never means by default.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub system: bool,
 }
 
 fn dictionary_value(dictionary: CFDictionaryRef, key: CFStringRefStatic) -> CFTypeRef {
@@ -139,6 +142,26 @@ pub fn ax_windows(app: &Element) -> Outcome<Vec<(Element, Option<u32>)>> {
     }
 }
 
+/// The developer identifiers in a small subtree, `levels` deep and at most 8 children a level.
+fn identifiers(element: &Element, levels: usize) -> Vec<String> {
+    let mut found = Vec::new();
+    if let Some(identifier) = element.text("AXIdentifier") {
+        found.push(identifier);
+    }
+    if levels > 0 {
+        for child in element.elements("AXChildren", 8).unwrap_or_default() {
+            found.extend(identifiers(&child, levels - 1));
+        }
+    }
+    found
+}
+
+/// Whether an untitled dialog with these identifiers inside is one macOS put among the app's windows: Siri's, which
+/// macOS 27 shows over an app a few seconds after a press in a SwiftUI sheet, holds only its orb, identified `siri`.
+fn system_dialog(identifiers: &[String]) -> bool {
+    identifiers.iter().any(|identifier| identifier.eq_ignore_ascii_case("siri"))
+}
+
 /// Whether `window` holds the app's focused window: is it, or carries it as a sheet or an alert. The app's focused window
 /// is the sheet then, and keys reach the window through it.
 pub fn holds_focus(focused: &Element, window: &Element) -> bool {
@@ -160,9 +183,12 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
     for (element, id) in &accessible {
         let Some(id) = *id else { continue };
         let entry = server.iter().find(|window| window.id == id);
-        let values = element.attributes(&["AXTitle", "AXMinimized", "AXPosition", "AXSize"]).unwrap_or_else(|_| vec![None, None, None, None]);
+        let values = element.attributes(&["AXTitle", "AXMinimized", "AXPosition", "AXSize", "AXSubrole"]).unwrap_or_else(|_| vec![None; 5]);
         let title = values[0].as_ref().and_then(|value| value.text().map(str::to_owned));
         let minimized = values[1].as_ref().and_then(|value| value.boolean()).unwrap_or(false);
+        let subrole = values[4].as_ref().and_then(|value| value.text());
+        // Only an untitled dialog is read further: an app's own windows nearly all have titles.
+        let system = subrole == Some("AXDialog") && title.as_deref().is_none_or(|title| title.trim().is_empty()) && system_dialog(&identifiers(element, 3));
         let ax_bounds = match (&values[2], &values[3]) {
             (Some(ax::Value::Point(x, y)), Some(ax::Value::Size(width, height))) => Some(Rect { x: *x, y: *y, width: *width, height: *height }),
             _ => None,
@@ -177,6 +203,7 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
             minimized,
             pid,
             bounds: ax_bounds.or_else(|| entry.and_then(|window| window.bounds)),
+            system,
         });
     }
     for window in &server {
@@ -197,6 +224,7 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
             minimized: false,
             pid,
             bounds: window.bounds,
+            system: false,
         });
     }
     Ok(out)
@@ -225,4 +253,16 @@ pub fn server_bounds(id: u32) -> Option<Rect> {
 /// How many menus `pid` has open on screen: windows at the menu level.
 pub fn open_menus(pid: i32) -> usize {
     server_windows().into_iter().filter(|window| window.pid == pid && window.layer == MENU_LAYER && window.onscreen).count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::system_dialog;
+
+    #[test]
+    fn tells_siri_from_an_app_dialog() {
+        assert!(system_dialog(&["siri".into()]));
+        assert!(!system_dialog(&["confirm-delete".into(), "ok".into()]));
+        assert!(!system_dialog(&[]));
+    }
 }
