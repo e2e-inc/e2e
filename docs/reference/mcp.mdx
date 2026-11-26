@@ -248,6 +248,9 @@ Returns how many nodes match a semantic locator, which ones, and the
 | `exact` | Exact matching; `false` for substring, case-insensitive. |
 
 - Zero or several matches name the error a test would get.
+- The target's [`locators.visible`](/reference/config#locators) is used, as
+  in a test. When it's true, only nodes that render are counted for `text`,
+  `label`, `placeholder`, and `testId`.
 - A `name` matches the accessible name only. `observe` shows a `status`,
   `alert`, or `listitem` by its text, so one of those with a name that
   matches nothing also points at `getByRole(role).filter({ hasText })` and
@@ -362,7 +365,10 @@ Test line: await screen.getByRole("button", "Sign in").tap();
   (`getByRole("listitem").filter({ hasText: "Offer B" })`), then by position
   (`.nth(1)`, with a comment saying so). A position is used only when the
   live twins are the ones the observation listed, each in place or all
-  moved together.
+  moved together. When the target's
+  [`locators.visible`](/reference/config#locators) is true,
+  `{ visible: true }` is left out of text, label, placeholder, and test id
+  lines since it's already the default.
 - A control with no name, label, placeholder, text, or test id is found by
   its role: alone when it is the only one (`getByRole("spinbutton")`, with
   a comment), else narrowed like twins.

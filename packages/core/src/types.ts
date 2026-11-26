@@ -425,7 +425,10 @@ export interface TextMatchOptions {
    * When true, nodes the platform reports as hidden are excluded before the
    * exactly-one rule is applied, so a visible node with a hidden twin (a
    * prerendered copy kept after navigation, a closed drawer) still resolves.
-   * Omitted or false keeps every match, hidden ones included.
+   * When false, every match is kept, hidden ones included. When omitted,
+   * the target's `locators.visible` is used. For `getByRole`, the default is
+   * `false`, since role queries already skip nodes hidden from the
+   * accessibility tree.
    */
   visible?: boolean;
 }
@@ -1719,6 +1722,18 @@ export interface Target {
   video?: RecordingMode;
   /** Whether this target runs the tests of one file in parallel, in place of the config's `fullyParallel`; `--fully-parallel` wins over it. */
   fullyParallel?: boolean;
+  /** Defaults for this target's screen queries. `visible` here overrides the top-level value. */
+  locators?: LocatorsConfig;
+}
+
+/** Defaults for screen queries. Options passed to a query override these. */
+export interface LocatorsConfig {
+  /**
+   * The default `visible` option for every query except `getByRole`. Set it
+   * to true when most queries need `{ visible: true }`. Targets that don't
+   * set it inherit the config's value. The default is `false`.
+   */
+  visible?: boolean;
 }
 
 /**
@@ -2009,6 +2024,8 @@ export interface ProjectConfig {
    * Applies to the targets whose engine can record.
    */
   video?: RecordingMode;
+  /** Defaults for screen queries on every target. A target's `locators.visible` overrides this. */
+  locators?: LocatorsConfig;
   /**
    * The directory a run writes its results to, relative to the project root;
    * default `.e2e`. It holds `report.json`, `junit.xml`, `summary.md`, `ctrf.json`,

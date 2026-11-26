@@ -502,6 +502,7 @@ export class HeldTestTools {
       },
       warn: () => undefined,
       appBase: runtime.app.base,
+      locators: this.target.locators,
     });
   }
 
