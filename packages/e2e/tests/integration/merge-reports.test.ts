@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
@@ -74,6 +74,9 @@ it('merges real shard runs and uses the merged report for a whole-run rerun', ()
   expect(merged.status, merged.stderr).toBe(1);
   expect(merged.stdout).toContain('finished report: 5');
   expect(existsSync(path.join(fixture.dir, 'merged/junit.xml'))).toBe(true);
+  if (process.platform !== 'win32') {
+    expect(statSync(path.join(fixture.dir, 'merged')).mode).toBe(statSync(path.join(fixture.dir, 'shard-1')).mode);
+  }
   expect(existsSync(path.join(fixture.dir, 'merged/summary.md'))).toBe(false);
   const run = report(fixture, 'merged');
   expect(run.shard).toBeUndefined();
@@ -123,6 +126,7 @@ it('keeps both shared setup executions and links each shard’s local evidence',
   const trace = readFileSync(path.join(root, resultSegment(setups[0]!), 'trace.md'), 'utf8');
   for (const index of [1, 2]) {
     expect(trace).toContain(`../shard-${index}/${artifactPath}`);
+    expect(trace).toContain(`\`merged/results/shard-${index}/${artifactPath}\``);
     expect(readFileSync(path.join(root, `shard-${index}`, artifactPath), 'utf8')).toBe(`login in shard ${index}`);
   }
   // Same-length replacement must still fail the artifact digest check.
@@ -201,7 +205,7 @@ const value = process.env.MERGE_FIXTURE_SECRET;
 const login = process.env.MERGE_FIXTURE_PASSWORD;
 console.log(value, login);
 export default { credentials: { account: { password: login } }, secrets: { publishing: value }, reporters: [{
-  name: 'publisher', onRunFinished() { throw new Error(value); },
+  name: 'publisher', onRunFinished(run) { console.log('project root:', run.projectRoot); throw new Error(value); },
 }] };
 `);
   const merged = cli(fixture, ['merge-reports', 'shard-1', 'shard-2', '--output', path.join(fixture.dir, 'merged'), '--config', 'ci/publish.config.mjs'], {
@@ -211,6 +215,7 @@ export default { credentials: { account: { password: login } }, secrets: { publi
   });
   expect(merged.status).toBe(0);
   expect((merged.stdout + merged.stderr).includes('fixture-password-31272')).toBe(false);
+  expect(merged.stdout.trimEnd().split('\n')).toContain(`project root: ${fixture.dir}`);
   expect(merged.stderr.includes('reporter "publisher" failed: <secret:publishing>')).toBe(true);
   for (const representation of [value, encodeURIComponent(value), Buffer.from(value).toString('base64')]) {
     expect((merged.stdout + merged.stderr).includes(representation)).toBe(false);
@@ -436,4 +441,104 @@ it('identifies missing and duplicate shards before writing any report', () => {
   expect(duplicate.status).toBe(2);
   expect(duplicate.stderr).toContain('duplicate shard 1');
   expect(existsSync(path.join(fixture.dir, 'merged'))).toBe(false);
+}, 60_000);
+
+it('keeps exit 1 when a fresh shard reaches its duration limit during a test', () => {
+  const fixture = project();
+  writeFileSync(path.join(fixture.dir, 'tests/shop.e2e.ts'), `import { test } from 'e2e';
+test('slow', async () => { await new Promise((resolve) => setTimeout(resolve, 8000)); });
+`);
+  const ran = cli(fixture, ['run', '--shard', '1/1', '--output', 'shard-1', '--max-duration', '1500']);
+  expect(ran.status, ran.stderr).toBe(1);
+  expect(report(fixture, 'shard-1').summary.interrupted).toBe(1);
+  const merged = cli(fixture, ['merge-reports', 'shard-1', '--output', 'merged']);
+  expect(merged.status, merged.stderr).toBe(1);
+  expect(report(fixture, 'merged')).toMatchObject({ status: 'failed', exitCode: 1 });
+}, 60_000);
+
+it('merges shards when one report could not record the commit and retains the known commit', () => {
+  const fixture = project();
+  expect(shard(fixture, 1).status).toBe(0);
+  expect(shard(fixture, 2).status).toBe(0);
+  const first = report(fixture, 'shard-1');
+  const second = report(fixture, 'shard-2');
+  const { vcs: _firstVcs, ...firstWithoutVcs } = first;
+  const { vcs: _secondVcs, ...secondWithoutVcs } = second;
+  const commit = 'a'.repeat(40);
+  const write = (index: number, run: Report1Document['run']) => {
+    const document = { schemaVersion: 'report-1', run };
+    assertValidReport(document);
+    writeFileSync(path.join(fixture.dir, `shard-${index}/report.json`), JSON.stringify(document));
+  };
+  const command = ['merge-reports', 'shard-1', 'shard-2', '--output'];
+  write(1, firstWithoutVcs);
+  write(2, { ...second, vcs: { commit } });
+  const firstMissing = cli(fixture, [...command, 'first-missing']);
+  expect(firstMissing.status, firstMissing.stderr).toBe(0);
+  expect(firstMissing.stderr).toContain('shard 1 did not record a commit');
+  expect(report(fixture, 'first-missing').vcs?.commit).toBe(commit);
+
+  write(1, { ...first, vcs: { commit } });
+  write(2, secondWithoutVcs);
+  const secondMissing = cli(fixture, [...command, 'second-missing']);
+  expect(secondMissing.status, secondMissing.stderr).toBe(0);
+  expect(secondMissing.stderr).toContain('shard 2 did not record a commit');
+  expect(report(fixture, 'second-missing').vcs?.commit).toBe(commit);
+
+  write(2, { ...second, vcs: { commit: 'b'.repeat(40) } });
+  const incompatible = cli(fixture, [...command, 'incompatible']);
+  expect(incompatible.status).toBe(2);
+  expect(incompatible.stderr).toContain('shard 2 has a different commit');
+}, 60_000);
+
+it('rejects an explicitly selected live-only command-line reporter', () => {
+  const fixture = project();
+  expect(cli(fixture, ['run', '--shard', '1/1', '--output', 'shard-1']).status).toBe(0);
+  const merged = cli(fixture, ['merge-reports', 'shard-1', '--output', 'merged', '--reporter', 'list']);
+  expect(merged.status).toBe(2);
+  expect(existsSync(path.join(fixture.dir, 'merged'))).toBe(false);
+}, 60_000);
+
+it('merges shards whose app requested a different free port each time, and rejects a different fixed port', () => {
+  const fixture = project();
+  const configPath = path.join(fixture.dir, 'e2e.config.ts');
+  const originalConfig = readFileSync(configPath, 'utf8');
+  const config = originalConfig.replace('app: FAKE_APP', `app: {
+    url: 'http://127.0.0.1:0',
+    command: { executable: process.execPath, args: ['server.cjs'], env: { PORT: '{port}' } },
+  }`);
+  writeFileSync(configPath, config);
+  writeFileSync(path.join(fixture.dir, 'server.cjs'), `require('node:http')
+    .createServer((_request, response) => response.end('ready'))
+    .listen(Number(process.env.PORT), '127.0.0.1');`);
+  expect(shard(fixture, 1).status).toBe(0);
+  expect(shard(fixture, 2).status).toBe(0);
+  const second = report(fixture, 'shard-2');
+  const firstOrigin = report(fixture, 'shard-1').targets[0]?.baseOrigin;
+  expect(second.targets[0]?.baseOrigin).not.toBe(firstOrigin);
+  const merge = cli(fixture, ['merge-reports', 'shard-1', 'shard-2', '--output', 'merged']);
+  expect(merge.status, merge.stderr).toBe(0);
+  expect(report(fixture, 'merged').targets[0]?.baseOrigin).toBe(firstOrigin);
+
+  writeFileSync(configPath, originalConfig);
+  expect(shard(fixture, 2).status).toBe(0);
+  const mismatch = cli(fixture, ['merge-reports', 'shard-1', 'shard-2', '--output', 'invalid']);
+  expect(mismatch.status).toBe(2);
+  expect(mismatch.stderr).toContain('different targets');
+}, 60_000);
+
+it('warns when a shard used different engine metadata', () => {
+  const fixture = project();
+  expect(shard(fixture, 1).status).toBe(0);
+  expect(shard(fixture, 2).status).toBe(0);
+  const run = report(fixture, 'shard-2');
+  const target = run.targets[0]!;
+  target.stateCapability = !target.stateCapability;
+  const document = { schemaVersion: 'report-1', run };
+  assertValidReport(document);
+  writeFileSync(path.join(fixture.dir, 'shard-2/report.json'), JSON.stringify(document));
+
+  const merged = cli(fixture, ['merge-reports', 'shard-1', 'shard-2', '--output', 'merged']);
+  expect(merged.status, merged.stderr).toBe(0);
+  expect(merged.stderr).toContain('shard 2 has different engine metadata for target "fake"');
 }, 60_000);

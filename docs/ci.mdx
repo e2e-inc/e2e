@@ -261,6 +261,10 @@ jobs:
       - run: npx e2e run --shard ${{ matrix.shard }}/3 --pass-with-no-tests --output .e2e/shard-${{ matrix.shard }}
 ```
 
+To rerun a shard's failures before uploading, run `e2e run --last-failed`
+with that shard's original `--output`. Omit `--shard` so the rerun uses the
+failures already selected from that shard.
+
 Use a final job to publish one report for the matrix:
 
 1. Upload each shard's output directory with `if: always()`. Include

@@ -32,8 +32,8 @@ function unreached(result: ReportResult): boolean {
  * `--last-failed` selects by, so a rerun without the flag runs once a test any
  * repeat of which failed.
  */
-function testKey(result: ReportResult): string {
-  return [result.testId, result.targetId, result.agent].join('\u0000');
+export function testKey(result: ReportResult): string {
+  return JSON.stringify([result.testId, result.targetId, result.agent]);
 }
 
 /**

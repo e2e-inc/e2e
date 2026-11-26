@@ -81,6 +81,8 @@ After all shards finish, run
 Supply every shard's output directory, including its `results/` and any
 `report-with-reruns.json`. Upload the merged directory to keep trace links
 working. Rerun failures with `e2e run --last-failed --output .e2e/merged`.
+To rerun a single shard before uploading, use its original `--output` with
+`--last-failed` and omit `--shard`.
 
 `list` takes the same files and selection flags (`--config`, `--target`,
 `--tag`, `--tag-mode`, `--exclude-tag`, `--grep`, `--grep-invert`,

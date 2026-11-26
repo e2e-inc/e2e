@@ -29,6 +29,7 @@ import { runsFromCheckout } from '../telemetry/checkout.ts';
 import { initCompletedEvent, runCompletedEvent, upgradeCompletedEvent, USAGE_ERROR_CODE } from '../telemetry/events.ts';
 import { Telemetry } from '../telemetry/telemetry.ts';
 import { CACHE_DIR_DESCRIPTION, registerCacheCommand } from './cache.ts';
+import { registerMergeReportsCommand } from './merge-reports-command.ts';
 import { docsLine, examples, helpSection, pc } from './help.ts';
 import { EXIT_CODES } from './exit-codes.ts';
 import type { DoctorReport } from './doctor.ts';
@@ -1100,18 +1101,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
 
   registerCacheCommand(program);
 
-  program
-    .command('merge-reports')
-    .summary('merge finished shard reports and their local artifacts')
-    .argument('<directories...>', 'shard output directories, one per shard')
-    .requiredOption('--output <dir>', 'new directory for the merged report and artifacts')
-    .option('--config <path>', 'config file for finished-run reporters (default: the nearest e2e.config file)')
-    .option('--reporter <ids>', `comma-separated built-in reporters: ${BUILTIN_REPORTERS.join(', ')}`, parseReporters)
-    .addHelpText('after', `\n${docsLine('/reference/cli#e2e-merge-reports')}`)
-    .action(async (directories: string[], options: { output: string; config?: string; reporter?: BuiltinReporter[] }) => {
-      const { mergeReports } = await import('./merge-reports.ts');
-      process.exitCode = await mergeReports(directories, options);
-    });
+  registerMergeReportsCommand(program);
 
   program
     .command('report')

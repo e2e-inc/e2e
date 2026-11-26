@@ -660,6 +660,11 @@ function serializeTarget(
   };
 }
 
+/** The exit-code status the report builder starts from; `blocked` is derived from the results there. */
+export function statusOf(exitCode: BuildReportOptions['exitCode']): BuildReportOptions['status'] {
+  return exitCode === 0 ? 'passed' : exitCode === 1 ? 'failed' : exitCode === 130 ? 'interrupted' : 'error';
+}
+
 /**
  * A run is `blocked` — not failed — when it did not pass and *every*
  * non-passing result carries a blockable error code: credentials, the

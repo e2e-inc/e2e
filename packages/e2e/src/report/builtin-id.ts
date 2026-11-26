@@ -12,6 +12,8 @@ const BUILTIN_ID = Symbol.for('e2e.reporter.builtin');
 
 export const BUILTIN_REPORTERS = ['list', 'dot', 'line', 'json', 'junit', 'markdown'] as const satisfies readonly BuiltinReporter[];
 
+export const FINISHED_BUILTIN_REPORTERS = ['json', 'junit', 'markdown'] as const satisfies readonly BuiltinReporter[];
+
 export function isBuiltinReporter(value: string): value is BuiltinReporter {
   return (BUILTIN_REPORTERS as readonly string[]).includes(value);
 }
