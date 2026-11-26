@@ -290,14 +290,30 @@ fn presses(ax_role: &str) -> bool {
 /// The most steps a walk up from the element under the pointer takes: deeper than any window a snapshot reads.
 const MAX_WALK: usize = 256;
 
-/// Folds the walk up from the element under the pointer: each step says whether it is the element, and else its
-/// accessibility role. The walk ends (`None`) at the top, or after `MAX_WALK` steps, without reaching the element.
-fn aim_along(mut walk: impl FnMut() -> Option<Result<(bool, String), AXError>>) -> Result<Aim, AXError> {
+/// Whether an element under the pointer takes a click of its own: by its role, or, for an image, which may be decoration
+/// or a button, by the press it offers.
+fn takes_click(ax_role: &str, actions: impl FnOnce() -> Result<Vec<String>, AXError>) -> Result<bool, AXError> {
+    if presses(ax_role) {
+        return Ok(true);
+    }
+    if ax_role != "AXImage" {
+        return Ok(false);
+    }
+    match actions() {
+        Ok(names) => Ok(names.iter().any(|name| name == "AXPress")),
+        Err(ax::AX_CANNOT_COMPLETE) => Err(ax::AX_CANNOT_COMPLETE),
+        Err(_) => Ok(false),
+    }
+}
+
+/// Folds the walk up from the element under the pointer: each step says whether it is the element, and else whether it
+/// takes a click of its own. The walk ends (`None`) at the top, or after `MAX_WALK` steps, without reaching the element.
+fn aim_along(mut walk: impl FnMut() -> Option<Result<(bool, bool), AXError>>) -> Result<Aim, AXError> {
     let mut control = false;
     for _ in 0..MAX_WALK {
         match walk() {
             Some(Ok((true, _))) => return Ok(if control { Aim::Control } else { Aim::Target }),
-            Some(Ok((false, ax_role))) => control = control || presses(&ax_role),
+            Some(Ok((false, clicks))) => control = control || clicks,
             Some(Err(error)) => return Err(error),
             None => return Ok(Aim::Other),
         }
@@ -312,19 +328,23 @@ fn aim_at(element: &Element, x: f64, y: f64) -> Result<Aim, AXError> {
     aim_along(|| {
         let hit = next.take()?;
         if &hit == element {
-            return Some(Ok((true, String::new())));
+            return Some(Ok((true, false)));
         }
         let ax_role = match hit.attribute("AXRole") {
             Ok(value) => value.text().unwrap_or_default().to_owned(),
             Err(ax::AX_CANNOT_COMPLETE) => return Some(Err(ax::AX_CANNOT_COMPLETE)),
             Err(_) => String::new(),
         };
+        let clicks = match takes_click(&ax_role, || hit.actions()) {
+            Ok(clicks) => clicks,
+            Err(error) => return Some(Err(error)),
+        };
         next = match hit.attribute("AXParent") {
             Ok(Value::Element(parent)) => Some(parent),
             Err(ax::AX_CANNOT_COMPLETE) => return Some(Err(ax::AX_CANNOT_COMPLETE)),
             _ => None,
         };
-        Some(Ok((false, ax_role)))
+        Some(Ok((false, clicks)))
     })
 }
 
@@ -1322,12 +1342,19 @@ mod tests {
         use crate::failure::codes;
         let walk = |steps: Vec<Result<(bool, &str), crate::ax::AXError>>| {
             let mut steps = steps.into_iter();
-            aim_along(move || steps.next().map(|step| step.map(|(target, role)| (target, role.to_owned()))))
+            aim_along(move || steps.next().map(|step| step.map(|(target, role)| (target, super::presses(role)))))
         };
         // A row's text cell is content of the row; its inline button is a control of its own.
         assert_eq!(walk(vec![Ok((false, "AXStaticText")), Ok((false, "AXCell")), Ok((true, ""))]), Ok(Aim::Target));
         assert_eq!(walk(vec![Ok((false, "AXStaticText")), Ok((false, "AXButton")), Ok((true, ""))]), Ok(Aim::Control));
         assert_eq!(walk(vec![Ok((false, "AXButton")), Ok((false, "AXWindow"))]), Ok(Aim::Other));
+        // An image is decoration unless it offers a press: then it is a button of its own.
+        let image = |actions: Result<Vec<String>, crate::ax::AXError>| super::takes_click("AXImage", move || actions);
+        assert_eq!(image(Ok(vec!["AXPress".into()])), Ok(true));
+        assert_eq!(image(Ok(vec!["AXShowMenu".into()])), Ok(false));
+        assert_eq!(image(Err(crate::ax::AX_ACTION_UNSUPPORTED)), Ok(false));
+        assert_eq!(image(Err(crate::ax::AX_CANNOT_COMPLETE)), Err(crate::ax::AX_CANNOT_COMPLETE));
+        assert_eq!(super::takes_click("AXStaticText", || panic!("no action read for a role that tells")), Ok(false));
         // An inline editor of a row takes a double-click of its own.
         for editor in ["AXTextField", "AXComboBox", "AXTextArea"] {
             assert_eq!(walk(vec![Ok((false, editor)), Ok((false, "AXCell")), Ok((true, ""))]), Ok(Aim::Control), "{editor}");
