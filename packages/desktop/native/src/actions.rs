@@ -236,15 +236,17 @@ fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
         return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("the value of this {role} cannot be set")));
     }
     // A field that holds focus commits its text the way typing does; one that cannot take focus still takes the value.
-    if roles::takes_text(role) && element.settable("AXFocused").unwrap_or(false) {
-        let _ = element.set_bool("AXFocused", true);
-    }
+    // Focus moved by this call has reached the app (its handlers may have run), so a later failure is no longer "nothing sent".
+    let moved_focus = roles::takes_text(role)
+        && element.settable("AXFocused").unwrap_or(false)
+        && element.boolean("AXFocused") != Some(true)
+        && element.set_bool("AXFocused", true).is_ok();
     let numeric = matches!(element.attribute("AXValue"), Ok(Value::Number(_)));
     let written = match (numeric, text.trim().parse::<f64>()) {
         (true, Ok(number)) => element.set_number("AXValue", number),
         _ => element.set_text("AXValue", text),
     };
-    written.map_err(|error| refused(error, "set value"))?;
+    written.map_err(|error| if moved_focus { refused(error, "set value").delivered() } else { refused(error, "set value") })?;
     if secure {
         return Ok(());
     }
