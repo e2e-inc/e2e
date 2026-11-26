@@ -299,13 +299,15 @@ fn pieces(text: &str) -> Vec<Piece> {
 pub fn type_text(text: &str, route: Route, run: &TypingRun, deadline: std::time::Instant, still: &dyn Fn() -> Outcome<()>) -> Outcome<()> {
     let source = source()?;
     for piece in pieces(text) {
+        // The focus check reads the app and can take a while: the cancel and the deadline are checked after it, right
+        // before the key goes.
+        still().map_err(|failure| Failure { message: format!("{}; the text sent before then stays sent", failure.message), ..failure }.delivered())?;
         if run.cancelled() {
             return Err(Failure::unconfirmed(codes::TIMEOUT, "typing was cancelled; the text sent before then stays sent"));
         }
         if std::time::Instant::now() >= deadline {
             return Err(Failure::unconfirmed(codes::TIMEOUT, "typing ran out of time; the text sent before then stays sent"));
         }
-        still().map_err(|failure| Failure { message: format!("{}; the text sent before then stays sent", failure.message), ..failure }.delivered())?;
         let units = match piece {
             Piece::Return | Piece::Tab => {
                 let code = if piece == Piece::Tab { 48 } else { 36 };
