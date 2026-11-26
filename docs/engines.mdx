@@ -32,8 +32,9 @@ server elsewhere couldn't receive.
 ## Learn from the Electron engine
 
 [`@e2e-dev/electron`](/electron) is the model for an engine built outside
-this repository. It imports only `@e2e-dev/core/engine` and Playwright's
-public Electron launcher, and nothing from another engine. Building it showed
+this repository. It imports only `@e2e-dev/core/engine`, and speaks the
+DevTools protocol itself: no automation library and nothing from another
+engine. Building it showed
 where the contract assumed a browser or a device:
 
 | Assumption | What changed |

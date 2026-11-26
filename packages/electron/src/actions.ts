@@ -21,6 +21,7 @@ import {
 } from '@e2e-dev/core/engine';
 import { actionablePoint, contentBox, waitReady, whole, type WaitTarget } from './actionability.ts';
 import type { Budget } from './budget.ts';
+import { hasKey, type MouseButton } from './cdp/input.ts';
 import type { DevTools } from './devtools.ts';
 import { lostFocus, notActionable, unsupported } from './errors.ts';
 import { nextFrame, viewportSize } from './in-page/node-ops.ts';
@@ -120,14 +121,14 @@ export async function performAtPoint(context: ActionContext, window: AppWindow, 
     case 'swipeTo':
       return drag(budget, window, at, () => Promise.resolve(whole(action.target)), action.durationMs ?? SWIPE_TO_MS);
     case 'swipe':
-      return swipe(budget, context.devtools, window, at, await context.devtools.evaluate(window.page, viewportSize), action);
+      return swipe(budget, window, at, await window.page.evaluate(viewportSize), action);
   }
 }
 
 /** A swipe on the window itself, from its centre. */
 export async function swipeWindow(context: ActionContext, window: AppWindow, action: ActionOf<'swipe'>, budget: Budget): Promise<void> {
-  const size = await context.devtools.evaluate(window.page, viewportSize);
-  await swipe(budget, context.devtools, window, whole({ x: size.width / 2, y: size.height / 2 }), size, action);
+  const size = await window.page.evaluate(viewportSize);
+  await swipe(budget, window, whole({ x: size.width / 2, y: size.height / 2 }), size, action);
 }
 
 /** Types into the focused element of the shown window, one character at a time: no key goes out once the caller stopped waiting. */
@@ -135,7 +136,7 @@ export async function typeText(context: ActionContext, window: AppWindow, text: 
   const { keyboard } = window.page;
   if (!(await context.devtools.focusedTakesText(window.page))) throw notActionable('nothing that takes text has keyboard focus; tap the field first');
   if (replace) {
-    await budget.send(() => keyboard.press('ControlOrMeta+A'));
+    await budget.send(() => keyboard.press('A', ['ControlOrMeta']));
     await budget.send(() => keyboard.press('Delete'));
   }
   for (const character of text) await budget.send(() => keyboard.type(character));
@@ -143,8 +144,8 @@ export async function typeText(context: ActionContext, window: AppWindow, text: 
 
 /** Presses a key in the shown window, wherever focus is. */
 export async function pressKey(window: AppWindow, key: string, budget: Budget): Promise<void> {
-  const sent = playwrightKey(key);
-  await budget.send(() => window.page.keyboard.press(sent));
+  const chord = keyChord(key);
+  await budget.send(() => window.page.keyboard.press(chord.key, chord.modifiers));
 }
 
 // --- node actions ---
@@ -154,7 +155,7 @@ async function tap(step: Step, action: ActionOf<'tap' | 'doubleTap' | 'secondary
   await click(step.budget, step.window, point, {
     clickCount: action.kind === 'doubleTap' ? 2 : action.kind === 'multiTap' ? action.count : 1,
     button: action.kind === 'secondaryTap' ? 'right' : 'left',
-    modifiers: (action.modifiers ?? []).map(modifierKey),
+    modifiers: action.modifiers ?? [],
   });
 }
 
@@ -168,7 +169,7 @@ async function focus(step: Step): Promise<void> {
 
 /** Scrolls the element into view, waiting until it has a box to scroll to: an element that is not rendered cannot be. */
 async function scrollIntoView(step: Step): Promise<void> {
-  const session = await step.devtools.session(step.window.page);
+  const { session } = step.window.page;
   await pollCondition({
     deadline: step.deadline,
     signal: step.operation.signal,
@@ -184,7 +185,7 @@ async function scrollIntoView(step: Step): Promise<void> {
 async function fill(step: Step, value: string): Promise<void> {
   const { devtools, window, backendNodeId, budget } = step;
   await waitReady(step, 'checkEditable');
-  // A date, time, color, or range input takes no typed text: its value is set, as Playwright's fill does.
+  // A date, time, color, or range input takes no typed text: its value is set, as a browser's own picker does.
   const set = await budget.send(() => devtools.callOn(window.page, backendNodeId, 'setValue', value));
   if (set !== null) {
     if (!set.ok) throw notActionable(set.reason);
@@ -193,7 +194,7 @@ async function fill(step: Step, value: string): Promise<void> {
   // The app's focus handler can hand focus on; text goes only to the node that still holds it.
   if (!(await budget.send(() => devtools.callOn(window.page, backendNodeId, 'selectContents')))) throw lostFocus();
   // Text replaces the selection as typing would, with input events and no key events, as fill promises; an empty value
-  // is a Delete key, as Playwright's fill sends it, so an editor that keeps its own model sees beforeinput.
+  // is a Delete key, so an editor that keeps its own model sees beforeinput.
   if (value === '') await budget.send(() => window.page.keyboard.press('Delete'));
   else await budget.send(() => window.page.keyboard.insertText(value));
 }
@@ -219,11 +220,11 @@ async function setChecked(step: Step, want: boolean): Promise<void> {
 
 async function press(step: Step, action: ActionOf<'press'>): Promise<void> {
   // A key the keyboard cannot send is refused before focus moves.
-  const key = playwrightKey(action.key);
+  const chord = keyChord(action.key);
   await waitReady(step, 'checkConnected');
   // The key goes to what holds focus after the node is focused, as on the web: a node that cannot take focus (a plain div) leaves it where it was.
   await step.budget.send(() => step.devtools.callOn(step.window.page, step.backendNodeId, 'focus'));
-  await step.budget.send(() => step.window.page.keyboard.press(key));
+  await step.budget.send(() => step.window.page.keyboard.press(chord.key, chord.modifiers));
 }
 
 async function selectOption(step: Step, action: ActionOf<'selectOption'>): Promise<void> {
@@ -247,8 +248,7 @@ async function setInputFiles(step: Step, action: ActionOf<'setInputFiles'>): Pro
     await step.budget.send(() => step.devtools.callOn(step.window.page, step.backendNodeId, 'clearFiles'));
     return;
   }
-  const session = await step.devtools.session(step.window.page);
-  await step.budget.send(() => session.send('DOM.setFileInputFiles', { files, backendNodeId: step.backendNodeId }));
+  await step.budget.send(() => step.window.page.session.send('DOM.setFileInputFiles', { files, backendNodeId: step.backendNodeId }));
 }
 
 async function dragTo(step: Step, action: ActionOf<'dragTo'>): Promise<void> {
@@ -270,14 +270,14 @@ async function swipeNode(step: Step, action: ActionOf<'swipe'>): Promise<void> {
   // The layout can change after the wait for actionability read the box.
   const box = await contentBox(step);
   if (box === undefined) throw notActionable('the element has no box on screen to swipe');
-  await swipe(step.budget, step.devtools, step.window, point, box, action);
+  await swipe(step.budget, step.window, point, box, action);
 }
 
 // --- pointer gestures at a point, which node and point actions share ---
 
-async function click(budget: Budget, window: AppWindow, at: ViewportPoint, options: { readonly clickCount?: number; readonly button?: 'left' | 'right'; readonly modifiers?: readonly string[] }): Promise<void> {
+async function click(budget: Budget, window: AppWindow, at: ViewportPoint, options: { readonly clickCount?: number; readonly button?: MouseButton; readonly modifiers?: readonly string[] }): Promise<void> {
   const { clickCount = 1, button = 'left', modifiers = [] } = options;
-  await budget.send(() => withModifiers(window, modifiers, () => window.page.mouse.click(at.x, at.y, { clickCount, button })));
+  await budget.send(() => withModifiers(window, modifiers, () => window.page.mouse.click(at.x, at.y, button, clickCount)));
 }
 
 async function hover(budget: Budget, window: AppWindow, at: ViewportPoint): Promise<void> {
@@ -327,14 +327,14 @@ async function drag(budget: Budget, window: AppWindow, from: ViewportPoint, targ
 }
 
 /** A wheel scroll with the pointer at a point, its distance a share of `box` by momentum, then a frame for the app to render it. */
-async function swipe(budget: Budget, devtools: DevTools, window: AppWindow, at: ViewportPoint, box: Size, action: { readonly direction: ScrollDirection; readonly momentum?: Momentum }): Promise<void> {
+async function swipe(budget: Budget, window: AppWindow, at: ViewportPoint, box: Size, action: { readonly direction: ScrollDirection; readonly momentum?: Momentum }): Promise<void> {
   const { direction } = action;
   const extent = direction === 'up' || direction === 'down' ? box.height : box.width;
   const distance = Math.max(1, Math.round(extent * WHEEL_SHARE[action.momentum ?? 'none']));
   const [deltaX, deltaY] = direction === 'down' ? [0, distance] : direction === 'up' ? [0, -distance] : direction === 'right' ? [distance, 0] : [-distance, 0];
   await budget.send(() => window.page.mouse.move(at.x, at.y));
   await budget.send(() => window.page.mouse.wheel(deltaX, deltaY));
-  await devtools.evaluate(window.page, nextFrame);
+  await window.page.evaluate(nextFrame);
 }
 
 async function withModifiers(window: AppWindow, modifiers: readonly string[], work: () => Promise<void>): Promise<void> {
@@ -347,22 +347,19 @@ async function withModifiers(window: AppWindow, modifiers: readonly string[], wo
   }
 }
 
-function modifierKey(modifier: string): string {
-  return modifier === 'ControlOrMeta' ? (process.platform === 'darwin' ? 'Meta' : 'Control') : modifier;
-}
-
 /**
- * A key of the contract grammar in Playwright's spelling: the same names, and
- * `Space` as the space character. Playwright's keyboard knows the named keys
- * and the printable ASCII characters; any other character (`é`, `ß`) is
+ * A key of the contract grammar as the keyboard presses it: the key and the
+ * modifiers held with it. The keyboard has the named keys and the characters
+ * of a US layout; any other character (`é`, `ß`) is
  * `UNSUPPORTED_CAPABILITY`, as the contract asks of a key a surface cannot
  * deliver.
  */
-export function playwrightKey(key: string): string {
+export function keyChord(key: string): { readonly key: string; readonly modifiers: readonly string[] } {
   const parsed = parseKey(key);
   if (parsed === undefined) throw unsupported(`${JSON.stringify(key)} is not a key of the contract grammar`);
-  if (parsed.key.kind === 'char' && !/^[\x20-\x7e]$/.test(parsed.key.char)) {
-    throw unsupported(`the keyboard cannot press ${JSON.stringify(parsed.key.char)}: only named keys and printable ASCII characters have a key; type other text with fill or pressSequentially`);
+  const name = parsed.key.kind === 'char' ? parsed.key.char : parsed.key.name;
+  if (!hasKey(name)) {
+    throw unsupported(`the keyboard cannot press ${JSON.stringify(name)}: only named keys and the characters of a US keyboard have a key; type other text with fill or pressSequentially`);
   }
-  return key === 'Space' ? ' ' : key.replace(/\+Space$/, '+ ');
+  return { key: name, modifiers: parsed.modifiers };
 }

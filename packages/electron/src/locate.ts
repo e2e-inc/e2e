@@ -31,7 +31,7 @@ export interface ProjectionContext {
 
 /** Reads the window: its accessibility tree and a DOM snapshot of the same document, with the geometry joining them. */
 export async function readWindow(devtools: DevTools, window: AppWindow): Promise<RawRead> {
-  const session = await devtools.session(window.page);
+  const { session } = window.page;
   const [{ nodes }, snapshot, metrics] = await Promise.all([
     session.send('Accessibility.getFullAXTree'),
     devtools.snapshot(window.page),

@@ -15,8 +15,8 @@ describe('translate', () => {
   });
 
   it('maps a protocol failure by what went away', () => {
-    expect(code(new Error('Target page, context or browser has been closed'), false)).toBe('INVALID_STATE');
-    expect(code(new Error('Protocol error (DOM.resolveNode): No node with given id found'), false)).toBe('NODE_STALE');
+    expect(code(new Error('Accessibility.getFullAXTree: session detached'), false)).toBe('INVALID_STATE');
+    expect(code(new Error('DOM.resolveNode: No node with given id found'), false)).toBe('NODE_STALE');
     expect(code(new Error('Node is detached: it is no longer in the document'), false)).toBe('NODE_STALE');
     expect(code(new Error('something else'), false)).toBe('ENGINE_FAILURE');
   });
@@ -45,8 +45,8 @@ describe('translate', () => {
 
 describe('closedWindow', () => {
   it('tells a closed window or app from any other failure', () => {
-    expect(closedWindow(new Error('Target page, context or browser has been closed'))).toBe(true);
-    expect(closedWindow(new Error('browser has disconnected'))).toBe(true);
+    expect(closedWindow(new Error('Accessibility.getFullAXTree: session detached'))).toBe(true);
+    expect(closedWindow(new Error('Runtime.evaluate: connection closed'))).toBe(true);
     expect(closedWindow(new Error('No node with given id found'))).toBe(false);
   });
 });

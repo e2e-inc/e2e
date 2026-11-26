@@ -8,8 +8,8 @@ implement. A test written against `screen`, `expect`, `app`, and `agent` runs
 on an Electron target unchanged.
 
 It is also the reference for an engine built outside this repository: it
-imports only `@e2e-dev/core/engine` and Playwright's public Electron launcher,
-never another engine. [Engines](https://e2e.com/docs/engines) lists what
+imports only `@e2e-dev/core/engine` and speaks the DevTools protocol itself,
+with no automation library and never another engine. [Engines](https://e2e.com/docs/engines) lists what
 building it changed in the contract.
 
 ## Install

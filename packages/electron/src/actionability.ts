@@ -54,7 +54,7 @@ export async function waitReady<K extends ReadinessCheck>(target: WaitTarget, ch
  */
 export async function actionablePoint(target: WaitTarget, enabled: boolean): Promise<ViewportPoint> {
   const { devtools, window, backendNodeId } = target;
-  const session = await devtools.session(window.page);
+  const { session } = window.page;
   let reason = 'it never became actionable';
   let point: ViewportPoint | undefined;
   let covered = false;
@@ -97,7 +97,7 @@ export async function actionablePoint(target: WaitTarget, enabled: boolean): Pro
 
 /** The node's first content box with an area, in viewport CSS pixels; undefined when it has none. A node that is gone fails. */
 export async function contentBox(target: Pick<WaitTarget, 'devtools' | 'window' | 'backendNodeId'>): Promise<Box | undefined> {
-  const session = await target.devtools.session(target.window.page);
+  const { session } = target.window.page;
   const { quads } = await session.send('DOM.getContentQuads', { backendNodeId: target.backendNodeId }).catch((cause: unknown) => {
     if (cause instanceof Error && GONE.test(cause.message)) throw cause;
     return { quads: [] as number[][] };

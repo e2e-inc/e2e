@@ -10,6 +10,4 @@ export type { ElectronEngine } from './engine.ts';
 /** The engine factory again, as the default export: what `e2e mcp` calls when `open_session` names this package as its `engine`. */
 export { electron as default } from './engine.ts';
 export type { ElectronOptions } from './options.ts';
-export type { Electron, ElectronMainModule } from './electron.ts';
-export type { ElectronWindow, WindowMatcher } from './surface.ts';
-export type { ElectronFixtures } from './fixtures.ts';
+export type { Electron, ElectronFixtures, ElectronMainModule, ElectronWindow, WindowMatcher } from './fixtures.ts';

@@ -217,6 +217,9 @@ jobs:
         uses: ./.github/actions/chromium
       - name: Build
         run: pnpm --filter @e2e-dev/core --filter e2e --filter @e2e-dev/electron run build
+      # The engine's own launches and page-side code on real Electron windows.
+      - name: Electron integration tests
+        run: xvfb-run --auto-servernum pnpm --filter @e2e-dev/electron run test:integration
       - name: Electron testbed
         run: xvfb-run --auto-servernum pnpm --filter @e2e-dev/electron-testbed test
 

@@ -1,4 +1,4 @@
-/** The engine errors this surface raises, and the translation of a protocol or Playwright failure into them. */
+/** The engine errors this surface raises, and the translation of a protocol failure into them. */
 
 import { ConfigurationError, EngineError, TestError } from '@e2e-dev/core/engine';
 
@@ -22,10 +22,10 @@ export function lostFocus(): EngineError {
   return notActionable('the element did not keep keyboard focus (the app moved it), so the input would reach another element');
 }
 
-/** Protocol and Playwright failures that mean the node, or the document it was in, is gone. */
+/** Protocol failures that mean the node, or the document it was in, is gone. */
 export const GONE = /No node found|Could not find node|Node is detached|No node with given id|Cannot find context with specified id|Execution context was destroyed|Cannot find object with id|Node is not an element|does not belong to the document|frame was detached/i;
 /** Failures that mean the window, or the whole app, closed. */
-const CLOSED = /Target (page, context or browser )?(has been )?closed|Target closed|has been closed|Session closed|browser has disconnected|No target with given id|Protocol error.*Target/i;
+const CLOSED = /session detached|connection closed|Target closed|No target with given id|Session with given id not found|No session with given id/i;
 
 /** Whether a failure means the window, or the whole app, closed. */
 export function closedWindow(cause: unknown): boolean {

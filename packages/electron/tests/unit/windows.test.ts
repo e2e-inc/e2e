@@ -1,9 +1,9 @@
 import { EventEmitter } from 'node:events';
-import type { Page } from 'playwright-core';
 import { describe, expect, it } from 'vitest';
+import type { PageTarget } from '../../src/page.ts';
 import { nodeId, Windows } from '../../src/windows.ts';
 
-/** The part of a Playwright page the registry reads: its URL, whether it closed, and its close event. */
+/** The part of a page target the registry reads: its URL, whether it closed, and its close event. */
 class FakePage extends EventEmitter {
   private closed = false;
   readonly address: string;
@@ -29,7 +29,7 @@ class FakePage extends EventEmitter {
 
 function open(windows: Windows, address?: string): { readonly page: FakePage; readonly serial: number } {
   const page = new FakePage(address);
-  const window = windows.add(page as unknown as Page);
+  const window = windows.add(page as unknown as PageTarget);
   if (window === undefined) throw new Error('the page was not registered');
   return { page, serial: window.serial };
 }
@@ -46,10 +46,10 @@ describe('Windows', () => {
   it('registers a page once, and never a closed one', () => {
     const windows = new Windows();
     const { page } = open(windows);
-    expect(windows.add(page as unknown as Page)).toBeUndefined();
+    expect(windows.add(page as unknown as PageTarget)).toBeUndefined();
     const closed = new FakePage();
     closed.close();
-    expect(windows.add(closed as unknown as Page)).toBeUndefined();
+    expect(windows.add(closed as unknown as PageTarget)).toBeUndefined();
   });
 
   it('goes back to the window shown before when the shown one closes, else to the newest', () => {
@@ -99,9 +99,9 @@ describe('Windows', () => {
     const windows = new Windows();
     const { page } = open(windows);
     const shown = windows.current()!;
-    windows.markCrashed(page as unknown as Page);
+    windows.markCrashed(page as unknown as PageTarget);
     expect(windows.isCrashed(shown)).toBe(true);
-    windows.markLoaded(page as unknown as Page);
+    windows.markLoaded(page as unknown as PageTarget);
     expect(windows.isCrashed(shown)).toBe(false);
     windows.clear();
     expect(windows.open()).toEqual([]);

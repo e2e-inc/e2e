@@ -4,44 +4,9 @@
  * `electron.<method>` step bounded by the action timeout.
  */
 
-import { ConfigurationError, isSecret, stepTimeout, type EngineFixtureContext, type Locator } from '@e2e-dev/core/engine';
-import type { ElectronSurface, ElectronWindow, WindowMatcher } from './surface.ts';
-
-/**
- * The main process's `electron` module, as a function passed to `evaluate`
- * receives it: typed by the project's own `electron` package, the optional
- * peer every Electron project installs.
- */
-export type ElectronMainModule = typeof import('electron');
-
-/** Deterministic Electron app management exposed to tests as `electron`. */
-export interface Electron {
-  /**
-   * Runs `fn` in the app's main process and returns what it returns, which
-   * must be serializable. `fn` is sent as source text: it cannot close over
-   * the test's variables, so pass them as `arg`. Code with the main
-   * process's full authority, as trusted as the test itself.
-   */
-  evaluate<R>(fn: (electron: ElectronMainModule) => R | Promise<R>): Promise<R>;
-  /** Runs `fn` in the main process with `arg`, which a function that takes one must be given. */
-  evaluate<R, A>(fn: (electron: ElectronMainModule, arg: A) => R | Promise<R>, arg: A): Promise<R>;
-  /** The app's open windows, in the order they opened, the one `screen` reads marked `shown`. */
-  windows(): Promise<readonly ElectronWindow[]>;
-  /**
-   * Reads and acts in another window from now on: the window at a position,
-   * or the first whose title or URL matches (a string exactly, or a RegExp).
-   * Waits for such a window to open, up to `timeout` milliseconds or else
-   * the action timeout.
-   */
-  useWindow(which: WindowMatcher, options?: { readonly timeout?: number }): Promise<ElectronWindow>;
-  /**
-   * A locator for a CSS selector in the window `screen` reads, for an element
-   * no role, label, text, or test id names. It matches in the window's
-   * document and in each open shadow root, one root at a time, and never
-   * enters a frame.
-   */
-  locator(selector: string): Locator;
-}
+import { ConfigurationError, isSecret, stepTimeout, type EngineFixtureContext } from '@e2e-dev/core/engine';
+import type { Electron, ElectronMainModule } from './fixtures.ts';
+import type { ElectronSurface } from './surface.ts';
 
 export function createElectronFixture(surface: ElectronSurface, context: EngineFixtureContext): Electron {
   const electron: Electron = {

@@ -1,10 +1,10 @@
 import { defineConfig } from 'vitest/config';
 
 /**
- * Unit tests project captured Chromium reads and check the options, fully in
- * parallel. Integration tests run the page-side functions in Chromium, which
- * the web engine's tests install too. A real Electron app is the Electron
- * testbed's.
+ * Unit tests project captured Chromium reads and check the options and the
+ * protocol client, fully in parallel. Integration tests start real Electron
+ * apps, so they need a display: `pnpm test:integration`, under `xvfb-run` on
+ * Linux. The Electron testbed runs whole tests on one.
  */
 export default defineConfig({
   test: {
@@ -25,6 +25,7 @@ export default defineConfig({
         test: {
           name: 'integration',
           include: ['tests/integration/**/*.test.ts'],
+          globalSetup: ['tests/integration/electron-binary.ts'],
           testTimeout: 30_000,
           hookTimeout: 30_000,
           pool: 'forks',

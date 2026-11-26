@@ -62,13 +62,13 @@ const DEFAULT_LAUNCH_TIMEOUT_MS = 30_000;
 /**
  * Why the engine refuses a launch argument it owns, or undefined: Chromium's
  * profile directory (every attempt gets an empty one), and the inspector and
- * DevTools ports Playwright drives the app through (a fixed port would also
- * collide between workers).
+ * the DevTools transport the engine drives the app through (a fixed port
+ * would also collide between workers).
  */
 export function ownedArgument(argument: string): string | undefined {
   if (/^--user-data-dir(=|$)/.test(argument)) return 'must not set --user-data-dir: the engine gives every attempt an empty one of its own';
   const port = /^(--inspect(-brk)?|--remote-debugging-port|--remote-debugging-pipe)(=|$)/.exec(argument);
-  if (port !== null) return `must not set ${port[1]}: the engine drives the app through the inspector and DevTools ports it opens itself`;
+  if (port !== null) return `must not set ${port[1]}: the engine opens the inspector and the DevTools pipe it drives the app through itself`;
   return undefined;
 }
 const DEFAULT_SETTLE_MS = 100;

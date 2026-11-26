@@ -69,3 +69,14 @@ const showScheme = () => {
 };
 scheme.addEventListener('change', showScheme);
 showScheme();
+
+// An HTML drag: the drop reads what dragstart put in the data transfer, which only a real drag carries.
+const tray = document.querySelector('#tray');
+document.querySelector('#card').addEventListener('dragstart', (event) => {
+  event.dataTransfer.setData('text/plain', 'card');
+});
+tray.addEventListener('dragover', (event) => event.preventDefault());
+tray.addEventListener('drop', (event) => {
+  event.preventDefault();
+  document.querySelector('[data-testid="tray-status"]').textContent = `Tray holds ${event.dataTransfer.getData('text/plain')}`;
+});

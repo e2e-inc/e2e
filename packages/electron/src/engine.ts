@@ -2,9 +2,9 @@
  * The Electron engine for e2e: an Electron app's body built with the public
  * `defineEngine`, validated by the same rules and graded by the same
  * capabilities as any other engine. Core imports nothing from here, and this
- * package imports nothing from another engine: the contract comes from
- * `@e2e-dev/core/engine`, the launcher and the DevTools protocol from
- * Playwright. It contributes the `electron` fixture the way the browser
+ * package imports nothing from another engine and no automation library: the
+ * contract comes from `@e2e-dev/core/engine`, and it speaks the DevTools
+ * protocol itself. It contributes the `electron` fixture the way the browser
  * engine contributes `browser`.
  */
 

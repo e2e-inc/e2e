@@ -132,3 +132,6 @@ customElements.define('word-button', class extends HTMLElement {
 document.getElementById('ask').addEventListener('click', () => {
   document.querySelector('[data-testid="ask-result"]').textContent = `confirm returned ${confirm('Sure?')}`;
 });
+
+// A modal dialog is in the top layer, above everything the page stacks with z-index.
+document.getElementById('open-vault').addEventListener('click', () => document.getElementById('vault-dialog').showModal());

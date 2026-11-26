@@ -3,38 +3,26 @@
  * `screen` and the agent read, and the node refs that name a node in one.
  */
 
-import type { Page } from 'playwright-core';
 import { pollCondition, type NodeRef, type OperationContext } from '@e2e-dev/core/engine';
 import { invalidState, notActionable, stale } from './errors.ts';
-import { Budget } from './budget.ts';
+import { answerWithin, Budget } from './budget.ts';
+import type { ElectronWindow, WindowMatcher } from './fixtures.ts';
+import type { PageTarget } from './page.ts';
+
+/** How long a window gets to say its document's title. */
+const TITLE_MS = 1_000;
 
 /** The observation root's id: one surface, one root, whichever window it reads. */
 export const ROOT_ID = 'window';
 
 /** One open window of the app: its page and the serial its node ids carry. */
 export interface AppWindow {
-  readonly page: Page;
+  readonly page: PageTarget;
   readonly serial: number;
 }
 
-/** A window of the running app, as the `electron` fixture lists it. */
-export interface ElectronWindow {
-  /** Its position among the open windows, in the order they opened: what `useWindow` and the agent's tab tools take. */
-  readonly index: number;
-  /** The document's title. */
-  readonly title: string;
-  /** The OS window's title (`BrowserWindow.getTitle()`), when it differs from the document's; a view has none of its own. */
-  readonly windowTitle?: string;
-  readonly url: string;
-  /** Whether `screen` and the agent read and act in this window. */
-  readonly shown: boolean;
-}
-
 /** Reads the OS window's title of a window's page; undefined for a view with no window of its own. */
-export type WindowTitle = (page: Page) => Promise<string | undefined>;
-
-/** Which window `useWindow` picks: a position, or the first whose title (the document's or the OS window's) or URL matches. */
-export type WindowMatcher = number | { readonly title?: string | RegExp; readonly url?: string | RegExp };
+export type WindowTitle = (page: PageTarget) => Promise<string | undefined>;
 
 /** The node id a window's node carries: the window's serial and the node's backend id. */
 export function nodeId(window: AppWindow, backendNodeId: number): string {
@@ -42,15 +30,15 @@ export function nodeId(window: AppWindow, backendNodeId: number): string {
 }
 
 export class Windows {
-  private readonly byPage = new Map<Page, AppWindow>();
+  private readonly byPage = new Map<PageTarget, AppWindow>();
   private shown: AppWindow | undefined;
   /** The windows shown before the current one, oldest first: closing the shown window goes back to the latest still open. */
   private history: AppWindow[] = [];
   private nextSerial = 1;
-  private readonly crashed = new Set<Page>();
+  private readonly crashed = new Set<PageTarget>();
 
   /** Registers a page the app opened, once; undefined when it is already known or closed. Its node ids get a serial of their own. */
-  add(page: Page): AppWindow | undefined {
+  add(page: PageTarget): AppWindow | undefined {
     if (this.byPage.has(page) || page.isClosed()) return undefined;
     const window: AppWindow = { page, serial: this.nextSerial++ };
     this.byPage.set(page, window);
@@ -63,18 +51,18 @@ export class Windows {
    * Forgets a window that closed. A read can fail on a closed window before
    * its close event arrives; it discards the window itself and reads again.
    */
-  discard(page: Page): void {
+  discard(page: PageTarget): void {
     const window = this.byPage.get(page);
     this.byPage.delete(page);
     if (window !== undefined && this.shown === window) this.shown = this.fallback();
   }
 
   /** Marks a window whose renderer crashed, until it loads a page again. */
-  markCrashed(page: Page): void {
+  markCrashed(page: PageTarget): void {
     this.crashed.add(page);
   }
 
-  markLoaded(page: Page): void {
+  markLoaded(page: PageTarget): void {
     this.crashed.delete(page);
   }
 
@@ -103,8 +91,14 @@ export class Windows {
     return this.history.pop() ?? open.at(-1);
   }
 
-  isShown(window: AppWindow): boolean {
-    return this.shown === window;
+  /** Whether a page is registered as a window. */
+  has(page: PageTarget): boolean {
+    return this.byPage.has(page);
+  }
+
+  /** Whether a page is the window `screen` and the agent read. */
+  isShownPage(page: PageTarget): boolean {
+    return this.shown?.page === page;
   }
 
   /** The open windows, in the order they opened. A `WebContentsView` is a page of its own and counts as a window. */
@@ -163,7 +157,8 @@ export class Windows {
     const shown = this.current();
     return await Promise.all(
       this.open().map(async (window, index) => {
-        const [title, own] = await Promise.all([window.page.title().catch(() => ''), windowTitle(window.page)]);
+        // A window whose renderer crashed, or is busy, never answers: it is listed without a title rather than not at all.
+        const [title = '', own] = await Promise.all([answerWithin(window.page.title(), TITLE_MS), windowTitle(window.page)]);
         return { window, entry: { index, title, ...(own === undefined || own === title ? {} : { windowTitle: own }), url: window.page.url(), shown: window === shown } };
       }),
     );

@@ -6,10 +6,11 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ConfigurationError, readPngSize, type EngineSnapshot, type ObservationPixels } from '@e2e-dev/core/engine';
-import type { Locator } from 'playwright-core';
 import type { DevTools } from './devtools.ts';
+import { pixelRatio, placeMasks, removeMasks, type MaskState } from './in-page/masks.ts';
 import { viewportSize } from './in-page/node-ops.ts';
 import type { RawRead } from './locate.ts';
+import type { PageTarget } from './page.ts';
 import { MASKED_TAGS } from './snapshot.ts';
 import type { AppWindow } from './windows.ts';
 
@@ -37,35 +38,54 @@ function outOfReach(count: number): string {
  * capture runs, inside a closed shadow root or beside the masks already
  * placed, so the document is read again before the pixels go out.
  */
-async function maskedCapture(devtools: DevTools, window: AppWindow, unmaskableBefore: number, scale: 'css' | 'device'): Promise<MaskedCapture> {
-  const masks = window.page.locator(MASKED_SELECTOR);
-  const masked = await masks.count();
-  if (unmaskableBefore > 0) return { masked, withheld: outOfReach(unmaskableBefore) };
-  const placed = await maskBoxes(masks);
-  // Animations stopped, so a field a CSS animation moves stays under the mask measured for it.
-  const image = await window.page.screenshot({ scale, mask: [masks], maskColor: '#000000', caret: 'hide', animations: 'disabled' });
-  const after = await unmaskable(devtools, window);
-  if (after > 0) return { masked, withheld: outOfReach(after) };
-  if ((await masks.count()) > masked) {
+function maskedCapture(devtools: DevTools, window: AppWindow, unmaskableBefore: number, scale: 'css' | 'device'): Promise<MaskedCapture> {
+  // One capture of a page at a time: the masks are the page's, and a second capture would take the first one's away.
+  const turn = (captures.get(window.page) ?? Promise.resolve()).then(() => captureUnderMasks(devtools, window, unmaskableBefore, scale));
+  captures.set(window.page, turn.catch(() => undefined));
+  return turn;
+}
+
+const captures = new WeakMap<PageTarget, Promise<unknown>>();
+
+async function captureUnderMasks(devtools: DevTools, window: AppWindow, unmaskableBefore: number, scale: 'css' | 'device'): Promise<MaskedCapture> {
+  const { page } = window;
+  if (unmaskableBefore > 0) return { masked: (await page.evaluate(removeMasks, MASKED_SELECTOR)).count, withheld: outOfReach(unmaskableBefore) };
+  const placed = await page.evaluate(placeMasks, MASKED_SELECTOR);
+  const { count: masked } = placed;
+  let image: Buffer;
+  let after: MaskState | undefined;
+  try {
+    image = await captureViewport(window, scale);
+  } finally {
+    // The masks never outlive the capture, whatever became of it.
+    after = await page.evaluate(removeMasks, MASKED_SELECTOR).catch(() => undefined);
+  }
+  // A document that navigated or reloaded under the capture took its masks with it: the image may show the new one bare.
+  if (after?.placed !== true) return { masked, withheld: 'the window loaded another document while the screenshot was taken, without its masks, so the screenshot is withheld' };
+  const unmaskableAfter = await unmaskable(devtools, window);
+  if (unmaskableAfter > 0) return { masked, withheld: outOfReach(unmaskableAfter) };
+  if (after.count > masked) {
     return { masked, withheld: 'a password field or nested document appeared while the screenshot was taken, after its masks were placed, so the screenshot is withheld' };
   }
   // A mask is painted where its element was measured: one a script moved since may show beside its mask.
-  if ((await maskBoxes(masks)) !== placed) {
+  if (after.boxes !== placed.boxes) {
     return { masked, withheld: 'a password field or nested document moved while the screenshot was taken, out from under its mask, so the screenshot is withheld' };
   }
   return { masked, image };
 }
 
-/** Where the masked elements are in the viewport, as one comparable string. */
-async function maskBoxes(masks: Locator): Promise<string> {
-  return await masks.evaluateAll((elements) =>
-    elements
-      .map((element) => {
-        const { x, y, width, height } = element.getBoundingClientRect();
-        return [x, y, width, height].map(Math.round).join(',');
-      })
-      .join(';'),
-  );
+/** The window's viewport as a PNG: one image pixel per CSS pixel, or per device pixel. */
+async function captureViewport(window: AppWindow, scale: 'css' | 'device'): Promise<Buffer> {
+  const { page } = window;
+  let clip: { x: number; y: number; width: number; height: number; scale: number } | undefined;
+  if (scale === 'css') {
+    const [{ cssVisualViewport: scrolled }, { width, height }, ratio] = await Promise.all([page.session.send('Page.getLayoutMetrics'), page.evaluate(viewportSize), page.evaluate(pixelRatio)]);
+    // A clip is in the document's coordinates, so the window's is where the document is scrolled to. It is the window's
+    // whole inner size, scrollbars included, as a capture with no clip is.
+    if (ratio !== 1) clip = { x: scrolled.pageX, y: scrolled.pageY, width, height, scale: 1 / ratio };
+  }
+  const { data } = await page.session.send('Page.captureScreenshot', { format: 'png', ...(clip === undefined ? {} : { clip }) });
+  return Buffer.from(data, 'base64');
 }
 
 /** Adds the pixels to an observation of a read window, or leaves them out when they are withheld. */
@@ -73,7 +93,7 @@ export async function withPixels(devtools: DevTools, raw: RawRead, snapshot: Eng
   const capture = await maskedCapture(devtools, raw.window, raw.dom.unmaskableCount(), 'css');
   if ('withheld' in capture) return { ...snapshot, maskedRegionCount: capture.masked };
   const data = new Uint8Array(capture.image);
-  const { width: css } = await devtools.evaluate(raw.window.page, viewportSize);
+  const { width: css } = await raw.window.page.evaluate(viewportSize);
   const size = readPngSize(data);
   if (size === undefined) throw new Error('the window capture is not a PNG');
   const pixels: ObservationPixels = { data, mediaType: 'image/png', width: size.width, height: size.height, scale: css > 0 ? size.width / css : 1 };

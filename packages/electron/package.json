@@ -45,12 +45,10 @@
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc --project tsconfig.build.json && node ../../scripts/stamp-dist.ts",
     "prepublishOnly": "node ../../scripts/check-dist.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --project unit",
     "test:watch": "vitest",
-    "test:unit": "vitest run tests/unit"
-  },
-  "dependencies": {
-    "playwright-core": "1.65.1"
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run --project integration"
   },
   "peerDependencies": {
     "@e2e-dev/core": ">=0.25.1 <1",
@@ -67,7 +65,9 @@
   },
   "devDependencies": {
     "@e2e-dev/core": "workspace:*",
+    "@napi-rs/image": "1.16.0",
     "@types/node": "26.6.11",
+    "devtools-protocol": "0.0.1755318",
     "e2e": "workspace:*",
     "electron": "45.5.0",
     "typescript": "7.0.2",

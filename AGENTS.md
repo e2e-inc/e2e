@@ -150,8 +150,9 @@ suites that consume the built packages the way a user would.
 - `packages/electron` - the published `@e2e-dev/electron` package: the
   Electron engine, contributing the `electron` fixture, and the reference
   for an engine built outside this repository (ENG-892): it imports
-  `@e2e-dev/core/engine` and Playwright's public `_electron` launcher and
-  `CDPSession`, never another engine. What it needs from core becomes public
+  `@e2e-dev/core/engine` and nothing else at run time: it starts the binary
+  and speaks the DevTools protocol itself (`src/cdp/`, typed by
+  `devtools-protocol`), never another engine or an automation library. What it needs from core becomes public
   contract (`expressionSelectors` came from it); `docs/engines.mdx` lists the
   assumptions it broke. `app.open()` launches the project's `electron`
   package on `app.appPath` (or `executablePath`) with a private

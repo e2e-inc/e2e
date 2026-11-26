@@ -143,6 +143,14 @@ test.describe('controls page', () => {
     await expect.poll(() => existsSync(path.join(downloads, 'note.txt'))).toBe(true);
   });
 
+  test('drags a draggable element onto a drop target, with the data its dragstart set', async ({ screen }) => {
+    await screen.getByRole('button', 'Card to move').dragTo(screen.getByRole('region', 'Tray'));
+    await expect(screen.getByTestId('tray-status')).toHaveText('Tray holds card');
+    // The drag ended with the drop: the pointer is free for the next action.
+    await screen.getByRole('button', 'Hold').tap();
+    await expect(screen.getByTestId('hold-state')).toHaveText('up');
+  });
+
   test('releases a long press its timeout cuts short before the step fails', async ({ screen }) => {
     const cut = await failure(screen.getByRole('button', 'Hold').longPress({ duration: 3000, timeout: 1000 }));
     expect((cut as { cause?: { code?: string } }).cause?.code).toBe('ACTION_MAY_HAVE_COMMITTED');
@@ -158,6 +166,8 @@ test.describe('controls page', () => {
     await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.forcefullyCrashRenderer());
     const crashed = await failure(screen.getByRole('heading', 'Controls').waitFor({ timeout: 1000 }));
     expect(crashed).toMatchObject({ code: 'APP_NOT_OPEN', message: expect.stringContaining('renderer crashed') });
+    // The crashed window is still one of the app's windows, with no title to give.
+    expect(await electron.windows()).toMatchObject([{ index: 0, title: '', shown: true }]);
     await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.reload());
     await expect(screen.getByRole('heading', 'Controls')).toBeVisible({ timeout: 5000 });
   });

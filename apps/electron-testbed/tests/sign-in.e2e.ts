@@ -326,6 +326,15 @@ test.describe('screenshots', () => {
     expect(blackShare(image, beside!, scale)).toBeLessThan(0.5);
   });
 
+  test('paints over a password field in a modal dialog, which sits above the rest of the page', async ({ app, screen, electron }) => {
+    await screen.getByRole('button', 'Open vault dialog').tap();
+    await screen.getByTestId('vault-pin').fill('4321');
+    const field = await screen.getByTestId('vault-pin').boundingBox();
+    const image = decode(new Uint8Array(readFileSync(await app.screenshot('vault-dialog'))));
+    const { width } = await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getContentBounds());
+    expect(blackShare(image, field!, image.width / width)).toBe(1);
+  });
+
   test('withholds a screenshot of a window whose password field no mask reaches', async ({ app, screen, electron }) => {
     await screen.getByRole('button', 'Open settings').tap();
     await electron.useWindow({ title: 'Settings' });

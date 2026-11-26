@@ -2,13 +2,13 @@
  * The Electron surface: one app per attempt, launched by `app.open()` with
  * an empty user-data directory of the attempt's own, its windows read
  * through Chromium's accessibility tree over the DevTools protocol and
- * driven with trusted input events. Everything here goes through public
- * APIs: Playwright's `_electron` launcher and `CDPSession`, and the engine
- * contract of `@e2e-dev/core/engine`.
+ * driven with trusted input events. Everything here goes through the engine
+ * contract of `@e2e-dev/core/engine` and the DevTools protocol itself: the
+ * engine starts the binary and speaks the protocol with no library between.
  *
  * The state has three lifetimes, each in a module of its own: the worker's
- * (options, executable, `DevTools`), the attempt's (its user-data directory
- * and artifacts), and the running app's (`AppProcess` and `Windows`).
+ * (options, executable), the attempt's (its user-data directory and
+ * artifacts), and the running app's (`AppProcess` and `Windows`).
  */
 
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -38,14 +38,13 @@ import { AppProcess, DISCARD_CLOSE_MS, RESTART_CLOSE_MS } from './app-process.ts
 import { answerWithin, withBudget, type Budget } from './budget.ts';
 import { screenshotFile, screenshotName, withPixels } from './capture.ts';
 import { DevTools } from './devtools.ts';
-import type { ElectronMainModule } from './electron.ts';
+import type { ElectronMainModule } from './fixtures.ts';
 import { closedWindow, invalidState, notActionable } from './errors.ts';
 import { appPathProblem, describeExecutable, ensureElectronBinary, resolveExecutable } from './executable.ts';
 import { locateIn, projectRead, readWindow, type ProjectionContext, type RawRead } from './locate.ts';
 import type { ResolvedElectronOptions } from './options.ts';
-import { ROOT_ID, Windows, type AppWindow, type ElectronWindow, type WindowMatcher } from './windows.ts';
-
-export type { ElectronWindow, WindowMatcher } from './windows.ts';
+import type { ElectronWindow, WindowMatcher } from './fixtures.ts';
+import { ROOT_ID, Windows, type AppWindow } from './windows.ts';
 
 /** How long a read waits for a crashed window to load again. */
 const CRASH_RELOAD_WAIT_MS = 2_000;
@@ -70,7 +69,7 @@ export class ElectronSurface {
   private readonly app: AppProcess;
 
   constructor(private readonly options: ResolvedElectronOptions) {
-    this.app = new AppProcess(options, this.windowList, this.devtools);
+    this.app = new AppProcess(options, this.windowList);
   }
 
   // --- run and worker lifecycle ---
@@ -164,14 +163,13 @@ export class ElectronSurface {
       const window = this.windowList.current();
       if (window === undefined) return undefined;
       if (this.windowList.isCrashed(window)) {
-        await answerWithin(new Promise<void>((resolve) => window.page.once('load', () => resolve())), deadline.remaining());
+        await answerWithin(window.page.next('load'), deadline.remaining());
         if (this.windowList.isCrashed(window)) throw crashed();
       }
       // A read the renderer's crash leaves pending would never settle: the crash ends it, and the next pass waits.
-      let onCrash: (() => void) | undefined;
+      let stopWaiting: () => void = () => undefined;
       const crash = new Promise<'crashed'>((resolve) => {
-        onCrash = () => resolve('crashed');
-        window.page.once('crash', onCrash);
+        stopWaiting = window.page.on('crash', () => resolve('crashed'));
       });
       try {
         const raw = await Promise.race([readWindow(this.devtools, window), crash]);
@@ -180,7 +178,7 @@ export class ElectronSurface {
         if (!window.page.isClosed() && !closedWindow(cause)) throw cause;
         this.windowList.discard(window.page);
       } finally {
-        if (onCrash !== undefined) window.page.off('crash', onCrash);
+        stopWaiting();
       }
     }
   }
@@ -197,7 +195,7 @@ export class ElectronSurface {
 
   async locate(expression: LocatorExpression, operation: OperationContext): Promise<readonly SemanticNode[]> {
     // An app that is not running has nothing to find, ever: say so rather than let the locator wait out its timeout.
-    if (this.app.running === undefined) throw this.app.notRunning();
+    if (!this.app.running) throw this.app.notRunning();
     return await withBudget(operation, 'locate', async (budget) => {
       // A crashed window is waited on briefly, for a reload already under way; every read waiting the whole timeout
       // would make each step of a test whose app crashed take it.
@@ -237,7 +235,7 @@ export class ElectronSurface {
   }
 
   private requireWindow(): AppWindow {
-    if (this.app.running === undefined) throw this.app.notRunning();
+    if (!this.app.running) throw this.app.notRunning();
     return this.windowList.require();
   }
 
@@ -289,7 +287,7 @@ export class ElectronSurface {
 
   async closeTab(index: number, operation: OperationContext): Promise<void> {
     const window = this.windowList.closable(index);
-    await withBudget(operation, 'close window', (budget) => budget.send(() => window.page.close()));
+    await withBudget(operation, 'close window', (budget) => budget.send(() => this.app.closeWindow(window.page)));
   }
 
   // --- what the fixture asks ---

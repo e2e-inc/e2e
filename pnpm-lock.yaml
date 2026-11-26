@@ -728,17 +728,19 @@ importers:
         version: 5.1.2(@types/node@26.6.11)(vite@8.3.8(@types/node@26.6.11)(esbuild@0.28.2)(jiti@1.21.7)(terser@5.51.2)(tsx@4.23.14)(yaml@2.9.0))
 
   packages/electron:
-    dependencies:
-      playwright-core:
-        specifier: 1.65.1
-        version: 1.65.1
     devDependencies:
       '@e2e-dev/core':
         specifier: workspace:*
         version: link:../core
+      '@napi-rs/image':
+        specifier: 1.16.0
+        version: 1.16.0
       '@types/node':
         specifier: 26.6.11
         version: 26.6.11
+      devtools-protocol:
+        specifier: 0.0.1755318
+        version: 0.0.1755318
       e2e:
         specifier: workspace:*
         version: link:../e2e
@@ -3758,6 +3760,9 @@ packages:
 
   devlop@1.1.0:
     resolution: {integrity: sha512-RWmIqhcFf1lRYBvNmr7qTNuyCt/7/ns2jbpp1+PalgE/rDQcBT0fioSMUpJ93irlUhC5hrg4cYqe6U+0ImW0rA==}
+
+  devtools-protocol@0.0.1755318:
+    resolution: {integrity: sha512-ZTuMGdpyddC36xxOcDACwjr4QJvfz/XtbdomhoJN8rOv+Z8A4ApwEIpsUkBdlIeKE2QtXVU268jiJWpgokDQHg==}
 
   dnssd-advertise@1.1.6:
     resolution: {integrity: sha512-Ndrrf6BMPalkQPd/zubL+4YghH2J9NspapQ09uDXwYbvOPkP0oaqf5CkcwJ0b50kS2O3ul6yVu+jz+RY62Cejg==}
@@ -8445,6 +8450,8 @@ snapshots:
   devlop@1.1.0:
     dependencies:
       dequal: 2.0.3
+
+  devtools-protocol@0.0.1755318: {}
 
   dnssd-advertise@1.1.6: {}
 
