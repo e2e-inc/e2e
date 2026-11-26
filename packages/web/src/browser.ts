@@ -824,10 +824,10 @@ export function createBrowserFixture(surface: PlaywrightSurface, context: Engine
 
   const browser: Omit<Browser, keyof Expectable<BrowserExpectation>> = {
     get name() {
-      return surface.browserIdentity().name;
+      return surface.browserIdentity(context.operation().attemptId).name;
     },
     get version() {
-      return surface.browserIdentity().version;
+      return surface.browserIdentity(context.operation().attemptId).version;
     },
     goto(url, options) {
       const resolved = context.app.resolveUrl(url);

@@ -547,7 +547,7 @@ The [config](/reference/config) sets each member's budget:
   the same budget `app.open()` uses.
 - `waitForURL`: [`assertionTimeout`](/reference/config#assertiontimeout).
 - Every other member: [`actionTimeout`](/reference/config#actiontimeout).
-  `locator` and `frameLocator` touch no page and take none.
+  `name`, `version`, `locator`, and `frameLocator` touch no page and take none.
 
 A `{ timeout }` option overrides the budget on `goto`, `reload`, `back`,
 `forward`, `waitForResponse`, `waitForRequest`, `waitForPopup`, `waitForDownload`, and `waitForDownloads`, capped
@@ -582,7 +582,7 @@ test('exports a PDF', async ({ app, browser }) => {
   the runner's machine. For a hosted browser, read `navigator.platform`
   with [`evaluate`](#evaluate).
 - To tell Chrome from Edge, read `navigator.userAgentData.brands` with
-  [`evaluate`](#evaluate).
+  [`evaluate`](#evaluate). Chromium exposes it only on HTTPS and loopback pages.
 
 #### `goto`
 

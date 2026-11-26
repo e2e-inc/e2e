@@ -71,7 +71,7 @@ function session(options: {
   clockUsed?: () => boolean;
 } = {}) {
   return new AttemptSession({
-    artifactsDir: options.artifactsDir ?? tmpdir(), viewport: options.viewport === undefined ? { width: 320, height: 200 } : options.viewport, contextOptions: {}, screencast: {},
+    attemptId: 'a1', artifactsDir: options.artifactsDir ?? tmpdir(), viewport: options.viewport === undefined ? { width: 320, height: 200 } : options.viewport, contextOptions: {}, screencast: {},
     media: options.media ?? {},
     acquire: async () => { throw new Error('persistent attempts never acquire the shared browser'); },
     configure: options.configure ?? (async () => undefined),
@@ -149,7 +149,7 @@ describe('AttemptSession', () => {
     const newPage = vi.fn(async () => opened);
     const context = { pages: () => [existing], newPage, on: () => undefined, close: async () => undefined };
     const owner = new AttemptSession({
-      artifactsDir: tmpdir(), viewport: { width: 320, height: 200 }, contextOptions: {}, screencast: {}, media: {},
+      attemptId: 'a1', artifactsDir: tmpdir(), viewport: { width: 320, height: 200 }, contextOptions: {}, screencast: {}, media: {},
       acquire: async () => ({ newContext: async () => context }) as unknown as Browser,
       configure: async () => undefined,
       clockUsed: () => false,
@@ -166,7 +166,7 @@ describe('AttemptSession', () => {
     const newPage = vi.fn(() => pending.promise);
     const context = { pages: () => [], newPage, on: () => undefined, close: async () => undefined };
     const owner = new AttemptSession({
-      artifactsDir: tmpdir(), viewport: { width: 320, height: 200 }, contextOptions: {}, screencast: {},
+      attemptId: 'a1', artifactsDir: tmpdir(), viewport: { width: 320, height: 200 }, contextOptions: {}, screencast: {},
       media: {},
       acquire: async () => ({ newContext: async () => context }) as unknown as Browser,
       configure: async () => undefined,

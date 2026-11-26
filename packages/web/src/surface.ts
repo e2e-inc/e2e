@@ -601,6 +601,7 @@ export class PlaywrightSurface {
     this.clockState = clockState;
     this.dialogs = dialogs;
     const session = new AttemptSession({
+      attemptId: context.attemptId,
       artifactsDir: context.artifactsDir,
       viewport: this.viewport,
       screencast: this.screencast,
@@ -900,10 +901,14 @@ export class PlaywrightSurface {
   /**
    * The engine and version of the browser the attempt is connected to, both
    * asked of the driver: a browser attached over CDP was not launched from
-   * `web({ browser })`, and its version is no package's.
+   * `web({ browser })`, and its version is no package's. `attemptId` is the
+   * asking fixture's: one kept past its attempt gets no answer from the next
+   * attempt's browser, which a provider may have leased anew.
    */
-  browserIdentity(): { readonly name: BrowserName; readonly version: string } {
-    const { browser } = this.requireSession().current();
+  browserIdentity(attemptId: string): { readonly name: BrowserName; readonly version: string } {
+    const session = this.requireSession();
+    if (session.attemptId !== attemptId) throw invalidState('the attempt this browser belongs to has ended');
+    const { browser } = session.current();
     const name = browser.browserType().name();
     if (!isBrowserName(name)) {
       throw new EngineError('ENGINE_FAILURE', `the driver reported an unknown browser "${name}"`, { retryable: false });

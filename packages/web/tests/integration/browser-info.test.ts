@@ -133,4 +133,13 @@ describe('browser identity outside an attempt', () => {
       expect(() => browser.version).toThrow(expect.objectContaining({ code: 'INVALID_STATE' }));
     });
   }, 60_000);
+
+  it('stays INVALID_STATE on a fixture kept into the next attempt, whose browser is not its own', async () => {
+    await withBrowser({}, async (browser, engine) => {
+      await engine.endAttempt!(cleanup());
+      await engine.startAttempt!({ attemptId: 'next', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
+      expect(() => browser.name).toThrow(expect.objectContaining({ code: 'INVALID_STATE' }));
+      expect(() => browser.version).toThrow(expect.objectContaining({ code: 'INVALID_STATE' }));
+    });
+  }, 60_000);
 });
