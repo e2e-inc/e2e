@@ -25,7 +25,7 @@ test('the dashboard loads', async ({ app, screen, browser }) => {
 });
 ```
 
-In a suite with device targets, add `{ requires: ['browser'] }` to a test
+In a suite with device targets, add `{ platforms: ['web'] }` to a test
 that uses `browser`, so the runner skips it on devices.
 
 ## Mock an API
@@ -49,8 +49,9 @@ await expect(screen.getByText('$42.00')).toBeVisible();
 - An `expect` that fails in a handler fails the test, at the next step or
   at the end of the test.
 
-Start `browser.waitForResponse` before the request. This also works before
-the first `browser.goto` or `app.open`:
+Start `browser.waitForResponse` before the action that triggers the request,
+usually in `Promise.all`. It also works before the first `browser.goto` or
+`app.open`:
 
 ```ts
 const [response] = await Promise.all([
@@ -59,6 +60,13 @@ const [response] = await Promise.all([
 ]);
 expect(response.status).toBe(201);
 ```
+
+Use `browser.waitForRequest` to resolve when the page sends the request, before
+any response arrives. Both methods accept a URL glob, a `RegExp`,
+`{ method, url }`, or a predicate function such as
+`(response) => response.request.method === 'POST' && response.status === 201`.
+See [`waitForResponse`](/reference/web#waitforresponse) and
+[`waitForRequest`](/reference/web#waitforrequest).
 
 ## Handle a dialog
 
@@ -170,6 +178,39 @@ await app.open('/');
 
 A value holds for the rest of the test, through `app.restart()` and
 `app.clearState()`. See [media emulation](/reference/web#media-emulation).
+
+## Go offline
+
+`browser.setNetwork('offline')` cuts the network for every tab and service
+worker, until the test ends or goes back online:
+
+```ts
+await app.open('/');
+await browser.setNetwork('offline');
+await screen.getByRole('button', 'Refresh').tap();
+await expect(screen.getByText('You are offline')).toBeVisible();
+```
+
+`browser.reload()` loads a page its service worker cached. A navigation to a
+page no cache holds fails with `ACTION_FAILED`. See
+[`setNetwork`](/reference/web#setnetwork).
+
+## Control time
+
+`browser.clock` sets the time the page reads and runs its timers on your
+command, as Playwright's `page.clock` does. Install it before the page
+opens, then pause it:
+
+```ts
+await browser.clock.install({ time: new Date('2024-02-02T08:00:00Z') });
+await browser.clock.pauseAt(new Date('2024-02-02T09:00:00Z'));
+await app.open('/offer');
+await browser.clock.runFor('00:10'); // fires every timer due in 10 seconds
+await expect(screen.getByText('Offer expired')).toBeVisible();
+```
+
+The clock covers every tab and holds for the rest of the test. Your test's
+own timeouts and waits keep real time. See [clock](/reference/web#clock).
 
 ## Cookies
 

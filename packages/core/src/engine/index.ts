@@ -194,6 +194,12 @@ export interface EngineAppInfo {
   readonly launchArgumentValues?: LaunchArgumentValues;
   /** Permissions the app holds, by name; what each state means is the engine's (a device sets them before every fresh launch). */
   readonly permissions?: Readonly<Record<string, AppPermissionState>>;
+  /**
+   * `app.permissions: 'all'`: grant every permission the engine can grant,
+   * in place of `permissions`. Only an engine that declares
+   * `grantsAllPermissions` receives it; for any other, the config is refused.
+   */
+  readonly allPermissions?: true;
 }
 
 /**
@@ -674,6 +680,12 @@ export interface Engine {
    */
   readonly selectsDevice?: boolean;
   /**
+   * The engine grants `app.permissions: 'all'`, which reaches it as
+   * `EngineAppInfo.allPermissions`. Without it the harness refuses `'all'` at
+   * config load, so an engine that predates the value never receives it.
+   */
+  readonly grantsAllPermissions?: boolean;
+  /**
    * The engine reads the object form of `app.launchArguments` from
    * `EngineAppInfo.launchArgumentValues`. Without it the harness refuses an
    * object at config load, so an engine that predates the object form only
@@ -694,7 +706,7 @@ export interface Engine {
   /**
    * Named deterministic surfaces this engine contributes to TestFixtures
    * (a device fixture, a document fixture - anything). Keys become fixture and
-   * capability names; `requires: ['<name>']` gates at selection.
+   * capability names.
    */
   readonly fixtures?: Readonly<Record<string, EngineFixtureFactory>>;
   /**
@@ -815,10 +827,16 @@ export type EngineIsolation = 'attempt' | 'worker';
  * `@e2e-dev/core` types a session without a hand-written argument. It is a type
  * only: no handle carries a value under `engineFixtures`.
  */
-export interface EngineHandle<Fixtures extends object = {}> extends Engine {
+export interface EngineHandle<
+  Fixtures extends object = {},
+  Platform extends string = string,
+  Isolation extends EngineIsolation = EngineIsolation,
+> extends Engine {
   readonly [engineBrand]: true;
   readonly capabilities: ReadonlySet<EngineCapability>;
   readonly [engineFixtures]?: Fixtures;
+  readonly platform?: Platform;
+  readonly isolation?: Isolation;
 }
 
 export { defineEngine, isEngineHandle } from './manifest.ts';

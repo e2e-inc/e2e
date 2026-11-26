@@ -208,6 +208,9 @@ export class AttemptGuestSessions {
         this.opening.delete(opening);
         return this.taking && !opening.signal.aborted ? take(opened) : undefined;
       },
+      release: () => {
+        this.opening.delete(opening);
+      },
     };
   }
 

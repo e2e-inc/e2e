@@ -1,8 +1,8 @@
 /**
  * The fixture rules that need a target, checked at selection: once the pairs
  * that run are known, and before any worker starts. Only a pair that runs is
- * checked, so a file that names `device` and is skipped on a web target
- * (`platforms`, `requires`, `test.skipIf`) stays valid there.
+ * checked, so a file whose `beforeAll` names `app` and is skipped on a web
+ * target (`platforms`, `test.skipIf`) stays valid there.
  */
 
 import type { ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
@@ -93,9 +93,8 @@ export class AttemptPlans {
 /**
  * Checks the fixtures of every pair that runs, and of the suite hooks of the
  * scopes it enters, on the pair's target. Throws the first rule one breaks:
- * a name the target has no fixture for, a test fixture named by a suite hook
- * or a worker fixture, a cycle, a fixture whose declared scope is not the
- * one of the fixture it extends.
+ * a name no target in the config has a fixture for, a test fixture named by
+ * a suite hook or a worker fixture, a cycle.
  */
 export function assertFixtureUse(pairs: readonly TestTargetPair[], plans: AttemptPlans): void {
   for (const { test, target, disposition } of pairs) {

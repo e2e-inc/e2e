@@ -93,24 +93,29 @@ export interface WatchScope {
   readonly configPath: string | undefined;
   /** The config's `tests` globs; none when the config did not load. */
   readonly tests: readonly string[];
-  /** Directories the run itself writes, by absolute path: the output and the cache. A change there is the run's own, not a save. */
+  /** Directories the run itself writes, by absolute path: the output and the cache. A change under one is the run's own, not a save. */
   readonly written: readonly string[];
+  /** Files the run itself writes, by absolute path: the `--timings` file. Matched exactly, so a path naming a directory hides no save under it. */
+  readonly writtenFiles: readonly string[];
 }
 
 /**
  * The scope a run leaves behind: its config, or before the first run and
  * for a config that did not load, the config file it would be, alone.
  */
-function scopeOf(config: RunOutcome['config'], cwd: string, configPath: string | undefined): WatchScope {
+function scopeOf(config: RunOutcome['config'], cwd: string, base: RunOptions): WatchScope {
+  const { configPath, timings } = base;
+  // The run writes `--timings` from its first run on, before the session sees the loaded config.
+  const timingsFile = (projectRoot: string): string[] => (timings === undefined ? [] : [path.resolve(projectRoot, timings)]);
   if (config !== undefined) {
     const { projectRoot, configPath: loadedPath, tests, output, cache } = config;
-    return { projectRoot, configPath: loadedPath, tests, written: [path.resolve(projectRoot, output), cache.dir] };
+    return { projectRoot, configPath: loadedPath, tests, written: [path.resolve(projectRoot, output), cache.dir], writtenFiles: timingsFile(projectRoot) };
   }
   try {
     const discovered = discoverConfig(cwd, configPath);
-    return { projectRoot: discovered.projectRoot, configPath: discovered.configPath, tests: [], written: [] };
+    return { projectRoot: discovered.projectRoot, configPath: discovered.configPath, tests: [], written: [], writtenFiles: timingsFile(discovered.projectRoot) };
   } catch {
-    return { projectRoot: cwd, configPath: undefined, tests: [], written: [] };
+    return { projectRoot: cwd, configPath: undefined, tests: [], written: [], writtenFiles: [] };
   }
 }
 
@@ -144,6 +149,7 @@ function isInside(dir: string, absolutePath: string): boolean {
 export function classifyChange(scope: WatchScope, globs: CompiledGlobList, absolutePath: string): WatchChange | undefined {
   if (scope.configPath !== undefined && path.resolve(absolutePath) === scope.configPath) return { kind: 'config' };
   if (scope.written.some((dir) => isInside(dir, absolutePath))) return undefined;
+  if (scope.writtenFiles.includes(path.resolve(absolutePath))) return undefined;
   const relative = path.relative(scope.projectRoot, absolutePath);
   if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return undefined;
   const segments = relative.split(path.sep);
@@ -557,7 +563,7 @@ export async function watchSession(options: WatchSessionOptions): Promise<number
 
   try {
     // The config file is watched from the start; its test directories once it has loaded.
-    rescope(scopeOf(undefined, options.cwd, options.base.configPath));
+    rescope(scopeOf(undefined, options.cwd, options.base));
     for (;;) {
       const interrupt = new AbortController();
       const force = new AbortController();
@@ -590,7 +596,7 @@ export async function watchSession(options: WatchSessionOptions): Promise<number
         return 2;
       }
 
-      const changed = rescope(scopeOf(outcome.config, options.cwd, options.base.configPath));
+      const changed = rescope(scopeOf(outcome.config, options.cwd, options.base));
       if ((changed || count === 1) && watched.length === 0) {
         if (keyboard === undefined) {
           options.write(`${pc.yellow('nothing to watch')}: no test directory or config file to watch, and no terminal for the keys\n`);
@@ -648,7 +654,7 @@ type Wake = WatchTrigger | 'quit' | 'p' | 't';
 /** Whether two runs left the same thing to watch, so the watcher can stay. */
 function sameScope(a: WatchScope, b: WatchScope): boolean {
   const same = (x: readonly string[], y: readonly string[]): boolean => x.length === y.length && x.every((item, i) => item === y[i]);
-  return a.projectRoot === b.projectRoot && a.configPath === b.configPath && same(a.tests, b.tests) && same(a.written, b.written);
+  return a.projectRoot === b.projectRoot && a.configPath === b.configPath && same(a.tests, b.tests) && same(a.written, b.written) && same(a.writtenFiles, b.writtenFiles);
 }
 
 /** `p`: the positional the next runs select with; empty clears it. Answers nothing when cancelled or an invalid glob. */

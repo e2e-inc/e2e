@@ -84,9 +84,11 @@ A `GET` or `HEAD` request takes no body.
 
 ### `WebResponse`
 
-The response, with its body already read. It is the same type the web
-engine's [`browser.waitForResponse`](/reference/web#waitforresponse) and
-`route.fetch()` return.
+An HTTP response whose body `request` has already read. The web engine's
+`route.fetch()` returns the same type.
+[`browser.waitForResponse`](/reference/web#waitforresponse) returns a
+`PageResponse`, which extends `WebResponse` with `request` and starts reading
+the body as soon as the response matches.
 
 | Member | Type |
 | --- | --- |
@@ -104,8 +106,8 @@ engine's [`browser.waitForResponse`](/reference/web#waitforresponse) and
 - `text()` decodes the body as UTF-8. `json()` parses it, `unknown` unless
   you name a type. Nothing checks that type: use
   [`toMatchSchema`](/reference/expect#matching-a-schema) to check it.
-- Check the status with the value matchers:
-  `expect(response.status).toBe(201)`.
+- Check a 2xx status with [`toBeOK`](/reference/expect#tobeok), or an exact
+  one with the value matchers: `expect(response.status).toBe(201)`.
 
 ## URLs
 

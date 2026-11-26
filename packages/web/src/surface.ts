@@ -40,6 +40,7 @@ import {
 import { matchesText } from '@e2e-dev/core/engine';
 import { classifyActionError, classifyInputError, dispatchLocatorAction, dispatchPointerAction } from './actions.ts';
 import type { BrowserName } from './browser-connection.ts';
+import { grantedPermissions, grantPermissions } from './permissions.ts';
 import { AttemptSession, type AttemptTab, type StorageState } from './attempt-session.ts';
 import type { CdpEndpointResolver } from './cdp-recovery.ts';
 import type { BrowserProvider, LeaseDownloads } from './provider.ts';
@@ -57,6 +58,7 @@ import { CLOSED_SHADOW_ROOTS_INIT_SCRIPT, CLOSED_SHADOW_ROOTS_KEY } from './clos
 import { MODAL_ORDER_INIT_SCRIPT } from './modal-dialogs.ts';
 import type { WebInitScript } from './init-scripts.ts';
 import type { WebMedia } from './media.ts';
+import { applyClockCall, readClockNow, type ClockCall, type ClockHost } from './clock.ts';
 import { SECURE_FIELD_SELECTOR, type RawNodeData } from './read-node.ts';
 import { readSelector, takeReadsFunction } from './read-selector.ts';
 import { httpCredentials, installConfiguredHeaders, configuredHeadersFor } from './protected-app.ts';
@@ -154,6 +156,9 @@ export interface WebScreencastOptions {
   /** JPEG quality of each captured frame, 0 through 100; Playwright's default when unset. */
   readonly quality?: number;
 }
+
+/** One entry of an attempt's document setup: an init script, or a clock call. */
+type DocumentSetup = { readonly script: string } | { readonly clock: ClockCall };
 
 /**
  * Options of the browser engine: how it drives the app. The app itself
@@ -310,8 +315,15 @@ export class PlaywrightSurface {
   readonly dialogs = new DialogRouter(this.latch);
 
   private session: AttemptSession | undefined;
-  /** The attempt's init scripts, configured then added, applied to each context the attempt opens. */
-  private readonly initScripts: string[];
+  /**
+   * What every document of the attempt runs before the page's own scripts,
+   * in the order it was added: the configured init scripts, then the test's
+   * init scripts and successful clock calls. Each context the attempt opens
+   * applies it, so a replacement context gives its documents the same order.
+   */
+  private readonly documentSetup: DocumentSetup[];
+  /** Whether the attempt called `browser.clock`, even a call that failed after Playwright installed it. */
+  private clockUsed = false;
   /** Navigations the engine has in flight, which the app log leaves to the step that started them. */
   private ownNavigations = 0;
   /** One entry per navigation in flight, set to the URL of a document request a test route aborted during it. */
@@ -329,7 +341,7 @@ export class PlaywrightSurface {
 
   /** `attempt` is what the attempt's `startAttempt` got; the options are the worker's. */
   constructor(private readonly worker: WorkerBrowser, private readonly attempt: EngineAttemptContext) {
-    this.initScripts = worker.configuredInitScripts.forAttempt();
+    this.documentSetup = worker.configuredInitScripts.forAttempt().map((script) => ({ script }));
     this.trace = new TraceFeed(attempt, () => this.openPage(), () => this.session?.refs, { testIdAttribute: worker.testIdAttribute, site: worker.app.site });
   }
 
@@ -359,7 +371,7 @@ export class PlaywrightSurface {
           );
     const persistent = await this.worker.persistentBinding(context);
     // `validateApp` admitted only grants.
-    const granted = Object.keys(this.worker.app.permissions ?? {});
+    const granted = grantedPermissions(this.worker.browserName, this.worker.app);
     const session = new AttemptSession({
       artifactsDir: context.artifactsDir,
       viewport,
@@ -381,7 +393,11 @@ export class PlaywrightSurface {
       configure: async (target) => {
         await target.addInitScript(CLOSED_SHADOW_ROOTS_INIT_SCRIPT);
         await target.addInitScript(MODAL_ORDER_INIT_SCRIPT);
-        for (const script of this.initScripts) await target.addInitScript(script);
+        // A fresh context has no document yet, so a clock call only registers the clock's script and its log.
+        for (const setup of this.documentSetup) {
+          if ('script' in setup) await target.addInitScript(setup.script);
+          else await applyClockCall(target.clock, setup.clock);
+        }
         target.setDefaultTimeout(CONTEXT_DEFAULT_TIMEOUT_MS);
         target.on('dialog', (dialog) => { void this.dialogs.dispatch(dialog); });
         installAppLog(target, context.appLog, {
@@ -390,9 +406,10 @@ export class PlaywrightSurface {
           testPage: () => this.openPage(),
         });
         await installConfiguredHeaders(target, this.worker.credentialScope, this.worker.headers);
-        if (granted.length > 0) await target.grantPermissions(granted);
+        if (granted.length > 0) await grantPermissions(target, granted, this.worker.app.allPermissions === true);
         for (const stored of this.routes) await target.route(stored.predicate, stored.handler);
       },
+      clockUsed: () => this.clockUsed,
       ...(persistent === undefined ? {} : { persistent }),
       record: this.worker.leases?.recorder(context.attemptId),
     });
@@ -433,8 +450,39 @@ export class PlaywrightSurface {
   /** Adds one attempt-scoped init script to the current context, for every document it creates from now on. */
   async addInitScript(source: string): Promise<void> {
     const context = this.requireContext();
-    this.initScripts.push(source);
+    this.documentSetup.push({ script: source });
     await context.addInitScript(source);
+  }
+
+  /**
+   * Runs one clock call on the current context and logs it for a context
+   * that replaces this one. Playwright logs the call for the context's next
+   * documents before it runs it, so the call is logged whether it succeeds
+   * or fails, and a replacement context replays what a new document would.
+   * The attempt counts as using the clock from the start of the call:
+   * Playwright installs the clock before a call can fail.
+   */
+  async clock(call: ClockCall): Promise<void> {
+    const { clock } = this.requireContext();
+    this.clockUsed = true;
+    try {
+      await applyClockCall(clock, call);
+    } finally {
+      this.documentSetup.push({ clock: call });
+    }
+  }
+
+  /**
+   * The latest time a page clock of the current context reads, across every
+   * frame, or undefined when none has one yet. Playwright runs a call in
+   * every frame and fails it when one frame refuses, so the latest decides.
+   */
+  async clockNow(): Promise<number | undefined> {
+    const frames = this.requireContext().pages().flatMap((page) => page.frames());
+    // A frame that detaches or navigates while it is read has no clock to compare with.
+    const times = await Promise.all(frames.map((frame) => frame.evaluate(readClockNow).catch(() => undefined)));
+    const read = times.filter((time) => typeof time === 'number');
+    return read.length === 0 ? undefined : Math.max(...read);
   }
 
   // --- network routes shared with the browser fixture ---
@@ -522,6 +570,11 @@ export class PlaywrightSurface {
   /** Emulates media features on the open page, or the one the next navigation opens, for the rest of the attempt. */
   emulateMedia(media: WebMedia): Promise<void> {
     return this.requireSession().emulateMedia(media);
+  }
+
+  /** Takes the attempt's browser offline or back online, for the rest of the attempt. */
+  setOffline(offline: boolean): Promise<void> {
+    return this.requireSession().setOffline(offline);
   }
 
   /**
@@ -625,8 +678,9 @@ export class PlaywrightSurface {
   /**
    * Runs one navigation the engine itself makes, so the app log leaves it to
    * the step that asked for it. A navigation that fails after a test route
-   * aborted its document request failed because the test aborted it: an
-   * action failure, not an engine fault.
+   * aborted its document request, or while the test holds the browser
+   * offline, failed because of what the test did: an action failure, not an
+   * engine fault.
    */
   async navigating<T>(work: () => Promise<T>): Promise<T> {
     this.ownNavigations += 1;
@@ -637,8 +691,14 @@ export class PlaywrightSurface {
       this.trace.tellEnvironment();
       return result;
     } catch (cause) {
-      if (watch.url === undefined || isClassified(cause) || isPwTimeout(cause)) throw cause;
-      throw new TestError('ACTION_FAILED', `navigation failed: a route aborted the request for ${watch.url}: ${message(cause)}`, { cause });
+      if (isClassified(cause) || isPwTimeout(cause)) throw cause;
+      const reason = watch.url !== undefined
+        ? `a route aborted the request for ${watch.url}`
+        : this.session?.navigatedOffline() === true
+          ? "the browser is offline (browser.setNetwork('offline'))"
+          : undefined;
+      if (reason === undefined) throw cause;
+      throw new TestError('ACTION_FAILED', `navigation failed: ${reason}: ${message(cause)}`, { cause });
     } finally {
       this.navigationAborts.delete(watch);
       this.ownNavigations -= 1;
@@ -1341,6 +1401,8 @@ function measureViewportIntersection(element: Element): Promise<ViewportIntersec
       resolve({ intersects: ratio > 0, ratio });
     });
     observer.observe(element);
-    view.requestAnimationFrame(() => {});
+    // The native frame: under Playwright's clock, the page's own would queue a timer in the page's fake clock.
+    // oxlint-disable-next-line no-underscore-dangle -- Playwright's name for its page clock, which keeps the native timers
+    ((view as ClockHost).__pwClock?.builtins ?? view).requestAnimationFrame(() => {});
   });
 }

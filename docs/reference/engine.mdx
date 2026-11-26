@@ -70,14 +70,26 @@ Validates an engine spec, freezes it, computes its
 ```ts
 import { defineEngine, isEngineHandle, type EngineHandle } from 'e2e/engine';
 
-export function defineEngine<Fixtures extends object = {}>(spec: Engine): EngineHandle<Fixtures>;
-// With a fixture beside screen, app, and platform, `spec.fixtures` must hold
-// a factory returning each one Fixtures names.
+export function defineEngine<
+  Fixtures extends object = {},
+  Platform extends string = string,
+  Isolation extends EngineIsolation = EngineIsolation,
+>(spec: Engine & { readonly platform?: Platform; readonly isolation?: Isolation }): EngineHandle<Fixtures, Platform, Isolation>;
+// With a fixture beside screen, app, and platform, `spec.fixtures` must have
+// a factory returning each one Fixtures names. If Platform is a literal
+// such as 'ios', `spec.platform` must be that value. If Isolation is
+// 'worker', `spec.isolation` must be 'worker'.
 export function isEngineHandle(value: unknown): value is EngineHandle;
 
 /** A validated engine: branded, frozen, capabilities computed. */
-export interface EngineHandle<Fixtures extends object = {}> extends Engine {
+export interface EngineHandle<
+  Fixtures extends object = {},
+  Platform extends string = string,
+  Isolation extends EngineIsolation = EngineIsolation,
+> extends Engine {
   readonly capabilities: ReadonlySet<EngineCapability>;
+  readonly platform?: Platform;
+  readonly isolation?: Isolation;
 }
 ```
 
@@ -91,9 +103,21 @@ none, since every session holds them. Nothing checks it at runtime. With it, `la
 without a hand-written argument: return `defineEngine<{ device: Device }>(...)`
 from the factory.
 
+`Platform` and `Isolation` are literal types for the spec's `platform` and
+`isolation`, such as `'ios'` and `'worker'`. They're needed to tell targets
+apart when [a config's fixtures are typed](/reference/test#engine-fixtures-across-targets).
+If you pass `Fixtures`, pass all three to keep the literals:
+`defineEngine<{ device: Device }, 'ios', 'worker'>(...)`. Then set the same
+`platform` in the spec, and `isolation: 'worker'` for `'worker'`.
+
 Return your own interface from the factory, as `KioskEngine` does above. A
 config that infers its type then names your package. A bare `EngineHandle` can
 fail with TS2883 in a pnpm project that sets `declaration: true`.
+
+To keep the literal types on your interface, give it `Platform` and
+`Isolation` parameters with defaults of `string` and `EngineIsolation`, like
+`WebEngine` and `MobileEngine`. Then put the literals in the factory's
+return type: `web(): WebEngine<'web', 'attempt'>`.
 
 `defineEngine` throws `INVALID_CONFIG` when the spec breaks one of these
 rules:
@@ -114,6 +138,7 @@ rules:
 | `performAt`, `pointerActions` | One without the other. A `pointerActions` list that is empty, repeats a kind, or names one outside `POINTER_ACTION_KINDS`. |
 | `tapModifiers` | Not a boolean, or `true` without `perform`. |
 | `selectsDevice` | Not a boolean, or `true` without `prepare`. |
+| `grantsAllPermissions` | Not a boolean. |
 | `launchArgumentValues` | Not a boolean. |
 | `fileApps` | Not a boolean. |
 | `isolation` | Anything but `'attempt'` or `'worker'`. |
@@ -149,6 +174,7 @@ The body of one target. Every member but `name`, `version`, and
 | [`performAt`, `pointerActions`](#pointer-actions) | method, kinds |
 | [`tapModifiers`](#capabilities) | `boolean` |
 | [`selectsDevice`](#capabilities) | `boolean` |
+| [`grantsAllPermissions`](#capabilities) | `boolean` |
 | [`launchArgumentValues`](#engineappinfo) | `boolean` |
 | [`fileApps`](#capabilities) | `boolean` |
 | [`keyboard`](#keyboard) | `EngineKeyboard` |
@@ -262,6 +288,12 @@ export interface Engine {
    */
   readonly selectsDevice?: boolean;
   /**
+   * The engine grants `app.permissions: 'all'`, which reaches it as
+   * `EngineAppInfo.allPermissions`. Without it the harness refuses `'all'` at
+   * config load, so an engine that predates the value never receives it.
+   */
+  readonly grantsAllPermissions?: boolean;
+  /**
    * The engine reads the object form of `app.launchArguments` from
    * `EngineAppInfo.launchArgumentValues`. Without it the harness refuses an
    * object at config load.
@@ -281,7 +313,7 @@ export interface Engine {
   /**
    * Named deterministic surfaces this engine contributes to TestFixtures
    * (a device fixture, a document fixture - anything). Keys become fixture and
-   * capability names; `requires: ['<name>']` gates at selection.
+   * capability names.
    */
   readonly fixtures?: Readonly<Record<string, EngineFixtureFactory>>;
   /**
@@ -422,10 +454,8 @@ export interface OperationContext {
 The members an engine implements set its capabilities. A `screen`,
 `Locator`, or `app` call that needs a missing one fails with
 `UNSUPPORTED_CAPABILITY`. [Test APIs](#test-apis) lists what needs which
-member. Three gaps end differently:
+member. Two gaps end differently:
 
-- A test that `requires` a fixture the engine lacks is skipped
-  (`capability-unavailable`).
 - A selected test that uses a `test.setup` session, on an engine without
   `state`, is a collection error before the setup runs.
 - A `video` mode on an engine without video recording prints a notice and
@@ -441,6 +471,7 @@ member. Three gaps end differently:
 | `tapModifiers: true` | - | `perform` | `modifiers` on `tap`, `doubleTap`, `multiTap`, and `secondaryTap`. |
 | `selectsDevice: true` | - | `prepare` | `e2e run --device`, the device `prepare` binds. |
 | `actors: true` | `actors` | `startAttempt`, `endAttempt` | An [actor](#actors) on the test's own target. |
+| `grantsAllPermissions: true` | - | - | `app.permissions: 'all'`, which the engine receives as `EngineAppInfo.allPermissions`. Without it, config load refuses `'all'`, so an engine released before it never receives the string. |
 | `launchArgumentValues: true` | - | - | The object form of `app.launchArguments`, in `EngineAppInfo.launchArgumentValues`. |
 | `fileApps: true` | - | - | A target whose `app.url` is a `file:` URL. `validateApp` is told with `fileApp: true`. |
 | `performAt` + `pointerActions` | `pointer` | `observe` | One pointer action at a viewport point, with no node behind it. |
@@ -566,7 +597,6 @@ engine.
 | `app.back()` | `session.back` |
 | `app.restart()` | `session.restart` |
 | `app.clearState()` | `session.reset` |
-| `requires: ['<name>']` | `fixtures.<name>` |
 
 #### `engine.capabilities`
 
@@ -577,10 +607,6 @@ The computed `ReadonlySet` of capability names. Selection, the report, and
 const engine = kiosk({ host: 'kiosk.local' });
 engine.capabilities.has('location'); // true: the engine implements locate
 ```
-
-Selection also grades a target by the kind of app it declares, not by its
-engine. A target with `app.url` has `browser`, and one with `app.bundleId` or
-`app.appPath` has `native-app`, so a test can `requires: ['native-app']`.
 
 ```ts
 /**
@@ -1595,6 +1621,12 @@ export interface EngineAppInfo {
   readonly launchArgumentValues?: LaunchArgumentValues;
   /** Permissions the app holds, by name; what each state means is the engine's (a device sets them before every fresh launch). */
   readonly permissions?: Readonly<Record<string, AppPermissionState>>;
+  /**
+   * `app.permissions: 'all'`: grant every permission the engine can grant,
+   * in place of `permissions`. Only an engine that declares
+   * `grantsAllPermissions` receives it; for any other, the config is refused.
+   */
+  readonly allPermissions?: true;
 }
 ```
 
@@ -2395,7 +2427,7 @@ import { test as base } from 'e2e';
 
 const test = base.extend<{ printer: { print(text: string): Promise<void> } }>();
 
-test('prints a receipt', { requires: ['printer'] }, async ({ printer }) => {
+test('prints a receipt', { platforms: ['kiosk'] }, async ({ printer }) => {
   await printer.print('Order 42');
 });
 ```

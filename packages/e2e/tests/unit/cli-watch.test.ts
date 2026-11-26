@@ -80,6 +80,7 @@ describe('classifyChange and watchRoots', () => {
       configPath: path.join(root, 'e2e.config.ts'),
       tests: ['tests/**/*.e2e.ts', '!tests/wip/**'],
       written: [path.join(root, 'test-results'), path.join(root, 'tests', 'cache')],
+      writtenFiles: [],
     };
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -98,6 +99,17 @@ describe('classifyChange and watchRoots', () => {
     expect(at('test-results', 'report.json')).toBeUndefined();
     expect(at('tests', 'cache', 'abc.json')).toBeUndefined();
     expect(at('..', 'other', 'tests', 'x.e2e.ts')).toBeUndefined();
+  });
+
+  it('ignores the --timings file itself but not saves under a --timings path that names a directory', () => {
+    const globs = compileGlobList(scope.tests);
+    const file: WatchScope = { ...scope, writtenFiles: [path.join(root, 'timings.json')] };
+    expect(classifyChange(file, globs, path.join(root, 'timings.json'))).toBeUndefined();
+    const directory: WatchScope = { ...scope, writtenFiles: [path.join(root, 'tests')] };
+    expect(classifyChange(directory, globs, path.join(root, 'tests', 'agent', 'signup.e2e.ts'))).toEqual({ kind: 'test', file: 'tests/agent/signup.e2e.ts' });
+    mkdirSync(path.join(root, 'src'));
+    const wide: WatchScope = { ...directory, tests: ['**/*.e2e.ts'] };
+    expect(watchRoots(wide, compileGlobList(wide.tests))).toContainEqual({ dir: path.join(root, 'tests'), recursive: true });
   });
 
   it('a glob from the project root watches the root flat and its directories, not node_modules or dot directories', () => {
@@ -154,7 +166,7 @@ describe('ChangeWatcher', () => {
     vi.useFakeTimers();
     root = mkdtempSync(path.join(tmpdir(), 'e2e-watch-'));
     mkdirSync(path.join(root, 'tests'));
-    scope = { projectRoot: root, configPath: path.join(root, 'e2e.config.ts'), tests: ['tests/**/*.e2e.ts'], written: [] };
+    scope = { projectRoot: root, configPath: path.join(root, 'e2e.config.ts'), tests: ['tests/**/*.e2e.ts'], written: [], writtenFiles: [] };
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -427,6 +439,79 @@ describe('watchSession', () => {
     mkdirSync(path.join(root, 'tests', 'out'));
     writeFileSync(path.join(root, 'tests', 'out', 'report.json'), '{}');
     listeners.get(path.join(root, 'tests'))!('change', path.join('out', 'report.json'));
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+    await settle();
+    expect(runs).toHaveLength(2);
+    signals.escalate(() => undefined);
+    await expect(session).resolves.toBe(0);
+  });
+
+  it('the --timings file the run writes does not rerun it, from the first run on', async () => {
+    const listeners = new Map<string, (event: string, filename: string | null) => void>();
+    const runs: RunOptions[] = [];
+    let release: (() => void) | undefined;
+    const run = async (options: RunOptions): Promise<RunOutcome> => {
+      runs.push(options);
+      // The run's atomic write of the history, a temp file renamed over timings.json in the flat-watched root, then the rest of its teardown.
+      writeFileSync(path.join(root, 'timings.json'), '{}');
+      listeners.get(root)!('rename', 'timings.json');
+      await new Promise<void>((resolve) => (release = resolve));
+      return passed(0);
+    };
+    const signals = new SignalLadder();
+    const session = watchSession({
+      base: { timings: 'timings.json' },
+      cwd: root,
+      signals,
+      run,
+      stdin: undefined,
+      write: () => undefined,
+      writeError: () => undefined,
+      pc,
+      clear: false,
+      watch: fakeWatch(listeners),
+    });
+    // The first run's write lands while only the config directory is watched.
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+    release!();
+    await settle();
+    expect(runs).toHaveLength(1);
+    // A save reruns; that run's write, under the loaded config's watcher, does not.
+    writeFileSync(path.join(root, 'helpers.ts'), '');
+    listeners.get(root)!('change', 'helpers.ts');
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+    expect(runs).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+    release!();
+    await settle();
+    expect(runs).toHaveLength(2);
+    signals.escalate(() => undefined);
+    await expect(session).resolves.toBe(0);
+  });
+
+  it('a --timings path that names a directory still reruns on a save under it', async () => {
+    const listeners = new Map<string, (event: string, filename: string | null) => void>();
+    const runs: RunOptions[] = [];
+    const run = async (options: RunOptions): Promise<RunOutcome> => {
+      runs.push(options);
+      return passed(0);
+    };
+    const signals = new SignalLadder();
+    const session = watchSession({
+      base: { timings: 'tests' },
+      cwd: root,
+      signals,
+      run,
+      stdin: undefined,
+      write: () => undefined,
+      writeError: () => undefined,
+      pc,
+      clear: false,
+      watch: fakeWatch(listeners),
+    });
+    await settle();
+    writeFileSync(path.join(root, 'tests', 'a.e2e.ts'), '');
+    listeners.get(path.join(root, 'tests'))!('change', 'a.e2e.ts');
     await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
     await settle();
     expect(runs).toHaveLength(2);

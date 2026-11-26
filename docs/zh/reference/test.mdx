@@ -30,6 +30,7 @@ describe('checkout', { tags: ['billing'] }, () => {
 | --- | --- |
 | [`test`](#test) | `TestCase` |
 | [`test.skip`](#test-skip) | `TestCase \| void` |
+| [`test.todo`](#test-todo) | `TestCase` |
 | [`test.fixme`](#test-fixme) | `TestCase \| void` |
 | [`test.skipIf`](#test-skipif) | `TestRegistrar` |
 | [`test.runIf`](#test-runif) | `TestRegistrar` |
@@ -43,6 +44,7 @@ describe('checkout', { tags: ['billing'] }, () => {
 | [`test.extend`](#test-extend) | `TestAPI` |
 | [`describe`](#describe) | `void` |
 | [`describe.fail`](#describe-fail) | `void` |
+| [`describe.only`](#describe-only) | `void` |
 | [钩子](#hooks) | `void` |
 
 `describe` 和四个钩子也作为顶层导出提供，与 `test.describe`、`test.beforeEach` 等是相同的函数：`import { describe, beforeEach, test } from 'e2e'`。
@@ -115,6 +117,18 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 | `INVALID_ARGUMENT` | 在准备测试中调用，且条件为真或未给出条件。准备测试不能跳过，因为其他测试依赖它的会话。 |
 | `COLLECTION_ERROR` | 在测试主体之外使用条件形式。 |
 | `COLLECTION_ERROR` | 在串行分组内使用注册形式。请改为在串行 `describe` 上设置 [`skip`](#skip)。 |
+
+#### `test.todo`
+
+注册一个没有测试函数的未完成测试：
+
+```ts
+test.todo('add checkout coverage');
+```
+
+它会以 `skipped` 报告，`skip.cause` 和 `skip.reason` 均为 `todo`。它不会运行，也没有
+attempt。只选择 TODO 测试会导致 `NO_TESTS`，与只选择其他已跳过测试相同。在串行组内
+注册 TODO 会产生 `COLLECTION_ERROR`。
 
 #### `test.fixme`
 
@@ -306,7 +320,7 @@ test.only('pays', async ({ app }) => {
 });
 ```
 
-其他测试报告为 `filtered`。CI 运行中包含此类测试时会以 `ONLY_IN_CI` 失败。
+其他测试报告为 `filtered`。CI 运行中包含此类测试时会以 `ONLY_IN_CI` 失败。要单独运行一个分组中的所有测试，请使用 [`describe.only`](#describe-only)。
 
 #### `test.setup`
 
@@ -368,7 +382,7 @@ describe('checkout', { tags: ['smoke'], serial: true }, () => {
 });
 ```
 
-- 分组接受测试的[选项](#options)，但不包括 `only`，另外还接受 [`serial`](#serial)。
+- 分组接受测试的[选项](#options)，另外还接受 [`serial`](#serial)。
 - 主体必须同步执行。
 
 | 抛出 | 条件 |
@@ -398,6 +412,32 @@ describe('legacy checkout', { fail: 'old payment form' }, () => {}); // with a r
 | --- | --- |
 | `COLLECTION_ERROR` | The group is serial or inside a serial group, or a serial group is inside it. |
 | `COLLECTION_ERROR` | A `fail` option on `describe.fail`. It is also a type error. |
+
+#### `describe.only`
+
+声明一个单独运行的分组，等同于在 `describe` 上设置 `only: true`。分组中的每个测试（包括嵌套分组中的测试）都会像 [`test.only`](#test-only) 那样单独运行。
+
+```ts
+describe.only('checkout', () => {
+  test('pays by card', async ({ screen }) => {}); // runs
+  describe('refunds', () => {
+    test('refunds a card', async ({ screen }) => {}); // runs
+  });
+});
+test('signs in', async ({ app }) => {}); // filtered
+describe('checkout', { only: true }, () => {}); // the same, by option
+```
+
+- 单独运行的分组可以与 `test.only` 一起使用：所有单独运行的测试都会运行，其余测试报告为 `filtered`。
+- 单独运行的分组内部若还有 `test.only` 或 `describe.only`，该分组的范围会像 Playwright 一样收窄：该分组中只运行内部单独运行的测试。
+- 单独运行的分组中被跳过的测试仍属于单独运行的范围，并以自身的跳过原因（`explicit`、`fixme` 或 `todo`）报告。
+- CI 运行中包含单独运行的分组时会以 `ONLY_IN_CI` 失败。
+- serial 分组可以整体单独运行。serial 分组作为一个单元运行，因此其内部的 `only` 会被拒绝。
+
+| 抛出 | 条件 |
+| --- | --- |
+| `COLLECTION_ERROR` | 分组位于 serial 分组内部。 |
+| `COLLECTION_ERROR` | 在 `describe.only` 上设置 `only` 选项。这也是类型错误。 |
 
 ### 钩子
 
@@ -511,7 +551,6 @@ afterAll(async () => {
 | [`fail`](#fail) | `boolean \| string` | - |
 | [`only`](#only) | `boolean` | - |
 | [`platforms`](#platforms) | `readonly string[]` | - |
-| [`requires`](#requires) | `readonly Capability[]` | - |
 | [`session`](#session) | `string` | - |
 | [`agentContext`](#agentcontext) | `string` | - |
 | [`agent`](#agent) | `string \| readonly string[]` | 运行使用的智能体 |
@@ -520,7 +559,7 @@ afterAll(async () => {
 | [`serial`](#serial) | `boolean` | - |
 | [`sessions`](#sessions) | `readonly string[]` | 必填 |
 
-`test` 接受除 `serial` 和 `sessions` 外的所有选项。`describe` 接受除 `only` 和 `sessions` 外的所有选项。`test.setup` 要求提供 `sessions`，且不接受 `session`、`only`、`skip` 或 `fail`。
+`test` 接受除 `serial` 和 `sessions` 外的所有选项。`describe` 接受除 `sessions` 外的所有选项。`test.setup` 要求提供 `sessions`，且不接受 `session`、`only`、`skip` 或 `fail`。
 
 解析顺序为：测试、最近的分组、外层分组、配置、内置默认值。在[串行分组](#serial)中，使用分组的 `retries`、`trace` 和 `video`。
 
@@ -577,10 +616,11 @@ describe('legacy checkout', { fail: 'old payment form' }, () => {});
 
 #### `only`
 
-在本地单独运行该测试。CI 会以 `ONLY_IN_CI` 拒绝。
+在本地单独运行该测试，或分组中的所有测试（见 [`describe.only`](#describe-only)）。CI 会以 `ONLY_IN_CI` 拒绝。
 
 ```ts
 test('pays', { only: true }, async ({ app }) => {});
+describe('checkout', { only: true }, () => {});
 ```
 
 #### `platforms`
@@ -590,23 +630,6 @@ test('pays', { only: true }, async ({ app }) => {});
 ```ts
 test('uses Face ID', { platforms: ['ios'] }, async ({ app }) => {});
 ```
-
-#### `requires`
-
-测试目标必须具备的能力。缺少任一能力的测试目标会在选择阶段跳过该测试。最内层设置优先。
-
-```ts
-test('onboarding asks for the camera', { requires: ['native-app'] }, async ({ app, agent }) => {
-  await app.open();
-  await agent.assert('The app asks for camera access');
-});
-```
-
-接受的值：
-
-- 测试目标引擎的测试执行框架能力：`observation`、`actions`、`location`、`pointer`、`keyboard`、`computed-style`、`state`、`artifacts`。
-- 每个引擎提供的内置测试夹具对应一个值：`browser`、`device`。参阅[引擎契约](/reference/engine#engine)。
-- 测试目标声明的应用类型：`app.url` 对应 `browser`，`app.bundleId` 或 `app.appPath` 对应 `native-app`。
 
 #### `session`
 
@@ -690,8 +713,8 @@ describe('checkout', { serial: true }, () => {
 
 | 抛出 | 条件 |
 | --- | --- |
-| `COLLECTION_ERROR` | 成员设置了 `retries`、`trace`、`video`、`session`、`platforms`、`requires`、`skip`、`only` 或嵌套的 `serial`。 |
-| `COLLECTION_ERROR` | 成员通过 `test.skip(title, fn)`、`test.skipIf`、`test.runIf` 或 `test.fixme(title, fn)` 注册。 |
+| `COLLECTION_ERROR` | 成员设置了 `retries`、`trace`、`video`、`session`、`platforms`、`skip`、`only` 或嵌套的 `serial`。 |
+| `COLLECTION_ERROR` | 成员通过 `test.skip(title, fn)`、`test.todo(title)`、`test.skipIf`、`test.runIf` 或 `test.fixme(title, fn)` 注册。 |
 
 #### `sessions`
 
@@ -730,7 +753,7 @@ test.setup('authenticate', { sessions: ['member', 'admin'] }, async ({ session }
 
 | 抛出 | 条件 |
 | --- | --- |
-| `COLLECTION_ERROR` | 在某个测试目标上运行的测试或它的钩子列出了该测试目标没有的测试夹具。此时不会运行任何测试。声明 `requires: ['browser']`、`platforms` 或 `test.skipIf` 可改为在该测试目标上跳过此类测试。 |
+| `COLLECTION_ERROR` | 在某个测试目标上运行的测试或它的钩子列出了该测试目标没有的测试夹具。此时不会运行任何测试。声明 `platforms` 或 `test.skipIf` 可改为在该测试目标上跳过此类测试。 |
 | `COLLECTION_ERROR` | 测试主体、钩子或测试夹具函数接收整个对象（`async (fixtures) => {}`）、剩余属性（`{ app, ...rest }`）或计算属性，或者是无法读取参数的绑定函数（`fn.bind()`）。 |
 
 <Note>
@@ -848,6 +871,8 @@ export interface DescribeRegistrar<Options = DescribeOptions> {
 export interface DescribeAPI extends DescribeRegistrar {
   /** Declares a group whose tests are expected to fail, as if it had `fail: true`; a reason goes in the `fail` option of `describe`. */
   fail: DescribeRegistrar<Omit<DescribeOptions, 'fail'>>;
+  /** Declares a focused group, as if it had `only: true`: its tests are focused the way `test.only` focuses one. CI rejects it with `ONLY_IN_CI`. */
+  only: DescribeRegistrar<Omit<DescribeOptions, 'only'>>;
 }
 
 /** The two call forms of `test`, shared with what `test.skipIf` and `test.runIf` return. */
@@ -883,6 +908,8 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    */
   skip(condition: boolean, reason?: string): void;
   skip(reason?: string): void;
+  /** Registers an unfinished test, reported as skipped with cause and reason `todo`. */
+  todo(title: string): TestCase;
   /** Registers one skipped test marked fixme, reported with the skip cause and reason `fixme`. */
   fixme(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
@@ -1015,7 +1042,7 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   extend<Extra = {}, ExtraWorker = {}>(
     fixtures: FixtureDefinitions<Fixtures & Worker, Extra, Worker, ExtraWorker>,
   ): TestAPI<Fixtures & Extra, Worker & ExtraWorker>;
-  /** Declares a group synchronously; `describe.fail` declares one whose tests are expected to fail. */
+  /** Declares a group synchronously; `describe.fail` declares one whose tests are expected to fail, `describe.only` a focused one. */
   describe: DescribeAPI;
   /** Registers a test-attempt setup hook: it runs after the test's fixtures are set up. */
   beforeEach(fn: TestHookFn<Fixtures & Worker>): void;
@@ -1054,12 +1081,15 @@ export interface TestOptions {
    * around a serial group.
    */
   fail?: boolean | string;
-  /** Focuses the test locally. CI rejects it with `ONLY_IN_CI`. */
+  /**
+   * Focuses the test locally; on a group, focuses every test in it, skipped
+   * ones included, unless a test or group inside it is focused too, which
+   * narrows the focus to that one. CI rejects it with `ONLY_IN_CI`. Not
+   * allowed inside a serial group; a serial group itself can be focused.
+   */
   only?: boolean;
   /** Platforms the test runs on; other targets skip it. Innermost wins. */
   platforms?: readonly string[];
-  /** Capabilities the target must have; otherwise the test is skipped at selection. Innermost wins. */
-  requires?: readonly Capability[];
   /** Session a setup test saved, restored before the body runs. */
   session?: string;
   /** Extra context for agent steps; layers are concatenated outermost first. */
@@ -1088,7 +1118,7 @@ export interface TestOptions {
   video?: RecordingMode;
 }
 
-export interface DescribeOptions extends Omit<TestOptions, 'only'> {
+export interface DescribeOptions extends TestOptions {
   /** Runs the group as one ordered retry unit with shared app state. Nesting one serial group in another is a `COLLECTION_ERROR`. */
   serial?: boolean;
 }

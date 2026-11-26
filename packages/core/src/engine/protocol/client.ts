@@ -134,6 +134,15 @@ interface Link {
   readonly signals: SignalEncoder;
 }
 
+/** One attempt the client has started and not ended. */
+interface OpenAttempt {
+  readonly context: EngineAttemptContext;
+  /** How many screenshots the client wrote for it, which numbers the next. */
+  screenshots: number;
+  /** Set when its `endAttempt` begins: a screenshot's bytes no longer land in it, though callbacks still reach it until that settles. */
+  ending: boolean;
+}
+
 /**
  * Connects to an engine server and returns it as an engine handle, the
  * value a target's `engine` takes. The handle is built from the manifest
@@ -207,8 +216,8 @@ class EngineClient {
    * previous `dispose`: calls go to the newest, `dispose` ends the oldest.
    */
   readonly #workers: Promise<Link>[] = [];
-  /** The open attempts by id, each with the screenshots written for it: one, or more with `actors`. */
-  readonly #attempts = new Map<string, { readonly context: EngineAttemptContext; screenshots: number }>();
+  /** The open attempts by id: one, or more with `actors`. */
+  readonly #attempts = new Map<string, OpenAttempt>();
 
   constructor(manifest: EngineManifest, options: ConnectEngineOptions) {
     this.#manifest = manifest;
@@ -245,6 +254,7 @@ class EngineClient {
         pointerActions: manifest.pointerActions,
         tapModifiers: manifest.tapModifiers,
         selectsDevice: manifest.selectsDevice,
+        grantsAllPermissions: manifest.grantsAllPermissions,
         launchArgumentValues: manifest.launchArgumentValues,
         fileApps: manifest.fileApps,
         isolation: manifest.isolation,
@@ -277,12 +287,12 @@ class EngineClient {
       else if (name === 'action' && spec.member === 'perform') params[name] = encodeLocatorAction(args[index] as LocatorAction);
       else params[name] = args[index];
     });
+    // The attempt that asked, before the server answers: a late answer must not land in one that started since.
+    const operation = args[spec.args.indexOf('operation')] as OperationContext | undefined;
+    const attempt = operation?.attemptId === undefined ? undefined : this.#attempts.get(operation.attemptId);
     const result = await this.#call(link, method, params);
     if (spec.result === 'snapshot') return decodeSnapshot(result as WireSnapshot);
-    if (spec.result === 'screenshot') {
-      const operation = args[spec.args.indexOf('operation')] as OperationContext | undefined;
-      return this.#screenshot(result as ScreenshotResult, params['label'] as string | undefined, operation?.attemptId);
-    }
+    if (spec.result === 'screenshot') return this.#screenshot(attempt, result as ScreenshotResult, params['label'] as string | undefined);
     return result ?? undefined;
   }
 
@@ -344,7 +354,7 @@ class EngineClient {
 
   /** Tracks the attempt, which the server's callbacks and a screenshot's bytes land in, and forwards it when the server answers. */
   async #startAttempt(context: EngineAttemptContext): Promise<void> {
-    this.#attempts.set(context.attemptId, { context, screenshots: 0 });
+    this.#attempts.set(context.attemptId, { context, screenshots: 0, ending: false });
     if (!this.#manifest.methods.includes('lifecycle/startAttempt')) return;
     const link = await this.#workerLink();
     await this.#call(link, 'lifecycle/startAttempt', {
@@ -359,6 +369,8 @@ class EngineClient {
     // A hook that outlived its budget settles after the next attempt
     // started: it retires only the attempt it ended.
     const ending = this.#cleanupAttempt(context);
+    // The runner may stop waiting for a server that never answers; bytes it sends meanwhile have no attempt to land in.
+    if (ending !== undefined) ending.ending = true;
     try {
       if (this.#manifest.methods.includes('lifecycle/endAttempt')) await this.#forward('lifecycle/endAttempt', context);
     } finally {
@@ -367,7 +379,7 @@ class EngineClient {
   }
 
   /** The attempt a cleanup hook is for: the one it names, else the only one open. */
-  #cleanupAttempt(context: EngineCleanupContext): { readonly context: EngineAttemptContext; screenshots: number } | undefined {
+  #cleanupAttempt(context: EngineCleanupContext): OpenAttempt | undefined {
     if (context.attemptId !== undefined) return this.#attempts.get(context.attemptId);
     return this.#attempts.size === 1 ? this.#attempts.values().next().value : undefined;
   }
@@ -423,11 +435,10 @@ class EngineClient {
 
   /**
    * Where a screenshot landed: a path the server wrote, which must stay under
-   * the attempt's artifact directory, or the bytes it returned, written there
-   * by the client.
+   * the artifact directory of the attempt that asked for it, or the bytes it
+   * returned, written there by the client until that attempt starts ending.
    */
-  async #screenshot(result: ScreenshotResult, label: string | undefined, attemptId: string | undefined): Promise<string> {
-    const open = attemptId === undefined ? undefined : this.#attempts.get(attemptId);
+  async #screenshot(open: OpenAttempt | undefined, result: ScreenshotResult, label: string | undefined): Promise<string> {
     const attempt = open?.context;
     if ('path' in result) {
       if (attempt !== undefined && (path.isAbsolute(result.path) || relativeToProjectRoot(attempt.artifactsDir, path.resolve(attempt.artifactsDir, result.path)) === undefined)) {
@@ -436,6 +447,7 @@ class EngineClient {
       return result.path;
     }
     if (open === undefined || attempt === undefined) throw new EngineError('INVALID_STATE', 'screenshot outside an attempt', { retryable: false });
+    if (this.#attempts.get(attempt.attemptId) !== open || open.ending) throw new EngineError('INVALID_STATE', 'screenshot answered after its attempt ended', { retryable: false });
     open.screenshots += 1;
     const name = (label ?? 'screenshot').replaceAll(/[^A-Za-z0-9._-]/g, '_').slice(0, 64) || 'screenshot';
     const relative = path.join('screenshots', `${String(open.screenshots).padStart(3, '0')}-${name}.png`);

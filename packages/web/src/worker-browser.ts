@@ -66,6 +66,8 @@ export class WorkerBrowser {
   app: EngineAppInfo = {};
   projectRoot = '';
   private headed = false;
+  /** Set by `init`: a handle no target runs on never gets there. */
+  private started = false;
   /** The surface of each open attempt: a context of its own on the worker's browser. Set before its `start` awaits anything. */
   private readonly attempts = new Map<string, PlaywrightSurface>();
 
@@ -115,6 +117,7 @@ export class WorkerBrowser {
 
   /** Provisions the shared browser once per worker: a local launch, or a CDP attach. */
   async init(info: EngineInitInfo): Promise<void> {
+    this.started = true;
     // A runner older than the peer floor passes no origin; fail rather than send the credentials nowhere.
     if (info.app.origin === undefined && (this.options.headers !== undefined || this.options.basicAuth !== undefined)) {
       throw new ConfigurationError('INVALID_CONFIG', 'web({ headers, basicAuth }) needs an e2e runner that tells the engine the app\'s origin; update e2e to the release beside this @e2e-dev/web');
@@ -279,7 +282,8 @@ export class WorkerBrowser {
   attempt(name: AttemptName): PlaywrightSurface {
     const surface = this.find(name);
     if (surface !== undefined) return surface;
-    throw invalidState(this.attempts.size === 0 ? 'no attempt is running' : 'the attempt this call belongs to is not running: it ended, or never started here');
+    if (this.attempts.size > 0) throw invalidState('the attempt this call belongs to is not running: it ended, or never started here');
+    throw invalidState(this.started ? 'no attempt is running' : 'no attempt is running on this engine handle, which has not started in this process: use the handle the target runs on, not a new web(), from code a test runs');
   }
 
   /** Settles the attempt a cleanup is for; one that is not open has no handler left to wait for. */
