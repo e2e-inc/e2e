@@ -755,18 +755,35 @@ const MENU_CLOSE_GLANCE: Duration = Duration::from_millis(100);
 /// Closes a menu nothing was chosen from, and answers whether it closed. It runs after the action's deadline too: each
 /// way of closing gets a wait of its own, so an `AXCancel` that used its wait still leaves Escape time to be seen.
 fn close_menu(pid: i32, menu: &Element) -> bool {
-    let closed = || windows::open_menus(pid) == 0;
+    close_menu_with(
+        cancelled,
+        || windows::open_menus(pid) == 0,
+        || menu.perform("AXCancel").is_ok(),
+        || {
+            let _ = input::parse_combo("escape").and_then(|combo| input::press(&combo, Route::Process(pid)));
+        },
+    )
+}
+
+/// `close_menu`'s steps, over `stopped` (the caller cancelled), `closed` (no menu is open), `cancel` (sends `AXCancel`,
+/// and says whether the menu took it), and `escape` (sends Escape).
+fn close_menu_with(stopped: impl Fn() -> bool, closed: impl Fn() -> bool, cancel: impl FnOnce() -> bool, escape: impl FnOnce()) -> bool {
+    // A cancelled action's caller has moved on, and may be working with this menu or another: nothing more is sent, and
+    // the menu may be open.
+    if stopped() {
+        return closed();
+    }
     // A menu that answered the action with an error gets only a glance: an Escape sent once the menu closed would reach
     // the window under it (a sheet it cancels), so even then the driver looks before it sends one.
-    let wait = if menu.perform("AXCancel").is_ok() { MENU_CLOSE_WAIT } else { MENU_CLOSE_GLANCE };
-    if until(Instant::now() + wait, closed) {
+    let wait = if cancel() { MENU_CLOSE_WAIT } else { MENU_CLOSE_GLANCE };
+    if until(Instant::now() + wait, &closed) {
         return true;
     }
-    // A cancelled action's caller has moved on: an Escape now could close a menu its next action opened.
-    if cancelled() {
+    // A cancel that came while the menu was watched: an Escape now could close a menu the caller's next action opened.
+    if stopped() {
         return false;
     }
-    let _ = input::parse_combo("escape").and_then(|combo| input::press(&combo, Route::Process(pid)));
+    escape();
     until(Instant::now() + MENU_CLOSE_WAIT, closed)
 }
 
@@ -799,13 +816,19 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         let items = all(&menu, "AXChildren", "read the list's options").map_err(unchosen)?;
         // A title the app did not answer in time may be the option asked for: that is no proof it is missing.
         let mut stalled = false;
-        let item = items.into_iter().find(|item| match item.attribute("AXTitle") {
-            Ok(title) => title.text() == Some(label) && item.boolean("AXEnabled") != Some(false),
-            Err(error) => {
-                stalled |= error == ax::AX_CANNOT_COMPLETE;
-                false
+        let mut item = None;
+        for candidate in items {
+            // Each title waits on the app: a caller that gave up meanwhile stops the scan.
+            go("read the list's options").map_err(unchosen)?;
+            match candidate.attribute("AXTitle") {
+                Ok(title) if title.text() == Some(label) && candidate.boolean("AXEnabled") != Some(false) => {
+                    item = Some(candidate);
+                    break;
+                }
+                Ok(_) => {}
+                Err(error) => stalled |= error == ax::AX_CANNOT_COMPLETE,
             }
-        });
+        }
         let Some(item) = item else {
             return Err(unchosen(if stalled {
                 unread(ax::AX_CANNOT_COMPLETE, "read the list's options")
@@ -1348,6 +1371,35 @@ mod tests {
         set(1_000_033, later());
         assert!(super::go("press").is_ok());
         super::CURRENT.with(|current| current.borrow_mut().take());
+    }
+
+    #[test]
+    fn sends_nothing_to_close_a_menu_once_the_caller_cancelled() {
+        use super::close_menu_with;
+        let sent = Cell::new(0);
+        // Cancelled before the cleanup: neither AXCancel nor Escape, and the menu is reported as it is.
+        let open = close_menu_with(
+            || true,
+            || false,
+            || {
+                sent.set(sent.get() + 1);
+                true
+            },
+            || sent.set(sent.get() + 1),
+        );
+        assert_eq!((open, sent.get()), (false, 0));
+        // Cancelled while the menu was watched after AXCancel: no Escape follows.
+        let calls = Cell::new(0);
+        let stopped = || {
+            calls.set(calls.get() + 1);
+            calls.get() > 1
+        };
+        let escaped = Cell::new(false);
+        assert!(!close_menu_with(stopped, || false, || false, || escaped.set(true)));
+        assert!(!escaped.get());
+        // Not cancelled: a menu that ignored AXCancel gets Escape, and is closed by it.
+        let menu_open = Cell::new(true);
+        assert!(close_menu_with(|| false, || !menu_open.get(), || false, || menu_open.set(false)));
     }
 
     #[test]
