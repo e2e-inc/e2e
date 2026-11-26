@@ -9,10 +9,11 @@ type HardwareButtonName = Parameters<AgentDeviceClient['command']['hardwareButto
 /**
  * agent-device's button for each hardware button. agent-device sends them as
  * key events on an Android emulator or phone, and the volume buttons through
- * the XCUITest runner on a physical iPhone. An iOS simulator, an Android TV,
- * and a physical iPhone's power button are refused, which reaches the test as
- * `UNSUPPORTED_CAPABILITY`. agent-device also has `mute`, `sleep`, `wake`,
- * and media keys; they are left out until a phone test needs them.
+ * the XCUITest runner on a physical iPhone or iPad. An iOS simulator, an
+ * Android TV, and an iPhone's or iPad's power button are refused, which
+ * reaches the test as `UNSUPPORTED_CAPABILITY`. agent-device also has
+ * `mute`, `sleep`, `wake`, and media keys; they are left out until a phone
+ * test needs them.
  */
 const HARDWARE_BUTTONS = {
   'volume-up': 'volume-up',
