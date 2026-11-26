@@ -791,6 +791,22 @@ fn close_menu_with(stopped: impl Fn() -> bool, closed: impl Fn() -> bool, cancel
     until(Instant::now() + MENU_CLOSE_WAIT, closed)
 }
 
+/// The first item `matches` takes, and whether a read of one the app did not answer in time left an item unread: that
+/// item may be the one asked for. Each read waits on the app, and a list can hold thousands of items: the scan stops
+/// with the cut-off once the caller gave up or ran out of time.
+fn scan<T>(items: Vec<T>, what: &str, mut matches: impl FnMut(&T) -> Result<bool, AXError>) -> Outcome<(Option<T>, bool)> {
+    let mut stalled = false;
+    for item in items {
+        go(what)?;
+        match matches(&item) {
+            Ok(true) => return Ok((Some(item), stalled)),
+            Ok(false) => {}
+            Err(error) => stalled |= error == ax::AX_CANNOT_COMPLETE,
+        }
+    }
+    Ok((None, stalled))
+}
+
 /// A select's failure before anything was chosen, once its menu was closed or failed to close. A menu that stayed open
 /// changed the screen, and covers the window for the next action, so the failure is no longer "nothing sent".
 fn unclosed(failure: Failure, closed: bool) -> Failure {
@@ -819,20 +835,10 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         let unchosen = |failure: Failure| unclosed(failure, close_menu(entry.pid, &menu));
         let items = all(&menu, "AXChildren", "read the list's options").map_err(unchosen)?;
         // A title the app did not answer in time may be the option asked for: that is no proof it is missing.
-        let mut stalled = false;
-        let mut item = None;
-        for candidate in items {
-            // Each title waits on the app: a caller that gave up meanwhile stops the scan.
-            go("read the list's options").map_err(unchosen)?;
-            match candidate.attribute("AXTitle") {
-                Ok(title) if title.text() == Some(label) && candidate.boolean("AXEnabled") != Some(false) => {
-                    item = Some(candidate);
-                    break;
-                }
-                Ok(_) => {}
-                Err(error) => stalled |= error == ax::AX_CANNOT_COMPLETE,
-            }
-        }
+        let (item, stalled) = scan(items, "read the list's options", |candidate| {
+            candidate.attribute("AXTitle").map(|title| title.text() == Some(label) && candidate.boolean("AXEnabled") != Some(false))
+        })
+        .map_err(unchosen)?;
         let Some(item) = item else {
             return Err(unchosen(if stalled {
                 unread(ax::AX_CANNOT_COMPLETE, "read the list's options")
@@ -866,20 +872,7 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
             rows => rows,
         };
         // A row the app did not answer in time may be the option asked for: that is no proof it is missing.
-        let mut stalled = false;
-        let mut row = None;
-        for candidate in rows {
-            // Each label waits on the app, and a table can hold thousands of rows: a caller that gave up stops the scan.
-            go("read the list's rows")?;
-            match item_label(&candidate) {
-                Ok(text) if text.as_deref() == Some(label) => {
-                    row = Some(candidate);
-                    break;
-                }
-                Ok(_) => {}
-                Err(error) => stalled |= error == ax::AX_CANNOT_COMPLETE,
-            }
-        }
+        let (row, stalled) = scan(rows, "read the list's rows", |candidate| item_label(candidate).map(|text| text.as_deref() == Some(label)))?;
         let Some(row) = row else {
             if stalled {
                 return Err(unread(ax::AX_CANNOT_COMPLETE, "read the list's rows"));
@@ -1452,6 +1445,29 @@ mod tests {
         assert_eq!((failure.code, failure.delivery), (crate::failure::codes::TIMEOUT, crate::failure::Delivery::NotDelivered));
         let late = super::focus_window(-1, 1, Some(1_000_040), Instant::now()).expect_err("out of time");
         assert_eq!(late.code, crate::failure::codes::TIMEOUT);
+    }
+
+    #[test]
+    fn stops_scanning_a_list_once_the_caller_cancelled() {
+        use super::scan;
+        let read = Cell::new(0);
+        let outcome = super::guarded(Some(1_000_051), later(), || {
+            scan(vec![1, 2, 3], "read the list's rows", |_| {
+                read.set(read.get() + 1);
+                crate::input::cancel_input(1_000_051);
+                Ok(false)
+            })
+        });
+        assert_eq!(outcome.expect_err("cancelled during the scan").code, crate::failure::codes::TIMEOUT);
+        assert_eq!(read.get(), 1, "no row read after the cancel");
+        // Not cancelled: the first match, and a stall on the way is reported with a miss.
+        let found = super::guarded(Some(1_000_052), later(), || scan(vec![1, 2, 3], "scan", |item| Ok(*item == 2))).expect("scanned");
+        assert_eq!(found, (Some(2), false));
+        let missed = super::guarded(Some(1_000_053), later(), || {
+            scan(vec![1, 2], "scan", |item| if *item == 1 { Err(crate::ax::AX_CANNOT_COMPLETE) } else { Ok(false) })
+        })
+        .expect("scanned");
+        assert_eq!(missed, (None, true));
     }
 
     #[test]
