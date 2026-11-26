@@ -338,7 +338,17 @@ fn check(element: &Element, wanted: bool, deadline: Instant) -> Outcome<()> {
         return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("a {role} has no checked state to set")));
     }
     let target = wanted as u8;
-    let mut shown = toggle_state(element);
+    // A box whose state cannot be read may already show the one asked for: a press would turn it the other way.
+    let mut shown = match element.attribute("AXValue") {
+        Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT)) => return Err(unread(error, if wanted { "check" } else { "uncheck" })),
+        value => crate::snapshot::parse_toggle(value.ok().as_ref()),
+    };
+    if shown.is_none() {
+        return Err(Failure::refused(
+            codes::ACTION_NOT_SUPPORTED,
+            format!("the {role} shows no checked state the engine can read, so pressing it could undo the one asked for"),
+        ));
+    }
     let reached = press_to_state(
         target,
         shown,
