@@ -448,6 +448,101 @@ test('never registered', async () => {});
     120_000,
   );
 
+  it('names test.fixme() when it refuses one from an afterEach hook', async () => {
+    const file = `import { afterEach, test } from 'e2e';
+
+afterEach(() => {
+  test.fixme(true, 'too late');
+});
+test('passes before an afterEach fixme', async () => {});
+`;
+    const { outcome, project } = await runProject({ 'tests/late-fixme.e2e.ts': file }, {});
+    try {
+      const result = resultByTitle(outcome, 'passes before an afterEach fixme');
+      expect(result.status).toBe('failed');
+      expect(result.attempts[0]?.error).toMatchObject({
+        code: 'INVALID_ARGUMENT',
+        phase: 'afterEach',
+        message: expect.stringMatching(/test\.fixme\(\) cannot skip a test from an afterEach hook or a fixture teardown/),
+      });
+    } finally {
+      project.cleanup();
+    }
+  }, 120_000);
+
+  it(
+    'refuses test.skip() from an afterEach hook or a fixture teardown with INVALID_ARGUMENT',
+    async () => {
+      const file = `import { afterEach, beforeEach, describe, expect, test as base } from 'e2e';
+
+const test = base.extend<{ resource: number }>({
+  resource: async ({}, use) => {
+    await use(1);
+    test.skip(true, 'too late');
+  },
+});
+
+test('skips from a fixture teardown', async ({ resource }) => {
+  expect(resource).toBe(1);
+});
+
+describe('late', () => {
+  afterEach(() => {
+    base.skip('too late');
+  });
+  base('passes before an afterEach skip', async () => {});
+  base('fails before an afterEach skip', async () => {
+    expect(1).toBe(2);
+  });
+});
+
+describe('skipped first', () => {
+  beforeEach(() => {
+    base.skip(true, 'flag off');
+  });
+  afterEach(() => {
+    base.skip(true, 'flag off');
+  });
+  base('skips in both hooks', async () => {});
+});
+
+describe('soft failure then skip', () => {
+  afterEach(() => {
+    base.skip(true, 'too late');
+  });
+  base('fails softly, then skips', async () => {
+    expect.soft(1).toBe(2);
+    base.skip(true, 'flag off');
+  });
+});
+`;
+      const { outcome, project } = await runProject({ 'tests/late-skip.e2e.ts': file }, {});
+      const late = /test\.skip\(\) cannot skip a test from an afterEach hook or a fixture teardown/;
+      for (const title of ['skips from a fixture teardown', 'passes before an afterEach skip']) {
+        const result = resultByTitle(outcome, title);
+        expect(result.status).toBe('failed');
+        expect(result.skip).toBeUndefined();
+        expect(result.attempts[0]?.error).toMatchObject({ code: 'INVALID_ARGUMENT', phase: 'afterEach', message: expect.stringMatching(late) });
+      }
+      const failed = resultByTitle(outcome, 'fails before an afterEach skip');
+      expect(failed.attempts[0]?.error?.code).toBe('ASSERTION_FAILED');
+      expect(failed.attempts[0]?.secondaryErrors).toEqual([expect.objectContaining({ code: 'INVALID_ARGUMENT', message: expect.stringMatching(late) })]);
+      // A skip in afterEach after a test that already skipped agrees with its verdict.
+      const skippedTwice = resultByTitle(outcome, 'skips in both hooks');
+      expect(skippedTwice.status).toBe('skipped');
+      expect(skippedTwice.skip?.reason).toBe('flag off');
+      expect(skippedTwice.attempts[0]?.error).toBeUndefined();
+      expect(skippedTwice.attempts[0]?.secondaryErrors ?? []).toEqual([]);
+      // A soft failure outranks the body's skip, so the verdict is a failure and the afterEach skip comes too late.
+      const softThenSkip = resultByTitle(outcome, 'fails softly, then skips');
+      expect(softThenSkip.status).toBe('failed');
+      expect(softThenSkip.attempts[0]?.error?.code).toBe('ASSERTION_FAILED');
+      expect(softThenSkip.attempts[0]?.secondaryErrors).toEqual([expect.objectContaining({ code: 'INVALID_ARGUMENT', message: expect.stringMatching(late) })]);
+      project.cleanup();
+    },
+    120_000,
+  );
+
   it(
     'runs the named file past broken files it did not name, and fails a run that names one or names none',
     async () => {

@@ -115,6 +115,7 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 | エラー | 発生条件 |
 | --- | --- |
 | `INVALID_ARGUMENT` | セットアップテストで、条件が true か条件なしで呼び出した場合。他のテストがそのセッションに依存するため、セットアップテストはスキップできません。 |
+| `INVALID_ARGUMENT` | スキップしなかったテストの後、`afterEach` フックやフィクスチャの後処理で、条件が true の場合。テストの判定はすでに決まっています。Playwright はこの場合、成功したテストをスキップ扱いにし、失敗の後は呼び出しを無視します。スキップしたテストの後では、呼び出しはエラーを記録しませんが、そのフックや後処理の残りは実行されません。 |
 | `COLLECTION_ERROR` | 条件付きの形式をテスト本体の外で呼び出した場合。 |
 | `COLLECTION_ERROR` | 登録時の形式を直列実行グループ内で呼び出した場合。代わりに直列実行の `describe` に [`skip`](#skip) を設定します。 |
 
@@ -149,6 +150,7 @@ test.fixme(); // inside a body, always
 | エラー | 発生条件 |
 | --- | --- |
 | `INVALID_ARGUMENT` | セットアップテストで、条件が true か条件なしで呼び出した場合。他のテストがそのセッションに依存するため、セットアップテストはスキップできません。 |
+| `INVALID_ARGUMENT` | スキップしなかったテストの後、`afterEach` フックやフィクスチャの後処理で、条件が true か条件なしで呼び出した場合。`test.skip` と同じです。 |
 | `COLLECTION_ERROR` | 条件付きの形式をテスト本体の外で呼び出した場合。収集時には `test.fixme(title, fn)` を使います。 |
 | `COLLECTION_ERROR` | 登録時の形式を直列実行グループ内で呼び出した場合。代わりに直列実行の `describe` に [`skip`](#skip) を設定します。 |
 

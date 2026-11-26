@@ -134,6 +134,7 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 | Throws | When |
 | --- | --- |
 | `INVALID_ARGUMENT` | Called in a setup test with a true condition, or none. A setup test cannot skip because other tests depend on its sessions. |
+| `INVALID_ARGUMENT` | A true condition in an `afterEach` hook or a fixture teardown after a test that did not skip, where its verdict is already reached. Playwright instead marks a passed test skipped and ignores the call after a failure. After a skipped test, the call records no error, and the rest of that hook or teardown does not run. |
 | `COLLECTION_ERROR` | The conditional form, outside a test body. |
 | `COLLECTION_ERROR` | The registration form, inside a serial group. Set [`skip`](#skip) on the serial `describe` instead. |
 
@@ -178,6 +179,7 @@ test.fixme(); // inside a body, always
 | Throws | When |
 | --- | --- |
 | `INVALID_ARGUMENT` | Called in a setup test with a true condition, or none. A setup test cannot skip because other tests depend on its sessions. |
+| `INVALID_ARGUMENT` | A true condition, or none, in an `afterEach` hook or a fixture teardown after a test that did not skip, as for `test.skip`. |
 | `COLLECTION_ERROR` | The conditional form, outside a test body. Use `test.fixme(title, fn)` at collection. |
 | `COLLECTION_ERROR` | The registration form, inside a serial group. Set [`skip`](#skip) on the serial `describe` instead. |
 

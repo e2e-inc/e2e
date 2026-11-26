@@ -10,6 +10,7 @@
 
 import { currentAttempt } from '@e2e-dev/core/lib/expect/attempt';
 import { CollectionError, TestError } from '@e2e-dev/core/lib/internal/errors';
+import { LATE_VERDICT } from '@e2e-dev/core/lib/internal/expected-failure';
 import type { SelfSkipCause } from '@e2e-dev/core/lib/run/records';
 
 const runtimeSkipBrand: unique symbol = Symbol.for('e2e.runtimeSkip.v1');
@@ -112,4 +113,15 @@ export function skipRunningTest(
     throw new TestError('INVALID_ARGUMENT', `${api}() cannot skip a setup test: the sessions it declares are owed to their consumers`);
   }
   throw new RuntimeSkip(reason, RUNTIME_SKIP_APIS[api].cause);
+}
+
+/**
+ * What a skip thrown from an afterEach hook or a fixture teardown becomes
+ * after a test that did not skip: the attempt's verdict is already reached
+ * there, as for a late `test.fail()`. After a skipped test the skip agrees
+ * with the verdict, and the caller records nothing.
+ */
+export function lateSkipError(skip: CaughtRuntimeSkip): TestError {
+  const call = runtimeSkipCause(skip) === 'fixme' ? 'test.fixme()' : 'test.skip()';
+  return new TestError('INVALID_ARGUMENT', `${call} cannot skip ${LATE_VERDICT}; call it in the test body or a beforeEach hook`);
 }
