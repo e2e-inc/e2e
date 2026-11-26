@@ -329,6 +329,9 @@ fn pieces(text: &str) -> Vec<Piece> {
 /// the keyboard there.
 pub fn type_text(text: &str, route: Route, run: &TypingRun, deadline: std::time::Instant, still: &dyn Fn() -> Outcome<()>) -> Outcome<()> {
     let source = source()?;
+    // The key that types each character on this Mac's layout, so a control that reads the key code sees the key a
+    // person would press; a character no key types without a modifier keeps code 0, and its text says what it is.
+    let layout = crate::layout::characters(false).unwrap_or_default();
     // A stop before the first key sent nothing; after it, the keys sent stay sent.
     let mut sent = false;
     let stopped = |failure: Failure, sent: bool| {
@@ -354,9 +357,10 @@ pub fn type_text(text: &str, route: Route, run: &TypingRun, deadline: std::time:
             Piece::Text(units) => units,
         };
         sent = true;
+        let code = key_code(&units, &layout);
         for down in [true, false] {
             let event =
-                CGEvent::new_keyboard_event(source.clone(), 0, down).map_err(|_| Failure::unconfirmed(codes::INTERNAL, "could not create a key event"))?;
+                CGEvent::new_keyboard_event(source.clone(), code, down).map_err(|_| Failure::unconfirmed(codes::INTERNAL, "could not create a key event"))?;
             // No modifiers: a key the user holds would otherwise ride along on an HID-state event and turn text into a shortcut.
             event.set_flags(CGEventFlags::CGEventFlagNull);
             event.set_string_from_utf16_unchecked(&units);
@@ -365,6 +369,15 @@ pub fn type_text(text: &str, route: Route, run: &TypingRun, deadline: std::time:
         sleep(Duration::from_millis(1));
     }
     Ok(())
+}
+
+/// The key code of a typed character on a layout's table: the key that types it with no modifier, else 0.
+fn key_code(units: &[u16], layout: &[(u16, char)]) -> u16 {
+    let mut decoded = char::decode_utf16(units.iter().copied());
+    match (decoded.next(), decoded.next()) {
+        (Some(Ok(character)), None) => crate::layout::code_for(character, layout).unwrap_or(0),
+        _ => 0,
+    }
 }
 
 /// What a pointer does at a point.
@@ -427,6 +440,19 @@ mod tests {
             Piece::Text(units) => String::from_utf16(units).expect("a key event holds a whole character"),
             other => panic!("expected text, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn gives_a_typed_character_the_key_that_types_it_on_the_layout() {
+        let units = |text: &str| text.encode_utf16().collect::<Vec<_>>();
+        // A US layout's a and b keys; on it, A needs Shift and no key types an emoji.
+        let us = [(0, 'a'), (11, 'b')];
+        assert_eq!(super::key_code(&units("b"), &us), 11);
+        assert_eq!(super::key_code(&units("a"), &us), 0);
+        assert_eq!(super::key_code(&units("A"), &us), 0);
+        assert_eq!(super::key_code(&units("😀"), &us), 0);
+        // French AZERTY types a on the key a US keyboard has for q.
+        assert_eq!(super::key_code(&units("a"), &[(12, 'a'), (0, 'q')]), 12);
     }
 
     #[test]
