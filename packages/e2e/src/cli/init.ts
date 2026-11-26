@@ -27,7 +27,7 @@ import {
   findInstalledSkillDirs,
   findPackageSkillLinks,
   holdsCopyAfter,
-  holdsSkillEntry,
+  holdsSkill,
   linkedAtSkillName,
   planSkillInstall,
   planSkillLink,
@@ -298,8 +298,12 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
     : {};
   // A location pnpm links the installed skill into counts as installed, whatever the link's name.
   const packageLinks = findPackageSkillLinks(cwd);
+  const installedSkillDirs = findInstalledSkillDirs(cwd);
   const foundSkillDirs = SKILL_LOCATIONS.map(({ dir }) => dir)
-    .filter((dir) => findInstalledSkillDirs(cwd).includes(dir) || packageLinks.some((link) => link.dir === dir));
+    .filter((dir) => installedSkillDirs.includes(dir) || packageLinks.some((link) => link.dir === dir));
+  // In a workspace member, pnpm links the skill into the workspace root's folders only.
+  const workspace = detectWorkspacePackageManager(cwd);
+  const rootLinks = path.resolve(workspace.root) === path.resolve(cwd) ? [] : findPackageSkillLinks(workspace.root);
   const foundMcpFiles = findRegisteredMcpFiles(cwd);
   const given = {
     engines: options.engines ?? defaults.engines,
@@ -368,10 +372,12 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
     if (duplicates.includes(link)) clack.log.warn(describeDuplicate(link));
     else clack.log.info(`Linked to the installed e2e, not touching: ${link.dir}/${link.name}`);
   }
-  // Where pnpm links the skill, init refreshes the copies there are and adds none: pnpm would link a second skill beside a new copy.
-  const unwritten = packageLinks.length === 0 ? [] : skillDirs.filter((dir) => !holdsSkillEntry(cwd, dir));
+  // Where the package manager links the skill, init refreshes the copies there are and adds none: pnpm would link a second skill beside a new copy.
+  const unwritten = packageLinks.length === 0 && rootLinks.length === 0 ? [] : skillDirs.filter((dir) => !holdsSkill(cwd, dir));
   for (const dir of unwritten.filter((missing) => !packageLinks.some((link) => link.dir === missing))) {
-    clack.log.info(`Not copying the skill into ${dir}: pnpm links it from the installed e2e in this project; create the folder and run pnpm install to link it there`);
+    clack.log.info(packageLinks.length > 0
+      ? `Not copying the skill into ${dir}: the package manager links it from the installed e2e in this project; create the folder and install again to link it there`
+      : `Not copying the skill into ${dir}: the package manager links it from the installed e2e at the workspace root, in ${rootLinks.map((link) => posixRelative(cwd, path.join(workspace.root, link.dir, link.name))).join(' and ')}`);
   }
   const { copies, links } = splitSkillDirs(skillDirs.filter((dir) => !linkedAtSkillName(packageLinks, dir) && !unwritten.includes(dir)));
   const plannedCopies = planSkillInstall(cwd, copies, bundledSkill);
@@ -397,7 +403,6 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
   facts.mcp = mcpFiles.length > 0;
   // A workspace member takes its workspace root's manager when this machine has it, and is treated as a standalone project otherwise.
   const own = detectPackageManager(cwd, pkg.manifest.packageManager);
-  const workspace = detectWorkspacePackageManager(cwd);
   const manager = workspace.manager === own || isInstalled(workspace.manager, workspace.root) ? workspace.manager : own;
   if (manager !== workspace.manager) clack.log.warn(`This workspace uses ${workspace.manager}, which was not found on this machine; continuing with ${manager}`);
   let mcpRegistrations: ReturnType<typeof planMcpRegistration>['registrations'];

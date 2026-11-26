@@ -668,7 +668,7 @@ describe('e2e upgrade', () => {
       expect((await run()).exitCode).toBe(0);
       expect(skillFile('.agents/skills', 'SKILL.md')).toBe('new');
       expect(written(stdoutSpy)).toContain(
-        'Two e2e skills in .agents/skills: the copy in e2e/ and pnpm-e2e-e2e, linked to the installed e2e; delete .agents/skills/e2e and run pnpm install --force\n',
+        'Two e2e skills in .agents/skills: e2e and pnpm-e2e-e2e, the link to the installed e2e; delete .agents/skills/e2e and run pnpm install --force\n',
       );
 
       // pnpm's link under that name, with no copy beside it, is the only skill there.

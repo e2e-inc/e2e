@@ -1129,7 +1129,7 @@ describe('e2e init', () => {
       expect((await init(dir, { yes: true, skills: ['.agents/skills', '.claude/skills'], mcp: [] })).exitCode).toBe(0);
       expect(existsSync(path.join(dir, '.agents/skills/e2e'))).toBe(false);
       expect(existsSync(path.join(dir, '.claude/skills/e2e'))).toBe(false);
-      expect(output()).toContain('Not copying the skill into .claude/skills: pnpm links it from the installed e2e in this project; create the folder and run pnpm install to link it there');
+      expect(output()).toContain('Not copying the skill into .claude/skills: the package manager links it from the installed e2e in this project; create the folder and install again to link it there');
       expect(output()).not.toContain('Not copying the skill into .agents/skills');
       expect(output()).toContain('Linked to the installed e2e, not touching: .agents/skills/pnpm-e2e-e2e');
     });
@@ -1140,8 +1140,38 @@ describe('e2e init', () => {
       expect((await init(dir, { yes: true, mcp: [] })).exitCode).toBe(0);
       expect(read('.agents/skills/e2e/SKILL.md')).toMatch(/^---\nname: e2e\n/);
       expect(output()).toContain(
-        'Two e2e skills in .agents/skills: the copy in e2e/ and pnpm-e2e-e2e, linked to the installed e2e; delete .agents/skills/e2e and run pnpm install --force',
+        'Two e2e skills in .agents/skills: e2e and pnpm-e2e-e2e, the link to the installed e2e; delete .agents/skills/e2e and run pnpm install --force',
       );
+    });
+
+    it('names only the deletion for a link another tool made', async () => {
+      writeCopy('.agents/skills');
+      pnpmLink('.agents/skills', 'npm-e2e-e2e');
+      expect((await init(dir, { yes: true, mcp: [] })).exitCode).toBe(0);
+      expect(output()).toContain('Two e2e skills in .agents/skills: e2e and npm-e2e-e2e, the link to the installed e2e; delete .agents/skills/e2e\n');
+    });
+
+    it('leaves a dangling skill link beside pnpm\'s link alone, without calling it a copy or offering to replace it', async () => {
+      pnpmLink('.claude/skills', 'pnpm-e2e-e2e');
+      symlinkSync('../../.agents/skills/e2e', path.join(dir, '.claude/skills/e2e'), process.platform === 'win32' ? 'junction' : 'dir');
+      vi.mocked(clack.confirm).mockResolvedValue(true);
+      expect((await init(dir, { install: false })).exitCode).toBe(0);
+      expect(output()).not.toContain('Two e2e skills');
+      expect(clack.confirm).not.toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('Replace the symlink') }));
+      expect(existsSync(path.join(dir, '.agents/skills/e2e'))).toBe(false);
+      expect(lstatSync(path.join(dir, '.claude/skills/e2e')).isSymbolicLink()).toBe(true);
+    });
+
+    it('writes no copy in a workspace member when pnpm links the skill at the workspace root', async () => {
+      pnpmLink('.agents/skills');
+      writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), 'packages:\n  - app\n');
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'root', private: true }));
+      const member = path.join(dir, 'app');
+      mkdirSync(path.join(member, '.agents/skills'), { recursive: true });
+      writeFileSync(path.join(member, 'package.json'), JSON.stringify({ name: 'app', private: true }));
+      expect((await init(member, { yes: true, skills: ['.agents/skills'], mcp: [] })).exitCode).toBe(0);
+      expect(existsSync(path.join(member, '.agents/skills/e2e'))).toBe(false);
+      expect(output()).toContain('Not copying the skill into .agents/skills: the package manager links it from the installed e2e at the workspace root, in ../.agents/skills/e2e');
     });
   });
 

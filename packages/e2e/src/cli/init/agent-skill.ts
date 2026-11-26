@@ -91,9 +91,10 @@ export type SkillInstall = SkillCopy | SkillSymlink;
 
 /**
  * A link in a skills directory that leads to the skill an installed e2e
- * ships, as pnpm 12.11 or later links a dependency's skills: `e2e`, or
- * `pnpm-e2e-e2e` when that name was taken. The package manager keeps it on
- * the installed version, so init and upgrade write nothing there.
+ * ships, as pnpm 12.11 or later links a dependency's skills: `pnpm-e2e-e2e`
+ * before pnpm 12.18, and from 12.18 `e2e` unless that name is taken. The
+ * package manager keeps it on the installed version, so init and upgrade
+ * write nothing there.
  */
 export interface PackageSkillLink {
   /** The skills directory, e.g. `.agents/skills`. */
@@ -124,25 +125,30 @@ export function findPackageSkillLinks(cwd: string): PackageSkillLink[] {
 }
 
 /**
- * The skills directories holding a copy at `e2e` beside a package link under
- * another name: an agent reading the directory loads two e2e skills.
+ * The package links beside which `<dir>/e2e` holds another skill, a copy or a
+ * link to one: an agent reading the directory loads two e2e skills.
  */
 export function findDuplicateSkills(cwd: string, links: readonly PackageSkillLink[]): PackageSkillLink[] {
   return links.filter((link) =>
     link.name !== SKILL_NAME
     && !links.some((other) => other.dir === link.dir && other.name === SKILL_NAME)
-    && holdsSkillEntry(cwd, link.dir),
+    && holdsSkill(cwd, link.dir),
   );
 }
 
-/** The warning for a copy beside a package link, with the two steps that leave pnpm's link alone. */
+/**
+ * The warning for another skill beside a package link: delete it, and for
+ * pnpm's link, reinstall with `--force` so pnpm 12.18 or later renames the
+ * link to `e2e`, the path the instructions files name.
+ */
 export function describeDuplicate(link: PackageSkillLink): string {
-  return `Two e2e skills in ${link.dir}: the copy in ${SKILL_NAME}/ and ${link.name}, linked to the installed e2e; delete ${link.dir}/${SKILL_NAME} and run pnpm install --force`;
+  const rename = link.name.startsWith('pnpm-') ? ' and run pnpm install --force' : '';
+  return `Two e2e skills in ${link.dir}: ${SKILL_NAME} and ${link.name}, the link to the installed e2e; delete ${link.dir}/${SKILL_NAME}${rename}`;
 }
 
-/** Whether anything, a dangling link included, stands at `<dir>/e2e`. */
-export function holdsSkillEntry(cwd: string, dir: string): boolean {
-  return lstatOrUndefined(path.join(cwd, dir, SKILL_NAME)) !== undefined;
+/** Whether `<dir>/e2e` holds a skill an agent loads: a `SKILL.md` there, through any link. */
+export function holdsSkill(cwd: string, dir: string): boolean {
+  return existsSync(path.join(cwd, dir, SKILL_NAME, 'SKILL.md'));
 }
 
 /** Whether `<dir>/e2e` is itself a link to an installed e2e's skill. */

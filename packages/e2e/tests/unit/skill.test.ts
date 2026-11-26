@@ -21,6 +21,19 @@ describe('the bundled agent skill', () => {
   it('lists every file it ships among the files the skill has ever shipped, which init and upgrade may remove once retired', () => {
     // Removing a file from the skill keeps its line in SHIPPED_SKILL_FILES, so copies drop it on the next init or upgrade.
     expect(SHIPPED_SKILL_FILES).toEqual(expect.arrayContaining(readSkillFiles().map((file) => file.relative)));
+    // Append-only: a line dropped from the list leaves that file in every project's copy for good.
+    const shippedBy0_25 = [
+      'SKILL.md',
+      'references/agent.md',
+      'references/bug-bash.md',
+      'references/debugging.md',
+      'references/explore.md',
+      'references/mcp.md',
+      'references/running.md',
+      'references/setup.md',
+      'references/writing-tests.md',
+    ];
+    expect(SHIPPED_SKILL_FILES).toEqual(expect.arrayContaining(shippedBy0_25));
     expect(new Set(SHIPPED_SKILL_FILES).size).toBe(SHIPPED_SKILL_FILES.length);
   });
 
