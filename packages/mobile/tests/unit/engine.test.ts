@@ -3771,6 +3771,11 @@ describe('device fixture', () => {
     expect(h.adbCalls).toEqual([set('com.other', 'de-DE,it-IT')]);
     // Before the close, which ends the session and frees the device.
     expect(closing).toEqual(['apps.close after 1 adb']);
+    // A fresh launch by display name: the package it launched gets its own locales back once the launch names it.
+    await device.openApp('com.other', { relaunch: true, locale: 'ja-JP' });
+    h.adbCalls.length = 0;
+    await device.openApp('Other', { relaunch: true });
+    expect(h.adbCalls).toEqual([set('com.other', 'de-DE,it-IT')]);
     // The locale goes back before the session closes, which frees the device for another session.
     const order: string[] = [];
     h.respondAdb((args) => {

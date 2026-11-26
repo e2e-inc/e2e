@@ -951,6 +951,12 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     if (this.options.platform === 'android') await this.presetAndroidLocale(app, locale, relaunch, signal);
     if (permissions !== undefined) await this.presetPermissions(app, permissions, signal);
     await this.open(app, relaunch, launchArguments, signal, locale);
+    // A fresh launch by display name missed the package's own locales above; the launch names the
+    // package, and Android applies its locale to the running app by recreating its screen.
+    const launched = this.appIdentity;
+    if (this.options.platform === 'android' && relaunch && locale === undefined && launched !== undefined && launched !== app) {
+      await this.androidLocales?.putBack(launched, signal);
+    }
   }
 
   /**
@@ -1099,7 +1105,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     const app = this.appIdentity ?? this.pinnedApp;
     // The next open launches the app fresh, in its own locale again, as an iOS one does. Put back
     // before the close: it ends the agent-device session, which frees the device for another one.
-    if (app !== undefined) await this.androidLocales?.afterClose(app, signal);
+    if (app !== undefined) await this.androidLocales?.putBack(app, signal);
     await this.command('device.closeApp', (client) => client.apps.close({ ...this.selection(), ...(app === undefined ? {} : { app }) }), signal);
     this.screenReplaced();
   }

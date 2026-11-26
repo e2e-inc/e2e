@@ -180,14 +180,6 @@ export class AndroidAppLocales {
     if (relaunch) await this.putBack(app, signal);
   }
 
-  /**
-   * Puts back `app`'s own locales as `device.closeApp` terminates it, so the
-   * next open, which launches it fresh, runs in them.
-   */
-  async afterClose(app: string, signal: AbortSignal): Promise<void> {
-    await this.putBack(app, signal);
-  }
-
   /** Puts back the locales of every app this worker changed; failures are left, as the worker is going away. */
   async restore(signal: AbortSignal): Promise<void> {
     for (const app of this.original.keys()) {
@@ -196,8 +188,12 @@ export class AndroidAppLocales {
     this.original.clear();
   }
 
-  /** Sets `app`'s locales back to what it had before this worker changed them, when it did. */
-  private async putBack(app: string, signal: AbortSignal): Promise<void> {
+  /**
+   * Sets `app`'s locales back to what it had before this worker changed
+   * them, when it did: as `device.closeApp` terminates it, and after a fresh
+   * launch by display name, whose package only the launch names.
+   */
+  async putBack(app: string, signal: AbortSignal): Promise<void> {
     const original = this.original.get(app);
     if (original === undefined) return;
     await this.set(app, await original, signal);
