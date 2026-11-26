@@ -39,10 +39,21 @@ const ANDROID_MEDIA_DIR = '/sdcard/Pictures';
  */
 const MAX_STDERR = 2_000;
 
-/** Runs a host command with `execFile`: no shell, so a file name is one argument whatever it holds. */
+/**
+ * Runs a host command with `execFile`: no shell, so a file name is one
+ * argument whatever it holds. An abort kills it with SIGKILL, which a
+ * program cannot catch, and the promise settles once it has exited, so none
+ * keeps working past the step. `execFile`'s own `signal` option sends
+ * SIGTERM whatever `killSignal` says, so the abort is handled here.
+ */
 export const runHostCommand: HostRunner = (command, { env, signal }) =>
   new Promise((resolve, reject) => {
-    execFile(command.file, [...command.args], { env, signal, maxBuffer: 16 * 1024 * 1024 }, (error, _stdout, stderr) => {
+    const child = execFile(command.file, [...command.args], { env, maxBuffer: 16 * 1024 * 1024 }, (error, _stdout, stderr) => {
+      signal.removeEventListener('abort', kill);
+      if (signal.aborted) {
+        reject(Object.assign(new Error(`${path.basename(command.file)} was stopped`), { name: 'AbortError' }));
+        return;
+      }
       if (error === null) {
         resolve();
         return;
@@ -50,6 +61,11 @@ export const runHostCommand: HostRunner = (command, { env, signal }) =>
       const output = String(stderr).trim();
       reject(Object.assign(error, { stderr: output.length > MAX_STDERR ? `${output.length} characters of stderr, too long to show` : output }));
     });
+    function kill(): void {
+      child.kill('SIGKILL');
+    }
+    signal.addEventListener('abort', kill, { once: true });
+    if (signal.aborted) kill();
   });
 
 /** The files `device.addMedia` was given, as a list; anything but one or more non-empty strings is `INVALID_ARGUMENT`. */

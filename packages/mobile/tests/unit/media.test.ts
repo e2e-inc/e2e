@@ -4,7 +4,7 @@
  * The host runner is scripted, so no simulator or adb is needed.
  */
 
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -270,6 +270,33 @@ describe('runHostCommand', () => {
       () => undefined,
       (error: { stderr?: unknown }) => error.stderr,
     );
+
+  it('kills a program that ignores SIGTERM when the signal aborts, so it does not keep working', async () => {
+    const pidFile = path.join(dir, 'pid');
+    const ignoresTerm: HostCommand = {
+      file: process.execPath,
+      args: ['-e', `process.on('SIGTERM', () => {}); require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 30_000)`],
+    };
+    const controller = new AbortController();
+    const running = runHostCommand(ignoresTerm, { env: process.env, signal: controller.signal });
+    await expect.poll(() => existsSync(pidFile), { timeout: 10_000 }).toBe(true);
+    const pid = Number(readFileSync(pidFile, 'utf8'));
+    controller.abort();
+    await expect(running).rejects.toMatchObject({ name: 'AbortError' });
+    const alive = (): boolean => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    try {
+      await expect.poll(alive, { timeout: 1_000 }).toBe(false);
+    } finally {
+      if (alive()) process.kill(pid, 'SIGKILL');
+    }
+  });
 
   it("rejects with the program's stderr, and leaves out stderr too long to show instead of cutting it", async () => {
     expect(await stderrOf(failWith(12))).toBe('k'.repeat(12));
