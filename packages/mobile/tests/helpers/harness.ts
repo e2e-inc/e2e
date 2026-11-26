@@ -57,7 +57,7 @@ export interface Harness {
   /** Every `adb` argument list the engine ran, in order. */
   readonly adbCalls: (readonly string[])[];
   /** Replaces what `adb` answers; by default `defaultAdbOutput`. */
-  respondAdb(responder: (args: readonly string[]) => AdbResult): void;
+  respondAdb(responder: (args: readonly string[], signal: AbortSignal) => AdbResult | Promise<AdbResult>): void;
 }
 
 /** The engine's options and its target's app, in one literal: what a test varies. */
@@ -82,7 +82,7 @@ export function harness(options: HarnessOptions = {}, pinned = true): Harness {
   const connections: (DeviceConnection | undefined)[] = [];
   const { bundleId, appPath, launchArguments, launchArgumentValues, permissions, allPermissions, locale, ...engineOptions } = options;
   const adbCalls: (readonly string[])[] = [];
-  let adb = (args: readonly string[]): AdbResult => ({ stdout: defaultAdbOutput(args), stderr: '', exitCode: 0 });
+  let adb = (args: readonly string[], _signal: AbortSignal): AdbResult | Promise<AdbResult> => ({ stdout: defaultAdbOutput(args), stderr: '', exitCode: 0 });
   const surface = new AgentDeviceSurface(
     { platform: 'ios', ...engineOptions },
     (session, connection) => {
@@ -90,9 +90,9 @@ export function harness(options: HarnessOptions = {}, pinned = true): Harness {
       connections.push(connection);
       return fake.client;
     },
-    async (args) => {
+    async (args, _env, signal) => {
       adbCalls.push(args);
-      return adb(args);
+      return adb(args, signal);
     },
   );
   const engine = buildEngine(surface);

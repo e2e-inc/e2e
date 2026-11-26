@@ -3773,6 +3773,23 @@ describe('device fixture', () => {
     expect(order).toEqual([set(ANDROID_APP_PACKAGE).join(' '), 'sessions.close']);
   });
 
+  it('closes the session at dispose when the Android locale restore hangs past half the cleanup budget', async () => {
+    const h = harness({ platform: 'android', bundleId: ANDROID_APP_PACKAGE, locale: 'fr-FR' });
+    h.fake.respond('devices.boot', () => ({ id: 'emulator-5554', device: 'Pixel 9' }));
+    await openAttempt(h);
+    // A wedged device: adb answers nothing until it is aborted, as execFile is on its signal.
+    h.respondAdb((_args, signal) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason as Error), { once: true });
+    }));
+    let closed = false;
+    h.fake.respond('sessions.close', () => {
+      closed = true;
+      return {};
+    });
+    await h.engine.dispose!({ signal: new AbortController().signal, timeoutMs: 200 });
+    expect(closed).toBe(true);
+  });
+
   it('refuses an Android app locale on a device older than Android 13, and reports what adb printed when the locale did not take', async () => {
     const h = harness({ platform: 'android', bundleId: ANDROID_APP_PACKAGE });
     h.fake.respond('devices.boot', () => ({ id: 'emulator-5554', device: 'Pixel 4' }));

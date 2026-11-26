@@ -140,7 +140,8 @@ await device.openApp('com.example.app', { relaunch: true, locale: 'ar-EG' });
   its package, such as `com.example.app`, not its display name. The app's
   earlier language comes back on its next fresh launch without a locale (a
   relaunch, or an open after `device.closeApp()`), and at the end of the
-  run. A run that is killed leaves the locale set.
+  run. A run that is killed, or an `adb` that fails or hangs at its end, leaves
+  the locale set.
 - `app.locale` fails at config load on a provider's Android devices, which
   this machine's `adb` doesn't reach. For the same reason, a launch with a
   locale fails with `UNSUPPORTED_CAPABILITY` when agent-device drives the

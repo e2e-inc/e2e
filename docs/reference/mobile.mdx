@@ -424,8 +424,10 @@ launch:
   folder, then on `PATH`. It needs Android 13 (API 33) or newer. Before the
   first change the engine reads the app's own locales (`get-app-locales`). A
   later fresh launch of that package without a locale puts them back, and so
-  do `device.closeApp()` and the worker's end, before its session closes. A
-  worker that is killed leaves the locale set.
+  do `device.closeApp()` and the worker's end, before its session closes.
+  The worker's end is best effort, like the rest of its cleanup: within half
+  the cleanup budget, then the session closes anyway. A worker that is
+  killed, or an `adb` that fails or hangs then, leaves the locale set.
 - A provider's Android devices are not on this machine's `adb`, so
   `app.locale` fails at config load there. Neither is a device behind a
   remote agent-device daemon (`AGENT_DEVICE_DAEMON_BASE_URL`): a launch with a

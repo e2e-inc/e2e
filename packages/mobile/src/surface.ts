@@ -889,7 +889,9 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     this.installedApp = undefined;
     this.knownViewport = undefined;
     // Before the session closes: a closed session frees the device for another one.
-    const restoring = locales?.restore(context.signal);
+    // The budget stops waiting but aborts nothing, so the restore gets half of
+    // it as its own deadline: a wedged adb must not keep the session open.
+    const restoring = locales?.restore(AbortSignal.any([context.signal, AbortSignal.timeout(Math.max(0, context.timeoutMs / 2))]));
     let closing: Promise<void> | undefined;
     const close = (): void => {
       if (client === undefined) return;
