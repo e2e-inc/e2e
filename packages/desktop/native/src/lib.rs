@@ -244,6 +244,17 @@ pub struct PressOptions {
     pub timeout_ms: f64,
 }
 
+/// Checks that a key combo can be pressed on this Mac's keyboard layout, the way `press` reads it, and sends nothing: a
+/// caller that moves focus first can refuse a combo the layout cannot type before anything changed.
+#[napi(ts_return_type = "Promise<NativeEnvelope<Record<string, never>>>")]
+pub async fn check_combo(combo: String) -> Value {
+    blocking(move || {
+        input::parse_combo(&combo)?;
+        Ok(serde_json::json!({}))
+    })
+    .await
+}
+
 /// Presses a key combo into a window.
 #[napi(ts_return_type = "Promise<NativeEnvelope<Record<string, never>>>")]
 pub async fn press(options: PressOptions) -> Value {
