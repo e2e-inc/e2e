@@ -107,15 +107,25 @@ fn bundle_id_of(url: &NSURL) -> Option<String> {
 }
 
 /// Whether macOS hides the environment of the bundle's process from other
-/// processes: Apple's own apps (a platform identifier in the signature) and
-/// builds signed with the `restrict` flag.
+/// processes, from its signature (`codesign -dvv`).
 fn hides_environment(bundle: &str) -> bool {
     let output =
-        Command::new("/usr/bin/codesign").arg("-dv").arg(bundle).env_clear().stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).output();
+        Command::new("/usr/bin/codesign").arg("-dvv").arg(bundle).env_clear().stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).output();
     let Ok(output) = output else { return false };
-    String::from_utf8_lossy(&output.stderr)
-        .lines()
-        .any(|line| line.starts_with("Platform identifier=") || (line.starts_with("CodeDirectory ") && line.contains("restrict")))
+    hidden_by(&String::from_utf8_lossy(&output.stderr))
+}
+
+/// Whether a signature, as `codesign -dvv` prints it, is one whose process
+/// macOS hides the environment of: Apple's own apps (a platform identifier),
+/// Apple's Mac App Store apps (Numbers, Pages, Xcode: signed by Apple Mac OS
+/// Application Signing, with no platform identifier), and builds signed with
+/// the `restrict` flag.
+fn hidden_by(signature: &str) -> bool {
+    signature.lines().any(|line| {
+        line.starts_with("Platform identifier=")
+            || line == "Authority=Apple Mac OS Application Signing"
+            || (line.starts_with("CodeDirectory ") && line.contains("restrict"))
+    })
 }
 
 /// Starts a new instance of the app with `open -n`, run with exactly the
@@ -208,4 +218,20 @@ fn launched(pid: i32, bundle: &str, bundle_id: &str) -> Launched {
     let name = NSRunningApplication::runningApplicationWithProcessIdentifier(pid).and_then(|app| app.localizedName()).map(|name| name.to_string());
     let app = name.unwrap_or_else(|| Path::new(bundle).file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default());
     Launched { pid, app, bundle_id: Some(bundle_id.to_owned()), started: crate::process::started(pid).map(|started| started as f64) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hidden_by;
+
+    #[test]
+    fn tells_which_signatures_hide_the_environment() {
+        // Calculator, Numbers (an Apple App Store app), a `restrict` build, and a third-party Developer ID app.
+        assert!(hidden_by("Platform identifier=27\nAuthority=macOS Software Signing\n"));
+        assert!(hidden_by(
+            "CodeDirectory v=20500 size=1 flags=0x12000(library-validation,runtime) hashes=1\nAuthority=Apple Mac OS Application Signing\nTeamIdentifier=JCRTNEU7GK\n"
+        ));
+        assert!(hidden_by("CodeDirectory v=20400 size=1 flags=0x800(restrict) hashes=1\n"));
+        assert!(!hidden_by("CodeDirectory v=20500 size=1 flags=0x10000(runtime) hashes=1\nAuthority=Developer ID Application: Slack Technologies\n"));
+    }
 }
