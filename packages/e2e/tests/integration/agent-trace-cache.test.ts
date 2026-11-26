@@ -1225,6 +1225,71 @@ describe('trace cache: a detour through a page whose address carries a token', (
   }, 240_000);
 });
 
+/** A value of letters only, so the route rule reads it as a word and keeps it in the path. */
+const INVITE = 'Zebracornflakes';
+
+const LATE_SECRET_SUITE = `import { test, expect, secrets } from 'e2e';
+
+test('increments after a wrong turn', async ({ app, agent, screen }) => {
+  await app.open();
+  await agent.act('increment the counter');
+  await expect(screen.getByRole('status')).toHaveText('1');
+  // The provider runs here, after the step that visited a page under the value.
+  await app.open('/echo');
+  await screen.getByLabel('Token').fill(secrets.get('invite'));
+});
+`;
+
+/** Opens a record page whose path is the invite value, goes back, then taps Increment. */
+function inviteRecordExecutor(appUrl: string): StepExecutor {
+  return {
+    name: 'invite-record-executor',
+    version: 'test',
+    async runStep(context: StepExecutorContext) {
+      await context.observe();
+      await context.actions.navigate(`${appUrl}/records/${INVITE}`);
+      await context.observe();
+      await context.actions.back();
+      const observation = await context.observe();
+      await context.actions.tap({ id: nodeIdFor(observation.text, /button "Increment"/) });
+      return { status: 'passed' as const, summary: 'the counter shows 1' };
+    },
+  };
+}
+
+describe('trace cache: a detour through a page named by a secret a later step resolves', () => {
+  let app: FixtureApp;
+  let project: FixtureProject;
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+    project = createProject({ 'tests/detour.e2e.ts': LATE_SECRET_SUITE });
+  }, 60_000);
+
+  afterAll(async () => {
+    project?.cleanup();
+    await app?.close();
+  });
+
+  it('masks the value in the stored locations and in the step\'s detour', async () => {
+    const outcome = await runExisting(project, {
+      appUrl: app.url,
+      config: {
+        tests: 'tests/**/*.e2e.ts',
+        agents: { default: { executor: inviteRecordExecutor(app.url) } },
+        cache: 'read-write' as const,
+        secrets: { invite: () => INVITE },
+      },
+    });
+    expect(outcome.exitCode).toBe(0);
+    const { entry } = readOnlyEntry(project);
+    // Settled with the value the process learned after the step; the navigate's own url is the action, as it was before locations.
+    expect(entry.payload.actions.map((action) => action.at)).toEqual(['/', '/records/<secret:invite>', '/']);
+    const step = resultByTitle(outcome, 'increments after a wrong turn').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+    expect(step.cache?.detour).toBe('actions 1-2 left / for /records/<secret:invite> and came back with nothing typed, chosen, or set');
+  }, 240_000);
+});
+
 /** Takes the wrong turn on a step it runs from the top; after a hand-off, only taps Increment, as an agent finishing the step would. */
 function resumingExecutor(record: ExecutorRecord): StepExecutor {
   const fromTop = wrongTurnExecutor(record);
