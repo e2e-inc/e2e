@@ -3,6 +3,7 @@
 import { discoverConfig, loadConfigModule, missingConfigError } from '../config/load.ts';
 import { resolveConfig, type ResolvedRunConfig } from '../config/resolve-run.ts';
 import { classifyError, ConfigurationError, errorMessage, serializeError, type SerializedError } from '@e2e-dev/core/lib/internal/errors';
+import { NEVER_ABORTS } from '@e2e-dev/core/lib/internal/time';
 import type { TestFixtures } from '@e2e-dev/core/lib/types';
 import type { E2EConfig, Report } from '../run-types.ts';
 import { allocateTargetPorts } from './app-ports.ts';
@@ -88,12 +89,12 @@ async function openHostWorker<Fixtures extends object>(options: OpenHostOptions)
     const loaded = await loadHostConfig(cwd, options.config, env);
     registerStaticSecrets(loaded.allSecrets);
     const { config, target } = await allocateTargetPorts(loaded, selectTarget(loaded, options.target, 'pass `target` to openHost'));
-    const signal = options.signal ?? new AbortController().signal;
+    const signal = options.signal ?? NEVER_ABORTS;
     const notice = (message: string): void => options.onNotice?.('service', processSecrets.redact(message));
 
     // Services start before the app command, since its `env` function reads
     // them. openHost doesn't handle signals, so nothing forces a service to stop.
-    const services = await startServices(config.services, signal, new AbortController().signal, {
+    const services = await startServices(config.services, signal, NEVER_ABORTS, {
       starting: () => undefined,
       ready: (name, durationMs) => notice(`service "${name}" started in ${durationMs} ms`),
       stopFailed: (cause) => notice(`cleanup after a failed start: ${errorMessage(cause)}`),
@@ -139,7 +140,7 @@ async function openHostWorker<Fixtures extends object>(options: OpenHostOptions)
         if (typeof sessionOptions.name !== 'string') throw new ConfigurationError('INVALID_CONFIG', 'a hosted session requires a string name');
         const attempt = await host.openAttempt({
           name: sessionOptions.name,
-          signal: sessionOptions.signal ?? new AbortController().signal,
+          signal: sessionOptions.signal ?? NEVER_ABORTS,
           timeoutMs: sessionOptions.timeout ?? config.timeout,
           agent: sessionOptions.agent,
           ...(sessionOptions.onStep === undefined ? {} : { onProgress: sessionOptions.onStep }),

@@ -1,11 +1,11 @@
 /**
  * Who starts the app processes an attempt declares. `UNSHARED` starts each
- * one for the attempt alone, as a run does; `SharedAppProcesses` hands every
+ * one for the attempt alone, as a run does; `SharedProcesses` hands every
  * attempt that declares the same process one instance of it, so live
  * sessions on one dev server share it. Either way the attempt starts and
  * stops through `startDeclaredProcesses`: the pool only decides whether a
  * process is started or reused. `e2e mcp` also uses a separate
- * `SharedAppProcesses` to share services across sessions.
+ * `SharedProcesses` to share services across sessions.
  */
 
 import { InfrastructureError } from '../internal/errors.ts';
@@ -47,7 +47,7 @@ interface SharedEntry<Held extends AppProcesses> {
  * attempt that arrives while a process stops starts a fresh one once the
  * stop is done.
  */
-export class SharedAppProcesses<Held extends AppProcesses = AppProcesses> implements ProcessPool {
+export class SharedProcesses<Held extends AppProcesses = AppProcesses> implements ProcessPool {
   private readonly entries = new Map<string, SharedEntry<Held>>();
   /** Stops still running, and starts abandoned, by key. */
   private readonly draining = new Map<string, Promise<unknown>>();

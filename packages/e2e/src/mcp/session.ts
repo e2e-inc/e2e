@@ -19,12 +19,12 @@ import { ScreenPresenter } from '@e2e-dev/core/lib/agent/screen-update';
 import type { ResolvedConfig, ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
 import { launchesPinnedApp } from '@e2e-dev/core/lib/config/targets';
 import { classifyError, ConfigurationError, errorMessage, InfrastructureError, serializeError, type SerializedError } from '@e2e-dev/core/lib/internal/errors';
-import { abortError, cancelledError } from '@e2e-dev/core/lib/internal/time';
+import { NEVER_ABORTS, abortError, cancelledError } from '@e2e-dev/core/lib/internal/time';
 import { LocatorEngine } from '@e2e-dev/core/lib/locator/engine';
 import { allocateTargetPorts } from '../run/app-ports.ts';
 import { selectTarget } from '../run/select-target.ts';
 import { NO_HELD_TEST, type HeldTestAttachment } from '../run/step-attachment-wire.ts';
-import { SharedAppProcesses } from '@e2e-dev/core/lib/run/process-pool';
+import { SharedProcesses } from '@e2e-dev/core/lib/run/process-pool';
 import { outputLayout } from '@e2e-dev/core/lib/run/output';
 import { processSecrets, registerStaticSecrets } from '@e2e-dev/core/lib/run/secrecy';
 import { openStandaloneAttempt, type OneShotAttempt } from '../run/standalone-kinds.ts';
@@ -51,12 +51,6 @@ const SESSION_TTL_MS = 4 * 60 * 60 * 1000;
 const SESSION_IDLE_MS = 30 * 60 * 1000;
 /** How long the attempt outlives its step, so a step that hit the TTL is still closed in order. */
 const CLOSE_GRACE_MS = 60 * 1000;
-/**
- * The `force` signal passed to services started by `e2e mcp`. It never aborts.
- * The server handles one Ctrl+C or SIGTERM and stops every session. A second
- * signal ends the process, so there's no later signal to pass on.
- */
-const NEVER = new AbortController().signal;
 const SESSION_INSTRUCTION = 'Interactive session: a coding agent drives the app over MCP.';
 /** Where an agent reads how to write a test, said in the server's instructions and every session's opening. */
 export const READ_WRITING_GUIDE = 'Before you write or edit a test, read the writing-tests guide: the resource e2e://guide/writing-tests, or npx e2e guide writing-tests in a shell.';
@@ -155,13 +149,13 @@ export interface SessionHostOptions {
 export class SessionHost {
   private readonly sessions: SessionRegistry<Session>;
   /** Sessions on one app command share its process: the last one to close stops it. */
-  private readonly apps = new SharedAppProcesses();
+  private readonly apps = new SharedProcesses();
   /**
    * Sessions on the same config file share its services, keyed by the file's
    * absolute path. The first session starts them, and the last one to close
    * stops them.
    */
-  private readonly services = new SharedAppProcesses<RunServices>();
+  private readonly services = new SharedProcesses<RunServices>();
   /** Aborts every open still running once the server shuts down, so none leaves a process behind. */
   private readonly shutdown = new AbortController();
 
@@ -474,10 +468,13 @@ export class SessionHost {
       // the edit removes every service: this session may share an app
       // process with a session that uses them.
       if ('file' in source) {
+        // The `force` signal never aborts. The server handles one Ctrl+C or
+        // SIGTERM and stops every session. A second signal ends the process,
+        // so there's no later signal to pass on.
         services = await this.services.acquire(
           source.file,
           (scope) =>
-            startServices(config.services, scope, NEVER, {
+            startServices(config.services, scope, NEVER_ABORTS, {
               starting: () => undefined,
               ready: (name, durationMs) => this.log('info', `service "${name}" started in ${durationMs} ms`),
               stopFailed: (cause) => this.log('warning', `cleanup after a failed start: ${errorMessage(cause)}`),
