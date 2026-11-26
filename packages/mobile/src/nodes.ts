@@ -652,7 +652,7 @@ export function projectSnapshot(
   });
 
   const keyboard = options.keyboard === undefined ? new Set<number>() : keyboardSide(raw, parents, roots, children, options.keyboard);
-  const pageFocus = pageFocusEchoes(raw, parents, children);
+  const pageFocus = pageFocusEchoes(raw, children);
   const index: ProjectedNode[] = [];
   const build = (position: number, parent: ProjectedNode | undefined, parentOnKeyboard: boolean): SemanticNode => {
     const source = raw[position] as RawNode;
@@ -796,16 +796,12 @@ function keyboardSide(
  */
 function pageFocusEchoes(
   raw: readonly RawNode[],
-  parents: readonly (number | undefined)[],
   children: ReadonlyMap<number, readonly number[]>,
 ): Set<number> {
   const echoes = new Set<number>();
   const isWebView = (position: number): boolean => kindOf(raw[position] as RawNode) === 'web-view';
   raw.forEach((_, position) => {
     if (!isWebView(position)) return;
-    for (let ancestor = parents[position]; ancestor !== undefined; ancestor = parents[ancestor]) {
-      if (isWebView(ancestor)) return;
-    }
     const focused: number[] = [];
     const pending = [position];
     for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
