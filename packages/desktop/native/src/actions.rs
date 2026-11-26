@@ -648,12 +648,10 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         if matches!(row_role, "radiobutton" | "tab") {
             return perform(&row, "AXPress", "choose the option");
         }
+        let by_rows = settable(element, "AXSelectedRows", "select")?;
+        // The read above can take long on a slow app; the caller may have given up since.
         go("select")?;
-        let written = if settable(element, "AXSelectedRows", "select")? {
-            element.set_elements("AXSelectedRows", std::slice::from_ref(&row))
-        } else {
-            row.set_bool("AXSelected", true)
-        };
+        let written = if by_rows { element.set_elements("AXSelectedRows", std::slice::from_ref(&row)) } else { row.set_bool("AXSelected", true) };
         written.map_err(|error| refused(error, "choose the option"))?;
         if until(deadline, || row.boolean("AXSelected") == Some(true)) {
             return Ok(());
