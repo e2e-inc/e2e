@@ -71,6 +71,29 @@ test.describe('browser fixture', { platforms: ['web'], tags: ['browser'] }, () =
     expect(await names(['http://other.example/', '/browser'])).toEqual(['elsewhere', 'everywhere', 'scoped']);
     expect(await names()).toEqual(['elsewhere', 'encrypted', 'everywhere', 'scoped', 'shared']);
   });
+
+  test('console messages and page errors read back and clear on restart', async ({ app, browser }) => {
+    // FIXME: the playground doesn't serve /favicon.ico, so headed Chromium and
+    // hosted Chrome log a 404. Headless runs don't, so that message is
+    // filtered out to keep the lists the same in every mode.
+    const logged = async () => (await browser.consoleMessages()).filter((message) => !message.text.startsWith('Failed to load resource'));
+
+    await browser.evaluate(() => {
+      console.error('broken', 42);
+      void Promise.reject(new Error('rejected'));
+      setTimeout(() => {
+        throw new Error('thrown');
+      });
+      return null;
+    });
+    await expect.poll(async () => (await browser.pageErrors()).map((error) => error.message).toSorted()).toEqual(['rejected', 'thrown']);
+    expect(await logged()).toEqual([{ type: 'error', text: 'broken 42' }]);
+
+    await app.restart();
+
+    expect(await logged()).toEqual([]);
+    expect(await browser.pageErrors()).toEqual([]);
+  });
 });
 
 test('offline fails the page\'s requests and navigations until the test goes back online', { platforms: ['web'], tags: ['browser'] }, async ({ app, screen, browser }) => {

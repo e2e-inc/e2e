@@ -37,6 +37,8 @@ export type {
   RouteContinueOverrides,
   RouteFulfillResponse,
   RouteMatcher,
+  WebConsoleMessage,
+  WebPageError,
   WebRequest,
   WebResponse,
   WebRoute,
