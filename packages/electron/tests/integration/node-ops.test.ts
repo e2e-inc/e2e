@@ -6,7 +6,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { chromium, type Browser, type ElementHandle, type Page } from 'playwright-core';
-import { nodeOp, queryAll, type NodeOps } from '../../src/in-page/node-ops.ts';
+import { activeUnder, nodeOp, queryAll, type NodeOps } from '../../src/in-page/node-ops.ts';
 
 let browser: Browser;
 let page: Page;
@@ -137,14 +137,14 @@ describe('nodeOp', () => {
       (open.querySelector('#inner') as HTMLInputElement).focus();
     });
     const documentHandle = await page.evaluateHandle(() => window.document);
-    const active = await documentHandle.evaluate((node, source) => new Function(`return (${source})`)()(node, 'activeUnder', []).id, nodeOp.toString());
+    const active = await documentHandle.evaluate((node, source) => new Function(`return (${source})`)()(node).id, activeUnder.toString());
     expect(active).toBe('inner');
     await page.evaluate(() => {
       const closed = document.querySelector('#closed')!.attachShadow({ mode: 'closed' });
       closed.innerHTML = '<input>';
       closed.querySelector('input')!.focus();
     });
-    const host = await documentHandle.evaluate((node, source) => new Function(`return (${source})`)()(node, 'activeUnder', []).id, nodeOp.toString());
+    const host = await documentHandle.evaluate((node, source) => new Function(`return (${source})`)()(node).id, activeUnder.toString());
     expect(host).toBe('closed');
   });
 

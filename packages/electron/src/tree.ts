@@ -3,7 +3,8 @@
  * contract's semantic tree. The roles, names, values, and states are what
  * Chromium computed (`Accessibility.getFullAXTree`); the boxes, attributes,
  * and input values come from one DOM snapshot of the same document
- * (`DOMSnapshot.captureSnapshot`), joined on each node's backend DOM node id.
+ * (`snapshot.ts`), joined on each node's backend DOM node id. `fields.ts`
+ * reads one element; this walks the tree and folds its text.
  * Nothing runs in the page, so an app's content security policy, its frozen
  * globals, and its mutation observers never see a read.
  *
@@ -11,56 +12,8 @@
  */
 
 import { OBSERVED_NAME_LIMIT, OBSERVED_TEXT_LIMIT, type SemanticNode } from '@e2e-dev/core/engine';
-
-/** The fields of a Chromium `AXValue` the projection reads. */
-interface AXValue {
-  readonly value?: unknown;
-}
-
-/** One node of `Accessibility.getFullAXTree`, the fields the projection reads. */
-export interface AXNode {
-  readonly nodeId: string;
-  readonly ignored: boolean;
-  readonly ignoredReasons?: readonly { readonly name: string }[];
-  readonly role?: AXValue;
-  readonly name?: AXValue;
-  readonly value?: AXValue;
-  readonly properties?: readonly { readonly name: string; readonly value: AXValue }[];
-  readonly parentId?: string;
-  readonly childIds?: readonly string[];
-  readonly backendDOMNodeId?: number;
-}
-
-/** A `DOMSnapshot` rare-string table: `value[i]` is the string index for node `index[i]`. */
-interface RareStrings {
-  readonly index: readonly number[];
-  readonly value: readonly number[];
-}
-
-/** The fields of one `DOMSnapshot.captureSnapshot` document the projection reads. */
-export interface SnapshotDocument {
-  readonly nodes: {
-    readonly backendNodeId?: readonly number[];
-    readonly nodeName?: readonly number[];
-    readonly attributes?: readonly (readonly number[])[];
-    readonly inputValue?: RareStrings;
-    /** A textarea's current text. */
-    readonly textValue?: RareStrings;
-    readonly nodeType?: readonly number[];
-    readonly nodeValue?: readonly number[];
-    /** The option elements that are selected. */
-    readonly optionSelected?: { readonly index: readonly number[] };
-    readonly parentIndex?: readonly number[];
-    /** For every node inside a shadow root, that root's type: `open`, `closed`, or `user-agent`. */
-    readonly shadowRootType?: RareStrings;
-  };
-  readonly layout: {
-    readonly nodeIndex: readonly number[];
-    readonly bounds: readonly (readonly number[])[];
-    /** Per layout node, the computed styles the read asked for, as string indexes: `visibility` alone. */
-    readonly styles?: readonly (readonly number[])[];
-  };
-}
+import { elementFields, isFocusable, isHiddenSubtree, isSecure, isTextField, roleOf, stringOf, type AXNode, type FieldContext, type ProjectionPolicy } from './fields.ts';
+import { collapse, type DomFacts, type DomSnapshot } from './snapshot.ts';
 
 /** How the window's layout maps the snapshot's device pixels to the viewport's CSS pixels. */
 export interface WindowGeometry {
@@ -74,12 +27,35 @@ export interface WindowGeometry {
   readonly height: number;
 }
 
-/**
- * `tree` is the observation for a model: bounded fields, a few attributes,
- * each element's own text. `node` is what a locator reads: every attribute,
- * whole fields, and each element's text with its descendants'.
- */
+/** `tree` is the observation for a model; `node` is what a locator reads. `POLICIES` says how they differ. */
 export type ProjectionMode = 'tree' | 'node';
+
+const POLICIES: Readonly<Record<ProjectionMode, ProjectionPolicy>> = {
+  tree: {
+    textLimit: OBSERVED_TEXT_LIMIT,
+    nameLimit: OBSERVED_NAME_LIMIT,
+    maxNodes: 5000,
+    attributes: new Set(['type', 'autocomplete', 'href', 'role', 'placeholder']),
+    redactHref: true,
+    editingHostRole: true,
+    checkableValue: false,
+    emptyState: false,
+    descendantText: false,
+    hiddenTestIds: false,
+  },
+  node: {
+    textLimit: Number.POSITIVE_INFINITY,
+    nameLimit: Number.POSITIVE_INFINITY,
+    maxNodes: Number.POSITIVE_INFINITY,
+    attributes: null,
+    redactHref: false,
+    editingHostRole: false,
+    checkableValue: true,
+    emptyState: true,
+    descendantText: true,
+    hiddenTestIds: true,
+  },
+};
 
 export interface ProjectionOptions {
   readonly mode: ProjectionMode;
@@ -94,7 +70,7 @@ export interface ProjectionOptions {
   readonly title?: string;
   /** Backend ids of elements a locator's CSS selector matched: kept as nodes even where the tree would leave them out. */
   readonly keep?: ReadonlySet<number>;
-  /** The most nodes one projection keeps; the rest are left out and the tree marked truncated. Default 5000 for `tree`, none for `node`. */
+  /** Overrides the mode's node cap; past it nodes are left out and the tree marked truncated. */
   readonly maxNodes?: number;
 }
 
@@ -104,158 +80,10 @@ export interface Projection {
   readonly truncated: boolean;
 }
 
-/** Attributes an observation keeps, beside every `aria-*` one: what a model reads a control by. */
-const TREE_ATTRIBUTES = new Set(['type', 'autocomplete', 'href', 'role', 'placeholder']);
-
-/**
- * Chromium's own role names mapped to the roles of the engine contract's
- * vocabulary, where an image is `image` (`getByRole('img')` is that role's
- * alias, resolved before it reaches the tree). A role missing here and spelled
- * with a capital is Chromium-internal and reads as a generic container.
- */
-const CHROMIUM_ROLES: Readonly<Record<string, string>> = {
-  image: 'image',
-  MenuListPopup: 'listbox',
-  MenuListOption: 'option',
-  Iframe: 'iframe',
-  IframePresentational: 'iframe',
-  DisclosureTriangle: 'button',
-  // Date, time, and color inputs, which the web reads as text fields.
-  Date: 'textbox',
-  DateTime: 'textbox',
-  InputTime: 'textbox',
-  ColorWell: 'textbox',
-  Canvas: 'image',
-  Video: 'generic',
-  Audio: 'generic',
-};
-
 /** Roles whose node never reaches the tree: text runs, list bullets, line breaks. */
 const DROPPED_ROLES = new Set(['InlineTextBox', 'ListMarker', 'LineBreak']);
 
-/** Containers that say nothing on their own: kept only with a name, a test id, or for a locator's `selector`. */
-const GENERIC_ROLES = new Set(['generic', 'none', 'presentation', 'LabelText', 'Section', 'Pre', 'Ruby', 'Abbr', 'Mark', 'Legend', 'Unknown']);
-
-/** Reasons Chromium leaves a node out that also hide it from a person: its subtree never reaches the tree. */
-const HIDING_REASONS = new Set(['ariaHiddenElement', 'ariaHiddenSubtree', 'notRendered', 'inertElement', 'inertSubtree', 'notVisible']);
-
-/** Roles whose value is what a person typed or picked. */
-const VALUE_ROLES = new Set(['textbox', 'searchbox', 'combobox', 'spinbutton', 'slider']);
-
-/** ARIA range roles: an element's value is its `aria-valuetext`, else its `aria-valuenow`, as written, as the web reads it. */
-const RANGE_ROLES = new Set(['slider', 'spinbutton', 'progressbar', 'meter', 'scrollbar']);
-
-/** Roles whose read-only state is their `aria-readonly`, as the web reads it. */
-const ARIA_READONLY_ROLES = new Set(['checkbox', 'combobox', 'grid', 'gridcell', 'listbox', 'radiogroup', 'slider', 'spinbutton', 'textbox', 'searchbox', 'columnheader', 'rowheader', 'switch', 'treegrid']);
-
-/** Roles whose level is their `aria-level`, as the web reads it; a heading element's comes from its tag. */
-const LEVEL_ROLES = new Set(['heading', 'listitem', 'row', 'treeitem']);
-
-const DEFAULT_MAX_NODES = 5000;
-
-/** One DOM node's facts from the snapshot. */
-interface DomFacts {
-  readonly nodeName: string;
-  readonly attributes: Readonly<Record<string, string>>;
-  readonly inputValue?: string;
-  /** A textarea's current text. */
-  readonly textValue?: string;
-  /** Whether the node's text content holds anything but white space, as `textContent` reads it. */
-  readonly hasText: boolean;
-  /** A select's value: what its first selected option submits. */
-  readonly selectValue?: string;
-  /** Device-pixel document bounds. */
-  readonly bounds?: readonly number[];
-  /** Its computed `visibility` is `hidden` or `collapse`. */
-  readonly invisible: boolean;
-}
-
-/**
- * Each select's value, by node index: what its first selected option submits,
- * the option's `value` attribute or else its text, as `HTMLSelectElement.value`
- * reads it.
- */
-function selectedValues(document: SnapshotDocument, strings: readonly string[], attributesOf: (index: number) => Record<string, string>): Map<number, string> {
-  const values = new Map<number, string>();
-  const selected = document.nodes.optionSelected?.index ?? [];
-  if (selected.length === 0) return values;
-  const names = document.nodes.nodeName ?? [];
-  const parents = document.nodes.parentIndex ?? [];
-  const types = document.nodes.nodeType ?? [];
-  const nodeValues = document.nodes.nodeValue ?? [];
-  const texts = new Map<number, string>();
-  types.forEach((type, index) => {
-    if (type !== 3) return;
-    const parent = parents[index] ?? -1;
-    texts.set(parent, (texts.get(parent) ?? '') + (strings[nodeValues[index]!] ?? ''));
-  });
-  for (const option of selected.toSorted((a, b) => a - b)) {
-    let select = parents[option] ?? -1;
-    while (select >= 0 && strings[names[select]!] !== 'SELECT') select = parents[select] ?? -1;
-    if (select < 0 || values.has(select)) continue;
-    values.set(select, attributesOf(option)['value'] ?? collapse(texts.get(option) ?? ''));
-  }
-  return values;
-}
-
-/** The node indices whose text content holds anything but white space: every ancestor of such a text node. */
-function nodesWithText(document: SnapshotDocument, strings: readonly string[]): Set<number> {
-  const marked = new Set<number>();
-  const parents = document.nodes.parentIndex ?? [];
-  const values = document.nodes.nodeValue ?? [];
-  (document.nodes.nodeType ?? []).forEach((type, index) => {
-    if (type !== 3 || (strings[values[index]!] ?? '').trim() === '') return;
-    for (let at = parents[index] ?? -1; at >= 0 && !marked.has(at); at = parents[at] ?? -1) marked.add(at);
-  });
-  return marked;
-}
-
-/** Indexes the snapshot by backend DOM node id. */
-function indexSnapshot(document: SnapshotDocument, strings: readonly string[]): Map<number, DomFacts> {
-  const facts = new Map<number, DomFacts>();
-  const ids = document.nodes.backendNodeId ?? [];
-  const names = document.nodes.nodeName ?? [];
-  const attributes = document.nodes.attributes ?? [];
-  const rareStrings = (rare: RareStrings | undefined): Map<number, string> => {
-    const values = new Map<number, string>();
-    rare?.index.forEach((node, at) => values.set(node, strings[rare.value[at]!] ?? ''));
-    return values;
-  };
-  const inputValues = rareStrings(document.nodes.inputValue);
-  const textValues = rareStrings(document.nodes.textValue);
-  const withText = nodesWithText(document, strings);
-  const bounds = new Map<number, readonly number[]>();
-  const invisible = new Set<number>();
-  document.layout.nodeIndex.forEach((node, at) => {
-    if (!bounds.has(node)) bounds.set(node, document.layout.bounds[at]!);
-    const visibility = strings[document.layout.styles?.[at]?.[0] ?? -1];
-    if (visibility === 'hidden' || visibility === 'collapse') invisible.add(node);
-  });
-  const attributesOf = (index: number): Record<string, string> => {
-    const pairs = attributes[index] ?? [];
-    const record: Record<string, string> = {};
-    for (let at = 0; at + 1 < pairs.length; at += 2) record[(strings[pairs[at]!] ?? '').toLowerCase()] = strings[pairs[at + 1]!] ?? '';
-    return record;
-  };
-  const selectValues = selectedValues(document, strings, attributesOf);
-  ids.forEach((backendNodeId, index) => {
-    const input = inputValues.get(index);
-    const text = textValues.get(index);
-    const selected = selectValues.get(index);
-    const box = bounds.get(index);
-    facts.set(backendNodeId, {
-      nodeName: strings[names[index]!] ?? '',
-      attributes: attributesOf(index),
-      hasText: withText.has(index),
-      invisible: invisible.has(index),
-      ...(input === undefined ? {} : { inputValue: input }),
-      ...(text === undefined ? {} : { textValue: text }),
-      ...(selected === undefined ? {} : { selectValue: selected }),
-      ...(box === undefined ? {} : { bounds: box }),
-    });
-  });
-  return facts;
-}
+type Rect = NonNullable<SemanticNode['rect']>;
 
 /** A node under construction: the contract node's fields, mutable, with the text the projection folds. */
 interface Draft {
@@ -269,9 +97,8 @@ interface Draft {
   states: Record<string, boolean>;
   level?: number;
   attributes?: Record<string, string>;
-  rect?: { x: number; y: number; width: number; height: number };
-  /** The node's box, which line breaks between text runs are read from. */
-  layout?: { x: number; y: number; width: number; height: number };
+  /** The node's box, which line breaks between text runs are read from too. */
+  rect?: Rect;
   children: Draft[];
   /** A text run: its text folds into the parent when it is the parent's only content. */
   isText: boolean;
@@ -282,64 +109,25 @@ interface Draft {
   order: number;
 }
 
-/** `value` cut at `limit` in tree mode, whole in node mode. */
-function bound(value: string, limit: number, mode: ProjectionMode): string {
-  return mode === 'tree' && value.length > limit ? value.slice(0, limit) : value;
-}
-
-function stringOf(value: AXValue | undefined): string | undefined {
-  const raw = value?.value;
-  if (raw === undefined || raw === null) return undefined;
-  return typeof raw === 'string' ? raw : String(raw);
-}
-
-/**
- * A link as an observation shows it, as the web engine reduces it: origin and
- * path, a query and a fragment only as `?…` and `#…` (they routinely carry
- * tokens), and a scheme with no origin (`data:`, `javascript:`), whose path
- * is a whole file or script, as `scheme:…`. A relative link resolves against
- * the document's URL.
- */
-function originAndPath(value: string, base: string | undefined): string {
-  const elided = (query: boolean, fragment: boolean): string => `${query ? '?…' : ''}${fragment ? '#…' : ''}`;
-  try {
-    const url = new URL(value, base);
-    const rest = `${url.pathname}${elided(url.search !== '', url.hash !== '')}`;
-    if (url.protocol === 'blob:') {
-      const inner = URL.canParse(url.pathname) ? new URL(url.pathname) : null;
-      return inner === null || inner.origin === 'null' ? 'blob:…' : `blob:${inner.origin}${inner.pathname}${elided(url.search !== '', url.hash !== '')}`;
-    }
-    if (url.origin !== 'null') return `${url.origin}${rest}`;
-    // A local page's links are files beside it: the path says where one goes, as the web shows it.
-    if (url.protocol === 'mailto:' || url.protocol === 'tel:' || url.protocol === 'file:') return `${url.protocol}${url.protocol === 'file:' ? '//' : ''}${rest}`;
-    return `${url.protocol}…`;
-  } catch {
-    const [beforeFragment = '', ...fragment] = value.split('#');
-    const [path = '', ...query] = beforeFragment.split('?');
-    return `${path}${elided(query.join('?') !== '', fragment.join('#') !== '')}`;
-  }
-}
-
-/** Collapses runs of white space the way rendered text reads. */
-function collapse(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
+function cut(value: string, limit: number): string {
+  return value.length > limit ? value.slice(0, limit) : value;
 }
 
 /** Whether `next` starts below `previous`, which with no white space between them means a block boundary, not inline markup. */
 function startsNewLine(previous: Draft, next: Draft): boolean {
-  const { layout: above } = previous;
-  const { layout: below } = next;
+  const { rect: above } = previous;
+  const { rect: below } = next;
   return above !== undefined && below !== undefined && below.y >= above.y + above.height - 0.5;
 }
 
 /**
- * The text a node reads as: its text runs, and in node mode its descendants'
+ * The text a node reads as: its text runs, and with `deep` its descendants'
  * too. Runs join as the source has them: with white space where the source had
  * some or where a block boundary falls, and with none between inline markup
  * (`<span>$</span><span>10</span>` reads `$10`). Two table cells side by side
- * read with a space between them; `cellOf` names the cell a node is in.
+ * read with a space between them.
  */
-function textOf(draft: Draft, deep: boolean, gap: (from: number, to: number) => boolean, cellOf: (order: number) => number): string {
+function textOf(draft: Draft, deep: boolean, snapshot: DomSnapshot): string {
   const parts: Draft[] = [];
   const walk = (node: Draft): void => {
     for (const child of node.children) {
@@ -354,342 +142,236 @@ function textOf(draft: Draft, deep: boolean, gap: (from: number, to: number) => 
   let joined = '';
   parts.forEach((part, at) => {
     const previous = parts[at - 1];
-    if (previous !== undefined && (previous.spaceAfter === true || part.spaceBefore === true || cellOf(previous.order) !== cellOf(part.order) || gap(previous.order, part.order) || startsNewLine(previous, part))) joined += ' ';
+    if (previous !== undefined && separated(previous, part, snapshot)) joined += ' ';
     joined += part.text ?? '';
   });
   return collapse(joined);
 }
 
-/**
- * Projects the window's accessibility tree. Returns the root and how many
- * secure fields it holds; a field is secure while it is a password input,
- * and then reports no value and no text.
- */
-export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocument, strings: readonly string[], geometry: WindowGeometry, options: ProjectionOptions): Projection {
-  const { mode, testIdAttribute } = options;
-  const byId = new Map(axNodes.map((node) => [node.nodeId, node]));
-  const dom = indexSnapshot(document, strings);
-  // The cap bounds what a model reads; a locator reads every node, or it would miss a match past the cap.
-  const maxNodes = options.maxNodes ?? (mode === 'tree' ? DEFAULT_MAX_NODES : Number.POSITIVE_INFINITY);
-  let kept = 0;
-  let truncated = false;
-  const drafted = new Map<number, Draft>();
-  const domIndex = new Map((document.nodes.backendNodeId ?? []).map((id, index) => [id, index]));
-  const nodeTypes = document.nodes.nodeType ?? [];
-  const nodeValues = document.nodes.nodeValue ?? [];
-  const domValue = (index: number | undefined): string | undefined => (index !== undefined && nodeTypes[index] === 3 ? strings[nodeValues[index]!] : undefined);
-  // Source white space between two runs (a text node of nothing else) reads as a space between them, as it renders.
-  const blanks: number[] = [];
-  nodeTypes.forEach((type, index) => blanks.push((blanks[index - 1] ?? 0) + (type === 3 && /^\s+$/.test(strings[nodeValues[index]!] ?? '') ? 1 : 0)));
-  const gap = (from: number, to: number): boolean => from >= 0 && to > from && (blanks[to - 1] ?? 0) - (blanks[from] ?? 0) > 0;
-  // Each node's nearest table cell, from the DOM: Chromium gives a layout table's cells no cell role. A parent precedes its children.
-  const nodeNames = document.nodes.nodeName ?? [];
-  const parentIndexes = document.nodes.parentIndex ?? [];
-  const cells: number[] = [];
-  nodeNames.forEach((nameIndex, index) => {
-    const name = strings[nameIndex];
-    cells.push(name === 'TD' || name === 'TH' ? index : (cells[parentIndexes[index] ?? -1] ?? -1));
-  });
-  const cellOf = (order: number): number => cells[order] ?? -1;
+function separated(previous: Draft, part: Draft, snapshot: DomSnapshot): boolean {
+  if (previous.spaceAfter === true || part.spaceBefore === true) return true;
+  if (snapshot.cellOf(previous.order) !== snapshot.cellOf(part.order)) return true;
+  return snapshot.gap(previous.order, part.order) || startsNewLine(previous, part);
+}
 
-  const toCss = (box: readonly number[]): NonNullable<Draft['rect']> => {
-    const [x = 0, y = 0, width = 0, height = 0] = box;
-    return { x: x / geometry.scale - geometry.scrollX, y: y / geometry.scale - geometry.scrollY, width: width / geometry.scale, height: height / geometry.scale };
-  };
-  const rectOf = (facts: DomFacts | undefined): Draft['rect'] => {
-    const box = facts?.bounds;
-    return box === undefined || box.length < 4 ? undefined : toCss(box);
-  };
-  const build = (node: AXNode): Draft[] => {
-    if (node.ignored && node.ignoredReasons?.some((reason) => HIDING_REASONS.has(reason.name)) === true) return [];
-    const chromium = stringOf(node.role) ?? '';
-    if (DROPPED_ROLES.has(chromium)) return [];
-    const children = (): Draft[] => (node.childIds ?? []).flatMap((id) => {
-      const child = byId.get(id);
-      return child === undefined ? [] : build(child);
+/** One projection: the walk over the accessibility tree, and the state it keeps (the node count, the drafts by backend id). */
+class TreeProjector {
+  truncated = false;
+  private kept = 0;
+  private readonly drafted = new Map<number, Draft>();
+  private readonly nodes: ReadonlyMap<string, AXNode>;
+  private readonly snapshot: DomSnapshot;
+  private readonly geometry: WindowGeometry;
+  private readonly options: ProjectionOptions;
+  private readonly policy: ProjectionPolicy;
+  private readonly context: FieldContext;
+  private readonly testIdAttribute: string;
+
+  constructor(axNodes: readonly AXNode[], snapshot: DomSnapshot, geometry: WindowGeometry, options: ProjectionOptions) {
+    this.nodes = new Map(axNodes.map((node) => [node.nodeId, node]));
+    this.snapshot = snapshot;
+    this.geometry = geometry;
+    this.options = options;
+    this.policy = options.maxNodes === undefined ? POLICIES[options.mode] : { ...POLICIES[options.mode], maxNodes: options.maxNodes };
+    this.context = { policy: this.policy, testIdAttribute: options.testIdAttribute, baseUrl: options.baseUrl };
+    this.testIdAttribute = options.testIdAttribute.toLowerCase();
+  }
+
+  children(node: AXNode): Draft[] {
+    return (node.childIds ?? []).flatMap((id) => {
+      const child = this.nodes.get(id);
+      return child === undefined ? [] : this.build(child);
     });
-    const backend = node.backendDOMNodeId;
-    const facts = backend === undefined ? undefined : dom.get(backend);
-    if (chromium === 'StaticText') {
-      // The text as rendered, `text-transform` applied, as the web's innerText reads it; the white space comes from the source.
-      const source = backend === undefined ? undefined : domValue(domIndex.get(backend));
-      const text = collapse(stringOf(node.name) ?? '');
-      if (text === '' || backend === undefined) return [];
-      if (kept >= maxNodes) {
-        truncated = true;
-        return [];
-      }
-      kept += 1;
-      const rect = rectOf(facts);
-      // The white space comes from the text node's own source: Chromium's name for a run trims what the next element's run follows.
-      const spacing = source ?? stringOf(node.name) ?? '';
-      const run: Draft = { id: options.idOf(backend), text: bound(text, OBSERVED_TEXT_LIMIT, mode), states: rect === undefined || rect.width === 0 || rect.height === 0 ? { hidden: true } : {}, ...(rect === undefined ? {} : { rect, layout: rect }), children: [], isText: true, spaceBefore: /^\s/.test(spacing), spaceAfter: /\s$/.test(spacing), order: domIndex.get(backend) ?? -1 };
-      drafted.set(backend, run);
-      return [run];
-    }
-    const testId = facts?.attributes[testIdAttribute.toLowerCase()];
-    const name = collapse(stringOf(node.name) ?? '');
-    const editingHost = facts !== undefined && facts.attributes['contenteditable'] !== undefined && facts.attributes['contenteditable'].toLowerCase() !== 'false';
-    // An editing host with no role of its own is a text field to the agent, as the web's tree shows it; a locator's role
-    // query does not find it as one, as the web's does not (Chromium gives it no role).
-    const mapped = CHROMIUM_ROLES[chromium] ?? (/^[A-Z]/.test(chromium) ? 'generic' : chromium);
-    const role = mode === 'tree' && editingHost && (mapped === 'generic' || GENERIC_ROLES.has(chromium)) ? 'textbox' : mapped;
-    // A container Chromium leaves out, or one that says nothing, gives its place to its children: unless a test id,
-    // a name, or a locator's selector makes it addressable.
-    const silent = node.ignored || (role !== 'textbox' && (GENERIC_ROLES.has(chromium) || role === 'generic'));
-    const selected = backend !== undefined && options.keep?.has(backend) === true;
-    // A focusable element with no role (a span with a tabindex) is a control of the app's own: it keeps a node, so an
-    // action reaches it rather than the container its text would fold into.
-    const focusable = !node.ignored && node.properties?.some((property) => property.name === 'focusable' && property.value.value === true) === true;
-    if (silent && testId === undefined && !selected && !focusable && (node.ignored || name === '')) return children();
-    if (backend === undefined) return children();
-    if (kept >= maxNodes) {
-      truncated = true;
-      return [];
-    }
-    kept += 1;
-    const draft: Draft = { id: options.idOf(backend), role: silent ? 'generic' : role, states: {}, children: [], isText: false, order: domIndex.get(backend) ?? -1 };
-    drafted.set(backend, draft);
-    if (name !== '') draft.name = bound(name, OBSERVED_NAME_LIMIT, mode);
-    if (testId !== undefined) draft.testId = testId;
-    const attributes = facts?.attributes ?? {};
-    const secure = facts?.nodeName === 'INPUT' && attributes['type']?.toLowerCase() === 'password';
-    if (secure) draft.states['secure'] = true;
-    const autocomplete = attributes['autocomplete']?.toLowerCase();
-    if (secure || autocomplete === 'current-password' || autocomplete === 'new-password') draft.inputPurpose = 'password';
-    else if (autocomplete === 'username') draft.inputPurpose = 'username';
-    else if (autocomplete === 'one-time-code') draft.inputPurpose = 'one-time-code';
-    for (const property of node.properties ?? []) {
-      const value = property.value.value;
-      switch (property.name) {
-        case 'checked':
-        case 'pressed':
-          draft.states[property.name] = value === 'true' || value === true;
-          break;
-        case 'disabled':
-        case 'expanded':
-        case 'selected':
-        case 'focused':
-        case 'readonly':
-          draft.states[property.name] = value === true || value === 'true';
-          break;
-      }
-    }
-    // A heading element's level is its tag's, whatever its aria-level; an ARIA role's is its aria-level, as the web reads them (Chromium computes
-    // one for every treeitem, and a default for a role="heading" with none).
-    const tagLevel = /^H([1-6])$/.exec(facts?.nodeName ?? '')?.[1];
-    const ariaLevel = Number.parseInt(facts?.attributes['aria-level'] ?? '', 10);
-    if (role === 'heading' && tagLevel !== undefined) draft.level = Number(tagLevel);
-    else if (LEVEL_ROLES.has(role) && ariaLevel >= 1) draft.level = ariaLevel;
-    // A role that takes aria-readonly reads it, an editing host's included.
-    if (draft.states['readonly'] === undefined && ARIA_READONLY_ROLES.has(role) && attributes['aria-readonly'] !== undefined) draft.states['readonly'] = attributes['aria-readonly'].toLowerCase() === 'true';
-    // An editing host, and an element inside one, takes text; Chromium marks it `editable` and gives no read-only state.
-    if (draft.states['readonly'] === undefined && node.properties?.some((property) => property.name === 'editable') === true) draft.states['readonly'] = false;
-    // A native field has a read-only state whatever Chromium reports for it (none for a select): its readonly attribute.
-    if (facts?.nodeName === 'INPUT' || facts?.nodeName === 'TEXTAREA' || facts?.nodeName === 'SELECT') draft.states['readonly'] = 'readonly' in attributes;
-    else if (draft.states['readonly'] === undefined && ARIA_READONLY_ROLES.has(role)) draft.states['readonly'] = attributes['aria-readonly']?.toLowerCase() === 'true';
-    const checkable = facts?.nodeName === 'INPUT' && ['checkbox', 'radio'].includes(attributes['type']?.toLowerCase() ?? '');
-    if (facts?.nodeName === 'SELECT') {
-      // A select's value is what its chosen option submits, as `select.value` reads it; its options name the labels.
-      draft.value = bound(facts.selectValue ?? '', OBSERVED_TEXT_LIMIT, mode);
-    } else if (checkable) {
-      // A checkbox or radio submits its value attribute, `on` without one, whatever its state; an observation leaves that token out.
-      if (mode === 'node') draft.value = attributes['value'] ?? 'on';
-    } else if (!secure && (facts?.nodeName === 'INPUT' || facts?.nodeName === 'TEXTAREA')) {
-      // A field's value is the element's own, whatever role Chromium gives it (a date input is no textbox).
-      draft.value = bound((facts.nodeName === 'INPUT' ? facts.inputValue : facts.textValue) ?? '', OBSERVED_TEXT_LIMIT, mode);
-    } else if (!secure && RANGE_ROLES.has(role)) {
-      // As written, as the web reads it: Chromium clamps aria-valuenow, drops aria-valuetext, and makes up a midpoint.
-      // A native progress or meter element's value is its value attribute; an empty attribute counts as none.
-      const filled = (value: string | undefined): string | undefined => (value === undefined || value.trim() === '' ? undefined : value);
-      const native = facts?.nodeName === 'PROGRESS' || facts?.nodeName === 'METER' ? filled(attributes['value']) : undefined;
-      draft.value = bound(filled(attributes['aria-valuetext']) ?? filled(attributes['aria-valuenow']) ?? native ?? '', OBSERVED_TEXT_LIMIT, mode);
-    } else if (!secure && VALUE_ROLES.has(role) && (role !== 'combobox' || editingHost)) {
-      // An editing host or an ARIA widget has no DOM value: its value is the one Chromium computes. A combobox that only
-      // shows its choice (a div) has none, as on the web; Chromium would echo its text.
-      draft.value = bound(stringOf(node.value) ?? '', OBSERVED_TEXT_LIMIT, mode);
-    }
-    const shown: Record<string, string> = {};
-    for (const [key, value] of Object.entries(attributes)) {
-      if (secure && key === 'value') continue;
-      if (mode === 'tree' && !TREE_ATTRIBUTES.has(key) && !key.startsWith('aria-')) continue;
-      // Whole, as the web engine keeps them: the harness redacts an attribute by whole values only, so a cut here could
-      // leave the start of a secret behind; it bounds what it renders after redaction.
-      shown[key] = mode === 'tree' && key === 'href' ? originAndPath(value, options.baseUrl) : value;
-    }
-    if (Object.keys(shown).length > 0) draft.attributes = shown;
-    const rect = rectOf(facts);
-    if (rect !== undefined) {
-      draft.rect = rect;
-      draft.layout = rect;
-    }
-    if (rect === undefined || rect.width === 0 || rect.height === 0) draft.states['hidden'] = true;
-    // A native field's inner editor repeats its value as text: a secure one would leak its length, any other says
-    // nothing new. An editing host (contenteditable) keeps its content, which is its text.
-    draft.children = secure || facts?.nodeName === 'INPUT' || facts?.nodeName === 'TEXTAREA' ? [] : children();
-    // Text runs that are the node's only content are the node's text, not nodes of their own. Beside other
-    // children they stay nodes, and an observation does not repeat them on the node; a locator reads all of it.
-    const onlyText = draft.children.length > 0 && draft.children.every((child) => child.isText);
-    if (!secure && (mode === 'node' || onlyText)) {
-      const text = textOf(draft, mode === 'node', gap, cellOf);
-      if (text !== '') draft.text = bound(text, OBSERVED_TEXT_LIMIT, mode);
-    }
-    // A closed select's option has no text run: its text is its label, which Chromium names it by.
-    if (draft.text === undefined && facts?.nodeName === 'OPTION' && name !== '') draft.text = bound(name, OBSERVED_TEXT_LIMIT, mode);
-    // A locator keeps several runs as nodes, so an exact text query finds each one (`<span>Price</span> <span>$10</span>`).
-    if (onlyText && (mode === 'tree' || draft.children.length === 1)) draft.children = [];
-    // What toBeEmpty reads, on a locator's read only and never on a secure field: a field by its value, anything else
-    // by its text content, as the web engine reads it (a select's option text counts, and so does hidden text).
-    if (mode === 'node' && !secure) {
-      const field = facts?.nodeName === 'INPUT' || facts?.nodeName === 'TEXTAREA';
-      draft.states['empty'] = field ? (draft.value ?? '') === '' : facts?.hasText !== true;
-    }
-    return [draft];
-  };
+  }
 
-  const rootNode = axNodes.find((node) => node.parentId === undefined) ?? axNodes[0];
-  const children = rootNode === undefined ? [] : (rootNode.childIds ?? []).flatMap((id) => {
-    const child = byId.get(id);
-    return child === undefined ? [] : build(child);
-  });
-  // An element a locator asks for that the tree leaves out (`hidden`, `display: none`) is still there to count, as on
-  // the web: one a CSS selector matched, and on a locator's read one with a test id. It joins the tree as a hidden
-  // node at its place in the document, under its nearest ancestor that is in the tree, read by the same field rules.
-  const absentIds = new Set(options.keep ?? []);
-  if (mode === 'node') for (const [backend, facts] of dom) if (facts.attributes[testIdAttribute.toLowerCase()] !== undefined) absentIds.add(backend);
-  const absent = [...absentIds].filter((backend) => !drafted.has(backend) && dom.has(backend) && domIndex.has(backend)).toSorted((a, b) => domIndex.get(a)! - domIndex.get(b)!);
-  const rendered = new Set(document.layout.nodeIndex);
-  for (const backend of absent) {
-    const facts = dom.get(backend)!;
-    const order = domIndex.get(backend)!;
-    const attributes = { ...facts.attributes };
-    const secure = facts.nodeName === 'INPUT' && attributes['type']?.toLowerCase() === 'password';
-    const field = facts.nodeName === 'INPUT' || facts.nodeName === 'TEXTAREA';
-    if (secure) delete attributes['value'];
-    const testId = attributes[testIdAttribute.toLowerCase()];
-    const value = secure || !field ? undefined : ((facts.nodeName === 'INPUT' ? facts.inputValue : facts.textValue) ?? '');
-    const inside = subtree(document, order);
-    // Hidden as the main path reads it, from the layout box: an inline element Chromium leaves out of the tree has one,
-    // and so does what a `display: contents` wrapper holds, though the wrapper has none of its own.
-    const box = facts.bounds;
-    const hidden = facts.invisible || ((box === undefined || box.length < 4 || box[2] === 0 || box[3] === 0) && ![...inside].some((at) => at !== order && rendered.has(at)));
-    const siblings = ancestorOf(order, drafted, document)?.children ?? children;
-    const node: Draft = {
-      id: options.idOf(backend),
-      role: 'generic',
-      states: { ...(hidden ? { hidden: true } : {}), ...(secure ? { secure: true } : {}) },
+  /**
+   * An element a locator asks for that the tree leaves out (`hidden`,
+   * `display: none`) is still there to count, as on the web: one a CSS
+   * selector matched, and on a locator's read one with a test id. It joins
+   * the tree at its place in the document, under its nearest ancestor that is
+   * in the tree, read by the same field rules as any other element.
+   */
+  placeAbsent(roots: Draft[]): void {
+    const wanted = new Set(this.options.keep ?? []);
+    if (this.policy.hiddenTestIds) {
+      for (const [backend, facts] of this.snapshot.elements()) if (facts.attributes[this.testIdAttribute] !== undefined) wanted.add(backend);
+    }
+    const absent = [...wanted].flatMap((backend) => {
+      const facts = this.drafted.has(backend) ? undefined : this.snapshot.element(backend);
+      return facts === undefined ? [] : [{ backend, facts }];
+    });
+    for (const { backend, facts } of absent.toSorted((a, b) => a.facts.index - b.facts.index)) {
+      const draft = this.element(backend, undefined, facts, 'generic');
+      const siblings = this.parentOf(facts.index)?.children ?? roots;
+      if (!isSecure(facts) && !isTextField(facts)) this.adoptText(draft, siblings);
+      const at = siblings.findIndex((sibling) => sibling.order > draft.order);
+      siblings.splice(at < 0 ? siblings.length : at, 0, draft);
+    }
+  }
+
+  private build(node: AXNode): Draft[] {
+    const chromium = stringOf(node.role) ?? '';
+    if (isHiddenSubtree(node) || DROPPED_ROLES.has(chromium)) return [];
+    const backend = node.backendDOMNodeId;
+    if (chromium === 'StaticText') return backend === undefined ? [] : this.textRun(node, backend);
+    const facts = backend === undefined ? undefined : this.snapshot.element(backend);
+    const { role, silent } = roleOf(node, facts, this.policy);
+    const name = collapse(stringOf(node.name) ?? '');
+    // A container Chromium leaves out, or one that says nothing, gives its place to its children: unless a test id,
+    // a name, a locator's selector, or taking focus makes it addressable, so an action reaches it rather than the
+    // container its text would fold into.
+    const addressable =
+      facts?.attributes[this.testIdAttribute] !== undefined ||
+      (backend !== undefined && this.options.keep?.has(backend) === true) ||
+      isFocusable(node) ||
+      (!node.ignored && name !== '');
+    if (backend === undefined || (silent && !addressable)) return this.children(node);
+    if (!this.take()) return [];
+    const draft = this.element(backend, node, facts, silent ? 'generic' : role);
+    if (name !== '') draft.name = cut(name, this.policy.nameLimit);
+    if (isSecure(facts)) return [draft];
+    // A native field's inner editor repeats its value as text, which says nothing new. An editing host
+    // (contenteditable) keeps its content, which is its text.
+    if (!isTextField(facts)) draft.children = this.children(node);
+    this.foldText(draft);
+    // A closed select's option has no text run: its text is its label, which Chromium names it by.
+    if (draft.text === undefined && facts?.nodeName === 'OPTION' && name !== '') draft.text = cut(name, this.policy.textLimit);
+    return [draft];
+  }
+
+  /** Counts one more node against the cap; false once the cap is reached. */
+  private take(): boolean {
+    if (this.kept >= this.policy.maxNodes) {
+      this.truncated = true;
+      return false;
+    }
+    this.kept += 1;
+    return true;
+  }
+
+  private textRun(node: AXNode, backend: number): Draft[] {
+    // The text as rendered, `text-transform` applied, as the web's innerText reads it.
+    const text = collapse(stringOf(node.name) ?? '');
+    if (text === '' || !this.take()) return [];
+    const facts = this.snapshot.element(backend);
+    const rect = this.rectOf(facts);
+    // The white space comes from the text node's own source: Chromium's name for a run trims what the next element's run follows.
+    const source = (facts === undefined ? undefined : this.snapshot.sourceText(facts.index)) ?? stringOf(node.name) ?? '';
+    const run: Draft = {
+      id: this.options.idOf(backend),
+      text: cut(text, this.policy.textLimit),
+      states: this.isHidden(facts, rect) ? { hidden: true } : {},
+      ...(rect === undefined ? {} : { rect }),
+      children: [],
+      isText: true,
+      spaceBefore: /^\s/.test(source),
+      spaceAfter: /\s$/.test(source),
+      order: facts?.index ?? -1,
+    };
+    this.drafted.set(backend, run);
+    return [run];
+  }
+
+  /** An element's node, without its name, children, or text. `node` is undefined for one the accessibility tree leaves out. */
+  private element(backend: number, node: AXNode | undefined, facts: DomFacts | undefined, role: string): Draft {
+    const { value, ...fields } = elementFields(node, facts, role, this.context);
+    const rect = this.rectOf(facts);
+    const draft: Draft = {
+      id: this.options.idOf(backend),
+      role,
+      ...fields,
+      ...(value === undefined ? {} : { value: cut(value, this.policy.textLimit) }),
+      ...(rect === undefined ? {} : { rect }),
       children: [],
       isText: false,
-      order,
-      ...(secure ? { inputPurpose: 'password' as const } : {}),
-      ...(testId === undefined ? {} : { testId }),
-      ...(value === undefined ? {} : { value: bound(value, OBSERVED_TEXT_LIMIT, mode) }),
-      ...(Object.keys(attributes).length === 0 ? {} : { attributes }),
+      order: facts?.index ?? -1,
     };
-    const rect = rectOf(facts);
-    if (rect !== undefined) {
-      node.rect = rect;
-      node.layout = rect;
-    }
-    // The text runs the tree already holds for this element move under it, so its text is not read twice; with none
-    // (nothing rendered), the text comes from the DOM.
-    if (!secure && !field) {
-      const runs = siblings.filter((sibling) => sibling.isText && inside.has(sibling.order));
-      if (runs.length > 0) {
-        for (const run of runs) siblings.splice(siblings.indexOf(run), 1);
-        node.children = runs;
-        const text = textOf(node, false, gap, cellOf);
-        if (text !== '') node.text = bound(text, OBSERVED_TEXT_LIMIT, mode);
-        if (mode === 'tree' || runs.length === 1) node.children = [];
-      } else {
-        const text = domText(document, strings, order);
-        if (text !== '') node.text = bound(text, OBSERVED_TEXT_LIMIT, mode);
-      }
-    }
-    if (mode === 'node' && !secure) node.states['empty'] = field ? value === '' : !facts.hasText;
-    const at = siblings.findIndex((sibling) => sibling.order > order);
-    siblings.splice(at < 0 ? siblings.length : at, 0, node);
-    drafted.set(backend, node);
+    if (this.isHidden(facts, rect)) draft.states['hidden'] = true;
+    // What toBeEmpty reads, never on a secure field: a field by its value, anything else by its text content, as the
+    // web engine reads it (a select's option text counts, and so does hidden text).
+    if (this.policy.emptyState && !isSecure(facts)) draft.states['empty'] = isTextField(facts) ? (value ?? '') === '' : facts?.hasText !== true;
+    this.drafted.set(backend, draft);
+    return draft;
   }
+
+  /**
+   * Text runs that are the node's only content are the node's text, not nodes
+   * of their own. Beside other children they stay nodes, and an observation
+   * does not repeat them on the node; a locator reads all of it, and keeps
+   * several runs as nodes so an exact text query finds each one
+   * (`<span>Price</span> <span>$10</span>`).
+   */
+  private foldText(draft: Draft): void {
+    const onlyText = draft.children.length > 0 && draft.children.every((child) => child.isText);
+    if (this.policy.descendantText || onlyText) {
+      const text = textOf(draft, this.policy.descendantText, this.snapshot);
+      if (text !== '') draft.text = cut(text, this.policy.textLimit);
+    }
+    if (onlyText && (!this.policy.descendantText || draft.children.length === 1)) draft.children = [];
+  }
+
+  /**
+   * The text of an element the tree left out. The text runs the tree already
+   * holds for it move under it, so its text is not read twice; with none
+   * (nothing rendered), the text comes from the DOM.
+   */
+  private adoptText(draft: Draft, siblings: Draft[]): void {
+    const inside = this.snapshot.subtree(draft.order);
+    const runs = siblings.filter((sibling) => sibling.isText && inside.has(sibling.order));
+    if (runs.length === 0) {
+      const text = this.snapshot.textContent(draft.order);
+      if (text !== '') draft.text = cut(text, this.policy.textLimit);
+      return;
+    }
+    for (const run of runs) siblings.splice(siblings.indexOf(run), 1);
+    draft.children = runs;
+    this.foldText(draft);
+  }
+
+  /** The nearest DOM ancestor of the node at `index` that is an element in the tree; undefined when it sits under the root. */
+  private parentOf(index: number): Draft | undefined {
+    for (const backend of this.snapshot.ancestors(index)) {
+      const draft = this.drafted.get(backend);
+      if (draft !== undefined && !draft.isText) return draft;
+    }
+    return undefined;
+  }
+
+  private rectOf(facts: DomFacts | undefined): Rect | undefined {
+    const box = facts?.bounds;
+    if (box === undefined || box.length < 4) return undefined;
+    const [x = 0, y = 0, width = 0, height = 0] = box;
+    const { scale, scrollX, scrollY } = this.geometry;
+    return { x: x / scale - scrollX, y: y / scale - scrollY, width: width / scale, height: height / scale };
+  }
+
+  /**
+   * Hidden as the web reads it: by its `visibility`, else by its box. An
+   * element with no box of its own (`display: contents`) is shown while
+   * something inside it is rendered.
+   */
+  private isHidden(facts: DomFacts | undefined, rect: Rect | undefined): boolean {
+    if (facts === undefined || facts.invisible) return true;
+    if (rect === undefined) return !this.snapshot.rendersContent(facts.index);
+    return rect.width === 0 || rect.height === 0;
+  }
+}
+
+/** Projects the window's accessibility tree onto the contract's semantic tree. */
+export function projectTree(axNodes: readonly AXNode[], snapshot: DomSnapshot, geometry: WindowGeometry, options: ProjectionOptions): Projection {
+  const projector = new TreeProjector(axNodes, snapshot, geometry, options);
+  const rootNode = axNodes.find((node) => node.parentId === undefined) ?? axNodes[0];
+  const children = rootNode === undefined ? [] : projector.children(rootNode);
+  projector.placeAbsent(children);
   const rootName = options.title ?? stringOf(rootNode?.name);
   const root: SemanticNode = {
     ref: { id: options.rootId, revision: '' },
     role: 'document',
-    ...(rootName === undefined || rootName === '' ? {} : { name: bound(rootName, OBSERVED_NAME_LIMIT, mode) }),
+    ...(rootName === undefined || rootName === '' ? {} : { name: cut(rootName, POLICIES[options.mode].nameLimit) }),
     rect: { x: 0, y: 0, width: geometry.width, height: geometry.height },
     ...(children.length === 0 ? {} : { children: children.map(finish) }),
   };
-  return { root, truncated };
-}
-
-/** Elements a screenshot paints over besides a secure field's value: the nested documents the engine does not read. */
-export const MASKED_TAGS: readonly string[] = ['IFRAME', 'FRAME', 'WEBVIEW', 'EMBED', 'OBJECT'];
-
-/**
- * How many rendered elements a screenshot must paint over and a selector
- * cannot reach: password inputs and nested documents inside a closed shadow
- * root, at any depth. Read from the DOM snapshot, which enters every shadow
- * root, so it holds whatever the accessibility tree leaves out (`aria-hidden`,
- * the node cap). Every other such element in the document, open shadow roots
- * included, a selector mask covers.
- */
-export function unmaskableCount(document: SnapshotDocument, strings: readonly string[]): number {
-  const names = document.nodes.nodeName ?? [];
-  const parents = document.nodes.parentIndex ?? [];
-  const attributes = document.nodes.attributes ?? [];
-  const closed = new Set<number>();
-  const rare = document.nodes.shadowRootType;
-  rare?.index.forEach((node, at) => {
-    if (strings[rare.value[at]!] === 'closed') closed.add(node);
-  });
-  if (closed.size === 0) return 0;
-  const rendered = new Set(document.layout.nodeIndex);
-  let count = 0;
-  names.forEach((nameIndex, node) => {
-    if (!rendered.has(node)) return;
-    const name = strings[nameIndex] ?? '';
-    const pairs = attributes[node] ?? [];
-    let password = false;
-    for (let at = 0; at + 1 < pairs.length; at += 2) {
-      if ((strings[pairs[at]!] ?? '').toLowerCase() === 'type' && (strings[pairs[at + 1]!] ?? '').toLowerCase() === 'password') password = true;
-    }
-    if (!(name === 'INPUT' && password) && !MASKED_TAGS.includes(name)) return;
-    for (let at: number | undefined = node; at !== undefined && at >= 0; at = parents[at]) {
-      if (closed.has(at)) {
-        count += 1;
-        return;
-      }
-    }
-  });
-  return count;
-}
-
-/** The nearest DOM ancestor of the node at `index` that has a draft, or undefined when none does (the node sits under the root). */
-function ancestorOf(index: number, drafted: ReadonlyMap<number, Draft>, document: SnapshotDocument): Draft | undefined {
-  const ids = document.nodes.backendNodeId ?? [];
-  const parents = document.nodes.parentIndex ?? [];
-  for (let at = parents[index] ?? -1; at >= 0; at = parents[at] ?? -1) {
-    const draft = drafted.get(ids[at]!);
-    if (draft !== undefined && !draft.isText) return draft;
-  }
-  return undefined;
-}
-
-/** The snapshot indices inside the node at `index`, itself included: its descendants follow it in the snapshot's document order. */
-function subtree(document: SnapshotDocument, index: number): Set<number> {
-  const parents = document.nodes.parentIndex ?? [];
-  const inside = new Set([index]);
-  for (let at = index + 1; at < parents.length && inside.has(parents[at] ?? -1); at += 1) inside.add(at);
-  return inside;
-}
-
-/** The text content of the node at `index`, white space collapsed: its descendant text nodes. */
-function domText(document: SnapshotDocument, strings: readonly string[], index: number): string {
-  const types = document.nodes.nodeType ?? [];
-  const values = document.nodes.nodeValue ?? [];
-  const parts: string[] = [];
-  for (const at of subtree(document, index)) if (types[at] === 3) parts.push(strings[values[at]!] ?? '');
-  return collapse(parts.join(''));
+  return { root, truncated: projector.truncated };
 }
 
 /** A draft as a contract node, empty fields left out. */

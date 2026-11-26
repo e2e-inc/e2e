@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { resolveExpression, type SemanticNode } from '@e2e-dev/core/engine';
 import { describe, expect, it } from 'vitest';
-import { projectTree, unmaskableCount, type AXNode, type ProjectionMode, type SnapshotDocument } from '../../src/tree.ts';
+import type { AXNode } from '../../src/fields.ts';
+import { DomSnapshot, type SnapshotDocument } from '../../src/snapshot.ts';
+import { projectTree, type ProjectionMode } from '../../src/tree.ts';
 
 /**
  * One read of the testbed's sign-in window, captured from Electron 45 with
@@ -19,8 +21,7 @@ function project(mode: ProjectionMode, extra: { maxNodes?: number; keep?: Readon
   const { metrics } = captured;
   return projectTree(
     captured.ax,
-    captured.snapshot.documents[0]!,
-    captured.snapshot.strings,
+    new DomSnapshot(captured.snapshot.documents[0]!, captured.snapshot.strings),
     {
       scale: metrics.layoutViewport.clientWidth / metrics.cssLayoutViewport.clientWidth,
       scrollX: metrics.cssVisualViewport.pageX,
@@ -117,7 +118,7 @@ describe('projectTree', () => {
       { nodeId: 'root', ignored: false, role: { value: 'RootWebArea' }, childIds: hrefs.map((_, at) => String(at)), backendDOMNodeId: 1 },
       ...hrefs.map((_, at) => ({ nodeId: String(at), ignored: false, role: { value: 'link' }, name: { value: `Link ${at}` }, parentId: 'root', backendDOMNodeId: 10 + at })),
     ];
-    const { root } = projectTree(ax, document, strings, { scale: 1, scrollX: 0, scrollY: 0, width: 640, height: 480 }, { mode: 'tree', testIdAttribute: 'data-testid', idOf: (id) => `1.${id}`, rootId: 'window', baseUrl: 'https://app.example/index.html' });
+    const { root } = projectTree(ax, new DomSnapshot(document, strings), { scale: 1, scrollX: 0, scrollY: 0, width: 640, height: 480 }, { mode: 'tree', testIdAttribute: 'data-testid', idOf: (id) => `1.${id}`, rootId: 'window', baseUrl: 'https://app.example/index.html' });
     expect(root.children?.map((link) => link.attributes?.['href'])).toEqual(['https://example.com/p?…#…', 'data:…', 'javascript:…', 'mailto:ada@example.com', 'https://app.example/settings.html?…']);
   });
 
@@ -132,7 +133,7 @@ describe('projectTree', () => {
       { nodeId: '1', ignored: false, role: { value: 'RootWebArea' }, childIds: ['3'], backendDOMNodeId: 1 },
       { nodeId: '3', ignored: false, role: { value: 'textbox' }, name: { value: 'Field' }, parentId: '1', backendDOMNodeId: 3 },
     ];
-    const { root } = projectTree(ax, document, strings, { scale: 1, scrollX: 0, scrollY: 0, width: 640, height: 480 }, { mode: 'tree', testIdAttribute: 'data-testid', idOf: (id) => `1.${id}`, rootId: 'window' });
+    const { root } = projectTree(ax, new DomSnapshot(document, strings), { scale: 1, scrollX: 0, scrollY: 0, width: 640, height: 480 }, { mode: 'tree', testIdAttribute: 'data-testid', idOf: (id) => `1.${id}`, rootId: 'window' });
     expect(root.children?.[0]?.attributes?.['placeholder']).toBe(long);
   });
 
@@ -175,6 +176,42 @@ describe('projectTree', () => {
     expect(kept.children?.map((child) => child.testId ?? child.text)).toEqual(['Username', 'username']);
   });
 
+  it('reads an element the tree leaves out by the rules every element reads by', () => {
+    const strings = ['#document', 'BODY', 'SELECT', 'OPTION', 'INPUT', 'data-testid', 'pick', 'value', 'a', 'b', 'user', 'autocomplete', 'username'];
+    const document: SnapshotDocument = {
+      nodes: {
+        backendNodeId: [1, 2, 3, 4, 5, 6],
+        nodeName: [0, 1, 2, 3, 3, 4],
+        parentIndex: [-1, 0, 1, 2, 2, 1],
+        attributes: [[], [], [5, 6], [7, 8], [7, 9], [5, 10, 11, 12]],
+        optionSelected: { index: [4] },
+        inputValue: { index: [5], value: [8] },
+      },
+      layout: { nodeIndex: [], bounds: [] },
+    };
+    const ax: AXNode[] = [{ nodeId: '1', ignored: false, role: { value: 'RootWebArea' }, backendDOMNodeId: 1 }];
+    const { root } = projectTree(ax, new DomSnapshot(document, strings), { scale: 1, scrollX: 0, scrollY: 0, width: 640, height: 480 }, { mode: 'node', testIdAttribute: 'data-testid', idOf: (id) => `1.${id}`, rootId: 'window' });
+    expect(find(root, (node) => node.testId === 'pick')).toMatchObject({ role: 'generic', value: 'b', states: { hidden: true, readonly: false } });
+    expect(find(root, (node) => node.testId === 'user')).toMatchObject({ value: 'a', inputPurpose: 'username', states: { hidden: true, empty: false } });
+  });
+
+  it('shows an element with no box of its own while something inside it is rendered, and hides one whose box has no size', () => {
+    const strings = ['#document', 'BODY', 'UL', 'LI', 'DIV', 'P'];
+    const document: SnapshotDocument = {
+      nodes: { backendNodeId: [1, 2, 3, 4, 5, 6, 7], nodeName: [0, 1, 2, 3, 4, 5, 2], parentIndex: [-1, 0, 1, 2, 1, 4, 1] },
+      layout: { nodeIndex: [3, 4, 5], bounds: [[0, 0, 100, 20], [0, 20, 100, 0], [0, 20, 100, 20]] },
+    };
+    const list = (id: number, name: string): AXNode => ({ nodeId: String(id), ignored: false, role: { value: 'list' }, name: { value: name }, parentId: '1', backendDOMNodeId: id });
+    const ax: AXNode[] = [
+      { nodeId: '1', ignored: false, role: { value: 'RootWebArea' }, childIds: ['3', '5', '7'], backendDOMNodeId: 1 },
+      list(3, 'Contents'),
+      { nodeId: '5', ignored: false, role: { value: 'group' }, name: { value: 'Collapsed' }, parentId: '1', backendDOMNodeId: 5 },
+      list(7, 'Empty'),
+    ];
+    const { root } = projectTree(ax, new DomSnapshot(document, strings), { scale: 1, scrollX: 0, scrollY: 0, width: 640, height: 480 }, { mode: 'tree', testIdAttribute: 'data-testid', idOf: (id) => `1.${id}`, rootId: 'window' });
+    expect(root.children?.map((node) => [node.name, node.states?.hidden === true])).toEqual([['Contents', false], ['Collapsed', true], ['Empty', true]]);
+  });
+
   it('caps an observation and never a locator read', () => {
     const buttons = Array.from({ length: 6000 }, (_, at) => at + 2);
     const ax: AXNode[] = [
@@ -184,10 +221,10 @@ describe('projectTree', () => {
     const empty: SnapshotDocument = { nodes: {}, layout: { nodeIndex: [], bounds: [] } };
     const geometry = { scale: 1, scrollX: 0, scrollY: 0, width: 640, height: 480 };
     const options = { testIdAttribute: 'data-testid', idOf: (id: number) => `1.${id}`, rootId: 'window' };
-    const observed = projectTree(ax, empty, [], geometry, { ...options, mode: 'tree' });
+    const observed = projectTree(ax, new DomSnapshot(empty, []), geometry, { ...options, mode: 'tree' });
     expect(observed.truncated).toBe(true);
     expect(observed.root.children).toHaveLength(5000);
-    const located = projectTree(ax, empty, [], geometry, { ...options, mode: 'node' });
+    const located = projectTree(ax, new DomSnapshot(empty, []), geometry, { ...options, mode: 'node' });
     expect(located.truncated).toBe(false);
     expect(located.root.children).toHaveLength(6000);
   });
@@ -229,18 +266,18 @@ describe('unmaskableCount', () => {
   }
 
   it('counts a rendered password field or nested document inside a closed shadow root', () => {
-    expect(unmaskableCount(documentWith({ name: 3, attributes: [4, 5], shadow: 6 }), strings)).toBe(1);
-    expect(unmaskableCount(documentWith({ name: 8, shadow: 6 }), strings)).toBe(1);
+    expect(new DomSnapshot(documentWith({ name: 3, attributes: [4, 5], shadow: 6 }), strings).unmaskableCount()).toBe(1);
+    expect(new DomSnapshot(documentWith({ name: 8, shadow: 6 }), strings).unmaskableCount()).toBe(1);
   });
 
   it('counts one inside an open shadow root that a closed one holds', () => {
-    expect(unmaskableCount(documentWith({ name: 3, attributes: [4, 5], shadow: 6, nested: 7 }), strings)).toBe(1);
+    expect(new DomSnapshot(documentWith({ name: 3, attributes: [4, 5], shadow: 6, nested: 7 }), strings).unmaskableCount()).toBe(1);
   });
 
   it('leaves out what a selector reaches, what is not rendered, and what holds no secret', () => {
-    expect(unmaskableCount(documentWith({ name: 3, attributes: [4, 5], shadow: 7 }), strings)).toBe(0);
-    expect(unmaskableCount(documentWith({ name: 3, attributes: [4, 5] }), strings)).toBe(0);
-    expect(unmaskableCount(documentWith({ name: 3, attributes: [4, 5], shadow: 6, rendered: false }), strings)).toBe(0);
-    expect(unmaskableCount(documentWith({ name: 3, attributes: [4, 9], shadow: 6 }), strings)).toBe(0);
+    expect(new DomSnapshot(documentWith({ name: 3, attributes: [4, 5], shadow: 7 }), strings).unmaskableCount()).toBe(0);
+    expect(new DomSnapshot(documentWith({ name: 3, attributes: [4, 5] }), strings).unmaskableCount()).toBe(0);
+    expect(new DomSnapshot(documentWith({ name: 3, attributes: [4, 5], shadow: 6, rendered: false }), strings).unmaskableCount()).toBe(0);
+    expect(new DomSnapshot(documentWith({ name: 3, attributes: [4, 9], shadow: 6 }), strings).unmaskableCount()).toBe(0);
   });
 });

@@ -49,15 +49,13 @@ export interface NodeOps {
   clearFiles(): void;
   /** A native radio, or an element with a radio role. */
   isRadio(): boolean;
-  /** The focused element under the node, a document or shadow root, through every open shadow root; it stops at a closed root's host. */
-  activeUnder(): Element | null;
   /** Whether the node, the focused element, takes typed text, or typed keys as a widget's typeahead. */
   takesText(): boolean;
 }
 
 /** Runs one of `NodeOps` on `node`. */
 export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Parameters<NodeOps[K]>): ReturnType<NodeOps[K]> {
-  const element = node instanceof Element ? node : node.parentElement;
+  const owner = node instanceof Element ? node : node.parentElement;
   const TEXT_INPUT_TYPES = new Set(['', 'text', 'password', 'email', 'search', 'tel', 'url', 'number']);
   /** Input types whose value is set rather than typed. */
   const SET_VALUE_TYPES = new Set(['date', 'time', 'datetime-local', 'month', 'week', 'color', 'range']);
@@ -67,14 +65,10 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
   const TYPEAHEAD_ROLES = new Set(['listbox', 'option', 'tree', 'treeitem', 'menu', 'menubar', 'menuitem', 'combobox', 'grid', 'gridcell', 'radiogroup', 'tablist', 'tab']);
   /** Of those, the ones that also take typed text: digits a key at a time. */
   const TYPED_PICKER_TYPES = new Set(['date', 'time', 'datetime-local', 'month', 'week']);
-  /** A node the document dropped fails as one: the harness locates it again, where a reason would only wait out the deadline. */
-  const gone = (): never => {
-    throw new Error('Node is detached: it is no longer in the document');
-  };
-
-  const attached = (): Element => {
-    if (element === null) throw new Error('Node is detached');
-    return element;
+  /** The node's element. A node the document dropped fails as one: the harness locates it again, where a reason would only wait out the deadline. */
+  const live = (): Element => {
+    if (owner?.isConnected !== true) throw new Error('Node is detached: it is no longer in the document');
+    return owner;
   };
   /** An input's type as the browser reads it (an unknown type is `text`); another element's type attribute. */
   const typeOf = (target: Element): string => (target instanceof HTMLInputElement ? target.type : (target.getAttribute('type') ?? '').toLowerCase());
@@ -122,17 +116,18 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
 
   const ops: NodeOps = {
     checkConnected() {
-      return element?.isConnected === true ? { ok: true } : gone();
+      live();
+      return { ok: true };
     },
     checkEnabled(enabled) {
-      if (element?.isConnected !== true) return gone();
+      const element = live();
       if (enabled && isDisabled(element)) return { ok: false, reason: 'it is disabled' };
       if (element.closest('[inert]') !== null) return { ok: false, reason: 'it is inert (a modal or the app blocks it)' };
       if (getComputedStyle(element).visibility !== 'visible') return { ok: false, reason: 'it is not visible' };
       return { ok: true };
     },
     hitTest(x, y) {
-      if (element?.isConnected !== true) return gone();
+      const element = live();
       const root = element.getRootNode();
       const hit = (root instanceof ShadowRoot ? root : document).elementFromPoint(x, y);
       if (hit === null) return { ok: false, reason: 'its centre is outside the window' };
@@ -144,10 +139,10 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       return { ok: false, reason: `another element (${hit.tagName.toLowerCase()}${hit.id === '' ? '' : `#${hit.id}`}) would receive the click` };
     },
     scrollIntoView() {
-      element?.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+      live().scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
     },
     focus() {
-      const target = attached();
+      const target = live();
       // Whether the element took focus at all, even for a moment: an app's focus handler can send it on at once.
       let took = false;
       const onFocus = (): void => {
@@ -160,11 +155,11 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       return took ? 'moved' : 'none';
     },
     blur() {
-      const target = attached();
+      const target = live();
       if (target instanceof HTMLElement || target instanceof SVGElement) target.blur();
     },
     checkEditable() {
-      if (element?.isConnected !== true) return gone();
+      const element = live();
       const type = typeOf(element);
       const field = element instanceof HTMLTextAreaElement || (element instanceof HTMLInputElement && (TEXT_INPUT_TYPES.has(type) || SET_VALUE_TYPES.has(type))) ? element : undefined;
       if (field === undefined && !(element instanceof HTMLElement && element.isContentEditable)) return { ok: false, reason: 'it is not a text field' };
@@ -174,6 +169,7 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       return { ok: true };
     },
     setValue(value) {
+      const element = live();
       if (!(element instanceof HTMLInputElement)) return null;
       const type = typeOf(element);
       const refused: Readiness = { ok: false, reason: `the ${type} input does not take ${JSON.stringify(value)}` };
@@ -194,7 +190,7 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       return { ok: true };
     },
     selectContents() {
-      const target = attached();
+      const target = live();
       if (target instanceof HTMLElement) target.focus();
       if (!holdsFocus(target)) return false;
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
@@ -209,7 +205,7 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       return true;
     },
     readChecked() {
-      const target = attached();
+      const target = live();
       if (target instanceof HTMLInputElement && (target.type === 'checkbox' || target.type === 'radio')) return target.checked;
       if (!CHECKED_ROLES.has(target.getAttribute('role') ?? '')) return null;
       const aria = target.getAttribute('aria-checked');
@@ -217,7 +213,7 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       return aria === 'true' ? true : aria === 'false' || aria === 'mixed' ? false : null;
     },
     checkSelect(wanted) {
-      if (element?.isConnected !== true) return gone();
+      const element = live();
       if (!(element instanceof HTMLSelectElement)) return { ok: false, reason: 'it is not a <select>' };
       if (isDisabled(element)) return { ok: false, reason: 'it is disabled' };
       if (!element.checkVisibility({ visibilityProperty: true })) return { ok: false, reason: 'it is not visible' };
@@ -225,6 +221,7 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       return 'index' in found ? { ok: true } : found;
     },
     selectOption(wanted) {
+      const element = live();
       if (!(element instanceof HTMLSelectElement)) return { ok: false, reason: 'it is not a <select>' };
       const found = findOption(element, wanted);
       if (!('index' in found)) return found;
@@ -234,33 +231,28 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       return { ok: true };
     },
     checkFileInput() {
-      if (element?.isConnected !== true) return gone();
+      const element = live();
       if (!(element instanceof HTMLInputElement) || element.type !== 'file') return { ok: false, reason: 'it is not a file input' };
       if (isDisabled(element)) return { ok: false, reason: 'it is disabled' };
       return { ok: true };
     },
     takesFiles(count) {
-      const input = attached();
+      const input = live();
       if (count > 1 && input instanceof HTMLInputElement && !input.multiple) return { ok: false, reason: `the file input takes one file, not ${count}: it has no multiple attribute` };
       return { ok: true };
     },
     clearFiles() {
-      const input = attached();
+      const input = live();
       if (!(input instanceof HTMLInputElement) || input.files === null || input.files.length === 0) return;
       input.value = '';
       fire(input);
     },
     isRadio() {
-      const target = attached();
+      const target = live();
       return (target instanceof HTMLInputElement && target.type === 'radio') || ['radio', 'menuitemradio'].includes(target.getAttribute('role') ?? '');
     },
-    activeUnder() {
-      let active = node instanceof Document || node instanceof ShadowRoot ? node.activeElement : null;
-      while (active?.shadowRoot?.activeElement != null) active = active.shadowRoot.activeElement;
-      return active;
-    },
     takesText() {
-      const active = attached();
+      const active = live();
       if (active.tagName === 'IFRAME' || active.tagName === 'WEBVIEW') return true;
       if (active instanceof HTMLElement && active.isContentEditable) return true;
       if (active instanceof HTMLTextAreaElement) return !active.readOnly && !active.disabled;
@@ -273,6 +265,18 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
   // TypeScript cannot tie `args` to the method `name` picks; `NodeOps` holds the two together for callers.
   const run = ops[name] as (...values: Parameters<NodeOps[K]>) => ReturnType<NodeOps[K]>;
   return run.apply(ops, args);
+}
+
+/**
+ * The focused element under a document or shadow root, through every open
+ * shadow root; it stops at a closed root's host. Its answer is a handle, which
+ * only the protocol can hold, so it is no `NodeOps` entry: those answer in
+ * JSON. Sent as source text: self-contained.
+ */
+export function activeUnder(root: Node): Element | null {
+  let active = root instanceof Document || root instanceof ShadowRoot ? root.activeElement : null;
+  while (active?.shadowRoot?.activeElement != null) active = active.shadowRoot.activeElement;
+  return active;
 }
 
 /**

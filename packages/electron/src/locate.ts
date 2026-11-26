@@ -7,15 +7,16 @@
 import { expressionSelectors, resolveExpression, type EngineSnapshot, type LocatorExpression, type SemanticNode } from '@e2e-dev/core/engine';
 import type { DevTools } from './devtools.ts';
 import { stale } from './errors.ts';
-import { projectTree, type AXNode, type ProjectionMode, type SnapshotDocument, type WindowGeometry } from './tree.ts';
+import type { AXNode } from './fields.ts';
+import type { DomSnapshot } from './snapshot.ts';
+import { projectTree, type ProjectionMode, type WindowGeometry } from './tree.ts';
 import { nodeId, ROOT_ID, type AppWindow } from './windows.ts';
 
 /** One window's raw read: the accessibility tree, the DOM snapshot of the same document, and its geometry. */
 export interface RawRead {
   readonly window: AppWindow;
   readonly ax: readonly AXNode[];
-  readonly document: SnapshotDocument;
-  readonly strings: readonly string[];
+  readonly dom: DomSnapshot;
   readonly geometry: WindowGeometry;
   readonly title: string;
   readonly url: string;
@@ -33,18 +34,16 @@ export async function readWindow(devtools: DevTools, window: AppWindow): Promise
   const session = await devtools.session(window.page);
   const [{ nodes }, snapshot, metrics] = await Promise.all([
     session.send('Accessibility.getFullAXTree'),
-    session.send('DOMSnapshot.captureSnapshot', { computedStyles: ['visibility'] }),
+    devtools.snapshot(window.page),
     session.send('Page.getLayoutMetrics'),
   ]);
   const css = metrics.cssLayoutViewport;
   const device = metrics.layoutViewport;
-  const document = snapshot.documents[0];
-  if (document === undefined) throw stale('the window has no document yet');
+  if (snapshot === undefined) throw stale('the window has no document yet');
   return {
     window,
     ax: nodes,
-    document,
-    strings: snapshot.strings,
+    dom: snapshot.dom,
     geometry: {
       scale: css.clientWidth > 0 ? device.clientWidth / css.clientWidth : 1,
       scrollX: metrics.cssVisualViewport.pageX,
@@ -52,14 +51,14 @@ export async function readWindow(devtools: DevTools, window: AppWindow): Promise
       width: metrics.cssVisualViewport.clientWidth,
       height: metrics.cssVisualViewport.clientHeight,
     },
-    title: snapshot.strings[document.title] ?? '',
+    title: snapshot.title,
     url: window.page.url(),
   };
 }
 
 /** Projects a read into the snapshot the harness receives; `keep` holds elements a selector matched, kept where the tree leaves them out. */
 export function projectRead(raw: RawRead, mode: ProjectionMode, context: ProjectionContext, keep?: ReadonlySet<number>): EngineSnapshot {
-  const projection = projectTree(raw.ax, raw.document, raw.strings, raw.geometry, {
+  const projection = projectTree(raw.ax, raw.dom, raw.geometry, {
     mode,
     ...(keep === undefined ? {} : { keep }),
     testIdAttribute: context.testIdAttribute,
@@ -91,7 +90,7 @@ export async function locateIn(devtools: DevTools, raw: RawRead, expression: Loc
   const keep = new Set([...selected.values()].flatMap((ids) => [...ids]));
   const { root } = projectRead(raw, 'node', context, keep);
   // The hook answers in document order, as `querySelectorAll` does; `aria-owns` can put the tree in another one.
-  const domOrder = new Map((raw.document.nodes.backendNodeId ?? []).map((backendNodeId, index) => [nodeId(window, backendNodeId), index]));
+  const domOrder = new Map([...keep].map((backendNodeId) => [nodeId(window, backendNodeId), raw.dom.element(backendNodeId)?.index]));
   const position = (node: SemanticNode): number => domOrder.get(node.ref.id) ?? Number.MAX_SAFE_INTEGER;
   return resolveExpression(expression, [root], {
     selector: (selector, candidates) => {

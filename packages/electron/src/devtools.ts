@@ -7,13 +7,18 @@
 import type { CDPSession, Page } from 'playwright-core';
 import { TestError } from '@e2e-dev/core/engine';
 import { stale } from './errors.ts';
-import { nodeOp, queryAll, type NodeOps } from './in-page/node-ops.ts';
-import type { SnapshotDocument } from './tree.ts';
+import { activeUnder, nodeOp, queryAll, type NodeOps } from './in-page/node-ops.ts';
+import { DomSnapshot, SNAPSHOT_STYLES } from './snapshot.ts';
 
 /** The isolated world the engine's own page-side reads run in, apart from the app's globals. */
 const WORLD_NAME = '__e2e_electron__';
 
 const NODE_OP = nodeOp.toString();
+const ACTIVE_UNDER = activeUnder.toString();
+
+function thrown(details: { readonly text: string; readonly exception?: { readonly description?: string } }): string {
+  return details.exception?.description ?? details.text;
+}
 
 let objectGroups = 0;
 
@@ -23,10 +28,10 @@ function objectGroup(): string {
   return `${WORLD_NAME}${objectGroups}`;
 }
 
-/** One DOM snapshot of a window's main document, with the string table its indexes point into. */
+/** One DOM snapshot of a window's main document, indexed, with the document's title. */
 export interface DocumentSnapshot {
-  readonly document: SnapshotDocument;
-  readonly strings: readonly string[];
+  readonly dom: DomSnapshot;
+  readonly title: string;
 }
 
 export class DevTools {
@@ -70,18 +75,27 @@ export class DevTools {
     return world;
   }
 
-  /**
-   * Runs one of `NodeOps` on a node in the isolated world. The node is
-   * resolved fresh from its backend id, so a node the document dropped fails
-   * as stale.
-   */
-  async callOn<K extends keyof NodeOps>(page: Page, backendNodeId: number, name: K, ...args: Parameters<NodeOps[K]>): Promise<ReturnType<NodeOps[K]>> {
+  /** Runs `work` in the window's isolated world with an object group of its own, released when the call ends. */
+  private async inWorld<T>(page: Page, work: (session: CDPSession, contextId: number, group: string) => Promise<T>): Promise<T> {
     const session = await this.session(page);
-    const executionContextId = await this.world(page);
+    const contextId = await this.world(page);
     const group = objectGroup();
-    const { object } = await session.send('DOM.resolveNode', { backendNodeId, executionContextId, objectGroup: group });
-    if (object.objectId === undefined) throw stale(`node ${backendNodeId} is no longer in the window`);
     try {
+      return await work(session, contextId, group);
+    } finally {
+      await session.send('Runtime.releaseObjectGroup', { objectGroup: group }).catch(() => undefined);
+    }
+  }
+
+  /**
+   * Runs one of `NodeOps` on a node in the isolated world and returns its
+   * JSON result. The node is resolved fresh from its backend id, so a node
+   * the document dropped fails as stale.
+   */
+  callOn<K extends keyof NodeOps>(page: Page, backendNodeId: number, name: K, ...args: Parameters<NodeOps[K]>): Promise<ReturnType<NodeOps[K]>> {
+    return this.inWorld(page, async (session, executionContextId, objectGroup) => {
+      const { object } = await session.send('DOM.resolveNode', { backendNodeId, executionContextId, objectGroup });
+      if (object.objectId === undefined) throw stale(`node ${backendNodeId} is no longer in the window`);
       const { result, exceptionDetails } = await session.send('Runtime.callFunctionOn', {
         objectId: object.objectId,
         functionDeclaration: NODE_OP,
@@ -89,11 +103,9 @@ export class DevTools {
         returnByValue: true,
         awaitPromise: true,
       });
-      if (exceptionDetails !== undefined) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
+      if (exceptionDetails !== undefined) throw new Error(thrown(exceptionDetails));
       return result.value;
-    } finally {
-      await session.send('Runtime.releaseObjectGroup', { objectGroup: group }).catch(() => undefined);
-    }
+    });
   }
 
   /** Calls a self-contained page function in the isolated world with JSON arguments and returns its JSON result. */
@@ -102,7 +114,7 @@ export class DevTools {
     const contextId = await this.world(page);
     const expression = `(${fn.toString()})(...${JSON.stringify(args)})`;
     const { result, exceptionDetails } = await session.send('Runtime.evaluate', { expression, contextId, returnByValue: true, awaitPromise: true });
-    if (exceptionDetails !== undefined) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
+    if (exceptionDetails !== undefined) throw new Error(thrown(exceptionDetails));
     return result.value;
   }
 
@@ -111,33 +123,32 @@ export class DevTools {
    * stops at the host of a closed shadow root; the DevTools protocol reaches
    * into one, so the walk goes on inside until it finds the focused element.
    */
-  async focusedTakesText(page: Page): Promise<boolean> {
-    const session = await this.session(page);
-    const executionContextId = await this.world(page);
-    const group = objectGroup();
-    const call = async (objectId: string, name: 'activeUnder' | 'takesText', returnByValue: boolean) =>
-      (await session.send('Runtime.callFunctionOn', { objectId, functionDeclaration: NODE_OP, arguments: [{ objectId }, { value: name }, { value: [] }], objectGroup: group, returnByValue })).result;
-    try {
-      const { result: document } = await session.send('Runtime.evaluate', { expression: 'document', contextId: executionContextId, objectGroup: group });
-      if (document.objectId === undefined) return false;
-      const first = await call(document.objectId, 'activeUnder', false);
-      if (first.objectId === undefined) return false;
-      let active = first.objectId;
+  focusedTakesText(page: Page): Promise<boolean> {
+    return this.inWorld(page, async (session, executionContextId, objectGroup) => {
+      const focusedUnder = async (objectId: string): Promise<string | undefined> =>
+        (await session.send('Runtime.callFunctionOn', { objectId, functionDeclaration: ACTIVE_UNDER, arguments: [{ objectId }], objectGroup })).result.objectId;
+      const { result: document } = await session.send('Runtime.evaluate', { expression: 'document', contextId: executionContextId, objectGroup });
+      const first = document.objectId === undefined ? undefined : await focusedUnder(document.objectId);
+      if (first === undefined) return false;
+      let active: string = first;
       for (;;) {
         const { node } = await session.send('DOM.describeNode', { objectId: active, depth: 1, pierce: true });
         const closed = node.shadowRoots?.find((root) => root.shadowRootType === 'closed');
         if (closed === undefined) break;
-        const { object: root } = await session.send('DOM.resolveNode', { backendNodeId: closed.backendNodeId, executionContextId, objectGroup: group });
-        if (root.objectId === undefined) break;
-        const inner = await call(root.objectId, 'activeUnder', false);
+        const { object: root } = await session.send('DOM.resolveNode', { backendNodeId: closed.backendNodeId, executionContextId, objectGroup });
         // Nothing focused inside: the host itself has focus.
-        if (inner.objectId === undefined) break;
-        active = inner.objectId;
+        const inner: string | undefined = root.objectId === undefined ? undefined : await focusedUnder(root.objectId);
+        if (inner === undefined) break;
+        active = inner;
       }
-      return (await call(active, 'takesText', true)).value === true;
-    } finally {
-      await session.send('Runtime.releaseObjectGroup', { objectGroup: group }).catch(() => undefined);
-    }
+      const { result } = await session.send('Runtime.callFunctionOn', {
+        objectId: active,
+        functionDeclaration: NODE_OP,
+        arguments: [{ objectId: active }, { value: 'takesText' satisfies keyof NodeOps }, { value: [] }],
+        returnByValue: true,
+      });
+      return result.value === true;
+    });
   }
 
   /**
@@ -145,37 +156,25 @@ export class DevTools {
    * document and in each open shadow root (`queryAll`), run in the isolated
    * world.
    */
-  async querySelectorAll(page: Page, selector: string): Promise<ReadonlySet<number>> {
-    const session = await this.session(page);
-    const contextId = await this.world(page);
-    const group = objectGroup();
-    const { result, exceptionDetails } = await session.send('Runtime.evaluate', {
-      expression: `(${queryAll.toString()})(${JSON.stringify(selector)})`,
-      contextId,
-      objectGroup: group,
-    });
-    try {
-      if (exceptionDetails !== undefined) {
-        const reason = (exceptionDetails.exception?.description ?? exceptionDetails.text).split('\n')[0];
-        throw new TestError('INVALID_LOCATOR', `${JSON.stringify(selector)} is not a CSS selector: ${reason}`);
-      }
-      if (result.objectId === undefined) return new Set();
+  querySelectorAll(page: Page, selector: string): Promise<ReadonlySet<number>> {
+    return this.inWorld(page, async (session, contextId, objectGroup) => {
+      const { result, exceptionDetails } = await session.send('Runtime.evaluate', { expression: `(${queryAll.toString()})(${JSON.stringify(selector)})`, contextId, objectGroup });
+      if (exceptionDetails !== undefined) throw new TestError('INVALID_LOCATOR', `${JSON.stringify(selector)} is not a CSS selector: ${thrown(exceptionDetails).split('\n')[0]}`);
+      if (result.objectId === undefined) return new Set<number>();
       const { result: entries } = await session.send('Runtime.getProperties', { objectId: result.objectId, ownProperties: true });
       // One round trip per match, sent together: a broad selector on a long list is read on every poll of an expect.
       const described = await Promise.all(
         entries.flatMap((entry) => (/^\d+$/.test(entry.name) && entry.value?.objectId !== undefined ? [session.send('DOM.describeNode', { objectId: entry.value.objectId })] : [])),
       );
       return new Set(described.map(({ node }) => node.backendNodeId));
-    } finally {
-      await session.send('Runtime.releaseObjectGroup', { objectGroup: group }).catch(() => undefined);
-    }
+    });
   }
 
-  /** One DOM snapshot of the window's main document; undefined while it has none. */
+  /** One DOM snapshot of the window's main document, the only place one is captured; undefined while it has none. */
   async snapshot(page: Page): Promise<DocumentSnapshot | undefined> {
     const session = await this.session(page);
-    const snapshot = await session.send('DOMSnapshot.captureSnapshot', { computedStyles: [] });
-    const document = snapshot.documents[0];
-    return document === undefined ? undefined : { document, strings: snapshot.strings };
+    const { documents, strings } = await session.send('DOMSnapshot.captureSnapshot', { computedStyles: [...SNAPSHOT_STYLES] });
+    const document = documents[0];
+    return document === undefined ? undefined : { dom: new DomSnapshot(document, strings), title: strings[document.title] ?? '' };
   }
 }
