@@ -35,13 +35,29 @@ const NO_DEAD_KEYS: u32 = 1;
 /// Every virtual key code a keyboard has.
 const CODES: u16 = 128;
 
-/// `cmdKey >> 8`, the Command bit of UCKeyTranslate's modifier state.
-const COMMAND: u32 = 1;
+/// A modifier layer of a layout: what its keys type with no modifier, with Shift, or with Command.
+#[derive(Clone, Copy)]
+pub enum Layer {
+    Plain,
+    Shift,
+    Command,
+}
 
-/// What each key code types on the current ASCII-capable layout, the one macOS matches Command shortcuts against: with
-/// Command held when `command`, since a layout such as Dvorak-QWERTY Command types other characters then, and with no
-/// modifier otherwise. `None` when the layout cannot be read.
-pub fn characters(command: bool) -> Option<Vec<(u16, char)>> {
+impl Layer {
+    /// The layer's bit in UCKeyTranslate's modifier state: `shiftKey >> 8` or `cmdKey >> 8`.
+    fn state(self) -> u32 {
+        match self {
+            Layer::Plain => 0,
+            Layer::Shift => 2,
+            Layer::Command => 1,
+        }
+    }
+}
+
+/// What each key code types on the current ASCII-capable layout, the one macOS matches Command shortcuts against, in
+/// one modifier layer: a layout such as Dvorak-QWERTY Command types other characters with Command held. `None` when the
+/// layout cannot be read.
+pub fn characters(layer: Layer) -> Option<Vec<(u16, char)>> {
     // Text Input Sources aborts the process when two threads call it at once, and native calls run on a pool of threads:
     // one read at a time.
     static LAYOUT: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -62,18 +78,8 @@ pub fn characters(command: bool) -> Option<Vec<(u16, char)>> {
                 let mut dead = 0u32;
                 let mut buffer = [0u16; 4];
                 let mut length = 0usize;
-                let status = UCKeyTranslate(
-                    layout,
-                    code,
-                    KEY_DOWN,
-                    if command { COMMAND } else { 0 },
-                    keyboard,
-                    NO_DEAD_KEYS,
-                    &mut dead,
-                    buffer.len(),
-                    &mut length,
-                    buffer.as_mut_ptr(),
-                );
+                let status =
+                    UCKeyTranslate(layout, code, KEY_DOWN, layer.state(), keyboard, NO_DEAD_KEYS, &mut dead, buffer.len(), &mut length, buffer.as_mut_ptr());
                 if status != 0 || length != 1 {
                     continue;
                 }

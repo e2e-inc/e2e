@@ -239,7 +239,8 @@ pub fn parse_combo(combo: &str) -> Outcome<Combo> {
             // Shift keys carry their characters, as typed.
             let shortcut = flags.intersects(CGEventFlags::CGEventFlagCommand | CGEventFlags::CGEventFlagControl | CGEventFlags::CGEventFlagAlternate);
             let code = if shortcut {
-                let table = crate::layout::characters(flags.contains(CGEventFlags::CGEventFlagCommand))
+                let layer = if flags.contains(CGEventFlags::CGEventFlagCommand) { crate::layout::Layer::Command } else { crate::layout::Layer::Plain };
+                let table = crate::layout::characters(layer)
                     .ok_or_else(|| Failure::refused(codes::ACTION_FAILED, "the keyboard layout could not be read, so the shortcut's key is unknown"))?;
                 crate::layout::code_for(lower, &table).ok_or_else(|| {
                     Failure::refused(
@@ -329,9 +330,10 @@ fn pieces(text: &str) -> Vec<Piece> {
 /// the keyboard there.
 pub fn type_text(text: &str, route: Route, run: &TypingRun, deadline: std::time::Instant, still: &dyn Fn() -> Outcome<()>) -> Outcome<()> {
     let source = source()?;
-    // The key that types each character on this Mac's layout, so a control that reads the key code sees the key a
-    // person would press; a character no key types without a modifier keeps code 0, and its text says what it is.
-    let layout = crate::layout::characters(false).unwrap_or_default();
+    // The key that types each character on this Mac's layout, and Shift when it takes Shift, so a control that reads the
+    // key code sees the key a person would press; a character no key types keeps code 0, and its text says what it is.
+    let plain = crate::layout::characters(crate::layout::Layer::Plain).unwrap_or_default();
+    let shifted = crate::layout::characters(crate::layout::Layer::Shift).unwrap_or_default();
     // A stop before the first key sent nothing; after it, the keys sent stay sent.
     let mut sent = false;
     let stopped = |failure: Failure, sent: bool| {
@@ -357,12 +359,13 @@ pub fn type_text(text: &str, route: Route, run: &TypingRun, deadline: std::time:
             Piece::Text(units) => units,
         };
         sent = true;
-        let code = key_code(&units, &layout);
+        let (code, shift) = key_code(&units, &plain, &shifted);
         for down in [true, false] {
             let event =
                 CGEvent::new_keyboard_event(source.clone(), code, down).map_err(|_| Failure::unconfirmed(codes::INTERNAL, "could not create a key event"))?;
-            // No modifiers: a key the user holds would otherwise ride along on an HID-state event and turn text into a shortcut.
-            event.set_flags(CGEventFlags::CGEventFlagNull);
+            // Only the Shift the character takes: a key the user holds would otherwise ride along on an HID-state event and
+            // turn text into a shortcut.
+            event.set_flags(if shift { CGEventFlags::CGEventFlagShift } else { CGEventFlags::CGEventFlagNull });
             event.set_string_from_utf16_unchecked(&units);
             post(&event, route);
         }
@@ -371,13 +374,15 @@ pub fn type_text(text: &str, route: Route, run: &TypingRun, deadline: std::time:
     Ok(())
 }
 
-/// The key code of a typed character on a layout's table: the key that types it with no modifier, else 0.
-fn key_code(units: &[u16], layout: &[(u16, char)]) -> u16 {
+/// The key a typed character takes on a layout, and whether it takes Shift: the key that types it with no modifier, else
+/// the one that types it with Shift, else code 0 with no Shift.
+fn key_code(units: &[u16], plain: &[(u16, char)], shifted: &[(u16, char)]) -> (u16, bool) {
     let mut decoded = char::decode_utf16(units.iter().copied());
-    match (decoded.next(), decoded.next()) {
-        (Some(Ok(character)), None) => crate::layout::code_for(character, layout).unwrap_or(0),
-        _ => 0,
+    let (Some(Ok(character)), None) = (decoded.next(), decoded.next()) else { return (0, false) };
+    if let Some(code) = crate::layout::code_for(character, plain) {
+        return (code, false);
     }
+    crate::layout::code_for(character, shifted).map_or((0, false), |code| (code, true))
 }
 
 /// What a pointer does at a point.
@@ -445,14 +450,15 @@ mod tests {
     #[test]
     fn gives_a_typed_character_the_key_that_types_it_on_the_layout() {
         let units = |text: &str| text.encode_utf16().collect::<Vec<_>>();
-        // A US layout's a and b keys; on it, A needs Shift and no key types an emoji.
+        // A US layout's a and b keys, and their Shift layer; no key types an emoji.
         let us = [(0, 'a'), (11, 'b')];
-        assert_eq!(super::key_code(&units("b"), &us), 11);
-        assert_eq!(super::key_code(&units("a"), &us), 0);
-        assert_eq!(super::key_code(&units("A"), &us), 0);
-        assert_eq!(super::key_code(&units("😀"), &us), 0);
+        let us_shifted = [(0, 'A'), (11, 'B')];
+        assert_eq!(super::key_code(&units("b"), &us, &us_shifted), (11, false));
+        assert_eq!(super::key_code(&units("a"), &us, &us_shifted), (0, false));
+        assert_eq!(super::key_code(&units("B"), &us, &us_shifted), (11, true));
+        assert_eq!(super::key_code(&units("😀"), &us, &us_shifted), (0, false));
         // French AZERTY types a on the key a US keyboard has for q.
-        assert_eq!(super::key_code(&units("a"), &[(12, 'a'), (0, 'q')]), 12);
+        assert_eq!(super::key_code(&units("a"), &[(12, 'a'), (0, 'q')], &[]), (12, false));
     }
 
     #[test]
