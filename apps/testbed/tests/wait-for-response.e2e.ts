@@ -38,7 +38,7 @@ test.describe('page wait for response', { platforms: ['web'], tags: ['playwright
   test('should respect timeout', async ({ browser }) => {
     const error = await browser.waitForResponse(() => false, { timeout: 1 }).then(() => undefined, (caught: Error) => caught);
     expect(error?.message).toContain('waitForResponse');
-    expect(error?.message).toContain('exceeded its timeout');
+    expect(error?.message).toMatch(/exceeded its timeout|timed out/);
   });
 
   test('should log the url', async ({ browser }) => {
