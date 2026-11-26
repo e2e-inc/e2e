@@ -257,7 +257,7 @@ export function createFixtures(environment: AttemptEnvironment): AttemptFixtures
   const context: CoreFixtureContext = { environment, engine, screenContext, agentRuntime };
   const factories: Record<string, () => unknown> = {};
   for (const [name, fixture] of Object.entries(CORE_FIXTURES)) {
-    factories[name] = 'ofTarget' in fixture ? () => fixture.ofTarget(environment.target, environment.services ?? {}) : () => fixture.create(context);
+    factories[name] = 'ofWorker' in fixture ? () => fixture.ofWorker({ target: environment.target, services: environment.services ?? {} }) : () => fixture.create(context);
   }
   Object.assign(factories, contributedFactories(environment, engine, screenContext));
   // Accessors: a fixture is built on first touch, whether or not the test body reaches it, and kept.
@@ -295,15 +295,21 @@ export type BuiltInTarget = Pick<ResolvedTarget, 'name' | 'platform' | 'fixtureS
   readonly engine?: Pick<NonNullable<ResolvedTarget['engine']>, 'name' | 'isolation' | 'fixtures'> | undefined;
 };
 
+/** What a worker fixture is built from: the target and the worker's service values. */
+type WorkerFixtureContext = {
+  readonly target: Pick<BuiltInTarget, 'platform'>;
+  readonly services: Readonly<Record<string, unknown>>;
+};
+
 /**
  * Definition for one core fixture: its scope and how it's built. Most
  * fixtures are built from an attempt (`create`). Fixtures built with
- * `ofTarget` depend only on the target and the worker's service values, so
+ * `ofWorker` depend only on the target and the worker's service values, so
  * they don't need an attempt and can be read by code that outlives attempts.
  */
 type CoreFixture<Value> = { readonly scope: CoreFixtureScope } & (
   | { create(context: CoreFixtureContext): Value }
-  | { ofTarget(target: Pick<BuiltInTarget, 'platform'>, services: Readonly<Record<string, unknown>>): Value }
+  | { ofWorker(worker: WorkerFixtureContext): Value }
 );
 
 /**
@@ -323,9 +329,9 @@ export const CORE_FIXTURES: { readonly [Name in keyof CoreFixtureValues]: CoreFi
   },
   app: { scope: 'engine', create: ({ environment, engine }) => createApp(environment, engine) },
   screen: { scope: 'engine', create: ({ screenContext }) => createScreen(screenContext) },
-  platform: { scope: 'worker', ofTarget: (target) => target.platform },
+  platform: { scope: 'worker', ofWorker: ({ target }) => target.platform },
   request: { scope: 'test', create: ({ environment, engine }) => createRequest({ environment, actionTimeout: () => engine.actionTimeout }) },
-  services: { scope: 'worker', ofTarget: (_target, services) => services },
+  services: { scope: 'worker', ofWorker: ({ services }) => services },
   session: {
     scope: 'test',
     create: ({ environment }) => ({
@@ -354,7 +360,7 @@ function coreFixture(name: string): CoreFixture<unknown> | undefined {
 /** Returns true when reading `name` requires an attempt, which is every fixture except core fixtures derived from the target or worker. */
 function needsAttempt(name: string): boolean {
   const fixture = coreFixture(name);
-  return fixture === undefined || !('ofTarget' in fixture);
+  return fixture === undefined || !('ofWorker' in fixture);
 }
 
 /**
@@ -398,7 +404,7 @@ export function builtInFixtures(target: BuiltInTarget, services: Readonly<Record
     needsAttempt: (name) => (contributed.includes(name) || !target.fixtureScopes.has(name)) && needsAttempt(name),
     attemptless(name) {
       const fixture = coreFixture(name);
-      return fixture !== undefined && 'ofTarget' in fixture ? fixture.ofTarget(target, services) : undefined;
+      return fixture !== undefined && 'ofWorker' in fixture ? fixture.ofWorker({ target, services }) : undefined;
     },
     missing: (name, available) => unknownFixtureMessage(target, name, available),
   };

@@ -314,6 +314,8 @@ async function startService(name: string, service: Service, signal: AbortSignal,
  * waiting and skips its stop code. The signal also aborts if shutdown passes
  * the service's `shutdownTimeout`, after which the runner stops waiting. A second `yield` fails
  * shutdown, and `return()` closes the generator so its `finally` blocks run.
+ * A service that still hasn't yielded when `shutdownTimeout` passes isn't a
+ * stop failure, since its stop code hasn't started.
  */
 async function stopService({ name, generator, controller, first, settled, shutdownTimeout: limitMs }: StartedService, force: AbortSignal): Promise<void> {
   let resumed = false;
@@ -363,8 +365,10 @@ async function stopService({ name, generator, controller, first, settled, shutdo
 
     // Skip the race once `first` has settled. If `forced` is already settled
     // too, `Promise.race` could pick it and skip stop code for a service that
-    // already yielded after a second Ctrl+C.
-    const yielded = await untilStopped(settled ? outcome : Promise.race([outcome, forced]));
+    // already yielded after a second Ctrl+C. A service that hasn't yielded
+    // has no stop code to run yet, so running out of time here isn't a stop
+    // failure: the code in `finally` still runs it if the service yields later.
+    const yielded = settled ? await untilStopped(outcome) : await Promise.race([outcome, forced, expired.then(() => false)]);
 
     if (!yielded) {
       return;

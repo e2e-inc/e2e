@@ -757,6 +757,38 @@ test('reads each type', async ({ services }) => {
     expect(events).toEqual(['yield late', 'stop late']);
   });
 
+  it.each([
+    { cancel: 'the run is interrupted', options: {}, runOptions: (interrupt: AbortController) => ({ interruptSignal: interrupt.signal }), errors: [] },
+    {
+      cancel: 'it does not yield within the start limit',
+      options: { startupTimeout: 100 },
+      runOptions: () => ({}),
+      errors: [{ code: 'SERVICE_START_FAILED', message: 'service "stuck" didn\'t yield within 0.1 seconds' }],
+    },
+  ])('reports no stop failure for a service that never yields after $cancel', async ({ options, runOptions, errors }) => {
+    const interrupt = new AbortController();
+
+    const outcome = await runInProcess(
+      { 'tests/a.e2e.ts': PASSING_TEST },
+      {
+        services: {
+          stuck: defineService({
+            ...options,
+            shutdownTimeout: 200,
+            // oxlint-disable-next-line require-yield -- this service never yields, which is what the test checks
+            async *start() {
+              interrupt.abort();
+              await new Promise(() => undefined);
+            },
+          }),
+        },
+      },
+      runOptions(interrupt),
+    );
+
+    expect(runErrors(outcome)).toEqual(errors);
+  });
+
   it('runs the stop code with the signal live after a first Ctrl+C', async () => {
     const interrupt = new AbortController();
     const aborted: boolean[] = [];
