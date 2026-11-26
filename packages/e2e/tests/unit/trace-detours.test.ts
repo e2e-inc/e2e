@@ -62,7 +62,7 @@ describe('findDetours by recorded locations', () => {
     expect(findDetours(flow([tap('Display', '/settings'), tap('Dark mode', '/settings/display', 'switch'), back('/settings/display')], { endPath: '/settings' }))).toEqual([]);
   });
 
-  it('counts a tap at a point inside a switch as a change, and a hover over one as none', () => {
+  it('counts a tap on or inside a switch or checkbox as a change, and a hover over one as none', () => {
     const toggled: RecordedAction = {
       name: 'tapAt',
       summary: 'tap the point (40, 80)',
@@ -78,6 +78,11 @@ describe('findDetours by recorded locations', () => {
     // The icon inside the switch held the point; the switch is the control it set.
     const onIcon: RecordedAction = { ...toggled, within: { target: { role: 'img', name: 'Moon' }, fx: 0.5, fy: 0.5 }, controlRole: 'switch' } as RecordedAction;
     expect(findDetours(flow([tap('Display', '/settings'), onIcon, back('/settings/display')], { endPath: '/settings' }))).toEqual([]);
+    // A checkbox whose label holds a link reaches the link at its centre and still sets the checkbox.
+    const labelLink: RecordedAction = { ...tap('I agree to the Terms', '/signup/terms', 'checkbox'), controlRole: 'link' } as RecordedAction;
+    expect(findDetours(flow([tap('Terms', '/signup'), labelLink, back('/signup/terms')], { endPath: '/signup' }))).toEqual([]);
+    const pointOnLabelLink: RecordedAction = { ...toggled, within: { target: { role: 'checkbox', name: 'I agree' }, fx: 0.5, fy: 0.5 }, controlRole: 'link' } as RecordedAction;
+    expect(findDetours(flow([tap('Terms', '/signup'), pointOnLabelLink, back('/settings/display')], { endPath: '/signup' }))).toEqual([]);
     const hovered: RecordedAction = { name: 'hover', summary: 'hover checkbox "Beta"', target: { role: 'checkbox', name: 'Beta' }, at: '/settings/labs' };
     expect(findDetours(flow([tap('Labs', '/settings'), hovered, back('/settings/labs')], { endPath: '/settings' }))).toEqual([
       { from: 0, to: 3, at: '/settings', via: '/settings/labs', evidence: 'locations' },

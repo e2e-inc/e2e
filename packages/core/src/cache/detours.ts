@@ -95,27 +95,29 @@ const LEAVING_ACTIONS: ReadonlySet<RecordedAction['name']> = new Set<RecordedAct
 /**
  * Whether an action may have changed what the app holds, so a return after
  * it is not a detour. A tap counts when it landed on a control that holds a
- * state, by its target or, for a tap at a point, the node the point was in;
- * hovering over or scrolling to such a control sets nothing.
+ * state, by its target or, for a tap at a point, the node the point was in,
+ * or when the control it reached is one: a checkbox whose label holds a
+ * link ("I agree to the Terms") records the link as the control at its
+ * centre and is still set by the tap. Hovering over or scrolling to such a
+ * control sets nothing.
  */
 function changesState(action: RecordedAction): boolean {
   if (CHANGING_ACTIONS.has(action.name)) return true;
-  const role = tappedRole(action);
-  return role !== undefined && STATE_ROLES.has(role);
+  return tappedRoles(action).some((role) => role !== undefined && STATE_ROLES.has(role));
 }
 
-/** The role of the control a tap landed on, or undefined for an action that taps nothing. */
-function tappedRole(action: RecordedAction): string | undefined {
+/** The roles of what a tap landed on, its own and the control it reached; none for an action that taps nothing. */
+function tappedRoles(action: RecordedAction): readonly (string | undefined)[] {
   switch (action.name) {
     case 'tap':
     case 'doubleTap':
     case 'longPress':
     case 'secondaryTap':
-      return action.controlRole ?? action.target.role;
+      return [action.controlRole, action.target.role];
     case 'tapAt':
-      return action.controlRole ?? action.within?.target.role;
+      return [action.controlRole, action.within?.target.role];
     default:
-      return undefined;
+      return [];
   }
 }
 
