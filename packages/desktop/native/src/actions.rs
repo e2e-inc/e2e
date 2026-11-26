@@ -763,8 +763,13 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         }
         return Err(Failure::unconfirmed(codes::ACTION_FAILED, format!("the list does not show \"{label}\" after it was chosen")));
     }
+    // An editable combo box is refused before this (a fill sets it); one that takes no typed value shows its list only
+    // when opened.
     if ax_role == "AXComboBox" {
-        return set_value(element, label, deadline);
+        return Err(Failure::refused(
+            codes::ACTION_NOT_SUPPORTED,
+            "a combo box that takes no typed value cannot be selected by label yet; tap it, then tap the option",
+        ));
     }
     if roles::collection(role) {
         let rows = match all(element, "AXRows", "read the list's rows")? {
