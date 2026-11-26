@@ -2293,6 +2293,43 @@ describe('perform', () => {
     }
   });
 
+  it('follows the toggle that was tapped, not a sibling that still carries the old label', async () => {
+    const h = harness();
+    const rows = (first: boolean) => [
+      ...SETTINGS_NODES.filter((node) => node.label !== 'Airplane Mode'),
+      { ref: '@e6', index: 6, parentIndex: 0, depth: 1, type: 'switch', label: first ? 'On' : 'Off', value: first ? '1' : '0', rect: { x: 0, y: 170, width: 390, height: 44 } },
+      { ref: '@e11', index: 11, parentIndex: 0, depth: 1, type: 'switch', label: 'Off', value: '0', rect: { x: 0, y: 700, width: 390, height: 44 } },
+    ];
+    let pressed = false;
+    h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: rows(pressed) }));
+    h.fake.respond('interactions.press', () => {
+      pressed = true;
+    });
+    await openAttempt(h);
+    const { root } = await h.engine.observe!(operation());
+    const first = [...walk(root)].find((node) => node.role === 'switch')!;
+    await expect(h.engine.perform!(first.ref, { kind: 'check' }, { ...operation(), timeoutMs: 1_000 })).resolves.toBeUndefined();
+    expect(h.fake.methods().filter((method) => method === 'interactions.press')).toHaveLength(1);
+  });
+
+  it('fails a read the deadline cuts off after the tap as an unchanged toggle', async () => {
+    const h = harness({ transition: 0 });
+    let pressed = false;
+    h.fake.respond('capture.snapshot', () => {
+      if (!pressed) return SETTINGS_SNAPSHOT;
+      return new Promise((resolve) => setTimeout(() => resolve(SETTINGS_SNAPSHOT), 500));
+    });
+    h.fake.respond('interactions.press', () => {
+      pressed = true;
+    });
+    await openAttempt(h);
+    const toggle = await observed(h, 'Airplane Mode');
+    await expect(h.engine.perform!(toggle.ref, { kind: 'check' }, { ...operation(), origin: 'test', timeoutMs: 400 })).rejects.toMatchObject({
+      code: 'NOT_ACTIONABLE',
+      message: expect.stringContaining('its checked state did not change'),
+    });
+  });
+
   it('passes a toggle whose label spells its state when the stale read comes first', async () => {
     const h = harness();
     let pressed = false;

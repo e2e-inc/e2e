@@ -1729,19 +1729,26 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
         const raw = await this.snapshot(operation.signal, false, budget);
         const index = this.project(raw).index;
         truncated = isTruncated(raw);
-        found = this.refind(entry, index);
         // A toggle whose label spells its state is a new name after the tap:
-        // the same role and test id in the same place, already as wanted.
-        found ??= index.find(
-          (candidate) =>
-            candidate.node.role === entry.node.role &&
-            candidate.node.testId === entry.node.testId &&
-            sameRect(candidate.node.rect, entry.node.rect) &&
-            candidate.node.states?.checked === wanted,
-        );
+        // the same role and test id in the same place, already as wanted. It
+        // goes first, so a sibling toggle that still carries the old label
+        // cannot be mistaken for the control.
+        found =
+          index.find(
+            (candidate) =>
+              candidate.node.role === entry.node.role &&
+              candidate.node.testId === entry.node.testId &&
+              sameRect(candidate.node.rect, entry.node.rect) &&
+              candidate.node.states?.checked === wanted,
+          ) ?? this.refind(entry, index);
       } catch (cause) {
+        if (operation.signal.aborted) throw cause;
+        // A read the deadline cut off is a toggle that did not change in time.
+        if (cause instanceof EngineError && (cause.code === 'ACTION_MAY_HAVE_COMMITTED' || cause.code === 'OPERATION_TIMEOUT')) {
+          throw unchanged(' before the device answered the last read');
+        }
         // A capture the app is still drawing says nothing about the toggle.
-        if (operation.signal.aborted || !isUnreadableCapture(cause) || budget.remainingMs() < Date.now() - startedMs) throw cause;
+        if (!isUnreadableCapture(cause) || budget.remainingMs() < Date.now() - startedMs) throw cause;
         truncated = true;
       }
       const readMs = Date.now() - startedMs;
