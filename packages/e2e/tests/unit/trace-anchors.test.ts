@@ -547,6 +547,10 @@ describe('deltaMismatch', () => {
     }
     const counts = nodes([heading, node('s', { role: 'status', text: 'Task created' }), node('m', { text: '3月' }), node('v', { text: 'v1.2.2026' })]);
     expect(describeDelta(before, counts, false).appeared).toEqual([{ role: 'status', text: 'Task created' }, { text: '3月' }, { text: 'v1.2.2026' }]);
+    for (const text of ['Ref 2026/11/155', 'Ref 15.11.20261', 'Ref 123月15日', 'Ref 123時30分']) {
+      const after = nodes([heading, node('s', { role: 'status', text: 'Task created' }), node('r', { text })]);
+      expect(describeDelta(before, after, false).appeared, text).toHaveLength(2);
+    }
   });
 
   it('forgives a churned test id when the other fields still identify the node', () => {
