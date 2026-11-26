@@ -269,6 +269,12 @@ export interface ProcessHooks extends Omit<ManagedProcessHooks, 'unexpectedExit'
   readonly commandExited?: (targetNames: readonly string[], cause: InfrastructureError) => void;
 }
 
+/** The values `env` functions read, and the pool that starts or shares each app command. */
+type DeclaredProcessOptions = {
+  readonly services?: Readonly<Record<string, unknown>>;
+  readonly pool?: ProcessPool | undefined;
+};
+
 /**
  * Starts every distinct app command the targets declare, in target order,
  * deduplicated across targets (two browsers on one dev server share one
@@ -284,8 +290,7 @@ export async function startDeclaredProcesses(
   hooks: ProcessHooks,
   signal: AbortSignal,
   debug: DebugTrace,
-  services: Readonly<Record<string, unknown>> = {},
-  pool: ProcessPool = UNSHARED,
+  { services = {}, pool = UNSHARED }: DeclaredProcessOptions = {},
 ): Promise<AppProcesses> {
   const held: AppProcesses[] = [];
   const processes: AppProcesses = {

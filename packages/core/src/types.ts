@@ -1559,7 +1559,7 @@ export interface Expect extends ExpectCall {
 /**
  * The function form of `CommandConfig.env`.
  *
- * FIXME: TypeScript compares the parameters of a function type one way, so a
+ * TypeScript compares the parameters of a function type one way, so a
  * config from `defineConfig`, whose `env` reads its own services, wouldn't be
  * an `E2EConfig`. It compares a method's parameters both ways, so the
  * function is declared as a method and read back by name.

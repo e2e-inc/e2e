@@ -1169,7 +1169,7 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     }
 
     processes = hasWork
-      ? await startDeclaredProcesses(targets, config.projectRoot, processHooks, interrupted, debug, copyServiceValues(services.wire, services.call))
+      ? await startDeclaredProcesses(targets, config.projectRoot, processHooks, interrupted, debug, { services: copyServiceValues(services.wire, services.call) })
       : undefined;
 
     // A run cancelled while the app was starting runs no test: the interrupt
