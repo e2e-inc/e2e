@@ -54,7 +54,8 @@ fn app_folders() -> Vec<String> {
     folders
 }
 
-/// The bundle of an installed app: by bundle id first, then by name in the usual folders, in any case.
+/// The bundle of an installed app: by bundle id first, then by name in the usual folders, in any case, then by name
+/// through LaunchServices.
 fn installed(target: &str) -> Option<Retained<NSURL>> {
     let workspace = NSWorkspace::sharedWorkspace();
     if let Some(url) = workspace.URLForApplicationWithBundleIdentifier(&NSString::from_str(target)) {
@@ -70,7 +71,11 @@ fn installed(target: &str) -> Option<Retained<NSURL>> {
             }
         }
     }
-    None
+    // An app LaunchServices knows by name anywhere else, such as a build in a project's directory or a subfolder of
+    // Applications. Deprecated for `URLForApplicationWithBundleIdentifier`, which takes no name.
+    #[allow(deprecated)]
+    let path = workspace.fullPathForApplication(&NSString::from_str(target))?;
+    Some(NSURL::fileURLWithPath(&path))
 }
 
 /// The process ids of an app's copies running now.
