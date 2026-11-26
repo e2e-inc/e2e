@@ -1027,29 +1027,32 @@ fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Instant) -> Ou
     if Element::application(entry.pid).element("AXFocusedUIElement").as_ref() != Some(&entry.element) {
         return Err(after_focus(Failure::refused(codes::ACTION_FAILED, "the field lost keyboard focus before typing began, so nothing was typed")));
     }
-    // What the field holds, in characters, as the app answers it: a change says the app took the key sent last.
-    let length = || match entry.element.attribute("AXNumberOfCharacters") {
+    // What an element holds, in characters, as the app answers it: a change says the app took the key sent last.
+    let length = |element: &Element| match element.attribute("AXNumberOfCharacters") {
         Ok(Value::Number(count)) => Some(count),
         _ => None,
     };
-    let field_focused = || Element::application(entry.pid).element("AXFocusedUIElement").as_ref() == Some(&entry.element);
-    // The field's length when the last key went; unset before the first.
-    let sent_at: std::cell::Cell<Option<Option<f64>>> = std::cell::Cell::new(None);
+    let focused_element = || Element::application(entry.pid).element("AXFocusedUIElement");
+    // The element that held the keyboard when the last key went, and its length then; unset before the first key. It is
+    // the field typing began in until a Tab, or a code field's next box, takes the keys within the window.
+    let sent_to: std::cell::RefCell<Option<(Option<Element>, Option<f64>)>> = std::cell::RefCell::new(None);
     // Set once a key showed no change in its whole wait: a field that drops or caps characters would spend the wait on
     // every key after it, so the rest get the short one.
     let quiet = std::cell::Cell::new(false);
     let still = || -> Outcome<()> {
-        // A key posted to the app is in its queue, not yet handled: wait until the field shows it, or focus moved, so a
-        // window the key opened (a handler on the text, a Return) holds the keyboard by the time the check below reads it.
-        if let Some(before) = sent_at.get() {
+        // A key posted to the app is in its queue, not yet handled: wait until the element it went to shows it, or focus
+        // moved, so a window the key opened (a handler on the text, a Return) holds the keyboard by the time the check
+        // below reads it.
+        let last = sent_to.borrow().clone();
+        if let Some((target, before)) = last {
             let settle = deadline.min(Instant::now() + if quiet.get() { KEY_SETTLE_UNREAD } else { KEY_SETTLE });
-            match before {
-                Some(count) => {
-                    if !until(settle, || length() != Some(count) || !field_focused()) {
+            match (target, before) {
+                (Some(target), Some(count)) => {
+                    if !until(settle, || length(&target) != Some(count) || focused_element().as_ref() != Some(&target)) {
                         quiet.set(true);
                     }
                 }
-                None => sleep(KEY_SETTLE_UNREAD.min(settle.saturating_duration_since(Instant::now()))),
+                _ => sleep(KEY_SETTLE_UNREAD.min(settle.saturating_duration_since(Instant::now()))),
             }
         }
         let app = Element::application(entry.pid);
@@ -1060,7 +1063,9 @@ fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Instant) -> Ou
         };
         let forward = !physical || app.boolean("AXFrontmost") == Some(true);
         if held && forward {
-            sent_at.set(Some(length()));
+            let target = focused_element();
+            let count = target.as_ref().and_then(&length);
+            sent_to.replace(Some((target, count)));
             Ok(())
         } else {
             Err(Failure::refused(codes::ACTION_FAILED, "typing stopped: the field's window lost the keyboard to another window or app"))
