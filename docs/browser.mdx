@@ -453,7 +453,7 @@ name. Implement `before` to note what is already stored: the engine calls it
 once per `waitForDownload` or `waitForDownloads`, before the trigger, and
 passes its result to each `read` of that wait as `context.before`. A
 `before` that throws fails the wait with `ENGINE_FAILURE`, naming the
-provider.
+provider, unless the wait was already cancelled or timed out.
 
 Without `downloads`, a download on a browser on another machine fails with
 `ENGINE_FAILURE`, naming the provider. A provider whose browsers run on the
