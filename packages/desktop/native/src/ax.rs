@@ -117,6 +117,17 @@ impl PartialEq for Element {
 
 impl Eq for Element {}
 
+impl Element {
+    /// A key naming a sheet or window as a string the engine can hand back: its window server id, else `ax-` and the
+    /// accessibility element's hash, which CoreFoundation keeps equal for elements that are equal.
+    pub fn sheet_key(&self) -> String {
+        match self.window_id() {
+            Some(id) => id.to_string(),
+            None => format!("ax-{:x}", unsafe { CFHash(self.0) }),
+        }
+    }
+}
+
 impl Hash for Element {
     fn hash<H: Hasher>(&self, state: &mut H) {
         unsafe { CFHash(self.0) }.hash(state);

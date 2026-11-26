@@ -281,7 +281,8 @@ pub struct PointerTarget {
     pub window_id: String,
     /// Whether a sheet on the window held its focus when the point was taken.
     pub sheet: bool,
-    /// That sheet's window server id, when it has one: another sheet in its place does not take the click.
+    /// That sheet's key, as `listWindows` gave it (`sheet_id`): another sheet in its place, or one with no key, does not
+    /// take the click.
     pub sheet_id: Option<String>,
     /// The point is on a node with no ref, which takes no click of its own: no control may be under it when it goes.
     pub content: Option<bool>,
@@ -299,8 +300,8 @@ pub async fn pointer(x: f64, y: f64, kind: String, input_id: Option<u32>, timeou
             Some(target) => {
                 let sheet = match (target.sheet, target.sheet_id) {
                     (false, _) => Sheet::None,
-                    (true, Some(id)) => Sheet::Known(window_id(&id)?),
-                    (true, None) => Sheet::Unknown,
+                    (true, Some(key)) => Sheet::Key(key),
+                    (true, None) => Sheet::Unnamed,
                 };
                 Some(actions::PointTarget { pid: target.pid, window: window_id(&target.window_id)?, sheet, content: target.content.unwrap_or(false) })
             }
