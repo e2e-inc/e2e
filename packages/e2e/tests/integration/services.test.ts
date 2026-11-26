@@ -16,7 +16,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { defineEngine } from '@e2e-dev/core/lib/engine/index';
 import { defineService } from '../../src/index.ts';
-import type { CommandConfig, E2EConfig, Service } from '../../src/index.ts';
+import type { CommandConfig, E2EConfig, RunEvent, Service } from '../../src/index.ts';
 import { createFakeEngine, FAKE_APP } from '../helpers/fake-engine.ts';
 import { freePort } from '../helpers/free-port.ts';
 import { hostHarness } from '../helpers/open-host.ts';
@@ -1101,7 +1101,7 @@ test('reads each type', async ({ services }) => {
     const events: string[] = [];
 
     const outcome = await runInProcess(
-      { 'tests/a.e2e.ts': PASSING_TEST },
+      { 'server.cjs': SERVER, 'tests/a.e2e.ts': PASSING_TEST },
       {
         services: {
           first: defineService({
@@ -1120,8 +1120,14 @@ test('reads each type', async ({ services }) => {
             },
           }),
         },
+        targets: [
+          commandTarget(() => {
+            interrupt.abort();
+            return {};
+          }),
+        ],
       },
-      { interruptSignal: interrupt.signal, forceSignal: force.signal, onEvent: interruptOnceStarted(interrupt, 'second') },
+      { interruptSignal: interrupt.signal, forceSignal: force.signal },
     );
 
     expect(runErrors(outcome)).toEqual([]);
