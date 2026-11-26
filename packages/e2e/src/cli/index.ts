@@ -673,6 +673,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
       parseNames('agent'),
     )
     .option('--workers <n>', 'parallel workers (default: from the config)', parseNonNegativeInt)
+    .option('--fully-parallel', 'run the tests of one file in parallel too, on every target (default: fullyParallel in the config)')
     .option('--retries <n>', 'retries per failing test (default: from the config)', parseNonNegativeInt)
     .option('--action-timeout <ms>', 'budget of every engine operation, such as a locator waiting for its element; a call\'s own timeout still wins (default: actionTimeout in the config, else 30000)', parseBoundedInt({ min: 1, max: MAX_TIMER_MS }))
     .option('--assertion-timeout <ms>', 'default expect deadline; a matcher\'s own timeout still wins (default: assertionTimeout in the config, else 5000)', parseBoundedInt({ min: 1, max: MAX_TIMER_MS }))
@@ -746,6 +747,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
           agent?: string[];
           retries?: number;
           workers?: number;
+          fullyParallel?: boolean;
           actionTimeout?: number;
           assertionTimeout?: number;
           maxFailures?: number;
@@ -795,6 +797,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
           retries: options.retries,
           // A stepped run is one test at a time, so there is one prompt at a time.
           workers: options.step === true ? 1 : options.workers,
+          fullyParallel: options.fullyParallel,
           actionTimeout: options.actionTimeout,
           assertionTimeout: options.assertionTimeout,
           maxFailures: options.maxFailures,
@@ -1057,7 +1060,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
     .command('doctor')
     .summary('check that e2e run can start here, without starting anything')
     .description(
-      'Check the runtime, load and resolve the config, ask each target\'s engine what it needs on this machine, and name the model each agent resolved to. Starts no app and no worker, only the server of an engine that runs in its own process, and calls no model unless --check-model is given. Ctrl-C stops the checks and reports what ran. A model on an e2e login passes when the login is stored; any other model reads its own credential, which doctor reports as unknown. Exits 0 when no check failed, 2 otherwise, and 130 when interrupted.',
+      'Check the runtime, load and resolve the config, ask each target\'s engine what it needs on this machine, and name the model each agent resolved to. Starts no app and no worker, only the server of an engine that runs in its own process, and calls no model unless --check-model is given. Ctrl-C stops the checks and reports what ran. A model on an e2e login passes when the login is stored; a Vercel AI Gateway or OpenRouter model with no key variable set is a warning; any other model reads its own credential, which doctor reports as unknown. Exits 0 when no check failed, 2 otherwise, and 130 when interrupted.',
     )
     .option('--config <path>', 'config file (default: the nearest e2e.config.ts, .mts, .js, or .mjs)')
     .option('--target <ids>', 'target names, comma-separated or repeated (default: all targets)', parseNames('target'))

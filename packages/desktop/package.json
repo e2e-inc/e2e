@@ -1,6 +1,6 @@
 {
   "name": "@e2e-dev/desktop",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Desktop engine for e2e agentic end-to-end testing, built on agent-desktop: native apps, a prototype tested on macOS",
   "keywords": [
     "e2e",
@@ -64,10 +64,10 @@
   },
   "devDependencies": {
     "@e2e-dev/core": "workspace:*",
-    "@types/node": "26.6.6",
+    "@types/node": "26.6.11",
     "e2e": "workspace:*",
     "typescript": "7.0.2",
-    "vitest": "5.1.1"
+    "vitest": "5.1.2"
   },
   "engines": {
     "node": "^22.22.3 || >=24.8.0"

@@ -77,6 +77,10 @@ export interface CatalogOptions {
   readonly fills?: TestLineFills | undefined;
   /** The test the session ran first, as `file:line`, which its test lines carry on from. */
   readonly testRan?: string | undefined;
+  /** Whether the session is attached to a held running test (`screen.pause()` or `--step`). */
+  readonly attached?: boolean | undefined;
+  /** Whether the session's agent has a model or custom executor configured. */
+  readonly hasAgent?: boolean | undefined;
   readonly warn: (message: string) => void;
   /** Told the cause of every grammar action that failed into a result. */
   readonly onActionFailed?: ((cause: unknown) => void) | undefined;
@@ -98,6 +102,8 @@ export function createSessionCatalog(options: CatalogOptions): SessionCatalog {
     fills: options.fills,
     engineFixtures: options.runCode?.engineFixtures,
     testRan: options.testRan,
+    attached: options.attached,
+    hasAgent: options.hasAgent,
   });
   const context = lines.watch(options.context);
   // The grammar's own observe reports a diff for the model loop; the
@@ -276,7 +282,9 @@ export function describeLocate(query: LocateQuery, count: number, nodes: readonl
 /**
  * A located node by what names it, from the projection `observe` hands an
  * executor: name, text, and value have passed the secret ledger and a secure
- * node carries no value. Located refs are not observation ids, so none is shown.
+ * node carries no value. Located refs are not observation ids, so none is shown,
+ * and neither is `empty`, a state engines add to a located node for
+ * `toBeEmpty` alone, which an observation never carries.
  */
 function describeNode(node: ExecutorNode): string {
   const parts = [node.role ?? 'node'];
@@ -284,7 +292,7 @@ function describeNode(node: ExecutorNode): string {
   if (node.text !== undefined && node.text !== '' && node.text !== node.name) parts.push(`text ${JSON.stringify(node.text)}`);
   if (node.value !== undefined) parts.push(`value ${JSON.stringify(node.value)}`);
   const states = Object.entries(node.states ?? {})
-    .filter(([, value]) => value === true)
+    .filter(([key, value]) => value === true && key !== 'empty')
     .map(([key]) => key);
   if (states.length > 0) parts.push(`[${states.join(', ')}]`);
   return parts.join(' ');

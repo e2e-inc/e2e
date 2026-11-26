@@ -376,6 +376,41 @@ describe('renderMarkdownReport', () => {
     expect(body).not.toContain('');
   });
 
+  it('escapes an ampersand, so entity text in a title or a message shows as written', () => {
+    const entities = named({
+      title: 'renders &copy; and &lt;b&gt; literally',
+      status: 'failed',
+      attempts: [attempt({ status: 'failed', error: { code: 'ASSERTION_FAILED', message: 'expected "Tom & Jerry" to equal "Tom &amp; Jerry"' } })],
+    });
+    const body = renderMarkdownReport(page({ status: 'failed', results: [entities] }));
+    expect(body).toContain('renders &amp;copy; and &amp;lt;b&amp;gt; literally');
+    expect(body).toContain('expected "Tom &amp; Jerry" to equal "Tom &amp;amp; Jerry"');
+    expect(body).not.toContain('&copy;');
+  });
+
+  it('escapes an underscore at the edge of a word, so a title or a message is not bold or italic', () => {
+    const underscores = named({
+      title: 'reads the __proto__ key',
+      status: 'failed',
+      attempts: [attempt({ status: 'failed', error: { code: 'ASSERTION_FAILED', message: '_id_ is missing (_x) in snake_case _ __' } })],
+    });
+    const body = renderMarkdownReport(page({ status: 'failed', results: [underscores] }));
+    expect(body).toContain('reads the \\_\\_proto\\_\\_ key');
+    expect(body).toContain('\\_id\\_ is missing (\\_x) in snake_case _ __');
+    expect(body).toContain('**ASSERTION_FAILED**');
+  });
+
+  it('keeps an entity from decoding into a mention or an issue link, and leaves an ampersand inside a code span alone', () => {
+    // `&#64;alice` holds `#6`, so it is a linkable token and already goes out as code; the hex and named spellings are plain text.
+    const entities = named({
+      title: 'ping &#x40;alice &commat;bob &#64;carol, see &num;12 at https://x.test/?a=1&b=2',
+      status: 'failed',
+      attempts: [attempt({ status: 'failed', error: reportError() })],
+    });
+    const body = renderMarkdownReport(page({ status: 'failed', results: [entities] }));
+    expect(body).toContain('ping &amp;#x40;alice &amp;commat;bob `&#64;carol,` see &amp;num;12 at `https://x.test/?a=1&b=2`');
+  });
+
   it('shows a token GitHub would link as code, and keeps a quoted line from opening a block', () => {
     // GitHub's mention and issue filters run on the rendered text, so an entity or a backslash before `@` or `#` changes nothing; a code span is skipped.
     const hostile = named({

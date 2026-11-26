@@ -41,12 +41,14 @@ import {
   type Secret,
   type SemanticNode,
   type VideoSegment,
+  type ViewportIntersection,
   type ViewportPoint,
   type ViewportSize,
 } from '@e2e-dev/core/engine';
 import { matchesText } from '@e2e-dev/core/engine';
 import { classifyActionError, classifyInputError, dispatchLocatorAction, dispatchPointerAction } from './actions.ts';
 import { BrowserConnection, connectCdp, defaultChromiumSandbox, type BrowserLaunchOptions, type BrowserName } from './browser-connection.ts';
+import { grantedPermissions, grantPermissions } from './permissions.ts';
 import { AttemptSession, type AttemptTab, type StorageState } from './attempt-session.ts';
 import type { CdpEndpointResolver } from './cdp-recovery.ts';
 import { webmcpLaunch } from './webmcp.ts';
@@ -54,7 +56,8 @@ import { LeasedBrowsers, type BrowserProvider, type LeaseDownloads } from './pro
 import { installAppLog } from './app-log.ts';
 import { TraceFeed } from './trace-feed.ts';
 import { DialogRouter } from './dialogs.ts';
-import { browserCheck, ensureBrowsersInstalled } from './install.ts';
+import { missingLibrariesMessage } from './host-libraries.ts';
+import { browserCheck, ensureBrowsersInstalled, missingBrowserLibraries } from './install.ts';
 import { applyPostSteps, frameSelectors, projectExpression } from './locators.ts';
 import { contentBox, frameContentInset, placeBoxInFrame, ROOT_NODE_ID, toSemanticNode } from './observation.ts';
 import { captureObservation } from './observation-capture.ts';
@@ -66,6 +69,7 @@ import { CLOSED_SHADOW_ROOTS_INIT_SCRIPT, CLOSED_SHADOW_ROOTS_KEY } from './clos
 import { MODAL_ORDER_INIT_SCRIPT } from './modal-dialogs.ts';
 import { ConfiguredInitScripts, type WebInitScript } from './init-scripts.ts';
 import type { WebMedia } from './media.ts';
+import { applyClockCall, readClockNow, type ClockCall, type ClockHost } from './clock.ts';
 import { SECURE_FIELD_SELECTOR, type RawNodeData } from './read-node.ts';
 import { readSelector, takeReadsFunction } from './read-selector.ts';
 import { credentialOrigins, httpCredentials, installConfiguredHeaders, lowercaseNames, configuredHeadersFor } from './protected-app.ts';
@@ -165,6 +169,9 @@ export interface WebScreencastOptions {
   /** JPEG quality of each captured frame, 0 through 100; Playwright's default when unset. */
   readonly quality?: number;
 }
+
+/** One entry of an attempt's document setup: an init script, or a clock call. */
+type DocumentSetup = { readonly script: string } | { readonly clock: ClockCall };
 
 /**
  * Options of the browser engine: how it drives the app. The app itself
@@ -332,6 +339,8 @@ export class PlaywrightSurface {
   /** The provider's browsers, when `browser` names one; the runner and worker halves of the lease bookkeeping. */
   private readonly leases: LeasedBrowsers | undefined;
   private session: AttemptSession | undefined;
+  /** Set by `init`: a handle no target runs on never gets there. */
+  private started = false;
   private readonly usedContexts = new Set<string>();
   private readonly viewport: ViewportSize | null;
   private readonly deviceScaleFactor: number | undefined;
@@ -349,8 +358,15 @@ export class PlaywrightSurface {
   /** The configured media features, which every attempt starts from. */
   private readonly media: WebMedia;
   private readonly configuredInitScripts: ConfiguredInitScripts;
-  /** The attempt's init scripts, configured then added, applied to each context the attempt opens. */
-  private initScripts: string[] = [];
+  /**
+   * What every document of the attempt runs before the page's own scripts,
+   * in the order it was added: the configured init scripts, then the test's
+   * init scripts and successful clock calls. Each context the attempt opens
+   * applies it, so a replacement context gives its documents the same order.
+   */
+  private documentSetup: DocumentSetup[] = [];
+  /** Whether the attempt called `browser.clock`, even a call that failed after Playwright installed it. */
+  private clockState = { used: false };
   private app: EngineAppInfo = {};
   private projectRoot = '';
   private headed = false;
@@ -425,6 +441,7 @@ export class PlaywrightSurface {
 
   /** Provisions the shared browser once per worker: a local launch, or a CDP attach. */
   async init(info: EngineInitInfo): Promise<void> {
+    this.started = true;
     // A runner older than the peer floor passes no origin; fail rather than send the credentials nowhere.
     if (info.app.origin === undefined && (this.headers !== undefined || this.basicAuth !== undefined)) {
       throw new ConfigurationError('INVALID_CONFIG', 'web({ headers, basicAuth }) needs an e2e runner that tells the engine the app\'s origin; update e2e to the release beside this @e2e-dev/web');
@@ -474,7 +491,11 @@ export class PlaywrightSurface {
       );
     } catch (cause) {
       if (cause instanceof EngineError) throw cause;
-      throw new EngineError('ENGINE_FAILURE', `browser ${verb} failed: ${message(cause)}`, {
+      // The probe is the one await after the launch settled, so it stops with the init signal too.
+      const missing = verb === 'launch' ? await missingBrowserLibraries(this.browserName, process.env, this.headed, { signal }) : [];
+      // The launch's own reason follows the advice: it can name a second fault the libraries do not explain.
+      const reason = missing.length > 0 ? `${missingLibrariesMessage(this.browserName, missing)}\nlaunch error: ${message(cause)}` : message(cause);
+      throw new EngineError('ENGINE_FAILURE', `browser ${verb} failed: ${reason}`, {
         retryable: false,
         cause,
       });
@@ -570,11 +591,14 @@ export class PlaywrightSurface {
     const routes: StoredRoute[] = [];
     const initScripts = this.configuredInitScripts.forAttempt();
     // `validateApp` admitted only grants.
-    const granted = Object.keys(this.app.permissions ?? {});
+    const granted = grantedPermissions(this.browserName, this.app);
     this.latch = new ErrorLatch();
     const dialogs = new DialogRouter(this.latch);
+    const documentSetup: DocumentSetup[] = initScripts.map((script) => ({ script }));
+    const clockState = { used: false };
     this.routes = routes;
-    this.initScripts = initScripts;
+    this.documentSetup = documentSetup;
+    this.clockState = clockState;
     this.dialogs = dialogs;
     const session = new AttemptSession({
       artifactsDir: context.artifactsDir,
@@ -597,7 +621,11 @@ export class PlaywrightSurface {
       configure: async (target) => {
         await target.addInitScript(CLOSED_SHADOW_ROOTS_INIT_SCRIPT);
         await target.addInitScript(MODAL_ORDER_INIT_SCRIPT);
-        for (const script of initScripts) await target.addInitScript(script);
+        // A fresh context has no document yet, so a clock call only registers the clock's script and its log.
+        for (const setup of documentSetup) {
+          if ('script' in setup) await target.addInitScript(setup.script);
+          else await applyClockCall(target.clock, setup.clock);
+        }
         target.setDefaultTimeout(CONTEXT_DEFAULT_TIMEOUT_MS);
         target.on('dialog', (dialog) => { void dialogs.dispatch(dialog); });
         installAppLog(target, context.appLog, {
@@ -606,9 +634,10 @@ export class PlaywrightSurface {
           testPage: () => this.openPage(),
         });
         await installConfiguredHeaders(target, this.credentialScope, this.headers);
-        if (granted.length > 0) await target.grantPermissions(granted);
+        if (granted.length > 0) await grantPermissions(target, granted, this.app.allPermissions === true);
         for (const stored of routes) await target.route(stored.predicate, stored.handler);
       },
+      clockUsed: () => clockState.used,
       ...(persistent === undefined ? {} : { persistent }),
       record: this.leases?.recorder(context.attemptId),
     });
@@ -667,15 +696,51 @@ export class PlaywrightSurface {
 
   /** Returns the active attempt, including its connection generation and references. */
   private requireSession(): AttemptSession {
-    if (this.session === undefined) throw invalidState('no attempt is running');
+    if (this.session === undefined) {
+      throw invalidState(this.started ? 'no attempt is running' : 'no attempt is running on this engine handle, which has not started in this process: use the handle the target runs on, not a new web(), from code a test runs');
+    }
     return this.session;
   }
 
   /** Adds one attempt-scoped init script to the current context, for every document it creates from now on. */
   async addInitScript(source: string): Promise<void> {
     const context = this.requireContext();
-    this.initScripts.push(source);
+    this.documentSetup.push({ script: source });
     await context.addInitScript(source);
+  }
+
+  /**
+   * Runs one clock call on the current context and logs it for a context
+   * that replaces this one. Playwright logs the call for the context's next
+   * documents before it runs it, so the call is logged whether it succeeds
+   * or fails, and a replacement context replays what a new document would.
+   * The attempt counts as using the clock from the start of the call:
+   * Playwright installs the clock before a call can fail. The log is the one
+   * this attempt started with, so a call that resolves after its step timed
+   * out never reaches the next attempt's.
+   */
+  async clock(call: ClockCall): Promise<void> {
+    const setup = this.documentSetup;
+    const { clock } = this.requireContext();
+    this.clockState.used = true;
+    try {
+      await applyClockCall(clock, call);
+    } finally {
+      setup.push({ clock: call });
+    }
+  }
+
+  /**
+   * The latest time a page clock of the current context reads, across every
+   * frame, or undefined when none has one yet. Playwright runs a call in
+   * every frame and fails it when one frame refuses, so the latest decides.
+   */
+  async clockNow(): Promise<number | undefined> {
+    const frames = this.requireContext().pages().flatMap((page) => page.frames());
+    // A frame that detaches or navigates while it is read has no clock to compare with.
+    const times = await Promise.all(frames.map((frame) => frame.evaluate(readClockNow).catch(() => undefined)));
+    const read = times.filter((time) => typeof time === 'number');
+    return read.length === 0 ? undefined : Math.max(...read);
   }
 
   // --- network routes shared with the browser fixture ---
@@ -763,6 +828,11 @@ export class PlaywrightSurface {
   /** Emulates media features on the open page, or the one the next navigation opens, for the rest of the attempt. */
   emulateMedia(media: WebMedia): Promise<void> {
     return this.requireSession().emulateMedia(media);
+  }
+
+  /** Takes the attempt's browser offline or back online, for the rest of the attempt. */
+  setOffline(offline: boolean): Promise<void> {
+    return this.requireSession().setOffline(offline);
   }
 
   /**
@@ -866,8 +936,9 @@ export class PlaywrightSurface {
   /**
    * Runs one navigation the engine itself makes, so the app log leaves it to
    * the step that asked for it. A navigation that fails after a test route
-   * aborted its document request failed because the test aborted it: an
-   * action failure, not an engine fault.
+   * aborted its document request, or while the test holds the browser
+   * offline, failed because of what the test did: an action failure, not an
+   * engine fault.
    */
   async navigating<T>(work: () => Promise<T>): Promise<T> {
     this.ownNavigations += 1;
@@ -878,8 +949,14 @@ export class PlaywrightSurface {
       this.trace?.tellEnvironment();
       return result;
     } catch (cause) {
-      if (watch.url === undefined || isClassified(cause) || isPwTimeout(cause)) throw cause;
-      throw new TestError('ACTION_FAILED', `navigation failed: a route aborted the request for ${watch.url}: ${message(cause)}`, { cause });
+      if (isClassified(cause) || isPwTimeout(cause)) throw cause;
+      const reason = watch.url !== undefined
+        ? `a route aborted the request for ${watch.url}`
+        : this.session?.navigatedOffline() === true
+          ? "the browser is offline (browser.setNetwork('offline'))"
+          : undefined;
+      if (reason === undefined) throw cause;
+      throw new TestError('ACTION_FAILED', `navigation failed: ${reason}: ${message(cause)}`, { cause });
     } finally {
       this.navigationAborts.delete(watch);
       this.ownNavigations -= 1;
@@ -961,6 +1038,45 @@ export class PlaywrightSurface {
       if (style === null) throw new EngineError('NODE_STALE', 'node is detached; observe again before reading', { retryable: true });
       return style;
     }, navigationStaleOr);
+  }
+
+  /**
+   * Measures how much of a located or observed element is inside the
+   * viewport with the page's `IntersectionObserver`, the check Playwright's
+   * `toBeInViewport` makes, so scrolling and overflow ancestors and frames
+   * clip it. An element with no box, or an empty one, is outside. It runs
+   * in the page's own world, as `readStyle` does, so an app that replaces
+   * `IntersectionObserver` changes what it reads.
+   */
+  viewportIntersection(ref: NodeRef, operation: OperationContext): Promise<ViewportIntersection> {
+    return this.guard(operation, 'measure viewport intersection', (currentOperation) => this.readingTab(async () => {
+      const target = await this.requireSession().refs.lookup(ref);
+      let element: ElementHandle;
+      if (target.kind === 'element') {
+        element = target.element;
+      } else {
+        // A strict locator that matches anything but one element no longer names the node it located.
+        const handles = await target.locator.elementHandles();
+        if (handles.length !== 1) {
+          for (const handle of handles) void handle.dispose().catch(() => undefined);
+          throw new EngineError('NODE_STALE', `node reference ${ref.id} no longer matches one element`, { retryable: true });
+        }
+        element = handles[0]!;
+      }
+      try {
+        currentOperation.signal.throwIfAborted();
+        const measured = await element.evaluate(measureViewportIntersection);
+        if (measured === 'detached') throw new EngineError('NODE_STALE', 'node is detached; locate it again', { retryable: true });
+        if (measured === 'unsupported') {
+          throw new EngineError('UNSUPPORTED_CAPABILITY', 'the browser has no IntersectionObserver to measure the viewport with', {
+            retryable: false,
+          });
+        }
+        return measured;
+      } finally {
+        if (target.kind === 'locator') void element.dispose().catch(() => undefined);
+      }
+    }), navigationStaleOr);
   }
 
   // --- location tier ---
@@ -1510,4 +1626,41 @@ function inFrame(node: SemanticNode, frame: Rect | null | undefined): SemanticNo
   if (frame === undefined || node.rect === undefined) return node;
   const { rect, origin, ...rest } = node;
   return frame === null ? rest : { ...rest, ...placeBoxInFrame(rect, origin, frame) };
+}
+
+/**
+ * The in-page half of `viewportIntersection`: one `IntersectionObserver`
+ * callback, which reports the element's first intersection right after it
+ * is observed. The empty animation frame makes Firefox deliver it. The
+ * callback's own entry decides: an element the page replaced before it
+ * fired is stale, and its box and ratio come from that one frame, since a
+ * zero-area target that intersects reports a ratio of 1.
+ */
+function measureViewportIntersection(element: Element): Promise<ViewportIntersection | 'detached' | 'unsupported'> {
+  if (!element.isConnected) return Promise.resolve('detached');
+  if (element.getClientRects().length === 0) return Promise.resolve({ intersects: false, ratio: 0 });
+  const view = element.ownerDocument.defaultView;
+  if (view === null || typeof view.IntersectionObserver !== 'function') return Promise.resolve('unsupported');
+  return new Promise((resolve) => {
+    const observer = new view.IntersectionObserver((entries) => {
+      observer.disconnect();
+      if (!element.isConnected) {
+        resolve('detached');
+        return;
+      }
+      const entry = entries.at(-1);
+      const box = entry?.boundingClientRect;
+      if (entry === undefined || box === undefined || box.width <= 0 || box.height <= 0) {
+        resolve({ intersects: false, ratio: 0 });
+        return;
+      }
+      // Clamped: a browser can round a fully visible box a hair past 1.
+      const ratio = Math.min(1, Math.max(0, entry.intersectionRatio));
+      resolve({ intersects: ratio > 0, ratio });
+    });
+    observer.observe(element);
+    // The native frame: under Playwright's clock, the page's own would queue a timer in the page's fake clock.
+    // oxlint-disable-next-line no-underscore-dangle -- Playwright's name for its page clock, which keeps the native timers
+    ((view as ClockHost).__pwClock?.builtins ?? view).requestAnimationFrame(() => {});
+  });
 }

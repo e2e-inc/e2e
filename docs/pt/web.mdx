@@ -19,7 +19,8 @@ app: { url: process.env.APP_URL ?? 'http://localhost:3000' },
 ```
 
 Uma URL sem esquema usa HTTPS, ou HTTP para um host de loopback. HTTP simples
-funciona apenas em um host de loopback.
+funciona apenas em um host de loopback. Uma URL `file:` abre
+[um arquivo do disco](/reference/config#a-file-as-the-app), sem servidor.
 
 ### Deixe o runner iniciá-lo
 
@@ -195,6 +196,19 @@ nova tentativa começa no tamanho do alvo.
 - Um alvo de dispositivo pode ficar na mesma lista. Veja a
   [referência da engine mobile](/reference/mobile).
 
+### Telas de alta densidade
+
+`deviceScaleFactor` define quantos pixels do dispositivo desenham um pixel
+CSS. Com 2, a página é renderizada como em uma tela Retina, e as capturas de
+tela salvas têm o dobro da largura e da altura do viewport:
+
+```ts title="Target fragment"
+{ name: 'retina', engine: web({ deviceScaleFactor: 2 }), app }
+```
+
+O fator não muda a imagem que o modelo lê nem a que `toHaveScreenshot`
+compara.
+
 ### Preencher a janela
 
 `viewport: null` não define tamanho, então a página preenche a janela do
@@ -255,7 +269,7 @@ com `toBeChecked()`, não com `toBeVisible()`.
 
 ### Restringir um teste a um tamanho
 
-`platforms` e `requires` não conseguem selecionar um viewport, porque todo alvo
+`platforms` não consegue selecionar um viewport, porque todo alvo
 de navegador tem a plataforma `web`. Para pular um teste em alguns tamanhos,
 leia a largura no teste:
 
@@ -306,6 +320,10 @@ app usar a área de transferência, conceda-a no alvo:
   `INVALID_CONFIG`: em vez disso, deixe a permissão de fora.
 - Os nomes são os do Playwright, e cada navegador concede seu próprio conjunto.
   Veja [`permissions`](/reference/config#permissions).
+- `permissions: 'all'` concede todos os nomes que o navegador do alvo concede.
+  Um Chrome mais antigo conectado por CDP que não conhece
+  `local-network-access`, `storage-access` ou `local-fonts` recebe o resto da
+  lista.
 
 ## Próximos passos
 

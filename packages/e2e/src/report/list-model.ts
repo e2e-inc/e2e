@@ -19,7 +19,7 @@ export function isShownEvent(event: StepEvent): event is ShownEvent {
   return event.kind === 'model' || event.kind === 'engine';
 }
 
-/** The step a running pair is executing right now. */
+/** A step a running pair has started and not yet ended. */
 export interface CurrentStep {
   readonly api: string;
   readonly label: string;
@@ -46,6 +46,13 @@ export interface CurrentStep {
   activity: StepActivity | undefined;
 }
 
+/** The step the live window shows for a pair: the one it started last of those still open. */
+export function currentStep(test: RunningTest): CurrentStep | undefined {
+  let last: CurrentStep | undefined;
+  for (const step of test.open.values()) last = step;
+  return last;
+}
+
 /** One finished agent step of a pair, as the `end` progress reported it. */
 export type FinishedStep = Pick<
   Extract<StepProgress, { phase: 'end' }>,
@@ -60,6 +67,9 @@ export interface RunningTest {
   readonly group: FileGroup;
   /** The pair's serial group, when it belongs to one. */
   readonly serialId: string | undefined;
+  /** The pair's agent and repeat: each runs a serial group of its own. */
+  readonly agent: string | undefined;
+  readonly repeat: number | undefined;
   readonly title: string;
   readonly startedMs: number;
   /**
@@ -67,7 +77,23 @@ export interface RunningTest {
    * executing, but its result only arrives with the whole group.
    */
   executing: boolean;
-  current: CurrentStep | undefined;
+  /**
+   * Steps started and not yet ended, by step id, oldest first. A step can
+   * open inside another (an `onAction` hook's screenshot inside an act) or
+   * beside it (`Promise.all`), so each phase updates the step it names.
+   */
+  readonly open: Map<string, CurrentStep>;
+  /**
+   * The attempt whose steps `open` holds. A retry starts no new pair, and a
+   * step of a timed-out attempt may never end.
+   */
+  attemptId: string | undefined;
+  /**
+   * That attempt's index. The body of a timed-out attempt keeps running, so
+   * it can start a step after the retry began; a step of an older attempt is
+   * not shown.
+   */
+  attemptIndex: number | undefined;
   /**
    * Finished agent steps across every attempt, oldest first. Shown under the
    * test in the live window while it runs, nested under its line in the file
