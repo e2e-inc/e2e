@@ -239,66 +239,24 @@ docs/frameworks/nextjs.mdx.
 
 ### Start the app's dependencies as services
 
-Define any dependency your app needs (like an email API, an OAuth provider,
-or a database) as a service, and pass its address to the app in
-`command.env`:
+Put dependencies the app needs (an email API, an OAuth provider, a database)
+in `services`. Each is a `defineService({ async *start({ signal }) { ... } })`
+that starts the dependency, yields a plain object of data and functions one
+time, and stops it after the `yield`.
 
-```ts
-import { createEmulator } from 'emulate';
-import { defineConfig, defineService } from 'e2e';
-import { web } from '@e2e-dev/web';
+- `e2e run` and `e2e explore` start services in key order before the app
+  commands and stop them in reverse order afterward. In `e2e mcp` and
+  `openHost`, a config with services fails with `INVALID_CONFIG`.
+- Pass the service's address to the app in `command.env`, with a fixed port.
+- Pass `signal` to anything the service starts. Set `startupTimeout` (60 s by
+  default) or `shutdownTimeout` (10 s by default) on a slow service.
+- Tests read the values through the `services` fixture. Each yielded function
+  becomes async and runs in the runner (`await services.email.createInbox()`).
+  Yielding a class instance fails with `INVALID_SERVICE_VALUE`.
+- All workers share one instance, so filter for data the test created, such
+  as emails sent to a unique inbox.
 
-const resend = defineService({
-  async *start() {
-    const emulator = await createEmulator({ service: 'resend', port: 4008 });
-    yield { url: emulator.url };
-    await emulator.close();
-  },
-});
-
-export default defineConfig({
-  services: { resend },
-  targets: [
-    {
-      engine: web(),
-      app: {
-        url: 'http://127.0.0.1:0',
-        command: {
-          executable: 'node',
-          args: ['app/server.mjs'],
-          env: { PORT: '{port}', RESEND_BASE_URL: 'http://localhost:4008' },
-        },
-      },
-    },
-  ],
-});
-```
-
-- Start the dependency inside `start`, `yield` a plain object for the value
-  tests get, and stop the dependency after the `yield`.
-- Pass `signal` from `start({ signal })` to anything you start or stop in the
-  service. It aborts if startup is cancelled or takes longer than
-  `startupTimeout` (60 s by default), if the code after `yield` takes longer
-  than `shutdownTimeout` (10 s by default), or if Ctrl+C is pressed a second
-  time in `e2e run` or `e2e explore` (either during the tests or while
-  services are stopping). The code after `yield` runs when the services are no
-  longer needed.
-- Set `startupTimeout` or `shutdownTimeout` (in milliseconds) on the service
-  when it needs longer than 60 s to start or 10 s to stop.
-- Keep data and functions in plain objects and arrays. Yielding a custom class
-  instance fails with `INVALID_SERVICE_VALUE`.
-- In `e2e run` and `e2e explore`, services start in key order before app
-  commands and stop in reverse order afterward.
-- In `e2e mcp` and `openHost`, services aren't started. A config that defines
-  them fails with `INVALID_CONFIG`, so run those tests with `e2e run`.
-
-Tests read service values through the `services` fixture. Every yielded
-function becomes async and runs in the runner process, so call it with
-`await services.email.createInbox()`. Each worker gets a copy of the data,
-and all workers share the same service instance. Filter for data your test
-created, like emails sent to a unique inbox address your test signed up with.
-See
-https://e2e.com/docs/services.
+Full reference: docs/services.mdx (online: https://e2e.com/docs/services).
 
 ## Environment variables the runner reads
 
