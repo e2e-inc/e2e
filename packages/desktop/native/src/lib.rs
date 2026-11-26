@@ -228,6 +228,8 @@ pub struct PressOptions {
     /// A combo such as `cmd+a` or `return`.
     pub combo: String,
     pub physical: bool,
+    /// A ref whose element must still hold the app's focus when the key goes: a locator's control.
+    pub focused_ref: Option<String>,
     /// Names this press, so `cancelInput` can stop it before it sends the key.
     pub input_id: Option<u32>,
     pub timeout_ms: f64,
@@ -238,7 +240,15 @@ pub struct PressOptions {
 pub async fn press(options: PressOptions) -> Value {
     let deadline = deadline(options.timeout_ms);
     blocking(move || {
-        actions::press(options.pid, window_id(&options.window_id)?, &options.combo, options.physical, options.input_id, deadline)?;
+        actions::press(
+            options.pid,
+            window_id(&options.window_id)?,
+            &options.combo,
+            options.physical,
+            options.focused_ref.as_deref(),
+            options.input_id,
+            deadline,
+        )?;
         Ok(serde_json::json!({}))
     })
     .await

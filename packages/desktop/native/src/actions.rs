@@ -855,7 +855,9 @@ fn run(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
 /// key goes to the process, which hands it to its key window: the window
 /// must be that one. With it, the window comes forward first. No key goes
 /// out once `input_id` was cancelled or `deadline` passed.
-pub fn press(pid: i32, window: u32, combo: &str, physical: bool, input_id: Option<u32>, deadline: Instant) -> Outcome<()> {
+/// With `focused`, the key goes only while the element that ref names holds the app's focus: a window that came forward
+/// can open a sheet that takes it, and a locator's key must reach its own control.
+pub fn press(pid: i32, window: u32, combo: &str, physical: bool, focused: Option<&str>, input_id: Option<u32>, deadline: Instant) -> Outcome<()> {
     let combo = input::parse_combo(combo)?;
     guarded(input_id, deadline, || {
         let element = windows::find(pid, window)?;
@@ -866,6 +868,12 @@ pub fn press(pid: i32, window: u32, combo: &str, physical: bool, input_id: Optio
             key_window(pid, &element)?;
             Route::Process(pid)
         };
+        if let Some(reference) = focused {
+            let entry = refs::get(reference).ok_or_else(|| Failure::refused(codes::STALE_REF, format!("{reference} names no element of a recent snapshot")))?;
+            if Element::application(pid).element("AXFocusedUIElement").as_ref() != Some(&entry.element) {
+                return Err(Failure::refused(codes::ACTION_FAILED, "the control lost keyboard focus before the key was sent, so nothing was sent"));
+            }
+        }
         go("press")?;
         input::press(&combo, route).map_err(Failure::delivered)
     })
