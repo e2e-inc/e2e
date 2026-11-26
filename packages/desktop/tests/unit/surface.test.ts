@@ -665,6 +665,9 @@ describe('DesktopSurface: reading', () => {
     await expect(surface.locate(placeholder, operation())).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
     const textbox = { kind: 'query', query: { kind: 'role', value: { kind: 'string', value: 'textbox', exact: true } } } as const;
     await expect(surface.locate({ kind: 'filter', source: textbox, has: placeholder }, operation())).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+    // Under a selector too, before the selector itself is refused for want of a selector language.
+    const underSelector = { kind: 'selector', selector: 'input', scope: placeholder } as const;
+    await expect(surface.locate(underSelector, operation())).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY', message: expect.stringContaining('placeholder') });
     const named = { kind: 'query', query: { kind: 'role', value: { kind: 'string', value: 'textbox', exact: true }, name: { kind: 'string', value: 'Username', exact: true } } } as const;
     await expect(surface.locate(named, operation())).resolves.toHaveLength(1);
   });
