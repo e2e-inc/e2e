@@ -1974,7 +1974,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     const refusal = mediaRefusal(platform, this.boundKind, this.device, env);
     if (refusal !== undefined) throw unsupported(refusal);
     const { deviceId } = this.boundDevice;
-    await assertMediaFiles(platform, resolved);
+    const sizes = await assertMediaFiles(platform, resolved);
     const run = async (command: HostCommand): Promise<string> => {
       try {
         if (stop.aborted) throw stop.reason;
@@ -1988,7 +1988,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     if (platform !== 'android') return;
     // The scan runs after the broadcast returns: wait, within the same budget, until the index lists every file.
     const query = androidIndexQuery(deviceId, adb);
-    while (unindexedFiles(await run(query), resolved).length > 0) await sleep(MEDIA_INDEX_POLL_MS, stop);
+    while (unindexedFiles(await run(query), resolved, sizes).length > 0) await sleep(MEDIA_INDEX_POLL_MS, stop);
   }
 
   /**

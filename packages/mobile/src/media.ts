@@ -85,7 +85,7 @@ export function mediaFiles(files: unknown): readonly string[] {
  * the first), or a name starting with a dot, which the media scanner treats
  * as hidden and leaves out of the library.
  */
-export async function assertMediaFiles(platform: MobilePlatform, files: readonly string[]): Promise<void> {
+export async function assertMediaFiles(platform: MobilePlatform, files: readonly string[]): Promise<readonly number[]> {
   if (platform === 'android') {
     const names = new Set<string>();
     for (const file of files) {
@@ -96,11 +96,14 @@ export async function assertMediaFiles(platform: MobilePlatform, files: readonly
       names.add(key);
     }
   }
+  const sizes: number[] = [];
   for (const file of files) {
     const info = await stat(file).catch(() => undefined);
     const readable = info?.isFile() === true && (await access(file, constants.R_OK).then(() => true, () => false));
-    if (!readable) throw new TestError('INVALID_ARGUMENT', `device.addMedia: ${file} is not a readable file`);
+    if (!readable || info === undefined) throw new TestError('INVALID_ARGUMENT', `device.addMedia: ${file} is not a readable file`);
+    sizes.push(info.size);
   }
+  return sizes;
 }
 
 /**
@@ -163,25 +166,38 @@ export function mediaCommands(
 }
 
 /**
- * Lists the media index's paths under `ANDROID_MEDIA_DIR`, for
- * `unindexedFiles`. The `where` clause names no file, so the device's shell
- * reads only fixed text.
+ * Lists the photos and videos (`media_type` 1 and 3) the media index keeps
+ * under a `Pictures` directory, with their sizes, for `unindexedFiles`. The
+ * `where` clause names no file, so the device's shell reads only fixed text.
  */
 export function androidIndexQuery(deviceId: string, adb: string): HostCommand {
-  return { file: adb, args: ['-s', deviceId, 'shell', 'content', 'query', '--uri', 'content://media/external/file', '--projection', '_data', '--where', `"_data LIKE '%/Pictures/%'"`] };
+  return {
+    file: adb,
+    args: ['-s', deviceId, 'shell', 'content', 'query', '--uri', 'content://media/external/file', '--projection', '_data:_size', '--where', `"_data LIKE '%/Pictures/%' AND media_type IN (1, 3)"`],
+  };
 }
+
+/** Where the primary shared storage keeps `ANDROID_MEDIA_DIR` in the index: `/sdcard` is `/storage/emulated/<user>`. */
+const INDEXED_MEDIA_PATH = /^\/storage\/emulated\/\d+\/Pictures\/([^/]+)$/;
+
+/** One `content query` row of `androidIndexQuery`: the path, then the size, `NULL` until the scan has measured it. */
+const INDEX_ROW = /_data=(.*), _size=(\S+)\s*$/;
 
 /**
  * The files whose pushed copy `androidIndexQuery`'s output does not list
- * yet. The index keeps the storage path (`/storage/emulated/0/Pictures/...`),
- * not `/sdcard`, so a row is matched by its ending. The media scan a
- * broadcast asks for runs after `am broadcast` returns, so on a device that
- * indexes only what is scanned (Android 10 and earlier) a file can be
- * missing for a moment.
+ * yet, as a photo or video at its place in `ANDROID_MEDIA_DIR` with the size
+ * of the local file. The media scan a broadcast asks for runs after
+ * `am broadcast` returns, so a file can be missing, or still listed with the
+ * size of the file it replaced, for a moment. Names compare ignoring case,
+ * as the storage does: a push over `RECEIPT.png` keeps that spelling.
  */
-export function unindexedFiles(stdout: string, files: readonly string[]): readonly string[] {
-  const indexed = stdout.split('\n').map((line) => line.trim());
-  return files.filter((file) => !indexed.some((line) => line.endsWith(`/Pictures/${path.basename(file)}`)));
+export function unindexedFiles(stdout: string, files: readonly string[], sizes: readonly number[]): readonly string[] {
+  const rows = stdout.split('\n').flatMap((line) => {
+    const row = INDEX_ROW.exec(line);
+    const place = row === null ? null : INDEXED_MEDIA_PATH.exec(row[1]!);
+    return row === null || place === null ? [] : [{ name: place[1]!.toLowerCase(), size: Number(row[2]) }];
+  });
+  return files.filter((file, index) => !rows.some((row) => row.name === path.basename(file).toLowerCase() && row.size === sizes[index]));
 }
 
 /** A file name as one percent-encoded URI path segment, with none of the characters `encodeURIComponent` leaves bare that a shell reads. */

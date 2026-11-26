@@ -4,7 +4,7 @@
  * The host runner is scripted, so no simulator or adb is needed.
  */
 
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -44,9 +44,14 @@ type ScriptedRunner = (command: HostCommand, call: Parameters<HostRunner>[1], ra
 
 /** The `content query` rows an Android index lists for the files pushed so far, as the device prints them. */
 function indexRows(ran: readonly HostCommand[]): string {
-  const pushed = ran.filter((command) => command.args[2] === 'push').map((command) => command.args[4]!.replace('/sdcard/', '/storage/emulated/0/'));
-  return pushed.length === 0 ? 'No result found.\n' : pushed.map((remote, row) => `Row: ${row} _data=${remote}\n`).join('');
+  const pushed = ran
+    .filter((command) => command.args[2] === 'push')
+    .map((command) => ({ path: command.args[4]!.replace('/sdcard/', '/storage/emulated/0/'), size: statSync(command.args[3]!).size }));
+  return pushed.length === 0 ? 'No result found.\n' : pushed.map(({ path: remote, size }, row) => `Row: ${row} _data=${remote}, _size=${size}\n`).join('');
 }
+
+/** The size `photo()` writes. */
+const PHOTO_SIZE = 'not really a jpeg'.length;
 
 /** A device that indexes every pushed file as soon as it lands, as Android 11 and later do. */
 const indexesAtOnce: ScriptedRunner = async (command, _call, ran) => (command.args.includes('content') ? indexRows(ran) : '');
@@ -145,7 +150,19 @@ describe('device.addMedia', () => {
       },
       {
         file: adb,
-        args: ['-s', 'emulator-5554', 'shell', 'content', 'query', '--uri', 'content://media/external/file', '--projection', '_data', '--where', `"_data LIKE '%/Pictures/%'"`],
+        args: [
+          '-s',
+          'emulator-5554',
+          'shell',
+          'content',
+          'query',
+          '--uri',
+          'content://media/external/file',
+          '--projection',
+          '_data:_size',
+          '--where',
+          `"_data LIKE '%/Pictures/%' AND media_type IN (1, 3)"`,
+        ],
       },
     ]);
   });
@@ -158,11 +175,30 @@ describe('device.addMedia', () => {
       if (!command.args.includes('content')) return '';
       queries += 1;
       // The first answer lists only a.jpg; b.jpg is still being scanned.
-      return queries === 1 ? 'Row: 0 _data=/storage/emulated/0/Pictures/a.jpg\n' : indexRows(done);
+      return queries === 1 ? `Row: 0 _data=/storage/emulated/0/Pictures/a.jpg, _size=${PHOTO_SIZE}\n` : indexRows(done);
     });
     await device.addMedia(['a.jpg', 'b.jpg']);
     expect(queries).toBe(2);
     expect(ran.filter((command) => command.args.includes('content'))).toHaveLength(2);
+  });
+
+  it('takes only the pushed file as indexed: its place in Pictures on primary storage and its size, with the name in any case', async () => {
+    photo('receipt.jpg');
+    const answers = [
+      // Another album, and another volume, with a file of the same name.
+      `Row: 0 _data=/storage/emulated/0/Download/Pictures/receipt.jpg, _size=${PHOTO_SIZE}\nRow: 1 _data=/storage/1A2B-3C4D/Pictures/receipt.jpg, _size=${PHOTO_SIZE}\n`,
+      // The file this call replaced, not scanned again yet: its old size, or none.
+      'Row: 0 _data=/storage/emulated/0/Pictures/receipt.jpg, _size=393493\n',
+      'Row: 0 _data=/storage/emulated/0/Pictures/receipt.jpg, _size=NULL\n',
+      // Scanned: the storage kept the earlier file's spelling, RECEIPT.JPG.
+      `Row: 0 _data=/storage/emulated/0/Pictures/RECEIPT.JPG, _size=${PHOTO_SIZE}\n`,
+    ];
+    let queries = 0;
+    const { device } = await setup({ platform: 'android', kind: 'emulator', id: 'emulator-5554' }, async (command) =>
+      command.args.includes('content') ? answers[Math.min(queries++, answers.length - 1)]! : '',
+    );
+    await device.addMedia('receipt.jpg');
+    expect(queries).toBe(answers.length);
   });
 
   it('stops waiting for the media index at the action timeout', async () => {
