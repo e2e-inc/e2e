@@ -241,6 +241,8 @@ fn physical(entry: &Entry, action: Pointer) -> Outcome<()> {
     if !hits(entry.pid, &entry.element, x, y) {
         return Err(Failure::refused(codes::ACTION_FAILED, "another element covers the center of this one, so the pointer would land there"));
     }
+    // Raising the window and the hit test can take a second on a slow app: the caller may have given up meanwhile.
+    go("pointer")?;
     input::pointer(x, y, action).map_err(Failure::delivered)
 }
 
@@ -412,12 +414,13 @@ fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
     }
     // A field that holds focus commits its text the way typing does; one that cannot take focus still takes the value.
     // Focus moved by this call has reached the app (its handlers may have run), so a later failure is no longer "nothing sent".
-    go("set value")?;
-    let moved_focus = roles::takes_text(role)
-        && settable(element, "AXFocused", "set value")?
-        && element.boolean("AXFocused") != Some(true)
-        && element.set_bool("AXFocused", true).is_ok();
+    let moved_focus = roles::takes_text(role) && settable(element, "AXFocused", "set value")? && element.boolean("AXFocused") != Some(true) && {
+        go("set value")?;
+        element.set_bool("AXFocused", true).is_ok()
+    };
     let numeric = matches!(element.attribute("AXValue"), Ok(Value::Number(_)));
+    // The reads above can take long on a slow app; the caller may have given up since.
+    go("set value").map_err(|failure| if moved_focus { failure.delivered() } else { failure })?;
     let written = match (numeric, finite(text)) {
         (true, Ok(number)) => element.set_number("AXValue", number),
         _ => element.set_text("AXValue", text),
@@ -602,13 +605,18 @@ fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Instant) -> Ou
         .map_err(Failure::delivered)
 }
 
-/// Runs one action on the element `reference` names.
-pub fn act(reference: &str, action: Action, input_id: Option<u32>, deadline: Instant) -> Outcome<()> {
-    // Until it returns, every input this action sends first checks it was not cancelled and is still in time (`go`).
+/// Runs `work` as the action `input_id` names: until it returns, every input it sends first checks that the action was
+/// not cancelled and is still in time (`go`).
+fn guarded<T>(input_id: Option<u32>, deadline: Instant, work: impl FnOnce() -> Outcome<T>) -> Outcome<T> {
     CURRENT.with(|current| *current.borrow_mut() = Some((input::TypingRun::start(input_id), deadline)));
-    let outcome = run(reference, action, deadline);
+    let outcome = work();
     CURRENT.with(|current| current.borrow_mut().take());
     outcome
+}
+
+/// Runs one action on the element `reference` names.
+pub fn act(reference: &str, action: Action, input_id: Option<u32>, deadline: Instant) -> Outcome<()> {
+    guarded(input_id, deadline, || run(reference, action, deadline))
 }
 
 fn run(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
@@ -642,16 +650,22 @@ fn run(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
 
 /// Presses a key combo into a window of `pid`. Without physical input the
 /// key goes to the process, which hands it to its key window: the window
-/// must be that one. With it, the window comes forward first.
-pub fn press(pid: i32, window: u32, combo: &str, physical: bool) -> Outcome<()> {
+/// must be that one. With it, the window comes forward first. No key goes
+/// out once `input_id` was cancelled or `deadline` passed.
+pub fn press(pid: i32, window: u32, combo: &str, physical: bool, input_id: Option<u32>, deadline: Instant) -> Outcome<()> {
     let combo = input::parse_combo(combo)?;
-    let element = windows::find(pid, window)?;
-    if physical {
-        raise(pid, &element)?;
-        return input::press(&combo, Route::Physical).map_err(Failure::delivered);
-    }
-    key_window(pid, &element)?;
-    input::press(&combo, Route::Process(pid)).map_err(Failure::delivered)
+    guarded(input_id, deadline, || {
+        let element = windows::find(pid, window)?;
+        let route = if physical {
+            raise(pid, &element)?;
+            Route::Physical
+        } else {
+            key_window(pid, &element)?;
+            Route::Process(pid)
+        };
+        go("press")?;
+        input::press(&combo, route).map_err(Failure::delivered)
+    })
 }
 
 /// Refuses unless `window` is the app's key window, or holds the focused sheet or alert: a key or text sent to the app

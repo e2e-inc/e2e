@@ -205,7 +205,7 @@ pub async fn act(options: ActOptions) -> Value {
     .await
 }
 
-/// Stops the action `act` was given `inputId` for: it sends no input from then on, though what it sent stays sent.
+/// Stops the action `act` or `press` was given `inputId` for: it sends no input from then on, though what it sent stays sent.
 #[napi]
 pub fn cancel_input(input_id: u32) {
     crate::input::cancel_input(input_id);
@@ -218,13 +218,17 @@ pub struct PressOptions {
     /// A combo such as `cmd+a` or `return`.
     pub combo: String,
     pub physical: bool,
+    /// Names this press, so `cancelInput` can stop it before it sends the key.
+    pub input_id: Option<u32>,
+    pub timeout_ms: f64,
 }
 
 /// Presses a key combo into a window.
 #[napi(ts_return_type = "Promise<NativeEnvelope<Record<string, never>>>")]
 pub async fn press(options: PressOptions) -> Value {
+    let deadline = deadline(options.timeout_ms);
     blocking(move || {
-        actions::press(options.pid, window_id(&options.window_id)?, &options.combo, options.physical)?;
+        actions::press(options.pid, window_id(&options.window_id)?, &options.combo, options.physical, options.input_id, deadline)?;
         Ok(serde_json::json!({}))
     })
     .await
