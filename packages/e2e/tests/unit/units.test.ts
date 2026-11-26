@@ -33,6 +33,7 @@ const EMPTY_APP: ResolvedTarget['app'] = {
   linkBase: undefined,
   launchArguments: undefined,
   permissions: undefined,
+  locale: undefined,
   command: undefined,
   readyUrl: undefined,
 };
@@ -45,6 +46,7 @@ const EMPTY_DECLARED: ResolvedTarget['declaredApp'] = {
   environment: undefined,
   launchArguments: undefined,
   permissions: undefined,
+  locale: undefined,
   command: undefined,
   readyUrl: undefined,
 };

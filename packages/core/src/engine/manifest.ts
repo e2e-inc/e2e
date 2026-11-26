@@ -31,6 +31,7 @@ const KNOWN_KEYS = [
   'tapModifiers',
   'selectsDevice',
   'grantsAllPermissions',
+  'appLocale',
   'launchArgumentValues',
   'fileApps',
   'keyboard',
@@ -308,6 +309,7 @@ export function defineEngine<
   if (spec.grantsAllPermissions !== undefined && typeof spec.grantsAllPermissions !== 'boolean') {
     throw invalid(name, 'grantsAllPermissions must be a boolean');
   }
+  if (spec.appLocale !== undefined && typeof spec.appLocale !== 'boolean') throw invalid(name, 'appLocale must be a boolean');
   if (spec.launchArgumentValues !== undefined && typeof spec.launchArgumentValues !== 'boolean') throw invalid(name, 'launchArgumentValues must be a boolean');
   if (spec.fileApps !== undefined && typeof spec.fileApps !== 'boolean') throw invalid(name, 'fileApps must be a boolean');
   if (spec.isolation !== undefined && spec.isolation !== 'attempt' && spec.isolation !== 'worker') {
@@ -332,6 +334,7 @@ export function defineEngine<
   if (spec.tapModifiers === true) handle['tapModifiers'] = true;
   if (spec.selectsDevice === true) handle['selectsDevice'] = true;
   if (spec.grantsAllPermissions === true) handle['grantsAllPermissions'] = true;
+  if (spec.appLocale === true) handle['appLocale'] = true;
   if (spec.launchArgumentValues === true) handle['launchArgumentValues'] = true;
   if (spec.fileApps === true) handle['fileApps'] = true;
   if (spec.isolation === 'worker') handle['isolation'] = 'worker';

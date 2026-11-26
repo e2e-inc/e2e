@@ -200,6 +200,12 @@ export interface EngineAppInfo {
    * `grantsAllPermissions` receives it; for any other, the config is refused.
    */
   readonly allPermissions?: true;
+  /**
+   * `app.locale`: the BCP 47 tag the app runs in, as the target declared it.
+   * Only an engine that declares `appLocale` receives it; for any other, the
+   * config is refused.
+   */
+  readonly locale?: string;
 }
 
 /**
@@ -842,6 +848,12 @@ export interface Engine {
    * config load, so an engine that predates the value never receives it.
    */
   readonly grantsAllPermissions?: boolean;
+  /**
+   * The engine launches the app in `app.locale`, which reaches it as
+   * `EngineAppInfo.locale`. Without it the harness refuses `app.locale` at
+   * config load, so an engine that predates the field never ignores it.
+   */
+  readonly appLocale?: boolean;
   /**
    * The engine reads the object form of `app.launchArguments` from
    * `EngineAppInfo.launchArgumentValues`. Without it the harness refuses an

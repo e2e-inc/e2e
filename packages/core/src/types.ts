@@ -1670,6 +1670,13 @@ export interface TargetApp {
    */
   permissions?: Readonly<Record<string, AppPermissionState>> | 'all' | undefined;
   /**
+   * The language and region the app runs in, as a BCP 47 tag: `fr-FR`,
+   * `ar-EG`, `zh-Hans-CN`. A device app is launched in it on every fresh
+   * launch; what that sets on each platform, and where it is refused, is the
+   * engine's to say. Only an engine that declares `appLocale` takes it.
+   */
+  locale?: string | undefined;
+  /**
    * Process the runner starts before the first test and stops at the end of
    * the run (a dev server, Metro for a debug build). Structured, never
    * shell-interpreted; the child inherits only `PATH`, `HOME`, the

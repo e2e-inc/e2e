@@ -121,6 +121,8 @@ export interface EngineManifest {
   readonly selectsDevice?: boolean;
   /** See `Engine.grantsAllPermissions`. */
   readonly grantsAllPermissions?: boolean;
+  /** See `Engine.appLocale`. */
+  readonly appLocale?: boolean;
   /** See `Engine.launchArgumentValues`. */
   readonly launchArgumentValues?: boolean;
   /** See `Engine.fileApps`. */

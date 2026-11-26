@@ -576,12 +576,15 @@ describe('engine protocol', () => {
         performAt: async () => {},
         keyboard: { type: async () => {}, press: async () => {} },
         grantsAllPermissions: true,
+        appLocale: true,
         init: async () => {},
       }),
     );
     expect(validate(describeEngine(local))).toBe(true);
     expect(describeEngine(local).grantsAllPermissions).toBe(true);
     expect(connectEngine({ manifest: describeEngine(local), transport: loopbackTransport(local) }).grantsAllPermissions).toBe(true);
+    expect(describeEngine(local).appLocale).toBe(true);
+    expect(connectEngine({ manifest: describeEngine(local), transport: loopbackTransport(local) }).appLocale).toBe(true);
     const base = { name: 'x', version: '1', spiVersion: 1 };
     for (const refused of [
       { ...base, methods: ['engine/observe', 'engine/teleport'] },
@@ -595,6 +598,7 @@ describe('engine protocol', () => {
       { ...base, methods: ['lifecycle/finish'], selectsDevice: true },
       { ...base, methods: ['engine/observe'], pointerActions: ['tap'] },
       { ...base, methods: ['engine/observe'], grantsAllPermissions: 'yes' },
+      { ...base, methods: ['engine/observe'], appLocale: 'yes' },
       { ...base, methods: ['engine/locate'] },
       { ...base, methods: ['engine/observe', 'keyboard/type'] },
       { ...base, methods: ['state/capture'] },
@@ -733,6 +737,40 @@ describe('engine protocol', () => {
       const local = defineEngine(toy({}));
       const remote = connectEngine({ manifest: { ...describeEngine(local), grantsAllPermissions: true }, transport: loopbackTransport(local) });
       await expect(remote.init!(initInfo())).rejects.toThrow(/grantsAllPermissions is false, declared true/);
+    });
+  });
+
+  describe('app.locale', () => {
+    it('carries the locale into prepare on an engine that declares appLocale', async () => {
+      const seen: unknown[] = [];
+      const { remote } = overLoopback(
+        toy({
+          appLocale: true,
+          async prepare(info) {
+            seen.push(info.app);
+          },
+        }),
+        {
+          validateApp(app) {
+            seen.push(app);
+          },
+        },
+      );
+      const target = resolveConfig(
+        { targets: [{ name: 'phone', platform: 'toy', engine: remote, app: { bundleId: 'dev.shop.app', locale: 'fr-FR' } }] },
+        { projectRoot: process.cwd(), env: {} as NodeJS.ProcessEnv },
+      ).targets[0]!;
+      await target.engine!.prepare!({ runId: 'run', targetName: target.name, projectRoot: process.cwd(), app: engineAppInfo(target.app), slots: 1, env: {}, headed: false, signal: new AbortController().signal, log: () => {} });
+      expect(seen).toEqual([
+        { bundleId: 'dev.shop.app', locale: 'fr-FR' },
+        { bundleId: 'dev.shop.app', locale: 'fr-FR' },
+      ]);
+    });
+
+    it('refuses a server that does not declare the appLocale its manifest promised', async () => {
+      const local = defineEngine(toy({}));
+      const remote = connectEngine({ manifest: { ...describeEngine(local), appLocale: true }, transport: loopbackTransport(local) });
+      await expect(remote.init!(initInfo())).rejects.toThrow(/appLocale is false, declared true/);
     });
   });
 
