@@ -177,7 +177,7 @@ on purpose.
 | `scrollUntilVisible: { centerElement, visibilityPercentage }` | No exact match. After it resolves, read `boundingBox()`, then `screen.swipe({ direction, momentum: 'slow' })` if the node is off center |
 | Device logs and crash reports beside a failure | `adb logcat` or `xcrun simctl spawn <udid> log stream`, collected in a fixture |
 | `maestro hierarchy` as a terminal command | A one-line test that calls `screen.debug()` |
-| `--device-locale` | `app.launchArguments: { AppleLanguages: ['de'], AppleLocale: 'de_DE' }` on iOS, see [Run the app in another language](/mobile#run-the-app-in-another-language); on Android, set the device language before the run |
+| `--device-locale` | `app.locale: 'de-DE'`, see [Run the app in another language](/mobile#run-the-app-in-another-language). It sets the app's language, not the device's; on Android it needs Android 13 or newer |
 | Maestro Cloud | Your [CI](/ci) with a [hosted device provider](/mobile#hosted-devices) |
 | `pressKey: lock`, `power`, `volume up`, `volume down` | `client.command.hardwareButton` on [`unstable_raw`](/reference/mobile#unstable_raw): power and volume on Android, volume on a physical iPhone |
 | JUnit `properties`, a JUnit path with `--output` | Ids in tags or the title; copy `.e2e/junit.xml` after the run |

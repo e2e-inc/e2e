@@ -155,7 +155,7 @@ describe('manifest', () => {
     expect(() => android(app({ AppleLocale: 'fr_FR' }), info)).toThrowError(
       expect.objectContaining({
         code: 'INVALID_CONFIG',
-        message: `target "pixel" app.launchArguments.AppleLocale is an iOS launch argument, and Android reads none of Apple's; set the device's language before the run, or language and locale on a hosted device provider`,
+        message: `target "pixel" app.launchArguments.AppleLocale is an iOS launch argument, and Android reads none of Apple's; set the language and region with app.locale or device.openApp({ locale })`,
       }),
     );
 
@@ -187,6 +187,40 @@ describe('manifest', () => {
     expect(() => validateApp!(app({ camera: 'grant', 'media-library': 'deny', photos: undefined }), info)).not.toThrow();
     // Config load hands an engine 'all' as allPermissions, never as the string.
     expect(() => validateApp!({ bundleId: 'com.example.app', allPermissions: true }, info)).not.toThrow();
+  });
+
+  it('takes app.locale as a language, script, and region, refuses one beside the Apple locale arguments on iOS, and on a provider\'s Android devices', () => {
+    const info = { targetName: 'phone' };
+    const ios = harness().engine.validateApp!;
+    const android = harness({ platform: 'android' }).engine.validateApp!;
+    for (const validateApp of [ios, android]) {
+      expect(() => validateApp({ bundleId: 'com.example.app', locale: 'zh-Hans-CN' }, info)).not.toThrow();
+      expect(() => validateApp({ bundleId: 'com.example.app', locale: 'ja-JP-u-ca-japanese' }, info)).toThrowError(
+        expect.objectContaining({
+          code: 'INVALID_CONFIG',
+          message: 'target "phone" app.locale takes a language, script, and region only, such as "fr-FR" or "zh-Hans-CN", got "ja-JP-u-ca-japanese"',
+        }),
+      );
+    }
+    expect(() => ios({ bundleId: 'com.example.app', locale: 'fr-FR', launchArgumentValues: { AppleLocale: 'fr_FR' } }, info)).toThrowError(
+      expect.objectContaining({
+        code: 'INVALID_CONFIG',
+        message: 'target "phone" app.launchArguments sets AppleLocale, and the locale sets it too: set the language and region with the locale only',
+      }),
+    );
+    expect(() => ios({ bundleId: 'com.example.app', locale: 'fr-FR', launchArguments: ['-AppleLanguages', '(fr)'] }, info)).toThrowError(
+      expect.objectContaining({ code: 'INVALID_CONFIG' }),
+    );
+    const provider = { name: 'cloud', acquire: async () => ({ id: 'lease-1' }), release: async () => undefined };
+    const leased = harness({ platform: 'android', device: provider as never }).engine.validateApp!;
+    expect(() => leased({ bundleId: 'com.example.app', locale: 'fr-FR' }, info)).toThrowError(
+      expect.objectContaining({
+        code: 'INVALID_CONFIG',
+        message: 'target "phone" app.locale is set, and device provider "cloud" leases this target\'s Android devices, which this machine\'s adb does not reach: set the language and locale with the provider\'s own options instead',
+      }),
+    );
+    // A provider's iOS devices launch with the locale's arguments like any other.
+    expect(() => harness({ device: provider as never }).engine.validateApp!({ bundleId: 'com.example.app', locale: 'fr-FR' }, info)).not.toThrow();
   });
 });
 
@@ -3624,6 +3658,100 @@ describe('device fixture', () => {
       ['apps.open', { platform: 'ios', app: 'com.other' }],
       ['apps.open', { platform: 'ios', app: 'com.other' }],
     ]);
+  });
+
+  it('launches the pinned app in app.locale on iOS with AppleLanguages and AppleLocale after its own arguments, on every fresh launch, and in one openApp\'s locale', async () => {
+    const h = harness({ bundleId: 'com.example.app', launchArguments: ['-e2e', 'YES'], locale: 'zh-hans-cn' });
+    h.fake.respond('apps.open', () => ({ session: 's', appName: 'Example', appBundleId: 'com.example.app', identifiers: {} }));
+    await openAttempt(h);
+    const device = fixture(h);
+    const before = h.fake.calls.length;
+    await h.engine.session!.restart!(operation());
+    await device.openApp('com.example.app');
+    await device.openApp('com.example.app', { relaunch: true, locale: 'ar-EG' });
+    await device.openApp('com.other', { relaunch: true, locale: 'fr-FR', launchArguments: { onboarding: false } });
+    expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
+      ['apps.open', { platform: 'ios', app: 'com.example.app', relaunch: true, launchArgs: ['-e2e', 'YES', '-AppleLanguages', '(zh-Hans-CN)', '-AppleLocale', 'zh-Hans_CN'] }],
+      // A foreground-only open takes none of the engine's launch options.
+      ['apps.open', { platform: 'ios', app: 'com.example.app' }],
+      ['apps.open', { platform: 'ios', app: 'com.example.app', relaunch: true, launchArgs: ['-e2e', 'YES', '-AppleLanguages', '(ar-EG)', '-AppleLocale', 'ar_EG'] }],
+      ['apps.open', { platform: 'ios', app: 'com.other', relaunch: true, launchArgs: ['-onboarding', 'NO', '-AppleLanguages', '(fr-FR)', '-AppleLocale', 'fr_FR'] }],
+    ]);
+    expect(h.adbCalls).toEqual([]);
+  });
+
+  it('refuses an openApp locale that is no language tag, or one beside the Apple locale arguments, before any device command', async () => {
+    const h = harness({ bundleId: 'com.example.app', launchArgumentValues: { AppleLanguages: ['de'] } });
+    await openAttempt(h);
+    const device = fixture(h);
+    const before = h.fake.calls.length;
+    await expect(device.openApp('com.other', { relaunch: true, locale: 'fr_FR' })).rejects.toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      message: 'device.openApp({ locale }) must be a BCP 47 language tag such as "fr-FR", got "fr_FR"',
+    });
+    await expect(device.openApp('com.example.app', { relaunch: true, locale: 'fr-FR' })).rejects.toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      message: "the target's app.launchArguments sets AppleLanguages, and the locale sets it too: set the language and region with the locale only",
+    });
+    await expect(device.openApp('com.other', { relaunch: true, locale: 'fr-FR', launchArguments: ['-AppleLocale', 'fr_FR'] })).rejects.toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      message: 'device.openApp({ launchArguments }) sets AppleLocale, and the locale sets it too: set the language and region with the locale only',
+    });
+    expect(h.fake.calls.length).toBe(before);
+  });
+
+  it('sets an Android app\'s own locale through adb on the booted serial before each fresh launch, clears it when a fresh launch asks for none, and at dispose', async () => {
+    const h = harness({ platform: 'android', bundleId: ANDROID_APP_PACKAGE, locale: 'fr-FR' });
+    h.fake.respond('devices.boot', () => ({ id: 'emulator-5554', device: 'Pixel 9' }));
+    await openAttempt(h);
+    const device = fixture(h);
+    await h.engine.session!.restart!(operation());
+    await device.openApp('com.other', { relaunch: true, locale: 'ja-JP' });
+    await device.openApp('com.other', { relaunch: true });
+    // A foreground-only open keeps what the app has: a change would recreate its screen.
+    await device.openApp(ANDROID_APP_PACKAGE);
+    const set = (app: string, locale?: string) => ['-s', 'emulator-5554', 'shell', 'cmd', 'locale', 'set-app-locales', app, ...(locale === undefined ? [] : ['--locales', locale])];
+    expect(h.adbCalls).toEqual([
+      // The API level is read once, before the first locale is set.
+      ['-s', 'emulator-5554', 'shell', 'getprop', 'ro.build.version.sdk'],
+      set(ANDROID_APP_PACKAGE, 'fr-FR'),
+      set(ANDROID_APP_PACKAGE, 'fr-FR'),
+      set('com.other', 'ja-JP'),
+      set('com.other'),
+    ]);
+    // Android reads no Apple arguments: the launch carries none.
+    expect(h.fake.calls.filter((call) => call.method === 'apps.open').every((call) => !('launchArgs' in (call.args as object)))).toBe(true);
+    h.adbCalls.length = 0;
+    await h.engine.dispose!(cleanup());
+    expect(h.adbCalls).toEqual([set(ANDROID_APP_PACKAGE)]);
+  });
+
+  it('refuses an Android app locale on a device older than Android 13, and reports what adb printed when the locale did not take', async () => {
+    const h = harness({ platform: 'android', bundleId: ANDROID_APP_PACKAGE });
+    h.fake.respond('devices.boot', () => ({ id: 'emulator-5554', device: 'Pixel 4' }));
+    await openAttempt(h);
+    const device = fixture(h);
+    h.respondAdb((args) => ({ stdout: args.includes('getprop') ? '32\n' : '', stderr: '', exitCode: 0 }));
+    const before = h.fake.calls.length;
+    await expect(device.openApp(ANDROID_APP_PACKAGE, { relaunch: true, locale: 'fr-FR' })).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('needs Android 13 (API 33) or newer, and emulator-5554 runs API 32'),
+    });
+    expect(h.fake.calls.length).toBe(before);
+
+    const newer = harness({ platform: 'android', bundleId: ANDROID_APP_PACKAGE });
+    newer.fake.respond('devices.boot', () => ({ id: 'emulator-5554', device: 'Pixel 9' }));
+    await openAttempt(newer);
+    newer.respondAdb((args) => ({ stdout: args.includes('getprop') ? '36' : 'Unknown package com.missing for userId 0\n', stderr: '', exitCode: 0 }));
+    await expect(fixture(newer).openApp('com.missing', { relaunch: true, locale: 'fr-FR' })).rejects.toMatchObject({
+      code: 'ENGINE_FAILURE',
+      message: 'setting the locale of com.missing to fr-FR on emulator-5554 failed: Unknown package com.missing for userId 0',
+    });
+    newer.respondAdb(() => ({ stdout: '', stderr: "adb: device 'emulator-5554' not found", exitCode: 1 }));
+    await expect(fixture(newer).openApp('com.other', { relaunch: true, locale: 'fr-FR' })).rejects.toMatchObject({
+      code: 'ENGINE_FAILURE',
+      message: "setting the locale of com.other to fr-FR on emulator-5554 failed: adb: device 'emulator-5554' not found",
+    });
   });
 
   it('refuses openApp launch arguments of the wrong shape, or ones Android cannot carry, before any device command', async () => {

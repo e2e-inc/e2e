@@ -112,28 +112,37 @@ await device.openApp('com.example.app', { relaunch: true, permissions: { camera:
 
 ### Run the app in another language
 
-On iOS, launch arguments set the app's language and region for that launch.
-The device keeps its own language. Add one target per language:
+Set `app.locale` to a BCP 47 tag, such as `fr-FR` or `zh-Hans-CN`. Every
+fresh launch of the target's app runs in that language and region. Add one
+target per language:
 
 ```ts
 {
   name: 'ios-fr',
   engine: mobile({ platform: 'ios' }),
-  app: {
-    bundleId: 'com.example.app',
-    launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR' },
-  },
+  app: { bundleId: 'com.example.app', locale: 'fr-FR' },
 }
 ```
 
-- As a list, the same launch is
-  `['-AppleLanguages', '(fr)', '-AppleLocale', 'fr_FR']`.
-- The app must ship the language. If it doesn't, iOS shows its development
-  language.
-- Android has no launch argument for the language. `AppleLanguages` or
-  `AppleLocale` in an object on an Android target fails at config load. On
-  a hosted device, set `language` and `locale` on `browserstack()` or
-  `testmu()`. On a local device, set the device's language before the run.
+To launch one test in another language, pass `locale` to `device.openApp`:
+
+```ts
+await device.openApp('com.example.app', { relaunch: true, locale: 'ar-EG' });
+```
+
+- On iOS the locale is the launch's `AppleLanguages` and `AppleLocale`
+  arguments, on any simulator, phone, or hosted device. The device keeps its
+  own language. Don't set those two arguments in `launchArguments` as well.
+- On Android the engine sets the app's own language with this machine's
+  `adb` before the launch. It needs Android 13 or newer. A later fresh launch
+  without a locale, and the end of the run, clear it again.
+- A provider's Android devices are not reachable over this machine's `adb`,
+  so `app.locale` fails at config load there. Set `language` and `locale` on
+  `browserstack()` or `testmu()` instead.
+- The tag takes a language, a script, and a region only, with no extension
+  such as `-u-ca-japanese`.
+- The app must ship the language. If it doesn't, the OS shows its
+  development language.
 
 ### Expo development builds
 

@@ -53,6 +53,7 @@ import { isAppNotRunning, isSnapshotPresentationFailure, isUnreadableCapture, OR
 import { pointerInteraction, DEFAULT_LONG_PRESS_MS, MAX_TAP_COUNT } from './actions.ts';
 import { resolveExpression } from './locate.ts';
 import { launchArgumentList, launchArgumentsForOpen } from './launch-arguments.ts';
+import { AndroidAppLocales, assertLocaleReachable, assertNoAppleLocaleArguments, checkLocale, runAdb as defaultRunAdb, withLocaleArguments, type AdbRunner } from './locale.ts';
 import {
   isWithin,
   keyboardElementsTop,
@@ -131,6 +132,15 @@ export interface OpenAppOptions {
    * target's `app.permissions` for a relaunch of the pinned app.
    */
   readonly permissions?: LaunchPermissions;
+  /**
+   * The language and region this launch runs the app in, as a BCP 47 tag
+   * (`fr-FR`). Replaces the target's `app.locale` for a relaunch of the
+   * pinned app. On iOS it is this launch's `AppleLanguages` and `AppleLocale`;
+   * on Android the app's own locale (Android 13 and newer), set through this
+   * machine's adb before the launch. It takes effect when this open launches
+   * the app, which `relaunch` makes sure of.
+   */
+  readonly locale?: string;
 }
 
 /**
@@ -520,6 +530,10 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   private installedApp: string | undefined;
   /** The target's app, as `init` received it. */
   private app: EngineAppInfo = {};
+  /** The run's environment, as `init` received it: where `adb` is looked up. */
+  private env: Readonly<Record<string, string | undefined>> = {};
+  /** The Android app locales this worker set; created by the first launch that sets one. */
+  private androidLocales: AndroidAppLocales | undefined;
   /** Where relative build paths resolve; the run's project root once init has told us. */
   private projectRoot = process.cwd();
   /** The session and device this worker drives, for the error messages whose recovery is per device; set in init. */
@@ -566,6 +580,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   constructor(
     readonly options: MobileOptions<Platform>,
     private readonly createClient: ClientFactory,
+    private readonly runAdb: AdbRunner = defaultRunAdb,
   ) {
     rejectUnknownKeys('mobile()', options, MOBILE_OPTION_KEYS);
     this.pool = new DevicePool(options, createClient);
@@ -677,6 +692,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   async init(info: EngineInitInfo): Promise<void> {
     this.projectRoot = info.projectRoot;
     this.app = info.app;
+    this.env = info.env;
     const binding = this.pool.binding(info, info.workerSlot, info.env);
     this.device = binding;
     const session = this.pool.slotSession(info, info.workerSlot, binding);
@@ -861,6 +877,8 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   async dispose(context: EngineCleanupContext & { readonly reuseSignal?: AbortSignal }): Promise<void> {
     const client = this.client;
     const recording = this.recording;
+    const locales = this.androidLocales;
+    this.androidLocales = undefined;
     this.client = undefined;
     this.bound = undefined;
     this.attempt = undefined;
@@ -886,6 +904,8 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
       await withinCleanupBudget((async () => {
         await stopping;
         await closing;
+        // Over adb, not the session: the device is left in the language it was found in.
+        await locales?.restore(context.signal);
       })(), context);
     } finally {
       reuse?.removeEventListener('abort', close);
@@ -901,6 +921,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   async openApp(app: string, options: OpenAppOptions, signal: AbortSignal): Promise<void> {
     assertAppId(app);
     if (options.permissions !== undefined) assertPermissions('device.openApp({ permissions })', options.permissions, 'INVALID_ARGUMENT');
+    if (options.locale !== undefined) assertLocaleReachable('device.openApp({ locale })', this.options, 'INVALID_ARGUMENT');
     const relaunch = options.relaunch === true;
     // The engine's own launch options belong to a fresh launch of the pinned
     // app. A foreground-only open of a running app takes no arguments, and a
@@ -908,13 +929,36 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     const configured = relaunch && app === this.pinnedApp;
     const launchArguments = launchArgumentsForOpen(this.options.platform, options.launchArguments) ?? (configured ? (this.app.launchArgumentValues ?? this.app.launchArguments) : undefined);
     const permissions = options.permissions ?? (configured ? configuredPermissions(this.app) : undefined);
+    const locale = options.locale !== undefined
+      ? checkLocale('device.openApp({ locale })', options.locale, 'INVALID_ARGUMENT')
+      : configured && this.app.locale !== undefined ? checkLocale('app.locale', this.app.locale, 'INVALID_CONFIG') : undefined;
+    if (locale !== undefined && this.options.platform === 'ios') {
+      const label = options.launchArguments === undefined ? "the target's app.launchArguments" : 'device.openApp({ launchArguments })';
+      assertNoAppleLocaleArguments(label, launchArguments, 'INVALID_ARGUMENT');
+    }
     if (permissions !== undefined) await this.presetPermissions(app, permissions, signal);
-    await this.open(app, relaunch, launchArguments, signal);
+    if (this.options.platform === 'android') await this.presetAndroidLocale(app, locale, relaunch, signal);
+    await this.open(app, relaunch, launchArguments, signal, locale);
+  }
+
+  /**
+   * Puts an Android app's own locale in place before it launches, through
+   * this machine's adb on the serial agent-device booted; see
+   * `AndroidAppLocales`. Nothing runs while no launch has asked for one.
+   */
+  private async presetAndroidLocale(app: string, locale: string | undefined, relaunch: boolean, signal: AbortSignal): Promise<void> {
+    if (locale === undefined && this.androidLocales === undefined) return;
+    if (this.androidLocales === undefined) {
+      const serial = this.boundDevice.deviceId;
+      if (serial === undefined || serial === '') throw invalidState('setting an Android app locale needs the serial of the booted device, and agent-device reported none');
+      this.androidLocales = new AndroidAppLocales(serial, this.env, this.runAdb);
+    }
+    await this.androidLocales.beforeOpen(app, locale, relaunch, signal);
   }
 
   /** One `open` of an app, remembered as the session's app and as the screen's replacement. */
-  private async open(app: string, relaunch: boolean, launchArguments: ResolvedLaunchArguments | undefined, signal: AbortSignal): Promise<void> {
-    const launchArgs = launchArgumentList(this.options.platform, launchArguments);
+  private async open(app: string, relaunch: boolean, launchArguments: ResolvedLaunchArguments | undefined, signal: AbortSignal, locale?: string): Promise<void> {
+    const launchArgs = withLocaleArguments(this.options.platform, launchArgumentList(this.options.platform, launchArguments), locale);
     const result = await this.command(
       `open ${app}`,
       (client) =>

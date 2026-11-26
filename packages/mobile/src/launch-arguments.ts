@@ -38,7 +38,7 @@ export function assertLaunchArgumentsFor(platform: MobilePlatform, label: string
   if (platform !== 'android' || launchArguments === undefined || Array.isArray(launchArguments)) return;
   for (const [name, value] of Object.entries(launchArguments)) {
     if (IOS_ONLY_ARGUMENTS.has(name)) {
-      fail(code, `${label}.${name} is an iOS launch argument, and Android reads none of Apple's; set the device's language before the run, or language and locale on a hosted device provider`);
+      fail(code, `${label}.${name} is an iOS launch argument, and Android reads none of Apple's; set the language and region with app.locale or device.openApp({ locale })`);
     }
     if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') continue;
     const problem = androidListProblem(value);

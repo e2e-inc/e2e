@@ -12,6 +12,7 @@ import { ConfigurationError, defineEngine, obj, type EngineAppCheckInfo, type En
 import { createDeviceFixture } from './device.ts';
 import type { ClientFactory, MobileOptions, MobilePlatform } from './options.ts';
 import { assertLaunchArgumentsFor } from './launch-arguments.ts';
+import { assertLocaleReachable, assertNoAppleLocaleArguments, checkLocale } from './locale.ts';
 import { isLink, linkTarget } from './links.ts';
 import { DEVICE_ACTIONS, DEVICE_POINTER_ACTIONS } from './actions.ts';
 import { AgentDeviceSurface, assertPermissions } from './surface.ts';
@@ -39,6 +40,8 @@ export function buildEngine<Platform extends MobilePlatform>(surface: AgentDevic
     ...(surface.pool.selectsDevice ? { selectsDevice: true } : {}),
     // `app.permissions: 'all'` is one agent-device `all` grant; see AgentDeviceSurface.presetPermissions.
     grantsAllPermissions: true,
+    // `app.locale` is launch arguments on iOS and adb on Android; see locale.ts.
+    appLocale: true,
     launchArgumentValues: true,
     prepare: (info) => surface.pool.prepare(info),
     finish: (info) => surface.pool.finish(info),
@@ -61,7 +64,7 @@ export function buildEngine<Platform extends MobilePlatform>(surface: AgentDevic
       press: (key, operation) => surface.pressFocusedKey(key, operation, surface.inputBudget('press', operation)),
       dismiss: (operation) => surface.dismissKeyboard(operation.signal, surface.inputBudget('keyboard dismiss', operation)),
     },
-    validateApp: (app, info) => validateApp(app, info, surface.options.platform),
+    validateApp: (app, info) => validateApp(app, info, surface.options),
     // No `open`: a device app has no URL to open, so the runner serves
     // `app.open()` with `restart`, the fresh launch of the pinned app, which
     // is also the device's "recreate the context".
@@ -125,7 +128,8 @@ const LOOPBACK_NOTES: Readonly<Record<MobilePlatform, string>> = {
  * not supported yet, and a link in `bundleId` is a mistake: a test opens one
  * with `device.openLink`.
  */
-function validateApp(app: EngineAppDeclaration, { targetName }: EngineAppCheckInfo, platform: MobilePlatform): void {
+function validateApp(app: EngineAppDeclaration, { targetName }: EngineAppCheckInfo, options: MobileOptions): void {
+  const { platform } = options;
   const where = `target "${targetName}"`;
   if (app.url !== undefined) {
     throw new ConfigurationError(
@@ -147,6 +151,11 @@ function validateApp(app: EngineAppDeclaration, { targetName }: EngineAppCheckIn
   }
   assertLaunchArgumentsFor(platform, `${where} app.launchArguments`, app.launchArgumentValues ?? app.launchArguments);
   if (app.permissions !== undefined) assertPermissions(`${where} app.permissions`, app.permissions, 'INVALID_CONFIG');
+  if (app.locale !== undefined) {
+    checkLocale(`${where} app.locale`, app.locale, 'INVALID_CONFIG');
+    assertLocaleReachable(`${where} app.locale`, options, 'INVALID_CONFIG');
+    if (platform === 'ios') assertNoAppleLocaleArguments(`${where} app.launchArguments`, app.launchArgumentValues ?? app.launchArguments, 'INVALID_CONFIG');
+  }
 }
 
 /** The surface behind a handle this package created; undefined for any other engine. */
