@@ -97,7 +97,7 @@ describe('todos', () => {
 | `cy.contains('text')`, `cy.contains('li', 'text')` | `screen.getByText('text', { exact: false })`, `screen.getByRole('listitem').filter({ hasText: 'text' })` |
 | `.click()`, `.dblclick()`, `.clear()`, `.check()`, `.uncheck()`, `.focus()`, `.blur()`, `.first()`, `.last()`, `.scrollIntoView()` | The same |
 | `.rightclick()`, `.eq(n)`, `.selectFile(path)` | `.secondaryTap()`, `.nth(n)`, `.setInputFiles(path)` |
-| `cy.scrollTo('bottom')`, `cy.get('.feed').scrollTo('right')` | `screen.scrollTo('bottom')`, `screen.getByTestId('feed').scrollTo('right')`. An edge only: for a position such as `cy.scrollTo(0, 500)`, use `browser.evaluate(() => scrollTo(0, 500))` |
+| `cy.scrollTo('bottom')`, `cy.get('.feed').scrollTo('right')` | `screen.scrollTo('bottom')`, `screen.getByTestId('feed').scrollTo('right')`. An edge only: for a position such as `cy.scrollTo(0, 500)`, use `browser.evaluate(() => { scrollTo(0, 500); return null; })` |
 | `.type('text')`, `.type('{enter}')`, `.clear().type('text')` | `.pressSequentially('text')` appends with key events, `.press('Enter')`, `.fill('text')` |
 | `.select('Pro')` | `.selectOption('Pro')` matches the label; a value needs `{ value: 'pro' }`, an index `{ index: 1 }` |
 | `.should('be.visible')`, `be.checked`, `be.disabled`, `be.focused`, `exist` | `await expect(locator).toBeVisible()`, `toBeChecked()`, `toBeDisabled()`, `toBeFocused()`, `toBeAttached()` |

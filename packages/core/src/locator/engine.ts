@@ -568,7 +568,8 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
    * out of budget (an engine timeout, or input that may have landed) did not
    * reach the edge; an engine stops a little before the deadline, so that is
    * said whether or not it has passed, with the engine's reason, which tells
-   * a list still moving from a stuck read. Only the scroll's own failure is
+   * a list still moving from a stuck read, and names the step's timeout
+   * rather than the time the engine took. Only the scroll's own failure is
    * read that way: a locate or a first observation that ran out stays what
    * it was.
    */
@@ -580,7 +581,7 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
     const notReached = (cause: unknown): TestError | undefined => {
       const engineError = asEngineError(cause);
       if (engineError?.code !== 'OPERATION_TIMEOUT' && engineError?.code !== 'ACTION_MAY_HAVE_COMMITTED') return undefined;
-      return new TestError('ACTION_FAILED', `scrollTo('${edge}') did not reach the edge within ${deadline.elapsed()}ms (${engineError.message})${target}`, { cause });
+      return new TestError('ACTION_FAILED', `scrollTo('${edge}') did not reach the edge within ${deadline.endsAt - deadline.startedAt}ms (${engineError.message})${target}`, { cause });
     };
     if (expression === undefined) await this.scrollScreenTo(action, deadline, notReached);
     else await this.performUntil(expression, action, deadline, notReached);

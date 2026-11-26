@@ -165,6 +165,15 @@ describe('scrollTo on the screen', () => {
     expect(failure).toMatchObject({ code: 'OPERATION_TIMEOUT', message: expect.stringContaining('more content kept loading at the bottom edge') });
   });
 
+  it('finishes while the page clock is paused, whose timers never fire', async () => {
+    await page.clock.install();
+    await page.setContent(ROWS);
+    await page.clock.pauseAt(Date.now() + 60_000);
+    await scroll('bottom');
+    const bottom = await offsets();
+    expect(bottom.top).toBe(bottom.maxTop);
+  });
+
   it('follows a feed that loads from an IntersectionObserver on a sentinel row', async () => {
     // The observer runs after the frame a jump waits for, so only a jump that moves nothing may end the scroll.
     await page.setContent(`<!doctype html><body style="margin: 0"><div id="feed">${ROWS}</div><div id="sentinel" style="height: 1px"></div>
@@ -193,8 +202,19 @@ describe('scrollTo out of budget', () => {
   it('says the budget ran out, not that content kept loading, on a static page with too little budget', async () => {
     await page.setContent(ROWS);
     const failure = await scroll('bottom', undefined, 40).catch((cause: unknown) => cause);
-    expect(failure).toMatchObject({ code: 'OPERATION_TIMEOUT' });
-    expect((failure as Error).message).toMatch(/^the budget ran out (before the first jump|after 1 jump, before a jump confirmed) /);
+    expect(failure).toMatchObject({ code: 'OPERATION_TIMEOUT', message: 'the budget ran out before the first jump toward the bottom edge' });
+    expect((await offsets()).top).toBe(0);
+  });
+
+  it('jumps nowhere when the step is cancelled while the page is busy', async () => {
+    // The page blocks its main thread, so the container lookup answers only after the cancel.
+    await page.setContent(ROWS);
+    await page.evaluate(() => void setTimeout(() => { const end = Date.now() + 400; while (Date.now() < end); }, 0));
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 100);
+    const failure = await scrollToEdge(page, undefined, 'bottom', { timeoutMs: 2_000, signal: controller.signal }).catch((cause: unknown) => cause);
+    expect(failure).toBeDefined();
+    expect((await offsets()).top).toBe(0);
   });
 
   it('fails a node that leaves the page as stale, and leaves the page where it was', async () => {
@@ -359,12 +379,26 @@ describe('scrollTo on a node', () => {
     expect(pane.top).toBe(pane.maxTop);
   });
 
-  it('scrolls a body with paint containment itself, since its overflow stays its own', async () => {
-    await page.setContent(`<!doctype html><body style="margin: 0; height: 100vh; overflow: auto; contain: paint"><p id="first">Row 0</p>${ROWS}</body>`);
-    await scroll('bottom', '#first');
-    const body = await offsets('body');
-    expect(body.maxTop).toBeGreaterThan(0);
-    expect(body.top).toBe(body.maxTop);
+  it.each([
+    ['body', 'contain: paint'],
+    ['body', 'contain: layout'],
+    ['body', 'contain: size'],
+    ['body', 'contain: inline-size'],
+    ['body', 'contain: style'],
+    ['body', 'container-type: inline-size'],
+    ['body', 'container-type: size'],
+    ['html', 'contain: layout'],
+  ])('scrolls a body whose overflow stays its own under %s { %s }, from a node and from the screen', async (on, style) => {
+    const content = (form: string) => `<!doctype html><html style="${on === 'html' ? style : ''}">`
+      + `<body style="margin: 0; height: 100vh; overflow: auto; ${on === 'body' ? style : ''}"><p id="first">Row 0 ${form}</p>${ROWS}</body></html>`;
+    for (const form of ['node', 'screen'] as const) {
+      await page.setContent(content(form));
+      await scroll('bottom', form === 'node' ? '#first' : undefined);
+      const body = await offsets('body');
+      expect(body.maxTop, form).toBeGreaterThan(0);
+      expect(body.top, form).toBe(body.maxTop);
+      expect((await offsets()).top, form).toBe(0);
+    }
   });
 
   it('finishes for a node in a cross-origin iframe out of view, which renders no frames', async () => {

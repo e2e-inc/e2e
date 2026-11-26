@@ -71,8 +71,7 @@ describe('scrollTo', () => {
   it('keeps a first observation that outlasts the timeout as what it is, and scrolls nothing', async () => {
     const { screen, received } = feedScreen({ observeMs: 300 });
     const failure = await screen.scrollTo('bottom', { timeout: 100 }).catch((cause: unknown) => cause);
-    expect(failure).toMatchObject({ code: expect.any(String) });
-    expect(String((failure as Error).message)).not.toMatch(/did not reach the edge/);
+    expect(failure).toMatchObject({ code: 'ACTION_FAILED', message: 'operation timed out before the scrollTo was sent: the screen' });
     expect(received).toEqual([]);
   });
 
@@ -100,9 +99,17 @@ describe('scrollTo', () => {
     expect(budget).toBeLessThanOrEqual(720);
   });
 
+  it('sends no screen swipe once the first observation spent the timeout', async () => {
+    const { screen, received } = feedScreen({ observeMs: 300, timeoutMs: 100 });
+    await expect(screen.swipe({ direction: 'down' })).rejects.toBeDefined();
+    expect(received).toEqual([]);
+  });
+
   it('scrolls a located node, its step naming the node and the edge', async () => {
-    const { screen, steps, received } = feedScreen();
+    let budget = Infinity;
+    const { screen, steps, received } = feedScreen({ perform: async (_action, operation) => { budget = operation.timeoutMs; } });
     await screen.getByTestId('feed').scrollTo('left', { timeout: 500 });
+    expect(budget).toBeLessThanOrEqual(500);
     expect(received).toEqual([{ ref: 'feed', action: { kind: 'scrollTo', edge: 'left' } }]);
     expect(steps.all()).toEqual([
       expect.objectContaining({ api: 'locator.scrollTo', label: 'getByTestId("feed") → left', status: 'passed' }),
@@ -168,7 +175,7 @@ describe('scrollTo', () => {
     const { screen } = feedScreen({ perform });
     await expect(screen.getByTestId('feed').scrollTo('bottom')).rejects.toMatchObject({
       code: 'ACTION_FAILED',
-      message: expect.stringMatching(/^scrollTo\('bottom'\) did not reach the edge within \d+ms \(the content was still moving after 4 drags when the budget ran out\): getByTestId\("feed"\)$/),
+      message: expect.stringMatching(/^scrollTo\('bottom'\) did not reach the edge within 1000ms \(the content was still moving after 4 drags when the budget ran out\): getByTestId\("feed"\)$/),
     });
   });
 

@@ -3,6 +3,7 @@
 import type { ElementHandle, JSHandle, Page } from 'playwright-core';
 import { Deadline, EngineError, type ScrollEdge } from '@e2e-dev/core/engine';
 import { CLOSED_SHADOW_ROOTS_KEY } from './closed-shadow.ts';
+import type { ClockHost } from './clock.ts';
 import type { ConnectionBudget } from './operation-budget.ts';
 import { isPwTimeout, type ActionTarget } from './support.ts';
 
@@ -71,20 +72,24 @@ export async function scrollToEdge(page: Page, target: ActionTarget | undefined,
   let found = false;
   try {
     for (;;) {
-      operation.signal.throwIfAborted();
       if (container === undefined) {
+        operation.signal.throwIfAborted();
         try {
           container = await findContainer(page, target, args, Math.max(1, deadline.remaining()));
         } catch (cause) {
           if (cause instanceof Error && cause.message.includes(DETACHED)) throw stale('the node');
-          // A locate that ran out once a container was found means the node it came from is gone.
-          if (isPwTimeout(cause)) throw found ? stale('the scroll container') : outOfBudget();
+          // A locator that cannot be found again once a container was, means the node it came from is gone;
+          // the screen's root always exists, so there it only means the budget ran out.
+          if (isPwTimeout(cause)) throw found && target !== undefined ? stale('the scroll container') : outOfBudget();
           throw cause;
         }
         found = true;
       }
       const element = container.asElement();
       if (element === null) return;
+      // Checked right before each jump, so a step cancelled or out of budget while the page was busy moves nothing.
+      operation.signal.throwIfAborted();
+      if (deadline.remaining() < MIN_JUMP_MS) throw outOfBudget();
       const result = await element.evaluate(jumpOnce, edge);
       if (result.state === 'settled') return;
       if (result.state === 'detached') {
@@ -95,7 +100,6 @@ export async function scrollToEdge(page: Page, target: ActionTarget | undefined,
         firstExtent ??= result.from;
         if (result.extent > firstExtent) grew = true;
       }
-      if (deadline.remaining() < MIN_JUMP_MS) throw outOfBudget();
     }
   } finally {
     await container?.dispose().catch(() => undefined);
@@ -125,15 +129,17 @@ function scrollContainer(start: Element, args: FindArgs): Element | null {
   const scrolling = doc.scrollingElement ?? doc.documentElement;
   const closedRoots = (globalThis as Record<symbol, unknown>)[Symbol.for(args.closedRootsKey)] as WeakMap<Element, ShadowRoot> | undefined;
   const overflowOf = (style: CSSStyleDeclaration): string => (vertical ? style.overflowY : style.overflowX);
-  const paintContained = (style: CSSStyleDeclaration): boolean => /\b(paint|strict|content)\b/.test(style.contain);
+  // Any containment stops the body's overflow from reaching the viewport:
+  // `contain`, and a container type, which applies it without showing in `contain`.
+  const contained = (style: CSSStyleDeclaration): boolean => style.contain !== 'none' || style.containerType !== 'normal';
 
   // The viewport takes the root element's overflow, or the body's when the
-  // root's is visible on both axes and neither has paint containment; the
-  // body then does not scroll itself.
+  // root's is visible on both axes and neither has containment; the body
+  // then does not scroll itself.
   const rootStyle = view.getComputedStyle(doc.documentElement);
   const bodyStyle = doc.body === null ? undefined : view.getComputedStyle(doc.body);
   const bodyGivesOverflow = bodyStyle !== undefined && rootStyle.overflowX === 'visible' && rootStyle.overflowY === 'visible'
-    && !paintContained(rootStyle) && !paintContained(bodyStyle);
+    && !contained(rootStyle) && !contained(bodyStyle);
   const viewportScrolls = (): boolean => {
     const overflow = overflowOf(bodyGivesOverflow && bodyStyle !== undefined ? bodyStyle : rootStyle);
     return overflow !== 'hidden' && overflow !== 'clip';
@@ -157,7 +163,8 @@ function scrollContainer(start: Element, args: FindArgs): Element | null {
     if (slot !== null) return slot;
     if (element.parentElement !== null) return element.parentElement;
     const parent = element.parentNode;
-    return parent instanceof ShadowRoot ? parent.host : null;
+    // A shadow root by its node type: a page can replace the global `ShadowRoot`.
+    return parent !== null && parent.nodeType === 11 && 'host' in parent ? (parent as ShadowRoot).host : null;
   };
 
   let from: Element | null = start;
@@ -189,7 +196,8 @@ function scrollContainer(start: Element, args: FindArgs): Element | null {
  * Page-side: one jump of `container` toward `edge`, then the position after
  * the next rendered frame. A hidden document renders no frames, so it reads
  * at once; a frame that renders none while out of view (a cross-origin
- * iframe) reads after 100 ms.
+ * iframe) reads after 100 ms. The waits use the native timers Playwright's
+ * clock keeps, as `nextRenderedFrame` does, so a paused clock holds none.
  */
 function jumpOnce(container: Element, edge: ScrollEdge): Promise<JumpResult> {
   if (!container.isConnected) return Promise.resolve({ state: 'detached', from: 0, extent: 0 });
@@ -221,7 +229,9 @@ function jumpOnce(container: Element, edge: ScrollEdge): Promise<JumpResult> {
       done = true;
       resolve(read());
     };
-    view.requestAnimationFrame(() => view.setTimeout(finish, 0));
-    view.setTimeout(finish, 100);
+    // oxlint-disable-next-line no-underscore-dangle -- Playwright's name for its page clock, which keeps the native timers
+    const timers = (view as ClockHost).__pwClock?.builtins ?? view;
+    timers.requestAnimationFrame(() => timers.setTimeout(finish, 0));
+    timers.setTimeout(finish, 100);
   });
 }

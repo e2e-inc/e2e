@@ -1733,6 +1733,8 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     const gesture = swipeWithin(region, EDGE_DIRECTION[edge], undefined);
     await dragToEdge({
       drag: async (count) => {
+        // A cancel that lands as a read finishes sends no further drag.
+        if (operation.signal.aborted) throw new EngineError('CANCELLED', 'scrollTo cancelled', { retryable: false });
         await input.send(() => client.interactions.swipe({ ...gesture, count, pauseMs: 0 }));
       },
       read: async () => signature(await capture()),

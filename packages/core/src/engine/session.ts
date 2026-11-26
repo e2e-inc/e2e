@@ -219,9 +219,12 @@ const KINDS_BY_VERB: readonly (readonly [GrammarVerb, readonly LocatorActionKind
  * `operation` with what is left of its budget since `startedMs`, for the
  * second call of a step that first observes for the root ref: `timeout`
  * bounds the whole step, so the observe's time comes out of the action's.
+ * An observe that spent all of it leaves nothing to send the action with.
  */
 function leftSince(operation: OperationContext, startedMs: number): OperationContext {
-  return { ...operation, timeoutMs: Math.max(1, operation.timeoutMs - (Date.now() - startedMs)) };
+  const timeoutMs = operation.timeoutMs - (Date.now() - startedMs);
+  if (timeoutMs <= 0) throw new EngineError('OPERATION_TIMEOUT', 'the first observation spent the whole budget; nothing was sent', { retryable: false });
+  return { ...operation, timeoutMs };
 }
 
 /** The grammar verbs an engine declaration can honor. */
