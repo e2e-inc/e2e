@@ -154,6 +154,37 @@ fn character_key(character: char) -> Option<u16> {
     })
 }
 
+/// What a key types with Shift held, on the US layout the key codes follow.
+fn shifted(character: char) -> Option<char> {
+    if character.is_ascii_lowercase() {
+        return Some(character.to_ascii_uppercase());
+    }
+    Some(match character {
+        '1' => '!',
+        '2' => '@',
+        '3' => '#',
+        '4' => '$',
+        '5' => '%',
+        '6' => '^',
+        '7' => '&',
+        '8' => '*',
+        '9' => '(',
+        '0' => ')',
+        '-' => '_',
+        '=' => '+',
+        '[' => '{',
+        ']' => '}',
+        '\\' => '|',
+        ';' => ':',
+        '\'' => '"',
+        ',' => '<',
+        '.' => '>',
+        '/' => '?',
+        '`' => '~',
+        _ => return None,
+    })
+}
+
 /// A parsed combo: its key and modifier flags.
 pub struct Combo {
     key: Key,
@@ -184,7 +215,9 @@ pub fn parse_combo(combo: &str) -> Outcome<Combo> {
             }
             let lower = character.to_ascii_lowercase();
             let code = character_key(lower).ok_or_else(|| Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("\"{character}\" has no key of its own")))?;
-            Key { code, character: Some(character) }
+            // With Shift the key types its shifted character; one with none on the US layout is left to the app to work out.
+            let typed = if flags.contains(CGEventFlags::CGEventFlagShift) { shifted(lower) } else { Some(lower) };
+            Key { code, character: typed }
         }
         _ => {
             let name = last.to_ascii_lowercase();
@@ -341,6 +374,7 @@ pub fn pointer(x: f64, y: f64, action: Pointer) -> Outcome<()> {
 #[cfg(test)]
 mod tests {
     use super::{CHUNK_UNITS, Piece, parse_combo, pieces};
+    use core_graphics::event::CGEventFlags;
 
     fn text(units: &Piece) -> String {
         match units {
@@ -374,6 +408,15 @@ mod tests {
                 Piece::Text("e".encode_utf16().collect()),
             ]
         );
+    }
+
+    #[test]
+    fn types_the_shifted_character_of_a_shift_combo() {
+        for (combo, typed) in [("shift+a", Some('A')), ("A", Some('A')), ("shift+1", Some('!')), ("a", Some('a')), ("cmd+a", Some('a'))] {
+            let parsed = parse_combo(combo).unwrap_or_else(|_| panic!("{combo} parses"));
+            assert_eq!(parsed.key.character, typed, "{combo}");
+        }
+        assert!(parse_combo("shift+a").unwrap().flags.contains(CGEventFlags::CGEventFlagShift));
     }
 
     #[test]
