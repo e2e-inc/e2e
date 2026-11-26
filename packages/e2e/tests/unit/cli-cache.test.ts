@@ -259,21 +259,21 @@ describe('e2e cache show', () => {
 });
 
 describe('e2e cache check', () => {
-  it('names every detour and exits 1', async () => {
+  it('names every detour and exits 0, since a correct recording can take one', async () => {
     await seed([
       { keyHash: 'c'.repeat(64), trace: detouredTrace() },
       { keyHash: 'a'.repeat(64), trace: trace({ testId: 'tests/a.e2e.ts::a', targetId: 'web', instructionDigest: 'd'.repeat(64) }, 2) },
     ]);
     await invoke('cache', 'check');
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(0);
     const lines = written(stdoutSpy).trimEnd().split('\n');
     expect(lines).toEqual([
       `cccccccccccc tests/settings.e2e.ts::opens privacy (ios): ${DETOUR_LINE}`,
-      '1 of 2 replay cache entries take a detour; e2e cache show <entry> prints its actions',
+      '1 of 2 replay cache entries take a detour; e2e cache show <entry> prints its actions. A detour the step asks for, or one after a tap that changed data, is expected',
     ]);
   });
 
-  it('reads an entry recorded before locations by its actions alone, as a hint that fails nothing', async () => {
+  it('reads an entry recorded before locations by its actions alone, as a hint', async () => {
     const legacy: ActionTrace = {
       ...trace(undefined, 0),
       actions: [

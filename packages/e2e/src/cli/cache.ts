@@ -77,9 +77,9 @@ const DIGEST_PREFIX_CHARS = 12;
 
 /**
  * Runs one `e2e cache` command against the configured store directory.
- * Returns the process exit code: 2 for a config or filesystem error, 1 when
- * `check` finds a detour, 0 otherwise — an empty or absent cache is a fact,
- * not a failure.
+ * Returns the process exit code: 2 for a config or filesystem error, 0
+ * otherwise. An empty or absent cache is a fact, not a failure, and so is a
+ * detour `check` finds (see `check`).
  */
 async function cache(command: CacheCommand | { readonly show: string }, options: CacheOptions = {}): Promise<number> {
   // A path names its own file, wherever it is and whatever its name: a copied
@@ -161,7 +161,7 @@ export function registerCacheCommand(program: Command): void {
   cacheSubcommand(
     'check',
     'find recordings that take a detour',
-    'Read every cached trace for a detour: a stretch that leaves a screen and comes back to it with nothing typed, chosen, or set on the way, as an agent does when it opens the wrong page and backs out. Exits 1 when the screens a trace recorded show one, so a pipeline can stop a recording with a wrong turn before it is committed. A trace recorded before actions kept their screens is read by its actions alone, and its detours are hints that fail nothing.',
+    'Read every cached trace for a detour: a stretch that leaves a screen and comes back to it with nothing typed, chosen, or set on the way, as an agent does when it opens the wrong page and backs out. Read the list before you commit recordings. A detour is not always a wrong turn: a tap that changes data (a delete that returns to the list) and a step that asks to go back take one too, so a detour fails nothing and the command exits 0. A trace recorded before actions kept their screens is read by its actions alone, and its detours are only hints.',
   );
   cacheSubcommand('clear', 'delete every cached trace', 'Delete the cache files and the directory itself; files the runner never wrote are left alone.');
   cacheSubcommand('stats', 'print the entry count and size', 'Print the store directory, how many readable entries it holds, and how many bytes they take.');
@@ -273,8 +273,8 @@ function list(contents: CacheContents): number {
 
 /**
  * How `ls` marks an entry's detours: `(detour)` when its recorded screens
- * show one, which fails `check`; `(detour hint)` when only the shape of an
- * entry without locations suggests one, which fails nothing.
+ * show one; `(detour hint)` when only the shape of an entry without
+ * locations suggests one.
  */
 function detourMark(detours: readonly TraceDetour[]): string {
   if (detours.length === 0) return '';
@@ -415,12 +415,15 @@ function plain(text: string): string {
 }
 
 /**
- * Prints every entry with a detour, one line per detour, and exits 1 when a
- * recorded location shows one: a recording that took a wrong turn replays
- * it on every run, and a pipeline that commits recordings is where to stop
- * it. An entry recorded before actions kept their locations is read by its
- * actions alone, which cannot tell a wrong turn from a step that asks to go
- * back, so its detours are printed as hints and fail nothing.
+ * Prints every entry with a detour, one line per detour, for a person to
+ * read before the recordings are committed: a recording that took a wrong
+ * turn replays it on every run. It exits 0 whatever it finds. The rule ends
+ * a detour only at a typed value or a state control, so a correct recording
+ * whose tap changed data and returned (a delete that goes back to the
+ * list), or a step that asks to go back, takes one too, and until such a
+ * detour can be accepted, failing on it would fail a correct recording with
+ * no way out. An entry recorded before actions kept their locations is read
+ * by its actions alone, so its detours are printed as hints.
  */
 function check(contents: CacheContents): number {
   const detoured = contents.entries
@@ -434,12 +437,12 @@ function check(contents: CacheContents): number {
   }
   const total = contents.entries.length;
   const entries = (count: number) => `${count === 1 ? 'entry' : 'entries'}`;
-  const failing = detoured.filter((entry) => entry.detours.some((detour) => detour.evidence === 'locations')).length;
-  const hinted = detoured.length - failing;
+  const shown = detoured.filter((entry) => entry.detours.some((detour) => detour.evidence === 'locations')).length;
+  const hinted = detoured.length - shown;
   process.stdout.write(
-    failing === 0
+    shown === 0
       ? `no detours ${hinted > 0 ? 'the recorded screens show ' : ''}in ${total} replay cache ${entries(total)} in ${contents.directory}\n`
-      : `${failing} of ${total} replay cache ${total === 1 ? 'entry takes' : 'entries take'} a detour; e2e cache show <entry> prints its actions\n`,
+      : `${shown} of ${total} replay cache ${total === 1 ? 'entry takes' : 'entries take'} a detour; e2e cache show <entry> prints its actions. A detour the step asks for, or one after a tap that changed data, is expected\n`,
   );
   if (hinted > 0) {
     // A run that records the same flow again keeps the stored entry, so only a new recording adds the locations.
@@ -448,7 +451,7 @@ function check(contents: CacheContents): number {
     );
   }
   warnAboutSkipped(contents);
-  return failing === 0 ? 0 : 1;
+  return 0;
 }
 
 /** Prints the store's size: where it is, how many entries, how many bytes. */
