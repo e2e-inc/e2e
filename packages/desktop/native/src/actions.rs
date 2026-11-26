@@ -1044,9 +1044,26 @@ pub fn press(pid: i32, window: u32, combo: &str, physical: bool, focused: Option
                 return Err(Failure::refused(codes::ACTION_FAILED, "the control lost keyboard focus before the key was sent, so nothing was sent"));
             }
         }
+        // A key sent as physical input goes to whatever app is frontmost: the user may have switched apps since the raise,
+        // while the app still names its own focused control.
+        if physical {
+            if !frontmost(pid)? {
+                return Err(Failure::refused(codes::ACTION_FAILED, "another app came forward before the key was sent, so nothing was sent"));
+            }
+            key_window(pid, &element)?;
+        }
         go("press")?;
         input::press(&combo, route).map_err(Failure::delivered)
     })
+}
+
+/// Whether the app is the frontmost one. A read the app did not answer in time is a stall.
+fn frontmost(pid: i32) -> Outcome<bool> {
+    match Element::application(pid).attribute("AXFrontmost") {
+        Ok(value) => Ok(value.boolean() == Some(true)),
+        Err(error) if error == ax::AX_CANNOT_COMPLETE => Err(unread(error, "read whether the app is frontmost")),
+        Err(_) => Ok(false),
+    }
 }
 
 /// Refuses unless `window` is the app's key window, or holds the focused sheet or alert: a key or text sent to the app
@@ -1085,11 +1102,7 @@ fn takes_point(frontmost: bool, holds: bool, on_sheet: bool, sheet: bool) -> Out
 fn window_takes_point(pid: i32, id: u32, sheet: bool, x: f64, y: f64) -> Outcome<()> {
     let window = windows::find(pid, id)?;
     let app = Element::application(pid);
-    let frontmost = match app.attribute("AXFrontmost") {
-        Ok(value) => value.boolean() == Some(true),
-        Err(error) if error == ax::AX_CANNOT_COMPLETE => return Err(unread(error, "read whether the app is frontmost")),
-        Err(_) => false,
-    };
+    let frontmost = frontmost(pid)?;
     let focused = match app.attribute("AXFocusedWindow") {
         Ok(Value::Element(focused)) => Some(focused),
         Err(error) if error == ax::AX_CANNOT_COMPLETE => return Err(unread(error, "read the app's focused window")),
