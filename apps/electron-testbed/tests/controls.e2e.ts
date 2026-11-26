@@ -1,0 +1,117 @@
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { test } from '@e2e-dev/electron';
+import { expect } from 'e2e';
+
+/** What a rejected step threw, for checking its code. */
+function failure(promise: Promise<unknown>): Promise<unknown> {
+  return promise.then(() => undefined, (error: unknown) => error);
+}
+
+test.describe('controls page', () => {
+  test.beforeEach(async ({ app, electron, screen }) => {
+    await app.open();
+    await electron.evaluate(() => (globalThis as unknown as { testbedOpen: (page: string) => Promise<void> }).testbedOpen('controls.html'));
+    await expect(screen.getByRole('heading', 'Controls')).toBeVisible();
+  });
+
+  test('fills a range past its default bounds, an input of an unknown type, and pickers as web() does', async ({ screen }) => {
+    await screen.getByLabel('Budget').fill('750');
+    await expect(screen.getByTestId('budget')).toHaveValue('750');
+    await screen.getByRole('textbox', 'Nickname').fill('Ace');
+    await expect(screen.getByTestId('nickname')).toHaveValue('Ace');
+    await screen.getByTestId('tint').fill('#FF8800');
+    await expect(screen.getByTestId('tint')).toHaveValue('#ff8800');
+    await screen.getByTestId('birthday').fill(' 2026-01-02 ');
+    await expect(screen.getByTestId('birthday')).toHaveValue('2026-01-02');
+    await expect(screen.getByRole('textbox', 'Birthday')).toHaveCount(1);
+    // The field order follows the OS locale, so the typed digits are checked only for landing in the field.
+    await screen.getByTestId('birthday').clear();
+    await screen.getByTestId('birthday').pressSequentially('05172026');
+    await expect(screen.getByTestId('birthday')).not.toHaveValue('');
+  });
+
+  test('reads an editing host with no role as a text field', async ({ screen }) => {
+    await expect(screen.getByTestId('bare-editor')).toHaveRole('textbox');
+  });
+
+  test('checks a mixed checkbox and refuses to uncheck a radio at once', async ({ screen }) => {
+    await screen.getByRole('checkbox', 'Some files').check();
+    await expect(screen.getByRole('checkbox', 'Some files')).toBeChecked();
+    const started = Date.now();
+    const refused = await failure(screen.getByRole('radio', 'Free').uncheck({ timeout: 5000 }));
+    expect(refused).toMatchObject({ code: 'ACTION_FAILED', message: expect.stringContaining('select another radio') });
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  test('clears a file input with no files and refuses two files where one fits', async ({ screen }) => {
+    await screen.getByTestId('attachment').setInputFiles('app/settings.html');
+    await expect(screen.getByTestId('attachment-count')).toHaveText('1 files');
+    await screen.getByTestId('attachment').setInputFiles([]);
+    await expect(screen.getByTestId('attachment-count')).toHaveText('0 files');
+    const refused = await failure(screen.getByTestId('attachment').setInputFiles(['app/settings.html', 'app/settings.html']));
+    expect(refused).toMatchObject({ code: 'INVALID_ARGUMENT' });
+  });
+
+  test('chooses an option by its label only when it has a label attribute, and refuses a select no one can see', async ({ screen }) => {
+    await screen.getByTestId('size').selectOption('Extra large');
+    await expect(screen.getByTestId('size')).toHaveValue('xl');
+    expect(await failure(screen.getByTestId('size').selectOption('XL', { timeout: 1000 }))).toMatchObject({ code: 'ACTION_FAILED' });
+    expect(await failure(screen.getByTestId('folded-select').selectOption('B', { timeout: 1000 }))).toMatchObject({ code: 'ACTION_FAILED' });
+  });
+
+  test('reads table cells apart, source text, options of a closed select, and visibility as web() does', async ({ screen, electron }) => {
+    await expect(screen.getByTestId('ada-row')).toHaveText('Ada 36');
+    await expect(screen.getByText('shouty text')).toHaveCount(1);
+    await expect(screen.getByRole('option', 'Small')).toHaveCount(1);
+    await expect(screen.getByTestId('invisible')).toBeHidden();
+    await expect(electron.locator('[data-testid="invisible"]')).toBeHidden();
+  });
+
+  test('refuses to scroll to an element that is not rendered, and an invalid selector as a locator error', async ({ screen, electron }) => {
+    expect(await failure(screen.getByTestId('not-rendered').scrollIntoView({ timeout: 1000 }))).toMatchObject({ code: 'ACTION_FAILED' });
+    expect(await failure(electron.locator('div[[').count())).toMatchObject({ code: 'INVALID_LOCATOR' });
+  });
+
+  test('taps a button the app renders anew while the tap waits', async ({ screen }) => {
+    await screen.getByRole('button', 'Start re-render').tap();
+    await screen.getByRole('button', 'Save draft').tap({ timeout: 5000 });
+    await expect(screen.getByTestId('draft-status')).toHaveText('Saved');
+  });
+
+  test('taps a button a sticky header covers', async ({ screen }) => {
+    await screen.getByRole('button', 'Scroll the target under the header').tap();
+    await screen.getByRole('button', 'Behind the header').tap({ timeout: 5000 });
+    await expect(screen.getByTestId('under-header-status')).toHaveText('Tapped');
+  });
+
+  test('restarts promptly through a beforeunload guard, and the app runs its quit handlers', async ({ app, screen, electron }) => {
+    const userData = await electron.evaluate(({ app: main }) => main.getPath('userData'));
+    await screen.getByRole('button', 'Guard unload').tap();
+    const started = Date.now();
+    await app.restart();
+    expect(Date.now() - started).toBeLessThan(4000);
+    expect(existsSync(path.join(userData, 'quit-handled'))).toBe(true);
+  });
+});
+
+test.describe('a shown window that closes', () => {
+  test('reads the window shown before it at once, though its close event comes later', async ({ app, screen, electron }) => {
+    await app.open();
+    await screen.getByRole('button', 'Open settings').tap();
+    await electron.useWindow({ title: 'Settings' });
+    await expect(screen.getByRole('switch', 'Dark mode')).toBeVisible();
+    await electron.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'Settings')?.destroy();
+    });
+    await expect(screen.getByTestId('status')).toHaveText('Not signed in', { timeout: 2000 });
+  });
+});
+
+test.describe('the app not running', () => {
+  test('a locator says the app is not open rather than waiting out its timeout', async ({ screen }) => {
+    const started = Date.now();
+    expect(await failure(screen.getByRole('button', 'Sign in').tap({ timeout: 5000 }))).toMatchObject({ code: 'APP_NOT_OPEN' });
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+});

@@ -46,6 +46,14 @@ ipcMain.handle('testbed:open-settings', () => {
 });
 ipcMain.handle('testbed:user-data', () => app.getPath('userData'));
 
+/** Loads another page of the app into the first window, for tests of controls the sign-in form does not have. */
+globalThis.testbedOpen = (page) => BrowserWindow.getAllWindows()[0].loadFile(path.join(__dirname, page));
+
+/** Marks that the app ran its quit handlers, which a window's beforeunload guard must not stop. */
+app.on('will-quit', () => {
+  require('node:fs').writeFileSync(path.join(app.getPath('userData'), 'quit-handled'), '1');
+});
+
 app.whenReady().then(() => {
   createWindow('index.html', { title: 'Sign In' });
 });

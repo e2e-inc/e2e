@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <title>Controls</title>
+    <style>
+      body { font: 14px system-ui, sans-serif; margin: 0; }
+      main { padding: 0 24px 24px; display: grid; gap: 10px; max-width: 420px; }
+      header { position: sticky; top: 0; height: 60px; background: #fff; border-bottom: 1px solid #ccc; z-index: 1; display: flex; align-items: center; padding: 0 24px; }
+      #cover { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.2); }
+      .spacer { height: 900px; }
+    </style>
+  </head>
+  <body>
+    <header>Sticky header</header>
+    <main>
+      <h1>Controls</h1>
+      <label>Budget <input type="range" min="0" max="1000" step="50" value="100" data-testid="budget" /></label>
+      <label>Nickname <input type="unknownkind" data-testid="nickname" /></label>
+      <label>Birthday <input type="date" data-testid="birthday" /></label>
+      <label>Tint <input type="color" data-testid="tint" /></label>
+      <div contenteditable="true" data-testid="bare-editor">Bare editor text</div>
+      <div role="checkbox" aria-checked="mixed" tabindex="0" id="some-files">Some files</div>
+      <fieldset>
+        <legend>Tier</legend>
+        <label><input type="radio" name="tier" value="free" checked /> Free</label>
+        <label><input type="radio" name="tier" value="paid" /> Paid</label>
+      </fieldset>
+      <label>Attachment <input type="file" data-testid="attachment" /></label>
+      <output data-testid="attachment-count">0 files</output>
+      <details><summary>More options</summary><select data-testid="folded-select"><option>A</option><option>B</option></select></details>
+      <label>Size
+        <select data-testid="size">
+          <option value="xl" label="Extra large">XL</option>
+          <option value="s">Small</option>
+        </select>
+      </label>
+      <table>
+        <tbody><tr data-testid="ada-row"><td>Ada</td><td>36</td></tr></tbody>
+      </table>
+      <p style="text-transform: uppercase">shouty text</p>
+      <p data-testid="invisible" style="visibility: hidden">Invisible text</p>
+      <p data-testid="not-rendered" style="display: none">Not rendered</p>
+      <button type="button" id="guard">Guard unload</button>
+      <button type="button" id="rerender-start">Start re-render</button>
+      <div id="rerender-host"><button type="button" id="draft">Save draft</button></div>
+      <output data-testid="draft-status">Not saved</output>
+      <button type="button" id="scroll-under">Scroll the target under the header</button>
+      <div class="spacer"></div>
+      <button type="button" id="under-header">Behind the header</button>
+      <output data-testid="under-header-status">Not tapped</output>
+      <div class="spacer"></div>
+    </main>
+    <script src="controls.js"></script>
+  </body>
+</html>
