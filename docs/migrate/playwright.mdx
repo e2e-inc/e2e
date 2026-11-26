@@ -122,7 +122,8 @@ run only in a browser, so a test that uses it declares
 | `click({ button: 'right' })`, `click({ button: 'middle' })` | the same |
 | `click({ delay })` | `longPress({ duration })` |
 | `click({ position })`, `click({ modifiers })`, `click({ clickCount: 3 })` | `tap({ position })`, `tap({ modifiers })`, `tap({ count: 3 })` |
-| `fill()`, `pressSequentially()`, `clear()`, `focus()`, `blur()`, `hover()`, `check()`, `uncheck()`, `dragTo()`, `setInputFiles(path)`, `selectOption({ label })` or `{ value }` | the same, without `force`, `trial`, or `position` |
+| `dblclick({ position })`, `click({ button: 'right', position })`, `hover({ position })` | the same, measured from the top-left corner as in Playwright. A percentage of the box also works: `{ x: '50%', y: '50%' }` is the center |
+| `fill()`, `pressSequentially()`, `clear()`, `focus()`, `blur()`, `hover()`, `check()`, `uncheck()`, `dragTo()`, `setInputFiles(path)`, `selectOption({ label })` or `{ value }` | the same, without `force` or `trial`. Of these, only `hover()` takes `position` |
 | `setInputFiles({ name, mimeType, buffer })` | Web only. Pass a plain object with only `name`, `mimeType`, and `buffer`. |
 | `press(key)` | the same for one character or a [named key](/reference/engine#keys); `browser.keyboard.press` after `focus()` for a key code |
 | `innerText()`, `allInnerTexts()`, `scrollIntoViewIfNeeded()` | `textContent()`, `allTextContents()`, `scrollIntoView()` |
@@ -272,7 +273,7 @@ purpose. Use the workaround, or keep the test in Playwright.
 | --- | --- |
 | `locator.and()`, `filter({ visible })` | One `browser.locator` selector, or a `screen` query inside the scope |
 | `locator.evaluate()`, `expect(locator).toHaveClass()`, `toHaveCSS()`, `dispatchEvent()` | `browser.evaluate(fn, selector)`; `expect(browser).toHaveClass(locator, cls)` |
-| `selectOption([...])`, `hover({ position })` | `browser.evaluate` for a multi-select; `browser.mouse` with `boundingBox()` |
+| `selectOption([...])` | `browser.evaluate` for a multi-select |
 
 </Accordion>
 <Accordion title="Assertions">

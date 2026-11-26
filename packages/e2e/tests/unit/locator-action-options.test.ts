@@ -16,7 +16,8 @@ import {
   type PointerAction,
   LOCATOR_ACTION_KINDS,
 } from '@e2e-dev/core/lib/engine/index';
-import type { ActionOptions, Locator, Screen, TapOptions } from '@e2e-dev/core/lib/types';
+import type { ActionOptions, ClickOptions, HoverOptions, Locator, Screen, ScreenPoint, TapOptions } from '@e2e-dev/core/lib/types';
+import { EngineError } from '@e2e-dev/core/lib/engine/contract';
 import { invalid } from '../helpers/invalid.ts';
 import { screenOver, type ScreenOverOptions } from '../helpers/screen-over.ts';
 import { snapshot } from '../helpers/snapshot.ts';
@@ -85,22 +86,34 @@ function tapScreen(flags: Pick<ScreenOverOptions, 'actions' | 'tapModifiers' | '
 }
 
 /** Creates a screen with a positioned box and all pointer actions, recording lookups and point actions. */
-function pointScreen(flags: { tapButtons?: boolean } = {}) {
-  const box = { ...BOX, rect: { x: 10, y: 20, width: 100, height: 40 } };
+function pointScreen(
+  flags: Pick<ScreenOverOptions, 'tapButtons' | 'pointerActions'> & {
+    origin?: { x: number; y: number };
+    rect?: { x: number; y: number; width: number; height: number };
+    observeFailures?: Error[];
+  } = {},
+) {
+  const { origin, rect = { x: 10, y: 20, width: 100, height: 40 }, observeFailures = [], ...engine } = flags;
+  const box = { ...BOX, rect, ...(origin === undefined ? {} : { origin }) };
   const at: { action: PointerAction; point: { x: number; y: number } }[] = [];
   const locate = vi.fn(async (expression: LocatorExpression) => resolveExpression(expression, [box]));
+  const observe = vi.fn(() => {
+    const failure = observeFailures.shift();
+    if (failure !== undefined) throw failure;
+    return snapshot([box]);
+  });
   const { screen, steps } = screenOver({
     locate,
-    observe: () => snapshot([box]),
+    observe,
     perform: () => {},
     performAt: (point, action: PointerAction) => {
       at.push({ action, point });
     },
     pointerActions: KNOWN_POINTER_ACTION_KINDS,
-    ...flags,
+    ...engine,
     timeoutMs: 1_000,
   });
-  return { screen, steps, at, locate };
+  return { screen, steps, at, locate, observe };
 }
 
 describe('locator action options', () => {
@@ -423,6 +436,207 @@ describe('locator action options', () => {
       const { screen, at } = pointScreen();
       await screen.getByLabel('Agree').tap({ button: 'right', position: { x: 1, y: 1 } });
       expect(at).toEqual([{ action: { kind: 'secondaryTap' }, point: { x: 11, y: 21 } }]);
+    });
+  });
+
+  describe('position', () => {
+    it.each([
+      ['tap', (locator: Locator) => locator.tap({ position: { x: 1, y: 2 } }), { kind: 'tap' }],
+      ['click', (locator: Locator) => locator.click({ position: { x: 1, y: 2 } }), { kind: 'tap' }],
+      ['doubleTap', (locator: Locator) => locator.doubleTap({ position: { x: 1, y: 2 } }), { kind: 'doubleTap' }],
+      ['dblclick', (locator: Locator) => locator.dblclick({ position: { x: 1, y: 2 } }), { kind: 'doubleTap' }],
+      ['secondaryTap', (locator: Locator) => locator.secondaryTap({ position: { x: 1, y: 2 } }), { kind: 'secondaryTap' }],
+      ['hover', (locator: Locator) => locator.hover({ position: { x: 1, y: 2 } }), { kind: 'hover' }],
+    ] as const)('%s sends its pointer action at the point of the box, labelled with the point', async (verb, call, action) => {
+      const { screen, steps, at } = pointScreen();
+      await call(screen.getByLabel('Agree'));
+      expect(at).toEqual([{ action, point: { x: 11, y: 22 } }]);
+      expect(steps.all()).toEqual([
+        expect.objectContaining({ api: `locator.${verb}`, label: 'getByLabel("Agree") at (1, 2)', status: 'passed' }),
+      ]);
+    });
+
+    it('reads a percentage as a share of the box, keeping 100% on its last pixel', async () => {
+      const { screen, steps, at } = pointScreen();
+      await screen.getByLabel('Agree').doubleTap({ position: { x: '50%', y: '50%' } });
+      await screen.getByLabel('Agree').hover({ position: { x: '100%', y: '100%' } });
+      await screen.getByLabel('Agree').secondaryTap({ position: { x: '0%', y: '25%' } });
+      expect(at).toEqual([
+        { action: { kind: 'doubleTap' }, point: { x: 60, y: 40 } },
+        { action: { kind: 'hover' }, point: { x: 109, y: 59 } },
+        { action: { kind: 'secondaryTap' }, point: { x: 10, y: 30 } },
+      ]);
+      expect(steps.all().map((step) => step.label)).toEqual([
+        'getByLabel("Agree") at (50%, 50%)',
+        'getByLabel("Agree") at (100%, 100%)',
+        'getByLabel("Agree") at (0%, 25%)',
+      ]);
+    });
+
+    it('measures pixels from the node origin and percentages from the box corner', async () => {
+      const { screen, at } = pointScreen({ origin: { x: 12, y: 23 } });
+      await screen.getByLabel('Agree').tap({ position: { x: 3, y: '50%' } });
+      await screen.getByLabel('Agree').hover({ position: { x: '10%', y: 4 } });
+      expect(at).toEqual([
+        { action: { kind: 'tap' }, point: { x: 15, y: 40 } },
+        { action: { kind: 'hover' }, point: { x: 20, y: 27 } },
+      ]);
+    });
+
+    it('reads a percentage as a share of the part of the box inside the viewport, and a pixel coordinate from the uncut box', async () => {
+      const { screen, at } = pointScreen({ rect: { x: 1200, y: -500, width: 200, height: 3000 } });
+      await screen.getByLabel('Agree').tap({ position: { x: '50%', y: '50%' } });
+      await screen.getByLabel('Agree').hover({ position: { x: '100%', y: 10 } });
+      expect(at).toEqual([
+        { action: { kind: 'tap' }, point: { x: 1240, y: 360 } },
+        { action: { kind: 'hover' }, point: { x: 1279, y: -490 } },
+      ]);
+    });
+
+    it('keeps a percentage on the whole pixels of a box at a fractional position', async () => {
+      const { screen, at } = pointScreen({ rect: { x: 10.5, y: 20.25, width: 100, height: 40 } });
+      await screen.getByLabel('Agree').tap({ position: { x: '0%', y: '0%' } });
+      await screen.getByLabel('Agree').tap({ position: { x: '100%', y: '100%' } });
+      expect(at).toEqual([
+        { action: { kind: 'tap' }, point: { x: 11, y: 21 } },
+        { action: { kind: 'tap' }, point: { x: 109, y: 59 } },
+      ]);
+    });
+
+    it('taps the whole coordinate inside a box along a side that holds no whole pixel', async () => {
+      const { screen, at } = pointScreen({ rect: { x: 300.5, y: 20, width: 1, height: 40 } });
+      await screen.getByLabel('Agree').tap({ position: { x: '50%', y: '50%' } });
+      await screen.getByLabel('Agree').tap({ position: { x: '0%', y: '100%' } });
+      await screen.getByLabel('Agree').tap({ position: { x: '100%', y: '0%' } });
+      expect(at).toEqual([
+        { action: { kind: 'tap' }, point: { x: 301, y: 40 } },
+        { action: { kind: 'tap' }, point: { x: 301, y: 59 } },
+        { action: { kind: 'tap' }, point: { x: 301, y: 20 } },
+      ]);
+    });
+
+    it('takes a percentage of the unrounded part of a box in the viewport along a side with no whole coordinate inside it', async () => {
+      const { screen, at } = pointScreen({ rect: { x: 300.2, y: 20, width: 0.6, height: 40 } });
+      await screen.getByLabel('Agree').tap({ position: { x: '50%', y: '50%' } });
+      await screen.getByLabel('Agree').tap({ position: { x: '100%', y: '100%' } });
+      expect(at).toEqual([
+        { action: { kind: 'tap' }, point: { x: 300.2, y: 40 } },
+        { action: { kind: 'tap' }, point: { x: 300.2, y: 59 } },
+      ]);
+    });
+
+    it('reads the viewport once for a percentage, and not for pixels', async () => {
+      const { screen, at, observe } = pointScreen();
+      await screen.getByLabel('Agree').tap({ position: { x: 5, y: 5 } });
+      expect(observe).not.toHaveBeenCalled();
+      await screen.getByLabel('Agree').tap({ position: { x: '50%', y: 5 } });
+      expect(observe).toHaveBeenCalledTimes(1);
+      expect(at.map(({ point }) => point)).toEqual([{ x: 15, y: 25 }, { x: 60, y: 25 }]);
+    });
+
+    it('reads the viewport again when a retryable failure cuts its read short, as it reads a stale node again', async () => {
+      const { screen, at, observe } = pointScreen({
+        observeFailures: [new EngineError('NODE_STALE', 'observation page was replaced', { retryable: true })],
+      });
+      await screen.getByLabel('Agree').tap({ position: { x: '50%', y: '50%' } });
+      expect(observe).toHaveBeenCalledTimes(2);
+      expect(at).toEqual([{ action: { kind: 'tap' }, point: { x: 60, y: 40 } }]);
+    });
+
+    it('fails with LOCATOR_NOT_FOUND naming the viewport read, with its last failure as the cause, when that read keeps failing until the timeout', async () => {
+      const stale = () => new EngineError('NODE_STALE', 'observation page was replaced', { retryable: true });
+      const { screen, at } = pointScreen({ observeFailures: Array.from({ length: 100 }, stale) });
+      const failure = await screen.getByLabel('Agree').tap({ position: { x: '50%', y: '50%' }, timeout: 300 }).catch((error: unknown) => error);
+      expect(failure).toMatchObject({
+        code: 'LOCATOR_NOT_FOUND',
+        message: 'the viewport could not be read to place a percentage position on the locator: getByLabel("Agree")',
+        cause: { code: 'NODE_STALE', message: 'observation page was replaced' },
+      });
+      expect(at).toEqual([]);
+    });
+
+    it('fails with the public error when the viewport read fails for good, and taps nothing', async () => {
+      const { screen, at } = pointScreen({
+        observeFailures: [new EngineError('ENGINE_FAILURE', 'the device reported no screen geometry', { retryable: false })],
+      });
+      await expect(screen.getByLabel('Agree').tap({ position: { x: '50%', y: '50%' } })).rejects.toMatchObject({
+        code: 'ENGINE_FAILURE',
+        message: expect.stringContaining('the device reported no screen geometry'),
+      });
+      expect(at).toEqual([]);
+    });
+
+    it('waits for a box outside the viewport to come into it before taking a percentage of it, and fails with LOCATOR_NOT_FOUND', async () => {
+      const { screen, at } = pointScreen({ rect: { x: 10, y: 800, width: 100, height: 40 } });
+      await expect(screen.getByLabel('Agree').tap({ position: { x: '50%', y: '50%' }, timeout: 300 })).rejects.toMatchObject({
+        code: 'LOCATOR_NOT_FOUND',
+        message: expect.stringContaining('did not become visible with a box in the viewport to act within'),
+      });
+      await screen.getByLabel('Agree').tap({ position: { x: 5, y: 5 } });
+      expect(at).toEqual([{ action: { kind: 'tap' }, point: { x: 15, y: 805 } }]);
+    });
+
+    it('refuses a positioned hover on an engine without the hover pointer action before resolving the node', async () => {
+      const { screen, steps, at, locate } = pointScreen({ pointerActions: ['tap', 'doubleTap', 'multiTap', 'longPress', 'swipeTo'] });
+      await expect(screen.getByLabel('Missing').hover({ position: { x: 1, y: 1 } })).rejects.toMatchObject({
+        code: 'UNSUPPORTED_CAPABILITY',
+        message: expect.stringContaining('the "hover" action at a point is not available on this target'),
+      });
+      expect(locate).not.toHaveBeenCalled();
+      expect(at).toEqual([]);
+      expect(steps.all()).toEqual([expect.objectContaining({ api: 'locator.hover', status: 'failed' })]);
+    });
+
+    it('refuses a positioned secondary tap on an engine without the secondaryTap pointer action before resolving the node', async () => {
+      const { screen, at, locate } = pointScreen({ pointerActions: ['tap', 'doubleTap'] });
+      await expect(screen.getByLabel('Missing').secondaryTap({ position: { x: 1, y: 1 } })).rejects.toMatchObject({
+        code: 'UNSUPPORTED_CAPABILITY',
+        message: expect.stringContaining('the "secondaryTap" action at a point is not available on this target'),
+      });
+      expect(locate).not.toHaveBeenCalled();
+      expect(at).toEqual([]);
+    });
+
+    it.each([
+      [{ x: '150%', y: 0 }, `takes a percentage from '0%' through '100%', got "150%"`],
+      [{ x: '50', y: 0 }, `takes a percentage from '0%' through '100%', got "50"`],
+      [{ x: -1, y: 0 }, 'requires a point { x, y } of non-negative numbers'],
+      [{ x: 1 }, 'requires a point { x, y } of finite numbers or percentages'],
+    ])('rejects position %j before any lookup, action, or step', async (position, message) => {
+      const { screen, steps, at, locate } = pointScreen();
+      const locator = screen.getByLabel('Agree');
+      await expect(
+        Promise.resolve().then(() => locator.dblclick({ position: invalid<ScreenPoint>(position) })),
+      ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: `dblclick position ${message}` });
+      await expect(
+        Promise.resolve().then(() => locator.hover({ position: invalid<ScreenPoint>(position) })),
+      ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: `hover position ${message}` });
+      expect(locate).not.toHaveBeenCalled();
+      expect(at).toEqual([]);
+      expect(steps.all()).toEqual([]);
+    });
+
+    it.each([
+      ['doubleTap', (locator: Locator) => locator.doubleTap({ modifiers: ['Shift'], position: { x: 1, y: 1 } })],
+      ['secondaryTap', (locator: Locator) => locator.secondaryTap({ modifiers: ['Alt'], position: { x: 1, y: 1 } })],
+    ] as const)('%s refuses modifiers with a position, as tap does', async (verb, call) => {
+      const { screen } = tapScreen({ tapModifiers: true });
+      await expect(Promise.resolve().then(() => call(screen.getByLabel('Agree')))).rejects.toMatchObject({
+        code: 'INVALID_ARGUMENT',
+        message: `${verb}() does not take modifiers with a position yet; drop one of them`,
+      });
+    });
+
+    it.each([
+      ['doubleTap', (locator: Locator) => locator.doubleTap(invalid<ClickOptions>({ count: 3 }))],
+      ['secondaryTap', (locator: Locator) => locator.secondaryTap(invalid<ClickOptions>({ button: 'middle' }))],
+      ['hover', (locator: Locator) => locator.hover(invalid<HoverOptions>({ modifiers: ['Shift'] }))],
+    ] as const)('%s still refuses the options only tap and click take', async (verb, call) => {
+      const { screen } = tapScreen();
+      await expect(Promise.resolve().then(() => call(screen.getByLabel('Agree')))).rejects.toMatchObject({
+        code: 'INVALID_ARGUMENT',
+        message: expect.stringMatching(`^${verb} options has no key`),
+      });
     });
   });
 

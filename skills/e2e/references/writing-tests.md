@@ -479,16 +479,15 @@ Each action resolves one node, waits up to `config.actionTimeout` (30 s, or
 `click()`, `{ button: 'middle' }` or `{ button: 'right' }` clicks with that
 mouse button, and `{ count: 3 }` taps three times in a row, a triple click in
 a browser. `count` is a positive safe integer. `2` is `doubleTap()`, and 3 or
-more need `multiTap`, up to 200 on browser and mobile, and browser-only with
-`position`),
+more need `multiTap`, up to 200 on browser and mobile),
 `doubleTap()` (alias `dblclick()`),
-`secondaryTap()` (each takes `{ modifiers: ['Shift'] }`),
+`secondaryTap()` (each takes `{ modifiers: ['Shift'] }` and `{ position }`),
 `longPress({ duration? })`
 (100 to 10000 ms; default 500 on the web, 1000 on a device),
 `fill(value | Secret)`, `pressSequentially(text, { delay? })`, `clear()`,
 `press(key)`, `check()`, `uncheck()`,
 `selectOption(label | { label } | { value } | { index })` (one option; an
-array is `INVALID_ARGUMENT`), `focus()`, `blur()`, `hover()`, `setInputFiles(files)`
+array is `INVALID_ARGUMENT`), `focus()`, `blur()`, `hover({ position? })`, `setInputFiles(files)`
 (paths relative to the project root, or `{ name, mimeType, buffer: Buffer }` payloads, singly or as an array; `[]` clears; a missing path, or one under a directory the runner cannot search, is `INVALID_ARGUMENT`), `dragTo(locator)`, `scrollIntoView()`,
 `swipe({ direction, momentum? })`. Web only, `UNSUPPORTED_CAPABILITY` on a
 device: `blur`, `secondaryTap`, `selectOption`, `setInputFiles`, `scrollIntoView`,
@@ -503,7 +502,19 @@ field and types one character per `delay`, plain string only (a `Secret` is
 
 Coordinates are CSS pixels, for what the tree does not list: `tap({ position:
 { x, y } })` offsets from the node's top-left corner inside its border (with `modifiers` it is
-`INVALID_ARGUMENT`), `screen.tapAt({ x, y })` taps a viewport point,
+`INVALID_ARGUMENT`). `doubleTap`, `secondaryTap`, and `hover` take the same
+`position`. A position percentage is a share of the node's box as
+`boundingBox()` reports it, the border included, cut to the viewport:
+`{ x: '50%', y: '50%' }` is the center of the part in view. Nothing else cuts
+it: not a scroll container or `overflow: hidden` ancestor, and not an outer
+frame that a nested frame's content overflows. So `'50%'` of a 600px button
+in a 200px `overflow: auto` div lands past the div's edge and the step
+passes: use a pixel position there, or scroll first. A CSS transform on a
+frame isn't counted either, so no position lands right in a scaled frame.
+With a position, the pointer goes to the point once the node is in view and has a
+box, with no other actionability check.
+`hover({ position })` is `UNSUPPORTED_CAPABILITY` on a device.
+`screen.tapAt({ x, y })` taps a viewport point,
 `screen.doubleTapAt({ x, y })` double-taps a viewport point,
 `screen.swipe({ from, to, duration? })` swipes along a path (on iOS an
 untimed one must stay above the open soft keyboard; pass `duration` to drag

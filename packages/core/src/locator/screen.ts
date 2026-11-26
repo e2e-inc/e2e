@@ -7,7 +7,7 @@ import type { LocatorAction, LocatorExpression, Observation, PointerAction, Sema
 import { locatorBrand } from '../internal/brands.ts';
 import { isSecret } from '../secrets.ts';
 import { TestError } from '../internal/errors.ts';
-import { isPercentage, requireFinitePoint } from '../internal/geometry.ts';
+import { isPercentage } from '../internal/geometry.ts';
 import { isCheckable, isValueControl } from '../internal/roles.ts';
 import { isPlainObject, rejectUnknownOptions } from '../internal/options.ts';
 import { realmSlot } from '../internal/realm-slot.ts';
@@ -17,10 +17,10 @@ import type {
   ActionOptions,
   ClickOptions,
   FilePayload,
+  HoverOptions,
   LongPressOptions,
   Locator,
   Momentum,
-  Point,
   PressSequentiallyOptions,
   Role,
   RoleAlias,
@@ -418,58 +418,54 @@ class LocatorImpl extends ScreenImpl implements Locator {
     return this.tapWith('click', options);
   }
 
+  doubleTap(options?: ClickOptions): Promise<void> {
+    return this.tapWith('doubleTap', options, { count: 2 });
+  }
+
+  dblclick(options?: ClickOptions): Promise<void> {
+    return this.tapWith('dblclick', options, { count: 2 });
+  }
+
+  secondaryTap(options?: ClickOptions): Promise<void> {
+    return this.tapWith('secondaryTap', options, { button: 'right' });
+  }
+
   /**
    * `count` taps of the node: the platform's own, or, with a position, the
-   * pointer dispatched at that offset of the node's box. Two taps are the
+   * pointer dispatched at that point of the node's box. Two taps are the
    * `doubleTap` kind, so `tap({ count: 2 })` is `doubleTap()` on every
    * engine; three or more are `multiTap`. A left click is sent without
    * `button`, so it works on an engine without `tapButtons`. A single right
-   * click is the `secondaryTap` kind.
+   * click is the `secondaryTap` kind. `doubleTap`, `dblclick`, and
+   * `secondaryTap` pass their own count or button in `fixed`, and their
+   * step label leaves it out.
    */
-  private tapWith(api: 'tap' | 'click', options: TapOptions | undefined): Promise<void> {
-    rejectUnknownOptions(api, options, ['timeout', 'position', 'modifiers', 'count', 'button']);
+  private tapWith(
+    api: 'tap' | 'click' | 'doubleTap' | 'dblclick' | 'secondaryTap',
+    options: TapOptions | undefined,
+    fixed?: { readonly count?: 2; readonly button?: 'right' },
+  ): Promise<void> {
+    const keys = ['timeout', 'position', 'modifiers'];
+    rejectUnknownOptions(api, options, fixed === undefined ? [...keys, 'count', 'button'] : keys);
     const modifiers = requireModifiers(options?.modifiers, api);
     const count = requireTapCount(options?.count, api);
     const button = options?.button === 'left' ? undefined : options?.button;
     if (button !== undefined && button !== 'middle' && button !== 'right') {
       throw new TestError('INVALID_ARGUMENT', `${api}() button ${describeValue(button)} is not one of left, middle, right`);
     }
-    const action = tapAction(count, button);
+    const action = tapAction(fixed?.count ?? count, fixed?.button ?? button);
     const label = this.tapLabel(count === 1 ? undefined : count, button, modifiers.modifiers);
     if (options?.position === undefined) return this.dispatchTap(api, { ...action, ...modifiers }, label, options?.timeout);
     if (modifiers.modifiers !== undefined) {
       throw new TestError('INVALID_ARGUMENT', `${api}() does not take modifiers with a position yet; drop one of them`);
     }
-    const position = requirePoint(options.position, `${api} position`);
+    const position = requireScreenPoint(options.position, `${api} position`);
     return this.context.steps.run(
       'locator',
       `locator.${api}`,
       `${label} at ${describePoint(position)}`,
       () => this.context.engine.performWithin(this.expression, position, action, options.timeout),
     );
-  }
-
-  doubleTap(options?: ClickOptions): Promise<void> {
-    return this.clickWith('doubleTap', 'doubleTap', options);
-  }
-
-  dblclick(options?: ClickOptions): Promise<void> {
-    return this.clickWith('dblclick', 'doubleTap', options);
-  }
-
-  secondaryTap(options?: ClickOptions): Promise<void> {
-    return this.clickWith('secondaryTap', 'secondaryTap', options);
-  }
-
-  /** A double or secondary tap, with the keys `modifiers` holds for it. */
-  private clickWith(
-    api: 'doubleTap' | 'dblclick' | 'secondaryTap',
-    kind: 'doubleTap' | 'secondaryTap',
-    options: ClickOptions | undefined,
-  ): Promise<void> {
-    rejectUnknownOptions(api, options, ['timeout', 'modifiers']);
-    const modifiers = requireModifiers(options?.modifiers, api);
-    return this.dispatchTap(api, { kind, ...modifiers }, this.tapLabel(undefined, undefined, modifiers.modifiers), options?.timeout);
   }
 
   /** Runs one tap-family action as a step with the given label. */
@@ -563,8 +559,20 @@ class LocatorImpl extends ScreenImpl implements Locator {
     return this.perform('blur', { kind: 'blur' }, options);
   }
 
-  hover(options?: ActionOptions): Promise<void> {
-    return this.perform('hover', { kind: 'hover' }, options);
+  hover(options?: HoverOptions): Promise<void> {
+    rejectUnknownOptions('hover', options, ['timeout', 'position']);
+    if (options?.position === undefined) {
+      return this.action('locator.hover', () =>
+        this.context.engine.perform(this.expression, { kind: 'hover' }, options?.timeout),
+      );
+    }
+    const position = requireScreenPoint(options.position, 'hover position');
+    return this.context.steps.run(
+      'locator',
+      'locator.hover',
+      `${this.label} at ${describePoint(position)}`,
+      () => this.context.engine.performWithin(this.expression, position, { kind: 'hover' }, options.timeout),
+    );
   }
 
   setInputFiles(files: string | readonly string[] | FilePayload | readonly FilePayload[], options?: ActionOptions): Promise<void> {
@@ -784,16 +792,7 @@ function isSwipePath(options: SwipeOptions | SwipePathOptions): options is Swipe
   return typeof options === 'object' && options !== null && ('from' in options || 'to' in options);
 }
 
-/** Validates a point a test names: finite, and never off the plane. */
-function requirePoint(point: Point | undefined, what: string): Point {
-  const at = requireFinitePoint(point, what);
-  if (at.x < 0 || at.y < 0) {
-    throw new TestError('INVALID_ARGUMENT', `${what} requires a point { x, y } of non-negative numbers`);
-  }
-  return at;
-}
-
-/** Validates a viewport point a test names: non-negative pixels or `'0%'` through `'100%'` per coordinate. */
+/** Validates a point a test names, in the viewport or a node's box: non-negative pixels or `'0%'` through `'100%'` per coordinate. */
 function requireScreenPoint(point: ScreenPoint | undefined, what: string): ScreenPoint {
   const { x, y } = (point ?? {}) as { readonly x?: unknown; readonly y?: unknown };
   return { x: requireCoordinate(x, what), y: requireCoordinate(y, what) };

@@ -101,3 +101,30 @@ test('screen.doubleTapAt edits a label beneath a sibling SVG', { platforms: ['we
   await label.fill('Renamed');
   await expect(label).toHaveValue('Renamed');
 });
+
+test('a positioned dblclick, right tap, and hover land at the point they name', { platforms: ['web'] }, async ({ app, browser, screen }) => {
+  await app.open('/pointer');
+  await browser.evaluate(() => {
+    const pad = document.querySelector<HTMLElement>('#pad')!;
+    const state = document.querySelector('output[aria-label="Pad state"]')!;
+    for (const type of ['dblclick', 'contextmenu', 'mousemove'] as const) {
+      pad.addEventListener(type, (event) => {
+        event.preventDefault();
+        const box = pad.getBoundingClientRect();
+        state.textContent = `${type} at ${Math.round(event.clientX - box.left)},${Math.round(event.clientY - box.top)} button ${event.button}`;
+      });
+    }
+    return null;
+  });
+  const pad = screen.getByRole('image', 'Pointer pad');
+  const state = screen.getByLabel('Pad state');
+
+  await pad.dblclick({ position: { x: '25%', y: 100 } });
+  await expect(state).toHaveText('dblclick at 80,100 button 0');
+
+  await pad.tap({ button: 'right', position: { x: 160, y: 40 } });
+  await expect(state).toHaveText('contextmenu at 160,40 button 2');
+
+  await pad.hover({ position: { x: '100%', y: 20 } });
+  await expect(state).toHaveText('mousemove at 319,20 button 0');
+});

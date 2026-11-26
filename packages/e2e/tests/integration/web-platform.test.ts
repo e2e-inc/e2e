@@ -330,6 +330,79 @@ test('taps use the requested mouse button, count, and position', async ({ app, s
   expect(await pressed({ count: 3, position: { x: 9, y: 5 } })).toEqual(['click b0 d1 x9', 'click b0 d2 x9', 'click b0 d3 x9']);
 });
 
+test('double taps, secondary taps, and hovers land at the position they name', async ({ app, screen, browser }) => {
+  await app.open();
+  await browser.evaluate(() => {
+    document.body.innerHTML =
+      '<div role="button" aria-label="Pad" style="position: absolute; left: 20px; top: 30px; width: 200px; height: 100px; border: 4px solid black"></div>';
+    const pad = document.querySelector('div')!;
+    const last: Record<string, string> = {};
+    (window as unknown as { last: Record<string, string> }).last = last;
+    for (const type of ['dblclick', 'contextmenu', 'mousemove']) {
+      pad.addEventListener(type, (event) => {
+        event.preventDefault();
+        const mouse = event as MouseEvent;
+        const box = pad.getBoundingClientRect();
+        last[type] = [mouse.clientX - box.left, mouse.clientY - box.top, 'b' + mouse.button].join(' ');
+      });
+    }
+    return null;
+  });
+  const pad = screen.getByRole('button', { name: 'Pad' });
+  const last = () => browser.evaluate(() => (window as unknown as { last: Record<string, string> }).last);
+  await pad.dblclick({ position: { x: '50%', y: '50%' } });
+  expect((await last()).dblclick).toBe('104 54 b0');
+  await pad.secondaryTap({ position: { x: 7, y: 9 } });
+  expect((await last()).contextmenu).toBe('11 13 b2');
+  await pad.doubleTap({ position: { x: 0, y: '100%' } });
+  expect((await last()).dblclick).toBe('4 107 b0');
+  await pad.hover({ position: { x: '100%', y: '0%' } });
+  expect((await last()).mousemove).toBe('207 0 b0');
+});
+
+test('a percentage position is of the part of the node its frame and the viewport show', async ({ app, screen, browser }) => {
+  await app.open();
+  await browser.evaluate(() => {
+    document.body.innerHTML =
+      '<iframe id="single" style="position: absolute; left: 20px; top: 150px; width: 100px; height: 60px; border: 0"></iframe>' +
+      '<div role="button" aria-label="Tall" style="position: absolute; left: 300px; top: 0; width: 200px; height: 3000px"></div>';
+    document.querySelector<HTMLIFrameElement>('#single')!.srcdoc =
+      '<body style="margin: 0; overflow: hidden"><button style="display: block; margin-left: -50px; width: 150px; height: 60px; border: 0; padding: 0">Shifted</button></body>';
+    return null;
+  });
+  const shifted = browser.frameLocator('#single').getByRole('button', { name: 'Shifted' });
+  const tall = screen.getByRole('button', { name: 'Tall' });
+  await expect(shifted).toBeVisible();
+  await browser.evaluate(() => {
+    const hits: string[] = [];
+    (window as unknown as { hits: string[] }).hits = hits;
+    const nodes = {
+      shifted: document.querySelector<HTMLIFrameElement>('#single')!.contentDocument!.querySelector('button')!,
+      tall: document.querySelector('div')!,
+    };
+    for (const [name, node] of Object.entries(nodes)) {
+      node.addEventListener('click', (event) => {
+        const box = node.getBoundingClientRect();
+        const shown = event.clientY >= 0 && event.clientY < node.ownerDocument.defaultView!.innerHeight;
+        hits.push([name, Math.round(event.clientX - box.left), Math.round(event.clientY - box.top), shown ? 'shown' : 'off screen'].join(' '));
+      });
+    }
+    return null;
+  });
+  const tapped = async (target: typeof tall, position: Parameters<typeof screen.tapAt>[0]) => {
+    await browser.evaluate(() => {
+      (window as unknown as { hits: string[] }).hits.length = 0;
+      return null;
+    });
+    await target.tap({ position });
+    return browser.evaluate(() => (window as unknown as { hits: string[] }).hits);
+  };
+  expect(await tapped(shifted, { x: '0%', y: '50%' })).toEqual(['shifted 50 30 shown']);
+  expect(await tapped(shifted, { x: '100%', y: 0 })).toEqual(['shifted 149 0 shown']);
+  expect(await tapped(shifted, { x: 60, y: 5 })).toEqual(['shifted 60 5 shown']);
+  expect(await tapped(tall, { x: '50%', y: '50%' })).toEqual([expect.stringMatching(/^tall 100 \\d+ shown$/)]);
+});
+
 test('a trigger that starts no download times out saying so', async ({ app, browser }) => {
   await app.open('/downloads');
   await browser.waitForDownload(() => new Promise((resolve) => setTimeout(resolve, 200)), { timeout: 500 });
@@ -645,6 +718,8 @@ describe('web platform integration', () => {
     'downloads are captured as artifacts',
     'clicks hold the modifiers they name',
     'taps use the requested mouse button, count, and position',
+    'double taps, secondary taps, and hovers land at the position they name',
+    'a percentage position is of the part of the node its frame and the viewport show',
     'a viewport set before the first navigation holds through app.open',
     'an empty class attribute is an empty class list',
     'reads wait for a node that arrives late',

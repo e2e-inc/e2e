@@ -458,24 +458,48 @@ export interface ActionOptions {
 }
 
 /**
- * A point in CSS pixels. For `tap({ position })` the origin is the node's own
- * top-left corner, inside its border on a document platform. A `Point` is
- * also a `ScreenPoint`, whose origin is the viewport's top-left corner, the
- * space `boundingBox()` reports in.
+ * A point in CSS pixels. A `Point` is also a `ScreenPoint`, whose origin is
+ * the viewport's top-left corner, the space `boundingBox()` reports in.
  */
 export type Point = ViewportPoint;
 
-/** CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`), `'0%'` through `'100%'`. */
+/**
+ * CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`),
+ * `'0%'` through `'100%'`. In a locator action's `position`, a percentage is
+ * of the node's box cut to the viewport instead.
+ */
 export type ScreenCoordinate = number | `${number}%`;
 
-/** A viewport point in pixels, percentages, or both: `{ x: '50%', y: 120 }`. */
+/** A point in pixels, percentages, or both: `{ x: '50%', y: 120 }`. In the viewport, or in a node's box for a locator action's `position`. */
 export interface ScreenPoint {
   readonly x: ScreenCoordinate;
   readonly y: ScreenCoordinate;
 }
 
-/** `tap`, `click`, `doubleTap`, `dblclick`, and `secondaryTap` options: the action timeout and the keys held for the click. */
+/** `tap`, `click`, `doubleTap`, `dblclick`, and `secondaryTap` options: the action timeout, the point of the node, and the keys held for the click. */
 export interface ClickOptions extends ActionOptions {
+  /**
+   * Where to tap in the node. A pixel coordinate is measured from the node's
+   * top-left corner, inside its border on a document platform. A percentage
+   * is a share of the node's box as `boundingBox()` reports it, cut to the
+   * viewport, in whole pixels. On a document platform that box includes the
+   * border, so `{ x: '0%', y: '0%' }` is the border's outer corner while
+   * `{ x: 0, y: 0 }` is inside the border. `{ x: '50%', y: '50%' }` is the
+   * center of the part in the viewport, and `'100%'` its last pixel.
+   * Nothing else cuts the box: not a scrolling or `overflow: hidden`
+   * ancestor, and not an outer frame that a nested frame's content overflows.
+   * In a 200px wide scroll container, `'50%'` of a 600px wide button is 300px
+   * into it, on whatever the page shows past the container's edge. Use a
+   * pixel position, or scroll first, there. A CSS transform on a frame is not
+   * counted either, so in a scaled frame neither kind of position lands where
+   * the frame draws the node. Without `position`
+   * the platform picks a point of the node, usually its center, behind its
+   * own actionability checks; with it the pointer is dispatched at that
+   * point once the node is in view and has a box. The engine needs the
+   * matching pointer action: `tap`, `secondaryTap` for a single right tap,
+   * `doubleTap` for 2 taps, or `multiTap` for 3 or more.
+   */
+  position?: ScreenPoint;
   /**
    * Keys held while the pointer clicks, as a Shift-click extends a selection:
    * `Shift`, `Control`, `Alt`, `Meta`, or `ControlOrMeta` (Control on Windows
@@ -487,16 +511,6 @@ export interface ClickOptions extends ActionOptions {
 
 /** `tap` and `click` options. */
 export interface TapOptions extends ClickOptions {
-  /**
-   * Where to tap, relative to the node's top-left corner, inside its border
-   * on a document platform. Without it the platform picks a point of the
-   * node, usually its center, behind its own actionability checks; with it
-   * the pointer is dispatched at that point once the node is in view and has
-   * a box. The engine needs the matching pointer action: `tap`,
-   * `secondaryTap` for a single right tap, `doubleTap` for 2 taps, or
-   * `multiTap` for 3 or more.
-   */
-  position?: Point;
   /**
    * How many taps in a row, a positive safe integer, default 1. `2` is the
    * same as `doubleTap()`; 3 or more needs an engine that declares the
@@ -513,6 +527,17 @@ export interface TapOptions extends ClickOptions {
    * `tapButtons`, and fails with `UNSUPPORTED_CAPABILITY` otherwise.
    */
   button?: 'left' | 'middle' | 'right';
+}
+
+/** `hover` options. */
+export interface HoverOptions extends ActionOptions {
+  /**
+   * Where to hover in the node, measured as a tap's `position` is. With it
+   * the pointer moves to that point once the node is in view and has a box,
+   * with no other actionability check. The engine needs the `hover` pointer
+   * action, `UNSUPPORTED_CAPABILITY` otherwise.
+   */
+  position?: ScreenPoint;
 }
 
 /** `longPress` options: the hold time in milliseconds, 100 through 10000, default the engine's own. */
@@ -605,11 +630,11 @@ export interface Locator extends Omit<Screen, 'tree' | 'debug' | 'pause'> {
   tap(options?: TapOptions): Promise<void>;
   /** Alias of tap. */
   click(options?: TapOptions): Promise<void>;
-  /** Double-taps exactly one matching actionable node. */
+  /** Double-taps exactly one matching actionable node; with `position`, that point of its box, as `tap` does. */
   doubleTap(options?: ClickOptions): Promise<void>;
   /** Alias of doubleTap. */
   dblclick(options?: ClickOptions): Promise<void>;
-  /** Secondary-taps exactly one matching actionable node: a right click, a two-finger tap. */
+  /** Secondary-taps exactly one matching actionable node: a right click, a two-finger tap; with `position`, at that point of its box, as `tap` does. */
   secondaryTap(options?: ClickOptions): Promise<void>;
   /** Long-presses exactly one matching actionable node. */
   longPress(options?: LongPressOptions): Promise<void>;
@@ -635,8 +660,8 @@ export interface Locator extends Omit<Screen, 'tree' | 'debug' | 'pause'> {
   focus(options?: ActionOptions): Promise<void>;
   /** Removes focus from exactly one node if it is focused. */
   blur(options?: ActionOptions): Promise<void>;
-  /** Hovers over exactly one matching actionable node. */
-  hover(options?: ActionOptions): Promise<void>;
+  /** Hovers over exactly one matching actionable node; with `position`, moves the pointer to that point of its box once it is in view, with no other actionability check. */
+  hover(options?: HoverOptions): Promise<void>;
   /** Sets the files of exactly one file input, or of a control that opens a file chooser; paths resolve from the project root, payloads supply bytes in memory, and an empty array clears the input. */
   setInputFiles(files: string | readonly string[] | FilePayload | readonly FilePayload[], options?: ActionOptions): Promise<void>;
   /** Drags exactly one node to exactly one target. */

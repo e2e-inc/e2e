@@ -61,7 +61,7 @@ export function clampToViewport(
 /** Digits with an optional fraction, then `%`: no sign, exponent, or space. */
 const PERCENTAGE = /^\d+(?:\.\d+)?%$/;
 
-/** Whether a coordinate is a percentage of the viewport from `'0%'` through `'100%'`. */
+/** Whether a coordinate is a percentage, of the viewport or a node's box, from `'0%'` through `'100%'`. */
 export function isPercentage(value: unknown): value is `${number}%` {
   return typeof value === 'string' && PERCENTAGE.test(value) && Number.parseFloat(value) <= 100;
 }
@@ -73,14 +73,15 @@ export function isPixelPoint(point: ScreenPoint): point is ViewportPoint {
 
 /**
  * Resolves a point a test names to CSS pixels: a percentage is that share of
- * the viewport's width (x) or height (y), rounded to a whole pixel and kept on
- * the last one, so `'100%'` stays inside the viewport. Pixels pass through.
+ * the width (x) or height (y) of `area`, the viewport or a node's box, rounded
+ * to a whole pixel and kept on the last one, so `'100%'` stays inside it.
+ * Pixels pass through.
  */
-export function resolveScreenPoint(point: ScreenPoint, viewport: ViewportSize): ViewportPoint {
-  return { x: resolveCoordinate(point.x, viewport.width), y: resolveCoordinate(point.y, viewport.height) };
+export function resolveScreenPoint(point: ScreenPoint, area: ViewportSize): ViewportPoint {
+  return { x: resolveCoordinate(point.x, area.width), y: resolveCoordinate(point.y, area.height) };
 }
 
-/** One coordinate of `resolveScreenPoint` along a viewport side of `size` CSS pixels. */
+/** One coordinate of `resolveScreenPoint` along a side of `size` CSS pixels. */
 function resolveCoordinate(value: ScreenCoordinate, size: number): number {
   if (typeof value === 'number') return value;
   return clamp(Math.round((Number.parseFloat(value) / 100) * size), 0, Math.max(0, size - 1));
@@ -89,6 +90,33 @@ function resolveCoordinate(value: ScreenCoordinate, size: number): number {
 /** True when the point lies inside the box: on its top and left edges, short of its bottom and right ones. */
 export function containsPoint(box: Box, point: ViewportPoint): boolean {
   return point.x >= box.x && point.x < box.x + box.width && point.y >= box.y && point.y < box.y + box.height;
+}
+
+/**
+ * The whole CSS pixels of the box inside the viewport, undefined when no part
+ * of it is inside. A pixel the box covers only in part is left out, since a
+ * neighbor can own it. Along a side where the part inside holds no whole
+ * pixel, as a 1px node at x 300.5 does, the box is the one pixel at the whole
+ * coordinate inside that part, 301 there, since a browser that rounds a point
+ * sends 300.5 to 300, outside the node. Only a part with no whole coordinate
+ * inside is kept unrounded.
+ */
+export function pixelsInViewport(box: Box, viewport: ViewportSize): Box | undefined {
+  const x = pixelsAlong(box.x, box.width, viewport.width);
+  const y = pixelsAlong(box.y, box.height, viewport.height);
+  return x === undefined || y === undefined ? undefined : { x: x.start, y: y.start, width: x.size, height: y.size };
+}
+
+/** One side of `pixelsInViewport`: the part of `start` to `start + size` inside 0 to `limit`. */
+function pixelsAlong(start: number, size: number, limit: number): { start: number; size: number } | undefined {
+  const from = Math.max(start, 0);
+  const to = Math.min(start + size, limit);
+  if (to <= from) return undefined;
+  const first = Math.ceil(from);
+  const last = Math.floor(to);
+  if (last > first) return { start: first, size: last - first };
+  if (first < to) return { start: first, size: 1 };
+  return { start: from, size: to - from };
 }
 
 /**
