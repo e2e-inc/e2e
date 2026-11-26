@@ -103,11 +103,15 @@ pub struct LaunchOptions {
     pub timeout_ms: f64,
     /// How long the search for the launched process may take once `open` has exited.
     pub claim_ms: f64,
+    /// Names the launch, so `cancelInput` can stop it before it starts the app.
+    pub input_id: Option<u32>,
 }
 
 /// Starts a new instance of an app.
 #[napi(ts_return_type = "Promise<NativeEnvelope<NativeLaunched>>")]
 pub async fn launch(options: LaunchOptions) -> Value {
+    // The budget counts from the call, not from when a blocking thread picks the work up.
+    let asked = Instant::now();
     blocking(move || {
         let mut environment: Vec<(String, String)> = options.environment.into_iter().collect();
         environment.sort();
@@ -120,6 +124,8 @@ pub async fn launch(options: LaunchOptions) -> Value {
             activate: options.activate,
             timeout: Duration::from_millis(options.timeout_ms.max(0.0) as u64),
             claim: Duration::from_millis(options.claim_ms.max(0.0) as u64),
+            asked,
+            input_id: options.input_id,
         };
         data(launch::launch(request)?)
     })
@@ -206,7 +212,7 @@ pub async fn act(options: ActOptions) -> Value {
     .await
 }
 
-/// Stops the action `act` or `press` was given `inputId` for: it sends no input from then on, though what it sent stays sent.
+/// Stops the call (`act`, `press`, `pointer`, `launch`) that was given `inputId`: it sends no input from then on, though what it sent stays sent.
 #[napi]
 pub fn cancel_input(input_id: u32) {
     crate::input::cancel_input(input_id);

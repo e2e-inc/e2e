@@ -37,6 +37,10 @@ pub struct LaunchRequest {
     /// How long the search for the process may take once `open` has exited, within `timeout`: a slow `open` (a cold
     /// start, Gatekeeper checking a new build) does not eat into it.
     pub claim: Duration,
+    /// When the caller asked, which `timeout` counts from: the lookup and the signature check before `open` take time.
+    pub asked: Instant,
+    /// Names the launch, so `cancel_input` can stop it before `open` runs.
+    pub input_id: Option<u32>,
 }
 
 /// The process a launch started.
@@ -122,7 +126,8 @@ fn hides_environment(bundle: &str) -> bool {
 /// <token>`, a user default AppKit ignores), which stay readable. A copy
 /// with neither is never taken: it may be one the user opened meanwhile.
 pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
-    let started = Instant::now();
+    let started = request.asked;
+    let run = crate::input::TypingRun::start(request.input_id);
     let url = match (&request.path, &request.bundle_id) {
         (Some(path), _) => {
             if !Path::new(path).join("Contents/Info.plist").exists() {
@@ -152,6 +157,10 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
         command.arg(TOKEN_ARGUMENT).arg(&token);
     }
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    // The lookup and `codesign` above can take a while: an app the caller gave up on is never started.
+    if run.cancelled() || started.elapsed() >= request.timeout {
+        return Err(Failure::refused(codes::TIMEOUT, format!("the launch of {bundle} was given up before open ran")));
+    }
     let mut child = command.spawn().map_err(|error| Failure::refused(codes::INTERNAL, format!("could not run open: {error}")))?;
     loop {
         match child.try_wait() {
