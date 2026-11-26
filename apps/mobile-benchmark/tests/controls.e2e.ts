@@ -355,17 +355,21 @@ test.describe('control inventory', () => {
     await expect(screen.getByTestId('tap-count')).toContainText('3 taps');
   });
 
-  // Android bounds and points are the screen's physical pixels: agent-device
-  // 0.21.15 reports the emulator's display density in its snapshot metadata,
-  // but rects and points stay physical pixels and the engine does not scale
-  // them yet, so the pad's 240 by 100 reads as 630 by 263 on a 2.625x emulator.
-  test('pointer verbs land at the point asked for', { platforms: ['ios'] }, async ({ screen }) => {
+  test('pointer verbs land at the point asked for', async ({ screen, platform }) => {
     await showSection(screen, 'Gestures');
     const pad = screen.getByLabel('Tap pad');
     const box = await pad.boundingBox();
     if (box === null) throw new Error('pad has no box');
-    expect(box.width).toBe(240);
-    expect(box.height).toBe(100);
+    if (platform === 'android') {
+      // The engine rounds the viewport to whole dp (1080 px at density 2.625
+      // is 411 dp), so a box is within 0.2% of its dp size: the 240 by 100
+      // dp pad reads 239.75 by 100.16.
+      expect(box.width).toBeCloseTo(240, 0);
+      expect(box.height).toBeCloseTo(100, 0);
+    } else {
+      expect(box.width).toBe(240);
+      expect(box.height).toBe(100);
+    }
 
     await screen.tapAt({ x: box.x + 40, y: box.y + 30 });
     await expect(screen.getByTestId('pad-status')).toHaveText('pad: 40,30');
@@ -383,6 +387,8 @@ test.describe('control inventory', () => {
     // gesture, wherever it starts), so the path runs right to left. The
     // finger goes down exactly at `from`; agent-device swipes as a fling that
     // lifts about 10 pt short of `to` (111 for 100 here), hence the tolerance.
+    // On Android the fling can run past `to` (84 for 100 on API 36 emulators
+    // at 420 and 480 dpi), so the tolerance there is 20.
     await screen.swipe({
       from: { x: swipeBox.x + 300, y: swipeBox.y + 40 },
       to: { x: swipeBox.x + 100, y: swipeBox.y + 40 },
@@ -391,7 +397,7 @@ test.describe('control inventory', () => {
     await expect(swipeStatus).toContainText('swipe: 300,40 to ');
     const path = /^swipe: 300,40 to (\d+),40$/.exec((await swipeStatus.textContent()) ?? '');
     if (path === null) throw new Error('swipe status has no path');
-    expect(Math.abs(Number(path[1]) - 100)).toBeLessThanOrEqual(15);
+    expect(Math.abs(Number(path[1]) - 100)).toBeLessThanOrEqual(platform === 'android' ? 20 : 15);
 
     // `direction` is the scroll direction: content to the right comes into
     // view when the finger moves left, so the end lands left of the start.

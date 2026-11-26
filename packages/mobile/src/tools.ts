@@ -19,6 +19,14 @@ import { pressRemote, REMOTE_KEYS } from './remote.ts';
 import type { AgentDeviceSurface, FoldPose } from './surface.ts';
 
 /**
+ * How long the agent's `swipe` tool waits for the Android screen's pixel
+ * scale. It matches the 15 s bound core puts on a targeted agent action. A
+ * tool's `execute` doesn't get an operation context, so `actionTimeout`
+ * doesn't apply. The step's abort signal still cancels it.
+ */
+const TARGETED_ACTION_MS = 15_000;
+
+/**
  * Types a tool the way the SDK's `tool()` does, without importing it: `ai`
  * is an optional peer dependency, and this module loads with the project's
  * config, so it must not need the package at run time.
@@ -143,7 +151,10 @@ export function mobileTools(
           to: z.object({ x: z.number(), y: z.number() }),
         }),
         execute: async ({ from, to }, options) => {
-          await active().command('swipe', (client) => client.interactions.swipe({ from, to }), abort(options));
+          const surface = active();
+          const signal = abort(options) ?? new AbortController().signal;
+          await surface.readPixelScale(signal, surface.inputBudget('swipe', { timeoutMs: TARGETED_ACTION_MS, signal }));
+          await surface.command('swipe', (client) => client.interactions.swipe({ from: surface.toDevicePoint(from), to: surface.toDevicePoint(to) }), signal);
           return `Swiped from (${from.x}, ${from.y}) to (${to.x}, ${to.y}).`;
         },
       }),

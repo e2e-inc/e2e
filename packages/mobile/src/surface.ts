@@ -62,11 +62,12 @@ import {
   ROOT_ID,
   screenRoot,
   screenTitle,
+  viewportOf,
   withEmptyState,
   type ProjectedNode,
   type ProjectedSnapshot,
 } from './nodes.ts';
-import { keyboardDragStart, keyboardShownIn, type KeyboardUnknown } from './keyboard.ts';
+import { keyboardDragStart, keyboardShownIn, type KeyboardCapture, type KeyboardUnknown } from './keyboard.ts';
 import { DEVICE_PERMISSIONS, type AgentDeviceClient, type ClientFactory, type DevicePermission, type LaunchPermissions, type MobileOptions, type MobilePlatform, type PermissionState } from './options.ts';
 import { maskPng } from './png.ts';
 import { mobileDoctor } from './doctor.ts';
@@ -85,6 +86,7 @@ import {
   type RawScreenshotResult,
   swipeWithin,
   unsupported,
+  type Point,
   type Rect,
   InputBudget,
   type InstallIdentity,
@@ -138,8 +140,9 @@ export interface OpenAppOptions {
  * is the band the capture's producer measured: `visible` with its frame,
  * `absent`, or that it could not look. `refsGeneration` is the capture its
  * refs were issued from. `warnings` is read for `ORIGIN_WARNING` only.
+ * `androidSnapshot` holds the Android display density (see `inDp`).
  */
-type RawSnapshot = Partial<Pick<CaptureSnapshotResult, 'nodes' | 'viewport' | 'truncated' | 'appName' | 'appBundleId' | 'snapshotQuality' | 'keyboard' | 'refsGeneration' | 'warnings'>>;
+type RawSnapshot = KeyboardCapture & Partial<Pick<CaptureSnapshotResult, 'truncated' | 'appName' | 'appBundleId' | 'snapshotQuality' | 'refsGeneration' | 'warnings' | 'androidSnapshot'>>;
 
 /**
  * How far the dismissing drag travels, as a share of the viewport: short
@@ -325,6 +328,9 @@ interface LeaseRecorder {
  * returning the sparse tree costs the model a confused turn.
  */
 const SPARSE_RETRY_BACKOFF_MS = [0, 1_200, 3_000] as const;
+
+/** The wait between captures while a point action reads the pixel scale (see `readPixelScale`). */
+const SCALE_READ_RETRY_MS = 250;
 
 /**
  * Waits between captures while the keyboard reads as moving
@@ -562,6 +568,15 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
    * screen to agree, see `viewportFor`.
    */
   private knownViewport: ViewportSize | undefined;
+  /**
+   * Physical pixels per viewport unit on each axis on Android, from the
+   * latest capture with screen geometry (see `inDp`). It's undefined before
+   * that capture, after a rotation or a fold, and before a test's point
+   * action.
+   */
+  private pixelScale: Point | undefined;
+  /** The display density the latest Android capture reported, to tell a density change from a new screen size. */
+  private pixelDensity: number | undefined;
 
   constructor(
     readonly options: MobileOptions<Platform>,
@@ -870,6 +885,8 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     this.appIdentity = undefined;
     this.installedApp = undefined;
     this.knownViewport = undefined;
+    this.pixelScale = undefined;
+    this.pixelDensity = undefined;
     let closing: Promise<void> | undefined;
     const close = (): void => {
       if (client === undefined) return;
@@ -1146,14 +1163,103 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
    * capture runs under `budget`, so one the budget abandoned is not retried.
    */
   private async capture(signal: AbortSignal, interactiveOnly: boolean, budget: InputBudget): Promise<RawSnapshot> {
-    const take = (): Promise<RawSnapshot> =>
-      budget.read(() => this.command('snapshot', (client) => client.capture.snapshot({ interactiveOnly }), signal));
+    const take = async (): Promise<RawSnapshot> =>
+      this.inDp(await budget.read(() => this.command('snapshot', (client) => client.capture.snapshot({ interactiveOnly }), signal)));
     try {
       return await take();
     } catch (cause) {
       if (signal.aborted || !isSnapshotPresentationFailure(cause)) throw cause;
       return take();
     }
+  }
+
+  /**
+   * Converts an Android capture to density-independent pixels (dp). Every
+   * rect and point the harness reads is in dp, like iOS points. On Android,
+   * geometry from agent-device is in physical pixels, with the display
+   * density beside it.
+   *
+   * The viewport is stored in whole units in the report and the replay
+   * cache. So the screen is rounded to whole dp, and each axis gets the
+   * factor that maps it back exactly (1080 pixels at density 2.625 round to
+   * 411 dp, so one dp is 2.6277 pixels wide). A point on the viewport's edge
+   * then converts back to the screen's edge.
+   *
+   * Captures without screen geometry return unchanged and don't set a
+   * scale. Captures without a density (agent-device's older Android
+   * snapshot helper) stay in physical pixels. The learned viewport is in the
+   * old unit, so it's dropped when the density changes, even to or from a
+   * capture without one.
+   */
+  private inDp(raw: RawSnapshot): RawSnapshot {
+    if (this.options.platform !== 'android') return raw;
+    const screen = raw.viewport ?? viewportOf(raw.nodes ?? []);
+    if (screen === undefined) return raw;
+    const density = raw.androidSnapshot?.pixelDensity ?? 1;
+    if (this.pixelDensity !== undefined && this.pixelDensity !== density) this.knownViewport = undefined;
+    this.pixelDensity = density;
+    if (density === 1) {
+      this.pixelScale = { x: 1, y: 1 };
+      return raw;
+    }
+    const viewport = { width: Math.round(screen.width / density), height: Math.round(screen.height / density) };
+    const scale = { x: screen.width / viewport.width, y: screen.height / viewport.height };
+    this.pixelScale = scale;
+    const toDp = (rect: Rect): Rect => ({ x: rect.x / scale.x, y: rect.y / scale.y, width: rect.width / scale.x, height: rect.height / scale.y });
+    const { nodes, keyboard } = raw;
+    return {
+      ...raw,
+      viewport,
+      ...(nodes === undefined ? {} : { nodes: nodes.map((node) => (node.rect === undefined ? node : { ...node, rect: toDp(node.rect) })) }),
+      ...(keyboard?.kind === 'visible' || keyboard?.kind === 'derived' ? { keyboard: { ...keyboard, frame: toDp(keyboard.frame) } } : {}),
+    };
+  }
+
+  /**
+   * Converts a point in viewport units to the coordinates agent-device takes,
+   * with the latest scale (see `inDp`). Those are physical pixels on Android
+   * and points on iOS.
+   */
+  toDevicePoint(point: Point): Point {
+    const scale = this.pixelScale ?? { x: 1, y: 1 };
+    return { x: point.x * scale.x, y: point.y * scale.y };
+  }
+
+  /**
+   * Reads the Android pixel scale before a point action if it isn't set yet
+   * (see `inDp`). A test or agent can pass a point before the first capture,
+   * so capture the screen first to get the scale. If the screen can't be
+   * read yet (a splash screen or launching app) or lacks screen geometry,
+   * keep capturing until the budget runs out. Then the action fails with
+   * `OPERATION_TIMEOUT`, and no input is sent.
+   */
+  async readPixelScale(signal: AbortSignal, input: InputBudget): Promise<void> {
+    if (this.options.platform !== 'android') return;
+    while (this.pixelScale === undefined) {
+      try {
+        await this.capture(signal, true, input);
+      } catch (cause) {
+        if (signal.aborted || !isUnreadableCapture(cause)) throw cause;
+      }
+      if (this.pixelScale !== undefined) return;
+      if (input.remainingMs() <= SCALE_READ_RETRY_MS) {
+        throw new EngineError(
+          'OPERATION_TIMEOUT',
+          'the Android screen couldn\'t be read in time to convert the point to physical pixels. Nothing was sent. Wait for the first screen before a point action.',
+          { retryable: false },
+        );
+      }
+      await sleep(SCALE_READ_RETRY_MS, signal);
+    }
+  }
+
+  /**
+   * Drops the pixel scale, so the next point action reads it again. The
+   * screen can change after a rotation or fold. Test point actions don't
+   * capture first.
+   */
+  forgetPixelScale(): void {
+    this.pixelScale = undefined;
   }
 
   /**
@@ -1663,7 +1769,8 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
             );
           }
           const stabilization = gestureStabilization(operation);
-          const sent = await input.send(() => client.interactions.swipe({ ...swipeWithin(rect, action.direction, action.momentum), ...stabilization }));
+          const { from, to } = swipeWithin(rect, action.direction, action.momentum);
+          const sent = await input.send(() => client.interactions.swipe({ from: this.toDevicePoint(from), to: this.toDevicePoint(to), ...stabilization }));
           this.noteGesture(operation);
           return sent;
         }
@@ -1733,11 +1840,24 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
    */
   async performAt(point: ViewportPoint, action: PointerAction, operation: OperationContext, input: InputBudget): Promise<void> {
     const settle = operation.origin === 'test' ? {} : this.settleOptions;
+    // Test point actions don't capture the screen first, and the display
+    // density can change between actions, so read the scale again.
+    // The agent reads the screen on every turn.
+    if (operation.origin === 'test') this.forgetPixelScale();
+    await this.readPixelScale(operation.signal, input);
     const before = this.latestScreen;
     const label = `${action.kind} at point`;
-    await this.command(label, (client) => pointerInteraction(client, point, action, settle, gestureStabilization(operation), input).catch(async (cause: unknown) => {
+    const toDevice = (at: ViewportPoint): ViewportPoint => this.toDevicePoint(at);
+    await this.command(label, (client) => pointerInteraction(client, point, action, settle, gestureStabilization(operation), input, toDevice).catch(async (cause: unknown) => {
       if (action.kind !== 'swipeTo') throw cause;
-      throw await refusedSwipePath(cause, label, action.durationMs !== undefined, () => this.viewport(operation, input));
+      // On Android, agent-device reports the refused path and viewport in
+      // physical pixels, so convert the compared screen size to physical
+      // pixels.
+      throw await refusedSwipePath(cause, label, action.durationMs !== undefined, async () => {
+        const { width, height } = await this.viewport(operation, input);
+        const corner = this.toDevicePoint({ x: width, y: height });
+        return { width: Math.round(corner.x), height: Math.round(corner.y) };
+      });
     }), operation.signal);
     if (action.kind === 'swipeTo') this.noteGesture(operation);
     this.markAction(before);
@@ -1889,7 +2009,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
       const to = axis === 'horizontal'
         ? { x: from.x - viewport.width * KEYBOARD_DRAG_RATIO, y: from.y }
         : { x: from.x, y: from.y - viewport.height * KEYBOARD_DRAG_RATIO };
-      await this.command('keyboard.dismiss', (client) => input.send(() => client.interactions.swipe({ from, to })), signal);
+      await this.command('keyboard.dismiss', (client) => input.send(() => client.interactions.swipe({ from: this.toDevicePoint(from), to: this.toDevicePoint(to) })), signal);
       reading = await this.keyboardReading(signal, input);
       if (reading.shown !== true) return;
     }
@@ -1950,6 +2070,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
    */
   async fold(pose: FoldPose, signal: AbortSignal): Promise<void> {
     await this.screenCommand('device.fold', (client) => client.command.fold({ ...this.selection(), pose }), signal);
+    this.forgetPixelScale();
   }
 
   /**
@@ -2023,12 +2144,16 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
    * hold a credential must not leave the engine.
    */
   private async maskedScreenshot(operation: OperationContext, budget: InputBudget): Promise<{ data: Uint8Array; masked: number }> {
-    const secure = secureBounds(this.project(await this.snapshotOrEmpty(operation, false, budget)));
+    const projected = this.project(await this.snapshotOrEmpty(operation, false, budget));
+    const secure = secureBounds(projected);
     if (secure === undefined) {
       throw new ConfigurationError('POLICY_DENIED', 'a secure field on screen has no bounds to mask, so the screenshot is withheld');
     }
+    // Each axis is scaled by its ratio, so use this capture's viewport rather
+    // than one learned before the screen resized.
+    const viewport = secure.length === 0 ? undefined : await this.viewportFor(projected.viewport, operation.signal, budget);
     const data = await this.rawScreenshot(operation.signal, {}, budget);
-    const masked = redactSecure(data, secure, this.knownViewport);
+    const masked = redactSecure(data, secure, viewport);
     if (masked === undefined) {
       throw new EngineError('ENGINE_FAILURE', 'the screenshot could not be read to mask the secure fields on screen; screenshot withheld', {
         retryable: false,
@@ -2064,12 +2189,25 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     if (redacted === undefined) return undefined;
     const size = readPngSize(redacted.data);
     if (size === undefined) return undefined;
-    const scale = viewport.width > 0 ? size.width / viewport.width : 1;
+    const scale = imageScale(size, viewport);
     return {
       pixels: { data: redacted.data, mediaType: 'image/png', width: size.width, height: size.height, scale },
       masked: redacted.masked,
     };
   }
+}
+
+/**
+ * Returns the image pixels per viewport unit for `ObservationPixels.scale`.
+ * On Android the viewport is whole dp, so the two axes have slightly
+ * different factors (see `inDp`), but the contract takes one number. Using
+ * `(size.width + size.height) / (viewport.width + viewport.height)` splits
+ * the rounding so the image divides back to the viewport on both axes (411
+ * by 914 for 1080 by 2400 at density 2.625).
+ */
+function imageScale(size: { readonly width: number; readonly height: number }, viewport: ViewportSize): number {
+  if (viewport.width <= 0 || viewport.height <= 0) return 1;
+  return (size.width + size.height) / (viewport.width + viewport.height);
 }
 
 /**
@@ -2091,8 +2229,8 @@ function secureBounds(projected: ProjectedSnapshot): readonly Rect[] | undefined
  * Returns the masked bytes and how many regions were covered, or undefined
  * when the image cannot be read or edited: the caller then withholds the
  * image rather than ship one it could not prove redacted. Bounds are in
- * logical points; the image may be at device scale, so they are scaled by
- * the image-to-viewport ratio.
+ * logical points. The image may be at device scale, so each axis is scaled
+ * by the image-to-viewport ratio on that axis.
  */
 function redactSecure(
   data: Uint8Array,
@@ -2102,8 +2240,9 @@ function redactSecure(
   if (secure.length === 0) return { data, masked: 0 };
   const size = readPngSize(data);
   if (size === undefined) return undefined;
-  const scale = viewport !== undefined && viewport.width > 0 ? size.width / viewport.width : 1;
-  const rects = secure.map((rect) => ({ x: rect.x * scale, y: rect.y * scale, width: rect.width * scale, height: rect.height * scale }));
+  const x = viewport !== undefined && viewport.width > 0 ? size.width / viewport.width : 1;
+  const y = viewport !== undefined && viewport.height > 0 ? size.height / viewport.height : 1;
+  const rects = secure.map((rect) => ({ x: rect.x * x, y: rect.y * y, width: rect.width * x, height: rect.height * y }));
   try {
     return { data: maskPng(data, rects), masked: rects.length };
   } catch {

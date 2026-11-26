@@ -403,6 +403,7 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     },
     async setOrientation(orientation) {
       await surface.screenCommand('device.setOrientation', (client) => client.command.orientation({ ...surface.selection(), orientation }), context.signal);
+      surface.forgetPixelScale();
     },
     async viewport() {
       const operation = context.operation();
