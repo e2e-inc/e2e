@@ -35,9 +35,13 @@ const NO_DEAD_KEYS: u32 = 1;
 /// Every virtual key code a keyboard has.
 const CODES: u16 = 128;
 
-/// What each key code types with no modifier on the current ASCII-capable layout, the one macOS matches Command
-/// shortcuts against; `None` when the layout cannot be read.
-pub fn characters() -> Option<Vec<(u16, char)>> {
+/// `cmdKey >> 8`, the Command bit of UCKeyTranslate's modifier state.
+const COMMAND: u32 = 1;
+
+/// What each key code types on the current ASCII-capable layout, the one macOS matches Command shortcuts against: with
+/// Command held when `command`, since a layout such as Dvorak-QWERTY Command types other characters then, and with no
+/// modifier otherwise. `None` when the layout cannot be read.
+pub fn characters(command: bool) -> Option<Vec<(u16, char)>> {
     unsafe {
         let source = TISCopyCurrentASCIICapableKeyboardLayoutInputSource();
         if source.is_null() {
@@ -54,7 +58,18 @@ pub fn characters() -> Option<Vec<(u16, char)>> {
                 let mut dead = 0u32;
                 let mut buffer = [0u16; 4];
                 let mut length = 0usize;
-                let status = UCKeyTranslate(layout, code, KEY_DOWN, 0, keyboard, NO_DEAD_KEYS, &mut dead, buffer.len(), &mut length, buffer.as_mut_ptr());
+                let status = UCKeyTranslate(
+                    layout,
+                    code,
+                    KEY_DOWN,
+                    if command { COMMAND } else { 0 },
+                    keyboard,
+                    NO_DEAD_KEYS,
+                    &mut dead,
+                    buffer.len(),
+                    &mut length,
+                    buffer.as_mut_ptr(),
+                );
                 if status != 0 || length != 1 {
                     continue;
                 }

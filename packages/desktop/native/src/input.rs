@@ -221,10 +221,11 @@ pub fn parse_combo(combo: &str) -> Outcome<Combo> {
             }
             let us = character_key(lower).ok_or_else(|| Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("\"{character}\" has no key of its own")))?;
             // A shortcut carries only its key code, and macOS reads its character from the layout: the code must be the
-            // key that types the character on this Mac's layout. Text and Shift keys carry their characters, as typed.
+            // key that types the character on this Mac's layout, in its Command layer for a Command shortcut. Text and
+            // Shift keys carry their characters, as typed.
             let shortcut = flags.intersects(CGEventFlags::CGEventFlagCommand | CGEventFlags::CGEventFlagControl | CGEventFlags::CGEventFlagAlternate);
             let code = if shortcut {
-                let table = crate::layout::characters()
+                let table = crate::layout::characters(flags.contains(CGEventFlags::CGEventFlagCommand))
                     .ok_or_else(|| Failure::refused(codes::ACTION_FAILED, "the keyboard layout could not be read, so the shortcut's key is unknown"))?;
                 crate::layout::code_for(lower, &table)
                     .ok_or_else(|| Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("no key types \"{lower}\" on this Mac's keyboard layout")))?
