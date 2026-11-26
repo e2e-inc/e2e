@@ -40,6 +40,7 @@ describe.each(schemas)('%s schema', (name) => {
           expect.objectContaining({ instancePath: '/run/merge/shardDurationMs', keyword: 'minimum' }),
           expect.objectContaining({ instancePath: '/run/merge/shards/0/index', keyword: 'minimum' }),
           expect.objectContaining({ instancePath: '/run/results/0/skip/otherShard', keyword: 'const' }),
+          expect.objectContaining({ keyword: 'minimum', instancePath: expect.stringMatching(/\/steps\/\d+\/parent$/) }),
         ]),
       );
     }
