@@ -220,20 +220,49 @@ fn focus(element: &Element, deadline: Instant) -> Outcome<()> {
 
 fn check(element: &Element, wanted: bool, deadline: Instant) -> Outcome<()> {
     let target = wanted as u8;
-    if toggle_state(element) == Some(target) {
-        return Ok(());
+    let mut shown = toggle_state(element);
+    let reached = press_to_state(
+        target,
+        shown,
+        || perform(element, "AXPress", if wanted { "check" } else { "uncheck" }),
+        || {
+            let before = shown;
+            until(deadline, || toggle_state(element) != before);
+            shown = toggle_state(element);
+            shown
+        },
+    )?;
+    if reached {
+        Ok(())
+    } else {
+        Err(Failure::unconfirmed(codes::ACTION_FAILED, format!("the box is still not {}", if wanted { "checked" } else { "unchecked" })))
     }
-    // A mixed box may take two presses to land on the state asked for.
-    for attempt in 0..2 {
-        perform(element, "AXPress", if wanted { "check" } else { "uncheck" }).map_err(|failure| if attempt == 0 { failure } else { failure.delivered() })?;
-        if until(deadline, || toggle_state(element) == Some(target)) {
-            return Ok(());
-        }
-        if toggle_state(element) != Some(2) {
-            break;
-        }
+}
+
+/// The states a box can show: off, on, and mixed.
+const BOX_STATES: usize = 3;
+
+/// Presses a box until it shows `target`, at most once per state it can show: an AppKit box goes mixed, on, off, so
+/// unchecking a mixed box takes two presses. `settle` waits for the state a press led to. It stops early when the state
+/// cannot be read or a press changed nothing, so a box that does not answer is not pressed again and again. A failed
+/// first press sent nothing; a failed later one follows a press that landed.
+fn press_to_state(target: u8, shown: Option<u8>, mut press: impl FnMut() -> Outcome<()>, mut settle: impl FnMut() -> Option<u8>) -> Outcome<bool> {
+    if shown == Some(target) {
+        return Ok(true);
     }
-    Err(Failure::unconfirmed(codes::ACTION_FAILED, format!("the box is still not {}", if wanted { "checked" } else { "unchecked" })))
+    let mut before = shown;
+    for attempt in 0..BOX_STATES {
+        press().map_err(|failure| if attempt == 0 { failure } else { failure.delivered() })?;
+        let now = settle();
+        if now == Some(target) {
+            return Ok(true);
+        }
+        if now.is_none() || now == before {
+            return Ok(false);
+        }
+        before = now;
+    }
+    Ok(false)
 }
 
 fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
@@ -471,4 +500,67 @@ pub fn pointer_at(x: f64, y: f64, kind: &str) -> Outcome<()> {
         other => return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("no pointer action {other}"))),
     };
     input::pointer(x, y, action).map_err(Failure::delivered)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::press_to_state;
+    use crate::failure::Outcome;
+    use std::cell::Cell;
+
+    /// An AppKit box with mixed state: each press moves it mixed, on, off, mixed.
+    fn appkit_box(start: u8) -> (Cell<u8>, Cell<usize>) {
+        (Cell::new(start), Cell::new(0))
+    }
+
+    fn drive(target: u8, start: u8) -> (Outcome<bool>, u8, usize) {
+        let (state, presses) = appkit_box(start);
+        let outcome = press_to_state(
+            target,
+            Some(state.get()),
+            || {
+                presses.set(presses.get() + 1);
+                state.set(match state.get() {
+                    2 => 1,
+                    1 => 0,
+                    _ => 2,
+                });
+                Ok(())
+            },
+            || Some(state.get()),
+        );
+        (outcome, state.get(), presses.get())
+    }
+
+    #[test]
+    fn unchecks_a_mixed_box_in_two_presses() {
+        let (outcome, state, presses) = drive(0, 2);
+        assert!(outcome.unwrap());
+        assert_eq!((state, presses), (0, 2));
+    }
+
+    #[test]
+    fn checks_a_mixed_box_in_one_press_and_leaves_a_checked_box_alone() {
+        assert_eq!(drive(1, 2).1, 1);
+        assert_eq!(drive(1, 2).2, 1);
+        assert_eq!(drive(1, 1).2, 0);
+    }
+
+    #[test]
+    fn stops_when_a_press_changes_nothing_or_the_state_cannot_be_read() {
+        let presses = Cell::new(0);
+        let stuck = press_to_state(
+            1,
+            Some(0),
+            || {
+                presses.set(presses.get() + 1);
+                Ok(())
+            },
+            || Some(0),
+        );
+        assert!(!stuck.unwrap());
+        assert_eq!(presses.get(), 1);
+        let unreadable = press_to_state(1, None, || Ok(()), || None);
+        assert!(!unreadable.unwrap());
+    }
 }
