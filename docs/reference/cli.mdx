@@ -1533,7 +1533,7 @@ still owes results after a rerun requires its matching folded report.
 | --- | --- |
 | `--output <dir>` | Required. A new directory for `report.json`, copied local artifacts, trace pages, and reporter output. Relative to the project root. With `--config`, the project root is the directory containing that config. |
 | `--config <path>` | Config to load for finished-run reporters. Defaults to the nearest config, if present. With a config in a subdirectory, reporters use the closest default config at or above that directory as the root for source and trace paths. |
-| `--reporter <ids>` | Comma-separated finished-run reporters (`json`, `junit`, `markdown`, or `ctrf`). Overrides built-in choices in the config and keeps configured third-party reporters. `list`, `dot`, and `line` print from a run's live events, so the flag refuses them; one named in the config still loads and prints only the lines that say where the other reporters wrote their files. |
+| `--reporter <ids>` | Comma-separated finished-run reporters (`json`, `junit`, `markdown`, or `ctrf`). Overrides built-in choices in the config and keeps configured third-party reporters. `list`, `dot`, and `line` print from a run's live events, so the flag refuses them. One named in the config still loads, and prints only where the other reporters wrote their files. |
 
 Reporters must implement a finished-run hook. The command reads finished
 reports and does not replay live events. Its terminal verdict goes to
@@ -1547,9 +1547,10 @@ setup verdict. An interrupted result carried from before a shard rerun gives
 the merged run exit code 130. A
 per-shard `--max-failures` or `--max-duration` stop keeps its failing verdict.
 The recorded duration spans the earliest shard start to the latest shard
-finish. The merged report leaves `run.shard` unset and records the combined
-shard duration and source shards in `run.merge`, with each merged result and
-attempt keeping its source `shard` index. The command returns the merged run's
+finish. The merged report leaves `run.shard` unset and records the source
+shards and the sum of their durations in
+[`run.merge`](/reference/reporters#merged-shard-reports). Each merged result
+and attempt keeps its source `shard` index. The command returns the merged run's
 [exit code](#exit-codes), or 2 if the merge could not be made.
 
 See [Sharding](/ci#sharding) for artifact upload and whole-run reruns.
