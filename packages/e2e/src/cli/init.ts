@@ -19,16 +19,23 @@ import { CONFIG_NAMES, JS_CONFIG_NAMES } from '../config/names.ts';
 import { DOCS_URL } from './docs-url.ts';
 import { initStarStrip } from './star.ts';
 import {
+  describeCopy,
+  describeDuplicate,
   describeLinks,
   describeObstacles,
+  findDuplicateSkills,
   findInstalledSkillDirs,
+  findPackageSkillLinks,
   holdsCopyAfter,
+  holdsSkillEntry,
+  linkedAtSkillName,
   planSkillInstall,
   planSkillLink,
   replaceableLinks,
   SKILL_LOCATIONS,
   splitSkillDirs,
   type SkillInstall,
+  writeSkillCopy,
 } from './init/agent-skill.ts';
 import {
   CI_SERVICES,
@@ -289,7 +296,10 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
         ci: 'none',
       }
     : {};
-  const foundSkillDirs = findInstalledSkillDirs(cwd);
+  // A location pnpm links the installed skill into counts as installed, whatever the link's name.
+  const packageLinks = findPackageSkillLinks(cwd);
+  const foundSkillDirs = SKILL_LOCATIONS.map(({ dir }) => dir)
+    .filter((dir) => findInstalledSkillDirs(cwd).includes(dir) || packageLinks.some((link) => link.dir === dir));
   const foundMcpFiles = findRegisteredMcpFiles(cwd);
   const given = {
     engines: options.engines ?? defaults.engines,
@@ -353,7 +363,17 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
   );
   if (isCancelled(skillDirs)) return cancel();
   facts.skill = skillDirs.length > 0;
-  const { copies, links } = splitSkillDirs(skillDirs);
+  const duplicates = findDuplicateSkills(cwd, packageLinks);
+  for (const link of packageLinks.filter((found) => skillDirs.includes(found.dir))) {
+    if (duplicates.includes(link)) clack.log.warn(describeDuplicate(link));
+    else clack.log.info(`Linked to the installed e2e, not touching: ${link.dir}/${link.name}`);
+  }
+  // Where pnpm links the skill, init refreshes the copies there are and adds none: pnpm would link a second skill beside a new copy.
+  const unwritten = packageLinks.length === 0 ? [] : skillDirs.filter((dir) => !holdsSkillEntry(cwd, dir));
+  for (const dir of unwritten.filter((missing) => !packageLinks.some((link) => link.dir === missing))) {
+    clack.log.info(`Not copying the skill into ${dir}: pnpm links it from the installed e2e in this project; create the folder and run pnpm install to link it there`);
+  }
+  const { copies, links } = splitSkillDirs(skillDirs.filter((dir) => !linkedAtSkillName(packageLinks, dir) && !unwritten.includes(dir)));
   const plannedCopies = planSkillInstall(cwd, copies, bundledSkill);
   const skillInstalls: SkillInstall[] = [];
   for (const planned of plannedCopies) {
@@ -526,12 +546,9 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
       clack.log.success(`Linked ${skill.relative} -> ${skill.target}${linkReplaces(skill, 'replaced')}`);
       continue;
     }
-    for (const file of skill.files) {
-      mkdirSync(path.dirname(file.absolute), { recursive: true });
-      writeFileSync(file.absolute, file.content, 'utf8');
-    }
+    writeSkillCopy(cwd, skill);
     const verb = skill.links.length > 0 ? 'Replaced' : skill.existing ? 'Updated' : 'Created';
-    clack.log.success(`${verb} ${skill.relative}/ (${skill.files.length} files)`);
+    clack.log.success(`${verb} ${skill.relative}/ (${describeCopy(skill)})`);
   }
   if (skillDirs.length === 0) {
     clack.log.info(`Skipped the agent skill; agents can still print it with ${execCommand(manager, 'e2e guide')}`);
