@@ -192,6 +192,52 @@ describe.each<BrowserProviderScope>(['worker', 'attempt'])('downloads through a 
     } finally { clearTimeout(watchdog); }
   });
 
+  it.each(['waitForDownload', 'waitForDownloads'] as const)('%s bounds a before hook that never settles, without running the trigger', async (method) => {
+    artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-provider-stalled-before-'));
+    remoteDisk = mkdtempSync(path.join(tmpdir(), 'e2e-browser-stalled-before-'));
+    chrome = await launchRemoteChrome();
+    let hookSignal: AbortSignal | undefined;
+    const provider: BrowserProvider = {
+      name: 'stalled-before', scope,
+      acquire: async () => ({ id: 'stalled-lease', cdpEndpoint: chrome!.endpoint }),
+      release: async () => undefined,
+      downloads: {
+        dir: path.join(remoteDisk, 'downloads'),
+        read: async (_lease, file) => readFile(file),
+        before: async (_lease, { signal: hookCancellation }) => {
+          hookSignal = hookCancellation;
+          return new Promise<unknown>(() => undefined);
+        },
+      },
+    };
+    engine = webEngine({ browser: provider });
+    const prepared = await engine.prepare!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, slots: 1, env: {}, signal: signal(), headed: false, log: () => undefined });
+    await engine.init!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, env: { ...prepared?.env }, headed: false, workerSlot: 0, signal: signal(), log: () => undefined });
+    await engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal: signal(), resolveSecret: noSecrets, ...ignoreTrace });
+    await engine.session!.open!(app.url, operation());
+    const browser = engine.fixtures!['browser']!({
+      operation: (timeout?: number) => ({ ...operation(), timeoutMs: timeout ?? 15000 }),
+      app: { resolveUrl: (url: string) => new URL(url, app.url).href },
+      expectable: (target: object) => target, fixture: (_name: string, target: object) => target,
+      attachArtifact: () => undefined,
+    } as unknown as EngineFixtureContext) as Browser;
+    let triggers = 0;
+    const trigger = async (): Promise<void> => { triggers += 1; };
+    const work = method === 'waitForDownload'
+      ? browser.waitForDownload(trigger, { timeout: 500 })
+      : browser.waitForDownloads(trigger, { count: 1, timeout: 500 });
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        work.then(() => ({ code: 'completed', message: '' }), (error: { code: string; message: string }) => error),
+        new Promise<{ code: string; message: string }>((resolve) => { watchdog = setTimeout(() => resolve({ code: 'still pending', message: '' }), 1500); }),
+      ]);
+      expect(result).toMatchObject({ code: 'ACTION_FAILED', message: expect.stringContaining('exceeded its timeout') });
+      expect(triggers).toBe(0);
+      expect(hookSignal?.aborted).toBe(true);
+    } finally { clearTimeout(watchdog); }
+  });
+
   it('fails the wait with ENGINE_FAILURE naming the provider when its before hook throws, without running the trigger', async () => {
     artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-provider-before-'));
     remoteDisk = mkdtempSync(path.join(tmpdir(), 'e2e-browser-before-'));
