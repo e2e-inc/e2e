@@ -20,7 +20,7 @@ const MAX_CHILDREN: usize = 1_000;
 const MAX_VALUE_CHARS: usize = 1_000_000;
 
 /// Every attribute one request reads of a node.
-const ATTRIBUTES: [&str; 16] = [
+const ATTRIBUTES: [&str; 17] = [
     "AXRole",
     "AXSubrole",
     "AXTitle",
@@ -37,6 +37,7 @@ const ATTRIBUTES: [&str; 16] = [
     "AXHelp",
     "AXTitleUIElement",
     "AXVerticalScrollBar",
+    "AXHorizontalScrollBar",
 ];
 
 #[derive(Serialize)]
@@ -179,7 +180,7 @@ fn read(element: &Element) -> Result<Read, ax::AXError> {
     let placeholder = label(take(12).and_then(|value| value.text().map(str::to_owned)));
     let help = label(take(13).and_then(|value| value.text().map(str::to_owned)));
     let title_element = take(14).and_then(|value| value.element().cloned());
-    let scrollbar = take(15).is_some();
+    let scrollbar = take(15).is_some() || take(16).is_some();
     let role = roles::role(&ax_role, subrole.as_deref());
     Ok(Read {
         role,
@@ -283,7 +284,9 @@ impl Walk {
         if has("AXScrollToVisible") {
             push(&mut out, "ScrollTo");
         }
-        if (role == "scrollarea" && read.scrollbar) || has("AXScrollDownByPage") || has("AXScrollUpByPage") {
+        if (role == "scrollarea" && read.scrollbar)
+            || ["AXScrollDownByPage", "AXScrollUpByPage", "AXScrollLeftByPage", "AXScrollRightByPage"].into_iter().any(&has)
+        {
             push(&mut out, "Scroll");
         }
         let value_settable = roles::bears_value(role) && element.settable("AXValue").unwrap_or(false);
