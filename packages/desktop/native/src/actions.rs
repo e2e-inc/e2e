@@ -276,10 +276,55 @@ fn press_to_state(target: u8, shown: Option<u8>, mut press: impl FnMut() -> Outc
     Ok(false)
 }
 
+/// The most presses a stepper gets to reach a value.
+const MAX_STEPS: usize = 500;
+
+/// Steps a value toward `target`, one increment or decrement at a time, until it shows it. It stops when the value
+/// cannot be read, a step changed nothing, or a step went past the target (the step does not divide the distance).
+/// A failed first step sent nothing; a failed later one follows steps that landed.
+fn step_to(target: f64, shown: Option<f64>, mut step: impl FnMut(bool) -> Outcome<()>, mut settle: impl FnMut() -> Option<f64>) -> Outcome<bool> {
+    let Some(mut now) = shown else { return Ok(false) };
+    for attempt in 0..MAX_STEPS {
+        if now == target {
+            return Ok(true);
+        }
+        let up = now < target;
+        step(up).map_err(|failure| if attempt == 0 { failure } else { failure.delivered() })?;
+        let Some(next) = settle() else { return Ok(false) };
+        if next == now || (up && next > target) || (!up && next < target) {
+            return Ok(next == target);
+        }
+        now = next;
+    }
+    Ok(now == target)
+}
+
 fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
     let (ax_role, role) = raw_role(element);
     let secure = ax_role == "AXSecureTextField" || element.text("AXSubrole").as_deref() == Some("AXSecureTextField");
     if !element.settable("AXValue").unwrap_or(false) {
+        // A stepper whose value cannot be written still steps toward a number.
+        let names = element.actions().unwrap_or_default();
+        let steps = names.iter().any(|name| name == "AXIncrement" || name == "AXDecrement");
+        if let (true, Ok(Value::Number(_)), Ok(target)) = (steps, element.attribute("AXValue"), text.trim().parse::<f64>()) {
+            let number = || match element.attribute("AXValue") {
+                Ok(Value::Number(number)) => Some(number),
+                _ => None,
+            };
+            let mut shown = number();
+            let reached = step_to(
+                target,
+                shown,
+                |up| perform(element, if up { "AXIncrement" } else { "AXDecrement" }, "step the value"),
+                || {
+                    let before = shown;
+                    until(deadline, || number() != before);
+                    shown = number();
+                    shown
+                },
+            )?;
+            return if reached { Ok(()) } else { Err(Failure::unconfirmed(codes::ACTION_FAILED, format!("the {role} stopped short of {}", text.trim()))) };
+        }
         return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("the value of this {role} cannot be set")));
     }
     // A field that holds focus commits its text the way typing does; one that cannot take focus still takes the value.
@@ -522,7 +567,7 @@ pub fn pointer_at(x: f64, y: f64, kind: &str) -> Outcome<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::press_to_state;
+    use super::{press_to_state, step_to};
     use crate::failure::Outcome;
     use std::cell::Cell;
 
@@ -562,6 +607,54 @@ mod tests {
         assert_eq!(drive(1, 2).1, 1);
         assert_eq!(drive(1, 2).2, 1);
         assert_eq!(drive(1, 1).2, 0);
+    }
+
+    #[test]
+    fn steps_a_stepper_up_and_down_to_the_value() {
+        for (start, target, presses) in [(1.0, 3.0, 2), (5.0, 2.0, 3), (4.0, 4.0, 0)] {
+            let value = Cell::new(start);
+            let count = Cell::new(0);
+            let reached = step_to(
+                target,
+                Some(start),
+                |up| {
+                    count.set(count.get() + 1);
+                    value.set(value.get() + if up { 1.0 } else { -1.0 });
+                    Ok(())
+                },
+                || Some(value.get()),
+            );
+            assert!(reached.unwrap());
+            assert_eq!((value.get(), count.get()), (target, presses));
+        }
+    }
+
+    #[test]
+    fn stops_a_stepper_that_steps_past_the_value_or_does_not_move() {
+        let value = Cell::new(0.0);
+        let past = step_to(
+            3.0,
+            Some(0.0),
+            |_| {
+                value.set(value.get() + 2.0);
+                Ok(())
+            },
+            || Some(value.get()),
+        );
+        assert!(!past.unwrap());
+        assert_eq!(value.get(), 4.0);
+        let count = Cell::new(0);
+        let stuck = step_to(
+            3.0,
+            Some(0.0),
+            |_| {
+                count.set(count.get() + 1);
+                Ok(())
+            },
+            || Some(0.0),
+        );
+        assert!(!stuck.unwrap());
+        assert_eq!(count.get(), 1);
     }
 
     #[test]

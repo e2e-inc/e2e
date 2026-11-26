@@ -285,7 +285,9 @@ impl Walk {
             push(&mut out, "Scroll");
         }
         let value_settable = roles::bears_value(role) && element.settable("AXValue").unwrap_or(false);
-        if has("AXIncrement") || has("AXDecrement") || value_settable {
+        // A stepper steps toward a number only when it shows one.
+        let steps = (has("AXIncrement") || has("AXDecrement")) && matches!(read.value, Some(Value::Number(_)));
+        if steps || value_settable {
             push(&mut out, "SetValue");
         }
         if (role == "combobox" && (value_settable || read.ax_role == "AXPopUpButton")) || roles::collection(role) {
