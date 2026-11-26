@@ -504,9 +504,13 @@ Coordinates are CSS pixels, for what the tree does not list: `tap({ position:
 { x, y } })` offsets from the node's top-left corner inside its border (with `modifiers` it is
 `INVALID_ARGUMENT`). `doubleTap`, `secondaryTap`, and `hover` take the same
 `position`. A position percentage is a share of the part of the node's box
-the screen shows (inside the viewport and every frame, the border included):
-`{ x: '50%', y: '50%' }` is the center of that part. With a position, the pointer goes to the point once
-the node is in view and has a box, with no other actionability check.
+inside the viewport and every frame, the border included:
+`{ x: '50%', y: '50%' }` is the center of that part. A scroll container or
+`overflow: hidden` ancestor does not cut the box, so `'50%'` of a 600px
+button in a 200px `overflow: auto` div lands past the div's edge and the step
+passes: use a pixel position there, or scroll the container. With a
+position, the pointer goes to the point once the node is in view and has a
+box, with no other actionability check.
 `hover({ position })` is `UNSUPPORTED_CAPABILITY` on a device.
 `screen.tapAt({ x, y })` taps a viewport point,
 `screen.doubleTapAt({ x, y })` double-taps a viewport point,
