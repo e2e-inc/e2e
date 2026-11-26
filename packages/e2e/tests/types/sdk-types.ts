@@ -304,8 +304,10 @@ subscriptionModel satisfies ModelInstance;
 
 // Secrets: a bare value or a provider; every handle is the same opaque Secret.
 ({ targets, secrets: { key: 'sk_test', totp: () => '123456' } }) satisfies E2EConfig;
-// @ts-expect-error a secret needs a value; an env variable that may be unset must be defaulted.
+// A secret may be undefined, like an env variable that may be unset: E2E_SECRET_KEY gives the value, or the config load fails.
 ({ targets, secrets: { key: process.env['STRIPE_KEY'] } }) satisfies E2EConfig;
+// @ts-expect-error a secret is a string or a provider
+({ targets, secrets: { key: 42 } }) satisfies E2EConfig;
 secrets.get('key') satisfies Secret;
 // An engine declares the secrets its options hold and resolves them per attempt.
 ({ name: 'gated', version: '1.0.0', spiVersion: 1, secrets: [secrets.get('key')] }) satisfies Engine;
@@ -1580,6 +1582,17 @@ const optionalServicesConfig = {
 } as const satisfies E2EConfig;
 test.extend<{}, {}, typeof optionalServicesConfig>()('reads an optional service', async ({ services }) => {
   // @ts-expect-error mailbox is missing when the condition is false
+  void services.mailbox.url;
+  void services.mailbox?.url;
+});
+
+// A service set to undefined starts nothing, and the fixture's value is undefined.
+const disabledServiceConfig = defineConfig({
+  services: { mailbox: withMailbox ? mailbox : undefined },
+  targets: [{ engine: paneEngine }],
+});
+test.extend<{}, {}, typeof disabledServiceConfig>()('reads a service set to undefined', async ({ services }) => {
+  // @ts-expect-error mailbox is undefined when the condition is false
   void services.mailbox.url;
   void services.mailbox?.url;
 });

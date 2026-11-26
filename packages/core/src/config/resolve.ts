@@ -827,11 +827,14 @@ function collectSecrets(raw: SecretConfig, env: NodeJS.ProcessEnv) {
     checkEnvNameCollisions('E2E_USER', 'credentials', Object.keys(raw.credentials ?? {}));
     checkEnvNameCollisions('E2E_SECRET', 'secrets', Object.keys(raw.secrets ?? {}));
     for (const [name, credential] of Object.entries(raw.credentials ?? {})) {
-      checkCredentialShape(name, credential);
+      if (credential !== undefined) {
+        checkCredentialShape(name, credential);
+      }
+
       const passwordName = credentialSecretName(name);
       credentialOwners.set(passwordName, name);
       const prefix = envName('E2E_USER', name);
-      const username = env[`${prefix}_USERNAME`] ?? credential.username;
+      const username = env[`${prefix}_USERNAME`] ?? credential?.username;
       if (typeof username !== 'string') {
         missing.push({
           name,
@@ -839,7 +842,7 @@ function collectSecrets(raw: SecretConfig, env: NodeJS.ProcessEnv) {
         });
       }
       // An environment override wins, including over a provider.
-      const password = env[`${prefix}_PASSWORD`] ?? credential.password;
+      const password = env[`${prefix}_PASSWORD`] ?? credential?.password;
       if (isSecretValue(password)) {
         const secret: ResolvedSecret = { name: passwordName, purpose: 'password', value: password };
         allSecrets.set(secret.name, secret);
@@ -1081,7 +1084,7 @@ function computeConfigDigest(
     sanitized['credentials'] = Object.fromEntries(
       Object.entries(raw.credentials).map(([name, credential]) => [
         name,
-        { username: credential.username, password: { secretName: name } },
+        { username: credential?.username, password: { secretName: name } },
       ]),
     );
   }

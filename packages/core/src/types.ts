@@ -2094,13 +2094,16 @@ export interface ProjectConfig<Services = Readonly<Record<string, unknown>>> {
    * Named accounts. `credentials.user(name).password` is the handle of a
    * credential's password, a secret named `<name>.password`; `secrets.get()`
    * never returns it, so a credential and a secret may share a name.
+   * An `undefined` entry takes its username and password from
+   * `E2E_USER_<NAME>_USERNAME` and `E2E_USER_<NAME>_PASSWORD`.
    */
-  credentials?: Readonly<Record<string, CredentialConfig>>;
+  credentials?: Readonly<Record<string, CredentialConfig | undefined>>;
   /**
    * Named values the model must never see: API keys, tokens, anything sourced
    * from the environment. `secrets.get(name)` hands a test the opaque handle;
    * the value is filled by the runner, masked in every observation, and
-   * redacted from logs and the report.
+   * redacted from logs and the report. An `undefined` entry takes its value
+   * from `E2E_SECRET_<NAME>`.
    */
-  secrets?: Readonly<Record<string, SecretConfig>>;
+  secrets?: Readonly<Record<string, SecretConfig | undefined>>;
 }

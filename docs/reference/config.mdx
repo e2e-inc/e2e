@@ -64,7 +64,7 @@ export default defineConfig({
 ```ts
 export function defineConfig<
   const Config extends E2EConfig<ServiceValues<Services>>,
-  Services extends Readonly<Record<string, Service>> = {},
+  Services extends Readonly<Record<string, Service | undefined>> = {},
 >(config: Config & { readonly services?: Services } & { readonly [Key in Exclude<keyof Config, keyof E2EConfig>]: never }): Config;
 ```
 
@@ -93,10 +93,10 @@ export function defineConfig<
 | [`video`](#video) | `RecordingMode` | `'off'` |
 | [`agents`](#agents) | `Record<string, AgentConfig>` | `default`, no model |
 | [`filters`](#filters) | `TestFilter[]` | - |
-| [`services`](#services) | `Record<string, Service>` | - |
+| [`services`](#services) | `Record<string, Service \| undefined>` | - |
 | [`cache`](#cache) | `CacheMode \| CacheConfig` | `'read-write'`, `'read-only'` in CI |
-| [`credentials`](#credentials) | `Record<string, CredentialConfig>` | - |
-| [`secrets`](#secrets) | `Record<string, SecretConfig>` | - |
+| [`credentials`](#credentials) | `Record<string, CredentialConfig \| undefined>` | - |
+| [`secrets`](#secrets) | `Record<string, SecretConfig \| undefined>` | - |
 
 The full declaration is [`E2EConfig`](#e2econfig).
 
@@ -1369,7 +1369,9 @@ Service lifecycle:
   when the last session on that file closes.
 - `openHost`: services start when the host opens and stop in `host.close()`.
 
-If a service fails to start, any services already started are stopped.
+If a service fails to start, any services already started are stopped. An
+entry set to `undefined` starts nothing, and its value in tests is
+`undefined`.
 
 One instance of each service is shared across all workers. The values are
 available in tests through the [`services` fixture](/reference/test#services)
@@ -1406,6 +1408,8 @@ credentials: {
 - The agent, the replay cache, and the reports know that password as a secret
   named `<name>.password` (`<secret:admin.password>`). So `credentials.admin`
   and `secrets.admin` can both exist.
+- An entry set to `undefined` takes its username and password from
+  `E2E_USER_<NAME>_USERNAME` and `E2E_USER_<NAME>_PASSWORD`.
 
 | Throws | When |
 | --- | --- |
@@ -1473,7 +1477,9 @@ secrets: {
 
 - A provider runs on every authorized fill (a vault lookup, a freshly
   computed TOTP). The config digest records it by name only.
-- An `E2E_SECRET_<NAME>` override wins over both.
+- An `E2E_SECRET_<NAME>` override wins over both. It's the only value of an
+  entry set to `undefined`, like `process.env.STRIPE_KEY` when the variable
+  is unset.
 - Every entry must resolve to a string of at least 6 characters (code points)
   or a function; anything else is `INVALID_CONFIG`. A provider's value is held
   to the same minimum at fill time, with `SECRET_UNAVAILABLE`.
@@ -1838,13 +1844,13 @@ export interface E2EConfig<Services = Readonly<Record<string, unknown>>> {
   /** Test filters, in order, run with `--changed-since`: each judges the tests the one before it kept. */
   filters?: readonly TestFilter[];
   /** Dependencies of the app under test, keyed by name and defined with `defineService`, started before the app commands. */
-  services?: Readonly<Record<string, Service>>;
+  services?: Readonly<Record<string, Service | undefined>>;
   /** Replay cache mode or options; default `read-write`, `read-only` in CI. */
   cache?: CacheMode | CacheConfig;
   /** Named accounts: a username and a password the model never sees. */
-  credentials?: Readonly<Record<string, CredentialConfig>>;
+  credentials?: Readonly<Record<string, CredentialConfig | undefined>>;
   /** Named values the model must never see: API keys, tokens, anything sourced from the environment. */
-  secrets?: Readonly<Record<string, SecretConfig>>;
+  secrets?: Readonly<Record<string, SecretConfig | undefined>>;
 }
 ```
 
