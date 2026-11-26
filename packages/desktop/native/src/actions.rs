@@ -660,7 +660,10 @@ pub fn scroll_bar(element: &Element, vertical: bool) -> Option<Element> {
 
 /// Scrolls a scroll area by moving its scroll bar, `pages` of its visible size.
 fn scroll(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
-    scroll_by(element, direction, pages).map_err(|failure| {
+    let vertical = matches!(direction, "up" | "down");
+    // A list or table scrolls through the scroll area that holds it: a swipe on the list moves that one.
+    let target = if scroll_bar(element, vertical).is_some() { None } else { enclosing_scroll_area(element, vertical) };
+    scroll_by(target.as_ref().unwrap_or(element), direction, pages).map_err(|failure| {
         // An element that takes none of the ways to scroll: say so, not which attribute it lacks.
         if failure.code == codes::ACTION_NOT_SUPPORTED && failure.delivery == Delivery::NotDelivered {
             Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("nothing here scrolls {direction}"))
@@ -668,6 +671,18 @@ fn scroll(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
             failure
         }
     })
+}
+
+/// The nearest scroll area above `element`, a few levels up, with a scroll bar for the axis.
+fn enclosing_scroll_area(element: &Element, vertical: bool) -> Option<Element> {
+    let mut current = element.element("AXParent")?;
+    for _ in 0..4 {
+        if current.text("AXRole").as_deref() == Some("AXScrollArea") && scroll_bar(&current, vertical).is_some() {
+            return Some(current);
+        }
+        current = current.element("AXParent")?;
+    }
+    None
 }
 
 fn scroll_by(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
