@@ -349,8 +349,8 @@ Defect check: on
 
 ## Gaps
 
-- `addMedia` has no e2e equivalent (guide: Planned). iOS: the test adds the
-  photo with `xcrun simctl addmedia`. Android: unchecked, stays in Maestro.
+- `--device-locale` has no e2e equivalent (guide: Planned). iOS: the target
+  sets `AppleLanguages` in `app.launchArguments`. Android: stays in Maestro.
 
 ## Next
 

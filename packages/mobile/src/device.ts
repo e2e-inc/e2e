@@ -5,6 +5,7 @@
  * `device.<method>` step bounded by the action timeout.
  */
 
+import path from 'node:path';
 import type { AgentDeviceClient as DeviceSessionClient } from 'agent-device';
 import type { EngineFixtureContext, Locator, ViewportSize } from '@e2e-dev/core/engine';
 import { appLabel, linkLabel, linkTarget } from './links.ts';
@@ -176,6 +177,20 @@ export interface Device {
    */
   closeApp(): Promise<void>;
   /**
+   * Adds photos or videos (paths resolved against the project root) to the
+   * device's library, for a test of the system photo picker. It runs on this
+   * machine: `xcrun simctl addmedia` on an iOS simulator, which adds a copy
+   * on every call, and on Android `adb push` to `/sdcard/Pictures` under the
+   * file's own name, which replaces an earlier file of that name, then a
+   * media scan. A physical iPhone, a device a provider leased, and a device
+   * behind a remote agent-device daemon are `UNSUPPORTED_CAPABILITY`; a path
+   * that is not a readable file is `INVALID_ARGUMENT`. The library sorts by
+   * the capture date in a photo's metadata, not the day it was added. Call
+   * it before `app.open()`: an app that is already showing the library may
+   * not see the new item until it reloads.
+   */
+  addMedia(files: string | readonly string[]): Promise<void>;
+  /**
    * Resets the simulator's keychain, every app's, since simctl has no
    * per-app reset: what `app.clearState()` leaves behind (a session token, a
    * Firebase sign-in). iOS simulator only; Android is
@@ -252,6 +267,13 @@ export interface Device {
   clipboard(): Promise<string>;
   /** Writes the clipboard. */
   setClipboard(text: string): Promise<void>;
+}
+
+/** A step label for `addMedia`: the file names, never their directories, which can hold a user name. */
+function mediaLabel(files: string | readonly string[]): string {
+  const list: readonly unknown[] = typeof files === 'string' ? [files] : Array.isArray(files) ? files : [];
+  const names = list.map((file) => (typeof file === 'string' ? path.basename(file) : '?'));
+  return names.length <= 3 ? names.join(', ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
 }
 
 /** The raw driver session a surface is bound to: `device.unstable_raw`, and what `unstable_deviceSession()` hands a custom tool. */
@@ -377,6 +399,9 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     async closeApp() {
       await surface.closeApp(context.signal);
     },
+    async addMedia(files) {
+      await surface.addMedia(files, context.signal);
+    },
     async clearKeychain() {
       await surface.clearKeychain(context.signal);
     },
@@ -442,6 +467,7 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     openApp: { ...action, label: (app) => appLabel(app) },
     openLink: { ...action, label: (url) => linkLabel(url) },
     closeApp: action,
+    addMedia: { ...action, label: (files) => mediaLabel(files) },
     clearKeychain: action,
     foregroundApp: action,
     home: action,

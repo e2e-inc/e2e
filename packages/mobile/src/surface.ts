@@ -73,6 +73,7 @@ import { mobileDoctor } from './doctor.ts';
 import { deviceLabel, deviceSelection, pinnedApp, type DeviceSelection, type SlotBinding } from './bindings.ts';
 import { assertAppId } from './links.ts';
 import { bootRequest, DevicePool } from './pool.ts';
+import { assertMediaFiles, findAdb, hostCommandError, mediaCommands, mediaFiles, mediaRefusal, runHostCommand, type DeviceKind, type HostRunner } from './media.ts';
 import { recordLease, travelledLease, type DeviceLease, type RecordingDeviceProvider } from './provider.ts';
 import {
   installedIdentity,
@@ -526,6 +527,10 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   private where: string | undefined;
   /** The agent-device session this worker drives and the device `init` booted under it. */
   private bound: BoundDevice | undefined;
+  /** What agent-device booted that device as: a simulator, an emulator, or a physical device; set in init. */
+  private boundKind: DeviceKind | undefined;
+  /** The worker's environment, as `init` received it: what a program the engine runs on this machine gets. */
+  private env: Readonly<Record<string, string | undefined>> = process.env;
   /** How this worker's device records through its provider: set in init when the pool's provider records and the slot rides one of its leases. */
   private leaseRecorder: LeaseRecorder | undefined;
   /**
@@ -566,6 +571,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   constructor(
     readonly options: MobileOptions<Platform>,
     private readonly createClient: ClientFactory,
+    private readonly runHost: HostRunner = runHostCommand,
   ) {
     rejectUnknownKeys('mobile()', options, MOBILE_OPTION_KEYS);
     this.pool = new DevicePool(options, createClient);
@@ -677,6 +683,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   async init(info: EngineInitInfo): Promise<void> {
     this.projectRoot = info.projectRoot;
     this.app = info.app;
+    this.env = info.env;
     const binding = this.pool.binding(info, info.workerSlot, info.env);
     this.device = binding;
     const session = this.pool.slotSession(info, info.workerSlot, binding);
@@ -691,6 +698,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
         : { provider, lease, runId: info.runId, targetName: info.targetName, env: info.env };
     const booted = await this.command('boot', (client) => client.devices.boot(bootRequest(this.selection())), info.signal);
     this.bound = { session, deviceId: booted.id, deviceName: booted.device };
+    this.boundKind = booted.kind;
     // Nothing is installed here: a device provider that installed the build
     // from `appPath` says so on the binding, and otherwise the suite installs
     // it where it wants to, with `device.installApp()`.
@@ -1943,6 +1951,30 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
    */
   async fold(pose: FoldPose, signal: AbortSignal): Promise<void> {
     await this.screenCommand('device.fold', (client) => client.command.fold({ ...this.selection(), pose }), signal);
+  }
+
+  /**
+   * Adds photos or videos, resolved against the project root, to the
+   * library of the session's device with the platform's own tool on this
+   * machine (see `media.ts`). Refuses a device this machine cannot reach,
+   * and a path that is not a readable file, before anything runs. Nothing
+   * on screen changes, so the screen this surface read stays.
+   */
+  async addMedia(files: unknown, signal: AbortSignal): Promise<void> {
+    const resolved = mediaFiles(files).map((file) => path.resolve(this.projectRoot, file));
+    const { platform } = this.options;
+    const refusal = mediaRefusal(platform, this.boundKind, this.device, this.env);
+    if (refusal !== undefined) throw unsupported(refusal);
+    const { deviceId } = this.boundDevice;
+    await assertMediaFiles(resolved);
+    const adb = platform === 'android' ? await findAdb(this.env) : 'adb';
+    for (const command of mediaCommands(platform, deviceId, resolved, adb)) {
+      try {
+        await this.track(this.runHost(command, { env: this.env, signal }));
+      } catch (error) {
+        throw hostCommandError(error, command, signal);
+      }
+    }
   }
 
   /**

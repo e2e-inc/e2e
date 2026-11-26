@@ -463,7 +463,8 @@ export default {
   `ACTION_FAILED` naming the cover; dismiss it or scroll the target clear.
 - `screen`, `expect`, `app`, `agent` work unchanged; `test` from
   `@e2e-dev/mobile` types the `device` fixture (`installApp`, `openLink`,
-  `setPermission`, `setNetwork`, `setAppearance`, `clearKeychain`, `fold`
+  `setPermission`, `setNetwork`, `setAppearance`, `clearKeychain`, `addMedia`
+  to put a photo in the library for a picker test, `fold`
   for a foldable's hinge (iPhone Duo, Android foldable emulators), `locator`, more). Portable suites declare
   `platforms: ['ios', 'android']`.
 - `device.viewport()` reads `{ width, height }` fresh on each call, in the coordinate space of `screen.tapAt()`.
