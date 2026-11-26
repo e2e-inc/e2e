@@ -865,13 +865,19 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         };
         // A row the app did not answer in time may be the option asked for: that is no proof it is missing.
         let mut stalled = false;
-        let row = rows.into_iter().find(|row| match item_label(row) {
-            Ok(text) => text.as_deref() == Some(label),
-            Err(error) => {
-                stalled |= error == ax::AX_CANNOT_COMPLETE;
-                false
+        let mut row = None;
+        for candidate in rows {
+            // Each label waits on the app, and a table can hold thousands of rows: a caller that gave up stops the scan.
+            go("read the list's rows")?;
+            match item_label(&candidate) {
+                Ok(text) if text.as_deref() == Some(label) => {
+                    row = Some(candidate);
+                    break;
+                }
+                Ok(_) => {}
+                Err(error) => stalled |= error == ax::AX_CANNOT_COMPLETE,
             }
-        });
+        }
         let Some(row) = row else {
             if stalled {
                 return Err(unread(ax::AX_CANNOT_COMPLETE, "read the list's rows"));
